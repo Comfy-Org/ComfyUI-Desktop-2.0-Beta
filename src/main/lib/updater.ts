@@ -1,9 +1,23 @@
 import { ipcMain, BrowserWindow } from 'electron'
 import todesktop from '@todesktop/runtime'
 import * as settings from '../settings'
+import { evaluateUpdaterCanaryGate } from './updateGate'
 
 interface UpdateInfo {
   version: string
+}
+
+interface CheckResult {
+  available: boolean
+  version?: string
+  error?: string
+  blocked?: boolean
+  blockReason?: string
+}
+
+interface CheckOptions {
+  source: string
+  userInitiated?: boolean
 }
 
 let _updateInfo: UpdateInfo | null = null
@@ -94,12 +108,26 @@ function bindUpdaterEvents(): void {
   })
 }
 
-async function checkForUpdate(source: string): Promise<{ available: boolean; version?: string; error?: string }> {
+async function runCheck({ source, userInitiated = false }: CheckOptions): Promise<CheckResult> {
+  const gate = await evaluateUpdaterCanaryGate()
+  const gateSummary = `[updater] canary gate ${source}: ${gate.allowed ? 'allow' : 'block'} (${gate.reason})`
+  if (gate.allowed) {
+    console.info(gateSummary)
+  } else {
+    console.warn(gateSummary)
+    _updateInfo = null
+    if (userInitiated) {
+      broadcast('update-error', { message: `Updates are currently paused by rollout policy. (${gate.reason})` })
+    }
+    return { available: false, blocked: true, blockReason: gate.reason, error: gate.detail }
+  }
+
   const updater = getAutoUpdater()
   if (!updater) {
     return { available: false, error: UPDATER_UNAVAILABLE_MESSAGE }
   }
   bindUpdaterEvents()
+
   const result = await updater.checkForUpdates({
     source,
     disableUpdateReadyAction: true,
@@ -108,16 +136,12 @@ async function checkForUpdate(source: string): Promise<{ available: boolean; ver
   return version ? { available: true, version } : { available: false }
 }
 
-function runCheck(source: string): Promise<{ available: boolean; version?: string; error?: string }> {
-  return checkForUpdate(source)
-}
-
 export function register(): void {
   bindUpdaterEvents()
 
   ipcMain.handle('check-for-update', async () => {
     try {
-      return await runCheck('manual-check')
+      return await runCheck({ source: 'manual-check', userInitiated: true })
     } catch (err) {
       return { available: false, error: err instanceof Error ? err.message : String(err) }
     }
@@ -125,7 +149,8 @@ export function register(): void {
 
   ipcMain.handle('download-update', async () => {
     try {
-      const result = await runCheck('download-button')
+      const result = await runCheck({ source: 'download-button', userInitiated: true })
+      if (result.blocked) return
       if (!result.available && !_updateInfo) {
         broadcast('update-error', { message: result.error || NO_UPDATE_AVAILABLE_MESSAGE })
       }
@@ -151,7 +176,7 @@ export function register(): void {
 
   // Check on startup and periodically (respects autoUpdate setting at each check)
   const runIfEnabled = (): void => {
-    if (settings.get('autoUpdate') !== false) runCheck('auto-check').catch(() => {})
+    if (settings.get('autoUpdate') !== false) runCheck({ source: 'auto-check', userInitiated: false }).catch(() => {})
   }
   setTimeout(runIfEnabled, 2000)
   setInterval(runIfEnabled, 10 * 60 * 1000)
