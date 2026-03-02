@@ -504,6 +504,10 @@ export interface ElectronApi {
   getSnapshots(installationId: string): Promise<SnapshotListData>
   getSnapshotDetail(installationId: string, filename: string): Promise<SnapshotDetailData>
   getSnapshotDiff(installationId: string, filename: string, mode: 'previous' | 'current'): Promise<SnapshotDiffData>
+  exportSnapshot(installationId: string, filename: string): Promise<{ ok: boolean; message?: string }>
+  exportAllSnapshots(installationId: string): Promise<{ ok: boolean; message?: string }>
+  importSnapshots(installationId: string): Promise<{ ok: boolean; imported?: number; skipped?: number; message?: string }>
+  createFromSnapshot(): Promise<{ ok: boolean; entry?: { id: string; name: string }; message?: string }>
 
   // Settings
   getSettingsSections(): Promise<SettingsSection[]>

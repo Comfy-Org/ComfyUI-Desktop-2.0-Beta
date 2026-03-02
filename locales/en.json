@@ -112,6 +112,7 @@
   "list": {
     "title": "Installs",
     "trackExisting": "Track Existing",
+    "newFromSnapshot": "New from Snapshot",
     "newInstall": "New Install",
     "empty": "No installs yet.",
     "emptyHint": "Install or track an existing version of ComfyUI.",
@@ -527,7 +528,13 @@
     "copyUpdatedAs": "Copy & Updated as",
     "releaseUpdatedAs": "Release Updated as",
     "copyDeleted": "deleted",
-    "viewInstall": "View"
+    "viewInstall": "View",
+    "exportSnapshot": "Export",
+    "exportAllSnapshots": "Export All",
+    "importSnapshots": "Import",
+    "importSuccess": "Imported {imported} snapshot(s), skipped {skipped} duplicate(s).",
+    "importInvalidFile": "Invalid snapshot file.",
+    "exportSuccess": "Snapshot exported."
   },
 
   "portable": {

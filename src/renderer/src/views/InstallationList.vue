@@ -229,6 +229,24 @@ const emit = defineEmits<{
   'show-track': []
 }>()
 
+async function handleNewFromSnapshot(): Promise<void> {
+  const result = await window.api.createFromSnapshot()
+  if (!result.ok) {
+    if (result.message) {
+      await modal.alert({ title: t('list.newFromSnapshot'), message: result.message })
+    }
+    return
+  }
+  if (result.entry) {
+    emit('show-progress', {
+      installationId: result.entry.id,
+      title: `${t('newInstall.installing')} — ${result.entry.name}`,
+      apiCall: () => window.api.installInstance(result.entry!.id),
+      cancellable: true,
+    })
+  }
+}
+
 // --- Context menu ---
 const { ctxMenu, ctxMenuItems, openCardMenu, handleCtxMenuSelect, closeMenu } =
   useInstallContextMenu((inst) => emit('show-detail', inst))
@@ -244,6 +262,7 @@ defineExpose({ refresh })
       </div>
       <div class="toolbar-actions">
         <button @click="emit('show-track')">{{ $t('list.trackExisting') }}</button>
+        <button @click="handleNewFromSnapshot">{{ $t('list.newFromSnapshot') }}</button>
         <button class="primary add-btn" @click="emit('show-new-install')">
           + {{ $t('list.newInstall') }}
         </button>

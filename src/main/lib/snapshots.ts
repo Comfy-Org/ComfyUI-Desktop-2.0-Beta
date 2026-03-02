@@ -33,6 +33,14 @@ export interface SnapshotEntry {
   snapshot: Snapshot
 }
 
+export interface SnapshotExportEnvelope {
+  type: 'comfyui-launcher-snapshot'
+  version: 1
+  exportedAt: string
+  installationName: string
+  snapshots: Snapshot[]
+}
+
 export interface SnapshotDiff {
   comfyuiChanged: boolean
   comfyui?: {
@@ -344,6 +352,78 @@ export async function deleteSnapshot(installPath: string, filename: string): Pro
 /** Recompute snapshot count from disk. */
 export async function getSnapshotCount(installPath: string): Promise<number> {
   return (await listSnapshots(installPath)).length
+}
+
+// --- Export / Import ---
+
+export function buildExportEnvelope(installationName: string, entries: SnapshotEntry[]): SnapshotExportEnvelope {
+  return {
+    type: 'comfyui-launcher-snapshot',
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    installationName,
+    snapshots: entries.map((e) => e.snapshot),
+  }
+}
+
+const VALID_TRIGGERS = new Set(['boot', 'restart', 'manual', 'pre-update', 'post-update', 'post-restore'])
+
+function isValidSnapshot(s: unknown): s is Snapshot {
+  if (!s || typeof s !== 'object') return false
+  const obj = s as Record<string, unknown>
+  return obj.version === 1 &&
+    typeof obj.createdAt === 'string' && !isNaN(Date.parse(obj.createdAt)) &&
+    typeof obj.trigger === 'string' && VALID_TRIGGERS.has(obj.trigger) &&
+    obj.comfyui != null && typeof obj.comfyui === 'object' &&
+    Array.isArray(obj.customNodes) &&
+    obj.pipPackages != null && typeof obj.pipPackages === 'object'
+}
+
+export function validateExportEnvelope(data: unknown): SnapshotExportEnvelope {
+  if (!data || typeof data !== 'object') throw new Error('Invalid file: not a JSON object')
+  const obj = data as Record<string, unknown>
+  if (obj.type !== 'comfyui-launcher-snapshot') throw new Error('Invalid file: not a ComfyUI Launcher snapshot export')
+  if (obj.version !== 1) throw new Error(`Unsupported snapshot version: ${obj.version}`)
+  if (!Array.isArray(obj.snapshots) || obj.snapshots.length === 0) throw new Error('File contains no snapshots')
+  for (let i = 0; i < obj.snapshots.length; i++) {
+    if (!isValidSnapshot(obj.snapshots[i])) throw new Error(`Invalid snapshot at index ${i}`)
+  }
+  return obj as unknown as SnapshotExportEnvelope
+}
+
+export async function importSnapshots(
+  installPath: string,
+  envelope: SnapshotExportEnvelope
+): Promise<{ imported: number; skipped: number }> {
+  const dir = snapshotsDir(installPath)
+  await fs.promises.mkdir(dir, { recursive: true })
+
+  // Build a set of existing (createdAt, trigger) pairs for deduplication
+  const existing = await listSnapshots(installPath)
+  const existingKeys = new Set(existing.map((e) => `${e.snapshot.createdAt}|${e.snapshot.trigger}`))
+
+  let imported = 0
+  let skipped = 0
+
+  for (const snapshot of envelope.snapshots) {
+    const key = `${snapshot.createdAt}|${snapshot.trigger}`
+    if (existingKeys.has(key)) {
+      skipped++
+      continue
+    }
+
+    const date = new Date(snapshot.createdAt)
+    const suffix = Math.random().toString(16).slice(2, 8)
+    const filename = `${formatTimestamp(date)}-${snapshot.trigger}-${suffix}.json`
+    const filePath = path.join(dir, filename)
+    const tmpPath = `${filePath}.${suffix}.tmp`
+    await fs.promises.writeFile(tmpPath, JSON.stringify(snapshot, null, 2))
+    await fs.promises.rename(tmpPath, filePath)
+    existingKeys.add(key)
+    imported++
+  }
+
+  return { imported, skipped }
 }
 
 export function diffSnapshots(a: Snapshot, b: Snapshot): SnapshotDiff {

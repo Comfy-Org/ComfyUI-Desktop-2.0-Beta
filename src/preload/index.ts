@@ -61,6 +61,14 @@ const api: ElectronApi = {
     ipcRenderer.invoke('get-snapshot-detail', installationId, filename),
   getSnapshotDiff: (installationId, filename, mode) =>
     ipcRenderer.invoke('get-snapshot-diff', installationId, filename, mode),
+  exportSnapshot: (installationId, filename) =>
+    ipcRenderer.invoke('export-snapshot', installationId, filename),
+  exportAllSnapshots: (installationId) =>
+    ipcRenderer.invoke('export-all-snapshots', installationId),
+  importSnapshots: (installationId) =>
+    ipcRenderer.invoke('import-snapshots', installationId),
+  createFromSnapshot: () =>
+    ipcRenderer.invoke('create-from-snapshot'),
 
   // Settings
   getSettingsSections: () => ipcRenderer.invoke('get-settings-sections'),

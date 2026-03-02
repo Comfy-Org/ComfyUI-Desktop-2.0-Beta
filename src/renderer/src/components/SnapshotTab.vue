@@ -250,6 +250,34 @@ async function handleDelete(filename: string): Promise<void> {
   emit('refresh-all')
 }
 
+async function handleExport(filename: string): Promise<void> {
+  await window.api.exportSnapshot(props.installationId, filename)
+}
+
+async function handleExportAll(): Promise<void> {
+  await window.api.exportAllSnapshots(props.installationId)
+}
+
+async function handleImport(): Promise<void> {
+  const result = await window.api.importSnapshots(props.installationId)
+  if (!result.ok) {
+    if (result.message) {
+      await modal.alert({ title: t('snapshots.importSnapshots'), message: result.message })
+    }
+    return
+  }
+  await modal.alert({
+    title: t('snapshots.importSnapshots'),
+    message: t('snapshots.importSuccess', { imported: result.imported ?? 0, skipped: result.skipped ?? 0 }),
+  })
+  selectedFilename.value = null
+  detail.value = null
+  diffData.value = null
+  diffMode.value = null
+  await load()
+  emit('refresh-all')
+}
+
 const filteredCustomNodes = computed(() => {
   if (!detail.value) return []
   if (!nodeSearch.value) return detail.value.customNodes
@@ -294,6 +322,12 @@ function diffHasChanges(diff: SnapshotDiffResult): boolean {
     <div v-if="snapshots.length > 0 || !loading" class="snapshot-header">
       <button class="snapshot-save-btn" @click="saveSnapshot">
         {{ t('snapshots.saveSnapshot') }}
+      </button>
+      <button class="snapshot-header-btn" @click="handleImport">
+        {{ t('snapshots.importSnapshots') }}
+      </button>
+      <button v-if="snapshots.length > 0" class="snapshot-header-btn" @click="handleExportAll">
+        {{ t('snapshots.exportAllSnapshots') }}
       </button>
     </div>
 
@@ -361,6 +395,13 @@ function diffHasChanges(diff: SnapshotDiffResult): boolean {
                 @click.stop="handleRestore(item.snapshot.filename)"
               >
                 {{ t('snapshots.restore') }}
+              </button>
+              <!-- Export button -->
+              <button
+                class="timeline-export-btn"
+                @click.stop="handleExport(item.snapshot.filename)"
+              >
+                {{ t('snapshots.exportSnapshot') }}
               </button>
               <!-- Delete button (manual snapshots only) -->
               <button
@@ -561,6 +602,21 @@ function diffHasChanges(diff: SnapshotDiffResult): boolean {
   transition: all 0.15s;
 }
 .snapshot-save-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.snapshot-header-btn {
+  padding: 6px 16px;
+  font-size: 13px;
+  border-radius: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.snapshot-header-btn:hover {
   border-color: var(--accent);
   color: var(--accent);
 }
@@ -798,6 +854,27 @@ function diffHasChanges(diff: SnapshotDiffResult): boolean {
   opacity: 1;
 }
 .timeline-restore-btn:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.timeline-export-btn {
+  padding: 3px 10px;
+  font-size: 11px;
+  border-radius: 4px;
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+.timeline-card:hover .timeline-export-btn,
+.timeline-export-btn:focus-visible {
+  opacity: 1;
+}
+.timeline-export-btn:hover {
   color: var(--text);
   border-color: var(--accent);
 }
