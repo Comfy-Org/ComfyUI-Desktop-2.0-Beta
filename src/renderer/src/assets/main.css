@@ -316,15 +316,16 @@ input[type="checkbox"]:checked::after { transform: translateX(16px); }
 /* Instance list */
 .instance-list { display: flex; flex-direction: column; gap: 10px; }
 .instance-card {
+  --card-pad-y: 14px; --card-pad-x: 16px;
   background: var(--surface); border: 1px solid var(--border);
-  border-radius: 8px; padding: 14px 16px;
+  border-radius: 8px; padding: var(--card-pad-y) var(--card-pad-x);
   display: flex; justify-content: space-between; align-items: center;
 }
 .instance-card.is-idle { transition: transform 0.12s ease; }
 .instance-card.is-draggable { z-index: 10; user-select: none; }
 .drag-handle {
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
-  align-self: stretch; padding: 0 18px; margin: -14px 0 -14px -16px;
+  align-self: stretch; padding: 0 18px; margin: calc(-1 * var(--card-pad-y)) 0 calc(-1 * var(--card-pad-y)) calc(-1 * var(--card-pad-x));
   border-radius: 8px 0 0 8px; cursor: grab;
   opacity: 0.35; transition: opacity 0.15s, background-color 0.15s;
 }
