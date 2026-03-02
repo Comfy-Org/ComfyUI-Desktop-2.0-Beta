@@ -3,6 +3,7 @@ import { ref, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useModal } from '../composables/useModal'
 import { ChevronDown } from 'lucide-vue-next'
+import SnapshotDiffView from './SnapshotDiffView.vue'
 import type {
   ActionDef,
   CopyEvent,
@@ -320,11 +321,6 @@ const filteredPipPackages = computed(() => {
   return entries.filter(([name]) => name.toLowerCase().includes(q))
 })
 
-function formatVersion(v: { ref: string; commit: string | null; displayVersion?: string }): string {
-  if (v.displayVersion) return v.displayVersion
-  return v.commit ? `${v.ref} (${v.commit.slice(0, 7)})` : v.ref
-}
-
 function formatNodeVersion(node: { version?: string; commit?: string }): string {
   if (node.version) return node.version
   if (node.commit) return node.commit.slice(0, 7)
@@ -469,44 +465,8 @@ function diffHasChanges(diff: SnapshotDiffResult): boolean {
                     <span v-if="restorePreviewDiff.diff.pipsChanged.length > 0" class="restore-badge restore-badge-changed">~{{ restorePreviewDiff.diff.pipsChanged.length }} {{ t('snapshots.pkgsLabel') }}</span>
                   </div>
 
-                  <!-- Detailed diff (same rendering as existing diff view) -->
                   <div class="diff-view">
-                    <div v-if="restorePreviewDiff.diff.comfyuiChanged && restorePreviewDiff.diff.comfyui" class="diff-section">
-                      <div class="diff-section-title">{{ t('snapshots.comfyuiVersion') }}</div>
-                      <div class="diff-line diff-changed">
-                        {{ formatVersion(restorePreviewDiff.diff.comfyui.from) }} → {{ formatVersion(restorePreviewDiff.diff.comfyui.to) }}
-                      </div>
-                    </div>
-
-                    <div v-if="restorePreviewDiff.diff.nodesAdded.length > 0 || restorePreviewDiff.diff.nodesRemoved.length > 0 || restorePreviewDiff.diff.nodesChanged.length > 0" class="diff-section">
-                      <div class="diff-section-title">{{ t('snapshots.customNodes') }}</div>
-                      <div v-for="n in restorePreviewDiff.diff.nodesAdded" :key="'radd-' + n.id" class="diff-line diff-added">
-                        + {{ n.id }} {{ formatNodeVersion(n) }}
-                      </div>
-                      <div v-for="n in restorePreviewDiff.diff.nodesRemoved" :key="'rrem-' + n.id" class="diff-line diff-removed">
-                        − {{ n.id }} {{ formatNodeVersion(n) }}
-                      </div>
-                      <div v-for="n in restorePreviewDiff.diff.nodesChanged" :key="'rchg-' + n.id" class="diff-line diff-changed">
-                        ~ {{ n.id }}: {{ n.from.version || (n.from.commit ? n.from.commit.slice(0, 7) : '?') }} → {{ n.to.version || (n.to.commit ? n.to.commit.slice(0, 7) : '?') }}
-                        <template v-if="n.from.enabled !== n.to.enabled">, {{ n.from.enabled ? 'enabled' : 'disabled' }} → {{ n.to.enabled ? 'enabled' : 'disabled' }}</template>
-                      </div>
-                    </div>
-
-                    <div v-if="restorePreviewDiff.diff.pipsAdded.length > 0 || restorePreviewDiff.diff.pipsRemoved.length > 0 || restorePreviewDiff.diff.pipsChanged.length > 0" class="diff-section">
-                      <div class="diff-section-title">
-                        {{ t('snapshots.pipPackages') }}
-                        ({{ restorePreviewDiff.diff.pipsAdded.length + restorePreviewDiff.diff.pipsRemoved.length + restorePreviewDiff.diff.pipsChanged.length }})
-                      </div>
-                      <div v-for="p in restorePreviewDiff.diff.pipsAdded" :key="'rpadd-' + p.name" class="diff-line diff-added">
-                        + {{ p.name }} {{ p.version }}
-                      </div>
-                      <div v-for="p in restorePreviewDiff.diff.pipsRemoved" :key="'rprem-' + p.name" class="diff-line diff-removed">
-                        − {{ p.name }} {{ p.version }}
-                      </div>
-                      <div v-for="p in restorePreviewDiff.diff.pipsChanged" :key="'rpchg-' + p.name" class="diff-line diff-changed">
-                        ~ {{ p.name }}: {{ p.from }} → {{ p.to }}
-                      </div>
-                    </div>
+                    <SnapshotDiffView :diff="restorePreviewDiff.diff" />
                   </div>
                 </template>
 
@@ -550,47 +510,7 @@ function diffHasChanges(diff: SnapshotDiffResult): boolean {
               <div v-if="!diffHasChanges(diffData.diff)" class="diff-empty">
                 {{ t('snapshots.diffNoChanges') }}
               </div>
-              <template v-else>
-                <!-- ComfyUI version change -->
-                <div v-if="diffData.diff.comfyuiChanged && diffData.diff.comfyui" class="diff-section">
-                  <div class="diff-section-title">{{ t('snapshots.comfyuiVersion') }}</div>
-                  <div class="diff-line diff-changed">
-                    {{ formatVersion(diffData.diff.comfyui.from) }} → {{ formatVersion(diffData.diff.comfyui.to) }}
-                  </div>
-                </div>
-
-                <!-- Node changes -->
-                <div v-if="diffData.diff.nodesAdded.length > 0 || diffData.diff.nodesRemoved.length > 0 || diffData.diff.nodesChanged.length > 0" class="diff-section">
-                  <div class="diff-section-title">{{ t('snapshots.customNodes') }}</div>
-                  <div v-for="n in diffData.diff.nodesAdded" :key="'add-' + n.id" class="diff-line diff-added">
-                    + {{ n.id }} {{ formatNodeVersion(n) }}
-                  </div>
-                  <div v-for="n in diffData.diff.nodesRemoved" :key="'rem-' + n.id" class="diff-line diff-removed">
-                    − {{ n.id }} {{ formatNodeVersion(n) }}
-                  </div>
-                  <div v-for="n in diffData.diff.nodesChanged" :key="'chg-' + n.id" class="diff-line diff-changed">
-                    ~ {{ n.id }}: {{ n.from.version || (n.from.commit ? n.from.commit.slice(0, 7) : '?') }} → {{ n.to.version || (n.to.commit ? n.to.commit.slice(0, 7) : '?') }}
-                    <template v-if="n.from.enabled !== n.to.enabled">, {{ n.from.enabled ? 'enabled' : 'disabled' }} → {{ n.to.enabled ? 'enabled' : 'disabled' }}</template>
-                  </div>
-                </div>
-
-                <!-- Pip changes -->
-                <div v-if="diffData.diff.pipsAdded.length > 0 || diffData.diff.pipsRemoved.length > 0 || diffData.diff.pipsChanged.length > 0" class="diff-section">
-                  <div class="diff-section-title">
-                    {{ t('snapshots.pipPackages') }}
-                    ({{ diffData.diff.pipsAdded.length + diffData.diff.pipsRemoved.length + diffData.diff.pipsChanged.length }})
-                  </div>
-                  <div v-for="p in diffData.diff.pipsAdded" :key="'padd-' + p.name" class="diff-line diff-added">
-                    + {{ p.name }} {{ p.version }}
-                  </div>
-                  <div v-for="p in diffData.diff.pipsRemoved" :key="'prem-' + p.name" class="diff-line diff-removed">
-                    − {{ p.name }} {{ p.version }}
-                  </div>
-                  <div v-for="p in diffData.diff.pipsChanged" :key="'pchg-' + p.name" class="diff-line diff-changed">
-                    ~ {{ p.name }}: {{ p.from }} → {{ p.to }}
-                  </div>
-                </div>
-              </template>
+              <SnapshotDiffView v-else :diff="diffData.diff" />
             </div>
             <div v-else-if="diffMode && diffLoading" class="snapshot-loading">{{ t('common.loading') }}</div>
             </template>
@@ -1070,34 +990,6 @@ function diffHasChanges(diff: SnapshotDiffResult): boolean {
   border-radius: 6px;
   padding: 10px 12px;
 }
-
-.diff-section {
-  margin-bottom: 8px;
-}
-.diff-section:last-child {
-  margin-bottom: 0;
-}
-
-.diff-section-title {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
-  margin-bottom: 4px;
-}
-
-.diff-line {
-  font-size: 12px;
-  font-family: monospace;
-  padding: 1px 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.diff-added { color: var(--success, #00cd72); }
-.diff-removed { color: var(--danger); }
-.diff-changed { color: var(--warning, #fd9903); }
 
 .diff-empty {
   font-size: 13px;

@@ -368,15 +368,42 @@ export function buildExportEnvelope(installationName: string, entries: SnapshotE
 
 const VALID_TRIGGERS = new Set(['boot', 'restart', 'manual', 'pre-update', 'post-update', 'post-restore'])
 
+// PyPI package names: letters, digits, dots, hyphens, underscores (PEP 508).
+// Must not start with '-' to avoid argument injection when passed to uv pip.
+const VALID_PIP_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
+
+function isValidCustomNode(n: unknown): boolean {
+  if (!n || typeof n !== 'object') return false
+  const node = n as Record<string, unknown>
+  if (typeof node.dirName !== 'string' || !isSafePathComponent(node.dirName)) return false
+  if (typeof node.id !== 'string' || !node.id) return false
+  if (typeof node.type !== 'string' || !['cnr', 'git', 'file'].includes(node.type)) return false
+  return true
+}
+
 function isValidSnapshot(s: unknown): s is Snapshot {
   if (!s || typeof s !== 'object') return false
   const obj = s as Record<string, unknown>
-  return obj.version === 1 &&
-    typeof obj.createdAt === 'string' && !isNaN(Date.parse(obj.createdAt)) &&
-    typeof obj.trigger === 'string' && VALID_TRIGGERS.has(obj.trigger) &&
-    obj.comfyui != null && typeof obj.comfyui === 'object' &&
-    Array.isArray(obj.customNodes) &&
-    obj.pipPackages != null && typeof obj.pipPackages === 'object'
+  if (obj.version !== 1) return false
+  if (typeof obj.createdAt !== 'string' || isNaN(Date.parse(obj.createdAt))) return false
+  if (typeof obj.trigger !== 'string' || !VALID_TRIGGERS.has(obj.trigger)) return false
+  if (obj.comfyui == null || typeof obj.comfyui !== 'object') return false
+  if (!Array.isArray(obj.customNodes)) return false
+  if (obj.pipPackages == null || typeof obj.pipPackages !== 'object') return false
+
+  // Validate custom node entries
+  for (const node of obj.customNodes) {
+    if (!isValidCustomNode(node)) return false
+  }
+
+  // Validate pip package names
+  const pips = obj.pipPackages as Record<string, unknown>
+  for (const name of Object.keys(pips)) {
+    if (!VALID_PIP_NAME.test(name)) return false
+    if (typeof pips[name] !== 'string') return false
+  }
+
+  return true
 }
 
 export function validateExportEnvelope(data: unknown): SnapshotExportEnvelope {
