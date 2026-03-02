@@ -19,7 +19,7 @@ import {
   findAvailablePort, writePortLock, readPortLock, removePortLock,
 } from './process'
 import { detectGPU, validateHardware, checkNvidiaDriver } from './gpu'
-import { detectDesktopInstall } from './desktopDetect'
+import { detectDesktopInstall, syncSharedModelPaths } from './desktopDetect'
 import { getDiskSpace, validateInstallPath } from './disk'
 import type { GpuInfo } from './gpu'
 import { formatTime } from './util'
@@ -405,6 +405,14 @@ export function register(callbacks: RegisterCallbacks = {}): void {
         desktopExePath: desktopInfo.executablePath || undefined,
         status: 'installed',
       })
+
+      // Sync Launcher's shared model directories into Desktop's config
+      const modelsDirs = settings.get('modelsDirs') as string[] | undefined
+      if (modelsDirs && modelsDirs.length > 0) {
+        try {
+          syncSharedModelPaths(desktopInfo.configDir, modelsDirs)
+        } catch {}
+      }
     }
   }
 
@@ -617,10 +625,6 @@ export function register(callbacks: RegisterCallbacks = {}): void {
       }
     }
     return results
-  })
-
-  ipcMain.handle('detect-desktop-install', () => {
-    return detectDesktopInstall()
   })
 
   ipcMain.handle('track-installation', async (_event, data: Record<string, unknown>) => {
@@ -934,6 +938,17 @@ export function register(callbacks: RegisterCallbacks = {}): void {
         if (!win.isDestroyed()) win.webContents.send('locale-changed', msgs)
       })
       if (_onLocaleChanged) _onLocaleChanged()
+    }
+    if (key === 'modelsDirs') {
+      // Re-sync shared model paths into Desktop's config if Desktop is tracked
+      if (process.platform === 'win32' || process.platform === 'darwin') {
+        const desktopInfo = detectDesktopInstall()
+        if (desktopInfo) {
+          try {
+            syncSharedModelPaths(desktopInfo.configDir, value as string[])
+          } catch {}
+        }
+      }
     }
   })
 

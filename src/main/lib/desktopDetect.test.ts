@@ -2,7 +2,11 @@ import path from 'path'
 import { describe, expect, it, vi, beforeEach, type MockInstance } from 'vitest'
 import fs from 'fs'
 
-import { detectDesktopInstall, findDesktopExecutable } from './desktopDetect'
+vi.mock('electron', () => ({
+  app: { getPath: () => '' },
+}))
+
+import { detectDesktopInstall, findDesktopExecutable, syncSharedModelPaths } from './desktopDetect'
 
 describe('detectDesktopInstall', () => {
   let readFileSyncSpy: MockInstance
@@ -134,5 +138,83 @@ describe('findDesktopExecutable', () => {
     existsSyncSpy.mockReturnValue(false)
     expect(findDesktopExecutable()).toBeNull()
     vi.unstubAllGlobals()
+  })
+})
+
+describe('syncSharedModelPaths', () => {
+  let readFileSyncSpy: MockInstance
+  let writeFileSyncSpy: MockInstance
+  let mkdirSyncSpy: MockInstance
+
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    readFileSyncSpy = vi.spyOn(fs, 'readFileSync')
+    writeFileSyncSpy = vi.spyOn(fs, 'writeFileSync').mockImplementation(() => {})
+    mkdirSyncSpy = vi.spyOn(fs, 'mkdirSync').mockImplementation(() => undefined as any)
+  })
+
+  it('creates config with launcher sections when file does not exist', () => {
+    readFileSyncSpy.mockImplementation(() => { throw new Error('ENOENT') })
+
+    syncSharedModelPaths('/config/ComfyUI', ['/shared/models'])
+
+    expect(mkdirSyncSpy).toHaveBeenCalledWith('/config/ComfyUI', { recursive: true })
+    expect(writeFileSyncSpy).toHaveBeenCalledOnce()
+    const written = writeFileSyncSpy.mock.calls[0]![1] as string
+    expect(written).toContain('comfyui_launcher_0:')
+    expect(written).toContain('checkpoints: checkpoints/')
+    expect(written).toContain('loras: loras/')
+  })
+
+  it('preserves existing Desktop sections and appends launcher sections', () => {
+    readFileSyncSpy.mockReturnValue(
+      'comfyui_desktop:\n  base_path: /docs/ComfyUI\n  is_default: true\n'
+    )
+
+    syncSharedModelPaths('/config/ComfyUI', ['/shared/models'])
+
+    const written = writeFileSyncSpy.mock.calls[0]![1] as string
+    expect(written).toContain('comfyui_desktop:')
+    expect(written).toContain('base_path: /docs/ComfyUI')
+    expect(written).toContain('comfyui_launcher_0:')
+  })
+
+  it('replaces existing launcher sections on re-sync', () => {
+    readFileSyncSpy.mockReturnValue(
+      'comfyui_desktop:\n  base_path: /docs/ComfyUI\n\n' +
+      'comfyui_launcher_0:\n  base_path: /old/models\n  checkpoints: checkpoints/\n'
+    )
+
+    const newDir = path.resolve('/new/models')
+    syncSharedModelPaths('/config/ComfyUI', ['/new/models'])
+
+    const written = writeFileSyncSpy.mock.calls[0]![1] as string
+    expect(written).not.toContain('/old/models')
+    expect(written).toContain(newDir)
+    expect(written).toContain('comfyui_desktop:')
+    // Should have exactly one launcher section
+    expect(written.match(/comfyui_launcher_0:/g)).toHaveLength(1)
+  })
+
+  it('handles multiple model directories', () => {
+    readFileSyncSpy.mockImplementation(() => { throw new Error('ENOENT') })
+
+    syncSharedModelPaths('/config/ComfyUI', ['/models/a', '/models/b'])
+
+    const written = writeFileSyncSpy.mock.calls[0]![1] as string
+    expect(written).toContain('comfyui_launcher_0:')
+    expect(written).toContain('comfyui_launcher_1:')
+  })
+
+  it('writes no launcher sections when modelsDirs is empty', () => {
+    readFileSyncSpy.mockReturnValue(
+      'comfyui_desktop:\n  base_path: /docs/ComfyUI\n'
+    )
+
+    syncSharedModelPaths('/config/ComfyUI', [])
+
+    const written = writeFileSyncSpy.mock.calls[0]![1] as string
+    expect(written).toContain('comfyui_desktop:')
+    expect(written).not.toContain('comfyui_launcher_')
   })
 })

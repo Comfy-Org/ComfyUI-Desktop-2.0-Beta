@@ -2,7 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import { shell } from 'electron'
 import { untrackAction } from '../lib/actions'
-import { detectDesktopInstall, findDesktopExecutable } from '../lib/desktopDetect'
+import { findDesktopExecutable } from '../lib/desktopDetect'
 import { t } from '../lib/i18n'
 import type { InstallationRecord } from '../installations'
 import type {
@@ -144,18 +144,3 @@ export const desktop: SourcePlugin = {
   },
 }
 
-export function autoDetectDesktop(): {
-  installPath: string
-  data: Record<string, unknown>
-} | null {
-  const info = detectDesktopInstall()
-  if (!info) return null
-  return {
-    installPath: info.basePath,
-    data: {
-      version: 'desktop',
-      launchMode: 'external',
-      desktopExePath: info.executablePath || undefined,
-    },
-  }
-}
