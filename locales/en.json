@@ -156,7 +156,8 @@
     "configuration": "Configuration",
     "nameLocation": "Name & Location",
     "next": "Next",
-    "recommended": "Recommended"
+    "recommended": "Recommended",
+    "changeInstallType": "Change Install Type"
   },
 
   "diskSpace": {
