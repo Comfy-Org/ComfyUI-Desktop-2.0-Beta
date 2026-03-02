@@ -24,7 +24,7 @@ interface PendingDownload {
   filename: string
   directory: string
   savePath: string
-  tempPath: string
+  tempPath?: string
   window: BrowserWindow
   subscriberWindows: Set<BrowserWindow>
   item?: Electron.DownloadItem
@@ -117,7 +117,9 @@ function findPendingForItem(item: Electron.DownloadItem): PendingDownload | unde
   const candidates = [...item.getURLChain(), item.getURL()].filter(Boolean)
   for (const u of candidates) {
     const pending = pendingDownloads.get(u)
-    if (pending) return pending
+    // Only match entries waiting for their DownloadItem (managed model downloads).
+    // Entries that already have an item are active general downloads — don't hijack them.
+    if (pending && !pending.item) return pending
   }
   return undefined
 }
@@ -204,6 +206,97 @@ export async function startModelDownload(
   return true
 }
 
+function attachDownloadListeners(item: Electron.DownloadItem, pending: PendingDownload): void {
+  item.on('updated', (_ev, state) => {
+    if (state !== 'progressing') return
+    const total = item.getTotalBytes()
+    const received = item.getReceivedBytes()
+    const progress = total > 0 ? received / total : 0
+
+    const now = Date.now()
+    const elapsed = (now - pending.lastSpeedTime) / 1000
+    let speed: number | undefined
+    let eta: number | undefined
+    if (elapsed >= 0.5) {
+      const delta = received - pending.lastSpeedBytes
+      speed = delta / elapsed
+      pending.lastSpeedBytes = received
+      pending.lastSpeedTime = now
+      if (speed > 0 && total > 0) {
+        eta = (total - received) / speed
+      }
+    } else {
+      speed = pending.lastProgress.speedBytesPerSec
+      eta = pending.lastProgress.etaSeconds
+    }
+
+    reportProgress({
+      url: pending.url,
+      filename: pending.filename,
+      directory: pending.directory,
+      progress,
+      receivedBytes: received,
+      totalBytes: total,
+      speedBytesPerSec: speed,
+      etaSeconds: eta,
+      status: item.isPaused() ? 'paused' : 'downloading',
+    })
+  })
+
+  item.once('done', (_ev, state) => {
+    if (state === 'completed') {
+      // Model downloads use a temp file that needs to be moved to the final path
+      if (pending.tempPath) {
+        try {
+          fs.renameSync(pending.tempPath, pending.savePath)
+        } catch {
+          try { fs.unlinkSync(pending.tempPath) } catch {}
+          if (!fs.existsSync(pending.savePath)) {
+            reportProgress({
+              url: pending.url,
+              filename: pending.filename,
+              directory: pending.directory,
+              progress: 0,
+              status: 'error',
+              error: 'Failed to move downloaded file to final location',
+            })
+            pendingDownloads.delete(pending.url)
+            return
+          }
+        }
+      }
+      reportProgress({
+        url: pending.url,
+        filename: pending.filename,
+        directory: pending.directory,
+        savePath: pending.savePath,
+        progress: 1,
+        status: 'completed',
+      })
+    } else if (state === 'cancelled') {
+      if (pending.tempPath) { try { fs.unlinkSync(pending.tempPath) } catch {} }
+      reportProgress({
+        url: pending.url,
+        filename: pending.filename,
+        directory: pending.directory,
+        progress: 0,
+        status: 'cancelled',
+      })
+    } else {
+      if (pending.tempPath) { try { fs.unlinkSync(pending.tempPath) } catch {} }
+      reportProgress({
+        url: pending.url,
+        filename: pending.filename,
+        directory: pending.directory,
+        progress: 0,
+        status: 'error',
+        error: `Download failed: ${state}`,
+      })
+    }
+    pendingDownloads.delete(pending.url)
+  })
+}
+
 export function attachSessionDownloadHandler(sess: Electron.Session): void {
   if (attachedSessions.has(sess)) return
   attachedSessions.add(sess)
@@ -214,97 +307,8 @@ export function attachSessionDownloadHandler(sess: Electron.Session): void {
     if (pending) {
       // Managed model download — auto-save to the resolved path
       pending.item = item
-      item.setSavePath(pending.tempPath)
-
-      item.on('updated', (_ev, state) => {
-        if (state !== 'progressing') return
-        const total = item.getTotalBytes()
-        const received = item.getReceivedBytes()
-        const progress = total > 0 ? received / total : 0
-
-        // Compute speed and ETA
-        const now = Date.now()
-        const elapsed = (now - pending.lastSpeedTime) / 1000
-        let speed: number | undefined
-        let eta: number | undefined
-        if (elapsed >= 0.5) {
-          const delta = received - pending.lastSpeedBytes
-          speed = delta / elapsed
-          pending.lastSpeedBytes = received
-          pending.lastSpeedTime = now
-          if (speed > 0 && total > 0) {
-            eta = (total - received) / speed
-          }
-        } else {
-          speed = pending.lastProgress.speedBytesPerSec
-          eta = pending.lastProgress.etaSeconds
-        }
-
-        reportProgress({
-          url: pending.url,
-          filename: pending.filename,
-          directory: pending.directory,
-          progress,
-          receivedBytes: received,
-          totalBytes: total,
-          speedBytesPerSec: speed,
-          etaSeconds: eta,
-          status: item.isPaused() ? 'paused' : 'downloading',
-        })
-      })
-
-      item.once('done', (_ev, state) => {
-        if (state === 'completed') {
-          try {
-            fs.renameSync(pending.tempPath, pending.savePath)
-          } catch {
-            try { fs.unlinkSync(pending.tempPath) } catch {}
-            if (!fs.existsSync(pending.savePath)) {
-              reportProgress({
-                url: pending.url,
-                filename: pending.filename,
-                directory: pending.directory,
-                progress: 0,
-                status: 'error',
-                error: 'Failed to move downloaded file to final location',
-              })
-              pendingDownloads.delete(pending.url)
-              return
-            }
-          }
-          reportProgress({
-            url: pending.url,
-            filename: pending.filename,
-            directory: pending.directory,
-            savePath: pending.savePath,
-            progress: 1,
-            status: 'completed',
-          })
-          pendingDownloads.delete(pending.url)
-        } else if (state === 'cancelled') {
-          try { fs.unlinkSync(pending.tempPath) } catch {}
-          reportProgress({
-            url: pending.url,
-            filename: pending.filename,
-            directory: pending.directory,
-            progress: 0,
-            status: 'cancelled',
-          })
-          pendingDownloads.delete(pending.url)
-        } else {
-          try { fs.unlinkSync(pending.tempPath) } catch {}
-          reportProgress({
-            url: pending.url,
-            filename: pending.filename,
-            directory: pending.directory,
-            progress: 0,
-            status: 'error',
-            error: `Download failed: ${state}`,
-          })
-          pendingDownloads.delete(pending.url)
-          // Progress already broadcast to toast UI and Launcher panel
-        }
-      })
+      item.setSavePath(pending.tempPath!)
+      attachDownloadListeners(item, pending)
     } else {
       // General download — browser-like save dialog
       const suggestedName = item.getFilename()
@@ -339,13 +343,13 @@ export function attachSessionDownloadHandler(sess: Electron.Session): void {
 
       const url = item.getURL()
       const filename = path.basename(savePath)
+      const fallbackWindow = win || launcherWindow || BrowserWindow.getAllWindows()[0]
       const general: PendingDownload = {
         url,
         filename,
         directory: '',
         savePath,
-        tempPath: '',
-        window: win || BrowserWindow.getAllWindows()[0]!,
+        window: fallbackWindow!,
         subscriberWindows: new Set(),
         item,
         lastProgress: { url, filename, progress: 0, status: 'pending' },
@@ -354,48 +358,7 @@ export function attachSessionDownloadHandler(sess: Electron.Session): void {
       }
       pendingDownloads.set(url, general)
       reportProgress(general.lastProgress)
-
-      item.on('updated', (_ev, state) => {
-        if (state !== 'progressing') return
-        const total = item.getTotalBytes()
-        const received = item.getReceivedBytes()
-        const progress = total > 0 ? received / total : 0
-
-        const now = Date.now()
-        const elapsed = (now - general.lastSpeedTime) / 1000
-        let speed: number | undefined
-        let eta: number | undefined
-        if (elapsed >= 0.5) {
-          const delta = received - general.lastSpeedBytes
-          speed = delta / elapsed
-          general.lastSpeedBytes = received
-          general.lastSpeedTime = now
-          if (speed > 0 && total > 0) {
-            eta = (total - received) / speed
-          }
-        } else {
-          speed = general.lastProgress.speedBytesPerSec
-          eta = general.lastProgress.etaSeconds
-        }
-
-        reportProgress({
-          url, filename, progress,
-          receivedBytes: received, totalBytes: total,
-          speedBytesPerSec: speed, etaSeconds: eta,
-          status: item.isPaused() ? 'paused' : 'downloading',
-        })
-      })
-
-      item.once('done', (_ev, state) => {
-        if (state === 'completed') {
-          reportProgress({ url, filename, savePath, progress: 1, status: 'completed' })
-        } else if (state === 'cancelled') {
-          reportProgress({ url, filename, progress: 0, status: 'cancelled' })
-        } else {
-          reportProgress({ url, filename, progress: 0, status: 'error', error: `Download failed: ${state}` })
-        }
-        pendingDownloads.delete(url)
-      })
+      attachDownloadListeners(item, general)
     }
   })
 }
