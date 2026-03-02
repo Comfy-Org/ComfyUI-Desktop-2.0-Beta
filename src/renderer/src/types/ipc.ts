@@ -42,6 +42,7 @@ export type {
   UpdateDownloadProgress,
   ModelDownloadStatus,
   ModelDownloadProgress,
+  ModelFileInfo,
   TrackResult,
   CopyEvent,
   SnapshotDiffSummary,

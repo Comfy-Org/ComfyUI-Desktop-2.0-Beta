@@ -26,8 +26,10 @@ import NewInstallModal from './views/NewInstallModal.vue'
 import QuickInstallModal from './views/QuickInstallModal.vue'
 import TrackModal from './views/TrackModal.vue'
 
+import DownloadsDrawer from './components/DownloadsDrawer.vue'
+
 // Lucide icons
-import { LayoutDashboard, Box, Play, FolderOpen, Image, Settings } from 'lucide-vue-next'
+import { LayoutDashboard, Box, Play, FolderOpen, Image, Settings, Download } from 'lucide-vue-next'
 
 const { t, setLocaleMessage, locale } = useI18n()
 const sessionStore = useSessionStore()
@@ -41,6 +43,13 @@ useTheme()
 // --- View state ---
 type TabView = 'dashboard' | 'list' | 'running' | 'models' | 'media' | 'settings'
 const activeView = ref<TabView>('dashboard')
+
+// --- Downloads drawer ---
+const downloadsDrawerOpen = ref(false)
+
+function toggleDownloadsDrawer(): void {
+  downloadsDrawerOpen.value = !downloadsDrawerOpen.value
+}
 
 // --- Modal views ---
 const detailInstallation = ref<Installation | null>(null)
@@ -233,11 +242,25 @@ onMounted(async () => {
             <span
               v-if="downloadStore.activeDownloads.length > 0"
               class="sidebar-count"
+              @click.stop="toggleDownloadsDrawer"
             >{{ downloadStore.activeDownloads.length }}</span>
           </template>
         </button>
+
+        <button
+          v-if="downloadStore.activeDownloads.length > 0"
+          class="sidebar-item"
+          :class="{ active: downloadsDrawerOpen }"
+          @click="toggleDownloadsDrawer"
+        >
+          <Download :size="18" />
+          <span>{{ $t('downloads.title') }}</span>
+          <span class="sidebar-count">{{ downloadStore.activeDownloads.length }}</span>
+        </button>
       </div>
     </nav>
+
+    <DownloadsDrawer v-model="downloadsDrawerOpen" />
 
     <!-- Content Area -->
     <main class="content">
