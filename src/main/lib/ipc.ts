@@ -73,11 +73,6 @@ function openPath(targetPath: string): Promise<string> {
 
 const sourceMap: Record<string, SourcePlugin> = Object.fromEntries(sources.map((s) => [s.id, s]))
 
-function resolveSource(sourceId: string): SourcePlugin {
-  const source = sourceMap[sourceId]
-  if (!source) throw new Error(`Unknown source: ${sourceId}`)
-  return source
-}
 
 async function findDuplicatePath(installPath: string): Promise<InstallationRecord | null> {
   const normalized = path.resolve(installPath)
@@ -463,8 +458,10 @@ export function register(callbacks: RegisterCallbacks = {}): void {
   )
 
   ipcMain.handle('get-field-options', async (_event, sourceId: string, fieldId: string, selections: Record<string, unknown>) => {
+    const source = sourceMap[sourceId]
+    if (!source) return []
     const gpu = _gpuPromise ? await _gpuPromise : null
-    const options = await resolveSource(sourceId).getFieldOptions(
+    const options = await source.getFieldOptions(
       fieldId,
       selections as Record<string, FieldOption | undefined>,
       { gpu: gpu && gpu.id }
@@ -483,7 +480,8 @@ export function register(callbacks: RegisterCallbacks = {}): void {
   ipcMain.handle('check-nvidia-driver', () => checkNvidiaDriver())
 
   ipcMain.handle('build-installation', (_event, sourceId: string, selections: Record<string, unknown>) => {
-    const source = resolveSource(sourceId)
+    const source = sourceMap[sourceId]
+    if (!source) return null
     return {
       sourceId: source.id,
       sourceLabel: source.label,
