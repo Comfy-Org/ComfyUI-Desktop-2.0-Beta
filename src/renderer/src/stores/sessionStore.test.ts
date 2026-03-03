@@ -94,4 +94,80 @@ describe('useSessionStore', () => {
       expect(store.hasErrors).toBe(true)
     })
   })
+
+  describe('launchingInstances', () => {
+    it('isLaunching returns false when no instance is launching', () => {
+      expect(store.isLaunching('inst-1')).toBe(false)
+    })
+
+    it('isLaunching returns true after adding to launchingInstances', () => {
+      store.launchingInstances.set('inst-1', { installationName: 'Test' })
+
+      expect(store.isLaunching('inst-1')).toBe(true)
+    })
+
+    it('isLaunching returns false after removing from launchingInstances', () => {
+      store.launchingInstances.set('inst-1', { installationName: 'Test' })
+      store.launchingInstances.delete('inst-1')
+
+      expect(store.isLaunching('inst-1')).toBe(false)
+    })
+  })
+
+  describe('init IPC event handling', () => {
+    let handlers: Record<string, (data: unknown) => void>
+
+    beforeEach(async () => {
+      handlers = {}
+      ;(window as Record<string, unknown>).api = {
+        getRunningInstances: vi.fn().mockResolvedValue([]),
+        onInstanceLaunching: vi.fn((cb: (data: unknown) => void) => {
+          handlers['instance-launching'] = cb
+          return () => {}
+        }),
+        onInstanceLaunchFailed: vi.fn((cb: (data: unknown) => void) => {
+          handlers['instance-launch-failed'] = cb
+          return () => {}
+        }),
+        onInstanceStarted: vi.fn((cb: (data: unknown) => void) => {
+          handlers['instance-started'] = cb
+          return () => {}
+        }),
+        onInstanceStopped: vi.fn((cb: (data: unknown) => void) => {
+          handlers['instance-stopped'] = cb
+          return () => {}
+        }),
+        onComfyOutput: vi.fn(() => () => {}),
+        onComfyExited: vi.fn(() => () => {}),
+      }
+      await store.init()
+    })
+
+    it('tracks launching instances via instance-launching event', () => {
+      handlers['instance-launching']!({ installationId: 'inst-1', installationName: 'My Install' })
+
+      expect(store.isLaunching('inst-1')).toBe(true)
+      expect(store.launchingInstances.get('inst-1')?.installationName).toBe('My Install')
+    })
+
+    it('clears launching on instance-launch-failed event', () => {
+      handlers['instance-launching']!({ installationId: 'inst-1', installationName: 'My Install' })
+      handlers['instance-launch-failed']!({ installationId: 'inst-1' })
+
+      expect(store.isLaunching('inst-1')).toBe(false)
+    })
+
+    it('transitions from launching to running on instance-started event', () => {
+      handlers['instance-launching']!({ installationId: 'inst-1', installationName: 'My Install' })
+      handlers['instance-started']!({
+        installationId: 'inst-1',
+        installationName: 'My Install',
+        port: 8188,
+        mode: 'window',
+      })
+
+      expect(store.isLaunching('inst-1')).toBe(false)
+      expect(store.isRunning('inst-1')).toBe(true)
+    })
+  })
 })
