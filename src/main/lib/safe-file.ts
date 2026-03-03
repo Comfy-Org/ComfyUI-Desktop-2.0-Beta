@@ -28,7 +28,12 @@ export function writeFileSafe(filePath: string, data: string, backup: boolean = 
   if (backup) {
     try { fs.copyFileSync(filePath, bakPath) } catch {}
   }
-  fs.renameSync(tmpPath, filePath)
+  try {
+    fs.renameSync(tmpPath, filePath)
+  } catch (err) {
+    try { fs.unlinkSync(tmpPath) } catch {}
+    throw err
+  }
 }
 
 /**
@@ -66,7 +71,24 @@ export async function writeFileSafeAsync(filePath: string, data: string, backup:
   if (backup) {
     try { await fs.promises.copyFile(filePath, bakPath) } catch {}
   }
-  await fs.promises.rename(tmpPath, filePath)
+  // On Windows, antivirus or indexer may briefly lock the file after a write,
+  // causing EPERM on rename. Retry a few times with a short delay.
+  const RENAME_RETRIES = 3
+  const RENAME_DELAY_MS = 100
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await fs.promises.rename(tmpPath, filePath)
+      return
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code
+      if ((code === 'EPERM' || code === 'EACCES') && attempt < RENAME_RETRIES) {
+        await new Promise((r) => setTimeout(r, RENAME_DELAY_MS * (attempt + 1)))
+        continue
+      }
+      try { await fs.promises.unlink(tmpPath) } catch {}
+      throw err
+    }
+  }
 }
 
 export async function readFileSafeAsync(filePath: string): Promise<string | null> {

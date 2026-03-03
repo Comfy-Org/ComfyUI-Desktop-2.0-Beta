@@ -30,6 +30,13 @@ export function useLocalInstanceGuard() {
         runningLocal.push({ id, name: instance.installationName })
       }
     }
+    for (const [id, instance] of sessionStore.launchingInstances) {
+      if (id === targetId) continue
+      const inst = installationStore.installations.find((i) => i.id === id)
+      if (!inst || inst.sourceCategory === 'local') {
+        runningLocal.push({ id, name: instance.installationName })
+      }
+    }
 
     if (runningLocal.length === 0) return true
 

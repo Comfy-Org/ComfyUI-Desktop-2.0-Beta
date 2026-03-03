@@ -542,6 +542,8 @@ export interface ElectronApi {
   onInstallProgress(callback: (data: ProgressData) => void): Unsubscribe
   onComfyOutput(callback: (data: ComfyOutputData) => void): Unsubscribe
   onComfyExited(callback: (data: ComfyExitedData) => void): Unsubscribe
+  onInstanceLaunching(callback: (data: { installationId: string; installationName: string }) => void): Unsubscribe
+  onInstanceLaunchFailed(callback: (data: { installationId: string }) => void): Unsubscribe
   onInstanceStarted(callback: (data: RunningInstance) => void): Unsubscribe
   onInstanceStopped(callback: (data: { installationId: string }) => void): Unsubscribe
   onThemeChanged(callback: (theme: ResolvedTheme) => void): Unsubscribe
