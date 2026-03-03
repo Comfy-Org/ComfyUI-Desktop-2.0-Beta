@@ -345,7 +345,7 @@ async function changePrimary(): Promise<void> {
       <!-- Pinned section -->
       <div v-if="primaryInstall" class="dashboard-section">
         <div class="dashboard-section-label">
-          <Pin :size="14" style="vertical-align: -2px; margin-right: 4px;" />
+          <Pin :size="14" />
           {{ $t('dashboard.pinned') }}
         </div>
         <div v-if="pinnedInstalls.length > 0" class="dashboard-quick-launch">
@@ -379,7 +379,7 @@ async function changePrimary(): Promise<void> {
       <!-- Cloud section -->
       <div v-if="cloudInstall" class="dashboard-section">
         <div class="dashboard-section-label">
-          <Cloud :size="14" style="vertical-align: -2px; margin-right: 4px;" />
+          <Cloud :size="14" />
           {{ $t('dashboard.cloudSection') }}
         </div>
         <div class="dashboard-cloud-card" @contextmenu.prevent="openCardMenu($event, cloudInstall!)">

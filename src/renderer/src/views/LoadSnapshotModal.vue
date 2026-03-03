@@ -294,7 +294,7 @@ defineExpose({ open })
                   <span class="ls-collapse">{{ nodesExpanded ? '▾' : '▸' }}</span>
                 </div>
                 <template v-if="nodesExpanded">
-                  <div v-if="preview.newestSnapshot.customNodes.length > 0" class="ls-recessed-list">
+                  <div v-if="preview.newestSnapshot.customNodes.length > 0" class="recessed-list">
                     <div v-for="node in preview.newestSnapshot.customNodes" :key="node.id" class="ls-node-row">
                       <span class="ls-node-status" :class="node.enabled ? 'ls-node-enabled' : 'ls-node-disabled'" />
                       <span class="ls-node-name">{{ node.id }}</span>
@@ -313,7 +313,7 @@ defineExpose({ open })
                   <span class="ls-collapse">{{ pipExpanded ? '▾' : '▸' }}</span>
                 </div>
                 <template v-if="pipExpanded">
-                  <div v-if="preview.newestSnapshot.pipPackageCount > 0" class="ls-recessed-list">
+                  <div v-if="preview.newestSnapshot.pipPackageCount > 0" class="recessed-list">
                     <div v-for="(version, name) in preview.newestSnapshot.pipPackages" :key="name" class="ls-pip-row">
                       <span class="ls-pip-name">{{ name }}</span>
                       <span class="ls-pip-version" :title="version">{{ version }}</span>
@@ -360,7 +360,7 @@ defineExpose({ open })
   width: 100%;
   min-height: 180px;
   border: 2px dashed var(--border);
-  border-radius: 10px;
+  border-radius: 8px;
   padding: 32px;
   transition: border-color 0.15s, background 0.15s;
 }
@@ -374,7 +374,7 @@ defineExpose({ open })
 }
 
 .ls-drop-text {
-  font-size: 15px;
+  font-size: 14px;
   color: var(--text-muted);
   text-align: center;
 }
@@ -454,7 +454,7 @@ defineExpose({ open })
 
 .ls-name-hint {
   font-size: 11px;
-  color: var(--warning, #fd9903);
+  color: var(--warning);
   margin-top: 2px;
 }
 
@@ -494,11 +494,11 @@ defineExpose({ open })
 }
 
 .ls-trigger-boot { color: var(--text-muted); }
-.ls-trigger-restart { color: var(--info, #58a6ff); }
-.ls-trigger-manual { color: var(--success, #00cd72); }
-.ls-trigger-pre-update { color: var(--success, #00cd72); }
-.ls-trigger-post-update { color: var(--warning, #fd9903); }
-.ls-trigger-post-restore { color: var(--warning, #fd9903); }
+.ls-trigger-restart { color: var(--info); }
+.ls-trigger-manual { color: var(--success); }
+.ls-trigger-pre-update { color: var(--success); }
+.ls-trigger-post-update { color: var(--warning); }
+.ls-trigger-post-restore { color: var(--warning); }
 
 .ls-current-tag {
   font-size: 11px;
@@ -543,18 +543,6 @@ defineExpose({ open })
   font-size: 14px;
 }
 
-.ls-recessed-list {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  max-height: 200px;
-  overflow-y: auto;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 6px;
-}
-
 .ls-node-row {
   display: flex;
   align-items: center;
@@ -569,7 +557,7 @@ defineExpose({ open })
   border-radius: 50%;
   flex-shrink: 0;
 }
-.ls-node-enabled { background: var(--info, #58a6ff); }
+.ls-node-enabled { background: var(--info); }
 .ls-node-disabled { background: var(--text-muted); }
 
 .ls-node-name {

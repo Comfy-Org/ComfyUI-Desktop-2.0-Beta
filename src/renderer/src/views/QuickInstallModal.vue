@@ -108,8 +108,13 @@ watch(instPath, (newPath) => {
   fetchDiskSpace(newPath)
 })
 
+function handleEscapeKey(event: KeyboardEvent): void {
+  if (event.key === 'Escape') emit('close')
+}
+
 onUnmounted(() => {
   if (diskSpaceTimer) clearTimeout(diskSpaceTimer)
+  document.removeEventListener('keydown', handleEscapeKey)
 })
 
 async function handleBrowse(): Promise<void> {
@@ -142,6 +147,7 @@ let installDirPromise: Promise<string> | null = null
 
 onMounted(() => {
   installDirPromise = window.api.getDefaultInstallDir().catch(() => '')
+  document.addEventListener('keydown', handleEscapeKey)
 })
 
 async function open(): Promise<void> {

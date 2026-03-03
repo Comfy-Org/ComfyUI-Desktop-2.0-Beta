@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useSessionStore } from '../stores/sessionStore'
 
@@ -86,6 +86,20 @@ watch(
     }
   }
 )
+
+function handleEscapeKey(event: KeyboardEvent): void {
+  if (event.key === 'Escape' && props.installationId) {
+    emit('close')
+  }
+}
+
+onMounted(() => {
+  document.addEventListener('keydown', handleEscapeKey)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('keydown', handleEscapeKey)
+})
 
 function handleOverlayMouseDown(event: MouseEvent): void {
   mouseDownOnOverlay.value = event.target === (event.currentTarget as HTMLElement)

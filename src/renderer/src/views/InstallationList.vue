@@ -273,9 +273,9 @@ defineExpose({ refresh })
 
         <!-- Empty: no installations at all -->
         <div v-else-if="filteredInstallations.length === 0" class="empty-state">
-          <div style="font-weight: 700; color: var(--text-muted)">{{ $t('list.empty') }}</div>
-          <div style="margin-top: 4px">{{ $t('list.emptyHint') }}</div>
-          <button class="accent add-btn" style="margin-top: 8px" @click="emit('show-new-install')">
+          <div class="empty-state-title">{{ $t('list.empty') }}</div>
+          <div class="empty-state-hint">{{ $t('list.emptyHint') }}</div>
+          <button class="accent add-btn empty-state-action" @click="emit('show-new-install')">
             + {{ $t('list.newInstall') }}
           </button>
         </div>
@@ -378,9 +378,9 @@ defineExpose({ refresh })
           v-if="filteredInstallations.length > 0 && !hasLocal && (filter === 'all' || filter === 'local')"
           class="empty-state"
         >
-          <div style="font-weight: 700; color: var(--text-muted)">{{ $t('list.empty') }}</div>
-          <div style="margin-top: 4px">{{ $t('list.emptyHint') }}</div>
-          <button class="accent add-btn" style="margin-top: 8px" @click="emit('show-new-install')">
+          <div class="empty-state-title">{{ $t('list.empty') }}</div>
+          <div class="empty-state-hint">{{ $t('list.emptyHint') }}</div>
+          <button class="accent add-btn empty-state-action" @click="emit('show-new-install')">
             + {{ $t('list.newInstall') }}
           </button>
         </div>
