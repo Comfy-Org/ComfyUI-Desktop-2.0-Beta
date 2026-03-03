@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, reactive, watch, nextTick } from 'vue'
+import { useModal } from '../composables/useModal'
 import type { DetailItem, DetailField, DetailFieldOption, ActionDef } from '../types/ipc'
 
 interface Props {
@@ -27,6 +28,7 @@ const emit = defineEmits<{
   'refresh-all': []
 }>()
 
+const modal = useModal()
 const isCollapsed = ref(props.collapsed === true)
 const sectionRef = ref<HTMLDivElement | null>(null)
 
@@ -83,6 +85,8 @@ async function handleFieldChange(field: DetailField, value: string | boolean): P
     const result = await window.api.runAction(props.installationId, field.onChangeAction)
     if (result.navigate === 'detail') {
       emit('refresh-all')
+    } else if (!result.ok && result.message) {
+      await modal.alert({ title: field.label, message: result.message })
     }
   }
 }

@@ -204,7 +204,11 @@ async function saveSnapshot(): Promise<void> {
   })
   if (label === null) return
   try {
-    await window.api.runAction(props.installationId, 'snapshot-save', { label: label || undefined })
+    const result = await window.api.runAction(props.installationId, 'snapshot-save', { label: label || undefined })
+    if (!result.ok && result.message) {
+      await modal.alert({ title: t('snapshots.saveSnapshot'), message: result.message })
+      return
+    }
   } catch (err: unknown) {
     await modal.alert({ title: t('snapshots.saveSnapshot'), message: (err as Error).message || String(err) })
     return
@@ -239,7 +243,11 @@ async function handleDelete(filename: string): Promise<void> {
     message: t('snapshots.deleteConfirm'),
   })
   if (!confirmed) return
-  await window.api.runAction(props.installationId, 'snapshot-delete', { file: filename })
+  const result = await window.api.runAction(props.installationId, 'snapshot-delete', { file: filename })
+  if (!result.ok && result.message) {
+    await modal.alert({ title: t('standalone.snapshotDelete'), message: result.message })
+    return
+  }
   if (selectedFilename.value === filename) {
     selectedFilename.value = null
     detail.value = null
