@@ -19,6 +19,7 @@ interface ErrorInstance {
 
 export const useSessionStore = defineStore('session', () => {
   const runningInstances = reactive(new Map<string, RunningInstance>())
+  const launchingInstances = reactive(new Map<string, { installationName: string }>())
   const activeSessions = reactive(new Map<string, ActiveSession>())
   const errorInstances = reactive(new Map<string, ErrorInstance>())
   const sessions = reactive(new Map<string, SessionBuffer>())
@@ -31,6 +32,10 @@ export const useSessionStore = defineStore('session', () => {
 
   function isRunning(installationId: string): boolean {
     return runningInstances.has(installationId)
+  }
+
+  function isLaunching(installationId: string): boolean {
+    return launchingInstances.has(installationId)
   }
 
   function setActiveSession(installationId: string, label: string): void {
@@ -86,7 +91,14 @@ export const useSessionStore = defineStore('session', () => {
     }
 
     cleanups.push(
+      window.api.onInstanceLaunching((data: { installationId: string; installationName: string }) => {
+        launchingInstances.set(data.installationId, { installationName: data.installationName })
+      }),
+      window.api.onInstanceLaunchFailed((data: { installationId: string }) => {
+        launchingInstances.delete(data.installationId)
+      }),
       window.api.onInstanceStarted((data: RunningInstance) => {
+        launchingInstances.delete(data.installationId)
         runningInstances.set(data.installationId, data)
       }),
       window.api.onInstanceStopped((data: { installationId: string }) => {
@@ -121,12 +133,14 @@ export const useSessionStore = defineStore('session', () => {
 
   return {
     runningInstances,
+    launchingInstances,
     activeSessions,
     errorInstances,
     sessions,
     runningTabCount,
     hasErrors,
     isRunning,
+    isLaunching,
     setActiveSession,
     clearActiveSession,
     clearErrorInstance,

@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { IpcRendererEvent } from 'electron'
 import type { ElectronApi, ResolvedTheme } from '../types/ipc'
 
@@ -61,6 +61,19 @@ const api: ElectronApi = {
     ipcRenderer.invoke('get-snapshot-detail', installationId, filename),
   getSnapshotDiff: (installationId, filename, mode) =>
     ipcRenderer.invoke('get-snapshot-diff', installationId, filename, mode),
+  exportSnapshot: (installationId, filename) =>
+    ipcRenderer.invoke('export-snapshot', installationId, filename),
+  exportAllSnapshots: (installationId) =>
+    ipcRenderer.invoke('export-all-snapshots', installationId),
+  importSnapshots: (installationId) =>
+    ipcRenderer.invoke('import-snapshots', installationId),
+  previewSnapshotFile: () =>
+    ipcRenderer.invoke('preview-snapshot-file'),
+  previewSnapshotPath: (filePath: string) =>
+    ipcRenderer.invoke('preview-snapshot-path', filePath),
+  createFromSnapshot: (filePath: string, name?: string) =>
+    ipcRenderer.invoke('create-from-snapshot', filePath, name),
+  getPathForFile: (file: File) => webUtils.getPathForFile(file),
 
   // Settings
   getSettingsSections: () => ipcRenderer.invoke('get-settings-sections'),
@@ -106,6 +119,16 @@ const api: ElectronApi = {
     const handler = (_event: IpcRendererEvent, data: unknown) => callback(data as Parameters<typeof callback>[0])
     ipcRenderer.on('comfy-exited', handler)
     return () => ipcRenderer.removeListener('comfy-exited', handler)
+  },
+  onInstanceLaunching: (callback) => {
+    const handler = (_event: IpcRendererEvent, data: unknown) => callback(data as Parameters<typeof callback>[0])
+    ipcRenderer.on('instance-launching', handler)
+    return () => ipcRenderer.removeListener('instance-launching', handler)
+  },
+  onInstanceLaunchFailed: (callback) => {
+    const handler = (_event: IpcRendererEvent, data: unknown) => callback(data as Parameters<typeof callback>[0])
+    ipcRenderer.on('instance-launch-failed', handler)
+    return () => ipcRenderer.removeListener('instance-launch-failed', handler)
   },
   onInstanceStarted: (callback) => {
     const handler = (_event: IpcRendererEvent, data: unknown) => callback(data as Parameters<typeof callback>[0])
