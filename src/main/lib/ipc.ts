@@ -13,6 +13,7 @@ import { download } from './download'
 import { createCache } from './cache'
 import { extractNested as extract } from './extract'
 import { deleteDir } from './delete'
+import { deleteAction, untrackAction } from './actions'
 import {
   spawnProcess, waitForPort, waitForUrl, killProcessTree, killByPort,
   findPidsByPort, getProcessInfo, looksLikeComfyUI, setPortArg,
@@ -73,11 +74,6 @@ function openPath(targetPath: string): Promise<string> {
 
 const sourceMap: Record<string, SourcePlugin> = Object.fromEntries(sources.map((s) => [s.id, s]))
 
-function resolveSource(sourceId: string): SourcePlugin {
-  const source = sourceMap[sourceId]
-  if (!source) throw new Error(`Unknown source: ${sourceId}`)
-  return source
-}
 
 async function findDuplicatePath(installPath: string): Promise<InstallationRecord | null> {
   const normalized = path.resolve(installPath)
@@ -202,8 +198,8 @@ async function performCopy(
       })
     }, { signal })
 
-    const source = resolveSource(inst.sourceId)
-    if (source.fixupCopy) {
+    const source = sourceMap[inst.sourceId]
+    if (source?.fixupCopy) {
       await source.fixupCopy(inst.installPath, destPath)
     }
 
@@ -259,6 +255,15 @@ let _gpuPromise: Promise<GpuInfo | null> | null = null
 
 const _operationAborts = new Map<string, AbortController>()
 const _runningSessions = new Map<string, SessionInfo>()
+const _pendingPorts = new Map<number, string>() // port → installationName
+
+function _reservePort(port: number, installationName: string): void {
+  _pendingPorts.set(port, installationName)
+}
+
+function _releasePort(port: number): void {
+  _pendingPorts.delete(port)
+}
 
 function _broadcastToRenderer(channel: string, data: Record<string, unknown>): void {
   BrowserWindow.getAllWindows().forEach((win) => {
@@ -463,8 +468,10 @@ export function register(callbacks: RegisterCallbacks = {}): void {
   )
 
   ipcMain.handle('get-field-options', async (_event, sourceId: string, fieldId: string, selections: Record<string, unknown>) => {
+    const source = sourceMap[sourceId]
+    if (!source) return []
     const gpu = _gpuPromise ? await _gpuPromise : null
-    const options = await resolveSource(sourceId).getFieldOptions(
+    const options = await source.getFieldOptions(
       fieldId,
       selections as Record<string, FieldOption | undefined>,
       { gpu: gpu && gpu.id }
@@ -483,7 +490,8 @@ export function register(callbacks: RegisterCallbacks = {}): void {
   ipcMain.handle('check-nvidia-driver', () => checkNvidiaDriver())
 
   ipcMain.handle('build-installation', (_event, sourceId: string, selections: Record<string, unknown>) => {
-    const source = resolveSource(sourceId)
+    const source = sourceMap[sourceId]
+    if (!source) return null
     return {
       sourceId: source.id,
       sourceLabel: source.label,
@@ -623,10 +631,11 @@ export function register(callbacks: RegisterCallbacks = {}): void {
   ipcMain.handle('install-instance', async (_event, installationId: string) => {
     const inst = await installations.get(installationId)
     if (!inst) return { ok: false, message: 'Installation not found.' }
+    const source = sourceMap[inst.sourceId]
+    if (!source) return { ok: false, message: i18n.t('errors.unknownSource') }
     if (_operationAborts.has(installationId)) {
       return { ok: false, message: 'Another operation is already running for this installation.' }
     }
-    const source = resolveSource(inst.sourceId)
     const sender = _event.sender
 
     const sendProgress = (phase: string, detail: Record<string, unknown>): void => {
@@ -713,7 +722,8 @@ export function register(callbacks: RegisterCallbacks = {}): void {
   ipcMain.handle('get-list-actions', async (_event, installationId: string) => {
     const inst = await installations.get(installationId)
     if (!inst) return []
-    const source = resolveSource(inst.sourceId)
+    const source = sourceMap[inst.sourceId]
+    if (!source) return []
     return source.getListActions ? source.getListActions(inst) : []
   })
 
@@ -721,7 +731,8 @@ export function register(callbacks: RegisterCallbacks = {}): void {
   ipcMain.handle('update-installation', async (_event, installationId: string, data: Record<string, unknown>) => {
     const inst = await installations.get(installationId)
     if (!inst) return { ok: false, message: 'Installation not found.' }
-    const source = resolveSource(inst.sourceId)
+    const source = sourceMap[inst.sourceId]
+    if (!source) return { ok: false, message: i18n.t('errors.unknownSource') }
     const sections = source.getDetailSections(inst)
     const allowedIds = new Set(['name', 'seen'])
     for (const section of sections) {
@@ -750,7 +761,24 @@ export function register(callbacks: RegisterCallbacks = {}): void {
   ipcMain.handle('get-detail-sections', async (_event, installationId: string) => {
     const inst = await installations.get(installationId)
     if (!inst) return []
-    return resolveSource(inst.sourceId).getDetailSections(inst)
+    const source = sourceMap[inst.sourceId]
+    if (!source) {
+      const actions = [untrackAction()]
+      if (inst.installPath && fs.existsSync(inst.installPath)) {
+        actions.unshift(deleteAction(inst))
+      }
+      return [
+        {
+          title: '',
+          description: i18n.t('errors.unknownSource'),
+        },
+        {
+          pinBottom: true,
+          actions,
+        },
+      ]
+    }
+    return source.getDetailSections(inst)
   })
 
   // Snapshots
@@ -1164,7 +1192,8 @@ export function register(callbacks: RegisterCallbacks = {}): void {
           if (phase !== 'steps') sendProgress(phase, detail)
         }
         try {
-          const source = resolveSource(inst.sourceId)
+          const source = sourceMap[inst.sourceId]
+          if (!source) throw new Error(i18n.t('errors.unknownSource'))
           const newInst = await installations.get(entry.id)
           const newUpdate = (data: Record<string, unknown>): Promise<void> =>
             installations.update(entry.id, data).then(() => {})
@@ -1205,7 +1234,8 @@ export function register(callbacks: RegisterCallbacks = {}): void {
         return { ok: false, message: 'Another operation is already running for this installation.' }
       }
 
-      const source = resolveSource(inst.sourceId)
+      const source = sourceMap[inst.sourceId]
+      if (!source) return { ok: false, message: i18n.t('errors.unknownSource') }
       const installData = source.buildInstallation({
         release: releaseSelection as unknown as FieldOption,
         variant: variantSelection as unknown as FieldOption,
@@ -1342,7 +1372,8 @@ export function register(callbacks: RegisterCallbacks = {}): void {
       if (_operationAborts.has(installationId)) {
         return { ok: false, message: 'Another operation is already running for this installation.' }
       }
-      const source = resolveSource(inst.sourceId)
+      const source = sourceMap[inst.sourceId]
+      if (!source) return { ok: false, message: i18n.t('errors.unknownSource') }
       if (!source.skipInstall && isEffectivelyEmptyInstallDir(inst.installPath)) {
         return { ok: false, message: i18n.t('errors.installDirEmpty') }
       }
@@ -1413,40 +1444,82 @@ export function register(callbacks: RegisterCallbacks = {}): void {
         setPortArg(launchCmd as LaunchCmd, actionData.portOverride as number)
       }
 
-      const existingPids = await findPidsByPort(launchCmd.port!)
-      if (existingPids.length > 0) {
+      // Check for port conflicts: in-memory pending reservations, OS-level listeners, and disk locks
+      const pendingPortOwner = _pendingPorts.get(launchCmd.port!)
+      const existingPids = pendingPortOwner ? [] : await findPidsByPort(launchCmd.port!)
+      const portOccupied = !!pendingPortOwner || existingPids.length > 0
+
+      if (portOccupied) {
         const defaults = source.getDefaults ? source.getDefaults() : {}
         const portConflictMode = (inst.portConflict as string | undefined) || (defaults.portConflict as string | undefined) || 'auto'
         const userArgs = ((inst.launchArgs as string | undefined) || '').trim()
         const portIsExplicit = /(?:^|\s)--port\b/.test(userArgs)
 
+        const reservedPorts = new Set(_pendingPorts.keys())
         let nextPort: number | null = null
         try {
-          nextPort = await findAvailablePort('127.0.0.1', launchCmd.port! + 1, launchCmd.port! + 1000)
+          nextPort = await findAvailablePort('127.0.0.1', launchCmd.port! + 1, launchCmd.port! + 1000, reservedPorts)
         } catch {}
 
         if (portConflictMode === 'auto' && nextPort && !portIsExplicit) {
           sendProgress('launch', { percent: -1, status: i18n.t('launch.portBusyUsing', { old: launchCmd.port!, new: nextPort }) })
           setPortArg(launchCmd as LaunchCmd, nextPort)
         } else {
-          const lock = readPortLock(launchCmd.port!)
           let message: string
           let isComfy: boolean
-          if (lock) {
-            message = i18n.t('errors.portConflictLauncher', { port: launchCmd.port!, name: lock.installationName })
+          if (pendingPortOwner) {
+            message = i18n.t('errors.portConflictLauncher', { port: launchCmd.port!, name: pendingPortOwner })
             isComfy = true
           } else {
-            const info = await getProcessInfo(existingPids[0]!)
-            isComfy = looksLikeComfyUI(info)
-            const processDesc = info ? info.name : `PID ${existingPids[0]}`
-            message = isComfy
-              ? i18n.t('errors.portConflictComfy', { port: launchCmd.port!, process: processDesc })
-              : i18n.t('errors.portConflictOther', { port: launchCmd.port!, process: processDesc })
+            const lock = readPortLock(launchCmd.port!)
+            if (lock) {
+              message = i18n.t('errors.portConflictLauncher', { port: launchCmd.port!, name: lock.installationName })
+              isComfy = true
+            } else {
+              const info = await getProcessInfo(existingPids[0]!)
+              isComfy = looksLikeComfyUI(info)
+              const processDesc = info ? info.name : `PID ${existingPids[0]}`
+              message = isComfy
+                ? i18n.t('errors.portConflictComfy', { port: launchCmd.port!, process: processDesc })
+                : i18n.t('errors.portConflictOther', { port: launchCmd.port!, process: processDesc })
+            }
           }
           _operationAborts.delete(installationId)
           return { ok: false, message, portConflict: { port: launchCmd.port, pids: existingPids, isComfy, nextPort } }
         }
       }
+
+      // Synchronous re-check: another launch may have reserved this port while we
+      // were awaiting findPidsByPort / findAvailablePort above (TOCTOU gap).
+      const lateConflictOwner = _pendingPorts.get(launchCmd.port!)
+      if (lateConflictOwner) {
+        const defaults = source.getDefaults ? source.getDefaults() : {}
+        const portConflictMode = (inst.portConflict as string | undefined) || (defaults.portConflict as string | undefined) || 'auto'
+        const userArgs = ((inst.launchArgs as string | undefined) || '').trim()
+        const portIsExplicit = /(?:^|\s)--port\b/.test(userArgs)
+
+        const reservedPorts = new Set(_pendingPorts.keys())
+        let nextPort: number | null = null
+        try {
+          nextPort = await findAvailablePort('127.0.0.1', launchCmd.port! + 1, launchCmd.port! + 1000, reservedPorts)
+        } catch {}
+
+        if (portConflictMode === 'auto' && nextPort && !portIsExplicit) {
+          sendProgress('launch', { percent: -1, status: i18n.t('launch.portBusyUsing', { old: launchCmd.port!, new: nextPort }) })
+          setPortArg(launchCmd as LaunchCmd, nextPort)
+        } else {
+          _operationAborts.delete(installationId)
+          return {
+            ok: false,
+            message: i18n.t('errors.portConflictLauncher', { port: launchCmd.port!, name: lateConflictOwner }),
+            portConflict: { port: launchCmd.port, pids: [], isComfy: true, nextPort },
+          }
+        }
+      }
+
+      // Reserve port eagerly before spawning to prevent concurrent launches from claiming it
+      _reservePort(launchCmd.port!, inst.name)
+      _broadcastToRenderer('instance-launching', { installationId, installationName: inst.name })
 
       const sessionPath = createSessionPath()
       const launchEnv = { ...process.env, __COMFY_CLI_SESSION__: sessionPath }
@@ -1530,9 +1603,12 @@ export function register(callbacks: RegisterCallbacks = {}): void {
           if (isPortConflict && portRetries < PORT_RETRY_MAX) {
             portRetries++
             try {
-              const retryPort = await findAvailablePort('127.0.0.1', launchCmd.port! + 1, launchCmd.port! + 1000)
+              const reservedPorts = new Set(_pendingPorts.keys())
+              const retryPort = await findAvailablePort('127.0.0.1', launchCmd.port! + 1, launchCmd.port! + 1000, reservedPorts)
               sendOutput(`\nPort ${launchCmd.port} in use, retrying on port ${retryPort}…\n`)
+              _releasePort(launchCmd.port!)
               setPortArg(launchCmd as LaunchCmd, retryPort)
+              _reservePort(launchCmd.port!, inst.name)
               return tryLaunch()
             } catch {}
           }
@@ -1543,12 +1619,16 @@ export function register(callbacks: RegisterCallbacks = {}): void {
 
       const launchResult = await tryLaunch()
       if (!launchResult.ok) {
+        _releasePort(launchCmd.port!)
         _operationAborts.delete(installationId)
+        _broadcastToRenderer('instance-launch-failed', { installationId })
         if (launchResult.cancelled) return { ok: false, cancelled: true }
         return { ok: false, message: launchResult.message }
       }
       let { proc } = launchResult
 
+      // Transition from pending reservation to confirmed session + port lock
+      _pendingPorts.delete(launchCmd.port!)
       _operationAborts.delete(installationId)
       const mode = (inst.launchMode as string | undefined) || 'window'
       _addSession(installationId, { proc, port: launchCmd.port!, mode, installationName: inst.name })
@@ -1624,8 +1704,13 @@ export function register(callbacks: RegisterCallbacks = {}): void {
     }
     const update = (data: Record<string, unknown>): Promise<void> =>
       installations.update(installationId, data).then(() => {})
+    const source = sourceMap[inst.sourceId]
+    if (!source) {
+      _operationAborts.delete(installationId)
+      return { ok: false, message: i18n.t('errors.unknownSource') }
+    }
     try {
-      return await resolveSource(inst.sourceId).handleAction(actionId, inst, actionData, { update, sendProgress, sendOutput, signal: abort.signal })
+      return await source.handleAction(actionId, inst, actionData, { update, sendProgress, sendOutput, signal: abort.signal })
     } catch (err) {
       if (abort.signal.aborted) return { ok: false, message: 'Cancelled' }
       return { ok: false, message: (err as Error).message }

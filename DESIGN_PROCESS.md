@@ -194,3 +194,21 @@ When reviewing code for modularity, check:
 5. **Does a renderer view contain hardcoded conditionals for specific action/source IDs?** Replace with a data-driven pattern (add a property to the schema).
 6. **Does a source repeat information already available from its own definition?** Have the framework (ipc.js) inject it.
 7. **Can a new source be added by only creating a file in `sources/` and registering it in `sources/index.js`?** If not, something is coupled.
+
+## Future Enhancements
+
+### Convert `writeFileSafe` callers to async
+
+The synchronous `writeFileSafe` in `lib/safe-file.ts` cannot safely retry on
+Windows `EPERM`/`EACCES` rename errors (retry would require a busy-wait that
+blocks the event loop). The async variant `writeFileSafeAsync` handles this
+with proper `setTimeout`-based retries.
+
+Callers that should be migrated to `writeFileSafeAsync`:
+- `src/main/settings.ts` — `set()` function
+- `src/main/lib/release-cache.ts` — `save()` function
+- `src/main/lib/models.ts` — `ensureModelPathsConfig()`
+- `src/main/lib/fetch.ts` — `fetchJSON()` cache write
+
+Currently the sync version relies on `readFileSafe`'s `.bak` fallback to
+recover from a failed rename, which is adequate but not ideal.
