@@ -9,6 +9,7 @@ import * as settings from './settings'
 import * as i18n from './lib/i18n'
 import { configDir, migrateXdgPaths } from './lib/paths'
 import { waitForPort } from './lib/process'
+import { isQuitInProgress, setQuitReason } from './lib/quit-state'
 import type { InstallationRecord } from './installations'
 import {
   attachSessionDownloadHandler,
@@ -137,7 +138,6 @@ function attachContextMenu(comfyWindow: BrowserWindow): void {
 let launcherWindow: BrowserWindow | null = null
 let tray: Tray | null = null
 const comfyWindows = new Map<string, BrowserWindow>()
-let isQuitting = false
 
 function createLauncherWindow(): void {
   launcherWindow = new BrowserWindow({
@@ -200,7 +200,7 @@ function createLauncherWindow(): void {
   }
 
   launcherWindow.on('close', (e) => {
-    if (isQuitting) return
+    if (isQuitInProgress()) return
 
     const onClose = (settings.get('onLauncherClose') as string | undefined) || 'tray'
     if (onClose === 'tray') {
@@ -251,7 +251,7 @@ function showLauncher(): void {
 }
 
 function quitApp(): void {
-  isQuitting = true
+  setQuitReason('user-quit')
   ipc.cancelAll()
   for (const [_id, win] of comfyWindows) {
     if (!win.isDestroyed()) win.destroy()
@@ -486,7 +486,7 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
   })
 
   app.on('before-quit', () => {
-    isQuitting = true
+    if (!isQuitInProgress()) setQuitReason('user-quit')
     cleanupTempDownloads()
   })
 
