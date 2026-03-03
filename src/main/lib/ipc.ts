@@ -13,6 +13,7 @@ import { download } from './download'
 import { createCache } from './cache'
 import { extractNested as extract } from './extract'
 import { deleteDir } from './delete'
+import { deleteAction, untrackAction } from './actions'
 import {
   spawnProcess, waitForPort, waitForUrl, killProcessTree, killByPort,
   findPidsByPort, getProcessInfo, looksLikeComfyUI, setPortArg,
@@ -752,7 +753,17 @@ export function register(callbacks: RegisterCallbacks = {}): void {
     const inst = await installations.get(installationId)
     if (!inst) return []
     const source = sourceMap[inst.sourceId]
-    if (!source) return []
+    if (!source) {
+      const actions = [untrackAction()]
+      if (inst.installPath && fs.existsSync(inst.installPath)) {
+        actions.unshift(deleteAction(inst))
+      }
+      return [{
+        title: i18n.t('errors.unknownSource'),
+        pinBottom: true,
+        actions,
+      }]
+    }
     return source.getDetailSections(inst)
   })
 
