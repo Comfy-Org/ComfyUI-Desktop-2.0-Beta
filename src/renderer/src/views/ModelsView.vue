@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import DirCard from '../components/DirCard.vue'
+import DownloadsPanel from '../components/DownloadsPanel.vue'
 import ModelBrowser from '../components/ModelBrowser.vue'
 import type { ModelsSection } from '../types/ipc'
 
@@ -117,6 +118,8 @@ defineExpose({ loadModels })
           </div>
         </div>
       </div>
+
+      <DownloadsPanel />
     </div>
 
     <div v-else class="view-scroll" style="padding: 16px;">
