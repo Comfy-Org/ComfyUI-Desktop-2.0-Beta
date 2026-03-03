@@ -23,7 +23,7 @@ export interface LaunchCmd {
   port: number
 }
 
-interface PortLock {
+export interface PortLock {
   pid: number
   installationName: string
   timestamp: number
@@ -206,11 +206,15 @@ export function setPortArg(launchCmd: LaunchCmd, port: number): void {
   launchCmd.port = port
 }
 
-export function findAvailablePort(host: string, startPort: number, endPort: number): Promise<number> {
+export function findAvailablePort(host: string, startPort: number, endPort: number, excludePorts?: ReadonlySet<number>): Promise<number> {
   return new Promise((resolve, reject) => {
     function tryPort(port: number): void {
       if (port > endPort) {
         reject(new Error(`No available ports found between ${startPort} and ${endPort}`))
+        return
+      }
+      if (excludePorts && excludePorts.has(port)) {
+        tryPort(port + 1)
         return
       }
       const server = net.createServer()
