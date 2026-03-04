@@ -1,7 +1,10 @@
 import fs from 'fs'
 import path from 'path'
+import { execFile } from 'child_process'
 import { homedir } from 'os'
 import { MODEL_FOLDER_TYPES } from './models'
+import { scanCustomNodes } from './nodes'
+import type { Snapshot } from './snapshots'
 
 export interface DesktopInstallInfo {
   configDir: string
@@ -116,4 +119,90 @@ export function syncSharedModelPaths(configDir: string, modelsDirs: string[]): v
 
   fs.mkdirSync(configDir, { recursive: true })
   fs.writeFileSync(configPath, lines.join('\n'), 'utf-8')
+}
+
+function getDesktopPythonPath(basePath: string): string | null {
+  if (process.platform === 'win32') {
+    const candidate = path.join(basePath, '.venv', 'Scripts', 'python.exe')
+    if (fs.existsSync(candidate)) return candidate
+  } else if (process.platform === 'darwin') {
+    const candidate = path.join(basePath, '.venv', 'bin', 'python3')
+    if (fs.existsSync(candidate)) return candidate
+  }
+  return null
+}
+
+async function pipFreezeDirect(pythonPath: string): Promise<Record<string, string>> {
+  const output = await new Promise<string>((resolve, reject) => {
+    execFile(
+      pythonPath,
+      ['-m', 'pip', 'freeze', '--local'],
+      { windowsHide: true, timeout: 60_000, maxBuffer: 10 * 1024 * 1024 },
+      (err, stdout, stderr) => {
+        if (err) {
+          const detail = stderr ? stderr.slice(0, 500) : err.message
+          return reject(new Error(`pip freeze failed: ${detail}`))
+        }
+        resolve(stdout)
+      }
+    )
+  })
+
+  const packages: Record<string, string> = {}
+  for (const line of output.split('\n')) {
+    const trimmed = line.trim()
+    if (!trimmed || trimmed.startsWith('#')) continue
+    if (trimmed.startsWith('-e ')) {
+      const eggMatch = trimmed.match(/#egg=(.+)/)
+      if (eggMatch) packages[eggMatch[1]!] = trimmed
+      continue
+    }
+    const atMatch = trimmed.match(/^([A-Za-z0-9_.-]+)\s*@\s*(.+)$/)
+    if (atMatch) {
+      packages[atMatch[1]!] = atMatch[2]!.trim()
+      continue
+    }
+    const eqIdx = trimmed.indexOf('==')
+    if (eqIdx > 0) {
+      packages[trimmed.slice(0, eqIdx)] = trimmed.slice(eqIdx + 2)
+    }
+  }
+  return packages
+}
+
+/**
+ * Build a Snapshot from the Desktop installation's on-disk state.
+ * This enables Desktop → Standalone migration via the snapshot restore pipeline.
+ */
+export async function captureDesktopSnapshot(info: DesktopInstallInfo): Promise<Snapshot> {
+  // Desktop's basePath IS the ComfyUI dir (models/, user/, custom_nodes/ at top level)
+  const customNodes = await scanCustomNodes(info.basePath)
+
+  // Attempt pip freeze against Desktop's venv
+  let pipPackages: Record<string, string> = {}
+  const venvPython = getDesktopPythonPath(info.basePath)
+  if (venvPython) {
+    try {
+      // Use pip directly (no uv in Desktop installs)
+      pipPackages = await pipFreezeDirect(venvPython)
+    } catch {
+      // Desktop venv may not be accessible — nodes will get deps via post-install scripts
+    }
+  }
+
+  return {
+    version: 1,
+    createdAt: new Date().toISOString(),
+    trigger: 'manual',
+    label: 'Desktop migration',
+    comfyui: {
+      ref: 'desktop',
+      commit: null,
+      releaseTag: '',
+      variant: '',
+      displayVersion: 'Desktop',
+    },
+    customNodes,
+    pipPackages,
+  }
 }

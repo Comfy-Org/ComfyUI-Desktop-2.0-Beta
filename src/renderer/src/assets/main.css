@@ -573,11 +573,34 @@ input[type="checkbox"]:checked::after { transform: translateX(16px); }
 .modal-message a { color: var(--accent); text-decoration: underline; cursor: pointer; }
 .modal-body { max-height: 50vh; overflow-y: auto; margin-bottom: 20px; }
 .modal-body .modal-message { max-height: none; overflow-y: visible; margin-bottom: 8px; }
+.modal-box-wide { max-width: 520px; }
 .modal-details { margin-bottom: 0; }
 .modal-detail-group { margin-bottom: 6px; }
 .modal-detail-label { font-weight: 600; color: var(--text); font-size: 13px; }
 .modal-detail-list { margin: 2px 0 0; padding-left: 20px; list-style: disc; }
 .modal-detail-list li { font-size: 13px; color: var(--text-muted); }
+
+/* Snapshot preview in confirm dialog */
+.sp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 16px; margin-bottom: 10px; }
+.sp-field { display: flex; flex-direction: column; gap: 2px; }
+.sp-label { font-size: 13px; color: var(--text-muted); }
+.sp-value { font-size: 14px; color: var(--text); user-select: text; }
+.sp-subsection { margin-top: 10px; }
+.sp-subsection-title { font-size: 13px; font-weight: 600; color: var(--text-muted); cursor: pointer; display: flex; align-items: center; justify-content: space-between; user-select: none; margin-bottom: 6px; }
+.sp-collapse { font-size: 14px; }
+.sp-recessed-list { display: flex; flex-direction: column; gap: 3px; max-height: 200px; overflow-y: auto; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 6px; }
+.sp-node-row { display: flex; align-items: center; gap: 8px; font-size: 13px; padding: 2px 0; }
+.sp-node-status { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.sp-node-enabled { background: var(--info, #58a6ff); }
+.sp-node-disabled { background: var(--text-muted); }
+.sp-node-name { color: var(--text); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; }
+.sp-node-type { font-size: 11px; font-weight: 600; text-transform: uppercase; color: var(--text-muted); padding: 1px 5px; border: 1px solid var(--border); border-radius: 3px; flex-shrink: 0; }
+.sp-node-version { font-size: 13px; color: var(--text-muted); font-family: monospace; flex-shrink: 0; user-select: text; }
+.sp-empty { font-size: 14px; color: var(--text-muted); }
+.sp-pip-row { display: flex; justify-content: space-between; align-items: center; padding: 2px 0; font-size: 13px; }
+.sp-pip-name { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; user-select: text; }
+.sp-pip-version { color: var(--text-muted); font-family: monospace; margin-left: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 50%; user-select: text; }
+
 .modal-input-wrap { margin-bottom: 4px; }
 .modal-error { font-size: 13px; color: var(--danger); min-height: 12px; margin-bottom: 4px; }
 .modal-input { width: 100%; padding: 6px 8px; font-size: 14px; }

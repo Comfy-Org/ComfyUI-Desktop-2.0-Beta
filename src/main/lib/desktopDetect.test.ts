@@ -6,7 +6,12 @@ vi.mock('electron', () => ({
   app: { getPath: () => '' },
 }))
 
-import { detectDesktopInstall, findDesktopExecutable, syncSharedModelPaths } from './desktopDetect'
+vi.mock('./nodes', () => ({
+  scanCustomNodes: vi.fn().mockResolvedValue([]),
+}))
+
+import { detectDesktopInstall, findDesktopExecutable, syncSharedModelPaths, captureDesktopSnapshot } from './desktopDetect'
+import type { DesktopInstallInfo } from './desktopDetect'
 
 describe('detectDesktopInstall', () => {
   let readFileSyncSpy: MockInstance
@@ -216,5 +221,69 @@ describe('syncSharedModelPaths', () => {
     const written = writeFileSyncSpy.mock.calls[0]![1] as string
     expect(written).toContain('comfyui_desktop:')
     expect(written).not.toContain('comfyui_launcher_')
+  })
+})
+
+describe('captureDesktopSnapshot', () => {
+  let mockScan: ReturnType<typeof vi.fn>
+
+  beforeEach(async () => {
+    vi.restoreAllMocks()
+    const nodes = await import('./nodes')
+    mockScan = vi.mocked(nodes.scanCustomNodes)
+    mockScan.mockResolvedValue([])
+  })
+
+  it('returns a valid snapshot with empty nodes when no custom nodes exist', async () => {
+    vi.spyOn(fs, 'existsSync').mockReturnValue(false)
+    const info: DesktopInstallInfo = {
+      configDir: '/config/ComfyUI',
+      basePath: '/data/ComfyUI',
+      executablePath: null,
+      hasVenv: false,
+    }
+
+    const snapshot = await captureDesktopSnapshot(info)
+
+    expect(snapshot.version).toBe(1)
+    expect(snapshot.trigger).toBe('manual')
+    expect(snapshot.label).toBe('Desktop migration')
+    expect(snapshot.comfyui.ref).toBe('desktop')
+    expect(snapshot.customNodes).toEqual([])
+    expect(snapshot.pipPackages).toEqual({})
+  })
+
+  it('scans custom nodes from basePath', async () => {
+    vi.spyOn(fs, 'existsSync').mockReturnValue(false)
+    const fakeNodes = [
+      { id: 'test-node', type: 'cnr' as const, dirName: 'test-node', enabled: true, version: '1.0' },
+    ]
+    mockScan.mockResolvedValue(fakeNodes)
+
+    const info: DesktopInstallInfo = {
+      configDir: '/config/ComfyUI',
+      basePath: '/data/ComfyUI',
+      executablePath: null,
+      hasVenv: false,
+    }
+
+    const snapshot = await captureDesktopSnapshot(info)
+
+    expect(mockScan).toHaveBeenCalledWith('/data/ComfyUI')
+    expect(snapshot.customNodes).toEqual(fakeNodes)
+  })
+
+  it('skips pip freeze when no venv exists', async () => {
+    vi.spyOn(fs, 'existsSync').mockReturnValue(false)
+    const info: DesktopInstallInfo = {
+      configDir: '/config/ComfyUI',
+      basePath: '/data/ComfyUI',
+      executablePath: null,
+      hasVenv: false,
+    }
+
+    const snapshot = await captureDesktopSnapshot(info)
+
+    expect(snapshot.pipPackages).toEqual({})
   })
 })

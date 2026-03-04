@@ -86,6 +86,20 @@ export const desktop: SourcePlugin = {
             enabled: !!execPath,
           },
           {
+            id: 'migrate-to-standalone',
+            label: t('desktop.migrateToStandalone'),
+            style: 'default',
+            enabled: installation.status === 'installed',
+            showProgress: true,
+            progressTitle: t('desktop.migrating'),
+            cancellable: true,
+            confirm: {
+              title: t('desktop.migrateConfirmTitle'),
+              message: t('desktop.migrateConfirmMessage'),
+              confirmLabel: t('desktop.migrateConfirm'),
+            },
+          },
+          {
             id: 'open-folder',
             label: t('actions.openFolder'),
             style: 'default',

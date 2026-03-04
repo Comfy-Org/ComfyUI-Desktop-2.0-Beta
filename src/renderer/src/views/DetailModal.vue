@@ -248,8 +248,49 @@ async function runAction(action: ActionDef, btn: HTMLButtonElement | null): Prom
     }
   }
 
-  // confirm chain
-  if (mutableAction.confirm) {
+  // Desktop migration preview — replaces the static confirm with a live snapshot preview
+  if (mutableAction.id === 'migrate-to-standalone') {
+    let previewResult: Awaited<ReturnType<typeof window.api.previewDesktopMigration>>
+    try {
+      previewResult = await window.api.previewDesktopMigration()
+    } catch (err) {
+      await modal.alert({
+        title: mutableAction.label,
+        message: (err as Error)?.message ?? String(err),
+      })
+      return
+    }
+    if (!previewResult.ok) {
+      if (previewResult.message) {
+        await modal.alert({ title: mutableAction.label, message: previewResult.message })
+      }
+      return
+    }
+    const confirmed = await modal.confirm({
+      title: mutableAction.confirm?.title || t('desktop.migrateConfirmTitle'),
+      message: mutableAction.confirm?.message || '',
+      snapshotPreview: previewResult.preview?.newestSnapshot,
+      messageDetails: [{
+        label: t('desktop.migrateConfirmTitle'),
+        items: [
+          t('desktop.copyingUserData'),
+          t('desktop.copyingInput'),
+          t('desktop.copyingOutput'),
+          t('desktop.addingModels'),
+        ],
+      }],
+      confirmLabel: mutableAction.confirm?.confirmLabel || t('desktop.migrateConfirm'),
+      confirmStyle: 'primary',
+    })
+    if (!confirmed) return
+    mutableAction = {
+      ...mutableAction,
+      data: { ...mutableAction.data, snapshotPath: previewResult.snapshotPath },
+    }
+  }
+
+  // confirm chain — skip for migrate-to-standalone since it handles its own confirmation above
+  if (mutableAction.confirm && mutableAction.id !== 'migrate-to-standalone') {
     if (mutableAction.confirm.options) {
       const result = await modal.confirmWithOptions({
         title: mutableAction.confirm.title || 'Confirm',

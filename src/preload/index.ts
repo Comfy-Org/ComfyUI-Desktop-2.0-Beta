@@ -69,6 +69,8 @@ const api: ElectronApi = {
     ipcRenderer.invoke('import-snapshots', installationId),
   previewSnapshotFile: () =>
     ipcRenderer.invoke('preview-snapshot-file'),
+  previewDesktopMigration: () =>
+    ipcRenderer.invoke('preview-desktop-migration'),
   previewSnapshotPath: (filePath: string) =>
     ipcRenderer.invoke('preview-snapshot-path', filePath),
   createFromSnapshot: (filePath: string, name?: string) =>
