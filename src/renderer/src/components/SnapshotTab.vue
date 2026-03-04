@@ -726,11 +726,11 @@ function diffHasChanges(diff: SnapshotDiffResult): boolean {
   box-sizing: content-box;
 }
 .timeline-dot.trigger-boot { background: var(--text-muted); }
-.timeline-dot.trigger-manual { background: var(--success, #00cd72); }
-.timeline-dot.trigger-preupdate { background: var(--success, #00cd72); }
-.timeline-dot.trigger-postupdate { background: var(--warning, #fd9903); }
-.timeline-dot.trigger-postrestore { background: var(--warning, #fd9903); }
-.timeline-dot.trigger-restart { background: var(--info, #58a6ff); }
+.timeline-dot.trigger-manual { background: var(--success); }
+.timeline-dot.trigger-preupdate { background: var(--success); }
+.timeline-dot.trigger-postupdate { background: var(--warning); }
+.timeline-dot.trigger-postrestore { background: var(--warning); }
+.timeline-dot.trigger-restart { background: var(--info); }
 .timeline-dot.trigger-copy { background: var(--text-muted); }
 
 .timeline-card {
@@ -770,11 +770,11 @@ function diffHasChanges(diff: SnapshotDiffResult): boolean {
   background: var(--bg);
 }
 .timeline-trigger.trigger-boot { color: var(--text-muted); }
-.timeline-trigger.trigger-manual { color: var(--success, #00cd72); }
-.timeline-trigger.trigger-preupdate { color: var(--success, #00cd72); }
-.timeline-trigger.trigger-postupdate { color: var(--warning, #fd9903); }
-.timeline-trigger.trigger-postrestore { color: var(--warning, #fd9903); }
-.timeline-trigger.trigger-restart { color: var(--info, #58a6ff); }
+.timeline-trigger.trigger-manual { color: var(--success); }
+.timeline-trigger.trigger-preupdate { color: var(--success); }
+.timeline-trigger.trigger-postupdate { color: var(--warning); }
+.timeline-trigger.trigger-postrestore { color: var(--warning); }
+.timeline-trigger.trigger-restart { color: var(--info); }
 .timeline-trigger.trigger-copy { color: var(--text-muted); }
 
 /* Copy event card */
@@ -1008,8 +1008,8 @@ function diffHasChanges(diff: SnapshotDiffResult): boolean {
 /* Restore preview */
 .restore-preview {
   margin-bottom: 12px;
-  background: color-mix(in srgb, var(--warning, #fd9903) 6%, var(--bg));
-  border: 1px solid color-mix(in srgb, var(--warning, #fd9903) 30%, var(--border));
+  background: color-mix(in srgb, var(--warning) 6%, var(--bg));
+  border: 1px solid color-mix(in srgb, var(--warning) 30%, var(--border));
   border-radius: 6px;
   padding: 10px 12px;
 }
@@ -1021,7 +1021,7 @@ function diffHasChanges(diff: SnapshotDiffResult): boolean {
 .restore-preview-title {
   font-size: 12px;
   font-weight: 600;
-  color: var(--warning, #fd9903);
+  color: var(--warning);
 }
 
 .restore-preview-summary {
@@ -1039,8 +1039,8 @@ function diffHasChanges(diff: SnapshotDiffResult): boolean {
 }
 
 .restore-badge-added {
-  color: var(--success, #00cd72);
-  background: color-mix(in srgb, var(--success, #00cd72) 12%, transparent);
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 12%, transparent);
 }
 
 .restore-badge-removed {
@@ -1049,8 +1049,8 @@ function diffHasChanges(diff: SnapshotDiffResult): boolean {
 }
 
 .restore-badge-changed {
-  color: var(--warning, #fd9903);
-  background: color-mix(in srgb, var(--warning, #fd9903) 12%, transparent);
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
 }
 
 .restore-preview-actions {
@@ -1080,14 +1080,14 @@ function diffHasChanges(diff: SnapshotDiffResult): boolean {
   font-size: 12px;
   font-weight: 600;
   border-radius: 5px;
-  background: color-mix(in srgb, var(--warning, #fd9903) 15%, var(--surface));
-  border: 1px solid var(--warning, #fd9903);
-  color: var(--warning, #fd9903);
+  background: color-mix(in srgb, var(--warning) 15%, var(--surface));
+  border: 1px solid var(--warning);
+  color: var(--warning);
   cursor: pointer;
 }
 
 .restore-preview-confirm:hover {
-  background: color-mix(in srgb, var(--warning, #fd9903) 25%, var(--surface));
+  background: color-mix(in srgb, var(--warning) 25%, var(--surface));
 }
 
 /* Inspector sections */
@@ -1150,21 +1150,7 @@ function diffHasChanges(diff: SnapshotDiffResult): boolean {
 }
 
 /* Recessed list container */
-.recessed-list {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 6px;
-}
-
-/* Node list */
-.node-list {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  max-height: 240px;
-  overflow-y: auto;
-}
+/* Node list — inherits recessed-list from main.css */
 
 .node-row {
   display: flex;
@@ -1180,7 +1166,7 @@ function diffHasChanges(diff: SnapshotDiffResult): boolean {
   border-radius: 50%;
   flex-shrink: 0;
 }
-.node-enabled { background: var(--info, #58a6ff); }
+.node-enabled { background: var(--info); }
 .node-disabled { background: var(--text-faint); }
 
 .node-name {

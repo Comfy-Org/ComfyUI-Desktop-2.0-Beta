@@ -92,6 +92,7 @@ watch(instPath, (newPath) => {
 })
 
 onUnmounted(() => {
+  document.removeEventListener('keydown', handleEscapeKey)
   if (diskSpaceTimer) clearTimeout(diskSpaceTimer)
 })
 
@@ -171,7 +172,12 @@ function rawSelections(): Record<string, FieldOption> {
 let installDirPromise: Promise<string> | null = null
 let sourcesPromise: Promise<Source[]> | null = null
 
+function handleEscapeKey(event: KeyboardEvent): void {
+  if (event.key === 'Escape') emit('close')
+}
+
 onMounted(() => {
+  document.addEventListener('keydown', handleEscapeKey)
   window.api
     .detectGPU()
     .then((gpu) => {
