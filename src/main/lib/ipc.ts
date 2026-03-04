@@ -26,7 +26,7 @@ import { formatTime } from './util'
 import { getActiveDownloads } from './comfyDownloadManager'
 import * as releaseCache from './release-cache'
 import * as i18n from './i18n'
-import { ensureModelPathsConfig } from './models'
+import { ensureModelPathsConfig, syncCustomModelFolders } from './models'
 import { copyDirWithProgress } from './copy'
 import { fetchJSON } from './fetch'
 import { fetchLatestRelease, truncateNotes } from './comfyui-releases'
@@ -1875,6 +1875,12 @@ export function register(callbacks: RegisterCallbacks = {}): void {
             }
           })
           .catch((err) => console.warn('Snapshot capture failed:', err))
+      }
+
+      // Sync custom-node model directories to shared models root
+      if ((inst.useSharedPaths as boolean | undefined) !== false) {
+        const syncModelsDirs = settings.get('modelsDirs') as string[] | undefined
+        syncCustomModelFolders(inst.installPath, syncModelsDirs)
       }
 
       function attachExitHandler(p: ChildProcess): void {
