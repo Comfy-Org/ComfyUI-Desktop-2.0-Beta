@@ -3,6 +3,7 @@ import { ref, computed, watch, toRaw, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useModal } from '../composables/useModal'
 import type { SnapshotFilePreview, FieldOption, GPUInfo } from '../types/ipc'
+import { stripVariantPrefix, getVariantImage, sortedCardOptions } from '../lib/variants'
 
 const emit = defineEmits<{
   close: []
@@ -37,37 +38,7 @@ const variantLoading = ref(false)
 const detectedGpu = ref<GPUInfo | null>(null)
 let optionsGeneration = 0
 
-/** Map GPU vendor key (from variantId) to a logo image path */
-const variantImages: Record<string, string> = {
-  nvidia: './images/nvidia-logo.jpg',
-  amd: './images/amd-logo.png',
-  mps: './images/apple-mps-logo.png',
-}
-
-/** Preferred display order for variant cards */
-const variantOrder: string[] = ['amd', 'nvidia', 'intel-xpu', 'cpu', 'mps']
-
-function stripVariantPrefix(variantId: string): string {
-  return variantId.replace(/^(win|mac|linux)-/, '')
-}
-
-function getVariantImage(option: FieldOption): string | null {
-  const stripped = stripVariantPrefix((option.data?.variantId as string) ?? option.value)
-  for (const key of Object.keys(variantImages)) {
-    if (stripped === key || stripped.startsWith(key + '-')) return variantImages[key]!
-  }
-  return null
-}
-
-const sortedVariants = computed(() =>
-  [...variantOptions.value].sort((a, b) => {
-    const aKey = stripVariantPrefix((a.data?.variantId as string) ?? a.value)
-    const bKey = stripVariantPrefix((b.data?.variantId as string) ?? b.value)
-    const aIdx = variantOrder.findIndex((k) => aKey === k || aKey.startsWith(k + '-'))
-    const bIdx = variantOrder.findIndex((k) => bKey === k || bKey.startsWith(k + '-'))
-    return (aIdx < 0 ? 999 : aIdx) - (bIdx < 0 ? 999 : bIdx)
-  })
-)
+const sortedVariants = computed(() => sortedCardOptions(variantOptions.value))
 
 /** Extract the base GPU vendor from a variant ID like "win-nvidia-cu128" -> "NVIDIA" */
 function getVariantGpuLabel(variantId: string): string | null {
