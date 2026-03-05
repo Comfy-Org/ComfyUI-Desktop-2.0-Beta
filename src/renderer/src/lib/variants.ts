@@ -22,6 +22,21 @@ export function getVariantImage(option: FieldOption): string | null {
   return null
 }
 
+/** Map base GPU vendor key to a human-readable label */
+export const variantLabels: Record<string, string> = {
+  nvidia: 'NVIDIA',
+  amd: 'AMD',
+  mps: 'Apple Silicon',
+  'intel-xpu': 'Intel Arc',
+  cpu: 'CPU',
+}
+
+/** Extract a human-readable GPU label from a variant ID like "win-nvidia-cu128" -> "NVIDIA" */
+export function getVariantGpuLabel(variantId: string): string | null {
+  const base = stripVariantPrefix(variantId).replace(/-.*$/, '')
+  return variantLabels[base] || null
+}
+
 export function sortedCardOptions(options: FieldOption[]): FieldOption[] {
   return [...options].sort((a, b) => {
     const aKey = stripVariantPrefix((a.data?.variantId as string) ?? a.value)

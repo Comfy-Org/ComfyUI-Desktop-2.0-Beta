@@ -3,7 +3,7 @@ import { ref, computed, watch, toRaw, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useModal } from '../composables/useModal'
 import type { SnapshotFilePreview, FieldOption, GPUInfo } from '../types/ipc'
-import { stripVariantPrefix, getVariantImage, sortedCardOptions } from '../lib/variants'
+import { stripVariantPrefix, getVariantImage, getVariantGpuLabel, sortedCardOptions } from '../lib/variants'
 
 const emit = defineEmits<{
   close: []
@@ -39,14 +39,6 @@ const detectedGpu = ref<GPUInfo | null>(null)
 let optionsGeneration = 0
 
 const sortedVariants = computed(() => sortedCardOptions(variantOptions.value))
-
-/** Extract the base GPU vendor from a variant ID like "win-nvidia-cu128" -> "NVIDIA" */
-function getVariantGpuLabel(variantId: string): string | null {
-  const stripped = stripVariantPrefix(variantId)
-  const base = stripped.replace(/-.*$/, '')
-  const labels: Record<string, string> = { nvidia: 'NVIDIA', amd: 'AMD', mps: 'Apple Silicon', 'intel-xpu': 'Intel Arc', cpu: 'CPU' }
-  return labels[base] || null
-}
 
 const snapshotGpuLabel = computed(() => {
   if (!preview.value) return null

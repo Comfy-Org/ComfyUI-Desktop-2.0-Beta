@@ -1050,6 +1050,7 @@ export function register(callbacks: RegisterCallbacks = {}): void {
       if (!match) return { ok: false, message: `Release "${releaseTag}" is no longer available.` }
       selectedRelease = match
     } else {
+      console.warn('No releaseTag specified for create-from-snapshot, falling back to latest release.')
       selectedRelease = releaseOptions[0]!
     }
 
