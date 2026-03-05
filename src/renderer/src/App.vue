@@ -272,6 +272,7 @@ onMounted(async () => {
         v-show="activeView === 'dashboard'"
         :visible="activeView === 'dashboard'"
         @show-quick-install="openQuickInstall"
+        @show-settings="switchView('settings')"
         @show-detail="openDetail"
         @show-console="openConsole"
         @show-progress="showProgress"

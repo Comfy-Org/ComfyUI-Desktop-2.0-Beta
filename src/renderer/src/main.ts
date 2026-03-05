@@ -37,6 +37,8 @@ function isFlagDisabled(value: string | undefined): boolean {
   return ['0', 'false', 'off'].includes((value || '').trim().toLowerCase())
 }
 
+type DatadogTrackingConsent = 'granted' | 'not-granted'
+
 const DEFAULT_DATADOG_APPLICATION_ID = '74a97924-20d7-4890-8e55-0c2b87193373'
 const DEFAULT_DATADOG_CLIENT_TOKEN = 'pub5b0afc7fe0411fcebad80bb87274d711'
 const DEFAULT_DATADOG_SERVICE = 'comfyui-launcher'
@@ -54,25 +56,59 @@ const datadogService = (import.meta.env.VITE_DATADOG_RUM_SERVICE || DEFAULT_DATA
 const datadogEnv = (import.meta.env.VITE_DATADOG_RUM_ENV || 'prod-v2').trim()
 const datadogVersion = (import.meta.env.VITE_DATADOG_RUM_VERSION || '').trim()
 
-const isDatadogEnabled = !isFlagDisabled(import.meta.env.VITE_DATADOG_RUM_ENABLED)
+const isDatadogConfigured = !isFlagDisabled(import.meta.env.VITE_DATADOG_RUM_ENABLED)
   && datadogClientToken.length > 0
   && datadogApplicationId.length > 0
 
-if (isDatadogEnabled) {
-  datadogRum.init({
-    applicationId: datadogApplicationId,
-    clientToken: datadogClientToken,
-    site: datadogSite,
-    service: datadogService,
-    env: datadogEnv,
-    version: datadogVersion || undefined,
-    sessionSampleRate: parseSampleRate(import.meta.env.VITE_DATADOG_RUM_SESSION_SAMPLE_RATE, 100),
-    sessionReplaySampleRate: parseSampleRate(import.meta.env.VITE_DATADOG_RUM_SESSION_REPLAY_SAMPLE_RATE, 0),
-    trackResources: true,
-    trackLongTasks: true,
-    trackUserInteractions: true,
-  })
+let isDatadogInitialized = false
+
+function toDatadogTrackingConsent(enabled: boolean | undefined): DatadogTrackingConsent {
+  return enabled === false ? 'not-granted' : 'granted'
 }
+
+async function getTelemetryEnabledSetting(): Promise<boolean | undefined> {
+  try {
+    return await window.api.getSetting('telemetryEnabled') as boolean | undefined
+  } catch {
+    return undefined
+  }
+}
+
+function setDatadogTrackingConsent(consent: DatadogTrackingConsent): void {
+  if (!isDatadogInitialized) return
+  try {
+    datadogRum.setTrackingConsent(consent)
+  } catch {}
+}
+
+async function initializeDatadog(): Promise<void> {
+  if (!isDatadogConfigured) return
+  const telemetryEnabled = await getTelemetryEnabledSetting()
+  try {
+    datadogRum.init({
+      applicationId: datadogApplicationId,
+      clientToken: datadogClientToken,
+      site: datadogSite,
+      service: datadogService,
+      env: datadogEnv,
+      version: datadogVersion || undefined,
+      trackingConsent: toDatadogTrackingConsent(telemetryEnabled),
+      sessionSampleRate: parseSampleRate(import.meta.env.VITE_DATADOG_RUM_SESSION_SAMPLE_RATE, 100),
+      sessionReplaySampleRate: parseSampleRate(import.meta.env.VITE_DATADOG_RUM_SESSION_REPLAY_SAMPLE_RATE, 0),
+      trackResources: true,
+      trackLongTasks: true,
+      trackUserInteractions: true,
+    })
+    isDatadogInitialized = true
+  } catch {}
+}
+
+window.api.onTelemetrySettingChanged((enabled) => {
+  if (!isDatadogConfigured) return
+  setDatadogTrackingConsent(toDatadogTrackingConsent(enabled))
+})
+
+void initializeDatadog()
 
 function reportRendererError(payload: {
   source: string
@@ -80,7 +116,7 @@ function reportRendererError(payload: {
   stack?: string
   context?: Record<string, unknown>
 }): void {
-  if (!isDatadogEnabled) return
+  if (!isDatadogInitialized) return
   const error = new Error(payload.message || 'Unknown error')
   if (payload.stack) {
     error.stack = payload.stack
