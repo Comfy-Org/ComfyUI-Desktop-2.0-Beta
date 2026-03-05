@@ -369,7 +369,7 @@ input[type="checkbox"]:checked::after { transform: translateX(16px); }
 .view { display: none; }
 .view.active { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
 .view-scroll { flex: 1; min-height: 0; overflow-y: auto; padding-right: 8px; }
-.view-bottom { flex-shrink: 0; display: flex; gap: 10px; padding-top: 12px; }
+.view-bottom { flex-shrink: 0; display: flex; justify-content: flex-end; gap: 10px; padding-top: 12px; }
 .view-list-scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding-right: 8px; }
 
 /* Detail tabs */
