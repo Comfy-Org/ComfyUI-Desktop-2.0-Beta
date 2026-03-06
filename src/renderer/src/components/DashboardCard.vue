@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import { useSessionStore } from '../stores/sessionStore'
 import { useProgressStore } from '../stores/progressStore'
 import { useLauncherPrefs } from '../composables/useLauncherPrefs'
-import { Play, ExternalLink, Square, Star, Pin, TriangleAlert } from 'lucide-vue-next'
+import { Play, ExternalLink, Star, Pin, TriangleAlert } from 'lucide-vue-next'
 import type { Installation, ListAction } from '../types/ipc'
 
 const props = defineProps<{
@@ -105,7 +105,6 @@ function stopComfyUI(): void {
         {{ $t('list.console') }}
       </button>
       <button class="danger-solid dashboard-cta-btn" @click="stopComfyUI()">
-        <Square :size="16" />
         {{ $t('console.stop') }}
       </button>
     </template>
