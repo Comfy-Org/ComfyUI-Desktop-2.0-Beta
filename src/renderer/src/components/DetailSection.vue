@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, reactive, watch, nextTick } from 'vue'
+import ArgsBuilder from './ArgsBuilder.vue'
 import type { DetailItem, DetailField, DetailFieldOption, ActionDef } from '../types/ipc'
 
 interface Props {
@@ -68,6 +69,9 @@ async function toggleCollapse(): Promise<void> {
 }
 
 async function handleFieldChange(field: DetailField, value: string | boolean): Promise<void> {
+  // Optimistically update the local field value so two-way-bound components
+  // (like ArgsBuilder) reflect the change immediately without a round-trip.
+  field.value = value
   await window.api.updateInstallation(props.installationId, { [field.id]: value })
   if (field.refreshSection && props.title) {
     emit('refresh', props.title)
@@ -187,6 +191,14 @@ v-if="f.editable && f.editType === 'select'" class="detail-field-input"
             <input
 v-else-if="f.editable && f.editType === 'boolean'" type="checkbox" class="detail-field-toggle"
                    :checked="f.value !== false" @change="handleFieldChange(f, ($event.target as HTMLInputElement).checked)">
+            <!-- Args builder -->
+            <ArgsBuilder
+v-else-if="f.editable && f.editType === 'args-builder' && f.data"
+              :model-value="String(f.value ?? '')"
+              :schema="(f.data as Record<string, unknown>).schema as InstanceType<typeof ArgsBuilder>['$props']['schema']"
+              :version="((f.data as Record<string, unknown>).version as string)"
+              @update:model-value="handleFieldChange(f, $event)"
+            />
             <!-- Text editable -->
             <input
 v-else-if="f.editable" type="text" class="detail-field-input"
