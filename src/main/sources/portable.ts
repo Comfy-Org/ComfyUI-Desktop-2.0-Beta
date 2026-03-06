@@ -7,7 +7,7 @@ import { downloadAndExtract } from '../lib/installer'
 import * as releaseCache from '../lib/release-cache'
 import { parseArgs } from '../lib/util'
 import { t } from '../lib/i18n'
-import { truncateNotes } from '../lib/comfyui-releases'
+import { fetchLatestRelease, truncateNotes } from '../lib/comfyui-releases'
 import type { InstallationRecord } from '../installations'
 import type {
   SourcePlugin,
@@ -268,6 +268,23 @@ export const portable: SourcePlugin = {
 
     if (actionId === 'check-update') {
       const channel = (installation.updateChannel as string | undefined) || 'stable'
+      const otherChannels = ['stable', 'latest'].filter((ch) => ch !== channel)
+      await Promise.allSettled(
+        otherChannels.map((ch) =>
+          releaseCache.getOrFetch(COMFYUI_REPO, ch, async () => {
+            const release = await fetchLatestRelease(ch)
+            if (!release) return null
+            return {
+              checkedAt: Date.now(),
+              latestTag: release.tag_name as string,
+              releaseName: (release.name as string) || (release.tag_name as string),
+              releaseNotes: truncateNotes(release.body as string, 4000),
+              releaseUrl: release.html_url as string,
+              publishedAt: release.published_at as string,
+            }
+          }, true)
+        )
+      )
       return releaseCache.checkForUpdate(COMFYUI_REPO, channel, installation, update)
     }
 

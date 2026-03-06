@@ -341,20 +341,12 @@ function resolveTheme(): ResolvedTheme {
   return theme === 'system' ? (nativeTheme.shouldUseDarkColors ? 'dark' : 'light') : theme
 }
 
+const ALL_UPDATE_CHANNELS = ['stable', 'latest']
+
 async function checkInstallationUpdates(): Promise<void> {
   try {
-    const all = await installations.list()
-    const channels = new Set<string>()
-    for (const inst of all) {
-      const source = sourceMap[inst.sourceId]
-      if (!source || source.skipInstall) continue
-      if (inst.status !== 'installed') continue
-      const channel = (inst.updateChannel as string | undefined) || 'stable'
-      channels.add(channel)
-    }
-    if (channels.size === 0) return
     await Promise.allSettled(
-      [...channels].map((channel) =>
+      ALL_UPDATE_CHANNELS.map((channel) =>
         releaseCache.getOrFetch(COMFYUI_REPO, channel, async () => {
           const release = await fetchLatestRelease(channel)
           if (!release) return null
