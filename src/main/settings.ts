@@ -14,6 +14,7 @@ export interface KnownSettings {
   language?: string
   theme?: string
   autoUpdate?: boolean
+  pypiMirror?: string
   telemetryEnabled?: boolean
   primaryInstallId?: string
   pinnedInstallIds?: string[]
@@ -44,6 +45,7 @@ const SETTINGS_SCHEMA = {
   language: { nullable: false },
   theme: { nullable: false },
   autoUpdate: { nullable: false },
+  pypiMirror: { nullable: false },
   telemetryEnabled: { nullable: false },
   primaryInstallId: { nullable: false },
   pinnedInstallIds: { nullable: false },
@@ -125,6 +127,9 @@ export function get(key: string): unknown {
   return load()[key]
 }
 
+/** Keys whose values should be deleted when set to an empty or whitespace-only string. */
+const EMPTY_STRING_MEANS_UNSET: ReadonlySet<string> = new Set<KnownSettingKey>(['pypiMirror'])
+
 export function set<K extends string>(
   key: K,
   value: K extends KnownSettingKey ? KnownSettings[K] | undefined : unknown
@@ -132,9 +137,11 @@ export function set<K extends string>(
   const settings = load()
   // `undefined` is the canonical "unset/default" value in settings.
   // For known non-nullable keys, treat `null` the same way.
+  // For string keys in EMPTY_STRING_MEANS_UNSET, treat '' / whitespace as unset.
   if (
     value === undefined
     || (value === null && isKnownSettingKey(key) && !isNullableKnownSettingKey(key))
+    || (typeof value === 'string' && value.trim() === '' && EMPTY_STRING_MEANS_UNSET.has(key))
   ) {
     delete settings[key]
     save(settings)

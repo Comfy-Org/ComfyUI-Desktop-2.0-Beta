@@ -228,6 +228,7 @@ export interface SettingsField {
   readonly?: boolean
   options?: { value: string; label: string }[]
   openable?: boolean
+  placeholder?: string
   min?: number
   max?: number
 }

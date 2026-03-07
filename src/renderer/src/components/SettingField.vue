@@ -126,6 +126,6 @@ v-else-if="field.type === 'number'" type="number" class="detail-field-input"
     <!-- Text (fallback) -->
     <input
 v-else type="text" class="detail-field-input"
-           :value="field.value ?? ''" @change="updateSetting(($event.target as HTMLInputElement).value)" />
+           :value="field.value ?? ''" :placeholder="field.placeholder" @change="updateSetting(($event.target as HTMLInputElement).value)" />
   </div>
 </template>
