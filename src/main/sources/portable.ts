@@ -5,7 +5,7 @@ import { fetchJSON } from '../lib/fetch'
 import { deleteAction, untrackAction } from '../lib/actions'
 import { downloadAndExtract } from '../lib/installer'
 import * as releaseCache from '../lib/release-cache'
-import { parseArgs } from '../lib/util'
+import { parseArgs, extractPort } from '../lib/util'
 import { t } from '../lib/i18n'
 import { fetchLatestRelease, truncateNotes } from '../lib/comfyui-releases'
 import { buildChannelCards, buildChannelLabelMap } from '../lib/channel-cards'
@@ -100,9 +100,7 @@ export const portable: SourcePlugin = {
     if (!root) return null
     const userArgs = ((installation.launchArgs as string | undefined) ?? DEFAULT_LAUNCH_ARGS).trim()
     const parsed = userArgs.length > 0 ? parseArgs(userArgs) : []
-    const portIdx = parsed.indexOf('--port')
-    const portArg = portIdx >= 0 ? parsed[portIdx + 1] : undefined
-    const port = portArg ? parseInt(portArg, 10) || 8188 : 8188
+    const port = extractPort(parsed)
     return {
       cmd: path.join(root, 'python_embeded', 'python.exe'),
       args: ['-s', path.join(root, 'ComfyUI', 'main.py'), ...parsed],

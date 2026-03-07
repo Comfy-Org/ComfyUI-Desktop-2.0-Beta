@@ -10,7 +10,7 @@ import type { ChannelDef } from '../lib/channel-cards'
 import { deleteAction, untrackAction } from '../lib/actions'
 import { downloadAndExtract, downloadAndExtractMulti } from '../lib/installer'
 import { copyDirWithProgress } from '../lib/copy'
-import { parseArgs, formatTime } from '../lib/util'
+import { parseArgs, extractPort, formatTime } from '../lib/util'
 import { t } from '../lib/i18n'
 import * as installations from '../installations'
 import { listCustomNodes, findComfyUIDir, backupDir, mergeDirFlat } from '../lib/migrate'
@@ -297,8 +297,7 @@ export const standalone: SourcePlugin = {
     if (!fs.existsSync(mainPy)) return null
     const userArgs = ((installation.launchArgs as string | undefined) ?? DEFAULT_LAUNCH_ARGS).trim()
     const parsed = userArgs.length > 0 ? parseArgs(userArgs) : []
-    const portIdx = parsed.indexOf('--port')
-    const port = portIdx >= 0 && parsed[portIdx + 1] ? parseInt(parsed[portIdx + 1]!, 10) || 8188 : 8188
+    const port = extractPort(parsed)
     return {
       cmd: pythonPath,
       args: ['-s', path.join('ComfyUI', 'main.py'), ...parsed],

@@ -412,8 +412,22 @@
   },
 
   "git": {
-    "label": "Git Source",
-    "desc": "Clone from a Git repository for development or custom forks."
+    "label": "Git Clone",
+    "desc": "Track an existing ComfyUI git clone with a Python virtual environment.",
+    "installInfo": "Installation Info",
+    "repository": "Repository",
+    "branch": "Branch",
+    "commit": "Commit",
+    "venv": "Virtual Environment",
+    "venvNotFound": "No virtual environment found.",
+    "venvDetected": "Detected: {path}",
+    "gitPull": "Git Pull",
+    "gitPulling": "Running git pull…",
+    "gitPullComplete": "Git pull complete.",
+    "gitPullFailed": "Git pull failed (exit code {code}).",
+    "gitNotFound": "Could not find git. Please install git and try again.",
+    "noVenv": "No virtual environment configured. Cannot launch.",
+    "noMainPy": "Cannot find ComfyUI main.py in this directory."
   },
 
   "remote": {

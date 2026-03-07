@@ -1,12 +1,17 @@
 import fs from 'fs'
 import path from 'path'
+import { spawn, execFile } from 'child_process'
 import { fetchJSON } from '../lib/fetch'
 import { deleteAction, untrackAction } from '../lib/actions'
+import { parseArgs, extractPort } from '../lib/util'
 import { t } from '../lib/i18n'
 import type { InstallationRecord } from '../installations'
-import type { SourcePlugin, FieldOption, ActionResult, ActionTools } from '../types/sources'
+import type { SourcePlugin, FieldOption, ActionResult, ActionTools, LaunchCommand } from '../types/sources'
 
 const DEFAULT_REPO = 'https://github.com/Comfy-Org/ComfyUI/'
+const DEFAULT_LAUNCH_ARGS = ''
+
+const VENV_CANDIDATES = ['.venv', 'venv', '.env', 'env']
 
 interface GitHubParsed {
   owner: string
@@ -30,12 +35,56 @@ function parseGitHubRepo(url: string): GitHubParsed | null {
   }
 }
 
+function findVenv(dirPath: string): string | null {
+  for (const name of VENV_CANDIDATES) {
+    const venvDir = path.join(dirPath, name)
+    if (fs.existsSync(path.join(venvDir, 'pyvenv.cfg'))) return venvDir
+  }
+  return null
+}
+
+function getVenvPython(venvDir: string): string {
+  if (process.platform === 'win32') {
+    return path.join(venvDir, 'Scripts', 'python.exe')
+  }
+  const python3 = path.join(venvDir, 'bin', 'python3')
+  if (fs.existsSync(python3)) return python3
+  return path.join(venvDir, 'bin', 'python')
+}
+
+function resolveVenvPython(installation: InstallationRecord): string | null {
+  const venvPath = installation.venvPath as string | undefined
+  if (!venvPath) return null
+  const pythonPath = getVenvPython(venvPath)
+  if (fs.existsSync(pythonPath)) return pythonPath
+  return null
+}
+
+function findGit(): Promise<string | null> {
+  const cmd = process.platform === 'win32' ? 'where' : 'which'
+  return new Promise((resolve) => {
+    execFile(cmd, ['git'], { windowsHide: true }, (err, stdout) => {
+      if (err) return resolve(null)
+      const gitPath = stdout.trim().split(/\r?\n/)[0]
+      resolve(gitPath || null)
+    })
+  })
+}
+
+function findMainPy(dirPath: string): string | null {
+  const direct = path.join(dirPath, 'main.py')
+  if (fs.existsSync(direct)) return direct
+  const nested = path.join(dirPath, 'ComfyUI', 'main.py')
+  if (fs.existsSync(nested)) return nested
+  return null
+}
+
 export const gitSource: SourcePlugin = {
   id: 'git',
   get label() { return t('git.label') },
   get description() { return t('git.desc') },
   category: 'local',
-  hidden: true,
+  hasConsole: true,
 
   fields: [
     { id: 'repo', label: 'Git Repository', type: 'text',
@@ -45,6 +94,12 @@ export const gitSource: SourcePlugin = {
     { id: 'commit', label: 'Commit', type: 'select', errorTarget: 'repo' },
   ],
 
+  skipInstall: true,
+
+  getDefaults() {
+    return { launchArgs: DEFAULT_LAUNCH_ARGS, launchMode: 'console', browserPartition: 'shared' }
+  },
+
   buildInstallation(selections: Record<string, FieldOption | undefined>): Record<string, unknown> {
     return {
       version: selections.commit?.value?.slice(0, 8) ?? 'unknown',
@@ -52,44 +107,91 @@ export const gitSource: SourcePlugin = {
       branch: selections.branch?.value ?? '',
       commit: selections.commit?.value ?? '',
       commitMessage: selections.commit?.label ?? '',
+      launchArgs: DEFAULT_LAUNCH_ARGS,
+      launchMode: 'console',
+      browserPartition: 'shared',
     }
   },
 
-  getLaunchCommand(_installation: InstallationRecord) {
-    return null
+  getLaunchCommand(installation: InstallationRecord): LaunchCommand | null {
+    const pythonPath = resolveVenvPython(installation)
+    if (!pythonPath) return null
+    const mainPy = findMainPy(installation.installPath)
+    if (!mainPy) return null
+    const userArgs = ((installation.launchArgs as string | undefined) ?? DEFAULT_LAUNCH_ARGS).trim()
+    const parsed = userArgs.length > 0 ? parseArgs(userArgs) : []
+    const port = extractPort(parsed)
+    const relMainPy = path.relative(installation.installPath, mainPy)
+    return {
+      cmd: pythonPath,
+      args: ['-s', relMainPy, ...parsed],
+      cwd: installation.installPath,
+      port,
+    }
   },
 
-  getListActions(_installation: InstallationRecord) {
+  getListPreview(installation: InstallationRecord): string | null {
+    const repo = installation.repo as string | undefined
+    const branch = installation.branch as string | undefined
+    if (repo && branch) return `${repo} (${branch})`
+    return repo || null
+  },
+
+  getListActions(installation: InstallationRecord): Record<string, unknown>[] {
+    const installed = installation.status === 'installed'
+    const hasVenv = !!resolveVenvPython(installation)
+    const hasMain = !!findMainPy(installation.installPath)
+    const canLaunch = installed && hasVenv && hasMain
     return [
-      { id: 'launch', label: 'Launch', style: 'primary', enabled: false },
+      { id: 'launch', label: t('actions.launch'), style: 'primary', enabled: canLaunch,
+        ...(!canLaunch && { disabledMessage: !hasVenv ? t('git.noVenv') : !hasMain ? t('git.noMainPy') : t('errors.installNotReady') }),
+        showProgress: true, progressTitle: t('common.startingComfyUI'), cancellable: true },
     ]
   },
 
-  getDetailSections(installation: InstallationRecord) {
+  getDetailSections(installation: InstallationRecord): Record<string, unknown>[] {
+    const installed = installation.status === 'installed'
+    const hasVenv = !!resolveVenvPython(installation)
+    const hasMain = !!findMainPy(installation.installPath)
+    const canLaunch = installed && hasVenv && hasMain
+
+    const venvPath = installation.venvPath as string | undefined
+    const venvDisplay = venvPath || t('git.venvNotFound')
+
     return [
       {
         tab: 'status',
-        title: 'Installation Info',
+        title: t('git.installInfo'),
         fields: [
-          { label: 'Install Method', value: installation.sourceLabel as string },
-          { label: 'Repository', value: (installation.repo as string) || '—' },
-          { label: 'Branch', value: (installation.branch as string) || '—' },
-          { label: 'Commit', value: (installation.commit as string) || '—' },
-          { label: 'Location', value: installation.installPath || '—' },
-          { label: 'Installed', value: new Date(installation.createdAt).toLocaleDateString() },
+          { label: t('common.installMethod'), value: installation.sourceLabel as string },
+          { label: t('git.repository'), value: (installation.repo as string) || '—' },
+          { label: t('git.branch'), value: (installation.branch as string) || '—' },
+          { label: t('git.commit'), value: (installation.commit as string) || '—' },
+          { label: t('git.venv'), value: venvDisplay },
+          { label: t('common.location'), value: installation.installPath || '—' },
+          { label: t('common.installed'), value: new Date(installation.createdAt).toLocaleDateString() },
         ],
       },
       {
         tab: 'settings',
-        title: 'Launch Settings',
+        title: t('common.launchSettings'),
         fields: [
-          { id: 'browserPartition', label: 'Browser Cache',
-            value: (installation.browserPartition as string) || 'shared',
-            editable: true,
-            editType: 'select',
-            options: [
-              { value: 'shared', label: 'Shared' },
-              { value: 'unique', label: 'Unique to this install' },
+          { id: 'venvPath', label: t('git.venv'), value: venvPath || '', editable: true },
+          { id: 'launchArgs', label: t('common.startupArgs'), value: (installation.launchArgs as string | undefined) ?? DEFAULT_LAUNCH_ARGS, editable: true },
+          { id: 'launchMode', label: t('common.launchMode'), value: (installation.launchMode as string | undefined) || 'console', editable: true,
+            editType: 'select', options: [
+              { value: 'window', label: t('common.launchModeWindow') },
+              { value: 'console', label: t('common.launchModeConsole') },
+            ] },
+          { id: 'browserPartition', label: t('common.browserPartition'), value: (installation.browserPartition as string | undefined) || 'shared', editable: true,
+            editType: 'select', options: [
+              { value: 'shared', label: t('common.partitionShared') },
+              { value: 'unique', label: t('common.partitionUnique') },
+            ] },
+          { id: 'portConflict', label: t('common.portConflict'), value: (installation.portConflict as string | undefined) || 'ask', editable: true,
+            editType: 'select', options: [
+              { value: 'ask', label: t('common.portConflictAsk') },
+              { value: 'auto', label: t('common.portConflictAuto') },
             ] },
         ],
       },
@@ -97,9 +199,12 @@ export const gitSource: SourcePlugin = {
         title: 'Actions',
         pinBottom: true,
         actions: [
-          { id: 'launch', label: 'Launch', style: 'primary', enabled: false },
-          { id: 'open-folder', label: 'Open Directory', style: 'default', enabled: !!installation.installPath },
-          { id: 'pull', label: 'Git Pull', style: 'default', enabled: false },
+          { id: 'launch', label: t('actions.launch'), style: 'primary', enabled: canLaunch,
+            ...(!canLaunch && { disabledMessage: !hasVenv ? t('git.noVenv') : !hasMain ? t('git.noMainPy') : t('errors.installNotReady') }),
+            showProgress: true, progressTitle: t('common.startingComfyUI'), cancellable: true },
+          { id: 'open-folder', label: t('actions.openDirectory'), style: 'default', enabled: !!installation.installPath },
+          { id: 'git-pull', label: t('git.gitPull'), style: 'default', enabled: installed,
+            showProgress: true, progressTitle: t('git.gitPulling') },
           deleteAction(installation),
           untrackAction(),
         ],
@@ -120,15 +225,49 @@ export const gitSource: SourcePlugin = {
     } catch {
       // ignore — partial info is fine
     }
+    const venv = findVenv(dirPath)
+    if (venv) info.venvPath = venv
     return info
   },
 
   async handleAction(
     actionId: string,
-    _installation: InstallationRecord,
+    installation: InstallationRecord,
     _actionData: Record<string, unknown> | undefined,
-    _tools: ActionTools
+    { sendProgress, sendOutput }: ActionTools
   ): Promise<ActionResult> {
+    if (actionId === 'git-pull') {
+      const gitPath = await findGit()
+      if (!gitPath) {
+        return { ok: false, message: t('git.gitNotFound') }
+      }
+
+      sendProgress('pull', { percent: -1, status: t('git.gitPulling') })
+
+      const exitCode = await new Promise<number>((resolve) => {
+        const proc = spawn(gitPath, ['pull'], {
+          cwd: installation.installPath,
+          stdio: ['ignore', 'pipe', 'pipe'],
+          windowsHide: true,
+        })
+        proc.stdout.on('data', (chunk: Buffer) => sendOutput(chunk.toString('utf-8')))
+        proc.stderr.on('data', (chunk: Buffer) => sendOutput(chunk.toString('utf-8')))
+        proc.on('error', (err: Error) => {
+          sendOutput(`Error: ${err.message}\n`)
+          resolve(1)
+        })
+        proc.on('exit', (code: number | null) => resolve(code ?? 1))
+      })
+
+      if (exitCode !== 0) {
+        return { ok: false, message: t('git.gitPullFailed', { code: exitCode }) }
+      }
+
+      sendOutput(`\n✓ ${t('git.gitPullComplete')}\n`)
+      sendProgress('done', { percent: 100, status: t('common.done') })
+      return { ok: true, navigate: 'detail' }
+    }
+
     return { ok: false, message: `Action "${actionId}" not yet implemented.` }
   },
 
