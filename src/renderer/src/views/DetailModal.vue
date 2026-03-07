@@ -182,8 +182,15 @@ async function runAction(action: ActionDef, btn: HTMLButtonElement | null): Prom
 
   // Pre-flight: block if an operation (launch/install) is already in progress
   if (REQUIRES_STOPPED.has(action.id) && sessionStore.isLaunching(props.installation.id)) {
-    await modal.alert({ title: action.label, message: t('errors.operationInProgress') })
-    return
+    const confirmed = await modal.confirm({
+      title: action.label,
+      message: t('errors.operationInProgress'),
+      confirmLabel: t('errors.cancelOperation'),
+      confirmStyle: 'danger',
+    })
+    if (!confirmed) return
+    await window.api.cancelOperation(props.installation.id)
+    await new Promise((r) => setTimeout(r, 500))
   }
 
   // Pre-flight: if the action requires the install to be stopped, offer to stop it
