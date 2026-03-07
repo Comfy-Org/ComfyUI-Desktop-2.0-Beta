@@ -32,7 +32,7 @@ import { ensureModelPathsConfig } from './models'
 import { copyDirWithProgress } from './copy'
 import { fetchJSON } from './fetch'
 import { fetchLatestRelease, truncateNotes } from './comfyui-releases'
-import { captureSnapshotIfChanged, getSnapshotCount, getSnapshotListData, getSnapshotDetailData, getSnapshotDiffVsPrevious, diffAgainstCurrent, loadSnapshot, listSnapshots, buildExportEnvelope, validateExportEnvelope, importSnapshots, saveSnapshot, restoreCustomNodes, restorePipPackages } from './snapshots'
+import { captureSnapshotIfChanged, getSnapshotCount, getSnapshotListData, getSnapshotDetailData, getSnapshotDiffVsPrevious, diffAgainstCurrent, loadSnapshot, listSnapshots, buildExportEnvelope, validateExportEnvelope, importSnapshots, saveSnapshot, restoreCustomNodes, restorePipPackages, restoreComfyUIVersion, buildPostRestoreState } from './snapshots'
 import type { SnapshotExportEnvelope } from './snapshots'
 import { getVariantLabel } from '../sources/standalone'
 import type { FieldOption, SourcePlugin } from '../types/sources'
@@ -702,6 +702,10 @@ export function register(callbacks: RegisterCallbacks = {}): void {
             await importSnapshots(freshInst.installPath, envelope)
             const targetSnapshot = envelope.snapshots[0]!
 
+            // Restore ComfyUI version
+            sendOutput('\n── Restore ComfyUI Version ──\n')
+            const comfyResult = await restoreComfyUIVersion(freshInst.installPath, targetSnapshot, sendOutput)
+
             sendOutput('\n── Restore Nodes ──\n')
             await restoreCustomNodes(freshInst.installPath, freshInst, targetSnapshot, sendProgress, sendOutput, abort.signal)
 
@@ -712,15 +716,17 @@ export function register(callbacks: RegisterCallbacks = {}): void {
                 sendOutput, abort.signal)
             }
 
-            // Restore update channel from the snapshot
-            const targetChannel = targetSnapshot.updateChannel || 'stable'
-            if (targetChannel !== (freshInst.updateChannel as string | undefined)) {
-              await update({ updateChannel: targetChannel })
-            }
+            // Restore update channel (always) and version/lastRollback state
+            // (only if ComfyUI version restore succeeded).
+            const restoreState = buildPostRestoreState(
+              targetSnapshot, comfyResult,
+              freshInst.updateInfoByChannel as Record<string, Record<string, unknown>> | undefined
+            )
+            await update(restoreState)
 
             // Save post-restore snapshot
             try {
-              const updatedInst = { ...freshInst, updateChannel: targetChannel }
+              const updatedInst = { ...freshInst, ...restoreState }
               const filename = await saveSnapshot(freshInst.installPath, updatedInst, 'post-restore')
               const snapshotCount = await getSnapshotCount(freshInst.installPath)
               await update({ pendingSnapshotRestore: undefined, lastSnapshot: filename, snapshotCount })

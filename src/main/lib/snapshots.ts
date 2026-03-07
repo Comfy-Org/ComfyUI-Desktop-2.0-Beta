@@ -785,6 +785,79 @@ export interface RestoreResult {
 }
 
 /**
+ * Restore the ComfyUI version to match a target snapshot.
+ * Compares the current HEAD against the snapshot's commit and checks out
+ * the target commit if they differ.
+ */
+export async function restoreComfyUIVersion(
+  installPath: string,
+  targetSnapshot: Snapshot,
+  sendOutput: (text: string) => void
+): Promise<{ changed: boolean; commit: string | null; error?: string }> {
+  const comfyuiDir = path.join(installPath, 'ComfyUI')
+  const targetCommit = targetSnapshot.comfyui.commit
+  if (!targetCommit) {
+    return { changed: false, commit: null }
+  }
+
+  const currentHead = readGitHead(comfyuiDir)
+  if (currentHead && (currentHead.startsWith(targetCommit) || targetCommit.startsWith(currentHead))) {
+    return { changed: false, commit: currentHead }
+  }
+
+  const gitDir = path.join(comfyuiDir, '.git')
+  if (!fs.existsSync(gitDir)) {
+    const msg = 'ComfyUI .git directory not found — cannot restore version'
+    sendOutput(`⚠ ${msg}\n`)
+    return { changed: false, commit: currentHead, error: msg }
+  }
+
+  sendOutput(`Checking out ComfyUI commit ${targetCommit.slice(0, 7)}…\n`)
+  const exitCode = await gitFetchAndCheckout(comfyuiDir, targetCommit, sendOutput)
+  if (exitCode !== 0) {
+    const msg = `git checkout failed with exit code ${exitCode}`
+    sendOutput(`⚠ ${msg}\n`)
+    return { changed: false, commit: currentHead, error: msg }
+  }
+
+  const newHead = readGitHead(comfyuiDir)
+  return { changed: true, commit: newHead }
+}
+
+/**
+ * Build the installation state update to apply after a snapshot restore.
+ * Only updates version/lastRollback/updateInfoByChannel if the ComfyUI
+ * version was actually restored successfully; always updates updateChannel.
+ */
+export function buildPostRestoreState(
+  targetSnapshot: Snapshot,
+  comfyResult: { changed: boolean; commit: string | null; error?: string },
+  existingUpdateInfo: Record<string, Record<string, unknown>> | undefined
+): Record<string, unknown> {
+  const targetChannel = targetSnapshot.updateChannel || 'stable'
+  const state: Record<string, unknown> = { updateChannel: targetChannel }
+
+  if (!comfyResult.error) {
+    const displayVersion = targetSnapshot.comfyui.displayVersion || targetSnapshot.comfyui.releaseTag || 'unknown'
+    const restoredHead = comfyResult.commit || targetSnapshot.comfyui.commit
+    state.version = displayVersion
+    state.lastRollback = {
+      preUpdateHead: null,
+      postUpdateHead: restoredHead,
+      backupBranch: null,
+      channel: targetChannel,
+      updatedAt: Date.now(),
+    }
+    state.updateInfoByChannel = {
+      ...(existingUpdateInfo || {}),
+      [targetChannel]: { installedTag: displayVersion },
+    }
+  }
+
+  return state
+}
+
+/**
  * Restore pip packages to match a target snapshot.
  * Creates a targeted backup of affected packages before making changes.
  * On failure, reverts from backup.
