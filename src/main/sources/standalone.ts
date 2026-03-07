@@ -3,7 +3,7 @@ import path from 'path'
 import { app } from 'electron'
 import { spawn, execFile } from 'child_process'
 import { fetchJSON } from '../lib/fetch'
-import { truncateNotes } from '../lib/comfyui-releases'
+import { fetchLatestRelease, truncateNotes } from '../lib/comfyui-releases'
 import * as releaseCache from '../lib/release-cache'
 import { buildChannelCards, buildChannelLabelMap } from '../lib/channel-cards'
 import type { ChannelDef } from '../lib/channel-cards'
@@ -804,6 +804,23 @@ export const standalone: SourcePlugin = {
 
     if (actionId === 'check-update') {
       const channel = (installation.updateChannel as string | undefined) || 'stable'
+      const otherChannels = ['stable', 'latest'].filter((ch) => ch !== channel)
+      await Promise.allSettled(
+        otherChannels.map((ch) =>
+          releaseCache.getOrFetch(COMFYUI_REPO, ch, async () => {
+            const release = await fetchLatestRelease(ch)
+            if (!release) return null
+            return {
+              checkedAt: Date.now(),
+              latestTag: release.tag_name as string,
+              releaseName: (release.name as string) || (release.tag_name as string),
+              releaseNotes: truncateNotes(release.body as string, 4000),
+              releaseUrl: release.html_url as string,
+              publishedAt: release.published_at as string,
+            }
+          }, true)
+        )
+      )
       return releaseCache.checkForUpdate(COMFYUI_REPO, channel, installation, update)
     }
 
