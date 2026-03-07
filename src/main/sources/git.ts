@@ -157,7 +157,6 @@ export const gitSource: SourcePlugin = {
     const canLaunch = installed && hasVenv && hasMain
 
     const venvPath = installation.venvPath as string | undefined
-    const venvDisplay = venvPath || t('git.venvNotFound')
 
     return [
       {
@@ -168,7 +167,7 @@ export const gitSource: SourcePlugin = {
           { label: t('git.repository'), value: (installation.repo as string) || '—' },
           { label: t('git.branch'), value: (installation.branch as string) || '—' },
           { label: t('git.commit'), value: (installation.commit as string) || '—' },
-          { label: t('git.venv'), value: venvDisplay },
+          { id: 'venvPath', label: t('git.venv'), value: venvPath || '', editable: true, editType: 'path' },
           { label: t('common.location'), value: installation.installPath || '—' },
           { label: t('common.installed'), value: new Date(installation.createdAt).toLocaleDateString() },
         ],
