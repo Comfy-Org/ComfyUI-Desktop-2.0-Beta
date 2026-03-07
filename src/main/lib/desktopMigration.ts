@@ -132,13 +132,13 @@ export async function performDesktopMigration(
       const targetSnapshot = importEnvelope.snapshots[0]!
 
       sendOutput('\n── Restore Nodes ──\n')
-      await restoreCustomNodes(freshInst.installPath, freshInst, targetSnapshot, sendProgress, sendOutput, signal)
+      await restoreCustomNodes(freshInst.installPath, freshInst, targetSnapshot, sendProgress, sendOutput, signal, settings.get('pypiMirror'))
 
       if (!signal.aborted && !targetSnapshot.skipPipSync) {
         sendOutput('\n── Restore Packages ──\n')
         await restorePipPackages(freshInst.installPath, freshInst, targetSnapshot,
           (phase, data) => sendProgress(phase === 'restore' ? 'restore-pip' : phase, data),
-          sendOutput, signal)
+          sendOutput, signal, settings.get('pypiMirror'))
       }
 
       try {

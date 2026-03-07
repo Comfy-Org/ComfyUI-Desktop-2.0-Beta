@@ -3,7 +3,7 @@ import path from 'path'
 import { spawn } from 'child_process'
 import { readGitHead, isGitAvailable, gitClone, gitFetchAndCheckout } from './git'
 import { scanCustomNodes, nodeKey } from './nodes'
-import { pipFreeze } from './pip'
+import { pipFreeze, getPipIndexArgs } from './pip'
 import { installCnrNode, switchCnrVersion, isSafePathComponent } from './cnr'
 import type { ScannedNode } from './nodes'
 import type { InstallationRecord } from '../installations'
@@ -877,7 +877,8 @@ export async function restorePipPackages(
   targetSnapshot: Snapshot,
   sendProgress: (phase: string, data: Record<string, unknown>) => void,
   sendOutput: (text: string) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  pypiMirror?: string
 ): Promise<RestoreResult> {
   const result: RestoreResult = {
     installed: [], removed: [], changed: [],
@@ -974,10 +975,11 @@ export async function restorePipPackages(
       sendProgress('restore', { percent: 20, status: `Installing ${toInstall.length} package(s)…` })
 
       const specs = toInstall.map((p) => `${p.name}==${p.version}`)
+      const indexArgs = getPipIndexArgs(pypiMirror)
 
       // Try bulk install first
       sendOutput(`\nInstalling ${specs.length} package(s)…\n`)
-      const bulkResult = await runUvPip(uvPath, ['pip', 'install', ...specs, '--python', pythonPath], installPath, sendOutput, signal)
+      const bulkResult = await runUvPip(uvPath, ['pip', 'install', ...specs, '--python', pythonPath, ...indexArgs], installPath, sendOutput, signal)
 
       if (bulkResult !== 0) {
         sendOutput('\n⚠ Bulk install failed, falling back to one-by-one with --no-deps\n\n')
@@ -990,7 +992,7 @@ export async function restorePipPackages(
           sendProgress('restore', { percent, status: `Installing ${name}…` })
 
           const singleResult = await runUvPip(
-            uvPath, ['pip', 'install', spec, '--no-deps', '--python', pythonPath], installPath, sendOutput, signal
+            uvPath, ['pip', 'install', spec, '--no-deps', '--python', pythonPath, ...indexArgs], installPath, sendOutput, signal
           )
 
           if (singleResult !== 0) {
@@ -1111,7 +1113,8 @@ async function runPostInstallScripts(
   pythonPath: string,
   installPath: string,
   sendOutput: (text: string) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  pypiMirror?: string
 ): Promise<void> {
   const reqPath = path.join(nodePath, 'requirements.txt')
   if (fs.existsSync(reqPath)) {
@@ -1122,7 +1125,8 @@ async function runPostInstallScripts(
       await fs.promises.writeFile(filteredReqPath, filtered, 'utf-8')
 
       try {
-        await runUvPip(uvPath, ['pip', 'install', '-r', filteredReqPath, '--python', pythonPath], installPath, sendOutput)
+        const indexArgs = getPipIndexArgs(pypiMirror)
+        await runUvPip(uvPath, ['pip', 'install', '-r', filteredReqPath, '--python', pythonPath, ...indexArgs], installPath, sendOutput)
       } finally {
         try { await fs.promises.unlink(filteredReqPath) } catch {}
       }
@@ -1170,7 +1174,8 @@ export async function restoreCustomNodes(
   targetSnapshot: Snapshot,
   sendProgress: (phase: string, data: Record<string, unknown>) => void,
   sendOutput: (text: string) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  pypiMirror?: string
 ): Promise<NodeRestoreResult> {
   const result: NodeRestoreResult = {
     installed: [], switched: [], enabled: [], disabled: [],
@@ -1397,7 +1402,7 @@ export async function restoreCustomNodes(
       sendProgress('restore-nodes', { percent: 92, status: 'Installing node dependencies…' })
       for (const nodePath of nodesNeedingPostInstall) {
         sendOutput(`\nRunning post-install for ${path.basename(nodePath)}…\n`)
-        await runPostInstallScripts(nodePath, uvPath, pythonPath, installPath, sendOutput, signal)
+        await runPostInstallScripts(nodePath, uvPath, pythonPath, installPath, sendOutput, signal, pypiMirror)
       }
     } else {
       sendOutput('⚠ Cannot run post-install scripts: uv or Python environment not found\n')

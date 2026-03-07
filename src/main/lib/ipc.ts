@@ -707,13 +707,13 @@ export function register(callbacks: RegisterCallbacks = {}): void {
             const comfyResult = await restoreComfyUIVersion(freshInst.installPath, targetSnapshot, sendOutput)
 
             sendOutput('\n── Restore Nodes ──\n')
-            await restoreCustomNodes(freshInst.installPath, freshInst, targetSnapshot, sendProgress, sendOutput, abort.signal)
+            await restoreCustomNodes(freshInst.installPath, freshInst, targetSnapshot, sendProgress, sendOutput, abort.signal, settings.get('pypiMirror'))
 
             if (!abort.signal.aborted && !targetSnapshot.skipPipSync) {
               sendOutput('\n── Restore Packages ──\n')
               await restorePipPackages(freshInst.installPath, freshInst, targetSnapshot,
                 (phase, data) => sendProgress(phase === 'restore' ? 'restore-pip' : phase, data),
-                sendOutput, abort.signal)
+                sendOutput, abort.signal, settings.get('pypiMirror'))
             }
 
             // Restore update channel and version/lastRollback state so the
@@ -1210,6 +1210,13 @@ export function register(callbacks: RegisterCallbacks = {}): void {
         fields: [
           { id: 'cacheDir', label: i18n.t('settings.cacheDir'), type: 'path', value: s.cacheDir, openable: true },
           { id: 'maxCachedFiles', label: i18n.t('settings.maxCachedFiles'), type: 'number', value: s.maxCachedFiles, min: 1, max: 50 },
+        ],
+      },
+      {
+        title: i18n.t('settings.advanced'),
+        fields: [
+          { id: 'pypiMirror', label: i18n.t('settings.pypiMirror'), type: 'text', value: s.pypiMirror || '',
+            placeholder: i18n.t('settings.pypiMirrorPlaceholder') },
         ],
       },
     ]

@@ -91,4 +91,18 @@ describe('settings unset/default semantics', () => {
     expect(settings.get('customKey' as string)).toBeNull()
     expect(readPersistedSettings()['customKey']).toBeNull()
   })
+
+  it('treats empty and whitespace-only strings as unset for pypiMirror', () => {
+    settings.set('pypiMirror', 'https://mirrors.aliyun.com/pypi/simple/')
+    expect(settings.get('pypiMirror')).toBe('https://mirrors.aliyun.com/pypi/simple/')
+
+    settings.set('pypiMirror', '')
+    expect(settings.get('pypiMirror')).toBeUndefined()
+    expect(readPersistedSettings()).not.toHaveProperty('pypiMirror')
+
+    settings.set('pypiMirror', 'https://example.com/simple/')
+    settings.set('pypiMirror', '   ')
+    expect(settings.get('pypiMirror')).toBeUndefined()
+    expect(readPersistedSettings()).not.toHaveProperty('pypiMirror')
+  })
 })

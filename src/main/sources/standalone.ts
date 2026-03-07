@@ -16,6 +16,7 @@ import * as installations from '../installations'
 import { listCustomNodes, findComfyUIDir, backupDir, mergeDirFlat } from '../lib/migrate'
 import * as settings from '../settings'
 import * as snapshots from '../lib/snapshots'
+import { getPipIndexArgs } from '../lib/pip'
 import type { InstallationRecord } from '../installations'
 import type {
   SourcePlugin,
@@ -656,7 +657,8 @@ export const standalone: SourcePlugin = {
       // Phase 2: Restore custom nodes first (node installs may add pip dependencies)
       sendOutput('\n── Restore Nodes ──\n')
       const nodeResult = await snapshots.restoreCustomNodes(
-        installation.installPath, installation, targetSnapshot, sendProgress, sendOutput, signal
+        installation.installPath, installation, targetSnapshot, sendProgress, sendOutput, signal,
+        settings.get('pypiMirror')
       )
 
       if (signal?.aborted) return { ok: false, message: 'Cancelled' }
@@ -666,7 +668,7 @@ export const standalone: SourcePlugin = {
       const pipResult = await snapshots.restorePipPackages(
         installation.installPath, installation, targetSnapshot,
         (phase, data) => sendProgress(phase === 'restore' ? 'restore-pip' : phase, data),
-        sendOutput, signal
+        sendOutput, signal, settings.get('pypiMirror')
       )
 
       // Build combined summary
@@ -949,10 +951,11 @@ export const standalone: SourcePlugin = {
           await fs.promises.writeFile(filteredReqPath, filteredReqs, 'utf-8')
 
           try {
+            const indexArgs = getPipIndexArgs(settings.get('pypiMirror'))
             sendProgress('deps', { percent: -1, status: t('standalone.updateDepsDryRun') })
             if (signal?.aborted) return { ok: false, message: 'Cancelled' }
             const dryRunResult = await new Promise<{ code: number; stdout: string; stderr: string }>((resolve) => {
-              const proc = spawn(uvPath, ['pip', 'install', '--dry-run', '-r', filteredReqPath, '--python', activeEnvPython], {
+              const proc = spawn(uvPath, ['pip', 'install', '--dry-run', '-r', filteredReqPath, '--python', activeEnvPython, ...indexArgs], {
                 cwd: installPath,
                 stdio: ['ignore', 'pipe', 'pipe'],
                 windowsHide: true,
@@ -980,7 +983,7 @@ export const standalone: SourcePlugin = {
             if (signal?.aborted) return { ok: false, message: 'Cancelled' }
             sendProgress('deps', { percent: -1, status: t('standalone.updateDepsInstalling') })
             const installResult = await new Promise<number>((resolve) => {
-              const proc = spawn(uvPath, ['pip', 'install', '-r', filteredReqPath, '--python', activeEnvPython], {
+              const proc = spawn(uvPath, ['pip', 'install', '-r', filteredReqPath, '--python', activeEnvPython, ...indexArgs], {
                 cwd: installPath,
                 stdio: ['ignore', 'pipe', 'pipe'],
                 windowsHide: true,
@@ -1243,6 +1246,7 @@ export const standalone: SourcePlugin = {
             sendProgress('deps', { percent: 100, status: t('migrate.depsSkipped') })
           } else {
             const PYTORCH_RE = /^(torch|torchvision|torchaudio|torchsde)(\s*[<>=!~;[#]|$)/i
+            const migrateIndexArgs = getPipIndexArgs(settings.get('pypiMirror'))
             let depsInstalled = 0
 
             for (const node of nodesWithReqs) {
@@ -1260,7 +1264,7 @@ export const standalone: SourcePlugin = {
 
                 try {
                   const procResult = await new Promise<number>((resolve) => {
-                    const proc = spawn(uvPath, ['pip', 'install', '-r', filteredReqPath, '--python', activePython], {
+                    const proc = spawn(uvPath, ['pip', 'install', '-r', filteredReqPath, '--python', activePython, ...migrateIndexArgs], {
                       cwd: installation.installPath,
                       stdio: ['ignore', 'pipe', 'pipe'],
                       windowsHide: true,
