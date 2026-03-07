@@ -135,11 +135,11 @@ export function gitFetchAndCheckout(
       proc.on('close', (code) => resolve(code ?? 1))
     })
 
-  // Fetch all branches explicitly — grafted/archive-based repos may have
-  // no branch tracking configured, so a bare `git fetch origin` only
-  // pulls tags. Use --unshallow to handle shallow clones; fall back to
-  // a regular fetch if the repo is already complete.
-  const refspec = '+refs/heads/*:refs/remotes/origin/*'
+  // Fetch master explicitly — grafted/archive-based repos may have no
+  // branch tracking configured, so a bare `git fetch origin` only pulls
+  // tags. Use --unshallow to handle shallow clones; fall back to a
+  // regular fetch if the repo is already complete.
+  const refspec = '+refs/heads/master:refs/remotes/origin/master'
   return runGit(['fetch', '--unshallow', 'origin', refspec]).then((code) => {
     if (code !== 0) return runGit(['fetch', 'origin', refspec])
     return code
