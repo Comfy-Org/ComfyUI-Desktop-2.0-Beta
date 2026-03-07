@@ -99,36 +99,42 @@ export function getModelDownloadContentScript(): string {
     observer.observe(target, { childList: true, subtree: true });
   }
 
-  if (document.body) {
-    startObserver();
-  } else {
-    document.addEventListener('DOMContentLoaded', startObserver);
+  // Only observe the Missing Models dialog and intercept downloads for local sessions
+  if (!window.__comfyLauncherRemote) {
+    if (document.body) {
+      startObserver();
+    } else {
+      document.addEventListener('DOMContentLoaded', startObserver);
+    }
   }
 
   // ---- Override document.createElement to intercept <a>.click() ----
+  // For remote/cloud sessions model downloads should not be captured (no local models dir).
   var origCreate = document.createElement.bind(document);
-  document.createElement = function(tag, options) {
-    var el = origCreate(tag, options);
-    if (typeof tag === 'string' && tag.toLowerCase() === 'a' && Object.keys(modelCache).length > 0) {
-      var origClick = el.click;
-      el.click = function() {
-        if (this.download && this.href && window.__comfyLauncher) {
-          var directory = modelCache[this.href];
-          if (directory) {
-            var cleanName = this.download.split('?')[0];
-            window.__comfyLauncher.downloadModel(
-              this.href,
-              cleanName,
-              directory
-            ).catch(function() {});
-            return;
+  if (!window.__comfyLauncherRemote) {
+    document.createElement = function(tag, options) {
+      var el = origCreate(tag, options);
+      if (typeof tag === 'string' && tag.toLowerCase() === 'a' && Object.keys(modelCache).length > 0) {
+        var origClick = el.click;
+        el.click = function() {
+          if (this.download && this.href && window.__comfyLauncher) {
+            var directory = modelCache[this.href];
+            if (directory) {
+              var cleanName = this.download.split('?')[0];
+              window.__comfyLauncher.downloadModel(
+                this.href,
+                cleanName,
+                directory
+              ).catch(function() {});
+              return;
+            }
           }
-        }
-        return origClick.call(this);
-      };
-    }
-    return el;
-  };
+          return origClick.call(this);
+        };
+      }
+      return el;
+    };
+  }
 
   // ---- Theme integration ----
   // Read ComfyUI's CSS variables and derive toast colors
