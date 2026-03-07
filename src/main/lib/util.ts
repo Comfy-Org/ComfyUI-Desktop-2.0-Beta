@@ -21,13 +21,17 @@ export function formatTime(secs: number): string {
 }
 
 export function extractPort(args: string[], defaultPort = 8188): number {
-  const idx = args.indexOf('--port')
-  if (idx >= 0 && args[idx + 1]) return parseInt(args[idx + 1]!, 10) || defaultPort
-  for (const arg of args) {
-    const m = arg.match(/^--port=(\d+)$/)
-    if (m) return parseInt(m[1]!, 10) || defaultPort
+  let port = defaultPort
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--port' && args[i + 1]) {
+      port = parseInt(args[i + 1]!, 10) || defaultPort
+      i++
+    } else {
+      const m = args[i]!.match(/^--port=(\d+)$/)
+      if (m) port = parseInt(m[1]!, 10) || defaultPort
+    }
   }
-  return defaultPort
+  return port
 }
 
 export function parseArgs(str: string): string[] {

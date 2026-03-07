@@ -45,7 +45,9 @@ function findVenv(dirPath: string): string | null {
 
 function getVenvPython(venvDir: string): string {
   if (process.platform === 'win32') {
-    return path.join(venvDir, 'Scripts', 'python.exe')
+    const scripts = path.join(venvDir, 'Scripts', 'python.exe')
+    if (fs.existsSync(scripts)) return scripts
+    return path.join(venvDir, 'python.exe')
   }
   const python3 = path.join(venvDir, 'bin', 'python3')
   if (fs.existsSync(python3)) return python3
@@ -122,11 +124,11 @@ export const gitSource: SourcePlugin = {
     const userArgs = ((installation.launchArgs as string | undefined) ?? DEFAULT_LAUNCH_ARGS).trim()
     const parsed = userArgs.length > 0 ? parseArgs(userArgs) : []
     const port = extractPort(parsed)
-    const relMainPy = path.relative(installation.installPath, mainPy)
+    const cwd = path.dirname(mainPy)
     return {
       cmd: pythonPath,
-      args: ['-s', relMainPy, ...parsed],
-      cwd: installation.installPath,
+      args: ['-s', 'main.py', ...parsed],
+      cwd,
       port,
     }
   },
@@ -278,6 +280,7 @@ export const gitSource: SourcePlugin = {
           cwd: installation.installPath,
           stdio: ['ignore', 'pipe', 'pipe'],
           windowsHide: true,
+          env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
         })
         proc.stdout.on('data', (chunk: Buffer) => sendOutput(chunk.toString('utf-8')))
         proc.stderr.on('data', (chunk: Buffer) => sendOutput(chunk.toString('utf-8')))
