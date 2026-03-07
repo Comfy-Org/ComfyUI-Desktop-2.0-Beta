@@ -145,6 +145,10 @@ export function gitFetchAndCheckout(
     return code
   }).then((code) => {
     if (code !== 0) return code
-    return runGit(['checkout', commit])
+    // Ensure a local master branch exists (mirroring the pygit2 update
+    // script) so future updates via update_comfyui.py work correctly.
+    return runGit(['branch', '-f', 'master', 'refs/remotes/origin/master']).then(() => {
+      return runGit(['checkout', commit])
+    })
   })
 }
