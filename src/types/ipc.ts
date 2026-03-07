@@ -182,6 +182,7 @@ export interface ActionResult {
   mode?: 'console' | 'window'
   portConflict?: PortConflictInfo
   cancelled?: boolean
+  running?: boolean
 }
 
 export interface PortConflictInfo {
@@ -599,3 +600,16 @@ export interface ElectronApi {
   onTelemetrySettingChanged(callback: (enabled: boolean | undefined) => void): Unsubscribe
   onDatadogError(callback: (payload: DatadogForwardedError) => void): Unsubscribe
 }
+
+/** Action IDs that require the installation to be stopped before running.
+ *  Shared between main and renderer processes. */
+export const REQUIRES_STOPPED = new Set([
+  'delete',
+  'copy',
+  'copy-update',
+  'release-update',
+  'migrate-to-standalone',
+  'snapshot-restore',
+  'update-comfyui',
+  'migrate-from',
+])
