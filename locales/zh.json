@@ -245,7 +245,7 @@
     "retry": "重试",
     "updateCheck": "检查更新",
     "updateError": "更新错误",
-    "upToDate": "您正在使用最新版本。"
+    "upToDate": "您正在使用最新版本的 ComfyUI Launcher。"
   },
 
   "modal": {

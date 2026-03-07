@@ -324,7 +324,7 @@
     "retry": "Retry",
     "updateCheck": "Update Check",
     "updateError": "Update Error",
-    "upToDate": "You are running the latest version."
+    "upToDate": "You are running the latest version of ComfyUI Launcher."
   },
 
   "modal": {
