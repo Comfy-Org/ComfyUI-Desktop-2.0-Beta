@@ -53,6 +53,17 @@ function formatBytes(bytes: number): string {
   return `${(bytes / 1048576).toFixed(0)} MB`
 }
 
+const estimatedInstallSize = computed(() => {
+  let downloadBytes = 0
+  for (const selected of Object.values(selections.value)) {
+    const files = selected?.data?.downloadFiles as Array<{ size: number }> | undefined
+    if (files) {
+      downloadBytes += files.reduce((sum, f) => sum + f.size, 0)
+    }
+  }
+  return downloadBytes > 0 ? Math.ceil(downloadBytes * 2.25) : 0
+})
+
 function toPathGuardrail(issue: PathIssue): string {
   switch (issue) {
     case 'insideAppBundle': return 'path_inside_bundle'
@@ -579,7 +590,7 @@ async function handleSave(): Promise<void> {
         ? downloadFiles.reduce((sum, f) => sum + f.size, 0)
         : 0
       // Estimate extracted size as ~2x compressed download size
-      const estimatedRequired = downloadBytes > 0 ? downloadBytes * 2 : 0
+      const estimatedRequired = downloadBytes > 0 ? Math.ceil(downloadBytes * 2.25) : 0
 
       if (estimatedRequired > 0 && space.free < estimatedRequired) {
         const ok = await modal.confirm({
@@ -934,6 +945,9 @@ defineExpose({ open })
                 </template>
                 <template v-else-if="diskSpace">
                   {{ $t('diskSpace.free', { size: formatBytes(diskSpace.free) }) }}
+                  <template v-if="estimatedInstallSize > 0">
+                    · {{ $t('diskSpace.estimatedRequired', { size: formatBytes(estimatedInstallSize) }) }}
+                  </template>
                 </template>
               </div>
             </div>
