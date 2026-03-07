@@ -415,8 +415,6 @@ defineExpose({ refresh })
       </div>
     </div>
 
-    <slot name="update-banner" />
-
     <ContextMenu
       :open="ctxMenu.open"
       :x="ctxMenu.x"

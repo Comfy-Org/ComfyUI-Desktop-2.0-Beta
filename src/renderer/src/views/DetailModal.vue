@@ -47,6 +47,7 @@ const prefs = useLauncherPrefs()
 const installationStore = useInstallationStore()
 
 const isLocal = computed(() => props.installation?.sourceCategory === 'local')
+const isDesktop = computed(() => props.installation?.sourceId === 'desktop')
 const isCloud = computed(() => props.installation?.sourceCategory === 'cloud')
 const isPrimary = computed(() => props.installation ? prefs.isPrimary(props.installation.id) : false)
 const isPinned = computed(() => props.installation ? prefs.isPinned(props.installation.id) : false)
@@ -454,7 +455,7 @@ onUnmounted(() => {
         </div>
         <div class="detail-header-actions">
           <button
-            v-if="isLocal"
+            v-if="isLocal && !isDesktop"
             class="detail-header-btn"
             :class="{ active: isPrimary }"
             :disabled="isPrimary"

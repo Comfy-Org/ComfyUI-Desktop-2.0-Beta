@@ -293,6 +293,7 @@ onMounted(async () => {
 
     <!-- Content Area -->
     <main class="content">
+      <UpdateBanner />
       <ZoomBanner />
       <DashboardView
         v-show="activeView === 'dashboard'"
@@ -313,11 +314,7 @@ onMounted(async () => {
         @show-new-install="openNewInstall"
         @show-track="openTrack"
         @show-load-snapshot="openLoadSnapshot"
-      >
-        <template #update-banner>
-          <UpdateBanner />
-        </template>
-      </InstallationList>
+      />
 
       <RunningView
         v-show="activeView === 'running'"
