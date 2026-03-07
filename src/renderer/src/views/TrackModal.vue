@@ -17,6 +17,7 @@ const trackPath = ref('')
 const trackName = ref('')
 const probeResults = ref<ProbeResult[]>([])
 const selectedProbe = ref<ProbeResult | null>(null)
+const venvOverride = ref<string | null>(null)
 const probing = ref(false)
 const mouseDownOnOverlay = ref(false)
 
@@ -27,6 +28,7 @@ function open(): void {
   trackName.value = ''
   probeResults.value = []
   selectedProbe.value = null
+  venvOverride.value = null
 }
 
 async function handleBrowse(): Promise<void> {
@@ -56,6 +58,7 @@ async function probe(dirPath: string): Promise<void> {
 function handleSourceChange(event: Event): void {
   const idx = parseInt((event.target as HTMLSelectElement).value, 10)
   selectedProbe.value = probeResults.value[idx] ?? null
+  venvOverride.value = null
 }
 
 interface DetailFieldEntry {
@@ -76,11 +79,33 @@ const detailFields = computed<DetailFieldEntry[]>(() => {
   if (p.branch) {
     fields.push({ label: t('track.branch'), value: p.branch })
   }
-  if (p.venvName) {
-    fields.push({ label: t('git.venv'), value: p.venvName as string })
-  }
   return fields
 })
+
+const showVenvField = computed(() => {
+  if (!selectedProbe.value) return false
+  return selectedProbe.value.sourceId === 'git'
+})
+
+const effectiveVenvPath = computed(() => {
+  if (venvOverride.value !== null) return venvOverride.value
+  return (selectedProbe.value?.venvPath as string | undefined) || ''
+})
+
+const effectiveVenvName = computed(() => {
+  const p = effectiveVenvPath.value
+  if (!p) return ''
+  const sep = p.includes('\\') ? '\\' : '/'
+  return p.split(sep).pop() || ''
+})
+
+async function handleBrowseVenv(): Promise<void> {
+  const defaultPath = effectiveVenvPath.value || trackPath.value || undefined
+  const dir = await window.api.browseFolder(defaultPath)
+  if (dir) {
+    venvOverride.value = dir
+  }
+}
 
 async function handleSave(): Promise<void> {
   if (!selectedProbe.value) return
@@ -90,6 +115,9 @@ async function handleSave(): Promise<void> {
     `ComfyUI (${selectedProbe.value.sourceLabel})`
 
   const rawProbe = JSON.parse(JSON.stringify(toRaw(selectedProbe.value))) as Record<string, unknown>
+  if (venvOverride.value !== null) {
+    rawProbe.venvPath = venvOverride.value
+  }
   const data: Record<string, unknown> = {
     name,
     installPath: trackPath.value,
@@ -210,6 +238,19 @@ defineExpose({ open })
             <div v-for="field in detailFields" :key="field.label">
               <div class="detail-field-label">{{ field.label }}</div>
               <div class="detail-field-value">{{ field.value }}</div>
+            </div>
+          </div>
+
+          <!-- Virtual environment selector (git source) -->
+          <div v-if="showVenvField" class="field">
+            <label>{{ $t('git.venv') }}</label>
+            <div class="path-input">
+              <input
+                type="text"
+                :value="effectiveVenvName || $t('git.venvNotFound')"
+                disabled
+              />
+              <button @click="handleBrowseVenv">{{ $t('common.browse') }}</button>
             </div>
           </div>
         </div>
