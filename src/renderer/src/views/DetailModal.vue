@@ -419,9 +419,7 @@ async function runAction(action: ActionDef, btn: HTMLButtonElement | null): Prom
     )
     // Fallback: backend detected running instance (race condition)
     if (result.running && props.installation) {
-      if (await stopAndRetry(props.installation.id)) {
-        return runAction(action, btn)
-      }
+      await stopAndRetry(props.installation.id)
       return
     }
     const resultValue = result.cancelled ? 'cancelled' : (result.ok === false ? 'failed' : 'ok')

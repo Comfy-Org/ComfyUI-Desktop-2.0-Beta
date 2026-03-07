@@ -302,16 +302,8 @@ async function handleLaunch(inst: Installation, actions: ListAction[]): Promise<
   try {
     const result = await window.api.runAction(inst.id, action.id)
     if (result.running) {
-      const confirmed = await modal.confirm({
-        title: t('errors.stopRunning'),
-        message: t('errors.stopRequiredConfirm'),
-        confirmLabel: t('errors.stopRunning'),
-        confirmStyle: 'primary',
-      })
-      if (!confirmed) return
-      await window.api.stopComfyUI(inst.id)
-      await new Promise((r) => setTimeout(r, 500))
-      return handleLaunch(inst, actions)
+      await modal.alert({ title: action.label, message: result.message || t('errors.stopRequired') })
+      return
     }
     const resultValue = result.cancelled ? 'cancelled' : (result.ok === false ? 'failed' : 'ok')
     emitTelemetryAction('launcher.action.result', { action_id: action.id, result: resultValue, ...telemetryContext })
