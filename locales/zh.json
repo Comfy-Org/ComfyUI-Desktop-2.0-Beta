@@ -217,6 +217,8 @@
     "closeQuitMessage": "ComfyUI 实例仍在运行。退出将停止所有实例。",
     "closeQuitConfirm": "退出",
     "autoUpdate": "启动时检查更新",
+    "checkForUpdates": "检查更新",
+    "checkingForUpdates": "检查中…",
     "telemetry": "遥测",
     "telemetryEnabled": "共享匿名使用遥测数据",
     "models": "共享模型",

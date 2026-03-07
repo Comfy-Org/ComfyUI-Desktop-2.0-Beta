@@ -1188,6 +1188,9 @@ export function register(callbacks: RegisterCallbacks = {}): void {
               { value: 'tray', label: i18n.t('settings.closeTray') },
             ] },
         ],
+        actions: [
+          { label: i18n.t('settings.checkForUpdates'), action: 'check-for-update' },
+        ],
       },
       {
         title: i18n.t('settings.telemetry'),

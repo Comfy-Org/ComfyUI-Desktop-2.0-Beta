@@ -216,6 +216,7 @@ export interface SettingsSection {
 export interface SettingsAction {
   label: string
   url?: string
+  action?: string
 }
 
 export interface SettingsField {
