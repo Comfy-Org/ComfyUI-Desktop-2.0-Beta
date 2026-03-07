@@ -147,7 +147,14 @@ export function gitFetchAndCheckout(
     if (code !== 0) return code
     // Ensure a local master branch exists (mirroring the pygit2 update
     // script) so future updates via update_comfyui.py work correctly.
-    return runGit(['branch', '-f', 'master', 'refs/remotes/origin/master']).then(() => {
+    // Detach HEAD first so `branch -f` can't fail due to master being
+    // the currently checked-out branch.
+    return runGit(['checkout', '--detach', 'HEAD']).then(() => {
+      // Detach may fail if HEAD is invalid (fresh archive with no commits
+      // checked out); that's fine — branch -f will still succeed.
+      return runGit(['branch', '-f', 'master', 'refs/remotes/origin/master'])
+    }).then((branchCode) => {
+      if (branchCode !== 0) return branchCode
       return runGit(['checkout', commit])
     })
   })
