@@ -114,18 +114,6 @@ export function gitClone(
   })
 }
 
-/** Check whether a git repo is shallow (has a shallow graft file). */
-function isShallowRepo(repoPath: string): boolean {
-  const gitDir = resolveGitDir(repoPath)
-  if (!gitDir) return false
-  const shallowFile = path.join(gitDir, 'shallow')
-  try {
-    return fs.existsSync(shallowFile) && fs.statSync(shallowFile).size > 0
-  } catch {
-    return false
-  }
-}
-
 export function gitFetchAndCheckout(
   repoPath: string,
   commit: string,
@@ -147,13 +135,13 @@ export function gitFetchAndCheckout(
       proc.on('close', (code) => resolve(code ?? 1))
     })
 
-  // Unshallow first if the repo is a shallow/grafted clone, otherwise
-  // the target commit may not exist in local history.
-  const fetchArgs = isShallowRepo(repoPath)
-    ? ['fetch', '--unshallow', 'origin']
-    : ['fetch', 'origin']
-
-  return runGit(fetchArgs).then((code) => {
+  // Try --unshallow first to handle shallow/grafted clones where the
+  // target commit may not exist locally. Falls back to a regular fetch
+  // if the repo is already complete (--unshallow exits non-zero).
+  return runGit(['fetch', '--unshallow', 'origin']).then((code) => {
+    if (code !== 0) return runGit(['fetch', 'origin'])
+    return code
+  }).then((code) => {
     if (code !== 0) return code
     return runGit(['checkout', commit])
   })
