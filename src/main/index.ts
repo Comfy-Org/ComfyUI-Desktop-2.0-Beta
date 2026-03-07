@@ -246,7 +246,9 @@ function createLauncherWindow(): void {
   })
   launcherWindow.once('ready-to-show', () => {
     launcherWindow?.show()
+    if (process.platform === 'win32') launcherWindow?.moveTop()
     launcherWindow?.focus()
+    createTray()
   })
 
   attachContextMenu(launcherWindow)
@@ -583,6 +585,7 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
       if (launcherWindow && !launcherWindow.isDestroyed()) {
         launcherWindow.show()
         if (launcherWindow.isMinimized()) launcherWindow.restore()
+        if (process.platform === 'win32') launcherWindow.moveTop()
         launcherWindow.focus()
       }
     })
@@ -598,8 +601,14 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
     cleanupTempDownloads()
     ipc.register({ onLaunch, onStop, onComfyExited, onComfyRestarted, onLocaleChanged: updateTrayMenu })
     updater.register()
-    createTray()
     createLauncherWindow()
+  })
+
+  app.on('activate', () => {
+    if (launcherWindow && !launcherWindow.isDestroyed()) {
+      launcherWindow.show()
+      launcherWindow.focus()
+    }
   })
 
   app.on('before-quit', () => {
