@@ -79,6 +79,9 @@ const detailFields = computed<DetailFieldEntry[]>(() => {
   if (p.branch) {
     fields.push({ label: t('track.branch'), value: p.branch })
   }
+  if (p.venvName) {
+    fields.push({ label: t('git.venv'), value: p.venvName as string })
+  }
   return fields
 })
 
