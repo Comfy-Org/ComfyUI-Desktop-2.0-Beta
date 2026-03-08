@@ -1,6 +1,28 @@
 # ComfyUI-Launcher
 
+[![Latest Release](https://img.shields.io/github/v/release/Comfy-Org/ComfyUI-Launcher?style=for-the-badge&display_name=tag)](https://github.com/Comfy-Org/ComfyUI-Launcher/releases/latest)
+[![CI](https://img.shields.io/github/actions/workflow/status/Comfy-Org/ComfyUI-Launcher/ci.yml?branch=main&style=for-the-badge&label=CI)](https://github.com/Comfy-Org/ComfyUI-Launcher/actions/workflows/ci.yml)
+[![License](https://img.shields.io/github/license/Comfy-Org/ComfyUI-Launcher?style=for-the-badge)](https://github.com/Comfy-Org/ComfyUI-Launcher/blob/main/LICENSE)
+
 An Electron app for managing multiple ComfyUI installations.
+
+## Downloads
+
+### Windows
+
+[![Windows x64](https://img.shields.io/badge/Windows-x64-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://dl.todesktop.com/241130tqe9q3y/windows/nsis/x64)
+[![Windows ARM64](https://img.shields.io/badge/Windows-ARM64-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://dl.todesktop.com/241130tqe9q3y/windows/nsis/arm64)
+
+### macOS
+
+[![macOS Apple Silicon](https://img.shields.io/badge/macOS-Apple%20Silicon-000000?style=for-the-badge&logo=apple&logoColor=white)](https://dl.todesktop.com/241130tqe9q3y/mac/dmg/arm64)
+
+### Linux
+
+[![Linux AppImage x64](https://img.shields.io/badge/Linux-AppImage%20x64-FCC624?style=for-the-badge&logo=linux&logoColor=black)](https://dl.todesktop.com/241130tqe9q3y/linux/appImage/x64)
+[![Linux AppImage ARM64](https://img.shields.io/badge/Linux-AppImage%20ARM64-FCC624?style=for-the-badge&logo=linux&logoColor=black)](https://dl.todesktop.com/241130tqe9q3y/linux/appImage/arm64)
+[![Linux DEB x64](https://img.shields.io/badge/Linux-DEB%20x64-FCC624?style=for-the-badge&logo=debian&logoColor=black)](https://dl.todesktop.com/241130tqe9q3y/linux/deb/x64)
+[![Linux DEB ARM64](https://img.shields.io/badge/Linux-DEB%20ARM64-FCC624?style=for-the-badge&logo=debian&logoColor=black)](https://dl.todesktop.com/241130tqe9q3y/linux/deb/arm64)
 
 ## Running
 
