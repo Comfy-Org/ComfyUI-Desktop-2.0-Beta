@@ -26,7 +26,8 @@
 
   "sidebar": {
     "installations": "安装",
-    "running": "运行中"
+    "running": "运行中",
+    "giveFeedback": "提交反馈"
   },
 
   "running": {

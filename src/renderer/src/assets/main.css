@@ -230,6 +230,7 @@ body {
 }
 .sidebar-feedback {
   margin: 0 8px;
+  width: auto;
 }
 .sidebar-version {
   padding: 8px 20px;
