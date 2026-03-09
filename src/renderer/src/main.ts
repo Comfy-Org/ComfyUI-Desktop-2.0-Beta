@@ -156,7 +156,9 @@ function reportRendererError(payload: {
 }): void {
   if (!isDatadogInitialized) return
   const error = new Error(payload.message || 'Unknown error')
-  error.stack = payload.stack
+  if (payload.stack) {
+    error.stack = payload.stack
+  }
   try {
     datadogRum.addError(error, {
       source: 'custom',
