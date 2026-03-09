@@ -90,6 +90,7 @@ const api: ElectronApi = {
   getResolvedTheme: () => ipcRenderer.invoke('get-resolved-theme'),
 
   // App
+  getAppVersion: () => ipcRenderer.invoke('get-app-version'),
   quitApp: () => ipcRenderer.invoke('quit-app'),
   resetZoom: () => ipcRenderer.invoke('reset-zoom'),
 
