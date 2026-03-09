@@ -44,6 +44,7 @@ useTheme()
 // --- View state ---
 type TabView = 'dashboard' | 'list' | 'running' | 'models' | 'media' | 'settings'
 const activeView = ref<TabView>('dashboard')
+const appVersion = ref('')
 
 // --- Modal views ---
 const detailInstallation = ref<Installation | null>(null)
@@ -253,6 +254,7 @@ onMounted(async () => {
   setupQuitConfirmation()
   setupLocaleListener()
   listRef.value?.refresh()
+  appVersion.value = await window.api.getAppVersion()
 })
 </script>
 
@@ -289,6 +291,7 @@ onMounted(async () => {
           </template>
         </button>
       </div>
+      <div v-if="appVersion" class="sidebar-version">v{{ appVersion }}</div>
     </nav>
 
     <!-- Content Area -->

@@ -560,6 +560,7 @@ export interface ElectronApi {
   getResolvedTheme(): Promise<ResolvedTheme>
 
   // App
+  getAppVersion(): Promise<string>
   quitApp(): Promise<void>
   resetZoom(): Promise<void>
 

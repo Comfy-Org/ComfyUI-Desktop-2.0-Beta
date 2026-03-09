@@ -5,6 +5,7 @@ import { execFile } from 'child_process'
 import type { ChildProcess } from 'child_process'
 import todesktop from '@todesktop/runtime'
 import * as ipc from './lib/ipc'
+import { getLauncherVersion } from './lib/ipc'
 import * as updater from './lib/updater'
 import * as settings from './settings'
 import * as i18n from './lib/i18n'
@@ -26,6 +27,7 @@ todesktop.init({ autoUpdater: false })
 
 const APP_ICON = path.join(__dirname, '..', '..', 'assets', 'Comfy_Logo_x256.png')
 const TRAY_ICON = path.join(__dirname, '..', '..', 'assets', 'Comfy_Logo_x32.png')
+const LAUNCHER_VERSION = getLauncherVersion()
 
 const POPUP_ALLOWED_PREFIXES = [
   'https://dreamboothy.firebaseapp.com/',
@@ -236,6 +238,7 @@ function createLauncherWindow(): void {
     minWidth: 650,
     minHeight: 500,
     icon: APP_ICON,
+    title: `ComfyUI Launcher v${LAUNCHER_VERSION}`,
     backgroundColor: '#202020',
     show: false,
     webPreferences: {
@@ -440,7 +443,7 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
     minWidth: 800,
     minHeight: 600,
     icon: APP_ICON,
-    title: installation.name,
+    title: `${installation.name} — Launcher v${LAUNCHER_VERSION}`,
     backgroundColor: '#171717',
     webPreferences: {
       nodeIntegration: false,
@@ -462,7 +465,7 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
   })
   comfyWindow.webContents.on('page-title-updated', (e, title) => {
     e.preventDefault()
-    comfyWindow.setTitle(`${title} — ${installation.name}`)
+    comfyWindow.setTitle(`${title} — ${installation.name} — Launcher v${LAUNCHER_VERSION}`)
   })
   comfyWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (shouldOpenInPopup(url)) {

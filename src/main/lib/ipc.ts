@@ -77,6 +77,16 @@ function openPath(targetPath: string): Promise<string> {
   return shell.openPath(targetPath)
 }
 
+export function getLauncherVersion(): string {
+  let version = app.getVersion()
+  if (!app.isPackaged) {
+    try {
+      version = execFileSync('git', ['describe', '--tags', '--always'], { cwd: __dirname, encoding: 'utf8' }).trim() || version
+    } catch {}
+  }
+  return version.replace(/^v/, '')
+}
+
 const sourceMap: Record<string, SourcePlugin> = Object.fromEntries(sources.map((s) => [s.id, s]))
 
 
@@ -473,6 +483,9 @@ export function register(callbacks: RegisterCallbacks = {}): void {
   // Check installation updates on startup and periodically
   setTimeout(() => checkInstallationUpdates(), 3_000)
   setInterval(() => checkInstallationUpdates(), UPDATE_CHECK_INTERVAL)
+
+  // App version
+  ipcMain.handle('get-app-version', () => getLauncherVersion())
 
   // Sources
   ipcMain.handle('get-sources', () =>
@@ -1227,12 +1240,7 @@ export function register(callbacks: RegisterCallbacks = {}): void {
       }
       return []
     })
-    let version = app.getVersion()
-    if (!app.isPackaged) {
-      try {
-        version = execFileSync('git', ['describe', '--tags', '--always'], { cwd: __dirname, encoding: 'utf8' }).trim() || version
-      } catch {}
-    }
+    const version = getLauncherVersion()
     const aboutSection = {
       title: i18n.t('settings.about'),
       fields: [
