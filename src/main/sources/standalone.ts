@@ -390,7 +390,7 @@ export const standalone: SourcePlugin = {
 
     const infoFields: Record<string, unknown>[] = [
       { label: t('common.installMethod'), value: installation.sourceLabel as string },
-      { label: t('standalone.comfyui'), value: installation.version },
+      { label: t('standalone.comfyui'), value: installation.versionDetail || installation.version },
       { label: t('common.release'), value: (installation.releaseTag as string | undefined) || '—' },
       { label: t('standalone.variant'), value: (installation.variant as string | undefined) ? getVariantLabel(installation.variant as string) : '—' },
       { label: t('standalone.python'), value: (installation.pythonVersion as string | undefined) || '—' },
@@ -448,11 +448,11 @@ export const standalone: SourcePlugin = {
       const actions: Record<string, unknown>[] = []
       if (card.data?.updateAvailable && hasGit) {
         const channelInfo = releaseCache.getEffectiveInfo(COMFYUI_REPO, card.value, installation)!
-        const installedDisplay = (installation.version as string | undefined) || channelInfo.installedTag || 'unknown'
+        const installedDisplay = (installation.versionDetail as string | undefined) || (installation.version as string | undefined) || channelInfo.installedTag || 'unknown'
         const latestDisplay = channelInfo.releaseDetailName || channelInfo.releaseName || channelInfo.latestTag || '—'
         const isSwitching = card.value !== channel
         const latestTag = channelInfo.releaseName || channelInfo.latestTag || ''
-        const isDowngrade = card.value === 'stable' && (installedDisplay.includes(latestTag + '+') || installedDisplay.includes(latestTag + ' +'))
+        const isDowngrade = card.value === 'stable' && releaseCache.isVersionAheadOf(installedDisplay, latestTag)
         const msgKey = isDowngrade ? 'standalone.updateConfirmMessageDowngrade'
           : card.value === 'latest' ? 'standalone.updateConfirmMessageLatest'
           : 'standalone.updateConfirmMessage'
@@ -1139,6 +1139,7 @@ export const standalone: SourcePlugin = {
       const postHead = markers.POST_UPDATE_HEAD ? markers.POST_UPDATE_HEAD.slice(0, 7) : null
       const installedTag = markers.CHECKED_OUT_TAG || postHead || cachedRelease.latestTag || (installation.version as string | undefined) || 'unknown'
       const displayVersion = markers.CHECKED_OUT_TAG || cachedRelease.releaseName || installedTag
+      const displayVersionDetail = markers.CHECKED_OUT_TAG || cachedRelease.releaseDetailName || cachedRelease.releaseName || installedTag
       const rollback = {
         preUpdateHead: markers.PRE_UPDATE_HEAD || null,
         postUpdateHead: markers.POST_UPDATE_HEAD || null,
@@ -1149,6 +1150,7 @@ export const standalone: SourcePlugin = {
       const existing = (installation.updateInfoByChannel as Record<string, Record<string, unknown>> | undefined) || {}
       await update({
         version: displayVersion,
+        versionDetail: displayVersionDetail,
         lastRollback: rollback,
         updateInfoByChannel: {
           ...existing,
@@ -1158,7 +1160,7 @@ export const standalone: SourcePlugin = {
 
       // Capture post-update snapshot so the history reflects the new state immediately
       try {
-        const updatedInstallation = { ...installation, version: displayVersion, updateChannel: targetChannel }
+        const updatedInstallation = { ...installation, version: displayVersion, versionDetail: displayVersionDetail, updateChannel: targetChannel }
         const filename = await snapshots.saveSnapshot(installPath, updatedInstallation, 'post-update')
         const snapshotCount = await snapshots.getSnapshotCount(installPath)
         await update({ lastSnapshot: filename, snapshotCount })

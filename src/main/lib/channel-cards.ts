@@ -34,7 +34,7 @@ export function buildChannelCards(
     return {
       ...def,
       data: info ? {
-        installedVersion: (installation.version as string | undefined) || info.installedTag || 'unknown',
+        installedVersion: (installation.versionDetail as string | undefined) || (installation.version as string | undefined) || info.installedTag || 'unknown',
         latestVersion: info.releaseDetailName || info.releaseName || info.latestTag || '—',
         lastChecked: info.checkedAt ? new Date(info.checkedAt).toLocaleString() : '—',
         updateAvailable: releaseCache.isUpdateAvailable(installation, def.value, info),

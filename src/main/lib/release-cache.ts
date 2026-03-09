@@ -201,6 +201,15 @@ export async function checkForUpdate(
 }
 
 /**
+ * Check whether a version string indicates commits ahead of a base tag.
+ * Matches both the short format (e.g. "v0.14.2+21") and the legacy
+ * verbose format (e.g. "v0.14.2 + 21 commits (abc1234)").
+ */
+export function isVersionAheadOf(version: string, baseTag: string): boolean {
+  return version.includes(baseTag + '+') || version.includes(baseTag + ' +')
+}
+
+/**
  * Determine if an update is available for the given channel, using local data only.
  * Handles cross-channel switches (e.g. last update was on "latest" but viewing "stable").
  */
@@ -210,9 +219,8 @@ export function isUpdateAvailable(
   info: ReleaseCacheEntry | null
 ): boolean {
   if (!info || !info.latestTag) return false
-  // Installed version string shows commits ahead of the stable tag (e.g. "v0.14.2+21")
   const version = (installation.version as string) || ''
-  if (channel === 'stable' && (version.includes(info.latestTag + '+') || version.includes(info.latestTag + ' +'))) return true
+  if (channel === 'stable' && isVersionAheadOf(version, info.latestTag)) return true
   // Cross-channel: last update was on a different channel, so this channel's installedTag is stale;
   // fall back to comparing the current display version against this channel's latest tag.
   const lastRollback = installation.lastRollback as

@@ -823,6 +823,7 @@ export function buildPostRestoreState(
   const state: Record<string, unknown> = {
     updateChannel: targetChannel,
     version: displayVersion,
+    versionDetail: displayVersion,
     lastRollback: {
       preUpdateHead: null,
       postUpdateHead: headCommit,
