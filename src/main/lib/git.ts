@@ -1,6 +1,7 @@
 import { execFile, spawn } from 'child_process'
 import fs from 'fs'
 import path from 'path'
+import { killProcTree } from './process'
 
 /**
  * Resolve the actual .git directory for a repository.
@@ -97,43 +98,65 @@ export function isGitAvailable(): Promise<boolean> {
 export function gitClone(
   url: string,
   dest: string,
-  sendOutput: (text: string) => void
+  sendOutput: (text: string) => void,
+  signal?: AbortSignal
 ): Promise<number> {
+  if (signal?.aborted) return Promise.resolve(1)
   return new Promise((resolve) => {
     const proc = spawn('git', ['clone', url, dest], {
       stdio: ['ignore', 'pipe', 'pipe'],
-      windowsHide: true
+      windowsHide: true,
+      detached: process.platform !== 'win32'
     })
+    const onAbort = (): void => { killProcTree(proc) }
+    signal?.addEventListener('abort', onAbort, { once: true })
+    if (signal?.aborted) onAbort()
     proc.stdout.on('data', (data: Buffer) => sendOutput(data.toString()))
     proc.stderr.on('data', (data: Buffer) => sendOutput(data.toString()))
     proc.on('error', (err) => {
+      signal?.removeEventListener('abort', onAbort)
       sendOutput(err.message)
       resolve(1)
     })
-    proc.on('close', (code) => resolve(code ?? 1))
+    proc.on('close', (code) => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve(code ?? 1)
+    })
   })
 }
 
 export function gitFetchAndCheckout(
   repoPath: string,
   commit: string,
-  sendOutput: (text: string) => void
+  sendOutput: (text: string) => void,
+  signal?: AbortSignal
 ): Promise<number> {
-  const runGit = (args: string[]): Promise<number> =>
-    new Promise((resolve) => {
+  if (signal?.aborted) return Promise.resolve(1)
+  const runGit = (args: string[]): Promise<number> => {
+    if (signal?.aborted) return Promise.resolve(1)
+    return new Promise((resolve) => {
       const proc = spawn('git', args, {
         cwd: repoPath,
         stdio: ['ignore', 'pipe', 'pipe'],
-        windowsHide: true
+        windowsHide: true,
+        detached: process.platform !== 'win32'
       })
+      const onAbort = (): void => { killProcTree(proc) }
+      signal?.addEventListener('abort', onAbort, { once: true })
+      if (signal?.aborted) onAbort()
       proc.stdout.on('data', (data: Buffer) => sendOutput(data.toString()))
       proc.stderr.on('data', (data: Buffer) => sendOutput(data.toString()))
       proc.on('error', (err) => {
+        signal?.removeEventListener('abort', onAbort)
         sendOutput(err.message)
         resolve(1)
       })
-      proc.on('close', (code) => resolve(code ?? 1))
+      proc.on('close', (code) => {
+        signal?.removeEventListener('abort', onAbort)
+        resolve(code ?? 1)
+      })
     })
+  }
 
   // Fetch master explicitly — grafted/archive-based repos may have no
   // branch tracking configured, so a bare `git fetch origin` only pulls
