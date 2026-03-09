@@ -22,21 +22,13 @@ import {
   setLauncherWindow,
 } from './lib/comfyDownloadManager'
 import { getModelDownloadContentScript } from './lib/comfyContentScript'
+import { shouldOpenInPopup } from './lib/allowedPopups'
 
 todesktop.init({ autoUpdater: false })
 
 const APP_ICON = path.join(__dirname, '..', '..', 'assets', 'Comfy_Logo_x256.png')
 const TRAY_ICON = path.join(__dirname, '..', '..', 'assets', 'Comfy_Logo_x32.png')
 const LAUNCHER_VERSION = getLauncherVersion()
-
-const POPUP_ALLOWED_PREFIXES = [
-  'https://dreamboothy.firebaseapp.com/',
-  'https://checkout.comfy.org/',
-]
-
-function shouldOpenInPopup(url: string): boolean {
-  return POPUP_ALLOWED_PREFIXES.some((prefix) => url.startsWith(prefix))
-}
 
 interface WindowBounds {
   x: number
