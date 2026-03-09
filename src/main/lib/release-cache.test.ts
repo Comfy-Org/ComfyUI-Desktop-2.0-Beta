@@ -54,4 +54,22 @@ describe('isUpdateAvailable', () => {
     const info: ReleaseCacheEntry = { latestTag: 'v1.1.0', installedTag: 'v1.0.0' }
     expect(isUpdateAvailable(installation, 'stable', info)).toBe(true)
   })
+
+  it('detects stable update available when on latest with short format version (v0.14.2+21)', () => {
+    const installation = {
+      version: 'v0.14.2+21',
+      updateInfoByChannel: { stable: { installedTag: 'abc1234' } },
+    }
+    const info: ReleaseCacheEntry = { latestTag: 'v0.14.2', installedTag: 'abc1234' }
+    expect(isUpdateAvailable(installation, 'stable', info)).toBe(true)
+  })
+
+  it('detects stable update available when on latest with legacy format version (v0.14.2 + 21 commits)', () => {
+    const installation = {
+      version: 'v0.14.2 + 21 commits (abc1234)',
+      updateInfoByChannel: { stable: { installedTag: 'abc1234' } },
+    }
+    const info: ReleaseCacheEntry = { latestTag: 'v0.14.2', installedTag: 'abc1234' }
+    expect(isUpdateAvailable(installation, 'stable', info)).toBe(true)
+  })
 })

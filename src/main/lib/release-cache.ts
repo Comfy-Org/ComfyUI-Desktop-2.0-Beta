@@ -19,6 +19,7 @@ export interface ReleaseCacheEntry {
   checkedAt?: number
   latestTag?: string
   releaseName?: string
+  releaseDetailName?: string
   releaseNotes?: string
   releaseUrl?: string
   publishedAt?: string
@@ -173,6 +174,7 @@ export async function checkForUpdate(
         checkedAt: Date.now(),
         latestTag: release.tag_name as string,
         releaseName: (release.name as string) || (release.tag_name as string),
+        releaseDetailName: (release.detail_name as string | undefined) || (release.name as string) || (release.tag_name as string),
         releaseNotes: truncateNotes(release.body as string, 4000),
         releaseUrl: release.html_url as string,
         publishedAt: release.published_at as string,
@@ -208,9 +210,9 @@ export function isUpdateAvailable(
   info: ReleaseCacheEntry | null
 ): boolean {
   if (!info || !info.latestTag) return false
-  // Installed version string shows commits ahead of the stable tag (e.g. "v0.14.2 + 21 commits")
+  // Installed version string shows commits ahead of the stable tag (e.g. "v0.14.2+21")
   const version = (installation.version as string) || ''
-  if (channel === 'stable' && version.includes(info.latestTag + ' +')) return true
+  if (channel === 'stable' && (version.includes(info.latestTag + '+') || version.includes(info.latestTag + ' +'))) return true
   // Cross-channel: last update was on a different channel, so this channel's installedTag is stale;
   // fall back to comparing the current display version against this channel's latest tag.
   const lastRollback = installation.lastRollback as

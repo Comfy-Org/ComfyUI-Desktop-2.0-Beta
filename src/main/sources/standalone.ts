@@ -449,9 +449,10 @@ export const standalone: SourcePlugin = {
       if (card.data?.updateAvailable && hasGit) {
         const channelInfo = releaseCache.getEffectiveInfo(COMFYUI_REPO, card.value, installation)!
         const installedDisplay = (installation.version as string | undefined) || channelInfo.installedTag || 'unknown'
-        const latestDisplay = channelInfo.releaseName || channelInfo.latestTag || '—'
+        const latestDisplay = channelInfo.releaseDetailName || channelInfo.releaseName || channelInfo.latestTag || '—'
         const isSwitching = card.value !== channel
-        const isDowngrade = card.value === 'stable' && installedDisplay.includes(latestDisplay + ' +')
+        const latestTag = channelInfo.releaseName || channelInfo.latestTag || ''
+        const isDowngrade = card.value === 'stable' && (installedDisplay.includes(latestTag + '+') || installedDisplay.includes(latestTag + ' +'))
         const msgKey = isDowngrade ? 'standalone.updateConfirmMessageDowngrade'
           : card.value === 'latest' ? 'standalone.updateConfirmMessageLatest'
           : 'standalone.updateConfirmMessage'

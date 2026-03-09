@@ -35,22 +35,26 @@ export async function fetchLatestRelease(
     const msg = commit.commit?.message?.split('\n')[0] ?? ''
     const stable = releases.find((r) => !r.draft && !r.prerelease)
     let label = sha
+    let detailLabel = sha
     if (stable) {
       try {
         const cmp = await fetchJSON(
           `https://api.github.com/repos/${REPO}/compare/${stable.tag_name}...master`
         ) as GitHubComparison
         const ahead = cmp.ahead_by
-        label = ahead > 0
+        label = ahead > 0 ? `${stable.tag_name}+${ahead}` : stable.tag_name
+        detailLabel = ahead > 0
           ? `${stable.tag_name} + ${ahead} commit${ahead !== 1 ? 's' : ''} (${sha})`
           : stable.tag_name
       } catch {
-        label = `${stable.tag_name}+ (${sha})`
+        label = `${stable.tag_name}+`
+        detailLabel = `${stable.tag_name}+ (${sha})`
       }
     }
     return {
       tag_name: sha,
       name: label,
+      detail_name: detailLabel,
       body: msg,
       html_url: commit.html_url,
       published_at: date,
