@@ -94,7 +94,7 @@ function getMetaParts(inst: Installation): MetaPart[] {
   if (!sessionStore.isRunning(inst.id) && activeSession) {
     parts.push({ text: activeSession.label, class: 'status-in-progress' })
   }
-  if (inst.statusTag && inst.statusTag.style !== 'update') {
+  if (inst.statusTag && inst.statusTag.style !== 'update' && inst.statusTag.style !== 'migrate') {
     parts.push({ text: inst.statusTag.label, class: `status-${inst.statusTag.style}` })
   }
   if (inst.seen === false) {
@@ -257,6 +257,7 @@ const filterStats = computed(() => {
 
 const emit = defineEmits<{
   'show-detail': [inst: Installation, tab?: string]
+  'show-migrate': [inst: Installation]
   'show-console': [installationId: string]
   'show-progress': [opts: {
     installationId: string
@@ -343,6 +344,10 @@ defineExpose({ refresh })
             <template v-if="inst.statusTag?.style === 'update'">
               <template v-if="getMetaParts(inst).length > 0"> · </template>
               <span class="update-pill" role="button" tabindex="0" @click.stop="emit('show-detail', inst, 'update')" @keydown.enter.stop="emit('show-detail', inst, 'update')" @keydown.space.prevent.stop="emit('show-detail', inst, 'update')">{{ inst.statusTag.label }}</span>
+            </template>
+            <template v-if="inst.statusTag?.style === 'migrate'">
+              <template v-if="getMetaParts(inst).length > 0"> · </template>
+              <span class="migrate-pill" role="button" tabindex="0" @click.stop="emit('show-migrate', inst)" @keydown.enter.stop="emit('show-migrate', inst)" @keydown.space.prevent.stop="emit('show-migrate', inst)">{{ inst.statusTag.label }}</span>
             </template>
           </template>
 

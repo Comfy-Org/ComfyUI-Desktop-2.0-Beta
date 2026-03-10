@@ -31,7 +31,7 @@ const prefs = useLauncherPrefs()
 const emit = defineEmits<{
   'show-quick-install': []
   'show-settings': []
-  'show-detail': [inst: Installation, tab?: string]
+  'show-detail': [inst: Installation, tab?: string, autoAction?: string]
   'show-console': [installationId: string]
   'show-progress': [opts: {
     installationId: string
@@ -365,6 +365,7 @@ async function changePrimary(): Promise<void> {
               @launch="handleLaunch"
               @show-detail="(inst) => emit('show-detail', inst)"
               @show-update="(inst) => emit('show-detail', inst, 'update')"
+              @show-migrate="(inst) => emit('show-detail', inst, undefined, 'migrate-to-standalone')"
               @show-console="(id) => emit('show-console', id)"
               @show-progress="(opts) => emit('show-progress', opts)"
             >
@@ -389,6 +390,7 @@ async function changePrimary(): Promise<void> {
               @launch="handleLaunch"
               @show-detail="(inst) => emit('show-detail', inst)"
               @show-update="(inst) => emit('show-detail', inst, 'update')"
+              @show-migrate="(inst) => emit('show-detail', inst, undefined, 'migrate-to-standalone')"
               @show-console="(id) => emit('show-console', id)"
               @show-progress="(opts) => emit('show-progress', opts)"
             >
@@ -426,6 +428,7 @@ async function changePrimary(): Promise<void> {
               @launch="handleLaunch"
               @show-detail="(inst) => emit('show-detail', inst)"
               @show-update="(inst) => emit('show-detail', inst, 'update')"
+              @show-migrate="(inst) => emit('show-detail', inst, undefined, 'migrate-to-standalone')"
               @show-console="(id) => emit('show-console', id)"
               @show-progress="(opts) => emit('show-progress', opts)"
             >
@@ -455,6 +458,7 @@ async function changePrimary(): Promise<void> {
             @launch="handleLaunch"
             @show-detail="(inst) => emit('show-detail', inst)"
             @show-update="(inst) => emit('show-detail', inst, 'update')"
+            @show-migrate="(inst) => emit('show-detail', inst, undefined, 'migrate-to-standalone')"
             @show-console="(id) => emit('show-console', id)"
             @show-progress="(opts) => emit('show-progress', opts)"
           />

@@ -11,6 +11,7 @@ import type {
   ActionResult,
   ActionTools,
   LaunchCommand,
+  StatusTag,
 } from '../types/sources'
 
 export const desktop: SourcePlugin = {
@@ -36,6 +37,13 @@ export const desktop: SourcePlugin = {
 
   getListPreview(installation: InstallationRecord): string | null {
     return installation.installPath || null
+  },
+
+  getStatusTag(installation: InstallationRecord): StatusTag | undefined {
+    if (installation.status === 'installed') {
+      return { label: t('migrate.migrateToStandalonePill'), style: 'migrate' }
+    }
+    return undefined
   },
 
   getLaunchCommand(installation: InstallationRecord): LaunchCommand | null {

@@ -1,8 +1,16 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted, onUnmounted, reactive } from 'vue'
 import { useModal, type ModalOption } from '../composables/useModal'
+import { sortedCardOptions, getVariantImage } from '../lib/variants'
+import type { FieldOption } from '../types/ipc'
 
-const { state, close } = useModal()
+const { state, close, updateConfirm } = useModal()
+
+const sortedVariants = computed(() => sortedCardOptions(state.variantCards))
+
+function selectVariant(opt: FieldOption): void {
+  updateConfirm({ selectedVariant: opt })
+}
 
 const inputValue = ref('')
 const error = ref('')
@@ -20,13 +28,6 @@ function formatNodeVersion(node: { version?: string; commit?: string }): string 
   if (node.version) return node.version
   if (node.commit) return node.commit.slice(0, 7)
   return '—'
-}
-
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleString(undefined, {
-    year: 'numeric', month: 'short', day: 'numeric',
-    hour: '2-digit', minute: '2-digit',
-  })
 }
 
 const confirmClass = computed(() =>
@@ -92,6 +93,25 @@ function handleOverlayClick(event: MouseEvent): void {
   mouseDownOnOverlay.value = false
 }
 
+function resetSnapshotExpansion(): void {
+  const sp = state.snapshotPreview
+  const hasVariantCards = state.variantCards.length > 0 || state.variantLoading
+  spNodesExpanded.value = hasVariantCards ? false : sp ? sp.customNodes.length > 0 : true
+  spPipExpanded.value = false
+}
+
+watch(() => state.snapshotPreview, () => {
+  if (state.visible && state.type === 'confirm') {
+    resetSnapshotExpansion()
+  }
+})
+
+watch(() => state.variantCards, () => {
+  if (state.visible && state.type === 'confirm' && state.variantCards.length > 0) {
+    spNodesExpanded.value = false
+  }
+})
+
 function handleKeydown(event: KeyboardEvent): void {
   if (!state.visible) return
   if (event.key === 'Escape') {
@@ -116,9 +136,8 @@ watch(
       inputRef.value?.select()
     }
 
-    if (state.type === 'confirm' && state.snapshotPreview) {
-      spNodesExpanded.value = true
-      spPipExpanded.value = false
+    if (state.type === 'confirm') {
+      resetSnapshotExpansion()
     }
 
     if (state.type === 'confirmWithOptions') {
@@ -162,7 +181,7 @@ onUnmounted(() => {
       </div>
 
       <!-- Confirm -->
-      <div v-else-if="state.type === 'confirm'" class="modal-box" :class="{ 'modal-box-wide': state.snapshotPreview }">
+      <div v-else-if="state.type === 'confirm'" class="modal-box" :class="{ 'modal-box-wide': state.snapshotPreview || state.loading }">
         <div class="modal-title">{{ state.title }}</div>
         <div class="modal-body">
           <div
@@ -171,8 +190,14 @@ onUnmounted(() => {
             v-html="linkifiedMessage"
           ></div>
 
+          <!-- Loading -->
+          <div v-if="state.loading" class="modal-loading">
+            <div class="modal-loading-spinner" />
+            <span>{{ $t('common.loading') }}</span>
+          </div>
+
           <!-- Snapshot preview -->
-          <template v-if="state.snapshotPreview">
+          <template v-if="!state.loading && state.snapshotPreview">
             <div class="sp-grid">
               <div class="sp-field">
                 <span class="sp-label">{{ $t('snapshots.comfyuiVersion') }}</span>
@@ -186,10 +211,7 @@ onUnmounted(() => {
                 <span class="sp-label">{{ $t('snapshots.pythonVersion') }}</span>
                 <span class="sp-value">{{ state.snapshotPreview.pythonVersion }}</span>
               </div>
-              <div class="sp-field">
-                <span class="sp-label">{{ $t('snapshots.capturedAt') }}</span>
-                <span class="sp-value">{{ formatDate(state.snapshotPreview.createdAt) }}</span>
-              </div>
+
             </div>
 
             <div class="sp-subsection">
@@ -227,6 +249,48 @@ onUnmounted(() => {
             </div>
           </template>
 
+          <!-- Variant / device selection -->
+          <div v-if="!state.loading && (state.variantCards.length > 0 || state.variantLoading)" class="sp-subsection">
+            <div class="sp-subsection-title">
+              <span>{{ $t('list.snapshotDevice') }}</span>
+            </div>
+            <div v-if="state.variantLoading" class="modal-loading">
+              <div class="modal-loading-spinner" />
+              <span>{{ $t('common.loading') }}</span>
+            </div>
+            <div v-else class="variant-cards">
+              <div
+                v-for="opt in sortedVariants"
+                :key="opt.value"
+                role="button"
+                tabindex="0"
+                :class="['variant-card', {
+                  selected: state.selectedVariant?.value === opt.value,
+                  recommended: opt.recommended,
+                }]"
+                @click="selectVariant(opt)"
+                @keydown.enter.prevent="selectVariant(opt)"
+              >
+                <div class="variant-card-icon">
+                  <img
+                    v-if="getVariantImage(opt)"
+                    :src="getVariantImage(opt)!"
+                    :alt="opt.label"
+                    draggable="false"
+                  />
+                  <span v-else class="variant-card-icon-text">{{ opt.label }}</span>
+                </div>
+                <div class="variant-card-label">{{ opt.label }}</div>
+                <div v-if="opt.recommended" class="variant-card-badge">
+                  {{ $t('newInstall.recommended') }}
+                </div>
+                <div v-if="opt.description" class="variant-card-desc">
+                  {{ opt.description }}
+                </div>
+              </div>
+            </div>
+          </div>
+
           <div v-if="state.messageDetails.length" class="modal-details">
             <div v-for="(group, gi) in state.messageDetails" :key="gi" class="modal-detail-group">
               <span class="modal-detail-label">{{ group.label }}</span>
@@ -235,10 +299,16 @@ onUnmounted(() => {
               </ul>
             </div>
           </div>
+          <div v-if="state.checkboxes.length" class="modal-options">
+            <label v-for="cb in state.checkboxes" :key="cb.id" class="modal-option">
+              <input v-model="cb.checked" type="checkbox" />
+              <span>{{ cb.label }}</span>
+            </label>
+          </div>
         </div>
         <div class="modal-actions">
           <button @click="close(false)">{{ $t('common.cancel') }}</button>
-          <button :class="confirmClass" @click="close(true)">
+          <button :class="confirmClass" :disabled="state.loading || state.variantLoading || (state.variantCards.length > 0 && !state.selectedVariant)" @click="close(true)">
             {{ state.confirmLabel }}
           </button>
         </div>

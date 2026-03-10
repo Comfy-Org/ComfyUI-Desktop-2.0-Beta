@@ -48,12 +48,12 @@ async function startMigration(): Promise<void> {
       message: t('desktop.migrateConfirmMessage'),
       snapshotPreview: previewResult.preview?.newestSnapshot,
       messageDetails: [{
-        label: t('desktop.migrateConfirmTitle'),
+        label: t('migrate.migrationWill'),
         items: [
-          t('desktop.copyingUserData'),
-          t('desktop.copyingInput'),
-          t('desktop.copyingOutput'),
-          t('desktop.addingModels'),
+          t('desktop.copyUserData'),
+          t('desktop.copyInput'),
+          t('desktop.copyOutput'),
+          t('desktop.addModels'),
         ],
       }],
       confirmLabel: t('desktop.migrateConfirm'),

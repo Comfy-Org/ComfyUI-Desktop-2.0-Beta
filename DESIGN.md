@@ -22,8 +22,10 @@ The app uses a fixed font-size scale. Do **not** introduce sizes outside this se
 | Element | Size | Notes |
 | ------- | ---- | ----- |
 | Labels | 13px | `color: var(--text-muted)` |
+| Labels (modal key-value grids) | 13px | `font-weight: 600`, `color: var(--text)` — inside modals where surrounding text is already muted, field labels use `--text` to remain scannable |
+| Values (modal key-value grids) | 14px | `color: var(--text-muted)` — secondary to their bold labels |
 | Values / body text | 14px | `color: var(--text)` |
-| Section titles | 13px | uppercase, `font-weight: 600`, `color: var(--text-muted)` |
+| Section titles | 13px | uppercase, `font-weight: 600`, `color: var(--text-muted)` (in views) or `color: var(--text)` (in modals) |
 | List rows | 13px | |
 | Badges / tags | 11px | `font-weight: 600`, uppercase |
 | Buttons | 14px | |
@@ -124,6 +126,8 @@ When a searchable list has a filter input, place the `<input>` **inside** the re
 
 - Use `modal-overlay` → `modal-box` pattern.
 - `modal-box` uses `border-radius: 12px`.
+- **Title separator**: `.modal-title` has `border-bottom: 1px solid var(--border)` with `padding-bottom: 12px` and `margin-bottom: 12px`.
+- **Actions separator**: `.modal-actions` has `border-top: 1px solid var(--border)` with `padding-top: 12px`.
 
 ### All modals
 

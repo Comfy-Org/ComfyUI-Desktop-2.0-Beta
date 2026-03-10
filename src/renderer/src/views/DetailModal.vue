@@ -8,6 +8,7 @@ import DetailSectionComponent from '../components/DetailSection.vue'
 import SnapshotTab from '../components/SnapshotTab.vue'
 import { useInstallationStore } from '../stores/installationStore'
 import { emitTelemetryAction, toErrorBucket } from '../lib/telemetry'
+import { findBestVariant } from '../lib/variants'
 import { REQUIRES_STOPPED } from '../types/ipc'
 import { Star, Pin } from 'lucide-vue-next'
 import type {
@@ -22,10 +23,12 @@ import type {
 interface Props {
   installation: Installation | null
   initialTab?: string
+  autoAction?: string | null
 }
 
 const props = withDefaults(defineProps<Props>(), {
   initialTab: 'status',
+  autoAction: null,
 })
 
 const emit = defineEmits<{
@@ -134,6 +137,19 @@ watch(
       await nextTick()
       if (scrollRef.value) scrollRef.value.scrollTop = 0
       if (inst.installPath) fetchInstallationSize(inst.id)
+
+      // Auto-trigger an action if requested (e.g. from migrate pill click)
+      if (props.autoAction) {
+        const actionId = props.autoAction
+        for (const section of sections.value) {
+          const action = section.actions?.find((a: ActionDef) => a.id === actionId)
+          if (action) {
+            await nextTick()
+            runAction(action, null)
+            break
+          }
+        }
+      }
     }
   },
   { immediate: true }
@@ -294,12 +310,40 @@ async function runAction(action: ActionDef, btn: HTMLButtonElement | null): Prom
     }
   }
 
-  // Desktop migration preview — replaces the static confirm with a live snapshot preview
+  // Migration preview — replaces the static confirm with a live snapshot preview
   if (mutableAction.id === 'migrate-to-standalone') {
+    const isDesktop = props.installation.sourceId === 'desktop'
+    const migrateItems = isDesktop
+      ? [
+          t('desktop.copyUserData'),
+          t('desktop.copyInput'),
+          t('desktop.copyOutput'),
+          t('desktop.addModels'),
+        ]
+      : [
+          t('migrate.mergeUserData'),
+          t('migrate.mergeInput'),
+          t('migrate.mergeOutput'),
+          t('migrate.addModels'),
+        ]
+
+    // Show the modal immediately with a loading indicator
+    const confirmPromise = modal.confirm({
+      title: mutableAction.confirm?.title || t('migrate.migrateToStandaloneConfirmTitle'),
+      message: mutableAction.confirm?.message || '',
+      loading: true,
+      confirmLabel: mutableAction.confirm?.confirmLabel || t('migrate.migrateToStandaloneConfirm'),
+      confirmStyle: 'primary',
+    })
+
+    // Fetch the preview in the background
     let previewResult: Awaited<ReturnType<typeof window.api.previewDesktopMigration>>
     try {
-      previewResult = await window.api.previewDesktopMigration()
+      previewResult = isDesktop
+        ? await window.api.previewDesktopMigration()
+        : await window.api.previewLocalMigration(props.installation.id)
     } catch (err) {
+      modal.close(false)
       await modal.alert({
         title: mutableAction.label,
         message: (err as Error)?.message ?? String(err),
@@ -307,31 +351,71 @@ async function runAction(action: ActionDef, btn: HTMLButtonElement | null): Prom
       return
     }
     if (!previewResult.ok) {
+      modal.close(false)
       if (previewResult.message) {
         await modal.alert({ title: mutableAction.label, message: previewResult.message })
       }
       return
     }
-    const confirmed = await modal.confirm({
-      title: mutableAction.confirm?.title || t('desktop.migrateConfirmTitle'),
-      message: mutableAction.confirm?.message || '',
+
+    // Update the modal with the loaded preview data + start loading variant options
+    modal.updateConfirm({
+      loading: false,
       snapshotPreview: previewResult.preview?.newestSnapshot,
+      variantLoading: true,
       messageDetails: [{
-        label: t('desktop.migrateConfirmTitle'),
-        items: [
-          t('desktop.copyingUserData'),
-          t('desktop.copyingInput'),
-          t('desktop.copyingOutput'),
-          t('desktop.addingModels'),
-        ],
+        label: t('migrate.migrationWill'),
+        items: migrateItems,
       }],
-      confirmLabel: mutableAction.confirm?.confirmLabel || t('desktop.migrateConfirm'),
-      confirmStyle: 'primary',
+      checkboxes: isDesktop ? [] : [
+        { id: 'enablePipSync', label: t('migrate.enablePipSync'), checked: false },
+      ],
     })
+
+    // Fetch release + variant options for device selection
+    let migrateRelease: FieldOption | null = null
+    try {
+      const releaseOptions = await window.api.getFieldOptions('standalone', 'release', {})
+      migrateRelease = releaseOptions[0] || null
+      if (migrateRelease) {
+        const variantOptions = await window.api.getFieldOptions('standalone', 'variant', { release: toRaw(migrateRelease) })
+        const snapshotVariantId = previewResult.preview?.newestSnapshot.comfyui.variant || ''
+        const defaultVariant = findBestVariant(variantOptions, snapshotVariantId)
+
+        modal.updateConfirm({
+          variantCards: variantOptions,
+          selectedVariant: defaultVariant,
+          variantLoading: false,
+        })
+      } else {
+        modal.updateConfirm({ variantLoading: false })
+      }
+    } catch {
+      modal.updateConfirm({ variantLoading: false })
+    }
+
+    const confirmed = await confirmPromise
     if (!confirmed) return
+    const checkboxValues = modal.getLastCheckboxValues()
+
+    const selectedVariant = modal.state.selectedVariant
+    const targetData: Record<string, unknown> = {}
+    if (selectedVariant && migrateRelease) {
+      targetData.target = {
+        mode: 'selected' as const,
+        release: toRaw(migrateRelease),
+        variant: toRaw(selectedVariant),
+      }
+    }
+
     mutableAction = {
       ...mutableAction,
-      data: { ...mutableAction.data, snapshotPath: previewResult.snapshotPath },
+      data: {
+        ...mutableAction.data,
+        snapshotPath: previewResult.snapshotPath,
+        enablePipSync: !!checkboxValues.enablePipSync,
+        ...targetData,
+      },
     }
   }
 

@@ -22,6 +22,7 @@ import {
 import { detectGPU, validateHardware, checkNvidiaDriver } from './gpu'
 import { detectDesktopInstall, stageDesktopSnapshot } from './desktopDetect'
 import { performDesktopMigration } from './desktopMigration'
+import { performLocalMigration, stageLocalSnapshot } from './localMigration'
 import { getDiskSpace, getDirectorySize, validateInstallPath } from './disk'
 import type { GpuInfo } from './gpu'
 import { formatTime } from './util'
@@ -498,7 +499,10 @@ export function register(callbacks: RegisterCallbacks = {}): void {
   ipcMain.handle('get-field-options', async (_event, sourceId: string, fieldId: string, selections: Record<string, unknown>) => {
     const source = sourceMap[sourceId]
     if (!source) return []
-    const gpu = _gpuPromise ? await _gpuPromise : null
+    if (!_gpuPromise) {
+      _gpuPromise = detectGPU().catch(() => null)
+    }
+    const gpu = await _gpuPromise
     const options = await source.getFieldOptions(
       fieldId,
       selections as Record<string, FieldOption | undefined>,
@@ -1055,6 +1059,32 @@ export function register(callbacks: RegisterCallbacks = {}): void {
     }
   })
 
+  const _lastLocalPreviewFiles = new Map<string, string>()
+  ipcMain.handle('preview-local-migration', async (_event, installationId: string) => {
+    try {
+      const prev = _lastLocalPreviewFiles.get(installationId)
+      if (prev) {
+        fs.promises.unlink(prev).catch(() => {})
+        _lastLocalPreviewFiles.delete(installationId)
+      }
+
+      const inst = await installations.get(installationId)
+      if (!inst) return { ok: false, message: 'Installation not found.' }
+
+      const { envelope, stagedFile } = await stageLocalSnapshot(
+        inst.installPath,
+        inst.sourceId as string,
+        inst.name,
+      )
+
+      _lastLocalPreviewFiles.set(installationId, stagedFile)
+      return { ok: true, preview: buildSnapshotPreview(stagedFile, envelope), snapshotPath: stagedFile }
+    } catch (err) {
+      console.warn('preview-local-migration failed:', err)
+      return { ok: false, message: (err as Error)?.message ?? String(err) }
+    }
+  })
+
   ipcMain.handle('preview-snapshot-file', async (_event) => {
     const win = BrowserWindow.fromWebContents(_event.sender)
     if (!win) return { ok: false, message: 'No window.' }
@@ -1589,19 +1619,19 @@ export function register(callbacks: RegisterCallbacks = {}): void {
       let entry: InstallationRecord | null = null
       let destPath = ''
       try {
-        const result = await performDesktopMigration(actionData, {
+        const migrationTools = {
           sendProgress,
           sendOutput,
           signal: abort.signal,
           sourceMap,
           uniqueName,
           ensureDefaultPrimary,
-        })
+        }
+        const result = inst.sourceId === 'desktop'
+          ? await performDesktopMigration(actionData, migrationTools)
+          : await performLocalMigration(inst, actionData, migrationTools)
         entry = result.entry
         destPath = result.destPath
-
-        // Promote the new standalone install to primary so the dashboard features it
-        settings.set('primaryInstallId', entry.id)
 
         _operationAborts.delete(installationId)
         sendProgress('done', { percent: 100, status: 'Complete' })

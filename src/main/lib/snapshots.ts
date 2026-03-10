@@ -1,7 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import { spawn } from 'child_process'
-import { readGitHead, isGitAvailable, gitClone, gitFetchAndCheckout } from './git'
+import { readGitHead, isGitAvailable, gitClone, gitCheckoutCommit, gitFetchAndCheckout } from './git'
 import { scanCustomNodes, nodeKey } from './nodes'
 import { pipFreeze, runUvPip as sharedRunUvPip, installFilteredRequirements, getPipIndexArgs } from './pip'
 import { installCnrNode, switchCnrVersion, isSafePathComponent } from './cnr'
@@ -1302,7 +1302,7 @@ export async function restoreCustomNodes(
             continue
           }
           if (targetNode.commit) {
-            const checkoutResult = await gitFetchAndCheckout(dest, targetNode.commit, sendOutput, signal)
+            const checkoutResult = await gitCheckoutCommit(dest, targetNode.commit, sendOutput, signal)
             if (signal?.aborted) {
               await fs.promises.rm(dest, { recursive: true, force: true }).catch(() => {})
               break
@@ -1369,7 +1369,7 @@ export async function restoreCustomNodes(
         if (!gitAvailable) {
           result.failed.push({ id: targetNode.id, error: 'git not available' })
         } else {
-          const checkoutResult = await gitFetchAndCheckout(nodePath, targetNode.commit, sendOutput, signal)
+          const checkoutResult = await gitCheckoutCommit(nodePath, targetNode.commit, sendOutput, signal)
           if (signal?.aborted) break
           if (checkoutResult.exitCode === 0) {
             result.switched.push(targetNode.id)
