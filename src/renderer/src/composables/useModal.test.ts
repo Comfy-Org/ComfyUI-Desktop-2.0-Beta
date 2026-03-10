@@ -130,6 +130,43 @@ describe('useModal', () => {
     })
   })
 
+  describe('updateConfirm variant state', () => {
+    const variantA = { value: 'nvidia', label: 'NVIDIA' }
+    const variantB = { value: 'amd', label: 'AMD' }
+
+    it('sets variantCards and selectedVariant', () => {
+      modal.confirm({ title: 'T', message: 'M' })
+      modal.updateConfirm({ variantCards: [variantA, variantB], selectedVariant: variantA })
+
+      expect(modal.state.variantCards).toEqual([variantA, variantB])
+      expect(modal.state.selectedVariant).toEqual(variantA)
+    })
+
+    it('sets variantLoading', () => {
+      modal.confirm({ title: 'T', message: 'M' })
+      modal.updateConfirm({ variantLoading: true })
+
+      expect(modal.state.variantLoading).toBe(true)
+    })
+
+    it('clears variant state on reset', () => {
+      modal.confirm({ title: 'T', message: 'M' })
+      modal.updateConfirm({ variantCards: [variantA], selectedVariant: variantA, variantLoading: true })
+      modal.close(false)
+
+      expect(modal.state.variantCards).toEqual([])
+      expect(modal.state.selectedVariant).toBeNull()
+      expect(modal.state.variantLoading).toBe(false)
+    })
+
+    it('does not update when modal is not visible', () => {
+      modal.updateConfirm({ variantCards: [variantA], selectedVariant: variantA })
+
+      expect(modal.state.variantCards).toEqual([])
+      expect(modal.state.selectedVariant).toBeNull()
+    })
+  })
+
   describe('close', () => {
     it('resets state after resolving', () => {
       modal.confirm({ title: 'Test', message: 'Msg', confirmStyle: 'primary' })

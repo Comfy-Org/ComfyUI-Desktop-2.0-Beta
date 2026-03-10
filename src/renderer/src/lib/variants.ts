@@ -38,16 +38,17 @@ export function getVariantGpuLabel(variantId: string): string | null {
 }
 
 /**
- * Pick the best default variant from a list of options, preferring a match
- * to the snapshot's variant, then the GPU-recommended option, then the first.
+ * Pick the best default variant from a list of options, preferring the
+ * GPU-recommended option, then a match to the snapshot's variant, then first.
  */
 export function findBestVariant(options: FieldOption[], snapshotVariantId: string): FieldOption | null {
+  const recommended = options.find((o) => o.recommended)
+  if (recommended) return recommended
   const stripped = stripVariantPrefix(snapshotVariantId)
   const snapshotMatch = stripped
     ? options.find((o) => stripVariantPrefix((o.data?.variantId as string) || '') === stripped)
     : undefined
-  const recommended = options.find((o) => o.recommended)
-  return snapshotMatch || recommended || options[0] || null
+  return snapshotMatch || options[0] || null
 }
 
 export function sortedCardOptions(options: FieldOption[]): FieldOption[] {
