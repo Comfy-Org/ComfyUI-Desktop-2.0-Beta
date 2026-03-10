@@ -6,7 +6,7 @@ import { deleteAction, untrackAction } from '../lib/actions'
 import { parseArgs, extractPort } from '../lib/util'
 import { t } from '../lib/i18n'
 import type { InstallationRecord } from '../installations'
-import type { SourcePlugin, FieldOption, ActionResult, ActionTools, LaunchCommand } from '../types/sources'
+import type { SourcePlugin, FieldOption, ActionResult, ActionTools, LaunchCommand, StatusTag } from '../types/sources'
 
 const DEFAULT_REPO = 'https://github.com/Comfy-Org/ComfyUI/'
 const DEFAULT_LAUNCH_ARGS = ''
@@ -152,6 +152,13 @@ export const gitSource: SourcePlugin = {
     ]
   },
 
+  getStatusTag(installation: InstallationRecord): StatusTag | undefined {
+    if (installation.status === 'installed') {
+      return { label: t('migrate.migrateToStandalonePill'), style: 'migrate' }
+    }
+    return undefined
+  },
+
   getDetailSections(installation: InstallationRecord): Record<string, unknown>[] {
     const installed = installation.status === 'installed'
     const hasVenv = !!resolveVenvPython(installation)
@@ -207,6 +214,19 @@ export const gitSource: SourcePlugin = {
           { id: 'open-folder', label: t('actions.openDirectory'), style: 'default', enabled: !!installation.installPath },
           { id: 'git-pull', label: t('git.gitPull'), style: 'default', enabled: installed,
             showProgress: true, progressTitle: t('git.gitPulling') },
+          { id: 'migrate-to-standalone',
+            label: t('migrate.migrateToStandalone'),
+            style: 'default',
+            enabled: installed,
+            showProgress: true,
+            progressTitle: t('migrate.migrating'),
+            cancellable: true,
+            confirm: {
+              title: t('migrate.migrateToStandaloneConfirmTitle'),
+              message: t('migrate.migrateToStandaloneConfirmMessage'),
+              confirmLabel: t('migrate.migrateToStandaloneConfirm'),
+            },
+          },
           deleteAction(installation),
           untrackAction(),
         ],

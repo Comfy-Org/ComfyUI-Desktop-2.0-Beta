@@ -114,7 +114,8 @@
     "tabStatus": "Status",
     "tabUpdate": "Update",
     "tabSnapshots": "Snapshots",
-    "tabSettings": "Settings"
+    "tabSettings": "Settings",
+    "loading": "Loading…"
   },
 
   "list": {
@@ -377,10 +378,13 @@
     "copyingNode": "Copying {name}… ({current}/{total})",
     "copyingSettings": "Copying user settings…",
     "mergingUserData": "Merging user data…",
+    "mergeUserData": "Merge user data",
     "mergingWorkflows": "Merging workflows…",
     "mergingModels": "Merging models…",
     "mergingInput": "Merging input files…",
+    "mergeInput": "Merge input files",
     "mergingOutput": "Merging output files…",
+    "mergeOutput": "Merge output files",
     "checkingDeps": "Checking dependencies…",
     "noDeps": "No dependencies to install.",
     "noUvOrPython": "⚠ Cannot install dependencies: uv or Python environment not found.",
@@ -396,7 +400,18 @@
     "summaryModels": "models: {copied} copied, {skipped} skipped",
     "summaryInput": "input: {copied} copied, {skipped} skipped",
     "summaryOutput": "output: {copied} copied, {skipped} skipped",
-    "summaryDeps": "{count} with dependencies installed"
+    "summaryDeps": "{count} with dependencies installed",
+    "migrateToStandalone": "Migrate to Standalone",
+    "migrateToStandalonePill": "Migrate",
+    "migrateToStandaloneConfirmTitle": "Migrate to Standalone",
+    "migrateToStandaloneConfirmMessage": "This will create a new Standalone installation with your custom nodes, workflows, settings, and user data. Your current installation will not be modified.\n\nModels will be added to shared paths (not copied).",
+    "migrationWill": "Migration will:",
+    "migrateToStandaloneConfirm": "Start Migration",
+    "migrateDataPhase": "Copy user data",
+    "creatingSnapshot": "Creating snapshot…",
+    "addingModels": "Adding models to shared paths…",
+    "addModels": "Add models to shared paths",
+    "enablePipSync": "Advanced: sync all pip packages (slower, usually not needed)"
   },
 
   "git": {
@@ -449,9 +464,13 @@
     "scanningDesktop": "Scanning Desktop installation…",
     "creatingSnapshot": "Creating Desktop snapshot…",
     "copyingUserData": "Copying workflows and settings…",
+    "copyUserData": "Copy workflows and settings",
     "copyingInput": "Copying input files…",
+    "copyInput": "Copy input files",
     "copyingOutput": "Copying output files…",
+    "copyOutput": "Copy output files",
     "addingModels": "Adding Desktop models to shared paths…",
+    "addModels": "Add Desktop models to shared paths",
     "migrateComplete": "Migration complete",
     "migrateNoData": "No data found to migrate."
   },

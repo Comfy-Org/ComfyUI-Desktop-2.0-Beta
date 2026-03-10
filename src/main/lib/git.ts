@@ -135,14 +135,12 @@ export function gitClone(
   })
 }
 
-export function gitFetchAndCheckout(
+function makeRunGit(
   repoPath: string,
-  commit: string,
   sendOutput: (text: string) => void,
-  signal?: AbortSignal
-): Promise<ProcessResult> {
-  if (signal?.aborted) return Promise.resolve({ exitCode: 1, stderr: '' })
-  const runGit = (args: string[]): Promise<ProcessResult> => {
+  signal?: AbortSignal,
+): (args: string[]) => Promise<ProcessResult> {
+  return (args: string[]): Promise<ProcessResult> => {
     if (signal?.aborted) return Promise.resolve({ exitCode: 1, stderr: '' })
     return new Promise((resolve) => {
       const stderrChunks: string[] = []
@@ -172,6 +170,48 @@ export function gitFetchAndCheckout(
       })
     })
   }
+}
+
+/**
+ * Check out a specific commit. Tries a direct checkout first (works for
+ * full clones where the commit is already local). If the commit isn't
+ * available, fetches all refs from origin (unshallowing if needed) and
+ * retries.
+ */
+export function gitCheckoutCommit(
+  repoPath: string,
+  commit: string,
+  sendOutput: (text: string) => void,
+  signal?: AbortSignal
+): Promise<ProcessResult> {
+  if (signal?.aborted) return Promise.resolve({ exitCode: 1, stderr: '' })
+  const runGit = makeRunGit(repoPath, sendOutput, signal)
+
+  return runGit(['checkout', commit]).then((directResult) => {
+    if (directResult.exitCode === 0) return directResult
+    return runGit(['fetch', '--unshallow', 'origin']).then((result) => {
+      if (result.exitCode !== 0) return runGit(['fetch', 'origin'])
+      return result
+    }).then((fetchResult) => {
+      if (fetchResult.exitCode !== 0) return fetchResult
+      return runGit(['checkout', commit])
+    })
+  })
+}
+
+/**
+ * Fetch the master branch from origin and check out a specific commit.
+ * Designed for the ComfyUI main repo where master must exist locally
+ * (mirroring update_comfyui.py behaviour).
+ */
+export function gitFetchAndCheckout(
+  repoPath: string,
+  commit: string,
+  sendOutput: (text: string) => void,
+  signal?: AbortSignal
+): Promise<ProcessResult> {
+  if (signal?.aborted) return Promise.resolve({ exitCode: 1, stderr: '' })
+  const runGit = makeRunGit(repoPath, sendOutput, signal)
 
   // Fetch master explicitly — grafted/archive-based repos may have no
   // branch tracking configured, so a bare `git fetch origin` only pulls

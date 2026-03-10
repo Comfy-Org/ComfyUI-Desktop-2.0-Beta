@@ -14,6 +14,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   launch: [inst: Installation, actions: ListAction[]]
   'show-detail': [inst: Installation]
+  'show-migrate': [inst: Installation]
   'show-update': [inst: Installation]
   'show-console': [installationId: string]
   'show-progress': [opts: {
@@ -87,6 +88,10 @@ function stopComfyUI(): void {
       <template v-if="installation.statusTag?.style === 'update'">
         <span> · </span>
         <span class="update-pill" role="button" tabindex="0" @click.stop="emit('show-update', installation)" @keydown.enter.stop="emit('show-update', installation)" @keydown.space.prevent.stop="emit('show-update', installation)">{{ installation.statusTag.label }}</span>
+      </template>
+      <template v-if="installation.statusTag?.style === 'migrate'">
+        <span> · </span>
+        <span class="migrate-pill" role="button" tabindex="0" @click.stop="emit('show-migrate', installation)" @keydown.enter.stop="emit('show-migrate', installation)" @keydown.space.prevent.stop="emit('show-migrate', installation)">{{ installation.statusTag.label }}</span>
       </template>
     </div>
     <slot name="detail" />

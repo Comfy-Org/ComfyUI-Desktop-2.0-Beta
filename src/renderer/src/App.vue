@@ -50,6 +50,7 @@ const appVersion = ref('')
 // --- Modal views ---
 const detailInstallation = ref<Installation | null>(null)
 const detailInitialTab = ref<string>('status')
+const detailAutoAction = ref<string | null>(null)
 const consoleInstallationId = ref<string | null>(null)
 const progressInstallationId = ref<string | null>(null)
 const showNewInstall = ref(false)
@@ -99,8 +100,9 @@ function openFeedback(): void {
 }
 
 // --- Modal handlers ---
-function openDetail(inst: Installation, tab?: string): void {
+function openDetail(inst: Installation, tab?: string, autoAction?: string): void {
   detailInitialTab.value = tab ?? 'status'
+  detailAutoAction.value = autoAction ?? null
   detailInstallation.value = inst
 }
 
@@ -313,7 +315,7 @@ onMounted(async () => {
         :visible="activeView === 'dashboard'"
         @show-quick-install="openQuickInstall"
         @show-settings="switchView('settings')"
-        @show-detail="(inst, tab) => openDetail(inst, tab)"
+        @show-detail="(inst, tab, autoAction) => openDetail(inst, tab, autoAction)"
         @show-console="openConsole"
         @show-progress="showProgress"
       />
@@ -322,6 +324,7 @@ onMounted(async () => {
         v-show="activeView === 'list'"
         ref="listRef"
         @show-detail="(inst, tab) => openDetail(inst, tab)"
+        @show-migrate="(inst) => openDetail(inst, undefined, 'migrate-to-standalone')"
         @show-console="openConsole"
         @show-progress="showProgress"
         @show-new-install="openNewInstall"
@@ -357,6 +360,7 @@ onMounted(async () => {
   <DetailModal
     :installation="detailInstallation"
     :initial-tab="detailInitialTab"
+    :auto-action="detailAutoAction"
     @close="closeDetail"
     @show-progress="showProgress"
     @navigate-list="handleNavigateList"

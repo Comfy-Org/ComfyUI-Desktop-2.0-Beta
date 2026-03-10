@@ -81,6 +81,9 @@ export const portable: SourcePlugin = {
     if (info && releaseCache.isUpdateAvailable(installation, channel, info)) {
       return { label: t('portable.updateAvailableTag', { version: info.releaseName || info.latestTag || '' }), style: 'update' }
     }
+    if (installation.status === 'installed') {
+      return { label: t('migrate.migrateToStandalonePill'), style: 'migrate' }
+    }
     return undefined
   },
 
@@ -225,6 +228,19 @@ export const portable: SourcePlugin = {
             ...(!installed && { disabledMessage: t('errors.installNotReady') }),
             showProgress: true, progressTitle: t('common.startingComfyUI'), cancellable: true },
           { id: 'open-folder', label: t('actions.openDirectory'), style: 'default', enabled: !!installation.installPath },
+          { id: 'migrate-to-standalone',
+            label: t('migrate.migrateToStandalone'),
+            style: 'default',
+            enabled: installed,
+            showProgress: true,
+            progressTitle: t('migrate.migrating'),
+            cancellable: true,
+            confirm: {
+              title: t('migrate.migrateToStandaloneConfirmTitle'),
+              message: t('migrate.migrateToStandaloneConfirmMessage'),
+              confirmLabel: t('migrate.migrateToStandaloneConfirm'),
+            },
+          },
           deleteAction(installation),
           untrackAction(),
         ],

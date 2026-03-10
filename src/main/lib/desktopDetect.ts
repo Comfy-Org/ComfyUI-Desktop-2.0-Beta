@@ -83,7 +83,7 @@ function getDesktopPythonPath(basePath: string): string | null {
   return null
 }
 
-async function pipFreezeDirect(pythonPath: string): Promise<Record<string, string>> {
+export async function pipFreezeDirect(pythonPath: string): Promise<Record<string, string>> {
   const output = await new Promise<string>((resolve, reject) => {
     execFile(
       pythonPath,
