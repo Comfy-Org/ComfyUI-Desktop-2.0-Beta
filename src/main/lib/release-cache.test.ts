@@ -99,6 +99,12 @@ describe('isUpdateAvailable', () => {
     expect(isUpdateAvailable(installation, 'stable', info)).toBe(true)
   })
 
+  it('returns false when installedTag is unknown (new install before first update)', () => {
+    const installation = {}
+    const info: ReleaseCacheEntry = { latestTag: 'v0.14.2', installedTag: 'unknown' }
+    expect(isUpdateAvailable(installation, 'stable', info)).toBe(false)
+  })
+
   it('returns false via installedTag match when no comfyVersion', () => {
     const installation = {
       updateInfoByChannel: { stable: { installedTag: 'v0.14.2' } },
