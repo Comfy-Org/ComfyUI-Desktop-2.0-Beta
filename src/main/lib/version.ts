@@ -38,7 +38,7 @@ export function formatComfyVersion(
   // We know the baseTag but not how far ahead, so show the tag + SHA to
   // indicate uncertainty rather than silently displaying the stable tag.
   if (commitsAhead === undefined) {
-    return style === 'short' ? `${baseTag} (${shortSha})` : `${baseTag} (${shortSha})`
+    return `${baseTag} (${shortSha})`
   }
 
   if (style === 'short') {
