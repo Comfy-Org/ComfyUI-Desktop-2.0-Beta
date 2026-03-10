@@ -129,7 +129,7 @@
     "themeNord": "Nord",
     "themeArc": "Arc",
     "themeGithub": "GitHub",
-    "onLauncherClose": "Al cerrar el lanzador",
+    "onAppClose": "Al cerrar el lanzador",
     "closeTray": "Minimizar a la bandeja (mantener instancias en ejecución)",
     "closeQuit": "Detener todas las instancias y salir",
     "closeQuitTitle": "Cerrar lanzador",
@@ -169,7 +169,7 @@
   },
 
   "tray": {
-    "showLauncher": "Mostrar lanzador",
+    "showApp": "Mostrar lanzador",
     "quit": "Salir"
   },
 
@@ -281,7 +281,7 @@
     "cannotOpenDir": "No se pudo abrir el directorio: {error}",
     "launchCancelled": "Inicio cancelado.",
     "cannotConnect": "No se pudo conectar a {url}. Asegúrate de que ComfyUI esté ejecutándose en esa dirección.",
-    "portConflictLauncher": "El puerto {port} ya está en uso por \"{name}\", iniciado desde otra instancia de ComfyUI Launcher. Detenlo primero o cambia el puerto en los Argumentos de inicio.",
+    "portConflictLauncher": "El puerto {port} ya está en uso por \"{name}\", iniciado desde otra instancia de ComfyUI Desktop 2.0. Detenlo primero o cambia el puerto en los Argumentos de inicio.",
     "portConflictComfy": "El puerto {port} ya está en uso por {process}, que parece ser una instancia de ComfyUI. Detenlo primero o cambia el puerto en los Argumentos de inicio.",
     "portConflictOther": "El puerto {port} ya está en uso por {process}. Cambia el puerto en los Argumentos de inicio para evitar conflictos.",
     "portConflictUsePort": "Usar el puerto {port}",

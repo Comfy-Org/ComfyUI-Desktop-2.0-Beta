@@ -170,7 +170,7 @@ export async function stageDesktopSnapshot(
     { filename: 'desktop-migration.json', snapshot },
   ])
 
-  const stagingDir = path.join(os.tmpdir(), 'comfyui-launcher-snapshots')
+  const stagingDir = path.join(os.tmpdir(), 'comfyui-desktop-2-snapshots')
   await fs.promises.mkdir(stagingDir, { recursive: true })
   const stagedFile = path.join(stagingDir, `desktop-migrate-${Date.now()}.json`)
   await fs.promises.writeFile(stagedFile, JSON.stringify(envelope, null, 2))

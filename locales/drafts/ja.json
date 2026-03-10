@@ -129,7 +129,7 @@
     "themeNord": "Nord",
     "themeArc": "Arc",
     "themeGithub": "GitHub",
-    "onLauncherClose": "ランチャーを閉じた時",
+    "onAppClose": "ランチャーを閉じた時",
     "closeTray": "トレイに最小化（インスタンスを実行したまま）",
     "closeQuit": "すべてのインスタンスを停止して終了",
     "closeQuitTitle": "ランチャーを終了",
@@ -169,7 +169,7 @@
   },
 
   "tray": {
-    "showLauncher": "ランチャーを表示",
+    "showApp": "ランチャーを表示",
     "quit": "終了"
   },
 
@@ -281,7 +281,7 @@
     "cannotOpenDir": "ディレクトリを開けませんでした: {error}",
     "launchCancelled": "起動がキャンセルされました。",
     "cannotConnect": "{url} に接続できませんでした。ComfyUI がそのアドレスで実行されていることを確認してください。",
-    "portConflictLauncher": "ポート {port} は別の ComfyUI Launcher インスタンスから起動された \"{name}\" によって使用中です。先に停止するか、起動引数でポートを変更してください。",
+    "portConflictLauncher": "ポート {port} は別の ComfyUI Desktop 2.0 インスタンスから起動された \"{name}\" によって使用中です。先に停止するか、起動引数でポートを変更してください。",
     "portConflictComfy": "ポート {port} は {process} によって使用中です。ComfyUI インスタンスのようです。先に停止するか、起動引数でポートを変更してください。",
     "portConflictOther": "ポート {port} は {process} によって使用中です。競合を避けるため、起動引数でポートを変更してください。",
     "portConflictUsePort": "ポート {port} を使用",

@@ -1,5 +1,5 @@
-appId: org.comfy.comfyui-launcher
-productName: ComfyUI Launcher
+appId: org.comfy.comfyui-desktop-2
+productName: ComfyUI Desktop 2.0
 directories:
   buildResources: resources
 files:
@@ -22,7 +22,7 @@ publish:
   provider: github
   owner: Comfy-Org
   repo: ComfyUI-Launcher
-artifactName: ComfyUI-Launcher-${version}-${os}-${arch}.${ext}
+artifactName: ComfyUI-Desktop-2.0-${version}-${os}-${arch}.${ext}
 win:
   target: nsis
   icon: assets/Comfy_Logo_x256.png

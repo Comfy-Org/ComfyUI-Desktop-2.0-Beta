@@ -245,7 +245,7 @@ export function getModelDownloadContentScript(): string {
       var spans = dlContainer.querySelectorAll('span');
       for (var s = 0; s < spans.length; s++) {
         var sp = spans[s];
-        if (sp.textContent === 'ComfyUI Launcher') sp.style.color = theme.textSecondary;
+        if (sp.textContent === 'ComfyUI Desktop 2.0') sp.style.color = theme.textSecondary;
       }
       var closeButtons = dlContainer.querySelectorAll('button[title="Close"]');
       for (var c = 0; c < closeButtons.length; c++) {
@@ -480,7 +480,7 @@ export function getModelDownloadContentScript(): string {
     header.style.cssText = 'display:flex;align-items:center;padding:6px 10px;background:' + theme.panelBg + ';border:1px solid ' + theme.borderColor + ';border-bottom:none;border-radius:8px 8px 0 0;cursor:grab;user-select:none;';
 
     var brandLabel = origCreate('span');
-    brandLabel.textContent = 'ComfyUI Launcher';
+    brandLabel.textContent = 'ComfyUI Desktop 2.0';
     brandLabel.style.cssText = 'flex:1;color:' + theme.textSecondary + ';font-size:11px;font-weight:600;letter-spacing:0.3px;text-transform:uppercase;';
 
     var closeBtn = origCreate('button');

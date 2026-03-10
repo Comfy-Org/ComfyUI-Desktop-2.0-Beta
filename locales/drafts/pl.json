@@ -129,10 +129,10 @@
     "themeNord": "Nord",
     "themeArc": "Arc",
     "themeGithub": "GitHub",
-    "onLauncherClose": "Po zamknięciu launchera",
+    "onAppClose": "Po zamknięciu launchera",
     "closeTray": "Minimalizuj do zasobnika (instancje nadal działają)",
     "closeQuit": "Zatrzymaj wszystkie instancje i zakończ",
-    "closeQuitTitle": "Zamknij Launcher",
+    "closeQuitTitle": "Zamknij Desktop 2.0",
     "closeQuitMessage": "Instancje ComfyUI nadal działają. Zamknięcie zatrzyma je wszystkie.",
     "closeQuitConfirm": "Zamknij",
     "autoUpdate": "Sprawdzaj aktualizacje przy uruchomieniu",
@@ -169,7 +169,7 @@
   },
 
   "tray": {
-    "showLauncher": "Pokaż Launcher",
+    "showApp": "Pokaż Launcher",
     "quit": "Zakończ"
   },
 
@@ -186,7 +186,7 @@
     "deleteConfirmMessage": "Spowoduje to trwałe usunięcie instalacji i wszystkich jej plików. Tej operacji nie można cofnąć.",
     "untrack": "Przestań śledzić",
     "untrackConfirmTitle": "Przestań śledzić instalację",
-    "untrackConfirmMessage": "Instalacja zostanie usunięta z launchera. Pliki nie zostaną usunięte."
+    "untrackConfirmMessage": "Instalacja zostanie usunięta z aplikacji. Pliki nie zostaną usunięte."
   },
 
   "remote": {
@@ -281,7 +281,7 @@
     "cannotOpenDir": "Nie można otworzyć katalogu: {error}",
     "launchCancelled": "Uruchamianie anulowane.",
     "cannotConnect": "Nie można połączyć się z {url}. Upewnij się, że ComfyUI działa pod tym adresem.",
-    "portConflictLauncher": "Port {port} jest już używany przez \"{name}\", uruchomiony z innej instancji ComfyUI Launcher. Najpierw go zatrzymaj lub zmień port w Argumentach startowych.",
+    "portConflictLauncher": "Port {port} jest już używany przez \"{name}\", uruchomiony z innej instancji ComfyUI Desktop 2.0. Najpierw go zatrzymaj lub zmień port w Argumentach startowych.",
     "portConflictComfy": "Port {port} jest już używany przez {process}, który wygląda na instancję ComfyUI. Najpierw go zatrzymaj lub zmień port w Argumentach startowych.",
     "portConflictOther": "Port {port} jest już używany przez {process}. Zmień port w Argumentach startowych, aby uniknąć konfliktów.",
     "portConflictUsePort": "Użyj portu {port}",

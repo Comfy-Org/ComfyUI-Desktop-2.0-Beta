@@ -35,10 +35,10 @@ interface PendingDownload {
 
 const attachedSessions = new WeakSet<Electron.Session>()
 const pendingDownloads = new Map<string, PendingDownload>()
-let launcherWindow: BrowserWindow | null = null
+let mainWindow: BrowserWindow | null = null
 
-export function setLauncherWindow(win: BrowserWindow | null): void {
-  launcherWindow = win
+export function setMainWindow(win: BrowserWindow | null): void {
+  mainWindow = win
 }
 
 function getModelsBaseDir(): string {
@@ -85,8 +85,8 @@ function broadcastProgress(progress: DownloadProgress): void {
     }
   }
   // Also send to the Launcher window
-  if (launcherWindow && !launcherWindow.isDestroyed()) {
-    launcherWindow.webContents.send('model-download-progress', progress)
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('model-download-progress', progress)
   }
 }
 
@@ -347,7 +347,7 @@ export function attachSessionDownloadHandler(sess: Electron.Session): void {
 
       const url = item.getURL()
       const filename = path.basename(savePath)
-      const fallbackWindow = win || launcherWindow || BrowserWindow.getAllWindows()[0]
+      const fallbackWindow = win || mainWindow || BrowserWindow.getAllWindows()[0]
       const general: PendingDownload = {
         url,
         filename,

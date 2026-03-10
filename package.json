@@ -1,7 +1,7 @@
 {
-  "name": "comfyui-launcher",
+  "name": "comfyui-desktop-2",
   "version": "0.3.6",
-  "description": "ComfyUI Launcher",
+  "description": "ComfyUI Desktop 2.0",
   "author": {
     "name": "Jedrzej Kosinski",
     "email": "kosinkadink@users.noreply.github.com"
