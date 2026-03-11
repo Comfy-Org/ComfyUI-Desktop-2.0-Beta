@@ -270,7 +270,7 @@ onMounted(async () => {
   <div class="app-layout">
     <!-- Sidebar -->
     <nav class="sidebar">
-      <div class="sidebar-brand">ComfyUI Desktop 2.0</div>
+      <div class="sidebar-brand">Desktop 2.0</div>
       <div class="sidebar-nav">
         <button
           v-for="item in sidebarItems"

@@ -406,7 +406,7 @@ export function register(callbacks: RegisterCallbacks = {}): void {
     const desktopInfo = detectDesktopInstall()
     if (desktopInfo) {
       installations.ensureExists('desktop', {
-        name: 'ComfyUI Desktop',
+        name: 'ComfyUI Legacy Desktop',
         sourceId: 'desktop',
         installPath: desktopInfo.basePath,
         version: 'desktop',
