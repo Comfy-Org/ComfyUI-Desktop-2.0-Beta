@@ -43,3 +43,9 @@ linux:
     - deb
   icon: assets/Comfy_Logo_x256.png
   category: Development
+  extraResources:
+    - from: resources/apparmor-profile
+      to: apparmor-profile
+deb:
+  afterInstall: scripts/after-install.sh
+  afterRemove: scripts/after-remove.sh
