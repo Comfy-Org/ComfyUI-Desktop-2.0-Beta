@@ -5,7 +5,9 @@ import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'comfyui-desktop-2-settings-'))
 const homePath = path.join(tmpRoot, 'home')
-const userDataPath = path.join(tmpRoot, 'user-data')
+const userDataPath = path.join(homePath, 'AppData', 'Roaming', 'comfyui-desktop-2')
+const adminHomePath = path.join(tmpRoot, 'Administrator')
+const adminUserDataPath = path.join(adminHomePath, 'AppData', 'Roaming', 'comfyui-desktop-2')
 const xdgConfigHome = path.join(tmpRoot, 'xdg-config')
 const xdgCacheHome = path.join(tmpRoot, 'xdg-cache')
 const originalXdgConfigHome = process.env.XDG_CONFIG_HOME
@@ -15,6 +17,8 @@ process.env.XDG_CONFIG_HOME = xdgConfigHome
 process.env.XDG_CACHE_HOME = xdgCacheHome
 fs.mkdirSync(homePath, { recursive: true })
 fs.mkdirSync(userDataPath, { recursive: true })
+fs.mkdirSync(adminHomePath, { recursive: true })
+fs.mkdirSync(adminUserDataPath, { recursive: true })
 fs.mkdirSync(xdgConfigHome, { recursive: true })
 fs.mkdirSync(xdgCacheHome, { recursive: true })
 
@@ -104,5 +108,41 @@ describe('settings unset/default semantics', () => {
     settings.set('pypiMirror', '   ')
     expect(settings.get('pypiMirror')).toBeUndefined()
     expect(readPersistedSettings()).not.toHaveProperty('pypiMirror')
+  })
+})
+
+describe('settings path sanitization', () => {
+  it('rewrites copied foreign-user defaults to the current user defaults', () => {
+    fs.mkdirSync(path.dirname(settingsPath), { recursive: true })
+    fs.writeFileSync(
+      settingsPath,
+      JSON.stringify({
+        cacheDir: path.join(adminUserDataPath, 'download-cache'),
+        modelsDirs: [
+          path.join(adminHomePath, 'ComfyUI-Shared', 'models'),
+          path.join(tmpRoot, 'custom-models'),
+        ],
+        inputDir: path.join(adminHomePath, 'ComfyUI-Shared', 'input'),
+        outputDir: path.join(adminHomePath, 'ComfyUI-Shared', 'output'),
+      }, null, 2),
+      'utf-8'
+    )
+
+    expect(settings.get('cacheDir')).toBe(path.join(userDataPath, 'download-cache'))
+    expect(settings.get('modelsDirs')).toEqual([
+      path.join(homePath, 'ComfyUI-Shared', 'models'),
+      path.join(tmpRoot, 'custom-models'),
+    ])
+    expect(settings.get('inputDir')).toBe(path.join(homePath, 'ComfyUI-Shared', 'input'))
+    expect(settings.get('outputDir')).toBe(path.join(homePath, 'ComfyUI-Shared', 'output'))
+
+    const persisted = readPersistedSettings()
+    expect(persisted['cacheDir']).toBe(path.join(userDataPath, 'download-cache'))
+    expect(persisted['modelsDirs']).toEqual([
+      path.join(homePath, 'ComfyUI-Shared', 'models'),
+      path.join(tmpRoot, 'custom-models'),
+    ])
+    expect(persisted['inputDir']).toBe(path.join(homePath, 'ComfyUI-Shared', 'input'))
+    expect(persisted['outputDir']).toBe(path.join(homePath, 'ComfyUI-Shared', 'output'))
   })
 })
