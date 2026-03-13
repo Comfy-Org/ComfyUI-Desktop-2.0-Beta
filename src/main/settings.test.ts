@@ -8,8 +8,9 @@ const homePath = path.join(tmpRoot, 'home')
 const userDataPath = path.join(homePath, 'AppData', 'Roaming', 'comfyui-desktop-2')
 const adminHomePath = path.join(tmpRoot, 'Administrator')
 const adminUserDataPath = path.join(adminHomePath, 'AppData', 'Roaming', 'comfyui-desktop-2')
-const xdgConfigHome = path.join(tmpRoot, 'xdg-config')
-const xdgCacheHome = path.join(tmpRoot, 'xdg-cache')
+const xdgConfigHome = path.join(homePath, '.config')
+const xdgCacheHome = path.join(homePath, '.cache')
+const adminXdgCacheHome = path.join(adminHomePath, '.cache')
 const originalXdgConfigHome = process.env.XDG_CONFIG_HOME
 const originalXdgCacheHome = process.env.XDG_CACHE_HOME
 
@@ -31,6 +32,12 @@ let settings: {
 const settingsPath = process.platform === 'linux'
   ? path.join(xdgConfigHome, 'comfyui-desktop-2', 'settings.json')
   : path.join(userDataPath, 'settings.json')
+const expectedCacheDir = process.platform === 'linux'
+  ? path.join(xdgCacheHome, 'comfyui-desktop-2', 'download-cache')
+  : path.join(userDataPath, 'download-cache')
+const copiedAdminCacheDir = process.platform === 'linux'
+  ? path.join(adminXdgCacheHome, 'comfyui-desktop-2', 'download-cache')
+  : path.join(adminUserDataPath, 'download-cache')
 
 function readPersistedSettings(): Record<string, unknown> {
   const raw = fs.readFileSync(settingsPath, 'utf-8')
@@ -117,7 +124,7 @@ describe('settings path sanitization', () => {
     fs.writeFileSync(
       settingsPath,
       JSON.stringify({
-        cacheDir: path.join(adminUserDataPath, 'download-cache'),
+        cacheDir: copiedAdminCacheDir,
         modelsDirs: [
           path.join(adminHomePath, 'ComfyUI-Shared', 'models'),
           path.join(tmpRoot, 'custom-models'),
@@ -128,7 +135,7 @@ describe('settings path sanitization', () => {
       'utf-8'
     )
 
-    expect(settings.get('cacheDir')).toBe(path.join(userDataPath, 'download-cache'))
+    expect(settings.get('cacheDir')).toBe(expectedCacheDir)
     expect(settings.get('modelsDirs')).toEqual([
       path.join(homePath, 'ComfyUI-Shared', 'models'),
       path.join(tmpRoot, 'custom-models'),
@@ -137,7 +144,7 @@ describe('settings path sanitization', () => {
     expect(settings.get('outputDir')).toBe(path.join(homePath, 'ComfyUI-Shared', 'output'))
 
     const persisted = readPersistedSettings()
-    expect(persisted['cacheDir']).toBe(path.join(userDataPath, 'download-cache'))
+    expect(persisted['cacheDir']).toBe(expectedCacheDir)
     expect(persisted['modelsDirs']).toEqual([
       path.join(homePath, 'ComfyUI-Shared', 'models'),
       path.join(tmpRoot, 'custom-models'),
