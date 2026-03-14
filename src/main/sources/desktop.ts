@@ -58,6 +58,7 @@ export const desktop: SourcePlugin = {
         cwd: path.dirname(execPath),
         showWindow: true,
         skipPortWait: true,
+        skipSharedPaths: true,
       }
     }
     return {
@@ -66,6 +67,7 @@ export const desktop: SourcePlugin = {
       cwd: path.dirname(execPath),
       showWindow: true,
       skipPortWait: true,
+      skipSharedPaths: true,
     }
   },
 
