@@ -153,6 +153,31 @@ export function findLatestVersionTag(repoPath: string): Promise<string | undefin
 }
 
 /**
+ * Count commits reachable from `ref1` that have no cherry-pick equivalent
+ * (matched by patch-id) reachable from `ref2`.  Runs
+ * `git rev-list --count --cherry-pick --left-only ref1...ref2`
+ * (local, no network).  Returns undefined on error.
+ *
+ * Useful for backport detection: when a release branch cherry-picks commits
+ * from master, this counts only the commits unique to the release branch
+ * (typically just the version bump).
+ */
+export function countUniqueCommits(repoPath: string, ref1: string, ref2: string): Promise<number | undefined> {
+  return new Promise((resolve) => {
+    execFile('git', ['rev-list', '--count', '--cherry-pick', '--left-only', `${ref1}...${ref2}`], {
+      cwd: repoPath,
+      encoding: 'utf-8',
+      windowsHide: true,
+      timeout: 5000,
+    }, (error, stdout) => {
+      if (error) { resolve(undefined); return }
+      const n = parseInt(stdout.trim(), 10)
+      resolve(Number.isFinite(n) ? n : undefined)
+    })
+  })
+}
+
+/**
  * Check whether `ancestor` is an ancestor of `descendant` in the commit
  * graph.  Runs `git merge-base --is-ancestor` (local, no network).
  * Returns true if ancestor is reachable from descendant, false otherwise
@@ -211,18 +236,30 @@ export function revParseRef(repoPath: string, ref: string): Promise<string | und
 }
 
 /**
- * Fetch all tags from the remote.  Runs `git fetch origin --tags`
- * asynchronously (network operation).  Returns true if exit code is 0,
- * false otherwise.
+ * Fetch all tags from the remote, unshallowing if needed so that
+ * cherry-pick–aware version resolution has the full commit graph.
+ * Tries `git fetch --unshallow origin --tags` first; falls back to
+ * `git fetch origin --tags` when the repo is already complete or
+ * unshallowing fails (e.g. network issues).
+ * Returns true if at least the tag fetch succeeded, false otherwise.
  */
 export function fetchTags(repoPath: string): Promise<boolean> {
   return new Promise((resolve) => {
-    execFile('git', ['fetch', 'origin', '--tags'], {
+    execFile('git', ['fetch', '--unshallow', 'origin', '--tags'], {
       cwd: repoPath,
       windowsHide: true,
       timeout: 15000,
     }, (error) => {
-      resolve(!error)
+      if (!error) { resolve(true); return }
+      // Unshallow fails when the repo is already complete or on network
+      // error — retry without --unshallow so tags still get fetched.
+      execFile('git', ['fetch', 'origin', '--tags'], {
+        cwd: repoPath,
+        windowsHide: true,
+        timeout: 15000,
+      }, (error2) => {
+        resolve(!error2)
+      })
     })
   })
 }

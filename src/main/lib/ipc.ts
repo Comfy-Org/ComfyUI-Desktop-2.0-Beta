@@ -333,9 +333,6 @@ async function _fetchAndResolveLatestTags(
  * get-installations returns.
  */
 async function _resolveAndBroadcastVersions(list: InstallationRecord[]): Promise<void> {
-  // Clear cache so we pick up any newly fetched tags
-  clearVersionCache()
-
   // Collect installations with ComfyUI git repos
   const candidates = list.flatMap((inst) => {
     const cv = inst.comfyVersion as ComfyVersion | undefined
@@ -348,6 +345,10 @@ async function _resolveAndBroadcastVersions(list: InstallationRecord[]): Promise
 
   // Fetch tags once per unique origin and resolve latest tag info
   const tagOverrides = await _fetchAndResolveLatestTags(candidates)
+
+  // Clear cache AFTER fetching so concurrent resolveLocalVersion calls
+  // during the fetch don't repopulate the cache with stale data.
+  clearVersionCache()
 
   // Resolve each installation's version
   const updates: { id: string; version: string }[] = []
