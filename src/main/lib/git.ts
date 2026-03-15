@@ -93,9 +93,9 @@ function redactUrl(url: string): string {
  * asynchronously (local operation, no network).  Returns undefined if git is
  * unavailable, the tag doesn't exist, or any error occurs.
  */
-export function countCommitsAhead(repoPath: string, tag: string): Promise<number | undefined> {
+export function countCommitsAhead(repoPath: string, tag: string, commit: string = 'HEAD'): Promise<number | undefined> {
   return new Promise((resolve) => {
-    execFile('git', ['rev-list', '--count', `${tag}..HEAD`], {
+    execFile('git', ['rev-list', '--count', `${tag}..${commit}`], {
       cwd: repoPath,
       encoding: 'utf-8',
       windowsHide: true,
@@ -113,9 +113,9 @@ export function countCommitsAhead(repoPath: string, tag: string): Promise<number
  * asynchronously (local operation, no network).  Returns undefined if git is
  * unavailable, no tags exist, or any error occurs.
  */
-export function findNearestTag(repoPath: string): Promise<string | undefined> {
+export function findNearestTag(repoPath: string, commit: string = 'HEAD'): Promise<string | undefined> {
   return new Promise((resolve) => {
-    execFile('git', ['describe', '--tags', '--abbrev=0', 'HEAD'], {
+    execFile('git', ['describe', '--tags', '--abbrev=0', commit], {
       cwd: repoPath,
       encoding: 'utf-8',
       windowsHide: true,
@@ -130,9 +130,12 @@ export function findNearestTag(repoPath: string): Promise<string | undefined> {
 
 /**
  * Find the highest version tag in the repository.  Runs `git tag` with
- * version-sort, so it works even when the latest release is a backport on
- * a separate branch (not an ancestor of HEAD).  Returns undefined if git
- * is unavailable, no `v*` tags exist, or any error occurs.
+ * version-sort, so it includes tags on release branches that are not
+ * ancestors of HEAD.  This is a display heuristic — the result may refer
+ * to a tag whose commit is on a different branch.  Callers should verify
+ * ancestry (via {@link isAncestorOf}) before using it as a base tag.
+ * Returns undefined if git is unavailable, no `v*` tags exist, or any
+ * error occurs.
  */
 export function findLatestVersionTag(repoPath: string): Promise<string | undefined> {
   return new Promise((resolve) => {
@@ -145,6 +148,24 @@ export function findLatestVersionTag(repoPath: string): Promise<string | undefin
       if (error) { resolve(undefined); return }
       const tag = stdout.trim().split('\n')[0]?.trim()
       resolve(tag || undefined)
+    })
+  })
+}
+
+/**
+ * Check whether `ancestor` is an ancestor of `descendant` in the commit
+ * graph.  Runs `git merge-base --is-ancestor` (local, no network).
+ * Returns true if ancestor is reachable from descendant, false otherwise
+ * (including on error).
+ */
+export function isAncestorOf(repoPath: string, ancestor: string, descendant: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    execFile('git', ['merge-base', '--is-ancestor', ancestor, descendant], {
+      cwd: repoPath,
+      windowsHide: true,
+      timeout: 1000,
+    }, (error) => {
+      resolve(!error)
     })
   })
 }

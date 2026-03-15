@@ -7,7 +7,7 @@ vi.mock('child_process', async (importOriginal) => {
 })
 
 import { execFile } from 'child_process'
-import { countCommitsAhead, findNearestTag, findLatestVersionTag } from './git'
+import { countCommitsAhead, findNearestTag, findLatestVersionTag, isAncestorOf } from './git'
 
 const mockedExecFile = vi.mocked(execFile)
 
@@ -79,5 +79,19 @@ describe('findLatestVersionTag', () => {
   it('returns undefined for empty output', async () => {
     mockExecFile((_cmd, _args, _opts, cb) => { cb(null, '\n', '') })
     expect(await findLatestVersionTag('/repo')).toBeUndefined()
+  })
+})
+
+describe('isAncestorOf', () => {
+  beforeEach(() => { vi.resetAllMocks() })
+
+  it('returns true when git exits with 0', async () => {
+    mockExecFile((_cmd, _args, _opts, cb) => { cb(null, '', '') })
+    expect(await isAncestorOf('/repo', 'v0.17.0', 'v0.17.1')).toBe(true)
+  })
+
+  it('returns false when git exits with error', async () => {
+    mockExecFile((_cmd, _args, _opts, cb) => { cb(new Error('not ancestor'), '', '') })
+    expect(await isAncestorOf('/repo', 'v0.18.0', 'v0.17.1')).toBe(false)
   })
 })
