@@ -584,9 +584,11 @@ export function register(callbacks: RegisterCallbacks = {}): void {
         : inst.status === 'failed'
         ? { label: i18n.t('errors.installFailed'), style: 'danger' }
         : (source.getStatusTag ? source.getStatusTag(inst) : undefined)
-      // Derive version display string from comfyVersion ground truth, falling back to legacy string
+      // Derive version display string from comfyVersion ground truth, falling back to legacy string.
+      // Omit version when it just duplicates the source type (e.g. 'cloud', 'desktop').
       const cv = inst.comfyVersion as ComfyVersion | undefined
-      const version = cv ? formatComfyVersion(cv, 'short') : (inst.version as string | undefined)
+      const rawVersion = cv ? formatComfyVersion(cv, 'short') : (inst.version as string | undefined)
+      const version = rawVersion === inst.sourceId ? undefined : rawVersion
       return {
         ...inst,
         ...(version != null ? { version } : {}),
