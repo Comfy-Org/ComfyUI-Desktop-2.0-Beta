@@ -585,7 +585,7 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
     })
   }
 
-  app.whenReady().then(async () => {
+  app.whenReady().then(() => {
     migrateXdgPaths()
     registerProcessErrorHandlers()
 
