@@ -22,6 +22,7 @@ export function getModelDownloadContentScript(): string {
   document.head.appendChild(dlStyle);
 
   var modelCache = {};
+  var modelNameCache = {};
 
   // ---- Badge-text → directory reverse map (new dialog) ----
   var BADGE_TO_DIR = {
@@ -58,6 +59,8 @@ export function getModelDownloadContentScript(): string {
       '[aria-labelledby="global-missing-models-warning"]'
     );
     if (!dialog) return;
+
+    // Strategy 1: per-model buttons with URL in title (older frontend versions)
     var buttons = dialog.querySelectorAll('button[title]');
     for (var i = 0; i < buttons.length; i++) {
       var url = buttons[i].getAttribute('title');
@@ -70,6 +73,21 @@ export function getModelDownloadContentScript(): string {
       var badge = row.querySelector('[class*="rounded-full"]');
       if (badge) {
         modelCache[url] = reverseBadge(badge.textContent.trim());
+      }
+    }
+
+    // Strategy 2: model name spans paired with badges (newer frontend versions
+    // that may only have a "Download all" button instead of per-model buttons)
+    var rows = dialog.querySelectorAll('[class*="justify-between"]');
+    for (var r = 0; r < rows.length; r++) {
+      var nameSpan = rows[r].querySelector('span[title]');
+      var badge2 = rows[r].querySelector('[class*="rounded-full"]');
+      if (!nameSpan || !badge2) continue;
+      var name = nameSpan.getAttribute('title');
+      if (!name) continue;
+      var dir = reverseBadge(badge2.textContent.trim().toUpperCase());
+      if (dir) {
+        modelNameCache[name] = dir;
       }
     }
   }
@@ -89,6 +107,7 @@ export function getModelDownloadContentScript(): string {
       // Dialog just closed — clear cache to remove click() wrapping overhead
       dialogWasOpen = false;
       modelCache = {};
+      modelNameCache = {};
     }
   }
 
@@ -114,13 +133,14 @@ export function getModelDownloadContentScript(): string {
   if (!window.__comfyDesktop2Remote) {
     document.createElement = function(tag, options) {
       var el = origCreate(tag, options);
-      if (typeof tag === 'string' && tag.toLowerCase() === 'a' && Object.keys(modelCache).length > 0) {
+      if (typeof tag === 'string' && tag.toLowerCase() === 'a' &&
+          (Object.keys(modelCache).length > 0 || Object.keys(modelNameCache).length > 0)) {
         var origClick = el.click;
         el.click = function() {
           if (this.download && this.href && window.__comfyDesktop2) {
-            var directory = modelCache[this.href];
+            var cleanName = this.download.split('?')[0];
+            var directory = modelCache[this.href] || modelNameCache[cleanName];
             if (directory) {
-              var cleanName = this.download.split('?')[0];
               window.__comfyDesktop2.downloadModel(
                 this.href,
                 cleanName,

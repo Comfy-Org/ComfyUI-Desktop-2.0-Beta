@@ -17,6 +17,7 @@ vi.stubGlobal('window', {
   api: {
     getInstallations: vi.fn().mockResolvedValue([]),
     onInstallationsChanged: vi.fn(),
+    onInstallationsVersionsUpdated: vi.fn(),
     onInstallProgress: vi.fn(() => vi.fn()),
     onComfyOutput: vi.fn(() => vi.fn()),
     cancelOperation: vi.fn(),
@@ -25,6 +26,7 @@ vi.stubGlobal('window', {
     onInstanceStarted: vi.fn(() => vi.fn()),
     onInstanceStopped: vi.fn(() => vi.fn()),
     onComfyExited: vi.fn(() => vi.fn()),
+    onErrorDetail: vi.fn(() => vi.fn()),
   }
 })
 

@@ -170,6 +170,14 @@ const api: ElectronApi = {
     ipcRenderer.on('installations-changed', handler)
     return () => ipcRenderer.removeListener('installations-changed', handler)
   },
+  onInstallationsVersionsUpdated: (callback) => {
+    const handler = (_event: IpcRendererEvent, data: unknown) => {
+      const updates = (data as Record<string, unknown>).updates as { id: string; version: string }[]
+      callback(updates)
+    }
+    ipcRenderer.on('installations-versions-updated', handler)
+    return () => ipcRenderer.removeListener('installations-versions-updated', handler)
+  },
   onUpdateAvailable: (callback) => {
     const handler = (_event: IpcRendererEvent, data: unknown) => callback(data as Parameters<typeof callback>[0])
     ipcRenderer.on('update-available', handler)
@@ -209,6 +217,11 @@ const api: ElectronApi = {
     const handler = (_event: IpcRendererEvent, data: unknown) => callback(data as Parameters<typeof callback>[0])
     ipcRenderer.on('dd-error', handler)
     return () => ipcRenderer.removeListener('dd-error', handler)
+  },
+  onErrorDetail: (callback) => {
+    const handler = (_event: IpcRendererEvent, data: unknown) => callback(data as Parameters<typeof callback>[0])
+    ipcRenderer.on('error-detail', handler)
+    return () => ipcRenderer.removeListener('error-detail', handler)
   },
 }
 

@@ -9,6 +9,9 @@ import * as installations from '../installations'
 import type { InstallationRecord } from '../installations'
 import { formatComfyVersion } from './version'
 import type { ComfyVersion } from './version'
+import { resolveLocalVersion, clearVersionCache } from './version-resolve'
+import type { LatestTagOverride } from './version-resolve'
+import { readGitRemoteUrl, fetchTags, findLatestVersionTag, revParseRef, hasGitDir } from './git'
 import * as settings from '../settings'
 import { defaultInstallDir } from './paths'
 import { download } from './download'
@@ -42,6 +45,7 @@ import { getVariantLabel } from '../sources/standalone'
 import type { FieldOption, SourcePlugin } from '../types/sources'
 import { REQUIRES_STOPPED } from '../../types/ipc'
 import type { Theme, ResolvedTheme, QuitActiveItem } from '../../types/ipc'
+import { findLockingProcesses } from './file-lock-info'
 import type { LaunchCmd } from './process'
 
 const MARKER_FILE = '.comfyui-desktop-2'
@@ -299,6 +303,86 @@ function _broadcastToRenderer(channel: string, data: Record<string, unknown>): v
   })
 }
 
+/**
+ * Fetch tags once per unique remote origin, resolve the latest tag name +
+ * SHA, then return a map from origin URL to the override info.
+ */
+async function _fetchAndResolveLatestTags(
+  installs: Array<{ comfyuiDir: string }>
+): Promise<Map<string, LatestTagOverride>> {
+  // Group by remote origin URL
+  const originGroups = new Map<string, string[]>()
+  for (const { comfyuiDir } of installs) {
+    const origin = readGitRemoteUrl(comfyuiDir)
+    if (!origin) continue
+    const group = originGroups.get(origin) ?? []
+    group.push(comfyuiDir)
+    originGroups.set(origin, group)
+  }
+
+  const result = new Map<string, LatestTagOverride>()
+  await Promise.all([...originGroups.entries()].map(async ([origin, dirs]) => {
+    // Fetch tags into ALL repos in the group so every repo has the
+    // commit objects needed for SHA-based merge-base / ancestry checks.
+    await Promise.all(dirs.map((d) => fetchTags(d)))
+    const representative = dirs[0]!
+    const tagName = await findLatestVersionTag(representative)
+    if (!tagName) return
+    const sha = await revParseRef(representative, tagName)
+    if (!sha) return
+    result.set(origin, { name: tagName, sha })
+  }))
+  return result
+}
+
+/**
+ * Resolve versions from git state for all installations, fetch tags once
+ * per unique remote origin, persist updates to the installation records,
+ * and broadcast changes to the renderer.  Called in the background after
+ * get-installations returns.
+ */
+async function _resolveAndBroadcastVersions(list: InstallationRecord[]): Promise<void> {
+  // Collect installations with ComfyUI git repos
+  const candidates = list.flatMap((inst) => {
+    const cv = inst.comfyVersion as ComfyVersion | undefined
+    if (!cv?.commit || !inst.installPath) return []
+    const comfyuiDir = path.join(inst.installPath, 'ComfyUI')
+    if (!hasGitDir(comfyuiDir)) return []
+    return [{ inst, cv, comfyuiDir }]
+  })
+  if (candidates.length === 0) return
+
+  // Fetch tags once per unique origin and resolve latest tag info
+  const tagOverrides = await _fetchAndResolveLatestTags(candidates)
+
+  // Clear cache AFTER fetching so concurrent resolveLocalVersion calls
+  // during the fetch don't repopulate the cache with stale data.
+  clearVersionCache()
+
+  // Resolve each installation's version
+  const updates: { id: string; version: string }[] = []
+  await Promise.all(candidates.map(async ({ inst, cv, comfyuiDir }) => {
+    const origin = readGitRemoteUrl(comfyuiDir)
+    const override = origin ? tagOverrides.get(origin) : undefined
+    try {
+      const resolved = await resolveLocalVersion(comfyuiDir, cv.commit, undefined, override)
+      const resolvedStr = formatComfyVersion(resolved, 'short')
+      const storedStr = formatComfyVersion(cv, 'short')
+      if (resolvedStr !== storedStr) {
+        // Persist to the installation record so all surfaces (Status tab,
+        // Update tab, etc.) read the same resolved version.
+        await installations.update(inst.id, { comfyVersion: resolved })
+        updates.push({ id: inst.id, version: resolvedStr })
+      }
+    } catch {
+      // ignore — keep stored version
+    }
+  }))
+  if (updates.length > 0) {
+    _broadcastToRenderer('installations-versions-updated', { updates })
+  }
+}
+
 function _addSession(installationId: string, { proc, port, url, mode, installationName }: Omit<SessionInfo, 'startedAt'>): void {
   _runningSessions.set(installationId, { proc, port, url, mode, installationName, startedAt: Date.now() })
   _broadcastToRenderer('instance-started', { installationId, port, url, mode, installationName })
@@ -394,7 +478,6 @@ export function register(callbacks: RegisterCallbacks = {}): void {
     {
       name: 'Comfy Cloud',
       sourceId: 'cloud',
-      version: 'cloud',
       remoteUrl: 'https://cloud.comfy.org/',
       launchMode: 'window',
       browserPartition: 'shared',
@@ -403,7 +486,6 @@ export function register(callbacks: RegisterCallbacks = {}): void {
   installations.ensureExists('cloud', {
     name: 'Comfy Cloud',
     sourceId: 'cloud',
-    version: 'cloud',
     remoteUrl: 'https://cloud.comfy.org/',
     launchMode: 'window',
     browserPartition: 'shared',
@@ -418,7 +500,6 @@ export function register(callbacks: RegisterCallbacks = {}): void {
         name: 'ComfyUI Legacy Desktop',
         sourceId: 'desktop',
         installPath: desktopInfo.basePath,
-        version: 'desktop',
         launchMode: 'external',
         desktopExePath: desktopInfo.executablePath || undefined,
         status: 'installed',
@@ -587,7 +668,7 @@ export function register(callbacks: RegisterCallbacks = {}): void {
       }
     }
 
-    return list.map((inst) => {
+    const result = list.map((inst) => {
       const source = sourceMap[inst.sourceId]
       if (!source) return inst
       const listPreview = source.getListPreview ? source.getListPreview(inst) : undefined
@@ -596,12 +677,15 @@ export function register(callbacks: RegisterCallbacks = {}): void {
         : inst.status === 'failed'
         ? { label: i18n.t('errors.installFailed'), style: 'danger' }
         : (source.getStatusTag ? source.getStatusTag(inst) : undefined)
-      // Derive version display string from comfyVersion ground truth, falling back to legacy string
+      // Derive version display string from stored comfyVersion, falling back to legacy string.
+      // Omit version when it just duplicates the source type (e.g. 'cloud', 'desktop').
+      // Resolved versions are sent asynchronously via 'installations-versions-updated'.
       const cv = inst.comfyVersion as ComfyVersion | undefined
-      const version = cv ? formatComfyVersion(cv, 'short') : (inst.version as string | undefined)
+      const rawVersion = cv ? formatComfyVersion(cv, 'short') : (inst.version as string | undefined)
+      const version = rawVersion === inst.sourceId ? undefined : rawVersion
       return {
         ...inst,
-        ...(version != null ? { version } : {}),
+        version,
         sourceLabel: source.label,
         sourceCategory: source.category,
         hasConsole: source.hasConsole !== false,
@@ -609,6 +693,12 @@ export function register(callbacks: RegisterCallbacks = {}): void {
         ...(statusTag ? { statusTag } : {}),
       }
     })
+
+    // Resolve versions from git state in the background; push updates to
+    // the renderer if any differ from the stored values.
+    _resolveAndBroadcastVersions(list).catch(() => {})
+
+    return result
   })
 
   ipcMain.handle('get-unique-name', async (_event, baseName: string) => {
@@ -710,7 +800,7 @@ export function register(callbacks: RegisterCallbacks = {}): void {
         if (source.postInstall) {
           const update = (data: Record<string, unknown>): Promise<void> =>
             installations.update(installationId, data).then(() => {})
-          await source.postInstall(inst, { sendProgress, update })
+          await source.postInstall(inst, { sendProgress, update, signal: abort.signal })
         }
 
         // After postInstall, check for pending snapshot restore
@@ -1008,14 +1098,52 @@ export function register(callbacks: RegisterCallbacks = {}): void {
     return { ok: true, imported: result.imported, skipped: result.skipped }
   })
 
-  function buildSnapshotPreview(filePath: string, envelope: SnapshotExportEnvelope): Record<string, unknown> {
+  /**
+   * Find a reference ComfyUI git repo from existing installations that
+   * can be used to resolve versions for imported snapshots.  Returns the
+   * repo dir and a latestTagOverride if available.
+   */
+  async function _findReferenceRepo(): Promise<{ comfyuiDir: string; override?: LatestTagOverride } | null> {
+    const all = await installations.list()
+    for (const inst of all) {
+      if (!inst.installPath) continue
+      const comfyuiDir = path.join(inst.installPath, 'ComfyUI')
+      if (!hasGitDir(comfyuiDir)) continue
+      // Try to get the latest tag info from this repo
+      const tagName = await findLatestVersionTag(comfyuiDir)
+      if (tagName) {
+        const sha = await revParseRef(comfyuiDir, tagName)
+        if (sha) return { comfyuiDir, override: { name: tagName, sha } }
+      }
+      return { comfyuiDir }
+    }
+    return null
+  }
+
+  async function buildSnapshotPreview(filePath: string, envelope: SnapshotExportEnvelope): Promise<Record<string, unknown>> {
+    // Find a reference repo to resolve versions from git state
+    const ref = await _findReferenceRepo()
+
+    const resolveVersion = async (comfyui: { ref: string; commit: string | null; baseTag?: string; commitsAhead?: number }, style: 'short' | 'detail'): Promise<string> => {
+      if (!comfyui.commit || !ref) return formatSnapshotVersion(comfyui, style)
+      try {
+        const cv = await resolveLocalVersion(ref.comfyuiDir, comfyui.commit, undefined, ref.override)
+        return formatComfyVersion(cv, style)
+      } catch {
+        return formatSnapshotVersion(comfyui, style)
+      }
+    }
+
     const newest = envelope.snapshots[0]!
+    const resolvedVersions = await Promise.all(
+      envelope.snapshots.map((s) => resolveVersion(s.comfyui, 'short'))
+    )
     const snapshots = envelope.snapshots.map((s, i) => ({
       filename: `imported-${i}`,
       createdAt: s.createdAt,
       trigger: s.trigger,
       label: s.label,
-      comfyuiVersion: formatSnapshotVersion(s.comfyui, 'short'),
+      comfyuiVersion: resolvedVersions[i]!,
       nodeCount: s.customNodes.length,
       pipPackageCount: Object.keys(s.pipPackages).length,
     }))
@@ -1029,7 +1157,7 @@ export function register(callbacks: RegisterCallbacks = {}): void {
         createdAt: newest.createdAt,
         trigger: newest.trigger,
         label: newest.label,
-        comfyuiVersion: formatSnapshotVersion(newest.comfyui, 'detail'),
+        comfyuiVersion: await resolveVersion(newest.comfyui, 'detail'),
         comfyui: newest.comfyui,
         pythonVersion: newest.pythonVersion,
         updateChannel: newest.updateChannel,
@@ -1064,7 +1192,7 @@ export function register(callbacks: RegisterCallbacks = {}): void {
       const { envelope, stagedFile } = await stageDesktopSnapshot(desktopInfo)
 
       _lastDesktopPreviewFile = stagedFile
-      return { ok: true, preview: buildSnapshotPreview(stagedFile, envelope), snapshotPath: stagedFile }
+      return { ok: true, preview: await buildSnapshotPreview(stagedFile, envelope), snapshotPath: stagedFile }
     } catch (err) {
       console.warn('preview-desktop-migration failed:', err)
       return { ok: false, message: (err as Error)?.message ?? String(err) }
@@ -1090,7 +1218,7 @@ export function register(callbacks: RegisterCallbacks = {}): void {
       )
 
       _lastLocalPreviewFiles.set(installationId, stagedFile)
-      return { ok: true, preview: buildSnapshotPreview(stagedFile, envelope), snapshotPath: stagedFile }
+      return { ok: true, preview: await buildSnapshotPreview(stagedFile, envelope), snapshotPath: stagedFile }
     } catch (err) {
       console.warn('preview-local-migration failed:', err)
       return { ok: false, message: (err as Error)?.message ?? String(err) }
@@ -1113,7 +1241,7 @@ export function register(callbacks: RegisterCallbacks = {}): void {
     let envelope: SnapshotExportEnvelope
     try { envelope = validateExportEnvelope(parsed) } catch (err) { return { ok: false, message: (err as Error).message } }
 
-    return { ok: true, preview: buildSnapshotPreview(filePaths[0]!, envelope) }
+    return { ok: true, preview: await buildSnapshotPreview(filePaths[0]!, envelope) }
   })
 
   ipcMain.handle('preview-snapshot-path', async (_event, filePath: string) => {
@@ -1125,7 +1253,7 @@ export function register(callbacks: RegisterCallbacks = {}): void {
     let envelope: SnapshotExportEnvelope
     try { envelope = validateExportEnvelope(parsed) } catch (err) { return { ok: false, message: (err as Error).message } }
 
-    return { ok: true, preview: buildSnapshotPreview(filePath, envelope) }
+    return { ok: true, preview: await buildSnapshotPreview(filePath, envelope) }
   })
 
   ipcMain.handle('create-from-snapshot', async (_event, filePath: string, customName?: string, releaseTag?: string, variantId?: string) => {
@@ -1485,6 +1613,17 @@ export function register(callbacks: RegisterCallbacks = {}): void {
         let message = raw.message
         if (raw.code === 'EBUSY' || raw.code === 'EPERM') {
           message = i18n.t('errors.deleteLocked', { path: raw.path ?? '' })
+          // Fire-and-forget: resolve which process holds the lock, then push an updated message
+          const lockedPath = raw.path
+          if (lockedPath) {
+            findLockingProcesses(lockedPath).then((procs) => {
+              if (procs.length > 0 && !sender.isDestroyed()) {
+                const names = [...new Set(procs.map((p) => p.name))].join(', ')
+                const detail = i18n.t('errors.deleteLockedBy', { processes: names, path: lockedPath })
+                sender.send('error-detail', { installationId, message: detail })
+              }
+            }).catch((err) => { console.error('Failed to identify locking processes:', err) })
+          }
         }
         return { ok: false, message }
       }
@@ -1746,7 +1885,7 @@ export function register(callbacks: RegisterCallbacks = {}): void {
 
         const newUpdate = (data: Record<string, unknown>): Promise<void> =>
           installations.update(entry!.id, data).then(() => {})
-        await source.postInstall!(installRecord, { sendProgress, update: newUpdate })
+        await source.postInstall!(installRecord, { sendProgress, update: newUpdate, signal: abort.signal })
         installComplete = true
 
         const newInst = await installations.get(entry.id)
@@ -1823,7 +1962,7 @@ export function register(callbacks: RegisterCallbacks = {}): void {
       }
       const launchCmd = launchCmdRaw
       // Inject shared paths if this installation uses them
-      if ((inst.useSharedPaths as boolean | undefined) !== false && launchCmd.args) {
+      if (!launchCmd.skipSharedPaths && (inst.useSharedPaths as boolean | undefined) !== false && launchCmd.args) {
         const modelsDirs = settings.get('modelsDirs') as string[] | undefined
         const modelPathsConfig = ensureModelPathsConfig(modelsDirs)
         if (modelPathsConfig) {
