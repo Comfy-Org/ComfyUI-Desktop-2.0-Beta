@@ -147,7 +147,7 @@ async function loadManifest(): Promise<ResolvedOemManifest | null> {
 
 export function getOemRoot(): string | null {
   if (process.platform !== 'win32') return null
-  const programData = process.env.ProgramData || process.env.PROGRAMDATA
+  const programData = process.env.ProgramData
   if (!programData) return null
   return path.join(programData, OEM_DIR_NAME, 'OEM')
 }
