@@ -3,6 +3,74 @@ import fs from 'fs'
 import path from 'path'
 import { killProcTree } from './process'
 
+let _pygit2Python: string | null = null
+let _pygit2Script: string | null = null
+
+export function configurePygit2(pythonPath: string, scriptPath: string): void {
+  _pygit2Python = pythonPath
+  _pygit2Script = scriptPath
+}
+
+export function isPygit2Configured(): boolean {
+  return _pygit2Python !== null && _pygit2Script !== null
+}
+
+function runPygit2(args: string[], timeout: number = 5000): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+  return new Promise((resolve) => {
+    execFile(_pygit2Python!, ['-s', _pygit2Script!, ...args], {
+      encoding: 'utf-8',
+      windowsHide: true,
+      timeout,
+    }, (error, stdout, stderr) => {
+      resolve({
+        exitCode: error ? (error as any).code ?? 1 : 0,
+        stdout: (stdout ?? '').toString(),
+        stderr: (stderr ?? '').toString(),
+      })
+    })
+  })
+}
+
+function makeRunPygit2(
+  sendOutput: (text: string) => void,
+  signal?: AbortSignal,
+): (args: string[]) => Promise<ProcessResult> {
+  return (args: string[]): Promise<ProcessResult> => {
+    if (signal?.aborted) return Promise.resolve({ exitCode: 1, stderr: '', stdout: '' })
+    return new Promise((resolve) => {
+      const stdoutChunks: string[] = []
+      const stderrChunks: string[] = []
+      const proc = spawn(_pygit2Python!, ['-s', _pygit2Script!, ...args], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
+        detached: process.platform !== 'win32'
+      })
+      const onAbort = (): void => { killProcTree(proc) }
+      signal?.addEventListener('abort', onAbort, { once: true })
+      if (signal?.aborted) onAbort()
+      proc.stdout.on('data', (data: Buffer) => {
+        const text = data.toString()
+        stdoutChunks.push(text)
+        sendOutput(text)
+      })
+      proc.stderr.on('data', (data: Buffer) => {
+        const text = data.toString()
+        stderrChunks.push(text)
+        sendOutput(text)
+      })
+      proc.on('error', (err) => {
+        signal?.removeEventListener('abort', onAbort)
+        sendOutput(err.message)
+        resolve({ exitCode: 1, stderr: stderrChunks.join('') + err.message, stdout: stdoutChunks.join('') })
+      })
+      proc.on('close', (code) => {
+        signal?.removeEventListener('abort', onAbort)
+        resolve({ exitCode: code ?? 1, stderr: stderrChunks.join(''), stdout: stdoutChunks.join('') })
+      })
+    })
+  }
+}
+
 export interface ProcessResult {
   exitCode: number
   stderr: string
@@ -94,6 +162,13 @@ function redactUrl(url: string): string {
  * unavailable, the tag doesn't exist, or any error occurs.
  */
 export function countCommitsAhead(repoPath: string, tag: string, commit: string = 'HEAD'): Promise<number | undefined> {
+  if (isPygit2Configured()) {
+    return runPygit2(['rev-list-count', repoPath, tag, commit]).then(({ exitCode, stdout }) => {
+      if (exitCode !== 0) return undefined
+      const n = parseInt(stdout.trim(), 10)
+      return Number.isFinite(n) ? n : undefined
+    })
+  }
   return new Promise((resolve) => {
     execFile('git', ['rev-list', '--count', `${tag}..${commit}`], {
       cwd: repoPath,
@@ -114,6 +189,13 @@ export function countCommitsAhead(repoPath: string, tag: string, commit: string 
  * unavailable, no tags exist, or any error occurs.
  */
 export function findNearestTag(repoPath: string, commit: string = 'HEAD'): Promise<string | undefined> {
+  if (isPygit2Configured()) {
+    return runPygit2(['describe-tags', repoPath, commit]).then(({ exitCode, stdout }) => {
+      if (exitCode !== 0) return undefined
+      const tag = stdout.trim()
+      return tag || undefined
+    })
+  }
   return new Promise((resolve) => {
     execFile('git', ['describe', '--tags', '--abbrev=0', commit], {
       cwd: repoPath,
@@ -138,6 +220,13 @@ export function findNearestTag(repoPath: string, commit: string = 'HEAD'): Promi
  * error occurs.
  */
 export function findLatestVersionTag(repoPath: string): Promise<string | undefined> {
+  if (isPygit2Configured()) {
+    return runPygit2(['tag-list', repoPath]).then(({ exitCode, stdout }) => {
+      if (exitCode !== 0) return undefined
+      const tag = stdout.trim().split('\n')[0]?.trim()
+      return tag || undefined
+    })
+  }
   return new Promise((resolve) => {
     execFile('git', ['tag', '-l', 'v*', '--sort=-v:refname'], {
       cwd: repoPath,
@@ -163,6 +252,13 @@ export function findLatestVersionTag(repoPath: string): Promise<string | undefin
  * (typically just the version bump).
  */
 export function countUniqueCommits(repoPath: string, ref1: string, ref2: string): Promise<number | undefined> {
+  if (isPygit2Configured()) {
+    return runPygit2(['cherry-pick-count', repoPath, ref1, ref2], 5000).then(({ exitCode, stdout }) => {
+      if (exitCode !== 0) return undefined
+      const n = parseInt(stdout.trim(), 10)
+      return Number.isFinite(n) ? n : undefined
+    })
+  }
   return new Promise((resolve) => {
     execFile('git', ['rev-list', '--count', '--cherry-pick', '--left-only', `${ref1}...${ref2}`], {
       cwd: repoPath,
@@ -184,6 +280,11 @@ export function countUniqueCommits(repoPath: string, ref1: string, ref2: string)
  * (including on error).
  */
 export function isAncestorOf(repoPath: string, ancestor: string, descendant: string): Promise<boolean> {
+  if (isPygit2Configured()) {
+    return runPygit2(['is-ancestor', repoPath, ancestor, descendant]).then(({ exitCode }) => {
+      return exitCode === 0
+    })
+  }
   return new Promise((resolve) => {
     execFile('git', ['merge-base', '--is-ancestor', ancestor, descendant], {
       cwd: repoPath,
@@ -201,6 +302,13 @@ export function isAncestorOf(repoPath: string, ancestor: string, descendant: str
  * (e.g. if either ref is missing from the object store).
  */
 export function findMergeBase(repoPath: string, ref1: string, ref2: string): Promise<string | undefined> {
+  if (isPygit2Configured()) {
+    return runPygit2(['merge-base', repoPath, ref1, ref2]).then(({ exitCode, stdout }) => {
+      if (exitCode !== 0) return undefined
+      const sha = stdout.trim()
+      return sha || undefined
+    })
+  }
   return new Promise((resolve) => {
     execFile('git', ['merge-base', ref1, ref2], {
       cwd: repoPath,
@@ -221,6 +329,13 @@ export function findMergeBase(repoPath: string, ref1: string, ref2: string): Pro
  * undefined on error.
  */
 export function revParseRef(repoPath: string, ref: string): Promise<string | undefined> {
+  if (isPygit2Configured()) {
+    return runPygit2(['rev-parse', repoPath, ref]).then(({ exitCode, stdout }) => {
+      if (exitCode !== 0) return undefined
+      const sha = stdout.trim()
+      return sha || undefined
+    })
+  }
   return new Promise((resolve) => {
     execFile('git', ['rev-parse', ref], {
       cwd: repoPath,
@@ -244,6 +359,11 @@ export function revParseRef(repoPath: string, ref: string): Promise<string | und
  * Returns true if at least the tag fetch succeeded, false otherwise.
  */
 export function fetchTags(repoPath: string): Promise<boolean> {
+  if (isPygit2Configured()) {
+    return runPygit2(['fetch-tags', repoPath], 15000).then(({ exitCode }) => {
+      return exitCode === 0
+    })
+  }
   return new Promise((resolve) => {
     execFile('git', ['fetch', '--unshallow', 'origin', '--tags'], {
       cwd: repoPath,
@@ -270,6 +390,7 @@ export function hasGitDir(nodePath: string): boolean {
 }
 
 export function isGitAvailable(): Promise<boolean> {
+  if (isPygit2Configured()) return Promise.resolve(true)
   return new Promise((resolve) => {
     execFile('git', ['--version'], { windowsHide: true, timeout: 5000 }, (error) => {
       resolve(!error)
@@ -284,6 +405,10 @@ export function gitClone(
   signal?: AbortSignal
 ): Promise<ProcessResult> {
   if (signal?.aborted) return Promise.resolve({ exitCode: 1, stderr: '', stdout: '' })
+  if (isPygit2Configured()) {
+    const runPygit2Spawn = makeRunPygit2(sendOutput, signal)
+    return runPygit2Spawn(['clone', url, dest])
+  }
   return new Promise((resolve) => {
     const stdoutChunks: string[] = []
     const stderrChunks: string[] = []
@@ -372,6 +497,10 @@ export function gitCheckoutCommit(
   signal?: AbortSignal
 ): Promise<ProcessResult> {
   if (signal?.aborted) return Promise.resolve({ exitCode: 1, stderr: '', stdout: '' })
+  if (isPygit2Configured()) {
+    const runPygit2Spawn = makeRunPygit2(sendOutput, signal)
+    return runPygit2Spawn(['checkout', repoPath, commit])
+  }
   const runGit = makeRunGit(repoPath, sendOutput, signal)
 
   return runGit(['checkout', commit]).then((directResult) => {
@@ -398,6 +527,10 @@ export function gitFetchAndCheckout(
   signal?: AbortSignal
 ): Promise<ProcessResult> {
   if (signal?.aborted) return Promise.resolve({ exitCode: 1, stderr: '', stdout: '' })
+  if (isPygit2Configured()) {
+    const runPygit2Spawn = makeRunPygit2(sendOutput, signal)
+    return runPygit2Spawn(['fetch-and-checkout', repoPath, commit])
+  }
   const runGit = makeRunGit(repoPath, sendOutput, signal)
 
   // Fetch master explicitly — grafted/archive-based repos may have no
