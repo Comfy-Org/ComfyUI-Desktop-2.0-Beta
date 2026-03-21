@@ -1,4 +1,4 @@
-import { execFile, spawn } from 'child_process'
+import { execFile, spawn, type ExecFileException } from 'child_process'
 import fs from 'fs'
 import path from 'path'
 import { killProcTree } from './process'
@@ -17,13 +17,13 @@ export function isPygit2Configured(): boolean {
 
 function runPygit2(args: string[], timeout: number = 5000): Promise<{ exitCode: number; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
-    execFile(_pygit2Python!, ['-s', _pygit2Script!, ...args], {
+    execFile(_pygit2Python!, ['-s', '-u', _pygit2Script!, ...args], {
       encoding: 'utf-8',
       windowsHide: true,
       timeout,
     }, (error, stdout, stderr) => {
       resolve({
-        exitCode: error ? (error as any).code ?? 1 : 0,
+        exitCode: error ? (typeof (error as ExecFileException).code === 'number' ? ((error as ExecFileException).code as number) : 1) : 0,
         stdout: (stdout ?? '').toString(),
         stderr: (stderr ?? '').toString(),
       })
@@ -40,7 +40,7 @@ function makeRunPygit2(
     return new Promise((resolve) => {
       const stdoutChunks: string[] = []
       const stderrChunks: string[] = []
-      const proc = spawn(_pygit2Python!, ['-s', _pygit2Script!, ...args], {
+      const proc = spawn(_pygit2Python!, ['-s', '-u', _pygit2Script!, ...args], {
         stdio: ['ignore', 'pipe', 'pipe'],
         windowsHide: true,
         detached: process.platform !== 'win32'

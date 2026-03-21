@@ -11,7 +11,7 @@ import { formatComfyVersion } from './version'
 import type { ComfyVersion } from './version'
 import { resolveLocalVersion, clearVersionCache } from './version-resolve'
 import type { LatestTagOverride } from './version-resolve'
-import { readGitRemoteUrl, fetchTags, findLatestVersionTag, revParseRef, hasGitDir, isGitAvailable, configurePygit2, isPygit2Configured } from './git'
+import { readGitRemoteUrl, fetchTags, findLatestVersionTag, revParseRef, hasGitDir, isGitAvailable, configurePygit2 } from './git'
 import * as settings from '../settings'
 import { defaultInstallDir } from './paths'
 import { download } from './download'
@@ -23,6 +23,7 @@ import {
   spawnProcess, waitForPort, waitForUrl, killProcessTree, killByPort,
   findPidsByPort, getProcessInfo, looksLikeComfyUI, setPortArg,
   findAvailablePort, writePortLock, readPortLock, removePortLock,
+  COMFY_BOOT_TIMEOUT_MS,
 } from './process'
 import { detectGPU, validateHardware, checkNvidiaDriver } from './gpu'
 import { detectDesktopInstall, stageDesktopSnapshot } from './desktopDetect'
@@ -2226,7 +2227,7 @@ export function register(callbacks: RegisterCallbacks = {}): void {
         try {
           await Promise.race([
             waitForPort(launchCmd.port!, '127.0.0.1', {
-              timeoutMs: 120000,
+              timeoutMs: COMFY_BOOT_TIMEOUT_MS,
               signal: abort.signal,
               onPoll: ({ elapsedMs }) => {
                 const secs = Math.round(elapsedMs / 1000)

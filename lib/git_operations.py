@@ -40,7 +40,10 @@ def open_repo(repo_path):
     # Ensure required .git subdirectories exist (archive extraction can
     # drop empty directories that libgit2 requires).
     for sub in ["refs/heads", "refs/tags", "refs/remotes"]:
-        os.makedirs(os.path.join(git_dir, sub), exist_ok=True)
+        try:
+            os.makedirs(os.path.join(git_dir, sub), exist_ok=True)
+        except OSError:
+            pass
 
     repo = None
     errors = []
@@ -104,9 +107,8 @@ def resolve_ref(repo, ref):
     # Try as a SHA or abbreviated SHA
     try:
         obj = repo.revparse_single(ref)
-        if obj.type == pygit2.GIT_OBJ_TAG:
-            obj = obj.peel(pygit2.Commit)
-        return obj.id
+        commit = obj.peel(pygit2.Commit)
+        return commit.id
     except (KeyError, ValueError):
         pass
 
@@ -231,31 +233,9 @@ def cmd_rev_list_count(repo_path, tag_or_ref, commit="HEAD"):
         print(0)
         return
 
-    # BFS from commit, counting commits until we've exhausted all paths
-    # that don't go through the tag commit.
-    count = 0
-    visited = set()
-    queue = deque([commit_oid])
-    while queue:
-        oid = queue.popleft()
-        if oid in visited:
-            continue
-        visited.add(oid)
-
-        if oid == tag_oid:
-            continue
-
-        count += 1
-        try:
-            commit_obj = repo.get(oid)
-            if commit_obj is not None and commit_obj.type == pygit2.GIT_OBJ_COMMIT:
-                for parent_id in commit_obj.parent_ids:
-                    if parent_id not in visited:
-                        queue.append(parent_id)
-        except (KeyError, ValueError):
-            pass
-
-    print(count)
+    walker = repo.walk(commit_oid, pygit2.GIT_SORT_TOPOLOGICAL)
+    walker.hide(tag_oid)
+    print(sum(1 for _ in walker))
 
 
 def cmd_cherry_pick_count(repo_path, ref1, ref2):
@@ -279,30 +259,9 @@ def cmd_cherry_pick_count(repo_path, ref1, ref2):
         print("Error: no common ancestor found", file=sys.stderr)
         sys.exit(1)
 
-    # Count commits from ref1 back to (but not including) the merge-base
-    count = 0
-    visited = set()
-    queue = deque([oid1])
-    while queue:
-        oid = queue.popleft()
-        if oid in visited:
-            continue
-        visited.add(oid)
-
-        if oid == base_oid:
-            continue
-
-        count += 1
-        try:
-            commit_obj = repo.get(oid)
-            if commit_obj is not None and commit_obj.type == pygit2.GIT_OBJ_COMMIT:
-                for parent_id in commit_obj.parent_ids:
-                    if parent_id not in visited:
-                        queue.append(parent_id)
-        except (KeyError, ValueError):
-            pass
-
-    print(count)
+    walker = repo.walk(oid1, pygit2.GIT_SORT_TOPOLOGICAL)
+    walker.hide(base_oid)
+    print(sum(1 for _ in walker))
 
 
 def cmd_merge_base(repo_path, ref1, ref2):
@@ -381,7 +340,13 @@ def cmd_clone(url, dest):
     """Clone a repository. Print progress to stderr."""
     print("Cloning %s into %s..." % (url, dest), file=sys.stderr)
     try:
-        pygit2.clone_repository(url, dest)
+        class Progress(pygit2.RemoteCallbacks):
+            def transfer_progress(self, stats):
+                print("\r  Objects: %d/%d, Received: %d bytes" % (
+                    stats.indexed_objects, stats.total_objects,
+                    stats.received_bytes), end='', file=sys.stderr)
+        pygit2.clone_repository(url, dest, callbacks=Progress())
+        print(file=sys.stderr)  # newline after progress
         print("Clone complete.", file=sys.stderr)
     except Exception as e:
         print("Error: clone failed: %s" % e, file=sys.stderr)
@@ -400,7 +365,7 @@ def cmd_checkout(repo_path, commit):
     try:
         oid = resolve_ref(repo, commit)
         commit_obj = repo.get(oid)
-        repo.checkout_tree(commit_obj, strategy=pygit2.GIT_CHECKOUT_FORCE)
+        repo.checkout_tree(commit_obj, strategy=pygit2.GIT_CHECKOUT_SAFE)
         repo.set_head(oid)
         print("Checked out %s" % str(oid), file=sys.stderr)
         return
@@ -425,7 +390,7 @@ def cmd_checkout(repo_path, commit):
     try:
         oid = resolve_ref(repo, commit)
         commit_obj = repo.get(oid)
-        repo.checkout_tree(commit_obj, strategy=pygit2.GIT_CHECKOUT_FORCE)
+        repo.checkout_tree(commit_obj, strategy=pygit2.GIT_CHECKOUT_SAFE)
         repo.set_head(oid)
         print("Checked out %s" % str(oid), file=sys.stderr)
     except Exception as e:
@@ -456,6 +421,13 @@ def cmd_fetch_and_checkout(repo_path, commit):
         except Exception as e:
             print("Error: failed to fetch from origin: %s" % e, file=sys.stderr)
             sys.exit(1)
+
+    # Detach HEAD before modifying master to avoid corrupting state
+    # if HEAD is currently attached to master
+    try:
+        repo.set_head(repo.head.target)
+    except Exception:
+        pass
 
     # Ensure local master branch exists, pointing at origin/master
     try:
