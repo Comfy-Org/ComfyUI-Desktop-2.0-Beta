@@ -131,6 +131,7 @@ describe('settings path sanitization', () => {
       : [
           path.join(adminHomePath, 'ComfyUI-Shared', 'models'),
           customModelsDir,
+          path.join(homePath, 'ComfyUI-Shared', 'models'),
         ]
     const expectedInputDir = shouldRewriteCopiedDefaults
       ? path.join(homePath, 'ComfyUI-Shared', 'input')
@@ -181,6 +182,21 @@ describe('modelsDirs user ordering', () => {
 
     expect(settings.get('modelsDirs')).toEqual([userPrimary, systemDefault])
     expect((settings.get('modelsDirs') as string[])[0]).toBe(userPrimary)
+  })
+
+  it('appends system default when missing from user list', () => {
+    const userDir = path.join(tmpRoot, 'only-my-models')
+    const systemDefault = path.join(homePath, 'ComfyUI-Shared', 'models')
+    fs.mkdirSync(path.dirname(settingsPath), { recursive: true })
+    fs.writeFileSync(
+      settingsPath,
+      JSON.stringify({ modelsDirs: [userDir] }, null, 2),
+      'utf-8'
+    )
+
+    const dirs = settings.get('modelsDirs') as string[]
+    expect(dirs).toEqual([userDir, systemDefault])
+    expect(dirs[0]).toBe(userDir)
   })
 
   it('injects system default when modelsDirs is empty', () => {
