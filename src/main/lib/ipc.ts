@@ -11,7 +11,7 @@ import { formatComfyVersion } from './version'
 import type { ComfyVersion } from './version'
 import { resolveLocalVersion, clearVersionCache } from './version-resolve'
 import type { LatestTagOverride } from './version-resolve'
-import { readGitRemoteUrl, fetchTags, findLatestVersionTag, revParseRef, hasGitDir } from './git'
+import { readGitRemoteUrl, fetchTags, findLatestVersionTag, revParseRef, hasGitDir, isGitAvailable, configurePygit2 } from './git'
 import * as settings from '../settings'
 import { defaultInstallDir } from './paths'
 import { download } from './download'
@@ -545,6 +545,28 @@ export function register(callbacks: RegisterCallbacks = {}): void {
       }
 
       if (swept || settingsChanged) _broadcastToRenderer('installations-changed', {})
+    } catch {}
+  })()
+
+  // If system git is not available, configure pygit2 as a fallback using the
+  // first standalone installation's Python (which bundles pygit2).
+  void (async () => {
+    try {
+      if (await isGitAvailable()) return
+      const all = await installations.list()
+      for (const inst of all) {
+        if (inst.sourceId !== 'standalone' || !inst.installPath) continue
+        const pythonPath = process.platform === 'win32'
+          ? path.join(inst.installPath, 'standalone-env', 'python.exe')
+          : path.join(inst.installPath, 'standalone-env', 'bin', 'python3')
+        if (!fs.existsSync(pythonPath)) continue
+        const scriptPath = app.isPackaged
+          ? path.join(process.resourcesPath, 'lib', 'git_operations.py')
+          : path.join(__dirname, '..', '..', 'lib', 'git_operations.py')
+        configurePygit2(pythonPath, scriptPath)
+        console.log('[ipc] System git not found — configured pygit2 fallback via', pythonPath)
+        break
+      }
     } catch {}
   })()
 
@@ -2025,7 +2047,11 @@ export function register(callbacks: RegisterCallbacks = {}): void {
         const sendOutput = (text: string): void => {
           if (!sender.isDestroyed()) sender.send('comfy-output', { installationId, text })
         }
-        const launchEnv = { ...process.env, PYTHONIOENCODING: 'utf-8' }
+        const launchEnv: Record<string, string | undefined> = {
+          ...process.env,
+          PYTHONIOENCODING: 'utf-8',
+          ...(inst.sourceId === 'standalone' ? { CM_USE_PYGIT2: '1' } : {}),
+        }
         const proc = spawnProcess(launchCmd.cmd!, launchCmd.args!, launchCmd.cwd!, launchEnv, { showWindow: launchCmd.showWindow })
         let stderrBuf = ''
         proc.stdout?.on('data', (chunk: Buffer) => sendOutput(chunk.toString('utf-8')))
@@ -2139,7 +2165,12 @@ export function register(callbacks: RegisterCallbacks = {}): void {
       _broadcastToRenderer('instance-launching', { installationId, installationName: inst.name })
 
       const sessionPath = createSessionPath()
-      const launchEnv = { ...process.env, PYTHONIOENCODING: 'utf-8', __COMFY_CLI_SESSION__: sessionPath }
+      const launchEnv: Record<string, string | undefined> = {
+        ...process.env,
+        PYTHONIOENCODING: 'utf-8',
+        __COMFY_CLI_SESSION__: sessionPath,
+        ...(inst.sourceId === 'standalone' ? { CM_USE_PYGIT2: '1' } : {}),
+      }
       const sendOutput = (text: string): void => {
         if (!sender.isDestroyed()) {
           sender.send('comfy-output', { installationId, text })
