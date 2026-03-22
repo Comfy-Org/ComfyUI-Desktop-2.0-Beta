@@ -1,4 +1,5 @@
-import { mkdir, mkdtemp, rm } from 'node:fs/promises'
+import http from 'node:http'
+import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
@@ -62,6 +63,57 @@ export async function launchLauncherApp(): Promise<LauncherAppHandle> {
     } catch {
       // Application already closed / disconnected — nothing to clean up.
     }
+    await rm(homeDir, { recursive: true, force: true })
+  }
+
+  return { application, homeDir, cleanup }
+}
+
+/**
+ * Launch the app in simulated dev mode: a minimal HTTP server stands in for the
+ * Vite dev server, and ELECTRON_RENDERER_URL is set so the main process loads
+ * the renderer via URL (the same code path as `pnpm dev`).
+ */
+export async function launchLauncherAppDev(): Promise<LauncherAppHandle> {
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'comfyui-launcher-e2e-'))
+
+  if (process.platform === 'win32') {
+    await mkdir(path.join(homeDir, 'AppData', 'Roaming'), { recursive: true })
+  }
+
+  // Serve the built renderer index.html from a local HTTP server so Electron
+  // takes the loadURL(ELECTRON_RENDERER_URL) branch instead of loadFile.
+  const rendererHtml = await readFile(
+    path.resolve('out', 'renderer', 'index.html'),
+    'utf-8',
+  )
+  const server = http.createServer((_req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/html' })
+    res.end(rendererHtml)
+  })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const port = (server.address() as { port: number }).port
+
+  const args = ['.']
+  if (process.platform === 'linux') {
+    args.push('--no-sandbox')
+  }
+
+  const env = buildIsolatedEnv(homeDir)
+  env['ELECTRON_RENDERER_URL'] = `http://127.0.0.1:${port}`
+
+  const application = await electron.launch({ args, env })
+
+  const cleanup = async (): Promise<void> => {
+    try {
+      const proc = application.process()
+      if (proc && proc.exitCode === null) {
+        await application.close().catch(() => {})
+      }
+    } catch {
+      // Application already closed / disconnected.
+    }
+    server.close()
     await rm(homeDir, { recursive: true, force: true })
   }
 
