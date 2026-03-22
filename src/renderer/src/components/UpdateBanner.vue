@@ -21,21 +21,21 @@ const visible = ref(false)
 const canAutoUpdate = ref(true)
 const systemManaged = ref(false)
 
-function boldify(text: string): string {
-  return text.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+function formatMarkdown(text: string): string {
+  return text.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/`([^`]+)`/g, '<code>$1</code>')
 }
 
 const bannerMessage = computed<string>(() => {
   if (!state.value) return ''
   switch (state.value.type) {
     case 'available':
-      return boldify(systemManaged.value
+      return formatMarkdown(systemManaged.value
         ? t('update.debAvailable', { version: state.value.version })
         : t('update.available', { version: state.value.version }))
     case 'downloading':
       return t('update.downloading', { progress: `${state.value.transferred} / ${state.value.total} MB (${Math.round(state.value.percent)}%)` })
     case 'ready':
-      return boldify(t('update.ready', { version: state.value.version }))
+      return formatMarkdown(t('update.ready', { version: state.value.version }))
     case 'error':
       return t('update.checkFailed')
     default:

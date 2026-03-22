@@ -29,7 +29,7 @@ const messages = {
       updateCheck: 'Update Check',
       updateError: 'Update Error',
       upToDate: 'You are running the latest version.',
-      debAvailable: 'Update **v{version}** is available. Run apt to update.',
+      debAvailable: 'Update **v{version}** is available. Run `sudo apt update && sudo apt upgrade` to update.',
       debUpToDate: 'Updates are delivered through your system package manager.',
     },
   },
@@ -143,6 +143,26 @@ describe('UpdateBanner', () => {
 
       const bannerHtml = wrapper.find('.update-banner-message').html()
       expect(bannerHtml).toContain('apt')
+    })
+
+    it('renders backtick commands as <code> tags', async () => {
+      const onUpdateAvailable = vi.fn((cb: (info: { version: string }) => void) => {
+        setTimeout(() => cb({ version: '1.2.0' }), 0)
+        return vi.fn()
+      })
+      const api = stubApi({
+        getUpdateCapabilities: vi.fn().mockResolvedValue({ canAutoUpdate: false, systemManaged: true }),
+        onUpdateAvailable,
+      })
+      const wrapper = mountBanner(api)
+
+      await vi.waitFor(() => {
+        expect(wrapper.text()).toContain('1.2.0')
+      })
+
+      const bannerHtml = wrapper.find('.update-banner-message').html()
+      expect(bannerHtml).toContain('<code>')
+      expect(bannerHtml).not.toContain('`')
     })
 
     it('still shows Dismiss button', async () => {
