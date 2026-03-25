@@ -48,6 +48,8 @@ import { REQUIRES_STOPPED } from '../../types/ipc'
 import type { Theme, ResolvedTheme, QuitActiveItem } from '../../types/ipc'
 import { findLockingProcesses } from './file-lock-info'
 import type { LaunchCmd } from './process'
+import { getComfyArgsSchema, filterUnsupportedArgs } from './comfy-args'
+import type { ComfyArgDef } from './comfy-args'
 
 const MARKER_FILE = '.comfyui-desktop-2'
 const COMFYUI_REPO = 'Comfy-Org/ComfyUI'
@@ -1021,6 +1023,26 @@ export function register(callbacks: RegisterCallbacks = {}): void {
       ]
     }
     return source.getDetailSections(inst)
+  })
+
+  ipcMain.handle('get-comfy-args', async (_event, installationId: string): Promise<{ args: ComfyArgDef[] } | null> => {
+    const inst = await installations.get(installationId)
+    if (!inst) return null
+    const source = sourceMap[inst.sourceId]
+    if (!source) return null
+    const launchCmd = source.getLaunchCommand(inst)
+    if (!launchCmd?.cmd || !launchCmd.args || !launchCmd.cwd) return null
+    // Extract main.py path from args (after -s flag)
+    const sIdx = launchCmd.args.indexOf('-s')
+    if (sIdx === -1 || sIdx + 1 >= launchCmd.args.length) return null
+    const mainPyRel = launchCmd.args[sIdx + 1]!
+    const mainPyAbs = path.resolve(launchCmd.cwd, mainPyRel)
+    try {
+      const schema = await getComfyArgsSchema(launchCmd.cmd, mainPyAbs, launchCmd.cwd, installationId, inst.version as string | undefined)
+      return { args: schema.args }
+    } catch {
+      return null
+    }
   })
 
   // Snapshots
@@ -2001,6 +2023,26 @@ export function register(callbacks: RegisterCallbacks = {}): void {
         return { ok: false, message: i18n.t('errors.noEnvFound') }
       }
       const launchCmd = launchCmdRaw
+
+      // Filter out unsupported args (best-effort: only if schema is cached or can be fetched)
+      if (launchCmd.cmd && launchCmd.args && launchCmd.cwd) {
+        const sIdx = launchCmd.args.indexOf('-s')
+        if (sIdx !== -1 && sIdx + 1 < launchCmd.args.length) {
+          const mainPyRel = launchCmd.args[sIdx + 1]!
+          const mainPyAbs = path.resolve(launchCmd.cwd, mainPyRel)
+          try {
+            const schema = await getComfyArgsSchema(launchCmd.cmd, mainPyAbs, launchCmd.cwd, installationId, inst.version as string | undefined)
+            // Only filter args after the -s main.py prefix
+            const prefixArgs = launchCmd.args.slice(0, sIdx + 2)
+            const userArgs = launchCmd.args.slice(sIdx + 2)
+            const filtered = filterUnsupportedArgs(userArgs, schema)
+            launchCmd.args = [...prefixArgs, ...filtered]
+          } catch {
+            // Schema not available — pass args as-is
+          }
+        }
+      }
+
       // Inject shared paths if this installation uses them
       if (!launchCmd.skipSharedPaths && (inst.useSharedPaths as boolean | undefined) !== false && launchCmd.args) {
         const modelsDirs = settings.get('modelsDirs') as string[] | undefined
