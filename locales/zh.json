@@ -235,11 +235,11 @@
   },
 
   "update": {
-    "available": "有可用更新：**v{version}**",
+    "available": "Desktop 2.0 有可用更新：**v{version}**",
     "download": "下载",
     "dismiss": "忽略",
-    "downloading": "正在下载更新… {progress}",
-    "ready": "更新 **v{version}** 已准备好安装",
+    "downloading": "正在下载 Desktop 2.0 更新… {progress}",
+    "ready": "Desktop 2.0 更新 **v{version}** 已准备好安装",
     "restartUpdate": "重启并更新",
     "later": "稍后",
     "checkFailed": "检查更新失败",
@@ -247,7 +247,9 @@
     "retry": "重试",
     "updateCheck": "检查更新",
     "updateError": "更新错误",
-    "upToDate": "您正在使用最新版本的 ComfyUI Desktop 2.0。"
+    "upToDate": "您正在使用最新版本的 ComfyUI Desktop 2.0。",
+    "debAvailable": "Desktop 2.0 更新 **v{version}** 可用。运行 `sudo apt update && sudo apt upgrade` 进行更新，或从发布页面下载新的 .deb 文件。",
+    "debUpToDate": "您正在使用最新版本。.deb 安装的更新通过系统包管理器（apt）提供。"
   },
 
   "modal": {
@@ -377,7 +379,7 @@
     "channelStableDesc": "经过测试的版本，推荐大多数用户使用",
     "channelLatest": "GitHub 最新版",
     "channelLatestDesc": "master 分支的最新提交",
-    "updateAvailableTag": "更新：{version}",
+    "updateAvailableTag": "有可用更新：{version}",
     "updateNow": "立即更新",
     "updateConfirmTitle": "更新 ComfyUI",
     "updateConfirmMessage": "从 {installed} 更新到 {latest}？\n\n本地更改将被暂存，并创建备份分支。\n\n发布说明：\n{notes}",
@@ -422,7 +424,7 @@
     "channelStableDesc": "经过测试的版本，推荐大多数用户使用",
     "channelLatest": "GitHub 最新版",
     "channelLatestDesc": "master 分支的最新提交",
-    "updateAvailableTag": "更新：{version}",
+    "updateAvailableTag": "有可用更新：{version}",
     "updateNow": "立即更新",
     "updateConfirmTitle": "更新 ComfyUI",
     "updateConfirmMessage": "从 {installed} 更新到 {latest}？\n\n本地更改将被暂存，并创建备份分支。\n\n发布说明：\n{notes}",

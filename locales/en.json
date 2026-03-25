@@ -71,7 +71,7 @@
   "models": {
     "title": "Models",
     "directories": "Shared Directories",
-    "directoriesDesc": "Directories shared across all installs. The first directory is the primary (default for ComfyUI).",
+    "directoriesDesc": "Model directories shared across all installations. Models placed here are available to every ComfyUI install, avoiding duplicate downloads. The first directory is the primary (default for ComfyUI).",
     "addDir": "Add Directory",
     "removeDir": "Remove",
     "primary": "primary",
@@ -305,11 +305,11 @@
   },
 
   "update": {
-    "available": "Update available: **v{version}**",
+    "available": "Desktop 2.0 update available: **v{version}**",
     "download": "Download",
     "dismiss": "Dismiss",
-    "downloading": "Downloading update… {progress}",
-    "ready": "Update **v{version}** ready to install",
+    "downloading": "Downloading Desktop 2.0 update… {progress}",
+    "ready": "Desktop 2.0 update **v{version}** ready to install",
     "restartUpdate": "Restart & Update",
     "later": "Later",
     "checkFailed": "Update check failed",
@@ -318,7 +318,7 @@
     "updateCheck": "Update Check",
     "updateError": "Update Error",
     "upToDate": "You are running the latest version of ComfyUI Desktop 2.0.",
-    "debAvailable": "Update **v{version}** is available. Run `sudo apt update && sudo apt upgrade` to update, or download the new .deb from the releases page.",
+    "debAvailable": "Desktop 2.0 update **v{version}** is available. Run `sudo apt update && sudo apt upgrade` to update, or download the new .deb from the releases page.",
     "debUpToDate": "You are running the latest version. Updates for .deb installs are delivered through your system package manager (apt)."
   },
 
@@ -510,7 +510,7 @@
     "channelStableDesc": "Tested releases, recommended for most users",
     "channelLatest": "Latest on GitHub",
     "channelLatestDesc": "Newest commits from the master branch",
-    "updateAvailableTag": "Update: {version}",
+    "updateAvailableTag": "Update available: {version}",
     "updateNow": "Update Now",
     "updateConfirmTitle": "Update ComfyUI",
     "updateConfirmMessage": "Update from {installed} to {latest}?\n\nLocal changes will be stashed and a backup branch created.\n\nRelease notes:\n{notes}",
@@ -656,7 +656,7 @@
     "channelStableDesc": "Tested releases, recommended for most users",
     "channelLatest": "Latest on GitHub",
     "channelLatestDesc": "Newest commits from the master branch",
-    "updateAvailableTag": "Update: {version}",
+    "updateAvailableTag": "Update available: {version}",
     "updateNow": "Update Now",
     "updateConfirmTitle": "Update ComfyUI",
     "updateConfirmMessage": "Update from {installed} to {latest}?\n\nLocal changes will be stashed and a backup branch created.\n\nRelease notes:\n{notes}",
@@ -723,6 +723,24 @@
     "stopRequiredConfirm": "This installation is currently running. Would you like to stop it to continue?",
     "stopRunning": "Stop Running",
     "folderPermissionDenied": "macOS denied access to \"{path}\". Please open System Settings → Privacy & Security → Files and Folders, grant access to ComfyUI Desktop 2.0, then retry."
+  },
+
+  "tooltips": {
+    "standalone": "A self-contained install with its own bundled Python and dependencies. Easy to update and manage.",
+    "portable": "The official portable Windows build with embedded Python. Runs from a single folder without a system-wide install.",
+    "git": "A git-based install cloned from the ComfyUI repository. Requires git and Python to be installed on your system.",
+    "snapshot": "A saved record of your environment's state — ComfyUI version, custom nodes, and pip packages — that can be restored later.",
+    "updateChannel": "Controls where updates come from. 'Stable' uses tested releases; 'Latest' pulls the newest commits directly from GitHub.",
+    "startupArgs": "Command-line arguments passed to ComfyUI when it starts, such as --port or --lowvram.",
+    "browserPartition": "Controls whether this install shares browser cache (cookies, local storage) with other installs or keeps its own separate cache.",
+    "sharedDirs": "Directories shared across all installations for inputs and outputs.",
+    "modelsPrimary": "The primary directory is where ComfyUI saves newly downloaded models by default.",
+    "modelsDefault": "The system default directory. This path is created automatically and cannot be removed.",
+    "useSharedPaths": "When enabled, this install can access models, inputs, and outputs from the shared directories. Disable to use only this install's own local paths.",
+    "inputDir": "Shared folder for input files (images, masks, etc.) accessible to all installations.",
+    "outputDir": "Shared folder where ComfyUI saves generated outputs, accessible to all installations.",
+    "customNodes": "Third-party extensions that add new node types and functionality to ComfyUI.",
+    "pipPackages": "Python packages installed in the environment. Custom nodes often install their own pip dependencies."
   },
 
   "contextMenu": {
