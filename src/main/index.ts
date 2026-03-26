@@ -416,10 +416,18 @@ function onComfyRestarted({ installationId, process: _proc }: { installationId?:
   if (!port) return
 
   waitForPort(port, '127.0.0.1', { timeoutMs: COMFY_BOOT_TIMEOUT_MS })
-    .then(() => {
-      if (!win.isDestroyed()) {
-        win.webContents.stop()
-        win.loadURL(currentUrl)
+    .then(async () => {
+      // The TCP port may be open before the HTTP server is ready.
+      // Retry loadURL a few times with backoff to handle ERR_CONNECTION_REFUSED.
+      for (let attempt = 0; attempt < 5; attempt++) {
+        if (win.isDestroyed()) return
+        try {
+          win.webContents.stop()
+          await win.loadURL(currentUrl)
+          return
+        } catch {
+          await new Promise((r) => setTimeout(r, 500 * (attempt + 1)))
+        }
       }
     })
     .catch((err) => {
