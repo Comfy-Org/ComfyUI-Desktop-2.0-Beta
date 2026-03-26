@@ -106,6 +106,7 @@ function viewProgress(): void {
       </button>
       <button
         class="dashboard-cta-btn"
+        style="margin-top: 10px"
         @click="emit('show-quick-install')"
       >
         <Download :size="18" />
