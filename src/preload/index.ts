@@ -85,6 +85,8 @@ const api: ElectronApi = {
   // Settings
   getSettingsSections: () => ipcRenderer.invoke('get-settings-sections'),
   getModelsSections: () => ipcRenderer.invoke('get-models-sections'),
+  getModelFolders: () => ipcRenderer.invoke('get-model-folders'),
+  getModelFiles: (folder) => ipcRenderer.invoke('get-model-files', folder),
   getUniqueName: (baseName: string) => ipcRenderer.invoke('get-unique-name', baseName),
   getMediaSections: () => ipcRenderer.invoke('get-media-sections'),
   setSetting: (key, value) => ipcRenderer.invoke('set-setting', key, value),

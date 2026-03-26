@@ -28,9 +28,10 @@ import NewInstallModal from './views/NewInstallModal.vue'
 import QuickInstallModal from './views/QuickInstallModal.vue'
 import TrackModal from './views/TrackModal.vue'
 import LoadSnapshotModal from './views/LoadSnapshotModal.vue'
+import DownloadsView from './views/DownloadsView.vue'
 
 // Lucide icons
-import { LayoutDashboard, Box, Play, FolderOpen, Image, Settings, MessageSquarePlus } from 'lucide-vue-next'
+import { LayoutDashboard, Box, Play, FolderOpen, Image, Settings, MessageSquarePlus, Download } from 'lucide-vue-next'
 import { buildSupportUrl } from './lib/supportUrl'
 
 const { t, setLocaleMessage, locale } = useI18n()
@@ -43,7 +44,7 @@ const launcherPrefs = useLauncherPrefs()
 useTheme()
 
 // --- View state ---
-type TabView = 'dashboard' | 'list' | 'running' | 'models' | 'media' | 'settings'
+type TabView = 'dashboard' | 'list' | 'running' | 'models' | 'media' | 'downloads' | 'settings'
 const activeView = ref<TabView>('dashboard')
 const appVersion = ref('')
 
@@ -76,6 +77,7 @@ const sidebarItems = computed(() => [
   { key: 'running' as const, icon: Play, labelKey: 'sidebar.running' },
   { key: 'models' as const, icon: FolderOpen, labelKey: 'models.title' },
   { key: 'media' as const, icon: Image, labelKey: 'media.title' },
+  { key: 'downloads' as const, icon: Download, labelKey: 'downloads.title' },
   { key: 'settings' as const, icon: Settings, labelKey: 'settings.title' },
 ])
 
@@ -272,12 +274,16 @@ onMounted(async () => {
     <nav class="sidebar">
       <div class="sidebar-brand">Desktop 2.0</div>
       <div class="sidebar-nav">
-        <button
+        <div
           v-for="item in sidebarItems"
           :key="item.key"
           class="sidebar-item"
           :class="{ active: activeView === item.key }"
+          role="button"
+          tabindex="0"
           @click="switchView(item.key)"
+          @keydown.enter="switchView(item.key)"
+          @keydown.space.prevent="switchView(item.key)"
         >
           <component :is="item.icon" :size="18" />
           <span>{{ $t(item.labelKey) }}</span>
@@ -291,13 +297,13 @@ onMounted(async () => {
               class="sidebar-count"
             >{{ sessionStore.runningTabCount }}</span>
           </template>
-          <template v-if="item.key === 'models'">
+          <template v-if="item.key === 'downloads'">
             <span
               v-if="downloadStore.activeDownloads.length > 0"
               class="sidebar-count"
             >{{ downloadStore.activeDownloads.length }}</span>
           </template>
-        </button>
+        </div>
       </div>
       <button class="sidebar-item sidebar-feedback" @click="openFeedback">
         <MessageSquarePlus :size="18" />
@@ -347,6 +353,10 @@ onMounted(async () => {
       <MediaView
         v-show="activeView === 'media'"
         ref="mediaRef"
+      />
+
+      <DownloadsView
+        v-show="activeView === 'downloads'"
       />
 
       <SettingsView

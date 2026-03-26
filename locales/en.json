@@ -45,7 +45,7 @@
   },
 
   "downloads": {
-    "title": "Model Downloads",
+    "title": "Downloads",
     "empty": "No downloads in progress.",
     "pause": "Pause",
     "resume": "Resume",
@@ -58,7 +58,8 @@
     "completed": "Complete",
     "cancelled": "Cancelled",
     "error": "Failed",
-    "sizeProgress": "{received} / {total}"
+    "sizeProgress": "{received} / {total}",
+    "clearCompleted": "Clear Completed"
   },
 
   "media": {
@@ -76,7 +77,13 @@
     "removeDir": "Remove",
     "primary": "primary",
     "default": "default",
-    "makePrimary": "Make Primary"
+    "makePrimary": "Make Primary",
+    "browse": "Browse Models",
+    "directoriesTab": "Directories",
+    "folderTypes": "Folder Types",
+    "searchPlaceholder": "Search model files…",
+    "noFiles": "No model files found",
+    "openFolder": "Show in Folder"
   },
 
   "common": {

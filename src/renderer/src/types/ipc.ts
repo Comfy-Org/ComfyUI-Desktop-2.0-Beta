@@ -29,6 +29,7 @@ export type {
   ModelsResult,
   ModelsSection,
   ModelsField,
+  ModelFileInfo,
   ProbeResult,
   ProgressData,
   ProgressStep,

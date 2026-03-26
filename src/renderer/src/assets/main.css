@@ -161,6 +161,7 @@
  * ================================================================ */
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
+:root { --sidebar-width: 200px; }
 
 ::-webkit-scrollbar { width: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
@@ -181,7 +182,7 @@ body {
 .app-layout { display: flex; height: 100vh; }
 
 .sidebar {
-  width: 200px;
+  width: var(--sidebar-width);
   flex-shrink: 0;
   background: var(--surface);
   border-right: 1px solid var(--border);

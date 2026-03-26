@@ -36,7 +36,7 @@ import { formatTime } from './util'
 import { getActiveDownloads } from './comfyDownloadManager'
 import * as releaseCache from './release-cache'
 import * as i18n from './i18n'
-import { syncCustomModelFolders, discoverExtraModelFolders } from './models'
+import { syncCustomModelFolders, discoverExtraModelFolders, listModelFolders, listModelFiles } from './models'
 import { copyDirWithProgress } from './copy'
 import { fetchJSON } from './fetch'
 import { fetchLatestRelease } from './comfyui-releases'
@@ -1520,6 +1520,22 @@ export function register(callbacks: RegisterCallbacks = {}): void {
       ],
 
     }
+  })
+
+  ipcMain.handle('get-model-folders', () => {
+    const s = settings.getAll()
+    const modelsDirs = s.modelsDirs as string[] | undefined
+    if (!modelsDirs || modelsDirs.length === 0) return []
+    return listModelFolders(modelsDirs)
+  })
+
+  ipcMain.handle('get-model-files', async (_event, folder: string) => {
+    const s = settings.getAll()
+    const modelsDirs = s.modelsDirs as string[] | undefined
+    if (!modelsDirs || modelsDirs.length === 0) return []
+    const validFolders = listModelFolders(modelsDirs)
+    if (!validFolders.includes(folder)) return []
+    return listModelFiles(modelsDirs, folder)
   })
 
   ipcMain.handle('get-media-sections', () => {
