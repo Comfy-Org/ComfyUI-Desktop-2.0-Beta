@@ -554,6 +554,29 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
   comfyWindow.on('move', () => saveWindowBounds(installationId, comfyWindow))
   comfyWindow.webContents.on('did-create-window', (childWindow) => {
     childWindow.setIcon(APP_ICON)
+    // On macOS, Electron's WebAuthn/passkey support is broken (electron#24573).
+    // Show a warning banner when the auth popup navigates to Google so users
+    // know to use password + OTP instead of passkeys.
+    if (process.platform === 'darwin') {
+      childWindow.webContents.on('did-navigate', (_e, url) => {
+        if (url.startsWith('https://accounts.google.com/')) {
+          childWindow.webContents
+            .insertCSS(
+              `#comfy-passkey-banner{background:#fef3c7;color:#92400e;font:13px/1.4 system-ui,sans-serif;` +
+                `padding:8px 12px;text-align:center;border-bottom:1px solid #f59e0b;}`
+            )
+            .then(() =>
+              childWindow.webContents.executeJavaScript(
+                `if(!document.getElementById('comfy-passkey-banner')){` +
+                  `const b=document.createElement('div');b.id='comfy-passkey-banner';` +
+                  `b.textContent='Passkeys are not supported in Desktop 2.0 on macOS. Please use your password or verification code to sign in.';` +
+                  `document.body.prepend(b)}`
+              )
+            )
+            .catch(() => {})
+        }
+      })
+    }
   })
   comfyWindow.webContents.on('page-title-updated', (e, title) => {
     e.preventDefault()
