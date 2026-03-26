@@ -23,8 +23,16 @@ p{margin-top:24px;font-size:14px;opacity:0.7}
 </svg>
 <p>Restarting \u2014 configuring new model folders\u2026</p>
 </body></html>`
+  // Block page-initiated navigations (e.g. ComfyUI frontend reconnect logic
+  // calling location.reload()) so they can't cancel our loadURL.
+  const blockNav = (e: Electron.Event) => e.preventDefault()
+  win.webContents.on('will-navigate', blockNav)
   win.webContents.stop()
-  await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`)
+  try {
+    await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`)
+  } finally {
+    win.webContents.off('will-navigate', blockNav)
+  }
   // Give the renderer a frame to paint before the caller kills ComfyUI
   await new Promise((r) => setTimeout(r, 100))
 }
