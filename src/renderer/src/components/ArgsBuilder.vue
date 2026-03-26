@@ -272,8 +272,8 @@ function onTextInput(value: string): void {
 
 function completeArg(name: string): void {
   const val = localValue.value
-  // Replace the partial --xxx at the end with the full flag + trailing space
-  const replaced = val.replace(/--[\w_-]*$/, `--${name} `)
+  // Replace the partial -xxx or --xxx at the end with the full flag + trailing space
+  const replaced = val.replace(/-{1,2}[\w_-]*$/, `--${name} `)
   localValue.value = replaced
   emit('update:modelValue', replaced)
 }
