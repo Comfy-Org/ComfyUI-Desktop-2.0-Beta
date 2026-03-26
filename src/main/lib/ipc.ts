@@ -12,6 +12,7 @@ import type { ComfyVersion } from './version'
 import { resolveLocalVersion, clearVersionCache } from './version-resolve'
 import type { LatestTagOverride } from './version-resolve'
 import { readGitRemoteUrl, fetchTags, findLatestVersionTag, revParseRef, hasGitDir, isGitAvailable, tryConfigurePygit2Fallback } from './git'
+import { ensureRemoteUrl } from './github-mirror'
 import * as settings from '../settings'
 import { defaultInstallDir } from './paths'
 import { download } from './download'
@@ -330,6 +331,8 @@ async function _fetchAndResolveLatestTags(
   await Promise.all([...originGroups.entries()].map(async ([origin, dirs]) => {
     // Fetch tags into ALL repos in the group so every repo has the
     // commit objects needed for SHA-based merge-base / ancestry checks.
+    const mirrorEnabled = settings.get('useChineseGitMirror') === true
+    await Promise.all(dirs.map((d) => ensureRemoteUrl(d, mirrorEnabled)))
     await Promise.all(dirs.map((d) => fetchTags(d)))
     const representative = dirs[0]!
     const tagName = await findLatestVersionTag(representative)
@@ -1482,6 +1485,7 @@ export function register(callbacks: RegisterCallbacks = {}): void {
         fields: [
           { id: 'pypiMirror', label: i18n.t('settings.pypiMirror'), type: 'text', value: s.pypiMirror || '',
             placeholder: i18n.t('settings.pypiMirrorPlaceholder') },
+          { id: 'useChineseGitMirror', label: i18n.t('settings.useChineseGitMirror'), type: 'boolean', value: s.useChineseGitMirror === true },
         ],
       },
     ]

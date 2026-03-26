@@ -7,6 +7,8 @@ import { scanCustomNodes, nodeKey } from './nodes'
 import { pipFreeze, runUvPip as sharedRunUvPip, installFilteredRequirements, getPipIndexArgs } from './pip'
 import { installCnrNode, switchCnrVersion, isSafePathComponent } from './cnr'
 import { killProcTree } from './process'
+import { rewriteCloneUrl, ensureRemoteUrl } from './github-mirror'
+import * as settings from '../settings'
 import type { ScannedNode } from './nodes'
 import type { InstallationRecord } from '../installations'
 import { formatComfyVersion } from './version'
@@ -832,6 +834,7 @@ export async function restoreComfyUIVersion(
   }
 
   sendOutput(`Checking out ComfyUI commit ${targetCommit.slice(0, 7)}…\n`)
+  await ensureRemoteUrl(comfyuiDir, settings.get('useChineseGitMirror') === true)
   const gitResult = await gitFetchAndCheckout(comfyuiDir, targetCommit, sendOutput, signal)
   if (gitResult.exitCode !== 0) {
     const detail = (gitResult.stderr || gitResult.stdout).trim().split('\n').slice(-20).join('\n')
@@ -1351,7 +1354,8 @@ export async function restoreCustomNodes(
         }
         try {
           const dest = path.join(customNodesDir, targetNode.dirName)
-          const cloneResult = await gitClone(targetNode.url, dest, sendOutput, signal)
+          const cloneUrl = rewriteCloneUrl(targetNode.url, settings.get('useChineseGitMirror') === true)
+          const cloneResult = await gitClone(cloneUrl, dest, sendOutput, signal)
           if (signal?.aborted) {
             await fs.promises.rm(dest, { recursive: true, force: true }).catch(() => {})
             break

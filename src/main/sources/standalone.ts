@@ -13,6 +13,7 @@ import { deleteAction, untrackAction } from '../lib/actions'
 import { downloadAndExtract, downloadAndExtractMulti } from '../lib/installer'
 import { copyDirWithProgress } from '../lib/copy'
 import { readGitHead, isGitAvailable, isPygit2Configured, tryConfigurePygit2Fallback, fetchTags } from '../lib/git'
+import { ensureRemoteUrl } from '../lib/github-mirror'
 import { resolveLocalVersion, clearVersionCache } from '../lib/version-resolve'
 import { parseArgs, extractPort, formatTime } from '../lib/util'
 import { PYTORCH_RE, installFilteredRequirements, getPipIndexArgs } from '../lib/pip'
@@ -698,6 +699,7 @@ export const standalone: SourcePlugin = {
     }
     const comfyuiDir = path.join(installation.installPath, 'ComfyUI')
     sendProgress('cleanup', { percent: -1, status: 'Fetching version tags…' })
+    await ensureRemoteUrl(comfyuiDir, settings.get('useChineseGitMirror') === true)
     await fetchTags(comfyuiDir)
     const headCommit = readGitHead(comfyuiDir)
     if (headCommit) {

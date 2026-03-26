@@ -292,6 +292,7 @@
     "advanced": "Advanced",
     "pypiMirror": "PyPI Mirror URL",
     "pypiMirrorPlaceholder": "e.g. https://mirrors.aliyun.com/pypi/simple/",
+    "useChineseGitMirror": "Use Chinese GitHub mirror (gitcode.com)",
     "about": "About",
     "version": "Version",
     "platform": "Platform",
