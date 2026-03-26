@@ -29,7 +29,7 @@ async function fetchSchema(): Promise<void> {
   loadError.value = false
   try {
     const result = await window.api.getComfyArgs(props.installationId)
-    if (result) {
+    if (result?.args?.length) {
       schema.value = result.args
     } else {
       loadError.value = true
@@ -454,6 +454,9 @@ function toggleGroup(group: string): void {
   color: var(--text-muted);
   cursor: pointer;
   transition: color 0.15s, border-color 0.15s;
+}
+.args-configure-btn :deep(svg) {
+  stroke: currentColor;
 }
 .args-configure-btn:hover {
   color: var(--text);
