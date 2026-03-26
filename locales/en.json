@@ -26,7 +26,8 @@
     "telemetrySettings": "Manage in Settings",
     "migrateBannerTitle": "Migrate to Standalone",
     "migrateBannerDesc": "Your Legacy Desktop installation was detected. Migrate to a Standalone install for better performance, easier updates, and full Desktop 2.0 management.",
-    "migrateBannerAction": "Migrate Now"
+    "migrateBannerAction": "Migrate Now",
+    "migrateBannerSkip": "New Install Without Migrating"
   },
 
   "sidebar": {

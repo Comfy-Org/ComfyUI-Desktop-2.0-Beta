@@ -353,6 +353,7 @@ async function changePrimary(): Promise<void> {
         :installation="desktopOnlyInstall"
         @show-progress="(opts) => emit('show-progress', opts)"
         @show-settings="emit('show-settings')"
+        @show-quick-install="emit('show-quick-install')"
       />
 
       <!-- Quick Launch section -->

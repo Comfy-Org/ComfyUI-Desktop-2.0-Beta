@@ -95,6 +95,12 @@ function sortedVariants(options: FieldOption[]): FieldOption[] {
   })
 }
 
+const estimatedInstallSize = computed(() => {
+  const files = selectedVariant.value?.data?.downloadFiles as Array<{ size: number }> | undefined
+  const downloadBytes = files ? files.reduce((sum, f) => sum + f.size, 0) : 0
+  return downloadBytes > 0 ? Math.ceil(downloadBytes * 2.25) : 0
+})
+
 const canInstall = computed(() =>
   !loading.value && !installing.value && selectedVariant.value !== null && pathIssues.value.length === 0
 )
@@ -535,6 +541,9 @@ defineExpose({ open })
                 </template>
                 <template v-else-if="diskSpace">
                   {{ $t('diskSpace.free', { size: formatBytes(diskSpace.free) }) }}
+                  <template v-if="estimatedInstallSize > 0">
+                    · {{ $t('diskSpace.estimatedRequired', { size: formatBytes(estimatedInstallSize) }) }}
+                  </template>
                 </template>
               </div>
             </div>
