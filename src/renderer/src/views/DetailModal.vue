@@ -11,6 +11,7 @@ import { emitTelemetryAction, toErrorBucket } from '../lib/telemetry'
 import { useMigrateAction } from '../composables/useMigrateAction'
 import { REQUIRES_STOPPED } from '../types/ipc'
 import { Star, Pin, Pencil } from 'lucide-vue-next'
+import TooltipWrap from '../components/TooltipWrap.vue'
 import type {
   Installation,
   ActionDef,
@@ -58,6 +59,19 @@ const isDesktop = computed(() => props.installation?.sourceId === 'desktop')
 const isCloud = computed(() => props.installation?.sourceCategory === 'cloud')
 const isPrimary = computed(() => props.installation ? prefs.isPrimary(props.installation.id) : false)
 const isPinned = computed(() => props.installation ? prefs.isPinned(props.installation.id) : false)
+
+async function confirmSetPrimary(): Promise<void> {
+  if (!props.installation) return
+  const confirmed = await modal.confirm({
+    title: t('dashboard.setPrimary'),
+    message: t('dashboard.setPrimaryConfirm', { name: props.installation.name }),
+    confirmLabel: t('dashboard.setPrimary'),
+    confirmStyle: 'primary',
+  })
+  if (confirmed) {
+    await prefs.setPrimary(props.installation.id)
+  }
+}
 
 const contentRef = ref<HTMLDivElement | null>(null)
 const scrollRef = ref<HTMLDivElement | null>(null)
@@ -146,7 +160,14 @@ watch(
       activeTab.value = tabExists ? props.initialTab : 'status'
       await nextTick()
       if (scrollRef.value) scrollRef.value.scrollTop = 0
-      if (inst.installPath) fetchInstallationSize(inst.id)
+      if (inst.installPath) {
+        fetchInstallationSize(inst.id)
+      } else {
+        sizeGeneration++
+        installationSize.value = null
+        installationSizeLoading.value = false
+        window.api.cancelInstallationSize()
+      }
 
       // Auto-trigger an action if requested (e.g. from migrate pill click)
       if (props.autoAction && !autoActionRun.value) {
@@ -552,7 +573,7 @@ onUnmounted(() => {
             :class="{ active: isPrimary }"
             :disabled="isPrimary"
             :title="$t('dashboard.setPrimary')"
-            @click="prefs.setPrimary(installation!.id)"
+            @click="confirmSetPrimary"
           >
             <Star :size="16" />
           </button>
@@ -622,18 +643,22 @@ onUnmounted(() => {
         <!-- Bottom pinned actions -->
         <div v-if="bottomSection" id="detail-bottom-actions">
           <div class="detail-actions">
-            <button
+            <TooltipWrap
               v-for="a in bottomSection.actions"
               :key="a.id"
-              :class="[
-                a.style,
-                { 'looks-disabled': a.enabled === false && a.disabledMessage }
-              ]"
-              :disabled="a.enabled === false && !a.disabledMessage"
-              @click="handleActionClick(a, $event)"
+              :text="a.tooltip"
             >
-              {{ a.label }}
-            </button>
+              <button
+                :class="[
+                  a.style,
+                  { 'looks-disabled': a.enabled === false && a.disabledMessage }
+                ]"
+                :disabled="a.enabled === false && !a.disabledMessage"
+                @click="handleActionClick(a, $event)"
+              >
+                {{ a.label }}
+              </button>
+            </TooltipWrap>
           </div>
         </div>
       </div>

@@ -168,6 +168,7 @@ export const portable: SourcePlugin = {
         })
         actions.push({
           id: 'update-comfyui', label: t('portable.updateNow'), style: 'primary', enabled: installed,
+          tooltip: t('tooltips.updateNow'),
           showProgress: true, progressTitle: t('portable.updatingTitle', { version: channelInfo.latestTag || '' }),
           data: isSwitching ? { channel: card.value } : undefined,
           confirm: {
@@ -220,6 +221,7 @@ export const portable: SourcePlugin = {
               { value: 'ask', label: t('common.portConflictAsk') },
               { value: 'auto', label: t('common.portConflictAuto') },
             ] },
+          { id: 'envVars', label: t('common.envVars'), value: (installation.envVars as Record<string, string> | undefined) ?? {}, editable: true, editType: 'env-vars', tooltip: t('tooltips.envVars') },
         ],
       },
       {

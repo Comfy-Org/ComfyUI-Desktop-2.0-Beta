@@ -3,7 +3,7 @@ import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useMigrateAction } from '../composables/useMigrateAction'
 import { useProgressStore } from '../stores/progressStore'
-import { ArrowRightLeft } from 'lucide-vue-next'
+import { ArrowRightLeft, Download } from 'lucide-vue-next'
 import type { Installation } from '../types/ipc'
 
 const props = defineProps<{
@@ -18,6 +18,7 @@ const emit = defineEmits<{
     cancellable?: boolean
   }]
   'show-settings': []
+  'show-quick-install': []
 }>()
 
 const { t } = useI18n()
@@ -102,6 +103,14 @@ function viewProgress(): void {
       >
         <ArrowRightLeft :size="18" />
         {{ $t('dashboard.migrateBannerAction') }}
+      </button>
+      <button
+        class="dashboard-cta-btn"
+        style="margin-top: 10px"
+        @click="emit('show-quick-install')"
+      >
+        <Download :size="18" />
+        {{ $t('dashboard.migrateBannerSkip') }}
       </button>
     </template>
 

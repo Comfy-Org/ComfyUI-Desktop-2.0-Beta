@@ -106,9 +106,9 @@ export interface ComfyArgDef {
 export interface DetailField {
   id: string
   label: string
-  value: string | boolean | number | null
+  value: string | boolean | number | Record<string, string> | null
   editable?: boolean
-  editType?: 'select' | 'boolean' | 'text' | 'path' | 'channel-cards' | 'args-builder'
+  editType?: 'select' | 'boolean' | 'text' | 'path' | 'channel-cards' | 'args-builder' | 'env-vars'
   options?: DetailFieldOption[]
   refreshSection?: boolean
   onChangeAction?: string
@@ -121,6 +121,7 @@ export interface ActionDef {
   style?: 'primary' | 'danger'
   enabled?: boolean
   disabledMessage?: string
+  tooltip?: string
   confirm?: ConfirmDef
   showProgress?: boolean
   progressTitle?: string
@@ -520,6 +521,7 @@ export interface ElectronApi {
   getDiskSpace(targetPath: string): Promise<DiskSpaceInfo>
   validateInstallPath(targetPath: string): Promise<PathIssue[]>
   getInstallationSize(installationId: string): Promise<{ sizeBytes: number }>
+  cancelInstallationSize(): Promise<void>
 
   // Locale
   getLocaleMessages(): Promise<Record<string, unknown>>

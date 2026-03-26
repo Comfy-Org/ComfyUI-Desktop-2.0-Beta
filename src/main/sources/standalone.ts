@@ -505,6 +505,7 @@ export const standalone: SourcePlugin = {
         })
         actions.push({
           id: 'update-comfyui', label: t('standalone.updateNow'), style: 'primary', enabled: installed,
+          tooltip: t('tooltips.updateNow'),
           showProgress: true, progressTitle: t('standalone.updatingTitle', { version: latestDisplay }),
           data: isSwitching ? { channel: card.value } : undefined,
           confirm: {
@@ -514,6 +515,7 @@ export const standalone: SourcePlugin = {
         })
         actions.push({
           id: 'copy-update', label: t('standalone.copyAndUpdate'), style: 'default', enabled: installed,
+          tooltip: t('tooltips.copyAndUpdate'),
           showProgress: true, progressTitle: t('standalone.copyUpdatingTitle', { version: latestDisplay }),
           cancellable: true,
           data: isSwitching ? { channel: card.value } : undefined,
@@ -571,6 +573,7 @@ export const standalone: SourcePlugin = {
               { value: 'ask', label: t('common.portConflictAsk') },
               { value: 'auto', label: t('common.portConflictAuto') },
             ] },
+          { id: 'envVars', label: t('common.envVars'), value: (installation.envVars as Record<string, string> | undefined) ?? {}, editable: true, editType: 'env-vars', tooltip: t('tooltips.envVars') },
         ],
       },
       {
@@ -593,55 +596,6 @@ export const standalone: SourcePlugin = {
           { id: 'open-folder', label: t('actions.openDirectory'), style: 'default', enabled: !!installation.installPath },
           deleteAction(installation),
           untrackAction(),
-        ],
-      },
-      {
-        tab: 'settings',
-        title: t('common.advanced'),
-        collapsed: true,
-        actions: [
-          { id: 'release-update', label: t('standalone.releaseUpdate'), style: 'default', enabled: installed,
-            showProgress: true, progressTitle: t('standalone.releaseUpdatingTitle'), cancellable: true,
-            fieldSelects: [
-              { sourceId: 'standalone', fieldId: 'release', field: 'releaseSelection',
-                title: t('standalone.releaseUpdateSelectRelease'),
-                message: t('standalone.releaseUpdateSelectReleaseMessage') },
-              { sourceId: 'standalone', fieldId: 'variant', field: 'variantSelection',
-                title: t('standalone.releaseUpdateSelectVariant'),
-                message: t('standalone.releaseUpdateSelectVariantMessage') },
-            ],
-            prompt: {
-              title: t('standalone.releaseUpdateTitle'),
-              message: t('standalone.releaseUpdateNameMessage'),
-              defaultValue: `${installation.name} (Release Update)`,
-              confirmLabel: t('standalone.releaseUpdateConfirm'),
-              required: true,
-              field: 'name',
-            } },
-          { id: 'migrate-from', label: t('migrate.migrateFrom'), style: 'default', enabled: installed,
-            showProgress: true, progressTitle: t('migrate.migrating'), cancellable: true,
-            select: {
-              title: t('migrate.selectSource'),
-              message: t('migrate.selectSourceMessage'),
-              emptyMessage: t('migrate.noInstallations'),
-              source: 'installations',
-              field: 'sourceInstallationId',
-              excludeSelf: true,
-              filters: { status: 'installed', sourceCategory: 'local' },
-            },
-            confirm: {
-              title: t('migrate.confirmTitle'),
-              message: t('migrate.confirmMessage'),
-              confirmLabel: t('migrate.migrateConfirm'),
-              options: [
-                { id: 'customNodes', label: t('migrate.optCustomNodes'), checked: true },
-                { id: 'workflows', label: t('migrate.optWorkflows'), checked: false },
-                { id: 'userSettings', label: t('migrate.optUserSettings'), checked: false },
-                { id: 'models', label: t('migrate.optModels'), checked: false },
-                { id: 'input', label: t('migrate.optInput'), checked: false },
-                { id: 'output', label: t('migrate.optOutput'), checked: false },
-              ],
-            } },
         ],
       },
     )

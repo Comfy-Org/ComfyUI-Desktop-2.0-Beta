@@ -2,7 +2,9 @@
 import { ref, reactive, watch, nextTick } from 'vue'
 import type { DetailItem, DetailField, DetailFieldOption, ActionDef } from '../types/ipc'
 import InfoTooltip from './InfoTooltip.vue'
+import TooltipWrap from './TooltipWrap.vue'
 import ArgsBuilder from './ArgsBuilder.vue'
+import EnvVarsEditor from './EnvVarsEditor.vue'
 
 interface Props {
   title?: string
@@ -69,7 +71,7 @@ async function toggleCollapse(): Promise<void> {
   }
 }
 
-async function handleFieldChange(field: DetailField, value: string | boolean): Promise<void> {
+async function handleFieldChange(field: DetailField, value: string | boolean | Record<string, string>): Promise<void> {
   await window.api.updateInstallation(props.installationId, { [field.id]: value })
   if (field.refreshSection && props.title) {
     emit('refresh', props.title)
@@ -175,14 +177,15 @@ v-for="a in item.actions" :key="a.id"
               <span v-if="getDraft(f) !== String(f.value)" class="channel-switch-hint">
                 {{ $t('channelCards.switchTo', { channel: getSelectedOption(f)?.label }) }}
               </span>
-              <button
-                v-for="a in getSelectedActions(f)" :key="a.id"
-                :class="[a.style, { 'looks-disabled': a.enabled === false && a.disabledMessage }]"
-                :disabled="a.enabled === false && !a.disabledMessage"
-                @click="handleAction(a, $event)"
-              >
-                {{ a.label }}
-              </button>
+              <TooltipWrap v-for="a in getSelectedActions(f)" :key="a.id" :text="a.tooltip">
+                <button
+                  :class="[a.style, { 'looks-disabled': a.enabled === false && a.disabledMessage }]"
+                  :disabled="a.enabled === false && !a.disabledMessage"
+                  @click="handleAction(a, $event)"
+                >
+                  {{ a.label }}
+                </button>
+              </TooltipWrap>
             </div>
           </template>
           <!-- Args builder -->
@@ -191,6 +194,14 @@ v-for="a in item.actions" :key="a.id"
             <ArgsBuilder
               :model-value="String(f.value ?? '')"
               :installation-id="installationId"
+              @update:model-value="handleFieldChange(f, $event)"
+            />
+          </template>
+          <!-- Env vars editor -->
+          <template v-else-if="f.editable && f.editType === 'env-vars'">
+            <div class="detail-field-label">{{ f.label }}<InfoTooltip v-if="f.tooltip" :text="f.tooltip" /></div>
+            <EnvVarsEditor
+              :model-value="(f.value as Record<string, string>) ?? {}"
               @update:model-value="handleFieldChange(f, $event)"
             />
           </template>
@@ -225,13 +236,14 @@ v-else-if="f.editable" type="text" class="detail-field-input"
 
       <!-- Actions -->
       <div v-if="actions?.length" class="detail-actions">
-        <button
-v-for="a in actions" :key="a.id"
-                :class="[a.style, { 'looks-disabled': a.enabled === false && a.disabledMessage }]"
-                :disabled="a.enabled === false && !a.disabledMessage"
-                @click="handleAction(a, $event)">
-          {{ a.label }}
-        </button>
+        <TooltipWrap v-for="a in actions" :key="a.id" :text="a.tooltip">
+          <button
+            :class="[a.style, { 'looks-disabled': a.enabled === false && a.disabledMessage }]"
+            :disabled="a.enabled === false && !a.disabledMessage"
+            @click="handleAction(a, $event)">
+            {{ a.label }}
+          </button>
+        </TooltipWrap>
       </div>
     </div>
   </div>
