@@ -24,6 +24,7 @@ import {
 import { getModelDownloadContentScript } from './lib/comfyContentScript'
 import { shouldOpenInPopup } from './lib/allowedPopups'
 import { showModelFolderRelaunchPage } from './lib/relaunchPage'
+import { COMFY_BG } from './lib/theme'
 
 todesktop.init({ autoUpdater: false })
 
@@ -478,7 +479,7 @@ function onComfyRestarted({ installationId, process: _proc }: { installationId?:
       cleanupRelaunchState()
       // Force the background color so the brief gap between splash unload
       // and ComfyUI page paint is dark instead of white.
-      win.setBackgroundColor('#171717')
+      win.setBackgroundColor(COMFY_BG)
       await win.loadURL(currentUrl)
     })
     .catch((err) => {
@@ -528,7 +529,7 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
     minHeight: 600,
     icon: APP_ICON,
     title: `${installation.name} — Desktop 2.0 v${APP_VERSION}`,
-    backgroundColor: '#171717',
+    backgroundColor: COMFY_BG,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
