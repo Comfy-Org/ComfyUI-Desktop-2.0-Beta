@@ -607,17 +607,20 @@ export function register(callbacks: RegisterCallbacks = {}): void {
     } catch {}
   })()
 
-  // Pre-warm the ETag cache for GitHub API URLs
-  void (async () => {
-    try {
-      await Promise.allSettled([
-        fetchJSON('https://api.github.com/repos/Comfy-Org/ComfyUI-Standalone-Environments/releases?per_page=30'),
-        fetchJSON('https://api.github.com/repos/Comfy-Org/ComfyUI-Standalone-Environments/releases/latest'),
-        fetchJSON('https://api.github.com/repos/Comfy-Org/ComfyUI/releases?per_page=30'),
-        fetchJSON('https://api.github.com/repos/Comfy-Org/ComfyUI/tags?per_page=30'),
-      ])
-    } catch {}
-  })()
+  // Pre-warm the ETag cache for GitHub API URLs (skip when using Chinese mirror
+  // since these calls would be slow/blocked and the mirror path uses git ls-remote)
+  if (settings.get('useChineseGitMirror') !== true) {
+    void (async () => {
+      try {
+        await Promise.allSettled([
+          fetchJSON('https://api.github.com/repos/Comfy-Org/ComfyUI-Standalone-Environments/releases?per_page=30'),
+          fetchJSON('https://api.github.com/repos/Comfy-Org/ComfyUI-Standalone-Environments/releases/latest'),
+          fetchJSON('https://api.github.com/repos/Comfy-Org/ComfyUI/releases?per_page=30'),
+          fetchJSON('https://api.github.com/repos/Comfy-Org/ComfyUI/tags?per_page=30'),
+        ])
+      } catch {}
+    })()
+  }
 
   // Check installation updates on startup and periodically
   setTimeout(() => checkInstallationUpdates(), 3_000)

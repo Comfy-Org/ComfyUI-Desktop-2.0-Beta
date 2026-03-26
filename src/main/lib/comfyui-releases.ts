@@ -1,4 +1,6 @@
 import { fetchJSON } from './fetch'
+import { getComfyUIRemoteUrl, lsRemoteTags, lsRemoteRef } from './github-mirror'
+import * as settings from '../settings'
 
 const REPO = 'Comfy-Org/ComfyUI'
 
@@ -56,11 +58,28 @@ function compareVersions(a: number[], b: number[]): number {
 }
 
 /**
- * Find the latest semver tag from the tags API.
- * This catches tags that exist in git but whose GitHub Release is still a draft
- * (the releases API omits drafts for unauthenticated callers).
+ * Find the latest semver tag. Uses `git ls-remote --tags` against the
+ * gitcode mirror when the Chinese mirror setting is enabled; otherwise
+ * falls back to the GitHub tags API.
  */
 async function fetchLatestTag(): Promise<string | null> {
+  const mirrorEnabled = settings.get('useChineseGitMirror') === true
+  if (mirrorEnabled) {
+    try {
+      const tags = await lsRemoteTags(getComfyUIRemoteUrl(true))
+      let best: { tag: string; version: number[] } | null = null
+      for (const name of tags) {
+        const v = parseVersionTag(name)
+        if (!v) continue
+        if (!best || compareVersions(v, best.version) > 0) {
+          best = { tag: name, version: v }
+        }
+      }
+      // If ls-remote succeeded with results, use them; otherwise fall through
+      // to the API path (e.g. pygit2-only systems where git is unavailable).
+      if (best) return best.tag
+    } catch {}
+  }
   try {
     const tags = await fetchJSON(
       `https://api.github.com/repos/${REPO}/tags?per_page=30`
@@ -82,7 +101,29 @@ async function fetchLatestTag(): Promise<string | null> {
 export async function fetchLatestRelease(
   channel: string
 ): Promise<Record<string, unknown> | null> {
+  const mirrorEnabled = settings.get('useChineseGitMirror') === true
+
   if (channel === 'latest') {
+    // Mirror path: use git ls-remote for HEAD SHA, skip releases API
+    if (mirrorEnabled) {
+      const mirrorUrl = getComfyUIRemoteUrl(true)
+      const [headSha, latestTag] = await Promise.all([
+        lsRemoteRef(mirrorUrl, 'refs/heads/master'),
+        fetchLatestTag(),
+      ])
+      if (!headSha) return null
+      return {
+        tag_name: headSha.slice(0, 7),
+        commitSha: headSha,
+        baseTag: latestTag || undefined,
+        // commitsAhead is resolved locally after git fetch — omit here
+        body: '',
+        html_url: `https://github.com/${REPO}/commit/${headSha}`,
+        published_at: new Date().toISOString(),
+        _commit: true,
+      }
+    }
+
     const [commit, releases, latestTag] = await Promise.all([
       fetchJSON(`https://api.github.com/repos/${REPO}/commits/master`) as Promise<GitHubCommit | null>,
       (fetchJSON(`https://api.github.com/repos/${REPO}/releases?per_page=10`) as Promise<GitHubRelease[]>)
@@ -127,6 +168,22 @@ export async function fetchLatestRelease(
       _commit: true,
     }
   }
+
+  // Stable channel: mirror path uses tags only (no releases API needed)
+  if (mirrorEnabled) {
+    const latestTag = await fetchLatestTag()
+    if (!latestTag) return null
+    return {
+      tag_name: latestTag,
+      name: latestTag,
+      body: '',
+      html_url: `https://github.com/${REPO}/releases/tag/${latestTag}`,
+      published_at: new Date().toISOString(),
+      baseTag: latestTag,
+      commitsAhead: 0,
+    }
+  }
+
   const [releases, latestTag] = await Promise.all([
     fetchJSON(`https://api.github.com/repos/${REPO}/releases?per_page=30`) as Promise<GitHubRelease[]>,
     fetchLatestTag(),
