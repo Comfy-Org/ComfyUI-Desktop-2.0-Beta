@@ -2,6 +2,7 @@ import path from 'path'
 import fs from 'fs'
 import { dataDir } from './paths'
 import { writeFileSafe } from './safe-file'
+import type { ModelFileInfo } from '../../types/ipc'
 
 // Canonical ComfyUI model folder types from folder_paths.py.
 // When ComfyUI adds `all_model_folders` support in extra_model_paths.yaml,
@@ -215,4 +216,54 @@ export function syncCustomModelFolders(
   const config = ensureModelPathsConfig(modelsDirs)
 
   return { newFolders, config }
+}
+
+/**
+ * Returns the deduplicated, sorted list of model folder names present across
+ * all shared model directories. Includes both canonical and extra folders.
+ */
+export function listModelFolders(modelsDirs: string[]): string[] {
+  const seen = new Set<string>()
+  for (const dir of modelsDirs) {
+    for (const name of allFoldersIn(dir)) {
+      if (name.startsWith('.')) continue
+      seen.add(name)
+    }
+  }
+  return [...seen].sort()
+}
+
+/**
+ * Lists model files in a given folder name across all shared model directories.
+ * Returns deduplicated entries sorted by name. Uses async IO to avoid blocking
+ * the main thread on large model libraries.
+ */
+export async function listModelFiles(modelsDirs: string[], folder: string): Promise<ModelFileInfo[]> {
+  const seen = new Map<string, ModelFileInfo>()
+  for (const dir of modelsDirs) {
+    const folderPath = path.join(dir, folder)
+    let entries: fs.Dirent[]
+    try {
+      entries = await fs.promises.readdir(folderPath, { withFileTypes: true })
+    } catch {
+      continue
+    }
+    for (const entry of entries) {
+      if (!entry.isFile()) continue
+      if (seen.has(entry.name)) continue
+      const entryPath = path.join(folderPath, entry.name)
+      try {
+        const stat = await fs.promises.stat(entryPath)
+        seen.set(entry.name, {
+          name: entry.name,
+          fullPath: entryPath,
+          sizeBytes: stat.size,
+          modifiedAt: stat.mtimeMs,
+        })
+      } catch {
+        // skip files we can't stat
+      }
+    }
+  }
+  return [...seen.values()].sort((a, b) => a.name.localeCompare(b.name))
 }

@@ -1,11 +1,17 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import DirCard from '../components/DirCard.vue'
-import DownloadsPanel from '../components/DownloadsPanel.vue'
+import ModelBrowser from '../components/ModelBrowser.vue'
 import type { ModelsSection } from '../types/ipc'
 
+const { t } = useI18n()
+
+type ModelsTab = 'directories' | 'browse'
+const activeTab = ref<ModelsTab>('directories')
 const systemDefault = ref('')
 const sections = ref<ModelsSection[]>([])
+const modelBrowserRef = ref<InstanceType<typeof ModelBrowser> | null>(null)
 
 function normalizePath(p: string): string {
   return (p || '').replace(/[\\/]+$/, '').toLowerCase()
@@ -15,6 +21,7 @@ async function loadModels(): Promise<void> {
   const result = await window.api.getModelsSections()
   systemDefault.value = result.systemDefault
   sections.value = result.sections
+  if (activeTab.value === 'browse') modelBrowserRef.value?.refresh()
 }
 
 function isDefault(path: string): boolean {
@@ -57,6 +64,11 @@ async function handleAdd(field: ModelsSection['fields'][number]): Promise<void> 
   }
 }
 
+function switchTab(tab: ModelsTab): void {
+  activeTab.value = tab
+  if (tab === 'browse') modelBrowserRef.value?.refresh()
+}
+
 onMounted(() => loadModels())
 
 defineExpose({ loadModels })
@@ -71,36 +83,55 @@ defineExpose({ loadModels })
     </div>
 
     <div class="view-scroll">
-      <div
-        v-for="(section, sIdx) in sections"
-        :key="sIdx"
-        class="settings-section"
-      >
-        <div v-if="section.title" class="detail-section-title">{{ section.title }}</div>
+      <div class="detail-tabs">
+        <button
+          class="detail-tab"
+          :class="{ active: activeTab === 'directories' }"
+          @click="switchTab('directories')"
+        >
+          {{ t('models.directoriesTab') }}
+        </button>
+        <button
+          class="detail-tab"
+          :class="{ active: activeTab === 'browse' }"
+          @click="switchTab('browse')"
+        >
+          {{ t('models.browse') }}
+        </button>
+      </div>
 
-        <div class="detail-fields">
-          <div v-for="field in section.fields" :key="field.id" class="field">
-            <label>{{ field.label }}</label>
+      <template v-if="activeTab === 'directories'">
+        <div
+          v-for="(section, sIdx) in sections"
+          :key="sIdx"
+          class="settings-section"
+        >
+          <div v-if="section.title" class="detail-section-title">{{ section.title }}</div>
 
-            <div class="dir-card-list">
-              <DirCard
-                v-for="(path, index) in field.value"
-                :key="index"
-                :path="path"
-                :is-primary="index === 0"
-                :is-default="isDefault(path)"
-                @open="handleOpen(path)"
-                @browse="handleBrowse(field, index)"
-                @remove="handleRemove(field, index)"
-                @make-primary="handleMakePrimary(field, index)"
-              />
-              <button @click="handleAdd(field)">{{ $t('models.addDir') }}</button>
+          <div class="detail-fields">
+            <div v-for="field in section.fields" :key="field.id" class="field">
+              <label>{{ field.label }}</label>
+
+              <div class="dir-card-list">
+                <DirCard
+                  v-for="(path, index) in field.value"
+                  :key="index"
+                  :path="path"
+                  :is-primary="index === 0"
+                  :is-default="isDefault(path)"
+                  @open="handleOpen(path)"
+                  @browse="handleBrowse(field, index)"
+                  @remove="handleRemove(field, index)"
+                  @make-primary="handleMakePrimary(field, index)"
+                />
+                <button @click="handleAdd(field)">{{ $t('models.addDir') }}</button>
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      </template>
 
-      <DownloadsPanel />
+      <ModelBrowser v-else ref="modelBrowserRef" />
     </div>
   </div>
 </template>

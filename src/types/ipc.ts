@@ -266,6 +266,13 @@ export interface ModelsField {
   tooltip?: string
 }
 
+export interface ModelFileInfo {
+  name: string
+  fullPath: string
+  sizeBytes: number
+  modifiedAt: number
+}
+
 // --- Probe types ---
 export interface ProbeResult {
   sourceLabel: string
@@ -567,6 +574,8 @@ export interface ElectronApi {
   // Settings
   getSettingsSections(): Promise<SettingsSection[]>
   getModelsSections(): Promise<ModelsResult>
+  getModelFolders(): Promise<string[]>
+  getModelFiles(folder: string): Promise<ModelFileInfo[]>
   getMediaSections(): Promise<SettingsSection[]>
   getUniqueName(baseName: string): Promise<string>
   setSetting(key: string, value: unknown): Promise<void>
