@@ -389,6 +389,7 @@ export interface SnapshotDiffSummary {
   pipsRemoved: number
   pipsChanged: number
   comfyuiChanged: boolean
+  updateChannelChanged: boolean
 }
 
 export interface SnapshotSummary {
