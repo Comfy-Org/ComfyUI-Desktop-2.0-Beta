@@ -23,7 +23,8 @@ There are 2 e2e test files using Playwright but no screenshot-capture infrastruc
 Add a Playwright test file (`e2e/view-flow-screenshots.spec.ts`) that navigates to each view/modal state and captures a screenshot to `docs/screenshots/`.
 
 - Mock the Electron IPC layer (already partially done in `e2e/support/`) to render each view with representative dummy data.
-- Output: ~14 PNG files (`dashboard.png`, `detail-modal.png`, `progress-modal.png`, etc.).
+- Initial output: 10 PNG files covering 6 tab views + 4 modals (empty/welcome states).
+- Future: add populated-state screenshots for DetailModal, ConsoleModal, ProgressModal once mock data seeding is implemented (~13–14 total).
 
 **Effort:** 2–3 days
 

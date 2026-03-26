@@ -7,120 +7,120 @@
  *
  * Run: pnpm exec playwright test e2e/view-flow-screenshots.spec.ts
  */
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 import path from 'node:path'
-import { launchLauncherApp } from './support/electronHarness'
+import { fileURLToPath } from 'node:url'
+import { type LauncherAppHandle, launchLauncherApp } from './support/electronHarness'
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SCREENSHOT_DIR = path.resolve(__dirname, '..', 'docs', 'screenshots')
 
-// Timeout for waiting on UI elements to appear
 const UI_TIMEOUT = 12_000
 
+let handle: LauncherAppHandle
+let page: Page
+
+async function screenshot(name: string): Promise<void> {
+  await page.screenshot({
+    path: path.join(SCREENSHOT_DIR, `${name}.png`),
+    type: 'png',
+  })
+}
+
+async function clickSidebar(text: string): Promise<void> {
+  const item = page.locator('.sidebar-item', { hasText: text })
+  await item.click()
+  await expect(item).toHaveClass(/active/, { timeout: UI_TIMEOUT })
+}
+
+async function openModal(locator: ReturnType<Page['locator']>, screenshotName: string): Promise<void> {
+  await expect(locator).toBeVisible({ timeout: UI_TIMEOUT })
+  await locator.click()
+  await expect(page.locator('.modal-overlay, .modal, [class*="modal"]')).toBeVisible({ timeout: UI_TIMEOUT })
+  await screenshot(screenshotName)
+  await page.keyboard.press('Escape')
+  await expect(page.locator('.modal-overlay, .modal, [class*="modal"]')).toBeHidden({ timeout: UI_TIMEOUT })
+}
+
 test.describe('View Flow Screenshots (#226)', () => {
-  test('capture all views and modals @macos @windows @linux', async () => {
-    const { application, cleanup } = await launchLauncherApp()
-    try {
-      const page = await application.firstWindow()
+  test.beforeAll(async () => {
+    handle = await launchLauncherApp()
+    page = await handle.application.firstWindow()
 
-      // Wait for the app to fully render
-      await expect(page.locator('#app')).toBeAttached({ timeout: UI_TIMEOUT })
-      await expect(page.locator('.sidebar')).toBeVisible({ timeout: UI_TIMEOUT })
+    await expect(page.locator('#app')).toBeAttached({ timeout: UI_TIMEOUT })
+    await expect(page.locator('.sidebar')).toBeVisible({ timeout: UI_TIMEOUT })
+    // Wait for Vue to finish mounting and i18n to load
+    await expect(page.locator('.sidebar-item')).toHaveCount(7, { timeout: UI_TIMEOUT })
+  })
 
-      // Give Vue time to finish mounting and i18n to load
-      await page.waitForTimeout(1500)
+  test.afterAll(async () => {
+    await handle.cleanup()
+  })
 
-      // Helper to take a screenshot with a consistent name
-      async function screenshot(name: string): Promise<void> {
-        await page.screenshot({
-          path: path.join(SCREENSHOT_DIR, `${name}.png`),
-          type: 'png',
-        })
-      }
+  // ── Tab Views ──────────────────────────────────────────────
 
-      // Helper to click a sidebar item by its visible text
-      async function clickSidebar(text: string): Promise<void> {
-        await page.locator('.sidebar-item', { hasText: text }).click()
-        await page.waitForTimeout(500)
-      }
+  test('01 — Dashboard @macos @windows @linux', async () => {
+    await screenshot('01-dashboard')
+  })
 
-      // ── Tab Views ──────────────────────────────────────────────
+  test('02 — Installation List @macos @windows @linux', async () => {
+    await clickSidebar('Installs')
+    await screenshot('02-installation-list')
+  })
 
-      // 1. Dashboard (default view on launch — welcome/empty state)
-      await screenshot('01-dashboard')
+  test('03 — Running @macos @windows @linux', async () => {
+    await clickSidebar('Running')
+    await screenshot('03-running')
+  })
 
-      // 2. Installation List (sidebar label: "Installs")
-      await clickSidebar('Installs')
-      await screenshot('02-installation-list')
+  test('04 — Models @macos @windows @linux', async () => {
+    await clickSidebar('Models')
+    await screenshot('04-models')
+  })
 
-      // 3. Running
-      await clickSidebar('Running')
-      await screenshot('03-running')
+  test('05 — Media @macos @windows @linux', async () => {
+    await clickSidebar('Media')
+    await screenshot('05-media')
+  })
 
-      // 4. Models
-      await clickSidebar('Models')
-      await screenshot('04-models')
+  test('06 — Settings @macos @windows @linux', async () => {
+    await clickSidebar('Settings')
+    await screenshot('06-settings')
+  })
 
-      // 5. Media
-      await clickSidebar('Media')
-      await screenshot('05-media')
+  // ── Modals (opened from Installation List) ─────────────────
 
-      // 6. Settings
-      await clickSidebar('Settings')
-      await screenshot('06-settings')
+  test('07 — New Install modal @macos @windows @linux', async () => {
+    await clickSidebar('Installs')
+    await openModal(
+      page.locator('.toolbar button', { hasText: 'New Install' }),
+      '07-new-install-modal',
+    )
+  })
 
-      // ── Modals (opened from Installation List) ─────────────────
+  test('08 — Track Existing modal @macos @windows @linux', async () => {
+    await clickSidebar('Installs')
+    await openModal(
+      page.locator('button', { hasText: 'Track Existing' }),
+      '08-track-modal',
+    )
+  })
 
-      // Switch back to list view for modal entry points
-      await clickSidebar('Installs')
+  test('09 — Load Snapshot modal @macos @windows @linux', async () => {
+    await clickSidebar('Installs')
+    await openModal(
+      page.locator('button', { hasText: 'Load Snapshot' }),
+      '09-load-snapshot-modal',
+    )
+  })
 
-      // 7. New Install modal (toolbar button: "+ New Install")
-      const newInstallBtn = page.locator('.toolbar button', { hasText: 'New Install' })
-      if (await newInstallBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
-        await newInstallBtn.click()
-        await page.waitForTimeout(1000)
-        await screenshot('07-new-install-modal')
-        await page.keyboard.press('Escape')
-        await page.waitForTimeout(300)
-      }
+  // ── Dashboard modal entry points ───────────────────────────
 
-      // 8. Track Existing modal
-      const trackBtn = page.locator('button', { hasText: 'Track Existing' })
-      if (await trackBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
-        await trackBtn.click()
-        await page.waitForTimeout(1000)
-        await screenshot('08-track-modal')
-        await page.keyboard.press('Escape')
-        await page.waitForTimeout(300)
-      }
-
-      // 9. Load Snapshot modal
-      const loadSnapshotBtn = page.locator('button', { hasText: 'Load Snapshot' })
-      if (await loadSnapshotBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
-        await loadSnapshotBtn.click()
-        await page.waitForTimeout(1000)
-        await screenshot('09-load-snapshot-modal')
-        await page.keyboard.press('Escape')
-        await page.waitForTimeout(300)
-      }
-
-      // ── Dashboard modal entry points ───────────────────────────
-
-      // Switch to dashboard to capture the Quick Install modal
-      await clickSidebar('Dashboard')
-      await page.waitForTimeout(300)
-
-      // 10. Quick Install modal (welcome state button: "Install ComfyUI")
-      const quickInstallBtn = page.locator('button', { hasText: 'Install ComfyUI' })
-      if (await quickInstallBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
-        await quickInstallBtn.click()
-        await page.waitForTimeout(1000)
-        await screenshot('10-quick-install-modal')
-        await page.keyboard.press('Escape')
-        await page.waitForTimeout(300)
-      }
-
-    } finally {
-      await cleanup()
-    }
+  test('10 — Quick Install modal @macos @windows @linux', async () => {
+    await clickSidebar('Dashboard')
+    await openModal(
+      page.locator('button', { hasText: 'Install ComfyUI' }),
+      '10-quick-install-modal',
+    )
   })
 })
