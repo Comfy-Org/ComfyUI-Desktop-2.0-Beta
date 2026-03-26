@@ -28,13 +28,17 @@ const fetched = ref(false)
 
 // --- Fetch schema eagerly (autocomplete + validation work without opening panel) ---
 
+let fetchGeneration = 0
+
 async function fetchSchema(): Promise<void> {
   if (fetched.value) return
   fetched.value = true
   loading.value = true
   loadError.value = null
+  const gen = ++fetchGeneration
   try {
     const result = await window.api.getComfyArgs(props.installationId)
+    if (gen !== fetchGeneration) return
     if (result?.args?.length) {
       schema.value = result.args.map((a) => ({
         ...a,
@@ -47,13 +51,20 @@ async function fetchSchema(): Promise<void> {
       loadError.value = result.error || '[debug] Result had empty args and no error field'
     }
   } catch (err) {
+    if (gen !== fetchGeneration) return
     loadError.value = (err as Error).message || 'Failed to fetch argument definitions'
   } finally {
-    loading.value = false
+    if (gen === fetchGeneration) loading.value = false
   }
 }
 
 onMounted(fetchSchema)
+
+watch(() => props.installationId, () => {
+  fetched.value = false
+  schema.value = []
+  fetchSchema()
+})
 
 function togglePanel(): void {
   expanded.value = !expanded.value
@@ -111,17 +122,8 @@ function parseArgs(raw: string): ParsedArgs {
           // --flag=value syntax: value is inline (non-empty)
           known.set(name, eqValue)
           i++
-        } else if (def?.type === 'optional-value') {
-          const next = tokens[i + 1]
-          if (next !== undefined && !next.startsWith('--')) {
-            known.set(name, next)
-            i += 2
-          } else {
-            known.set(name, '')
-            i++
-          }
         } else {
-          // value type
+          // value or optional-value type
           const next = tokens[i + 1]
           if (next !== undefined && !next.startsWith('--')) {
             known.set(name, next)
@@ -132,18 +134,12 @@ function parseArgs(raw: string): ParsedArgs {
           }
         }
       } else {
-        // Unknown flag — keep in extra
-        if (eqValue !== undefined) {
-          extra.push(`--${name}`)
-          extra.push(eqValue)
+        // Unknown flag — keep in extra, preserving original format
+        extra.push(token)
+        i++
+        if (eqValue === undefined && i < tokens.length && !tokens[i]!.startsWith('--')) {
+          extra.push(tokens[i]!)
           i++
-        } else {
-          extra.push(token)
-          i++
-          if (i < tokens.length && !tokens[i]!.startsWith('--')) {
-            extra.push(tokens[i]!)
-            i++
-          }
         }
       }
     } else {
