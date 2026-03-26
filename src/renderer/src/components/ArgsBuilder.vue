@@ -194,7 +194,7 @@ const unsupportedFlags = computed(() => {
 
 // --- Search / filter ---
 
-/** Extract the partial flag being typed (last token if it starts with --) */
+/** Extract the partial being typed (last token — with or without leading dashes) */
 const searchQuery = computed(() => {
   if (!inputFocused.value) return ''
   const val = localValue.value
@@ -203,14 +203,14 @@ const searchQuery = computed(() => {
   const lastToken = val.trimEnd() === val
     ? val.split(/\s+/).pop() || ''
     : '' // trailing space means no partial token
+  if (!lastToken) return ''
   if (lastToken === '-' || lastToken === '--') return '--' // bare - or -- triggers full list
-  if (lastToken.startsWith('--')) {
-    const raw = lastToken.slice(2)
-    const eqIdx = raw.indexOf('=')
-    const name = eqIdx >= 0 ? raw.slice(0, eqIdx) : raw
-    if (!schema.value.some((a) => a.name === name)) {
-      return name.toLowerCase()
-    }
+  // Strip leading dashes to get the name portion
+  const stripped = lastToken.replace(/^-{1,2}/, '')
+  const eqIdx = stripped.indexOf('=')
+  const name = eqIdx >= 0 ? stripped.slice(0, eqIdx) : stripped
+  if (name && !schema.value.some((a) => a.name === name)) {
+    return name.toLowerCase()
   }
   return ''
 })
@@ -272,8 +272,8 @@ function onTextInput(value: string): void {
 
 function completeArg(name: string): void {
   const val = localValue.value
-  // Replace the partial -xxx or --xxx at the end with the full flag + trailing space
-  const replaced = val.replace(/-{1,2}[\w_-]*$/, `--${name} `)
+  // Replace the partial token at the end (with or without dashes) with the full flag
+  const replaced = val.replace(/-{0,2}[\w_-]*$/, `--${name} `)
   localValue.value = replaced
   emit('update:modelValue', replaced)
 }
@@ -437,6 +437,10 @@ const textTokens = computed<TextToken[]>(() => {
           i++
         }
       }
+    } else if (partial && i === tokens.length - 1 && token.toLowerCase() === partial) {
+      // Bare partial being typed that matches autocomplete search
+      result.push({ text: token, status: 'partial' })
+      i++
     } else {
       result.push({ text: token, status: 'unsupported', tooltip: 'Unexpected positional argument — use --flag syntax' })
       i++
