@@ -16,6 +16,10 @@ export function isPygit2Configured(): boolean {
   return _pygit2Python !== null && _pygit2Script !== null
 }
 
+export function getPygit2Config(): { _pygit2Python: string | null; _pygit2Script: string | null } {
+  return { _pygit2Python, _pygit2Script }
+}
+
 /**
  * Try to configure the pygit2 fallback using a standalone installation's
  * Python.  Validates that both the Python binary and the helper script

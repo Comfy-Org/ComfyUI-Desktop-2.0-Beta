@@ -19,6 +19,8 @@ Subcommands:
   clone              <url> <dest>
   checkout           <repo_path> <commit>
   fetch-and-checkout <repo_path> <commit>
+  ls-remote-tags     <url>
+  ls-remote-ref      <url> <ref>
 """
 
 import os
@@ -453,6 +455,56 @@ def cmd_fetch_and_checkout(repo_path, commit):
         sys.exit(1)
 
 
+def cmd_ls_remote_tags(url):
+    """List version tags on a remote URL (like git ls-remote --tags).
+
+    Uses a temporary in-memory init to create an anonymous remote.
+    Prints one tag name per line, filtered to v* semver tags.
+    """
+    import tempfile
+    tmp = tempfile.mkdtemp(prefix="comfy-ls-remote-")
+    try:
+        repo = pygit2.init_repository(tmp, bare=True)
+        remote = repo.remotes.create_anonymous(url)
+        heads = remote.ls_remotes()
+        for head in heads:
+            name = head.get("name", "") if isinstance(head, dict) else getattr(head, "name", "")
+            if not name.startswith("refs/tags/"):
+                continue
+            tag = name[len("refs/tags/"):]
+            if tag.endswith("^{}"):
+                continue
+            if parse_version_tuple(tag) is not None:
+                print(tag)
+    finally:
+        import shutil
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def cmd_ls_remote_ref(url, ref):
+    """Get the SHA of a specific ref on a remote URL.
+
+    Prints the SHA on stdout, or exits with code 1 if not found.
+    """
+    import tempfile
+    tmp = tempfile.mkdtemp(prefix="comfy-ls-remote-")
+    try:
+        repo = pygit2.init_repository(tmp, bare=True)
+        remote = repo.remotes.create_anonymous(url)
+        heads = remote.ls_remotes()
+        for head in heads:
+            name = head.get("name", "") if isinstance(head, dict) else getattr(head, "name", "")
+            oid = head.get("oid", None) if isinstance(head, dict) else getattr(head, "oid", None)
+            if name == ref and oid is not None:
+                print(str(oid))
+                return
+        print("Error: ref %s not found" % ref, file=sys.stderr)
+        sys.exit(1)
+    finally:
+        import shutil
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 # ---------------------------------------------------------------------------
 # Main dispatch
 # ---------------------------------------------------------------------------
@@ -472,6 +524,8 @@ Subcommands:
   clone              <url> <dest>
   checkout           <repo_path> <commit>
   fetch-and-checkout <repo_path> <commit>
+  ls-remote-tags     <url>
+  ls-remote-ref      <url> <ref>
 """
 
 if __name__ == "__main__":
@@ -551,6 +605,18 @@ if __name__ == "__main__":
                 print("Usage: git_operations.py fetch-and-checkout <repo_path> <commit>", file=sys.stderr)
                 sys.exit(1)
             cmd_fetch_and_checkout(sys.argv[2], sys.argv[3])
+
+        elif subcmd == "ls-remote-tags":
+            if len(sys.argv) < 3:
+                print("Usage: git_operations.py ls-remote-tags <url>", file=sys.stderr)
+                sys.exit(1)
+            cmd_ls_remote_tags(sys.argv[2])
+
+        elif subcmd == "ls-remote-ref":
+            if len(sys.argv) < 4:
+                print("Usage: git_operations.py ls-remote-ref <url> <ref>", file=sys.stderr)
+                sys.exit(1)
+            cmd_ls_remote_ref(sys.argv[2], sys.argv[3])
 
         else:
             print("Unknown subcommand: %s" % subcmd, file=sys.stderr)

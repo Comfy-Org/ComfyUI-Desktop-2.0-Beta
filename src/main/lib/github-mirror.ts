@@ -1,7 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import { execFile } from 'child_process'
-import { resolveGitDir, isPygit2Configured } from './git'
+import { resolveGitDir, isPygit2Configured, getPygit2Config } from './git'
 
 export const GITCODE_COMFY_ORG_BASE = 'https://gitcode.com/gh_mirrors/co'
 
@@ -61,9 +61,6 @@ interface LsRemoteRef {
 }
 
 function runLsRemote(url: string, args: string[]): Promise<LsRemoteRef[]> {
-  // git ls-remote requires system git; if only pygit2 is configured we
-  // cannot run it — callers should fall back to the GitHub API path.
-  if (isPygit2Configured()) return Promise.resolve([])
   return new Promise((resolve) => {
     execFile('git', ['ls-remote', ...args, url], {
       windowsHide: true,
@@ -83,12 +80,32 @@ function runLsRemote(url: string, args: string[]): Promise<LsRemoteRef[]> {
 }
 
 /**
+ * Run a pygit2 subcommand and return stdout lines.
+ */
+function runPygit2Ls(subcommand: string, args: string[]): Promise<string[]> {
+  const { _pygit2Python, _pygit2Script } = getPygit2Config()
+  if (!_pygit2Python || !_pygit2Script) return Promise.resolve([])
+  return new Promise((resolve) => {
+    execFile(_pygit2Python, ['-s', '-u', _pygit2Script, subcommand, ...args], {
+      windowsHide: true,
+      timeout: 15000,
+      encoding: 'utf-8',
+    }, (err, stdout) => {
+      if (err) { resolve([]); return }
+      resolve(stdout.trim().split('\n').filter((l) => l.trim()))
+    })
+  })
+}
+
+/**
  * Fetch all version tags from a remote URL via `git ls-remote --tags`.
- * Returns tag names sorted by semver descending, or empty on error.
+ * Uses pygit2 when system git is unavailable. Returns tag names or empty on error.
  */
 export async function lsRemoteTags(url: string): Promise<string[]> {
+  if (isPygit2Configured()) {
+    return runPygit2Ls('ls-remote-tags', [url])
+  }
   const refs = await runLsRemote(url, ['--tags'])
-  // Filter to v* tags, strip refs/tags/ prefix, ignore ^{} derefs
   return refs
     .map((r) => r.ref.replace(/^refs\/tags\//, ''))
     .filter((name) => /^v?\d/.test(name) && !name.endsWith('^{}'))
@@ -96,8 +113,13 @@ export async function lsRemoteTags(url: string): Promise<string[]> {
 
 /**
  * Get the SHA of a specific ref (e.g. "refs/heads/master") from a remote URL.
+ * Uses pygit2 when system git is unavailable.
  */
 export async function lsRemoteRef(url: string, ref: string): Promise<string | null> {
+  if (isPygit2Configured()) {
+    const lines = await runPygit2Ls('ls-remote-ref', [url, ref])
+    return lines[0] ?? null
+  }
   const refs = await runLsRemote(url, ['--refs'])
   const match = refs.find((r) => r.ref === ref)
   return match?.sha ?? null
