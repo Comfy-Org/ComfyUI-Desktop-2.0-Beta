@@ -112,4 +112,37 @@ describe('isUpdateAvailable', () => {
     const info: ReleaseCacheEntry = { latestTag: 'v0.14.2', installedTag: 'v0.14.2' }
     expect(isUpdateAvailable(installation, 'stable', info)).toBe(false)
   })
+
+  it('returns false for latest channel when commit SHA matches even if installedTag differs from latestTag', () => {
+    const fullSha = 'abc123def456abc123def456abc123def456abc123'
+    const installation = {
+      comfyVersion: { commit: fullSha, baseTag: 'v0.18.3', commitsAhead: 5 },
+      lastRollback: { channel: 'latest' },
+      updateInfoByChannel: { latest: { installedTag: 'v0.18.3+5' } },
+    }
+    // latestTag is a short SHA (from fetchLatestRelease), releaseName may
+    // differ from installedTag if commitsAhead enrichment hasn't run yet.
+    const info: ReleaseCacheEntry = {
+      latestTag: 'abc123d',
+      commitSha: fullSha,
+      releaseName: 'v0.18.3 (abc123d)',
+      installedTag: 'v0.18.3+5',
+    }
+    expect(isUpdateAvailable(installation, 'latest', info)).toBe(false)
+  })
+
+  it('returns true for latest channel when commit SHA differs', () => {
+    const installation = {
+      comfyVersion: { commit: 'old123old456old123old456old123old456old123', baseTag: 'v0.18.3', commitsAhead: 3 },
+      lastRollback: { channel: 'latest' },
+      updateInfoByChannel: { latest: { installedTag: 'v0.18.3+3' } },
+    }
+    const info: ReleaseCacheEntry = {
+      latestTag: 'abc123d',
+      commitSha: 'abc123def456abc123def456abc123def456abc123',
+      releaseName: 'v0.18.3+5',
+      installedTag: 'v0.18.3+3',
+    }
+    expect(isUpdateAvailable(installation, 'latest', info)).toBe(true)
+  })
 })

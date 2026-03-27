@@ -16,6 +16,10 @@ export function isPygit2Configured(): boolean {
   return _pygit2Python !== null && _pygit2Script !== null
 }
 
+export function getPygit2Config(): { python: string | null; script: string | null } {
+  return { python: _pygit2Python, script: _pygit2Script }
+}
+
 /**
  * Try to configure the pygit2 fallback using a standalone installation's
  * Python.  Validates that both the Python binary and the helper script
@@ -240,6 +244,77 @@ export function findNearestTag(repoPath: string, commit: string = 'HEAD'): Promi
  * Returns undefined if git is unavailable, no `v*` tags exist, or any
  * error occurs.
  */
+/**
+ * List version tags from a remote URL via the Git protocol (not the GitHub API).
+ * Returns the latest (highest) version tag, or undefined on failure.
+ * Uses pygit2 when configured, falling back to system git.
+ */
+export function lsRemoteLatestTag(url: string): Promise<string | undefined> {
+  if (isPygit2Configured()) {
+    return runPygit2(['ls-remote-tags', url], 15000).then(({ exitCode, stdout }) => {
+      if (exitCode !== 0) return undefined
+      const tag = stdout.trim().split('\n')[0]?.trim()
+      return tag || undefined
+    })
+  }
+  return new Promise((resolve) => {
+    execFile('git', ['ls-remote', '--tags', url], {
+      encoding: 'utf-8',
+      windowsHide: true,
+      timeout: 15000,
+    }, (error, stdout) => {
+      if (error) { resolve(undefined); return }
+      let best: { tag: string; version: number[] } | undefined
+      for (const line of stdout.trim().split('\n')) {
+        const ref = line.split(/\s+/)[1]
+        if (!ref || !ref.startsWith('refs/tags/') || ref.endsWith('^{}')) continue
+        const name = ref.slice('refs/tags/'.length)
+        const m = name.match(/^v?(\d+(?:\.\d+)*)$/)
+        if (!m) continue
+        const v = m[1]!.split('.').map(Number)
+        if (!best || compareVersionArrays(v, best.version) > 0) {
+          best = { tag: name, version: v }
+        }
+      }
+      resolve(best?.tag)
+    })
+  })
+}
+
+/**
+ * Get the SHA of a specific ref from a remote URL via the Git protocol.
+ * Uses pygit2 when configured, falling back to system git.
+ */
+export function lsRemoteRef(url: string, ref: string): Promise<string | null> {
+  if (isPygit2Configured()) {
+    return runPygit2(['ls-remote-ref', url, ref], 15000).then(({ exitCode, stdout }) => {
+      if (exitCode !== 0) return null
+      const sha = stdout.trim()
+      return sha || null
+    })
+  }
+  return new Promise((resolve) => {
+    execFile('git', ['ls-remote', '--refs', url, ref], {
+      encoding: 'utf-8',
+      windowsHide: true,
+      timeout: 15000,
+    }, (error, stdout) => {
+      if (error) { resolve(null); return }
+      const sha = stdout.trim().split(/\s+/)[0]
+      resolve(sha || null)
+    })
+  })
+}
+
+function compareVersionArrays(a: number[], b: number[]): number {
+  const len = Math.max(a.length, b.length)
+  for (let i = 0; i < len; i++) {
+    const diff = (a[i] ?? 0) - (b[i] ?? 0)
+    if (diff !== 0) return diff
+  }
+  return 0
+}
+
 export function findLatestVersionTag(repoPath: string): Promise<string | undefined> {
   if (isPygit2Configured()) {
     return runPygit2(['tag-list', repoPath]).then(({ exitCode, stdout }) => {

@@ -43,6 +43,11 @@ export function runUvPip(
   })
 }
 
+export interface PipMirrorConfig {
+  pypiMirror?: string
+  useChineseMirrors?: boolean
+}
+
 /**
  * Read a requirements file, filter out PyTorch packages, write a temp file,
  * and install via `uv pip install -r`. Cleans up the temp file afterward.
@@ -56,7 +61,7 @@ export async function installFilteredRequirements(
   tempName: string,
   sendOutput: (text: string) => void,
   signal?: AbortSignal,
-  pypiMirror?: string
+  mirrors?: PipMirrorConfig
 ): Promise<number> {
   const content = await fs.promises.readFile(reqPath, 'utf-8')
   const filtered = content.split('\n').filter((l) => !PYTORCH_RE.test(l.trim())).join('\n')
@@ -64,7 +69,7 @@ export async function installFilteredRequirements(
   await fs.promises.writeFile(filteredPath, filtered, 'utf-8')
 
   try {
-    const indexArgs = getPipIndexArgs(pypiMirror)
+    const indexArgs = getPipIndexArgs(mirrors?.pypiMirror, mirrors?.useChineseMirrors)
     return await runUvPip(uvPath, ['pip', 'install', '-r', filteredPath, '--python', pythonPath, ...indexArgs], installPath, sendOutput, signal)
   } finally {
     try { await fs.promises.unlink(filteredPath) } catch {}
@@ -102,7 +107,7 @@ function normalizeIndexUrl(url: string): string {
   return trimmed.endsWith('/') ? trimmed : trimmed + '/'
 }
 
-export function getPipIndexArgs(pypiMirror?: string): string[] {
+export function getPipIndexArgs(pypiMirror?: string, useChineseMirrors?: boolean): string[] {
   const args: string[] = ['--index-url', PYPI_INDEX_URL]
 
   const seen = new Set<string>([normalizeIndexUrl(PYPI_INDEX_URL)])
@@ -117,11 +122,13 @@ export function getPipIndexArgs(pypiMirror?: string): string[] {
     }
   }
 
-  for (const url of PYPI_MIRROR_URLS) {
-    const norm = normalizeIndexUrl(url)
-    if (!seen.has(norm)) {
-      extras.push(url)
-      seen.add(norm)
+  if (useChineseMirrors) {
+    for (const url of PYPI_MIRROR_URLS) {
+      const norm = normalizeIndexUrl(url)
+      if (!seen.has(norm)) {
+        extras.push(url)
+        seen.add(norm)
+      }
     }
   }
 

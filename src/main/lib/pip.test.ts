@@ -9,8 +9,17 @@ describe('getPipIndexArgs', () => {
     expect(args[idxPos + 1]).toBe(PYPI_INDEX_URL)
   })
 
-  it('includes Chinese mirrors as --extra-index-url when no mirror is set', () => {
+  it('does not include Chinese mirrors when useChineseMirrors is false or unset', () => {
     const args = getPipIndexArgs()
+    for (const url of PYPI_MIRROR_URLS) {
+      expect(args).not.toContain(url)
+    }
+    const extraCount = args.filter((a) => a === '--extra-index-url').length
+    expect(extraCount).toBe(0)
+  })
+
+  it('includes Chinese mirrors as --extra-index-url when useChineseMirrors is true', () => {
+    const args = getPipIndexArgs(undefined, true)
     for (const url of PYPI_MIRROR_URLS) {
       expect(args).toContain(url)
     }
@@ -40,8 +49,32 @@ describe('getPipIndexArgs', () => {
     expect(extras).toContain(mirror)
   })
 
+  it('adds user mirror without Chinese mirrors when useChineseMirrors is false', () => {
+    const mirror = 'https://custom.mirror.example/simple/'
+    const args = getPipIndexArgs(mirror, false)
+    const extras: string[] = []
+    for (let i = 0; i < args.length; i++) {
+      if (args[i] === '--extra-index-url') extras.push(args[i + 1]!)
+    }
+    expect(extras).toEqual([mirror])
+  })
+
+  it('adds user mirror and Chinese mirrors when useChineseMirrors is true', () => {
+    const mirror = 'https://custom.mirror.example/simple/'
+    const args = getPipIndexArgs(mirror, true)
+    const extras: string[] = []
+    for (let i = 0; i < args.length; i++) {
+      if (args[i] === '--extra-index-url') extras.push(args[i + 1]!)
+    }
+    expect(extras).toContain(mirror)
+    for (const url of PYPI_MIRROR_URLS) {
+      expect(extras).toContain(url)
+    }
+    expect(extras.length).toBe(1 + PYPI_MIRROR_URLS.length)
+  })
+
   it('deduplicates when user mirror matches pypi.org', () => {
-    const args = getPipIndexArgs('https://pypi.org/simple/')
+    const args = getPipIndexArgs('https://pypi.org/simple/', true)
     const extras: string[] = []
     for (let i = 0; i < args.length; i++) {
       if (args[i] === '--extra-index-url') extras.push(args[i + 1]!)
@@ -51,18 +84,17 @@ describe('getPipIndexArgs', () => {
   })
 
   it('deduplicates when user mirror matches pypi.org without trailing slash', () => {
-    const args = getPipIndexArgs('https://pypi.org/simple')
+    const args = getPipIndexArgs('https://pypi.org/simple', true)
     const extras: string[] = []
     for (let i = 0; i < args.length; i++) {
       if (args[i] === '--extra-index-url') extras.push(args[i + 1]!)
     }
-    // pypi.org already covered by --index-url; user mirror (no slash variant) is deduped
     expect(extras.length).toBe(PYPI_MIRROR_URLS.length)
   })
 
   it('deduplicates when user mirror is one of the Chinese mirrors', () => {
     const mirror = PYPI_MIRROR_URLS[0]!
-    const args = getPipIndexArgs(mirror)
+    const args = getPipIndexArgs(mirror, true)
     const extras: string[] = []
     for (let i = 0; i < args.length; i++) {
       if (args[i] === '--extra-index-url') extras.push(args[i + 1]!)

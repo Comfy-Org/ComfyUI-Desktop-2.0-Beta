@@ -19,6 +19,8 @@ Subcommands:
   clone              <url> <dest>
   checkout           <repo_path> <commit>
   fetch-and-checkout <repo_path> <commit>
+  ls-remote-tags     <url>
+  ls-remote-ref      <url> <ref>
 """
 
 import os
@@ -453,6 +455,62 @@ def cmd_fetch_and_checkout(repo_path, commit):
         sys.exit(1)
 
 
+def cmd_ls_remote_tags(url):
+    """List version tags from a remote repository URL, sorted by version descending.
+
+    Uses a temporary bare repo to query the remote via the Git protocol
+    (not the GitHub API), so it is not subject to REST API rate limits.
+    Prints one tag name per line on stdout.
+    """
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        repo = pygit2.init_repository(tmpdir, bare=True)
+        remote = repo.remotes.create_anonymous(url)
+        try:
+            heads = remote.list_heads()
+        except AttributeError:
+            heads = remote.ls_remotes()
+
+        tags = []
+        for ref in heads:
+            name = ref["name"] if isinstance(ref, dict) else ref.name
+            if not name.startswith("refs/tags/") or name.endswith("^{}"):
+                continue
+            tag_name = name[len("refs/tags/"):]
+            version = parse_version_tuple(tag_name)
+            if version is not None:
+                tags.append((version, tag_name))
+
+        tags.sort(reverse=True)
+        for _, tag_name in tags:
+            print(tag_name)
+
+
+def cmd_ls_remote_ref(url, ref):
+    """Get the SHA of a specific ref on a remote URL.
+
+    Prints the SHA on stdout, or exits with code 1 if not found.
+    """
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        repo = pygit2.init_repository(tmpdir, bare=True)
+        remote = repo.remotes.create_anonymous(url)
+        try:
+            heads = remote.list_heads()
+        except AttributeError:
+            heads = remote.ls_remotes()
+        for head in heads:
+            name = head["name"] if isinstance(head, dict) else head.name
+            oid = head["oid"] if isinstance(head, dict) else head.oid
+            if name == ref and oid is not None:
+                print(str(oid))
+                return
+        print("Error: ref %s not found" % ref, file=sys.stderr)
+        sys.exit(1)
+
+
 # ---------------------------------------------------------------------------
 # Main dispatch
 # ---------------------------------------------------------------------------
@@ -472,6 +530,8 @@ Subcommands:
   clone              <url> <dest>
   checkout           <repo_path> <commit>
   fetch-and-checkout <repo_path> <commit>
+  ls-remote-tags     <url>
+  ls-remote-ref      <url> <ref>
 """
 
 if __name__ == "__main__":
@@ -551,6 +611,18 @@ if __name__ == "__main__":
                 print("Usage: git_operations.py fetch-and-checkout <repo_path> <commit>", file=sys.stderr)
                 sys.exit(1)
             cmd_fetch_and_checkout(sys.argv[2], sys.argv[3])
+
+        elif subcmd == "ls-remote-tags":
+            if len(sys.argv) < 3:
+                print("Usage: git_operations.py ls-remote-tags <url>", file=sys.stderr)
+                sys.exit(1)
+            cmd_ls_remote_tags(sys.argv[2])
+
+        elif subcmd == "ls-remote-ref":
+            if len(sys.argv) < 4:
+                print("Usage: git_operations.py ls-remote-ref <url> <ref>", file=sys.stderr)
+                sys.exit(1)
+            cmd_ls_remote_ref(sys.argv[2], sys.argv[3])
 
         else:
             print("Unknown subcommand: %s" % subcmd, file=sys.stderr)

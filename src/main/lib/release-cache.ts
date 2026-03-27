@@ -127,7 +127,9 @@ export async function getOrFetch(
         _entries[key] = entry
         _persist()
       }
-      return entry
+      return entry ?? cached ?? null
+    } catch {
+      return cached ?? null
     } finally {
       _inFlight.delete(key)
     }
@@ -260,6 +262,10 @@ export function isUpdateAvailable(
     if (shortHead && (shortHead === info.latestTag || info.releaseName?.includes(shortHead))) return false
     return true
   }
+  // Direct commit SHA comparison — most reliable for the "latest" channel
+  // where latestTag is a short SHA and releaseName depends on enrichment timing.
+  if (cv && info.commitSha && cv.commit === info.commitSha) return false
+
   // Raw tag/sha mismatch (also check releaseName since the latest channel uses a SHA as latestTag).
   // Skip if installedTag is 'unknown' (brand-new install before first update).
   if (info.installedTag && info.installedTag !== 'unknown' && info.installedTag !== info.latestTag && info.installedTag !== info.releaseName) return true

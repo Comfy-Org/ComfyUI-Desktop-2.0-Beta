@@ -10,6 +10,7 @@ import {
   validateExportEnvelope, importSnapshots,
   saveSnapshot, getSnapshotCount, restoreCustomNodes, restorePipPackages,
 } from './snapshots'
+
 import * as installations from '../installations'
 import type { InstallationRecord } from '../installations'
 import * as settings from '../settings'
@@ -135,16 +136,14 @@ async function restoreSnapshotIntoInstallation(
     const importEnvelope = validateExportEnvelope(JSON.parse(fileContent))
     await importSnapshots(freshInst.installPath, importEnvelope)
     const targetSnapshot = importEnvelope.snapshots[0]!
-    const pypiMirror = settings.get('pypiMirror')
-
     sendOutput('\n── Restore Nodes ──\n')
-    await restoreCustomNodes(freshInst.installPath, freshInst, targetSnapshot, sendProgress, sendOutput, signal, pypiMirror)
+    await restoreCustomNodes(freshInst.installPath, freshInst, targetSnapshot, sendProgress, sendOutput, signal, settings.getMirrorConfig())
 
     if (!signal.aborted && !targetSnapshot.skipPipSync) {
       sendOutput('\n── Restore Packages ──\n')
       await restorePipPackages(freshInst.installPath, freshInst, targetSnapshot,
         (phase, data) => sendProgress(phase === 'restore' ? 'restore-pip' : phase, data),
-        sendOutput, signal, pypiMirror)
+        sendOutput, signal, settings.getMirrorConfig())
     }
 
     try {

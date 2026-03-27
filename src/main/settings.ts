@@ -15,6 +15,7 @@ export interface KnownSettings {
   theme?: string
   autoUpdate?: boolean
   pypiMirror?: string
+  useChineseMirrors?: boolean
   telemetryEnabled?: boolean
   primaryInstallId?: string
   pinnedInstallIds?: string[]
@@ -48,6 +49,7 @@ const SETTINGS_SCHEMA = {
   theme: { nullable: false },
   autoUpdate: { nullable: false },
   pypiMirror: { nullable: false },
+  useChineseMirrors: { nullable: false },
   telemetryEnabled: { nullable: false },
   primaryInstallId: { nullable: false },
   pinnedInstallIds: { nullable: false },
@@ -261,4 +263,9 @@ export function set<K extends string>(
 
 export function getAll(): Settings {
   return load()
+}
+
+/** Build a PipMirrorConfig from current settings. */
+export function getMirrorConfig(): { pypiMirror?: string; useChineseMirrors?: boolean } {
+  return { pypiMirror: get('pypiMirror'), useChineseMirrors: get('useChineseMirrors') === true }
 }
