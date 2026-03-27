@@ -160,20 +160,33 @@ Build output is written to the `dist/` directory.
 
 ## Releasing
 
-Pushing a version tag triggers the **ToDesktop Build & Release** workflow. It runs a ToDesktop cloud build and creates a draft GitHub Release with platform download links.
+Pushing a version tag to `main` triggers the **ToDesktop Build & Release** workflow. It runs a ToDesktop cloud build and creates a draft GitHub Release with platform download links. The workflow enforces that the tag matches the `version` in `package.json`.
 
-```bash
-# Ensure package.json version matches the tag version first
-# e.g. package.json "version": "0.2.0"
+### Release steps
 
-# Tag the current commit with that same version
-git tag v0.1.0
+1. **Bump the version** — create a branch, update the `version` field in `package.json` (e.g. `0.4.4` → `0.4.5`), and open a PR:
 
-# Push the tag to trigger the release workflow
-git push origin v0.1.0
-```
+   ```bash
+   git checkout main && git pull origin main
+   git checkout -b release/v0.4.5
+   # Edit package.json "version": "0.4.5"
+   git add package.json
+   git commit -m "chore: bump version to 0.4.5"
+   git push origin release/v0.4.5
+   # Open a PR targeting main
+   ```
 
-The workflow enforces `tag == package.json version`. Once the build finishes, go to the [Releases](../../releases) page to review and publish the draft.
+2. **Merge the PR** — once CI passes and the PR is approved, merge it into `main`.
+
+3. **Tag and push** — pull the merged `main`, create the tag, and push it to trigger the build:
+
+   ```bash
+   git checkout main && git pull origin main
+   git tag v0.4.5
+   git push origin v0.4.5
+   ```
+
+4. **Publish** — once the build finishes, go to the [Releases](../../releases) page to review and publish the draft.
 
 ## Data Locations
 
