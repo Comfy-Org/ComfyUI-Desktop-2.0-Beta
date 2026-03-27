@@ -8,7 +8,7 @@ vi.mock('child_process', async (importOriginal) => {
 
 import { execFile, spawn } from 'child_process'
 import { EventEmitter } from 'events'
-import { countCommitsAhead, findNearestTag, findLatestVersionTag, isAncestorOf, findMergeBase, revParseRef, fetchTags, configurePygit2, isGitAvailable, resetGitAvailableCache, countUniqueCommits, gitClone, gitCheckoutCommit, gitFetchAndCheckout } from './git'
+import { countCommitsAhead, findNearestTag, findLatestVersionTag, lsRemoteLatestTag, lsRemoteRef, isAncestorOf, findMergeBase, revParseRef, fetchTags, configurePygit2, isGitAvailable, resetGitAvailableCache, countUniqueCommits, gitClone, gitCheckoutCommit, gitFetchAndCheckout } from './git'
 
 const mockedExecFile = vi.mocked(execFile)
 const mockedSpawn = vi.mocked(spawn)
@@ -414,6 +414,48 @@ describe('pygit2 fallback', () => {
     it('returns undefined for empty output', async () => {
       mockExecFile((_cmd, _args, _opts, cb) => { cb(null, '\n', '') })
       expect(await findLatestVersionTag('/repo')).toBeUndefined()
+    })
+  })
+
+  describe('lsRemoteLatestTag', () => {
+    it('passes correct subcommand and parses first tag', async () => {
+      mockExecFile((_cmd, _args, _opts, cb) => { cb(null, 'v0.18.3\nv0.18.2\nv0.18.1\n', '') })
+      expect(await lsRemoteLatestTag('https://github.com/Comfy-Org/ComfyUI.git')).toBe('v0.18.3')
+      const args = expectPygit2Call()
+      expect(args).toEqual(['ls-remote-tags', 'https://github.com/Comfy-Org/ComfyUI.git'])
+    })
+
+    it('returns undefined on error', async () => {
+      const errWithCode = new Error('fail') as Error & { code: number }
+      errWithCode.code = 1
+      mockExecFile((_cmd, _args, _opts, cb) => { cb(errWithCode, '', '') })
+      expect(await lsRemoteLatestTag('https://github.com/Comfy-Org/ComfyUI.git')).toBeUndefined()
+    })
+
+    it('returns undefined for empty output', async () => {
+      mockExecFile((_cmd, _args, _opts, cb) => { cb(null, '\n', '') })
+      expect(await lsRemoteLatestTag('https://github.com/Comfy-Org/ComfyUI.git')).toBeUndefined()
+    })
+  })
+
+  describe('lsRemoteRef', () => {
+    it('passes correct subcommand and returns SHA', async () => {
+      mockExecFile((_cmd, _args, _opts, cb) => { cb(null, 'abc123def456\n', '') })
+      expect(await lsRemoteRef('https://github.com/Comfy-Org/ComfyUI.git', 'refs/heads/master')).toBe('abc123def456')
+      const args = expectPygit2Call()
+      expect(args).toEqual(['ls-remote-ref', 'https://github.com/Comfy-Org/ComfyUI.git', 'refs/heads/master'])
+    })
+
+    it('returns null on error', async () => {
+      const errWithCode = new Error('fail') as Error & { code: number }
+      errWithCode.code = 1
+      mockExecFile((_cmd, _args, _opts, cb) => { cb(errWithCode, '', '') })
+      expect(await lsRemoteRef('https://github.com/Comfy-Org/ComfyUI.git', 'refs/heads/master')).toBeNull()
+    })
+
+    it('returns null for empty output', async () => {
+      mockExecFile((_cmd, _args, _opts, cb) => { cb(null, '\n', '') })
+      expect(await lsRemoteRef('https://github.com/Comfy-Org/ComfyUI.git', 'refs/heads/master')).toBeNull()
     })
   })
 

@@ -12,6 +12,7 @@ import type { ComfyVersion } from './version'
 import { resolveLocalVersion, clearVersionCache } from './version-resolve'
 import type { LatestTagOverride } from './version-resolve'
 import { readGitRemoteUrl, fetchTags, findLatestVersionTag, revParseRef, hasGitDir, isGitAvailable, tryConfigurePygit2Fallback } from './git'
+import { ensureRemoteUrl } from './github-mirror'
 import * as settings from '../settings'
 import { defaultInstallDir } from './paths'
 import { download } from './download'
@@ -344,6 +345,11 @@ function _broadcastToRenderer(channel: string, data: Record<string, unknown>): v
 async function _fetchAndResolveLatestTags(
   installs: Array<{ comfyuiDir: string }>
 ): Promise<Map<string, LatestTagOverride>> {
+  // Ensure remotes point to the correct host (github.com vs gitcode.com)
+  // BEFORE grouping, so the origin keys are stable.
+  const mirrorEnabled = settings.get('useChineseMirrors') === true
+  await Promise.all(installs.map(({ comfyuiDir }) => ensureRemoteUrl(comfyuiDir, mirrorEnabled)))
+
   // Group by remote origin URL
   const originGroups = new Map<string, string[]>()
   for (const { comfyuiDir } of installs) {
@@ -520,8 +526,26 @@ async function checkInstallationUpdates(): Promise<void> {
         }, true)
       )
     )
+    // Enrich the "latest" cache entry with locally-computed commitsAhead.
+    // ls-remote can't compute this, so we resolve it from a local git repo.
+    await _enrichLatestCommitsAhead()
     _broadcastToRenderer('installations-changed', {})
   } catch {}
+}
+
+/**
+ * Enrich the "latest" channel cache with commitsAhead from the first
+ * available local ComfyUI git repo.
+ */
+async function _enrichLatestCommitsAhead(): Promise<void> {
+  const all = await installations.list()
+  for (const inst of all) {
+    if (!inst.installPath) continue
+    const comfyuiDir = path.join(inst.installPath, 'ComfyUI')
+    if (!hasGitDir(comfyuiDir)) continue
+    await releaseCache.enrichCommitsAhead(COMFYUI_REPO, comfyuiDir)
+    if (releaseCache.get(COMFYUI_REPO, 'latest')?.commitsAhead !== undefined) return
+  }
 }
 
 export function register(callbacks: RegisterCallbacks = {}): void {
@@ -629,14 +653,13 @@ export function register(callbacks: RegisterCallbacks = {}): void {
     } catch {}
   })()
 
-  // Pre-warm the ETag cache for GitHub API URLs
+  // Pre-warm the ETag cache for Standalone-Environments release API
+  // (ComfyUI repo version checks use git ls-remote, no API needed)
   void (async () => {
     try {
       await Promise.allSettled([
         fetchJSON('https://api.github.com/repos/Comfy-Org/ComfyUI-Standalone-Environments/releases?per_page=30'),
         fetchJSON('https://api.github.com/repos/Comfy-Org/ComfyUI-Standalone-Environments/releases/latest'),
-        fetchJSON('https://api.github.com/repos/Comfy-Org/ComfyUI/releases?per_page=30'),
-        fetchJSON('https://api.github.com/repos/Comfy-Org/ComfyUI/tags?per_page=30'),
       ])
     } catch {}
   })()
@@ -929,13 +952,13 @@ export function register(callbacks: RegisterCallbacks = {}): void {
             const comfyResult = await restoreComfyUIVersion(freshInst.installPath, targetSnapshot, sendOutput)
 
             sendOutput('\n── Restore Nodes ──\n')
-            await restoreCustomNodes(freshInst.installPath, freshInst, targetSnapshot, sendProgress, sendOutput, abort.signal, settings.get('pypiMirror'))
+            await restoreCustomNodes(freshInst.installPath, freshInst, targetSnapshot, sendProgress, sendOutput, abort.signal, settings.getMirrorConfig())
 
             if (!abort.signal.aborted && !targetSnapshot.skipPipSync) {
               sendOutput('\n── Restore Packages ──\n')
               await restorePipPackages(freshInst.installPath, freshInst, targetSnapshot,
                 (phase, data) => sendProgress(phase === 'restore' ? 'restore-pip' : phase, data),
-                sendOutput, abort.signal, settings.get('pypiMirror'))
+                sendOutput, abort.signal, settings.getMirrorConfig())
             }
 
             // Restore update channel and version/lastRollback state so the
@@ -1533,6 +1556,7 @@ export function register(callbacks: RegisterCallbacks = {}): void {
         fields: [
           { id: 'pypiMirror', label: i18n.t('settings.pypiMirror'), type: 'text', value: s.pypiMirror || '',
             placeholder: i18n.t('settings.pypiMirrorPlaceholder') },
+          { id: 'useChineseMirrors', label: i18n.t('settings.useChineseMirrors'), type: 'boolean', value: s.useChineseMirrors === true },
         ],
       },
     ]

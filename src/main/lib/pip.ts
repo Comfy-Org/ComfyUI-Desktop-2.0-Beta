@@ -43,6 +43,11 @@ export function runUvPip(
   })
 }
 
+export interface PipMirrorConfig {
+  pypiMirror?: string
+  useChineseMirrors?: boolean
+}
+
 /**
  * Read a requirements file, filter out PyTorch packages, write a temp file,
  * and install via `uv pip install -r`. Cleans up the temp file afterward.
@@ -56,7 +61,7 @@ export async function installFilteredRequirements(
   tempName: string,
   sendOutput: (text: string) => void,
   signal?: AbortSignal,
-  pypiMirror?: string
+  mirrors?: PipMirrorConfig
 ): Promise<number> {
   const content = await fs.promises.readFile(reqPath, 'utf-8')
   const filtered = content.split('\n').filter((l) => !PYTORCH_RE.test(l.trim())).join('\n')
@@ -64,7 +69,7 @@ export async function installFilteredRequirements(
   await fs.promises.writeFile(filteredPath, filtered, 'utf-8')
 
   try {
-    const indexArgs = getPipIndexArgs(pypiMirror)
+    const indexArgs = getPipIndexArgs(mirrors?.pypiMirror, mirrors?.useChineseMirrors)
     return await runUvPip(uvPath, ['pip', 'install', '-r', filteredPath, '--python', pythonPath, ...indexArgs], installPath, sendOutput, signal)
   } finally {
     try { await fs.promises.unlink(filteredPath) } catch {}
@@ -86,14 +91,15 @@ export const PYPI_MIRROR_URLS: string[] = [
 /**
  * Build `--index-url` and `--extra-index-url` arguments for uv pip commands.
  *
- * pypi.org is always the primary `--index-url`.  The Chinese mirrors are
- * added as `--extra-index-url`.  When a user-configured mirror is set it is
- * also added as an extra (de-duplicated against the lists above).
+ * When a user-configured `pypiMirror` is set, it becomes the primary
+ * `--index-url` and pypi.org is demoted to `--extra-index-url`.
  *
- * uv's default `first-match` strategy checks the primary index first and
- * only falls back to extras when a package is not found there.  This keeps
- * resolution fast for users with good connectivity to pypi.org while still
- * providing fallback mirrors for regions where pypi.org is unreachable.
+ * When `useChineseMirrors` is true (and no user mirror is set), the first
+ * Chinese mirror becomes `--index-url` and pypi.org is an extra fallback.
+ * This avoids the slowdown caused by uv's `first-match` strategy checking
+ * the (unreachable) pypi.org before falling back to the Chinese mirrors.
+ *
+ * When neither is set, pypi.org remains the primary `--index-url`.
  */
 
 /** Trim whitespace and ensure a trailing slash for consistent URL comparison. */
@@ -102,26 +108,40 @@ function normalizeIndexUrl(url: string): string {
   return trimmed.endsWith('/') ? trimmed : trimmed + '/'
 }
 
-export function getPipIndexArgs(pypiMirror?: string): string[] {
-  const args: string[] = ['--index-url', PYPI_INDEX_URL]
-
-  const seen = new Set<string>([normalizeIndexUrl(PYPI_INDEX_URL)])
-  const extras: string[] = []
-
+export function getPipIndexArgs(pypiMirror?: string, useChineseMirrors?: boolean): string[] {
   const mirror = pypiMirror?.trim() || undefined
+
+  // Determine the primary --index-url:
+  // 1. User-provided mirror takes highest priority
+  // 2. First Chinese mirror when useChineseMirrors is enabled
+  // 3. Default pypi.org
+  let primary: string
   if (mirror) {
-    const norm = normalizeIndexUrl(mirror)
-    if (!seen.has(norm)) {
-      extras.push(mirror)
-      seen.add(norm)
-    }
+    primary = mirror
+  } else if (useChineseMirrors && PYPI_MIRROR_URLS.length > 0) {
+    primary = PYPI_MIRROR_URLS[0]!
+  } else {
+    primary = PYPI_INDEX_URL
   }
 
-  for (const url of PYPI_MIRROR_URLS) {
-    const norm = normalizeIndexUrl(url)
-    if (!seen.has(norm)) {
-      extras.push(url)
-      seen.add(norm)
+  const args: string[] = ['--index-url', primary]
+  const seen = new Set<string>([normalizeIndexUrl(primary)])
+  const extras: string[] = []
+
+  // Add pypi.org as a fallback extra when it's not the primary
+  const pypiNorm = normalizeIndexUrl(PYPI_INDEX_URL)
+  if (!seen.has(pypiNorm)) {
+    extras.push(PYPI_INDEX_URL)
+    seen.add(pypiNorm)
+  }
+
+  if (useChineseMirrors) {
+    for (const url of PYPI_MIRROR_URLS) {
+      const norm = normalizeIndexUrl(url)
+      if (!seen.has(norm)) {
+        extras.push(url)
+        seen.add(norm)
+      }
     }
   }
 

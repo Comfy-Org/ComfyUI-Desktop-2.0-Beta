@@ -514,6 +514,51 @@ function onStop({ installationId }: { installationId?: string } = {}): void {
   }
 }
 
+/**
+ * On macOS, Electron's WebAuthn/passkey support is broken (electron#24573).
+ * Inject a fixed warning banner into auth popups (Google, GitHub) so users
+ * know to use password + OTP instead of passkeys.
+ */
+const PASSKEY_BANNER_PREFIXES = [
+  'https://accounts.google.com/',
+  'https://github.com/login',
+]
+
+const PASSKEY_BANNER_CSS =
+  `#comfy-passkey-banner{position:fixed;top:0;left:0;right:0;z-index:999999;` +
+  `background:#eff6ff;color:#1e40af;font:13px/1.4 system-ui,sans-serif;` +
+  `padding:8px 12px;text-align:center;border-bottom:1px solid #93c5fd;box-sizing:border-box;}`
+
+const PASSKEY_BANNER_JS =
+  `(function(){` +
+    `if(document.getElementById('comfy-passkey-banner'))return;` +
+    `const b=document.createElement('div');b.id='comfy-passkey-banner';` +
+    `b.textContent='\\u24d8 Passkeys are not supported in Desktop 2.0 on macOS. Please use your password or verification code to sign in.';` +
+    `document.body.prepend(b);` +
+    `document.body.style.paddingTop=(b.offsetHeight)+'px';` +
+    `new MutationObserver(function(){` +
+      `if(!document.getElementById('comfy-passkey-banner')){` +
+        `document.body.prepend(b);document.body.style.paddingTop=(b.offsetHeight)+'px'` +
+      `}` +
+    `}).observe(document.body,{childList:true});` +
+  `})()`
+
+function injectMacPasskeyWarning(childWindow: BrowserWindow): void {
+  if (process.platform !== 'darwin') return
+
+  const inject = (): void => {
+    const url = childWindow.webContents.getURL()
+    if (!PASSKEY_BANNER_PREFIXES.some((prefix) => url.startsWith(prefix))) return
+    childWindow.webContents
+      .insertCSS(PASSKEY_BANNER_CSS)
+      .then(() => childWindow.webContents.executeJavaScript(PASSKEY_BANNER_JS))
+      .catch(() => {})
+  }
+
+  childWindow.webContents.on('dom-ready', inject)
+  childWindow.webContents.on('did-navigate-in-page', inject)
+}
+
 function onLaunch({ port, url, process: proc, installation, mode }: {
   port: number
   url?: string
@@ -554,6 +599,8 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
   comfyWindow.on('move', () => saveWindowBounds(installationId, comfyWindow))
   comfyWindow.webContents.on('did-create-window', (childWindow) => {
     childWindow.setIcon(APP_ICON)
+    if (process.platform !== 'darwin') childWindow.removeMenu()
+    injectMacPasskeyWarning(childWindow)
   })
   comfyWindow.webContents.on('page-title-updated', (e, title) => {
     e.preventDefault()
