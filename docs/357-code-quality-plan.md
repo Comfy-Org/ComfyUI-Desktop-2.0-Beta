@@ -58,8 +58,9 @@ Split into `src/main/lib/snapshots/` directory:
 
 ---
 
-## Phase 2: Extract duplicated source-plugin helpers
+## Phase 2: Extract duplicated source-plugin helpers + break down run-action
 
+- **Break down `run-action`** — split the ~900-line `run-action` handler in `registerSessionHandlers.ts` into per-action functions (e.g., `handleDelete()`, `handleLaunch()`, `handleCopy()`, `handleReleaseUpdate()`, `handleMigrateToStandalone()`)
 - **Shared launch settings builder** — extracted from standalone's patterns, used by portable/git
 - **Shared action builders** — launch, open-folder, delete/untrack, migrate actions
 - **Shared Python launch command builder** — parseArgs/extractPort/cmd construction
