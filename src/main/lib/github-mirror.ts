@@ -35,18 +35,18 @@ function restoreGitHubUrl(url: string): string {
  * setting. Reads and updates `.git/config` directly so it works even when
  * system git is unavailable (pygit2-only environments).
  */
-export function ensureRemoteUrl(repoPath: string, enabled: boolean): void {
+export async function ensureRemoteUrl(repoPath: string, enabled: boolean): Promise<void> {
   try {
     const gitDir = resolveGitDir(repoPath)
     if (!gitDir) return
     const configPath = path.join(gitDir, 'config')
-    const content = fs.readFileSync(configPath, 'utf-8')
+    const content = await fs.promises.readFile(configPath, 'utf-8')
     const match = content.match(/(\[remote "origin"\][^[]*?url\s*=\s*)(.+)/m)
     if (!match) return
     const currentUrl = match[2]!.trim()
     const desired = enabled ? rewriteCloneUrl(currentUrl, true) : restoreGitHubUrl(currentUrl)
     if (desired === currentUrl) return
     const updated = content.replace(match[0]!, match[1]! + desired)
-    fs.writeFileSync(configPath, updated, 'utf-8')
+    await fs.promises.writeFile(configPath, updated, 'utf-8')
   } catch {}
 }

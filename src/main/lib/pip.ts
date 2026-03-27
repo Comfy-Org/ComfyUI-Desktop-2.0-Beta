@@ -43,6 +43,11 @@ export function runUvPip(
   })
 }
 
+export interface PipMirrorConfig {
+  pypiMirror?: string
+  useChineseMirrors?: boolean
+}
+
 /**
  * Read a requirements file, filter out PyTorch packages, write a temp file,
  * and install via `uv pip install -r`. Cleans up the temp file afterward.
@@ -56,8 +61,7 @@ export async function installFilteredRequirements(
   tempName: string,
   sendOutput: (text: string) => void,
   signal?: AbortSignal,
-  pypiMirror?: string,
-  useChineseMirrors?: boolean
+  mirrors?: PipMirrorConfig
 ): Promise<number> {
   const content = await fs.promises.readFile(reqPath, 'utf-8')
   const filtered = content.split('\n').filter((l) => !PYTORCH_RE.test(l.trim())).join('\n')
@@ -65,7 +69,7 @@ export async function installFilteredRequirements(
   await fs.promises.writeFile(filteredPath, filtered, 'utf-8')
 
   try {
-    const indexArgs = getPipIndexArgs(pypiMirror, useChineseMirrors)
+    const indexArgs = getPipIndexArgs(mirrors?.pypiMirror, mirrors?.useChineseMirrors)
     return await runUvPip(uvPath, ['pip', 'install', '-r', filteredPath, '--python', pythonPath, ...indexArgs], installPath, sendOutput, signal)
   } finally {
     try { await fs.promises.unlink(filteredPath) } catch {}

@@ -348,9 +348,7 @@ async function _fetchAndResolveLatestTags(
   // Ensure remotes point to the correct host (github.com vs gitcode.com)
   // BEFORE grouping, so the origin keys are stable.
   const mirrorEnabled = settings.get('useChineseMirrors') === true
-  for (const { comfyuiDir } of installs) {
-    ensureRemoteUrl(comfyuiDir, mirrorEnabled)
-  }
+  await Promise.all(installs.map(({ comfyuiDir }) => ensureRemoteUrl(comfyuiDir, mirrorEnabled)))
 
   // Group by remote origin URL
   const originGroups = new Map<string, string[]>()
@@ -936,13 +934,13 @@ export function register(callbacks: RegisterCallbacks = {}): void {
             const comfyResult = await restoreComfyUIVersion(freshInst.installPath, targetSnapshot, sendOutput)
 
             sendOutput('\n── Restore Nodes ──\n')
-            await restoreCustomNodes(freshInst.installPath, freshInst, targetSnapshot, sendProgress, sendOutput, abort.signal, settings.get('pypiMirror'), settings.get('useChineseMirrors') === true)
+            await restoreCustomNodes(freshInst.installPath, freshInst, targetSnapshot, sendProgress, sendOutput, abort.signal, { pypiMirror: settings.get('pypiMirror'), useChineseMirrors: settings.get('useChineseMirrors') === true })
 
             if (!abort.signal.aborted && !targetSnapshot.skipPipSync) {
               sendOutput('\n── Restore Packages ──\n')
               await restorePipPackages(freshInst.installPath, freshInst, targetSnapshot,
                 (phase, data) => sendProgress(phase === 'restore' ? 'restore-pip' : phase, data),
-                sendOutput, abort.signal, settings.get('pypiMirror'), settings.get('useChineseMirrors') === true)
+                sendOutput, abort.signal, { pypiMirror: settings.get('pypiMirror'), useChineseMirrors: settings.get('useChineseMirrors') === true })
             }
 
             // Restore update channel and version/lastRollback state so the

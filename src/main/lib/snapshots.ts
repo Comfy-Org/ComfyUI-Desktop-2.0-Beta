@@ -5,7 +5,7 @@ import { readGitHead, isGitAvailable, gitClone, gitCheckoutCommit, gitFetchAndCh
 import { rewriteCloneUrl } from './github-mirror'
 import { resolveLocalVersion } from './version-resolve'
 import { scanCustomNodes, nodeKey } from './nodes'
-import { pipFreeze, runUvPip as sharedRunUvPip, installFilteredRequirements, getPipIndexArgs } from './pip'
+import { pipFreeze, runUvPip as sharedRunUvPip, installFilteredRequirements, getPipIndexArgs, type PipMirrorConfig } from './pip'
 import { installCnrNode, switchCnrVersion, isSafePathComponent } from './cnr'
 import { killProcTree } from './process'
 import type { ScannedNode } from './nodes'
@@ -913,8 +913,7 @@ export async function restorePipPackages(
   sendProgress: (phase: string, data: Record<string, unknown>) => void,
   sendOutput: (text: string) => void,
   signal?: AbortSignal,
-  pypiMirror?: string,
-  useChineseMirrors?: boolean
+  mirrors?: PipMirrorConfig
 ): Promise<RestoreResult> {
   const result: RestoreResult = {
     installed: [], removed: [], changed: [],
@@ -1018,7 +1017,7 @@ export async function restorePipPackages(
       sendProgress('restore', { percent: 20, status: `Installing ${toInstall.length} package(s)…` })
 
       const specs = toInstall.map((p) => `${p.name}==${p.version}`)
-      const indexArgs = getPipIndexArgs(pypiMirror, useChineseMirrors)
+      const indexArgs = getPipIndexArgs(mirrors?.pypiMirror, mirrors?.useChineseMirrors)
 
       // Try bulk install first
       sendOutput(`\nInstalling ${specs.length} package(s)…\n`)
@@ -1161,13 +1160,12 @@ async function runPostInstallScripts(
   installPath: string,
   sendOutput: (text: string) => void,
   signal?: AbortSignal,
-  pypiMirror?: string,
-  useChineseMirrors?: boolean
+  mirrors?: PipMirrorConfig
 ): Promise<void> {
   const reqPath = path.join(nodePath, 'requirements.txt')
   if (fs.existsSync(reqPath)) {
     try {
-      await installFilteredRequirements(reqPath, uvPath, pythonPath, installPath, `.restore-reqs-${path.basename(nodePath)}.txt`, sendOutput, signal, pypiMirror, useChineseMirrors)
+      await installFilteredRequirements(reqPath, uvPath, pythonPath, installPath, `.restore-reqs-${path.basename(nodePath)}.txt`, sendOutput, signal, mirrors)
     } catch (err) {
       sendOutput(`⚠ requirements.txt failed for ${path.basename(nodePath)}: ${(err as Error).message}\n`)
     }
@@ -1214,8 +1212,7 @@ export async function restoreCustomNodes(
   sendProgress: (phase: string, data: Record<string, unknown>) => void,
   sendOutput: (text: string) => void,
   signal?: AbortSignal,
-  pypiMirror?: string,
-  useChineseMirrors?: boolean
+  mirrors?: PipMirrorConfig
 ): Promise<NodeRestoreResult> {
   const result: NodeRestoreResult = {
     installed: [], switched: [], enabled: [], disabled: [],
@@ -1463,7 +1460,7 @@ export async function restoreCustomNodes(
       for (const nodePath of nodesNeedingPostInstall) {
         if (signal?.aborted) break
         sendOutput(`\nRunning post-install for ${path.basename(nodePath)}…\n`)
-        await runPostInstallScripts(nodePath, uvPath, pythonPath, installPath, sendOutput, signal, pypiMirror, useChineseMirrors)
+        await runPostInstallScripts(nodePath, uvPath, pythonPath, installPath, sendOutput, signal, mirrors)
       }
     } else {
       sendOutput('⚠ Cannot run post-install scripts: uv or Python environment not found\n')
@@ -1480,7 +1477,7 @@ export async function restoreCustomNodes(
       if (pythonPath && fs.existsSync(uvPath)) {
         sendOutput('\nInstalling manager requirements…\n')
         try {
-          const mgrResult = await installFilteredRequirements(mgrReqPath, uvPath, pythonPath, installPath, '.restore-mgr-reqs.txt', sendOutput, signal, pypiMirror, useChineseMirrors)
+          const mgrResult = await installFilteredRequirements(mgrReqPath, uvPath, pythonPath, installPath, '.restore-mgr-reqs.txt', sendOutput, signal, mirrors)
           if (mgrResult !== 0) {
             sendOutput(`⚠ manager requirements install exited with code ${mgrResult}\n`)
           }

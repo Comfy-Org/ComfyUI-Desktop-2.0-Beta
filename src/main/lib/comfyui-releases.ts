@@ -36,7 +36,6 @@ export async function fetchLatestRelease(
       // commitsAhead is resolved locally after git fetch
       body: '',
       html_url: `https://github.com/${REPO}/commit/${headSha}`,
-      published_at: new Date().toISOString(),
       _commit: true,
     }
   }
@@ -49,7 +48,6 @@ export async function fetchLatestRelease(
     name: latestTag,
     body: '',
     html_url: `https://github.com/${REPO}/releases/tag/${latestTag}`,
-    published_at: new Date().toISOString(),
     baseTag: latestTag,
     commitsAhead: 0,
   }
