@@ -298,7 +298,10 @@ export const portable: SourcePlugin = {
           }, true)
         )
       )
-      return releaseCache.checkForUpdate(COMFYUI_REPO, channel, installation, update)
+      const result = await releaseCache.checkForUpdate(COMFYUI_REPO, channel, installation, update)
+      const root = findPortableRoot(installation.installPath)
+      if (root) await releaseCache.enrichCommitsAhead(COMFYUI_REPO, path.join(root, 'ComfyUI'))
+      return result
     }
 
     if (actionId === 'update-comfyui') {

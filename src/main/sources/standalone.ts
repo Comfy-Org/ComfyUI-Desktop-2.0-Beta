@@ -948,7 +948,9 @@ export const standalone: SourcePlugin = {
           }, true)
         )
       )
-      return releaseCache.checkForUpdate(COMFYUI_REPO, channel, installation, update)
+      const result = await releaseCache.checkForUpdate(COMFYUI_REPO, channel, installation, update)
+      await releaseCache.enrichCommitsAhead(COMFYUI_REPO, path.join(installation.installPath, 'ComfyUI'))
+      return result
     }
 
     if (actionId === 'update-comfyui') {
@@ -1174,20 +1176,15 @@ export const standalone: SourcePlugin = {
       // subsequent resolveLocalVersion calls see the new tags.
       clearVersionCache()
 
-      // Build structured comfyVersion from raw data.
-      // For stable updates, CHECKED_OUT_TAG is the most reliable baseTag source
-      // (comes directly from the git checkout). The cache may lack baseTag if
-      // the release was fetched before the structured-version fields were added.
+      // Resolve comfyVersion from the local git state.  resolveLocalVersion
+      // computes commitsAhead locally (via git rev-list) which works even
+      // when the release cache lacks it (e.g. the latest channel uses
+      // ls-remote which cannot compute commitsAhead).
       const checkedOutTag = markers.CHECKED_OUT_TAG || undefined
-      const comfyVersion: ComfyVersion | undefined = fullPostHead
-        ? {
-          commit: fullPostHead,
-          baseTag: (cachedRelease.baseTag as string | undefined) ?? checkedOutTag,
-          commitsAhead: checkedOutTag
-            ? (cachedRelease.commitsAhead as number | undefined) ?? 0
-            : (cachedRelease.commitsAhead as number | undefined),
-        }
-        : undefined
+      let comfyVersion: ComfyVersion | undefined
+      if (fullPostHead) {
+        comfyVersion = await resolveLocalVersion(comfyuiDir, fullPostHead, checkedOutTag)
+      }
       const installedTag = comfyVersion
         ? formatComfyVersion(comfyVersion, 'short')
         : (markers.CHECKED_OUT_TAG || cachedRelease.latestTag || 'unknown')

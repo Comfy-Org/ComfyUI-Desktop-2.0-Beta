@@ -14,6 +14,7 @@ import fs from 'fs'
 import { dataDir } from './paths'
 import { writeFileSafe } from './safe-file'
 import { fetchLatestRelease, truncateNotes } from './comfyui-releases'
+import { fetchTags, countCommitsAhead } from './git'
 import { formatComfyVersion } from './version'
 import type { ComfyVersion } from './version'
 
@@ -226,6 +227,26 @@ export async function checkForUpdate(
     },
   })
   return { ok: true, navigate: 'detail' }
+}
+
+/**
+ * Enrich the "latest" channel cache entry with locally-computed commitsAhead.
+ * ls-remote cannot compute this, so we resolve it from a local git repo.
+ * No-op if commitsAhead is already set or the entry lacks the required fields.
+ */
+export async function enrichCommitsAhead(repo: string, comfyuiDir: string): Promise<void> {
+  const entry = get(repo, 'latest')
+  if (!entry?.commitSha || !entry.baseTag || entry.commitsAhead !== undefined) return
+  if (!fs.existsSync(path.join(comfyuiDir, '.git'))) return
+
+  await fetchTags(comfyuiDir)
+  const ahead = await countCommitsAhead(comfyuiDir, entry.baseTag, entry.commitSha)
+  if (ahead === undefined) return
+
+  const current = get(repo, 'latest')
+  if (!current || current.commitSha !== entry.commitSha) return
+  const releaseName = formatComfyVersion({ commit: current.commitSha!, baseTag: current.baseTag, commitsAhead: ahead }, 'short')
+  set(repo, 'latest', { ...current, commitsAhead: ahead, releaseName })
 }
 
 /**
