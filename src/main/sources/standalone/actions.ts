@@ -326,7 +326,7 @@ async function handleUpdateComfyUI(
 
   const updateScript = app.isPackaged
     ? path.join(process.resourcesPath, 'lib', 'update_comfyui.py')
-    : path.join(__dirname, '..', '..', '..', 'lib', 'update_comfyui.py')
+    : path.join(__dirname, '..', '..', 'lib', 'update_comfyui.py')
   const markers: Record<string, string> = {}
   let markerBuf = ''
   let stdoutBuf = ''
