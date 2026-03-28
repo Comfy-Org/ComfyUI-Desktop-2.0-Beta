@@ -214,7 +214,9 @@ window.api.onInstanceStarted((data) => {
   if (!isDatadogInitialized) return
   window.api.getInstallationDdContext(data.installationId).then((ctx) => {
     if (!ctx) return
-    try { datadogRum.setGlobalContextProperty('installation', ctx) } catch {}
+    const { snapshot_diffs, ...metadata } = ctx
+    try { datadogRum.setGlobalContextProperty('installation', metadata) } catch {}
+    try { datadogRum.addAction('launcher.session.snapshot_history', { installation_id: ctx.installation_id, snapshot_diffs }) } catch {}
   }).catch(() => {})
 })
 
