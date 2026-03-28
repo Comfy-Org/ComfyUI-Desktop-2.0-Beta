@@ -138,10 +138,12 @@ export function registerAppHandlers(): void {
     let cpuManufacturer: string | null = null
     let cpuPhysicalCores: number | null = null
     let cpuSpeedGhz: number | null = null
+    let allGpus: Array<{ vendor: string; model: string; vram_mb: number | null; driver_version: string | null }> = []
     try {
-      const [osInfo, cpuInfo] = await Promise.all([
+      const [osInfo, cpuInfo, graphicsInfo] = await Promise.all([
         si.osInfo(),
         si.cpu(),
+        si.graphics(),
       ])
       osDistro = osInfo.distro || null
       osRelease = osInfo.release || null
@@ -149,6 +151,12 @@ export function registerAppHandlers(): void {
       cpuManufacturer = cpuInfo.manufacturer || null
       cpuPhysicalCores = cpuInfo.physicalCores ?? null
       cpuSpeedGhz = cpuInfo.speed ?? null
+      allGpus = graphicsInfo.controllers.map((ctrl) => ({
+        vendor: ctrl.vendor || '',
+        model: ctrl.model || '',
+        vram_mb: ctrl.vram ?? null,
+        driver_version: ctrl.driverVersion?.trim() || null,
+      }))
     } catch {}
 
     return {
@@ -157,6 +165,7 @@ export function registerAppHandlers(): void {
       gpu_model: gpu?.model ?? null,
       gpu_vram_mb: gpu?.vramMb ?? null,
       gpu_driver_version: gpu?.driverVersion ?? null,
+      gpus: allGpus,
       nvidia_driver_version: nvidiaCheck?.driverVersion ?? null,
       nvidia_driver_supported: nvidiaCheck?.supported ?? null,
       platform: process.platform,

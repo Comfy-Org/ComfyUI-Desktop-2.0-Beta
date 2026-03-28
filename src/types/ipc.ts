@@ -376,12 +376,20 @@ export interface TrackResult {
   message?: string
 }
 
+export interface SystemGpuInfo {
+  vendor: string
+  model: string
+  vram_mb: number | null
+  driver_version: string | null
+}
+
 export interface SystemInfo {
   gpu_vendor: string | null
   gpu_label: string | null
   gpu_model: string | null
   gpu_vram_mb: number | null
   gpu_driver_version: string | null
+  gpus: SystemGpuInfo[]
   nvidia_driver_version: string | null
   nvidia_driver_supported: boolean | null
   platform: string
