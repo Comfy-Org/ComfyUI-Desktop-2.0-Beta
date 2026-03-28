@@ -1,8 +1,8 @@
 import { execFile, spawn, type ExecFileException } from 'child_process'
 import fs from 'fs'
 import path from 'path'
-import { app } from 'electron'
 import { killProcTree } from './process'
+import { getBundledScriptPath } from './bundledScript'
 
 let _pygit2Python: string | null = null
 let _pygit2Script: string | null = null
@@ -32,9 +32,7 @@ export function tryConfigurePygit2Fallback(installPath: string): boolean {
     ? path.join(installPath, 'standalone-env', 'python.exe')
     : path.join(installPath, 'standalone-env', 'bin', 'python3')
   if (!fs.existsSync(pythonPath)) return false
-  const scriptPath = app.isPackaged
-    ? path.join(process.resourcesPath, 'lib', 'git_operations.py')
-    : path.join(__dirname, '..', '..', 'lib', 'git_operations.py')
+  const scriptPath = getBundledScriptPath('git_operations.py')
   if (!fs.existsSync(scriptPath)) return false
   configurePygit2(pythonPath, scriptPath)
   return true

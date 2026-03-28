@@ -1,6 +1,5 @@
 import fs from 'fs'
 import path from 'path'
-import { app } from 'electron'
 import { spawn } from 'child_process'
 import { fetchLatestRelease } from '../../lib/comfyui-releases'
 import * as releaseCache from '../../lib/release-cache'
@@ -12,6 +11,7 @@ import { PYTORCH_RE, installFilteredRequirements, getPipIndexArgs } from '../../
 import { copyDirWithProgress } from '../../lib/copy'
 import { listCustomNodes, findComfyUIDir, backupDir, mergeDirFlat } from '../../lib/migrate'
 import { t } from '../../lib/i18n'
+import { getBundledScriptPath } from '../../lib/bundledScript'
 import * as installations from '../../installations'
 import * as settings from '../../settings'
 import * as snapshots from '../../lib/snapshots'
@@ -324,9 +324,7 @@ async function handleUpdateComfyUI(
 
   sendProgress('run', { percent: -1, status: t('standalone.updateFetching') })
 
-  const updateScript = app.isPackaged
-    ? path.join(process.resourcesPath, 'lib', 'update_comfyui.py')
-    : path.join(__dirname, '..', '..', 'lib', 'update_comfyui.py')
+  const updateScript = getBundledScriptPath('update_comfyui.py')
   const markers: Record<string, string> = {}
   let markerBuf = ''
   let stdoutBuf = ''
