@@ -131,6 +131,19 @@ describe('spawnCommand', { timeout: 15_000 }, () => {
     expect(result.code).toBe(0)
   })
 
+  it('resolves immediately when signal is already aborted', async () => {
+    const controller = new AbortController()
+    controller.abort()
+    const { command, args } = sleepCmd()
+
+    const start = Date.now()
+    const result = await spawnCommand(command, args, tmpDir, undefined, undefined, controller.signal)
+    const elapsed = Date.now() - start
+
+    expect(result.code).not.toBe(0)
+    expect(elapsed).toBeLessThan(5_000)
+  })
+
   it('invokes both callbacks when process writes to stdout and stderr', async () => {
     const stdoutChunks: string[] = []
     const stderrChunks: string[] = []

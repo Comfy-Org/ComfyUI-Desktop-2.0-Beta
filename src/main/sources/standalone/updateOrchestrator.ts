@@ -59,8 +59,12 @@ export function spawnCommand(
     })
     if (signal) {
       const onAbort = (): void => { proc.kill() }
-      signal.addEventListener('abort', onAbort, { once: true })
-      proc.on('close', () => signal.removeEventListener('abort', onAbort))
+      if (signal.aborted) {
+        onAbort()
+      } else {
+        signal.addEventListener('abort', onAbort, { once: true })
+        proc.on('close', () => signal.removeEventListener('abort', onAbort))
+      }
     }
     let stdout = ''
     let stderr = ''
