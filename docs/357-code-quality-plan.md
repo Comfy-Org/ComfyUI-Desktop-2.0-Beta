@@ -77,13 +77,18 @@ Split into `src/main/lib/snapshots/` directory:
 
 ---
 
-## Phase 3: Stale/dead code cleanup
+## Phase 3: Stale/dead code cleanup ✅
 
-- `getUvPath()` / `getActivePythonPath()` duplication between `snapshots/pythonEnv.ts` and `standalone/envPaths.ts` — unify into a shared `lib/pythonEnv.ts`, using the more robust standalone version
-- No-op plugin methods — make `SourcePlugin` interface hooks optional where possible
-- `desktop.ts` — label clearly as v1-migration-only
-- Legacy selectors in `comfyContentScript.ts` — evaluate removal if min frontend version allows
-- Swallowed `catch {}` blocks — add debug/warn logging via consistent helper
+### Completed
+
+- **Unified `getUvPath()` / `getActivePythonPath()`** — extracted canonical versions (with `resolveActiveEnv` fallback logic) into `lib/pythonEnv.ts`; `snapshots/pythonEnv.ts` and `standalone/envPaths.ts` now re-export from the shared module
+- **Optional plugin methods** — made `getFieldOptions` and `getListActions` optional on `SourcePlugin` interface; removed no-op implementations from `desktop.ts` and `urlSource.ts`
+- **desktop.ts labelling** — added module-level JSDoc documenting it as v1-migration-only with removal criteria
+- **Swallowed `catch {}` logging** — added `console.warn` to three high-impact catch blocks (settings JSON parse, post-restore snapshot save, snapshot pruning); intentional fire-and-forget catches left unchanged
+
+### Intentionally skipped
+
+- **Legacy selectors in `comfyContentScript.ts`** — no enforced minimum frontend version, so the legacy `.comfy-missing-models` selectors remain as a safety net for older ComfyUI builds
 
 ---
 
