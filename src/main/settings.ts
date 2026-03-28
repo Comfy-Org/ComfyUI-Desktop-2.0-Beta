@@ -154,7 +154,9 @@ function load(): Settings {
     try {
       const obj: unknown = JSON.parse(raw)
       if (obj && typeof obj === 'object' && !Array.isArray(obj)) parsed = obj as Record<string, unknown>
-    } catch {}
+    } catch (err) {
+      console.warn('Settings: failed to parse settings JSON:', (err as Error).message)
+    }
   }
   if (parsed) {
     for (const key of KNOWN_SETTING_KEYS) {

@@ -105,7 +105,7 @@ export interface SourcePlugin {
   buildInstallation(selections: Record<string, FieldOption | undefined>): Record<string, unknown>
   getListPreview?(installation: InstallationRecord): string | null
   getLaunchCommand(installation: InstallationRecord): LaunchCommand | null
-  getListActions(installation: InstallationRecord): Record<string, unknown>[]
+  getListActions?(installation: InstallationRecord): Record<string, unknown>[]
   getDetailSections(installation: InstallationRecord): Record<string, unknown>[]
   install?(installation: InstallationRecord, tools: InstallTools): Promise<void>
   postInstall?(installation: InstallationRecord, tools: PostInstallTools): Promise<void>
@@ -116,7 +116,7 @@ export interface SourcePlugin {
     actionData: Record<string, unknown> | undefined,
     tools: ActionTools
   ): Promise<ActionResult>
-  getFieldOptions(
+  getFieldOptions?(
     fieldId: string,
     selections: Record<string, FieldOption | undefined>,
     context: Record<string, unknown>

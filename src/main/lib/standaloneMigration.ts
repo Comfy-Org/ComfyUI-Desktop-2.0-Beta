@@ -91,7 +91,7 @@ async function resolveStandaloneInstallData(
     release = target.release
     variant = target.variant
   } else {
-    const releaseOptions = await standaloneSource.getFieldOptions('release', {}, {})
+    const releaseOptions = await standaloneSource.getFieldOptions!('release', {}, {})
     if (releaseOptions.length === 0) {
       cleanupOnError()
       throw new Error('No releases available.')
@@ -99,7 +99,7 @@ async function resolveStandaloneInstallData(
     release = releaseOptions[0]!
 
     const gpu = await detectGPU()
-    const variantOptions = await standaloneSource.getFieldOptions('variant', { release }, { gpu: gpu?.id })
+    const variantOptions = await standaloneSource.getFieldOptions!('variant', { release }, { gpu: gpu?.id })
     if (variantOptions.length === 0) {
       cleanupOnError()
       throw new Error('No compatible variants found for this platform.')
