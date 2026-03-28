@@ -672,6 +672,7 @@ export interface ElectronApi {
   resetZoom(): Promise<void>
   getSystemInfo(): Promise<SystemInfo>
   getInstallationDdContext(installationId: string): Promise<InstallationDdContext | null>
+  getDeviceId(): Promise<string>
 
   // Updates
   checkForUpdate(): Promise<{ available: boolean; version?: string; error?: string }>

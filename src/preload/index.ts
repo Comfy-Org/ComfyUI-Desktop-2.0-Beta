@@ -100,6 +100,7 @@ const api: ElectronApi = {
   resetZoom: () => ipcRenderer.invoke('reset-zoom'),
   getSystemInfo: () => ipcRenderer.invoke('get-system-info'),
   getInstallationDdContext: (installationId: string) => ipcRenderer.invoke('get-installation-dd-context', installationId),
+  getDeviceId: () => ipcRenderer.invoke('get-device-id'),
 
   // Model downloads
   listModelDownloads: () => ipcRenderer.invoke('model-download-list'),

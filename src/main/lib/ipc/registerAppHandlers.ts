@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import {
   ipcMain, dialog, shell, BrowserWindow,
   fs, path, os,
@@ -7,6 +8,7 @@ import {
   sourceMap, getAppVersion, openPath,
   listSnapshots, diffSnapshots,
 } from './shared'
+import { configDir } from '../paths'
 import type { FieldOption } from './shared'
 import { getGpuPromise, setGpuPromise } from './shared'
 
@@ -243,5 +245,16 @@ export function registerAppHandlers(): void {
     }
 
     return result
+  })
+
+  const deviceIdPath = path.join(configDir(), 'device-id.txt')
+  ipcMain.handle('get-device-id', () => {
+    try {
+      const existing = fs.readFileSync(deviceIdPath, 'utf-8').trim()
+      if (existing) return existing
+    } catch {}
+    const id = randomUUID()
+    try { fs.writeFileSync(deviceIdPath, id) } catch {}
+    return id
   })
 }

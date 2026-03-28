@@ -136,6 +136,9 @@ async function initializeDatadog(): Promise<void> {
       is_packaged: !import.meta.env.DEV,
       telemetry_effective_enabled: telemetryEnabled !== false,
     })
+    window.api.getDeviceId().then((id) => {
+      try { datadogRum.setUser({ id }) } catch {}
+    }).catch(() => {})
     window.api.getSystemInfo().then((info) => {
       trackTelemetryAction('launcher.session.system_info', info as unknown as Record<string, string | number | boolean | null | undefined>)
     }).catch(() => {})
