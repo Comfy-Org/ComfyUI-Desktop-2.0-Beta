@@ -71,6 +71,7 @@ export const standalone: SourcePlugin = {
       { phase: 'extract', label: t('common.extract') },
       { phase: 'setup', label: t('standalone.setupEnv') },
       { phase: 'cleanup', label: t('standalone.cleanupEnv') },
+      { phase: 'update', label: t('standalone.updateToStable') },
     ]
   },
 
