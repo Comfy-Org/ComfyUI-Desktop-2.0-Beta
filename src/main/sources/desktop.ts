@@ -1,3 +1,15 @@
+/**
+ * Desktop (v1) source plugin — **legacy, migration-only**.
+ *
+ * This plugin exists solely to let users who installed ComfyUI via the
+ * original Electron-based "ComfyUI Desktop" (v1) launch that installation
+ * from the new Launcher and migrate it to a standalone install.  It is
+ * hidden from the source picker (`hidden: true`) and no new installations
+ * can be created through it.
+ *
+ * Once the v1 user-base has fully migrated to standalone, this file can
+ * be removed along with `desktopDetect.ts` and `desktopMigration.ts`.
+ */
 import fs from 'fs'
 import path from 'path'
 import { shell } from 'electron'
