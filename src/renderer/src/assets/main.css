@@ -442,7 +442,6 @@ input[type="checkbox"]:checked::after { transform: translateX(16px); }
 }
 .detail-field-label { font-size: 13px; color: var(--text-muted); }
 .detail-field-value { font-size: 14px; margin-top: 1px; }
-.detail-field-description { font-size: 12px; color: var(--text-muted); margin-top: 4px; line-height: 1.4; }
 .detail-field-input { width: 100%; margin-top: 4px; padding: 6px 8px; font-size: 14px; }
 .detail-section-desc { font-size: 14px; color: var(--text-muted); margin-bottom: 8px; }
 
