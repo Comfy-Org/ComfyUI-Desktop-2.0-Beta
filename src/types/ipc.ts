@@ -372,6 +372,67 @@ export interface TrackResult {
   message?: string
 }
 
+export interface SystemInfo {
+  gpu_vendor: string | null
+  gpu_label: string | null
+  nvidia_driver_version: string | null
+  nvidia_driver_supported: boolean | null
+  platform: string
+  arch: string
+  os_version: string
+  electron_version: string
+  chrome_version: string
+  total_memory_gb: number
+  cpu_model: string
+  cpu_cores: number
+}
+
+export interface SnapshotDiffEntry {
+  createdAt: string
+  trigger: string
+  label: string | null
+  nodesAdded: string[]
+  nodesRemoved: string[]
+  nodesChanged: string[]
+  pipsAdded: string[]
+  pipsRemoved: string[]
+  pipsChanged: string[]
+  comfyuiChanged: boolean
+}
+
+export interface InstallationDdContext {
+  installation_id: string
+  installation_name: string
+  variant: string
+  source_id: string
+  update_channel: string
+  comfyui_version: string
+  snapshot_count: number
+  latest_snapshot: {
+    createdAt: string
+    trigger: string
+    label: string | null
+    comfyui: {
+      ref: string
+      commit: string | null
+      releaseTag: string
+      variant: string
+    }
+    customNodes: Array<{
+      id: string
+      type: string
+      dirName: string
+      enabled: boolean
+      version?: string
+      commit?: string
+    }>
+    pipPackages: Record<string, string>
+    pythonVersion?: string
+    updateChannel?: string
+  } | null
+  snapshot_diffs: SnapshotDiffEntry[]
+}
+
 export interface DatadogForwardedError {
   source: string
   message: string
@@ -586,6 +647,8 @@ export interface ElectronApi {
   getAppVersion(): Promise<string>
   quitApp(): Promise<void>
   resetZoom(): Promise<void>
+  getSystemInfo(): Promise<SystemInfo>
+  getInstallationDdContext(installationId: string): Promise<InstallationDdContext | null>
 
   // Updates
   checkForUpdate(): Promise<{ available: boolean; version?: string; error?: string }>

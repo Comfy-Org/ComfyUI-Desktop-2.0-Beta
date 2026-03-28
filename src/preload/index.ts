@@ -98,6 +98,8 @@ const api: ElectronApi = {
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
   quitApp: () => ipcRenderer.invoke('quit-app'),
   resetZoom: () => ipcRenderer.invoke('reset-zoom'),
+  getSystemInfo: () => ipcRenderer.invoke('get-system-info'),
+  getInstallationDdContext: (installationId: string) => ipcRenderer.invoke('get-installation-dd-context', installationId),
 
   // Model downloads
   listModelDownloads: () => ipcRenderer.invoke('model-download-list'),

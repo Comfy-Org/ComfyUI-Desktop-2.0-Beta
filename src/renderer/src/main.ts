@@ -136,6 +136,9 @@ async function initializeDatadog(): Promise<void> {
       is_packaged: !import.meta.env.DEV,
       telemetry_effective_enabled: telemetryEnabled !== false,
     })
+    window.api.getSystemInfo().then((info) => {
+      try { datadogRum.setGlobalContextProperty('system', info) } catch {}
+    }).catch(() => {})
   } catch {}
 }
 
@@ -205,6 +208,19 @@ window.api.onDatadogError((data) => {
       ...(data.context || {}),
     },
   })
+})
+
+window.api.onInstanceStarted((data) => {
+  if (!isDatadogInitialized) return
+  window.api.getInstallationDdContext(data.installationId).then((ctx) => {
+    if (!ctx) return
+    try { datadogRum.setGlobalContextProperty('installation', ctx) } catch {}
+  }).catch(() => {})
+})
+
+window.api.onInstanceStopped(() => {
+  if (!isDatadogInitialized) return
+  try { datadogRum.removeGlobalContextProperty('installation') } catch {}
 })
 
 const i18n = createI18n({

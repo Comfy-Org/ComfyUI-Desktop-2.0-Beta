@@ -41,7 +41,7 @@ import { syncCustomModelFolders, discoverExtraModelFolders } from '../models'
 import { copyDirWithProgress } from '../copy'
 import { fetchJSON } from '../fetch'
 import { fetchLatestRelease } from '../comfyui-releases'
-import { captureSnapshotIfChanged, getSnapshotCount, getSnapshotListData, getSnapshotDetailData, getSnapshotDiffVsPrevious, diffAgainstCurrent, loadSnapshot, listSnapshots, buildExportEnvelope, validateExportEnvelope, importSnapshots, saveSnapshot, restoreCustomNodes, restorePipPackages, restoreComfyUIVersion, buildPostRestoreState, formatSnapshotVersion } from '../snapshots'
+import { captureSnapshotIfChanged, getSnapshotCount, getSnapshotListData, getSnapshotDetailData, getSnapshotDiffVsPrevious, diffAgainstCurrent, loadSnapshot, listSnapshots, diffSnapshots, buildExportEnvelope, validateExportEnvelope, importSnapshots, saveSnapshot, restoreCustomNodes, restorePipPackages, restoreComfyUIVersion, buildPostRestoreState, formatSnapshotVersion } from '../snapshots'
 import type { SnapshotExportEnvelope } from '../snapshots'
 import { getVariantLabel } from '../../sources/standalone'
 import type { FieldOption, SourcePlugin } from '../../types/sources'
@@ -73,7 +73,7 @@ export {
   syncCustomModelFolders, discoverExtraModelFolders,
   copyDirWithProgress, fetchJSON, fetchLatestRelease,
   captureSnapshotIfChanged, getSnapshotCount, getSnapshotListData, getSnapshotDetailData,
-  getSnapshotDiffVsPrevious, diffAgainstCurrent, loadSnapshot, listSnapshots,
+  getSnapshotDiffVsPrevious, diffAgainstCurrent, loadSnapshot, listSnapshots, diffSnapshots,
   buildExportEnvelope, validateExportEnvelope, importSnapshots, saveSnapshot,
   restoreCustomNodes, restorePipPackages, restoreComfyUIVersion, buildPostRestoreState, formatSnapshotVersion,
   getVariantLabel, REQUIRES_STOPPED, findLockingProcesses,
