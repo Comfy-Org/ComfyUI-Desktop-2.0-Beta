@@ -300,8 +300,7 @@ export function registerSnapshotHandlers(): void {
     const baseGpu = strippedVariant.replace(/-.*$/, '')
 
     const source = sourceMap['standalone']!
-    // Exclude the synthetic "Latest Stable" entry — snapshot restore targets a specific release
-    const releaseOptions = (await source.getFieldOptions!('release', {}, {})).filter((r) => r.value !== 'latest')
+    const releaseOptions = await source.getFieldOptions!('release', {}, {})
     if (releaseOptions.length === 0) return { ok: false, message: 'No releases available.' }
 
     let selectedRelease: FieldOption

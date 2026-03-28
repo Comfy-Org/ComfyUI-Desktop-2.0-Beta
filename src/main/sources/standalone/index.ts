@@ -176,8 +176,8 @@ export const standalone: SourcePlugin = {
       const filtered = releases.filter((r) => r.assets.some((a) => a.name === 'manifests.json'))
       const options: FieldOption[] = []
 
-      // Synthetic "Latest version" entry — uses the newest release but auto-updates ComfyUI after install
-      if (filtered.length > 0) {
+      // Synthetic "Latest Stable" entry — uses the newest release but auto-updates ComfyUI after install
+      if (filtered.length > 0 && context?.includeLatestStable) {
         options.push({
           value: 'latest',
           label: t('standalone.latestVersion'),
