@@ -385,6 +385,16 @@ export interface SystemInfo {
   total_memory_gb: number
   cpu_model: string
   cpu_cores: number
+  app_version: string
+  auto_update: boolean
+  locale: string
+  installation_count: number
+  installations: Array<{
+    source_id: string
+    variant: string
+    update_channel: string
+    status: string
+  }>
 }
 
 export interface SnapshotDiffEntry {

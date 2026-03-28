@@ -1,7 +1,7 @@
 import {
   ipcMain, dialog, shell, BrowserWindow,
   fs, path, os,
-  sources, installations,
+  sources, installations, settings,
   defaultInstallDir, getDiskSpace, getDirectorySize, validateInstallPath,
   detectGPU, validateHardware, checkNvidiaDriver,
   sourceMap, getAppVersion, openPath,
@@ -127,6 +127,7 @@ export function registerAppHandlers(): void {
     const gpu = await gpuPromise
     const nvidiaCheck = gpu?.id === 'nvidia' ? await checkNvidiaDriver() : null
     const cpus = os.cpus()
+    const allInstalls = await installations.list()
     return {
       gpu_vendor: gpu?.id ?? null,
       gpu_label: gpu?.label ?? null,
@@ -140,6 +141,16 @@ export function registerAppHandlers(): void {
       total_memory_gb: Math.round(os.totalmem() / 1073741824),
       cpu_model: cpus[0]?.model ?? 'unknown',
       cpu_cores: cpus.length,
+      app_version: getAppVersion(),
+      auto_update: settings.get('autoUpdate') !== false,
+      locale: settings.get('language') || 'en',
+      installation_count: allInstalls.length,
+      installations: allInstalls.map((inst) => ({
+        source_id: (inst.sourceId as string) || '',
+        variant: (inst.variant as string) || '',
+        update_channel: (inst.updateChannel as string) || 'stable',
+        status: (inst.status as string) || 'ready',
+      })),
     }
   })
 
