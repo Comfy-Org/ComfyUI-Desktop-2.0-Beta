@@ -151,13 +151,17 @@ export function registerAppHandlers(): void {
     const entries = await listSnapshots(inst.installPath)
     const latest = entries.length > 0 ? entries[0]!.snapshot : null
 
+    const copiedFrom = inst.copiedFrom as string | undefined
+    const copyReason = inst.copyReason as string | undefined
+
     const result = {
       installation_id: inst.id,
-      installation_name: inst.name,
       variant: (inst.variant as string) || '',
       source_id: (inst.sourceId as string) || '',
       update_channel: (inst.updateChannel as string) || 'stable',
       comfyui_version: (inst.comfyuiVersion as string) || '',
+      ...(copiedFrom ? { copied_from: copiedFrom } : {}),
+      ...(copyReason ? { copy_reason: copyReason } : {}),
       snapshot_count: entries.length,
       latest_snapshot: latest ? {
         createdAt: latest.createdAt,
@@ -181,18 +185,7 @@ export function registerAppHandlers(): void {
         pythonVersion: latest.pythonVersion,
         updateChannel: latest.updateChannel,
       } : null,
-      snapshot_diffs: [] as Array<{
-        createdAt: string
-        trigger: string
-        label: string | null
-        nodesAdded: string[]
-        nodesRemoved: string[]
-        nodesChanged: string[]
-        pipsAdded: string[]
-        pipsRemoved: string[]
-        pipsChanged: string[]
-        comfyuiChanged: boolean
-      }>,
+      snapshot_diffs: [] as Array<Record<string, unknown>>,
     }
 
     let runningSize = JSON.stringify(result).length
@@ -200,17 +193,23 @@ export function registerAppHandlers(): void {
       const newer = entries[i]!.snapshot
       const older = entries[i + 1]!.snapshot
       const diff = diffSnapshots(older, newer)
-      const entry = {
+      const entry: Record<string, unknown> = {
         createdAt: newer.createdAt,
         trigger: newer.trigger,
         label: newer.label,
-        nodesAdded: diff.nodesAdded.map((n) => n.dirName),
-        nodesRemoved: diff.nodesRemoved.map((n) => n.dirName),
-        nodesChanged: diff.nodesChanged.map((n) => n.id),
-        pipsAdded: diff.pipsAdded.map((p) => p.name),
-        pipsRemoved: diff.pipsRemoved.map((p) => p.name),
-        pipsChanged: diff.pipsChanged.map((p) => p.name),
+        nodesAdded: diff.nodesAdded.map((n) => ({ id: n.id, type: n.type, dirName: n.dirName, enabled: n.enabled, version: n.version, commit: n.commit })),
+        nodesRemoved: diff.nodesRemoved.map((n) => ({ id: n.id, type: n.type, dirName: n.dirName, enabled: n.enabled, version: n.version, commit: n.commit })),
+        nodesChanged: diff.nodesChanged.map((n) => ({ id: n.id, from: n.from, to: n.to })),
+        pipsAdded: diff.pipsAdded,
+        pipsRemoved: diff.pipsRemoved,
+        pipsChanged: diff.pipsChanged,
         comfyuiChanged: diff.comfyuiChanged,
+      }
+      if (diff.comfyui) {
+        entry.comfyui = {
+          from: { ref: diff.comfyui.from.ref, commit: diff.comfyui.from.commit },
+          to: { ref: diff.comfyui.to.ref, commit: diff.comfyui.to.commit },
+        }
       }
       const entrySize = JSON.stringify(entry).length + 1
       if (runningSize + entrySize > MAX_CONTEXT_BYTES) break

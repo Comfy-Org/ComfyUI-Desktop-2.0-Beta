@@ -391,22 +391,31 @@ export interface SnapshotDiffEntry {
   createdAt: string
   trigger: string
   label: string | null
-  nodesAdded: string[]
-  nodesRemoved: string[]
-  nodesChanged: string[]
-  pipsAdded: string[]
-  pipsRemoved: string[]
-  pipsChanged: string[]
+  nodesAdded: Array<{ id: string; type: string; dirName: string; enabled: boolean; version?: string; commit?: string }>
+  nodesRemoved: Array<{ id: string; type: string; dirName: string; enabled: boolean; version?: string; commit?: string }>
+  nodesChanged: Array<{
+    id: string
+    from: { version?: string; commit?: string; enabled: boolean }
+    to: { version?: string; commit?: string; enabled: boolean }
+  }>
+  pipsAdded: Array<{ name: string; version: string }>
+  pipsRemoved: Array<{ name: string; version: string }>
+  pipsChanged: Array<{ name: string; from: string; to: string }>
   comfyuiChanged: boolean
+  comfyui?: {
+    from: { ref: string; commit: string | null }
+    to: { ref: string; commit: string | null }
+  }
 }
 
 export interface InstallationDdContext {
   installation_id: string
-  installation_name: string
   variant: string
   source_id: string
   update_channel: string
   comfyui_version: string
+  copied_from?: string
+  copy_reason?: string
   snapshot_count: number
   latest_snapshot: {
     createdAt: string
