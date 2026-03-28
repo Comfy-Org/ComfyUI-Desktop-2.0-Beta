@@ -110,7 +110,8 @@ export function useMigrateAction() {
     // Fetch release + variant options for device selection
     let migrateRelease: FieldOption | null = null
     try {
-      const releaseOptions = await window.api.getFieldOptions('standalone', 'release', {})
+      // Exclude the synthetic "Latest Stable" entry — migration targets a specific release
+      const releaseOptions = (await window.api.getFieldOptions('standalone', 'release', {})).filter((r) => r.value !== 'latest')
       migrateRelease = releaseOptions[0] || null
       if (migrateRelease) {
         const variantOptions = await window.api.getFieldOptions('standalone', 'variant', { release: toRaw(migrateRelease) })
