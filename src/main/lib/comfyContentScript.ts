@@ -248,8 +248,10 @@ export function getModelDownloadContentScript(): string {
       if (item.type === 'temp') return;
       var viewUrl = _buildViewUrl(baseUrl, item);
       if (_useBlobDownload) {
-        // Cloud path: fetch with auth token, send blob to main process
-        var fetchOpts = { credentials: 'include' };
+        // Cloud path: fetch with auth token, send blob to main process.
+        // Use same-origin credentials (default) — cloud redirects to a
+        // pre-signed GCS URL that rejects credentials: 'include'.
+        var fetchOpts = {};
         if (authToken) {
           fetchOpts.headers = { 'Authorization': 'Bearer ' + authToken };
         }
