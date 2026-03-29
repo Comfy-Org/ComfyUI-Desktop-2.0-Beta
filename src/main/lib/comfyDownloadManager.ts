@@ -25,6 +25,7 @@ interface PendingDownload {
   directory: string
   savePath: string
   tempPath?: string
+  outputDir?: string
   window: BrowserWindow
   subscriberWindows: Set<BrowserWindow>
   item?: Electron.DownloadItem
@@ -304,7 +305,8 @@ export async function startAssetDownload(
   if (!safeFilename) return false
   const savePath = await deduplicatePath(path.join(outputDir, safeFilename))
   const savedFilename = path.basename(savePath)
-  const tempDir = getAssetTempDir()
+  // Temp dir must be on the same filesystem as the output dir for atomic rename
+  const tempDir = path.join(outputDir, TEMP_DIR_NAME)
   const tempPath = path.join(tempDir, `${Date.now()}-${savedFilename}.tmp`)
 
   const makeProgress = (
@@ -341,6 +343,7 @@ export async function startAssetDownload(
     directory: '',
     savePath,
     tempPath,
+    outputDir,
     window: win,
     subscriberWindows: new Set(),
     lastProgress: initial,
@@ -481,24 +484,29 @@ export function attachSessionDownloadHandler(sess: Electron.Session): void {
       // response (Content-Disposition or GCS response-content-disposition param).
       // Cloud uses content hashes as filenames in the WebSocket message, so the
       // real human-readable name is only available from the HTTP response.
-      if (pending.tempPath) {
+      if (pending.tempPath && pending.outputDir) {
         const serverName = resolveServerFilename(item)
         if (serverName) {
-          const safeServer = sanitizeAssetFilename(serverName, path.dirname(pending.savePath))
+          // Use the output dir root (not the subfolder from the original path)
+          // so the server name is placed directly in the output directory.
+          const baseDir = pending.outputDir
+          const safeServer = sanitizeAssetFilename(serverName, baseDir)
           if (safeServer) {
-            const dir = path.dirname(pending.savePath)
-            const newSavePath = path.join(dir, safeServer)
+            const newSavePath = path.join(baseDir, safeServer)
             // Only update if it differs (avoid overwriting display_name with same value)
             if (newSavePath !== pending.savePath) {
               // Synchronous dedup since will-download must be handled synchronously
+              const saveDir = path.dirname(newSavePath)
               let candidate = newSavePath
               let i = 1
               while (fs.existsSync(candidate)) {
                 const ext = path.extname(newSavePath)
                 const base = path.basename(newSavePath, ext)
-                candidate = path.join(dir, `${base} (${i})${ext}`)
+                candidate = path.join(saveDir, `${base} (${i})${ext}`)
                 i++
               }
+              // Ensure the target directory exists (server name may introduce subdirs)
+              fs.mkdirSync(path.dirname(candidate), { recursive: true })
               pending.savePath = candidate
               pending.filename = path.basename(candidate)
               pending.tempPath = path.join(path.dirname(pending.tempPath), `${Date.now()}-${pending.filename}.tmp`)
@@ -640,8 +648,14 @@ export async function cleanupTempDownloads(): Promise<void> {
   try {
     await fs.promises.rm(getTempDir(), { recursive: true, force: true })
   } catch {}
+  // Clean legacy asset temp dir (sibling of output dir)
   try {
     await fs.promises.rm(getAssetTempDir(), { recursive: true, force: true })
+  } catch {}
+  // Clean current asset temp dir (inside output dir)
+  const outputDir = (settings.get('outputDir') as string | undefined) || settings.defaults.outputDir
+  try {
+    await fs.promises.rm(path.join(outputDir, TEMP_DIR_NAME), { recursive: true, force: true })
   } catch {}
 }
 
