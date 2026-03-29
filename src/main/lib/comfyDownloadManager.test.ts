@@ -19,6 +19,7 @@ let ALLOWED_EXTENSIONS: string[]
 let hasValidExtension: (filename: string) => boolean
 let isPathContained: (filePath: string, baseDir: string) => boolean
 let sanitizeAssetFilename: (filename: string, outputDir: string) => string | null
+let parseContentDispositionFilename: (header: string | null) => string | null
 
 beforeAll(async () => {
   const mod = await import('./comfyDownloadManager')
@@ -26,6 +27,7 @@ beforeAll(async () => {
   hasValidExtension = mod.hasValidExtension
   isPathContained = mod.isPathContained
   sanitizeAssetFilename = mod.sanitizeAssetFilename
+  parseContentDispositionFilename = mod.parseContentDispositionFilename
 })
 
 describe('ALLOWED_EXTENSIONS', () => {
@@ -108,5 +110,37 @@ describe('sanitizeAssetFilename', () => {
     expect(sanitizeAssetFilename('..', outputDir)).toBeNull()
     expect(sanitizeAssetFilename('../..', outputDir)).toBeNull()
     expect(sanitizeAssetFilename('.', outputDir)).toBeNull()
+  })
+})
+
+describe('parseContentDispositionFilename', () => {
+  it('returns null for null/empty input', () => {
+    expect(parseContentDispositionFilename(null)).toBeNull()
+    expect(parseContentDispositionFilename('')).toBeNull()
+  })
+
+  it('parses quoted filename', () => {
+    expect(parseContentDispositionFilename('attachment; filename="photo.png"')).toBe('photo.png')
+  })
+
+  it('parses unquoted filename', () => {
+    expect(parseContentDispositionFilename('attachment; filename=photo.png')).toBe('photo.png')
+  })
+
+  it('parses RFC 5987 encoded filename*', () => {
+    expect(parseContentDispositionFilename("attachment; filename*=UTF-8''NetaYume_%E7%A7%98.png")).toBe('NetaYume_秘.png')
+  })
+
+  it('prefers filename* over filename', () => {
+    expect(parseContentDispositionFilename("attachment; filename=\"fallback.png\"; filename*=UTF-8''preferred.png")).toBe('preferred.png')
+  })
+
+  it('parses GCS response-content-disposition format', () => {
+    expect(parseContentDispositionFilename('attachment; filename="NetaYume_Lumina_3.5_00187_.png"')).toBe('NetaYume_Lumina_3.5_00187_.png')
+  })
+
+  it('returns null for header without filename', () => {
+    expect(parseContentDispositionFilename('inline')).toBeNull()
+    expect(parseContentDispositionFilename('attachment')).toBeNull()
   })
 })

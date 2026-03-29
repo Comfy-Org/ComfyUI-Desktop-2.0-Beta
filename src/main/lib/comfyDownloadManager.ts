@@ -171,6 +171,36 @@ async function fileExists(filePath: string): Promise<boolean> {
   }
 }
 
+export function parseContentDispositionFilename(header: string | null): string | null {
+  if (!header) return null
+  // Try filename*= (RFC 5987 encoded)
+  const starMatch = header.match(/filename\*\s*=\s*(?:UTF-8''|utf-8'')([^;\s]+)/i)
+  if (starMatch?.[1]) {
+    try { return decodeURIComponent(starMatch[1]) } catch {}
+  }
+  // Try filename="..." or filename=...
+  const match = header.match(/filename\s*=\s*"([^"]+)"/i) || header.match(/filename\s*=\s*([^;\s]+)/i)
+  return match?.[1] ?? null
+}
+
+function resolveServerFilename(item: Electron.DownloadItem): string | null {
+  // 1. Try Content-Disposition header from the response
+  const cd = item.getContentDisposition()
+  const cdName = parseContentDispositionFilename(cd)
+  if (cdName) return cdName
+
+  // 2. Try response-content-disposition query param from the URL chain (GCS pre-signed URLs)
+  for (const u of item.getURLChain()) {
+    try {
+      const rcd = new URL(u).searchParams.get('response-content-disposition')
+      const rcdName = parseContentDispositionFilename(rcd)
+      if (rcdName) return rcdName
+    } catch {}
+  }
+
+  return null
+}
+
 function findPendingForItem(item: Electron.DownloadItem): PendingDownload | undefined {
   const candidates = [...item.getURLChain(), item.getURL()].filter(Boolean)
   for (const u of candidates) {
@@ -444,8 +474,40 @@ export function attachSessionDownloadHandler(sess: Electron.Session): void {
     const pending = findPendingForItem(item)
 
     if (pending) {
-      // Managed model download — auto-save to the resolved path
+      // Managed download — auto-save to the resolved path
       pending.item = item
+
+      // For asset downloads, try to resolve a better filename from the server
+      // response (Content-Disposition or GCS response-content-disposition param).
+      // Cloud uses content hashes as filenames in the WebSocket message, so the
+      // real human-readable name is only available from the HTTP response.
+      if (pending.tempPath) {
+        const serverName = resolveServerFilename(item)
+        if (serverName) {
+          const safeServer = sanitizeAssetFilename(serverName, path.dirname(pending.savePath))
+          if (safeServer) {
+            const dir = path.dirname(pending.savePath)
+            const newSavePath = path.join(dir, safeServer)
+            // Only update if it differs (avoid overwriting display_name with same value)
+            if (newSavePath !== pending.savePath) {
+              // Synchronous dedup since will-download must be handled synchronously
+              let candidate = newSavePath
+              let i = 1
+              while (fs.existsSync(candidate)) {
+                const ext = path.extname(newSavePath)
+                const base = path.basename(newSavePath, ext)
+                candidate = path.join(dir, `${base} (${i})${ext}`)
+                i++
+              }
+              pending.savePath = candidate
+              pending.filename = path.basename(candidate)
+              pending.tempPath = path.join(path.dirname(pending.tempPath), `${Date.now()}-${pending.filename}.tmp`)
+              pending.lastProgress = { ...pending.lastProgress, filename: pending.filename }
+            }
+          }
+        }
+      }
+
       item.setSavePath(pending.tempPath!)
       attachDownloadListeners(item, pending)
     } else {
