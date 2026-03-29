@@ -227,6 +227,75 @@ export function getModelDownloadContentScript(): string {
     };
   }
 
+  // ---- Auto-download outputs for remote/cloud sessions ----
+  // Intercept WebSocket messages to detect completed workflow outputs.
+  // The auth token (if any) is passed to the main process which resolves
+  // authenticated redirects server-side, avoiding renderer memory issues.
+  if (window.__comfyDesktop2Remote && window.__comfyDesktop2 && window.__comfyDesktop2.downloadAsset) {
+
+    function _buildViewUrl(baseUrl, item) {
+      var params = 'filename=' + encodeURIComponent(item.filename);
+      if (item.subfolder) params += '&subfolder=' + encodeURIComponent(item.subfolder);
+      if (item.type) params += '&type=' + encodeURIComponent(item.type);
+      return baseUrl + '/api/view?' + params;
+    }
+
+    function _withSubfolder(subfolder, name) {
+      if (!subfolder) return name;
+      // Avoid duplicating if name already starts with the subfolder
+      if (name.indexOf(subfolder + '/') === 0) return name;
+      return subfolder + '/' + name;
+    }
+
+    function _downloadItem(baseUrl, authToken, item) {
+      if (!item || !item.filename) return;
+      // Skip temporary preview outputs (PreviewImage, etc.)
+      if (item.type === 'temp') return;
+      var preferredName = item.display_name || null;
+      var saveName = _withSubfolder(item.subfolder, preferredName || item.filename);
+      var viewUrl = _buildViewUrl(baseUrl, item);
+      window.__comfyDesktop2.downloadAsset(viewUrl, saveName, authToken || '').catch(function() {});
+    }
+
+    var OrigWebSocket = window.WebSocket;
+    window.WebSocket = function(url, protocols) {
+      var ws = protocols !== undefined ? new OrigWebSocket(url, protocols) : new OrigWebSocket(url);
+      var wsUrl = typeof url === 'string' ? url : url.toString();
+      var httpBase = wsUrl.replace(/^ws(s?):/, 'http$1:').replace(/\\/ws(\\?.*)?$/, '');
+      // Extract auth token from WebSocket URL query params (cloud passes ?token=...)
+      var _authToken = null;
+      try {
+        var urlObj = new URL(wsUrl);
+        _authToken = urlObj.searchParams.get('token');
+      } catch(e) {}
+
+      ws.addEventListener('message', function(event) {
+        if (typeof event.data !== 'string') return;
+        try {
+          var msg = JSON.parse(event.data);
+          if (msg.type !== 'executed' || !msg.data || !msg.data.output) return;
+          var output = msg.data.output;
+          // Process all known output arrays: images, gifs, audio, video
+          var keys = ['images', 'gifs', 'audio', 'video'];
+          for (var k = 0; k < keys.length; k++) {
+            var items = output[keys[k]];
+            if (!items || !items.length) continue;
+            for (var i = 0; i < items.length; i++) {
+              _downloadItem(httpBase, _authToken, items[i]);
+            }
+          }
+        } catch(e) {}
+      });
+
+      return ws;
+    };
+    window.WebSocket.prototype = OrigWebSocket.prototype;
+    window.WebSocket.CONNECTING = OrigWebSocket.CONNECTING;
+    window.WebSocket.OPEN = OrigWebSocket.OPEN;
+    window.WebSocket.CLOSING = OrigWebSocket.CLOSING;
+    window.WebSocket.CLOSED = OrigWebSocket.CLOSED;
+  }
+
   // ---- Theme integration ----
   // Read ComfyUI's CSS variables and derive toast colors
   var theme = {

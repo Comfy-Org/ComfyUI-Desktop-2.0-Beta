@@ -25,6 +25,7 @@ interface PendingDownload {
   directory: string
   savePath: string
   tempPath?: string
+  outputDir?: string
   window: BrowserWindow
   subscriberWindows: Set<BrowserWindow>
   item?: Electron.DownloadItem
@@ -50,6 +51,59 @@ const TEMP_DIR_NAME = '.desktop2-downloads'
 
 function getTempDir(): string {
   return path.join(getModelsBaseDir(), TEMP_DIR_NAME)
+}
+
+function getAssetTempDir(): string {
+  const outputDir = (settings.get('outputDir') as string | undefined) || settings.defaults.outputDir
+  return path.join(path.dirname(outputDir), TEMP_DIR_NAME)
+}
+
+// Windows MAX_PATH is 260 chars (259 usable + null terminator).
+// Reserve space for deduplication suffix " (999)" = 6 chars.
+const WIN_MAX_PATH = 259
+const DEDUP_RESERVE = 6
+
+/**
+ * Sanitize an asset filename to prevent path traversal and ensure it fits
+ * within filesystem limits.  Returns null if the filename is invalid.
+ */
+export function sanitizeAssetFilename(filename: string, outputDir: string): string | null {
+  if (!filename || filename.trim() === '') return null
+
+  // Normalise separators and collapse sequences
+  let safe = filename.replace(/\\/g, '/')
+
+  // Strip path traversal components
+  safe = safe.split('/').filter((seg) => seg !== '..' && seg !== '.').join('/')
+
+  // Remove leading slashes (absolute path attempt)
+  safe = safe.replace(/^\/+/, '')
+
+  if (safe === '') return null
+
+  // Verify the resolved path stays inside outputDir
+  const resolved = path.resolve(outputDir, safe)
+  const resolvedBase = path.resolve(outputDir)
+  if (!resolved.startsWith(resolvedBase + path.sep) && resolved !== resolvedBase) {
+    return null
+  }
+
+  // On Windows, truncate filename stem if the full path exceeds MAX_PATH.
+  if (process.platform === 'win32') {
+    const fullLen = resolved.length
+    if (fullLen + DEDUP_RESERVE > WIN_MAX_PATH) {
+      const ext = path.extname(safe)
+      const dir = path.dirname(safe)
+      const stem = path.basename(safe, ext)
+      const dirPart = path.resolve(outputDir, dir)
+      const available = WIN_MAX_PATH - dirPart.length - 1 - ext.length - DEDUP_RESERVE
+      if (available <= 0) return null
+      const truncatedStem = stem.substring(0, available)
+      safe = dir && dir !== '.' ? dir + '/' + truncatedStem + ext : truncatedStem + ext
+    }
+  }
+
+  return safe
 }
 
 export function isPathContained(filePath: string, baseDir: string): boolean {
@@ -116,6 +170,36 @@ async function fileExists(filePath: string): Promise<boolean> {
   } catch {
     return false
   }
+}
+
+export function parseContentDispositionFilename(header: string | null): string | null {
+  if (!header) return null
+  // Try filename*= (RFC 5987 encoded)
+  const starMatch = header.match(/filename\*\s*=\s*(?:UTF-8''|utf-8'')([^;\s]+)/i)
+  if (starMatch?.[1]) {
+    try { return decodeURIComponent(starMatch[1]) } catch {}
+  }
+  // Try filename="..." or filename=...
+  const match = header.match(/filename\s*=\s*"([^"]+)"/i) || header.match(/filename\s*=\s*([^;\s]+)/i)
+  return match?.[1] ?? null
+}
+
+function resolveServerFilename(item: Electron.DownloadItem): string | null {
+  // 1. Try Content-Disposition header from the response
+  const cd = item.getContentDisposition()
+  const cdName = parseContentDispositionFilename(cd)
+  if (cdName) return cdName
+
+  // 2. Try response-content-disposition query param from the URL chain (GCS pre-signed URLs)
+  for (const u of item.getURLChain()) {
+    try {
+      const rcd = new URL(u).searchParams.get('response-content-disposition')
+      const rcdName = parseContentDispositionFilename(rcd)
+      if (rcdName) return rcdName
+    } catch {}
+  }
+
+  return null
 }
 
 function findPendingForItem(item: Electron.DownloadItem): PendingDownload | undefined {
@@ -210,6 +294,91 @@ export async function startModelDownload(
   return true
 }
 
+export async function startAssetDownload(
+  win: BrowserWindow,
+  url: string,
+  filename: string,
+  outputDir: string,
+  authToken?: string,
+): Promise<boolean> {
+  const safeFilename = sanitizeAssetFilename(filename, outputDir)
+  if (!safeFilename) return false
+  const savePath = await deduplicatePath(path.join(outputDir, safeFilename))
+  const savedFilename = path.basename(savePath)
+  // Temp dir is a sibling of the output dir — same filesystem for atomic rename,
+  // but outside the output dir so ComfyUI won't scan it.
+  const tempDir = path.join(path.dirname(outputDir), TEMP_DIR_NAME)
+  const tempPath = path.join(tempDir, `${Date.now()}-${savedFilename}.tmp`)
+
+  const makeProgress = (
+    overrides: Partial<DownloadProgress>,
+  ): DownloadProgress => ({
+    url,
+    filename: savedFilename,
+    directory: '',
+    progress: 0,
+    status: 'pending',
+    ...overrides,
+  })
+
+  const existing = pendingDownloads.get(url)
+  if (existing) {
+    if (win !== existing.window) {
+      existing.subscriberWindows.add(win)
+    }
+    if (!win.isDestroyed()) {
+      win.webContents.send('desktop2-download-progress', existing.lastProgress)
+    }
+    return true
+  }
+
+  await fs.promises.mkdir(path.dirname(savePath), { recursive: true })
+  await fs.promises.mkdir(tempDir, { recursive: true })
+
+  if (win.isDestroyed()) return false
+
+  const initial = makeProgress({ status: 'pending' })
+  pendingDownloads.set(url, {
+    url,
+    filename: savedFilename,
+    directory: '',
+    savePath,
+    tempPath,
+    outputDir,
+    window: win,
+    subscriberWindows: new Set(),
+    lastProgress: initial,
+    lastSpeedBytes: 0,
+    lastSpeedTime: Date.now(),
+  })
+
+  const sess = win.webContents.session
+  attachSessionDownloadHandler(sess)
+  // Pass auth headers directly — Electron follows redirects internally and
+  // the original URL stays in item.getURLChain(), so findPendingForItem matches.
+  const downloadOptions = authToken
+    ? { headers: { Authorization: `Bearer ${authToken}` } }
+    : undefined
+  sess.downloadURL(url, downloadOptions)
+
+  reportProgress(initial)
+  return true
+}
+
+async function deduplicatePath(filePath: string): Promise<string> {
+  if (!(await fileExists(filePath))) return filePath
+  const dir = path.dirname(filePath)
+  const ext = path.extname(filePath)
+  const base = path.basename(filePath, ext)
+  let i = 1
+  let candidate: string
+  do {
+    candidate = path.join(dir, `${base} (${i})${ext}`)
+    i++
+  } while (await fileExists(candidate))
+  return candidate
+}
+
 function attachDownloadListeners(item: Electron.DownloadItem, pending: PendingDownload): void {
   item.on('updated', (_ev, state) => {
     if (state !== 'progressing') return
@@ -268,6 +437,8 @@ function attachDownloadListeners(item: Electron.DownloadItem, pending: PendingDo
             return
           }
         }
+        // Try to remove the temp directory if it's now empty (safe — fails silently if not empty)
+        try { fs.rmdirSync(path.dirname(pending.tempPath)) } catch {}
       }
       reportProgress({
         url: pending.url,
@@ -278,7 +449,10 @@ function attachDownloadListeners(item: Electron.DownloadItem, pending: PendingDo
         status: 'completed',
       })
     } else if (state === 'cancelled') {
-      if (pending.tempPath) { try { fs.unlinkSync(pending.tempPath) } catch {} }
+      if (pending.tempPath) {
+        try { fs.unlinkSync(pending.tempPath) } catch {}
+        try { fs.rmdirSync(path.dirname(pending.tempPath)) } catch {}
+      }
       reportProgress({
         url: pending.url,
         filename: pending.filename,
@@ -287,7 +461,10 @@ function attachDownloadListeners(item: Electron.DownloadItem, pending: PendingDo
         status: 'cancelled',
       })
     } else {
-      if (pending.tempPath) { try { fs.unlinkSync(pending.tempPath) } catch {} }
+      if (pending.tempPath) {
+        try { fs.unlinkSync(pending.tempPath) } catch {}
+        try { fs.rmdirSync(path.dirname(pending.tempPath)) } catch {}
+      }
       reportProgress({
         url: pending.url,
         filename: pending.filename,
@@ -309,8 +486,45 @@ export function attachSessionDownloadHandler(sess: Electron.Session): void {
     const pending = findPendingForItem(item)
 
     if (pending) {
-      // Managed model download — auto-save to the resolved path
+      // Managed download — auto-save to the resolved path
       pending.item = item
+
+      // For asset downloads, try to resolve a better filename from the server
+      // response (Content-Disposition or GCS response-content-disposition param).
+      // Cloud uses content hashes as filenames in the WebSocket message, so the
+      // real human-readable name is only available from the HTTP response.
+      if (pending.tempPath && pending.outputDir) {
+        const serverName = resolveServerFilename(item)
+        if (serverName) {
+          // Use the output dir root (not the subfolder from the original path)
+          // so the server name is placed directly in the output directory.
+          const baseDir = pending.outputDir
+          const safeServer = sanitizeAssetFilename(serverName, baseDir)
+          if (safeServer) {
+            const newSavePath = path.join(baseDir, safeServer)
+            // Only update if it differs (avoid overwriting display_name with same value)
+            if (newSavePath !== pending.savePath) {
+              // Synchronous dedup since will-download must be handled synchronously
+              const saveDir = path.dirname(newSavePath)
+              let candidate = newSavePath
+              let i = 1
+              while (fs.existsSync(candidate)) {
+                const ext = path.extname(newSavePath)
+                const base = path.basename(newSavePath, ext)
+                candidate = path.join(saveDir, `${base} (${i})${ext}`)
+                i++
+              }
+              // Ensure the target directory exists (server name may introduce subdirs)
+              fs.mkdirSync(path.dirname(candidate), { recursive: true })
+              pending.savePath = candidate
+              pending.filename = path.basename(candidate)
+              pending.tempPath = path.join(path.dirname(pending.tempPath), `${Date.now()}-${pending.filename}.tmp`)
+              pending.lastProgress = { ...pending.lastProgress, filename: pending.filename }
+            }
+          }
+        }
+      }
+
       item.setSavePath(pending.tempPath!)
       attachDownloadListeners(item, pending)
     } else {
@@ -438,10 +652,14 @@ export function detachWindowDownloads(win: BrowserWindow): void {
 
 // ---- Temp file cleanup ----
 
-/** Remove the temp download directory and all its contents. */
+/** Remove the temp download directories and all their contents. */
 export async function cleanupTempDownloads(): Promise<void> {
   try {
     await fs.promises.rm(getTempDir(), { recursive: true, force: true })
+  } catch {}
+  // Clean asset temp dir (sibling of output dir)
+  try {
+    await fs.promises.rm(getAssetTempDir(), { recursive: true, force: true })
   } catch {}
 }
 

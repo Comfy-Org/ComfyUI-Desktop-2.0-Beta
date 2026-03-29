@@ -221,7 +221,7 @@ v-else-if="f.editable && f.editType === 'boolean'" type="checkbox" class="detail
             <div v-else-if="f.editable && f.editType === 'path'" class="path-input">
               <input
 type="text" class="detail-field-input"
-                     :value="f.value ?? ''" @change="handleFieldChange(f, ($event.target as HTMLInputElement).value)">
+                     :value="f.value ?? ''" :readonly="f.browseOnly" @change="!f.browseOnly && handleFieldChange(f, ($event.target as HTMLInputElement).value)">
               <button @click="handleBrowseField(f)">{{ $t('common.browse') }}</button>
             </div>
             <!-- Text editable -->

@@ -1,6 +1,7 @@
 import { untrackAction } from '../../lib/actions'
 import { parseUrl } from '../../lib/util'
 import { t } from '../../lib/i18n'
+import * as settings from '../../settings'
 import type { InstallationRecord } from '../../installations'
 import type { SourcePlugin, FieldOption, ActionResult, ActionTools, LaunchCommand } from '../../types/sources'
 
@@ -109,6 +110,17 @@ export function createUrlSource(config: UrlSourceConfig): SourcePlugin {
                 { value: 'shared', label: t('common.partitionShared') },
                 { value: 'unique', label: t('common.partitionUnique') },
               ], tooltip: t('tooltips.browserPartition') },
+            { id: 'autoDownloadOutputs', label: t('common.autoDownloadOutputs'), value: (installation.autoDownloadOutputs as boolean | undefined) ?? true, editable: true,
+              editType: 'boolean', refreshSection: true, tooltip: t('tooltips.autoDownloadOutputs') },
+            ...((installation.autoDownloadOutputs as boolean | undefined) !== false ? [
+              { id: 'useSharedOutputDir', label: t('common.useSharedOutputDir'), value: (installation.useSharedOutputDir as boolean | undefined) ?? true, editable: true,
+                editType: 'boolean', refreshSection: true, tooltip: t('tooltips.useSharedOutputDir') },
+              ...((installation.useSharedOutputDir as boolean | undefined) === false ? [
+                { id: 'outputDir', label: t('media.outputDir'),
+                  value: (installation.outputDir as string | undefined) || settings.defaults.outputDir,
+                  editable: true, editType: 'path', browseOnly: true, tooltip: t('tooltips.outputDirPerInstall') },
+              ] : []),
+            ] : []),
           ],
         },
         {

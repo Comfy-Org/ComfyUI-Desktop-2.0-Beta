@@ -111,6 +111,7 @@ export interface DetailField {
   editType?: 'select' | 'boolean' | 'text' | 'path' | 'channel-cards' | 'args-builder' | 'env-vars'
   options?: DetailFieldOption[]
   refreshSection?: boolean
+  browseOnly?: boolean
   onChangeAction?: string
   tooltip?: string
 }
