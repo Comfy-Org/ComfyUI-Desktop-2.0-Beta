@@ -256,6 +256,8 @@ export function getModelDownloadContentScript(): string {
 
     function _withSubfolder(subfolder, name) {
       if (!subfolder) return name;
+      // Avoid duplicating if name already starts with the subfolder
+      if (name.indexOf(subfolder + '/') === 0) return name;
       return subfolder + '/' + name;
     }
 
