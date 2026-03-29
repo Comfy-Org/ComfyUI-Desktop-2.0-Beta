@@ -288,17 +288,6 @@ export async function startAssetDownload(
     ...overrides,
   })
 
-  const existing = pendingDownloads.get(url)
-  if (existing) {
-    if (win !== existing.window) {
-      existing.subscriberWindows.add(win)
-    }
-    if (!win.isDestroyed()) {
-      win.webContents.send('desktop2-download-progress', existing.lastProgress)
-    }
-    return true
-  }
-
   await fs.promises.mkdir(path.dirname(savePath), { recursive: true })
   await fs.promises.mkdir(tempDir, { recursive: true })
 
@@ -318,6 +307,18 @@ export async function startAssetDownload(
     } catch {
       // Fall through to download the original URL
     }
+  }
+
+  // Dedup: check both the original view URL and the resolved download URL
+  const existing = pendingDownloads.get(downloadUrl) || (downloadUrl !== url ? pendingDownloads.get(url) : undefined)
+  if (existing) {
+    if (win !== existing.window) {
+      existing.subscriberWindows.add(win)
+    }
+    if (!win.isDestroyed()) {
+      win.webContents.send('desktop2-download-progress', existing.lastProgress)
+    }
+    return true
   }
 
   const initial = makeProgress({ url: downloadUrl, status: 'pending' })
