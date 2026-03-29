@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, net, shell } from 'electron'
 import fs from 'fs'
 import path from 'path'
 import * as settings from '../settings'
@@ -53,9 +53,11 @@ function getTempDir(): string {
 }
 
 // Windows MAX_PATH is 260 chars (259 usable + null terminator).
-// Reserve space for deduplication suffix " (999)" = 6 chars.
+// Reserve space for deduplication suffix " (999)" = 6 chars, plus temp path
+// overhead: .desktop2-downloads/ (21) + timestamp (13) + dash (1) + .tmp (4) = 39.
 const WIN_MAX_PATH = 259
 const DEDUP_RESERVE = 6
+const TEMP_PATH_OVERHEAD = 39
 
 /**
  * Sanitize an asset filename to prevent path traversal and ensure it fits
@@ -82,16 +84,17 @@ export function sanitizeAssetFilename(filename: string, outputDir: string): stri
     return null
   }
 
-  // On Windows, truncate filename stem if the full path exceeds MAX_PATH
+  // On Windows, truncate filename stem if the full path exceeds MAX_PATH.
+  // Account for both deduplication suffix and temp file path overhead.
   if (process.platform === 'win32') {
     const fullLen = resolved.length
-    if (fullLen + DEDUP_RESERVE > WIN_MAX_PATH) {
+    const reserve = DEDUP_RESERVE + TEMP_PATH_OVERHEAD
+    if (fullLen + reserve > WIN_MAX_PATH) {
       const ext = path.extname(safe)
       const dir = path.dirname(safe)
       const stem = path.basename(safe, ext)
       const dirPart = path.resolve(outputDir, dir)
-      // Available space: MAX_PATH - dirPart length - separator - extension - dedup reserve
-      const available = WIN_MAX_PATH - dirPart.length - 1 - ext.length - DEDUP_RESERVE
+      const available = WIN_MAX_PATH - dirPart.length - 1 - ext.length - reserve
       if (available <= 0) return null
       const truncatedStem = stem.substring(0, available)
       safe = dir && dir !== '.' ? dir + '/' + truncatedStem + ext : truncatedStem + ext
@@ -264,6 +267,7 @@ export async function startAssetDownload(
   url: string,
   filename: string,
   outputDir: string,
+  authToken?: string,
 ): Promise<boolean> {
   const safeFilename = sanitizeAssetFilename(filename, outputDir)
   if (!safeFilename) return false
@@ -299,10 +303,26 @@ export async function startAssetDownload(
 
   if (win.isDestroyed()) return false
 
+  // For authenticated endpoints (Cloud), resolve the redirect to get a
+  // pre-signed URL that the native downloader can fetch without auth headers.
+  let downloadUrl = url
+  if (authToken) {
+    try {
+      const res = await net.fetch(url, {
+        headers: { Authorization: `Bearer ${authToken}` },
+        redirect: 'manual',
+      })
+      const location = res.headers.get('location')
+      if (location) downloadUrl = location
+    } catch {
+      // Fall through to download the original URL
+    }
+  }
+
   const initial = makeProgress({ status: 'pending' })
   pendingDownloads.set(url, {
     url,
-    filename,
+    filename: savedFilename,
     directory: '',
     savePath,
     tempPath,
@@ -315,7 +335,7 @@ export async function startAssetDownload(
 
   const sess = win.webContents.session
   attachSessionDownloadHandler(sess)
-  sess.downloadURL(url)
+  sess.downloadURL(downloadUrl)
 
   reportProgress(initial)
   return true

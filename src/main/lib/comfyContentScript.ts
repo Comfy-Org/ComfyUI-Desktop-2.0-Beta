@@ -229,29 +229,15 @@ export function getModelDownloadContentScript(): string {
 
   // ---- Auto-download outputs for remote/cloud sessions ----
   // Intercept WebSocket messages to detect completed workflow outputs.
-  // For cloud sessions, fetch files with page credentials (Bearer auth) and
-  // send the blob to the main process.  For plain remote sessions, pass the
-  // URL so Electron can download it directly (session cookies suffice).
+  // The auth token (if any) is passed to the main process which resolves
+  // authenticated redirects server-side, avoiding renderer memory issues.
   if (window.__comfyDesktop2Remote && window.__comfyDesktop2 && window.__comfyDesktop2.downloadAsset) {
-    var _useBlobDownload = !!window.__comfyDesktop2.downloadAssetBlob;
 
     function _buildViewUrl(baseUrl, item) {
       var params = 'filename=' + encodeURIComponent(item.filename);
       if (item.subfolder) params += '&subfolder=' + encodeURIComponent(item.subfolder);
       if (item.type) params += '&type=' + encodeURIComponent(item.type);
       return baseUrl + '/api/view?' + params;
-    }
-
-    function _parseContentDispositionFilename(header) {
-      if (!header) return null;
-      // Try filename*= (RFC 5987 encoded)
-      var starMatch = header.match(/filename\\*\\s*=\\s*(?:UTF-8''|utf-8'')([^;\\s]+)/i);
-      if (starMatch) {
-        try { return decodeURIComponent(starMatch[1]); } catch(e) {}
-      }
-      // Try filename="..." or filename=...
-      var match = header.match(/filename\\s*=\\s*"([^"]+)"/i) || header.match(/filename\\s*=\\s*([^;\\s]+)/i);
-      return match ? match[1] : null;
     }
 
     function _withSubfolder(subfolder, name) {
@@ -265,44 +251,10 @@ export function getModelDownloadContentScript(): string {
       if (!item || !item.filename) return;
       // Skip temporary preview outputs (PreviewImage, etc.)
       if (item.type === 'temp') return;
-      // Prefer display_name from the executed message (human-readable name)
       var preferredName = item.display_name || null;
+      var saveName = _withSubfolder(item.subfolder, preferredName || item.filename);
       var viewUrl = _buildViewUrl(baseUrl, item);
-      if (_useBlobDownload) {
-        // Cloud path: fetch with auth token, send blob to main process.
-        // Use same-origin credentials (default) — cloud redirects to a
-        // pre-signed GCS URL that rejects credentials: 'include'.
-        var fetchOpts = {};
-        if (authToken) {
-          fetchOpts.headers = { 'Authorization': 'Bearer ' + authToken };
-        }
-        fetch(viewUrl, fetchOpts)
-          .then(function(res) {
-            if (!res.ok) return null;
-            // Extract real filename from Content-Disposition header if available
-            if (!preferredName) {
-              var cd = res.headers.get('content-disposition');
-              preferredName = _parseContentDispositionFilename(cd);
-            }
-            // Also try the redirected URL's response-content-disposition param
-            if (!preferredName) {
-              try {
-                var rUrl = new URL(res.url);
-                var rcd = rUrl.searchParams.get('response-content-disposition');
-                preferredName = _parseContentDispositionFilename(rcd);
-              } catch(e) {}
-            }
-            return res.arrayBuffer();
-          })
-          .then(function(buf) {
-            var saveName = _withSubfolder(item.subfolder, preferredName || item.filename);
-            if (buf) window.__comfyDesktop2.downloadAssetBlob(saveName, buf).catch(function() {});
-          })
-          .catch(function() {});
-      } else {
-        var saveName = _withSubfolder(item.subfolder, preferredName || item.filename);
-        window.__comfyDesktop2.downloadAsset(viewUrl, saveName).catch(function() {});
-      }
+      window.__comfyDesktop2.downloadAsset(viewUrl, saveName, authToken || '').catch(function() {});
     }
 
     var OrigWebSocket = window.WebSocket;
