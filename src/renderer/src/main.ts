@@ -219,6 +219,15 @@ window.api.onComfyExited((data) => {
     installation_id: data.installationId,
     crashed: data.crashed ?? false,
     exit_code: data.exitCode ?? null,
+    last_stderr: data.lastStderr ?? null,
+  })
+})
+
+window.api.onComfyBootLog((data) => {
+  if (!isDatadogInitialized) return
+  trackTelemetryAction('launcher.comfyui.boot_log', {
+    installation_id: data.installationId,
+    boot_stderr: data.bootStderr,
   })
 })
 

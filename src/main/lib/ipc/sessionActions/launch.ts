@@ -19,6 +19,20 @@ import {
 } from '../shared'
 import type { ChildProcess, LaunchCmd } from '../shared'
 import type { ActionContext, ActionResult } from './types'
+import { scrubStderr, lastNLines } from '../../scrubStderr'
+import { rotateLogFiles, getLogDir } from '../../logRotation'
+import type { WriteStream } from 'fs'
+
+async function openLogStream(installPath: string): Promise<WriteStream> {
+  const logDir = getLogDir(installPath)
+  fs.mkdirSync(logDir, { recursive: true })
+  await rotateLogFiles(logDir, 'comfyui.log')
+  return fs.createWriteStream(path.join(logDir, 'comfyui.log'), { flags: 'w' })
+}
+
+function writeLog(stream: WriteStream, text: string): void {
+  if (!stream.writableEnded) stream.write(text)
+}
 
 export async function handleLaunch({ event, installationId, inst: instArg, actionData }: ActionContext): Promise<ActionResult> {
   let inst = instArg
@@ -135,13 +149,21 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
     _broadcastToRenderer('instance-launching', { installationId, installationName: inst.name })
     const sendOutput = makeSendOutput(sender, installationId)
     const launchEnv = buildLaunchEnv(inst)
+
+    const logStream = await openLogStream(inst.installPath)
+
     const proc = spawnProcess(launchCmd.cmd!, launchCmd.args!, launchCmd.cwd!, launchEnv, { showWindow: launchCmd.showWindow })
     let stderrBuf = ''
-    proc.stdout?.on('data', (chunk: Buffer) => sendOutput(chunk.toString('utf-8')))
+    proc.stdout?.on('data', (chunk: Buffer) => {
+      const text = chunk.toString('utf-8')
+      writeLog(logStream, text)
+      sendOutput(text)
+    })
     proc.stderr?.on('data', (chunk: Buffer) => {
       const text = chunk.toString('utf-8')
       stderrBuf += text
       if (stderrBuf.length > 8192) stderrBuf = stderrBuf.slice(-4096)
+      writeLog(logStream, text)
       sendOutput(text)
     })
 
@@ -150,10 +172,12 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
     _addSession(installationId, { proc, port: 0, mode, installationName: inst.name }, Date.now() - launchStartedAt)
 
     proc.on('exit', (code) => {
+      logStream.end()
       const crashed = _runningSessions.has(installationId) && code !== 0
+      const lastStderr = scrubStderr(lastNLines(stderrBuf, 100))
       _removeSession(installationId)
       if (!sender.isDestroyed()) {
-        sender.send('comfy-exited', { installationId, crashed, exitCode: code, installationName: inst.name })
+        sender.send('comfy-exited', { installationId, crashed, exitCode: code, installationName: inst.name, lastStderr })
       }
       if (_onComfyExited) _onComfyExited({ installationId })
     })
@@ -252,14 +276,21 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
     }
   }
 
+  const logStream = await openLogStream(inst.installPath)
+
   function spawnComfy(): { proc: ChildProcess; getStderr: () => string } {
     const p = spawnProcess(launchCmd.cmd!, launchCmd.args!, launchCmd.cwd!, launchEnv, { showWindow: launchCmd.showWindow })
     let stderrBuf = ''
-    p.stdout!.on('data', (chunk: Buffer) => sendOutput(chunk.toString('utf-8')))
+    p.stdout!.on('data', (chunk: Buffer) => {
+      const text = chunk.toString('utf-8')
+      writeLog(logStream, text)
+      sendOutput(text)
+    })
     p.stderr!.on('data', (chunk: Buffer) => {
       const text = chunk.toString('utf-8')
       stderrBuf += text
       if (stderrBuf.length > 8192) stderrBuf = stderrBuf.slice(-4096)
+      writeLog(logStream, text)
       sendOutput(text)
     })
     return { proc: p, getStderr: () => stderrBuf }
@@ -339,6 +370,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
 
   const launchResult = await tryLaunch()
   if (!launchResult.ok) {
+    logStream.end()
     _releasePort(launchCmd.port!)
     _operationAborts.delete(installationId)
     _broadcastToRenderer('instance-launch-failed', { installationId })
@@ -352,6 +384,11 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
   const mode = (inst.launchMode as string | undefined) || 'window'
   _addSession(installationId, { proc, port: launchCmd.port!, mode, installationName: inst.name }, Date.now() - launchStartedAt)
   writePortLock(launchCmd.port!, { pid: proc.pid!, installationName: inst.name })
+
+  if (!sender.isDestroyed()) {
+    const bootStderr = scrubStderr(lastNLines(launchResult.getStderr(), 50))
+    sender.send('comfy-boot-log', { installationId, bootStderr })
+  }
 
   // Capture snapshot in background after successful launch
   if (inst.sourceId === 'standalone') {
@@ -397,6 +434,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
           relaunchEarlyExit,
         ])
       } catch (err) {
+        logStream.end()
         await killProcessTree(proc)
         _removeSession(installationId)
         _broadcastToRenderer('instance-launch-failed', { installationId })
@@ -412,6 +450,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
   )
   let pendingModelFolderRelaunch = false
   let rebootModelCheckAbort: AbortController | null = null
+  let currentGetStderr = launchResult.getStderr
 
   function attachExitHandler(p: ChildProcess): void {
     p.on('exit', (code) => {
@@ -442,6 +481,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
         }
         const spawned = spawnComfy()
         proc = spawned.proc
+        currentGetStderr = spawned.getStderr
         const session = _runningSessions.get(installationId)
         if (session) session.proc = proc
         writePortLock(launchCmd.port!, { pid: proc.pid!, installationName: inst.name })
@@ -489,10 +529,12 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
         }
         return
       }
+      logStream.end()
       const crashed = _runningSessions.has(installationId)
+      const lastStderr = scrubStderr(lastNLines(currentGetStderr(), 100))
       _removeSession(installationId)
       if (!sender.isDestroyed()) {
-        sender.send('comfy-exited', { installationId, crashed, exitCode: code, installationName: inst.name })
+        sender.send('comfy-exited', { installationId, crashed, exitCode: code, installationName: inst.name, lastStderr })
       }
       if (_onComfyExited) _onComfyExited({ installationId })
     })

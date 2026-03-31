@@ -132,6 +132,11 @@ const api: ElectronApi = {
     ipcRenderer.on('comfy-exited', handler)
     return () => ipcRenderer.removeListener('comfy-exited', handler)
   },
+  onComfyBootLog: (callback) => {
+    const handler = (_event: IpcRendererEvent, data: unknown) => callback(data as Parameters<typeof callback>[0])
+    ipcRenderer.on('comfy-boot-log', handler)
+    return () => ipcRenderer.removeListener('comfy-boot-log', handler)
+  },
   onInstanceLaunching: (callback) => {
     const handler = (_event: IpcRendererEvent, data: unknown) => callback(data as Parameters<typeof callback>[0])
     ipcRenderer.on('instance-launching', handler)
