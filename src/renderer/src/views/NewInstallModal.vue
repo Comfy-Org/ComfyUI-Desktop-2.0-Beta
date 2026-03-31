@@ -898,7 +898,7 @@ defineExpose({ open })
                           :key="opt.value"
                           :value="i"
                         >
-                          {{ opt.description ? `${opt.label}  —  ${opt.description}` : opt.label }}{{ opt.recommended ? ` (${$t('newInstall.latest')})` : '' }}
+                          {{ opt.description ? `${opt.label}  —  ${opt.description}` : opt.label }}{{ opt.recommended ? ` (${$t('newInstall.recommended')})` : '' }}
                         </option>
                       </template>
                     </select>
