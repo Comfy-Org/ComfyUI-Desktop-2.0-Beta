@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import type { ComfyArgDef } from '../../../types/ipc'
 import ArgRow from './ArgRow.vue'
+import ArgRadioGroup from './ArgRadioGroup.vue'
 import { Settings } from 'lucide-vue-next'
 
 interface Props {
@@ -59,6 +60,13 @@ async function fetchSchema(): Promise<void> {
 }
 
 onMounted(fetchSchema)
+
+// Flush any unsaved text input when the component is about to unmount (e.g. tab switch)
+onBeforeUnmount(() => {
+  if (localValue.value !== props.modelValue) {
+    emit('update:modelValue', localValue.value)
+  }
+})
 
 watch(() => props.installationId, () => {
   fetched.value = false
@@ -262,6 +270,37 @@ const groupedArgs = computed(() => {
     groups.set(arg.category, list)
   }
   return groups
+})
+
+// --- Structured items per group (exclusive radio clusters + individual args) ---
+
+type GroupItem =
+  | { kind: 'arg'; arg: ComfyArgDef }
+  | { kind: 'exclusive'; group: string; args: ComfyArgDef[] }
+
+const structuredGroups = computed(() => {
+  const result = new Map<string, GroupItem[]>()
+  const seenExclusive = new Set<string>()
+  for (const [category, args] of groupedArgs.value) {
+    const items: GroupItem[] = []
+    for (const arg of args) {
+      if (arg.exclusiveGroup) {
+        if (seenExclusive.has(arg.exclusiveGroup)) continue
+        seenExclusive.add(arg.exclusiveGroup)
+        // Always use full schema for siblings so search filtering doesn't break the group
+        const siblings = schema.value.filter((a) => a.exclusiveGroup === arg.exclusiveGroup)
+        if (siblings.length > 1) {
+          items.push({ kind: 'exclusive', group: arg.exclusiveGroup, args: siblings })
+        } else {
+          items.push({ kind: 'arg', arg })
+        }
+      } else {
+        items.push({ kind: 'arg', arg })
+      }
+    }
+    result.set(category, items)
+  }
+  return result
 })
 
 // --- Getters ---
@@ -579,12 +618,12 @@ function toggleGroup(group: string): void {
         <div class="args-error-detail">{{ loadError }}</div>
       </div>
       <template v-else>
-        <!-- Active args pinned to top -->
-        <div v-if="activeArgs.length" class="args-group args-group-active">
+        <!-- Active args pinned to top — always rendered to avoid layout shift -->
+        <div class="args-group args-group-active">
           <div class="args-group-header args-active-header" @click="toggleGroup('__active__')">
             <span class="args-group-chevron" :class="{ collapsed: collapsedGroups.has('__active__') }">▸</span>
             Active
-            <span class="args-active-count">{{ activeArgs.length }}</span>
+            <span v-if="activeArgs.length" class="args-active-count">{{ activeArgs.length }}</span>
           </div>
           <div v-show="!collapsedGroups.has('__active__')" class="args-group-body">
             <ArgRow
@@ -600,22 +639,34 @@ function toggleGroup(group: string): void {
           </div>
         </div>
 
-        <div v-for="[group, args] in groupedArgs" :key="group" class="args-group">
+        <div v-for="[group, items] in structuredGroups" :key="group" class="args-group">
           <div class="args-group-header" @click="toggleGroup(group)">
             <span class="args-group-chevron" :class="{ collapsed: collapsedGroups.has(group) }">▸</span>
             {{ group }}
           </div>
           <div v-show="!collapsedGroups.has(group)" class="args-group-body">
-            <ArgRow
-              v-for="a in args" :key="a.name"
-              :arg="a"
-              :active="isActive(a.name)"
-              :value="getValue(a.name)"
-              @toggle-boolean="toggleBoolean"
-              @toggle-optional-value="toggleOptionalValue"
-              @set-value-arg="setValueArg"
-              @set-optional-value-text="setOptionalValueText"
-            />
+            <template v-for="item in items" :key="item.kind === 'arg' ? item.arg.name : item.group">
+              <ArgRadioGroup
+                v-if="item.kind === 'exclusive'"
+                :args="item.args"
+                :active-arg="item.args.find((a) => isActive(a.name))?.name ?? null"
+                :active-value="item.args.find((a) => isActive(a.name)) ? getValue(item.args.find((a) => isActive(a.name))!.name) : ''"
+                @toggle-boolean="toggleBoolean"
+                @toggle-optional-value="toggleOptionalValue"
+                @set-value-arg="setValueArg"
+                @set-optional-value-text="setOptionalValueText"
+              />
+              <ArgRow
+                v-else
+                :arg="item.arg"
+                :active="isActive(item.arg.name)"
+                :value="getValue(item.arg.name)"
+                @toggle-boolean="toggleBoolean"
+                @toggle-optional-value="toggleOptionalValue"
+                @set-value-arg="setValueArg"
+                @set-optional-value-text="setOptionalValueText"
+              />
+            </template>
           </div>
         </div>
       </template>
