@@ -19,7 +19,7 @@ import {
 } from '../shared'
 import type { ChildProcess, LaunchCmd } from '../shared'
 import type { ActionContext, ActionResult } from './types'
-import { scrubStderr, lastNLines } from '../../scrubStderr'
+import { scrubStderr, lastNLines, stripAnsi } from '../../scrubStderr'
 import { rotateLogFiles, getLogDir } from '../../logRotation'
 import type { WriteStream } from 'fs'
 
@@ -31,7 +31,7 @@ async function openLogStream(installPath: string): Promise<WriteStream> {
 }
 
 function writeLog(stream: WriteStream, text: string): void {
-  if (!stream.writableEnded) stream.write(text)
+  if (!stream.writableEnded) stream.write(stripAnsi(text))
 }
 
 export async function handleLaunch({ event, installationId, inst: instArg, actionData }: ActionContext): Promise<ActionResult> {

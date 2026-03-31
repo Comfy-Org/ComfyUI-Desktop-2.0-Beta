@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { scrubStderr, lastNLines } from './scrubStderr'
+import { scrubStderr, lastNLines, stripAnsi } from './scrubStderr'
 
 describe('scrubStderr', () => {
   it('redacts Windows user paths', () => {
@@ -60,6 +60,20 @@ describe('scrubStderr', () => {
     expect(result).toContain('C:\\Users\\[REDACTED]\\AppData\\foo')
     expect(result).not.toContain('JohnDoe')
     expect(result).not.toContain('sk-abc123')
+  })
+})
+
+describe('stripAnsi', () => {
+  it('removes color codes', () => {
+    expect(stripAnsi('\u001B[31mError\u001B[0m')).toBe('Error')
+  })
+
+  it('removes multiple escape sequences', () => {
+    expect(stripAnsi('\u001B[1m\u001B[32mOK\u001B[0m done')).toBe('OK done')
+  })
+
+  it('leaves plain text unchanged', () => {
+    expect(stripAnsi('no codes here')).toBe('no codes here')
   })
 })
 
