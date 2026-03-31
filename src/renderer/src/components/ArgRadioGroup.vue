@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { computed } from 'vue'
 import type { ComfyArgDef } from '../../../types/ipc'
 import InfoTooltip from './InfoTooltip.vue'
 
@@ -15,14 +14,6 @@ const emit = defineEmits<{
   setValueArg: [name: string, value: string, def: ComfyArgDef]
   setOptionalValueText: [name: string, value: string]
 }>()
-
-const selectedDef = computed(() =>
-  props.activeArg ? props.args.find((a) => a.name === props.activeArg) : undefined
-)
-
-const hasChoices = computed(() =>
-  selectedDef.value?.choices && selectedDef.value.choices.length > 1
-)
 
 function selectArg(arg: ComfyArgDef): void {
   if (arg.name === props.activeArg) {
@@ -63,14 +54,14 @@ function selectArg(arg: ComfyArgDef): void {
             </span>
             <InfoTooltip :text="arg.help" />
           </label>
-          <template v-if="hasChoices">
+          <template v-if="arg.choices && arg.choices.length > 1">
             <select
               class="detail-field-input args-inline-input"
               :value="props.activeValue"
               @change="emit('setOptionalValueText', arg.name, ($event.target as HTMLSelectElement).value)"
             >
               <option value="">(default)</option>
-              <option v-for="c in selectedDef!.choices" :key="c" :value="c">{{ c }}</option>
+              <option v-for="c in arg.choices" :key="c" :value="c">{{ c }}</option>
             </select>
           </template>
           <input
