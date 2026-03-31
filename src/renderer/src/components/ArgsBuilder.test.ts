@@ -6,8 +6,9 @@ import type { ComfyArgDef, ElectronApi } from '../../../types/ipc'
 const MOCK_ARGS: ComfyArgDef[] = [
   { name: 'port', flag: '--port', help: 'Set the listen port.', type: 'value', metavar: 'PORT', category: 'Network' },
   { name: 'listen', flag: '--listen', help: 'Specify the IP address to listen on.', type: 'optional-value', metavar: 'IP', category: 'Network' },
-  { name: 'lowvram', flag: '--lowvram', help: 'Split the unet in parts to use less vram.', type: 'boolean', category: 'GPU & VRAM' },
-  { name: 'cpu', flag: '--cpu', help: 'To use the CPU for everything (slow).', type: 'boolean', category: 'GPU & VRAM' },
+  { name: 'lowvram', flag: '--lowvram', help: 'Split the unet in parts to use less vram.', type: 'boolean', category: 'GPU & VRAM', exclusiveGroup: 'vram' },
+  { name: 'cpu', flag: '--cpu', help: 'To use the CPU for everything (slow).', type: 'boolean', category: 'GPU & VRAM', exclusiveGroup: 'vram' },
+  { name: 'highvram', flag: '--highvram', help: 'Keep models in GPU memory.', type: 'boolean', category: 'GPU & VRAM', exclusiveGroup: 'vram' },
   { name: 'verbose', flag: '--verbose', help: 'Set the logging level', type: 'optional-value', choices: ['DEBUG', 'INFO', 'WARNING'], category: 'Logging' },
 ]
 
@@ -143,6 +144,32 @@ describe('ArgsBuilder', () => {
     await wrapper.setProps({ installationId: 'inst-b' })
     await flushPromises()
     expect(window.api.getComfyArgs).toHaveBeenCalledWith('inst-b')
+    wrapper.unmount()
+  })
+
+  // --- Exclusive group radio rendering ---
+
+  it('renders exclusive group args as checkboxes in a grouped container', async () => {
+    const wrapper = await ready('')
+    // Open the helper panel
+    await wrapper.find('.args-configure-btn').trigger('click')
+    await flushPromises()
+    // Should find the radio group container with checkboxes for the 3 exclusive VRAM args
+    const group = wrapper.find('.arg-radio-group')
+    expect(group.exists()).toBe(true)
+    const checkboxes = group.findAll('input[type="checkbox"]')
+    expect(checkboxes.length).toBe(3)
+    wrapper.unmount()
+  })
+
+  it('always renders the active section to avoid layout shift', async () => {
+    const wrapper = await ready('')
+    await wrapper.find('.args-configure-btn').trigger('click')
+    await flushPromises()
+    // Active section header is always present, even with no active args
+    const activeGroup = wrapper.find('.args-group-active')
+    expect(activeGroup.exists()).toBe(true)
+    expect(activeGroup.find('.args-active-header').exists()).toBe(true)
     wrapper.unmount()
   })
 })
