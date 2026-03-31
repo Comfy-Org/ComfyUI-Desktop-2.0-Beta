@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import type { ComfyArgDef } from '../../../types/ipc'
 import ArgRow from './ArgRow.vue'
 import ArgRadioGroup from './ArgRadioGroup.vue'
@@ -60,6 +60,13 @@ async function fetchSchema(): Promise<void> {
 }
 
 onMounted(fetchSchema)
+
+// Flush any unsaved text input when the component is about to unmount (e.g. tab switch)
+onBeforeUnmount(() => {
+  if (localValue.value !== props.modelValue) {
+    emit('update:modelValue', localValue.value)
+  }
+})
 
 watch(() => props.installationId, () => {
   fetched.value = false
