@@ -72,6 +72,8 @@ async function toggleCollapse(): Promise<void> {
 }
 
 async function handleFieldChange(field: DetailField, value: string | boolean | Record<string, string>): Promise<void> {
+  // Update local field value immediately so tab switches reflect the change
+  field.value = value
   await window.api.updateInstallation(props.installationId, { [field.id]: value })
   if (field.refreshSection && props.title) {
     emit('refresh', props.title)
