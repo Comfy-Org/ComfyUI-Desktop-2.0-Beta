@@ -18,60 +18,48 @@ function mountGroup(activeArg: string | null = null, activeValue = '') {
 }
 
 describe('ArgRadioGroup', () => {
-  it('renders all args as radio options', () => {
+  it('renders all args as checkbox options', () => {
     const wrapper = mountGroup()
-    const radios = wrapper.findAll('input[type="radio"]')
-    expect(radios.length).toBe(5)
+    const checkboxes = wrapper.findAll('input[type="checkbox"]')
+    expect(checkboxes.length).toBe(5)
   })
 
-  it('shows "one of" badge', () => {
-    const wrapper = mountGroup()
-    expect(wrapper.find('.arg-radio-group-badge').text()).toBe('one of')
-  })
-
-  it('checks the active radio', () => {
+  it('checks only the active checkbox', () => {
     const wrapper = mountGroup('lowvram')
-    const radios = wrapper.findAll('input[type="radio"]')
-    const checked = radios.filter((r) => (r.element as HTMLInputElement).checked)
+    const checkboxes = wrapper.findAll('input[type="checkbox"]')
+    const checked = checkboxes.filter((r) => (r.element as HTMLInputElement).checked)
     expect(checked.length).toBe(1)
-    const label = checked[0]!.element.closest('.arg-radio-option')
-    expect(label?.textContent).toContain('--lowvram')
+    const row = checked[0]!.element.closest('.args-row')
+    expect(row?.textContent).toContain('--lowvram')
   })
 
-  it('has no radio checked when activeArg is null', () => {
+  it('has no checkbox checked when activeArg is null', () => {
     const wrapper = mountGroup(null)
-    const radios = wrapper.findAll('input[type="radio"]')
-    const checked = radios.filter((r) => (r.element as HTMLInputElement).checked)
+    const checkboxes = wrapper.findAll('input[type="checkbox"]')
+    const checked = checkboxes.filter((r) => (r.element as HTMLInputElement).checked)
     expect(checked.length).toBe(0)
   })
 
   it('emits toggleBoolean when clicking an unselected boolean arg', async () => {
     const wrapper = mountGroup(null)
-    const radios = wrapper.findAll('input[type="radio"]')
-    await radios[2]!.trigger('click')
+    const checkboxes = wrapper.findAll('input[type="checkbox"]')
+    await checkboxes[2]!.trigger('change')
     expect(wrapper.emitted('toggleBoolean')).toBeTruthy()
     expect(wrapper.emitted('toggleBoolean')![0]).toEqual(['lowvram', VRAM_ARGS[2]])
   })
 
   it('emits toggleBoolean to deselect when clicking the active arg', async () => {
     const wrapper = mountGroup('highvram')
-    const radios = wrapper.findAll('input[type="radio"]')
+    const checkboxes = wrapper.findAll('input[type="checkbox"]')
     // Click the already-active one (highvram is index 1)
-    await radios[1]!.trigger('click')
+    await checkboxes[1]!.trigger('change')
     expect(wrapper.emitted('toggleBoolean')).toBeTruthy()
     expect(wrapper.emitted('toggleBoolean')![0]).toEqual(['highvram', VRAM_ARGS[1]])
   })
 
-  it('marks the active option with the .active class', () => {
-    const wrapper = mountGroup('gpu-only')
-    const options = wrapper.findAll('.arg-radio-option')
-    expect(options[0]!.classes()).toContain('active')
-    expect(options[1]!.classes()).not.toContain('active')
-  })
-
   it('does not show value input for boolean-only exclusive groups', () => {
     const wrapper = mountGroup('lowvram')
-    expect(wrapper.find('.arg-radio-value-row').exists()).toBe(false)
+    expect(wrapper.find('.args-inline-input').exists()).toBe(false)
   })
 
   it('shows value input for an active optional-value arg', () => {
@@ -82,8 +70,7 @@ describe('ArgRadioGroup', () => {
     const wrapper = mount(ArgRadioGroup, {
       props: { args: mixedArgs, activeArg: 'preview-b', activeValue: 'fast' },
     })
-    expect(wrapper.find('.arg-radio-value-row').exists()).toBe(true)
-    const input = wrapper.find('.arg-radio-value-row input')
+    const input = wrapper.find('.args-inline-input')
     expect(input.exists()).toBe(true)
     expect((input.element as HTMLInputElement).value).toBe('fast')
   })
@@ -96,7 +83,7 @@ describe('ArgRadioGroup', () => {
     const wrapper = mount(ArgRadioGroup, {
       props: { args: choiceArgs, activeArg: 'mode-b', activeValue: 'y' },
     })
-    const select = wrapper.find('.arg-radio-value-row select')
+    const select = wrapper.find('select.args-inline-input')
     expect(select.exists()).toBe(true)
   })
 })

@@ -40,48 +40,49 @@ function selectArg(arg: ComfyArgDef): void {
 
 <template>
   <div class="arg-radio-group">
-    <div class="arg-radio-group-label">
-      <span class="arg-radio-group-badge">one of</span>
-    </div>
-    <div class="arg-radio-group-options">
-      <label
-        v-for="arg in props.args" :key="arg.name"
-        class="arg-radio-option"
-        :class="{ active: arg.name === props.activeArg }"
-      >
-        <input
-          type="radio"
-          :name="`exclusive-${arg.exclusiveGroup}`"
-          :checked="arg.name === props.activeArg"
-          @click="selectArg(arg)"
-        >
-        <span class="args-name">{{ arg.flag }}</span>
-        <span v-if="arg.metavar" class="args-value-tag" :class="arg.type === 'optional-value' ? 'optional' : 'required'">
-          {{ arg.type === 'optional-value' ? `[${arg.metavar}]` : arg.metavar }}
-        </span>
-        <InfoTooltip :text="arg.help" />
-      </label>
-    </div>
-    <!-- Inline input for selected arg that takes a value -->
-    <div v-if="selectedDef && selectedDef.type !== 'boolean'" class="arg-radio-value-row">
-      <template v-if="hasChoices">
-        <select
-          class="detail-field-input arg-radio-input"
-          :value="props.activeValue"
-          @change="emit('setOptionalValueText', selectedDef!.name, ($event.target as HTMLSelectElement).value)"
-        >
-          <option value="">(default)</option>
-          <option v-for="c in selectedDef!.choices" :key="c" :value="c">{{ c }}</option>
-        </select>
+    <div v-for="arg in props.args" :key="arg.name" class="args-row">
+      <!-- Bare label when no inline input needed (matches ArgRow) -->
+      <template v-if="arg.type === 'boolean' || arg.name !== props.activeArg">
+        <label class="args-check-row">
+          <input type="checkbox" :checked="arg.name === props.activeArg" @change="selectArg(arg)">
+          <span class="args-name">{{ arg.flag }}</span>
+          <span v-if="arg.metavar" class="args-value-tag" :class="arg.type === 'optional-value' ? 'optional' : 'required'">
+            {{ arg.type === 'optional-value' ? `[${arg.metavar}]` : arg.metavar }}
+          </span>
+          <InfoTooltip :text="arg.help" />
+        </label>
       </template>
-      <input
-        v-else
-        type="text"
-        class="detail-field-input arg-radio-input"
-        :value="props.activeValue"
-        :placeholder="selectedDef!.metavar || selectedDef!.choices?.[0] || ''"
-        @change="emit('setOptionalValueText', selectedDef!.name, ($event.target as HTMLInputElement).value)"
-      >
+      <!-- Active non-boolean: flex row with inline input (matches ArgRow) -->
+      <template v-else>
+        <div class="args-inline-row">
+          <label class="args-check-row">
+            <input type="checkbox" :checked="true" @change="selectArg(arg)">
+            <span class="args-name">{{ arg.flag }}</span>
+            <span v-if="arg.metavar" class="args-value-tag" :class="arg.type === 'optional-value' ? 'optional' : 'required'">
+              {{ arg.type === 'optional-value' ? `[${arg.metavar}]` : arg.metavar }}
+            </span>
+            <InfoTooltip :text="arg.help" />
+          </label>
+          <template v-if="hasChoices">
+            <select
+              class="detail-field-input args-inline-input"
+              :value="props.activeValue"
+              @change="emit('setOptionalValueText', arg.name, ($event.target as HTMLSelectElement).value)"
+            >
+              <option value="">(default)</option>
+              <option v-for="c in selectedDef!.choices" :key="c" :value="c">{{ c }}</option>
+            </select>
+          </template>
+          <input
+            v-else
+            type="text"
+            class="detail-field-input args-inline-input"
+            :value="props.activeValue"
+            :placeholder="arg.metavar || arg.choices?.[0] || ''"
+            @change="emit('setOptionalValueText', arg.name, ($event.target as HTMLInputElement).value)"
+          >
+        </div>
+      </template>
     </div>
   </div>
 </template>
@@ -90,46 +91,31 @@ function selectArg(arg: ComfyArgDef): void {
 .arg-radio-group {
   border: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
   border-radius: 6px;
-  padding: 6px 8px;
+  padding: 4px 8px;
   margin: 2px 0;
-  background: color-mix(in srgb, var(--surface) 30%, transparent);
 }
 
-.arg-radio-group-label {
-  margin-bottom: 4px;
+.args-row {
+  padding: 3px 0;
+}
+.args-row + .args-row {
+  border-top: 1px solid var(--border);
 }
 
-.arg-radio-group-badge {
-  font-size: 9px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: var(--text-muted);
-  background: color-mix(in srgb, var(--border) 40%, transparent);
-  padding: 1px 5px;
-  border-radius: 3px;
-}
-
-.arg-radio-group-options {
+.args-inline-row {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  align-items: center;
+  gap: 6px;
 }
 
-.arg-radio-option {
+.args-check-row {
   display: flex;
   align-items: center;
   gap: 5px;
   cursor: pointer;
-  padding: 2px 0;
-  border-radius: 4px;
+  flex-shrink: 0;
 }
-
-.arg-radio-option.active {
-  color: var(--accent);
-}
-
-.arg-radio-option input[type="radio"] {
+.args-check-row input[type="checkbox"] {
   margin: 0;
   flex-shrink: 0;
 }
@@ -139,6 +125,12 @@ function selectArg(arg: ComfyArgDef): void {
   color: var(--text);
   white-space: nowrap;
   font-family: monospace;
+}
+
+.args-inline-input {
+  flex: 1;
+  min-width: 0;
+  max-width: 200px;
 }
 
 .args-value-tag {
@@ -156,14 +148,5 @@ function selectArg(arg: ComfyArgDef): void {
 .args-value-tag.optional {
   color: var(--text-muted);
   background: color-mix(in srgb, var(--text-muted) 15%, transparent);
-}
-
-.arg-radio-value-row {
-  margin-top: 4px;
-  padding-left: 20px;
-}
-
-.arg-radio-input {
-  max-width: 200px;
 }
 </style>

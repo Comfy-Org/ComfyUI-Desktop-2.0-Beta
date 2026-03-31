@@ -149,30 +149,27 @@ describe('ArgsBuilder', () => {
 
   // --- Exclusive group radio rendering ---
 
-  it('renders exclusive group args as radio buttons in the helper panel', async () => {
+  it('renders exclusive group args as checkboxes in a grouped container', async () => {
     const wrapper = await ready('')
     // Open the helper panel
     await wrapper.find('.args-configure-btn').trigger('click')
     await flushPromises()
-    // Should find radio group with "one of" badge
-    const badge = wrapper.find('.arg-radio-group-badge')
-    expect(badge.exists()).toBe(true)
-    expect(badge.text()).toBe('one of')
-    // Should have radio inputs for the 3 exclusive VRAM args
-    const radios = wrapper.findAll('.arg-radio-group input[type="radio"]')
-    expect(radios.length).toBe(3)
+    // Should find the radio group container with checkboxes for the 3 exclusive VRAM args
+    const group = wrapper.find('.arg-radio-group')
+    expect(group.exists()).toBe(true)
+    const checkboxes = group.findAll('input[type="checkbox"]')
+    expect(checkboxes.length).toBe(3)
     wrapper.unmount()
   })
 
-  it('shows exclusive group in active section when one is active', async () => {
-    const wrapper = await ready('--lowvram')
+  it('always renders the active section to avoid layout shift', async () => {
+    const wrapper = await ready('')
     await wrapper.find('.args-configure-btn').trigger('click')
     await flushPromises()
-    // Active section should exist and contain a radio group
+    // Active section header is always present, even with no active args
     const activeGroup = wrapper.find('.args-group-active')
     expect(activeGroup.exists()).toBe(true)
-    const activeRadios = activeGroup.findAll('.arg-radio-group input[type="radio"]')
-    expect(activeRadios.length).toBe(3)
+    expect(activeGroup.find('.args-active-header').exists()).toBe(true)
     wrapper.unmount()
   })
 })
