@@ -361,7 +361,7 @@ defineExpose({ open })
                     :key="opt.value"
                     :value="i"
                   >
-                    {{ opt.label }}{{ opt.recommended ? ` (${$t('newInstall.latest')})` : '' }}
+                    {{ opt.label }}{{ opt.recommended ? ` (${$t('newInstall.recommended')})` : '' }}
                   </option>
                 </select>
                 <span v-else-if="releaseLoading" class="ls-value ls-value-loading with-spinner">{{ $t('newInstall.loading') }}</span>
