@@ -642,7 +642,7 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
   })
   comfyWindow.webContents.on('page-title-updated', (e, title) => {
     e.preventDefault()
-    comfyWindow.setTitle(`${title} — ${installation.name} — Desktop 2.0 v${APP_VERSION}`)
+    comfyWindow.setTitle(`${installation.name} — ${title} — Desktop 2.0 v${APP_VERSION}`)
   })
   comfyWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (shouldOpenInPopup(url)) {
