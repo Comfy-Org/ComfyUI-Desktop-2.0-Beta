@@ -37,6 +37,7 @@
     "format:check": "prettier --check \"src/**/*.{ts,vue}\" \"*.{json,ts,yml}\"",
     "test": "vitest run",
     "test:e2e": "playwright test",
+    "generate:view-flow": "node scripts/generate-view-flow.mjs",
     "test:e2e:macos": "playwright test --project=macos",
     "test:e2e:windows": "playwright test --project=windows",
     "test:e2e:linux": "playwright test --project=linux",
