@@ -6,6 +6,7 @@ import { ChevronDown } from 'lucide-vue-next'
 import { emitTelemetryAction, toCountBucket } from '../lib/telemetry'
 import SnapshotDiffView from './SnapshotDiffView.vue'
 import RestoreModal from './RestoreModal.vue'
+import ImportPreviewModal from './ImportPreviewModal.vue'
 import InfoTooltip from './InfoTooltip.vue'
 import type {
   ActionDef,
@@ -15,6 +16,7 @@ import type {
   SnapshotDetailData,
   SnapshotDiffData,
   SnapshotDiffResult,
+  SnapshotFilePreview,
 } from '../types/ipc'
 
 interface Props {
@@ -47,6 +49,9 @@ const nodesExpanded = ref(true)
 const restorePreviewFilename = ref<string | null>(null)
 const restorePreviewDiff = ref<SnapshotDiffData | null>(null)
 const restorePreviewLoading = ref(false)
+const importPreview = ref<SnapshotFilePreview | null>(null)
+const importPreviewFilePath = ref<string | null>(null)
+const importPreviewLoading = ref(false)
 
 const snapshots = computed(() => listData.value?.snapshots ?? [])
 const copyEvents = computed(() => listData.value?.copyEvents ?? [])
@@ -318,7 +323,31 @@ async function handleExportAll(): Promise<void> {
 }
 
 async function handleImport(): Promise<void> {
-  const result = await window.api.importSnapshots(props.installationId)
+  importPreview.value = null
+  importPreviewFilePath.value = null
+  const result = await window.api.importSnapshotsPreview()
+  if (!result.ok) {
+    if (result.message) {
+      await modal.alert({ title: t('snapshots.importSnapshots'), message: result.message })
+    }
+    return
+  }
+  importPreview.value = result.preview ?? null
+  importPreviewFilePath.value = result.filePath ?? null
+}
+
+function cancelImportPreview(): void {
+  importPreview.value = null
+  importPreviewFilePath.value = null
+  importPreviewLoading.value = false
+}
+
+async function confirmImportPreview(): Promise<void> {
+  const filePath = importPreviewFilePath.value
+  if (!filePath) return
+  importPreviewLoading.value = true
+  const result = await window.api.importSnapshotsConfirm(props.installationId, filePath)
+  cancelImportPreview()
   if (!result.ok) {
     if (result.message) {
       await modal.alert({ title: t('snapshots.importSnapshots'), message: result.message })
@@ -610,6 +639,15 @@ function diffHasChanges(diff: SnapshotDiffResult): boolean {
       :loading="restorePreviewLoading"
       @cancel="cancelRestore"
       @confirm="confirmRestore"
+    />
+
+    <!-- Import preview modal -->
+    <ImportPreviewModal
+      v-if="importPreview || importPreviewLoading"
+      :preview="importPreview"
+      :loading="importPreviewLoading"
+      @cancel="cancelImportPreview"
+      @confirm="confirmImportPreview"
     />
   </div>
 </template>

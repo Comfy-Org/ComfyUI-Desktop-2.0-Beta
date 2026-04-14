@@ -656,6 +656,10 @@
     "exportSnapshot": "Export",
     "exportAllSnapshots": "Export All",
     "importSnapshots": "Import",
+    "importPreviewTitle": "Import Preview — snapshots to be imported:",
+    "importSourceName": "Source installation",
+    "importSnapshotCount": "Snapshots",
+    "importConfirm": "Confirm Import",
     "importSuccess": "Imported {imported} snapshot(s), skipped {skipped} duplicate(s).",
     "importInvalidFile": "Invalid snapshot file.",
     "exportSuccess": "Snapshot exported."
