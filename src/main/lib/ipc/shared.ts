@@ -545,8 +545,11 @@ export async function migrateDefaults(): Promise<void> {
   }
 }
 
+const VALID_THEMES: readonly string[] = ['system', 'dark', 'light'] satisfies readonly Theme[]
+
 export function resolveTheme(): ResolvedTheme {
-  const theme = (settings.get('theme') as Theme | undefined) || 'system'
+  const raw = settings.get('theme') as string | undefined
+  const theme: Theme = raw && VALID_THEMES.includes(raw) ? (raw as Theme) : 'system'
   return theme === 'system' ? (nativeTheme.shouldUseDarkColors ? 'dark' : 'light') : theme
 }
 

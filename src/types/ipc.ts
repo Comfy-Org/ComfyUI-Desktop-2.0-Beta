@@ -5,7 +5,7 @@
 export type Unsubscribe = () => void
 
 // Theme identifiers
-export type Theme = 'system' | 'dark' | 'light' | 'solarized' | 'nord' | 'arc' | 'github'
+export type Theme = 'system' | 'dark' | 'light'
 export type ResolvedTheme = Exclude<Theme, 'system'>
 
 // --- Installation types ---
