@@ -7,6 +7,7 @@ import { execFileSync } from 'child_process'
 import { EventEmitter } from 'events'
 import type { ChildProcess } from 'child_process'
 import type { Readable } from 'stream'
+import type * as ChildProcessModule from 'child_process'
 
 // ---------------------------------------------------------------------------
 // Sentinel commands returned by the mocked envPaths — used to identify
@@ -100,7 +101,7 @@ vi.mock('../../lib/i18n', () => ({
 // commands; delegate everything else (git, etc.) to the real implementation.
 // ---------------------------------------------------------------------------
 vi.mock('child_process', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('child_process')>()
+  const actual = await importOriginal<typeof ChildProcessModule>()
   return {
     ...actual,
     spawn: vi.fn((command: string, args?: readonly string[], options?: object) => {
@@ -157,7 +158,8 @@ function fakeProc(opts: {
   exitCode?: number
   exitSignal?: string | null
 }): ChildProcess {
-  const proc = new EventEmitter() as ChildProcess
+  // Use a plain object cast to ChildProcess to avoid TS2540 on readonly props
+  const proc = new EventEmitter() as ChildProcess & { pid: number; killed: boolean }
   const exitCode = opts.exitCode ?? 0
   proc.stdout = makeReadable(opts.stdout ?? [])
   proc.stderr = makeReadable(opts.stderr ?? [])
@@ -283,12 +285,16 @@ describe.skipIf(!HAS_GIT)('runComfyUIUpdate integration', () => {
     spawnState.uvHandler = undefined
     spawnState.uvCalls = []
 
+    // Create a file at the SENTINEL_UV path so fs.existsSync(getUvPath(...)) passes
+    fs.writeFileSync(SENTINEL_UV, '')
+
     // Clear version-resolve cache between tests
     clearVersionCache()
   })
 
   afterEach(() => {
     fs.rmSync(tmpDir, { recursive: true, force: true })
+    try { fs.unlinkSync(SENTINEL_UV) } catch {}
   })
 
   // -----------------------------------------------------------------------
@@ -298,11 +304,6 @@ describe.skipIf(!HAS_GIT)('runComfyUIUpdate integration', () => {
     it('returns ok=true with resolved version after successful update', async () => {
       spawnState.pythonHandler = makeSuccessfulUpdateHandler(comfyuiDir, repoShas.v2Sha)
       spawnState.uvHandler = () => fakeProc({ exitCode: 0 })
-
-      // Ensure uv "binary" exists so the orchestrator enters the install branch
-      const uvPath = path.join(installPath, 'standalone-env')
-      fs.mkdirSync(uvPath, { recursive: true })
-      fs.writeFileSync(path.join(uvPath, process.platform === 'win32' ? 'uv.exe' : 'uv'), '')
 
       const opts = makeBaseOpts(installPath, { channel: 'stable', saveRollback: true })
       const result = await runComfyUIUpdate(opts)
@@ -317,10 +318,6 @@ describe.skipIf(!HAS_GIT)('runComfyUIUpdate integration', () => {
     it('calls update() with version data, channel, and rollback info', async () => {
       spawnState.pythonHandler = makeSuccessfulUpdateHandler(comfyuiDir, repoShas.v2Sha)
       spawnState.uvHandler = () => fakeProc({ exitCode: 0 })
-
-      const uvPath = path.join(installPath, 'standalone-env')
-      fs.mkdirSync(uvPath, { recursive: true })
-      fs.writeFileSync(path.join(uvPath, process.platform === 'win32' ? 'uv.exe' : 'uv'), '')
 
       const opts = makeBaseOpts(installPath, { channel: 'stable', saveRollback: true })
       await runComfyUIUpdate(opts)
@@ -345,10 +342,6 @@ describe.skipIf(!HAS_GIT)('runComfyUIUpdate integration', () => {
     it('invokes uv pip install when requirements change', async () => {
       spawnState.pythonHandler = makeSuccessfulUpdateHandler(comfyuiDir, repoShas.v2Sha)
       spawnState.uvHandler = () => fakeProc({ exitCode: 0 })
-
-      const uvPath = path.join(installPath, 'standalone-env')
-      fs.mkdirSync(uvPath, { recursive: true })
-      fs.writeFileSync(path.join(uvPath, process.platform === 'win32' ? 'uv.exe' : 'uv'), '')
 
       const opts = makeBaseOpts(installPath)
       await runComfyUIUpdate(opts)
@@ -379,10 +372,6 @@ describe.skipIf(!HAS_GIT)('runComfyUIUpdate integration', () => {
         }
         return fakeProc({ exitCode: 0 })
       }
-
-      const uvPath = path.join(installPath, 'standalone-env')
-      fs.mkdirSync(uvPath, { recursive: true })
-      fs.writeFileSync(path.join(uvPath, process.platform === 'win32' ? 'uv.exe' : 'uv'), '')
 
       const opts = makeBaseOpts(installPath)
       await runComfyUIUpdate(opts)
@@ -415,10 +404,6 @@ describe.skipIf(!HAS_GIT)('runComfyUIUpdate integration', () => {
         }
         return fakeProc({ exitCode: 0 })
       }
-
-      const uvPath = path.join(installPath, 'standalone-env')
-      fs.mkdirSync(uvPath, { recursive: true })
-      fs.writeFileSync(path.join(uvPath, process.platform === 'win32' ? 'uv.exe' : 'uv'), '')
 
       const opts = makeBaseOpts(installPath, { dryRunConflictCheck: true })
       const result = await runComfyUIUpdate(opts)
@@ -536,7 +521,7 @@ describe.skipIf(!HAS_GIT)('runComfyUIUpdate integration', () => {
       const controller = new AbortController()
 
       spawnState.pythonHandler = (_args: string[]) => {
-        const proc = new EventEmitter() as ChildProcess
+        const proc = new EventEmitter() as ChildProcess & { pid: number; killed: boolean }
         proc.stdout = new EventEmitter() as Readable
         proc.stderr = new EventEmitter() as Readable
         proc.stdout.destroy = vi.fn() as Readable['destroy']
@@ -581,10 +566,6 @@ describe.skipIf(!HAS_GIT)('runComfyUIUpdate integration', () => {
       spawnState.pythonHandler = makeSuccessfulUpdateHandler(comfyuiDir, repoShas.v2Sha)
       spawnState.uvHandler = () => fakeProc({ exitCode: 0 })
 
-      const uvPath = path.join(installPath, 'standalone-env')
-      fs.mkdirSync(uvPath, { recursive: true })
-      fs.writeFileSync(path.join(uvPath, process.platform === 'win32' ? 'uv.exe' : 'uv'), '')
-
       const opts = makeBaseOpts(installPath, { preUpdateSnapshot: true })
       const result = await runComfyUIUpdate(opts)
 
@@ -625,10 +606,6 @@ describe.skipIf(!HAS_GIT)('runComfyUIUpdate integration', () => {
       }
       spawnState.uvHandler = () => fakeProc({ exitCode: 0 })
 
-      const uvPath = path.join(installPath, 'standalone-env')
-      fs.mkdirSync(uvPath, { recursive: true })
-      fs.writeFileSync(path.join(uvPath, process.platform === 'win32' ? 'uv.exe' : 'uv'), '')
-
       const opts = makeBaseOpts(installPath, { saveRollback: true })
       const result = await runComfyUIUpdate(opts)
 
@@ -666,10 +643,6 @@ describe.skipIf(!HAS_GIT)('runComfyUIUpdate integration', () => {
       }
       spawnState.uvHandler = () => fakeProc({ exitCode: 0 })
 
-      const uvPath = path.join(installPath, 'standalone-env')
-      fs.mkdirSync(uvPath, { recursive: true })
-      fs.writeFileSync(path.join(uvPath, process.platform === 'win32' ? 'uv.exe' : 'uv'), '')
-
       const opts = makeBaseOpts(installPath, { channel: 'latest' })
       await runComfyUIUpdate(opts)
 
@@ -691,10 +664,6 @@ describe.skipIf(!HAS_GIT)('runComfyUIUpdate integration', () => {
         })
       }
       spawnState.uvHandler = () => fakeProc({ exitCode: 0 })
-
-      const uvPath = path.join(installPath, 'standalone-env')
-      fs.mkdirSync(uvPath, { recursive: true })
-      fs.writeFileSync(path.join(uvPath, process.platform === 'win32' ? 'uv.exe' : 'uv'), '')
 
       const opts = makeBaseOpts(installPath, { channel: 'stable' })
       await runComfyUIUpdate(opts)
