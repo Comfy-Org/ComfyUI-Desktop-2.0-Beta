@@ -358,20 +358,39 @@ describe.skipIf(!HAS_GIT)('runComfyUIUpdate integration', () => {
       expect(rollback.backupBranch).toBe('backup-pre-update')
     })
 
-    it('invokes uv pip install when requirements change', async () => {
+    it('invokes uv pip install with correct args when requirements change', async () => {
       spawnState.pythonHandler = makeSuccessfulUpdateHandler(comfyuiDir, repoShas.v2Sha)
       spawnState.uvHandler = () => fakeProc({ exitCode: 0 })
 
       const opts = makeBaseOpts(installPath)
       await runComfyUIUpdate(opts)
 
-      // uv should have been called for both requirements.txt and manager_requirements.txt
-      expect(spawnState.uvCalls.length).toBeGreaterThanOrEqual(1)
-      // At least one call should include 'pip' and 'install'
       const pipInstalls = spawnState.uvCalls.filter(
         (args) => args.includes('pip') && args.includes('install'),
       )
-      expect(pipInstalls.length).toBeGreaterThanOrEqual(1)
+      // Should install both requirements.txt and manager_requirements.txt
+      expect(pipInstalls.length).toBe(2)
+
+      // All pip install calls must include --python and --index-url
+      for (const args of pipInstalls) {
+        expect(args).toContain('pip')
+        expect(args).toContain('install')
+        expect(args).toContain('-r')
+        expect(args).toContain('--python')
+        expect(args).toContain(SENTINEL_ACTIVE_PY)
+        expect(args).toContain('--index-url')
+        expect(args).toContain('https://pypi.org/simple/')
+      }
+
+      // First call should reference the main requirements temp file
+      const mainReqCall = pipInstalls[0]!
+      const mainReqIdx = mainReqCall.indexOf('-r')
+      expect(mainReqCall[mainReqIdx + 1]).toContain('.post-install-reqs.txt')
+
+      // Second call should reference the manager requirements temp file
+      const mgrReqCall = pipInstalls[1]!
+      const mgrReqIdx = mgrReqCall.indexOf('-r')
+      expect(mgrReqCall[mgrReqIdx + 1]).toContain('.post-install-mgr-reqs.txt')
     })
 
     it('filters PyTorch packages from requirements before installing', async () => {
@@ -412,9 +431,7 @@ describe.skipIf(!HAS_GIT)('runComfyUIUpdate integration', () => {
     it('runs dry-run then proceeds with install even when dry-run fails', async () => {
       spawnState.pythonHandler = makeSuccessfulUpdateHandler(comfyuiDir, repoShas.v2Sha)
 
-      let uvCallCount = 0
       spawnState.uvHandler = (args: string[]) => {
-        uvCallCount++
         if (args.includes('--dry-run')) {
           return fakeProc({
             exitCode: 1,
@@ -428,8 +445,26 @@ describe.skipIf(!HAS_GIT)('runComfyUIUpdate integration', () => {
       const result = await runComfyUIUpdate(opts)
 
       expect(result.ok).toBe(true)
-      // Should have at least 2 uv calls: dry-run + install for requirements.txt
-      expect(uvCallCount).toBeGreaterThanOrEqual(2)
+
+      // Verify captured uv calls: dry-run + install for requirements, then manager_requirements
+      const dryRunCalls = spawnState.uvCalls.filter((a) => a.includes('--dry-run'))
+      const installCalls = spawnState.uvCalls.filter(
+        (a) => a.includes('pip') && a.includes('install') && !a.includes('--dry-run'),
+      )
+
+      // Dry-run should only apply to requirements.txt (not manager_requirements)
+      expect(dryRunCalls.length).toBe(1)
+      expect(dryRunCalls[0]).toContain('--python')
+      expect(dryRunCalls[0]).toContain(SENTINEL_ACTIVE_PY)
+      expect(dryRunCalls[0]).toContain('-r')
+
+      // Install calls: one for requirements.txt, one for manager_requirements.txt
+      expect(installCalls.length).toBe(2)
+      for (const args of installCalls) {
+        expect(args).toContain('--python')
+        expect(args).toContain(SENTINEL_ACTIVE_PY)
+        expect(args).toContain('--index-url')
+      }
 
       // Conflict warning should appear in output
       const outputFn = opts.sendOutput as ReturnType<typeof vi.fn>
