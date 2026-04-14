@@ -123,6 +123,7 @@ vi.mock('child_process', async (importOriginal) => {
 import { runComfyUIUpdate } from './updateOrchestrator'
 import type { UpdateOrchestrationOptions } from './updateOrchestrator'
 import { clearVersionCache } from '../../lib/version-resolve'
+import { formatComfyVersion } from '../../lib/version'
 import type { InstallationRecord } from '../../installations'
 
 // ---------------------------------------------------------------------------
@@ -179,8 +180,15 @@ function fakeProc(opts: {
   return proc
 }
 
+interface TestRepoShas {
+  v1Sha: string
+  v2Sha: string
+  /** Commits beyond the latest tag (for latest-channel tests). */
+  aheadShas: string[]
+}
+
 /** Create a minimal git repo with tagged commits and a requirements file. */
-function createTestRepo(installPath: string): { v1Sha: string; v2Sha: string } {
+function createTestRepo(installPath: string, commitsAheadOfTag: number = 0): TestRepoShas {
   const comfyuiDir = path.join(installPath, 'ComfyUI')
   fs.mkdirSync(comfyuiDir, { recursive: true })
 
@@ -204,10 +212,19 @@ function createTestRepo(installPath: string): { v1Sha: string; v2Sha: string } {
   execFileSync('git', ['tag', 'v0.2.0'], gitOpts)
   const v2Sha = execFileSync('git', ['rev-parse', 'HEAD'], gitOpts).toString().trim()
 
+  // Optional commits beyond v0.2.0 (untagged, simulating "latest" channel)
+  const aheadShas: string[] = []
+  for (let i = 1; i <= commitsAheadOfTag; i++) {
+    fs.writeFileSync(path.join(comfyuiDir, `feature-${i}.txt`), `feature ${i}\n`)
+    execFileSync('git', ['add', '.'], gitOpts)
+    execFileSync('git', ['commit', '-m', `feature ${i}`], gitOpts)
+    aheadShas.push(execFileSync('git', ['rev-parse', 'HEAD'], gitOpts).toString().trim())
+  }
+
   // Point HEAD back to v0.1.0 (pre-update state)
   execFileSync('git', ['checkout', 'v0.1.0', '--detach'], gitOpts)
 
-  return { v1Sha, v2Sha }
+  return { v1Sha, v2Sha, aheadShas }
 }
 
 /** Build a fake Python update script handler that "moves" the repo to v0.2.0. */
@@ -669,6 +686,157 @@ describe.skipIf(!HAS_GIT)('runComfyUIUpdate integration', () => {
       await runComfyUIUpdate(opts)
 
       expect(capturedArgs).toContain('--stable')
+    })
+  })
+
+  // -----------------------------------------------------------------------
+  // 9. Version resolution with commits ahead of tag
+  // -----------------------------------------------------------------------
+  describe('version resolution', () => {
+    let aheadTmpDir: string
+    let aheadInstallPath: string
+    let aheadComfyuiDir: string
+    let aheadShas: TestRepoShas
+
+    beforeEach(() => {
+      aheadTmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'update-orch-ahead-'))
+      aheadInstallPath = aheadTmpDir
+      aheadComfyuiDir = path.join(aheadInstallPath, 'ComfyUI')
+      aheadShas = createTestRepo(aheadInstallPath, 3)
+      clearVersionCache()
+    })
+
+    afterEach(() => {
+      fs.rmSync(aheadTmpDir, { recursive: true, force: true })
+    })
+
+    it('resolves commitsAhead when HEAD is beyond the latest tag', async () => {
+      const targetSha = aheadShas.aheadShas[2]!
+
+      spawnState.pythonHandler = () => {
+        execFileSync('git', ['checkout', targetSha, '--detach'], {
+          cwd: aheadComfyuiDir, windowsHide: true, stdio: 'pipe',
+        })
+
+        return fakeProc({
+          stdout: [`[POST_UPDATE_HEAD] ${targetSha}\n`],
+          exitCode: 0,
+        })
+      }
+      spawnState.uvHandler = () => fakeProc({ exitCode: 0 })
+
+      const opts = makeBaseOpts(aheadInstallPath, { channel: 'latest' })
+      const result = await runComfyUIUpdate(opts)
+
+      expect(result.ok).toBe(true)
+      expect(result.comfyVersion).toBeDefined()
+      expect(result.comfyVersion!.commit).toBe(targetSha)
+      expect(result.comfyVersion!.baseTag).toBe('v0.2.0')
+      expect(result.comfyVersion!.commitsAhead).toBe(3)
+    })
+
+    it('resolves commitsAhead=1 for a single commit beyond tag', async () => {
+      const targetSha = aheadShas.aheadShas[0]!
+
+      spawnState.pythonHandler = () => {
+        execFileSync('git', ['checkout', targetSha, '--detach'], {
+          cwd: aheadComfyuiDir, windowsHide: true, stdio: 'pipe',
+        })
+
+        return fakeProc({
+          stdout: [`[POST_UPDATE_HEAD] ${targetSha}\n`],
+          exitCode: 0,
+        })
+      }
+      spawnState.uvHandler = () => fakeProc({ exitCode: 0 })
+
+      const opts = makeBaseOpts(aheadInstallPath, { channel: 'latest' })
+      const result = await runComfyUIUpdate(opts)
+
+      expect(result.ok).toBe(true)
+      expect(result.comfyVersion).toBeDefined()
+      expect(result.comfyVersion!.commit).toBe(targetSha)
+      expect(result.comfyVersion!.baseTag).toBe('v0.2.0')
+      expect(result.comfyVersion!.commitsAhead).toBe(1)
+    })
+
+    it('formats version as tag+N for short style', async () => {
+      const targetSha = aheadShas.aheadShas[2]!
+
+      spawnState.pythonHandler = () => {
+        execFileSync('git', ['checkout', targetSha, '--detach'], {
+          cwd: aheadComfyuiDir, windowsHide: true, stdio: 'pipe',
+        })
+
+        return fakeProc({
+          stdout: [`[POST_UPDATE_HEAD] ${targetSha}\n`],
+          exitCode: 0,
+        })
+      }
+      spawnState.uvHandler = () => fakeProc({ exitCode: 0 })
+
+      const opts = makeBaseOpts(aheadInstallPath, { channel: 'latest' })
+      const result = await runComfyUIUpdate(opts)
+
+      expect(result.ok).toBe(true)
+      const shortVersion = formatComfyVersion(result.comfyVersion, 'short')
+      expect(shortVersion).toBe('v0.2.0+3')
+
+      const detailVersion = formatComfyVersion(result.comfyVersion, 'detail')
+      expect(detailVersion).toBe(`v0.2.0 + 3 commits (${targetSha.slice(0, 7)})`)
+    })
+
+    it('stores correct installedTag in updateInfoByChannel', async () => {
+      const targetSha = aheadShas.aheadShas[2]!
+
+      spawnState.pythonHandler = () => {
+        execFileSync('git', ['checkout', targetSha, '--detach'], {
+          cwd: aheadComfyuiDir, windowsHide: true, stdio: 'pipe',
+        })
+
+        return fakeProc({
+          stdout: [`[POST_UPDATE_HEAD] ${targetSha}\n`],
+          exitCode: 0,
+        })
+      }
+      spawnState.uvHandler = () => fakeProc({ exitCode: 0 })
+
+      const opts = makeBaseOpts(aheadInstallPath, { channel: 'latest' })
+      await runComfyUIUpdate(opts)
+
+      const updateFn = opts.update as ReturnType<typeof vi.fn>
+      const calls = updateFn.mock.calls.map((c: unknown[]) => c[0] as Record<string, unknown>)
+      const channelCall = calls.find((c) => c.updateInfoByChannel !== undefined)
+      expect(channelCall).toBeDefined()
+
+      const channelInfo = channelCall!.updateInfoByChannel as Record<string, Record<string, unknown>>
+      expect(channelInfo.latest).toBeDefined()
+      expect(channelInfo.latest!.installedTag).toBe('v0.2.0+3')
+    })
+
+    it('resolves exactly on tag with commitsAhead=0', async () => {
+      spawnState.pythonHandler = () => {
+        execFileSync('git', ['checkout', 'v0.2.0', '--detach'], {
+          cwd: aheadComfyuiDir, windowsHide: true, stdio: 'pipe',
+        })
+
+        return fakeProc({
+          stdout: [
+            `[POST_UPDATE_HEAD] ${aheadShas.v2Sha}\n`,
+            `[CHECKED_OUT_TAG] v0.2.0\n`,
+          ],
+          exitCode: 0,
+        })
+      }
+      spawnState.uvHandler = () => fakeProc({ exitCode: 0 })
+
+      const opts = makeBaseOpts(aheadInstallPath, { channel: 'stable' })
+      const result = await runComfyUIUpdate(opts)
+
+      expect(result.ok).toBe(true)
+      expect(result.comfyVersion!.baseTag).toBe('v0.2.0')
+      expect(result.comfyVersion!.commitsAhead).toBe(0)
+      expect(formatComfyVersion(result.comfyVersion, 'short')).toBe('v0.2.0')
     })
   })
 })
