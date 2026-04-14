@@ -8,6 +8,7 @@ import SnapshotDiffView from './SnapshotDiffView.vue'
 import RestoreModal from './RestoreModal.vue'
 import ImportPreviewModal from './ImportPreviewModal.vue'
 import InfoTooltip from './InfoTooltip.vue'
+import { triggerLabel as _triggerLabel, formatDate, formatNodeVersion } from '../lib/snapshots'
 import type {
   ActionDef,
   CopyEvent,
@@ -102,15 +103,7 @@ watch(() => props.installationId, () => {
 }, { immediate: true })
 
 function triggerLabel(trigger: string): string {
-  switch (trigger) {
-    case 'boot': return t('snapshots.triggerBoot')
-    case 'restart': return t('snapshots.triggerRestart')
-    case 'manual': return t('snapshots.triggerManual')
-    case 'pre-update': return t('snapshots.triggerPreUpdate')
-    case 'post-update': return t('snapshots.triggerPostUpdate')
-    case 'post-restore': return t('snapshots.triggerPostRestore')
-    default: return trigger
-  }
+  return _triggerLabel(trigger, t)
 }
 
 function triggerClass(trigger: string): string {
@@ -123,10 +116,6 @@ function triggerClass(trigger: string): string {
     case 'post-restore': return 'trigger-postrestore'
     default: return ''
   }
-}
-
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleString()
 }
 
 function formatRelative(iso: string): string {
@@ -385,12 +374,6 @@ const filteredPipPackages = computed(() => {
   const q = pipSearch.value.toLowerCase()
   return entries.filter(([name]) => name.toLowerCase().includes(q))
 })
-
-function formatNodeVersion(node: { version?: string; commit?: string }): string {
-  if (node.version) return node.version
-  if (node.commit) return node.commit.slice(0, 7)
-  return '—'
-}
 
 function diffHasChanges(diff: SnapshotDiffResult): boolean {
   return diff.comfyuiChanged || diff.updateChannelChanged || diff.nodesAdded.length > 0 || diff.nodesRemoved.length > 0 ||

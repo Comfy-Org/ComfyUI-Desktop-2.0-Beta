@@ -5,6 +5,7 @@ import { useModal } from '../composables/useModal'
 import type { SnapshotFilePreview, FieldOption, GPUInfo } from '../types/ipc'
 import { getVariantImage, getVariantGpuLabel, sortedCardOptions, findBestVariant } from '../lib/variants'
 import { emitTelemetryAction, toVariantBucket } from '../lib/telemetry'
+import { triggerLabel as _triggerLabel, formatDate, formatNodeVersion } from '../lib/snapshots'
 
 const emit = defineEmits<{
   close: []
@@ -241,25 +242,7 @@ async function handleCreate(): Promise<void> {
 }
 
 function triggerLabel(trigger: string): string {
-  switch (trigger) {
-    case 'boot': return t('snapshots.triggerBoot')
-    case 'restart': return t('snapshots.triggerRestart')
-    case 'manual': return t('snapshots.triggerManual')
-    case 'pre-update': return t('snapshots.triggerPreUpdate')
-    case 'post-update': return t('snapshots.triggerPostUpdate')
-    case 'post-restore': return t('snapshots.triggerPostRestore')
-    default: return trigger
-  }
-}
-
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleString()
-}
-
-function formatNodeVersion(node: { version?: string; commit?: string }): string {
-  if (node.version) return node.version
-  if (node.commit) return node.commit.slice(0, 7)
-  return '—'
+  return _triggerLabel(trigger, t)
 }
 
 function handleOverlayMouseDown(event: MouseEvent): void {
@@ -590,52 +573,6 @@ defineExpose({ open })
   border-color: var(--border-hover);
 }
 
-/* Preview content */
-.ls-section {
-  margin-bottom: 16px;
-}
-.ls-section:last-child {
-  margin-bottom: 0;
-}
-
-.ls-section-title {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
-  margin-bottom: 8px;
-}
-
-.ls-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 6px 16px;
-  margin-bottom: 10px;
-}
-
-.ls-field {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin-bottom: 4px;
-}
-
-.ls-label {
-  font-size: 13px;
-  color: var(--text-muted);
-}
-
-.ls-value {
-  font-size: 14px;
-  color: var(--text);
-  user-select: text;
-}
-
-.ls-value-loading {
-  color: var(--text-muted);
-}
-
 .ls-name-input {
   font-size: 14px;
   padding: 6px 10px;
@@ -663,142 +600,6 @@ defineExpose({ open })
   margin-top: 2px;
 }
 
-/* Timeline */
-.ls-timeline {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  max-height: 200px;
-  overflow-y: auto;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 6px;
-}
-
-.ls-timeline-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  padding: 6px 10px;
-  background: var(--bg);
-  border-radius: 5px;
-}
-
-.ls-trigger {
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
-  padding: 1px 6px;
-  border-radius: 3px;
-  flex-shrink: 0;
-  color: var(--text-muted);
-  background: var(--surface);
-}
-
-.ls-trigger-boot { color: var(--text-muted); }
-.ls-trigger-restart { color: var(--info); }
-.ls-trigger-manual { color: var(--success); }
-.ls-trigger-pre-update { color: var(--success); }
-.ls-trigger-post-update { color: var(--warning); }
-.ls-trigger-post-restore { color: var(--warning); }
-
-.ls-current-tag {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--accent);
-  flex-shrink: 0;
-}
-
-.ls-meta {
-  color: var(--text-muted);
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ls-time {
-  color: var(--text-muted);
-  font-size: 13px;
-  flex-shrink: 0;
-}
-
-/* Subsections (nodes, packages) */
-.ls-subsection {
-  margin-top: 10px;
-}
-
-.ls-subsection-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-muted);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  user-select: none;
-  margin-bottom: 6px;
-}
-
-.ls-collapse {
-  font-size: 14px;
-}
-
-.ls-node-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  padding: 2px 0;
-}
-
-.ls-node-status {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-.ls-node-enabled { background: var(--info); }
-.ls-node-disabled { background: var(--text-muted); }
-
-.ls-node-name {
-  color: var(--text);
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  user-select: text;
-}
-
-.ls-node-type {
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  color: var(--text-muted);
-  padding: 1px 5px;
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  flex-shrink: 0;
-}
-
-.ls-node-version {
-  font-size: 13px;
-  color: var(--text-muted);
-  font-family: monospace;
-  flex-shrink: 0;
-  user-select: text;
-}
-
-.ls-empty {
-  font-size: 14px;
-  color: var(--text-muted);
-}
-
 /* Release select */
 .ls-select {
   font-size: 14px;
@@ -824,35 +625,5 @@ defineExpose({ open })
   border-radius: 6px;
   padding: 8px 12px;
   margin-top: 8px;
-}
-
-/* Pip packages */
-.ls-pip-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 2px 0;
-  font-size: 13px;
-}
-
-.ls-pip-name {
-  color: var(--text);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  flex: 1;
-  min-width: 0;
-  user-select: text;
-}
-
-.ls-pip-version {
-  color: var(--text-muted);
-  font-family: monospace;
-  margin-left: 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 50%;
-  user-select: text;
 }
 </style>

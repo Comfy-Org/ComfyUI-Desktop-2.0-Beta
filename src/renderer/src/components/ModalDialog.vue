@@ -5,6 +5,7 @@ import { useModal, type ModalOption } from '../composables/useModal'
 import { sortedCardOptions, getVariantImage } from '../lib/variants'
 import type { FieldOption } from '../types/ipc'
 import InfoTooltip from './InfoTooltip.vue'
+import { formatNodeVersion } from '../lib/snapshots'
 
 const { t } = useI18n()
 
@@ -27,12 +28,6 @@ const spPipExpanded = ref(false)
 const localOptions = reactive<(ModalOption & { checked: boolean })[]>([])
 
 const anyChecked = computed(() => localOptions.some((o) => o.checked))
-
-function formatNodeVersion(node: { version?: string; commit?: string }): string {
-  if (node.version) return node.version
-  if (node.commit) return node.commit.slice(0, 7)
-  return '—'
-}
 
 const confirmClass = computed(() =>
   state.confirmStyle === 'danger' ? 'danger-solid' : state.confirmStyle
