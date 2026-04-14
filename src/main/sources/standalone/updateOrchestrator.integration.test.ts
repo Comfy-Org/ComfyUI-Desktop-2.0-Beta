@@ -14,7 +14,7 @@ import type * as ChildProcessModule from 'child_process'
 // Python/uv subprocesses in the spawn interceptor below.
 // ---------------------------------------------------------------------------
 const SENTINEL_PYTHON = '__TEST_MASTER_PY__'
-const SENTINEL_UV = '__TEST_UV__'
+const SENTINEL_UV_NAME = '__sentinel_uv__'
 const SENTINEL_ACTIVE_PY = '__TEST_ACTIVE_PY__'
 
 // ---------------------------------------------------------------------------
@@ -53,7 +53,7 @@ vi.mock('../../lib/snapshots', () => ({
 // ---------------------------------------------------------------------------
 vi.mock('./envPaths', () => ({
   getMasterPythonPath: () => SENTINEL_PYTHON,
-  getUvPath: () => SENTINEL_UV,
+  getUvPath: (p: string) => path.join(p, SENTINEL_UV_NAME),
   getActivePythonPath: () => SENTINEL_ACTIVE_PY,
   getVenvDir: (p: string) => path.join(p, 'ComfyUI', '.venv'),
   getVenvPythonPath: (p: string) => path.join(p, 'ComfyUI', '.venv', 'Scripts', 'python.exe'),
@@ -108,7 +108,7 @@ vi.mock('child_process', async (importOriginal) => {
       if (command === SENTINEL_PYTHON && spawnState.pythonHandler) {
         return spawnState.pythonHandler([...(args ?? [])])
       }
-      if (command === SENTINEL_UV && spawnState.uvHandler) {
+      if (typeof command === 'string' && command.endsWith(SENTINEL_UV_NAME) && spawnState.uvHandler) {
         spawnState.uvCalls.push([...(args ?? [])])
         return spawnState.uvHandler([...(args ?? [])])
       }
@@ -172,9 +172,12 @@ function fakeProc(opts: {
     return true
   })
   // Emit 'close' after stdout/stderr have been consumed.
+  // Guard against double-emit if kill() was called first.
   process.nextTick(() => {
     process.nextTick(() => {
-      proc.emit('close', exitCode, opts.exitSignal ?? null)
+      if (!proc.killed) {
+        proc.emit('close', exitCode, opts.exitSignal ?? null)
+      }
     })
   })
   return proc
@@ -302,8 +305,8 @@ describe.skipIf(!HAS_GIT)('runComfyUIUpdate integration', () => {
     spawnState.uvHandler = undefined
     spawnState.uvCalls = []
 
-    // Create a file at the SENTINEL_UV path so fs.existsSync(getUvPath(...)) passes
-    fs.writeFileSync(SENTINEL_UV, '')
+    // Create sentinel uv file inside tmpDir so fs.existsSync(getUvPath(...)) passes
+    fs.writeFileSync(path.join(installPath, SENTINEL_UV_NAME), '')
 
     // Clear version-resolve cache between tests
     clearVersionCache()
@@ -311,7 +314,6 @@ describe.skipIf(!HAS_GIT)('runComfyUIUpdate integration', () => {
 
   afterEach(() => {
     fs.rmSync(tmpDir, { recursive: true, force: true })
-    try { fs.unlinkSync(SENTINEL_UV) } catch {}
   })
 
   // -----------------------------------------------------------------------
@@ -528,8 +530,8 @@ describe.skipIf(!HAS_GIT)('runComfyUIUpdate integration', () => {
       const opts = makeBaseOpts(installPath, { signal: controller.signal })
       const result = await runComfyUIUpdate(opts)
 
-      // The spawn mock returns immediately with code 1 when already aborted,
-      // and then the function checks signal.aborted
+      // The update script runs and exits (non-zero or zero), then
+      // runComfyUIUpdate checks signal.aborted at line 202 and returns Cancelled.
       expect(result.ok).toBe(false)
       expect(result.message).toBe('Cancelled')
     })
@@ -537,28 +539,10 @@ describe.skipIf(!HAS_GIT)('runComfyUIUpdate integration', () => {
     it('returns cancelled result when signal fires during update', async () => {
       const controller = new AbortController()
 
-      spawnState.pythonHandler = (_args: string[]) => {
-        const proc = new EventEmitter() as ChildProcess & { pid: number; killed: boolean }
-        proc.stdout = new EventEmitter() as Readable
-        proc.stderr = new EventEmitter() as Readable
-        proc.stdout.destroy = vi.fn() as Readable['destroy']
-        proc.stderr.destroy = vi.fn() as Readable['destroy']
-        proc.pid = 99999
-        proc.killed = false
-        proc.kill = vi.fn(() => {
-          proc.killed = true
-          return true
-        })
-
-        // Abort after a tick, then emit close with non-zero
-        process.nextTick(() => {
-          controller.abort()
-          process.nextTick(() => {
-            proc.emit('close', 1, 'SIGTERM')
-          })
-        })
-
-        return proc
+      spawnState.pythonHandler = () => {
+        // Schedule abort after fakeProc is returned but before close fires
+        process.nextTick(() => controller.abort())
+        return fakeProc({ exitCode: 1, exitSignal: 'SIGTERM' })
       }
 
       const opts = makeBaseOpts(installPath, { signal: controller.signal })
@@ -703,6 +687,7 @@ describe.skipIf(!HAS_GIT)('runComfyUIUpdate integration', () => {
       aheadInstallPath = aheadTmpDir
       aheadComfyuiDir = path.join(aheadInstallPath, 'ComfyUI')
       aheadShas = createTestRepo(aheadInstallPath, 3)
+      fs.writeFileSync(path.join(aheadInstallPath, SENTINEL_UV_NAME), '')
       clearVersionCache()
     })
 
