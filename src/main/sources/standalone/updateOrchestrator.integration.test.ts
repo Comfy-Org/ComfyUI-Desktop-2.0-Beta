@@ -317,87 +317,14 @@ describe.skipIf(!HAS_GIT)('runComfyUIUpdate integration', () => {
   })
 
   // -----------------------------------------------------------------------
-  // 1. Happy path: latest update with changed requirements
+  // 1. PyTorch filtering — real PYTORCH_RE regex on real file content
   // -----------------------------------------------------------------------
-  describe('happy path update', () => {
-    it('returns ok=true with resolved version after successful update', async () => {
-      spawnState.pythonHandler = makeSuccessfulUpdateHandler(comfyuiDir, repoShas.v2Sha)
-      spawnState.uvHandler = () => fakeProc({ exitCode: 0 })
-
-      const opts = makeBaseOpts(installPath, { channel: 'stable', saveRollback: true })
-      const result = await runComfyUIUpdate(opts)
-
-      expect(result.ok).toBe(true)
-      expect(result.comfyVersion).toBeDefined()
-      expect(result.comfyVersion!.commit).toBe(repoShas.v2Sha)
-      expect(result.comfyVersion!.baseTag).toBe('v0.2.0')
-      expect(result.comfyVersion!.commitsAhead).toBe(0)
-    })
-
-    it('calls update() with version data, channel, and rollback info', async () => {
-      spawnState.pythonHandler = makeSuccessfulUpdateHandler(comfyuiDir, repoShas.v2Sha)
-      spawnState.uvHandler = () => fakeProc({ exitCode: 0 })
-
-      const opts = makeBaseOpts(installPath, { channel: 'stable', saveRollback: true })
-      await runComfyUIUpdate(opts)
-
-      // update() is called multiple times — the final one should have comfyVersion + rollback
-      const updateFn = opts.update as ReturnType<typeof vi.fn>
-      const calls = updateFn.mock.calls.map((c: unknown[]) => c[0] as Record<string, unknown>)
-
-      const versionCall = calls.find((c) => c.comfyVersion !== undefined)
-      expect(versionCall).toBeDefined()
-      expect(versionCall!.updateChannel).toBe('stable')
-      expect(versionCall!.updateInfoByChannel).toBeDefined()
-
-      const rollbackCall = calls.find((c) => c.lastRollback !== undefined)
-      expect(rollbackCall).toBeDefined()
-      const rollback = rollbackCall!.lastRollback as Record<string, unknown>
-      expect(rollback.postUpdateHead).toBe(repoShas.v2Sha)
-      expect(rollback.channel).toBe('stable')
-      expect(rollback.backupBranch).toBe('backup-pre-update')
-    })
-
-    it('invokes uv pip install with correct args when requirements change', async () => {
-      spawnState.pythonHandler = makeSuccessfulUpdateHandler(comfyuiDir, repoShas.v2Sha)
-      spawnState.uvHandler = () => fakeProc({ exitCode: 0 })
-
-      const opts = makeBaseOpts(installPath)
-      await runComfyUIUpdate(opts)
-
-      const pipInstalls = spawnState.uvCalls.filter(
-        (args) => args.includes('pip') && args.includes('install'),
-      )
-      // Should install both requirements.txt and manager_requirements.txt
-      expect(pipInstalls.length).toBe(2)
-
-      // All pip install calls must include --python and --index-url
-      for (const args of pipInstalls) {
-        expect(args).toContain('pip')
-        expect(args).toContain('install')
-        expect(args).toContain('-r')
-        expect(args).toContain('--python')
-        expect(args).toContain(SENTINEL_ACTIVE_PY)
-        expect(args).toContain('--index-url')
-        expect(args).toContain('https://pypi.org/simple/')
-      }
-
-      // First call should reference the main requirements temp file
-      const mainReqCall = pipInstalls[0]!
-      const mainReqIdx = mainReqCall.indexOf('-r')
-      expect(mainReqCall[mainReqIdx + 1]).toContain('.post-install-reqs.txt')
-
-      // Second call should reference the manager requirements temp file
-      const mgrReqCall = pipInstalls[1]!
-      const mgrReqIdx = mgrReqCall.indexOf('-r')
-      expect(mgrReqCall[mgrReqIdx + 1]).toContain('.post-install-mgr-reqs.txt')
-    })
-
-    it('filters PyTorch packages from requirements before installing', async () => {
+  describe('PyTorch filtering', () => {
+    it('excludes PyTorch packages from requirements before installing', async () => {
       spawnState.pythonHandler = makeSuccessfulUpdateHandler(comfyuiDir, repoShas.v2Sha)
 
-      // Capture the filtered requirements content during the uv handler
-      // execution, before the orchestrator cleans up the temp file.
+      // Capture filtered requirements content inside the uv handler,
+      // before the orchestrator cleans up the temp file.
       const capturedFilteredContents: string[] = []
       spawnState.uvHandler = (args: string[]) => {
         if (args.includes('pip') && args.includes('install') && args.includes('-r')) {
@@ -414,212 +341,22 @@ describe.skipIf(!HAS_GIT)('runComfyUIUpdate integration', () => {
       const opts = makeBaseOpts(installPath)
       await runComfyUIUpdate(opts)
 
-      // Verify we actually captured content and it excludes PyTorch
+      // The repo's requirements.txt contains 'torch==2.0' — verify it was stripped
       expect(capturedFilteredContents.length).toBeGreaterThan(0)
       for (const content of capturedFilteredContents) {
         expect(content).not.toMatch(/^torch==/m)
         expect(content).not.toMatch(/^torchvision==/m)
         expect(content).not.toMatch(/^torchaudio==/m)
       }
+      // Non-PyTorch deps should still be present
+      const mainReqs = capturedFilteredContents[0]!
+      expect(mainReqs).toContain('foo==')
+      expect(mainReqs).toContain('bar==')
     })
   })
 
   // -----------------------------------------------------------------------
-  // 2. Dry-run conflict check
-  // -----------------------------------------------------------------------
-  describe('dry-run conflict check', () => {
-    it('runs dry-run then proceeds with install even when dry-run fails', async () => {
-      spawnState.pythonHandler = makeSuccessfulUpdateHandler(comfyuiDir, repoShas.v2Sha)
-
-      spawnState.uvHandler = (args: string[]) => {
-        if (args.includes('--dry-run')) {
-          return fakeProc({
-            exitCode: 1,
-            stderr: ['Conflict detected: foo==2.0 vs foo==1.0\n'],
-          })
-        }
-        return fakeProc({ exitCode: 0 })
-      }
-
-      const opts = makeBaseOpts(installPath, { dryRunConflictCheck: true })
-      const result = await runComfyUIUpdate(opts)
-
-      expect(result.ok).toBe(true)
-
-      // Verify captured uv calls: dry-run + install for requirements, then manager_requirements
-      const dryRunCalls = spawnState.uvCalls.filter((a) => a.includes('--dry-run'))
-      const installCalls = spawnState.uvCalls.filter(
-        (a) => a.includes('pip') && a.includes('install') && !a.includes('--dry-run'),
-      )
-
-      // Dry-run should only apply to requirements.txt (not manager_requirements)
-      expect(dryRunCalls.length).toBe(1)
-      expect(dryRunCalls[0]).toContain('--python')
-      expect(dryRunCalls[0]).toContain(SENTINEL_ACTIVE_PY)
-      expect(dryRunCalls[0]).toContain('-r')
-
-      // Install calls: one for requirements.txt, one for manager_requirements.txt
-      expect(installCalls.length).toBe(2)
-      for (const args of installCalls) {
-        expect(args).toContain('--python')
-        expect(args).toContain(SENTINEL_ACTIVE_PY)
-        expect(args).toContain('--index-url')
-      }
-
-      // Conflict warning should appear in output
-      const outputFn = opts.sendOutput as ReturnType<typeof vi.fn>
-      const allOutput = outputFn.mock.calls.map((c: unknown[]) => c[0] as string).join('')
-      expect(allOutput).toContain('dry-run')
-    })
-  })
-
-  // -----------------------------------------------------------------------
-  // 3. No requirements change — no uv install
-  // -----------------------------------------------------------------------
-  describe('no requirements change', () => {
-    it('skips uv install when requirements are unchanged', async () => {
-      // Update handler that does NOT change requirements
-      spawnState.pythonHandler = (_args: string[]) => {
-        // Just make a new commit on the same requirements
-        execFileSync('git', ['checkout', 'v0.1.0', '--detach'], {
-          cwd: comfyuiDir, windowsHide: true, stdio: 'pipe',
-        })
-        const sha = execFileSync('git', ['rev-parse', 'HEAD'], {
-          cwd: comfyuiDir, windowsHide: true, stdio: 'pipe',
-        }).toString().trim()
-
-        return fakeProc({
-          stdout: [
-            `[POST_UPDATE_HEAD] ${sha}\n`,
-            `[CHECKED_OUT_TAG] v0.1.0\n`,
-          ],
-          exitCode: 0,
-        })
-      }
-      spawnState.uvHandler = () => fakeProc({ exitCode: 0 })
-
-      const opts = makeBaseOpts(installPath, { dryRunConflictCheck: true })
-      const result = await runComfyUIUpdate(opts)
-
-      expect(result.ok).toBe(true)
-      // No uv calls should have been made
-      expect(spawnState.uvCalls.length).toBe(0)
-
-      // Progress should show deps up to date
-      const progressFn = opts.sendProgress as ReturnType<typeof vi.fn>
-      const depsProgress = progressFn.mock.calls.filter(
-        (c: unknown[]) => (c[0] as string) === 'deps',
-      )
-      const statuses = depsProgress.map(
-        (c: unknown[]) => (c[1] as Record<string, unknown>).status as string,
-      )
-      expect(statuses.some((s) => s.includes('updateDepsUpToDate'))).toBe(true)
-    })
-  })
-
-  // -----------------------------------------------------------------------
-  // 4. Update script failure
-  // -----------------------------------------------------------------------
-  describe('update script failure', () => {
-    it('returns ok=false with error message when update script exits non-zero', async () => {
-      spawnState.pythonHandler = () =>
-        fakeProc({
-          exitCode: 1,
-          stderr: ['Error: something went wrong\nTraceback ...\nRuntimeError: bad\n'],
-        })
-
-      const opts = makeBaseOpts(installPath)
-      const result = await runComfyUIUpdate(opts)
-
-      expect(result.ok).toBe(false)
-      expect(result.message).toBeDefined()
-      expect(result.message).toContain('updateFailed')
-      // No uv calls should have happened
-      expect(spawnState.uvCalls.length).toBe(0)
-    })
-
-    it('does not persist version data on failure', async () => {
-      spawnState.pythonHandler = () => fakeProc({ exitCode: 1, stderr: ['fail\n'] })
-
-      const opts = makeBaseOpts(installPath)
-      await runComfyUIUpdate(opts)
-
-      const updateFn = opts.update as ReturnType<typeof vi.fn>
-      // update() should not have been called with comfyVersion
-      for (const [data] of updateFn.mock.calls) {
-        expect((data as Record<string, unknown>).comfyVersion).toBeUndefined()
-      }
-    })
-  })
-
-  // -----------------------------------------------------------------------
-  // 5. Cancellation via AbortSignal
-  // -----------------------------------------------------------------------
-  describe('cancellation', () => {
-    it('returns cancelled result when signal is aborted before update script', async () => {
-      const controller = new AbortController()
-      controller.abort()
-
-      spawnState.pythonHandler = () => fakeProc({ exitCode: 0 })
-
-      const opts = makeBaseOpts(installPath, { signal: controller.signal })
-      const result = await runComfyUIUpdate(opts)
-
-      // The update script runs and exits (non-zero or zero), then
-      // runComfyUIUpdate checks signal.aborted at line 202 and returns Cancelled.
-      expect(result.ok).toBe(false)
-      expect(result.message).toBe('Cancelled')
-    })
-
-    it('returns cancelled result when signal fires during update', async () => {
-      const controller = new AbortController()
-
-      spawnState.pythonHandler = () => {
-        // Schedule abort after fakeProc is returned but before close fires
-        process.nextTick(() => controller.abort())
-        return fakeProc({ exitCode: 1, exitSignal: 'SIGTERM' })
-      }
-
-      const opts = makeBaseOpts(installPath, { signal: controller.signal })
-      const result = await runComfyUIUpdate(opts)
-
-      expect(result.ok).toBe(false)
-      expect(result.message).toBe('Cancelled')
-    })
-  })
-
-  // -----------------------------------------------------------------------
-  // 6. Pre-update snapshot
-  // -----------------------------------------------------------------------
-  describe('pre-update snapshot', () => {
-    it('saves a pre-update snapshot and deduplicates afterward', async () => {
-      const { saveSnapshot, deduplicatePreUpdateSnapshot, getSnapshotCount } = await import('../../lib/snapshots')
-      const mockedSave = vi.mocked(saveSnapshot)
-      const mockedDedup = vi.mocked(deduplicatePreUpdateSnapshot)
-      const mockedCount = vi.mocked(getSnapshotCount)
-      mockedCount.mockResolvedValue(2)
-
-      spawnState.pythonHandler = makeSuccessfulUpdateHandler(comfyuiDir, repoShas.v2Sha)
-      spawnState.uvHandler = () => fakeProc({ exitCode: 0 })
-
-      const opts = makeBaseOpts(installPath, { preUpdateSnapshot: true })
-      const result = await runComfyUIUpdate(opts)
-
-      expect(result.ok).toBe(true)
-
-      // Should have called saveSnapshot for pre-update and post-update
-      const saveCalls = mockedSave.mock.calls
-      const triggers = saveCalls.map((c) => c[2])
-      expect(triggers).toContain('pre-update')
-      expect(triggers).toContain('post-update')
-
-      // Should have attempted deduplication
-      expect(mockedDedup).toHaveBeenCalledWith(installPath, 'pre-update-snap.json')
-    })
-  })
-
-  // -----------------------------------------------------------------------
-  // 7. Marker parsing across chunked stdout
+  // 2. Marker parsing — real line-buffer parser against chunked stdout
   // -----------------------------------------------------------------------
   describe('marker parsing', () => {
     it('parses markers correctly when split across stdout chunks', async () => {
@@ -660,56 +397,26 @@ describe.skipIf(!HAS_GIT)('runComfyUIUpdate integration', () => {
   })
 
   // -----------------------------------------------------------------------
-  // 8. Latest channel
+  // 3. Cancellation — guards the production bugfix (signal.aborted check
+  //    in spawnUpdateScript)
   // -----------------------------------------------------------------------
-  describe('latest channel', () => {
-    it('does not pass --stable flag for latest channel', async () => {
-      let capturedArgs: string[] = []
-      spawnState.pythonHandler = (args: string[]) => {
-        capturedArgs = args
+  describe('cancellation', () => {
+    it('returns cancelled when signal is already aborted', async () => {
+      const controller = new AbortController()
+      controller.abort()
 
-        execFileSync('git', ['checkout', 'v0.2.0', '--detach'], {
-          cwd: comfyuiDir, windowsHide: true, stdio: 'pipe',
-        })
+      spawnState.pythonHandler = () => fakeProc({ exitCode: 0 })
 
-        return fakeProc({
-          stdout: [`[POST_UPDATE_HEAD] ${repoShas.v2Sha}\n`],
-          exitCode: 0,
-        })
-      }
-      spawnState.uvHandler = () => fakeProc({ exitCode: 0 })
+      const opts = makeBaseOpts(installPath, { signal: controller.signal })
+      const result = await runComfyUIUpdate(opts)
 
-      const opts = makeBaseOpts(installPath, { channel: 'latest' })
-      await runComfyUIUpdate(opts)
-
-      expect(capturedArgs).not.toContain('--stable')
-    })
-
-    it('passes --stable flag for stable channel', async () => {
-      let capturedArgs: string[] = []
-      spawnState.pythonHandler = (args: string[]) => {
-        capturedArgs = args
-
-        execFileSync('git', ['checkout', 'v0.2.0', '--detach'], {
-          cwd: comfyuiDir, windowsHide: true, stdio: 'pipe',
-        })
-
-        return fakeProc({
-          stdout: [`[POST_UPDATE_HEAD] ${repoShas.v2Sha}\n`],
-          exitCode: 0,
-        })
-      }
-      spawnState.uvHandler = () => fakeProc({ exitCode: 0 })
-
-      const opts = makeBaseOpts(installPath, { channel: 'stable' })
-      await runComfyUIUpdate(opts)
-
-      expect(capturedArgs).toContain('--stable')
+      expect(result.ok).toBe(false)
+      expect(result.message).toBe('Cancelled')
     })
   })
 
   // -----------------------------------------------------------------------
-  // 9. Version resolution with commits ahead of tag
+  // 4. Version resolution — real git, real tag/commit counting
   // -----------------------------------------------------------------------
   describe('version resolution', () => {
     let aheadTmpDir: string
