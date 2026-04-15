@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    html, body { margin: 0; padding: 0; overflow: hidden; height: 100%; }
+    body {
+      background: #353535;
+      app-region: drag;
+      display: flex;
+      align-items: center;
+      padding-left: 12px;
+      box-sizing: border-box;
+      font: 12px/1 system-ui, sans-serif;
+      color: #999;
+      user-select: none;
+    }
+  </style>
+</head>
+<body>
+  <span id="title">ComfyUI</span>
+  <script>
+    window.__updateTheme = function(bg, text) {
+      if (bg) document.body.style.background = bg;
+      if (text) document.body.style.color = text;
+    };
+  </script>
+</body>
+</html>

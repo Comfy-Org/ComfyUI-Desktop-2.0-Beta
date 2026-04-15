@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Tray, Menu, ipcMain, shell, clipboard, screen, net } from 'electron'
+import { app, BrowserWindow, Tray, Menu, ipcMain, shell, clipboard, screen, net, nativeTheme, WebContentsView } from 'electron'
 import path from 'path'
 import fs from 'fs'
 import { execFile } from 'child_process'
@@ -27,6 +27,8 @@ import { getModelDownloadContentScript } from './lib/comfyContentScript'
 import { shouldOpenInPopup } from './lib/allowedPopups'
 import { showModelFolderRelaunchPage } from './lib/relaunchPage'
 import { COMFY_BG, SPLASH_DARK, type SplashTheme } from './lib/theme'
+import { TITLEBAR_HEIGHT, titleBarOverlayForTheme, comfyTitleBarOverlay, updateTitleBarOverlay, setMainWindowId } from './lib/titleBarOverlay'
+import { resolveTheme } from './lib/ipc/shared'
 
 todesktop.init({ autoUpdater: false })
 
@@ -95,8 +97,8 @@ function getWindowOptions(installationId: string): Partial<Electron.BrowserWindo
   return { x, y, width, height }
 }
 
-function attachContextMenu(comfyWindow: BrowserWindow): void {
-  comfyWindow.webContents.on('context-menu', (_event, params) => {
+function attachContextMenu(comfyWindow: BrowserWindow, webContents?: Electron.WebContents): void {
+  (webContents || comfyWindow.webContents).on('context-menu', (_event, params) => {
     const { editFlags, isEditable, selectionText, linkURL } = params
     const hasSelection = selectionText.trim().length > 0
     const hasLink = linkURL.length > 0
@@ -247,6 +249,7 @@ function registerProcessErrorHandlers(): void {
 }
 
 function createMainWindow(): void {
+  const isDark = resolveTheme() === 'dark'
   mainWindow = new BrowserWindow({
     width: 1470,
     height: 880,
@@ -256,12 +259,17 @@ function createMainWindow(): void {
     title: `ComfyUI Desktop 2.0 v${APP_VERSION}`,
     backgroundColor: '#202020',
     show: false,
+    titleBarStyle: 'hidden',
+    ...(process.platform !== 'darwin'
+      ? { titleBarOverlay: titleBarOverlayForTheme(isDark) }
+      : {}),
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
       preload: path.join(__dirname, '../preload/index.js'),
     },
   })
+  setMainWindowId(mainWindow.id)
   const isDev = !!process.env['ELECTRON_RENDERER_URL']
   const loadTarget = process.env['ELECTRON_RENDERER_URL'] || 'index.html (file)'
 
@@ -293,6 +301,12 @@ function createMainWindow(): void {
 
   attachContextMenu(mainWindow)
   mainWindow.setMenuBarVisibility(false)
+
+  // Sync title bar overlay colors when the OS theme changes (Windows/Linux only)
+  if (process.platform !== 'darwin') {
+    nativeTheme.on('updated', updateTitleBarOverlay)
+  }
+
   mainWindow.webContents.on('did-finish-load', () => {
     if (isDev) console.log(`[main] did-finish-load — url=${mainWindow?.webContents.getURL()}`)
     if (mainWindow && !mainWindow.isDestroyed()) {
@@ -620,6 +634,26 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
     icon: APP_ICON,
     title: `${installation.name} — Desktop 2.0 v${APP_VERSION}`,
     backgroundColor: COMFY_BG,
+    titleBarStyle: 'hidden',
+    ...(process.platform !== 'darwin'
+      ? { titleBarOverlay: comfyTitleBarOverlay() }
+      : {}),
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+    },
+  })
+  comfyWindow.setMenuBarVisibility(false)
+
+  // Title bar view — bounded to TITLEBAR_HEIGHT, isolated from ComfyUI
+  const titleBarView = new WebContentsView({
+    webPreferences: { nodeIntegration: false, contextIsolation: true },
+  })
+  titleBarView.webContents.loadFile(path.join(__dirname, '..', '..', 'resources', 'comfyTitleBar.html'))
+  comfyWindow.contentView.addChildView(titleBarView)
+
+  // ComfyUI content view — completely isolated from the title bar
+  const comfyView = new WebContentsView({
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -629,22 +663,35 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
         : 'persist:shared',
     },
   })
-  comfyWindow.setMenuBarVisibility(false)
+  comfyWindow.contentView.addChildView(comfyView)
+
+  // Layout both views; title bar is fixed height, comfy view fills the rest
+  const layoutViews = (): void => {
+    if (comfyWindow.isDestroyed()) return
+    const [width, height] = comfyWindow.getContentSize() as [number, number]
+    titleBarView.setBounds({ x: 0, y: 0, width, height: TITLEBAR_HEIGHT })
+    comfyView.setBounds({ x: 0, y: TITLEBAR_HEIGHT, width, height: Math.max(0, height - TITLEBAR_HEIGHT) })
+  }
+  layoutViews()
+  comfyWindow.on('resize', layoutViews)
+
+  // Alias for the ComfyUI webContents (all handlers use this)
+  const comfyContents = comfyView.webContents
 
   if (saved?.maximized) comfyWindow.maximize()
 
   comfyWindow.on('resize', () => saveWindowBounds(installationId, comfyWindow))
   comfyWindow.on('move', () => saveWindowBounds(installationId, comfyWindow))
-  comfyWindow.webContents.on('did-create-window', (childWindow) => {
+  comfyContents.on('did-create-window', (childWindow) => {
     childWindow.setIcon(APP_ICON)
     if (process.platform !== 'darwin') childWindow.removeMenu()
     injectMacPasskeyWarning(childWindow)
   })
-  comfyWindow.webContents.on('page-title-updated', (e, title) => {
+  comfyContents.on('page-title-updated', (e, title) => {
     e.preventDefault()
     comfyWindow.setTitle(`${installation.name} — ${title} — Desktop 2.0 v${APP_VERSION}`)
   })
-  comfyWindow.webContents.setWindowOpenHandler(({ url }) => {
+  comfyContents.setWindowOpenHandler(({ url }) => {
     if (shouldOpenInPopup(url)) {
       return { action: 'allow', overrideBrowserWindowOptions: { webPreferences: { preload: undefined } } }
     }
@@ -652,32 +699,66 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
     return { action: 'deny' }
   })
 
+  // Sync the title bar and overlay colors with the ComfyUI frontend's theme
+  const applyComfyTheme = (bg: string, text: string): void => {
+    if (comfyWindow.isDestroyed()) return
+    titleBarView.webContents.executeJavaScript(
+      `window.__updateTheme && window.__updateTheme(${JSON.stringify(bg)}, ${JSON.stringify(text)})`
+    ).catch(() => {})
+    if (process.platform !== 'darwin') {
+      try { comfyWindow.setTitleBarOverlay({ color: bg, symbolColor: text }) } catch {}
+    }
+  }
+
+  comfyContents.on('ipc-message', (_event, channel, ...args) => {
+    if (channel === 'desktop2-theme-report') {
+      const { bg, text } = (args[0] || {}) as { bg?: string; text?: string }
+      if (bg) applyComfyTheme(bg, text || '#ddd')
+    }
+  })
+
+  const COMFY_THEME_OBSERVER_JS =
+    `(function(){` +
+      `let last='';` +
+      `function read(){` +
+        `const s=getComputedStyle(document.body);` +
+        `const bg=s.getPropertyValue('--comfy-menu-bg').trim();` +
+        `const text=s.getPropertyValue('--descrip-text').trim();` +
+        `const key=bg+'|'+text;` +
+        `if(key!==last&&bg){last=key;window.__comfyDesktop2?.reportTheme?.(bg,text)}` +
+      `}` +
+      `new MutationObserver(()=>setTimeout(read,50)).observe(document.documentElement,{attributes:true,attributeFilter:['class','data-theme','style']});` +
+      `read();` +
+    `})()`
+
   // Download management: attach session handler and inject content script
   const isLocal = !url
-  attachSessionDownloadHandler(comfyWindow.webContents.session)
-  comfyWindow.webContents.on('dom-ready', () => {
+  attachSessionDownloadHandler(comfyContents.session)
+  comfyContents.on('dom-ready', () => {
+    comfyContents.executeJavaScript(COMFY_THEME_OBSERVER_JS).catch(() => {})
+
     const preamble = isLocal ? '' : 'window.__comfyDesktop2Remote = true;\n'
-    comfyWindow.webContents
+    comfyContents
       .executeJavaScript(preamble + getModelDownloadContentScript())
       .catch(() => {})
   })
 
-  attachContextMenu(comfyWindow)
+  attachContextMenu(comfyWindow, comfyContents)
 
-  comfyWindow.loadURL(comfyUrl)
+  comfyContents.loadURL(comfyUrl)
 
   const reloadComfy = (): void => {
     if (comfyWindow.isDestroyed()) return
     if (relaunchStates.has(installationId)) return
-    comfyWindow.webContents.stop()
-    comfyWindow.loadURL(comfyUrl)
+    comfyContents.stop()
+    comfyContents.loadURL(comfyUrl)
   }
 
-  comfyWindow.webContents.on('will-prevent-unload', (e) => {
+  comfyContents.on('will-prevent-unload', (e) => {
     e.preventDefault()
   })
 
-  comfyWindow.webContents.on('before-input-event', (e, input) => {
+  comfyContents.on('before-input-event', (e, input) => {
     if (input.type !== 'keyDown') return
     const mod = input.control || input.meta
     if (mod && input.key.toLowerCase() === 'w') {
@@ -695,7 +776,7 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
     if (failRetryTimer) { clearTimeout(failRetryTimer); failRetryTimer = null }
   }
   comfyFailRetryTimerCancels.set(installationId, cancelFailRetry)
-  comfyWindow.webContents.on('did-fail-load', (_e, code, _desc, _failUrl, isMainFrame) => {
+  comfyContents.on('did-fail-load', (_e, code, _desc, _failUrl, isMainFrame) => {
     if (!isMainFrame || code === -3 || failRetryTimer) return
     // During a model-folder relaunch, onComfyRestarted handles retry logic.
     if (relaunchStates.has(installationId)) return
@@ -703,12 +784,12 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
       failRetryTimer = null
       if (relaunchStates.has(installationId)) return
       if (!comfyWindow.isDestroyed()) {
-        comfyWindow.loadURL(comfyUrl)
+        comfyContents.loadURL(comfyUrl)
       }
     }, 2000)
   })
 
-  comfyWindow.webContents.on('render-process-gone', (_event, details) => {
+  comfyContents.on('render-process-gone', (_event, details) => {
     forwardDatadogError({
       source: 'comfy-window-render-process-gone',
       message: `Comfy window renderer process exited (${details.reason})`,
@@ -727,6 +808,8 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
     e.preventDefault()
     detachWindowDownloads(comfyWindow)
     ipc.stopRunning(installationId)
+    titleBarView.webContents.close()
+    comfyView.webContents.close()
     comfyWindow.destroy()
   })
 
@@ -799,7 +882,7 @@ function registerAssetDownloadIpc(): void {
       if (!inst) return false
       const outputDir = resolveOutputDir(inst)
       if (!outputDir) return false
-      return startAssetDownload(win, url, filename, outputDir, authToken)
+      return startAssetDownload(win, url, filename, outputDir, authToken, event.sender)
     },
   )
 }
