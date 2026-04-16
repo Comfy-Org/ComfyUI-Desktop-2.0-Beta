@@ -18,13 +18,15 @@ const isMac = computed(() => navigator.userAgent.toLowerCase().includes('mac'))
 
 <style scoped>
 .titlebar {
-  height: var(--titlebar-height, 36px);
+  height: var(--titlebar-height, 37px);
   flex-shrink: 0;
   display: flex;
   align-items: center;
   background: var(--surface);
   position: relative;
   z-index: 1000;
+  box-sizing: border-box;
+  border-bottom: 1px solid var(--border);
 }
 
 .titlebar-drag-region {

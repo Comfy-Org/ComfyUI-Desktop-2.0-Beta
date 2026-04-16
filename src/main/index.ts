@@ -665,12 +665,14 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
   })
   comfyWindow.contentView.addChildView(comfyView)
 
-  // Layout both views; title bar is fixed height, comfy view fills the rest
+  // Layout both views; title bar is 1px taller than the overlay so a CSS
+  // border-bottom in comfyTitleBar.html sits below the native buttons.
+  const titleBarTotal = TITLEBAR_HEIGHT + 1
   const layoutViews = (): void => {
     if (comfyWindow.isDestroyed()) return
     const [width, height] = comfyWindow.getContentSize() as [number, number]
-    titleBarView.setBounds({ x: 0, y: 0, width, height: TITLEBAR_HEIGHT })
-    comfyView.setBounds({ x: 0, y: TITLEBAR_HEIGHT, width, height: Math.max(0, height - TITLEBAR_HEIGHT) })
+    titleBarView.setBounds({ x: 0, y: 0, width, height: titleBarTotal })
+    comfyView.setBounds({ x: 0, y: titleBarTotal, width, height: Math.max(0, height - titleBarTotal) })
   }
   layoutViews()
   comfyWindow.on('resize', layoutViews)

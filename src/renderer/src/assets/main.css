@@ -101,8 +101,8 @@ body {
 }
 
 /* App shell */
-:root { --titlebar-height: 36px; }
-.app-layout { display: flex; height: calc(100vh - var(--titlebar-height)); border-top: 1px solid var(--border); }
+:root { --titlebar-height: 37px; }
+.app-layout { display: flex; height: calc(100vh - var(--titlebar-height)); }
 
 .sidebar {
   width: 200px;
