@@ -6,7 +6,7 @@ import {
   defaultInstallDir,
   detectGPU, detectDesktopInstall, stageDesktopSnapshot, stageLocalSnapshot,
   getSnapshotCount, getSnapshotListData, getSnapshotDetailData,
-  getSnapshotDiffVsPrevious, diffAgainstCurrent, loadSnapshot, listSnapshots,
+  getSnapshotDiffVsPrevious, diffAgainstCurrent, loadSnapshot, listSnapshots, statesMatch,
   buildExportEnvelope, validateExportEnvelope, importSnapshots,
   resolveSnapshotVersion, getVariantLabel,
   findDuplicatePath, uniqueName, ensureDefaultPrimary,
@@ -197,10 +197,18 @@ export function registerSnapshotHandlers(): void {
       try { parsed = JSON.parse(content) } catch { return { ok: false, message: 'Invalid JSON file.' } }
       let envelope: SnapshotExportEnvelope
       try { envelope = validateExportEnvelope(parsed) } catch (err) { return { ok: false, message: (err as Error).message } }
+
+      // Reject if the newest snapshot in the envelope matches the current state
+      const newestInEnvelope = envelope.snapshots[envelope.snapshots.length - 1]!
+      const existing = await listSnapshots(inst.installPath)
+      if (existing.length > 0 && statesMatch(existing[0]!.snapshot, newestInEnvelope)) {
+        return { ok: false, message: i18n.t('snapshots.importAlreadyCurrent') }
+      }
+
       const result = await importSnapshots(inst.installPath, envelope)
       const snapshotCount = await getSnapshotCount(inst.installPath)
       await installations.update(installationId, { snapshotCount })
-      return { ok: true, imported: result.imported, skipped: result.skipped }
+      return { ok: true, imported: result.imported, restoreFile: result.newestFilename }
     } catch { return { ok: false, message: 'Failed to read snapshot file.' } }
   })
 

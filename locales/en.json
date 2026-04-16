@@ -654,7 +654,8 @@
     "importSnapshots": "Import",
     "importPreviewTitle": "Import Preview",
     "importConfirm": "Confirm Import",
-    "importSuccess": "Imported {imported} snapshot(s), skipped {skipped} duplicate(s).",
+    "importSuccess": "Imported {imported} snapshot(s).",
+    "importAlreadyCurrent": "This snapshot already matches the current state.",
     "importInvalidFile": "Invalid snapshot file.",
     "exportSuccess": "Snapshot exported."
   },

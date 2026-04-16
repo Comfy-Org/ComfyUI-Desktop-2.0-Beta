@@ -348,16 +348,17 @@ async function confirmImportPreview(): Promise<void> {
     snapshot_count_bucket: toCountBucket(snapshots.value.length),
     imported_bucket: toCountBucket(result.imported ?? 0),
   })
-  await modal.alert({
-    title: t('snapshots.importSnapshots'),
-    message: t('snapshots.importSuccess', { imported: result.imported ?? 0, skipped: result.skipped ?? 0 }),
-  })
   selectedFilename.value = null
   detail.value = null
   diffData.value = null
   diffMode.value = null
   await load()
   emit('refresh-all')
+
+  // Show the restore preview modal so the user can see what will change
+  if (result.restoreFile) {
+    await handleRestore(result.restoreFile)
+  }
 }
 
 const filteredCustomNodes = computed(() => {
