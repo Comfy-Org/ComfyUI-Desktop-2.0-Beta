@@ -283,7 +283,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <TitleBar :title="`Desktop 2.0 v${appVersion || ''}`" />
+  <TitleBar />
   <div class="app-layout">
     <!-- Sidebar -->
     <nav class="sidebar">

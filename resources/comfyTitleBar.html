@@ -19,8 +19,11 @@
   </style>
 </head>
 <body>
-  <span id="title">ComfyUI</span>
+  <span id="title"></span>
   <script>
+    window.__setTitle = function(text) {
+      document.getElementById('title').textContent = text;
+    };
     window.__updateTheme = function(bg, text) {
       if (bg) document.body.style.background = bg;
       if (text) document.body.style.color = text;

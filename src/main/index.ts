@@ -28,7 +28,7 @@ import { shouldOpenInPopup } from './lib/allowedPopups'
 import { showModelFolderRelaunchPage } from './lib/relaunchPage'
 import { COMFY_BG, SPLASH_DARK, type SplashTheme } from './lib/theme'
 import { TITLEBAR_HEIGHT, titleBarOverlayForTheme, comfyTitleBarOverlay, updateTitleBarOverlay, setMainWindowId } from './lib/titleBarOverlay'
-import { resolveTheme } from './lib/ipc/shared'
+import { resolveTheme, sourceMap } from './lib/ipc/shared'
 
 todesktop.init({ autoUpdater: false })
 
@@ -650,6 +650,13 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
     webPreferences: { nodeIntegration: false, contextIsolation: true },
   })
   titleBarView.webContents.loadFile(path.join(__dirname, '..', '..', 'resources', 'comfyTitleBar.html'))
+  const sourceLabel = sourceMap[installation.sourceId]?.label
+  const titleBarText = sourceLabel ? `${installation.name} — ${sourceLabel}` : installation.name
+  titleBarView.webContents.on('dom-ready', () => {
+    titleBarView.webContents.executeJavaScript(
+      `window.__setTitle && window.__setTitle(${JSON.stringify(titleBarText)})`
+    ).catch(() => {})
+  })
   comfyWindow.contentView.addChildView(titleBarView)
 
   // ComfyUI content view — completely isolated from the title bar
