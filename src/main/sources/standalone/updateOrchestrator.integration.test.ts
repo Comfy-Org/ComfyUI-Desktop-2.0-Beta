@@ -168,7 +168,7 @@ function fakeProc(opts: {
   proc.killed = false
   proc.kill = vi.fn(() => {
     proc.killed = true
-    proc.emit('close', 1, 'SIGTERM')
+    process.nextTick(() => proc.emit('close', 1, 'SIGTERM'))
     return true
   })
   // Emit 'close' after stdout/stderr have been consumed.
