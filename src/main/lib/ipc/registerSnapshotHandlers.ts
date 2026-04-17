@@ -6,7 +6,7 @@ import {
   defaultInstallDir,
   detectGPU, detectDesktopInstall, stageDesktopSnapshot, stageLocalSnapshot,
   getSnapshotCount, getSnapshotListData, getSnapshotDetailData,
-  getSnapshotDiffVsPrevious, diffAgainstCurrent, loadSnapshot, listSnapshots,
+  getSnapshotDiffVsPrevious, diffAgainstCurrent, loadSnapshot, listSnapshots, statesMatch, deleteSnapshot,
   buildExportEnvelope, validateExportEnvelope, importSnapshots,
   resolveSnapshotVersion, getVariantLabel,
   findDuplicatePath, uniqueName, ensureDefaultPrimary,
@@ -169,9 +169,7 @@ export function registerSnapshotHandlers(): void {
     return { ok: true }
   })
 
-  ipcMain.handle('import-snapshots', async (_event, installationId: string) => {
-    const inst = await installations.get(installationId)
-    if (!inst || !inst.installPath) return { ok: false, message: 'Installation not found.' }
+  ipcMain.handle('import-snapshots-preview', async (_event) => {
     const win = BrowserWindow.fromWebContents(_event.sender)
     if (!win) return { ok: false, message: 'No window.' }
     const { canceled, filePaths } = await dialog.showOpenDialog(win, {
@@ -179,17 +177,49 @@ export function registerSnapshotHandlers(): void {
       properties: ['openFile'],
     })
     if (canceled || filePaths.length === 0) return { ok: false }
-    const content = await fs.promises.readFile(filePaths[0]!, 'utf-8')
-    let parsed: unknown
-    try { parsed = JSON.parse(content) } catch { return { ok: false, message: 'Invalid JSON file.' } }
-    let envelope
-    try { envelope = validateExportEnvelope(parsed) } catch (err) { return { ok: false, message: (err as Error).message } }
-    const result = await importSnapshots(inst.installPath, envelope)
+    try {
+      const content = await fs.promises.readFile(filePaths[0]!, 'utf-8')
+      let parsed: unknown
+      try { parsed = JSON.parse(content) } catch { return { ok: false, message: 'Invalid JSON file.' } }
+      let envelope: SnapshotExportEnvelope
+      try { envelope = validateExportEnvelope(parsed) } catch (err) { return { ok: false, message: (err as Error).message } }
+      return { ok: true, preview: await buildSnapshotPreview(filePaths[0]!, envelope), filePath: filePaths[0]! }
+    } catch { return { ok: false, message: 'Failed to read snapshot file.' } }
+  })
+
+  ipcMain.handle('import-snapshots-confirm', async (_event, installationId: string, filePath: string) => {
+    const inst = await installations.get(installationId)
+    if (!inst || !inst.installPath) return { ok: false, message: 'Installation not found.' }
+    if (!filePath) return { ok: false, message: 'Snapshot file not found.' }
+    try {
+      const content = await fs.promises.readFile(filePath, 'utf-8')
+      let parsed: unknown
+      try { parsed = JSON.parse(content) } catch { return { ok: false, message: 'Invalid JSON file.' } }
+      let envelope: SnapshotExportEnvelope
+      try { envelope = validateExportEnvelope(parsed) } catch (err) { return { ok: false, message: (err as Error).message } }
+
+      // Reject if the newest snapshot in the envelope matches the current state
+      const newestInEnvelope = envelope.snapshots[envelope.snapshots.length - 1]!
+      const existing = await listSnapshots(inst.installPath)
+      if (existing.length > 0 && statesMatch(existing[0]!.snapshot, newestInEnvelope)) {
+        return { ok: false, message: i18n.t('snapshots.importAlreadyCurrent') }
+      }
+
+      const result = await importSnapshots(inst.installPath, envelope)
+      const snapshotCount = await getSnapshotCount(inst.installPath)
+      await installations.update(installationId, { snapshotCount })
+      return { ok: true, imported: result.imported, restoreFile: result.filenames[result.filenames.length - 1]!, importedFiles: result.filenames }
+    } catch { return { ok: false, message: 'Failed to read snapshot file.' } }
+  })
+
+  ipcMain.handle('rollback-imported-snapshots', async (_event, installationId: string, filenames: string[]) => {
+    const inst = await installations.get(installationId)
+    if (!inst || !inst.installPath) return
+    for (const f of filenames) {
+      await deleteSnapshot(inst.installPath, f).catch(() => {})
+    }
     const snapshotCount = await getSnapshotCount(inst.installPath)
-    const allSnapshots = await listSnapshots(inst.installPath)
-    const lastSnapshot = allSnapshots.length > 0 ? allSnapshots[0]!.filename : null
-    await installations.update(installationId, { snapshotCount, ...(lastSnapshot ? { lastSnapshot } : {}) })
-    return { ok: true, imported: result.imported, skipped: result.skipped }
+    await installations.update(installationId, { snapshotCount })
   })
 
   let _lastDesktopPreviewFile: string | null = null

@@ -6,7 +6,9 @@ import { ChevronDown } from 'lucide-vue-next'
 import { emitTelemetryAction, toCountBucket } from '../lib/telemetry'
 import SnapshotDiffView from './SnapshotDiffView.vue'
 import RestoreModal from './RestoreModal.vue'
+import ImportPreviewModal from './ImportPreviewModal.vue'
 import InfoTooltip from './InfoTooltip.vue'
+import { triggerLabel as _triggerLabel, formatDate, formatNodeVersion } from '../lib/snapshots'
 import type {
   ActionDef,
   CopyEvent,
@@ -15,6 +17,7 @@ import type {
   SnapshotDetailData,
   SnapshotDiffData,
   SnapshotDiffResult,
+  SnapshotFilePreview,
 } from '../types/ipc'
 
 interface Props {
@@ -47,6 +50,10 @@ const nodesExpanded = ref(true)
 const restorePreviewFilename = ref<string | null>(null)
 const restorePreviewDiff = ref<SnapshotDiffData | null>(null)
 const restorePreviewLoading = ref(false)
+const importPreview = ref<SnapshotFilePreview | null>(null)
+const importPreviewFilePath = ref<string | null>(null)
+const importPreviewLoading = ref(false)
+const pendingImportFiles = ref<string[]>([])  // files to delete if restore is cancelled
 
 const snapshots = computed(() => listData.value?.snapshots ?? [])
 const copyEvents = computed(() => listData.value?.copyEvents ?? [])
@@ -97,15 +104,7 @@ watch(() => props.installationId, () => {
 }, { immediate: true })
 
 function triggerLabel(trigger: string): string {
-  switch (trigger) {
-    case 'boot': return t('snapshots.triggerBoot')
-    case 'restart': return t('snapshots.triggerRestart')
-    case 'manual': return t('snapshots.triggerManual')
-    case 'pre-update': return t('snapshots.triggerPreUpdate')
-    case 'post-update': return t('snapshots.triggerPostUpdate')
-    case 'post-restore': return t('snapshots.triggerPostRestore')
-    default: return trigger
-  }
+  return _triggerLabel(trigger, t)
 }
 
 function triggerClass(trigger: string): string {
@@ -118,10 +117,6 @@ function triggerClass(trigger: string): string {
     case 'post-restore': return 'trigger-postrestore'
     default: return ''
   }
-}
-
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleString()
 }
 
 function formatRelative(iso: string): string {
@@ -253,16 +248,27 @@ async function handleRestore(filename: string): Promise<void> {
   })
 }
 
-function cancelRestore(): void {
+async function cancelRestore(): Promise<void> {
   restorePreviewFilename.value = null
   restorePreviewDiff.value = null
+
+  // Roll back imported snapshots that were never applied
+  if (pendingImportFiles.value.length > 0) {
+    const files = pendingImportFiles.value
+    pendingImportFiles.value = []
+    await window.api.rollbackImportedSnapshots(props.installationId, files)
+    await load()
+    emit('refresh-all')
+  }
 }
 
 function confirmRestore(): void {
   if (!restorePreviewFilename.value) return
   const filename = restorePreviewFilename.value
   const hasDiff = restorePreviewDiff.value ? diffHasChanges(restorePreviewDiff.value.diff) : undefined
-  cancelRestore()
+  restorePreviewFilename.value = null
+  restorePreviewDiff.value = null
+  pendingImportFiles.value = []
 
   const action: ActionDef = {
     id: 'snapshot-restore',
@@ -318,7 +324,31 @@ async function handleExportAll(): Promise<void> {
 }
 
 async function handleImport(): Promise<void> {
-  const result = await window.api.importSnapshots(props.installationId)
+  importPreview.value = null
+  importPreviewFilePath.value = null
+  const result = await window.api.importSnapshotsPreview()
+  if (!result.ok) {
+    if (result.message) {
+      await modal.alert({ title: t('snapshots.importSnapshots'), message: result.message })
+    }
+    return
+  }
+  importPreview.value = result.preview ?? null
+  importPreviewFilePath.value = result.filePath ?? null
+}
+
+function cancelImportPreview(): void {
+  importPreview.value = null
+  importPreviewFilePath.value = null
+  importPreviewLoading.value = false
+}
+
+async function confirmImportPreview(): Promise<void> {
+  const filePath = importPreviewFilePath.value
+  if (!filePath) return
+  importPreviewLoading.value = true
+  const result = await window.api.importSnapshotsConfirm(props.installationId, filePath)
+  cancelImportPreview()
   if (!result.ok) {
     if (result.message) {
       await modal.alert({ title: t('snapshots.importSnapshots'), message: result.message })
@@ -330,16 +360,21 @@ async function handleImport(): Promise<void> {
     snapshot_count_bucket: toCountBucket(snapshots.value.length),
     imported_bucket: toCountBucket(result.imported ?? 0),
   })
-  await modal.alert({
-    title: t('snapshots.importSnapshots'),
-    message: t('snapshots.importSuccess', { imported: result.imported ?? 0, skipped: result.skipped ?? 0 }),
-  })
   selectedFilename.value = null
   detail.value = null
   diffData.value = null
   diffMode.value = null
+
+  // Track imported files so we can roll back if the user cancels restore
+  pendingImportFiles.value = result.importedFiles ?? []
+
   await load()
   emit('refresh-all')
+
+  // Show the restore preview modal so the user can see what will change
+  if (result.restoreFile) {
+    await handleRestore(result.restoreFile)
+  }
 }
 
 const filteredCustomNodes = computed(() => {
@@ -356,12 +391,6 @@ const filteredPipPackages = computed(() => {
   const q = pipSearch.value.toLowerCase()
   return entries.filter(([name]) => name.toLowerCase().includes(q))
 })
-
-function formatNodeVersion(node: { version?: string; commit?: string }): string {
-  if (node.version) return node.version
-  if (node.commit) return node.commit.slice(0, 7)
-  return '—'
-}
 
 function diffHasChanges(diff: SnapshotDiffResult): boolean {
   return diff.comfyuiChanged || diff.updateChannelChanged || diff.nodesAdded.length > 0 || diff.nodesRemoved.length > 0 ||
@@ -610,6 +639,15 @@ function diffHasChanges(diff: SnapshotDiffResult): boolean {
       :loading="restorePreviewLoading"
       @cancel="cancelRestore"
       @confirm="confirmRestore"
+    />
+
+    <!-- Import preview modal -->
+    <ImportPreviewModal
+      v-if="importPreview || importPreviewLoading"
+      :preview="importPreview"
+      :loading="importPreviewLoading"
+      @cancel="cancelImportPreview"
+      @confirm="confirmImportPreview"
     />
   </div>
 </template>
