@@ -114,9 +114,10 @@ export const standalone: SourcePlugin = {
     const userArgs = ((installation.launchArgs as string | undefined) ?? DEFAULT_LAUNCH_ARGS).trim()
     const parsed = userArgs.length > 0 ? parseArgs(userArgs) : []
     const port = extractPort(parsed)
+    const desktop2Flags = ['--feature-flag', 'show_signin_button=true']
     return {
       cmd: pythonPath,
-      args: ['-s', path.join('ComfyUI', 'main.py'), ...parsed],
+      args: ['-s', path.join('ComfyUI', 'main.py'), ...desktop2Flags, ...parsed],
       cwd: installation.installPath,
       port,
     }
