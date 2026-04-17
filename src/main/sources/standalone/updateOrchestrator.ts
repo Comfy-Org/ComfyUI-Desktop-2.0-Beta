@@ -109,6 +109,7 @@ function spawnUpdateScript(
     if (signal) {
       const onAbort = (): void => { proc.kill() }
       signal.addEventListener('abort', onAbort, { once: true })
+      if (signal.aborted) onAbort()
       proc.on('close', () => signal.removeEventListener('abort', onAbort))
     }
     proc.stdout.on('data', (chunk: Buffer) => {
