@@ -53,6 +53,7 @@ const restorePreviewLoading = ref(false)
 const importPreview = ref<SnapshotFilePreview | null>(null)
 const importPreviewFilePath = ref<string | null>(null)
 const importPreviewLoading = ref(false)
+const pendingImportFiles = ref<string[]>([])  // files to delete if restore is cancelled
 
 const snapshots = computed(() => listData.value?.snapshots ?? [])
 const copyEvents = computed(() => listData.value?.copyEvents ?? [])
@@ -247,16 +248,27 @@ async function handleRestore(filename: string): Promise<void> {
   })
 }
 
-function cancelRestore(): void {
+async function cancelRestore(): Promise<void> {
   restorePreviewFilename.value = null
   restorePreviewDiff.value = null
+
+  // Roll back imported snapshots that were never applied
+  if (pendingImportFiles.value.length > 0) {
+    const files = pendingImportFiles.value
+    pendingImportFiles.value = []
+    await window.api.rollbackImportedSnapshots(props.installationId, files)
+    await load()
+    emit('refresh-all')
+  }
 }
 
 function confirmRestore(): void {
   if (!restorePreviewFilename.value) return
   const filename = restorePreviewFilename.value
   const hasDiff = restorePreviewDiff.value ? diffHasChanges(restorePreviewDiff.value.diff) : undefined
-  cancelRestore()
+  restorePreviewFilename.value = null
+  restorePreviewDiff.value = null
+  pendingImportFiles.value = []
 
   const action: ActionDef = {
     id: 'snapshot-restore',
@@ -352,6 +364,10 @@ async function confirmImportPreview(): Promise<void> {
   detail.value = null
   diffData.value = null
   diffMode.value = null
+
+  // Track imported files so we can roll back if the user cancels restore
+  pendingImportFiles.value = result.importedFiles ?? []
+
   await load()
   emit('refresh-all')
 

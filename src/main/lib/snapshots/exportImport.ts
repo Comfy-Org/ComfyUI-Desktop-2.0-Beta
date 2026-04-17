@@ -69,12 +69,11 @@ export function validateExportEnvelope(data: unknown): SnapshotExportEnvelope {
 export async function importSnapshots(
   installPath: string,
   envelope: SnapshotExportEnvelope
-): Promise<{ imported: number; newestFilename: string }> {
+): Promise<{ imported: number; filenames: string[] }> {
   const dir = snapshotsDir(installPath)
   await fs.promises.mkdir(dir, { recursive: true })
 
-  let imported = 0
-  let newestFilename = ''
+  const filenames: string[] = []
   // Each imported snapshot gets a fresh timestamp so it lands at the top of the
   // timeline.  Offset by 1ms per snapshot to preserve ordering within the import.
   const baseTime = Date.now()
@@ -89,9 +88,8 @@ export async function importSnapshots(
     const tmpPath = `${filePath}.${suffix}.tmp`
     await fs.promises.writeFile(tmpPath, JSON.stringify(stamped, null, 2))
     await fs.promises.rename(tmpPath, filePath)
-    newestFilename = filename
-    imported++
+    filenames.push(filename)
   }
 
-  return { imported, newestFilename }
+  return { imported: filenames.length, filenames }
 }

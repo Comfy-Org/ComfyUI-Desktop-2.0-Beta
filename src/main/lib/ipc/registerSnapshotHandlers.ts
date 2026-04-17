@@ -6,7 +6,7 @@ import {
   defaultInstallDir,
   detectGPU, detectDesktopInstall, stageDesktopSnapshot, stageLocalSnapshot,
   getSnapshotCount, getSnapshotListData, getSnapshotDetailData,
-  getSnapshotDiffVsPrevious, diffAgainstCurrent, loadSnapshot, listSnapshots, statesMatch,
+  getSnapshotDiffVsPrevious, diffAgainstCurrent, loadSnapshot, listSnapshots, statesMatch, deleteSnapshot,
   buildExportEnvelope, validateExportEnvelope, importSnapshots,
   resolveSnapshotVersion, getVariantLabel,
   findDuplicatePath, uniqueName, ensureDefaultPrimary,
@@ -208,8 +208,18 @@ export function registerSnapshotHandlers(): void {
       const result = await importSnapshots(inst.installPath, envelope)
       const snapshotCount = await getSnapshotCount(inst.installPath)
       await installations.update(installationId, { snapshotCount })
-      return { ok: true, imported: result.imported, restoreFile: result.newestFilename }
+      return { ok: true, imported: result.imported, restoreFile: result.filenames[result.filenames.length - 1]!, importedFiles: result.filenames }
     } catch { return { ok: false, message: 'Failed to read snapshot file.' } }
+  })
+
+  ipcMain.handle('rollback-imported-snapshots', async (_event, installationId: string, filenames: string[]) => {
+    const inst = await installations.get(installationId)
+    if (!inst || !inst.installPath) return
+    for (const f of filenames) {
+      await deleteSnapshot(inst.installPath, f).catch(() => {})
+    }
+    const snapshotCount = await getSnapshotCount(inst.installPath)
+    await installations.update(installationId, { snapshotCount })
   })
 
   let _lastDesktopPreviewFile: string | null = null
