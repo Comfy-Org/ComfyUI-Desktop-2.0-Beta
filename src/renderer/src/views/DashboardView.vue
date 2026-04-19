@@ -58,6 +58,10 @@ const primaryInstall = computed(() => {
   return localInstalls.value[0] ?? null
 })
 
+const canChangePrimary = computed(() =>
+  localInstalls.value.some((i) => i.sourceId !== 'desktop' && i.id !== primaryInstall.value?.id)
+)
+
 const desktopOnlyInstall = computed(() => {
   if (localInstalls.value.length !== 1) return null
   const only = localInstalls.value[0]!
@@ -304,7 +308,7 @@ async function handleLaunch(inst: Installation, actions: ListAction[]): Promise<
 // --- Change primary ---
 async function changePrimary(): Promise<void> {
   const items = localInstalls.value
-    .filter((i) => i.sourceId !== 'desktop' && !prefs.isPrimary(i.id))
+    .filter((i) => i.sourceId !== 'desktop' && i.id !== primaryInstall.value?.id)
     .map((i) => ({
       value: i.id,
       label: i.name,
@@ -390,7 +394,7 @@ async function changePrimary(): Promise<void> {
             <div class="dashboard-card-badge dashboard-card-badge-primary">
               <Star :size="14" />
               {{ $t('dashboard.primary') }}
-              <button class="dashboard-change-btn" :title="$t('dashboard.setPrimaryMessage')" @click="changePrimary">{{ $t('dashboard.changePrimary') }}</button>
+              <button v-if="canChangePrimary" class="dashboard-change-btn" :title="$t('dashboard.setPrimaryMessage')" @click="changePrimary">{{ $t('dashboard.changePrimary') }}</button>
             </div>
             <DashboardCard
               :installation="primaryInstall"
