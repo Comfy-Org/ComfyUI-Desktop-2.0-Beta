@@ -58,9 +58,10 @@ const primaryInstall = computed(() => {
   return localInstalls.value[0] ?? null
 })
 
-const canChangePrimary = computed(() =>
-  localInstalls.value.some((i) => i.sourceId !== 'desktop' && i.id !== primaryInstall.value?.id)
+const availablePrimaryTargets = computed(() =>
+  localInstalls.value.filter((i) => i.sourceId !== 'desktop' && i.id !== primaryInstall.value?.id)
 )
+const canChangePrimary = computed(() => availablePrimaryTargets.value.length > 0)
 
 const desktopOnlyInstall = computed(() => {
   if (localInstalls.value.length !== 1) return null
@@ -307,8 +308,7 @@ async function handleLaunch(inst: Installation, actions: ListAction[]): Promise<
 
 // --- Change primary ---
 async function changePrimary(): Promise<void> {
-  const items = localInstalls.value
-    .filter((i) => i.sourceId !== 'desktop' && i.id !== primaryInstall.value?.id)
+  const items = availablePrimaryTargets.value
     .map((i) => ({
       value: i.id,
       label: i.name,
