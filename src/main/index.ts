@@ -27,7 +27,7 @@ import { getModelDownloadContentScript } from './lib/comfyContentScript'
 import { shouldOpenInPopup } from './lib/allowedPopups'
 import { showModelFolderRelaunchPage } from './lib/relaunchPage'
 import { COMFY_BG, SPLASH_DARK, type SplashTheme } from './lib/theme'
-import { TITLEBAR_HEIGHT, titleBarOverlayForTheme, comfyTitleBarOverlay, updateTitleBarOverlay, setMainWindowId } from './lib/titleBarOverlay'
+import { TITLEBAR_HEIGHT, TRAFFIC_LIGHT_POSITION, titleBarOverlayForTheme, comfyTitleBarOverlay, updateTitleBarOverlay, setMainWindowId } from './lib/titleBarOverlay'
 import { resolveTheme, sourceMap } from './lib/ipc/shared'
 
 todesktop.init({ autoUpdater: false })
@@ -260,9 +260,9 @@ function createMainWindow(): void {
     backgroundColor: '#202020',
     show: false,
     titleBarStyle: 'hidden',
-    ...(process.platform !== 'darwin'
-      ? { titleBarOverlay: titleBarOverlayForTheme(isDark) }
-      : {}),
+    ...(process.platform === 'darwin'
+      ? { trafficLightPosition: TRAFFIC_LIGHT_POSITION }
+      : { titleBarOverlay: titleBarOverlayForTheme(isDark) }),
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -635,9 +635,9 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
     title: `${installation.name} — Desktop 2.0 v${APP_VERSION}`,
     backgroundColor: COMFY_BG,
     titleBarStyle: 'hidden',
-    ...(process.platform !== 'darwin'
-      ? { titleBarOverlay: comfyTitleBarOverlay() }
-      : {}),
+    ...(process.platform === 'darwin'
+      ? { trafficLightPosition: TRAFFIC_LIGHT_POSITION }
+      : { titleBarOverlay: comfyTitleBarOverlay() }),
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -688,6 +688,16 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
   const comfyContents = comfyView.webContents
 
   if (saved?.maximized) comfyWindow.maximize()
+
+  // On macOS fullscreen the traffic-light buttons disappear, so remove the extra left padding
+  if (process.platform === 'darwin') {
+    comfyWindow.on('enter-full-screen', () => {
+      titleBarView.webContents.executeJavaScript(`document.body.style.paddingLeft='12px'`).catch(() => {})
+    })
+    comfyWindow.on('leave-full-screen', () => {
+      titleBarView.webContents.executeJavaScript(`document.body.style.paddingLeft='78px'`).catch(() => {})
+    })
+  }
 
   comfyWindow.on('resize', () => saveWindowBounds(installationId, comfyWindow))
   comfyWindow.on('move', () => saveWindowBounds(installationId, comfyWindow))
@@ -932,7 +942,18 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
   })
 
   app.on('before-quit', () => {
-    if (!isQuitInProgress()) setQuitReason('user-quit')
+    if (!isQuitInProgress()) {
+      setQuitReason('user-quit')
+      ipc.cancelAll()
+      for (const [, win] of comfyWindows) {
+        if (!win.isDestroyed()) win.destroy()
+      }
+      comfyWindows.clear()
+      if (tray) {
+        tray.destroy()
+        tray = null
+      }
+    }
     cleanupTempDownloads()
   })
 

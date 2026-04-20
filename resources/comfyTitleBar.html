@@ -24,6 +24,9 @@
     window.__setTitle = function(text) {
       document.getElementById('title').textContent = text;
     };
+    if (navigator.userAgent.includes('Mac')) {
+      document.body.style.paddingLeft = '78px';
+    }
     window.__updateTheme = function(bg, text) {
       if (bg) document.body.style.background = bg;
       if (text) document.body.style.color = text;

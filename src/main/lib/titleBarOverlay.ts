@@ -4,6 +4,9 @@ import { resolveTheme } from './ipc/shared'
 /** Height (px) of the custom title bar — must match the CSS `--titlebar-height`. */
 export const TITLEBAR_HEIGHT = 36
 
+/** Position of macOS traffic-light buttons, vertically centered within the title bar. */
+export const TRAFFIC_LIGHT_POSITION: Electron.Point = { x: 13, y: Math.round((TITLEBAR_HEIGHT - 16) / 2) }
+
 /** Colors must stay in sync with `--surface` in `src/renderer/src/assets/main.css`. */
 export function titleBarOverlayForTheme(isDark: boolean): Electron.TitleBarOverlayOptions {
   return {
