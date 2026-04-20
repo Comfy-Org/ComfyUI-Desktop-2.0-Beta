@@ -243,6 +243,23 @@ export function setPortArg(launchCmd: LaunchCmd, port: number): void {
   launchCmd.port = port
 }
 
+/**
+ * Check whether a port is already in use by attempting to bind a temporary
+ * server to it.  This works regardless of which user owns the listener,
+ * unlike `lsof` / `findPidsByPort` which can only see same-user processes
+ * on Linux.
+ */
+export function isPortListening(port: number, host: string = '127.0.0.1'): Promise<boolean> {
+  return new Promise((resolve) => {
+    const server = net.createServer()
+    server.once('error', () => resolve(true))
+    server.listen(port, host, () => {
+      server.once('close', () => resolve(false))
+      server.close()
+    })
+  })
+}
+
 export function findAvailablePort(host: string, startPort: number, endPort: number, excludePorts?: ReadonlySet<number>): Promise<number> {
   return new Promise((resolve, reject) => {
     function tryPort(port: number): void {

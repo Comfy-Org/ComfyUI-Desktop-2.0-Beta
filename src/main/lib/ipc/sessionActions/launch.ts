@@ -4,7 +4,7 @@ import {
   sourceMap,
   spawnProcess, waitForPort, waitForUrl, killProcessTree,
   findPidsByPort, getProcessInfo, looksLikeComfyUI, setPortArg,
-  findAvailablePort, writePortLock, readPortLock,
+  findAvailablePort, isPortListening, writePortLock, readPortLock,
   COMFY_BOOT_TIMEOUT_MS, SENSITIVE_ARG_RE,
   _onLaunch, _onComfyExited, _onComfyRestarted, _onModelFolderRelaunch,
   _operationAborts, _runningSessions, _pendingPorts,
@@ -192,10 +192,14 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
     setPortArg(launchCmd as LaunchCmd, actionData.portOverride as number)
   }
 
-  // Check for port conflicts
+  // Check for port conflicts.
+  // Use isPortListening (net.createServer bind test) as the primary check —
+  // findPidsByPort uses lsof which on Linux can only see same-user processes,
+  // silently returning [] when a different user owns the port.
   const pendingPortOwner = _pendingPorts.get(launchCmd.port!)
-  const existingPids = pendingPortOwner ? [] : await findPidsByPort(launchCmd.port!)
-  const portOccupied = !!pendingPortOwner || existingPids.length > 0
+  const portBusy = !pendingPortOwner && await isPortListening(launchCmd.port!)
+  const existingPids = (pendingPortOwner || !portBusy) ? [] : await findPidsByPort(launchCmd.port!)
+  const portOccupied = !!pendingPortOwner || portBusy
 
   if (portOccupied) {
     const defaults = source.getDefaults ? source.getDefaults() : {}
