@@ -7,7 +7,7 @@ import { launchAction } from '../../lib/actions'
 import {
   PLATFORM_PREFIX, DEFAULT_LAUNCH_ARGS,
   getVariantLabel, stripPlatform, getActivePythonPath,
-  getVenvDir, recommendVariant,
+  getVenvDir, recommendVariant, writeComfyEnvironment,
 } from './envPaths'
 import { install, postInstall, probeInstallation } from './install'
 import { getListPreview, getStatusTag, getDetailSections, RELEASE_REPO } from './updateSections'
@@ -135,6 +135,8 @@ export const standalone: SourcePlugin = {
   handleAction,
 
   async fixupCopy(srcPath: string, destPath: string): Promise<void> {
+    await writeComfyEnvironment(path.join(destPath, 'ComfyUI'))
+
     const venvPath = getVenvDir(destPath)
     if (!fs.existsSync(venvPath)) return
 
