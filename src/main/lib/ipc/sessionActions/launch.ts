@@ -227,13 +227,18 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
         if (lock) {
           message = i18n.t('errors.portConflictLauncher', { port: launchCmd.port!, name: lock.installationName })
           isComfy = true
-        } else {
+        } else if (existingPids.length > 0) {
           const info = await getProcessInfo(existingPids[0]!)
           isComfy = looksLikeComfyUI(info)
           const processDesc = info ? info.name : `PID ${existingPids[0]}`
           message = isComfy
             ? i18n.t('errors.portConflictComfy', { port: launchCmd.port!, process: processDesc })
             : i18n.t('errors.portConflictOther', { port: launchCmd.port!, process: processDesc })
+        } else {
+          // Port is busy but we could not identify the owning process
+          // (e.g. lsof on Linux cannot see other-user processes).
+          isComfy = false
+          message = i18n.t('errors.portConflictOther', { port: launchCmd.port!, process: i18n.t('errors.unknownProcess') })
         }
       }
       _operationAborts.delete(installationId)
