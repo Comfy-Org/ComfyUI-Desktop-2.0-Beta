@@ -28,6 +28,7 @@ import NewInstallModal from './views/NewInstallModal.vue'
 import QuickInstallModal from './views/QuickInstallModal.vue'
 import TrackModal from './views/TrackModal.vue'
 import LoadSnapshotModal from './views/LoadSnapshotModal.vue'
+import TitleBar from './components/TitleBar.vue'
 
 // Lucide icons
 import { LayoutDashboard, Box, Play, FolderOpen, Image, Settings, MessageSquarePlus } from 'lucide-vue-next'
@@ -282,6 +283,7 @@ onMounted(async () => {
 </script>
 
 <template>
+  <TitleBar />
   <div class="app-layout">
     <!-- Sidebar -->
     <nav class="sidebar">
