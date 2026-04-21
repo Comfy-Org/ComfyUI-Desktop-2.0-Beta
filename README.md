@@ -21,13 +21,6 @@ An Electron app for managing multiple ComfyUI installations.
 
 [![macOS Apple Silicon](https://img.shields.io/badge/macOS-Apple%20Silicon-000000?style=for-the-badge&logo=apple&logoColor=white)](https://dl.todesktop.com/241130tqe9q3y/mac/dmg/arm64)
 
-### Linux
-
-[![Linux AppImage x64](https://img.shields.io/badge/Linux-AppImage%20x64-FCC624?style=for-the-badge&logo=linux&logoColor=black)](https://dl.todesktop.com/241130tqe9q3y/linux/appImage/x64)
-[![Linux AppImage ARM64](https://img.shields.io/badge/Linux-AppImage%20ARM64-FCC624?style=for-the-badge&logo=linux&logoColor=black)](https://dl.todesktop.com/241130tqe9q3y/linux/appImage/arm64)
-[![Linux DEB x64](https://img.shields.io/badge/Linux-DEB%20x64-FCC624?style=for-the-badge&logo=debian&logoColor=black)](https://dl.todesktop.com/241130tqe9q3y/linux/deb/x64)
-[![Linux DEB ARM64](https://img.shields.io/badge/Linux-DEB%20ARM64-FCC624?style=for-the-badge&logo=debian&logoColor=black)](https://dl.todesktop.com/241130tqe9q3y/linux/deb/arm64)
-
 ## Running
 
 ### Windows
