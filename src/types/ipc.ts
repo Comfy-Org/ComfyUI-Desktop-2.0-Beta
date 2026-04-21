@@ -672,8 +672,8 @@ export interface ElectronApi {
   getSnapshotDiff(installationId: string, filename: string, mode: 'previous' | 'current'): Promise<SnapshotDiffData>
   exportSnapshot(installationId: string, filename: string): Promise<{ ok: boolean; message?: string }>
   exportAllSnapshots(installationId: string): Promise<{ ok: boolean; message?: string }>
-  importSnapshotsPreview(): Promise<{ ok: boolean; preview?: SnapshotFilePreview; filePath?: string; message?: string }>
-  importSnapshotsConfirm(installationId: string, filePath: string): Promise<{ ok: boolean; imported?: number; restoreFile?: string; importedFiles?: string[]; message?: string }>
+  importSnapshotsPreview(): Promise<{ ok: boolean; preview?: SnapshotFilePreview; message?: string }>
+  importSnapshotsConfirm(installationId: string): Promise<{ ok: boolean; imported?: number; restoreFile?: string; importedFiles?: string[]; message?: string }>
   rollbackImportedSnapshots(installationId: string, filenames: string[]): Promise<void>
   previewSnapshotFile(): Promise<{ ok: boolean; preview?: SnapshotFilePreview; message?: string }>
   previewDesktopMigration(): Promise<{ ok: boolean; message?: string; preview?: SnapshotFilePreview; snapshotPath?: string }>

@@ -51,7 +51,6 @@ const restorePreviewFilename = ref<string | null>(null)
 const restorePreviewDiff = ref<SnapshotDiffData | null>(null)
 const restorePreviewLoading = ref(false)
 const importPreview = ref<SnapshotFilePreview | null>(null)
-const importPreviewFilePath = ref<string | null>(null)
 const importPreviewLoading = ref(false)
 const pendingImportFiles = ref<string[]>([])  // files to delete if restore is cancelled
 
@@ -325,7 +324,6 @@ async function handleExportAll(): Promise<void> {
 
 async function handleImport(): Promise<void> {
   importPreview.value = null
-  importPreviewFilePath.value = null
   const result = await window.api.importSnapshotsPreview()
   if (!result.ok) {
     if (result.message) {
@@ -334,20 +332,16 @@ async function handleImport(): Promise<void> {
     return
   }
   importPreview.value = result.preview ?? null
-  importPreviewFilePath.value = result.filePath ?? null
 }
 
 function cancelImportPreview(): void {
   importPreview.value = null
-  importPreviewFilePath.value = null
   importPreviewLoading.value = false
 }
 
 async function confirmImportPreview(): Promise<void> {
-  const filePath = importPreviewFilePath.value
-  if (!filePath) return
   importPreviewLoading.value = true
-  const result = await window.api.importSnapshotsConfirm(props.installationId, filePath)
+  const result = await window.api.importSnapshotsConfirm(props.installationId)
   cancelImportPreview()
   if (!result.ok) {
     if (result.message) {

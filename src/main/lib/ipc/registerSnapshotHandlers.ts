@@ -169,7 +169,10 @@ export function registerSnapshotHandlers(): void {
     return { ok: true }
   })
 
+  let _pendingImportEnvelope: { filePath: string; envelope: SnapshotExportEnvelope } | null = null
+
   ipcMain.handle('import-snapshots-preview', async (_event) => {
+    _pendingImportEnvelope = null
     const win = BrowserWindow.fromWebContents(_event.sender)
     if (!win) return { ok: false, message: 'No window.' }
     const { canceled, filePaths } = await dialog.showOpenDialog(win, {
@@ -183,33 +186,31 @@ export function registerSnapshotHandlers(): void {
       try { parsed = JSON.parse(content) } catch { return { ok: false, message: 'Invalid JSON file.' } }
       let envelope: SnapshotExportEnvelope
       try { envelope = validateExportEnvelope(parsed) } catch (err) { return { ok: false, message: (err as Error).message } }
-      return { ok: true, preview: await buildSnapshotPreview(filePaths[0]!, envelope), filePath: filePaths[0]! }
+      _pendingImportEnvelope = { filePath: filePaths[0]!, envelope }
+      return { ok: true, preview: await buildSnapshotPreview(filePaths[0]!, envelope) }
     } catch { return { ok: false, message: 'Failed to read snapshot file.' } }
   })
 
-  ipcMain.handle('import-snapshots-confirm', async (_event, installationId: string, filePath: string) => {
+  ipcMain.handle('import-snapshots-confirm', async (_event, installationId: string) => {
+    const pending = _pendingImportEnvelope
+    _pendingImportEnvelope = null
+    if (!pending) return { ok: false, message: 'No pending import preview.' }
     const inst = await installations.get(installationId)
     if (!inst || !inst.installPath) return { ok: false, message: 'Installation not found.' }
-    if (!filePath) return { ok: false, message: 'Snapshot file not found.' }
-    try {
-      const content = await fs.promises.readFile(filePath, 'utf-8')
-      let parsed: unknown
-      try { parsed = JSON.parse(content) } catch { return { ok: false, message: 'Invalid JSON file.' } }
-      let envelope: SnapshotExportEnvelope
-      try { envelope = validateExportEnvelope(parsed) } catch (err) { return { ok: false, message: (err as Error).message } }
 
-      // Reject if the newest snapshot in the envelope matches the current state
-      const newestInEnvelope = envelope.snapshots[envelope.snapshots.length - 1]!
-      const existing = await listSnapshots(inst.installPath)
-      if (existing.length > 0 && statesMatch(existing[0]!.snapshot, newestInEnvelope)) {
-        return { ok: false, message: i18n.t('snapshots.importAlreadyCurrent') }
-      }
+    const { envelope } = pending
 
-      const result = await importSnapshots(inst.installPath, envelope)
-      const snapshotCount = await getSnapshotCount(inst.installPath)
-      await installations.update(installationId, { snapshotCount })
-      return { ok: true, imported: result.imported, restoreFile: result.filenames[result.filenames.length - 1]!, importedFiles: result.filenames }
-    } catch { return { ok: false, message: 'Failed to read snapshot file.' } }
+    // Reject if the newest snapshot in the envelope matches the current state
+    const newestInEnvelope = envelope.snapshots[envelope.snapshots.length - 1]!
+    const existing = await listSnapshots(inst.installPath)
+    if (existing.length > 0 && statesMatch(existing[0]!.snapshot, newestInEnvelope)) {
+      return { ok: false, message: i18n.t('snapshots.importAlreadyCurrent') }
+    }
+
+    const result = await importSnapshots(inst.installPath, envelope)
+    const snapshotCount = await getSnapshotCount(inst.installPath)
+    await installations.update(installationId, { snapshotCount })
+    return { ok: true, imported: result.imported, restoreFile: result.filenames[result.filenames.length - 1]!, importedFiles: result.filenames }
   })
 
   ipcMain.handle('rollback-imported-snapshots', async (_event, installationId: string, filenames: string[]) => {
