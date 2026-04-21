@@ -23,6 +23,7 @@ export {
   listSnapshots,
   loadSnapshot,
   saveSnapshot,
+  statesMatch,
   deduplicatePreUpdateSnapshot,
   pruneAutoSnapshots,
 } from './store'

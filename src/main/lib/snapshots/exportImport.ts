@@ -1,7 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import { isSafePathComponent } from '../cnr'
-import { snapshotsDir, formatTimestamp, listSnapshots } from './store'
+import { snapshotsDir, formatTimestamp } from './store'
 import type { Snapshot, SnapshotEntry, SnapshotExportEnvelope } from './types'
 
 export function buildExportEnvelope(installationName: string, entries: SnapshotEntry[]): SnapshotExportEnvelope {
@@ -69,34 +69,37 @@ export function validateExportEnvelope(data: unknown): SnapshotExportEnvelope {
 export async function importSnapshots(
   installPath: string,
   envelope: SnapshotExportEnvelope
-): Promise<{ imported: number; skipped: number }> {
+): Promise<{ imported: number; filenames: string[] }> {
   const dir = snapshotsDir(installPath)
   await fs.promises.mkdir(dir, { recursive: true })
 
-  // Build a set of existing (createdAt, trigger) pairs for deduplication
-  const existing = await listSnapshots(installPath)
-  const existingKeys = new Set(existing.map((e) => `${e.snapshot.createdAt}|${e.snapshot.trigger}`))
+  const filenames: string[] = []
+  // Each imported snapshot gets a fresh timestamp so it lands at the top of the
+  // timeline.  Envelope is newest-first (index 0 = newest), so the first entry
+  // gets the highest timestamp and later entries get progressively older ones.
+  const count = envelope.snapshots.length
+  const baseTime = Date.now()
 
-  let imported = 0
-  let skipped = 0
-
-  for (const snapshot of envelope.snapshots) {
-    const key = `${snapshot.createdAt}|${snapshot.trigger}`
-    if (existingKeys.has(key)) {
-      skipped++
-      continue
-    }
-
-    const date = new Date(snapshot.createdAt)
+  for (let i = 0; i < count; i++) {
+    const snapshot = envelope.snapshots[i]!
+    const now = new Date(baseTime + (count - 1 - i))
+    const stamped = { ...snapshot, createdAt: now.toISOString() }
     const suffix = Math.random().toString(16).slice(2, 8)
-    const filename = `${formatTimestamp(date)}-${snapshot.trigger}-${suffix}.json`
+    const filename = `${formatTimestamp(now)}-${snapshot.trigger}-${suffix}.json`
     const filePath = path.join(dir, filename)
     const tmpPath = `${filePath}.${suffix}.tmp`
-    await fs.promises.writeFile(tmpPath, JSON.stringify(snapshot, null, 2))
-    await fs.promises.rename(tmpPath, filePath)
-    existingKeys.add(key)
-    imported++
+    try {
+      await fs.promises.writeFile(tmpPath, JSON.stringify(stamped, null, 2))
+      await fs.promises.rename(tmpPath, filePath)
+    } catch (err) {
+      // Clean up any files already written
+      for (const written of filenames) {
+        await fs.promises.unlink(path.join(dir, written)).catch(() => {})
+      }
+      throw err
+    }
+    filenames.push(filename)
   }
 
-  return { imported, skipped }
+  return { imported: filenames.length, filenames }
 }

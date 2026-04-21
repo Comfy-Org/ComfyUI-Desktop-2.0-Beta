@@ -604,6 +604,42 @@ input[type="checkbox"]:checked::after { transform: translateX(16px); }
 .sp-pip-name { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; user-select: text; }
 .sp-pip-version { color: var(--text-muted); font-family: monospace; margin-left: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 50%; user-select: text; }
 
+/* Snapshot detail layout (ls- prefix) — used by LoadSnapshotModal, ImportPreviewModal */
+.ls-section { margin-bottom: 16px; }
+.ls-section:last-child { margin-bottom: 0; }
+.ls-section-title { font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.3px; margin-bottom: 8px; }
+.ls-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 16px; margin-bottom: 10px; }
+.ls-field { display: flex; flex-direction: column; gap: 2px; margin-bottom: 4px; }
+.ls-label { font-size: 13px; color: var(--text-muted); }
+.ls-value { font-size: 14px; color: var(--text); user-select: text; }
+.ls-value-loading { color: var(--text-muted); }
+.ls-timeline { display: flex; flex-direction: column; gap: 4px; max-height: 200px; overflow-y: auto; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 6px; }
+.ls-timeline-item { display: flex; align-items: center; gap: 8px; font-size: 13px; padding: 6px 10px; background: var(--bg); border-radius: 5px; }
+.ls-trigger { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px; padding: 1px 6px; border-radius: 3px; flex-shrink: 0; color: var(--text-muted); background: var(--surface); }
+.ls-trigger-boot { color: var(--text-muted); }
+.ls-trigger-restart { color: var(--info); }
+.ls-trigger-manual { color: var(--success); }
+.ls-trigger-pre-update { color: var(--success); }
+.ls-trigger-post-update { color: var(--warning); }
+.ls-trigger-post-restore { color: var(--warning); }
+.ls-current-tag { font-size: 11px; font-weight: 600; color: var(--accent); flex-shrink: 0; }
+.ls-meta { color: var(--text-muted); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ls-time { color: var(--text-muted); font-size: 13px; flex-shrink: 0; }
+.ls-subsection { margin-top: 10px; }
+.ls-subsection-title { font-size: 13px; font-weight: 600; color: var(--text-muted); cursor: pointer; display: flex; align-items: center; justify-content: space-between; user-select: none; margin-bottom: 6px; }
+.ls-collapse { font-size: 14px; }
+.ls-node-row { display: flex; align-items: center; gap: 8px; font-size: 13px; padding: 2px 0; }
+.ls-node-status { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.ls-node-enabled { background: var(--info); }
+.ls-node-disabled { background: var(--text-muted); }
+.ls-node-name { color: var(--text); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; }
+.ls-node-type { font-size: 11px; font-weight: 600; text-transform: uppercase; color: var(--text-muted); padding: 1px 5px; border: 1px solid var(--border); border-radius: 3px; flex-shrink: 0; }
+.ls-node-version { font-size: 13px; color: var(--text-muted); font-family: monospace; flex-shrink: 0; user-select: text; }
+.ls-empty { font-size: 14px; color: var(--text-muted); }
+.ls-pip-row { display: flex; justify-content: space-between; align-items: center; padding: 2px 0; font-size: 13px; }
+.ls-pip-name { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; user-select: text; }
+.ls-pip-version { color: var(--text-muted); font-family: monospace; margin-left: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 50%; user-select: text; }
+
 .modal-prompt-card {
   background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
   padding: 10px 14px; margin: 0 0 12px;
