@@ -23,7 +23,7 @@ import { deleteAction, untrackAction } from '../actions'
 import {
   spawnProcess, waitForPort, waitForUrl, killProcessTree, killByPort,
   findPidsByPort, getProcessInfo, looksLikeComfyUI, setPortArg,
-  findAvailablePort, writePortLock, readPortLock, removePortLock,
+  findAvailablePort, isPortListening, writePortLock, readPortLock, removePortLock,
   COMFY_BOOT_TIMEOUT_MS,
 } from '../process'
 import { detectGPU, validateHardware, checkNvidiaDriver } from '../gpu'
@@ -63,7 +63,7 @@ export {
   defaultInstallDir, download, createCache, extract, deleteDir, deleteAction, untrackAction,
   spawnProcess, waitForPort, waitForUrl, killProcessTree, killByPort,
   findPidsByPort, getProcessInfo, looksLikeComfyUI, setPortArg,
-  findAvailablePort, writePortLock, readPortLock, removePortLock,
+  findAvailablePort, isPortListening, writePortLock, readPortLock, removePortLock,
   COMFY_BOOT_TIMEOUT_MS,
   detectGPU, validateHardware, checkNvidiaDriver,
   detectDesktopInstall, stageDesktopSnapshot,

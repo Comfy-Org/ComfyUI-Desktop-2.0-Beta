@@ -490,6 +490,7 @@
     "portConflictComfy": "端口 {port} 已被 {process} 占用，看起来是一个 ComfyUI 实例。请先停止它或在启动参数中更改端口。",
     "portConflictOther": "端口 {port} 已被 {process} 占用。请在启动参数中更改端口以避免冲突。",
     "portConflictUsePort": "改用端口 {port}",
+    "unknownProcess": "未知进程",
     "portConflictKill": "停止进程并重试",
     "portConflictKillConfirmTitle": "停止现有进程",
     "portConflictKillConfirmMessage": "这将强制停止当前使用此端口的进程。该 ComfyUI 实例中未保存的工作将丢失。",

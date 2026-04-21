@@ -243,26 +243,29 @@ export function setPortArg(launchCmd: LaunchCmd, port: number): void {
   launchCmd.port = port
 }
 
-export function findAvailablePort(host: string, startPort: number, endPort: number, excludePorts?: ReadonlySet<number>): Promise<number> {
-  return new Promise((resolve, reject) => {
-    function tryPort(port: number): void {
-      if (port > endPort) {
-        reject(new Error(`No available ports found between ${startPort} and ${endPort}`))
-        return
-      }
-      if (excludePorts && excludePorts.has(port)) {
-        tryPort(port + 1)
-        return
-      }
-      const server = net.createServer()
-      server.listen(port, host, () => {
-        server.once("close", () => resolve(port))
-        server.close()
-      })
-      server.on("error", () => tryPort(port + 1))
-    }
-    tryPort(startPort)
+/**
+ * Check whether a port is already in use by attempting to bind a temporary
+ * server to it.  This works regardless of which user owns the listener,
+ * unlike `lsof` / `findPidsByPort` which can only see same-user processes
+ * on Linux.
+ */
+export function isPortListening(port: number, host: string = '127.0.0.1'): Promise<boolean> {
+  return new Promise((resolve) => {
+    const server = net.createServer()
+    server.once('error', () => resolve(true))
+    server.listen(port, host, () => {
+      server.once('close', () => resolve(false))
+      server.close()
+    })
   })
+}
+
+export async function findAvailablePort(host: string, startPort: number, endPort: number, excludePorts?: ReadonlySet<number>): Promise<number> {
+  for (let port = startPort; port <= endPort; port++) {
+    if (excludePorts && excludePorts.has(port)) continue
+    if (!(await isPortListening(port, host))) return port
+  }
+  throw new Error(`No available ports found between ${startPort} and ${endPort}`)
 }
 
 // --- Port lock files ---
