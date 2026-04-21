@@ -101,7 +101,8 @@ body {
 }
 
 /* App shell */
-.app-layout { display: flex; height: 100vh; }
+:root { --titlebar-height: 37px; }
+.app-layout { display: flex; height: calc(100vh - var(--titlebar-height)); }
 
 .sidebar {
   width: 200px;
@@ -503,6 +504,7 @@ input[type="checkbox"]:checked::after { transform: translateX(16px); }
 /* View modals */
 .view-modal {
   position: fixed; inset: 0;
+  top: var(--titlebar-height);
   background: var(--overlay-bg);
   display: none; align-items: center; justify-content: center;
   z-index: 50;
@@ -511,7 +513,7 @@ input[type="checkbox"]:checked::after { transform: translateX(16px); }
 .view-modal-content {
   background: var(--bg); border: 1px solid var(--border);
   border-radius: 12px;
-  width: calc(100vw - 260px); height: calc(100vh - 60px);
+  width: calc(100vw - 260px); height: calc(100vh - 60px - var(--titlebar-height));
   max-width: 900px;
   display: flex; flex-direction: column; overflow: hidden;
 }
@@ -554,6 +556,7 @@ input[type="checkbox"]:checked::after { transform: translateX(16px); }
 /* Modal dialog */
 .modal-overlay {
   position: fixed; inset: 0;
+  top: var(--titlebar-height);
   background: var(--overlay-bg);
   display: flex; align-items: center; justify-content: center;
   z-index: 100;
@@ -933,7 +936,7 @@ input[type="checkbox"]:checked::after { transform: translateX(16px); }
 .quick-install-modal {
   max-width: 620px;
   min-height: 420px;
-  height: auto; max-height: calc(100vh - 100px);
+  height: auto; max-height: calc(100vh - 100px - var(--titlebar-height));
 }
 .quick-install-desc {
   font-size: 14px; color: var(--text-muted); margin-bottom: 16px;
