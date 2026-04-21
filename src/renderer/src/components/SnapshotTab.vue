@@ -99,6 +99,9 @@ watch(() => props.installationId, () => {
   diffMode.value = null
   restorePreviewFilename.value = null
   restorePreviewDiff.value = null
+  importPreview.value = null
+  importPreviewLoading.value = false
+  pendingImport.value = false
   load()
 }, { immediate: true })
 

@@ -537,7 +537,8 @@ describe('importSnapshots', () => {
     expect(loaded.pipPackages).toEqual({ numpy: '1.24.0', pillow: '10.0.0' })
   })
 
-  it('imported snapshots land at the top with preserved envelope order', async () => {
+  it('imported snapshots land at the top with preserved envelope order (newest-first)', async () => {
+    // Envelope is newest-first: boot is the "newest" at index 0
     const envelope = makeEnvelope([
       makeSnapshot({ createdAt: '2026-03-01T12:00:00.000Z', trigger: 'boot' }),
       makeSnapshot({ createdAt: '2026-03-03T12:00:00.000Z', trigger: 'manual' }),
@@ -551,10 +552,10 @@ describe('importSnapshots', () => {
     for (const e of entries) {
       expect(new Date(e.snapshot.createdAt).getTime()).toBeGreaterThan(new Date('2026-03-03T12:00:00.000Z').getTime())
     }
-    // Newest-first: last in envelope (restart) has the highest timestamp
-    expect(entries[0]!.snapshot.trigger).toBe('restart')
+    // Newest-first: first in envelope (boot) gets the highest timestamp
+    expect(entries[0]!.snapshot.trigger).toBe('boot')
     expect(entries[1]!.snapshot.trigger).toBe('manual')
-    expect(entries[2]!.snapshot.trigger).toBe('boot')
+    expect(entries[2]!.snapshot.trigger).toBe('restart')
   })
 
   it('imports identical snapshots within a single envelope', async () => {

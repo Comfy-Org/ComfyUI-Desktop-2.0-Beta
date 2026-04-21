@@ -6,7 +6,7 @@ import {
   defaultInstallDir,
   detectGPU, detectDesktopInstall, stageDesktopSnapshot, stageLocalSnapshot,
   getSnapshotCount, getSnapshotListData, getSnapshotDetailData,
-  getSnapshotDiffVsPrevious, diffAgainstCurrent, loadSnapshot, listSnapshots, statesMatch,
+  getSnapshotDiffVsPrevious, diffAgainstCurrent, loadSnapshot, listSnapshots,
   buildExportEnvelope, validateExportEnvelope, importSnapshots,
   resolveSnapshotVersion, getVariantLabel,
   findDuplicatePath, uniqueName, ensureDefaultPrimary,
@@ -186,43 +186,46 @@ export function registerSnapshotHandlers(): void {
       try { parsed = JSON.parse(content) } catch { return { ok: false, message: 'Invalid JSON file.' } }
       let envelope: SnapshotExportEnvelope
       try { envelope = validateExportEnvelope(parsed) } catch (err) { return { ok: false, message: (err as Error).message } }
+      const preview = await buildSnapshotPreview(filePaths[0]!, envelope)
       _pendingImportEnvelope = { filePath: filePaths[0]!, envelope }
-      return { ok: true, preview: await buildSnapshotPreview(filePaths[0]!, envelope) }
+      return { ok: true, preview }
     } catch { return { ok: false, message: 'Failed to read snapshot file.' } }
   })
 
   ipcMain.handle('import-snapshots-diff', async (_event, installationId: string) => {
-    if (!_pendingImportEnvelope) return { ok: false, message: 'No pending import preview.' }
-    const inst = await installations.get(installationId)
-    if (!inst || !inst.installPath) return { ok: false, message: 'Installation not found.' }
+    try {
+      if (!_pendingImportEnvelope) return { ok: false, message: 'No pending import preview.' }
+      const inst = await installations.get(installationId)
+      if (!inst || !inst.installPath) return { ok: false, message: 'Installation not found.' }
 
-    const { envelope } = _pendingImportEnvelope
-    const newestInEnvelope = envelope.snapshots[envelope.snapshots.length - 1]!
+      const newestInEnvelope = _pendingImportEnvelope.envelope.snapshots[0]!
+      const diff = await diffAgainstCurrent(inst.installPath, inst, newestInEnvelope as Snapshot)
+      const empty = !diff.comfyuiChanged && !diff.updateChannelChanged && diff.nodesAdded.length === 0 && diff.nodesRemoved.length === 0 &&
+                    diff.nodesChanged.length === 0 && diff.pipsAdded.length === 0 && diff.pipsRemoved.length === 0 &&
+                    diff.pipsChanged.length === 0
 
-    // Reject if the newest snapshot already matches the current state
-    const existing = await listSnapshots(inst.installPath)
-    if (existing.length > 0 && statesMatch(existing[0]!.snapshot, newestInEnvelope)) {
-      return { ok: false, message: i18n.t('snapshots.importAlreadyCurrent') }
-    }
+      // Reject if the import would produce no changes
+      if (empty) {
+        return { ok: false, message: i18n.t('snapshots.importAlreadyCurrent') }
+      }
 
-    const diff = await diffAgainstCurrent(inst.installPath, inst, newestInEnvelope as Snapshot)
-    const empty = !diff.comfyuiChanged && !diff.updateChannelChanged && diff.nodesAdded.length === 0 && diff.nodesRemoved.length === 0 &&
-                  diff.nodesChanged.length === 0 && diff.pipsAdded.length === 0 && diff.pipsRemoved.length === 0 &&
-                  diff.pipsChanged.length === 0
-    return { ok: true, diff: { mode: 'current' as const, baseLabel: 'Current state', diff, empty } }
+      return { ok: true, diff: { mode: 'current' as const, baseLabel: 'Current state', diff, empty } }
+    } catch (err) { return { ok: false, message: (err as Error)?.message ?? 'Failed to compute import diff.' } }
   })
 
   ipcMain.handle('import-snapshots-confirm', async (_event, installationId: string) => {
     const pending = _pendingImportEnvelope
     _pendingImportEnvelope = null
     if (!pending) return { ok: false, message: 'No pending import preview.' }
-    const inst = await installations.get(installationId)
-    if (!inst || !inst.installPath) return { ok: false, message: 'Installation not found.' }
+    try {
+      const inst = await installations.get(installationId)
+      if (!inst || !inst.installPath) return { ok: false, message: 'Installation not found.' }
 
-    const result = await importSnapshots(inst.installPath, pending.envelope)
-    const snapshotCount = await getSnapshotCount(inst.installPath)
-    await installations.update(installationId, { snapshotCount })
-    return { ok: true, imported: result.imported, restoreFile: result.filenames[result.filenames.length - 1]! }
+      const result = await importSnapshots(inst.installPath, pending.envelope)
+      const snapshotCount = await getSnapshotCount(inst.installPath)
+      await installations.update(installationId, { snapshotCount })
+      return { ok: true, imported: result.imported, restoreFile: result.filenames[0]! }
+    } catch (err) { return { ok: false, message: (err as Error)?.message ?? 'Failed to import snapshots.' } }
   })
 
   let _lastDesktopPreviewFile: string | null = null

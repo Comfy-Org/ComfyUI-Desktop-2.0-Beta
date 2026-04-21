@@ -75,19 +75,29 @@ export async function importSnapshots(
 
   const filenames: string[] = []
   // Each imported snapshot gets a fresh timestamp so it lands at the top of the
-  // timeline.  Offset by 1ms per snapshot to preserve ordering within the import.
+  // timeline.  Envelope is newest-first (index 0 = newest), so the first entry
+  // gets the highest timestamp and later entries get progressively older ones.
+  const count = envelope.snapshots.length
   const baseTime = Date.now()
 
-  for (let i = 0; i < envelope.snapshots.length; i++) {
+  for (let i = 0; i < count; i++) {
     const snapshot = envelope.snapshots[i]!
-    const now = new Date(baseTime + i)
+    const now = new Date(baseTime + (count - 1 - i))
     const stamped = { ...snapshot, createdAt: now.toISOString() }
     const suffix = Math.random().toString(16).slice(2, 8)
     const filename = `${formatTimestamp(now)}-${snapshot.trigger}-${suffix}.json`
     const filePath = path.join(dir, filename)
     const tmpPath = `${filePath}.${suffix}.tmp`
-    await fs.promises.writeFile(tmpPath, JSON.stringify(stamped, null, 2))
-    await fs.promises.rename(tmpPath, filePath)
+    try {
+      await fs.promises.writeFile(tmpPath, JSON.stringify(stamped, null, 2))
+      await fs.promises.rename(tmpPath, filePath)
+    } catch (err) {
+      // Clean up any files already written
+      for (const written of filenames) {
+        await fs.promises.unlink(path.join(dir, written)).catch(() => {})
+      }
+      throw err
+    }
     filenames.push(filename)
   }
 
