@@ -42,7 +42,7 @@ import { copyDirWithProgress } from '../copy'
 import { fetchJSON } from '../fetch'
 import { fetchLatestRelease } from '../comfyui-releases'
 import { captureSnapshotIfChanged, getSnapshotCount, getSnapshotListData, getSnapshotDetailData, getSnapshotDiffVsPrevious, diffAgainstCurrent, loadSnapshot, listSnapshots, deleteSnapshot, diffSnapshots, buildExportEnvelope, validateExportEnvelope, importSnapshots, saveSnapshot, statesMatch, restoreCustomNodes, restorePipPackages, restoreComfyUIVersion, buildPostRestoreState, formatSnapshotVersion, resolveSnapshotVersion } from '../snapshots'
-import type { SnapshotExportEnvelope } from '../snapshots'
+import type { SnapshotExportEnvelope, Snapshot } from '../snapshots'
 import { getVariantLabel } from '../../sources/standalone'
 import type { FieldOption, SourcePlugin } from '../../types/sources'
 import { REQUIRES_STOPPED } from '../../../types/ipc'
@@ -81,7 +81,7 @@ export {
 }
 export type {
   ChildProcess, InstallationRecord, ComfyVersion, LatestTagOverride,
-  GpuInfo, SnapshotExportEnvelope, FieldOption, SourcePlugin,
+  GpuInfo, SnapshotExportEnvelope, Snapshot, FieldOption, SourcePlugin,
   Theme, ResolvedTheme, QuitActiveItem, LaunchCmd, ComfyArgDef,
 }
 

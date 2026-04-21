@@ -6,13 +6,13 @@ import {
   defaultInstallDir,
   detectGPU, detectDesktopInstall, stageDesktopSnapshot, stageLocalSnapshot,
   getSnapshotCount, getSnapshotListData, getSnapshotDetailData,
-  getSnapshotDiffVsPrevious, diffAgainstCurrent, loadSnapshot, listSnapshots, statesMatch, deleteSnapshot,
+  getSnapshotDiffVsPrevious, diffAgainstCurrent, loadSnapshot, listSnapshots, statesMatch,
   buildExportEnvelope, validateExportEnvelope, importSnapshots,
   resolveSnapshotVersion, getVariantLabel,
   findDuplicatePath, uniqueName, ensureDefaultPrimary,
 } from './shared'
 import type {
-  LatestTagOverride, SnapshotExportEnvelope, FieldOption,
+  LatestTagOverride, SnapshotExportEnvelope, FieldOption, Snapshot,
 } from './shared'
 
 async function _findReferenceRepo(): Promise<{ comfyuiDir: string; override?: LatestTagOverride } | null> {
@@ -191,6 +191,27 @@ export function registerSnapshotHandlers(): void {
     } catch { return { ok: false, message: 'Failed to read snapshot file.' } }
   })
 
+  ipcMain.handle('import-snapshots-diff', async (_event, installationId: string) => {
+    if (!_pendingImportEnvelope) return { ok: false, message: 'No pending import preview.' }
+    const inst = await installations.get(installationId)
+    if (!inst || !inst.installPath) return { ok: false, message: 'Installation not found.' }
+
+    const { envelope } = _pendingImportEnvelope
+    const newestInEnvelope = envelope.snapshots[envelope.snapshots.length - 1]!
+
+    // Reject if the newest snapshot already matches the current state
+    const existing = await listSnapshots(inst.installPath)
+    if (existing.length > 0 && statesMatch(existing[0]!.snapshot, newestInEnvelope)) {
+      return { ok: false, message: i18n.t('snapshots.importAlreadyCurrent') }
+    }
+
+    const diff = await diffAgainstCurrent(inst.installPath, inst, newestInEnvelope as Snapshot)
+    const empty = !diff.comfyuiChanged && !diff.updateChannelChanged && diff.nodesAdded.length === 0 && diff.nodesRemoved.length === 0 &&
+                  diff.nodesChanged.length === 0 && diff.pipsAdded.length === 0 && diff.pipsRemoved.length === 0 &&
+                  diff.pipsChanged.length === 0
+    return { ok: true, diff: { mode: 'current' as const, baseLabel: 'Current state', diff, empty } }
+  })
+
   ipcMain.handle('import-snapshots-confirm', async (_event, installationId: string) => {
     const pending = _pendingImportEnvelope
     _pendingImportEnvelope = null
@@ -198,29 +219,10 @@ export function registerSnapshotHandlers(): void {
     const inst = await installations.get(installationId)
     if (!inst || !inst.installPath) return { ok: false, message: 'Installation not found.' }
 
-    const { envelope } = pending
-
-    // Reject if the newest snapshot in the envelope matches the current state
-    const newestInEnvelope = envelope.snapshots[envelope.snapshots.length - 1]!
-    const existing = await listSnapshots(inst.installPath)
-    if (existing.length > 0 && statesMatch(existing[0]!.snapshot, newestInEnvelope)) {
-      return { ok: false, message: i18n.t('snapshots.importAlreadyCurrent') }
-    }
-
-    const result = await importSnapshots(inst.installPath, envelope)
+    const result = await importSnapshots(inst.installPath, pending.envelope)
     const snapshotCount = await getSnapshotCount(inst.installPath)
     await installations.update(installationId, { snapshotCount })
-    return { ok: true, imported: result.imported, restoreFile: result.filenames[result.filenames.length - 1]!, importedFiles: result.filenames }
-  })
-
-  ipcMain.handle('rollback-imported-snapshots', async (_event, installationId: string, filenames: string[]) => {
-    const inst = await installations.get(installationId)
-    if (!inst || !inst.installPath) return
-    for (const f of filenames) {
-      await deleteSnapshot(inst.installPath, f).catch(() => {})
-    }
-    const snapshotCount = await getSnapshotCount(inst.installPath)
-    await installations.update(installationId, { snapshotCount })
+    return { ok: true, imported: result.imported, restoreFile: result.filenames[result.filenames.length - 1]! }
   })
 
   let _lastDesktopPreviewFile: string | null = null

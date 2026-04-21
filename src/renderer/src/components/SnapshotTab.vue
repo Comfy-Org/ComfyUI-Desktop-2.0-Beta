@@ -52,7 +52,7 @@ const restorePreviewDiff = ref<SnapshotDiffData | null>(null)
 const restorePreviewLoading = ref(false)
 const importPreview = ref<SnapshotFilePreview | null>(null)
 const importPreviewLoading = ref(false)
-const pendingImportFiles = ref<string[]>([])  // files to delete if restore is cancelled
+const pendingImport = ref(false)  // true when restore modal is showing an import diff
 
 const snapshots = computed(() => listData.value?.snapshots ?? [])
 const copyEvents = computed(() => listData.value?.copyEvents ?? [])
@@ -247,27 +247,43 @@ async function handleRestore(filename: string): Promise<void> {
   })
 }
 
-async function cancelRestore(): Promise<void> {
+function cancelRestore(): void {
   restorePreviewFilename.value = null
   restorePreviewDiff.value = null
-
-  // Roll back imported snapshots that were never applied
-  if (pendingImportFiles.value.length > 0) {
-    const files = pendingImportFiles.value
-    pendingImportFiles.value = []
-    await window.api.rollbackImportedSnapshots(props.installationId, files)
-    await load()
-    emit('refresh-all')
-  }
+  pendingImport.value = false
 }
 
-function confirmRestore(): void {
-  if (!restorePreviewFilename.value) return
-  const filename = restorePreviewFilename.value
+async function confirmRestore(): Promise<void> {
   const hasDiff = restorePreviewDiff.value ? diffHasChanges(restorePreviewDiff.value.diff) : undefined
-  restorePreviewFilename.value = null
-  restorePreviewDiff.value = null
-  pendingImportFiles.value = []
+  let filename = restorePreviewFilename.value
+
+  if (pendingImport.value) {
+    // Import flow: write snapshots to disk now, then restore the newest
+    pendingImport.value = false
+    restorePreviewFilename.value = null
+    restorePreviewDiff.value = null
+
+    const result = await window.api.importSnapshotsConfirm(props.installationId)
+    if (!result.ok) {
+      if (result.message) {
+        await modal.alert({ title: t('snapshots.importSnapshots'), message: result.message })
+      }
+      return
+    }
+    emitTelemetryAction('launcher.snapshot.flow', {
+      action: 'import',
+      snapshot_count_bucket: toCountBucket(snapshots.value.length),
+      imported_bucket: toCountBucket(result.imported ?? 0),
+    })
+    filename = result.restoreFile ?? null
+    await load()
+    emit('refresh-all')
+  } else {
+    restorePreviewFilename.value = null
+    restorePreviewDiff.value = null
+  }
+
+  if (!filename) return
 
   const action: ActionDef = {
     id: 'snapshot-restore',
@@ -341,7 +357,7 @@ function cancelImportPreview(): void {
 
 async function confirmImportPreview(): Promise<void> {
   importPreviewLoading.value = true
-  const result = await window.api.importSnapshotsConfirm(props.installationId)
+  const result = await window.api.importSnapshotsDiff(props.installationId)
   cancelImportPreview()
   if (!result.ok) {
     if (result.message) {
@@ -349,26 +365,15 @@ async function confirmImportPreview(): Promise<void> {
     }
     return
   }
-  emitTelemetryAction('launcher.snapshot.flow', {
-    action: 'import',
-    snapshot_count_bucket: toCountBucket(snapshots.value.length),
-    imported_bucket: toCountBucket(result.imported ?? 0),
-  })
+
+  // Show the restore modal with the import diff (nothing written to disk yet)
   selectedFilename.value = null
   detail.value = null
   diffData.value = null
   diffMode.value = null
-
-  // Track imported files so we can roll back if the user cancels restore
-  pendingImportFiles.value = result.importedFiles ?? []
-
-  await load()
-  emit('refresh-all')
-
-  // Show the restore preview modal so the user can see what will change
-  if (result.restoreFile) {
-    await handleRestore(result.restoreFile)
-  }
+  pendingImport.value = true
+  restorePreviewDiff.value = result.diff ?? null
+  restorePreviewFilename.value = '__pending_import__'
 }
 
 const filteredCustomNodes = computed(() => {
