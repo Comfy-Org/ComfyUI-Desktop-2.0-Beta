@@ -260,26 +260,12 @@ export function isPortListening(port: number, host: string = '127.0.0.1'): Promi
   })
 }
 
-export function findAvailablePort(host: string, startPort: number, endPort: number, excludePorts?: ReadonlySet<number>): Promise<number> {
-  return new Promise((resolve, reject) => {
-    function tryPort(port: number): void {
-      if (port > endPort) {
-        reject(new Error(`No available ports found between ${startPort} and ${endPort}`))
-        return
-      }
-      if (excludePorts && excludePorts.has(port)) {
-        tryPort(port + 1)
-        return
-      }
-      const server = net.createServer()
-      server.listen(port, host, () => {
-        server.once("close", () => resolve(port))
-        server.close()
-      })
-      server.on("error", () => tryPort(port + 1))
-    }
-    tryPort(startPort)
-  })
+export async function findAvailablePort(host: string, startPort: number, endPort: number, excludePorts?: ReadonlySet<number>): Promise<number> {
+  for (let port = startPort; port <= endPort; port++) {
+    if (excludePorts && excludePorts.has(port)) continue
+    if (!(await isPortListening(port, host))) return port
+  }
+  throw new Error(`No available ports found between ${startPort} and ${endPort}`)
 }
 
 // --- Port lock files ---
