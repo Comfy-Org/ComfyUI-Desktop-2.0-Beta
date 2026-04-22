@@ -55,6 +55,17 @@ export function getMasterPythonPath(installPath: string): string {
   return path.join(installPath, 'standalone-env', 'bin', 'python3')
 }
 
+const COMFY_ENVIRONMENT_FILE = '.comfy_environment'
+const COMFY_ENVIRONMENT_VALUE = 'local-launcher'
+
+export async function writeComfyEnvironment(comfyUIDir: string): Promise<void> {
+  try {
+    await fs.promises.writeFile(path.join(comfyUIDir, COMFY_ENVIRONMENT_FILE), COMFY_ENVIRONMENT_VALUE + '\n', 'utf-8')
+  } catch (err) {
+    console.warn('Failed to write .comfy_environment:', err)
+  }
+}
+
 export function recommendVariant(variantId: string, gpu: string | undefined): boolean {
   const stripped = stripPlatform(variantId)
   if (!gpu) return stripped === 'cpu'

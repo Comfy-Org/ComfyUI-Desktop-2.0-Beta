@@ -50,6 +50,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
   // Migrate legacy envs/default/ → ComfyUI/.venv/ for standalone installations
   if (inst.sourceId === 'standalone') {
     const { migrateEnvLayout } = await import('../../../sources/standalone/install')
+    const { writeComfyEnvironment } = await import('../../../sources/standalone/envPaths')
     const updateFn = async (data: Record<string, unknown>): Promise<unknown> => installations.update(installationId, data)
     try {
       const migrated = await migrateEnvLayout(inst.installPath, updateFn)
@@ -57,6 +58,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
     } catch (err) {
       console.warn('Env layout migration failed:', err)
     }
+    await writeComfyEnvironment(path.join(inst.installPath, 'ComfyUI'))
   }
 
   const launchStartedAt = Date.now()

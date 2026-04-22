@@ -15,6 +15,7 @@ import { runComfyUIUpdate } from './updateOrchestrator'
 import {
   MANIFEST_FILE, DEFAULT_LAUNCH_ARGS,
   getUvPath, getVenvDir, findSitePackages, getMasterPythonPath,
+  writeComfyEnvironment,
 } from './envPaths'
 import type { InstallationRecord } from '../../installations'
 import type { ComfyVersion } from '../../lib/version'
@@ -118,6 +119,7 @@ export async function postInstall(installation: InstallationRecord, { sendProgre
     tryConfigurePygit2Fallback(installation.installPath)
   }
   const comfyuiDir = path.join(installation.installPath, 'ComfyUI')
+  await writeComfyEnvironment(comfyuiDir)
   sendProgress('cleanup', { percent: -1, status: 'Fetching version tags…' })
   await fetchTags(comfyuiDir)
   const headCommit = readGitHead(comfyuiDir)
