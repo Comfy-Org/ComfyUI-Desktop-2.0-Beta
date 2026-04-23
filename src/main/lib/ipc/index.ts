@@ -3,7 +3,7 @@ import {
   installations, settings,
   sourceMap,
   detectDesktopInstall,
-  isGitAvailable, tryConfigurePygit2Fallback,
+  isGitAvailable, tryConfigureBootstrapPygit2, tryConfigurePygit2Fallback,
   createCache, fetchJSON,
   setCallbacks, _broadcastToRenderer,
   migrateDefaults, checkInstallationUpdates,
@@ -101,13 +101,18 @@ export function register(callbacks: RegisterCallbacks = {}): void {
   void (async () => {
     try {
       if (await isGitAvailable()) return
+      // Prefer standalone installation's pygit2 (co-located with ComfyUI env)
       const all = await installations.list()
       for (const inst of all) {
         if (inst.sourceId !== 'standalone' || !inst.installPath) continue
         if (tryConfigurePygit2Fallback(inst.installPath)) {
           console.log('[ipc] System git not found — configured pygit2 fallback via', inst.installPath)
-          break
+          return
         }
+      }
+      // Fall back to bootstrap python (bundled with the app, for pre-install use)
+      if (tryConfigureBootstrapPygit2()) {
+        console.log('[ipc] System git not found — configured pygit2 via bootstrap python')
       }
     } catch {}
   })()
