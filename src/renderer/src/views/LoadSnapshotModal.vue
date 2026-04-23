@@ -4,7 +4,8 @@ import { useI18n } from 'vue-i18n'
 import { useModal } from '../composables/useModal'
 import { useModalOverlay } from '../composables/useModalOverlay'
 import type { SnapshotFilePreview, FieldOption, GPUInfo } from '../types/ipc'
-import { getVariantImage, getVariantGpuLabel, sortedCardOptions, findBestVariant } from '../lib/variants'
+import { getVariantGpuLabel, sortedCardOptions, findBestVariant } from '../lib/variants'
+import VariantCardGrid from '../components/VariantCardGrid.vue'
 import { emitTelemetryAction, toVariantBucket } from '../lib/telemetry'
 import { triggerLabel as _triggerLabel, formatDate, formatNodeVersion } from '../lib/snapshots'
 
@@ -348,37 +349,12 @@ defineExpose({ open })
               <div class="ls-field">
                 <span class="ls-label">{{ $t('list.snapshotDevice') }}</span>
                 <div v-if="variantLoading" class="ls-value ls-value-loading with-spinner">{{ $t('newInstall.loading') }}</div>
-                <div
+                <VariantCardGrid
                   v-else-if="variantOptions.length > 0"
-                  class="variant-cards"
-                >
-                  <div
-                    v-for="opt in sortedVariants"
-                    :key="opt.value"
-                    :class="['variant-card', {
-                      selected: selectedVariant?.value === opt.value,
-                      recommended: opt.recommended,
-                    }]"
-                    @click="selectVariant(opt)"
-                  >
-                    <div class="variant-card-icon">
-                      <img
-                        v-if="getVariantImage(opt)"
-                        :src="getVariantImage(opt)!"
-                        :alt="opt.label"
-                        draggable="false"
-                      />
-                      <span v-else class="variant-card-icon-text">{{ opt.label }}</span>
-                    </div>
-                    <div class="variant-card-label">{{ opt.label }}</div>
-                    <div v-if="opt.recommended" class="variant-card-badge">
-                      {{ $t('newInstall.recommended') }}
-                    </div>
-                    <div v-if="opt.description" class="variant-card-desc">
-                      {{ opt.description }}
-                    </div>
-                  </div>
-                </div>
+                  :options="sortedVariants"
+                  :selected-value="selectedVariant?.value"
+                  @select="selectVariant"
+                />
                 <span v-else class="ls-value">{{ $t('newInstall.noOptions') }}</span>
               </div>
 

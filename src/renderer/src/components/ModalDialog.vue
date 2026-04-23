@@ -2,9 +2,10 @@
 import { ref, computed, watch, nextTick, onMounted, onUnmounted, reactive } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useModal, type ModalOption } from '../composables/useModal'
-import { sortedCardOptions, getVariantImage } from '../lib/variants'
+import { sortedCardOptions } from '../lib/variants'
 import type { FieldOption } from '../types/ipc'
 import InfoTooltip from './InfoTooltip.vue'
+import VariantCardGrid from './VariantCardGrid.vue'
 import { formatNodeVersion } from '../lib/snapshots'
 
 const { t } = useI18n()
@@ -261,37 +262,12 @@ onUnmounted(() => {
               <div class="modal-loading-spinner" />
               <span>{{ $t('common.loading') }}</span>
             </div>
-            <div v-else class="variant-cards">
-              <div
-                v-for="opt in sortedVariants"
-                :key="opt.value"
-                role="button"
-                tabindex="0"
-                :class="['variant-card', {
-                  selected: state.selectedVariant?.value === opt.value,
-                  recommended: opt.recommended,
-                }]"
-                @click="selectVariant(opt)"
-                @keydown.enter.prevent="selectVariant(opt)"
-              >
-                <div class="variant-card-icon">
-                  <img
-                    v-if="getVariantImage(opt)"
-                    :src="getVariantImage(opt)!"
-                    :alt="opt.label"
-                    draggable="false"
-                  />
-                  <span v-else class="variant-card-icon-text">{{ opt.label }}</span>
-                </div>
-                <div class="variant-card-label">{{ opt.label }}</div>
-                <div v-if="opt.recommended" class="variant-card-badge">
-                  {{ $t('newInstall.recommended') }}
-                </div>
-                <div v-if="opt.description" class="variant-card-desc">
-                  {{ opt.description }}
-                </div>
-              </div>
-            </div>
+            <VariantCardGrid
+              v-else
+              :options="sortedVariants"
+              :selected-value="state.selectedVariant?.value"
+              @select="selectVariant"
+            />
           </div>
 
           <div v-if="state.messageDetails.length" class="modal-details">

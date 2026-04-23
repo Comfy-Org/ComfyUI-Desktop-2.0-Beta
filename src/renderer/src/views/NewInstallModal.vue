@@ -4,7 +4,8 @@ import { useI18n } from 'vue-i18n'
 import { useModal } from '../composables/useModal'
 import { useModalOverlay } from '../composables/useModalOverlay'
 import type { Source, SourceField, FieldOption, HardwareValidation } from '../types/ipc'
-import { stripVariantPrefix, getVariantImage, sortedCardOptions } from '../lib/variants'
+import { stripVariantPrefix, sortedCardOptions } from '../lib/variants'
+import VariantCardGrid from '../components/VariantCardGrid.vue'
 import { emitTelemetryAction, toVariantBucket } from '../lib/telemetry'
 import { formatBytes } from '../lib/formatting'
 import { toPathGuardrail, trackGuardrailBlocked, trackDiskWarningResponse, createDiskSpaceChecker } from '../lib/installHelpers'
@@ -735,37 +736,12 @@ defineExpose({ open })
                     <div v-if="fieldLoading.get(field.id)" class="wizard-loading with-spinner">
                       {{ $t('newInstall.loading') }}
                     </div>
-                    <div
+                    <VariantCardGrid
                       v-else-if="fieldOptions.has(field.id) && (fieldOptions.get(field.id)?.length ?? 0) > 0"
-                      class="variant-cards"
-                    >
-                      <div
-                        v-for="opt in sortedCardOptions(fieldOptions.get(field.id)!)"
-                        :key="opt.value"
-                        :class="['variant-card', {
-                          selected: selections[field.id]?.value === opt.value,
-                          recommended: opt.recommended
-                        }]"
-                        @click="selectCardOption(field, fieldIndex, opt)"
-                      >
-                        <div class="variant-card-icon">
-                          <img
-                            v-if="getVariantImage(opt)"
-                            :src="getVariantImage(opt)!"
-                            :alt="opt.label"
-                            draggable="false"
-                          />
-                          <span v-else class="variant-card-icon-text">{{ opt.label }}</span>
-                        </div>
-                        <div class="variant-card-label">{{ opt.label }}</div>
-                        <div v-if="opt.recommended" class="variant-card-badge">
-                          {{ $t('newInstall.recommended') }}
-                        </div>
-                        <div v-if="opt.description" class="variant-card-desc">
-                          {{ opt.description }}
-                        </div>
-                      </div>
-                    </div>
+                      :options="sortedCardOptions(fieldOptions.get(field.id)!)"
+                      :selected-value="selections[field.id]?.value"
+                      @select="(opt) => selectCardOption(field, fieldIndex, opt)"
+                    />
                     <div
                       v-else-if="fieldOptions.has(field.id)"
                       class="wizard-loading"
