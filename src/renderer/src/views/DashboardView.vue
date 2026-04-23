@@ -113,97 +113,79 @@ const latestActions = ref<ListAction[]>([])
 const cloudActions = ref<ListAction[]>([])
 const pinnedActionsById = ref<Record<string, ListAction[]>>({})
 
-let primaryGen = 0
-let latestGen = 0
-let cloudGen = 0
-const pinnedGenById = new Map<string, number>()
-
 const sessionDeps = [
   () => sessionStore.runningInstances.size,
   () => sessionStore.activeSessions.size,
   () => sessionStore.errorInstances.size,
 ]
 
-watch(
-  [() => primaryInstall.value?.id, () => props.visible, ...sessionDeps],
-  async () => {
-    const gen = ++primaryGen
-    const id = primaryInstall.value?.id
-    if (!id || !props.visible) { primaryActions.value = []; return }
-    if (
-      !sessionStore.isRunning(id) &&
-      !sessionStore.activeSessions.has(id)
-    ) {
-      const actions = await window.api.getListActions(id)
-      if (gen === primaryGen) primaryActions.value = actions
-    } else {
-      primaryActions.value = []
-    }
-  },
-  { immediate: true }
-)
-
-watch(
-  [() => latestInstall.value?.id, () => props.visible, ...sessionDeps],
-  async () => {
-    const gen = ++latestGen
-    const id = latestInstall.value?.id
-    if (!id || !props.visible || id === primaryInstall.value?.id) { latestActions.value = []; return }
-    if (
-      !sessionStore.isRunning(id) &&
-      !sessionStore.activeSessions.has(id)
-    ) {
-      const actions = await window.api.getListActions(id)
-      if (gen === latestGen) latestActions.value = actions
-    } else {
-      latestActions.value = []
-    }
-  },
-  { immediate: true }
-)
-
-watch(
-  [() => cloudInstall.value?.id, () => props.visible,
-    () => sessionStore.runningInstances.size, () => sessionStore.activeSessions.size],
-  async () => {
-    const gen = ++cloudGen
-    const id = cloudInstall.value?.id
-    if (!id || !props.visible) { cloudActions.value = []; return }
-    if (
-      !sessionStore.isRunning(id) &&
-      !sessionStore.activeSessions.has(id)
-    ) {
-      const actions = await window.api.getListActions(id)
-      if (gen === cloudGen) cloudActions.value = actions
-    } else {
-      cloudActions.value = []
-    }
-  },
-  { immediate: true }
-)
-
-watch(
-  [() => pinnedInstalls.value.map((i) => i.id).join(','), () => props.visible, ...sessionDeps],
-  async () => {
-    if (!props.visible) { pinnedActionsById.value = {}; return }
-    const result: Record<string, ListAction[]> = {}
-    for (const inst of pinnedInstalls.value) {
-      const gen = (pinnedGenById.get(inst.id) ?? 0) + 1
-      pinnedGenById.set(inst.id, gen)
-      if (
-        !sessionStore.isRunning(inst.id) &&
-        !sessionStore.activeSessions.has(inst.id)
-      ) {
-        const actions = await window.api.getListActions(inst.id)
-        if (pinnedGenById.get(inst.id) === gen) result[inst.id] = actions
-      } else {
-        result[inst.id] = []
+function useActionWatcher(
+  idGetter: () => string | undefined | null,
+  extraDeps: Array<() => unknown>,
+  setActions: (actions: ListAction[]) => void,
+): void {
+  let gen = 0
+  watch(
+    [idGetter, () => props.visible, ...sessionDeps, ...extraDeps],
+    async () => {
+      const currentGen = ++gen
+      const id = idGetter()
+      if (!id || !props.visible) { setActions([]); return }
+      if (sessionStore.isRunning(id) || sessionStore.activeSessions.has(id)) {
+        setActions([])
+        return
       }
-    }
-    pinnedActionsById.value = result
-  },
-  { immediate: true }
+      const actions = await window.api.getListActions(id)
+      if (currentGen === gen) setActions(actions)
+    },
+    { immediate: true },
+  )
+}
+
+useActionWatcher(
+  () => primaryInstall.value?.id,
+  [],
+  (actions) => { primaryActions.value = actions },
 )
+
+useActionWatcher(
+  () => {
+    const id = latestInstall.value?.id
+    return id && id !== primaryInstall.value?.id ? id : null
+  },
+  [],
+  (actions) => { latestActions.value = actions },
+)
+
+useActionWatcher(
+  () => cloudInstall.value?.id,
+  [],
+  (actions) => { cloudActions.value = actions },
+)
+
+// Pinned watcher: watches multiple IDs and fetches actions for each
+{
+  const pinnedGenById = new Map<string, number>()
+  watch(
+    [() => pinnedInstalls.value.map((i) => i.id).join(','), () => props.visible, ...sessionDeps],
+    async () => {
+      if (!props.visible) { pinnedActionsById.value = {}; return }
+      const result: Record<string, ListAction[]> = {}
+      for (const inst of pinnedInstalls.value) {
+        const gen = (pinnedGenById.get(inst.id) ?? 0) + 1
+        pinnedGenById.set(inst.id, gen)
+        if (sessionStore.isRunning(inst.id) || sessionStore.activeSessions.has(inst.id)) {
+          result[inst.id] = []
+        } else {
+          const actions = await window.api.getListActions(inst.id)
+          if (pinnedGenById.get(inst.id) === gen) result[inst.id] = actions
+        }
+      }
+      pinnedActionsById.value = result
+    },
+    { immediate: true },
+  )
+}
 
 // --- Relative time (reactive) ---
 const now = ref(Date.now())

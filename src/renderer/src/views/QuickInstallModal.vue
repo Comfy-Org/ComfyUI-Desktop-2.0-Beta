@@ -7,8 +7,8 @@ import type { Source, FieldOption } from '../types/ipc'
 import { emitTelemetryAction, toVariantBucket } from '../lib/telemetry'
 import { stripVariantPrefix, sortedCardOptions } from '../lib/variants'
 import VariantCardGrid from '../components/VariantCardGrid.vue'
-import { formatBytes } from '../lib/formatting'
-import { toPathGuardrail, trackGuardrailBlocked, trackDiskWarningResponse, createDiskSpaceChecker } from '../lib/installHelpers'
+import { trackGuardrailBlocked, createDiskSpaceChecker, showPathIssueAlerts, checkNvidiaDriverOrWarn, checkDiskSpaceOrWarn } from '../lib/installHelpers'
+import PathDiskInfo from '../components/PathDiskInfo.vue'
 
 const emit = defineEmits<{
   close: []
@@ -186,22 +186,9 @@ async function handleInstall(): Promise<void> {
     // Warn if NVIDIA driver is too old for the bundled PyTorch
     const variantId = selectedVariant.value.data?.variantId as string | undefined
     if (variantId && stripVariantPrefix(variantId).startsWith('nvidia')) {
-      const driverCheck = await window.api.checkNvidiaDriver()
-      if (driverCheck && !driverCheck.supported) {
-        const ok = await modal.confirm({
-          title: t('newInstall.nvidiaDriverWarningTitle'),
-          message: t('newInstall.nvidiaDriverWarning', {
-            driverVersion: driverCheck.driverVersion,
-            minimumVersion: driverCheck.minimumVersion,
-          }),
-          confirmLabel: t('newInstall.nvidiaDriverContinue'),
-          confirmStyle: 'primary',
-        })
-        if (!ok) {
-          trackGuardrailBlocked('nvidia_driver', 'quick', 'install')
-          installing.value = false
-          return
-        }
+      if (!await checkNvidiaDriverOrWarn('quick', 'install', modal.confirm, t)) {
+        installing.value = false
+        return
       }
     }
 
@@ -209,43 +196,9 @@ async function handleInstall(): Promise<void> {
     if (instPath.value) {
       try {
         const issues = await window.api.validateInstallPath(instPath.value)
-        for (const issue of issues) {
-          if (issue === 'insideAppBundle') {
-            trackGuardrailBlocked(toPathGuardrail(issue), 'quick', 'install')
-            await modal.alert({
-              title: t('pathValidation.insideAppBundleTitle'),
-              message: t('pathValidation.insideAppBundleMessage'),
-            })
-            installing.value = false
-            return
-          }
-          if (issue === 'oneDrive') {
-            trackGuardrailBlocked(toPathGuardrail(issue), 'quick', 'install')
-            await modal.alert({
-              title: t('pathValidation.oneDriveTitle'),
-              message: t('pathValidation.oneDriveMessage'),
-            })
-            installing.value = false
-            return
-          }
-          if (issue === 'insideSharedDir') {
-            trackGuardrailBlocked(toPathGuardrail(issue), 'quick', 'install')
-            await modal.alert({
-              title: t('pathValidation.insideSharedDirTitle'),
-              message: t('pathValidation.insideSharedDirMessage'),
-            })
-            installing.value = false
-            return
-          }
-          if (issue === 'insideExistingInstall') {
-            trackGuardrailBlocked(toPathGuardrail(issue), 'quick', 'install')
-            await modal.alert({
-              title: t('pathValidation.insideExistingInstallTitle'),
-              message: t('pathValidation.insideExistingInstallMessage'),
-            })
-            installing.value = false
-            return
-          }
+        if (!await showPathIssueAlerts(issues, 'quick', 'install', modal.alert, t)) {
+          installing.value = false
+          return
         }
       } catch {
         // If validation fails, proceed anyway
@@ -255,7 +208,6 @@ async function handleInstall(): Promise<void> {
     // Check disk space
     if (instPath.value) {
       try {
-        const space = await window.api.getDiskSpace(instPath.value)
         const downloadFiles = selectedVariant.value.data?.downloadFiles as
           Array<{ size: number }> | undefined
         const downloadBytes = downloadFiles
@@ -263,29 +215,15 @@ async function handleInstall(): Promise<void> {
           : 0
         const estimatedRequired = downloadBytes > 0 ? downloadBytes * 2 : 0
 
-        if (estimatedRequired > 0 && space.free < estimatedRequired) {
-          const ok = await modal.confirm({
-            title: t('diskSpace.warningTitle'),
-            message: t('diskSpace.warningMessage', {
-              free: formatBytes(space.free),
-              required: formatBytes(estimatedRequired),
-            }),
-            confirmLabel: t('diskSpace.continueAnyway'),
-            confirmStyle: 'primary',
-          })
-          trackDiskWarningResponse('insufficient_estimated', !!ok, 'quick')
-          if (!ok) { installing.value = false; return }
-        } else if (space.free < 1073741824) {
-          const ok = await modal.confirm({
-            title: t('diskSpace.warningTitle'),
-            message: t('diskSpace.warningMessageGeneric', {
-              free: formatBytes(space.free),
-            }),
-            confirmLabel: t('diskSpace.continueAnyway'),
-            confirmStyle: 'primary',
-          })
-          trackDiskWarningResponse('low_free_space', !!ok, 'quick')
-          if (!ok) { installing.value = false; return }
+        if (!await checkDiskSpaceOrWarn({
+          path: instPath.value,
+          estimatedRequired,
+          flow: 'quick',
+          confirm: modal.confirm,
+          t,
+        })) {
+          installing.value = false
+          return
         }
       } catch {
         // If disk space check fails, proceed anyway
@@ -390,29 +328,12 @@ defineExpose({ open })
                   @click="resetInstPath"
                 >{{ $t('common.resetDefault') }}</button>
               </div>
-              <div v-if="pathIssues.includes('insideAppBundle')" class="field-error">
-                {{ $t('pathValidation.insideAppBundleMessage') }}
-              </div>
-              <div v-else-if="pathIssues.includes('oneDrive')" class="field-error">
-                {{ $t('pathValidation.oneDriveMessage') }}
-              </div>
-              <div v-else-if="pathIssues.includes('insideSharedDir')" class="field-error">
-                {{ $t('pathValidation.insideSharedDirMessage') }}
-              </div>
-              <div v-else-if="pathIssues.includes('insideExistingInstall')" class="field-error">
-                {{ $t('pathValidation.insideExistingInstallMessage') }}
-              </div>
-              <div class="disk-space-info">
-                <template v-if="diskSpaceLoading">
-                  {{ $t('diskSpace.checking') }}
-                </template>
-                <template v-else-if="diskSpace">
-                  {{ $t('diskSpace.free', { size: formatBytes(diskSpace.free) }) }}
-                  <template v-if="estimatedInstallSize > 0">
-                    · {{ $t('diskSpace.estimatedRequired', { size: formatBytes(estimatedInstallSize) }) }}
-                  </template>
-                </template>
-              </div>
+              <PathDiskInfo
+                :path-issues="pathIssues"
+                :disk-space-loading="diskSpaceLoading"
+                :disk-space="diskSpace"
+                :estimated-size="estimatedInstallSize"
+              />
             </div>
           </template>
         </div>

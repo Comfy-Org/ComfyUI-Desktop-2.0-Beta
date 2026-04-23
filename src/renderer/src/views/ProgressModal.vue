@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Check, X, TriangleAlert } from 'lucide-vue-next'
 import { useModal } from '../composables/useModal'
 import { useModalOverlay } from '../composables/useModalOverlay'
+import { useTerminalScroll } from '../composables/useTerminalScroll'
 import { useProgressStore } from '../stores/progressStore'
 import type { Operation } from '../stores/progressStore'
 import type {
@@ -29,10 +30,7 @@ const modal = useModal()
 const progressStore = useProgressStore()
 
 const currentId = ref<string | null>(null)
-const terminalRef = ref<HTMLDivElement | null>(null)
-const isTerminalAtBottom = ref(true)
 const resolvingConflict = ref(false)
-const terminalExpanded = ref(true)
 
 const { handleOverlayMouseDown, handleOverlayClick } = useModalOverlay(
   () => {
@@ -53,21 +51,9 @@ const currentOp = computed(() => {
 
 const displayId = computed(() => currentId.value ?? props.installationId)
 
-function handleTerminalScroll(): void {
-  if (!terminalRef.value) return
-  const el = terminalRef.value
-  isTerminalAtBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight < 60
-}
-
-// Auto-scroll terminal
-watch(
-  () => currentOp.value?.terminalOutput,
-  async () => {
-    if (!isTerminalAtBottom.value) return
-    await nextTick()
-    if (terminalRef.value) terminalRef.value.scrollTop = terminalRef.value.scrollHeight
-  }
-)
+const terminalRef = ref<HTMLDivElement | null>(null)
+const { isAtBottom, terminalExpanded, handleTerminalScroll } =
+  useTerminalScroll(terminalRef, () => currentOp.value?.terminalOutput)
 
 // Sync currentId with prop
 watch(
@@ -75,20 +61,12 @@ watch(
   (id) => {
     if (id) {
       currentId.value = id
-      isTerminalAtBottom.value = true
+      isAtBottom.value = true
       terminalExpanded.value = true
     }
   },
   { immediate: true }
 )
-
-watch(terminalExpanded, async (expanded) => {
-  if (!expanded) return
-  await nextTick()
-  if (isTerminalAtBottom.value && terminalRef.value) {
-    terminalRef.value.scrollTop = terminalRef.value.scrollHeight
-  }
-})
 
 function showOperation(installationId: string): void {
   const op = progressStore.operations.get(installationId)

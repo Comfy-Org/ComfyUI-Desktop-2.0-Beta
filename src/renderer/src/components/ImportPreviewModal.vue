@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue'
+import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useModalOverlay } from '../composables/useModalOverlay'
 import type { SnapshotFilePreview } from '../types/ipc'
 import { triggerLabel as _triggerLabel, formatDate, formatNodeVersion } from '../lib/snapshots'
 
@@ -20,37 +21,15 @@ const { t } = useI18n()
 
 const nodesExpanded = ref(true)
 const pipExpanded = ref(false)
-const mouseDownOnOverlay = ref(false)
+
+const { handleOverlayMouseDown, handleOverlayClick } = useModalOverlay(
+  () => true,
+  () => emit('cancel'),
+)
 
 function triggerLabel(trigger: string): string {
   return _triggerLabel(trigger, t)
 }
-
-function handleOverlayMouseDown(event: MouseEvent): void {
-  mouseDownOnOverlay.value = event.target === (event.currentTarget as HTMLElement)
-}
-
-function handleOverlayClick(event: MouseEvent): void {
-  if (mouseDownOnOverlay.value && event.target === (event.currentTarget as HTMLElement)) {
-    emit('cancel')
-  }
-  mouseDownOnOverlay.value = false
-}
-
-function handleKeydown(event: KeyboardEvent): void {
-  if (event.key === 'Escape') {
-    event.stopImmediatePropagation()
-    emit('cancel')
-  }
-}
-
-onMounted(() => {
-  document.addEventListener('keydown', handleKeydown)
-})
-
-onUnmounted(() => {
-  document.removeEventListener('keydown', handleKeydown)
-})
 </script>
 
 <template>
