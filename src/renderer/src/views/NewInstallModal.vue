@@ -1,10 +1,13 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted, toRaw } from 'vue'
+import { ref, computed, watch, onMounted, toRaw } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useModal } from '../composables/useModal'
-import type { Source, SourceField, FieldOption, DiskSpaceInfo, PathIssue, HardwareValidation } from '../types/ipc'
+import { useModalOverlay } from '../composables/useModalOverlay'
+import type { Source, SourceField, FieldOption, HardwareValidation } from '../types/ipc'
 import { stripVariantPrefix, getVariantImage, sortedCardOptions } from '../lib/variants'
 import { emitTelemetryAction, toVariantBucket } from '../lib/telemetry'
+import { formatBytes } from '../lib/formatting'
+import { toPathGuardrail, trackGuardrailBlocked, trackDiskWarningResponse, createDiskSpaceChecker } from '../lib/installHelpers'
 
 const emit = defineEmits<{
   close: []
@@ -43,16 +46,8 @@ const fieldErrors = ref(new Map<string, string>())
 const textFieldValues = ref(new Map<string, string>())
 
 // Disk space and path validation
-const diskSpace = ref<DiskSpaceInfo | null>(null)
-const diskSpaceLoading = ref(false)
-const pathIssues = ref<PathIssue[]>([])
-let diskSpaceTimer: ReturnType<typeof setTimeout> | null = null
+const { diskSpace, diskSpaceLoading, pathIssues, fetchDiskSpace, reset: resetDiskSpace } = createDiskSpaceChecker()
 let hardwareValidation: HardwareValidation | null = null
-
-function formatBytes(bytes: number): string {
-  if (bytes >= 1073741824) return `${(bytes / 1073741824).toFixed(1)} GB`
-  return `${(bytes / 1048576).toFixed(0)} MB`
-}
 
 const estimatedInstallSize = computed(() => {
   let downloadBytes = 0
@@ -65,64 +60,6 @@ const estimatedInstallSize = computed(() => {
   return downloadBytes > 0 ? Math.ceil(downloadBytes * 2.25) : 0
 })
 
-function toPathGuardrail(issue: PathIssue): string {
-  switch (issue) {
-    case 'insideAppBundle': return 'path_inside_bundle'
-    case 'oneDrive': return 'onedrive'
-    case 'insideSharedDir': return 'inside_shared_dir'
-    case 'insideExistingInstall': return 'inside_existing_install'
-    default: return 'path_issue'
-  }
-}
-
-function trackGuardrailBlocked(guardrailType: string, stage: string): void {
-  emitTelemetryAction('launcher.install.guardrail.blocked', {
-    guardrail_type: guardrailType,
-    flow: 'wizard',
-    stage,
-  })
-}
-
-function trackDiskWarningResponse(warningType: string, accepted: boolean): void {
-  emitTelemetryAction('launcher.install.disk_warning.response', {
-    warning_type: warningType,
-    accepted,
-    flow: 'wizard',
-  })
-}
-
-let diskSpaceGeneration = 0
-
-function fetchDiskSpace(targetPath: string): void {
-  if (diskSpaceTimer) clearTimeout(diskSpaceTimer)
-  diskSpaceTimer = setTimeout(async () => {
-    if (!targetPath) {
-      diskSpace.value = null
-      pathIssues.value = []
-      return
-    }
-    const gen = ++diskSpaceGeneration
-    diskSpaceLoading.value = true
-    try {
-      const [space, issues] = await Promise.all([
-        window.api.getDiskSpace(targetPath),
-        window.api.validateInstallPath(targetPath),
-      ])
-      if (gen !== diskSpaceGeneration) return
-      diskSpace.value = space
-      pathIssues.value = issues
-    } catch {
-      if (gen !== diskSpaceGeneration) return
-      diskSpace.value = null
-      pathIssues.value = []
-    } finally {
-      if (gen === diskSpaceGeneration) {
-        diskSpaceLoading.value = false
-      }
-    }
-  }, 300)
-}
-
 watch(instPath, (newPath) => {
   diskSpace.value = null
   pathIssues.value = []
@@ -131,10 +68,7 @@ watch(instPath, (newPath) => {
   }
 })
 
-onUnmounted(() => {
-  document.removeEventListener('keydown', handleEscapeKey)
-  if (diskSpaceTimer) clearTimeout(diskSpaceTimer)
-})
+
 
 /** Generation counter — incremented on each open/source change to discard stale responses */
 let loadGeneration = 0
@@ -180,12 +114,7 @@ function rawSelections(): Record<string, FieldOption> {
 let installDirPromise: Promise<string> | null = null
 let sourcesPromise: Promise<Source[]> | null = null
 
-function handleEscapeKey(event: KeyboardEvent): void {
-  if (event.key === 'Escape') emit('close')
-}
-
 onMounted(() => {
-  document.addEventListener('keydown', handleEscapeKey)
   window.api
     .detectGPU()
     .then((gpu) => {
@@ -217,9 +146,7 @@ async function open(): Promise<void> {
   textFieldValues.value.clear()
 
   detectedGpu.value = t('newInstall.detectingGpu')
-  diskSpace.value = null
-  diskSpaceLoading.value = false
-  pathIssues.value = []
+  resetDiskSpace()
   sourceError.value = ''
   initializing.value = true
 
@@ -257,7 +184,7 @@ async function selectSourceCard(source: Source): Promise<void> {
   if (currentSource.value?.id === source.id) return
 
   if (source.id === 'standalone' && hardwareValidation && !hardwareValidation.supported) {
-    trackGuardrailBlocked('unsupported_hw', 'source_select')
+    trackGuardrailBlocked('unsupported_hw', 'wizard', 'source_select')
     await modal.alert({
       title: t('newInstall.unsupportedHardwareTitle'),
       message: hardwareValidation.error || '',
@@ -503,7 +430,7 @@ async function handleSave(): Promise<void> {
           confirmStyle: 'primary',
         })
         if (!ok) {
-          trackGuardrailBlocked('nvidia_driver', 'save')
+          trackGuardrailBlocked('nvidia_driver', 'wizard', 'save')
           return
         }
       }
@@ -548,7 +475,7 @@ async function handleSave(): Promise<void> {
       const issues = await window.api.validateInstallPath(instPath.value)
       for (const issue of issues) {
         if (issue === 'insideAppBundle') {
-          trackGuardrailBlocked(toPathGuardrail(issue), 'save')
+          trackGuardrailBlocked(toPathGuardrail(issue), 'wizard', 'save')
           await modal.alert({
             title: t('pathValidation.insideAppBundleTitle'),
             message: t('pathValidation.insideAppBundleMessage'),
@@ -556,7 +483,7 @@ async function handleSave(): Promise<void> {
           return
         }
         if (issue === 'oneDrive') {
-          trackGuardrailBlocked(toPathGuardrail(issue), 'save')
+          trackGuardrailBlocked(toPathGuardrail(issue), 'wizard', 'save')
           await modal.alert({
             title: t('pathValidation.oneDriveTitle'),
             message: t('pathValidation.oneDriveMessage'),
@@ -564,7 +491,7 @@ async function handleSave(): Promise<void> {
           return
         }
         if (issue === 'insideSharedDir') {
-          trackGuardrailBlocked(toPathGuardrail(issue), 'save')
+          trackGuardrailBlocked(toPathGuardrail(issue), 'wizard', 'save')
           await modal.alert({
             title: t('pathValidation.insideSharedDirTitle'),
             message: t('pathValidation.insideSharedDirMessage'),
@@ -572,7 +499,7 @@ async function handleSave(): Promise<void> {
           return
         }
         if (issue === 'insideExistingInstall') {
-          trackGuardrailBlocked(toPathGuardrail(issue), 'save')
+          trackGuardrailBlocked(toPathGuardrail(issue), 'wizard', 'save')
           await modal.alert({
             title: t('pathValidation.insideExistingInstallTitle'),
             message: t('pathValidation.insideExistingInstallMessage'),
@@ -608,7 +535,7 @@ async function handleSave(): Promise<void> {
           confirmLabel: t('diskSpace.continueAnyway'),
           confirmStyle: 'primary',
         })
-        trackDiskWarningResponse('insufficient_estimated', !!ok)
+        trackDiskWarningResponse('insufficient_estimated', !!ok, 'wizard')
         if (!ok) return
       } else if (space.free < 1073741824) {
         // Warn if less than 1 GB free even without an estimate
@@ -620,7 +547,7 @@ async function handleSave(): Promise<void> {
           confirmLabel: t('diskSpace.continueAnyway'),
           confirmStyle: 'primary',
         })
-        trackDiskWarningResponse('low_free_space', !!ok)
+        trackDiskWarningResponse('low_free_space', !!ok, 'wizard')
         if (!ok) return
       }
     } catch {
@@ -659,18 +586,10 @@ function getSelectedIndex(field: SourceField): number {
   return idx >= 0 ? idx : 0
 }
 
-function handleOverlayMouseDown(event: MouseEvent): void {
-  mouseDownOnOverlay.value = event.target === (event.currentTarget as HTMLElement)
-}
-
-const mouseDownOnOverlay = ref(false)
-
-function handleOverlayClick(event: MouseEvent): void {
-  if (mouseDownOnOverlay.value && event.target === (event.currentTarget as HTMLElement)) {
-    emit('close')
-  }
-  mouseDownOnOverlay.value = false
-}
+const { handleOverlayMouseDown, handleOverlayClick } = useModalOverlay(
+  () => true,
+  () => emit('close'),
+)
 
 defineExpose({ open })
 </script>

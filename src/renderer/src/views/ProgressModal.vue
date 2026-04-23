@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Check, X, TriangleAlert } from 'lucide-vue-next'
 import { useModal } from '../composables/useModal'
+import { useModalOverlay } from '../composables/useModalOverlay'
 import { useProgressStore } from '../stores/progressStore'
 import type { Operation } from '../stores/progressStore'
 import type {
@@ -32,6 +33,17 @@ const terminalRef = ref<HTMLDivElement | null>(null)
 const isTerminalAtBottom = ref(true)
 const resolvingConflict = ref(false)
 const terminalExpanded = ref(true)
+
+const { handleOverlayMouseDown, handleOverlayClick } = useModalOverlay(
+  () => {
+    if (props.installationId === null) return false
+    const id = displayId.value
+    if (!id) return false
+    const op = progressStore.operations.get(id)
+    return !op || op.finished
+  },
+  () => emit('close'),
+)
 
 const currentOp = computed(() => {
   const id = currentId.value ?? props.installationId
@@ -243,38 +255,6 @@ function getStepSummary(op: Operation, step: ProgressStep, stepIndex: number): s
   }
   return null
 }
-
-function handleOverlayMouseDown(event: MouseEvent): void {
-  mouseDownOnOverlay.value = event.target === (event.currentTarget as HTMLElement)
-}
-
-const mouseDownOnOverlay = ref(false)
-
-function handleOverlayClick(event: MouseEvent): void {
-  if (mouseDownOnOverlay.value && event.target === (event.currentTarget as HTMLElement)) {
-    emit('close')
-  }
-  mouseDownOnOverlay.value = false
-}
-
-function handleEscapeKey(event: KeyboardEvent): void {
-  if (event.key !== 'Escape') return
-  if (props.installationId === null) return
-  const id = displayId.value
-  if (!id) return
-  const op = progressStore.operations.get(id)
-  if (!op || op.finished) {
-    emit('close')
-  }
-}
-
-onMounted(() => {
-  document.addEventListener('keydown', handleEscapeKey)
-})
-
-onUnmounted(() => {
-  document.removeEventListener('keydown', handleEscapeKey)
-})
 
 defineExpose({ startOperation, showOperation })
 </script>

@@ -2,6 +2,7 @@
 import { ref, computed, watch, toRaw, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useModal } from '../composables/useModal'
+import { useModalOverlay } from '../composables/useModalOverlay'
 import type { SnapshotFilePreview, FieldOption, GPUInfo } from '../types/ipc'
 import { getVariantImage, getVariantGpuLabel, sortedCardOptions, findBestVariant } from '../lib/variants'
 import { emitTelemetryAction, toVariantBucket } from '../lib/telemetry'
@@ -56,7 +57,11 @@ const hardwareMismatch = computed(() => {
 
 const INVALID_NAME_CHARS = /[<>:"/\\|?*]/
 const nameHasInvalidChars = computed(() => INVALID_NAME_CHARS.test(installName.value))
-const mouseDownOnOverlay = ref(false)
+
+const { handleOverlayMouseDown, handleOverlayClick } = useModalOverlay(
+  () => true,
+  () => emit('close'),
+)
 
 function open(): void {
   preview.value = null
@@ -245,33 +250,16 @@ function triggerLabel(trigger: string): string {
   return _triggerLabel(trigger, t)
 }
 
-function handleOverlayMouseDown(event: MouseEvent): void {
-  mouseDownOnOverlay.value = event.target === (event.currentTarget as HTMLElement)
-}
-
-function handleOverlayClick(event: MouseEvent): void {
-  if (mouseDownOnOverlay.value && event.target === (event.currentTarget as HTMLElement)) {
-    emit('close')
-  }
-  mouseDownOnOverlay.value = false
-}
-
-function handleKeydown(event: KeyboardEvent): void {
-  if (event.key === 'Escape') emit('close')
-}
-
 // Prevent Electron from navigating to dropped files
 function preventNav(event: Event): void {
   event.preventDefault()
 }
 
 onMounted(() => {
-  document.addEventListener('keydown', handleKeydown)
   document.addEventListener('dragover', preventNav)
   document.addEventListener('drop', preventNav)
 })
 onUnmounted(() => {
-  document.removeEventListener('keydown', handleKeydown)
   document.removeEventListener('dragover', preventNav)
   document.removeEventListener('drop', preventNav)
 })

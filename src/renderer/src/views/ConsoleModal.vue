@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useSessionStore } from '../stores/sessionStore'
+import { useModalOverlay } from '../composables/useModalOverlay'
 
 interface Props {
   installationId: string | null
@@ -19,8 +20,12 @@ const sessionStore = useSessionStore()
 const api = window.api
 const terminalRef = ref<HTMLDivElement | null>(null)
 const isAtBottom = ref(true)
-const mouseDownOnOverlay = ref(false)
 const terminalExpanded = ref(true)
+
+const { handleOverlayMouseDown, handleOverlayClick } = useModalOverlay(
+  () => props.installationId !== null,
+  () => emit('close'),
+)
 
 const session = computed(() => {
   if (!props.installationId) return undefined
@@ -101,31 +106,6 @@ watch(terminalExpanded, async (expanded) => {
     terminalRef.value.scrollTop = terminalRef.value.scrollHeight
   }
 })
-
-function handleEscapeKey(event: KeyboardEvent): void {
-  if (event.key === 'Escape' && props.installationId) {
-    emit('close')
-  }
-}
-
-onMounted(() => {
-  document.addEventListener('keydown', handleEscapeKey)
-})
-
-onUnmounted(() => {
-  document.removeEventListener('keydown', handleEscapeKey)
-})
-
-function handleOverlayMouseDown(event: MouseEvent): void {
-  mouseDownOnOverlay.value = event.target === (event.currentTarget as HTMLElement)
-}
-
-function handleOverlayClick(event: MouseEvent): void {
-  if (mouseDownOnOverlay.value && event.target === (event.currentTarget as HTMLElement)) {
-    emit('close')
-  }
-  mouseDownOnOverlay.value = false
-}
 </script>
 
 <template>
