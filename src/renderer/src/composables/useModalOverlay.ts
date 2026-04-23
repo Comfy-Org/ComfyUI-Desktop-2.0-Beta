@@ -27,6 +27,7 @@ export function useModalOverlay(
 
   function handleEscapeKey(event: KeyboardEvent): void {
     if (event.key === 'Escape' && shouldClose()) {
+      event.stopImmediatePropagation()
       close()
     }
   }

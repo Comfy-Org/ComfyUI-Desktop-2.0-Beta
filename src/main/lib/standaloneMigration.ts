@@ -9,6 +9,7 @@ import { defaultInstallDir, sanitizeDirName, allocateUniqueDir } from './paths'
 import {
   validateExportEnvelope, importSnapshots,
   saveSnapshot, getSnapshotCount, restoreCustomNodes, restorePipPackages,
+  restoreComfyUIVersion, buildPostRestoreState,
 } from './snapshots'
 
 import * as installations from '../installations'
@@ -16,6 +17,7 @@ import type { InstallationRecord } from '../installations'
 import * as settings from '../settings'
 import * as i18n from './i18n'
 import type { SourcePlugin, FieldOption } from '../types/sources'
+import type { ComfyVersion } from './version'
 import { assertReadable } from './desktopDetect'
 
 const MARKER_FILE = '.comfyui-desktop-2'
@@ -120,11 +122,11 @@ async function resolveStandaloneInstallData(
  * Restore a snapshot (custom nodes + pip packages) into a freshly installed
  * standalone installation.
  */
-async function restoreSnapshotIntoInstallation(
+export async function restoreSnapshotIntoInstallation(
   entry: InstallationRecord,
   stagedFile: string,
   ownsStagedFile: boolean,
-  tools: MigrationTools,
+  tools: Pick<MigrationTools, 'sendProgress' | 'sendOutput' | 'signal'>,
   update: (data: Record<string, unknown>) => Promise<void>,
 ): Promise<void> {
   const { sendProgress, sendOutput, signal } = tools
@@ -136,6 +138,11 @@ async function restoreSnapshotIntoInstallation(
     const importEnvelope = validateExportEnvelope(JSON.parse(fileContent))
     await importSnapshots(freshInst.installPath, importEnvelope)
     const targetSnapshot = importEnvelope.snapshots[0]!
+
+    // Restore ComfyUI version
+    sendOutput('\n── Restore ComfyUI Version ──\n')
+    const comfyResult = await restoreComfyUIVersion(freshInst.installPath, targetSnapshot, sendOutput)
+
     sendOutput('\n── Restore Nodes ──\n')
     await restoreCustomNodes(freshInst.installPath, freshInst, targetSnapshot, sendProgress, sendOutput, signal, settings.getMirrorConfig())
 
@@ -146,8 +153,17 @@ async function restoreSnapshotIntoInstallation(
         sendOutput, signal, settings.getMirrorConfig())
     }
 
+    // Update installation state with restored version/channel metadata
+    const restoreState = buildPostRestoreState(
+      targetSnapshot, comfyResult,
+      freshInst.updateInfoByChannel as Record<string, Record<string, unknown>> | undefined,
+      freshInst.comfyVersion as ComfyVersion | undefined
+    )
+    await update(restoreState)
+
     try {
-      const snapFilename = await saveSnapshot(freshInst.installPath, freshInst, 'post-restore')
+      const updatedInst = { ...freshInst, ...restoreState }
+      const snapFilename = await saveSnapshot(freshInst.installPath, updatedInst, 'post-restore')
       const snapshotCount = await getSnapshotCount(freshInst.installPath)
       await update({ lastSnapshot: snapFilename, snapshotCount })
     } catch {}

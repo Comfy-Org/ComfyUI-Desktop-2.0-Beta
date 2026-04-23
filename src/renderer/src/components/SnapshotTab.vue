@@ -1094,4 +1094,9 @@ function diffHasChanges(diff: SnapshotDiffResult): boolean {
   max-height: 300px;
   overflow-y: auto;
 }
+
+/* Override global ls-node-disabled to match original SnapshotTab styling */
+.ls-node-disabled {
+  background: var(--text-faint);
+}
 </style>
