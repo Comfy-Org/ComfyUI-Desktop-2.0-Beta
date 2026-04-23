@@ -2,10 +2,10 @@ import {
   path, fs, ipcMain,
   sources, installations, settings, i18n,
   sourceMap, formatComfyVersion, _resolveAndBroadcastVersions,
-  isPromotableLocal, ensureDefaultPrimary, findDuplicatePath, uniqueName,
+  isPromotableLocal, ensureDefaultPrimary, findDuplicatePath, uniqueName, sanitizeDirName, allocateUniqueDir,
   syncOemSeedBestEffort, isEffectivelyEmptyInstallDir,
-  download, createCache, extract, deleteDir, deleteAction, untrackAction,
-  formatTime, MARKER_FILE,
+  download, createCache, extract, deleteDir, formatDeleteStatus, deleteAction, untrackAction,
+  MARKER_FILE,
   validateExportEnvelope, importSnapshots, saveSnapshot, getSnapshotCount,
   restoreCustomNodes, restorePipPackages, restoreComfyUIVersion, buildPostRestoreState,
   _operationAborts,
@@ -75,14 +75,8 @@ export function registerInstallationHandlers(): void {
   ipcMain.handle('add-installation', async (_event, data: Record<string, unknown>) => {
     data.name = await uniqueName((data.name as string) || 'ComfyUI')
     if (data.installPath) {
-      const dirName = (data.name as string).replace(/[<>:"/\\|?*]+/g, '_').trim() || 'ComfyUI'
-      let installPath = path.join(data.installPath as string, dirName)
-      let suffix = 1
-      while (fs.existsSync(installPath)) {
-        installPath = path.join(data.installPath as string, `${dirName} (${suffix})`)
-        suffix++
-      }
-      data.installPath = installPath
+      const dirName = sanitizeDirName(data.name as string)
+      data.installPath = allocateUniqueDir(data.installPath as string, dirName)
       const duplicate = await findDuplicatePath(data.installPath as string)
       if (duplicate) {
         return { ok: false, message: `That directory is already used by "${duplicate.name}".` }
@@ -250,12 +244,7 @@ export function registerInstallationHandlers(): void {
           sendProgress('delete', { percent: 0, status: 'Counting files…' })
           try {
             await deleteDir(inst.installPath, (p) => {
-              const elapsed = formatTime(p.elapsedSecs)
-              const eta = p.etaSecs >= 0 ? formatTime(p.etaSecs) : '—'
-              sendProgress('delete', {
-                percent: p.percent,
-                status: `Deleting… ${p.deleted} / ${p.total} items  ·  ${elapsed} elapsed  ·  ${eta} remaining`,
-              })
+              sendProgress('delete', { percent: p.percent, status: formatDeleteStatus(p) })
             }, { signal: deleteAbort.signal })
             _operationAborts.delete(installationId)
             await installations.remove(installationId)

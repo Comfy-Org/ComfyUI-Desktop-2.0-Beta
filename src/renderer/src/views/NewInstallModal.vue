@@ -8,7 +8,7 @@ import { stripVariantPrefix, sortedCardOptions } from '../lib/variants'
 import VariantCardGrid from '../components/VariantCardGrid.vue'
 import { emitTelemetryAction, toVariantBucket } from '../lib/telemetry'
 import { trackGuardrailBlocked, createDiskSpaceChecker, showPathIssueAlerts, checkNvidiaDriverOrWarn, checkDiskSpaceOrWarn } from '../lib/installHelpers'
-import PathDiskInfo from '../components/PathDiskInfo.vue'
+import InstallNamePath from '../components/InstallNamePath.vue'
 
 const emit = defineEmits<{
   close: []
@@ -394,10 +394,6 @@ async function handleBrowse(): Promise<void> {
   if (chosen) instPath.value = chosen
 }
 
-function resetInstPath(): void {
-  instPath.value = defaultInstPath.value
-}
-
 function nextStep(): void {
   if (currentStep.value < totalSteps.value && canProceed.value) {
     currentStep.value++
@@ -617,15 +613,19 @@ defineExpose({ open })
               </div>
 
               <!-- Name field for skipInstall -->
-              <div class="field">
-                <label for="inst-name">{{ $t('common.name') }}</label>
-                <input
-                  id="inst-name"
-                  v-model="instName"
-                  type="text"
-                  :placeholder="$t('common.namePlaceholder')"
-                />
-              </div>
+              <InstallNamePath
+                :name="instName"
+                :path="instPath"
+                :default-path="defaultInstPath"
+                hide-install-path
+                :path-issues="pathIssues"
+                :disk-space-loading="diskSpaceLoading"
+                :disk-space="diskSpace"
+                :estimated-size="estimatedInstallSize"
+                @update:name="instName = $event"
+                @update:path="instPath = $event"
+                @browse="handleBrowse"
+              />
             </template>
 
             <!-- For local sources: configuration fields -->
@@ -742,40 +742,19 @@ defineExpose({ open })
 
           <!-- Step 3: Name & Location (local sources only) -->
           <div v-else-if="currentStep === 3" class="wizard-step">
-            <div class="field">
-              <label for="inst-name">{{ $t('common.name') }}</label>
-              <input
-                id="inst-name"
-                v-model="instName"
-                type="text"
-                :placeholder="$t('common.namePlaceholder')"
-              />
-            </div>
-
-            <div
-              v-if="!currentSource?.hideInstallPath"
-              class="field"
-            >
-              <label for="inst-path">{{ $t('newInstall.installLocation') }}</label>
-              <div class="path-input">
-                <input
-                  id="inst-path"
-                  v-model="instPath"
-                  type="text"
-                />
-                <button @click="handleBrowse">{{ $t('common.browse') }}</button>
-                <button
-                  v-if="instPath !== defaultInstPath"
-                  @click="resetInstPath"
-                >{{ $t('common.resetDefault') }}</button>
-              </div>
-              <PathDiskInfo
-                :path-issues="pathIssues"
-                :disk-space-loading="diskSpaceLoading"
-                :disk-space="diskSpace"
-                :estimated-size="estimatedInstallSize"
-              />
-            </div>
+            <InstallNamePath
+              :name="instName"
+              :path="instPath"
+              :default-path="defaultInstPath"
+              :hide-install-path="currentSource?.hideInstallPath"
+              :path-issues="pathIssues"
+              :disk-space-loading="diskSpaceLoading"
+              :disk-space="diskSpace"
+              :estimated-size="estimatedInstallSize"
+              @update:name="instName = $event"
+              @update:path="instPath = $event"
+              @browse="handleBrowse"
+            />
           </div>
         </div>
 

@@ -7,7 +7,7 @@ import type { SnapshotFilePreview, FieldOption, GPUInfo } from '../types/ipc'
 import { getVariantGpuLabel, sortedCardOptions, findBestVariant } from '../lib/variants'
 import VariantCardGrid from '../components/VariantCardGrid.vue'
 import { emitTelemetryAction, toVariantBucket } from '../lib/telemetry'
-import { triggerLabel as _triggerLabel, formatDate, formatNodeVersion } from '../lib/snapshots'
+import SnapshotFilePreviewContent from '../components/SnapshotFilePreviewContent.vue'
 
 const emit = defineEmits<{
   close: []
@@ -26,8 +26,6 @@ const modal = useModal()
 
 const preview = ref<SnapshotFilePreview | null>(null)
 const installName = ref('')
-const nodesExpanded = ref(true)
-const pipExpanded = ref(false)
 const loading = ref(false)
 const creating = ref(false)
 const dragging = ref(false)
@@ -67,8 +65,6 @@ const { handleOverlayMouseDown, handleOverlayClick } = useModalOverlay(
 function open(): void {
   preview.value = null
   installName.value = ''
-  nodesExpanded.value = true
-  pipExpanded.value = false
   loading.value = false
   creating.value = false
   dragging.value = false
@@ -147,7 +143,6 @@ async function loadFromPath(filePath: string): Promise<void> {
     if (result.preview) {
       preview.value = result.preview
       installName.value = result.preview.installationName || ''
-      nodesExpanded.value = true
       await loadReleaseOptions()
     }
   } finally {
@@ -166,7 +161,6 @@ async function handleBrowse(): Promise<void> {
   if (result.preview) {
     preview.value = result.preview
     installName.value = result.preview.installationName || ''
-    nodesExpanded.value = true
     await loadReleaseOptions()
   }
 }
@@ -245,10 +239,6 @@ async function handleCreate(): Promise<void> {
   } finally {
     creating.value = false
   }
-}
-
-function triggerLabel(trigger: string): string {
-  return _triggerLabel(trigger, t)
 }
 
 // Prevent Electron from navigating to dropped files
@@ -364,94 +354,7 @@ defineExpose({ open })
               </div>
             </div>
 
-            <!-- Source info -->
-            <div class="ls-section">
-              <div class="ls-field">
-                <span class="ls-label">{{ $t('list.snapshotSourceName') }}</span>
-                <span class="ls-value">{{ preview.installationName }}</span>
-              </div>
-              <div class="ls-field">
-                <span class="ls-label">{{ $t('list.snapshotCount') }}</span>
-                <span class="ls-value">{{ preview.snapshotCount }}</span>
-              </div>
-            </div>
-
-            <!-- Snapshot timeline -->
-            <div class="ls-section">
-              <div class="ls-section-title">{{ $t('list.snapshotTimeline') }}</div>
-              <div class="ls-timeline">
-                <div
-                  v-for="(snap, i) in preview.snapshots"
-                  :key="snap.filename"
-                  class="ls-timeline-item"
-                >
-                  <span class="ls-trigger" :class="'ls-trigger-' + snap.trigger">{{ triggerLabel(snap.trigger) }}</span>
-                  <span v-if="i === 0" class="ls-current-tag">{{ $t('snapshots.current') }}</span>
-                  <span class="ls-meta">{{ snap.comfyuiVersion }} · {{ $t('snapshots.nodesCount', { count: snap.nodeCount }) }} · {{ $t('snapshots.packagesCount', { count: snap.pipPackageCount }) }}</span>
-                  <span class="ls-time">{{ formatDate(snap.createdAt) }}</span>
-                </div>
-              </div>
-            </div>
-
-            <!-- Newest snapshot detail -->
-            <div class="ls-section">
-              <div class="ls-section-title">{{ $t('list.snapshotNewestDetail') }}</div>
-
-              <div class="ls-grid">
-                <div class="ls-field">
-                  <span class="ls-label">{{ $t('snapshots.comfyuiVersion') }}</span>
-                  <span class="ls-value">{{ preview.newestSnapshot.comfyuiVersion }}</span>
-                </div>
-                <div class="ls-field">
-                  <span class="ls-label">{{ $t('snapshots.variant') }}</span>
-                  <span class="ls-value">{{ preview.newestSnapshot.comfyui.variant || '—' }}</span>
-                </div>
-                <div class="ls-field">
-                  <span class="ls-label">{{ $t('snapshots.pythonVersion') }}</span>
-                  <span class="ls-value">{{ preview.newestSnapshot.pythonVersion || '—' }}</span>
-                </div>
-                <div class="ls-field">
-                  <span class="ls-label">{{ $t('snapshots.capturedAt') }}</span>
-                  <span class="ls-value">{{ formatDate(preview.newestSnapshot.createdAt) }}</span>
-                </div>
-              </div>
-
-              <!-- Custom nodes -->
-              <div class="ls-subsection">
-                <div class="ls-subsection-title" @click="nodesExpanded = !nodesExpanded">
-                  <span>{{ $t('snapshots.customNodes') }} ({{ preview.newestSnapshot.customNodes.length }})</span>
-                  <span class="ls-collapse">{{ nodesExpanded ? '▾' : '▸' }}</span>
-                </div>
-                <template v-if="nodesExpanded">
-                  <div v-if="preview.newestSnapshot.customNodes.length > 0" class="recessed-list">
-                    <div v-for="node in preview.newestSnapshot.customNodes" :key="node.id" class="ls-node-row">
-                      <span class="ls-node-status" :class="node.enabled ? 'ls-node-enabled' : 'ls-node-disabled'" />
-                      <span class="ls-node-name">{{ node.id }}</span>
-                      <span class="ls-node-type">{{ node.type }}</span>
-                      <span class="ls-node-version" :title="formatNodeVersion(node)">{{ formatNodeVersion(node) }}</span>
-                    </div>
-                  </div>
-                  <div v-else class="ls-empty">—</div>
-                </template>
-              </div>
-
-              <!-- Pip packages -->
-              <div class="ls-subsection">
-                <div class="ls-subsection-title" @click="pipExpanded = !pipExpanded">
-                  <span>{{ $t('snapshots.pipPackages') }} ({{ preview.newestSnapshot.pipPackageCount }})</span>
-                  <span class="ls-collapse">{{ pipExpanded ? '▾' : '▸' }}</span>
-                </div>
-                <template v-if="pipExpanded">
-                  <div v-if="preview.newestSnapshot.pipPackageCount > 0" class="recessed-list">
-                    <div v-for="(version, name) in preview.newestSnapshot.pipPackages" :key="name" class="ls-pip-row">
-                      <span class="ls-pip-name">{{ name }}</span>
-                      <span class="ls-pip-version" :title="version">{{ version }}</span>
-                    </div>
-                  </div>
-                  <div v-else class="ls-empty">—</div>
-                </template>
-              </div>
-            </div>
+            <SnapshotFilePreviewContent :preview="preview" />
           </template>
         </div>
 

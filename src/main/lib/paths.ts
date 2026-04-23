@@ -133,3 +133,25 @@ function migrateCacheDirSetting(oldBase: string): void {
 export function homeDir(): string {
   return app.getPath("home");
 }
+
+/**
+ * Sanitize a name for use as a directory component by replacing
+ * filesystem-unsafe characters with underscores.
+ */
+export function sanitizeDirName(name: string): string {
+  return name.replace(/[<>:"/\\|?*]+/g, '_').trim() || 'ComfyUI'
+}
+
+/**
+ * Allocate a unique directory path under `parentDir` by appending
+ * a numeric suffix when a path already exists on disk.
+ */
+export function allocateUniqueDir(parentDir: string, dirName: string): string {
+  let candidate = path.join(parentDir, dirName)
+  let suffix = 1
+  while (fs.existsSync(candidate)) {
+    candidate = path.join(parentDir, `${dirName} (${suffix})`)
+    suffix++
+  }
+  return candidate
+}

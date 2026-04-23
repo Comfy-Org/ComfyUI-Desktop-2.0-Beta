@@ -202,60 +202,60 @@ onUnmounted(() => {
 
           <!-- Snapshot preview -->
           <template v-if="!state.loading && state.snapshotPreview">
-            <div class="sp-grid">
-              <div class="sp-field">
-                <span class="sp-label">{{ $t('snapshots.comfyuiVersion') }}</span>
-                <span class="sp-value">{{ state.snapshotPreview.comfyuiVersion }}</span>
+            <div class="ls-grid">
+              <div class="ls-field">
+                <span class="ls-label">{{ $t('snapshots.comfyuiVersion') }}</span>
+                <span class="ls-value">{{ state.snapshotPreview.comfyuiVersion }}</span>
               </div>
-              <div class="sp-field">
-                <span class="sp-label">{{ $t('snapshots.variant') }}</span>
-                <span class="sp-value">{{ state.snapshotPreview.comfyui.variant || '—' }}</span>
+              <div class="ls-field">
+                <span class="ls-label">{{ $t('snapshots.variant') }}</span>
+                <span class="ls-value">{{ state.snapshotPreview.comfyui.variant || '—' }}</span>
               </div>
-              <div v-if="state.snapshotPreview.pythonVersion" class="sp-field">
-                <span class="sp-label">{{ $t('snapshots.pythonVersion') }}</span>
-                <span class="sp-value">{{ state.snapshotPreview.pythonVersion }}</span>
+              <div v-if="state.snapshotPreview.pythonVersion" class="ls-field">
+                <span class="ls-label">{{ $t('snapshots.pythonVersion') }}</span>
+                <span class="ls-value">{{ state.snapshotPreview.pythonVersion }}</span>
               </div>
 
             </div>
 
-            <div class="sp-subsection">
-              <div class="sp-subsection-title" @click="spNodesExpanded = !spNodesExpanded">
+            <div class="ls-subsection">
+              <div class="ls-subsection-title" @click="spNodesExpanded = !spNodesExpanded">
                 <span>{{ $t('snapshots.customNodes') }} ({{ state.snapshotPreview.customNodes.length }})<InfoTooltip :text="t('tooltips.customNodes')" side="bottom" /></span>
-                <span class="sp-collapse">{{ spNodesExpanded ? '▾' : '▸' }}</span>
+                <span class="ls-collapse">{{ spNodesExpanded ? '▾' : '▸' }}</span>
               </div>
               <template v-if="spNodesExpanded">
-                <div v-if="state.snapshotPreview.customNodes.length > 0" class="sp-recessed-list">
-                  <div v-for="node in state.snapshotPreview.customNodes" :key="node.id" class="sp-node-row">
-                    <span class="sp-node-status" :class="node.enabled ? 'sp-node-enabled' : 'sp-node-disabled'" />
-                    <span class="sp-node-name">{{ node.id }}</span>
-                    <span class="sp-node-type">{{ node.type }}</span>
-                    <span class="sp-node-version">{{ formatNodeVersion(node) }}</span>
+                <div v-if="state.snapshotPreview.customNodes.length > 0" class="recessed-list">
+                  <div v-for="node in state.snapshotPreview.customNodes" :key="node.id" class="ls-node-row">
+                    <span class="ls-node-status" :class="node.enabled ? 'ls-node-enabled' : 'ls-node-disabled'" />
+                    <span class="ls-node-name">{{ node.id }}</span>
+                    <span class="ls-node-type">{{ node.type }}</span>
+                    <span class="ls-node-version">{{ formatNodeVersion(node) }}</span>
                   </div>
                 </div>
-                <div v-else class="sp-empty">—</div>
+                <div v-else class="ls-empty">—</div>
               </template>
             </div>
 
-            <div class="sp-subsection">
-              <div class="sp-subsection-title" @click="spPipExpanded = !spPipExpanded">
+            <div class="ls-subsection">
+              <div class="ls-subsection-title" @click="spPipExpanded = !spPipExpanded">
                 <span>{{ $t('snapshots.pipPackages') }} ({{ state.snapshotPreview.pipPackageCount }})<InfoTooltip :text="t('tooltips.pipPackages')" side="bottom" /></span>
-                <span class="sp-collapse">{{ spPipExpanded ? '▾' : '▸' }}</span>
+                <span class="ls-collapse">{{ spPipExpanded ? '▾' : '▸' }}</span>
               </div>
               <template v-if="spPipExpanded">
-                <div v-if="state.snapshotPreview.pipPackageCount > 0" class="sp-recessed-list">
-                  <div v-for="(version, name) in state.snapshotPreview.pipPackages" :key="name" class="sp-pip-row">
-                    <span class="sp-pip-name">{{ name }}</span>
-                    <span class="sp-pip-version" :title="version">{{ version }}</span>
+                <div v-if="state.snapshotPreview.pipPackageCount > 0" class="recessed-list">
+                  <div v-for="(version, name) in state.snapshotPreview.pipPackages" :key="name" class="ls-pip-row">
+                    <span class="ls-pip-name">{{ name }}</span>
+                    <span class="ls-pip-version" :title="version">{{ version }}</span>
                   </div>
                 </div>
-                <div v-else class="sp-empty">—</div>
+                <div v-else class="ls-empty">—</div>
               </template>
             </div>
           </template>
 
           <!-- Variant / device selection -->
-          <div v-if="!state.loading && (state.variantCards.length > 0 || state.variantLoading)" class="sp-subsection">
-            <div class="sp-subsection-title">
+          <div v-if="!state.loading && (state.variantCards.length > 0 || state.variantLoading)" class="ls-subsection">
+            <div class="ls-subsection-title">
               <span>{{ $t('list.snapshotDevice') }}</span>
             </div>
             <div v-if="state.variantLoading" class="modal-loading">

@@ -8,7 +8,7 @@ import { emitTelemetryAction, toVariantBucket } from '../lib/telemetry'
 import { stripVariantPrefix, sortedCardOptions } from '../lib/variants'
 import VariantCardGrid from '../components/VariantCardGrid.vue'
 import { trackGuardrailBlocked, createDiskSpaceChecker, showPathIssueAlerts, checkNvidiaDriverOrWarn, checkDiskSpaceOrWarn } from '../lib/installHelpers'
-import PathDiskInfo from '../components/PathDiskInfo.vue'
+import InstallNamePath from '../components/InstallNamePath.vue'
 
 const emit = defineEmits<{
   close: []
@@ -64,10 +64,6 @@ watch(instPath, (newPath) => {
 async function handleBrowse(): Promise<void> {
   const chosen = await window.api.browseFolder(instPath.value)
   if (chosen) instPath.value = chosen
-}
-
-function resetInstPath(): void {
-  instPath.value = defaultInstPath.value
 }
 
 /** Deep-strip Vue reactive proxies for safe IPC serialization */
@@ -304,37 +300,18 @@ defineExpose({ open })
               />
             </div>
 
-            <div class="field">
-              <label for="qi-name">{{ $t('common.name') }}</label>
-              <input
-                id="qi-name"
-                v-model="instName"
-                type="text"
-                :placeholder="$t('common.namePlaceholder')"
-              />
-            </div>
-
-            <div class="field">
-              <label for="qi-path">{{ $t('newInstall.installLocation') }}</label>
-              <div class="path-input">
-                <input
-                  id="qi-path"
-                  v-model="instPath"
-                  type="text"
-                />
-                <button @click="handleBrowse">{{ $t('common.browse') }}</button>
-                <button
-                  v-if="instPath !== defaultInstPath"
-                  @click="resetInstPath"
-                >{{ $t('common.resetDefault') }}</button>
-              </div>
-              <PathDiskInfo
-                :path-issues="pathIssues"
-                :disk-space-loading="diskSpaceLoading"
-                :disk-space="diskSpace"
-                :estimated-size="estimatedInstallSize"
-              />
-            </div>
+            <InstallNamePath
+              :name="instName"
+              :path="instPath"
+              :default-path="defaultInstPath"
+              :path-issues="pathIssues"
+              :disk-space-loading="diskSpaceLoading"
+              :disk-space="diskSpace"
+              :estimated-size="estimatedInstallSize"
+              @update:name="instName = $event"
+              @update:path="instPath = $event"
+              @browse="handleBrowse"
+            />
           </template>
         </div>
 

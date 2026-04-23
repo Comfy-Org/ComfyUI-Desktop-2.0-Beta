@@ -58,46 +58,60 @@ function makeRunPygit2(
   sendOutput: (text: string) => void,
   signal?: AbortSignal,
 ): (args: string[]) => Promise<ProcessResult> {
-  return (args: string[]): Promise<ProcessResult> => {
-    if (signal?.aborted) return Promise.resolve({ exitCode: 1, stderr: '', stdout: '' })
-    return new Promise((resolve) => {
-      const stdoutChunks: string[] = []
-      const stderrChunks: string[] = []
-      const proc = spawn(_pygit2Python!, ['-s', '-u', _pygit2Script!, ...args], {
-        stdio: ['ignore', 'pipe', 'pipe'],
-        windowsHide: true,
-        detached: process.platform !== 'win32'
-      })
-      const onAbort = (): void => { killProcTree(proc) }
-      signal?.addEventListener('abort', onAbort, { once: true })
-      if (signal?.aborted) onAbort()
-      proc.stdout.on('data', (data: Buffer) => {
-        const text = data.toString()
-        stdoutChunks.push(text)
-        sendOutput(text)
-      })
-      proc.stderr.on('data', (data: Buffer) => {
-        const text = data.toString()
-        stderrChunks.push(text)
-        sendOutput(text)
-      })
-      proc.on('error', (err) => {
-        signal?.removeEventListener('abort', onAbort)
-        sendOutput(err.message)
-        resolve({ exitCode: 1, stderr: stderrChunks.join('') + err.message, stdout: stdoutChunks.join('') })
-      })
-      proc.on('close', (code) => {
-        signal?.removeEventListener('abort', onAbort)
-        resolve({ exitCode: code ?? 1, stderr: stderrChunks.join(''), stdout: stdoutChunks.join('') })
-      })
-    })
-  }
+  return (args: string[]): Promise<ProcessResult> =>
+    spawnStreamed(_pygit2Python!, ['-s', '-u', _pygit2Script!, ...args], sendOutput, { signal })
 }
 
 export interface ProcessResult {
   exitCode: number
   stderr: string
   stdout: string
+}
+
+/**
+ * Spawn a process, stream stdout/stderr to a callback, and collect output.
+ * Supports abort via signal (kills the process tree).
+ */
+function spawnStreamed(
+  cmd: string,
+  args: string[],
+  sendOutput: (text: string) => void,
+  options?: { cwd?: string; signal?: AbortSignal },
+): Promise<ProcessResult> {
+  const { cwd, signal } = options ?? {}
+  if (signal?.aborted) return Promise.resolve({ exitCode: 1, stderr: '', stdout: '' })
+  return new Promise((resolve) => {
+    const stdoutChunks: string[] = []
+    const stderrChunks: string[] = []
+    const proc = spawn(cmd, args, {
+      ...(cwd ? { cwd } : {}),
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+      detached: process.platform !== 'win32',
+    })
+    const onAbort = (): void => { killProcTree(proc) }
+    signal?.addEventListener('abort', onAbort, { once: true })
+    if (signal?.aborted) onAbort()
+    proc.stdout.on('data', (data: Buffer) => {
+      const text = data.toString()
+      stdoutChunks.push(text)
+      sendOutput(text)
+    })
+    proc.stderr.on('data', (data: Buffer) => {
+      const text = data.toString()
+      stderrChunks.push(text)
+      sendOutput(text)
+    })
+    proc.on('error', (err) => {
+      signal?.removeEventListener('abort', onAbort)
+      sendOutput(err.message)
+      resolve({ exitCode: 1, stderr: stderrChunks.join('') + err.message, stdout: stdoutChunks.join('') })
+    })
+    proc.on('close', (code) => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve({ exitCode: code ?? 1, stderr: stderrChunks.join(''), stdout: stdoutChunks.join('') })
+    })
+  })
 }
 
 /**
@@ -534,37 +548,7 @@ export function gitClone(
     const runPygit2Spawn = makeRunPygit2(sendOutput, signal)
     return runPygit2Spawn(['clone', url, dest])
   }
-  return new Promise((resolve) => {
-    const stdoutChunks: string[] = []
-    const stderrChunks: string[] = []
-    const proc = spawn('git', ['clone', url, dest], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      windowsHide: true,
-      detached: process.platform !== 'win32'
-    })
-    const onAbort = (): void => { killProcTree(proc) }
-    signal?.addEventListener('abort', onAbort, { once: true })
-    if (signal?.aborted) onAbort()
-    proc.stdout.on('data', (data: Buffer) => {
-      const text = data.toString()
-      stdoutChunks.push(text)
-      sendOutput(text)
-    })
-    proc.stderr.on('data', (data: Buffer) => {
-      const text = data.toString()
-      stderrChunks.push(text)
-      sendOutput(text)
-    })
-    proc.on('error', (err) => {
-      signal?.removeEventListener('abort', onAbort)
-      sendOutput(err.message)
-      resolve({ exitCode: 1, stderr: stderrChunks.join('') + err.message, stdout: stdoutChunks.join('') })
-    })
-    proc.on('close', (code) => {
-      signal?.removeEventListener('abort', onAbort)
-      resolve({ exitCode: code ?? 1, stderr: stderrChunks.join(''), stdout: stdoutChunks.join('') })
-    })
-  })
+  return spawnStreamed('git', ['clone', url, dest], sendOutput, { signal })
 }
 
 function makeRunGit(
@@ -572,41 +556,8 @@ function makeRunGit(
   sendOutput: (text: string) => void,
   signal?: AbortSignal,
 ): (args: string[]) => Promise<ProcessResult> {
-  return (args: string[]): Promise<ProcessResult> => {
-    if (signal?.aborted) return Promise.resolve({ exitCode: 1, stderr: '', stdout: '' })
-    return new Promise((resolve) => {
-      const stdoutChunks: string[] = []
-      const stderrChunks: string[] = []
-      const proc = spawn('git', args, {
-        cwd: repoPath,
-        stdio: ['ignore', 'pipe', 'pipe'],
-        windowsHide: true,
-        detached: process.platform !== 'win32'
-      })
-      const onAbort = (): void => { killProcTree(proc) }
-      signal?.addEventListener('abort', onAbort, { once: true })
-      if (signal?.aborted) onAbort()
-      proc.stdout.on('data', (data: Buffer) => {
-        const text = data.toString()
-        stdoutChunks.push(text)
-        sendOutput(text)
-      })
-      proc.stderr.on('data', (data: Buffer) => {
-        const text = data.toString()
-        stderrChunks.push(text)
-        sendOutput(text)
-      })
-      proc.on('error', (err) => {
-        signal?.removeEventListener('abort', onAbort)
-        sendOutput(err.message)
-        resolve({ exitCode: 1, stderr: stderrChunks.join('') + err.message, stdout: stdoutChunks.join('') })
-      })
-      proc.on('close', (code) => {
-        signal?.removeEventListener('abort', onAbort)
-        resolve({ exitCode: code ?? 1, stderr: stderrChunks.join(''), stdout: stdoutChunks.join('') })
-      })
-    })
-  }
+  return (args: string[]): Promise<ProcessResult> =>
+    spawnStreamed('git', args, sendOutput, { cwd: repoPath, signal })
 }
 
 /**

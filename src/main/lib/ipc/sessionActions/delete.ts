@@ -1,7 +1,7 @@
 import {
   path, fs,
   installations, i18n,
-  deleteDir, formatTime,
+  deleteDir, formatDeleteStatus,
   findLockingProcesses,
   MARKER_FILE,
   _operationAborts,
@@ -35,12 +35,7 @@ export async function handleDelete({ event, installationId, inst }: ActionContex
   sendProgress('delete', { percent: 0, status: 'Counting files…' })
   try {
     await deleteDir(inst.installPath, (p) => {
-      const elapsed = formatTime(p.elapsedSecs)
-      const eta = p.etaSecs >= 0 ? formatTime(p.etaSecs) : '—'
-      sendProgress('delete', {
-        percent: p.percent,
-        status: `Deleting… ${p.deleted} / ${p.total} items  ·  ${elapsed} elapsed  ·  ${eta} remaining`,
-      })
+      sendProgress('delete', { percent: p.percent, status: formatDeleteStatus(p) })
     }, { signal: abort.signal })
   } catch (err) {
     _operationAborts.delete(installationId)

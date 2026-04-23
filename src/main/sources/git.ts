@@ -4,6 +4,7 @@ import { execFile } from 'child_process'
 import { fetchJSON } from '../lib/fetch'
 import { runLoggedProcess, formatProcessError } from '../lib/logged-process'
 import { untrackAction, launchAction, openFolderAction, migrateToStandaloneAction } from '../lib/actions'
+import { resolveGitDir, readGitHead, readGitRemoteUrl } from '../lib/git'
 import { parseArgs, extractPort } from '../lib/util'
 import { t } from '../lib/i18n'
 import { buildLaunchSettingsFields } from './common/launchSettingsFields'
@@ -208,44 +209,32 @@ export const gitSource: SourcePlugin = {
   },
 
   probeInstallation(dirPath: string): Record<string, unknown> | null {
-    if (!fs.existsSync(path.join(dirPath, '.git'))) return null
+    const gitDir = resolveGitDir(dirPath)
+    if (!gitDir) return null
     const info: Record<string, unknown> = { version: 'unknown', repo: '', branch: '', commit: '' }
+
+    // Extract branch name from HEAD
     try {
-      const head = fs.readFileSync(path.join(dirPath, '.git', 'HEAD'), 'utf-8').trim()
+      const head = fs.readFileSync(path.join(gitDir, 'HEAD'), 'utf-8').trim()
       const branchMatch = head.match(/^ref: refs\/heads\/(.+)$/)
       if (branchMatch && branchMatch[1]) {
         info.branch = branchMatch[1]
-        // Resolve the ref to a commit SHA
-        try {
-          const refPath = path.join(dirPath, '.git', 'refs', 'heads', branchMatch[1])
-          const sha = fs.readFileSync(refPath, 'utf-8').trim()
-          if (sha) {
-            info.commit = sha
-            info.version = sha.slice(0, 8)
-          }
-        } catch {
-          // ref may be packed — try packed-refs
-          try {
-            const packed = fs.readFileSync(path.join(dirPath, '.git', 'packed-refs'), 'utf-8')
-            const refLine = packed.split('\n').find((l) => l.endsWith(` refs/heads/${branchMatch[1]}`))
-            if (refLine) {
-              const sha = refLine.split(' ')[0]!
-              info.commit = sha
-              info.version = sha.slice(0, 8)
-            }
-          } catch {}
-        }
-      } else if (/^[0-9a-f]{40}$/i.test(head)) {
-        // Detached HEAD
-        info.commit = head
-        info.version = head.slice(0, 8)
       }
-      const configRaw = fs.readFileSync(path.join(dirPath, '.git', 'config'), 'utf-8')
-      const urlMatch = configRaw.match(/url\s*=\s*(.+)/)
-      if (urlMatch) info.repo = urlMatch[1]!.trim()
     } catch {
       // ignore — partial info is fine
     }
+
+    // Resolve commit SHA via readGitHead (handles refs, packed-refs, detached HEAD)
+    const commit = readGitHead(dirPath)
+    if (commit) {
+      info.commit = commit
+      info.version = commit.slice(0, 8)
+    }
+
+    // Read remote URL via readGitRemoteUrl (handles credential redaction)
+    const remoteUrl = readGitRemoteUrl(dirPath)
+    if (remoteUrl) info.repo = remoteUrl
+
     const venv = findVenv(dirPath)
     if (venv) {
       info.venvPath = venv

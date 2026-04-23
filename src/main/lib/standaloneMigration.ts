@@ -5,7 +5,7 @@ import { mergeDirFlat } from './migrate'
 import { download } from './download'
 import { createCache } from './cache'
 import { extractNested as extract } from './extract'
-import { defaultInstallDir } from './paths'
+import { defaultInstallDir, sanitizeDirName, allocateUniqueDir } from './paths'
 import {
   validateExportEnvelope, importSnapshots,
   saveSnapshot, getSnapshotCount, restoreCustomNodes, restorePipPackages,
@@ -232,14 +232,9 @@ export async function migrateToStandaloneFromSnapshot(
 
   // 2. Create new standalone installation record
   const name = await uniqueName(input.installNameBase)
-  const dirName = name.replace(/[<>:"/\\|?*]+/g, '_').trim() || 'ComfyUI'
+  const dirName = sanitizeDirName(name)
   const installDir = defaultInstallDir()
-  let destPath = path.join(installDir, dirName)
-  let suffix = 1
-  while (fs.existsSync(destPath)) {
-    destPath = path.join(installDir, `${dirName} (${suffix})`)
-    suffix++
-  }
+  const destPath = allocateUniqueDir(installDir, dirName)
 
   const entry = await installations.add({
     name,
