@@ -90,9 +90,12 @@ async function downloadAndExtract(url, destDir) {
   // Save to temp file first, then extract with tar
   fs.mkdirSync(path.dirname(destDir), { recursive: true })
   const tmpFile = `${destDir}.tar.gz`
-  await pipeline(Readable.fromWeb(response.body), fs.createWriteStream(tmpFile))
-  execSync(`tar -xzf "${tmpFile}" -C "${path.dirname(destDir)}"`, { stdio: 'inherit' })
-  fs.unlinkSync(tmpFile)
+  try {
+    await pipeline(Readable.fromWeb(response.body), fs.createWriteStream(tmpFile))
+    execSync(`tar -xzf "${tmpFile}" -C "${path.dirname(destDir)}"`, { stdio: 'inherit' })
+  } finally {
+    if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile)
+  }
 }
 
 async function main() {
