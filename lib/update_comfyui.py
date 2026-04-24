@@ -104,9 +104,10 @@ def main():
     print("Fetching from origin…")
     for remote in repo.remotes:
         if remote.name == "origin":
-            refspecs = ["+refs/heads/master:refs/remotes/origin/master"]
-            if stable:
-                refspecs.append("+refs/tags/*:refs/tags/*")
+            refspecs = [
+                "+refs/heads/master:refs/remotes/origin/master",
+                "+refs/tags/*:refs/tags/*",
+            ]
             try:
                 remote.fetch(refspecs)
             except Exception as e:
