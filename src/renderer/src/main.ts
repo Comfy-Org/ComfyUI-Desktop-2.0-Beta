@@ -3,7 +3,6 @@ import './assets/main.css'
 import { datadogRum, type RumBeforeSend } from '@datadog/browser-rum'
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
-import { createI18n } from 'vue-i18n'
 import App from './App.vue'
 import { normalizeRumErrorEvent } from './lib/datadogPathNormalization'
 import {
@@ -247,14 +246,7 @@ window.api.onInstanceStarted((data) => {
   }).catch(() => {})
 })
 
-const i18n = createI18n({
-  legacy: false,
-  locale: 'en',
-  fallbackLocale: 'en',
-  messages: { en: {} },
-  missingWarn: false,
-  fallbackWarn: false,
-})
+import { i18n } from './i18n'
 
 const app = createApp(App)
 app.use(createPinia())

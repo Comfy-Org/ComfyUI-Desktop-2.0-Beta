@@ -82,8 +82,12 @@ export function fetchJSON(url: string): Promise<unknown> {
     request.setHeader("User-Agent", "ComfyUI-Desktop-2")
 
     const ghToken = process.env.GITHUB_TOKEN
-    if (ghToken && url.includes("api.github.com")) {
-      request.setHeader("Authorization", `token ${ghToken}`)
+    if (ghToken) {
+      try {
+        if (new URL(url).hostname === "api.github.com") {
+          request.setHeader("Authorization", `token ${ghToken}`)
+        }
+      } catch { /* invalid URL — skip auth */ }
     }
 
     if (cached?.etag) {

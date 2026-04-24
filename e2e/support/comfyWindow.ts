@@ -31,16 +31,31 @@
 import { chromium, type ElectronApplication, type Page, type Browser } from 'playwright'
 
 // ---------------------------------------------------------------------------
+// Shared: ComfyUI webContents finder (used by both bridges)
+// ---------------------------------------------------------------------------
+
+/** Evaluate expression that finds the ComfyUI webContents ID. Shared by all eval-bridge helpers. */
+function _findComfyId(app: ElectronApplication): Promise<number | null> {
+  return app.evaluate(({ webContents }) => {
+    for (const wc of webContents.getAllWebContents()) {
+      const url = wc.getURL()
+      if (url.startsWith('http://127.0.0.1:') || url.startsWith('http://localhost:')) {
+        return wc.id
+      }
+    }
+    return null
+  })
+}
+
+// ---------------------------------------------------------------------------
 // CDP bridge — real Playwright Page
 // ---------------------------------------------------------------------------
 
 /** State for a CDP-backed connection to the ComfyUI webContents. */
-interface ComfyCdpHandle {
+export interface ComfyCdpHandle {
   browser: Browser
   page: Page
 }
-
-let _cdpHandle: ComfyCdpHandle | null = null
 
 /**
  * Get a real Playwright `Page` backed by the ComfyUI webContents.
@@ -49,16 +64,15 @@ let _cdpHandle: ComfyCdpHandle | null = null
  * target whose URL points to localhost (the ComfyUI frontend).
  *
  * The returned Page supports locators, auto-waiting, screenshots, etc.
- * Call `closeComfyPage()` when done (typically in afterAll).
+ * The caller owns the returned handle and must call `handle.browser.close()`
+ * when done (typically in afterAll).
  *
  * @param cdpPort — the remote-debugging port (from `AppContext.cdpPort`)
  */
 export async function getComfyPage(
   cdpPort: number,
   options?: { timeout?: number },
-): Promise<Page> {
-  if (_cdpHandle) return _cdpHandle.page
-
+): Promise<ComfyCdpHandle> {
   const timeout = options?.timeout ?? 120_000
   const start = Date.now()
 
@@ -70,8 +84,7 @@ export async function getComfyPage(
       for (const page of ctx.pages()) {
         const url = page.url()
         if (url.startsWith('http://127.0.0.1:') || url.startsWith('http://localhost:')) {
-          _cdpHandle = { browser, page }
-          return page
+          return { browser, page }
         }
       }
     }
@@ -82,53 +95,28 @@ export async function getComfyPage(
   throw new Error(`ComfyUI page not found via CDP within ${timeout}ms`)
 }
 
-/**
- * Close the CDP connection opened by `getComfyPage`.
- * Safe to call multiple times.
- */
-export async function closeComfyPage(): Promise<void> {
-  if (!_cdpHandle) return
-  const { browser } = _cdpHandle
-  _cdpHandle = null
-  await browser.close().catch(() => {})
-}
-
 // ---------------------------------------------------------------------------
 // Eval bridge — lightweight, no extra connection
 // ---------------------------------------------------------------------------
 
 /**
- * Find the webContents ID of the ComfyUI view by looking for the child
- * WebContentsView that loads the ComfyUI URL (http://127.0.0.1:<port>).
+ * Find the webContents ID of the ComfyUI view.
+ * Returns the ID, or null if no ComfyUI webContents exists.
  */
-export async function getComfyWebContentsId(app: ElectronApplication): Promise<number | null> {
-  return app.evaluate(({ webContents }) => {
-    const all = webContents.getAllWebContents()
-    for (const wc of all) {
-      const url = wc.getURL()
-      if (url.startsWith('http://127.0.0.1:') || url.startsWith('http://localhost:')) {
-        return wc.id
-      }
-    }
-    return null
-  })
-}
+export const getComfyWebContentsId = _findComfyId
 
 /**
  * Execute JavaScript in the ComfyUI webContents and return the result.
  * Throws if no ComfyUI webContents is found.
  */
 export async function comfyEval(app: ElectronApplication, expression: string): Promise<unknown> {
-  return app.evaluate(async ({ webContents }, expr) => {
-    const all = webContents.getAllWebContents()
-    for (const wc of all) {
-      const url = wc.getURL()
-      if (url.startsWith('http://127.0.0.1:') || url.startsWith('http://localhost:')) {
-        return wc.executeJavaScript(expr)
-      }
-    }
-    throw new Error('ComfyUI webContents not found')
-  }, expression)
+  const wcId = await _findComfyId(app)
+  if (wcId === null) throw new Error('ComfyUI webContents not found')
+  return app.evaluate(async ({ webContents }, { id, expr }) => {
+    const wc = webContents.fromId(id)
+    if (!wc || wc.isDestroyed()) throw new Error('ComfyUI webContents destroyed')
+    return wc.executeJavaScript(expr)
+  }, { id: wcId, expr: expression })
 }
 
 /** Query the ComfyUI DOM via executeJavaScript. */
@@ -152,7 +140,7 @@ export async function waitForComfyReady(
   const start = Date.now()
 
   while (Date.now() - start < timeout) {
-    const id = await getComfyWebContentsId(app)
+    const id = await _findComfyId(app)
     if (id !== null) {
       const loaded = await app.evaluate(async ({ webContents }, wcId) => {
         const wc = webContents.fromId(wcId)
@@ -168,16 +156,12 @@ export async function waitForComfyReady(
 
 /** Get the current URL loaded in the ComfyUI webContents. */
 export async function getComfyUrl(app: ElectronApplication): Promise<string | null> {
-  return app.evaluate(({ webContents }) => {
-    const all = webContents.getAllWebContents()
-    for (const wc of all) {
-      const url = wc.getURL()
-      if (url.startsWith('http://127.0.0.1:') || url.startsWith('http://localhost:')) {
-        return url
-      }
-    }
-    return null
-  })
+  const id = await _findComfyId(app)
+  if (id === null) return null
+  return app.evaluate(({ webContents }, wcId) => {
+    const wc = webContents.fromId(wcId)
+    return wc && !wc.isDestroyed() ? wc.getURL() : null
+  }, id)
 }
 
 /** Click an element in the ComfyUI webContents by selector. */

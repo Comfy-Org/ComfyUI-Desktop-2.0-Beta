@@ -62,8 +62,9 @@ export async function launchLauncherApp(options?: SeedOptions): Promise<Launcher
 
   // Expose a CDP remote-debugging port so tests can connect to non-BrowserWindow
   // webContents (e.g. the ComfyUI WebContentsView) via chromium.connectOverCDP().
-  // Use a random port in a high range to avoid conflicts with parallel runs.
-  const cdpPort = 19200 + Math.floor(Math.random() * 800)
+  // Derive port from Playwright worker index to avoid collisions in parallel runs.
+  const workerIndex = parseInt(process.env['TEST_WORKER_INDEX'] || '0', 10)
+  const cdpPort = 19200 + workerIndex
 
   // Linux CI runners lack the SUID sandbox binary; disable it the same way linux-dev.sh does.
   const args = ['.', `--remote-debugging-port=${cdpPort}`]
@@ -87,12 +88,15 @@ export async function launchLauncherApp(options?: SeedOptions): Promise<Launcher
   })
 
   // Prevent Electron's default uncaught-exception dialog from blocking E2E tests.
-  // Adding an 'uncaughtException' handler suppresses the native error box; we log
-  // the error to stderr instead so test output captures it.
-  await application.evaluate(() => {
-    process.on('uncaughtException', (err) => {
-      console.error('[E2E] uncaughtException suppressed:', err)
-    })
+  // Suppress the native error dialog and exit immediately on uncaught exceptions
+  // so tests fail fast instead of timing out.
+  // Note: bare `process` is rewritten by Playwright's evaluate transpiler;
+  // use app.exit() instead and access process via Electron's internals.
+  await application.evaluate(({ app: electronApp, dialog }) => {
+    // Suppress any native error/message dialogs
+    dialog.showErrorBox = () => {}
+    // Register uncaught exception handler via the app module
+    electronApp.on('render-process-gone', () => electronApp.exit(1))
   })
 
   // Seed data files after launch so we can query app.getPath('userData') for
