@@ -31,6 +31,8 @@
     "build:win": "pnpm run build && electron-builder --win",
     "build:mac": "pnpm run build && electron-builder --mac",
     "build:linux": "pnpm run build && electron-builder --linux",
+    "bootstrap": "python scripts/build-bootstrap-python.py",
+    "bootstrap:fetch": "node scripts/fetch-bootstrap-python.mjs",
     "datadog:sourcemaps:upload": "node ./scripts/upload-datadog-sourcemaps.mjs",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
