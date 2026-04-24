@@ -43,12 +43,25 @@ async function fetchReleaseAssets(tag) {
   const headers = { Accept: 'application/vnd.github+json' }
   if (token) headers.Authorization = `Bearer ${token}`
 
-  const url = `https://api.github.com/repos/${REPO}/releases/tags/${tag}`
-  const response = await fetch(url, { headers })
-  if (!response.ok) {
-    throw new Error(`Failed to fetch release ${tag}: ${response.status} ${response.statusText}`)
+  // Try the tags endpoint first (works for published releases)
+  const tagUrl = `https://api.github.com/repos/${REPO}/releases/tags/${tag}`
+  const tagResponse = await fetch(tagUrl, { headers })
+  if (tagResponse.ok) {
+    const release = await tagResponse.json()
+    return release.assets || []
   }
-  const release = await response.json()
+
+  // Fall back to listing all releases (includes drafts, requires auth)
+  const listUrl = `https://api.github.com/repos/${REPO}/releases?per_page=50`
+  const listResponse = await fetch(listUrl, { headers })
+  if (!listResponse.ok) {
+    throw new Error(`Failed to list releases: ${listResponse.status} ${listResponse.statusText}`)
+  }
+  const releases = await listResponse.json()
+  const release = releases.find((r) => r.tag_name === tag)
+  if (!release) {
+    throw new Error(`Release ${tag} not found (checked ${releases.length} releases)`)
+  }
   return release.assets || []
 }
 
@@ -63,10 +76,9 @@ async function downloadAndExtract(url, destDir) {
   }
 
   // Save to temp file first, then extract with tar
+  fs.mkdirSync(path.dirname(destDir), { recursive: true })
   const tmpFile = `${destDir}.tar.gz`
   await pipeline(Readable.fromWeb(response.body), fs.createWriteStream(tmpFile))
-
-  fs.mkdirSync(path.dirname(destDir), { recursive: true })
   execSync(`tar -xzf "${tmpFile}" -C "${path.dirname(destDir)}"`, { stdio: 'inherit' })
   fs.unlinkSync(tmpFile)
 }
