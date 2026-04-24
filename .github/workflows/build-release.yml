@@ -84,6 +84,11 @@ jobs:
           VITE_DATADOG_RUM_VERSION: ${{ steps.datadog.outputs.release_version }}
         run: pnpm run datadog:sourcemaps:upload
 
+      - name: Fetch bootstrap Python
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/fetch-bootstrap-python.mjs
+
       - name: Install ToDesktop CLI
         run: npm install --location=global @todesktop/cli@1.22.0
 

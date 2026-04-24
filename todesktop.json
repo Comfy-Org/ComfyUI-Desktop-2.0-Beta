@@ -38,5 +38,25 @@
   "linux": {
     "icon": "./assets/Comfy_Logo_x256.png",
     "category": "AudioVideo;Graphics;3DGraphics;"
+  },
+  "platformOverrides": {
+    "windows": {
+      "extraResources": [
+        { "from": "./lib", "to": "lib" },
+        { "from": "./bootstrap-python/win-x64", "to": "bootstrap-python" }
+      ]
+    },
+    "mac": {
+      "extraResources": [
+        { "from": "./lib", "to": "lib" },
+        { "from": "./bootstrap-python/mac-arm64", "to": "bootstrap-python" }
+      ]
+    },
+    "linux": {
+      "extraResources": [
+        { "from": "./lib", "to": "lib" },
+        { "from": "./bootstrap-python/linux-x64", "to": "bootstrap-python" }
+      ]
+    }
   }
 }
