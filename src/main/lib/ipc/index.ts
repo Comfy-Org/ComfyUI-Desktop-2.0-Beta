@@ -98,8 +98,17 @@ export function register(callbacks: RegisterCallbacks = {}): void {
   })()
 
   // Configure pygit2 fallback if system git is unavailable
+  // Set COMFY_FORCE_BOOTSTRAP_GIT=1 to skip system git and standalone checks (for testing)
   void (async () => {
     try {
+      const forceBootstrap = process.env.COMFY_FORCE_BOOTSTRAP_GIT === '1'
+      if (forceBootstrap) {
+        if (tryConfigureBootstrapPygit2()) {
+          console.log('[ipc] COMFY_FORCE_BOOTSTRAP_GIT — using bootstrap python for git')
+          return
+        }
+        console.warn('[ipc] COMFY_FORCE_BOOTSTRAP_GIT set but bootstrap python not found')
+      }
       if (await isGitAvailable()) return
       // Prefer standalone installation's pygit2 (co-located with ComfyUI env)
       const all = await installations.list()
