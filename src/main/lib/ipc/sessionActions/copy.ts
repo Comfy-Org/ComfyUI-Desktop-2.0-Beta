@@ -1,11 +1,11 @@
 import {
   path, fs,
   installations, settings, i18n,
-  deleteDir, formatTime,
+  deleteDir, formatDeleteStatus,
   download, createCache, extract,
   MARKER_FILE,
   _operationAborts,
-  sourceMap, findDuplicatePath, uniqueName,
+  sourceMap, findDuplicatePath, uniqueName, sanitizeDirName, allocateUniqueDir,
   performCopy, copyBrowserPartition,
   makeSendProgress, makeSendOutput,
 } from '../shared'
@@ -127,13 +127,8 @@ export async function handleReleaseUpdate({ event, installationId, inst, actionD
   })
 
   const parentDir = path.dirname(inst.installPath)
-  const dirName = name.replace(/[<>:"/\\|?*]+/g, '_').trim() || 'ComfyUI'
-  let destPath = path.join(parentDir, dirName)
-  let suffix = 1
-  while (fs.existsSync(destPath)) {
-    destPath = path.join(parentDir, `${dirName} (${suffix})`)
-    suffix++
-  }
+  const dirName = sanitizeDirName(name)
+  const destPath = allocateUniqueDir(parentDir, dirName)
 
   const duplicate = await findDuplicatePath(destPath)
   if (duplicate) {
@@ -220,12 +215,7 @@ export async function handleReleaseUpdate({ event, installationId, inst, actionD
       try { await installations.remove(entry.id) } catch {}
       try {
         await deleteDir(destPath, (p) => {
-          const elapsed = formatTime(p.elapsedSecs)
-          const eta = p.etaSecs >= 0 ? formatTime(p.etaSecs) : '—'
-          sendProgress('migrate', {
-            percent: p.percent,
-            status: `${i18n.t('standalone.releaseUpdateCleaningUp')}  ${p.deleted} / ${p.total}  ·  ${elapsed} elapsed  ·  ${eta} remaining`,
-          })
+          sendProgress('migrate', { percent: p.percent, status: formatDeleteStatus(p, i18n.t('standalone.releaseUpdateCleaningUp')) })
         })
       } catch {}
       return { ok: false, message: migrateError }

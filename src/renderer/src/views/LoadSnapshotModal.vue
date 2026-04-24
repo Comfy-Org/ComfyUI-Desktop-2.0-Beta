@@ -2,10 +2,12 @@
 import { ref, computed, watch, toRaw, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useModal } from '../composables/useModal'
+import { useModalOverlay } from '../composables/useModalOverlay'
 import type { SnapshotFilePreview, FieldOption, GPUInfo } from '../types/ipc'
-import { getVariantImage, getVariantGpuLabel, sortedCardOptions, findBestVariant } from '../lib/variants'
+import { getVariantGpuLabel, sortedCardOptions, findBestVariant } from '../lib/variants'
+import VariantCardGrid from '../components/VariantCardGrid.vue'
 import { emitTelemetryAction, toVariantBucket } from '../lib/telemetry'
-import { triggerLabel as _triggerLabel, formatDate, formatNodeVersion } from '../lib/snapshots'
+import SnapshotFilePreviewContent from '../components/SnapshotFilePreviewContent.vue'
 
 const emit = defineEmits<{
   close: []
@@ -24,8 +26,6 @@ const modal = useModal()
 
 const preview = ref<SnapshotFilePreview | null>(null)
 const installName = ref('')
-const nodesExpanded = ref(true)
-const pipExpanded = ref(false)
 const loading = ref(false)
 const creating = ref(false)
 const dragging = ref(false)
@@ -56,13 +56,15 @@ const hardwareMismatch = computed(() => {
 
 const INVALID_NAME_CHARS = /[<>:"/\\|?*]/
 const nameHasInvalidChars = computed(() => INVALID_NAME_CHARS.test(installName.value))
-const mouseDownOnOverlay = ref(false)
+
+const { handleOverlayMouseDown, handleOverlayClick } = useModalOverlay(
+  () => true,
+  () => emit('close'),
+)
 
 function open(): void {
   preview.value = null
   installName.value = ''
-  nodesExpanded.value = true
-  pipExpanded.value = false
   loading.value = false
   creating.value = false
   dragging.value = false
@@ -141,7 +143,6 @@ async function loadFromPath(filePath: string): Promise<void> {
     if (result.preview) {
       preview.value = result.preview
       installName.value = result.preview.installationName || ''
-      nodesExpanded.value = true
       await loadReleaseOptions()
     }
   } finally {
@@ -160,7 +161,6 @@ async function handleBrowse(): Promise<void> {
   if (result.preview) {
     preview.value = result.preview
     installName.value = result.preview.installationName || ''
-    nodesExpanded.value = true
     await loadReleaseOptions()
   }
 }
@@ -241,37 +241,16 @@ async function handleCreate(): Promise<void> {
   }
 }
 
-function triggerLabel(trigger: string): string {
-  return _triggerLabel(trigger, t)
-}
-
-function handleOverlayMouseDown(event: MouseEvent): void {
-  mouseDownOnOverlay.value = event.target === (event.currentTarget as HTMLElement)
-}
-
-function handleOverlayClick(event: MouseEvent): void {
-  if (mouseDownOnOverlay.value && event.target === (event.currentTarget as HTMLElement)) {
-    emit('close')
-  }
-  mouseDownOnOverlay.value = false
-}
-
-function handleKeydown(event: KeyboardEvent): void {
-  if (event.key === 'Escape') emit('close')
-}
-
 // Prevent Electron from navigating to dropped files
 function preventNav(event: Event): void {
   event.preventDefault()
 }
 
 onMounted(() => {
-  document.addEventListener('keydown', handleKeydown)
   document.addEventListener('dragover', preventNav)
   document.addEventListener('drop', preventNav)
 })
 onUnmounted(() => {
-  document.removeEventListener('keydown', handleKeydown)
   document.removeEventListener('dragover', preventNav)
   document.removeEventListener('drop', preventNav)
 })
@@ -360,37 +339,12 @@ defineExpose({ open })
               <div class="ls-field">
                 <span class="ls-label">{{ $t('list.snapshotDevice') }}</span>
                 <div v-if="variantLoading" class="ls-value ls-value-loading with-spinner">{{ $t('newInstall.loading') }}</div>
-                <div
+                <VariantCardGrid
                   v-else-if="variantOptions.length > 0"
-                  class="variant-cards"
-                >
-                  <div
-                    v-for="opt in sortedVariants"
-                    :key="opt.value"
-                    :class="['variant-card', {
-                      selected: selectedVariant?.value === opt.value,
-                      recommended: opt.recommended,
-                    }]"
-                    @click="selectVariant(opt)"
-                  >
-                    <div class="variant-card-icon">
-                      <img
-                        v-if="getVariantImage(opt)"
-                        :src="getVariantImage(opt)!"
-                        :alt="opt.label"
-                        draggable="false"
-                      />
-                      <span v-else class="variant-card-icon-text">{{ opt.label }}</span>
-                    </div>
-                    <div class="variant-card-label">{{ opt.label }}</div>
-                    <div v-if="opt.recommended" class="variant-card-badge">
-                      {{ $t('newInstall.recommended') }}
-                    </div>
-                    <div v-if="opt.description" class="variant-card-desc">
-                      {{ opt.description }}
-                    </div>
-                  </div>
-                </div>
+                  :options="sortedVariants"
+                  :selected-value="selectedVariant?.value"
+                  @select="selectVariant"
+                />
                 <span v-else class="ls-value">{{ $t('newInstall.noOptions') }}</span>
               </div>
 
@@ -400,94 +354,7 @@ defineExpose({ open })
               </div>
             </div>
 
-            <!-- Source info -->
-            <div class="ls-section">
-              <div class="ls-field">
-                <span class="ls-label">{{ $t('list.snapshotSourceName') }}</span>
-                <span class="ls-value">{{ preview.installationName }}</span>
-              </div>
-              <div class="ls-field">
-                <span class="ls-label">{{ $t('list.snapshotCount') }}</span>
-                <span class="ls-value">{{ preview.snapshotCount }}</span>
-              </div>
-            </div>
-
-            <!-- Snapshot timeline -->
-            <div class="ls-section">
-              <div class="ls-section-title">{{ $t('list.snapshotTimeline') }}</div>
-              <div class="ls-timeline">
-                <div
-                  v-for="(snap, i) in preview.snapshots"
-                  :key="snap.filename"
-                  class="ls-timeline-item"
-                >
-                  <span class="ls-trigger" :class="'ls-trigger-' + snap.trigger">{{ triggerLabel(snap.trigger) }}</span>
-                  <span v-if="i === 0" class="ls-current-tag">{{ $t('snapshots.current') }}</span>
-                  <span class="ls-meta">{{ snap.comfyuiVersion }} · {{ $t('snapshots.nodesCount', { count: snap.nodeCount }) }} · {{ $t('snapshots.packagesCount', { count: snap.pipPackageCount }) }}</span>
-                  <span class="ls-time">{{ formatDate(snap.createdAt) }}</span>
-                </div>
-              </div>
-            </div>
-
-            <!-- Newest snapshot detail -->
-            <div class="ls-section">
-              <div class="ls-section-title">{{ $t('list.snapshotNewestDetail') }}</div>
-
-              <div class="ls-grid">
-                <div class="ls-field">
-                  <span class="ls-label">{{ $t('snapshots.comfyuiVersion') }}</span>
-                  <span class="ls-value">{{ preview.newestSnapshot.comfyuiVersion }}</span>
-                </div>
-                <div class="ls-field">
-                  <span class="ls-label">{{ $t('snapshots.variant') }}</span>
-                  <span class="ls-value">{{ preview.newestSnapshot.comfyui.variant || '—' }}</span>
-                </div>
-                <div class="ls-field">
-                  <span class="ls-label">{{ $t('snapshots.pythonVersion') }}</span>
-                  <span class="ls-value">{{ preview.newestSnapshot.pythonVersion || '—' }}</span>
-                </div>
-                <div class="ls-field">
-                  <span class="ls-label">{{ $t('snapshots.capturedAt') }}</span>
-                  <span class="ls-value">{{ formatDate(preview.newestSnapshot.createdAt) }}</span>
-                </div>
-              </div>
-
-              <!-- Custom nodes -->
-              <div class="ls-subsection">
-                <div class="ls-subsection-title" @click="nodesExpanded = !nodesExpanded">
-                  <span>{{ $t('snapshots.customNodes') }} ({{ preview.newestSnapshot.customNodes.length }})</span>
-                  <span class="ls-collapse">{{ nodesExpanded ? '▾' : '▸' }}</span>
-                </div>
-                <template v-if="nodesExpanded">
-                  <div v-if="preview.newestSnapshot.customNodes.length > 0" class="recessed-list">
-                    <div v-for="node in preview.newestSnapshot.customNodes" :key="node.id" class="ls-node-row">
-                      <span class="ls-node-status" :class="node.enabled ? 'ls-node-enabled' : 'ls-node-disabled'" />
-                      <span class="ls-node-name">{{ node.id }}</span>
-                      <span class="ls-node-type">{{ node.type }}</span>
-                      <span class="ls-node-version" :title="formatNodeVersion(node)">{{ formatNodeVersion(node) }}</span>
-                    </div>
-                  </div>
-                  <div v-else class="ls-empty">—</div>
-                </template>
-              </div>
-
-              <!-- Pip packages -->
-              <div class="ls-subsection">
-                <div class="ls-subsection-title" @click="pipExpanded = !pipExpanded">
-                  <span>{{ $t('snapshots.pipPackages') }} ({{ preview.newestSnapshot.pipPackageCount }})</span>
-                  <span class="ls-collapse">{{ pipExpanded ? '▾' : '▸' }}</span>
-                </div>
-                <template v-if="pipExpanded">
-                  <div v-if="preview.newestSnapshot.pipPackageCount > 0" class="recessed-list">
-                    <div v-for="(version, name) in preview.newestSnapshot.pipPackages" :key="name" class="ls-pip-row">
-                      <span class="ls-pip-name">{{ name }}</span>
-                      <span class="ls-pip-version" :title="version">{{ version }}</span>
-                    </div>
-                  </div>
-                  <div v-else class="ls-empty">—</div>
-                </template>
-              </div>
-            </div>
+            <SnapshotFilePreviewContent :preview="preview" />
           </template>
         </div>
 

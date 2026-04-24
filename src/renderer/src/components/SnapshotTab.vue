@@ -589,11 +589,11 @@ function diffHasChanges(diff: SnapshotDiffResult): boolean {
                   >
                   <div v-if="filteredCustomNodes.length === 0 && nodeSearch" class="inspector-empty">{{ t('snapshots.searchNoResults') }}</div>
                   <template v-else>
-                    <div v-for="node in filteredCustomNodes" :key="node.id" class="node-row">
-                      <span class="node-status" :class="node.enabled ? 'node-enabled' : 'node-disabled'" />
-                      <span class="node-name">{{ node.id }}</span>
-                      <span class="node-type-badge">{{ node.type }}</span>
-                      <span class="node-version" :title="formatNodeVersion(node)">{{ formatNodeVersion(node) }}</span>
+                    <div v-for="node in filteredCustomNodes" :key="node.id" class="ls-node-row">
+                      <span class="ls-node-status" :class="node.enabled ? 'ls-node-enabled' : 'ls-node-disabled'" />
+                      <span class="ls-node-name">{{ node.id }}</span>
+                      <span class="ls-node-type">{{ node.type }}</span>
+                      <span class="ls-node-version" :title="formatNodeVersion(node)">{{ formatNodeVersion(node) }}</span>
                     </div>
                   </template>
                 </div>
@@ -619,9 +619,9 @@ function diffHasChanges(diff: SnapshotDiffResult): boolean {
                   >
                   <div v-if="filteredPipPackages.length === 0 && pipSearch" class="inspector-empty">{{ t('snapshots.searchNoResults') }}</div>
                   <template v-else>
-                    <div v-for="[name, version] in filteredPipPackages" :key="name" class="pip-row">
-                      <span class="pip-name">{{ name }}</span>
-                      <span class="pip-version" :title="version">{{ version }}</span>
+                    <div v-for="[name, version] in filteredPipPackages" :key="name" class="ls-pip-row">
+                      <span class="ls-pip-name">{{ name }}</span>
+                      <span class="ls-pip-version" :title="version">{{ version }}</span>
                     </div>
                   </template>
                 </div>
@@ -1073,55 +1073,6 @@ function diffHasChanges(diff: SnapshotDiffResult): boolean {
   user-select: text;
 }
 
-/* Recessed list container */
-/* Node list — inherits recessed-list from main.css */
-
-.node-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  padding: 2px 0;
-}
-
-.node-status {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-.node-enabled { background: var(--info); }
-.node-disabled { background: var(--text-faint); }
-
-.node-name {
-  color: var(--text);
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  user-select: text;
-}
-
-.node-type-badge {
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  color: var(--text-muted);
-  padding: 1px 5px;
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  flex-shrink: 0;
-}
-
-.node-version {
-  font-size: 13px;
-  color: var(--text-muted);
-  flex-shrink: 0;
-  font-family: monospace;
-  user-select: text;
-}
-
 /* Search input inside recessed containers */
 .recessed-search {
   width: 100%;
@@ -1144,32 +1095,8 @@ function diffHasChanges(diff: SnapshotDiffResult): boolean {
   overflow-y: auto;
 }
 
-.pip-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 2px 0;
-  font-size: 13px;
-}
-
-.pip-name {
-  color: var(--text);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  flex: 1;
-  min-width: 0;
-  user-select: text;
-}
-
-.pip-version {
-  color: var(--text-muted);
-  font-family: monospace;
-  margin-left: 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 50%;
-  user-select: text;
+/* Override global ls-node-disabled to match original SnapshotTab styling */
+.ls-node-disabled {
+  background: var(--text-faint);
 }
 </style>

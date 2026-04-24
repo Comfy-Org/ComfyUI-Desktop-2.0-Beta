@@ -1,13 +1,15 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, toRaw, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, nextTick, toRaw } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useModal } from '../composables/useModal'
 import { useActionGuard } from '../composables/useActionGuard'
 import { useLauncherPrefs } from '../composables/useLauncherPrefs'
+import { useModalOverlay } from '../composables/useModalOverlay'
 import DetailSectionComponent from '../components/DetailSection.vue'
 import SnapshotTab from '../components/SnapshotTab.vue'
 import { useInstallationStore } from '../stores/installationStore'
 import { emitTelemetryAction, toErrorBucket } from '../lib/telemetry'
+import { formatBytes } from '../lib/formatting'
 import { useMigrateAction } from '../composables/useMigrateAction'
 import { REQUIRES_STOPPED } from '../types/ipc'
 import { Star, Pin, Pencil } from 'lucide-vue-next'
@@ -73,9 +75,12 @@ async function confirmSetPrimary(): Promise<void> {
   }
 }
 
-const contentRef = ref<HTMLDivElement | null>(null)
 const scrollRef = ref<HTMLDivElement | null>(null)
-const mouseDownOnOverlay = ref(false)
+
+const { handleOverlayMouseDown, handleOverlayClick } = useModalOverlay(
+  () => props.installation !== null,
+  () => emit('close'),
+)
 
 const sections = ref<DetailSection[]>([])
 const sectionsLoading = ref(false)
@@ -110,11 +115,6 @@ const bottomSection = computed(() => sections.value.find((s) => s.pinBottom) ?? 
 const previousInstId = ref<string | null>(null)
 const autoActionRun = ref(false)
 let sizeGeneration = 0
-
-function formatBytes(bytes: number): string {
-  if (bytes >= 1073741824) return `${(bytes / 1073741824).toFixed(1)} GB`
-  return `${(bytes / 1048576).toFixed(0)} MB`
-}
 
 async function fetchInstallationSize(installationId: string): Promise<void> {
   const gen = ++sizeGeneration
@@ -520,30 +520,7 @@ function navigateToInstallation(installationId: string): void {
   if (inst) emit('update:installation', inst)
 }
 
-function handleOverlayMouseDown(event: MouseEvent): void {
-  mouseDownOnOverlay.value = event.target === contentRef.value?.parentElement
-}
 
-function handleOverlayClick(event: MouseEvent): void {
-  if (mouseDownOnOverlay.value && event.target === contentRef.value?.parentElement) {
-    emit('close')
-  }
-  mouseDownOnOverlay.value = false
-}
-
-function handleEscapeKey(event: KeyboardEvent): void {
-  if (event.key === 'Escape' && props.installation) {
-    emit('close')
-  }
-}
-
-onMounted(() => {
-  document.addEventListener('keydown', handleEscapeKey)
-})
-
-onUnmounted(() => {
-  document.removeEventListener('keydown', handleEscapeKey)
-})
 </script>
 
 <template>
@@ -553,7 +530,7 @@ onUnmounted(() => {
     @mousedown="handleOverlayMouseDown"
     @click="handleOverlayClick"
   >
-    <div ref="contentRef" class="view-modal-content">
+    <div class="view-modal-content">
       <div class="view-modal-header">
         <div
           class="view-modal-title"

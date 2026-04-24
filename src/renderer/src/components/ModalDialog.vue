@@ -2,9 +2,10 @@
 import { ref, computed, watch, nextTick, onMounted, onUnmounted, reactive } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useModal, type ModalOption } from '../composables/useModal'
-import { sortedCardOptions, getVariantImage } from '../lib/variants'
+import { sortedCardOptions } from '../lib/variants'
 import type { FieldOption } from '../types/ipc'
 import InfoTooltip from './InfoTooltip.vue'
+import VariantCardGrid from './VariantCardGrid.vue'
 import { formatNodeVersion } from '../lib/snapshots'
 
 const { t } = useI18n()
@@ -201,97 +202,72 @@ onUnmounted(() => {
 
           <!-- Snapshot preview -->
           <template v-if="!state.loading && state.snapshotPreview">
-            <div class="sp-grid">
-              <div class="sp-field">
-                <span class="sp-label">{{ $t('snapshots.comfyuiVersion') }}</span>
-                <span class="sp-value">{{ state.snapshotPreview.comfyuiVersion }}</span>
+            <div class="ls-grid">
+              <div class="ls-field">
+                <span class="ls-label">{{ $t('snapshots.comfyuiVersion') }}</span>
+                <span class="ls-value">{{ state.snapshotPreview.comfyuiVersion }}</span>
               </div>
-              <div class="sp-field">
-                <span class="sp-label">{{ $t('snapshots.variant') }}</span>
-                <span class="sp-value">{{ state.snapshotPreview.comfyui.variant || '—' }}</span>
+              <div class="ls-field">
+                <span class="ls-label">{{ $t('snapshots.variant') }}</span>
+                <span class="ls-value">{{ state.snapshotPreview.comfyui.variant || '—' }}</span>
               </div>
-              <div v-if="state.snapshotPreview.pythonVersion" class="sp-field">
-                <span class="sp-label">{{ $t('snapshots.pythonVersion') }}</span>
-                <span class="sp-value">{{ state.snapshotPreview.pythonVersion }}</span>
+              <div v-if="state.snapshotPreview.pythonVersion" class="ls-field">
+                <span class="ls-label">{{ $t('snapshots.pythonVersion') }}</span>
+                <span class="ls-value">{{ state.snapshotPreview.pythonVersion }}</span>
               </div>
 
             </div>
 
-            <div class="sp-subsection">
-              <div class="sp-subsection-title" @click="spNodesExpanded = !spNodesExpanded">
+            <div class="ls-subsection">
+              <div class="ls-subsection-title" @click="spNodesExpanded = !spNodesExpanded">
                 <span>{{ $t('snapshots.customNodes') }} ({{ state.snapshotPreview.customNodes.length }})<InfoTooltip :text="t('tooltips.customNodes')" side="bottom" /></span>
-                <span class="sp-collapse">{{ spNodesExpanded ? '▾' : '▸' }}</span>
+                <span class="ls-collapse">{{ spNodesExpanded ? '▾' : '▸' }}</span>
               </div>
               <template v-if="spNodesExpanded">
-                <div v-if="state.snapshotPreview.customNodes.length > 0" class="sp-recessed-list">
-                  <div v-for="node in state.snapshotPreview.customNodes" :key="node.id" class="sp-node-row">
-                    <span class="sp-node-status" :class="node.enabled ? 'sp-node-enabled' : 'sp-node-disabled'" />
-                    <span class="sp-node-name">{{ node.id }}</span>
-                    <span class="sp-node-type">{{ node.type }}</span>
-                    <span class="sp-node-version">{{ formatNodeVersion(node) }}</span>
+                <div v-if="state.snapshotPreview.customNodes.length > 0" class="recessed-list">
+                  <div v-for="node in state.snapshotPreview.customNodes" :key="node.id" class="ls-node-row">
+                    <span class="ls-node-status" :class="node.enabled ? 'ls-node-enabled' : 'ls-node-disabled'" />
+                    <span class="ls-node-name">{{ node.id }}</span>
+                    <span class="ls-node-type">{{ node.type }}</span>
+                    <span class="ls-node-version">{{ formatNodeVersion(node) }}</span>
                   </div>
                 </div>
-                <div v-else class="sp-empty">—</div>
+                <div v-else class="ls-empty">—</div>
               </template>
             </div>
 
-            <div class="sp-subsection">
-              <div class="sp-subsection-title" @click="spPipExpanded = !spPipExpanded">
+            <div class="ls-subsection">
+              <div class="ls-subsection-title" @click="spPipExpanded = !spPipExpanded">
                 <span>{{ $t('snapshots.pipPackages') }} ({{ state.snapshotPreview.pipPackageCount }})<InfoTooltip :text="t('tooltips.pipPackages')" side="bottom" /></span>
-                <span class="sp-collapse">{{ spPipExpanded ? '▾' : '▸' }}</span>
+                <span class="ls-collapse">{{ spPipExpanded ? '▾' : '▸' }}</span>
               </div>
               <template v-if="spPipExpanded">
-                <div v-if="state.snapshotPreview.pipPackageCount > 0" class="sp-recessed-list">
-                  <div v-for="(version, name) in state.snapshotPreview.pipPackages" :key="name" class="sp-pip-row">
-                    <span class="sp-pip-name">{{ name }}</span>
-                    <span class="sp-pip-version" :title="version">{{ version }}</span>
+                <div v-if="state.snapshotPreview.pipPackageCount > 0" class="recessed-list">
+                  <div v-for="(version, name) in state.snapshotPreview.pipPackages" :key="name" class="ls-pip-row">
+                    <span class="ls-pip-name">{{ name }}</span>
+                    <span class="ls-pip-version" :title="version">{{ version }}</span>
                   </div>
                 </div>
-                <div v-else class="sp-empty">—</div>
+                <div v-else class="ls-empty">—</div>
               </template>
             </div>
           </template>
 
           <!-- Variant / device selection -->
-          <div v-if="!state.loading && (state.variantCards.length > 0 || state.variantLoading)" class="sp-subsection">
-            <div class="sp-subsection-title">
+          <div v-if="!state.loading && (state.variantCards.length > 0 || state.variantLoading)" class="ls-subsection">
+            <div class="ls-subsection-title">
               <span>{{ $t('list.snapshotDevice') }}</span>
             </div>
             <div v-if="state.variantLoading" class="modal-loading">
               <div class="modal-loading-spinner" />
               <span>{{ $t('common.loading') }}</span>
             </div>
-            <div v-else class="variant-cards">
-              <div
-                v-for="opt in sortedVariants"
-                :key="opt.value"
-                role="button"
-                tabindex="0"
-                :class="['variant-card', {
-                  selected: state.selectedVariant?.value === opt.value,
-                  recommended: opt.recommended,
-                }]"
-                @click="selectVariant(opt)"
-                @keydown.enter.prevent="selectVariant(opt)"
-              >
-                <div class="variant-card-icon">
-                  <img
-                    v-if="getVariantImage(opt)"
-                    :src="getVariantImage(opt)!"
-                    :alt="opt.label"
-                    draggable="false"
-                  />
-                  <span v-else class="variant-card-icon-text">{{ opt.label }}</span>
-                </div>
-                <div class="variant-card-label">{{ opt.label }}</div>
-                <div v-if="opt.recommended" class="variant-card-badge">
-                  {{ $t('newInstall.recommended') }}
-                </div>
-                <div v-if="opt.description" class="variant-card-desc">
-                  {{ opt.description }}
-                </div>
-              </div>
-            </div>
+            <VariantCardGrid
+              v-else
+              :options="sortedVariants"
+              :selected-value="state.selectedVariant?.value"
+              @select="selectVariant"
+            />
           </div>
 
           <div v-if="state.messageDetails.length" class="modal-details">

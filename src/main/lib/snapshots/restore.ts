@@ -9,6 +9,7 @@ import { installCnrNode, switchCnrVersion, isSafePathComponent } from '../cnr'
 import { killProcTree } from '../process'
 import { formatComfyVersion } from '../version'
 import { getUvPath, getActivePythonPath, getVenvDir } from '../pythonEnv'
+import { findSitePackages } from '../../sources/standalone/envPaths'
 import type { Snapshot, RestoreResult, NodeRestoreResult } from './types'
 import type { ScannedNode } from '../nodes'
 import type { InstallationRecord } from '../../installations'
@@ -38,18 +39,6 @@ function isProtectedPackage(name: string): boolean {
 /** Normalize a package name for dist-info directory matching (PEP 503). */
 function normalizeDistInfoName(name: string): string {
   return name.toLowerCase().replace(/[-_.]+/g, '_')
-}
-
-function findSitePackagesDir(envRoot: string): string | null {
-  if (process.platform === 'win32') {
-    return path.join(envRoot, 'Lib', 'site-packages')
-  }
-  const libDir = path.join(envRoot, 'lib')
-  try {
-    const pyDir = fs.readdirSync(libDir).find((d) => d.startsWith('python'))
-    if (pyDir) return path.join(libDir, pyDir, 'site-packages')
-  } catch {}
-  return null
 }
 
 /** Find a package's dist-info directory in site-packages. */
@@ -367,11 +356,11 @@ export async function restorePipPackages(
   // 3. Create targeted backup of packages that will be modified or removed
   sendProgress('restore', { percent: 10, status: 'Creating backup of affected packages…' })
   let envDir = getVenvDir(installPath)
-  let sitePackages = findSitePackagesDir(envDir)
+  let sitePackages = findSitePackages(envDir)
   if (!sitePackages) {
     // Fallback: legacy envs/default/ layout (pre-migration)
     envDir = path.join(installPath, 'envs', 'default')
-    sitePackages = findSitePackagesDir(envDir)
+    sitePackages = findSitePackages(envDir)
   }
   if (!sitePackages) {
     throw new Error('Could not locate site-packages directory')

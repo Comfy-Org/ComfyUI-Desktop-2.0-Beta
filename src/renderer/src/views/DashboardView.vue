@@ -4,12 +4,9 @@ import { useI18n } from 'vue-i18n'
 import { useInstallationStore } from '../stores/installationStore'
 import { useSessionStore } from '../stores/sessionStore'
 import { useModal } from '../composables/useModal'
-import { useActionGuard } from '../composables/useActionGuard'
-import { useLocalInstanceGuard } from '../composables/useLocalInstanceGuard'
+import { useListAction } from '../composables/useListAction'
 import { useLauncherPrefs } from '../composables/useLauncherPrefs'
 import { useInstallContextMenu } from '../composables/useInstallContextMenu'
-import { emitTelemetryAction, toErrorBucket } from '../lib/telemetry'
-import { REQUIRES_STOPPED } from '../types/ipc'
 import { Download, Star, Clock, Cloud, Pin } from 'lucide-vue-next'
 import DashboardCard from '../components/DashboardCard.vue'
 import MigrationBanner from '../components/MigrationBanner.vue'
@@ -24,8 +21,6 @@ const { t } = useI18n()
 const installationStore = useInstallationStore()
 const sessionStore = useSessionStore()
 const modal = useModal()
-const actionGuard = useActionGuard()
-const localInstanceGuard = useLocalInstanceGuard()
 const prefs = useLauncherPrefs()
 
 const emit = defineEmits<{
@@ -118,97 +113,79 @@ const latestActions = ref<ListAction[]>([])
 const cloudActions = ref<ListAction[]>([])
 const pinnedActionsById = ref<Record<string, ListAction[]>>({})
 
-let primaryGen = 0
-let latestGen = 0
-let cloudGen = 0
-const pinnedGenById = new Map<string, number>()
-
 const sessionDeps = [
   () => sessionStore.runningInstances.size,
   () => sessionStore.activeSessions.size,
   () => sessionStore.errorInstances.size,
 ]
 
-watch(
-  [() => primaryInstall.value?.id, () => props.visible, ...sessionDeps],
-  async () => {
-    const gen = ++primaryGen
-    const id = primaryInstall.value?.id
-    if (!id || !props.visible) { primaryActions.value = []; return }
-    if (
-      !sessionStore.isRunning(id) &&
-      !sessionStore.activeSessions.has(id)
-    ) {
-      const actions = await window.api.getListActions(id)
-      if (gen === primaryGen) primaryActions.value = actions
-    } else {
-      primaryActions.value = []
-    }
-  },
-  { immediate: true }
-)
-
-watch(
-  [() => latestInstall.value?.id, () => props.visible, ...sessionDeps],
-  async () => {
-    const gen = ++latestGen
-    const id = latestInstall.value?.id
-    if (!id || !props.visible || id === primaryInstall.value?.id) { latestActions.value = []; return }
-    if (
-      !sessionStore.isRunning(id) &&
-      !sessionStore.activeSessions.has(id)
-    ) {
-      const actions = await window.api.getListActions(id)
-      if (gen === latestGen) latestActions.value = actions
-    } else {
-      latestActions.value = []
-    }
-  },
-  { immediate: true }
-)
-
-watch(
-  [() => cloudInstall.value?.id, () => props.visible,
-    () => sessionStore.runningInstances.size, () => sessionStore.activeSessions.size],
-  async () => {
-    const gen = ++cloudGen
-    const id = cloudInstall.value?.id
-    if (!id || !props.visible) { cloudActions.value = []; return }
-    if (
-      !sessionStore.isRunning(id) &&
-      !sessionStore.activeSessions.has(id)
-    ) {
-      const actions = await window.api.getListActions(id)
-      if (gen === cloudGen) cloudActions.value = actions
-    } else {
-      cloudActions.value = []
-    }
-  },
-  { immediate: true }
-)
-
-watch(
-  [() => pinnedInstalls.value.map((i) => i.id).join(','), () => props.visible, ...sessionDeps],
-  async () => {
-    if (!props.visible) { pinnedActionsById.value = {}; return }
-    const result: Record<string, ListAction[]> = {}
-    for (const inst of pinnedInstalls.value) {
-      const gen = (pinnedGenById.get(inst.id) ?? 0) + 1
-      pinnedGenById.set(inst.id, gen)
-      if (
-        !sessionStore.isRunning(inst.id) &&
-        !sessionStore.activeSessions.has(inst.id)
-      ) {
-        const actions = await window.api.getListActions(inst.id)
-        if (pinnedGenById.get(inst.id) === gen) result[inst.id] = actions
-      } else {
-        result[inst.id] = []
+function useActionWatcher(
+  idGetter: () => string | undefined | null,
+  extraDeps: Array<() => unknown>,
+  setActions: (actions: ListAction[]) => void,
+): void {
+  let gen = 0
+  watch(
+    [idGetter, () => props.visible, ...sessionDeps, ...extraDeps],
+    async () => {
+      const currentGen = ++gen
+      const id = idGetter()
+      if (!id || !props.visible) { setActions([]); return }
+      if (sessionStore.isRunning(id) || sessionStore.activeSessions.has(id)) {
+        setActions([])
+        return
       }
-    }
-    pinnedActionsById.value = result
-  },
-  { immediate: true }
+      const actions = await window.api.getListActions(id)
+      if (currentGen === gen) setActions(actions)
+    },
+    { immediate: true },
+  )
+}
+
+useActionWatcher(
+  () => primaryInstall.value?.id,
+  [],
+  (actions) => { primaryActions.value = actions },
 )
+
+useActionWatcher(
+  () => {
+    const id = latestInstall.value?.id
+    return id && id !== primaryInstall.value?.id ? id : null
+  },
+  [],
+  (actions) => { latestActions.value = actions },
+)
+
+useActionWatcher(
+  () => cloudInstall.value?.id,
+  [],
+  (actions) => { cloudActions.value = actions },
+)
+
+// Pinned watcher: watches multiple IDs and fetches actions for each
+{
+  const pinnedGenById = new Map<string, number>()
+  watch(
+    [() => pinnedInstalls.value.map((i) => i.id).join(','), () => props.visible, ...sessionDeps],
+    async () => {
+      if (!props.visible) { pinnedActionsById.value = {}; return }
+      const result: Record<string, ListAction[]> = {}
+      for (const inst of pinnedInstalls.value) {
+        const gen = (pinnedGenById.get(inst.id) ?? 0) + 1
+        pinnedGenById.set(inst.id, gen)
+        if (sessionStore.isRunning(inst.id) || sessionStore.activeSessions.has(inst.id)) {
+          result[inst.id] = []
+        } else {
+          const actions = await window.api.getListActions(inst.id)
+          if (pinnedGenById.get(inst.id) === gen) result[inst.id] = actions
+        }
+      }
+      pinnedActionsById.value = result
+    },
+    { immediate: true },
+  )
+}
 
 // --- Relative time (reactive) ---
 const now = ref(Date.now())
@@ -233,77 +210,14 @@ function timeAgo(timestamp: number): string {
 }
 
 // --- Launch handling ---
+const { executeAction } = useListAction('dashboard', {
+  showProgress: (opts) => emit('show-progress', opts),
+})
+
 async function handleLaunch(inst: Installation, actions: ListAction[]): Promise<void> {
   const action = actions.find((a) => a.style === 'primary') ?? actions[0] ?? null
   if (!inst || !action) return
-  const telemetryContext = {
-    source_category: inst.sourceCategory || 'unknown',
-    ui_surface: 'dashboard',
-  }
-
-  if (action.enabled === false && action.disabledMessage) {
-    await modal.alert({ title: action.label, message: action.disabledMessage })
-    return
-  }
-
-  // Pre-flight: check if the installation is busy or running
-  if (REQUIRES_STOPPED.has(action.id)) {
-    if (!await actionGuard.checkBeforeAction(inst.id, action.label)) return
-  }
-
-  if (action.confirm) {
-    const confirmed = await modal.confirm({
-      title: action.confirm.title || 'Confirm',
-      message: action.confirm.message || 'Are you sure?',
-      confirmLabel: action.label,
-      confirmStyle: action.style || 'danger',
-    })
-    if (!confirmed) {
-      emitTelemetryAction('launcher.action.result', { action_id: action.id, result: 'cancelled', ...telemetryContext })
-      return
-    }
-  }
-
-  if (action.id === 'launch') {
-    const canLaunch = await localInstanceGuard.checkBeforeLaunch(inst.id)
-    if (!canLaunch) {
-      emitTelemetryAction('launcher.action.result', { action_id: action.id, result: 'cancelled', ...telemetryContext })
-      return
-    }
-  }
-
-  sessionStore.clearErrorInstance(inst.id)
-  emitTelemetryAction('launcher.action.invoked', { action_id: action.id, ...telemetryContext })
-  if (action.showProgress) {
-    emit('show-progress', {
-      installationId: inst.id,
-      title: `${action.progressTitle || action.label} — ${inst.name}`,
-      apiCall: () => window.api.runAction(inst.id, action.id),
-      cancellable: !!action.cancellable,
-    })
-    return
-  }
-
-  try {
-    const result = await window.api.runAction(inst.id, action.id)
-    if (result.running) {
-      await actionGuard.checkBeforeAction(inst.id, action.label)
-      return
-    }
-    const resultValue = result.cancelled ? 'cancelled' : (result.ok === false ? 'failed' : 'ok')
-    emitTelemetryAction('launcher.action.result', { action_id: action.id, result: resultValue, ...telemetryContext })
-    if (result.message) {
-      await modal.alert({ title: action.label, message: result.message })
-    }
-  } catch (error: unknown) {
-    emitTelemetryAction('launcher.action.result', {
-      action_id: action.id,
-      result: 'failed',
-      error_bucket: toErrorBucket(error),
-      ...telemetryContext,
-    })
-    throw error
-  }
+  await executeAction(inst, action)
 }
 
 // --- Change primary ---
