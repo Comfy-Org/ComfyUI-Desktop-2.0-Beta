@@ -5,7 +5,8 @@
   "appFiles": [
     "**",
     "!electron-builder.yml",
-    "!out/**/*.map"
+    "!out/**/*.map",
+    "!bootstrap-python/**"
   ],
   "appId": "org.comfy.comfyui-desktop-2",
   "icon": "./assets/Comfy_Logo_x512.png",
@@ -55,6 +56,7 @@
     "linux": {
       "extraResources": [
         { "from": "./lib", "to": "lib" },
+        { "from": "resources/apparmor-profile", "to": "apparmor-profile" },
         { "from": "./bootstrap-python/linux-x64", "to": "bootstrap-python" }
       ]
     }

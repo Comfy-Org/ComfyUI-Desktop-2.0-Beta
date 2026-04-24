@@ -101,7 +101,9 @@ async function main() {
 
     console.log(`  ${platform}: downloading ${assetName} (${(asset.size / 1048576).toFixed(1)} MB)`)
     try {
-      await downloadAndExtract(asset.browser_download_url, destDir)
+      // Use asset.url (REST API endpoint) not browser_download_url to
+      // support private repos and avoid auth-header issues with S3 redirects.
+      await downloadAndExtract(asset.url, destDir)
       console.log(`  ${platform}: OK`)
     } catch (err) {
       console.warn(`  ${platform}: failed - ${err.message}`)
@@ -113,6 +115,5 @@ async function main() {
 
 main().catch((err) => {
   console.error(err)
-  // Non-fatal — app works without bootstrap python, just no pre-install git
-  process.exit(0)
+  process.exit(1)
 })

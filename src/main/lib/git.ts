@@ -48,9 +48,12 @@ export function tryConfigurePygit2Fallback(installPath: string): boolean {
  * @returns `true` if pygit2 was successfully configured.
  */
 export function tryConfigureBootstrapPygit2(): boolean {
+  const platformDir = process.platform === 'win32' ? 'win-x64'
+    : process.platform === 'darwin' ? 'mac-arm64'
+    : 'linux-x64'
   const bootstrapDir = app.isPackaged
     ? path.join(process.resourcesPath, 'bootstrap-python')
-    : path.join(__dirname, '..', '..', 'bootstrap-python')
+    : path.join(__dirname, '..', '..', 'bootstrap-python', platformDir)
   const pythonPath = process.platform === 'win32'
     ? path.join(bootstrapDir, 'python.exe')
     : path.join(bootstrapDir, 'bin', 'python3')
