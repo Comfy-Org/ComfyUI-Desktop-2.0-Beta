@@ -57,6 +57,7 @@ The refactor was split into phases:
 3. `40e151b` — feat: CDP bridge for ComfyUI WebContentsView E2E testing
 4. `07b9ea2` — fix: extract i18n module, fix E2E harness and lifecycle tests
 5. `d74d5f1` — refactor: extract useControllerRegistration composable
+6. `4994044` — feat: Phase 3 infrastructure — fullscreen mode support, E2E tests
 
 ## Phase 3: Per-View Fullscreen Migration
 
@@ -71,15 +72,15 @@ The refactor was split into phases:
 
 ### Migration order
 
-1. SettingsView (tab → also modal) — not yet started
-2. NewInstallModal — not yet started
-3. QuickInstallModal — not yet started
-4. DetailModal — not yet started
-5. TrackModal — not yet started
-6. LoadSnapshotModal — not yet started
-7. ConsoleModal — not yet started
-8. ProgressModal — not yet started
+1. SettingsView (tab → also modal) — **done** — added `'settings'` to `OverlayKey`/`OverlayPropsMap`, `mode` prop selects overlay vs tab template, extracted `SettingsSections.vue` to deduplicate section rendering, ViewShell renders settings overlay, 3 E2E tests added
+2. NewInstallModal — **done** — already mode-agnostic via ViewShell wrapper, no per-view changes needed
+3. QuickInstallModal — **done** — already mode-agnostic via ViewShell wrapper, no per-view changes needed
+4. DetailModal — **done** — already mode-agnostic via ViewShell wrapper, no per-view changes needed
+5. TrackModal — **done** — already mode-agnostic via ViewShell wrapper, no per-view changes needed
+6. LoadSnapshotModal — **done** — already mode-agnostic via ViewShell wrapper, no per-view changes needed
+7. ConsoleModal — **done** — already mode-agnostic via ViewShell wrapper, no per-view changes needed
+8. ProgressModal — **done** — already mode-agnostic via ViewShell wrapper, no per-view changes needed
 
 ## Status
 
-Phase 2 complete. Phase 3 infrastructure complete. All tests passing (630 unit tests, 18 navigation E2E, 18 fullscreen E2E, 12 lifecycle E2E).
+Phase 3 complete. All views migrated. SettingsView can now be presented as modal/fullscreen overlay in addition to its tab role. All 7 modal views work in both modes through ViewShell without per-view changes. All tests passing (630 unit tests, 17 navigation E2E, 21 fullscreen E2E, 12 lifecycle E2E).

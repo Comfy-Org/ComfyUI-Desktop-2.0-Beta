@@ -22,6 +22,7 @@ export type OverlayKey =
   | 'quick-install'
   | 'track'
   | 'load-snapshot'
+  | 'settings'
 
 // ---------------------------------------------------------------------------
 // Per-route props
@@ -43,6 +44,7 @@ export interface OverlayPropsMap {
   'quick-install': Record<string, never>
   track: Record<string, never>
   'load-snapshot': Record<string, never>
+  settings: Record<string, never>
 }
 
 // ---------------------------------------------------------------------------

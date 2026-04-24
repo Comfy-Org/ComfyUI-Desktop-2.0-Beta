@@ -107,6 +107,58 @@ test('Settings tab persists across tab switches @windows', async () => {
 })
 
 // ---------------------------------------------------------------------------
+// Settings — overlay mode tests @windows
+// ---------------------------------------------------------------------------
+
+test('Settings opens in modal overlay mode @windows', async () => {
+  await presentModal('settings')
+  await expectModalVisible(true)
+
+  const overlay = ctx.page.locator('.view-modal.active[data-overlay-key="settings"]')
+  await expect(overlay).toBeVisible()
+  await expect(overlay).toHaveAttribute('data-overlay-mode', 'modal')
+  await expect(overlay.locator('.view-modal-content')).toBeVisible()
+  await expect(overlay.locator('.view-modal-close')).toBeVisible()
+  await expect(overlay.locator('.view-modal-title')).toContainText('Settings')
+
+  await ctx.page.keyboard.press('Escape')
+  await expectModalVisible(false)
+})
+
+test('Settings opens in fullscreen overlay mode @windows', async () => {
+  await presentFullscreen('settings')
+  await expectFullscreenVisible(true)
+  await expectModalVisible(false)
+
+  const overlay = ctx.page.locator('.view-fullscreen[data-overlay-key="settings"]')
+  await expect(overlay).toBeVisible()
+  await expect(overlay).toHaveAttribute('data-overlay-mode', 'fullscreen')
+  await expect(overlay.locator('.view-modal-content')).toBeVisible()
+
+  await ctx.page.keyboard.press('Escape')
+  await expectFullscreenVisible(false)
+})
+
+test('Settings overlay does not affect tab Settings @windows', async () => {
+  // Switch to Settings tab first
+  await clickTab('Settings')
+  await expectActiveTab('Settings')
+  await expect(ctx.page.locator('.breadcrumb-current', { hasText: 'Settings' })).toBeVisible({ timeout: 10_000 })
+
+  // Open settings as modal overlay — both should coexist
+  await presentModal('settings')
+  await expectModalVisible(true)
+
+  // Close the overlay
+  await ctx.page.keyboard.press('Escape')
+  await expectModalVisible(false)
+
+  // Tab Settings should still be visible underneath
+  await expectActiveTab('Settings')
+  await expect(ctx.page.locator('.breadcrumb-current', { hasText: 'Settings' })).toBeVisible()
+})
+
+// ---------------------------------------------------------------------------
 // NewInstallModal — baseline modal tests @windows
 // ---------------------------------------------------------------------------
 

@@ -1,9 +1,22 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import SettingField from '../components/SettingField.vue'
+import SettingsSections from '../components/SettingsSections.vue'
 import { useModal } from '../composables/useModal'
+import type { NavigationMode } from '../composables/useNavigation'
 import type { SettingsSection, SettingsAction } from '../types/ipc'
+
+interface Props {
+  mode?: NavigationMode
+}
+
+withDefaults(defineProps<Props>(), {
+  mode: undefined,
+})
+
+const emit = defineEmits<{
+  close: []
+}>()
 
 const { t } = useI18n()
 const modal = useModal()
@@ -49,41 +62,38 @@ defineExpose({ loadSettings })
 </script>
 
 <template>
-  <div class="view active">
+  <!-- Overlay mode: render inside view-modal-content with header/close -->
+  <div v-if="mode" class="view-modal-content">
+    <div class="view-modal-header">
+      <div class="view-modal-title">{{ $t('settings.title') }}</div>
+      <button class="view-modal-close" @click="emit('close')">✕</button>
+    </div>
+    <div class="view-modal-body">
+      <div class="view-scroll">
+        <SettingsSections
+          :sections="sections"
+          :checking-for-updates="checkingForUpdates"
+          @setting-updated="loadSettings"
+          @action="handleAction"
+        />
+      </div>
+    </div>
+  </div>
+
+  <!-- Tab mode: original inline layout -->
+  <div v-else class="view active">
     <div class="toolbar">
       <div class="breadcrumb">
         <span class="breadcrumb-current">{{ $t('settings.title') }}</span>
       </div>
     </div>
-
     <div class="view-scroll">
-      <div
-        v-for="(section, sIdx) in sections"
-        :key="sIdx"
-        class="settings-section"
-      >
-        <div v-if="section.title" class="detail-section-title">{{ section.title }}</div>
-
-        <div class="detail-fields">
-          <SettingField
-            v-for="field in section.fields"
-            :key="field.id"
-            :field="field"
-            @setting-updated="loadSettings"
-          />
-        </div>
-
-        <div v-if="section.actions?.length" class="detail-actions">
-          <button
-            v-for="(action, aIdx) in section.actions"
-            :key="aIdx"
-            :disabled="action.action === 'check-for-update' && checkingForUpdates"
-            @click="handleAction(action)"
-          >
-            {{ action.action === 'check-for-update' && checkingForUpdates ? $t('settings.checkingForUpdates') : action.label }}
-          </button>
-        </div>
-      </div>
+      <SettingsSections
+        :sections="sections"
+        :checking-for-updates="checkingForUpdates"
+        @setting-updated="loadSettings"
+        @action="handleAction"
+      />
     </div>
   </div>
 </template>

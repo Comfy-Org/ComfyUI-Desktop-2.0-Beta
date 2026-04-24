@@ -11,6 +11,7 @@ import NewInstallModal from '../views/NewInstallModal.vue'
 import QuickInstallModal from '../views/QuickInstallModal.vue'
 import TrackModal from '../views/TrackModal.vue'
 import LoadSnapshotModal from '../views/LoadSnapshotModal.vue'
+import SettingsView from '../views/SettingsView.vue'
 
 const emit = defineEmits<{
   'show-progress': [
@@ -142,6 +143,13 @@ function handleClose(key: OverlayKey): void {
         v-else-if="entry.key === 'load-snapshot'"
         @close="handleClose('load-snapshot')"
         @show-progress="(opts) => emit('show-progress', opts)"
+      />
+
+      <!-- Settings -->
+      <SettingsView
+        v-else-if="entry.key === 'settings'"
+        :mode="entry.mode"
+        @close="handleClose('settings')"
       />
     </div>
   </template>
