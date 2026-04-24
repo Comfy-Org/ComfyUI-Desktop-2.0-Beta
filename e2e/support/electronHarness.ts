@@ -10,6 +10,20 @@ export interface LauncherAppHandle {
   cleanup: () => Promise<void>
 }
 
+export interface SeedOptions {
+  /** Seed installation records into the isolated data directory. */
+  installations?: SeedInstallation[]
+}
+
+export interface SeedInstallation {
+  id?: string
+  name?: string
+  sourceId?: string
+  installPath?: string
+  status?: string
+  [key: string]: unknown
+}
+
 function buildIsolatedEnv(homeDir: string): Record<string, string> {
   const inheritedEnv = Object.fromEntries(
     Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
@@ -34,13 +48,15 @@ function buildIsolatedEnv(homeDir: string): Record<string, string> {
   return env
 }
 
-export async function launchLauncherApp(): Promise<LauncherAppHandle> {
+export async function launchLauncherApp(options?: SeedOptions): Promise<LauncherAppHandle> {
   const homeDir = await mkdtemp(path.join(os.tmpdir(), 'comfyui-launcher-e2e-'))
 
-  // Pre-create directories that Electron expects to exist
-  if (process.platform === 'win32') {
-    await mkdir(path.join(homeDir, 'AppData', 'Roaming'), { recursive: true })
-  }
+  // Pre-create directories that Electron expects to exist.
+  // On Windows, Electron uses %APPDATA%/<appName> for userData.
+  const appDataDir = process.platform === 'win32'
+    ? path.join(homeDir, 'AppData', 'Roaming', 'comfyui-desktop-2')
+    : path.join(homeDir, '.config', 'comfyui-desktop-2')
+  await mkdir(appDataDir, { recursive: true })
 
   // Linux CI runners lack the SUID sandbox binary; disable it the same way linux-dev.sh does.
   const args = ['.']
@@ -52,6 +68,39 @@ export async function launchLauncherApp(): Promise<LauncherAppHandle> {
     args,
     env: buildIsolatedEnv(homeDir),
   })
+
+  // The main window starts with show:false and transitions via ready-to-show.
+  // Under Playwright the event may fire but isVisible() can lag, so force-show
+  // once a BrowserWindow exists.
+  const page = await application.firstWindow()
+  await page.waitForLoadState('domcontentloaded')
+  await application.evaluate(({ BrowserWindow }) => {
+    const win = BrowserWindow.getAllWindows()[0]
+    if (win && !win.isVisible()) win.show()
+  })
+
+  // Seed data files after launch so we can query app.getPath('userData') for
+  // the correct directory (Electron may capitalize or modify the app name).
+  if (options?.installations && options.installations.length > 0) {
+    const userDataDir = await application.evaluate(async ({ app: electronApp }) => {
+      return electronApp.getPath('userData')
+    })
+    const records = options.installations.map((inst, i) => ({
+      id: inst.id ?? `inst-test-${i}`,
+      name: inst.name ?? `Test Install ${i + 1}`,
+      createdAt: new Date().toISOString(),
+      installPath: inst.installPath ?? path.join(homeDir, `install-${i}`),
+      sourceId: inst.sourceId ?? 'standalone',
+      status: inst.status ?? 'installed',
+      ...inst,
+    }))
+    const { writeFile: writeFileFs } = await import('node:fs/promises')
+    await mkdir(userDataDir, { recursive: true })
+    await writeFileFs(
+      path.join(userDataDir, 'installations.json'),
+      JSON.stringify(records, null, 2),
+    )
+  }
 
   const cleanup = async (): Promise<void> => {
     try {

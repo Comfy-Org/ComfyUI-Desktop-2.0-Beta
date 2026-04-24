@@ -8,6 +8,8 @@ import { useDownloadStore } from './stores/downloadStore'
 import { useModal } from './composables/useModal'
 import { useTheme } from './composables/useTheme'
 import { useLauncherPrefs } from './composables/useLauncherPrefs'
+import { useNavigation } from './composables/useNavigation'
+import type { OverlayPropsMap } from './composables/useNavigation'
 import type { Installation, ActionResult, QuitActiveItem } from './types/ipc'
 import type { ModalDetailGroup } from './composables/useModal'
 import { emitTelemetryAction } from './lib/telemetry'
@@ -41,23 +43,27 @@ const progressStore = useProgressStore()
 const downloadStore = useDownloadStore()
 const modal = useModal()
 const launcherPrefs = useLauncherPrefs()
+const nav = useNavigation()
 useTheme()
 
 // --- View state ---
 type TabView = 'dashboard' | 'list' | 'running' | 'models' | 'media' | 'settings'
-const activeView = ref<TabView>('dashboard')
+const activeView = nav.activeTab
 const appVersion = ref('')
 
-// --- Modal views ---
-const detailInstallation = ref<Installation | null>(null)
-const detailInitialTab = ref<string>('status')
-const detailAutoAction = ref<string | null>(null)
-const consoleInstallationId = ref<string | null>(null)
-const progressInstallationId = ref<string | null>(null)
-const showNewInstall = ref(false)
-const showQuickInstall = ref(false)
-const showTrack = ref(false)
-const showLoadSnapshot = ref(false)
+// --- Modal views (derived from navigation overlay stack) ---
+function overlayProps<K extends keyof OverlayPropsMap>(key: K): OverlayPropsMap[K] | undefined {
+  return nav.overlays.value.find((e) => e.key === key)?.props as OverlayPropsMap[K] | undefined
+}
+const detailInstallation = computed(() => overlayProps('detail')?.installation ?? null)
+const detailInitialTab = computed(() => overlayProps('detail')?.initialTab ?? 'status')
+const detailAutoAction = computed(() => overlayProps('detail')?.autoAction ?? null)
+const consoleInstallationId = computed(() => overlayProps('console')?.installationId ?? null)
+const progressInstallationId = computed(() => overlayProps('progress')?.installationId ?? null)
+const showNewInstall = computed(() => nav.isOpen('new-install'))
+const showQuickInstall = computed(() => nav.isOpen('quick-install'))
+const showTrack = computed(() => nav.isOpen('track'))
+const showLoadSnapshot = computed(() => nav.isOpen('load-snapshot'))
 
 // --- Template refs ---
 const listRef = ref<InstanceType<typeof InstallationList> | null>(null)
@@ -82,7 +88,7 @@ const sidebarItems = computed(() => [
 
 function switchView(view: TabView): void {
   const fromView = activeView.value
-  activeView.value = view
+  nav.switchTab(view)
   if (view !== fromView) {
     emitTelemetryAction('launcher.view.opened', {
       view,
@@ -102,21 +108,23 @@ function openFeedback(): void {
 
 // --- Modal handlers ---
 function openDetail(inst: Installation, tab?: string, autoAction?: string): void {
-  detailInitialTab.value = tab ?? 'status'
-  detailAutoAction.value = autoAction ?? null
-  detailInstallation.value = inst
+  nav.present('detail', {
+    installation: inst,
+    initialTab: tab ?? 'status',
+    autoAction: autoAction ?? null,
+  })
 }
 
 function closeDetail(): void {
-  detailInstallation.value = null
+  nav.dismiss('detail')
 }
 
 function openConsole(installationId: string): void {
-  consoleInstallationId.value = installationId
+  nav.present('console', { installationId })
 }
 
 function closeConsole(): void {
-  consoleInstallationId.value = null
+  nav.dismiss('console')
 }
 
 async function openNewInstall(): Promise<void> {
@@ -124,13 +132,13 @@ async function openNewInstall(): Promise<void> {
     flow: 'new_install',
     entrypoint: activeView.value,
   })
-  showNewInstall.value = true
+  nav.present('new-install', {})
   await nextTick()
   newInstallRef.value?.open()
 }
 
 function closeNewInstall(): void {
-  showNewInstall.value = false
+  nav.dismiss('new-install')
 }
 
 async function openQuickInstall(): Promise<void> {
@@ -138,13 +146,13 @@ async function openQuickInstall(): Promise<void> {
     flow: 'quick_install',
     entrypoint: activeView.value,
   })
-  showQuickInstall.value = true
+  nav.present('quick-install', {})
   await nextTick()
   quickInstallRef.value?.open()
 }
 
 function closeQuickInstall(): void {
-  showQuickInstall.value = false
+  nav.dismiss('quick-install')
 }
 
 async function openTrack(): Promise<void> {
@@ -152,13 +160,13 @@ async function openTrack(): Promise<void> {
     flow: 'track_existing',
     entrypoint: activeView.value,
   })
-  showTrack.value = true
+  nav.present('track', {})
   await nextTick()
   trackRef.value?.open()
 }
 
 function closeTrack(): void {
-  showTrack.value = false
+  nav.dismiss('track')
 }
 
 async function openLoadSnapshot(): Promise<void> {
@@ -166,13 +174,13 @@ async function openLoadSnapshot(): Promise<void> {
     flow: 'load_snapshot',
     entrypoint: activeView.value,
   })
-  showLoadSnapshot.value = true
+  nav.present('load-snapshot', {})
   await nextTick()
   loadSnapshotRef.value?.open()
 }
 
 function closeLoadSnapshot(): void {
-  showLoadSnapshot.value = false
+  nav.dismiss('load-snapshot')
 }
 
 function showProgress(opts: {
@@ -183,8 +191,8 @@ function showProgress(opts: {
   returnTo?: string
 }): void {
   // Close any open modal so they don't stack visually
-  if (opts.returnTo === 'detail') closeDetail()
-  progressInstallationId.value = opts.installationId
+  if (opts.returnTo === 'detail') nav.dismiss('detail')
+  nav.present('progress', { installationId: opts.installationId })
   // If an in-progress operation already exists for this ID, just show it
   const existingOp = progressStore.operations.get(opts.installationId)
   if (existingOp && !existingOp.finished) {
@@ -201,17 +209,17 @@ function showProgress(opts: {
 }
 
 function closeProgress(): void {
-  progressInstallationId.value = null
+  nav.dismiss('progress')
   listRef.value?.refresh()
 }
 
 function handleNavigateList(): void {
-  closeDetail()
+  nav.dismiss('detail')
   listRef.value?.refresh()
 }
 
 function handleProgressShowDetail(installationId: string): void {
-  closeProgress()
+  nav.dismiss('progress')
   const inst = installationStore.getById(installationId)
   if (inst) openDetail(inst)
 }
@@ -381,7 +389,7 @@ onMounted(async () => {
     @close="closeDetail"
     @show-progress="showProgress"
     @navigate-list="handleNavigateList"
-    @update:installation="(inst) => { detailInstallation = inst; installationStore.fetchInstallations() }"
+    @update:installation="(inst) => { nav.patchOverlay('detail', { installation: inst }); installationStore.fetchInstallations() }"
   />
 
   <ConsoleModal

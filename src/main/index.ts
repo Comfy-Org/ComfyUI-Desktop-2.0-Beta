@@ -280,9 +280,7 @@ function createMainWindow(): void {
 
   mainWindow.once('ready-to-show', () => {
     if (isDev) console.log('[main] ready-to-show fired')
-    mainWindow?.show()
-    if (process.platform === 'win32') mainWindow?.moveTop()
-    mainWindow?.focus()
+    if (mainWindow) bringToFront(mainWindow)
     createTray()
 
     // Suggest Chinese mirrors on first startup if system locale is Chinese
@@ -412,10 +410,22 @@ function createTray(): void {
   tray.on('double-click', () => showMainWindow())
 }
 
+/** Show a window and bring it to the front, working around Windows focus-theft prevention. */
+function bringToFront(win: BrowserWindow): void {
+  if (process.platform === 'win32') {
+    win.setAlwaysOnTop(true)
+    win.show()
+    win.focus()
+    win.setAlwaysOnTop(false)
+  } else {
+    win.show()
+    win.focus()
+  }
+}
+
 function showMainWindow(): void {
   if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.show()
-    mainWindow.focus()
+    bringToFront(mainWindow)
   }
 }
 
@@ -912,10 +922,8 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
   if (app.isPackaged) {
     app.on('second-instance', () => {
       if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.show()
         if (mainWindow.isMinimized()) mainWindow.restore()
-        if (process.platform === 'win32') mainWindow.moveTop()
-        mainWindow.focus()
+        bringToFront(mainWindow)
       }
     })
   }
