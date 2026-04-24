@@ -1,6 +1,3 @@
-const { execSync } = require('child_process')
-const path = require('path')
-
 const PLATFORM_MAP = {
   'win32-x64': 'win-x64',
   'darwin-arm64': 'mac-arm64',
@@ -8,6 +5,9 @@ const PLATFORM_MAP = {
 }
 
 module.exports = async ({ appDir, platform, arch }) => {
+  const { execSync } = await import('node:child_process')
+  const path = await import('node:path')
+
   const key = `${platform}-${arch}`
   const bootstrapPlatform = PLATFORM_MAP[key]
   if (!bootstrapPlatform) {
