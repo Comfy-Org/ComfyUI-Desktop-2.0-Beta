@@ -2,6 +2,9 @@
 !include 'FileFunc.nsh'
 !include 'LogicLib.nsh'
 
+# Enable directory picker in oneClick mode (silent updates, interactive first install)
+!define allowToChangeInstallationDirectory
+
 ; Optional installer command-line overrides:
 ;   /ALLUSERS    force a per-machine install
 ;   /CURRENTUSER force a per-user install

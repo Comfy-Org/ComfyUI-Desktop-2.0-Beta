@@ -28,9 +28,7 @@ win:
   target: nsis
   icon: assets/Comfy_Logo_x256.png
 nsis:
-  oneClick: false
   perMachine: false
-  allowToChangeInstallationDirectory: true
   include: scripts/installer.nsh
 mac:
   target:
