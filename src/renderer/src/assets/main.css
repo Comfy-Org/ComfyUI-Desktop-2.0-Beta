@@ -510,6 +510,18 @@ input[type="checkbox"]:checked::after { transform: translateX(16px); }
   z-index: 50;
 }
 .view-modal.active { display: flex; }
+.view-fullscreen {
+  position: fixed; top: var(--titlebar-height); bottom: 0; right: 0;
+  left: 200px;
+  display: flex;
+  z-index: 40;
+  background: var(--bg);
+}
+.view-fullscreen .view-modal-content {
+  width: 100%; height: 100%;
+  max-width: none;
+  border-radius: 0; border: none;
+}
 .view-modal-content {
   background: var(--bg); border: 1px solid var(--border);
   border-radius: 12px;

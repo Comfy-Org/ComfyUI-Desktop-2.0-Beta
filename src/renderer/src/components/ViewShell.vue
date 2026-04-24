@@ -78,12 +78,14 @@ function handleClose(key: OverlayKey): void {
 </script>
 
 <template>
-  <template v-for="entry in nav.overlays.value" :key="entry.id">
+  <template v-for="(entry, index) in nav.overlays.value" :key="entry.id">
     <div
-      class="view-modal active"
+      :class="entry.mode === 'fullscreen' ? 'view-fullscreen' : 'view-modal active'"
       :data-overlay-key="entry.key"
-      @mousedown="handleOverlayMouseDown($event, entry)"
-      @click="handleOverlayClick($event, entry)"
+      :data-overlay-mode="entry.mode"
+      :style="{ zIndex: (entry.mode === 'fullscreen' ? 40 : 50) + index }"
+      @mousedown="entry.mode === 'modal' ? handleOverlayMouseDown($event, entry) : undefined"
+      @click="entry.mode === 'modal' ? handleOverlayClick($event, entry) : undefined"
     >
       <!-- Detail -->
       <DetailModal

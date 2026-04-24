@@ -247,10 +247,22 @@ window.api.onInstanceStarted((data) => {
 })
 
 import { i18n } from './i18n'
+import { useNavigation } from './composables/useNavigation'
 
 const app = createApp(App)
 app.use(createPinia())
 app.use(i18n)
 app.mount('#app')
+
+// Expose navigation bridge for E2E tests (always available — no side effects)
+{
+  const nav = useNavigation()
+  ;(window as unknown as Record<string, unknown>).__E2E_NAV__ = {
+    present: nav.present,
+    dismiss: nav.dismiss,
+    dismissAll: nav.dismissAll,
+    switchTab: nav.switchTab,
+  }
+}
 
 export { i18n }

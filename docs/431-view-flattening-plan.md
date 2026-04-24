@@ -58,6 +58,28 @@ The refactor was split into phases:
 4. `07b9ea2` — fix: extract i18n module, fix E2E harness and lifecycle tests
 5. `d74d5f1` — refactor: extract useControllerRegistration composable
 
+## Phase 3: Per-View Fullscreen Migration
+
+**Goal**: Make each view capable of rendering in both `modal` and `fullscreen` modes.
+
+### Infrastructure (Complete)
+
+- **CSS**: `.view-fullscreen` class — `position: fixed`, fills content area to the right of sidebar, no backdrop.
+- **ViewShell**: Renders overlays with `mode === 'fullscreen'` in `.view-fullscreen` wrapper (no backdrop click/dismiss). Renders `mode === 'modal'` in `.view-modal.active` as before. Both use `data-overlay-key` and `data-overlay-mode` attributes.
+- **E2E bridge**: `window.__E2E_NAV__` exposes `present()`, `dismiss()`, `dismissAll()`, `switchTab()` for programmatic fullscreen testing.
+- **E2E tests**: `e2e/fullscreen.test.ts` — 18 tests covering Settings baseline, all 7 modal views in modal+fullscreen modes, backdrop absence, stacking, Escape, tab persistence.
+
+### Migration order
+
+1. SettingsView (tab → also modal) — not yet started
+2. NewInstallModal — not yet started
+3. QuickInstallModal — not yet started
+4. DetailModal — not yet started
+5. TrackModal — not yet started
+6. LoadSnapshotModal — not yet started
+7. ConsoleModal — not yet started
+8. ProgressModal — not yet started
+
 ## Status
 
-All phases complete. All tests passing (630 unit tests, 18 navigation E2E, 12 lifecycle E2E).
+Phase 2 complete. Phase 3 infrastructure complete. All tests passing (630 unit tests, 18 navigation E2E, 18 fullscreen E2E, 12 lifecycle E2E).
