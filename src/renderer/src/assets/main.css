@@ -101,11 +101,11 @@ body {
 }
 
 /* App shell */
-:root { --titlebar-height: 37px; }
+:root { --titlebar-height: 37px; --sidebar-width: 200px; }
 .app-layout { display: flex; height: calc(100vh - var(--titlebar-height)); }
 
 .sidebar {
-  width: 200px;
+  width: var(--sidebar-width);
   flex-shrink: 0;
   background: var(--surface);
   border-right: 1px solid var(--border);
@@ -512,7 +512,7 @@ input[type="checkbox"]:checked::after { transform: translateX(16px); }
 .view-modal.active { display: flex; }
 .view-fullscreen {
   position: fixed; top: var(--titlebar-height); bottom: 0; right: 0;
-  left: 200px;
+  left: var(--sidebar-width);
   display: flex;
   z-index: 40;
   background: var(--bg);
@@ -525,7 +525,7 @@ input[type="checkbox"]:checked::after { transform: translateX(16px); }
 .view-modal-content {
   background: var(--bg); border: 1px solid var(--border);
   border-radius: 12px;
-  width: calc(100vw - 260px); height: calc(100vh - 60px - var(--titlebar-height));
+  width: calc(100vw - var(--sidebar-width) - 60px); height: calc(100vh - 60px - var(--titlebar-height));
   max-width: 900px;
   display: flex; flex-direction: column; overflow: hidden;
 }
