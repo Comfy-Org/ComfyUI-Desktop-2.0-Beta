@@ -1,14 +1,20 @@
 /**
- * Download pre-built bootstrap-python archives for all platforms.
+ * Download pre-built bootstrap-python archives from a GitHub release.
  *
  * Called before `todesktop build` (or local electron-builder) to ensure
  * the platform-specific bootstrap-python directories exist under
  * bootstrap-python/{win-x64,mac-arm64,linux-x64}/.
  *
  * Usage:
- *   node scripts/fetch-bootstrap-python.mjs [--tag bootstrap-v1]
+ *   node scripts/fetch-bootstrap-python.mjs [--tag bootstrap-v1] [--platform win-x64]
+ *   node scripts/fetch-bootstrap-python.mjs [--tag bootstrap-v1] [--output-dir /path/to/dir]
  *
- * Requires GITHUB_TOKEN env var for authenticated downloads from releases.
+ * Options:
+ *   --platform   Fetch only this platform (default: all platforms)
+ *   --output-dir Override the output base directory (default: bootstrap-python/ in project root)
+ *   --tag        Release tag to fetch from (default: bootstrap-v1)
+ *
+ * Uses GITHUB_TOKEN env var for authenticated downloads if set.
  * Skips platforms whose directory already exists.
  */
 
@@ -30,12 +36,18 @@ const REPO = 'Comfy-Org/ComfyUI-Desktop-2.0-Beta'
 function parseArgs() {
   const args = process.argv.slice(2)
   let tag = DEFAULT_TAG
+  let platform = null
+  let outputDir = null
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--tag' && args[i + 1]) {
       tag = args[++i]
+    } else if (args[i] === '--platform' && args[i + 1]) {
+      platform = args[++i]
+    } else if (args[i] === '--output-dir' && args[i + 1]) {
+      outputDir = args[++i]
     }
   }
-  return { tag }
+  return { tag, platform, outputDir }
 }
 
 async function fetchReleaseAssets(tag) {
@@ -84,7 +96,9 @@ async function downloadAndExtract(url, destDir) {
 }
 
 async function main() {
-  const { tag } = parseArgs()
+  const { tag, platform: onlyPlatform, outputDir } = parseArgs()
+  const platforms = onlyPlatform ? [onlyPlatform] : PLATFORMS
+  const outBase = outputDir || outputBase
   console.log(`Fetching bootstrap-python archives from release ${tag}`)
 
   let assets
@@ -96,8 +110,8 @@ async function main() {
     return
   }
 
-  for (const platform of PLATFORMS) {
-    const destDir = path.join(outputBase, platform)
+  for (const platform of platforms) {
+    const destDir = path.join(outBase, platform)
     if (fs.existsSync(destDir)) {
       console.log(`  ${platform}: already exists, skipping`)
       continue
