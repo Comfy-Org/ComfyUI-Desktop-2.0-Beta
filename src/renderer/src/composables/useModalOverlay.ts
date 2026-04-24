@@ -19,7 +19,7 @@ export function useModalOverlay(
   }
 
   function handleOverlayClick(event: MouseEvent): void {
-    if (mouseDownOnOverlay.value && event.target === (event.currentTarget as HTMLElement) && shouldClose()) {
+    if (mouseDownOnOverlay.value && event.target === (event.currentTarget as HTMLElement)) {
       close()
     }
     mouseDownOnOverlay.value = false
