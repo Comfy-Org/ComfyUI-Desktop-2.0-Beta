@@ -16,6 +16,7 @@
   "packageManager": "pnpm@10.28.1",
   "main": "./out/main/index.js",
   "scripts": {
+    "init": "pnpm install && pnpm run dev:bootstrap",
     "predev": "node -e \"const fs=require('fs'),p=process.platform==='win32'?'win-x64':process.platform==='darwin'?'mac-arm64':'linux-x64';if(!fs.existsSync('bootstrap-python/'+p))console.log('\\n\\x1b[33m⚠ Bootstrap python not found. Run \\\"pnpm run bootstrap\\\" for pre-install git support.\\x1b[0m\\n')\"",
     "dev": "electron-vite dev",
     "predev:bootstrap": "node -e \"const fs=require('fs'),p=process.platform==='win32'?'win-x64':process.platform==='darwin'?'mac-arm64':'linux-x64';if(!fs.existsSync('bootstrap-python/'+p)){console.log('Building bootstrap python...');require('child_process').execSync('python scripts/build-bootstrap-python.py',{stdio:'inherit'})}\"",
