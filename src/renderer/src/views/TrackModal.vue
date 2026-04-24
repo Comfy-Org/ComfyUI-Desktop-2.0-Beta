@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { ref, computed, toRaw, onMounted, onUnmounted } from 'vue'
+import { ref, computed, toRaw } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useModal } from '../composables/useModal'
-import { useNavigation } from '../composables/useNavigation'
+import { useControllerRegistration } from '../composables/useControllerRegistration'
 
 import type { ProbeResult } from '../types/ipc'
 import { emitTelemetryAction, toCountBucket } from '../lib/telemetry'
@@ -143,9 +143,7 @@ async function handleSave(): Promise<void> {
   emit('navigate-list')
 }
 
-const nav = useNavigation()
-onMounted(() => nav.registerController('track', { open }))
-onUnmounted(() => nav.registerController('track', null))
+useControllerRegistration('track', { open })
 
 defineExpose({ open })
 </script>

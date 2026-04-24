@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Check, X, TriangleAlert } from 'lucide-vue-next'
 import { useModal } from '../composables/useModal'
-import { useNavigation } from '../composables/useNavigation'
+import { useControllerRegistration } from '../composables/useControllerRegistration'
 
 import { useTerminalScroll } from '../composables/useTerminalScroll'
 import { useProgressStore } from '../stores/progressStore'
@@ -225,9 +225,7 @@ function getStepSummary(op: Operation, step: ProgressStep, stepIndex: number): s
   return null
 }
 
-const nav = useNavigation()
-onMounted(() => nav.registerController('progress', { startOperation, showOperation }))
-onUnmounted(() => nav.registerController('progress', null))
+useControllerRegistration('progress', { startOperation, showOperation })
 
 defineExpose({ startOperation, showOperation })
 </script>

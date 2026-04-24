@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted, toRaw } from 'vue'
+import { ref, computed, watch, onMounted, toRaw } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useModal } from '../composables/useModal'
-import { useNavigation } from '../composables/useNavigation'
+import { useControllerRegistration } from '../composables/useControllerRegistration'
 
 import type { Source, SourceField, FieldOption, HardwareValidation } from '../types/ipc'
 import { stripVariantPrefix, sortedCardOptions } from '../lib/variants'
@@ -521,9 +521,7 @@ function getSelectedIndex(field: SourceField): number {
   return idx >= 0 ? idx : 0
 }
 
-const nav = useNavigation()
-onMounted(() => nav.registerController('new-install', { open }))
-onUnmounted(() => nav.registerController('new-install', null))
+useControllerRegistration('new-install', { open })
 
 defineExpose({ open })
 </script>

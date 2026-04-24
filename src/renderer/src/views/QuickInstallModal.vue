@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted, toRaw } from 'vue'
+import { ref, computed, watch, onMounted, toRaw } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useModal } from '../composables/useModal'
-import { useNavigation } from '../composables/useNavigation'
+import { useControllerRegistration } from '../composables/useControllerRegistration'
 
 import type { Source, FieldOption } from '../types/ipc'
 import { emitTelemetryAction, toVariantBucket } from '../lib/telemetry'
@@ -259,9 +259,7 @@ async function handleInstall(): Promise<void> {
   }
 }
 
-const nav = useNavigation()
-onMounted(() => nav.registerController('quick-install', { open }))
-onUnmounted(() => nav.registerController('quick-install', null))
+useControllerRegistration('quick-install', { open })
 
 defineExpose({ open })
 </script>
