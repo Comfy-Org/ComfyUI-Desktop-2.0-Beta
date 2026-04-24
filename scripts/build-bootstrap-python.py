@@ -51,6 +51,8 @@ STRIP_DIRS = [
     "ensurepip", "venv",
     "lib2to3", "pydoc_data",
     "unittest",
+    "tcl", "tk",
+    "libs",
 ]
 
 STRIP_TOP_LEVEL = [
@@ -59,7 +61,13 @@ STRIP_TOP_LEVEL = [
     "pkg_resources",
 ]
 
-STRIP_EXTENSIONS = [".pyc", ".pyo", ".a"]
+STRIP_EXTENSIONS = [".pyc", ".pyo", ".a", ".lib"]
+
+# DLL/pyd files to remove (unused by pygit2)
+STRIP_FILES = [
+    "tcl86t.dll", "tk86t.dll", "sqlite3.dll",
+    "_testcapi.pyd", "_tkinter.pyd", "_sqlite3.pyd",
+]
 
 
 def detect_platform():
@@ -83,8 +91,11 @@ def download_file(url, dest):
 
 
 def find_site_packages(env_dir):
-    if sys.platform == "win32" or os.path.exists(os.path.join(env_dir, "Lib", "site-packages")):
-        return os.path.join(env_dir, "Lib", "site-packages")
+    # Check Windows-style layout first (Lib/site-packages)
+    win_sp = os.path.join(env_dir, "Lib", "site-packages")
+    if os.path.isdir(win_sp):
+        return win_sp
+    # Unix-style layout (lib/python3.X/site-packages)
     lib_dir = os.path.join(env_dir, "lib")
     if os.path.exists(lib_dir):
         for entry in os.listdir(lib_dir):
@@ -122,10 +133,10 @@ def strip_environment(env_dir):
                     removed_count += 1
                     break
 
-    # Remove files by extension
+    # Remove files by extension and by name
     for root, dirs, files in os.walk(env_dir):
         for f in files:
-            if any(f.endswith(ext) for ext in STRIP_EXTENSIONS):
+            if any(f.endswith(ext) for ext in STRIP_EXTENSIONS) or f in STRIP_FILES:
                 os.remove(os.path.join(root, f))
                 removed_count += 1
 

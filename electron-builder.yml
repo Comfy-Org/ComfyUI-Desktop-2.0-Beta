@@ -27,6 +27,11 @@ artifactName: ComfyUI-Desktop-2.0-${version}-${os}-${arch}.${ext}
 win:
   target: nsis
   icon: assets/Comfy_Logo_x256.png
+  extraResources:
+    - from: bootstrap-python/win-x64
+      to: bootstrap-python
+      filter:
+        - '**/*'
 nsis:
   oneClick: false
   perMachine: false
@@ -38,6 +43,11 @@ mac:
     - zip
   icon: assets/Comfy_Logo_x512.png
   category: public.app-category.developer-tools
+  extraResources:
+    - from: bootstrap-python/mac-arm64
+      to: bootstrap-python
+      filter:
+        - '**/*'
 linux:
   target:
     - AppImage
@@ -47,6 +57,10 @@ linux:
   extraResources:
     - from: resources/apparmor-profile
       to: apparmor-profile
+    - from: bootstrap-python/linux-x64
+      to: bootstrap-python
+      filter:
+        - '**/*'
 deb:
   afterInstall: scripts/after-install.sh
   afterRemove: scripts/after-remove.sh
