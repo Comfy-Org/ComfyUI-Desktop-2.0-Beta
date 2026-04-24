@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Check, X, TriangleAlert } from 'lucide-vue-next'
 import { useModal } from '../composables/useModal'
-import { useModalOverlay } from '../composables/useModalOverlay'
+import { useNavigation } from '../composables/useNavigation'
+
 import { useTerminalScroll } from '../composables/useTerminalScroll'
 import { useProgressStore } from '../stores/progressStore'
 import type { Operation } from '../stores/progressStore'
@@ -32,16 +33,6 @@ const progressStore = useProgressStore()
 const currentId = ref<string | null>(null)
 const resolvingConflict = ref(false)
 
-const { handleOverlayMouseDown, handleOverlayClick } = useModalOverlay(
-  () => {
-    if (props.installationId === null) return false
-    const id = displayId.value
-    if (!id) return false
-    const op = progressStore.operations.get(id)
-    return !op || op.finished
-  },
-  () => emit('close'),
-)
 
 const currentOp = computed(() => {
   const id = currentId.value ?? props.installationId
@@ -234,17 +225,15 @@ function getStepSummary(op: Operation, step: ProgressStep, stepIndex: number): s
   return null
 }
 
+const nav = useNavigation()
+onMounted(() => nav.registerController('progress', { startOperation, showOperation }))
+onUnmounted(() => nav.registerController('progress', null))
+
 defineExpose({ startOperation, showOperation })
 </script>
 
 <template>
-  <div
-    v-if="installationId && currentOp"
-    class="view-modal active"
-    @mousedown="handleOverlayMouseDown"
-    @click="handleOverlayClick"
-  >
-    <div class="view-modal-content">
+  <div v-if="installationId && currentOp" class="view-modal-content">
     <div class="view-modal-header">
       <div class="view-modal-title">{{ currentOp.title }}</div>
       <button class="view-modal-close" @click="emit('close')">{{ currentOp.finished ? '✕' : '−' }}</button>
@@ -415,6 +404,5 @@ defineExpose({ startOperation, showOperation })
           </button>
         </div>
       </div>
-    </div>
   </div>
 </template>

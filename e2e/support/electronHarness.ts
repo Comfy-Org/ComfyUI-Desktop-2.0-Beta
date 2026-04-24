@@ -79,6 +79,15 @@ export async function launchLauncherApp(options?: SeedOptions): Promise<Launcher
     if (win && !win.isVisible()) win.show()
   })
 
+  // Prevent Electron's default uncaught-exception dialog from blocking E2E tests.
+  // Adding an 'uncaughtException' handler suppresses the native error box; we log
+  // the error to stderr instead so test output captures it.
+  await application.evaluate(() => {
+    process.on('uncaughtException', (err) => {
+      console.error('[E2E] uncaughtException suppressed:', err)
+    })
+  })
+
   // Seed data files after launch so we can query app.getPath('userData') for
   // the correct directory (Electron may capitalize or modify the app name).
   if (options?.installations && options.installations.length > 0) {

@@ -2,7 +2,8 @@
 import { ref, computed, watch, toRaw, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useModal } from '../composables/useModal'
-import { useModalOverlay } from '../composables/useModalOverlay'
+import { useNavigation } from '../composables/useNavigation'
+
 import type { SnapshotFilePreview, FieldOption, GPUInfo } from '../types/ipc'
 import { getVariantGpuLabel, sortedCardOptions, findBestVariant } from '../lib/variants'
 import VariantCardGrid from '../components/VariantCardGrid.vue'
@@ -57,10 +58,6 @@ const hardwareMismatch = computed(() => {
 const INVALID_NAME_CHARS = /[<>:"/\\|?*]/
 const nameHasInvalidChars = computed(() => INVALID_NAME_CHARS.test(installName.value))
 
-const { handleOverlayMouseDown, handleOverlayClick } = useModalOverlay(
-  () => true,
-  () => emit('close'),
-)
 
 function open(): void {
   preview.value = null
@@ -255,22 +252,21 @@ onUnmounted(() => {
   document.removeEventListener('drop', preventNav)
 })
 
+const nav = useNavigation()
+onMounted(() => nav.registerController('load-snapshot', { open }))
+onUnmounted(() => nav.registerController('load-snapshot', null))
+
 defineExpose({ open })
 </script>
 
 <template>
   <div
-    class="view-modal active"
-    @mousedown="handleOverlayMouseDown"
-    @click="handleOverlayClick"
+    ref="contentRef"
+    class="view-modal-content"
+    @dragover="!preview && handleDragOver($event)"
+    @dragleave="!preview && handleDragLeave($event)"
+    @drop="!preview && handleDrop($event)"
   >
-    <div
-      ref="contentRef"
-      class="view-modal-content"
-      @dragover="!preview && handleDragOver($event)"
-      @dragleave="!preview && handleDragLeave($event)"
-      @drop="!preview && handleDrop($event)"
-    >
       <div class="view-modal-header">
         <div class="view-modal-title">{{ $t('list.loadSnapshot') }}</div>
         <button class="view-modal-close" @click="emit('close')">✕</button>
@@ -370,7 +366,6 @@ defineExpose({ open })
           </button>
         </div>
       </div>
-    </div>
   </div>
 </template>
 

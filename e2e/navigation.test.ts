@@ -208,3 +208,105 @@ test('Detail modal closes on backdrop click @windows', async () => {
   await overlay.click({ position: { x: 10, y: 10 } })
   await expectModalVisible(false)
 })
+
+// ---------------------------------------------------------------------------
+// Escape and backdrop close for other modals @windows
+// ---------------------------------------------------------------------------
+
+test('Track modal closes on Escape @windows', async () => {
+  await clickTab('Installs')
+  const trackBtn = ctx.page.locator('button', { hasText: /Track Existing/i })
+  if (await trackBtn.isVisible()) {
+    await trackBtn.click()
+    await expectModalVisible(true)
+    await ctx.page.keyboard.press('Escape')
+    await expectModalVisible(false)
+  }
+})
+
+test('Track modal closes on backdrop click @windows', async () => {
+  await clickTab('Installs')
+  const trackBtn = ctx.page.locator('button', { hasText: /Track Existing/i })
+  if (await trackBtn.isVisible()) {
+    await trackBtn.click()
+    await expectModalVisible(true)
+    const overlay = ctx.page.locator('.view-modal.active')
+    await overlay.click({ position: { x: 10, y: 10 } })
+    await expectModalVisible(false)
+  }
+})
+
+test('Load Snapshot modal closes on Escape @windows', async () => {
+  await clickTab('Installs')
+  const loadBtn = ctx.page.locator('button', { hasText: /Load Snapshot/i })
+  if (await loadBtn.isVisible()) {
+    await loadBtn.click()
+    await expectModalVisible(true)
+    await ctx.page.keyboard.press('Escape')
+    await expectModalVisible(false)
+  }
+})
+
+test('Load Snapshot modal closes on backdrop click @windows', async () => {
+  await clickTab('Installs')
+  const loadBtn = ctx.page.locator('button', { hasText: /Load Snapshot/i })
+  if (await loadBtn.isVisible()) {
+    await loadBtn.click()
+    await expectModalVisible(true)
+    const overlay = ctx.page.locator('.view-modal.active')
+    await overlay.click({ position: { x: 10, y: 10 } })
+    await expectModalVisible(false)
+  }
+})
+
+test('New Installation modal closes on backdrop click @windows', async () => {
+  await clickTab('Installs')
+  const newInstallBtn = ctx.page.locator('button', { hasText: /New Install/i }).first()
+  if (await newInstallBtn.isVisible()) {
+    await newInstallBtn.click()
+    await expectModalVisible(true)
+    const overlay = ctx.page.locator('.view-modal.active')
+    await overlay.click({ position: { x: 10, y: 10 } })
+    await expectModalVisible(false)
+  }
+})
+
+// ---------------------------------------------------------------------------
+// Stacked overlay: Escape closes only the top modal @windows
+// ---------------------------------------------------------------------------
+
+test('Escape closes only top overlay when two modals are stacked @windows', async () => {
+  await clickTab('Installs')
+
+  // Open Track modal first
+  const trackBtn = ctx.page.locator('button', { hasText: /Track Existing/i })
+  if (!(await trackBtn.isVisible())) return
+  await trackBtn.click()
+  await expectModalVisible(true)
+
+  const modalCount = () => ctx.page.locator('.view-modal.active').count()
+  expect(await modalCount()).toBe(1)
+
+  // Stack a Load Snapshot modal on top by clicking its button behind the overlay.
+  // We can't use force-click (it triggers backdrop close), so use $eval to
+  // dispatch a click directly on the button element, bypassing the overlay.
+  await ctx.page.locator('button', { hasText: /Load Snapshot/i }).evaluate(
+    (el) => el.click(),
+  )
+  await ctx.page.waitForTimeout(200)
+
+  // Two overlays should now be visible
+  expect(await modalCount()).toBe(2)
+
+  // Escape should close only Load Snapshot (the top one), leaving Track
+  await ctx.page.keyboard.press('Escape')
+  expect(await modalCount()).toBe(1)
+
+  // The remaining modal should be Track
+  const remainingOverlay = ctx.page.locator('.view-modal.active')
+  await expect(remainingOverlay.locator('.view-modal-title')).toContainText('Track')
+
+  // Escape again closes Track
+  await ctx.page.keyboard.press('Escape')
+  await expectModalVisible(false)
+})

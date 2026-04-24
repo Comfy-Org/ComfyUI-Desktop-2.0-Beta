@@ -81,6 +81,11 @@ export function fetchJSON(url: string): Promise<unknown> {
     const request = net.request({ url, cache: "no-cache" })
     request.setHeader("User-Agent", "ComfyUI-Desktop-2")
 
+    const ghToken = process.env.GITHUB_TOKEN
+    if (ghToken && url.includes("api.github.com")) {
+      request.setHeader("Authorization", `token ${ghToken}`)
+    }
+
     if (cached?.etag) {
       request.setHeader("If-None-Match", cached.etag)
     }

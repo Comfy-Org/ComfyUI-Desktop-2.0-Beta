@@ -2,7 +2,7 @@
 import { ref, computed, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useSessionStore } from '../stores/sessionStore'
-import { useModalOverlay } from '../composables/useModalOverlay'
+
 import { useTerminalScroll } from '../composables/useTerminalScroll'
 
 interface Props {
@@ -20,10 +20,6 @@ const sessionStore = useSessionStore()
 
 const api = window.api
 
-const { handleOverlayMouseDown, handleOverlayClick } = useModalOverlay(
-  () => props.installationId !== null,
-  () => emit('close'),
-)
 
 const session = computed(() => {
   if (!props.installationId) return undefined
@@ -86,13 +82,7 @@ watch(
 </script>
 
 <template>
-  <div
-    v-if="installationId"
-    class="view-modal active"
-    @mousedown="handleOverlayMouseDown"
-    @click="handleOverlayClick"
-  >
-    <div class="view-modal-content">
+  <div v-if="installationId" class="view-modal-content">
       <div class="view-modal-header">
         <div class="view-modal-title">{{ title }}</div>
         <button class="view-modal-close" @click="emit('close')">{{ (!isExited && !errorInfo) ? '−' : '✕' }}</button>
@@ -150,6 +140,5 @@ watch(
           </button>
         </div>
       </div>
-    </div>
   </div>
 </template>

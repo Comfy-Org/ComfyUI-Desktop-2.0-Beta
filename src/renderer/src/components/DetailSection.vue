@@ -79,9 +79,13 @@ async function handleFieldChange(field: DetailField, value: string | boolean | R
     emit('refresh', props.title)
   }
   if (field.onChangeAction) {
-    const result = await window.api.runAction(props.installationId, field.onChangeAction)
-    if (result.navigate === 'detail') {
-      emit('refresh-all')
+    try {
+      const result = await window.api.runAction(props.installationId, field.onChangeAction)
+      if (result.navigate === 'detail') {
+        emit('refresh-all')
+      }
+    } catch (err) {
+      console.error(`[DetailSection] onChangeAction '${field.onChangeAction}' failed:`, err)
     }
   }
 }

@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { useModal } from '../composables/useModal'
 import { useActionGuard } from '../composables/useActionGuard'
 import { useLauncherPrefs } from '../composables/useLauncherPrefs'
-import { useModalOverlay } from '../composables/useModalOverlay'
+
 import DetailSectionComponent from '../components/DetailSection.vue'
 import SnapshotTab from '../components/SnapshotTab.vue'
 import { useInstallationStore } from '../stores/installationStore'
@@ -77,10 +77,6 @@ async function confirmSetPrimary(): Promise<void> {
 
 const scrollRef = ref<HTMLDivElement | null>(null)
 
-const { handleOverlayMouseDown, handleOverlayClick } = useModalOverlay(
-  () => props.installation !== null,
-  () => emit('close'),
-)
 
 const sections = ref<DetailSection[]>([])
 const sectionsLoading = ref(false)
@@ -505,7 +501,10 @@ async function runAction(action: ActionDef, btn: HTMLButtonElement | null): Prom
       error_bucket: toErrorBucket(error),
       ...telemetryContext,
     })
-    throw error
+    await modal.alert({
+      title: mutableAction.label,
+      message: error instanceof Error ? error.message : String(error),
+    })
   } finally {
     if (btn) {
       btn.disabled = false
@@ -524,13 +523,7 @@ function navigateToInstallation(installationId: string): void {
 </script>
 
 <template>
-  <div
-    v-if="installation"
-    class="view-modal active"
-    @mousedown="handleOverlayMouseDown"
-    @click="handleOverlayClick"
-  >
-    <div class="view-modal-content">
+  <div v-if="installation" class="view-modal-content">
       <div class="view-modal-header">
         <div
           class="view-modal-title"
@@ -641,6 +634,5 @@ function navigateToInstallation(installationId: string): void {
           </div>
         </div>
       </div>
-    </div>
   </div>
 </template>

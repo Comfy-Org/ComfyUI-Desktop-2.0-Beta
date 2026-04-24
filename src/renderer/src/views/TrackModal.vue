@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, computed, toRaw } from 'vue'
+import { ref, computed, toRaw, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useModal } from '../composables/useModal'
-import { useModalOverlay } from '../composables/useModalOverlay'
+import { useNavigation } from '../composables/useNavigation'
+
 import type { ProbeResult } from '../types/ipc'
 import { emitTelemetryAction, toCountBucket } from '../lib/telemetry'
 
@@ -21,10 +22,6 @@ const selectedProbe = ref<ProbeResult | null>(null)
 const venvOverride = ref<string | null>(null)
 const probing = ref(false)
 
-const { handleOverlayMouseDown, handleOverlayClick } = useModalOverlay(
-  () => true,
-  () => emit('close'),
-)
 
 const saveDisabled = computed(() => !trackPath.value || !selectedProbe.value)
 
@@ -146,16 +143,15 @@ async function handleSave(): Promise<void> {
   emit('navigate-list')
 }
 
+const nav = useNavigation()
+onMounted(() => nav.registerController('track', { open }))
+onUnmounted(() => nav.registerController('track', null))
+
 defineExpose({ open })
 </script>
 
 <template>
-  <div
-    class="view-modal active"
-    @mousedown="handleOverlayMouseDown"
-    @click="handleOverlayClick"
-  >
-    <div class="view-modal-content">
+  <div class="view-modal-content">
       <div class="view-modal-header">
         <div class="view-modal-title">{{ $t('track.title') }}</div>
         <button class="view-modal-close" @click="emit('close')">✕</button>
@@ -249,6 +245,5 @@ defineExpose({ open })
           </button>
         </div>
       </div>
-    </div>
   </div>
 </template>
