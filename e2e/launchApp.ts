@@ -20,11 +20,13 @@ export type { SeedOptions, SeedInstallation } from './support/electronHarness'
 export interface AppContext {
   app: ElectronApplication
   page: Page
+  /** CDP remote-debugging port for connecting to WebContentsView targets. */
+  cdpPort: number
   cleanup: () => Promise<void>
 }
 
 export async function launchApp(options?: SeedOptions): Promise<AppContext> {
-  const { application, cleanup } = await launchLauncherApp(options)
+  const { application, cdpPort, cleanup } = await launchLauncherApp(options)
 
   const page = await application.firstWindow()
 
@@ -41,5 +43,5 @@ export async function launchApp(options?: SeedOptions): Promise<AppContext> {
     await page.locator('.sidebar-item', { hasText: 'Dashboard' }).click()
   }
 
-  return { app: application, page, cleanup }
+  return { app: application, page, cdpPort, cleanup }
 }

@@ -7,6 +7,8 @@ import { _electron as electron, type ElectronApplication } from 'playwright'
 export interface LauncherAppHandle {
   application: ElectronApplication
   homeDir: string
+  /** CDP remote-debugging port for connecting to non-BrowserWindow webContents. */
+  cdpPort: number
   cleanup: () => Promise<void>
 }
 
@@ -58,8 +60,13 @@ export async function launchLauncherApp(options?: SeedOptions): Promise<Launcher
     : path.join(homeDir, '.config', 'comfyui-desktop-2')
   await mkdir(appDataDir, { recursive: true })
 
+  // Expose a CDP remote-debugging port so tests can connect to non-BrowserWindow
+  // webContents (e.g. the ComfyUI WebContentsView) via chromium.connectOverCDP().
+  // Use a random port in a high range to avoid conflicts with parallel runs.
+  const cdpPort = 19200 + Math.floor(Math.random() * 800)
+
   // Linux CI runners lack the SUID sandbox binary; disable it the same way linux-dev.sh does.
-  const args = ['.']
+  const args = ['.', `--remote-debugging-port=${cdpPort}`]
   if (process.platform === 'linux') {
     args.push('--no-sandbox')
   }
@@ -123,7 +130,7 @@ export async function launchLauncherApp(options?: SeedOptions): Promise<Launcher
     await rm(homeDir, { recursive: true, force: true })
   }
 
-  return { application, homeDir, cleanup }
+  return { application, homeDir, cdpPort, cleanup }
 }
 
 export async function waitForAppExit(application: ElectronApplication, timeoutMs = 10_000): Promise<void> {
