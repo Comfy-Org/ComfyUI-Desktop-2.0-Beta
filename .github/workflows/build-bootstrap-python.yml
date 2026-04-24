@@ -1,0 +1,63 @@
+name: Build Bootstrap Python
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag for the bootstrap-python assets (e.g. bootstrap-v1)"
+        required: true
+        default: "bootstrap-v1"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: win-x64
+            os: windows-latest
+          - platform: mac-arm64
+            os: macos-latest
+          - platform: linux-x64
+            os: ubuntu-latest
+
+    runs-on: ${{ matrix.os }}
+    name: Build ${{ matrix.platform }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build bootstrap Python
+        run: python scripts/build-bootstrap-python.py --platform ${{ matrix.platform }} --output bootstrap-python
+
+      - name: Package archive
+        shell: bash
+        run: |
+          cd bootstrap-python
+          tar -czf ../bootstrap-python-${{ matrix.platform }}.tar.gz ${{ matrix.platform }}
+          ls -lh ../bootstrap-python-${{ matrix.platform }}.tar.gz
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bootstrap-python-${{ matrix.platform }}
+          path: bootstrap-python-${{ matrix.platform }}.tar.gz
+
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag }}
+          files: bootstrap-python-${{ matrix.platform }}.tar.gz
+          fail_on_unmatched_files: false
+          draft: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
