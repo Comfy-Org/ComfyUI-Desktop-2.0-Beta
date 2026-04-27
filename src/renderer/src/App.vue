@@ -326,7 +326,7 @@ onMounted(async () => {
     </main>
   </div>
 
-  <!-- Modal views (rendered by ViewShell from navigation overlay stack) -->
+  <!-- Overlay views (rendered by ViewShell from navigation overlay stack) -->
   <ViewShell
     @show-progress="showProgress"
     @show-detail="handleProgressShowDetail"
