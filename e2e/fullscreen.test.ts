@@ -9,6 +9,15 @@
 
 import { test, expect } from '@playwright/test'
 import { launchApp, type AppContext } from './launchApp'
+import {
+  clickTab as _clickTab,
+  expectActiveTab as _expectActiveTab,
+  expectModalVisible as _expectModalVisible,
+  expectFullscreenVisible as _expectFullscreenVisible,
+  presentFullscreen as _presentFullscreen,
+  presentModal as _presentModal,
+  dismissAll as _dismissAll,
+} from './support/navigationHelpers'
 
 let ctx: AppContext
 
@@ -23,70 +32,16 @@ test.afterAll(async () => {
 })
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Helpers — bind shared helpers to this suite's page
 // ---------------------------------------------------------------------------
 
-async function clickTab(label: string): Promise<void> {
-  await ctx.page.locator('.sidebar-item', { hasText: label }).click()
-}
-
-async function expectActiveTab(label: string): Promise<void> {
-  const activeItem = ctx.page.locator('.sidebar-item.active')
-  await expect(activeItem).toContainText(label)
-}
-
-/** Assert a modal overlay is visible (or not). */
-async function expectModalVisible(visible: boolean): Promise<void> {
-  const modal = ctx.page.locator('.view-modal.active')
-  if (visible) {
-    await expect(modal.first()).toBeVisible()
-  } else {
-    await expect(modal).toHaveCount(0)
-  }
-}
-
-/** Assert a fullscreen overlay is visible (or not). */
-async function expectFullscreenVisible(visible: boolean): Promise<void> {
-  const fs = ctx.page.locator('.view-fullscreen')
-  if (visible) {
-    await expect(fs.first()).toBeVisible()
-  } else {
-    await expect(fs).toHaveCount(0)
-  }
-}
-
-/** Open a view in fullscreen mode via the E2E nav bridge. */
-async function presentFullscreen(key: string, props: Record<string, unknown> = {}): Promise<void> {
-  await ctx.page.evaluate(
-    ([k, p]: [string, Record<string, unknown>]) => {
-      // @ts-expect-error -- browser context: __E2E_NAV__ is injected at runtime
-      const nav = globalThis.__E2E_NAV__
-      nav.present(k, p, { mode: 'fullscreen' })
-    },
-    [key, props] as [string, Record<string, unknown>],
-  )
-}
-
-/** Present an overlay in modal mode via the E2E nav bridge. */
-async function presentModal(key: string, props: Record<string, unknown> = {}): Promise<void> {
-  await ctx.page.evaluate(
-    ([k, p]: [string, Record<string, unknown>]) => {
-      // @ts-expect-error -- browser context
-      const nav = globalThis.__E2E_NAV__
-      nav.present(k, p, { mode: 'modal' })
-    },
-    [key, props] as [string, Record<string, unknown>],
-  )
-}
-
-/** Dismiss all overlays via the E2E nav bridge. */
-async function dismissAll(): Promise<void> {
-  await ctx.page.evaluate(() => {
-    // @ts-expect-error -- browser context
-    const nav = globalThis.__E2E_NAV__
-    nav.dismissAll()
-  })
-}
+const clickTab = (label: string) => _clickTab(ctx.page, label)
+const expectActiveTab = (label: string) => _expectActiveTab(ctx.page, label)
+const expectModalVisible = (visible: boolean) => _expectModalVisible(ctx.page, visible)
+const expectFullscreenVisible = (visible: boolean) => _expectFullscreenVisible(ctx.page, visible)
+const presentFullscreen = (key: string, props?: Record<string, unknown>) => _presentFullscreen(ctx.page, key, props)
+const presentModal = (key: string, props?: Record<string, unknown>) => _presentModal(ctx.page, key, props)
+const dismissAll = () => _dismissAll(ctx.page)
 
 // ---------------------------------------------------------------------------
 // Settings — baseline tab tests @windows

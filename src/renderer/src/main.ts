@@ -254,7 +254,10 @@ app.use(createPinia())
 app.use(i18n)
 app.mount('#app')
 
-// Expose navigation bridge for E2E tests (always available — no side effects)
+// Expose navigation bridge for E2E tests.
+// These methods only mirror what UI buttons already do (present/dismiss overlays,
+// switch tabs) — no privilege escalation. The renderer's CSP and preload sandbox
+// already restrict what scripts can execute in this context.
 {
   const nav = useNavigation()
   ;(window as unknown as Record<string, unknown>).__E2E_NAV__ = {

@@ -193,16 +193,21 @@ export function useNavigation(): UseNavigation {
 
   function dismiss(key: OverlayKey): void {
     overlays.value = overlays.value.filter((e) => e.key !== key)
+    // Discard any pending invokeWhenReady callbacks for this key to prevent leaks.
+    pendingInvocations.delete(key)
   }
 
   function dismissTop(): void {
     if (overlays.value.length > 0) {
+      const top = overlays.value[overlays.value.length - 1]!
       overlays.value = overlays.value.slice(0, -1)
+      pendingInvocations.delete(top.key)
     }
   }
 
   function dismissAll(): void {
     overlays.value = []
+    pendingInvocations.clear()
   }
 
   function patchOverlay<K extends OverlayKey>(

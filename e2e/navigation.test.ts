@@ -6,6 +6,7 @@
 
 import { test, expect } from '@playwright/test'
 import { launchApp, type AppContext } from './launchApp'
+import { clickTab as _clickTab, expectActiveTab as _expectActiveTab, expectModalVisible as _expectModalVisible } from './support/navigationHelpers'
 
 let ctx: AppContext
 
@@ -20,29 +21,12 @@ test.afterAll(async () => {
 })
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Helpers — bind shared helpers to this suite's page
 // ---------------------------------------------------------------------------
 
-/** Click a sidebar tab by its translation key content. */
-async function clickTab(label: string): Promise<void> {
-  await ctx.page.locator('.sidebar-item', { hasText: label }).click()
-}
-
-/** Assert which sidebar tab is active. */
-async function expectActiveTab(label: string): Promise<void> {
-  const activeItem = ctx.page.locator('.sidebar-item.active')
-  await expect(activeItem).toContainText(label)
-}
-
-/** Assert a view-modal overlay is visible (or not). */
-async function expectModalVisible(visible: boolean): Promise<void> {
-  const modal = ctx.page.locator('.view-modal.active')
-  if (visible) {
-    await expect(modal.first()).toBeVisible()
-  } else {
-    await expect(modal).toHaveCount(0)
-  }
-}
+const clickTab = (label: string) => _clickTab(ctx.page, label)
+const expectActiveTab = (label: string) => _expectActiveTab(ctx.page, label)
+const expectModalVisible = (visible: boolean) => _expectModalVisible(ctx.page, visible)
 
 // ---------------------------------------------------------------------------
 // Tab switching @windows

@@ -16,6 +16,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { test, expect, type Page } from '@playwright/test'
 import { launchApp, type AppContext } from './launchApp'
+import { clickTab as _clickTab, expectActiveTab as _expectActiveTab, expectModalVisible as _expectModalVisible } from './support/navigationHelpers'
 
 // ---------------------------------------------------------------------------
 // Shared state — all tests share one app instance (serial)
@@ -74,23 +75,9 @@ async function cancelAllOperations(): Promise<void> {
   await ctx.page.waitForTimeout(500)
 }
 
-async function clickTab(label: string): Promise<void> {
-  await ctx.page.locator('.sidebar-item', { hasText: label }).click()
-}
-
-async function expectActiveTab(label: string): Promise<void> {
-  const activeItem = ctx.page.locator('.sidebar-item.active')
-  await expect(activeItem).toContainText(label)
-}
-
-async function expectModalVisible(visible: boolean): Promise<void> {
-  const modal = ctx.page.locator('.view-modal.active')
-  if (visible) {
-    await expect(modal.first()).toBeVisible()
-  } else {
-    await expect(modal).toHaveCount(0)
-  }
-}
+const clickTab = (label: string) => _clickTab(ctx.page, label)
+const expectActiveTab = (label: string) => _expectActiveTab(ctx.page, label)
+const expectModalVisible = (visible: boolean) => _expectModalVisible(ctx.page, visible)
 
 /**
  * Wait for the progress modal to reach a terminal state (success or error).
