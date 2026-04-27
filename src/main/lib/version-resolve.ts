@@ -37,10 +37,11 @@ const MAX_BACKPORT_WALK = 10
  * whose content is fully represented in `commit` (cherry-pick–aware).
  *
  * Collects candidate tags by walking backward, then evaluates from lowest
- * to highest.  A tag at position N (1-based, counting from `stopTag`)
- * qualifies when `countUniqueCommits(tag, commit) ≤ N` — each tag in the
- * chain is expected to contribute one version-bump commit that has no
- * equivalent on the commit's branch.
+ * to highest.  A tag qualifies when its unique commits (those with no
+ * cherry-pick equivalent on the commit's branch) do not exceed the total
+ * number of commits between `stopTag` and the candidate on the release
+ * branch.  This accommodates release branches that carry version bumps
+ * plus additional cherry-picks with no master equivalent.
  *
  * @returns The qualifying tag name and cherry-pick–aware "+N" count, or
  *          undefined if no qualifying tag is found before reaching `stopTag`.
@@ -64,8 +65,11 @@ async function findBestBackportTag(
   if (candidates.length === 0) return undefined
 
   // Phase 2: evaluate from lowest (closest to stopTag) to highest.
-  // Each tag adds one version-bump commit, so the threshold grows with
-  // the tag's position in the chain.
+  // The threshold for each candidate is the total number of commits
+  // between stopTag and that candidate on the release branch — this
+  // accounts for version-bump commits plus any release-only cherry-picks
+  // (e.g. workflow template bumps) that have no patch-id equivalent on
+  // the commit's branch.
   //
   // Sanity check: in shallow clones, countUniqueCommits can return wildly
   // inflated values because the truncated graph prevents patch-id matching.
@@ -75,14 +79,15 @@ async function findBestBackportTag(
   let best: { tag: string; commitsAhead: number } | undefined
   for (let pos = candidates.length - 1; pos >= 0; pos--) {
     const tag = candidates[pos]!
-    const threshold = candidates.length - pos
+    const branchDist = await countCommitsAhead(repoPath, stopTag, tag)
+    if (branchDist === undefined) break
     const unique = await countUniqueCommits(repoPath, tag, commit)
     if (unique === undefined) break
     if (ancestorDist !== undefined && unique > ancestorDist) return undefined
     // This tag has too many unique commits — stop ascending the chain
     // (higher tags will have even more).  Any previously found `best` from
     // a lower tag is still valid and will be returned.
-    if (unique > threshold) break
+    if (unique > branchDist) break
     const ahead = await countUniqueCommits(repoPath, commit, tag)
     if (ahead === undefined) break
     best = { tag, commitsAhead: ahead }

@@ -2,8 +2,8 @@ import fs from 'fs'
 import path from 'path'
 import { spawn } from 'child_process'
 import { killProcTree } from '../../lib/process'
-import { resolveInstalledVersion, clearVersionCache } from '../../lib/version-resolve'
-import { readGitHead } from '../../lib/git'
+import { resolveInstalledVersion, clearVersionCache, type LatestTagOverride } from '../../lib/version-resolve'
+import { readGitHead, fetchTags, findLatestVersionTag, revParseRef } from '../../lib/git'
 import { PYTORCH_RE, installFilteredRequirements, getPipIndexArgs } from '../../lib/pip'
 import { formatComfyVersion } from '../../lib/version'
 import type { ComfyVersion } from '../../lib/version'
@@ -314,17 +314,30 @@ export async function runComfyUIUpdate(opts: UpdateOrchestrationOptions): Promis
     }
   }
 
-  // Re-resolve comfyVersion from git state
+  // Re-resolve comfyVersion from git state.
+  // Fetch tags so the local repo has all release tags for version resolution
+  // (the update script may only fetch master on the latest channel).
+  await fetchTags(comfyuiDir)
   clearVersionCache()
   const checkedOutTag = markers.CHECKED_OUT_TAG || undefined
   const fullPostHead = markers.POST_UPDATE_HEAD || readGitHead(comfyuiDir)
+
+  // Build a latestTagOverride so resolveInstalledVersion can use the
+  // tag's SHA directly — matches the background version sync approach.
+  let latestTagOverride: LatestTagOverride | undefined
+  const latestTag = await findLatestVersionTag(comfyuiDir)
+  if (latestTag) {
+    const sha = await revParseRef(comfyuiDir, latestTag)
+    if (sha) latestTagOverride = { name: latestTag, sha }
+  }
 
   let comfyVersion: ComfyVersion | undefined
   if (fullPostHead) {
     comfyVersion = await resolveInstalledVersion(
       comfyuiDir, fullPostHead,
       installation.comfyVersion as ComfyVersion | undefined,
-      checkedOutTag
+      checkedOutTag,
+      latestTagOverride
     )
   }
 

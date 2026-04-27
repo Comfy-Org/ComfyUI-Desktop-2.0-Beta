@@ -1,6 +1,7 @@
 import { execFile, spawn, type ExecFileException } from 'child_process'
 import fs from 'fs'
 import path from 'path'
+import { app } from 'electron'
 import { killProcTree } from './process'
 import { getBundledScriptPath } from './bundledScript'
 
@@ -31,6 +32,32 @@ export function tryConfigurePygit2Fallback(installPath: string): boolean {
   const pythonPath = process.platform === 'win32'
     ? path.join(installPath, 'standalone-env', 'python.exe')
     : path.join(installPath, 'standalone-env', 'bin', 'python3')
+  if (!fs.existsSync(pythonPath)) return false
+  const scriptPath = getBundledScriptPath('git_operations.py')
+  if (!fs.existsSync(scriptPath)) return false
+  configurePygit2(pythonPath, scriptPath)
+  return true
+}
+
+/**
+ * Try to configure the pygit2 fallback using a bootstrap Python bundled
+ * with the Electron app (in resources/bootstrap-python/).  This allows
+ * git operations to work from app launch, before any standalone
+ * environment is downloaded.
+ *
+ * @returns `true` if pygit2 was successfully configured.
+ */
+export function tryConfigureBootstrapPygit2(): boolean {
+  const osName = process.platform === 'win32' ? 'win'
+    : process.platform === 'darwin' ? 'mac'
+    : 'linux'
+  const platformDir = `${osName}-${process.arch}`
+  const bootstrapDir = app.isPackaged
+    ? path.join(process.resourcesPath, 'bootstrap-python')
+    : path.join(__dirname, '..', '..', 'bootstrap-python', platformDir)
+  const pythonPath = process.platform === 'win32'
+    ? path.join(bootstrapDir, 'python.exe')
+    : path.join(bootstrapDir, 'bin', 'python3')
   if (!fs.existsSync(pythonPath)) return false
   const scriptPath = getBundledScriptPath('git_operations.py')
   if (!fs.existsSync(scriptPath)) return false
