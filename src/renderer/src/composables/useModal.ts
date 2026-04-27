@@ -1,5 +1,5 @@
 import { reactive, readonly } from 'vue'
-import { i18n } from '../main'
+import { i18n } from '../i18n'
 import type { SnapshotDetailData, FieldOption, ModalDetailGroup } from '../types/ipc'
 
 export type ModalType = 'alert' | 'confirm' | 'confirmWithOptions' | 'prompt' | 'select'

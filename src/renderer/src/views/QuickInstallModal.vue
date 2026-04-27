@@ -2,7 +2,8 @@
 import { ref, computed, watch, onMounted, toRaw } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useModal } from '../composables/useModal'
-import { useModalOverlay } from '../composables/useModalOverlay'
+import { useControllerRegistration } from '../composables/useControllerRegistration'
+
 import type { Source, FieldOption } from '../types/ipc'
 import { emitTelemetryAction, toVariantBucket } from '../lib/telemetry'
 import { stripVariantPrefix, sortedCardOptions } from '../lib/variants'
@@ -25,10 +26,6 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const modal = useModal()
 
-const { handleOverlayMouseDown, handleOverlayClick } = useModalOverlay(
-  () => true,
-  () => emit('close'),
-)
 
 const source = ref<Source | null>(null)
 const detectedGpu = ref('')
@@ -262,16 +259,13 @@ async function handleInstall(): Promise<void> {
   }
 }
 
+useControllerRegistration('quick-install', { open })
+
 defineExpose({ open })
 </script>
 
 <template>
-  <div
-    class="view-modal active"
-    @mousedown="handleOverlayMouseDown"
-    @click="handleOverlayClick"
-  >
-    <div class="view-modal-content quick-install-modal">
+  <div class="view-modal-content quick-install-modal">
       <div class="view-modal-header">
         <div class="view-modal-title">{{ $t('quickInstall.title') }}</div>
         <button class="view-modal-close" @click="emit('close')">✕</button>
@@ -328,6 +322,5 @@ defineExpose({ open })
           </button>
         </div>
       </div>
-    </div>
   </div>
 </template>

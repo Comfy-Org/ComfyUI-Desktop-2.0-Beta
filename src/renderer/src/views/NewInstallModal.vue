@@ -2,7 +2,8 @@
 import { ref, computed, watch, onMounted, toRaw } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useModal } from '../composables/useModal'
-import { useModalOverlay } from '../composables/useModalOverlay'
+import { useControllerRegistration } from '../composables/useControllerRegistration'
+
 import type { Source, SourceField, FieldOption, HardwareValidation } from '../types/ipc'
 import { stripVariantPrefix, sortedCardOptions } from '../lib/variants'
 import VariantCardGrid from '../components/VariantCardGrid.vue'
@@ -520,21 +521,13 @@ function getSelectedIndex(field: SourceField): number {
   return idx >= 0 ? idx : 0
 }
 
-const { handleOverlayMouseDown, handleOverlayClick } = useModalOverlay(
-  () => true,
-  () => emit('close'),
-)
+useControllerRegistration('new-install', { open })
 
 defineExpose({ open })
 </script>
 
 <template>
-  <div
-    class="view-modal active"
-    @mousedown="handleOverlayMouseDown"
-    @click="handleOverlayClick"
-  >
-    <div class="view-modal-content">
+  <div class="view-modal-content">
       <div class="view-modal-header">
         <div class="view-modal-title">{{ stepTitle }}</div>
         <button class="view-modal-close" @click="emit('close')">✕</button>
@@ -786,6 +779,5 @@ defineExpose({ open })
           </button>
         </div>
       </div>
-    </div>
   </div>
 </template>
