@@ -96,9 +96,6 @@ async function findBestBackportTag(
 }
 
 /**
- * @internal Use {@link resolveInstalledVersion} instead — it guards against
- * re-resolving when stored metadata is already authoritative.
- *
  * Resolve a {@link ComfyVersion} from local git state.  Uses the nearest
  * ancestor tag as a base, upgrading to a newer version tag when possible.
  *
@@ -195,7 +192,9 @@ export async function resolveLocalVersion(
         // less precise (doesn't exclude cherry-picked commits from +N) but
         // still gives a reasonable display.
         const mergeBase = await findMergeBase(comfyuiDir, latestTagRef!, commit)
-        const dist = mergeBase ? await countCommitsAhead(comfyuiDir, mergeBase, commit) : undefined
+        const dist = mergeBase && mergeBase !== commit
+          ? await countCommitsAhead(comfyuiDir, mergeBase, commit)
+          : undefined
         if (dist !== undefined) {
           baseTag = latestTagName
           commitsAhead = dist
@@ -222,31 +221,6 @@ export async function resolveLocalVersion(
   return result
 }
 
-/**
- * Single write-gate for resolving the version to store on an installation.
- *
- * When the commit hasn't changed and the stored version already has a
- * baseTag, returns the stored version as-is — re-resolving against the
- * current git state can produce wrong results when newer tags exist
- * (e.g. a snapshot-restored v0.17.2+12 re-resolving to v0.18.3).
- *
- * Only re-resolves from git when:
- * - No stored version exists (fresh install)
- * - The commit has changed (update / restore that moved HEAD)
- * - The stored version lacks a baseTag (legacy migration)
- */
-export async function resolveInstalledVersion(
-  comfyuiDir: string,
-  commit: string,
-  storedVersion: ComfyVersion | undefined,
-  hint?: string,
-  latestTagOverride?: LatestTagOverride,
-): Promise<ComfyVersion> {
-  if (storedVersion?.baseTag && storedVersion.commit === commit) {
-    return storedVersion
-  }
-  return resolveLocalVersion(comfyuiDir, commit, hint, latestTagOverride)
-}
 
 /** Clear the version cache (e.g. after an update changes tags). */
 export function clearVersionCache(): void {

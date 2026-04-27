@@ -9,7 +9,7 @@ import * as installations from '../../installations'
 import type { InstallationRecord } from '../../installations'
 import { formatComfyVersion } from '../version'
 import type { ComfyVersion } from '../version'
-import { resolveInstalledVersion, clearVersionCache } from '../version-resolve'
+import { resolveLocalVersion, clearVersionCache } from '../version-resolve'
 import type { LatestTagOverride } from '../version-resolve'
 import { readGitHead, readGitRemoteUrl, fetchTags, findLatestVersionTag, revParseRef, hasGitDir, isGitAvailable, tryConfigureBootstrapPygit2, tryConfigurePygit2Fallback } from '../git'
 import { ensureRemoteUrl } from '../github-mirror'
@@ -57,7 +57,7 @@ export {
   path, fs, os, app, ipcMain, dialog, shell, BrowserWindow, nativeTheme,
   execFile, spawn, execFileSync,
   sources, installations, settings, releaseCache, i18n,
-  formatComfyVersion, resolveInstalledVersion, clearVersionCache,
+  formatComfyVersion, resolveLocalVersion, clearVersionCache,
   readGitRemoteUrl, fetchTags, findLatestVersionTag, revParseRef, hasGitDir, isGitAvailable, tryConfigureBootstrapPygit2, tryConfigurePygit2Fallback,
   ensureRemoteUrl,
   defaultInstallDir, sanitizeDirName, allocateUniqueDir, download, createCache, extract, deleteDir, formatDeleteStatus, deleteAction, untrackAction,
@@ -468,7 +468,7 @@ export async function _resolveAndBroadcastVersions(list: InstallationRecord[]): 
       // made external changes (manual git pull, checkout, etc.).
       const actualHead = readGitHead(comfyuiDir) || cv.commit
 
-      const resolved = await resolveInstalledVersion(comfyuiDir, actualHead, cv, undefined, override)
+      const resolved = await resolveLocalVersion(comfyuiDir, actualHead, undefined, override)
       const resolvedStr = formatComfyVersion(resolved, 'short')
       const storedStr = formatComfyVersion(cv, 'short')
       const versionChanged = resolvedStr !== storedStr
