@@ -10,7 +10,7 @@ import {
   getVenvDir, recommendVariant,
 } from './envPaths'
 import { install, postInstall, probeInstallation } from './install'
-import { getListPreview, getStatusTag, getDetailSections, RELEASE_REPO } from './updateSections'
+import { getListPreview, getStatusTag, getDetailSections, R2_BASE_URL } from './updateSections'
 import { handleAction } from './actions'
 import type { InstallationRecord } from '../../installations'
 import type {
@@ -21,31 +21,33 @@ import type {
 
 export { getVariantLabel } from './envPaths'
 
-// --- GitHub API response types ---
+// --- R2 release types ---
 
-interface GitHubAsset {
-  name: string
-  browser_download_url: string
+interface R2Variant {
+  tag: string
+  comfyui_version: string
+  comfyui_commit: string
+  build: number
+  date: string
+  file: string
   size: number
-}
-
-interface GitHubRelease {
-  id: number
-  tag_name: string
-  name: string | null
-  assets: GitHubAsset[]
-}
-
-interface ManifestEntry {
-  id: string
-  comfyui_ref: string
   python_version: string
-  files?: string[]
+  torch_version: string
+  torchvision_version?: string
+  torchaudio_version?: string
+}
+
+/** latest.json: vendor_id → newest release */
+type R2Latest = Record<string, R2Variant>
+
+/** {vendor}/releases.json: full history for one vendor */
+interface R2VendorReleases {
+  releases: R2Variant[]
 }
 
 interface VariantData {
   variantId: string
-  manifest: ManifestEntry
+  manifest: { id: string; comfyui_ref: string; python_version: string }
   downloadUrl: string
   downloadFiles: { url: string; filename: string; size: number }[]
 }
@@ -84,16 +86,15 @@ export const standalone: SourcePlugin = {
   getDetailSections,
 
   buildInstallation(selections: Record<string, FieldOption | undefined>): Record<string, unknown> {
-    const vd = selections.variant?.data as VariantData | undefined
+    const vd = selections.variant?.data as (VariantData & { r2Release?: R2Variant }) | undefined
     const manifest = vd?.manifest
+    const r2Release = vd?.r2Release
     const variantId = vd?.variantId || ''
     const isCpu = stripPlatform(variantId) === 'cpu' || stripPlatform(variantId).startsWith('cpu-')
     const isLatest = selections.release?.value === 'latest'
-    // For "Latest version", use the underlying release's tag_name
-    const releaseData = selections.release?.data as unknown as GitHubRelease | undefined
-    const releaseTag = isLatest ? (releaseData?.tag_name || 'unknown') : (selections.release?.value || 'unknown')
+    const releaseTag = r2Release?.tag || (selections.release?.value || 'unknown')
     return {
-      version: manifest?.comfyui_ref || releaseTag,
+      version: r2Release?.comfyui_version || manifest?.comfyui_ref || releaseTag,
       releaseTag,
       variant: variantId,
       downloadUrl: vd?.downloadUrl || '',
@@ -166,62 +167,91 @@ export const standalone: SourcePlugin = {
 
   async getFieldOptions(fieldId: string, selections: Record<string, FieldOption | undefined>, context: Record<string, unknown>): Promise<FieldOption[]> {
     if (fieldId === 'release') {
-      const [releases, latest] = await Promise.all([
-        fetchJSON(`https://api.github.com/repos/${RELEASE_REPO}/releases?per_page=30`) as Promise<GitHubRelease[]>,
-        (fetchJSON(`https://api.github.com/repos/${RELEASE_REPO}/releases/latest`) as Promise<GitHubRelease>).catch(() => null),
-      ])
-      if (latest && !releases.some((r) => r.id === latest.id)) {
-        releases.unshift(latest)
+      const prefix = PLATFORM_PREFIX[process.platform]
+      if (!prefix) return []
+
+      // Fetch latest.json (tiny, pre-warmed on startup) to know which vendors exist
+      const latest = await fetchJSON(`${R2_BASE_URL}/latest.json`) as R2Latest
+      const vendorIds = Object.keys(latest).filter((id) => id.startsWith(prefix))
+      if (vendorIds.length === 0) return []
+
+      // Fetch per-vendor release history in parallel
+      const vendorReleases = Object.fromEntries(
+        await Promise.all(vendorIds.map(async (id) => {
+          const data = await fetchJSON(`${R2_BASE_URL}/${id}/releases.json`) as R2VendorReleases
+          return [id, data.releases] as const
+        }))
+      )
+
+      // Collect unique release tags across all vendors for this platform
+      const tagMap = new Map<string, { comfyui_version: string; date: string; tag: string }>()
+      for (const releases of Object.values(vendorReleases)) {
+        for (const release of releases) {
+          if (!tagMap.has(release.tag) || release.date > tagMap.get(release.tag)!.date) {
+            tagMap.set(release.tag, { comfyui_version: release.comfyui_version, date: release.date, tag: release.tag })
+          }
+        }
       }
-      const filtered = releases.filter((r) => r.assets.some((a) => a.name === 'manifests.json'))
+      const tags = [...tagMap.values()].sort((a, b) => b.date.localeCompare(a.date))
+
       const options: FieldOption[] = []
 
-      // Synthetic "Latest Stable" entry — uses the newest release but auto-updates ComfyUI after install
-      if (filtered.length > 0 && context?.includeLatestStable) {
+      // Synthetic "Latest Stable" entry
+      if (tags.length > 0 && context?.includeLatestStable) {
         options.push({
           value: 'latest',
           label: t('standalone.latestVersion'),
           recommended: true,
-          data: filtered[0] as unknown as Record<string, unknown>,
+          data: { tag: tags[0]!.tag, vendorReleases } as unknown as Record<string, unknown>,
         })
       }
 
-      for (const r of filtered) {
-        const name = r.name && r.name !== r.tag_name ? `${r.tag_name}  —  ${r.name}` : r.tag_name
-        options.push({ value: r.tag_name, label: name, data: r as unknown as Record<string, unknown> })
+      for (const entry of tags) {
+        const dateStr = entry.date.slice(0, 10)
+        options.push({
+          value: entry.tag,
+          label: `${entry.tag}  —  ComfyUI ${entry.comfyui_version}  ·  ${dateStr}`,
+          data: { tag: entry.tag, vendorReleases } as unknown as Record<string, unknown>,
+        })
       }
       return options
     }
 
     if (fieldId === 'variant') {
-      const release = selections.release?.data as unknown as GitHubRelease | undefined
-      if (!release) return []
+      const releaseData = selections.release?.data as { tag: string; vendorReleases: Record<string, R2Variant[]> } | undefined
+      if (!releaseData) return []
       const prefix = PLATFORM_PREFIX[process.platform]
       if (!prefix) return []
 
-      const manifestAsset = release.assets.find((a) => a.name === 'manifests.json')
-      if (!manifestAsset) return []
-      const manifests = await fetchJSON(manifestAsset.browser_download_url) as ManifestEntry[]
-
+      const isLatest = selections.release?.value === 'latest'
       const gpu = context?.gpu as string | undefined
-      return manifests
-        .filter((m) => m.id.startsWith(prefix))
-        .map((m): FieldOption | null => {
-          const files = m.files || []
-          const assets = files
-            .map((f) => release.assets.find((a) => a.name === f))
-            .filter((a): a is GitHubAsset => a != null)
-          if (assets.length === 0) return null
-          const totalBytes = assets.reduce((sum, a) => sum + a.size, 0)
-          const sizeMB = (totalBytes / 1048576).toFixed(0)
-          const downloadFiles = assets.map((a) => ({ url: a.browser_download_url, filename: a.name, size: a.size }))
-          const downloadUrl = downloadFiles.length === 1 ? downloadFiles[0]!.url : ''
+
+      return Object.entries(releaseData.vendorReleases)
+        .filter(([vendorId]) => vendorId.startsWith(prefix))
+        .map(([vendorId, releases]): FieldOption | null => {
+          const release = isLatest
+            ? releases[0]
+            : releases.find((r) => r.tag === releaseData.tag)
+          if (!release) return null
+
+          const sizeMB = (release.size / 1048576).toFixed(0)
+          const downloadFiles = [{
+            url: `${R2_BASE_URL}/${vendorId}/${release.tag}/${release.file}`,
+            filename: release.file,
+            size: release.size,
+          }]
           return {
-            value: downloadFiles.length > 0 ? m.id : '',
-            label: getVariantLabel(m.id),
-            description: `ComfyUI ${m.comfyui_ref}  ·  Python ${m.python_version}  ·  ${sizeMB} MB`,
-            data: { variantId: m.id, manifest: m, downloadFiles, downloadUrl } as unknown as Record<string, unknown>,
-            recommended: recommendVariant(m.id, gpu),
+            value: vendorId,
+            label: getVariantLabel(vendorId),
+            description: `ComfyUI ${release.comfyui_version}  ·  Python ${release.python_version}  ·  ${sizeMB} MB`,
+            data: {
+              variantId: vendorId,
+              manifest: { id: vendorId, comfyui_ref: release.comfyui_version, python_version: release.python_version },
+              downloadFiles,
+              downloadUrl: downloadFiles[0]!.url,
+              r2Release: release,
+            } as unknown as Record<string, unknown>,
+            recommended: recommendVariant(vendorId, gpu),
           }
         })
         .filter((item): item is FieldOption => item != null)

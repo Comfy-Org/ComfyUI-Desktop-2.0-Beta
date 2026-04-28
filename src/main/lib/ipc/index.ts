@@ -123,10 +123,7 @@ export function register(callbacks: RegisterCallbacks = {}): void {
   // Pre-warm the ETag cache
   void (async () => {
     try {
-      await Promise.allSettled([
-        fetchJSON('https://api.github.com/repos/Comfy-Org/ComfyUI-Standalone-Environments/releases?per_page=30'),
-        fetchJSON('https://api.github.com/repos/Comfy-Org/ComfyUI-Standalone-Environments/releases/latest'),
-      ])
+      await fetchJSON('https://desktop-assets.comfy.org/standalone-environments/latest.json')
     } catch {}
   })()
 
