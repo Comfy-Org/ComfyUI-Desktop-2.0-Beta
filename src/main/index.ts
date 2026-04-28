@@ -26,7 +26,7 @@ import { get as getInstallation } from './installations'
 import { getModelDownloadContentScript } from './lib/comfyContentScript'
 import { shouldOpenInPopup } from './lib/allowedPopups'
 import { showModelFolderRelaunchPage } from './lib/relaunchPage'
-import { COMFY_BG, SPLASH_DARK, type SplashTheme } from './lib/theme'
+import { COMFY_BG, SPLASH_DARK, TITLEBAR_BG, type SplashTheme } from './lib/theme'
 import { TITLEBAR_HEIGHT, TRAFFIC_LIGHT_POSITION, titleBarOverlayForTheme, comfyTitleBarOverlay, updateTitleBarOverlay, setMainWindowId } from './lib/titleBarOverlay'
 import { resolveTheme, sourceMap } from './lib/ipc/shared'
 
@@ -659,6 +659,8 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
   const titleBarView = new WebContentsView({
     webPreferences: { nodeIntegration: false, contextIsolation: true },
   })
+  // Paint the title bar's dark background before its HTML loads to avoid a white flash on window show.
+  titleBarView.setBackgroundColor(TITLEBAR_BG)
   titleBarView.webContents.loadFile(path.join(__dirname, '..', '..', 'resources', 'comfyTitleBar.html'))
   const sourceLabel = sourceMap[installation.sourceId]?.label
   const titleBarText = sourceLabel ? `${installation.name} — ${sourceLabel}` : installation.name
@@ -680,6 +682,10 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
         : 'persist:shared',
     },
   })
+  // Paint the ComfyUI view's dark background before any URL loads to avoid a white flash
+  // on window show. The parent BrowserWindow's backgroundColor never shows because the
+  // WebContentsViews cover its entire content area.
+  comfyView.setBackgroundColor(COMFY_BG)
   comfyWindow.contentView.addChildView(comfyView)
 
   // Layout both views; title bar is 1px taller than the overlay so a CSS
