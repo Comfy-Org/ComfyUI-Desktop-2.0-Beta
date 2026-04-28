@@ -24,8 +24,15 @@ import { clickTab as _clickTab, expectActiveTab as _expectActiveTab, expectModal
 
 let ctx: AppContext
 
-/** The release tag of the second-to-latest release, captured during install. */
+/** The release tag of the installed release, captured during install. */
 let installedReleaseTag = ''
+
+/**
+ * Whether the install picked an older release than "latest stable" — i.e. the
+ * R2 backend exposed at least 2 distinct release tags. Update-flow tests are
+ * skipped when this is false because there is no newer version to update to.
+ */
+let hasOlderRelease = false
 
 test.describe.configure({ mode: 'serial' })
 
@@ -147,23 +154,29 @@ test('New Install wizard: opens and selects standalone source @lifecycle', async
   await expect(releaseSelect).toBeEnabled({ timeout: 30_000 })
 })
 
-test('New Install wizard: selects second-to-latest release @lifecycle', async () => {
+test('New Install wizard: selects an installable release @lifecycle', async () => {
   const releaseSelect = ctx.page.locator('#sf-release')
   await expect(releaseSelect).toBeVisible()
 
   // Option 0 = "Latest Stable (Recommended)", option 1 = newest tag,
-  // option 2 = second-to-latest. Select option 2 so there's a newer version
-  // available for the update test.
+  // option 2+ = older tags. Prefer index 2 (second-to-latest) so the update
+  // flow has a newer version to upgrade to. If the backend only exposes one
+  // release tag (R2 buckets start out with just one), fall back to index 1
+  // and skip the update tests later — they have nothing to verify.
   const optionCount = await releaseSelect.locator('option').count()
-  expect(optionCount).toBeGreaterThanOrEqual(3)
+  expect(optionCount).toBeGreaterThanOrEqual(2)
 
-  // Capture the tag name from the third option's text (format: "v0.X.Y  —  Name")
-  const thirdOptionText = (await releaseSelect.locator('option').nth(2).textContent())?.trim() ?? ''
-  installedReleaseTag = thirdOptionText.match(/(v[\d.]+\S*)/)?.[1] ?? ''
+  hasOlderRelease = optionCount >= 3
+  const targetIndex = hasOlderRelease ? 2 : 1
+
+  // Capture the tag name from the chosen option's text (format: "v0.X.Y  —  Name")
+  const targetOptionText =
+    (await releaseSelect.locator('option').nth(targetIndex).textContent())?.trim() ?? ''
+  installedReleaseTag = targetOptionText.match(/(v[\d.]+\S*)/)?.[1] ?? ''
   expect(installedReleaseTag).toBeTruthy()
 
-  // Select the second-to-latest release (index 2)
-  await releaseSelect.selectOption({ index: 2 })
+  // Select the chosen release
+  await releaseSelect.selectOption({ index: targetIndex })
 
   // Wait for variant cards to load for this release
   const variantCards = ctx.page.locator('.variant-card')
@@ -347,6 +360,8 @@ test('Stop: stops running ComfyUI instance @lifecycle', async () => {
 // ---------------------------------------------------------------------------
 
 test('Detail update tab shows update available @lifecycle', async () => {
+  test.skip(!hasOlderRelease, 'Only one release tag is published; nothing to update to.')
+
   // Cancel any lingering operation from the launch/crash cycle so the
   // backend's _operationAborts map is clean before we attempt the update.
   await cancelAllOperations()
@@ -380,6 +395,8 @@ test('Detail update tab shows update available @lifecycle', async () => {
 })
 
 test('Update: triggers and completes ComfyUI update @lifecycle', async () => {
+  test.skip(!hasOlderRelease, 'Only one release tag is published; nothing to update to.')
+
   // Cancel any lingering operations before attempting the update
   await cancelAllOperations()
 
@@ -421,6 +438,8 @@ test('Update: triggers and completes ComfyUI update @lifecycle', async () => {
 })
 
 test('Detail shows updated version after update @lifecycle', async () => {
+  test.skip(!hasOlderRelease, 'Only one release tag is published; nothing to update to.')
+
   // Close any remaining modals from the update flow before re-opening detail
   while (await ctx.page.locator('.view-modal.active').count() > 0) {
     await ctx.page.keyboard.press('Escape')
