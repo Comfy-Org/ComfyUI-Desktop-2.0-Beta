@@ -11,16 +11,21 @@ vi.mock('../../lib/fetch', () => ({
 
 import { standalone } from './index'
 import { fetchJSON } from '../../lib/fetch'
+import { PLATFORM_PREFIX } from './envPaths'
 import type { FieldOption } from '../../types/sources'
 
 const mockedFetchJSON = vi.mocked(fetchJSON)
+
+// Use the running platform's vendor prefix so tests work on win32/darwin/linux CI runners.
+const PLATFORM_VENDOR_PREFIX = (PLATFORM_PREFIX[process.platform] || 'win-').replace(/-$/, '')
+const VENDOR_ID = `${PLATFORM_VENDOR_PREFIX}-nvidia`
 
 // --- Helpers ---
 
 type R2Release = { tag: string; comfyui_version: string; comfyui_commit: string; build: number; date: string; file: string; size: number; python_version: string; torch_version: string }
 
-function makeR2Releases(tags: string[], options?: { vendorPrefix?: string; comfyuiVersion?: string }) {
-  const prefix = options?.vendorPrefix ?? 'win'
+function makeR2Releases(tags: string[], options?: { vendorId?: string; comfyuiVersion?: string }) {
+  const vendorId = options?.vendorId ?? VENDOR_ID
   const version = options?.comfyuiVersion ?? '0.18.3'
   const releases: R2Release[] = tags.map((tag) => ({
     tag,
@@ -28,16 +33,16 @@ function makeR2Releases(tags: string[], options?: { vendorPrefix?: string; comfy
     comfyui_commit: 'abc123',
     build: 1,
     date: '2026-03-15T00:00:00Z',
-    file: `${prefix}-nvidia-${tag}.tar.gz`,
+    file: `${vendorId}-${tag}.tar.gz`,
     size: 1048576,
     python_version: '3.13.12',
     torch_version: '2.7.0',
   }))
   // latest.json: vendor_id → newest release
-  const latest: Record<string, R2Release> = { [`${prefix}-nvidia`]: releases[0]! }
+  const latest: Record<string, R2Release> = { [vendorId]: releases[0]! }
   // per-vendor releases.json
-  const vendorReleases: Record<string, { releases: R2Release[] }> = { [`${prefix}-nvidia`]: { releases } }
-  return { latest, vendorReleases }
+  const vendorReleases: Record<string, { releases: R2Release[] }> = { [vendorId]: { releases } }
+  return { latest, vendorReleases, vendorId }
 }
 
 // --- buildInstallation ---
@@ -64,7 +69,7 @@ describe('standalone.buildInstallation', () => {
   it('sets autoUpdateComfyUI when release value is "latest"', () => {
     const result = standalone.buildInstallation({
       release: makeRelease('latest', 'v0.18.2-env1'),
-      variant: makeVariant('win-nvidia'),
+      variant: makeVariant(VENDOR_ID),
     })
     expect(result.autoUpdateComfyUI).toBe(true)
   })
@@ -72,7 +77,7 @@ describe('standalone.buildInstallation', () => {
   it('does NOT set autoUpdateComfyUI for a specific release tag', () => {
     const result = standalone.buildInstallation({
       release: makeRelease('v0.18.2-env1'),
-      variant: makeVariant('win-nvidia'),
+      variant: makeVariant(VENDOR_ID),
     })
     expect(result.autoUpdateComfyUI).toBeUndefined()
   })
@@ -80,7 +85,7 @@ describe('standalone.buildInstallation', () => {
   it('uses r2Release tag as releaseTag when "latest" is selected', () => {
     const result = standalone.buildInstallation({
       release: makeRelease('latest', 'v0.18.2-env1'),
-      variant: makeVariant('win-nvidia'),
+      variant: makeVariant(VENDOR_ID),
     })
     expect(result.releaseTag).toBe('v0.18.2-env1')
   })
@@ -88,7 +93,7 @@ describe('standalone.buildInstallation', () => {
   it('uses the release value directly as releaseTag for specific releases', () => {
     const result = standalone.buildInstallation({
       release: makeRelease('v0.18.2-env1'),
-      variant: makeVariant('win-nvidia'),
+      variant: makeVariant(VENDOR_ID),
     })
     expect(result.releaseTag).toBe('v0.18.2-env1')
   })
@@ -98,15 +103,15 @@ describe('standalone.buildInstallation', () => {
 
 describe('standalone.getFieldOptions release', () => {
   function setupMockReleases() {
-    const { latest, vendorReleases } = makeR2Releases(['v0.18.3-env1', 'v0.18.2-env1'])
+    const { latest, vendorReleases, vendorId } = makeR2Releases(['v0.18.3-env1', 'v0.18.2-env1'])
     // Make the first tag newer
-    vendorReleases['win-nvidia']!.releases[0]!.date = '2026-04-01T00:00:00Z'
-    vendorReleases['win-nvidia']!.releases[1]!.date = '2026-03-15T00:00:00Z'
-    vendorReleases['win-nvidia']!.releases[1]!.comfyui_version = '0.18.2'
-    latest['win-nvidia'] = vendorReleases['win-nvidia']!.releases[0]!
+    vendorReleases[vendorId]!.releases[0]!.date = '2026-04-01T00:00:00Z'
+    vendorReleases[vendorId]!.releases[1]!.date = '2026-03-15T00:00:00Z'
+    vendorReleases[vendorId]!.releases[1]!.comfyui_version = '0.18.2'
+    latest[vendorId] = vendorReleases[vendorId]!.releases[0]!
     mockedFetchJSON.mockImplementation((url: string) => {
       if (url.includes('latest.json')) return Promise.resolve(latest)
-      return Promise.resolve(vendorReleases['win-nvidia']!)
+      return Promise.resolve(vendorReleases[vendorId]!)
     })
   }
 
