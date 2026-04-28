@@ -17,8 +17,7 @@ import type { FieldOption } from '../../types/sources'
 const mockedFetchJSON = vi.mocked(fetchJSON)
 
 // Use the running platform's vendor prefix so tests work on win32/darwin/linux CI runners.
-const PLATFORM_VENDOR_PREFIX = (PLATFORM_PREFIX[process.platform] || 'win-').replace(/-$/, '')
-const VENDOR_ID = `${PLATFORM_VENDOR_PREFIX}-nvidia`
+const VENDOR_ID = `${PLATFORM_PREFIX[process.platform] || 'win-'}nvidia`
 
 // --- Helpers ---
 
