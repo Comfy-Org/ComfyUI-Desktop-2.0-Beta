@@ -139,7 +139,23 @@ function attachContextMenu(comfyWindow: BrowserWindow, webContents?: Electron.We
 
 let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
-const comfyWindows = new Map<string, BrowserWindow>()
+
+/**
+ * Per-installation handle for a ComfyUI window.
+ *
+ * The ComfyUI window is split into a parent BrowserWindow plus two
+ * WebContentsViews — a thin native title bar and the ComfyUI content view.
+ * Most lifecycle code needs the BrowserWindow (show, focus, destroy, bounds)
+ * but the navigation / restart / splash flows must target the ComfyUI
+ * WebContents, which lives on `comfyView.webContents` — NOT on the parent
+ * window's webContents (that is only used as a host for the views).
+ */
+interface ComfyWindowEntry {
+  window: BrowserWindow
+  comfyView: WebContentsView
+  titleBarView: WebContentsView
+}
+const comfyWindows = new Map<string, ComfyWindowEntry>()
 
 function focusExternalProcessWindow(pid: number): void {
   if (process.platform === 'win32') {
@@ -432,8 +448,8 @@ function showMainWindow(): void {
 function quitApp(): void {
   setQuitReason('user-quit')
   ipc.cancelAll()
-  for (const [_id, win] of comfyWindows) {
-    if (!win.isDestroyed()) win.destroy()
+  for (const [, entry] of comfyWindows) {
+    if (!entry.window.isDestroyed()) entry.window.destroy()
   }
   comfyWindows.clear()
   if (tray) {
@@ -445,8 +461,8 @@ function quitApp(): void {
 
 function onComfyExited({ installationId }: { installationId?: string } = {}): void {
   if (installationId) {
-    const win = comfyWindows.get(installationId)
-    if (win && !win.isDestroyed()) win.destroy()
+    const entry = comfyWindows.get(installationId)
+    if (entry && !entry.window.isDestroyed()) entry.window.destroy()
     comfyWindows.delete(installationId)
   }
 }
@@ -470,25 +486,26 @@ const comfyFailRetryTimerCancels = new Map<string, () => void>()
 let relaunchTokenCounter = 0
 
 async function onModelFolderRelaunch({ installationId }: { installationId: string }): Promise<void> {
-  const win = comfyWindows.get(installationId)
-  if (!win || win.isDestroyed()) return
+  const entry = comfyWindows.get(installationId)
+  if (!entry || entry.window.isDestroyed()) return
+  const comfyContents = entry.comfyView.webContents
 
   // If a relaunch is already in progress, clean up the previous state first
   // so the stale onComfyRestarted call will abort (token mismatch).
   const prev = relaunchStates.get(installationId)
-  if (prev) win.webContents.off('will-navigate', prev.navBlocker)
+  if (prev) comfyContents.off('will-navigate', prev.navBlocker)
 
   // Capture the real ComfyUI URL — but only if we're not already on the splash page.
-  const currentUrl = win.webContents.getURL()
+  const currentUrl = comfyContents.getURL()
   const originalUrl = prev ? prev.originalUrl : currentUrl
 
   // Cancel any pending did-fail-load retry so it doesn't navigate away from the splash
   const cancelRetry = comfyFailRetryTimerCancels.get(installationId)
   if (cancelRetry) cancelRetry()
 
-  // Block navigations on the comfy window until onComfyRestarted loads the real URL.
+  // Block navigations on the comfy view until onComfyRestarted loads the real URL.
   const blockNav = (e: Electron.Event): void => { e.preventDefault() }
-  win.webContents.on('will-navigate', blockNav)
+  comfyContents.on('will-navigate', blockNav)
 
   // Always use dark splash — the frontend's own loading screen is always dark,
   // so a light splash would cause a jarring dark flash when ComfyUI loads.
@@ -496,18 +513,19 @@ async function onModelFolderRelaunch({ installationId }: { installationId: strin
   const token = ++relaunchTokenCounter
 
   relaunchStates.set(installationId, { originalUrl, theme, navBlocker: blockNav, token })
-  await showModelFolderRelaunchPage(win, theme)
+  await showModelFolderRelaunchPage(comfyContents, theme)
 }
 
 function onComfyRestarted({ installationId, process: _proc }: { installationId?: string; process?: ChildProcess } = {}): void {
   if (!installationId) return
-  const win = comfyWindows.get(installationId)
-  if (!win || win.isDestroyed()) return
+  const entry = comfyWindows.get(installationId)
+  if (!entry || entry.window.isDestroyed()) return
+  const comfyContents = entry.comfyView.webContents
 
   const state = relaunchStates.get(installationId)
   const myToken = state?.token
 
-  const currentUrl = state?.originalUrl || win.webContents.getURL()
+  const currentUrl = state?.originalUrl || comfyContents.getURL()
   if (!currentUrl) return
 
   const url = new URL(currentUrl)
@@ -518,7 +536,7 @@ function onComfyRestarted({ installationId, process: _proc }: { installationId?:
     // Only clean up if this is still the active relaunch (token matches)
     const current = relaunchStates.get(installationId)
     if (current && current.token === myToken) {
-      if (!win.isDestroyed()) win.webContents.off('will-navigate', current.navBlocker)
+      if (!entry.window.isDestroyed()) comfyContents.off('will-navigate', current.navBlocker)
       relaunchStates.delete(installationId)
     }
   }
@@ -535,7 +553,7 @@ function onComfyRestarted({ installationId, process: _proc }: { installationId?:
       // Probe with HTTP HEAD requests so the splash page stays visible
       // until the server actually responds.
       for (let attempt = 0; attempt < 10; attempt++) {
-        if (win.isDestroyed() || isStale()) { cleanupRelaunchState(); return }
+        if (entry.window.isDestroyed() || isStale()) { cleanupRelaunchState(); return }
         try {
           const resp = await net.fetch(currentUrl, { method: 'HEAD' })
           resp.body?.cancel()
@@ -544,12 +562,14 @@ function onComfyRestarted({ installationId, process: _proc }: { installationId?:
           await new Promise((r) => setTimeout(r, 500 * (attempt + 1)))
         }
       }
-      if (win.isDestroyed() || isStale()) { cleanupRelaunchState(); return }
+      if (entry.window.isDestroyed() || isStale()) { cleanupRelaunchState(); return }
       // Non-relaunch restart while a relaunch is active — defer to the relaunch.
       if (relaunchStates.has(installationId) && !state) return
       cleanupRelaunchState()
-      win.setBackgroundColor(state?.theme.bg ?? COMFY_BG)
-      await win.loadURL(currentUrl)
+      // Set the dark/theme background on the comfyView (the parent BrowserWindow's
+      // backgroundColor is hidden behind the views and would have no visual effect).
+      entry.comfyView.setBackgroundColor(state?.theme.bg ?? COMFY_BG)
+      await comfyContents.loadURL(currentUrl)
     })
     .catch((err) => {
       cleanupRelaunchState()
@@ -565,12 +585,12 @@ function onComfyRestarted({ installationId, process: _proc }: { installationId?:
 
 function onStop({ installationId }: { installationId?: string } = {}): void {
   if (installationId) {
-    const win = comfyWindows.get(installationId)
-    if (win && !win.isDestroyed()) win.destroy()
+    const entry = comfyWindows.get(installationId)
+    if (entry && !entry.window.isDestroyed()) entry.window.destroy()
     comfyWindows.delete(installationId)
   } else {
-    for (const [_id, win] of comfyWindows) {
-      if (!win.isDestroyed()) win.destroy()
+    for (const [, entry] of comfyWindows) {
+      if (!entry.window.isDestroyed()) entry.window.destroy()
     }
     comfyWindows.clear()
   }
@@ -854,7 +874,7 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
     relaunchStates.delete(installationId)
   })
 
-  comfyWindows.set(installationId, comfyWindow)
+  comfyWindows.set(installationId, { window: comfyWindow, comfyView, titleBarView })
 
   if (proc) {
     proc.on('exit', () => {
@@ -872,10 +892,10 @@ ipcMain.handle('reset-zoom', () => {
 })
 
 ipcMain.handle('focus-comfy-window', (_event, installationId: string) => {
-  const win = comfyWindows.get(installationId)
-  if (win && !win.isDestroyed()) {
-    win.show()
-    win.focus()
+  const entry = comfyWindows.get(installationId)
+  if (entry && !entry.window.isDestroyed()) {
+    entry.window.show()
+    entry.window.focus()
     return true
   }
 
@@ -899,8 +919,8 @@ function resolveOutputDir(inst: InstallationRecord): string | null {
 }
 
 function findInstallationIdForWindow(win: BrowserWindow): string | undefined {
-  for (const [id, w] of comfyWindows) {
-    if (w === win) return id
+  for (const [id, entry] of comfyWindows) {
+    if (entry.window === win) return id
   }
   return undefined
 }
@@ -959,8 +979,8 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
     if (!isQuitInProgress()) {
       setQuitReason('user-quit')
       ipc.cancelAll()
-      for (const [, win] of comfyWindows) {
-        if (!win.isDestroyed()) win.destroy()
+      for (const [, entry] of comfyWindows) {
+        if (!entry.window.isDestroyed()) entry.window.destroy()
       }
       comfyWindows.clear()
       if (tray) {

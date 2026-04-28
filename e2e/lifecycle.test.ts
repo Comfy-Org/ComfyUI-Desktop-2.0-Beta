@@ -257,6 +257,52 @@ test('Launch: starts ComfyUI from installation list @lifecycle', async () => {
   await expect(stopBtn).toBeVisible({ timeout: 120_000 })
 })
 
+/**
+ * Regression guard for #449 — the ComfyUI window must paint a dark background
+ * before the URL loads, and both child WebContentsViews must exist as siblings
+ * of a parent BrowserWindow with COMFY_BG. If a future refactor regresses the
+ * setBackgroundColor calls (or removes the WebContentsView split), this test
+ * fails.
+ */
+test('Launch: ComfyUI window has dark background and split-view architecture @lifecycle', async () => {
+  // Wait for the comfy webContents to exist (it's the one with a localhost URL).
+  await expect.poll(
+    () => ctx.app.evaluate(({ webContents }) =>
+      webContents.getAllWebContents().some((wc) => /^http:\/\/(127\.0\.0\.1|localhost):/.test(wc.getURL())),
+    ),
+    { timeout: 60_000, intervals: [500] },
+  ).toBe(true)
+
+  const arch = await ctx.app.evaluate(({ BrowserWindow, WebContentsView }) => {
+    // Find a BrowserWindow whose contentView contains a WebContentsView whose
+    // webContents has loaded a localhost URL — that's the ComfyUI window.
+    for (const win of BrowserWindow.getAllWindows()) {
+      const children = win.contentView.children
+      const hasComfy = children.some((v) =>
+        v instanceof WebContentsView &&
+        /^http:\/\/(127\.0\.0\.1|localhost):/.test(v.webContents.getURL()),
+      )
+      if (!hasComfy) continue
+      return {
+        childCount: children.length,
+        allWebContentsViews: children.every((v) => v instanceof WebContentsView),
+        bg: win.getBackgroundColor(),
+      }
+    }
+    return null
+  })
+
+  expect(arch, 'ComfyUI BrowserWindow not found among open windows').not.toBeNull()
+  // The comfy window must use the title-bar + content split-view architecture
+  // introduced in PR #414 (2 WebContentsViews).
+  expect(arch!.childCount).toBe(2)
+  expect(arch!.allWebContentsViews).toBe(true)
+  // Parent BrowserWindow must have a dark backgroundColor as defense-in-depth
+  // against future architecture changes that re-expose the parent surface.
+  // Electron normalizes hex strings to lowercase.
+  expect(arch!.bg.toLowerCase()).toBe('#171717')
+})
+
 test('Console: shows terminal output for running instance @lifecycle', async () => {
   // Stay on Installs tab where the running card is visible
   await clickTab('Installs')
