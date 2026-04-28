@@ -1,8 +1,11 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Check, X, TriangleAlert } from 'lucide-vue-next'
 import { useModal } from '../composables/useModal'
+import { useControllerRegistration } from '../composables/useControllerRegistration'
+
+import { useTerminalScroll } from '../composables/useTerminalScroll'
 import { useProgressStore } from '../stores/progressStore'
 import type { Operation } from '../stores/progressStore'
 import type {
@@ -28,10 +31,8 @@ const modal = useModal()
 const progressStore = useProgressStore()
 
 const currentId = ref<string | null>(null)
-const terminalRef = ref<HTMLDivElement | null>(null)
-const isTerminalAtBottom = ref(true)
 const resolvingConflict = ref(false)
-const terminalExpanded = ref(true)
+
 
 const currentOp = computed(() => {
   const id = currentId.value ?? props.installationId
@@ -41,21 +42,9 @@ const currentOp = computed(() => {
 
 const displayId = computed(() => currentId.value ?? props.installationId)
 
-function handleTerminalScroll(): void {
-  if (!terminalRef.value) return
-  const el = terminalRef.value
-  isTerminalAtBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight < 60
-}
-
-// Auto-scroll terminal
-watch(
-  () => currentOp.value?.terminalOutput,
-  async () => {
-    if (!isTerminalAtBottom.value) return
-    await nextTick()
-    if (terminalRef.value) terminalRef.value.scrollTop = terminalRef.value.scrollHeight
-  }
-)
+const terminalRef = ref<HTMLDivElement | null>(null)
+const { isAtBottom, terminalExpanded, handleTerminalScroll } =
+  useTerminalScroll(terminalRef, () => currentOp.value?.terminalOutput)
 
 // Sync currentId with prop
 watch(
@@ -63,20 +52,12 @@ watch(
   (id) => {
     if (id) {
       currentId.value = id
-      isTerminalAtBottom.value = true
+      isAtBottom.value = true
       terminalExpanded.value = true
     }
   },
   { immediate: true }
 )
-
-watch(terminalExpanded, async (expanded) => {
-  if (!expanded) return
-  await nextTick()
-  if (isTerminalAtBottom.value && terminalRef.value) {
-    terminalRef.value.scrollTop = terminalRef.value.scrollHeight
-  }
-})
 
 function showOperation(installationId: string): void {
   const op = progressStore.operations.get(installationId)
@@ -244,49 +225,13 @@ function getStepSummary(op: Operation, step: ProgressStep, stepIndex: number): s
   return null
 }
 
-function handleOverlayMouseDown(event: MouseEvent): void {
-  mouseDownOnOverlay.value = event.target === (event.currentTarget as HTMLElement)
-}
-
-const mouseDownOnOverlay = ref(false)
-
-function handleOverlayClick(event: MouseEvent): void {
-  if (mouseDownOnOverlay.value && event.target === (event.currentTarget as HTMLElement)) {
-    emit('close')
-  }
-  mouseDownOnOverlay.value = false
-}
-
-function handleEscapeKey(event: KeyboardEvent): void {
-  if (event.key !== 'Escape') return
-  if (props.installationId === null) return
-  const id = displayId.value
-  if (!id) return
-  const op = progressStore.operations.get(id)
-  if (!op || op.finished) {
-    emit('close')
-  }
-}
-
-onMounted(() => {
-  document.addEventListener('keydown', handleEscapeKey)
-})
-
-onUnmounted(() => {
-  document.removeEventListener('keydown', handleEscapeKey)
-})
+useControllerRegistration('progress', { startOperation, showOperation })
 
 defineExpose({ startOperation, showOperation })
 </script>
 
 <template>
-  <div
-    v-if="installationId && currentOp"
-    class="view-modal active"
-    @mousedown="handleOverlayMouseDown"
-    @click="handleOverlayClick"
-  >
-    <div class="view-modal-content">
+  <div v-if="installationId && currentOp" class="view-modal-content">
     <div class="view-modal-header">
       <div class="view-modal-title">{{ currentOp.title }}</div>
       <button class="view-modal-close" @click="emit('close')">{{ currentOp.finished ? '✕' : '−' }}</button>
@@ -457,6 +402,5 @@ defineExpose({ startOperation, showOperation })
           </button>
         </div>
       </div>
-    </div>
   </div>
 </template>

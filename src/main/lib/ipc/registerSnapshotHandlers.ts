@@ -9,7 +9,7 @@ import {
   getSnapshotDiffVsPrevious, diffAgainstCurrent, loadSnapshot, listSnapshots,
   buildExportEnvelope, validateExportEnvelope, importSnapshots,
   resolveSnapshotVersion, getVariantLabel,
-  findDuplicatePath, uniqueName, ensureDefaultPrimary,
+  findDuplicatePath, uniqueName, ensureDefaultPrimary, sanitizeDirName, allocateUniqueDir,
 } from './shared'
 import type {
   LatestTagOverride, SnapshotExportEnvelope, FieldOption, Snapshot,
@@ -367,14 +367,9 @@ export function registerSnapshotHandlers(): void {
     }
     const baseName = customName || envelope.installationName || 'ComfyUI'
     const name = await uniqueName(baseName)
-    const dirName = name.replace(/[<>:"/\\|?*]+/g, '_').trim() || 'ComfyUI'
+    const dirName = sanitizeDirName(name)
     const installDir = defaultInstallDir()
-    let installPath = path.join(installDir, dirName)
-    let suffix = 1
-    while (fs.existsSync(installPath)) {
-      installPath = path.join(installDir, `${dirName} (${suffix})`)
-      suffix++
-    }
+    const installPath = allocateUniqueDir(installDir, dirName)
 
     const duplicate = await findDuplicatePath(installPath)
     if (duplicate) return { ok: false, message: `Directory already used by "${duplicate.name}".` }

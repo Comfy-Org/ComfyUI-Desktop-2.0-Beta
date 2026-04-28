@@ -3,7 +3,7 @@ import {
   installations, settings,
   sourceMap,
   detectDesktopInstall,
-  isGitAvailable, tryConfigurePygit2Fallback,
+  isGitAvailable, tryConfigureBootstrapPygit2, tryConfigurePygit2Fallback,
   createCache, fetchJSON,
   setCallbacks, _broadcastToRenderer,
   migrateDefaults, checkInstallationUpdates,
@@ -98,16 +98,30 @@ export function register(callbacks: RegisterCallbacks = {}): void {
   })()
 
   // Configure pygit2 fallback if system git is unavailable
+  // Set COMFY_FORCE_BOOTSTRAP_GIT=1 to skip system git and standalone checks (for testing)
   void (async () => {
     try {
+      const forceBootstrap = process.env.COMFY_FORCE_BOOTSTRAP_GIT === '1'
+      if (forceBootstrap) {
+        if (tryConfigureBootstrapPygit2()) {
+          console.log('[ipc] COMFY_FORCE_BOOTSTRAP_GIT — using bootstrap python for git')
+          return
+        }
+        console.warn('[ipc] COMFY_FORCE_BOOTSTRAP_GIT set but bootstrap python not found')
+      }
       if (await isGitAvailable()) return
+      // Prefer standalone installation's pygit2 (co-located with ComfyUI env)
       const all = await installations.list()
       for (const inst of all) {
         if (inst.sourceId !== 'standalone' || !inst.installPath) continue
         if (tryConfigurePygit2Fallback(inst.installPath)) {
           console.log('[ipc] System git not found — configured pygit2 fallback via', inst.installPath)
-          break
+          return
         }
+      }
+      // Fall back to bootstrap python (bundled with the app, for pre-install use)
+      if (tryConfigureBootstrapPygit2()) {
+        console.log('[ipc] System git not found — configured pygit2 via bootstrap python')
       }
     } catch {}
   })()

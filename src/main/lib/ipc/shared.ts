@@ -9,16 +9,16 @@ import * as installations from '../../installations'
 import type { InstallationRecord } from '../../installations'
 import { formatComfyVersion } from '../version'
 import type { ComfyVersion } from '../version'
-import { resolveInstalledVersion, clearVersionCache } from '../version-resolve'
+import { resolveLocalVersion, clearVersionCache } from '../version-resolve'
 import type { LatestTagOverride } from '../version-resolve'
-import { readGitHead, readGitRemoteUrl, fetchTags, findLatestVersionTag, revParseRef, hasGitDir, isGitAvailable, tryConfigurePygit2Fallback } from '../git'
+import { readGitHead, readGitRemoteUrl, fetchTags, findLatestVersionTag, revParseRef, hasGitDir, isGitAvailable, tryConfigureBootstrapPygit2, tryConfigurePygit2Fallback } from '../git'
 import { ensureRemoteUrl } from '../github-mirror'
 import * as settings from '../../settings'
-import { defaultInstallDir } from '../paths'
+import { defaultInstallDir, sanitizeDirName, allocateUniqueDir } from '../paths'
 import { download } from '../download'
 import { createCache } from '../cache'
 import { extractNested as extract } from '../extract'
-import { deleteDir } from '../delete'
+import { deleteDir, formatDeleteStatus } from '../delete'
 import { deleteAction, untrackAction } from '../actions'
 import {
   spawnProcess, waitForPort, waitForUrl, killProcessTree, killByPort,
@@ -57,10 +57,10 @@ export {
   path, fs, os, app, ipcMain, dialog, shell, BrowserWindow, nativeTheme,
   execFile, spawn, execFileSync,
   sources, installations, settings, releaseCache, i18n,
-  formatComfyVersion, resolveInstalledVersion, clearVersionCache,
-  readGitRemoteUrl, fetchTags, findLatestVersionTag, revParseRef, hasGitDir, isGitAvailable, tryConfigurePygit2Fallback,
+  formatComfyVersion, resolveLocalVersion, clearVersionCache,
+  readGitRemoteUrl, fetchTags, findLatestVersionTag, revParseRef, hasGitDir, isGitAvailable, tryConfigureBootstrapPygit2, tryConfigurePygit2Fallback,
   ensureRemoteUrl,
-  defaultInstallDir, download, createCache, extract, deleteDir, deleteAction, untrackAction,
+  defaultInstallDir, sanitizeDirName, allocateUniqueDir, download, createCache, extract, deleteDir, formatDeleteStatus, deleteAction, untrackAction,
   spawnProcess, waitForPort, waitForUrl, killProcessTree, killByPort,
   findPidsByPort, getProcessInfo, looksLikeComfyUI, setPortArg,
   findAvailablePort, isPortListening, writePortLock, readPortLock, removePortLock,
@@ -280,13 +280,8 @@ export async function performCopy(
   copyReason: CopyReason = 'copy'
 ): Promise<{ entry: InstallationRecord; destPath: string }> {
   const parentDir = path.dirname(inst.installPath)
-  const dirName = name.replace(/[<>:"/\\|?*]+/g, '_').trim() || 'ComfyUI'
-  let destPath = path.join(parentDir, dirName)
-  let suffix = 1
-  while (fs.existsSync(destPath)) {
-    destPath = path.join(parentDir, `${dirName} (${suffix})`)
-    suffix++
-  }
+  const dirName = sanitizeDirName(name)
+  const destPath = allocateUniqueDir(parentDir, dirName)
 
   const duplicate = await findDuplicatePath(destPath)
   if (duplicate) {
@@ -473,7 +468,7 @@ export async function _resolveAndBroadcastVersions(list: InstallationRecord[]): 
       // made external changes (manual git pull, checkout, etc.).
       const actualHead = readGitHead(comfyuiDir) || cv.commit
 
-      const resolved = await resolveInstalledVersion(comfyuiDir, actualHead, cv, undefined, override)
+      const resolved = await resolveLocalVersion(comfyuiDir, actualHead, undefined, override)
       const resolvedStr = formatComfyVersion(resolved, 'short')
       const storedStr = formatComfyVersion(cv, 'short')
       const versionChanged = resolvedStr !== storedStr

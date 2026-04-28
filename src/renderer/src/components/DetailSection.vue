@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { ref, reactive, watch, nextTick } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { useModal } from '../composables/useModal'
 import type { DetailItem, DetailField, DetailFieldOption, ActionDef } from '../types/ipc'
 import InfoTooltip from './InfoTooltip.vue'
 import TooltipWrap from './TooltipWrap.vue'
@@ -30,6 +32,9 @@ const emit = defineEmits<{
   'refresh': [sectionTitle: string]
   'refresh-all': []
 }>()
+
+const { t } = useI18n()
+const modal = useModal()
 
 const isCollapsed = ref(props.collapsed === true)
 const sectionRef = ref<HTMLDivElement | null>(null)
@@ -79,9 +84,16 @@ async function handleFieldChange(field: DetailField, value: string | boolean | R
     emit('refresh', props.title)
   }
   if (field.onChangeAction) {
-    const result = await window.api.runAction(props.installationId, field.onChangeAction)
-    if (result.navigate === 'detail') {
-      emit('refresh-all')
+    try {
+      const result = await window.api.runAction(props.installationId, field.onChangeAction)
+      if (result.navigate === 'detail') {
+        emit('refresh-all')
+      }
+    } catch (err) {
+      await modal.alert({
+        title: t('common.error', 'Error'),
+        message: err instanceof Error ? err.message : String(err),
+      })
     }
   }
 }

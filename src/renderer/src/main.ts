@@ -3,7 +3,6 @@ import './assets/main.css'
 import { datadogRum, type RumBeforeSend } from '@datadog/browser-rum'
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
-import { createI18n } from 'vue-i18n'
 import App from './App.vue'
 import { normalizeRumErrorEvent } from './lib/datadogPathNormalization'
 import {
@@ -247,18 +246,26 @@ window.api.onInstanceStarted((data) => {
   }).catch(() => {})
 })
 
-const i18n = createI18n({
-  legacy: false,
-  locale: 'en',
-  fallbackLocale: 'en',
-  messages: { en: {} },
-  missingWarn: false,
-  fallbackWarn: false,
-})
+import { i18n } from './i18n'
+import { useNavigation } from './composables/useNavigation'
 
 const app = createApp(App)
 app.use(createPinia())
 app.use(i18n)
 app.mount('#app')
+
+// Expose navigation bridge for E2E tests.
+// These methods only mirror what UI buttons already do (present/dismiss overlays,
+// switch tabs) — no privilege escalation. The renderer's CSP and preload sandbox
+// already restrict what scripts can execute in this context.
+{
+  const nav = useNavigation()
+  ;(window as unknown as Record<string, unknown>).__E2E_NAV__ = {
+    present: nav.present,
+    dismiss: nav.dismiss,
+    dismissAll: nav.dismissAll,
+    switchTab: nav.switchTab,
+  }
+}
 
 export { i18n }

@@ -37,10 +37,11 @@ const MAX_BACKPORT_WALK = 10
  * whose content is fully represented in `commit` (cherry-pick–aware).
  *
  * Collects candidate tags by walking backward, then evaluates from lowest
- * to highest.  A tag at position N (1-based, counting from `stopTag`)
- * qualifies when `countUniqueCommits(tag, commit) ≤ N` — each tag in the
- * chain is expected to contribute one version-bump commit that has no
- * equivalent on the commit's branch.
+ * to highest.  A tag qualifies when its unique commits (those with no
+ * cherry-pick equivalent on the commit's branch) do not exceed the total
+ * number of commits between `stopTag` and the candidate on the release
+ * branch.  This accommodates release branches that carry version bumps
+ * plus additional cherry-picks with no master equivalent.
  *
  * @returns The qualifying tag name and cherry-pick–aware "+N" count, or
  *          undefined if no qualifying tag is found before reaching `stopTag`.
@@ -64,8 +65,11 @@ async function findBestBackportTag(
   if (candidates.length === 0) return undefined
 
   // Phase 2: evaluate from lowest (closest to stopTag) to highest.
-  // Each tag adds one version-bump commit, so the threshold grows with
-  // the tag's position in the chain.
+  // The threshold for each candidate is the total number of commits
+  // between stopTag and that candidate on the release branch — this
+  // accounts for version-bump commits plus any release-only cherry-picks
+  // (e.g. workflow template bumps) that have no patch-id equivalent on
+  // the commit's branch.
   //
   // Sanity check: in shallow clones, countUniqueCommits can return wildly
   // inflated values because the truncated graph prevents patch-id matching.
@@ -75,14 +79,15 @@ async function findBestBackportTag(
   let best: { tag: string; commitsAhead: number } | undefined
   for (let pos = candidates.length - 1; pos >= 0; pos--) {
     const tag = candidates[pos]!
-    const threshold = candidates.length - pos
+    const branchDist = await countCommitsAhead(repoPath, stopTag, tag)
+    if (branchDist === undefined) break
     const unique = await countUniqueCommits(repoPath, tag, commit)
     if (unique === undefined) break
     if (ancestorDist !== undefined && unique > ancestorDist) return undefined
     // This tag has too many unique commits — stop ascending the chain
     // (higher tags will have even more).  Any previously found `best` from
     // a lower tag is still valid and will be returned.
-    if (unique > threshold) break
+    if (unique > branchDist) break
     const ahead = await countUniqueCommits(repoPath, commit, tag)
     if (ahead === undefined) break
     best = { tag, commitsAhead: ahead }
@@ -91,9 +96,6 @@ async function findBestBackportTag(
 }
 
 /**
- * @internal Use {@link resolveInstalledVersion} instead — it guards against
- * re-resolving when stored metadata is already authoritative.
- *
  * Resolve a {@link ComfyVersion} from local git state.  Uses the nearest
  * ancestor tag as a base, upgrading to a newer version tag when possible.
  *
@@ -190,7 +192,9 @@ export async function resolveLocalVersion(
         // less precise (doesn't exclude cherry-picked commits from +N) but
         // still gives a reasonable display.
         const mergeBase = await findMergeBase(comfyuiDir, latestTagRef!, commit)
-        const dist = mergeBase ? await countCommitsAhead(comfyuiDir, mergeBase, commit) : undefined
+        const dist = mergeBase && mergeBase !== commit
+          ? await countCommitsAhead(comfyuiDir, mergeBase, commit)
+          : undefined
         if (dist !== undefined) {
           baseTag = latestTagName
           commitsAhead = dist
@@ -217,31 +221,6 @@ export async function resolveLocalVersion(
   return result
 }
 
-/**
- * Single write-gate for resolving the version to store on an installation.
- *
- * When the commit hasn't changed and the stored version already has a
- * baseTag, returns the stored version as-is — re-resolving against the
- * current git state can produce wrong results when newer tags exist
- * (e.g. a snapshot-restored v0.17.2+12 re-resolving to v0.18.3).
- *
- * Only re-resolves from git when:
- * - No stored version exists (fresh install)
- * - The commit has changed (update / restore that moved HEAD)
- * - The stored version lacks a baseTag (legacy migration)
- */
-export async function resolveInstalledVersion(
-  comfyuiDir: string,
-  commit: string,
-  storedVersion: ComfyVersion | undefined,
-  hint?: string,
-  latestTagOverride?: LatestTagOverride,
-): Promise<ComfyVersion> {
-  if (storedVersion?.baseTag && storedVersion.commit === commit) {
-    return storedVersion
-  }
-  return resolveLocalVersion(comfyuiDir, commit, hint, latestTagOverride)
-}
 
 /** Clear the version cache (e.g. after an update changes tags). */
 export function clearVersionCache(): void {
