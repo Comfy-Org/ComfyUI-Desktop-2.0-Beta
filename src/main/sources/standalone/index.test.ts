@@ -97,6 +97,15 @@ describe('standalone.buildInstallation', () => {
     })
     expect(result.releaseTag).toBe('v0.18.2-env1')
   })
+
+  it('freezes originalBuild and originalTorchVersion from r2Release on the installation', () => {
+    const result = standalone.buildInstallation({
+      release: makeRelease('v0.18.2-env1'),
+      variant: makeVariant(VENDOR_ID),
+    })
+    expect(result.originalBuild).toBe(1)
+    expect(result.originalTorchVersion).toBe('2.7.0')
+  })
 })
 
 // --- getFieldOptions('release') ---

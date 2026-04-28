@@ -100,6 +100,13 @@ export const standalone: SourcePlugin = {
       downloadUrl: vd?.downloadUrl || '',
       downloadFiles: vd?.downloadFiles || [],
       pythonVersion: manifest?.python_version || '',
+      // Frozen install-time fingerprint. Used to detect when a newer standalone
+      // ships an incompatible Python/torch and the user should be informed they
+      // can migrate to a fresh install. We store these explicitly rather than
+      // derive them from releases.json so the comparison stays correct even if
+      // history is pruned in the future.
+      ...(r2Release?.build !== undefined ? { originalBuild: r2Release.build } : {}),
+      ...(r2Release?.torch_version ? { originalTorchVersion: r2Release.torch_version } : {}),
       launchArgs: isCpu ? `${DEFAULT_LAUNCH_ARGS} --cpu` : DEFAULT_LAUNCH_ARGS,
       launchMode: 'window',
       browserPartition: 'unique',
