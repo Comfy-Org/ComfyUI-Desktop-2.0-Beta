@@ -223,7 +223,10 @@ export function getAppVersion(): string {
   let version = app.getVersion()
   if (!app.isPackaged) {
     try {
-      version = execFileSync('git', ['describe', '--tags', '--always'], { cwd: __dirname, encoding: 'utf8' }).trim() || version
+      // Restrict to release tags (`v0.5.0`, etc.) so unrelated tags like
+      // `bootstrap-v1` from the bootstrap-python build don't bleed into the
+      // launcher's displayed version.
+      version = execFileSync('git', ['describe', '--tags', '--always', '--match', 'v[0-9]*'], { cwd: __dirname, encoding: 'utf8' }).trim() || version
     } catch {}
   }
   return version.replace(/^v/, '')
