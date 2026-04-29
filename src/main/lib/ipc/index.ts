@@ -4,7 +4,7 @@ import {
   sourceMap,
   detectDesktopInstall,
   isGitAvailable, tryConfigureBootstrapPygit2, tryConfigurePygit2Fallback,
-  createCache, fetchJSON,
+  createCache, fetchJSON, getLatestStableTag,
   setCallbacks, _broadcastToRenderer,
   migrateDefaults, checkInstallationUpdates,
   isEffectivelyEmptyInstallDir,
@@ -106,51 +106,62 @@ export function register(callbacks: RegisterCallbacks = {}): void {
   // back to standalone-install pygit2, then system git.  Set
   // COMFY_FORCE_BOOTSTRAP_GIT=1 to disable the fallback entirely (for testing).
   void (async () => {
-    const forceBootstrap = process.env.COMFY_FORCE_BOOTSTRAP_GIT === '1'
+    const configureGitBackend = async (): Promise<void> => {
+      const forceBootstrap = process.env.COMFY_FORCE_BOOTSTRAP_GIT === '1'
 
-    if (tryConfigureBootstrapPygit2()) {
-      console.log('[ipc] Using bootstrap pygit2 for git operations (default)')
-      return
-    }
-
-    console.warn(
-      '[ipc] Bootstrap pygit2 not available — bootstrap-python/<platform>/ is missing. ' +
-      'Run "pnpm run bootstrap" (or "pnpm run bootstrap:fetch") to build it. ' +
-      'Falling back to standalone-install pygit2 / system git.'
-    )
-
-    if (forceBootstrap) {
-      console.warn('[ipc] COMFY_FORCE_BOOTSTRAP_GIT set but bootstrap python not found — no git backend will be configured')
-      return
-    }
-
-    // Prefer standalone installation's pygit2 (co-located with ComfyUI env).
-    // Failures listing installations must NOT short-circuit the system-git
-    // fallback below, so this lookup is isolated in its own try/catch.
-    try {
-      const all = await installations.list()
-      for (const inst of all) {
-        if (inst.sourceId !== 'standalone' || !inst.installPath) continue
-        if (tryConfigurePygit2Fallback(inst.installPath)) {
-          console.log('[ipc] Configured pygit2 fallback via standalone install at', inst.installPath)
-          return
-        }
-      }
-    } catch (err) {
-      console.warn('[ipc] Failed to enumerate standalone installations for pygit2 fallback:', err)
-    }
-
-    // Final fallback: system git, if installed.
-    try {
-      if (await isGitAvailable()) {
-        console.log('[ipc] Using system git (bootstrap pygit2 and standalone pygit2 both unavailable)')
+      if (tryConfigureBootstrapPygit2()) {
+        console.log('[ipc] Using bootstrap pygit2 for git operations (default)')
         return
       }
-    } catch (err) {
-      console.warn('[ipc] isGitAvailable() check failed:', err)
+
+      console.warn(
+        '[ipc] Bootstrap pygit2 not available — bootstrap-python/<platform>/ is missing. ' +
+        'Run "pnpm run bootstrap" (or "pnpm run bootstrap:fetch") to build it. ' +
+        'Falling back to standalone-install pygit2 / system git.'
+      )
+
+      if (forceBootstrap) {
+        console.warn('[ipc] COMFY_FORCE_BOOTSTRAP_GIT set but bootstrap python not found — no git backend will be configured')
+        return
+      }
+
+      // Prefer standalone installation's pygit2 (co-located with ComfyUI env).
+      // Failures listing installations must NOT short-circuit the system-git
+      // fallback below, so this lookup is isolated in its own try/catch.
+      try {
+        const all = await installations.list()
+        for (const inst of all) {
+          if (inst.sourceId !== 'standalone' || !inst.installPath) continue
+          if (tryConfigurePygit2Fallback(inst.installPath)) {
+            console.log('[ipc] Configured pygit2 fallback via standalone install at', inst.installPath)
+            return
+          }
+        }
+      } catch (err) {
+        console.warn('[ipc] Failed to enumerate standalone installations for pygit2 fallback:', err)
+      }
+
+      // Final fallback: system git, if installed.
+      try {
+        if (await isGitAvailable()) {
+          console.log('[ipc] Using system git (bootstrap pygit2 and standalone pygit2 both unavailable)')
+          return
+        }
+      } catch (err) {
+        console.warn('[ipc] isGitAvailable() check failed:', err)
+      }
+
+      console.warn('[ipc] No git backend available (bootstrap pygit2, standalone pygit2, and system git all missing)')
     }
 
-    console.warn('[ipc] No git backend available (bootstrap pygit2, standalone pygit2, and system git all missing)')
+    await configureGitBackend()
+
+    // Pre-warm the latest stable tag cache.  Once a git backend is configured
+    // (bootstrap pygit2 / standalone pygit2 / system git) we can resolve the
+    // upstream ComfyUI tag without any local clone — this makes the New
+    // Install wizard's "Latest Stable" entry display the concrete version
+    // (e.g. v1.19.5) on first open.
+    try { await getLatestStableTag() } catch {}
   })()
 
   // Clean up partial downloads
