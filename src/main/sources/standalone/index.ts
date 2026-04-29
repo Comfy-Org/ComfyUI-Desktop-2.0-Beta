@@ -4,6 +4,7 @@ import { fetchJSON } from '../../lib/fetch'
 import { parseArgs, extractPort } from '../../lib/util'
 import { t } from '../../lib/i18n'
 import { launchAction } from '../../lib/actions'
+import { getLatestStableTag } from '../../lib/comfyui-releases'
 import {
   PLATFORM_PREFIX, DEFAULT_LAUNCH_ARGS,
   getVariantLabel, stripPlatform, getActivePythonPath,
@@ -203,11 +204,16 @@ export const standalone: SourcePlugin = {
 
       const options: FieldOption[] = []
 
-      // Synthetic "Latest Stable" entry
+      // Synthetic "Latest Stable" entry.  Resolve the upstream ComfyUI tag
+      // (e.g. `v1.19.5`) via bootstrap pygit2 so users can see the concrete
+      // version they'll be installing.  Falls back to no description when
+      // the lookup fails (offline, pygit2 unavailable, etc.).
       if (tags.length > 0 && context?.includeLatestStable) {
+        const latestStableTag = await getLatestStableTag()
         options.push({
           value: 'latest',
           label: t('standalone.latestVersion'),
+          ...(latestStableTag ? { description: latestStableTag } : {}),
           recommended: true,
           data: { tag: tags[0]!.tag, vendorReleases } as unknown as Record<string, unknown>,
         })

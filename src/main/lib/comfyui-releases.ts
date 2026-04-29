@@ -5,16 +5,65 @@ import * as settings from '../settings'
 const REPO = 'Comfy-Org/ComfyUI'
 
 /**
- * Find the latest semver tag via `git ls-remote --tags` (Git protocol).
- * No GitHub REST API calls — works against both github.com and gitcode.com.
+ * Short-lived cache for the latest stable tag, keyed by remote URL.
+ * Avoids repeated `git ls-remote` calls when the renderer hits the
+ * release dropdown, update checks, etc. in close succession.
  */
-async function fetchLatestTag(): Promise<string | null> {
-  const url = getComfyUIRemoteUrl(settings.get('useChineseMirrors') === true)
-  try {
-    return (await lsRemoteLatestTag(url)) ?? null
-  } catch {
-    return null
+const LATEST_TAG_TTL_MS = 10 * 60 * 1000
+interface CacheEntry {
+  tag: string | null
+  fetchedAt: number
+}
+const _latestTagCache = new Map<string, CacheEntry>()
+let _inflight: Map<string, Promise<string | null>> = new Map()
+
+function _getRemoteUrl(): string {
+  return getComfyUIRemoteUrl(settings.get('useChineseMirrors') === true)
+}
+
+/**
+ * Resolve the latest stable ComfyUI tag (e.g. `v1.19.5`) via
+ * `git ls-remote --tags` (Git protocol) — no GitHub REST API calls,
+ * works against both github.com and gitcode.com.
+ *
+ * Result is cached in-memory for {@link LATEST_TAG_TTL_MS}.  Concurrent
+ * callers share a single in-flight request per remote URL.  Returns
+ * `null` (never throws) on failure so callers can degrade gracefully
+ * when offline or pygit2 is not configured.
+ *
+ * Set `refresh: true` to bypass the cache.
+ */
+export async function getLatestStableTag(opts?: { refresh?: boolean }): Promise<string | null> {
+  const url = _getRemoteUrl()
+  const now = Date.now()
+  if (!opts?.refresh) {
+    const hit = _latestTagCache.get(url)
+    if (hit && now - hit.fetchedAt < LATEST_TAG_TTL_MS) return hit.tag
   }
+  const existing = _inflight.get(url)
+  if (existing) return existing
+  const promise = (async () => {
+    try {
+      const tag = (await lsRemoteLatestTag(url)) ?? null
+      _latestTagCache.set(url, { tag, fetchedAt: Date.now() })
+      return tag
+    } catch {
+      // Cache the failure briefly so we don't hammer a flapping remote, but
+      // use a much shorter horizon than success.
+      _latestTagCache.set(url, { tag: null, fetchedAt: Date.now() - LATEST_TAG_TTL_MS + 30_000 })
+      return null
+    } finally {
+      _inflight.delete(url)
+    }
+  })()
+  _inflight.set(url, promise)
+  return promise
+}
+
+/** Test-only: clear the in-memory cache. */
+export function _clearLatestStableTagCache(): void {
+  _latestTagCache.clear()
+  _inflight = new Map()
 }
 
 export async function fetchLatestRelease(
@@ -26,7 +75,7 @@ export async function fetchLatestRelease(
   if (channel === 'latest') {
     const [headSha, latestTag] = await Promise.all([
       lsRemoteRef(remoteUrl, 'refs/heads/master'),
-      fetchLatestTag(),
+      getLatestStableTag(),
     ])
     if (!headSha) return null
     return {
@@ -41,7 +90,7 @@ export async function fetchLatestRelease(
   }
 
   // Stable channel: build synthetic release from latest tag
-  const latestTag = await fetchLatestTag()
+  const latestTag = await getLatestStableTag()
   if (!latestTag) return null
   return {
     tag_name: latestTag,

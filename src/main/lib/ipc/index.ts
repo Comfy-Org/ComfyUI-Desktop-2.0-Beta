@@ -4,7 +4,7 @@ import {
   sourceMap,
   detectDesktopInstall,
   isGitAvailable, tryConfigureBootstrapPygit2, tryConfigurePygit2Fallback,
-  createCache, fetchJSON,
+  createCache, fetchJSON, getLatestStableTag,
   setCallbacks, _broadcastToRenderer,
   migrateDefaults, checkInstallationUpdates,
   isEffectivelyEmptyInstallDir,
@@ -124,6 +124,12 @@ export function register(callbacks: RegisterCallbacks = {}): void {
         console.log('[ipc] System git not found — configured pygit2 via bootstrap python')
       }
     } catch {}
+
+    // Pre-warm the latest stable tag cache.  Once bootstrap pygit2 (or system
+    // git) is configured we can resolve the upstream ComfyUI tag without any
+    // local clone — this makes the New Install wizard's "Latest Stable" entry
+    // display the concrete version (e.g. v1.19.5) on first open.
+    try { await getLatestStableTag() } catch {}
   })()
 
   // Clean up partial downloads

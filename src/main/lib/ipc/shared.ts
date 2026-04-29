@@ -40,7 +40,7 @@ import * as i18n from '../i18n'
 import { syncCustomModelFolders, discoverExtraModelFolders } from '../models'
 import { copyDirWithProgress } from '../copy'
 import { fetchJSON } from '../fetch'
-import { fetchLatestRelease } from '../comfyui-releases'
+import { fetchLatestRelease, getLatestStableTag } from '../comfyui-releases'
 import { captureSnapshotIfChanged, getSnapshotCount, getSnapshotListData, getSnapshotDetailData, getSnapshotDiffVsPrevious, diffAgainstCurrent, loadSnapshot, listSnapshots, deleteSnapshot, diffSnapshots, buildExportEnvelope, validateExportEnvelope, importSnapshots, saveSnapshot, statesMatch, restoreCustomNodes, restorePipPackages, restoreComfyUIVersion, buildPostRestoreState, formatSnapshotVersion, resolveSnapshotVersion } from '../snapshots'
 import type { SnapshotExportEnvelope, Snapshot } from '../snapshots'
 import { getVariantLabel } from '../../sources/standalone'
@@ -71,7 +71,7 @@ export {
   getDiskSpace, getDirectorySize, validateInstallPath,
   syncOemSeed, formatTime, getActiveDownloads,
   syncCustomModelFolders, discoverExtraModelFolders,
-  copyDirWithProgress, fetchJSON, fetchLatestRelease,
+  copyDirWithProgress, fetchJSON, fetchLatestRelease, getLatestStableTag,
   captureSnapshotIfChanged, getSnapshotCount, getSnapshotListData, getSnapshotDetailData,
   getSnapshotDiffVsPrevious, diffAgainstCurrent, loadSnapshot, listSnapshots, diffSnapshots,
   buildExportEnvelope, validateExportEnvelope, importSnapshots, saveSnapshot, statesMatch, deleteSnapshot,
