@@ -229,6 +229,12 @@ function reportRendererError(payload: {
   message: string
   stack?: string
   context?: Record<string, unknown>
+  /**
+   * If true, the error has already been captured by main-process PostHog
+   * Node and is being forwarded only so Datadog (renderer-only) sees it.
+   * Suppresses the renderer-side PostHog mirror to avoid duplicates.
+   */
+  skipPostHog?: boolean
 }): void {
   const error = new Error(payload.message || 'Unknown error')
   if (payload.stack) {
@@ -246,7 +252,7 @@ function reportRendererError(payload: {
       })
     } catch {}
   }
-  if (isPostHogInitialized()) {
+  if (!payload.skipPostHog && isPostHogInitialized()) {
     captureExceptionPostHog(error, {
       origin: 'renderer',
       forwarded_source: payload.source,
@@ -288,6 +294,7 @@ window.api.onDatadogError((data) => {
       level: data.level,
       ...(data.context || {}),
     },
+    skipPostHog: data.skipPostHog === true,
   })
 })
 

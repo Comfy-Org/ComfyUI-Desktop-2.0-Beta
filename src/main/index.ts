@@ -30,7 +30,8 @@ import { COMFY_BG, SPLASH_DARK, TITLEBAR_BG, type SplashTheme } from './lib/them
 import { TITLEBAR_HEIGHT, TRAFFIC_LIGHT_POSITION, titleBarOverlayForTheme, comfyTitleBarOverlay, updateTitleBarOverlay, setMainWindowId } from './lib/titleBarOverlay'
 import { resolveTheme, sourceMap } from './lib/ipc/shared'
 import * as mainTelemetry from './lib/telemetry'
-import { randomUUID } from 'crypto'
+import { getDeviceId } from './lib/deviceId'
+import { scrubPII } from './lib/piiScrub'
 
 todesktop.init({ autoUpdater: false })
 
@@ -196,25 +197,15 @@ function serializeUnknownError(error: unknown): { message: string; stack?: strin
   }
 }
 
-const PII_PATH_PATTERNS = [
-  /([A-Za-z]:[\\/]Users[\\/])[^\\/]+?(?=[\\/]|$)/g,
-  /(\/Users\/)[^\\/]+?(?=\/|$)/g,
-  /(\/home\/)[^\\/]+?(?=\/|$)/g,
-]
-
-function scrubPII(value: string): string {
-  let scrubbed = value
-  for (const pattern of PII_PATH_PATTERNS) {
-    scrubbed = scrubbed.replace(pattern, (_match, prefix: string) => `${prefix}[REDACTED]`)
-  }
-  return scrubbed
-}
-
 function forwardDatadogError(payload: DatadogForwardedError): void {
   const scrubbed: DatadogForwardedError = {
     ...payload,
     message: scrubPII(payload.message),
     stack: payload.stack ? scrubPII(payload.stack) : undefined,
+    // Mark this error as already captured by main-process PostHog so the
+    // renderer's `onDatadogError` listener routes it to Datadog only and
+    // we don't double-count exceptions in PostHog.
+    skipPostHog: true,
   }
   if (mainWindow && !mainWindow.isDestroyed()) {
     try {
@@ -232,17 +223,6 @@ function forwardDatadogError(payload: DatadogForwardedError): void {
       level: scrubbed.level ?? null,
     })
   } catch {}
-}
-
-function readOrCreateDeviceId(): string {
-  const deviceIdPath = path.join(configDir(), 'device-id.txt')
-  try {
-    const existing = fs.readFileSync(deviceIdPath, 'utf-8').trim()
-    if (existing) return existing
-  } catch {}
-  const id = randomUUID()
-  try { fs.writeFileSync(deviceIdPath, id) } catch {}
-  return id
 }
 
 function registerProcessErrorHandlers(): void {
@@ -993,7 +973,7 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
       isPackaged: app.isPackaged,
     })
     mainTelemetry.installAppHooks()
-    void mainTelemetry.identify(readOrCreateDeviceId(), {
+    void mainTelemetry.identify(getDeviceId(), {
       app_version: APP_VERSION,
       platform: process.platform,
       arch: process.arch,

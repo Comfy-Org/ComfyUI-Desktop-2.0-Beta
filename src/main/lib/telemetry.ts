@@ -130,6 +130,12 @@ export interface InitOptions {
 /**
  * Initialize PostHog Node. Safe to call before consent decision is known —
  * events are queued by setConsent(false) and dropped at capture time.
+ *
+ * Note: the session-start event is intentionally NOT emitted here. The
+ * `distinctId` is unknown until `identify()` runs, and emitting before the
+ * first feature-flag refresh would ignore a remotely configured
+ * `launcher.disabled_events` allow/block list. `identify()` issues the
+ * session-start event after flags are bootstrapped.
  */
 export function initTelemetry(opts: InitOptions): void {
   if (initialized) return
@@ -148,24 +154,30 @@ export function initTelemetry(opts: InitOptions): void {
     })
   } catch {
     client = null
-    return
   }
 
-  // Best-effort: refresh feature flags in the background; cached values
-  // remain in use while the request is in flight.
-  if (distinctId) {
-    refreshFlags(opts).catch(() => {})
-  }
-
-  capture('launcher.session.started', {
+  // Stash session-start parameters until identify() can attribute them.
+  pendingSessionStart = {
     app_env: opts.appEnv,
     app_version: opts.appVersion,
     is_packaged: opts.isPackaged,
-  })
+  }
 }
+
+let pendingSessionStart: Record<string, TelemetryValue> | null = null
+
+/**
+ * Maximum time we'll wait for the first feature-flag fetch to complete
+ * before letting startup events through with cached/default flag values.
+ */
+const FLAG_BOOTSTRAP_TIMEOUT_MS = 1500
 
 /**
  * Bind the persistent device id once it is known and refresh feature flags.
+ *
+ * If `opts` is provided, we await the flag refresh (with a short timeout)
+ * before emitting the deferred session-start event so that remotely
+ * configured event suppressions take effect on the very first event.
  */
 export async function identify(
   id: string,
@@ -180,7 +192,13 @@ export async function identify(
     // ignore
   }
   if (opts) {
-    await refreshFlags(opts).catch(() => {})
+    const refresh = refreshFlags(opts).catch(() => {})
+    const timeout = new Promise<void>((resolve) => setTimeout(resolve, FLAG_BOOTSTRAP_TIMEOUT_MS))
+    await Promise.race([refresh, timeout])
+  }
+  if (pendingSessionStart) {
+    capture('launcher.session.started', pendingSessionStart)
+    pendingSessionStart = null
   }
 }
 
@@ -323,18 +341,38 @@ export async function shutdown(reason: string): Promise<void> {
 }
 
 let beforeQuitHooked = false
+let drainingForQuit = false
+
+/**
+ * Maximum time we'll block the quit on draining queued PostHog events.
+ * If the network is slow / down, we still want the app to exit promptly.
+ */
+const SHUTDOWN_DRAIN_TIMEOUT_MS = 1500
 
 /**
  * Wire `app.before-quit` so PostHog drains its queue before the process exits.
+ *
+ * Electron does NOT await async listeners on `before-quit`, so we use the
+ * standard pattern of calling `event.preventDefault()`, awaiting the
+ * shutdown, then re-issuing `app.exit()`. A one-shot guard prevents the
+ * subsequent quit from re-entering this branch.
+ *
  * Safe to call multiple times – the hook only attaches once.
  */
 export function installAppHooks(): void {
   if (beforeQuitHooked) return
   beforeQuitHooked = true
-  app.on('before-quit', () => {
-    // Detach: we'll let the queued shutdown event ship before exit. We
-    // intentionally don't await here; PostHog Node's shutdown flushes via
-    // the Node event loop and we cap waiting via internal timeouts.
-    void shutdown('quit')
+
+  app.on('before-quit', (event) => {
+    if (drainingForQuit || !client) return
+    drainingForQuit = true
+    event.preventDefault()
+    const drainPromise = shutdown('quit').catch(() => {})
+    const timeoutPromise = new Promise<void>((resolve) =>
+      setTimeout(resolve, SHUTDOWN_DRAIN_TIMEOUT_MS),
+    )
+    void Promise.race([drainPromise, timeoutPromise]).finally(() => {
+      app.exit(0)
+    })
   })
 }

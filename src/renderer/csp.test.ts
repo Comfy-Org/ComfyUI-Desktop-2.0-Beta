@@ -37,11 +37,18 @@ describe('Content-Security-Policy', () => {
     expect(csp['img-src']).toContain('https://*.posthog.com')
   })
 
-  it('restricts script-src to self only', () => {
-    expect(csp['script-src']).toBe("'self'")
+  it('restricts script-src to self plus PostHog session-recorder host', () => {
+    // PostHog's session recording lazy-loads recorder.js from posthog.com,
+    // so we allow that single origin. No other remote scripts are allowed.
+    expect(csp['script-src']).toBe("'self' https://*.posthog.com")
   })
 
   it('restricts default-src to self only', () => {
     expect(csp['default-src']).toBe("'self'")
+  })
+
+  it('allows blob and data URIs for PostHog session-recorder workers', () => {
+    expect(csp['worker-src']).toContain('blob:')
+    expect(csp['worker-src']).toContain('data:')
   })
 })

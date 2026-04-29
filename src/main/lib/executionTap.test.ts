@@ -62,6 +62,9 @@ describe('executionTap', () => {
 
   it('captures Python tracebacks from stderr and emits a single error', () => {
     const tap = createExecutionTap({ installationId: 'inst-1' })
+    // Trailing line after the blank-line boundary so the parser sees the
+    // boundary as a complete line (mirrors real ComfyUI output where logs
+    // continue after a failure).
     tap.ingest(
       [
         'Traceback (most recent call last):',
@@ -69,12 +72,89 @@ describe('executionTap', () => {
         '    raise RuntimeError("boom")',
         'RuntimeError: boom',
         '',
+        'next-line',
       ].join('\n'),
       'stderr',
     )
     const errs = captured.filter((c) => c.event === 'launcher.execution.error')
     expect(errs.length).toBe(1)
     expect(errs[0]!.ctx).toMatchObject({ error_class: 'RuntimeError' })
+  })
+
+  it('emits one error per traceback in chained Python tracebacks', () => {
+    // We deliberately do NOT collapse chained tracebacks; the inner and the
+    // outer are real distinct errors and analytics needs both visible.
+    const tap = createExecutionTap({ installationId: 'inst-1' })
+    tap.ingest(
+      [
+        'Traceback (most recent call last):',
+        '  File "a.py", line 1, in <module>',
+        '    raise ValueError("inner")',
+        'ValueError: inner',
+        '',
+        'During handling of the above exception, another exception occurred:',
+        '',
+        'Traceback (most recent call last):',
+        '  File "b.py", line 2, in <module>',
+        '    raise RuntimeError("outer")',
+        'RuntimeError: outer',
+        '',
+        'next-line',
+      ].join('\n'),
+      'stderr',
+    )
+    const errs = captured.filter((c) => c.event === 'launcher.execution.error')
+    const classes = errs.map((e) => e.ctx['error_class'])
+    expect(classes).toEqual(['ValueError', 'RuntimeError'])
+  })
+
+  it('scrubs PII (Windows user paths) from traceback error messages', () => {
+    const tap = createExecutionTap({ installationId: 'inst-1' })
+    tap.ingest(
+      [
+        'Traceback (most recent call last):',
+        '  File "C:\\Users\\alice\\stuff.py", line 10, in foo',
+        '    open("bad")',
+        'FileNotFoundError: [Errno 2] No such file: \'C:\\Users\\alice\\bad\'',
+        '',
+        'next-line',
+      ].join('\n'),
+      'stderr',
+    )
+    const errs = captured.filter((c) => c.event === 'launcher.execution.error')
+    expect(errs.length).toBe(1)
+    const message = String(errs[0]!.ctx.error_message)
+    expect(message).not.toContain('alice')
+    expect(message).toContain('[REDACTED]')
+  })
+
+  it('flushSummary drains a pending traceback so errors are not lost on exit', () => {
+    const tap = createExecutionTap({ installationId: 'inst-1' })
+    // No trailing blank line — process died before traceback ended.
+    tap.ingest(
+      [
+        'Traceback (most recent call last):',
+        '  File "x.py", line 9, in y',
+        'KeyError: missing',
+      ].join('\n') + '\n',
+      'stderr',
+    )
+    // Without flush, no error emitted yet (no blank-line boundary).
+    expect(captured.filter((c) => c.event === 'launcher.execution.error')).toHaveLength(0)
+    tap.flushSummary()
+    expect(captured.filter((c) => c.event === 'launcher.execution.error')).toHaveLength(1)
+    expect(captured.filter((c) => c.event === 'launcher.execution.session_summary')).toHaveLength(1)
+  })
+
+  it('caps promptStartTimes so unpaired starts cannot grow unbounded', () => {
+    const tap = createExecutionTap({ installationId: 'inst-1' })
+    // Far more than the cap (256).
+    for (let i = 0; i < 1000; i++) tap.ingest('got prompt\n', 'stdout')
+    // Then complete one — wall_clock_ms should still be a finite number.
+    tap.ingest('Prompt executed in 1 seconds\n', 'stdout')
+    const completed = captured.find((c) => c.event === 'launcher.execution.completed')
+    expect(completed).toBeDefined()
+    expect(typeof completed!.ctx.wall_clock_ms).toBe('number')
   })
 
   it('emits a session_summary on flush even when nothing was captured', () => {

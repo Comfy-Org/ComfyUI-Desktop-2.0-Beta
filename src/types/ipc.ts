@@ -486,6 +486,12 @@ export interface DatadogForwardedError {
   stack?: string
   level?: 'debug' | 'info' | 'warn' | 'error' | 'critical'
   context?: Record<string, unknown>
+  /**
+   * Set when the error has already been captured by main-process PostHog
+   * (via `mainTelemetry.captureException`). The renderer's listener forwards
+   * such errors to Datadog only, avoiding duplicate PostHog exceptions.
+   */
+  skipPostHog?: boolean
 }
 
 // --- Snapshot tab types ---
