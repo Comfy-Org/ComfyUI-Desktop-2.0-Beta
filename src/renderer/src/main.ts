@@ -3,6 +3,7 @@ import './assets/main.css'
 import { datadogRum, type RumBeforeSend } from '@datadog/browser-rum'
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
+import { createI18n } from 'vue-i18n'
 import App from './App.vue'
 import { normalizeRumErrorEvent } from './lib/datadogPathNormalization'
 import {
@@ -10,6 +11,16 @@ import {
   type TelemetryActionEventDetail,
   type TelemetryContext,
 } from './lib/telemetry'
+import {
+  capturePostHog,
+  captureExceptionPostHog,
+  identifyPostHog,
+  initPostHog,
+  isFeatureFlagEnabled,
+  isInitialized as isPostHogInitialized,
+  isPostHogConfigured,
+  setPostHogConsent,
+} from './lib/posthogProvider'
 
 function serializeUnknownError(error: unknown): { message: string; stack?: string } {
   if (error instanceof Error) {
@@ -94,10 +105,12 @@ function setDatadogTrackingConsent(consent: DatadogTrackingConsent): void {
 }
 
 function trackTelemetryAction(actionName: string, context: TelemetryContext): void {
-  if (!isDatadogInitialized) return
-  try {
-    datadogRum.addAction(actionName, context)
-  } catch {}
+  if (isDatadogInitialized) {
+    try { datadogRum.addAction(actionName, context) } catch {}
+  }
+  if (isPostHogInitialized()) {
+    capturePostHog(actionName, context)
+  }
 }
 
 function handleTelemetryActionBridgeEvent(event: Event): void {
@@ -109,49 +122,107 @@ function handleTelemetryActionBridgeEvent(event: Event): void {
 }
 
 
-async function initializeDatadog(): Promise<void> {
-  if (!isDatadogConfigured) return
+async function initializeProviders(): Promise<void> {
   const telemetryEnabled = await getTelemetryEnabledSetting()
-  try {
-    datadogRum.init({
-      applicationId: datadogApplicationId,
-      clientToken: datadogClientToken,
-      site: datadogSite,
-      service: datadogService,
-      env: datadogEnv,
-      version: datadogVersion || undefined,
-      trackingConsent: toDatadogTrackingConsent(telemetryEnabled),
-      beforeSend: datadogBeforeSend,
-      sessionSampleRate: parseSampleRate(import.meta.env.VITE_DATADOG_RUM_SESSION_SAMPLE_RATE, 100),
-      sessionReplaySampleRate: parseSampleRate(import.meta.env.VITE_DATADOG_RUM_SESSION_REPLAY_SAMPLE_RATE, 0),
-      trackResources: true,
-      trackLongTasks: true,
-      trackUserInteractions: true,
+  const consent = telemetryEnabled !== false
+  const appVersion = datadogVersion || 'unknown'
+
+  if (isDatadogConfigured) {
+    try {
+      datadogRum.init({
+        applicationId: datadogApplicationId,
+        clientToken: datadogClientToken,
+        site: datadogSite,
+        service: datadogService,
+        env: datadogEnv,
+        version: datadogVersion || undefined,
+        trackingConsent: toDatadogTrackingConsent(telemetryEnabled),
+        beforeSend: datadogBeforeSend,
+        sessionSampleRate: parseSampleRate(import.meta.env.VITE_DATADOG_RUM_SESSION_SAMPLE_RATE, 100),
+        sessionReplaySampleRate: parseSampleRate(import.meta.env.VITE_DATADOG_RUM_SESSION_REPLAY_SAMPLE_RATE, 0),
+        trackResources: true,
+        trackLongTasks: true,
+        trackUserInteractions: true,
+      })
+      isDatadogInitialized = true
+    } catch {}
+  }
+
+  if (isPostHogConfigured()) {
+    initPostHog({
+      appVersion,
+      appEnv: datadogEnv,
+      isPackaged: !import.meta.env.DEV,
+      consent,
+      // Default off – flip via remote feature flag at runtime.
+      enableSessionRecording: false,
     })
-    isDatadogInitialized = true
+  }
+
+  if (isDatadogInitialized || isPostHogInitialized()) {
     trackTelemetryAction('launcher.session.started', {
       app_env: datadogEnv,
-      app_version: datadogVersion || 'unknown',
+      app_version: appVersion,
       is_packaged: !import.meta.env.DEV,
-      telemetry_effective_enabled: telemetryEnabled !== false,
+      telemetry_effective_enabled: consent,
     })
     window.api.getDeviceId().then((id) => {
-      try { datadogRum.setUser({ id }) } catch {}
+      if (isDatadogInitialized) {
+        try { datadogRum.setUser({ id }) } catch {}
+      }
+      // For PostHog we'll merge in the system_info profile properties below.
+      identifyPostHog(id)
     }).catch(() => {})
-    window.api.getSystemInfo().then((info) => {
-      trackTelemetryAction('launcher.session.system_info', info as unknown as Record<string, string | number | boolean | null | undefined>)
+    window.api.getSystemInfo().then(async (info) => {
+      const ctx = info as unknown as Record<string, string | number | boolean | null | undefined>
+      trackTelemetryAction('launcher.session.system_info', ctx)
+      // Promote system info to PostHog profile properties so it's queryable
+      // across sessions without joining against a per-session event.
+      try {
+        const id = await window.api.getDeviceId()
+        identifyPostHog(id, {
+          platform: ctx['platform'],
+          arch: ctx['arch'],
+          os_distro: ctx['os_distro'],
+          os_release: ctx['os_release'],
+          gpu_vendor: ctx['gpu_vendor'],
+          gpu_model: ctx['gpu_model'],
+          total_memory_gb: ctx['total_memory_gb'],
+          cpu_cores: ctx['cpu_cores'],
+          electron_version: ctx['electron_version'],
+          app_version: appVersion,
+        })
+      } catch {}
     }).catch(() => {})
-  } catch {}
+  }
+
+  // Session-replay kill switch is feature-flagged. We rely on the SDK's
+  // built-in flag fetch on init — by the time the first event is sent the
+  // flag should be available. If the user later opts in we re-check.
+  if (isPostHogInitialized() && isFeatureFlagEnabled('launcher.session_replay.enabled')) {
+    // Lazy enable session recording. posthog-js exposes startSessionRecording.
+    try {
+      // @ts-expect-error startSessionRecording exists on PostHog runtime
+      window.posthog?.startSessionRecording?.()
+    } catch {}
+  }
 }
 
 window.api.onTelemetrySettingChanged((enabled) => {
-  if (!isDatadogConfigured) return
-  setDatadogTrackingConsent(toDatadogTrackingConsent(enabled))
+  if (isDatadogConfigured) setDatadogTrackingConsent(toDatadogTrackingConsent(enabled))
+  setPostHogConsent(enabled !== false)
 })
 
 window.addEventListener(TELEMETRY_ACTION_EVENT_NAME, handleTelemetryActionBridgeEvent)
 
-void initializeDatadog()
+// Events emitted from the main process land here and fan out to both providers.
+window.api.onTelemetryActionFromMain((data) => {
+  if (!data || typeof data.event !== 'string' || data.event.length === 0) return
+  const ctx = (data.context && typeof data.context === 'object' ? data.context : {}) as TelemetryContext
+  trackTelemetryAction(data.event, ctx)
+})
+
+void initializeProviders()
 
 function reportRendererError(payload: {
   source: string
@@ -159,21 +230,29 @@ function reportRendererError(payload: {
   stack?: string
   context?: Record<string, unknown>
 }): void {
-  if (!isDatadogInitialized) return
   const error = new Error(payload.message || 'Unknown error')
   if (payload.stack) {
     error.stack = payload.stack
   }
-  try {
-    datadogRum.addError(error, {
-      source: 'custom',
-      context: {
-        origin: 'renderer',
-        forwarded_source: payload.source,
-        ...(payload.context || {}),
-      },
+  if (isDatadogInitialized) {
+    try {
+      datadogRum.addError(error, {
+        source: 'custom',
+        context: {
+          origin: 'renderer',
+          forwarded_source: payload.source,
+          ...(payload.context || {}),
+        },
+      })
+    } catch {}
+  }
+  if (isPostHogInitialized()) {
+    captureExceptionPostHog(error, {
+      origin: 'renderer',
+      forwarded_source: payload.source,
+      ...(payload.context || {}),
     })
-  } catch {}
+  }
 }
 
 window.addEventListener('error', (event) => {
@@ -213,7 +292,6 @@ window.api.onDatadogError((data) => {
 })
 
 window.api.onComfyExited((data) => {
-  if (!isDatadogInitialized) return
   trackTelemetryAction('launcher.comfyui.exited', {
     installation_id: data.installationId,
     crashed: data.crashed ?? false,
@@ -223,7 +301,6 @@ window.api.onComfyExited((data) => {
 })
 
 window.api.onComfyBootLog((data) => {
-  if (!isDatadogInitialized) return
   trackTelemetryAction('launcher.comfyui.boot_log', {
     installation_id: data.installationId,
     boot_stderr: data.bootStderr,
@@ -231,7 +308,6 @@ window.api.onComfyBootLog((data) => {
 })
 
 window.api.onInstanceStarted((data) => {
-  if (!isDatadogInitialized) return
   const bootTimeMs = (data as unknown as Record<string, unknown>).bootTimeMs as number | undefined
   window.api.getInstallationDdContext(data.installationId).then((ctx) => {
     if (!ctx) return
@@ -241,31 +317,30 @@ window.api.onInstanceStarted((data) => {
       boot_time_ms: bootTimeMs ?? null,
     })
     if (snapshot_diffs.length > 0) {
-      try { datadogRum.addAction('launcher.session.snapshot_history', { installation_id: ctx.installation_id, snapshot_diffs }) } catch {}
+      // snapshot_diffs is an array of objects, which Datadog/PostHog handle
+      // natively; bypass the typed bridge via a fresh call.
+      if (isDatadogInitialized) {
+        try { datadogRum.addAction('launcher.session.snapshot_history', { installation_id: ctx.installation_id, snapshot_diffs }) } catch {}
+      }
+      if (isPostHogInitialized()) {
+        capturePostHog('launcher.session.snapshot_history', { installation_id: ctx.installation_id, snapshot_diffs } as unknown as TelemetryContext)
+      }
     }
   }).catch(() => {})
 })
 
-import { i18n } from './i18n'
-import { useNavigation } from './composables/useNavigation'
+const i18n = createI18n({
+  legacy: false,
+  locale: 'en',
+  fallbackLocale: 'en',
+  messages: { en: {} },
+  missingWarn: false,
+  fallbackWarn: false,
+})
 
 const app = createApp(App)
 app.use(createPinia())
 app.use(i18n)
 app.mount('#app')
-
-// Expose navigation bridge for E2E tests.
-// These methods only mirror what UI buttons already do (present/dismiss overlays,
-// switch tabs) — no privilege escalation. The renderer's CSP and preload sandbox
-// already restrict what scripts can execute in this context.
-{
-  const nav = useNavigation()
-  ;(window as unknown as Record<string, unknown>).__E2E_NAV__ = {
-    present: nav.present,
-    dismiss: nav.dismiss,
-    dismissAll: nav.dismissAll,
-    switchTab: nav.switchTab,
-  }
-}
 
 export { i18n }

@@ -29,6 +29,14 @@ describe('Content-Security-Policy', () => {
     expect(csp['connect-src']).toContain('https://browser-intake-us5-datadoghq.com')
   })
 
+  it('allows PostHog telemetry endpoints in connect-src', () => {
+    expect(csp['connect-src']).toContain('https://*.posthog.com')
+  })
+
+  it('allows PostHog avatar/feature-flag images', () => {
+    expect(csp['img-src']).toContain('https://*.posthog.com')
+  })
+
   it('restricts script-src to self only', () => {
     expect(csp['script-src']).toBe("'self'")
   })

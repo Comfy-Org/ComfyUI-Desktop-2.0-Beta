@@ -12,6 +12,7 @@ import si from 'systeminformation'
 import { configDir } from '../paths'
 import type { FieldOption } from './shared'
 import { getGpuPromise, setGpuPromise } from './shared'
+import * as mainTelemetry from '../telemetry'
 
 export function registerAppHandlers(): void {
   // App version
@@ -52,7 +53,18 @@ export function registerAppHandlers(): void {
     return gpuPromise
   })
 
-  ipcMain.handle('validate-hardware', () => validateHardware())
+  ipcMain.handle('validate-hardware', async () => {
+    const result = await validateHardware()
+    // Emit a single event whether hardware passes or fails so we can build
+    // funnels like "% of users who hit hardware-not-supported during install".
+    mainTelemetry.emit('launcher.install.validation', {
+      passed: result.supported,
+      platform: process.platform,
+      arch: process.arch,
+      reason: result.supported ? null : (result.error ?? 'unsupported'),
+    })
+    return result
+  })
   ipcMain.handle('check-nvidia-driver', () => checkNvidiaDriver())
 
   ipcMain.handle('build-installation', (_event, sourceId: string, selections: Record<string, unknown>) => {
