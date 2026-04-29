@@ -5,6 +5,7 @@ import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import { createI18n } from 'vue-i18n'
 import App from './App.vue'
+import { useNavigation } from './composables/useNavigation'
 import { normalizeRumErrorEvent } from './lib/datadogPathNormalization'
 import {
   TELEMETRY_ACTION_EVENT_NAME,
@@ -349,5 +350,19 @@ const app = createApp(App)
 app.use(createPinia())
 app.use(i18n)
 app.mount('#app')
+
+// Expose navigation bridge for E2E tests.
+// These methods only mirror what UI buttons already do (present/dismiss overlays,
+// switch tabs) — no privilege escalation. The renderer's CSP and preload sandbox
+// already restrict what scripts can execute in this context.
+{
+  const nav = useNavigation()
+  ;(window as unknown as Record<string, unknown>).__E2E_NAV__ = {
+    present: nav.present,
+    dismiss: nav.dismiss,
+    dismissAll: nav.dismissAll,
+    switchTab: nav.switchTab,
+  }
+}
 
 export { i18n }
