@@ -9,10 +9,11 @@ const REPO = 'Comfy-Org/ComfyUI'
  * Avoids repeated `git ls-remote` calls when the renderer hits the
  * release dropdown, update checks, etc. in close succession.
  */
-const LATEST_TAG_TTL_MS = 10 * 60 * 1000
+const SUCCESS_TTL_MS = 10 * 60 * 1000
+const FAILURE_TTL_MS = 30_000
 interface CacheEntry {
   tag: string | null
-  fetchedAt: number
+  expiresAt: number
 }
 const _latestTagCache = new Map<string, CacheEntry>()
 let _inflight: Map<string, Promise<string | null>> = new Map()
@@ -26,10 +27,12 @@ function _getRemoteUrl(): string {
  * `git ls-remote --tags` (Git protocol) — no GitHub REST API calls,
  * works against both github.com and gitcode.com.
  *
- * Result is cached in-memory for {@link LATEST_TAG_TTL_MS}.  Concurrent
- * callers share a single in-flight request per remote URL.  Returns
- * `null` (never throws) on failure so callers can degrade gracefully
- * when offline or pygit2 is not configured.
+ * Successful results are cached in-memory for {@link SUCCESS_TTL_MS};
+ * failures use the much shorter {@link FAILURE_TTL_MS} so a flapping
+ * remote isn't pounded on but recovers quickly.  Concurrent callers
+ * share a single in-flight request per remote URL.  Returns `null`
+ * (never throws) on failure so callers can degrade gracefully when
+ * offline or pygit2 is not configured.
  *
  * Set `refresh: true` to bypass the cache.
  */
@@ -38,19 +41,17 @@ export async function getLatestStableTag(opts?: { refresh?: boolean }): Promise<
   const now = Date.now()
   if (!opts?.refresh) {
     const hit = _latestTagCache.get(url)
-    if (hit && now - hit.fetchedAt < LATEST_TAG_TTL_MS) return hit.tag
+    if (hit && now < hit.expiresAt) return hit.tag
   }
   const existing = _inflight.get(url)
   if (existing) return existing
   const promise = (async () => {
     try {
       const tag = (await lsRemoteLatestTag(url)) ?? null
-      _latestTagCache.set(url, { tag, fetchedAt: Date.now() })
+      _latestTagCache.set(url, { tag, expiresAt: Date.now() + SUCCESS_TTL_MS })
       return tag
     } catch {
-      // Cache the failure briefly so we don't hammer a flapping remote, but
-      // use a much shorter horizon than success.
-      _latestTagCache.set(url, { tag: null, fetchedAt: Date.now() - LATEST_TAG_TTL_MS + 30_000 })
+      _latestTagCache.set(url, { tag: null, expiresAt: Date.now() + FAILURE_TTL_MS })
       return null
     } finally {
       _inflight.delete(url)
