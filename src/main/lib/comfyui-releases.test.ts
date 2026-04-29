@@ -18,14 +18,17 @@ vi.mock('../settings', () => ({
 }))
 
 import { lsRemoteLatestTag, lsRemoteRef } from './git'
-import { fetchLatestRelease } from './comfyui-releases'
+import { fetchLatestRelease, getLatestStableTag, _clearLatestStableTagCache } from './comfyui-releases'
 import * as settings from '../settings'
 
 const mockedLsRemoteLatestTag = vi.mocked(lsRemoteLatestTag)
 const mockedLsRemoteRef = vi.mocked(lsRemoteRef)
 const mockedSettingsGet = vi.mocked(settings.get)
 
-beforeEach(() => { vi.resetAllMocks() })
+beforeEach(() => {
+  vi.resetAllMocks()
+  _clearLatestStableTagCache()
+})
 
 describe('fetchLatestRelease', () => {
   describe('latest channel', () => {
@@ -100,6 +103,67 @@ describe('fetchLatestRelease', () => {
       mockedLsRemoteLatestTag.mockResolvedValue('v0.18.3')
       const result = await fetchLatestRelease('stable')
       expect(result!.published_at).toBeUndefined()
+    })
+  })
+
+  describe('getLatestStableTag cache', () => {
+    it('caches successful lookups within the TTL', async () => {
+      mockedLsRemoteLatestTag.mockResolvedValue('v1.19.5')
+      const a = await getLatestStableTag()
+      const b = await getLatestStableTag()
+      expect(a).toBe('v1.19.5')
+      expect(b).toBe('v1.19.5')
+      expect(mockedLsRemoteLatestTag).toHaveBeenCalledTimes(1)
+    })
+
+    it('refresh: true bypasses the cache', async () => {
+      mockedLsRemoteLatestTag.mockResolvedValueOnce('v1.19.5').mockResolvedValueOnce('v1.19.6')
+      const a = await getLatestStableTag()
+      const b = await getLatestStableTag({ refresh: true })
+      expect(a).toBe('v1.19.5')
+      expect(b).toBe('v1.19.6')
+      expect(mockedLsRemoteLatestTag).toHaveBeenCalledTimes(2)
+    })
+
+    it('returns null when the lookup fails and never throws', async () => {
+      mockedLsRemoteLatestTag.mockRejectedValue(new Error('boom'))
+      await expect(getLatestStableTag()).resolves.toBeNull()
+    })
+
+    it('returns null when no tags found', async () => {
+      mockedLsRemoteLatestTag.mockResolvedValue(undefined)
+      await expect(getLatestStableTag()).resolves.toBeNull()
+    })
+
+    it('keys cache by remote URL — flipping the mirror setting refetches', async () => {
+      mockedLsRemoteLatestTag.mockResolvedValueOnce('v1.19.5').mockResolvedValueOnce('v1.19.5-mirror')
+      mockedSettingsGet.mockReturnValue(undefined as never)
+      const a = await getLatestStableTag()
+      mockedSettingsGet.mockReturnValue(true as never)
+      const b = await getLatestStableTag()
+      expect(a).toBe('v1.19.5')
+      expect(b).toBe('v1.19.5-mirror')
+      expect(mockedLsRemoteLatestTag).toHaveBeenCalledTimes(2)
+    })
+
+    it('coalesces concurrent in-flight requests', async () => {
+      let resolve: (v: string) => void = () => {}
+      mockedLsRemoteLatestTag.mockReturnValue(new Promise((r) => { resolve = r as (v: string) => void }))
+      const p1 = getLatestStableTag()
+      const p2 = getLatestStableTag()
+      resolve('v1.19.5')
+      const [a, b] = await Promise.all([p1, p2])
+      expect(a).toBe('v1.19.5')
+      expect(b).toBe('v1.19.5')
+      expect(mockedLsRemoteLatestTag).toHaveBeenCalledTimes(1)
+    })
+
+    it('fetchLatestRelease("stable") shares the cache', async () => {
+      mockedLsRemoteLatestTag.mockResolvedValue('v1.19.5')
+      await getLatestStableTag()
+      const result = await fetchLatestRelease('stable')
+      expect(result!.tag_name).toBe('v1.19.5')
+      expect(mockedLsRemoteLatestTag).toHaveBeenCalledTimes(1)
     })
   })
 
