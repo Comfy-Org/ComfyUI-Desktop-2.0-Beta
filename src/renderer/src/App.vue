@@ -103,15 +103,6 @@ async function openNewInstall(): Promise<void> {
   await nav.invokeWhenReady('new-install', (c) => c.open())
 }
 
-async function openQuickInstall(): Promise<void> {
-  emitTelemetryAction('launcher.install.flow.opened', {
-    flow: 'quick_install',
-    entrypoint: activeView.value,
-  })
-  nav.present('quick-install', {})
-  await nav.invokeWhenReady('quick-install', (c) => c.open())
-}
-
 async function openTrack(): Promise<void> {
   emitTelemetryAction('launcher.install.flow.opened', {
     flow: 'track_existing',
@@ -241,6 +232,12 @@ function setupChineseMirrorsSuggestion(): void {
 // onboarding finished and persisted state, the v-if would re-evaluate to
 // `false` and tear down the screen — the user saw the done-state vanish.
 const onboardingActive = ref(false)
+// Gate the entire app render on both `onboardingPrefs.loadPrefs()` AND
+// `installationStore.fetchInstallations()` having resolved. Otherwise a
+// returning local-last user would briefly see onboarding flash for one frame
+// because `installations === []` while fetch is in flight, and
+// `decideShowOnboarding()` would treat that as "no installed local present".
+const bootRoutingReady = ref(false)
 
 const hasInstalledLocal = computed(() =>
   installationStore.installations.some(
@@ -300,12 +297,18 @@ onMounted(async () => {
   await sessionStore.init()
   downloadStore.init()
   launcherPrefs.loadPrefs()
-  await onboardingPrefs.loadPrefs()
-  // Need installations loaded before the boot-time routing decision.
-  await installationStore.fetchInstallations()
+  // Run prefs + installations fetch in parallel — both must resolve before we
+  // can make the onboarding routing decision. Sequential awaits caused a
+  // single-frame onboarding flash for returning local-last users (prefs
+  // `completed=true` was visible while installations was still empty).
+  await Promise.all([
+    onboardingPrefs.loadPrefs(),
+    installationStore.fetchInstallations(),
+  ])
   // Latch the onboarding render decision now — once we decide to show it, we
   // keep showing it until OnboardingView emits `complete`.
   onboardingActive.value = decideShowOnboarding()
+  bootRoutingReady.value = true
   setupQuitConfirmation()
   setupLocaleListener()
   setupChineseMirrorsSuggestion()
@@ -318,12 +321,11 @@ onMounted(async () => {
 <template>
   <TitleBar />
   <OnboardingView
-    v-if="onboardingPrefs.loaded.value && onboardingActive"
+    v-if="bootRoutingReady && onboardingActive"
     @complete="onboardingActive = false"
-    @show-quick-install="openQuickInstall"
     @show-progress="showProgress"
   />
-  <div v-else-if="onboardingPrefs.loaded.value" class="app-layout">
+  <div v-else-if="bootRoutingReady" class="app-layout">
     <!-- Sidebar -->
     <nav class="sidebar">
       <div class="sidebar-brand">Desktop 2.0</div>

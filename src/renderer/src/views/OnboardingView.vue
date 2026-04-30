@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, onMounted, toRaw, watch } from 'vue'
+import { computed, ref, onMounted, onUnmounted, toRaw, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ArrowRightLeft, Check, Cloud, Download, ExternalLink, FolderSearch, HardDrive } from 'lucide-vue-next'
 import { useInstallationStore } from '../stores/installationStore'
@@ -8,7 +8,7 @@ import { useOnboardingPrefs } from '../composables/useOnboardingPrefs'
 import { useMigrateAction } from '../composables/useMigrateAction'
 import { useModal } from '../composables/useModal'
 import { emitTelemetryAction } from '../lib/telemetry'
-import type { ActionResult, FieldOption } from '../types/ipc'
+import type { FieldOption } from '../types/ipc'
 
 // TODO: replace with the final EULA URL once Legal signs off.
 const EULA_URL = 'https://www.comfy.org/legal/desktop-eula'
@@ -44,6 +44,9 @@ const selectedRelease = ref<FieldOption | null>(null)
 const detectedGpuLabel = ref('')
 const formLoading = ref(false)
 const formError = ref('')
+// Surfaced in the mode picker after a failed cloud connect attempt so the
+// user understands why they bounced back instead of seeing a silent revert.
+const cloudError = ref('')
 
 // --- Install progress state ---
 const installingId = ref<string | null>(null)
@@ -112,18 +115,39 @@ const activeStepLabel = computed(() => {
   return active?.label ?? displaySteps.value[displaySteps.value.length - 1]?.label ?? ''
 })
 
+// Latched so the watch only finalizes once. Vue's `watch` can fire multiple
+// times for the same `finished=true` value if upstream reactivity nudges
+// `installOp` (e.g. a late progress event clearing flatStatus). Without this,
+// we'd run the launch + complete sequence twice.
+const hasFinalized = ref(false)
+
 watch(
   () => installOp.value?.finished,
   (finished) => {
     if (!finished || stage.value !== 'installing') return
+    if (hasFinalized.value) return
     const op = installOp.value
     if (!op) return
+    hasFinalized.value = true
     stopElapsedTimer()
+
+    // Cancellation path — user clicked cancel mid-install. progressStore
+    // surfaces this as `op.result.cancelled === true` (no error). Return
+    // them to the form so they can retry without seeing a generic failure.
+    if (op.result?.cancelled) {
+      stage.value = 'install-form'
+      installingId.value = null
+      // Allow re-entry on a future install attempt.
+      hasFinalized.value = false
+      return
+    }
+
     if (op.error) {
       // Install failed — surface the error, return to form so user can retry.
       formError.value = op.error
       stage.value = 'install-form'
       installingId.value = null
+      hasFinalized.value = false
       return
     }
     // Show the success ack, then launch ComfyUI in the same window so the
@@ -132,10 +156,14 @@ watch(
     // fire-and-forget — it returns before the launch completes. runAction
     // awaits until launch.ts's inline `_onLaunch` callback creates the new
     // ComfyUI window. Only then do we hide the launcher.
+    //
+    // Note: `onboardingPrefs.complete('manual')` is intentionally NOT called
+    // here — it's already been persisted at install kickoff in `startInstall`,
+    // so a renderer death between install-completion and launch can't strand
+    // the user back at onboarding next boot.
     stage.value = 'done'
     const id = installingId.value
     void (async () => {
-      await onboardingPrefs.complete('manual')
       await onboardingPrefs.setLastUsedMode('local')
       if (id) {
         try {
@@ -155,6 +183,13 @@ watch(
 
 onMounted(async () => {
   await installationStore.fetchInstallations()
+})
+
+// Cleanup on unmount — if the user closes the launcher mid-install or
+// mid-cloud-connect, neither timer should keep firing in the detached state.
+onUnmounted(() => {
+  stopElapsedTimer()
+  clearCloudTimeout()
 })
 
 const desktopOnlyInstall = computed(() => {
@@ -202,6 +237,33 @@ function onContinue(): void {
 // We bypass `useListAction.executeAction` so the ProgressModal popup never
 // shows — onboarding owns the screen during the 1-15s `waitForUrl` poll, then
 // the Electron window renders cloud.comfy.org and onboarding closes.
+//
+// `connecting-cloud` previously had no timeout and no Back affordance — if
+// the launch hung the user was stuck. We now show a "Still connecting…" hint
+// + Back button after CLOUD_TIMEOUT_MS so they can retry from the picker.
+const CLOUD_TIMEOUT_MS = 30_000
+const cloudTimeoutFired = ref(false)
+let cloudTimeoutHandle: ReturnType<typeof setTimeout> | null = null
+
+function clearCloudTimeout(): void {
+  if (cloudTimeoutHandle) {
+    clearTimeout(cloudTimeoutHandle)
+    cloudTimeoutHandle = null
+  }
+}
+
+function backFromCloudConnect(): void {
+  // Best-effort: abort any in-flight cloud launch operation. cancelLaunch
+  // aborts ALL active operations, which is broader than we want, but it's
+  // the closest IPC available — and during onboarding nothing else should
+  // be running anyway.
+  try { void window.api.cancelLaunch() } catch {}
+  clearCloudTimeout()
+  cloudTimeoutFired.value = false
+  busy.value = false
+  stage.value = 'mode'
+}
+
 async function pickCloud(): Promise<void> {
   if (busy.value) return
   const inst = cloudInstall.value
@@ -212,32 +274,58 @@ async function pickCloud(): Promise<void> {
     return
   }
   busy.value = true
+  // Clear any prior failure message — user is retrying.
+  cloudError.value = ''
+  cloudTimeoutFired.value = false
   stage.value = 'connecting-cloud'
+  clearCloudTimeout()
+  cloudTimeoutHandle = setTimeout(() => {
+    cloudTimeoutFired.value = true
+  }, CLOUD_TIMEOUT_MS)
+
+  let launched: boolean
   try {
     await window.api.setSetting('primaryInstallId', inst.id)
-    await onboardingPrefs.setLastUsedMode('cloud')
     emitTelemetryAction('onboarding.cloud.connecting')
     try {
-      await window.api.runAction(inst.id, 'launch')
+      const result = await window.api.runAction(inst.id, 'launch')
+      // runAction normally returns `{ ok: true }`; treat anything else as a failure.
+      launched = !!result?.ok
     } catch {
-      // The launch action handles its own errors; if it threw we still close
-      // onboarding so the user can retry from app boot.
+      launched = false
     }
+
+    if (!launched) {
+      // Surface a recoverable error: route back to the picker with an inline
+      // message. We do NOT mark onboarding completed or persist
+      // `lastUsedMode='cloud'` — the user hasn't successfully picked anything.
+      cloudError.value = t('onboarding.cloudConnectError')
+      emitTelemetryAction('onboarding.cloud.failed')
+      stage.value = 'mode'
+      return
+    }
+
+    // Cloud launch succeeded — clear any prior error banner.
+    cloudError.value = ''
     // Show the success ack briefly so the user sees a clear handoff, then
     // focus the cloud window and hide the launcher chrome.
     stage.value = 'done'
+    await onboardingPrefs.setLastUsedMode('cloud')
     await onboardingPrefs.complete('manual')
     await new Promise((r) => setTimeout(r, 1200))
     try { window.api.focusComfyWindow(inst.id) } catch {}
     try { await window.api.hideLauncherWindow() } catch {}
     emit('complete')
   } finally {
+    clearCloudTimeout()
+    cloudTimeoutFired.value = false
     busy.value = false
   }
 }
 
 async function pickLocal(): Promise<void> {
   if (busy.value) return
+  cloudError.value = ''
   // Returning users with an installed local instance should land in it
   // directly — no install form, no extra screen.
   const installed = installationStore.installations.find(
@@ -375,6 +463,22 @@ async function startInstall(): Promise<void> {
       variant: variant.value,
     })
 
+    // Persist `onboardingCompleted=true` BEFORE kicking off the install.
+    // If the renderer dies mid-install (cmd+Q, crash) the install still
+    // completes at the backend, but if we waited until post-launch to flip
+    // the flag, the user would land back at onboarding next boot. The
+    // onboarding-completed flag is independent of "did we successfully
+    // launch" — once the user has picked Local + named an install, the
+    // onboarding decision has been made.
+    if (!onboardingPrefs.completed.value) {
+      await onboardingPrefs.complete('manual')
+    }
+
+    // Reset the watch latch so the install-completion handler runs for this
+    // new operation. (`hasFinalized` may have been left at `false` after a
+    // prior cancel/error retry, but make it explicit.)
+    hasFinalized.value = false
+
     // Switch to the inline progress view and start the operation directly via
     // the progress store — no ProgressModal popup, the onboarding owns the screen.
     installingId.value = result.entry.id
@@ -387,9 +491,7 @@ async function startInstall(): Promise<void> {
     progressStore.startOperation({
       installationId: result.entry.id,
       title: `${t('newInstall.installing')} — ${name}`,
-      // installInstance resolves with `void` but progressStore expects ActionResult;
-      // App.vue's showProgress applies the same cast.
-      apiCall: ((() => window.api.installInstance(result.entry!.id)) as unknown) as () => Promise<ActionResult>,
+      apiCall: () => window.api.installInstance(result.entry!.id),
     })
   } catch (err) {
     formError.value = (err as Error)?.message || String(err)
@@ -511,6 +613,9 @@ function goBack(): void {
           </header>
 
           <div class="onboarding-screen-body">
+            <div v-if="cloudError" class="onboarding-form-error" role="alert">
+              {{ cloudError }}
+            </div>
             <div class="onboarding-card-row">
               <button
                 class="onboarding-card"
@@ -687,7 +792,9 @@ function goBack(): void {
           <header class="onboarding-screen-header">
             <div class="installing-meta">{{ t('onboarding.cloudConnectingMeta') }}</div>
             <h2 class="installing-title">{{ t('onboarding.cloudConnectingTitle') }}</h2>
-            <p class="installing-flavor">{{ t('onboarding.cloudConnectingFlavor') }}</p>
+            <p class="installing-flavor">
+              {{ cloudTimeoutFired ? t('onboarding.cloudConnectingTimeout') : t('onboarding.cloudConnectingFlavor') }}
+            </p>
           </header>
 
           <div class="onboarding-screen-body">
@@ -701,6 +808,20 @@ function goBack(): void {
               </span>
             </div>
           </div>
+
+          <!-- After CLOUD_TIMEOUT_MS the launch is probably stuck — give the
+               user an escape hatch. The footer is hidden until then so the
+               normal happy-path stays uncluttered. -->
+          <footer v-if="cloudTimeoutFired" class="onboarding-screen-footer">
+            <button
+              type="button"
+              class="onboarding-back-btn"
+              @click="backFromCloudConnect"
+            >
+              ← {{ t('onboarding.back') }}
+            </button>
+            <span />
+          </footer>
         </section>
 
         <!-- =====================================================

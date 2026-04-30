@@ -642,7 +642,7 @@ export interface ElectronApi {
   reorderInstallations(orderedIds: string[]): Promise<void>
   probeInstallation(dirPath: string): Promise<ProbeResult[]>
   trackInstallation(data: Record<string, unknown>): Promise<TrackResult>
-  installInstance(installationId: string): Promise<void>
+  installInstance(installationId: string): Promise<ActionResult>
   updateInstallation(
     installationId: string,
     data: Record<string, unknown>

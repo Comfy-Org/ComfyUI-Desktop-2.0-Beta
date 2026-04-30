@@ -48,9 +48,13 @@ export function useOnboardingPrefs() {
       ])
     } else {
       eulaAcceptedAt.value = null
+      // `eulaAcceptedAt` is declared non-nullable in the settings schema, so
+      // pass `undefined` to delete the key rather than writing `null`. The
+      // settings layer already treats `undefined` as "unset" and removes the
+      // entry on disk.
       await Promise.all([
         window.api.setSetting('eulaAccepted', false),
-        window.api.setSetting('eulaAcceptedAt', null),
+        window.api.setSetting('eulaAcceptedAt', undefined),
       ])
     }
   }

@@ -50,6 +50,8 @@
     "cloudConnectingTitle": "Opening Comfy Cloud",
     "cloudConnectingFlavor": "Connecting to managed GPUs in the cloud.",
     "cloudConnectingStatus": "Reaching cloud.comfy.org…",
+    "cloudConnectingTimeout": "Still connecting… this is taking longer than expected.",
+    "cloudConnectError": "Couldn't reach Comfy Cloud. Check your connection and try again.",
     "doneTitle": "Your studio is ready",
     "doneSubtitle": "Opening ComfyUI…"
   },
@@ -88,9 +90,6 @@
 
   "running": {
     "empty": "没有正在运行或进行中的任务。",
-    "notRunning": "ComfyUI isn't running.",
-    "launch": "Launch ComfyUI",
-    "launching": "Launching…",
     "instances": "运行中的实例",
     "errors": "错误",
     "crashed": "崩溃",
