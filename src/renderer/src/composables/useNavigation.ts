@@ -109,7 +109,7 @@ function nextId(): string {
   return `nav-${++_idCounter}`
 }
 
-const activeTab = ref<TabKey>('dashboard')
+const activeTab = ref<TabKey>('running')
 const overlays = ref<OverlayEntry[]>([])
 const controllers = new Map<string, unknown>()
 

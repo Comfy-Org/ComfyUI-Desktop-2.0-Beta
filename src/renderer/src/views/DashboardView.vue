@@ -25,7 +25,6 @@ const prefs = useLauncherPrefs()
 
 const emit = defineEmits<{
   'show-quick-install': []
-  'show-settings': []
   'show-detail': [inst: Installation, tab?: string, autoAction?: string]
   'show-console': [installationId: string]
   'show-progress': [opts: {
@@ -258,21 +257,13 @@ async function changePrimary(): Promise<void> {
           <Download :size="18" />
           {{ $t('dashboard.installComfyUI') }}
         </button>
-        <p class="dashboard-telemetry-notice">
-          {{ $t('dashboard.telemetryNotice') }}
-          <button class="dashboard-telemetry-link" @click="emit('show-settings')">
-            {{ $t('dashboard.telemetrySettings') }}
-          </button>
-        </p>
       </div>
 
-      <!-- Desktop-only migration banner -->
+      <!-- Desktop-only migration banner — only renders during an active migration -->
       <MigrationBanner
         v-if="desktopOnlyInstall"
         :installation="desktopOnlyInstall"
         @show-progress="(opts) => emit('show-progress', opts)"
-        @show-settings="emit('show-settings')"
-        @show-quick-install="emit('show-quick-install')"
       />
 
       <!-- Quick Launch section -->

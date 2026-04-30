@@ -696,6 +696,7 @@ export interface ElectronApi {
   // App
   getAppVersion(): Promise<string>
   quitApp(): Promise<void>
+  hideLauncherWindow(): Promise<void>
   resetZoom(): Promise<void>
   getSystemInfo(): Promise<SystemInfo>
   getInstallationDdContext(installationId: string): Promise<InstallationDdContext | null>

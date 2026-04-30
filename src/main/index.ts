@@ -885,6 +885,15 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
 
 ipcMain.handle('quit-app', () => quitApp())
 
+// Hide the launcher window without quitting the app or its child Comfy
+// windows. Used by the renderer when a session takes the foreground (e.g.
+// cloud Connect) so the user lives in ComfyUI, not in a launcher chrome.
+ipcMain.handle('hide-launcher-window', () => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.hide()
+  }
+})
+
 ipcMain.handle('reset-zoom', () => {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.setZoomLevel(0)

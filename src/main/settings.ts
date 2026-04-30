@@ -22,6 +22,10 @@ export interface KnownSettings {
   pinnedInstallIds?: string[]
   oemManagedModelDirs?: string[]
   oemWorkflowImportVersion?: number
+  onboardingCompleted?: boolean
+  eulaAccepted?: boolean
+  eulaAcceptedAt?: number
+  lastUsedMode?: 'cloud' | 'local'
 }
 
 export type Settings = KnownSettings & Record<string, unknown>
@@ -57,6 +61,10 @@ const SETTINGS_SCHEMA = {
   pinnedInstallIds: { nullable: false },
   oemManagedModelDirs: { nullable: false },
   oemWorkflowImportVersion: { nullable: false },
+  onboardingCompleted: { nullable: false },
+  eulaAccepted: { nullable: false },
+  eulaAcceptedAt: { nullable: false },
+  lastUsedMode: { nullable: false },
 } as const satisfies Record<keyof KnownSettings, { nullable: boolean }>
 
 export type KnownSettingKey = keyof typeof SETTINGS_SCHEMA

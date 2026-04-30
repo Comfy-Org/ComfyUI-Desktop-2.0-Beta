@@ -140,7 +140,8 @@ const emit = defineEmits<{
     </div>
 
     <div class="view-list-scroll">
-      <!-- Empty state -->
+      <!-- Empty state — quiet, no launch CTA. The app boot auto-launches; if
+           the user explicitly stopped ComfyUI we just say so. -->
       <div v-if="isEmpty" class="empty-state">{{ $t('running.empty') }}</div>
 
       <template v-else>
@@ -306,3 +307,4 @@ const emit = defineEmits<{
     </div>
   </div>
 </template>
+

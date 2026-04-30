@@ -8,6 +8,8 @@ import { useDownloadStore } from './stores/downloadStore'
 import { useModal } from './composables/useModal'
 import { useTheme } from './composables/useTheme'
 import { useLauncherPrefs } from './composables/useLauncherPrefs'
+import { useOnboardingPrefs } from './composables/useOnboardingPrefs'
+import { useListAction } from './composables/useListAction'
 import { useNavigation } from './composables/useNavigation'
 import type { Installation, ActionResult, QuitActiveItem } from './types/ipc'
 import type { ModalDetailGroup } from './composables/useModal'
@@ -17,7 +19,7 @@ import ModalDialog from './components/ModalDialog.vue'
 import UpdateBanner from './components/UpdateBanner.vue'
 import ZoomBanner from './components/ZoomBanner.vue'
 import ViewShell from './components/ViewShell.vue'
-import DashboardView from './views/DashboardView.vue'
+import OnboardingView from './views/OnboardingView.vue'
 import InstallationList from './views/InstallationList.vue'
 import RunningView from './views/RunningView.vue'
 import SettingsView from './views/SettingsView.vue'
@@ -26,7 +28,7 @@ import MediaView from './views/MediaView.vue'
 import TitleBar from './components/TitleBar.vue'
 
 // Lucide icons
-import { LayoutDashboard, Box, Play, FolderOpen, Image, Settings, MessageSquarePlus } from 'lucide-vue-next'
+import { Play, Settings, MessageSquarePlus } from 'lucide-vue-next'
 import { buildSupportUrl } from './lib/supportUrl'
 
 const { t, setLocaleMessage, locale } = useI18n()
@@ -36,6 +38,7 @@ const progressStore = useProgressStore()
 const downloadStore = useDownloadStore()
 const modal = useModal()
 const launcherPrefs = useLauncherPrefs()
+const onboardingPrefs = useOnboardingPrefs()
 const nav = useNavigation()
 useTheme()
 
@@ -51,12 +54,11 @@ const modelsRef = ref<InstanceType<typeof ModelsView> | null>(null)
 const mediaRef = ref<InstanceType<typeof MediaView> | null>(null)
 
 // --- Sidebar ---
+// Reduced from the launcher-era list (dashboard / installs / models / media)
+// down to the two surfaces that matter for "open ComfyUI / change settings".
+// The other views still exist as components but are no longer entry points.
 const sidebarItems = computed(() => [
-  { key: 'dashboard' as const, icon: LayoutDashboard, labelKey: 'dashboard.title' },
-  { key: 'list' as const, icon: Box, labelKey: 'sidebar.installations' },
   { key: 'running' as const, icon: Play, labelKey: 'sidebar.running' },
-  { key: 'models' as const, icon: FolderOpen, labelKey: 'models.title' },
-  { key: 'media' as const, icon: Image, labelKey: 'media.title' },
   { key: 'settings' as const, icon: Settings, labelKey: 'settings.title' },
 ])
 
@@ -221,23 +223,105 @@ function setupChineseMirrorsSuggestion(): void {
   })
 }
 
+// --- Boot-time routing ---
+// Desktop 2.0 is a thin shell around ComfyUI — opening the app should mean
+// opening ComfyUI, not landing on a launcher dashboard.
+//
+// Rules:
+//   • First-time user (no EULA / no completed) → run the full onboarding flow.
+//   • Returning user, last used Local + an installed local exists → silently
+//     auto-launch that install. No screen.
+//   • Returning user, last used Cloud (or no installed local) → show the
+//     Cloud / Local picker (onboarding without the consent step). After they
+//     pick, the picker dismisses for this session only — they'll see it
+//     again on the next boot if cloud was the last choice.
+const { executeAction: launchInstall } = useListAction('app-boot', {
+  showProgress: showProgress,
+})
+
+const onboardingDismissedThisSession = ref(false)
+
+const hasInstalledLocal = computed(() =>
+  installationStore.installations.some(
+    (i) => i.sourceCategory === 'local' && i.status === 'installed' && i.sourceId !== 'desktop',
+  ),
+)
+
+const shouldShowOnboarding = computed(() => {
+  if (!onboardingPrefs.loaded.value) return false
+  if (!onboardingPrefs.completed.value) return true
+  if (onboardingPrefs.lastUsedMode.value === 'cloud') return true
+  // Local-last but the install no longer exists → fall back to picker.
+  if (!hasInstalledLocal.value) return true
+  return false
+})
+
+async function autoLaunchOnBoot(): Promise<void> {
+  // Only the local-last + installed-local case auto-launches. Cloud-last users
+  // see the picker (handled by shouldShowOnboarding); first-timers go through
+  // onboarding.
+  if (shouldShowOnboarding.value) return
+  if (sessionStore.runningInstances.size > 0) return
+  if (sessionStore.activeSessions.size > 0) return
+
+  const installs = installationStore.installations
+  // Resolve a launchable local install: pinned primary first, then any
+  // installed local (excluding the legacy 'desktop' source).
+  const primaryId = launcherPrefs.primaryInstallId.value
+  let inst: Installation | null = null
+  if (primaryId) {
+    const found = installs.find((i) => i.id === primaryId)
+    if (found && found.sourceCategory === 'local' && found.status === 'installed') {
+      inst = found
+    }
+  }
+  if (!inst) {
+    inst = installs.find(
+      (i) => i.sourceCategory === 'local' && i.status === 'installed' && i.sourceId !== 'desktop',
+    ) ?? null
+  }
+  if (!inst) return
+
+  try {
+    const actions = await window.api.getListActions(inst.id)
+    const primary = actions.find((a) => a.style === 'primary') ?? actions[0]
+    if (!primary) return
+    await launchInstall(inst, primary)
+    // Boot auto-launch is the silent path — hide the launcher chrome so the
+    // user lives in their ComfyUI window. The launcher process stays alive.
+    try { await window.api.hideLauncherWindow() } catch {}
+  } catch {
+    // Auto-launch is best-effort — RunningView's empty state is the fallback.
+  }
+}
+
 // --- Init ---
 onMounted(async () => {
   await loadLocale()
   await sessionStore.init()
   downloadStore.init()
   launcherPrefs.loadPrefs()
+  await onboardingPrefs.loadPrefs()
+  // Need installations loaded before the boot-time routing decision.
+  await installationStore.fetchInstallations()
   setupQuitConfirmation()
   setupLocaleListener()
   setupChineseMirrorsSuggestion()
   listRef.value?.refresh()
   appVersion.value = await window.api.getAppVersion()
+  void autoLaunchOnBoot()
 })
 </script>
 
 <template>
   <TitleBar />
-  <div class="app-layout">
+  <OnboardingView
+    v-if="onboardingPrefs.loaded.value && shouldShowOnboarding && !onboardingDismissedThisSession"
+    @complete="onboardingDismissedThisSession = true"
+    @show-quick-install="openQuickInstall"
+    @show-progress="showProgress"
+  />
+  <div v-else-if="onboardingPrefs.loaded.value" class="app-layout">
     <!-- Sidebar -->
     <nav class="sidebar">
       <div class="sidebar-brand">Desktop 2.0</div>
@@ -261,12 +345,6 @@ onMounted(async () => {
               class="sidebar-count"
             >{{ sessionStore.runningTabCount }}</span>
           </template>
-          <template v-if="item.key === 'models'">
-            <span
-              v-if="downloadStore.activeDownloads.length > 0"
-              class="sidebar-count"
-            >{{ downloadStore.activeDownloads.length }}</span>
-          </template>
         </button>
       </div>
       <button class="sidebar-item sidebar-feedback" @click="openFeedback">
@@ -280,16 +358,6 @@ onMounted(async () => {
     <main class="content">
       <UpdateBanner />
       <ZoomBanner />
-      <DashboardView
-        v-show="activeView === 'dashboard'"
-        :visible="activeView === 'dashboard'"
-        @show-quick-install="openQuickInstall"
-        @show-settings="switchView('settings')"
-        @show-detail="(inst, tab, autoAction) => openDetail(inst, tab, autoAction)"
-        @show-console="openConsole"
-        @show-progress="showProgress"
-      />
-
       <InstallationList
         v-show="activeView === 'list'"
         ref="listRef"

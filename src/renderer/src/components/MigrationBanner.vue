@@ -1,9 +1,7 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
-import { useI18n } from 'vue-i18n'
-import { useMigrateAction } from '../composables/useMigrateAction'
+import { computed } from 'vue'
 import { useProgressStore } from '../stores/progressStore'
-import { ArrowRightLeft, Download } from 'lucide-vue-next'
+import { ArrowRightLeft } from 'lucide-vue-next'
 import type { Installation } from '../types/ipc'
 
 const props = defineProps<{
@@ -17,14 +15,9 @@ const emit = defineEmits<{
     apiCall: () => Promise<unknown>
     cancellable?: boolean
   }]
-  'show-settings': []
-  'show-quick-install': []
 }>()
 
-const { t } = useI18n()
-const { confirmMigration } = useMigrateAction()
 const progressStore = useProgressStore()
-const migrating = ref(false)
 
 const activeOp = computed(() => {
   const op = progressStore.operations.get(props.installation.id)
@@ -34,28 +27,6 @@ const activeOp = computed(() => {
 const progressInfo = computed(() =>
   progressStore.getProgressInfo(props.installation.id)
 )
-
-async function startMigration(): Promise<void> {
-  if (migrating.value) return
-  migrating.value = true
-  try {
-    const result = await confirmMigration(props.installation)
-    if (!result) return
-
-    emit('show-progress', {
-      installationId: props.installation.id,
-      title: `${t('desktop.migrating')} — ${props.installation.name}`,
-      apiCall: () => window.api.runAction(
-        props.installation.id,
-        'migrate-to-standalone',
-        result,
-      ),
-      cancellable: true,
-    })
-  } finally {
-    migrating.value = false
-  }
-}
 
 function viewProgress(): void {
   // Emit with a dummy apiCall — App.vue's showProgress detects the existing
@@ -69,56 +40,77 @@ function viewProgress(): void {
 </script>
 
 <template>
-  <div class="dashboard-welcome">
-    <div class="dashboard-welcome-icon">
-      <ArrowRightLeft :size="48" />
-    </div>
-
-    <!-- In-progress state -->
-    <template v-if="activeOp">
-      <h1 class="dashboard-welcome-title">{{ $t('desktop.migrating') }}</h1>
-      <p class="dashboard-welcome-desc">{{ progressInfo?.status || $t('progress.starting') }}</p>
-      <div
-        class="progress-bar-track migration-banner-progress"
-        :class="{ indeterminate: !progressInfo || progressInfo.percent < 0 }"
-      >
-        <div
-          class="progress-bar-fill"
-          :style="{ width: progressInfo && progressInfo.percent >= 0 ? `${progressInfo.percent}%` : '0%' }"
-        ></div>
+  <!-- Only renders when a migration is currently in progress for this install.
+       The default "Migrate to Standalone" choice now lives in OnboardingView. -->
+  <div v-if="activeOp" class="migration-banner-progress-wrap">
+    <div class="migration-banner-progress-content">
+      <div class="migration-banner-progress-icon">
+        <ArrowRightLeft :size="20" />
       </div>
-      <button class="primary dashboard-cta-btn" @click="viewProgress">
+      <div class="migration-banner-progress-text">
+        <div class="migration-banner-progress-title">{{ $t('desktop.migrating') }}</div>
+        <div class="migration-banner-progress-status">
+          {{ progressInfo?.status || $t('progress.starting') }}
+        </div>
+      </div>
+      <button class="primary" @click="viewProgress">
         {{ $t('list.viewProgress') }}
       </button>
-    </template>
-
-    <!-- Default state -->
-    <template v-else>
-      <h1 class="dashboard-welcome-title">{{ $t('dashboard.migrateBannerTitle') }}</h1>
-      <p class="dashboard-welcome-desc">{{ $t('dashboard.migrateBannerDesc') }}</p>
-      <button
-        class="primary dashboard-cta-btn"
-        :disabled="migrating"
-        @click="startMigration"
-      >
-        <ArrowRightLeft :size="18" />
-        {{ $t('dashboard.migrateBannerAction') }}
-      </button>
-      <button
-        class="dashboard-cta-btn"
-        style="margin-top: 10px"
-        @click="emit('show-quick-install')"
-      >
-        <Download :size="18" />
-        {{ $t('dashboard.migrateBannerSkip') }}
-      </button>
-    </template>
-
-    <p class="dashboard-telemetry-notice">
-      {{ $t('dashboard.telemetryNotice') }}
-      <button class="dashboard-telemetry-link" @click="emit('show-settings')">
-        {{ $t('dashboard.telemetrySettings') }}
-      </button>
-    </p>
+    </div>
+    <div
+      class="progress-bar-track"
+      :class="{ indeterminate: !progressInfo || progressInfo.percent < 0 }"
+    >
+      <div
+        class="progress-bar-fill"
+        :style="{ width: progressInfo && progressInfo.percent >= 0 ? `${progressInfo.percent}%` : '0%' }"
+      ></div>
+    </div>
   </div>
 </template>
+
+<style scoped>
+.migration-banner-progress-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  margin-bottom: 16px;
+}
+
+.migration-banner-progress-content {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.migration-banner-progress-icon {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.migration-banner-progress-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex-grow: 1;
+  min-width: 0;
+}
+
+.migration-banner-progress-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.migration-banner-progress-status {
+  font-size: 12px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+</style>
