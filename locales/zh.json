@@ -53,7 +53,24 @@
     "cloudConnectingTimeout": "Still connecting… this is taking longer than expected.",
     "cloudConnectError": "Couldn't reach Comfy Cloud. Check your connection and try again.",
     "doneTitle": "Your studio is ready",
-    "doneSubtitle": "Opening ComfyUI…"
+    "doneSubtitle": "Opening ComfyUI…",
+    "localForkSubtitle": "We found a previous install. Bring it forward, or start clean.",
+    "migrateCardSubdesc": "Keeps your models, custom nodes, and workflows.",
+    "startFreshSubdesc": "New, empty install. Old install stays untouched.",
+    "recommendedBadge": "RECOMMENDED",
+    "installingTimeHint": "This usually takes 2–4 minutes.",
+    "doneStuckSubtitle": "Almost there — ComfyUI is taking a moment to start.",
+    "doneVeryStuckSubtitle": "ComfyUI is taking longer than expected to open.",
+    "openComfyUiCta": "Open ComfyUI",
+    "showDetailsCta": "Show details",
+    "closeLauncherCta": "Close launcher",
+    "doneDetailsLine": "If ComfyUI doesn't open, you can find it at:",
+    "doneStuckExplanation": "This is taking longer than usual. The install completed; we're waiting on ComfyUI to launch.",
+    "installPathReset": "Reset to default",
+    "cloudCheckAuth": "Authenticating session",
+    "cloudCheckCompute": "Reserving compute",
+    "cloudCheckWorkspace": "Opening workspace",
+    "continueDisabledHint": "Accept the EULA to continue"
   },
 
   "dashboard": {

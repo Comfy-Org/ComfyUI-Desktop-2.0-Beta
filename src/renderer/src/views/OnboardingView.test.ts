@@ -252,10 +252,11 @@ describe('OnboardingView', () => {
       const wrapper = await mountView()
       await nextTick()
 
-      // Find the EULA checkbox (second consent row) and check it
+      // EULA is the FIRST consent row (consent gating belongs at the top of
+      // the visual hierarchy per the polish spec). Telemetry is the second.
       const checkboxes = wrapper.findAll('input[type="checkbox"]')
       expect(checkboxes).toHaveLength(2)
-      const eulaCheckbox = checkboxes[1]!
+      const eulaCheckbox = checkboxes[0]!
       await eulaCheckbox.setValue(true)
       await nextTick()
 
