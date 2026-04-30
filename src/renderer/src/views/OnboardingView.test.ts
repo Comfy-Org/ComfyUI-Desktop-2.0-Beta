@@ -1,5 +1,5 @@
 import { createTestingPinia } from '@pinia/testing'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createI18n } from 'vue-i18n'
 import { nextTick, ref } from 'vue'
@@ -94,22 +94,26 @@ function setupApi(): void {
 
   // Don't replace `window` wholesale — vi.stubGlobal('window', {...window, ...})
   // breaks happy-dom's event constructors (MouseEvent etc.) which @vue/test-utils
-  // needs for trigger(). Just install `window.api` directly.
-  ;(window as unknown as { api: unknown }).api = {
-    runAction: vi.fn(async (id: string, action: string) => {
-      apiCalls.runAction.push({ id, action })
-      return await runActionImpl()
-    }),
-    hideLauncherWindow: vi.fn(async () => { apiCalls.hideLauncherWindow++ }),
-    focusComfyWindow: vi.fn((id: string) => { apiCalls.focusComfyWindow.push(id) }),
-    setSetting: vi.fn(async (key: string, value: unknown) => {
-      apiCalls.setSetting.push({ key, value })
-    }),
-    getSetting: vi.fn(async () => undefined),
-    openExternal: vi.fn(),
-    cancelLaunch: vi.fn().mockResolvedValue(undefined),
-    onErrorDetail: vi.fn(() => vi.fn()),
-  }
+  // needs for trigger(). Just install `window.api` directly via Object.assign,
+  // which avoids a double-cast through `unknown` (project rule: no `as unknown
+  // as` chains, even in tests).
+  Object.assign(window, {
+    api: {
+      runAction: vi.fn(async (id: string, action: string) => {
+        apiCalls.runAction.push({ id, action })
+        return await runActionImpl()
+      }),
+      hideLauncherWindow: vi.fn(async () => { apiCalls.hideLauncherWindow++ }),
+      focusComfyWindow: vi.fn((id: string) => { apiCalls.focusComfyWindow.push(id) }),
+      setSetting: vi.fn(async (key: string, value: unknown) => {
+        apiCalls.setSetting.push({ key, value })
+      }),
+      getSetting: vi.fn(async () => undefined),
+      openExternal: vi.fn(),
+      cancelLaunch: vi.fn().mockResolvedValue(undefined),
+      onErrorDetail: vi.fn(() => vi.fn()),
+    },
+  })
 }
 
 beforeEach(() => {
@@ -297,8 +301,10 @@ describe('OnboardingView', () => {
 
       const cloudCard = wrapper.findAll('button').find((b) => b.text().includes('Comfy Cloud'))!
       await cloudCard.trigger('click')
-      // Allow microtasks (the connecting-cloud → mode-on-failure transition)
-      await new Promise((r) => setTimeout(r, 50))
+      // Drain pending microtasks so the cloud-connect failure path runs
+      // (connecting-cloud → mode-on-failure with cloudError set). Avoids
+      // brittle wall-clock waits like setTimeout(50).
+      await flushPromises()
       await nextTick()
 
       // Should NOT have completed, NOT have set lastUsedMode, NOT have hidden launcher
