@@ -1,5 +1,5 @@
 import { createTestingPinia } from '@pinia/testing'
-import { flushPromises, mount } from '@vue/test-utils'
+import { mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createI18n } from 'vue-i18n'
 import { nextTick, ref } from 'vue'
@@ -302,19 +302,26 @@ describe('OnboardingView', () => {
 
       const cloudCard = wrapper.findAll('button').find((b) => b.text().includes('Comfy Cloud'))!
       await cloudCard.trigger('click')
-      // Drain pending microtasks so the cloud-connect failure path runs
-      // (connecting-cloud → mode-on-failure with cloudError set). Avoids
-      // brittle wall-clock waits like setTimeout(50).
-      await flushPromises()
-      await nextTick()
+      // pickCloud has a 400ms paint-delay setTimeout before the actual IPC
+      // (so the loading state visibly registers). flushPromises only drains
+      // microtasks; we need to actually wait for the timer + microtasks.
+      // vi.waitFor retries the assertion every poll until it passes, so we
+      // don't have to guess at the timer duration.
+      await vi.waitFor(() => {
+        expect(wrapper.text()).toContain('Network down')
+      }, { timeout: 1500 })
 
       // Should NOT have completed, NOT have set lastUsedMode, NOT have hidden launcher
       expect(mockPrefsMethods.complete).not.toHaveBeenCalled()
       expect(mockPrefsMethods.setLastUsedMode).not.toHaveBeenCalled()
       expect(apiCalls.hideLauncherWindow).toBe(0)
-      // Should be back in the mode picker with the error visible
+      // Should be back in the mode picker with the verbatim IPC error visible.
+      // Per §9, the renderer surfaces `result.message` (or `error.message` on
+      // throw) as the user-facing copy — not the generic i18n fallback. This
+      // test mocks runActionImpl to throw `Error('Network down')`, so that's
+      // what should appear in the DOM.
       expect(wrapper.text()).toContain('Where do you want to run ComfyUI?')
-      expect(wrapper.text()).toContain("Couldn't reach Comfy Cloud.")
+      expect(wrapper.text()).toContain('Network down')
     })
   })
 })

@@ -2,6 +2,7 @@
 import { computed, ref, onMounted, onUnmounted, toRaw, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
+  AlertCircle,
   Check,
   Cloud,
   Cpu,
@@ -10,6 +11,8 @@ import {
   FolderSearch,
   HardDrive,
   Import,
+  Loader2,
+  Play,
   RotateCw,
   Sparkles,
 } from 'lucide-vue-next'
@@ -23,6 +26,39 @@ import type { FieldOption } from '../types/ipc'
 
 // TODO: replace with the final EULA URL once Legal signs off.
 const EULA_URL = 'https://www.comfy.org/legal/desktop-eula'
+
+// --- IPC timeout matrix (per §9.0 spec) ----------------------------------
+// Every async user-initiated action has an explicit timeout via Promise.race.
+// Values picked per the spec timeout matrix; documented inline so reviewers
+// can verify each.
+const TIMEOUT_SET_SETTING_MS = 3_000              // setSetting (any single key)
+const TIMEOUT_OPEN_EXTERNAL_MS = 2_000            // shell.openExternal — just acks the OS
+const TIMEOUT_FORM_PREFLIGHT_MS = 10_000          // getDefaultInstallDir + getFieldOptions + detectGPU + validateHardware
+const TIMEOUT_INSTALL_SETUP_MS = 15_000           // 4-call submit chain ending in addInstallation
+const TIMEOUT_CLOUD_LAUNCH_MS = 30_000            // runAction(id, 'launch') for cloud — waitForUrl poll
+const TIMEOUT_LOCAL_LAUNCH_MS = 15_000            // runAction(id, 'launch') for local
+const TIMEOUT_CANCEL_LAUNCH_MS = 3_000            // cancelLaunch — must escape regardless
+const TIMEOUT_DONE_RETRY_MS = 15_000              // §8 explicit done-state retry timeout
+const CARD_LOADING_PAINT_MS = 400                 // ensure card-loading state renders before stage flips
+
+// Helper: wraps a promise in a Promise.race against an explicit timeout.
+// Returns a discriminated rejection value the caller can pattern-match on.
+function withTimeout<T>(p: Promise<T>, ms: number, timeoutValue: T): Promise<T> {
+  return Promise.race<T>([
+    p,
+    new Promise<T>((resolve) => setTimeout(() => resolve(timeoutValue), ms)),
+  ])
+}
+
+// Variant that REJECTS on timeout. Use this when the caller has a try/catch
+// and wants to treat the timeout as a thrown error (e.g. setSetting toggles
+// where the catch block reverts UI state).
+function withTimeoutOrThrow<T>(p: Promise<T>, ms: number, errorMessage: string): Promise<T> {
+  return Promise.race<T>([
+    p,
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error(errorMessage)), ms)),
+  ])
+}
 
 const emit = defineEmits<{
   complete: []
@@ -91,6 +127,10 @@ const installPercent = computed(() => {
   const op = installOp.value
   if (!op) return 0
   if (op.flatPercent >= 0) return op.flatPercent
+  // Stall-aware fallback (§9.5): when stalled, freeze at the last observed
+  // percent rather than continuing the time-based estimate forward — the
+  // estimate would be a lie if no real progress is happening.
+  if (isStalled.value) return lastFlatPercent.value
   // Backend didn't send a percent — estimate from elapsed time so the slider
   // still advances and the user knows things are happening.
   return Math.min(95, (elapsedSeconds.value / FAUX_DURATION_SECONDS) * 100)
@@ -175,19 +215,54 @@ watch(
     stage.value = 'done'
     const id = installingId.value
     void (async () => {
-      await onboardingPrefs.setLastUsedMode('local')
-      if (id) {
-        try {
-          await window.api.setSetting('primaryInstallId', id)
-          await installationStore.fetchInstallations()
-          // Done state stays visible for the duration of the launch — the
-          // user sees "Your studio is ready / Opening ComfyUI…" until the
-          // new window actually appears.
-          try { await window.api.runAction(id, 'launch') } catch {}
-          try { await window.api.hideLauncherWindow() } catch {}
-        } catch {}
+      try {
+        await onboardingPrefs.setLastUsedMode('local')
+      } catch (err) {
+        // Non-blocking: lastUsedMode is just a default-restore preference. The
+        // user can still proceed; surface via telemetry only.
+        emitTelemetryAction('onboarding.setLastUsedMode.failed', {
+          message: (err as Error)?.message,
+        })
       }
-      emit('complete')
+      if (!id) {
+        emit('complete')
+        return
+      }
+      try {
+        await window.api.setSetting('primaryInstallId', id)
+      } catch (err) {
+        // Idempotent best-effort: primaryInstallId is a "remember last" hint,
+        // not load-bearing. The launch path below is what matters.
+        emitTelemetryAction('onboarding.setPrimaryInstallId.failed', {
+          message: (err as Error)?.message,
+        })
+      }
+      try {
+        await installationStore.fetchInstallations()
+      } catch (err) {
+        emitTelemetryAction('onboarding.fetchInstallations.failed', {
+          message: (err as Error)?.message,
+        })
+      }
+      // Done state stays visible for the duration of the launch — the user
+      // sees "Your studio is ready / Opening ComfyUI…" until the new window
+      // actually appears. We use the §8 retry pattern so a hung or failing
+      // launch surfaces an actual error rather than a silent hang.
+      const launchOk = await launchWithTimeout(id, TIMEOUT_LOCAL_LAUNCH_MS)
+      if (launchOk) {
+        try {
+          await window.api.hideLauncherWindow()
+          emit('complete')
+        } catch (err) {
+          // Launcher hide failed — user can still see the launcher window
+          // but ComfyUI did open. Surface as a non-fatal warning via the
+          // done-state retry block so the user has a manual escape.
+          retryError.value = (err as Error)?.message || t('onboarding.openComfyUiErrorSubtitle')
+        }
+      }
+      // If launchOk is false, retryError is already populated by
+      // launchWithTimeout — the done state will render the §8 error block
+      // and "Try again" button. No further action needed here.
     })()
   },
 )
@@ -219,22 +294,80 @@ const canSubmitForm = computed(
   () => !!selectedRelease.value && !!installPath.value && !busy.value && !formLoading.value,
 )
 
-// --- Section A handlers ---
+// --- Section A handlers (consent — §9.1) ---
+// Per-checkbox error refs. Bound to inline helper text below each row so a
+// failed setSetting reverts the checkbox AND shows the user why.
+const telemetryError = ref<string | null>(null)
+const eulaError = ref<string | null>(null)
+const eulaLinkError = ref<string | null>(null)
+let eulaLinkErrorTimer: ReturnType<typeof setTimeout> | null = null
+
 async function onTelemetryToggle(event: Event): Promise<void> {
-  const checked = (event.target as HTMLInputElement).checked
-  await onboardingPrefs.setTelemetry(checked)
-  emitTelemetryAction('onboarding.telemetry.toggled', { enabled: checked })
+  const target = event.target as HTMLInputElement
+  const checked = target.checked
+  const previous = onboardingPrefs.telemetryEnabled.value
+  telemetryError.value = null
+  try {
+    await withTimeoutOrThrow(onboardingPrefs.setTelemetry(checked), TIMEOUT_SET_SETTING_MS, 'timeout')
+    emitTelemetryAction('onboarding.telemetry.toggled', { enabled: checked })
+  } catch (err) {
+    // Revert visually + state-wise.
+    onboardingPrefs.telemetryEnabled.value = previous
+    target.checked = previous
+    telemetryError.value = t('onboarding.telemetrySaveError')
+    emitTelemetryAction('onboarding.telemetry.persist_failed', {
+      message: (err as Error)?.message,
+    })
+  }
 }
 
 async function onEulaToggle(event: Event): Promise<void> {
-  const checked = (event.target as HTMLInputElement).checked
-  await onboardingPrefs.setEulaAccepted(checked)
-  if (checked) emitTelemetryAction('onboarding.eula.accepted')
+  const target = event.target as HTMLInputElement
+  const checked = target.checked
+  const previous = onboardingPrefs.eulaAccepted.value
+  eulaError.value = null
+  try {
+    await withTimeoutOrThrow(onboardingPrefs.setEulaAccepted(checked), TIMEOUT_SET_SETTING_MS, 'timeout')
+    if (checked) emitTelemetryAction('onboarding.eula.accepted')
+  } catch (err) {
+    // Revert — canContinue is bound to eulaAccepted so this re-gates Continue.
+    onboardingPrefs.eulaAccepted.value = previous
+    target.checked = previous
+    eulaError.value = t('onboarding.eulaSaveError')
+    emitTelemetryAction('onboarding.eula.persist_failed', {
+      message: (err as Error)?.message,
+    })
+  }
 }
 
-function openEula(): void {
+async function openEula(): Promise<void> {
   emitTelemetryAction('onboarding.eula.viewed')
-  window.api.openExternal(EULA_URL)
+  if (eulaLinkErrorTimer) {
+    clearTimeout(eulaLinkErrorTimer)
+    eulaLinkErrorTimer = null
+  }
+  try {
+    // openExternal returns void on most paths — we treat any thrown error as a
+    // failure and surface it. The 2s timeout is a soft signal (the OS may take
+    // a moment to dispatch); we don't reject on timeout, just log and assume
+    // the OS got it.
+    const result = window.api.openExternal(EULA_URL) as unknown
+    if (result instanceof Promise) {
+      await withTimeout(result, TIMEOUT_OPEN_EXTERNAL_MS, undefined)
+    }
+    eulaLinkError.value = null
+  } catch (err) {
+    eulaLinkError.value = t('onboarding.eulaLinkError')
+    emitTelemetryAction('onboarding.eula.openExternal_failed', {
+      message: (err as Error)?.message,
+    })
+    // Auto-clear the error after 5s so the user can retry without a stale
+    // message persisting.
+    eulaLinkErrorTimer = setTimeout(() => {
+      eulaLinkError.value = null
+      eulaLinkErrorTimer = null
+    }, 5_000)
+  }
 }
 
 function onContinue(): void {
@@ -263,12 +396,38 @@ function clearCloudTimeout(): void {
   }
 }
 
-function backFromCloudConnect(): void {
-  // Best-effort: abort any in-flight cloud launch operation. cancelLaunch
-  // aborts ALL active operations, which is broader than we want, but it's
-  // the closest IPC available — and during onboarding nothing else should
-  // be running anyway.
-  try { void window.api.cancelLaunch() } catch {}
+// §9.2: card-level loading state refs. Set synchronously on click so the
+// card paints "Connecting…" / "Opening…" within 200ms of pointerdown.
+const cloudCardLoading = ref(false)
+const localCardLoading = ref(false)
+// Cancel-warning banner if `cancelLaunch` failed during back-from-cloud-connect.
+const cancelWarning = ref<string | null>(null)
+
+async function backFromCloudConnect(): Promise<void> {
+  // Per §9.6: await cancelLaunch with a 3s timeout. On failure, surface a
+  // helper next to the button and force-route to mode regardless — the user
+  // must always escape, even if cancel didn't clean up cleanly.
+  const TIMEOUT_SENTINEL = '__cancel_timeout__' as const
+  cancelWarning.value = null
+  try {
+    // cancelLaunch resolves with void; coerce to undefined so the sentinel
+    // union is well-typed. Same pattern used in cancelInstall().
+    const result = await withTimeout<undefined | typeof TIMEOUT_SENTINEL>(
+      window.api.cancelLaunch().then(() => undefined),
+      TIMEOUT_CANCEL_LAUNCH_MS,
+      TIMEOUT_SENTINEL,
+    )
+    if (result === TIMEOUT_SENTINEL) {
+      // Timed out — set warning, but still bail out to mode.
+      cancelWarning.value = t('onboarding.cancelInstallFailed')
+      emitTelemetryAction('onboarding.cloud.cancel_timeout')
+    }
+  } catch (err) {
+    cancelWarning.value = (err as Error)?.message || t('onboarding.cancelInstallFailed')
+    emitTelemetryAction('onboarding.cloud.cancel_failed', {
+      message: (err as Error)?.message,
+    })
+  }
   clearCloudTimeout()
   cloudTimeoutFired.value = false
   busy.value = false
@@ -280,37 +439,73 @@ async function pickCloud(): Promise<void> {
   const inst = cloudInstall.value
   if (!inst) {
     // Cloud entry should always be seeded; bail gracefully if not.
-    await onboardingPrefs.complete('manual')
+    try {
+      await onboardingPrefs.complete('manual')
+    } catch (err) {
+      // Non-blocking: completion flag is best-effort here. Worst case the
+      // user sees onboarding again on next boot — annoying, not broken.
+      emitTelemetryAction('onboarding.complete.failed', {
+        message: (err as Error)?.message,
+      })
+    }
     emit('complete')
     return
   }
   busy.value = true
-  // Clear any prior failure message — user is retrying.
+  // Paint card-loading state synchronously so the user sees "Connecting…"
+  // within 200ms of pointerdown — independent of the IPC duration.
+  cloudCardLoading.value = true
   cloudError.value = ''
   cloudTimeoutFired.value = false
+  // Hold on the mode screen for CARD_LOADING_PAINT_MS so the loading state
+  // visibly registers before the screen flips. Without this, fast IPCs
+  // make the card-loading state effectively invisible.
+  await new Promise((r) => setTimeout(r, CARD_LOADING_PAINT_MS))
   stage.value = 'connecting-cloud'
   clearCloudTimeout()
   cloudTimeoutHandle = setTimeout(() => {
     cloudTimeoutFired.value = true
   }, CLOUD_TIMEOUT_MS)
 
-  let launched: boolean
+  // setSetting is non-blocking for cloud connect — primaryInstallId is just a
+  // default-restore preference. Surface failure via telemetry but don't gate.
   try {
-    await window.api.setSetting('primaryInstallId', inst.id)
-    emitTelemetryAction('onboarding.cloud.connecting')
+    await withTimeout(
+      window.api.setSetting('primaryInstallId', inst.id),
+      TIMEOUT_SET_SETTING_MS,
+      undefined,
+    )
+  } catch (err) {
+    emitTelemetryAction('onboarding.setPrimaryInstallId.failed', {
+      message: (err as Error)?.message,
+    })
+  }
+
+  emitTelemetryAction('onboarding.cloud.connecting')
+  try {
+    type Result = { ok?: boolean; message?: string; cancelled?: boolean; __timeout?: true }
+    const timeoutMarker: Result = { ok: false, message: t('onboarding.cloudConnectingTimeout'), __timeout: true }
+    let result: Result
     try {
-      const result = await window.api.runAction(inst.id, 'launch')
-      // runAction normally returns `{ ok: true }`; treat anything else as a failure.
-      launched = !!result?.ok
-    } catch {
-      launched = false
+      result = await withTimeout<Result>(
+        window.api.runAction(inst.id, 'launch') as Promise<Result>,
+        TIMEOUT_CLOUD_LAUNCH_MS,
+        timeoutMarker,
+      )
+    } catch (err) {
+      // §9.2 fix: surface the verbatim thrown message instead of generic.
+      cloudError.value = (err as Error)?.message || t('onboarding.cloudConnectError')
+      emitTelemetryAction('onboarding.cloud.failed', {
+        message: (err as Error)?.message,
+      })
+      stage.value = 'mode'
+      return
     }
 
-    if (!launched) {
-      // Surface a recoverable error: route back to the picker with an inline
-      // message. We do NOT mark onboarding completed or persist
-      // `lastUsedMode='cloud'` — the user hasn't successfully picked anything.
-      cloudError.value = t('onboarding.cloudConnectError')
+    if (!result?.ok) {
+      // Surface verbatim message from the IPC ("Another operation is already
+      // running for this installation" etc.) — not a generic fallback first.
+      cloudError.value = result?.message || t('onboarding.cloudConnectError')
       emitTelemetryAction('onboarding.cloud.failed')
       stage.value = 'mode'
       return
@@ -321,16 +516,42 @@ async function pickCloud(): Promise<void> {
     // Show the success ack briefly so the user sees a clear handoff, then
     // focus the cloud window and hide the launcher chrome.
     stage.value = 'done'
-    await onboardingPrefs.setLastUsedMode('cloud')
-    await onboardingPrefs.complete('manual')
+    try {
+      await onboardingPrefs.setLastUsedMode('cloud')
+    } catch (err) {
+      emitTelemetryAction('onboarding.setLastUsedMode.failed', {
+        message: (err as Error)?.message,
+      })
+    }
+    try {
+      await onboardingPrefs.complete('manual')
+    } catch (err) {
+      emitTelemetryAction('onboarding.complete.failed', {
+        message: (err as Error)?.message,
+      })
+    }
     await new Promise((r) => setTimeout(r, 1200))
-    try { window.api.focusComfyWindow(inst.id) } catch {}
-    try { await window.api.hideLauncherWindow() } catch {}
-    emit('complete')
+    try {
+      window.api.focusComfyWindow(inst.id)
+    } catch (err) {
+      emitTelemetryAction('onboarding.focusComfyWindow.failed', {
+        message: (err as Error)?.message,
+      })
+    }
+    try {
+      await withTimeout(window.api.hideLauncherWindow(), 3_000, undefined)
+      emit('complete')
+    } catch (err) {
+      // Cloud launched but launcher didn't hide. Surface via the §8 retry
+      // block — user has a manual escape ("Try again" → which will hit the
+      // already-running gate, or "Quit ComfyUI Desktop").
+      retryError.value = (err as Error)?.message || t('onboarding.openComfyUiErrorSubtitle')
+    }
   } finally {
     clearCloudTimeout()
     cloudTimeoutFired.value = false
     busy.value = false
+    cloudCardLoading.value = false
   }
 }
 
@@ -344,20 +565,55 @@ async function pickLocal(): Promise<void> {
   )
   if (installed) {
     busy.value = true
+    localCardLoading.value = true
+    // Same 400ms paint shim as pickCloud — let the card render its loading
+    // state before we flip to the done screen.
+    await new Promise((r) => setTimeout(r, CARD_LOADING_PAINT_MS))
     try {
-      await onboardingPrefs.setLastUsedMode('local')
-      await window.api.setSetting('primaryInstallId', installed.id)
+      try {
+        await onboardingPrefs.setLastUsedMode('local')
+      } catch (err) {
+        emitTelemetryAction('onboarding.setLastUsedMode.failed', {
+          message: (err as Error)?.message,
+        })
+      }
+      try {
+        await withTimeout(
+          window.api.setSetting('primaryInstallId', installed.id),
+          TIMEOUT_SET_SETTING_MS,
+          undefined,
+        )
+      } catch (err) {
+        emitTelemetryAction('onboarding.setPrimaryInstallId.failed', {
+          message: (err as Error)?.message,
+        })
+      }
       if (!onboardingPrefs.completed.value) {
-        await onboardingPrefs.complete('manual')
+        try {
+          await onboardingPrefs.complete('manual')
+        } catch (err) {
+          emitTelemetryAction('onboarding.complete.failed', {
+            message: (err as Error)?.message,
+          })
+        }
       }
       stage.value = 'done'
-      // Direct runAction so we await until the new ComfyUI window is open.
-      // Same reasoning as the install completion path.
-      try { await window.api.runAction(installed.id, 'launch') } catch {}
-      try { await window.api.hideLauncherWindow() } catch {}
-      emit('complete')
+      // §9.2 fix: §8 retry pattern — Promise.race(15s) + verbatim error.
+      // No more silent swallow.
+      const ok = await launchWithTimeout(installed.id, TIMEOUT_LOCAL_LAUNCH_MS)
+      if (ok) {
+        try {
+          await withTimeout(window.api.hideLauncherWindow(), 3_000, undefined)
+          emit('complete')
+        } catch (err) {
+          retryError.value = (err as Error)?.message || t('onboarding.openComfyUiErrorSubtitle')
+        }
+      }
+      // On failure, retryError is set by launchWithTimeout — done state will
+      // render the §8 error block with "Try again" + "Quit ComfyUI Desktop".
     } finally {
       busy.value = false
+      localCardLoading.value = false
     }
     return
   }
@@ -369,16 +625,41 @@ async function pickLocal(): Promise<void> {
   }
 }
 
-// --- Section C (local fork) ---
+// --- Section C (local fork — §9.3) ---
+// Card-level loading flags so the user sees response within 200ms of click,
+// even if the migrate-confirm modal takes time to open or the preflight chain
+// is slow.
+const migrateCardLoading = ref(false)
+const freshCardLoading = ref(false)
+const forkError = ref<string | null>(null)
+
 async function pickMigrate(): Promise<void> {
   if (busy.value) return
   const inst = desktopOnlyInstall.value
   if (!inst) return
   busy.value = true
+  migrateCardLoading.value = true
+  forkError.value = null
   try {
-    const result = await confirmMigration(inst)
+    let result: Awaited<ReturnType<typeof confirmMigration>>
+    try {
+      result = await confirmMigration(inst)
+    } catch (err) {
+      // §9.3 fix: confirmMigration throwing today goes unhandled. Surface
+      // verbatim into the card-level error footer.
+      forkError.value = (err as Error)?.message || t('onboarding.migrationFailed')
+      return
+    }
     if (!result) return
-    await onboardingPrefs.complete('migrate')
+    try {
+      await onboardingPrefs.complete('migrate')
+    } catch (err) {
+      // Non-blocking — the migrate flow can still proceed. Failure means the
+      // onboarding flag may not flip; surface via telemetry.
+      emitTelemetryAction('onboarding.complete.failed', {
+        message: (err as Error)?.message,
+      })
+    }
     emit('show-progress', {
       installationId: inst.id,
       title: `${t('desktop.migrating')} — ${inst.name}`,
@@ -388,26 +669,82 @@ async function pickMigrate(): Promise<void> {
     emit('complete')
   } finally {
     busy.value = false
+    migrateCardLoading.value = false
   }
 }
 
-function pickStartFresh(): void {
+async function pickStartFresh(): Promise<void> {
   if (busy.value) return
-  void enterInstallForm()
+  freshCardLoading.value = true
+  // Render the loading state for at least CARD_LOADING_PAINT_MS so the user
+  // sees "Detecting hardware…" before the screen flips. enterInstallForm sets
+  // its own formLoading, but the card-loading paint gives an earlier signal.
+  await new Promise((r) => setTimeout(r, CARD_LOADING_PAINT_MS))
+  try {
+    await enterInstallForm()
+  } finally {
+    freshCardLoading.value = false
+  }
 }
 
-// --- Section D (install form) ---
+// --- Section D (install form — §9.4) ---
+// Loading flags for the browse button and install-button submit chain. Set
+// synchronously so the button paints its loading state within 200ms of click.
+const browseLoading = ref(false)
+const installSubmitting = ref(false)
+// Hint shown when getDefaultInstallDir failed: instead of a silent empty path,
+// tell the user to pick one. Non-blocking — user can still browse.
+const noDefaultPathHint = ref<string | null>(null)
+// Hint shown when detectGPU returned null (GPU detection failure). The form
+// still works without GPU input; this just surfaces that we couldn't detect.
+const gpuDetectionFailed = ref(false)
+
 async function enterInstallForm(): Promise<void> {
   stage.value = 'install-form'
   formLoading.value = true
   formError.value = ''
+  noDefaultPathHint.value = null
+  gpuDetectionFailed.value = false
   try {
-    const [path, releases, gpu, hw] = await Promise.all([
-      window.api.getDefaultInstallDir().catch(() => ''),
-      window.api.getFieldOptions('standalone', 'release', {}, { includeLatestStable: true }),
-      window.api.detectGPU().catch(() => null),
-      window.api.validateHardware(),
-    ])
+    // Track each failure independently so we know which one to surface.
+    let pathFailed = false
+    let gpuFailed = false
+    type PreflightResult = {
+      path: string
+      releases: FieldOption[]
+      gpu: { label?: string } | null
+      hw: { supported: boolean; error?: string }
+      __timeout?: true
+    }
+    const TIMEOUT_SENTINEL: PreflightResult = {
+      path: '',
+      releases: [],
+      gpu: null,
+      hw: { supported: true },
+      __timeout: true,
+    }
+    const preflight = withTimeout<PreflightResult>(
+      Promise.all([
+        window.api.getDefaultInstallDir().catch(() => {
+          pathFailed = true
+          return ''
+        }),
+        window.api.getFieldOptions('standalone', 'release', {}, { includeLatestStable: true }),
+        window.api.detectGPU().catch(() => {
+          gpuFailed = true
+          return null
+        }),
+        window.api.validateHardware(),
+      ]).then(([path, releases, gpu, hw]) => ({ path, releases, gpu, hw })),
+      TIMEOUT_FORM_PREFLIGHT_MS,
+      TIMEOUT_SENTINEL,
+    )
+    const result = await preflight
+    if (result.__timeout) {
+      formError.value = t('onboarding.preflightTimeout')
+      return
+    }
+    const { path, releases, gpu, hw } = result
     if (!hw.supported) {
       await modal.alert({
         title: t('newInstall.unsupportedHardwareTitle'),
@@ -415,6 +752,14 @@ async function enterInstallForm(): Promise<void> {
       })
       stage.value = desktopOnlyInstall.value ? 'local-fork' : 'mode'
       return
+    }
+    if (pathFailed) {
+      // Non-blocking: surface a hint above the path field so the user knows
+      // we couldn't suggest a default and they need to pick one.
+      noDefaultPathHint.value = t('onboarding.noDefaultPathHint')
+    }
+    if (gpuFailed || !gpu) {
+      gpuDetectionFailed.value = true
     }
     defaultInstallPath.value = path
     installPath.value = path
@@ -432,90 +777,267 @@ async function enterInstallForm(): Promise<void> {
 }
 
 async function onBrowsePath(): Promise<void> {
-  const chosen = await window.api.browseFolder(installPath.value)
-  if (chosen) installPath.value = chosen
+  if (browseLoading.value) return
+  browseLoading.value = true
+  try {
+    const chosen = await window.api.browseFolder(installPath.value)
+    if (chosen) installPath.value = chosen
+  } catch (err) {
+    // §9.4 fix: today line 435 has no error handling. Surface verbatim.
+    formError.value = (err as Error)?.message || t('onboarding.browseFailed')
+    emitTelemetryAction('onboarding.browseFolder.failed', {
+      message: (err as Error)?.message,
+    })
+  } finally {
+    browseLoading.value = false
+  }
 }
 
 async function startInstall(): Promise<void> {
   if (!canSubmitForm.value || !selectedRelease.value || !installPath.value) return
   busy.value = true
+  installSubmitting.value = true
   formError.value = ''
+  // Wrap the entire 4-call chain in a Promise.race against a 15s aggregate
+  // timeout. On timeout, surface a clear error and reset the button state.
+  type ChainResult = { ok: true } | { ok: false; message: string } | { __timeout: true }
+  const run = async (): Promise<ChainResult> => {
+    try {
+      // Pick the recommended variant for the chosen release silently.
+      const variants = await window.api.getFieldOptions('standalone', 'variant', {
+        release: JSON.parse(JSON.stringify(toRaw(selectedRelease.value!))) as FieldOption,
+      })
+      const variant = variants.find((v) => v.recommended) ?? variants[0]
+      if (!variant) {
+        return { ok: false, message: t('newInstall.noOptions') }
+      }
+
+      const instData = await window.api.buildInstallation('standalone', {
+        release: JSON.parse(JSON.stringify(toRaw(selectedRelease.value!))) as FieldOption,
+        variant: JSON.parse(JSON.stringify(toRaw(variant))) as FieldOption,
+      })
+
+      const name = await window.api.getUniqueName('ComfyUI')
+      const result = await window.api.addInstallation({
+        name,
+        installPath: installPath.value,
+        ...instData,
+      })
+      if (!result.ok || !result.entry) {
+        // Surface verbatim message (per §9.4 — render result.message verbatim,
+        // not a generic fallback first).
+        return { ok: false, message: result.message || t('errors.cannotAdd') }
+      }
+
+      emitTelemetryAction('onboarding.install.started', {
+        release: selectedRelease.value!.value,
+        variant: variant.value,
+      })
+
+      // Persist `onboardingCompleted=true` BEFORE kicking off the install.
+      // If the renderer dies mid-install (cmd+Q, crash) the install still
+      // completes at the backend, but if we waited until post-launch to flip
+      // the flag, the user would land back at onboarding next boot.
+      if (!onboardingPrefs.completed.value) {
+        try {
+          await onboardingPrefs.complete('manual')
+        } catch (err) {
+          // Non-blocking: install can still proceed; surface via telemetry.
+          emitTelemetryAction('onboarding.complete.failed', {
+            message: (err as Error)?.message,
+          })
+        }
+      }
+
+      hasFinalized.value = false
+
+      // Switch to the inline progress view and start the operation directly
+      // via the progress store. We wrap startOperation in a try/catch — if it
+      // throws synchronously, revert to the form so the user isn't stuck on
+      // an installing screen with no actual operation.
+      installingId.value = result.entry.id
+      installingName.value = name
+      installStartedAt.value = Date.now()
+      elapsedSeconds.value = 0
+      startElapsedTimer()
+      stage.value = 'installing'
+      try {
+        progressStore.startOperation({
+          installationId: result.entry.id,
+          title: `${t('newInstall.installing')} — ${name}`,
+          apiCall: () => window.api.installInstance(result.entry!.id),
+        })
+      } catch (err) {
+        // §9.4 fix: revert and surface. The user is on `installing` stage
+        // with no operation if we don't.
+        stopElapsedTimer()
+        installingId.value = null
+        stage.value = 'install-form'
+        return { ok: false, message: (err as Error)?.message || t('onboarding.installCantStart') }
+      }
+      return { ok: true }
+    } catch (err) {
+      return { ok: false, message: (err as Error)?.message || String(err) }
+    }
+  }
+
+  const TIMEOUT_SENTINEL: ChainResult = { __timeout: true }
   try {
-    // Pick the recommended variant for the chosen release silently.
-    const variants = await window.api.getFieldOptions('standalone', 'variant', {
-      release: JSON.parse(JSON.stringify(toRaw(selectedRelease.value))) as FieldOption,
-    })
-    const variant = variants.find((v) => v.recommended) ?? variants[0]
-    if (!variant) {
-      formError.value = t('newInstall.noOptions')
-      busy.value = false
+    const result = await withTimeout<ChainResult>(run(), TIMEOUT_INSTALL_SETUP_MS, TIMEOUT_SENTINEL)
+    if ('__timeout' in result && result.__timeout) {
+      formError.value = t('onboarding.installSetupTimeout')
       return
     }
-
-    const instData = await window.api.buildInstallation('standalone', {
-      release: JSON.parse(JSON.stringify(toRaw(selectedRelease.value))) as FieldOption,
-      variant: JSON.parse(JSON.stringify(toRaw(variant))) as FieldOption,
-    })
-
-    const name = await window.api.getUniqueName('ComfyUI')
-    const result = await window.api.addInstallation({
-      name,
-      installPath: installPath.value,
-      ...instData,
-    })
-    if (!result.ok || !result.entry) {
-      formError.value = result.message || t('errors.cannotAdd')
-      busy.value = false
-      return
+    if ('ok' in result && !result.ok) {
+      formError.value = result.message
     }
-
-    emitTelemetryAction('onboarding.install.started', {
-      release: selectedRelease.value.value,
-      variant: variant.value,
-    })
-
-    // Persist `onboardingCompleted=true` BEFORE kicking off the install.
-    // If the renderer dies mid-install (cmd+Q, crash) the install still
-    // completes at the backend, but if we waited until post-launch to flip
-    // the flag, the user would land back at onboarding next boot. The
-    // onboarding-completed flag is independent of "did we successfully
-    // launch" — once the user has picked Local + named an install, the
-    // onboarding decision has been made.
-    if (!onboardingPrefs.completed.value) {
-      await onboardingPrefs.complete('manual')
-    }
-
-    // Reset the watch latch so the install-completion handler runs for this
-    // new operation. (`hasFinalized` may have been left at `false` after a
-    // prior cancel/error retry, but make it explicit.)
-    hasFinalized.value = false
-
-    // Switch to the inline progress view and start the operation directly via
-    // the progress store — no ProgressModal popup, the onboarding owns the screen.
-    installingId.value = result.entry.id
-    installingName.value = name
-    installStartedAt.value = Date.now()
-    elapsedSeconds.value = 0
-    startElapsedTimer()
-    stage.value = 'installing'
-
-    progressStore.startOperation({
-      installationId: result.entry.id,
-      title: `${t('newInstall.installing')} — ${name}`,
-      apiCall: () => window.api.installInstance(result.entry!.id),
-    })
-  } catch (err) {
-    formError.value = (err as Error)?.message || String(err)
   } finally {
     busy.value = false
+    installSubmitting.value = false
   }
 }
+
+// --- Section H (installing — §9.5) ---
+// Stall detection: if flatStatus + flatPercent haven't changed in 30s, we
+// surface a warning strip + reveal the Cancel button. The progress bar stops
+// estimating forward when stalled (don't lie about progress).
+const INSTALL_STALL_THRESHOLD_MS = 30_000
+const lastProgressAt = ref(Date.now())
+const lastFlatPercent = ref(0)
+const lastFlatStatus = ref('')
+const isStalled = ref(false)
+const cancelInProgress = ref(false)
+const cancelError = ref<string | null>(null)
+
+// Watch the upstream progress events. When either flatPercent or flatStatus
+// changes, mark progress as fresh.
+watch(
+  () => [installOp.value?.flatPercent, installOp.value?.flatStatus] as const,
+  ([percent, status]) => {
+    if (typeof percent === 'number' && percent !== lastFlatPercent.value) {
+      lastFlatPercent.value = percent
+      lastProgressAt.value = Date.now()
+      isStalled.value = false
+    }
+    if (typeof status === 'string' && status !== lastFlatStatus.value) {
+      lastFlatStatus.value = status
+      lastProgressAt.value = Date.now()
+      isStalled.value = false
+    }
+  },
+)
+
+// Tick the stall flag from the elapsed timer. Cheap — runs once a second.
+function checkInstallStall(): void {
+  if (stage.value !== 'installing') return
+  if (Date.now() - lastProgressAt.value > INSTALL_STALL_THRESHOLD_MS) {
+    isStalled.value = true
+  }
+}
+
+// Cancel control. Shown unless install is in finalize phase (>= 95%).
+const cancelDisabled = computed(() => installPercent.value >= 95)
+
+async function cancelInstall(): Promise<void> {
+  if (cancelInProgress.value) return
+  if (cancelDisabled.value) return
+  cancelError.value = null
+  // Confirm via modal so the user understands downloaded files will be removed.
+  let confirmed: boolean
+  try {
+    confirmed = await modal.confirm({
+      title: t('onboarding.cancelInstallConfirmTitle'),
+      message: t('onboarding.cancelInstallConfirmMessage'),
+      confirmLabel: t('onboarding.cancelInstall'),
+      confirmStyle: 'danger',
+    })
+  } catch (err) {
+    cancelError.value = (err as Error)?.message || t('onboarding.cancelInstallFailed')
+    return
+  }
+  if (!confirmed) return
+
+  cancelInProgress.value = true
+  try {
+    const TIMEOUT_SENTINEL = '__cancel_timeout__' as const
+    // cancelLaunch() resolves with void; we coerce to undefined so the
+    // sentinel union (undefined | typeof TIMEOUT_SENTINEL) is well-typed.
+    const result = await withTimeout<undefined | typeof TIMEOUT_SENTINEL>(
+      window.api.cancelLaunch().then(() => undefined),
+      TIMEOUT_CANCEL_LAUNCH_MS,
+      TIMEOUT_SENTINEL,
+    )
+    if (result === TIMEOUT_SENTINEL) {
+      // 3s timeout — assume cancel may have failed but force-route anyway so
+      // the user has an escape. The watch on installOp.finished will route
+      // them back to install-form when the cancel actually completes.
+      cancelError.value = t('onboarding.cancelInstallFailed')
+      emitTelemetryAction('onboarding.cancel.timeout')
+    }
+  } catch (err) {
+    cancelError.value = (err as Error)?.message || t('onboarding.cancelInstallFailed')
+    emitTelemetryAction('onboarding.cancel.failed', {
+      message: (err as Error)?.message,
+    })
+  } finally {
+    cancelInProgress.value = false
+  }
+}
+
+// Structured status parsing: split on `·` (the backend status format) and map
+// to phase title / detail / speed-elapsed-eta. Falls back to raw if parsing
+// fails — never crashes the layout.
+interface StructuredStatus {
+  title: string
+  detail: string
+  meta: string
+}
+
+const structuredStatus = computed<StructuredStatus>(() => {
+  const raw = installStatus.value
+  if (!raw) return { title: '', detail: '', meta: '' }
+  // Backend phase prefixes are stable: 'download', 'extract', 'setup'. Map to
+  // human copy. If the status doesn't start with one of those, fall back to
+  // showing the whole string in the detail line.
+  const parts = raw.split('·').map((s) => s.trim()).filter(Boolean)
+  if (parts.length === 0) {
+    return { title: '', detail: raw, meta: '' }
+  }
+  // Heuristic: try to detect the phase prefix from the first chunk.
+  const firstChunk = parts[0] || ''
+  const firstLower = firstChunk.toLowerCase()
+  let title: string
+  let detail: string
+  if (firstLower.startsWith('download')) {
+    title = 'Downloading runtime'
+    detail = parts[1] || firstChunk
+  } else if (firstLower.startsWith('extract')) {
+    title = 'Extracting files'
+    detail = parts[1] || firstChunk
+  } else if (firstLower.startsWith('setup') || firstLower.startsWith('install')) {
+    title = 'Installing dependencies'
+    detail = parts[1] || firstChunk
+  } else {
+    // Unknown phase prefix — show the whole first chunk as detail with no title.
+    title = ''
+    detail = firstChunk
+  }
+  const meta = parts.slice(2).join(' · ')
+  return { title, detail, meta }
+})
 
 // --- Helpers ---
 function startElapsedTimer(): void {
   stopElapsedTimer()
+  // Reset stall tracking each time we start a new install so a prior stalled
+  // session doesn't bleed into the new one.
+  lastProgressAt.value = Date.now()
+  lastFlatPercent.value = 0
+  lastFlatStatus.value = ''
+  isStalled.value = false
   elapsedTimer = setInterval(() => {
     elapsedSeconds.value = Math.floor((Date.now() - installStartedAt.value) / 1000)
+    checkInstallStall()
   }, 1000)
 }
 
@@ -566,30 +1088,49 @@ function resetInstallPath(): void {
   installPath.value = defaultInstallPath.value
 }
 
-// --- Section F: connecting-cloud visual checklist ---
-// Pure UI — no backend hookup. Cycles a 3-step "what's happening" checklist on
-// a 3s timer so the user has *something* visually progressing during the
-// 1-15s waitForUrl poll. Mirrors the install ladder grammar.
+// --- Section F: connecting-cloud visual checklist (§9.6) ---
+// Wired to elapsed-time gates rather than a fixed 3s timer. We don't have a
+// real backend signal for which step we're actually on, so this is partially
+// aspirational — but freezing on timeout (per spec) avoids the lie of
+// "Workspace step lit while we know nothing's actually happening."
+//
+// Gates (per §9.6 designer guess):
+//   0–8s    → step 0 (Authenticating session) active
+//   8–18s   → step 1 (Reserving compute) active
+//   18s+    → step 2 (Opening workspace) active — ONLY if !cloudTimeoutFired
+//
+// On timeout (cloudTimeoutFired=true), the active step is frozen at step 1
+// (no auto-advance). The active marker also recolors to warning per §6 polish.
 const CLOUD_CHECKS = ['cloudCheckAuth', 'cloudCheckCompute', 'cloudCheckWorkspace'] as const
-const cloudCheckIndex = ref(0)
-let cloudCheckTimer: ReturnType<typeof setInterval> | null = null
+const CLOUD_CHECK_STEP1_GATE_MS = 8_000
+const CLOUD_CHECK_STEP2_GATE_MS = 18_000
+const cloudConnectStartedAt = ref(0)
+const cloudConnectElapsed = ref(0)
+let cloudConnectTimer: ReturnType<typeof setInterval> | null = null
+
+const cloudCheckIndex = computed<number>(() => {
+  const elapsed = cloudConnectElapsed.value
+  if (elapsed < CLOUD_CHECK_STEP1_GATE_MS) return 0
+  if (elapsed < CLOUD_CHECK_STEP2_GATE_MS) return 1
+  // Past the third gate: only advance if we haven't timed out — freezing
+  // avoids lying about progress when the backend has gone silent.
+  if (cloudTimeoutFired.value) return 1
+  return 2
+})
 
 function startCloudCheckCycle(): void {
   stopCloudCheckCycle()
-  cloudCheckIndex.value = 0
-  cloudCheckTimer = setInterval(() => {
-    // Advance until the last item, then hold there. We never auto-mark all as
-    // done because the actual "done" is the cloud window appearing.
-    if (cloudCheckIndex.value < CLOUD_CHECKS.length - 1) {
-      cloudCheckIndex.value += 1
-    }
-  }, 3000)
+  cloudConnectStartedAt.value = Date.now()
+  cloudConnectElapsed.value = 0
+  cloudConnectTimer = setInterval(() => {
+    cloudConnectElapsed.value = Date.now() - cloudConnectStartedAt.value
+  }, 500)
 }
 
 function stopCloudCheckCycle(): void {
-  if (cloudCheckTimer) {
-    clearInterval(cloudCheckTimer)
-    cloudCheckTimer = null
+  if (cloudConnectTimer) {
+    clearInterval(cloudConnectTimer)
+    cloudConnectTimer = null
   }
 }
 
@@ -604,24 +1145,37 @@ const cloudChecks = computed<CloudCheck[]>(() =>
   })),
 )
 
-// --- Section G: done stuck-state recovery ---
-// View-local timers for the done screen. Drives the 15s/45s tiered reveal of
-// recovery affordances ("Open ComfyUI", "Show details", "Close launcher").
-// No state-machine changes — just escape valves on the existing 'done' state.
+// --- Section G: done-state recovery v2 (§8) ---
+// View-local timers for the done screen. The button-reveal threshold is purely
+// view-state (when to show "Open ComfyUI" the first time); the retry timeout is
+// independent (per spec — different concern, different ref).
 const DONE_STUCK_THRESHOLD_S = 15
-const DONE_VERY_STUCK_THRESHOLD_S = 45
 const doneEnteredAt = ref(0)
 const doneElapsedSeconds = ref(0)
 let doneTimer: ReturnType<typeof setInterval> | null = null
+// `doneStuck` controls whether the "Open ComfyUI" button is rendered at all.
+// It does NOT govern subtitle copy escalation — that's driven by retry state.
 const doneStuck = computed(() => doneElapsedSeconds.value >= DONE_STUCK_THRESHOLD_S)
-const doneVeryStuck = computed(() => doneElapsedSeconds.value >= DONE_VERY_STUCK_THRESHOLD_S)
-const showDoneDetails = ref(false)
+
+// §8 retry state. `retrying` is a UI gate that paints synchronously on click
+// (before await) so the button shows its loading state within 200ms even if
+// the IPC takes ~1s to return. `retryError` is the verbatim message from the
+// IPC (or a friendly fallback) — surfaced in the inline error block.
+const retrying = ref(false)
+const retryError = ref<string | null>(null)
+// `retryAttempted` flips true after the FIRST explicit user retry click. Used
+// to gate the "Quit ComfyUI Desktop" affordance per §8 ("only renders when
+// `retryError !== null`" — but more precisely: only after the user has
+// explicitly retried at least once and seen a failure).
+const retryAttempted = ref(false)
 
 function startDoneTimer(): void {
   stopDoneTimer()
   doneEnteredAt.value = Date.now()
   doneElapsedSeconds.value = 0
-  showDoneDetails.value = false
+  retryError.value = null
+  retrying.value = false
+  retryAttempted.value = false
   doneTimer = setInterval(() => {
     doneElapsedSeconds.value = Math.floor((Date.now() - doneEnteredAt.value) / 1000)
   }, 1000)
@@ -634,36 +1188,132 @@ function stopDoneTimer(): void {
   }
 }
 
-// Pick the active subtitle copy based on elapsed time.
-const doneSubtitleKey = computed(() => {
-  if (doneVeryStuck.value) return 'onboarding.doneVeryStuckSubtitle'
-  if (doneStuck.value) return 'onboarding.doneStuckSubtitle'
-  return 'onboarding.doneSubtitle'
-})
-
 // Pick which install id to operate on for retry. Prefer the local install id
 // (set during installing flow), fall back to the cloud install id.
 function activeLaunchId(): string | null {
   return installingId.value ?? cloudInstall.value?.id ?? null
 }
 
-// Re-runs the launch IPC and focuses the comfy window. Safe to call multiple
-// times — runAction is idempotent at the orchestrator level (a second call
-// while a first is in-flight is a no-op-ish; we eat any error and let the
-// user try again).
+// Subtitle copy per §8 state table.
+const doneSubtitleKey = computed(() => {
+  if (retryError.value) return 'onboarding.openComfyUiErrorSubtitle'
+  if (retrying.value) return 'onboarding.connectingSubtitle'
+  if (doneStuck.value) return 'onboarding.doneSubtitleStuckV2'
+  return 'onboarding.doneSubtitle'
+})
+
+const doneTitleKey = computed(() => {
+  if (retryError.value) return 'onboarding.openComfyUiError'
+  if (retrying.value) return 'onboarding.connectingTitle'
+  return 'onboarding.doneTitle'
+})
+
+// Button copy + state per §8 state table.
+type DoneButtonState = 'idle' | 'loading' | 'error'
+const doneButtonState = computed<DoneButtonState>(() => {
+  if (retrying.value) return 'loading'
+  if (retryError.value) return 'error'
+  return 'idle'
+})
+
+const doneButtonLabelKey = computed(() => {
+  switch (doneButtonState.value) {
+    case 'loading': return 'onboarding.openComfyUiLoading'
+    case 'error': return 'onboarding.openComfyUiTryAgain'
+    default: return 'onboarding.openComfyUiCta'
+  }
+})
+
+// Core launch helper — wraps runAction in a Promise.race against the supplied
+// timeout, surfaces any failure into `retryError`. Returns true on launch
+// success (caller should hideLauncherWindow + emit complete), false otherwise.
+//
+// Used by both the install-completion auto-launch path AND the §8 retry
+// button. Sharing the same code path means every launch surface fails loudly,
+// not just the explicit retry.
+async function launchWithTimeout(id: string, timeoutMs: number): Promise<boolean> {
+  type Result = { ok?: boolean; message?: string; cancelled?: boolean; __timeout?: true }
+  const timeoutMarker: Result = { ok: false, message: t('onboarding.openComfyUiTimeout'), __timeout: true }
+  let result: Result
+  try {
+    result = await withTimeout<Result>(
+      window.api.runAction(id, 'launch') as Promise<Result>,
+      timeoutMs,
+      timeoutMarker,
+    )
+  } catch (err) {
+    retryError.value = (err as Error)?.message || t('onboarding.openComfyUiErrorSubtitle')
+    return false
+  }
+  if (result?.ok) {
+    retryError.value = null
+    return true
+  }
+  // ok: false (or timeout sentinel) — surface verbatim.
+  retryError.value = result?.message || t('onboarding.openComfyUiErrorSubtitle')
+  return false
+}
+
+// §8 retry handler — called when user clicks "Open ComfyUI" / "Try again".
+// Synchronous gate: `retrying.value = true` BEFORE await so the button paints
+// its loading state within 200ms, regardless of how long the IPC takes.
 async function retryLaunch(): Promise<void> {
+  // UI re-entry gate (the IPC also gates server-side via _operationAborts,
+  // but the spec says "UI must not rely solely on backend gate").
+  if (retrying.value) return
   const id = activeLaunchId()
-  if (!id) return
-  try { await window.api.runAction(id, 'launch') } catch {}
-  try { window.api.focusComfyWindow(id) } catch {}
+  if (!id) {
+    retryError.value = t('onboarding.openComfyUiNoActiveInstall')
+    retryAttempted.value = true
+    return
+  }
+  retrying.value = true
+  retryError.value = null
+  retryAttempted.value = true
+  try {
+    const ok = await launchWithTimeout(id, TIMEOUT_DONE_RETRY_MS)
+    if (ok) {
+      // Success — focus the window and tear down the launcher.
+      try {
+        window.api.focusComfyWindow(id)
+      } catch (err) {
+        // focus is best-effort; the runAction success is what matters.
+        emitTelemetryAction('onboarding.focusComfyWindow.failed', {
+          message: (err as Error)?.message,
+        })
+      }
+      try {
+        await withTimeout(window.api.hideLauncherWindow(), 3_000, undefined)
+        emit('complete')
+      } catch (err) {
+        retryError.value = (err as Error)?.message || t('onboarding.openComfyUiErrorSubtitle')
+      }
+    }
+    // Failure path: retryError is already populated by launchWithTimeout.
+  } finally {
+    retrying.value = false
+  }
 }
 
-function toggleDoneDetails(): void {
-  showDoneDetails.value = !showDoneDetails.value
-}
-
-async function closeLauncher(): Promise<void> {
-  try { await window.api.hideLauncherWindow() } catch {}
+// Quit affordance shown only after a retry has actually failed. Calls quit-app
+// IPC directly. Wrapped in error handling so a failing quit doesn't strand the
+// user — fall back to hideLauncherWindow if quit fails (last-ditch escape).
+async function quitDesktop(): Promise<void> {
+  try {
+    await withTimeout(window.api.quitApp(), 3_000, undefined)
+  } catch (err) {
+    // If quit failed (rare), at least hide the launcher chrome so the user
+    // isn't stuck on the failure screen.
+    emitTelemetryAction('onboarding.quitApp.failed', {
+      message: (err as Error)?.message,
+    })
+    try {
+      await window.api.hideLauncherWindow()
+    } catch {
+      // truly stuck — but this is a last-ditch path. The user can hit OS-level
+      // window close; we've done what we can.
+    }
+  }
 }
 
 // Track stage transitions to drive the done timer + cloud checklist + screen
@@ -700,7 +1350,7 @@ const stageAnnouncement = computed(() => {
     case 'connecting-cloud':
       return t('onboarding.cloudConnectingTitle')
     case 'done':
-      return t(doneSubtitleKey.value)
+      return t(doneTitleKey.value)
     default:
       return ''
   }
@@ -763,6 +1413,17 @@ onUnmounted(() => {
                     {{ t('onboarding.eulaViewLink') }}
                     <ExternalLink :size="12" />
                   </button>
+                  <!-- §9.1: persistence-failure helper. Shown only when the
+                       setSetting IPC failed; checkbox state has been reverted
+                       so the user can retry. -->
+                  <span v-if="eulaError" class="consent-error" role="alert">
+                    {{ eulaError }}
+                  </span>
+                  <!-- §9.1: link-failure helper. openExternal returned false
+                       or threw — surface the URL so the user can copy it. -->
+                  <span v-if="eulaLinkError" class="consent-error" role="alert">
+                    {{ eulaLinkError }}
+                  </span>
                 </span>
               </label>
 
@@ -776,6 +1437,9 @@ onUnmounted(() => {
                 <span class="consent-body">
                   <span class="consent-label">{{ t('onboarding.telemetryLabel') }}</span>
                   <span class="consent-hint">{{ t('onboarding.telemetryHint') }}</span>
+                  <span v-if="telemetryError" class="consent-error" role="alert">
+                    {{ telemetryError }}
+                  </span>
                 </span>
               </label>
             </div>
@@ -811,14 +1475,25 @@ onUnmounted(() => {
             <div class="onboarding-card-row">
               <button
                 class="onboarding-card"
+                :class="{
+                  'onboarding-card-loading': cloudCardLoading,
+                  'onboarding-card-dimmed': localCardLoading && !cloudCardLoading,
+                }"
                 type="button"
                 :disabled="busy"
+                :aria-busy="cloudCardLoading ? 'true' : 'false'"
                 @click="pickCloud"
               >
                 <Cloud :size="22" class="onboarding-card-icon" />
                 <span class="onboarding-card-title">{{ t('onboarding.cloudCardTitle') }}</span>
                 <span class="onboarding-card-desc">{{ t('onboarding.cloudCardDesc') }}</span>
-                <span class="onboarding-card-cta">→ {{ t('onboarding.cloudCardCta') }}</span>
+                <!-- CTA swaps to a loading state while the IPC chain is
+                     in flight. Per §9.0: gerund + ellipsis copy. -->
+                <span class="onboarding-card-cta">
+                  <Loader2 v-if="cloudCardLoading" :size="14" class="spin" />
+                  <template v-else>→</template>
+                  {{ cloudCardLoading ? t('onboarding.connectingCloudCard') : t('onboarding.cloudCardCta') }}
+                </span>
                 <!-- Inline error attached to the failing card only — replaces
                      the wide red banner above the row. -->
                 <span v-if="cloudError" class="onboarding-card-error" role="alert">
@@ -828,15 +1503,24 @@ onUnmounted(() => {
               </button>
               <button
                 class="onboarding-card onboarding-card-recommended"
+                :class="{
+                  'onboarding-card-loading': localCardLoading,
+                  'onboarding-card-dimmed': cloudCardLoading && !localCardLoading,
+                }"
                 type="button"
                 :disabled="busy"
+                :aria-busy="localCardLoading ? 'true' : 'false'"
                 @click="pickLocal"
               >
                 <span class="onboarding-card-badge">{{ t('onboarding.recommendedBadge') }}</span>
                 <HardDrive :size="22" class="onboarding-card-icon" />
                 <span class="onboarding-card-title">{{ t('onboarding.localCardTitle') }}</span>
                 <span class="onboarding-card-desc">{{ t('onboarding.localCardDesc') }}</span>
-                <span class="onboarding-card-cta">→ {{ t('onboarding.localCardCta') }}</span>
+                <span class="onboarding-card-cta">
+                  <Loader2 v-if="localCardLoading" :size="14" class="spin" />
+                  <template v-else>→</template>
+                  {{ localCardLoading ? t('onboarding.openingComfyUiCard') : t('onboarding.localCardCta') }}
+                </span>
               </button>
             </div>
           </div>
@@ -1123,85 +1807,122 @@ onUnmounted(() => {
               </li>
             </ol>
 
-            <p class="installing-status-line" aria-live="polite">
-              <span class="installing-status-glyph" aria-hidden="true">›</span>
-              {{ installStatus }}
-            </p>
+            <!-- Structured status: phase title + detail (bytes/files) + meta
+                 (speed · elapsed · ETA), parsed from the backend's status
+                 string. Falls back to raw if the parse misses. -->
+            <div class="installing-structured" aria-live="polite">
+              <span v-if="structuredStatus.title" class="installing-structured-title">
+                {{ structuredStatus.title }}
+              </span>
+              <span class="installing-structured-detail">
+                <span class="installing-status-glyph" aria-hidden="true">›</span>
+                {{ structuredStatus.detail || installStatus }}
+              </span>
+              <span v-if="structuredStatus.meta" class="installing-structured-meta">
+                {{ structuredStatus.meta }}
+              </span>
+            </div>
+
+            <!-- Stalled-state escape: appears when no progress events have
+                 fired in 30s. Cancel routes through modal.confirm; disabled
+                 once we're past the finalize threshold (95%) since cancelling
+                 mid-finalize can corrupt state. Per §9.4. -->
+            <div v-if="isStalled" class="installing-stalled" role="alert">
+              <p class="installing-stalled-text">{{ t('onboarding.installStalled') }}</p>
+              <button
+                type="button"
+                class="installing-cancel-btn"
+                :disabled="cancelInProgress || cancelDisabled"
+                @click="cancelInstall"
+              >
+                {{ cancelInProgress ? t('progress.starting') : t('onboarding.cancelInstall') }}
+              </button>
+              <p v-if="cancelError" class="installing-cancel-error">{{ cancelError }}</p>
+            </div>
           </div>
         </section>
 
         <!-- =====================================================
-             6 / Done — success ack before launcher hides
-             Tiered stuck-state recovery:
-               Tier 1 (0-15s): unchanged from today, pulsing check icon
-               Tier 2 (≥15s):  Open ComfyUI + Show details affordances
-               Tier 3 (≥45s):  warning subtitle + Close launcher escape
+             6 / Done — success ack with §8 recovery v2
+             Single primary button surfaces a working retry path with verbatim
+             error surface + 15s timeout + Quit affordance after explicit
+             retry-failure. No "Show details", no "Close launcher", no
+             disclosure — every state has direct, actionable feedback.
              ===================================================== -->
         <section v-else-if="stage === 'done'" key="done" class="onboarding-screen onboarding-done">
           <div class="done-inner">
-            <div class="done-check" :class="{ 'done-check-stuck': doneStuck }">
-              <Check :size="32" />
-            </div>
-            <h2 class="done-title">{{ t('onboarding.doneTitle') }}</h2>
-            <!-- aria-live announces the subtitle when it changes from
-                 "Opening" → "Almost there" → "Taking longer" — covers SR users
-                 across the tier transitions. -->
-            <p
-              class="done-subtitle"
+            <!-- Check icon: success tint normally, danger tint when retry failed.
+                 No pulsing on error (per §8). -->
+            <div
+              class="done-check"
               :class="{
-                'done-subtitle-stuck': doneStuck,
-                'done-subtitle-very-stuck': doneVeryStuck,
+                'done-check-stuck': doneStuck && !retryError,
+                'done-check-error': !!retryError,
               }"
+            >
+              <Check v-if="!retryError" :size="32" />
+              <AlertCircle v-else :size="32" />
+            </div>
+            <h2 class="done-title">{{ t(doneTitleKey) }}</h2>
+            <!-- aria-live announces the subtitle when retry state flips.
+                 Hidden when the inline error block is rendering (the error
+                 block carries the message in that state). -->
+            <p
+              v-if="!retryError"
+              class="done-subtitle"
+              :class="{ 'done-subtitle-stuck': doneStuck }"
               aria-live="polite"
             >
               {{ t(doneSubtitleKey) }}
             </p>
 
-            <!-- Tier 2+ recovery affordances -->
+            <!-- Inline error block (state 6 only). Above the button, below
+                 the subtitle. Verbatim message from IPC. -->
+            <Transition name="onboarding-fade">
+              <div
+                v-if="retryError"
+                class="done-error-block"
+                role="alert"
+              >
+                <AlertCircle :size="14" class="done-error-icon" />
+                <span class="done-error-text">
+                  {{ t('onboarding.openComfyUiError') }}: {{ retryError }}
+                </span>
+              </div>
+            </Transition>
+
+            <!-- §8 recovery: single primary button, gated on doneStuck reveal -->
             <Transition name="onboarding-fade">
               <div v-if="doneStuck" class="done-recovery">
-                <div class="done-recovery-buttons">
-                  <button
-                    type="button"
-                    class="primary onboarding-primary-btn"
-                    @click="retryLaunch"
-                  >
-                    {{ t('onboarding.openComfyUiCta') }}
-                  </button>
-                  <button
-                    type="button"
-                    class="done-text-btn"
-                    @click="toggleDoneDetails"
-                  >
-                    {{ t('onboarding.showDetailsCta') }}
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  class="primary onboarding-primary-btn done-retry-btn"
+                  :class="{
+                    'done-retry-loading': doneButtonState === 'loading',
+                    'done-retry-error': doneButtonState === 'error',
+                  }"
+                  :disabled="retrying"
+                  :aria-busy="retrying ? 'true' : 'false'"
+                  @click="retryLaunch"
+                >
+                  <Loader2 v-if="doneButtonState === 'loading'" :size="16" class="done-btn-icon spin" />
+                  <RotateCw v-else-if="doneButtonState === 'error'" :size="16" class="done-btn-icon" />
+                  <Play v-else :size="16" class="done-btn-icon" />
+                  {{ t(doneButtonLabelKey) }}
+                </button>
 
-                <Transition name="onboarding-fade">
-                  <div v-if="showDoneDetails" class="done-details">
-                    <p class="done-details-explain">
-                      {{ t('onboarding.doneStuckExplanation') }}
-                    </p>
-                    <p v-if="installStatus" class="done-details-status">
-                      <span class="done-details-glyph" aria-hidden="true">›</span>
-                      {{ installStatus }}
-                    </p>
-                    <p v-if="installPath" class="done-details-path">
-                      {{ t('onboarding.doneDetailsLine') }}
-                      <span class="done-details-path-value">{{ installPath }}</span>
-                    </p>
-                  </div>
-                </Transition>
-
-                <!-- Tier 3 only: quiet "Close launcher" escape. -->
+                <!-- Quit affordance: ONLY after an explicit retry-failure.
+                     Per §8: "only renders when retryError !== null" — and we
+                     additionally require retryAttempted to disambiguate from
+                     install-completion errors that populate retryError. -->
                 <Transition name="onboarding-fade">
                   <button
-                    v-if="doneVeryStuck"
+                    v-if="retryError && retryAttempted"
                     type="button"
                     class="done-text-btn done-text-btn-quiet"
-                    @click="closeLauncher"
+                    @click="quitDesktop"
                   >
-                    {{ t('onboarding.closeLauncherCta') }}
+                    {{ t('onboarding.quitDesktop') }}
                   </button>
                 </Transition>
               </div>
@@ -2061,27 +2782,93 @@ onUnmounted(() => {
   flex-grow: 1;
 }
 
-/* Live status line — promoted from 12/faint to 13/muted with a top-border so
-   it reads as a "live log" footer of the body, not a stray hint. */
-.installing-status-line {
+/* Structured status block — replaces the single status line with a 3-row
+   grid (phase title / detail / meta) parsed from the backend status string.
+   Surfaces real download bytes / extract % / file counts / speed / ETA
+   instead of a long pipe-delimited line. */
+.installing-structured {
   display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  color: var(--text-muted);
+  flex-direction: column;
+  gap: 4px;
   margin: 8px 0 0;
   padding-top: 12px;
   border-top: 1px solid var(--border);
   font-variant-numeric: tabular-nums;
+}
+
+.installing-structured-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.3;
+}
+
+.installing-structured-detail {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.installing-structured-meta {
+  font-size: 12px;
+  color: var(--text-faint);
 }
 
 .installing-status-glyph {
   color: var(--text-faint);
   flex-shrink: 0;
   font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+}
+
+/* Stalled-state escape — appears below the structured status when no
+   progress events have fired in 30s. Per §9.4 spec. */
+.installing-stalled {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 16px;
+  padding: 12px 14px;
+  background: color-mix(in srgb, var(--warning) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warning) 30%, transparent);
+  border-radius: 6px;
+}
+
+.installing-stalled-text {
+  font-size: 13px;
+  color: var(--warning);
+  margin: 0;
+}
+
+.installing-cancel-btn {
+  align-self: flex-start;
+  padding: 6px 14px;
+  font-size: 13px;
+  background: transparent;
+  color: var(--warning);
+  border: 1px solid color-mix(in srgb, var(--warning) 50%, transparent);
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.installing-cancel-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+}
+
+.installing-cancel-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.installing-cancel-error {
+  font-size: 12px;
+  color: var(--danger);
+  margin: 0;
 }
 
 /* --- Done screen --- */
