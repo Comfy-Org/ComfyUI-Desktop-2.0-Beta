@@ -49,7 +49,9 @@
     "cloudConnectingMeta": "COMFY CLOUD",
     "cloudConnectingTitle": "Opening Comfy Cloud",
     "cloudConnectingFlavor": "Connecting to managed GPUs in the cloud.",
-    "cloudConnectingStatus": "Reaching cloud.comfy.org…"
+    "cloudConnectingStatus": "Reaching cloud.comfy.org…",
+    "doneTitle": "Your studio is ready",
+    "doneSubtitle": "Opening ComfyUI…"
   },
 
   "dashboard": {

@@ -9,7 +9,6 @@ import { useModal } from './composables/useModal'
 import { useTheme } from './composables/useTheme'
 import { useLauncherPrefs } from './composables/useLauncherPrefs'
 import { useOnboardingPrefs } from './composables/useOnboardingPrefs'
-import { useListAction } from './composables/useListAction'
 import { useNavigation } from './composables/useNavigation'
 import type { Installation, ActionResult, QuitActiveItem } from './types/ipc'
 import type { ModalDetailGroup } from './composables/useModal'
@@ -235,11 +234,13 @@ function setupChineseMirrorsSuggestion(): void {
 //     Cloud / Local picker (onboarding without the consent step). After they
 //     pick, the picker dismisses for this session only — they'll see it
 //     again on the next boot if cloud was the last choice.
-const { executeAction: launchInstall } = useListAction('app-boot', {
-  showProgress: showProgress,
-})
-
-const onboardingDismissedThisSession = ref(false)
+// `onboardingActive` is the *latched* render decision. We compute it once at
+// boot from the static decision below and only flip it back to `false` when
+// OnboardingView explicitly emits `complete`. Computing v-if reactively from
+// `onboardingPrefs.completed` etc. caused mid-flow unmounts: the moment the
+// onboarding finished and persisted state, the v-if would re-evaluate to
+// `false` and tear down the screen — the user saw the done-state vanish.
+const onboardingActive = ref(false)
 
 const hasInstalledLocal = computed(() =>
   installationStore.installations.some(
@@ -247,20 +248,18 @@ const hasInstalledLocal = computed(() =>
   ),
 )
 
-const shouldShowOnboarding = computed(() => {
-  if (!onboardingPrefs.loaded.value) return false
+function decideShowOnboarding(): boolean {
   if (!onboardingPrefs.completed.value) return true
   if (onboardingPrefs.lastUsedMode.value === 'cloud') return true
   // Local-last but the install no longer exists → fall back to picker.
   if (!hasInstalledLocal.value) return true
   return false
-})
+}
 
 async function autoLaunchOnBoot(): Promise<void> {
   // Only the local-last + installed-local case auto-launches. Cloud-last users
-  // see the picker (handled by shouldShowOnboarding); first-timers go through
-  // onboarding.
-  if (shouldShowOnboarding.value) return
+  // see the picker; first-timers go through onboarding.
+  if (onboardingActive.value) return
   if (sessionStore.runningInstances.size > 0) return
   if (sessionStore.activeSessions.size > 0) return
 
@@ -283,12 +282,12 @@ async function autoLaunchOnBoot(): Promise<void> {
   if (!inst) return
 
   try {
-    const actions = await window.api.getListActions(inst.id)
-    const primary = actions.find((a) => a.style === 'primary') ?? actions[0]
-    if (!primary) return
-    await launchInstall(inst, primary)
-    // Boot auto-launch is the silent path — hide the launcher chrome so the
-    // user lives in their ComfyUI window. The launcher process stays alive.
+    // Direct runAction so we await until the new ComfyUI window is actually
+    // open before hiding the launcher. Going through useListAction's
+    // executeAction would return immediately (showProgress is fire-and-forget)
+    // and we'd hide the launcher before the new window had appeared, leaving
+    // a flash of empty desktop in between.
+    try { await window.api.runAction(inst.id, 'launch') } catch {}
     try { await window.api.hideLauncherWindow() } catch {}
   } catch {
     // Auto-launch is best-effort — RunningView's empty state is the fallback.
@@ -304,6 +303,9 @@ onMounted(async () => {
   await onboardingPrefs.loadPrefs()
   // Need installations loaded before the boot-time routing decision.
   await installationStore.fetchInstallations()
+  // Latch the onboarding render decision now — once we decide to show it, we
+  // keep showing it until OnboardingView emits `complete`.
+  onboardingActive.value = decideShowOnboarding()
   setupQuitConfirmation()
   setupLocaleListener()
   setupChineseMirrorsSuggestion()
@@ -316,8 +318,8 @@ onMounted(async () => {
 <template>
   <TitleBar />
   <OnboardingView
-    v-if="onboardingPrefs.loaded.value && shouldShowOnboarding && !onboardingDismissedThisSession"
-    @complete="onboardingDismissedThisSession = true"
+    v-if="onboardingPrefs.loaded.value && onboardingActive"
+    @complete="onboardingActive = false"
     @show-quick-install="openQuickInstall"
     @show-progress="showProgress"
   />

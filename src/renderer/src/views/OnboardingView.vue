@@ -1,12 +1,11 @@
 <script setup lang="ts">
 import { computed, ref, onMounted, toRaw, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ArrowRightLeft, Cloud, Download, ExternalLink, FolderSearch, HardDrive } from 'lucide-vue-next'
+import { ArrowRightLeft, Check, Cloud, Download, ExternalLink, FolderSearch, HardDrive } from 'lucide-vue-next'
 import { useInstallationStore } from '../stores/installationStore'
 import { useProgressStore } from '../stores/progressStore'
 import { useOnboardingPrefs } from '../composables/useOnboardingPrefs'
 import { useMigrateAction } from '../composables/useMigrateAction'
-import { useListAction } from '../composables/useListAction'
 import { useModal } from '../composables/useModal'
 import { emitTelemetryAction } from '../lib/telemetry'
 import type { ActionResult, FieldOption } from '../types/ipc'
@@ -30,11 +29,8 @@ const progressStore = useProgressStore()
 const onboardingPrefs = useOnboardingPrefs()
 const modal = useModal()
 const { confirmMigration } = useMigrateAction()
-const { executeAction } = useListAction('onboarding', {
-  showProgress: (opts) => emit('show-progress', opts),
-})
 
-type Stage = 'consent' | 'mode' | 'local-fork' | 'install-form' | 'installing' | 'connecting-cloud'
+type Stage = 'consent' | 'mode' | 'local-fork' | 'install-form' | 'installing' | 'connecting-cloud' | 'done'
 // Returning users (EULA already accepted) skip straight to the mode picker.
 // We seed the initial stage from prefs at composition time.
 const stage = ref<Stage>(onboardingPrefs.eulaAccepted.value ? 'mode' : 'consent')
@@ -61,33 +57,59 @@ const installOp = computed(() => {
   return progressStore.operations.get(installingId.value) ?? null
 })
 
+// The standalone install backend doesn't emit a `steps` list — it only
+// streams a flat percent + status. To give the user a sense of "where am I
+// in the install", we render a fixed step ladder and light it up based on
+// the live percent. If percent is unknown (negative), we fall back to a
+// time-based estimate so the slider still moves.
+const FAUX_STEPS = [
+  { label: 'Validating environment', threshold: 5 },
+  { label: 'Downloading ComfyUI runtime', threshold: 35 },
+  { label: 'Setting up Python', threshold: 65 },
+  { label: 'Installing dependencies', threshold: 90 },
+  { label: 'Finalizing', threshold: 100 },
+]
+// Heuristic install duration for time-based fallback (3 min). Caps at 95%
+// so the bar never sits at 100% while we're still waiting on the backend.
+const FAUX_DURATION_SECONDS = 180
+
 const installPercent = computed(() => {
   const op = installOp.value
   if (!op) return 0
-  return op.flatPercent >= 0 ? op.flatPercent : 0
+  if (op.flatPercent >= 0) return op.flatPercent
+  // Backend didn't send a percent — estimate from elapsed time so the slider
+  // still advances and the user knows things are happening.
+  return Math.min(95, (elapsedSeconds.value / FAUX_DURATION_SECONDS) * 100)
 })
 
 const installPercentDisplay = computed(() => {
-  const op = installOp.value
-  if (!op || op.flatPercent < 0) return '—'
-  return `${Math.round(op.flatPercent)}%`
+  const p = installPercent.value
+  return `${Math.round(p)}%`
 })
 
 const installStatus = computed(
   () => installOp.value?.flatStatus || t('progress.starting'),
 )
 
-const installError = computed(() => installOp.value?.error || '')
+interface DisplayStep {
+  label: string
+  state: 'pending' | 'active' | 'done'
+}
 
-// Cosmetic: a copy line that morphs as % climbs, so the screen feels alive.
-const flavorText = computed(() => {
+const displaySteps = computed<DisplayStep[]>(() => {
   const p = installPercent.value
-  if (installError.value) return t('onboarding.installFailedFlavor')
-  if (p < 5) return t('onboarding.installFlavor1')
-  if (p < 30) return t('onboarding.installFlavor2')
-  if (p < 60) return t('onboarding.installFlavor3')
-  if (p < 90) return t('onboarding.installFlavor4')
-  return t('onboarding.installFlavor5')
+  return FAUX_STEPS.map((step, i) => {
+    const prev = i === 0 ? 0 : FAUX_STEPS[i - 1]!.threshold
+    let state: DisplayStep['state'] = 'pending'
+    if (p >= step.threshold) state = 'done'
+    else if (p >= prev) state = 'active'
+    return { label: step.label, state }
+  })
+})
+
+const activeStepLabel = computed(() => {
+  const active = displaySteps.value.find((s) => s.state === 'active')
+  return active?.label ?? displaySteps.value[displaySteps.value.length - 1]?.label ?? ''
 })
 
 watch(
@@ -104,9 +126,13 @@ watch(
       installingId.value = null
       return
     }
-    // Success — auto-launch the freshly installed ComfyUI before closing
-    // onboarding. The user opened Desktop 2.0 to use ComfyUI, not to land
-    // on a launcher screen.
+    // Show the success ack, then launch ComfyUI in the same window so the
+    // user has a continuous experience. We call runAction directly (not via
+    // useListAction) because executeAction's `showProgress` branch is
+    // fire-and-forget — it returns before the launch completes. runAction
+    // awaits until launch.ts's inline `_onLaunch` callback creates the new
+    // ComfyUI window. Only then do we hide the launcher.
+    stage.value = 'done'
     const id = installingId.value
     void (async () => {
       await onboardingPrefs.complete('manual')
@@ -115,17 +141,12 @@ watch(
         try {
           await window.api.setSetting('primaryInstallId', id)
           await installationStore.fetchInstallations()
-          const inst = installationStore.installations.find((i) => i.id === id)
-          if (inst) {
-            const actions = await window.api.getListActions(id)
-            const primary = actions.find((a) => a.style === 'primary') ?? actions[0]
-            if (primary) await executeAction(inst, primary)
-          }
+          // Done state stays visible for the duration of the launch — the
+          // user sees "Your studio is ready / Opening ComfyUI…" until the
+          // new window actually appears.
+          try { await window.api.runAction(id, 'launch') } catch {}
           try { await window.api.hideLauncherWindow() } catch {}
-        } catch {
-          // Best-effort — if launch fails, the running view will surface the
-          // install state.
-        }
+        } catch {}
       }
       emit('complete')
     })()
@@ -198,16 +219,17 @@ async function pickCloud(): Promise<void> {
     emitTelemetryAction('onboarding.cloud.connecting')
     try {
       await window.api.runAction(inst.id, 'launch')
-      // Once the cloud window is up, focus it and hide the launcher chrome.
-      // The launcher process stays alive (so the cloud child window survives);
-      // it just becomes invisible.
-      try { window.api.focusComfyWindow(inst.id) } catch {}
-      try { await window.api.hideLauncherWindow() } catch {}
     } catch {
       // The launch action handles its own errors; if it threw we still close
       // onboarding so the user can retry from app boot.
     }
+    // Show the success ack briefly so the user sees a clear handoff, then
+    // focus the cloud window and hide the launcher chrome.
+    stage.value = 'done'
     await onboardingPrefs.complete('manual')
+    await new Promise((r) => setTimeout(r, 1200))
+    try { window.api.focusComfyWindow(inst.id) } catch {}
+    try { await window.api.hideLauncherWindow() } catch {}
     emit('complete')
   } finally {
     busy.value = false
@@ -226,14 +248,13 @@ async function pickLocal(): Promise<void> {
     try {
       await onboardingPrefs.setLastUsedMode('local')
       await window.api.setSetting('primaryInstallId', installed.id)
-      const actions = await window.api.getListActions(installed.id)
-      const primary = actions.find((a) => a.style === 'primary') ?? actions[0]
-      if (primary) {
-        try { await executeAction(installed, primary) } catch {}
-      }
       if (!onboardingPrefs.completed.value) {
         await onboardingPrefs.complete('manual')
       }
+      stage.value = 'done'
+      // Direct runAction so we await until the new ComfyUI window is open.
+      // Same reasoning as the install completion path.
+      try { await window.api.runAction(installed.id, 'launch') } catch {}
       try { await window.api.hideLauncherWindow() } catch {}
       emit('complete')
     } finally {
@@ -424,264 +445,317 @@ function goBack(): void {
              1 / Consent
              ===================================================== -->
         <section v-if="stage === 'consent'" key="consent" class="onboarding-screen">
-          <div class="onboarding-wordmark">ComfyUI</div>
-          <h1 class="onboarding-title">{{ t('onboarding.welcomeTitle') }}</h1>
-          <p class="onboarding-subtitle">{{ t('onboarding.welcomeSubtitle') }}</p>
+          <header class="onboarding-screen-header">
+            <div class="onboarding-wordmark">ComfyUI</div>
+            <h1 class="onboarding-title">{{ t('onboarding.welcomeTitle') }}</h1>
+            <p class="onboarding-subtitle">{{ t('onboarding.welcomeSubtitle') }}</p>
+          </header>
 
-          <div class="onboarding-divider" />
-
-          <div class="onboarding-consent">
-            <label class="consent-row">
-              <input
-                type="checkbox"
-                class="consent-checkbox"
-                :checked="onboardingPrefs.telemetryEnabled.value"
-                @change="onTelemetryToggle"
-              />
-              <span class="consent-body">
-                <span class="consent-label">{{ t('onboarding.telemetryLabel') }}</span>
-                <span class="consent-hint">{{ t('onboarding.telemetryHint') }}</span>
-              </span>
-            </label>
-
-            <label class="consent-row">
-              <input
-                type="checkbox"
-                class="consent-checkbox"
-                :checked="onboardingPrefs.eulaAccepted.value"
-                @change="onEulaToggle"
-              />
-              <span class="consent-body">
-                <span class="consent-label">{{ t('onboarding.eulaLabel') }}</span>
-                <span class="consent-hint">
-                  {{ t('onboarding.eulaHint') }}
-                  <button type="button" class="consent-link" @click.prevent="openEula">
-                    {{ t('onboarding.eulaViewLink') }}
-                    <ExternalLink :size="12" />
-                  </button>
+          <div class="onboarding-screen-body">
+            <div class="onboarding-divider" />
+            <div class="onboarding-consent">
+              <label class="consent-row">
+                <input
+                  type="checkbox"
+                  class="consent-checkbox"
+                  :checked="onboardingPrefs.telemetryEnabled.value"
+                  @change="onTelemetryToggle"
+                />
+                <span class="consent-body">
+                  <span class="consent-label">{{ t('onboarding.telemetryLabel') }}</span>
+                  <span class="consent-hint">{{ t('onboarding.telemetryHint') }}</span>
                 </span>
-              </span>
-            </label>
+              </label>
+
+              <label class="consent-row">
+                <input
+                  type="checkbox"
+                  class="consent-checkbox"
+                  :checked="onboardingPrefs.eulaAccepted.value"
+                  @change="onEulaToggle"
+                />
+                <span class="consent-body">
+                  <span class="consent-label">{{ t('onboarding.eulaLabel') }}</span>
+                  <span class="consent-hint">
+                    {{ t('onboarding.eulaHint') }}
+                    <button type="button" class="consent-link" @click.prevent="openEula">
+                      {{ t('onboarding.eulaViewLink') }}
+                      <ExternalLink :size="12" />
+                    </button>
+                  </span>
+                </span>
+              </label>
+            </div>
           </div>
 
-          <div class="onboarding-cta-row">
+          <footer class="onboarding-screen-footer">
+            <span /><!-- spacer; no Back on the first screen -->
             <button
-              class="primary onboarding-continue-btn"
+              class="primary onboarding-primary-btn"
               :disabled="!canContinue"
               :title="canContinue ? '' : t('onboarding.continueDisabledTooltip')"
               @click="onContinue"
             >
               {{ t('onboarding.continue') }}
             </button>
-          </div>
+          </footer>
         </section>
 
         <!-- =====================================================
              2 / Mode picker — Cloud vs Local
              ===================================================== -->
         <section v-else-if="stage === 'mode'" key="mode" class="onboarding-screen">
-          <button
-            type="button"
-            class="onboarding-back-link"
-            :disabled="busy"
-            @click="goBack"
-          >
-            ← {{ t('onboarding.back') }}
-          </button>
-          <h2 class="onboarding-screen-title">{{ t('onboarding.modeTitle') }}</h2>
-          <p class="onboarding-screen-subtitle">{{ t('onboarding.modeSubtitle') }}</p>
+          <header class="onboarding-screen-header">
+            <h2 class="onboarding-screen-title">{{ t('onboarding.modeTitle') }}</h2>
+            <p class="onboarding-screen-subtitle">{{ t('onboarding.modeSubtitle') }}</p>
+          </header>
 
-          <div class="onboarding-card-row">
-            <button
-              class="onboarding-card"
-              type="button"
-              :disabled="busy"
-              @click="pickCloud"
-            >
-              <Cloud :size="22" class="onboarding-card-icon" />
-              <span class="onboarding-card-title">{{ t('onboarding.cloudCardTitle') }}</span>
-              <span class="onboarding-card-desc">{{ t('onboarding.cloudCardDesc') }}</span>
-              <span class="onboarding-card-cta">{{ t('onboarding.cloudCardCta') }}</span>
-            </button>
-            <button
-              class="onboarding-card"
-              type="button"
-              :disabled="busy"
-              @click="pickLocal"
-            >
-              <HardDrive :size="22" class="onboarding-card-icon" />
-              <span class="onboarding-card-title">{{ t('onboarding.localCardTitle') }}</span>
-              <span class="onboarding-card-desc">{{ t('onboarding.localCardDesc') }}</span>
-              <span class="onboarding-card-cta">{{ t('onboarding.localCardCta') }}</span>
-            </button>
+          <div class="onboarding-screen-body">
+            <div class="onboarding-card-row">
+              <button
+                class="onboarding-card"
+                type="button"
+                :disabled="busy"
+                @click="pickCloud"
+              >
+                <Cloud :size="22" class="onboarding-card-icon" />
+                <span class="onboarding-card-title">{{ t('onboarding.cloudCardTitle') }}</span>
+                <span class="onboarding-card-desc">{{ t('onboarding.cloudCardDesc') }}</span>
+                <span class="onboarding-card-cta">{{ t('onboarding.cloudCardCta') }}</span>
+              </button>
+              <button
+                class="onboarding-card"
+                type="button"
+                :disabled="busy"
+                @click="pickLocal"
+              >
+                <HardDrive :size="22" class="onboarding-card-icon" />
+                <span class="onboarding-card-title">{{ t('onboarding.localCardTitle') }}</span>
+                <span class="onboarding-card-desc">{{ t('onboarding.localCardDesc') }}</span>
+                <span class="onboarding-card-cta">{{ t('onboarding.localCardCta') }}</span>
+              </button>
+            </div>
           </div>
+
+          <footer class="onboarding-screen-footer">
+            <button
+              type="button"
+              class="onboarding-back-btn"
+              :disabled="busy"
+              @click="goBack"
+            >
+              ← {{ t('onboarding.back') }}
+            </button>
+            <span /><!-- no primary; cards are primary actions -->
+          </footer>
         </section>
 
         <!-- =====================================================
              3 / Local fork — Migrate vs Fresh (only when legacy detected)
              ===================================================== -->
         <section v-else-if="stage === 'local-fork'" key="local-fork" class="onboarding-screen">
-          <button
-            type="button"
-            class="onboarding-back-link"
-            :disabled="busy"
-            @click="goBack"
-          >
-            ← {{ t('onboarding.back') }}
-          </button>
-          <h2 class="onboarding-screen-title">{{ t('onboarding.legacyDetectedTitle') }}</h2>
+          <header class="onboarding-screen-header">
+            <h2 class="onboarding-screen-title">{{ t('onboarding.legacyDetectedTitle') }}</h2>
+          </header>
 
-          <div class="onboarding-card-row">
-            <button
-              class="onboarding-card"
-              type="button"
-              :disabled="busy"
-              @click="pickMigrate"
-            >
-              <ArrowRightLeft :size="22" class="onboarding-card-icon" />
-              <span class="onboarding-card-title">{{ t('onboarding.migrateCardTitle') }}</span>
-              <span class="onboarding-card-desc">{{ t('onboarding.migrateCardDesc') }}</span>
-              <span class="onboarding-card-cta">{{ t('onboarding.migrateCardCta') }}</span>
-            </button>
-            <button
-              class="onboarding-card"
-              type="button"
-              :disabled="busy"
-              @click="pickStartFresh"
-            >
-              <Download :size="22" class="onboarding-card-icon" />
-              <span class="onboarding-card-title">{{ t('onboarding.startFreshCardTitle') }}</span>
-              <span class="onboarding-card-desc">{{ t('onboarding.startFreshCardDesc') }}</span>
-              <span class="onboarding-card-cta">{{ t('onboarding.startFreshCardCta') }}</span>
-            </button>
+          <div class="onboarding-screen-body">
+            <div class="onboarding-card-row">
+              <button
+                class="onboarding-card"
+                type="button"
+                :disabled="busy"
+                @click="pickMigrate"
+              >
+                <ArrowRightLeft :size="22" class="onboarding-card-icon" />
+                <span class="onboarding-card-title">{{ t('onboarding.migrateCardTitle') }}</span>
+                <span class="onboarding-card-desc">{{ t('onboarding.migrateCardDesc') }}</span>
+                <span class="onboarding-card-cta">{{ t('onboarding.migrateCardCta') }}</span>
+              </button>
+              <button
+                class="onboarding-card"
+                type="button"
+                :disabled="busy"
+                @click="pickStartFresh"
+              >
+                <Download :size="22" class="onboarding-card-icon" />
+                <span class="onboarding-card-title">{{ t('onboarding.startFreshCardTitle') }}</span>
+                <span class="onboarding-card-desc">{{ t('onboarding.startFreshCardDesc') }}</span>
+                <span class="onboarding-card-cta">{{ t('onboarding.startFreshCardCta') }}</span>
+              </button>
+            </div>
           </div>
+
+          <footer class="onboarding-screen-footer">
+            <button
+              type="button"
+              class="onboarding-back-btn"
+              :disabled="busy"
+              @click="goBack"
+            >
+              ← {{ t('onboarding.back') }}
+            </button>
+            <span />
+          </footer>
         </section>
 
         <!-- =====================================================
              4 / Install form — path + version
              ===================================================== -->
         <section v-else-if="stage === 'install-form'" key="install-form" class="onboarding-screen">
-          <button
-            type="button"
-            class="onboarding-back-link"
-            :disabled="busy"
-            @click="goBack"
-          >
-            ← {{ t('onboarding.back') }}
-          </button>
-          <h2 class="onboarding-screen-title">{{ t('onboarding.installFormTitle') }}</h2>
-          <p class="onboarding-screen-subtitle">{{ t('onboarding.installFormSubtitle') }}</p>
+          <header class="onboarding-screen-header">
+            <h2 class="onboarding-screen-title">{{ t('onboarding.installFormTitle') }}</h2>
+            <p class="onboarding-screen-subtitle">{{ t('onboarding.installFormSubtitle') }}</p>
+          </header>
 
-          <div v-if="formLoading" class="onboarding-form-loading">
-            <div class="onboarding-spinner" />
-            <span>{{ t('onboarding.formLoading') }}</span>
+          <div class="onboarding-screen-body">
+            <div v-if="formLoading" class="onboarding-form-loading">
+              <div class="onboarding-spinner" />
+              <span>{{ t('onboarding.formLoading') }}</span>
+            </div>
+
+            <template v-else>
+              <div class="onboarding-form-field">
+                <label class="onboarding-form-label">{{ t('onboarding.installPathLabel') }}</label>
+                <div class="onboarding-form-row">
+                  <input
+                    v-model="installPath"
+                    type="text"
+                    class="onboarding-form-input"
+                    :placeholder="defaultInstallPath"
+                    :disabled="busy"
+                  />
+                  <button
+                    type="button"
+                    class="onboarding-form-browse"
+                    :disabled="busy"
+                    @click="onBrowsePath"
+                  >
+                    <FolderSearch :size="14" />
+                    {{ t('onboarding.browse') }}
+                  </button>
+                </div>
+                <p class="onboarding-form-hint">{{ t('onboarding.installPathHint') }}</p>
+              </div>
+
+              <div class="onboarding-form-field">
+                <label class="onboarding-form-label">{{ t('onboarding.versionLabel') }}</label>
+                <select
+                  v-model="selectedRelease"
+                  class="onboarding-form-select"
+                  :disabled="busy || releaseOptions.length === 0"
+                >
+                  <option
+                    v-for="opt in releaseOptions"
+                    :key="opt.value"
+                    :value="opt"
+                  >
+                    {{ opt.label }}
+                  </option>
+                </select>
+                <p v-if="detectedGpuLabel" class="onboarding-form-hint">
+                  {{ t('onboarding.detectedGpu', { gpu: detectedGpuLabel }) }}
+                </p>
+              </div>
+
+              <div v-if="formError" class="onboarding-form-error">{{ formError }}</div>
+            </template>
           </div>
 
-          <template v-else>
-            <div class="onboarding-form-field">
-              <label class="onboarding-form-label">{{ t('onboarding.installPathLabel') }}</label>
-              <div class="onboarding-form-row">
-                <input
-                  v-model="installPath"
-                  type="text"
-                  class="onboarding-form-input"
-                  :placeholder="defaultInstallPath"
-                  :disabled="busy"
-                />
-                <button
-                  type="button"
-                  class="onboarding-form-browse"
-                  :disabled="busy"
-                  @click="onBrowsePath"
-                >
-                  <FolderSearch :size="14" />
-                  {{ t('onboarding.browse') }}
-                </button>
-              </div>
-              <p class="onboarding-form-hint">{{ t('onboarding.installPathHint') }}</p>
-            </div>
-
-            <div class="onboarding-form-field">
-              <label class="onboarding-form-label">{{ t('onboarding.versionLabel') }}</label>
-              <select
-                v-model="selectedRelease"
-                class="onboarding-form-select"
-                :disabled="busy || releaseOptions.length === 0"
-              >
-                <option
-                  v-for="opt in releaseOptions"
-                  :key="opt.value"
-                  :value="opt"
-                >
-                  {{ opt.label }}
-                </option>
-              </select>
-              <p v-if="detectedGpuLabel" class="onboarding-form-hint">
-                {{ t('onboarding.detectedGpu', { gpu: detectedGpuLabel }) }}
-              </p>
-            </div>
-
-            <div v-if="formError" class="onboarding-form-error">{{ formError }}</div>
-
-            <div class="onboarding-cta-row">
-              <button
-                class="primary onboarding-continue-btn"
-                :disabled="!canSubmitForm"
-                @click="startInstall"
-              >
-                {{ t('onboarding.installCta') }}
-              </button>
-            </div>
-          </template>
+          <footer v-if="!formLoading" class="onboarding-screen-footer">
+            <button
+              type="button"
+              class="onboarding-back-btn"
+              :disabled="busy"
+              @click="goBack"
+            >
+              ← {{ t('onboarding.back') }}
+            </button>
+            <button
+              class="primary onboarding-primary-btn"
+              :disabled="!canSubmitForm"
+              @click="startInstall"
+            >
+              {{ t('onboarding.installCta') }}
+            </button>
+          </footer>
         </section>
 
         <!-- =====================================================
              5a / Connecting to Comfy Cloud (after Cloud picked)
              ===================================================== -->
         <section v-else-if="stage === 'connecting-cloud'" key="connecting-cloud" class="onboarding-screen onboarding-installing">
-          <div class="installing-meta">{{ t('onboarding.cloudConnectingMeta') }}</div>
-          <h2 class="installing-title">{{ t('onboarding.cloudConnectingTitle') }}</h2>
-          <p class="installing-flavor">{{ t('onboarding.cloudConnectingFlavor') }}</p>
+          <header class="onboarding-screen-header">
+            <div class="installing-meta">{{ t('onboarding.cloudConnectingMeta') }}</div>
+            <h2 class="installing-title">{{ t('onboarding.cloudConnectingTitle') }}</h2>
+            <p class="installing-flavor">{{ t('onboarding.cloudConnectingFlavor') }}</p>
+          </header>
 
-          <div class="installing-progress-track">
-            <div class="installing-progress-fill indeterminate" style="width: 40%" />
-          </div>
-
-          <div class="installing-progress-row">
-            <span class="installing-status">
-              <span class="installing-status-dot" />
-              {{ t('onboarding.cloudConnectingStatus') }}
-            </span>
+          <div class="onboarding-screen-body">
+            <div class="installing-progress-track">
+              <div class="installing-progress-fill indeterminate" style="width: 40%" />
+            </div>
+            <div class="installing-progress-row">
+              <span class="installing-status">
+                <span class="installing-status-dot" />
+                {{ t('onboarding.cloudConnectingStatus') }}
+              </span>
+            </div>
           </div>
         </section>
 
         <!-- =====================================================
-             5 / Installing — inline progress, no back
+             5 / Installing — inline progress with step ladder
              ===================================================== -->
         <section v-else-if="stage === 'installing'" key="installing" class="onboarding-screen onboarding-installing">
-          <div class="installing-meta">{{ t('onboarding.installingFor') }} {{ installingName }}</div>
-          <h2 class="installing-title">{{ t('onboarding.installingTitle') }}</h2>
-          <p class="installing-flavor">{{ flavorText }}</p>
+          <header class="onboarding-screen-header">
+            <div class="installing-meta">{{ t('onboarding.installingFor') }} {{ installingName }}</div>
+            <h2 class="installing-title">{{ t('onboarding.installingTitle') }}</h2>
+            <p class="installing-flavor">{{ activeStepLabel }}</p>
+          </header>
 
-          <div class="installing-progress-track">
-            <div
-              class="installing-progress-fill"
-              :class="{ indeterminate: installPercent <= 0 }"
-              :style="{ width: installPercent > 0 ? `${installPercent}%` : '40%' }"
-            />
-          </div>
+          <div class="onboarding-screen-body">
+            <div class="installing-progress-track">
+              <div
+                class="installing-progress-fill"
+                :class="{ indeterminate: installPercent <= 0 }"
+                :style="{ width: installPercent > 0 ? `${installPercent}%` : '40%' }"
+              />
+            </div>
 
-          <div class="installing-progress-row">
-            <span class="installing-status">
-              <span class="installing-status-dot" />
-              {{ installStatus }}
-            </span>
-            <span class="installing-percent">{{ installPercentDisplay }}</span>
-          </div>
+            <div class="installing-progress-row">
+              <span class="installing-percent">{{ installPercentDisplay }}</span>
+              <span class="installing-elapsed-inline">{{ formatElapsed(elapsedSeconds) }}</span>
+            </div>
 
-          <div class="installing-elapsed">
-            {{ t('onboarding.elapsed', { time: formatElapsed(elapsedSeconds) }) }}
+            <ol class="install-step-list">
+              <li
+                v-for="(step, i) in displaySteps"
+                :key="i"
+                class="install-step"
+                :class="step.state"
+              >
+                <span class="install-step-marker" aria-hidden="true">
+                  <Check v-if="step.state === 'done'" :size="12" />
+                  <span v-else-if="step.state === 'active'" class="install-step-dot" />
+                  <span v-else class="install-step-pending">{{ i + 1 }}</span>
+                </span>
+                <span class="install-step-label">{{ step.label }}</span>
+              </li>
+            </ol>
+
+            <p class="installing-status-line">{{ installStatus }}</p>
           </div>
+        </section>
+
+        <!-- =====================================================
+             6 / Done — success ack before launcher hides
+             ===================================================== -->
+        <section v-else-if="stage === 'done'" key="done" class="onboarding-screen onboarding-done">
+          <div class="done-check">
+            <Check :size="32" />
+          </div>
+          <h2 class="done-title">{{ t('onboarding.doneTitle') }}</h2>
+          <p class="done-subtitle">{{ t('onboarding.doneSubtitle') }}</p>
         </section>
       </Transition>
     </div>
@@ -707,10 +781,35 @@ function goBack(): void {
   box-sizing: border-box;
 }
 
+/* Each screen is a flex column with header / body / footer.
+   Footer sticks to the bottom of the screen for consistent button placement
+   across the flow (Back left, Primary right). */
 .onboarding-screen {
   display: flex;
   flex-direction: column;
+  gap: 24px;
+  min-height: 560px;
+}
+
+.onboarding-screen-header {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.onboarding-screen-body {
+  flex-grow: 1;
+  display: flex;
+  flex-direction: column;
   gap: 20px;
+}
+
+.onboarding-screen-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 8px;
 }
 
 .onboarding-screen-title {
@@ -726,6 +825,41 @@ function goBack(): void {
   color: var(--text-muted);
   margin: 0;
   line-height: 1.5;
+}
+
+.onboarding-back-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+.onboarding-back-btn:hover:not(:disabled) {
+  border-color: var(--border-hover);
+  color: var(--text);
+}
+
+.onboarding-back-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.onboarding-primary-btn {
+  padding: 8px 20px;
+  font-size: 14px;
+}
+
+.onboarding-primary-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* Multi-step transitions: fade + slight slide on enter/exit. */
@@ -1165,11 +1299,130 @@ function goBack(): void {
   flex-shrink: 0;
 }
 
-.installing-elapsed {
+.installing-elapsed-inline {
   font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  color: var(--text-faint);
+}
+
+/* --- Install step ladder --- */
+.install-step-list {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.install-step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--text-faint);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.install-step.active {
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.install-step.done {
+  color: var(--text-muted);
+}
+
+.install-step-marker {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.install-step.pending .install-step-marker {
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+.install-step.active .install-step-marker {
+  background: var(--accent);
+  color: #0c0c0c;
+}
+
+.install-step.done .install-step-marker {
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
+  color: var(--accent);
+}
+
+.install-step-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #0c0c0c;
+  animation: install-pulse 1.2s ease-in-out infinite;
+}
+
+.install-step-pending {
+  color: var(--text-faint);
+}
+
+.install-step-label {
+  flex-grow: 1;
+}
+
+.installing-status-line {
   font-size: 12px;
   color: var(--text-faint);
-  margin-top: 4px;
+  margin: 4px 0 0;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* --- Done screen --- */
+.onboarding-done {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 16px;
+  padding: 64px 0;
+}
+
+.done-check {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--success) 18%, transparent);
+  color: var(--success);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.done-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text);
+  margin: 0;
+  line-height: 1.2;
+}
+
+.done-subtitle {
+  font-size: 14px;
+  color: var(--text-muted);
+  margin: 0;
+  line-height: 1.5;
 }
 
 .onboarding-spinner {
