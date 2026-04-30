@@ -10,8 +10,7 @@
  */
 import posthog, { type PostHog } from 'posthog-js'
 import type { TelemetryContext } from './telemetry'
-
-const DEFAULT_POSTHOG_HOST = 'https://us.i.posthog.com'
+import { DEFAULT_POSTHOG_API_KEY, DEFAULT_POSTHOG_HOST, isPostHogFlagDisabled as isFlagDisabled } from '../../../shared/posthogConfig'
 
 interface PosthogInitOptions {
   appVersion: string
@@ -24,12 +23,8 @@ interface PosthogInitOptions {
 let initialized = false
 let client: PostHog | null = null
 
-function isFlagDisabled(value: string | undefined): boolean {
-  return ['0', 'false', 'off'].includes((value || '').trim().toLowerCase())
-}
-
 function readApiKey(): string {
-  return (import.meta.env.VITE_POSTHOG_API_KEY || '').trim()
+  return (import.meta.env.VITE_POSTHOG_API_KEY || DEFAULT_POSTHOG_API_KEY).trim()
 }
 
 function readHost(): string {

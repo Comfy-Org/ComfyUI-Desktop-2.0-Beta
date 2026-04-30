@@ -21,6 +21,7 @@ import path from 'path'
 import { PostHog } from 'posthog-node'
 import { configDir } from './paths'
 import { readFileSafe, writeFileSafe } from './safe-file'
+import { DEFAULT_POSTHOG_API_KEY, DEFAULT_POSTHOG_HOST, isPostHogFlagDisabled as isFlagDisabled } from '../../shared/posthogConfig'
 
 export type TelemetryValue = boolean | number | string | null | undefined
 export type TelemetryContext = Record<string, TelemetryValue | TelemetryValue[]>
@@ -31,14 +32,9 @@ interface PostHogConfig {
   enabled: boolean
 }
 
-const DEFAULT_POSTHOG_HOST = 'https://us.i.posthog.com'
-
-function isFlagDisabled(value: string | undefined): boolean {
-  return ['0', 'false', 'off'].includes((value || '').trim().toLowerCase())
-}
 
 function readPostHogConfig(): PostHogConfig {
-  const apiKey = (process.env['POSTHOG_API_KEY'] || '').trim()
+  const apiKey = (process.env['POSTHOG_API_KEY'] || DEFAULT_POSTHOG_API_KEY).trim()
   const host = (process.env['POSTHOG_HOST'] || DEFAULT_POSTHOG_HOST).trim()
   const enabled = !isFlagDisabled(process.env['POSTHOG_ENABLED']) && apiKey.length > 0
   return { apiKey, host, enabled }
