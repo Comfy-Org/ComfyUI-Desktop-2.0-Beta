@@ -47,6 +47,12 @@ export function initPostHog(opts: PosthogInitOptions): void {
       autocapture: false,
       // Session recording is gated behind a remote feature flag — see main.ts
       disable_session_recording: !opts.enableSessionRecording,
+      // Surveys are remotely toggleable via the PostHog dashboard, but only
+      // when the user has consented to telemetry. This is enforced by
+      // tracking consent in `disable_surveys` here and in setPostHogConsent
+      // below — PostHog's surveys do NOT honor `opt_out_capturing()` outside
+      // of `cookieless_mode`, so we have to wire the gate ourselves.
+      disable_surveys: !opts.consent,
       persistence: 'localStorage+cookie',
       loaded: (ph) => {
         ph.register({
@@ -107,6 +113,21 @@ export function setPostHogConsent(enabled: boolean): void {
     else client.opt_out_capturing()
   } catch {
     // ignore
+  }
+  // Keep `disable_surveys` in lock-step with consent. PostHog's surveys
+  // module ignores `opt_out_capturing()` outside cookieless mode, so the
+  // only reliable way to suppress dashboard-defined surveys for an
+  // opted-out user is to flip the config flag on every consent change.
+  // When opting back in, ask the surveys module to (re-)load so dashboard
+  // surveys can appear without requiring a relaunch.
+  try {
+    client.set_config({ disable_surveys: !enabled })
+    if (enabled) {
+      const surveys = (client as unknown as { surveys?: { loadIfEnabled?: () => void } }).surveys
+      surveys?.loadIfEnabled?.()
+    }
+  } catch {
+    // ignore – telemetry must never break the app
   }
 }
 
