@@ -31,7 +31,7 @@ import { TITLEBAR_HEIGHT, TRAFFIC_LIGHT_POSITION, titleBarOverlayForTheme, comfy
 import { resolveTheme, sourceMap } from './lib/ipc/shared'
 import * as mainTelemetry from './lib/telemetry'
 import { getDeviceId } from './lib/deviceId'
-import { scrubPII } from './lib/piiScrub'
+import { scrubAll } from './lib/piiScrub'
 
 todesktop.init({ autoUpdater: false })
 
@@ -200,8 +200,8 @@ function serializeUnknownError(error: unknown): { message: string; stack?: strin
 function forwardDatadogError(payload: DatadogForwardedError): void {
   const scrubbed: DatadogForwardedError = {
     ...payload,
-    message: scrubPII(payload.message),
-    stack: payload.stack ? scrubPII(payload.stack) : undefined,
+    message: scrubAll(payload.message),
+    stack: payload.stack ? scrubAll(payload.stack) : undefined,
     // Mark this error as already captured by main-process PostHog so the
     // renderer's `onDatadogError` listener routes it to Datadog only and
     // we don't double-count exceptions in PostHog.

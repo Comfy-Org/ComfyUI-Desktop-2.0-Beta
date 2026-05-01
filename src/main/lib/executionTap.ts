@@ -28,7 +28,7 @@
  */
 import * as installationsApi from '../installations'
 import * as telemetry from './telemetry'
-import { scrubPII } from './piiScrub'
+import { scrubAll } from './piiScrub'
 
 /**
  * Traceback collection state. We collect until a blank line follows an
@@ -51,9 +51,12 @@ interface TapState {
   tracebackBuffer: string[]
   tracebackChars: number
   tracebackPhase: TracebackPhase
-  // Re-uses one shared sample bucket across started/completed/error so a
-  // sampled-out prompt is dropped consistently.
-  sampleDropped: number
+  // FIFO queue of per-prompt sample decisions (`true` = sampled in, `false` =
+  // sampled out). ComfyUI runs prompts strictly serially, so completions and
+  // errors arrive in the same order their `got prompt` did. Pushed on each
+  // start, shifted on each terminal event so a sampled-out prompt is dropped
+  // consistently across started/completed/error.
+  sampleResults: boolean[]
 }
 
 const TRACEBACK_START = /^Traceback \(most recent call last\):/
@@ -98,7 +101,7 @@ export function createExecutionTap(opts: {
     tracebackBuffer: [],
     tracebackChars: 0,
     tracebackPhase: 'none',
-    sampleDropped: 0,
+    sampleResults: [],
   }
 
   const baseContext = {
@@ -119,6 +122,17 @@ export function createExecutionTap(opts: {
   function consumePromptStart(): number | null {
     const ts = state.promptStartTimes.shift()
     return ts === undefined ? null : Date.now() - ts
+  }
+
+  /**
+   * Pop the matching sample-decision for the current terminal event.
+   * Returns `true` if the prompt was sampled in (or if no decision was
+   * recorded — fail-open so terminal events that arrive before any
+   * `got prompt` was seen are not silently swallowed).
+   */
+  function consumeSampleResult(): boolean {
+    if (state.sampleResults.length === 0) return true
+    return state.sampleResults.shift()!
   }
 
   function emitFirstCompletedIfNeeded(): void {
@@ -156,10 +170,11 @@ export function createExecutionTap(opts: {
       }
     }
     const errorClass = exceptionLine.split(':')[0]?.trim() || 'unknown'
-    const scrubbedMessage = scrubPII(exceptionLine).slice(0, ERROR_MESSAGE_MAX)
+    const scrubbedMessage = scrubAll(exceptionLine).slice(0, ERROR_MESSAGE_MAX)
     state.errorCount++
     // An error consumes a pending start so wall-clock pairing stays sane.
     consumePromptStart()
+    consumeSampleResult()
     telemetry.emit('launcher.execution.error', {
       ...baseContext,
       error_class: errorClass.slice(0, ERROR_CLASS_MAX),
@@ -191,10 +206,14 @@ export function createExecutionTap(opts: {
     if (trimmed.length === 0) return
 
     if (PROMPT_GOT.test(trimmed)) {
-      if (!shouldSample()) {
-        state.sampleDropped++
-        return
+      const sampledIn = shouldSample()
+      state.sampleResults.push(sampledIn)
+      // Bound the queue to the same cap as promptStartTimes so a runaway
+      // mismatch can't grow it forever.
+      while (state.sampleResults.length > MAX_PENDING_PROMPTS) {
+        state.sampleResults.shift()
       }
+      if (!sampledIn) return
       state.startedCount++
       pushPromptStart()
       telemetry.emit('launcher.execution.started', {
@@ -206,10 +225,7 @@ export function createExecutionTap(opts: {
 
     const doneMatch = trimmed.match(PROMPT_DONE)
     if (doneMatch?.groups) {
-      if (state.sampleDropped > 0 && state.startedCount === 0) {
-        state.sampleDropped--
-        return
-      }
+      if (!consumeSampleResult()) return
       const seconds = Number(doneMatch.groups['seconds'])
       const wallMs = consumePromptStart()
       state.completedCount++
@@ -225,6 +241,7 @@ export function createExecutionTap(opts: {
 
     const validationMatch = trimmed.match(VALIDATION_FAIL)
     if (validationMatch?.groups) {
+      if (!consumeSampleResult()) return
       state.errorCount++
       consumePromptStart()
       telemetry.emit('launcher.execution.error', {

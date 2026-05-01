@@ -189,4 +189,74 @@ describe('executionTap', () => {
     expect(events).toContain('launcher.execution.started')
     expect(events).toContain('launcher.execution.completed')
   })
+
+  it('redacts Bearer tokens and api keys from traceback messages (secret scrub)', () => {
+    const bearer = 'Bearer ' + 'a'.repeat(30)
+    const apiKey = 's' + 'k-' + 'a'.repeat(24)
+    const tap = createExecutionTap({ installationId: 'inst-1' })
+    const tracebackLines = [
+      'Traceback (most recent call last):',
+      '  File ' + JSON.stringify('x.py') + ', line 1, in <module>',
+      '    raise RuntimeError(' + JSON.stringify(bearer + ' was rejected, ' + apiKey + ' also bad') + ')',
+      'RuntimeError: ' + bearer + ' was rejected, ' + apiKey + ' also bad',
+      '',
+      'next-line',
+    ]
+    tap.ingest(tracebackLines.join('\n'), 'stderr')
+    const err = captured.find((c) => c.event === 'launcher.execution.error')
+    expect(err).toBeDefined()
+    const msg = String(err!.ctx['error_message'])
+    expect(msg).toContain('Bearer ' + '[' + 'REDACTED' + ']')
+    expect(msg).not.toContain('a'.repeat(30))
+    expect(msg).not.toContain(apiKey)
+    expect(msg).toContain('[' + 'REDACTED' + ']')
+  })
+
+  it('pairs sample decisions to terminal events FIFO (mid-session sample-out is honored)', () => {
+    // Force sampling to drop only the SECOND prompt, not the first or third.
+    let promptIdx = 0
+    const sampleDecisions = [true, false, true]
+    vi.spyOn(telemetry, 'getFlag').mockImplementation((name: string, fallback?: unknown) => {
+      if (name === 'launcher.execution_telemetry.enabled') return true
+      if (name === 'launcher.execution_telemetry.sample_rate') return 1
+      return fallback
+    })
+    const randomSpy = vi.spyOn(Math, 'random').mockImplementation(() => {
+      // shouldSample uses Math.random() < rate; we hijack by also stubbing
+      // the rate via the queue: since rate is 1 here, shouldSample short-
+      // circuits to true. Override rate to 0.5 so Math.random gates it.
+      return 0
+    })
+    // Re-mock with a controllable rate so Math.random actually decides
+    vi.spyOn(telemetry, 'getFlag').mockImplementation((name: string, fallback?: unknown) => {
+      if (name === 'launcher.execution_telemetry.enabled') return true
+      if (name === 'launcher.execution_telemetry.sample_rate') return 0.5
+      return fallback
+    })
+    randomSpy.mockImplementation(() => {
+      // shouldSample: Math.random() < 0.5 → true means sampled in
+      const decision = sampleDecisions[promptIdx++] ?? true
+      return decision ? 0 : 0.99
+    })
+
+    const tap = createExecutionTap({ installationId: 'inst-1' })
+    tap.ingest(
+      [
+        'got prompt',
+        'Prompt executed in 1 seconds',
+        'got prompt',
+        'Prompt executed in 1 seconds',
+        'got prompt',
+        'Prompt executed in 1 seconds',
+        '',
+      ].join('\n'),
+      'stdout',
+    )
+    const started = captured.filter((c) => c.event === 'launcher.execution.started')
+    const completed = captured.filter((c) => c.event === 'launcher.execution.completed')
+    // Exactly two pairs should make it through (prompt 1 and 3); prompt 2 is
+    // dropped at BOTH the start and the completion stages.
+    expect(started.length).toBe(2)
+    expect(completed.length).toBe(2)
+  })
 })
