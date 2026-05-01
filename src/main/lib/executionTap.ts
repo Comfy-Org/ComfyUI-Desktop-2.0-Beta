@@ -14,10 +14,10 @@
  *
  * The per-install `firstRunAt` flag mirrors legacy desktop's once-ever
  * `execution:completed` semantic. It is set on the first successful prompt
- * and emitted as `launcher.execution.first_completed`.
+ * and emitted as `desktop2.execution.first_completed`.
  *
- * All emissions are gated by the `launcher.execution_telemetry.enabled` and
- * `launcher.execution_telemetry.sample_rate` feature flags.
+ * All emissions are gated by the `desktop2.execution_telemetry.enabled` and
+ * `desktop2.execution_telemetry.sample_rate` feature flags.
  *
  * Defensive bounds:
  *   - `promptStartTimes` is capped to avoid leaking when starts and
@@ -72,11 +72,11 @@ const ERROR_MESSAGE_MAX = 500
 const ERROR_CLASS_MAX = 80
 
 export function isTelemetryEnabled(): boolean {
-  return telemetry.getFlag<boolean>('launcher.execution_telemetry.enabled', true) === true
+  return telemetry.getFlag<boolean>('desktop2.execution_telemetry.enabled', true) === true
 }
 
 function shouldSample(): boolean {
-  const rate = Number(telemetry.getFlag('launcher.execution_telemetry.sample_rate', 1))
+  const rate = Number(telemetry.getFlag('desktop2.execution_telemetry.sample_rate', 1))
   if (!Number.isFinite(rate) || rate >= 1) return true
   if (rate <= 0) return false
   return Math.random() < rate
@@ -143,7 +143,7 @@ export function createExecutionTap(opts: {
         if (!inst || (inst as Record<string, unknown>)['firstRunAt']) return
         const firstRunAt = new Date().toISOString()
         await installationsApi.update(state.installationId, { firstRunAt })
-        telemetry.emit('launcher.execution.first_completed', {
+        telemetry.emit('desktop2.execution.first_completed', {
           ...baseContext,
           first_run_at: firstRunAt,
         })
@@ -175,7 +175,7 @@ export function createExecutionTap(opts: {
     // An error consumes a pending start so wall-clock pairing stays sane.
     consumePromptStart()
     consumeSampleResult()
-    telemetry.emit('launcher.execution.error', {
+    telemetry.emit('desktop2.execution.error', {
       ...baseContext,
       error_class: errorClass.slice(0, ERROR_CLASS_MAX),
       error_message: scrubbedMessage,
@@ -216,7 +216,7 @@ export function createExecutionTap(opts: {
       if (!sampledIn) return
       state.startedCount++
       pushPromptStart()
-      telemetry.emit('launcher.execution.started', {
+      telemetry.emit('desktop2.execution.started', {
         ...baseContext,
         started_count: state.startedCount,
       })
@@ -229,7 +229,7 @@ export function createExecutionTap(opts: {
       const seconds = Number(doneMatch.groups['seconds'])
       const wallMs = consumePromptStart()
       state.completedCount++
-      telemetry.emit('launcher.execution.completed', {
+      telemetry.emit('desktop2.execution.completed', {
         ...baseContext,
         duration_seconds: Number.isFinite(seconds) ? seconds : null,
         wall_clock_ms: wallMs,
@@ -244,7 +244,7 @@ export function createExecutionTap(opts: {
       if (!consumeSampleResult()) return
       state.errorCount++
       consumePromptStart()
-      telemetry.emit('launcher.execution.error', {
+      telemetry.emit('desktop2.execution.error', {
         ...baseContext,
         error_class: 'validation_failed',
         error_count: state.errorCount,
@@ -319,7 +319,7 @@ export function createExecutionTap(opts: {
       }
       // Always emit a per-session summary so analytics has a row even when
       // no individual events were emitted (e.g. when sample_rate < 1).
-      telemetry.emit('launcher.execution.session_summary', {
+      telemetry.emit('desktop2.execution.session_summary', {
         ...baseContext,
         started_count: state.startedCount,
         completed_count: state.completedCount,

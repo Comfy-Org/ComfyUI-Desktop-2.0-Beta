@@ -143,18 +143,18 @@ export async function restoreSnapshotIntoInstallation(
 
     // Restore ComfyUI version
     sendOutput('\n── Restore ComfyUI Version ──\n')
-    const comfyResult = await telemetry.trackedStep('launcher.snapshot.restore_comfyui_version', restoreContext, async () => {
+    const comfyResult = await telemetry.trackedStep('desktop2.snapshot.restore_comfyui_version', restoreContext, async () => {
       return restoreComfyUIVersion(freshInst.installPath, targetSnapshot, sendOutput)
     })
 
     sendOutput('\n── Restore Nodes ──\n')
-    await telemetry.trackedStep('launcher.snapshot.restore_custom_nodes', restoreContext, async () => {
+    await telemetry.trackedStep('desktop2.snapshot.restore_custom_nodes', restoreContext, async () => {
       await restoreCustomNodes(freshInst.installPath, freshInst, targetSnapshot, sendProgress, sendOutput, signal, settings.getMirrorConfig())
     })
 
     if (!signal.aborted && !targetSnapshot.skipPipSync) {
       sendOutput('\n── Restore Packages ──\n')
-      await telemetry.trackedStep('launcher.snapshot.restore_pip_packages', restoreContext, async () => {
+      await telemetry.trackedStep('desktop2.snapshot.restore_pip_packages', restoreContext, async () => {
         await restorePipPackages(freshInst.installPath, freshInst, targetSnapshot,
           (phase, data) => sendProgress(phase === 'restore' ? 'restore-pip' : phase, data),
           sendOutput, signal, settings.getMirrorConfig())
@@ -199,7 +199,7 @@ async function copyMigrationData(
 
   // User data
   if (sourcePaths.userDir && fs.existsSync(sourcePaths.userDir)) {
-    await telemetry.trackedStep('launcher.migrate.user_files', {}, async () => {
+    await telemetry.trackedStep('desktop2.migrate.user_files', {}, async () => {
       sendProgress('migrate', { percent: 0, status: labels.userData })
       const dstUserDir = path.join(destComfyUIDir, 'user')
       await mergeDirFlat(sourcePaths.userDir!, dstUserDir, (copied, skipped, fileTotal) => {
@@ -211,7 +211,7 @@ async function copyMigrationData(
 
   // Input
   if (sourcePaths.inputDir && fs.existsSync(sourcePaths.inputDir)) {
-    await telemetry.trackedStep('launcher.migrate.input', {}, async () => {
+    await telemetry.trackedStep('desktop2.migrate.input', {}, async () => {
       const dstInput = (settings.get('inputDir') as string | undefined) || settings.defaults.inputDir
       sendProgress('migrate', { percent: 40, status: labels.input })
       await mergeDirFlat(sourcePaths.inputDir!, dstInput)
@@ -220,7 +220,7 @@ async function copyMigrationData(
 
   // Output
   if (sourcePaths.outputDir && fs.existsSync(sourcePaths.outputDir)) {
-    await telemetry.trackedStep('launcher.migrate.output', {}, async () => {
+    await telemetry.trackedStep('desktop2.migrate.output', {}, async () => {
       const dstOutput = (settings.get('outputDir') as string | undefined) || settings.defaults.outputDir
       sendProgress('migrate', { percent: 60, status: labels.output })
       await mergeDirFlat(sourcePaths.outputDir!, dstOutput)
@@ -229,7 +229,7 @@ async function copyMigrationData(
 
   // Models — add to shared paths, no copy
   if (sourcePaths.modelsDir) {
-    await telemetry.trackedStep('launcher.migrate.models', {}, async () => {
+    await telemetry.trackedStep('desktop2.migrate.models', {}, async () => {
       sendProgress('migrate', { percent: 90, status: labels.models })
       const resolved = path.resolve(sourcePaths.modelsDir!)
       const currentModelsDirs = (settings.get('modelsDirs') as string[] | undefined) || [...settings.defaults.modelsDirs]
@@ -298,13 +298,13 @@ export async function migrateToStandaloneFromSnapshot(
     variant_id: variantId,
   }
 
-  await telemetry.trackedStep('launcher.install.standalone', installContext, async () => {
+  await telemetry.trackedStep('desktop2.install.standalone', installContext, async () => {
     await standaloneSource.install!(installRecord, { sendProgress, download, cache, extract, signal })
   })
 
   const update = (data: Record<string, unknown>): Promise<void> =>
     installations.update(entry!.id, data).then(() => {})
-  await telemetry.trackedStep('launcher.install.post_install', installContext, async () => {
+  await telemetry.trackedStep('desktop2.install.post_install', installContext, async () => {
     await standaloneSource.postInstall!(installRecord, { sendProgress, update })
   })
 

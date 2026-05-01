@@ -20,7 +20,7 @@ export const useDownloadStore = defineStore('downloads', () => {
       isTerminalModelDownloadStatus(progress.status)
       && (!previous || previous.status !== progress.status)
     ) {
-      emitTelemetryAction('launcher.model_download.result', {
+      emitTelemetryAction('desktop2.model_download.result', {
         result: progress.status,
         directory_bucket: toModelDirectoryBucket(progress.directory),
         file_ext: toFileExtension(progress.filename),

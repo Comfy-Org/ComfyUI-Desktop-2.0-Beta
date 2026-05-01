@@ -38,7 +38,7 @@ export async function handleMigrateToStandalone({ event, installationId, inst, a
       uniqueName,
       ensureDefaultPrimary,
     }
-    const result = await telemetry.trackedStep('launcher.migrate.flow', flowContext, async () => {
+    const result = await telemetry.trackedStep('desktop2.migrate.flow', flowContext, async () => {
       return inst.sourceId === 'desktop'
         ? performDesktopMigration(actionData, migrationTools, { id: inst.id, name: inst.name })
         : performLocalMigration(inst, actionData, migrationTools)

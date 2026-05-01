@@ -16,7 +16,7 @@ const localPaths = ref<string[]>(Array.isArray(props.field.value) ? [...props.fi
 
 async function updateSetting(value: string | boolean | number | string[]): Promise<void> {
   await window.api.setSetting(props.field.id, value)
-  emitTelemetryAction('launcher.settings.changed', {
+  emitTelemetryAction('desktop2.settings.changed', {
     setting_key: props.field.id,
     value_kind: props.field.type || 'text',
     bool_value: typeof value === 'boolean' ? value : undefined,

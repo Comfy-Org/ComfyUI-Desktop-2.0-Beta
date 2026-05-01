@@ -56,7 +56,7 @@ export function registerAppHandlers(): void {
     const result = await validateHardware()
     // Emit a single event whether hardware passes or fails so we can build
     // funnels like "% of users who hit hardware-not-supported during install".
-    mainTelemetry.emit('launcher.install.validation', {
+    mainTelemetry.emit('desktop2.install.validation', {
       passed: result.supported,
       platform: process.platform,
       arch: process.arch,

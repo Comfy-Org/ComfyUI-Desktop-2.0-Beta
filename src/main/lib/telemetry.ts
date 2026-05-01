@@ -50,15 +50,15 @@ let initialized = false
 const FLAG_CACHE_FILE = 'telemetry-flags.json'
 const flagDefaults: Record<string, boolean | string | number> = {
   // Master kill switch for log-based execution telemetry
-  'launcher.execution_telemetry.enabled': true,
+  'desktop2.execution_telemetry.enabled': true,
   // 0..1 sampling applied to per-prompt execution events
-  'launcher.execution_telemetry.sample_rate': 1,
+  'desktop2.execution_telemetry.sample_rate': 1,
   // Comma-separated list of event names to silence at the SDK level
-  'launcher.disabled_events': '',
+  'desktop2.disabled_events': '',
   // Kill switch for posthog session recording (renderer-only flag, exposed here for parity)
-  'launcher.session_replay.enabled': false,
-  // Maximum chars of ComfyUI boot stderr forwarded with launcher.comfyui.boot_log
-  'launcher.boot_log_max_chars': 8192,
+  'desktop2.session_replay.enabled': false,
+  // Maximum chars of ComfyUI boot stderr forwarded with desktop2.comfyui.boot_log
+  'desktop2.boot_log_max_chars': 8192,
 }
 let flagsCache: Record<string, unknown> = { ...flagDefaults }
 
@@ -96,7 +96,7 @@ export function getFlag<T = unknown>(name: string, fallback?: T): T {
 }
 
 function disabledEventNames(): Set<string> {
-  const raw = String(getFlag('launcher.disabled_events', '') || '')
+  const raw = String(getFlag('desktop2.disabled_events', '') || '')
   return new Set(raw.split(',').map((s) => s.trim()).filter(Boolean))
 }
 
@@ -130,7 +130,7 @@ export interface InitOptions {
  * Note: the session-start event is intentionally NOT emitted here. The
  * `distinctId` is unknown until `identify()` runs, and emitting before the
  * first feature-flag refresh would ignore a remotely configured
- * `launcher.disabled_events` allow/block list. `identify()` issues the
+ * `desktop2.disabled_events` allow/block list. `identify()` issues the
  * session-start event after flags are bootstrapped.
  */
 export function initTelemetry(opts: InitOptions): void {
@@ -193,7 +193,7 @@ export async function identify(
     await Promise.race([refresh, timeout])
   }
   if (pendingSessionStart) {
-    capture('launcher.session.started', pendingSessionStart)
+    capture('desktop2.session.started', pendingSessionStart)
     pendingSessionStart = null
   }
 }
@@ -318,7 +318,7 @@ export async function shutdown(reason: string): Promise<void> {
   if (!client) return
   const uptimeMs = Date.now() - bootstrapTimeMs
   try {
-    capture('launcher.session.ended', {
+    capture('desktop2.session.ended', {
       reason,
       uptime_ms: uptimeMs,
       uptime_seconds: Math.round(uptimeMs / 1000),

@@ -200,7 +200,7 @@ function handleClearPreview(): void {
 
 function selectVariant(option: FieldOption): void {
   selectedVariant.value = option
-  emitTelemetryAction('launcher.install.variant.selected', {
+  emitTelemetryAction('desktop2.install.variant.selected', {
     variant_bucket: toVariantBucket((option.data?.variantId as string | undefined) || option.value),
     recommended: !!option.recommended,
     flow: 'snapshot',

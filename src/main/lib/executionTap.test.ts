@@ -23,8 +23,8 @@ describe('executionTap', () => {
       captured.push({ event, ctx: ctx as Record<string, unknown> })
     })
     vi.spyOn(telemetry, 'getFlag').mockImplementation((name: string, fallback?: unknown) => {
-      if (name === 'launcher.execution_telemetry.enabled') return true
-      if (name === 'launcher.execution_telemetry.sample_rate') return 1
+      if (name === 'desktop2.execution_telemetry.enabled') return true
+      if (name === 'desktop2.execution_telemetry.sample_rate') return 1
       return fallback
     })
   })
@@ -36,14 +36,14 @@ describe('executionTap', () => {
   it('emits started when "got prompt" appears in stdout', () => {
     const tap = createExecutionTap({ installationId: 'inst-1' })
     tap.ingest('got prompt\n', 'stdout')
-    expect(captured.map((c) => c.event)).toEqual(['launcher.execution.started'])
+    expect(captured.map((c) => c.event)).toEqual(['desktop2.execution.started'])
     expect(captured[0]!.ctx).toMatchObject({ installation_id: 'inst-1', started_count: 1 })
   })
 
   it('emits completed with parsed duration_seconds', () => {
     const tap = createExecutionTap({ installationId: 'inst-1' })
     tap.ingest('got prompt\nPrompt executed in 12.5 seconds\n', 'stdout')
-    const completed = captured.find((c) => c.event === 'launcher.execution.completed')
+    const completed = captured.find((c) => c.event === 'desktop2.execution.completed')
     expect(completed).toBeDefined()
     expect(completed!.ctx).toMatchObject({
       installation_id: 'inst-1',
@@ -55,7 +55,7 @@ describe('executionTap', () => {
   it('emits validation_failed errors when prompt validation fails', () => {
     const tap = createExecutionTap({ installationId: 'inst-1' })
     tap.ingest('Failed to validate prompt for output 42:\n', 'stdout')
-    const err = captured.find((c) => c.event === 'launcher.execution.error')
+    const err = captured.find((c) => c.event === 'desktop2.execution.error')
     expect(err).toBeDefined()
     expect(err!.ctx).toMatchObject({ error_class: 'validation_failed', node_id: '42' })
   })
@@ -76,7 +76,7 @@ describe('executionTap', () => {
       ].join('\n'),
       'stderr',
     )
-    const errs = captured.filter((c) => c.event === 'launcher.execution.error')
+    const errs = captured.filter((c) => c.event === 'desktop2.execution.error')
     expect(errs.length).toBe(1)
     expect(errs[0]!.ctx).toMatchObject({ error_class: 'RuntimeError' })
   })
@@ -103,7 +103,7 @@ describe('executionTap', () => {
       ].join('\n'),
       'stderr',
     )
-    const errs = captured.filter((c) => c.event === 'launcher.execution.error')
+    const errs = captured.filter((c) => c.event === 'desktop2.execution.error')
     const classes = errs.map((e) => e.ctx['error_class'])
     expect(classes).toEqual(['ValueError', 'RuntimeError'])
   })
@@ -121,7 +121,7 @@ describe('executionTap', () => {
       ].join('\n'),
       'stderr',
     )
-    const errs = captured.filter((c) => c.event === 'launcher.execution.error')
+    const errs = captured.filter((c) => c.event === 'desktop2.execution.error')
     expect(errs.length).toBe(1)
     const message = String(errs[0]!.ctx.error_message)
     expect(message).not.toContain('alice')
@@ -140,10 +140,10 @@ describe('executionTap', () => {
       'stderr',
     )
     // Without flush, no error emitted yet (no blank-line boundary).
-    expect(captured.filter((c) => c.event === 'launcher.execution.error')).toHaveLength(0)
+    expect(captured.filter((c) => c.event === 'desktop2.execution.error')).toHaveLength(0)
     tap.flushSummary()
-    expect(captured.filter((c) => c.event === 'launcher.execution.error')).toHaveLength(1)
-    expect(captured.filter((c) => c.event === 'launcher.execution.session_summary')).toHaveLength(1)
+    expect(captured.filter((c) => c.event === 'desktop2.execution.error')).toHaveLength(1)
+    expect(captured.filter((c) => c.event === 'desktop2.execution.session_summary')).toHaveLength(1)
   })
 
   it('caps promptStartTimes so unpaired starts cannot grow unbounded', () => {
@@ -152,7 +152,7 @@ describe('executionTap', () => {
     for (let i = 0; i < 1000; i++) tap.ingest('got prompt\n', 'stdout')
     // Then complete one — wall_clock_ms should still be a finite number.
     tap.ingest('Prompt executed in 1 seconds\n', 'stdout')
-    const completed = captured.find((c) => c.event === 'launcher.execution.completed')
+    const completed = captured.find((c) => c.event === 'desktop2.execution.completed')
     expect(completed).toBeDefined()
     expect(typeof completed!.ctx.wall_clock_ms).toBe('number')
   })
@@ -160,7 +160,7 @@ describe('executionTap', () => {
   it('emits a session_summary on flush even when nothing was captured', () => {
     const tap = createExecutionTap({ installationId: 'inst-1' })
     tap.flushSummary()
-    const summary = captured.find((c) => c.event === 'launcher.execution.session_summary')
+    const summary = captured.find((c) => c.event === 'desktop2.execution.session_summary')
     expect(summary).toBeDefined()
     expect(summary!.ctx).toMatchObject({
       installation_id: 'inst-1',
@@ -172,7 +172,7 @@ describe('executionTap', () => {
 
   it('respects the kill switch feature flag', () => {
     vi.spyOn(telemetry, 'getFlag').mockImplementation((name: string, fallback?: unknown) => {
-      if (name === 'launcher.execution_telemetry.enabled') return false
+      if (name === 'desktop2.execution_telemetry.enabled') return false
       return fallback
     })
     const tap = createExecutionTap({ installationId: 'inst-1' })
@@ -186,8 +186,8 @@ describe('executionTap', () => {
     tap.ingest('got pro', 'stdout')
     tap.ingest('mpt\nPrompt executed in 2 seconds\n', 'stdout')
     const events = captured.map((c) => c.event)
-    expect(events).toContain('launcher.execution.started')
-    expect(events).toContain('launcher.execution.completed')
+    expect(events).toContain('desktop2.execution.started')
+    expect(events).toContain('desktop2.execution.completed')
   })
 
   it('redacts Bearer tokens and api keys from traceback messages (secret scrub)', () => {
@@ -203,7 +203,7 @@ describe('executionTap', () => {
       'next-line',
     ]
     tap.ingest(tracebackLines.join('\n'), 'stderr')
-    const err = captured.find((c) => c.event === 'launcher.execution.error')
+    const err = captured.find((c) => c.event === 'desktop2.execution.error')
     expect(err).toBeDefined()
     const msg = String(err!.ctx['error_message'])
     expect(msg).toContain('Bearer ' + '[' + 'REDACTED' + ']')
@@ -217,8 +217,8 @@ describe('executionTap', () => {
     let promptIdx = 0
     const sampleDecisions = [true, false, true]
     vi.spyOn(telemetry, 'getFlag').mockImplementation((name: string, fallback?: unknown) => {
-      if (name === 'launcher.execution_telemetry.enabled') return true
-      if (name === 'launcher.execution_telemetry.sample_rate') return 1
+      if (name === 'desktop2.execution_telemetry.enabled') return true
+      if (name === 'desktop2.execution_telemetry.sample_rate') return 1
       return fallback
     })
     const randomSpy = vi.spyOn(Math, 'random').mockImplementation(() => {
@@ -229,8 +229,8 @@ describe('executionTap', () => {
     })
     // Re-mock with a controllable rate so Math.random actually decides
     vi.spyOn(telemetry, 'getFlag').mockImplementation((name: string, fallback?: unknown) => {
-      if (name === 'launcher.execution_telemetry.enabled') return true
-      if (name === 'launcher.execution_telemetry.sample_rate') return 0.5
+      if (name === 'desktop2.execution_telemetry.enabled') return true
+      if (name === 'desktop2.execution_telemetry.sample_rate') return 0.5
       return fallback
     })
     randomSpy.mockImplementation(() => {
@@ -252,8 +252,8 @@ describe('executionTap', () => {
       ].join('\n'),
       'stdout',
     )
-    const started = captured.filter((c) => c.event === 'launcher.execution.started')
-    const completed = captured.filter((c) => c.event === 'launcher.execution.completed')
+    const started = captured.filter((c) => c.event === 'desktop2.execution.started')
+    const completed = captured.filter((c) => c.event === 'desktop2.execution.completed')
     // Exactly two pairs should make it through (prompt 1 and 3); prompt 2 is
     // dropped at BOTH the start and the completion stages.
     expect(started.length).toBe(2)

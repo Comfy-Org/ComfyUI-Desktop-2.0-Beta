@@ -161,7 +161,7 @@ async function initializeProviders(): Promise<void> {
   }
 
   if (isDatadogInitialized || isPostHogInitialized()) {
-    trackTelemetryAction('launcher.session.started', {
+    trackTelemetryAction('desktop2.session.started', {
       app_env: datadogEnv,
       app_version: appVersion,
       is_packaged: !import.meta.env.DEV,
@@ -176,7 +176,7 @@ async function initializeProviders(): Promise<void> {
     }).catch(() => {})
     window.api.getSystemInfo().then(async (info) => {
       const ctx = info as unknown as Record<string, string | number | boolean | null | undefined>
-      trackTelemetryAction('launcher.session.system_info', ctx)
+      trackTelemetryAction('desktop2.session.system_info', ctx)
       // Promote system info to PostHog profile properties so it's queryable
       // across sessions without joining against a per-session event.
       try {
@@ -200,7 +200,7 @@ async function initializeProviders(): Promise<void> {
   // Session-replay kill switch is feature-flagged. We rely on the SDK's
   // built-in flag fetch on init — by the time the first event is sent the
   // flag should be available. If the user later opts in we re-check.
-  if (isPostHogInitialized() && isFeatureFlagEnabled('launcher.session_replay.enabled')) {
+  if (isPostHogInitialized() && isFeatureFlagEnabled('desktop2.session_replay.enabled')) {
     // Lazy enable session recording. posthog-js exposes startSessionRecording.
     try {
       // @ts-expect-error startSessionRecording exists on PostHog runtime
@@ -300,7 +300,7 @@ window.api.onDatadogError((data) => {
 })
 
 window.api.onComfyExited((data) => {
-  trackTelemetryAction('launcher.comfyui.exited', {
+  trackTelemetryAction('desktop2.comfyui.exited', {
     installation_id: data.installationId,
     crashed: data.crashed ?? false,
     exit_code: data.exitCode ?? null,
@@ -309,7 +309,7 @@ window.api.onComfyExited((data) => {
 })
 
 window.api.onComfyBootLog((data) => {
-  trackTelemetryAction('launcher.comfyui.boot_log', {
+  trackTelemetryAction('desktop2.comfyui.boot_log', {
     installation_id: data.installationId,
     boot_stderr: data.bootStderr,
   })
@@ -320,7 +320,7 @@ window.api.onInstanceStarted((data) => {
   window.api.getInstallationDdContext(data.installationId).then((ctx) => {
     if (!ctx) return
     const { snapshot_diffs, ...metadata } = ctx
-    trackTelemetryAction('launcher.session.installation_started', {
+    trackTelemetryAction('desktop2.session.installation_started', {
       ...(metadata as unknown as Record<string, string | number | boolean | null | undefined>),
       boot_time_ms: bootTimeMs ?? null,
     })
@@ -328,10 +328,10 @@ window.api.onInstanceStarted((data) => {
       // snapshot_diffs is an array of objects, which Datadog/PostHog handle
       // natively; bypass the typed bridge via a fresh call.
       if (isDatadogInitialized) {
-        try { datadogRum.addAction('launcher.session.snapshot_history', { installation_id: ctx.installation_id, snapshot_diffs }) } catch {}
+        try { datadogRum.addAction('desktop2.session.snapshot_history', { installation_id: ctx.installation_id, snapshot_diffs }) } catch {}
       }
       if (isPostHogInitialized()) {
-        capturePostHog('launcher.session.snapshot_history', { installation_id: ctx.installation_id, snapshot_diffs } as unknown as TelemetryContext)
+        capturePostHog('desktop2.session.snapshot_history', { installation_id: ctx.installation_id, snapshot_diffs } as unknown as TelemetryContext)
       }
     }
   }).catch(() => {})

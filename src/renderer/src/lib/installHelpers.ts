@@ -33,7 +33,7 @@ export function toPathGuardrail(issue: PathIssue): string {
 }
 
 export function trackGuardrailBlocked(guardrailType: string, flow: string, stage: string): void {
-  emitTelemetryAction('launcher.install.guardrail.blocked', {
+  emitTelemetryAction('desktop2.install.guardrail.blocked', {
     guardrail_type: guardrailType,
     flow,
     stage,
@@ -92,7 +92,7 @@ export async function checkNvidiaDriverOrWarn(
 }
 
 export function trackDiskWarningResponse(warningType: string, accepted: boolean, flow: string): void {
-  emitTelemetryAction('launcher.install.disk_warning.response', {
+  emitTelemetryAction('desktop2.install.disk_warning.response', {
     warning_type: warningType,
     accepted,
     flow,
