@@ -4,14 +4,20 @@ ComfyUI Desktop 2 emits telemetry through **two providers** that share a
 single event bus:
 
 - **Datadog RUM** (renderer-only) — reliability, errors, performance,
-  long tasks, user-interaction tracking, and (optional) session replay.
+  long tasks, and user-interaction tracking.
 - **PostHog** — the canonical product-analytics sink. Runs in **two
   SDKs**:
   - `posthog-node` in the **main process** — captures things the
     renderer cannot see (app start/quit, install/migrate sub-steps,
     ComfyUI execution events parsed from stdout/stderr).
   - `posthog-js` in the **renderer** — UI-originated events, user
-    identify + person profile, feature flags, optional session replay.
+    identify + person profile, feature flags.
+
+Session replay is intentionally **not** captured by either provider.
+The PostHog recorder is blocked at the CSP layer and PostHog JS is
+configured with `disable_session_recording: true`. Datadog RUM omits
+`sessionReplaySampleRate` so it defaults to off. Reintroducing replay
+on either side requires a deliberate code change in a release.
 
 Both providers receive **the same event name and the same context**
 for almost every event. The split below is therefore not _which events_
@@ -52,14 +58,14 @@ Main-process events go through `mainTelemetry.emit()`
 
 | Concern | Datadog RUM (renderer) | PostHog Node (main) | PostHog JS (renderer) |
 |---|---|---|---|
-| **Purpose** | Reliability, errors, performance, session replay | Lifecycle / install / migrate / execution events outside the renderer | UI funnel + identify + feature flags |
+| **Purpose** | Reliability, errors, performance | Lifecycle / install / migrate / execution events outside the renderer | UI funnel + identify + feature flags |
 | **App lifecycle (`session.started` / `session.ended`)** | mirrors `session.started` via bridge | **owns** both events | mirrors `session.started` |
 | **Install / migrate pipeline (`*.start` / `.end` / `.error`)** | mirrors via bridge | **owns** (via `trackedStep`) | mirrors via bridge |
 | **ComfyUI execution (`got prompt`, `Prompt executed in …`, tracebacks)** | mirrors via bridge | **owns** (via `executionTap`) | mirrors via bridge |
 | **UI clicks / view-opened / install method+variant** | **owns** (originated in Vue) | mirrors via bridge | **owns** (originated in Vue) |
 | **JS errors / unhandled rejection** | **owns** (`datadogRum.addError`) | — | mirrors as exception (`captureException`) unless `skipPostHog` |
 | **Main-process errors** | mirrored to renderer → `addError` (with `skipPostHog: true`) | **owns** (`captureException`) | suppressed (`skipPostHog`) to avoid double counting |
-| **Session replay** | configurable (`VITE_DATADOG_RUM_SESSION_REPLAY_SAMPLE_RATE`, default 0%) | — | hard-disabled (no recorder script, no CSP allowance) |
+| **Session replay** | not configured (field omitted, SDK default is off) | — | hard-disabled (no recorder script, no CSP allowance) |
 | **Long tasks / resource timing / user interactions** | **owns** (`trackResources`, `trackLongTasks`, `trackUserInteractions: true`) | — | — |
 | **Feature flags / kill switches** | — | **owns** (bootstraps + on-disk cache `telemetry-flags.json`) | — (no renderer-side flag consumers) |
 | **Distinct id** | `datadogRum.setUser({ id })` | `client.identify({ distinctId })` | `posthog.identify(id, profileProps)` (sets person-profile props) |
@@ -203,7 +209,6 @@ Defaults in `src/renderer/src/main.ts`:
 | `env` | `prod-v2` |
 | `site` | `us5.datadoghq.com` |
 | `sessionSampleRate` | `100` |
-| `sessionReplaySampleRate` | `0` |
 
 Overridable via `VITE_DATADOG_RUM_*` environment variables at build
 time. `VITE_DATADOG_RUM_ENABLED=0|false|off` disables Datadog.

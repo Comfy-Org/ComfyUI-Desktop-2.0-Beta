@@ -139,7 +139,9 @@ async function initializeProviders(): Promise<void> {
         trackingConsent: toDatadogTrackingConsent(telemetryEnabled),
         beforeSend: datadogBeforeSend,
         sessionSampleRate: parseSampleRate(import.meta.env.VITE_DATADOG_RUM_SESSION_SAMPLE_RATE, 100),
-        sessionReplaySampleRate: parseSampleRate(import.meta.env.VITE_DATADOG_RUM_SESSION_REPLAY_SAMPLE_RATE, 0),
+        // Session replay is intentionally not configured. Datadog defaults
+        // to off when the field is omitted; reintroduce only as a deliberate
+        // code change in a release.
         trackResources: true,
         trackLongTasks: true,
         trackUserInteractions: true,
