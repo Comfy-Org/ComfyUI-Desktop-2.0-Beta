@@ -52,7 +52,6 @@ const baseOpts = {
   appVersion: '0.0.0-test',
   appEnv: 'test',
   isPackaged: false,
-  enableSessionRecording: false,
 } as const
 
 describe('posthogProvider consent ↔ disable_surveys gating', () => {

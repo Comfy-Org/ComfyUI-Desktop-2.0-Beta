@@ -17,7 +17,6 @@ interface PosthogInitOptions {
   appEnv: string
   isPackaged: boolean
   consent: boolean
-  enableSessionRecording: boolean
 }
 
 let initialized = false
@@ -45,8 +44,9 @@ export function initPostHog(opts: PosthogInitOptions): void {
       opt_out_capturing_by_default: !opts.consent,
       capture_pageview: false,
       autocapture: false,
-      // Session recording is gated behind a remote feature flag — see main.ts
-      disable_session_recording: !opts.enableSessionRecording,
+      // Session recording is intentionally never enabled. The recorder script
+      // is also blocked at the CSP layer.
+      disable_session_recording: true,
       // Surveys are remotely toggleable via the PostHog dashboard, but only
       // when the user has consented to telemetry. This is enforced by
       // tracking consent in `disable_surveys` here and in setPostHogConsent
@@ -131,21 +131,4 @@ export function setPostHogConsent(enabled: boolean): void {
   }
 }
 
-export function isFeatureFlagEnabled(name: string, fallback = false): boolean {
-  if (!client) return fallback
-  try {
-    const value = client.isFeatureEnabled(name)
-    return value === undefined ? fallback : value
-  } catch {
-    return fallback
-  }
-}
 
-export function reloadPostHogFeatureFlags(): void {
-  if (!client) return
-  try {
-    client.reloadFeatureFlags()
-  } catch {
-    // ignore
-  }
-}

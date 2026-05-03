@@ -55,8 +55,6 @@ const flagDefaults: Record<string, boolean | string | number> = {
   'desktop2.execution_telemetry.sample_rate': 1,
   // Comma-separated list of event names to silence at the SDK level
   'desktop2.disabled_events': '',
-  // Kill switch for posthog session recording (renderer-only flag, exposed here for parity)
-  'desktop2.session_replay.enabled': false,
   // Maximum chars of ComfyUI boot stderr forwarded with desktop2.comfyui.boot_log
   'desktop2.boot_log_max_chars': 8192,
 }

@@ -17,7 +17,6 @@ import {
   captureExceptionPostHog,
   identifyPostHog,
   initPostHog,
-  isFeatureFlagEnabled,
   isInitialized as isPostHogInitialized,
   isPostHogConfigured,
   setPostHogConsent,
@@ -155,8 +154,6 @@ async function initializeProviders(): Promise<void> {
       appEnv: datadogEnv,
       isPackaged: !import.meta.env.DEV,
       consent,
-      // Default off – flip via remote feature flag at runtime.
-      enableSessionRecording: false,
     })
   }
 
@@ -197,16 +194,6 @@ async function initializeProviders(): Promise<void> {
     }).catch(() => {})
   }
 
-  // Session-replay kill switch is feature-flagged. We rely on the SDK's
-  // built-in flag fetch on init — by the time the first event is sent the
-  // flag should be available. If the user later opts in we re-check.
-  if (isPostHogInitialized() && isFeatureFlagEnabled('desktop2.session_replay.enabled')) {
-    // Lazy enable session recording. posthog-js exposes startSessionRecording.
-    try {
-      // @ts-expect-error startSessionRecording exists on PostHog runtime
-      window.posthog?.startSessionRecording?.()
-    } catch {}
-  }
 }
 
 window.api.onTelemetrySettingChanged((enabled) => {

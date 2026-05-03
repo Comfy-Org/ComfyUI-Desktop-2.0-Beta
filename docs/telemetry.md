@@ -59,9 +59,9 @@ Main-process events go through `mainTelemetry.emit()`
 | **UI clicks / view-opened / install method+variant** | **owns** (originated in Vue) | mirrors via bridge | **owns** (originated in Vue) |
 | **JS errors / unhandled rejection** | **owns** (`datadogRum.addError`) | — | mirrors as exception (`captureException`) unless `skipPostHog` |
 | **Main-process errors** | mirrored to renderer → `addError` (with `skipPostHog: true`) | **owns** (`captureException`) | suppressed (`skipPostHog`) to avoid double counting |
-| **Session replay** | configurable (`VITE_DATADOG_RUM_SESSION_REPLAY_SAMPLE_RATE`, default 0%) | — | gated by `desktop2.session_replay.enabled` flag |
+| **Session replay** | configurable (`VITE_DATADOG_RUM_SESSION_REPLAY_SAMPLE_RATE`, default 0%) | — | hard-disabled (no recorder script, no CSP allowance) |
 | **Long tasks / resource timing / user interactions** | **owns** (`trackResources`, `trackLongTasks`, `trackUserInteractions: true`) | — | — |
-| **Feature flags / kill switches** | — | **owns** (bootstraps + on-disk cache `telemetry-flags.json`) | reads via `isFeatureEnabled` |
+| **Feature flags / kill switches** | — | **owns** (bootstraps + on-disk cache `telemetry-flags.json`) | — (no renderer-side flag consumers) |
 | **Distinct id** | `datadogRum.setUser({ id })` | `client.identify({ distinctId })` | `posthog.identify(id, profileProps)` (sets person-profile props) |
 | **Path normalisation on errors** | yes (`normalizeRumErrorEvent`) | PII + secret scrub via `scrubAll()` | `scrubAll()` already applied upstream |
 
@@ -218,7 +218,6 @@ disk in `<configDir>/telemetry-flags.json` for offline use:
 | `desktop2.execution_telemetry.enabled` | `true` | Master kill switch for `desktop2.execution.*` events. |
 | `desktop2.execution_telemetry.sample_rate` | `1` | 0..1 sampling applied per prompt (FIFO-paired across start/done/error). |
 | `desktop2.disabled_events` | `""` | Comma-separated event-name deny list applied at the SDK boundary. |
-| `desktop2.session_replay.enabled` | `false` | Lazy-enables `posthog.startSessionRecording()`. |
 | `desktop2.boot_log_max_chars` | `8192` | Cap on `desktop2.comfyui.boot_log.boot_stderr` length. |
 
 ## PII and secret scrubbing
