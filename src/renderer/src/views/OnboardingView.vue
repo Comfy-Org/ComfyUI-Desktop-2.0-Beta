@@ -282,15 +282,20 @@ watch(
       // launch surfaces an actual error rather than a silent hang.
       const launchOk = await launchWithTimeout(id, TIMEOUT_LOCAL_LAUNCH_MS)
       if (launchOk) {
+        // Hide-fail is non-fatal here: ComfyUI is open in its own window,
+        // so the user's goal is achieved. Don't surface this as a "Try
+        // again" via retryError — that would render the recovery UX while
+        // the new window is already running, confusing them into thinking
+        // the launch failed. Telemetry only; emit complete unconditionally.
         try {
           await window.api.hideLauncherWindow()
-          emit('complete')
         } catch (err) {
-          // Launcher hide failed — user can still see the launcher window
-          // but ComfyUI did open. Surface as a non-fatal warning via the
-          // done-state retry block so the user has a manual escape.
-          retryError.value = (err as Error)?.message || t('onboarding.openComfyUiErrorSubtitle')
+          emitTelemetryAction('onboarding.hideLauncherWindow.failed', {
+            message: (err as Error)?.message,
+            phase: 'install_complete',
+          })
         }
+        emit('complete')
       }
       // If launchOk is false, retryError is already populated by
       // launchWithTimeout — the done state will render the §8 error block
@@ -671,15 +676,18 @@ async function pickCloud(): Promise<void> {
         message: (err as Error)?.message,
       })
     }
+    // Cloud is connected and visible — hide-fail is non-fatal. Don't surface
+    // it via retryError; that would render the "Try again" UX while the
+    // cloud window is already running.
     try {
       await withTimeout(window.api.hideLauncherWindow(), 3_000, undefined)
-      emit('complete')
     } catch (err) {
-      // Cloud launched but launcher didn't hide. Surface via the §8 retry
-      // block — user has a manual escape ("Try again" → which will hit the
-      // already-running gate, or "Quit ComfyUI Desktop").
-      retryError.value = (err as Error)?.message || t('onboarding.openComfyUiErrorSubtitle')
+      emitTelemetryAction('onboarding.hideLauncherWindow.failed', {
+        message: (err as Error)?.message,
+        phase: 'cloud_connect',
+      })
     }
+    emit('complete')
   } finally {
     clearCloudTimeout()
     cloudTimeoutFired.value = false
@@ -735,12 +743,17 @@ async function pickLocal(): Promise<void> {
       // No more silent swallow.
       const ok = await launchWithTimeout(installed.id, TIMEOUT_LOCAL_LAUNCH_MS)
       if (ok) {
+        // ComfyUI is open — hide-fail is non-fatal. Don't trigger the
+        // "Try again" UX; user's goal is achieved.
         try {
           await withTimeout(window.api.hideLauncherWindow(), 3_000, undefined)
-          emit('complete')
         } catch (err) {
-          retryError.value = (err as Error)?.message || t('onboarding.openComfyUiErrorSubtitle')
+          emitTelemetryAction('onboarding.hideLauncherWindow.failed', {
+            message: (err as Error)?.message,
+            phase: 'pick_local_existing',
+          })
         }
+        emit('complete')
       }
       // On failure, retryError is set by launchWithTimeout — done state will
       // render the §8 error block with "Try again" + "Quit ComfyUI Desktop".
@@ -1710,6 +1723,12 @@ onUnmounted(() => {
                 <span class="onboarding-card-cta">→ {{ t('onboarding.startFreshCardCta') }}</span>
               </button>
             </div>
+            <!-- forkError: silent migration-confirm preflight failure was
+                 setting this ref but never rendering. Now surfaced inline so
+                 the user knows why their click bounced. -->
+            <div v-if="forkError" class="onboarding-form-error" role="alert">
+              <span class="onboarding-form-error-text">{{ forkError }}</span>
+            </div>
           </div>
 
           <footer class="onboarding-screen-footer">
@@ -1765,11 +1784,13 @@ onUnmounted(() => {
                   <button
                     type="button"
                     class="onboarding-form-browse"
-                    :disabled="busy"
+                    :disabled="busy || browseLoading"
+                    :aria-busy="browseLoading ? 'true' : 'false'"
                     @click="onBrowsePath"
                   >
-                    <FolderSearch :size="14" />
-                    {{ t('onboarding.browse') }}
+                    <Loader2 v-if="browseLoading" :size="14" class="spin" />
+                    <FolderSearch v-else :size="14" />
+                    {{ browseLoading ? t('onboarding.browseOpening') : t('onboarding.browse') }}
                   </button>
                 </div>
                 <p class="onboarding-form-hint">{{ t('onboarding.installPathHint') }}</p>
@@ -1843,10 +1864,12 @@ onUnmounted(() => {
             </button>
             <button
               class="primary onboarding-primary-btn"
-              :disabled="!canSubmitForm"
+              :disabled="!canSubmitForm || installSubmitting"
+              :aria-busy="installSubmitting ? 'true' : 'false'"
               @click="startInstall"
             >
-              {{ t('onboarding.installCta') }}
+              <Loader2 v-if="installSubmitting" :size="14" class="spin" />
+              {{ installSubmitting ? t('onboarding.installPreparing') : t('onboarding.installCta') }}
             </button>
           </footer>
         </section>
@@ -1917,6 +1940,14 @@ onUnmounted(() => {
               <span />
             </footer>
           </Transition>
+
+          <!-- cancelWarning: surfaces if Back's cancelLaunch IPC failed or
+               timed out. The user has already routed back to mode by then,
+               but this still renders briefly via the same Transition cycle.
+               Originally set silently with no template binding. -->
+          <div v-if="cancelWarning" class="onboarding-form-error" role="alert">
+            <span class="onboarding-form-error-text">{{ cancelWarning }}</span>
+          </div>
         </section>
 
         <!-- =====================================================
@@ -3296,6 +3327,59 @@ onUnmounted(() => {
    class is the public API. */
 .spin {
   animation: spin 0.9s linear infinite;
+}
+
+/* Cards bound these classes in the template but no rules existed — found
+   in the fresh-eyes audit. Without these, the `RECOMMENDED` card looked
+   identical to its sibling, the clicked card showed no loading state,
+   and the dimmed-sibling treatment did nothing. */
+
+/* Recommended card: a thin accent ring + slight surface elevation so
+   the badge has visual support. The badge styling lives elsewhere; this
+   is the card-level treatment. */
+.onboarding-card-recommended {
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+  background: color-mix(in srgb, var(--accent) 4%, var(--surface));
+}
+
+.onboarding-card-recommended:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+/* Loading card: clicked card while its IPC chain is in flight. Pulses
+   the accent border so the user sees a response within 200ms even if
+   the IPC takes longer. Spinner + state copy live inside the card body
+   via separate template bindings; this is just the chrome treatment. */
+.onboarding-card-loading {
+  border-color: var(--accent);
+  cursor: wait;
+}
+
+.onboarding-card-loading::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  border: 1px solid var(--accent);
+  pointer-events: none;
+  animation: install-pulse 1.6s ease-in-out infinite;
+}
+
+/* Sibling card while its peer is loading — drained so the clicked card
+   visually owns the screen. Matches the disabled treatment but reads
+   as deliberate (waiting), not as broken. */
+.onboarding-card-dimmed {
+  opacity: 0.45;
+  filter: saturate(0.4);
+  transition: opacity 0.15s ease, filter 0.15s ease;
+}
+
+/* The done-state subtitle picks up a warning tint when we've been on
+   the done screen long enough to consider it stuck. Pairs with the
+   doneStuck computed flag to communicate "still waiting" without the
+   subtitle silently sitting at the success copy. */
+.done-subtitle-stuck {
+  color: var(--warning);
 }
 
 /* Per-screen error pill — sits below the offending control with a 12px
