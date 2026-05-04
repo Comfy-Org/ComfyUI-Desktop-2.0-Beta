@@ -69,8 +69,12 @@ const api: ElectronApi = {
     ipcRenderer.invoke('export-snapshot', installationId, filename),
   exportAllSnapshots: (installationId) =>
     ipcRenderer.invoke('export-all-snapshots', installationId),
-  importSnapshots: (installationId) =>
-    ipcRenderer.invoke('import-snapshots', installationId),
+  importSnapshotsPreview: () =>
+    ipcRenderer.invoke('import-snapshots-preview'),
+  importSnapshotsDiff: (installationId: string) =>
+    ipcRenderer.invoke('import-snapshots-diff', installationId),
+  importSnapshotsConfirm: (installationId: string) =>
+    ipcRenderer.invoke('import-snapshots-confirm', installationId),
   previewSnapshotFile: () =>
     ipcRenderer.invoke('preview-snapshot-file'),
   previewDesktopMigration: () =>

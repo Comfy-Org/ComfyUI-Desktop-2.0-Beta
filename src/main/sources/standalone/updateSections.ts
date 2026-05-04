@@ -15,6 +15,7 @@ import type { StatusTag } from '../../types/sources'
 
 export const COMFYUI_REPO = 'Comfy-Org/ComfyUI'
 export const RELEASE_REPO = 'Comfy-Org/ComfyUI-Standalone-Environments'
+export const R2_BASE_URL = 'https://desktop-assets.comfy.org/standalone-environments'
 
 function getChannelDefs(): ChannelDef[] {
   return [

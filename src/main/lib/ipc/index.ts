@@ -3,8 +3,8 @@ import {
   installations, settings,
   sourceMap,
   detectDesktopInstall,
-  isGitAvailable, tryConfigurePygit2Fallback,
-  createCache, fetchJSON,
+  isGitAvailable, tryConfigureBootstrapPygit2, tryConfigurePygit2Fallback,
+  createCache, fetchJSON, getLatestStableTag,
   setCallbacks, _broadcastToRenderer,
   migrateDefaults, checkInstallationUpdates,
   isEffectivelyEmptyInstallDir,
@@ -97,19 +97,71 @@ export function register(callbacks: RegisterCallbacks = {}): void {
     } catch {}
   })()
 
-  // Configure pygit2 fallback if system git is unavailable
+  // Configure git backend.  We default to the bundled bootstrap pygit2 so the
+  // pygit2 code path is always exercised — most developers have system git
+  // installed, which would otherwise mask bugs in the pygit2 path that real
+  // users (without system git) hit on first launch.
+  //
+  // If bootstrap pygit2 is unavailable for any reason we log loudly and fall
+  // back to standalone-install pygit2, then system git.  Set
+  // COMFY_FORCE_BOOTSTRAP_GIT=1 to disable the fallback entirely (for testing).
   void (async () => {
-    try {
-      if (await isGitAvailable()) return
-      const all = await installations.list()
-      for (const inst of all) {
-        if (inst.sourceId !== 'standalone' || !inst.installPath) continue
-        if (tryConfigurePygit2Fallback(inst.installPath)) {
-          console.log('[ipc] System git not found — configured pygit2 fallback via', inst.installPath)
-          break
-        }
+    const configureGitBackend = async (): Promise<void> => {
+      const forceBootstrap = process.env.COMFY_FORCE_BOOTSTRAP_GIT === '1'
+
+      if (tryConfigureBootstrapPygit2()) {
+        console.log('[ipc] Using bootstrap pygit2 for git operations (default)')
+        return
       }
-    } catch {}
+
+      console.warn(
+        '[ipc] Bootstrap pygit2 not available — bootstrap-python/<platform>/ is missing. ' +
+        'Run "pnpm run bootstrap" (or "pnpm run bootstrap:fetch") to build it. ' +
+        'Falling back to standalone-install pygit2 / system git.'
+      )
+
+      if (forceBootstrap) {
+        console.warn('[ipc] COMFY_FORCE_BOOTSTRAP_GIT set but bootstrap python not found — no git backend will be configured')
+        return
+      }
+
+      // Prefer standalone installation's pygit2 (co-located with ComfyUI env).
+      // Failures listing installations must NOT short-circuit the system-git
+      // fallback below, so this lookup is isolated in its own try/catch.
+      try {
+        const all = await installations.list()
+        for (const inst of all) {
+          if (inst.sourceId !== 'standalone' || !inst.installPath) continue
+          if (tryConfigurePygit2Fallback(inst.installPath)) {
+            console.log('[ipc] Configured pygit2 fallback via standalone install at', inst.installPath)
+            return
+          }
+        }
+      } catch (err) {
+        console.warn('[ipc] Failed to enumerate standalone installations for pygit2 fallback:', err)
+      }
+
+      // Final fallback: system git, if installed.
+      try {
+        if (await isGitAvailable()) {
+          console.log('[ipc] Using system git (bootstrap pygit2 and standalone pygit2 both unavailable)')
+          return
+        }
+      } catch (err) {
+        console.warn('[ipc] isGitAvailable() check failed:', err)
+      }
+
+      console.warn('[ipc] No git backend available (bootstrap pygit2, standalone pygit2, and system git all missing)')
+    }
+
+    await configureGitBackend()
+
+    // Pre-warm the latest stable tag cache.  Once a git backend is configured
+    // (bootstrap pygit2 / standalone pygit2 / system git) we can resolve the
+    // upstream ComfyUI tag without any local clone — this makes the New
+    // Install wizard's "Latest Stable" entry display the concrete version
+    // (e.g. v1.19.5) on first open.
+    try { await getLatestStableTag() } catch {}
   })()
 
   // Clean up partial downloads
@@ -123,10 +175,7 @@ export function register(callbacks: RegisterCallbacks = {}): void {
   // Pre-warm the ETag cache
   void (async () => {
     try {
-      await Promise.allSettled([
-        fetchJSON('https://api.github.com/repos/Comfy-Org/ComfyUI-Standalone-Environments/releases?per_page=30'),
-        fetchJSON('https://api.github.com/repos/Comfy-Org/ComfyUI-Standalone-Environments/releases/latest'),
-      ])
+      await fetchJSON('https://desktop-assets.comfy.org/standalone-environments/latest.json')
     } catch {}
   })()
 

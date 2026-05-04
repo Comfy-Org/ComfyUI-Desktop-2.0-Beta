@@ -9,21 +9,21 @@ import * as installations from '../../installations'
 import type { InstallationRecord } from '../../installations'
 import { formatComfyVersion } from '../version'
 import type { ComfyVersion } from '../version'
-import { resolveInstalledVersion, clearVersionCache } from '../version-resolve'
+import { resolveLocalVersion, clearVersionCache } from '../version-resolve'
 import type { LatestTagOverride } from '../version-resolve'
-import { readGitHead, readGitRemoteUrl, fetchTags, findLatestVersionTag, revParseRef, hasGitDir, isGitAvailable, tryConfigurePygit2Fallback } from '../git'
+import { readGitHead, readGitRemoteUrl, fetchTags, findLatestVersionTag, revParseRef, hasGitDir, isGitAvailable, tryConfigureBootstrapPygit2, tryConfigurePygit2Fallback } from '../git'
 import { ensureRemoteUrl } from '../github-mirror'
 import * as settings from '../../settings'
-import { defaultInstallDir } from '../paths'
+import { defaultInstallDir, sanitizeDirName, allocateUniqueDir } from '../paths'
 import { download } from '../download'
 import { createCache } from '../cache'
 import { extractNested as extract } from '../extract'
-import { deleteDir } from '../delete'
+import { deleteDir, formatDeleteStatus } from '../delete'
 import { deleteAction, untrackAction } from '../actions'
 import {
   spawnProcess, waitForPort, waitForUrl, killProcessTree, killByPort,
   findPidsByPort, getProcessInfo, looksLikeComfyUI, setPortArg,
-  findAvailablePort, writePortLock, readPortLock, removePortLock,
+  findAvailablePort, isPortListening, writePortLock, readPortLock, removePortLock,
   COMFY_BOOT_TIMEOUT_MS,
 } from '../process'
 import { detectGPU, validateHardware, checkNvidiaDriver } from '../gpu'
@@ -40,9 +40,9 @@ import * as i18n from '../i18n'
 import { syncCustomModelFolders, discoverExtraModelFolders } from '../models'
 import { copyDirWithProgress } from '../copy'
 import { fetchJSON } from '../fetch'
-import { fetchLatestRelease } from '../comfyui-releases'
-import { captureSnapshotIfChanged, getSnapshotCount, getSnapshotListData, getSnapshotDetailData, getSnapshotDiffVsPrevious, diffAgainstCurrent, loadSnapshot, listSnapshots, diffSnapshots, buildExportEnvelope, validateExportEnvelope, importSnapshots, saveSnapshot, restoreCustomNodes, restorePipPackages, restoreComfyUIVersion, buildPostRestoreState, formatSnapshotVersion, resolveSnapshotVersion } from '../snapshots'
-import type { SnapshotExportEnvelope } from '../snapshots'
+import { fetchLatestRelease, getLatestStableTag } from '../comfyui-releases'
+import { captureSnapshotIfChanged, getSnapshotCount, getSnapshotListData, getSnapshotDetailData, getSnapshotDiffVsPrevious, diffAgainstCurrent, loadSnapshot, listSnapshots, deleteSnapshot, diffSnapshots, buildExportEnvelope, validateExportEnvelope, importSnapshots, saveSnapshot, statesMatch, restoreCustomNodes, restorePipPackages, restoreComfyUIVersion, buildPostRestoreState, formatSnapshotVersion, resolveSnapshotVersion } from '../snapshots'
+import type { SnapshotExportEnvelope, Snapshot } from '../snapshots'
 import { getVariantLabel } from '../../sources/standalone'
 import type { FieldOption, SourcePlugin } from '../../types/sources'
 import { REQUIRES_STOPPED } from '../../../types/ipc'
@@ -59,13 +59,13 @@ export {
   path, fs, os, app, ipcMain, dialog, shell, BrowserWindow, nativeTheme,
   execFile, spawn, execFileSync,
   sources, installations, settings, releaseCache, i18n,
-  formatComfyVersion, resolveInstalledVersion, clearVersionCache,
-  readGitRemoteUrl, fetchTags, findLatestVersionTag, revParseRef, hasGitDir, isGitAvailable, tryConfigurePygit2Fallback,
+  formatComfyVersion, resolveLocalVersion, clearVersionCache,
+  readGitRemoteUrl, fetchTags, findLatestVersionTag, revParseRef, hasGitDir, isGitAvailable, tryConfigureBootstrapPygit2, tryConfigurePygit2Fallback,
   ensureRemoteUrl,
-  defaultInstallDir, download, createCache, extract, deleteDir, deleteAction, untrackAction,
+  defaultInstallDir, sanitizeDirName, allocateUniqueDir, download, createCache, extract, deleteDir, formatDeleteStatus, deleteAction, untrackAction,
   spawnProcess, waitForPort, waitForUrl, killProcessTree, killByPort,
   findPidsByPort, getProcessInfo, looksLikeComfyUI, setPortArg,
-  findAvailablePort, writePortLock, readPortLock, removePortLock,
+  findAvailablePort, isPortListening, writePortLock, readPortLock, removePortLock,
   COMFY_BOOT_TIMEOUT_MS,
   detectGPU, validateHardware, checkNvidiaDriver,
   detectDesktopInstall, stageDesktopSnapshot,
@@ -73,10 +73,10 @@ export {
   getDiskSpace, getDirectorySize, validateInstallPath,
   syncOemSeed, formatTime, getActiveDownloads,
   syncCustomModelFolders, discoverExtraModelFolders,
-  copyDirWithProgress, fetchJSON, fetchLatestRelease,
+  copyDirWithProgress, fetchJSON, fetchLatestRelease, getLatestStableTag,
   captureSnapshotIfChanged, getSnapshotCount, getSnapshotListData, getSnapshotDetailData,
   getSnapshotDiffVsPrevious, diffAgainstCurrent, loadSnapshot, listSnapshots, diffSnapshots,
-  buildExportEnvelope, validateExportEnvelope, importSnapshots, saveSnapshot,
+  buildExportEnvelope, validateExportEnvelope, importSnapshots, saveSnapshot, statesMatch, deleteSnapshot,
   restoreCustomNodes, restorePipPackages, restoreComfyUIVersion, buildPostRestoreState, formatSnapshotVersion, resolveSnapshotVersion,
   getVariantLabel, REQUIRES_STOPPED, findLockingProcesses,
   getComfyArgsSchema, filterUnsupportedArgs,
@@ -84,7 +84,7 @@ export {
 }
 export type {
   ChildProcess, InstallationRecord, ComfyVersion, LatestTagOverride,
-  GpuInfo, SnapshotExportEnvelope, FieldOption, SourcePlugin,
+  GpuInfo, SnapshotExportEnvelope, Snapshot, FieldOption, SourcePlugin,
   Theme, ResolvedTheme, QuitActiveItem, LaunchCmd, ComfyArgDef,
   FeatureFlagRegistry,
 }
@@ -227,7 +227,10 @@ export function getAppVersion(): string {
   let version = app.getVersion()
   if (!app.isPackaged) {
     try {
-      version = execFileSync('git', ['describe', '--tags', '--always'], { cwd: __dirname, encoding: 'utf8' }).trim() || version
+      // Restrict to release tags (`v0.5.0`, etc.) so unrelated tags like
+      // `bootstrap-v1` from the bootstrap-python build don't bleed into the
+      // launcher's displayed version.
+      version = execFileSync('git', ['describe', '--tags', '--always', '--match', 'v[0-9]*'], { cwd: __dirname, encoding: 'utf8' }).trim() || version
     } catch {}
   }
   return version.replace(/^v/, '')
@@ -284,13 +287,8 @@ export async function performCopy(
   copyReason: CopyReason = 'copy'
 ): Promise<{ entry: InstallationRecord; destPath: string }> {
   const parentDir = path.dirname(inst.installPath)
-  const dirName = name.replace(/[<>:"/\\|?*]+/g, '_').trim() || 'ComfyUI'
-  let destPath = path.join(parentDir, dirName)
-  let suffix = 1
-  while (fs.existsSync(destPath)) {
-    destPath = path.join(parentDir, `${dirName} (${suffix})`)
-    suffix++
-  }
+  const dirName = sanitizeDirName(name)
+  const destPath = allocateUniqueDir(parentDir, dirName)
 
   const duplicate = await findDuplicatePath(destPath)
   if (duplicate) {
@@ -477,7 +475,7 @@ export async function _resolveAndBroadcastVersions(list: InstallationRecord[]): 
       // made external changes (manual git pull, checkout, etc.).
       const actualHead = readGitHead(comfyuiDir) || cv.commit
 
-      const resolved = await resolveInstalledVersion(comfyuiDir, actualHead, cv, undefined, override)
+      const resolved = await resolveLocalVersion(comfyuiDir, actualHead, undefined, override)
       const resolvedStr = formatComfyVersion(resolved, 'short')
       const storedStr = formatComfyVersion(cv, 'short')
       const versionChanged = resolvedStr !== storedStr

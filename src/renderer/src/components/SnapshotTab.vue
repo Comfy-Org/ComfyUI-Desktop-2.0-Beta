@@ -6,7 +6,9 @@ import { ChevronDown } from 'lucide-vue-next'
 import { emitTelemetryAction, toCountBucket } from '../lib/telemetry'
 import SnapshotDiffView from './SnapshotDiffView.vue'
 import RestoreModal from './RestoreModal.vue'
+import ImportPreviewModal from './ImportPreviewModal.vue'
 import InfoTooltip from './InfoTooltip.vue'
+import { triggerLabel as _triggerLabel, formatDate, formatNodeVersion } from '../lib/snapshots'
 import type {
   ActionDef,
   CopyEvent,
@@ -15,6 +17,7 @@ import type {
   SnapshotDetailData,
   SnapshotDiffData,
   SnapshotDiffResult,
+  SnapshotFilePreview,
 } from '../types/ipc'
 
 interface Props {
@@ -47,6 +50,9 @@ const nodesExpanded = ref(true)
 const restorePreviewFilename = ref<string | null>(null)
 const restorePreviewDiff = ref<SnapshotDiffData | null>(null)
 const restorePreviewLoading = ref(false)
+const importPreview = ref<SnapshotFilePreview | null>(null)
+const importPreviewLoading = ref(false)
+const pendingImport = ref(false)  // true when restore modal is showing an import diff
 
 const snapshots = computed(() => listData.value?.snapshots ?? [])
 const copyEvents = computed(() => listData.value?.copyEvents ?? [])
@@ -93,19 +99,14 @@ watch(() => props.installationId, () => {
   diffMode.value = null
   restorePreviewFilename.value = null
   restorePreviewDiff.value = null
+  importPreview.value = null
+  importPreviewLoading.value = false
+  pendingImport.value = false
   load()
 }, { immediate: true })
 
 function triggerLabel(trigger: string): string {
-  switch (trigger) {
-    case 'boot': return t('snapshots.triggerBoot')
-    case 'restart': return t('snapshots.triggerRestart')
-    case 'manual': return t('snapshots.triggerManual')
-    case 'pre-update': return t('snapshots.triggerPreUpdate')
-    case 'post-update': return t('snapshots.triggerPostUpdate')
-    case 'post-restore': return t('snapshots.triggerPostRestore')
-    default: return trigger
-  }
+  return _triggerLabel(trigger, t)
 }
 
 function triggerClass(trigger: string): string {
@@ -118,10 +119,6 @@ function triggerClass(trigger: string): string {
     case 'post-restore': return 'trigger-postrestore'
     default: return ''
   }
-}
-
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleString()
 }
 
 function formatRelative(iso: string): string {
@@ -256,13 +253,40 @@ async function handleRestore(filename: string): Promise<void> {
 function cancelRestore(): void {
   restorePreviewFilename.value = null
   restorePreviewDiff.value = null
+  pendingImport.value = false
 }
 
-function confirmRestore(): void {
-  if (!restorePreviewFilename.value) return
-  const filename = restorePreviewFilename.value
+async function confirmRestore(): Promise<void> {
   const hasDiff = restorePreviewDiff.value ? diffHasChanges(restorePreviewDiff.value.diff) : undefined
-  cancelRestore()
+  let filename = restorePreviewFilename.value
+
+  if (pendingImport.value) {
+    // Import flow: write snapshots to disk now, then restore the newest
+    pendingImport.value = false
+    restorePreviewFilename.value = null
+    restorePreviewDiff.value = null
+
+    const result = await window.api.importSnapshotsConfirm(props.installationId)
+    if (!result.ok) {
+      if (result.message) {
+        await modal.alert({ title: t('snapshots.importSnapshots'), message: result.message })
+      }
+      return
+    }
+    emitTelemetryAction('launcher.snapshot.flow', {
+      action: 'import',
+      snapshot_count_bucket: toCountBucket(snapshots.value.length),
+      imported_bucket: toCountBucket(result.imported ?? 0),
+    })
+    filename = result.restoreFile ?? null
+    await load()
+    emit('refresh-all')
+  } else {
+    restorePreviewFilename.value = null
+    restorePreviewDiff.value = null
+  }
+
+  if (!filename) return
 
   const action: ActionDef = {
     id: 'snapshot-restore',
@@ -318,28 +342,41 @@ async function handleExportAll(): Promise<void> {
 }
 
 async function handleImport(): Promise<void> {
-  const result = await window.api.importSnapshots(props.installationId)
+  importPreview.value = null
+  const result = await window.api.importSnapshotsPreview()
   if (!result.ok) {
     if (result.message) {
       await modal.alert({ title: t('snapshots.importSnapshots'), message: result.message })
     }
     return
   }
-  emitTelemetryAction('launcher.snapshot.flow', {
-    action: 'import',
-    snapshot_count_bucket: toCountBucket(snapshots.value.length),
-    imported_bucket: toCountBucket(result.imported ?? 0),
-  })
-  await modal.alert({
-    title: t('snapshots.importSnapshots'),
-    message: t('snapshots.importSuccess', { imported: result.imported ?? 0, skipped: result.skipped ?? 0 }),
-  })
+  importPreview.value = result.preview ?? null
+}
+
+function cancelImportPreview(): void {
+  importPreview.value = null
+  importPreviewLoading.value = false
+}
+
+async function confirmImportPreview(): Promise<void> {
+  importPreviewLoading.value = true
+  const result = await window.api.importSnapshotsDiff(props.installationId)
+  cancelImportPreview()
+  if (!result.ok) {
+    if (result.message) {
+      await modal.alert({ title: t('snapshots.importSnapshots'), message: result.message })
+    }
+    return
+  }
+
+  // Show the restore modal with the import diff (nothing written to disk yet)
   selectedFilename.value = null
   detail.value = null
   diffData.value = null
   diffMode.value = null
-  await load()
-  emit('refresh-all')
+  pendingImport.value = true
+  restorePreviewDiff.value = result.diff ?? null
+  restorePreviewFilename.value = '__pending_import__'
 }
 
 const filteredCustomNodes = computed(() => {
@@ -356,12 +393,6 @@ const filteredPipPackages = computed(() => {
   const q = pipSearch.value.toLowerCase()
   return entries.filter(([name]) => name.toLowerCase().includes(q))
 })
-
-function formatNodeVersion(node: { version?: string; commit?: string }): string {
-  if (node.version) return node.version
-  if (node.commit) return node.commit.slice(0, 7)
-  return '—'
-}
 
 function diffHasChanges(diff: SnapshotDiffResult): boolean {
   return diff.comfyuiChanged || diff.updateChannelChanged || diff.nodesAdded.length > 0 || diff.nodesRemoved.length > 0 ||
@@ -558,11 +589,11 @@ function diffHasChanges(diff: SnapshotDiffResult): boolean {
                   >
                   <div v-if="filteredCustomNodes.length === 0 && nodeSearch" class="inspector-empty">{{ t('snapshots.searchNoResults') }}</div>
                   <template v-else>
-                    <div v-for="node in filteredCustomNodes" :key="node.id" class="node-row">
-                      <span class="node-status" :class="node.enabled ? 'node-enabled' : 'node-disabled'" />
-                      <span class="node-name">{{ node.id }}</span>
-                      <span class="node-type-badge">{{ node.type }}</span>
-                      <span class="node-version" :title="formatNodeVersion(node)">{{ formatNodeVersion(node) }}</span>
+                    <div v-for="node in filteredCustomNodes" :key="node.id" class="ls-node-row">
+                      <span class="ls-node-status" :class="node.enabled ? 'ls-node-enabled' : 'ls-node-disabled'" />
+                      <span class="ls-node-name">{{ node.id }}</span>
+                      <span class="ls-node-type">{{ node.type }}</span>
+                      <span class="ls-node-version" :title="formatNodeVersion(node)">{{ formatNodeVersion(node) }}</span>
                     </div>
                   </template>
                 </div>
@@ -588,9 +619,9 @@ function diffHasChanges(diff: SnapshotDiffResult): boolean {
                   >
                   <div v-if="filteredPipPackages.length === 0 && pipSearch" class="inspector-empty">{{ t('snapshots.searchNoResults') }}</div>
                   <template v-else>
-                    <div v-for="[name, version] in filteredPipPackages" :key="name" class="pip-row">
-                      <span class="pip-name">{{ name }}</span>
-                      <span class="pip-version" :title="version">{{ version }}</span>
+                    <div v-for="[name, version] in filteredPipPackages" :key="name" class="ls-pip-row">
+                      <span class="ls-pip-name">{{ name }}</span>
+                      <span class="ls-pip-version" :title="version">{{ version }}</span>
                     </div>
                   </template>
                 </div>
@@ -610,6 +641,15 @@ function diffHasChanges(diff: SnapshotDiffResult): boolean {
       :loading="restorePreviewLoading"
       @cancel="cancelRestore"
       @confirm="confirmRestore"
+    />
+
+    <!-- Import preview modal -->
+    <ImportPreviewModal
+      v-if="importPreview || importPreviewLoading"
+      :preview="importPreview"
+      :loading="importPreviewLoading"
+      @cancel="cancelImportPreview"
+      @confirm="confirmImportPreview"
     />
   </div>
 </template>
@@ -1033,55 +1073,6 @@ function diffHasChanges(diff: SnapshotDiffResult): boolean {
   user-select: text;
 }
 
-/* Recessed list container */
-/* Node list — inherits recessed-list from main.css */
-
-.node-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  padding: 2px 0;
-}
-
-.node-status {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-.node-enabled { background: var(--info); }
-.node-disabled { background: var(--text-faint); }
-
-.node-name {
-  color: var(--text);
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  user-select: text;
-}
-
-.node-type-badge {
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  color: var(--text-muted);
-  padding: 1px 5px;
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  flex-shrink: 0;
-}
-
-.node-version {
-  font-size: 13px;
-  color: var(--text-muted);
-  flex-shrink: 0;
-  font-family: monospace;
-  user-select: text;
-}
-
 /* Search input inside recessed containers */
 .recessed-search {
   width: 100%;
@@ -1104,32 +1095,8 @@ function diffHasChanges(diff: SnapshotDiffResult): boolean {
   overflow-y: auto;
 }
 
-.pip-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 2px 0;
-  font-size: 13px;
-}
-
-.pip-name {
-  color: var(--text);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  flex: 1;
-  min-width: 0;
-  user-select: text;
-}
-
-.pip-version {
-  color: var(--text-muted);
-  font-family: monospace;
-  margin-left: 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 50%;
-  user-select: text;
+/* Override global ls-node-disabled to match original SnapshotTab styling */
+.ls-node-disabled {
+  background: var(--text-faint);
 }
 </style>

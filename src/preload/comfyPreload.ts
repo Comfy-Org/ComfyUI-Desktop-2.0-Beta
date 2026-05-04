@@ -38,4 +38,7 @@ contextBridge.exposeInMainWorld('__comfyDesktop2', {
     ipcRenderer.on('desktop2-download-progress', handler)
     return () => ipcRenderer.removeListener('desktop2-download-progress', handler)
   },
+  reportTheme: (bg: string, text: string): void => {
+    ipcRenderer.send('desktop2-theme-report', { bg, text })
+  },
 })

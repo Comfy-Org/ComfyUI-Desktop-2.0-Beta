@@ -27,6 +27,8 @@ jobs:
             command: pnpm run typecheck
           - name: Test
             command: pnpm run test
+          - name: Test (integration)
+            command: pnpm run test:integration
 
     steps:
       - name: Checkout

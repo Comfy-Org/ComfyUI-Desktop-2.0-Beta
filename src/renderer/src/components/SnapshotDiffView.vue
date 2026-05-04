@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
 import type { SnapshotDiffResult } from '../types/ipc'
+import { formatNodeVersion } from '../lib/snapshots'
 
 defineProps<{
   diff: SnapshotDiffResult
@@ -12,11 +13,6 @@ function formatVersion(v: { formattedVersion: string }): string {
   return v.formattedVersion
 }
 
-function formatNodeVersion(node: { version?: string; commit?: string }): string {
-  if (node.version) return node.version
-  if (node.commit) return node.commit.slice(0, 7)
-  return '—'
-}
 </script>
 
 <template>

@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { ref, computed, toRaw, onMounted, onUnmounted } from 'vue'
+import { ref, computed, toRaw } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useModal } from '../composables/useModal'
+import { useControllerRegistration } from '../composables/useControllerRegistration'
+
 import type { ProbeResult } from '../types/ipc'
 import { emitTelemetryAction, toCountBucket } from '../lib/telemetry'
 
@@ -19,7 +21,7 @@ const probeResults = ref<ProbeResult[]>([])
 const selectedProbe = ref<ProbeResult | null>(null)
 const venvOverride = ref<string | null>(null)
 const probing = ref(false)
-const mouseDownOnOverlay = ref(false)
+
 
 const saveDisabled = computed(() => !trackPath.value || !selectedProbe.value)
 
@@ -141,39 +143,13 @@ async function handleSave(): Promise<void> {
   emit('navigate-list')
 }
 
-function handleOverlayMouseDown(event: MouseEvent): void {
-  mouseDownOnOverlay.value = event.target === (event.currentTarget as HTMLElement)
-}
-
-function handleOverlayClick(event: MouseEvent): void {
-  if (mouseDownOnOverlay.value && event.target === (event.currentTarget as HTMLElement)) {
-    emit('close')
-  }
-  mouseDownOnOverlay.value = false
-}
-
-function handleEscapeKey(event: KeyboardEvent): void {
-  if (event.key === 'Escape') emit('close')
-}
-
-onMounted(() => {
-  document.addEventListener('keydown', handleEscapeKey)
-})
-
-onUnmounted(() => {
-  document.removeEventListener('keydown', handleEscapeKey)
-})
+useControllerRegistration('track', { open })
 
 defineExpose({ open })
 </script>
 
 <template>
-  <div
-    class="view-modal active"
-    @mousedown="handleOverlayMouseDown"
-    @click="handleOverlayClick"
-  >
-    <div class="view-modal-content">
+  <div class="view-modal-content">
       <div class="view-modal-header">
         <div class="view-modal-title">{{ $t('track.title') }}</div>
         <button class="view-modal-close" @click="emit('close')">✕</button>
@@ -267,6 +243,5 @@ defineExpose({ open })
           </button>
         </div>
       </div>
-    </div>
   </div>
 </template>

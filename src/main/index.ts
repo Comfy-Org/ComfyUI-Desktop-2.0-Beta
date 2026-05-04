@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Tray, Menu, ipcMain, shell, clipboard, screen, net } from 'electron'
+import { app, BrowserWindow, Tray, Menu, ipcMain, shell, clipboard, screen, net, nativeTheme, WebContentsView } from 'electron'
 import path from 'path'
 import fs from 'fs'
 import { execFile } from 'child_process'
@@ -26,7 +26,9 @@ import { get as getInstallation } from './installations'
 import { getModelDownloadContentScript } from './lib/comfyContentScript'
 import { shouldOpenInPopup } from './lib/allowedPopups'
 import { showModelFolderRelaunchPage } from './lib/relaunchPage'
-import { COMFY_BG, SPLASH_DARK, type SplashTheme } from './lib/theme'
+import { COMFY_BG, SPLASH_DARK, TITLEBAR_BG, type SplashTheme } from './lib/theme'
+import { TITLEBAR_HEIGHT, TRAFFIC_LIGHT_POSITION, titleBarOverlayForTheme, comfyTitleBarOverlay, updateTitleBarOverlay, setMainWindowId } from './lib/titleBarOverlay'
+import { resolveTheme, sourceMap } from './lib/ipc/shared'
 
 todesktop.init({ autoUpdater: false })
 
@@ -95,8 +97,8 @@ function getWindowOptions(installationId: string): Partial<Electron.BrowserWindo
   return { x, y, width, height }
 }
 
-function attachContextMenu(comfyWindow: BrowserWindow): void {
-  comfyWindow.webContents.on('context-menu', (_event, params) => {
+function attachContextMenu(comfyWindow: BrowserWindow, webContents?: Electron.WebContents): void {
+  (webContents || comfyWindow.webContents).on('context-menu', (_event, params) => {
     const { editFlags, isEditable, selectionText, linkURL } = params
     const hasSelection = selectionText.trim().length > 0
     const hasLink = linkURL.length > 0
@@ -137,7 +139,23 @@ function attachContextMenu(comfyWindow: BrowserWindow): void {
 
 let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
-const comfyWindows = new Map<string, BrowserWindow>()
+
+/**
+ * Per-installation handle for a ComfyUI window.
+ *
+ * The ComfyUI window is split into a parent BrowserWindow plus two
+ * WebContentsViews — a thin native title bar and the ComfyUI content view.
+ * Most lifecycle code needs the BrowserWindow (show, focus, destroy, bounds)
+ * but the navigation / restart / splash flows must target the ComfyUI
+ * WebContents, which lives on `comfyView.webContents` — NOT on the parent
+ * window's webContents (that is only used as a host for the views).
+ */
+interface ComfyWindowEntry {
+  window: BrowserWindow
+  comfyView: WebContentsView
+  titleBarView: WebContentsView
+}
+const comfyWindows = new Map<string, ComfyWindowEntry>()
 
 function focusExternalProcessWindow(pid: number): void {
   if (process.platform === 'win32') {
@@ -247,6 +265,7 @@ function registerProcessErrorHandlers(): void {
 }
 
 function createMainWindow(): void {
+  const isDark = resolveTheme() === 'dark'
   mainWindow = new BrowserWindow({
     width: 1470,
     height: 880,
@@ -256,12 +275,17 @@ function createMainWindow(): void {
     title: `ComfyUI Desktop 2.0 v${APP_VERSION}`,
     backgroundColor: '#202020',
     show: false,
+    titleBarStyle: 'hidden',
+    ...(process.platform === 'darwin'
+      ? { trafficLightPosition: TRAFFIC_LIGHT_POSITION }
+      : { titleBarOverlay: titleBarOverlayForTheme(isDark) }),
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
       preload: path.join(__dirname, '../preload/index.js'),
     },
   })
+  setMainWindowId(mainWindow.id)
   const isDev = !!process.env['ELECTRON_RENDERER_URL']
   const loadTarget = process.env['ELECTRON_RENDERER_URL'] || 'index.html (file)'
 
@@ -272,9 +296,7 @@ function createMainWindow(): void {
 
   mainWindow.once('ready-to-show', () => {
     if (isDev) console.log('[main] ready-to-show fired')
-    mainWindow?.show()
-    if (process.platform === 'win32') mainWindow?.moveTop()
-    mainWindow?.focus()
+    if (mainWindow) bringToFront(mainWindow)
     createTray()
 
     // Suggest Chinese mirrors on first startup if system locale is Chinese
@@ -293,6 +315,12 @@ function createMainWindow(): void {
 
   attachContextMenu(mainWindow)
   mainWindow.setMenuBarVisibility(false)
+
+  // Sync title bar overlay colors when the OS theme changes (Windows/Linux only)
+  if (process.platform !== 'darwin') {
+    nativeTheme.on('updated', updateTitleBarOverlay)
+  }
+
   mainWindow.webContents.on('did-finish-load', () => {
     if (isDev) console.log(`[main] did-finish-load — url=${mainWindow?.webContents.getURL()}`)
     if (mainWindow && !mainWindow.isDestroyed()) {
@@ -398,18 +426,30 @@ function createTray(): void {
   tray.on('double-click', () => showMainWindow())
 }
 
+/** Show a window and bring it to the front, working around Windows focus-theft prevention. */
+function bringToFront(win: BrowserWindow): void {
+  if (process.platform === 'win32') {
+    win.setAlwaysOnTop(true)
+    win.show()
+    win.focus()
+    win.setAlwaysOnTop(false)
+  } else {
+    win.show()
+    win.focus()
+  }
+}
+
 function showMainWindow(): void {
   if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.show()
-    mainWindow.focus()
+    bringToFront(mainWindow)
   }
 }
 
 function quitApp(): void {
   setQuitReason('user-quit')
   ipc.cancelAll()
-  for (const [_id, win] of comfyWindows) {
-    if (!win.isDestroyed()) win.destroy()
+  for (const [, entry] of comfyWindows) {
+    if (!entry.window.isDestroyed()) entry.window.destroy()
   }
   comfyWindows.clear()
   if (tray) {
@@ -421,8 +461,8 @@ function quitApp(): void {
 
 function onComfyExited({ installationId }: { installationId?: string } = {}): void {
   if (installationId) {
-    const win = comfyWindows.get(installationId)
-    if (win && !win.isDestroyed()) win.destroy()
+    const entry = comfyWindows.get(installationId)
+    if (entry && !entry.window.isDestroyed()) entry.window.destroy()
     comfyWindows.delete(installationId)
   }
 }
@@ -446,25 +486,26 @@ const comfyFailRetryTimerCancels = new Map<string, () => void>()
 let relaunchTokenCounter = 0
 
 async function onModelFolderRelaunch({ installationId }: { installationId: string }): Promise<void> {
-  const win = comfyWindows.get(installationId)
-  if (!win || win.isDestroyed()) return
+  const entry = comfyWindows.get(installationId)
+  if (!entry || entry.window.isDestroyed()) return
+  const comfyContents = entry.comfyView.webContents
 
   // If a relaunch is already in progress, clean up the previous state first
   // so the stale onComfyRestarted call will abort (token mismatch).
   const prev = relaunchStates.get(installationId)
-  if (prev) win.webContents.off('will-navigate', prev.navBlocker)
+  if (prev) comfyContents.off('will-navigate', prev.navBlocker)
 
   // Capture the real ComfyUI URL — but only if we're not already on the splash page.
-  const currentUrl = win.webContents.getURL()
+  const currentUrl = comfyContents.getURL()
   const originalUrl = prev ? prev.originalUrl : currentUrl
 
   // Cancel any pending did-fail-load retry so it doesn't navigate away from the splash
   const cancelRetry = comfyFailRetryTimerCancels.get(installationId)
   if (cancelRetry) cancelRetry()
 
-  // Block navigations on the comfy window until onComfyRestarted loads the real URL.
+  // Block navigations on the comfy view until onComfyRestarted loads the real URL.
   const blockNav = (e: Electron.Event): void => { e.preventDefault() }
-  win.webContents.on('will-navigate', blockNav)
+  comfyContents.on('will-navigate', blockNav)
 
   // Always use dark splash — the frontend's own loading screen is always dark,
   // so a light splash would cause a jarring dark flash when ComfyUI loads.
@@ -472,18 +513,19 @@ async function onModelFolderRelaunch({ installationId }: { installationId: strin
   const token = ++relaunchTokenCounter
 
   relaunchStates.set(installationId, { originalUrl, theme, navBlocker: blockNav, token })
-  await showModelFolderRelaunchPage(win, theme)
+  await showModelFolderRelaunchPage(comfyContents, theme)
 }
 
 function onComfyRestarted({ installationId, process: _proc }: { installationId?: string; process?: ChildProcess } = {}): void {
   if (!installationId) return
-  const win = comfyWindows.get(installationId)
-  if (!win || win.isDestroyed()) return
+  const entry = comfyWindows.get(installationId)
+  if (!entry || entry.window.isDestroyed()) return
+  const comfyContents = entry.comfyView.webContents
 
   const state = relaunchStates.get(installationId)
   const myToken = state?.token
 
-  const currentUrl = state?.originalUrl || win.webContents.getURL()
+  const currentUrl = state?.originalUrl || comfyContents.getURL()
   if (!currentUrl) return
 
   const url = new URL(currentUrl)
@@ -494,7 +536,7 @@ function onComfyRestarted({ installationId, process: _proc }: { installationId?:
     // Only clean up if this is still the active relaunch (token matches)
     const current = relaunchStates.get(installationId)
     if (current && current.token === myToken) {
-      if (!win.isDestroyed()) win.webContents.off('will-navigate', current.navBlocker)
+      if (!entry.window.isDestroyed()) comfyContents.off('will-navigate', current.navBlocker)
       relaunchStates.delete(installationId)
     }
   }
@@ -511,7 +553,7 @@ function onComfyRestarted({ installationId, process: _proc }: { installationId?:
       // Probe with HTTP HEAD requests so the splash page stays visible
       // until the server actually responds.
       for (let attempt = 0; attempt < 10; attempt++) {
-        if (win.isDestroyed() || isStale()) { cleanupRelaunchState(); return }
+        if (entry.window.isDestroyed() || isStale()) { cleanupRelaunchState(); return }
         try {
           const resp = await net.fetch(currentUrl, { method: 'HEAD' })
           resp.body?.cancel()
@@ -520,12 +562,14 @@ function onComfyRestarted({ installationId, process: _proc }: { installationId?:
           await new Promise((r) => setTimeout(r, 500 * (attempt + 1)))
         }
       }
-      if (win.isDestroyed() || isStale()) { cleanupRelaunchState(); return }
+      if (entry.window.isDestroyed() || isStale()) { cleanupRelaunchState(); return }
       // Non-relaunch restart while a relaunch is active — defer to the relaunch.
       if (relaunchStates.has(installationId) && !state) return
       cleanupRelaunchState()
-      win.setBackgroundColor(state?.theme.bg ?? COMFY_BG)
-      await win.loadURL(currentUrl)
+      // Set the dark/theme background on the comfyView (the parent BrowserWindow's
+      // backgroundColor is hidden behind the views and would have no visual effect).
+      entry.comfyView.setBackgroundColor(state?.theme.bg ?? COMFY_BG)
+      await comfyContents.loadURL(currentUrl)
     })
     .catch((err) => {
       cleanupRelaunchState()
@@ -541,12 +585,12 @@ function onComfyRestarted({ installationId, process: _proc }: { installationId?:
 
 function onStop({ installationId }: { installationId?: string } = {}): void {
   if (installationId) {
-    const win = comfyWindows.get(installationId)
-    if (win && !win.isDestroyed()) win.destroy()
+    const entry = comfyWindows.get(installationId)
+    if (entry && !entry.window.isDestroyed()) entry.window.destroy()
     comfyWindows.delete(installationId)
   } else {
-    for (const [_id, win] of comfyWindows) {
-      if (!win.isDestroyed()) win.destroy()
+    for (const [, entry] of comfyWindows) {
+      if (!entry.window.isDestroyed()) entry.window.destroy()
     }
     comfyWindows.clear()
   }
@@ -620,6 +664,35 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
     icon: APP_ICON,
     title: `${installation.name} — Desktop 2.0 v${APP_VERSION}`,
     backgroundColor: COMFY_BG,
+    titleBarStyle: 'hidden',
+    ...(process.platform === 'darwin'
+      ? { trafficLightPosition: TRAFFIC_LIGHT_POSITION }
+      : { titleBarOverlay: comfyTitleBarOverlay() }),
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+    },
+  })
+  comfyWindow.setMenuBarVisibility(false)
+
+  // Title bar view — bounded to TITLEBAR_HEIGHT, isolated from ComfyUI
+  const titleBarView = new WebContentsView({
+    webPreferences: { nodeIntegration: false, contextIsolation: true },
+  })
+  // Paint the title bar's dark background before its HTML loads to avoid a white flash on window show.
+  titleBarView.setBackgroundColor(TITLEBAR_BG)
+  titleBarView.webContents.loadFile(path.join(__dirname, '..', '..', 'resources', 'comfyTitleBar.html'))
+  const sourceLabel = sourceMap[installation.sourceId]?.label
+  const titleBarText = sourceLabel ? `${installation.name} — ${sourceLabel}` : installation.name
+  titleBarView.webContents.on('dom-ready', () => {
+    titleBarView.webContents.executeJavaScript(
+      `window.__setTitle && window.__setTitle(${JSON.stringify(titleBarText)})`
+    ).catch(() => {})
+  })
+  comfyWindow.contentView.addChildView(titleBarView)
+
+  // ComfyUI content view — completely isolated from the title bar
+  const comfyView = new WebContentsView({
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -629,22 +702,51 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
         : 'persist:shared',
     },
   })
-  comfyWindow.setMenuBarVisibility(false)
+  // Paint the ComfyUI view's dark background before any URL loads to avoid a white flash
+  // on window show. The parent BrowserWindow's backgroundColor never shows because the
+  // WebContentsViews cover its entire content area.
+  comfyView.setBackgroundColor(COMFY_BG)
+  comfyWindow.contentView.addChildView(comfyView)
+
+  // Layout both views; title bar is 1px taller than the overlay so a CSS
+  // border-bottom in comfyTitleBar.html sits below the native buttons.
+  const titleBarTotal = TITLEBAR_HEIGHT + 1
+  const layoutViews = (): void => {
+    if (comfyWindow.isDestroyed()) return
+    const [width, height] = comfyWindow.getContentSize() as [number, number]
+    titleBarView.setBounds({ x: 0, y: 0, width, height: titleBarTotal })
+    comfyView.setBounds({ x: 0, y: titleBarTotal, width, height: Math.max(0, height - titleBarTotal) })
+  }
+  layoutViews()
+  comfyWindow.on('resize', layoutViews)
+
+  // Alias for the ComfyUI webContents (all handlers use this)
+  const comfyContents = comfyView.webContents
 
   if (saved?.maximized) comfyWindow.maximize()
 
+  // On macOS fullscreen the traffic-light buttons disappear, so remove the extra left padding
+  if (process.platform === 'darwin') {
+    comfyWindow.on('enter-full-screen', () => {
+      titleBarView.webContents.executeJavaScript(`document.body.style.paddingLeft='12px'`).catch(() => {})
+    })
+    comfyWindow.on('leave-full-screen', () => {
+      titleBarView.webContents.executeJavaScript(`document.body.style.paddingLeft='78px'`).catch(() => {})
+    })
+  }
+
   comfyWindow.on('resize', () => saveWindowBounds(installationId, comfyWindow))
   comfyWindow.on('move', () => saveWindowBounds(installationId, comfyWindow))
-  comfyWindow.webContents.on('did-create-window', (childWindow) => {
+  comfyContents.on('did-create-window', (childWindow) => {
     childWindow.setIcon(APP_ICON)
     if (process.platform !== 'darwin') childWindow.removeMenu()
     injectMacPasskeyWarning(childWindow)
   })
-  comfyWindow.webContents.on('page-title-updated', (e, title) => {
+  comfyContents.on('page-title-updated', (e, title) => {
     e.preventDefault()
     comfyWindow.setTitle(`${installation.name} — ${title} — Desktop 2.0 v${APP_VERSION}`)
   })
-  comfyWindow.webContents.setWindowOpenHandler(({ url }) => {
+  comfyContents.setWindowOpenHandler(({ url }) => {
     if (shouldOpenInPopup(url)) {
       return { action: 'allow', overrideBrowserWindowOptions: { webPreferences: { preload: undefined } } }
     }
@@ -652,32 +754,66 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
     return { action: 'deny' }
   })
 
+  // Sync the title bar and overlay colors with the ComfyUI frontend's theme
+  const applyComfyTheme = (bg: string, text: string): void => {
+    if (comfyWindow.isDestroyed()) return
+    titleBarView.webContents.executeJavaScript(
+      `window.__updateTheme && window.__updateTheme(${JSON.stringify(bg)}, ${JSON.stringify(text)})`
+    ).catch(() => {})
+    if (process.platform !== 'darwin') {
+      try { comfyWindow.setTitleBarOverlay({ color: bg, symbolColor: text }) } catch {}
+    }
+  }
+
+  comfyContents.on('ipc-message', (_event, channel, ...args) => {
+    if (channel === 'desktop2-theme-report') {
+      const { bg, text } = (args[0] || {}) as { bg?: string; text?: string }
+      if (bg) applyComfyTheme(bg, text || '#ddd')
+    }
+  })
+
+  const COMFY_THEME_OBSERVER_JS =
+    `(function(){` +
+      `let last='';` +
+      `function read(){` +
+        `const s=getComputedStyle(document.body);` +
+        `const bg=s.getPropertyValue('--comfy-menu-bg').trim();` +
+        `const text=s.getPropertyValue('--descrip-text').trim();` +
+        `const key=bg+'|'+text;` +
+        `if(key!==last&&bg){last=key;window.__comfyDesktop2?.reportTheme?.(bg,text)}` +
+      `}` +
+      `new MutationObserver(()=>setTimeout(read,50)).observe(document.documentElement,{attributes:true,attributeFilter:['class','data-theme','style']});` +
+      `read();` +
+    `})()`
+
   // Download management: attach session handler and inject content script
   const isLocal = !url
-  attachSessionDownloadHandler(comfyWindow.webContents.session)
-  comfyWindow.webContents.on('dom-ready', () => {
+  attachSessionDownloadHandler(comfyContents.session)
+  comfyContents.on('dom-ready', () => {
+    comfyContents.executeJavaScript(COMFY_THEME_OBSERVER_JS).catch(() => {})
+
     const preamble = isLocal ? '' : 'window.__comfyDesktop2Remote = true;\n'
-    comfyWindow.webContents
+    comfyContents
       .executeJavaScript(preamble + getModelDownloadContentScript())
       .catch(() => {})
   })
 
-  attachContextMenu(comfyWindow)
+  attachContextMenu(comfyWindow, comfyContents)
 
-  comfyWindow.loadURL(comfyUrl)
+  comfyContents.loadURL(comfyUrl)
 
   const reloadComfy = (): void => {
     if (comfyWindow.isDestroyed()) return
     if (relaunchStates.has(installationId)) return
-    comfyWindow.webContents.stop()
-    comfyWindow.loadURL(comfyUrl)
+    comfyContents.stop()
+    comfyContents.loadURL(comfyUrl)
   }
 
-  comfyWindow.webContents.on('will-prevent-unload', (e) => {
+  comfyContents.on('will-prevent-unload', (e) => {
     e.preventDefault()
   })
 
-  comfyWindow.webContents.on('before-input-event', (e, input) => {
+  comfyContents.on('before-input-event', (e, input) => {
     if (input.type !== 'keyDown') return
     const mod = input.control || input.meta
     if (mod && input.key.toLowerCase() === 'w') {
@@ -695,7 +831,7 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
     if (failRetryTimer) { clearTimeout(failRetryTimer); failRetryTimer = null }
   }
   comfyFailRetryTimerCancels.set(installationId, cancelFailRetry)
-  comfyWindow.webContents.on('did-fail-load', (_e, code, _desc, _failUrl, isMainFrame) => {
+  comfyContents.on('did-fail-load', (_e, code, _desc, _failUrl, isMainFrame) => {
     if (!isMainFrame || code === -3 || failRetryTimer) return
     // During a model-folder relaunch, onComfyRestarted handles retry logic.
     if (relaunchStates.has(installationId)) return
@@ -703,12 +839,12 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
       failRetryTimer = null
       if (relaunchStates.has(installationId)) return
       if (!comfyWindow.isDestroyed()) {
-        comfyWindow.loadURL(comfyUrl)
+        comfyContents.loadURL(comfyUrl)
       }
     }, 2000)
   })
 
-  comfyWindow.webContents.on('render-process-gone', (_event, details) => {
+  comfyContents.on('render-process-gone', (_event, details) => {
     forwardDatadogError({
       source: 'comfy-window-render-process-gone',
       message: `Comfy window renderer process exited (${details.reason})`,
@@ -727,6 +863,8 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
     e.preventDefault()
     detachWindowDownloads(comfyWindow)
     ipc.stopRunning(installationId)
+    titleBarView.webContents.close()
+    comfyView.webContents.close()
     comfyWindow.destroy()
   })
 
@@ -736,7 +874,7 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
     relaunchStates.delete(installationId)
   })
 
-  comfyWindows.set(installationId, comfyWindow)
+  comfyWindows.set(installationId, { window: comfyWindow, comfyView, titleBarView })
 
   if (proc) {
     proc.on('exit', () => {
@@ -754,10 +892,10 @@ ipcMain.handle('reset-zoom', () => {
 })
 
 ipcMain.handle('focus-comfy-window', (_event, installationId: string) => {
-  const win = comfyWindows.get(installationId)
-  if (win && !win.isDestroyed()) {
-    win.show()
-    win.focus()
+  const entry = comfyWindows.get(installationId)
+  if (entry && !entry.window.isDestroyed()) {
+    entry.window.show()
+    entry.window.focus()
     return true
   }
 
@@ -781,8 +919,8 @@ function resolveOutputDir(inst: InstallationRecord): string | null {
 }
 
 function findInstallationIdForWindow(win: BrowserWindow): string | undefined {
-  for (const [id, w] of comfyWindows) {
-    if (w === win) return id
+  for (const [id, entry] of comfyWindows) {
+    if (entry.window === win) return id
   }
   return undefined
 }
@@ -799,7 +937,7 @@ function registerAssetDownloadIpc(): void {
       if (!inst) return false
       const outputDir = resolveOutputDir(inst)
       if (!outputDir) return false
-      return startAssetDownload(win, url, filename, outputDir, authToken)
+      return startAssetDownload(win, url, filename, outputDir, authToken, event.sender)
     },
   )
 }
@@ -810,10 +948,8 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
   if (app.isPackaged) {
     app.on('second-instance', () => {
       if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.show()
         if (mainWindow.isMinimized()) mainWindow.restore()
-        if (process.platform === 'win32') mainWindow.moveTop()
-        mainWindow.focus()
+        bringToFront(mainWindow)
       }
     })
   }
@@ -840,7 +976,18 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
   })
 
   app.on('before-quit', () => {
-    if (!isQuitInProgress()) setQuitReason('user-quit')
+    if (!isQuitInProgress()) {
+      setQuitReason('user-quit')
+      ipc.cancelAll()
+      for (const [, entry] of comfyWindows) {
+        if (!entry.window.isDestroyed()) entry.window.destroy()
+      }
+      comfyWindows.clear()
+      if (tray) {
+        tray.destroy()
+        tray = null
+      }
+    }
     cleanupTempDownloads()
   })
 

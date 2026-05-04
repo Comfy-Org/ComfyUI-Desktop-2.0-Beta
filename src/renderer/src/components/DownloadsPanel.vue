@@ -1,17 +1,11 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
 import { useDownloadStore } from '../stores/downloadStore'
+import { formatBytes } from '../lib/formatting'
 import type { ModelDownloadProgress } from '../types/ipc'
 
 const { t } = useI18n()
 const downloadStore = useDownloadStore()
-
-function fmtBytes(b: number): string {
-  if (!b || b <= 0) return ''
-  if (b < 1048576) return (b / 1024).toFixed(0) + ' KB'
-  if (b < 1073741824) return (b / 1048576).toFixed(1) + ' MB'
-  return (b / 1073741824).toFixed(2) + ' GB'
-}
 
 function fmtSpeed(bytesPerSec: number): string {
   if (bytesPerSec < 1048576) return (bytesPerSec / 1024).toFixed(0) + ' KB/s'
@@ -34,7 +28,7 @@ function statusLabel(d: ModelDownloadProgress): string {
     case 'downloading': {
       const parts: string[] = []
       if (d.totalBytes && d.totalBytes > 0 && d.receivedBytes != null) {
-        parts.push(`${fmtBytes(d.receivedBytes)} / ${fmtBytes(d.totalBytes)}`)
+        parts.push(`${formatBytes(d.receivedBytes)} / ${formatBytes(d.totalBytes)}`)
       }
       parts.push(`${pct}%`)
       if (d.speedBytesPerSec && d.speedBytesPerSec > 0) {
@@ -48,7 +42,7 @@ function statusLabel(d: ModelDownloadProgress): string {
     case 'paused': {
       const parts: string[] = [t('downloads.paused', { percent: pct })]
       if (d.totalBytes && d.totalBytes > 0 && d.receivedBytes != null) {
-        parts.push(`${fmtBytes(d.receivedBytes)} / ${fmtBytes(d.totalBytes)}`)
+        parts.push(`${formatBytes(d.receivedBytes)} / ${formatBytes(d.totalBytes)}`)
       }
       return parts.join(' · ')
     }

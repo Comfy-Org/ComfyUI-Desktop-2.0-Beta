@@ -1,4 +1,4 @@
-import type { BrowserWindow } from 'electron'
+import type { WebContents } from 'electron'
 import * as i18n from './i18n'
 import { BRAND_YELLOW, type SplashTheme, SPLASH_DARK } from './theme'
 
@@ -9,7 +9,15 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 }
 
-export async function showModelFolderRelaunchPage(win: BrowserWindow, theme: SplashTheme = SPLASH_DARK): Promise<void> {
+/**
+ * Render the model-folder relaunch splash page into the given WebContents.
+ *
+ * NOTE: This must target the ComfyUI WebContentsView's webContents, NOT the
+ * parent BrowserWindow's. After PR #414 the parent window's webContents is
+ * empty and is fully covered by child WebContentsViews, so loading the
+ * splash there is invisible to the user.
+ */
+export async function showModelFolderRelaunchPage(webContents: WebContents, theme: SplashTheme = SPLASH_DARK): Promise<void> {
   const title = escapeHtml(i18n.t('launch.modelFolderRelaunchTitle'))
   const desc = escapeHtml(i18n.t('launch.modelFolderRelaunchDesc'))
   const { bg, fg } = theme
@@ -39,8 +47,8 @@ p{margin-top:10px;font-size:14px;color:${mutedFg};line-height:1.5;text-align:cen
 </body></html>`
   // The caller (onModelFolderRelaunch) attaches a persistent will-navigate
   // blocker before calling us, so we just need to stop + load the data URL.
-  win.webContents.stop()
-  await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`)
+  webContents.stop()
+  await webContents.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`)
   // Give the renderer a frame to paint before the caller kills ComfyUI
   await new Promise((r) => setTimeout(r, 100))
 }

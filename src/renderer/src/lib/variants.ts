@@ -4,6 +4,7 @@ import type { FieldOption } from '../types/ipc'
 export const variantImages: Record<string, string> = {
   nvidia: './images/nvidia-logo.jpg',
   amd: './images/amd-logo.png',
+  'intel-xpu': './images/intel-logo.png',
   mps: './images/apple-mps-logo.png',
 }
 
@@ -33,8 +34,11 @@ export const variantLabels: Record<string, string> = {
 
 /** Extract a human-readable GPU label from a variant ID like "win-nvidia-cu128" -> "NVIDIA" */
 export function getVariantGpuLabel(variantId: string): string | null {
-  const base = stripVariantPrefix(variantId).replace(/-.*$/, '')
-  return variantLabels[base] || null
+  const stripped = stripVariantPrefix(variantId)
+  for (const key of Object.keys(variantLabels)) {
+    if (stripped === key || stripped.startsWith(key + '-')) return variantLabels[key]!
+  }
+  return null
 }
 
 /**
