@@ -123,11 +123,23 @@ describe('TitleBarApp', () => {
     await flushPromises()
     await wrapper.find('.title-install-caret').trigger('click')
     const items = wrapper.findAll('.title-menu-item')
-    expect(items.length).toBe(2)
+    expect(items.length).toBe(3)
     const installSettingsItem = items.find((i) => i.text().includes('Install Settings'))
     expect(installSettingsItem).toBeTruthy()
     await installSettingsItem!.trigger('click')
     expect(bridgeState.setPanelCalls).toEqual(['install-settings'])
+  })
+
+  it('opens the install caret menu and routes Directories to setPanel', async () => {
+    const { default: TitleBarApp } = await import('./TitleBarApp.vue')
+    const wrapper = mount(TitleBarApp)
+    await flushPromises()
+    await wrapper.find('.title-install-caret').trigger('click')
+    const items = wrapper.findAll('.title-menu-item')
+    const directoriesItem = items.find((i) => i.text().trim() === 'Directories')
+    expect(directoriesItem).toBeTruthy()
+    await directoriesItem!.trigger('click')
+    expect(bridgeState.setPanelCalls).toEqual(['directories'])
   })
 
   it('opens the install caret menu and routes Check for Updates to bridge.checkForUpdates', async () => {

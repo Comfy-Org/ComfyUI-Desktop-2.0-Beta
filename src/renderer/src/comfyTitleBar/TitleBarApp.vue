@@ -6,7 +6,7 @@ import { ChevronDown } from 'lucide-vue-next'
 // file isn't visible to tsconfig.web (only its .d.ts would be). Kept in
 // sync with the literal union in src/preload/comfyTitleBarPreload.ts and
 // the ComfyPanelKey export in src/main/index.ts.
-type ComfyPanelKey = 'comfy' | 'install-settings' | 'launcher-settings'
+type ComfyPanelKey = 'comfy' | 'install-settings' | 'launcher-settings' | 'directories'
 
 interface Bridge {
   getInstallationId: () => string | null
@@ -92,6 +92,10 @@ function handleDesktopSettings(): void {
 function handleInstallSettings(): void {
   closeMenu()
   bridge?.setPanel('install-settings')
+}
+function handleDirectories(): void {
+  closeMenu()
+  bridge?.setPanel('directories')
 }
 function handleCheckForUpdates(): void {
   closeMenu()
@@ -228,6 +232,15 @@ onUnmounted(() => {
           @click="handleInstallSettings"
         >
           Install Settings
+        </button>
+        <button
+          type="button"
+          class="title-menu-item"
+          role="menuitem"
+          :class="{ active: activePanel === 'directories' }"
+          @click="handleDirectories"
+        >
+          Directories
         </button>
         <button
           type="button"

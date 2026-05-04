@@ -62,6 +62,10 @@
     "outputDir": "输出目录"
   },
 
+  "directories": {
+    "title": "目录"
+  },
+
   "models": {
     "title": "模型",
     "directories": "共享目录",

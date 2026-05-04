@@ -40,8 +40,13 @@ import { scrubAll } from './lib/piiScrub'
  * running) or the lifecycle panel (instance stopped / launching / stopping).
  * The decision lives in `computeBodyMode()` and is internal to main.
  */
-export type ComfyPanelKey = 'comfy' | 'install-settings' | 'launcher-settings'
-const VALID_PANELS: ReadonlySet<ComfyPanelKey> = new Set(['comfy', 'install-settings', 'launcher-settings'])
+export type ComfyPanelKey = 'comfy' | 'install-settings' | 'launcher-settings' | 'directories'
+const VALID_PANELS: ReadonlySet<ComfyPanelKey> = new Set([
+  'comfy',
+  'install-settings',
+  'launcher-settings',
+  'directories',
+])
 
 /**
  * Internal body-mode for a comfy window.
@@ -56,7 +61,13 @@ const VALID_PANELS: ReadonlySet<ComfyPanelKey> = new Set(['comfy', 'install-sett
  * the entry yet). Picking an install in the chooser eventually swaps the
  * window in-place to a real install (Phase 3 step 2d).
  */
-type BodyMode = 'comfy' | 'comfy-lifecycle' | 'install-settings' | 'launcher-settings' | 'chooser'
+type BodyMode =
+  | 'comfy'
+  | 'comfy-lifecycle'
+  | 'install-settings'
+  | 'launcher-settings'
+  | 'directories'
+  | 'chooser'
 
 todesktop.init({ autoUpdater: false })
 
@@ -1439,10 +1450,12 @@ function setActivePanel(windowKey: string, panel: ComfyPanelKey): void {
   const entry = comfyWindows.get(windowKey)
   if (!entry || entry.window.isDestroyed()) return
   if (entry.activePanel === panel) return
-  // Install Settings is hidden in install-less host windows — refuse to
-  // switch to it from anywhere (a stray IPC payload should not be able to
-  // wedge the window into a body mode that has no install to render).
-  if (entry.installationId === null && panel === 'install-settings') return
+  // Install Settings + Directories are install-scoped (the install caret
+  // menu in the title bar is hidden in install-less host windows). Refuse
+  // to switch to either from anywhere when there's no install backing the
+  // window — a stray IPC payload must not be able to wedge the window
+  // into a body mode that has no install to render.
+  if (entry.installationId === null && (panel === 'install-settings' || panel === 'directories')) return
 
   entry.activePanel = panel
   // Resolve to the actual body mode (Comfy pill maps to lifecycle / chooser

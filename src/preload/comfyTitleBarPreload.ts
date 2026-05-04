@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { IpcRendererEvent } from 'electron'
 
-export type ComfyPanelKey = 'comfy' | 'install-settings' | 'launcher-settings'
+export type ComfyPanelKey = 'comfy' | 'install-settings' | 'launcher-settings' | 'directories'
 
 export interface ComfyTitleBarBridge {
   /** The installation this title bar belongs to. */

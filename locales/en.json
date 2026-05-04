@@ -107,6 +107,10 @@
     "outputDir": "Output Directory"
   },
 
+  "directories": {
+    "title": "Directories"
+  },
+
   "models": {
     "title": "Models",
     "directories": "Shared Directories",

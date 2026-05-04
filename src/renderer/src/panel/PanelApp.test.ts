@@ -46,6 +46,13 @@ vi.mock('./ComfyLifecycleView.vue', () => ({
       '<div data-testid="comfy-lifecycle" :data-installation-id="installationId" />',
   },
 }))
+vi.mock('../views/DirectoriesView.vue', () => ({
+  default: {
+    name: 'DirectoriesView',
+    template: '<div data-testid="directories-view" />',
+    methods: { loadAll: vi.fn(), loadModels: vi.fn(), loadMedia: vi.fn() },
+  },
+}))
 
 import { mount, flushPromises } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
@@ -217,6 +224,25 @@ describe('PanelApp', () => {
     const lifecycle = wrapper.find('[data-testid="comfy-lifecycle"]')
     expect(lifecycle.exists()).toBe(true)
     expect(lifecycle.attributes('data-installation-id')).toBe('test-id')
+  })
+
+  it('renders the directories view when initialised with panel=directories', async () => {
+    window.history.replaceState({}, '', '/?installationId=test-id&panel=directories')
+    const wrapper = mountPanel()
+    await flushPromises()
+    expect(wrapper.find('[data-testid="directories-view"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="settings-view"]').exists()).toBe(false)
+  })
+
+  it('switches to the directories view in response to a panel-switch IPC event', async () => {
+    const wrapper = mountPanel()
+    await flushPromises()
+    expect(wrapper.find('[data-testid="settings-view"]').exists()).toBe(true)
+
+    mockState.panelSwitchCallbacks.forEach((cb) => cb({ panel: 'directories' }))
+    await flushPromises()
+    expect(wrapper.find('[data-testid="settings-view"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="directories-view"]').exists()).toBe(true)
   })
 
   it('switches to the comfy-lifecycle view in response to a panel-switch IPC event', async () => {

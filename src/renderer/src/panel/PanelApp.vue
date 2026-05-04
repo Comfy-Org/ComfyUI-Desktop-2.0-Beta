@@ -7,6 +7,7 @@ import ProgressModal from '../views/ProgressModal.vue'
 import ModalDialog from '../components/ModalDialog.vue'
 import ComfyLifecycleView from './ComfyLifecycleView.vue'
 import ChooserView from '../views/ChooserView.vue'
+import DirectoriesView from '../views/DirectoriesView.vue'
 import { useTheme } from '../composables/useTheme'
 import { useSessionStore } from '../stores/sessionStore'
 import { useInstallationStore } from '../stores/installationStore'
@@ -22,13 +23,19 @@ import type { ActionResult, Installation } from '../types/ipc'
  * is the install-picker shown for the Comfy tab of an install-less host
  * window, the others are the title-bar pills that map directly to a panel.
  */
-export type PanelKey = 'comfy-lifecycle' | 'chooser' | 'install-settings' | 'launcher-settings'
+export type PanelKey =
+  | 'comfy-lifecycle'
+  | 'chooser'
+  | 'install-settings'
+  | 'launcher-settings'
+  | 'directories'
 
 const VALID_PANELS: ReadonlySet<PanelKey> = new Set([
   'comfy-lifecycle',
   'chooser',
   'install-settings',
   'launcher-settings',
+  'directories',
 ])
 
 const { setLocaleMessage, locale } = useI18n()
@@ -245,6 +252,8 @@ onUnmounted(() => {
   <div class="panel-shell">
     <main class="panel-content">
       <SettingsView v-if="activePanel === 'launcher-settings'" ref="settingsRef" />
+
+      <DirectoriesView v-else-if="activePanel === 'directories'" />
 
       <div v-else-if="activePanel === 'install-settings'" class="panel-install-settings">
         <DetailModal
