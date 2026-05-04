@@ -18,6 +18,7 @@ import {
 } from 'lucide-vue-next'
 import { useInstallationStore } from '../stores/installationStore'
 import { useProgressStore } from '../stores/progressStore'
+import { useSessionStore } from '../stores/sessionStore'
 import { useOnboardingPrefs } from '../composables/useOnboardingPrefs'
 import { useMigrateAction } from '../composables/useMigrateAction'
 import { useModal } from '../composables/useModal'
@@ -36,8 +37,23 @@ const TIMEOUT_SET_SETTING_MS = 3_000              // setSetting (any single key)
 const TIMEOUT_OPEN_EXTERNAL_MS = 2_000            // shell.openExternal — just acks the OS
 const TIMEOUT_FORM_PREFLIGHT_MS = 10_000          // getDefaultInstallDir + getFieldOptions + detectGPU + validateHardware
 const TIMEOUT_INSTALL_SETUP_MS = 15_000           // 4-call submit chain ending in addInstallation
+// Overall-progress mapping: backend emits per-phase percent (download 0→100,
+// extract 0→100, setup 0→100). Without mapping, the bar resets between
+// phases. We allocate slots so total progress is monotonic across the install.
+// Sums to 100 across all phases the backend emits; finalize / unknown phases
+// stay in the last 5%.
+const PHASE_PROGRESS_WEIGHTS = {
+  download: { start: 0, end: 35 },
+  extract: { start: 35, end: 60 },
+  setup: { start: 60, end: 95 },
+} as const
 const TIMEOUT_CLOUD_LAUNCH_MS = 30_000            // runAction(id, 'launch') for cloud — waitForUrl poll
-const TIMEOUT_LOCAL_LAUNCH_MS = 15_000            // runAction(id, 'launch') for local
+// Local first-launch (Python cold-start, port wait, etc) regularly takes
+// 30-60s on a fresh install. Was 15s — caused "Couldn't open" errors that
+// then auto-resolved when the launch completed naturally. Bumped well past
+// the realistic ceiling. The sessionStore watch below also recovers if the
+// launch lands after the timeout fires.
+const TIMEOUT_LOCAL_LAUNCH_MS = 120_000           // runAction(id, 'launch') for local
 const TIMEOUT_CANCEL_LAUNCH_MS = 3_000            // cancelLaunch — must escape regardless
 const TIMEOUT_DONE_RETRY_MS = 15_000              // §8 explicit done-state retry timeout
 const CARD_LOADING_PAINT_MS = 400                 // ensure card-loading state renders before stage flips
@@ -74,6 +90,7 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const installationStore = useInstallationStore()
 const progressStore = useProgressStore()
+const sessionStore = useSessionStore()
 const onboardingPrefs = useOnboardingPrefs()
 const modal = useModal()
 const { confirmMigration } = useMigrateAction()
@@ -133,15 +150,16 @@ const FAUX_STEP_KEYS = [
 // determinate at the last observed value rather than reverting to shimmer.
 const hasSeenRealPercent = ref(false)
 
+// Overall install percent: -1 (indeterminate shimmer) until we've seen a
+// real backend event; then `lastOverallPercent` which the watch keeps
+// monotonic across phases via PHASE_PROGRESS_WEIGHTS. Bug Deep reported:
+// "starts at around 30-40% by default" was the raw download-phase percent
+// being shown as absolute bar position. Now: bar tracks total install
+// progress 0-100 end-to-end and never goes backward.
 const installPercent = computed(() => {
-  const op = installOp.value
-  if (!op) return -1                                  // sentinel: no operation yet
-  if (op.flatPercent >= 0) return op.flatPercent
-  // Latch: once we've seen a real percent, never go back to indeterminate.
-  if (hasSeenRealPercent.value) return lastFlatPercent.value
-  // Stall fallback only kicks in AFTER we've had real progress.
-  if (isStalled.value && hasSeenRealPercent.value) return lastFlatPercent.value
-  return -1
+  if (!installOp.value) return -1                     // no operation yet
+  if (!hasSeenRealPercent.value) return -1            // no real event yet
+  return lastOverallPercent.value
 })
 
 // §5 — display computed. `—` (em dash) when indeterminate so the user gets a
@@ -158,6 +176,14 @@ const isIndeterminate = computed(() => installPercent.value < 0)
 const installStatus = computed(
   () => installOp.value?.flatStatus || '',
 )
+
+// §5 — ParsedStatus: structured parse of the backend's status string.
+// Implemented as a pure function in `lib/parseInstallStatus.ts` so it can
+// be unit-tested against the exact strings the backend emits. The computed
+// here just feeds installStatus into it — see that file for the full spec.
+// Declared early so the per-phase progress watch (further below) can read
+// `parsedStatus.value.phase` without hitting a temporal dead zone.
+const parsedStatus = computed<ParsedStatus>(() => parseInstallStatus(installStatus.value))
 
 interface DisplayStep {
   label: string
@@ -1044,12 +1070,17 @@ async function startInstall(): Promise<void> {
 }
 
 // --- Section H (installing — §9.5) ---
-// Stall detection: if flatStatus + flatPercent haven't changed in 30s, we
-// surface a warning strip + reveal the Cancel button. The progress bar stops
-// estimating forward when stalled (don't lie about progress).
-const INSTALL_STALL_THRESHOLD_MS = 30_000
+// Stall detection: if flatStatus + flatPercent haven't changed in 90s, we
+// surface a warning strip + reveal the Cancel button. Was 30s — too
+// aggressive; legitimate phases (Python env copy, model downloads on slow
+// links) routinely sit without a progress event for over a minute and the
+// "is taking longer than usual" warning was firing during normal operation.
+const INSTALL_STALL_THRESHOLD_MS = 90_000
 const lastProgressAt = ref(Date.now())
 const lastFlatPercent = ref(0)
+// Monotonic overall percent (0-100 across the whole install). Updated by
+// the watch on flatPercent + parsedStatus.phase. Read by `installPercent`.
+const lastOverallPercent = ref(0)
 const lastFlatStatus = ref('')
 const isStalled = ref(false)
 const cancelInProgress = ref(false)
@@ -1060,8 +1091,8 @@ const cancelError = ref<string | null>(null)
 // `flatPercent`, latch `hasSeenRealPercent` so the bar never reverts to
 // indeterminate shimmer (§5 Bug 1 fix).
 watch(
-  () => [installOp.value?.flatPercent, installOp.value?.flatStatus] as const,
-  ([percent, status]) => {
+  () => [installOp.value?.flatPercent, installOp.value?.flatStatus, parsedStatus.value.phase] as const,
+  ([percent, status, phase]) => {
     if (typeof percent === 'number') {
       // First real percent (>= 0) flips the latch. This can be 0 — that's a
       // valid first event; the bar becomes determinate at 0% rather than
@@ -1075,6 +1106,23 @@ watch(
         if (percent >= 0) lastFlatPercent.value = percent
         lastProgressAt.value = Date.now()
         isStalled.value = false
+      }
+      // Compute monotonic overall (0-100 across all phases). Once we know
+      // the phase, slot the per-phase percent into PHASE_PROGRESS_WEIGHTS;
+      // otherwise hold the prior overall (don't regress when phase parser
+      // misses, e.g. between phases or on a status string we haven't mapped).
+      if (percent >= 0) {
+        const phaseKey = phase && phase in PHASE_PROGRESS_WEIGHTS
+          ? phase as keyof typeof PHASE_PROGRESS_WEIGHTS
+          : null
+        const overall = phaseKey
+          ? PHASE_PROGRESS_WEIGHTS[phaseKey].start +
+            (percent / 100) *
+              (PHASE_PROGRESS_WEIGHTS[phaseKey].end - PHASE_PROGRESS_WEIGHTS[phaseKey].start)
+          : lastOverallPercent.value
+        if (overall > lastOverallPercent.value) {
+          lastOverallPercent.value = overall
+        }
       }
     }
     if (typeof status === 'string' && status !== lastFlatStatus.value) {
@@ -1142,12 +1190,6 @@ async function cancelInstall(): Promise<void> {
   }
 }
 
-// §5 — ParsedStatus: structured parse of the backend's status string.
-// Implemented as a pure function in `lib/parseInstallStatus.ts` so it can
-// be unit-tested against the exact strings the backend emits. The computed
-// here just feeds installStatus into it — see that file for the full spec.
-const parsedStatus = computed<ParsedStatus>(() => parseInstallStatus(installStatus.value))
-
 // §5 — Phase title shown above the bar. Maps the parser's phase to spec
 // copy. Falls back to active step ladder label for unknown phases (e.g.
 // "Finalizing setup") so the header always reads sensibly.
@@ -1175,6 +1217,7 @@ function startElapsedTimer(): void {
   // pre-fill before first real event).
   lastProgressAt.value = Date.now()
   lastFlatPercent.value = 0
+  lastOverallPercent.value = 0
   lastFlatStatus.value = ''
   isStalled.value = false
   hasSeenRealPercent.value = false
@@ -1316,6 +1359,36 @@ const retryError = ref<string | null>(null)
 // `retryError !== null`" — but more precisely: only after the user has
 // explicitly retried at least once and seen a failure).
 const retryAttempted = ref(false)
+
+// Late-arriving session recovery. Bug Deep reported: launch timeout fires
+// at 15s → "Couldn't open ComfyUI" surfaces → ComfyUI actually opens 30-60s
+// later (Python cold-start finishes). User sees a contradictory error
+// while the app is running. Even with the timeout bumped to 120s, the
+// backend can in principle exceed it — this watch is the safety net.
+//
+// When sessionStore reports `installingId.value` as a running instance
+// while we're sitting on the done state with a retryError, treat it as
+// recovered: clear the error, hide the launcher, complete onboarding.
+watch(
+  () => installingId.value && sessionStore.runningInstances.has(installingId.value),
+  (running) => {
+    if (!running) return
+    if (stage.value !== 'done') return
+    if (!retryError.value) return
+    retryError.value = null
+    void (async () => {
+      try {
+        await withTimeout(window.api.hideLauncherWindow(), 3_000, undefined)
+      } catch (err) {
+        emitTelemetryAction('onboarding.hideLauncherWindow.failed', {
+          message: (err as Error)?.message,
+          phase: 'session_recovery',
+        })
+      }
+      emit('complete')
+    })()
+  },
+)
 
 function startDoneTimer(): void {
   stopDoneTimer()
