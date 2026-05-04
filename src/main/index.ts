@@ -50,8 +50,13 @@ const VALID_PANELS: ReadonlySet<ComfyPanelKey> = new Set(['comfy', 'install-sett
  * inside the Comfy tab when the install isn't running (no process up yet,
  * shutting down, or crashed). The title bar still highlights the Comfy pill;
  * the lifecycle view is just what fills the body in that state.
+ *
+ * `'chooser'` is also not a title-bar pill — it's the panel rendered inside
+ * the Comfy tab of an install-less host window (one with no install backing
+ * the entry yet). Picking an install in the chooser eventually swaps the
+ * window in-place to a real install (Phase 3 step 2d).
  */
-type BodyMode = 'comfy' | 'comfy-lifecycle' | 'install-settings' | 'launcher-settings'
+type BodyMode = 'comfy' | 'comfy-lifecycle' | 'install-settings' | 'launcher-settings' | 'chooser'
 
 todesktop.init({ autoUpdater: false })
 
@@ -179,14 +184,15 @@ interface ComfyWindowEntry {
   titleBarView: WebContentsView
   /**
    * Lazily-created on first non-comfy panel switch *or* when the comfy tab
-   * needs to render the lifecycle body (install stopped / launching).
+   * needs to render the lifecycle body (install stopped / launching) *or*
+   * the chooser body (install-less host window).
    */
   panelView: WebContentsView | null
   /**
-   * Which title-bar pill is currently selected. Always one of the three
-   * user-visible pills — never `'comfy-lifecycle'`. The body shown for the
-   * Comfy pill switches between the live ComfyUI view and the lifecycle
-   * panel based on `_runningSessions` (see `computeBodyMode()`).
+   * Which title-bar pill is currently selected. Always one of the user-
+   * visible pills — never the internal `'comfy-lifecycle'` / `'chooser'`
+   * body modes. For install-less host windows only the Comfy and
+   * Launcher Settings pills are reachable (Install Settings is hidden).
    */
   activePanel: ComfyPanelKey
   /** Last known theme reported by the ComfyUI frontend, applied to the panel when it loads. */
@@ -197,24 +203,53 @@ interface ComfyWindowEntry {
    * The current ComfyUI URL the comfyView should display. Updated on every
    * `onLaunch` so reload / did-fail-load handlers don't hold stale URLs
    * across stop+restart cycles (the window persists, the URL may change).
+   * Empty string for install-less host windows where comfyView is collapsed.
    */
   comfyUrl: string
+  /**
+   * Installation backing this window, or null for install-less host
+   * windows (chooser / file-menu flows in Phase 3 step 2c+). Centralises
+   * the "is this entry install-backed?" decision so `computeBodyMode()`
+   * can route the Comfy pill to the chooser without parallel branches in
+   * every call site.
+   */
+  installationId: string | null
 }
+/**
+ * All host windows (install-backed and install-less). Install-backed
+ * entries are keyed by their installationId; install-less entries are
+ * keyed by a synthetic `chooser:<n>` string (see `openChooserHostWindow`).
+ * Lookups by installationId still hit only install-backed entries.
+ */
 const comfyWindows = new Map<string, ComfyWindowEntry>()
+let _chooserWindowCounter = 0
+function nextChooserKey(): string {
+  return `chooser:${++_chooserWindowCounter}`
+}
 
 /**
  * Decide what should fill the body area of a comfy window right now.
  *
- * The Comfy pill resolves to either the live ComfyUI WebContentsView (instance
- * running) or the lifecycle panel (instance stopped / launching / stopping).
- * The other two pills always map directly to themselves.
+ * For install-backed windows, the Comfy pill resolves to either the live
+ * ComfyUI WebContentsView (instance running) or the lifecycle panel
+ * (instance stopped / launching / stopping). The other two pills always
+ * map directly to themselves.
+ *
+ * For install-less host windows (entry.installationId === null), the Comfy
+ * pill resolves to the chooser body; only the Comfy and Launcher Settings
+ * pills are reachable in this mode.
  *
  * Centralising this so layout decisions and event-driven body swaps can't
  * disagree about which view should be visible.
  */
-function computeBodyMode(entry: ComfyWindowEntry, installationId: string): BodyMode {
+function computeBodyMode(entry: ComfyWindowEntry): BodyMode {
+  if (entry.installationId === null) {
+    // Install-less host window. Comfy pill → chooser; everything else
+    // (in practice only Launcher Settings) maps to itself.
+    return entry.activePanel === 'comfy' ? 'chooser' : entry.activePanel
+  }
   if (entry.activePanel !== 'comfy') return entry.activePanel
-  return _runningSessions.has(installationId) ? 'comfy' : 'comfy-lifecycle'
+  return _runningSessions.has(entry.installationId) ? 'comfy' : 'comfy-lifecycle'
 }
 
 /**
@@ -229,7 +264,7 @@ function refreshComfyTabBody(installationId: string): void {
   if (!entry || entry.window.isDestroyed()) return
   if (entry.activePanel !== 'comfy') return
 
-  const mode = computeBodyMode(entry, installationId)
+  const mode = computeBodyMode(entry)
   if (mode === 'comfy-lifecycle') {
     const panelView = ensurePanelView(installationId, entry, 'comfy-lifecycle')
     if (!panelView.webContents.isDestroyed() && !panelView.webContents.isLoadingMainFrame()) {
@@ -503,6 +538,10 @@ function updateTrayMenu(): void {
   if (!tray) return
   const contextMenu = Menu.buildFromTemplate([
     { label: i18n.t('tray.showApp'), click: () => showMainWindow() },
+    // Phase 3 step 2c — entry-point for the install-less host window so
+    // the chooser infrastructure can be exercised end-to-end without
+    // waiting on the startup-picker / File-menu wiring (steps 2d / 3).
+    { label: 'Open Chooser Window (preview)', click: () => { openChooserHostWindow() } },
     { type: 'separator' },
     { label: i18n.t('tray.quit'), click: () => quitApp() },
   ])
@@ -863,7 +902,7 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
 
     // The Comfy pill maps to the live ComfyUI view *or* the lifecycle panel
     // depending on whether the install is currently running.
-    const mode = entry ? computeBodyMode(entry, installationId) : 'comfy'
+    const mode = entry ? computeBodyMode(entry) : 'comfy'
     const showPanel = mode !== 'comfy'
     if (showPanel && entry?.panelView) {
       // Panel covers the body; ComfyUI is hidden but kept alive so its state is preserved.
@@ -1109,6 +1148,7 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
     lastTheme: { bg: COMFY_BG, text: '#dddddd' },
     layoutViews,
     comfyUrl,
+    installationId,
   })
 
   // Now that the entry exists, layout for the first time.
@@ -1119,6 +1159,171 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
       // Session registry handles state cleanup
     })
   }
+}
+
+/**
+ * Open an install-less host window (Phase 3 step 2c).
+ *
+ * Same window shape as a comfy window — title bar pills + a body area —
+ * but with no installation backing the entry. The Comfy pill resolves to
+ * the chooser body via `computeBodyMode()`; the user picks an install
+ * from there.
+ *
+ * Lean version of the install-backed `onLaunch()` flow: no comfy URL load,
+ * no theme observer, no download wiring, no failure retry — those are all
+ * comfy-specific and would do nothing useful in install-less mode. The
+ * comfyView still exists (so `layoutViews` doesn't have to special-case
+ * its absence) but is sized to zero and never made visible.
+ */
+function openChooserHostWindow(): BrowserWindow {
+  const windowKey = nextChooserKey()
+
+  const windowOptions = getWindowOptions(windowKey)
+  const comfyWindow = new BrowserWindow({
+    ...windowOptions,
+    minWidth: 800,
+    minHeight: 600,
+    icon: APP_ICON,
+    title: `Choose an install — Desktop 2.0 v${APP_VERSION}`,
+    backgroundColor: COMFY_BG,
+    titleBarStyle: 'hidden',
+    ...(process.platform === 'darwin'
+      ? { trafficLightPosition: TRAFFIC_LIGHT_POSITION }
+      : { titleBarOverlay: comfyTitleBarOverlay() }),
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+    },
+  })
+  comfyWindow.setMenuBarVisibility(false)
+
+  // Title bar — same renderer as install-backed windows. The empty
+  // `installationId` URL param is what the title-bar Vue uses to enter
+  // install-less mode (hide Install Settings pill, accept the fallback
+  // label).
+  const titleBarView = new WebContentsView({
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, '../preload/comfyTitleBarPreload.js'),
+    },
+  })
+  titleBarView.setBackgroundColor(TITLEBAR_BG)
+  {
+    const isDev = !!process.env['ELECTRON_RENDERER_URL']
+    const tbLoad = isDev
+      ? titleBarView.webContents.loadURL(
+          `${(process.env['ELECTRON_RENDERER_URL'] as string).replace(/\/$/, '')}/comfyTitleBar.html?installationId=`,
+        )
+      : titleBarView.webContents.loadFile(
+          path.join(__dirname, '../renderer/comfyTitleBar.html'),
+          { query: { installationId: '' } },
+        )
+    void tbLoad.catch(() => {})
+  }
+  comfyWindow.contentView.addChildView(titleBarView)
+  _registerExtraBroadcastTarget(titleBarView.webContents)
+
+  // Dummy comfyView. Kept so `layoutViews` doesn't have to special-case the
+  // install-less branch — its body always resolves to the panelView.
+  const comfyView = new WebContentsView({
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+    },
+  })
+  comfyView.setBackgroundColor(COMFY_BG)
+  comfyWindow.contentView.addChildView(comfyView)
+
+  const titleBarTotal = TITLEBAR_HEIGHT + 1
+  const layoutViews = (): void => {
+    if (comfyWindow.isDestroyed()) return
+    const entry = comfyWindows.get(windowKey)
+    const [width, height] = comfyWindow.getContentSize() as [number, number]
+    const bodyHeight = Math.max(0, height - titleBarTotal)
+    const bodyRect = { x: 0, y: titleBarTotal, width, height: bodyHeight }
+    titleBarView.setBounds({ x: 0, y: 0, width, height: titleBarTotal })
+    // Install-less windows always resolve to a panel body (chooser or
+    // launcher-settings). If the panelView isn't created yet, collapse
+    // the comfy view rather than show it — the dummy comfyView has no
+    // useful URL.
+    if (entry?.panelView) {
+      entry.panelView.setBounds(bodyRect)
+      entry.panelView.setVisible(true)
+    }
+    comfyView.setBounds({ x: 0, y: titleBarTotal, width: 0, height: 0 })
+    comfyView.setVisible(false)
+  }
+  comfyWindow.on('resize', layoutViews)
+
+  // macOS fullscreen — keep the title-bar padding in sync just like the
+  // install-backed flow.
+  if (process.platform === 'darwin') {
+    const sendFullscreen = (fullscreen: boolean): void => {
+      if (titleBarView.webContents.isDestroyed()) return
+      titleBarView.webContents.send('comfy-titlebar:fullscreen-changed', fullscreen)
+    }
+    comfyWindow.on('enter-full-screen', () => sendFullscreen(true))
+    comfyWindow.on('leave-full-screen', () => sendFullscreen(false))
+  }
+
+  // Push initial state once the title bar's preload signals readiness.
+  // Filtered to this window's title-bar webContents to avoid cross-talk.
+  const onTitleBarReady = (event: Electron.IpcMainEvent): void => {
+    if (event.sender !== titleBarView.webContents) return
+    if (!titleBarView.webContents.isDestroyed()) {
+      // Fallback label — install-backed windows use the install name.
+      titleBarView.webContents.send('comfy-titlebar:title-changed', 'Choose an install')
+      const entry = comfyWindows.get(windowKey)
+      titleBarView.webContents.send('comfy-titlebar:panel-changed', entry?.activePanel ?? 'comfy')
+      if (entry) {
+        titleBarView.webContents.send('comfy-titlebar:theme-changed', entry.lastTheme)
+      }
+    }
+  }
+  ipcMain.on('comfy-window:title-bar-ready', onTitleBarReady)
+
+  comfyWindow.on('close', () => {
+    _unregisterExtraBroadcastTarget(titleBarView.webContents)
+    const entry = comfyWindows.get(windowKey)
+    if (entry?.panelView) {
+      _unregisterExtraBroadcastTarget(entry.panelView.webContents)
+      entry.panelView.webContents.close()
+    }
+    titleBarView.webContents.close()
+    comfyView.webContents.close()
+  })
+
+  comfyWindow.on('closed', () => {
+    ipcMain.off('comfy-window:title-bar-ready', onTitleBarReady)
+    comfyWindows.delete(windowKey)
+  })
+
+  comfyWindow.on('resize', () => saveWindowBounds(windowKey, comfyWindow))
+  comfyWindow.on('move', () => saveWindowBounds(windowKey, comfyWindow))
+
+  comfyWindows.set(windowKey, {
+    window: comfyWindow,
+    comfyView,
+    titleBarView,
+    panelView: null,
+    activePanel: 'comfy',
+    lastTheme: { bg: COMFY_BG, text: '#dddddd' },
+    layoutViews,
+    comfyUrl: '',
+    installationId: null,
+  })
+
+  // Force-create the panel WebContentsView with the chooser body — install-
+  // less windows always need a panel, and creating it eagerly avoids the
+  // empty body flash that would happen on the next layoutViews tick.
+  const entry = comfyWindows.get(windowKey)
+  if (entry) {
+    ensurePanelView(windowKey, entry, 'chooser')
+  }
+
+  layoutViews()
+  return comfyWindow
 }
 
 ipcMain.handle('quit-app', () => quitApp())
@@ -1164,21 +1369,25 @@ function ensurePanelView(installationId: string, entry: ComfyWindowEntry, initia
   panelView.webContents.once('did-finish-load', () => {
     const latest = comfyWindows.get(installationId)
     if (!latest || latest.window.isDestroyed() || panelView.webContents.isDestroyed()) return
-    const mode = computeBodyMode(latest, installationId)
+    const mode = computeBodyMode(latest)
     if (mode !== 'comfy') {
-      panelView.webContents.send('panel-switch', { panel: mode, installationId })
+      panelView.webContents.send('panel-switch', { panel: mode, installationId: latest.installationId ?? '' })
       if (latest.window.isFocused()) panelView.webContents.focus()
     }
   })
 
+  // Pass the entry's installationId (which is the empty string for
+  // install-less host windows) to the panel renderer — the Map key may be
+  // a synthetic `chooser:<n>` string that PanelApp.vue must not see.
+  const panelInstallationId = entry.installationId ?? ''
   const isDev = !!process.env['ELECTRON_RENDERER_URL']
   const loadPromise = isDev
     ? panelView.webContents.loadURL(
-        `${(process.env['ELECTRON_RENDERER_URL'] as string).replace(/\/$/, '')}/panel.html?installationId=${encodeURIComponent(installationId)}&panel=${encodeURIComponent(initialPanel)}`,
+        `${(process.env['ELECTRON_RENDERER_URL'] as string).replace(/\/$/, '')}/panel.html?installationId=${encodeURIComponent(panelInstallationId)}&panel=${encodeURIComponent(initialPanel)}`,
       )
     : panelView.webContents.loadFile(
         path.join(__dirname, '../renderer/panel.html'),
-        { query: { installationId, panel: initialPanel } },
+        { query: { installationId: panelInstallationId, panel: initialPanel } },
       )
   // Loads can reject if the window closes mid-load — swallow to avoid noisy
   // unhandledRejection forwarding from the main-process error handlers.
@@ -1192,13 +1401,7 @@ function ensurePanelView(installationId: string, entry: ComfyWindowEntry, initia
 /** Move OS focus to whichever body view is now active so keyboard input lands in the right place. */
 function focusActiveBody(entry: ComfyWindowEntry): void {
   if (entry.window.isDestroyed() || !entry.window.isFocused()) return
-  // Walk the entry back to its installationId so we can ask computeBodyMode
-  // — the entry doesn't carry the id directly.
-  let installationId: string | null = null
-  for (const [id, e] of comfyWindows) {
-    if (e === entry) { installationId = id; break }
-  }
-  const mode = installationId ? computeBodyMode(entry, installationId) : entry.activePanel
+  const mode = computeBodyMode(entry)
   if (mode === 'comfy') {
     if (!entry.comfyView.webContents.isDestroyed()) entry.comfyView.webContents.focus()
   } else if (entry.panelView && !entry.panelView.webContents.isDestroyed() && !entry.panelView.webContents.isLoadingMainFrame()) {
@@ -1208,21 +1411,26 @@ function focusActiveBody(entry: ComfyWindowEntry): void {
   }
 }
 
-function setActivePanel(installationId: string, panel: ComfyPanelKey): void {
-  const entry = comfyWindows.get(installationId)
+function setActivePanel(windowKey: string, panel: ComfyPanelKey): void {
+  const entry = comfyWindows.get(windowKey)
   if (!entry || entry.window.isDestroyed()) return
   if (entry.activePanel === panel) return
+  // Install Settings is hidden in install-less host windows — refuse to
+  // switch to it from anywhere (a stray IPC payload should not be able to
+  // wedge the window into a body mode that has no install to render).
+  if (entry.installationId === null && panel === 'install-settings') return
 
   entry.activePanel = panel
-  // Resolve to the actual body mode (Comfy pill maps to lifecycle when not running).
-  const mode = computeBodyMode(entry, installationId)
+  // Resolve to the actual body mode (Comfy pill maps to lifecycle / chooser
+  // depending on running state and whether the window is install-backed).
+  const mode = computeBodyMode(entry)
   if (mode !== 'comfy') {
-    const panelView = ensurePanelView(installationId, entry, mode)
+    const panelView = ensurePanelView(windowKey, entry, mode)
     // If panel view already loaded, push the switch immediately. If still
     // loading, the did-finish-load handler in ensurePanelView will push the
     // current body mode — guarding against rapid clicks during first load.
     if (!panelView.webContents.isDestroyed() && !panelView.webContents.isLoadingMainFrame()) {
-      panelView.webContents.send('panel-switch', { panel: mode, installationId })
+      panelView.webContents.send('panel-switch', { panel: mode, installationId: entry.installationId ?? '' })
     }
   }
   entry.layoutViews()
@@ -1265,6 +1473,47 @@ ipcMain.handle('close-comfy-window', (_event, installationId: string) => {
   if (!entry || entry.window.isDestroyed()) return false
   entry.window.close()
   return true
+})
+
+/**
+ * Chooser → "create a new install" (Phase 3 step 2c).
+ *
+ * The launcher window owns the new-install flow today (sidebar / detail
+ * surface). Until step 3 promotes those flows to a native File menu, we
+ * just focus the launcher window so the user can click New Install from
+ * there. This keeps the chooser empty-state CTA wired without forcing a
+ * new IPC plumbing path that 3 will rewrite anyway.
+ */
+ipcMain.handle('open-new-install-from-host', () => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    bringToFront(mainWindow)
+  }
+})
+
+/**
+ * Close the host window that contains the calling panel WebContents
+ * (Phase 3 step 2d).
+ *
+ * Used by the chooser after a successful pick → launch hand-off: once the
+ * install's own ComfyUI window has opened (via the existing `onLaunch`
+ * flow), the install-less chooser host window is no longer needed and
+ * closes itself. The renderer can't close its parent BrowserWindow
+ * directly, so it asks main to do it.
+ *
+ * Safe on install-backed windows too — the install-settings panel's
+ * navigate-list path already handles teardown via `closeComfyWindow`, but
+ * if a future renderer surface needs the same "close my window" hook this
+ * IPC can stand in for it.
+ */
+ipcMain.handle('close-host-window', (event) => {
+  for (const [, entry] of comfyWindows) {
+    if (entry.window.isDestroyed()) continue
+    if (entry.panelView?.webContents === event.sender) {
+      entry.window.close()
+      return true
+    }
+  }
+  return false
 })
 
 function resolveOutputDir(inst: InstallationRecord): string | null {

@@ -6,23 +6,27 @@ import DetailModal from '../views/DetailModal.vue'
 import ProgressModal from '../views/ProgressModal.vue'
 import ModalDialog from '../components/ModalDialog.vue'
 import ComfyLifecycleView from './ComfyLifecycleView.vue'
+import ChooserView from '../views/ChooserView.vue'
 import { useTheme } from '../composables/useTheme'
 import { useSessionStore } from '../stores/sessionStore'
 import { useInstallationStore } from '../stores/installationStore'
 import { useProgressStore } from '../stores/progressStore'
 import { useLauncherPrefs } from '../composables/useLauncherPrefs'
+import { useListAction } from '../composables/useListAction'
 import type { ActionResult, Installation } from '../types/ipc'
 
 /**
  * Body modes the panel WebContentsView can render. Mirrors the `BodyMode`
  * union in `src/main/index.ts` — `'comfy-lifecycle'` is the lifecycle UI
- * shown for the Comfy tab when no ComfyUI process is running, the others
- * are the title-bar pills that map directly to a panel.
+ * shown for the Comfy tab when no ComfyUI process is running, `'chooser'`
+ * is the install-picker shown for the Comfy tab of an install-less host
+ * window, the others are the title-bar pills that map directly to a panel.
  */
-export type PanelKey = 'comfy-lifecycle' | 'install-settings' | 'launcher-settings'
+export type PanelKey = 'comfy-lifecycle' | 'chooser' | 'install-settings' | 'launcher-settings'
 
 const VALID_PANELS: ReadonlySet<PanelKey> = new Set([
   'comfy-lifecycle',
+  'chooser',
   'install-settings',
   'launcher-settings',
 ])
@@ -34,7 +38,11 @@ const params = new URLSearchParams(window.location.search)
 const installationId = params.get('installationId') || ''
 const initialPanel: PanelKey = ((): PanelKey => {
   const raw = params.get('panel')
-  return raw && VALID_PANELS.has(raw as PanelKey) ? (raw as PanelKey) : 'launcher-settings'
+  if (raw && VALID_PANELS.has(raw as PanelKey)) return raw as PanelKey
+  // Install-less host windows (no installationId) default to the chooser;
+  // install-backed panels default to launcher-settings (matches the
+  // pre-Phase-3 behaviour for the title-bar Launcher Settings pill).
+  return installationId ? 'launcher-settings' : 'chooser'
 })()
 
 const activePanel = ref<PanelKey>(initialPanel)
@@ -98,6 +106,83 @@ function handleUpdateInstallation(inst: Installation): void {
   if (idx >= 0) installationStore.installations.splice(idx, 1, inst)
 }
 
+// --- Chooser handlers (install-less host window only) ---
+//
+// Phase 3 step 2d — chooser pick triggers the install's launch action
+// directly from the panel renderer, mirroring the Dashboard "Open" button
+// flow. Once the install's own ComfyUI window has opened (or it was already
+// running), the install-less chooser host window closes itself.
+//
+// `useListAction` covers the same launch UX paths the Dashboard already
+// uses: confirm modal, in-progress guard, port-conflict resolution via
+// ProgressModal, telemetry, etc. Reusing it keeps the chooser pick from
+// re-implementing launch semantics.
+const { executeAction: executeChooserAction } = useListAction('chooser', {
+  showProgress: handleShowProgress,
+})
+
+/** Pending close-on-launch subscription, so unmount can clean it up. */
+let pendingPickUnsub: (() => void) | null = null
+
+async function handleChooserPick(installation: Installation): Promise<void> {
+  // Already running with an open window — focus that window and retire
+  // the chooser host. No need to involve the launch action.
+  if (sessionStore.isRunning(installation.id)) {
+    await window.api.focusComfyWindow(installation.id)
+    void window.api.closeHostWindow()
+    return
+  }
+
+  // Otherwise look up the launch action (sources expose it as their
+  // primary list action, e.g. 'launch' for standalone, 'connect' for
+  // url-based sources) and run it through the standard pipeline.
+  const actions = await window.api.getListActions(installation.id)
+  const launchAction = actions.find((a) => a.id === 'launch')
+    ?? actions.find((a) => a.style === 'primary')
+    ?? null
+  if (!launchAction) {
+    // Source has no launch path (e.g. the install isn't installed yet).
+    // Fall back to the launcher window's detail surface so the user can
+    // resolve the missing setup step from there.
+    void window.api.openNewInstallFromHost()
+    return
+  }
+
+  // Subscribe BEFORE kicking off the launch so we don't miss a
+  // fast-firing instance-started broadcast. The launch action runs via
+  // the ProgressModal pipeline (showProgress: true) so executeAction
+  // returns immediately after kicking it off — the actual completion
+  // signal is the instance-started event coming back from main.
+  pendingPickUnsub?.()
+  pendingPickUnsub = window.api.onInstanceStarted((data) => {
+    if (data.installationId !== installation.id) return
+    pendingPickUnsub?.()
+    pendingPickUnsub = null
+    // The install's own ComfyUI window has opened — chooser host is done.
+    void window.api.closeHostWindow()
+  })
+
+  await executeChooserAction(installation, launchAction)
+}
+
+function handleChooserShowNewInstall(): void {
+  // Empty-state CTA from the chooser. The install-less host window will
+  // gain native File-menu equivalents in step 3; for now route through
+  // the same IPC main exposes for the launcher window's "New Install"
+  // entry-point so the user isn't blocked.
+  void window.api.openNewInstallFromHost()
+}
+
+function handleChooserShowDetail(_installation: Installation): void {
+  // View Details from the chooser context menu. Inside the install-less
+  // host window there's no install backing the panel yet, so opening a
+  // detail modal here would be confusing — focus the launcher window where
+  // the detail surface already lives. (Same focus-launcher path as the
+  // new-install CTA; both go away when step 3 introduces native File-menu
+  // entries that open dedicated host windows for these flows.)
+  void window.api.openNewInstallFromHost()
+}
+
 function handleNavigateList(): void {
   // The install was removed from the list (e.g. deleted, migrated). The
   // ComfyUI window that hosts this panel no longer has an install backing
@@ -145,6 +230,7 @@ onUnmounted(() => {
   unsubPanel?.()
   unsubLocale?.()
   unsubSettings?.()
+  pendingPickUnsub?.()
   sessionStore.dispose()
 })
 </script>
@@ -177,6 +263,14 @@ onUnmounted(() => {
           :installation="installation"
           :installation-id="installationId"
           @show-progress="handleShowProgress"
+        />
+      </div>
+
+      <div v-else-if="activePanel === 'chooser'" class="panel-chooser">
+        <ChooserView
+          @pick="handleChooserPick"
+          @show-new-install="handleChooserShowNewInstall"
+          @show-detail="handleChooserShowDetail"
         />
       </div>
     </main>

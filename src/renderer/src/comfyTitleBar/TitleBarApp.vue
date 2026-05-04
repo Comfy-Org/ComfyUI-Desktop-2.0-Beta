@@ -23,6 +23,13 @@ const bridge = (window as unknown as { __comfyTitleBar?: Bridge }).__comfyTitleB
 const isMac = ref(bridge?.isMac() ?? false)
 const isFullscreen = ref(false)
 const activePanel = ref<ComfyPanelKey>('comfy')
+/**
+ * Install-less host window flag (Phase 3 step 2c). When true, the Comfy
+ * pill labels itself "Choose an install" (set by the initial title push
+ * from main), and the Install Settings pill is hidden — only Comfy and
+ * Launcher Settings are reachable.
+ */
+const isInstallLess = ref((bridge?.getInstallationId() ?? '') === '')
 /** Install identity (e.g. "MyInstall — Standalone") — main pushes this on ready. */
 const installLabel = ref('ComfyUI')
 const themeBg = ref<string | null>(null)
@@ -44,15 +51,32 @@ const isLight = computed(() => {
   return (r * 299 + g * 587 + b * 114) / 1000 >= 128
 })
 
-const tabs: { key: ComfyPanelKey; staticLabel?: string }[] = [
+const allTabs: { key: ComfyPanelKey; staticLabel?: string }[] = [
   { key: 'comfy' },
   { key: 'install-settings', staticLabel: 'Install Settings' },
   { key: 'launcher-settings', staticLabel: 'Launcher Settings' },
 ]
 
+/**
+ * Pills shown to the user. Install-less host windows (chooser / file-menu
+ * flows in Phase 3 step 2c+) hide the Install Settings pill — there's no
+ * install backing the window so its panel has nothing to render. This must
+ * stay in sync with the install-less guard in `setActivePanel()` over in
+ * src/main/index.ts that refuses to switch to install-settings for these
+ * windows.
+ */
+const tabs = computed(() =>
+  isInstallLess.value
+    ? allTabs.filter((t) => t.key !== 'install-settings')
+    : allTabs,
+)
+
 function labelFor(key: ComfyPanelKey, staticLabel?: string): string {
   // The comfy tab is the install identity; everything else is a fixed string
-  // (title bar isn't localized yet — it lives in its own WebContents).
+  // (title bar isn't localized yet — it lives in its own WebContents). For
+  // install-less host windows main pushes a fallback label ("Choose an
+  // install") via the same `comfy-titlebar:title-changed` channel, which
+  // ends up in `installLabel`.
   if (key === 'comfy') return installLabel.value || 'ComfyUI'
   return staticLabel || key
 }

@@ -668,6 +668,16 @@ export interface ElectronApi {
    *  panel after a navigate-list emit (e.g. delete) so the parent window
    *  doesn't linger with no install backing it. */
   closeComfyWindow(installationId: string): Promise<boolean>
+  /** Close the BrowserWindow that contains the calling panel WebContents
+   *  (Phase 3 step 2d). Used by the chooser to retire its install-less
+   *  host window after a successful pick → launch hand-off. Returns true
+   *  if a window was found and closed. */
+  closeHostWindow(): Promise<boolean>
+  /** Chooser → "create a new install" (Phase 3 step 2c). The chooser's
+   *  empty-state CTA fires this; main routes to the same new-install entry
+   *  the launcher window exposes. Becomes a native File-menu equivalent in
+   *  step 3. */
+  openNewInstallFromHost(): Promise<void>
   getRunningInstances(): Promise<RunningInstance[]>
   cancelLaunch(): Promise<void>
   cancelOperation(installationId: string): Promise<void>
