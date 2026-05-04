@@ -10,6 +10,14 @@ export interface ComfyTitleBarBridge {
   isMac(): boolean
   /** Request the main process to swap the active panel. */
   setPanel(panel: ComfyPanelKey): void
+  /** File menu → "New Window" (Phase 3 title bar v2). Opens a fresh
+   *  install-less chooser host window. Always creates a new one — the
+   *  focus-existing path lives on the tray entry. */
+  openNewWindow(): void
+  /** Install-pill caret → "Check for Updates" (Phase 3 title bar v2).
+   *  Wired in for install-backed host windows; main is responsible for
+   *  routing to the appropriate per-install update check. */
+  checkForUpdates(): void
   /** Subscribe to panel-active changes coming from main. */
   onPanelChanged(cb: (panel: ComfyPanelKey) => void): () => void
   /** Subscribe to title text changes coming from main. */
@@ -45,6 +53,12 @@ const bridge: ComfyTitleBarBridge = {
   isMac: () => (g.navigator?.userAgent ?? '').toLowerCase().includes('mac'),
   setPanel: (panel) => {
     ipcRenderer.send('comfy-window:set-panel', { panel })
+  },
+  openNewWindow: () => {
+    ipcRenderer.send('comfy-window:new-chooser-window')
+  },
+  checkForUpdates: () => {
+    ipcRenderer.send('comfy-window:check-for-updates')
   },
   onPanelChanged: (cb) => {
     const handler = (_event: IpcRendererEvent, panel: unknown): void => {

@@ -1474,6 +1474,28 @@ ipcMain.on('comfy-window:set-panel', (event, payload: { panel: string }) => {
   setActivePanel(found.id, panel)
 })
 
+/**
+ * File menu → New Window (Phase 3 title bar v2). Always opens a fresh
+ * install-less chooser host window — does NOT focus an existing one
+ * (that's the tray-entry behaviour). The user explicitly asked for a
+ * new window so they get one.
+ */
+ipcMain.on('comfy-window:new-chooser-window', () => {
+  openChooserHostWindow()
+})
+
+/**
+ * Install-pill caret → Check for Updates (Phase 3 title bar v2). Stub
+ * for now — focuses the launcher window so the user can use the Settings
+ * page's existing "Check for updates" button. A proper per-install check
+ * + result UI lives in step 5 alongside the rest of the title-bar menu.
+ */
+ipcMain.on('comfy-window:check-for-updates', () => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    bringToFront(mainWindow)
+  }
+})
+
 ipcMain.handle('focus-comfy-window', (_event, installationId: string) => {
   const entry = comfyWindows.get(installationId)
   if (entry && !entry.window.isDestroyed()) {
