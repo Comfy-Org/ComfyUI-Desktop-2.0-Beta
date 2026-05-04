@@ -119,7 +119,84 @@ The "primary install" surface (gold-star button, `primaryInstallId` pref,
 `set-primary-install` action) is intentionally **untouched** in this
 landing — recency is purely additive data so any future consumer can use
 it. Removing primary is a separate, larger step that will land alongside
-the dashboard rethink (see "Migration considerations" below).
+the chooser-view rebuild (see below).
+
+### The chooser view (replaces Dashboard *and* Installs)
+
+When the launcher window is retired, "what should the user see when the
+app launches with no window open?" can't be "auto-open the most-recent
+install" — that gets stuck in a loop the moment the most-recent install
+is no longer bootable (corrupt env, deleted files, broken snapshot, etc.).
+Instead, the recency signal feeds a **chooser view** that surfaces both
+the recent installs and the full list at once, and lets the user pick.
+
+The chooser view also collapses Phase 3's "Dashboard" and "Installations
+list" surfaces into a single screen — they're solving the same problem
+("which install do I want to open right now"), just from different
+angles. Both go away; the chooser is the replacement.
+
+#### Layout
+
+```
+╭───────────────────────────────────────────────╮
+│ ☁  Cloud — try / connect                      │  ← single promo row,
+├───────────────────────────────────────────────┤    pinned at the top
+│ Recent                                        │
+│   Install A   local     2 min ago             │
+│   Install B   desktop   1 hour ago            │
+├───────────────────────────────────────────────┤
+│ All                                           │
+│   Install A   local                           │
+│   Install B   desktop                         │
+│   Install C   local     (never run)           │
+╰───────────────────────────────────────────────╯
+```
+
+- **Cloud row sits *above* the table**, not inside it. Cloud isn't a disk
+  install, doesn't carry the same actions, and deserves the prominence
+  separate from the on-disk listing.
+- **Recent and All are sections of one table**, not separate tabs — both
+  are visible without a click. Recent is driven by `getRecent()` /
+  `getRecentByCategory()`; All is the same data the current Installs page
+  surfaces.
+- **No "primary" affordance.** The gold-star concept goes away with this
+  rebuild — no star column, no `primaryInstallId` pref, no
+  `set-primary-install` action. Recent + manual selection covers the same
+  user need without the dual-source-of-truth problem.
+
+#### Where the chooser lives
+
+The chooser is the default content of an **install-less host window** —
+i.e. a ComfyUI-shaped window whose Comfy WebContentsView is empty
+(no install booted yet). The same window shape that hosts a real Comfy
+install hosts the chooser; the title bar's Comfy tab body simply renders
+the chooser instead of an instance. Picking an install in the chooser
+either swaps the Comfy view in-place or opens a fresh window for that
+install (decision deferred to the implementation thread).
+
+This same install-less host window also hosts the File-menu flows from
+section 5 (new install / track existing / load snapshot / etc.) — the
+chooser and those flows are different "modes" of the same window shape,
+which is why section 5's "open a new ComfyUI window even when the install
+doesn't exist yet" works without a special-case window class.
+
+#### What goes away alongside the chooser
+
+The chooser rebuild is the right moment to delete:
+
+- The **Dashboard view** (`DashboardView.vue` and its store wiring) — the
+  chooser fully replaces it.
+- The **Installs page** as a separate view — same.
+- The **primary install system** in its entirety — the gold-star button
+  and `confirmSetPrimary` flow in `DetailModal.vue`, the `primaryInstallId`
+  field on `useLauncherPrefs`, the `set-primary-install` source action,
+  and any persisted `primaryInstallId` in settings (drop-on-load is fine
+  since the data is purely advisory).
+- The "promotable local" / `ensureDefaultPrimary` logic in
+  `registerInstallationHandlers.ts` and `shared.ts`.
+
+Pin probably stays as an affordance for the Recent/All sections — useful
+for "always surface these installs" without conflating with recency.
 
 ### Migration considerations when removing primary
 
