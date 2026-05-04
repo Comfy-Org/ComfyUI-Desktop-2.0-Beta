@@ -244,6 +244,17 @@ const api: ElectronApi = {
     ipcRenderer.on('suggest-chinese-mirrors', handler)
     return () => ipcRenderer.removeListener('suggest-chinese-mirrors', handler)
   },
+  onSettingsChanged: (callback) => {
+    const handler = (_event: IpcRendererEvent, data: unknown) => callback(data as { key: string })
+    ipcRenderer.on('settings-changed', handler)
+    return () => ipcRenderer.removeListener('settings-changed', handler)
+  },
+  onPanelSwitch: (callback) => {
+    const handler = (_event: IpcRendererEvent, data: unknown) =>
+      callback(data as { panel: string; installationId?: string })
+    ipcRenderer.on('panel-switch', handler)
+    return () => ipcRenderer.removeListener('panel-switch', handler)
+  },
 }
 
 if (process.contextIsolated) {

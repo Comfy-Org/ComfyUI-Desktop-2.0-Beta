@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>ComfyUI Desktop 2.0 — Panel</title>
+    <!--
+      CSP is relaxed in dev by electron-vite (it injects the HMR script).
+      Mirrors the launcher renderer's CSP — these two surfaces share assets
+      and behave the same way.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ws: https://*.datadoghq.com https://browser-intake-us5-datadoghq.com"
+    />
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/panel/main.ts"></script>
+  </body>
+</html>

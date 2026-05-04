@@ -36,6 +36,14 @@
     "giveFeedback": "Give Feedback"
   },
 
+  "titleBar": {
+    "panelComfy": "ComfyUI",
+    "panelInstallSettings": "Install Settings",
+    "panelLauncherSettings": "Launcher Settings",
+    "installSettingsComingSoon": "Installation-specific settings will appear here in a future update.",
+    "installationLabel": "Installation"
+  },
+
   "running": {
     "title": "Running",
     "empty": "Nothing running or in progress.",

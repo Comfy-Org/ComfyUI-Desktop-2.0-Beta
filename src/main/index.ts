@@ -28,7 +28,10 @@ import { shouldOpenInPopup } from './lib/allowedPopups'
 import { showModelFolderRelaunchPage } from './lib/relaunchPage'
 import { COMFY_BG, SPLASH_DARK, TITLEBAR_BG, type SplashTheme } from './lib/theme'
 import { TITLEBAR_HEIGHT, TRAFFIC_LIGHT_POSITION, titleBarOverlayForTheme, comfyTitleBarOverlay, updateTitleBarOverlay, setMainWindowId } from './lib/titleBarOverlay'
-import { resolveTheme, sourceMap } from './lib/ipc/shared'
+import { resolveTheme, sourceMap, _registerExtraBroadcastTarget, _unregisterExtraBroadcastTarget } from './lib/ipc/shared'
+
+export type ComfyPanelKey = 'comfy' | 'install-settings' | 'launcher-settings'
+const VALID_PANELS: ReadonlySet<ComfyPanelKey> = new Set(['comfy', 'install-settings', 'launcher-settings'])
 
 todesktop.init({ autoUpdater: false })
 
@@ -154,8 +157,23 @@ interface ComfyWindowEntry {
   window: BrowserWindow
   comfyView: WebContentsView
   titleBarView: WebContentsView
+  /** Lazily-created on first non-comfy panel switch. */
+  panelView: WebContentsView | null
+  /** Which view is currently visible below the title bar. */
+  activePanel: ComfyPanelKey
+  /** Last known theme reported by the ComfyUI frontend, applied to the panel when it loads. */
+  lastTheme: { bg: string; text: string }
+  /** Layout function bound to this entry — updates view bounds for the current activePanel. */
+  layoutViews: () => void
 }
 const comfyWindows = new Map<string, ComfyWindowEntry>()
+
+function findEntryByTitleBarSender(wc: Electron.WebContents): { id: string; entry: ComfyWindowEntry } | null {
+  for (const [id, entry] of comfyWindows) {
+    if (entry.titleBarView.webContents === wc) return { id, entry }
+  }
+  return null
+}
 
 function focusExternalProcessWindow(pid: number): void {
   if (process.platform === 'win32') {
@@ -675,21 +693,26 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
   })
   comfyWindow.setMenuBarVisibility(false)
 
-  // Title bar view — bounded to TITLEBAR_HEIGHT, isolated from ComfyUI
+  // Title bar view — bounded to TITLEBAR_HEIGHT, isolated from ComfyUI.
+  // Uses the comfyTitleBarPreload bridge (panel switch buttons, theme updates, etc.).
   const titleBarView = new WebContentsView({
-    webPreferences: { nodeIntegration: false, contextIsolation: true },
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, '../preload/comfyTitleBarPreload.js'),
+    },
   })
   // Paint the title bar's dark background before its HTML loads to avoid a white flash on window show.
   titleBarView.setBackgroundColor(TITLEBAR_BG)
-  titleBarView.webContents.loadFile(path.join(__dirname, '..', '..', 'resources', 'comfyTitleBar.html'))
+  // Pass installationId via query so the preload can expose it to the page.
+  titleBarView.webContents.loadFile(
+    path.join(__dirname, '..', '..', 'resources', 'comfyTitleBar.html'),
+    { query: { installationId } },
+  )
   const sourceLabel = sourceMap[installation.sourceId]?.label
   const titleBarText = sourceLabel ? `${installation.name} — ${sourceLabel}` : installation.name
-  titleBarView.webContents.on('dom-ready', () => {
-    titleBarView.webContents.executeJavaScript(
-      `window.__setTitle && window.__setTitle(${JSON.stringify(titleBarText)})`
-    ).catch(() => {})
-  })
   comfyWindow.contentView.addChildView(titleBarView)
+  _registerExtraBroadcastTarget(titleBarView.webContents)
 
   // ComfyUI content view — completely isolated from the title bar
   const comfyView = new WebContentsView({
@@ -708,16 +731,34 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
   comfyView.setBackgroundColor(COMFY_BG)
   comfyWindow.contentView.addChildView(comfyView)
 
-  // Layout both views; title bar is 1px taller than the overlay so a CSS
-  // border-bottom in comfyTitleBar.html sits below the native buttons.
+  // Title bar is 1px taller than the overlay so a CSS border-bottom in
+  // comfyTitleBar.html sits below the native buttons.
   const titleBarTotal = TITLEBAR_HEIGHT + 1
   const layoutViews = (): void => {
     if (comfyWindow.isDestroyed()) return
+    const entry = comfyWindows.get(installationId)
     const [width, height] = comfyWindow.getContentSize() as [number, number]
+    const bodyHeight = Math.max(0, height - titleBarTotal)
+    const bodyRect = { x: 0, y: titleBarTotal, width, height: bodyHeight }
     titleBarView.setBounds({ x: 0, y: 0, width, height: titleBarTotal })
-    comfyView.setBounds({ x: 0, y: titleBarTotal, width, height: Math.max(0, height - titleBarTotal) })
+
+    const panelActive = entry?.activePanel && entry.activePanel !== 'comfy'
+    if (panelActive && entry?.panelView) {
+      // Panel covers the body; ComfyUI is hidden but kept alive so its state is preserved.
+      entry.panelView.setBounds(bodyRect)
+      entry.panelView.setVisible(true)
+      // Collapse the comfy view to zero so it can't intercept input, but keep it loaded.
+      comfyView.setBounds({ x: 0, y: titleBarTotal, width: 0, height: 0 })
+      comfyView.setVisible(false)
+    } else {
+      comfyView.setBounds(bodyRect)
+      comfyView.setVisible(true)
+      if (entry?.panelView) {
+        entry.panelView.setBounds({ x: 0, y: titleBarTotal, width: 0, height: 0 })
+        entry.panelView.setVisible(false)
+      }
+    }
   }
-  layoutViews()
   comfyWindow.on('resize', layoutViews)
 
   // Alias for the ComfyUI webContents (all handlers use this)
@@ -734,6 +775,35 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
       titleBarView.webContents.executeJavaScript(`document.body.style.paddingLeft='78px'`).catch(() => {})
     })
   }
+
+  /** Send the active panel down to the title bar so it can highlight the right button. */
+  function notifyTitleBarPanel(panel: ComfyPanelKey): void {
+    if (titleBarView.webContents.isDestroyed()) return
+    titleBarView.webContents.send('comfy-titlebar:panel-changed', panel)
+  }
+
+  /** Send the title text to the title bar (replaces inline executeJavaScript). */
+  function notifyTitleBarTitle(text: string): void {
+    if (titleBarView.webContents.isDestroyed()) return
+    titleBarView.webContents.send('comfy-titlebar:title-changed', text)
+  }
+
+  // Push the initial state once the title bar's preload signals readiness.
+  // Using ipcMain.on (not handle) since the title bar uses ipcRenderer.send.
+  // Filter to this title bar's WebContents to avoid cross-talk between windows.
+  const onTitleBarReady = (event: Electron.IpcMainEvent): void => {
+    if (event.sender !== titleBarView.webContents) return
+    notifyTitleBarTitle(titleBarText)
+    const entry = comfyWindows.get(installationId)
+    notifyTitleBarPanel(entry?.activePanel ?? 'comfy')
+    if (entry) {
+      titleBarView.webContents.send('comfy-titlebar:theme-changed', entry.lastTheme)
+    }
+  }
+  ipcMain.on('comfy-window:title-bar-ready', onTitleBarReady)
+  comfyWindow.on('closed', () => {
+    ipcMain.off('comfy-window:title-bar-ready', onTitleBarReady)
+  })
 
   comfyWindow.on('resize', () => saveWindowBounds(installationId, comfyWindow))
   comfyWindow.on('move', () => saveWindowBounds(installationId, comfyWindow))
@@ -757,9 +827,12 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
   // Sync the title bar and overlay colors with the ComfyUI frontend's theme
   const applyComfyTheme = (bg: string, text: string): void => {
     if (comfyWindow.isDestroyed()) return
-    titleBarView.webContents.executeJavaScript(
-      `window.__updateTheme && window.__updateTheme(${JSON.stringify(bg)}, ${JSON.stringify(text)})`
-    ).catch(() => {})
+    const theme = { bg, text }
+    const entry = comfyWindows.get(installationId)
+    if (entry) entry.lastTheme = theme
+    if (!titleBarView.webContents.isDestroyed()) {
+      titleBarView.webContents.send('comfy-titlebar:theme-changed', theme)
+    }
     if (process.platform !== 'darwin') {
       try { comfyWindow.setTitleBarOverlay({ color: bg, symbolColor: text }) } catch {}
     }
@@ -863,6 +936,12 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
     e.preventDefault()
     detachWindowDownloads(comfyWindow)
     ipc.stopRunning(installationId)
+    _unregisterExtraBroadcastTarget(titleBarView.webContents)
+    const entry = comfyWindows.get(installationId)
+    if (entry?.panelView) {
+      _unregisterExtraBroadcastTarget(entry.panelView.webContents)
+      entry.panelView.webContents.close()
+    }
     titleBarView.webContents.close()
     comfyView.webContents.close()
     comfyWindow.destroy()
@@ -874,7 +953,18 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
     relaunchStates.delete(installationId)
   })
 
-  comfyWindows.set(installationId, { window: comfyWindow, comfyView, titleBarView })
+  comfyWindows.set(installationId, {
+    window: comfyWindow,
+    comfyView,
+    titleBarView,
+    panelView: null,
+    activePanel: 'comfy',
+    lastTheme: { bg: COMFY_BG, text: '#dddddd' },
+    layoutViews,
+  })
+
+  // Now that the entry exists, layout for the first time.
+  layoutViews()
 
   if (proc) {
     proc.on('exit', () => {
@@ -889,6 +979,78 @@ ipcMain.handle('reset-zoom', () => {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.setZoomLevel(0)
   }
+})
+
+/**
+ * Lazily create the panel WebContentsView for a comfy window. Adds it as a
+ * sibling of comfyView, registers it for broadcasts, and loads panel.html
+ * with the installation context as URL parameters.
+ */
+function ensurePanelView(installationId: string, entry: ComfyWindowEntry, initialPanel: ComfyPanelKey): WebContentsView {
+  if (entry.panelView) return entry.panelView
+
+  const panelView = new WebContentsView({
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      // Reuse the launcher preload — panel UI uses window.api like the main launcher window.
+      preload: path.join(__dirname, '../preload/index.js'),
+      // Default session (no partition) — keeps the panel isolated from the
+      // ComfyUI frontend's storage even though it runs in the same window.
+    },
+  })
+  panelView.setBackgroundColor(resolveTheme() === 'dark' ? '#202020' : '#ffffff')
+  entry.window.contentView.addChildView(panelView)
+  // Insert at zero size, behind the comfy view; layoutViews handles positioning.
+  panelView.setBounds({ x: 0, y: TITLEBAR_HEIGHT + 1, width: 0, height: 0 })
+  panelView.setVisible(false)
+
+  const isDev = !!process.env['ELECTRON_RENDERER_URL']
+  if (isDev) {
+    const devBase = process.env['ELECTRON_RENDERER_URL'] as string
+    panelView.webContents.loadURL(
+      `${devBase.replace(/\/$/, '')}/panel.html?installationId=${encodeURIComponent(installationId)}&panel=${encodeURIComponent(initialPanel)}`,
+    )
+  } else {
+    panelView.webContents.loadFile(
+      path.join(__dirname, '../renderer/panel.html'),
+      { query: { installationId, panel: initialPanel } },
+    )
+  }
+
+  _registerExtraBroadcastTarget(panelView.webContents)
+  entry.panelView = panelView
+  return panelView
+}
+
+function setActivePanel(installationId: string, panel: ComfyPanelKey): void {
+  const entry = comfyWindows.get(installationId)
+  if (!entry || entry.window.isDestroyed()) return
+  if (entry.activePanel === panel) return
+
+  entry.activePanel = panel
+  if (panel !== 'comfy') {
+    const panelView = ensurePanelView(installationId, entry, panel)
+    // If panel view already exists (revisiting after switching away), tell the
+    // renderer to switch its internal sub-view.
+    if (!panelView.webContents.isDestroyed() && !panelView.webContents.isLoadingMainFrame()) {
+      panelView.webContents.send('panel-switch', { panel, installationId })
+    } else {
+      // First load — the renderer will read the URL params on mount, no need to send.
+    }
+  }
+  entry.layoutViews()
+  if (!entry.titleBarView.webContents.isDestroyed()) {
+    entry.titleBarView.webContents.send('comfy-titlebar:panel-changed', panel)
+  }
+}
+
+ipcMain.on('comfy-window:set-panel', (event, payload: { panel: string }) => {
+  const found = findEntryByTitleBarSender(event.sender)
+  if (!found) return
+  const panel = payload?.panel as ComfyPanelKey
+  if (!VALID_PANELS.has(panel)) return
+  setActivePanel(found.id, panel)
 })
 
 ipcMain.handle('focus-comfy-window', (_event, installationId: string) => {

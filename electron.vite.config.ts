@@ -26,6 +26,7 @@ export default defineConfig({
         input: {
           index: resolve(__dirname, 'src/preload/index.ts'),
           comfyPreload: resolve(__dirname, 'src/preload/comfyPreload.ts'),
+          comfyTitleBarPreload: resolve(__dirname, 'src/preload/comfyTitleBarPreload.ts'),
         },
       },
     },
@@ -33,6 +34,12 @@ export default defineConfig({
   renderer: {
     build: {
       sourcemap: 'hidden',
+      rollupOptions: {
+        input: {
+          index: resolve(__dirname, 'src/renderer/index.html'),
+          panel: resolve(__dirname, 'src/renderer/panel.html'),
+        },
+      },
     },
     resolve: {
       alias: {

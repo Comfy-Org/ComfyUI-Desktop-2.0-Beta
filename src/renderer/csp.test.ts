@@ -2,9 +2,9 @@ import { describe, it, expect } from 'vitest'
 import fs from 'fs'
 import path from 'path'
 
-function parseCSP(html: string): Record<string, string> {
+function parseCSP(html: string, source: string): Record<string, string> {
   const match = html.match(/http-equiv="Content-Security-Policy"\s+content="([^"]+)"/)
-  if (!match) throw new Error('CSP meta tag not found in index.html')
+  if (!match) throw new Error(`CSP meta tag not found in ${source}`)
   const directives: Record<string, string> = {}
   for (const part of match[1].split(';')) {
     const trimmed = part.trim()
@@ -16,9 +16,14 @@ function parseCSP(html: string): Record<string, string> {
   return directives
 }
 
-describe('Content-Security-Policy', () => {
-  const html = fs.readFileSync(path.resolve(__dirname, 'index.html'), 'utf-8')
-  const csp = parseCSP(html)
+const RENDERER_FILES = [
+  { file: 'index.html', label: 'launcher renderer' },
+  { file: 'panel.html', label: 'panel renderer' },
+]
+
+describe.each(RENDERER_FILES)('Content-Security-Policy ($label)', ({ file }) => {
+  const html = fs.readFileSync(path.resolve(__dirname, file), 'utf-8')
+  const csp = parseCSP(html, file)
 
   it('has a connect-src directive', () => {
     expect(csp['connect-src']).toBeDefined()

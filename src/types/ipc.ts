@@ -740,6 +740,12 @@ export interface ElectronApi {
   onDatadogError(callback: (payload: DatadogForwardedError) => void): Unsubscribe
   onErrorDetail(callback: (data: ErrorDetailData) => void): Unsubscribe
   onSuggestChineseMirrors(callback: () => void): Unsubscribe
+  onSettingsChanged(callback: (data: { key: string }) => void): Unsubscribe
+  /**
+   * Fired by main when something requests a panel switch in the embedded
+   * panel WebContentsView (e.g. from the ComfyUI window's title-bar buttons).
+   */
+  onPanelSwitch(callback: (data: { panel: string; installationId?: string }) => void): Unsubscribe
 }
 
 /** Action IDs that require the installation to be stopped before running.

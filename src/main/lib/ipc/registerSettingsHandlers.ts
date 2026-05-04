@@ -124,6 +124,10 @@ export function registerSettingsHandlers(): void {
     if (key === 'telemetryEnabled') {
       _broadcastToRenderer('telemetry-setting-changed', value)
     }
+    // Notify all renderers (including embedded panel views) so any open
+    // settings UI can refresh and stay in sync. Cheap, fires on every
+    // setting change — listeners should refetch what they care about.
+    _broadcastToRenderer('settings-changed', { key })
   })
 
   ipcMain.handle('get-setting', (_event, key: string) => {
