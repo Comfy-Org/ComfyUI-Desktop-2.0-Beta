@@ -195,7 +195,7 @@ async function selectSourceCard(source: Source): Promise<void> {
   }
 
   await selectSource(source)
-  emitTelemetryAction('launcher.install.method.selected', {
+  emitTelemetryAction('desktop2.install.method.selected', {
     source_id: source.id,
     source_category: source.category || source.id,
     flow: 'wizard',
@@ -354,7 +354,7 @@ function handleFieldSelectChange(field: SourceField, fieldIndex: number, value: 
 function selectCardOption(field: SourceField, fieldIndex: number, option: FieldOption): void {
   selections.value[field.id] = option
   if (field.id === 'variant') {
-    emitTelemetryAction('launcher.install.variant.selected', {
+    emitTelemetryAction('desktop2.install.variant.selected', {
       variant_bucket: toVariantBucket((option.data?.variantId as string | undefined) || option.value),
       recommended: !!option.recommended,
       flow: 'wizard',

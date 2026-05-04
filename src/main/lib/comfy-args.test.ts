@@ -111,6 +111,50 @@ describe('parseHelpOutput', () => {
     expect(byName.get('listen')?.type).toBe('optional-value')
     expect(byName.get('enable-manager')?.type).toBe('boolean')
   })
+
+  it('hides --feature-flag / --list-feature-flags from suggestion list but keeps them in knownFlags', () => {
+    const helpWithFeatureFlags = `usage: main.py [-h] [--port PORT] [--feature-flag KEY=VALUE] [--list-feature-flags] [--enable-manager]
+
+options:
+  -h, --help            show this help message and exit
+  --port PORT           Set the listen port.
+  --feature-flag KEY=VALUE
+                        Set a server feature flag as a key=value pair.
+  --list-feature-flags  Print the registry of known CLI-settable feature flags as JSON and exit.
+  --enable-manager      Enable the ComfyUI-Manager feature.
+`
+    const schema = parseHelpOutput(helpWithFeatureFlags)
+    const argNames = new Set(schema.args.map((a) => a.name))
+
+    // Hidden from the suggestion list
+    expect(argNames.has('feature-flag')).toBe(false)
+    expect(argNames.has('list-feature-flags')).toBe(false)
+
+    // But still recognized so user-typed values pass filterUnsupportedArgs
+    expect(schema.knownFlags.has('feature-flag')).toBe(true)
+    expect(schema.knownFlags.has('list-feature-flags')).toBe(true)
+
+    // Surrounding args unaffected
+    expect(argNames.has('port')).toBe(true)
+    expect(argNames.has('enable-manager')).toBe(true)
+  })
+
+  it('lets user-typed --feature-flag survive filterUnsupportedArgs', () => {
+    const helpWithFeatureFlags = `usage: main.py [-h] [--feature-flag KEY=VALUE] [--enable-manager]
+
+options:
+  -h, --help            show this help message and exit
+  --feature-flag KEY=VALUE
+                        Set a server feature flag as a key=value pair.
+  --enable-manager      Enable the ComfyUI-Manager feature.
+`
+    const schema = parseHelpOutput(helpWithFeatureFlags)
+    const filtered = filterUnsupportedArgs(
+      ['--feature-flag', 'custom=value', '--enable-manager'],
+      schema
+    )
+    expect(filtered).toEqual(['--feature-flag', 'custom=value', '--enable-manager'])
+  })
 })
 
 describe('validateArgs', () => {

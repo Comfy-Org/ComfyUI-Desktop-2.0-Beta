@@ -218,7 +218,7 @@ async function saveSnapshot(): Promise<void> {
     await modal.alert({ title: t('snapshots.saveSnapshot'), message: (err as Error).message || String(err) })
     return
   }
-  emitTelemetryAction('launcher.snapshot.flow', {
+  emitTelemetryAction('desktop2.snapshot.flow', {
     action: 'save',
     snapshot_count_bucket: toCountBucket(snapshots.value.length),
   })
@@ -243,7 +243,7 @@ async function handleRestore(filename: string): Promise<void> {
   } finally {
     restorePreviewLoading.value = false
   }
-  emitTelemetryAction('launcher.snapshot.flow', {
+  emitTelemetryAction('desktop2.snapshot.flow', {
     action: 'restore_start',
     snapshot_count_bucket: toCountBucket(snapshots.value.length),
     has_diff: restorePreviewDiff.value ? diffHasChanges(restorePreviewDiff.value.diff) : undefined,
@@ -273,7 +273,7 @@ async function confirmRestore(): Promise<void> {
       }
       return
     }
-    emitTelemetryAction('launcher.snapshot.flow', {
+    emitTelemetryAction('desktop2.snapshot.flow', {
       action: 'import',
       snapshot_count_bucket: toCountBucket(snapshots.value.length),
       imported_bucket: toCountBucket(result.imported ?? 0),
@@ -296,7 +296,7 @@ async function confirmRestore(): Promise<void> {
     progressTitle: t('standalone.snapshotRestoringTitle'),
     cancellable: true,
   }
-  emitTelemetryAction('launcher.snapshot.flow', {
+  emitTelemetryAction('desktop2.snapshot.flow', {
     action: 'restore_complete',
     snapshot_count_bucket: toCountBucket(snapshots.value.length),
     has_diff: hasDiff,
@@ -311,7 +311,7 @@ async function handleDelete(filename: string): Promise<void> {
   })
   if (!confirmed) return
   await window.api.runAction(props.installationId, 'snapshot-delete', { file: filename })
-  emitTelemetryAction('launcher.snapshot.flow', {
+  emitTelemetryAction('desktop2.snapshot.flow', {
     action: 'delete',
     snapshot_count_bucket: toCountBucket(snapshots.value.length),
   })
@@ -327,7 +327,7 @@ async function handleDelete(filename: string): Promise<void> {
 
 async function handleExport(filename: string): Promise<void> {
   await window.api.exportSnapshot(props.installationId, filename)
-  emitTelemetryAction('launcher.snapshot.flow', {
+  emitTelemetryAction('desktop2.snapshot.flow', {
     action: 'export_one',
     snapshot_count_bucket: toCountBucket(snapshots.value.length),
   })
@@ -335,7 +335,7 @@ async function handleExport(filename: string): Promise<void> {
 
 async function handleExportAll(): Promise<void> {
   await window.api.exportAllSnapshots(props.installationId)
-  emitTelemetryAction('launcher.snapshot.flow', {
+  emitTelemetryAction('desktop2.snapshot.flow', {
     action: 'export_all',
     snapshot_count_bucket: toCountBucket(snapshots.value.length),
   })

@@ -19,6 +19,7 @@ import * as i18n from './i18n'
 import type { SourcePlugin, FieldOption } from '../types/sources'
 import type { ComfyVersion } from './version'
 import { assertReadable } from './desktopDetect'
+import * as telemetry from './telemetry'
 
 const MARKER_FILE = '.comfyui-desktop-2'
 
@@ -133,6 +134,7 @@ export async function restoreSnapshotIntoInstallation(
   const freshInst = await installations.get(entry.id)
   if (!freshInst || !fs.existsSync(stagedFile)) return
 
+  const restoreContext = { installation_id: entry.id }
   try {
     const fileContent = await fs.promises.readFile(stagedFile, 'utf-8')
     const importEnvelope = validateExportEnvelope(JSON.parse(fileContent))
@@ -141,16 +143,22 @@ export async function restoreSnapshotIntoInstallation(
 
     // Restore ComfyUI version
     sendOutput('\n── Restore ComfyUI Version ──\n')
-    const comfyResult = await restoreComfyUIVersion(freshInst.installPath, targetSnapshot, sendOutput)
+    const comfyResult = await telemetry.trackedStep('desktop2.snapshot.restore_comfyui_version', restoreContext, async () => {
+      return restoreComfyUIVersion(freshInst.installPath, targetSnapshot, sendOutput)
+    })
 
     sendOutput('\n── Restore Nodes ──\n')
-    await restoreCustomNodes(freshInst.installPath, freshInst, targetSnapshot, sendProgress, sendOutput, signal, settings.getMirrorConfig())
+    await telemetry.trackedStep('desktop2.snapshot.restore_custom_nodes', restoreContext, async () => {
+      await restoreCustomNodes(freshInst.installPath, freshInst, targetSnapshot, sendProgress, sendOutput, signal, settings.getMirrorConfig())
+    })
 
     if (!signal.aborted && !targetSnapshot.skipPipSync) {
       sendOutput('\n── Restore Packages ──\n')
-      await restorePipPackages(freshInst.installPath, freshInst, targetSnapshot,
-        (phase, data) => sendProgress(phase === 'restore' ? 'restore-pip' : phase, data),
-        sendOutput, signal, settings.getMirrorConfig())
+      await telemetry.trackedStep('desktop2.snapshot.restore_pip_packages', restoreContext, async () => {
+        await restorePipPackages(freshInst.installPath, freshInst, targetSnapshot,
+          (phase, data) => sendProgress(phase === 'restore' ? 'restore-pip' : phase, data),
+          sendOutput, signal, settings.getMirrorConfig())
+      })
     }
 
     // Update installation state with restored version/channel metadata
@@ -191,38 +199,46 @@ async function copyMigrationData(
 
   // User data
   if (sourcePaths.userDir && fs.existsSync(sourcePaths.userDir)) {
-    sendProgress('migrate', { percent: 0, status: labels.userData })
-    const dstUserDir = path.join(destComfyUIDir, 'user')
-    await mergeDirFlat(sourcePaths.userDir, dstUserDir, (copied, skipped, fileTotal) => {
-      const pct = fileTotal > 0 ? Math.round(((copied + skipped) / fileTotal) * 30) : 30
-      sendProgress('migrate', { percent: pct, status: labels.userData })
+    await telemetry.trackedStep('desktop2.migrate.user_files', {}, async () => {
+      sendProgress('migrate', { percent: 0, status: labels.userData })
+      const dstUserDir = path.join(destComfyUIDir, 'user')
+      await mergeDirFlat(sourcePaths.userDir!, dstUserDir, (copied, skipped, fileTotal) => {
+        const pct = fileTotal > 0 ? Math.round(((copied + skipped) / fileTotal) * 30) : 30
+        sendProgress('migrate', { percent: pct, status: labels.userData })
+      })
     })
   }
 
   // Input
   if (sourcePaths.inputDir && fs.existsSync(sourcePaths.inputDir)) {
-    const dstInput = (settings.get('inputDir') as string | undefined) || settings.defaults.inputDir
-    sendProgress('migrate', { percent: 40, status: labels.input })
-    await mergeDirFlat(sourcePaths.inputDir, dstInput)
+    await telemetry.trackedStep('desktop2.migrate.input', {}, async () => {
+      const dstInput = (settings.get('inputDir') as string | undefined) || settings.defaults.inputDir
+      sendProgress('migrate', { percent: 40, status: labels.input })
+      await mergeDirFlat(sourcePaths.inputDir!, dstInput)
+    })
   }
 
   // Output
   if (sourcePaths.outputDir && fs.existsSync(sourcePaths.outputDir)) {
-    const dstOutput = (settings.get('outputDir') as string | undefined) || settings.defaults.outputDir
-    sendProgress('migrate', { percent: 60, status: labels.output })
-    await mergeDirFlat(sourcePaths.outputDir, dstOutput)
+    await telemetry.trackedStep('desktop2.migrate.output', {}, async () => {
+      const dstOutput = (settings.get('outputDir') as string | undefined) || settings.defaults.outputDir
+      sendProgress('migrate', { percent: 60, status: labels.output })
+      await mergeDirFlat(sourcePaths.outputDir!, dstOutput)
+    })
   }
 
   // Models — add to shared paths, no copy
   if (sourcePaths.modelsDir) {
-    sendProgress('migrate', { percent: 90, status: labels.models })
-    const resolved = path.resolve(sourcePaths.modelsDir)
-    const currentModelsDirs = (settings.get('modelsDirs') as string[] | undefined) || [...settings.defaults.modelsDirs]
-    const normalizedCurrent = currentModelsDirs.map((d) => path.resolve(d))
-    if (fs.existsSync(resolved) && !normalizedCurrent.includes(resolved)) {
-      currentModelsDirs.push(resolved)
-      settings.set('modelsDirs', currentModelsDirs)
-    }
+    await telemetry.trackedStep('desktop2.migrate.models', {}, async () => {
+      sendProgress('migrate', { percent: 90, status: labels.models })
+      const resolved = path.resolve(sourcePaths.modelsDir!)
+      const currentModelsDirs = (settings.get('modelsDirs') as string[] | undefined) || [...settings.defaults.modelsDirs]
+      const normalizedCurrent = currentModelsDirs.map((d) => path.resolve(d))
+      if (fs.existsSync(resolved) && !normalizedCurrent.includes(resolved)) {
+        currentModelsDirs.push(resolved)
+        settings.set('modelsDirs', currentModelsDirs)
+      }
+    })
   }
 
   sendProgress('migrate', { percent: 100, status: i18n.t('common.done') })
@@ -273,11 +289,24 @@ export async function migrateToStandaloneFromSnapshot(
   await fs.promises.writeFile(path.join(destPath, MARKER_FILE), entry.id)
   const cache = createCache(settings.get('cacheDir') as string, settings.get('maxCachedFiles') as number)
   const installRecord = { ...instData, installPath: destPath } as unknown as InstallationRecord
-  await standaloneSource.install!(installRecord, { sendProgress, download, cache, extract, signal })
+
+  const releaseTag = (instData['releaseTag'] as string | undefined) ?? null
+  const variantId = (instData['variantId'] as string | undefined) ?? null
+  const installContext = {
+    installation_id: entry.id,
+    release_tag: releaseTag,
+    variant_id: variantId,
+  }
+
+  await telemetry.trackedStep('desktop2.install.standalone', installContext, async () => {
+    await standaloneSource.install!(installRecord, { sendProgress, download, cache, extract, signal })
+  })
 
   const update = (data: Record<string, unknown>): Promise<void> =>
-    installations.update(entry.id, data).then(() => {})
-  await standaloneSource.postInstall!(installRecord, { sendProgress, update })
+    installations.update(entry!.id, data).then(() => {})
+  await telemetry.trackedStep('desktop2.install.post_install', installContext, async () => {
+    await standaloneSource.postInstall!(installRecord, { sendProgress, update })
+  })
 
   // 4. Restore snapshot (custom nodes + pip packages)
   await restoreSnapshotIntoInstallation(entry, stagedSnapshot.path, stagedSnapshot.owned, tools, update)

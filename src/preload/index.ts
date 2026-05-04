@@ -234,6 +234,11 @@ const api: ElectronApi = {
     ipcRenderer.on('dd-error', handler)
     return () => ipcRenderer.removeListener('dd-error', handler)
   },
+  onTelemetryActionFromMain: (callback) => {
+    const handler = (_event: IpcRendererEvent, data: unknown) => callback(data as Parameters<typeof callback>[0])
+    ipcRenderer.on('telemetry-action-from-main', handler)
+    return () => ipcRenderer.removeListener('telemetry-action-from-main', handler)
+  },
   onErrorDetail: (callback) => {
     const handler = (_event: IpcRendererEvent, data: unknown) => callback(data as Parameters<typeof callback>[0])
     ipcRenderer.on('error-detail', handler)

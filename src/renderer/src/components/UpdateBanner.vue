@@ -44,7 +44,7 @@ const bannerMessage = computed<string>(() => {
 })
 
 function dismiss() {
-  emitTelemetryAction('launcher.update.cta', {
+  emitTelemetryAction('desktop2.update.cta', {
     action: 'dismissed',
     state: state.value?.type || 'unknown',
     target_version: (state.value?.type === 'available' || state.value?.type === 'ready') ? state.value.version : undefined,
@@ -54,7 +54,7 @@ function dismiss() {
 }
 
 async function download() {
-  emitTelemetryAction('launcher.update.cta', {
+  emitTelemetryAction('desktop2.update.cta', {
     action: 'download_clicked',
     state: state.value?.type || 'unknown',
     target_version: state.value?.type === 'available' ? state.value.version : undefined,
@@ -64,7 +64,7 @@ async function download() {
 }
 
 async function install() {
-  emitTelemetryAction('launcher.update.cta', {
+  emitTelemetryAction('desktop2.update.cta', {
     action: 'install_clicked',
     state: state.value?.type || 'unknown',
     target_version: state.value?.type === 'ready' ? state.value.version : undefined,
@@ -73,7 +73,7 @@ async function install() {
 }
 
 function retry() {
-  emitTelemetryAction('launcher.update.cta', {
+  emitTelemetryAction('desktop2.update.cta', {
     action: 'retry_clicked',
     state: state.value?.type || 'unknown',
   })

@@ -64,7 +64,7 @@ function switchView(view: TabView): void {
   const fromView = activeView.value
   nav.switchTab(view)
   if (view !== fromView) {
-    emitTelemetryAction('launcher.view.opened', {
+    emitTelemetryAction('desktop2.view.opened', {
       view,
       from_view: fromView,
     })
@@ -76,7 +76,7 @@ function switchView(view: TabView): void {
 }
 
 function openFeedback(): void {
-  emitTelemetryAction('launcher.feedback.opened')
+  emitTelemetryAction('desktop2.feedback.opened')
   window.api.openExternal(buildSupportUrl(appVersion.value || undefined))
 }
 
@@ -94,7 +94,7 @@ function openConsole(installationId: string): void {
 }
 
 async function openNewInstall(): Promise<void> {
-  emitTelemetryAction('launcher.install.flow.opened', {
+  emitTelemetryAction('desktop2.install.flow.opened', {
     flow: 'new_install',
     entrypoint: activeView.value,
   })
@@ -103,7 +103,7 @@ async function openNewInstall(): Promise<void> {
 }
 
 async function openQuickInstall(): Promise<void> {
-  emitTelemetryAction('launcher.install.flow.opened', {
+  emitTelemetryAction('desktop2.install.flow.opened', {
     flow: 'quick_install',
     entrypoint: activeView.value,
   })
@@ -112,7 +112,7 @@ async function openQuickInstall(): Promise<void> {
 }
 
 async function openTrack(): Promise<void> {
-  emitTelemetryAction('launcher.install.flow.opened', {
+  emitTelemetryAction('desktop2.install.flow.opened', {
     flow: 'track_existing',
     entrypoint: activeView.value,
   })
@@ -121,7 +121,7 @@ async function openTrack(): Promise<void> {
 }
 
 async function openLoadSnapshot(): Promise<void> {
-  emitTelemetryAction('launcher.install.flow.opened', {
+  emitTelemetryAction('desktop2.install.flow.opened', {
     flow: 'load_snapshot',
     entrypoint: activeView.value,
   })

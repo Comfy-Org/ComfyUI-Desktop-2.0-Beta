@@ -1,0 +1,98 @@
+/**
+ * Discovers the registry of CLI-settable feature flags for a ComfyUI install
+ * by invoking `python main.py --list-feature-flags`. The launcher uses this
+ * to gate `--feature-flag KEY=VALUE` injection per-key, so we only set flags
+ * the running ComfyUI version actually knows about.
+ *
+ * On any failure (older ComfyUI without the flag, parse error, timeout) this
+ * returns an empty registry, which the caller treats as "inject nothing".
+ */
+
+import { execFile } from 'child_process'
+import * as path from 'path'
+
+export interface FeatureFlagInfo {
+  type: string
+  default: unknown
+  description: string
+}
+
+export type FeatureFlagRegistry = Record<string, FeatureFlagInfo>
+
+const registryCache = new Map<string, { registry: FeatureFlagRegistry; version: string }>()
+
+/**
+ * Parse the JSON stdout from `--list-feature-flags`. Returns `{}` on
+ * malformed input, non-object payloads, or empty strings.
+ */
+export function parseFeatureFlagOutput(stdout: string): FeatureFlagRegistry {
+  if (!stdout) return {}
+  try {
+    const parsed = JSON.parse(stdout) as unknown
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed as FeatureFlagRegistry
+    }
+  } catch {
+    /* fall through */
+  }
+  return {}
+}
+
+/**
+ * Run `python main.py --list-feature-flags` and parse the JSON output.
+ * Cached per (installationId, version), matching getComfyArgsSchema.
+ * Returns {} on any error.
+ */
+export async function getComfyFeatureFlagRegistry(
+  pythonPath: string,
+  mainPyPath: string,
+  cwd: string,
+  installationId: string,
+  version?: string,
+): Promise<FeatureFlagRegistry> {
+  const cached = registryCache.get(installationId)
+  if (cached && version && cached.version === version) {
+    return cached.registry
+  }
+
+  let registry: FeatureFlagRegistry = {}
+  try {
+    const stdout = await runListFeatureFlags(pythonPath, mainPyPath, cwd)
+    registry = parseFeatureFlagOutput(stdout)
+  } catch (err) {
+    console.warn('[comfy-feature-flags] Could not get registry:', (err as Error).message)
+  }
+
+  if (version) {
+    registryCache.set(installationId, { registry, version })
+  }
+  return registry
+}
+
+function runListFeatureFlags(pythonPath: string, mainPyPath: string, cwd: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const mainPyRel = path.relative(cwd, mainPyPath)
+    execFile(
+      pythonPath,
+      ['-s', mainPyRel, '--list-feature-flags'],
+      { cwd, timeout: 15000 },
+      (err, stdout, stderr) => {
+        if (err) {
+          const detail = stderr ? `\nstderr: ${stderr.slice(0, 500)}` : ''
+          reject(new Error(`--list-feature-flags failed: ${err.message}${detail}`))
+          return
+        }
+        if (!stdout) {
+          reject(new Error('Empty --list-feature-flags output'))
+          return
+        }
+        resolve(stdout)
+      },
+    )
+  })
+}
+
+/** Clear the registry cache for an installation (e.g. after version update). */
+export function clearFeatureFlagRegistryCache(installationId: string): void {
+  registryCache.delete(installationId)
+}

@@ -25,7 +25,8 @@
     "src/renderer/src/**/*",
     "src/renderer/src/**/*.vue",
     "src/preload/*.d.ts",
-    "src/types/**/*"
+    "src/types/**/*",
+    "src/shared/**/*"
   ],
   "exclude": [
     "src/**/*.test.ts"

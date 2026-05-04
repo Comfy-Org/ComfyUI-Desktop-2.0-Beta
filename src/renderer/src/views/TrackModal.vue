@@ -134,7 +134,7 @@ async function handleSave(): Promise<void> {
     })
     return
   }
-  emitTelemetryAction('launcher.track_existing.saved', {
+  emitTelemetryAction('desktop2.track_existing.saved', {
     detected_source_label: selectedProbe.value.sourceLabel || 'unknown',
     probe_count_bucket: toCountBucket(probeResults.value.length),
     custom_name_used: trackName.value.trim().length > 0,

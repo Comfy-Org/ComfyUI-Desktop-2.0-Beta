@@ -16,12 +16,24 @@ import {
   createSessionPath, buildLaunchEnv, checkRebootMarker,
   makeSendProgress, makeSendOutput,
   getComfyArgsSchema, filterUnsupportedArgs,
+  getComfyFeatureFlagRegistry,
 } from '../shared'
 import type { ChildProcess, LaunchCmd } from '../shared'
 import type { ActionContext, ActionResult } from './types'
 import { scrubStderr, lastNLines, stripAnsi } from '../../scrubStderr'
 import { rotateLogFiles, getLogDir } from '../../logRotation'
+import { createExecutionTap } from '../../executionTap'
 import type { WriteStream } from 'fs'
+
+/**
+ * Feature flags the launcher wants set on every ComfyUI it spawns. Each entry
+ * is gated by the running install's `--list-feature-flags` registry: keys not
+ * present in the registry are skipped so we never inject something the
+ * running ComfyUI version doesn't recognize.
+ */
+const DESKTOP_FEATURE_FLAGS: Record<string, string> = {
+  show_signin_button: 'true',
+}
 
 async function openLogStream(installPath: string): Promise<WriteStream> {
   const logDir = getLogDir(installPath)
@@ -66,18 +78,33 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
   }
   const launchCmd = launchCmdRaw
 
-  // Filter out unsupported args
+  // Filter out unsupported args, then inject desktop-managed feature flags
+  // gated on the running ComfyUI's --list-feature-flags registry.
   if (launchCmd.cmd && launchCmd.args && launchCmd.cwd) {
     const sIdx = launchCmd.args.indexOf('-s')
     if (sIdx !== -1 && sIdx + 1 < launchCmd.args.length) {
       const mainPyRel = launchCmd.args[sIdx + 1]!
       const mainPyAbs = path.resolve(launchCmd.cwd, mainPyRel)
+      const version = inst.version as string | undefined
       try {
-        const schema = await getComfyArgsSchema(launchCmd.cmd, mainPyAbs, launchCmd.cwd, installationId, inst.version as string | undefined)
+        const schema = await getComfyArgsSchema(launchCmd.cmd, mainPyAbs, launchCmd.cwd, installationId, version)
         const prefixArgs = launchCmd.args.slice(0, sIdx + 2)
         const userArgs = launchCmd.args.slice(sIdx + 2)
         const filtered = filterUnsupportedArgs(userArgs, schema)
-        launchCmd.args = [...prefixArgs, ...filtered]
+
+        // Inject desktop-managed feature flags. Skip on ComfyUI versions that
+        // don't expose the discovery flag (avoids a pointless python spawn).
+        const desktopFlagArgs: string[] = []
+        if (schema.knownFlags.has('feature-flag') && schema.knownFlags.has('list-feature-flags')) {
+          const registry = await getComfyFeatureFlagRegistry(launchCmd.cmd, mainPyAbs, launchCmd.cwd, installationId, version)
+          for (const [key, value] of Object.entries(DESKTOP_FEATURE_FLAGS)) {
+            if (key in registry) {
+              desktopFlagArgs.push('--feature-flag', `${key}=${value}`)
+            }
+          }
+        }
+
+        launchCmd.args = [...prefixArgs, ...desktopFlagArgs, ...filtered]
       } catch {
         // Schema not available — pass args as-is
       }
@@ -151,6 +178,11 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
     const launchEnv = buildLaunchEnv(inst)
 
     const logStream = await openLogStream(inst.installPath)
+    const execTap = createExecutionTap({
+      installationId,
+      variant: (inst.variant as string | undefined) ?? null,
+      release: (inst.release as string | undefined) ?? null,
+    })
 
     const proc = spawnProcess(launchCmd.cmd!, launchCmd.args!, launchCmd.cwd!, launchEnv, { showWindow: launchCmd.showWindow })
     let stderrBuf = ''
@@ -158,6 +190,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
       const text = chunk.toString('utf-8')
       writeLog(logStream, text)
       sendOutput(text)
+      execTap.ingest(text, 'stdout')
     })
     proc.stderr?.on('data', (chunk: Buffer) => {
       const text = chunk.toString('utf-8')
@@ -165,6 +198,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
       if (stderrBuf.length > 8192) stderrBuf = stderrBuf.slice(-4096)
       writeLog(logStream, text)
       sendOutput(text)
+      execTap.ingest(text, 'stderr')
     })
 
     _operationAborts.delete(installationId)
@@ -175,6 +209,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
       logStream.end()
       const crashed = _runningSessions.has(installationId) && code !== 0
       const lastStderr = scrubStderr(lastNLines(stderrBuf, 100))
+      execTap.flushSummary()
       _removeSession(installationId)
       if (!sender.isDestroyed()) {
         sender.send('comfy-exited', { installationId, crashed, exitCode: code, installationName: inst.name, lastStderr })
@@ -286,6 +321,11 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
   }
 
   const logStream = await openLogStream(inst.installPath)
+  const execTap = createExecutionTap({
+    installationId,
+    variant: (inst.variant as string | undefined) ?? null,
+    release: (inst.release as string | undefined) ?? null,
+  })
 
   function spawnComfy(): { proc: ChildProcess; getStderr: () => string } {
     const p = spawnProcess(launchCmd.cmd!, launchCmd.args!, launchCmd.cwd!, launchEnv, { showWindow: launchCmd.showWindow })
@@ -294,6 +334,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
       const text = chunk.toString('utf-8')
       writeLog(logStream, text)
       sendOutput(text)
+      execTap.ingest(text, 'stdout')
     })
     p.stderr!.on('data', (chunk: Buffer) => {
       const text = chunk.toString('utf-8')
@@ -301,6 +342,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
       if (stderrBuf.length > 8192) stderrBuf = stderrBuf.slice(-4096)
       writeLog(logStream, text)
       sendOutput(text)
+      execTap.ingest(text, 'stderr')
     })
     return { proc: p, getStderr: () => stderrBuf }
   }
@@ -541,6 +583,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
       logStream.end()
       const crashed = _runningSessions.has(installationId)
       const lastStderr = scrubStderr(lastNLines(currentGetStderr(), 100))
+      execTap.flushSummary()
       _removeSession(installationId)
       if (!sender.isDestroyed()) {
         sender.send('comfy-exited', { installationId, crashed, exitCode: code, installationName: inst.name, lastStderr })
