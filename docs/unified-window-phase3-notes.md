@@ -178,6 +178,29 @@ Direction:
   a "show this in the picker first" affordance, primary goes away (see
   section 2).
 
+## 6. Promote Downloads to its own title-bar panel
+
+Today the in-flight downloads list is rendered by
+[`DownloadsPanel.vue`](../src/renderer/src/components/DownloadsPanel.vue),
+which mounts as a floating overlay inside the ComfyUI area. That made
+sense when the launcher window owned the chrome and downloads had to slot
+in somewhere unobtrusive — but in the unified window each ComfyUI tab is
+already isolated, and stacking a floating panel on top of the Comfy
+WebContentsView is awkward (it lives in a separate WebContents, can't
+participate cleanly in z-ordering, and steals real estate from ComfyUI).
+
+Phase 3 should turn Downloads into a first-class **title-bar panel** next
+to Install Settings / Launcher Settings — same WebContentsView swap
+pattern that Phases 1–2 established. The downloads list is global (all
+installs share the same queue / cache), so a single Downloads panel per
+window is fine; clicking it swaps in the existing `DownloadsPanel`
+contents (probably renamed to `DownloadsView` once it's no longer a
+floating component) inside the panel WebContentsView.
+
+This also resolves the floating-component / WebContentsView z-order pain
+without needing to move the panel into the Comfy renderer (which would
+re-couple us to ComfyUI's storage and CSP).
+
 ---
 
 ## Status
