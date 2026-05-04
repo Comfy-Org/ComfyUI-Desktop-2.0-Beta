@@ -47,10 +47,6 @@ let consentEnabled = true
 let bootstrapTimeMs: number = Date.now()
 let initialized = false
 
-function isEventEnabled(_name: string): boolean {
-  return consentEnabled
-}
-
 export function setConsent(enabled: boolean): void {
   consentEnabled = enabled
   if (!enabled) {
@@ -128,7 +124,7 @@ export function identify(
 
 export function capture(event: string, properties: TelemetryContext = {}): void {
   if (!client || !distinctId) return
-  if (!isEventEnabled(event)) return
+  if (!consentEnabled) return
   try {
     client.capture({ distinctId, event, properties })
   } catch {
@@ -197,7 +193,7 @@ export function bucketError(input: unknown): string {
  * Use this for events that should appear in both providers (most do).
  */
 export function forwardToRenderer(event: string, context: TelemetryContext = {}): void {
-  if (!isEventEnabled(event)) return
+  if (!consentEnabled) return
   for (const win of BrowserWindow.getAllWindows()) {
     if (!win.isDestroyed()) {
       try {

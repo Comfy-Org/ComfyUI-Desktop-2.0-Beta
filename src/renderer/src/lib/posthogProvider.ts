@@ -131,4 +131,3 @@ export function setPostHogConsent(enabled: boolean): void {
   }
 }
 
-

@@ -77,7 +77,7 @@ Main-process events go through `mainTelemetry.emit()`
 
 | Event | Properties | Notes |
 |---|---|---|
-| `desktop2.session.started` | `app_env`, `app_version`, `is_packaged`, `telemetry_effective_enabled` | Deferred until first PostHog feature-flag refresh settles, so a remote `desktop2.disabled_events` block list takes effect on the very first event. |
+| `desktop2.session.started` | `app_env`, `app_version`, `is_packaged`, `telemetry_effective_enabled` | Stashed at `initTelemetry()` and emitted once `identify()` binds the persistent device id, since `distinctId` isn't known yet at init. |
 | `desktop2.session.system_info` | `platform`, `arch`, `os_distro`, `os_release`, `gpu_vendor`, `gpu_model`, `total_memory_gb`, `cpu_cores`, `electron_version`, `app_version` | Also promoted to PostHog person-profile properties via `identify` so they're queryable without joining against per-session events. |
 | `desktop2.session.installation_started` | full installation context + `boot_time_ms` | Fires when an installation actually starts the ComfyUI process. |
 | `desktop2.session.snapshot_history` | `installation_id`, `snapshot_diffs[]` | Sent to **both** providers but bypasses the typed bridge because of the array-of-objects payload. PostHog is the primary consumer. |
@@ -117,18 +117,15 @@ tracebacks. All events share `installation_id`, `variant`, `release`.
 | `desktop2.execution.error` | `error_class`, `error_message` (scrubbed), `error_bucket`, `error_count`, `node_id?` |
 | `desktop2.execution.session_summary` | `started_count`, `completed_count`, `error_count` (on flush) |
 
-Gated by the `desktop2.execution_telemetry.enabled` flag and sampled by
-`desktop2.execution_telemetry.sample_rate`. Sample decisions are pushed
-into a FIFO queue on each `got prompt` and shifted off on each terminal
-event so a sampled-out prompt is dropped consistently across all of
-`started` / `completed` / `error`.
+Execution telemetry is unconditional — there is no remote kill switch
+or sample-rate dial (see _Remote feature flags_ below).
 
 ### ComfyUI process (main → renderer IPC → both)
 
 | Event | Properties |
 |---|---|
 | `desktop2.comfyui.exited` | `installation_id`, `crashed`, `exit_code`, `last_stderr` |
-| `desktop2.comfyui.boot_log` | `installation_id`, `boot_stderr` (capped by `desktop2.boot_log_max_chars`, default 8 KiB) |
+| `desktop2.comfyui.boot_log` | `installation_id`, `boot_stderr` (capped to the last 50 lines of stderr by `lastNLines` in `sessionActions/launch.ts`) |
 
 ### UI / funnel (renderer `emitTelemetryAction`, both providers)
 
