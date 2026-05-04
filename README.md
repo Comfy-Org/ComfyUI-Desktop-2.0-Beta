@@ -101,14 +101,30 @@ sources/         # Installation source plugins
 ```bash
 git clone https://github.com/Comfy-Org/ComfyUI-Desktop-2.0-Beta.git
 cd ComfyUI-Desktop-2.0-Beta
-pnpm install
+pnpm run init
 ```
+
+`pnpm run init` is the recommended one-shot for a fresh clone. It runs `pnpm install` (which also fires the `postinstall` hook and husky `prepare`), then `pnpm run bootstrap` to build the **bootstrap Python** environment described below.
+
+#### Bootstrap Python
+
+The app ships a minimal (~15–20 MB) standalone Python with `pygit2` baked in, under `bootstrap-python/<platform>/`. It provides git operations (clone, fetch, ls-remote) before any standalone ComfyUI environment has been provisioned, so the app works on machines without system `git` installed.
+
+| Command | What it does |
+|---|---|
+| `pnpm run bootstrap` | Build locally via `scripts/build-bootstrap-python.py` (requires Python 3.13). Downloads `python-build-standalone`, installs `pygit2`, strips test/idle/tkinter junk. Auto-detects the host platform; pass `--platform win-x64\|mac-arm64\|linux-x64` to build a different one. |
+| `pnpm run bootstrap:fetch` | Download a prebuilt archive from the [`bootstrap-v1`](https://github.com/Comfy-Org/ComfyUI-Desktop-2.0-Beta/releases/tag/bootstrap-v1) release (faster, no local Python needed). Pass `--tag <name>` to use a different release. Set `GITHUB_TOKEN` to authenticate. |
+
+Both targets write to `bootstrap-python/{win-x64,mac-arm64,linux-x64}/` (gitignored). The directory must exist before running `pnpm run dev` or `pnpm run build:*` — `pnpm run predev` prints a yellow warning if it's missing.
+
+At runtime the main process picks a git backend in priority order ([`src/main/lib/ipc/index.ts`](src/main/lib/ipc/index.ts)): bootstrap pygit2 → standalone-install pygit2 → system `git`. Set `COMFY_FORCE_BOOTSTRAP_GIT=1` to disable the fallbacks (used by `pnpm run dev:bootstrap` to verify the bootstrap path that ships to users without git).
 
 ### Run in development
 
 **Windows / macOS:**
 ```bash
-pnpm run dev
+pnpm run dev               # standard dev mode
+pnpm run dev:bootstrap     # force COMFY_FORCE_BOOTSTRAP_GIT=1; auto-builds bootstrap python if missing
 ```
 
 **Linux:**
@@ -119,9 +135,11 @@ pnpm run dev
 ### Type checking
 
 ```bash
-pnpm run typecheck          # both main + renderer
-pnpm run typecheck:node     # main process only
-pnpm run typecheck:web      # renderer only
+pnpm run typecheck                # node + web + e2e + integration
+pnpm run typecheck:node           # main process only
+pnpm run typecheck:web            # renderer only
+pnpm run typecheck:e2e            # Playwright suite
+pnpm run typecheck:integration    # vitest integration suite
 ```
 
 ### Linting
@@ -136,50 +154,103 @@ pnpm run format:check   # check formatting without writing
 ### Testing
 
 ```bash
-pnpm test               # run all unit tests
-pnpm run test:watch     # run in watch mode
+pnpm test                  # all unit tests (vitest)
+pnpm run test:watch        # vitest watch mode
+pnpm run test:integration  # integration suite (vitest.integration.config.ts)
+pnpm run test:e2e          # Playwright e2e (use :macos / :windows / :linux to scope)
 ```
 
 ### Build for distribution
 
 ```bash
-# Platform-specific
+# Platform-specific (electron-builder, local install/dev artifacts)
 pnpm run build:win      # Windows (NSIS installer)
 pnpm run build:mac      # macOS (DMG)
 pnpm run build:linux    # Linux (AppImage, .deb)
 ```
 
-Build output is written to the `dist/` directory.
+Output is written to `dist/`. These targets require `bootstrap-python/<platform>/` to exist — run `pnpm run bootstrap` (or `pnpm run bootstrap:fetch`) first.
+
+> Production releases are **not** built locally — they go through ToDesktop in CI (see [Releasing](#releasing)). The ToDesktop pipeline calls `scripts/todesktop-beforeBuild.cjs`, which runs `fetch-bootstrap-python.mjs` to pull the prebuilt bootstrap python for the target platform.
 
 ## Releasing
 
-Pushing a version tag to `main` triggers the **ToDesktop Build & Release** workflow. It runs a ToDesktop cloud build and creates a draft GitHub Release with platform download links. The workflow enforces that the tag matches the `version` in `package.json`.
+The release pipeline is fully automated via three workflows in [`.github/workflows/`](.github/workflows/):
 
-### Release steps
+| Workflow | Trigger | Role |
+|---|---|---|
+| [`version-bump.yml`](.github/workflows/version-bump.yml) | manual (`workflow_dispatch`) | Opens a `chore: bump version to vX.Y.Z` PR with the `Release` label. |
+| [`release-from-pr-label.yml`](.github/workflows/release-from-pr-label.yml) | `pull_request_target: closed` | When a `Release`-labeled PR merges, creates the `vX.Y.Z` tag on the merge commit and dispatches the build workflow. |
+| [`build-release.yml`](.github/workflows/build-release.yml) | `push` of `v*` tag (or manual) | Runs `pnpm run build`, uploads Datadog sourcemaps, runs `todesktop build`, parses the build log, uploads `release-assets.json`, and creates a **draft** GitHub Release with auto-generated notes. |
 
-1. **Bump the version** — create a branch, update the `version` field in `package.json` (e.g. `0.4.4` → `0.4.5`), and open a PR:
+```diagram
+╭──────────────────────────╮  workflow_dispatch   ╭──────────────────────────╮
+│ Version Bump PR          │─────────────────────▶│ PR opened with           │
+│ (version-bump.yml)       │                      │ "Release" label          │
+╰──────────────────────────╯                      ╰────────────┬─────────────╯
+                                                               │ merge
+                                                               ▼
+╭──────────────────────────╮  on: pull_request_target  ╭───────────────────╮
+│ Release From Version PR  │◀──────────────────────────│ closed PR (merged)│
+│ (release-from-pr-label)  │                           ╰───────────────────╯
+│   • detects version bump │
+│   • creates v{x.y.z} tag │
+│   • dispatches build     │
+╰────────┬─────────────────╯
+         │ workflow dispatch on tag
+         ▼
+╭──────────────────────────╮
+│ ToDesktop Build & Release│  • pnpm run build
+│ (build-release.yml)      │  • Datadog sourcemap upload
+│                          │  • todesktop build --ephemeral
+│                          │  • parse log → release-assets.json
+│                          │  • gh release create --draft --generate-notes
+╰──────────────────────────╯
+```
 
+### Recommended (automated) flow
+
+1. **Trigger `Version Bump PR`** from the Actions tab (or via CLI):
    ```bash
-   git checkout main && git pull origin main
-   git checkout -b release/v0.4.5
-   # Edit package.json "version": "0.4.5"
-   git add package.json
-   git commit -m "chore: bump version to 0.4.5"
-   git push origin release/v0.4.5
-   # Open a PR targeting main
+   gh workflow run version-bump.yml -f bump=patch -f release=true
    ```
+   This opens a `chore: bump version to vX.Y.Z` PR on a branch like `automation/version-bump/main/v0.5.1`, with the `Release` label applied. `bump` accepts `patch | minor | major`.
+2. **Review & merge** that PR. After it merges, the `release-from-pr-label.yml` workflow notices the `Release` label, creates and pushes the `vX.Y.Z` tag on the merge commit, and dispatches `build-release.yml` for that tag.
+3. **Publish the draft** — `build-release.yml` produces a draft GitHub Release. Review it on the [Releases](../../releases) page and hit **Publish**.
 
-2. **Merge the PR** — once CI passes and the PR is approved, merge it into `main`.
+### Manual fallback
 
-3. **Tag and push** — pull the merged `main`, create the tag, and push it to trigger the build:
+If automation is unavailable, follow the manual flow:
 
-   ```bash
-   git checkout main && git pull origin main
-   git tag v0.4.5
-   git push origin v0.4.5
-   ```
+```bash
+git checkout main && git pull origin main
+git checkout -b release/v0.5.1
+# Edit package.json "version": "0.5.1"
+git add package.json
+git commit -m "chore: bump version to 0.5.1"
+git push origin release/v0.5.1
+# Open + merge a PR targeting main
+git checkout main && git pull origin main
+git tag v0.5.1
+git push origin v0.5.1   # triggers build-release.yml
+```
 
-4. **Publish** — once the build finishes, go to the [Releases](../../releases) page to review and publish the draft.
+`build-release.yml` enforces that the tag matches `package.json`'s `version`; the automated flow handles this for you.
+
+### Required secrets
+
+`build-release.yml` and `version-bump.yml` rely on these GitHub Actions secrets:
+
+| Secret | Used by | Purpose |
+|---|---|---|
+| `TODESKTOP_ACCESS_TOKEN` | build-release | Auth for the ToDesktop CLI |
+| `TODESKTOP_EMAIL` | build-release | ToDesktop account email |
+| `DATADOG_API_KEY` | build-release | Upload renderer sourcemaps to Datadog (US5) for RUM symbolication |
+| `BEN_PAT` | version-bump | PAT used to open/edit the version-bump PR (so it triggers CI checks that the default `GITHUB_TOKEN` would skip) |
+
+### Bootstrap python in releases
+
+The `bootstrap-v1` GitHub release stores prebuilt `bootstrap-python-{win-x64,mac-arm64,linux-x64}.tar.gz` archives produced by [`build-bootstrap-python.yml`](.github/workflows/build-bootstrap-python.yml). During a ToDesktop build, [`scripts/todesktop-beforeBuild.cjs`](scripts/todesktop-beforeBuild.cjs) runs `fetch-bootstrap-python.mjs` to download the archive matching the build's target platform and extract it into `bootstrap-python/<platform>/` so it's bundled into the installer. To rebuild and publish a new bootstrap release, dispatch the bootstrap workflow and update the `--tag` argument if you change the release name.
 
 ## Data Locations
 

@@ -9,12 +9,18 @@ vi.mock('../../lib/fetch', () => ({
   fetchJSON: vi.fn(),
 }))
 
+vi.mock('../../lib/comfyui-releases', () => ({
+  getLatestStableTag: vi.fn(),
+}))
+
 import { standalone } from './index'
 import { fetchJSON } from '../../lib/fetch'
+import { getLatestStableTag } from '../../lib/comfyui-releases'
 import { PLATFORM_PREFIX } from './envPaths'
 import type { FieldOption } from '../../types/sources'
 
 const mockedFetchJSON = vi.mocked(fetchJSON)
+const mockedGetLatestStableTag = vi.mocked(getLatestStableTag)
 
 // Use the running platform's vendor prefix so tests work on win32/darwin/linux CI runners.
 const VENDOR_ID = `${PLATFORM_PREFIX[process.platform] || 'win-'}nvidia`
@@ -152,5 +158,21 @@ describe('standalone.getFieldOptions release', () => {
     const latestEntry = options.find((o) => o.value === 'latest')!
     const underlyingData = latestEntry.data as Record<string, unknown>
     expect(underlyingData.tag).toBe('v0.18.3-env1')
+  })
+
+  it('"Latest Stable" entry shows the upstream ComfyUI tag in description when resolved', async () => {
+    setupMockReleases()
+    mockedGetLatestStableTag.mockResolvedValue('v1.19.5')
+    const options = await standalone.getFieldOptions!('release', {}, { includeLatestStable: true })
+    const latestEntry = options.find((o) => o.value === 'latest')!
+    expect(latestEntry.description).toBe('v1.19.5')
+  })
+
+  it('"Latest Stable" entry omits description when the tag lookup fails', async () => {
+    setupMockReleases()
+    mockedGetLatestStableTag.mockResolvedValue(null)
+    const options = await standalone.getFieldOptions!('release', {}, { includeLatestStable: true })
+    const latestEntry = options.find((o) => o.value === 'latest')!
+    expect(latestEntry.description).toBeUndefined()
   })
 })
