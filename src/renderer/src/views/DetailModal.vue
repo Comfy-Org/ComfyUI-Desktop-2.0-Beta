@@ -27,11 +27,16 @@ interface Props {
   installation: Installation | null
   initialTab?: string
   autoAction?: string | null
+  /** When true, render without the modal-overlay framing — i.e. fill the
+   *  parent container and hide the close button. Used by the embedded
+   *  install-settings panel inside ComfyUI windows. */
+  inline?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   initialTab: 'status',
   autoAction: null,
+  inline: false,
 })
 
 const emit = defineEmits<{
@@ -523,7 +528,7 @@ function navigateToInstallation(installationId: string): void {
 </script>
 
 <template>
-  <div v-if="installation" class="view-modal-content">
+  <div v-if="installation" class="view-modal-content" :class="{ 'view-modal-inline': inline }">
       <div class="view-modal-header">
         <div
           class="view-modal-title"
@@ -559,7 +564,7 @@ function navigateToInstallation(installationId: string): void {
             <Pin :size="16" />
           </button>
         </div>
-        <button class="view-modal-close" @click="emit('close')">✕</button>
+        <button v-if="!inline" class="view-modal-close" @click="emit('close')">✕</button>
       </div>
       <div class="view-modal-body">
         <div v-if="hasTabs" class="detail-tabs">
