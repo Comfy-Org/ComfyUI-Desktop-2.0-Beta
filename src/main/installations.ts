@@ -135,22 +135,23 @@ export async function ensureExists(sourceId: string, data: Record<string, unknow
 }
 
 /**
- * Stamp `lastLaunchedAt` (global) and — when `category` is provided —
- * `lastLaunchedAtByCategory[category]` on the install in a single atomic
- * write. Goes through the same `installations.json` queue as `update()` and
- * fires the same 'updated' event on `installationEvents`, so existing
- * subscribers (title-bar refresh, etc.) keep working.
+ * Stamp `lastLaunchedAt` (global) and — when `resolveCategory` returns a
+ * value — `lastLaunchedAtByCategory[category]` on the install in a single
+ * atomic write. Goes through the same `installations.json` queue as
+ * `update()` and fires the same 'updated' event on `installationEvents`,
+ * so existing subscribers (title-bar refresh, etc.) keep working.
  *
- * `category` should be the install's source category (`'local'` / `'cloud'`
- * / `'desktop'`), normally resolved by the caller via
- * `sourceMap[inst.sourceId]?.category` since the persisted record doesn't
- * carry the category itself. If omitted, only the global timestamp is
- * touched (e.g. tests, or future call sites where the category isn't
- * known).
+ * `resolveCategory` is invoked with the freshly-loaded record under the
+ * queue lock — typically `(inst) => sourceMap[inst.sourceId]?.category` —
+ * so this module stays free of any source-plugin dependency and the caller
+ * doesn't have to pre-fetch the install just to compute its category.
+ * Omit it (or have it return undefined) when the category isn't known
+ * (e.g. unit tests on installs whose source isn't registered) and only
+ * the global timestamp will be touched.
  */
 export async function markLaunched(
   installationId: string,
-  category?: string,
+  resolveCategory?: (inst: InstallationRecord) => string | undefined,
 ): Promise<InstallationRecord | null> {
   const updated = await enqueue(async () => {
     const list = await load()
@@ -158,6 +159,7 @@ export async function markLaunched(
     if (index === -1) return null
     const existing = list[index]!
     const now = Date.now()
+    const category = resolveCategory?.(existing)
     const existingByCategory =
       (existing.lastLaunchedAtByCategory as Record<string, number> | undefined) ?? {}
     const merged: InstallationRecord = {

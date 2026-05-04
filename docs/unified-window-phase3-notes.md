@@ -95,11 +95,14 @@ The data layer for the per-category signal landed on
   carries an optional `lastLaunchedAtByCategory: Record<string, number>`
   alongside the existing global `lastLaunchedAt`. The two fields are
   always written together.
-- `installations.markLaunched(installationId, category?)` is the single
-  helper for stamping both fields atomically. The launch path in
-  `_addSession` (src/main/lib/ipc/shared.ts) routes through it, looking up
-  the category via `sourceMap[inst.sourceId]?.category`. The existing
-  `installationEvents` 'updated' event still fires.
+- `installations.markLaunched(installationId, resolveCategory?)` is the
+  single helper for stamping both fields atomically. The launch path in
+  `_addSession` (src/main/lib/ipc/shared.ts) calls it as
+  `markLaunched(id, (inst) => sourceMap[inst.sourceId]?.category)` — the
+  resolver runs inside the same enqueue lock that performs the write so
+  there's no separate read round-trip, and `installations.ts` stays free
+  of any source-plugin dependency. The existing `installationEvents`
+  'updated' event still fires.
 - `installations.getRecent()` and `installations.getRecentByCategory(category, resolveCategory)`
   expose the rankings. `getRecentByCategory` falls back to the global
   `lastLaunchedAt` for installs that pre-date the per-category field, so

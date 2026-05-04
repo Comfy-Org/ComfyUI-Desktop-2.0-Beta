@@ -421,12 +421,10 @@ export function _addSession(installationId: string, { proc, port, url, mode, ins
   // `lastLaunchedAtByCategory[category]` so recency-aware surfaces (e.g.
   // the future startup picker) can pick the most-recent install per
   // category without scanning every record. Category is resolved via the
-  // source map since the persisted record itself doesn't carry it.
-  installations.get(installationId)
-    .then((inst) => {
-      const category = inst ? sourceMap[inst.sourceId]?.category : undefined
-      return installations.markLaunched(installationId, category)
-    })
+  // source map since the persisted record itself doesn't carry it; the
+  // resolver runs inside `markLaunched`'s enqueue lock so there's no
+  // separate read/lookup round-trip here.
+  installations.markLaunched(installationId, (inst) => sourceMap[inst.sourceId]?.category)
     .then(() => _broadcastToRenderer('installations-changed', {}))
     .catch((err) => {
       console.error('Failed to mark installation launched:', err)

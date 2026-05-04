@@ -58,7 +58,7 @@ describe('installations.markLaunched', () => {
       status: 'installed',
     })
 
-    const updated = await installations.markLaunched(entry.id, 'local')
+    const updated = await installations.markLaunched(entry.id, resolveCategory)
     expect(updated).not.toBeNull()
     expect(typeof updated!.lastLaunchedAt).toBe('number')
     expect(updated!.lastLaunchedAt!).toBeGreaterThanOrEqual(before)
@@ -80,7 +80,7 @@ describe('installations.markLaunched', () => {
       lastLaunchedAtByCategory: { cloud: 100, desktop: 200 },
     })
 
-    const updated = await installations.markLaunched(entry.id, 'local')
+    const updated = await installations.markLaunched(entry.id, resolveCategory)
     expect(updated!.lastLaunchedAtByCategory).toMatchObject({
       cloud: 100,
       desktop: 200,
@@ -88,18 +88,53 @@ describe('installations.markLaunched', () => {
     })
   })
 
-  it('omits the per-category map when no category is provided', async () => {
+  it('omits the per-category map when the resolver returns undefined', async () => {
     const installations = await loadInstallations()
     const entry = await installations.add({
       name: 'No Category',
       installPath: path.join(tmpRoot, 'no-cat'),
+      // 'mystery' isn't recognised by resolveCategory, so the resolver
+      // returns undefined and only the global timestamp should be stamped.
       sourceId: 'mystery',
+      status: 'installed',
+    })
+
+    const updated = await installations.markLaunched(entry.id, resolveCategory)
+    expect(typeof updated!.lastLaunchedAt).toBe('number')
+    expect(updated!.lastLaunchedAtByCategory).toBeUndefined()
+  })
+
+  it('omits the per-category map when no resolver is provided', async () => {
+    const installations = await loadInstallations()
+    const entry = await installations.add({
+      name: 'No Resolver',
+      installPath: path.join(tmpRoot, 'no-res'),
+      sourceId: 'standalone',
       status: 'installed',
     })
 
     const updated = await installations.markLaunched(entry.id)
     expect(typeof updated!.lastLaunchedAt).toBe('number')
     expect(updated!.lastLaunchedAtByCategory).toBeUndefined()
+  })
+
+  it('passes the freshly-loaded record to the resolver', async () => {
+    const installations = await loadInstallations()
+    const entry = await installations.add({
+      name: 'Resolver Probe',
+      installPath: path.join(tmpRoot, 'probe'),
+      sourceId: 'standalone',
+      status: 'installed',
+    })
+
+    let received: InstallationRecord | null = null
+    await installations.markLaunched(entry.id, (inst) => {
+      received = inst
+      return 'local'
+    })
+    expect(received).not.toBeNull()
+    expect(received!.id).toBe(entry.id)
+    expect(received!.sourceId).toBe('standalone')
   })
 
   it('emits an installationEvents `updated` event on success', async () => {
@@ -114,7 +149,7 @@ describe('installations.markLaunched', () => {
     const seen: InstallationRecord[] = []
     installations.installationEvents.on('updated', (rec: InstallationRecord) => seen.push(rec))
 
-    await installations.markLaunched(entry.id, 'local')
+    await installations.markLaunched(entry.id, resolveCategory)
     expect(seen).toHaveLength(1)
     expect(seen[0]!.id).toBe(entry.id)
     expect(seen[0]!.lastLaunchedAtByCategory).toEqual({ local: seen[0]!.lastLaunchedAt })
@@ -125,7 +160,7 @@ describe('installations.markLaunched', () => {
     const seen: InstallationRecord[] = []
     installations.installationEvents.on('updated', (rec: InstallationRecord) => seen.push(rec))
 
-    const updated = await installations.markLaunched('inst-does-not-exist', 'local')
+    const updated = await installations.markLaunched('inst-does-not-exist', resolveCategory)
     expect(updated).toBeNull()
     expect(seen).toHaveLength(0)
   })
@@ -328,7 +363,7 @@ describe('installations.getRecentByCategory', () => {
     expect((await installations.getRecentByCategory('local', resolveCategory))!.id).toBe(b.id)
 
     // markLaunched(a) should bump A above B.
-    await installations.markLaunched(a.id, 'local')
+    await installations.markLaunched(a.id, resolveCategory)
     expect((await installations.getRecentByCategory('local', resolveCategory))!.id).toBe(a.id)
   })
 })
