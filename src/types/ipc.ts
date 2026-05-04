@@ -673,6 +673,12 @@ export interface ElectronApi {
    *  host window after a successful pick → launch hand-off. Returns true
    *  if a window was found and closed. */
   closeHostWindow(): Promise<boolean>
+  /** Stamp the calling chooser host window's current bounds onto the
+   *  install's saved-bounds slot (Phase 3 visual continuity). The chooser
+   *  pick flow calls this BEFORE kicking off the launch so the new
+   *  install window opens exactly where the chooser was — visually a
+   *  swap-in-place. No-op for install-backed callers. */
+  transferHostBoundsToInstall(installationId: string): Promise<boolean>
   /** Chooser → "create a new install" (Phase 3 step 2c). The chooser's
    *  empty-state CTA fires this; main routes to the same new-install entry
    *  the launcher window exposes. Becomes a native File-menu equivalent in

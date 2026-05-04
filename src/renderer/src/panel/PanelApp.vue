@@ -148,6 +148,12 @@ async function handleChooserPick(installation: Installation): Promise<void> {
     return
   }
 
+  // Visual continuity — stamp the chooser host's current bounds onto the
+  // install's saved-bounds slot BEFORE the launch, so the install's own
+  // window opens exactly where the chooser was. The user perceives a
+  // swap-in-place even though it's structurally close+open.
+  await window.api.transferHostBoundsToInstall(installation.id)
+
   // Subscribe BEFORE kicking off the launch so we don't miss a
   // fast-firing instance-started broadcast. The launch action runs via
   // the ProgressModal pipeline (showProgress: true) so executeAction

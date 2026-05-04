@@ -1562,6 +1562,33 @@ ipcMain.handle('close-host-window', (event) => {
   return false
 })
 
+/**
+ * Copy the calling chooser host window's current bounds into the install's
+ * saved-bounds slot (Phase 3 visual continuity for chooser pick).
+ *
+ * The chooser pick flow currently closes the host and launches the install
+ * in a fresh window. Without this transfer, the new install window opens
+ * at the install's previously-saved bounds (or the default 1280x900),
+ * jumping visibly away from where the user just clicked. Stamping the
+ * chooser's current bounds onto the install BEFORE the launch makes the
+ * new window appear in the same spot — visually a swap-in-place even
+ * though it's structurally close+open.
+ *
+ * No-op when the calling sender isn't the panel of an install-less host
+ * window (so install-backed panels can't accidentally clobber another
+ * install's bounds).
+ */
+ipcMain.handle('transfer-host-bounds-to-install', (event, installationId: string) => {
+  for (const [, entry] of comfyWindows) {
+    if (entry.window.isDestroyed()) continue
+    if (entry.installationId !== null) continue
+    if (entry.panelView?.webContents !== event.sender) continue
+    saveWindowBounds(installationId, entry.window)
+    return true
+  }
+  return false
+})
+
 function resolveOutputDir(inst: InstallationRecord): string | null {
   if ((inst.autoDownloadOutputs as boolean | undefined) === false) return null
   if ((inst.useSharedOutputDir as boolean | undefined) !== false) {
