@@ -20,7 +20,9 @@ describe('comfyTitleBar.html', () => {
   it('locks down its CSP', () => {
     expect(html).toMatch(/Content-Security-Policy/)
     expect(html).toMatch(/default-src 'none'/)
-    expect(html).toMatch(/script-src 'self'/)
+    // Inline script is required because the bridge wire-up runs in the
+    // HTML itself; the CSP otherwise blocks external loads.
+    expect(html).toMatch(/script-src 'unsafe-inline'/)
   })
 
   it('listens to all three bridge channels', () => {

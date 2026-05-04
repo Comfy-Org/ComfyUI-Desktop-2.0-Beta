@@ -3,12 +3,12 @@
 <head>
   <meta charset="UTF-8">
   <!--
-    Loaded from disk into a WebContentsView; no network resources, so a
-    locked-down CSP is fine. style-src 'unsafe-inline' is needed because the
-    JS below toggles inline styles for the dynamic theme + button states.
+    Loaded from disk into a WebContentsView; no network resources, so the CSP
+    just needs to disable any external loads. Inline script is required for
+    the bridge wire-up below.
   -->
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; img-src data:;">
+    content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:;">
   <style>
     html, body { margin: 0; padding: 0; overflow: hidden; height: 100%; }
     body {
