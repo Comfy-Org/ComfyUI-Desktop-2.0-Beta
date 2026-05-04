@@ -12,6 +12,7 @@ import NewInstallModal from '../views/NewInstallModal.vue'
 import TrackModal from '../views/TrackModal.vue'
 import LoadSnapshotModal from '../views/LoadSnapshotModal.vue'
 import QuickInstallModal from '../views/QuickInstallModal.vue'
+import UpdateBanner from '../components/UpdateBanner.vue'
 import { useTheme } from '../composables/useTheme'
 import { useSessionStore } from '../stores/sessionStore'
 import { useInstallationStore } from '../stores/installationStore'
@@ -328,6 +329,15 @@ onUnmounted(() => {
 
 <template>
   <div class="panel-shell">
+    <!-- Update banner — listens to `update-available` / `update-error`
+         broadcasts from the updater module. Mirrored from the launcher
+         window's App.vue so the install pill caret's "Check for Updates"
+         entry has a place to surface its result inside the host window
+         (Phase 3: launcher window goes away). The banner is auto-hide
+         when no update info is present, so this row renders nothing in
+         the steady state. -->
+    <UpdateBanner />
+
     <main class="panel-content">
       <SettingsView v-if="activePanel === 'launcher-settings'" ref="settingsRef" />
 

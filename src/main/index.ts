@@ -597,9 +597,16 @@ function bringToFront(win: BrowserWindow): void {
 }
 
 function showMainWindow(): void {
+  // Phase 3 — the chooser host is the primary surface. Prefer focusing
+  // an existing chooser host (or the launcher window while it still
+  // exists, for backwards continuity), and fall back to spawning a
+  // chooser host so the tray "Show App" entry never silently no-ops
+  // once `createMainWindow()` is dropped.
   if (mainWindow && !mainWindow.isDestroyed()) {
     bringToFront(mainWindow)
+    return
   }
+  openOrFocusChooserHostWindow()
 }
 
 function quitApp(): void {
@@ -1514,15 +1521,23 @@ ipcMain.on('comfy-window:new-chooser-window', () => {
 })
 
 /**
- * Install-pill caret → Check for Updates (Phase 3 title bar v2). Stub
- * for now — focuses the launcher window so the user can use the Settings
- * page's existing "Check for updates" button. A proper per-install check
- * + result UI lives in step 5 alongside the rest of the title-bar menu.
+ * Install-pill caret → Check for Updates (Phase 3 title bar v2).
+ * Triggers a manual update check via the updater module. The result
+ * flows through the existing broadcast pipeline (`update-available`
+ * / `update-error`) so the UpdateBanner in any subscribed renderer
+ * surface (today the launcher window's App.vue; in step 4 also the
+ * host window's panel) updates without further wiring.
+ *
+ * Errors are caught here so a failing check can never crash the main
+ * process — the broadcast pipeline already surfaces an `update-error`
+ * payload to the renderer for that case.
  */
 ipcMain.on('comfy-window:check-for-updates', () => {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    bringToFront(mainWindow)
-  }
+  void updater.runCheck('title-bar-check').catch(() => {
+    // runCheck already broadcasts an `update-error` for any failure
+    // path; the catch is just to mark the floating Promise rejection
+    // as handled so it doesn't surface as an unhandledRejection.
+  })
 })
 
 ipcMain.handle('focus-comfy-window', (_event, installationId: string) => {

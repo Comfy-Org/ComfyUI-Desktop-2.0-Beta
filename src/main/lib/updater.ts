@@ -118,7 +118,17 @@ async function checkForUpdate(source: string): Promise<{ available: boolean; ver
   return version ? { available: true, version } : { available: false }
 }
 
-function runCheck(source: string): Promise<{ available: boolean; version?: string; error?: string }> {
+/**
+ * Run an update check and return the result. Exported so callers in
+ * main (e.g. the title-bar "Check for Updates" entry routed through
+ * `comfy-window:check-for-updates`) can trigger a check without going
+ * through the renderer-facing `check-for-update` IPC. Result also flows
+ * through the broadcast pipeline (`update-available` / `update-error`)
+ * so any subscribed renderer surface still updates.
+ */
+export function runCheck(
+  source: string,
+): Promise<{ available: boolean; version?: string; error?: string }> {
   return checkForUpdate(source)
 }
 

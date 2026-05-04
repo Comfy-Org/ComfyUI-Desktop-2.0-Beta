@@ -93,6 +93,12 @@ vi.mock('../views/QuickInstallModal.vue', () => ({
     methods: { open: vi.fn() },
   },
 }))
+vi.mock('../components/UpdateBanner.vue', () => ({
+  default: {
+    name: 'UpdateBanner',
+    template: '<div data-testid="update-banner" />',
+  },
+}))
 
 import { mount, flushPromises } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
