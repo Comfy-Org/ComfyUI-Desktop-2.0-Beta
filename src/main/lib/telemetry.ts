@@ -11,16 +11,17 @@
  *       * execution events parsed from ComfyUI's stdout
  *   - A `trackedStep()` helper mirroring legacy desktop's `@trackEvent` decorator
  *     pattern (`<step>.start` / `<step>.end` / `<step>.error`)
- *   - Feature-flag bootstrap with on-disk cache so the launcher works offline
  *
  * The renderer continues to be the primary telemetry funnel for UI events;
  * this module exists for the things the renderer cannot see.
+ *
+ * NOTE: There is intentionally no remote feature-flag system. We initially
+ * shipped one with a few kill switches and a sample-rate dial, but the
+ * launcher has no live use for them and the bootstrap/cache machinery
+ * complicates startup. Reintroduce only if a concrete need appears.
  */
 import { app, BrowserWindow } from 'electron'
-import path from 'path'
 import { PostHog } from 'posthog-node'
-import { configDir } from './paths'
-import { readFileSafe, writeFileSafe } from './safe-file'
 import { DEFAULT_POSTHOG_API_KEY, DEFAULT_POSTHOG_HOST, isPostHogFlagDisabled as isFlagDisabled } from '../../shared/posthogConfig'
 
 export type TelemetryValue = boolean | number | string | null | undefined
@@ -46,61 +47,8 @@ let consentEnabled = true
 let bootstrapTimeMs: number = Date.now()
 let initialized = false
 
-// Feature flags fetched from PostHog at init, cached on disk for offline use
-const FLAG_CACHE_FILE = 'telemetry-flags.json'
-const flagDefaults: Record<string, boolean | string | number> = {
-  // Master kill switch for log-based execution telemetry
-  'desktop2.execution_telemetry.enabled': true,
-  // 0..1 sampling applied to per-prompt execution events
-  'desktop2.execution_telemetry.sample_rate': 1,
-  // Comma-separated list of event names to silence at the SDK level
-  'desktop2.disabled_events': '',
-  // Maximum chars of ComfyUI boot stderr forwarded with desktop2.comfyui.boot_log
-  'desktop2.boot_log_max_chars': 8192,
-}
-let flagsCache: Record<string, unknown> = { ...flagDefaults }
-
-function flagCachePath(): string {
-  return path.join(configDir(), FLAG_CACHE_FILE)
-}
-
-function loadCachedFlags(): void {
-  try {
-    const raw = readFileSafe(flagCachePath())
-    if (!raw) return
-    const parsed = JSON.parse(raw) as Record<string, unknown>
-    flagsCache = { ...flagDefaults, ...parsed }
-  } catch {
-    // ignore – fall through to defaults
-  }
-}
-
-function persistFlags(values: Record<string, unknown>): void {
-  try {
-    writeFileSafe(flagCachePath(), JSON.stringify(values, null, 2))
-  } catch {
-    // ignore
-  }
-}
-
-export function getFlag<T = unknown>(name: string, fallback?: T): T {
-  if (Object.prototype.hasOwnProperty.call(flagsCache, name)) {
-    return flagsCache[name] as T
-  }
-  if (Object.prototype.hasOwnProperty.call(flagDefaults, name)) {
-    return flagDefaults[name] as T
-  }
-  return fallback as T
-}
-
-function disabledEventNames(): Set<string> {
-  const raw = String(getFlag('desktop2.disabled_events', '') || '')
-  return new Set(raw.split(',').map((s) => s.trim()).filter(Boolean))
-}
-
-function isEventEnabled(name: string): boolean {
-  if (!consentEnabled) return false
-  return !disabledEventNames().has(name)
+function isEventEnabled(_name: string): boolean {
+  return consentEnabled
 }
 
 export function setConsent(enabled: boolean): void {
@@ -125,17 +73,14 @@ export interface InitOptions {
  * Initialize PostHog Node. Safe to call before consent decision is known —
  * events are queued by setConsent(false) and dropped at capture time.
  *
- * Note: the session-start event is intentionally NOT emitted here. The
- * `distinctId` is unknown until `identify()` runs, and emitting before the
- * first feature-flag refresh would ignore a remotely configured
- * `desktop2.disabled_events` allow/block list. `identify()` issues the
- * session-start event after flags are bootstrapped.
+ * Note: the session-start event is intentionally NOT emitted here — the
+ * `distinctId` is unknown until `identify()` runs. `identify()` issues
+ * the session-start event once the device id is bound.
  */
 export function initTelemetry(opts: InitOptions): void {
   if (initialized) return
   initialized = true
   bootstrapTimeMs = Date.now()
-  loadCachedFlags()
 
   const cfg = readPostHogConfig()
   if (!cfg.enabled) return
@@ -161,23 +106,13 @@ export function initTelemetry(opts: InitOptions): void {
 let pendingSessionStart: Record<string, TelemetryValue> | null = null
 
 /**
- * Maximum time we'll wait for the first feature-flag fetch to complete
- * before letting startup events through with cached/default flag values.
+ * Bind the persistent device id once it is known. Emits the deferred
+ * session-start event with the now-known distinctId.
  */
-const FLAG_BOOTSTRAP_TIMEOUT_MS = 1500
-
-/**
- * Bind the persistent device id once it is known and refresh feature flags.
- *
- * If `opts` is provided, we await the flag refresh (with a short timeout)
- * before emitting the deferred session-start event so that remotely
- * configured event suppressions take effect on the very first event.
- */
-export async function identify(
+export function identify(
   id: string,
   properties: Record<string, TelemetryValue> = {},
-  opts?: InitOptions,
-): Promise<void> {
+): void {
   distinctId = id
   if (!client) return
   try {
@@ -185,37 +120,10 @@ export async function identify(
   } catch {
     // ignore
   }
-  if (opts) {
-    const refresh = refreshFlags(opts).catch(() => {})
-    const timeout = new Promise<void>((resolve) => setTimeout(resolve, FLAG_BOOTSTRAP_TIMEOUT_MS))
-    await Promise.race([refresh, timeout])
-  }
   if (pendingSessionStart) {
     capture('desktop2.session.started', pendingSessionStart)
     pendingSessionStart = null
   }
-}
-
-async function refreshFlags(opts: InitOptions): Promise<void> {
-  if (!client || !distinctId) return
-  const merged: Record<string, unknown> = { ...flagDefaults }
-  for (const flagName of Object.keys(flagDefaults)) {
-    try {
-      const value = await client.getFeatureFlag(flagName, distinctId, {
-        personProperties: {
-          app_env: opts.appEnv,
-          app_version: opts.appVersion,
-        },
-      })
-      if (value !== undefined && value !== null) {
-        merged[flagName] = value
-      }
-    } catch {
-      // keep default for this flag
-    }
-  }
-  flagsCache = merged
-  persistFlags(merged)
 }
 
 export function capture(event: string, properties: TelemetryContext = {}): void {

@@ -973,14 +973,10 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
       isPackaged: app.isPackaged,
     })
     mainTelemetry.installAppHooks()
-    void mainTelemetry.identify(getDeviceId(), {
+    mainTelemetry.identify(getDeviceId(), {
       app_version: APP_VERSION,
       platform: process.platform,
       arch: process.arch,
-    }, {
-      appVersion: APP_VERSION,
-      appEnv: app.isPackaged ? 'prod-v2' : 'dev',
-      isPackaged: app.isPackaged,
     })
 
     const locale = (settings.get('language') as string | undefined) || app.getLocale().split('-')[0]

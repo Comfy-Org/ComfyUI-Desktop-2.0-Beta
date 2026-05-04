@@ -67,7 +67,7 @@ Main-process events go through `mainTelemetry.emit()`
 | **Main-process errors** | mirrored to renderer → `addError` (with `skipPostHog: true`) | **owns** (`captureException`) | suppressed (`skipPostHog`) to avoid double counting |
 | **Session replay** | not configured (field omitted, SDK default is off) | — | hard-disabled (no recorder script, no CSP allowance) |
 | **Long tasks / resource timing / user interactions** | **owns** (`trackResources`, `trackLongTasks`, `trackUserInteractions: true`) | — | — |
-| **Feature flags / kill switches** | — | **owns** (bootstraps + on-disk cache `telemetry-flags.json`) | — (no renderer-side flag consumers) |
+| **Feature flags / kill switches** | — | none in this build (see _Remote feature flags_ below) | — |
 | **Distinct id** | `datadogRum.setUser({ id })` | `client.identify({ distinctId })` | `posthog.identify(id, profileProps)` (sets person-profile props) |
 | **Path normalisation on errors** | yes (`normalizeRumErrorEvent`) | PII + secret scrub via `scrubAll()` | `scrubAll()` already applied upstream |
 
@@ -215,15 +215,20 @@ time. `VITE_DATADOG_RUM_ENABLED=0|false|off` disables Datadog.
 
 ### Remote feature flags
 
-Fetched from PostHog at startup (with a 1.5 s budget) and cached on
-disk in `<configDir>/telemetry-flags.json` for offline use:
+There are intentionally **no remote feature flags** in this build.
 
-| Flag | Default | Effect |
-|---|---|---|
-| `desktop2.execution_telemetry.enabled` | `true` | Master kill switch for `desktop2.execution.*` events. |
-| `desktop2.execution_telemetry.sample_rate` | `1` | 0..1 sampling applied per prompt (FIFO-paired across start/done/error). |
-| `desktop2.disabled_events` | `""` | Comma-separated event-name deny list applied at the SDK boundary. |
-| `desktop2.boot_log_max_chars` | `8192` | Cap on `desktop2.comfyui.boot_log.boot_stderr` length. |
+An earlier iteration shipped a small set (`desktop2.execution_telemetry.enabled`,
+`desktop2.execution_telemetry.sample_rate`, `desktop2.disabled_events`,
+`desktop2.boot_log_max_chars`) bootstrapped from PostHog at startup with
+an on-disk cache. None of them had a live operational use case for the
+launcher, and the bootstrap added startup latency plus state we did not
+want to maintain. The whole system was removed: no `getFlag` calls, no
+deferred session-start, no `<configDir>/telemetry-flags.json`. Execution
+telemetry is now unconditionally on.
+
+If a future need arises, the path to bring flags back is straightforward
+(re-add the bootstrap + cache + a `getFlag` accessor and the call sites
+that need it), but the default position is **no flags**.
 
 ## PII and secret scrubbing
 

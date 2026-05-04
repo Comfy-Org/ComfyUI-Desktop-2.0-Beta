@@ -22,11 +22,6 @@ describe('executionTap', () => {
     vi.spyOn(telemetry, 'emit').mockImplementation((event, ctx) => {
       captured.push({ event, ctx: ctx as Record<string, unknown> })
     })
-    vi.spyOn(telemetry, 'getFlag').mockImplementation((name: string, fallback?: unknown) => {
-      if (name === 'desktop2.execution_telemetry.enabled') return true
-      if (name === 'desktop2.execution_telemetry.sample_rate') return 1
-      return fallback
-    })
   })
 
   afterEach(() => {
@@ -170,17 +165,6 @@ describe('executionTap', () => {
     })
   })
 
-  it('respects the kill switch feature flag', () => {
-    vi.spyOn(telemetry, 'getFlag').mockImplementation((name: string, fallback?: unknown) => {
-      if (name === 'desktop2.execution_telemetry.enabled') return false
-      return fallback
-    })
-    const tap = createExecutionTap({ installationId: 'inst-1' })
-    tap.ingest('got prompt\nPrompt executed in 1 seconds\n', 'stdout')
-    tap.flushSummary()
-    expect(captured.length).toBe(0)
-  })
-
   it('handles split chunks at line boundaries', () => {
     const tap = createExecutionTap({ installationId: 'inst-1' })
     tap.ingest('got pro', 'stdout')
@@ -212,51 +196,4 @@ describe('executionTap', () => {
     expect(msg).toContain('[' + 'REDACTED' + ']')
   })
 
-  it('pairs sample decisions to terminal events FIFO (mid-session sample-out is honored)', () => {
-    // Force sampling to drop only the SECOND prompt, not the first or third.
-    let promptIdx = 0
-    const sampleDecisions = [true, false, true]
-    vi.spyOn(telemetry, 'getFlag').mockImplementation((name: string, fallback?: unknown) => {
-      if (name === 'desktop2.execution_telemetry.enabled') return true
-      if (name === 'desktop2.execution_telemetry.sample_rate') return 1
-      return fallback
-    })
-    const randomSpy = vi.spyOn(Math, 'random').mockImplementation(() => {
-      // shouldSample uses Math.random() < rate; we hijack by also stubbing
-      // the rate via the queue: since rate is 1 here, shouldSample short-
-      // circuits to true. Override rate to 0.5 so Math.random gates it.
-      return 0
-    })
-    // Re-mock with a controllable rate so Math.random actually decides
-    vi.spyOn(telemetry, 'getFlag').mockImplementation((name: string, fallback?: unknown) => {
-      if (name === 'desktop2.execution_telemetry.enabled') return true
-      if (name === 'desktop2.execution_telemetry.sample_rate') return 0.5
-      return fallback
-    })
-    randomSpy.mockImplementation(() => {
-      // shouldSample: Math.random() < 0.5 → true means sampled in
-      const decision = sampleDecisions[promptIdx++] ?? true
-      return decision ? 0 : 0.99
-    })
-
-    const tap = createExecutionTap({ installationId: 'inst-1' })
-    tap.ingest(
-      [
-        'got prompt',
-        'Prompt executed in 1 seconds',
-        'got prompt',
-        'Prompt executed in 1 seconds',
-        'got prompt',
-        'Prompt executed in 1 seconds',
-        '',
-      ].join('\n'),
-      'stdout',
-    )
-    const started = captured.filter((c) => c.event === 'desktop2.execution.started')
-    const completed = captured.filter((c) => c.event === 'desktop2.execution.completed')
-    // Exactly two pairs should make it through (prompt 1 and 3); prompt 2 is
-    // dropped at BOTH the start and the completion stages.
-    expect(started.length).toBe(2)
-    expect(completed.length).toBe(2)
-  })
 })

@@ -16,9 +16,6 @@
  * `execution:completed` semantic. It is set on the first successful prompt
  * and emitted as `desktop2.execution.first_completed`.
  *
- * All emissions are gated by the `desktop2.execution_telemetry.enabled` and
- * `desktop2.execution_telemetry.sample_rate` feature flags.
- *
  * Defensive bounds:
  *   - `promptStartTimes` is capped to avoid leaking when starts and
  *     completions don't pair (e.g. crashes mid-prompt).
@@ -51,12 +48,6 @@ interface TapState {
   tracebackBuffer: string[]
   tracebackChars: number
   tracebackPhase: TracebackPhase
-  // FIFO queue of per-prompt sample decisions (`true` = sampled in, `false` =
-  // sampled out). ComfyUI runs prompts strictly serially, so completions and
-  // errors arrive in the same order their `got prompt` did. Pushed on each
-  // start, shifted on each terminal event so a sampled-out prompt is dropped
-  // consistently across started/completed/error.
-  sampleResults: boolean[]
 }
 
 const TRACEBACK_START = /^Traceback \(most recent call last\):/
@@ -70,17 +61,6 @@ const MAX_TRACEBACK_LINES = 200
 const MAX_TRACEBACK_CHARS = 16 * 1024
 const ERROR_MESSAGE_MAX = 500
 const ERROR_CLASS_MAX = 80
-
-export function isTelemetryEnabled(): boolean {
-  return telemetry.getFlag<boolean>('desktop2.execution_telemetry.enabled', true) === true
-}
-
-function shouldSample(): boolean {
-  const rate = Number(telemetry.getFlag('desktop2.execution_telemetry.sample_rate', 1))
-  if (!Number.isFinite(rate) || rate >= 1) return true
-  if (rate <= 0) return false
-  return Math.random() < rate
-}
 
 export function createExecutionTap(opts: {
   installationId: string
@@ -101,7 +81,6 @@ export function createExecutionTap(opts: {
     tracebackBuffer: [],
     tracebackChars: 0,
     tracebackPhase: 'none',
-    sampleResults: [],
   }
 
   const baseContext = {
@@ -122,17 +101,6 @@ export function createExecutionTap(opts: {
   function consumePromptStart(): number | null {
     const ts = state.promptStartTimes.shift()
     return ts === undefined ? null : Date.now() - ts
-  }
-
-  /**
-   * Pop the matching sample-decision for the current terminal event.
-   * Returns `true` if the prompt was sampled in (or if no decision was
-   * recorded — fail-open so terminal events that arrive before any
-   * `got prompt` was seen are not silently swallowed).
-   */
-  function consumeSampleResult(): boolean {
-    if (state.sampleResults.length === 0) return true
-    return state.sampleResults.shift()!
   }
 
   function emitFirstCompletedIfNeeded(): void {
@@ -174,7 +142,6 @@ export function createExecutionTap(opts: {
     state.errorCount++
     // An error consumes a pending start so wall-clock pairing stays sane.
     consumePromptStart()
-    consumeSampleResult()
     telemetry.emit('desktop2.execution.error', {
       ...baseContext,
       error_class: errorClass.slice(0, ERROR_CLASS_MAX),
@@ -206,14 +173,6 @@ export function createExecutionTap(opts: {
     if (trimmed.length === 0) return
 
     if (PROMPT_GOT.test(trimmed)) {
-      const sampledIn = shouldSample()
-      state.sampleResults.push(sampledIn)
-      // Bound the queue to the same cap as promptStartTimes so a runaway
-      // mismatch can't grow it forever.
-      while (state.sampleResults.length > MAX_PENDING_PROMPTS) {
-        state.sampleResults.shift()
-      }
-      if (!sampledIn) return
       state.startedCount++
       pushPromptStart()
       telemetry.emit('desktop2.execution.started', {
@@ -225,7 +184,6 @@ export function createExecutionTap(opts: {
 
     const doneMatch = trimmed.match(PROMPT_DONE)
     if (doneMatch?.groups) {
-      if (!consumeSampleResult()) return
       const seconds = Number(doneMatch.groups['seconds'])
       const wallMs = consumePromptStart()
       state.completedCount++
@@ -241,7 +199,6 @@ export function createExecutionTap(opts: {
 
     const validationMatch = trimmed.match(VALIDATION_FAIL)
     if (validationMatch?.groups) {
-      if (!consumeSampleResult()) return
       state.errorCount++
       consumePromptStart()
       telemetry.emit('desktop2.execution.error', {
@@ -262,7 +219,6 @@ export function createExecutionTap(opts: {
   }
 
   function handleLine(line: string, source: 'stdout' | 'stderr'): void {
-    if (!isTelemetryEnabled()) return
     const trimmed = line.trim()
 
     // Outside a traceback: dispatch as a normal line.
@@ -308,7 +264,6 @@ export function createExecutionTap(opts: {
       for (const line of lines) handleLine(line, source)
     },
     flushSummary(): void {
-      if (!isTelemetryEnabled()) return
       // Drain any in-flight traceback so we don't drop the error if the
       // process exited before a boundary line arrived.
       if (
@@ -317,8 +272,8 @@ export function createExecutionTap(opts: {
       ) {
         emitTracebackError()
       }
-      // Always emit a per-session summary so analytics has a row even when
-      // no individual events were emitted (e.g. when sample_rate < 1).
+      // Per-session summary so analytics always has a row, even if a session
+      // produced no individual prompt events.
       telemetry.emit('desktop2.execution.session_summary', {
         ...baseContext,
         started_count: state.startedCount,
