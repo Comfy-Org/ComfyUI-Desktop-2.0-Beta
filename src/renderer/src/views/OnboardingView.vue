@@ -1773,6 +1773,12 @@ onUnmounted(() => {
                   </button>
                 </div>
                 <p class="onboarding-form-hint">{{ t('onboarding.installPathHint') }}</p>
+                <!-- §4 — getDefaultInstallDir failed: silent fallback would
+                     leave the field empty with no explanation. Surface the
+                     reason inline so the user knows to choose one manually. -->
+                <span v-if="noDefaultPathHint" class="consent-error" role="alert">
+                  {{ noDefaultPathHint }}
+                </span>
               </div>
 
               <div class="onboarding-form-field">
@@ -1791,14 +1797,38 @@ onUnmounted(() => {
                   </option>
                 </select>
                 <!-- GPU detection promoted to an inline pill — feels like a
-                     fact the app is showing off, not buried text. -->
-                <span v-if="detectedGpuLabel" class="onboarding-gpu-chip">
+                     fact the app is showing off, not buried text. When the
+                     detection actually failed, swap to a warning chip so the
+                     "we picked the right build for your hardware" promise
+                     isn't silently broken. Per §4 spec. -->
+                <span
+                  v-if="gpuDetectionFailed"
+                  class="onboarding-gpu-chip onboarding-gpu-chip-warning"
+                >
+                  <Cpu :size="12" />
+                  {{ t('onboarding.gpuNotDetected') }}
+                </span>
+                <span v-else-if="detectedGpuLabel" class="onboarding-gpu-chip">
                   <Cpu :size="12" />
                   {{ t('onboarding.detectedGpu', { gpu: detectedGpuLabel }) }}
                 </span>
               </div>
 
-              <div v-if="formError" class="onboarding-form-error">{{ formError }}</div>
+              <!-- §4 — preflight-timeout error surfaces a "Try again" CTA so
+                   the user isn't stranded in a form with empty release
+                   options and only a Back button. -->
+              <div v-if="formError" class="onboarding-form-error" role="alert">
+                <span class="onboarding-form-error-text">{{ formError }}</span>
+                <button
+                  v-if="formError === t('onboarding.preflightTimeout')"
+                  type="button"
+                  class="onboarding-form-error-retry"
+                  :disabled="busy || formLoading"
+                  @click="enterInstallForm"
+                >
+                  {{ t('onboarding.preflightTryAgain') }}
+                </button>
+              </div>
             </template>
           </div>
 
@@ -2718,13 +2748,57 @@ onUnmounted(() => {
   color: var(--info);
 }
 
+/* Warning variant for when GPU detection failed — same shape as the info
+   chip but in warning palette so the "we picked your build" promise
+   doesn't read as confidently true. */
+.onboarding-gpu-chip-warning {
+  background: color-mix(in srgb, var(--warning) 10%, transparent);
+  color: var(--warning);
+}
+
+.onboarding-gpu-chip-warning svg {
+  color: var(--warning);
+}
+
+/* Form error block — used by both the install-error and the preflight-
+   timeout-with-retry. The retry variant lays out as a row (text + button)
+   so the user has an action without leaving the form. */
 .onboarding-form-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   padding: 10px 12px;
   font-size: 13px;
   color: var(--danger);
   background: color-mix(in srgb, var(--danger) 10%, transparent);
   border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
   border-radius: 6px;
+}
+
+.onboarding-form-error-text {
+  flex-grow: 1;
+}
+
+.onboarding-form-error-retry {
+  flex-shrink: 0;
+  padding: 4px 12px;
+  font-size: 12px;
+  color: var(--danger);
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--danger) 50%, transparent);
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.onboarding-form-error-retry:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+}
+
+.onboarding-form-error-retry:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* ---- Installing ---- */
@@ -3215,5 +3289,106 @@ onUnmounted(() => {
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+/* Reusable spin binding for any Lucide icon that should rotate (loading
+   states on cards, retry buttons, etc.). The keyframe lives above; this
+   class is the public API. */
+.spin {
+  animation: spin 0.9s linear infinite;
+}
+
+/* Per-screen error pill — sits below the offending control with a 12px
+   gap. Inline-flex so an icon can sit next to it; warning palette via
+   color-mix to avoid a hardcoded hex. */
+.consent-error {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
+  border-radius: 4px;
+}
+
+/* Done-state error block — verbatim IPC message inline above the retry
+   button. Not a toast; not a modal; the user has to read this to make a
+   decision so it gets a row of its own. */
+.done-error-block {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 12px 0 4px;
+  padding: 10px 12px;
+  font-size: 13px;
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
+  border-radius: 6px;
+  max-width: 360px;
+  text-align: left;
+  line-height: 1.4;
+}
+
+.done-error-icon {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--danger);
+}
+
+.done-error-text {
+  flex-grow: 1;
+}
+
+/* Done-state retry button — three modifiers (loading / error / idle).
+   Idle = primary fill (inherited from .primary base class). Loading =
+   keep primary fill but spinner replaces icon (no chrome change so the
+   button doesn't shift). Error = chrome shifts to neutral with the
+   warning-tinted icon, clearly different from a successful retry. */
+.done-retry-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 200px;
+  transition: background 0.15s ease, color 0.15s ease, opacity 0.15s ease;
+}
+
+.done-retry-loading {
+  cursor: wait;
+}
+
+.done-retry-error {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+.done-retry-error:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.done-btn-icon {
+  flex-shrink: 0;
+}
+
+/* When the retry surfaces an explicit error, the success check icon
+   becomes a danger-palette alert mark — keeps the existing geometry
+   (size, position) but reads as warning, not success. */
+.done-check-error {
+  background: color-mix(in srgb, var(--danger) 18%, transparent);
+  color: var(--danger);
+}
+
+/* Stops the success-check pulse outside the patient phase so the
+   stuck/error states don't read as "still working". Pairs with the
+   `done-check-error` class for the error variant. */
+.done-check-static {
+  animation: none;
 }
 </style>
