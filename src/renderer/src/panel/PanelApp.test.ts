@@ -38,6 +38,14 @@ vi.mock('../views/ProgressModal.vue', () => ({
 vi.mock('../components/ModalDialog.vue', () => ({
   default: { name: 'ModalDialog', template: '<div />' },
 }))
+vi.mock('./ComfyLifecycleView.vue', () => ({
+  default: {
+    name: 'ComfyLifecycleView',
+    props: ['installation', 'installationId'],
+    template:
+      '<div data-testid="comfy-lifecycle" :data-installation-id="installationId" />',
+  },
+}))
 
 import { mount, flushPromises } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
@@ -198,5 +206,30 @@ describe('PanelApp', () => {
     await flushPromises()
     expect(wrapper.find('[data-testid="detail-modal"]').exists()).toBe(false)
     expect(wrapper.text()).toContain('missing-id')
+  })
+
+  it('renders the comfy-lifecycle view when initialised with that panel', async () => {
+    // Main initialises panel.html with `panel=comfy-lifecycle` when the
+    // Comfy tab body needs to show the lifecycle UI (instance not running).
+    window.history.replaceState({}, '', '/?installationId=test-id&panel=comfy-lifecycle')
+    const wrapper = mountPanel()
+    await flushPromises()
+    const lifecycle = wrapper.find('[data-testid="comfy-lifecycle"]')
+    expect(lifecycle.exists()).toBe(true)
+    expect(lifecycle.attributes('data-installation-id')).toBe('test-id')
+  })
+
+  it('switches to the comfy-lifecycle view in response to a panel-switch IPC event', async () => {
+    // Main flips us into 'comfy-lifecycle' when the install transitions out
+    // of running (stop / crash) while the user is on the Comfy tab.
+    const wrapper = mountPanel()
+    await flushPromises()
+    expect(wrapper.find('[data-testid="settings-view"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="comfy-lifecycle"]').exists()).toBe(false)
+
+    mockState.panelSwitchCallbacks.forEach((cb) => cb({ panel: 'comfy-lifecycle' }))
+    await flushPromises()
+    expect(wrapper.find('[data-testid="settings-view"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="comfy-lifecycle"]').exists()).toBe(true)
   })
 })

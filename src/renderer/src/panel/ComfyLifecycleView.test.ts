@@ -1,0 +1,150 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { mount, flushPromises } from '@vue/test-utils'
+import { createI18n } from 'vue-i18n'
+import { createPinia, setActivePinia } from 'pinia'
+
+import ComfyLifecycleView from './ComfyLifecycleView.vue'
+import { useSessionStore } from '../stores/sessionStore'
+import type { Installation } from '../types/ipc'
+
+const messages = {
+  en: {
+    comfyLifecycle: {
+      stoppedTitle: 'ComfyUI is not running',
+      stoppedDesc: 'Start ComfyUI to use this installation.',
+      launchingTitle: 'Starting ComfyUI…',
+      launchingDesc: 'Waiting for the server to come online.',
+      stoppingTitle: 'Stopping ComfyUI…',
+      stoppingDesc: 'Waiting for the process to shut down cleanly.',
+      crashedTitle: 'ComfyUI exited unexpectedly',
+      crashedDesc: 'The ComfyUI process exited. You can restart it below.',
+      crashedDescWithCode: 'The ComfyUI process exited (exit code {code}). You can restart it below.',
+      start: 'Start ComfyUI',
+      restart: 'Restart ComfyUI',
+      launchProgressTitle: 'Starting ComfyUI',
+    },
+  },
+}
+
+function createTestI18n() {
+  return createI18n({ legacy: false, locale: 'en', messages })
+}
+
+const SAMPLE_INSTALL: Installation = {
+  id: 'inst-1',
+  name: 'My Local Install',
+  sourceId: 'standalone',
+  sourceLabel: 'Standalone',
+  sourceCategory: 'local',
+  status: 'installed',
+} as unknown as Installation
+
+interface MockApi {
+  runAction: ReturnType<typeof vi.fn>
+  getRunningInstances: ReturnType<typeof vi.fn>
+  onInstanceLaunching: ReturnType<typeof vi.fn>
+  onInstanceLaunchFailed: ReturnType<typeof vi.fn>
+  onInstanceStarted: ReturnType<typeof vi.fn>
+  onInstanceStopped: ReturnType<typeof vi.fn>
+  onInstanceStopping: ReturnType<typeof vi.fn>
+  onComfyOutput: ReturnType<typeof vi.fn>
+  onComfyExited: ReturnType<typeof vi.fn>
+}
+
+function installMockApi(): MockApi {
+  const api: MockApi = {
+    runAction: vi.fn().mockResolvedValue({ ok: true }),
+    getRunningInstances: vi.fn().mockResolvedValue([]),
+    onInstanceLaunching: vi.fn(() => () => {}),
+    onInstanceLaunchFailed: vi.fn(() => () => {}),
+    onInstanceStarted: vi.fn(() => () => {}),
+    onInstanceStopped: vi.fn(() => () => {}),
+    onInstanceStopping: vi.fn(() => () => {}),
+    onComfyOutput: vi.fn(() => () => {}),
+    onComfyExited: vi.fn(() => () => {}),
+  }
+  ;(window as unknown as { api: MockApi }).api = api
+  return api
+}
+
+function mountView(installationId = 'inst-1', installation: Installation | null = SAMPLE_INSTALL) {
+  return mount(ComfyLifecycleView, {
+    props: { installationId, installation },
+    global: { plugins: [createTestI18n(), createPinia()] },
+  })
+}
+
+describe('ComfyLifecycleView', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    installMockApi()
+  })
+
+  it('renders the stopped state by default with a Start button', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    expect(wrapper.text()).toContain('ComfyUI is not running')
+    const button = wrapper.find('button.primary')
+    expect(button.exists()).toBe(true)
+    expect(button.text()).toContain('Start ComfyUI')
+  })
+
+  it('renders the launching state when sessionStore reports the install as launching', async () => {
+    const wrapper = mountView()
+    const sessionStore = useSessionStore()
+    sessionStore.launchingInstances.set('inst-1', { installationName: 'My Local Install' })
+    await flushPromises()
+    expect(wrapper.text()).toContain('Starting ComfyUI')
+    // No Start / Restart button while a launch is in flight — the user
+    // shouldn't be able to double-trigger from here.
+    expect(wrapper.find('button.primary').exists()).toBe(false)
+  })
+
+  it('renders the stopping state when sessionStore reports the install as stopping', async () => {
+    const wrapper = mountView()
+    const sessionStore = useSessionStore()
+    sessionStore.stoppingInstances.add('inst-1')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Stopping ComfyUI')
+    expect(wrapper.find('button.primary').exists()).toBe(false)
+  })
+
+  it('renders the crashed state with exit code when an error instance is recorded', async () => {
+    const wrapper = mountView()
+    const sessionStore = useSessionStore()
+    sessionStore.errorInstances.set('inst-1', {
+      installationName: 'My Local Install',
+      exitCode: 137,
+    })
+    await flushPromises()
+    expect(wrapper.text()).toContain('ComfyUI exited unexpectedly')
+    expect(wrapper.text()).toContain('exit code 137')
+    const button = wrapper.find('button.primary')
+    expect(button.exists()).toBe(true)
+    expect(button.text()).toContain('Restart ComfyUI')
+  })
+
+  it('emits show-progress with a launch apiCall when Start is clicked', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.find('button.primary').trigger('click')
+    const events = wrapper.emitted('show-progress')
+    expect(events).toBeDefined()
+    expect(events!.length).toBe(1)
+    const payload = events![0]![0] as {
+      installationId: string
+      title: string
+      apiCall: () => Promise<unknown>
+      cancellable?: boolean
+    }
+    expect(payload.installationId).toBe('inst-1')
+    expect(payload.title).toContain('Starting ComfyUI')
+    expect(payload.title).toContain('My Local Install')
+    expect(payload.cancellable).toBe(true)
+
+    // The apiCall should hit window.api.runAction with the 'launch' action.
+    await payload.apiCall()
+    const api = (window as unknown as { api: MockApi }).api
+    expect(api.runAction).toHaveBeenCalledWith('inst-1', 'launch')
+  })
+})

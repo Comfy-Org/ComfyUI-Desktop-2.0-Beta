@@ -44,6 +44,21 @@
     "installationLabel": "Installation"
   },
 
+  "comfyLifecycle": {
+    "stoppedTitle": "ComfyUI is not running",
+    "stoppedDesc": "Start ComfyUI to use this installation.",
+    "launchingTitle": "Starting ComfyUI…",
+    "launchingDesc": "Waiting for the server to come online.",
+    "stoppingTitle": "Stopping ComfyUI…",
+    "stoppingDesc": "Waiting for the process to shut down cleanly.",
+    "crashedTitle": "ComfyUI exited unexpectedly",
+    "crashedDesc": "The ComfyUI process exited. You can restart it below.",
+    "crashedDescWithCode": "The ComfyUI process exited (exit code {code}). You can restart it below.",
+    "start": "Start ComfyUI",
+    "restart": "Restart ComfyUI",
+    "launchProgressTitle": "Starting ComfyUI"
+  },
+
   "running": {
     "title": "Running",
     "empty": "Nothing running or in progress.",

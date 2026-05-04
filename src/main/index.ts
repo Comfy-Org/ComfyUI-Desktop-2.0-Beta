@@ -28,13 +28,30 @@ import { shouldOpenInPopup } from './lib/allowedPopups'
 import { showModelFolderRelaunchPage } from './lib/relaunchPage'
 import { COMFY_BG, SPLASH_DARK, TITLEBAR_BG, type SplashTheme } from './lib/theme'
 import { TITLEBAR_HEIGHT, TRAFFIC_LIGHT_POSITION, titleBarOverlayForTheme, comfyTitleBarOverlay, updateTitleBarOverlay, setMainWindowId } from './lib/titleBarOverlay'
-import { resolveTheme, sourceMap, _registerExtraBroadcastTarget, _unregisterExtraBroadcastTarget } from './lib/ipc/shared'
+import { resolveTheme, sourceMap, _registerExtraBroadcastTarget, _unregisterExtraBroadcastTarget, _runningSessions } from './lib/ipc/shared'
 import * as mainTelemetry from './lib/telemetry'
 import { getDeviceId } from './lib/deviceId'
 import { scrubAll } from './lib/piiScrub'
 
+/**
+ * Title-bar pill key — one of the three user-visible navigation tabs.
+ *
+ * The Comfy pill maps to either the live ComfyUI WebContentsView (instance
+ * running) or the lifecycle panel (instance stopped / launching / stopping).
+ * The decision lives in `computeBodyMode()` and is internal to main.
+ */
 export type ComfyPanelKey = 'comfy' | 'install-settings' | 'launcher-settings'
 const VALID_PANELS: ReadonlySet<ComfyPanelKey> = new Set(['comfy', 'install-settings', 'launcher-settings'])
+
+/**
+ * Internal body-mode for a comfy window.
+ *
+ * `'comfy-lifecycle'` is *not* a title-bar pill — it's the panel rendered
+ * inside the Comfy tab when the install isn't running (no process up yet,
+ * shutting down, or crashed). The title bar still highlights the Comfy pill;
+ * the lifecycle view is just what fills the body in that state.
+ */
+type BodyMode = 'comfy' | 'comfy-lifecycle' | 'install-settings' | 'launcher-settings'
 
 todesktop.init({ autoUpdater: false })
 
@@ -160,16 +177,68 @@ interface ComfyWindowEntry {
   window: BrowserWindow
   comfyView: WebContentsView
   titleBarView: WebContentsView
-  /** Lazily-created on first non-comfy panel switch. */
+  /**
+   * Lazily-created on first non-comfy panel switch *or* when the comfy tab
+   * needs to render the lifecycle body (install stopped / launching).
+   */
   panelView: WebContentsView | null
-  /** Which view is currently visible below the title bar. */
+  /**
+   * Which title-bar pill is currently selected. Always one of the three
+   * user-visible pills — never `'comfy-lifecycle'`. The body shown for the
+   * Comfy pill switches between the live ComfyUI view and the lifecycle
+   * panel based on `_runningSessions` (see `computeBodyMode()`).
+   */
   activePanel: ComfyPanelKey
   /** Last known theme reported by the ComfyUI frontend, applied to the panel when it loads. */
   lastTheme: { bg: string; text: string }
   /** Layout function bound to this entry — updates view bounds for the current activePanel. */
   layoutViews: () => void
+  /**
+   * The current ComfyUI URL the comfyView should display. Updated on every
+   * `onLaunch` so reload / did-fail-load handlers don't hold stale URLs
+   * across stop+restart cycles (the window persists, the URL may change).
+   */
+  comfyUrl: string
 }
 const comfyWindows = new Map<string, ComfyWindowEntry>()
+
+/**
+ * Decide what should fill the body area of a comfy window right now.
+ *
+ * The Comfy pill resolves to either the live ComfyUI WebContentsView (instance
+ * running) or the lifecycle panel (instance stopped / launching / stopping).
+ * The other two pills always map directly to themselves.
+ *
+ * Centralising this so layout decisions and event-driven body swaps can't
+ * disagree about which view should be visible.
+ */
+function computeBodyMode(entry: ComfyWindowEntry, installationId: string): BodyMode {
+  if (entry.activePanel !== 'comfy') return entry.activePanel
+  return _runningSessions.has(installationId) ? 'comfy' : 'comfy-lifecycle'
+}
+
+/**
+ * Re-evaluate the body mode for a comfy window after a session-state
+ * transition (instance launched / stopped / crashed) and reflect it in the
+ * layout. When the body mode is `'comfy-lifecycle'`, the panelView is created
+ * (if needed) and asked to render the lifecycle UI; the title-bar pill stays
+ * on `'comfy'` either way.
+ */
+function refreshComfyTabBody(installationId: string): void {
+  const entry = comfyWindows.get(installationId)
+  if (!entry || entry.window.isDestroyed()) return
+  if (entry.activePanel !== 'comfy') return
+
+  const mode = computeBodyMode(entry, installationId)
+  if (mode === 'comfy-lifecycle') {
+    const panelView = ensurePanelView(installationId, entry, 'comfy-lifecycle')
+    if (!panelView.webContents.isDestroyed() && !panelView.webContents.isLoadingMainFrame()) {
+      panelView.webContents.send('panel-switch', { panel: 'comfy-lifecycle', installationId })
+    }
+  }
+  entry.layoutViews()
+  focusActiveBody(entry)
+}
 
 function findEntryByTitleBarSender(wc: Electron.WebContents): { id: string; entry: ComfyWindowEntry } | null {
   for (const [id, entry] of comfyWindows) {
@@ -483,11 +552,12 @@ function quitApp(): void {
 }
 
 function onComfyExited({ installationId }: { installationId?: string } = {}): void {
-  if (installationId) {
-    const entry = comfyWindows.get(installationId)
-    if (entry && !entry.window.isDestroyed()) entry.window.destroy()
-    comfyWindows.delete(installationId)
-  }
+  if (!installationId) return
+  // The window stays alive — exit (clean or crash) just swaps the body to the
+  // lifecycle panel so the user can re-launch, look at logs, or close the
+  // window themselves. Window destruction only happens via explicit close
+  // paths (user closes window, app quits, install deleted via close-comfy-window).
+  refreshComfyTabBody(installationId)
 }
 
 interface RelaunchState {
@@ -607,15 +677,16 @@ function onComfyRestarted({ installationId, process: _proc }: { installationId?:
 }
 
 function onStop({ installationId }: { installationId?: string } = {}): void {
+  // Stopping the process no longer destroys the window — the window stays
+  // open so the user can re-launch, view logs, or run install-settings
+  // actions. Window destruction stays bound to explicit close paths
+  // (user closes window, app quits, install deleted via close-comfy-window).
   if (installationId) {
-    const entry = comfyWindows.get(installationId)
-    if (entry && !entry.window.isDestroyed()) entry.window.destroy()
-    comfyWindows.delete(installationId)
+    refreshComfyTabBody(installationId)
   } else {
-    for (const [, entry] of comfyWindows) {
-      if (!entry.window.isDestroyed()) entry.window.destroy()
+    for (const id of comfyWindows.keys()) {
+      refreshComfyTabBody(id)
     }
-    comfyWindows.clear()
   }
 }
 
@@ -675,6 +746,26 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
   const installationId = installation.id
 
   if (mode === 'console' || mode === 'external') {
+    return
+  }
+
+  // Re-launch into an existing window: a previous launch left the comfy
+  // window alive (stop / crash leaves the window open with the lifecycle
+  // body). Reuse the existing views; just point the comfyView at the new URL
+  // and let `refreshComfyTabBody` swap the body back from lifecycle to comfy.
+  const existing = comfyWindows.get(installationId)
+  if (existing && !existing.window.isDestroyed()) {
+    existing.comfyUrl = comfyUrl
+    if (!existing.comfyView.webContents.isDestroyed()) {
+      existing.comfyView.setBackgroundColor(COMFY_BG)
+      void existing.comfyView.webContents.loadURL(comfyUrl).catch(() => {})
+    }
+    refreshComfyTabBody(installationId)
+    if (proc) {
+      proc.on('exit', () => {
+        // Session registry handles state cleanup
+      })
+    }
     return
   }
 
@@ -770,8 +861,11 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
     const bodyRect = { x: 0, y: titleBarTotal, width, height: bodyHeight }
     titleBarView.setBounds({ x: 0, y: 0, width, height: titleBarTotal })
 
-    const panelActive = entry?.activePanel && entry.activePanel !== 'comfy'
-    if (panelActive && entry?.panelView) {
+    // The Comfy pill maps to the live ComfyUI view *or* the lifecycle panel
+    // depending on whether the install is currently running.
+    const mode = entry ? computeBodyMode(entry, installationId) : 'comfy'
+    const showPanel = mode !== 'comfy'
+    if (showPanel && entry?.panelView) {
       // Panel covers the body; ComfyUI is hidden but kept alive so its state is preserved.
       entry.panelView.setBounds(bodyRect)
       entry.panelView.setVisible(true)
@@ -924,11 +1018,15 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
 
   comfyContents.loadURL(comfyUrl)
 
+  /** Read the current target URL from the entry; falls back to the launch
+   *  URL during the brief window before the entry is registered. */
+  const currentComfyUrl = (): string => comfyWindows.get(installationId)?.comfyUrl ?? comfyUrl
+
   const reloadComfy = (): void => {
     if (comfyWindow.isDestroyed()) return
     if (relaunchStates.has(installationId)) return
     comfyContents.stop()
-    comfyContents.loadURL(comfyUrl)
+    comfyContents.loadURL(currentComfyUrl())
   }
 
   comfyContents.on('will-prevent-unload', (e) => {
@@ -961,7 +1059,7 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
       failRetryTimer = null
       if (relaunchStates.has(installationId)) return
       if (!comfyWindow.isDestroyed()) {
-        comfyContents.loadURL(comfyUrl)
+        comfyContents.loadURL(currentComfyUrl())
       }
     }, 2000)
   })
@@ -1010,6 +1108,7 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
     activePanel: 'comfy',
     lastTheme: { bg: COMFY_BG, text: '#dddddd' },
     layoutViews,
+    comfyUrl,
   })
 
   // Now that the entry exists, layout for the first time.
@@ -1040,7 +1139,7 @@ ipcMain.handle('reset-zoom', () => {
  * Launcher Settings before the first load completes still ends up on the
  * latter. This guards against the mid-load race.
  */
-function ensurePanelView(installationId: string, entry: ComfyWindowEntry, initialPanel: ComfyPanelKey): WebContentsView {
+function ensurePanelView(installationId: string, entry: ComfyWindowEntry, initialPanel: BodyMode): WebContentsView {
   if (entry.panelView) return entry.panelView
 
   const panelView = new WebContentsView({
@@ -1059,14 +1158,15 @@ function ensurePanelView(installationId: string, entry: ComfyWindowEntry, initia
   panelView.setBounds({ x: 0, y: TITLEBAR_HEIGHT + 1, width: 0, height: 0 })
   panelView.setVisible(false)
 
-  // Push the *latest* active panel (may differ from initialPanel if the user
-  // clicked between buttons during the first load) and steal focus if the
-  // window is focused.
+  // Push the *latest* body mode (may differ from initialPanel if the user
+  // clicked between buttons during the first load, or the running state
+  // changed) and steal focus if the window is focused.
   panelView.webContents.once('did-finish-load', () => {
     const latest = comfyWindows.get(installationId)
     if (!latest || latest.window.isDestroyed() || panelView.webContents.isDestroyed()) return
-    if (latest.activePanel !== 'comfy') {
-      panelView.webContents.send('panel-switch', { panel: latest.activePanel, installationId })
+    const mode = computeBodyMode(latest, installationId)
+    if (mode !== 'comfy') {
+      panelView.webContents.send('panel-switch', { panel: mode, installationId })
       if (latest.window.isFocused()) panelView.webContents.focus()
     }
   })
@@ -1092,7 +1192,14 @@ function ensurePanelView(installationId: string, entry: ComfyWindowEntry, initia
 /** Move OS focus to whichever body view is now active so keyboard input lands in the right place. */
 function focusActiveBody(entry: ComfyWindowEntry): void {
   if (entry.window.isDestroyed() || !entry.window.isFocused()) return
-  if (entry.activePanel === 'comfy') {
+  // Walk the entry back to its installationId so we can ask computeBodyMode
+  // — the entry doesn't carry the id directly.
+  let installationId: string | null = null
+  for (const [id, e] of comfyWindows) {
+    if (e === entry) { installationId = id; break }
+  }
+  const mode = installationId ? computeBodyMode(entry, installationId) : entry.activePanel
+  if (mode === 'comfy') {
     if (!entry.comfyView.webContents.isDestroyed()) entry.comfyView.webContents.focus()
   } else if (entry.panelView && !entry.panelView.webContents.isDestroyed() && !entry.panelView.webContents.isLoadingMainFrame()) {
     // Panel exists and is loaded — focus immediately. If still loading, the
@@ -1107,17 +1214,21 @@ function setActivePanel(installationId: string, panel: ComfyPanelKey): void {
   if (entry.activePanel === panel) return
 
   entry.activePanel = panel
-  if (panel !== 'comfy') {
-    const panelView = ensurePanelView(installationId, entry, panel)
+  // Resolve to the actual body mode (Comfy pill maps to lifecycle when not running).
+  const mode = computeBodyMode(entry, installationId)
+  if (mode !== 'comfy') {
+    const panelView = ensurePanelView(installationId, entry, mode)
     // If panel view already loaded, push the switch immediately. If still
     // loading, the did-finish-load handler in ensurePanelView will push the
-    // current activePanel — guarding against rapid clicks during first load.
+    // current body mode — guarding against rapid clicks during first load.
     if (!panelView.webContents.isDestroyed() && !panelView.webContents.isLoadingMainFrame()) {
-      panelView.webContents.send('panel-switch', { panel, installationId })
+      panelView.webContents.send('panel-switch', { panel: mode, installationId })
     }
   }
   entry.layoutViews()
   if (!entry.titleBarView.webContents.isDestroyed()) {
+    // Title bar pill stays on the user-visible key — never reflects the
+    // internal `'comfy-lifecycle'` body mode.
     entry.titleBarView.webContents.send('comfy-titlebar:panel-changed', panel)
   }
   focusActiveBody(entry)

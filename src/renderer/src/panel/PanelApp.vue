@@ -5,6 +5,7 @@ import SettingsView from '../views/SettingsView.vue'
 import DetailModal from '../views/DetailModal.vue'
 import ProgressModal from '../views/ProgressModal.vue'
 import ModalDialog from '../components/ModalDialog.vue'
+import ComfyLifecycleView from './ComfyLifecycleView.vue'
 import { useTheme } from '../composables/useTheme'
 import { useSessionStore } from '../stores/sessionStore'
 import { useInstallationStore } from '../stores/installationStore'
@@ -12,14 +13,29 @@ import { useProgressStore } from '../stores/progressStore'
 import { useLauncherPrefs } from '../composables/useLauncherPrefs'
 import type { ActionResult, Installation } from '../types/ipc'
 
-export type PanelKey = 'install-settings' | 'launcher-settings'
+/**
+ * Body modes the panel WebContentsView can render. Mirrors the `BodyMode`
+ * union in `src/main/index.ts` — `'comfy-lifecycle'` is the lifecycle UI
+ * shown for the Comfy tab when no ComfyUI process is running, the others
+ * are the title-bar pills that map directly to a panel.
+ */
+export type PanelKey = 'comfy-lifecycle' | 'install-settings' | 'launcher-settings'
+
+const VALID_PANELS: ReadonlySet<PanelKey> = new Set([
+  'comfy-lifecycle',
+  'install-settings',
+  'launcher-settings',
+])
 
 const { setLocaleMessage, locale } = useI18n()
 useTheme()
 
 const params = new URLSearchParams(window.location.search)
 const installationId = params.get('installationId') || ''
-const initialPanel = (params.get('panel') as PanelKey | null) || 'launcher-settings'
+const initialPanel: PanelKey = ((): PanelKey => {
+  const raw = params.get('panel')
+  return raw && VALID_PANELS.has(raw as PanelKey) ? (raw as PanelKey) : 'launcher-settings'
+})()
 
 const activePanel = ref<PanelKey>(initialPanel)
 const settingsRef = ref<InstanceType<typeof SettingsView> | null>(null)
@@ -101,10 +117,12 @@ onMounted(async () => {
     setLocaleMessage('en', messages as Record<string, unknown>)
   })
 
-  // Main can request a panel switch (e.g. from title-bar buttons).
+  // Main can request a panel switch (e.g. from title-bar buttons, or when
+  // the install lifecycle changes — main flips us to 'comfy-lifecycle' when
+  // the instance stops so the Comfy tab body shows the right transient UI).
   unsubPanel = window.api.onPanelSwitch((data) => {
-    if (data.panel === 'install-settings' || data.panel === 'launcher-settings') {
-      activePanel.value = data.panel
+    if (VALID_PANELS.has(data.panel as PanelKey)) {
+      activePanel.value = data.panel as PanelKey
     }
   })
 
@@ -153,6 +171,14 @@ onUnmounted(() => {
           </p>
         </div>
       </div>
+
+      <div v-else-if="activePanel === 'comfy-lifecycle'" class="panel-comfy-lifecycle">
+        <ComfyLifecycleView
+          :installation="installation"
+          :installation-id="installationId"
+          @show-progress="handleShowProgress"
+        />
+      </div>
     </main>
 
     <!-- Progress overlay for actions kicked off from the install-settings panel. -->
@@ -195,9 +221,11 @@ onUnmounted(() => {
   overflow: hidden;
 }
 
-/* Install-settings hosts an inline DetailModal that owns its own padding,
- * so we negate the panel-content gutter for that branch only. */
-.panel-content:has(.panel-install-settings) {
+/* Install-settings hosts an inline DetailModal and the comfy-lifecycle view
+ * fills its own background — both own their padding, so negate the
+ * panel-content gutter for those branches. */
+.panel-content:has(.panel-install-settings),
+.panel-content:has(.panel-comfy-lifecycle) {
   padding: 0;
 }
 
@@ -209,7 +237,8 @@ onUnmounted(() => {
   display: none;
 }
 
-.panel-install-settings {
+.panel-install-settings,
+.panel-comfy-lifecycle {
   flex: 1;
   min-height: 0;
   display: flex;
