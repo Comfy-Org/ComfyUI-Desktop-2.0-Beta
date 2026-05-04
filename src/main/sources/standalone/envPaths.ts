@@ -56,11 +56,29 @@ export function getMasterPythonPath(installPath: string): string {
 }
 
 const COMFY_ENVIRONMENT_FILE = '.comfy_environment'
-const COMFY_ENVIRONMENT_VALUE = 'local-launcher'
+const COMFY_ENVIRONMENT_VALUE = 'local_launcher'
+const COMFY_ENVIRONMENT_CONTENT = COMFY_ENVIRONMENT_VALUE + '\n'
 
+/**
+ * Write the `.comfy_environment` marker file consumed by ComfyUI core
+ * (see Comfy-Org/ComfyUI#13425) so partner-node API requests carry the
+ * `X-Comfy-Env: local_launcher` header. Idempotent: if the file already
+ * has the expected content, this is a no-op. Skips silently when the
+ * target directory does not exist (older installs not yet migrated).
+ * Errors are swallowed with a warning — this marker is non-critical and
+ * must never break launch.
+ */
 export async function writeComfyEnvironment(comfyUIDir: string): Promise<void> {
+  if (!fs.existsSync(comfyUIDir)) return
+  const filePath = path.join(comfyUIDir, COMFY_ENVIRONMENT_FILE)
   try {
-    await fs.promises.writeFile(path.join(comfyUIDir, COMFY_ENVIRONMENT_FILE), COMFY_ENVIRONMENT_VALUE + '\n', 'utf-8')
+    const existing = await fs.promises.readFile(filePath, 'utf-8')
+    if (existing === COMFY_ENVIRONMENT_CONTENT) return
+  } catch {
+    // File missing or unreadable — fall through to write.
+  }
+  try {
+    await fs.promises.writeFile(filePath, COMFY_ENVIRONMENT_CONTENT, 'utf-8')
   } catch (err) {
     console.warn('Failed to write .comfy_environment:', err)
   }
