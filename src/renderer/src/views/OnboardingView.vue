@@ -1094,10 +1094,12 @@ watch(
   () => [installOp.value?.flatPercent, installOp.value?.flatStatus, parsedStatus.value.phase] as const,
   ([percent, status, phase]) => {
     if (typeof percent === 'number') {
-      // First real percent (>= 0) flips the latch. This can be 0 — that's a
-      // valid first event; the bar becomes determinate at 0% rather than
-      // continuing to shimmer.
-      if (percent >= 0 && !hasSeenRealPercent.value) {
+      // Only latch on ACTUAL progress (percent > 0). A `percent: 0` event is
+      // common during early "Starting download…" / "Waiting for download…"
+      // signals — latching there flips the bar from the sliding-indeterminate
+      // animation to a determinate-at-0% empty fill, which reads as frozen.
+      // Stay indeterminate until real bytes / files are moving.
+      if (percent > 0 && !hasSeenRealPercent.value) {
         hasSeenRealPercent.value = true
       }
       if (percent !== lastFlatPercent.value) {
@@ -2975,21 +2977,28 @@ onUnmounted(() => {
   transition: width 0.4s ease;
 }
 
+/* True indeterminate: a thin fill physically translates left-to-right
+   across the FULL track. Universal "loading" pattern — the previous
+   gradient-shift-on-static-bar read as "stuck partial fill". The fill
+   width override (35%) and absolute positioning lets us animate `left`
+   from -35% to 100% so the strip enters from the left edge, crosses,
+   and exits the right edge. The container has overflow:hidden + position
+   relative so off-track positioning clips cleanly. */
 .installing-progress-fill.indeterminate {
-  background: linear-gradient(90deg,
-    color-mix(in srgb, var(--accent) 20%, transparent),
-    var(--accent),
-    color-mix(in srgb, var(--accent) 20%, transparent)
-  );
-  background-size: 200% 100%;
-  /* 2.4s shimmer paired with 2.0s pulse — same family of motion, no jitter.
-     TODO(design-system): replace with --motion-slow when motion tokens land. */
-  animation: install-shimmer 2.4s linear infinite;
+  width: 35% !important;
+  position: absolute;
+  top: 0;
+  left: 0;
+  background: var(--accent);
+  /* Disable the determinate width transition (which would smooth-animate
+     the width override and conflict with the slide animation). */
+  transition: none;
+  animation: install-slide 1.6s ease-in-out infinite;
 }
 
-@keyframes install-shimmer {
-  from { background-position: 200% 0; }
-  to { background-position: -200% 0; }
+@keyframes install-slide {
+  from { left: -35%; }
+  to   { left: 100%; }
 }
 
 /* Row A above the bar — the most prominent metric on the screen.
