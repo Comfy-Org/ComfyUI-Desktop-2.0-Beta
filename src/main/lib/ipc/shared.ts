@@ -417,10 +417,19 @@ export function _broadcastToRenderer(channel: string, data: unknown): void {
 export function _addSession(installationId: string, { proc, port, url, mode, installationName }: Omit<SessionInfo, 'startedAt'>, bootTimeMs?: number): void {
   _runningSessions.set(installationId, { proc, port, url, mode, installationName, startedAt: Date.now() })
   _broadcastToRenderer('instance-started', { installationId, port, url, mode, installationName, bootTimeMs })
-  installations.update(installationId, { lastLaunchedAt: Date.now() })
+  // Stamp both the global `lastLaunchedAt` and the per-source-category
+  // `lastLaunchedAtByCategory[category]` so recency-aware surfaces (e.g.
+  // the future startup picker) can pick the most-recent install per
+  // category without scanning every record. Category is resolved via the
+  // source map since the persisted record itself doesn't carry it.
+  installations.get(installationId)
+    .then((inst) => {
+      const category = inst ? sourceMap[inst.sourceId]?.category : undefined
+      return installations.markLaunched(installationId, category)
+    })
     .then(() => _broadcastToRenderer('installations-changed', {}))
     .catch((err) => {
-      console.error('Failed to update lastLaunchedAt:', err)
+      console.error('Failed to mark installation launched:', err)
     })
 }
 

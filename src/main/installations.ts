@@ -20,6 +20,12 @@ export interface InstallationRecord {
   status?: string
   seen?: boolean
   comfyVersion?: ComfyVersion
+  /** Epoch ms of the most recent launch, regardless of source category. */
+  lastLaunchedAt?: number
+  /** Epoch ms of the most recent launch keyed by the install's source
+   *  category (e.g. 'local' / 'cloud' / 'desktop'). Always written together
+   *  with `lastLaunchedAt` via `markLaunched()` so the two stay consistent. */
+  lastLaunchedAtByCategory?: Record<string, number>
   [key: string]: unknown
 }
 
@@ -126,6 +132,103 @@ export async function ensureExists(sourceId: string, data: Record<string, unknow
     } as InstallationRecord)
     await save(existing)
   })
+}
+
+/**
+ * Stamp `lastLaunchedAt` (global) and — when `category` is provided —
+ * `lastLaunchedAtByCategory[category]` on the install in a single atomic
+ * write. Goes through the same `installations.json` queue as `update()` and
+ * fires the same 'updated' event on `installationEvents`, so existing
+ * subscribers (title-bar refresh, etc.) keep working.
+ *
+ * `category` should be the install's source category (`'local'` / `'cloud'`
+ * / `'desktop'`), normally resolved by the caller via
+ * `sourceMap[inst.sourceId]?.category` since the persisted record doesn't
+ * carry the category itself. If omitted, only the global timestamp is
+ * touched (e.g. tests, or future call sites where the category isn't
+ * known).
+ */
+export async function markLaunched(
+  installationId: string,
+  category?: string,
+): Promise<InstallationRecord | null> {
+  const updated = await enqueue(async () => {
+    const list = await load()
+    const index = list.findIndex((i) => i.id === installationId)
+    if (index === -1) return null
+    const existing = list[index]!
+    const now = Date.now()
+    const existingByCategory =
+      (existing.lastLaunchedAtByCategory as Record<string, number> | undefined) ?? {}
+    const merged: InstallationRecord = {
+      ...existing,
+      lastLaunchedAt: now,
+      ...(category
+        ? { lastLaunchedAtByCategory: { ...existingByCategory, [category]: now } }
+        : {}),
+    }
+    list[index] = merged
+    await save(list)
+    return merged
+  })
+  if (updated) installationEvents.emit('updated', updated)
+  return updated
+}
+
+/** Most-recently-launched install (by global `lastLaunchedAt`), or null
+ *  when no install has ever been launched. Installs without a timestamp
+ *  are ignored. */
+export async function getRecent(): Promise<InstallationRecord | null> {
+  const list = await load()
+  let best: InstallationRecord | null = null
+  let bestTs = -Infinity
+  for (const inst of list) {
+    const ts = typeof inst.lastLaunchedAt === 'number' ? inst.lastLaunchedAt : -Infinity
+    if (ts > bestTs) {
+      bestTs = ts
+      best = inst
+    }
+  }
+  return best && bestTs > -Infinity ? best : null
+}
+
+/**
+ * Most-recently-launched install whose source category matches `category`.
+ *
+ * Ranking key per install is
+ * `lastLaunchedAtByCategory[category] ?? lastLaunchedAt`, so installs that
+ * existed before the per-category field was introduced still participate
+ * via their global timestamp until they're launched again (at which point
+ * `markLaunched()` populates the category-specific entry).
+ *
+ * Because `installations.json` doesn't persist `sourceCategory` on the
+ * record, the caller passes `resolveCategory` — typically
+ * `(inst) => sourceMap[inst.sourceId]?.category` — so this module stays
+ * free of any dependency on the source-plugin layer.
+ */
+export async function getRecentByCategory(
+  category: string,
+  resolveCategory: (inst: InstallationRecord) => string | undefined,
+): Promise<InstallationRecord | null> {
+  const list = await load()
+  let best: InstallationRecord | null = null
+  let bestTs = -Infinity
+  for (const inst of list) {
+    if (resolveCategory(inst) !== category) continue
+    const byCat = inst.lastLaunchedAtByCategory as Record<string, number> | undefined
+    const perCategoryTs = byCat?.[category]
+    const ts =
+      typeof perCategoryTs === 'number'
+        ? perCategoryTs
+        : typeof inst.lastLaunchedAt === 'number'
+          ? inst.lastLaunchedAt
+          : -Infinity
+    if (ts > bestTs) {
+      bestTs = ts
+      best = inst
+    }
+  }
+  return best && bestTs > -Infinity ? best : null
 }
 
 export async function seedDefaults(defaults: Record<string, unknown>[]): Promise<void> {

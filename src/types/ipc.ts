@@ -24,6 +24,11 @@ export interface Installation {
   installPath?: string
   status?: string
   lastLaunchedAt?: number
+  /** Per-source-category last-launched timestamps (epoch ms). Written
+   *  alongside `lastLaunchedAt` by `installations.markLaunched()` on the
+   *  main side; consumed by recency-aware UI surfaces such as the
+   *  startup picker. */
+  lastLaunchedAtByCategory?: Record<string, number>
   [key: string]: unknown // allow extra fields from sources
 }
 
