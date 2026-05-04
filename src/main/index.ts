@@ -22,7 +22,7 @@ import {
   setMainWindow,
   startAssetDownload,
 } from './lib/comfyDownloadManager'
-import { get as getInstallation } from './installations'
+import { get as getInstallation, installationEvents } from './installations'
 import { getModelDownloadContentScript } from './lib/comfyContentScript'
 import { shouldOpenInPopup } from './lib/allowedPopups'
 import { showModelFolderRelaunchPage } from './lib/relaunchPage'
@@ -724,8 +724,21 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
         )
     void tbLoad.catch(() => {})
   }
-  const sourceLabel = sourceMap[installation.sourceId]?.label
-  const titleBarText = sourceLabel ? `${installation.name} — ${sourceLabel}` : installation.name
+  /** Format the install identity for the comfy tab in the title bar. */
+  function computeTitleBarText(inst: InstallationRecord): string {
+    const label = sourceMap[inst.sourceId]?.label
+    return label ? `${inst.name} — ${label}` : inst.name
+  }
+  let titleBarText = computeTitleBarText(installation)
+  /** Mirrored install fields used by the OS-level window title (which is
+   *  rebuilt whenever the page title or the install name changes). */
+  let currentInstallName = installation.name
+  let currentPageTitle = ''
+  function refreshOsWindowTitle(): void {
+    if (comfyWindow.isDestroyed()) return
+    const suffix = currentPageTitle ? ` — ${currentPageTitle}` : ''
+    comfyWindow.setTitle(`${currentInstallName}${suffix} — Desktop 2.0 v${APP_VERSION}`)
+  }
   comfyWindow.contentView.addChildView(titleBarView)
   _registerExtraBroadcastTarget(titleBarView.webContents)
 
@@ -818,8 +831,26 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
     }
   }
   ipcMain.on('comfy-window:title-bar-ready', onTitleBarReady)
+
+  // Reflect rename / source change in both the comfy tab and the OS-level
+  // window title as the install record mutates.
+  const onInstallationUpdated = (updated: InstallationRecord): void => {
+    if (updated.id !== installationId) return
+    const nextTabText = computeTitleBarText(updated)
+    if (nextTabText !== titleBarText) {
+      titleBarText = nextTabText
+      notifyTitleBarTitle(titleBarText)
+    }
+    if (updated.name !== currentInstallName) {
+      currentInstallName = updated.name
+      refreshOsWindowTitle()
+    }
+  }
+  installationEvents.on('updated', onInstallationUpdated)
+
   comfyWindow.on('closed', () => {
     ipcMain.off('comfy-window:title-bar-ready', onTitleBarReady)
+    installationEvents.off('updated', onInstallationUpdated)
   })
 
   comfyWindow.on('resize', () => saveWindowBounds(installationId, comfyWindow))
@@ -831,7 +862,8 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
   })
   comfyContents.on('page-title-updated', (e, title) => {
     e.preventDefault()
-    comfyWindow.setTitle(`${installation.name} — ${title} — Desktop 2.0 v${APP_VERSION}`)
+    currentPageTitle = title
+    refreshOsWindowTitle()
   })
   comfyContents.setWindowOpenHandler(({ url }) => {
     if (shouldOpenInPopup(url)) {

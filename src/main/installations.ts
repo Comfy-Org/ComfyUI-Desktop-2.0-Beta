@@ -1,7 +1,15 @@
 import path from 'path'
+import { EventEmitter } from 'events'
 import { dataDir } from './lib/paths'
 import { readFileSafeAsync, writeFileSafeAsync } from './lib/safe-file'
 import type { ComfyVersion } from './lib/version'
+
+/** Internal main-process event bus for installation lifecycle changes.
+ *  Emits 'updated' with the updated record after a successful update().
+ *  Used by main/index.ts to refresh ComfyUI window title bars when their
+ *  install is renamed (the title-bar WebContents has its own preload and
+ *  isn't subscribed to the installations-changed renderer broadcast). */
+export const installationEvents = new EventEmitter()
 
 export interface InstallationRecord {
   id: string
@@ -75,7 +83,7 @@ export async function remove(id: string): Promise<void> {
 }
 
 export async function update(id: string, data: Record<string, unknown>): Promise<InstallationRecord | null> {
-  return enqueue(async () => {
+  const updated = await enqueue(async () => {
     const installations = await load()
     const index = installations.findIndex((i) => i.id === id)
     if (index === -1) return null
@@ -84,6 +92,8 @@ export async function update(id: string, data: Record<string, unknown>): Promise
     await save(installations)
     return installations[index]!
   })
+  if (updated) installationEvents.emit('updated', updated)
+  return updated
 }
 
 export async function get(id: string): Promise<InstallationRecord | null> {
