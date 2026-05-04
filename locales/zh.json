@@ -34,7 +34,14 @@
     "openCloud": "打开",
     "emptyTitle": "尚无安装",
     "emptyDesc": "创建你的第一个 ComfyUI 安装即可开始。",
-    "createInstall": "创建安装"
+    "createInstall": "创建安装",
+    "newInstall": "新建安装",
+    "newInstallDesc": "搭建一个全新的 ComfyUI 环境。",
+    "filterAll": "全部",
+    "filterLocal": "本地",
+    "filterDesktop": "桌面",
+    "filterCloud": "云端",
+    "filterRemote": "远程"
   },
 
   "running": {

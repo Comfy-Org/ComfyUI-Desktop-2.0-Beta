@@ -4,40 +4,44 @@ import { useInstallationStore } from '../stores/installationStore'
 import { useSessionStore } from '../stores/sessionStore'
 import { useLauncherPrefs } from '../composables/useLauncherPrefs'
 import { useInstallContextMenu } from '../composables/useInstallContextMenu'
-import { Cloud, Clock, Pin, Box, Play } from 'lucide-vue-next'
+import { Cloud, Plus, Box, Monitor, Globe, Pin } from 'lucide-vue-next'
 import ContextMenu from '../components/ContextMenu.vue'
 import type { Installation } from '../types/ipc'
 
 /**
- * Chooser view (Phase 3 step 2 of the unified-window work).
+ * Chooser view (Phase 3 step 2 — recents grid).
  *
- * Replaces the standalone Dashboard + Installs surfaces with a single
- * "what install do I want to open right now" picker. Renderer-only —
- * the install-less host window in step 2c will host this as the Comfy
- * tab body when no install backs the entry.
+ * Replaces the standalone Dashboard + Installs + Running surfaces with a
+ * single golden-ratio "tile" grid the user picks from. Renderer-only —
+ * the install-less host window (Phase 3 step 2c) hosts this as the
+ * Comfy tab body when no install backs the entry.
  *
- * Layout per docs/unified-window-phase3-notes.md section 2:
- *   - Pinned Cloud promo row above the table (single row, not inside it)
- *   - Recent section sourced from lastLaunchedAt (descending)
- *   - All section listing every install
- *   - One scrollable view, both visible at once (NOT tabs)
- *   - No primary affordance (the primary system was retired in step 2a)
+ * Grid layout per the design discussion:
+ *   - Top-left card: "New Install" (always present, fixed-position).
+ *   - Next card: "Cloud" — opens an existing cloud install if there is
+ *     one, otherwise routes to the new-install flow as a Try-Cloud CTA.
+ *   - Following cards: every other install (local / desktop / remote)
+ *     ordered by `lastLaunchedAt` desc, never-launched at the end.
+ *   - Filter chips above the grid let the user narrow by source category.
+ *   - Each card carries a type icon (cloud / local / desktop / remote)
+ *     so the source kind is visible at a glance.
+ *
+ * Cards are golden-ratio rectangles (1.618 : 1) and we explicitly do
+ * NOT support reordering — the lastLaunchedAt order is the order.
  */
 
 const props = withDefaults(defineProps<{
   visible?: boolean
-  /** Maximum number of recent installs to surface. */
-  recentLimit?: number
 }>(), {
   visible: true,
-  recentLimit: 5,
 })
 
 const emit = defineEmits<{
   /** User picked an install — caller decides whether to swap-in-place,
    *  open a fresh window, or hand off to a launch flow. */
   pick: [installation: Installation]
-  /** User triggered the new-install flow from the empty state. */
+  /** User triggered the new-install flow (top-left card or empty Cloud
+   *  card). */
   'show-new-install': []
   /** User opened the install detail (View Details from the context menu). */
   'show-detail': [installation: Installation]
@@ -47,44 +51,68 @@ const installationStore = useInstallationStore()
 const sessionStore = useSessionStore()
 const prefs = useLauncherPrefs()
 
-// installationStore auto-fetches on installations-changed, so we just
-// need to kick the initial load.
 onMounted(() => {
   if (installationStore.installations.length === 0) {
-    installationStore.fetchInstallations()
+    void installationStore.fetchInstallations()
   }
 })
 
-// --- Cloud promo row (pinned above the table, not inside it) ---
+// --- Filter chips ---
+type FilterKey = 'all' | 'local' | 'desktop' | 'cloud' | 'remote'
+const activeFilter = ref<FilterKey>('all')
+
+interface FilterChip { key: FilterKey; labelKey: string }
+const filterChips: FilterChip[] = [
+  { key: 'all', labelKey: 'chooser.filterAll' },
+  { key: 'local', labelKey: 'chooser.filterLocal' },
+  { key: 'desktop', labelKey: 'chooser.filterDesktop' },
+  { key: 'cloud', labelKey: 'chooser.filterCloud' },
+  { key: 'remote', labelKey: 'chooser.filterRemote' },
+]
+
+// --- Cloud card sources its install (if any) from the store ---
 const cloudInstall = computed<Installation | null>(() =>
   installationStore.installations.find((i) => i.sourceCategory === 'cloud') ?? null
 )
 
-// --- Non-cloud installs feed both Recent and All sections ---
+/** Non-cloud installs — feed the "rest of the grid" after New Install + Cloud. */
 const nonCloudInstalls = computed<Installation[]>(() =>
   installationStore.installations.filter((i) => i.sourceCategory !== 'cloud')
 )
 
-// --- Recent: top N non-cloud installs by lastLaunchedAt (descending) ---
-const recentInstalls = computed<Installation[]>(() => {
-  const withTimestamp = nonCloudInstalls.value.filter(
-    (i) => typeof i.lastLaunchedAt === 'number'
-  )
-  withTimestamp.sort((a, b) => (b.lastLaunchedAt as number) - (a.lastLaunchedAt as number))
-  return withTimestamp.slice(0, props.recentLimit)
+/** Sort key: lastLaunchedAt desc, never-launched (no timestamp) at the end. */
+function sortByRecency(a: Installation, b: Installation): number {
+  const ta = typeof a.lastLaunchedAt === 'number' ? a.lastLaunchedAt : -Infinity
+  const tb = typeof b.lastLaunchedAt === 'number' ? b.lastLaunchedAt : -Infinity
+  return tb - ta
+}
+
+/** Apply the active filter to the non-cloud list. */
+const visibleInstalls = computed<Installation[]>(() => {
+  const sorted = [...nonCloudInstalls.value].sort(sortByRecency)
+  switch (activeFilter.value) {
+    case 'all': return sorted
+    case 'local': return sorted.filter((i) => i.sourceCategory === 'local')
+    case 'desktop': return sorted.filter((i) => i.sourceCategory === 'desktop')
+    case 'remote': return sorted.filter((i) => i.sourceCategory === 'remote')
+    case 'cloud': return [] // cloud installs only appear in the Cloud tile
+    default: return sorted
+  }
 })
 
-// --- All: full non-cloud list (recent stays visible separately above) ---
-const allInstalls = computed<Installation[]>(() => nonCloudInstalls.value)
-
-const isEmpty = computed(() =>
-  !cloudInstall.value && nonCloudInstalls.value.length === 0
+/** Cloud tile is hidden by the Cloud filter only when there's no cloud
+ *  install to show (the Try-Cloud CTA shouldn't survive a filter). */
+const showCloudCard = computed(() =>
+  activeFilter.value === 'all' || activeFilter.value === 'cloud'
 )
+
+/** New Install card is always visible across filters — it's the entry-
+ *  point for adding any source category. */
+const showNewInstallCard = true
 
 // --- Relative-time formatting (shared with DashboardView's pattern) ---
 const now = ref(Date.now())
 let nowTimer: ReturnType<typeof setInterval> | null = null
-
 onMounted(() => {
   nowTimer = setInterval(() => { now.value = Date.now() }, 60_000)
 })
@@ -103,146 +131,145 @@ function timeAgo(timestamp: number): string {
   return `${days}d ago`
 }
 
-// --- Context menu: pin/unpin/dismiss-error/view-details ---
+// --- Type icon mapping — visible on each card so source kind is obvious ---
+function iconFor(category: string | undefined): typeof Cloud {
+  switch (category) {
+    case 'cloud': return Cloud
+    case 'desktop': return Monitor
+    case 'remote': return Globe
+    case 'local':
+    default: return Box
+  }
+}
+
+// --- Context menu (pin/unpin/dismiss-error/view-details) ---
 const { ctxMenu, ctxMenuItems, openCardMenu, handleCtxMenuSelect, closeMenu } =
   useInstallContextMenu((inst) => emit('show-detail', inst))
 
-// --- Row classes mirror the DashboardCard idle/running/stopping states ---
-function rowClasses(inst: Installation): Record<string, boolean> {
+// --- Card status classes (running, stopping, in-progress) ---
+function statusClasses(inst: Installation): Record<string, boolean> {
   return {
-    'chooser-row-running':
+    'chooser-tile-running':
       sessionStore.isRunning(inst.id) && !sessionStore.isStopping(inst.id),
-    'chooser-row-stopping': sessionStore.isStopping(inst.id),
-    'chooser-row-in-progress':
+    'chooser-tile-stopping': sessionStore.isStopping(inst.id),
+    'chooser-tile-in-progress':
       sessionStore.activeSessions.has(inst.id) && !sessionStore.isRunning(inst.id),
   }
 }
 
-function pick(inst: Installation): void {
+function pickInstall(inst: Installation): void {
   emit('pick', inst)
+}
+
+function handleCloudClick(): void {
+  // If there's an existing cloud install, pick it. Otherwise promote the
+  // new-install flow as a Try-Cloud CTA — the renderer-side handler will
+  // route to the correct screen once the new-install flow lives in the
+  // host window (step 5+ of the unified-window plan).
+  if (cloudInstall.value) {
+    pickInstall(cloudInstall.value)
+  } else {
+    emit('show-new-install')
+  }
+}
+
+function handleNewInstallClick(): void {
+  emit('show-new-install')
 }
 </script>
 
 <template>
-  <div v-show="visible" class="chooser-view">
-    <div class="chooser-scroll">
-      <!-- Cloud promo row (single pinned row above the table) -->
-      <div
-        v-if="cloudInstall"
-        class="chooser-cloud-row"
-        @click="pick(cloudInstall)"
-        @contextmenu.prevent="openCardMenu($event, cloudInstall!)"
+  <div v-show="props.visible" class="chooser-view">
+    <!-- Filter chips: narrow the grid by source category. The New Install
+         and Cloud tiles stay visible regardless (they're entry-points,
+         not data rows), per the design — except the Cloud tile is hidden
+         when filtering to local/desktop/remote where it would be noise. -->
+    <div class="chooser-filters">
+      <button
+        v-for="chip in filterChips"
+        :key="chip.key"
+        type="button"
+        class="chooser-filter-chip"
+        :class="{ active: activeFilter === chip.key }"
+        @click="activeFilter = chip.key"
       >
-        <div class="chooser-cloud-icon"><Cloud :size="22" /></div>
-        <div class="chooser-cloud-text">
-          <div class="chooser-cloud-title">{{ cloudInstall.name }}</div>
-          <div class="chooser-cloud-desc">{{ $t('dashboard.cloudSection') }}</div>
-        </div>
-        <button class="primary chooser-cloud-cta" @click.stop="pick(cloudInstall!)">
-          {{ $t('chooser.openCloud') }}
-        </button>
-      </div>
+        {{ $t(chip.labelKey) }}
+      </button>
+    </div>
 
-      <!-- Loading state -->
-      <div v-if="installationStore.loading && allInstalls.length === 0" class="modal-loading with-spinner">
-        {{ $t('common.loading') }}
-      </div>
+    <!-- Loading state — chooser-grid scrolls; the loading message replaces it. -->
+    <div
+      v-if="installationStore.loading && nonCloudInstalls.length === 0"
+      class="chooser-loading"
+    >
+      {{ $t('common.loading') }}
+    </div>
 
-      <!-- Empty state — zero installs and no cloud either -->
-      <div v-else-if="isEmpty" class="chooser-empty">
-        <div class="chooser-empty-icon"><Box :size="48" /></div>
-        <h1 class="chooser-empty-title">{{ $t('chooser.emptyTitle') }}</h1>
-        <p class="chooser-empty-desc">{{ $t('chooser.emptyDesc') }}</p>
-        <button class="primary" @click="emit('show-new-install')">
-          {{ $t('chooser.createInstall') }}
-        </button>
-      </div>
+    <!-- Golden-ratio grid: New Install + Cloud + every install. -->
+    <div v-else class="chooser-grid">
+      <!-- New Install card (top-left, fixed) -->
+      <button
+        v-if="showNewInstallCard"
+        type="button"
+        class="chooser-tile chooser-tile-new"
+        @click="handleNewInstallClick"
+      >
+        <div class="chooser-tile-icon"><Plus :size="32" /></div>
+        <div class="chooser-tile-name">{{ $t('chooser.newInstall') }}</div>
+        <div class="chooser-tile-meta">{{ $t('chooser.newInstallDesc') }}</div>
+      </button>
 
-      <!-- Recent section -->
-      <div v-if="recentInstalls.length > 0" class="chooser-section">
-        <div class="chooser-section-label">
-          <Clock :size="14" />
-          {{ $t('chooser.recent') }}
+      <!-- Cloud card (next, fixed when an existing install or as Try-Cloud CTA) -->
+      <button
+        v-if="showCloudCard"
+        type="button"
+        class="chooser-tile chooser-tile-cloud"
+        @click="handleCloudClick"
+        @contextmenu.prevent="cloudInstall ? openCardMenu($event, cloudInstall) : null"
+      >
+        <div class="chooser-tile-icon"><Cloud :size="32" /></div>
+        <div class="chooser-tile-name">
+          {{ cloudInstall ? cloudInstall.name : $t('cloud.label') }}
         </div>
-        <div class="chooser-table">
-          <div
-            v-for="inst in recentInstalls"
-            :key="`recent-${inst.id}`"
-            class="chooser-row"
-            :class="rowClasses(inst)"
-            @click="pick(inst)"
-            @contextmenu.prevent="openCardMenu($event, inst)"
-          >
-            <div class="chooser-row-name">
-              {{ inst.name }}
-              <Pin
-                v-if="prefs.isPinned(inst.id)"
-                :size="13"
-                class="chooser-row-pin"
-                :title="$t('dashboard.pinned')"
-              />
-            </div>
-            <div class="chooser-row-meta">
-              <span>{{ inst.sourceLabel }}</span>
-              <template v-if="inst.version">
-                <span> · </span><span>{{ inst.version }}</span>
-              </template>
-              <template v-if="typeof inst.lastLaunchedAt === 'number'">
-                <span> · </span>
-                <span>{{ $t('dashboard.launchedAgo', { time: timeAgo(inst.lastLaunchedAt as number) }) }}</span>
-              </template>
-            </div>
-            <div class="chooser-row-actions">
-              <Play :size="16" />
-            </div>
-          </div>
+        <div class="chooser-tile-meta">
+          {{ cloudInstall ? cloudInstall.sourceLabel : $t('cloud.desc') }}
         </div>
-      </div>
+      </button>
 
-      <!-- All section -->
-      <div v-if="allInstalls.length > 0" class="chooser-section">
-        <div class="chooser-section-label">
-          <Box :size="14" />
-          {{ $t('chooser.all') }}
+      <!-- Install tiles (recents-ordered) -->
+      <button
+        v-for="inst in visibleInstalls"
+        :key="inst.id"
+        type="button"
+        class="chooser-tile"
+        :class="statusClasses(inst)"
+        @click="pickInstall(inst)"
+        @contextmenu.prevent="openCardMenu($event, inst)"
+      >
+        <div class="chooser-tile-icon">
+          <component :is="iconFor(inst.sourceCategory)" :size="28" />
         </div>
-        <div class="chooser-table">
-          <div
-            v-for="inst in allInstalls"
-            :key="`all-${inst.id}`"
-            class="chooser-row"
-            :class="rowClasses(inst)"
-            @click="pick(inst)"
-            @contextmenu.prevent="openCardMenu($event, inst)"
-          >
-            <div class="chooser-row-name">
-              {{ inst.name }}
-              <Pin
-                v-if="prefs.isPinned(inst.id)"
-                :size="13"
-                class="chooser-row-pin"
-                :title="$t('dashboard.pinned')"
-              />
-            </div>
-            <div class="chooser-row-meta">
-              <span>{{ inst.sourceLabel }}</span>
-              <template v-if="inst.version">
-                <span> · </span><span>{{ inst.version }}</span>
-              </template>
-              <template v-if="typeof inst.lastLaunchedAt === 'number'">
-                <span> · </span>
-                <span>{{ $t('dashboard.launchedAgo', { time: timeAgo(inst.lastLaunchedAt as number) }) }}</span>
-              </template>
-              <template v-else>
-                <span> · </span>
-                <span>{{ $t('dashboard.neverLaunched') }}</span>
-              </template>
-            </div>
-            <div class="chooser-row-actions">
-              <Play :size="16" />
-            </div>
-          </div>
+        <div class="chooser-tile-name">
+          {{ inst.name }}
+          <Pin
+            v-if="prefs.isPinned(inst.id)"
+            :size="13"
+            class="chooser-tile-pin"
+            :title="$t('dashboard.pinned')"
+          />
         </div>
-      </div>
+        <div class="chooser-tile-meta">
+          <span>{{ inst.sourceLabel }}</span>
+          <template v-if="typeof inst.lastLaunchedAt === 'number'">
+            <span class="chooser-tile-meta-sep"> · </span>
+            <span>{{ $t('dashboard.launchedAgo', { time: timeAgo(inst.lastLaunchedAt as number) }) }}</span>
+          </template>
+          <template v-else>
+            <span class="chooser-tile-meta-sep"> · </span>
+            <span>{{ $t('dashboard.neverLaunched') }}</span>
+          </template>
+        </div>
+      </button>
     </div>
 
     <ContextMenu
@@ -264,144 +291,142 @@ function pick(inst: Installation): void {
   overflow: hidden;
 }
 
-.chooser-scroll {
-  flex: 1;
-  overflow-y: auto;
-  padding: 16px 24px 32px;
+.chooser-filters {
   display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
-
-.chooser-cloud-row {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 14px 18px;
-  border-radius: 10px;
-  background: var(--bg-elev-1, rgba(127, 127, 127, 0.08));
-  border: 1px solid var(--border-subtle, rgba(127, 127, 127, 0.18));
-  cursor: pointer;
-  transition: background 120ms ease;
-}
-.chooser-cloud-row:hover {
-  background: var(--bg-elev-2, rgba(127, 127, 127, 0.14));
-}
-.chooser-cloud-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 40px;
-  height: 40px;
-  border-radius: 8px;
-  background: var(--bg-elev-2, rgba(127, 127, 127, 0.14));
-}
-.chooser-cloud-text {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.chooser-cloud-title {
-  font-weight: 600;
-}
-.chooser-cloud-desc {
-  font-size: 12px;
-  opacity: 0.7;
-}
-.chooser-cloud-cta {
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 16px 24px 8px;
   flex-shrink: 0;
 }
 
-.chooser-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-  padding: 48px 24px;
-  text-align: center;
-}
-.chooser-empty-icon {
-  opacity: 0.5;
-}
-.chooser-empty-title {
-  margin: 0;
-  font-size: 22px;
-  font-weight: 600;
-}
-.chooser-empty-desc {
-  margin: 0;
-  opacity: 0.75;
-  max-width: 420px;
-}
-
-.chooser-section {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.chooser-section-label {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  opacity: 0.65;
-  padding: 0 4px;
-}
-
-.chooser-table {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.chooser-row {
-  display: grid;
-  grid-template-columns: 1fr auto auto;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 14px;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: background 100ms ease;
+.chooser-filter-chip {
   background: transparent;
+  color: inherit;
+  border: 1px solid var(--border, rgba(127, 127, 127, 0.25));
+  padding: 4px 12px;
+  font: inherit;
+  font-size: 12px;
+  border-radius: 999px;
+  cursor: pointer;
+  opacity: 0.8;
+  transition: background-color 100ms ease, opacity 100ms ease, border-color 100ms ease;
 }
-.chooser-row:hover {
-  background: var(--bg-elev-1, rgba(127, 127, 127, 0.08));
+.chooser-filter-chip:hover {
+  opacity: 1;
 }
-.chooser-row-running {
-  box-shadow: inset 0 0 0 1px var(--accent-success, #2e7d32);
-}
-.chooser-row-stopping,
-.chooser-row-in-progress {
-  opacity: 0.7;
+.chooser-filter-chip.active {
+  background: var(--bg-elev-2, rgba(127, 127, 127, 0.16));
+  border-color: var(--border-strong, rgba(127, 127, 127, 0.4));
+  opacity: 1;
 }
 
-.chooser-row-name {
+.chooser-loading {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.7;
+  padding: 48px 24px;
+}
+
+.chooser-grid {
+  flex: 1;
+  overflow-y: auto;
+  /* Golden-ratio cards: width = ~280px, height = width / 1.618. The grid
+     auto-fills as many columns as fit; cards keep their aspect via
+     aspect-ratio. */
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 16px;
+  padding: 8px 24px 24px;
+  align-content: start;
+}
+
+.chooser-tile {
+  /* Golden ratio (1.618 : 1) — the design specifies tiles of this shape. */
+  aspect-ratio: 1.618 / 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 16px 18px;
+  border-radius: 12px;
+  background: var(--bg-elev-1, rgba(127, 127, 127, 0.08));
+  border: 1px solid var(--border-subtle, rgba(127, 127, 127, 0.18));
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  transition: background-color 120ms ease, border-color 120ms ease, transform 120ms ease;
+}
+.chooser-tile:hover {
+  background: var(--bg-elev-2, rgba(127, 127, 127, 0.14));
+  border-color: var(--border-strong, rgba(127, 127, 127, 0.4));
+  transform: translateY(-1px);
+}
+.chooser-tile:focus-visible {
+  outline: 2px solid var(--accent, #4a90e2);
+  outline-offset: 2px;
+}
+
+.chooser-tile-icon {
+  position: absolute;
+  /* Float the icon to the top-left of the tile. */
+  top: 14px;
+  left: 16px;
+  opacity: 0.85;
+}
+.chooser-tile {
+  position: relative;
+}
+
+.chooser-tile-name {
+  font-size: 16px;
+  font-weight: 600;
   display: flex;
   align-items: center;
   gap: 6px;
-  font-weight: 500;
+  /* Reserve space for the type icon at top-left so name doesn't collide. */
+  margin-top: auto;
 }
-.chooser-row-pin {
+.chooser-tile-pin {
   opacity: 0.6;
 }
-.chooser-row-meta {
+
+.chooser-tile-meta {
   font-size: 12px;
   opacity: 0.7;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  max-width: 100%;
 }
-.chooser-row-actions {
-  display: flex;
-  align-items: center;
-  opacity: 0.5;
+.chooser-tile-meta-sep {
+  opacity: 0.6;
 }
-.chooser-row:hover .chooser-row-actions {
-  opacity: 1;
+
+/* Status overlays — match the visual language used by DashboardCard so
+ * users recognise the running / stopping / in-progress states. */
+.chooser-tile-running {
+  box-shadow: inset 0 0 0 2px var(--accent-success, #2e7d32);
+}
+.chooser-tile-stopping,
+.chooser-tile-in-progress {
+  opacity: 0.7;
+}
+
+/* The two fixed-position tiles (New Install + Cloud) get a slightly
+ * different treatment so they read as entry-points, not data rows. */
+.chooser-tile-new {
+  background: var(--accent-soft, rgba(74, 144, 226, 0.10));
+  border-style: dashed;
+  border-color: var(--border-strong, rgba(127, 127, 127, 0.4));
+}
+.chooser-tile-new:hover {
+  background: var(--accent-soft-hover, rgba(74, 144, 226, 0.18));
+}
+.chooser-tile-cloud {
+  background: var(--bg-elev-1, rgba(127, 127, 127, 0.08));
 }
 </style>

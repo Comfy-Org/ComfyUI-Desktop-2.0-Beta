@@ -38,7 +38,14 @@
     "openCloud": "Open",
     "emptyTitle": "No installations yet",
     "emptyDesc": "Create your first ComfyUI installation to get started.",
-    "createInstall": "Create installation"
+    "createInstall": "Create installation",
+    "newInstall": "New Install",
+    "newInstallDesc": "Set up a fresh ComfyUI environment.",
+    "filterAll": "All",
+    "filterLocal": "Local",
+    "filterDesktop": "Desktop",
+    "filterCloud": "Cloud",
+    "filterRemote": "Remote"
   },
 
   "titleBar": {

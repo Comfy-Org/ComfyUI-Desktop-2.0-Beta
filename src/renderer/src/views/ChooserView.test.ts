@@ -14,6 +14,7 @@ vi.mock('../components/ContextMenu.vue', () => ({
 const messages = {
   en: {
     common: { loading: 'Loading…' },
+    cloud: { label: 'Cloud', desc: 'Try Cloud' },
     dashboard: {
       cloudSection: 'ComfyUI Cloud',
       pinned: 'Pinned',
@@ -25,12 +26,13 @@ const messages = {
     list: { view: 'View' },
     running: { dismiss: 'Dismiss' },
     chooser: {
-      recent: 'Recent',
-      all: 'All',
-      openCloud: 'Open',
-      emptyTitle: 'No installations yet',
-      emptyDesc: 'Create your first ComfyUI installation to get started.',
-      createInstall: 'Create installation',
+      newInstall: 'New Install',
+      newInstallDesc: 'Set up a fresh ComfyUI environment.',
+      filterAll: 'All',
+      filterLocal: 'Local',
+      filterDesktop: 'Desktop',
+      filterCloud: 'Cloud',
+      filterRemote: 'Remote',
     },
   },
 }
@@ -80,37 +82,48 @@ describe('ChooserView', () => {
     setActivePinia(createPinia())
   })
 
-  it('renders the empty state when there are no installations', async () => {
+  it('always renders the New Install tile and a Cloud tile', async () => {
     installMockApi([])
     const wrapper = mountChooser()
     await flushPromises()
-    expect(wrapper.text()).toContain('No installations yet')
-    const cta = wrapper.find('button.primary')
-    expect(cta.exists()).toBe(true)
-    expect(cta.text()).toContain('Create installation')
+    expect(wrapper.text()).toContain('New Install')
+    // Cloud tile shows the Try-Cloud CTA when no cloud install exists.
+    expect(wrapper.text()).toContain('Cloud')
+    expect(wrapper.text()).toContain('Try Cloud')
   })
 
-  it('emits show-new-install when the empty-state CTA is clicked', async () => {
+  it('emits show-new-install when the New Install tile is clicked', async () => {
     installMockApi([])
     const wrapper = mountChooser()
     await flushPromises()
-    await wrapper.find('button.primary').trigger('click')
+    await wrapper.find('.chooser-tile-new').trigger('click')
     expect(wrapper.emitted('show-new-install')).toBeDefined()
     expect(wrapper.emitted('show-new-install')!.length).toBe(1)
   })
 
-  it('renders the cloud promo row above the table when a cloud install exists', async () => {
+  it('emits show-new-install when the Cloud tile is clicked and no cloud install exists', async () => {
     installMockApi([
-      makeInstall({ id: 'cloud', name: 'Comfy Cloud', sourceCategory: 'cloud', sourceLabel: 'Cloud' }),
       makeInstall({ id: 'a', name: 'Local A' }),
     ])
     const wrapper = mountChooser()
     await flushPromises()
-    expect(wrapper.text()).toContain('Comfy Cloud')
-    expect(wrapper.text()).toContain('ComfyUI Cloud')
+    await wrapper.find('.chooser-tile-cloud').trigger('click')
+    expect(wrapper.emitted('show-new-install')).toBeDefined()
   })
 
-  it('places the most-recently-launched non-cloud install at the top of the Recent section', async () => {
+  it('emits pick with the cloud install when the Cloud tile is clicked and one exists', async () => {
+    installMockApi([
+      makeInstall({ id: 'cloud', name: 'Comfy Cloud', sourceCategory: 'cloud', sourceLabel: 'Cloud' }),
+    ])
+    const wrapper = mountChooser()
+    await flushPromises()
+    await wrapper.find('.chooser-tile-cloud').trigger('click')
+    const events = wrapper.emitted('pick')
+    expect(events).toBeDefined()
+    expect((events![0]![0] as Installation).id).toBe('cloud')
+  })
+
+  it('orders install tiles by lastLaunchedAt desc with never-launched at the end', async () => {
     installMockApi([
       makeInstall({ id: 'old', name: 'Old', lastLaunchedAt: 100 }),
       makeInstall({ id: 'new', name: 'New', lastLaunchedAt: 500 }),
@@ -118,42 +131,55 @@ describe('ChooserView', () => {
     ])
     const wrapper = mountChooser()
     await flushPromises()
-
-    const rows = wrapper.findAll('.chooser-row')
-    // First three rows: Recent section (only the two with timestamps),
-    // followed by the All section (all three).
-    expect(rows.length).toBeGreaterThanOrEqual(2)
-    expect(rows[0]!.text()).toContain('New')
-    expect(rows[1]!.text()).toContain('Old')
+    // The first two tiles are the fixed New Install + Cloud entries; the
+    // remaining tiles are the install rows in recency order.
+    const tiles = wrapper.findAll('.chooser-tile')
+    const installTiles = tiles.filter(
+      (t) => !t.classes().includes('chooser-tile-new') && !t.classes().includes('chooser-tile-cloud')
+    )
+    expect(installTiles.length).toBe(3)
+    expect(installTiles[0]!.text()).toContain('New')
+    expect(installTiles[1]!.text()).toContain('Old')
+    expect(installTiles[2]!.text()).toContain('Never')
   })
 
-  it('emits pick with the installation when a row is clicked', async () => {
+  it('emits pick with the installation when an install tile is clicked', async () => {
     installMockApi([
       makeInstall({ id: 'a', name: 'Alpha' }),
     ])
     const wrapper = mountChooser()
     await flushPromises()
-
-    const row = wrapper.find('.chooser-row')
-    expect(row.exists()).toBe(true)
-    await row.trigger('click')
-
+    const tiles = wrapper.findAll('.chooser-tile')
+    const alphaTile = tiles.find((t) => t.text().includes('Alpha'))
+    expect(alphaTile).toBeTruthy()
+    await alphaTile!.trigger('click')
     const events = wrapper.emitted('pick')
     expect(events).toBeDefined()
     expect((events![0]![0] as Installation).id).toBe('a')
   })
 
-  it('excludes cloud installs from both Recent and All sections', async () => {
+  it('filters install tiles by source category when a filter chip is active', async () => {
     installMockApi([
-      makeInstall({ id: 'cloud', name: 'Comfy Cloud', sourceCategory: 'cloud', sourceLabel: 'Cloud', lastLaunchedAt: 9999 }),
-      makeInstall({ id: 'a', name: 'Local A', lastLaunchedAt: 100 }),
+      makeInstall({ id: 'l', name: 'LocalThing', sourceCategory: 'local' }),
+      makeInstall({ id: 'd', name: 'DesktopThing', sourceCategory: 'desktop' }),
+      makeInstall({ id: 'r', name: 'RemoteThing', sourceCategory: 'remote' }),
     ])
     const wrapper = mountChooser()
     await flushPromises()
 
-    const rows = wrapper.findAll('.chooser-row')
-    for (const row of rows) {
-      expect(row.text()).not.toContain('Comfy Cloud')
-    }
+    // Activate the Desktop filter — only the desktop install should remain
+    // among the install tiles. New Install stays visible; Cloud is hidden
+    // when filtering to a non-cloud category.
+    const chips = wrapper.findAll('.chooser-filter-chip')
+    const desktopChip = chips.find((c) => c.text() === 'Desktop')
+    expect(desktopChip).toBeTruthy()
+    await desktopChip!.trigger('click')
+
+    const tiles = wrapper.findAll('.chooser-tile')
+    const installTiles = tiles.filter(
+      (t) => !t.classes().includes('chooser-tile-new') && !t.classes().includes('chooser-tile-cloud')
+    )
+    expect(installTiles.length).toBe(1)
+    expect(installTiles[0]!.text()).toContain('DesktopThing')
   })
 })
