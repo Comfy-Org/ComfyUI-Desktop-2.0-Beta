@@ -323,7 +323,7 @@
     "telemetry": "Telemetry",
     "telemetryEnabled": "Share anonymous usage telemetry",
     "models": "Shared Models",
-    "downloads": "Downloads",
+    "cache": "Cache",
     "cacheDir": "Cache Directory",
     "maxCachedFiles": "Max Cached Downloads",
     "open": "Open",

@@ -46,7 +46,12 @@ export function registerSettingsHandlers(): void {
         ],
       },
       {
-        title: i18n.t('settings.downloads'),
+        // Phase 3 §4: this section was previously titled "Downloads" but
+        // the contents are really the on-disk cache (model files, wheels,
+        // GitHub release tarballs, etc.) — i.e. blobs the launcher pulls
+        // down on behalf of an install. "Cache" reflects what the user
+        // actually controls here.
+        title: i18n.t('settings.cache'),
         fields: [
           { id: 'cacheDir', label: i18n.t('settings.cacheDir'), type: 'path', value: s.cacheDir, openable: true },
           { id: 'maxCachedFiles', label: i18n.t('settings.maxCachedFiles'), type: 'number', value: s.maxCachedFiles, min: 1, max: 50 },

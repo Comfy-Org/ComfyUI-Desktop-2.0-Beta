@@ -234,7 +234,7 @@
     "telemetry": "遥测",
     "telemetryEnabled": "共享匿名使用遥测数据",
     "models": "共享模型",
-    "downloads": "下载",
+    "cache": "缓存",
     "cacheDir": "缓存目录",
     "maxCachedFiles": "最大缓存下载数",
     "open": "打开",
