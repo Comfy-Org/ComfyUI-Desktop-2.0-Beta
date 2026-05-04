@@ -17,6 +17,9 @@ export const COMFY_BG_LIGHT = '#f5f5f5'
 /** Default dark background for comfy windows (used at creation time before theme is known). */
 export const COMFY_BG = '#171717'
 
+/** Title bar background — matches the inline CSS in resources/comfyTitleBar.html. */
+export const TITLEBAR_BG = '#353535'
+
 export interface SplashTheme {
   bg: string
   fg: string

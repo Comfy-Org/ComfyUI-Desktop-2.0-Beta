@@ -486,26 +486,24 @@ describe('importSnapshots', () => {
     ])
     const result = await importSnapshots(tmpDir, envelope)
     expect(result.imported).toBe(2)
-    expect(result.skipped).toBe(0)
 
     const entries = await listSnapshots(tmpDir)
     expect(entries).toHaveLength(2)
   })
 
-  it('deduplicates by createdAt + trigger', async () => {
+  it('imports same snapshot file twice (timeline allows duplicates)', async () => {
     const envelope = makeEnvelope([
       makeSnapshot({ createdAt: '2026-03-01T12:00:00.000Z', trigger: 'boot' }),
     ])
     await importSnapshots(tmpDir, envelope)
     const result = await importSnapshots(tmpDir, envelope)
-    expect(result.imported).toBe(0)
-    expect(result.skipped).toBe(1)
+    expect(result.imported).toBe(1)
 
     const entries = await listSnapshots(tmpDir)
-    expect(entries).toHaveLength(1)
+    expect(entries).toHaveLength(2)
   })
 
-  it('imports new snapshots while skipping duplicates', async () => {
+  it('imports all snapshots from envelope regardless of existing history', async () => {
     const first = makeEnvelope([
       makeSnapshot({ createdAt: '2026-03-01T12:00:00.000Z', trigger: 'boot' }),
     ])
@@ -516,18 +514,7 @@ describe('importSnapshots', () => {
       makeSnapshot({ createdAt: '2026-03-02T12:00:00.000Z', trigger: 'manual' }),
     ])
     const result = await importSnapshots(tmpDir, second)
-    expect(result.imported).toBe(1)
-    expect(result.skipped).toBe(1)
-  })
-
-  it('treats same createdAt with different trigger as distinct', async () => {
-    const envelope = makeEnvelope([
-      makeSnapshot({ createdAt: '2026-03-01T12:00:00.000Z', trigger: 'boot' }),
-      makeSnapshot({ createdAt: '2026-03-01T12:00:00.000Z', trigger: 'manual' }),
-    ])
-    const result = await importSnapshots(tmpDir, envelope)
     expect(result.imported).toBe(2)
-    expect(result.skipped).toBe(0)
   })
 
   it('preserves snapshot content through round-trip', async () => {
@@ -542,14 +529,16 @@ describe('importSnapshots', () => {
     const entries = await listSnapshots(tmpDir)
     expect(entries).toHaveLength(1)
     const loaded = entries[0]!.snapshot
-    expect(loaded.createdAt).toBe(original.createdAt)
+    // createdAt is re-stamped to "now" on import, so just verify it's a valid ISO date
+    expect(new Date(loaded.createdAt).getTime()).toBeGreaterThan(0)
     expect(loaded.trigger).toBe(original.trigger)
     expect(loaded.customNodes).toHaveLength(1)
     expect(loaded.customNodes[0]!.id).toBe('my-node')
     expect(loaded.pipPackages).toEqual({ numpy: '1.24.0', pillow: '10.0.0' })
   })
 
-  it('lists imported snapshots newest-first', async () => {
+  it('imported snapshots land at the top with preserved envelope order (newest-first)', async () => {
+    // Envelope is newest-first: boot is the "newest" at index 0
     const envelope = makeEnvelope([
       makeSnapshot({ createdAt: '2026-03-01T12:00:00.000Z', trigger: 'boot' }),
       makeSnapshot({ createdAt: '2026-03-03T12:00:00.000Z', trigger: 'manual' }),
@@ -559,19 +548,23 @@ describe('importSnapshots', () => {
 
     const entries = await listSnapshots(tmpDir)
     expect(entries).toHaveLength(3)
-    expect(entries[0]!.snapshot.createdAt).toBe('2026-03-03T12:00:00.000Z')
-    expect(entries[1]!.snapshot.createdAt).toBe('2026-03-02T12:00:00.000Z')
-    expect(entries[2]!.snapshot.createdAt).toBe('2026-03-01T12:00:00.000Z')
+    // All three should have fresh timestamps (not the original ones)
+    for (const e of entries) {
+      expect(new Date(e.snapshot.createdAt).getTime()).toBeGreaterThan(new Date('2026-03-03T12:00:00.000Z').getTime())
+    }
+    // Newest-first: first in envelope (boot) gets the highest timestamp
+    expect(entries[0]!.snapshot.trigger).toBe('boot')
+    expect(entries[1]!.snapshot.trigger).toBe('manual')
+    expect(entries[2]!.snapshot.trigger).toBe('restart')
   })
 
-  it('deduplicates within a single envelope', async () => {
+  it('imports identical snapshots within a single envelope', async () => {
     const envelope = makeEnvelope([
       makeSnapshot({ createdAt: '2026-03-01T12:00:00.000Z', trigger: 'boot' }),
       makeSnapshot({ createdAt: '2026-03-01T12:00:00.000Z', trigger: 'boot' }),
     ])
     const result = await importSnapshots(tmpDir, envelope)
-    expect(result.imported).toBe(1)
-    expect(result.skipped).toBe(1)
+    expect(result.imported).toBe(2)
   })
 })
 

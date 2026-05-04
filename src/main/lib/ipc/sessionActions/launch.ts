@@ -4,7 +4,7 @@ import {
   sourceMap,
   spawnProcess, waitForPort, waitForUrl, killProcessTree,
   findPidsByPort, getProcessInfo, looksLikeComfyUI, setPortArg,
-  findAvailablePort, writePortLock, readPortLock,
+  findAvailablePort, isPortListening, writePortLock, readPortLock,
   COMFY_BOOT_TIMEOUT_MS, SENSITIVE_ARG_RE,
   _onLaunch, _onComfyExited, _onComfyRestarted, _onModelFolderRelaunch,
   _operationAborts, _runningSessions, _pendingPorts,
@@ -16,12 +16,23 @@ import {
   createSessionPath, buildLaunchEnv, checkRebootMarker,
   makeSendProgress, makeSendOutput,
   getComfyArgsSchema, filterUnsupportedArgs,
+  getComfyFeatureFlagRegistry,
 } from '../shared'
 import type { ChildProcess, LaunchCmd } from '../shared'
 import type { ActionContext, ActionResult } from './types'
 import { scrubStderr, lastNLines, stripAnsi } from '../../scrubStderr'
 import { rotateLogFiles, getLogDir } from '../../logRotation'
 import type { WriteStream } from 'fs'
+
+/**
+ * Feature flags the launcher wants set on every ComfyUI it spawns. Each entry
+ * is gated by the running install's `--list-feature-flags` registry: keys not
+ * present in the registry are skipped so we never inject something the
+ * running ComfyUI version doesn't recognize.
+ */
+const DESKTOP_FEATURE_FLAGS: Record<string, string> = {
+  show_signin_button: 'true',
+}
 
 async function openLogStream(installPath: string): Promise<WriteStream> {
   const logDir = getLogDir(installPath)
@@ -68,18 +79,33 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
   }
   const launchCmd = launchCmdRaw
 
-  // Filter out unsupported args
+  // Filter out unsupported args, then inject desktop-managed feature flags
+  // gated on the running ComfyUI's --list-feature-flags registry.
   if (launchCmd.cmd && launchCmd.args && launchCmd.cwd) {
     const sIdx = launchCmd.args.indexOf('-s')
     if (sIdx !== -1 && sIdx + 1 < launchCmd.args.length) {
       const mainPyRel = launchCmd.args[sIdx + 1]!
       const mainPyAbs = path.resolve(launchCmd.cwd, mainPyRel)
+      const version = inst.version as string | undefined
       try {
-        const schema = await getComfyArgsSchema(launchCmd.cmd, mainPyAbs, launchCmd.cwd, installationId, inst.version as string | undefined)
+        const schema = await getComfyArgsSchema(launchCmd.cmd, mainPyAbs, launchCmd.cwd, installationId, version)
         const prefixArgs = launchCmd.args.slice(0, sIdx + 2)
         const userArgs = launchCmd.args.slice(sIdx + 2)
         const filtered = filterUnsupportedArgs(userArgs, schema)
-        launchCmd.args = [...prefixArgs, ...filtered]
+
+        // Inject desktop-managed feature flags. Skip on ComfyUI versions that
+        // don't expose the discovery flag (avoids a pointless python spawn).
+        const desktopFlagArgs: string[] = []
+        if (schema.knownFlags.has('feature-flag') && schema.knownFlags.has('list-feature-flags')) {
+          const registry = await getComfyFeatureFlagRegistry(launchCmd.cmd, mainPyAbs, launchCmd.cwd, installationId, version)
+          for (const [key, value] of Object.entries(DESKTOP_FEATURE_FLAGS)) {
+            if (key in registry) {
+              desktopFlagArgs.push('--feature-flag', `${key}=${value}`)
+            }
+          }
+        }
+
+        launchCmd.args = [...prefixArgs, ...desktopFlagArgs, ...filtered]
       } catch {
         // Schema not available — pass args as-is
       }
@@ -194,10 +220,14 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
     setPortArg(launchCmd as LaunchCmd, actionData.portOverride as number)
   }
 
-  // Check for port conflicts
+  // Check for port conflicts.
+  // Use isPortListening (net.createServer bind test) as the primary check —
+  // findPidsByPort uses lsof which on Linux can only see same-user processes,
+  // silently returning [] when a different user owns the port.
   const pendingPortOwner = _pendingPorts.get(launchCmd.port!)
-  const existingPids = pendingPortOwner ? [] : await findPidsByPort(launchCmd.port!)
-  const portOccupied = !!pendingPortOwner || existingPids.length > 0
+  const portBusy = !pendingPortOwner && await isPortListening(launchCmd.port!)
+  const existingPids = (pendingPortOwner || !portBusy) ? [] : await findPidsByPort(launchCmd.port!)
+  const portOccupied = !!pendingPortOwner || portBusy
 
   if (portOccupied) {
     const defaults = source.getDefaults ? source.getDefaults() : {}
@@ -225,13 +255,18 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
         if (lock) {
           message = i18n.t('errors.portConflictLauncher', { port: launchCmd.port!, name: lock.installationName })
           isComfy = true
-        } else {
+        } else if (existingPids.length > 0) {
           const info = await getProcessInfo(existingPids[0]!)
           isComfy = looksLikeComfyUI(info)
           const processDesc = info ? info.name : `PID ${existingPids[0]}`
           message = isComfy
             ? i18n.t('errors.portConflictComfy', { port: launchCmd.port!, process: processDesc })
             : i18n.t('errors.portConflictOther', { port: launchCmd.port!, process: processDesc })
+        } else {
+          // Port is busy but we could not identify the owning process
+          // (e.g. lsof on Linux cannot see other-user processes).
+          isComfy = false
+          message = i18n.t('errors.portConflictOther', { port: launchCmd.port!, process: i18n.t('errors.unknownProcess') })
         }
       }
       _operationAborts.delete(installationId)

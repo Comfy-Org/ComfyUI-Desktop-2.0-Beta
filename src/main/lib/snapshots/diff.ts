@@ -1,6 +1,6 @@
 import path from 'path'
 import { hasGitDir } from '../git'
-import { resolveInstalledVersion } from '../version-resolve'
+import { resolveLocalVersion } from '../version-resolve'
 import type { LatestTagOverride } from '../version-resolve'
 import { formatComfyVersion } from '../version'
 import type { ComfyVersion } from '../version'
@@ -46,7 +46,7 @@ export async function resolveSnapshotVersion(
     return formatComfyVersion(snapshotCv, style)
   }
   try {
-    const resolved = await resolveInstalledVersion(comfyuiDir, comfyui.commit, snapshotCv, undefined, options?.latestTagOverride)
+    const resolved = await resolveLocalVersion(comfyuiDir, comfyui.commit, undefined, options?.latestTagOverride)
     return formatComfyVersion(resolved, style)
   } catch {
     return formatComfyVersion(snapshotCv, style)

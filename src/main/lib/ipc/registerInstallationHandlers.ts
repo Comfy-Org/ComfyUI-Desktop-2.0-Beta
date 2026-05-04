@@ -2,17 +2,16 @@ import {
   path, fs, ipcMain,
   sources, installations, settings, i18n,
   sourceMap, formatComfyVersion, _resolveAndBroadcastVersions,
-  isPromotableLocal, ensureDefaultPrimary, findDuplicatePath, uniqueName,
+  isPromotableLocal, ensureDefaultPrimary, findDuplicatePath, uniqueName, sanitizeDirName, allocateUniqueDir,
   syncOemSeedBestEffort, isEffectivelyEmptyInstallDir,
-  download, createCache, extract, deleteDir, deleteAction, untrackAction,
-  formatTime, MARKER_FILE,
-  validateExportEnvelope, importSnapshots, saveSnapshot, getSnapshotCount,
-  restoreCustomNodes, restorePipPackages, restoreComfyUIVersion, buildPostRestoreState,
+  download, createCache, extract, deleteDir, formatDeleteStatus, deleteAction, untrackAction,
+  MARKER_FILE,
   _operationAborts,
   sanitizeEnvVars,
   getComfyArgsSchema,
 } from './shared'
 import type { ComfyVersion, ComfyArgDef } from './shared'
+import { restoreSnapshotIntoInstallation } from '../standaloneMigration'
 
 export function registerInstallationHandlers(): void {
   // Installations
@@ -75,14 +74,8 @@ export function registerInstallationHandlers(): void {
   ipcMain.handle('add-installation', async (_event, data: Record<string, unknown>) => {
     data.name = await uniqueName((data.name as string) || 'ComfyUI')
     if (data.installPath) {
-      const dirName = (data.name as string).replace(/[<>:"/\\|?*]+/g, '_').trim() || 'ComfyUI'
-      let installPath = path.join(data.installPath as string, dirName)
-      let suffix = 1
-      while (fs.existsSync(installPath)) {
-        installPath = path.join(data.installPath as string, `${dirName} (${suffix})`)
-        suffix++
-      }
-      data.installPath = installPath
+      const dirName = sanitizeDirName(data.name as string)
+      data.installPath = allocateUniqueDir(data.installPath as string, dirName)
       const duplicate = await findDuplicatePath(data.installPath as string)
       if (duplicate) {
         return { ok: false, message: `That directory is already used by "${duplicate.name}".` }
@@ -181,50 +174,11 @@ export function registerInstallationHandlers(): void {
           }
           const update = (data: Record<string, unknown>): Promise<void> =>
             installations.update(installationId, data).then(() => {})
-
-          try {
-            const fileContent = await fs.promises.readFile(pendingFile, 'utf-8')
-            const envelope = validateExportEnvelope(JSON.parse(fileContent))
-            await importSnapshots(freshInst.installPath, envelope)
-            const targetSnapshot = envelope.snapshots[0]!
-
-            // Restore ComfyUI version
-            sendOutput('\n── Restore ComfyUI Version ──\n')
-            const comfyResult = await restoreComfyUIVersion(freshInst.installPath, targetSnapshot, sendOutput)
-
-            sendOutput('\n── Restore Nodes ──\n')
-            await restoreCustomNodes(freshInst.installPath, freshInst, targetSnapshot, sendProgress, sendOutput, abort.signal, settings.getMirrorConfig())
-
-            if (!abort.signal.aborted && !targetSnapshot.skipPipSync) {
-              sendOutput('\n── Restore Packages ──\n')
-              await restorePipPackages(freshInst.installPath, freshInst, targetSnapshot,
-                (phase, data) => sendProgress(phase === 'restore' ? 'restore-pip' : phase, data),
-                sendOutput, abort.signal, settings.getMirrorConfig())
-            }
-
-            const restoreState = buildPostRestoreState(
-              targetSnapshot, comfyResult,
-              freshInst.updateInfoByChannel as Record<string, Record<string, unknown>> | undefined,
-              freshInst.comfyVersion as ComfyVersion | undefined
-            )
-            await update(restoreState)
-
-            // Save post-restore snapshot
-            try {
-              const updatedInst = { ...freshInst, ...restoreState }
-              const filename = await saveSnapshot(freshInst.installPath, updatedInst, 'post-restore')
-              const snapshotCount = await getSnapshotCount(freshInst.installPath)
-              await update({ pendingSnapshotRestore: undefined, lastSnapshot: filename, snapshotCount })
-            } catch {
-              await update({ pendingSnapshotRestore: undefined })
-            }
-          } catch (restoreErr) {
-            console.warn('Post-install snapshot restore failed:', restoreErr)
-            sendOutput(`\n⚠ Snapshot restore failed: ${(restoreErr as Error).message}\nThe installation completed successfully. You can restore the snapshot manually from the Snapshots tab.\n`)
-            await update({ pendingSnapshotRestore: undefined })
-          } finally {
-            fs.promises.unlink(pendingFile).catch(() => {})
-          }
+          await restoreSnapshotIntoInstallation(
+            freshInst, pendingFile, true,
+            { sendProgress, sendOutput, signal: abort.signal },
+            update,
+          )
         }
 
         sendProgress('done', { percent: 100, status: 'Complete' })
@@ -250,12 +204,7 @@ export function registerInstallationHandlers(): void {
           sendProgress('delete', { percent: 0, status: 'Counting files…' })
           try {
             await deleteDir(inst.installPath, (p) => {
-              const elapsed = formatTime(p.elapsedSecs)
-              const eta = p.etaSecs >= 0 ? formatTime(p.etaSecs) : '—'
-              sendProgress('delete', {
-                percent: p.percent,
-                status: `Deleting… ${p.deleted} / ${p.total} items  ·  ${elapsed} elapsed  ·  ${eta} remaining`,
-              })
+              sendProgress('delete', { percent: p.percent, status: formatDeleteStatus(p) })
             }, { signal: deleteAbort.signal })
             _operationAborts.delete(installationId)
             await installations.remove(installationId)

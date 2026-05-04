@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, nextTick } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useSessionStore } from './stores/sessionStore'
 import { useInstallationStore } from './stores/installationStore'
@@ -8,6 +8,7 @@ import { useDownloadStore } from './stores/downloadStore'
 import { useModal } from './composables/useModal'
 import { useTheme } from './composables/useTheme'
 import { useLauncherPrefs } from './composables/useLauncherPrefs'
+import { useNavigation } from './composables/useNavigation'
 import type { Installation, ActionResult, QuitActiveItem } from './types/ipc'
 import type { ModalDetailGroup } from './composables/useModal'
 import { emitTelemetryAction } from './lib/telemetry'
@@ -15,19 +16,14 @@ import { emitTelemetryAction } from './lib/telemetry'
 import ModalDialog from './components/ModalDialog.vue'
 import UpdateBanner from './components/UpdateBanner.vue'
 import ZoomBanner from './components/ZoomBanner.vue'
+import ViewShell from './components/ViewShell.vue'
 import DashboardView from './views/DashboardView.vue'
 import InstallationList from './views/InstallationList.vue'
 import RunningView from './views/RunningView.vue'
 import SettingsView from './views/SettingsView.vue'
 import ModelsView from './views/ModelsView.vue'
 import MediaView from './views/MediaView.vue'
-import DetailModal from './views/DetailModal.vue'
-import ConsoleModal from './views/ConsoleModal.vue'
-import ProgressModal from './views/ProgressModal.vue'
-import NewInstallModal from './views/NewInstallModal.vue'
-import QuickInstallModal from './views/QuickInstallModal.vue'
-import TrackModal from './views/TrackModal.vue'
-import LoadSnapshotModal from './views/LoadSnapshotModal.vue'
+import TitleBar from './components/TitleBar.vue'
 
 // Lucide icons
 import { LayoutDashboard, Box, Play, FolderOpen, Image, Settings, MessageSquarePlus } from 'lucide-vue-next'
@@ -40,34 +36,19 @@ const progressStore = useProgressStore()
 const downloadStore = useDownloadStore()
 const modal = useModal()
 const launcherPrefs = useLauncherPrefs()
+const nav = useNavigation()
 useTheme()
 
 // --- View state ---
 type TabView = 'dashboard' | 'list' | 'running' | 'models' | 'media' | 'settings'
-const activeView = ref<TabView>('dashboard')
+const activeView = nav.activeTab
 const appVersion = ref('')
-
-// --- Modal views ---
-const detailInstallation = ref<Installation | null>(null)
-const detailInitialTab = ref<string>('status')
-const detailAutoAction = ref<string | null>(null)
-const consoleInstallationId = ref<string | null>(null)
-const progressInstallationId = ref<string | null>(null)
-const showNewInstall = ref(false)
-const showQuickInstall = ref(false)
-const showTrack = ref(false)
-const showLoadSnapshot = ref(false)
 
 // --- Template refs ---
 const listRef = ref<InstanceType<typeof InstallationList> | null>(null)
 const settingsRef = ref<InstanceType<typeof SettingsView> | null>(null)
 const modelsRef = ref<InstanceType<typeof ModelsView> | null>(null)
 const mediaRef = ref<InstanceType<typeof MediaView> | null>(null)
-const progressRef = ref<InstanceType<typeof ProgressModal> | null>(null)
-const newInstallRef = ref<InstanceType<typeof NewInstallModal> | null>(null)
-const quickInstallRef = ref<InstanceType<typeof QuickInstallModal> | null>(null)
-const trackRef = ref<InstanceType<typeof TrackModal> | null>(null)
-const loadSnapshotRef = ref<InstanceType<typeof LoadSnapshotModal> | null>(null)
 
 // --- Sidebar ---
 const sidebarItems = computed(() => [
@@ -81,7 +62,7 @@ const sidebarItems = computed(() => [
 
 function switchView(view: TabView): void {
   const fromView = activeView.value
-  activeView.value = view
+  nav.switchTab(view)
   if (view !== fromView) {
     emitTelemetryAction('launcher.view.opened', {
       view,
@@ -101,21 +82,15 @@ function openFeedback(): void {
 
 // --- Modal handlers ---
 function openDetail(inst: Installation, tab?: string, autoAction?: string): void {
-  detailInitialTab.value = tab ?? 'status'
-  detailAutoAction.value = autoAction ?? null
-  detailInstallation.value = inst
-}
-
-function closeDetail(): void {
-  detailInstallation.value = null
+  nav.present('detail', {
+    installation: inst,
+    initialTab: tab ?? 'status',
+    autoAction: autoAction ?? null,
+  })
 }
 
 function openConsole(installationId: string): void {
-  consoleInstallationId.value = installationId
-}
-
-function closeConsole(): void {
-  consoleInstallationId.value = null
+  nav.present('console', { installationId })
 }
 
 async function openNewInstall(): Promise<void> {
@@ -123,13 +98,8 @@ async function openNewInstall(): Promise<void> {
     flow: 'new_install',
     entrypoint: activeView.value,
   })
-  showNewInstall.value = true
-  await nextTick()
-  newInstallRef.value?.open()
-}
-
-function closeNewInstall(): void {
-  showNewInstall.value = false
+  nav.present('new-install', {})
+  await nav.invokeWhenReady('new-install', (c) => c.open())
 }
 
 async function openQuickInstall(): Promise<void> {
@@ -137,13 +107,8 @@ async function openQuickInstall(): Promise<void> {
     flow: 'quick_install',
     entrypoint: activeView.value,
   })
-  showQuickInstall.value = true
-  await nextTick()
-  quickInstallRef.value?.open()
-}
-
-function closeQuickInstall(): void {
-  showQuickInstall.value = false
+  nav.present('quick-install', {})
+  await nav.invokeWhenReady('quick-install', (c) => c.open())
 }
 
 async function openTrack(): Promise<void> {
@@ -151,13 +116,8 @@ async function openTrack(): Promise<void> {
     flow: 'track_existing',
     entrypoint: activeView.value,
   })
-  showTrack.value = true
-  await nextTick()
-  trackRef.value?.open()
-}
-
-function closeTrack(): void {
-  showTrack.value = false
+  nav.present('track', {})
+  await nav.invokeWhenReady('track', (c) => c.open())
 }
 
 async function openLoadSnapshot(): Promise<void> {
@@ -165,13 +125,8 @@ async function openLoadSnapshot(): Promise<void> {
     flow: 'load_snapshot',
     entrypoint: activeView.value,
   })
-  showLoadSnapshot.value = true
-  await nextTick()
-  loadSnapshotRef.value?.open()
-}
-
-function closeLoadSnapshot(): void {
-  showLoadSnapshot.value = false
+  nav.present('load-snapshot', {})
+  await nav.invokeWhenReady('load-snapshot', (c) => c.open())
 }
 
 function showProgress(opts: {
@@ -182,37 +137,36 @@ function showProgress(opts: {
   returnTo?: string
 }): void {
   // Close any open modal so they don't stack visually
-  if (opts.returnTo === 'detail') closeDetail()
-  progressInstallationId.value = opts.installationId
+  if (opts.returnTo === 'detail') nav.dismiss('detail')
+  nav.present('progress', { installationId: opts.installationId })
   // If an in-progress operation already exists for this ID, just show it
   const existingOp = progressStore.operations.get(opts.installationId)
   if (existingOp && !existingOp.finished) {
-    progressRef.value!.showOperation(opts.installationId)
+    nav.invokeWhenReady('progress', (c) => c.showOperation(opts.installationId))
     return
   }
-  progressRef.value?.startOperation({
+  nav.invokeWhenReady('progress', (c) => c.startOperation({
     installationId: opts.installationId,
     title: opts.title,
     apiCall: opts.apiCall as () => Promise<ActionResult>,
     cancellable: opts.cancellable,
     returnTo: opts.returnTo,
-  })
-}
-
-function closeProgress(): void {
-  progressInstallationId.value = null
-  listRef.value?.refresh()
+  }))
 }
 
 function handleNavigateList(): void {
-  closeDetail()
+  nav.dismiss('detail')
   listRef.value?.refresh()
 }
 
 function handleProgressShowDetail(installationId: string): void {
-  closeProgress()
+  nav.dismiss('progress')
   const inst = installationStore.getById(installationId)
   if (inst) openDetail(inst)
+}
+
+function handleOverlayClosed(key: string): void {
+  if (key === 'progress') listRef.value?.refresh()
 }
 
 // --- Quit confirmation ---
@@ -282,6 +236,7 @@ onMounted(async () => {
 </script>
 
 <template>
+  <TitleBar />
   <div class="app-layout">
     <!-- Sidebar -->
     <nav class="sidebar">
@@ -371,57 +326,14 @@ onMounted(async () => {
     </main>
   </div>
 
-  <!-- Modal views -->
-  <DetailModal
-    :installation="detailInstallation"
-    :initial-tab="detailInitialTab"
-    :auto-action="detailAutoAction"
-    @close="closeDetail"
+  <!-- Overlay views (rendered by ViewShell from navigation overlay stack) -->
+  <ViewShell
     @show-progress="showProgress"
-    @navigate-list="handleNavigateList"
-    @update:installation="(inst) => { detailInstallation = inst; installationStore.fetchInstallations() }"
-  />
-
-  <ConsoleModal
-    :installation-id="consoleInstallationId"
-    @close="closeConsole"
-  />
-
-  <ProgressModal
-    ref="progressRef"
-    :installation-id="progressInstallationId"
-    @close="closeProgress"
     @show-detail="handleProgressShowDetail"
     @show-console="openConsole"
-  />
-
-  <NewInstallModal
-    v-if="showNewInstall"
-    ref="newInstallRef"
-    @close="closeNewInstall"
-    @show-progress="showProgress"
     @navigate-list="handleNavigateList"
-  />
-
-  <QuickInstallModal
-    v-if="showQuickInstall"
-    ref="quickInstallRef"
-    @close="closeQuickInstall"
-    @show-progress="showProgress"
-  />
-
-  <TrackModal
-    v-if="showTrack"
-    ref="trackRef"
-    @close="closeTrack"
-    @navigate-list="handleNavigateList"
-  />
-
-  <LoadSnapshotModal
-    v-if="showLoadSnapshot"
-    ref="loadSnapshotRef"
-    @close="closeLoadSnapshot"
-    @show-progress="showProgress"
+    @update:installation="(inst) => { nav.patchOverlay('detail', { installation: inst }); installationStore.fetchInstallations() }"
+    @overlay-closed="handleOverlayClosed"
   />
 
   <!-- Global modal dialog (alerts/confirms/prompts/selects) -->

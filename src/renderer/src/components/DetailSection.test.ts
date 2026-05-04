@@ -1,8 +1,8 @@
 import { mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createI18n } from 'vue-i18n'
+import type { ActionDef } from '../types/ipc'
 import DetailSection from './DetailSection.vue'
-import type { ActionDef, ElectronApi } from '../types/ipc'
 
 const i18n = createI18n({
   legacy: false,
@@ -26,8 +26,8 @@ function mountComponent(props: Record<string, unknown> = {}) {
 beforeEach(() => {
   window.api = {
     updateInstallation: vi.fn().mockResolvedValue({}),
-    runAction: vi.fn().mockResolvedValue({ navigate: undefined })
-  } as unknown as ElectronApi
+    runAction: vi.fn().mockResolvedValue({ navigate: undefined }),
+  } as unknown as typeof window.api
 })
 
 describe('DetailSection', () => {

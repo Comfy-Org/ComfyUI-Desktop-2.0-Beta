@@ -27,6 +27,8 @@ interface PendingDownload {
   tempPath?: string
   outputDir?: string
   window: BrowserWindow
+  /** The webContents that initiated the download (may differ from window.webContents for WebContentsView). */
+  senderContents?: Electron.WebContents
   subscriberWindows: Set<BrowserWindow>
   item?: Electron.DownloadItem
   lastProgress: DownloadProgress
@@ -127,8 +129,9 @@ function broadcastProgress(progress: DownloadProgress): void {
   const pending = pendingDownloads.get(progress.url)
   if (pending) {
     pending.lastProgress = progress
-    if (!pending.window.isDestroyed()) {
-      pending.window.webContents.send('desktop2-download-progress', progress)
+    const target = pending.senderContents || pending.window.webContents
+    if (!target.isDestroyed()) {
+      target.send('desktop2-download-progress', progress)
     }
     for (const sub of pending.subscriberWindows) {
       if (!sub.isDestroyed()) {
@@ -218,6 +221,7 @@ export async function startModelDownload(
   url: string,
   rawFilename: string,
   directory: string,
+  senderContents?: Electron.WebContents,
 ): Promise<boolean> {
   const filename = stripQueryParams(rawFilename)
   const baseDir = getModelsBaseDir()
@@ -280,13 +284,14 @@ export async function startModelDownload(
     savePath,
     tempPath,
     window: win,
+    senderContents: senderContents !== win.webContents ? senderContents : undefined,
     subscriberWindows: new Set(),
     lastProgress: initial,
     lastSpeedBytes: 0,
     lastSpeedTime: Date.now(),
   })
 
-  const sess = win.webContents.session
+  const sess = (senderContents || win.webContents).session
   attachSessionDownloadHandler(sess)
   sess.downloadURL(url)
 
@@ -300,6 +305,7 @@ export async function startAssetDownload(
   filename: string,
   outputDir: string,
   authToken?: string,
+  senderContents?: Electron.WebContents,
 ): Promise<boolean> {
   const safeFilename = sanitizeAssetFilename(filename, outputDir)
   if (!safeFilename) return false
@@ -346,13 +352,14 @@ export async function startAssetDownload(
     tempPath,
     outputDir,
     window: win,
+    senderContents: senderContents !== win.webContents ? senderContents : undefined,
     subscriberWindows: new Set(),
     lastProgress: initial,
     lastSpeedBytes: 0,
     lastSpeedTime: Date.now(),
   })
 
-  const sess = win.webContents.session
+  const sess = (senderContents || win.webContents).session
   attachSessionDownloadHandler(sess)
   // Pass auth headers directly — Electron follows redirects internally and
   // the original URL stays in item.getURLChain(), so findPendingForItem matches.
@@ -671,7 +678,7 @@ export function registerDownloadIpc(): void {
     (event, { url, filename, directory }: { url: string; filename: string; directory: string }) => {
       const win = BrowserWindow.fromWebContents(event.sender)
       if (!win) return false
-      return startModelDownload(win, url, filename, directory)
+      return startModelDownload(win, url, filename, directory, event.sender)
     },
   )
 

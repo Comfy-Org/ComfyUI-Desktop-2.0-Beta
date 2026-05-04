@@ -1,5 +1,6 @@
 import fs from 'fs'
 import path from 'path'
+import { formatTime } from './util'
 
 export interface DeleteProgress {
   deleted: number
@@ -160,4 +161,14 @@ export async function deleteDir(
       })
     })
   })
+}
+
+/**
+ * Build a formatted status string from a {@link DeleteProgress} update.
+ * Used by IPC handlers that pipe delete progress into `sendProgress`.
+ */
+export function formatDeleteStatus(p: DeleteProgress, prefix = 'Deleting…'): string {
+  const elapsed = formatTime(p.elapsedSecs)
+  const eta = p.etaSecs >= 0 ? formatTime(p.etaSecs) : '—'
+  return `${prefix} ${p.deleted} / ${p.total} items  ·  ${elapsed} elapsed  ·  ${eta} remaining`
 }

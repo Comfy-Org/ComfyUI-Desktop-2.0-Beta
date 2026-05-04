@@ -101,10 +101,11 @@ body {
 }
 
 /* App shell */
-.app-layout { display: flex; height: 100vh; }
+:root { --titlebar-height: 37px; --sidebar-width: 200px; }
+.app-layout { display: flex; height: calc(100vh - var(--titlebar-height)); }
 
 .sidebar {
-  width: 200px;
+  width: var(--sidebar-width);
   flex-shrink: 0;
   background: var(--surface);
   border-right: 1px solid var(--border);
@@ -503,15 +504,28 @@ input[type="checkbox"]:checked::after { transform: translateX(16px); }
 /* View modals */
 .view-modal {
   position: fixed; inset: 0;
+  top: var(--titlebar-height);
   background: var(--overlay-bg);
   display: none; align-items: center; justify-content: center;
   z-index: 50;
 }
 .view-modal.active { display: flex; }
+.view-fullscreen {
+  position: fixed; top: var(--titlebar-height); bottom: 0; right: 0;
+  left: var(--sidebar-width);
+  display: flex;
+  z-index: 40;
+  background: var(--bg);
+}
+.view-fullscreen .view-modal-content {
+  width: 100%; height: 100%;
+  max-width: none;
+  border-radius: 0; border: none;
+}
 .view-modal-content {
   background: var(--bg); border: 1px solid var(--border);
   border-radius: 12px;
-  width: calc(100vw - 260px); height: calc(100vh - 60px);
+  width: calc(100vw - var(--sidebar-width) - 60px); height: calc(100vh - 60px - var(--titlebar-height));
   max-width: 900px;
   display: flex; flex-direction: column; overflow: hidden;
 }
@@ -554,6 +568,7 @@ input[type="checkbox"]:checked::after { transform: translateX(16px); }
 /* Modal dialog */
 .modal-overlay {
   position: fixed; inset: 0;
+  top: var(--titlebar-height);
   background: var(--overlay-bg);
   display: flex; align-items: center; justify-content: center;
   z-index: 100;
@@ -580,26 +595,41 @@ input[type="checkbox"]:checked::after { transform: translateX(16px); }
 .modal-detail-item { font-size: 14px; color: var(--text-muted); line-height: 1.6; white-space: pre-line; }
 .modal-detail-item a, .modal-detail-item .modal-link { color: var(--accent); text-decoration: underline; cursor: pointer; }
 
-/* Snapshot preview in confirm dialog */
-.sp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 16px; margin-bottom: 10px; }
-.sp-field { display: flex; flex-direction: column; gap: 2px; }
-.sp-label { font-size: 13px; font-weight: 600; color: var(--text); }
-.sp-value { font-size: 14px; color: var(--text-muted); user-select: text; }
-.sp-subsection { margin-top: 10px; }
-.sp-subsection-title { font-size: 13px; font-weight: 600; color: var(--text); text-transform: uppercase; cursor: pointer; display: flex; align-items: center; justify-content: space-between; user-select: none; margin-bottom: 6px; }
-.sp-collapse { font-size: 14px; }
-.sp-recessed-list { display: flex; flex-direction: column; gap: 4px; max-height: 200px; overflow-y: auto; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 6px; }
-.sp-node-row { display: flex; align-items: center; gap: 8px; font-size: 13px; padding: 2px 0; }
-.sp-node-status { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
-.sp-node-enabled { background: var(--info); }
-.sp-node-disabled { background: var(--text-muted); }
-.sp-node-name { color: var(--text); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; }
-.sp-node-type { font-size: 11px; font-weight: 600; text-transform: uppercase; color: var(--text-muted); padding: 1px 6px; border: 1px solid var(--border); border-radius: 3px; flex-shrink: 0; }
-.sp-node-version { font-size: 13px; color: var(--text-muted); font-family: monospace; flex-shrink: 0; user-select: text; }
-.sp-empty { font-size: 14px; color: var(--text-muted); }
-.sp-pip-row { display: flex; justify-content: space-between; align-items: center; padding: 2px 0; font-size: 13px; }
-.sp-pip-name { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; user-select: text; }
-.sp-pip-version { color: var(--text-muted); font-family: monospace; margin-left: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 50%; user-select: text; }
+/* Snapshot detail layout (ls- prefix) — used by LoadSnapshotModal, ImportPreviewModal, ModalDialog, SnapshotTab */
+.ls-section { margin-bottom: 16px; }
+.ls-section:last-child { margin-bottom: 0; }
+.ls-section-title { font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.3px; margin-bottom: 8px; }
+.ls-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 16px; margin-bottom: 10px; }
+.ls-field { display: flex; flex-direction: column; gap: 2px; margin-bottom: 4px; }
+.ls-label { font-size: 13px; color: var(--text-muted); }
+.ls-value { font-size: 14px; color: var(--text); user-select: text; }
+.ls-value-loading { color: var(--text-muted); }
+.ls-timeline { display: flex; flex-direction: column; gap: 4px; max-height: 200px; overflow-y: auto; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 6px; }
+.ls-timeline-item { display: flex; align-items: center; gap: 8px; font-size: 13px; padding: 6px 10px; background: var(--bg); border-radius: 5px; }
+.ls-trigger { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px; padding: 1px 6px; border-radius: 3px; flex-shrink: 0; color: var(--text-muted); background: var(--surface); }
+.ls-trigger-boot { color: var(--text-muted); }
+.ls-trigger-restart { color: var(--info); }
+.ls-trigger-manual { color: var(--success); }
+.ls-trigger-pre-update { color: var(--success); }
+.ls-trigger-post-update { color: var(--warning); }
+.ls-trigger-post-restore { color: var(--warning); }
+.ls-current-tag { font-size: 11px; font-weight: 600; color: var(--accent); flex-shrink: 0; }
+.ls-meta { color: var(--text-muted); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ls-time { color: var(--text-muted); font-size: 13px; flex-shrink: 0; }
+.ls-subsection { margin-top: 10px; }
+.ls-subsection-title { font-size: 13px; font-weight: 600; color: var(--text-muted); cursor: pointer; display: flex; align-items: center; justify-content: space-between; user-select: none; margin-bottom: 6px; }
+.ls-collapse { font-size: 14px; }
+.ls-node-row { display: flex; align-items: center; gap: 8px; font-size: 13px; padding: 2px 0; }
+.ls-node-status { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.ls-node-enabled { background: var(--info); }
+.ls-node-disabled { background: var(--text-muted); }
+.ls-node-name { color: var(--text); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; }
+.ls-node-type { font-size: 11px; font-weight: 600; text-transform: uppercase; color: var(--text-muted); padding: 1px 5px; border: 1px solid var(--border); border-radius: 3px; flex-shrink: 0; }
+.ls-node-version { font-size: 13px; color: var(--text-muted); font-family: monospace; flex-shrink: 0; user-select: text; }
+.ls-empty { font-size: 14px; color: var(--text-muted); }
+.ls-pip-row { display: flex; justify-content: space-between; align-items: center; padding: 2px 0; font-size: 13px; }
+.ls-pip-name { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; user-select: text; }
+.ls-pip-version { color: var(--text-muted); font-family: monospace; margin-left: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 50%; user-select: text; }
 
 .modal-prompt-card {
   background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
@@ -897,7 +927,7 @@ input[type="checkbox"]:checked::after { transform: translateX(16px); }
 .quick-install-modal {
   max-width: 620px;
   min-height: 420px;
-  height: auto; max-height: calc(100vh - 100px);
+  height: auto; max-height: calc(100vh - 100px - var(--titlebar-height));
 }
 .quick-install-desc {
   font-size: 14px; color: var(--text-muted); margin-bottom: 16px;
@@ -976,3 +1006,15 @@ button.detail-header-btn.active:hover:not(:disabled) {
 button.detail-header-btn:disabled {
   cursor: default; opacity: 0.4;
 }
+
+/* Shared arg-row styles — used by ArgRow, ArgRadioGroup */
+.args-row { padding: 3px 0; }
+.args-row + .args-row { border-top: 1px solid var(--border); }
+.args-inline-row { display: flex; align-items: center; gap: 6px; }
+.args-check-row { display: flex; align-items: center; gap: 5px; cursor: pointer; flex-shrink: 0; }
+.args-check-row input[type="checkbox"] { margin: 0; flex-shrink: 0; }
+.args-name { font-size: 12px; color: var(--text); white-space: nowrap; font-family: monospace; }
+.args-inline-input { flex: 1; min-width: 0; max-width: 200px; }
+.args-value-tag { font-size: 10px; font-family: monospace; padding: 1px 4px; border-radius: 3px; white-space: nowrap; flex-shrink: 0; }
+.args-value-tag.required { color: var(--accent); background: color-mix(in srgb, var(--accent) 15%, transparent); }
+.args-value-tag.optional { color: var(--text-muted); background: color-mix(in srgb, var(--text-muted) 15%, transparent); }

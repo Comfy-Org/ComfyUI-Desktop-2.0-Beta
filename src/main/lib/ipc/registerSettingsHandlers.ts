@@ -4,6 +4,7 @@ import {
   getAppVersion, resolveTheme,
   _onLocaleChanged, _broadcastToRenderer,
 } from './shared'
+import { updateTitleBarOverlay } from '../titleBarOverlay'
 
 export function registerSettingsHandlers(): void {
   ipcMain.handle('get-settings-sections', () => {
@@ -113,6 +114,7 @@ export function registerSettingsHandlers(): void {
     settings.set(key, value)
     if (key === 'theme') {
       _broadcastToRenderer('theme-changed', resolveTheme())
+      updateTitleBarOverlay()
     }
     if (key === 'language') {
       i18n.init(value as string)
