@@ -49,8 +49,6 @@ const api: ElectronApi = {
     ipcRenderer.invoke('close-host-window'),
   transferHostBoundsToInstall: (installationId) =>
     ipcRenderer.invoke('transfer-host-bounds-to-install', installationId),
-  openNewInstallFromHost: () =>
-    ipcRenderer.invoke('open-new-install-from-host'),
   getRunningInstances: () => ipcRenderer.invoke('get-running-instances'),
   cancelLaunch: () => ipcRenderer.invoke('cancel-launch'),
   cancelOperation: (installationId) =>

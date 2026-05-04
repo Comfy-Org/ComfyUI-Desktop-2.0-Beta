@@ -254,14 +254,19 @@ function handleChooserShowNewInstall(): void {
   void switchPanel('new-install')
 }
 
-function handleChooserShowDetail(_installation: Installation): void {
-  // View Details from the chooser context menu. Inside the install-less
-  // host window there's no install backing the panel yet, so opening a
-  // detail modal here would be confusing — focus the launcher window where
-  // the detail surface already lives. (Same focus-launcher path as the
-  // new-install CTA; both go away when step 3 introduces native File-menu
-  // entries that open dedicated host windows for these flows.)
-  void window.api.openNewInstallFromHost()
+function handleChooserShowDetail(installation: Installation): void {
+  // View Details from the chooser context menu. The chooser host has
+  // no install backing it (installationId === null), so 'install-settings'
+  // can't be set on this window directly. Instead reuse the pick path —
+  // launching the install opens its own ComfyUI window where the user
+  // can reach Install Settings via the install pill caret.
+  //
+  // A future improvement is to spawn an install-backed host window with
+  // panel=install-settings without launching the instance, but that's
+  // a larger change — for now "View Details" effectively means "open
+  // this install" which is a more useful default than the dead-end the
+  // launcher window's detail modal provided.
+  void handleChooserPick(installation)
 }
 
 function handleNavigateList(): void {

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Tray, Menu, ipcMain, shell, clipboard, screen, net, nativeTheme, WebContentsView } from 'electron'
+import { app, BrowserWindow, Tray, Menu, ipcMain, shell, clipboard, screen, net, WebContentsView } from 'electron'
 import path from 'path'
 import fs from 'fs'
 import { execFile } from 'child_process'
@@ -19,7 +19,6 @@ import {
   cleanupTempDownloads,
   detachWindowDownloads,
   registerDownloadIpc,
-  setMainWindow,
   startAssetDownload,
 } from './lib/comfyDownloadManager'
 import { get as getInstallation, installationEvents } from './installations'
@@ -27,7 +26,7 @@ import { getModelDownloadContentScript } from './lib/comfyContentScript'
 import { shouldOpenInPopup } from './lib/allowedPopups'
 import { showModelFolderRelaunchPage } from './lib/relaunchPage'
 import { COMFY_BG, SPLASH_DARK, TITLEBAR_BG, type SplashTheme } from './lib/theme'
-import { TITLEBAR_HEIGHT, TRAFFIC_LIGHT_POSITION, titleBarOverlayForTheme, comfyTitleBarOverlay, updateTitleBarOverlay, setMainWindowId } from './lib/titleBarOverlay'
+import { TITLEBAR_HEIGHT, TRAFFIC_LIGHT_POSITION, comfyTitleBarOverlay } from './lib/titleBarOverlay'
 import { resolveTheme, sourceMap, _registerExtraBroadcastTarget, _unregisterExtraBroadcastTarget, _runningSessions } from './lib/ipc/shared'
 import * as mainTelemetry from './lib/telemetry'
 import { getDeviceId } from './lib/deviceId'
@@ -192,7 +191,12 @@ function attachContextMenu(comfyWindow: BrowserWindow, webContents?: Electron.We
   })
 }
 
-let mainWindow: BrowserWindow | null = null
+// Phase 3 — `mainWindow` (the launcher window) was retired. The const
+// is kept null and never reassigned so the historical guard checks
+// `if (mainWindow && !mainWindow.isDestroyed())` continue to type-check
+// and short-circuit cleanly without rewriting every call site in this
+// commit. A follow-up cleanup commit will scrub the now-dead branches.
+const mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
 
 /**
@@ -418,156 +422,27 @@ function registerProcessErrorHandlers(): void {
   })
 }
 
-function createMainWindow(): void {
-  const isDark = resolveTheme() === 'dark'
-  mainWindow = new BrowserWindow({
-    width: 1470,
-    height: 880,
-    minWidth: 650,
-    minHeight: 500,
-    icon: APP_ICON,
-    title: `ComfyUI Desktop 2.0 v${APP_VERSION}`,
-    backgroundColor: '#202020',
-    show: false,
-    titleBarStyle: 'hidden',
-    ...(process.platform === 'darwin'
-      ? { trafficLightPosition: TRAFFIC_LIGHT_POSITION }
-      : { titleBarOverlay: titleBarOverlayForTheme(isDark) }),
-    webPreferences: {
-      nodeIntegration: false,
-      contextIsolation: true,
-      preload: path.join(__dirname, '../preload/index.js'),
-    },
-  })
-  setMainWindowId(mainWindow.id)
-  const isDev = !!process.env['ELECTRON_RENDERER_URL']
-  const loadTarget = process.env['ELECTRON_RENDERER_URL'] || 'index.html (file)'
-
-  if (isDev) {
-    console.log(`[main] dev mode — loading renderer from ${loadTarget}`)
-    console.log(`[main] platform=${process.platform} electron=${process.versions.electron} chrome=${process.versions.chrome}`)
-  }
-
-  mainWindow.once('ready-to-show', () => {
-    if (isDev) console.log('[main] ready-to-show fired')
-    if (mainWindow) bringToFront(mainWindow)
-    createTray()
-
-    // Suggest Chinese mirrors on first startup if system locale is Chinese
-    const effectiveLocale = (settings.get('language') as string | undefined) || app.getLocale()
-    if (
-      effectiveLocale.startsWith('zh') &&
-      settings.get('useChineseMirrors') === undefined &&
-      settings.get('chineseMirrorsPrompted') !== true
-    ) {
-      // Small delay so the renderer has time to mount
-      setTimeout(() => {
-        mainWindow?.webContents.send('suggest-chinese-mirrors')
-      }, 1500)
-    }
-  })
-
-  attachContextMenu(mainWindow)
-  mainWindow.setMenuBarVisibility(false)
-
-  // Sync title bar overlay colors when the OS theme changes (Windows/Linux only)
-  if (process.platform !== 'darwin') {
-    nativeTheme.on('updated', updateTitleBarOverlay)
-  }
-
-  mainWindow.webContents.on('did-finish-load', () => {
-    if (isDev) console.log(`[main] did-finish-load — url=${mainWindow?.webContents.getURL()}`)
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.setZoomLevel(0)
-    }
-  })
-
-  mainWindow.webContents.on('did-fail-load', (_e, code, description, failUrl, isMainFrame) => {
-    if (!isMainFrame) return
-    console.error(`[main] did-fail-load: code=${code} desc="${description}" url=${failUrl}`)
-  })
-
-  mainWindow.webContents.on('render-process-gone', (_event, details) => {
-    forwardDatadogError({
-      source: 'main-render-process-gone',
-      message: `Main renderer process exited (${details.reason})`,
-      level: 'critical',
-      context: {
-        origin: 'main-process',
-        reason: details.reason,
-        exitCode: details.exitCode,
-      },
-    })
-  })
-
-  function notifyZoomLevel(): void {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      const level = mainWindow.webContents.getZoomLevel()
-      mainWindow.webContents.send('zoom-changed', level)
-    }
-  }
-
-  // Pinch-to-zoom
-  mainWindow.webContents.on('zoom-changed', () => notifyZoomLevel())
-
-  // Keyboard zoom (Ctrl/Cmd + =/-/0) and block Ctrl+W from closing the window
-  mainWindow.webContents.on('before-input-event', (e, input) => {
-    if (input.type !== 'keyDown') return
-    const mod = input.control || input.meta
-    if (mod && input.key.toLowerCase() === 'w') {
-      e.preventDefault()
-      return
-    }
-    if (mod && (input.key === '=' || input.key === '+' || input.key === '-' || input.key === '0')) {
-      setTimeout(notifyZoomLevel, 50)
-    }
-  })
-
-  setMainWindow(mainWindow)
-
-  mainWindow.on('closed', () => {
-    mainWindow = null
-    setMainWindow(null)
-  })
-
-  if (process.env['ELECTRON_RENDERER_URL']) {
-    mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
-  } else {
-    mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'))
-  }
-
-  mainWindow.on('close', (e) => {
-    if (isQuitInProgress()) return
-
-    const onClose = (settings.get('onAppClose') as string | undefined) || 'tray'
-    if (onClose === 'tray') {
-      e.preventDefault()
-      mainWindow!.hide()
-      createTray()
-      return
-    }
-    if (ipc.hasActiveOperations()) {
-      e.preventDefault()
-      ipc.getActiveDetails()
-        .catch(() => [] as Awaited<ReturnType<typeof ipc.getActiveDetails>>)
-        .then((details) => {
-          if (mainWindow!.isDestroyed()) return
-          if (details.length === 0) { quitApp(); return }
-          mainWindow!.webContents.send('confirm-quit', details)
-        })
-      return
-    }
-    quitApp()
-  })
-}
+// Phase 3 — `createMainWindow()` was removed. The launcher window is
+// retired; the install-less chooser host (`openChooserHostWindow`) is
+// the entry-point surface and per-install ComfyUI windows
+// (`openComfyWindow`) host install-scoped panels. The `mainWindow`
+// global is intentionally retained as `let mainWindow: ... = null`
+// (declared above) so the historical guarded references throughout
+// this file (`if (mainWindow && !mainWindow.isDestroyed())`) compile
+// cleanly and short-circuit to no-ops; a follow-up commit will scrub
+// the now-dead branches.
 
 function updateTrayMenu(): void {
   if (!tray) return
+  // Phase 3 — the launcher window is retired; the install-less chooser
+  // host is the primary surface. "Show App" and the previous separate
+  // "Choose an Install" entry now collapse into a single chooser-host
+  // focus action.
   const contextMenu = Menu.buildFromTemplate([
-    { label: i18n.t('tray.showApp'), click: () => showMainWindow() },
-    // Phase 3 — chooser host is the primary surface. Focuses an existing
-    // one if open so the tray entry doesn't stack duplicate windows.
-    { label: 'Choose an Install', click: () => { openOrFocusChooserHostWindow() } },
+    {
+      label: i18n.t('tray.showApp'),
+      click: () => { openOrFocusChooserHostWindow() },
+    },
     { type: 'separator' },
     { label: i18n.t('tray.quit'), click: () => quitApp() },
   ])
@@ -580,7 +455,7 @@ function createTray(): void {
   tray = new Tray(TRAY_ICON)
   tray.setToolTip('ComfyUI Desktop 2.0')
   updateTrayMenu()
-  tray.on('double-click', () => showMainWindow())
+  tray.on('double-click', () => { openOrFocusChooserHostWindow() })
 }
 
 /** Show a window and bring it to the front, working around Windows focus-theft prevention. */
@@ -594,19 +469,6 @@ function bringToFront(win: BrowserWindow): void {
     win.show()
     win.focus()
   }
-}
-
-function showMainWindow(): void {
-  // Phase 3 — the chooser host is the primary surface. Prefer focusing
-  // an existing chooser host (or the launcher window while it still
-  // exists, for backwards continuity), and fall back to spawning a
-  // chooser host so the tray "Show App" entry never silently no-ops
-  // once `createMainWindow()` is dropped.
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    bringToFront(mainWindow)
-    return
-  }
-  openOrFocusChooserHostWindow()
 }
 
 function quitApp(): void {
@@ -1386,10 +1248,14 @@ function openChooserHostWindow(): BrowserWindow {
 
 ipcMain.handle('quit-app', () => quitApp())
 
+// Phase 3 — `reset-zoom` was launcher-window-only (the launcher's
+// ProgressModal exposed a Reset-Zoom shortcut). With the launcher
+// retired, this IPC has no callers; the per-install ComfyUI windows
+// manage their own zoom independently. Kept as a stubbed handler so
+// any straggling renderer still bound to the channel doesn't reject
+// — a follow-up cleanup commit will scrub the preload binding too.
 ipcMain.handle('reset-zoom', () => {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.setZoomLevel(0)
-  }
+  // no-op
 })
 
 /**
@@ -1566,21 +1432,6 @@ ipcMain.handle('close-comfy-window', (_event, installationId: string) => {
 })
 
 /**
- * Chooser → "create a new install" (Phase 3 step 2c).
- *
- * The launcher window owns the new-install flow today (sidebar / detail
- * surface). Until step 3 promotes those flows to a native File menu, we
- * just focus the launcher window so the user can click New Install from
- * there. This keeps the chooser empty-state CTA wired without forcing a
- * new IPC plumbing path that 3 will rewrite anyway.
- */
-ipcMain.handle('open-new-install-from-host', () => {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    bringToFront(mainWindow)
-  }
-})
-
-/**
  * Close the host window that contains the calling panel WebContents
  * (Phase 3 step 2d).
  *
@@ -1671,10 +1522,16 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
 } else {
   if (app.isPackaged) {
     app.on('second-instance', () => {
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        if (mainWindow.isMinimized()) mainWindow.restore()
-        bringToFront(mainWindow)
+      // Phase 3 — the launcher window is gone; route the OS-level
+      // "open another instance" attempt to the chooser host instead.
+      // Restores any minimised chooser host before focusing it.
+      const chooser = findFirstChooserHostWindow()
+      if (chooser) {
+        if (chooser.isMinimized()) chooser.restore()
+        bringToFront(chooser)
+        return
       }
+      openChooserHostWindow()
     })
   }
 
@@ -1705,27 +1562,27 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
     cleanupTempDownloads()
     ipc.register({ onLaunch, onStop, onComfyExited, onComfyRestarted, onModelFolderRelaunch, onLocaleChanged: updateTrayMenu })
     updater.register()
-    createMainWindow()
-    // Phase 3 — open the install-less chooser host alongside the launcher
-    // window at startup. The launcher window will be retired entirely once
-    // step 5's File menu replaces its top-bar action cluster; until then
-    // both windows coexist.
+    // Tray was previously bound to the launcher window's ready-to-show
+    // event. With the launcher window retired (Phase 3), the tray is
+    // an app-wide construct and is created up-front so it's available
+    // regardless of which host window happens to be open.
+    createTray()
+    // Phase 3 — the install-less chooser host is the primary surface;
+    // the launcher window is retired. createMainWindow() is no longer
+    // called here. Each install gets its own ComfyUI window via
+    // openComfyWindow() when launched, and the chooser host is the
+    // entry-point for picking / creating installs.
     openOrFocusChooserHostWindow()
   })
 
   app.on('activate', () => {
-    // macOS dock click. Prefer focusing an existing chooser host (the
-    // user's primary surface in Phase 3) — fall back to the launcher
-    // window, fall back to creating a fresh chooser host if neither is
-    // currently open.
+    // macOS dock click. Focus an existing chooser host if open,
+    // otherwise spawn a fresh one. With the launcher window retired
+    // (Phase 3), the chooser host is the only fallback surface — any
+    // running install windows already accept their own focus events.
     const chooser = findFirstChooserHostWindow()
     if (chooser) {
       bringToFront(chooser)
-      return
-    }
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.show()
-      mainWindow.focus()
       return
     }
     openChooserHostWindow()

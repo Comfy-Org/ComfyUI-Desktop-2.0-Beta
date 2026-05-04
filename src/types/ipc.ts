@@ -679,11 +679,6 @@ export interface ElectronApi {
    *  install window opens exactly where the chooser was — visually a
    *  swap-in-place. No-op for install-backed callers. */
   transferHostBoundsToInstall(installationId: string): Promise<boolean>
-  /** Chooser → "create a new install" (Phase 3 step 2c). The chooser's
-   *  empty-state CTA fires this; main routes to the same new-install entry
-   *  the launcher window exposes. Becomes a native File-menu equivalent in
-   *  step 3. */
-  openNewInstallFromHost(): Promise<void>
   getRunningInstances(): Promise<RunningInstance[]>
   cancelLaunch(): Promise<void>
   cancelOperation(installationId: string): Promise<void>
