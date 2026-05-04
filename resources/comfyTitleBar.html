@@ -30,22 +30,22 @@
     }
     .panel-tabs {
       display: flex;
-      align-items: stretch;
+      align-items: center;
       app-region: no-drag;
       flex: 0 1 auto;
       min-width: 0;
-      gap: 0;
+      gap: 4px;
     }
     .panel-tabs button {
       app-region: no-drag;
       background: transparent;
       color: inherit;
-      border: 0;
-      border-bottom: 2px solid transparent;
-      padding: 0 14px;
+      border: 1px solid transparent;
+      padding: 4px 10px;
       font: inherit;
+      border-radius: 4px;
       cursor: pointer;
-      opacity: 0.7;
+      opacity: 0.75;
       display: inline-flex;
       align-items: center;
       max-width: 320px;
@@ -56,20 +56,22 @@
     }
     .panel-tabs button:hover {
       opacity: 1;
-      background: rgba(255,255,255,0.05);
+      background: rgba(255,255,255,0.06);
     }
     .panel-tabs button.active {
       opacity: 1;
-      background: rgba(255,255,255,0.07);
-      border-bottom-color: currentColor;
+      background: rgba(255,255,255,0.1);
+      border-color: rgba(255,255,255,0.18);
     }
-    /* The comfy tab is the install identity — let it grow with the title text. */
+    /* The comfy tab is the install identity — emphasised so it reads as the
+       window's primary label rather than as a peer of the settings buttons. */
     .panel-tabs button[data-panel="comfy"] {
       font-weight: 500;
     }
-    body.is-light .panel-tabs button:hover { background: rgba(0,0,0,0.05); }
+    body.is-light .panel-tabs button:hover { background: rgba(0,0,0,0.06); }
     body.is-light .panel-tabs button.active {
-      background: rgba(0,0,0,0.07);
+      background: rgba(0,0,0,0.08);
+      border-color: rgba(0,0,0,0.18);
     }
     /* Spacer pushes nothing — the empty flex region absorbs drag space. */
     .drag-spacer {
