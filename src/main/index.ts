@@ -538,10 +538,9 @@ function updateTrayMenu(): void {
   if (!tray) return
   const contextMenu = Menu.buildFromTemplate([
     { label: i18n.t('tray.showApp'), click: () => showMainWindow() },
-    // Phase 3 step 2c — entry-point for the install-less host window so
-    // the chooser infrastructure can be exercised end-to-end without
-    // waiting on the startup-picker / File-menu wiring (steps 2d / 3).
-    { label: 'Open Chooser Window (preview)', click: () => { openChooserHostWindow() } },
+    // Phase 3 — chooser host is the primary surface. Focuses an existing
+    // one if open so the tray entry doesn't stack duplicate windows.
+    { label: 'Choose an Install', click: () => { openOrFocusChooserHostWindow() } },
     { type: 'separator' },
     { label: i18n.t('tray.quit'), click: () => quitApp() },
   ])
@@ -1175,6 +1174,31 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
  * comfyView still exists (so `layoutViews` doesn't have to special-case
  * its absence) but is sized to zero and never made visible.
  */
+/**
+ * Find the first install-less host window (chooser / file-menu mode) so
+ * the startup picker / tray entry can focus an existing one instead of
+ * stacking duplicates. Step 5's "File → New Window" entry-point will
+ * always create a fresh one regardless.
+ */
+function findFirstChooserHostWindow(): BrowserWindow | null {
+  for (const [, entry] of comfyWindows) {
+    if (entry.installationId === null && !entry.window.isDestroyed()) {
+      return entry.window
+    }
+  }
+  return null
+}
+
+/** Focus an existing chooser host window if one is open, otherwise create one. */
+function openOrFocusChooserHostWindow(): BrowserWindow {
+  const existing = findFirstChooserHostWindow()
+  if (existing) {
+    bringToFront(existing)
+    return existing
+  }
+  return openChooserHostWindow()
+}
+
 function openChooserHostWindow(): BrowserWindow {
   const windowKey = nextChooserKey()
 
@@ -1589,13 +1613,29 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
     ipc.register({ onLaunch, onStop, onComfyExited, onComfyRestarted, onModelFolderRelaunch, onLocaleChanged: updateTrayMenu })
     updater.register()
     createMainWindow()
+    // Phase 3 — open the install-less chooser host alongside the launcher
+    // window at startup. The launcher window will be retired entirely once
+    // step 5's File menu replaces its top-bar action cluster; until then
+    // both windows coexist.
+    openOrFocusChooserHostWindow()
   })
 
   app.on('activate', () => {
+    // macOS dock click. Prefer focusing an existing chooser host (the
+    // user's primary surface in Phase 3) — fall back to the launcher
+    // window, fall back to creating a fresh chooser host if neither is
+    // currently open.
+    const chooser = findFirstChooserHostWindow()
+    if (chooser) {
+      bringToFront(chooser)
+      return
+    }
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.show()
       mainWindow.focus()
+      return
     }
+    openChooserHostWindow()
   })
 
   app.on('before-quit', () => {
