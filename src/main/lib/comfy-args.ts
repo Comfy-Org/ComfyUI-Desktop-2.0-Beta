@@ -151,6 +151,14 @@ const CATEGORY_ORDER = [
   'Paths', 'Logging', 'Advanced', 'Other',
 ]
 
+/**
+ * Flags that exist in ComfyUI's --help output but should NOT be shown in the
+ * args-builder suggestion panel. These are intended for internal launcher use
+ * (e.g. desktop integration) — users can still type them manually and they
+ * remain in `knownFlags` so they survive `filterUnsupportedArgs`.
+ */
+const HIDDEN_ARGS = new Set(['feature-flag', 'list-feature-flags'])
+
 function getCategory(flagName: string): string {
   return CATEGORY_MAP[flagName] || 'Other'
 }
@@ -309,6 +317,9 @@ export function parseHelpOutput(helpText: string): ComfyArgsSchema {
   for (const opt of parsedOptions) {
     if (opt.name === 'h' || opt.name === 'help') continue
     knownFlags.add(opt.name)
+    // HIDDEN_ARGS are kept in knownFlags (so user-typed values survive filtering)
+    // but excluded from the suggestion list shown in the UI.
+    if (HIDDEN_ARGS.has(opt.name)) continue
     args.push({
       name: opt.name,
       flag: opt.flag,

@@ -51,6 +51,8 @@ import { findLockingProcesses } from '../file-lock-info'
 import type { LaunchCmd } from '../process'
 import { getComfyArgsSchema, filterUnsupportedArgs } from '../comfy-args'
 import type { ComfyArgDef } from '../comfy-args'
+import { getComfyFeatureFlagRegistry } from '../comfy-feature-flags'
+import type { FeatureFlagRegistry } from '../comfy-feature-flags'
 
 // Re-export frequently used imports so handler modules can import from shared
 export {
@@ -78,11 +80,13 @@ export {
   restoreCustomNodes, restorePipPackages, restoreComfyUIVersion, buildPostRestoreState, formatSnapshotVersion, resolveSnapshotVersion,
   getVariantLabel, REQUIRES_STOPPED, findLockingProcesses,
   getComfyArgsSchema, filterUnsupportedArgs,
+  getComfyFeatureFlagRegistry,
 }
 export type {
   ChildProcess, InstallationRecord, ComfyVersion, LatestTagOverride,
   GpuInfo, SnapshotExportEnvelope, FieldOption, SourcePlugin,
   Theme, ResolvedTheme, QuitActiveItem, LaunchCmd, ComfyArgDef,
+  FeatureFlagRegistry,
 }
 
 // ── Constants ──

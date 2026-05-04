@@ -114,10 +114,12 @@ export const standalone: SourcePlugin = {
     const userArgs = ((installation.launchArgs as string | undefined) ?? DEFAULT_LAUNCH_ARGS).trim()
     const parsed = userArgs.length > 0 ? parseArgs(userArgs) : []
     const port = extractPort(parsed)
-    const desktop2Flags = ['--feature-flag', 'show_signin_button=true']
+    // Desktop-managed feature flags (e.g. show_signin_button) are injected in
+    // handleLaunch after we discover the running ComfyUI's feature-flag registry,
+    // so we only set keys the install actually knows about.
     return {
       cmd: pythonPath,
-      args: ['-s', path.join('ComfyUI', 'main.py'), ...desktop2Flags, ...parsed],
+      args: ['-s', path.join('ComfyUI', 'main.py'), ...parsed],
       cwd: installation.installPath,
       port,
     }
