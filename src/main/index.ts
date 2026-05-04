@@ -29,6 +29,9 @@ import { showModelFolderRelaunchPage } from './lib/relaunchPage'
 import { COMFY_BG, SPLASH_DARK, TITLEBAR_BG, type SplashTheme } from './lib/theme'
 import { TITLEBAR_HEIGHT, TRAFFIC_LIGHT_POSITION, titleBarOverlayForTheme, comfyTitleBarOverlay, updateTitleBarOverlay, setMainWindowId } from './lib/titleBarOverlay'
 import { resolveTheme, sourceMap } from './lib/ipc/shared'
+import * as mainTelemetry from './lib/telemetry'
+import { getDeviceId } from './lib/deviceId'
+import { scrubAll } from './lib/piiScrub'
 
 todesktop.init({ autoUpdater: false })
 
@@ -194,29 +197,31 @@ function serializeUnknownError(error: unknown): { message: string; stack?: strin
   }
 }
 
-const PII_PATH_PATTERNS = [
-  /([A-Za-z]:[\\/]Users[\\/])[^\\/]+?(?=[\\/]|$)/g,
-  /(\/Users\/)[^\\/]+?(?=\/|$)/g,
-  /(\/home\/)[^\\/]+?(?=\/|$)/g,
-]
-
-function scrubPII(value: string): string {
-  let scrubbed = value
-  for (const pattern of PII_PATH_PATTERNS) {
-    scrubbed = scrubbed.replace(pattern, (_match, prefix: string) => `${prefix}[REDACTED]`)
-  }
-  return scrubbed
-}
-
 function forwardDatadogError(payload: DatadogForwardedError): void {
-  if (!mainWindow || mainWindow.isDestroyed()) return
+  const scrubbed: DatadogForwardedError = {
+    ...payload,
+    message: scrubAll(payload.message),
+    stack: payload.stack ? scrubAll(payload.stack) : undefined,
+    // Mark this error as already captured by main-process PostHog so the
+    // renderer's `onDatadogError` listener routes it to Datadog only and
+    // we don't double-count exceptions in PostHog.
+    skipPostHog: true,
+  }
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    try {
+      mainWindow.webContents.send('dd-error', scrubbed)
+    } catch {}
+  }
+  // Also surface to PostHog Node so we don't lose the error if the renderer
+  // is gone (render-process-gone, before-quit shutdown, etc.).
   try {
-    const scrubbed: DatadogForwardedError = {
-      ...payload,
-      message: scrubPII(payload.message),
-      stack: payload.stack ? scrubPII(payload.stack) : undefined,
-    }
-    mainWindow.webContents.send('dd-error', scrubbed)
+    const err = new Error(scrubbed.message)
+    if (scrubbed.stack) err.stack = scrubbed.stack
+    mainTelemetry.captureException(err, {
+      origin: 'main-process',
+      source: scrubbed.source,
+      level: scrubbed.level ?? null,
+    })
   } catch {}
 }
 
@@ -954,9 +959,25 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
     })
   }
 
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
     migrateXdgPaths()
     registerProcessErrorHandlers()
+
+    // Bring up main-process telemetry as early as possible so install/migrate
+    // sub-step events can fire even before the renderer mounts.
+    const telemetryEnabled = settings.get('telemetryEnabled') !== false
+    mainTelemetry.setConsent(telemetryEnabled)
+    mainTelemetry.initTelemetry({
+      appVersion: APP_VERSION,
+      appEnv: app.isPackaged ? 'prod-v2' : 'dev',
+      isPackaged: app.isPackaged,
+    })
+    mainTelemetry.installAppHooks()
+    mainTelemetry.identify(getDeviceId(), {
+      app_version: APP_VERSION,
+      platform: process.platform,
+      arch: process.arch,
+    })
 
     const locale = (settings.get('language') as string | undefined) || app.getLocale().split('-')[0]
     i18n.init(locale)

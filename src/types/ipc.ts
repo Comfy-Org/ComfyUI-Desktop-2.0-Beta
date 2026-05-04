@@ -486,6 +486,12 @@ export interface DatadogForwardedError {
   stack?: string
   level?: 'debug' | 'info' | 'warn' | 'error' | 'critical'
   context?: Record<string, unknown>
+  /**
+   * Set when the error has already been captured by main-process PostHog
+   * (via `mainTelemetry.captureException`). The renderer's listener forwards
+   * such errors to Datadog only, avoiding duplicate PostHog exceptions.
+   */
+  skipPostHog?: boolean
 }
 
 // --- Snapshot tab types ---
@@ -738,6 +744,7 @@ export interface ElectronApi {
   onModelDownloadProgress(callback: (progress: ModelDownloadProgress) => void): Unsubscribe
   onTelemetrySettingChanged(callback: (enabled: boolean | undefined) => void): Unsubscribe
   onDatadogError(callback: (payload: DatadogForwardedError) => void): Unsubscribe
+  onTelemetryActionFromMain(callback: (data: { event: string; context: Record<string, unknown> }) => void): Unsubscribe
   onErrorDetail(callback: (data: ErrorDetailData) => void): Unsubscribe
   onSuggestChineseMirrors(callback: () => void): Unsubscribe
 }

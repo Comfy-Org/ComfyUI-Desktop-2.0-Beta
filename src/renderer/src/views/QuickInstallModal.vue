@@ -128,7 +128,7 @@ async function open(): Promise<void> {
       return
     }
     source.value = standalone
-    emitTelemetryAction('launcher.install.method.selected', {
+    emitTelemetryAction('desktop2.install.method.selected', {
       source_id: standalone.id,
       source_category: standalone.category || standalone.id,
       flow: 'quick',
@@ -164,7 +164,7 @@ async function open(): Promise<void> {
 
 function selectVariant(option: FieldOption): void {
   selectedVariant.value = option
-  emitTelemetryAction('launcher.install.variant.selected', {
+  emitTelemetryAction('desktop2.install.variant.selected', {
     variant_bucket: toVariantBucket((option.data?.variantId as string | undefined) || option.value),
     recommended: !!option.recommended,
     flow: 'quick',

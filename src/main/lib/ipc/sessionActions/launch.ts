@@ -22,6 +22,7 @@ import type { ChildProcess, LaunchCmd } from '../shared'
 import type { ActionContext, ActionResult } from './types'
 import { scrubStderr, lastNLines, stripAnsi } from '../../scrubStderr'
 import { rotateLogFiles, getLogDir } from '../../logRotation'
+import { createExecutionTap } from '../../executionTap'
 import type { WriteStream } from 'fs'
 
 /**
@@ -179,6 +180,11 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
     const launchEnv = buildLaunchEnv(inst)
 
     const logStream = await openLogStream(inst.installPath)
+    const execTap = createExecutionTap({
+      installationId,
+      variant: (inst.variant as string | undefined) ?? null,
+      release: (inst.release as string | undefined) ?? null,
+    })
 
     const proc = spawnProcess(launchCmd.cmd!, launchCmd.args!, launchCmd.cwd!, launchEnv, { showWindow: launchCmd.showWindow })
     let stderrBuf = ''
@@ -186,6 +192,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
       const text = chunk.toString('utf-8')
       writeLog(logStream, text)
       sendOutput(text)
+      execTap.ingest(text, 'stdout')
     })
     proc.stderr?.on('data', (chunk: Buffer) => {
       const text = chunk.toString('utf-8')
@@ -193,6 +200,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
       if (stderrBuf.length > 8192) stderrBuf = stderrBuf.slice(-4096)
       writeLog(logStream, text)
       sendOutput(text)
+      execTap.ingest(text, 'stderr')
     })
 
     _operationAborts.delete(installationId)
@@ -203,6 +211,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
       logStream.end()
       const crashed = _runningSessions.has(installationId) && code !== 0
       const lastStderr = scrubStderr(lastNLines(stderrBuf, 100))
+      execTap.flushSummary()
       _removeSession(installationId)
       if (!sender.isDestroyed()) {
         sender.send('comfy-exited', { installationId, crashed, exitCode: code, installationName: inst.name, lastStderr })
@@ -314,6 +323,11 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
   }
 
   const logStream = await openLogStream(inst.installPath)
+  const execTap = createExecutionTap({
+    installationId,
+    variant: (inst.variant as string | undefined) ?? null,
+    release: (inst.release as string | undefined) ?? null,
+  })
 
   function spawnComfy(): { proc: ChildProcess; getStderr: () => string } {
     const p = spawnProcess(launchCmd.cmd!, launchCmd.args!, launchCmd.cwd!, launchEnv, { showWindow: launchCmd.showWindow })
@@ -322,6 +336,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
       const text = chunk.toString('utf-8')
       writeLog(logStream, text)
       sendOutput(text)
+      execTap.ingest(text, 'stdout')
     })
     p.stderr!.on('data', (chunk: Buffer) => {
       const text = chunk.toString('utf-8')
@@ -329,6 +344,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
       if (stderrBuf.length > 8192) stderrBuf = stderrBuf.slice(-4096)
       writeLog(logStream, text)
       sendOutput(text)
+      execTap.ingest(text, 'stderr')
     })
     return { proc: p, getStderr: () => stderrBuf }
   }
@@ -569,6 +585,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
       logStream.end()
       const crashed = _runningSessions.has(installationId)
       const lastStderr = scrubStderr(lastNLines(currentGetStderr(), 100))
+      execTap.flushSummary()
       _removeSession(installationId)
       if (!sender.isDestroyed()) {
         sender.send('comfy-exited', { installationId, crashed, exitCode: code, installationName: inst.name, lastStderr })

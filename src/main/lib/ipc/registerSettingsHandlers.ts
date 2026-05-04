@@ -5,6 +5,7 @@ import {
   _onLocaleChanged, _broadcastToRenderer,
 } from './shared'
 import { updateTitleBarOverlay } from '../titleBarOverlay'
+import * as mainTelemetry from '../telemetry'
 
 export function registerSettingsHandlers(): void {
   ipcMain.handle('get-settings-sections', () => {
@@ -123,6 +124,7 @@ export function registerSettingsHandlers(): void {
     }
     if (key === 'telemetryEnabled') {
       _broadcastToRenderer('telemetry-setting-changed', value)
+      mainTelemetry.setConsent(value !== false)
     }
   })
 

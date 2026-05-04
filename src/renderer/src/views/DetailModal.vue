@@ -454,7 +454,7 @@ async function runAction(action: ActionDef, btn: HTMLButtonElement | null): Prom
         String((mutableAction.data as Record<string, unknown>)?.[k] ?? k)
     )
     const title = `${rawTitle} — ${instName}`
-    emitTelemetryAction('launcher.action.invoked', { action_id: mutableAction.id, ...telemetryContext })
+    emitTelemetryAction('desktop2.action.invoked', { action_id: mutableAction.id, ...telemetryContext })
     emit('show-progress', {
       installationId: instId,
       title,
@@ -473,7 +473,7 @@ async function runAction(action: ActionDef, btn: HTMLButtonElement | null): Prom
     btn.classList.add('loading')
   }
   try {
-    emitTelemetryAction('launcher.action.invoked', { action_id: mutableAction.id, ...telemetryContext })
+    emitTelemetryAction('desktop2.action.invoked', { action_id: mutableAction.id, ...telemetryContext })
     const result = await window.api.runAction(
       props.installation.id,
       mutableAction.id,
@@ -485,7 +485,7 @@ async function runAction(action: ActionDef, btn: HTMLButtonElement | null): Prom
       return
     }
     const resultValue = result.cancelled ? 'cancelled' : (result.ok === false ? 'failed' : 'ok')
-    emitTelemetryAction('launcher.action.result', { action_id: mutableAction.id, result: resultValue, ...telemetryContext })
+    emitTelemetryAction('desktop2.action.result', { action_id: mutableAction.id, result: resultValue, ...telemetryContext })
     if (result.navigate === 'list') {
       emit('close')
       emit('navigate-list')
@@ -495,7 +495,7 @@ async function runAction(action: ActionDef, btn: HTMLButtonElement | null): Prom
       await modal.alert({ title: mutableAction.label, message: result.message })
     }
   } catch (error: unknown) {
-    emitTelemetryAction('launcher.action.result', {
+    emitTelemetryAction('desktop2.action.result', {
       action_id: mutableAction.id,
       result: 'failed',
       error_bucket: toErrorBucket(error),

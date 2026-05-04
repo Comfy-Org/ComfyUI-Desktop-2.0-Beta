@@ -29,11 +29,27 @@ describe('Content-Security-Policy', () => {
     expect(csp['connect-src']).toContain('https://browser-intake-us5-datadoghq.com')
   })
 
+  it('allows PostHog telemetry endpoints in connect-src', () => {
+    expect(csp['connect-src']).toContain('https://*.posthog.com')
+  })
+
+  it('allows PostHog avatar/feature-flag images', () => {
+    expect(csp['img-src']).toContain('https://*.posthog.com')
+  })
+
   it('restricts script-src to self only', () => {
+    // PostHog session recording is intentionally never loaded, so its
+    // recorder.js is blocked at the CSP layer. Only first-party scripts run.
     expect(csp['script-src']).toBe("'self'")
   })
 
   it('restricts default-src to self only', () => {
     expect(csp['default-src']).toBe("'self'")
+  })
+
+  it('does not declare a worker-src directive', () => {
+    // Nothing in the app loads web workers; without session recording there
+    // is no need for blob:/data: workers, so the directive is omitted.
+    expect(csp['worker-src']).toBeUndefined()
   })
 })

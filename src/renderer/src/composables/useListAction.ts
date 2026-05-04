@@ -46,7 +46,7 @@ export function useListAction(uiSurface: string, callbacks: ListActionCallbacks)
         confirmStyle: action.style || 'danger',
       })
       if (!confirmed) {
-        emitTelemetryAction('launcher.action.result', { action_id: action.id, result: 'cancelled', ...telemetryContext })
+        emitTelemetryAction('desktop2.action.result', { action_id: action.id, result: 'cancelled', ...telemetryContext })
         return
       }
     }
@@ -54,13 +54,13 @@ export function useListAction(uiSurface: string, callbacks: ListActionCallbacks)
     if (action.id === 'launch') {
       const canLaunch = await localInstanceGuard.checkBeforeLaunch(inst.id)
       if (!canLaunch) {
-        emitTelemetryAction('launcher.action.result', { action_id: action.id, result: 'cancelled', ...telemetryContext })
+        emitTelemetryAction('desktop2.action.result', { action_id: action.id, result: 'cancelled', ...telemetryContext })
         return
       }
     }
 
     sessionStore.clearErrorInstance(inst.id)
-    emitTelemetryAction('launcher.action.invoked', { action_id: action.id, ...telemetryContext })
+    emitTelemetryAction('desktop2.action.invoked', { action_id: action.id, ...telemetryContext })
 
     if (action.showProgress) {
       callbacks.showProgress({
@@ -79,14 +79,14 @@ export function useListAction(uiSurface: string, callbacks: ListActionCallbacks)
         return
       }
       const resultValue = result.cancelled ? 'cancelled' : (result.ok === false ? 'failed' : 'ok')
-      emitTelemetryAction('launcher.action.result', { action_id: action.id, result: resultValue, ...telemetryContext })
+      emitTelemetryAction('desktop2.action.result', { action_id: action.id, result: resultValue, ...telemetryContext })
       if (callbacks.onNavigate) {
         await callbacks.onNavigate(result, action)
       } else if (result.message) {
         await modal.alert({ title: action.label, message: result.message })
       }
     } catch (error: unknown) {
-      emitTelemetryAction('launcher.action.result', {
+      emitTelemetryAction('desktop2.action.result', {
         action_id: action.id,
         result: 'failed',
         error_bucket: toErrorBucket(error),

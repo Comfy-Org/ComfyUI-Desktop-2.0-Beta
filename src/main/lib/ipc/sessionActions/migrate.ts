@@ -8,6 +8,7 @@ import {
 } from '../shared'
 import type { InstallationRecord } from '../shared'
 import type { ActionContext, ActionResult } from './types'
+import * as telemetry from '../../telemetry'
 
 export async function handleMigrateToStandalone({ event, installationId, inst, actionData }: ActionContext): Promise<ActionResult> {
   if (_operationAborts.has(installationId)) {
@@ -21,6 +22,11 @@ export async function handleMigrateToStandalone({ event, installationId, inst, a
   const abort = new AbortController()
   _operationAborts.set(installationId, abort)
 
+  const flowContext = {
+    source_id: inst.sourceId as string,
+    source_installation_id: inst.id,
+  }
+
   let entry: InstallationRecord | null = null
   let destPath = ''
   try {
@@ -32,9 +38,11 @@ export async function handleMigrateToStandalone({ event, installationId, inst, a
       uniqueName,
       ensureDefaultPrimary,
     }
-    const result = inst.sourceId === 'desktop'
-      ? await performDesktopMigration(actionData, migrationTools, { id: inst.id, name: inst.name })
-      : await performLocalMigration(inst, actionData, migrationTools)
+    const result = await telemetry.trackedStep('desktop2.migrate.flow', flowContext, async () => {
+      return inst.sourceId === 'desktop'
+        ? performDesktopMigration(actionData, migrationTools, { id: inst.id, name: inst.name })
+        : performLocalMigration(inst, actionData, migrationTools)
+    })
     entry = result.entry
     destPath = result.destPath
 
