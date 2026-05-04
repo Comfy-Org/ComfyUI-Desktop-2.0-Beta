@@ -79,15 +79,44 @@ but Phase 3 needs richer recency signals:
 - **Most-recent per source category:** so flows like "open my most recent
   Standalone install" or "show me my most recent Desktop migration" don't
   need to filter the global list. Source categories today include `local`,
-  `cloud`, and `desktop` (see `sourceCategory` on `Installation`). Add
-  per-category recency to the install record (e.g. `lastLaunchedAt` stays
-  global, plus the per-category index can be derived in the source layer,
-  OR introduce a separate `lastUsedAt` keyed by `{ category, id }`).
+  `cloud`, and `desktop` (see `sourceCategory` on `Installation`).
 - **What counts as "ran"?** Decide whether "recent" means "launched the
   process" (current `lastLaunchedAt` semantics) vs. "user actually
   interacted with the panel/instance" vs. "any action ran against this
   install." Most likely "process actually started" is the right signal —
   it's already tracked and survives crashes naturally.
+
+#### Per-category recency tracking — **DONE** (Phase 3 prep)
+
+The data layer for the per-category signal landed on
+`feat/unified-window-titlebar-panels`:
+
+- `InstallationRecord` (and the renderer-side `Installation` type) now
+  carries an optional `lastLaunchedAtByCategory: Record<string, number>`
+  alongside the existing global `lastLaunchedAt`. The two fields are
+  always written together.
+- `installations.markLaunched(installationId, category?)` is the single
+  helper for stamping both fields atomically. The launch path in
+  `_addSession` (src/main/lib/ipc/shared.ts) routes through it, looking up
+  the category via `sourceMap[inst.sourceId]?.category`. The existing
+  `installationEvents` 'updated' event still fires.
+- `installations.getRecent()` and `installations.getRecentByCategory(category, resolveCategory)`
+  expose the rankings. `getRecentByCategory` falls back to the global
+  `lastLaunchedAt` for installs that pre-date the per-category field, so
+  legacy data still participates in rankings until the next launch.
+  `resolveCategory` is supplied by the caller (typically
+  `(inst) => sourceMap[inst.sourceId]?.category`) to keep
+  `installations.ts` free of any source-plugin dependency.
+- Unit coverage in `src/main/installations.test.ts` exercises the
+  write-both-fields path, the per-category vs. global ranking, the
+  legacy-fallback case, the cross-category isolation case, and the
+  `markLaunched` event emission contract.
+
+The "primary install" surface (gold-star button, `primaryInstallId` pref,
+`set-primary-install` action) is intentionally **untouched** in this
+landing — recency is purely additive data so any future consumer can use
+it. Removing primary is a separate, larger step that will land alongside
+the dashboard rethink (see "Migration considerations" below).
 
 ### Migration considerations when removing primary
 
