@@ -53,6 +53,46 @@ vi.mock('../views/DirectoriesView.vue', () => ({
     methods: { loadAll: vi.fn(), loadModels: vi.fn(), loadMedia: vi.fn() },
   },
 }))
+vi.mock('../views/ChooserView.vue', () => ({
+  default: {
+    name: 'ChooserView',
+    emits: ['pick', 'show-new-install', 'show-detail'],
+    template:
+      '<div data-testid="chooser-view"><button data-testid="chooser-new-install" @click="$emit(\'show-new-install\')">New</button></div>',
+  },
+}))
+vi.mock('../views/NewInstallModal.vue', () => ({
+  default: {
+    name: 'NewInstallModal',
+    emits: ['close', 'navigate-list', 'show-progress'],
+    template: '<div data-testid="new-install-modal" />',
+    methods: { open: vi.fn() },
+  },
+}))
+vi.mock('../views/TrackModal.vue', () => ({
+  default: {
+    name: 'TrackModal',
+    emits: ['close', 'navigate-list'],
+    template: '<div data-testid="track-modal" />',
+    methods: { open: vi.fn() },
+  },
+}))
+vi.mock('../views/LoadSnapshotModal.vue', () => ({
+  default: {
+    name: 'LoadSnapshotModal',
+    emits: ['close', 'show-progress'],
+    template: '<div data-testid="load-snapshot-modal" />',
+    methods: { open: vi.fn() },
+  },
+}))
+vi.mock('../views/QuickInstallModal.vue', () => ({
+  default: {
+    name: 'QuickInstallModal',
+    emits: ['close', 'show-progress'],
+    template: '<div data-testid="quick-install-modal" />',
+    methods: { open: vi.fn() },
+  },
+}))
 
 import { mount, flushPromises } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
@@ -243,6 +283,52 @@ describe('PanelApp', () => {
     await flushPromises()
     expect(wrapper.find('[data-testid="settings-view"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="directories-view"]').exists()).toBe(true)
+  })
+
+  it('switches to new-install panel when the chooser emits show-new-install', async () => {
+    // Phase 3 step 2e — empty-state CTA from the chooser was bouncing
+    // through openNewInstallFromHost (focus launcher window). Now it
+    // switches the host's panel body to new-install in-place.
+    window.history.replaceState({}, '', '/?panel=chooser')
+    const wrapper = mountPanel()
+    await flushPromises()
+    expect(wrapper.find('[data-testid="chooser-view"]').exists()).toBe(true)
+    await wrapper.find('[data-testid="chooser-new-install"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="chooser-view"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="new-install-modal"]').exists()).toBe(true)
+  })
+
+  it('returns to chooser when a flow panel emits close', async () => {
+    window.history.replaceState({}, '', '/?panel=new-install')
+    const wrapper = mountPanel()
+    await flushPromises()
+    expect(wrapper.find('[data-testid="new-install-modal"]').exists()).toBe(true)
+    await wrapper.findComponent({ name: 'NewInstallModal' }).vm.$emit('close')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="new-install-modal"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="chooser-view"]').exists()).toBe(true)
+  })
+
+  it('renders the track flow panel when initialised with panel=track', async () => {
+    window.history.replaceState({}, '', '/?panel=track')
+    const wrapper = mountPanel()
+    await flushPromises()
+    expect(wrapper.find('[data-testid="track-modal"]').exists()).toBe(true)
+  })
+
+  it('renders the load-snapshot flow panel when initialised with panel=load-snapshot', async () => {
+    window.history.replaceState({}, '', '/?panel=load-snapshot')
+    const wrapper = mountPanel()
+    await flushPromises()
+    expect(wrapper.find('[data-testid="load-snapshot-modal"]').exists()).toBe(true)
+  })
+
+  it('renders the quick-install flow panel when initialised with panel=quick-install', async () => {
+    window.history.replaceState({}, '', '/?panel=quick-install')
+    const wrapper = mountPanel()
+    await flushPromises()
+    expect(wrapper.find('[data-testid="quick-install-modal"]').exists()).toBe(true)
   })
 
   it('switches to the comfy-lifecycle view in response to a panel-switch IPC event', async () => {

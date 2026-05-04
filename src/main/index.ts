@@ -40,12 +40,24 @@ import { scrubAll } from './lib/piiScrub'
  * running) or the lifecycle panel (instance stopped / launching / stopping).
  * The decision lives in `computeBodyMode()` and is internal to main.
  */
-export type ComfyPanelKey = 'comfy' | 'install-settings' | 'launcher-settings' | 'directories'
+export type ComfyPanelKey =
+  | 'comfy'
+  | 'install-settings'
+  | 'launcher-settings'
+  | 'directories'
+  | 'new-install'
+  | 'track'
+  | 'load-snapshot'
+  | 'quick-install'
 const VALID_PANELS: ReadonlySet<ComfyPanelKey> = new Set([
   'comfy',
   'install-settings',
   'launcher-settings',
   'directories',
+  'new-install',
+  'track',
+  'load-snapshot',
+  'quick-install',
 ])
 
 /**
@@ -68,6 +80,10 @@ type BodyMode =
   | 'launcher-settings'
   | 'directories'
   | 'chooser'
+  | 'new-install'
+  | 'track'
+  | 'load-snapshot'
+  | 'quick-install'
 
 todesktop.init({ autoUpdater: false })
 

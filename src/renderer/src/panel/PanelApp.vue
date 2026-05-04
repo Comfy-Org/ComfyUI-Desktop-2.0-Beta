@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import SettingsView from '../views/SettingsView.vue'
 import DetailModal from '../views/DetailModal.vue'
@@ -8,6 +8,10 @@ import ModalDialog from '../components/ModalDialog.vue'
 import ComfyLifecycleView from './ComfyLifecycleView.vue'
 import ChooserView from '../views/ChooserView.vue'
 import DirectoriesView from '../views/DirectoriesView.vue'
+import NewInstallModal from '../views/NewInstallModal.vue'
+import TrackModal from '../views/TrackModal.vue'
+import LoadSnapshotModal from '../views/LoadSnapshotModal.vue'
+import QuickInstallModal from '../views/QuickInstallModal.vue'
 import { useTheme } from '../composables/useTheme'
 import { useSessionStore } from '../stores/sessionStore'
 import { useInstallationStore } from '../stores/installationStore'
@@ -29,6 +33,10 @@ export type PanelKey =
   | 'install-settings'
   | 'launcher-settings'
   | 'directories'
+  | 'new-install'
+  | 'track'
+  | 'load-snapshot'
+  | 'quick-install'
 
 const VALID_PANELS: ReadonlySet<PanelKey> = new Set([
   'comfy-lifecycle',
@@ -36,6 +44,24 @@ const VALID_PANELS: ReadonlySet<PanelKey> = new Set([
   'install-settings',
   'launcher-settings',
   'directories',
+  'new-install',
+  'track',
+  'load-snapshot',
+  'quick-install',
+])
+
+/**
+ * Panels that wrap a `*Modal` component which exposes an imperative
+ * `open()` reset. Switching to one of these panels must call `open()`
+ * after the component mounts so the form state resets cleanly each
+ * time the user re-enters the flow (the launcher window's pre-Phase-3
+ * App.vue did the same via useNavigation's invokeWhenReady).
+ */
+const FLOW_PANELS: ReadonlySet<PanelKey> = new Set([
+  'new-install',
+  'track',
+  'load-snapshot',
+  'quick-install',
 ])
 
 const { setLocaleMessage, locale } = useI18n()
@@ -55,6 +81,10 @@ const initialPanel: PanelKey = ((): PanelKey => {
 const activePanel = ref<PanelKey>(initialPanel)
 const settingsRef = ref<InstanceType<typeof SettingsView> | null>(null)
 const progressRef = ref<InstanceType<typeof ProgressModal> | null>(null)
+const newInstallRef = ref<InstanceType<typeof NewInstallModal> | null>(null)
+const trackRef = ref<InstanceType<typeof TrackModal> | null>(null)
+const loadSnapshotRef = ref<InstanceType<typeof LoadSnapshotModal> | null>(null)
+const quickInstallRef = ref<InstanceType<typeof QuickInstallModal> | null>(null)
 
 const activeProgressId = ref<string | null>(null)
 
@@ -106,6 +136,42 @@ function handleProgressClose(): void {
   activeProgressId.value = null
 }
 
+/**
+ * Switch the panel body and run the post-mount imperative open() reset
+ * for flow panels (`new-install` / `track` / `load-snapshot` /
+ * `quick-install`). The launcher window's pre-Phase-3 App.vue did the
+ * same via useNavigation.invokeWhenReady — without this reset the form
+ * state would carry over between successive entries to the same flow.
+ *
+ * Idempotent: switching to the already-active panel still re-runs
+ * open(), which mirrors the launcher window behaviour where re-opening
+ * the modal always starts fresh.
+ */
+async function switchPanel(panel: PanelKey): Promise<void> {
+  activePanel.value = panel
+  if (!FLOW_PANELS.has(panel)) return
+  // Wait for the v-else-if branch to mount the component.
+  await nextTick()
+  if (panel === 'new-install') await newInstallRef.value?.open()
+  else if (panel === 'track') trackRef.value?.open()
+  else if (panel === 'load-snapshot') loadSnapshotRef.value?.open()
+  else if (panel === 'quick-install') await quickInstallRef.value?.open()
+}
+
+/**
+ * Returning to chooser — what the per-flow `close` and `navigate-list`
+ * emits map to inside the install-less host window. There's no launcher
+ * list to navigate to anymore; the chooser IS the list, so both fold
+ * into "back to chooser". Install-backed panels also use this path
+ * (e.g. flows started from a future install-pill caret menu) — they'll
+ * land back in their last-active install panel via setActivePanel from
+ * main, but in the meantime "chooser" is a safe default that doesn't
+ * leave the user on a dismissed flow panel.
+ */
+function handleFlowClose(): void {
+  void switchPanel('chooser')
+}
+
 function handleUpdateInstallation(inst: Installation): void {
   // Optimistic local update for snappier UX while the broadcast-driven
   // refetch is in flight (e.g. rename via the editable title).
@@ -149,9 +215,10 @@ async function handleChooserPick(installation: Installation): Promise<void> {
     ?? null
   if (!launchAction) {
     // Source has no launch path (e.g. the install isn't installed yet).
-    // Fall back to the launcher window's detail surface so the user can
-    // resolve the missing setup step from there.
-    void window.api.openNewInstallFromHost()
+    // Fall back to the new-install flow inside the host window so the
+    // user can resolve the missing setup step without bouncing to the
+    // launcher window (which is going away in this phase).
+    void switchPanel('new-install')
     return
   }
 
@@ -179,11 +246,11 @@ async function handleChooserPick(installation: Installation): Promise<void> {
 }
 
 function handleChooserShowNewInstall(): void {
-  // Empty-state CTA from the chooser. The install-less host window will
-  // gain native File-menu equivalents in step 3; for now route through
-  // the same IPC main exposes for the launcher window's "New Install"
-  // entry-point so the user isn't blocked.
-  void window.api.openNewInstallFromHost()
+  // Empty-state CTA from the chooser — switch the host window's body
+  // to the new-install flow panel. Same install-less host window, just
+  // a different body mode; the user perceives a wizard step rather than
+  // a navigation jump.
+  void switchPanel('new-install')
 }
 
 function handleChooserShowDetail(_installation: Installation): void {
@@ -218,9 +285,12 @@ onMounted(async () => {
   // Main can request a panel switch (e.g. from title-bar buttons, or when
   // the install lifecycle changes — main flips us to 'comfy-lifecycle' when
   // the instance stops so the Comfy tab body shows the right transient UI).
+  // Flow panels (new-install / track / load-snapshot / quick-install) need
+  // the imperative open() reset to run after mount, so funnel through
+  // switchPanel() rather than assigning activePanel directly.
   unsubPanel = window.api.onPanelSwitch((data) => {
     if (VALID_PANELS.has(data.panel as PanelKey)) {
-      activePanel.value = data.panel as PanelKey
+      void switchPanel(data.panel as PanelKey)
     }
   })
 
@@ -237,6 +307,14 @@ onMounted(async () => {
     installationStore.fetchInstallations(),
     launcherPrefs.loadPrefs(),
   ])
+
+  // If the URL-driven initial panel is a flow panel, run its open()
+  // reset now that the component has mounted (the script-setup branch
+  // assigned activePanel before the template rendered, so the modal
+  // refs weren't populated yet).
+  if (FLOW_PANELS.has(initialPanel)) {
+    void switchPanel(initialPanel)
+  }
 })
 
 onUnmounted(() => {
@@ -288,6 +366,43 @@ onUnmounted(() => {
           @show-detail="handleChooserShowDetail"
         />
       </div>
+
+      <!-- Install-creation / import flow panels (Phase 3 step 2e). The
+           launcher window's modal components are reused here as full-panel
+           bodies; the panel-flow wrapper makes the modal-styled root fill
+           the panel area instead of floating in a dim backdrop. -->
+      <div v-else-if="activePanel === 'new-install'" class="panel-flow">
+        <NewInstallModal
+          ref="newInstallRef"
+          @close="handleFlowClose"
+          @navigate-list="handleFlowClose"
+          @show-progress="handleShowProgress"
+        />
+      </div>
+
+      <div v-else-if="activePanel === 'track'" class="panel-flow">
+        <TrackModal
+          ref="trackRef"
+          @close="handleFlowClose"
+          @navigate-list="handleFlowClose"
+        />
+      </div>
+
+      <div v-else-if="activePanel === 'load-snapshot'" class="panel-flow">
+        <LoadSnapshotModal
+          ref="loadSnapshotRef"
+          @close="handleFlowClose"
+          @show-progress="handleShowProgress"
+        />
+      </div>
+
+      <div v-else-if="activePanel === 'quick-install'" class="panel-flow">
+        <QuickInstallModal
+          ref="quickInstallRef"
+          @close="handleFlowClose"
+          @show-progress="handleShowProgress"
+        />
+      </div>
     </main>
 
     <!-- Progress overlay for actions kicked off from the install-settings panel. -->
@@ -332,9 +447,12 @@ onUnmounted(() => {
 
 /* Install-settings hosts an inline DetailModal and the comfy-lifecycle view
  * fills its own background — both own their padding, so negate the
- * panel-content gutter for those branches. */
+ * panel-content gutter for those branches. The flow panels reuse modal
+ * components which set their own scrolled body padding, so they also drop
+ * the outer gutter. */
 .panel-content:has(.panel-install-settings),
-.panel-content:has(.panel-comfy-lifecycle) {
+.panel-content:has(.panel-comfy-lifecycle),
+.panel-content:has(.panel-flow) {
   padding: 0;
 }
 
@@ -347,12 +465,27 @@ onUnmounted(() => {
 }
 
 .panel-install-settings,
-.panel-comfy-lifecycle {
+.panel-comfy-lifecycle,
+.panel-flow {
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+/* Flow panels reuse the launcher window's modal components (`*Modal.vue`
+ * with a `.view-modal-content` root). When mounted as a panel body
+ * they should fill the panel area instead of floating with a max-width
+ * dialog box, so neutralize the modal sizing and chrome. */
+.panel-flow :deep(.view-modal-content) {
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  border-radius: 0;
+  box-shadow: none;
+  margin: 0;
+  background: var(--bg);
 }
 
 .panel-placeholder {

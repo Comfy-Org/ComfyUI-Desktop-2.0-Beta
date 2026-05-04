@@ -6,7 +6,15 @@ import { ChevronDown } from 'lucide-vue-next'
 // file isn't visible to tsconfig.web (only its .d.ts would be). Kept in
 // sync with the literal union in src/preload/comfyTitleBarPreload.ts and
 // the ComfyPanelKey export in src/main/index.ts.
-type ComfyPanelKey = 'comfy' | 'install-settings' | 'launcher-settings' | 'directories'
+type ComfyPanelKey =
+  | 'comfy'
+  | 'install-settings'
+  | 'launcher-settings'
+  | 'directories'
+  | 'new-install'
+  | 'track'
+  | 'load-snapshot'
+  | 'quick-install'
 
 interface Bridge {
   getInstallationId: () => string | null
