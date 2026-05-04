@@ -185,6 +185,16 @@ onUnmounted(() => {
   min-height: 0;
   display: flex;
   flex-direction: column;
+  /* Match the launcher window's `.content` padding so tab-mode views
+   * (SettingsView etc.) have the same gutter as in the standalone window. */
+  padding: 24px 28px;
+  overflow: hidden;
+}
+
+/* Install-settings hosts an inline DetailModal that owns its own padding,
+ * so we negate the panel-content gutter for that branch only. */
+.panel-content:has(.panel-install-settings) {
+  padding: 0;
 }
 
 .panel-install-settings {
