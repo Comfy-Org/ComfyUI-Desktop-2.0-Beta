@@ -22,6 +22,7 @@ import { useOnboardingPrefs } from '../composables/useOnboardingPrefs'
 import { useMigrateAction } from '../composables/useMigrateAction'
 import { useModal } from '../composables/useModal'
 import { emitTelemetryAction } from '../lib/telemetry'
+import { parseInstallStatus, type ParsedStatus } from '../lib/parseInstallStatus'
 import type { FieldOption } from '../types/ipc'
 
 // TODO: replace with the final EULA URL once Legal signs off.
@@ -110,39 +111,52 @@ const installOp = computed(() => {
 // The standalone install backend doesn't emit a `steps` list — it only
 // streams a flat percent + status. To give the user a sense of "where am I
 // in the install", we render a fixed step ladder and light it up based on
-// the live percent. If percent is unknown (negative), we fall back to a
-// time-based estimate so the slider still moves.
-const FAUX_STEPS = [
-  { label: 'Validating environment', threshold: 5 },
-  { label: 'Downloading ComfyUI runtime', threshold: 35 },
-  { label: 'Setting up Python', threshold: 65 },
-  { label: 'Installing dependencies', threshold: 90 },
-  { label: 'Finalizing', threshold: 100 },
-]
-// Heuristic install duration for time-based fallback (3 min). Caps at 95%
-// so the bar never sits at 100% while we're still waiting on the backend.
-const FAUX_DURATION_SECONDS = 180
+// the live percent. Per §5: while flatPercent < 0 (no real event yet) all
+// steps are pending except step 0 which is active. As soon as the first
+// real percent arrives, the threshold logic takes over. There is NO
+// time-based fallback — the bar must be honest about what we know.
+const FAUX_STEP_KEYS = [
+  { key: 'stepValidating', threshold: 5 },
+  { key: 'stepDownloading', threshold: 35 },
+  { key: 'stepSetupPython', threshold: 65 },
+  { key: 'stepInstallingDeps', threshold: 90 },
+  { key: 'stepFinalizing', threshold: 100 },
+] as const
+
+// §5 (Bug 1 — pre-filled percent fix): `installPercent < 0` is the sentinel
+// for "indeterminate / no real event yet". The bar treats this as
+// indeterminate shimmer, the percent text renders `—`, and the step ladder
+// freezes step 0 active. The first real backend event (whether 0 or 7)
+// flips this to a real number, the bar becomes determinate, and we never
+// look back. Once `hasSeenRealPercent` latches true, even a subsequent
+// `flatPercent < 0` (which can happen during cleanup phases) stays
+// determinate at the last observed value rather than reverting to shimmer.
+const hasSeenRealPercent = ref(false)
 
 const installPercent = computed(() => {
   const op = installOp.value
-  if (!op) return 0
+  if (!op) return -1                                  // sentinel: no operation yet
   if (op.flatPercent >= 0) return op.flatPercent
-  // Stall-aware fallback (§9.5): when stalled, freeze at the last observed
-  // percent rather than continuing the time-based estimate forward — the
-  // estimate would be a lie if no real progress is happening.
-  if (isStalled.value) return lastFlatPercent.value
-  // Backend didn't send a percent — estimate from elapsed time so the slider
-  // still advances and the user knows things are happening.
-  return Math.min(95, (elapsedSeconds.value / FAUX_DURATION_SECONDS) * 100)
+  // Latch: once we've seen a real percent, never go back to indeterminate.
+  if (hasSeenRealPercent.value) return lastFlatPercent.value
+  // Stall fallback only kicks in AFTER we've had real progress.
+  if (isStalled.value && hasSeenRealPercent.value) return lastFlatPercent.value
+  return -1
 })
 
+// §5 — display computed. `—` (em dash) when indeterminate so the user gets a
+// "we don't know yet" signal rather than a flickering 0%.
 const installPercentDisplay = computed(() => {
   const p = installPercent.value
-  return `${Math.round(p)}%`
+  return p < 0 ? '—' : `${Math.round(p)}%`
 })
 
+// True iff the bar should render in indeterminate shimmer mode. Drives both
+// the bar visual and the ARIA wiring (aria-busy + omit aria-valuenow).
+const isIndeterminate = computed(() => installPercent.value < 0)
+
 const installStatus = computed(
-  () => installOp.value?.flatStatus || t('progress.starting'),
+  () => installOp.value?.flatStatus || '',
 )
 
 interface DisplayStep {
@@ -152,12 +166,19 @@ interface DisplayStep {
 
 const displaySteps = computed<DisplayStep[]>(() => {
   const p = installPercent.value
-  return FAUX_STEPS.map((step, i) => {
-    const prev = i === 0 ? 0 : FAUX_STEPS[i - 1]!.threshold
+  // §5 — indeterminate state: step 0 active, the rest pending.
+  if (p < 0) {
+    return FAUX_STEP_KEYS.map((step, i) => ({
+      label: t(`onboarding.${step.key}`),
+      state: i === 0 ? 'active' : 'pending',
+    }))
+  }
+  return FAUX_STEP_KEYS.map((step, i) => {
+    const prev = i === 0 ? 0 : FAUX_STEP_KEYS[i - 1]!.threshold
     let state: DisplayStep['state'] = 'pending'
     if (p >= step.threshold) state = 'done'
     else if (p >= prev) state = 'active'
-    return { label: step.label, state }
+    return { label: t(`onboarding.${step.key}`), state }
   })
 })
 
@@ -214,7 +235,18 @@ watch(
     // the user back at onboarding next boot.
     stage.value = 'done'
     const id = installingId.value
+    const isFakeInstall = id?.startsWith('fake-install-')
     void (async () => {
+      // Dev bypass: skip the real-install IPC chain entirely. The fake id
+      // doesn't correspond to a registered installation, so setSetting,
+      // fetchInstallations and launchWithTimeout would all fail meaningfully.
+      // Simulate a brief launch latency, hide the launcher, and exit.
+      if (isFakeInstall) {
+        await new Promise((r) => setTimeout(r, 1500))
+        try { await window.api.hideLauncherWindow() } catch { /* dev best-effort */ }
+        emit('complete')
+        return
+      }
       try {
         await onboardingPrefs.setLastUsedMode('local')
       } catch (err) {
@@ -269,6 +301,7 @@ watch(
 
 onMounted(async () => {
   await installationStore.fetchInstallations()
+  if (isDev) window.addEventListener('keydown', onDevKeydown)
 })
 
 // Cleanup on unmount — if the user closes the launcher mid-install or
@@ -276,7 +309,107 @@ onMounted(async () => {
 onUnmounted(() => {
   stopElapsedTimer()
   clearCloudTimeout()
+  if (isDev) window.removeEventListener('keydown', onDevKeydown)
+  if (fakeInstallInterval) clearInterval(fakeInstallInterval)
 })
+
+// =====================================================================
+// Dev bypass — fake install for offline / slow-network iteration.
+//
+// Triggered by Cmd/Ctrl+Shift+S anywhere on the onboarding view in dev
+// mode (`pnpm dev` only — gated on `import.meta.env.DEV`). Injects a
+// reactive op into progressStore.operations and pumps realistic-looking
+// progress events over ~15 seconds so we can walk the entire installing
+// → done flow without an actual install. The watch on installOp.finished
+// picks up the synthesized completion exactly like a real install would.
+// In the post-done block, fake ids short-circuit the real IPC chain
+// (setSetting / fetchInstallations / launchWithTimeout would all fail
+// against a non-existent install).
+// =====================================================================
+const isDev = import.meta.env.DEV
+let fakeInstallInterval: ReturnType<typeof setInterval> | null = null
+
+function onDevKeydown(e: KeyboardEvent): void {
+  if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 's') {
+    e.preventDefault()
+    startFakeInstall()
+  }
+}
+
+function startFakeInstall(): void {
+  if (!isDev) return
+  if (stage.value === 'installing' || stage.value === 'connecting-cloud' || stage.value === 'done') return
+
+  const fakeId = `fake-install-${Date.now()}`
+  installingId.value = fakeId
+  installingName.value = 'ComfyUI (dev fake)'
+  installStartedAt.value = Date.now()
+  elapsedSeconds.value = 0
+  startElapsedTimer()
+  hasFinalized.value = false
+
+  // The reactive Map proxies the inserted object so direct mutation is
+  // observed by the `installOp` computed.
+  const fakeOp = {
+    title: 'Dev fake install',
+    steps: null,
+    activePhase: null,
+    activePercent: -1,
+    lastStatus: {},
+    flatStatus: 'Starting…',
+    flatPercent: 0,
+    terminalOutput: '',
+    done: false,
+    error: null,
+    finished: false,
+    cancelRequested: false,
+    result: null,
+    unsubProgress: null,
+    unsubOutput: null,
+    apiCall: null,
+  }
+  // Insert via Map.set so reactivity fires; cast since the store's full
+  // Operation interface includes types we don't need to satisfy in dev.
+  ;(progressStore.operations as unknown as Map<string, typeof fakeOp>).set(fakeId, fakeOp)
+
+  stage.value = 'installing'
+
+  // ~15s end-to-end. Status strings mirror the backend's real format so
+  // the structuredStatus parser exercises the download / extract / setup
+  // phases as it would on a real install.
+  const FAKE_DURATION_MS = 15_000
+  const FAKE_PHASES = [
+    { until: 30, status: 'Downloading: 64.2 / 543.2 MB  ·  4.3 MB/s  ·  0:14 elapsed  ·  1:51 remaining' },
+    { until: 60, status: 'Extracting: 67%  ·  0:14 elapsed  ·  0:08 remaining' },
+    { until: 95, status: 'Copying packages… 2417 / 4302 files  ·  1m12s elapsed  ·  38s remaining' },
+    { until: 100, status: 'Finalizing setup' },
+  ] as const
+
+  if (fakeInstallInterval) clearInterval(fakeInstallInterval)
+  const start = Date.now()
+  fakeInstallInterval = setInterval(() => {
+    const elapsedMs = Date.now() - start
+    const pct = Math.min(100, (elapsedMs / FAKE_DURATION_MS) * 100)
+    const phase = FAKE_PHASES.find((p) => pct < p.until) ?? FAKE_PHASES[FAKE_PHASES.length - 1]!
+    fakeOp.flatPercent = pct
+    fakeOp.flatStatus = phase.status
+
+    if (pct >= 100) {
+      if (fakeInstallInterval) clearInterval(fakeInstallInterval)
+      fakeInstallInterval = null
+      fakeOp.flatPercent = 100
+      fakeOp.flatStatus = 'Complete'
+      fakeOp.done = true
+      fakeOp.finished = true
+      // The watch on installOp.value?.finished picks up the flip and
+      // routes through the normal done / launch / hide flow. The fake-id
+      // short-circuit in that flow skips the real IPCs.
+    }
+  }, 200)
+
+  emitTelemetryAction('onboarding.devBypass.fake_install_started')
+  console.log('[onboarding] dev fake install started:', fakeId)
+}
 
 const desktopOnlyInstall = computed(() => {
   const locals = installationStore.installations.filter((i) => i.sourceCategory === 'local')
@@ -910,14 +1043,26 @@ const cancelInProgress = ref(false)
 const cancelError = ref<string | null>(null)
 
 // Watch the upstream progress events. When either flatPercent or flatStatus
-// changes, mark progress as fresh.
+// changes, mark progress as fresh. The first time we see a non-negative
+// `flatPercent`, latch `hasSeenRealPercent` so the bar never reverts to
+// indeterminate shimmer (§5 Bug 1 fix).
 watch(
   () => [installOp.value?.flatPercent, installOp.value?.flatStatus] as const,
   ([percent, status]) => {
-    if (typeof percent === 'number' && percent !== lastFlatPercent.value) {
-      lastFlatPercent.value = percent
-      lastProgressAt.value = Date.now()
-      isStalled.value = false
+    if (typeof percent === 'number') {
+      // First real percent (>= 0) flips the latch. This can be 0 — that's a
+      // valid first event; the bar becomes determinate at 0% rather than
+      // continuing to shimmer.
+      if (percent >= 0 && !hasSeenRealPercent.value) {
+        hasSeenRealPercent.value = true
+      }
+      if (percent !== lastFlatPercent.value) {
+        // Only update lastFlatPercent for real (>= 0) values. A negative
+        // value during cleanup shouldn't overwrite the last good number.
+        if (percent >= 0) lastFlatPercent.value = percent
+        lastProgressAt.value = Date.now()
+        isStalled.value = false
+      }
     }
     if (typeof status === 'string' && status !== lastFlatStatus.value) {
       lastFlatStatus.value = status
@@ -984,57 +1129,42 @@ async function cancelInstall(): Promise<void> {
   }
 }
 
-// Structured status parsing: split on `·` (the backend status format) and map
-// to phase title / detail / speed-elapsed-eta. Falls back to raw if parsing
-// fails — never crashes the layout.
-interface StructuredStatus {
-  title: string
-  detail: string
-  meta: string
-}
+// §5 — ParsedStatus: structured parse of the backend's status string.
+// Implemented as a pure function in `lib/parseInstallStatus.ts` so it can
+// be unit-tested against the exact strings the backend emits. The computed
+// here just feeds installStatus into it — see that file for the full spec.
+const parsedStatus = computed<ParsedStatus>(() => parseInstallStatus(installStatus.value))
 
-const structuredStatus = computed<StructuredStatus>(() => {
-  const raw = installStatus.value
-  if (!raw) return { title: '', detail: '', meta: '' }
-  // Backend phase prefixes are stable: 'download', 'extract', 'setup'. Map to
-  // human copy. If the status doesn't start with one of those, fall back to
-  // showing the whole string in the detail line.
-  const parts = raw.split('·').map((s) => s.trim()).filter(Boolean)
-  if (parts.length === 0) {
-    return { title: '', detail: raw, meta: '' }
+// §5 — Phase title shown above the bar. Maps the parser's phase to spec
+// copy. Falls back to active step ladder label for unknown phases (e.g.
+// "Finalizing setup") so the header always reads sensibly.
+const installingPhaseTitle = computed(() => {
+  switch (parsedStatus.value.phase) {
+    case 'download': return t('onboarding.phaseDownloading')
+    case 'extract': return t('onboarding.phaseExtracting')
+    case 'setup': return t('onboarding.phaseSetup')
+    default: return activeStepLabel.value
   }
-  // Heuristic: try to detect the phase prefix from the first chunk.
-  const firstChunk = parts[0] || ''
-  const firstLower = firstChunk.toLowerCase()
-  let title: string
-  let detail: string
-  if (firstLower.startsWith('download')) {
-    title = 'Downloading runtime'
-    detail = parts[1] || firstChunk
-  } else if (firstLower.startsWith('extract')) {
-    title = 'Extracting files'
-    detail = parts[1] || firstChunk
-  } else if (firstLower.startsWith('setup') || firstLower.startsWith('install')) {
-    title = 'Installing dependencies'
-    detail = parts[1] || firstChunk
-  } else {
-    // Unknown phase prefix — show the whole first chunk as detail with no title.
-    title = ''
-    detail = firstChunk
-  }
-  const meta = parts.slice(2).join(' · ')
-  return { title, detail, meta }
 })
+
+// §5 — Row A primary content. `—` em dash when the parser produced nothing
+// (indeterminate state, before first event) — never empty, never silently
+// hidden. Once we have a real status string, this is the bytes line / file
+// count / extract %.
+const rowAPrimary = computed(() => parsedStatus.value.primary || '—')
 
 // --- Helpers ---
 function startElapsedTimer(): void {
   stopElapsedTimer()
   // Reset stall tracking each time we start a new install so a prior stalled
-  // session doesn't bleed into the new one.
+  // session doesn't bleed into the new one. Also reset the real-percent
+  // latch so the bar starts in indeterminate shimmer (§5 — bar must not
+  // pre-fill before first real event).
   lastProgressAt.value = Date.now()
   lastFlatPercent.value = 0
   lastFlatStatus.value = ''
   isStalled.value = false
+  hasSeenRealPercent.value = false
   elapsedTimer = setInterval(() => {
     elapsedSeconds.value = Math.floor((Date.now() - installStartedAt.value) / 1000)
     checkInstallStall()
@@ -1048,10 +1178,15 @@ function stopElapsedTimer(): void {
   }
 }
 
-function formatElapsed(s: number): string {
-  const mm = Math.floor(s / 60).toString().padStart(2, '0')
+// Same shape as the backend's "0:14 elapsed" cells in Row B — used as a
+// fallback when the parser hasn't produced an `elapsed` field yet (early in
+// download / between phases). `M:SS elapsed` with no zero-pad on minutes so
+// the cell text reads like the backend's natural format.
+function formatElapsedMetric(s: number): string {
+  if (s <= 0) return '—'
+  const m = Math.floor(s / 60)
   const ss = (s % 60).toString().padStart(2, '0')
-  return `${mm}:${ss}`
+  return t('onboarding.metricElapsed', { time: `${m}:${ss}` })
 }
 
 // Direction tracks forward vs backward stage transitions so the slide animation
@@ -1755,13 +1890,22 @@ onUnmounted(() => {
         </section>
 
         <!-- =====================================================
-             5 / Installing — inline progress with step ladder
+             5 / Installing — inline progress with Row A / bar / Row B / steps
+             Per onboarding-redo-v2 §5: the bar is the visual anchor, flanked
+             by Row A above (bytes/files/percent — the most prominent metrics)
+             and Row B below (speed · elapsed · ETA — the supporting metrics).
+             The structured-status block from v1 is gone — its data is now
+             hoisted into the rows around the bar.
              ===================================================== -->
         <section v-else-if="stage === 'installing'" key="installing" class="onboarding-screen onboarding-installing">
           <header class="onboarding-screen-header">
             <div class="installing-meta">{{ t('onboarding.installingFor') }} {{ installingName }}</div>
             <h2 class="installing-title">{{ t('onboarding.installingTitle') }}</h2>
-            <p class="installing-flavor">{{ activeStepLabel }}</p>
+            <!-- Phase title (one of "Downloading ComfyUI runtime",
+                 "Extracting files", "Installing dependencies"), driven by
+                 the parser's phase classification. Falls back to active step
+                 label for unknown phases (e.g. "Finalizing setup"). -->
+            <p class="installing-flavor">{{ installingPhaseTitle }}</p>
             <!-- Reassurance for first-timers; hides once we're near completion
                  so it doesn't read as wrong on a fast install. -->
             <p v-if="installPercent < 95" class="installing-time-hint">
@@ -1770,24 +1914,56 @@ onUnmounted(() => {
           </header>
 
           <div class="onboarding-screen-body">
+            <!-- Row A: primary metric (bytes / file count / extract %) on
+                 the left, percent on the right. Both 14/600/tabular. -->
+            <div class="installing-row-a">
+              <span class="installing-row-a-primary" :class="{ 'installing-metric-muted': isIndeterminate }">
+                {{ rowAPrimary }}
+              </span>
+              <span class="installing-row-a-percent" :class="{ 'installing-metric-muted': isIndeterminate }">
+                {{ installPercentDisplay }}
+              </span>
+            </div>
+
+            <!-- The bar. Indeterminate shimmer when we don't have a real
+                 percent yet (or before any installOp); determinate when
+                 backend has reported. ARIA wires aria-valuenow only when
+                 determinate, aria-busy only when indeterminate. -->
             <div
               class="installing-progress-track"
               role="progressbar"
-              :aria-valuenow="Math.round(installPercent)"
+              :aria-valuenow="isIndeterminate ? undefined : Math.round(installPercent)"
               aria-valuemin="0"
               aria-valuemax="100"
+              :aria-busy="isIndeterminate ? 'true' : 'false'"
               :aria-label="t('onboarding.installingTitle')"
             >
               <div
                 class="installing-progress-fill"
-                :class="{ indeterminate: installPercent <= 0 }"
-                :style="{ width: installPercent > 0 ? `${installPercent}%` : '40%' }"
+                :class="{ indeterminate: isIndeterminate }"
+                :style="{ width: isIndeterminate ? '40%' : `${Math.max(0, installPercent)}%` }"
               />
             </div>
 
-            <div class="installing-progress-row">
-              <span class="installing-percent">{{ installPercentDisplay }}</span>
-              <span class="installing-elapsed-inline">{{ formatElapsed(elapsedSeconds) }}</span>
+            <!-- Row B: speed · elapsed · ETA. Three equal columns, 12/faint
+                 with tabular nums. Each cell renders `—` when its data is
+                 missing (e.g. extract / setup phases don't emit speed). On
+                 stall, all three turn warning color and the right cell
+                 shows "stalled" instead of an ETA. -->
+            <div
+              class="installing-row-b"
+              :class="{ 'installing-row-b-stalled': isStalled }"
+              aria-live="polite"
+            >
+              <span class="installing-row-b-cell installing-row-b-left">
+                {{ parsedStatus.speed ?? '—' }}
+              </span>
+              <span class="installing-row-b-cell installing-row-b-center">
+                {{ parsedStatus.elapsed ?? formatElapsedMetric(elapsedSeconds) }}
+              </span>
+              <span class="installing-row-b-cell installing-row-b-right">
+                {{ isStalled ? t('onboarding.metricStalled') : (parsedStatus.remaining ?? '—') }}
+              </span>
             </div>
 
             <ol class="install-step-list" aria-label="Installation progress">
@@ -1807,26 +1983,10 @@ onUnmounted(() => {
               </li>
             </ol>
 
-            <!-- Structured status: phase title + detail (bytes/files) + meta
-                 (speed · elapsed · ETA), parsed from the backend's status
-                 string. Falls back to raw if the parse misses. -->
-            <div class="installing-structured" aria-live="polite">
-              <span v-if="structuredStatus.title" class="installing-structured-title">
-                {{ structuredStatus.title }}
-              </span>
-              <span class="installing-structured-detail">
-                <span class="installing-status-glyph" aria-hidden="true">›</span>
-                {{ structuredStatus.detail || installStatus }}
-              </span>
-              <span v-if="structuredStatus.meta" class="installing-structured-meta">
-                {{ structuredStatus.meta }}
-              </span>
-            </div>
-
             <!-- Stalled-state escape: appears when no progress events have
                  fired in 30s. Cancel routes through modal.confirm; disabled
                  once we're past the finalize threshold (95%) since cancelling
-                 mid-finalize can corrupt state. Per §9.4. -->
+                 mid-finalize can corrupt state. Per §5 stalled-state spec. -->
             <div v-if="isStalled" class="installing-stalled" role="alert">
               <p class="installing-stalled-text">{{ t('onboarding.installStalled') }}</p>
               <button
@@ -1835,8 +1995,11 @@ onUnmounted(() => {
                 :disabled="cancelInProgress || cancelDisabled"
                 @click="cancelInstall"
               >
-                {{ cancelInProgress ? t('progress.starting') : t('onboarding.cancelInstall') }}
+                {{ cancelInProgress ? t('onboarding.cancelling') : t('onboarding.cancelInstall') }}
               </button>
+              <p v-if="cancelDisabled" class="installing-cancel-helper">
+                {{ t('onboarding.cancelAlmostDone') }}
+              </p>
               <p v-if="cancelError" class="installing-cancel-error">{{ cancelError }}</p>
             </div>
           </div>
@@ -2651,6 +2814,64 @@ onUnmounted(() => {
   to { background-position: -200% 0; }
 }
 
+/* Row A above the bar — the most prominent metric on the screen.
+   Bytes / file count / extract% on the left, percent on the right.
+   Both 14/600/tabular per spec typography rhythm. */
+.installing-row-a {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.installing-row-a-primary,
+.installing-row-a-percent {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.4;
+}
+
+/* `—` em dash state — same weight, muted color. Signals "we don't know yet"
+   without a flickering 0% that v1 had. */
+.installing-metric-muted {
+  color: var(--text-muted);
+}
+
+/* Row B below the bar — three equal columns, 12/faint with tabular nums.
+   Speed / elapsed / ETA. Each cell renders `—` when its data is missing
+   so the layout never collapses. */
+.installing-row-b {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  column-gap: 12px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.4;
+}
+
+.installing-row-b-cell {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.installing-row-b-left { text-align: left; }
+.installing-row-b-center { text-align: center; }
+.installing-row-b-right { text-align: right; }
+
+/* When stalled, all three cells turn warning so the user can read the
+   stall status from any glance. */
+.installing-row-b-stalled .installing-row-b-cell {
+  color: var(--warning);
+}
+
+/* Connecting-cloud reuses .installing-progress-row for its status dot row.
+   Local installing screen now uses Row A / Row B above. */
 .installing-progress-row {
   display: flex;
   align-items: center;
@@ -2688,20 +2909,6 @@ onUnmounted(() => {
 @keyframes install-pulse {
   0%, 100% { opacity: 1; transform: scale(1); }
   50% { opacity: 0.4; transform: scale(0.85); }
-}
-
-.installing-percent {
-  font-variant-numeric: tabular-nums;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text);
-  flex-shrink: 0;
-}
-
-.installing-elapsed-inline {
-  font-variant-numeric: tabular-nums;
-  font-size: 13px;
-  color: var(--text-faint);
 }
 
 /* --- Install step ladder --- */
@@ -2782,51 +2989,8 @@ onUnmounted(() => {
   flex-grow: 1;
 }
 
-/* Structured status block — replaces the single status line with a 3-row
-   grid (phase title / detail / meta) parsed from the backend status string.
-   Surfaces real download bytes / extract % / file counts / speed / ETA
-   instead of a long pipe-delimited line. */
-.installing-structured {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin: 8px 0 0;
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
-  font-variant-numeric: tabular-nums;
-}
-
-.installing-structured-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text);
-  line-height: 1.3;
-}
-
-.installing-structured-detail {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  color: var(--text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.installing-structured-meta {
-  font-size: 12px;
-  color: var(--text-faint);
-}
-
-.installing-status-glyph {
-  color: var(--text-faint);
-  flex-shrink: 0;
-  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
-}
-
-/* Stalled-state escape — appears below the structured status when no
-   progress events have fired in 30s. Per §9.4 spec. */
+/* Stalled-state escape — appears below the step ladder when no
+   progress events have fired in 30s. Per §5 spec. */
 .installing-stalled {
   display: flex;
   flex-direction: column;
@@ -2868,6 +3032,14 @@ onUnmounted(() => {
 .installing-cancel-error {
   font-size: 12px;
   color: var(--danger);
+  margin: 0;
+}
+
+/* Helper text shown when Cancel is disabled (>= 95%) — explains why the
+   button can't be clicked instead of leaving it inert. Per §5 spec. */
+.installing-cancel-helper {
+  font-size: 12px;
+  color: var(--text-faint);
   margin: 0;
 }
 
