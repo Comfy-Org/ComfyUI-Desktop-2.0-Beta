@@ -18,7 +18,6 @@ export interface KnownSettings {
   useChineseMirrors?: boolean
   chineseMirrorsPrompted?: boolean
   telemetryEnabled?: boolean
-  primaryInstallId?: string
   pinnedInstallIds?: string[]
   oemManagedModelDirs?: string[]
   oemWorkflowImportVersion?: number
@@ -53,7 +52,6 @@ const SETTINGS_SCHEMA = {
   useChineseMirrors: { nullable: false },
   chineseMirrorsPrompted: { nullable: false },
   telemetryEnabled: { nullable: false },
-  primaryInstallId: { nullable: false },
   pinnedInstallIds: { nullable: false },
   oemManagedModelDirs: { nullable: false },
   oemWorkflowImportVersion: { nullable: false },
@@ -169,6 +167,14 @@ function load(): Settings {
   }
   const result: Settings = { ...defaults, ...(parsed || {}) }
   let changed = false
+
+  // Drop legacy `primaryInstallId` (the primary-install system was retired in
+  // Phase 3 of the unified-window work). The data is purely advisory so a
+  // drop-on-first-load is sufficient.
+  if (Object.prototype.hasOwnProperty.call(result, 'primaryInstallId')) {
+    delete result.primaryInstallId
+    changed = true
+  }
 
   if (shouldSanitizeCopiedUserDefaults) {
     const nextCacheDir = sanitizeUserDefaultPath(result.cacheDir, defaults.cacheDir)

@@ -1,13 +1,11 @@
 <script setup lang="ts">
 import { computed, watch, ref, onMounted, onBeforeUnmount } from 'vue'
-import { useI18n } from 'vue-i18n'
 import { useInstallationStore } from '../stores/installationStore'
 import { useSessionStore } from '../stores/sessionStore'
-import { useModal } from '../composables/useModal'
 import { useListAction } from '../composables/useListAction'
 import { useLauncherPrefs } from '../composables/useLauncherPrefs'
 import { useInstallContextMenu } from '../composables/useInstallContextMenu'
-import { Download, Star, Clock, Cloud, Pin } from 'lucide-vue-next'
+import { Download, Clock, Cloud, Pin } from 'lucide-vue-next'
 import DashboardCard from '../components/DashboardCard.vue'
 import MigrationBanner from '../components/MigrationBanner.vue'
 import ContextMenu from '../components/ContextMenu.vue'
@@ -17,10 +15,8 @@ const props = defineProps<{
   visible: boolean
 }>()
 
-const { t } = useI18n()
 const installationStore = useInstallationStore()
 const sessionStore = useSessionStore()
-const modal = useModal()
 const prefs = useLauncherPrefs()
 
 const emit = defineEmits<{
@@ -44,28 +40,11 @@ const localInstalls = computed(() =>
   installationStore.installations.filter((i) => i.sourceCategory === 'local')
 )
 
-const primaryInstall = computed(() => {
-  if (prefs.primaryInstallId.value) {
-    const found = localInstalls.value.find((i) => i.id === prefs.primaryInstallId.value)
-    if (found) return found
-  }
-  // Temporary fallback while the main process reassigns primary
-  return localInstalls.value[0] ?? null
-})
-
-const availablePrimaryTargets = computed(() =>
-  localInstalls.value.filter((i) => i.sourceId !== 'desktop' && i.id !== primaryInstall.value?.id)
-)
-const canChangePrimary = computed(() => availablePrimaryTargets.value.length > 0)
-
-const desktopOnlyInstall = computed(() => {
-  if (localInstalls.value.length !== 1) return null
-  const only = localInstalls.value[0]!
-  return only.sourceId === 'desktop' ? only : null
-})
-
-// --- Latest install (exclude desktop) ---
-const latestInstall = computed(() => {
+// --- Lead install: most-recently-launched local non-desktop install,
+// falling back to the first local install. Replaces the former "primary
+// install" surface; the chooser view in Phase 3 step 2 takes over this
+// responsibility for real. ---
+const latestLaunchedLocal = computed(() => {
   const withTimestamp = installationStore.installations.filter(
     (i) => i.sourceCategory !== 'cloud' && i.sourceId !== 'desktop' && typeof i.lastLaunchedAt === 'number'
   )
@@ -75,20 +54,25 @@ const latestInstall = computed(() => {
   )
 })
 
-const showLatestCard = computed(() =>
-  latestInstall.value && latestInstall.value.id !== primaryInstall.value?.id
+const leadInstall = computed<Installation | null>(() =>
+  latestLaunchedLocal.value ?? localInstalls.value[0] ?? null
 )
+
+const desktopOnlyInstall = computed(() => {
+  if (localInstalls.value.length !== 1) return null
+  const only = localInstalls.value[0]!
+  return only.sourceId === 'desktop' ? only : null
+})
 
 // --- Cloud install ---
 const cloudInstall = computed(() =>
   installationStore.installations.find((i) => i.sourceCategory === 'cloud') ?? null
 )
 
-// --- Pinned installs (exclude cloud, primary, latest) ---
+// --- Pinned installs (exclude cloud and the lead card) ---
 const pinnedInstalls = computed(() => {
   const excludeIds = new Set<string>()
-  if (primaryInstall.value) excludeIds.add(primaryInstall.value.id)
-  if (showLatestCard.value && latestInstall.value) excludeIds.add(latestInstall.value.id)
+  if (leadInstall.value) excludeIds.add(leadInstall.value.id)
 
   return prefs.pinnedInstallIds.value
     .map((id) => installationStore.installations.find((i) => i.id === id))
@@ -98,8 +82,7 @@ const pinnedInstalls = computed(() => {
 const allPinsInQuickLaunch = computed(() => {
   if (pinnedInstalls.value.length > 0) return false
   const quickLaunchIds = new Set<string>()
-  if (primaryInstall.value) quickLaunchIds.add(primaryInstall.value.id)
-  if (showLatestCard.value && latestInstall.value) quickLaunchIds.add(latestInstall.value.id)
+  if (leadInstall.value) quickLaunchIds.add(leadInstall.value.id)
   return prefs.pinnedInstallIds.value.some((id) => quickLaunchIds.has(id))
 })
 
@@ -108,8 +91,7 @@ function isInProgress(id: string): boolean {
 }
 
 // --- Actions for cards (separate generation counters) ---
-const primaryActions = ref<ListAction[]>([])
-const latestActions = ref<ListAction[]>([])
+const leadActions = ref<ListAction[]>([])
 const cloudActions = ref<ListAction[]>([])
 const pinnedActionsById = ref<Record<string, ListAction[]>>({})
 
@@ -143,18 +125,9 @@ function useActionWatcher(
 }
 
 useActionWatcher(
-  () => primaryInstall.value?.id,
+  () => leadInstall.value?.id,
   [],
-  (actions) => { primaryActions.value = actions },
-)
-
-useActionWatcher(
-  () => {
-    const id = latestInstall.value?.id
-    return id && id !== primaryInstall.value?.id ? id : null
-  },
-  [],
-  (actions) => { latestActions.value = actions },
+  (actions) => { leadActions.value = actions },
 )
 
 useActionWatcher(
@@ -220,35 +193,16 @@ async function handleLaunch(inst: Installation, actions: ListAction[]): Promise<
   await executeAction(inst, action)
 }
 
-// --- Change primary ---
-async function changePrimary(): Promise<void> {
-  const items = availablePrimaryTargets.value
-    .map((i) => ({
-      value: i.id,
-      label: i.name,
-      description: [i.sourceLabel, i.version].filter(Boolean).join(' · '),
-    }))
-  if (items.length === 0) return
-  const selected = await modal.select({
-    title: t('dashboard.changePrimaryTitle'),
-    message: t('dashboard.setPrimaryMessage'),
-    items,
-  })
-  if (selected) {
-    await prefs.setPrimary(selected)
-  }
-}
-
 </script>
 
 <template>
   <div class="view active">
     <div class="view-scroll">
       <!-- Loading state -->
-      <div v-if="!primaryInstall && installationStore.loading" class="modal-loading with-spinner">{{ $t('common.loading') }}</div>
+      <div v-if="!leadInstall && installationStore.loading" class="modal-loading with-spinner">{{ $t('common.loading') }}</div>
 
       <!-- Welcome state: no local installations -->
-      <div v-else-if="!primaryInstall" class="dashboard-welcome">
+      <div v-else-if="!leadInstall" class="dashboard-welcome">
         <div class="dashboard-welcome-icon">
           <Download :size="48" />
         </div>
@@ -276,18 +230,18 @@ async function changePrimary(): Promise<void> {
       />
 
       <!-- Quick Launch section -->
-      <div v-else-if="primaryInstall" class="dashboard-section">
+      <div v-else-if="leadInstall" class="dashboard-section">
         <div class="dashboard-section-label">{{ $t('dashboard.quickLaunch') }}</div>
         <div class="dashboard-quick-launch">
-          <!-- Latest card -->
-          <div v-if="showLatestCard && latestInstall" class="dashboard-card" :class="{ 'card-running': sessionStore.isRunning(latestInstall.id) && !sessionStore.isStopping(latestInstall.id), 'card-stopping': sessionStore.isStopping(latestInstall.id), 'card-in-progress': isInProgress(latestInstall.id) }" @contextmenu.prevent="openCardMenu($event, latestInstall!)">
+          <!-- Lead card (most recent local install, falling back to first) -->
+          <div class="dashboard-card" :class="{ 'card-running': sessionStore.isRunning(leadInstall.id) && !sessionStore.isStopping(leadInstall.id), 'card-stopping': sessionStore.isStopping(leadInstall.id), 'card-in-progress': isInProgress(leadInstall.id) }" @contextmenu.prevent="openCardMenu($event, leadInstall!)">
             <div class="dashboard-card-badge">
               <Clock :size="14" />
               {{ $t('dashboard.recent') }}
             </div>
             <DashboardCard
-              :installation="latestInstall"
-              :actions="latestActions"
+              :installation="leadInstall"
+              :actions="leadActions"
               @launch="handleLaunch"
               @show-detail="(inst) => emit('show-detail', inst)"
               @show-update="(inst) => emit('show-detail', inst, 'update')"
@@ -296,33 +250,8 @@ async function changePrimary(): Promise<void> {
               @show-progress="(opts) => emit('show-progress', opts)"
             >
               <template #detail>
-                <div v-if="typeof latestInstall.lastLaunchedAt === 'number'" class="dashboard-card-detail">
-                  {{ $t('dashboard.launchedAgo', { time: timeAgo(latestInstall.lastLaunchedAt as number) }) }}
-                </div>
-              </template>
-            </DashboardCard>
-          </div>
-
-          <!-- Primary card -->
-          <div class="dashboard-card" :class="{ 'card-running': sessionStore.isRunning(primaryInstall.id) && !sessionStore.isStopping(primaryInstall.id), 'card-stopping': sessionStore.isStopping(primaryInstall.id), 'card-in-progress': isInProgress(primaryInstall.id) }" @contextmenu.prevent="openCardMenu($event, primaryInstall!)">
-            <div class="dashboard-card-badge dashboard-card-badge-primary">
-              <Star :size="14" />
-              {{ $t('dashboard.primary') }}
-              <button v-if="canChangePrimary" class="dashboard-change-btn" :title="$t('dashboard.setPrimaryMessage')" @click="changePrimary">{{ $t('dashboard.changePrimary') }}</button>
-            </div>
-            <DashboardCard
-              :installation="primaryInstall"
-              :actions="primaryActions"
-              @launch="handleLaunch"
-              @show-detail="(inst) => emit('show-detail', inst)"
-              @show-update="(inst) => emit('show-detail', inst, 'update')"
-              @show-migrate="(inst) => emit('show-detail', inst, undefined, 'migrate-to-standalone')"
-              @show-console="(id) => emit('show-console', id)"
-              @show-progress="(opts) => emit('show-progress', opts)"
-            >
-              <template #detail>
-                <div v-if="typeof primaryInstall.lastLaunchedAt === 'number'" class="dashboard-card-detail">
-                  {{ $t('dashboard.launchedAgo', { time: timeAgo(primaryInstall.lastLaunchedAt as number) }) }}
+                <div v-if="typeof leadInstall.lastLaunchedAt === 'number'" class="dashboard-card-detail">
+                  {{ $t('dashboard.launchedAgo', { time: timeAgo(leadInstall.lastLaunchedAt as number) }) }}
                 </div>
                 <div v-else class="dashboard-card-detail">
                   {{ $t('dashboard.neverLaunched') }}
@@ -335,7 +264,7 @@ async function changePrimary(): Promise<void> {
       </div>
 
       <!-- Pinned section -->
-      <div v-if="primaryInstall" class="dashboard-section">
+      <div v-if="leadInstall" class="dashboard-section">
         <div class="dashboard-section-label">
           <Pin :size="14" />
           {{ $t('dashboard.pinned') }}

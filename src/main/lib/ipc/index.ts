@@ -8,7 +8,6 @@ import {
   setCallbacks, _broadcastToRenderer,
   migrateDefaults, checkInstallationUpdates,
   isEffectivelyEmptyInstallDir,
-  autoAssignPrimary,
   UPDATE_CHECK_INTERVAL,
 } from './shared'
 import type { RegisterCallbacks } from './shared'
@@ -78,12 +77,6 @@ export function register(callbacks: RegisterCallbacks = {}): void {
       const remaining = swept ? await installations.list() : all
       const validIds = new Set(remaining.map((i) => i.id))
       let settingsChanged = false
-
-      const currentPrimary = settings.get('primaryInstallId')
-      if (currentPrimary && !validIds.has(currentPrimary)) {
-        await autoAssignPrimary(currentPrimary)
-        settingsChanged = true
-      }
 
       const rawPinned = settings.get('pinnedInstallIds')
       const pinned = Array.isArray(rawPinned) ? rawPinned as string[] : []

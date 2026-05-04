@@ -1,12 +1,11 @@
 <script setup lang="ts">
-import { Star, Pin } from 'lucide-vue-next'
+import { Pin } from 'lucide-vue-next'
 import { useLauncherPrefs } from '../composables/useLauncherPrefs'
 
-const props = defineProps<{
+defineProps<{
   installationId?: string
   name: string
   draggable?: boolean
-  sourceCategory?: string
   running?: boolean
   stopping?: boolean
   inProgress?: boolean
@@ -31,7 +30,6 @@ const prefs = useLauncherPrefs()
     <div class="instance-info">
       <div class="instance-name">
         {{ name }}
-        <Star v-if="installationId && sourceCategory === 'local' && prefs.isPrimary(installationId)" :size="14" class="card-indicator card-indicator-primary" :title="$t('dashboard.primary')" />
         <Pin v-if="installationId && prefs.isPinned(installationId)" :size="14" class="card-indicator card-indicator-pinned" :title="$t('dashboard.pinned')" />
       </div>
       <div v-if="$slots.meta" class="instance-meta">

@@ -29,7 +29,6 @@ export interface MigrationTools {
   signal: AbortSignal
   sourceMap: Record<string, SourcePlugin>
   uniqueName: (baseName: string) => Promise<string>
-  ensureDefaultPrimary: (entry: InstallationRecord) => void
 }
 
 export interface SharedMigrationInput {
@@ -252,7 +251,7 @@ export async function migrateToStandaloneFromSnapshot(
   input: SharedMigrationInput,
   tools: MigrationTools,
 ): Promise<{ entry: InstallationRecord; destPath: string }> {
-  const { sendProgress, signal, uniqueName, ensureDefaultPrimary } = tools
+  const { sendProgress, signal, uniqueName } = tools
   const { stagedSnapshot, sourcePaths, labels, target } = input
 
   const cleanupStagedFile = (): void => {
@@ -282,7 +281,6 @@ export async function migrateToStandaloneFromSnapshot(
       copyReason: 'standalone-migration',
     } : {}),
   })
-  ensureDefaultPrimary(entry)
 
   // 3. Install standalone (download + extract + setup env)
   await fs.promises.mkdir(destPath, { recursive: true })

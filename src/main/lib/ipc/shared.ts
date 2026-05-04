@@ -246,25 +246,6 @@ export async function uniqueName(baseName: string): Promise<string> {
   return installations.uniqueName(baseName, all)
 }
 
-export function isPromotableLocal(sourceId: string): boolean {
-  const source = sourceMap[sourceId]
-  return !!source && source.category === 'local' && sourceId !== 'desktop'
-}
-
-export async function autoAssignPrimary(removedId: string): Promise<void> {
-  const currentPrimary = settings.get('primaryInstallId')
-  if (currentPrimary !== removedId) return
-  const all = (await installations.list()).filter((i) => i.id !== removedId)
-  const firstLocal = all.find((i) => isPromotableLocal(i.sourceId))
-  settings.set('primaryInstallId', firstLocal?.id)
-}
-
-export function ensureDefaultPrimary(entry: InstallationRecord): void {
-  if (isPromotableLocal(entry.sourceId) && !settings.get('primaryInstallId')) {
-    settings.set('primaryInstallId', entry.id)
-  }
-}
-
 export async function copyBrowserPartition(sourceId: string, destId: string, sourceBrowserPartition?: string): Promise<void> {
   if (sourceBrowserPartition !== 'unique') return
   const partitionsDir = path.join(app.getPath('userData'), 'Partitions')

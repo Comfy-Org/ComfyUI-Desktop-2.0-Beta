@@ -81,7 +81,7 @@ function applyManagedModelDirs(managedModelDirs: string[]): void {
   settings.set('oemManagedModelDirs', managedModelDirs.length > 0 ? managedModelDirs : undefined)
 }
 
-function isPromotableLocalInstall(installation: InstallationRecord): boolean {
+function isLocalNonDesktopInstall(installation: InstallationRecord): boolean {
   const source = sourceMap[installation.sourceId]
   return !!source && source.category === 'local' && installation.sourceId !== 'desktop'
 }
@@ -92,7 +92,7 @@ async function importWorkflowsForInstalls(manifest: ResolvedOemManifest | null):
   if (currentVersion === OEM_WORKFLOW_IMPORT_VERSION) return
 
   const candidates = (await installations.list())
-    .filter(isPromotableLocalInstall)
+    .filter(isLocalNonDesktopInstall)
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
   if (candidates.length === 0) return
 

@@ -1,5 +1,5 @@
 export type { ActionContext, ActionResult } from './types'
-export { handleRemove, handleSetPrimaryInstall, handlePinInstall, handleUnpinInstall, handleOpenFolder } from './basic'
+export { handleRemove, handlePinInstall, handleUnpinInstall, handleOpenFolder } from './basic'
 export { handleDelete } from './delete'
 export { handleCopy, handleCopyUpdate, handleReleaseUpdate } from './copy'
 export { handleMigrateToStandalone } from './migrate'

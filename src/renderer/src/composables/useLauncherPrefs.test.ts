@@ -13,10 +13,10 @@ vi.stubGlobal('window', {
   }
 })
 
-// useLauncherPrefs has module-level shared state (primaryInstallId,
-// pinnedInstallIds, loadPromise) that cannot be reset between tests.
-// We therefore test loadPrefs once and exercise the remaining API via
-// setPrimary / pinInstall / unpinInstall which mutate state directly.
+// useLauncherPrefs has module-level shared state (pinnedInstallIds,
+// loadPromise) that cannot be reset between tests. We therefore test
+// loadPrefs once and exercise the remaining API via pinInstall /
+// unpinInstall which mutate state directly.
 
 import { useLauncherPrefs } from './useLauncherPrefs'
 
@@ -28,22 +28,18 @@ describe('useLauncherPrefs', () => {
     vi.clearAllMocks()
     prefs = useLauncherPrefs()
     // Reset module-level shared state to isolate tests
-    prefs.primaryInstallId.value = undefined
     prefs.pinnedInstallIds.value = []
   })
 
   describe('loadPrefs', () => {
-    it('populates primaryInstallId and pinnedInstallIds from getSetting', async () => {
+    it('populates pinnedInstallIds from getSetting', async () => {
       vi.mocked(window.api.getSetting).mockImplementation((key: string) => {
-        if (key === 'primaryInstallId') return Promise.resolve('inst-1')
         if (key === 'pinnedInstallIds') return Promise.resolve(['inst-2', 'inst-3'])
         return Promise.resolve(undefined)
       })
 
       await prefs.loadPrefs()
 
-      expect(prefs.isPrimary('inst-1')).toBe(true)
-      expect(prefs.isPrimary('inst-2')).toBe(false)
       expect(prefs.isPinned('inst-2')).toBe(true)
       expect(prefs.isPinned('inst-3')).toBe(true)
       expect(prefs.isPinned('inst-99')).toBe(false)
@@ -51,27 +47,9 @@ describe('useLauncherPrefs', () => {
     })
   })
 
-  describe('isPinned / isPrimary', () => {
+  describe('isPinned', () => {
     it('returns false for unknown ids', () => {
       expect(prefs.isPinned('unknown')).toBe(false)
-      expect(prefs.isPrimary('unknown')).toBe(false)
-    })
-  })
-
-  describe('setPrimary', () => {
-    it('updates primaryInstallId and calls runAction', async () => {
-      await prefs.setPrimary('inst-5')
-
-      expect(prefs.isPrimary('inst-5')).toBe(true)
-      expect(window.api.runAction).toHaveBeenCalledWith('inst-5', 'set-primary-install')
-    })
-
-    it('replaces previous primary', async () => {
-      await prefs.setPrimary('inst-5')
-      await prefs.setPrimary('inst-6')
-
-      expect(prefs.isPrimary('inst-5')).toBe(false)
-      expect(prefs.isPrimary('inst-6')).toBe(true)
     })
   })
 

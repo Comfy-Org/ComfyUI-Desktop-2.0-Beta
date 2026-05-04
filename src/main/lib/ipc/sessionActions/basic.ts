@@ -1,26 +1,17 @@
 import {
   fs,
   installations, settings, i18n,
-  openPath, autoAssignPrimary,
+  openPath,
 } from '../shared'
 import type { ActionContext, ActionResult } from './types'
 
 export async function handleRemove({ installationId }: ActionContext): Promise<ActionResult> {
   await installations.remove(installationId)
-  await autoAssignPrimary(installationId)
   const pinned = (settings.get('pinnedInstallIds') as string[] | undefined) ?? []
   if (pinned.includes(installationId)) {
     settings.set('pinnedInstallIds', pinned.filter((id) => id !== installationId))
   }
   return { ok: true, navigate: 'list' }
-}
-
-export async function handleSetPrimaryInstall({ installationId, inst }: ActionContext): Promise<ActionResult> {
-  if (inst.sourceId === 'desktop') {
-    return { ok: false, message: 'Desktop installations cannot be set as primary.' }
-  }
-  settings.set('primaryInstallId', installationId)
-  return { ok: true }
 }
 
 export function handlePinInstall({ installationId }: ActionContext): ActionResult {

@@ -12,7 +12,7 @@ import { emitTelemetryAction, toErrorBucket } from '../lib/telemetry'
 import { formatBytes } from '../lib/formatting'
 import { useMigrateAction } from '../composables/useMigrateAction'
 import { REQUIRES_STOPPED } from '../types/ipc'
-import { Star, Pin, Pencil } from 'lucide-vue-next'
+import { Pin, Pencil } from 'lucide-vue-next'
 import TooltipWrap from '../components/TooltipWrap.vue'
 import type {
   Installation,
@@ -61,24 +61,8 @@ const installationStore = useInstallationStore()
 const actionGuard = useActionGuard()
 const { confirmMigration } = useMigrateAction()
 
-const isLocal = computed(() => props.installation?.sourceCategory === 'local')
-const isDesktop = computed(() => props.installation?.sourceId === 'desktop')
 const isCloud = computed(() => props.installation?.sourceCategory === 'cloud')
-const isPrimary = computed(() => props.installation ? prefs.isPrimary(props.installation.id) : false)
 const isPinned = computed(() => props.installation ? prefs.isPinned(props.installation.id) : false)
-
-async function confirmSetPrimary(): Promise<void> {
-  if (!props.installation) return
-  const confirmed = await modal.confirm({
-    title: t('dashboard.setPrimary'),
-    message: t('dashboard.setPrimaryConfirm', { name: props.installation.name }),
-    confirmLabel: t('dashboard.setPrimary'),
-    confirmStyle: 'primary',
-  })
-  if (confirmed) {
-    await prefs.setPrimary(props.installation.id)
-  }
-}
 
 const scrollRef = ref<HTMLDivElement | null>(null)
 
@@ -544,16 +528,6 @@ function navigateToInstallation(installationId: string): void {
           {{ installation.name }}<Pencil :size="14" class="edit-name-hint" contenteditable="false" />
         </div>
         <div class="detail-header-actions">
-          <button
-            v-if="isLocal && !isDesktop"
-            class="detail-header-btn"
-            :class="{ active: isPrimary }"
-            :disabled="isPrimary"
-            :title="$t('dashboard.setPrimary')"
-            @click="confirmSetPrimary"
-          >
-            <Star :size="16" />
-          </button>
           <button
             v-if="!isCloud"
             class="detail-header-btn"

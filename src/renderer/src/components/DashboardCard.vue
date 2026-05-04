@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import { useSessionStore } from '../stores/sessionStore'
 import { useProgressStore } from '../stores/progressStore'
 import { useLauncherPrefs } from '../composables/useLauncherPrefs'
-import { Play, ExternalLink, Star, Pin, TriangleAlert } from 'lucide-vue-next'
+import { Play, ExternalLink, Pin, TriangleAlert } from 'lucide-vue-next'
 import type { Installation, ListAction } from '../types/ipc'
 
 const props = defineProps<{
@@ -64,7 +64,6 @@ function stopComfyUI(): void {
   <div class="dashboard-card-info">
     <div class="dashboard-card-name">
       {{ installation.name }}
-      <Star v-if="installation.sourceCategory === 'local' && prefs.isPrimary(installation.id)" :size="14" class="card-indicator card-indicator-primary" :title="$t('dashboard.primary')" />
       <Pin v-if="prefs.isPinned(installation.id)" :size="14" class="card-indicator card-indicator-pinned" :title="$t('dashboard.pinned')" />
     </div>
     <div class="dashboard-card-meta">

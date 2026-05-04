@@ -270,7 +270,6 @@ defineExpose({ refresh })
           :key="inst.id"
           :installation-id="inst.id"
           :name="inst.name"
-          :source-category="inst.sourceCategory"
           :draggable="true"
           :running="sessionStore.isRunning(inst.id)"
           :stopping="sessionStore.isStopping(inst.id)"
