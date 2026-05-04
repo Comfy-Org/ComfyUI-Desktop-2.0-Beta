@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { computed, ref, onMounted, onUnmounted, toRaw, watch } from 'vue'
+import { computed, nextTick, ref, onMounted, onUnmounted, toRaw, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   Check,
+  ChevronDown,
+  ChevronUp,
   Cloud,
   Cpu,
   Download,
@@ -1109,6 +1111,44 @@ const lastFlatStatus = ref('')
 const isStalled = ref(false)
 const cancelInProgress = ref(false)
 const cancelError = ref<string | null>(null)
+// Last phase the parser was able to recognize. Backend emits MANY status
+// strings the parser doesn't know — "Cleaning up environment…", "Fetching
+// version tags…", "Codesigning binaries…", "Removing quarantine flags…",
+// "Migrating environment layout…" — all return phase='unknown'. Without
+// remembering the last known phase, the bar freezes whenever an unknown
+// status arrives. Bug Deep flagged: "stuck on validating, goes directly
+// to opening ComfyUI" was lastOverallPercent stuck because cleanup /
+// update / repair phases all parsed as 'unknown'.
+const lastKnownPhase = ref<keyof typeof PHASE_PROGRESS_WEIGHTS | null>(null)
+
+// "Show details" disclosure — streams the install operation's terminalOutput
+// (raw stdout/stderr from the install process) so the user can see what's
+// actually happening. Useful when the structured progress isn't moving
+// (parser miss, slow phase, network stall) but the install IS still working.
+// Same idea as the old Desktop 2.0's console panel.
+const showDetails = ref(false)
+const logEl = ref<HTMLPreElement | null>(null)
+const terminalOutput = computed(() => installOp.value?.terminalOutput || '')
+
+// Auto-scroll the log to the bottom whenever new output arrives — only when
+// the disclosure is open (the ref is null when hidden, so guarding is cheap).
+watch(terminalOutput, async () => {
+  if (!showDetails.value) return
+  await nextTick()
+  if (logEl.value) {
+    logEl.value.scrollTop = logEl.value.scrollHeight
+  }
+})
+
+// On open, immediately scroll to the bottom so the user sees the latest line
+// rather than the start of the buffer.
+watch(showDetails, async (open) => {
+  if (!open) return
+  await nextTick()
+  if (logEl.value) {
+    logEl.value.scrollTop = logEl.value.scrollHeight
+  }
+})
 
 // Watch the upstream progress events. When either flatPercent or flatStatus
 // changes, mark progress as fresh. The first time we see a non-negative
@@ -1138,9 +1178,13 @@ watch(
       // otherwise hold the prior overall (don't regress when phase parser
       // misses, e.g. between phases or on a status string we haven't mapped).
       if (percent >= 0) {
-        const phaseKey = phase && phase in PHASE_PROGRESS_WEIGHTS
-          ? phase as keyof typeof PHASE_PROGRESS_WEIGHTS
-          : null
+        // Update lastKnownPhase whenever the parser recognizes one. If the
+        // current event's phase is unknown, fall back to the last recognized
+        // phase so the bar still advances through the unknown gap.
+        if (phase && phase in PHASE_PROGRESS_WEIGHTS) {
+          lastKnownPhase.value = phase as keyof typeof PHASE_PROGRESS_WEIGHTS
+        }
+        const phaseKey = lastKnownPhase.value
         const overall = phaseKey
           ? PHASE_PROGRESS_WEIGHTS[phaseKey].start +
             (percent / 100) *
@@ -1244,6 +1288,7 @@ function startElapsedTimer(): void {
   lastProgressAt.value = Date.now()
   lastFlatPercent.value = 0
   lastOverallPercent.value = 0
+  lastKnownPhase.value = null
   lastFlatStatus.value = ''
   isStalled.value = false
   hasSeenRealPercent.value = false
@@ -1974,6 +2019,33 @@ onUnmounted(() => {
                 <span class="install-step-label">{{ step.label }}</span>
               </li>
             </ol>
+
+            <!-- "Show details" disclosure — streams the install op's raw
+                 stdout/stderr so the user can see what's happening when the
+                 structured progress isn't moving (parser miss, slow phase,
+                 network stall). Same affordance as the old Desktop 2.0
+                 console panel. Auto-scrolls to bottom on new content. -->
+            <div class="installing-details">
+              <button
+                type="button"
+                class="installing-details-toggle"
+                :aria-expanded="showDetails"
+                @click="showDetails = !showDetails"
+              >
+                <ChevronUp v-if="showDetails" :size="12" />
+                <ChevronDown v-else :size="12" />
+                {{ showDetails ? t('onboarding.hideDetails') : t('onboarding.showDetails') }}
+              </button>
+              <Transition name="onboarding-fade">
+                <pre
+                  v-if="showDetails"
+                  ref="logEl"
+                  class="installing-log"
+                  aria-live="polite"
+                  aria-label="Install log"
+                >{{ terminalOutput || t('onboarding.installLogEmpty') }}</pre>
+              </Transition>
+            </div>
 
             <!-- Stalled-state escape: appears when no progress events have
                  fired in 30s. Cancel routes through modal.confirm; disabled
@@ -2970,6 +3042,56 @@ onUnmounted(() => {
 
 .install-step-label {
   flex-grow: 1;
+}
+
+/* "Show details" disclosure — quiet text-button + collapsible terminal
+   block streaming the install op's stdout/stderr. Same affordance as the
+   old Desktop 2.0 console panel. The toggle row is muted by default so
+   it doesn't compete with the step ladder. */
+.installing-details {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.installing-details-toggle {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background: transparent;
+  border: none;
+  color: var(--text-faint);
+  font-size: 12px;
+  cursor: pointer;
+  font-family: inherit;
+  border-radius: 4px;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.installing-details-toggle:hover {
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--text-muted) 8%, transparent);
+}
+
+.installing-log {
+  max-height: 200px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 10px 12px;
+  background: var(--terminal-bg, #111);
+  color: var(--text-muted);
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  /* Selectable so users can copy the log into a bug report. */
+  user-select: text;
 }
 
 /* Stalled-state escape — appears below the step ladder when no

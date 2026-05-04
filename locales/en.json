@@ -60,6 +60,8 @@
     "stepOpeningComfyUi": "Opening ComfyUI",
     "phaseLaunch": "Opening ComfyUI",
     "phaseLaunchSubtitle": "ComfyUI is starting up. This usually takes 30-60 seconds.",
+    "hideDetails": "Hide details",
+    "installLogEmpty": "Waiting for install output…",
     "cloudConnectingMeta": "COMFY CLOUD",
     "cloudConnectingTitle": "Opening Comfy Cloud",
     "cloudConnectingFlavor": "Connecting to managed GPUs in the cloud.",
