@@ -244,6 +244,23 @@ behalf of an install. Rename the category and update both the i18n key
 (`settings.section.downloads` → `settings.section.cache`) and any
 telemetry / settings-section IDs that downstream consumers may key off.
 
+## 4b. Unify New Install + Quick Install into a single flow
+
+Both `NewInstallModal.vue` and `QuickInstallModal.vue` are now mounted
+as full-panel bodies inside `PanelApp.vue` (Phase 3 step 2e), but the
+two flows are conceptually overlapping — Quick Install is essentially
+"new install with a fixed default source/variant pre-selected, fewer
+steps". With the unified-window direction, two parallel entry-points
+into "create an install" doesn't carry its weight.
+
+**TODO — pending design decision.** Unify the two flows into one. Open
+question: keep Quick Install as the surface and grow it to cover the
+full new-install configurability, or keep New Install and add a
+"quick start" preset / shortcut at the top of step 1, or fold both
+into a single new flow component. Decide before deleting either of
+the existing `*Modal.vue` files. Either way the chooser CTA / File
+menu entries should land on a single canonical create-install panel.
+
 ## 5. Drop the top-bar action cluster in favour of a "File" menu / new window
 
 Today the launcher window's top toolbar carries a row of buttons:
