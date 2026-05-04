@@ -15,72 +15,77 @@
       background: #353535;
       app-region: drag;
       display: flex;
-      align-items: center;
+      align-items: stretch;
       padding-left: 12px;
       padding-right: 140px; /* Reserve space for native window controls (Win/Linux) */
       box-sizing: border-box;
       font: 12px/1 system-ui, sans-serif;
-      color: #999;
+      color: #ccc;
       user-select: none;
       border-bottom: 1px solid rgba(255,255,255,0.08);
-      gap: 12px;
     }
     body.is-mac {
       padding-left: 78px;
       padding-right: 12px;
     }
-    .title {
+    .panel-tabs {
+      display: flex;
+      align-items: stretch;
+      app-region: no-drag;
       flex: 0 1 auto;
       min-width: 0;
-      max-width: 360px;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      opacity: 0.85;
+      gap: 0;
     }
-    .panel-buttons {
-      display: flex;
-      gap: 4px;
-      app-region: no-drag;
-      margin-left: auto;
-      flex: 0 0 auto;
-    }
-    body.is-mac .panel-buttons { margin-left: 0; }
-    .panel-buttons button {
+    .panel-tabs button {
       app-region: no-drag;
       background: transparent;
       color: inherit;
-      border: 1px solid transparent;
-      padding: 4px 10px;
+      border: 0;
+      border-bottom: 2px solid transparent;
+      padding: 0 14px;
       font: inherit;
-      border-radius: 4px;
       cursor: pointer;
-      opacity: 0.75;
+      opacity: 0.7;
+      display: inline-flex;
+      align-items: center;
+      max-width: 320px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
       transition: background-color 0.12s, opacity 0.12s, border-color 0.12s;
     }
-    .panel-buttons button:hover {
+    .panel-tabs button:hover {
       opacity: 1;
-      background: rgba(255,255,255,0.06);
+      background: rgba(255,255,255,0.05);
     }
-    .panel-buttons button.active {
+    .panel-tabs button.active {
       opacity: 1;
-      background: rgba(255,255,255,0.1);
-      border-color: rgba(255,255,255,0.18);
+      background: rgba(255,255,255,0.07);
+      border-bottom-color: currentColor;
     }
-    body.is-light .panel-buttons button:hover { background: rgba(0,0,0,0.06); }
-    body.is-light .panel-buttons button.active {
-      background: rgba(0,0,0,0.08);
-      border-color: rgba(0,0,0,0.18);
+    /* The comfy tab is the install identity — let it grow with the title text. */
+    .panel-tabs button[data-panel="comfy"] {
+      font-weight: 500;
+    }
+    body.is-light .panel-tabs button:hover { background: rgba(0,0,0,0.05); }
+    body.is-light .panel-tabs button.active {
+      background: rgba(0,0,0,0.07);
+    }
+    /* Spacer pushes nothing — the empty flex region absorbs drag space. */
+    .drag-spacer {
+      flex: 1 1 auto;
+      min-width: 0;
+      app-region: drag;
     }
   </style>
 </head>
 <body>
-  <span id="title" class="title"></span>
-  <div id="panel-buttons" class="panel-buttons">
+  <div id="panel-buttons" class="panel-tabs">
     <button data-panel="comfy" type="button"></button>
     <button data-panel="install-settings" type="button"></button>
     <button data-panel="launcher-settings" type="button"></button>
   </div>
+  <div class="drag-spacer"></div>
   <script>
     (function () {
       var bridge = window.__comfyTitleBar;
@@ -88,26 +93,27 @@
 
       if (bridge.isMac()) document.body.classList.add('is-mac');
 
-      // Static labels — kept in sync with locales/en.json keys
-      // titleBar.panelComfy / titleBar.panelInstallSettings / titleBar.panelLauncherSettings.
-      // Hardcoded for now since the title bar is non-localized; revisit when
-      // i18n is exposed to the title-bar WebContents.
-      var labels = {
-        'comfy': 'ComfyUI',
+      // The comfy tab acts as the install identity — its label is the install
+      // name + source label pushed by main via comfy-titlebar:title-changed.
+      // The other two tabs have static labels (kept in sync with locales/en.json
+      // titleBar.panelInstallSettings / titleBar.panelLauncherSettings — title
+      // bar isn't localized yet since it's a separate WebContents).
+      var staticLabels = {
         'install-settings': 'Install Settings',
         'launcher-settings': 'Launcher Settings',
       };
-      var titleEl = document.getElementById('title');
       var buttonEls = Array.prototype.slice.call(
         document.querySelectorAll('#panel-buttons button')
       );
       buttonEls.forEach(function (btn) {
         var key = btn.getAttribute('data-panel');
-        btn.textContent = labels[key] || key;
+        if (staticLabels[key]) btn.textContent = staticLabels[key];
         btn.addEventListener('click', function () {
           bridge.setPanel(key);
         });
       });
+
+      var comfyBtn = document.querySelector('#panel-buttons button[data-panel="comfy"]');
 
       function setActive(panel) {
         buttonEls.forEach(function (btn) {
@@ -116,7 +122,9 @@
       }
 
       function setTitle(text) {
-        titleEl.textContent = text || '';
+        // The comfy tab IS the title — it shows the install name + source.
+        // Fallback so the tab is never empty before main pushes a value.
+        if (comfyBtn) comfyBtn.textContent = text || 'ComfyUI';
       }
 
       function applyTheme(bg, text) {
