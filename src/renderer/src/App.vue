@@ -18,6 +18,7 @@ import UpdateBanner from './components/UpdateBanner.vue'
 import ZoomBanner from './components/ZoomBanner.vue'
 import ViewShell from './components/ViewShell.vue'
 import DashboardView from './views/DashboardView.vue'
+import ChooserView from './views/ChooserView.vue'
 import InstallationList from './views/InstallationList.vue'
 import RunningView from './views/RunningView.vue'
 import SettingsView from './views/SettingsView.vue'
@@ -26,7 +27,7 @@ import MediaView from './views/MediaView.vue'
 import TitleBar from './components/TitleBar.vue'
 
 // Lucide icons
-import { LayoutDashboard, Box, Play, FolderOpen, Image, Settings, MessageSquarePlus } from 'lucide-vue-next'
+import { LayoutDashboard, Box, Play, FolderOpen, Image, Settings, MessageSquarePlus, ListChecks } from 'lucide-vue-next'
 import { buildSupportUrl } from './lib/supportUrl'
 
 const { t, setLocaleMessage, locale } = useI18n()
@@ -40,7 +41,7 @@ const nav = useNavigation()
 useTheme()
 
 // --- View state ---
-type TabView = 'dashboard' | 'list' | 'running' | 'models' | 'media' | 'settings'
+type TabView = 'dashboard' | 'chooser' | 'list' | 'running' | 'models' | 'media' | 'settings'
 const activeView = nav.activeTab
 const appVersion = ref('')
 
@@ -53,6 +54,10 @@ const mediaRef = ref<InstanceType<typeof MediaView> | null>(null)
 // --- Sidebar ---
 const sidebarItems = computed(() => [
   { key: 'dashboard' as const, icon: LayoutDashboard, labelKey: 'dashboard.title' },
+  // Phase 3 step 2b preview entry — wired into the install-less host
+  // window in 2c, removed from this sidebar in 2e alongside Dashboard
+  // and Installs.
+  { key: 'chooser' as const, icon: ListChecks, labelKey: 'sidebar.chooser' },
   { key: 'list' as const, icon: Box, labelKey: 'sidebar.installations' },
   { key: 'running' as const, icon: Play, labelKey: 'sidebar.running' },
   { key: 'models' as const, icon: FolderOpen, labelKey: 'models.title' },
@@ -288,6 +293,14 @@ onMounted(async () => {
         @show-detail="(inst, tab, autoAction) => openDetail(inst, tab, autoAction)"
         @show-console="openConsole"
         @show-progress="showProgress"
+      />
+
+      <ChooserView
+        v-show="activeView === 'chooser'"
+        :visible="activeView === 'chooser'"
+        @pick="(inst) => openDetail(inst)"
+        @show-detail="(inst) => openDetail(inst)"
+        @show-new-install="openNewInstall"
       />
 
       <InstallationList

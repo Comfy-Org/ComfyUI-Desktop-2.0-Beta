@@ -23,7 +23,18 @@
   "sidebar": {
     "installations": "安装",
     "running": "运行中",
+    "chooser": "选择器（预览）",
     "giveFeedback": "提交反馈"
+  },
+
+  "chooser": {
+    "title": "选择安装",
+    "recent": "最近使用",
+    "all": "全部",
+    "openCloud": "打开",
+    "emptyTitle": "尚无安装",
+    "emptyDesc": "创建你的第一个 ComfyUI 安装即可开始。",
+    "createInstall": "创建安装"
   },
 
   "running": {

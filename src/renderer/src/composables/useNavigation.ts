@@ -8,6 +8,7 @@ import type { Installation, ActionResult } from '../types/ipc'
 
 export type TabKey =
   | 'dashboard'
+  | 'chooser'
   | 'list'
   | 'running'
   | 'models'

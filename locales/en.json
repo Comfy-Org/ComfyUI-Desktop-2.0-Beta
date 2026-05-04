@@ -27,7 +27,18 @@
   "sidebar": {
     "installations": "Installs",
     "running": "Running",
+    "chooser": "Chooser (preview)",
     "giveFeedback": "Give Feedback"
+  },
+
+  "chooser": {
+    "title": "Choose an installation",
+    "recent": "Recent",
+    "all": "All",
+    "openCloud": "Open",
+    "emptyTitle": "No installations yet",
+    "emptyDesc": "Create your first ComfyUI installation to get started.",
+    "createInstall": "Create installation"
   },
 
   "titleBar": {
