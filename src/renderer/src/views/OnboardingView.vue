@@ -2,7 +2,6 @@
 import { computed, ref, onMounted, onUnmounted, toRaw, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
-  AlertCircle,
   Check,
   Cloud,
   Cpu,
@@ -12,7 +11,6 @@ import {
   HardDrive,
   Import,
   Loader2,
-  Play,
   RotateCw,
   Sparkles,
 } from 'lucide-vue-next'
@@ -23,7 +21,7 @@ import { useOnboardingPrefs } from '../composables/useOnboardingPrefs'
 import { useMigrateAction } from '../composables/useMigrateAction'
 import { useModal } from '../composables/useModal'
 import { emitTelemetryAction } from '../lib/telemetry'
-import { parseInstallStatus, type ParsedStatus } from '../lib/parseInstallStatus'
+import { parseInstallStatus, type ParsedPhase, type ParsedStatus } from '../lib/parseInstallStatus'
 import type { FieldOption } from '../types/ipc'
 
 // TODO: replace with the final EULA URL once Legal signs off.
@@ -46,16 +44,19 @@ const PHASE_PROGRESS_WEIGHTS = {
   download: { start: 0, end: 35 },
   extract: { start: 35, end: 60 },
   setup: { start: 60, end: 95 },
+  // 'launch' is a synthesized phase — the backend doesn't emit it; we set it
+  // ourselves after `installInstance` resolves and before runAction('launch')
+  // returns. Lets the bar finish the last 5% as the final step ("Opening
+  // ComfyUI") rather than jumping to a separate Done screen.
+  launch: { start: 95, end: 100 },
 } as const
 const TIMEOUT_CLOUD_LAUNCH_MS = 30_000            // runAction(id, 'launch') for cloud — waitForUrl poll
-// Local first-launch (Python cold-start, port wait, etc) regularly takes
-// 30-60s on a fresh install. Was 15s — caused "Couldn't open" errors that
-// then auto-resolved when the launch completed naturally. Bumped well past
-// the realistic ceiling. The sessionStore watch below also recovers if the
-// launch lands after the timeout fires.
-const TIMEOUT_LOCAL_LAUNCH_MS = 120_000           // runAction(id, 'launch') for local
+// Local launch has no client-side timeout: ComfyUI's first-run cold-start
+// (Python startup, port wait) regularly takes 30-90s, and our previous
+// 15s / 120s timeouts both fired before completion in the wild. The
+// sessionStore.runningInstances watch is the success signal — when a
+// session for our install id appears, ComfyUI is live and we hide.
 const TIMEOUT_CANCEL_LAUNCH_MS = 3_000            // cancelLaunch — must escape regardless
-const TIMEOUT_DONE_RETRY_MS = 15_000              // §8 explicit done-state retry timeout
 const CARD_LOADING_PAINT_MS = 400                 // ensure card-loading state renders before stage flips
 
 // Helper: wraps a promise in a Promise.race against an explicit timeout.
@@ -95,7 +96,12 @@ const onboardingPrefs = useOnboardingPrefs()
 const modal = useModal()
 const { confirmMigration } = useMigrateAction()
 
-type Stage = 'consent' | 'mode' | 'local-fork' | 'install-form' | 'installing' | 'connecting-cloud' | 'done'
+// `done` removed — install-completion + launch-handoff now live entirely
+// inside the 'installing' stage as a synthesized 'launch' phase. The Done
+// screen with retry buttons / "Couldn't open ComfyUI" / "Try again" /
+// "Quit ComfyUI Desktop" is gone; the UI doesn't model a "we're stuck
+// between stages" state — there is no such state.
+type Stage = 'consent' | 'mode' | 'local-fork' | 'install-form' | 'installing' | 'connecting-cloud'
 // Returning users (EULA already accepted) skip straight to the mode picker.
 // We seed the initial stage from prefs at composition time.
 const stage = ref<Stage>(onboardingPrefs.eulaAccepted.value ? 'mode' : 'consent')
@@ -137,7 +143,11 @@ const FAUX_STEP_KEYS = [
   { key: 'stepDownloading', threshold: 35 },
   { key: 'stepSetupPython', threshold: 65 },
   { key: 'stepInstallingDeps', threshold: 90 },
-  { key: 'stepFinalizing', threshold: 100 },
+  // Final step covers the launch handoff — ComfyUI's first-run cold-start
+  // (Python / port-up) takes 30-60s+ on top of the pure install. Folding it
+  // into the same step ladder + bar lets the user see "we're still working"
+  // without flipping to a separate Done screen with retry buttons.
+  { key: 'stepOpeningComfyUi', threshold: 100 },
 ] as const
 
 // §5 (Bug 1 — pre-filled percent fix): `installPercent < 0` is the sentinel
@@ -183,7 +193,23 @@ const installStatus = computed(
 // here just feeds installStatus into it — see that file for the full spec.
 // Declared early so the per-phase progress watch (further below) can read
 // `parsedStatus.value.phase` without hitting a temporal dead zone.
-const parsedStatus = computed<ParsedStatus>(() => parseInstallStatus(installStatus.value))
+//
+// When isLaunching is true (install completed, runAction('launch') in flight),
+// override the parser output with a synthesized launch phase so the step
+// ladder advances to step 5 and the bar's PHASE_PROGRESS_WEIGHTS lookup
+// resolves to the 95-100 slot.
+const parsedStatus = computed<ParsedStatus>(() => {
+  if (isLaunching.value) {
+    return {
+      phase: 'launch' as ParsedPhase,
+      primary: t('onboarding.phaseLaunchSubtitle'),
+      speed: null,
+      elapsed: null,
+      remaining: null,
+    }
+  }
+  return parseInstallStatus(installStatus.value)
+})
 
 interface DisplayStep {
   label: string
@@ -218,6 +244,13 @@ const activeStepLabel = computed(() => {
 // `installOp` (e.g. a late progress event clearing flatStatus). Without this,
 // we'd run the launch + complete sequence twice.
 const hasFinalized = ref(false)
+// Flips true the moment install op finishes successfully; drives the synth-
+// esized 'launch' phase so the step ladder + bar transition to step 5.
+const isLaunching = ref(false)
+// Set if `runAction('launch')` itself throws (rare). Surfaced inline below
+// the bar with a single quit-launcher escape. NOT for slow launches —
+// those are the normal case, expected to take 30-90s.
+const launchError = ref<string | null>(null)
 
 watch(
   () => installOp.value?.finished,
@@ -248,25 +281,28 @@ watch(
       hasFinalized.value = false
       return
     }
-    // Show the success ack, then launch ComfyUI in the same window so the
-    // user has a continuous experience. We call runAction directly (not via
-    // useListAction) because executeAction's `showProgress` branch is
-    // fire-and-forget — it returns before the launch completes. runAction
-    // awaits until launch.ts's inline `_onLaunch` callback creates the new
-    // ComfyUI window. Only then do we hide the launcher.
+    // Install finished successfully. We DON'T transition to a separate Done
+    // screen — the launch is folded into the same installing UI as a final
+    // "Opening ComfyUI" phase. Synthesize a `launch` phase reading so the
+    // step ladder advances to step 5 and the bar fills the remaining 5%.
+    // Then run the actual launch in the background. SessionStore watch
+    // (further down) hides the launcher when ComfyUI's window appears.
     //
-    // Note: `onboardingPrefs.complete('manual')` is intentionally NOT called
-    // here — it's already been persisted at install kickoff in `startInstall`,
-    // so a renderer death between install-completion and launch can't strand
-    // the user back at onboarding next boot.
-    stage.value = 'done'
+    // No more done-state retry buttons / "Couldn't open" error blocks —
+    // ComfyUI's first-run cold-start is an honest, slow operation we
+    // surface as a normal phase, not as a failure mode that needs recovery.
+    isLaunching.value = true
+    lastFlatStatus.value = t('onboarding.phaseLaunch')
+    // Lock the bar at the launch phase boundary so step 5 reads as "active"
+    // (between threshold[3]=90 and threshold[4]=100). The slide-overlay
+    // animation continues showing motion during the wait.
+    lastOverallPercent.value = Math.max(lastOverallPercent.value, 95)
+    lastProgressAt.value = Date.now()
+    isStalled.value = false
+
     const id = installingId.value
     const isFakeInstall = id?.startsWith('fake-install-')
     void (async () => {
-      // Dev bypass: skip the real-install IPC chain entirely. The fake id
-      // doesn't correspond to a registered installation, so setSetting,
-      // fetchInstallations and launchWithTimeout would all fail meaningfully.
-      // Simulate a brief launch latency, hide the launcher, and exit.
       if (isFakeInstall) {
         await new Promise((r) => setTimeout(r, 1500))
         try { await window.api.hideLauncherWindow() } catch { /* dev best-effort */ }
@@ -276,8 +312,6 @@ watch(
       try {
         await onboardingPrefs.setLastUsedMode('local')
       } catch (err) {
-        // Non-blocking: lastUsedMode is just a default-restore preference. The
-        // user can still proceed; surface via telemetry only.
         emitTelemetryAction('onboarding.setLastUsedMode.failed', {
           message: (err as Error)?.message,
         })
@@ -289,8 +323,6 @@ watch(
       try {
         await window.api.setSetting('primaryInstallId', id)
       } catch (err) {
-        // Idempotent best-effort: primaryInstallId is a "remember last" hint,
-        // not load-bearing. The launch path below is what matters.
         emitTelemetryAction('onboarding.setPrimaryInstallId.failed', {
           message: (err as Error)?.message,
         })
@@ -302,30 +334,26 @@ watch(
           message: (err as Error)?.message,
         })
       }
-      // Done state stays visible for the duration of the launch — the user
-      // sees "Your studio is ready / Opening ComfyUI…" until the new window
-      // actually appears. We use the §8 retry pattern so a hung or failing
-      // launch surfaces an actual error rather than a silent hang.
-      const launchOk = await launchWithTimeout(id, TIMEOUT_LOCAL_LAUNCH_MS)
-      if (launchOk) {
-        // Hide-fail is non-fatal here: ComfyUI is open in its own window,
-        // so the user's goal is achieved. Don't surface this as a "Try
-        // again" via retryError — that would render the recovery UX while
-        // the new window is already running, confusing them into thinking
-        // the launch failed. Telemetry only; emit complete unconditionally.
-        try {
-          await window.api.hideLauncherWindow()
-        } catch (err) {
+      // Fire runAction with no client-side timeout. The backend's launch.ts
+      // waits for the port to come up; on first run that's 30-90s for the
+      // Python cold-start. The sessionStore watch below auto-hides the
+      // launcher the moment a session shows up — so even a slow launch
+      // resolves the flow naturally without an error screen.
+      try {
+        await window.api.runAction(id, 'launch')
+        try { await window.api.hideLauncherWindow() } catch (err) {
           emitTelemetryAction('onboarding.hideLauncherWindow.failed', {
             message: (err as Error)?.message,
             phase: 'install_complete',
           })
         }
         emit('complete')
+      } catch (err) {
+        // Hard failure of runAction itself (rare — usually means main
+        // process IPC errored). Surface inline below the bar; user can
+        // quit the launcher to retry from scratch.
+        launchError.value = (err as Error)?.message || t('onboarding.openComfyUiErrorSubtitle')
       }
-      // If launchOk is false, retryError is already populated by
-      // launchWithTimeout — the done state will render the §8 error block
-      // and "Try again" button. No further action needed here.
     })()
   },
 )
@@ -369,7 +397,7 @@ function onDevKeydown(e: KeyboardEvent): void {
 
 function startFakeInstall(): void {
   if (!isDev) return
-  if (stage.value === 'installing' || stage.value === 'connecting-cloud' || stage.value === 'done') return
+  if (stage.value === 'installing' || stage.value === 'connecting-cloud') return
 
   const fakeId = `fake-install-${Date.now()}`
   installingId.value = fakeId
@@ -677,9 +705,6 @@ async function pickCloud(): Promise<void> {
 
     // Cloud launch succeeded — clear any prior error banner.
     cloudError.value = ''
-    // Show the success ack briefly so the user sees a clear handoff, then
-    // focus the cloud window and hide the launcher chrome.
-    stage.value = 'done'
     try {
       await onboardingPrefs.setLastUsedMode('cloud')
     } catch (err) {
@@ -694,7 +719,6 @@ async function pickCloud(): Promise<void> {
         message: (err as Error)?.message,
       })
     }
-    await new Promise((r) => setTimeout(r, 1200))
     try {
       window.api.focusComfyWindow(inst.id)
     } catch (err) {
@@ -702,9 +726,6 @@ async function pickCloud(): Promise<void> {
         message: (err as Error)?.message,
       })
     }
-    // Cloud is connected and visible — hide-fail is non-fatal. Don't surface
-    // it via retryError; that would render the "Try again" UX while the
-    // cloud window is already running.
     try {
       await withTimeout(window.api.hideLauncherWindow(), 3_000, undefined)
     } catch (err) {
@@ -764,13 +785,12 @@ async function pickLocal(): Promise<void> {
           })
         }
       }
-      stage.value = 'done'
-      // §9.2 fix: §8 retry pattern — Promise.race(15s) + verbatim error.
-      // No more silent swallow.
-      const ok = await launchWithTimeout(installed.id, TIMEOUT_LOCAL_LAUNCH_MS)
-      if (ok) {
-        // ComfyUI is open — hide-fail is non-fatal. Don't trigger the
-        // "Try again" UX; user's goal is achieved.
+      // Fire runAction with no client-side timeout — the backend's launch.ts
+      // waits for the port to come up; on first run that's 30-90s. The
+      // sessionStore watch (in install-completion path) doesn't apply here
+      // since we never set isLaunching, so we await runAction directly.
+      try {
+        await window.api.runAction(installed.id, 'launch')
         try {
           await withTimeout(window.api.hideLauncherWindow(), 3_000, undefined)
         } catch (err) {
@@ -780,9 +800,13 @@ async function pickLocal(): Promise<void> {
           })
         }
         emit('complete')
+      } catch (err) {
+        // Hard runAction failure on a returning user's existing install.
+        // Surface via cloudError (reusing the inline mode-picker banner) and
+        // route back to the picker so they can try cloud or re-pick local.
+        cloudError.value = (err as Error)?.message || t('onboarding.openComfyUiErrorSubtitle')
+        stage.value = 'mode'
       }
-      // On failure, retryError is set by launchWithTimeout — done state will
-      // render the §8 error block with "Try again" + "Quit ComfyUI Desktop".
     } finally {
       busy.value = false
       localCardLoading.value = false
@@ -1338,46 +1362,23 @@ const cloudChecks = computed<CloudCheck[]>(() =>
   })),
 )
 
-// --- Section G: done-state recovery v2 (§8) ---
-// View-local timers for the done screen. The button-reveal threshold is purely
-// view-state (when to show "Open ComfyUI" the first time); the retry timeout is
-// independent (per spec — different concern, different ref).
-const DONE_STUCK_THRESHOLD_S = 15
-const doneEnteredAt = ref(0)
-const doneElapsedSeconds = ref(0)
-let doneTimer: ReturnType<typeof setInterval> | null = null
-// `doneStuck` controls whether the "Open ComfyUI" button is rendered at all.
-// It does NOT govern subtitle copy escalation — that's driven by retry state.
-const doneStuck = computed(() => doneElapsedSeconds.value >= DONE_STUCK_THRESHOLD_S)
-
-// §8 retry state. `retrying` is a UI gate that paints synchronously on click
-// (before await) so the button shows its loading state within 200ms even if
-// the IPC takes ~1s to return. `retryError` is the verbatim message from the
-// IPC (or a friendly fallback) — surfaced in the inline error block.
-const retrying = ref(false)
-const retryError = ref<string | null>(null)
-// `retryAttempted` flips true after the FIRST explicit user retry click. Used
-// to gate the "Quit ComfyUI Desktop" affordance per §8 ("only renders when
-// `retryError !== null`" — but more precisely: only after the user has
-// explicitly retried at least once and seen a failure).
-const retryAttempted = ref(false)
-
-// Late-arriving session recovery. Bug Deep reported: launch timeout fires
-// at 15s → "Couldn't open ComfyUI" surfaces → ComfyUI actually opens 30-60s
-// later (Python cold-start finishes). User sees a contradictory error
-// while the app is running. Even with the timeout bumped to 120s, the
-// backend can in principle exceed it — this watch is the safety net.
+// --- Section G: launch-handoff inside the installing stage ---
+// The Done screen is gone. After the install op finishes, the watch above
+// keeps stage='installing', flips `isLaunching=true`, and runs `runAction
+// ('launch')` in the background. We need a sessionStore watch as the
+// success signal: the moment a session for our install id appears, we
+// know ComfyUI is live and can hide the launcher.
 //
-// When sessionStore reports `installingId.value` as a running instance
-// while we're sitting on the done state with a retryError, treat it as
-// recovered: clear the error, hide the launcher, complete onboarding.
+// This replaces the v1 retry-button + "Couldn't open ComfyUI" + "Quit
+// ComfyUI Desktop" recovery UX. Failure is now ONLY surfaced when
+// runAction itself throws (above, populating launchError) — slow launches
+// are the normal case, not a failure.
 watch(
   () => installingId.value && sessionStore.runningInstances.has(installingId.value),
   (running) => {
     if (!running) return
-    if (stage.value !== 'done') return
-    if (!retryError.value) return
-    retryError.value = null
+    if (stage.value !== 'installing') return
+    if (!isLaunching.value) return
     void (async () => {
       try {
         await withTimeout(window.api.hideLauncherWindow(), 3_000, undefined)
@@ -1392,163 +1393,21 @@ watch(
   },
 )
 
-function startDoneTimer(): void {
-  stopDoneTimer()
-  doneEnteredAt.value = Date.now()
-  doneElapsedSeconds.value = 0
-  retryError.value = null
-  retrying.value = false
-  retryAttempted.value = false
-  doneTimer = setInterval(() => {
-    doneElapsedSeconds.value = Math.floor((Date.now() - doneEnteredAt.value) / 1000)
-  }, 1000)
-}
-
-function stopDoneTimer(): void {
-  if (doneTimer) {
-    clearInterval(doneTimer)
-    doneTimer = null
-  }
-}
-
-// Pick which install id to operate on for retry. Prefer the local install id
-// (set during installing flow), fall back to the cloud install id.
-function activeLaunchId(): string | null {
-  return installingId.value ?? cloudInstall.value?.id ?? null
-}
-
-// Subtitle copy per §8 state table.
-const doneSubtitleKey = computed(() => {
-  if (retryError.value) return 'onboarding.openComfyUiErrorSubtitle'
-  if (retrying.value) return 'onboarding.connectingSubtitle'
-  if (doneStuck.value) return 'onboarding.doneSubtitleStuckV2'
-  return 'onboarding.doneSubtitle'
-})
-
-const doneTitleKey = computed(() => {
-  if (retryError.value) return 'onboarding.openComfyUiError'
-  if (retrying.value) return 'onboarding.connectingTitle'
-  return 'onboarding.doneTitle'
-})
-
-// Button copy + state per §8 state table.
-type DoneButtonState = 'idle' | 'loading' | 'error'
-const doneButtonState = computed<DoneButtonState>(() => {
-  if (retrying.value) return 'loading'
-  if (retryError.value) return 'error'
-  return 'idle'
-})
-
-const doneButtonLabelKey = computed(() => {
-  switch (doneButtonState.value) {
-    case 'loading': return 'onboarding.openComfyUiLoading'
-    case 'error': return 'onboarding.openComfyUiTryAgain'
-    default: return 'onboarding.openComfyUiCta'
-  }
-})
-
-// Core launch helper — wraps runAction in a Promise.race against the supplied
-// timeout, surfaces any failure into `retryError`. Returns true on launch
-// success (caller should hideLauncherWindow + emit complete), false otherwise.
-//
-// Used by both the install-completion auto-launch path AND the §8 retry
-// button. Sharing the same code path means every launch surface fails loudly,
-// not just the explicit retry.
-async function launchWithTimeout(id: string, timeoutMs: number): Promise<boolean> {
-  type Result = { ok?: boolean; message?: string; cancelled?: boolean; __timeout?: true }
-  const timeoutMarker: Result = { ok: false, message: t('onboarding.openComfyUiTimeout'), __timeout: true }
-  let result: Result
-  try {
-    result = await withTimeout<Result>(
-      window.api.runAction(id, 'launch') as Promise<Result>,
-      timeoutMs,
-      timeoutMarker,
-    )
-  } catch (err) {
-    retryError.value = (err as Error)?.message || t('onboarding.openComfyUiErrorSubtitle')
-    return false
-  }
-  if (result?.ok) {
-    retryError.value = null
-    return true
-  }
-  // ok: false (or timeout sentinel) — surface verbatim.
-  retryError.value = result?.message || t('onboarding.openComfyUiErrorSubtitle')
-  return false
-}
-
-// §8 retry handler — called when user clicks "Open ComfyUI" / "Try again".
-// Synchronous gate: `retrying.value = true` BEFORE await so the button paints
-// its loading state within 200ms, regardless of how long the IPC takes.
-async function retryLaunch(): Promise<void> {
-  // UI re-entry gate (the IPC also gates server-side via _operationAborts,
-  // but the spec says "UI must not rely solely on backend gate").
-  if (retrying.value) return
-  const id = activeLaunchId()
-  if (!id) {
-    retryError.value = t('onboarding.openComfyUiNoActiveInstall')
-    retryAttempted.value = true
-    return
-  }
-  retrying.value = true
-  retryError.value = null
-  retryAttempted.value = true
-  try {
-    const ok = await launchWithTimeout(id, TIMEOUT_DONE_RETRY_MS)
-    if (ok) {
-      // Success — focus the window and tear down the launcher.
-      try {
-        window.api.focusComfyWindow(id)
-      } catch (err) {
-        // focus is best-effort; the runAction success is what matters.
-        emitTelemetryAction('onboarding.focusComfyWindow.failed', {
-          message: (err as Error)?.message,
-        })
-      }
-      try {
-        await withTimeout(window.api.hideLauncherWindow(), 3_000, undefined)
-        emit('complete')
-      } catch (err) {
-        retryError.value = (err as Error)?.message || t('onboarding.openComfyUiErrorSubtitle')
-      }
-    }
-    // Failure path: retryError is already populated by launchWithTimeout.
-  } finally {
-    retrying.value = false
-  }
-}
-
-// Quit affordance shown only after a retry has actually failed. Calls quit-app
-// IPC directly. Wrapped in error handling so a failing quit doesn't strand the
-// user — fall back to hideLauncherWindow if quit fails (last-ditch escape).
+// Quit affordance — used inline if launchError surfaces. Wrapped in error
+// handling so a failing quit doesn't strand the user.
 async function quitDesktop(): Promise<void> {
   try {
     await withTimeout(window.api.quitApp(), 3_000, undefined)
   } catch (err) {
-    // If quit failed (rare), at least hide the launcher chrome so the user
-    // isn't stuck on the failure screen.
     emitTelemetryAction('onboarding.quitApp.failed', {
       message: (err as Error)?.message,
     })
-    try {
-      await window.api.hideLauncherWindow()
-    } catch {
-      // truly stuck — but this is a last-ditch path. The user can hit OS-level
-      // window close; we've done what we can.
-    }
+    try { await window.api.hideLauncherWindow() } catch { /* last-ditch */ }
   }
 }
 
-// Track stage transitions to drive the done timer + cloud checklist + screen
-// reader announcements. Watching `stage` keeps lifecycle hooks in one place.
+// Track stage transitions to drive the cloud checklist cycle.
 watch(stage, (next, prev) => {
-  // Done timer
-  if (next === 'done') {
-    startDoneTimer()
-  } else if (prev === 'done') {
-    stopDoneTimer()
-  }
-  // Cloud checklist
   if (next === 'connecting-cloud') {
     startCloudCheckCycle()
   } else if (prev === 'connecting-cloud') {
@@ -1572,8 +1431,6 @@ const stageAnnouncement = computed(() => {
       return t('onboarding.installingTitle')
     case 'connecting-cloud':
       return t('onboarding.cloudConnectingTitle')
-    case 'done':
-      return t(doneTitleKey.value)
     default:
       return ''
   }
@@ -1591,7 +1448,6 @@ watch(stage, () => {
 // Cleanup the done + cloud-check timers on unmount in addition to the
 // existing elapsed/cloud-timeout cleanups above.
 onUnmounted(() => {
-  stopDoneTimer()
   stopCloudCheckCycle()
 })
 </script>
@@ -2123,7 +1979,7 @@ onUnmounted(() => {
                  fired in 30s. Cancel routes through modal.confirm; disabled
                  once we're past the finalize threshold (95%) since cancelling
                  mid-finalize can corrupt state. Per §5 stalled-state spec. -->
-            <div v-if="isStalled" class="installing-stalled" role="alert">
+            <div v-if="isStalled && !isLaunching" class="installing-stalled" role="alert">
               <p class="installing-stalled-text">{{ t('onboarding.installStalled') }}</p>
               <button
                 type="button"
@@ -2138,96 +1994,36 @@ onUnmounted(() => {
               </p>
               <p v-if="cancelError" class="installing-cancel-error">{{ cancelError }}</p>
             </div>
-          </div>
-        </section>
 
-        <!-- =====================================================
-             6 / Done — success ack with §8 recovery v2
-             Single primary button surfaces a working retry path with verbatim
-             error surface + 15s timeout + Quit affordance after explicit
-             retry-failure. No "Show details", no "Close launcher", no
-             disclosure — every state has direct, actionable feedback.
-             ===================================================== -->
-        <section v-else-if="stage === 'done'" key="done" class="onboarding-screen onboarding-done">
-          <div class="done-inner">
-            <!-- Check icon: success tint normally, danger tint when retry failed.
-                 No pulsing on error (per §8). -->
-            <div
-              class="done-check"
-              :class="{
-                'done-check-stuck': doneStuck && !retryError,
-                'done-check-error': !!retryError,
-              }"
-            >
-              <Check v-if="!retryError" :size="32" />
-              <AlertCircle v-else :size="32" />
-            </div>
-            <h2 class="done-title">{{ t(doneTitleKey) }}</h2>
-            <!-- aria-live announces the subtitle when retry state flips.
-                 Hidden when the inline error block is rendering (the error
-                 block carries the message in that state). -->
-            <p
-              v-if="!retryError"
-              class="done-subtitle"
-              :class="{ 'done-subtitle-stuck': doneStuck }"
-              aria-live="polite"
-            >
-              {{ t(doneSubtitleKey) }}
-            </p>
-
-            <!-- Inline error block (state 6 only). Above the button, below
-                 the subtitle. Verbatim message from IPC. -->
-            <Transition name="onboarding-fade">
-              <div
-                v-if="retryError"
-                class="done-error-block"
-                role="alert"
+            <!-- launchError: rare hard failure of runAction itself (main-process
+                 IPC error). Slow launches are NOT failures — sessionStore's
+                 watch picks up the late-arriving session and hides the
+                 launcher, no error needed. This block is a true error path:
+                 the install completed, the IPC threw, ComfyUI didn't open. -->
+            <div v-if="launchError" class="installing-launch-error" role="alert">
+              <p class="installing-launch-error-title">
+                {{ t('onboarding.openComfyUiError') }}
+              </p>
+              <p class="installing-launch-error-text">{{ launchError }}</p>
+              <button
+                type="button"
+                class="installing-cancel-btn"
+                @click="quitDesktop"
               >
-                <AlertCircle :size="14" class="done-error-icon" />
-                <span class="done-error-text">
-                  {{ t('onboarding.openComfyUiError') }}: {{ retryError }}
-                </span>
-              </div>
-            </Transition>
-
-            <!-- §8 recovery: single primary button, gated on doneStuck reveal -->
-            <Transition name="onboarding-fade">
-              <div v-if="doneStuck" class="done-recovery">
-                <button
-                  type="button"
-                  class="primary onboarding-primary-btn done-retry-btn"
-                  :class="{
-                    'done-retry-loading': doneButtonState === 'loading',
-                    'done-retry-error': doneButtonState === 'error',
-                  }"
-                  :disabled="retrying"
-                  :aria-busy="retrying ? 'true' : 'false'"
-                  @click="retryLaunch"
-                >
-                  <Loader2 v-if="doneButtonState === 'loading'" :size="16" class="done-btn-icon spin" />
-                  <RotateCw v-else-if="doneButtonState === 'error'" :size="16" class="done-btn-icon" />
-                  <Play v-else :size="16" class="done-btn-icon" />
-                  {{ t(doneButtonLabelKey) }}
-                </button>
-
-                <!-- Quit affordance: ONLY after an explicit retry-failure.
-                     Per §8: "only renders when retryError !== null" — and we
-                     additionally require retryAttempted to disambiguate from
-                     install-completion errors that populate retryError. -->
-                <Transition name="onboarding-fade">
-                  <button
-                    v-if="retryError && retryAttempted"
-                    type="button"
-                    class="done-text-btn done-text-btn-quiet"
-                    @click="quitDesktop"
-                  >
-                    {{ t('onboarding.quitDesktop') }}
-                  </button>
-                </Transition>
-              </div>
-            </Transition>
+                {{ t('onboarding.quitDesktop') }}
+              </button>
+            </div>
           </div>
         </section>
+
+        <!-- Done stage removed: install completion + launch handoff now run
+             inside 'installing' as a synthesized 'launch' phase. The Done
+             screen with retry buttons / "Couldn't open ComfyUI" / "Quit
+             ComfyUI Desktop" is gone — those flows were broken (timeout
+             fired before launch finished, success path showed retry
+             buttons over a running ComfyUI window) and confused the user.
+             A failed runAction now surfaces inline below the install bar
+             with a single Quit affordance. -->
       </Transition>
     </div>
   </div>
@@ -3230,157 +3026,35 @@ onUnmounted(() => {
   margin: 0;
 }
 
-/* --- Done screen --- */
-.onboarding-done {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  padding: 64px 0;
-}
-
-.done-inner {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 16px;
-  max-width: 360px;
-  width: 100%;
-}
-
-.done-check {
-  width: 64px;
-  height: 64px;
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--success) 18%, transparent);
-  color: var(--success);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  /* Subtle pulse during the patient phase keeps the screen feeling alive. */
-  animation: install-pulse 2s ease-in-out infinite;
-}
-
-/* Stop the pulse once we move past the patient threshold — the screen is
-   now in a recovery posture, not a celebratory one. */
-.done-check-stuck {
-  animation: none;
-}
-
-.done-title {
-  font-size: 22px;
-  font-weight: 700;
-  color: var(--text);
-  margin: 0;
-  line-height: 1.2;
-}
-
-.done-subtitle {
-  font-size: 14px;
-  color: var(--text-muted);
-  margin: 0;
-  line-height: 1.5;
-  transition: color 0.2s ease;
-}
-
-/* Tier 3: warning color when we cross the very-stuck threshold. */
-.done-subtitle-very-stuck {
-  color: var(--warning);
-}
-
-/* Tier 2+ recovery affordances cluster. */
-.done-recovery {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-  width: 100%;
-  margin-top: 8px;
-}
-
-.done-recovery-buttons {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-
-/* Quiet text-button for "Show details" / "Close launcher". */
-.done-text-btn {
-  border: none;
-  background: none;
-  padding: 6px 8px;
-  color: var(--text-muted);
-  font-family: inherit;
-  font-size: 13px;
-  cursor: pointer;
-  transition: color 0.15s ease;
-  border-radius: 4px;
-}
-
-.done-text-btn:hover {
-  color: var(--text);
-  background: none;
-}
-
-.done-text-btn-quiet {
-  color: var(--text-faint);
-  font-size: 12px;
-}
-
-.done-text-btn-quiet:hover {
-  color: var(--text-muted);
-}
-
-/* Recessed-list disclosure block for the "Show details" content. */
-.done-details {
-  width: 100%;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 10px 12px;
+/* Hard-failure block on the installing screen — only renders when
+   runAction itself throws (not for slow launches). Sits below the
+   stalled-state strip; matches its layout grammar so the user sees
+   "this is a problem, here's the escape" without needing to learn
+   a new visual pattern. */
+.installing-launch-error {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  text-align: left;
+  margin-top: 16px;
+  padding: 12px 14px;
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
+  border-radius: 6px;
 }
 
-.done-details p {
+.installing-launch-error-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--danger);
   margin: 0;
+}
+
+.installing-launch-error-text {
   font-size: 12px;
   color: var(--text-muted);
-  line-height: 1.5;
-}
-
-.done-details-explain {
-  color: var(--text-muted);
-}
-
-.done-details-status {
-  display: flex;
-  gap: 6px;
-  align-items: flex-start;
-  color: var(--text-muted);
-  font-variant-numeric: tabular-nums;
-  /* Selectable for users who want to copy the status line into a bug report.
-     Per DESIGN.md rules — selectable text where it helps the user. */
-  user-select: text;
-}
-
-.done-details-glyph {
-  color: var(--text-faint);
-  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
-  flex-shrink: 0;
-}
-
-.done-details-path-value {
-  display: block;
-  margin-top: 4px;
-  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
-  font-size: 11px;
-  color: var(--text);
-  word-break: break-all;
-  user-select: text;
+  margin: 0;
+  line-height: 1.4;
+  word-break: break-word;
 }
 
 .onboarding-spinner {
@@ -3456,14 +3130,6 @@ onUnmounted(() => {
   transition: opacity 0.15s ease, filter 0.15s ease;
 }
 
-/* The done-state subtitle picks up a warning tint when we've been on
-   the done screen long enough to consider it stuck. Pairs with the
-   doneStuck computed flag to communicate "still waiting" without the
-   subtitle silently sitting at the success copy. */
-.done-subtitle-stuck {
-  color: var(--warning);
-}
-
 /* Per-screen error pill — sits below the offending control with a 12px
    gap. Inline-flex so an icon can sit next to it; warning palette via
    color-mix to avoid a hardcoded hex. */
@@ -3480,81 +3146,7 @@ onUnmounted(() => {
   border-radius: 4px;
 }
 
-/* Done-state error block — verbatim IPC message inline above the retry
-   button. Not a toast; not a modal; the user has to read this to make a
-   decision so it gets a row of its own. */
-.done-error-block {
-  display: inline-flex;
-  align-items: flex-start;
-  gap: 8px;
-  margin: 12px 0 4px;
-  padding: 10px 12px;
-  font-size: 13px;
-  color: var(--danger);
-  background: color-mix(in srgb, var(--danger) 10%, transparent);
-  border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
-  border-radius: 6px;
-  max-width: 360px;
-  text-align: left;
-  line-height: 1.4;
-}
-
-.done-error-icon {
-  flex-shrink: 0;
-  margin-top: 2px;
-  color: var(--danger);
-}
-
-.done-error-text {
-  flex-grow: 1;
-}
-
-/* Done-state retry button — three modifiers (loading / error / idle).
-   Idle = primary fill (inherited from .primary base class). Loading =
-   keep primary fill but spinner replaces icon (no chrome change so the
-   button doesn't shift). Error = chrome shifts to neutral with the
-   warning-tinted icon, clearly different from a successful retry. */
-.done-retry-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  min-width: 200px;
-  transition: background 0.15s ease, color 0.15s ease, opacity 0.15s ease;
-}
-
-.done-retry-loading {
-  cursor: wait;
-}
-
-.done-retry-error {
-  background: var(--surface);
-  color: var(--text);
-  border: 1px solid var(--border);
-}
-
-.done-retry-error:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--accent) 8%, transparent);
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
-.done-btn-icon {
-  flex-shrink: 0;
-}
-
-/* When the retry surfaces an explicit error, the success check icon
-   becomes a danger-palette alert mark — keeps the existing geometry
-   (size, position) but reads as warning, not success. */
-.done-check-error {
-  background: color-mix(in srgb, var(--danger) 18%, transparent);
-  color: var(--danger);
-}
-
-/* Stops the success-check pulse outside the patient phase so the
-   stuck/error states don't read as "still working". Pairs with the
-   `done-check-error` class for the error variant. */
-.done-check-static {
-  animation: none;
-}
+/* Done-screen styles removed — install + launch are one flow now,
+   inline error renders via .installing-launch-error on the installing
+   screen instead. */
 </style>

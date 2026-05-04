@@ -26,7 +26,10 @@
  * rendered as `phase: 'unknown'` with the raw chunk in `primary`.
  */
 
-export type ParsedPhase = 'download' | 'extract' | 'setup' | 'unknown'
+// 'launch' is synthesized by OnboardingView after install completes — the
+// backend never emits a "Launching" status. Including it here keeps the
+// parser's output type consistent with the renderer's phase usage.
+export type ParsedPhase = 'download' | 'extract' | 'setup' | 'launch' | 'unknown'
 
 export interface ParsedStatus {
   phase: ParsedPhase
