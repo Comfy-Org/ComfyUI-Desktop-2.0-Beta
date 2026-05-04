@@ -796,7 +796,7 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
     notifyTitleBarTitle(titleBarText)
     const entry = comfyWindows.get(installationId)
     notifyTitleBarPanel(entry?.activePanel ?? 'comfy')
-    if (entry) {
+    if (entry && !titleBarView.webContents.isDestroyed()) {
       titleBarView.webContents.send('comfy-titlebar:theme-changed', entry.lastTheme)
     }
   }
@@ -985,6 +985,11 @@ ipcMain.handle('reset-zoom', () => {
  * Lazily create the panel WebContentsView for a comfy window. Adds it as a
  * sibling of comfyView, registers it for broadcasts, and loads panel.html
  * with the installation context as URL parameters.
+ *
+ * The URL params are only an initial hint — `did-finish-load` always re-pushes
+ * the current `activePanel` so a user who clicks Install Settings then
+ * Launcher Settings before the first load completes still ends up on the
+ * latter. This guards against the mid-load race.
  */
 function ensurePanelView(installationId: string, entry: ComfyWindowEntry, initialPanel: ComfyPanelKey): WebContentsView {
   if (entry.panelView) return entry.panelView
@@ -1005,22 +1010,46 @@ function ensurePanelView(installationId: string, entry: ComfyWindowEntry, initia
   panelView.setBounds({ x: 0, y: TITLEBAR_HEIGHT + 1, width: 0, height: 0 })
   panelView.setVisible(false)
 
+  // Push the *latest* active panel (may differ from initialPanel if the user
+  // clicked between buttons during the first load) and steal focus if the
+  // window is focused.
+  panelView.webContents.once('did-finish-load', () => {
+    const latest = comfyWindows.get(installationId)
+    if (!latest || latest.window.isDestroyed() || panelView.webContents.isDestroyed()) return
+    if (latest.activePanel !== 'comfy') {
+      panelView.webContents.send('panel-switch', { panel: latest.activePanel, installationId })
+      if (latest.window.isFocused()) panelView.webContents.focus()
+    }
+  })
+
   const isDev = !!process.env['ELECTRON_RENDERER_URL']
-  if (isDev) {
-    const devBase = process.env['ELECTRON_RENDERER_URL'] as string
-    panelView.webContents.loadURL(
-      `${devBase.replace(/\/$/, '')}/panel.html?installationId=${encodeURIComponent(installationId)}&panel=${encodeURIComponent(initialPanel)}`,
-    )
-  } else {
-    panelView.webContents.loadFile(
-      path.join(__dirname, '../renderer/panel.html'),
-      { query: { installationId, panel: initialPanel } },
-    )
-  }
+  const loadPromise = isDev
+    ? panelView.webContents.loadURL(
+        `${(process.env['ELECTRON_RENDERER_URL'] as string).replace(/\/$/, '')}/panel.html?installationId=${encodeURIComponent(installationId)}&panel=${encodeURIComponent(initialPanel)}`,
+      )
+    : panelView.webContents.loadFile(
+        path.join(__dirname, '../renderer/panel.html'),
+        { query: { installationId, panel: initialPanel } },
+      )
+  // Loads can reject if the window closes mid-load — swallow to avoid noisy
+  // unhandledRejection forwarding from the main-process error handlers.
+  void loadPromise.catch(() => {})
 
   _registerExtraBroadcastTarget(panelView.webContents)
   entry.panelView = panelView
   return panelView
+}
+
+/** Move OS focus to whichever body view is now active so keyboard input lands in the right place. */
+function focusActiveBody(entry: ComfyWindowEntry): void {
+  if (entry.window.isDestroyed() || !entry.window.isFocused()) return
+  if (entry.activePanel === 'comfy') {
+    if (!entry.comfyView.webContents.isDestroyed()) entry.comfyView.webContents.focus()
+  } else if (entry.panelView && !entry.panelView.webContents.isDestroyed() && !entry.panelView.webContents.isLoadingMainFrame()) {
+    // Panel exists and is loaded — focus immediately. If still loading, the
+    // did-finish-load handler in ensurePanelView will focus it.
+    entry.panelView.webContents.focus()
+  }
 }
 
 function setActivePanel(installationId: string, panel: ComfyPanelKey): void {
@@ -1031,18 +1060,18 @@ function setActivePanel(installationId: string, panel: ComfyPanelKey): void {
   entry.activePanel = panel
   if (panel !== 'comfy') {
     const panelView = ensurePanelView(installationId, entry, panel)
-    // If panel view already exists (revisiting after switching away), tell the
-    // renderer to switch its internal sub-view.
+    // If panel view already loaded, push the switch immediately. If still
+    // loading, the did-finish-load handler in ensurePanelView will push the
+    // current activePanel — guarding against rapid clicks during first load.
     if (!panelView.webContents.isDestroyed() && !panelView.webContents.isLoadingMainFrame()) {
       panelView.webContents.send('panel-switch', { panel, installationId })
-    } else {
-      // First load — the renderer will read the URL params on mount, no need to send.
     }
   }
   entry.layoutViews()
   if (!entry.titleBarView.webContents.isDestroyed()) {
     entry.titleBarView.webContents.send('comfy-titlebar:panel-changed', panel)
   }
+  focusActiveBody(entry)
 }
 
 ipcMain.on('comfy-window:set-panel', (event, payload: { panel: string }) => {
