@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>ComfyUI Desktop 2.0 — Title Bar</title>
+    <!--
+      The title bar runs in its own WebContentsView and only needs local
+      assets (Inter font, design-token CSS, the bundled JS). PostHog/Datadog
+      surfaces aren't loaded here, so connect-src/img-src can stay narrow
+      compared to the launcher and panel renderers.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' ws:"
+    />
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/comfyTitleBar/main.ts"></script>
+  </body>
+</html>

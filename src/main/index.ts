@@ -709,11 +709,21 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
   })
   // Paint the title bar's dark background before its HTML loads to avoid a white flash on window show.
   titleBarView.setBackgroundColor(TITLEBAR_BG)
-  // Pass installationId via query so the preload can expose it to the page.
-  titleBarView.webContents.loadFile(
-    path.join(__dirname, '..', '..', 'resources', 'comfyTitleBar.html'),
-    { query: { installationId } },
-  )
+  // The title bar is a Vite-built renderer entry so it shares the Inter font
+  // + design tokens with the launcher and panel renderers. Pass installationId
+  // via the URL so the preload can expose it to the page.
+  {
+    const isDev = !!process.env['ELECTRON_RENDERER_URL']
+    const tbLoad = isDev
+      ? titleBarView.webContents.loadURL(
+          `${(process.env['ELECTRON_RENDERER_URL'] as string).replace(/\/$/, '')}/comfyTitleBar.html?installationId=${encodeURIComponent(installationId)}`,
+        )
+      : titleBarView.webContents.loadFile(
+          path.join(__dirname, '../renderer/comfyTitleBar.html'),
+          { query: { installationId } },
+        )
+    void tbLoad.catch(() => {})
+  }
   const sourceLabel = sourceMap[installation.sourceId]?.label
   const titleBarText = sourceLabel ? `${installation.name} — ${sourceLabel}` : installation.name
   comfyWindow.contentView.addChildView(titleBarView)
@@ -771,14 +781,16 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
 
   if (saved?.maximized) comfyWindow.maximize()
 
-  // On macOS fullscreen the traffic-light buttons disappear, so remove the extra left padding
+  // On macOS fullscreen the traffic-light buttons disappear, so the title bar
+  // should drop its 78px left padding for that period. Push the state via IPC
+  // so the Vue component can toggle a class instead of mutating the DOM directly.
   if (process.platform === 'darwin') {
-    comfyWindow.on('enter-full-screen', () => {
-      titleBarView.webContents.executeJavaScript(`document.body.style.paddingLeft='12px'`).catch(() => {})
-    })
-    comfyWindow.on('leave-full-screen', () => {
-      titleBarView.webContents.executeJavaScript(`document.body.style.paddingLeft='78px'`).catch(() => {})
-    })
+    const sendFullscreen = (fullscreen: boolean): void => {
+      if (titleBarView.webContents.isDestroyed()) return
+      titleBarView.webContents.send('comfy-titlebar:fullscreen-changed', fullscreen)
+    }
+    comfyWindow.on('enter-full-screen', () => sendFullscreen(true))
+    comfyWindow.on('leave-full-screen', () => sendFullscreen(false))
   }
 
   /** Send the active panel down to the title bar so it can highlight the right button. */

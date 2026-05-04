@@ -16,6 +16,8 @@ export interface ComfyTitleBarBridge {
   onTitleChanged(cb: (title: string) => void): () => void
   /** Subscribe to theme updates (background + symbol color). */
   onThemeChanged(cb: (theme: { bg: string; text: string }) => void): () => void
+  /** Subscribe to macOS fullscreen state — drives traffic-light padding. */
+  onFullscreenChanged(cb: (fullscreen: boolean) => void): () => void
   /** Tell main this title bar is mounted; main responds with the initial state. */
   ready(): void
 }
@@ -65,6 +67,13 @@ const bridge: ComfyTitleBarBridge = {
     }
     ipcRenderer.on('comfy-titlebar:theme-changed', handler)
     return () => ipcRenderer.removeListener('comfy-titlebar:theme-changed', handler)
+  },
+  onFullscreenChanged: (cb) => {
+    const handler = (_event: IpcRendererEvent, fullscreen: unknown): void => {
+      cb(!!fullscreen)
+    }
+    ipcRenderer.on('comfy-titlebar:fullscreen-changed', handler)
+    return () => ipcRenderer.removeListener('comfy-titlebar:fullscreen-changed', handler)
   },
   ready: () => {
     ipcRenderer.send('comfy-window:title-bar-ready')

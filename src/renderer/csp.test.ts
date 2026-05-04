@@ -16,12 +16,15 @@ function parseCSP(html: string, source: string): Record<string, string> {
   return directives
 }
 
-const RENDERER_FILES = [
+// The launcher and panel renderers host telemetry surfaces (Datadog + PostHog),
+// so their CSPs must allow those endpoints. The title-bar renderer is
+// telemetry-free so it gets a tighter CSP — covered by a separate block below.
+const TELEMETRY_RENDERER_FILES = [
   { file: 'index.html', label: 'launcher renderer' },
   { file: 'panel.html', label: 'panel renderer' },
 ]
 
-describe.each(RENDERER_FILES)('Content-Security-Policy ($label)', ({ file }) => {
+describe.each(TELEMETRY_RENDERER_FILES)('Content-Security-Policy ($label)', ({ file }) => {
   const html = fs.readFileSync(path.resolve(__dirname, file), 'utf-8')
   const csp = parseCSP(html, file)
 
@@ -56,5 +59,25 @@ describe.each(RENDERER_FILES)('Content-Security-Policy ($label)', ({ file }) => 
     // Nothing in the app loads web workers; without session recording there
     // is no need for blob:/data: workers, so the directive is omitted.
     expect(csp['worker-src']).toBeUndefined()
+  })
+})
+
+describe('Content-Security-Policy (title bar renderer)', () => {
+  const file = 'comfyTitleBar.html'
+  const html = fs.readFileSync(path.resolve(__dirname, file), 'utf-8')
+  const csp = parseCSP(html, file)
+
+  it('restricts default-src to self only', () => {
+    expect(csp['default-src']).toBe("'self'")
+  })
+
+  it('restricts script-src to self only', () => {
+    expect(csp['script-src']).toBe("'self'")
+  })
+
+  it('does not allow telemetry endpoints (title bar has no telemetry)', () => {
+    expect(csp['connect-src'] || '').not.toContain('posthog.com')
+    expect(csp['connect-src'] || '').not.toContain('datadoghq.com')
+    expect(csp['img-src'] || '').not.toContain('posthog.com')
   })
 })
