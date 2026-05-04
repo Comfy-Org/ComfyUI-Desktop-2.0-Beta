@@ -10,7 +10,7 @@ vi.mock('electron', () => ({
 import { writeComfyEnvironment } from './envPaths'
 
 const ENV_FILENAME = '.comfy_environment'
-const EXPECTED_CONTENT = 'local_launcher\n'
+const EXPECTED_CONTENT = 'local_desktop2_standalone\n'
 
 describe('writeComfyEnvironment', () => {
   let tmpDir: string
@@ -23,7 +23,7 @@ describe('writeComfyEnvironment', () => {
     try { fs.rmSync(tmpDir, { recursive: true, force: true }) } catch {}
   })
 
-  it('writes the marker file with local_launcher content + trailing newline', async () => {
+  it('writes the marker file with local_desktop2_standalone content + trailing newline', async () => {
     await writeComfyEnvironment(tmpDir)
     const written = fs.readFileSync(path.join(tmpDir, ENV_FILENAME), 'utf-8')
     expect(written).toBe(EXPECTED_CONTENT)
