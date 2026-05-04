@@ -84,10 +84,14 @@ function handleUpdateInstallation(inst: Installation): void {
 
 function handleNavigateList(): void {
   // The install was removed from the list (e.g. deleted, migrated). The
-  // onInstallationsChanged broadcast wired into installationStore will refetch
-  // automatically, after which `installation` becomes null and the panel
-  // shows the missing-install placeholder. Nothing more to do here — the
-  // parent ComfyUI window owns its own teardown.
+  // ComfyUI window that hosts this panel no longer has an install backing
+  // it, so ask main to close the parent window. Falls back to the
+  // missing-install placeholder if the close fails for any reason
+  // (e.g. window already torn down) — the onInstallationsChanged broadcast
+  // wired into installationStore has already cleared the local record.
+  if (installationId) {
+    void window.api.closeComfyWindow(installationId)
+  }
 }
 
 onMounted(async () => {

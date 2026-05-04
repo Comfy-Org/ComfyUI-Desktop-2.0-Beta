@@ -44,11 +44,12 @@ Implications:
   Done; in a panelized world the panel that started the action should
   re-launch the instance (or surface a "Start ComfyUI" button) when the
   operation completes successfully.
-- **Window teardown:** if the install backing the window is deleted from
-  inside its own panel (today this is a no-op via `handleNavigateList` in
-  `PanelApp.vue`), main needs to actively close the parent ComfyUI window.
-  Plumb this through `comfy-window:set-panel`-style IPC, or a dedicated
-  `comfy-window:close` channel, when the navigate-list emit fires.
+- **Window teardown:** when the install backing the window is deleted /
+  migrated from inside its own panel, the window should close. This is
+  wired today via the `close-comfy-window` IPC channel, with the panel
+  calling `window.api.closeComfyWindow(installationId)` in
+  `handleNavigateList`. Phase 3 panels for Dashboard / Installations etc.
+  should reuse this same mechanism rather than rolling new teardown paths.
 
 ## 2. Replace "primary install" with "recent install"
 

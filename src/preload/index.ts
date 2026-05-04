@@ -43,6 +43,8 @@ const api: ElectronApi = {
   stopComfyUI: (installationId) => ipcRenderer.invoke('stop-comfyui', installationId),
   focusComfyWindow: (installationId) =>
     ipcRenderer.invoke('focus-comfy-window', installationId),
+  closeComfyWindow: (installationId) =>
+    ipcRenderer.invoke('close-comfy-window', installationId),
   getRunningInstances: () => ipcRenderer.invoke('get-running-instances'),
   cancelLaunch: () => ipcRenderer.invoke('cancel-launch'),
   cancelOperation: (installationId) =>

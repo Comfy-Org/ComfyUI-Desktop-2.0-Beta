@@ -657,6 +657,12 @@ export interface ElectronApi {
   // Running
   stopComfyUI(installationId: string): Promise<void>
   focusComfyWindow(installationId: string): Promise<void>
+  /** Close the BrowserWindow that hosts the given installation's ComfyUI
+   *  view (and its title-bar / panel WebContentsViews). Returns true if a
+   *  window was found and closed. Used by the embedded install-settings
+   *  panel after a navigate-list emit (e.g. delete) so the parent window
+   *  doesn't linger with no install backing it. */
+  closeComfyWindow(installationId: string): Promise<boolean>
   getRunningInstances(): Promise<RunningInstance[]>
   cancelLaunch(): Promise<void>
   cancelOperation(installationId: string): Promise<void>

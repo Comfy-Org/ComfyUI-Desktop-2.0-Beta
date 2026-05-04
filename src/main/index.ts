@@ -1149,6 +1149,13 @@ ipcMain.handle('focus-comfy-window', (_event, installationId: string) => {
   return false
 })
 
+ipcMain.handle('close-comfy-window', (_event, installationId: string) => {
+  const entry = comfyWindows.get(installationId)
+  if (!entry || entry.window.isDestroyed()) return false
+  entry.window.close()
+  return true
+})
+
 function resolveOutputDir(inst: InstallationRecord): string | null {
   if ((inst.autoDownloadOutputs as boolean | undefined) === false) return null
   if ((inst.useSharedOutputDir as boolean | undefined) !== false) {
