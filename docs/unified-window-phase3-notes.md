@@ -1033,6 +1033,23 @@ Open question: do we hide `−` only during these flows, or globally?
 Hiding only during the flow flickers the controls in/out; hiding
 globally is a static UX decision that we can make once.
 
+### Status — minimize button drop **DONE**
+
+`minimizable: false` is now set on both `BrowserWindow` constructors
+in `src/main/index.ts` (the install-backed `openComfyWindow` and the
+install-less `openChooserHostWindow`). The OS-level minimize button
+disappears across every host window — the controls reduce to
+maximize / close so the takeover-style flows have a single,
+unambiguous "interrupt" affordance (×). Static decision, no
+in-flow flicker. The TitleMenu popup `BrowserWindow`
+(`ensureTitleMenuPopup`) already had `minimizable: false` for
+unrelated reasons and stays as-is.
+
+The takeover tier (full-screen body for install / update / first-use
+flows, with the title-bar pills/dropdowns rendered inert during a
+takeover) is the next slice of §17 — see the "Overlay slot
+architecture" notes below once they land.
+
 ---
 
 ## 18. Title-bar status pills — restart-required + updates available

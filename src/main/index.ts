@@ -833,6 +833,12 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
     icon: APP_ICON,
     title: `${installation.name} — Desktop 2.0 v${APP_VERSION}`,
     backgroundColor: COMFY_BG,
+    // Phase 3 §17 — drop the OS-level minimize button globally. The window
+    // controls reduce to maximize/close so the takeover-style flows
+    // (install / update / first-use) have a single, unambiguous "interrupt"
+    // affordance (×). Users who want to "set this aside while it runs" can
+    // open another chooser host window from the File menu / tray.
+    minimizable: false,
     titleBarStyle: 'hidden',
     ...(process.platform === 'darwin'
       ? { trafficLightPosition: TRAFFIC_LIGHT_POSITION }
@@ -1289,6 +1295,10 @@ function openChooserHostWindow(): BrowserWindow {
     icon: APP_ICON,
     title: `Choose an install — Desktop 2.0 v${APP_VERSION}`,
     backgroundColor: COMFY_BG,
+    // Phase 3 §17 — drop the OS-level minimize button globally (mirrors
+    // the install-backed `openComfyWindow` constructor above). Keeps the
+    // window controls consistent across chooser + install host windows.
+    minimizable: false,
     titleBarStyle: 'hidden',
     ...(process.platform === 'darwin'
       ? { trafficLightPosition: TRAFFIC_LIGHT_POSITION }
