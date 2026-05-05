@@ -172,6 +172,12 @@ function iconFor(category: string | undefined): typeof Cloud {
 // path for "open this install" — and the kebab `stopPropagation`s so
 // it doesn't double-fire as a card click.
 const manageInstall = ref<Installation | null>(null)
+/** Optional initial tab + auto-action for the Manage modal — set by
+ *  the update / migrate pill click handlers so the modal opens
+ *  directly on the relevant surface (Update tab / migrate-to-standalone
+ *  confirmation) instead of the default Status tab. Reset on close. */
+const manageInitialTab = ref<string>('status')
+const manageAutoAction = ref<string | null>(null)
 const {
   ctxMenu,
   ctxMenuItems,
@@ -180,11 +186,39 @@ const {
   handleCtxMenuSelect,
   closeMenu,
 } = useInstallContextMenu({
-  onManage: (inst) => { manageInstall.value = inst },
+  onManage: (inst) => {
+    manageInitialTab.value = 'status'
+    manageAutoAction.value = null
+    manageInstall.value = inst
+  },
 })
 
 function closeManageModal(): void {
   manageInstall.value = null
+  manageInitialTab.value = 'status'
+  manageAutoAction.value = null
+}
+
+/** Update pill click — open Manage modal on the Update tab so the
+ *  user lands directly on the channel-card grid where they can
+ *  inspect / accept / decline the available update. Mirrors the
+ *  legacy DashboardCard `show-update` flow that routed to
+ *  `openDetail(inst, 'update')`. */
+function openUpdateModal(inst: Installation): void {
+  manageInitialTab.value = 'update'
+  manageAutoAction.value = null
+  manageInstall.value = inst
+}
+
+/** Migrate pill click — open Manage modal and auto-trigger the
+ *  migrate-to-standalone action so the migration confirm flow
+ *  fires immediately. Mirrors the legacy DashboardCard `show-migrate`
+ *  flow that routed via `openDetail(inst, undefined,
+ *  'migrate-to-standalone')`. */
+function openMigrateModal(inst: Installation): void {
+  manageInitialTab.value = 'status'
+  manageAutoAction.value = 'migrate-to-standalone'
+  manageInstall.value = inst
 }
 
 /** DetailModal `update:installation` event — the user edited the
@@ -442,11 +476,24 @@ function handleNewInstallClick(): void {
             {{ inst.version }}
           </span>
           <!-- Update / migrate pills surface card-level prompts that
-               previously only lived inside Install Settings. -->
+               previously only lived inside Install Settings. Each
+               pill is a click target that opens the Manage modal
+               directly on the relevant surface (Update tab /
+               migrate-to-standalone auto-action) — the legacy
+               DashboardCard wired the same `show-update` /
+               `show-migrate` shortcuts and the chooser was missing
+               them after the §8 rebuild. `@click.stop` prevents the
+               pill click from bubbling up to the tile body's bare
+               `pickInstall` handler. -->
           <span
             v-if="hasUpdate(inst) && !progressFor(inst)"
             class="chooser-tile-pill chooser-tile-pill-update"
+            role="button"
+            tabindex="0"
             :title="inst.statusTag?.label"
+            @click.stop="openUpdateModal(inst)"
+            @keydown.enter.stop="openUpdateModal(inst)"
+            @keydown.space.prevent.stop="openUpdateModal(inst)"
           >
             <ArrowDownToLine :size="11" />
             {{ $t('chooser.updatePill') }}
@@ -454,7 +501,12 @@ function handleNewInstallClick(): void {
           <span
             v-if="hasMigratePrompt(inst) && !progressFor(inst)"
             class="chooser-tile-pill chooser-tile-pill-migrate"
+            role="button"
+            tabindex="0"
             :title="$t('dashboard.migrateBannerTitle')"
+            @click.stop="openMigrateModal(inst)"
+            @keydown.enter.stop="openMigrateModal(inst)"
+            @keydown.space.prevent.stop="openMigrateModal(inst)"
           >
             <ArrowRightLeft :size="11" />
             {{ $t('chooser.migratePill') }}
@@ -517,6 +569,8 @@ function handleNewInstallClick(): void {
       >
         <DetailModal
           :installation="manageInstall"
+          :initial-tab="manageInitialTab"
+          :auto-action="manageAutoAction"
           @close="closeManageModal"
           @navigate-list="handleManageNavigateList"
           @update:installation="handleManageUpdate"
@@ -676,13 +730,26 @@ function handleNewInstallClick(): void {
 /* Update-available pill — accent-blue tinted so it reads as
  * "informational, you can take action here" rather than "warning". The
  * icon + label format matches the migrate pill so they read as a pair
- * of card-level prompts. */
+ * of card-level prompts. Pointer cursor + hover lift telegraph that
+ * the pill is its own click target (opens the Update tab of the
+ * Manage modal); the same applies to .chooser-tile-pill-migrate. */
 .chooser-tile-pill-update {
   gap: 4px;
   color: var(--accent, #4a90e2);
   background: var(--accent-soft, rgba(74, 144, 226, 0.12));
   border-color: var(--accent, #4a90e2);
   opacity: 1;
+  cursor: pointer;
+  transition: background-color 0.12s, border-color 0.12s, transform 0.12s;
+}
+.chooser-tile-pill-update:hover,
+.chooser-tile-pill-update:focus-visible {
+  background: var(--accent-soft-hover, rgba(74, 144, 226, 0.22));
+  outline: none;
+}
+.chooser-tile-pill-update:focus-visible {
+  outline: 2px solid var(--accent, #4a90e2);
+  outline-offset: 2px;
 }
 
 /* Migrate-available pill — uses the warning amber so it's visually
@@ -694,6 +761,17 @@ function handleNewInstallClick(): void {
   background: var(--accent-warning-soft, rgba(217, 119, 6, 0.12));
   border-color: var(--accent-warning, #d97706);
   opacity: 1;
+  cursor: pointer;
+  transition: background-color 0.12s, border-color 0.12s, transform 0.12s;
+}
+.chooser-tile-pill-migrate:hover,
+.chooser-tile-pill-migrate:focus-visible {
+  background: var(--accent-warning-soft-hover, rgba(217, 119, 6, 0.22));
+  outline: none;
+}
+.chooser-tile-pill-migrate:focus-visible {
+  outline: 2px solid var(--accent-warning, #d97706);
+  outline-offset: 2px;
 }
 
 /* In-flight progress block — visible only when an op is running for
