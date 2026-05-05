@@ -1050,6 +1050,68 @@ flows, with the title-bar pills/dropdowns rendered inert during a
 takeover) is the next slice of §17 — see the "Overlay slot
 architecture" notes below once they land.
 
+### Status — overlay slot foundation **DONE**
+
+The overlay model is in place. New `useOverlay` composable in
+`src/renderer/src/composables/useOverlay.ts` defines the discriminated
+union `Overlay = manage | progress | flow | takeover` and the single
+`openOverlay(next, { from })` entry-point. Each panel host owns
+exactly one slot:
+
+- **`PanelApp`** holds the host-level slot — `progress` today, future
+  `takeover` (Steps 3-4). Replaces the old `activeProgressId` /
+  `handleShowProgress` / `handleProgressClose` trio.
+- **`ChooserView`** holds the chooser-tile slot — `manage` today.
+  Replaces the §8 Teleport-to-body Manage hack with an inline
+  overlay slot.
+
+Tier-collision rules are centralised in `useOverlay`:
+
+- Tier 1 (`manage`, confirm/prompt) — auto-replace silently.
+- Tier 2 (`progress` for ops that don't end in the app) — replacing
+  one in-flight progress op with another (or closing while running)
+  prompts the user via the standardised cancel-prompt copy under the
+  `overlay.*` i18n namespace.
+- Tier 3 (`flow` / `takeover` for ops that do end in the app) —
+  pre-empts Tier 1 silently, pre-empts Tier 2 with the same prompt.
+
+Two layered slots are coordinated by z-index alone: PanelApp's slot
+renders above ChooserView's, so a Tier 2/3 op kicked off from inside
+the chooser's Manage modal visually pre-empts the modal without the
+chooser needing to react.
+
+DROPs that landed with this slice:
+
+- `ChooserView.handleManageShowProgress`'s `actionId === 'launch'`
+  swap-in-place special case — the takeover-replaces-modal rule
+  subsumes it. The launch action's progress now runs in the shared
+  `ProgressModal` like everything else; the eventual swap to the
+  install host happens after the takeover ends (Step 3).
+- `ShowProgressOpts.actionId` field — only the launch-swap routed on
+  it. Removed from `src/types/ipc.ts` and from the three call sites
+  (`DetailModal`, `useListAction`, `ComfyLifecycleView`).
+- `DetailModal.inline` prop — DetailModal renders one way now and the
+  parent owns the close behaviour. The chooser overlay slot binds
+  `@close="closeOverlay"`; PanelApp's install-settings panel binds
+  `@close="handleInstallSettingsClose"` which calls the existing
+  `closeCurrentPanel` IPC.
+- `ChooserView.openManageDirect` / `openUpdateModal` /
+  `openMigrateModal` collapsed into a single `openManage(install,
+  { initialTab?, autoAction? })` call — one entry-point, three
+  parameter variants.
+
+Manage→Progress success behaviour: preserved. DetailModal's
+`result.navigate === 'detail'` branch still calls
+`refreshAllSections()` and leaves `activeTab` unchanged, so when the
+host's Tier 2 progress overlay closes the chooser's Tier 1 manage
+overlay is still mounted underneath on the originating tab. Future
+actions can override the destination via a
+`navigate: 'detail-status'`-style hint (additive — no current
+callers).
+
+Three steps still remain under §17 and the §10 / §16 / §18 / §19
+sections — see the relevant headings for current state.
+
 ---
 
 ## 18. Title-bar status pills — restart-required + updates available

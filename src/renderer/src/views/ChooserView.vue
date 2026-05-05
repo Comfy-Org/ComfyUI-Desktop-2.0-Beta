@@ -5,6 +5,7 @@ import { useSessionStore } from '../stores/sessionStore'
 import { useProgressStore } from '../stores/progressStore'
 import { useLauncherPrefs } from '../composables/useLauncherPrefs'
 import { useInstallContextMenu } from '../composables/useInstallContextMenu'
+import { useOverlay, type ManageOverlay } from '../composables/useOverlay'
 import { Cloud, Plus, Box, Monitor, Globe, Pin, AlertCircle, ArrowDownToLine, ArrowRightLeft, MoreVertical, Play, ExternalLink, Square, Loader2 } from 'lucide-vue-next'
 import ContextMenu from '../components/ContextMenu.vue'
 import DetailModal from './DetailModal.vue'
@@ -168,16 +169,44 @@ function iconFor(category: string | undefined): typeof Cloud {
 //     dropdown anchored to the button.
 // Both menus carry the same items: Pin / Unpin, Manage… (opens the
 // install's DetailModal as an overlay), and Dismiss error (when set).
-// The card body's bare click goes through `pickInstall` — the fast-
-// path for "open this install" — and the kebab `stopPropagation`s so
-// it doesn't double-fire as a card click.
-const manageInstall = ref<Installation | null>(null)
-/** Optional initial tab + auto-action for the Manage modal — set by
- *  the update / migrate pill click handlers so the modal opens
- *  directly on the relevant surface (Update tab / migrate-to-standalone
- *  confirmation) instead of the default Status tab. Reset on close. */
-const manageInitialTab = ref<string>('status')
-const manageAutoAction = ref<string | null>(null)
+// The card body's bare click goes through `openManage` — the fast-
+// path for "tell me about this install" — and the kebab
+// `stopPropagation`s so it doesn't double-fire as a card click.
+//
+// Phase 3 §17 — the chooser owns its own overlay slot so Manage opens
+// without the Teleport-to-body hack the §8 rebuild used. The slot is
+// Tier 1; Tier 2/3 ops kicked off from the modal flow up to PanelApp's
+// own slot which pre-empts this one visually (its z-index is higher).
+const { current: currentOverlay, openOverlay, closeOverlay } = useOverlay()
+
+/** Currently-mounted Manage overlay payload, or null. Computed from
+ *  `currentOverlay` so the template binds plain refs. Manage is the
+ *  only `kind` ChooserView mounts in its own slot today. */
+const manageOverlay = computed<ManageOverlay | null>(() =>
+  currentOverlay.value?.kind === 'manage' ? currentOverlay.value : null
+)
+
+/**
+ * Open the Manage modal for `inst` in the chooser's overlay slot.
+ *
+ * Single entry-point that replaces the per-call-site duplication the
+ * §8 chooser had: the kebab/right-click `onManage` callback, the
+ * card-body single-click handler, and the update / migrate pill
+ * click handlers all funnel through here with their preferred
+ * `initialTab` / `autoAction` deep-link parameters.
+ */
+function openManage(
+  installation: Installation,
+  opts: { initialTab?: string; autoAction?: string | null } = {},
+): void {
+  void openOverlay({
+    kind: 'manage',
+    installation,
+    initialTab: opts.initialTab ?? 'status',
+    autoAction: opts.autoAction ?? null,
+  })
+}
+
 const {
   ctxMenu,
   ctxMenuItems,
@@ -186,77 +215,41 @@ const {
   handleCtxMenuSelect,
   closeMenu,
 } = useInstallContextMenu({
-  onManage: (inst) => {
-    manageInitialTab.value = 'status'
-    manageAutoAction.value = null
-    manageInstall.value = inst
-  },
+  onManage: (inst) => openManage(inst),
 })
-
-function closeManageModal(): void {
-  manageInstall.value = null
-  manageInitialTab.value = 'status'
-  manageAutoAction.value = null
-}
-
-/** Update pill click — open Manage modal on the Update tab so the
- *  user lands directly on the channel-card grid where they can
- *  inspect / accept / decline the available update. Mirrors the
- *  legacy DashboardCard `show-update` flow that routed to
- *  `openDetail(inst, 'update')`. */
-function openUpdateModal(inst: Installation): void {
-  manageInitialTab.value = 'update'
-  manageAutoAction.value = null
-  manageInstall.value = inst
-}
-
-/** Migrate pill click — open Manage modal and auto-trigger the
- *  migrate-to-standalone action so the migration confirm flow
- *  fires immediately. Mirrors the legacy DashboardCard `show-migrate`
- *  flow that routed via `openDetail(inst, undefined,
- *  'migrate-to-standalone')`. */
-function openMigrateModal(inst: Installation): void {
-  manageInitialTab.value = 'status'
-  manageAutoAction.value = 'migrate-to-standalone'
-  manageInstall.value = inst
-}
 
 /** DetailModal `update:installation` event — the user edited the
  *  install (renamed it, changed its launch settings, etc.). Splice
  *  the new record in place so the modal and the underlying card stay
- *  in sync without round-tripping through `getInstallations`. Mirrors
- *  the pattern PanelApp uses for the inline DetailModal. */
+ *  in sync without round-tripping through `getInstallations`, and
+ *  refresh the overlay payload so DetailModal's `installation` prop
+ *  picks up the new fields. Mirrors the pattern PanelApp uses for the
+ *  install-settings DetailModal. */
 function handleManageUpdate(inst: Installation): void {
   const idx = installationStore.installations.findIndex((i) => i.id === inst.id)
   if (idx >= 0) installationStore.installations.splice(idx, 1, inst)
-  manageInstall.value = inst
+  if (manageOverlay.value) {
+    currentOverlay.value = { ...manageOverlay.value, installation: inst }
+  }
 }
 
 /** DetailModal `navigate-list` event — the install was deleted /
- *  migrated. Close the modal so the user is returned to the chooser
+ *  migrated. Close the overlay so the user is returned to the chooser
  *  grid; the installationsChanged broadcast already updated the store
  *  so the deleted card has dropped out of `visibleInstalls`. */
 function handleManageNavigateList(): void {
-  manageInstall.value = null
+  void closeOverlay()
 }
 
-/** DetailModal `show-progress` event — most actions (Update, Restore
- *  Snapshot, Migrate, …) bubble up to PanelApp's ProgressModal as-is.
- *  Launch is special: in the chooser host context, "launch this
- *  install" should swap the host window in place (the same UX a card
- *  click delivers) rather than stack ProgressModal on top of the
- *  still-open Manage modal. We detect launch via the payload's
- *  `actionId`, close the Manage modal, then route through
- *  `pickInstall` so PanelApp's `handleChooserPick` runs the standard
- *  chooser-pick pipeline (transferHostBoundsToInstall + onInstanceStarted
- *  → closeHostWindow). */
+/** DetailModal `show-progress` event — bubble straight up to PanelApp.
+ *  PanelApp's host-level overlay slot is Tier 2 and pre-empts this
+ *  Tier 1 manage overlay automatically (its DOM node sits at a higher
+ *  z-index over the chooser's slot). The legacy `actionId === 'launch'`
+ *  swap-in-place special-case is gone — the takeover-replaces-modal
+ *  rule subsumes it; the launch action's progress runs in the shared
+ *  ProgressModal like everything else and the eventual swap to the
+ *  install host happens after the takeover ends. */
 function handleManageShowProgress(opts: ShowProgressOpts): void {
-  if (opts.actionId === 'launch' && manageInstall.value) {
-    const inst = manageInstall.value
-    manageInstall.value = null
-    pickInstall(inst)
-    return
-  }
   emit('show-progress', opts)
 }
 
@@ -315,20 +308,6 @@ function progressFor(inst: Installation): { status: string; percent: number } | 
 
 function pickInstall(inst: Installation): void {
   emit('pick', inst)
-}
-
-/** Card body single-click — opens Manage modal on the default Status
- *  tab. The implicit "click-to-launch" gesture was replaced by the
- *  explicit Play button + double-click on the card; keeping a no-op
- *  single-click on the card body is jarring, so we default the
- *  card-body click to "tell me about this install" (the most common
- *  follow-up question after the user spots a card on the grid).
- *  Update / migrate pills + the kebab + the Play button all
- *  `@click.stop` so they don't double-fire as a card click. */
-function openManageDirect(inst: Installation): void {
-  manageInitialTab.value = 'status'
-  manageAutoAction.value = null
-  manageInstall.value = inst
 }
 
 /** Running card — focus the install's existing ComfyUI window
@@ -457,10 +436,10 @@ function handleNewInstallClick(): void {
         tabindex="0"
         class="chooser-tile"
         :class="statusClasses(inst)"
-        @click="openManageDirect(inst)"
+        @click="openManage(inst)"
         @dblclick="pickInstall(inst)"
-        @keydown.enter="openManageDirect(inst)"
-        @keydown.space.prevent="openManageDirect(inst)"
+        @keydown.enter="openManage(inst)"
+        @keydown.space.prevent="openManage(inst)"
         @contextmenu.prevent="openCardMenu($event, inst)"
       >
         <div class="chooser-tile-icon">
@@ -544,9 +523,9 @@ function handleNewInstallClick(): void {
             role="button"
             tabindex="0"
             :title="inst.statusTag?.label"
-            @click.stop="openUpdateModal(inst)"
-            @keydown.enter.stop="openUpdateModal(inst)"
-            @keydown.space.prevent.stop="openUpdateModal(inst)"
+            @click.stop="openManage(inst, { initialTab: 'update' })"
+            @keydown.enter.stop="openManage(inst, { initialTab: 'update' })"
+            @keydown.space.prevent.stop="openManage(inst, { initialTab: 'update' })"
           >
             <ArrowDownToLine :size="11" />
             {{ $t('chooser.updatePill') }}
@@ -557,9 +536,9 @@ function handleNewInstallClick(): void {
             role="button"
             tabindex="0"
             :title="$t('dashboard.migrateBannerTitle')"
-            @click.stop="openMigrateModal(inst)"
-            @keydown.enter.stop="openMigrateModal(inst)"
-            @keydown.space.prevent.stop="openMigrateModal(inst)"
+            @click.stop="openManage(inst, { autoAction: 'migrate-to-standalone' })"
+            @keydown.enter.stop="openManage(inst, { autoAction: 'migrate-to-standalone' })"
+            @keydown.space.prevent.stop="openManage(inst, { autoAction: 'migrate-to-standalone' })"
           >
             <ArrowRightLeft :size="11" />
             {{ $t('chooser.migratePill') }}
@@ -675,31 +654,31 @@ function handleNewInstallClick(): void {
       @select="handleCtxMenuSelect"
     />
 
-    <!-- Manage… overlay — DetailModal mounted in its modal-overlay
-         mode (inline=false) so the user gets a focused dialog on top
-         of the chooser grid rather than a full-screen panel. The
-         outer `view-modal active` wrapper provides the backdrop +
-         centering chrome (matches the pattern PanelApp uses for
-         ProgressModal). DetailModal handles its own actions over
-         IPC, so it works regardless of whether the chooser host has
-         an install backing it. -->
-    <Teleport to="body">
-      <div
-        v-if="manageInstall"
-        class="view-modal active"
-        data-overlay-key="manage-detail"
-      >
-        <DetailModal
-          :installation="manageInstall"
-          :initial-tab="manageInitialTab"
-          :auto-action="manageAutoAction"
-          @close="closeManageModal"
-          @navigate-list="handleManageNavigateList"
-          @update:installation="handleManageUpdate"
-          @show-progress="handleManageShowProgress"
-        />
-      </div>
-    </Teleport>
+    <!-- Chooser overlay slot (Phase 3 §17). Owned by the local
+         `useOverlay` instance — Tier 1 today (Manage modal). Mounted
+         inline in the chooser's tree so the §8 Teleport-to-body hack
+         is gone; the unified-window contract treats chooser-host and
+         install-host overlays uniformly. PanelApp's host-level slot
+         renders Tier 2/3 overlays at a higher z-index, so an op
+         kicked off from the Manage modal visually pre-empts it
+         without needing this slot to react. DetailModal handles its
+         own actions over IPC, so it works regardless of whether the
+         chooser host has an install backing it. -->
+    <div
+      v-if="manageOverlay"
+      class="view-modal active"
+      data-overlay-key="manage-detail"
+    >
+      <DetailModal
+        :installation="manageOverlay.installation"
+        :initial-tab="manageOverlay.initialTab"
+        :auto-action="manageOverlay.autoAction"
+        @close="closeOverlay"
+        @navigate-list="handleManageNavigateList"
+        @update:installation="handleManageUpdate"
+        @show-progress="handleManageShowProgress"
+      />
+    </div>
   </div>
 </template>
 

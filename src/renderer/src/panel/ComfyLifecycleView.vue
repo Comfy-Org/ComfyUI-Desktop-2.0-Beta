@@ -61,7 +61,6 @@ function startLaunch(): void {
       : t('comfyLifecycle.launchProgressTitle'),
     apiCall: () => window.api.runAction(props.installationId, 'launch'),
     cancellable: true,
-    actionId: 'launch',
   })
 }
 </script>

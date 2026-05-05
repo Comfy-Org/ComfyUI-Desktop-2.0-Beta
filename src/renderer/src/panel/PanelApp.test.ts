@@ -22,9 +22,11 @@ vi.mock('../views/SettingsView.vue', () => ({
 vi.mock('../views/DetailModal.vue', () => ({
   default: {
     name: 'DetailModal',
-    props: ['installation', 'inline', 'initialTab', 'autoAction'],
+    // Phase 3 §17 dropped the `inline` prop — DetailModal renders one
+    // way and the parent owns the close behaviour.
+    props: ['installation', 'initialTab', 'autoAction'],
     template:
-      '<div data-testid="detail-modal" :data-installation-id="installation?.id" :data-inline="inline" />',
+      '<div data-testid="detail-modal" :data-installation-id="installation?.id" />',
   },
 }))
 vi.mock('../views/ProgressModal.vue', () => ({
@@ -234,7 +236,6 @@ describe('PanelApp', () => {
     const detail = wrapper.find('[data-testid="detail-modal"]')
     expect(detail.exists()).toBe(true)
     expect(detail.attributes('data-installation-id')).toBe('test-id')
-    expect(detail.attributes('data-inline')).toBe('true')
   })
 
   it('refetches the installation when onInstallationsChanged fires', async () => {

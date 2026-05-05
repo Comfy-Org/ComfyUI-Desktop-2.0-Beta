@@ -344,6 +344,13 @@
     "required": "This field is required."
   },
 
+  "overlay": {
+    "cancelCurrentTitle": "Cancel current operation?",
+    "cancelNamedTitle": "Cancel \"{name}\"?",
+    "cancelMessage": "The operation will stop where it is. Anything not yet completed will be rolled back where possible.",
+    "cancelConfirm": "Cancel operation"
+  },
+
   "tray": {
     "showApp": "Show Desktop 2.0",
     "quit": "Quit"

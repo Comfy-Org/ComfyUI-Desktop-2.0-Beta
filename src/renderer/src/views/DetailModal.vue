@@ -29,18 +29,11 @@ interface Props {
   installation: Installation | null
   initialTab?: string
   autoAction?: string | null
-  /** When true, render without the modal-overlay framing — i.e. fill
-   *  the parent container. Used by the embedded install-settings panel
-   *  inside ComfyUI windows. The header X close button is still shown
-   *  in inline mode (it routes through `closeCurrentPanel` to the host
-   *  window's panel-history reset). */
-  inline?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   initialTab: 'status',
   autoAction: null,
-  inline: false,
 })
 
 const emit = defineEmits<{
@@ -58,17 +51,14 @@ const sessionStore = useSessionStore()
 const actionGuard = useActionGuard()
 const { confirmMigration } = useMigrateAction()
 
-/** Header X close. In inline mode (mounted as the install-settings
- *  panel body) we ask main to reset the host window's panel-history
- *  stack so the body returns to the comfy/chooser root. In modal mode
- *  (the legacy free-floating overlay) we emit `close` to let the
- *  parent unmount the modal. */
+/** Header X close. Always emits `close` — the parent decides what to
+ *  do (the chooser-host overlay slot calls `closeOverlay`; the
+ *  install-settings panel body asks main to reset the host window's
+ *  panel-history stack via `closeCurrentPanel`). Phase 3 §17 dropped
+ *  the `inline` prop now that DetailModal renders one way and the
+ *  parent owns the close behaviour. */
 function handleHeaderClose(): void {
-  if (props.inline) {
-    window.api.closeCurrentPanel()
-  } else {
-    emit('close')
-  }
+  emit('close')
 }
 
 const isCloud = computed(() => props.installation?.sourceCategory === 'cloud')
@@ -508,13 +498,6 @@ async function runAction(action: ActionDef, btn: HTMLButtonElement | null): Prom
       apiCall,
       cancellable: !!mutableAction.cancellable,
       returnTo: 'detail',
-      // Tag the payload with the originating action so hosts that
-      // want to special-case specific actions (e.g. ChooserView's
-      // Manage modal swapping a 'launch' into a chooser-pick instead
-      // of stacking ProgressModal on top of itself) can route on it.
-      // Restart maps to launch for routing purposes — the host cares
-      // about "this opens / restarts an install", not the synthetic id.
-      actionId: isRestart ? 'launch' : mutableAction.id,
     })
     return
   }
@@ -577,7 +560,7 @@ function navigateToInstallation(installationId: string): void {
 </script>
 
 <template>
-  <div v-if="installation" class="view-modal-content" :class="{ 'view-modal-inline': inline }">
+  <div v-if="installation" class="view-modal-content view-modal-inline">
       <div class="view-modal-header">
         <div
           class="view-modal-title"

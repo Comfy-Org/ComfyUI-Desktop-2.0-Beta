@@ -248,6 +248,13 @@
     "required": "此字段为必填项。"
   },
 
+  "overlay": {
+    "cancelCurrentTitle": "取消当前操作？",
+    "cancelNamedTitle": "取消「{name}」？",
+    "cancelMessage": "操作将立即停止。尚未完成的内容将尽可能回滚。",
+    "cancelConfirm": "取消操作"
+  },
+
   "tray": {
     "showApp": "显示启动器",
     "quit": "退出"

@@ -19,6 +19,7 @@ import { useInstallationStore } from '../stores/installationStore'
 import { useProgressStore } from '../stores/progressStore'
 import { useLauncherPrefs } from '../composables/useLauncherPrefs'
 import { useListAction } from '../composables/useListAction'
+import { useOverlay } from '../composables/useOverlay'
 import type { ActionResult, Installation, ShowProgressOpts } from '../types/ipc'
 
 /**
@@ -87,12 +88,20 @@ const trackRef = ref<InstanceType<typeof TrackModal> | null>(null)
 const loadSnapshotRef = ref<InstanceType<typeof LoadSnapshotModal> | null>(null)
 const quickInstallRef = ref<InstanceType<typeof QuickInstallModal> | null>(null)
 
-const activeProgressId = ref<string | null>(null)
-
 const sessionStore = useSessionStore()
 const installationStore = useInstallationStore()
 const progressStore = useProgressStore()
 const launcherPrefs = useLauncherPrefs()
+
+/**
+ * Host-level overlay slot (Phase 3 §17). Owns the in-flight progress
+ * (`progress` kind) and any future Tier 3 takeovers. Manage / Tier 1
+ * overlays driven by ChooserView mount in ChooserView's own slot —
+ * see `useOverlay` for the tier-collision rules. The `current` ref is
+ * destructured to a top-level binding so the template can read it via
+ * Vue's auto-unwrap.
+ */
+const { current: currentOverlay, openOverlay } = useOverlay()
 
 // installationStore.fetchInstallations() is wired to onInstallationsChanged
 // inside the store itself, so the panel just needs to read from it.
@@ -110,8 +119,30 @@ async function loadLocale(): Promise<void> {
   locale.value = 'en'
 }
 
-function handleShowProgress(opts: ShowProgressOpts): void {
-  activeProgressId.value = opts.installationId
+/**
+ * `show-progress` from any panel body (DetailModal, ChooserView,
+ * NewInstallModal, …). Routes through the host's overlay slot so the
+ * Tier 2 collision rules apply — replacing one in-flight progress op
+ * with another prompts the user to cancel via the standardised copy.
+ *
+ * Re-show of an already-running op is a no-op `openOverlay` to the
+ * same `progress` slot followed by `showOperation` on the modal ref;
+ * the slot already has the right kind+id, so the `current` swap is
+ * idempotent.
+ */
+async function handleShowProgress(opts: ShowProgressOpts): Promise<void> {
+  // Manage→Progress restoration relies on the title carrying the
+  // operation name (e.g. `"Updating ComfyUI — Local install"`); strip
+  // the install suffix for the cancel-prompt copy so the prompt reads
+  // `Cancel "Updating ComfyUI"?` instead of leaking the install name.
+  const operationName = opts.title.split(' — ')[0] || opts.title
+  const ok = await openOverlay({
+    kind: 'progress',
+    installationId: opts.installationId,
+    operationName,
+  })
+  if (!ok) return
+  await nextTick()
   // If an in-progress operation already exists for this ID, just show it
   const existing = progressStore.operations.get(opts.installationId)
   if (existing && !existing.finished) {
@@ -128,7 +159,11 @@ function handleShowProgress(opts: ShowProgressOpts): void {
 }
 
 function handleProgressClose(): void {
-  activeProgressId.value = null
+  // Direct close (✕ on a finished op, or auto-close via the
+  // window-mode launch watcher) — bypass `openOverlay`'s cancel
+  // prompt because the op has already finished. Cancellation of an
+  // in-flight op flows through `progressStore.cancelOperation`.
+  currentOverlay.value = null
 }
 
 /**
@@ -172,6 +207,15 @@ function handleUpdateInstallation(inst: Installation): void {
   // refetch is in flight (e.g. rename via the editable title).
   const idx = installationStore.installations.findIndex((i) => i.id === inst.id)
   if (idx >= 0) installationStore.installations.splice(idx, 1, inst)
+}
+
+/** DetailModal close (✕) when mounted as the install-settings panel
+ *  body. Phase 3 §17 dropped DetailModal's `inline` prop; the parent
+ *  decides what `close` means. For install-settings we ask main to
+ *  reset the host window's panel-history stack so the body returns
+ *  to the comfy/chooser root, matching the pre-§17 inline behaviour. */
+function handleInstallSettingsClose(): void {
+  window.api.closeCurrentPanel()
 }
 
 // --- Chooser handlers (install-less host window only) ---
@@ -331,7 +375,7 @@ onUnmounted(() => {
         <DetailModal
           v-if="installation"
           :installation="installation"
-          :inline="true"
+          @close="handleInstallSettingsClose"
           @show-progress="handleShowProgress"
           @navigate-list="handleNavigateList"
           @update:installation="handleUpdateInstallation"
@@ -399,11 +443,18 @@ onUnmounted(() => {
       </div>
     </main>
 
-    <!-- Progress overlay for actions kicked off from the install-settings panel. -->
-    <div v-show="activeProgressId" class="view-modal active" data-overlay-key="progress">
+    <!-- Host-level overlay slot (Phase 3 §17). One DOM node at a
+         time, owned by `useOverlay`. Today only the `progress` kind
+         mounts here (Tier 2); Step 3 wires Tier 3 takeovers and Step
+         4 wires the first-use takeover into this same slot. -->
+    <div
+      v-if="currentOverlay?.kind === 'progress'"
+      class="view-modal active"
+      data-overlay-key="progress"
+    >
       <ProgressModal
         ref="progressRef"
-        :installation-id="activeProgressId"
+        :installation-id="currentOverlay.installationId"
         @close="handleProgressClose"
       />
     </div>
