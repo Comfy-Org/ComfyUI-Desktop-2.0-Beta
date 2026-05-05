@@ -8,6 +8,7 @@ import { useLauncherPrefs } from '../composables/useLauncherPrefs'
 import DetailSectionComponent from '../components/DetailSection.vue'
 import SnapshotTab from '../components/SnapshotTab.vue'
 import { useInstallationStore } from '../stores/installationStore'
+import { useSessionStore } from '../stores/sessionStore'
 import { emitTelemetryAction, toErrorBucket } from '../lib/telemetry'
 import { formatBytes } from '../lib/formatting'
 import { useMigrateAction } from '../composables/useMigrateAction'
@@ -53,6 +54,7 @@ const { t } = useI18n()
 const modal = useModal()
 const prefs = useLauncherPrefs()
 const installationStore = useInstallationStore()
+const sessionStore = useSessionStore()
 const actionGuard = useActionGuard()
 const { confirmMigration } = useMigrateAction()
 
@@ -104,6 +106,36 @@ const mainSections = computed(() =>
   sections.value.filter((s) => !s.pinBottom && (!hasTabs.value || s.tab === activeTab.value))
 )
 const bottomSection = computed(() => sections.value.find((s) => s.pinBottom) ?? null)
+
+/** Phase 3 §9 — When the install is already running, the primary
+ *  "Launch" action becomes "Restart": hollow-blue (`accent`) styling
+ *  to telegraph that it asks for confirmation before doing anything,
+ *  and a stop-then-launch chain instead of a bare launch. We rewrite
+ *  the action object in the renderer (synthetic id `restart`) so the
+ *  source-side action definition stays single-purpose; `runAction`
+ *  picks the synthetic id up and routes it through stopComfyUI →
+ *  launch. */
+const bottomActions = computed<ActionDef[]>(() => {
+  const acts = bottomSection.value?.actions ?? []
+  if (!props.installation) return acts
+  const running = sessionStore.isRunning(props.installation.id)
+  if (!running) return acts
+  return acts.map((a) => {
+    if (a.id !== 'launch') return a
+    return {
+      ...a,
+      id: 'restart',
+      label: t('actions.restart'),
+      style: 'accent',
+      progressTitle: t('actions.restartProgressTitle'),
+      confirm: {
+        title: t('actions.restartConfirmTitle'),
+        message: t('actions.restartConfirmMessage'),
+        confirmLabel: t('actions.restartConfirm'),
+      },
+    }
+  })
+})
 
 const previousInstId = ref<string | null>(null)
 const autoActionRun = ref(false)
@@ -452,17 +484,37 @@ async function runAction(action: ActionDef, btn: HTMLButtonElement | null): Prom
     )
     const title = `${rawTitle} — ${instName}`
     emitTelemetryAction('desktop2.action.invoked', { action_id: mutableAction.id, ...telemetryContext })
+    // Phase 3 §9 — synthetic 'restart' action: chain stopComfyUI →
+    // launch in a single ProgressModal so the user sees one
+    // continuous "Restarting ComfyUI" view rather than two flashes.
+    // The action's confirm dialog has already run above.
+    const isRestart = mutableAction.id === 'restart'
+    const apiCall = isRestart
+      ? async () => {
+          await window.api.stopComfyUI(instId)
+          // Wait for the session to actually leave the running state
+          // before kicking off the new launch. The session store is
+          // updated by main via 'session-status' broadcasts.
+          const deadline = Date.now() + 10_000
+          while (sessionStore.isRunning(instId) && Date.now() < deadline) {
+            await new Promise((r) => setTimeout(r, 100))
+          }
+          return window.api.runAction(instId, 'launch')
+        }
+      : () => window.api.runAction(instId, mutableAction.id, mutableAction.data ? toRaw(mutableAction.data) : undefined)
     emit('show-progress', {
       installationId: instId,
       title,
-      apiCall: () => window.api.runAction(instId, mutableAction.id, mutableAction.data ? toRaw(mutableAction.data) : undefined),
+      apiCall,
       cancellable: !!mutableAction.cancellable,
       returnTo: 'detail',
       // Tag the payload with the originating action so hosts that
       // want to special-case specific actions (e.g. ChooserView's
       // Manage modal swapping a 'launch' into a chooser-pick instead
       // of stacking ProgressModal on top of itself) can route on it.
-      actionId: mutableAction.id,
+      // Restart maps to launch for routing purposes — the host cares
+      // about "this opens / restarts an install", not the synthetic id.
+      actionId: isRestart ? 'launch' : mutableAction.id,
     })
     return
   }
@@ -613,7 +665,7 @@ function navigateToInstallation(installationId: string): void {
         <div v-if="bottomSection" id="detail-bottom-actions">
           <div class="detail-actions">
             <TooltipWrap
-              v-for="a in bottomSection.actions"
+              v-for="a in bottomActions"
               :key="a.id"
               :text="a.tooltip"
             >

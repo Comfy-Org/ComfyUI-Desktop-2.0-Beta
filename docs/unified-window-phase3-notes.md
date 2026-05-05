@@ -243,7 +243,7 @@ Status:
   components, and let sources plug additional categories in
   (snapshots, logs, …).
 
-## 4. Rename "Downloads" settings category to "Cache"
+## 4. Rename "Downloads" settings category to "Cache" — **DONE**
 
 The current Launcher Settings page groups "Downloads" together (model
 download paths, in-flight download list, etc.). With the new direction,
@@ -585,7 +585,21 @@ Still open:
   click targets into the same menu (e.g. "Update available — Update
   now / View details") rather than reading as bare visual prompts.
 
-## 9. Install Settings — Restart instead of Launch when running
+## 9. Install Settings — Restart instead of Launch when running — **DONE**
+
+Implemented in `DetailModal.vue` via a renderer-side override: when
+`sessionStore.isRunning(installation.id)` is true, the bottom-pinned
+`launch` action is rewritten to a synthetic `restart` action with
+`style: 'accent'` (hollow blue), a confirmation dialog explaining
+that any unsaved work will be lost, and a chained
+`stopComfyUI` → `runAction(launch)` `apiCall` so the user sees a
+single continuous "Restarting ComfyUI" ProgressModal rather than
+two flashes. The `'accent'` style was promoted to a first-class
+member of `ActionDef.style` in `src/types/ipc.ts` to formalise the
+project-wide convention: *solid primary = does the thing
+immediately; outline accent = asks first.* Cross-checking existing
+prompt-then-act buttons (Delete, Migrate, Restore Snapshot) for the
+same convention is queued as a follow-up cleanup pass.
 
 Today the Install Settings panel's primary action is **Launch** — a
 solid-blue (`button.primary`) button that boots ComfyUI. When the
@@ -1150,11 +1164,11 @@ the Directories panel exists, per-source-category recency tracks both
 fields atomically, and the unified-window navigation history (Back /
 Forward + HTML title-bar dropdowns) is live.
 
-Sections 1, 2, 4, 4b, 5, 6 retain open work — primary-install
-removal hasn't fully landed (the gold-star + `primaryInstallId` pref
-are still present), the "Downloads" → "Cache" rename hasn't propagated
-out of Settings (`§4`), Downloads is still a floating component (§6),
-and the new-install / quick-install flows haven't been unified (§4b).
+Sections 1, 2, 4b, 5, 6 retain open work — primary-install removal
+hasn't fully landed (the gold-star + `primaryInstallId` pref are
+still present), Downloads is still a floating component (§6), and
+the new-install / quick-install flows haven't been unified (§4b).
+§4 — "Downloads" → "Cache" — has landed in Settings.
 
 Sections 3 and 8 are now mostly landed: §3 — the merged
 `DirectoriesView` ships, `ModelsView` / `MediaView` are deleted, and
@@ -1165,9 +1179,10 @@ bars + status pills, pin-first sort, and a click-driven action
 popover with double-click as the open fast-path (Open + Pin / Unpin
 + Dismiss error today; richer items follow once Issue #470 lands).
 
-Sections 7, 9, 10 capture UX refinements queued up while the unified
-window is live: title-bar pill polish, Restart-vs-Launch in Install
-Settings, and the update-channel dropdown.
+Sections 7, 10 capture UX refinements queued up while the unified
+window is live: title-bar pill polish and the update-channel dropdown.
+§9 — Restart-vs-Launch in Install Settings + the project-wide accent
+button convention — has landed.
 
 Sections 11–14 are recently shipped UX refinements: chooser-host
 focus on launch (§11), chooser-host title-bar / overlay colour match

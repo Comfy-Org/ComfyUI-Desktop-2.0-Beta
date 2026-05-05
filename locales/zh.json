@@ -255,6 +255,11 @@
 
   "actions": {
     "launch": "启动",
+    "restart": "重启",
+    "restartConfirmTitle": "重启 ComfyUI",
+    "restartConfirmMessage": "这将停止并重新启动 ComfyUI。任何未保存的工作将会丢失。",
+    "restartConfirm": "重启",
+    "restartProgressTitle": "正在重启 ComfyUI",
     "connect": "连接",
     "connecting": "连接中",
     "openDirectory": "打开目录",

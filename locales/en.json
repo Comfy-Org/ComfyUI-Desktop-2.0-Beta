@@ -351,6 +351,11 @@
 
   "actions": {
     "launch": "Launch",
+    "restart": "Restart",
+    "restartConfirmTitle": "Restart ComfyUI",
+    "restartConfirmMessage": "This will stop ComfyUI and start it again. Any unsaved work will be lost.",
+    "restartConfirm": "Restart",
+    "restartProgressTitle": "Restarting ComfyUI",
     "connect": "Connect",
     "connecting": "Connecting",
     "openDirectory": "Open Directory",

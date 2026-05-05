@@ -124,7 +124,12 @@ export interface DetailField {
 export interface ActionDef {
   id: string
   label: string
-  style?: 'primary' | 'danger'
+  /** Visual style for the action button.
+   *  - `primary`: solid blue, does the thing immediately on click.
+   *  - `accent`: hollow blue, telegraphs that a confirmation step
+   *    will run before doing anything (Phase 3 §9 convention).
+   *  - `danger`: red, destructive action. */
+  style?: 'primary' | 'accent' | 'danger'
   enabled?: boolean
   disabledMessage?: string
   tooltip?: string
