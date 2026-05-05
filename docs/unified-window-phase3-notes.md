@@ -774,19 +774,22 @@ the unified host opened up:
 
 These slot into the waffle menu as the global affordances:
 
-- New Window (existing)
+- New Window (existing) — **DONE**
 - Return to Dashboard (new — install-backed windows only; swaps the
-  window in-place from the install body to the chooser body) — **TODO**
+  window in-place from the install body to the chooser body) — **DONE**
 - Close Window (existing as an OS button, but more discoverable here) — **DONE**
 - Close All Windows (new) — **DONE**
 - Import Snapshot as New Install (new) — **TODO**
 - Directories (§15) — **DONE**
 - Desktop 2 Settings (existing) — **DONE**
 
-The current shipped File / waffle menu shape is:
+The current shipped File / waffle menu shape (install-backed host
+window — install-less chooser host omits Return to Dashboard since
+it would be a no-op there):
 
 ```
 New Window
+Return to Dashboard
 Close Window
 Close All Windows
 ─────────────
@@ -823,28 +826,38 @@ needless friction. Buttons are `[Close All]` (response 0) and
 `[Cancel]` (response 1, defaultId/cancelId), so an inadvertent
 Enter or Esc dismisses without action.
 
+`Return to Dashboard` is wired as a swap-via-close: capture the
+install-backed window's bounds (and maximised state), open a fresh
+chooser host, apply those bounds to the new window so it appears at
+the same screen position / size, then dispatch `close()` on the
+original window. The original's existing close handler runs the
+full teardown (`stopRunning` + webContents close +
+`window.destroy()`) so the install gets stopped cleanly.
+
+A truly single-window swap would re-key the `comfyWindows` entry
+from `installationId` to a synthetic `chooser:N`, null out
+`entry.installationId`, tear down the comfy-specific wiring
+(download manager, theme observer, panelView's loaded URL with the
+old installationId baked into the query string), and re-route the
+closure-bound `installationId` reads inside `layoutViews()` and
+several install-backed event handlers (the install-backed
+`layoutViews` in particular is bound at construction with `const
+entry = comfyWindows.get(installationId)` — re-keying breaks that
+lookup). That's a substantial rewrite of construction-time
+bindings; the swap-via-close approach delivers the user-facing
+affordance with a brief flicker as the cost.
+
+The doc TBD — install-pill identity click vs. waffle entry vs. both
+— remains open as a follow-up; the waffle entry covers the
+discoverability case for now.
+
 Still open:
 
-- **Return to Dashboard.** The "in-place" swap from install-backed
-  to install-less host is a substantial rewrite — it has to clear
-  `entry.installationId`, re-key the entry under a synthetic
-  `chooser:N` id, hide the comfyView, repaint the panel
-  WebContentsView for the chooser body, and reset the title bar
-  + theme. The simpler "close + open chooser" alternative loses
-  the window's position / size and visually feels like a different
-  window, so we kept it out of the §16 landing. The doc TBD —
-  install-pill identity click vs. waffle entry vs. both — also
-  remains open.
 - **Import Snapshot as New Install.** No flow exists yet; it's a
   brand-new variant of the new-install / load-snapshot pipeline.
   Defer until the new-install / quick-install unification (§4b)
   lands so we have a single canonical create-install panel to
   thread the "starting from a snapshot" entry-point into.
-
-The "return to dashboard" gesture is the most ergonomically sensitive
-one — it could also live on the install pill itself (clicking the
-identity opens a "switch install / pick another" surface) rather
-than only in the waffle. To be decided when the affordance lands.
 
 ---
 

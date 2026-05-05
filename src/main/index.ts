@@ -516,6 +516,45 @@ function closeAllHostWindows(): void {
 }
 
 /**
+ * Phase 3 §16 — File menu's "Return to Dashboard" entry. Stops the
+ * install backing the current host window and replaces the window with
+ * a fresh chooser host at the same bounds, so the user perceives the
+ * body swapping in-place from "an install" back to the install picker.
+ *
+ * Implementation note: a true single-window swap would re-key the
+ * `comfyWindows` entry from the installationId to a synthetic
+ * `chooser:N`, null out `entry.installationId`, tear down comfy-
+ * specific wiring (download manager, theme observer, panelView's
+ * loaded URL), and re-route the closure-bound `installationId` reads
+ * inside `layoutViews()` and the install-backed event handlers.
+ * That's a substantial rewrite of construction-time bindings.
+ *
+ * The close-and-reopen approach captures the install-backed window's
+ * bounds + maximised state, opens a fresh chooser host, applies those
+ * bounds to the new window, then dispatches close on the original.
+ * The original window's existing `close` handler runs the full
+ * teardown (`stopRunning` + webContents close + `window.destroy()`),
+ * so the install gets stopped cleanly. The brief flicker as the
+ * windows swap is the visible cost; the user-facing affordance is
+ * indistinguishable from an in-place swap once the new window paints.
+ */
+function returnToDashboard(parentEntryId: string): void {
+  const entry = comfyWindows.get(parentEntryId)
+  if (!entry || entry.installationId === null || entry.window.isDestroyed()) return
+  const bounds = entry.window.getBounds()
+  const wasMaximized = entry.window.isMaximized()
+  const chooserWindow = openChooserHostWindow()
+  if (!chooserWindow.isDestroyed()) {
+    if (wasMaximized) {
+      chooserWindow.maximize()
+    } else {
+      chooserWindow.setBounds(bounds)
+    }
+  }
+  entry.window.close()
+}
+
+/**
  * Confirm a `closeAllHostWindows()` dispatch when more than one host
  * window is open. The dialog lists the open windows by title (so the
  * user can see what's about to close) and any active operations that
@@ -1794,18 +1833,26 @@ function buildTitleMenuItems(kind: 'file' | 'install', entry: ComfyWindowEntry):
     // §15 — Directories is a global / cross-install affordance (the
     // launcher's view of disk: models, outputs, inputs) and lives on
     // the File / waffle menu alongside the other app-level entries.
-    // §16 — window-management entries (Close Window, Close All
-    // Windows) sit between the open-new gesture and the page-nav
-    // affordances; the separator below them keeps the two groups
-    // visually distinct.
-    return [
+    // §16 — window-management entries (Return to Dashboard, Close
+    // Window, Close All Windows) sit between the open-new gesture and
+    // the page-nav affordances; the separator below them keeps the
+    // two groups visually distinct. Return to Dashboard is install-
+    // backed-only — install-less host windows are already on the
+    // chooser body so the entry would be a no-op there.
+    const items: TitleMenuItem[] = [
       { id: 'new-window', label: 'New Window' },
+    ]
+    if (entry.installationId !== null) {
+      items.push({ id: 'return-to-dashboard', label: 'Return to Dashboard' })
+    }
+    items.push(
       { id: 'close-window', label: 'Close Window' },
       { id: 'close-all-windows', label: 'Close All Windows' },
       { kind: 'separator' },
       { id: 'directories', label: 'Directories', checked: entry.activePanel === 'directories' },
       { id: 'launcher-settings', label: 'Desktop 2 Settings' },
-    ]
+    )
+    return items
   }
   return [
     { id: 'install-settings', label: 'Install Settings', checked: entry.activePanel === 'install-settings' },
@@ -2038,7 +2085,16 @@ function openTitleMenuPopup(opts: {
 function activateTitleMenuItem(entry: TitleMenuPopupEntry, id: string): void {
   if (entry.kind === 'file') {
     if (id === 'new-window') openChooserHostWindow()
-    else if (id === 'close-window') {
+    else if (id === 'return-to-dashboard') {
+      // §16 — close the install-backed window and reopen at the same
+      // bounds as a chooser host. See `returnToDashboard` for why this
+      // is a swap-via-close rather than a true single-window swap.
+      // The popup is parented to the original window and gets auto-
+      // destroyed when that window closes; the trailing
+      // hideTitleMenuPopup is guarded against an already-destroyed
+      // popup.
+      returnToDashboard(entry.parentEntryId)
+    } else if (id === 'close-window') {
       // §16 — close just the parent host window. Each host window has
       // its own `close` handler that runs the teardown sequence
       // (`stopRunning` + webContents close + window.destroy), so we
