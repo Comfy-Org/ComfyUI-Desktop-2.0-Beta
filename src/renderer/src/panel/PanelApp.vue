@@ -19,7 +19,7 @@ import { useInstallationStore } from '../stores/installationStore'
 import { useProgressStore } from '../stores/progressStore'
 import { useLauncherPrefs } from '../composables/useLauncherPrefs'
 import { useListAction } from '../composables/useListAction'
-import type { ActionResult, Installation } from '../types/ipc'
+import type { ActionResult, Installation, ShowProgressOpts } from '../types/ipc'
 
 /**
  * Body modes the panel WebContentsView can render. Mirrors the `BodyMode`
@@ -110,13 +110,7 @@ async function loadLocale(): Promise<void> {
   locale.value = 'en'
 }
 
-function handleShowProgress(opts: {
-  installationId: string
-  title: string
-  apiCall: () => Promise<unknown>
-  cancellable?: boolean
-  returnTo?: string
-}): void {
+function handleShowProgress(opts: ShowProgressOpts): void {
   activeProgressId.value = opts.installationId
   // If an in-progress operation already exists for this ID, just show it
   const existing = progressStore.operations.get(opts.installationId)

@@ -200,6 +200,21 @@ export interface ListAction {
   cancellable?: boolean
 }
 
+/** Payload carried by every component's `show-progress` emit. The host
+ *  (typically `PanelApp`) consumes the closure-bound `apiCall` to drive
+ *  ProgressModal. `actionId` is what kind of action initiated this —
+ *  used by the chooser host's Manage modal to redirect a launch into a
+ *  proper pick-flow swap-in-place instead of stacking ProgressModal
+ *  on top of the still-open Manage overlay. */
+export interface ShowProgressOpts {
+  installationId: string
+  title: string
+  apiCall: () => Promise<unknown>
+  cancellable?: boolean
+  returnTo?: string
+  actionId?: string
+}
+
 // --- Action results ---
 export interface ActionResult {
   ok?: boolean

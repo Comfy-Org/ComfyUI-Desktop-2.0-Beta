@@ -3,7 +3,7 @@ import { ref, computed, watch, toRaw, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useModal } from '../composables/useModal'
 
-import type { SnapshotFilePreview, FieldOption, GPUInfo } from '../types/ipc'
+import type { SnapshotFilePreview, FieldOption, GPUInfo, ShowProgressOpts } from '../types/ipc'
 import { getVariantGpuLabel, sortedCardOptions, findBestVariant } from '../lib/variants'
 import VariantCardGrid from '../components/VariantCardGrid.vue'
 import { emitTelemetryAction, toVariantBucket } from '../lib/telemetry'
@@ -11,14 +11,7 @@ import SnapshotFilePreviewContent from '../components/SnapshotFilePreviewContent
 
 const emit = defineEmits<{
   close: []
-  'show-progress': [
-    opts: {
-      installationId: string
-      title: string
-      apiCall: () => Promise<unknown>
-      cancellable?: boolean
-    }
-  ]
+  'show-progress': [opts: ShowProgressOpts]
 }>()
 
 const { t } = useI18n()

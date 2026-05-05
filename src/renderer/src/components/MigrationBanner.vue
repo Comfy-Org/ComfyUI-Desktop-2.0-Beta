@@ -4,19 +4,14 @@ import { useI18n } from 'vue-i18n'
 import { useMigrateAction } from '../composables/useMigrateAction'
 import { useProgressStore } from '../stores/progressStore'
 import { ArrowRightLeft, Download } from 'lucide-vue-next'
-import type { Installation } from '../types/ipc'
+import type { Installation, ShowProgressOpts } from '../types/ipc'
 
 const props = defineProps<{
   installation: Installation
 }>()
 
 const emit = defineEmits<{
-  'show-progress': [opts: {
-    installationId: string
-    title: string
-    apiCall: () => Promise<unknown>
-    cancellable?: boolean
-  }]
+  'show-progress': [opts: ShowProgressOpts]
   'show-settings': []
   'show-quick-install': []
 }>()

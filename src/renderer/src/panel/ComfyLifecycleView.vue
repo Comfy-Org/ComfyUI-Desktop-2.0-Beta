@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Play, RefreshCcw, TriangleAlert, Loader2 } from 'lucide-vue-next'
 import { useSessionStore } from '../stores/sessionStore'
-import type { Installation } from '../types/ipc'
+import type { Installation, ShowProgressOpts } from '../types/ipc'
 
 /**
  * Body view for the Comfy tab when no ComfyUI process is currently running
@@ -29,12 +29,7 @@ interface Props {
 const props = defineProps<Props>()
 
 const emit = defineEmits<{
-  'show-progress': [opts: {
-    installationId: string
-    title: string
-    apiCall: () => Promise<unknown>
-    cancellable?: boolean
-  }]
+  'show-progress': [opts: ShowProgressOpts]
 }>()
 
 const { t } = useI18n()
@@ -66,6 +61,7 @@ function startLaunch(): void {
       : t('comfyLifecycle.launchProgressTitle'),
     apiCall: () => window.api.runAction(props.installationId, 'launch'),
     cancellable: true,
+    actionId: 'launch',
   })
 }
 </script>

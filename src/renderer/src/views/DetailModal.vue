@@ -20,7 +20,8 @@ import type {
   DetailSection,
   FieldOption,
   ActionResult,
-  DiskSpaceInfo
+  DiskSpaceInfo,
+  ShowProgressOpts
 } from '../types/ipc'
 
 interface Props {
@@ -43,15 +44,7 @@ const props = withDefaults(defineProps<Props>(), {
 
 const emit = defineEmits<{
   close: []
-  'show-progress': [
-    opts: {
-      installationId: string
-      title: string
-      apiCall: () => Promise<unknown>
-      cancellable?: boolean
-      returnTo?: string
-    }
-  ]
+  'show-progress': [opts: ShowProgressOpts]
   'navigate-list': []
   'update:installation': [inst: Installation]
 }>()
@@ -464,7 +457,12 @@ async function runAction(action: ActionDef, btn: HTMLButtonElement | null): Prom
       title,
       apiCall: () => window.api.runAction(instId, mutableAction.id, mutableAction.data ? toRaw(mutableAction.data) : undefined),
       cancellable: !!mutableAction.cancellable,
-      returnTo: 'detail'
+      returnTo: 'detail',
+      // Tag the payload with the originating action so hosts that
+      // want to special-case specific actions (e.g. ChooserView's
+      // Manage modal swapping a 'launch' into a chooser-pick instead
+      // of stacking ProgressModal on top of itself) can route on it.
+      actionId: mutableAction.id,
     })
     return
   }

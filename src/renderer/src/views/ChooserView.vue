@@ -8,7 +8,7 @@ import { useInstallContextMenu } from '../composables/useInstallContextMenu'
 import { Cloud, Plus, Box, Monitor, Globe, Pin, AlertCircle, ArrowDownToLine, ArrowRightLeft, MoreVertical } from 'lucide-vue-next'
 import ContextMenu from '../components/ContextMenu.vue'
 import DetailModal from './DetailModal.vue'
-import type { Installation } from '../types/ipc'
+import type { Installation, ShowProgressOpts } from '../types/ipc'
 
 /**
  * Chooser view (Phase 3 step 2 — recents grid).
@@ -47,15 +47,10 @@ const emit = defineEmits<{
   'show-new-install': []
   /** A long-running action was kicked off from the inline Manage…
    *  DetailModal (Update, Restore Snapshot, Migrate, …). The host
-   *  (`PanelApp`) owns the ProgressModal overlay; we just forward
-   *  the event so it can wire the operation through `progressStore`. */
-  'show-progress': [opts: {
-    installationId: string
-    title: string
-    apiCall: () => Promise<unknown>
-    cancellable?: boolean
-    returnTo?: string
-  }]
+   *  (`PanelApp`) owns the ProgressModal overlay; we forward most
+   *  events so it can wire the operation through `progressStore`.
+   *  Launch is the one exception — see `handleManageShowProgress`. */
+  'show-progress': [opts: ShowProgressOpts]
 }>()
 
 const installationStore = useInstallationStore()
@@ -209,6 +204,26 @@ function handleManageUpdate(inst: Installation): void {
  *  so the deleted card has dropped out of `visibleInstalls`. */
 function handleManageNavigateList(): void {
   manageInstall.value = null
+}
+
+/** DetailModal `show-progress` event — most actions (Update, Restore
+ *  Snapshot, Migrate, …) bubble up to PanelApp's ProgressModal as-is.
+ *  Launch is special: in the chooser host context, "launch this
+ *  install" should swap the host window in place (the same UX a card
+ *  click delivers) rather than stack ProgressModal on top of the
+ *  still-open Manage modal. We detect launch via the payload's
+ *  `actionId`, close the Manage modal, then route through
+ *  `pickInstall` so PanelApp's `handleChooserPick` runs the standard
+ *  chooser-pick pipeline (transferHostBoundsToInstall + onInstanceStarted
+ *  → closeHostWindow). */
+function handleManageShowProgress(opts: ShowProgressOpts): void {
+  if (opts.actionId === 'launch' && manageInstall.value) {
+    const inst = manageInstall.value
+    manageInstall.value = null
+    pickInstall(inst)
+    return
+  }
+  emit('show-progress', opts)
 }
 
 // --- Card status classes (running, stopping, in-progress, errored) ---
@@ -497,7 +512,7 @@ function handleNewInstallClick(): void {
           @close="closeManageModal"
           @navigate-list="handleManageNavigateList"
           @update:installation="handleManageUpdate"
-          @show-progress="(opts) => emit('show-progress', opts)"
+          @show-progress="handleManageShowProgress"
         />
       </div>
     </Teleport>

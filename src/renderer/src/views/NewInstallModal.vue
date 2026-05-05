@@ -3,7 +3,7 @@ import { ref, computed, watch, onMounted, toRaw } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useModal } from '../composables/useModal'
 
-import type { Source, SourceField, FieldOption, HardwareValidation } from '../types/ipc'
+import type { Source, SourceField, FieldOption, HardwareValidation, ShowProgressOpts } from '../types/ipc'
 import { stripVariantPrefix, sortedCardOptions } from '../lib/variants'
 import VariantCardGrid from '../components/VariantCardGrid.vue'
 import { emitTelemetryAction, toVariantBucket } from '../lib/telemetry'
@@ -12,15 +12,7 @@ import InstallNamePath from '../components/InstallNamePath.vue'
 
 const emit = defineEmits<{
   close: []
-  'show-progress': [
-    opts: {
-      installationId: string
-      title: string
-      apiCall: () => Promise<unknown>
-      cancellable?: boolean
-      returnTo?: string
-    }
-  ]
+  'show-progress': [opts: ShowProgressOpts]
   'navigate-list': []
 }>()
 

@@ -19,6 +19,7 @@ export type {
   PromptDef,
   ModalDetailGroup,
   ListAction,
+  ShowProgressOpts,
   ActionResult,
   PortConflictInfo,
   AddResult,
