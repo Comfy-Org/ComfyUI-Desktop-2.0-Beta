@@ -481,6 +481,21 @@ First slice landed on `feat/unified-window-titlebar-panels`:
   Errored takes precedence over running in the rare case both are
   set (a crashed-while-running install reads more usefully as
   errored).
+- **Pill chips replace the dot-separated meta line.** Each datum
+  (source label, version, last-launched timestamp) renders in its
+  own `.chooser-tile-pill` chip — discrete, scannable, and wraps
+  onto a second row on narrow tiles instead of ellipsing the line.
+  The version pill keeps the monospace face so commit-shas and
+  semver values still read as data.
+- **Bigger min tile size.** Grid `minmax(240px, 1fr)` →
+  `minmax(320px, 1fr)`. The tiles need to fit the install name + the
+  three meta pills + room for an icon + future pills (update /
+  migrate / progress) without going cramped; 240px was the carryover
+  from the original recents-grid landing where the tiles only had
+  to show name + sourceLabel + relative-time. Auto-fill + 1fr still
+  grows more columns on wide windows. The grid's `overflow-y: auto`
+  was already in place — the bigger min-width just makes the
+  scrollbar appear sooner on narrow / tile-heavy windows.
 
 Still open:
 

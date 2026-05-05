@@ -281,19 +281,21 @@ function handleNewInstallClick(): void {
           />
         </div>
         <div class="chooser-tile-meta">
-          <span>{{ inst.sourceLabel }}</span>
-          <template v-if="inst.version">
-            <span class="chooser-tile-meta-sep"> · </span>
-            <span class="chooser-tile-version">{{ inst.version }}</span>
-          </template>
-          <template v-if="typeof inst.lastLaunchedAt === 'number'">
-            <span class="chooser-tile-meta-sep"> · </span>
-            <span>{{ $t('dashboard.launchedAgo', { time: timeAgo(inst.lastLaunchedAt as number) }) }}</span>
-          </template>
-          <template v-else>
-            <span class="chooser-tile-meta-sep"> · </span>
-            <span>{{ $t('dashboard.neverLaunched') }}</span>
-          </template>
+          <!-- Each datum is its own pill so they read as discrete chips
+               rather than a dot-separated run-on line. Pills wrap onto a
+               second row on narrow tiles instead of ellipsing. -->
+          <span class="chooser-tile-pill">{{ inst.sourceLabel }}</span>
+          <span
+            v-if="inst.version"
+            class="chooser-tile-pill chooser-tile-pill-version"
+          >
+            {{ inst.version }}
+          </span>
+          <span class="chooser-tile-pill">
+            {{ typeof inst.lastLaunchedAt === 'number'
+              ? $t('dashboard.launchedAgo', { time: timeAgo(inst.lastLaunchedAt as number) })
+              : $t('dashboard.neverLaunched') }}
+          </span>
         </div>
       </button>
     </div>
@@ -358,11 +360,14 @@ function handleNewInstallClick(): void {
 .chooser-grid {
   flex: 1;
   overflow-y: auto;
-  /* Golden-ratio cards: width = ~280px, height = width / 1.618. The grid
-     auto-fills as many columns as fit; cards keep their aspect via
-     aspect-ratio. */
+  /* Golden-ratio cards keep their aspect via `aspect-ratio` on the
+     tile. Min column width is 320px — chooser tiles need to fit pills
+     for source / version / last-launched plus the install name and
+     icon, which 240px makes cramped. The auto-fill + 1fr columns let
+     the grid grow more columns on wide windows; on narrow windows
+     fewer columns appear and the grid scrolls vertically. */
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: 16px;
   padding: 8px 24px 24px;
   align-content: start;
@@ -421,15 +426,35 @@ function handleNewInstallClick(): void {
 }
 
 .chooser-tile-meta {
-  font-size: 12px;
-  opacity: 0.7;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
   max-width: 100%;
+  font-size: 12px;
+  /* Container-level mute applies to the New Install / Cloud tile's
+   * plain-text meta line; pill chips inside install tiles override
+   * the opacity locally so they read at full strength. */
+  opacity: 0.85;
 }
-.chooser-tile-meta-sep {
-  opacity: 0.6;
+
+/* Pill chips for the meta line. Each piece of card metadata
+ * (source label, version, last-launched timestamp) renders inside its
+ * own pill so the run-on dot-separated line is gone — each datum
+ * reads as a discrete chip the user can scan. Pills wrap onto a new
+ * row on narrow tiles instead of ellipsing the line. */
+.chooser-tile-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--bg-elev-2, rgba(127, 127, 127, 0.14));
+  border: 1px solid var(--border-subtle, rgba(127, 127, 127, 0.18));
+  font-size: 11px;
+  white-space: nowrap;
+  opacity: 0.9;
+}
+.chooser-tile-pill-version {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
 /* Status overlays — match the visual language used by DashboardCard so
@@ -467,14 +492,6 @@ function handleNewInstallClick(): void {
   align-items: center;
   justify-content: center;
   pointer-events: none;
-}
-
-/* Version chip in the meta line. Slightly muted + monospace so it
- * reads as data ("v0.3.45", "abc1234") rather than prose. */
-.chooser-tile-version {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 11px;
-  opacity: 0.85;
 }
 
 /* The two fixed-position tiles (New Install + Cloud) get a slightly
