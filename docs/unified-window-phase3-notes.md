@@ -808,6 +808,21 @@ already-destroyed popup, so the parent-of-popup window in the
 though the popup is auto-destroyed by Electron when its parent
 goes away.
 
+`Close All Windows` is gated by a native confirmation dialog when
+more than one host window is open. The dialog is parented to the
+window the menu was opened from, lists the open windows by
+`window.getTitle()`, and — when the legacy `hasActiveOperations()`
+flag is set — also lists running ComfyUI sessions, in-progress
+operations (installs / updates / migrations), and active model
+downloads, pulled from the same `getActiveDetails()` helper that
+powered the legacy launcher's quit-warning modal (commit
+`d22bdf6`). With zero or one window open the close happens
+straight through with no prompt — single-window close is
+indistinguishable from `Close Window` so prompting would be
+needless friction. Buttons are `[Close All]` (response 0) and
+`[Cancel]` (response 1, defaultId/cancelId), so an inadvertent
+Enter or Esc dismisses without action.
+
 Still open:
 
 - **Return to Dashboard.** The "in-place" swap from install-backed

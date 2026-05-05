@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, ipcMain, shell, clipboard, screen, net, WebContentsView } from 'electron'
+import { app, BrowserWindow, Menu, ipcMain, dialog, shell, clipboard, screen, net, WebContentsView } from 'electron'
 // `Tray` is referenced only as a type while docking-to-tray is disabled
 // (see whenReady() — createTray() has been removed). When docking comes
 // back, move this back into the runtime electron import alongside Menu.
@@ -513,6 +513,59 @@ function closeAllHostWindows(): void {
   for (const entry of entries) {
     if (!entry.window.isDestroyed()) entry.window.close()
   }
+}
+
+/**
+ * Confirm a `closeAllHostWindows()` dispatch when more than one host
+ * window is open. The dialog lists the open windows by title (so the
+ * user can see what's about to close) and any active operations that
+ * will be cancelled — running ComfyUI sessions, in-progress
+ * installs / updates, active model downloads — pulled from the same
+ * `getActiveDetails()` helper that powered the legacy launcher's
+ * quit-warning modal. With one or zero windows the close happens
+ * straight through with no prompt.
+ */
+async function confirmAndCloseAllHostWindows(parentWindow: BrowserWindow | null): Promise<void> {
+  const entries = Array.from(comfyWindows.values()).filter((e) => !e.window.isDestroyed())
+  if (entries.length <= 1) {
+    closeAllHostWindows()
+    return
+  }
+  const titles = entries.map((e) => e.window.getTitle() || 'Untitled window')
+  const detailLines: string[] = ['Open windows:', ...titles.map((t) => `  • ${t}`)]
+  if (ipc.hasActiveOperations()) {
+    try {
+      const items = await ipc.getActiveDetails()
+      const sessions = items.filter((i) => i.type === 'session').map((i) => i.name)
+      const operations = items.filter((i) => i.type === 'operation').map((i) => i.name)
+      const downloads = items.filter((i) => i.type === 'download').map((i) => i.name)
+      if (sessions.length > 0) {
+        detailLines.push('', 'Running ComfyUI:', ...sessions.map((n) => `  • ${n}`))
+      }
+      if (operations.length > 0) {
+        detailLines.push('', 'In-progress operations:', ...operations.map((n) => `  • ${n}`))
+      }
+      if (downloads.length > 0) {
+        detailLines.push('', 'Active downloads:', ...downloads.map((n) => `  • ${n}`))
+      }
+    } catch {
+      // If active-detail collection ever throws, fall back to just the
+      // window list — the user still sees what's about to close.
+    }
+  }
+  const opts: Electron.MessageBoxOptions = {
+    type: 'question',
+    buttons: ['Close All', 'Cancel'],
+    defaultId: 1,
+    cancelId: 1,
+    title: 'Close All Windows',
+    message: `Close ${entries.length} open windows?`,
+    detail: detailLines.join('\n'),
+  }
+  const result = parentWindow && !parentWindow.isDestroyed()
+    ? await dialog.showMessageBox(parentWindow, opts)
+    : await dialog.showMessageBox(opts)
+  if (result.response === 0) closeAllHostWindows()
 }
 
 function onComfyExited({ installationId }: { installationId?: string } = {}): void {
@@ -1997,10 +2050,19 @@ function activateTitleMenuItem(entry: TitleMenuPopupEntry, id: string): void {
         parentEntry.window.close()
       }
     } else if (id === 'close-all-windows') {
-      // §16 — see `closeAllHostWindows`. The parent of this popup is
-      // among the windows being closed; its popup is auto-destroyed,
-      // and the trailing hideTitleMenuPopup is guarded.
-      closeAllHostWindows()
+      // §16 — see `closeAllHostWindows` / `confirmAndCloseAllHostWindows`.
+      // For two or more open windows we confirm via a native dialog
+      // that lists the open windows + any active operations that
+      // would be cancelled. With one or zero windows the close
+      // happens straight through. The parent of this popup is among
+      // the windows being closed; its popup is auto-destroyed, and
+      // the trailing hideTitleMenuPopup is guarded against an
+      // already-destroyed popup.
+      const parentEntry = comfyWindows.get(entry.parentEntryId)
+      const parentWindow = parentEntry && !parentEntry.window.isDestroyed()
+        ? parentEntry.window
+        : null
+      void confirmAndCloseAllHostWindows(parentWindow)
     } else if (id === 'directories') setActivePanel(entry.parentEntryId, 'directories')
     else if (id === 'launcher-settings') setActivePanel(entry.parentEntryId, 'launcher-settings')
   } else {
