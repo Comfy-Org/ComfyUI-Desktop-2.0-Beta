@@ -7,8 +7,39 @@ interface UpdateInfo {
   version: string
 }
 
+/**
+ * Phase 3 §18 — title-bar status pills consume the current app-update
+ * state via `getCurrentUpdateState()` for the initial push (when a
+ * title bar mounts after the broadcast already fired) and via the
+ * `onUpdateStateChanged` callback for live updates. The two stay in
+ * sync because both writes go through `_setUpdateState`, which fans
+ * out to every registered callback.
+ *
+ * `kind` is `'available'` after `update-available`, `'ready'` after
+ * `update-downloaded`, and `null` when nothing is pending. `version`
+ * carries the corresponding version string. `update-error` does NOT
+ * clear the kind — the banner shows the error transiently, but the
+ * pill keeps reflecting the last-known state so the user can still
+ * act on a previously-discovered update once the error is dismissed.
+ */
+export interface AppUpdateState {
+  kind: 'available' | 'ready' | null
+  version: string | null
+}
+
 let _updateInfo: UpdateInfo | null = null
+let _appUpdateState: AppUpdateState = { kind: null, version: null }
+const _stateChangeCallbacks = new Set<(state: AppUpdateState) => void>()
 let _listenersBound = false
+
+function _setUpdateState(next: AppUpdateState): void {
+  _appUpdateState = next
+  for (const cb of _stateChangeCallbacks) {
+    try {
+      cb(next)
+    } catch {}
+  }
+}
 
 const NO_UPDATE_AVAILABLE_MESSAGE = 'No update available. Try checking for updates first.'
 const UPDATER_UNAVAILABLE_MESSAGE = 'ToDesktop auto-updater is unavailable.'
@@ -76,6 +107,7 @@ function bindUpdaterEvents(): void {
   updater.on('update-available', (info: unknown) => {
     const version = versionFromPayload(info)
     if (!version) return
+    _setUpdateState({ kind: 'available', version })
     broadcast('update-available', { version })
   })
 
@@ -95,6 +127,7 @@ function bindUpdaterEvents(): void {
     const version = versionFromPayload(event)
     if (!version) return
     _updateInfo = { version }
+    _setUpdateState({ kind: 'ready', version })
     broadcast('update-downloaded', _updateInfo)
   })
 
@@ -130,6 +163,38 @@ export function runCheck(
   source: string,
 ): Promise<{ available: boolean; version?: string; error?: string }> {
   return checkForUpdate(source)
+}
+
+/**
+ * Phase 3 §18 — current app-update state for the title-bar status
+ * pill. Returned by reference for cheapness; callers must not mutate.
+ * Title-bar webContents that mount AFTER an `update-available` /
+ * `update-downloaded` broadcast still need the latest state to render
+ * their pill, so main pushes this on `comfy-titlebar:title-bar-ready`
+ * via `comfy-titlebar:app-update-state-changed`.
+ */
+export function getCurrentUpdateState(): AppUpdateState {
+  return _appUpdateState
+}
+
+/**
+ * Phase 3 §18 — subscribe to app-update state transitions. Main
+ * registers once at startup and forwards each call to every host
+ * window's title-bar webContents. Returns an unsubscribe function.
+ *
+ * Skipped over a renderer-side relay (renderer → main → all-renderers
+ * → title-bar) because the broadcast() helper already reaches the
+ * title-bar webContents via BrowserWindow.getAllWindows; the title-bar
+ * preload just doesn't expose those raw events. Forwarding through
+ * `comfy-titlebar:app-update-state-changed` keeps the pill data path
+ * separate from the banner data path so the two surfaces can evolve
+ * independently.
+ */
+export function onUpdateStateChanged(cb: (state: AppUpdateState) => void): () => void {
+  _stateChangeCallbacks.add(cb)
+  return () => {
+    _stateChangeCallbacks.delete(cb)
+  }
 }
 
 export function register(): void {

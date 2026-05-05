@@ -45,13 +45,24 @@ import type { Installation } from '../types/ipc'
  * `Cancel "Updating ComfyUI"?`).
  */
 
-export type OverlayKind = 'manage' | 'progress' | 'flow' | 'takeover'
+export type OverlayKind = 'manage' | 'app-update' | 'progress' | 'flow' | 'takeover'
 
 export interface ManageOverlay {
   kind: 'manage'
   installation: Installation
   initialTab?: string
   autoAction?: string | null
+}
+
+/**
+ * Phase 3 §18 — Tier 1 popover surfaced from the title-bar app-update
+ * pill. Reads its state (available / ready / version) from the shared
+ * `useAppUpdateState` composable so the popover and `UpdateBanner`
+ * never disagree. No additional payload — the composable owns the
+ * data, the overlay just signals "render the popover".
+ */
+export interface AppUpdateOverlay {
+  kind: 'app-update'
 }
 
 export interface ProgressOverlay {
@@ -82,10 +93,16 @@ export interface TakeoverOverlay {
   installationId?: string
 }
 
-export type Overlay = ManageOverlay | ProgressOverlay | FlowOverlay | TakeoverOverlay
+export type Overlay =
+  | ManageOverlay
+  | AppUpdateOverlay
+  | ProgressOverlay
+  | FlowOverlay
+  | TakeoverOverlay
 
 const TIER: Record<OverlayKind, 1 | 2 | 3> = {
   manage: 1,
+  'app-update': 1,
   progress: 2,
   flow: 3,
   takeover: 3,

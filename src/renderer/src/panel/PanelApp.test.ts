@@ -117,6 +117,13 @@ vi.mock('../components/UpdateBanner.vue', () => ({
     template: '<div data-testid="update-banner" />',
   },
 }))
+vi.mock('../components/AppUpdatePopover.vue', () => ({
+  default: {
+    name: 'AppUpdatePopover',
+    emits: ['close'],
+    template: '<div data-testid="app-update-popover" />',
+  },
+}))
 
 import { mount, flushPromises } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
@@ -152,6 +159,10 @@ interface InstallationLike {
 
 interface MockApiState {
   panelSwitchCallbacks: ((data: { panel: string; installationId?: string }) => void)[]
+  panelTriggerOverlayCallbacks: ((data: {
+    kind: 'app-update' | 'install-update'
+    installationId?: string
+  }) => void)[]
   installationsChangedCallbacks: (() => void)[]
   installations: InstallationLike[]
   getInstallations: ReturnType<typeof vi.fn>
@@ -168,6 +179,7 @@ function installMockApi(initial?: {
   const installations: InstallationLike[] = initial?.installations ?? []
   const state: MockApiState = {
     panelSwitchCallbacks: [],
+    panelTriggerOverlayCallbacks: [],
     installationsChangedCallbacks: [],
     installations,
     getInstallations: vi.fn(async () => state.installations),
@@ -181,6 +193,14 @@ function installMockApi(initial?: {
       state.panelSwitchCallbacks.push(cb)
       return () => {}
     }),
+    onPanelTriggerOverlay: vi.fn(
+      (
+        cb: (d: { kind: 'app-update' | 'install-update'; installationId?: string }) => void,
+      ) => {
+        state.panelTriggerOverlayCallbacks.push(cb)
+        return () => {}
+      },
+    ),
     setTitleBarInert: vi.fn(),
     onSettingsChanged: vi.fn(() => () => {}),
     // Step 5 §16 — main consults the panel renderer before tearing
@@ -490,5 +510,47 @@ describe('PanelApp', () => {
     await flushPromises()
     expect(wrapper.find('[data-testid="settings-view"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="comfy-lifecycle"]').exists()).toBe(true)
+  })
+
+  it('mounts the manage overlay (DetailModal) when a panel-trigger-overlay install-update event arrives', async () => {
+    // Phase 3 §18 — the title-bar install-update pill click is
+    // forwarded by main as an `onPanelTriggerOverlay` event with
+    // `kind: 'install-update'` and the host's installationId. The
+    // panel renderer routes that into a Tier 1 manage overlay with
+    // initialTab='update' so the DetailModal opens directly on the
+    // update tab.
+    const wrapper = mountPanel()
+    await flushPromises()
+    expect(wrapper.find('[data-testid="detail-modal"]').exists()).toBe(false)
+
+    mockState.panelTriggerOverlayCallbacks.forEach((cb) =>
+      cb({ kind: 'install-update', installationId: 'test-id' }),
+    )
+    await flushPromises()
+    const detail = wrapper.find('[data-testid="detail-modal"]')
+    expect(detail.exists()).toBe(true)
+    expect(detail.attributes('data-installation-id')).toBe('test-id')
+  })
+
+  it('mounts the AppUpdatePopover when a panel-trigger-overlay app-update event arrives', async () => {
+    const wrapper = mountPanel()
+    await flushPromises()
+    expect(wrapper.find('[data-testid="app-update-popover"]').exists()).toBe(false)
+
+    mockState.panelTriggerOverlayCallbacks.forEach((cb) => cb({ kind: 'app-update' }))
+    await flushPromises()
+    expect(wrapper.find('[data-testid="app-update-popover"]').exists()).toBe(true)
+  })
+
+  it('ignores install-update events whose installationId does not match the host', async () => {
+    // Defensive — main scopes the install-update broadcast to the
+    // matching host's panelView, but the renderer also re-validates.
+    const wrapper = mountPanel()
+    await flushPromises()
+    mockState.panelTriggerOverlayCallbacks.forEach((cb) =>
+      cb({ kind: 'install-update', installationId: 'someone-else' }),
+    )
+    await flushPromises()
+    expect(wrapper.find('[data-testid="detail-modal"]').exists()).toBe(false)
   })
 })

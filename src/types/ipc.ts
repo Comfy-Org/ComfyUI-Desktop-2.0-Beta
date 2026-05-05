@@ -820,6 +820,17 @@ export interface ElectronApi {
    * panel WebContentsView (e.g. from the ComfyUI window's title-bar buttons).
    */
   onPanelSwitch(callback: (data: { panel: string; installationId?: string }) => void): Unsubscribe
+  /**
+   * Phase 3 §18 — main forwards a title-bar status pill click as an
+   * overlay-trigger to the panel renderer. The renderer subscribes
+   * once on mount and routes each kind through `useOverlay.openOverlay`:
+   *   - `'app-update'` → Tier 1 popover sourced from `useAppUpdateState`.
+   *   - `'install-update'` → Manage overlay (DetailModal) on the
+   *     update tab, scoped to the carried `installationId`.
+   */
+  onPanelTriggerOverlay(
+    callback: (data: { kind: 'app-update' | 'install-update'; installationId?: string }) => void,
+  ): Unsubscribe
 }
 
 /** Action IDs that require the installation to be stopped before running.

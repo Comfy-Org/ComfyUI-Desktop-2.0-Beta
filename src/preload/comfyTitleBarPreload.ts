@@ -67,6 +67,27 @@ export interface ComfyTitleBarBridge {
    *  title bar. Window controls (× / □) stay live — they're OS
    *  affordances outside this view. */
   onInertChanged(cb: (inert: boolean) => void): () => void
+  /** Subscribe to app-update state pushes (Phase 3 §18 status pills).
+   *  `kind` is `'available'` after `update-available`, `'ready'` after
+   *  `update-downloaded`, and `null` when nothing is pending. Drives
+   *  the title-bar app-update pill that sits to the right of the
+   *  hamburger menu. */
+  onAppUpdateStateChanged(
+    cb: (state: { kind: 'available' | 'ready' | null; version: string | null }) => void,
+  ): () => void
+  /** Subscribe to install-update state pushes (Phase 3 §18 status
+   *  pills). `true` when the install's `statusTag.style === 'update'`,
+   *  `false` otherwise. Only relevant on install-backed host windows;
+   *  install-less hosts never receive this signal. */
+  onInstallUpdateAvailable(cb: (available: boolean) => void): () => void
+  /** Click handler for the app-update pill. Main responds by sending
+   *  `panel-trigger-overlay` to the host's panelView so the renderer
+   *  can open the app-update popover via `openOverlay`. */
+  clickAppUpdatePill(): void
+  /** Click handler for the install-update pill. Main routes the
+   *  request to the host's panelView with the entry's installationId
+   *  so the renderer can open the manage overlay on the update tab. */
+  clickInstallUpdatePill(): void
   /** Tell main this title bar is mounted; main responds with the initial state. */
   ready(): void
 }
@@ -161,6 +182,29 @@ const bridge: ComfyTitleBarBridge = {
     }
     ipcRenderer.on('comfy-titlebar:inert-changed', handler)
     return () => ipcRenderer.removeListener('comfy-titlebar:inert-changed', handler)
+  },
+  onAppUpdateStateChanged: (cb) => {
+    const handler = (_event: IpcRendererEvent, state: unknown): void => {
+      const data = (state || {}) as { kind?: unknown; version?: unknown }
+      const kind = data.kind === 'available' || data.kind === 'ready' ? data.kind : null
+      const version = typeof data.version === 'string' ? data.version : null
+      cb({ kind, version })
+    }
+    ipcRenderer.on('comfy-titlebar:app-update-state-changed', handler)
+    return () => ipcRenderer.removeListener('comfy-titlebar:app-update-state-changed', handler)
+  },
+  onInstallUpdateAvailable: (cb) => {
+    const handler = (_event: IpcRendererEvent, available: unknown): void => {
+      cb(!!available)
+    }
+    ipcRenderer.on('comfy-titlebar:install-update-changed', handler)
+    return () => ipcRenderer.removeListener('comfy-titlebar:install-update-changed', handler)
+  },
+  clickAppUpdatePill: () => {
+    ipcRenderer.send('comfy-window:click-app-update-pill')
+  },
+  clickInstallUpdatePill: () => {
+    ipcRenderer.send('comfy-window:click-install-update-pill')
   },
   ready: () => {
     ipcRenderer.send('comfy-window:title-bar-ready')

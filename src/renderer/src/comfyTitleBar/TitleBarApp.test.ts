@@ -9,12 +9,19 @@ interface MockBridgeState {
   fullscreenChangedCallbacks: ((fullscreen: boolean) => void)[]
   menuClosedCallbacks: ((info: { menu: 'file' | 'install' }) => void)[]
   inertChangedCallbacks: ((inert: boolean) => void)[]
+  appUpdateStateCallbacks: ((state: {
+    kind: 'available' | 'ready' | null
+    version: string | null
+  }) => void)[]
+  installUpdateAvailableCallbacks: ((available: boolean) => void)[]
   setPanelCalls: string[]
   newWindowCalls: number
   fileMenuAnchors: { x: number; y: number }[]
   installMenuAnchors: { x: number; y: number }[]
   goBackCalls: number
   goForwardCalls: number
+  appUpdatePillClicks: number
+  installUpdatePillClicks: number
   readyCalls: number
 }
 
@@ -27,12 +34,16 @@ function installMockBridge(opts: { isMac?: boolean; installationId?: string | nu
     fullscreenChangedCallbacks: [],
     menuClosedCallbacks: [],
     inertChangedCallbacks: [],
+    appUpdateStateCallbacks: [],
+    installUpdateAvailableCallbacks: [],
     setPanelCalls: [],
     newWindowCalls: 0,
     fileMenuAnchors: [],
     installMenuAnchors: [],
     goBackCalls: 0,
     goForwardCalls: 0,
+    appUpdatePillClicks: 0,
+    installUpdatePillClicks: 0,
     readyCalls: 0,
   }
   const installationId = opts.installationId === undefined ? 'test-id' : opts.installationId
@@ -72,6 +83,22 @@ function installMockBridge(opts: { isMac?: boolean; installationId?: string | nu
     onInertChanged: (cb: (inert: boolean) => void) => {
       state.inertChangedCallbacks.push(cb)
       return () => {}
+    },
+    onAppUpdateStateChanged: (
+      cb: (next: { kind: 'available' | 'ready' | null; version: string | null }) => void,
+    ) => {
+      state.appUpdateStateCallbacks.push(cb)
+      return () => {}
+    },
+    onInstallUpdateAvailable: (cb: (available: boolean) => void) => {
+      state.installUpdateAvailableCallbacks.push(cb)
+      return () => {}
+    },
+    clickAppUpdatePill: () => {
+      state.appUpdatePillClicks += 1
+    },
+    clickInstallUpdatePill: () => {
+      state.installUpdatePillClicks += 1
     },
     ready: () => {
       state.readyCalls += 1
@@ -365,5 +392,146 @@ describe('TitleBarApp', () => {
     bridgeState.fullscreenChangedCallbacks.forEach((cb) => cb(false))
     await flushPromises()
     expect(wrapper.find('header').classes()).not.toContain('is-fullscreen')
+  })
+
+  // ===================================================================
+  // Phase 3 §18 — title-bar status pills (app-update + install-update)
+  // ===================================================================
+
+  it('hides both status pills by default (no update available, no install update)', async () => {
+    const { default: TitleBarApp } = await import('./TitleBarApp.vue')
+    const wrapper = mount(TitleBarApp)
+    await flushPromises()
+    expect(wrapper.find('.title-update-pill.is-app-update').exists()).toBe(false)
+    expect(wrapper.find('.title-update-pill.is-install-update').exists()).toBe(false)
+  })
+
+  it('renders the app-update pill with version label when state.kind=available', async () => {
+    const { default: TitleBarApp } = await import('./TitleBarApp.vue')
+    const wrapper = mount(TitleBarApp)
+    await flushPromises()
+    bridgeState.appUpdateStateCallbacks.forEach((cb) =>
+      cb({ kind: 'available', version: '2.3.4' }),
+    )
+    await flushPromises()
+    const pill = wrapper.find('.title-update-pill.is-app-update')
+    expect(pill.exists()).toBe(true)
+    expect(pill.classes()).not.toContain('is-ready')
+    expect(pill.text()).toContain('Update 2.3.4')
+  })
+
+  it('renders the app-update pill with restart label and is-ready when state.kind=ready', async () => {
+    const { default: TitleBarApp } = await import('./TitleBarApp.vue')
+    const wrapper = mount(TitleBarApp)
+    await flushPromises()
+    bridgeState.appUpdateStateCallbacks.forEach((cb) =>
+      cb({ kind: 'ready', version: '2.3.4' }),
+    )
+    await flushPromises()
+    const pill = wrapper.find('.title-update-pill.is-app-update')
+    expect(pill.exists()).toBe(true)
+    expect(pill.classes()).toContain('is-ready')
+    expect(pill.text()).toContain('Restart to update')
+  })
+
+  it('renders the install-update pill on install-backed hosts when onInstallUpdateAvailable=true', async () => {
+    const { default: TitleBarApp } = await import('./TitleBarApp.vue')
+    const wrapper = mount(TitleBarApp)
+    await flushPromises()
+    expect(wrapper.find('.title-update-pill.is-install-update').exists()).toBe(false)
+    bridgeState.installUpdateAvailableCallbacks.forEach((cb) => cb(true))
+    await flushPromises()
+    const pill = wrapper.find('.title-update-pill.is-install-update')
+    expect(pill.exists()).toBe(true)
+    expect(pill.text()).toContain('Update available')
+  })
+
+  it('suppresses the install-update pill on install-less host windows even when push fires', async () => {
+    bridgeState = installMockBridge({ installationId: null })
+    vi.resetModules()
+    const { default: TitleBarApp } = await import('./TitleBarApp.vue')
+    const wrapper = mount(TitleBarApp)
+    await flushPromises()
+    bridgeState.installUpdateAvailableCallbacks.forEach((cb) => cb(true))
+    await flushPromises()
+    expect(wrapper.find('.title-update-pill.is-install-update').exists()).toBe(false)
+  })
+
+  it('forwards app-update pill clicks through the bridge', async () => {
+    const { default: TitleBarApp } = await import('./TitleBarApp.vue')
+    const wrapper = mount(TitleBarApp, { attachTo: document.body })
+    await flushPromises()
+    bridgeState.appUpdateStateCallbacks.forEach((cb) =>
+      cb({ kind: 'available', version: '1.0.0' }),
+    )
+    await flushPromises()
+    await wrapper.find('.title-update-pill.is-app-update').trigger('click')
+    expect(bridgeState.appUpdatePillClicks).toBe(1)
+    wrapper.unmount()
+  })
+
+  it('forwards install-update pill clicks through the bridge', async () => {
+    const { default: TitleBarApp } = await import('./TitleBarApp.vue')
+    const wrapper = mount(TitleBarApp, { attachTo: document.body })
+    await flushPromises()
+    bridgeState.installUpdateAvailableCallbacks.forEach((cb) => cb(true))
+    await flushPromises()
+    await wrapper.find('.title-update-pill.is-install-update').trigger('click')
+    expect(bridgeState.installUpdatePillClicks).toBe(1)
+    wrapper.unmount()
+  })
+
+  it('disables both status pills while the title bar is inert (Tier 3 takeover)', async () => {
+    const { default: TitleBarApp } = await import('./TitleBarApp.vue')
+    const wrapper = mount(TitleBarApp, { attachTo: document.body })
+    await flushPromises()
+    bridgeState.appUpdateStateCallbacks.forEach((cb) =>
+      cb({ kind: 'available', version: '1.0.0' }),
+    )
+    bridgeState.installUpdateAvailableCallbacks.forEach((cb) => cb(true))
+    await flushPromises()
+    const appPill = wrapper.find('.title-update-pill.is-app-update')
+    const installPill = wrapper.find('.title-update-pill.is-install-update')
+    expect((appPill.element as HTMLButtonElement).disabled).toBe(false)
+    expect((installPill.element as HTMLButtonElement).disabled).toBe(false)
+
+    bridgeState.inertChangedCallbacks.forEach((cb) => cb(true))
+    await flushPromises()
+    expect((appPill.element as HTMLButtonElement).disabled).toBe(true)
+    expect((installPill.element as HTMLButtonElement).disabled).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('does not forward pill clicks while inert (clicks are no-ops)', async () => {
+    const { default: TitleBarApp } = await import('./TitleBarApp.vue')
+    const wrapper = mount(TitleBarApp, { attachTo: document.body })
+    await flushPromises()
+    bridgeState.appUpdateStateCallbacks.forEach((cb) =>
+      cb({ kind: 'available', version: '1.0.0' }),
+    )
+    bridgeState.installUpdateAvailableCallbacks.forEach((cb) => cb(true))
+    bridgeState.inertChangedCallbacks.forEach((cb) => cb(true))
+    await flushPromises()
+    await wrapper.find('.title-update-pill.is-app-update').trigger('click')
+    await wrapper.find('.title-update-pill.is-install-update').trigger('click')
+    expect(bridgeState.appUpdatePillClicks).toBe(0)
+    expect(bridgeState.installUpdatePillClicks).toBe(0)
+    wrapper.unmount()
+  })
+
+  it('hides the app-update pill when state transitions back to kind=null', async () => {
+    const { default: TitleBarApp } = await import('./TitleBarApp.vue')
+    const wrapper = mount(TitleBarApp)
+    await flushPromises()
+    bridgeState.appUpdateStateCallbacks.forEach((cb) =>
+      cb({ kind: 'ready', version: '2.0.0' }),
+    )
+    await flushPromises()
+    expect(wrapper.find('.title-update-pill.is-app-update').exists()).toBe(true)
+    bridgeState.appUpdateStateCallbacks.forEach((cb) =>
+      cb({ kind: null, version: null }),
+    )
+    await flushPromises()
+    expect(wrapper.find('.title-update-pill.is-app-update').exists()).toBe(false)
   })
 })

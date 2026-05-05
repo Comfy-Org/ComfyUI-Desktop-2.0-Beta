@@ -47,7 +47,10 @@
     "panelInstallSettings": "Install Settings",
     "panelLauncherSettings": "Launcher Settings",
     "installSettingsComingSoon": "Installation-specific settings will appear here in a future update.",
-    "installationLabel": "Installation"
+    "installationLabel": "Installation",
+    "appUpdateAvailable": "Update {version}",
+    "appUpdateReady": "Restart to update",
+    "installUpdateAvailable": "Update available"
   },
 
   "comfyLifecycle": {

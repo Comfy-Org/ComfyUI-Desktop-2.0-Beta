@@ -14,6 +14,7 @@ import LoadSnapshotModal from '../views/LoadSnapshotModal.vue'
 import QuickInstallModal from '../views/QuickInstallModal.vue'
 import FirstUseTakeover from '../views/FirstUseTakeover.vue'
 import UpdateBanner from '../components/UpdateBanner.vue'
+import AppUpdatePopover from '../components/AppUpdatePopover.vue'
 import { useTheme } from '../composables/useTheme'
 import { useSessionStore } from '../stores/sessionStore'
 import { useInstallationStore } from '../stores/installationStore'
@@ -166,6 +167,7 @@ let unsubPanel: (() => void) | null = null
 let unsubLocale: (() => void) | null = null
 let unsubSettings: (() => void) | null = null
 let unsubCloseRequest: (() => void) | null = null
+let unsubPanelTriggerOverlay: (() => void) | null = null
 
 async function loadLocale(): Promise<void> {
   const messages = await window.api.getLocaleMessages()
@@ -492,6 +494,35 @@ onMounted(async () => {
     })()
   })
 
+  // Phase 3 §18 — main forwards a title-bar status pill click here.
+  // The renderer routes each kind through `useOverlay.openOverlay`:
+  //   - `'app-update'` → Tier 1 popover (AppUpdatePopover) reading
+  //     state from the shared `useAppUpdateState` composable.
+  //   - `'install-update'` → Manage overlay (DetailModal) on the
+  //     update tab, scoped to the carried `installationId`. The
+  //     install-update pill is suppressed in main on install-less
+  //     hosts but we re-validate the id here defensively (the
+  //     subscription is the same in both host kinds).
+  unsubPanelTriggerOverlay = window.api.onPanelTriggerOverlay((payload) => {
+    void (async () => {
+      if (payload.kind === 'app-update') {
+        await openOverlay({ kind: 'app-update' })
+        return
+      }
+      if (payload.kind === 'install-update') {
+        const id = payload.installationId
+        if (!id || id !== installationId) return
+        const inst = installationStore.getById(id)
+        if (!inst) return
+        await openOverlay({
+          kind: 'manage',
+          installation: inst,
+          initialTab: 'update',
+        })
+      }
+    })()
+  })
+
   // Initialize stores / prefs needed by the install-settings DetailModal.
   // installationStore wires its own onInstallationsChanged listener.
   await Promise.all([
@@ -525,6 +556,7 @@ onUnmounted(() => {
   unsubLocale?.()
   unsubSettings?.()
   unsubCloseRequest?.()
+  unsubPanelTriggerOverlay?.()
   pendingPickUnsub?.()
   sessionStore.dispose()
 })
@@ -588,9 +620,34 @@ onUnmounted(() => {
          Tier 3 takeovers (the four flow modals; Step 4 will add the
          first-use takeover here too). The two branches are mutually
          exclusive because `useOverlay` only ever holds one overlay
-         in `current.value`. -->
+         in `current.value`.
+
+         Phase 3 §18 — Tier 1 slots `app-update` (popover sourced from
+         the title-bar app-update pill) and `manage` (DetailModal
+         routed from the title-bar install-update pill, opened on the
+         update tab) sit at the top of the v-if/v-else-if chain. Tier 1
+         loses to Tier 2/3 in `useOverlay`'s collision rules, so the
+         in-flight progress / takeover branches below pre-empt these
+         silently when they fire concurrently. -->
+    <AppUpdatePopover
+      v-if="currentOverlay?.kind === 'app-update'"
+      @close="dismissTakeoverDirect"
+    />
     <div
-      v-if="currentOverlay?.kind === 'progress'"
+      v-else-if="currentOverlay?.kind === 'manage'"
+      class="view-modal active"
+      data-overlay-key="manage"
+    >
+      <DetailModal
+        :installation="currentOverlay.installation"
+        :initial-tab="currentOverlay.initialTab"
+        :auto-action="currentOverlay.autoAction"
+        @close="dismissTakeoverDirect"
+        @show-progress="handleShowProgress"
+      />
+    </div>
+    <div
+      v-else-if="currentOverlay?.kind === 'progress'"
       class="view-modal active"
       data-overlay-key="progress"
     >

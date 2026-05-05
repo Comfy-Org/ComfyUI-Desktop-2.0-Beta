@@ -1062,6 +1062,22 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
       titleBarView.webContents.send('comfy-titlebar:theme-changed', entry.lastTheme)
       _notifyTitleBarNavState(entry)
     }
+    // Phase 3 §18 — push initial title-bar pill state. App-update
+    // pill mirrors the updater module's last-known state so a title
+    // bar mounting AFTER the broadcast already fired still shows the
+    // pill; install-update pill is computed from the install record's
+    // statusTag using the same source.getStatusTag() pipeline that
+    // the chooser cards / kebab menu read from.
+    if (!titleBarView.webContents.isDestroyed()) {
+      titleBarView.webContents.send(
+        'comfy-titlebar:app-update-state-changed',
+        updater.getCurrentUpdateState(),
+      )
+      void computeInstallUpdateAvailable(installationId).then((available) => {
+        if (titleBarView.webContents.isDestroyed()) return
+        titleBarView.webContents.send('comfy-titlebar:install-update-changed', available)
+      })
+    }
     // Pre-warm the title-menu popup so the user's first File / Install
     // click doesn't pay the BrowserWindow construction + HTML/JS load
     // cost (~100ms). The popup is created hidden, kept alive across
@@ -1071,7 +1087,10 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
   ipcMain.on('comfy-window:title-bar-ready', onTitleBarReady)
 
   // Reflect rename / source change in both the comfy tab and the OS-level
-  // window title as the install record mutates.
+  // window title as the install record mutates. Phase 3 §18 — also
+  // recompute the install-update pill state (the install's source may
+  // have flipped its statusTag between releases as the release-cache
+  // resolves in the background).
   const onInstallationUpdated = (updated: InstallationRecord): void => {
     if (updated.id !== installationId) return
     const nextTabText = computeTitleBarText(updated)
@@ -1083,6 +1102,10 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
       currentInstallName = updated.name
       refreshOsWindowTitle()
     }
+    void computeInstallUpdateAvailable(installationId).then((available) => {
+      if (titleBarView.webContents.isDestroyed()) return
+      titleBarView.webContents.send('comfy-titlebar:install-update-changed', available)
+    })
   }
   installationEvents.on('updated', onInstallationUpdated)
 
@@ -1497,6 +1520,14 @@ function openChooserHostWindow(): BrowserWindow {
         titleBarView.webContents.send('comfy-titlebar:theme-changed', entry.lastTheme)
         _notifyTitleBarNavState(entry)
       }
+      // Phase 3 §18 — chooser hosts get the app-update pill (no
+      // install-update pill since they have no install backing the
+      // entry). Mirrors the install-backed branch so users see the
+      // pending Desktop 2 update from the install-less window too.
+      titleBarView.webContents.send(
+        'comfy-titlebar:app-update-state-changed',
+        updater.getCurrentUpdateState(),
+      )
     }
     // Pre-warm the title-menu popup so the user's first File click
     // doesn't pay the BrowserWindow construction + HTML/JS load cost.
@@ -1855,6 +1886,82 @@ ipcMain.on('comfy-window:set-titlebar-inert', (event, payload: { inert: boolean 
       return
     }
   }
+})
+
+/**
+ * Phase 3 §18 — install-update pill state. Reads the install record
+ * via `getInstallation`, resolves its source via `sourceMap`, and
+ * applies the same `getStatusTag()` rule the chooser cards / kebab
+ * menu use (`statusTag.style === 'update'`). Returns `false` for
+ * install-less host windows or when the install isn't found.
+ */
+async function computeInstallUpdateAvailable(installationId: string): Promise<boolean> {
+  if (!installationId) return false
+  try {
+    const inst = await getInstallation(installationId)
+    if (!inst) return false
+    const source = sourceMap[inst.sourceId]
+    const tag = source?.getStatusTag ? source.getStatusTag(inst) : undefined
+    return tag?.style === 'update'
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Phase 3 §18 — fan out an updater state transition to every host
+ * window's title-bar webContents. Registered once at startup via
+ * `updater.onUpdateStateChanged`. The chooser-host title bar
+ * receives the same payload as install-backed title bars; the pill
+ * label / behaviour is the same regardless of the host kind.
+ */
+function _broadcastAppUpdateStateToTitleBars(state: updater.AppUpdateState): void {
+  for (const entry of comfyWindows.values()) {
+    const wc = entry.titleBarView.webContents
+    if (wc.isDestroyed()) continue
+    try {
+      wc.send('comfy-titlebar:app-update-state-changed', state)
+    } catch {}
+  }
+}
+
+/**
+ * Phase 3 §18 — title-bar app-update pill click. Resolves the entry
+ * via the title-bar webContents sender, then sends
+ * `panel-trigger-overlay` to the panel renderer so it can mount the
+ * Tier 1 app-update popover via `openOverlay`. The popover overlays
+ * whatever the user is currently looking at; we don't switch panels
+ * here.
+ */
+ipcMain.on('comfy-window:click-app-update-pill', (event) => {
+  const found = findEntryByTitleBarSender(event.sender)
+  if (!found) return
+  const { entry } = found
+  const panelView = entry.panelView
+  if (!panelView || panelView.webContents.isDestroyed()) return
+  panelView.webContents.send('panel-trigger-overlay', { kind: 'app-update' })
+})
+
+/**
+ * Phase 3 §18 — title-bar install-update pill click. Refuses on
+ * install-less hosts (the pill is suppressed there but a defensive
+ * guard keeps stray IPC from triggering anything). Sends
+ * `panel-trigger-overlay` with the entry's installationId so the
+ * renderer can open the Manage overlay on the update tab — same
+ * surface the chooser kebab "Update…" entry routes to.
+ */
+ipcMain.on('comfy-window:click-install-update-pill', (event) => {
+  const found = findEntryByTitleBarSender(event.sender)
+  if (!found) return
+  const { entry } = found
+  const installationId = entry.installationId
+  if (!installationId) return
+  const panelView = entry.panelView
+  if (!panelView || panelView.webContents.isDestroyed()) return
+  panelView.webContents.send('panel-trigger-overlay', {
+    kind: 'install-update',
+    installationId,
+  })
 })
 
 /**
@@ -2526,6 +2633,12 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
       onThemeChanged: applyChooserHostThemeToAll,
     })
     updater.register()
+    // Phase 3 §18 — forward updater state transitions to every host
+    // window's title-bar webContents. Subscribed once at startup;
+    // the helper iterates `comfyWindows` so newly-opened windows
+    // pick up live transitions automatically (initial state is
+    // pushed on `comfy-window:title-bar-ready` for the slow path).
+    updater.onUpdateStateChanged(_broadcastAppUpdateStateToTitleBars)
     // Tray / docking is disabled while the unified-window flow is being
     // rebuilt — closing the last window quits the app instead of
     // collapsing it into a hidden background process. The `onAppClose`

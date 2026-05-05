@@ -286,6 +286,12 @@ const api: ElectronApi = {
     ipcRenderer.on('panel-switch', handler)
     return () => ipcRenderer.removeListener('panel-switch', handler)
   },
+  onPanelTriggerOverlay: (callback) => {
+    const handler = (_event: IpcRendererEvent, data: unknown) =>
+      callback(data as { kind: 'app-update' | 'install-update'; installationId?: string })
+    ipcRenderer.on('panel-trigger-overlay', handler)
+    return () => ipcRenderer.removeListener('panel-trigger-overlay', handler)
+  },
 }
 
 if (process.contextIsolated) {

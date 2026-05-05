@@ -1,6 +1,13 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed, useTemplateRef } from 'vue'
-import { ChevronDown, ChevronLeft, ChevronRight, Menu as MenuIcon } from 'lucide-vue-next'
+import {
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Download,
+  Menu as MenuIcon,
+  RefreshCw,
+} from 'lucide-vue-next'
 
 // Inlined to keep the title-bar renderer self-contained — the preload TS
 // file isn't visible to tsconfig.web (only its .d.ts would be). Kept in
@@ -42,6 +49,23 @@ interface Bridge {
   onFullscreenChanged: (cb: (fullscreen: boolean) => void) => () => void
   onMenuClosed: (cb: (info: { menu: 'file' | 'install' }) => void) => () => void
   onInertChanged: (cb: (inert: boolean) => void) => () => void
+  /** Phase 3 §18 — app-update state pushes from main. `kind` is
+   *  `'available'` after `update-available`, `'ready'` after
+   *  `update-downloaded`, and `null` when nothing is pending.
+   *  Drives the title-bar app-update pill that sits to the right of
+   *  the hamburger menu. */
+  onAppUpdateStateChanged: (
+    cb: (state: { kind: 'available' | 'ready' | null; version: string | null }) => void,
+  ) => () => void
+  /** Phase 3 §18 — install-update flag pushes from main. `true` when
+   *  the install's `statusTag.style === 'update'`. Only meaningful on
+   *  install-backed host windows; install-less hosts never receive
+   *  this signal. Drives the title-bar install-update pill. */
+  onInstallUpdateAvailable: (cb: (available: boolean) => void) => () => void
+  /** Phase 3 §18 — click handler for the app-update pill. */
+  clickAppUpdatePill: () => void
+  /** Phase 3 §18 — click handler for the install-update pill. */
+  clickInstallUpdatePill: () => void
   ready: () => void
 }
 
@@ -109,6 +133,54 @@ const isInstallLess = ref((bridge?.getInstallationId() ?? '') === '')
 const installLabel = ref('ComfyUI')
 const themeBg = ref<string | null>(null)
 const themeText = ref<string | null>(null)
+
+/**
+ * Phase 3 §18 — title-bar status pills.
+ *
+ * The app-update pill (right of the hamburger) shows when the
+ * auto-updater has either downloaded an update (`'ready'`, prompts
+ * Restart-to-update via the popover) or detected one is available
+ * (`'available'`, prompts Download via the popover). State is pushed
+ * from main on `comfy-titlebar:app-update-state-changed`; the pill
+ * disappears entirely when `kind` is `null` so the title bar reads
+ * clean in the steady state.
+ *
+ * The install-update pill (right of the install pill in the center)
+ * fires when the active install's `statusTag.style === 'update'` —
+ * the same signal the chooser tile's "Update" pill consumes. State is
+ * pushed from main on `comfy-titlebar:install-update-changed` and is
+ * gated on `!isInstallLess` (install-less hosts have no install backing
+ * the window, so an install-scoped pill is meaningless there).
+ *
+ * Both pills become `:disabled` during a Tier 3 takeover via `isInert`,
+ * matching the file menu / install pill / nav arrows so the takeover
+ * can't be dismissed via title-bar affordances.
+ */
+const appUpdateState = ref<{
+  kind: 'available' | 'ready' | null
+  version: string | null
+}>({ kind: null, version: null })
+const hasInstallUpdate = ref(false)
+
+const appUpdatePillLabel = computed<string | null>(() => {
+  if (!appUpdateState.value.kind) return null
+  if (appUpdateState.value.kind === 'ready') return 'Restart to update'
+  // 'available'
+  const v = appUpdateState.value.version
+  return v ? `Update ${v}` : 'Update available'
+})
+
+const showAppUpdatePill = computed(() => appUpdateState.value.kind !== null)
+const showInstallUpdatePill = computed(() => !isInstallLess.value && hasInstallUpdate.value)
+
+function handleAppUpdatePill(): void {
+  if (isInert.value) return
+  bridge?.clickAppUpdatePill()
+}
+function handleInstallUpdatePill(): void {
+  if (isInert.value) return
+  bridge?.clickInstallUpdatePill()
+}
 
 /** Body luminance test — drives is-light styling (lighter hover state). */
 const isLight = computed(() => {
@@ -192,6 +264,8 @@ let unsubTheme: (() => void) | undefined
 let unsubFullscreen: (() => void) | undefined
 let unsubMenuClosed: (() => void) | undefined
 let unsubInert: (() => void) | undefined
+let unsubAppUpdate: (() => void) | undefined
+let unsubInstallUpdate: (() => void) | undefined
 
 /** Drop the hover gate immediately when input leaves the title-bar
  *  webContents — covers the case where a native menu (Menu.popup) or
@@ -239,6 +313,12 @@ onMounted(() => {
   unsubInert = bridge.onInertChanged((inert) => {
     isInert.value = inert
   })
+  unsubAppUpdate = bridge.onAppUpdateStateChanged((next) => {
+    appUpdateState.value = next
+  })
+  unsubInstallUpdate = bridge.onInstallUpdateAvailable((available) => {
+    hasInstallUpdate.value = available
+  })
   window.addEventListener('blur', handleWindowBlur)
   window.addEventListener('pointermove', handlePointerMove)
   document.documentElement.addEventListener('pointerleave', handlePointerLeave)
@@ -257,6 +337,8 @@ onUnmounted(() => {
   unsubFullscreen?.()
   unsubMenuClosed?.()
   unsubInert?.()
+  unsubAppUpdate?.()
+  unsubInstallUpdate?.()
   window.removeEventListener('blur', handleWindowBlur)
   window.removeEventListener('pointermove', handlePointerMove)
   document.documentElement.removeEventListener('pointerleave', handlePointerLeave)
@@ -297,6 +379,25 @@ onUnmounted(() => {
         @click="handleFileMenu"
       >
         <MenuIcon :size="18" />
+      </button>
+      <!-- Phase 3 §18 — app-update pill. Sits right of the hamburger
+           and disappears entirely in the steady state (no update). The
+           same surface (`useAppUpdateState` via the popover) is reached
+           via the in-banner buttons; the pill is the persistent re-entry
+           after the banner has been dismissed. -->
+      <button
+        v-if="showAppUpdatePill"
+        type="button"
+        class="title-update-pill is-app-update"
+        :class="{ 'is-ready': appUpdateState.kind === 'ready' }"
+        :disabled="isInert"
+        :title="appUpdatePillLabel ?? ''"
+        :aria-label="appUpdatePillLabel ?? ''"
+        @click="handleAppUpdatePill"
+      >
+        <Download v-if="appUpdateState.kind === 'available'" :size="14" />
+        <RefreshCw v-else-if="appUpdateState.kind === 'ready'" :size="14" />
+        <span class="title-update-pill-label">{{ appUpdatePillLabel }}</span>
       </button>
     </div>
 
@@ -341,6 +442,23 @@ onUnmounted(() => {
           :size="14"
           class="title-install-caret"
         />
+      </button>
+      <!-- Phase 3 §18 — install-update pill. Suppressed in install-less
+           mode (no install backing the host) and in the steady state
+           (status tag isn't `update`). Click sends a panel-trigger to
+           open the manage overlay on the update tab — same surface the
+           chooser kebab "Update…" entry lands on. -->
+      <button
+        v-if="showInstallUpdatePill"
+        type="button"
+        class="title-update-pill is-install-update"
+        :disabled="isInert"
+        title="Update available"
+        aria-label="Update available"
+        @click="handleInstallUpdatePill"
+      >
+        <Download :size="14" />
+        <span class="title-update-pill-label">Update available</span>
       </button>
     </div>
 
@@ -536,9 +654,53 @@ onUnmounted(() => {
    stay live. */
 .title-bar.is-inert .title-menu-button:disabled,
 .title-bar.is-inert .title-nav-button:disabled,
-.title-bar.is-inert .title-install-pill:disabled {
+.title-bar.is-inert .title-install-pill:disabled,
+.title-bar.is-inert .title-update-pill:disabled {
   cursor: default;
   opacity: 0.5;
+}
+
+/* --- Phase 3 §18 — Status pills (app-update + install-update) ---
+   Compact chip styling. The pills must fit inside the 36px content
+   area of the 37px title bar (1px bottom border) without growing it,
+   so padding/font-size are kept tight. Default colour palette tracks
+   the title bar text colour with a coloured tint so the pill draws
+   the eye but doesn't dominate the bar. */
+.title-update-pill {
+  -webkit-app-region: no-drag;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  border-radius: 999px;
+  cursor: pointer;
+  background: rgba(96, 165, 250, 0.18);
+  color: inherit;
+  border: 1px solid rgba(96, 165, 250, 0.35);
+  transition: background-color 0.12s, border-color 0.12s, opacity 0.12s;
+}
+.title-bar.is-hover-active .title-update-pill:hover:not(:disabled) {
+  background: rgba(96, 165, 250, 0.28);
+  border-color: rgba(96, 165, 250, 0.5);
+}
+.title-update-pill.is-ready {
+  background: rgba(34, 197, 94, 0.18);
+  border-color: rgba(34, 197, 94, 0.4);
+}
+.title-bar.is-hover-active .title-update-pill.is-ready:hover:not(:disabled) {
+  background: rgba(34, 197, 94, 0.28);
+  border-color: rgba(34, 197, 94, 0.55);
+}
+.title-update-pill:focus-visible {
+  outline: 2px solid var(--accent, #60a5fa);
+  outline-offset: 2px;
+}
+.title-update-pill-label {
+  white-space: nowrap;
 }
 
 /* Dropdown popups are now native OS menus rendered via Menu.popup() in

@@ -1551,7 +1551,7 @@ additive on top of the takeover slot foundation Step 3 built.
 
 ---
 
-## 18. Title-bar status pills — restart-required + updates available
+## 18. Title-bar status pills — restart-required + updates available — DONE (updates pills only)
 
 Two related visibility gaps the title bar should fill:
 
@@ -1621,6 +1621,61 @@ Open questions:
   tag the setting as restart-gated in the same place the renderer
   reads from, otherwise we'd have to enumerate restart-gated
   settings in two places.
+
+### Status (Phase 3 §18 — updates pills landed)
+
+The two **updates-available pills** ship in this slice; the
+restart-required pill family is deferred to a later pass (it requires
+a new restart-gated-setting registry on top of this scaffolding —
+see the second open question above).
+
+What landed:
+
+- **Composable-shared update state.** `useAppUpdateState` (under
+  `src/renderer/src/composables/`) wraps the four
+  `update-{available,download-progress,downloaded,error}` broadcasts
+  plus `getUpdateCapabilities` / `getPendingUpdate` and exports a
+  single `state` ref. Both the in-panel `UpdateBanner` and the new
+  title-bar app-update popover (`AppUpdatePopover`) consume it, so
+  the two surfaces can never disagree about what's pending. The
+  banner refactor is a pure dedup — its dismiss flow keeps a local
+  `visible` flag independent of `state` so dismissing the banner
+  doesn't clear the underlying state the pill / popover read from.
+- **`AppUpdateOverlay` (Tier 1).** New overlay kind in
+  `useOverlay`. Rendered by `PanelApp.vue` as the
+  `<AppUpdatePopover>` branch when
+  `currentOverlay.kind === 'app-update'`. Tier 1 means a Tier 2/3 op
+  silently pre-empts it — the popover is informational, not
+  blocking.
+- **Manage overlay slot in `PanelApp`.** §17 only mounted manage
+  overlays inside `ChooserView`. §18 adds a parallel
+  `currentOverlay.kind === 'manage'` branch in the host overlay slot
+  too, so the install-update pill click can land directly on
+  `DetailModal` (with `initialTab='update'`) without needing to be
+  routed through ChooserView. Same component, different host.
+- **Install-update via the existing `statusTag` pipeline.** Main's
+  `computeInstallUpdateAvailable(installationId)` helper reuses
+  `sourceMap[].getStatusTag` (the same call the IPC layer already
+  makes in `registerInstallationHandlers`) — `style === 'update'`
+  is the canonical "update is available" signal across the chooser,
+  the manage overlay, and now the title-bar pill, so the three
+  surfaces stay in lockstep without re-implementing the staleness
+  rules.
+- **`_broadcastAppUpdateStateToTitleBars` fan-out.** Wired once at
+  startup via `updater.onUpdateStateChanged(...)`. Updater's
+  existing `broadcast` already reaches title-bar webContents, but
+  the title-bar preload doesn't expose those raw events — the new
+  `comfy-titlebar:app-update-state-changed` channel carries just
+  the data the pill needs (`kind`, `version`). The title-bar
+  preload also surfaces `comfy-titlebar:install-update-changed` and
+  `comfy-window:click-{app,install}-update-pill` so the pill data
+  + click paths are fully owned by the title-bar bridge rather than
+  poking holes in the panel preload.
+- **Pill rendering + inert handling.** Both pills inherit the
+  Tier 3 takeover `isInert` flag — they go disabled (and dimmed
+  via the existing `.is-inert` rules) along with the file menu /
+  install pill / nav arrows so a takeover can't be dismissed via
+  the title bar.
 
 ---
 
