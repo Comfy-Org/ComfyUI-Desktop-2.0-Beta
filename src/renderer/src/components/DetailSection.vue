@@ -150,20 +150,18 @@ v-for="a in item.actions" :key="a.id"
           <!-- Channel cards -->
           <template v-if="f.editable && f.editType === 'channel-cards'">
             <div class="detail-field-label">{{ f.label }}<InfoTooltip v-if="f.tooltip" :text="f.tooltip" /></div>
-            <div class="channel-cards-row">
-              <button
-                v-for="opt in f.options" :key="opt.value"
-                class="channel-card"
-                :class="{ selected: getDraft(f) === opt.value, current: String(f.value) === opt.value }"
-                @click="draftValues[f.id] = opt.value"
-              >
-                <div class="channel-card-header">
-                  <span class="channel-card-label">{{ opt.label }}</span>
-                  <span v-if="String(f.value) === opt.value" class="channel-card-current">{{ $t('channelCards.current') }}</span>
-                  <span v-else-if="opt.recommended" class="channel-card-badge">{{ $t('newInstall.recommended') }}</span>
-                </div>
-                <div v-if="opt.description" class="channel-card-desc">{{ opt.description }}</div>
-              </button>
+            <select
+              class="detail-field-input channel-select"
+              :value="getDraft(f)"
+              @change="draftValues[f.id] = ($event.target as HTMLSelectElement).value"
+            >
+              <option v-for="opt in f.options" :key="opt.value" :value="opt.value">
+                {{ opt.label
+                  }}{{ String(f.value) === opt.value ? ` — ${$t('channelCards.current')}` : '' }}{{ String(f.value) !== opt.value && opt.recommended ? ` — ${$t('newInstall.recommended')}` : '' }}
+              </option>
+            </select>
+            <div v-if="getSelectedOption(f)?.description" class="channel-select-desc">
+              {{ getSelectedOption(f)!.description }}
             </div>
             <div v-if="getSelectedOption(f)?.data" class="channel-preview">
               <div class="channel-preview-row">

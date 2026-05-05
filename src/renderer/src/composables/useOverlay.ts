@@ -74,6 +74,12 @@ export interface TakeoverOverlay {
   component: string
   /** Optional label for the takeover-replacing-progress cancel prompt. */
   operationName?: string
+  /**
+   * Set for progress-style takeovers (Step 5 §10 — the `'update'`
+   * component) so the takeover slot can bind ProgressModal to the
+   * right install. Other takeover components ignore this.
+   */
+  installationId?: string
 }
 
 export type Overlay = ManageOverlay | ProgressOverlay | FlowOverlay | TakeoverOverlay

@@ -178,10 +178,16 @@ async function loadLocale(): Promise<void> {
  * Tier 2 collision rules apply — replacing one in-flight progress op
  * with another prompts the user to cancel via the standardised copy.
  *
+ * Step 5 §10 — classifier rule §4: if the install is currently running,
+ * the operation must end in the running app (Update Now restarts after
+ * applying), so route as a Tier 3 takeover instead of Tier 2 progress.
+ * Both branches mount the same `ProgressModal` (one ref, since the
+ * `v-if`/`v-else-if` slots are mutually exclusive) — only the wrapper
+ * tier and full-window styling differ.
+ *
  * Re-show of an already-running op is a no-op `openOverlay` to the
- * same `progress` slot followed by `showOperation` on the modal ref;
- * the slot already has the right kind+id, so the `current` swap is
- * idempotent.
+ * same slot followed by `showOperation` on the modal ref; the slot
+ * already has the right kind+id, so the `current` swap is idempotent.
  */
 async function handleShowProgress(opts: ShowProgressOpts): Promise<void> {
   // Manage→Progress restoration relies on the title carrying the
@@ -189,11 +195,21 @@ async function handleShowProgress(opts: ShowProgressOpts): Promise<void> {
   // the install suffix for the cancel-prompt copy so the prompt reads
   // `Cancel "Updating ComfyUI"?` instead of leaking the install name.
   const operationName = opts.title.split(' — ')[0] || opts.title
-  const ok = await openOverlay({
-    kind: 'progress',
-    installationId: opts.installationId,
-    operationName,
-  })
+  const isRunning = sessionStore.isRunning(opts.installationId)
+  const ok = await openOverlay(
+    isRunning
+      ? {
+          kind: 'takeover',
+          component: 'update',
+          installationId: opts.installationId,
+          operationName,
+        }
+      : {
+          kind: 'progress',
+          installationId: opts.installationId,
+          operationName,
+        },
+  )
   if (!ok) return
   await nextTick()
   // If an in-progress operation already exists for this ID, just show it
@@ -559,14 +575,27 @@ onUnmounted(() => {
     <!-- Tier 3 takeover slot. The four flow modals share the same
          shell — the underlying panel body (chooser / launcher-settings)
          stays mounted underneath, so `closeOverlay` returns the user
-         to wherever they came from without us having to remember it. -->
+         to wherever they came from without us having to remember it.
+         Step 5 §10 adds the `'update'` component which mounts the same
+         `ProgressModal` as the Tier 2 progress slot but with full-window
+         takeover styling (the `[data-overlay-key="takeover"]` :deep
+         override on `.view-modal-content` makes it span the panel area).
+         The `progressRef` template ref resolves to whichever
+         ProgressModal is currently mounted — the two slots are mutually
+         exclusive via the `v-if` chain. -->
     <div
       v-else-if="currentOverlay?.kind === 'takeover'"
       class="view-modal active"
       data-overlay-key="takeover"
     >
+      <ProgressModal
+        v-if="currentOverlay.component === 'update'"
+        ref="progressRef"
+        :installation-id="currentOverlay.installationId ?? ''"
+        @close="handleProgressClose"
+      />
       <NewInstallModal
-        v-if="currentOverlay.component === 'new-install'"
+        v-else-if="currentOverlay.component === 'new-install'"
         ref="newInstallRef"
         @close="handleNewInstallTakeoverClose"
         @navigate-list="handleNewInstallTakeoverClose"

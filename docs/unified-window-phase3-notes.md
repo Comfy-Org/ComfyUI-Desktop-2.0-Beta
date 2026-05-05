@@ -632,7 +632,7 @@ Direction:
   Comfy WebContentsView stays attached across the stop→start cycle
   so the user sees the lifecycle view rather than a window flash.
 
-## 10. Update channel as a dropdown
+## 10. Update channel as a dropdown — **DONE**
 
 The current update-channel selector in Install Settings is a fixed
 two-button toggle (Stable / Nightly, depending on source). With the
@@ -657,6 +657,91 @@ Direction:
 This is a deferrable cleanup — the toggle works today — but landing
 it before adding a third channel avoids a special-case "we needed a
 dropdown by then anyway" scramble.
+
+### Status — channel dropdown **DONE**
+
+The Install Settings update-channel surface now picks the channel from
+a `<select>` dropdown rather than a card-row of buttons. The per-channel
+preview block (installed / latest / last-checked / status) and per-channel
+actions (Update Now / Copy & Update / Switch Channel) still render
+underneath for the currently-drafted channel — only the picker chrome
+changed. Channels still come from the source plugin layer
+(`getChannelDefs()` in `src/main/sources/standalone/updateSections.ts`)
+via the `channel-cards` field's `options` array, so adding a third
+channel (beta / custom branch / preview / per-source-extension) is a
+source-side change with no renderer follow-up.
+
+Renderer-side wiring:
+
+- `DetailSection.vue`'s `f.editType === 'channel-cards'` branch
+  replaces the `.channel-cards-row` button grid with a styled `<select>`
+  bound to the same `draftValues[f.id]` local state. The "current" /
+  "recommended" affordances move into the `<option>` label as inline
+  suffixes (`Stable — Currently selected` / `Latest — Recommended`).
+  The selected option's description renders below the dropdown so the
+  longer-form copy (`Recommended — stable releases…`) still has a place
+  to live.
+- The draft pattern (`getDraft` / `getSelectedOption` / `getSelectedActions`)
+  is untouched — switching channels stays a two-step gesture (pick
+  from dropdown → click the action button on the draft channel)
+  exactly as before. No new IPC, no shape change to the
+  `channel-cards` field.
+- Per-channel actions still emit `run-action` via the parent
+  DetailModal, which converts `showProgress: true` into `show-progress`
+  → `PanelApp.handleShowProgress`.
+
+Tier routing for Update Now:
+
+- `handleShowProgress` in `PanelApp.vue` now consults
+  `sessionStore.isRunning(installationId)`. When the install is
+  running, the operation must end in the running app (Update Now
+  restarts after applying), so it routes through
+  `openOverlay({ kind: 'takeover', component: 'update', installationId,
+  operationName })` instead of the Tier 2 progress slot. Stopped
+  installs keep the Tier 2 `kind: 'progress'` route (the progress
+  doesn't end in the app — the install just goes from "stopped at
+  version A" to "stopped at version B").
+- The `'update'` takeover branch in PanelApp's takeover slot mounts
+  the same `ProgressModal` component as the Tier 2 progress slot, with
+  the existing `[data-overlay-key="takeover"] :deep(.view-modal-content)`
+  override turning it into a full-window surface. The `progressRef`
+  template ref is bound to both `v-if` branches — Vue resolves it to
+  whichever is currently mounted, since the slots are mutually
+  exclusive.
+- `useOverlay`'s `TakeoverOverlay` interface gained an optional
+  `installationId?` field so progress-style takeovers can carry the
+  install id through to the slot's ProgressModal binding. Other
+  takeover components (`new-install` / `track` / `load-snapshot` /
+  `quick-install` / `first-use`) ignore the field.
+
+DROPs that landed with this slice:
+
+- `.channel-cards-row` / `.channel-card` / `.channel-card-header` /
+  `.channel-card-label` / `.channel-card-current` / `.channel-card-badge`
+  / `.channel-card-desc` markup in `DetailSection.vue` and the matching
+  CSS rules in `src/renderer/src/assets/main.css`. Replaced by
+  `.channel-select` / `.channel-select-desc`.
+
+Architectural contracts preserved:
+
+- Classifier rule §4 ("does completing the flow end in the running
+  app?") drives the Tier 2 vs Tier 3 split — the `isRunning` check is
+  the runtime expression of that rule for any showProgress action,
+  not just Update Now.
+- Cross-window invariant: same code in chooser host and install host;
+  the takeover slot is host-agnostic and the `'update'` branch only
+  needs an `installationId`, which the running-session check supplies.
+- Title bar inert during the takeover: the existing tier watcher fires
+  `setTitleBarInert(true)` on tier→3 transitions, so an Update Now
+  takeover automatically inherits the file menu / install pill /
+  back-forward disable like every other Tier 3 surface.
+- Standardised cancel-prompt copy (`overlay.cancel*`) is what fires if
+  another Tier 2/3 op pre-empts an in-flight Update Now takeover —
+  no new variants added.
+- Single source of truth for channel definitions: `getChannelDefs()` in
+  the source plugin layer remains the only place that declares what
+  channels exist. The renderer never hardcodes channel ids, labels, or
+  descriptions.
 
 ## 11. Chooser host window must steal focus on app launch — **DONE**
 
@@ -1426,8 +1511,10 @@ bars + status pills, pin-first sort, and a click-driven action
 popover with double-click as the open fast-path (Open + Pin / Unpin
 + Dismiss error today; richer items follow once Issue #470 lands).
 
-Section 10 (update-channel dropdown) is the remaining UX refinement
-queued up while the unified window is live. §7 — title-bar v3, the
+Section 10 (update-channel dropdown) has landed — Install Settings
+now picks the channel via a `<select>` and Update Now on a running
+install routes as a Tier 3 takeover (per the classifier rule). §7 —
+title-bar v3, the
 single-click pill with Back / Forward immediately to its left — and
 §9 — Restart-vs-Launch in Install Settings + the project-wide accent
 button convention — have both landed.

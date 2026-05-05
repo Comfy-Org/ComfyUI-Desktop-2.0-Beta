@@ -383,31 +383,8 @@ input[type="checkbox"]:checked::after { transform: translateX(16px); }
 .detail-section-desc { font-size: 14px; color: var(--text-muted); margin-bottom: 8px; }
 
 /* Channel cards */
-.channel-cards-row {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: 8px; margin-top: 6px;
-}
-.channel-card {
-  display: flex; flex-direction: column; text-align: left;
-  padding: 12px 14px; background: var(--surface);
-  border: 2px solid var(--border); border-radius: 8px;
-  cursor: pointer; transition: border-color 0.15s;
-}
-.channel-card:hover { border-color: var(--border-hover); }
-.channel-card.selected { border-color: var(--selected); }
-.channel-card.current:not(.selected) { border-color: var(--border-hover); }
-.channel-card-header { display: flex; align-items: center; gap: 8px; }
-.channel-card-label { font-size: 14px; font-weight: 600; color: var(--text); }
-.channel-card-badge {
-  font-size: 11px; font-weight: 600; text-transform: uppercase;
-  color: var(--accent); letter-spacing: 0.5px;
-}
-.channel-card-current {
-  font-size: 11px; font-weight: 600; text-transform: uppercase;
-  color: var(--success); letter-spacing: 0.5px;
-}
-.channel-card-desc { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+.channel-select { max-width: 360px; }
+.channel-select-desc { font-size: 12px; color: var(--text-muted); margin-top: 6px; }
 .channel-preview {
   margin-top: 10px; padding: 10px 14px;
   background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
