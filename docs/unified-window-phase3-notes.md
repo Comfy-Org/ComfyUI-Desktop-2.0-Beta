@@ -776,12 +776,55 @@ These slot into the waffle menu as the global affordances:
 
 - New Window (existing)
 - Return to Dashboard (new — install-backed windows only; swaps the
-  window in-place from the install body to the chooser body)
-- Close Window (existing as an OS button, but more discoverable here)
-- Close All Windows (new)
-- Import Snapshot as New Install (new)
-- Directories (§15)
-- Desktop 2 Settings (existing)
+  window in-place from the install body to the chooser body) — **TODO**
+- Close Window (existing as an OS button, but more discoverable here) — **DONE**
+- Close All Windows (new) — **DONE**
+- Import Snapshot as New Install (new) — **TODO**
+- Directories (§15) — **DONE**
+- Desktop 2 Settings (existing) — **DONE**
+
+The current shipped File / waffle menu shape is:
+
+```
+New Window
+Close Window
+Close All Windows
+─────────────
+Directories
+Desktop 2 Settings
+```
+
+`Close Window` calls `entry.window.close()` on the parent host —
+each host window's existing `close` handler runs the full teardown
+(`stopRunning` + webContents close + `window.destroy()`), so the
+menu entry just dispatches the close. `Close All Windows` calls
+the new `closeAllHostWindows()` helper, which snapshots
+`comfyWindows.values()` and dispatches `close()` on each entry —
+the snapshot is necessary because the per-window `closed` callback
+deletes from the map mid-iteration. The activate handler's
+trailing `hideTitleMenuPopup` is guarded against an
+already-destroyed popup, so the parent-of-popup window in the
+"Close Window" / "Close All Windows" path tears down cleanly even
+though the popup is auto-destroyed by Electron when its parent
+goes away.
+
+Still open:
+
+- **Return to Dashboard.** The "in-place" swap from install-backed
+  to install-less host is a substantial rewrite — it has to clear
+  `entry.installationId`, re-key the entry under a synthetic
+  `chooser:N` id, hide the comfyView, repaint the panel
+  WebContentsView for the chooser body, and reset the title bar
+  + theme. The simpler "close + open chooser" alternative loses
+  the window's position / size and visually feels like a different
+  window, so we kept it out of the §16 landing. The doc TBD —
+  install-pill identity click vs. waffle entry vs. both — also
+  remains open.
+- **Import Snapshot as New Install.** No flow exists yet; it's a
+  brand-new variant of the new-install / load-snapshot pipeline.
+  Defer until the new-install / quick-install unification (§4b)
+  lands so we have a single canonical create-install panel to
+  thread the "starting from a snapshot" entry-point into.
 
 The "return to dashboard" gesture is the most ergonomically sensitive
 one — it could also live on the install pill itself (clicking the

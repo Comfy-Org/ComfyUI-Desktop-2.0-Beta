@@ -499,6 +499,22 @@ function quitApp(): void {
   app.quit()
 }
 
+/**
+ * Close every host window (install-backed and chooser hosts alike) but
+ * leave the app / tray alive. Phase 3 §16 — File menu's "Close All
+ * Windows" entry. Each window's existing `close` handler runs the full
+ * teardown (`stopRunning` + webContents close + window.destroy), so we
+ * just dispatch `close()` and let those handlers do the work. Snapshot
+ * the entry list first so the iteration isn't affected by `closed`
+ * callbacks that delete from the `comfyWindows` map mid-loop.
+ */
+function closeAllHostWindows(): void {
+  const entries = Array.from(comfyWindows.values())
+  for (const entry of entries) {
+    if (!entry.window.isDestroyed()) entry.window.close()
+  }
+}
+
 function onComfyExited({ installationId }: { installationId?: string } = {}): void {
   if (!installationId) return
   // The window stays alive — exit (clean or crash) just swaps the body to the
@@ -1725,8 +1741,15 @@ function buildTitleMenuItems(kind: 'file' | 'install', entry: ComfyWindowEntry):
     // §15 — Directories is a global / cross-install affordance (the
     // launcher's view of disk: models, outputs, inputs) and lives on
     // the File / waffle menu alongside the other app-level entries.
+    // §16 — window-management entries (Close Window, Close All
+    // Windows) sit between the open-new gesture and the page-nav
+    // affordances; the separator below them keeps the two groups
+    // visually distinct.
     return [
       { id: 'new-window', label: 'New Window' },
+      { id: 'close-window', label: 'Close Window' },
+      { id: 'close-all-windows', label: 'Close All Windows' },
+      { kind: 'separator' },
       { id: 'directories', label: 'Directories', checked: entry.activePanel === 'directories' },
       { id: 'launcher-settings', label: 'Desktop 2 Settings' },
     ]
@@ -1962,7 +1985,23 @@ function openTitleMenuPopup(opts: {
 function activateTitleMenuItem(entry: TitleMenuPopupEntry, id: string): void {
   if (entry.kind === 'file') {
     if (id === 'new-window') openChooserHostWindow()
-    else if (id === 'directories') setActivePanel(entry.parentEntryId, 'directories')
+    else if (id === 'close-window') {
+      // §16 — close just the parent host window. Each host window has
+      // its own `close` handler that runs the teardown sequence
+      // (`stopRunning` + webContents close + window.destroy), so we
+      // just dispatch close() here. The popup is auto-destroyed when
+      // its parent goes; the trailing hideTitleMenuPopup call below
+      // is guarded against an already-destroyed popup.
+      const parentEntry = comfyWindows.get(entry.parentEntryId)
+      if (parentEntry && !parentEntry.window.isDestroyed()) {
+        parentEntry.window.close()
+      }
+    } else if (id === 'close-all-windows') {
+      // §16 — see `closeAllHostWindows`. The parent of this popup is
+      // among the windows being closed; its popup is auto-destroyed,
+      // and the trailing hideTitleMenuPopup is guarded.
+      closeAllHostWindows()
+    } else if (id === 'directories') setActivePanel(entry.parentEntryId, 'directories')
     else if (id === 'launcher-settings') setActivePanel(entry.parentEntryId, 'launcher-settings')
   } else {
     if (id === 'install-settings') setActivePanel(entry.parentEntryId, 'install-settings')
