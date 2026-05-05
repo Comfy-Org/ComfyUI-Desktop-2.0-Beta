@@ -363,6 +363,7 @@ onUnmounted(() => {
         <ChooserView
           @pick="handleChooserPick"
           @show-new-install="handleChooserShowNewInstall"
+          @show-progress="handleShowProgress"
         />
       </div>
 
@@ -448,16 +449,19 @@ onUnmounted(() => {
  * fills its own background — both own their padding, so negate the
  * panel-content gutter for those branches. The flow panels reuse modal
  * components which set their own scrolled body padding, so they also drop
- * the outer gutter. */
+ * the outer gutter. The chooser owns its own filter / grid padding and
+ * needs the full panel height so its grid can scroll vertically. */
 .panel-content:has(.panel-install-settings),
 .panel-content:has(.panel-comfy-lifecycle),
-.panel-content:has(.panel-flow) {
+.panel-content:has(.panel-flow),
+.panel-content:has(.panel-chooser) {
   padding: 0;
 }
 
 .panel-install-settings,
 .panel-comfy-lifecycle,
-.panel-flow {
+.panel-flow,
+.panel-chooser {
   flex: 1;
   min-height: 0;
   display: flex;

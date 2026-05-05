@@ -5,8 +5,9 @@ import { useSessionStore } from '../stores/sessionStore'
 import { useProgressStore } from '../stores/progressStore'
 import { useLauncherPrefs } from '../composables/useLauncherPrefs'
 import { useInstallContextMenu } from '../composables/useInstallContextMenu'
-import { Cloud, Plus, Box, Monitor, Globe, Pin, AlertCircle, ArrowDownToLine, ArrowRightLeft } from 'lucide-vue-next'
+import { Cloud, Plus, Box, Monitor, Globe, Pin, AlertCircle, ArrowDownToLine, ArrowRightLeft, MoreVertical } from 'lucide-vue-next'
 import ContextMenu from '../components/ContextMenu.vue'
+import DetailModal from './DetailModal.vue'
 import type { Installation } from '../types/ipc'
 
 /**
@@ -44,6 +45,17 @@ const emit = defineEmits<{
   /** User triggered the new-install flow (top-left card or empty Cloud
    *  card). */
   'show-new-install': []
+  /** A long-running action was kicked off from the inline Manage…
+   *  DetailModal (Update, Restore Snapshot, Migrate, …). The host
+   *  (`PanelApp`) owns the ProgressModal overlay; we just forward
+   *  the event so it can wire the operation through `progressStore`. */
+  'show-progress': [opts: {
+    installationId: string
+    title: string
+    apiCall: () => Promise<unknown>
+    cancellable?: boolean
+    returnTo?: string
+  }]
 }>()
 
 const installationStore = useInstallationStore()
@@ -130,10 +142,6 @@ onMounted(() => {
 })
 onBeforeUnmount(() => {
   if (nowTimer) clearInterval(nowTimer)
-  if (pendingClick) {
-    clearTimeout(pendingClick.timer)
-    pendingClick = null
-  }
 })
 
 function timeAgo(timestamp: number): string {
@@ -158,22 +166,50 @@ function iconFor(category: string | undefined): typeof Cloud {
   }
 }
 
-// --- Action / context menu (Open + pin/unpin/dismiss-error) ---
-// The same composable powers both the right-click context menu and the
-// click-driven action popover. Right-click opens an accessory menu
-// (Pin / Dismiss); a primary click on a tile opens the action popover
-// rooted at the tile's bottom-left, which adds an "Open" entry at the
-// top so the user can browse-then-pick. Double-click is the fast-path
-// — bypasses the popover and opens the install directly. The behaviour
-// is documented at the @click handler on the install tile below.
+// --- Action / context menu (Pin / Manage / Dismiss error) ---
+// The same composable powers two surfaces:
+//   - Right-click on a card → context menu at click coords.
+//   - Click on the kebab (⋮) button at the top-right of a card →
+//     dropdown anchored to the button.
+// Both menus carry the same items: Pin / Unpin, Manage… (opens the
+// install's DetailModal as an overlay), and Dismiss error (when set).
+// The card body's bare click goes through `pickInstall` — the fast-
+// path for "open this install" — and the kebab `stopPropagation`s so
+// it doesn't double-fire as a card click.
+const manageInstall = ref<Installation | null>(null)
 const {
   ctxMenu,
   ctxMenuItems,
   openCardMenu,
-  openActionMenu,
+  openKebabMenu,
   handleCtxMenuSelect,
   closeMenu,
-} = useInstallContextMenu({ onOpen: pickInstall })
+} = useInstallContextMenu({
+  onManage: (inst) => { manageInstall.value = inst },
+})
+
+function closeManageModal(): void {
+  manageInstall.value = null
+}
+
+/** DetailModal `update:installation` event — the user edited the
+ *  install (renamed it, changed its launch settings, etc.). Splice
+ *  the new record in place so the modal and the underlying card stay
+ *  in sync without round-tripping through `getInstallations`. Mirrors
+ *  the pattern PanelApp uses for the inline DetailModal. */
+function handleManageUpdate(inst: Installation): void {
+  const idx = installationStore.installations.findIndex((i) => i.id === inst.id)
+  if (idx >= 0) installationStore.installations.splice(idx, 1, inst)
+  manageInstall.value = inst
+}
+
+/** DetailModal `navigate-list` event — the install was deleted /
+ *  migrated. Close the modal so the user is returned to the chooser
+ *  grid; the installationsChanged broadcast already updated the store
+ *  so the deleted card has dropped out of `visibleInstalls`. */
+function handleManageNavigateList(): void {
+  manageInstall.value = null
+}
 
 // --- Card status classes (running, stopping, in-progress, errored) ---
 function statusClasses(inst: Installation): Record<string, boolean> {
@@ -230,53 +266,6 @@ function progressFor(inst: Installation): { status: string; percent: number } | 
 
 function pickInstall(inst: Installation): void {
   emit('pick', inst)
-}
-
-/** Click vs. double-click disambiguation. The browser fires `click`
- *  twice and `dblclick` once on a double-click, so a naive
- *  `@click="openActionMenu"` + `@dblclick="pickInstall"` would flash
- *  the popover open before the dblclick fires. Defer the popover by
- *  one event-loop tick (~250ms — the conventional double-click
- *  threshold) and cancel it if a dblclick arrives in the window. */
-let pendingClick: { id: string; timer: ReturnType<typeof setTimeout> } | null = null
-const CLICK_DOUBLE_CLICK_DELAY_MS = 250
-
-function handleTileClick(event: MouseEvent, inst: Installation): void {
-  // Capture the rect-driven popover anchor immediately because the
-  // event itself is reused / pooled by Vue and won't be valid by the
-  // time the timer fires.
-  const target = event.currentTarget as HTMLElement | null
-  const rect = target?.getBoundingClientRect?.()
-  const x = rect?.left ?? event.clientX
-  const y = (rect?.bottom ?? event.clientY) + 4
-  if (pendingClick) {
-    clearTimeout(pendingClick.timer)
-    pendingClick = null
-  }
-  const timer = setTimeout(() => {
-    pendingClick = null
-    // Synthesize a minimal "click" event for the composable; only x/y
-    // and currentTarget are inspected. Use a proxy-like object so the
-    // composable's `currentTarget?.getBoundingClientRect?.()` returns
-    // the rect we captured above.
-    openActionMenu(
-      {
-        clientX: x,
-        clientY: y - 4,
-        currentTarget: { getBoundingClientRect: () => ({ left: x, bottom: y - 4 }) } as unknown as EventTarget,
-      } as MouseEvent,
-      inst,
-    )
-  }, CLICK_DOUBLE_CLICK_DELAY_MS)
-  pendingClick = { id: inst.id, timer }
-}
-
-function handleTileDblClick(inst: Installation): void {
-  if (pendingClick) {
-    clearTimeout(pendingClick.timer)
-    pendingClick = null
-  }
-  pickInstall(inst)
 }
 
 function handleCloudClick(): void {
@@ -357,35 +346,46 @@ function handleNewInstallClick(): void {
       </button>
 
       <!-- Install tiles (recents-ordered).
-           Click → action popover anchored at the tile's bottom-left
-           (Open + Pin / Dismiss). Double-click → fast-path open
-           (skips the popover). The handlers debounce single-click
-           by ~250ms so a dblclick can cancel the pending popover
-           without it flashing on screen. -->
+           Click on the tile body → fast-path open (the most common
+           gesture). The kebab (⋮) icon at the top-right surfaces
+           Pin / Manage / Dismiss in a dropdown menu — its click
+           stops propagation so it doesn't double-fire as a card
+           click. Right-click on the tile opens the same menu at
+           pointer coordinates as a power-user gesture. -->
       <button
         v-for="inst in visibleInstalls"
         :key="inst.id"
         type="button"
         class="chooser-tile"
         :class="statusClasses(inst)"
-        @click="handleTileClick($event, inst)"
-        @dblclick="handleTileDblClick(inst)"
+        @click="pickInstall(inst)"
         @contextmenu.prevent="openCardMenu($event, inst)"
       >
         <div class="chooser-tile-icon">
           <component :is="iconFor(inst.sourceCategory)" :size="28" />
         </div>
-        <!-- Error badge (top-right) — visible whenever the install's last
-             session crashed or its last action errored. Click-to-dismiss
-             still flows through the context menu's "Dismiss error" item;
-             the badge here is purely a card-level visibility affordance
-             so the user notices without opening the install. -->
-        <div
-          v-if="hasError(inst)"
-          class="chooser-tile-error"
-          :title="$t('running.errors')"
-        >
-          <AlertCircle :size="16" />
+        <!-- Top-right cluster — error badge (when set) + kebab (⋮)
+             button that anchors the per-tile action menu. The kebab
+             stops the click from propagating up to the tile so it
+             doesn't double-fire as a card click. -->
+        <div class="chooser-tile-actions">
+          <span
+            v-if="hasError(inst)"
+            class="chooser-tile-error"
+            :title="$t('running.errors')"
+          >
+            <AlertCircle :size="16" />
+          </span>
+          <button
+            type="button"
+            class="chooser-tile-kebab"
+            :title="$t('chooser.moreActions')"
+            :aria-label="$t('chooser.moreActions')"
+            @click.stop="openKebabMenu($event, inst)"
+            @contextmenu.stop="openKebabMenu($event, inst)"
+          >
+            <MoreVertical :size="16" />
+          </button>
         </div>
         <div class="chooser-tile-name">
           {{ inst.name }}
@@ -397,28 +397,31 @@ function handleNewInstallClick(): void {
           />
         </div>
         <div class="chooser-tile-meta">
-          <!-- Each datum is its own pill so they read as discrete chips
-               rather than a dot-separated run-on line. Pills wrap onto a
-               second row on narrow tiles instead of ellipsing. -->
-          <span class="chooser-tile-pill">{{ inst.sourceLabel }}</span>
+          <!-- Each datum is its own pill so they read as discrete
+               chips rather than a dot-separated run-on line. Pills
+               wrap onto a second row on narrow tiles instead of
+               ellipsing. -->
+          <!-- Source / channel pill: prefer `listPreview` when the
+               source plugin populated one (e.g. "Stable" / "Latest"
+               for the standalone source) so the channel reads
+               instead of the bare source label. Falls back to the
+               source label otherwise. The version pill is hidden
+               when listPreview is set — that's the rule the legacy
+               DashboardCard followed to avoid showing a raw commit
+               sha next to "Latest" for tracking installs. -->
+          <span class="chooser-tile-pill">
+            {{ inst.listPreview || inst.sourceLabel }}
+          </span>
           <span
-            v-if="inst.version"
+            v-if="inst.version && !inst.listPreview"
             class="chooser-tile-pill chooser-tile-pill-version"
           >
             {{ inst.version }}
           </span>
           <!-- Update / migrate pills surface card-level prompts that
-               previously only lived inside Install Settings. They sit
-               between the version chip and the timestamp so the
-               actionable signal reads first when the user scans the
-               card. The pills themselves don't claim a click target
-               yet — opening the install (single-click) still goes
-               through the existing pickInstall path, and the migrate /
-               update flows live behind Install Settings; once §8's
-               click→popover refactor lands, these pills will get
-               dedicated entries in the per-card action menu. -->
+               previously only lived inside Install Settings. -->
           <span
-            v-if="hasUpdate(inst)"
+            v-if="hasUpdate(inst) && !progressFor(inst)"
             class="chooser-tile-pill chooser-tile-pill-update"
             :title="inst.statusTag?.label"
           >
@@ -426,50 +429,42 @@ function handleNewInstallClick(): void {
             {{ $t('chooser.updatePill') }}
           </span>
           <span
-            v-if="hasMigratePrompt(inst)"
+            v-if="hasMigratePrompt(inst) && !progressFor(inst)"
             class="chooser-tile-pill chooser-tile-pill-migrate"
             :title="$t('dashboard.migrateBannerTitle')"
           >
             <ArrowRightLeft :size="11" />
             {{ $t('chooser.migratePill') }}
           </span>
-          <!-- While a long-running operation is in flight (install,
-               update, restore, migrate) the timestamp pill is replaced
-               by the live status line so the card reflects the active
-               work. The thin progress bar at the bottom of the tile
-               renders the percentage; the status pill carries the
-               textual phase label. -->
-          <span
-            v-if="progressFor(inst)"
-            class="chooser-tile-pill chooser-tile-pill-progress"
-          >
-            {{ progressFor(inst)!.status }}
-          </span>
-          <span v-else class="chooser-tile-pill">
+          <span v-if="!progressFor(inst)" class="chooser-tile-pill">
             {{ typeof inst.lastLaunchedAt === 'number'
               ? $t('dashboard.launchedAgo', { time: timeAgo(inst.lastLaunchedAt as number) })
               : $t('dashboard.neverLaunched') }}
           </span>
         </div>
-        <!-- Thin progress bar across the card bottom — present only
-             while progressFor(inst) is non-null. Indeterminate
-             (negative percent) renders a swept stripe; otherwise the
-             fill width tracks the percent value. Lives outside the
-             meta line so it spans the full card width and reads as
-             "this card is working" at a glance. -->
-        <div
-          v-if="progressFor(inst)"
-          class="chooser-tile-progress"
-          :class="{ indeterminate: (progressFor(inst)!.percent ?? -1) < 0 }"
-        >
+        <!-- Progress block — visible only while a long-running op
+             (install / update / restore / migrate) is in flight. The
+             status line carries the live phase text and the progress
+             track sits beneath it as a clear, prominent bar. The
+             pattern mirrors the legacy DashboardCard `card-progress`
+             treatment so users recognise the in-flight surface. -->
+        <div v-if="progressFor(inst)" class="chooser-tile-progress">
+          <div class="chooser-tile-progress-status">
+            {{ progressFor(inst)!.status }}
+          </div>
           <div
-            class="chooser-tile-progress-fill"
-            :style="{
-              width: (progressFor(inst)!.percent ?? -1) >= 0
-                ? `${progressFor(inst)!.percent}%`
-                : '40%',
-            }"
-          ></div>
+            class="chooser-tile-progress-track"
+            :class="{ indeterminate: (progressFor(inst)!.percent ?? -1) < 0 }"
+          >
+            <div
+              class="chooser-tile-progress-fill"
+              :style="{
+                width: (progressFor(inst)!.percent ?? -1) >= 0
+                  ? `${progressFor(inst)!.percent}%`
+                  : '40%',
+              }"
+            ></div>
+          </div>
         </div>
       </button>
     </div>
@@ -482,6 +477,30 @@ function handleNewInstallClick(): void {
       @close="closeMenu"
       @select="handleCtxMenuSelect"
     />
+
+    <!-- Manage… overlay — DetailModal mounted in its modal-overlay
+         mode (inline=false) so the user gets a focused dialog on top
+         of the chooser grid rather than a full-screen panel. The
+         outer `view-modal active` wrapper provides the backdrop +
+         centering chrome (matches the pattern PanelApp uses for
+         ProgressModal). DetailModal handles its own actions over
+         IPC, so it works regardless of whether the chooser host has
+         an install backing it. -->
+    <Teleport to="body">
+      <div
+        v-if="manageInstall"
+        class="view-modal active"
+        data-overlay-key="manage-detail"
+      >
+        <DetailModal
+          :installation="manageInstall"
+          @close="closeManageModal"
+          @navigate-list="handleManageNavigateList"
+          @update:installation="handleManageUpdate"
+          @show-progress="(opts) => emit('show-progress', opts)"
+        />
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -654,40 +673,34 @@ function handleNewInstallClick(): void {
   opacity: 1;
 }
 
-/* In-flight progress pill — replaces the timestamp pill while a
- * long-running operation is live (install / update / restore /
- * migrate). The fill bar at the card bottom carries the percentage;
- * this pill carries the status text. Tinted with the accent so the
- * "in progress" state reads as active work rather than neutral data. */
-.chooser-tile-pill-progress {
+/* In-flight progress block — visible only when an op is running for
+ * this install. Sits beneath the meta line and replaces the
+ * last-launched / update / migrate pills (those are hidden in the
+ * template while progressFor is non-null). The status line + track
+ * pattern matches the legacy DashboardCard `card-progress` block so
+ * users recognise the in-flight surface. */
+.chooser-tile-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  margin-top: 2px;
+}
+.chooser-tile-progress-status {
+  font-size: 11px;
   color: var(--accent, #4a90e2);
-  background: var(--accent-soft, rgba(74, 144, 226, 0.12));
-  border-color: var(--accent, #4a90e2);
-  opacity: 1;
-  /* The status string can be long ("Resolving dependencies…",
-   * "Restoring snapshot snapshot-2026-01-15.zip"). Cap the pill width
-   * and ellipsis so the meta line still fits on a single tile row on
-   * narrow windows. */
-  max-width: 100%;
+  /* Status strings can be long ("Resolving dependencies…",
+   * "Restoring snapshot snapshot-2026-01-15.zip"). Single-line
+   * ellipsis so the row stays within the tile. */
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-
-/* Thin progress bar pinned to the card bottom while an op is in
- * flight. Lives outside the meta line so it always spans the full
- * card width — the visual signal of "this card is working" the user
- * recognises from ProgressModal. Sweeping stripe for indeterminate
- * progress; tracked fill for percent-driven progress. */
-.chooser-tile-progress {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  height: 3px;
+.chooser-tile-progress-track {
+  position: relative;
+  height: 6px;
   background: var(--bg-elev-2, rgba(127, 127, 127, 0.16));
-  border-bottom-left-radius: 12px;
-  border-bottom-right-radius: 12px;
+  border-radius: 3px;
   overflow: hidden;
 }
 .chooser-tile-progress-fill {
@@ -695,7 +708,7 @@ function handleNewInstallClick(): void {
   background: var(--accent, #4a90e2);
   transition: width 200ms ease;
 }
-.chooser-tile-progress.indeterminate .chooser-tile-progress-fill {
+.chooser-tile-progress-track.indeterminate .chooser-tile-progress-fill {
   animation: chooser-tile-progress-sweep 1.4s ease-in-out infinite;
 }
 @keyframes chooser-tile-progress-sweep {
@@ -726,18 +739,50 @@ function handleNewInstallClick(): void {
   opacity: 0.7;
 }
 
-/* AlertCircle badge in the top-right corner of an errored card. Sits
- * above the icon's top-left position; uses the danger red to read as
- * "click here to see what's wrong" at a glance. */
-.chooser-tile-error {
+/* Top-right cluster — error badge + kebab (⋮) action button. Sits
+ * absolute-positioned in the top-right corner of every install tile.
+ * The kebab is the primary affordance for per-tile actions (Pin /
+ * Manage / Dismiss); the error badge is purely a visibility indicator
+ * (click-to-dismiss is a menu item, not a tap target on the badge).
+ * The cluster lives above the icon's top-left position; the source
+ * icon is at top-left, so the two never collide. */
+.chooser-tile-actions {
   position: absolute;
-  top: 12px;
-  right: 14px;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  z-index: 1;
+}
+.chooser-tile-error {
   color: var(--accent-danger, #d92d20);
   display: flex;
   align-items: center;
   justify-content: center;
   pointer-events: none;
+  padding: 0 4px;
+}
+.chooser-tile-kebab {
+  /* Reset native button chrome — we render a flat icon button. */
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 4px;
+  color: inherit;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.65;
+  transition: background-color 100ms ease, opacity 100ms ease, border-color 100ms ease;
+}
+.chooser-tile-kebab:hover,
+.chooser-tile-kebab:focus-visible {
+  background: var(--bg-elev-2, rgba(127, 127, 127, 0.18));
+  border-color: var(--border-strong, rgba(127, 127, 127, 0.4));
+  opacity: 1;
+  outline: none;
 }
 
 /* The two fixed-position tiles (New Install + Cloud) get a slightly

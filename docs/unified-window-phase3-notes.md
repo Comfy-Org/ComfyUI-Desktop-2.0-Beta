@@ -529,36 +529,61 @@ Second slice landed on the same branch:
   card bottom tracks the percent value. Indeterminate progress (when
   the op hasn't reported a percent yet) renders a swept stripe.
 
-Third slice landed on the same branch:
+Third slice landed on the same branch — kebab + Manage modal +
+version fix + scrollable grid (replacing an earlier click→popover
+attempt that ate the open fast-path):
 
-- **Click → action popover, double-click → open fast-path.** The
-  bare click that previously opened the install now anchors a
-  popover at the tile's bottom-left. Today the popover surfaces
-  Open + Pin / Unpin + Dismiss error — the same items the right-
-  click context menu carries plus an explicit Open entry at the
-  top. The composable `useInstallContextMenu({ onOpen })` powers
-  both surfaces from a single state (modes `'context'` and
-  `'action'`); the right-click menu still fires through the
-  unchanged `openCardMenu` path, the click popover through a new
-  `openActionMenu` path. The HTML-rendered route was preferred
-  over the native `Menu.popup()` route — the chooser body lives
-  in the panel WebContentsView which doesn't have the title-bar
-  clipping caveat that drove §14 to BrowserWindow popups. A
-  setTimeout-based debounce (250ms — the conventional double-
-  click threshold) keeps the popover from flashing on screen
-  during a double-click. Cleanup runs in `onBeforeUnmount`.
+- **Kebab (⋮) action menu.** Each install tile carries a top-right
+  kebab icon button next to the error badge. Click on the kebab
+  opens the per-tile action menu — Pin / Unpin, Manage…, Dismiss
+  error — anchored beneath the icon. The kebab handler `stopPropagation`s
+  so it doesn't double-fire as a card click. Right-click on the
+  tile body still opens the same menu at pointer coordinates as a
+  power-user gesture.
+- **Card click is the open fast-path again.** Single click on the
+  tile body emits `pick` directly — the user's primary "I want to
+  use this install" gesture. The earlier popover-on-click route
+  was rolled back: it ate the most common gesture (open) for the
+  least common one (browse actions), and the popover items
+  duplicated the right-click menu.
+- **Manage… opens DetailModal as an overlay.** The Manage menu
+  item mounts the existing `DetailModal` (in its modal-overlay
+  mode, `inline: false`) on top of the chooser via a Teleport
+  into the body element. The wrapper uses the standard
+  `view-modal active` framing (matches PanelApp's ProgressModal
+  treatment). Show-progress events bubble up through ChooserView
+  to PanelApp so long-running actions kicked off from the modal
+  use the same ProgressModal overlay the inline DetailModal does.
+- **Source / version display matches the legacy DashboardCard.**
+  When the source plugin populated `inst.listPreview` (e.g.
+  "Stable" / "Latest" for the standalone source), the chooser tile
+  shows that as the source pill and hides the version pill — the
+  rule the old DashboardCard followed. This stops the chooser
+  from rendering bare commit-shas next to the channel label for
+  Latest-tracking installs.
+- **Progress block, prominent.** The 3px sliver at the card bottom
+  was replaced with a status-line + 6px-rounded-bar block sitting
+  beneath the meta line. The pattern matches the legacy
+  DashboardCard `card-progress` treatment so users recognise the
+  in-flight surface; while progress is active, the timestamp +
+  update + migrate pills are hidden so the meta row stays compact.
+- **Scrollable grid.** The chooser's outer `panel-content` wrapper
+  now drops its padding for the chooser branch (so the chooser
+  owns its own filter / grid gutter) AND `.panel-chooser` itself
+  picks up `flex: 1; min-height: 0; overflow: hidden`. Without
+  these, `.chooser-grid`'s `overflow-y: auto` had no bounded
+  height to scroll inside, so on tile-heavy windows the cards
+  just clipped off the bottom instead of producing a scrollbar.
 
 Still open:
 
-- **Action set expansion.** The popover currently carries Open +
-  Pin / Unpin + Dismiss error. Update / Migrate / Install
-  Settings / Reveal in Folder / Restore Snapshot / Delete depend
-  on the `open-install-host-window-on-panel(installationId, panel)`
-  IPC tracked in Issue #470 — once that lands, those items move
-  into this popover so the chooser becomes the single launching
-  surface for any install action. The update / migrate pills
-  should fold their click targets into the same popover (e.g.
-  "Update available — Update now / View details").
+- **Action set expansion in the kebab menu.** Pin / Manage / Dismiss
+  cover the most-needed actions today, but Update / Migrate /
+  Reveal in Folder / Restore Snapshot / Delete should also surface
+  here as direct entries (Manage is currently the catch-all for
+  all of those). The Update / Migrate pills should also fold their
+  click targets into the same menu (e.g. "Update available — Update
+  now / View details") rather than reading as bare visual prompts.
 
 ## 9. Install Settings — Restart instead of Launch when running
 

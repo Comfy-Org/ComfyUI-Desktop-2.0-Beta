@@ -28,7 +28,9 @@
     "filterRemote": "远程",
     "updatePill": "更新",
     "migratePill": "迁移",
-    "openInstall": "打开"
+    "openInstall": "打开",
+    "manageInstall": "管理…",
+    "moreActions": "更多操作"
   },
 
   "running": {
