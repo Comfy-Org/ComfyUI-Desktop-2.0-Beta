@@ -13,6 +13,7 @@ files:
   - '!docs/*'
   - '!out/**/*.map'
   - '!reference/*'
+  - '!**/*.wsb'
 extraResources:
   - from: lib
     to: lib
