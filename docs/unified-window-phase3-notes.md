@@ -1193,6 +1193,93 @@ The first-use takeover (Step 4) and the per-section follow-ups
 takeover slot just like new-install does, and Step 5's update
 channel / kebab-menu actions feed the same `openOverlay` call.
 
+### Status — first-use takeover **DONE**
+
+The first-use Tier 3 takeover now auto-mounts on every launcher start
+where `launcherPrefs.firstUseCompleted` is still `false`, runs the
+user through T&C + telemetry consent → (locale-conditional) China
+mirror prompt → Cloud-vs-Local pick, and only flips the persisted gate
+when the user reaches a real completion path. Mid-flow cancel leaves
+the gate at `false` so the takeover replays on the next launch.
+
+Renderer-side wiring:
+
+- New `FirstUseTakeover.vue` in `src/renderer/src/views/` — single
+  component with internal `step` state (`'consent' | 'mirrors' |
+  'pick'`) and an imperative `open()` reset. The China-mirror sub-step
+  is only inserted when the resolved locale (fetched via
+  `window.api.getLocale()`) starts with `'zh'`; both paths through
+  that sub-step also set `chineseMirrorsPrompted` so the legacy
+  prompt machinery doesn't re-fire later.
+- `useLauncherPrefs` gained a `firstUseCompleted` ref backed by the
+  same `getSetting`/`setSetting` pipeline as `pinnedInstallIds`, plus
+  a `markFirstUseCompleted()` writer that's idempotent (so the
+  chain-to-new-install close path can fire it without worrying about
+  double-write). A `__resetLauncherPrefsForTest` helper is exported
+  for the PanelApp test suite — module-level memoization is otherwise
+  preserved for production.
+- `PanelApp` adds a fifth `v-if` branch under `currentOverlay.component
+  === 'first-use'` in the existing takeover slot — same shell, same
+  `data-overlay-key="takeover"` styling, same automatic title-bar
+  inert flag. A new `openFirstUseTakeover()` helper does the
+  `openOverlay` + post-mount `open()` reset; auto-mount happens in
+  `onMounted` after the URL-driven flow-panel branch (so a
+  `?panel=new-install` request from main still wins, since
+  `firstUseCompleted` will simply replay on the next launch).
+- Local-branch chaining: a `chainingFirstUseToNewInstall` ref records
+  that the user picked Local; `handleFirstUseChainLocal` flips the
+  flag and calls `switchPanel('new-install')` (Tier 3 → Tier 3 swap is
+  silent in `useOverlay`). The new-install takeover's `close` /
+  `navigate-list` handlers route through a new
+  `handleNewInstallTakeoverClose` wrapper that also marks
+  `firstUseCompleted` when the chain flag is set, then clears it.
+  Cloud-branch pick takes the direct `handleFirstUseComplete` path —
+  marks completion immediately and closes the overlay.
+
+Main / IPC additions:
+
+- `KnownSettings.firstUseCompleted: boolean` in `src/main/settings.ts`
+  (added to the `SETTINGS_SCHEMA` map alongside `pinnedInstallIds`).
+- New `get-locale` IPC handler in
+  `src/main/lib/ipc/registerSettingsHandlers.ts` — returns
+  `i18n.getLocale()`. Required because the renderer's vue-i18n locale
+  is always `'en'` (we deep-merge messages onto the en bundle), so
+  `app.getLocale()` / the `language` setting can only be read from
+  main. Wired through `src/preload/index.ts` and typed in
+  `src/types/ipc.ts` as `getLocale(): Promise<string>`.
+
+i18n:
+
+- New `firstUse.*` namespace in both `locales/en.json` and
+  `locales/zh.json` covering the takeover title, consent lead, T&C
+  body, telemetry hint, accept-T&C button, "Not now" mirror skip,
+  pick-step title/lead, and the Local-card label/description.
+- China-mirror sub-step REUSES the existing
+  `settings.chineseMirrorsSuggest{Title,Message,Confirm}` keys — no
+  duplication.
+- Cloud-card REUSES the existing `cloud.{label,desc}` keys.
+
+Architectural contracts preserved:
+
+- Same code in chooser host and install host — `defaultBodyPanel()`
+  routes to chooser-vs-launcher-settings exactly as before; the
+  first-use takeover sits above whichever default body the host
+  resolves to.
+- Title bar inert during the takeover: tier watcher already engages
+  the `setTitleBarInert` IPC on tier→3 transitions (Step 3 wiring),
+  so the first-use takeover automatically inherits the file menu /
+  install pill / back-forward disable for free.
+- Standardised cancel-prompt copy (`overlay.cancel*`) is what fires if
+  the user pre-empts an in-flight Tier 2 progress op while opening
+  first-use — no new variants added.
+- Per-source mirror override plumbing intentionally NOT exposed in
+  the takeover UI — the China-mirror step only flips the global
+  `useChineseMirrors` setting (per-source overrides are Step 5+
+  territory, code-ready behind that gate).
+
+DROPs that landed with this slice: none — first-use is purely
+additive on top of the takeover slot foundation Step 3 built.
+
 ---
 
 ## 18. Title-bar status pills — restart-required + updates available

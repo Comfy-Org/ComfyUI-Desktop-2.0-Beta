@@ -664,6 +664,13 @@ export interface ElectronApi {
   // Locale
   getLocaleMessages(): Promise<Record<string, unknown>>
   getAvailableLocales(): Promise<{ value: string; label: string }[]>
+  /** Resolved locale string from main (`language` setting or
+   *  `app.getLocale()` fallback). The renderer's vue-i18n locale is
+   *  always 'en' (messages are deep-merged onto the en bundle), so
+   *  consumers needing the user's actual language — e.g. the first-use
+   *  takeover deciding whether to insert the China-mirror sub-step —
+   *  must read it from main via this call. */
+  getLocale(): Promise<string>
 
   // Installations
   getInstallations(): Promise<Installation[]>

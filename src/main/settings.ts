@@ -19,6 +19,14 @@ export interface KnownSettings {
   chineseMirrorsPrompted?: boolean
   telemetryEnabled?: boolean
   pinnedInstallIds?: string[]
+  /**
+   * Phase 3 §17 Step 4 — set to `true` once the user has finished the
+   * first-use takeover (T&C + telemetry consent + locale-conditional
+   * China mirror prompt + Cloud/Local pick). Persists across launches
+   * so the takeover only shows on the very first run. Mid-flow cancel
+   * does NOT flip this — the takeover replays from step 1 next launch.
+   */
+  firstUseCompleted?: boolean
   oemManagedModelDirs?: string[]
   oemWorkflowImportVersion?: number
 }
@@ -53,6 +61,7 @@ const SETTINGS_SCHEMA = {
   chineseMirrorsPrompted: { nullable: false },
   telemetryEnabled: { nullable: false },
   pinnedInstallIds: { nullable: false },
+  firstUseCompleted: { nullable: false },
   oemManagedModelDirs: { nullable: false },
   oemWorkflowImportVersion: { nullable: false },
 } as const satisfies Record<keyof KnownSettings, { nullable: boolean }>

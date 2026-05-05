@@ -143,6 +143,14 @@ export function registerSettingsHandlers(): void {
 
   ipcMain.handle('get-locale-messages', () => i18n.getMessages())
   ipcMain.handle('get-available-locales', () => i18n.getAvailableLocales())
+  // Phase 3 §17 Step 4 — the first-use takeover (FirstUseTakeover.vue)
+  // needs to ask main for the resolved locale so it can decide whether
+  // to insert the China-mirror sub-step. The renderer's vue-i18n locale
+  // is always 'en' (we deep-merge messages onto the en bundle), so we
+  // can't read it from there — main owns the truth via i18n.getLocale()
+  // (which reflects the user's `language` setting + app.getLocale()
+  // fallback as initialised in main/index.ts).
+  ipcMain.handle('get-locale', () => i18n.getLocale())
 
   ipcMain.handle('get-resolved-theme', () => resolveTheme())
 

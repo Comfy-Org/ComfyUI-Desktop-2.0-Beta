@@ -351,6 +351,19 @@
     "cancelConfirm": "Cancel operation"
   },
 
+  "firstUse": {
+    "title": "Welcome to ComfyUI Desktop",
+    "consentLead": "Before you get started, please review the terms of use and choose whether to share anonymous usage telemetry.",
+    "tosBody": "By clicking Accept, you agree to the ComfyUI Desktop Terms of Use and Privacy Policy. You can change your telemetry preference at any time from App Settings.",
+    "telemetryHint": "Telemetry helps us improve the launcher. We never collect workflow contents, prompts, generated media, or personal information.",
+    "acceptTos": "Accept and continue",
+    "notNow": "Not now",
+    "pickTitle": "How would you like to use ComfyUI?",
+    "pickLead": "You can change this later — additional installs of either kind can be added from the launcher at any time.",
+    "localLabel": "Local install",
+    "localDesc": "Install and run ComfyUI on this machine. Works offline and keeps everything under your control."
+  },
+
   "tray": {
     "showApp": "Show Desktop 2.0",
     "quit": "Quit"

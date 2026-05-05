@@ -26,6 +26,7 @@ const api: ElectronApi = {
   // Locale
   getLocaleMessages: () => ipcRenderer.invoke('get-locale-messages'),
   getAvailableLocales: () => ipcRenderer.invoke('get-available-locales'),
+  getLocale: () => ipcRenderer.invoke('get-locale'),
 
   // Installations
   getInstallations: () => ipcRenderer.invoke('get-installations'),

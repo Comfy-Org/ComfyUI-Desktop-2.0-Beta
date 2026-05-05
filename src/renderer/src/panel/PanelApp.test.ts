@@ -95,6 +95,22 @@ vi.mock('../views/QuickInstallModal.vue', () => ({
     methods: { open: vi.fn() },
   },
 }))
+vi.mock('../views/FirstUseTakeover.vue', () => ({
+  default: {
+    name: 'FirstUseTakeover',
+    emits: ['close', 'complete', 'chain-local'],
+    // Stub does NOT auto-call window.api.getLocale on mount — the host
+    // exercises the imperative open() reset post-mount, which is what
+    // we mock + assert on.
+    template:
+      '<div data-testid="first-use-takeover">' +
+      '<button data-testid="first-use-cloud" @click="$emit(\'complete\')">Cloud</button>' +
+      '<button data-testid="first-use-local" @click="$emit(\'chain-local\')">Local</button>' +
+      '<button data-testid="first-use-close" @click="$emit(\'close\')">Close</button>' +
+      '</div>',
+    methods: { open: vi.fn() },
+  },
+}))
 vi.mock('../components/UpdateBanner.vue', () => ({
   default: {
     name: 'UpdateBanner',
@@ -106,6 +122,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import { createPinia, setActivePinia } from 'pinia'
 import PanelApp from './PanelApp.vue'
+import { __resetLauncherPrefsForTest } from '../composables/useLauncherPrefs'
 
 const messages = {
   en: {
@@ -138,18 +155,27 @@ interface MockApiState {
   installationsChangedCallbacks: (() => void)[]
   installations: InstallationLike[]
   getInstallations: ReturnType<typeof vi.fn>
+  /** Per-key getSetting values. Tests that need first-use takeover to
+   *  auto-mount can flip `firstUseCompleted` to false here. Default is
+   *  `true` so existing tests don't trip the takeover. */
+  settings: Record<string, unknown>
 }
 
-function installMockApi(initial?: { installations?: InstallationLike[] }): MockApiState {
+function installMockApi(initial?: {
+  installations?: InstallationLike[]
+  settings?: Record<string, unknown>
+}): MockApiState {
   const installations: InstallationLike[] = initial?.installations ?? []
   const state: MockApiState = {
     panelSwitchCallbacks: [],
     installationsChangedCallbacks: [],
     installations,
     getInstallations: vi.fn(async () => state.installations),
+    settings: { firstUseCompleted: true, ...initial?.settings },
   }
   const api = {
     getLocaleMessages: vi.fn().mockResolvedValue(messages.en),
+    getLocale: vi.fn().mockResolvedValue('en'),
     onLocaleChanged: vi.fn(() => () => {}),
     onPanelSwitch: vi.fn((cb: (d: { panel: string; installationId?: string }) => void) => {
       state.panelSwitchCallbacks.push(cb)
@@ -172,7 +198,10 @@ function installMockApi(initial?: { installations?: InstallationLike[] }): MockA
     onComfyOutput: vi.fn(() => () => {}),
     onComfyExited: vi.fn(() => () => {}),
     onErrorDetail: vi.fn(() => () => {}),
-    getSetting: vi.fn().mockResolvedValue(undefined),
+    getSetting: vi.fn(async (key: string) => state.settings[key]),
+    setSetting: vi.fn(async (key: string, value: unknown) => {
+      state.settings[key] = value
+    }),
   }
   ;(window as unknown as { api: typeof api }).api = api
   return state
@@ -196,6 +225,10 @@ describe('PanelApp', () => {
 
   beforeEach(() => {
     setActivePinia(createPinia())
+    // useLauncherPrefs has module-level shared state + memoized load
+    // promise — reset both so each test sees a fresh load against the
+    // current mock settings (in particular `firstUseCompleted`).
+    __resetLauncherPrefsForTest()
     mockState = installMockApi({ installations: [SAMPLE_INSTALL] })
     // Default URL — individual tests override.
     window.history.replaceState({}, '', '/?installationId=test-id')
@@ -361,6 +394,83 @@ describe('PanelApp', () => {
     const wrapper = mountPanel()
     await flushPromises()
     expect(wrapper.find('[data-testid="quick-install-modal"]').exists()).toBe(true)
+  })
+
+  it('does NOT auto-mount the first-use takeover when firstUseCompleted is true', async () => {
+    // Default mock state has firstUseCompleted: true; the takeover
+    // should never enter the overlay slot.
+    window.history.replaceState({}, '', '/?panel=chooser')
+    const wrapper = mountPanel()
+    await flushPromises()
+    expect(wrapper.find('[data-testid="first-use-takeover"]').exists()).toBe(false)
+  })
+
+  it('auto-mounts the first-use takeover above the chooser body when firstUseCompleted is false', async () => {
+    mockState.settings.firstUseCompleted = false
+    window.history.replaceState({}, '', '/?panel=chooser')
+    const wrapper = mountPanel()
+    await flushPromises()
+    expect(wrapper.find('[data-testid="chooser-view"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="first-use-takeover"]').exists()).toBe(true)
+  })
+
+  it('marks firstUseCompleted=true and closes the takeover on Cloud-branch pick', async () => {
+    mockState.settings.firstUseCompleted = false
+    window.history.replaceState({}, '', '/?panel=chooser')
+    const wrapper = mountPanel()
+    await flushPromises()
+    const setSetting = (window as unknown as {
+      api: { setSetting: ReturnType<typeof vi.fn> }
+    }).api.setSetting
+    expect(setSetting).not.toHaveBeenCalledWith('firstUseCompleted', true)
+
+    await wrapper.find('[data-testid="first-use-cloud"]').trigger('click')
+    await flushPromises()
+
+    expect(setSetting).toHaveBeenCalledWith('firstUseCompleted', true)
+    expect(wrapper.find('[data-testid="first-use-takeover"]').exists()).toBe(false)
+    // Chooser body underneath remains mounted.
+    expect(wrapper.find('[data-testid="chooser-view"]').exists()).toBe(true)
+  })
+
+  it('chains into the new-install takeover on Local-branch pick and marks completion when new-install closes', async () => {
+    mockState.settings.firstUseCompleted = false
+    window.history.replaceState({}, '', '/?panel=chooser')
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    await wrapper.find('[data-testid="first-use-local"]').trigger('click')
+    await flushPromises()
+
+    // Tier 3 → Tier 3 swap: first-use unmounts, new-install mounts.
+    expect(wrapper.find('[data-testid="first-use-takeover"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="new-install-modal"]').exists()).toBe(true)
+
+    const setSetting = (window as unknown as {
+      api: { setSetting: ReturnType<typeof vi.fn> }
+    }).api.setSetting
+    expect(setSetting).not.toHaveBeenCalledWith('firstUseCompleted', true)
+
+    // New-install close (success or cancel) flips the persisted gate.
+    await wrapper.findComponent({ name: 'NewInstallModal' }).vm.$emit('close')
+    await flushPromises()
+    expect(setSetting).toHaveBeenCalledWith('firstUseCompleted', true)
+  })
+
+  it('does NOT mark firstUseCompleted on mid-flow first-use cancel', async () => {
+    mockState.settings.firstUseCompleted = false
+    window.history.replaceState({}, '', '/?panel=chooser')
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.find('[data-testid="first-use-close"]').trigger('click')
+    await flushPromises()
+
+    const setSetting = (window as unknown as {
+      api: { setSetting: ReturnType<typeof vi.fn> }
+    }).api.setSetting
+    expect(setSetting).not.toHaveBeenCalledWith('firstUseCompleted', true)
+    expect(wrapper.find('[data-testid="first-use-takeover"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="chooser-view"]').exists()).toBe(true)
   })
 
   it('switches to the comfy-lifecycle view in response to a panel-switch IPC event', async () => {

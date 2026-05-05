@@ -12,6 +12,7 @@ import NewInstallModal from '../views/NewInstallModal.vue'
 import TrackModal from '../views/TrackModal.vue'
 import LoadSnapshotModal from '../views/LoadSnapshotModal.vue'
 import QuickInstallModal from '../views/QuickInstallModal.vue'
+import FirstUseTakeover from '../views/FirstUseTakeover.vue'
 import UpdateBanner from '../components/UpdateBanner.vue'
 import { useTheme } from '../composables/useTheme'
 import { useSessionStore } from '../stores/sessionStore'
@@ -111,6 +112,18 @@ const newInstallRef = ref<InstanceType<typeof NewInstallModal> | null>(null)
 const trackRef = ref<InstanceType<typeof TrackModal> | null>(null)
 const loadSnapshotRef = ref<InstanceType<typeof LoadSnapshotModal> | null>(null)
 const quickInstallRef = ref<InstanceType<typeof QuickInstallModal> | null>(null)
+const firstUseRef = ref<InstanceType<typeof FirstUseTakeover> | null>(null)
+
+/**
+ * Phase 3 §17 Step 4 — set when the first-use takeover's Local
+ * branch chains into the new-install Tier 3 takeover. The new-install
+ * modal emits `close` after a successful install (the same hook used
+ * everywhere); when that fires while this flag is true the host
+ * marks `firstUseCompleted` and clears the flag. A Cloud branch pick
+ * marks completion immediately and never sets this flag, so the two
+ * paths can't double-fire the pref write.
+ */
+const chainingFirstUseToNewInstall = ref(false)
 
 const sessionStore = useSessionStore()
 const installationStore = useInstallationStore()
@@ -227,6 +240,65 @@ async function openFlowTakeover(component: FlowComponent): Promise<void> {
   else if (component === 'track') trackRef.value?.open()
   else if (component === 'load-snapshot') loadSnapshotRef.value?.open()
   else if (component === 'quick-install') await quickInstallRef.value?.open()
+}
+
+/**
+ * Phase 3 §17 Step 4 — open the first-use takeover. Same shape as
+ * `openFlowTakeover` but the component identifier is the free-form
+ * `'first-use'` string (TakeoverOverlay.component is intentionally
+ * untyped — see useOverlay.ts) and the post-mount reset goes through
+ * the FirstUseTakeover ref's own `open()`. Auto-mounted from
+ * `onMounted` when `launcherPrefs.firstUseCompleted` is false; not
+ * routed through `switchPanel` because there's no URL/IPC entry point
+ * for it (the gate is purely the persisted pref).
+ */
+async function openFirstUseTakeover(): Promise<void> {
+  const ok = await openOverlay({ kind: 'takeover', component: 'first-use' })
+  if (!ok) return
+  await nextTick()
+  await firstUseRef.value?.open()
+}
+
+/** First-use takeover ✕ / Escape — the user dismissed mid-flow. We
+ *  do NOT mark `firstUseCompleted`, so the takeover replays on the
+ *  next launch (the persisted gate is only flipped via the explicit
+ *  `complete` emit or the chained new-install success path). */
+function handleFirstUseClose(): void {
+  chainingFirstUseToNewInstall.value = false
+  void closeOverlay()
+}
+
+/** First-use takeover Cloud-branch pick — one-shot completion. The
+ *  chooser body underneath is what the user lands on (where they can
+ *  pick the cloud install to launch via the normal launch flow). */
+async function handleFirstUseComplete(): Promise<void> {
+  await launcherPrefs.markFirstUseCompleted()
+  chainingFirstUseToNewInstall.value = false
+  void closeOverlay()
+}
+
+/** First-use takeover Local-branch pick — chain into the new-install
+ *  Tier 3 takeover. The Tier 3 → Tier 3 swap is silent in
+ *  `useOverlay`, so the first-use takeover unmounts as the
+ *  new-install takeover mounts. The completion flip is deferred to
+ *  the new-install close path (see `handleNewInstallTakeoverClose`). */
+function handleFirstUseChainLocal(): void {
+  chainingFirstUseToNewInstall.value = true
+  void switchPanel('new-install')
+}
+
+/** Wrapper around `closeOverlay` for the new-install takeover branch
+ *  that also flips `firstUseCompleted` when the close arrives at the
+ *  end of a first-use → Local chain. The new-install modal emits
+ *  `close` after a successful install AND on user-cancel (✕); both
+ *  cases count as "the user got past the cloud-or-local pick", so we
+ *  treat any close arriving via this chain as completion. */
+async function handleNewInstallTakeoverClose(): Promise<void> {
+  if (chainingFirstUseToNewInstall.value) {
+    chainingFirstUseToNewInstall.value = false
+    await launcherPrefs.markFirstUseCompleted()
+  }
+  void closeOverlay()
 }
 
 /**
@@ -391,6 +463,17 @@ onMounted(async () => {
   if (FLOW_PANELS.has(initialPanel)) {
     void switchPanel(initialPanel)
   }
+
+  // Phase 3 §17 Step 4 — first-use takeover auto-mounts when the
+  // persisted gate is still false. Runs AFTER the URL-driven flow
+  // panel branch so a `?panel=new-install` request still wins (e.g.
+  // when main re-routes a chooser pick into new-install for an
+  // un-installed source); the first-use takeover will replay on the
+  // next launch since `firstUseCompleted` stays false until the
+  // explicit completion path runs.
+  if (!launcherPrefs.firstUseCompleted.value && !FLOW_PANELS.has(initialPanel)) {
+    void openFirstUseTakeover()
+  }
 })
 
 onUnmounted(() => {
@@ -485,8 +568,8 @@ onUnmounted(() => {
       <NewInstallModal
         v-if="currentOverlay.component === 'new-install'"
         ref="newInstallRef"
-        @close="closeOverlay"
-        @navigate-list="closeOverlay"
+        @close="handleNewInstallTakeoverClose"
+        @navigate-list="handleNewInstallTakeoverClose"
         @show-progress="handleShowProgress"
       />
       <TrackModal
@@ -506,6 +589,13 @@ onUnmounted(() => {
         ref="quickInstallRef"
         @close="closeOverlay"
         @show-progress="handleShowProgress"
+      />
+      <FirstUseTakeover
+        v-else-if="currentOverlay.component === 'first-use'"
+        ref="firstUseRef"
+        @close="handleFirstUseClose"
+        @complete="handleFirstUseComplete"
+        @chain-local="handleFirstUseChainLocal"
       />
     </div>
 
