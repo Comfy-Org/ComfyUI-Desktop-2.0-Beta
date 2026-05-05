@@ -56,7 +56,7 @@ vi.mock('../views/DirectoriesView.vue', () => ({
 vi.mock('../views/ChooserView.vue', () => ({
   default: {
     name: 'ChooserView',
-    emits: ['pick', 'show-new-install', 'show-detail'],
+    emits: ['pick', 'show-new-install'],
     template:
       '<div data-testid="chooser-view"><button data-testid="chooser-new-install" @click="$emit(\'show-new-install\')">New</button></div>',
   },

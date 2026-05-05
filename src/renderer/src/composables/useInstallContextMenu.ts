@@ -5,7 +5,21 @@ import { useSessionStore } from '../stores/sessionStore'
 import type { ContextMenuItem } from '../types/context-menu'
 import type { Installation } from '../types/ipc'
 
-export function useInstallContextMenu(onShowDetail: (inst: Installation) => void) {
+/**
+ * Right-click context menu for chooser tiles. Today exposes:
+ *
+ *   - Pin / Unpin (non-cloud installs only)
+ *   - Dismiss error (when the install has a stored error)
+ *
+ * The previous "View Details" item routed through `handleChooserShowDetail`
+ * which fell through to `handleChooserPick` — i.e. it launched the install
+ * instead of just opening Install Settings. The right fix is a
+ * non-launching `open-install-host-window-on-panel(installationId, panel)`
+ * IPC that creates an install-backed host window without booting ComfyUI;
+ * tracked separately so we don't ship the broken "View Details" entry in
+ * the meantime.
+ */
+export function useInstallContextMenu() {
   const { t } = useI18n()
   const prefs = useLauncherPrefs()
   const sessionStore = useSessionStore()
@@ -29,12 +43,6 @@ export function useInstallContextMenu(onShowDetail: (inst: Installation) => void
         separator: items.length > 0,
       })
     }
-
-    items.push({
-      id: 'view-details',
-      label: t('list.view'),
-      separator: !sessionStore.errorInstances.has(inst.id) && items.length > 0,
-    })
 
     return items
   }
@@ -61,8 +69,6 @@ export function useInstallContextMenu(onShowDetail: (inst: Installation) => void
       await prefs.unpinInstall(inst.id)
     } else if (id === 'dismiss-error') {
       sessionStore.clearErrorInstance(inst.id)
-    } else if (id === 'view-details') {
-      onShowDetail(inst)
     }
   }
 

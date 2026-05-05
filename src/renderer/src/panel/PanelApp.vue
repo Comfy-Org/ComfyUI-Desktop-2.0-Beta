@@ -254,21 +254,6 @@ function handleChooserShowNewInstall(): void {
   void switchPanel('new-install')
 }
 
-function handleChooserShowDetail(installation: Installation): void {
-  // View Details from the chooser context menu. The chooser host has
-  // no install backing it (installationId === null), so 'install-settings'
-  // can't be set on this window directly. Instead reuse the pick path —
-  // launching the install opens its own ComfyUI window where the user
-  // can reach Install Settings via the install pill caret.
-  //
-  // A future improvement is to spawn an install-backed host window with
-  // panel=install-settings without launching the instance, but that's
-  // a larger change — for now "View Details" effectively means "open
-  // this install" which is a more useful default than the dead-end the
-  // launcher window's detail modal provided.
-  void handleChooserPick(installation)
-}
-
 function handleNavigateList(): void {
   // The install was removed from the list (e.g. deleted, migrated). The
   // ComfyUI window that hosts this panel no longer has an install backing
@@ -378,7 +363,6 @@ onUnmounted(() => {
         <ChooserView
           @pick="handleChooserPick"
           @show-new-install="handleChooserShowNewInstall"
-          @show-detail="handleChooserShowDetail"
         />
       </div>
 

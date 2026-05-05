@@ -43,8 +43,6 @@ const emit = defineEmits<{
   /** User triggered the new-install flow (top-left card or empty Cloud
    *  card). */
   'show-new-install': []
-  /** User opened the install detail (View Details from the context menu). */
-  'show-detail': [installation: Installation]
 }>()
 
 const installationStore = useInstallationStore()
@@ -87,9 +85,21 @@ function sortByRecency(a: Installation, b: Installation): number {
   return tb - ta
 }
 
+/** Sort key: pinned installs first (recency-ordered within pinned), then
+ *  unpinned installs (recency-ordered). The pin affordance promotes
+ *  installs the user wants to keep visible regardless of how recently
+ *  they were launched — the chooser's "Pin" context-menu item drives
+ *  this ranking. */
+function sortByPinAndRecency(a: Installation, b: Installation): number {
+  const aPinned = prefs.isPinned(a.id) ? 1 : 0
+  const bPinned = prefs.isPinned(b.id) ? 1 : 0
+  if (aPinned !== bPinned) return bPinned - aPinned
+  return sortByRecency(a, b)
+}
+
 /** Apply the active filter to the non-cloud list. */
 const visibleInstalls = computed<Installation[]>(() => {
-  const sorted = [...nonCloudInstalls.value].sort(sortByRecency)
+  const sorted = [...nonCloudInstalls.value].sort(sortByPinAndRecency)
   switch (activeFilter.value) {
     case 'all': return sorted
     case 'local': return sorted.filter((i) => i.sourceCategory === 'local')
@@ -142,9 +152,9 @@ function iconFor(category: string | undefined): typeof Cloud {
   }
 }
 
-// --- Context menu (pin/unpin/dismiss-error/view-details) ---
+// --- Context menu (pin/unpin/dismiss-error) ---
 const { ctxMenu, ctxMenuItems, openCardMenu, handleCtxMenuSelect, closeMenu } =
-  useInstallContextMenu((inst) => emit('show-detail', inst))
+  useInstallContextMenu()
 
 // --- Card status classes (running, stopping, in-progress, errored) ---
 function statusClasses(inst: Installation): Record<string, boolean> {
@@ -242,7 +252,9 @@ function handleNewInstallClick(): void {
           {{ cloudInstall ? cloudInstall.name : $t('cloud.label') }}
         </div>
         <div class="chooser-tile-meta">
-          {{ cloudInstall ? cloudInstall.sourceLabel : $t('cloud.desc') }}
+          <span class="chooser-tile-pill">
+            {{ cloudInstall ? cloudInstall.sourceLabel : $t('cloud.desc') }}
+          </span>
         </div>
       </button>
 

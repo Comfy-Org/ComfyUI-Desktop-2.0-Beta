@@ -5,8 +5,8 @@
     "launchedAgo": "已启动 {time}",
     "neverLaunched": "尚未启动",
     "pinned": "已固定",
-    "pinToDashboard": "固定到仪表盘",
-    "unpinFromDashboard": "从仪表盘取消固定",
+    "pinToDashboard": "固定",
+    "unpinFromDashboard": "取消固定",
     "telemetryNotice": "我们会收集匿名使用遥测数据来改进 ComfyUI 启动器。",
     "telemetrySettings": "在设置中管理"
   },
