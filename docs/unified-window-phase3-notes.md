@@ -336,7 +336,7 @@ This also resolves the floating-component / WebContentsView z-order pain
 without needing to move the panel into the Comfy renderer (which would
 re-couple us to ComfyUI's storage and CSP).
 
-## 7. Title bar v3 — pill always-pill, click-anywhere, nav placement
+## 7. Title bar v3 — pill always-pill, click-anywhere, nav placement — **DONE**
 
 The title bar shipped in Phase 3 (`title bar v2 — File menu (left) + center
 install pill with caret`, commit `716eb03`) ships a working but
@@ -1179,10 +1179,11 @@ bars + status pills, pin-first sort, and a click-driven action
 popover with double-click as the open fast-path (Open + Pin / Unpin
 + Dismiss error today; richer items follow once Issue #470 lands).
 
-Sections 7, 10 capture UX refinements queued up while the unified
-window is live: title-bar pill polish and the update-channel dropdown.
+Section 10 (update-channel dropdown) is the remaining UX refinement
+queued up while the unified window is live. §7 — title-bar v3, the
+single-click pill with Back / Forward immediately to its left — and
 §9 — Restart-vs-Launch in Install Settings + the project-wide accent
-button convention — has landed.
+button convention — have both landed.
 
 Sections 11–14 are recently shipped UX refinements: chooser-host
 focus on launch (§11), chooser-host title-bar / overlay colour match
