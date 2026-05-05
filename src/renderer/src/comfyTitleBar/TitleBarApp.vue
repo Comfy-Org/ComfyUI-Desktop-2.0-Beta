@@ -41,6 +41,7 @@ interface Bridge {
   onThemeChanged: (cb: (theme: { bg: string; text: string }) => void) => () => void
   onFullscreenChanged: (cb: (fullscreen: boolean) => void) => () => void
   onMenuClosed: (cb: (info: { menu: 'file' | 'install' }) => void) => () => void
+  onInertChanged: (cb: (inert: boolean) => void) => () => void
   ready: () => void
 }
 
@@ -81,6 +82,20 @@ const activePanel = ref<ComfyPanelKey>('comfy')
  *  navigation. Disabled-by-default until the first nav-state event. */
 const canBack = ref(false)
 const canForward = ref(false)
+/**
+ * Tier 3 takeover flag (Phase 3 §17). When true, the panel renderer
+ * has a full-window takeover mounted; the title bar stays visible but
+ * its interactive bits become inert so the user can't dismiss the
+ * takeover by hitting File / install pill / Back / Forward. The OS
+ * window controls (× / □) sit outside this view and stay live — the
+ * user always retains an "interrupt" affordance via close.
+ *
+ * Driven by `comfy-titlebar:inert-changed` from main, which forwards
+ * the panel renderer's `setTitleBarInert(boolean)` call. State is
+ * mirrored locally rather than asked-for; main does NOT cache the
+ * flag, matching how panel-changed / theme-changed already work.
+ */
+const isInert = ref(false)
 /**
  * Install-less host window flag (Phase 3 step 2c). When true, the center
  * install pill labels itself "Choose an install" (set by the initial
@@ -135,6 +150,12 @@ function anchorBelow(el: HTMLElement | null | undefined): MenuAnchor {
 }
 
 function handleFileMenu(): void {
+  // Tier 3 takeover holds the title bar inert — the file menu can't
+  // open while a takeover is mounted (the takeover's own surface is
+  // the only thing the user should be interacting with). The button
+  // is also `:disabled` in inert mode, so this guard is belt-and-
+  // braces against keyboard activation.
+  if (isInert.value) return
   // Suppress click-to-toggle-close: if the file menu just closed, this
   // click is the same one that dismissed it (OS dismissed first, then
   // event propagates to the button). Don't reopen.
@@ -142,10 +163,12 @@ function handleFileMenu(): void {
   bridge?.openFileMenu(anchorBelow(fileBtnRef.value))
 }
 function handleBack(): void {
+  if (isInert.value) return
   if (!canBack.value) return
   bridge?.goBack()
 }
 function handleForward(): void {
+  if (isInert.value) return
   if (!canForward.value) return
   bridge?.goForward()
 }
@@ -153,8 +176,10 @@ function handleForward(): void {
  *  the whole pill opens the native install menu (Phase 3 §7 — the pill
  *  body and caret are no longer separate hit targets). Install-less
  *  host windows render a disabled pill, so this handler is unreachable
- *  there. */
+ *  there. Tier 3 takeover also disables the pill so the user can't
+ *  pop the install menu over a takeover. */
 function handleInstallPillClick(): void {
+  if (isInert.value) return
   if (isInstallLess.value) return
   if (Date.now() - menuClosedAt.install < MENU_REOPEN_GUARD_MS) return
   bridge?.openInstallMenu(anchorBelow(pillBtnRef.value))
@@ -166,6 +191,7 @@ let unsubTitle: (() => void) | undefined
 let unsubTheme: (() => void) | undefined
 let unsubFullscreen: (() => void) | undefined
 let unsubMenuClosed: (() => void) | undefined
+let unsubInert: (() => void) | undefined
 
 /** Drop the hover gate immediately when input leaves the title-bar
  *  webContents — covers the case where a native menu (Menu.popup) or
@@ -210,6 +236,9 @@ onMounted(() => {
   unsubMenuClosed = bridge.onMenuClosed(({ menu }) => {
     menuClosedAt[menu] = Date.now()
   })
+  unsubInert = bridge.onInertChanged((inert) => {
+    isInert.value = inert
+  })
   window.addEventListener('blur', handleWindowBlur)
   window.addEventListener('pointermove', handlePointerMove)
   document.documentElement.addEventListener('pointerleave', handlePointerLeave)
@@ -227,6 +256,7 @@ onUnmounted(() => {
   unsubTheme?.()
   unsubFullscreen?.()
   unsubMenuClosed?.()
+  unsubInert?.()
   window.removeEventListener('blur', handleWindowBlur)
   window.removeEventListener('pointermove', handlePointerMove)
   document.documentElement.removeEventListener('pointerleave', handlePointerLeave)
@@ -241,6 +271,7 @@ onUnmounted(() => {
       'is-light': isLight,
       'is-fullscreen': isFullscreen,
       'is-hover-active': isHoverActive,
+      'is-inert': isInert,
     }"
     :style="{
       background: themeBg ?? undefined,
@@ -262,6 +293,7 @@ onUnmounted(() => {
         aria-haspopup="menu"
         title="Menu"
         aria-label="Menu"
+        :disabled="isInert"
         @click="handleFileMenu"
       >
         <MenuIcon :size="18" />
@@ -277,7 +309,7 @@ onUnmounted(() => {
       <button
         type="button"
         class="title-nav-button"
-        :disabled="!canBack"
+        :disabled="!canBack || isInert"
         aria-label="Back"
         title="Back"
         @click="handleBack"
@@ -287,7 +319,7 @@ onUnmounted(() => {
       <button
         type="button"
         class="title-nav-button"
-        :disabled="!canForward"
+        :disabled="!canForward || isInert"
         aria-label="Forward"
         title="Forward"
         @click="handleForward"
@@ -299,8 +331,8 @@ onUnmounted(() => {
         type="button"
         class="title-install-pill"
         :class="{ 'is-install-less': isInstallLess }"
-        :disabled="isInstallLess"
-        :aria-haspopup="isInstallLess ? undefined : 'menu'"
+        :disabled="isInstallLess || isInert"
+        :aria-haspopup="isInstallLess || isInert ? undefined : 'menu'"
         @click="handleInstallPillClick"
       >
         <span class="title-install-name">{{ installLabel }}</span>
@@ -493,6 +525,20 @@ onUnmounted(() => {
 .title-install-caret {
   flex-shrink: 0;
   opacity: 0.7;
+}
+
+/* Tier 3 takeover (§17) — interactive controls are :disabled while a
+   takeover is mounted, but install-less mode also disables the pill,
+   and we want the takeover state to read more "inert" than just
+   "no-install-here". The is-inert class adds a uniform dimming pass
+   so File / Back / Forward / pill all read as paused at the same
+   visual weight. Window controls (× / □) live outside this view and
+   stay live. */
+.title-bar.is-inert .title-menu-button:disabled,
+.title-bar.is-inert .title-nav-button:disabled,
+.title-bar.is-inert .title-install-pill:disabled {
+  cursor: default;
+  opacity: 0.5;
 }
 
 /* Dropdown popups are now native OS menus rendered via Menu.popup() in

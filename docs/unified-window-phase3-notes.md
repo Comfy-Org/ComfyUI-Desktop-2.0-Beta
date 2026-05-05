@@ -1112,6 +1112,87 @@ callers).
 Three steps still remain under §17 and the §10 / §16 / §18 / §19
 sections — see the relevant headings for current state.
 
+### Status — flow takeover migration **DONE**
+
+The four install-creation / import flow modals
+(`new-install` / `track` / `load-snapshot` / `quick-install`) now
+mount as Tier 3 takeovers in `PanelApp`'s overlay slot instead of
+swapping the panel body. The default body (chooser for install-less
+hosts, launcher-settings for install-backed) stays mounted underneath
+for the takeover's duration; dismissing the takeover drops the user
+right back where they were with no navigation churn.
+
+Renderer-side wiring:
+
+- `useOverlay` already had `kind: 'takeover'` carved out — Step 3 just
+  added the per-component dispatch in `PanelApp`'s template (one
+  shared `[data-overlay-key="takeover"]` `view-modal`, one v-if branch
+  per FlowComponent). The pre-§17 `.panel-flow` `:deep` overrides
+  that turned modal-styled roots into full-panel bodies moved over to
+  this same slot wholesale.
+- `switchPanel(key)` no longer assigns flow keys to `activePanel`; it
+  diverts them through a new `openFlowTakeover(component)` helper that
+  awaits `openOverlay({ kind: 'takeover', component })`, then runs
+  the modal's imperative `open()` reset post-mount (same form-state
+  reset reason as the pre-§17 panel-body branches).
+- `defaultBodyPanel()` is the new initial-`activePanel` source — flow
+  keys passed via `?panel=…` URL or `panel-switch` IPC mount the
+  takeover above this default rather than as the body itself.
+
+Title-bar coordination via main:
+
+- New IPC: `comfy-window:set-titlebar-inert` (panel renderer →
+  main) → `comfy-titlebar:inert-changed` (main → title-bar
+  WebContentsView). Main does NOT cache the flag; the title-bar
+  renderer mirrors the boolean locally (matches how panel-changed /
+  theme-changed already work).
+- `PanelApp` watches `tier` and only signals on transitions
+  in/out of Tier 3 — Tier 1 ↔ Tier 2 shifts are silent so we don't
+  spam IPC.
+- `TitleBarApp` adds an `isInert` flag and applies `is-inert` class +
+  `:disabled` bindings to the file menu, install pill, and back/
+  forward arrows for the takeover's duration. Each click handler also
+  early-returns on `isInert.value` as belt-and-braces against
+  keyboard activation. Window controls (× / □) live outside this
+  view and stay live — the user always retains an "interrupt"
+  affordance via close.
+
+DROPs that landed with this slice:
+
+- `<div v-else-if="activePanel === 'new-install'" class="panel-flow">`
+  branches in `PanelApp`'s template (and the matching `'track'` /
+  `'load-snapshot'` / `'quick-install'` branches). The
+  `panel-content:has(.panel-flow)` and `.panel-flow :deep(...)` CSS
+  rules they relied on went with them — the equivalent rules now
+  hang off `[data-overlay-key="takeover"]`.
+- `handleFlowClose` — `closeOverlay` does the same job at the
+  overlay-slot level and the underlying body is already correct
+  (we never left it).
+- The "Switch the panel body and run the post-mount imperative
+  open() reset" code path in `switchPanel` — flow vs non-flow are
+  now structurally different surfaces (overlay vs body), not two
+  branches of the same body swap.
+
+Architectural contract preserved:
+
+- Same code in chooser host and install host — `defaultBodyPanel()`
+  reads `installationId` once at the top, but the takeover-slot
+  template and `openFlowTakeover` are host-agnostic.
+- The chooser host (or install-backed launcher-settings host) hosts
+  the takeover for its entire duration; the eventual swap to the
+  install host happens AFTER the takeover ends (same as today's
+  `pendingPickUnsub` close-host-on-instance-started in
+  `handleChooserPick`).
+- Back/Forward + panel switches do NOT close overlays — the title
+  bar's nav arrows are inert during a takeover and main's
+  `panel-switch` IPC only updates `activePanel` (the body
+  underneath); the takeover slot is independent.
+
+The first-use takeover (Step 4) and the per-section follow-ups
+(Steps 5/6) now slot into the same plumbing — first-use mounts at the
+takeover slot just like new-install does, and Step 5's update
+channel / kebab-menu actions feed the same `openOverlay` call.
+
 ---
 
 ## 18. Title-bar status pills — restart-required + updates available

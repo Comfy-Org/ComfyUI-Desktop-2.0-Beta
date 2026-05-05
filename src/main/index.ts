@@ -1713,6 +1713,32 @@ ipcMain.on('comfy-window:close-current-panel', (event) => {
 })
 
 /**
+ * Phase 3 §17 — Tier 3 takeover coordination. The panel renderer
+ * watches its overlay tier and sends `{ inert: boolean }` whenever the
+ * tier flips into / out of 3 (full-window takeover). We forward the
+ * flag to the host's title-bar WebContentsView so the title bar can
+ * disable its file menu / install pill / back-forward arrows for the
+ * duration of the takeover (window controls stay live — they're OS
+ * affordances, not part of the renderer's surface).
+ *
+ * The send is a one-shot per state change; main does NOT cache the
+ * inert state on the entry. The title-bar renderer keeps the local
+ * flag, so a rare main↔panel resync (e.g. dev-tools reload) is the
+ * caller's responsibility to re-broadcast — the same way panel and
+ * theme already work.
+ */
+ipcMain.on('comfy-window:set-titlebar-inert', (event, payload: { inert: boolean }) => {
+  for (const entry of comfyWindows.values()) {
+    if (entry.panelView?.webContents === event.sender) {
+      if (!entry.titleBarView.webContents.isDestroyed()) {
+        entry.titleBarView.webContents.send('comfy-titlebar:inert-changed', !!payload?.inert)
+      }
+      return
+    }
+  }
+})
+
+/**
  * File menu → New Window (Phase 3 title bar v2). Always opens a fresh
  * install-less chooser host window — does NOT focus an existing one
  * (that's the tray-entry behaviour). The user explicitly asked for a

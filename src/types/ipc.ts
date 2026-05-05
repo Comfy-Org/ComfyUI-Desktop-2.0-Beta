@@ -696,6 +696,13 @@ export interface ElectronApi {
    *  the comfy/chooser root. Fire-and-forget; the panel will receive
    *  the resulting `panel-switch` like any other navigation. */
   closeCurrentPanel(): void
+  /** Tell main to flag the host window's title-bar WebContentsView as
+   *  inert (Phase 3 §17 Tier 3 takeover). When `inert` is true the
+   *  title bar disables its file menu, install pill and back/forward
+   *  arrows; window controls stay live. Fire-and-forget; the title bar
+   *  receives the change via the `comfy-titlebar:inert-changed`
+   *  broadcast main forwards back from this IPC. */
+  setTitleBarInert(inert: boolean): void
   /** Stamp the calling chooser host window's current bounds onto the
    *  install's saved-bounds slot (Phase 3 visual continuity). The chooser
    *  pick flow calls this BEFORE kicking off the launch so the new

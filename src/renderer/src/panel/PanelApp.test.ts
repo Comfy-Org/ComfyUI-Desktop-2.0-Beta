@@ -155,6 +155,7 @@ function installMockApi(initial?: { installations?: InstallationLike[] }): MockA
       state.panelSwitchCallbacks.push(cb)
       return () => {}
     }),
+    setTitleBarInert: vi.fn(),
     onSettingsChanged: vi.fn(() => () => {}),
     onInstallationsChanged: vi.fn((cb: () => void) => {
       state.installationsChangedCallbacks.push(cb)
@@ -292,46 +293,70 @@ describe('PanelApp', () => {
     expect(wrapper.find('[data-testid="directories-view"]').exists()).toBe(true)
   })
 
-  it('switches to new-install panel when the chooser emits show-new-install', async () => {
-    // Phase 3 step 2e — empty-state CTA from the chooser was bouncing
-    // through openNewInstallFromHost (focus launcher window). Now it
-    // switches the host's panel body to new-install in-place.
+  it('opens the new-install takeover above the chooser body when show-new-install fires', async () => {
+    // Phase 3 §17 — flow modals migrated from panel-body to Tier 3
+    // takeover overlays. The chooser stays mounted underneath the
+    // takeover, so dismissing the takeover drops the user back into
+    // the chooser tile they came from with no navigation churn.
     window.history.replaceState({}, '', '/?panel=chooser')
     const wrapper = mountPanel()
     await flushPromises()
     expect(wrapper.find('[data-testid="chooser-view"]').exists()).toBe(true)
     await wrapper.find('[data-testid="chooser-new-install"]').trigger('click')
     await flushPromises()
-    expect(wrapper.find('[data-testid="chooser-view"]').exists()).toBe(false)
+    // Both visible — takeover sits ABOVE the chooser body.
+    expect(wrapper.find('[data-testid="chooser-view"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="new-install-modal"]').exists()).toBe(true)
   })
 
-  it('returns to chooser when a flow panel emits close', async () => {
+  it('returns to the underlying body when a takeover emits close', async () => {
     window.history.replaceState({}, '', '/?panel=new-install')
     const wrapper = mountPanel()
     await flushPromises()
+    // The URL-driven flow panel mounts as a takeover above the default
+    // body (chooser, since there's no installationId).
     expect(wrapper.find('[data-testid="new-install-modal"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="chooser-view"]').exists()).toBe(true)
     await wrapper.findComponent({ name: 'NewInstallModal' }).vm.$emit('close')
     await flushPromises()
     expect(wrapper.find('[data-testid="new-install-modal"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="chooser-view"]').exists()).toBe(true)
   })
 
-  it('renders the track flow panel when initialised with panel=track', async () => {
+  it('signals the title bar as inert when a takeover mounts and live again on close', async () => {
+    // Phase 3 §17 — the panel renderer broadcasts inert state through
+    // `window.api.setTitleBarInert(boolean)` whenever the overlay tier
+    // flips into / out of 3. Main forwards to the title-bar
+    // WebContentsView so it can disable file menu / install pill /
+    // back-forward arrows for the takeover's duration.
+    window.history.replaceState({}, '', '/?panel=chooser')
+    const wrapper = mountPanel()
+    await flushPromises()
+    const setInert = (window as unknown as { api: { setTitleBarInert: ReturnType<typeof vi.fn> } }).api.setTitleBarInert
+    expect(setInert).not.toHaveBeenCalled()
+    await wrapper.find('[data-testid="chooser-new-install"]').trigger('click')
+    await flushPromises()
+    expect(setInert).toHaveBeenLastCalledWith(true)
+    await wrapper.findComponent({ name: 'NewInstallModal' }).vm.$emit('close')
+    await flushPromises()
+    expect(setInert).toHaveBeenLastCalledWith(false)
+  })
+
+  it('renders the track takeover when initialised with panel=track', async () => {
     window.history.replaceState({}, '', '/?panel=track')
     const wrapper = mountPanel()
     await flushPromises()
     expect(wrapper.find('[data-testid="track-modal"]').exists()).toBe(true)
   })
 
-  it('renders the load-snapshot flow panel when initialised with panel=load-snapshot', async () => {
+  it('renders the load-snapshot takeover when initialised with panel=load-snapshot', async () => {
     window.history.replaceState({}, '', '/?panel=load-snapshot')
     const wrapper = mountPanel()
     await flushPromises()
     expect(wrapper.find('[data-testid="load-snapshot-modal"]').exists()).toBe(true)
   })
 
-  it('renders the quick-install flow panel when initialised with panel=quick-install', async () => {
+  it('renders the quick-install takeover when initialised with panel=quick-install', async () => {
     window.history.replaceState({}, '', '/?panel=quick-install')
     const wrapper = mountPanel()
     await flushPromises()

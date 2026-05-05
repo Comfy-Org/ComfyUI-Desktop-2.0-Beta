@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import SettingsView from '../views/SettingsView.vue'
 import DetailModal from '../views/DetailModal.vue'
@@ -19,7 +19,7 @@ import { useInstallationStore } from '../stores/installationStore'
 import { useProgressStore } from '../stores/progressStore'
 import { useLauncherPrefs } from '../composables/useLauncherPrefs'
 import { useListAction } from '../composables/useListAction'
-import { useOverlay } from '../composables/useOverlay'
+import { useOverlay, type FlowComponent } from '../composables/useOverlay'
 import type { ActionResult, Installation, ShowProgressOpts } from '../types/ipc'
 
 /**
@@ -54,10 +54,18 @@ const VALID_PANELS: ReadonlySet<PanelKey> = new Set([
 
 /**
  * Panels that wrap a `*Modal` component which exposes an imperative
- * `open()` reset. Switching to one of these panels must call `open()`
- * after the component mounts so the form state resets cleanly each
- * time the user re-enters the flow (the launcher window's pre-Phase-3
- * App.vue did the same via useNavigation's invokeWhenReady).
+ * `open()` reset. Phase 3 §17 — these no longer mount as panel-body
+ * branches; they mount in the host's takeover overlay slot (Tier 3)
+ * via `useOverlay`. The set is still keyed on PanelKey because main
+ * still addresses these as "panel switch" requests (URL `?panel=…`
+ * and the `panel-switch` IPC) — `switchPanel` diverts them into
+ * `openOverlay({ kind: 'takeover', component })` instead of assigning
+ * `activePanel`.
+ *
+ * Each entry has a matching `*Ref` template ref so we can call the
+ * imperative `open()` reset after the takeover mounts (form state
+ * carries over otherwise — same reason the pre-§17 panel-body
+ * branches needed the post-mount `open()`).
  */
 const FLOW_PANELS: ReadonlySet<PanelKey> = new Set([
   'new-install',
@@ -71,16 +79,32 @@ useTheme()
 
 const params = new URLSearchParams(window.location.search)
 const installationId = params.get('installationId') || ''
+/**
+ * The default body panel for this host — the surface that sits
+ * underneath any takeover overlay. Install-backed hosts default to
+ * launcher-settings (matches the pre-Phase-3 title-bar Launcher
+ * Settings pill behaviour), install-less hosts default to the chooser.
+ * Used both for the initial mount (when the URL doesn't request a
+ * specific panel) AND as the underlying body when the initial URL
+ * panel is a flow-takeover (`?panel=new-install` etc.).
+ */
+function defaultBodyPanel(): PanelKey {
+  return installationId ? 'launcher-settings' : 'chooser'
+}
 const initialPanel: PanelKey = ((): PanelKey => {
   const raw = params.get('panel')
   if (raw && VALID_PANELS.has(raw as PanelKey)) return raw as PanelKey
-  // Install-less host windows (no installationId) default to the chooser;
-  // install-backed panels default to launcher-settings (matches the
-  // pre-Phase-3 behaviour for the title-bar Launcher Settings pill).
-  return installationId ? 'launcher-settings' : 'chooser'
+  return defaultBodyPanel()
 })()
 
-const activePanel = ref<PanelKey>(initialPanel)
+// `activePanel` is the underlying body. Flow keys are never assigned
+// here — they mount in the takeover overlay slot instead (see
+// `openFlowTakeover` and the post-mount `switchPanel(initialPanel)`
+// in `onMounted` which routes `?panel=new-install` etc. through the
+// overlay path).
+const activePanel = ref<PanelKey>(
+  FLOW_PANELS.has(initialPanel) ? defaultBodyPanel() : initialPanel,
+)
 const settingsRef = ref<InstanceType<typeof SettingsView> | null>(null)
 const progressRef = ref<InstanceType<typeof ProgressModal> | null>(null)
 const newInstallRef = ref<InstanceType<typeof NewInstallModal> | null>(null)
@@ -95,13 +119,29 @@ const launcherPrefs = useLauncherPrefs()
 
 /**
  * Host-level overlay slot (Phase 3 §17). Owns the in-flight progress
- * (`progress` kind) and any future Tier 3 takeovers. Manage / Tier 1
+ * (`progress` kind) and Tier 3 takeovers (`takeover` kind — the four
+ * flow modals plus the future first-use flow). Manage / Tier 1
  * overlays driven by ChooserView mount in ChooserView's own slot —
  * see `useOverlay` for the tier-collision rules. The `current` ref is
  * destructured to a top-level binding so the template can read it via
  * Vue's auto-unwrap.
+ *
+ * `tier` drives the title-bar inert flag — when a Tier 3 takeover is
+ * mounted the title bar disables its file menu, install pill and
+ * back/forward arrows so the user can't dismiss the takeover via
+ * those affordances. See the watcher below.
  */
-const { current: currentOverlay, openOverlay } = useOverlay()
+const { current: currentOverlay, tier, openOverlay, closeOverlay } = useOverlay()
+
+watch(tier, (newTier, oldTier) => {
+  // Only signal main on transitions into/out of the takeover tier —
+  // shifting between Tier 1 ↔ Tier 2 doesn't change the title-bar
+  // state, so we skip the redundant IPC.
+  const wasTakeover = oldTier === 3
+  const isTakeover = newTier === 3
+  if (wasTakeover === isTakeover) return
+  window.api.setTitleBarInert(isTakeover)
+})
 
 // installationStore.fetchInstallations() is wired to onInstallationsChanged
 // inside the store itself, so the panel just needs to read from it.
@@ -167,39 +207,45 @@ function handleProgressClose(): void {
 }
 
 /**
- * Switch the panel body and run the post-mount imperative open() reset
- * for flow panels (`new-install` / `track` / `load-snapshot` /
- * `quick-install`). The launcher window's pre-Phase-3 App.vue did the
- * same via useNavigation.invokeWhenReady — without this reset the form
- * state would carry over between successive entries to the same flow.
+ * Phase 3 §17 — open one of the four flow modals as a Tier 3 takeover
+ * overlay (full-window body sitting above the underlying panel). The
+ * imperative `open()` reset on each *Modal ref runs after the takeover
+ * mounts so form state always starts fresh, the same way the pre-§17
+ * panel-body branches reset on (re)entry.
  *
- * Idempotent: switching to the already-active panel still re-runs
- * open(), which mirrors the launcher window behaviour where re-opening
- * the modal always starts fresh.
+ * Returns silently if `openOverlay` was rejected (the user dismissed
+ * the cancel-prompt that fires when an in-flight Tier 2 progress op
+ * is being pre-empted — see `useOverlay`'s tier-collision rules).
  */
-async function switchPanel(panel: PanelKey): Promise<void> {
-  activePanel.value = panel
-  if (!FLOW_PANELS.has(panel)) return
-  // Wait for the v-else-if branch to mount the component.
+async function openFlowTakeover(component: FlowComponent): Promise<void> {
+  const ok = await openOverlay({ kind: 'takeover', component })
+  if (!ok) return
+  // Wait for the v-if branch in the takeover slot to mount the
+  // component before reaching for its ref.
   await nextTick()
-  if (panel === 'new-install') await newInstallRef.value?.open()
-  else if (panel === 'track') trackRef.value?.open()
-  else if (panel === 'load-snapshot') loadSnapshotRef.value?.open()
-  else if (panel === 'quick-install') await quickInstallRef.value?.open()
+  if (component === 'new-install') await newInstallRef.value?.open()
+  else if (component === 'track') trackRef.value?.open()
+  else if (component === 'load-snapshot') loadSnapshotRef.value?.open()
+  else if (component === 'quick-install') await quickInstallRef.value?.open()
 }
 
 /**
- * Returning to chooser — what the per-flow `close` and `navigate-list`
- * emits map to inside the install-less host window. There's no launcher
- * list to navigate to anymore; the chooser IS the list, so both fold
- * into "back to chooser". Install-backed panels also use this path
- * (e.g. flows started from a future install-pill caret menu) — they'll
- * land back in their last-active install panel via setActivePanel from
- * main, but in the meantime "chooser" is a safe default that doesn't
- * leave the user on a dismissed flow panel.
+ * Switch the underlying panel body. Flow keys (`new-install` / `track`
+ * / `load-snapshot` / `quick-install`) divert into the Tier 3
+ * takeover overlay slot instead of swapping the body — see
+ * `openFlowTakeover` for why.
+ *
+ * For non-flow keys: the assignment is idempotent — re-selecting the
+ * already-active panel is a no-op, matching what the user perceives
+ * (the title-bar pill click is just "go to this page", with no reset
+ * semantics needed for tab-style views like Settings / Directories).
  */
-function handleFlowClose(): void {
-  void switchPanel('chooser')
+async function switchPanel(panel: PanelKey): Promise<void> {
+  if (FLOW_PANELS.has(panel)) {
+    await openFlowTakeover(panel as FlowComponent)
+    return
+  }
+  activePanel.value = panel
 }
 
 function handleUpdateInstallation(inst: Installation): void {
@@ -285,10 +331,11 @@ async function handleChooserPick(installation: Installation): Promise<void> {
 }
 
 function handleChooserShowNewInstall(): void {
-  // Empty-state CTA from the chooser — switch the host window's body
-  // to the new-install flow panel. Same install-less host window, just
-  // a different body mode; the user perceives a wizard step rather than
-  // a navigation jump.
+  // Empty-state CTA from the chooser — opens the new-install flow as
+  // a Tier 3 takeover above the chooser body. Same install-less host
+  // window; the user perceives a wizard step rather than a navigation
+  // jump, and dismissing the takeover drops them right back into the
+  // chooser tile they came from.
   void switchPanel('new-install')
 }
 
@@ -405,48 +452,15 @@ onUnmounted(() => {
         />
       </div>
 
-      <!-- Install-creation / import flow panels (Phase 3 step 2e). The
-           launcher window's modal components are reused here as full-panel
-           bodies; the panel-flow wrapper makes the modal-styled root fill
-           the panel area instead of floating in a dim backdrop. -->
-      <div v-else-if="activePanel === 'new-install'" class="panel-flow">
-        <NewInstallModal
-          ref="newInstallRef"
-          @close="handleFlowClose"
-          @navigate-list="handleFlowClose"
-          @show-progress="handleShowProgress"
-        />
-      </div>
-
-      <div v-else-if="activePanel === 'track'" class="panel-flow">
-        <TrackModal
-          ref="trackRef"
-          @close="handleFlowClose"
-          @navigate-list="handleFlowClose"
-        />
-      </div>
-
-      <div v-else-if="activePanel === 'load-snapshot'" class="panel-flow">
-        <LoadSnapshotModal
-          ref="loadSnapshotRef"
-          @close="handleFlowClose"
-          @show-progress="handleShowProgress"
-        />
-      </div>
-
-      <div v-else-if="activePanel === 'quick-install'" class="panel-flow">
-        <QuickInstallModal
-          ref="quickInstallRef"
-          @close="handleFlowClose"
-          @show-progress="handleShowProgress"
-        />
-      </div>
     </main>
 
     <!-- Host-level overlay slot (Phase 3 §17). One DOM node at a
-         time, owned by `useOverlay`. Today only the `progress` kind
-         mounts here (Tier 2); Step 3 wires Tier 3 takeovers and Step
-         4 wires the first-use takeover into this same slot. -->
+         time, owned by `useOverlay`. Mounts either the in-flight
+         progress modal (Tier 2 — non-app-ending ops) or one of the
+         Tier 3 takeovers (the four flow modals; Step 4 will add the
+         first-use takeover here too). The two branches are mutually
+         exclusive because `useOverlay` only ever holds one overlay
+         in `current.value`. -->
     <div
       v-if="currentOverlay?.kind === 'progress'"
       class="view-modal active"
@@ -456,6 +470,42 @@ onUnmounted(() => {
         ref="progressRef"
         :installation-id="currentOverlay.installationId"
         @close="handleProgressClose"
+      />
+    </div>
+
+    <!-- Tier 3 takeover slot. The four flow modals share the same
+         shell — the underlying panel body (chooser / launcher-settings)
+         stays mounted underneath, so `closeOverlay` returns the user
+         to wherever they came from without us having to remember it. -->
+    <div
+      v-else-if="currentOverlay?.kind === 'takeover'"
+      class="view-modal active"
+      data-overlay-key="takeover"
+    >
+      <NewInstallModal
+        v-if="currentOverlay.component === 'new-install'"
+        ref="newInstallRef"
+        @close="closeOverlay"
+        @navigate-list="closeOverlay"
+        @show-progress="handleShowProgress"
+      />
+      <TrackModal
+        v-else-if="currentOverlay.component === 'track'"
+        ref="trackRef"
+        @close="closeOverlay"
+        @navigate-list="closeOverlay"
+      />
+      <LoadSnapshotModal
+        v-else-if="currentOverlay.component === 'load-snapshot'"
+        ref="loadSnapshotRef"
+        @close="closeOverlay"
+        @show-progress="handleShowProgress"
+      />
+      <QuickInstallModal
+        v-else-if="currentOverlay.component === 'quick-install'"
+        ref="quickInstallRef"
+        @close="closeOverlay"
+        @show-progress="handleShowProgress"
       />
     </div>
 
@@ -492,20 +542,17 @@ onUnmounted(() => {
 
 /* Install-settings hosts an inline DetailModal and the comfy-lifecycle view
  * fills its own background — both own their padding, so negate the
- * panel-content gutter for those branches. The flow panels reuse modal
- * components which set their own scrolled body padding, so they also drop
- * the outer gutter. The chooser owns its own filter / grid padding and
- * needs the full panel height so its grid can scroll vertically. */
+ * panel-content gutter for those branches. The chooser owns its own
+ * filter / grid padding and needs the full panel height so its grid
+ * can scroll vertically. */
 .panel-content:has(.panel-install-settings),
 .panel-content:has(.panel-comfy-lifecycle),
-.panel-content:has(.panel-flow),
 .panel-content:has(.panel-chooser) {
   padding: 0;
 }
 
 .panel-install-settings,
 .panel-comfy-lifecycle,
-.panel-flow,
 .panel-chooser {
   flex: 1;
   min-height: 0;
@@ -514,11 +561,16 @@ onUnmounted(() => {
   overflow: hidden;
 }
 
-/* Flow panels reuse the launcher window's modal components (`*Modal.vue`
- * with a `.view-modal-content` root). When mounted as a panel body
- * they should fill the panel area instead of floating with a max-width
- * dialog box, so neutralize the modal sizing and chrome. */
-.panel-flow :deep(.view-modal-content) {
+/* Tier 3 takeover slot (Phase 3 §17). The four flow modals reuse the
+ * launcher window's modal components (`*Modal.vue` with a
+ * `.view-modal-content` root). When mounted as a takeover they should
+ * fill the panel area instead of floating with a max-width dialog
+ * box, so neutralize the modal sizing and chrome — same shape as the
+ * pre-§17 `.panel-flow` :deep override that lived alongside the
+ * panel-body branches. The `data-overlay-key` selector keeps this
+ * scoped to the takeover slot only; the progress-overlay slot still
+ * renders its ProgressModal as a centred dialog. */
+[data-overlay-key="takeover"] :deep(.view-modal-content) {
   width: 100%;
   max-width: none;
   height: 100%;

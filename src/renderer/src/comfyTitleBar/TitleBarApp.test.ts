@@ -8,6 +8,7 @@ interface MockBridgeState {
   themeChangedCallbacks: ((theme: { bg: string; text: string }) => void)[]
   fullscreenChangedCallbacks: ((fullscreen: boolean) => void)[]
   menuClosedCallbacks: ((info: { menu: 'file' | 'install' }) => void)[]
+  inertChangedCallbacks: ((inert: boolean) => void)[]
   setPanelCalls: string[]
   newWindowCalls: number
   fileMenuAnchors: { x: number; y: number }[]
@@ -25,6 +26,7 @@ function installMockBridge(opts: { isMac?: boolean; installationId?: string | nu
     themeChangedCallbacks: [],
     fullscreenChangedCallbacks: [],
     menuClosedCallbacks: [],
+    inertChangedCallbacks: [],
     setPanelCalls: [],
     newWindowCalls: 0,
     fileMenuAnchors: [],
@@ -65,6 +67,10 @@ function installMockBridge(opts: { isMac?: boolean; installationId?: string | nu
     },
     onMenuClosed: (cb: (info: { menu: 'file' | 'install' }) => void) => {
       state.menuClosedCallbacks.push(cb)
+      return () => {}
+    },
+    onInertChanged: (cb: (inert: boolean) => void) => {
+      state.inertChangedCallbacks.push(cb)
       return () => {}
     },
     ready: () => {
@@ -296,6 +302,56 @@ describe('TitleBarApp', () => {
     await wrapper.find('.title-install-pill').trigger('click')
     expect(bridgeState.installMenuAnchors.length).toBe(1)
 
+    wrapper.unmount()
+  })
+
+  it('disables file menu, install pill and back/forward when onInertChanged fires true', async () => {
+    // Phase 3 §17 — Tier 3 takeover broadcasts an inert flag through
+    // main → title bar so the user can't dismiss the takeover by
+    // hitting the title-bar controls. Window controls (× / □) sit
+    // outside this view and stay live regardless.
+    const { default: TitleBarApp } = await import('./TitleBarApp.vue')
+    const wrapper = mount(TitleBarApp, { attachTo: document.body })
+    await flushPromises()
+    // Enable back/forward so we can prove they're disabled by inert,
+    // not just by the absence of nav state.
+    bridgeState.navStateChangedCallbacks.forEach((cb) => cb({ canBack: true, canForward: true }))
+    await flushPromises()
+    const fileBtn = wrapper.find('.title-menu-button')
+    const pill = wrapper.find('.title-install-pill')
+    const navButtons = wrapper.findAll('.title-nav-button')
+    expect((fileBtn.element as HTMLButtonElement).disabled).toBe(false)
+    expect((pill.element as HTMLButtonElement).disabled).toBe(false)
+    expect((navButtons[0]!.element as HTMLButtonElement).disabled).toBe(false)
+    expect((navButtons[1]!.element as HTMLButtonElement).disabled).toBe(false)
+
+    // Flip into takeover.
+    bridgeState.inertChangedCallbacks.forEach((cb) => cb(true))
+    await flushPromises()
+    expect(wrapper.find('header').classes()).toContain('is-inert')
+    expect((fileBtn.element as HTMLButtonElement).disabled).toBe(true)
+    expect((pill.element as HTMLButtonElement).disabled).toBe(true)
+    expect((navButtons[0]!.element as HTMLButtonElement).disabled).toBe(true)
+    expect((navButtons[1]!.element as HTMLButtonElement).disabled).toBe(true)
+
+    // Clicks must NOT reach the bridge while inert.
+    await fileBtn.trigger('click')
+    await pill.trigger('click')
+    await navButtons[0]!.trigger('click')
+    await navButtons[1]!.trigger('click')
+    expect(bridgeState.fileMenuAnchors.length).toBe(0)
+    expect(bridgeState.installMenuAnchors.length).toBe(0)
+    expect(bridgeState.goBackCalls).toBe(0)
+    expect(bridgeState.goForwardCalls).toBe(0)
+
+    // Flip back out — controls become live again.
+    bridgeState.inertChangedCallbacks.forEach((cb) => cb(false))
+    await flushPromises()
+    expect(wrapper.find('header').classes()).not.toContain('is-inert')
+    expect((fileBtn.element as HTMLButtonElement).disabled).toBe(false)
+    expect((pill.element as HTMLButtonElement).disabled).toBe(false)
+    expect((navButtons[0]!.element as HTMLButtonElement).disabled).toBe(false)
+    expect((navButtons[1]!.element as HTMLButtonElement).disabled).toBe(false)
     wrapper.unmount()
   })
 

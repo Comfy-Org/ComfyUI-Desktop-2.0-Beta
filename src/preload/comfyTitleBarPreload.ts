@@ -59,6 +59,14 @@ export interface ComfyTitleBarBridge {
    *  renderer uses this to suppress an immediate re-open if the same
    *  click that dismissed the menu also re-targets the menu button. */
   onMenuClosed(cb: (info: { menu: 'file' | 'install' }) => void): () => void
+  /** Subscribe to inert-state changes (Phase 3 §17 Tier 3 takeover).
+   *  When the panel renderer's overlay tier flips into or out of 3,
+   *  main forwards the boolean here. Drives `is-inert` styling on the
+   *  title bar and disables interactive controls (file menu, install
+   *  pill, back/forward) so a takeover can't be dismissed via the
+   *  title bar. Window controls (× / □) stay live — they're OS
+   *  affordances outside this view. */
+  onInertChanged(cb: (inert: boolean) => void): () => void
   /** Tell main this title bar is mounted; main responds with the initial state. */
   ready(): void
 }
@@ -146,6 +154,13 @@ const bridge: ComfyTitleBarBridge = {
     }
     ipcRenderer.on('comfy-titlebar:menu-closed', handler)
     return () => ipcRenderer.removeListener('comfy-titlebar:menu-closed', handler)
+  },
+  onInertChanged: (cb) => {
+    const handler = (_event: IpcRendererEvent, inert: unknown): void => {
+      cb(!!inert)
+    }
+    ipcRenderer.on('comfy-titlebar:inert-changed', handler)
+    return () => ipcRenderer.removeListener('comfy-titlebar:inert-changed', handler)
   },
   ready: () => {
     ipcRenderer.send('comfy-window:title-bar-ready')
