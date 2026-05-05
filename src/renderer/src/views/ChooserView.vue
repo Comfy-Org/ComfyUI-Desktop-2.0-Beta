@@ -4,7 +4,7 @@ import { useInstallationStore } from '../stores/installationStore'
 import { useSessionStore } from '../stores/sessionStore'
 import { useLauncherPrefs } from '../composables/useLauncherPrefs'
 import { useInstallContextMenu } from '../composables/useInstallContextMenu'
-import { Cloud, Plus, Box, Monitor, Globe, Pin } from 'lucide-vue-next'
+import { Cloud, Plus, Box, Monitor, Globe, Pin, AlertCircle } from 'lucide-vue-next'
 import ContextMenu from '../components/ContextMenu.vue'
 import type { Installation } from '../types/ipc'
 
@@ -146,7 +146,7 @@ function iconFor(category: string | undefined): typeof Cloud {
 const { ctxMenu, ctxMenuItems, openCardMenu, handleCtxMenuSelect, closeMenu } =
   useInstallContextMenu((inst) => emit('show-detail', inst))
 
-// --- Card status classes (running, stopping, in-progress) ---
+// --- Card status classes (running, stopping, in-progress, errored) ---
 function statusClasses(inst: Installation): Record<string, boolean> {
   return {
     'chooser-tile-running':
@@ -154,7 +154,17 @@ function statusClasses(inst: Installation): Record<string, boolean> {
     'chooser-tile-stopping': sessionStore.isStopping(inst.id),
     'chooser-tile-in-progress':
       sessionStore.activeSessions.has(inst.id) && !sessionStore.isRunning(inst.id),
+    'chooser-tile-errored': hasError(inst),
   }
+}
+
+/** Whether the install's last session crashed or its last action errored.
+ *  Drives both the card-level red border (statusClasses) and the
+ *  AlertCircle badge in the top-right corner — surfaces card-level
+ *  visibility for an error state that previously only lived inside the
+ *  legacy DetailModal / Running view. */
+function hasError(inst: Installation): boolean {
+  return sessionStore.errorInstances.has(inst.id)
 }
 
 function pickInstall(inst: Installation): void {
@@ -249,6 +259,18 @@ function handleNewInstallClick(): void {
         <div class="chooser-tile-icon">
           <component :is="iconFor(inst.sourceCategory)" :size="28" />
         </div>
+        <!-- Error badge (top-right) — visible whenever the install's last
+             session crashed or its last action errored. Click-to-dismiss
+             still flows through the context menu's "Dismiss error" item;
+             the badge here is purely a card-level visibility affordance
+             so the user notices without opening the install. -->
+        <div
+          v-if="hasError(inst)"
+          class="chooser-tile-error"
+          :title="$t('running.errors')"
+        >
+          <AlertCircle :size="16" />
+        </div>
         <div class="chooser-tile-name">
           {{ inst.name }}
           <Pin
@@ -260,6 +282,10 @@ function handleNewInstallClick(): void {
         </div>
         <div class="chooser-tile-meta">
           <span>{{ inst.sourceLabel }}</span>
+          <template v-if="inst.version">
+            <span class="chooser-tile-meta-sep"> · </span>
+            <span class="chooser-tile-version">{{ inst.version }}</span>
+          </template>
           <template v-if="typeof inst.lastLaunchedAt === 'number'">
             <span class="chooser-tile-meta-sep"> · </span>
             <span>{{ $t('dashboard.launchedAgo', { time: timeAgo(inst.lastLaunchedAt as number) }) }}</span>
@@ -407,13 +433,48 @@ function handleNewInstallClick(): void {
 }
 
 /* Status overlays — match the visual language used by DashboardCard so
- * users recognise the running / stopping / in-progress states. */
+ * users recognise the running / stopping / in-progress / errored states.
+ * Running uses the accent blue (per §8 spec) so it reads as "this is
+ * the live one"; errored uses the danger red so it reads as "look at
+ * this one". The two states are mutually exclusive in practice
+ * (errored installs aren't currently running), but the CSS handles
+ * both being set just in case. */
 .chooser-tile-running {
-  box-shadow: inset 0 0 0 2px var(--accent-success, #2e7d32);
+  box-shadow: inset 0 0 0 2px var(--accent, #4a90e2);
+}
+.chooser-tile-errored {
+  box-shadow: inset 0 0 0 2px var(--accent-danger, #d92d20);
+}
+.chooser-tile-running.chooser-tile-errored {
+  /* Errored takes precedence visually if both happen to be set —
+   * a crashed-while-running install reads more usefully as "errored". */
+  box-shadow: inset 0 0 0 2px var(--accent-danger, #d92d20);
 }
 .chooser-tile-stopping,
 .chooser-tile-in-progress {
   opacity: 0.7;
+}
+
+/* AlertCircle badge in the top-right corner of an errored card. Sits
+ * above the icon's top-left position; uses the danger red to read as
+ * "click here to see what's wrong" at a glance. */
+.chooser-tile-error {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  color: var(--accent-danger, #d92d20);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+/* Version chip in the meta line. Slightly muted + monospace so it
+ * reads as data ("v0.3.45", "abc1234") rather than prose. */
+.chooser-tile-version {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  opacity: 0.85;
 }
 
 /* The two fixed-position tiles (New Install + Cloud) get a slightly

@@ -458,6 +458,50 @@ cards likely need more vertical room (or a denser two-column metadata
 strip below the install name) to accommodate version + update +
 running + error signals without going visually noisy.
 
+### Status
+
+First slice landed on `feat/unified-window-titlebar-panels`:
+
+- **Version display.** `Installation.version` (already populated by
+  every source plugin) renders in the meta line as a monospace chip
+  between `sourceLabel` and the relative-time stamp. Slightly muted
+  + monospaced so it reads as data, not prose.
+- **Running indicator switched to accent blue.** The
+  `chooser-tile-running` shadow now uses `var(--accent)` (#4a90e2
+  fallback) instead of the previous `var(--accent-success)` green
+  — matches the "this is the live one" semantics in §8 spec and the
+  legacy `instance-card.card-running` rule.
+- **Error visibility.** New `chooser-tile-errored` modifier paints a
+  red `var(--accent-danger)` inset border and a top-right
+  AlertCircle badge (16px, danger red, `pointer-events: none` so the
+  card-level click still wins) whenever
+  `sessionStore.errorInstances.has(inst.id)` is true. Click-to-
+  dismiss still flows through the existing right-click → "Dismiss
+  error" item; the badge is a card-level visibility affordance.
+  Errored takes precedence over running in the rare case both are
+  set (a crashed-while-running install reads more usefully as
+  errored).
+
+Still open:
+
+- **Update-available indicator.** Needs the release-cache + channel
+  pipeline that `DetailModal`'s update banner reads from to be
+  exposed to the chooser tile.
+- **Migrate prompt.** Wire `MigrationBanner` data into a card-level
+  affordance.
+- **Progress bars.** Subscribe the chooser to `progressStore` /
+  `installationStore.runningTaskFor(id)` and render a thin progress
+  bar + status line at the card bottom.
+- **Click → popover of actions** (and double-click as the open
+  fast-path). Section 8's original guidance pointed at native
+  `Menu.popup()` because of the title-bar clipping caveat — but the
+  chooser body lives in the panel WebContentsView, which fills the
+  full body area, so HTML popovers from a card render fine without
+  clipping. The current trajectory is HTML-rendered popover (or the
+  same child-BrowserWindow popup pattern §14 introduced for the
+  title bar) rather than the native Menu route the original §8
+  text proposed.
+
 ## 9. Install Settings — Restart instead of Launch when running
 
 Today the Install Settings panel's primary action is **Launch** — a
