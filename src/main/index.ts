@@ -27,7 +27,7 @@ import { shouldOpenInPopup } from './lib/allowedPopups'
 import { showModelFolderRelaunchPage } from './lib/relaunchPage'
 import { COMFY_BG, SPLASH_DARK, TITLEBAR_BG, type SplashTheme } from './lib/theme'
 import { TITLEBAR_HEIGHT, TRAFFIC_LIGHT_POSITION, comfyTitleBarOverlay } from './lib/titleBarOverlay'
-import { resolveTheme, sourceMap, _registerExtraBroadcastTarget, _unregisterExtraBroadcastTarget, _runningSessions } from './lib/ipc/shared'
+import { resolveTheme, sourceMap, _registerExtraBroadcastTarget, _unregisterExtraBroadcastTarget, _runningSessions, _broadcastToRenderer } from './lib/ipc/shared'
 import * as mainTelemetry from './lib/telemetry'
 import { getDeviceId } from './lib/deviceId'
 import { scrubAll } from './lib/piiScrub'
@@ -191,12 +191,9 @@ function attachContextMenu(comfyWindow: BrowserWindow, webContents?: Electron.We
   })
 }
 
-// Phase 3 — `mainWindow` (the launcher window) was retired. The const
-// is kept null and never reassigned so the historical guard checks
-// `if (mainWindow && !mainWindow.isDestroyed())` continue to type-check
-// and short-circuit cleanly without rewriting every call site in this
-// commit. A follow-up cleanup commit will scrub the now-dead branches.
-const mainWindow: BrowserWindow | null = null
+// Phase 3 — `mainWindow` (the launcher window) was retired and all of its
+// historical guard branches have been scrubbed (Stage 4b). The chooser host
+// window plus per-install ComfyUI windows are now the only top-level surfaces.
 let tray: Tray | null = null
 
 /**
@@ -360,13 +357,16 @@ function forwardDatadogError(payload: DatadogForwardedError): void {
     // we don't double-count exceptions in PostHog.
     skipPostHog: true,
   }
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    try {
-      mainWindow.webContents.send('dd-error', scrubbed)
-    } catch {}
-  }
-  // Also surface to PostHog Node so we don't lose the error if the renderer
-  // is gone (render-process-gone, before-quit shutdown, etc.).
+  // The launcher window was retired in Phase 3 — broadcast to any open panel
+  // renderer instead so its `onDatadogError` listener can forward the error
+  // to Datadog RUM (the panel renderer hosts the same telemetry bootstrap
+  // the launcher renderer used to). When no panel is open the broadcast is a
+  // no-op and we still capture below via PostHog Node.
+  try {
+    _broadcastToRenderer('dd-error', scrubbed)
+  } catch {}
+  // Also surface to PostHog Node so we don't lose the error if no renderer is
+  // listening (render-process-gone, before-quit shutdown, no panel open yet).
   try {
     const err = new Error(scrubbed.message)
     if (scrubbed.stack) err.stack = scrubbed.stack
@@ -425,12 +425,7 @@ function registerProcessErrorHandlers(): void {
 // Phase 3 — `createMainWindow()` was removed. The launcher window is
 // retired; the install-less chooser host (`openChooserHostWindow`) is
 // the entry-point surface and per-install ComfyUI windows
-// (`openComfyWindow`) host install-scoped panels. The `mainWindow`
-// global is intentionally retained as `let mainWindow: ... = null`
-// (declared above) so the historical guarded references throughout
-// this file (`if (mainWindow && !mainWindow.isDestroyed())`) compile
-// cleanly and short-circuit to no-ops; a follow-up commit will scrub
-// the now-dead branches.
+// (`openComfyWindow`) host install-scoped panels.
 
 function updateTrayMenu(): void {
   if (!tray) return
@@ -600,13 +595,12 @@ function onComfyRestarted({ installationId, process: _proc }: { installationId?:
     })
     .catch((err) => {
       cleanupRelaunchState()
+      // The historical `comfy-output` broadcast to mainWindow was retired
+      // alongside the launcher window in Phase 3 — the install's own window
+      // is the right surface for restart-failure UX, but its comfyView is
+      // mid-load here so an inline message would be racy. Logging + the
+      // existing splash error path are sufficient for now.
       console.error(`ComfyUI restart failed for ${installationId}:`, err)
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('comfy-output', {
-          installationId,
-          text: `\n--- Restart failed: ${err.message || err} ---\n`,
-        })
-      }
     })
 }
 

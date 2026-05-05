@@ -2,7 +2,6 @@
 import { ref, computed, watch, toRaw, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useModal } from '../composables/useModal'
-import { useControllerRegistration } from '../composables/useControllerRegistration'
 
 import type { SnapshotFilePreview, FieldOption, GPUInfo } from '../types/ipc'
 import { getVariantGpuLabel, sortedCardOptions, findBestVariant } from '../lib/variants'
@@ -251,8 +250,6 @@ onUnmounted(() => {
   document.removeEventListener('dragover', preventNav)
   document.removeEventListener('drop', preventNav)
 })
-
-useControllerRegistration('load-snapshot', { open })
 
 defineExpose({ open })
 </script>

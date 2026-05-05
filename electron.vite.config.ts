@@ -36,7 +36,6 @@ export default defineConfig({
       sourcemap: 'hidden',
       rollupOptions: {
         input: {
-          index: resolve(__dirname, 'src/renderer/index.html'),
           panel: resolve(__dirname, 'src/renderer/panel.html'),
           comfyTitleBar: resolve(__dirname, 'src/renderer/comfyTitleBar.html'),
         },

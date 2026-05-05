@@ -2,7 +2,6 @@
 import { ref, computed, watch, onMounted, toRaw } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useModal } from '../composables/useModal'
-import { useControllerRegistration } from '../composables/useControllerRegistration'
 
 import type { Source, FieldOption } from '../types/ipc'
 import { emitTelemetryAction, toVariantBucket } from '../lib/telemetry'
@@ -258,8 +257,6 @@ async function handleInstall(): Promise<void> {
     installing.value = false
   }
 }
-
-useControllerRegistration('quick-install', { open })
 
 defineExpose({ open })
 </script>

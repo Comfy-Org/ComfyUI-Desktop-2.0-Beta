@@ -16,11 +16,10 @@ function parseCSP(html: string, source: string): Record<string, string> {
   return directives
 }
 
-// The launcher and panel renderers host telemetry surfaces (Datadog + PostHog),
-// so their CSPs must allow those endpoints. The title-bar renderer is
-// telemetry-free so it gets a tighter CSP — covered by a separate block below.
+// The panel renderer hosts telemetry surfaces (Datadog + PostHog), so its CSP
+// must allow those endpoints. The title-bar renderer is telemetry-free so it
+// gets a tighter CSP — covered by a separate block below.
 const TELEMETRY_RENDERER_FILES = [
-  { file: 'index.html', label: 'launcher renderer' },
   { file: 'panel.html', label: 'panel renderer' },
 ]
 

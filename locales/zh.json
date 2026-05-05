@@ -2,29 +2,13 @@
   "_label": "中文",
 
   "dashboard": {
-    "title": "仪表盘",
-    "welcome": "欢迎使用 ComfyUI",
-    "welcomeDesc": "开始在您的设备上安装 ComfyUI。",
-    "installComfyUI": "安装 ComfyUI",
-    "quickLaunch": "快速启动",
-    "recent": "最近使用",
     "launchedAgo": "已启动 {time}",
     "neverLaunched": "尚未启动",
-    "cloudSection": "ComfyUI 云",
     "pinned": "已固定",
-    "noPinned": "没有固定的安装。右键单击安装以将其固定到仪表盘。",
-    "pinnedInQuickLaunch": "已固定的安装已在上方的快速启动中显示。",
     "pinToDashboard": "固定到仪表盘",
     "unpinFromDashboard": "从仪表盘取消固定",
     "telemetryNotice": "我们会收集匿名使用遥测数据来改进 ComfyUI 启动器。",
     "telemetrySettings": "在设置中管理"
-  },
-
-  "sidebar": {
-    "installations": "安装",
-    "running": "运行中",
-    "chooser": "选择器（预览）",
-    "giveFeedback": "提交反馈"
   },
 
   "chooser": {
@@ -45,13 +29,7 @@
   },
 
   "running": {
-    "empty": "没有正在运行或进行中的任务。",
-    "instances": "运行中的实例",
-    "errors": "错误",
-    "crashed": "崩溃",
-    "exitCode": "退出代码 {code}",
     "dismiss": "关闭",
-    "inProgress": "进行中",
     "showWindow": "显示窗口"
   },
 
@@ -110,24 +88,9 @@
   },
 
   "list": {
-    "title": "安装",
-    "trackExisting": "跟踪现有安装",
-    "newInstall": "新建安装",
-    "empty": "暂无安装。",
-    "emptyHint": "安装或跟踪现有的 ComfyUI 版本。",
-    "emptyFilter": "没有匹配此筛选条件的安装。",
-
     "view": "管理",
-    "new": "新建",
-    "running": "运行中",
     "console": "控制台",
-    "viewError": "查看错误",
-    "viewProgress": "查看进度",
-    "dragToReorder": "拖动以重新排序",
-    "filterAll": "全部",
-    "filterLocal": "本地",
-    "filterRemote": "远程",
-    "filterCloud": "云端"
+    "viewProgress": "查看进度"
   },
 
   "newInstall": {

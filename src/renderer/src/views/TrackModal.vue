@@ -2,7 +2,6 @@
 import { ref, computed, toRaw } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useModal } from '../composables/useModal'
-import { useControllerRegistration } from '../composables/useControllerRegistration'
 
 import type { ProbeResult } from '../types/ipc'
 import { emitTelemetryAction, toCountBucket } from '../lib/telemetry'
@@ -142,8 +141,6 @@ async function handleSave(): Promise<void> {
   emit('close')
   emit('navigate-list')
 }
-
-useControllerRegistration('track', { open })
 
 defineExpose({ open })
 </script>

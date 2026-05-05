@@ -3,7 +3,6 @@ import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Check, X, TriangleAlert } from 'lucide-vue-next'
 import { useModal } from '../composables/useModal'
-import { useControllerRegistration } from '../composables/useControllerRegistration'
 
 import { useTerminalScroll } from '../composables/useTerminalScroll'
 import { useProgressStore } from '../stores/progressStore'
@@ -224,8 +223,6 @@ function getStepSummary(op: Operation, step: ProgressStep, stepIndex: number): s
   }
   return null
 }
-
-useControllerRegistration('progress', { startOperation, showOperation })
 
 defineExpose({ startOperation, showOperation })
 </script>

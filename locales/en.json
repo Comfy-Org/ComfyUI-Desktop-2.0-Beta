@@ -2,18 +2,9 @@
   "_label": "English",
 
   "dashboard": {
-    "title": "Dashboard",
-    "welcome": "Welcome to ComfyUI",
-    "welcomeDesc": "Get started by installing ComfyUI on your machine.",
-    "installComfyUI": "Install ComfyUI",
-    "quickLaunch": "Quick Launch",
-    "recent": "Recent",
     "launchedAgo": "Launched {time}",
     "neverLaunched": "Not launched yet",
-    "cloudSection": "ComfyUI Cloud",
     "pinned": "Pinned",
-    "noPinned": "No pinned installations. Right-click an install to pin it to the dashboard.",
-    "pinnedInQuickLaunch": "Pinned installations are already shown in Quick Launch above.",
     "pinToDashboard": "Pin to Dashboard",
     "unpinFromDashboard": "Unpin from Dashboard",
     "telemetryNotice": "Anonymous telemetry is collected to improve ComfyUI Desktop 2.0.",
@@ -22,13 +13,6 @@
     "migrateBannerDesc": "Your Legacy Desktop installation was detected. Migrate to a Standalone install for better performance, easier updates, and full Desktop 2.0 management.",
     "migrateBannerAction": "Migrate Now",
     "migrateBannerSkip": "New Install Without Migrating"
-  },
-
-  "sidebar": {
-    "installations": "Installs",
-    "running": "Running",
-    "chooser": "Chooser (preview)",
-    "giveFeedback": "Give Feedback"
   },
 
   "chooser": {
@@ -73,13 +57,7 @@
 
   "running": {
     "title": "Running",
-    "empty": "Nothing running or in progress.",
-    "instances": "Running Instances",
-    "errors": "Errors",
-    "crashed": "Crashed",
-    "exitCode": "Exit code {code}",
     "dismiss": "Dismiss",
-    "inProgress": "In Progress",
     "showWindow": "Show Window"
   },
 
@@ -164,8 +142,6 @@
   },
 
   "list": {
-    "title": "Installs",
-    "trackExisting": "Track Existing",
     "loadSnapshot": "Load Snapshot",
     "snapshotSourceName": "Source Installation",
     "snapshotCount": "Total Snapshots",
@@ -178,22 +154,10 @@
     "snapshotOriginalRelease": "Snapshot version: {tag}",
     "snapshotDevice": "Device",
     "snapshotHardwareMismatch": "The snapshot was created with {snapshotDevice}. Your detected hardware is {detectedDevice}. The recommended variant for your hardware has been pre-selected.",
-    "newInstall": "New Install",
-    "empty": "No installs yet.",
-    "emptyHint": "Install or track an existing version of ComfyUI.",
-    "emptyFilter": "No installs match this filter.",
 
     "view": "Manage",
-    "new": "New",
-    "running": "Running",
     "console": "Console",
-    "viewError": "View Error",
-    "viewProgress": "View Progress",
-    "dragToReorder": "Drag to reorder",
-    "filterAll": "All",
-    "filterLocal": "Local",
-    "filterRemote": "Remote",
-    "filterCloud": "Cloud"
+    "viewProgress": "View Progress"
   },
 
   "quickInstall": {
