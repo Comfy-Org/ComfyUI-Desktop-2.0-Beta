@@ -82,7 +82,6 @@
   },
 
   "media": {
-    "title": "Media",
     "sharedDirs": "Shared Directories",
     "inputDir": "Input Directory",
     "outputDir": "Output Directory"
@@ -93,7 +92,6 @@
   },
 
   "models": {
-    "title": "Models",
     "directories": "Shared Directories",
     "directoriesDesc": "Model directories shared across all installations. Models placed here are available to every ComfyUI install, avoiding duplicate downloads. The first directory is the primary (default for ComfyUI).",
     "addDir": "Add Directory",

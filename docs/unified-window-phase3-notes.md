@@ -212,27 +212,36 @@ for "always surface these installs" without conflating with recency.
 - Any data migration on the persisted settings should clean up the
   `primaryInstallId` key.
 
-## 3. Consolidate Models + Media into a single "Directories" panel
+## 3. Consolidate Models + Media into a single "Directories" panel — **DONE**
 
 The launcher's separate **Models** and **Media** tabs both browse on-disk
 folders that ComfyUI installations point at — models live under each
 install's `models/` (or a shared models dir), and media is the rendered
 output / input dirs. Conceptually they're two views of the same idea:
-"directories that an installation reads/writes." Phase 3 should merge them
-into a single **Directories** panel with subsections (or a sidebar) for
-Models / Outputs / Inputs / shared roots, sharing a single browse / open /
-reveal-in-finder action set.
+"directories that an installation reads/writes." Phase 3 merged them
+into a single **Directories** panel reachable from the global File /
+waffle menu (§15).
 
-Implementation hints when this lands:
+Status:
 
-- The current `ModelsView` and `MediaView` already share a lot of structure
-  (folder tree, scanning, breadcrumb). Pull the shared pieces into a single
-  `DirectoriesView` and have the per-category logic live in the source
-  layer (so a future "snapshots dir" or "logs dir" can plug in the same
-  way).
-- The renaming applies to the sidebar entry, the i18n keys (`models.title`
-  / `media.title` collapse into `directories.title`), and any telemetry
-  view names (`desktop2.view.opened` payloads).
+- `DirectoriesView.vue` lands as the merged surface — the Models
+  sections render through `DirCard` (primary / default markers) and
+  the Media sections render as plain `SettingField` rows under a
+  shared "Shared Directories" header. Both data sources
+  (`getModelsSections()`, `getMediaSections()`) are unchanged for
+  the merge landing.
+- `ModelsView.vue` and `MediaView.vue` are deleted — they had no
+  remaining references after Phase 3 step 2 retired the launcher
+  window's separate sidebar tabs. Their orphan `models.title` /
+  `media.title` i18n keys are scrubbed alongside; the active
+  `models.*` / `media.*` keys (primary, default, addDir,
+  inputDir, outputDir, sharedDirs, …) survive because they're
+  consumed by `DirCard`, `SettingField`, the standalone source
+  plugin, and `registerSettingsHandlers`.
+- Future work (out of scope for the merge landing): pull the
+  per-source folder-tree / scanning / breadcrumb pieces into shared
+  components, and let sources plug additional categories in
+  (snapshots, logs, …).
 
 ## 4. Rename "Downloads" settings category to "Cache"
 
@@ -1116,18 +1125,23 @@ the Directories panel exists, per-source-category recency tracks both
 fields atomically, and the unified-window navigation history (Back /
 Forward + HTML title-bar dropdowns) is live.
 
-Sections 1, 2, 3, 4, 4b, 5, 6 retain open work — the chooser cards
-still need the affordances called out in section 8, primary-install
+Sections 1, 2, 4, 4b, 5, 6 retain open work — primary-install
 removal hasn't fully landed (the gold-star + `primaryInstallId` pref
-are still present), Models + Media haven't been merged into
-Directories yet (Directories currently surfaces only models /
-output / input dirs through a flatter UI, not the consolidated
-`DirectoriesView` from §3), Downloads is still a floating component,
-and the new-install / quick-install flows haven't been unified.
+are still present), the "Downloads" → "Cache" rename hasn't propagated
+out of Settings (`§4`), Downloads is still a floating component (§6),
+and the new-install / quick-install flows haven't been unified (§4b).
 
-Sections 7–10 capture UX refinements queued up while the unified
-window is live: title-bar pill polish, restoring the data on chooser
-cards + switching click-to-actions, Restart-vs-Launch in Install
+Sections 3 and 8 are now mostly landed: §3 — the merged
+`DirectoriesView` ships, `ModelsView` / `MediaView` are deleted, and
+the orphan `models.title` / `media.title` i18n keys are scrubbed. §8
+— the chooser cards now carry version chips, accent-blue running
+indicators, error badges, update / migrate pills, in-flight progress
+bars + status pills, pin-first sort, and a click-driven action
+popover with double-click as the open fast-path (Open + Pin / Unpin
++ Dismiss error today; richer items follow once Issue #470 lands).
+
+Sections 7, 9, 10 capture UX refinements queued up while the unified
+window is live: title-bar pill polish, Restart-vs-Launch in Install
 Settings, and the update-channel dropdown.
 
 Sections 11–14 are recently shipped UX refinements: chooser-host

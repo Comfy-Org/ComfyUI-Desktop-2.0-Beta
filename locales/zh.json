@@ -37,7 +37,6 @@
   },
 
   "media": {
-    "title": "媒体",
     "sharedDirs": "共享目录",
     "inputDir": "输入目录",
     "outputDir": "输出目录"
@@ -48,7 +47,6 @@
   },
 
   "models": {
-    "title": "模型",
     "directories": "共享目录",
     "directoriesDesc": "所有安装共享的目录。第一个目录为主目录（ComfyUI 的默认目录）。",
     "addDir": "添加目录",
