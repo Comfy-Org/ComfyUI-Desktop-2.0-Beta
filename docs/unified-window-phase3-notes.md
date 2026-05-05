@@ -720,10 +720,13 @@ Fix:
 
 - `buildTitleMenuItems` in `src/main/index.ts` now emits
   `[New Window, Directories, Desktop 2 Settings]` for the File menu
-  and `[Install Settings, ─, Check for Updates]` for the install
-  pill. The `'directories'` activation branch in
-  `activateTitleMenuItem` moves from the install kind to the file
-  kind alongside `'launcher-settings'`.
+  and `[Install Settings]` for the install pill (the previous
+  `Check for Updates` entry was removed in a follow-up — it
+  duplicated the per-install settings update section and didn't
+  surface meaningful feedback at the title-bar level). The
+  `'directories'` activation branch in `activateTitleMenuItem`
+  moves from the install kind to the file kind alongside
+  `'launcher-settings'`.
 - Directories stays per-window for now (same wiring as
   `launcher-settings`) — the panel renderer is shared, but each
   host window owns its own panel WebContentsView and history stack.

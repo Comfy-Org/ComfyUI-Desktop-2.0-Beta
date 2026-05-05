@@ -29,7 +29,6 @@ interface Bridge {
   isMac: () => boolean
   setPanel: (panel: ComfyPanelKey) => void
   openNewWindow: () => void
-  checkForUpdates: () => void
   /** Pop the File menu natively (avoids WebContentsView clipping the popup). */
   openFileMenu: (anchor: MenuAnchor) => void
   /** Pop the Install caret menu natively. No-op for install-less host windows. */

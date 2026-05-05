@@ -10,7 +10,6 @@ interface MockBridgeState {
   menuClosedCallbacks: ((info: { menu: 'file' | 'install' }) => void)[]
   setPanelCalls: string[]
   newWindowCalls: number
-  checkForUpdatesCalls: number
   fileMenuAnchors: { x: number; y: number }[]
   installMenuAnchors: { x: number; y: number }[]
   goBackCalls: number
@@ -28,7 +27,6 @@ function installMockBridge(opts: { isMac?: boolean; installationId?: string | nu
     menuClosedCallbacks: [],
     setPanelCalls: [],
     newWindowCalls: 0,
-    checkForUpdatesCalls: 0,
     fileMenuAnchors: [],
     installMenuAnchors: [],
     goBackCalls: 0,
@@ -41,7 +39,6 @@ function installMockBridge(opts: { isMac?: boolean; installationId?: string | nu
     isMac: () => !!opts.isMac,
     setPanel: (panel: string) => state.setPanelCalls.push(panel),
     openNewWindow: () => { state.newWindowCalls += 1 },
-    checkForUpdates: () => { state.checkForUpdatesCalls += 1 },
     openFileMenu: (anchor: { x: number; y: number }) => { state.fileMenuAnchors.push(anchor) },
     openInstallMenu: (anchor: { x: number; y: number }) => { state.installMenuAnchors.push(anchor) },
     goBack: () => { state.goBackCalls += 1 },

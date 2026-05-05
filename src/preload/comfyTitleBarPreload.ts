@@ -31,10 +31,6 @@ export interface ComfyTitleBarBridge {
    *  install-less chooser host window. Always creates a new one — the
    *  focus-existing path lives on the tray entry. */
   openNewWindow(): void
-  /** Install-pill caret → "Check for Updates" (Phase 3 title bar v2).
-   *  Wired in for install-backed host windows; main is responsible for
-   *  routing to the appropriate per-install update check. */
-  checkForUpdates(): void
   /** Pop the File menu as a native OS menu. Avoids HTML popups that
    *  would be clipped by the title bar's WebContentsView bounds. */
   openFileMenu(anchor: TitleMenuAnchor): void
@@ -93,9 +89,6 @@ const bridge: ComfyTitleBarBridge = {
   },
   openNewWindow: () => {
     ipcRenderer.send('comfy-window:new-chooser-window')
-  },
-  checkForUpdates: () => {
-    ipcRenderer.send('comfy-window:check-for-updates')
   },
   openFileMenu: (anchor) => {
     ipcRenderer.send('comfy-window:open-title-menu', { menu: 'file', anchor })

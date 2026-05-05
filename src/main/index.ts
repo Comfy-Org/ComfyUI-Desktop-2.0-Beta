@@ -1604,26 +1604,6 @@ ipcMain.on('comfy-window:new-chooser-window', () => {
   openChooserHostWindow()
 })
 
-/**
- * Install-pill caret → Check for Updates (Phase 3 title bar v2).
- * Triggers a manual update check via the updater module. The result
- * flows through the existing broadcast pipeline (`update-available`
- * / `update-error`) so the UpdateBanner in any subscribed renderer
- * surface (today the launcher window's App.vue; in step 4 also the
- * host window's panel) updates without further wiring.
- *
- * Errors are caught here so a failing check can never crash the main
- * process — the broadcast pipeline already surfaces an `update-error`
- * payload to the renderer for that case.
- */
-ipcMain.on('comfy-window:check-for-updates', () => {
-  void updater.runCheck('title-bar-check').catch(() => {
-    // runCheck already broadcasts an `update-error` for any failure
-    // path; the catch is just to mark the floating Promise rejection
-    // as handled so it doesn't surface as an unhandledRejection.
-  })
-})
-
 // =====================================================================
 // Title-menu popups (Phase 3 §14 — replaces native Menu.popup()).
 //
@@ -1641,8 +1621,8 @@ ipcMain.on('comfy-window:check-for-updates', () => {
 // `comfy-window:open-title-menu`) is unchanged. The popup webContents
 // posts `comfy-titlemenu:item-activated` for clicks and
 // `comfy-titlemenu:close` for Escape; main routes activations to the
-// existing handlers (set-panel / new-chooser-window / runCheck) and closes
-// the popup. On close, main re-emits `comfy-titlebar:menu-closed` to the
+// existing handlers (set-panel / new-chooser-window) and closes the
+// popup. On close, main re-emits `comfy-titlebar:menu-closed` to the
 // title-bar webContents so the existing 100ms reopen-suppression guard
 // keeps working.
 // =====================================================================
@@ -1753,8 +1733,6 @@ function buildTitleMenuItems(kind: 'file' | 'install', entry: ComfyWindowEntry):
   }
   return [
     { id: 'install-settings', label: 'Install Settings', checked: entry.activePanel === 'install-settings' },
-    { kind: 'separator' },
-    { id: 'check-for-updates', label: 'Check for Updates' },
   ]
 }
 
@@ -1988,13 +1966,6 @@ function activateTitleMenuItem(entry: TitleMenuPopupEntry, id: string): void {
     else if (id === 'launcher-settings') setActivePanel(entry.parentEntryId, 'launcher-settings')
   } else {
     if (id === 'install-settings') setActivePanel(entry.parentEntryId, 'install-settings')
-    else if (id === 'check-for-updates') {
-      void updater.runCheck('title-bar-check').catch(() => {
-        // runCheck already broadcasts an `update-error` for any failure;
-        // the catch is just to mark the floating Promise rejection as
-        // handled so it doesn't surface as an unhandledRejection.
-      })
-    }
   }
   // Item click — popup still has focus, so push it back to the parent.
   hideTitleMenuPopup(entry, { releaseFocusToParent: true })
