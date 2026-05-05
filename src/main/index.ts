@@ -36,7 +36,8 @@ import { scrubAll } from './lib/piiScrub'
 todesktop.init({ autoUpdater: false })
 
 const APP_ICON = path.join(__dirname, '..', '..', 'assets', 'Comfy_Logo_x256.png')
-const TRAY_ICON = path.join(__dirname, '..', '..', 'assets', 'Comfy_Logo_x32.png')
+// 64px source so Electron can downsample crisply on HiDPI trays.
+const TRAY_ICON = path.join(__dirname, '..', '..', 'assets', 'Comfy_Logo_x64.png')
 const APP_VERSION = getAppVersion()
 
 interface WindowBounds {
