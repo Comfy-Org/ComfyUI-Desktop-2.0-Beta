@@ -705,9 +705,9 @@ Landed on `feat/unified-window-titlebar-panels`.
 
 ---
 
-## 15. Waffle menu reorganization — Directories belongs to the global menu
+## 15. Waffle menu reorganization — Directories belongs to the global menu — **DONE**
 
-The install pill currently surfaces Install Settings, Directories,
+The install pill previously surfaced Install Settings, Directories,
 and Check for Updates. Directories is a global concern (the
 launcher's view of the disk — models, outputs, etc. live cross-
 install) and shouldn't be scoped to any one install. Moving it from
@@ -716,16 +716,33 @@ install pill strictly install-scoped (Install Settings + Check for
 Updates only) and lets the waffle menu host all the global / app-
 level affordances in one place.
 
-Open work:
+Fix:
 
-- Strip Directories from the Install menu builder in
-  `buildTitleMenuItems('install', entry)` (`src/main/index.ts`) and
-  add it to the File builder.
-- Decide whether Directories should be a single global panel or stay
-  per-window. Leaning global, the way Desktop 2 Settings is.
-- Confirm ordering inside the waffle. Likely New Window,
-  Directories, Desktop 2 Settings, plus the new affordances called
-  out in §16.
+- `buildTitleMenuItems` in `src/main/index.ts` now emits
+  `[New Window, Directories, Desktop 2 Settings]` for the File menu
+  and `[Install Settings, ─, Check for Updates]` for the install
+  pill. The `'directories'` activation branch in
+  `activateTitleMenuItem` moves from the install kind to the file
+  kind alongside `'launcher-settings'`.
+- Directories stays per-window for now (same wiring as
+  `launcher-settings`) — the panel renderer is shared, but each
+  host window owns its own panel WebContentsView and history stack.
+  The view itself is install-agnostic (`DirectoriesView.vue` reads
+  global `getModelsSections()` / `getMediaSections()` with no
+  installationId), so it works equally on install-backed and
+  install-less host windows.
+- The install-less rejection in `setActivePanel` is narrowed from
+  `(panel === 'install-settings' || panel === 'directories')` to
+  just `panel === 'install-settings'` — Directories is now reachable
+  from the chooser host's File menu. Install Settings remains
+  install-scoped (the install caret menu is still suppressed in
+  install-less host windows so there's no UI to reach it from
+  there).
+- The further waffle entries listed for §16 (Return to Dashboard,
+  Close All Windows, Import Snapshot as New Install) are still open
+  — see that section.
+
+Landed on `feat/unified-window-titlebar-panels`.
 
 ---
 
@@ -952,18 +969,18 @@ focus on launch (§11), chooser-host title-bar / overlay colour match
 title-bar dropdowns rendered as child `BrowserWindow` popups in place
 of native `Menu.popup()` (§14).
 
-Sections 15–19 are the next batch of open UX work queued up after
-the §14 popup rewrite landed: moving Directories out of the install
-pill into the global waffle menu (§15), filling in the missing
-window-level lifecycle gestures — return-to-dashboard, Close All
-Windows, Import Snapshot as New Install (§16), turning startup /
-update modals into full-screen takeovers with a clear interrupt-vs-
-keep-running split on the window controls (§17), surfacing
-restart-required + update-available state via title-bar pills
-(Desktop-2-scoped to the right of the waffle, ComfyUI-scoped to the
-right of the install pill — §18), and a coordinated naming + flow-
-titles pass — "Desktop 2 Settings" → "App Settings", grand
-title/subtitle on every hosted flow (§19).
+§15 — moving Directories out of the install pill into the global
+File / waffle menu — has landed. The remaining batch (§16–§19) is
+the next slice of open UX work: filling in the missing window-level
+lifecycle gestures — return-to-dashboard, Close All Windows, Import
+Snapshot as New Install (§16), turning startup / update modals into
+full-screen takeovers with a clear interrupt-vs-keep-running split
+on the window controls (§17), surfacing restart-required + update-
+available state via title-bar pills (Desktop-2-scoped to the right
+of the waffle, ComfyUI-scoped to the right of the install pill —
+§18), and a coordinated naming + flow-titles pass — "Desktop 2
+Settings" → "App Settings", grand title/subtitle on every hosted
+flow (§19).
 
 Capture decisions made in subsequent design discussions in this file.
 The doc remains the source of truth for "what's left" on this branch

@@ -226,8 +226,9 @@ interface ComfyWindowEntry {
    * Which panel is currently rendered (== `panelHistory[panelHistoryIndex]`).
    * Always one of the user-visible panel keys — never the internal
    * `'comfy-lifecycle'` / `'chooser'` body modes. For install-less host
-   * windows only `'comfy'` and `'launcher-settings'` are reachable
-   * (Install Settings / Directories are hidden).
+   * windows only `'comfy'`, `'launcher-settings'`, and `'directories'`
+   * are reachable (Install Settings is hidden — the install caret menu
+   * is suppressed without an install backing the window).
    */
   activePanel: ComfyPanelKey
   /**
@@ -1482,12 +1483,15 @@ function setActivePanel(
 ): void {
   const entry = comfyWindows.get(windowKey)
   if (!entry || entry.window.isDestroyed()) return
-  // Install Settings + Directories are install-scoped (the install caret
-  // menu in the title bar is hidden in install-less host windows). Refuse
-  // to switch to either from anywhere when there's no install backing the
-  // window — a stray IPC payload must not be able to wedge the window
-  // into a body mode that has no install to render.
-  if (entry.installationId === null && (panel === 'install-settings' || panel === 'directories')) return
+  // Install Settings is install-scoped (the install caret menu in the
+  // title bar is hidden in install-less host windows). Refuse to switch
+  // to it from anywhere when there's no install backing the window — a
+  // stray IPC payload must not be able to wedge the window into a body
+  // mode that has no install to render. Directories was previously
+  // gated alongside Install Settings, but as of §15 it lives on the
+  // global File / waffle menu and is install-agnostic — install-less
+  // host windows are allowed to open it.
+  if (entry.installationId === null && panel === 'install-settings') return
 
   // Update navigation history per source. The history mutation happens
   // BEFORE the early-return for "same panel" because a `'reset'` from a
@@ -1738,14 +1742,17 @@ function computePopupHeight(items: readonly TitleMenuItem[]): number {
 
 function buildTitleMenuItems(kind: 'file' | 'install', entry: ComfyWindowEntry): TitleMenuItem[] {
   if (kind === 'file') {
+    // §15 — Directories is a global / cross-install affordance (the
+    // launcher's view of disk: models, outputs, inputs) and lives on
+    // the File / waffle menu alongside the other app-level entries.
     return [
       { id: 'new-window', label: 'New Window' },
+      { id: 'directories', label: 'Directories', checked: entry.activePanel === 'directories' },
       { id: 'launcher-settings', label: 'Desktop 2 Settings' },
     ]
   }
   return [
     { id: 'install-settings', label: 'Install Settings', checked: entry.activePanel === 'install-settings' },
-    { id: 'directories', label: 'Directories', checked: entry.activePanel === 'directories' },
     { kind: 'separator' },
     { id: 'check-for-updates', label: 'Check for Updates' },
   ]
@@ -1977,10 +1984,10 @@ function openTitleMenuPopup(opts: {
 function activateTitleMenuItem(entry: TitleMenuPopupEntry, id: string): void {
   if (entry.kind === 'file') {
     if (id === 'new-window') openChooserHostWindow()
+    else if (id === 'directories') setActivePanel(entry.parentEntryId, 'directories')
     else if (id === 'launcher-settings') setActivePanel(entry.parentEntryId, 'launcher-settings')
   } else {
     if (id === 'install-settings') setActivePanel(entry.parentEntryId, 'install-settings')
-    else if (id === 'directories') setActivePanel(entry.parentEntryId, 'directories')
     else if (id === 'check-for-updates') {
       void updater.runCheck('title-bar-check').catch(() => {
         // runCheck already broadcasts an `update-error` for any failure;
