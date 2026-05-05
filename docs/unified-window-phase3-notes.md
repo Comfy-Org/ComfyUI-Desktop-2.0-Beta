@@ -705,6 +705,222 @@ Landed on `feat/unified-window-titlebar-panels`.
 
 ---
 
+## 15. Waffle menu reorganization — Directories belongs to the global menu
+
+The install pill currently surfaces Install Settings, Directories,
+and Check for Updates. Directories is a global concern (the
+launcher's view of the disk — models, outputs, etc. live cross-
+install) and shouldn't be scoped to any one install. Moving it from
+the install pill into the waffle (File / hamburger) menu leaves the
+install pill strictly install-scoped (Install Settings + Check for
+Updates only) and lets the waffle menu host all the global / app-
+level affordances in one place.
+
+Open work:
+
+- Strip Directories from the Install menu builder in
+  `buildTitleMenuItems('install', entry)` (`src/main/index.ts`) and
+  add it to the File builder.
+- Decide whether Directories should be a single global panel or stay
+  per-window. Leaning global, the way Desktop 2 Settings is.
+- Confirm ordering inside the waffle. Likely New Window,
+  Directories, Desktop 2 Settings, plus the new affordances called
+  out in §16.
+
+---
+
+## 16. Window-level lifecycle ergonomics — close install / close all / dashboard return / import snapshot
+
+Several related affordances are missing for the multi-window world
+the unified host opened up:
+
+- **Close out of the current install and return to the "dashboard"**
+  (the install-less chooser host body) without closing the window.
+  Today the only way to leave an install in a window is to close the
+  whole window or pick another install via the pill (which swaps the
+  window in-place to the new install). There's no "go back to
+  picking an install" gesture inside an install-backed window.
+- **Close All Windows** in one click. With several host windows
+  open, closing them individually is tedious; quit-from-tray closes
+  the app entirely. A waffle-menu entry that shuts every host window
+  but leaves the app alive (tray persists) is the missing middle
+  step.
+- **Import Snapshot as New Install**. We can already load a snapshot
+  into an existing install via the load-snapshot panel, but there's
+  no path to import a snapshot as a brand-new install. This is a
+  natural sibling to New Install / Quick Install / Track on the
+  chooser body — and a candidate for the waffle once the in-window
+  flows are unified.
+
+These slot into the waffle menu as the global affordances:
+
+- New Window (existing)
+- Return to Dashboard (new — install-backed windows only; swaps the
+  window in-place from the install body to the chooser body)
+- Close Window (existing as an OS button, but more discoverable here)
+- Close All Windows (new)
+- Import Snapshot as New Install (new)
+- Directories (§15)
+- Desktop 2 Settings (existing)
+
+The "return to dashboard" gesture is the most ergonomically sensitive
+one — it could also live on the install pill itself (clicking the
+identity opens a "switch install / pick another" surface) rather
+than only in the waffle. To be decided when the affordance lands.
+
+---
+
+## 17. Full-screen takeover for startup / update flows
+
+Today the startup and update flows render as modals layered over
+the chooser or comfy body. Two problems with that:
+
+- The startup / update *is* the primary in-flight action — it should
+  read as a full-screen takeover (replacing the active body) rather
+  than a modal sitting on top of one. Modal styling implies "you can
+  dismiss this and resume what's behind"; a full-screen body says
+  "this is what the window is doing right now".
+- The OS-level window controls (`−` minimize, `×` close) currently
+  both surface during these flows. The semantically meaningful
+  distinction is **interrupt vs let it keep running**:
+    - `×` closes the host window, which interrupts the install /
+      update.
+    - `−` minimizes the host window, which doesn't interrupt
+      anything — the action keeps running in the background and the
+      user can pop the window back open from the tray.
+
+  We probably want to keep `−` working with that meaning, but it's
+  also worth considering dropping `−` entirely since the user can
+  always create a new chooser host window (or click the tray entry)
+  to view the dashboard / observe progress, even while the original
+  host window is busy. Dropping `−` simplifies the controls down to
+  "interrupt" (`×`) only, with the implicit fallback of opening
+  another window to keep checking on the running action.
+
+Open question: do we hide `−` only during these flows, or globally?
+Hiding only during the flow flickers the controls in/out; hiding
+globally is a static UX decision that we can make once.
+
+---
+
+## 18. Title-bar status pills — restart-required + updates available
+
+Two related visibility gaps the title bar should fill:
+
+- **Restart-required after a settings change.** Some settings in
+  Install Settings and Desktop 2 Settings only take effect on a
+  restart of the ComfyUI instance (per-install) or a relaunch of
+  Desktop 2 (app-wide). Today there's no in-product signal that the
+  user's last settings edit hasn't fully landed yet — they have to
+  remember which settings are restart-gated. We should surface a
+  per-scope "restart to apply" affordance somewhere persistent.
+- **Updates available** for either the ComfyUI instance or Desktop 2
+  itself. Both are tracked by the updater module today (the panel's
+  `UpdateBanner` shows them), but the title bar — the only chrome
+  that's always visible across panels and across the live ComfyUI
+  view — has no signal until the user reaches the relevant settings
+  surface.
+
+Both fit naturally as small status pills in the title bar, mirroring
+the affordance pills we'd surface on install cards (§8). The split
+mirrors the per-scope authority of each pill:
+
+- **Desktop 2-scoped pills** sit to the **right of the waffle menu**
+  (the global / app-level surface). This is where the "Desktop 2
+  update available" pill lives, and where a Desktop-2-scoped
+  "restart Desktop 2 to apply" pill would live if a global setting
+  needs a relaunch.
+- **ComfyUI-instance-scoped pills** sit to the **right of the
+  ComfyUI install pill** (the per-install surface). This is where
+  the "ComfyUI update available" pill lives, and where a
+  per-install "restart ComfyUI to apply" pill would live after an
+  Install Settings change that needs the instance to relaunch.
+
+Implementation notes:
+
+- The pill renderer is `TitleBarApp.vue`. The hover-gating
+  (`is-hover-active`) and the title-bar height (`TITLEBAR_HEIGHT`,
+  37px including the 1px bottom border) both have to keep working;
+  pills should fit inside the existing 36px content area without
+  growing the bar.
+- Click affordances: an update pill should open the relevant update
+  panel (Desktop 2 update → launcher-settings update section;
+  ComfyUI update → install-settings update section). A
+  "restart-required" pill should ideally trigger the restart
+  directly, since the user just opted into the change.
+- Visual: tone-matched chip with a tiny dot (or `ArrowUp` /
+  `RotateCw` icon for updates / restart respectively), sized to read
+  at title-bar scale. Keep it subtle — these are persistent, not
+  alarming.
+- Install-less host windows (no installation backing the entry)
+  should suppress the per-install pills entirely; only the
+  Desktop-2-scoped slot is meaningful there.
+- The pill state must survive panel navigation (chooser → install
+  settings → comfy and back) since it's window-chrome state, not
+  panel state. Source it from the same updater-broadcast and
+  settings-change pipeline that drives `UpdateBanner` so the two
+  surfaces never disagree.
+
+Open questions:
+
+- Do we batch multiple per-scope signals into a single pill ("3
+  changes need restart"), or render them as individual pills
+  side-by-side? Side-by-side wastes title-bar real estate fast; a
+  single pill that opens a list popup is probably the right
+  treatment once we get past one signal per scope.
+- For settings whose restart-required state is *implicit* (e.g.
+  changing the install's Python version), the change site has to
+  tag the setting as restart-gated in the same place the renderer
+  reads from, otherwise we'd have to enumerate restart-gated
+  settings in two places.
+
+---
+
+## 19. Naming + flow titles pass
+
+The unified window has accumulated names and titles that read fine
+in isolation but are inconsistent or insufficient now that they all
+live in the same chrome. Two threads to pull on:
+
+- **Naming review** of menu / panel labels.
+    - "Desktop 2 Settings" should just be "App Settings". The
+      product name belongs in the OS title bar / about dialog, not
+      in every menu entry where it competes with ComfyUI's own
+      "File" menu and the install identity in the pill.
+    - Audit other places we lean on the "Desktop 2" brand
+      (`launcher-settings` panel header, tray entries, CTA copy)
+      and decide which ones drop the brand. Rule of thumb: in
+      chrome and menus, drop it; in install-less startup / "about"
+      surfaces, keep it.
+    - Confirm "Install Settings" / "Directories" / "Check for
+      Updates" still read clearly once "Desktop 2 Settings" loses
+      its brand.
+- **Flow titles + subtitles.** The new-install flow currently
+  embeds itself in the panel area but has no top-level title
+  saying "an install is happening" — only the per-step headings
+  inside the flow. The user lands on a step ("Pick a source",
+  "Choose a location") and has to infer the broader context. Each
+  hosted flow (`new-install`, `track`, `load-snapshot`,
+  `quick-install`) needs:
+    - A grand title at the top of the panel ("New Install",
+      "Tracking an existing install", etc.) that survives across
+      the steps in the flow.
+    - A subtitle line saying *what* this is doing (e.g. "Set up a
+      fresh ComfyUI instance from a downloaded standalone build.")
+      so the user can confirm they're in the flow they meant to
+      start.
+    - Internal step titles stay, but read as sub-sections of the
+      grand title rather than as the page heading.
+
+This is a coordinated copy + layout pass across the panel renderer
+(`PanelApp.vue`, `views/SettingsView.vue`,
+`views/DirectoriesView.vue`, the new-install / track / load-snapshot
+/ quick-install panel files) and the title-bar menu builder
+(`buildTitleMenuItems` in `src/main/index.ts`). Worth doing in one
+go so we don't keep flip-flopping individual labels.
+
+---
+
 ## Status
 
 In progress. Phase 2 (`feat/unified-window-titlebar-panels`) is the
@@ -735,6 +951,19 @@ focus on launch (§11), chooser-host title-bar / overlay colour match
 (§12), live launcher-theme tracking on the chooser host (§13), and
 title-bar dropdowns rendered as child `BrowserWindow` popups in place
 of native `Menu.popup()` (§14).
+
+Sections 15–19 are the next batch of open UX work queued up after
+the §14 popup rewrite landed: moving Directories out of the install
+pill into the global waffle menu (§15), filling in the missing
+window-level lifecycle gestures — return-to-dashboard, Close All
+Windows, Import Snapshot as New Install (§16), turning startup /
+update modals into full-screen takeovers with a clear interrupt-vs-
+keep-running split on the window controls (§17), surfacing
+restart-required + update-available state via title-bar pills
+(Desktop-2-scoped to the right of the waffle, ComfyUI-scoped to the
+right of the install pill — §18), and a coordinated naming + flow-
+titles pass — "Desktop 2 Settings" → "App Settings", grand
+title/subtitle on every hosted flow (§19).
 
 Capture decisions made in subsequent design discussions in this file.
 The doc remains the source of truth for "what's left" on this branch
