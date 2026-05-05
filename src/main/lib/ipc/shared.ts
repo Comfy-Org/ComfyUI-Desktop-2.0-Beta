@@ -494,6 +494,27 @@ export async function _resolveAndBroadcastVersions(list: InstallationRecord[]): 
       const actualHead = readGitHead(comfyuiDir) || cv.commit
 
       const resolved = await resolveLocalVersion(comfyuiDir, actualHead, undefined, override)
+
+      // Guard against clobbering a populated baseTag with undefined.
+      // findNearestTag/findLatestVersionTag can fail transiently (e.g.
+      // pygit2 API mismatch in the bundled standalone-env, network
+      // hiccup during fetchTags, missing remote, system git absent).
+      // When that happens, `resolved` comes back as { commit } only —
+      // and persisting that overwrites the previously-good
+      // `{ commit, baseTag, commitsAhead }` on disk, downgrading the
+      // chooser tile and channel-card "Installed" line to a bare SHA
+      // until a future re-resolve happens to succeed. The downgrade is
+      // a one-way ratchet because nothing else writes baseTag back
+      // for installs whose HEAD isn't exactly on a tag (i.e. the entire
+      // 'latest' channel). Bail entirely whenever the new resolution
+      // would strictly lose information for the same commit (no DB
+      // write, no broadcast, no installedTag reconciliation against the
+      // bare SHA); a genuinely-new commit (HEAD moved externally) still
+      // writes through because the commit-equality check fails, so we
+      // don't get permanently stuck on a stale baseTag.
+      if (cv?.baseTag && !resolved.baseTag && resolved.commit === cv.commit) {
+        return
+      }
       const resolvedStr = formatComfyVersion(resolved, 'short')
       const storedStr = formatComfyVersion(cv, 'short')
       const versionChanged = resolvedStr !== storedStr

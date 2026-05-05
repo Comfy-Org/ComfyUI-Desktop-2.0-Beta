@@ -32,6 +32,34 @@ import pygit2
 
 
 # ---------------------------------------------------------------------------
+# pygit2 API compatibility shims
+# ---------------------------------------------------------------------------
+#
+# pygit2 1.15+ moved the legacy module-level constants (`pygit2.GIT_OBJ_*`,
+# `pygit2.GIT_SORT_*`, etc.) onto the typed `pygit2.enums` module, and 1.19
+# removed `GIT_OBJ_COMMIT` entirely.  Recent standalone-env builds ship
+# pygit2 1.19+ which means any code path that still references the old
+# constant crashes with `AttributeError: module 'pygit2' has no attribute
+# 'GIT_OBJ_COMMIT'` — silently breaking version resolution and causing the
+# launcher to overwrite good `comfyVersion.baseTag` with bare commit SHAs.
+#
+# Resolve once at import-time, preferring the new enum API but falling
+# back to the legacy attribute when running against an older pygit2.
+
+try:
+    from pygit2.enums import ObjectType as _ObjectType
+    GIT_OBJ_COMMIT = int(_ObjectType.COMMIT)
+except (ImportError, AttributeError):
+    GIT_OBJ_COMMIT = pygit2.GIT_OBJ_COMMIT  # pre-1.15
+
+try:
+    from pygit2.enums import SortMode as _SortMode
+    GIT_SORT_TOPOLOGICAL = int(_SortMode.TOPOLOGICAL)
+except (ImportError, AttributeError):
+    GIT_SORT_TOPOLOGICAL = pygit2.GIT_SORT_TOPOLOGICAL  # pre-1.15
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
@@ -194,7 +222,7 @@ def cmd_describe_tags(repo_path, commit="HEAD"):
 
         try:
             commit_obj = repo.get(oid)
-            if commit_obj is not None and commit_obj.type == pygit2.GIT_OBJ_COMMIT:
+            if commit_obj is not None and commit_obj.type == GIT_OBJ_COMMIT:
                 for parent_id in commit_obj.parent_ids:
                     if parent_id not in visited:
                         queue.append(parent_id)
@@ -236,7 +264,7 @@ def cmd_rev_list_count(repo_path, tag_or_ref, commit="HEAD"):
         print(0)
         return
 
-    walker = repo.walk(commit_oid, pygit2.GIT_SORT_TOPOLOGICAL)
+    walker = repo.walk(commit_oid, GIT_SORT_TOPOLOGICAL)
     walker.hide(tag_oid)
     print(sum(1 for _ in walker))
 
@@ -262,7 +290,7 @@ def cmd_cherry_pick_count(repo_path, ref1, ref2):
         print("Error: no common ancestor found", file=sys.stderr)
         sys.exit(1)
 
-    walker = repo.walk(oid1, pygit2.GIT_SORT_TOPOLOGICAL)
+    walker = repo.walk(oid1, GIT_SORT_TOPOLOGICAL)
     walker.hide(base_oid)
     print(sum(1 for _ in walker))
 
