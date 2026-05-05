@@ -34,7 +34,12 @@
     "migratePill": "Migrate",
     "openInstall": "Open",
     "manageInstall": "Manage…",
-    "moreActions": "More actions"
+    "moreActions": "More actions",
+    "menuUpdate": "Update…",
+    "menuMigrate": "Migrate to Standalone…",
+    "menuRestoreSnapshot": "Restore Snapshot…",
+    "menuRevealInFolder": "Open Folder",
+    "menuDelete": "Delete…"
   },
 
   "titleBar": {

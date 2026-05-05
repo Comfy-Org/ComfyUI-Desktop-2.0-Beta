@@ -30,7 +30,12 @@
     "migratePill": "迁移",
     "openInstall": "打开",
     "manageInstall": "管理…",
-    "moreActions": "更多操作"
+    "moreActions": "更多操作",
+    "menuUpdate": "更新…",
+    "menuMigrate": "迁移到独立版…",
+    "menuRestoreSnapshot": "恢复快照…",
+    "menuRevealInFolder": "打开文件夹",
+    "menuDelete": "删除…"
   },
 
   "running": {

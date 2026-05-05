@@ -575,15 +575,89 @@ attempt that ate the open fast-path):
   height to scroll inside, so on tile-heavy windows the cards
   just clipped off the bottom instead of producing a scrollbar.
 
-Still open:
+### Status — kebab expansion **DONE**
 
-- **Action set expansion in the kebab menu.** Pin / Manage / Dismiss
-  cover the most-needed actions today, but Update / Migrate /
-  Reveal in Folder / Restore Snapshot / Delete should also surface
-  here as direct entries (Manage is currently the catch-all for
-  all of those). The Update / Migrate pills should also fold their
-  click targets into the same menu (e.g. "Update available — Update
-  now / View details") rather than reading as bare visual prompts.
+The chooser tile's kebab / right-click action menu now grows to cover
+the actions the user previously had to drill into Manage… for. Same
+items either way (kebab or right-click); the composable owns the menu
+shape and the dispatch routing so the two surfaces cannot diverge.
+
+Items today (state-gated):
+
+- **Pin / Unpin** — non-cloud installs (unchanged).
+- **Manage…** — opens `DetailModal` on the default tab (unchanged).
+- **Update…** — `status === 'installed'` && `statusTag.style ===
+  'update'`. Opens Manage on the Update tab so the channel surface
+  picks up the user's interaction (the channel surface already routes
+  Update Now through `openOverlay` per §10's Tier 2/Tier 3 split, so
+  no new wiring is needed here).
+- **Migrate to Standalone…** — `sourceCategory === 'desktop'` &&
+  installed. Opens Manage with `autoAction: 'migrate-to-standalone'`
+  so the source-side migration confirm + showProgress flow runs end
+  to end without the user having to click through tabs.
+- **Restore Snapshot…** — installed && `installPath` && non-cloud.
+  Opens Manage on the Snapshots tab where SnapshotTab.vue handles
+  the per-snapshot Restore action.
+- **Open Folder** — `installPath` && non-cloud. Instant action via
+  the source-side `open-folder` action; no overlay opened. (The
+  source action handler already shells out to `shell.openPath` for
+  the install directory.)
+- **Delete…** — installed && non-cloud. Opens Manage with
+  `autoAction: 'delete'`. DetailModal's `autoAction` loop finds the
+  bottom Actions section's `delete` ActionDef and runs it through
+  `runAction`, which fires the existing confirm dialog +
+  `showProgress` Tier 2 progress overlay (delete requires the install
+  to be stopped, so the classifier rule resolves to Tier 2).
+- **Dismiss error** — when the install has a stored error in the
+  session store (unchanged).
+
+Pill / kebab dispatch unification:
+
+- The composable exposes a `triggerAction(id, inst)` function that's
+  the single dispatch path for both the menu select handler AND the
+  chooser tile's visual Update / Migrate pills. The pill click
+  handlers in `ChooserView.vue` (~lines 510-545) used to call
+  `openManage(inst, { initialTab: 'update' })` /
+  `openManage(inst, { autoAction: 'migrate-to-standalone' })` inline;
+  they now call `triggerAction('update', inst)` /
+  `triggerAction('migrate', inst)` so the routing decision lives in
+  exactly one place.
+- `useInstallContextMenu`'s `onManage` callback signature gained an
+  optional second `{ initialTab?, autoAction? }` parameter so the
+  composable can pass deep-link options through to the chooser's
+  `openManage` helper. The bare Manage… menu item passes no options
+  (default tab, no auto-action); the new entries each pass the
+  appropriate combination.
+
+Architectural contracts preserved:
+
+- All actions that need overlay surfaces still go through the
+  composable's `onManage` callback → `openManage` → `openOverlay({
+  kind: 'manage', … })`. Tier 2/3 ops kicked off from inside the
+  resulting Manage modal still bubble up via `@show-progress` to
+  PanelApp's host-level slot, where §10's `isRunning` classifier
+  picks Tier 2 progress vs Tier 3 takeover. No host-specific
+  branches were added — the same code runs in chooser host and
+  install host.
+- Cloud installs only see Manage… / Update… / Restore Snapshot…
+  (when applicable) / Dismiss error — the file-system / migration /
+  delete items are gated behind `sourceCategory !== 'cloud'` because
+  cloud installs are managed remotely.
+- Standardised cancel-prompt copy (`overlay.cancel*`) still fires
+  from `useOverlay` whenever a Tier 2/3 op kicked off via the kebab
+  pre-empts an in-flight progress / takeover op.
+
+DROPs that landed with this slice:
+
+- The inline pill-click `openManage(inst, { initialTab: 'update' })`
+  / `openManage(inst, { autoAction: 'migrate-to-standalone' })`
+  duplication in `ChooserView.vue`. Replaced by `triggerAction('update',
+  inst)` / `triggerAction('migrate', inst)` so the routing lives in
+  one place.
+
+i18n: new `chooser.menuUpdate` / `menuMigrate` / `menuRestoreSnapshot`
+/ `menuRevealInFolder` / `menuDelete` keys added in both
+`locales/en.json` and `locales/zh.json`.
 
 ## 9. Install Settings — Restart instead of Launch when running — **DONE**
 
@@ -1505,11 +1579,13 @@ the new-install / quick-install flows haven't been unified (§4b).
 Sections 3 and 8 are now mostly landed: §3 — the merged
 `DirectoriesView` ships, `ModelsView` / `MediaView` are deleted, and
 the orphan `models.title` / `media.title` i18n keys are scrubbed. §8
-— the chooser cards now carry version chips, accent-blue running
+— the chooser cards carry version chips, accent-blue running
 indicators, error badges, update / migrate pills, in-flight progress
-bars + status pills, pin-first sort, and a click-driven action
-popover with double-click as the open fast-path (Open + Pin / Unpin
-+ Dismiss error today; richer items follow once Issue #470 lands).
+bars + status pills, pin-first sort, and a kebab / right-click action
+menu (Pin / Unpin, Manage…, Update…, Migrate to Standalone…,
+Restore Snapshot…, Open Folder, Delete…, Dismiss error). Pill click
++ kebab item share a single `triggerAction(id, inst)` dispatch path
+so the two surfaces cannot diverge.
 
 Section 10 (update-channel dropdown) has landed — Install Settings
 now picks the channel via a `<select>` and Update Now on a running

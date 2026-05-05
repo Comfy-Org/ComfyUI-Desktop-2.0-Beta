@@ -14,23 +14,59 @@ import type { Installation } from '../types/ipc'
  *     anchored at the kebab button's bottom-right so the menu drops
  *     down beneath the icon. Same items either way.
  *
- * Items today:
+ * Items today (Phase 3 §8 expansion):
  *
  *   - **Pin / Unpin** (non-cloud installs only).
  *   - **Manage…** — opens the install's `DetailModal` overlay so the
- *     user can edit settings, restore snapshots, run actions, etc.
- *     Routed through an `onManage` callback the caller supplies.
+ *     user can edit settings, run actions, etc.
+ *   - **Update…** (`status === 'installed'` && `statusTag.style ===
+ *     'update'`) — opens Manage on the Update tab.
+ *   - **Migrate to Standalone…** (`sourceCategory === 'desktop'` &&
+ *     installed) — opens Manage with the migrate-to-standalone
+ *     auto-action.
+ *   - **Restore Snapshot…** (`status === 'installed'` && `installPath`
+ *     && non-cloud) — opens Manage on the Snapshots tab.
+ *   - **Open Folder** (installPath && non-cloud) — instant action via
+ *     the `open-folder` source-action; no overlay.
+ *   - **Delete…** (`status === 'installed'` && non-cloud) — opens
+ *     Manage with the delete auto-action so the source-side action
+ *     def's confirm + showProgress flow runs (Tier 2 progress for
+ *     stopped installs — Delete requires stopped).
  *   - **Dismiss error** (when the install has a stored error).
+ *
+ * The same items power the chooser tile's update/migrate visual
+ * pills via `triggerAction(id, inst)` — pill click and kebab item
+ * click route through one dispatch path so the two surfaces cannot
+ * diverge.
  *
  * Card click — single click on the tile body — opens the install
  * directly (`@click="pickInstall"` in ChooserView). The kebab button
  * stops propagation so clicking the icon doesn't also fire the
  * card-level open.
  */
+export type InstallMenuActionId =
+  | 'pin'
+  | 'unpin'
+  | 'manage'
+  | 'update'
+  | 'migrate'
+  | 'restore-snapshot'
+  | 'reveal-in-folder'
+  | 'delete'
+  | 'dismiss-error'
+
+export interface ManageOpenOptions {
+  initialTab?: string
+  autoAction?: string | null
+}
+
 export function useInstallContextMenu(opts: {
-  /** Called when the user picks "Manage…" from the menu. The caller
-   *  is responsible for opening the per-install DetailModal overlay. */
-  onManage?: (inst: Installation) => void
+  /** Open the per-install Manage… DetailModal overlay. The composable
+   *  funnels Update / Migrate / Restore Snapshot / Delete through this
+   *  callback with the appropriate `initialTab` / `autoAction` so the
+   *  source-side action machinery (confirms, prompts, showProgress) is
+   *  reused. The bare Manage… item passes no options. */
+  onManage?: (inst: Installation, options?: ManageOpenOptions) => void
 } = {}) {
   const { t } = useI18n()
   const prefs = useLauncherPrefs()
@@ -43,10 +79,30 @@ export function useInstallContextMenu(opts: {
     inst: null as Installation | null,
   })
 
+  function isLocalLikeInstall(inst: Installation): boolean {
+    return inst.sourceCategory !== 'cloud'
+  }
+
+  function isInstalled(inst: Installation): boolean {
+    return inst.status === 'installed'
+  }
+
+  function hasUpdateTag(inst: Installation): boolean {
+    return inst.statusTag?.style === 'update'
+  }
+
+  function hasMigratePrompt(inst: Installation): boolean {
+    return inst.sourceCategory === 'desktop' && isInstalled(inst)
+  }
+
+  function hasInstallPath(inst: Installation): boolean {
+    return !!inst.installPath
+  }
+
   function getMenuItems(inst: Installation): ContextMenuItem[] {
     const items: ContextMenuItem[] = []
 
-    if (inst.sourceCategory !== 'cloud') {
+    if (isLocalLikeInstall(inst)) {
       items.push({
         id: prefs.isPinned(inst.id) ? 'unpin' : 'pin',
         label: prefs.isPinned(inst.id) ? t('dashboard.unpinFromDashboard') : t('dashboard.pinToDashboard'),
@@ -57,6 +113,32 @@ export function useInstallContextMenu(opts: {
       items.push({
         id: 'manage',
         label: t('chooser.manageInstall'),
+        separator: items.length > 0,
+      })
+
+      if (isInstalled(inst) && hasUpdateTag(inst)) {
+        items.push({ id: 'update', label: t('chooser.menuUpdate') })
+      }
+      if (hasMigratePrompt(inst)) {
+        items.push({ id: 'migrate', label: t('chooser.menuMigrate') })
+      }
+      if (isInstalled(inst) && hasInstallPath(inst) && isLocalLikeInstall(inst)) {
+        items.push({ id: 'restore-snapshot', label: t('chooser.menuRestoreSnapshot') })
+      }
+    }
+
+    if (hasInstallPath(inst) && isLocalLikeInstall(inst)) {
+      items.push({
+        id: 'reveal-in-folder',
+        label: t('chooser.menuRevealInFolder'),
+        separator: items.length > 0,
+      })
+    }
+
+    if (opts.onManage && isInstalled(inst) && isLocalLikeInstall(inst)) {
+      items.push({
+        id: 'delete',
+        label: t('chooser.menuDelete'),
         separator: items.length > 0,
       })
     }
@@ -104,18 +186,40 @@ export function useInstallContextMenu(opts: {
     return getMenuItems(inst)
   })
 
-  async function handleCtxMenuSelect(id: string): Promise<void> {
-    const inst = ctxMenu.value.inst
-    if (!inst) return
+  /** Single dispatch path for both the kebab/right-click menu and the
+   *  chooser tile's visual pills. Pill clicks (`triggerAction('update',
+   *  inst)` / `triggerAction('migrate', inst)`) and menu selections
+   *  funnel through here so the two surfaces cannot diverge. */
+  async function triggerAction(id: string, inst: Installation): Promise<void> {
     if (id === 'pin') {
       await prefs.pinInstall(inst.id)
     } else if (id === 'unpin') {
       await prefs.unpinInstall(inst.id)
     } else if (id === 'manage') {
       opts.onManage?.(inst)
+    } else if (id === 'update') {
+      opts.onManage?.(inst, { initialTab: 'update' })
+    } else if (id === 'migrate') {
+      opts.onManage?.(inst, { autoAction: 'migrate-to-standalone' })
+    } else if (id === 'restore-snapshot') {
+      opts.onManage?.(inst, { initialTab: 'snapshots' })
+    } else if (id === 'reveal-in-folder') {
+      try {
+        await window.api.runAction(inst.id, 'open-folder')
+      } catch {
+        // The action surfaces its own error to the user via main; nothing to do here.
+      }
+    } else if (id === 'delete') {
+      opts.onManage?.(inst, { autoAction: 'delete' })
     } else if (id === 'dismiss-error') {
       sessionStore.clearErrorInstance(inst.id)
     }
+  }
+
+  async function handleCtxMenuSelect(id: string): Promise<void> {
+    const inst = ctxMenu.value.inst
+    if (!inst) return
+    await triggerAction(id, inst)
   }
 
   function closeMenu(): void {
@@ -129,5 +233,6 @@ export function useInstallContextMenu(opts: {
     openKebabMenu,
     handleCtxMenuSelect,
     closeMenu,
+    triggerAction,
   }
 }

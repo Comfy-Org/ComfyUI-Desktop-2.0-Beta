@@ -214,8 +214,9 @@ const {
   openKebabMenu,
   handleCtxMenuSelect,
   closeMenu,
+  triggerAction,
 } = useInstallContextMenu({
-  onManage: (inst) => openManage(inst),
+  onManage: (inst, opts) => openManage(inst, opts ?? {}),
 })
 
 /** DetailModal `update:installation` event — the user edited the
@@ -523,9 +524,9 @@ function handleNewInstallClick(): void {
             role="button"
             tabindex="0"
             :title="inst.statusTag?.label"
-            @click.stop="openManage(inst, { initialTab: 'update' })"
-            @keydown.enter.stop="openManage(inst, { initialTab: 'update' })"
-            @keydown.space.prevent.stop="openManage(inst, { initialTab: 'update' })"
+            @click.stop="triggerAction('update', inst)"
+            @keydown.enter.stop="triggerAction('update', inst)"
+            @keydown.space.prevent.stop="triggerAction('update', inst)"
           >
             <ArrowDownToLine :size="11" />
             {{ $t('chooser.updatePill') }}
@@ -536,9 +537,9 @@ function handleNewInstallClick(): void {
             role="button"
             tabindex="0"
             :title="$t('dashboard.migrateBannerTitle')"
-            @click.stop="openManage(inst, { autoAction: 'migrate-to-standalone' })"
-            @keydown.enter.stop="openManage(inst, { autoAction: 'migrate-to-standalone' })"
-            @keydown.space.prevent.stop="openManage(inst, { autoAction: 'migrate-to-standalone' })"
+            @click.stop="triggerAction('migrate', inst)"
+            @keydown.enter.stop="triggerAction('migrate', inst)"
+            @keydown.space.prevent.stop="triggerAction('migrate', inst)"
           >
             <ArrowRightLeft :size="11" />
             {{ $t('chooser.migratePill') }}
