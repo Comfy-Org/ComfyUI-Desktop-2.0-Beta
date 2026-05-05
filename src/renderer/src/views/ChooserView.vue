@@ -420,15 +420,23 @@ function handleNewInstallClick(): void {
                source plugin populated one (e.g. "Stable" / "Latest"
                for the standalone source) so the channel reads
                instead of the bare source label. Falls back to the
-               source label otherwise. The version pill is hidden
-               when listPreview is set — that's the rule the legacy
-               DashboardCard followed to avoid showing a raw commit
-               sha next to "Latest" for tracking installs. -->
+               source label otherwise. -->
           <span class="chooser-tile-pill">
             {{ inst.listPreview || inst.sourceLabel }}
           </span>
+          <!-- Version pill — channel and version are independent
+               facts: the channel reads as "what stream am I tracking"
+               while the version reads as "what point on that stream
+               am I currently at" (e.g. `v0.14.2+21` for a Latest
+               install 21 commits ahead of the v0.14.2 tag). The
+               legacy DashboardCard hid this when listPreview was set
+               but the legacy InstallationList showed it
+               unconditionally — the chooser is now the only surface
+               that lists installs, so we restore the always-on
+               behaviour to avoid losing the at-a-glance "what am I
+               on" affordance. -->
           <span
-            v-if="inst.version && !inst.listPreview"
+            v-if="inst.version"
             class="chooser-tile-pill chooser-tile-pill-version"
           >
             {{ inst.version }}
