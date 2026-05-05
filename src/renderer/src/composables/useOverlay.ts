@@ -152,8 +152,12 @@ export function useOverlay(): UseOverlayApi {
       if (!ok) return false
     }
     // Closing (`next === null`) an in-flight progress op also prompts —
-    // window-close / dashboard-return paths drive that branch.
-    if (next === null && cur?.kind === 'progress') {
+    // window-close / dashboard-return paths drive that branch. Step 5
+    // §16 — the takeover variant covers Tier 3 ops (update on a
+    // running install, install / first-use takeovers) so the user
+    // can't lose work without confirmation when main consults the
+    // renderer via `comfy-window:request-close`.
+    if (next === null && (cur?.kind === 'progress' || cur?.kind === 'takeover')) {
       const ok = await confirmCancelCurrent(cur.operationName)
       if (!ok) return false
     }

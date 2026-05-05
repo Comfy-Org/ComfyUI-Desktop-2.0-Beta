@@ -500,13 +500,75 @@ function quitApp(): void {
 }
 
 /**
+ * Step 5 §16 — pre-cleared close set. Marks a window as having
+ * already passed the panel renderer's tier-aware consult so the
+ * subsequent `close` event handler can skip the consult and tear
+ * down immediately. Used by `returnToDashboard` (consult upfront so
+ * we don't open a fresh chooser window the user is about to abort)
+ * and by `confirmAndCloseAllHostWindows` (the global confirm dialog
+ * already lists in-progress operations / sessions / downloads, so
+ * the per-window prompt would be redundant noise after the user
+ * confirmed the bulk close).
+ */
+const preClearedClose = new WeakSet<BrowserWindow>()
+
+/**
+ * Step 5 §16 — main consults the panel renderer before tearing down
+ * a host window so a Tier 2 progress / Tier 3 takeover overlay can
+ * prompt the user to confirm cancellation via the standardised
+ * cancel-prompt copy. Returns true when the renderer cleared the
+ * close (no overlay open, or the user confirmed cancellation),
+ * false when the renderer aborted (user dismissed the prompt).
+ *
+ * Falls back to "cleared" when the panelView is missing (no panel
+ * has been mounted yet — nothing to lose), the webContents is
+ * destroyed (already torn down), or the renderer doesn't reply
+ * within 5s (a hung renderer shouldn't permanently wedge close).
+ */
+async function consultPanelRendererClose(panelView: WebContentsView | null | undefined): Promise<boolean> {
+  if (!panelView || panelView.webContents.isDestroyed()) return true
+  return new Promise<boolean>((resolve) => {
+    const requestId = `close-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    let settled = false
+    const onResponse = (
+      event: Electron.IpcMainEvent,
+      payload: { requestId?: string; cleared?: boolean } | undefined,
+    ): void => {
+      if (event.sender !== panelView.webContents) return
+      if (payload?.requestId !== requestId) return
+      if (settled) return
+      settled = true
+      ipcMain.off('comfy-window:request-close-response', onResponse)
+      resolve(!!payload?.cleared)
+    }
+    ipcMain.on('comfy-window:request-close-response', onResponse)
+    try {
+      panelView.webContents.send('comfy-window:request-close', { requestId })
+    } catch {
+      settled = true
+      ipcMain.off('comfy-window:request-close-response', onResponse)
+      resolve(true)
+      return
+    }
+    setTimeout(() => {
+      if (settled) return
+      settled = true
+      ipcMain.off('comfy-window:request-close-response', onResponse)
+      resolve(true)
+    }, 5000)
+  })
+}
+
+/**
  * Close every host window (install-backed and chooser hosts alike) but
  * leave the app / tray alive. Phase 3 §16 — File menu's "Close All
  * Windows" entry. Each window's existing `close` handler runs the full
  * teardown (`stopRunning` + webContents close + window.destroy), so we
- * just dispatch `close()` and let those handlers do the work. Snapshot
- * the entry list first so the iteration isn't affected by `closed`
- * callbacks that delete from the `comfyWindows` map mid-loop.
+ * just dispatch `close()` and let those handlers do the work — the
+ * handlers also consult the panel renderer per Step 5 §16 unless the
+ * window is already in `preClearedClose`. Snapshot the entry list
+ * first so the iteration isn't affected by `closed` callbacks that
+ * delete from the `comfyWindows` map mid-loop.
  */
 function closeAllHostWindows(): void {
   const entries = Array.from(comfyWindows.values())
@@ -538,9 +600,16 @@ function closeAllHostWindows(): void {
  * windows swap is the visible cost; the user-facing affordance is
  * indistinguishable from an in-place swap once the new window paints.
  */
-function returnToDashboard(parentEntryId: string): void {
+async function returnToDashboard(parentEntryId: string): Promise<void> {
   const entry = comfyWindows.get(parentEntryId)
   if (!entry || entry.installationId === null || entry.window.isDestroyed()) return
+  // Step 5 §16 — consult the panel renderer up front so a Tier 2/3 op
+  // can prompt the user BEFORE we open the new chooser window. If the
+  // user dismisses the prompt the takeover stays mounted and we leave
+  // the original window untouched (no flicker, no orphan chooser).
+  const cleared = await consultPanelRendererClose(entry.panelView)
+  if (!cleared) return
+  preClearedClose.add(entry.window)
   const bounds = entry.window.getBounds()
   const wasMaximized = entry.window.isMaximized()
   const chooserWindow = openChooserHostWindow()
@@ -604,7 +673,15 @@ async function confirmAndCloseAllHostWindows(parentWindow: BrowserWindow | null)
   const result = parentWindow && !parentWindow.isDestroyed()
     ? await dialog.showMessageBox(parentWindow, opts)
     : await dialog.showMessageBox(opts)
-  if (result.response === 0) closeAllHostWindows()
+  if (result.response === 0) {
+    // Step 5 §16 — the global dialog already lists in-progress ops /
+    // sessions / downloads, so the per-window tier-aware prompt would
+    // be redundant after the user confirmed the bulk close. Pre-clear
+    // every entry so each window's `close` handler skips its own
+    // consult and tears down immediately.
+    for (const entry of entries) preClearedClose.add(entry.window)
+    closeAllHostWindows()
+  }
 }
 
 function onComfyExited({ installationId }: { installationId?: string } = {}): void {
@@ -1146,19 +1223,39 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
     reloadComfy()
   })
 
+  // Step 5 §16 — close handler is now async: preventDefault, consult
+  // the panel renderer (so a Tier 2/3 op can prompt the user), and
+  // only run the teardown sequence if cleared. The `closingInFlight`
+  // guard prevents re-entry on rapid clicks of the OS close button
+  // while the consult is pending.
+  let closingInFlight = false
   comfyWindow.on('close', (e) => {
     e.preventDefault()
-    detachWindowDownloads(comfyWindow)
-    ipc.stopRunning(installationId)
-    _unregisterExtraBroadcastTarget(titleBarView.webContents)
-    const entry = comfyWindows.get(installationId)
-    if (entry?.panelView) {
-      _unregisterExtraBroadcastTarget(entry.panelView.webContents)
-      entry.panelView.webContents.close()
-    }
-    titleBarView.webContents.close()
-    comfyView.webContents.close()
-    comfyWindow.destroy()
+    if (closingInFlight) return
+    closingInFlight = true
+    void (async () => {
+      try {
+        const entry = comfyWindows.get(installationId)
+        const skipConsult = preClearedClose.has(comfyWindow)
+        const cleared = skipConsult ? true : await consultPanelRendererClose(entry?.panelView)
+        if (!cleared) return
+        preClearedClose.delete(comfyWindow)
+        if (comfyWindow.isDestroyed()) return
+        detachWindowDownloads(comfyWindow)
+        ipc.stopRunning(installationId)
+        _unregisterExtraBroadcastTarget(titleBarView.webContents)
+        const liveEntry = comfyWindows.get(installationId)
+        if (liveEntry?.panelView) {
+          _unregisterExtraBroadcastTarget(liveEntry.panelView.webContents)
+          liveEntry.panelView.webContents.close()
+        }
+        titleBarView.webContents.close()
+        comfyView.webContents.close()
+        comfyWindow.destroy()
+      } finally {
+        closingInFlight = false
+      }
+    })()
   })
 
   comfyWindow.on('closed', () => {
@@ -1409,15 +1506,37 @@ function openChooserHostWindow(): BrowserWindow {
   }
   ipcMain.on('comfy-window:title-bar-ready', onTitleBarReady)
 
-  comfyWindow.on('close', () => {
-    _unregisterExtraBroadcastTarget(titleBarView.webContents)
-    const entry = comfyWindows.get(windowKey)
-    if (entry?.panelView) {
-      _unregisterExtraBroadcastTarget(entry.panelView.webContents)
-      entry.panelView.webContents.close()
-    }
-    titleBarView.webContents.close()
-    comfyView.webContents.close()
+  // Step 5 §16 — install-less host close handler now matches the
+  // install-backed shape: preventDefault, consult the panel renderer,
+  // tear down + destroy only if cleared. The chooser host's panel
+  // renderer hosts new-install / first-use takeovers; closing mid-
+  // takeover would lose the user's progress without the prompt.
+  let closingInFlight = false
+  comfyWindow.on('close', (e) => {
+    e.preventDefault()
+    if (closingInFlight) return
+    closingInFlight = true
+    void (async () => {
+      try {
+        const entry = comfyWindows.get(windowKey)
+        const skipConsult = preClearedClose.has(comfyWindow)
+        const cleared = skipConsult ? true : await consultPanelRendererClose(entry?.panelView)
+        if (!cleared) return
+        preClearedClose.delete(comfyWindow)
+        if (comfyWindow.isDestroyed()) return
+        _unregisterExtraBroadcastTarget(titleBarView.webContents)
+        const liveEntry = comfyWindows.get(windowKey)
+        if (liveEntry?.panelView) {
+          _unregisterExtraBroadcastTarget(liveEntry.panelView.webContents)
+          liveEntry.panelView.webContents.close()
+        }
+        titleBarView.webContents.close()
+        comfyView.webContents.close()
+        comfyWindow.destroy()
+      } finally {
+        closingInFlight = false
+      }
+    })()
   })
 
   comfyWindow.on('closed', () => {
@@ -2129,7 +2248,7 @@ function activateTitleMenuItem(entry: TitleMenuPopupEntry, id: string): void {
       // destroyed when that window closes; the trailing
       // hideTitleMenuPopup is guarded against an already-destroyed
       // popup.
-      returnToDashboard(entry.parentEntryId)
+      void returnToDashboard(entry.parentEntryId)
     } else if (id === 'close-window') {
       // §16 — close just the parent host window. Each host window has
       // its own `close` handler that runs the teardown sequence

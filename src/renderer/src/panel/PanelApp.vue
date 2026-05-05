@@ -165,6 +165,7 @@ const installation = computed<Installation | null>(
 let unsubPanel: (() => void) | null = null
 let unsubLocale: (() => void) | null = null
 let unsubSettings: (() => void) | null = null
+let unsubCloseRequest: (() => void) | null = null
 
 async function loadLocale(): Promise<void> {
   const messages = await window.api.getLocaleMessages()
@@ -275,13 +276,25 @@ async function openFirstUseTakeover(): Promise<void> {
   await firstUseRef.value?.open()
 }
 
+/**
+ * Step 5 §16 — bypass the takeover→null cancel-prompt for
+ * renderer-internal intentional close paths (✕ on a takeover,
+ * post-completion auto-close). The prompt belongs to the
+ * consult-from-main `onCloseRequest` path; firing it on a user's
+ * own ✕ click would be a redundant double-confirm. Mirrors the
+ * `handleProgressClose` direct-mutation pattern.
+ */
+function dismissTakeoverDirect(): void {
+  currentOverlay.value = null
+}
+
 /** First-use takeover ✕ / Escape — the user dismissed mid-flow. We
  *  do NOT mark `firstUseCompleted`, so the takeover replays on the
  *  next launch (the persisted gate is only flipped via the explicit
  *  `complete` emit or the chained new-install success path). */
 function handleFirstUseClose(): void {
   chainingFirstUseToNewInstall.value = false
-  void closeOverlay()
+  dismissTakeoverDirect()
 }
 
 /** First-use takeover Cloud-branch pick — one-shot completion. The
@@ -290,7 +303,7 @@ function handleFirstUseClose(): void {
 async function handleFirstUseComplete(): Promise<void> {
   await launcherPrefs.markFirstUseCompleted()
   chainingFirstUseToNewInstall.value = false
-  void closeOverlay()
+  dismissTakeoverDirect()
 }
 
 /** First-use takeover Local-branch pick — chain into the new-install
@@ -314,7 +327,7 @@ async function handleNewInstallTakeoverClose(): Promise<void> {
     chainingFirstUseToNewInstall.value = false
     await launcherPrefs.markFirstUseCompleted()
   }
-  void closeOverlay()
+  dismissTakeoverDirect()
 }
 
 /**
@@ -464,6 +477,21 @@ onMounted(async () => {
     settingsRef.value?.loadSettings()
   })
 
+  // Step 5 §16 — main consults the panel renderer before tearing down
+  // the host window. Funnel the consult through `closeOverlay()` so a
+  // Tier 2 progress / Tier 3 takeover op can prompt the user via the
+  // standardised cancel-prompt copy. `closeOverlay` returns true when
+  // the slot is empty or the user confirmed cancellation; false when
+  // the user dismissed the prompt. We echo the boolean back to main
+  // along with the original `requestId` so main can pair it with the
+  // request that fired it.
+  unsubCloseRequest = window.api.onCloseRequest(({ requestId }) => {
+    void (async () => {
+      const cleared = currentOverlay.value === null ? true : await closeOverlay()
+      window.api.respondCloseRequest({ requestId, cleared })
+    })()
+  })
+
   // Initialize stores / prefs needed by the install-settings DetailModal.
   // installationStore wires its own onInstallationsChanged listener.
   await Promise.all([
@@ -496,6 +524,7 @@ onUnmounted(() => {
   unsubPanel?.()
   unsubLocale?.()
   unsubSettings?.()
+  unsubCloseRequest?.()
   pendingPickUnsub?.()
   sessionStore.dispose()
 })
@@ -604,19 +633,19 @@ onUnmounted(() => {
       <TrackModal
         v-else-if="currentOverlay.component === 'track'"
         ref="trackRef"
-        @close="closeOverlay"
-        @navigate-list="closeOverlay"
+        @close="dismissTakeoverDirect"
+        @navigate-list="dismissTakeoverDirect"
       />
       <LoadSnapshotModal
         v-else-if="currentOverlay.component === 'load-snapshot'"
         ref="loadSnapshotRef"
-        @close="closeOverlay"
+        @close="dismissTakeoverDirect"
         @show-progress="handleShowProgress"
       />
       <QuickInstallModal
         v-else-if="currentOverlay.component === 'quick-install'"
         ref="quickInstallRef"
-        @close="closeOverlay"
+        @close="dismissTakeoverDirect"
         @show-progress="handleShowProgress"
       />
       <FirstUseTakeover

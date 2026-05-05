@@ -52,6 +52,21 @@ const api: ElectronApi = {
     ipcRenderer.send('comfy-window:close-current-panel'),
   setTitleBarInert: (inert: boolean) =>
     ipcRenderer.send('comfy-window:set-titlebar-inert', { inert }),
+  /**
+   * Step 5 §16 — main consults the panel renderer before tearing down
+   * the host window so a Tier 2 progress / Tier 3 takeover overlay can
+   * prompt the user to confirm cancellation. The renderer replies
+   * with `respondCloseRequest({ requestId, cleared })` — `cleared:
+   * true` lets main proceed with destruction, `cleared: false` aborts.
+   */
+  onCloseRequest: (callback) => {
+    const handler = (_event: IpcRendererEvent, data: unknown) =>
+      callback(data as { requestId: string })
+    ipcRenderer.on('comfy-window:request-close', handler)
+    return () => ipcRenderer.removeListener('comfy-window:request-close', handler)
+  },
+  respondCloseRequest: (payload) =>
+    ipcRenderer.send('comfy-window:request-close-response', payload),
   transferHostBoundsToInstall: (installationId) =>
     ipcRenderer.invoke('transfer-host-bounds-to-install', installationId),
   getRunningInstances: () => ipcRenderer.invoke('get-running-instances'),

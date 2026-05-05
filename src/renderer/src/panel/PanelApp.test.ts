@@ -183,6 +183,11 @@ function installMockApi(initial?: {
     }),
     setTitleBarInert: vi.fn(),
     onSettingsChanged: vi.fn(() => () => {}),
+    // Step 5 §16 — main consults the panel renderer before tearing
+    // down the host window. PanelApp subscribes on mount; the test
+    // suite never fires the consult so the mock is a no-op pair.
+    onCloseRequest: vi.fn(() => () => {}),
+    respondCloseRequest: vi.fn(),
     onInstallationsChanged: vi.fn((cb: () => void) => {
       state.installationsChangedCallbacks.push(cb)
       return () => {}

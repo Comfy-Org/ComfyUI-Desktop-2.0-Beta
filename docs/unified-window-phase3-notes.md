@@ -1159,6 +1159,116 @@ Still open:
   lands so we have a single canonical create-install panel to
   thread the "starting from a snapshot" entry-point into.
 
+### Status — close-window / dashboard tier-aware guard **DONE**
+
+The window-close + return-to-dashboard paths now consult the panel
+renderer before tearing down so a Tier 2 progress / Tier 3 takeover
+op can prompt the user via the standardised cancel-prompt copy.
+
+Renderer-side wiring:
+
+- `useOverlay.openOverlay`'s "closing while an in-flight op is
+  mounted" branch grew to cover Tier 3: any `next === null` close
+  with `cur?.kind === 'progress' || 'takeover'` fires the same
+  `confirmCancelCurrent(cur.operationName)` prompt the Tier 2 path
+  already used.
+- The renderer-internal intentional close paths (the takeover's own
+  ✕ button, post-completion auto-close) bypass the prompt by
+  directly mutating `currentOverlay.value = null`. This is the same
+  pattern `handleProgressClose` already used and prevents a
+  redundant double-confirm when the user explicitly dismissed the
+  takeover. The new `dismissTakeoverDirect()` helper in `PanelApp`
+  centralises the bypass; `handleFirstUseClose` /
+  `handleFirstUseComplete` / `handleNewInstallTakeoverClose` and the
+  Track / LoadSnapshot / QuickInstall takeover bindings all funnel
+  through it. The prompt is now exclusively reserved for the
+  consult-from-main path.
+- `PanelApp` subscribes to `window.api.onCloseRequest` on mount.
+  When main fires the consult, the handler calls `closeOverlay()`
+  for any Tier 2/3 op (which prompts via the standard copy) and
+  echoes the boolean result back via `window.api.respondCloseRequest`
+  with the same `requestId`.
+
+Main-side IPC:
+
+- New `comfy-window:request-close` (main → panel renderer) and
+  `comfy-window:request-close-response` (panel renderer → main)
+  channels. Each consult uses a fresh `requestId` so multiple
+  in-flight requests stay paired with their responses; the helper
+  cleans up its `ipcMain.on` listener as soon as the matching
+  reply arrives (or after a 5s timeout — a hung renderer shouldn't
+  permanently wedge close).
+- New `consultPanelRendererClose(panelView): Promise<boolean>`
+  helper in `src/main/index.ts` encapsulates the round-trip. Falls
+  back to "cleared" when the panelView is missing (no panel mounted
+  yet — nothing to lose) or its webContents is destroyed.
+
+Close-handler restructure:
+
+- The install-backed `comfyWindow.on('close', …)` handler at
+  `src/main/index.ts:1226` now `preventDefault`s, awaits the
+  consult, and only runs the existing teardown sequence
+  (`stopRunning` + webContents close + `comfyWindow.destroy()`)
+  when the renderer cleared. A `closingInFlight` flag prevents
+  re-entry on rapid clicks of the OS close button while the
+  consult is pending.
+- The install-less chooser-host `comfyWindow.on('close', …)`
+  handler at `src/main/index.ts:1509` got the same treatment —
+  previously it didn't `preventDefault`, so this commit also adds
+  the explicit `comfyWindow.destroy()` call after the cleared
+  teardown.
+- `returnToDashboard` now consults the panel renderer up front so
+  we don't open a fresh chooser window the user is about to abort.
+  The consult happens BEFORE `openChooserHostWindow` so a dismissed
+  prompt leaves the original install-backed window untouched (no
+  flicker, no orphan chooser). When cleared, the entry is added to
+  a module-level `preClearedClose` `WeakSet` so the close-handler
+  consult that fires when `entry.window.close()` is dispatched can
+  skip its own consult and tear down immediately.
+- `confirmAndCloseAllHostWindows` pre-clears every entry after the
+  global confirm dialog is accepted — the dialog already lists
+  in-progress ops / sessions / downloads, so the per-window
+  tier-aware prompt would be redundant noise after the user
+  confirmed the bulk close. Pre-clearing also prevents the
+  staircase-of-prompts UX where each window in turn prompts the
+  user before tearing down.
+- `closeAllHostWindows` itself is unchanged — it just dispatches
+  `entry.window.close()` per entry; the consult/skip logic lives
+  in the close handlers + `preClearedClose` set.
+
+Architectural contracts preserved:
+
+- Standardised cancel-prompt copy under `overlay.cancel*` —
+  `cancelCurrentTitle` / `cancelNamedTitle` / `cancelMessage` /
+  `cancelConfirm` — is reused unchanged for both the takeover→null
+  close and the existing Tier 2 collision cases. No new variants.
+- `useOverlay.openOverlay` still returns `Promise<boolean>`; the
+  renderer-side consult handler threads the boolean directly back
+  through `respondCloseRequest`, so main's go/no-go decision is the
+  same value the user dismissed (or confirmed) the prompt with.
+- Cross-window invariant: same code in chooser host and install
+  host. The consult helper is host-agnostic (it operates on
+  `entry.panelView`); the install-backed and install-less close
+  handlers share the same shape (preventDefault → consult →
+  teardown + destroy).
+- Title bar inert during the takeover: unchanged. The tier watcher
+  still fires `setTitleBarInert` on tier→3 transitions; the
+  consult never moves the slot to Tier 3 by itself, only the
+  existing `openOverlay({ kind: 'takeover' })` callers do.
+
+DROPs that landed with this slice: none — the pre-§16 close handlers
+were unconditional teardown; this slice just wraps them in the
+tier-aware consult.
+
+Type plumbing: new `ElectronApi.onCloseRequest` /
+`ElectronApi.respondCloseRequest` entries in `src/types/ipc.ts`,
+matching preload bindings in `src/preload/index.ts`.
+
+Test fixtures: the `installMockApi` helper in
+`src/renderer/src/panel/PanelApp.test.ts` gained no-op
+`onCloseRequest` / `respondCloseRequest` mocks so the `onMounted`
+subscription doesn't throw.
+
 ---
 
 ## 17. Full-screen takeover for startup / update flows

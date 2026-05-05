@@ -710,6 +710,14 @@ export interface ElectronApi {
    *  receives the change via the `comfy-titlebar:inert-changed`
    *  broadcast main forwards back from this IPC. */
   setTitleBarInert(inert: boolean): void
+  /** Step 5 §16 — main consults the panel renderer before tearing down
+   *  the host window. Returns an unsubscribe; the callback receives a
+   *  `requestId` it must echo back via `respondCloseRequest` so main
+   *  can pair the response with the request that fired it. */
+  onCloseRequest(callback: (data: { requestId: string }) => void): Unsubscribe
+  /** Reply to a `comfy-window:request-close` consult — `cleared: true`
+   *  lets main proceed with destruction, `cleared: false` aborts. */
+  respondCloseRequest(payload: { requestId: string; cleared: boolean }): void
   /** Stamp the calling chooser host window's current bounds onto the
    *  install's saved-bounds slot (Phase 3 visual continuity). The chooser
    *  pick flow calls this BEFORE kicking off the launch so the new
