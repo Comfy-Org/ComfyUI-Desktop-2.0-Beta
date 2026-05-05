@@ -47,6 +47,11 @@ interface MockApi {
   onInstallationsVersionsUpdated: ReturnType<typeof vi.fn>
   getSetting: ReturnType<typeof vi.fn>
   runAction: ReturnType<typeof vi.fn>
+  // progressStore subscribes to onErrorDetail at construction time, so
+  // the mock has to expose at least the listener-registration shape it
+  // expects. ChooserView reads progressStore.getProgressInfo() per
+  // tile via §8's in-flight-progress affordance.
+  onErrorDetail: ReturnType<typeof vi.fn>
 }
 
 function installMockApi(initial: Installation[]): MockApi {
@@ -56,6 +61,7 @@ function installMockApi(initial: Installation[]): MockApi {
     onInstallationsVersionsUpdated: vi.fn(() => () => {}),
     getSetting: vi.fn().mockResolvedValue(undefined),
     runAction: vi.fn().mockResolvedValue({ ok: true }),
+    onErrorDetail: vi.fn(() => () => {}),
   }
   ;(window as unknown as { api: MockApi }).api = api
   return api

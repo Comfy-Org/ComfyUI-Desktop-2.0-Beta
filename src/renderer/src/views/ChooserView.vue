@@ -2,9 +2,10 @@
 import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
 import { useInstallationStore } from '../stores/installationStore'
 import { useSessionStore } from '../stores/sessionStore'
+import { useProgressStore } from '../stores/progressStore'
 import { useLauncherPrefs } from '../composables/useLauncherPrefs'
 import { useInstallContextMenu } from '../composables/useInstallContextMenu'
-import { Cloud, Plus, Box, Monitor, Globe, Pin, AlertCircle } from 'lucide-vue-next'
+import { Cloud, Plus, Box, Monitor, Globe, Pin, AlertCircle, ArrowDownToLine, ArrowRightLeft } from 'lucide-vue-next'
 import ContextMenu from '../components/ContextMenu.vue'
 import type { Installation } from '../types/ipc'
 
@@ -47,6 +48,7 @@ const emit = defineEmits<{
 
 const installationStore = useInstallationStore()
 const sessionStore = useSessionStore()
+const progressStore = useProgressStore()
 const prefs = useLauncherPrefs()
 
 onMounted(() => {
@@ -177,6 +179,38 @@ function hasError(inst: Installation): boolean {
   return sessionStore.errorInstances.has(inst.id)
 }
 
+/** Whether the install's source has reported an update-available status
+ *  tag. Driven by the same release-cache + channel logic that powers
+ *  the Install Settings update banner — main builds `statusTag` for the
+ *  install via `source.getStatusTag()` and ships it on every fetch.
+ *  We treat any tag with `style: 'update'` as "newer release out there",
+ *  surfaced here as a card-level "Update" pill so users notice without
+ *  drilling into Install Settings. */
+function hasUpdate(inst: Installation): boolean {
+  return inst.statusTag?.style === 'update'
+}
+
+/** Whether the install is a Legacy Desktop (1.0) install with a pending
+ *  migrate-to-standalone action. Today this is purely a `sourceCategory`
+ *  check — the desktop source plugin always exposes the migrate action
+ *  for installed Desktop 1.0 records (`src/main/sources/desktop.ts`).
+ *  Surfacing it here as a "Migrate" pill on the chooser tile lets users
+ *  notice the migration prompt without opening Install Settings; the
+ *  actual migration UI still lives behind the install-settings panel. */
+function hasMigratePrompt(inst: Installation): boolean {
+  return inst.sourceCategory === 'desktop' && inst.status === 'installed'
+}
+
+/** Active in-flight operation (install / update / restore / migrate) for
+ *  this install, surfaced from the renderer-side progressStore. The same
+ *  data drives ProgressModal — here we render a thin progress bar +
+ *  status line at the bottom of the card so users notice in-progress
+ *  work without drilling into the install. Returns null when nothing is
+ *  in flight. */
+function progressFor(inst: Installation): { status: string; percent: number } | null {
+  return progressStore.getProgressInfo(inst.id)
+}
+
 function pickInstall(inst: Installation): void {
   emit('pick', inst)
 }
@@ -303,11 +337,69 @@ function handleNewInstallClick(): void {
           >
             {{ inst.version }}
           </span>
-          <span class="chooser-tile-pill">
+          <!-- Update / migrate pills surface card-level prompts that
+               previously only lived inside Install Settings. They sit
+               between the version chip and the timestamp so the
+               actionable signal reads first when the user scans the
+               card. The pills themselves don't claim a click target
+               yet — opening the install (single-click) still goes
+               through the existing pickInstall path, and the migrate /
+               update flows live behind Install Settings; once §8's
+               click→popover refactor lands, these pills will get
+               dedicated entries in the per-card action menu. -->
+          <span
+            v-if="hasUpdate(inst)"
+            class="chooser-tile-pill chooser-tile-pill-update"
+            :title="inst.statusTag?.label"
+          >
+            <ArrowDownToLine :size="11" />
+            {{ $t('chooser.updatePill') }}
+          </span>
+          <span
+            v-if="hasMigratePrompt(inst)"
+            class="chooser-tile-pill chooser-tile-pill-migrate"
+            :title="$t('dashboard.migrateBannerTitle')"
+          >
+            <ArrowRightLeft :size="11" />
+            {{ $t('chooser.migratePill') }}
+          </span>
+          <!-- While a long-running operation is in flight (install,
+               update, restore, migrate) the timestamp pill is replaced
+               by the live status line so the card reflects the active
+               work. The thin progress bar at the bottom of the tile
+               renders the percentage; the status pill carries the
+               textual phase label. -->
+          <span
+            v-if="progressFor(inst)"
+            class="chooser-tile-pill chooser-tile-pill-progress"
+          >
+            {{ progressFor(inst)!.status }}
+          </span>
+          <span v-else class="chooser-tile-pill">
             {{ typeof inst.lastLaunchedAt === 'number'
               ? $t('dashboard.launchedAgo', { time: timeAgo(inst.lastLaunchedAt as number) })
               : $t('dashboard.neverLaunched') }}
           </span>
+        </div>
+        <!-- Thin progress bar across the card bottom — present only
+             while progressFor(inst) is non-null. Indeterminate
+             (negative percent) renders a swept stripe; otherwise the
+             fill width tracks the percent value. Lives outside the
+             meta line so it spans the full card width and reads as
+             "this card is working" at a glance. -->
+        <div
+          v-if="progressFor(inst)"
+          class="chooser-tile-progress"
+          :class="{ indeterminate: (progressFor(inst)!.percent ?? -1) < 0 }"
+        >
+          <div
+            class="chooser-tile-progress-fill"
+            :style="{
+              width: (progressFor(inst)!.percent ?? -1) >= 0
+                ? `${progressFor(inst)!.percent}%`
+                : '40%',
+            }"
+          ></div>
         </div>
       </button>
     </div>
@@ -467,6 +559,78 @@ function handleNewInstallClick(): void {
 }
 .chooser-tile-pill-version {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+/* Update-available pill — accent-blue tinted so it reads as
+ * "informational, you can take action here" rather than "warning". The
+ * icon + label format matches the migrate pill so they read as a pair
+ * of card-level prompts. */
+.chooser-tile-pill-update {
+  gap: 4px;
+  color: var(--accent, #4a90e2);
+  background: var(--accent-soft, rgba(74, 144, 226, 0.12));
+  border-color: var(--accent, #4a90e2);
+  opacity: 1;
+}
+
+/* Migrate-available pill — uses the warning amber so it's visually
+ * distinct from the update pill (an action that materially changes the
+ * install vs. an in-place update). Same icon-plus-label layout. */
+.chooser-tile-pill-migrate {
+  gap: 4px;
+  color: var(--accent-warning, #d97706);
+  background: var(--accent-warning-soft, rgba(217, 119, 6, 0.12));
+  border-color: var(--accent-warning, #d97706);
+  opacity: 1;
+}
+
+/* In-flight progress pill — replaces the timestamp pill while a
+ * long-running operation is live (install / update / restore /
+ * migrate). The fill bar at the card bottom carries the percentage;
+ * this pill carries the status text. Tinted with the accent so the
+ * "in progress" state reads as active work rather than neutral data. */
+.chooser-tile-pill-progress {
+  color: var(--accent, #4a90e2);
+  background: var(--accent-soft, rgba(74, 144, 226, 0.12));
+  border-color: var(--accent, #4a90e2);
+  opacity: 1;
+  /* The status string can be long ("Resolving dependencies…",
+   * "Restoring snapshot snapshot-2026-01-15.zip"). Cap the pill width
+   * and ellipsis so the meta line still fits on a single tile row on
+   * narrow windows. */
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Thin progress bar pinned to the card bottom while an op is in
+ * flight. Lives outside the meta line so it always spans the full
+ * card width — the visual signal of "this card is working" the user
+ * recognises from ProgressModal. Sweeping stripe for indeterminate
+ * progress; tracked fill for percent-driven progress. */
+.chooser-tile-progress {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: var(--bg-elev-2, rgba(127, 127, 127, 0.16));
+  border-bottom-left-radius: 12px;
+  border-bottom-right-radius: 12px;
+  overflow: hidden;
+}
+.chooser-tile-progress-fill {
+  height: 100%;
+  background: var(--accent, #4a90e2);
+  transition: width 200ms ease;
+}
+.chooser-tile-progress.indeterminate .chooser-tile-progress-fill {
+  animation: chooser-tile-progress-sweep 1.4s ease-in-out infinite;
+}
+@keyframes chooser-tile-progress-sweep {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(250%); }
 }
 
 /* Status overlays — match the visual language used by DashboardCard so

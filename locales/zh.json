@@ -25,7 +25,9 @@
     "filterLocal": "本地",
     "filterDesktop": "桌面",
     "filterCloud": "云端",
-    "filterRemote": "远程"
+    "filterRemote": "远程",
+    "updatePill": "更新",
+    "migratePill": "迁移"
   },
 
   "running": {

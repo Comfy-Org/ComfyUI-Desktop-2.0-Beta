@@ -29,7 +29,9 @@
     "filterLocal": "Local",
     "filterDesktop": "Desktop",
     "filterCloud": "Cloud",
-    "filterRemote": "Remote"
+    "filterRemote": "Remote",
+    "updatePill": "Update",
+    "migratePill": "Migrate"
   },
 
   "titleBar": {

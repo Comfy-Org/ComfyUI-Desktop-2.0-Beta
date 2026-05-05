@@ -497,16 +497,31 @@ First slice landed on `feat/unified-window-titlebar-panels`:
   was already in place — the bigger min-width just makes the
   scrollbar appear sooner on narrow / tile-heavy windows.
 
+Second slice landed on the same branch:
+
+- **Update-available pill.** When `Installation.statusTag.style ===
+  'update'` (already populated by the standalone + portable source
+  plugins via the same release-cache logic that drives Install
+  Settings' update banner) the chooser tile renders an accent-blue
+  "Update" pill in the meta line with an `ArrowDownToLine` icon. The
+  pill is purely visual today — the click action that scrolls Install
+  Settings to the Update section is folded into the pending click→
+  popover refactor below.
+- **Migrate prompt pill.** Legacy Desktop installs (`sourceCategory
+  === 'desktop'` with `status === 'installed'`) get a warning-amber
+  "Migrate" pill in the meta line with an `ArrowRightLeft` icon. Same
+  visual-only treatment — the actual migration UI still lives behind
+  Install Settings, the pill is a card-level discoverability prompt.
+- **In-flight progress bar + status pill.** The chooser subscribes to
+  `progressStore.getProgressInfo(id)` per tile. While an op is in
+  flight, the timestamp pill is replaced by an accent-blue status pill
+  carrying the live phase text ("Resolving dependencies…",
+  "Restoring snapshot…") and a thin (3px) progress bar pinned to the
+  card bottom tracks the percent value. Indeterminate progress (when
+  the op hasn't reported a percent yet) renders a swept stripe.
+
 Still open:
 
-- **Update-available indicator.** Needs the release-cache + channel
-  pipeline that `DetailModal`'s update banner reads from to be
-  exposed to the chooser tile.
-- **Migrate prompt.** Wire `MigrationBanner` data into a card-level
-  affordance.
-- **Progress bars.** Subscribe the chooser to `progressStore` /
-  `installationStore.runningTaskFor(id)` and render a thin progress
-  bar + status line at the card bottom.
 - **Click → popover of actions** (and double-click as the open
   fast-path). Section 8's original guidance pointed at native
   `Menu.popup()` because of the title-bar clipping caveat — but the
@@ -515,7 +530,11 @@ Still open:
   clipping. The current trajectory is HTML-rendered popover (or the
   same child-BrowserWindow popup pattern §14 introduced for the
   title bar) rather than the native Menu route the original §8
-  text proposed.
+  text proposed. The action set is keyed off source category — Open,
+  Update, Restore Snapshot, Settings, Reveal in Folder, Delete — and
+  the update / migrate pills should fold their click targets into
+  the same popover (e.g. "Update available — Update now / View
+  details").
 
 ## 9. Install Settings — Restart instead of Launch when running
 
