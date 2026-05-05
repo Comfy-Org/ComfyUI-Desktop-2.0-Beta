@@ -149,7 +149,28 @@ describe('ChooserView', () => {
     expect(installTiles[2]!.text()).toContain('Never')
   })
 
-  it('emits pick with the installation when an install tile is clicked', async () => {
+  it('emits pick with the installation when an install tile is double-clicked', async () => {
+    // Double-click is the fast-path for opening an install — single
+    // click instead opens the action popover (Open / Pin / Dismiss).
+    installMockApi([
+      makeInstall({ id: 'a', name: 'Alpha' }),
+    ])
+    const wrapper = mountChooser()
+    await flushPromises()
+    const tiles = wrapper.findAll('.chooser-tile')
+    const alphaTile = tiles.find((t) => t.text().includes('Alpha'))
+    expect(alphaTile).toBeTruthy()
+    await alphaTile!.trigger('dblclick')
+    const events = wrapper.emitted('pick')
+    expect(events).toBeDefined()
+    expect((events![0]![0] as Installation).id).toBe('a')
+  })
+
+  it('does not emit pick on a single click — the popover handles it', async () => {
+    // The click-driven action popover replaces the bare pick on
+    // single-click; a `pick` only fires through the popover's "Open"
+    // entry or a double-click. Asserting the click stays silent
+    // guards the contract the §8 click→popover refactor introduced.
     installMockApi([
       makeInstall({ id: 'a', name: 'Alpha' }),
     ])
@@ -159,9 +180,7 @@ describe('ChooserView', () => {
     const alphaTile = tiles.find((t) => t.text().includes('Alpha'))
     expect(alphaTile).toBeTruthy()
     await alphaTile!.trigger('click')
-    const events = wrapper.emitted('pick')
-    expect(events).toBeDefined()
-    expect((events![0]![0] as Installation).id).toBe('a')
+    expect(wrapper.emitted('pick')).toBeUndefined()
   })
 
   it('filters install tiles by source category when a filter chip is active', async () => {

@@ -130,6 +130,10 @@ onMounted(() => {
 })
 onBeforeUnmount(() => {
   if (nowTimer) clearInterval(nowTimer)
+  if (pendingClick) {
+    clearTimeout(pendingClick.timer)
+    pendingClick = null
+  }
 })
 
 function timeAgo(timestamp: number): string {
@@ -154,9 +158,22 @@ function iconFor(category: string | undefined): typeof Cloud {
   }
 }
 
-// --- Context menu (pin/unpin/dismiss-error) ---
-const { ctxMenu, ctxMenuItems, openCardMenu, handleCtxMenuSelect, closeMenu } =
-  useInstallContextMenu()
+// --- Action / context menu (Open + pin/unpin/dismiss-error) ---
+// The same composable powers both the right-click context menu and the
+// click-driven action popover. Right-click opens an accessory menu
+// (Pin / Dismiss); a primary click on a tile opens the action popover
+// rooted at the tile's bottom-left, which adds an "Open" entry at the
+// top so the user can browse-then-pick. Double-click is the fast-path
+// — bypasses the popover and opens the install directly. The behaviour
+// is documented at the @click handler on the install tile below.
+const {
+  ctxMenu,
+  ctxMenuItems,
+  openCardMenu,
+  openActionMenu,
+  handleCtxMenuSelect,
+  closeMenu,
+} = useInstallContextMenu({ onOpen: pickInstall })
 
 // --- Card status classes (running, stopping, in-progress, errored) ---
 function statusClasses(inst: Installation): Record<string, boolean> {
@@ -213,6 +230,53 @@ function progressFor(inst: Installation): { status: string; percent: number } | 
 
 function pickInstall(inst: Installation): void {
   emit('pick', inst)
+}
+
+/** Click vs. double-click disambiguation. The browser fires `click`
+ *  twice and `dblclick` once on a double-click, so a naive
+ *  `@click="openActionMenu"` + `@dblclick="pickInstall"` would flash
+ *  the popover open before the dblclick fires. Defer the popover by
+ *  one event-loop tick (~250ms — the conventional double-click
+ *  threshold) and cancel it if a dblclick arrives in the window. */
+let pendingClick: { id: string; timer: ReturnType<typeof setTimeout> } | null = null
+const CLICK_DOUBLE_CLICK_DELAY_MS = 250
+
+function handleTileClick(event: MouseEvent, inst: Installation): void {
+  // Capture the rect-driven popover anchor immediately because the
+  // event itself is reused / pooled by Vue and won't be valid by the
+  // time the timer fires.
+  const target = event.currentTarget as HTMLElement | null
+  const rect = target?.getBoundingClientRect?.()
+  const x = rect?.left ?? event.clientX
+  const y = (rect?.bottom ?? event.clientY) + 4
+  if (pendingClick) {
+    clearTimeout(pendingClick.timer)
+    pendingClick = null
+  }
+  const timer = setTimeout(() => {
+    pendingClick = null
+    // Synthesize a minimal "click" event for the composable; only x/y
+    // and currentTarget are inspected. Use a proxy-like object so the
+    // composable's `currentTarget?.getBoundingClientRect?.()` returns
+    // the rect we captured above.
+    openActionMenu(
+      {
+        clientX: x,
+        clientY: y - 4,
+        currentTarget: { getBoundingClientRect: () => ({ left: x, bottom: y - 4 }) } as unknown as EventTarget,
+      } as MouseEvent,
+      inst,
+    )
+  }, CLICK_DOUBLE_CLICK_DELAY_MS)
+  pendingClick = { id: inst.id, timer }
+}
+
+function handleTileDblClick(inst: Installation): void {
+  if (pendingClick) {
+    clearTimeout(pendingClick.timer)
+    pendingClick = null
+  }
+  pickInstall(inst)
 }
 
 function handleCloudClick(): void {
@@ -292,14 +356,20 @@ function handleNewInstallClick(): void {
         </div>
       </button>
 
-      <!-- Install tiles (recents-ordered) -->
+      <!-- Install tiles (recents-ordered).
+           Click → action popover anchored at the tile's bottom-left
+           (Open + Pin / Dismiss). Double-click → fast-path open
+           (skips the popover). The handlers debounce single-click
+           by ~250ms so a dblclick can cancel the pending popover
+           without it flashing on screen. -->
       <button
         v-for="inst in visibleInstalls"
         :key="inst.id"
         type="button"
         class="chooser-tile"
         :class="statusClasses(inst)"
-        @click="pickInstall(inst)"
+        @click="handleTileClick($event, inst)"
+        @dblclick="handleTileDblClick(inst)"
         @contextmenu.prevent="openCardMenu($event, inst)"
       >
         <div class="chooser-tile-icon">

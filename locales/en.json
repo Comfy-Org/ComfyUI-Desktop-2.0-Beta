@@ -31,7 +31,8 @@
     "filterCloud": "Cloud",
     "filterRemote": "Remote",
     "updatePill": "Update",
-    "migratePill": "Migrate"
+    "migratePill": "Migrate",
+    "openInstall": "Open"
   },
 
   "titleBar": {

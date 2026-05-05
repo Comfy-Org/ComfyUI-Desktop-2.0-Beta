@@ -520,21 +520,36 @@ Second slice landed on the same branch:
   card bottom tracks the percent value. Indeterminate progress (when
   the op hasn't reported a percent yet) renders a swept stripe.
 
+Third slice landed on the same branch:
+
+- **Click → action popover, double-click → open fast-path.** The
+  bare click that previously opened the install now anchors a
+  popover at the tile's bottom-left. Today the popover surfaces
+  Open + Pin / Unpin + Dismiss error — the same items the right-
+  click context menu carries plus an explicit Open entry at the
+  top. The composable `useInstallContextMenu({ onOpen })` powers
+  both surfaces from a single state (modes `'context'` and
+  `'action'`); the right-click menu still fires through the
+  unchanged `openCardMenu` path, the click popover through a new
+  `openActionMenu` path. The HTML-rendered route was preferred
+  over the native `Menu.popup()` route — the chooser body lives
+  in the panel WebContentsView which doesn't have the title-bar
+  clipping caveat that drove §14 to BrowserWindow popups. A
+  setTimeout-based debounce (250ms — the conventional double-
+  click threshold) keeps the popover from flashing on screen
+  during a double-click. Cleanup runs in `onBeforeUnmount`.
+
 Still open:
 
-- **Click → popover of actions** (and double-click as the open
-  fast-path). Section 8's original guidance pointed at native
-  `Menu.popup()` because of the title-bar clipping caveat — but the
-  chooser body lives in the panel WebContentsView, which fills the
-  full body area, so HTML popovers from a card render fine without
-  clipping. The current trajectory is HTML-rendered popover (or the
-  same child-BrowserWindow popup pattern §14 introduced for the
-  title bar) rather than the native Menu route the original §8
-  text proposed. The action set is keyed off source category — Open,
-  Update, Restore Snapshot, Settings, Reveal in Folder, Delete — and
-  the update / migrate pills should fold their click targets into
-  the same popover (e.g. "Update available — Update now / View
-  details").
+- **Action set expansion.** The popover currently carries Open +
+  Pin / Unpin + Dismiss error. Update / Migrate / Install
+  Settings / Reveal in Folder / Restore Snapshot / Delete depend
+  on the `open-install-host-window-on-panel(installationId, panel)`
+  IPC tracked in Issue #470 — once that lands, those items move
+  into this popover so the chooser becomes the single launching
+  surface for any install action. The update / migrate pills
+  should fold their click targets into the same popover (e.g.
+  "Update available — Update now / View details").
 
 ## 9. Install Settings — Restart instead of Launch when running
 

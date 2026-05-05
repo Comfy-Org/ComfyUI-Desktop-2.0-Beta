@@ -27,7 +27,8 @@
     "filterCloud": "云端",
     "filterRemote": "远程",
     "updatePill": "更新",
-    "migratePill": "迁移"
+    "migratePill": "迁移",
+    "openInstall": "打开"
   },
 
   "running": {
