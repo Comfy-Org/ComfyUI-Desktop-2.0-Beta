@@ -102,6 +102,7 @@
 
   "common": {
     "back": "Back",
+    "close": "Close",
     "browse": "Browse…",
     "resetDefault": "Reset",
     "or": "or",

@@ -75,7 +75,11 @@ function isNullableKnownSettingKey(key: KnownSettingKey): key is NullableKnownSe
 export const defaults: SettingsDefaults = {
   cacheDir: path.join(cacheDir(), "download-cache"),
   maxCachedFiles: 5,
-  onAppClose: "tray",
+  // Docking-to-tray is disabled while the unified-window flow is being
+  // rebuilt — see main/index.ts (createTray() is a no-op for now).
+  // When docking comes back, default this to 'tray' again and restore
+  // the settings UI field in registerSettingsHandlers.ts.
+  onAppClose: "quit",
   modelsDirs: [path.join(SHARED_ROOT, "models")],
   inputDir: path.join(SHARED_ROOT, "input"),
   outputDir: path.join(SHARED_ROOT, "output"),

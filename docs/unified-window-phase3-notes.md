@@ -327,10 +327,415 @@ This also resolves the floating-component / WebContentsView z-order pain
 without needing to move the panel into the Comfy renderer (which would
 re-couple us to ComfyUI's storage and CSP).
 
+## 7. Title bar v3 — pill always-pill, click-anywhere, nav placement
+
+The title bar shipped in Phase 3 (`title bar v2 — File menu (left) + center
+install pill with caret`, commit `716eb03`) ships a working but
+visually-rough pill: the caret sits in a separate button that's framed by
+a decorative shape that does not render correctly across themes /
+fullscreen states, and the pill body and caret are two distinct hit
+targets so users have to aim for the small caret to open the install
+menu. The Back / Forward navigation arrows landed alongside the File
+menu in `title-left`, which makes them feel like part of the File flow
+rather than a top-level navigation surface.
+
+Direction:
+
+- **One pill, one click target.** Drop the inner two-button structure
+  (`title-install-name` button + `title-install-caret` button wrapped
+  in `title-install-pill`). Render a single `<button class="title-install-pill">`
+  whose label is the install name and whose trailing element is the
+  ChevronDown — the chevron is decoration inside the pill, not a
+  separate hit target. The whole pill opens the install menu (or, on
+  install-less host windows, opens the chooser / does nothing — final
+  behaviour TBD with section 5's File-menu flows).
+- **Pill always looks like a pill.** Solid surface fill, rounded ends,
+  visible border at rest. Drop the broken decorative frame around the
+  caret — it doesn't render correctly and stops carrying its weight
+  once the pill itself is the affordance.
+- **Visible hover.** The pill must brighten / shift border on `:hover`
+  so it's clearly interactive. Today the caret has hover styling but
+  the name button is bare text — once the two collapse, the unified
+  pill needs a single coherent hover state.
+- **Move Back / Forward to the left of the pill, not next to File.**
+  In `title-left` today the order is `[File ▾] [◀] [▶]`. Browser-style
+  navigation belongs visually adjacent to the thing being navigated —
+  i.e. left of the install pill that hosts the panels — not bundled
+  with the File menu. Restructure `title-bar` so the layout is roughly
+  `[File ▾]   [◀] [▶] [ Install Name ▾ ]   [drag spacer]` with the
+  arrows + pill living in a single horizontal group centred in the
+  bar, and File alone on the far left.
+
+Implementation hints:
+
+- The pill rebuild touches both `TitleBarApp.vue` (template + scoped
+  styles for `.title-install-pill`, `.title-install-name`,
+  `.title-install-caret`) and `TitleBarApp.test.ts` (which currently
+  asserts on the two-button structure and the caret-only menu path).
+- The caret-frame artefact is in the scoped styles around
+  `.title-install-caret` — a `border-left` separator + padding that
+  reads as a button divider on dark backgrounds and disappears on
+  light themes. Once the inner caret button goes away, that styling
+  goes with it.
+- The Back / Forward buttons stay wired to the existing
+  `goBack` / `goForward` IPC handlers from Phase 3; this is purely a
+  visual / DOM-position change, not a behaviour change.
+- Install-less host windows currently hide the caret (`v-if="!isInstallLess"`).
+  Decide whether the install-less pill becomes an inert label or a
+  clickable affordance that opens the chooser — both are reasonable;
+  the former is simpler and matches today's behaviour.
+
+## 8. Chooser cards — restore the "goods" + click-for-actions
+
+The Phase 3 chooser-view rebuild (commit `71997be`, "rewrite ChooserView
+as a golden-ratio recents grid") collapsed the dense Dashboard /
+Installations cards into clean recents tiles, but in doing so it
+dropped a lot of the metadata and affordances the old cards carried.
+Those signals are still useful — installs are the user's main object
+of interest and the chooser is now the only place they live, so the
+card needs to do more work.
+
+What needs to come back to each chooser card:
+
+- **Current ComfyUI version** the install is on (commit short-sha or
+  tag, depending on source category). Today `Installation.commitInfo`
+  / `Installation.versionInfo` carries this; the chooser card just
+  doesn't render it.
+- **Update-available indicator** when the install's source has a
+  newer release than what's checked out (driven by the same release-
+  cache + channel logic that `DetailModal`'s update banner uses).
+  Probably a small "Update" pill or chevron badge on the card corner;
+  a click opens the Install Settings panel scrolled to / focused on
+  the Update section.
+- **Migrate prompt** when an install has a pending migration
+  (currently surfaced via `MigrationBanner` inside `DetailModal`).
+  The same banner-style affordance should be visible on the card
+  itself so users don't have to open the install to discover the
+  migration.
+- **Progress bars** for in-flight install / update / restore /
+  migrate operations. The data is already in `progressStore` and
+  `installationStore.runningTaskFor(id)`; the chooser just doesn't
+  surface it. A thin progress bar across the card bottom + a status
+  line ("Updating ComfyUI…", "Restoring snapshot…") covers it.
+- **Running indicator** — a blue (`var(--accent)`) border around any
+  card whose install is currently running (driven by
+  `sessionStore.isRunning(id)`). This is the same affordance the
+  legacy `instance-card.card-running` rule in `main.css` already
+  defines; the chooser tile just needs to opt into it.
+- **Error visibility** — when an install's last action errored or its
+  session crashed, the card should show a "View error" affordance
+  (probably a red dot + click-to-open-logs/-error-detail). Today
+  errors live in `progressStore.completedFor(id)` with
+  `result.outcome === 'failed'` and the modal-based error dialog;
+  the chooser needs a card-level surface so users notice without
+  opening the install.
+
+Click behaviour:
+
+- **Click ≠ open.** Today clicking a chooser tile opens the install
+  directly. With the card carrying real interactive content (update
+  pill, migrate banner, error chip) the bare click target is
+  ambiguous. Switch the primary card click to a **dropdown / popover
+  of actions** — Open, Update, Restore Snapshot, Settings, Reveal in
+  Finder, Delete, etc. — keyed off the install's source category
+  (so cloud installs get a different action set than local ones).
+- **Native menu, not HTML.** The chooser body lives in the panel
+  WebContentsView, which has the same clipping caveats as the title
+  bar — section 7 / the Phase 3 title-bar dropdown work both went
+  native via `Menu.popup()` for this reason. The chooser's card
+  action menu should follow the same pattern: panel renderer asks
+  main to popup a native menu at click coordinates, main routes the
+  selected action back over IPC.
+- **Double-click → open.** Keep a fast-path: double-click on the
+  card opens the install (the most common action), single-click
+  surfaces the menu. Or alternatively a primary "Open" button on
+  the card itself + click-anywhere-else for the menu. Decide during
+  implementation.
+
+Layout implication: the card grows from a label + thumbnail into a
+content-bearing tile. Re-evaluate the golden-ratio grid sizing — the
+cards likely need more vertical room (or a denser two-column metadata
+strip below the install name) to accommodate version + update +
+running + error signals without going visually noisy.
+
+## 9. Install Settings — Restart instead of Launch when running
+
+Today the Install Settings panel's primary action is **Launch** — a
+solid-blue (`button.primary`) button that boots ComfyUI. When the
+install is already running, that button is currently still labelled
+Launch (or hidden, depending on the source) which is confusing: the
+user sees "Launch" while the instance is clearly running in the
+Comfy WebContentsView next to it.
+
+Direction:
+
+- **When the install is running, the primary action becomes Restart.**
+  Same button slot, label switches based on `sessionStore.isRunning(id)`.
+- **Restart requires confirmation.** A modal-confirm flow ("This will
+  stop ComfyUI and start it again. Any unsaved work will be lost.
+  Restart?") before the actual stop+start. The confirmation step is
+  what differentiates Restart from Launch — Launch is a clean boot
+  with nothing to lose, Restart kills a live process.
+- **Hollow blue, not solid blue, to telegraph the confirmation.**
+  Use `button.accent` (outline blue, blue text) rather than
+  `button.primary` (solid blue, white text) when the action will
+  prompt before executing. This becomes a project-wide signal:
+  *solid primary = does the thing immediately; outline accent =
+  asks first.* Cross-check existing buttons that prompt-then-act
+  (Delete, Migrate, Restore Snapshot) so they all follow the same
+  rule.
+- **Restart wiring.** Reuse the existing `stopComfyUI` +
+  `launchInstallation` paths sequentially via a new
+  `restartInstallation` orchestrator (or just chain them in the
+  IPC handler if there's no shared state to manage). Make sure the
+  Comfy WebContentsView stays attached across the stop→start cycle
+  so the user sees the lifecycle view rather than a window flash.
+
+## 10. Update channel as a dropdown
+
+The current update-channel selector in Install Settings is a fixed
+two-button toggle (Stable / Nightly, depending on source). With the
+roadmap heading toward more channels — beta, custom branch tracking,
+preview builds, and per-source-extension channels — the toggle stops
+scaling.
+
+Direction:
+
+- **Dropdown / select instead of a toggle row.** Same selection
+  semantics, but rendered as a `<select>` (or a styled menu) so we
+  can grow the channel list without redesigning the settings row.
+- **Channels come from the source layer.** Each source plugin already
+  knows what channels it offers (`Source.channels` or similar) — the
+  settings panel should render whatever the source declares rather
+  than hardcoding a Stable/Nightly pair in the renderer.
+- **Plumbing.** This is mostly a settings-renderer change plus a
+  small extension to whatever IPC currently exposes the channel list.
+  The actual "switch channel" IPC and source-side update flow stay
+  unchanged.
+
+This is a deferrable cleanup — the toggle works today — but landing
+it before adding a third channel avoids a special-case "we needed a
+dropdown by then anyway" scramble.
+
+## 11. Chooser host window must steal focus on app launch — **DONE**
+
+Symptom (reported during Phase 3 testing): launching Desktop 2.0 fresh
+from a shortcut / packaged build leaves the chooser host window
+unfocused — it appears behind whatever app the user clicked from. The
+legacy launcher window did not exhibit this; its `ready-to-show` path
+called `focus()` explicitly.
+
+Root cause: `openChooserHostWindow` (the install-less host window
+constructor) never called `bringToFront(comfyWindow)` after creating
+the window. The companion `openOrFocusChooserHostWindow` only brings
+an *existing* window forward — for a freshly-spawned chooser host
+nothing forced the foreground, so Windows' focus-theft prevention
+won the race.
+
+Fix: call `bringToFront(comfyWindow)` at the end of
+`openChooserHostWindow`, right after the initial `layoutViews()`
+tick. `bringToFront` already encapsulates the Windows-specific
+"always-on-top toggle" trick used elsewhere in main, so the install-
+backed `openComfyWindow` path doesn't need a parallel change — its
+`bringToFront` calls were already in place from the earlier focus
+work.
+
+Landed on `feat/unified-window-titlebar-panels`.
+
+## 12. Chooser host title-bar / window-controls colour mismatch — **DONE**
+
+Symptom: in the install-less chooser host window, the Vue-rendered
+title bar and the OS-level window controls (close / minimise /
+maximise on Win/Linux, traffic lights on macOS) painted different
+colours, leaving a visible stripe across the top of the window.
+
+Root cause: two independent paint paths.
+
+- The Vue `<header class="title-bar">` paints `themeBg ?? var(--surface)`.
+  In `openChooserHostWindow` the entry's `lastTheme` was seeded as
+  `{ bg: COMFY_BG, text: '#dddddd' }` — `COMFY_BG` is `#171717`, the
+  ComfyUI dark fallback used for the *body* background, not the title
+  bar.
+- The OS-level overlay (`comfyTitleBarOverlay()`) paints `#353535`,
+  which matches `TITLEBAR_BG` from `theme.ts`.
+
+Install-backed windows have a `applyComfyTheme` path that pushes the
+ComfyUI frontend's theme through to both surfaces (`theme-changed`
+IPC + `setTitleBarOverlay({ color, symbolColor })`), so they stay in
+sync as the install's theme changes. The chooser host has no
+ComfyUI frontend feeding it, so the two surfaces just sat at their
+respective construction-time defaults.
+
+Fix (initial): seed the chooser's `lastTheme.bg` to `TITLEBAR_BG`
+so both surfaces share one colour at construction time.
+
+Superseded by §13's launcher-theme-aware refresh path — the chooser
+host now resolves its title-bar colour from the launcher renderer's
+`--surface` (via `titleBarOverlayForTheme`) instead of the static
+`TITLEBAR_BG`, and refreshes both surfaces whenever the theme flips.
+
+Landed on `feat/unified-window-titlebar-panels`.
+
+## 13. Chooser host title bar must follow launcher light/dark theme — **DONE**
+
+Symptom (follow-on to §12): switching the launcher theme between
+dark / light from inside the chooser host repainted the panel body
+correctly but left the chooser host's title-bar Vue and OS overlay
+stuck at their construction-time dark values. Light mode looked
+broken — a dark title-bar stripe sat above a light panel body.
+
+Root cause: install-less host windows have no ComfyUI frontend
+feeding them a theme; install-backed windows have `applyComfyTheme`
+to drive both surfaces. There was no equivalent path for the chooser
+host, so launcher-theme changes (Settings → Theme, or the OS-level
+dark-mode preference flipping while the setting is `'system'`) only
+reached the panel body's HTML/CSS via the standard `theme-changed`
+broadcast — not the title-bar Vue (`comfy-titlebar:theme-changed`)
+or the OS overlay (`setTitleBarOverlay`).
+
+Fix:
+
+- Added a `ThemeChangedCallback` to `RegisterCallbacks` (sibling to
+  `LocaleCallback`) and an `_onThemeChanged` slot in
+  `lib/ipc/shared.ts`.
+- Fired `_onThemeChanged()` from `registerSettingsHandlers.ts` in
+  both the explicit `set-setting('theme', …)` branch and the
+  `nativeTheme.on('updated')` system-mode branch, alongside the
+  existing `_broadcastToRenderer('theme-changed', …)` broadcast.
+- Added `getChooserHostTheme()` in `index.ts` — returns
+  `{ bg, text }` from `titleBarOverlayForTheme(resolveTheme() === 'dark')`,
+  i.e. the launcher renderer's `--surface` (`#262729` dark, `#e9e9e9`
+  light) — and `applyChooserHostTheme(entry)` /
+  `applyChooserHostThemeToAll()` helpers that repaint the title-bar
+  Vue + OS overlay for every install-less host window.
+- Wired `onThemeChanged: applyChooserHostThemeToAll` into the
+  `ipc.register({…})` call in `app.whenReady`.
+- `openChooserHostWindow` now uses the launcher-resolved overlay
+  (`titleBarOverlayForTheme`) at construction time, and seeds
+  `lastTheme` + `titleBarView.setBackgroundColor` from
+  `getChooserHostTheme()` so the title bar pre-paints the right
+  surface colour and avoids the legacy `TITLEBAR_BG` (#353535)
+  fallback flash.
+- Install-backed windows are unaffected — their `applyComfyTheme`
+  path still drives ComfyUI-themed colours; this hook only walks
+  `entry.installationId === null` entries.
+
+Landed on `feat/unified-window-titlebar-panels`.
+
+---
+
+## 14. Title-bar dropdowns rendered as child BrowserWindow popups — **DONE**
+
+Symptom (follow-on to §7): the File / Install dropdowns in the title
+bar were native `Menu.popup()` menus. They worked, but they came with
+a string of compromises — platform-default chrome instead of our
+design tokens, no theme-matched border / shadow, and on Windows the
+menu's first hover state was inconsistent with the hover-gated buttons
+above it. The user explicitly wanted to follow the
+Chrome / Discord / VS Code precedent of rendering title-bar menus as
+HTML inside a child window so the dropdowns blend with the Vue title
+bar instead of standing apart from it.
+
+We considered an alternative — grow the title-bar `WebContentsView`
+height while a menu is open so an HTML popup can render inside the
+existing view — and rejected it. Every shipping product that does
+title-bar dropdowns natively (Chrome / Discord / VS Code) uses a
+child window for popups: no clipping by the host view's bounds, no
+z-order gymnastics with the body view, free click-outside dismissal
+via the popup's own blur event, and a real OS-level shadow that
+doesn't require CSS workarounds.
+
+Fix:
+
+- New renderer entry `src/renderer/src/comfyTitleMenu/` (mirrors the
+  shape of the existing `comfyTitleBar/` entry) with
+  `comfyTitleMenu.html`, a `main.ts` mount, and a `TitleMenuApp.vue`
+  component that renders the dropdown card. Items, kind, and theme
+  arrive as a base64-encoded JSON blob in the URL `config` parameter
+  so the first paint already has everything — no IPC round-trip /
+  blank flash before the menu shows. Card uses the same Inter font +
+  design tokens (`--surface`, `--border`, `--text-muted`) as the rest
+  of the launcher; the popup is themed from `entry.lastTheme` so it
+  matches the launcher's surface colour in light + dark and follows
+  ComfyUI-themed install-backed windows.
+- New preload `src/preload/comfyTitleMenuPreload.ts` exposes a tiny
+  `__comfyTitleMenu` bridge with `activate(id)` /
+  `close()` — the popup posts `comfy-titlemenu:item-activated` for
+  clicks and `comfy-titlemenu:close` for the Escape key.
+- New main helper `openTitleMenuPopup` in `src/main/index.ts` creates
+  a frameless transparent child `BrowserWindow` with the requesting
+  comfy / chooser host as its parent, sized from the items
+  (`computePopupHeight`) and positioned at the absolute screen
+  coordinates derived from the parent's `getContentBounds()` plus
+  the renderer-supplied title-bar-local anchor. Loads
+  `comfyTitleMenu.html` with the encoded config, focuses on
+  `ready-to-show`, and `popup.on('blur', () => popup.close())` for
+  click-outside dismissal. On `closed` it sends
+  `comfy-titlebar:menu-closed { menu }` back to the title-bar
+  webContents — preserving the existing 100ms `MENU_REOPEN_GUARD_MS`
+  reopen-suppression in `TitleBarApp.vue` (the same guard the user
+  shortened from 250ms in §7).
+- The previous `Menu.buildFromTemplate(...).popup(...)` block in the
+  `comfy-window:open-title-menu` handler is replaced with a call to
+  `openTitleMenuPopup`. Item / kind / install-less filtering
+  (`menuKind === 'install' && entry.installationId === null` →
+  refuse) is unchanged. The renderer-side bridge methods
+  `openFileMenu` / `openInstallMenu` and the
+  `{ menu, anchor: { x, y } }` payload shape are unchanged so all
+  existing 14 `TitleBarApp.test.ts` cases still pass without
+  modification.
+- Vite config gets a new preload input
+  (`comfyTitleMenuPreload`) and a new renderer input
+  (`comfyTitleMenu`) so the popup ships in the production bundle.
+
+Item activation routes through the same handlers we already had:
+File → `openChooserHostWindow` for "New Window",
+`setActivePanel(…, 'launcher-settings')` for "Desktop 2 Settings";
+Install → `setActivePanel(…, 'install-settings' | 'directories')` and
+`updater.runCheck('title-bar-check')` for "Check for Updates". The
+popup closes itself after activation.
+
+Hover-gating (§7) is unaffected: child-window popups still steal
+focus from the parent comfy window, so the title-bar webContents
+still fires `window.blur` and the renderer's `isHoverActive` gate
+drops to false; re-arming on a fresh `pointermove` continues to
+work the same way.
+
+Landed on `feat/unified-window-titlebar-panels`.
+
 ---
 
 ## Status
 
-Open. Phase 2 has shipped (`feat/unified-window-titlebar-panels`); Phase 3
-planning has not yet begun. Capture decisions made in subsequent design
-discussions in this file before the Phase 3 implementation branch is opened.
+In progress. Phase 2 (`feat/unified-window-titlebar-panels`) is the
+active branch and a substantial slice of Phase 3 has already shipped
+on it — the launcher window has been retired, the chooser host window
+opens at startup, the title-bar v2 / File menu / install pill landed,
+new-install / track / load-snapshot / quick-install panels are hosted,
+the Directories panel exists, per-source-category recency tracks both
+fields atomically, and the unified-window navigation history (Back /
+Forward + HTML title-bar dropdowns) is live.
+
+Sections 1, 2, 3, 4, 4b, 5, 6 retain open work — the chooser cards
+still need the affordances called out in section 8, primary-install
+removal hasn't fully landed (the gold-star + `primaryInstallId` pref
+are still present), Models + Media haven't been merged into
+Directories yet (Directories currently surfaces only models /
+output / input dirs through a flatter UI, not the consolidated
+`DirectoriesView` from §3), Downloads is still a floating component,
+and the new-install / quick-install flows haven't been unified.
+
+Sections 7–10 capture UX refinements queued up while the unified
+window is live: title-bar pill polish, restoring the data on chooser
+cards + switching click-to-actions, Restart-vs-Launch in Install
+Settings, and the update-channel dropdown.
+
+Sections 11–14 are recently shipped UX refinements: chooser-host
+focus on launch (§11), chooser-host title-bar / overlay colour match
+(§12), live launcher-theme tracking on the chooser host (§13), and
+title-bar dropdowns rendered as child `BrowserWindow` popups in place
+of native `Menu.popup()` (§14).
+
+Capture decisions made in subsequent design discussions in this file.
+The doc remains the source of truth for "what's left" on this branch
+until the work is split into per-feature implementation threads.

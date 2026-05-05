@@ -1,9 +1,19 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { X } from 'lucide-vue-next'
 import DirCard from '../components/DirCard.vue'
 import SettingField from '../components/SettingField.vue'
 import InfoTooltip from '../components/InfoTooltip.vue'
 import type { ModelsSection, SettingsSection } from '../types/ipc'
+
+const { t } = useI18n()
+
+function handleClose(): void {
+  // Reset the host window's panel-history stack and return to the
+  // comfy/chooser root. Wired into main via the panel preload.
+  window.api.closeCurrentPanel()
+}
 
 /**
  * Phase 3 §3 — Directories panel.
@@ -97,6 +107,15 @@ defineExpose({ loadAll, loadModels, loadMedia })
       <div class="breadcrumb">
         <span class="breadcrumb-current">{{ $t('directories.title') }}</span>
       </div>
+      <button
+        type="button"
+        class="view-page-close"
+        :title="t('common.close')"
+        :aria-label="t('common.close')"
+        @click="handleClose"
+      >
+        <X :size="18" />
+      </button>
     </div>
 
     <div class="view-scroll">

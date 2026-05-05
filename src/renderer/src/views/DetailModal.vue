@@ -27,9 +27,11 @@ interface Props {
   installation: Installation | null
   initialTab?: string
   autoAction?: string | null
-  /** When true, render without the modal-overlay framing — i.e. fill the
-   *  parent container and hide the close button. Used by the embedded
-   *  install-settings panel inside ComfyUI windows. */
+  /** When true, render without the modal-overlay framing — i.e. fill
+   *  the parent container. Used by the embedded install-settings panel
+   *  inside ComfyUI windows. The header X close button is still shown
+   *  in inline mode (it routes through `closeCurrentPanel` to the host
+   *  window's panel-history reset). */
   inline?: boolean
 }
 
@@ -60,6 +62,19 @@ const prefs = useLauncherPrefs()
 const installationStore = useInstallationStore()
 const actionGuard = useActionGuard()
 const { confirmMigration } = useMigrateAction()
+
+/** Header X close. In inline mode (mounted as the install-settings
+ *  panel body) we ask main to reset the host window's panel-history
+ *  stack so the body returns to the comfy/chooser root. In modal mode
+ *  (the legacy free-floating overlay) we emit `close` to let the
+ *  parent unmount the modal. */
+function handleHeaderClose(): void {
+  if (props.inline) {
+    window.api.closeCurrentPanel()
+  } else {
+    emit('close')
+  }
+}
 
 const isCloud = computed(() => props.installation?.sourceCategory === 'cloud')
 const isPinned = computed(() => props.installation ? prefs.isPinned(props.installation.id) : false)
@@ -538,7 +553,12 @@ function navigateToInstallation(installationId: string): void {
             <Pin :size="16" />
           </button>
         </div>
-        <button v-if="!inline" class="view-modal-close" @click="emit('close')">✕</button>
+        <button
+          class="view-modal-close"
+          :title="$t('common.close')"
+          :aria-label="$t('common.close')"
+          @click="handleHeaderClose"
+        >✕</button>
       </div>
       <div class="view-modal-body">
         <div v-if="hasTabs" class="detail-tabs">

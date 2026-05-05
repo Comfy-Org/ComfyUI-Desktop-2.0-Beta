@@ -5,10 +5,17 @@ import { readFileSafeAsync, writeFileSafeAsync } from './lib/safe-file'
 import type { ComfyVersion } from './lib/version'
 
 /** Internal main-process event bus for installation lifecycle changes.
- *  Emits 'updated' with the updated record after a successful update().
- *  Used by main/index.ts to refresh ComfyUI window title bars when their
- *  install is renamed (the title-bar WebContents has its own preload and
- *  isn't subscribed to the installations-changed renderer broadcast). */
+ *
+ *  Events:
+ *  - `'updated'`(record): a successful `update()` / `markLaunched()` —
+ *    main/index.ts uses this to refresh ComfyUI window title bars when
+ *    an install is renamed (the title-bar WebContents has its own
+ *    preload and isn't subscribed to the renderer broadcast).
+ *  - `'changed'`(): any mutation that affects the installs list as a
+ *    whole (add, remove, update, markLaunched, reorder, ensureExists,
+ *    seedDefaults). main/index.ts subscribes once and rebroadcasts as
+ *    `installations-changed` to all renderers so stores can refetch
+ *    without every IPC handler having to remember to call broadcast. */
 export const installationEvents = new EventEmitter()
 
 export interface InstallationRecord {
@@ -67,7 +74,7 @@ export function uniqueName(baseName: string, existing: InstallationRecord[], exc
 }
 
 export async function add(installation: Record<string, unknown>): Promise<InstallationRecord> {
-  return enqueue(async () => {
+  const entry = await enqueue(async () => {
     const installations = await load()
     installation.name = uniqueName(installation.name as string, installations)
     const entry = {
@@ -79,13 +86,16 @@ export async function add(installation: Record<string, unknown>): Promise<Instal
     await save(installations)
     return entry
   })
+  installationEvents.emit('changed')
+  return entry
 }
 
 export async function remove(id: string): Promise<void> {
-  return enqueue(async () => {
+  await enqueue(async () => {
     const installations = (await load()).filter((i) => i.id !== id)
     await save(installations)
   })
+  installationEvents.emit('changed')
 }
 
 export async function update(id: string, data: Record<string, unknown>): Promise<InstallationRecord | null> {
@@ -98,7 +108,10 @@ export async function update(id: string, data: Record<string, unknown>): Promise
     await save(installations)
     return installations[index]!
   })
-  if (updated) installationEvents.emit('updated', updated)
+  if (updated) {
+    installationEvents.emit('updated', updated)
+    installationEvents.emit('changed')
+  }
   return updated
 }
 
@@ -107,7 +120,7 @@ export async function get(id: string): Promise<InstallationRecord | null> {
 }
 
 export async function reorder(orderedIds: string[]): Promise<void> {
-  return enqueue(async () => {
+  await enqueue(async () => {
     const installations = await load()
     const byId: Record<string, InstallationRecord> = Object.fromEntries(installations.map((i) => [i.id, i]))
     const reordered: InstallationRecord[] = orderedIds
@@ -119,19 +132,22 @@ export async function reorder(orderedIds: string[]): Promise<void> {
     }
     await save(reordered)
   })
+  installationEvents.emit('changed')
 }
 
 export async function ensureExists(sourceId: string, data: Record<string, unknown>): Promise<void> {
-  return enqueue(async () => {
+  const added = await enqueue(async () => {
     const existing = await load()
-    if (existing.some((i) => i.sourceId === sourceId)) return
+    if (existing.some((i) => i.sourceId === sourceId)) return false
     existing.push({
       id: `inst-${Date.now()}`,
       createdAt: new Date().toISOString(),
       ...data,
     } as InstallationRecord)
     await save(existing)
+    return true
   })
+  if (added) installationEvents.emit('changed')
 }
 
 /**
@@ -173,7 +189,10 @@ export async function markLaunched(
     await save(list)
     return merged
   })
-  if (updated) installationEvents.emit('updated', updated)
+  if (updated) {
+    installationEvents.emit('updated', updated)
+    installationEvents.emit('changed')
+  }
   return updated
 }
 
@@ -234,9 +253,9 @@ export async function getRecentByCategory(
 }
 
 export async function seedDefaults(defaults: Record<string, unknown>[]): Promise<void> {
-  return enqueue(async () => {
+  const seeded = await enqueue(async () => {
     const installations = await load()
-    if (installations.length > 0) return
+    if (installations.length > 0) return false
     for (const entry of defaults) {
       installations.push({
         id: `inst-${Date.now()}`,
@@ -245,6 +264,11 @@ export async function seedDefaults(defaults: Record<string, unknown>[]): Promise
         ...entry,
       } as InstallationRecord)
     }
-    if (installations.length > 0) await save(installations)
+    if (installations.length > 0) {
+      await save(installations)
+      return true
+    }
+    return false
   })
+  if (seeded) installationEvents.emit('changed')
 }

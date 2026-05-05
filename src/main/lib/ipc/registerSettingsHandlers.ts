@@ -2,7 +2,7 @@ import {
   ipcMain, nativeTheme,
   sources, settings, i18n,
   getAppVersion, resolveTheme,
-  _onLocaleChanged, _broadcastToRenderer,
+  _onLocaleChanged, _onThemeChanged, _broadcastToRenderer,
 } from './shared'
 import { updateTitleBarOverlay } from '../titleBarOverlay'
 import * as mainTelemetry from '../telemetry'
@@ -28,11 +28,10 @@ export function registerSettingsHandlers(): void {
               { value: 'light', label: i18n.t('settings.themeLight') },
             ] },
           { id: 'autoUpdate', label: i18n.t('settings.autoUpdate'), type: 'boolean', value: s.autoUpdate !== false },
-          { id: 'onAppClose', label: i18n.t('settings.onAppClose'), type: 'select', value: s.onAppClose || settings.defaults.onAppClose,
-            options: [
-              { value: 'quit', label: i18n.t('settings.closeQuit') },
-              { value: 'tray', label: i18n.t('settings.closeTray') },
-            ] },
+          // The `onAppClose` field is hidden while docking-to-tray is
+          // disabled (see main/index.ts createTray()). Restore this
+          // entry — and the 'tray' default in settings.ts — when the
+          // docked-app flow comes back.
           ...(isChinese ? [chineseMirrorsField] : []),
         ],
         actions: [
@@ -121,6 +120,7 @@ export function registerSettingsHandlers(): void {
     if (key === 'theme') {
       _broadcastToRenderer('theme-changed', resolveTheme())
       updateTitleBarOverlay()
+      if (_onThemeChanged) _onThemeChanged()
     }
     if (key === 'language') {
       i18n.init(value as string)
@@ -149,5 +149,7 @@ export function registerSettingsHandlers(): void {
   nativeTheme.on('updated', () => {
     if (((settings.get('theme') as string | undefined) || 'system') !== 'system') return
     _broadcastToRenderer('theme-changed', resolveTheme())
+    updateTitleBarOverlay()
+    if (_onThemeChanged) _onThemeChanged()
   })
 }

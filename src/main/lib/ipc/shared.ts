@@ -137,6 +137,7 @@ export type ExitCallback = (info: ExitCallbackInfo) => void
 export type RestartCallback = (info: RestartCallbackInfo) => void
 export type ModelFolderRelaunchCallback = (info: { installationId: string }) => void | Promise<void>
 export type LocaleCallback = () => void
+export type ThemeChangedCallback = () => void
 
 export interface RegisterCallbacks {
   onLaunch?: LaunchCallback
@@ -145,6 +146,13 @@ export interface RegisterCallbacks {
   onComfyRestarted?: RestartCallback
   onModelFolderRelaunch?: ModelFolderRelaunchCallback
   onLocaleChanged?: LocaleCallback
+  /** Fires whenever the resolved launcher theme flips (user changed the
+   *  setting or the OS-level dark-mode preference flipped while the
+   *  setting is `'system'`). Index registers a handler to repaint
+   *  install-less host windows' title bars + OS overlays — install-
+   *  backed comfy windows are driven by ComfyUI's own theme observer
+   *  instead. */
+  onThemeChanged?: ThemeChangedCallback
 }
 
 export type CopyReason = 'copy' | 'copy-update'
@@ -159,6 +167,7 @@ export let _onComfyExited: ExitCallback | null = null
 export let _onComfyRestarted: RestartCallback | null = null
 export let _onModelFolderRelaunch: ModelFolderRelaunchCallback | null = null
 export let _onLocaleChanged: LocaleCallback | null = null
+export let _onThemeChanged: ThemeChangedCallback | null = null
 let _gpuPromise: Promise<GpuInfo | null> | null = null
 
 export const _operationAborts = new Map<string, AbortController>()
@@ -172,6 +181,7 @@ export function setCallbacks(callbacks: RegisterCallbacks): void {
   _onComfyRestarted = callbacks.onComfyRestarted ?? null
   _onModelFolderRelaunch = callbacks.onModelFolderRelaunch ?? null
   _onLocaleChanged = callbacks.onLocaleChanged ?? null
+  _onThemeChanged = callbacks.onThemeChanged ?? null
 }
 
 export function setGpuPromise(p: Promise<GpuInfo | null> | null): void {

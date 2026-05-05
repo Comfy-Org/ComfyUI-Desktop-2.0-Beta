@@ -321,6 +321,19 @@ input[type="checkbox"]:checked::after { transform: translateX(16px); }
 .breadcrumb { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .breadcrumb-current { font-size: 24px; font-weight: 600; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* In-view page close button (X) shown next to the breadcrumb on root
+   panel pages such as Settings and Directories. Resets the host
+   window's panel-history stack via `closeCurrentPanel`. */
+.view-page-close {
+  display: inline-flex; align-items: center; justify-content: center;
+  flex-shrink: 0; width: 28px; height: 28px; padding: 0;
+  background: none; border: none; border-radius: 6px;
+  color: var(--text-muted); cursor: pointer; line-height: 1;
+  transition: background 0.15s, color 0.15s;
+}
+.view-page-close:hover { background: var(--surface); color: var(--text); }
+.view-page-close:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
 .detected-hardware {
   font-size: 13px; color: var(--text-muted);
   background: var(--surface); border: 1px solid var(--border);

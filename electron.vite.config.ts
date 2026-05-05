@@ -27,6 +27,7 @@ export default defineConfig({
           index: resolve(__dirname, 'src/preload/index.ts'),
           comfyPreload: resolve(__dirname, 'src/preload/comfyPreload.ts'),
           comfyTitleBarPreload: resolve(__dirname, 'src/preload/comfyTitleBarPreload.ts'),
+          comfyTitleMenuPreload: resolve(__dirname, 'src/preload/comfyTitleMenuPreload.ts'),
         },
       },
     },
@@ -38,6 +39,7 @@ export default defineConfig({
         input: {
           panel: resolve(__dirname, 'src/renderer/panel.html'),
           comfyTitleBar: resolve(__dirname, 'src/renderer/comfyTitleBar.html'),
+          comfyTitleMenu: resolve(__dirname, 'src/renderer/comfyTitleMenu.html'),
         },
       },
     },

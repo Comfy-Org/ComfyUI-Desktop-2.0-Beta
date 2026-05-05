@@ -3,24 +3,36 @@ import { mount, flushPromises } from '@vue/test-utils'
 
 interface MockBridgeState {
   panelChangedCallbacks: ((panel: string) => void)[]
+  navStateChangedCallbacks: ((state: { canBack: boolean; canForward: boolean }) => void)[]
   titleChangedCallbacks: ((title: string) => void)[]
   themeChangedCallbacks: ((theme: { bg: string; text: string }) => void)[]
   fullscreenChangedCallbacks: ((fullscreen: boolean) => void)[]
+  menuClosedCallbacks: ((info: { menu: 'file' | 'install' }) => void)[]
   setPanelCalls: string[]
   newWindowCalls: number
   checkForUpdatesCalls: number
+  fileMenuAnchors: { x: number; y: number }[]
+  installMenuAnchors: { x: number; y: number }[]
+  goBackCalls: number
+  goForwardCalls: number
   readyCalls: number
 }
 
 function installMockBridge(opts: { isMac?: boolean; installationId?: string | null } = {}): MockBridgeState {
   const state: MockBridgeState = {
     panelChangedCallbacks: [],
+    navStateChangedCallbacks: [],
     titleChangedCallbacks: [],
     themeChangedCallbacks: [],
     fullscreenChangedCallbacks: [],
+    menuClosedCallbacks: [],
     setPanelCalls: [],
     newWindowCalls: 0,
     checkForUpdatesCalls: 0,
+    fileMenuAnchors: [],
+    installMenuAnchors: [],
+    goBackCalls: 0,
+    goForwardCalls: 0,
     readyCalls: 0,
   }
   const installationId = opts.installationId === undefined ? 'test-id' : opts.installationId
@@ -30,8 +42,16 @@ function installMockBridge(opts: { isMac?: boolean; installationId?: string | nu
     setPanel: (panel: string) => state.setPanelCalls.push(panel),
     openNewWindow: () => { state.newWindowCalls += 1 },
     checkForUpdates: () => { state.checkForUpdatesCalls += 1 },
+    openFileMenu: (anchor: { x: number; y: number }) => { state.fileMenuAnchors.push(anchor) },
+    openInstallMenu: (anchor: { x: number; y: number }) => { state.installMenuAnchors.push(anchor) },
+    goBack: () => { state.goBackCalls += 1 },
+    goForward: () => { state.goForwardCalls += 1 },
     onPanelChanged: (cb: (panel: string) => void) => {
       state.panelChangedCallbacks.push(cb)
+      return () => {}
+    },
+    onNavStateChanged: (cb: (state: { canBack: boolean; canForward: boolean }) => void) => {
+      state.navStateChangedCallbacks.push(cb)
       return () => {}
     },
     onTitleChanged: (cb: (title: string) => void) => {
@@ -44,6 +64,10 @@ function installMockBridge(opts: { isMac?: boolean; installationId?: string | nu
     },
     onFullscreenChanged: (cb: (fullscreen: boolean) => void) => {
       state.fullscreenChangedCallbacks.push(cb)
+      return () => {}
+    },
+    onMenuClosed: (cb: (info: { menu: 'file' | 'install' }) => void) => {
+      state.menuClosedCallbacks.push(cb)
       return () => {}
     },
     ready: () => {
@@ -62,19 +86,29 @@ describe('TitleBarApp', () => {
     vi.resetModules()
   })
 
-  it('renders File menu button and a center install pill', async () => {
+  it('renders the app menu button and a center install pill', async () => {
     const { default: TitleBarApp } = await import('./TitleBarApp.vue')
     const wrapper = mount(TitleBarApp)
     await flushPromises()
-    // File menu button on the left.
+    // App / hamburger menu button on the left. We use an icon (no text
+    // label) so that on install-backed windows the host-app menu
+    // doesn't visually clash with ComfyUI's own "File" menu inside the
+    // Comfy WebContentsView.
     const fileBtn = wrapper.find('.title-menu-button')
     expect(fileBtn.exists()).toBe(true)
-    expect(fileBtn.text()).toContain('File')
-    // Install pill in the center — install-backed (mock returns 'test-id')
-    // so the caret button is present.
-    expect(wrapper.find('.title-install-pill').exists()).toBe(true)
+    expect(fileBtn.attributes('aria-label')).toBe('Menu')
+    expect(fileBtn.classes()).toContain('title-menu-button--icon')
+    // Install pill in the center — single button. Install-backed (mock
+    // returns 'test-id') so the chevron caret is rendered inside as
+    // decoration. The pill itself is the click target — the caret is
+    // not a separate button anymore.
+    const pill = wrapper.find('.title-install-pill')
+    expect(pill.exists()).toBe(true)
+    expect(pill.element.tagName).toBe('BUTTON')
     expect(wrapper.find('.title-install-name').text()).toBe('ComfyUI')
     expect(wrapper.find('.title-install-caret').exists()).toBe(true)
+    // Caret is decoration (an SVG), not a button.
+    expect(wrapper.find('.title-install-caret').element.tagName).toBe('svg')
   })
 
   it('signals readiness so main can push initial state', async () => {
@@ -84,74 +118,53 @@ describe('TitleBarApp', () => {
     expect(bridgeState.readyCalls).toBe(1)
   })
 
-  it('forwards center-pill clicks to bridge.setPanel("comfy")', async () => {
+  it('opens the native install menu when the install pill is clicked (whole pill is the click target)', async () => {
+    // Phase 3 §7 — the pill body and caret are no longer separate
+    // hit targets. Clicking anywhere on the pill (including over the
+    // name span or the chevron SVG) opens the native install menu.
     const { default: TitleBarApp } = await import('./TitleBarApp.vue')
-    const wrapper = mount(TitleBarApp)
+    const wrapper = mount(TitleBarApp, { attachTo: document.body })
     await flushPromises()
-    await wrapper.find('.title-install-name').trigger('click')
-    expect(bridgeState.setPanelCalls).toEqual(['comfy'])
+    await wrapper.find('.title-install-pill').trigger('click')
+    expect(bridgeState.installMenuAnchors.length).toBe(1)
+    const anchor = bridgeState.installMenuAnchors[0]!
+    expect(typeof anchor.x).toBe('number')
+    expect(typeof anchor.y).toBe('number')
+    // The pill no longer routes clicks to setPanel — that gesture went
+    // away when the caret/name buttons collapsed into one.
+    expect(bridgeState.setPanelCalls).toEqual([])
+    wrapper.unmount()
   })
 
-  it('opens the File menu and routes Desktop 2 Settings to setPanel("launcher-settings")', async () => {
+  it('asks main to pop the native File menu when the File button is clicked', async () => {
     const { default: TitleBarApp } = await import('./TitleBarApp.vue')
-    const wrapper = mount(TitleBarApp)
+    const wrapper = mount(TitleBarApp, { attachTo: document.body })
     await flushPromises()
     await wrapper.find('.title-menu-button').trigger('click')
-    const items = wrapper.findAll('.title-menu-item')
-    expect(items.length).toBe(2)
-    const settingsItem = items.find((i) => i.text().includes('Desktop 2 Settings'))
-    expect(settingsItem).toBeTruthy()
-    await settingsItem!.trigger('click')
-    expect(bridgeState.setPanelCalls).toEqual(['launcher-settings'])
+    expect(bridgeState.fileMenuAnchors.length).toBe(1)
+    // Anchor is below the button; jsdom returns 0/0 rects but we assert
+    // the contract — anchor object is well-formed.
+    const anchor = bridgeState.fileMenuAnchors[0]!
+    expect(typeof anchor.x).toBe('number')
+    expect(typeof anchor.y).toBe('number')
+    wrapper.unmount()
   })
 
-  it('opens the File menu and routes New Window to bridge.openNewWindow', async () => {
+  it('does not open the install menu on install-less host windows (pill is disabled)', async () => {
+    // Phase 3 §7 — the install-less host window's pill is rendered
+    // disabled (no menu, no caret). Clicks must not reach the bridge.
+    bridgeState = installMockBridge({ installationId: null })
+    vi.resetModules()
     const { default: TitleBarApp } = await import('./TitleBarApp.vue')
-    const wrapper = mount(TitleBarApp)
+    const wrapper = mount(TitleBarApp, { attachTo: document.body })
     await flushPromises()
-    await wrapper.find('.title-menu-button').trigger('click')
-    const items = wrapper.findAll('.title-menu-item')
-    const newWindowItem = items.find((i) => i.text().includes('New Window'))
-    expect(newWindowItem).toBeTruthy()
-    await newWindowItem!.trigger('click')
-    expect(bridgeState.newWindowCalls).toBe(1)
-  })
-
-  it('opens the install caret menu and routes Install Settings to setPanel', async () => {
-    const { default: TitleBarApp } = await import('./TitleBarApp.vue')
-    const wrapper = mount(TitleBarApp)
-    await flushPromises()
-    await wrapper.find('.title-install-caret').trigger('click')
-    const items = wrapper.findAll('.title-menu-item')
-    expect(items.length).toBe(3)
-    const installSettingsItem = items.find((i) => i.text().includes('Install Settings'))
-    expect(installSettingsItem).toBeTruthy()
-    await installSettingsItem!.trigger('click')
-    expect(bridgeState.setPanelCalls).toEqual(['install-settings'])
-  })
-
-  it('opens the install caret menu and routes Directories to setPanel', async () => {
-    const { default: TitleBarApp } = await import('./TitleBarApp.vue')
-    const wrapper = mount(TitleBarApp)
-    await flushPromises()
-    await wrapper.find('.title-install-caret').trigger('click')
-    const items = wrapper.findAll('.title-menu-item')
-    const directoriesItem = items.find((i) => i.text().trim() === 'Directories')
-    expect(directoriesItem).toBeTruthy()
-    await directoriesItem!.trigger('click')
-    expect(bridgeState.setPanelCalls).toEqual(['directories'])
-  })
-
-  it('opens the install caret menu and routes Check for Updates to bridge.checkForUpdates', async () => {
-    const { default: TitleBarApp } = await import('./TitleBarApp.vue')
-    const wrapper = mount(TitleBarApp)
-    await flushPromises()
-    await wrapper.find('.title-install-caret').trigger('click')
-    const items = wrapper.findAll('.title-menu-item')
-    const checkItem = items.find((i) => i.text().includes('Check for Updates'))
-    expect(checkItem).toBeTruthy()
-    await checkItem!.trigger('click')
-    expect(bridgeState.checkForUpdatesCalls).toBe(1)
+    const pill = wrapper.find('.title-install-pill')
+    expect(pill.exists()).toBe(true)
+    expect((pill.element as HTMLButtonElement).disabled).toBe(true)
+    expect(pill.classes()).toContain('is-install-less')
+    await pill.trigger('click')
+    expect(bridgeState.installMenuAnchors.length).toBe(0)
+    wrapper.unmount()
   })
 
   it('updates the install pill label when main pushes a title', async () => {
@@ -163,13 +176,62 @@ describe('TitleBarApp', () => {
     expect(wrapper.find('.title-install-name').text()).toBe('MyInstall — Standalone')
   })
 
-  it('marks the install pill active when main reports the comfy panel is active', async () => {
+  it('does not mark the install pill active for any panel — pill is an identity label, not a tab', async () => {
+    // The pill no longer mirrors `activePanel`. Page navigation is
+    // tracked separately via Back/Forward arrows; the pill stays as a
+    // pure identity affordance.
     const { default: TitleBarApp } = await import('./TitleBarApp.vue')
     const wrapper = mount(TitleBarApp)
     await flushPromises()
     bridgeState.panelChangedCallbacks.forEach((cb) => cb('comfy'))
     await flushPromises()
-    expect(wrapper.find('.title-install-pill').classes()).toContain('active')
+    expect(wrapper.find('.title-install-pill').classes()).not.toContain('active')
+    bridgeState.panelChangedCallbacks.forEach((cb) => cb('launcher-settings'))
+    await flushPromises()
+    expect(wrapper.find('.title-install-pill').classes()).not.toContain('active')
+  })
+
+  it('renders Back and Forward buttons disabled by default and enables them via onNavStateChanged', async () => {
+    const { default: TitleBarApp } = await import('./TitleBarApp.vue')
+    const wrapper = mount(TitleBarApp)
+    await flushPromises()
+    const navButtons = wrapper.findAll('.title-nav-button')
+    expect(navButtons.length).toBe(2)
+    const [backBtn, fwdBtn] = navButtons
+    expect((backBtn!.element as HTMLButtonElement).disabled).toBe(true)
+    expect((fwdBtn!.element as HTMLButtonElement).disabled).toBe(true)
+
+    bridgeState.navStateChangedCallbacks.forEach((cb) => cb({ canBack: true, canForward: false }))
+    await flushPromises()
+    expect((backBtn!.element as HTMLButtonElement).disabled).toBe(false)
+    expect((fwdBtn!.element as HTMLButtonElement).disabled).toBe(true)
+
+    bridgeState.navStateChangedCallbacks.forEach((cb) => cb({ canBack: true, canForward: true }))
+    await flushPromises()
+    expect((backBtn!.element as HTMLButtonElement).disabled).toBe(false)
+    expect((fwdBtn!.element as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('forwards Back / Forward clicks through the bridge when enabled', async () => {
+    const { default: TitleBarApp } = await import('./TitleBarApp.vue')
+    const wrapper = mount(TitleBarApp)
+    await flushPromises()
+    const navButtons = wrapper.findAll('.title-nav-button')
+    const [backBtn, fwdBtn] = navButtons
+
+    // Disabled — clicks should be no-ops.
+    await backBtn!.trigger('click')
+    await fwdBtn!.trigger('click')
+    expect(bridgeState.goBackCalls).toBe(0)
+    expect(bridgeState.goForwardCalls).toBe(0)
+
+    // Enable both, then click each.
+    bridgeState.navStateChangedCallbacks.forEach((cb) => cb({ canBack: true, canForward: true }))
+    await flushPromises()
+    await backBtn!.trigger('click')
+    await fwdBtn!.trigger('click')
+    expect(bridgeState.goBackCalls).toBe(1)
+    expect(bridgeState.goForwardCalls).toBe(1)
   })
 
   it('applies the is-mac class when running on macOS', async () => {
@@ -185,8 +247,8 @@ describe('TitleBarApp', () => {
     // Phase 3 step 2c — install-less host windows (no installationId in
     // the URL, so the preload returns null) only expose the File menu.
     // The install pill name still renders (with the fallback label) but
-    // the caret/dropdown is hidden because there's no install-scoped
-    // menu to expose.
+    // the chevron caret SVG inside the pill is omitted because there's
+    // no install-scoped menu to expose.
     bridgeState = installMockBridge({ installationId: null })
     vi.resetModules()
     const { default: TitleBarApp } = await import('./TitleBarApp.vue')
@@ -205,6 +267,39 @@ describe('TitleBarApp', () => {
     bridgeState.titleChangedCallbacks.forEach((cb) => cb('Choose an install'))
     await flushPromises()
     expect(wrapper.find('.title-install-name').text()).toBe('Choose an install')
+  })
+
+  it('suppresses menu re-open immediately after a menu close (click-to-toggle dismiss)', async () => {
+    // Phase 3 §7 follow-up — when the user clicks the menu button
+    // while the native menu is open, the OS dismisses the menu first
+    // and the click event then propagates to the renderer. Without
+    // suppression the click handler would ask main to pop the menu
+    // again, making the menu flicker open immediately.
+    const { default: TitleBarApp } = await import('./TitleBarApp.vue')
+    const wrapper = mount(TitleBarApp, { attachTo: document.body })
+    await flushPromises()
+
+    // First click opens the file menu.
+    await wrapper.find('.title-menu-button').trigger('click')
+    expect(bridgeState.fileMenuAnchors.length).toBe(1)
+
+    // Main pops, user clicks the same button → menu dismisses → main
+    // fires the popup callback → onMenuClosed handler stamps the
+    // suppression timestamp. Simulate that by invoking the registered
+    // callback directly.
+    bridgeState.menuClosedCallbacks.forEach((cb) => cb({ menu: 'file' }))
+    await flushPromises()
+
+    // Second click within the suppression window must NOT open the menu.
+    await wrapper.find('.title-menu-button').trigger('click')
+    expect(bridgeState.fileMenuAnchors.length).toBe(1)
+
+    // Suppression is per-menu — clicking the install pill (different
+    // menu kind) is unaffected.
+    await wrapper.find('.title-install-pill').trigger('click')
+    expect(bridgeState.installMenuAnchors.length).toBe(1)
+
+    wrapper.unmount()
   })
 
   it('toggles is-fullscreen in response to onFullscreenChanged', async () => {

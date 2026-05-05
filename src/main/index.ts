@@ -1,4 +1,8 @@
-import { app, BrowserWindow, Tray, Menu, ipcMain, shell, clipboard, screen, net, WebContentsView } from 'electron'
+import { app, BrowserWindow, Menu, ipcMain, shell, clipboard, screen, net, WebContentsView } from 'electron'
+// `Tray` is referenced only as a type while docking-to-tray is disabled
+// (see whenReady() — createTray() has been removed). When docking comes
+// back, move this back into the runtime electron import alongside Menu.
+import type { Tray } from 'electron'
 import path from 'path'
 import fs from 'fs'
 import { execFile } from 'child_process'
@@ -26,7 +30,7 @@ import { getModelDownloadContentScript } from './lib/comfyContentScript'
 import { shouldOpenInPopup } from './lib/allowedPopups'
 import { showModelFolderRelaunchPage } from './lib/relaunchPage'
 import { COMFY_BG, SPLASH_DARK, TITLEBAR_BG, type SplashTheme } from './lib/theme'
-import { TITLEBAR_HEIGHT, TRAFFIC_LIGHT_POSITION, comfyTitleBarOverlay } from './lib/titleBarOverlay'
+import { TITLEBAR_HEIGHT, TRAFFIC_LIGHT_POSITION, comfyTitleBarOverlay, titleBarOverlayForTheme } from './lib/titleBarOverlay'
 import { resolveTheme, sourceMap, _registerExtraBroadcastTarget, _unregisterExtraBroadcastTarget, _runningSessions, _broadcastToRenderer } from './lib/ipc/shared'
 import * as mainTelemetry from './lib/telemetry'
 import { getDeviceId } from './lib/deviceId'
@@ -87,7 +91,9 @@ type BodyMode =
 todesktop.init({ autoUpdater: false })
 
 const APP_ICON = path.join(__dirname, '..', '..', 'assets', 'Comfy_Logo_x256.png')
-const TRAY_ICON = path.join(__dirname, '..', '..', 'assets', 'Comfy_Logo_x32.png')
+// TRAY_ICON has been removed alongside createTray() while docking-to-tray
+// is disabled — see whenReady()'s comment about restoring docking. The
+// 32px logo asset is still available under assets/ if it's reintroduced.
 const APP_VERSION = getAppVersion()
 
 interface WindowBounds {
@@ -217,12 +223,27 @@ interface ComfyWindowEntry {
    */
   panelView: WebContentsView | null
   /**
-   * Which title-bar pill is currently selected. Always one of the user-
-   * visible pills — never the internal `'comfy-lifecycle'` / `'chooser'`
-   * body modes. For install-less host windows only the Comfy and
-   * Launcher Settings pills are reachable (Install Settings is hidden).
+   * Which panel is currently rendered (== `panelHistory[panelHistoryIndex]`).
+   * Always one of the user-visible panel keys — never the internal
+   * `'comfy-lifecycle'` / `'chooser'` body modes. For install-less host
+   * windows only `'comfy'` and `'launcher-settings'` are reachable
+   * (Install Settings / Directories are hidden).
    */
   activePanel: ComfyPanelKey
+  /**
+   * Browser-style navigation history for the title-bar Back / Forward
+   * buttons. The pill is no longer treated as a tab indicator —
+   * navigating between pages uses this stack instead.
+   *
+   * The "root" is `'comfy'` and is always at index 0. Opening a page
+   * (Settings / Directories / Install Settings / a flow) truncates any
+   * forward history and pushes the new key. Returning to the comfy
+   * body via the pill or the page's X-close button resets the stack
+   * to `['comfy']` (deliberate "I'm done with these pages" gesture
+   * — clears forward history). Back / Forward only move the index.
+   */
+  panelHistory: ComfyPanelKey[]
+  panelHistoryIndex: number
   /** Last known theme reported by the ComfyUI frontend, applied to the panel when it loads. */
   lastTheme: { bg: string; text: string }
   /** Layout function bound to this entry — updates view bounds for the current activePanel. */
@@ -444,14 +465,11 @@ function updateTrayMenu(): void {
   tray.setContextMenu(contextMenu)
 }
 
-function createTray(): void {
-  if (tray) return
-
-  tray = new Tray(TRAY_ICON)
-  tray.setToolTip('ComfyUI Desktop 2.0')
-  updateTrayMenu()
-  tray.on('double-click', () => { openOrFocusChooserHostWindow() })
-}
+// `createTray()` has been removed while docking-to-tray is disabled —
+// see whenReady()'s comment about restoring docking. The `tray` module
+// state and `updateTrayMenu()` (a no-op when tray is null) are kept so
+// that `onLocaleChanged: updateTrayMenu` and the `before-quit` cleanup
+// path stay valid without conditional churn for the eventual restore.
 
 /** Show a window and bring it to the front, working around Windows focus-theft prevention. */
 function bringToFront(win: BrowserWindow): void {
@@ -850,7 +868,13 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
     notifyTitleBarPanel(entry?.activePanel ?? 'comfy')
     if (entry && !titleBarView.webContents.isDestroyed()) {
       titleBarView.webContents.send('comfy-titlebar:theme-changed', entry.lastTheme)
+      _notifyTitleBarNavState(entry)
     }
+    // Pre-warm the title-menu popup so the user's first File / Install
+    // click doesn't pay the BrowserWindow construction + HTML/JS load
+    // cost (~100ms). The popup is created hidden, kept alive across
+    // opens, and torn down when this window is.
+    ensureTitleMenuPopup(comfyWindow)
   }
   ipcMain.on('comfy-window:title-bar-ready', onTitleBarReady)
 
@@ -1034,6 +1058,8 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
     titleBarView,
     panelView: null,
     activePanel: 'comfy',
+    panelHistory: ['comfy'],
+    panelHistoryIndex: 0,
     lastTheme: { bg: COMFY_BG, text: '#dddddd' },
     layoutViews,
     comfyUrl,
@@ -1089,8 +1115,62 @@ function openOrFocusChooserHostWindow(): BrowserWindow {
   return openChooserHostWindow()
 }
 
+/** Resolve the title-bar / window-controls theme for install-less host
+ *  windows. The chooser's panel body lives in the launcher renderer
+ *  (which uses `--surface` from main.css), so the title-bar Vue header
+ *  and the OS-level window-controls overlay both need to track that
+ *  same colour. `titleBarOverlayForTheme` already returns the matching
+ *  `--surface` values (#262729 dark / #e9e9e9 light) so this helper is
+ *  a thin wrapper that just maps that to the
+ *  `comfy-titlebar:theme-changed` `{ bg, text }` shape consumed by
+ *  TitleBarApp.vue. */
+function getChooserHostTheme(): { bg: string; text: string } {
+  const overlay = titleBarOverlayForTheme(resolveTheme() === 'dark')
+  return { bg: overlay.color ?? TITLEBAR_BG, text: overlay.symbolColor ?? '#dddddd' }
+}
+
+/** Repaint a single install-less host window's title bar + OS overlay
+ *  to match the current launcher theme. Mirrors `applyComfyTheme` for
+ *  install-backed windows, but driven by the launcher setting (or
+ *  OS-level dark-mode flip on `'system'`) rather than ComfyUI's
+ *  in-page theme observer — install-less hosts have no ComfyUI
+ *  frontend feeding them. */
+function applyChooserHostTheme(entry: ComfyWindowEntry): void {
+  if (entry.installationId !== null) return
+  if (entry.window.isDestroyed()) return
+  const theme = getChooserHostTheme()
+  entry.lastTheme = theme
+  if (!entry.titleBarView.webContents.isDestroyed()) {
+    entry.titleBarView.webContents.send('comfy-titlebar:theme-changed', theme)
+  }
+  if (process.platform !== 'darwin') {
+    try {
+      entry.window.setTitleBarOverlay({ color: theme.bg, symbolColor: theme.text })
+    } catch {
+      // No-op — setTitleBarOverlay throws if the window was created
+      // without `titleBarOverlay`, which install-less hosts always set.
+    }
+  }
+}
+
+/** Walk every install-less host window and repaint its title bar to
+ *  the current launcher theme. Hooked into the settings handler's
+ *  `onThemeChanged` callback so flipping the Theme setting (or the
+ *  OS-level dark-mode preference while the setting is `'system'`)
+ *  refreshes every open chooser host live, instead of only repainting
+ *  the panel body inside it. */
+function applyChooserHostThemeToAll(): void {
+  for (const [, entry] of comfyWindows) {
+    if (entry.installationId === null) {
+      applyChooserHostTheme(entry)
+    }
+  }
+}
+
 function openChooserHostWindow(): BrowserWindow {
   const windowKey = nextChooserKey()
+
+  const initialChooserTheme = getChooserHostTheme()
 
   const windowOptions = getWindowOptions(windowKey)
   const comfyWindow = new BrowserWindow({
@@ -1103,7 +1183,11 @@ function openChooserHostWindow(): BrowserWindow {
     titleBarStyle: 'hidden',
     ...(process.platform === 'darwin'
       ? { trafficLightPosition: TRAFFIC_LIGHT_POSITION }
-      : { titleBarOverlay: comfyTitleBarOverlay() }),
+      // Install-less hosts use the launcher renderer's --surface for
+      // the OS overlay so the close/min/max region matches the Vue
+      // title bar above it. Install-backed windows still use
+      // `comfyTitleBarOverlay()` (ComfyUI brand --comfy-menu-bg).
+      : { titleBarOverlay: titleBarOverlayForTheme(resolveTheme() === 'dark') }),
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -1122,7 +1206,10 @@ function openChooserHostWindow(): BrowserWindow {
       preload: path.join(__dirname, '../preload/comfyTitleBarPreload.js'),
     },
   })
-  titleBarView.setBackgroundColor(TITLEBAR_BG)
+  // Pre-paint the title-bar WebContentsView with the launcher-theme
+  // surface colour so it doesn't flash `TITLEBAR_BG` (#353535) before
+  // the Vue header mounts and applies `themeBg` on `theme-changed`.
+  titleBarView.setBackgroundColor(initialChooserTheme.bg)
   {
     const isDev = !!process.env['ELECTRON_RENDERER_URL']
     const tbLoad = isDev
@@ -1192,8 +1279,14 @@ function openChooserHostWindow(): BrowserWindow {
       titleBarView.webContents.send('comfy-titlebar:panel-changed', entry?.activePanel ?? 'comfy')
       if (entry) {
         titleBarView.webContents.send('comfy-titlebar:theme-changed', entry.lastTheme)
+        _notifyTitleBarNavState(entry)
       }
     }
+    // Pre-warm the title-menu popup so the user's first File click
+    // doesn't pay the BrowserWindow construction + HTML/JS load cost.
+    // Install-less hosts only expose the File menu (no Install menu),
+    // so the warmed popup still pays off on every File-menu open.
+    ensureTitleMenuPopup(comfyWindow)
   }
   ipcMain.on('comfy-window:title-bar-ready', onTitleBarReady)
 
@@ -1216,13 +1309,22 @@ function openChooserHostWindow(): BrowserWindow {
   comfyWindow.on('resize', () => saveWindowBounds(windowKey, comfyWindow))
   comfyWindow.on('move', () => saveWindowBounds(windowKey, comfyWindow))
 
+  // Phase 3 — install-less host windows have no ComfyUI frontend to
+  // pull theme from, so the chooser's title bar / overlay colors are
+  // driven by the launcher theme (resolved at construction time and
+  // refreshed via `applyChooserHostTheme` when the theme setting or
+  // OS-level dark-mode preference flips). Both the Vue `<header>` and
+  // the OS overlay paint `getChooserHostTheme().bg` (i.e. the launcher
+  // renderer's `--surface`) so the seam between them stays invisible.
   comfyWindows.set(windowKey, {
     window: comfyWindow,
     comfyView,
     titleBarView,
     panelView: null,
     activePanel: 'comfy',
-    lastTheme: { bg: COMFY_BG, text: '#dddddd' },
+    panelHistory: ['comfy'],
+    panelHistoryIndex: 0,
+    lastTheme: initialChooserTheme,
     layoutViews,
     comfyUrl: '',
     installationId: null,
@@ -1237,6 +1339,14 @@ function openChooserHostWindow(): BrowserWindow {
   }
 
   layoutViews()
+  // Phase 3 — explicitly bring the new chooser host to the foreground.
+  // Without this, the freshly created window can stay behind whatever
+  // app the user launched Desktop 2.0 from (Windows focus-theft
+  // prevention is the usual culprit). The legacy launcher window had
+  // its own `ready-to-show` → `focus()` path; the chooser host needs
+  // the same treatment via `bringToFront`, which uses the always-on-top
+  // toggle trick on Windows.
+  bringToFront(comfyWindow)
   return comfyWindow
 }
 
@@ -1329,16 +1439,77 @@ function focusActiveBody(entry: ComfyWindowEntry): void {
   }
 }
 
-function setActivePanel(windowKey: string, panel: ComfyPanelKey): void {
+/**
+ * How a panel switch is being requested. Drives the navigation-history
+ * book-keeping so the title bar's Back / Forward buttons behave like a
+ * browser tab rather than a page swap:
+ *   - `'navigate'`: opening a page from a menu / dropdown / chooser →
+ *     truncate forward history and push the new key.
+ *   - `'back'` / `'forward'`: only move the history index. The caller
+ *     resolves the destination key from the stack, this function just
+ *     applies it.
+ *   - `'reset'`: pill click or X-close → wipe history back to `['comfy']`
+ *     and land on index 0. A deliberate "I'm done with these pages"
+ *     gesture, so forward history is intentionally cleared.
+ */
+type PanelNavSource = 'navigate' | 'back' | 'forward' | 'reset'
+
+/** Push `key` onto the history, truncating any forward entries first.
+ *  No-op when `key` is already the current panel. */
+function _pushPanelHistory(entry: ComfyWindowEntry, key: ComfyPanelKey): void {
+  // Drop everything strictly after the current index — the user is
+  // forking history from where they currently are.
+  entry.panelHistory = entry.panelHistory.slice(0, entry.panelHistoryIndex + 1)
+  if (entry.panelHistory[entry.panelHistoryIndex] === key) return
+  entry.panelHistory.push(key)
+  entry.panelHistoryIndex = entry.panelHistory.length - 1
+}
+
+/** Send the current Back/Forward enabled state to the title bar so it can
+ *  enable / disable the arrow buttons. */
+function _notifyTitleBarNavState(entry: ComfyWindowEntry): void {
+  if (entry.titleBarView.webContents.isDestroyed()) return
+  entry.titleBarView.webContents.send('comfy-titlebar:nav-state-changed', {
+    canBack: entry.panelHistoryIndex > 0,
+    canForward: entry.panelHistoryIndex < entry.panelHistory.length - 1,
+  })
+}
+
+function setActivePanel(
+  windowKey: string,
+  panel: ComfyPanelKey,
+  source: PanelNavSource = 'navigate',
+): void {
   const entry = comfyWindows.get(windowKey)
   if (!entry || entry.window.isDestroyed()) return
-  if (entry.activePanel === panel) return
   // Install Settings + Directories are install-scoped (the install caret
   // menu in the title bar is hidden in install-less host windows). Refuse
   // to switch to either from anywhere when there's no install backing the
   // window — a stray IPC payload must not be able to wedge the window
   // into a body mode that has no install to render.
   if (entry.installationId === null && (panel === 'install-settings' || panel === 'directories')) return
+
+  // Update navigation history per source. The history mutation happens
+  // BEFORE the early-return for "same panel" because a `'reset'` from a
+  // page back to `'comfy'` still has work to do (clear forward) even
+  // when the panel is already comfy by some other accident.
+  if (source === 'reset') {
+    entry.panelHistory = ['comfy']
+    entry.panelHistoryIndex = 0
+    panel = 'comfy'
+  } else if (source === 'navigate') {
+    _pushPanelHistory(entry, panel)
+  }
+  // For 'back' / 'forward' the caller has already moved
+  // panelHistoryIndex; we only apply the panel switch here.
+
+  if (entry.activePanel === panel) {
+    // Even when the panel didn't change (e.g. menu re-pick of the
+    // current page), nav state may have shifted (forward truncated)
+    // — push the latest state so the title bar arrows reflect reality.
+    _notifyTitleBarNavState(entry)
+    return
+  }
 
   entry.activePanel = panel
   // Resolve to the actual body mode (Comfy pill maps to lifecycle / chooser
@@ -1359,6 +1530,7 @@ function setActivePanel(windowKey: string, panel: ComfyPanelKey): void {
     // internal `'comfy-lifecycle'` body mode.
     entry.titleBarView.webContents.send('comfy-titlebar:panel-changed', panel)
   }
+  _notifyTitleBarNavState(entry)
   focusActiveBody(entry)
 }
 
@@ -1367,7 +1539,55 @@ ipcMain.on('comfy-window:set-panel', (event, payload: { panel: string }) => {
   if (!found) return
   const panel = payload?.panel as ComfyPanelKey
   if (!VALID_PANELS.has(panel)) return
-  setActivePanel(found.id, panel)
+  // Pill clicks always send `'comfy'` from the title bar — treat as a
+  // history reset (the pill is no longer a tab indicator, so going
+  // home should clear the breadcrumb of pages the user was browsing).
+  // Other panel keys from the title bar come from the File / Install
+  // dropdowns and are 'navigate'.
+  setActivePanel(found.id, panel, panel === 'comfy' ? 'reset' : 'navigate')
+})
+
+/** Title bar Back arrow → step one entry backward in history. */
+ipcMain.on('comfy-window:go-back', (event) => {
+  const found = findEntryByTitleBarSender(event.sender)
+  if (!found) return
+  const { id, entry } = found
+  if (entry.panelHistoryIndex <= 0) return
+  entry.panelHistoryIndex -= 1
+  const target = entry.panelHistory[entry.panelHistoryIndex]
+  if (!target) return
+  setActivePanel(id, target, 'back')
+})
+
+/** Title bar Forward arrow → step one entry forward in history. */
+ipcMain.on('comfy-window:go-forward', (event) => {
+  const found = findEntryByTitleBarSender(event.sender)
+  if (!found) return
+  const { id, entry } = found
+  if (entry.panelHistoryIndex >= entry.panelHistory.length - 1) return
+  entry.panelHistoryIndex += 1
+  const target = entry.panelHistory[entry.panelHistoryIndex]
+  if (!target) return
+  setActivePanel(id, target, 'forward')
+})
+
+/**
+ * Page-level X close (rendered inside the panel WebContentsView, e.g.
+ * Settings / Directories / Install Settings) — same effect as a pill
+ * click: history is reset and the body returns to the comfy/chooser
+ * root. The panel preload exposes this as `closeCurrentPanel()`.
+ *
+ * We resolve the host window via the panel's WebContents sender. The
+ * panelView is lazily created so we walk every entry instead of caching
+ * a separate reverse-map.
+ */
+ipcMain.on('comfy-window:close-current-panel', (event) => {
+  for (const [id, entry] of comfyWindows) {
+    if (entry.panelView?.webContents === event.sender) {
+      setActivePanel(id, 'comfy', 'reset')
+      return
+    }
+  }
 })
 
 /**
@@ -1399,6 +1619,454 @@ ipcMain.on('comfy-window:check-for-updates', () => {
     // as handled so it doesn't surface as an unhandledRejection.
   })
 })
+
+// =====================================================================
+// Title-menu popups (Phase 3 §14 — replaces native Menu.popup()).
+//
+// The File / Install dropdowns are now HTML rendered inside a frameless
+// transparent child BrowserWindow, mirroring the pattern Chrome / Discord /
+// VS Code use for their title-bar menus. Compared to `Menu.popup()` this
+// gives us:
+//   - native OS shadow + theme-matched chrome (no clipping by the title-bar
+//     WebContentsView's 37px bounds, no z-order gymnastics);
+//   - free click-outside dismissal via the popup's own blur event;
+//   - styling consistent with the Vue title bar above it (Inter + design
+//     tokens) instead of the platform's default native menu look.
+//
+// The renderer-side bridge (`openFileMenu` / `openInstallMenu` →
+// `comfy-window:open-title-menu`) is unchanged. The popup webContents
+// posts `comfy-titlemenu:item-activated` for clicks and
+// `comfy-titlemenu:close` for Escape; main routes activations to the
+// existing handlers (set-panel / new-chooser-window / runCheck) and closes
+// the popup. On close, main re-emits `comfy-titlebar:menu-closed` to the
+// title-bar webContents so the existing 100ms reopen-suppression guard
+// keeps working.
+// =====================================================================
+
+interface TitleMenuItem {
+  /** Item id — main routes activation by this. Omitted for separators. */
+  id?: string
+  /** Visible label. */
+  label?: string
+  /** Render a checkmark glyph beside the label when true. */
+  checked?: boolean
+  /** Marks a separator row instead of an interactive item. */
+  kind?: 'separator'
+}
+
+interface TitleMenuPopupConfig {
+  kind: 'file' | 'install'
+  items: TitleMenuItem[]
+  theme: { bg: string; text: string }
+}
+
+/**
+ * One reusable popup window per parent BrowserWindow.
+ *
+ * Recreating a `BrowserWindow` on every menu open meant ~100ms of
+ * construction + HTML/JS load time before the popup appeared, which
+ * the user noticed as a click-to-paint delay. Instead we lazily
+ * create one popup the first time the user opens a menu on a given
+ * parent, hide it on close (rather than destroying), and push fresh
+ * config via `comfy-titlemenu:set-config` IPC on every subsequent
+ * open. The window is destroyed when its parent is closed.
+ *
+ * Latest values for the *current* open are tracked here too so
+ * `activate` (item click) and the `closed` callback (re-emits
+ * `comfy-titlebar:menu-closed` for the reopen-suppression guard)
+ * can route without their own per-open context.
+ */
+interface TitleMenuPopupEntry {
+  popup: BrowserWindow
+  parentWindow: BrowserWindow
+  /** Snapshotted at construction so we don't touch `popup.webContents`
+   *  in the destroyed-window handlers. */
+  popupWebContentsId: number
+  parentWindowId: number
+  /** Updated on every open. */
+  parentEntryId: string
+  /** Updated on every open. */
+  kind: 'file' | 'install'
+  /** Updated on every open. */
+  titleBarSender: Electron.WebContents
+  /** True once the renderer has signalled `comfy-titlemenu:ready`.
+   *  Until then, config pushes are queued in `pendingConfig`. */
+  rendererReady: boolean
+  /** Config queued before the renderer signalled ready — flushed on
+   *  ready. Overwritten if multiple opens happen before ready. */
+  pendingConfig: TitleMenuPopupConfig | null
+  /** True between `setOpacity(0)`+park (hide) and `setOpacity(1)`
+   *  (show) — the blur handler ignores spurious blurs while we're
+   *  already hidden. */
+  isOpen: boolean
+  /** Set to a non-null timer when an open is in flight, waiting for
+   *  the renderer's `comfy-titlemenu:rendered` ack before flipping
+   *  opacity to 1. The timer is the fallback that flips anyway after
+   *  a short window (in case the renderer is unusually slow). */
+  pendingShowTimer: NodeJS.Timeout | null
+}
+
+/** Active popup keyed by parent BrowserWindow id (one popup per parent,
+ *  cached for reuse). The webContents-id index lets
+ *  `comfy-titlemenu:item-activated` / `:close` / `:ready` route by
+ *  `event.sender`. */
+const titleMenuPopupsByParent = new Map<number, TitleMenuPopupEntry>()
+const titleMenuPopupsByWebContents = new Map<number, TitleMenuPopupEntry>()
+
+const POPUP_WIDTH = 220
+const POPUP_ITEM_HEIGHT = 28
+const POPUP_SEPARATOR_HEIGHT = 9
+const POPUP_VPADDING = 8 // 4px top + 4px bottom on the <ul>
+const POPUP_VBORDER = 2 // 1px top + 1px bottom from the .popup card
+
+/** Off-screen parking position for a "hidden" popup. We keep the window
+ *  permanently `show()`n (never hide/show) so the OS compositor doesn't
+ *  re-warm a transparent window on every open — that re-warm is what
+ *  caused the visible flicker on first show. -32000 sits beyond every
+ *  Win32 display origin so the parked window is invisible regardless
+ *  of multi-monitor layout. */
+const POPUP_PARK_X = -32000
+const POPUP_PARK_Y = -32000
+
+function computePopupHeight(items: readonly TitleMenuItem[]): number {
+  const content = items.reduce(
+    (sum, item) => sum + (item.kind === 'separator' ? POPUP_SEPARATOR_HEIGHT : POPUP_ITEM_HEIGHT),
+    0,
+  )
+  return content + POPUP_VPADDING + POPUP_VBORDER
+}
+
+function buildTitleMenuItems(kind: 'file' | 'install', entry: ComfyWindowEntry): TitleMenuItem[] {
+  if (kind === 'file') {
+    return [
+      { id: 'new-window', label: 'New Window' },
+      { id: 'launcher-settings', label: 'Desktop 2 Settings' },
+    ]
+  }
+  return [
+    { id: 'install-settings', label: 'Install Settings', checked: entry.activePanel === 'install-settings' },
+    { id: 'directories', label: 'Directories', checked: entry.activePanel === 'directories' },
+    { kind: 'separator' },
+    { id: 'check-for-updates', label: 'Check for Updates' },
+  ]
+}
+
+/** Lazily create the reusable popup BrowserWindow for the given parent.
+ *  Subsequent opens for the same parent reuse the same window — the
+ *  renderer is loaded once, then we just push fresh config + reposition
+ *  + show on every open. The popup is destroyed when its parent is. */
+function ensureTitleMenuPopup(parent: BrowserWindow): TitleMenuPopupEntry {
+  const existing = titleMenuPopupsByParent.get(parent.id)
+  if (existing && !existing.popup.isDestroyed()) return existing
+
+  const popup = new BrowserWindow({
+    parent,
+    // Constructed parked off-screen with opacity 0 — we
+    // `showInactive()` it after first paint so the OS compositor
+    // commits the transparent surface once, then flip opacity / move
+    // on every open. Never `hide()`/`show()` again — that path is what
+    // caused the first-show flicker.
+    show: false,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    skipTaskbar: true,
+    hasShadow: true,
+    focusable: true,
+    opacity: 0,
+    width: POPUP_WIDTH,
+    // Initial height is overwritten by `setBounds` on every open, so the
+    // value here just has to be non-zero — Electron rejects `width: 0`
+    // / `height: 0` BrowserWindows on Windows.
+    height: 100,
+    x: POPUP_PARK_X,
+    y: POPUP_PARK_Y,
+    backgroundColor: '#00000000',
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, '../preload/comfyTitleMenuPreload.js'),
+    },
+  })
+  popup.setMenuBarVisibility(false)
+
+  const isDev = !!process.env['ELECTRON_RENDERER_URL']
+  const loadPromise = isDev
+    ? popup.loadURL(
+        `${(process.env['ELECTRON_RENDERER_URL'] as string).replace(/\/$/, '')}/comfyTitleMenu.html`,
+      )
+    : popup.loadFile(path.join(__dirname, '../renderer/comfyTitleMenu.html'))
+  void loadPromise.catch(() => {})
+
+  // Once the renderer paints, flip the window into its "parked &
+  // primed" state: parked off-screen, opacity 0, but `show()`n so the
+  // compositor has fully composited the transparent surface. From this
+  // point on, opens just `setBounds` + `setOpacity(1)` + `focus()`.
+  popup.once('ready-to-show', () => {
+    if (popup.isDestroyed()) return
+    popup.showInactive()
+  })
+
+  // Capture ids up-front. The `closed` event fires *after* the
+  // BrowserWindow + its webContents are destroyed, so accessing
+  // `popup.webContents.id` there would throw "Object has been destroyed".
+  const entry: TitleMenuPopupEntry = {
+    popup,
+    parentWindow: parent,
+    popupWebContentsId: popup.webContents.id,
+    parentWindowId: parent.id,
+    parentEntryId: '',
+    kind: 'file',
+    titleBarSender: popup.webContents, // overwritten on first open
+    rendererReady: false,
+    pendingConfig: null,
+    isOpen: false,
+    pendingShowTimer: null,
+  }
+  titleMenuPopupsByParent.set(entry.parentWindowId, entry)
+  titleMenuPopupsByWebContents.set(entry.popupWebContentsId, entry)
+
+  // Click-outside dismissal: when the popup loses focus (any other
+  // window steals it — including the parent title-bar button) hide
+  // ourselves. Item clicks inside the popup do NOT trigger blur —
+  // focus stays in the popup webContents until we explicitly hide
+  // it on item-activated, so item activations always reach main.
+  popup.on('blur', () => {
+    if (!entry.isOpen) return
+    hideTitleMenuPopup(entry)
+  })
+
+  // Popup is destroyed only when its parent is destroyed. Clean up
+  // the maps so a fresh parent with the same numeric id (vanishingly
+  // unlikely but possible) doesn't pick up a stale entry.
+  popup.on('closed', () => {
+    titleMenuPopupsByParent.delete(entry.parentWindowId)
+    titleMenuPopupsByWebContents.delete(entry.popupWebContentsId)
+  })
+
+  // Tear down with the parent. Without this, the popup would survive
+  // its parent and reuse the wrong context on the next click in a
+  // different window.
+  parent.once('closed', () => {
+    if (!popup.isDestroyed()) popup.destroy()
+  })
+
+  return entry
+}
+
+/** Fallback timeout (ms) — if the renderer's
+ *  `comfy-titlemenu:rendered` ack doesn't arrive within this window
+ *  after `set-config`, flip opacity anyway so the popup never gets
+ *  permanently stuck invisible. The renderer normally acks within one
+ *  animation frame (~16ms). */
+const POPUP_RENDER_ACK_TIMEOUT_MS = 80
+
+/** Park the popup back off-screen and re-emit the
+ *  `comfy-titlebar:menu-closed` event so the title-bar renderer's 100ms
+ *  `MENU_REOPEN_GUARD_MS` suppression fires (mirrors the previous
+ *  `Menu.popup()` callback path). The popup window itself stays
+ *  permanently `show()`n — we just flip opacity to 0 and move it
+ *  off-screen so the OS doesn't have to re-composite a transparent
+ *  surface on the next open.
+ *
+ *  `releaseFocusToParent` controls whether to explicitly focus the parent
+ *  window after parking. Use it when the popup is being dismissed *while*
+ *  it still has focus (item click, Escape key) so keyboard input lands
+ *  somewhere sensible. Skip it on the blur path — focus has already
+ *  moved to wherever the user clicked, and stealing it back to the
+ *  parent would yank focus out of whatever they targeted (another app
+ *  window, the parent's body, etc.). */
+function hideTitleMenuPopup(
+  entry: TitleMenuPopupEntry,
+  opts: { releaseFocusToParent?: boolean } = {},
+): void {
+  if (!entry.isOpen) return
+  entry.isOpen = false
+  // Cancel any in-flight render ack — if a hide arrives before the
+  // ack, the popup is already on its way back to opacity 0 and we
+  // shouldn't flip to 1 retroactively.
+  if (entry.pendingShowTimer) {
+    clearTimeout(entry.pendingShowTimer)
+    entry.pendingShowTimer = null
+  }
+  if (!entry.popup.isDestroyed()) {
+    entry.popup.setOpacity(0)
+    entry.popup.setPosition(POPUP_PARK_X, POPUP_PARK_Y)
+    if (opts.releaseFocusToParent && !entry.parentWindow.isDestroyed()) {
+      entry.parentWindow.focus()
+    }
+  }
+  if (!entry.titleBarSender.isDestroyed()) {
+    entry.titleBarSender.send('comfy-titlebar:menu-closed', { menu: entry.kind })
+  }
+}
+
+/** Flip the popup to opacity 1, focus it, and mark `isOpen`. Called
+ *  when the renderer acks `comfy-titlemenu:rendered` — at that point the
+ *  new config has been painted and showing is safe. */
+function showTitleMenuPopupNow(entry: TitleMenuPopupEntry): void {
+  if (entry.pendingShowTimer) {
+    clearTimeout(entry.pendingShowTimer)
+    entry.pendingShowTimer = null
+  }
+  if (entry.popup.isDestroyed()) return
+  entry.popup.setOpacity(1)
+  entry.popup.focus()
+  entry.isOpen = true
+}
+
+function openTitleMenuPopup(opts: {
+  parent: BrowserWindow
+  parentEntryId: string
+  kind: 'file' | 'install'
+  items: TitleMenuItem[]
+  anchor: { x: number; y: number }
+  theme: { bg: string; text: string }
+  titleBarSender: Electron.WebContents
+}): void {
+  const entry = ensureTitleMenuPopup(opts.parent)
+  if (entry.popup.isDestroyed()) return
+
+  // Refresh the per-open routing context. `kind` + `parentEntryId` +
+  // `titleBarSender` only matter for the *current* open, so we
+  // overwrite on every open instead of allocating a new context object.
+  entry.parentEntryId = opts.parentEntryId
+  entry.kind = opts.kind
+  entry.titleBarSender = opts.titleBarSender
+
+  // Anchor coords are title-bar-local; the title-bar view sits at
+  // content (0,0) so they map to content coordinates. `getContentBounds`
+  // returns screen-relative coords, so adding gives the popup's screen
+  // origin.
+  const contentBounds = opts.parent.getContentBounds()
+  const screenX = Math.round(contentBounds.x + Math.max(0, opts.anchor.x))
+  const screenY = Math.round(contentBounds.y + Math.max(0, opts.anchor.y))
+  const height = computePopupHeight(opts.items)
+
+  // Move + resize while invisible. On the very first open the renderer
+  // may not have had its `ready-to-show` yet (which calls
+  // `showInactive`) — fall back to a regular `showInactive()` here.
+  entry.popup.setBounds({ x: screenX, y: screenY, width: POPUP_WIDTH, height })
+  if (!entry.popup.isVisible()) entry.popup.showInactive()
+
+  // Push the new config and *wait* for the renderer to ack that the
+  // new content has painted before flipping opacity. Without this the
+  // user sees a frame of the previous open's content while Vue is
+  // still processing the config update.
+  if (entry.pendingShowTimer) {
+    clearTimeout(entry.pendingShowTimer)
+    entry.pendingShowTimer = null
+  }
+  const config: TitleMenuPopupConfig = { kind: opts.kind, items: opts.items, theme: opts.theme }
+  if (entry.rendererReady && !entry.popup.webContents.isDestroyed()) {
+    entry.popup.webContents.send('comfy-titlemenu:set-config', config)
+  } else {
+    // Renderer hasn't mounted yet on the very first open. Queue the
+    // config; the `ready` IPC handler flushes it.
+    entry.pendingConfig = config
+  }
+  entry.pendingShowTimer = setTimeout(() => {
+    if (entry.pendingShowTimer === null) return
+    showTitleMenuPopupNow(entry)
+  }, POPUP_RENDER_ACK_TIMEOUT_MS)
+}
+
+function activateTitleMenuItem(entry: TitleMenuPopupEntry, id: string): void {
+  if (entry.kind === 'file') {
+    if (id === 'new-window') openChooserHostWindow()
+    else if (id === 'launcher-settings') setActivePanel(entry.parentEntryId, 'launcher-settings')
+  } else {
+    if (id === 'install-settings') setActivePanel(entry.parentEntryId, 'install-settings')
+    else if (id === 'directories') setActivePanel(entry.parentEntryId, 'directories')
+    else if (id === 'check-for-updates') {
+      void updater.runCheck('title-bar-check').catch(() => {
+        // runCheck already broadcasts an `update-error` for any failure;
+        // the catch is just to mark the floating Promise rejection as
+        // handled so it doesn't surface as an unhandledRejection.
+      })
+    }
+  }
+  // Item click — popup still has focus, so push it back to the parent.
+  hideTitleMenuPopup(entry, { releaseFocusToParent: true })
+}
+
+ipcMain.on('comfy-titlemenu:ready', (event) => {
+  const entry = titleMenuPopupsByWebContents.get(event.sender.id)
+  if (!entry) return
+  entry.rendererReady = true
+  if (entry.pendingConfig && !entry.popup.webContents.isDestroyed()) {
+    entry.popup.webContents.send('comfy-titlemenu:set-config', entry.pendingConfig)
+    entry.pendingConfig = null
+  }
+})
+
+// Renderer signals that it has applied the latest config and the new
+// DOM has painted. Flip opacity to 1 and focus — the user only ever
+// sees the popup once it's showing the right content.
+ipcMain.on('comfy-titlemenu:rendered', (event) => {
+  const entry = titleMenuPopupsByWebContents.get(event.sender.id)
+  if (!entry) return
+  if (entry.pendingShowTimer === null) return
+  showTitleMenuPopupNow(entry)
+})
+
+ipcMain.on('comfy-titlemenu:item-activated', (event, payload: { id?: unknown }) => {
+  const entry = titleMenuPopupsByWebContents.get(event.sender.id)
+  if (!entry) return
+  const id = payload?.id
+  if (typeof id !== 'string') return
+  activateTitleMenuItem(entry, id)
+})
+
+ipcMain.on('comfy-titlemenu:close', (event) => {
+  const entry = titleMenuPopupsByWebContents.get(event.sender.id)
+  if (!entry) return
+  // Escape key — popup still has focus, so push it back to the parent.
+  hideTitleMenuPopup(entry, { releaseFocusToParent: true })
+})
+
+/**
+ * Title-bar dropdown popups (Phase 3 title bar v2 → §14 popup rewrite).
+ *
+ * The title bar lives in its own WebContentsView with `height: TITLEBAR_HEIGHT`,
+ * so HTML popups rendered inside it would be clipped by the view's bounds.
+ * Instead of the previous native `Menu.popup()` we open a child BrowserWindow
+ * (see `openTitleMenuPopup` above) that floats above all views with no
+ * clipping or z-order issues.
+ *
+ * The renderer sends the button's bottom-left corner in title-bar-local
+ * pixels; the title bar view sits at window y=0, so those coordinates
+ * translate directly to window content coordinates.
+ */
+ipcMain.on(
+  'comfy-window:open-title-menu',
+  (event, payload: { menu?: 'file' | 'install'; anchor?: { x?: number; y?: number } }) => {
+    const found = findEntryByTitleBarSender(event.sender)
+    if (!found) return
+    const { id: windowKey, entry } = found
+    if (entry.window.isDestroyed()) return
+    const menuKind = payload?.menu
+    if (menuKind !== 'file' && menuKind !== 'install') return
+    // Install menu is install-scoped — refuse for install-less host windows.
+    if (menuKind === 'install' && entry.installationId === null) return
+
+    const x = Math.max(0, Math.round(payload?.anchor?.x ?? 0))
+    const y = Math.max(0, Math.round(payload?.anchor?.y ?? TITLEBAR_HEIGHT))
+
+    openTitleMenuPopup({
+      parent: entry.window,
+      parentEntryId: windowKey,
+      kind: menuKind,
+      items: buildTitleMenuItems(menuKind, entry),
+      anchor: { x, y },
+      theme: entry.lastTheme,
+      titleBarSender: entry.titleBarView.webContents,
+    })
+  },
+)
 
 ipcMain.handle('focus-comfy-window', (_event, installationId: string) => {
   const entry = comfyWindows.get(installationId)
@@ -1554,19 +2222,44 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
     registerDownloadIpc()
     registerAssetDownloadIpc()
     cleanupTempDownloads()
-    ipc.register({ onLaunch, onStop, onComfyExited, onComfyRestarted, onModelFolderRelaunch, onLocaleChanged: updateTrayMenu })
+    ipc.register({
+      onLaunch,
+      onStop,
+      onComfyExited,
+      onComfyRestarted,
+      onModelFolderRelaunch,
+      onLocaleChanged: updateTrayMenu,
+      // Repaint install-less host windows whenever the launcher theme
+      // flips. Install-backed windows are driven by ComfyUI's in-page
+      // theme observer (see `applyComfyTheme` in openComfyWindow), so
+      // they don't need this hook.
+      onThemeChanged: applyChooserHostThemeToAll,
+    })
     updater.register()
-    // Tray was previously bound to the launcher window's ready-to-show
-    // event. With the launcher window retired (Phase 3), the tray is
-    // an app-wide construct and is created up-front so it's available
-    // regardless of which host window happens to be open.
-    createTray()
+    // Tray / docking is disabled while the unified-window flow is being
+    // rebuilt — closing the last window quits the app instead of
+    // collapsing it into a hidden background process. The `onAppClose`
+    // setting (settings.ts), the settings-UI field
+    // (registerSettingsHandlers.ts), the `createTray()` startup call,
+    // and the tray-aware `window-all-closed` gating will all come back
+    // when the docked-app flow is reinstated. Until then, see git
+    // history for the previous tray construction code.
     // Phase 3 — the install-less chooser host is the primary surface;
     // the launcher window is retired. createMainWindow() is no longer
     // called here. Each install gets its own ComfyUI window via
     // openComfyWindow() when launched, and the chooser host is the
     // entry-point for picking / creating installs.
     openOrFocusChooserHostWindow()
+
+    // Single subscription rebroadcasts every install-list mutation
+    // (add/remove/update/markLaunched/reorder/...) to all renderers as
+    // `installations-changed`, so the renderer-side installation store
+    // can refetch without every IPC handler having to remember to call
+    // _broadcastToRenderer itself. Lives at app level (not per-window)
+    // so it survives chooser-host / comfy-window churn.
+    installationEvents.on('changed', () => {
+      _broadcastToRenderer('installations-changed', {})
+    })
   })
 
   app.on('activate', () => {
@@ -1599,7 +2292,15 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
   })
 
   app.on('window-all-closed', () => {
-    if (!tray && !ipc.hasRunningSessions()) {
+    // With docking disabled (tray creation is currently a no-op), the
+    // app should quit when the last window closes. The
+    // `hasRunningSessions()` guard remains so an in-flight install /
+    // running ComfyUI session keeps the process alive even if every
+    // visible window happens to be closed momentarily — but in practice
+    // closing a comfy window also stops its session, so this is mostly
+    // a safety net. When docking comes back, restore the original
+    // `if (!tray && !ipc.hasRunningSessions())` gating.
+    if (!ipc.hasRunningSessions()) {
       app.quit()
     }
   })

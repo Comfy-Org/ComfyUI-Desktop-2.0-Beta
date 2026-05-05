@@ -1,12 +1,19 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { X } from 'lucide-vue-next'
 import SettingsSections from '../components/SettingsSections.vue'
 import { useModal } from '../composables/useModal'
 import type { SettingsSection, SettingsAction } from '../types/ipc'
 
 const { t } = useI18n()
 const modal = useModal()
+
+function handleClose(): void {
+  // Reset the host window's panel-history stack and return to the
+  // comfy/chooser root. Wired into main via the panel preload.
+  window.api.closeCurrentPanel()
+}
 
 function openUrl(url: string): void {
   window.api.openExternal(url)
@@ -54,6 +61,15 @@ defineExpose({ loadSettings })
       <div class="breadcrumb">
         <span class="breadcrumb-current">{{ $t('settings.title') }}</span>
       </div>
+      <button
+        type="button"
+        class="view-page-close"
+        :title="t('common.close')"
+        :aria-label="t('common.close')"
+        @click="handleClose"
+      >
+        <X :size="18" />
+      </button>
     </div>
     <div class="view-scroll">
       <SettingsSections

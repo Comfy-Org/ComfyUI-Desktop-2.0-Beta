@@ -673,6 +673,11 @@ export interface ElectronApi {
    *  host window after a successful pick → launch hand-off. Returns true
    *  if a window was found and closed. */
   closeHostWindow(): Promise<boolean>
+  /** Page X-close (Settings / Directories / Install Settings header).
+   *  Asks main to reset the panel-history stack and return the body to
+   *  the comfy/chooser root. Fire-and-forget; the panel will receive
+   *  the resulting `panel-switch` like any other navigation. */
+  closeCurrentPanel(): void
   /** Stamp the calling chooser host window's current bounds onto the
    *  install's saved-bounds slot (Phase 3 visual continuity). The chooser
    *  pick flow calls this BEFORE kicking off the launch so the new

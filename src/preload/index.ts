@@ -47,6 +47,8 @@ const api: ElectronApi = {
     ipcRenderer.invoke('close-comfy-window', installationId),
   closeHostWindow: () =>
     ipcRenderer.invoke('close-host-window'),
+  closeCurrentPanel: () =>
+    ipcRenderer.send('comfy-window:close-current-panel'),
   transferHostBoundsToInstall: (installationId) =>
     ipcRenderer.invoke('transfer-host-bounds-to-install', installationId),
   getRunningInstances: () => ipcRenderer.invoke('get-running-instances'),

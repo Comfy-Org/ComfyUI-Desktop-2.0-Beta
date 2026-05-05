@@ -471,14 +471,6 @@ onUnmounted(() => {
   padding: 0;
 }
 
-/* The tab-mode SettingsView renders a `.toolbar` breadcrumb ("Settings") at
- * the top to show "you are here" inside the launcher window. The panel's
- * title bar already labels the active panel ("Launcher Settings"), so the
- * breadcrumb is redundant — hide it inside the panel only. */
-.panel-content :deep(.view.active > .toolbar) {
-  display: none;
-}
-
 .panel-install-settings,
 .panel-comfy-lifecycle,
 .panel-flow {

@@ -11,6 +11,15 @@ export type ComfyPanelKey =
   | 'load-snapshot'
   | 'quick-install'
 
+/** Anchor coordinates for a native title-bar menu — title-bar-local
+ *  pixels (x = button left, y = button bottom). The titleBarView sits
+ *  at window y=0 so these coordinates double as window coordinates in
+ *  main. */
+export interface TitleMenuAnchor {
+  x: number
+  y: number
+}
+
 export interface ComfyTitleBarBridge {
   /** The installation this title bar belongs to. */
   getInstallationId(): string | null
@@ -26,14 +35,34 @@ export interface ComfyTitleBarBridge {
    *  Wired in for install-backed host windows; main is responsible for
    *  routing to the appropriate per-install update check. */
   checkForUpdates(): void
+  /** Pop the File menu as a native OS menu. Avoids HTML popups that
+   *  would be clipped by the title bar's WebContentsView bounds. */
+  openFileMenu(anchor: TitleMenuAnchor): void
+  /** Pop the Install caret menu as a native OS menu. No-op for
+   *  install-less host windows (main filters by sender's entry). */
+  openInstallMenu(anchor: TitleMenuAnchor): void
+  /** Browser-style Back arrow — step one entry backward in the host
+   *  window's panel-history stack. No-op when at the root. */
+  goBack(): void
+  /** Browser-style Forward arrow — step one entry forward in history.
+   *  No-op when there's nothing to redo (i.e. user hasn't pressed Back). */
+  goForward(): void
   /** Subscribe to panel-active changes coming from main. */
   onPanelChanged(cb: (panel: ComfyPanelKey) => void): () => void
+  /** Subscribe to navigation-state changes (Back/Forward enabledness). */
+  onNavStateChanged(cb: (state: { canBack: boolean; canForward: boolean }) => void): () => void
   /** Subscribe to title text changes coming from main. */
   onTitleChanged(cb: (title: string) => void): () => void
   /** Subscribe to theme updates (background + symbol color). */
   onThemeChanged(cb: (theme: { bg: string; text: string }) => void): () => void
   /** Subscribe to macOS fullscreen state — drives traffic-light padding. */
   onFullscreenChanged(cb: (fullscreen: boolean) => void): () => void
+  /** Subscribe to native title-bar menu close events. Fires when the
+   *  popup created by `openFileMenu` / `openInstallMenu` closes, after
+   *  the user picks an item or dismisses by clicking outside. The
+   *  renderer uses this to suppress an immediate re-open if the same
+   *  click that dismissed the menu also re-targets the menu button. */
+  onMenuClosed(cb: (info: { menu: 'file' | 'install' }) => void): () => void
   /** Tell main this title bar is mounted; main responds with the initial state. */
   ready(): void
 }
@@ -68,12 +97,32 @@ const bridge: ComfyTitleBarBridge = {
   checkForUpdates: () => {
     ipcRenderer.send('comfy-window:check-for-updates')
   },
+  openFileMenu: (anchor) => {
+    ipcRenderer.send('comfy-window:open-title-menu', { menu: 'file', anchor })
+  },
+  openInstallMenu: (anchor) => {
+    ipcRenderer.send('comfy-window:open-title-menu', { menu: 'install', anchor })
+  },
+  goBack: () => {
+    ipcRenderer.send('comfy-window:go-back')
+  },
+  goForward: () => {
+    ipcRenderer.send('comfy-window:go-forward')
+  },
   onPanelChanged: (cb) => {
     const handler = (_event: IpcRendererEvent, panel: unknown): void => {
       if (typeof panel === 'string') cb(panel as ComfyPanelKey)
     }
     ipcRenderer.on('comfy-titlebar:panel-changed', handler)
     return () => ipcRenderer.removeListener('comfy-titlebar:panel-changed', handler)
+  },
+  onNavStateChanged: (cb) => {
+    const handler = (_event: IpcRendererEvent, data: unknown): void => {
+      const { canBack, canForward } = (data || {}) as { canBack?: unknown; canForward?: unknown }
+      cb({ canBack: !!canBack, canForward: !!canForward })
+    }
+    ipcRenderer.on('comfy-titlebar:nav-state-changed', handler)
+    return () => ipcRenderer.removeListener('comfy-titlebar:nav-state-changed', handler)
   },
   onTitleChanged: (cb) => {
     const handler = (_event: IpcRendererEvent, title: unknown): void => {
@@ -96,6 +145,14 @@ const bridge: ComfyTitleBarBridge = {
     }
     ipcRenderer.on('comfy-titlebar:fullscreen-changed', handler)
     return () => ipcRenderer.removeListener('comfy-titlebar:fullscreen-changed', handler)
+  },
+  onMenuClosed: (cb) => {
+    const handler = (_event: IpcRendererEvent, data: unknown): void => {
+      const { menu } = (data || {}) as { menu?: unknown }
+      if (menu === 'file' || menu === 'install') cb({ menu })
+    }
+    ipcRenderer.on('comfy-titlebar:menu-closed', handler)
+    return () => ipcRenderer.removeListener('comfy-titlebar:menu-closed', handler)
   },
   ready: () => {
     ipcRenderer.send('comfy-window:title-bar-ready')

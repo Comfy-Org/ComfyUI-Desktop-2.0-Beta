@@ -57,6 +57,7 @@
 
   "common": {
     "back": "返回",
+    "close": "关闭",
     "browse": "浏览…",
     "resetDefault": "重置",
     "cancel": "取消",
