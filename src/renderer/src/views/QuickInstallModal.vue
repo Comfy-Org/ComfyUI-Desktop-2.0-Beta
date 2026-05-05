@@ -9,6 +9,7 @@ import { stripVariantPrefix, sortedCardOptions } from '../lib/variants'
 import VariantCardGrid from '../components/VariantCardGrid.vue'
 import { trackGuardrailBlocked, createDiskSpaceChecker, showPathIssueAlerts, checkNvidiaDriverOrWarn, checkDiskSpaceOrWarn } from '../lib/installHelpers'
 import InstallNamePath from '../components/InstallNamePath.vue'
+import TakeoverHeader from '../components/TakeoverHeader.vue'
 
 const emit = defineEmits<{
   close: []
@@ -257,7 +258,10 @@ defineExpose({ open })
 <template>
   <div class="view-modal-content quick-install-modal">
       <div class="view-modal-header">
-        <div class="view-modal-title">{{ $t('quickInstall.title') }}</div>
+        <TakeoverHeader
+          :title="$t('quickInstall.grandTitle')"
+          :subtitle="$t('quickInstall.grandSubtitle')"
+        />
         <button class="view-modal-close" @click="emit('close')">✕</button>
       </div>
       <div class="view-modal-body">

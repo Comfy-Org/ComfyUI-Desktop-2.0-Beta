@@ -2112,7 +2112,7 @@ function buildTitleMenuItems(kind: 'file' | 'install', entry: ComfyWindowEntry):
       { id: 'close-all-windows', label: 'Close All Windows' },
       { kind: 'separator' },
       { id: 'directories', label: 'Directories', checked: entry.activePanel === 'directories' },
-      { id: 'launcher-settings', label: 'Desktop 2 Settings' },
+      { id: 'launcher-settings', label: 'App Settings' },
     )
     return items
   }

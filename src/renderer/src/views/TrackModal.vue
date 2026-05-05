@@ -2,6 +2,7 @@
 import { ref, computed, toRaw } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useModal } from '../composables/useModal'
+import TakeoverHeader from '../components/TakeoverHeader.vue'
 
 import type { ProbeResult } from '../types/ipc'
 import { emitTelemetryAction, toCountBucket } from '../lib/telemetry'
@@ -148,7 +149,7 @@ defineExpose({ open })
 <template>
   <div class="view-modal-content">
       <div class="view-modal-header">
-        <div class="view-modal-title">{{ $t('track.title') }}</div>
+        <TakeoverHeader :title="$t('track.grandTitle')" :subtitle="$t('track.grandSubtitle')" />
         <button class="view-modal-close" @click="emit('close')">✕</button>
       </div>
       <div class="view-modal-body">

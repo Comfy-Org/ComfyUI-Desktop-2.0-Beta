@@ -125,7 +125,7 @@ const isInert = ref(false)
  * install pill labels itself "Choose an install" (set by the initial
  * title push from main) and renders without a caret — there's no
  * install backing the window so the install-scoped menu has no items
- * to expose. The File menu (New Window, Desktop 2 Settings) is the
+ * to expose. The File menu (New Window, App Settings) is the
  * only menu in install-less mode.
  */
 const isInstallLess = ref((bridge?.getInstallationId() ?? '') === '')

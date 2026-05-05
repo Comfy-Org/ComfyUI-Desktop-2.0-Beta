@@ -174,13 +174,22 @@
 
   "quickInstall": {
     "title": "Install ComfyUI",
+    "grandTitle": "Quick Install",
+    "grandSubtitle": "Install the latest version of ComfyUI for your detected hardware.",
     "desc": "We'll install the latest version of ComfyUI. Please confirm your GPU type below.",
     "selectVariant": "Select your GPU",
     "confirmInstall": "Install ComfyUI"
   },
 
+  "loadSnapshot": {
+    "grandTitle": "Restore From Snapshot",
+    "grandSubtitle": "Load a saved snapshot file to recreate that installation here."
+  },
+
   "newInstall": {
     "title": "New Install",
+    "grandTitle": "New Install",
+    "grandSubtitle": "Set up a fresh ComfyUI installation. Pick a source, name it, and configure it.",
     "installMethod": "Install Method",
     "installLocation": "Install Location",
     "addInstallation": "Add Install",
@@ -246,6 +255,8 @@
 
   "track": {
     "title": "Track Existing Install",
+    "grandTitle": "Track Existing Install",
+    "grandSubtitle": "Add an existing local ComfyUI checkout to Desktop without reinstalling it.",
     "installDir": "Install Directory",
     "selectDir": "Select a directory…",
     "detectedType": "Detected Type",
@@ -361,6 +372,8 @@
 
   "firstUse": {
     "title": "Welcome to ComfyUI Desktop",
+    "grandTitle": "Welcome to ComfyUI Desktop",
+    "grandSubtitle": "A quick first-run setup so you're ready to launch ComfyUI.",
     "consentLead": "Before you get started, please review the terms of use and choose whether to share anonymous usage telemetry.",
     "tosBody": "By clicking Accept, you agree to the ComfyUI Desktop Terms of Use and Privacy Policy. You can change your telemetry preference at any time from App Settings.",
     "telemetryHint": "Telemetry helps us improve the launcher. We never collect workflow contents, prompts, generated media, or personal information.",

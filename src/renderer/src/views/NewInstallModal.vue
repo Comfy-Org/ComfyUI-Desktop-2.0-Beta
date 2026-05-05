@@ -9,6 +9,7 @@ import VariantCardGrid from '../components/VariantCardGrid.vue'
 import { emitTelemetryAction, toVariantBucket } from '../lib/telemetry'
 import { trackGuardrailBlocked, createDiskSpaceChecker, showPathIssueAlerts, checkNvidiaDriverOrWarn, checkDiskSpaceOrWarn } from '../lib/installHelpers'
 import InstallNamePath from '../components/InstallNamePath.vue'
+import TakeoverHeader from '../components/TakeoverHeader.vue'
 
 const emit = defineEmits<{
   close: []
@@ -518,11 +519,19 @@ defineExpose({ open })
 <template>
   <div class="view-modal-content">
       <div class="view-modal-header">
-        <div class="view-modal-title">{{ stepTitle }}</div>
+        <TakeoverHeader
+          :title="$t('newInstall.grandTitle')"
+          :subtitle="$t('newInstall.grandSubtitle')"
+        />
         <button class="view-modal-close" @click="emit('close')">✕</button>
       </div>
       <div class="view-modal-body">
         <div class="view-scroll">
+          <!-- Phase 3 §19 — per-step heading reads as a sub-section
+               below the persistent grand title. The step number gives
+               the user "where am I in the wizard" context without
+               having to rebuild the same affordance for each modal. -->
+          <h2 class="new-install-step-title">{{ stepTitle }}</h2>
           <!-- Step 1: Source Selection -->
           <div v-if="currentStep === 1" class="wizard-step">
             <div v-if="sourcesLoading || initializing" class="wizard-loading with-spinner">
@@ -770,3 +779,18 @@ defineExpose({ open })
       </div>
   </div>
 </template>
+
+<style scoped>
+/* Phase 3 §19 — per-step sub-section heading sitting under the
+   persistent grand title in the takeover header. Spacing tuned so it
+   reads as a section break inside the wizard body, not a duplicate
+   page heading. */
+.new-install-step-title {
+  margin: 0 0 16px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+</style>

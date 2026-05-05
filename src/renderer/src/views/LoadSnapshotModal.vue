@@ -8,6 +8,7 @@ import { getVariantGpuLabel, sortedCardOptions, findBestVariant } from '../lib/v
 import VariantCardGrid from '../components/VariantCardGrid.vue'
 import { emitTelemetryAction, toVariantBucket } from '../lib/telemetry'
 import SnapshotFilePreviewContent from '../components/SnapshotFilePreviewContent.vue'
+import TakeoverHeader from '../components/TakeoverHeader.vue'
 
 const emit = defineEmits<{
   close: []
@@ -256,7 +257,10 @@ defineExpose({ open })
     @drop="!preview && handleDrop($event)"
   >
       <div class="view-modal-header">
-        <div class="view-modal-title">{{ $t('list.loadSnapshot') }}</div>
+        <TakeoverHeader
+          :title="$t('loadSnapshot.grandTitle')"
+          :subtitle="$t('loadSnapshot.grandSubtitle')"
+        />
         <button class="view-modal-close" @click="emit('close')">✕</button>
       </div>
       <div class="view-modal-body">

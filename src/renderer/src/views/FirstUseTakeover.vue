@@ -37,6 +37,7 @@
  * are reset.
  */
 import { ref, computed, onMounted } from 'vue'
+import TakeoverHeader from '../components/TakeoverHeader.vue'
 
 type Step = 'consent' | 'mirrors' | 'pick'
 
@@ -113,7 +114,10 @@ defineExpose({ open })
 <template>
   <div class="view-modal-content first-use-takeover">
     <div class="view-modal-header">
-      <div class="view-modal-title">{{ $t('firstUse.title') }}</div>
+      <TakeoverHeader
+        :title="$t('firstUse.grandTitle')"
+        :subtitle="$t('firstUse.grandSubtitle')"
+      />
       <button class="view-modal-close" @click="emit('close')">✕</button>
     </div>
     <div class="view-modal-body">
