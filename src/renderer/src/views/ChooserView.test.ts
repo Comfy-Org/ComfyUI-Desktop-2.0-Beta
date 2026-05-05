@@ -151,20 +151,40 @@ describe('ChooserView', () => {
     expect(installTiles[2]!.text()).toContain('Never')
   })
 
-  it('emits pick with the installation when an install tile is clicked', async () => {
-    // Single click on the tile body is the open fast-path — the
-    // user's primary "I want to use this install" gesture. The
-    // per-tile action menu lives behind the kebab (⋮) icon in the
-    // top-right and is asserted separately.
+  it('emits pick when an install tile is double-clicked', async () => {
+    // Double-click on the tile body launches via pickInstall — the
+    // convenience gesture for "open this install". A single-click
+    // opens the Manage modal instead (the implicit
+    // single-click-to-launch was confusing — see the explicit Play
+    // button below). The per-tile action menu lives behind the
+    // kebab (⋮) icon in the top-right and is asserted separately.
     installMockApi([
-      makeInstall({ id: 'a', name: 'Alpha' }),
+      makeInstall({ id: 'a', name: 'Alpha', status: 'installed' }),
     ])
     const wrapper = mountChooser()
     await flushPromises()
     const tiles = wrapper.findAll('.chooser-tile')
     const alphaTile = tiles.find((t) => t.text().includes('Alpha'))
     expect(alphaTile).toBeTruthy()
-    await alphaTile!.trigger('click')
+    await alphaTile!.trigger('dblclick')
+    const events = wrapper.emitted('pick')
+    expect(events).toBeDefined()
+    expect((events![0]![0] as Installation).id).toBe('a')
+  })
+
+  it('emits pick when the Play button on an install tile is clicked', async () => {
+    // The explicit Play CTA in the bottom-right of each tile
+    // launches via pickInstall — the primary, discoverable launch
+    // gesture (the implicit single-click-to-launch was retired in
+    // favour of single-click-opens-Manage).
+    installMockApi([
+      makeInstall({ id: 'a', name: 'Alpha', status: 'installed' }),
+    ])
+    const wrapper = mountChooser()
+    await flushPromises()
+    const playBtn = wrapper.find('.chooser-tile-cta-play')
+    expect(playBtn.exists()).toBe(true)
+    await playBtn.trigger('click')
     const events = wrapper.emitted('pick')
     expect(events).toBeDefined()
     expect((events![0]![0] as Installation).id).toBe('a')
@@ -172,10 +192,8 @@ describe('ChooserView', () => {
 
   it('does not emit pick when the kebab button is clicked — only the menu opens', async () => {
     // The kebab (⋮) action menu sits in the top-right of every
-    // install tile. Its click handler stop-propagates so the
-    // tile-level open fast-path does NOT fire. Asserting the
-    // contract guards against the popover-on-card-click regression
-    // that the prior approach to §8 introduced.
+    // install tile. Its click handler stop-propagates so neither
+    // the tile-level Manage open nor the launch fast-path fires.
     installMockApi([
       makeInstall({ id: 'a', name: 'Alpha' }),
     ])
