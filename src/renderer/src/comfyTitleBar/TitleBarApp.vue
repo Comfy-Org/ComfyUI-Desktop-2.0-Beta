@@ -222,12 +222,13 @@ function anchorBelow(el: HTMLElement | null | undefined): MenuAnchor {
 }
 
 function handleFileMenu(): void {
-  // Tier 3 takeover holds the title bar inert — the file menu can't
-  // open while a takeover is mounted (the takeover's own surface is
-  // the only thing the user should be interacting with). The button
-  // is also `:disabled` in inert mode, so this guard is belt-and-
-  // braces against keyboard activation.
-  if (isInert.value) return
+  // The Tier 3 inert flag intentionally does NOT disable the file /
+  // waffle menu — the user must always be able to escape a takeover
+  // via "Return to Dashboard" / "Close Window" / "Close All Windows"
+  // / open a fresh chooser via "New Window". Without this hatch the
+  // menu would be a dead button while a takeover is mounted (and the
+  // user has no other reachable nav surface, since the install pill
+  // and back/forward arrows DO stay disabled per `isInert`).
   // Suppress click-to-toggle-close: if the file menu just closed, this
   // click is the same one that dismissed it (OS dismissed first, then
   // event propagates to the button). Don't reopen.
@@ -368,6 +369,11 @@ onUnmounted(() => {
          vertically read as redundant. The hamburger reads as a
          host-app-level menu and stays out of ComfyUI's namespace. -->
     <div class="title-left">
+      <!-- File / waffle menu button is exempt from the `isInert` disable
+           gate so the user can always reach Return-to-Dashboard /
+           Close-Window from inside a Tier 3 takeover. The install pill,
+           back/forward arrows, and update pills remain disabled — only
+           the menu stays live. -->
       <button
         ref="fileBtn"
         type="button"
@@ -375,7 +381,6 @@ onUnmounted(() => {
         aria-haspopup="menu"
         title="Menu"
         aria-label="Menu"
-        :disabled="isInert"
         @click="handleFileMenu"
       >
         <MenuIcon :size="18" />

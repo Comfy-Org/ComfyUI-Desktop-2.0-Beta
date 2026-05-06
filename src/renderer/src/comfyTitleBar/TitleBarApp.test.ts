@@ -332,11 +332,18 @@ describe('TitleBarApp', () => {
     wrapper.unmount()
   })
 
-  it('disables file menu, install pill and back/forward when onInertChanged fires true', async () => {
+  it('disables install pill and back/forward when onInertChanged fires true, but leaves the file menu live', async () => {
     // Phase 3 §17 — Tier 3 takeover broadcasts an inert flag through
     // main → title bar so the user can't dismiss the takeover by
     // hitting the title-bar controls. Window controls (× / □) sit
     // outside this view and stay live regardless.
+    //
+    // Track C bug fix — the file/waffle menu is intentionally NOT
+    // gated by `isInert`. The user must always retain a reachable
+    // escape hatch from inside a takeover (Return to Dashboard /
+    // Close Window / New Window), so the menu stays both `:enabled`
+    // and click-active even when every other title-bar control is
+    // inert.
     const { default: TitleBarApp } = await import('./TitleBarApp.vue')
     const wrapper = mount(TitleBarApp, { attachTo: document.body })
     await flushPromises()
@@ -356,17 +363,20 @@ describe('TitleBarApp', () => {
     bridgeState.inertChangedCallbacks.forEach((cb) => cb(true))
     await flushPromises()
     expect(wrapper.find('header').classes()).toContain('is-inert')
-    expect((fileBtn.element as HTMLButtonElement).disabled).toBe(true)
+    // File menu stays live so the user can navigate out of the
+    // takeover via the menu items.
+    expect((fileBtn.element as HTMLButtonElement).disabled).toBe(false)
     expect((pill.element as HTMLButtonElement).disabled).toBe(true)
     expect((navButtons[0]!.element as HTMLButtonElement).disabled).toBe(true)
     expect((navButtons[1]!.element as HTMLButtonElement).disabled).toBe(true)
 
-    // Clicks must NOT reach the bridge while inert.
+    // File menu click reaches the bridge even while inert; pill and
+    // nav clicks stay no-ops.
     await fileBtn.trigger('click')
     await pill.trigger('click')
     await navButtons[0]!.trigger('click')
     await navButtons[1]!.trigger('click')
-    expect(bridgeState.fileMenuAnchors.length).toBe(0)
+    expect(bridgeState.fileMenuAnchors.length).toBe(1)
     expect(bridgeState.installMenuAnchors.length).toBe(0)
     expect(bridgeState.goBackCalls).toBe(0)
     expect(bridgeState.goForwardCalls).toBe(0)
