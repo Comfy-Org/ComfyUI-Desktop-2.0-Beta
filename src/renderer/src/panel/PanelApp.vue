@@ -230,8 +230,18 @@ async function handleShowProgress(opts: ShowProgressOpts): Promise<void> {
   // re-opens an in-progress modal) leave it untouched.
   if (chainingFirstUseToNewInstall.value && pendingFirstUseAutoLaunchId.value === null) {
     pendingFirstUseAutoLaunchId.value = opts.installationId
+    // First-use chain has just kicked off the long-running install op.
+    // Flip the persisted gate now so the takeover doesn't re-run on
+    // the next launch — we used to defer this to NewInstallModal's
+    // close emit, but the overlay handoff no longer goes through close.
+    void launcherPrefs.markFirstUseCompleted()
   }
   const isRunning = sessionStore.isRunning(opts.installationId)
+  // Keep the opaque takeover chrome alive when first-use is chaining
+  // into the install + auto-launch sequence. Without this the swap
+  // from the new-install Tier 3 takeover to a Tier 2 progress overlay
+  // exposes the dashboard underneath, breaking the bootstrap UX.
+  const useTakeover = isRunning || chainingFirstUseToNewInstall.value
   // Modal-unification (Track M-6) — wire `onCancel` so a window-close
   // consult that the user confirms (or any other slot-clearing
   // transition that fires the cancel-prompt) actually cancels the
@@ -243,7 +253,7 @@ async function handleShowProgress(opts: ShowProgressOpts): Promise<void> {
     progressStore.cancelOperation(opts.installationId)
   }
   const ok = await openOverlay(
-    isRunning
+    useTakeover
       ? {
           kind: 'takeover',
           component: 'update',
@@ -429,7 +439,15 @@ async function completeFirstUseAndDismiss(): Promise<void> {
  *  hijack their existing local install. */
 async function handleFirstUseComplete(): Promise<void> {
   chainingFirstUseToNewInstall.value = false
-  await completeFirstUseAndDismiss()
+  // Mark completion but DON'T dismiss the takeover yet — dismissing
+  // first would expose the dashboard underneath while the launch
+  // action races to mount its own progress overlay. Cloud's launch
+  // action has `showProgress: true`, so the launch goes through
+  // `handleShowProgress` → `openOverlay({ kind: 'takeover',
+  // component: 'update' })` which silently swaps the first-use
+  // takeover for the connect-progress takeover (Tier 3 → Tier 3).
+  await launcherPrefs.markFirstUseCompleted()
+  window.api.setFirstUseMode('none')
   // Find the auto-seeded Cloud install. The store may not be hydrated
   // yet on first-launch, so we fall back to a fresh fetch via main.
   let cloud = installationStore.installations.find((i) => i.sourceCategory === 'cloud') ?? null
@@ -440,8 +458,18 @@ async function handleFirstUseComplete(): Promise<void> {
     } catch {}
   }
   if (cloud) {
-    void launchInstallationAfterFirstUse(cloud)
+    // If the cloud install has no resolvable launch action (defensive
+    // fallback — production cloud sources always provide one), dismiss
+    // the takeover so the user lands on the chooser body underneath.
+    // The successful happy path leaves the takeover up; the launch
+    // action's `showProgress: true` swaps it for a connect-progress
+    // takeover via `handleShowProgress` (Tier 3 → Tier 3 silent).
+    await performChooserLaunch(cloud, () => { dismissTakeoverDirect() })
+    return
   }
+  // No cloud install to launch into — fall back to dismissing the
+  // takeover so the user lands on the chooser body underneath.
+  dismissTakeoverDirect()
 }
 
 /** First-use takeover Local-branch pick — chain into the new-install
@@ -517,13 +545,18 @@ async function handleNewInstallTakeoverClose(): Promise<void> {
     // watcher uses it together with `pendingFirstUseAutoLaunchId` to
     // decide whether to fire. The watcher clears both after launch.
   }
-  // Note: this close path always swaps OUT of a `'new-install'` Tier 3
-  // takeover, never directly out of `'first-use'` — the chain replaced
-  // the FirstUseTakeover overlay before mount. So there's no first-use
-  // mode to clear here; FirstUseTakeover.vue's onUnmounted handler
-  // already pushed `'none'` when it was swapped out at chain-local
-  // time.
-  dismissTakeoverDirect()
+  // Only dismiss when the new-install takeover is still in the slot.
+  // The happy-path install handoff in NewInstallModal swaps the
+  // overlay to a progress takeover via @show-progress without first
+  // emitting `close`, but `@navigate-list` still routes here for the
+  // skipInstall branch — and dismissing then would clear an unrelated
+  // overlay if anything else has claimed the slot in between.
+  if (
+    currentOverlay.value?.kind === 'takeover'
+    && currentOverlay.value.component === 'new-install'
+  ) {
+    dismissTakeoverDirect()
+  }
 }
 
 /** Shared launch path for chooser-tile clicks AND the first-use
@@ -984,6 +1017,7 @@ onUnmounted(() => {
       <NewInstallModal
         v-else-if="currentOverlay.component === 'new-install'"
         ref="newInstallRef"
+        :hide-back-to-dashboard="chainingFirstUseToNewInstall"
         @close="handleNewInstallTakeoverClose"
         @navigate-list="handleNewInstallTakeoverClose"
         @show-progress="handleShowProgress"

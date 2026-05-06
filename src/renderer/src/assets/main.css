@@ -560,6 +560,20 @@ input[type="checkbox"]:checked::after { transform: translateX(16px); }
 .view-modal-title:hover .edit-name-hint { opacity: 0.6; }
 .view-modal-title:focus .edit-name-hint { opacity: 0; }
 .view-modal-header-actions { display: flex; gap: 8px; flex-shrink: 0; }
+/* Stack the optional back chevron above the grand title in Tier 3
+   takeover modals (NewInstall / Track / LoadSnapshot / QuickInstall).
+   Without the wrapper the back button sits in the same row as the
+   title and shoves it right because both are flex children of
+   .view-modal-header. */
+.takeover-stacked-header {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.takeover-stacked-header > .takeover-header { width: 100%; }
 .view-modal-close {
   background: none; border: none; font-size: 18px;
   color: var(--text-muted); cursor: pointer;

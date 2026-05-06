@@ -253,14 +253,16 @@ defineExpose({ open })
 <template>
   <ModalShell binding @close="emit('close')">
       <template #header>
-        <TakeoverBack
-          :label="$t('common.backToDashboard')"
-          @back="emit('close')"
-        />
-        <TakeoverHeader
-          :title="$t('loadSnapshot.grandTitle')"
-          :subtitle="$t('loadSnapshot.grandSubtitle')"
-        />
+        <div class="takeover-stacked-header">
+          <TakeoverBack
+            :label="$t('common.backToDashboard')"
+            @back="emit('close')"
+          />
+          <TakeoverHeader
+            :title="$t('loadSnapshot.grandTitle')"
+            :subtitle="$t('loadSnapshot.grandSubtitle')"
+          />
+        </div>
       </template>
       <div
         ref="contentRef"
