@@ -33,11 +33,11 @@
     "nsisInclude": "./scripts/installer.nsh"
   },
   "mac": {
-    "icon": "./assets/Comfy_Logo_x512.png",
+    "icon": "./assets/Comfy_Logo_x1024.png",
     "category": "public.app-category.graphics-design"
   },
   "linux": {
-    "icon": "./assets/Comfy_Logo_x256.png",
+    "icon": "./assets/Comfy_Logo_x512.png",
     "category": "AudioVideo;Graphics;3DGraphics;"
   },
   "platformOverrides": {

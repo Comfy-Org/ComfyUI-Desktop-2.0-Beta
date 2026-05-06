@@ -94,8 +94,9 @@ todesktop.init({ autoUpdater: false })
 
 const APP_ICON = path.join(__dirname, '..', '..', 'assets', 'Comfy_Logo_x256.png')
 // TRAY_ICON has been removed alongside createTray() while docking-to-tray
-// is disabled — see whenReady()'s comment about restoring docking. The
-// 32px logo asset is still available under assets/ if it's reintroduced.
+// is disabled — see whenReady()'s comment about restoring docking. When
+// reintroduced, use assets/Comfy_Logo_x64.png so Electron can downsample
+// crisply on HiDPI trays.
 const APP_VERSION = getAppVersion()
 
 interface WindowBounds {
