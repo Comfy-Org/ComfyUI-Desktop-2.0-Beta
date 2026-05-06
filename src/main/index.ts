@@ -2080,9 +2080,34 @@ function _detachInstallImpl(entry: ComfyWindowEntry): void {
     _notifyTitleBarNavState(entry)
   }
 
+  // Step 7 — TEAR DOWN the install-backed panel renderer and rebuild
+  // it as a chooser-mounted one. Pre-fix `ensurePanelView('chooser')`
+  // was a no-op when a panelView already existed, so a host detached
+  // from install Y kept its install-backed PanelApp instance alive
+  // (with installationId=Y baked into the URL params, an active
+  // overlay slot left over from the takeover the user was in, an
+  // activePanel of 'launcher-settings' or 'install-settings', etc.).
+  // After flipping the chrome to chooser mode the body still rendered
+  // the install-backed page underneath — and any open Tier 3 takeover
+  // (e.g. update-while-running) stayed mounted with no path for the
+  // user to dismiss it because the surrounding panel context wasn't
+  // chooser-aware. Destroying + re-creating the panelView gives us a
+  // fresh PanelApp mounted with installationId='' which renders the
+  // chooser body unconditionally.
+  if (entry.panelView) {
+    const oldPanel = entry.panelView
+    entry.panelView = null
+    if (!oldPanel.webContents.isDestroyed()) {
+      _unregisterExtraBroadcastTarget(oldPanel.webContents)
+      oldPanel.webContents.close()
+    }
+    if (!entry.window.isDestroyed()) {
+      try { entry.window.contentView.removeChildView(oldPanel) } catch {}
+    }
+  }
   ensurePanelView(entry.windowKey, entry, 'chooser')
 
-  // Step 7 — render the chooser body.
+  // Step 8 — render the chooser body.
   entry.layoutViews()
 }
 
