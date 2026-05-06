@@ -530,7 +530,7 @@ input[type="checkbox"]:checked::after { transform: translateX(16px); }
   background: var(--bg); border: 1px solid var(--border);
   border-radius: 12px;
   width: 100%; max-width: 900px;
-  height: 540px; max-height: calc(100vh - 60px - var(--titlebar-height));
+  height: calc(100vh - 60px - var(--titlebar-height));
   margin: 0 30px;
   display: flex; flex-direction: column; overflow: hidden;
 }
