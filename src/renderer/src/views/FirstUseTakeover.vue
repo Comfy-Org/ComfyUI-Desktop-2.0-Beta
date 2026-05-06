@@ -175,7 +175,7 @@ defineExpose({ open })
 </script>
 
 <template>
-  <div class="view-modal-content first-use-takeover">
+  <div class="view-modal-content view-modal-content--takeover first-use-takeover">
     <!-- Phase 3 §17 Step 4 / post-Phase-3 polish — first-use is a
          binding flow, so the takeover deliberately omits the ✕ close
          button that the other Tier 3 takeovers render. The user can
@@ -334,9 +334,14 @@ defineExpose({ open })
 </template>
 
 <style scoped>
+/* Modal-unification (Track M-2.1) — first-use is a binding
+ * takeover-modal, so its root opts into `view-modal-content--takeover`
+ * (1000px max-width, centred dialog) and the wrapper in PanelApp opts
+ * OUT of the full-window `:deep(.view-modal-content)` override via
+ * `is-binding-takeover-modal`. Sizing is now governed by the shared
+ * `.view-modal-content` chrome — this scoped block keeps only the flex
+ * layout that the body / header / footer rows depend on. */
 .first-use-takeover {
-  width: 100%;
-  height: 100%;
   display: flex;
   flex-direction: column;
 }

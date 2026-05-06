@@ -162,6 +162,28 @@ const launcherPrefs = useLauncherPrefs()
  */
 const { current: currentOverlay, tier, openOverlay, closeOverlay } = useOverlay()
 
+/**
+ * Modal-unification (Track M-2.1) — class list for the Tier 3 takeover
+ * slot's wrapper div. Binding takeover-modals (first-use, and later the
+ * install-flow modals migrated in M-3) opt into:
+ *   - `view-modal--opaque` so the backdrop reads as a fully-covering
+ *     surface rather than a translucent overlay.
+ *   - `is-binding-takeover-modal` so the legacy full-window
+ *     `:deep(.view-modal-content)` override (kept for the not-yet-migrated
+ *     flow modals) doesn't clobber the binding modal's
+ *     `view-modal-content--takeover` width / centred-dialog chrome.
+ * Non-binding takeovers keep the legacy class set unchanged so their
+ * appearance doesn't shift before they're individually migrated.
+ */
+const takeoverWrapperClasses = computed<Record<string, boolean>>(() => {
+  const overlay = currentOverlay.value
+  const isBinding = overlay?.kind === 'takeover' && overlay.component === 'first-use'
+  return {
+    'view-modal--opaque': isBinding,
+    'is-binding-takeover-modal': isBinding,
+  }
+})
+
 watch(tier, (newTier, oldTier) => {
   // Only signal main on transitions into/out of the takeover tier —
   // shifting between Tier 1 ↔ Tier 2 doesn't change the title-bar
@@ -873,6 +895,7 @@ onUnmounted(() => {
     <div
       v-else-if="currentOverlay?.kind === 'takeover'"
       class="view-modal active"
+      :class="takeoverWrapperClasses"
       data-overlay-key="takeover"
     >
       <ProgressModal
@@ -975,8 +998,15 @@ onUnmounted(() => {
  * pre-§17 `.panel-flow` :deep override that lived alongside the
  * panel-body branches. The `data-overlay-key` selector keeps this
  * scoped to the takeover slot only; the progress-overlay slot still
- * renders its ProgressModal as a centred dialog. */
-[data-overlay-key="takeover"] :deep(.view-modal-content) {
+ * renders its ProgressModal as a centred dialog.
+ *
+ * Modal-unification (Track M-2.1) — binding takeover-modals (first-use,
+ * and later the install-flow modals in M-3) opt OUT of the full-window
+ * override via `is-binding-takeover-modal` so they can render as
+ * centred dialogs constrained by `view-modal-content--takeover`
+ * (1000px max). Once every flow modal has migrated, this override
+ * (and the legacy class set on the wrapper) goes away in M-3/M-4. */
+[data-overlay-key="takeover"]:not(.is-binding-takeover-modal) :deep(.view-modal-content) {
   width: 100%;
   max-width: none;
   height: 100%;
