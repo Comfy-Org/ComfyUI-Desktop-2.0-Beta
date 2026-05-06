@@ -215,6 +215,25 @@ let tray: Tray | null = null
  * window's webContents (that is only used as a host for the views).
  */
 interface ComfyWindowEntry {
+  /**
+   * Window-mode unification (Stage W-1) — stable monotonic numeric
+   * identifier minted at construction. The PRIMARY key into the
+   * `comfyWindows` map; survives attach/detach (W-2/W-3) so a host
+   * window can flip between install-backed and chooser-host modes
+   * without re-keying.
+   *
+   * Pre-W-1 the map was string-keyed by either `installationId`
+   * (install-backed) or `chooser:N` (install-less). Both rotated
+   * with the install identity, which is why the swap-via-close
+   * `returnToDashboard` had to construct a brand-new window: the map
+   * key it lived under wasn't valid anymore. The numeric key
+   * uncouples "which window is this" from "what install backs it".
+   *
+   * Lookups by `installationId` route through
+   * `getEntryByInstallationId(id)` (a `Map<string, number>`
+   * secondary index) instead of `comfyWindows.get(id)`.
+   */
+  windowKey: number
   window: BrowserWindow
   comfyView: WebContentsView
   titleBarView: WebContentsView
@@ -287,15 +306,64 @@ interface ComfyWindowEntry {
   firstUseMode: 'none' | 'consent-lockdown' | 'post-consent'
 }
 /**
- * All host windows (install-backed and install-less). Install-backed
- * entries are keyed by their installationId; install-less entries are
- * keyed by a synthetic `chooser:<n>` string (see `openChooserHostWindow`).
- * Lookups by installationId still hit only install-backed entries.
+ * All host windows (install-backed and install-less). Window-mode
+ * unification (Stage W-1) — keyed by a stable monotonic numeric
+ * `windowKey` minted at construction. Pre-W-1 this was a `Map<string,
+ * ...>` keyed by either `installationId` (install-backed) or
+ * `chooser:<n>` (install-less); both varied with the install identity,
+ * which is what blocked in-place transform between modes.
+ *
+ * Install-id → window-key lookups go through
+ * `getEntryByInstallationId(id)` below (the `installationIdToWindowKey`
+ * secondary index). Direct `comfyWindows.get(installationId)` calls
+ * are gone post-W-1.
  */
-const comfyWindows = new Map<string, ComfyWindowEntry>()
-let _chooserWindowCounter = 0
-function nextChooserKey(): string {
-  return `chooser:${++_chooserWindowCounter}`
+const comfyWindows = new Map<number, ComfyWindowEntry>()
+const installationIdToWindowKey = new Map<string, number>()
+let _nextWindowKeyValue = 0
+function nextWindowKey(): number {
+  return ++_nextWindowKeyValue
+}
+
+/**
+ * Window-mode unification (Stage W-1) — install-id → entry lookup,
+ * routed through the `installationIdToWindowKey` secondary index.
+ * Returns `undefined` if no install-backed entry currently carries
+ * the id (install-less host windows never enter the index, and a
+ * detached window — once W-3 lands — leaves the index too).
+ */
+function getEntryByInstallationId(installationId: string): ComfyWindowEntry | undefined {
+  const key = installationIdToWindowKey.get(installationId)
+  return key === undefined ? undefined : comfyWindows.get(key)
+}
+
+/**
+ * Window-mode unification (Stage W-1) — register an entry into the
+ * primary map AND (when install-backed) the secondary index. Use
+ * this from constructors and (W-3) `attachInstall` instead of
+ * touching `comfyWindows.set` directly.
+ */
+function registerHostEntry(entry: ComfyWindowEntry): void {
+  comfyWindows.set(entry.windowKey, entry)
+  if (entry.installationId !== null) {
+    installationIdToWindowKey.set(entry.installationId, entry.windowKey)
+  }
+}
+
+/**
+ * Window-mode unification (Stage W-1) — unregister an entry from
+ * BOTH the primary map AND the secondary index. Use this from the
+ * `'closed'` handler and (W-3) `detachInstall` instead of touching
+ * `comfyWindows.delete` directly.
+ */
+function unregisterHostEntry(entry: ComfyWindowEntry): void {
+  comfyWindows.delete(entry.windowKey)
+  if (entry.installationId !== null) {
+    const indexed = installationIdToWindowKey.get(entry.installationId)
+    if (indexed === entry.windowKey) {
+      installationIdToWindowKey.delete(entry.installationId)
+    }
+  }
 }
 
 /**
@@ -331,13 +399,13 @@ function computeBodyMode(entry: ComfyWindowEntry): BodyMode {
  * on `'comfy'` either way.
  */
 function refreshComfyTabBody(installationId: string): void {
-  const entry = comfyWindows.get(installationId)
+  const entry = getEntryByInstallationId(installationId)
   if (!entry || entry.window.isDestroyed()) return
   if (entry.activePanel !== 'comfy') return
 
   const mode = computeBodyMode(entry)
   if (mode === 'comfy-lifecycle') {
-    const panelView = ensurePanelView(installationId, entry, 'comfy-lifecycle')
+    const panelView = ensurePanelView(entry.windowKey, entry, 'comfy-lifecycle')
     if (!panelView.webContents.isDestroyed() && !panelView.webContents.isLoadingMainFrame()) {
       panelView.webContents.send('panel-switch', { panel: 'comfy-lifecycle', installationId })
     }
@@ -371,7 +439,7 @@ function refreshComfyTabBody(installationId: string): void {
  * tight when adding new title-bar IPCs: prefer this helper over open-coding
  * a sender match.
  */
-function findEntryByTitleBarSender(wc: Electron.WebContents): { id: string; entry: ComfyWindowEntry } | null {
+function findEntryByTitleBarSender(wc: Electron.WebContents): { id: number; entry: ComfyWindowEntry } | null {
   for (const [id, entry] of comfyWindows) {
     if (entry.titleBarView.webContents === wc) return { id, entry }
   }
@@ -646,7 +714,7 @@ function closeAllHostWindows(): void {
  * windows swap is the visible cost; the user-facing affordance is
  * indistinguishable from an in-place swap once the new window paints.
  */
-async function returnToDashboard(parentEntryId: string): Promise<void> {
+async function returnToDashboard(parentEntryId: number): Promise<void> {
   const entry = comfyWindows.get(parentEntryId)
   if (!entry || entry.installationId === null || entry.window.isDestroyed()) return
   // Step 5 §16 — consult the panel renderer up front so a Tier 2/3 op
@@ -758,7 +826,7 @@ const comfyFailRetryTimerCancels = new Map<string, () => void>()
 let relaunchTokenCounter = 0
 
 async function onModelFolderRelaunch({ installationId }: { installationId: string }): Promise<void> {
-  const entry = comfyWindows.get(installationId)
+  const entry = getEntryByInstallationId(installationId)
   if (!entry || entry.window.isDestroyed()) return
   const comfyContents = entry.comfyView.webContents
 
@@ -790,7 +858,7 @@ async function onModelFolderRelaunch({ installationId }: { installationId: strin
 
 function onComfyRestarted({ installationId, process: _proc }: { installationId?: string; process?: ChildProcess } = {}): void {
   if (!installationId) return
-  const entry = comfyWindows.get(installationId)
+  const entry = getEntryByInstallationId(installationId)
   if (!entry || entry.window.isDestroyed()) return
   const comfyContents = entry.comfyView.webContents
 
@@ -862,8 +930,14 @@ function onStop({ installationId }: { installationId?: string } = {}): void {
   if (installationId) {
     refreshComfyTabBody(installationId)
   } else {
-    for (const id of comfyWindows.keys()) {
-      refreshComfyTabBody(id)
+    // Window-mode unification (Stage W-1) — refresh every install-
+    // backed entry's comfy tab. Install-less host windows (entry.
+    // installationId === null) have no comfy lifecycle to refresh,
+    // so they're skipped naturally.
+    for (const entry of comfyWindows.values()) {
+      if (entry.installationId !== null) {
+        refreshComfyTabBody(entry.installationId)
+      }
     }
   }
 }
@@ -931,7 +1005,7 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
   // window alive (stop / crash leaves the window open with the lifecycle
   // body). Reuse the existing views; just point the comfyView at the new URL
   // and let `refreshComfyTabBody` swap the body back from lifecycle to comfy.
-  const existing = comfyWindows.get(installationId)
+  const existing = getEntryByInstallationId(installationId)
   if (existing && !existing.window.isDestroyed()) {
     existing.comfyUrl = comfyUrl
     if (!existing.comfyView.webContents.isDestroyed()) {
@@ -947,6 +1021,12 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
     return
   }
 
+  // Window-mode unification (Stage W-1) — mint the stable numeric
+  // windowKey up front so the close / closed handlers below can
+  // capture it in their closures and unregister via the entry's
+  // primary key (rather than `installationId`, which W-3 will detach
+  // at runtime).
+  const windowKey = nextWindowKey()
   const saved = getSavedBounds(installationId)
   const windowOptions = getWindowOptions(installationId)
   const comfyWindow = new BrowserWindow({
@@ -1053,7 +1133,7 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
   const titleBarTotal = TITLEBAR_HEIGHT + 1
   const layoutViews = (): void => {
     if (comfyWindow.isDestroyed()) return
-    const entry = comfyWindows.get(installationId)
+    const entry = getEntryByInstallationId(installationId)
     const [width, height] = comfyWindow.getContentSize() as [number, number]
     const bodyHeight = Math.max(0, height - titleBarTotal)
     const bodyRect = { x: 0, y: titleBarTotal, width, height: bodyHeight }
@@ -1126,7 +1206,7 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
     if (event.sender !== titleBarView.webContents) return
     notifyTitleBarTitle(titleBarText)
     notifyTitleBarSourceCategory(sourceCategory)
-    const entry = comfyWindows.get(installationId)
+    const entry = getEntryByInstallationId(installationId)
     notifyTitleBarPanel(entry?.activePanel ?? 'comfy')
     if (entry && !titleBarView.webContents.isDestroyed()) {
       titleBarView.webContents.send('comfy-titlebar:theme-changed', entry.lastTheme)
@@ -1237,7 +1317,7 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
   const applyComfyTheme = (bg: string, text: string): void => {
     if (comfyWindow.isDestroyed()) return
     const theme = { bg, text }
-    const entry = comfyWindows.get(installationId)
+    const entry = getEntryByInstallationId(installationId)
     if (entry) entry.lastTheme = theme
     if (!titleBarView.webContents.isDestroyed()) {
       titleBarView.webContents.send('comfy-titlebar:theme-changed', theme)
@@ -1286,7 +1366,7 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
 
   /** Read the current target URL from the entry; falls back to the launch
    *  URL during the brief window before the entry is registered. */
-  const currentComfyUrl = (): string => comfyWindows.get(installationId)?.comfyUrl ?? comfyUrl
+  const currentComfyUrl = (): string => getEntryByInstallationId(installationId)?.comfyUrl ?? comfyUrl
 
   const reloadComfy = (): void => {
     if (comfyWindow.isDestroyed()) return
@@ -1357,7 +1437,7 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
     closingInFlight = true
     void (async () => {
       try {
-        const entry = comfyWindows.get(installationId)
+        const entry = getEntryByInstallationId(installationId)
         const skipConsult = preClearedClose.has(comfyWindow)
         const cleared = skipConsult ? true : await consultPanelRendererClose(entry?.panelView)
         if (!cleared) return
@@ -1366,7 +1446,7 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
         detachWindowDownloads(comfyWindow)
         ipc.stopRunning(installationId)
         _unregisterExtraBroadcastTarget(titleBarView.webContents)
-        const liveEntry = comfyWindows.get(installationId)
+        const liveEntry = comfyWindows.get(windowKey)
         if (liveEntry?.panelView) {
           _unregisterExtraBroadcastTarget(liveEntry.panelView.webContents)
           liveEntry.panelView.webContents.close()
@@ -1381,12 +1461,18 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
   })
 
   comfyWindow.on('closed', () => {
-    comfyWindows.delete(installationId)
+    // Window-mode unification (Stage W-1) — unregister via the
+    // primary windowKey AND the secondary install-id index. The
+    // failure-retry / relaunch maps are still install-keyed (they're
+    // per-install state, not per-window state).
+    const closedEntry = comfyWindows.get(windowKey)
+    if (closedEntry) unregisterHostEntry(closedEntry)
     comfyFailRetryTimerCancels.delete(installationId)
     relaunchStates.delete(installationId)
   })
 
-  comfyWindows.set(installationId, {
+  registerHostEntry({
+    windowKey,
     window: comfyWindow,
     comfyView,
     titleBarView,
@@ -1502,12 +1588,25 @@ function applyChooserHostThemeToAll(): void {
   }
 }
 
+/**
+ * Window-mode unification (Stage W-1) — bounds-persistence key for
+ * install-less host windows. All chooser hosts share the same key so
+ * the JSON cache holds at most one chooser bounds entry (pre-W-1
+ * each chooser-host construction created a new `chooser:N` entry
+ * that was never read again — a slow leak). Bounds restore now
+ * works across sessions for chooser hosts as a side benefit.
+ */
+const CHOOSER_HOST_BOUNDS_KEY = 'chooser'
+
 function openChooserHostWindow(): BrowserWindow {
-  const windowKey = nextChooserKey()
+  // Window-mode unification (Stage W-1) — primary numeric key for
+  // the host entry. The bounds-persistence key is a separate concern
+  // (see CHOOSER_HOST_BOUNDS_KEY above).
+  const windowKey = nextWindowKey()
 
   const initialChooserTheme = getChooserHostTheme()
 
-  const windowOptions = getWindowOptions(windowKey)
+  const windowOptions = getWindowOptions(CHOOSER_HOST_BOUNDS_KEY)
   const comfyWindow = new BrowserWindow({
     ...windowOptions,
     minWidth: 800,
@@ -1677,11 +1776,15 @@ function openChooserHostWindow(): BrowserWindow {
 
   comfyWindow.on('closed', () => {
     ipcMain.off('comfy-window:title-bar-ready', onTitleBarReady)
-    comfyWindows.delete(windowKey)
+    // Window-mode unification (Stage W-1) — unregister via the
+    // entry helper so any future install-id index entry (W-3
+    // attach/detach) is cleared in lockstep with the primary map.
+    const closedEntry = comfyWindows.get(windowKey)
+    if (closedEntry) unregisterHostEntry(closedEntry)
   })
 
-  comfyWindow.on('resize', () => saveWindowBounds(windowKey, comfyWindow))
-  comfyWindow.on('move', () => saveWindowBounds(windowKey, comfyWindow))
+  comfyWindow.on('resize', () => saveWindowBounds(CHOOSER_HOST_BOUNDS_KEY, comfyWindow))
+  comfyWindow.on('move', () => saveWindowBounds(CHOOSER_HOST_BOUNDS_KEY, comfyWindow))
 
   // Phase 3 — install-less host windows have no ComfyUI frontend to
   // pull theme from, so the chooser's title bar / overlay colors are
@@ -1690,7 +1793,8 @@ function openChooserHostWindow(): BrowserWindow {
   // OS-level dark-mode preference flips). Both the Vue `<header>` and
   // the OS overlay paint `getChooserHostTheme().bg` (i.e. the launcher
   // renderer's `--surface`) so the seam between them stays invisible.
-  comfyWindows.set(windowKey, {
+  registerHostEntry({
+    windowKey,
     window: comfyWindow,
     comfyView,
     titleBarView,
@@ -1747,7 +1851,7 @@ ipcMain.handle('reset-zoom', () => {
  * Launcher Settings before the first load completes still ends up on the
  * latter. This guards against the mid-load race.
  */
-function ensurePanelView(installationId: string, entry: ComfyWindowEntry, initialPanel: BodyMode): WebContentsView {
+function ensurePanelView(windowKey: number, entry: ComfyWindowEntry, initialPanel: BodyMode): WebContentsView {
   if (entry.panelView) return entry.panelView
 
   const panelView = new WebContentsView({
@@ -1770,7 +1874,7 @@ function ensurePanelView(installationId: string, entry: ComfyWindowEntry, initia
   // clicked between buttons during the first load, or the running state
   // changed) and steal focus if the window is focused.
   panelView.webContents.once('did-finish-load', () => {
-    const latest = comfyWindows.get(installationId)
+    const latest = comfyWindows.get(windowKey)
     if (!latest || latest.window.isDestroyed() || panelView.webContents.isDestroyed()) return
     const mode = computeBodyMode(latest)
     if (mode !== 'comfy') {
@@ -1780,8 +1884,8 @@ function ensurePanelView(installationId: string, entry: ComfyWindowEntry, initia
   })
 
   // Pass the entry's installationId (which is the empty string for
-  // install-less host windows) to the panel renderer — the Map key may be
-  // a synthetic `chooser:<n>` string that PanelApp.vue must not see.
+  // install-less host windows) to the panel renderer — the Map key is a
+  // numeric windowKey (Stage W-1) that PanelApp.vue must not see.
   const panelInstallationId = entry.installationId ?? ''
   const isDev = !!process.env['ELECTRON_RENDERER_URL']
   const loadPromise = isDev
@@ -1851,7 +1955,7 @@ function _notifyTitleBarNavState(entry: ComfyWindowEntry): void {
 }
 
 function setActivePanel(
-  windowKey: string,
+  windowKey: number,
   panel: ComfyPanelKey,
   source: PanelNavSource = 'navigate',
 ): void {
@@ -2206,8 +2310,13 @@ interface TitleMenuPopupEntry {
    *  in the destroyed-window handlers. */
   popupWebContentsId: number
   parentWindowId: number
-  /** Updated on every open. */
-  parentEntryId: string
+  /**
+   *  Updated on every open. Window-mode unification (Stage W-1) — now
+   *  the numeric `windowKey` of the parent host entry. `0` is a
+   *  sentinel for "no popup has been opened yet" since `nextWindowKey`
+   *  always returns positive numbers.
+   */
+  parentEntryId: number
   /** Updated on every open. */
   kind: 'file' | 'install'
   /** Updated on every open. */
@@ -2385,7 +2494,7 @@ function ensureTitleMenuPopup(parent: BrowserWindow): TitleMenuPopupEntry {
     parentWindow: parent,
     popupWebContentsId: popup.webContents.id,
     parentWindowId: parent.id,
-    parentEntryId: '',
+    parentEntryId: 0,
     kind: 'file',
     titleBarSender: popup.webContents, // overwritten on first open
     rendererReady: false,
@@ -2487,7 +2596,7 @@ function showTitleMenuPopupNow(entry: TitleMenuPopupEntry): void {
 
 function openTitleMenuPopup(opts: {
   parent: BrowserWindow
-  parentEntryId: string
+  parentEntryId: number
   kind: 'file' | 'install'
   items: TitleMenuItem[]
   anchor: { x: number; y: number }
@@ -2686,7 +2795,7 @@ ipcMain.on(
 )
 
 ipcMain.handle('focus-comfy-window', (_event, installationId: string) => {
-  const entry = comfyWindows.get(installationId)
+  const entry = getEntryByInstallationId(installationId)
   if (entry && !entry.window.isDestroyed()) {
     entry.window.show()
     entry.window.focus()
@@ -2704,7 +2813,7 @@ ipcMain.handle('focus-comfy-window', (_event, installationId: string) => {
 })
 
 ipcMain.handle('close-comfy-window', (_event, installationId: string) => {
-  const entry = comfyWindows.get(installationId)
+  const entry = getEntryByInstallationId(installationId)
   if (!entry || entry.window.isDestroyed()) return false
   entry.window.close()
   return true
@@ -2773,8 +2882,14 @@ function resolveOutputDir(inst: InstallationRecord): string | null {
 }
 
 function findInstallationIdForWindow(win: BrowserWindow): string | undefined {
-  for (const [id, entry] of comfyWindows) {
-    if (entry.window === win) return id
+  for (const entry of comfyWindows.values()) {
+    if (entry.window !== win) continue
+    // Window-mode unification (Stage W-1) — install-less host
+    // windows (entry.installationId === null) have no install id to
+    // return; treating that case as `undefined` matches the pre-W-1
+    // semantics where chooser-host map keys (`chooser:N`) leaked
+    // through here as fake install ids that no caller could resolve.
+    return entry.installationId ?? undefined
   }
   return undefined
 }
