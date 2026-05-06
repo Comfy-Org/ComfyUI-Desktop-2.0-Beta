@@ -30,10 +30,15 @@ title bar, takeovers, and modals — that thread is captured in the
 > **Update — polish slice landed.** All non-gated items are done as of
 > the Track F commits (`1e4939a`, `784c2e8`). Items below are tagged
 > **`[DONE — <commit>]`** where shipped, **`[GATED]`** where waiting on
-> the Takeover ↔ Modal / Settings split / Running-install ownership
-> decisions, or **`[DEFERRED]`** for things split into their own
-> follow-up. See the Tracks A / B / C / D / E / F / G commits for
-> implementation detail.
+> the Settings split / Running-install ownership decisions, or
+> **`[DEFERRED]`** for things split into their own follow-up. See the
+> Tracks A / B / C / D / E / F / G commits for implementation detail.
+>
+> **Update — modal unification landed.** The Takeover ↔ Modal rethink
+> in the Cross-cutting section is RESOLVED end-to-end (Tracks M-1
+> through M-7, commits `4ac023d`..`d581c9f`). Items previously
+> tagged `[GATED — modal pattern]` are unblocked; most have shipped
+> as part of the unification — see the per-item updates below.
 
 ---
 
@@ -73,10 +78,17 @@ title bar, takeovers, and modals — that thread is captured in the
 - **Tile click for an already-running install closes the originating
   dashboard window and focuses the existing instance window.**
   **`[GATED — running-install ownership]`**
-- **All settings open as modals on the dashboard.** **`[GATED — modal pattern]`**
-- **Click-outside-modal dismisses the modal.** **`[GATED — modal pattern]`**
+- **All settings open as modals on the dashboard.** **`[DONE — b9b715f, 9f4f3ba, 1e76613]`**
+  Directories / App Settings / Install Settings now render through the
+  unified `Modal` primitive with `ModalShell` + steady viewport-filling
+  height.
+- **Click-outside-modal dismisses the modal.** **`[DONE — 0194d98]`**
+  Standard non-binding modal semantics on the unified primitive
+  (`binding: false` → backdrop-click closes; binding modals opt out).
 - **Tile click for an in-progress tile opens the in-progress modal.**
-  **`[GATED — modal pattern]`**
+  **`[DONE — 0c0b0c4 + modal-unification]`**
+  In-flight tile click routes via `triggerAction` → in-progress
+  modal (Tier 2) on the unified primitive.
 - **Visually deactivate actions blocked by a running operation.** **`[DONE — 0c0b0c4]`**
   Shared `isStoppedActionGated(inst)` predicate on `useInstallContextMenu`
   drives both kebab menu items and the visible Update/Migrate pills so
@@ -146,10 +158,14 @@ title bar, takeovers, and modals — that thread is captured in the
 - Same helper drives the dashboard tile AND the Comfy Instance title bar
   (textual `— Standalone` / `— Cloud` suffix replaced with the icon).
 
-### Takeover ↔ Modal rethink — **BIG DECISION**
+### Takeover ↔ Modal rethink — **RESOLVED (modal-unification track shipped)**
 
-This is the architectural decision that gates a lot of the per-category
-items. Several items above will need refinement once this is settled.
+Originally the architectural decision that gated a lot of the
+per-category items. Resolved end-to-end by Tracks M-1..M-7 (commits
+`4ac023d`..`d581c9f`): the two-primitive Takeover + Modal system
+collapsed into one `Modal` component with `binding` / `opacity` /
+`width` props. The bullets below describe the original problem
+statement; every one has shipped under the unification track.
 
 - **Takeovers need a max-width.** Today they fill the whole window;
   should sit centered with a max-width like modals do, so flow content
@@ -271,11 +287,14 @@ with where each sits once we apply the rules above. Items marked
 
 ## Open questions / decisions still pending
 
-1. **Takeover ↔ Modal rethink — overall pattern.** Max-width spec, ✕
-   button removal, "back to main concern" affordance shape (back
-   chevron vs explicit button vs clickable underlying surface).
+1. ~~**Takeover ↔ Modal rethink — overall pattern.**~~ **RESOLVED** —
+   modal-unification Tracks M-1..M-7 shipped. Max-width tokens,
+   binding/non-binding split, `TakeoverBack` chevron, and
+   cancel-on-window-close wiring all landed.
 2. **Settings split** — exact left-sidebar layout for Comfy Instance,
-   tab ordering, "Preferences" vs "App Settings" naming.
+   tab ordering, "Preferences" vs "App Settings" naming. **Gated on
+   the window-mode unification re-enable** (currently disabled — see
+   [window-mode-unification-revert.md](window-mode-unification-revert.md)).
 3. **Running-install ownership** — exact lock scope (read-only on
    dashboard? grayed-out subset of actions? action-menu items
    removed?).
@@ -284,6 +303,13 @@ with where each sits once we apply the rules above. Items marked
 5. **Restart-required pill family** — deferred from §18; needs a
    restart-gated-setting registry. Separate piece of work, not part of
    this polish slice.
+6. **Window-mode unification re-enable** — in-place attach/detach is
+   currently disabled in production due to lifecycle edge cases (see
+   `dac9b16` and the revert doc). Underlying infra (`comfyWindows`
+   keyed by `windowKey`, `attachInstall` / `detachInstall`,
+   `claimAttachHost`) is intact and dormant; re-enable is a one-line
+   IPC change once the partition-rebuild / cancel-prompt-funnel /
+   panelView-stale-state lifecycle bugs are addressed.
 
 ---
 
@@ -304,7 +330,9 @@ with where each sits once we apply the rules above. Items marked
 | Auto-download verification on packaged build | Track B item 2 (1c54755) | Confirm `runCheck('auto-download')` actually triggers the download in todesktop runtime when the periodic auto-check has only "checked". |
 | `DownloadsTrayPopover` ↔ `DownloadsPanel` overlap | Track F (1e4939a) | Both render the same `downloadStore` data. Decide which surface is canonical once settings-sidebar-tab work lands. |
 | App-update popover surface | Decision log | Deferred — panel-positioned card vs true title-bar child-window popup. |
-| Takeover ↔ Modal rethink (max-width, ✕ removal, "back to main" affordance) | Cross-cutting | **Open — gates Dashboard items and Settings split.** |
-| Settings split (Comfy-Instance left-sidebar tab layout) | Cross-cutting | **Open — gates Comfy Instance settings tab + parts of Dashboard.** |
+| Takeover ↔ Modal rethink (max-width, ✕ removal, "back to main" affordance) | Cross-cutting | **DONE — modal-unification Tracks M-1..M-7 (`4ac023d`..`d581c9f`).** |
+| Settings split (Comfy-Instance left-sidebar tab layout) | Cross-cutting | **Open — gated on window-mode unification re-enable (currently disabled).** |
 | Running-install ownership | Cross-cutting | **Open — gates running-tile click handoff, dashboard close-running, "don't treat dashboard windows as pseudo-launchers".** |
 | New-install wizard restructure | Cross-cutting | **Open — gates first-time vs subsequent install flow + snapshot-import location.** |
+| Window-mode unification re-enable | [window-mode-unification-revert.md](window-mode-unification-revert.md) | **Open — infra dormant; bugs in partition rebuild / cancel-prompt funnel / panelView stale state must be fixed before re-enable.** |
+| Post-unification code review findings | [post-unification-code-review.md](post-unification-code-review.md) | **Open — F1, F13, F14, F17 fixed; remaining findings tracked in that doc.** |

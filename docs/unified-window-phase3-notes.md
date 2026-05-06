@@ -1302,17 +1302,24 @@ Open question: do we hide `−` only during these flows, or globally?
 Hiding only during the flow flickers the controls in/out; hiding
 globally is a static UX decision that we can make once.
 
-### Status — minimize button drop **DONE**
+### Status — minimize button drop **REVERTED**
 
-`minimizable: false` is now set on both `BrowserWindow` constructors
-in `src/main/index.ts` (the install-backed `openComfyWindow` and the
-install-less `openChooserHostWindow`). The OS-level minimize button
-disappears across every host window — the controls reduce to
-maximize / close so the takeover-style flows have a single,
-unambiguous "interrupt" affordance (×). Static decision, no
-in-flow flicker. The TitleMenu popup `BrowserWindow`
-(`ensureTitleMenuPopup`) already had `minimizable: false` for
-unrelated reasons and stays as-is.
+The OS-level minimize button is back on every host window.
+`minimizable: false` is no longer set on the unified
+`createHostWindow()` constructor in `src/main/index.ts`.
+
+Why reverted: the original drop was justified by Tier 3 takeovers
+needing a single unambiguous "interrupt" affordance (✕). Once the
+modal-unification track retired the Tier 3 takeover semantics in
+favour of binding modals on the unified `Modal` primitive, the
+foundation for hiding `−` was gone — `−` is the standard OS "hide
+this window, keep its work running" gesture and the binding modals
+already handle window-close cancel-prompts independently. Hiding it
+just removed a useful affordance for no remaining gain.
+
+The TitleMenu popup `BrowserWindow` (`ensureTitleMenuPopup`) keeps
+`minimizable: false` for its own popup-lifecycle reason (frameless
+transparent child window) and is unaffected.
 
 The takeover tier (full-screen body for install / update / first-use
 flows, with the title-bar pills/dropdowns rendered inert during a
@@ -1726,59 +1733,63 @@ go so we don't keep flip-flopping individual labels.
 
 ## Status
 
-In progress. Phase 2 (`feat/unified-window-titlebar-panels`) is the
-active branch and a substantial slice of Phase 3 has already shipped
-on it — the launcher window has been retired, the chooser host window
-opens at startup, the title-bar v2 / File menu / install pill landed,
-new-install / track / load-snapshot / quick-install panels are hosted,
-the Directories panel exists, per-source-category recency tracks both
-fields atomically, and the unified-window navigation history (Back /
-Forward + HTML title-bar dropdowns) is live.
+`feat/unified-window-titlebar-panels` carries Phase 3 §1–§19 plus two
+follow-on unification tracks (modal + window-mode). Current state:
 
-Sections 1, 2, 4b, 5, 6 retain open work — primary-install removal
-hasn't fully landed (the gold-star + `primaryInstallId` pref are
-still present), Downloads is still a floating component (§6), and
-the new-install / quick-install flows haven't been unified (§4b).
-§4 — "Downloads" → "Cache" — has landed in Settings.
+**Phase 3 §1–§19** — all shipped on this branch. Notable details:
 
-Sections 3 and 8 are now mostly landed: §3 — the merged
-`DirectoriesView` ships, `ModelsView` / `MediaView` are deleted, and
-the orphan `models.title` / `media.title` i18n keys are scrubbed. §8
-— the chooser cards carry version chips, accent-blue running
-indicators, error badges, update / migrate pills, in-flight progress
-bars + status pills, pin-first sort, and a kebab / right-click action
-menu (Pin / Unpin, Manage…, Update…, Migrate to Standalone…,
-Restore Snapshot…, Open Folder, Delete…, Dismiss error). Pill click
-+ kebab item share a single `triggerAction(id, inst)` dispatch path
-so the two surfaces cannot diverge.
+- §1, §2 (primary-install removal incl. gold-star + `primaryInstallId`
+  pref), §4 ("Downloads" → "Cache"), §4b (new-install / quick-install
+  unification), §5, §6 (downloads tray promoted out of the floating
+  component), §7, §8, §9, §10, §11–§14, §15, §16, §17, §18 (updates
+  pills only — restart-required pills deferred to §18 followup),
+  §19.
+- §17's minimize-button drop is REVERTED — `−` is back on every host
+  window. The Tier 3 takeover machinery and the `isInert` title-bar
+  lockdown that originally justified hiding `−` have been retired by
+  the modal-unification track (see below); `kind: 'takeover'` survives
+  in `useOverlay` only as a styling/variant differentiator on the
+  unified `Modal` primitive.
+- §18's restart-required pill family is deferred (needs a
+  restart-gated-setting registry on top of the updates-pill
+  scaffolding).
 
-Section 10 (update-channel dropdown) has landed — Install Settings
-now picks the channel via a `<select>` and Update Now on a running
-install routes as a Tier 3 takeover (per the classifier rule). §7 —
-title-bar v3, the
-single-click pill with Back / Forward immediately to its left — and
-§9 — Restart-vs-Launch in Install Settings + the project-wide accent
-button convention — have both landed.
+**Modal unification (post-§17 cleanup)** — shipped end-to-end. The
+two-primitive Takeover + Modal system collapsed into one `Modal`
+component with `binding` / `opacity` / `width` props. Install-flow
+takeovers (new-install, track, load-snapshot, quick-install),
+first-use, update-while-running, DetailModal, ProgressModal,
+ImportPreviewModal, and Directories / App Settings / Install Settings
+all render through this primitive. The `isInert` title-bar lockdown
+system (the `comfy-titlebar:inert-changed` IPC, the bridge plumbing,
+and every `setTitleBarInert(...)` call) is fully removed. Binding
+modals get a `TakeoverBack` chevron (back to dashboard) and
+cancel-on-window-close wiring. The legacy `kind: 'flow'` overlay
+member is retired. See git log `4ac023d`..`d581c9f` for the slice.
 
-Sections 11–14 are recently shipped UX refinements: chooser-host
-focus on launch (§11), chooser-host title-bar / overlay colour match
-(§12), live launcher-theme tracking on the chooser host (§13), and
-title-bar dropdowns rendered as child `BrowserWindow` popups in place
-of native `Menu.popup()` (§14).
+**Window-mode unification — DISABLED.** Stages W-1..W-5 landed
+(`comfyWindows` re-keyed by stable `windowKey`, `attachInstall` /
+`detachInstall` operations, `claimAttachHost` IPC, in-place
+returnToDashboard / chooser-pick attach), then were turned off in
+production (`dac9b16`) due to lifecycle edge cases that left the app
+windowless. The infra is intact and dormant; see
+[window-mode-unification-revert.md](window-mode-unification-revert.md)
+for the kept findings, the disabled call sites, and the re-enable
+path.
 
-§15 — moving Directories out of the install pill into the global
-File / waffle menu — has landed. The remaining batch (§16–§19) is
-the next slice of open UX work: filling in the missing window-level
-lifecycle gestures — return-to-dashboard, Close All Windows, Import
-Snapshot as New Install (§16), turning startup / update modals into
-full-screen takeovers with a clear interrupt-vs-keep-running split
-on the window controls (§17), surfacing restart-required + update-
-available state via title-bar pills (Desktop-2-scoped to the right
-of the waffle, ComfyUI-scoped to the right of the install pill —
-§18), and a coordinated naming + flow-titles pass — "Desktop 2
-Settings" → "App Settings", grand title/subtitle on every hosted
-flow (§19).
+**Open work on this branch:**
 
-Capture decisions made in subsequent design discussions in this file.
-The doc remains the source of truth for "what's left" on this branch
-until the work is split into per-feature implementation threads.
+- Post-unification code review findings (see
+  [post-unification-code-review.md](post-unification-code-review.md))
+  — F1, F13, F14, F17 are fixed; the remaining findings are tracked
+  there.
+- Post-Phase 3 UX polish items still gated on Settings split,
+  Running-install ownership, App-update popover decisions, and
+  Restart-required pill family — see
+  [post-phase3-ux-polish.md](post-phase3-ux-polish.md).
+- §19 naming + flow-titles pass — partial; see followup tracker in
+  the polish doc.
+
+The doc remains the source of truth for "what shipped under each
+phase 3 section". Cross-cutting follow-on work has its own docs
+(linked above).

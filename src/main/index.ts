@@ -1136,11 +1136,6 @@ function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowResult {
     icon: APP_ICON,
     title: opts.windowTitle,
     backgroundColor: COMFY_BG,
-    // Phase 3 §17 — drop the OS-level minimize button globally. Window
-    // controls reduce to maximize/close so the takeover-style flows
-    // (install / update / first-use) have a single, unambiguous
-    // "interrupt" affordance (×).
-    minimizable: false,
     titleBarStyle: 'hidden',
     ...(process.platform === 'darwin'
       ? { trafficLightPosition: TRAFFIC_LIGHT_POSITION }
