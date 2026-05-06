@@ -1,32 +1,34 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 
 /**
- * Single modal primitive. Replaces the bespoke takeover surfaces.
+ * Single modal primitive.
  *
- * - `binding`: true → no click-outside dismiss, no Esc dismiss. Caller is
- *   responsible for providing an explicit close affordance (back chevron,
- *   cancel button, etc.). Used by install wizards / first-use.
- * - `opacity`: 'dim' | 'heavy-dim' — backdrop strength. No 'opaque' — the
- *   takeover variant is gone.
- * - `width`: 'regular' (~600px) | 'wide' (~900px). No fullscreen.
+ * - `binding`: true → no click-outside / Esc dismiss. Caller provides an
+ *   explicit close affordance (back chevron, cancel button). Defaults the
+ *   backdrop to `opaque` so the user reads "no escape via X / outside-click".
+ * - `opacity`: 'dim' | 'heavy-dim' | 'opaque'.
+ * - `width`: 'regular' (~600px) | 'wide' (~900px).
  *
- * Default slot is the modal body. The component owns backdrop + outer
- * `.view-modal-content` box; the slot can render its own `.view-modal-header`
- * / `.view-modal-body` / `.view-modal-footer` rows as needed.
+ * Default slot is the body; render `.view-modal-header` / `.view-modal-body` /
+ * `.view-modal-footer` rows inside.
  */
+type Opacity = 'dim' | 'heavy-dim' | 'opaque'
+
 const props = withDefaults(defineProps<{
   binding?: boolean
-  opacity?: 'dim' | 'heavy-dim'
+  opacity?: Opacity
   width?: 'regular' | 'wide'
   /** Extra class(es) appended to the content box. */
   contentClass?: string
 }>(), {
   binding: false,
-  opacity: 'dim',
+  opacity: undefined,
   width: 'wide',
   contentClass: '',
 })
+
+const resolvedOpacity = computed<Opacity>(() => props.opacity ?? (props.binding ? 'opaque' : 'dim'))
 
 const emit = defineEmits<{
   close: []
@@ -69,7 +71,8 @@ onUnmounted(() => {
       ref="overlayRef"
       class="view-modal active"
       :class="{
-        'view-modal--heavy-dim': opacity === 'heavy-dim',
+        'view-modal--heavy-dim': resolvedOpacity === 'heavy-dim',
+        'view-modal--opaque': resolvedOpacity === 'opaque',
       }"
       @mousedown="handleOverlayMouseDown"
       @click="handleOverlayClick"

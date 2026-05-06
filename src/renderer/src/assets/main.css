@@ -58,6 +58,11 @@
   --overlay-bg: rgba(0, 0, 0, 0.55);
   /* Heavier dim used on Comfy-Instance modals. */
   --overlay-bg-heavy: rgba(0, 0, 0, 0.75);
+  /* Fully opaque backdrop used on binding modals (install wizards,
+     first-use, update-while-running) — visually differentiates them
+     from non-binding modals and signals the lack of click-outside / ✕
+     dismiss. */
+  --overlay-bg-opaque: var(--bg);
 }
 
 [data-theme="light"] {
@@ -78,6 +83,7 @@
   --terminal-bg: #f3f3f3;
   --overlay-bg: rgba(0, 0, 0, 0.35);
   --overlay-bg-heavy: rgba(0, 0, 0, 0.55);
+  --overlay-bg-opaque: var(--bg);
 }
 
 /* ================================================================
@@ -503,8 +509,11 @@ input[type="checkbox"]:checked::after { transform: translateX(16px); }
   z-index: 50;
 }
 .view-modal.active { display: flex; }
-/* Backdrop variant — heavier dim used on Comfy-Instance modals. */
+/* Backdrop variants. `--heavy-dim` used on Comfy-Instance modals;
+ * `--opaque` used on binding modals (install wizards, first-use,
+ * update-while-running). */
 .view-modal--heavy-dim { background: var(--overlay-bg-heavy); }
+.view-modal--opaque { background: var(--overlay-bg-opaque); }
 .view-fullscreen {
   position: fixed; top: var(--titlebar-height); bottom: 0; right: 0;
   left: var(--sidebar-width);
