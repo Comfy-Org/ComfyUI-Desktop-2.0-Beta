@@ -1016,11 +1016,6 @@ onUnmounted(() => {
 
 <style scoped>
 .panel-shell {
-  /* The panel WebContentsView lives BELOW the ComfyUI window's title bar
-   * (which is its own WebContentsView). The panel renderer therefore has no
-   * title bar of its own — neutralize the global --titlebar-height inset so
-   * overlay modals (ProgressModal etc.) span the full panel area. */
-  --titlebar-height: 0px;
   display: flex;
   flex-direction: column;
   height: 100vh;
