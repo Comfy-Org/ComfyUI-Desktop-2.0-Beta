@@ -377,6 +377,16 @@ function dismissTakeoverDirect(): void {
   if (currentOverlay.value?.kind === 'takeover' && currentOverlay.value.component === 'first-use') {
     window.api.setFirstUseMode('none')
   }
+  // Page / manage overlays come from a title-bar `setPanel` IPC that
+  // also flipped main's `entry.activePanel` away from `'comfy'`,
+  // hiding the live comfy WebContentsView. Closing the overlay only
+  // clears the renderer-side modal — without IPC'ing main back to
+  // `'comfy'` the comfy view stays hidden and the user perceives the
+  // running instance as "shut down". `closeCurrentPanel` resets
+  // entry.activePanel to `'comfy'` and re-runs layoutViews().
+  if (currentOverlay.value?.kind === 'page' || currentOverlay.value?.kind === 'manage') {
+    window.api.closeCurrentPanel()
+  }
   currentOverlay.value = null
 }
 
