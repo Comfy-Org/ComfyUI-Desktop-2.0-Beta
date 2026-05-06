@@ -224,10 +224,12 @@ interface ComfyWindowEntry {
    *
    * Pre-W-1 the map was string-keyed by either `installationId`
    * (install-backed) or `chooser:N` (install-less). Both rotated
-   * with the install identity, which is why the swap-via-close
-   * `returnToDashboard` had to construct a brand-new window: the map
-   * key it lived under wasn't valid anymore. The numeric key
-   * uncouples "which window is this" from "what install backs it".
+   * with the install identity, which is why the pre-W-4 swap-via-
+   * close `returnToDashboard` had to construct a brand-new window:
+   * the map key it lived under wasn't valid anymore. The numeric
+   * key uncouples "which window is this" from "what install backs
+   * it" — `returnToDashboard` is now an in-place flip via
+   * `entry.detachInstall()` (W-4).
    *
    * Lookups by `installationId` route through
    * `getEntryByInstallationId(id)` (a `Map<string, number>`
@@ -655,12 +657,12 @@ function quitApp(): void {
  * Step 5 §16 — pre-cleared close set. Marks a window as having
  * already passed the panel renderer's tier-aware consult so the
  * subsequent `close` event handler can skip the consult and tear
- * down immediately. Used by `returnToDashboard` (consult upfront so
- * we don't open a fresh chooser window the user is about to abort)
- * and by `confirmAndCloseAllHostWindows` (the global confirm dialog
- * already lists in-progress operations / sessions / downloads, so
- * the per-window prompt would be redundant noise after the user
- * confirmed the bulk close).
+ * down immediately. Used by `confirmAndCloseAllHostWindows` (the
+ * global confirm dialog already lists in-progress operations /
+ * sessions / downloads, so the per-window prompt would be redundant
+ * noise after the user confirmed the bulk close). Pre-W-4 also used
+ * by `returnToDashboard` for its swap-via-close flow; W-4's in-place
+ * detach no longer goes through the close handler.
  */
 const preClearedClose = new WeakSet<BrowserWindow>()
 
@@ -731,48 +733,37 @@ function closeAllHostWindows(): void {
 
 /**
  * Phase 3 §16 — File menu's "Return to Dashboard" entry. Stops the
- * install backing the current host window and replaces the window with
- * a fresh chooser host at the same bounds, so the user perceives the
- * body swapping in-place from "an install" back to the install picker.
+ * install backing the current host window and flips the same window
+ * in-place to chooser-host mode so the user picks a different install
+ * without a window swap.
  *
- * Implementation note: a true single-window swap would re-key the
- * `comfyWindows` entry from the installationId to a synthetic
- * `chooser:N`, null out `entry.installationId`, tear down comfy-
- * specific wiring (download manager, theme observer, panelView's
- * loaded URL), and re-route the closure-bound `installationId` reads
- * inside `layoutViews()` and the install-backed event handlers.
- * That's a substantial rewrite of construction-time bindings.
+ * Window-mode unification (Stage W-4) — pre-W-3c this was a swap-via-
+ * close (capture-bounds → openChooserHostWindow → restore-bounds →
+ * dispatch-close), which paid a visible flicker as one window tore
+ * down and another painted at the same bounds. With the entry
+ * keyed by a stable `windowKey` (W-1) and an `attachInstall()` /
+ * `detachInstall()` pair on the entry (W-3b/W-3c), the same host
+ * BrowserWindow can flip its install backing in place: bounds /
+ * maximised state are preserved by definition because the window
+ * never goes away; the comfy view navigates to about:blank, the
+ * panel re-renders the chooser body, and the title bar repaints to
+ * the launcher surface theme. No flicker, no orphan chooser.
  *
- * The close-and-reopen approach captures the install-backed window's
- * bounds + maximised state, opens a fresh chooser host, applies those
- * bounds to the new window, then dispatches close on the original.
- * The original window's existing `close` handler runs the full
- * teardown (`stopRunning` + webContents close + `window.destroy()`),
- * so the install gets stopped cleanly. The brief flicker as the
- * windows swap is the visible cost; the user-facing affordance is
- * indistinguishable from an in-place swap once the new window paints.
+ * The Tier 2/3 consult still runs first — `detachInstall()` is the
+ * "discard install backing" gesture and the user may have a pending
+ * Tier 2/3 op in the panel that wants to prompt before discarding.
  */
 async function returnToDashboard(parentEntryId: number): Promise<void> {
   const entry = comfyWindows.get(parentEntryId)
   if (!entry || entry.installationId === null || entry.window.isDestroyed()) return
   // Step 5 §16 — consult the panel renderer up front so a Tier 2/3 op
-  // can prompt the user BEFORE we open the new chooser window. If the
+  // can prompt the user BEFORE we discard the install backing. If the
   // user dismisses the prompt the takeover stays mounted and we leave
-  // the original window untouched (no flicker, no orphan chooser).
+  // the host untouched.
   const cleared = await consultPanelRendererClose(entry.panelView)
   if (!cleared) return
-  preClearedClose.add(entry.window)
-  const bounds = entry.window.getBounds()
-  const wasMaximized = entry.window.isMaximized()
-  const chooserWindow = openChooserHostWindow()
-  if (!chooserWindow.isDestroyed()) {
-    if (wasMaximized) {
-      chooserWindow.maximize()
-    } else {
-      chooserWindow.setBounds(bounds)
-    }
-  }
-  entry.window.close()
+  if (entry.window.isDestroyed()) return
+  entry.detachInstall()
 }
 
 /**
@@ -2836,13 +2827,11 @@ function activateTitleMenuItem(entry: TitleMenuPopupEntry, id: string): void {
   if (entry.kind === 'file') {
     if (id === 'new-window') openChooserHostWindow()
     else if (id === 'return-to-dashboard') {
-      // §16 — close the install-backed window and reopen at the same
-      // bounds as a chooser host. See `returnToDashboard` for why this
-      // is a swap-via-close rather than a true single-window swap.
-      // The popup is parented to the original window and gets auto-
-      // destroyed when that window closes; the trailing
-      // hideTitleMenuPopup is guarded against an already-destroyed
-      // popup.
+      // §16 — flip the install-backed host in place to chooser-host
+      // mode (Stage W-4). The same BrowserWindow stays alive; the
+      // file-menu popup is parented to it so it stays valid through
+      // the in-place swap (no popup teardown, just a body swap
+      // underneath the popup).
       void returnToDashboard(entry.parentEntryId)
     } else if (id === 'close-window') {
       // §16 — close just the parent host window. Each host window has
