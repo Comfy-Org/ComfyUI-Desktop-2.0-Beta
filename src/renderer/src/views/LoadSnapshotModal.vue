@@ -10,7 +10,7 @@ import { emitTelemetryAction, toVariantBucket } from '../lib/telemetry'
 import SnapshotFilePreviewContent from '../components/SnapshotFilePreviewContent.vue'
 import TakeoverHeader from '../components/TakeoverHeader.vue'
 import TakeoverBack from '../components/TakeoverBack.vue'
-import Modal from '../components/Modal.vue'
+import ModalShell from '../components/ModalShell.vue'
 
 const emit = defineEmits<{
   close: []
@@ -251,8 +251,8 @@ defineExpose({ open })
 </script>
 
 <template>
-  <Modal binding @close="emit('close')">
-      <div class="view-modal-header">
+  <ModalShell binding @close="emit('close')">
+      <template #header>
         <TakeoverBack
           :label="$t('common.backToDashboard')"
           @back="emit('close')"
@@ -261,10 +261,10 @@ defineExpose({ open })
           :title="$t('loadSnapshot.grandTitle')"
           :subtitle="$t('loadSnapshot.grandSubtitle')"
         />
-      </div>
+      </template>
       <div
         ref="contentRef"
-        class="view-modal-body"
+        class="ls-drop-target"
         @dragover="!preview && handleDragOver($event)"
         @dragleave="!preview && handleDragLeave($event)"
         @drop="!preview && handleDrop($event)"
@@ -363,10 +363,17 @@ defineExpose({ open })
           </button>
         </div>
       </div>
-  </Modal>
+  </ModalShell>
 </template>
 
 <style scoped>
+/* Wraps the body so drag-leave detection (contains check) can target the
+   whole drop area and view-scroll still fills it. */
+.ls-drop-target {
+  flex: 1; min-height: 0;
+  display: flex; flex-direction: column;
+}
+
 /* Ensure view-scroll stretches the drop zone when no preview is loaded */
 .view-scroll:has(.ls-drop-zone-wrap) {
   display: flex;

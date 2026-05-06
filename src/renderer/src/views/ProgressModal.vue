@@ -12,7 +12,7 @@ import type {
   ProgressStep,
   KillResult
 } from '../types/ipc'
-import Modal from '../components/Modal.vue'
+import ModalShell from '../components/ModalShell.vue'
 
 interface Props {
   installationId: string | null
@@ -231,17 +231,14 @@ defineExpose({ startOperation, showOperation })
 </script>
 
 <template>
-  <Modal
+  <ModalShell
     v-if="installationId && currentOp"
     :binding="binding"
-    content-class="progress-modal-content"
+    :title="currentOp.title"
+    :close-glyph="currentOp.finished ? '✕' : '−'"
     @close="emit('close')"
   >
-    <div class="view-modal-header">
-      <div class="view-modal-title">{{ currentOp.title }}</div>
-      <button class="view-modal-close" @click="emit('close')">{{ currentOp.finished ? '✕' : '−' }}</button>
-    </div>
-      <div class="view-modal-body">
+      <!-- body -->
         <!-- Status banner -->
         <div
           v-if="currentOp.finished && !currentOp.result?.portConflict"
@@ -351,10 +348,9 @@ defineExpose({ startOperation, showOperation })
             @scroll="handleTerminalScroll"
           >{{ currentOp.terminalOutput }}</div>
         </template>
-      </div>
 
       <!-- Bottom bar (pinned outside scrollable body) -->
-      <div class="view-modal-footer">
+      <template #footer>
         <!-- Port conflict actions -->
         <div
           v-if="
@@ -406,6 +402,6 @@ defineExpose({ startOperation, showOperation })
             }}
           </button>
         </div>
-      </div>
-  </Modal>
+      </template>
+  </ModalShell>
 </template>

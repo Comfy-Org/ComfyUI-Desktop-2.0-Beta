@@ -11,7 +11,7 @@ import { trackGuardrailBlocked, createDiskSpaceChecker, showPathIssueAlerts, che
 import InstallNamePath from '../components/InstallNamePath.vue'
 import TakeoverHeader from '../components/TakeoverHeader.vue'
 import TakeoverBack from '../components/TakeoverBack.vue'
-import Modal from '../components/Modal.vue'
+import ModalShell from '../components/ModalShell.vue'
 
 const emit = defineEmits<{
   close: []
@@ -519,8 +519,8 @@ defineExpose({ open })
 </script>
 
 <template>
-  <Modal binding @close="emit('close')">
-      <div class="view-modal-header">
+  <ModalShell binding @close="emit('close')">
+      <template #header>
         <TakeoverBack
           :label="$t('common.backToDashboard')"
           @back="emit('close')"
@@ -529,8 +529,7 @@ defineExpose({ open })
           :title="$t('newInstall.grandTitle')"
           :subtitle="$t('newInstall.grandSubtitle')"
         />
-      </div>
-      <div class="view-modal-body">
+      </template>
         <div class="view-scroll">
           <!-- Phase 3 §19 — per-step heading reads as a sub-section
                below the persistent grand title. The step number gives
@@ -781,8 +780,7 @@ defineExpose({ open })
             {{ currentStep < totalSteps ? $t('newInstall.next') : $t('newInstall.addInstallation') }}
           </button>
         </div>
-      </div>
-  </Modal>
+  </ModalShell>
 </template>
 
 <style scoped>

@@ -39,7 +39,7 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { ArrowRightLeft, Box, Cloud, Download } from 'lucide-vue-next'
 import TakeoverHeader from '../components/TakeoverHeader.vue'
-import Modal from '../components/Modal.vue'
+import ModalShell from '../components/ModalShell.vue'
 
 type Step = 'consent' | 'mirrors' | 'pick' | 'localBranch'
 
@@ -211,17 +211,16 @@ defineExpose({ open })
 </script>
 
 <template>
-  <Modal binding content-class="first-use-takeover">
+  <ModalShell binding hide-close content-class="first-use-takeover">
     <!-- First-use is binding — no ✕ close. The OS-chrome window close
          routes through main → PanelApp's closeOverlay; there's no in-app
          dismiss affordance mid-onboarding. -->
-    <div class="view-modal-header">
+    <template #header>
       <TakeoverHeader
         :title="$t('firstUse.grandTitle')"
         :subtitle="$t('firstUse.grandSubtitle')"
       />
-    </div>
-    <div class="view-modal-body">
+    </template>
       <div class="view-scroll">
         <!-- Step 1: T&C + telemetry consent -->
         <template v-if="step === 'consent'">
@@ -360,8 +359,7 @@ defineExpose({ open })
           <div></div>
         </template>
       </div>
-    </div>
-  </Modal>
+  </ModalShell>
 </template>
 
 <style scoped>

@@ -5,7 +5,6 @@ import SettingsView from '../views/SettingsView.vue'
 import DetailModal from '../views/DetailModal.vue'
 import ProgressModal from '../views/ProgressModal.vue'
 import ModalDialog from '../components/ModalDialog.vue'
-import Modal from '../components/Modal.vue'
 import ComfyLifecycleView from './ComfyLifecycleView.vue'
 import ChooserView from '../views/ChooserView.vue'
 import DirectoriesView from '../views/DirectoriesView.vue'
@@ -923,12 +922,10 @@ onUnmounted(() => {
       @navigate-list="handleNavigateList"
     />
     <!-- Tier 1 page modals (Directories / App Settings) — fired from
-         the waffle / install dropdown menus. The body underneath stays
-         on chooser / comfy-lifecycle so dismissing returns there. -->
-    <Modal
-      v-else-if="currentOverlay?.kind === 'page'"
-      @close="dismissTakeoverDirect"
-    >
+         the waffle / install dropdown menus. Each view wraps itself in
+         ModalShell; the body underneath stays on chooser /
+         comfy-lifecycle so dismissing returns there. -->
+    <template v-else-if="currentOverlay?.kind === 'page'">
       <SettingsView
         v-if="currentOverlay.page === 'launcher-settings'"
         ref="settingsRef"
@@ -938,7 +935,7 @@ onUnmounted(() => {
         v-else-if="currentOverlay.page === 'directories'"
         @close="dismissTakeoverDirect"
       />
-    </Modal>
+    </template>
     <!-- Tier 2 progress slot. ProgressModal owns its own backdrop via
          the unified Modal primitive. -->
     <ProgressModal

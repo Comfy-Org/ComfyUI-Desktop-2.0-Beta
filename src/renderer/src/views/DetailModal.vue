@@ -6,7 +6,7 @@ import { useActionGuard } from '../composables/useActionGuard'
 
 import DetailSectionComponent from '../components/DetailSection.vue'
 import SnapshotTab from '../components/SnapshotTab.vue'
-import Modal from '../components/Modal.vue'
+import ModalShell from '../components/ModalShell.vue'
 import { useInstallationStore } from '../stores/installationStore'
 import { useSessionStore } from '../stores/sessionStore'
 import { emitTelemetryAction, toErrorBucket } from '../lib/telemetry'
@@ -566,16 +566,15 @@ function navigateToInstallation(installationId: string): void {
 </script>
 
 <template>
-  <Modal
+  <ModalShell
     v-if="installation"
     :inline="!asModal"
     :binding="asModal"
     opacity="dim"
     @close="handleHeaderClose"
   >
-      <div class="view-modal-header">
+      <template #title>
         <div
-          class="view-modal-title"
           role="textbox"
           :aria-label="$t('detail.editName', 'Edit installation name')"
           contenteditable
@@ -587,14 +586,7 @@ function navigateToInstallation(installationId: string): void {
         >
           {{ installation.name }}<Pencil :size="14" class="edit-name-hint" contenteditable="false" />
         </div>
-        <button
-          class="view-modal-close"
-          :title="$t('common.close')"
-          :aria-label="$t('common.close')"
-          @click="handleHeaderClose"
-        >✕</button>
-      </div>
-      <div class="view-modal-body">
+      </template>
         <div v-if="hasTabs" class="detail-tabs">
           <button
             v-for="tabId in availableTabs"
@@ -666,6 +658,5 @@ function navigateToInstallation(installationId: string): void {
             </TooltipWrap>
           </div>
         </div>
-      </div>
-  </Modal>
+  </ModalShell>
 </template>

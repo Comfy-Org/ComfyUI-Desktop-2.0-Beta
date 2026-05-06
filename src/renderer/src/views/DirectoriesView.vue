@@ -1,37 +1,20 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { X } from 'lucide-vue-next'
 import DirCard from '../components/DirCard.vue'
 import SettingField from '../components/SettingField.vue'
 import InfoTooltip from '../components/InfoTooltip.vue'
+import ModalShell from '../components/ModalShell.vue'
 import type { ModelsSection, SettingsSection } from '../types/ipc'
 
 const { t } = useI18n()
 
 const emit = defineEmits<{ close: [] }>()
 
-function handleClose(): void {
-  emit('close')
-}
-
 /**
- * Phase 3 §3 — Directories panel.
- *
- * Replaces the launcher window's separate Models + Media views with a
- * single panel reachable from the install pill caret menu. Both views
- * browse on-disk directories an installation reads/writes; the merge
- * surfaces them under one header instead of two parallel tabs.
- *
- * Data sources are unchanged for now:
- *   - `getModelsSections()` returns the model directory list (with
- *     primary / default markers per path).
- *   - `getMediaSections()` returns the shared input/output directory
- *     fields (rendered as SettingField since they're plain settings).
- *
- * Future work (out of scope for the merge landing): pull the per-source
- * folder-tree / scanning / breadcrumb pieces into shared components,
- * and let sources plug additional categories in (snapshots, logs, …).
+ * Combined Models + Media directory browser. Lists each on-disk
+ * directory the active installation reads/writes (model paths,
+ * shared input/output) and lets the user add, browse, and reorder.
  */
 
 const modelsSystemDefault = ref('')
@@ -102,73 +85,56 @@ defineExpose({ loadAll, loadModels, loadMedia })
 </script>
 
 <template>
-  <div class="view active">
-    <div class="toolbar">
-      <div class="breadcrumb">
-        <span class="breadcrumb-current">{{ $t('directories.title') }}</span>
-      </div>
-      <button
-        type="button"
-        class="view-page-close"
-        :title="t('common.close')"
-        :aria-label="t('common.close')"
-        @click="handleClose"
-      >
-        <X :size="18" />
-      </button>
-    </div>
+  <ModalShell :title="t('directories.title')" @close="emit('close')">
+    <!-- Models section: shared model directory list with primary marker. -->
+    <div
+      v-for="(section, sIdx) in modelsSections"
+      :key="`models-${sIdx}`"
+      class="settings-section"
+    >
+      <div v-if="section.title" class="detail-section-title">{{ section.title }}</div>
 
-    <div class="view-scroll">
-      <!-- Models section: shared model directory list with primary marker. -->
-      <div
-        v-for="(section, sIdx) in modelsSections"
-        :key="`models-${sIdx}`"
-        class="settings-section"
-      >
-        <div v-if="section.title" class="detail-section-title">{{ section.title }}</div>
+      <div class="detail-fields">
+        <div v-for="field in section.fields" :key="field.id" class="field">
+          <label>{{ field.label }}</label>
 
-        <div class="detail-fields">
-          <div v-for="field in section.fields" :key="field.id" class="field">
-            <label>{{ field.label }}</label>
-
-            <div class="dir-card-list">
-              <DirCard
-                v-for="(path, index) in field.value"
-                :key="index"
-                :path="path"
-                :is-primary="index === 0"
-                :is-default="isDefault(path)"
-                @open="handleOpen(path)"
-                @browse="handleBrowse(field, index)"
-                @remove="handleRemove(field, index)"
-                @make-primary="handleMakePrimary(field, index)"
-              />
-              <button @click="handleAdd(field)">{{ $t('models.addDir') }}</button>
-            </div>
+          <div class="dir-card-list">
+            <DirCard
+              v-for="(path, index) in field.value"
+              :key="index"
+              :path="path"
+              :is-primary="index === 0"
+              :is-default="isDefault(path)"
+              @open="handleOpen(path)"
+              @browse="handleBrowse(field, index)"
+              @remove="handleRemove(field, index)"
+              @make-primary="handleMakePrimary(field, index)"
+            />
+            <button @click="handleAdd(field)">{{ $t('models.addDir') }}</button>
           </div>
         </div>
       </div>
+    </div>
 
-      <!-- Shared input/output directories — rendered as plain settings fields
-           (the media data layer just exposes them as SettingsSection rows). -->
-      <div
-        v-for="(section, sIdx) in mediaSections"
-        :key="`media-${sIdx}`"
-        class="settings-section"
-      >
-        <div v-if="section.title" class="detail-section-title">
-          {{ section.title }}<InfoTooltip :text="$t('tooltips.sharedDirs')" />
-        </div>
+    <!-- Shared input/output directories — surfaced as plain settings fields
+         (the media data layer exposes them as SettingsSection rows). -->
+    <div
+      v-for="(section, sIdx) in mediaSections"
+      :key="`media-${sIdx}`"
+      class="settings-section"
+    >
+      <div v-if="section.title" class="detail-section-title">
+        {{ section.title }}<InfoTooltip :text="$t('tooltips.sharedDirs')" />
+      </div>
 
-        <div class="detail-fields">
-          <SettingField
-            v-for="field in section.fields"
-            :key="field.id"
-            :field="field"
-            @setting-updated="loadMedia"
-          />
-        </div>
+      <div class="detail-fields">
+        <SettingField
+          v-for="field in section.fields"
+          :key="field.id"
+          :field="field"
+          @setting-updated="loadMedia"
+        />
       </div>
     </div>
-  </div>
+  </ModalShell>
 </template>

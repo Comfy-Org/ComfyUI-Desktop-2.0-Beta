@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { useModal } from '../composables/useModal'
 import TakeoverHeader from '../components/TakeoverHeader.vue'
 import TakeoverBack from '../components/TakeoverBack.vue'
-import Modal from '../components/Modal.vue'
+import ModalShell from '../components/ModalShell.vue'
 
 import type { ProbeResult } from '../types/ipc'
 import { emitTelemetryAction, toCountBucket } from '../lib/telemetry'
@@ -149,15 +149,14 @@ defineExpose({ open })
 </script>
 
 <template>
-  <Modal binding @close="emit('close')">
-      <div class="view-modal-header">
+  <ModalShell binding @close="emit('close')">
+      <template #header>
         <TakeoverBack
           :label="$t('common.backToDashboard')"
           @back="emit('close')"
         />
         <TakeoverHeader :title="$t('track.grandTitle')" :subtitle="$t('track.grandSubtitle')" />
-      </div>
-      <div class="view-modal-body">
+      </template>
         <div class="view-scroll">
           <!-- Track path -->
           <div class="field">
@@ -245,6 +244,5 @@ defineExpose({ open })
             {{ $t('track.trackInstallation') }}
           </button>
         </div>
-      </div>
-  </Modal>
+  </ModalShell>
 </template>

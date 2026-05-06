@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { X } from 'lucide-vue-next'
 import SettingsSections from '../components/SettingsSections.vue'
+import ModalShell from '../components/ModalShell.vue'
 import { useModal } from '../composables/useModal'
 import type { SettingsSection, SettingsAction } from '../types/ipc'
 
@@ -10,10 +10,6 @@ const { t } = useI18n()
 const modal = useModal()
 
 const emit = defineEmits<{ close: [] }>()
-
-function handleClose(): void {
-  emit('close')
-}
 
 function openUrl(url: string): void {
   window.api.openExternal(url)
@@ -56,28 +52,12 @@ defineExpose({ loadSettings })
 </script>
 
 <template>
-  <div class="view active">
-    <div class="toolbar">
-      <div class="breadcrumb">
-        <span class="breadcrumb-current">{{ $t('settings.title') }}</span>
-      </div>
-      <button
-        type="button"
-        class="view-page-close"
-        :title="t('common.close')"
-        :aria-label="t('common.close')"
-        @click="handleClose"
-      >
-        <X :size="18" />
-      </button>
-    </div>
-    <div class="view-scroll">
-      <SettingsSections
-        :sections="sections"
-        :checking-for-updates="checkingForUpdates"
-        @setting-updated="loadSettings"
-        @action="handleAction"
-      />
-    </div>
-  </div>
+  <ModalShell :title="t('settings.title')" @close="emit('close')">
+    <SettingsSections
+      :sections="sections"
+      :checking-for-updates="checkingForUpdates"
+      @setting-updated="loadSettings"
+      @action="handleAction"
+    />
+  </ModalShell>
 </template>

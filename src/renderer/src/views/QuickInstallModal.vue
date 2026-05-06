@@ -11,7 +11,7 @@ import { trackGuardrailBlocked, createDiskSpaceChecker, showPathIssueAlerts, che
 import InstallNamePath from '../components/InstallNamePath.vue'
 import TakeoverHeader from '../components/TakeoverHeader.vue'
 import TakeoverBack from '../components/TakeoverBack.vue'
-import Modal from '../components/Modal.vue'
+import ModalShell from '../components/ModalShell.vue'
 
 const emit = defineEmits<{
   close: []
@@ -258,8 +258,8 @@ defineExpose({ open })
 </script>
 
 <template>
-  <Modal binding content-class="quick-install-modal" @close="emit('close')">
-      <div class="view-modal-header">
+  <ModalShell binding content-class="quick-install-modal" @close="emit('close')">
+      <template #header>
         <TakeoverBack
           :label="$t('common.backToDashboard')"
           @back="emit('close')"
@@ -268,8 +268,7 @@ defineExpose({ open })
           :title="$t('quickInstall.grandTitle')"
           :subtitle="$t('quickInstall.grandSubtitle')"
         />
-      </div>
-      <div class="view-modal-body">
+      </template>
         <div class="view-scroll">
           <div v-if="loading" class="wizard-loading with-spinner">
             {{ $t('newInstall.loading') }}
@@ -320,6 +319,5 @@ defineExpose({ open })
             {{ installing ? $t('newInstall.installing') : $t('quickInstall.confirmInstall') }}
           </button>
         </div>
-      </div>
-  </Modal>
+  </ModalShell>
 </template>
