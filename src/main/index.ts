@@ -770,38 +770,34 @@ function closeAllHostWindows(): void {
 }
 
 /**
- * Phase 3 §16 — File menu's "Return to Dashboard" entry. Stops the
- * install backing the current host window and flips the same window
- * in-place to chooser-host mode so the user picks a different install
- * without a window swap.
+ * File menu's "Return to Dashboard" entry. Closes the install-backed
+ * host window and opens a chooser host window at the same bounds.
  *
- * Window-mode unification (Stage W-4) — pre-W-3c this was a swap-via-
- * close (capture-bounds → openChooserHostWindow → restore-bounds →
- * dispatch-close), which paid a visible flicker as one window tore
- * down and another painted at the same bounds. With the entry
- * keyed by a stable `windowKey` (W-1) and an `attachInstall()` /
- * `detachInstall()` pair on the entry (W-3b/W-3c), the same host
- * BrowserWindow can flip its install backing in place: bounds /
- * maximised state are preserved by definition because the window
- * never goes away; the comfy view navigates to about:blank, the
- * panel re-renders the chooser body, and the title bar repaints to
- * the launcher surface theme. No flicker, no orphan chooser.
- *
- * The Tier 2/3 consult still runs first — `detachInstall()` is the
- * "discard install backing" gesture and the user may have a pending
- * Tier 2/3 op in the panel that wants to prompt before discarding.
+ * In-place flip via `entry.detachInstall()` (Stage W-4) is currently
+ * disabled — too many edge-case bugs around the in-place swap. The
+ * close+open swap pays a visible flicker but exercises the same
+ * close-handler teardown that production has used since main, which
+ * is the codepath we trust right now. See
+ * docs/window-mode-unification-revert.md.
  */
 async function returnToDashboard(parentEntryId: number): Promise<void> {
   const entry = comfyWindows.get(parentEntryId)
   if (!entry || entry.installationId === null || entry.window.isDestroyed()) return
-  // Step 5 §16 — consult the panel renderer up front so a Tier 2/3 op
-  // can prompt the user BEFORE we discard the install backing. If the
-  // user dismisses the prompt the takeover stays mounted and we leave
-  // the host untouched.
   const cleared = await consultPanelRendererClose(entry.panelView)
   if (!cleared) return
   if (entry.window.isDestroyed()) return
-  entry.detachInstall()
+  preClearedClose.add(entry.window)
+  const bounds = entry.window.getBounds()
+  const wasMaximized = entry.window.isMaximized()
+  const chooserWindow = openChooserHostWindow()
+  if (!chooserWindow.isDestroyed()) {
+    if (wasMaximized) {
+      chooserWindow.maximize()
+    } else {
+      chooserWindow.setBounds(bounds)
+    }
+  }
+  entry.window.close()
 }
 
 /**
@@ -3207,60 +3203,20 @@ ipcMain.handle('close-host-window', (event) => {
 })
 
 /**
- * Window-mode unification (Stage W-4) — register an in-place attach
- * claim against the calling install-less host window. Pre-launch
- * step the chooser-host renderer runs right before kicking off the
- * launch action: when the launch event eventually lands in
- * `onLaunch()`, the claim redirects it to attach the install to
- * THIS host window instead of constructing a fresh one. The user
- * perceives the chooser body swapping in place to a running
- * ComfyUI; no window swap, no flicker, no stale `closeHostWindow`
- * race.
+ * In-place attach (Stage W-4) is currently disabled — too many edge-
+ * case bugs (window destruction mid-attach, partition mismatches,
+ * missed instance-started fallbacks closing the only remaining
+ * window). Always return `false` so the renderer falls back to the
+ * legacy close-host + open-fresh-install-window swap, which is the
+ * pre-W-4 behaviour and the path that's been stable in production.
  *
- * Returns `true` when the claim was accepted (renderer should skip
- * its fallback `closeHostWindow` + `transferHostBoundsToInstall`
- * wiring); `false` when the sender isn't an install-less host's
- * panelView (the renderer should fall back to the legacy
- * close+open swap).
- *
- * The claim is best-effort: stale entries are dropped by `onLaunch`
- * when the target window is closed or already install-backed by
- * the time the launch event lands. `attachInstall()`'s consume
- * also handles the destroyed/closed cases.
+ * The underlying machinery (`pendingAttachClaims`, `attachInstall`,
+ * `detachInstall`, `comfyWindows` keyed by `windowKey`) is left in
+ * place so this revert is a one-line tactical disable; removing the
+ * infra entirely would be a much larger change. See
+ * docs/window-mode-unification-revert.md.
  */
-ipcMain.handle('claim-attach-host', (event, installationId: string) => {
-  // Prune a stale existing claim before testing the duplicate-claim
-  // guard below — a claim whose target window is already destroyed or
-  // has since been install-backed by another launch isn't a real
-  // contender, so a fresh chooser-host pick should be allowed to
-  // overwrite it. See post-unification-code-review.md F2 / F3.
-  const existing = pendingAttachClaims.get(installationId)
-  if (existing !== undefined) {
-    const existingEntry = comfyWindows.get(existing)
-    if (
-      !existingEntry ||
-      existingEntry.window.isDestroyed() ||
-      existingEntry.installationId !== null
-    ) {
-      pendingAttachClaims.delete(installationId)
-    } else {
-      // A live, install-less host already holds a claim for this
-      // install — refuse the duplicate so two chooser hosts racing
-      // to launch the same install can't silently misdirect the
-      // attach to whichever happened to set its claim last. The
-      // renderer falls back to the legacy close-host swap, which
-      // also matches the outcome the second `handleLaunch()` will
-      // get (`errors.alreadyRunning`).
-      return false
-    }
-  }
-  for (const [, entry] of comfyWindows) {
-    if (entry.window.isDestroyed()) continue
-    if (entry.panelView?.webContents !== event.sender) continue
-    if (entry.installationId !== null) return false
-    pendingAttachClaims.set(installationId, entry.windowKey)
-    return true
-  }
+ipcMain.handle('claim-attach-host', (_event, _installationId: string) => {
   return false
 })
 
