@@ -1,4 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import { EventEmitter } from 'events'
 import fs from 'fs'
 import path from 'path'
 import * as settings from '../settings'
@@ -39,6 +40,56 @@ interface PendingDownload {
 const attachedSessions = new WeakSet<Electron.Session>()
 const pendingDownloads = new Map<string, PendingDownload>()
 let mainWindow: BrowserWindow | null = null
+
+/**
+ * Track F — recent terminal downloads kept in main so a title-bar tray
+ * mounted AFTER a download finished can still surface it. Capped at
+ * `RECENT_LIMIT`; oldest entries are evicted FIFO. Re-pushed on every
+ * tray state broadcast and on the `onTitleBarReady` initial-state push.
+ */
+const RECENT_LIMIT = 10
+const recentDownloads: DownloadProgress[] = []
+
+/** Track F — main-process event bus for the title-bar downloads tray.
+ *  Emits `'tray-state-changed'` whenever a progress event is broadcast
+ *  (so subscribers can pull a fresh `getDownloadsTrayState()` snapshot
+ *  without each consumer reimplementing the same projection). The
+ *  listener cap is bumped because every comfy window subscribes once. */
+export const downloadEvents = new EventEmitter()
+downloadEvents.setMaxListeners(50)
+
+/** Track F — snapshot of the downloads tray state. `active` is every
+ *  in-flight (`pending` / `downloading` / `paused`) entry; `recent` is
+ *  the last `RECENT_LIMIT` terminal entries (oldest first). Mirror of
+ *  the payload pushed on `comfy-titlebar:downloads-changed`. */
+export interface DownloadsTrayState {
+  active: DownloadProgress[]
+  recent: DownloadProgress[]
+}
+
+function isTerminalStatus(status: DownloadProgress['status']): boolean {
+  return status === 'completed' || status === 'error' || status === 'cancelled'
+}
+
+function pushRecent(progress: DownloadProgress): void {
+  // Replace any prior entry for the same URL so a download that
+  // transitions completed → re-attempted → completed appears once.
+  const idx = recentDownloads.findIndex((d) => d.url === progress.url)
+  if (idx >= 0) recentDownloads.splice(idx, 1)
+  recentDownloads.push({ ...progress })
+  while (recentDownloads.length > RECENT_LIMIT) recentDownloads.shift()
+}
+
+export function getDownloadsTrayState(): DownloadsTrayState {
+  const active: DownloadProgress[] = []
+  for (const pending of pendingDownloads.values()) {
+    const s = pending.lastProgress.status
+    if (s === 'pending' || s === 'downloading' || s === 'paused') {
+      active.push(pending.lastProgress)
+    }
+  }
+  return { active, recent: recentDownloads.slice() }
+}
 
 export function setMainWindow(win: BrowserWindow | null): void {
   mainWindow = win
@@ -145,6 +196,15 @@ function broadcastProgress(progress: DownloadProgress): void {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('model-download-progress', progress)
   }
+  // Track F — title-bar downloads tray state. Terminal entries land in
+  // the recent buffer first so the snapshot the listener pulls already
+  // reflects the new state. The listener (registered in
+  // src/main/index.ts) fans out to every comfy window's title-bar
+  // webContents.
+  if (isTerminalStatus(progress.status)) {
+    pushRecent(progress)
+  }
+  downloadEvents.emit('tray-state-changed')
 }
 
 function setTaskbarProgress(win: BrowserWindow, progress: DownloadProgress): void {

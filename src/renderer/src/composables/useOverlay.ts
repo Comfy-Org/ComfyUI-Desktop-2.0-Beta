@@ -45,7 +45,7 @@ import type { Installation } from '../types/ipc'
  * `Cancel "Updating ComfyUI"?`).
  */
 
-export type OverlayKind = 'manage' | 'app-update' | 'progress' | 'flow' | 'takeover'
+export type OverlayKind = 'manage' | 'app-update' | 'downloads' | 'progress' | 'flow' | 'takeover'
 
 export interface ManageOverlay {
   kind: 'manage'
@@ -63,6 +63,18 @@ export interface ManageOverlay {
  */
 export interface AppUpdateOverlay {
   kind: 'app-update'
+}
+
+/**
+ * Track F — Tier 1 popover surfaced from the title-bar downloads tray.
+ * Reads its state (active + recently-completed downloads) from the
+ * shared `downloadStore` so the popover and any other consumers
+ * (e.g. the legacy DownloadsPanel) never disagree. No additional
+ * payload — the store owns the data, the overlay just signals
+ * "render the popover".
+ */
+export interface DownloadsOverlay {
+  kind: 'downloads'
 }
 
 export interface ProgressOverlay {
@@ -96,6 +108,7 @@ export interface TakeoverOverlay {
 export type Overlay =
   | ManageOverlay
   | AppUpdateOverlay
+  | DownloadsOverlay
   | ProgressOverlay
   | FlowOverlay
   | TakeoverOverlay
@@ -103,6 +116,7 @@ export type Overlay =
 const TIER: Record<OverlayKind, 1 | 2 | 3> = {
   manage: 1,
   'app-update': 1,
+  downloads: 1,
   progress: 2,
   flow: 3,
   takeover: 3,

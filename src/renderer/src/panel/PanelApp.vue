@@ -15,6 +15,7 @@ import QuickInstallModal from '../views/QuickInstallModal.vue'
 import FirstUseTakeover from '../views/FirstUseTakeover.vue'
 import UpdateBanner from '../components/UpdateBanner.vue'
 import AppUpdatePopover from '../components/AppUpdatePopover.vue'
+import DownloadsTrayPopover from '../components/DownloadsTrayPopover.vue'
 import { useTheme } from '../composables/useTheme'
 import { useSessionStore } from '../stores/sessionStore'
 import { useInstallationStore } from '../stores/installationStore'
@@ -699,6 +700,14 @@ onMounted(async () => {
           installation: inst,
           initialTab: 'update',
         })
+        return
+      }
+      if (payload.kind === 'downloads') {
+        // Track F — title-bar downloads tray click. Mounts the
+        // DownloadsTrayPopover at Tier 1; the popover reads its
+        // data from the renderer's `downloadStore` so no extra
+        // payload is needed.
+        await openOverlay({ kind: 'downloads' })
       }
     })()
   })
@@ -811,6 +820,18 @@ onUnmounted(() => {
          silently when they fire concurrently. -->
     <AppUpdatePopover
       v-if="currentOverlay?.kind === 'app-update'"
+      @close="dismissTakeoverDirect"
+    />
+    <!-- Track F — Tier 1 downloads tray popover surfaced from the
+         title-bar tray. Reads its data from the shared `downloadStore`
+         (same source the legacy `DownloadsPanel` consumes) so the
+         tray and any other downloads surface never disagree. Click-
+         away dismissal is handled the same way as `AppUpdatePopover`:
+         `dismissTakeoverDirect` skips the cancel-prompt because
+         closing the popover only hides the overlay; downloads keep
+         running and the next broadcast repaints if the user reopens. -->
+    <DownloadsTrayPopover
+      v-else-if="currentOverlay?.kind === 'downloads'"
       @close="dismissTakeoverDirect"
     />
     <div

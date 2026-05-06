@@ -124,6 +124,13 @@ vi.mock('../components/AppUpdatePopover.vue', () => ({
     template: '<div data-testid="app-update-popover" />',
   },
 }))
+vi.mock('../components/DownloadsTrayPopover.vue', () => ({
+  default: {
+    name: 'DownloadsTrayPopover',
+    emits: ['close'],
+    template: '<div data-testid="downloads-tray-popover" />',
+  },
+}))
 
 import { mount, flushPromises } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
@@ -160,7 +167,7 @@ interface InstallationLike {
 interface MockApiState {
   panelSwitchCallbacks: ((data: { panel: string; installationId?: string }) => void)[]
   panelTriggerOverlayCallbacks: ((data: {
-    kind: 'app-update' | 'install-update'
+    kind: 'app-update' | 'install-update' | 'downloads'
     installationId?: string
   }) => void)[]
   installationsChangedCallbacks: (() => void)[]
@@ -195,7 +202,10 @@ function installMockApi(initial?: {
     }),
     onPanelTriggerOverlay: vi.fn(
       (
-        cb: (d: { kind: 'app-update' | 'install-update'; installationId?: string }) => void,
+        cb: (d: {
+          kind: 'app-update' | 'install-update' | 'downloads'
+          installationId?: string
+        }) => void,
       ) => {
         state.panelTriggerOverlayCallbacks.push(cb)
         return () => {}
@@ -542,6 +552,19 @@ describe('PanelApp', () => {
     mockState.panelTriggerOverlayCallbacks.forEach((cb) => cb({ kind: 'app-update' }))
     await flushPromises()
     expect(wrapper.find('[data-testid="app-update-popover"]').exists()).toBe(true)
+  })
+
+  it('mounts the DownloadsTrayPopover when a panel-trigger-overlay downloads event arrives (Track F)', async () => {
+    // Track F — the title-bar downloads tray click routes through
+    // `panel-trigger-overlay { kind: 'downloads' }`. PanelApp opens
+    // the popover at Tier 1 (same tier as AppUpdatePopover).
+    const wrapper = mountPanel()
+    await flushPromises()
+    expect(wrapper.find('[data-testid="downloads-tray-popover"]').exists()).toBe(false)
+
+    mockState.panelTriggerOverlayCallbacks.forEach((cb) => cb({ kind: 'downloads' }))
+    await flushPromises()
+    expect(wrapper.find('[data-testid="downloads-tray-popover"]').exists()).toBe(true)
   })
 
   it('ignores install-update events whose installationId does not match the host', async () => {

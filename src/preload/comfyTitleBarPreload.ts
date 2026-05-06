@@ -20,6 +20,30 @@ export interface TitleMenuAnchor {
   y: number
 }
 
+/** Track F — single download entry surfaced by the title-bar tray.
+ *  Mirror of the main-side `DownloadProgress` shape, kept in sync via
+ *  `comfy-titlebar:downloads-changed` push. The title bar renders only
+ *  a status-icon + filename + progress percent — it doesn't need
+ *  byte counters or speed/ETA, so this interface stays minimal. */
+export interface DownloadsTrayEntry {
+  url: string
+  filename: string
+  directory?: string
+  progress: number
+  status: 'pending' | 'downloading' | 'paused' | 'completed' | 'error' | 'cancelled'
+  error?: string
+}
+
+/** Track F — payload pushed by main on `comfy-titlebar:downloads-changed`.
+ *  `active` is every in-flight (`pending` / `downloading` / `paused`)
+ *  download; `recent` is the last N terminal entries (oldest first),
+ *  capped server-side. The tray icon hides entirely when both arrays
+ *  are empty. */
+export interface DownloadsTrayState {
+  active: DownloadsTrayEntry[]
+  recent: DownloadsTrayEntry[]
+}
+
 export interface ComfyTitleBarBridge {
   /** The installation this title bar belongs to. */
   getInstallationId(): string | null
@@ -114,6 +138,15 @@ export interface ComfyTitleBarBridge {
    *  request to the host's panelView with the entry's installationId
    *  so the renderer can open the manage overlay on the update tab. */
   clickInstallUpdatePill(): void
+  /** Track F — subscribe to downloads-tray state pushes from main.
+   *  Initial push happens on `onTitleBarReady` (both install-backed
+   *  and chooser-host branches) so the tray renders correctly even
+   *  when a title bar mounts AFTER an in-flight download started. */
+  onDownloadsChanged(cb: (state: DownloadsTrayState) => void): () => void
+  /** Track F — click handler for the downloads tray. Routes through
+   *  the same `panel-trigger-overlay` channel as the app-update pill
+   *  so the panel renderer can open the downloads popover. */
+  clickDownloadsTray(): void
   /** Tell main this title bar is mounted; main responds with the initial state. */
   ready(): void
 }
@@ -244,6 +277,19 @@ const bridge: ComfyTitleBarBridge = {
   },
   clickInstallUpdatePill: () => {
     ipcRenderer.send('comfy-window:click-install-update-pill')
+  },
+  onDownloadsChanged: (cb) => {
+    const handler = (_event: IpcRendererEvent, state: unknown): void => {
+      const data = (state || {}) as { active?: unknown; recent?: unknown }
+      const active = Array.isArray(data.active) ? (data.active as DownloadsTrayEntry[]) : []
+      const recent = Array.isArray(data.recent) ? (data.recent as DownloadsTrayEntry[]) : []
+      cb({ active, recent })
+    }
+    ipcRenderer.on('comfy-titlebar:downloads-changed', handler)
+    return () => ipcRenderer.removeListener('comfy-titlebar:downloads-changed', handler)
+  },
+  clickDownloadsTray: () => {
+    ipcRenderer.send('comfy-window:click-downloads-tray')
   },
   ready: () => {
     ipcRenderer.send('comfy-window:title-bar-ready')

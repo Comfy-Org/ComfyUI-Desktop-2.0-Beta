@@ -844,9 +844,14 @@ export interface ElectronApi {
    *   - `'app-update'` → Tier 1 popover sourced from `useAppUpdateState`.
    *   - `'install-update'` → Manage overlay (DetailModal) on the
    *     update tab, scoped to the carried `installationId`.
+   *   - `'downloads'` → Track F Tier 1 popover listing in-flight and
+   *     recently-completed downloads from the shared `downloadStore`.
    */
   onPanelTriggerOverlay(
-    callback: (data: { kind: 'app-update' | 'install-update'; installationId?: string }) => void,
+    callback: (data: {
+      kind: 'app-update' | 'install-update' | 'downloads'
+      installationId?: string
+    }) => void,
   ): Unsubscribe
 }
 

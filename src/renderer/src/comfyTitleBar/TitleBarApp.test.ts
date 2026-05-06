@@ -1,6 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 
+interface MockDownloadsTrayEntry {
+  url: string
+  filename: string
+  directory?: string
+  progress: number
+  status: 'pending' | 'downloading' | 'paused' | 'completed' | 'error' | 'cancelled'
+  error?: string
+}
+interface MockDownloadsTrayState {
+  active: MockDownloadsTrayEntry[]
+  recent: MockDownloadsTrayEntry[]
+}
+
 interface MockBridgeState {
   panelChangedCallbacks: ((panel: string) => void)[]
   navStateChangedCallbacks: ((state: { canBack: boolean; canForward: boolean }) => void)[]
@@ -16,6 +29,7 @@ interface MockBridgeState {
     autoUpdate: boolean
   }) => void)[]
   installUpdateAvailableCallbacks: ((state: { available: boolean; version: string | null }) => void)[]
+  downloadsChangedCallbacks: ((state: MockDownloadsTrayState) => void)[]
   setPanelCalls: string[]
   newWindowCalls: number
   fileMenuAnchors: { x: number; y: number }[]
@@ -24,6 +38,7 @@ interface MockBridgeState {
   goForwardCalls: number
   appUpdatePillClicks: number
   installUpdatePillClicks: number
+  downloadsTrayClicks: number
   readyCalls: number
 }
 
@@ -39,6 +54,7 @@ function installMockBridge(opts: { isMac?: boolean; installationId?: string | nu
     inertChangedCallbacks: [],
     appUpdateStateCallbacks: [],
     installUpdateAvailableCallbacks: [],
+    downloadsChangedCallbacks: [],
     setPanelCalls: [],
     newWindowCalls: 0,
     fileMenuAnchors: [],
@@ -47,6 +63,7 @@ function installMockBridge(opts: { isMac?: boolean; installationId?: string | nu
     goForwardCalls: 0,
     appUpdatePillClicks: 0,
     installUpdatePillClicks: 0,
+    downloadsTrayClicks: 0,
     readyCalls: 0,
   }
   const installationId = opts.installationId === undefined ? 'test-id' : opts.installationId
@@ -110,6 +127,13 @@ function installMockBridge(opts: { isMac?: boolean; installationId?: string | nu
     },
     clickInstallUpdatePill: () => {
       state.installUpdatePillClicks += 1
+    },
+    onDownloadsChanged: (cb: (next: MockDownloadsTrayState) => void) => {
+      state.downloadsChangedCallbacks.push(cb)
+      return () => {}
+    },
+    clickDownloadsTray: () => {
+      state.downloadsTrayClicks += 1
     },
     ready: () => {
       state.readyCalls += 1
@@ -662,5 +686,209 @@ describe('TitleBarApp', () => {
     )
     await flushPromises()
     expect(wrapper.find('.title-update-pill.is-app-update').exists()).toBe(false)
+  })
+
+  // ===================================================================
+  // Track F — title-bar downloads tray
+  // ===================================================================
+
+  it('hides the downloads tray when there are no active or recent downloads', async () => {
+    const { default: TitleBarApp } = await import('./TitleBarApp.vue')
+    const wrapper = mount(TitleBarApp)
+    await flushPromises()
+    expect(wrapper.find('.title-downloads-tray').exists()).toBe(false)
+  })
+
+  it('renders the downloads tray with a badge counter when there are in-flight downloads', async () => {
+    const { default: TitleBarApp } = await import('./TitleBarApp.vue')
+    const wrapper = mount(TitleBarApp)
+    await flushPromises()
+    bridgeState.downloadsChangedCallbacks.forEach((cb) =>
+      cb({
+        active: [
+          {
+            url: 'https://example.com/a.safetensors',
+            filename: 'a.safetensors',
+            directory: 'checkpoints',
+            progress: 0.4,
+            status: 'downloading',
+          },
+          {
+            url: 'https://example.com/b.safetensors',
+            filename: 'b.safetensors',
+            directory: 'loras',
+            progress: 0.1,
+            status: 'pending',
+          },
+        ],
+        recent: [],
+      }),
+    )
+    await flushPromises()
+    const tray = wrapper.find('.title-downloads-tray')
+    expect(tray.exists()).toBe(true)
+    // Badge shows the in-flight count (2) — recent entries don't bump
+    // the counter.
+    const badge = wrapper.find('.title-downloads-badge')
+    expect(badge.exists()).toBe(true)
+    expect(badge.text()).toBe('2')
+    // Tooltip + aria-label communicate the same count in plural form.
+    expect(tray.attributes('title')).toBe('2 downloads in progress')
+    expect(tray.attributes('aria-label')).toBe('2 downloads in progress')
+  })
+
+  it('renders the downloads tray icon-only (no badge) when only recent entries exist', async () => {
+    // The badge counts ACTIVE downloads, not recent ones — so a tray
+    // with only completed entries should still show the icon (so the
+    // user can reopen the popover) but without a numeric badge that
+    // would otherwise read as "things still working".
+    const { default: TitleBarApp } = await import('./TitleBarApp.vue')
+    const wrapper = mount(TitleBarApp)
+    await flushPromises()
+    bridgeState.downloadsChangedCallbacks.forEach((cb) =>
+      cb({
+        active: [],
+        recent: [
+          {
+            url: 'https://example.com/a.safetensors',
+            filename: 'a.safetensors',
+            directory: 'checkpoints',
+            progress: 1,
+            status: 'completed',
+          },
+        ],
+      }),
+    )
+    await flushPromises()
+    expect(wrapper.find('.title-downloads-tray').exists()).toBe(true)
+    expect(wrapper.find('.title-downloads-badge').exists()).toBe(false)
+    // Idle label — no in-flight downloads, but the tray is still
+    // reachable so the recent-completed row in the popover stays
+    // accessible until the user dismisses it.
+    expect(wrapper.find('.title-downloads-tray').attributes('title')).toBe('Downloads')
+  })
+
+  it('uses singular copy when exactly one download is in flight', async () => {
+    const { default: TitleBarApp } = await import('./TitleBarApp.vue')
+    const wrapper = mount(TitleBarApp)
+    await flushPromises()
+    bridgeState.downloadsChangedCallbacks.forEach((cb) =>
+      cb({
+        active: [
+          {
+            url: 'https://example.com/a.safetensors',
+            filename: 'a.safetensors',
+            directory: 'checkpoints',
+            progress: 0.4,
+            status: 'downloading',
+          },
+        ],
+        recent: [],
+      }),
+    )
+    await flushPromises()
+    expect(wrapper.find('.title-downloads-tray').attributes('title')).toBe('1 download in progress')
+  })
+
+  it('hides the tray again when the state transitions back to empty', async () => {
+    const { default: TitleBarApp } = await import('./TitleBarApp.vue')
+    const wrapper = mount(TitleBarApp)
+    await flushPromises()
+    bridgeState.downloadsChangedCallbacks.forEach((cb) =>
+      cb({
+        active: [
+          {
+            url: 'https://example.com/a.safetensors',
+            filename: 'a.safetensors',
+            directory: 'checkpoints',
+            progress: 0.5,
+            status: 'downloading',
+          },
+        ],
+        recent: [],
+      }),
+    )
+    await flushPromises()
+    expect(wrapper.find('.title-downloads-tray').exists()).toBe(true)
+    bridgeState.downloadsChangedCallbacks.forEach((cb) => cb({ active: [], recent: [] }))
+    await flushPromises()
+    expect(wrapper.find('.title-downloads-tray').exists()).toBe(false)
+  })
+
+  it('forwards downloads-tray clicks through the bridge', async () => {
+    const { default: TitleBarApp } = await import('./TitleBarApp.vue')
+    const wrapper = mount(TitleBarApp, { attachTo: document.body })
+    await flushPromises()
+    bridgeState.downloadsChangedCallbacks.forEach((cb) =>
+      cb({
+        active: [
+          {
+            url: 'https://example.com/a.safetensors',
+            filename: 'a.safetensors',
+            directory: 'checkpoints',
+            progress: 0.5,
+            status: 'downloading',
+          },
+        ],
+        recent: [],
+      }),
+    )
+    await flushPromises()
+    await wrapper.find('.title-downloads-tray').trigger('click')
+    expect(bridgeState.downloadsTrayClicks).toBe(1)
+    wrapper.unmount()
+  })
+
+  it('disables the downloads tray while the title bar is inert (Tier 3 takeover)', async () => {
+    const { default: TitleBarApp } = await import('./TitleBarApp.vue')
+    const wrapper = mount(TitleBarApp, { attachTo: document.body })
+    await flushPromises()
+    bridgeState.downloadsChangedCallbacks.forEach((cb) =>
+      cb({
+        active: [
+          {
+            url: 'https://example.com/a.safetensors',
+            filename: 'a.safetensors',
+            directory: 'checkpoints',
+            progress: 0.5,
+            status: 'downloading',
+          },
+        ],
+        recent: [],
+      }),
+    )
+    await flushPromises()
+    const tray = wrapper.find('.title-downloads-tray')
+    expect((tray.element as HTMLButtonElement).disabled).toBe(false)
+    bridgeState.inertChangedCallbacks.forEach((cb) => cb(true))
+    await flushPromises()
+    expect((tray.element as HTMLButtonElement).disabled).toBe(true)
+    await tray.trigger('click')
+    expect(bridgeState.downloadsTrayClicks).toBe(0)
+    wrapper.unmount()
+  })
+
+  it('renders the downloads tray on install-less (chooser-host) windows too — downloads are global, not per-install', async () => {
+    bridgeState = installMockBridge({ installationId: null })
+    vi.resetModules()
+    const { default: TitleBarApp } = await import('./TitleBarApp.vue')
+    const wrapper = mount(TitleBarApp)
+    await flushPromises()
+    bridgeState.downloadsChangedCallbacks.forEach((cb) =>
+      cb({
+        active: [
+          {
+            url: 'https://example.com/a.safetensors',
+            filename: 'a.safetensors',
+            directory: 'checkpoints',
+            progress: 0.5,
+            status: 'downloading',
+          },
+        ],
+        recent: [],
+      }),
+    )
+    await flushPromises()
+    expect(wrapper.find('.title-downloads-tray').exists()).toBe(true)
   })
 })

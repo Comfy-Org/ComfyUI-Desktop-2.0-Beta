@@ -22,6 +22,8 @@ import {
   attachSessionDownloadHandler,
   cleanupTempDownloads,
   detachWindowDownloads,
+  downloadEvents,
+  getDownloadsTrayState,
   registerDownloadIpc,
   startAssetDownload,
 } from './lib/comfyDownloadManager'
@@ -1126,6 +1128,11 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
         if (titleBarView.webContents.isDestroyed()) return
         titleBarView.webContents.send('comfy-titlebar:install-update-changed', state)
       })
+      // Track F — push current downloads-tray state so a title bar
+      // mounting AFTER an in-flight download started still paints
+      // the tray. Live updates flow through
+      // `_broadcastDownloadsToTitleBars` once mounted.
+      notifyTitleBarDownloads(titleBarView)
     }
     // Pre-warm the title-menu popup so the user's first File / Install
     // click doesn't pay the BrowserWindow construction + HTML/JS load
@@ -1601,6 +1608,11 @@ function openChooserHostWindow(): BrowserWindow {
         'comfy-titlebar:app-update-state-changed',
         updater.getCurrentUpdateState(),
       )
+      // Track F — chooser hosts also surface the downloads tray;
+      // model downloads are a global concern, not per-install, so the
+      // chooser-host title bar shows them too. Mirror of the
+      // install-backed branch initial push.
+      notifyTitleBarDownloads(titleBarView)
     }
     // Pre-warm the title-menu popup so the user's first File click
     // doesn't pay the BrowserWindow construction + HTML/JS load cost.
@@ -2045,6 +2057,49 @@ ipcMain.on('comfy-window:click-install-update-pill', (event) => {
     kind: 'install-update',
     installationId,
   })
+})
+
+/**
+ * Track F — push the downloads-tray snapshot to a single title bar.
+ * Used both for the initial state push on `onTitleBarReady` (slow path
+ * — a title bar mounting AFTER an in-flight download started still
+ * paints correctly) and from the broadcast helper below for live
+ * updates. The payload shape is mirrored verbatim by the
+ * `DownloadsTrayState` interface in `comfyTitleBarPreload.ts`.
+ */
+function notifyTitleBarDownloads(titleBarView: WebContentsView): void {
+  if (titleBarView.webContents.isDestroyed()) return
+  titleBarView.webContents.send('comfy-titlebar:downloads-changed', getDownloadsTrayState())
+}
+
+/**
+ * Track F — fan out a downloads-tray state change to every host
+ * window's title-bar webContents. Subscribed once at startup to
+ * `downloadEvents.on('tray-state-changed', ...)`. The chooser-host
+ * title bar receives the same payload as install-backed title bars;
+ * downloads are a global concern, not per-install.
+ */
+function _broadcastDownloadsToTitleBars(): void {
+  for (const entry of comfyWindows.values()) {
+    notifyTitleBarDownloads(entry.titleBarView)
+  }
+}
+
+/**
+ * Track F — title-bar downloads-tray click. Routes through
+ * `panel-trigger-overlay` so the panel renderer can mount the Tier 1
+ * downloads popover via `openOverlay`. The popover reads its data
+ * from the renderer's `downloadStore` (already wired via
+ * `onModelDownloadProgress`) so the click does not need to ship any
+ * additional payload.
+ */
+ipcMain.on('comfy-window:click-downloads-tray', (event) => {
+  const found = findEntryByTitleBarSender(event.sender)
+  if (!found) return
+  const { entry } = found
+  const panelView = entry.panelView
+  if (!panelView || panelView.webContents.isDestroyed()) return
+  panelView.webContents.send('panel-trigger-overlay', { kind: 'downloads' })
 })
 
 /**
@@ -2751,6 +2806,12 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
     // pick up live transitions automatically (initial state is
     // pushed on `comfy-window:title-bar-ready` for the slow path).
     updater.onUpdateStateChanged(_broadcastAppUpdateStateToTitleBars)
+    // Track F — fan out downloads-tray state changes to every host
+    // window's title-bar. Subscribed once at startup; the helper
+    // iterates `comfyWindows` so newly-opened windows pick up live
+    // transitions automatically (initial state is pushed on
+    // `comfy-window:title-bar-ready` for the slow path).
+    downloadEvents.on('tray-state-changed', _broadcastDownloadsToTitleBars)
     // Tray / docking is disabled while the unified-window flow is being
     // rebuilt — closing the last window quits the app instead of
     // collapsing it into a hidden background process. The `onAppClose`

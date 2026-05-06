@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed, useTemplateRef } from 'vue'
 import {
+  ArrowDownToLine,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -30,6 +31,27 @@ type ComfyPanelKey =
 interface MenuAnchor {
   x: number
   y: number
+}
+
+/** Track F — single download entry surfaced by the title-bar tray.
+ *  Inline mirror of `DownloadsTrayEntry` in
+ *  `src/preload/comfyTitleBarPreload.ts` — kept in sync because the
+ *  title-bar renderer can't import preload TS directly (only its
+ *  generated `.d.ts` would be visible, and we ship neither). */
+interface DownloadsTrayEntry {
+  url: string
+  filename: string
+  directory?: string
+  progress: number
+  status: 'pending' | 'downloading' | 'paused' | 'completed' | 'error' | 'cancelled'
+  error?: string
+}
+
+/** Track F — payload pushed by main on `comfy-titlebar:downloads-changed`.
+ *  Inline mirror of `DownloadsTrayState` in the preload file. */
+interface DownloadsTrayState {
+  active: DownloadsTrayEntry[]
+  recent: DownloadsTrayEntry[]
 }
 
 interface Bridge {
@@ -90,6 +112,17 @@ interface Bridge {
   clickAppUpdatePill: () => void
   /** Phase 3 §18 — click handler for the install-update pill. */
   clickInstallUpdatePill: () => void
+  /** Track F — downloads tray state pushes from main. The payload
+   *  carries both in-flight downloads (`active`) and the most recent
+   *  terminal entries (`recent`, capped server-side at 10). The tray
+   *  is hidden entirely when both arrays are empty so it doesn't
+   *  squat in the steady state. Pushed initially on `ready()` and
+   *  on every state change (broadcast by the download manager). */
+  onDownloadsChanged: (cb: (state: DownloadsTrayState) => void) => () => void
+  /** Track F — click handler for the downloads tray. Routes through
+   *  the same `panel-trigger-overlay` channel as the update pills so
+   *  the panel renderer can mount the downloads popover. */
+  clickDownloadsTray: () => void
   ready: () => void
 }
 
@@ -269,6 +302,43 @@ function handleInstallUpdatePill(): void {
   bridge?.clickInstallUpdatePill()
 }
 
+/**
+ * Track F — title-bar downloads tray. Sits in the left cluster next
+ * to the app-update pill but visually distinct: an icon-only button
+ * with a small badge counter (vs the update pill's text + accent
+ * fill) and a different Lucide icon (`ArrowDownToLine` vs the
+ * update pill's `Download`) so the user reads "downloads tray" vs
+ * "update available pill" at a glance.
+ *
+ * Hidden entirely in the steady state (no active or recent
+ * downloads) — there's no permanent empty-tray squatting. The
+ * badge counts in-flight downloads only; recently-completed
+ * entries surface in the popover but don't bump the count (so the
+ * count reads as "what's still working").
+ *
+ * Click sends `clickDownloadsTray()` which routes through main and
+ * mounts the downloads popover in the panel renderer (same
+ * `panel-trigger-overlay` pipeline the update pills use). Disabled
+ * during a Tier 3 takeover via `isInert`, matching the rest of the
+ * informational title-bar pills.
+ */
+const downloadsState = ref<DownloadsTrayState>({ active: [], recent: [] })
+
+const downloadsActiveCount = computed(() => downloadsState.value.active.length)
+const showDownloadsTray = computed(
+  () => downloadsState.value.active.length > 0 || downloadsState.value.recent.length > 0,
+)
+const downloadsTrayLabel = computed<string>(() => {
+  const n = downloadsActiveCount.value
+  if (n === 0) return 'Downloads'
+  return `${n} download${n === 1 ? '' : 's'} in progress`
+})
+
+function handleDownloadsTray(): void {
+  if (isInert.value) return
+  bridge?.clickDownloadsTray()
+}
+
 /** Body luminance test — drives is-light styling (lighter hover state). */
 const isLight = computed(() => {
   const bg = themeBg.value
@@ -355,6 +425,7 @@ let unsubMenuClosed: (() => void) | undefined
 let unsubInert: (() => void) | undefined
 let unsubAppUpdate: (() => void) | undefined
 let unsubInstallUpdate: (() => void) | undefined
+let unsubDownloads: (() => void) | undefined
 
 /** Drop the hover gate immediately when input leaves the title-bar
  *  webContents — covers the case where a native menu (Menu.popup) or
@@ -411,6 +482,9 @@ onMounted(() => {
   unsubInstallUpdate = bridge.onInstallUpdateAvailable((next) => {
     installUpdateState.value = next
   })
+  unsubDownloads = bridge.onDownloadsChanged((next) => {
+    downloadsState.value = next
+  })
   window.addEventListener('blur', handleWindowBlur)
   window.addEventListener('pointermove', handlePointerMove)
   document.documentElement.addEventListener('pointerleave', handlePointerLeave)
@@ -432,6 +506,7 @@ onUnmounted(() => {
   unsubInert?.()
   unsubAppUpdate?.()
   unsubInstallUpdate?.()
+  unsubDownloads?.()
   window.removeEventListener('blur', handleWindowBlur)
   window.removeEventListener('pointermove', handlePointerMove)
   document.documentElement.removeEventListener('pointerleave', handlePointerLeave)
@@ -495,6 +570,30 @@ onUnmounted(() => {
         <Download v-if="appUpdateState.kind === 'available'" :size="14" />
         <RefreshCw v-else-if="appUpdateState.kind === 'ready'" :size="14" />
         <span class="title-update-pill-label">{{ appUpdatePillLabel }}</span>
+      </button>
+      <!-- Track F — downloads tray. Icon-only chip with a small badge
+           counter. Hidden in the steady state (no active or recent
+           downloads) so the title bar reads clean. The icon
+           (`ArrowDownToLine`) is intentionally distinct from the
+           update pills' `Download` icon so the user reads "downloads
+           tray" vs "update available pill" at a glance. Inert-disabled
+           to match the rest of the informational pills. -->
+      <button
+        v-if="showDownloadsTray"
+        type="button"
+        class="title-downloads-tray"
+        :class="{ 'has-active': downloadsActiveCount > 0 }"
+        :disabled="isInert"
+        :title="downloadsTrayLabel"
+        :aria-label="downloadsTrayLabel"
+        @click="handleDownloadsTray"
+      >
+        <ArrowDownToLine :size="14" />
+        <span
+          v-if="downloadsActiveCount > 0"
+          class="title-downloads-badge"
+          aria-hidden="true"
+        >{{ downloadsActiveCount }}</span>
       </button>
     </div>
 
@@ -818,6 +917,78 @@ onUnmounted(() => {
 }
 .title-update-pill-label {
   white-space: nowrap;
+}
+
+/* --- Track F — downloads tray ---
+   Icon-only chip sitting next to the app-update pill. Distinct from
+   the update pills in three ways so the user reads them at a glance
+   as separate things:
+     1. Icon: `ArrowDownToLine` (vs Download / RefreshCw on the
+        update pills).
+     2. Chrome: neutral surface tint (no blue/green accent) — the
+        tray is a passive informational entry-point, not a CTA.
+     3. Shape: square-ish padding + rounded corners (vs the update
+        pills' fully-pilled radius).
+   Padding/font-size kept tight (matching the update pills) so the
+   tray fits in the 36px content area of the 37px title bar without
+   growing it. */
+.title-downloads-tray {
+  -webkit-app-region: no-drag;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 3px 6px;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  border-radius: 6px;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.06);
+  color: inherit;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  transition: background-color 0.12s, border-color 0.12s, opacity 0.12s;
+}
+.title-bar.is-hover-active .title-downloads-tray:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.28);
+}
+.title-bar.is-light .title-downloads-tray {
+  background: rgba(0, 0, 0, 0.04);
+  border-color: rgba(0, 0, 0, 0.14);
+}
+.title-bar.is-light.is-hover-active .title-downloads-tray:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.09);
+  border-color: rgba(0, 0, 0, 0.24);
+}
+.title-downloads-tray:focus-visible {
+  outline: 2px solid var(--accent, #60a5fa);
+  outline-offset: 2px;
+}
+/* Tier 3 takeover dimming — matches the other inert-disabled pills. */
+.title-bar.is-inert .title-downloads-tray:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+/* Badge counter — small numeric pill next to the icon when there
+   are in-flight downloads. Suppressed in the icon-only case (recent
+   entries with no active ones) so the tray collapses to just the
+   icon when nothing is moving. */
+.title-downloads-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--accent, #60a5fa);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
 }
 
 /* Dropdown popups are now native OS menus rendered via Menu.popup() in
