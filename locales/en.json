@@ -382,7 +382,13 @@
     "pickTitle": "How would you like to use ComfyUI?",
     "pickLead": "You can change this later — additional installs of either kind can be added from the launcher at any time.",
     "localLabel": "Local install",
-    "localDesc": "Install and run ComfyUI on this machine. Works offline and keeps everything under your control."
+    "localDesc": "Install and run ComfyUI on this machine. Works offline and keeps everything under your control.",
+    "localBranchTitle": "Existing ComfyUI install detected",
+    "localBranchLead": "We found a ComfyUI Desktop install already on this machine. Bring it forward into a fresh Standalone install, or start over with a clean install instead.",
+    "localBranchMigrateLabel": "Migrate existing install",
+    "localBranchMigrateDesc": "Carry workflows, custom nodes, settings, and user data over from your existing install.",
+    "localBranchInstallNewLabel": "Install fresh",
+    "localBranchInstallNewDesc": "Start with a brand new Standalone install. Your existing install is left untouched."
   },
 
   "tray": {

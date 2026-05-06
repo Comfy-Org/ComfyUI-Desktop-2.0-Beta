@@ -21,6 +21,7 @@ import { useInstallationStore } from '../stores/installationStore'
 import { useProgressStore } from '../stores/progressStore'
 import { useLauncherPrefs } from '../composables/useLauncherPrefs'
 import { useListAction } from '../composables/useListAction'
+import { useMigrateAction } from '../composables/useMigrateAction'
 import { useOverlay, type FlowComponent } from '../composables/useOverlay'
 import type { ActionResult, Installation, ShowProgressOpts } from '../types/ipc'
 
@@ -126,6 +127,19 @@ const firstUseRef = ref<InstanceType<typeof FirstUseTakeover> | null>(null)
  */
 const chainingFirstUseToNewInstall = ref(false)
 
+/**
+ * Post-Phase-3 polish (Track D item 4) — installation id of the
+ * Standalone install that the first-use chain (new-install or
+ * migration) just kicked off. Captured from the corresponding
+ * `show-progress` while a chain flag is set. The progressStore
+ * watcher below auto-launches the install once its op finishes
+ * successfully, so the user lands on a running ComfyUI as the
+ * natural endpoint of first-use without having to click play again.
+ * Cleared after launch (or on chain cancel) so the next first-use
+ * replay starts clean.
+ */
+const pendingFirstUseAutoLaunchId = ref<string | null>(null)
+
 const sessionStore = useSessionStore()
 const installationStore = useInstallationStore()
 const progressStore = useProgressStore()
@@ -198,6 +212,18 @@ async function handleShowProgress(opts: ShowProgressOpts): Promise<void> {
   // the install suffix for the cancel-prompt copy so the prompt reads
   // `Cancel "Updating ComfyUI"?` instead of leaking the install name.
   const operationName = opts.title.split(' — ')[0] || opts.title
+  // Track D item 4 — capture the operation's installation id when a
+  // first-use chain is in flight (new-install or migrate). The
+  // progressStore watcher above auto-launches the resulting install
+  // once the op finishes successfully. New-install ops carry the
+  // new install's id directly; migrate ops carry the legacy install's
+  // id and the watcher resolves the resulting Standalone install
+  // from the store after the op finishes. Only the first chained op
+  // captures the id — subsequent show-progress calls (e.g. user
+  // re-opens an in-progress modal) leave it untouched.
+  if (chainingFirstUseToNewInstall.value && pendingFirstUseAutoLaunchId.value === null) {
+    pendingFirstUseAutoLaunchId.value = opts.installationId
+  }
   const isRunning = sessionStore.isRunning(opts.installationId)
   const ok = await openOverlay(
     isRunning
@@ -287,7 +313,10 @@ async function openFirstUseTakeover(): Promise<void> {
   if (!ok) return
   await nextTick()
   const state = await statePromise
-  await firstUseRef.value?.open({ skipPick: state.skipPick })
+  await firstUseRef.value?.open({
+    skipPick: state.skipPick,
+    hasLegacyDesktop: state.hasLegacyDesktop,
+  })
 }
 
 /**
@@ -303,12 +332,30 @@ function dismissTakeoverDirect(): void {
 }
 
 /** First-use takeover Cloud-branch pick — one-shot completion. The
- *  chooser body underneath is what the user lands on (where they can
- *  pick the cloud install to launch via the normal launch flow). */
+ *  chooser body underneath is what the user lands on; we additionally
+ *  auto-launch the always-present Cloud install (Track D item 4) so
+ *  the user reaches a running ComfyUI as the natural endpoint of
+ *  first-use without having to click play again. The launch goes
+ *  through the same `useListAction` pipeline the chooser uses
+ *  (close-host-window-on-instance-started, etc.). If the cloud
+ *  install can't be found for any reason we still mark complete and
+ *  close the takeover — the chooser body underneath is the fallback. */
 async function handleFirstUseComplete(): Promise<void> {
   await launcherPrefs.markFirstUseCompleted()
   chainingFirstUseToNewInstall.value = false
   dismissTakeoverDirect()
+  // Find the auto-seeded Cloud install. The store may not be hydrated
+  // yet on first-launch, so we fall back to a fresh fetch via main.
+  let cloud = installationStore.installations.find((i) => i.sourceCategory === 'cloud') ?? null
+  if (!cloud) {
+    try {
+      const all = await window.api.getInstallations()
+      cloud = all.find((i) => i.sourceCategory === 'cloud') ?? null
+    } catch {}
+  }
+  if (cloud) {
+    void launchInstallationAfterFirstUse(cloud)
+  }
 }
 
 /** First-use takeover Local-branch pick — chain into the new-install
@@ -318,7 +365,57 @@ async function handleFirstUseComplete(): Promise<void> {
  *  the new-install close path (see `handleNewInstallTakeoverClose`). */
 function handleFirstUseChainLocal(): void {
   chainingFirstUseToNewInstall.value = true
+  pendingFirstUseAutoLaunchId.value = null
   void switchPanel('new-install')
+}
+
+/** First-use takeover migrate-branch pick (Track D item 5) — runs
+ *  the migrate-to-standalone action against the auto-tracked Legacy
+ *  Desktop install. Same shape as the chain-local path: the
+ *  migration progress op flows through `handleShowProgress` (Tier 2
+ *  progress modal), capturing `pendingFirstUseAutoLaunchId` for the
+ *  resulting Standalone install along the way. The progressStore
+ *  watcher below auto-launches once the op finishes successfully. */
+const { confirmMigration } = useMigrateAction()
+async function handleFirstUseChainMigrate(): Promise<void> {
+  // Find the auto-tracked Legacy Desktop install.
+  let legacy = installationStore.installations.find((i) => i.sourceId === 'desktop') ?? null
+  if (!legacy) {
+    try {
+      const all = await window.api.getInstallations()
+      legacy = all.find((i) => i.sourceId === 'desktop') ?? null
+    } catch {}
+  }
+  if (!legacy) {
+    // Detection drift — main flagged hasLegacyDesktop=true but the
+    // install is gone now. Bail to chain-local so the user still gets
+    // to the new-install Standalone path.
+    handleFirstUseChainLocal()
+    return
+  }
+  // confirmMigration shows its own modal (variant pick / preview /
+  // confirm); a `null` return means user cancelled, in which case we
+  // leave the takeover mounted on the localBranch step (no state
+  // change).
+  const result = await confirmMigration(legacy)
+  if (!result) return
+
+  // Pre-mark the chain so the new install kicked off by migration
+  // gets captured as the auto-launch target. The migration emits
+  // installations-changed when the new Standalone install is added,
+  // and `handleShowProgress` carries the `installationId` through —
+  // we record it there.
+  chainingFirstUseToNewInstall.value = true
+  pendingFirstUseAutoLaunchId.value = null
+  // Dismiss the takeover before kicking off the migration so the
+  // Tier 2 progress modal isn't blocked by the takeover overlay.
+  dismissTakeoverDirect()
+  await handleShowProgress({
+    installationId: legacy.id,
+    title: `Migrating — ${legacy.name}`,
+    apiCall: () => window.api.runAction(legacy!.id, 'migrate-to-standalone', result),
+    cancellable: true,
+  })
 }
 
 /** Wrapper around `closeOverlay` for the new-install takeover branch
@@ -329,11 +426,91 @@ function handleFirstUseChainLocal(): void {
  *  treat any close arriving via this chain as completion. */
 async function handleNewInstallTakeoverClose(): Promise<void> {
   if (chainingFirstUseToNewInstall.value) {
-    chainingFirstUseToNewInstall.value = false
     await launcherPrefs.markFirstUseCompleted()
+    // Don't clear `chainingFirstUseToNewInstall` yet — the auto-launch
+    // watcher uses it together with `pendingFirstUseAutoLaunchId` to
+    // decide whether to fire. The watcher clears both after launch.
   }
   dismissTakeoverDirect()
 }
+
+/** Track D item 4 — fire the install's launch action through the
+ *  same `useListAction` pipeline ChooserView uses for tile clicks.
+ *  Mirrors the `handleChooserPick` shape (port-conflict resolution,
+ *  telemetry, close-host-window-on-instance-started) so first-use
+ *  ends with a running ComfyUI in its own window and the dashboard
+ *  host shuts down behind it. */
+async function launchInstallationAfterFirstUse(installation: Installation): Promise<void> {
+  if (sessionStore.isRunning(installation.id)) {
+    await window.api.focusComfyWindow(installation.id)
+    void window.api.closeHostWindow()
+    return
+  }
+  const actions = await window.api.getListActions(installation.id)
+  const launchAction = actions.find((a) => a.id === 'launch')
+    ?? actions.find((a) => a.style === 'primary')
+    ?? null
+  if (!launchAction) return
+  await window.api.transferHostBoundsToInstall(installation.id)
+  pendingPickUnsub?.()
+  pendingPickUnsub = window.api.onInstanceStarted((data) => {
+    if (data.installationId !== installation.id) return
+    pendingPickUnsub?.()
+    pendingPickUnsub = null
+    void window.api.closeHostWindow()
+  })
+  await executeChooserAction(installation, launchAction)
+}
+
+/** Track D item 4 — watch progressStore for the new-install /
+ *  migration op finishing and auto-launch the resulting Standalone
+ *  install. The chain flag (`chainingFirstUseToNewInstall`) gates
+ *  the watcher so we only auto-launch when the op was actually
+ *  driven by the first-use chain. The captured id
+ *  (`pendingFirstUseAutoLaunchId`) is set in `handleShowProgress` at
+ *  the moment the chained op begins. */
+watch(
+  () => {
+    const id = pendingFirstUseAutoLaunchId.value
+    if (!id) return null
+    const op = progressStore.operations.get(id)
+    return op && op.finished ? op : null
+  },
+  async (op) => {
+    if (!op) return
+    if (!chainingFirstUseToNewInstall.value) return
+    const id = pendingFirstUseAutoLaunchId.value
+    chainingFirstUseToNewInstall.value = false
+    pendingFirstUseAutoLaunchId.value = null
+    if (!id) return
+    if (op.cancelRequested || op.error || !op.result?.ok) return
+    // The migrate-to-standalone op runs against the legacy install
+    // but produces a fresh Standalone install — wait for the store
+    // to reflect the new install, then launch the most-recently-
+    // created non-cloud, non-legacy local install (the migration's
+    // result). For new-install ops, the captured id is the new
+    // install's id directly so this branch resolves immediately.
+    let inst = installationStore.installations.find((i) => i.id === id) ?? null
+    if (!inst || inst.sourceId === 'desktop') {
+      // Migration case — the captured id was the legacy install. Find
+      // the freshly-added Standalone install (it's the newest install
+      // with `copiedFrom === id`, falling back to the newest local).
+      try {
+        await installationStore.fetchInstallations()
+      } catch {}
+      inst = installationStore.installations.find(
+        (i) => (i as unknown as { copiedFrom?: string }).copiedFrom === id,
+      ) ?? installationStore.installations
+        .filter((i) => i.sourceCategory === 'local')
+        .sort((a, b) => Date.parse(String(b.createdAt ?? '')) - Date.parse(String(a.createdAt ?? '')))[0]
+        ?? null
+    }
+    if (inst) {
+      void launchInstallationAfterFirstUse(inst)
+    }
+  },
+  { deep: false },
+)
 
 /**
  * Switch the underlying panel body. Flow keys (`new-install` / `track`
@@ -713,6 +890,7 @@ onUnmounted(() => {
         ref="firstUseRef"
         @complete="handleFirstUseComplete"
         @chain-local="handleFirstUseChainLocal"
+        @chain-migrate="handleFirstUseChainMigrate"
       />
     </div>
 

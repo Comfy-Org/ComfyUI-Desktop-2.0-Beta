@@ -37,10 +37,10 @@
  * are reset.
  */
 import { ref, computed, onMounted } from 'vue'
-import { Box, Cloud } from 'lucide-vue-next'
+import { ArrowRightLeft, Box, Cloud, Download } from 'lucide-vue-next'
 import TakeoverHeader from '../components/TakeoverHeader.vue'
 
-type Step = 'consent' | 'mirrors' | 'pick'
+type Step = 'consent' | 'mirrors' | 'pick' | 'localBranch'
 
 const emit = defineEmits<{
   /** Cloud branch picked, or Local branch finished — host should flip
@@ -50,6 +50,14 @@ const emit = defineEmits<{
    *  Tier 3 takeover (Tier 3 → Tier 3 swap is silent) and mark
    *  `firstUseCompleted` once new-install ends successfully. */
   'chain-local': []
+  /** Local-branch follow-up: a Legacy Desktop install was detected
+   *  and the user chose to migrate it instead of installing fresh.
+   *  Host runs the migration flow (`useMigrateAction.confirmMigration`
+   *  → `runAction('migrate-to-standalone', …)` via `show-progress`)
+   *  on the auto-tracked desktop install and marks `firstUseCompleted`
+   *  once the migration finishes successfully. Same shape as
+   *  `chain-local` — host owns completion + auto-launch. */
+  'chain-migrate': []
 }>()
 
 const step = ref<Step>('consent')
@@ -63,6 +71,13 @@ const locale = ref('en')
  *  instead of advancing to `pick`. Detection lives in main —
  *  `window.api.getFirstUseState()` — and is plumbed in via `open()`. */
 const skipPick = ref(false)
+/** Post-Phase-3 polish — when a Legacy Desktop install is detected on
+ *  the machine (auto-tracked at startup as `sourceId === 'desktop'`),
+ *  picking Local opens a follow-up sub-step where the user picks
+ *  Migrate vs Install-new instead of immediately chaining into the
+ *  new-install takeover. Detection lives in main; the host plumbs the
+ *  flag in via `open()`. */
+const hasLegacyDesktop = ref(false)
 
 const isChinese = computed(() => locale.value.startsWith('zh'))
 
@@ -104,7 +119,24 @@ function pickCloud(): void {
   emit('complete')
 }
 
+/** Local branch — when a Legacy Desktop install is on the machine
+ *  the user gets a Migrate-vs-Install-new sub-step before the chain
+ *  fires; otherwise we go straight to the new-install chain.
+ *  Detection (`hasLegacyDesktop`) is computed by main and plumbed in
+ *  via `open()`. */
 function pickLocal(): void {
+  if (hasLegacyDesktop.value) {
+    step.value = 'localBranch'
+  } else {
+    emit('chain-local')
+  }
+}
+
+function chooseMigrate(): void {
+  emit('chain-migrate')
+}
+
+function chooseInstallNew(): void {
   emit('chain-local')
 }
 
@@ -112,11 +144,16 @@ interface OpenOpts {
   /** Suppress the cloud-vs-local pick — caller has already detected
    *  that the user has prior launcher usage. Defaults to false. */
   skipPick?: boolean
+  /** Surface the migrate-vs-install-new sub-step on the Local branch
+   *  because a Legacy Desktop install was detected on this machine.
+   *  Defaults to false. */
+  hasLegacyDesktop?: boolean
 }
 
 async function open(opts: OpenOpts = {}): Promise<void> {
   step.value = 'consent'
   skipPick.value = opts.skipPick === true
+  hasLegacyDesktop.value = opts.hasLegacyDesktop === true
   // Pre-load existing telemetry preference so the toggle reflects the
   // user's current persisted choice if the takeover is replaying after
   // a mid-flow cancel (the consent step is the only one that can flip
@@ -207,10 +244,59 @@ defineExpose({ open })
             </button>
           </div>
         </template>
+
+        <!-- Step 4 (conditional): Local + Legacy Desktop detected.
+             A Legacy Desktop install was auto-tracked at startup
+             (sourceId === 'desktop'), so before chaining into the
+             new-install Standalone takeover we ask whether the user
+             wants to migrate that install (carries data over via
+             `migrate-to-standalone`) or install fresh. The two tiles
+             use the same large-square layout as the cloud-vs-local
+             pick — same fork-style click target. The Back link in
+             the footer returns to the pick step in case the user
+             changes their mind. -->
+        <template v-else-if="step === 'localBranch'">
+          <h3 class="first-use-step-title">{{ $t('firstUse.localBranchTitle') }}</h3>
+          <p class="first-use-lead">{{ $t('firstUse.localBranchLead') }}</p>
+          <div class="first-use-fork">
+            <button
+              class="first-use-fork-tile"
+              data-testid="first-use-local-migrate"
+              @click="chooseMigrate"
+            >
+              <div class="first-use-fork-icon"><ArrowRightLeft :size="64" :stroke-width="1.5" /></div>
+              <div class="first-use-fork-title">{{ $t('firstUse.localBranchMigrateLabel') }}</div>
+              <div class="first-use-fork-desc">{{ $t('firstUse.localBranchMigrateDesc') }}</div>
+            </button>
+            <button
+              class="first-use-fork-tile"
+              data-testid="first-use-local-install-new"
+              @click="chooseInstallNew"
+            >
+              <div class="first-use-fork-icon"><Download :size="64" :stroke-width="1.5" /></div>
+              <div class="first-use-fork-title">{{ $t('firstUse.localBranchInstallNewLabel') }}</div>
+              <div class="first-use-fork-desc">{{ $t('firstUse.localBranchInstallNewDesc') }}</div>
+            </button>
+          </div>
+        </template>
       </div>
 
       <div class="wizard-footer">
-        <div class="wizard-back-placeholder"></div>
+        <!-- Back nav for the localBranch sub-step. The user reached
+             this step by picking Local at the pick step; if they
+             change their mind the Back link returns them to the pick
+             step (the only other reachable predecessor — consent
+             can't loop). -->
+        <div class="wizard-back-placeholder">
+          <button
+            v-if="step === 'localBranch'"
+            class="wizard-back"
+            data-testid="first-use-local-branch-back"
+            @click="step = 'pick'"
+          >
+            ← {{ $t('common.back') }}
+          </button>
+        </div>
         <div></div>
         <template v-if="step === 'consent'">
           <button
