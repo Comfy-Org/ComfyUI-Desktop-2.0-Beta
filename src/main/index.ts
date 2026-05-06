@@ -327,11 +327,21 @@ interface ComfyWindowEntry {
    * Window-mode unification (Stage W-3b) — symmetric undo for
    * `attachInstall()`. Set by attach (closes over every event listener
    * and map mutation it set up); called by the close handler before
-   * view teardown AND (W-3c) by `detachInstall()` to flip the host
-   * back to install-less mode in place. `null` whenever the entry is
-   * not currently install-backed.
+   * view teardown AND by `detachInstall()` to flip the host back to
+   * install-less mode in place. `null` whenever the entry is not
+   * currently install-backed.
    */
   _installCleanup: (() => void) | null
+  /**
+   * Window-mode unification (Stage W-3c) — flip this host in place
+   * from install-backed to install-less (chooser) mode. Delegates to
+   * the freestanding `_detachInstallImpl(entry)` helper; exposed as a
+   * method so callers (W-4: `returnToDashboard`, chooser-tile re-
+   * attach) can invoke it without importing the helper. No-op when
+   * the entry is already install-less. Always populated (set in
+   * `createHostWindow()`).
+   */
+  detachInstall: () => void
 }
 /**
  * All host windows (install-backed and install-less). Window-mode
@@ -1317,7 +1327,13 @@ function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowResult {
     titleBarText: opts.initialTitleBarText,
     sourceCategory: opts.initialSourceCategory,
     _installCleanup: null,
+    // Bound below so it can self-reference the freshly-created entry.
+    detachInstall: () => {},
   }
+  // Stage W-3c — bind the detach method to the freestanding impl.
+  // Done post-literal so the closure captures the registered entry
+  // by reference, not by a copy at literal-build time.
+  entry.detachInstall = () => _detachInstallImpl(entry)
   registerHostEntry(entry)
 
   return { windowKey, comfyWindow, titleBarView, comfyView, entry, layoutViews }
@@ -1705,9 +1721,9 @@ function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts): void {
   comfyContents.loadURL(comfyUrl)
 
   // Symmetric undo. Called by the close handler (always) and by
-  // `detachInstall()` (W-3c) when the host flips back to chooser
-  // mode in place. Idempotent — sets `_installCleanup = null` on
-  // first call so subsequent calls are no-ops.
+  // `detachInstall()` when the host flips back to chooser mode in
+  // place. Idempotent — sets `_installCleanup = null` on first call
+  // so subsequent calls are no-ops.
   entry._installCleanup = (): void => {
     if (entry._installCleanup === null) return
     entry._installCleanup = null
@@ -1731,6 +1747,99 @@ function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts): void {
     }
     entry.comfyUrl = ''
   }
+}
+
+/**
+ * Window-mode unification (Stage W-3c) — flip an install-backed host
+ * window in place to install-less (chooser) mode. The symmetric undo
+ * to `attachInstall()`. Bound onto `entry.detachInstall` by
+ * `createHostWindow()`; the underscore-prefixed name signals that
+ * callers should invoke `entry.detachInstall()` rather than this
+ * freestanding helper directly.
+ *
+ * Steps:
+ *   1. Runs `entry._installCleanup()` — `attachInstall()`'s stashed
+ *      undo: off all install-bound comfyContents listeners, cancel
+ *      the fail-retry timer, ipc.stopRunning the running session,
+ *      clear the install-keyed maps + the secondary index, and reset
+ *      `entry.installationId` / `entry.comfyUrl`.
+ *   2. Navigates the comfyView to `about:blank` so the loaded
+ *      ComfyUI page is unloaded (releases its renderer process). The
+ *      comfyView is kept alive (not destroyed) so the host can be
+ *      re-attached later without rebuilding.
+ *   3. Resets the title-bar identity (`titleBarText` →
+ *      `'Choose an install'`, `sourceCategory` → `null`) and pushes
+ *      to the live title-bar.
+ *   4. Resets the OS-level window title.
+ *   5. Re-paints the title bar to the launcher-theme surface
+ *      (chooser hosts derive their theme from the launcher setting,
+ *      not from a ComfyUI frontend).
+ *   6. Resets `entry.activePanel` to `'comfy'` (which now resolves
+ *      to the chooser body via `computeBodyMode`) and ensures a
+ *      panelView with the chooser body exists.
+ *   7. Calls `entry.layoutViews()` so the chooser body becomes
+ *      visible immediately.
+ *
+ * No-op when the entry is already install-less (no install backing
+ * to detach). Does not destroy the comfyView or the BrowserWindow
+ * — see the close handler in `createHostWindow()` for the destroy
+ * path.
+ *
+ * Stage W-3c only defines the operation; W-4 wires the call sites
+ * (`returnToDashboard` and the chooser-tile re-attach flow).
+ */
+function _detachInstallImpl(entry: ComfyWindowEntry): void {
+  if (entry.installationId === null) return
+  if (entry.window.isDestroyed()) return
+
+  // Step 1 — run the symmetric undo from attachInstall (clears
+  // listeners, maps, ipc.stopRunning, secondary index, resets
+  // entry.installationId / entry.comfyUrl).
+  entry._installCleanup?.()
+
+  // Step 2 — release the loaded ComfyUI page. The comfyView is kept
+  // alive so a subsequent attachInstall() can navigate it back
+  // without a fresh WebContentsView construction (the partition is
+  // fixed at construction so it carries over; per the W-3 risk
+  // notes, attaching to a different unique-partition install on the
+  // same host window is a known limitation that needs visual review
+  // in W-4).
+  if (!entry.comfyView.webContents.isDestroyed()) {
+    void entry.comfyView.webContents.loadURL('about:blank').catch(() => {})
+    entry.comfyView.setBackgroundColor(COMFY_BG)
+  }
+
+  // Step 3 — title-bar identity flips back to the chooser-host shape.
+  entry.titleBarText = 'Choose an install'
+  entry.sourceCategory = null
+  if (!entry.titleBarView.webContents.isDestroyed()) {
+    entry.titleBarView.webContents.send('comfy-titlebar:title-changed', entry.titleBarText)
+    entry.titleBarView.webContents.send('comfy-titlebar:source-category-changed', null)
+  }
+
+  // Step 4 — OS-level window title back to the chooser fallback.
+  entry.window.setTitle(`Choose an install — Desktop 2.0 v${APP_VERSION}`)
+
+  // Step 5 — repaint title bar + OS overlay to the launcher surface
+  // theme. `applyChooserHostTheme()` is the same helper the launcher-
+  // settings handler calls when the user flips the Theme setting.
+  applyChooserHostTheme(entry)
+
+  // Step 6 — reset to the comfy pill, which `computeBodyMode`
+  // resolves to the chooser body for install-less hosts. Truncate
+  // history (W-1's nav history) the same way `setActivePanel` would
+  // for a `'reset'` source.
+  entry.activePanel = 'comfy'
+  entry.panelHistory = ['comfy']
+  entry.panelHistoryIndex = 0
+  if (!entry.titleBarView.webContents.isDestroyed()) {
+    entry.titleBarView.webContents.send('comfy-titlebar:panel-changed', 'comfy')
+    _notifyTitleBarNavState(entry)
+  }
+  ensurePanelView(entry.windowKey, entry, 'chooser')
+
+  // Step 7 — render the chooser body.
+  entry.layoutViews()
 }
 
 /**

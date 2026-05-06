@@ -103,16 +103,40 @@ Sliced for clean per-commit gates. Each stage is one or two commits.
   wrappers around the helper while the call sites migrate.
 
 ### Stage W-3 — Symmetric attach / detach
-- Move install-specific wiring behind paired `attachInstall(id)` /
-  `detachInstall()` calls on the entry:
-  - download manager attach / detach
-  - theme observer swap (`applyComfyTheme` ↔ `applyChooserHostTheme`)
-  - comfyView URL load vs park-and-collapse
-  - failure-retry handler set vs cleared
-  - splash-page swap during relaunch
-- All event handlers (`comfyWindow.on('close')` / `'closed'` /
-  comfyContents handlers) start reading `entry.installationId` at
-  runtime instead of the captured constructor-time value.
+Sliced into three commits, all green-gated independently:
+
+- **W-3a (closure sweep)** — Every install-specific event handler
+  in `onLaunch` reads `entry.installationId` at runtime instead of
+  capturing the construction-time `installationId` constant.
+  Targets: `onTitleBarReady`, `onBeforeTeardown`, `onClosed`,
+  `onInstallationUpdated`, `applyComfyTheme`, `currentComfyUrl`,
+  `reloadComfy`, `did-fail-load`, `render-process-gone`. No
+  behaviour change — `entry.installationId` was still
+  immutable post-W-3a.
+- **W-3b (attachInstall)** — All install-specific imperative steps
+  bundled into a single `attachInstall(entry, deps)` function:
+  install-record subscription, every install-bound comfyContents
+  listener (theme report, page title, dom-ready content script,
+  before-input, did-fail-load, render-process-gone), session
+  download handler, comfyContents URL load. Stashes
+  `entry._installCleanup` — the symmetric undo (off all listeners,
+  ipc.stopRunning, clear install-keyed maps + secondary index,
+  reset entry install fields). New entry fields `titleBarText` /
+  `sourceCategory` / `_installCleanup`. createHostWindow opts
+  drop the per-mode `onTitleBarReady` / `onBeforeTeardown` /
+  `onClosed` callbacks; the unified title-bar-ready handshake
+  reads from entry fields and the close handler invokes
+  `entry._installCleanup?.()`.
+- **W-3c (detachInstall)** — `entry.detachInstall()` performs the
+  in-place mode flip from install-backed to install-less:
+  runs `_installCleanup`, navigates the comfyView to `about:blank`,
+  resets title-bar identity (`titleBarText`, `sourceCategory`, OS
+  window title), repaints to launcher-theme surface via
+  `applyChooserHostTheme()`, resets `activePanel` + nav history,
+  ensures the chooser panelView, calls `layoutViews()`. No-op when
+  already install-less. Defines the operation only — call sites
+  (`returnToDashboard` and chooser-pick re-attach) are wired in
+  W-4.
 
 ### Stage W-4 — Swap call sites to in-place transform
 - `returnToDashboard()` → `entry.detachInstall()`. Capture-bounds /
