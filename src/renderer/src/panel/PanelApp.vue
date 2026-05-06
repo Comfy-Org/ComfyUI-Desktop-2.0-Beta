@@ -503,13 +503,25 @@ async function handleNewInstallTakeoverClose(): Promise<void> {
   dismissTakeoverDirect()
 }
 
-/** Track D item 4 — fire the install's launch action through the
- *  same `useListAction` pipeline ChooserView uses for tile clicks.
- *  Mirrors the `handleChooserPick` shape (port-conflict resolution,
- *  telemetry, in-place attach via `prepareChooserHostHandoff`) so
- *  first-use ends with a running ComfyUI inside the chooser host
- *  window the user just dismissed the takeover from. */
-async function launchInstallationAfterFirstUse(installation: Installation): Promise<void> {
+/** Shared launch path for chooser-tile clicks AND the first-use
+ *  takeover's auto-launch. Both surfaces want the same five-step
+ *  shape (Stage W-5 already-running short-circuit → resolve launch
+ *  action → in-place attach claim → executeAction). Extracted to one
+ *  helper so a future change to the launch UX can't regress one
+ *  surface but not the other (post-unification-code-review.md F17).
+ *
+ *  `onMissingLaunchAction` is the only thing that diverges:
+ *    - chooser tile click → fall back to the new-install flow inside
+ *      this host (the user picked a tile that has no launch path
+ *      because the install isn't yet installed).
+ *    - first-use auto-launch → silently no-op (the chained new-install
+ *      op already finished, anything missing is genuinely "no
+ *      launchable install" and we don't want to bounce the user back
+ *      into a wizard immediately after they finished one). */
+async function performChooserLaunch(
+  installation: Installation,
+  onMissingLaunchAction: () => void = () => {},
+): Promise<void> {
   if (sessionStore.isRunning(installation.id)) {
     // Window-mode unification (Stage W-5) — focus the running
     // window and leave the chooser host alive (W-4 paradigm: tile
@@ -524,9 +536,22 @@ async function launchInstallationAfterFirstUse(installation: Installation): Prom
   const launchAction = actions.find((a) => a.id === 'launch')
     ?? actions.find((a) => a.style === 'primary')
     ?? null
-  if (!launchAction) return
+  if (!launchAction) {
+    onMissingLaunchAction()
+    return
+  }
   await prepareChooserHostHandoff(installation.id)
   await executeChooserAction(installation, launchAction)
+}
+
+/** Track D item 4 — fire the install's launch action through the
+ *  same `useListAction` pipeline ChooserView uses for tile clicks.
+ *  Mirrors the `handleChooserPick` shape (port-conflict resolution,
+ *  telemetry, in-place attach via `prepareChooserHostHandoff`) so
+ *  first-use ends with a running ComfyUI inside the chooser host
+ *  window the user just dismissed the takeover from. */
+async function launchInstallationAfterFirstUse(installation: Installation): Promise<void> {
+  await performChooserLaunch(installation)
 }
 
 /** Track D item 4 — watch progressStore for the new-install /
@@ -666,36 +691,12 @@ async function prepareChooserHostHandoff(installationId: string): Promise<void> 
 }
 
 async function handleChooserPick(installation: Installation): Promise<void> {
-  // Already running with an open window — focus that window. Window-
-  // mode unification (Stage W-5) — leave the chooser host alive
-  // (W-4 paradigm: tile clicks transform the host the user clicked
-  // from instead of closing it). The chooser host stays available
-  // for the user to pick another install or close themselves; no
-  // launch action involvement, no `attachInstall` (would create a
-  // duplicate view of the running install on this host).
-  if (sessionStore.isRunning(installation.id)) {
-    await window.api.focusComfyWindow(installation.id)
-    return
-  }
-
-  // Otherwise look up the launch action (sources expose it as their
-  // primary list action, e.g. 'launch' for standalone, 'connect' for
-  // url-based sources) and run it through the standard pipeline.
-  const actions = await window.api.getListActions(installation.id)
-  const launchAction = actions.find((a) => a.id === 'launch')
-    ?? actions.find((a) => a.style === 'primary')
-    ?? null
-  if (!launchAction) {
-    // Source has no launch path (e.g. the install isn't installed yet).
-    // Fall back to the new-install flow inside the host window so the
-    // user can resolve the missing setup step without bouncing to the
-    // launcher window (which is going away in this phase).
-    void switchPanel('new-install')
-    return
-  }
-
-  await prepareChooserHostHandoff(installation.id)
-  await executeChooserAction(installation, launchAction)
+  // Already-running short-circuit, launch-action lookup, and in-place
+  // attach claim all live in `performChooserLaunch`. Tile-click
+  // semantics for the missing-launch-action case: bounce into the
+  // new-install flow inside this same host so the user can resolve
+  // the missing setup step without bouncing to a separate window.
+  await performChooserLaunch(installation, () => { void switchPanel('new-install') })
 }
 
 function handleChooserShowNewInstall(): void {
