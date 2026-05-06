@@ -12,6 +12,35 @@ Surface size: **104 changed files, +16,028 / −4,367 LOC**, with the bulk in
 This pass surfaces issues only — no fixes are landed. Triage and ask for
 follow-up commits.
 
+## Status
+
+Findings are surfaced in the report below; tracking which have been
+fixed vs. left for follow-up here so the doc stays useful as a
+reference.
+
+| ID  | Severity | Status |
+|-----|----------|--------|
+| —   | Critical | **Fixed** — install-backed wrapper threw on every fresh launch (createHostWindow seeded `entry.installationId` from opts, then `attachInstall` immediately threw on its already-attached guard). Discovered while implementing the W-track findings; this was the user-visible "in-place switching does not even work" error. |
+| F1  | Critical | **Fixed** — `entry.constructedPartition` + `expectedPartitionFor()` + claim acceptance checks partition equality. |
+| F2  | High     | **Fixed** — close handler GC's `pendingAttachClaims` for entries pointing at the dying `windowKey`. |
+| F3  | High?    | **Fixed** — `claim-attach-host` refuses duplicates and prunes stale claims. |
+| F7  | High     | **Fixed** — `_installCleanup` aborts `_operationAborts.get(id)` before `stopRunning`. |
+| F4  | Medium   | Deferred — design call; see finding for prompt-vs-document trade-off. |
+| F5  | Medium   | Deferred — depends on `sessionStore.isRunning` semantics audit. |
+| F6  | Medium   | Deferred — covered by F12 test follow-up. |
+| F8  | Medium   | **Fixed** — `_installCleanup` `comfyContents.off('will-navigate', state.navBlocker)` before `relaunchStates.delete(id)`. |
+| F9  | Medium   | **Fixed** — F2's GC + F3's duplicate refuse jointly close the stale-claim consumption hole. |
+| F11 | Low      | **Fixed** — `attachInstall` returns `boolean`; throws replaced with telemetry + early return; both call sites handle the failure. |
+| F12 | Medium   | Deferred — test follow-up. |
+| F13 | Low      | **Fixed** — silent Tier 3 → Tier 3 swap fires `cur.onCancel?.()`. |
+| F14 | Low      | **Fixed** — settings load drops legacy `onAppClose: 'tray'` (preserves explicit `'quit'`). |
+| F15 | Low      | **Fixed** — `will-prevent-unload` gates on `entry.installationId !== null` at runtime. |
+| F16 | Medium   | Deferred — covered by F12 test follow-up. |
+| F17 | Low      | **Fixed** — `performChooserLaunch` extracted; `handleChooserPick` and `launchInstallationAfterFirstUse` collapse to one helper. |
+| F18 | Low      | Subsumed by F5. |
+| F19 | Nit      | **Fixed** — `_detachInstallImpl` doc-block updated to reference the F1 resolution. |
+| F20 | Nit      | Deferred — cosmetic. |
+
 ## Severity legend
 
 - **Critical** — data loss, persistent partition / session leak, broken UX
