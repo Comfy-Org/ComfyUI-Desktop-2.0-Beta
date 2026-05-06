@@ -1182,13 +1182,8 @@ function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowResult {
   comfyWindow.contentView.addChildView(titleBarView)
   _registerExtraBroadcastTarget(titleBarView.webContents)
 
-  // Body view. Install-backed loads the real ComfyUI URL post-construction
-  // via the wrapper; install-less leaves it dummy and zero-sized (the
-  // chooser body lives on the panelView). Construction is delegated to a
-  // shared helper because `attachInstall()` may need to rebuild the view
-  // (with a different partition) when the host is being re-attached to
-  // an install whose partition doesn't match what the view was pinned
-  // to — see `rebuildComfyViewIfNeeded`.
+  // Body view. Install-less leaves it dummy and zero-sized; install-backed
+  // loads the URL via attachInstall.
   const comfyView = buildComfyView(comfyWindow, opts.comfyWebPreferences, windowKey)
   comfyWindow.contentView.addChildView(comfyView)
 
@@ -1408,20 +1403,9 @@ function expectedPartitionFor(installation: InstallationRecord): string {
 }
 
 /**
- * Window-mode unification — construct a comfyView with the generic
- * (mode-agnostic) listeners attached. Extracted from `createHostWindow()`
- * so `attachInstall()` can also rebuild the view in place when the
- * incoming install needs a different partition than the one the view
- * was originally constructed with (Electron pins WebContentsView
- * partition at construction; the only way to "change" it is to
- * destroy + rebuild the view).
- *
- * Generic listeners (popup creation, window-open routing,
- * will-prevent-unload, OS context menu) survive every attach/detach
- * cycle for the lifetime of the view — they're harmless on a chooser
- * host's idle view (none fire until a real navigation happens) and
- * `attachInstall()` only has to register the install-keyed listeners
- * on top.
+ * Construct a comfyView with the mode-agnostic listeners attached.
+ * Extracted so rebuildComfyViewIfNeeded() can swap the view's pinned
+ * partition (Electron has no API to change it post-construction).
  */
 function buildComfyView(
   comfyWindow: BrowserWindow,
@@ -1439,32 +1423,15 @@ function buildComfyView(
   })
   comfyContents.setWindowOpenHandler(({ url: childUrl }) => {
     if (shouldOpenInPopup(childUrl)) {
-      // Aux popup contract (see also `findEntryByTitleBarSender`):
-      //   - `preload: undefined` strips our preload — the popup has no
-      //     `window.api` / `__comfyTitleBar` bridge and so cannot reach
-      //     any of the title-bar IPCs (`comfy-window:open-title-menu`
-      //     etc.). The waffle / file menu is therefore unreachable
-      //     from a cloud-login / OAuth popup, by design.
-      //   - We don't override `titleBarStyle` / `titleBarOverlay`. Per
-      //     Electron's `setWindowOpenHandler` docs only security-related
-      //     `webPreferences` inherit from the parent — chrome-style
-      //     options reset to OS defaults — so the popup gets a normal
-      //     OS title bar and looks like a regular browser window.
-      //   - The macOS passkey-unavailable banner is still injected
-      //     against this popup via `did-create-window` →
-      //     `injectMacPasskeyWarning`, so cloud-login flows on macOS
-      //     keep the password+OTP affordance.
+      // preload: undefined strips our title-bar bridge so OAuth/cloud-login
+      // popups can't reach the file menu IPCs.
       return { action: 'allow', overrideBrowserWindowOptions: { webPreferences: { preload: undefined } } }
     }
     shell.openExternal(childUrl)
     return { action: 'deny' }
   })
   comfyContents.on('will-prevent-unload', (e) => {
-    // Window-mode unification — only suppress beforeunload prompts
-    // while an install is actively backing this view. A detached host
-    // (chooser mode, comfyView at `about:blank` or a stray late
-    // navigation) shouldn't silently swallow user-driven dialogs.
-    // See post-unification-code-review.md F15.
+    // Only suppress beforeunload while an install actually backs the view.
     const liveEntry = comfyWindows.get(windowKey)
     if (!liveEntry || liveEntry.installationId === null) return
     e.preventDefault()
@@ -1474,31 +1441,14 @@ function buildComfyView(
 }
 
 /**
- * Window-mode unification — rebuild the entry's comfyView in place
- * when the incoming install's partition doesn't match the one pinned
- * at construction. Lets the W-4 in-place attach work for installs
- * that the partition-equality claim check would otherwise have
- * rejected (the chooser host's `persist:shared` view can't host a
- * unique-partition install without a fresh view).
- *
- * Tears down the old comfyView (which is at `about:blank` post-
- * detach), constructs a fresh one with the new partition + the
- * matching `comfyPreload`, replaces the entry's reference, and
- * updates `entry.constructedPartition`. Generic listeners (popup,
- * window-open, will-prevent-unload, context-menu) are wired by
- * `buildComfyView`. The install-keyed listeners come next when the
- * caller proceeds with `attachInstall()`.
- *
- * No-op when the partition is already correct.
+ * Swap the entry's comfyView for a fresh one with the install's expected
+ * partition. No-op when already correct.
  */
 function rebuildComfyViewIfNeeded(entry: ComfyWindowEntry, installation: InstallationRecord): void {
   const expectedPartition = expectedPartitionFor(installation)
   if (entry.constructedPartition === expectedPartition) return
   if (entry.window.isDestroyed()) return
 
-  // Replace the old view in the BrowserWindow's contentView. The
-  // titleBarView and panelView (if any) survive — only the comfyView
-  // is being rebuilt.
   const oldView = entry.comfyView
   const newView = buildComfyView(
     entry.window,
@@ -1511,9 +1461,6 @@ function rebuildComfyViewIfNeeded(entry: ComfyWindowEntry, installation: Install
     entry.windowKey,
   )
   entry.window.contentView.addChildView(newView)
-  // Hide the old view immediately so it doesn't intercept input
-  // before the destroy lands. The destroy is synchronous on Electron
-  // so this is mostly defensive.
   oldView.setVisible(false)
   entry.window.contentView.removeChildView(oldView)
   if (!oldView.webContents.isDestroyed()) oldView.webContents.close()
@@ -1555,22 +1502,8 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
     return
   }
 
-  // Window-mode unification (Stage W-4) — chooser-pick in-place
-  // attach. The chooser-host renderer claims its own host window via
-  // `comfy-window:claim-attach-host` right before kicking off the
-  // launch action, so by the time the launch event lands here the
-  // claim's already in the map. Honour it whenever the target host
-  // is still alive AND still install-less. Partition mismatches
-  // (chooser host's pinned `persist:shared` vs. a unique-partition
-  // install, OR a recycled host whose pinned partition is for a
-  // different install) are reconciled by `rebuildComfyViewIfNeeded`,
-  // which destroys + rebuilds the comfyView in place with the right
-  // partition before `attachInstall` loads the URL. Pre-fix the
-  // claim was rejected on partition mismatch and we fell through to
-  // the fresh-window path — that meant unique-partition installs
-  // (Standalone / Portable) launched from a chooser ALWAYS opened
-  // in a new window. The rebuild path keeps the user in the same
-  // window without leaking session data across partitions.
+  // Chooser-pick in-place attach — the chooser claimed this host before
+  // launching. Reconcile partition mismatches by rebuilding the comfyView.
   const claimedKey = pendingAttachClaims.get(installationId)
   if (claimedKey !== undefined) {
     pendingAttachClaims.delete(installationId)
@@ -2033,45 +1966,26 @@ function _detachInstallImpl(entry: ComfyWindowEntry): void {
   if (entry.installationId === null) return
   if (entry.window.isDestroyed()) return
 
-  // Step 1 — run the symmetric undo from attachInstall (clears
-  // listeners, maps, ipc.stopRunning, secondary index, resets
-  // entry.installationId / entry.comfyUrl).
+  // Symmetric undo of attachInstall (listeners, maps, stopRunning, etc).
   entry._installCleanup?.()
 
-  // Step 2 — release the loaded ComfyUI page. The comfyView is kept
-  // alive so a subsequent attachInstall() can navigate it back
-  // without a fresh WebContentsView construction. Partition mismatches
-  // (chooser host's `persist:shared` vs. a unique-partition install,
-  // or a recycled host whose pinned partition is for a different
-  // install) are reconciled at re-attach time by
-  // `rebuildComfyViewIfNeeded`, which destroys + rebuilds this view
-  // with the right partition before the next URL load. See
-  // post-unification-code-review.md F1.
+  // Release the ComfyUI page; the view is kept alive for re-attach.
   if (!entry.comfyView.webContents.isDestroyed()) {
     void entry.comfyView.webContents.loadURL('about:blank').catch(() => {})
     entry.comfyView.setBackgroundColor(COMFY_BG)
   }
 
-  // Step 3 — title-bar identity flips back to the chooser-host shape.
+  // Flip title-bar identity back to chooser-host shape.
   entry.titleBarText = 'Choose an install'
   entry.sourceCategory = null
   if (!entry.titleBarView.webContents.isDestroyed()) {
     entry.titleBarView.webContents.send('comfy-titlebar:title-changed', entry.titleBarText)
     entry.titleBarView.webContents.send('comfy-titlebar:source-category-changed', null)
   }
-
-  // Step 4 — OS-level window title back to the chooser fallback.
   entry.window.setTitle(`Choose an install — Desktop 2.0 v${APP_VERSION}`)
-
-  // Step 5 — repaint title bar + OS overlay to the launcher surface
-  // theme. `applyChooserHostTheme()` is the same helper the launcher-
-  // settings handler calls when the user flips the Theme setting.
   applyChooserHostTheme(entry)
 
-  // Step 6 — reset to the comfy pill, which `computeBodyMode`
-  // resolves to the chooser body for install-less hosts. Truncate
-  // history (W-1's nav history) the same way `setActivePanel` would
-  // for a `'reset'` source.
+  // Reset nav state to the comfy pill (chooser body for install-less hosts).
   entry.activePanel = 'comfy'
   entry.panelHistory = ['comfy']
   entry.panelHistoryIndex = 0
@@ -2080,20 +1994,9 @@ function _detachInstallImpl(entry: ComfyWindowEntry): void {
     _notifyTitleBarNavState(entry)
   }
 
-  // Step 7 — TEAR DOWN the install-backed panel renderer and rebuild
-  // it as a chooser-mounted one. Pre-fix `ensurePanelView('chooser')`
-  // was a no-op when a panelView already existed, so a host detached
-  // from install Y kept its install-backed PanelApp instance alive
-  // (with installationId=Y baked into the URL params, an active
-  // overlay slot left over from the takeover the user was in, an
-  // activePanel of 'launcher-settings' or 'install-settings', etc.).
-  // After flipping the chrome to chooser mode the body still rendered
-  // the install-backed page underneath — and any open Tier 3 takeover
-  // (e.g. update-while-running) stayed mounted with no path for the
-  // user to dismiss it because the surrounding panel context wasn't
-  // chooser-aware. Destroying + re-creating the panelView gives us a
-  // fresh PanelApp mounted with installationId='' which renders the
-  // chooser body unconditionally.
+  // Tear down the install-backed PanelApp and remount fresh in chooser mode.
+  // Preserves no per-install state (overlays, activePanel, installationId
+  // URL param) across the detach.
   if (entry.panelView) {
     const oldPanel = entry.panelView
     entry.panelView = null
@@ -2106,8 +2009,6 @@ function _detachInstallImpl(entry: ComfyWindowEntry): void {
     }
   }
   ensurePanelView(entry.windowKey, entry, 'chooser')
-
-  // Step 8 — render the chooser body.
   entry.layoutViews()
 }
 
