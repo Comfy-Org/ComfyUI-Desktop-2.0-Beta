@@ -75,6 +75,7 @@
 
   "common": {
     "back": "返回",
+    "backToDashboard": "返回主面板",
     "close": "关闭",
     "browse": "浏览…",
     "resetDefault": "重置",

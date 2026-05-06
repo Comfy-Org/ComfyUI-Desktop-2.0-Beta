@@ -172,6 +172,14 @@ Sliced for clean per-commit gates. Each track owns one or two commits.
   the binding-modal chrome.
 - Decide per flow which variant fits — capture choices in this doc.
 
+Per-flow choices (captured during the M-5 ship):
+
+| Flow | Affordance | Rationale |
+|------|-----------|-----------|
+| NewInstallModal / TrackModal / LoadSnapshotModal / QuickInstallModal | `TakeoverBack` chevron + "Back to Dashboard" label, mounted at the START of `view-modal-header`. Replaces the pre-M-5 corner ✕. | All four mount on the chooser-host window; the close emit returns to the chooser body underneath. Chevron + explicit label distinguishes from NewInstallModal's own per-step `wizard-back` button at the bottom (which navigates between wizard steps, not out of the wizard). |
+| FirstUseTakeover | NO header back affordance. Skip Onboarding via the file-menu waffle (added M-2.2) is the post-consent escape; the consent step has no in-app escape by design. | First-use is the bootstrap flow — there is no underlying "main concern" surface to return to (no dashboard, no install). Adding a chevron-back here would dead-end the user. |
+| ProgressModal in takeover mode (update-while-running) | Deferred to M-6. | The semantics here are "cancel update with rollback", not "go back to a still-live underlying surface" — Comfy was stopped to start the update so there is no live underlying state to return to. The cancel-on-window-close wiring in M-6 is the natural place to standardise this confirm + rollback flow. The current `−` (in-flight) / `✕` (finished) button stays until M-6. |
+
 ### Track M-6 — Cancel-on-window-close wiring
 - Hook each binding modal into the window's `before-close` lifecycle
   so OS-chrome X triggers the right cancel/rollback path per the

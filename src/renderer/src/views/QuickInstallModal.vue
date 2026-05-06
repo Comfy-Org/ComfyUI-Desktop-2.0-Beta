@@ -10,6 +10,7 @@ import VariantCardGrid from '../components/VariantCardGrid.vue'
 import { trackGuardrailBlocked, createDiskSpaceChecker, showPathIssueAlerts, checkNvidiaDriverOrWarn, checkDiskSpaceOrWarn } from '../lib/installHelpers'
 import InstallNamePath from '../components/InstallNamePath.vue'
 import TakeoverHeader from '../components/TakeoverHeader.vue'
+import TakeoverBack from '../components/TakeoverBack.vue'
 
 const emit = defineEmits<{
   close: []
@@ -259,12 +260,18 @@ defineExpose({ open })
   <!-- Modal-unification (Track M-3) — install-flow takeover-modal.
        See NewInstallModal.vue for the rationale; same chrome treatment. -->
   <div class="view-modal-content view-modal-content--takeover quick-install-modal">
+      <!-- Modal-unification (Track M-5) — back-chevron "Back to
+           Dashboard" replaces the corner ✕. See NewInstallModal.vue
+           for the rationale; same chrome treatment. -->
       <div class="view-modal-header">
+        <TakeoverBack
+          :label="$t('common.backToDashboard')"
+          @back="emit('close')"
+        />
         <TakeoverHeader
           :title="$t('quickInstall.grandTitle')"
           :subtitle="$t('quickInstall.grandSubtitle')"
         />
-        <button class="view-modal-close" @click="emit('close')">✕</button>
       </div>
       <div class="view-modal-body">
         <div class="view-scroll">

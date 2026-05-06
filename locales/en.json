@@ -118,6 +118,7 @@
 
   "common": {
     "back": "Back",
+    "backToDashboard": "Back to Dashboard",
     "close": "Close",
     "browse": "Browse…",
     "resetDefault": "Reset",

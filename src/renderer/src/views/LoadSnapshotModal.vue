@@ -9,6 +9,7 @@ import VariantCardGrid from '../components/VariantCardGrid.vue'
 import { emitTelemetryAction, toVariantBucket } from '../lib/telemetry'
 import SnapshotFilePreviewContent from '../components/SnapshotFilePreviewContent.vue'
 import TakeoverHeader from '../components/TakeoverHeader.vue'
+import TakeoverBack from '../components/TakeoverBack.vue'
 
 const emit = defineEmits<{
   close: []
@@ -258,12 +259,18 @@ defineExpose({ open })
     @dragleave="!preview && handleDragLeave($event)"
     @drop="!preview && handleDrop($event)"
   >
+      <!-- Modal-unification (Track M-5) — back-chevron "Back to
+           Dashboard" replaces the corner ✕. See NewInstallModal.vue
+           for the rationale; same chrome treatment. -->
       <div class="view-modal-header">
+        <TakeoverBack
+          :label="$t('common.backToDashboard')"
+          @back="emit('close')"
+        />
         <TakeoverHeader
           :title="$t('loadSnapshot.grandTitle')"
           :subtitle="$t('loadSnapshot.grandSubtitle')"
         />
-        <button class="view-modal-close" @click="emit('close')">✕</button>
       </div>
       <div class="view-modal-body">
         <div class="view-scroll">
