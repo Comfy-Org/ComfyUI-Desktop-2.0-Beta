@@ -465,6 +465,34 @@ function handleNewInstallClick(): void {
             <MoreVertical :size="16" />
           </button>
         </div>
+        <!-- Progress block — visible only while a long-running op
+             (install / update / restore / migrate) is in flight. Sits
+             in the empty top-of-tile gap between the source icon
+             (top-left) and the action cluster (top-right) so the
+             progress bar never overlaps the bottom-right CTA cluster.
+             The status line carries the live phase text and the
+             progress track sits beneath it as a clear, prominent
+             bar. The pattern mirrors the legacy DashboardCard
+             `card-progress` treatment so users recognise the in-flight
+             surface. -->
+        <div v-if="progressFor(inst)" class="chooser-tile-progress">
+          <div class="chooser-tile-progress-status">
+            {{ progressFor(inst)!.status }}
+          </div>
+          <div
+            class="chooser-tile-progress-track"
+            :class="{ indeterminate: (progressFor(inst)!.percent ?? -1) < 0 }"
+          >
+            <div
+              class="chooser-tile-progress-fill"
+              :style="{
+                width: (progressFor(inst)!.percent ?? -1) >= 0
+                  ? `${progressFor(inst)!.percent}%`
+                  : '40%',
+              }"
+            ></div>
+          </div>
+        </div>
         <div class="chooser-tile-name">
           {{ inst.name }}
         </div>
@@ -539,30 +567,6 @@ function handleNewInstallClick(): void {
               ? $t('dashboard.launchedAgo', { time: timeAgo(inst.lastLaunchedAt as number) })
               : $t('dashboard.neverLaunched') }}
           </span>
-        </div>
-        <!-- Progress block — visible only while a long-running op
-             (install / update / restore / migrate) is in flight. The
-             status line carries the live phase text and the progress
-             track sits beneath it as a clear, prominent bar. The
-             pattern mirrors the legacy DashboardCard `card-progress`
-             treatment so users recognise the in-flight surface. -->
-        <div v-if="progressFor(inst)" class="chooser-tile-progress">
-          <div class="chooser-tile-progress-status">
-            {{ progressFor(inst)!.status }}
-          </div>
-          <div
-            class="chooser-tile-progress-track"
-            :class="{ indeterminate: (progressFor(inst)!.percent ?? -1) < 0 }"
-          >
-            <div
-              class="chooser-tile-progress-fill"
-              :style="{
-                width: (progressFor(inst)!.percent ?? -1) >= 0
-                  ? `${progressFor(inst)!.percent}%`
-                  : '40%',
-              }"
-            ></div>
-          </div>
         </div>
         <!-- CTA cluster — overlay positioned bottom-right of the
              tile. The button shown depends on the install's lifecycle
@@ -869,17 +873,27 @@ function handleNewInstallClick(): void {
 }
 
 /* In-flight progress block — visible only when an op is running for
- * this install. Sits beneath the meta line and replaces the
- * last-launched / update / migrate pills (those are hidden in the
- * template while progressFor is non-null). The status line + track
- * pattern matches the legacy DashboardCard `card-progress` block so
- * users recognise the in-flight surface. */
+ * this install. Lives in the empty top-of-tile gap between the source
+ * icon (top-left, absolute @ ~top:14, left:16, size:28) and the
+ * action cluster (top-right, absolute @ ~top:8, right:8 carrying the
+ * kebab + optional error badge). Padded horizontally to clear both
+ * absolute clusters; the bottom-right CTA cluster is also absolute
+ * and well below where the progress bar sits. The last-launched /
+ * update / migrate pills inside `chooser-tile-meta` still hide while
+ * progressFor is non-null (the template gates them). The status line
+ * + track pattern matches the legacy DashboardCard `card-progress`
+ * block so users recognise the in-flight surface. */
 .chooser-tile-progress {
   display: flex;
   flex-direction: column;
   gap: 4px;
   width: 100%;
-  margin-top: 2px;
+  /* Clear the source icon (top-left) and the kebab/error cluster
+   * (top-right). Empirical paddings — keep the bar visually centered
+   * in the upper gap on common card widths. */
+  padding-left: 36px;
+  padding-right: 56px;
+  box-sizing: border-box;
 }
 .chooser-tile-progress-status {
   font-size: 11px;
