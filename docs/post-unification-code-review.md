@@ -21,7 +21,8 @@ reference.
 | ID  | Severity | Status |
 |-----|----------|--------|
 | —   | Critical | **Fixed** — install-backed wrapper threw on every fresh launch (createHostWindow seeded `entry.installationId` from opts, then `attachInstall` immediately threw on its already-attached guard). Discovered while implementing the W-track findings; this was the user-visible "in-place switching does not even work" error. |
-| F1  | Critical | **Fixed** — `entry.constructedPartition` + `expectedPartitionFor()` + claim acceptance checks partition equality. |
+| —   | High     | **Fixed** — Tier 3 takeovers (e.g. update-while-running) got stuck after a Return-to-Dashboard because `ensurePanelView('chooser')` was a no-op when an install-backed `panelView` already existed. `_detachInstallImpl` now tears down and rebuilds the `panelView` so the chooser body always mounts a fresh `PanelApp` with `installationId=''`. |
+| F1  | Critical | **Fixed** — `entry.constructedPartition` + `expectedPartitionFor()`; claim acceptance now calls `rebuildComfyViewIfNeeded()` to destroy and rebuild the comfyView with the correct partition before `attachInstall()` loads the URL, so cross-partition re-attaches stay in the same window without leaking session data. |
 | F2  | High     | **Fixed** — close handler GC's `pendingAttachClaims` for entries pointing at the dying `windowKey`. |
 | F3  | High?    | **Fixed** — `claim-attach-host` refuses duplicates and prunes stale claims. |
 | F7  | High     | **Fixed** — `_installCleanup` aborts `_operationAborts.get(id)` before `stopRunning`. |
@@ -114,6 +115,19 @@ construction path; now they can be either fresh (`persist:shared`) or
 - Or destroy + rebuild `comfyView` inside `_detachInstallImpl` whenever
   the previous install was unique-partition. Heavier but eliminates the
   whole class of mismatch.
+
+**Resolution:** A hybrid — `entry.constructedPartition` and
+`expectedPartitionFor()` were introduced as suggested, but instead of
+rejecting the claim on mismatch we extracted `buildComfyView()` and
+added `rebuildComfyViewIfNeeded()`, which destroys + rebuilds the
+comfyView with the correct partition at re-attach time. This keeps
+the user in the same window for in-place chooser-pick on
+unique-partition installs (Standalone / Portable) — the original
+"reject the claim" shape would have fallen through to the legacy
+fresh-window path. Generic listeners (popup, window-open,
+will-prevent-unload, context menu) are wired by `buildComfyView` so
+they survive every rebuild; only the install-keyed listeners get
+re-bound by the subsequent `attachInstall()`.
 
 ---
 
