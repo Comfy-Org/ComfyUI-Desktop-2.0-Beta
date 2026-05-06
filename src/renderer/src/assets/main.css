@@ -529,8 +529,9 @@ input[type="checkbox"]:checked::after { transform: translateX(16px); }
 .view-modal-content {
   background: var(--bg); border: 1px solid var(--border);
   border-radius: 12px;
-  width: calc(100vw - var(--sidebar-width) - 60px); height: calc(100vh - 60px - var(--titlebar-height));
-  max-width: 900px;
+  width: 100%; max-width: 900px;
+  min-height: 200px; max-height: calc(100vh - 60px - var(--titlebar-height));
+  margin: 0 30px;
   display: flex; flex-direction: column; overflow: hidden;
 }
 /* Width variant — narrower for per-install Manage / Preferences / confirms. */
