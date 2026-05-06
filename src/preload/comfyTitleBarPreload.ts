@@ -99,6 +99,15 @@ export interface ComfyTitleBarBridge {
    *  title bar. Window controls (× / □) stay live — they're OS
    *  affordances outside this view. */
   onInertChanged(cb: (inert: boolean) => void): () => void
+  /** Subscribe to first-use takeover step changes (modal-unification
+   *  Track M-2.2). Mode mirrors `firstUseMode` on the entry —
+   *  `'none'` for no takeover mounted, `'consent-lockdown'` while the
+   *  T&C consent step is on screen, `'post-consent'` for any later
+   *  step. M-2.3 will use this to lock down the title bar during
+   *  `'consent-lockdown'`; M-2.2 only plumbs the IPC end-to-end. */
+  onFirstUseModeChanged(
+    cb: (mode: 'none' | 'consent-lockdown' | 'post-consent') => void,
+  ): () => void
   /** Subscribe to app-update state pushes (Phase 3 §18 status pills).
    *  `kind` is `'available'` after `update-available`, `'ready'` after
    *  `update-downloaded`, and `null` when nothing is pending. Drives
@@ -248,6 +257,14 @@ const bridge: ComfyTitleBarBridge = {
     }
     ipcRenderer.on('comfy-titlebar:inert-changed', handler)
     return () => ipcRenderer.removeListener('comfy-titlebar:inert-changed', handler)
+  },
+  onFirstUseModeChanged: (cb) => {
+    const handler = (_event: IpcRendererEvent, mode: unknown): void => {
+      const normalised = mode === 'consent-lockdown' || mode === 'post-consent' ? mode : 'none'
+      cb(normalised)
+    }
+    ipcRenderer.on('comfy-titlebar:first-use-mode-changed', handler)
+    return () => ipcRenderer.removeListener('comfy-titlebar:first-use-mode-changed', handler)
   },
   onAppUpdateStateChanged: (cb) => {
     const handler = (_event: IpcRendererEvent, state: unknown): void => {

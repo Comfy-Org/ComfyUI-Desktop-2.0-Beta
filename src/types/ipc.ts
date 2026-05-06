@@ -718,6 +718,18 @@ export interface ElectronApi {
    *  receives the change via the `comfy-titlebar:inert-changed`
    *  broadcast main forwards back from this IPC. */
   setTitleBarInert(inert: boolean): void
+  /** Modal-unification (Track M-2.2) — push the first-use takeover's
+   *  current step to main so it can (a) cache the value on the host
+   *  entry for `buildTitleMenuItems` to read synchronously and (b)
+   *  forward to the title-bar webContents (consumed in M-2.3). Fire-
+   *  and-forget; FirstUseTakeover.vue calls this on every step change
+   *  and on unmount with `'none'`. */
+  setFirstUseMode(mode: 'none' | 'consent-lockdown' | 'post-consent'): void
+  /** Modal-unification (Track M-2.2) — main routes the file-menu
+   *  Skip Onboarding click here. Handler runs the same
+   *  `markFirstUseCompleted` + dismiss-takeover sequence the Cloud
+   *  pick path uses. Returns an unsubscribe. */
+  onFirstUseSkip(callback: () => void): Unsubscribe
   /** Step 5 §16 — main consults the panel renderer before tearing down
    *  the host window. Returns an unsubscribe; the callback receives a
    *  `requestId` it must echo back via `respondCloseRequest` so main

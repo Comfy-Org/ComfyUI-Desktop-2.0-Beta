@@ -205,6 +205,7 @@ let unsubLocale: (() => void) | null = null
 let unsubSettings: (() => void) | null = null
 let unsubCloseRequest: (() => void) | null = null
 let unsubPanelTriggerOverlay: (() => void) | null = null
+let unsubFirstUseSkip: (() => void) | null = null
 
 async function loadLocale(): Promise<void> {
   const messages = await window.api.getLocaleMessages()
@@ -351,7 +352,31 @@ async function openFirstUseTakeover(): Promise<void> {
  * `handleProgressClose` direct-mutation pattern.
  */
 function dismissTakeoverDirect(): void {
+  // Modal-unification (Track M-2.2) — whenever a Tier 3 overlay is
+  // cleared from the renderer side, the host's first-use mode must
+  // drop back to `'none'`. This covers both the explicit completion
+  // paths (Cloud / chain-local close handlers) AND the pure-dismiss
+  // paths (Track / LoadSnapshot / QuickInstall / Manage / Progress
+  // ✕). FirstUseTakeover.vue's own watch(step, …, immediate) handles
+  // the consent → post-consent transitions; the renderer-internal
+  // dismiss is the only place that can take the host from a non-'none'
+  // mode to 'none' without a step change inside the takeover.
+  if (currentOverlay.value?.kind === 'takeover' && currentOverlay.value.component === 'first-use') {
+    window.api.setFirstUseMode('none')
+  }
   currentOverlay.value = null
+}
+
+/** Modal-unification (Track M-2.2) — shared completion helper. The
+ *  Cloud-branch pick (`handleFirstUseComplete`) and the file-menu
+ *  Skip Onboarding entry (`onFirstUseSkip` listener) and the
+ *  new-install chain close (`handleNewInstallTakeoverClose`) all run
+ *  the same `markFirstUseCompleted` → dismiss sequence; extracting
+ *  the pair keeps them in sync if the gate flip ever needs extra
+ *  state cleanup (e.g. a future telemetry event). */
+async function completeFirstUseAndDismiss(): Promise<void> {
+  await launcherPrefs.markFirstUseCompleted()
+  dismissTakeoverDirect()
 }
 
 /** First-use takeover Cloud-branch pick — one-shot completion. The
@@ -364,9 +389,8 @@ function dismissTakeoverDirect(): void {
  *  install can't be found for any reason we still mark complete and
  *  close the takeover — the chooser body underneath is the fallback. */
 async function handleFirstUseComplete(): Promise<void> {
-  await launcherPrefs.markFirstUseCompleted()
   chainingFirstUseToNewInstall.value = false
-  dismissTakeoverDirect()
+  await completeFirstUseAndDismiss()
   // Find the auto-seeded Cloud install. The store may not be hydrated
   // yet on first-launch, so we fall back to a fresh fetch via main.
   let cloud = installationStore.installations.find((i) => i.sourceCategory === 'cloud') ?? null
@@ -454,6 +478,12 @@ async function handleNewInstallTakeoverClose(): Promise<void> {
     // watcher uses it together with `pendingFirstUseAutoLaunchId` to
     // decide whether to fire. The watcher clears both after launch.
   }
+  // Note: this close path always swaps OUT of a `'new-install'` Tier 3
+  // takeover, never directly out of `'first-use'` — the chain replaced
+  // the FirstUseTakeover overlay before mount. So there's no first-use
+  // mode to clear here; FirstUseTakeover.vue's onUnmounted handler
+  // already pushed `'none'` when it was swapped out at chain-local
+  // time.
   dismissTakeoverDirect()
 }
 
@@ -734,6 +764,18 @@ onMounted(async () => {
     })()
   })
 
+  // Modal-unification (Track M-2.2) — main forwards a file-menu Skip
+  // Onboarding click here. Run the same `markFirstUseCompleted` +
+  // dismiss-takeover sequence the Cloud-branch pick uses; if the
+  // overlay isn't a first-use takeover (defensive — main only sends
+  // this when the menu surfaced the entry, which only happens in
+  // `post-consent`) the dismiss is a no-op for the overlay slot but
+  // the gate flip still has to land so the takeover doesn't auto-
+  // remount on the next launch.
+  unsubFirstUseSkip = window.api.onFirstUseSkip(() => {
+    void completeFirstUseAndDismiss()
+  })
+
   // Initialize stores / prefs needed by the install-settings DetailModal.
   // installationStore wires its own onInstallationsChanged listener.
   await Promise.all([
@@ -768,6 +810,7 @@ onUnmounted(() => {
   unsubSettings?.()
   unsubCloseRequest?.()
   unsubPanelTriggerOverlay?.()
+  unsubFirstUseSkip?.()
   pendingPickUnsub?.()
   sessionStore.dispose()
 })

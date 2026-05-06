@@ -171,6 +171,11 @@ interface MockApiState {
     installationId?: string
   }) => void)[]
   installationsChangedCallbacks: (() => void)[]
+  /** Modal-unification (Track M-2.2) — file-menu Skip Onboarding
+   *  callbacks. Main fires this when the user clicks the entry in the
+   *  waffle popup; tests can simulate the click by invoking each
+   *  callback. */
+  firstUseSkipCallbacks: (() => void)[]
   installations: InstallationLike[]
   getInstallations: ReturnType<typeof vi.fn>
   /** Per-key getSetting values. Tests that need first-use takeover to
@@ -188,6 +193,7 @@ function installMockApi(initial?: {
     panelSwitchCallbacks: [],
     panelTriggerOverlayCallbacks: [],
     installationsChangedCallbacks: [],
+    firstUseSkipCallbacks: [],
     installations,
     getInstallations: vi.fn(async () => state.installations),
     settings: { firstUseCompleted: true, ...initial?.settings },
@@ -212,6 +218,11 @@ function installMockApi(initial?: {
       },
     ),
     setTitleBarInert: vi.fn(),
+    setFirstUseMode: vi.fn(),
+    onFirstUseSkip: vi.fn((cb: () => void) => {
+      state.firstUseSkipCallbacks.push(cb)
+      return () => {}
+    }),
     onSettingsChanged: vi.fn(() => () => {}),
     // Step 5 §16 — main consults the panel renderer before tearing
     // down the host window. PanelApp subscribes on mount; the test
@@ -496,6 +507,36 @@ describe('PanelApp', () => {
     await wrapper.findComponent({ name: 'NewInstallModal' }).vm.$emit('close')
     await flushPromises()
     expect(setSetting).toHaveBeenCalledWith('firstUseCompleted', true)
+  })
+
+  it('marks firstUseCompleted=true and closes the takeover when main fires the file-menu Skip Onboarding event', async () => {
+    // Modal-unification (Track M-2.2) — main routes the file-menu
+    // Skip Onboarding click into the panel renderer via the
+    // `comfy-panel:first-use-skip` IPC. PanelApp's listener should
+    // run the same `markFirstUseCompleted` + dismiss-takeover
+    // sequence the Cloud-branch pick uses, so the takeover
+    // disappears and the chooser body underneath is the landing
+    // surface (matching the Cloud-pick test above).
+    mockState.settings.firstUseCompleted = false
+    window.history.replaceState({}, '', '/?panel=chooser')
+    const wrapper = mountPanel()
+    await flushPromises()
+    expect(wrapper.find('[data-testid="first-use-takeover"]').exists()).toBe(true)
+
+    const setSetting = (window as unknown as {
+      api: { setSetting: ReturnType<typeof vi.fn> }
+    }).api.setSetting
+    expect(setSetting).not.toHaveBeenCalledWith('firstUseCompleted', true)
+
+    // Simulate the main → renderer Skip Onboarding push.
+    expect(mockState.firstUseSkipCallbacks.length).toBeGreaterThan(0)
+    mockState.firstUseSkipCallbacks.forEach((cb) => cb())
+    await flushPromises()
+
+    expect(setSetting).toHaveBeenCalledWith('firstUseCompleted', true)
+    expect(wrapper.find('[data-testid="first-use-takeover"]').exists()).toBe(false)
+    // Chooser body underneath remains mounted, same as Cloud-pick.
+    expect(wrapper.find('[data-testid="chooser-view"]').exists()).toBe(true)
   })
 
   // Post-Phase-3 polish: the first-use takeover dropped its in-app

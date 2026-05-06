@@ -56,6 +56,13 @@ const api: ElectronApi = {
     ipcRenderer.send('comfy-window:close-current-panel'),
   setTitleBarInert: (inert: boolean) =>
     ipcRenderer.send('comfy-window:set-titlebar-inert', { inert }),
+  setFirstUseMode: (mode: 'none' | 'consent-lockdown' | 'post-consent') =>
+    ipcRenderer.send('comfy-window:set-first-use-mode', { mode }),
+  onFirstUseSkip: (callback) => {
+    const handler = (): void => callback()
+    ipcRenderer.on('comfy-panel:first-use-skip', handler)
+    return () => ipcRenderer.removeListener('comfy-panel:first-use-skip', handler)
+  },
   /**
    * Step 5 §16 — main consults the panel renderer before tearing down
    * the host window so a Tier 2 progress / Tier 3 takeover overlay can

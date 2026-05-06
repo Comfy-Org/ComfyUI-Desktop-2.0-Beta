@@ -36,7 +36,7 @@
  * locale; the host calls it post-mount the same way the flow modals
  * are reset.
  */
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { ArrowRightLeft, Box, Cloud, Download } from 'lucide-vue-next'
 import TakeoverHeader from '../components/TakeoverHeader.vue'
 
@@ -169,6 +169,41 @@ onMounted(() => {
   // (when `firstUseCompleted === false`) goes through openOverlay
   // before nextTick, so we still need a baseline locale fetch here.
   void open()
+})
+
+/**
+ * Modal-unification (Track M-2.2) — push the current step to main as
+ * the host's `firstUseMode` so:
+ *   - `buildTitleMenuItems` can surface the Skip Onboarding entry
+ *     once we're past consent (`'post-consent'`).
+ *   - The title bar can lock down during `'consent-lockdown'`
+ *     (consumed in M-2.3).
+ *
+ * `immediate: true` makes the very first mount fire the watcher so the
+ * initial step (`'consent'`) lands on the host without waiting for a
+ * step transition. The `localBranch` sub-step counts as `post-consent`
+ * — the user has already accepted T&Cs and the menu's escape hatch
+ * stays available there.
+ */
+watch(
+  step,
+  (current) => {
+    const mode = current === 'consent' ? 'consent-lockdown' : 'post-consent'
+    window.api.setFirstUseMode(mode)
+  },
+  { immediate: true },
+)
+
+onUnmounted(() => {
+  // Modal-unification (Track M-2.2) — clear the host's `firstUseMode`
+  // whenever the takeover unmounts, regardless of why (Cloud-branch
+  // completion, Local-branch chain swap, file-menu Skip Onboarding,
+  // OS-chrome window close, dev-tools refresh). The host's
+  // `dismissTakeoverDirect` ALSO pushes `'none'` for the renderer-
+  // internal dismiss path; the duplicate landing here is harmless and
+  // keeps unmount paths that go through useOverlay's silent Tier 3 →
+  // Tier 3 swap (chain-local) covered too.
+  window.api.setFirstUseMode('none')
 })
 
 defineExpose({ open })

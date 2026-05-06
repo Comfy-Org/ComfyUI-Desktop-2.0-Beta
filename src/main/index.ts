@@ -266,6 +266,25 @@ interface ComfyWindowEntry {
    * every call site.
    */
   installationId: string | null
+  /**
+   * Modal-unification (Track M-2.2) — current step of the first-use
+   * takeover, cached on the entry so `buildTitleMenuItems` can read it
+   * synchronously when the user opens the file menu (the menu builder
+   * runs on click, after the popup config has already been chosen).
+   *
+   *   - `'none'`              — no first-use takeover mounted (default).
+   *   - `'consent-lockdown'`  — consent step is on screen; the title bar
+   *                             must be fully locked down (M-2.3).
+   *   - `'post-consent'`      — consent accepted; later steps are on
+   *                             screen. The waffle menu surfaces a
+   *                             `Skip Onboarding` entry (M-2.2) but
+   *                             stays otherwise normal.
+   *
+   * Mirrors the inert plumbing (`comfy-window:set-titlebar-inert`) but
+   * unlike inert the value IS cached on the entry — see the IPC
+   * handler comment.
+   */
+  firstUseMode: 'none' | 'consent-lockdown' | 'post-consent'
 }
 /**
  * All host windows (install-backed and install-less). Install-backed
@@ -1379,6 +1398,7 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
     layoutViews,
     comfyUrl,
     installationId,
+    firstUseMode: 'none',
   })
 
   // Now that the entry exists, layout for the first time.
@@ -1682,6 +1702,7 @@ function openChooserHostWindow(): BrowserWindow {
     layoutViews,
     comfyUrl: '',
     installationId: null,
+    firstUseMode: 'none',
   })
 
   // Force-create the panel WebContentsView with the chooser body — install-
@@ -1974,6 +1995,38 @@ ipcMain.on('comfy-window:set-titlebar-inert', (event, payload: { inert: boolean 
 })
 
 /**
+ * Modal-unification (Track M-2.2) — first-use takeover step plumbing.
+ *
+ * Mirrors the inert IPC above but with one critical difference: the
+ * mode value IS cached on the entry. `buildTitleMenuItems` (file-menu
+ * popup config builder) reads `entry.firstUseMode` synchronously when
+ * the user clicks the waffle, so the cached value has to be ground-
+ * truth — a one-shot send like inert would mean the menu builder
+ * couldn't recover the current step.
+ *
+ * The forwarded `comfy-titlebar:first-use-mode-changed` broadcast is
+ * consumed by the title-bar webContents in M-2.3 (T&C step lockdown).
+ * M-2.2 only plumbs the IPC end-to-end.
+ */
+ipcMain.on(
+  'comfy-window:set-first-use-mode',
+  (event, payload: { mode: 'none' | 'consent-lockdown' | 'post-consent' }) => {
+    const mode = payload?.mode === 'consent-lockdown' || payload?.mode === 'post-consent'
+      ? payload.mode
+      : 'none'
+    for (const entry of comfyWindows.values()) {
+      if (entry.panelView?.webContents === event.sender) {
+        entry.firstUseMode = mode
+        if (!entry.titleBarView.webContents.isDestroyed()) {
+          entry.titleBarView.webContents.send('comfy-titlebar:first-use-mode-changed', mode)
+        }
+        return
+      }
+    }
+  },
+)
+
+/**
  * Phase 3 §18 — install-update pill state. Reads the install record
  * via `getInstallation`, resolves its source via `sourceMap`, and
  * applies the same `getStatusTag()` rule the chooser cards / kebab
@@ -2259,6 +2312,16 @@ function buildTitleMenuItems(kind: 'file' | 'install', entry: ComfyWindowEntry):
     // menu) so the in-Comfy chrome stays closed-off, matching the
     // post-Phase-3 design doc's "Comfy Instance is closed-off" rule.
     if (entry.installationId === null) {
+      // Modal-unification (Track M-2.2) — Skip Onboarding lives at the
+      // top of the install-creation group when the first-use takeover
+      // is past the consent step. We surface it ONLY in `post-consent`
+      // (never during `consent-lockdown`, never when no takeover is
+      // mounted) so the entry shows up exactly when the user has both
+      // (a) accepted T&Cs and (b) is mid-onboarding — i.e. the moment
+      // the menu's primary purpose is "let me out of this".
+      if (entry.firstUseMode === 'post-consent') {
+        items.push({ id: 'skip-onboarding', label: 'Skip Onboarding' })
+      }
       items.push(
         { id: 'new-install', label: 'New Install' },
         { id: 'track', label: 'Track Existing Install' },
@@ -2539,6 +2602,18 @@ function activateTitleMenuItem(entry: TitleMenuPopupEntry, id: string): void {
       void confirmAndCloseAllHostWindows(parentWindow)
     } else if (id === 'directories') setActivePanel(entry.parentEntryId, 'directories')
     else if (id === 'launcher-settings') setActivePanel(entry.parentEntryId, 'launcher-settings')
+    else if (id === 'skip-onboarding') {
+      // Modal-unification (Track M-2.2) — forward to the panel renderer
+      // so it can run the same `markFirstUseCompleted` + dismiss
+      // sequence the Cloud-branch pick uses (PanelApp owns the
+      // `firstUseCompleted` flip and the overlay close — see
+      // `handleFirstUseComplete`). Resolve the host entry the same way
+      // the close-window branches above do.
+      const parentEntry = comfyWindows.get(entry.parentEntryId)
+      if (parentEntry?.panelView && !parentEntry.panelView.webContents.isDestroyed()) {
+        parentEntry.panelView.webContents.send('comfy-panel:first-use-skip')
+      }
+    }
     else if (id === 'new-install' || id === 'track' || id === 'load-snapshot' || id === 'quick-install') {
       // Track B item 3 — install-creation / import flows are
       // chooser-host-only. `buildTitleMenuItems` already filters them
