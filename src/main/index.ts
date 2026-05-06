@@ -2735,6 +2735,16 @@ function computePopupHeight(items: readonly TitleMenuItem[]): number {
 
 function buildTitleMenuItems(kind: 'file' | 'install', entry: ComfyWindowEntry): TitleMenuItem[] {
   if (kind === 'file') {
+    // First-use post-consent — the takeover is mounted (or chained
+    // into new-install / migrate / install-progress), and the only
+    // file-menu entry that should be reachable is the explicit escape
+    // hatch. Surfacing New Install / Directories / etc. here would
+    // let the user wander out of the bootstrap UX into surfaces that
+    // aren't ready for it. Skip Onboarding marks completion + clears
+    // the chain state and dismisses the takeover.
+    if (entry.firstUseMode === 'post-consent') {
+      return [{ id: 'skip-onboarding', label: 'Skip Onboarding' }]
+    }
     // §15 — Directories is a global / cross-install affordance (the
     // launcher's view of disk: models, outputs, inputs) and lives on
     // the File / waffle menu alongside the other app-level entries.
@@ -2764,16 +2774,10 @@ function buildTitleMenuItems(kind: 'file' | 'install', entry: ComfyWindowEntry):
     // menu) so the in-Comfy chrome stays closed-off, matching the
     // post-Phase-3 design doc's "Comfy Instance is closed-off" rule.
     if (entry.installationId === null) {
-      // Modal-unification (Track M-2.2) — Skip Onboarding lives at the
-      // top of the install-creation group when the first-use takeover
-      // is past the consent step. We surface it ONLY in `post-consent`
-      // (never during `consent-lockdown`, never when no takeover is
-      // mounted) so the entry shows up exactly when the user has both
-      // (a) accepted T&Cs and (b) is mid-onboarding — i.e. the moment
-      // the menu's primary purpose is "let me out of this".
-      if (entry.firstUseMode === 'post-consent') {
-        items.push({ id: 'skip-onboarding', label: 'Skip Onboarding' })
-      }
+      // The first-use post-consent short-circuit at the top of this
+      // function returns Skip Onboarding by itself — by the time we
+      // reach here `firstUseMode` is `'none'` so the install-creation
+      // group is the steady-state entry list.
       items.push(
         { id: 'new-install', label: 'New Install' },
         { id: 'track', label: 'Track Existing Install' },

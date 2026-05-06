@@ -419,7 +419,17 @@ function dismissTakeoverDirect(): void {
  *  the pair keeps them in sync if the gate flip ever needs extra
  *  state cleanup (e.g. a future telemetry event). */
 async function completeFirstUseAndDismiss(): Promise<void> {
+  // Clear chain state so the auto-launch watcher doesn't fire after
+  // a Skip Onboarding triggered mid-chain (the user wants OUT of
+  // onboarding, not to land on a freshly-installed Comfy).
+  chainingFirstUseToNewInstall.value = false
+  pendingFirstUseAutoLaunchId.value = null
   await launcherPrefs.markFirstUseCompleted()
+  // dismissTakeoverDirect pushes `'none'` only when the overlay is
+  // the first-use takeover itself; chain dismiss paths can have a
+  // new-install / progress takeover in the slot, so push it
+  // explicitly to keep the file-menu builder in steady state.
+  window.api.setFirstUseMode('none')
   dismissTakeoverDirect()
 }
 
@@ -477,10 +487,15 @@ async function handleFirstUseComplete(): Promise<void> {
  *  `useOverlay`, so the first-use takeover unmounts as the
  *  new-install takeover mounts. The completion flip is deferred to
  *  the new-install close path (see `handleNewInstallTakeoverClose`). */
-function handleFirstUseChainLocal(): void {
+async function handleFirstUseChainLocal(): Promise<void> {
   chainingFirstUseToNewInstall.value = true
   pendingFirstUseAutoLaunchId.value = null
-  void switchPanel('new-install')
+  await switchPanel('new-install')
+  // FirstUseTakeover.onUnmounted just pushed `'none'` as the chain
+  // swap unmounted it. Re-assert `'post-consent'` so the file-menu
+  // builder keeps the chain locked down to Skip Onboarding while
+  // the new-install / install-progress takeover is up.
+  window.api.setFirstUseMode('post-consent')
 }
 
 /** First-use takeover migrate-branch pick (Track D item 5) — runs
@@ -530,6 +545,11 @@ async function handleFirstUseChainMigrate(): Promise<void> {
     apiCall: () => window.api.runAction(legacy!.id, 'migrate-to-standalone', result),
     cancellable: true,
   })
+  // dismissTakeoverDirect pushed `'none'` as it cleared the first-use
+  // overlay; re-assert `'post-consent'` so the file-menu builder
+  // keeps the chain locked down to Skip Onboarding for the duration
+  // of the migration progress + auto-launch.
+  window.api.setFirstUseMode('post-consent')
 }
 
 /** Wrapper around `closeOverlay` for the new-install takeover branch
@@ -541,6 +561,11 @@ async function handleFirstUseChainMigrate(): Promise<void> {
 async function handleNewInstallTakeoverClose(): Promise<void> {
   if (chainingFirstUseToNewInstall.value) {
     await launcherPrefs.markFirstUseCompleted()
+    // The chain pushed `'post-consent'` to keep Skip Onboarding the
+    // only file-menu entry while the new-install takeover was up.
+    // Clear it here — whatever follows (dismiss back to chooser, or
+    // an in-flight progress / launch overlay swap) is post-onboarding.
+    window.api.setFirstUseMode('none')
     // Don't clear `chainingFirstUseToNewInstall` yet — the auto-launch
     // watcher uses it together with `pendingFirstUseAutoLaunchId` to
     // decide whether to fire. The watcher clears both after launch.
@@ -630,6 +655,11 @@ watch(
     const id = pendingFirstUseAutoLaunchId.value
     chainingFirstUseToNewInstall.value = false
     pendingFirstUseAutoLaunchId.value = null
+    // Chain is done (success or failure) — drop the file-menu lock.
+    // The launch path that follows (when the op succeeded) replaces
+    // the install-progress takeover with its own connect-progress
+    // takeover; either way the user is past onboarding now.
+    window.api.setFirstUseMode('none')
     if (!id) return
     if (op.cancelRequested || op.error || !op.result?.ok) return
     // The migrate-to-standalone op runs against the legacy install
