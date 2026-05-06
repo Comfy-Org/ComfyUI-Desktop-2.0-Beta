@@ -23,6 +23,7 @@ import type { ActionContext, ActionResult } from './types'
 import { scrubStderr, lastNLines, stripAnsi } from '../../scrubStderr'
 import { rotateLogFiles, getLogDir } from '../../logRotation'
 import { createExecutionTap } from '../../executionTap'
+import { clearCrash, recordCrash } from '../../crashBuffer'
 import type { WriteStream } from 'fs'
 
 /**
@@ -54,6 +55,10 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
   if (_operationAborts.has(installationId)) {
     return { ok: false, message: 'Another operation is already running for this installation.' }
   }
+  // The user is taking another shot at this install — drop any retained
+  // crash detail so a future `getLastCrashError` lookup doesn't surface
+  // the previous failure when the lifecycle view re-mounts.
+  clearCrash(installationId)
   const source = sourceMap[inst.sourceId]
   if (!source) return { ok: false, message: i18n.t('errors.unknownSource') }
   if (!source.skipInstall && isEffectivelyEmptyInstallDir(inst.installPath)) {
@@ -213,8 +218,10 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
       const lastStderr = scrubStderr(lastNLines(stderrBuf, 100))
       execTap.flushSummary()
       _removeSession(installationId)
+      const exitedPayload = { installationId, crashed, exitCode: code ?? undefined, installationName: inst.name, lastStderr }
+      if (crashed) recordCrash(exitedPayload)
       if (!sender.isDestroyed()) {
-        sender.send('comfy-exited', { installationId, crashed, exitCode: code, installationName: inst.name, lastStderr })
+        sender.send('comfy-exited', exitedPayload)
       }
       if (_onComfyExited) _onComfyExited({ installationId })
     })
@@ -587,8 +594,10 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
       const lastStderr = scrubStderr(lastNLines(currentGetStderr(), 100))
       execTap.flushSummary()
       _removeSession(installationId)
+      const exitedPayload = { installationId, crashed, exitCode: code ?? undefined, installationName: inst.name, lastStderr }
+      if (crashed) recordCrash(exitedPayload)
       if (!sender.isDestroyed()) {
-        sender.send('comfy-exited', { installationId, crashed, exitCode: code, installationName: inst.name, lastStderr })
+        sender.send('comfy-exited', exitedPayload)
       }
       if (_onComfyExited) _onComfyExited({ installationId })
     })

@@ -16,6 +16,7 @@ import { registerInstallationHandlers } from './registerInstallationHandlers'
 import { registerSnapshotHandlers } from './registerSnapshotHandlers'
 import { registerSettingsHandlers } from './registerSettingsHandlers'
 import { registerSessionHandlers } from './registerSessionHandlers'
+import { registerCrashHandlers } from './registerCrashHandlers'
 
 // Re-export public API from shared
 export { getAppVersion, stopRunning, hasRunningSessions, getSessionProcess, hasActiveOperations, getActiveDetails, cancelAll } from './shared'
@@ -59,7 +60,7 @@ export function register(callbacks: RegisterCallbacks = {}): void {
 
   migrateDefaults()
 
-  // Sweep empty/broken local installations on startup, then clean stale settings references
+  // Sweep empty/broken local installations on startup.
   void (async () => {
     try {
       const all = await installations.list()
@@ -74,19 +75,7 @@ export function register(callbacks: RegisterCallbacks = {}): void {
         swept = true
       }
 
-      const remaining = swept ? await installations.list() : all
-      const validIds = new Set(remaining.map((i) => i.id))
-      let settingsChanged = false
-
-      const rawPinned = settings.get('pinnedInstallIds')
-      const pinned = Array.isArray(rawPinned) ? rawPinned as string[] : []
-      const filtered = pinned.filter((id) => validIds.has(id))
-      if (filtered.length !== pinned.length) {
-        settings.set('pinnedInstallIds', filtered)
-        settingsChanged = true
-      }
-
-      if (swept || settingsChanged) _broadcastToRenderer('installations-changed', {})
+      if (swept) _broadcastToRenderer('installations-changed', {})
     } catch {}
   })()
 
@@ -182,4 +171,5 @@ export function register(callbacks: RegisterCallbacks = {}): void {
   registerSnapshotHandlers()
   registerSettingsHandlers()
   registerSessionHandlers()
+  registerCrashHandlers()
 }

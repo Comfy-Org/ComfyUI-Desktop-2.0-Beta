@@ -74,6 +74,8 @@ const api: ElectronApi = {
   transferHostBoundsToInstall: (installationId) =>
     ipcRenderer.invoke('transfer-host-bounds-to-install', installationId),
   getRunningInstances: () => ipcRenderer.invoke('get-running-instances'),
+  getLastCrashError: (installationId: string) =>
+    ipcRenderer.invoke('get-last-crash-error', installationId),
   cancelLaunch: () => ipcRenderer.invoke('cancel-launch'),
   cancelOperation: (installationId) =>
     ipcRenderer.invoke('cancel-operation', installationId),

@@ -733,6 +733,15 @@ export interface ElectronApi {
    *  swap-in-place. No-op for install-backed callers. */
   transferHostBoundsToInstall(installationId: string): Promise<boolean>
   getRunningInstances(): Promise<RunningInstance[]>
+  /**
+   * Read the retained crash detail for an installation, if any. Main holds
+   * the last `comfy-exited` payload (with stderr tail) per installation
+   * until the next launch attempt. The lifecycle view calls this on mount
+   * so a refresh / view recreation after a crash still surfaces the error
+   * context, even if the live `onComfyExited` event fired before this
+   * panel WebContents existed. Returns `null` when no crash is on record.
+   */
+  getLastCrashError(installationId: string): Promise<ComfyExitedData | null>
   cancelLaunch(): Promise<void>
   cancelOperation(installationId: string): Promise<void>
   killPortProcess(port: number): Promise<KillResult>
