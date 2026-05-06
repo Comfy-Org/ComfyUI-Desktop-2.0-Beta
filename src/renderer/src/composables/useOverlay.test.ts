@@ -31,6 +31,8 @@ vi.mock('../i18n', () => ({
 describe('useOverlay — cancel-prompt copy (Track M-2.4 / M-6)', () => {
   beforeEach(() => {
     confirmMock.mockReset()
+    // Reset the singleton overlay slot so test order doesn't matter.
+    useOverlay().current.value = null
   })
 
   it("uses the dedicated 'Quit setup?' copy when a takeover sets cancelCopyKey: 'quit-setup'", async () => {
@@ -129,6 +131,8 @@ describe('useOverlay — cancel-prompt copy (Track M-2.4 / M-6)', () => {
 describe('useOverlay — onCancel firing (Track M-6)', () => {
   beforeEach(() => {
     confirmMock.mockReset()
+    // Reset the singleton overlay slot so test order doesn't matter.
+    useOverlay().current.value = null
   })
 
   it('fires onCancel after the user confirms the cancel-prompt for an in-flight progress overlay', async () => {
