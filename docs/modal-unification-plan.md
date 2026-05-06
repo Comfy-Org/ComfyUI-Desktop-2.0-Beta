@@ -201,10 +201,26 @@ The `onCancel` hook fires from inside `useOverlay.openOverlay` immediately AFTER
 
 `onCancel` is unset for wizard takeovers (no main-side rollback to fire) and for first-use (the app exits, taking the renderer with it). Tier 1 popovers (manage / app-update / downloads) never trigger the prompt and so never read `onCancel`.
 
-### Track M-7 — `useOverlay` Tier 3 retirement (if no consumer)
-- After M-2/M-3, Tier 3 (takeover) may have no remaining caller.
-- Collapse the tier system to Tier 1 (modal) + Tier 2 (in-progress).
-- Update collision rules and tests.
+### Track M-7 — Legacy `flow` overlay kind retirement
+The original M-7 sketch read "Tier 3 retirement (if no consumer) —
+collapse to Tier 1 + Tier 2". In practice Tier 3 still has live
+consumers post-M-3 (`kind: 'takeover'` owns first-use, the four
+install-flow wizards, and update-while-running) so the tier itself
+stays. The unused part is the legacy **`kind: 'flow'`** discriminated
+union member: pre-M-3 the four install-flow modals mounted via
+`'flow'` while they still rendered as panel bodies; M-3 migrated them
+into `'takeover'` chrome and `'flow'` has had no caller since.
+
+M-7 ship:
+- Remove `FlowOverlay` from the `Overlay` union.
+- Remove `'flow'` from `OverlayKind`.
+- Remove the `flow: 3` entry from the `TIER` constant.
+- Keep `FlowComponent` (the install-flow wizard component-id union)
+  — it's still useful as the parameter type of `openFlowTakeover`
+  and as the `TakeoverOverlay.component` value when one of those
+  wizards mounts.
+- Collision rules don't need to change — they're tier-based, not
+  kind-based, and Tier 3 stays.
 
 ## Risks
 

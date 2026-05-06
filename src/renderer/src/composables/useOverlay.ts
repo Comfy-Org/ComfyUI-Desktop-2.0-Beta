@@ -14,17 +14,26 @@ import type { Installation } from '../types/ipc'
  * The kinds form a discriminated union:
  *   - `manage`   — DetailModal (Manage…) + confirm/prompt/channel
  *                  cards / action menus. Tier 1.
+ *   - `app-update` — Title-bar app-update pill popover. Tier 1.
+ *   - `downloads`  — Title-bar downloads tray popover. Tier 1.
  *   - `progress` — ProgressModal for a long-running action that does
  *                  NOT end in the running ComfyUI app (delete,
  *                  snapshot, copy, update-while-stopped). Tier 2.
- *   - `flow`     — Multi-step flow surface for a Tier 3 action that
- *                  DOES end in the running ComfyUI app (legacy slot
- *                  for `new-install` / `track` / `load-snapshot` /
- *                  `quick-install` while they still mount as panel
- *                  bodies; will move into the takeover slot in Step 3).
  *   - `takeover` — Full-window takeover for actions that end in the
  *                  app (launch, install, update-then-restart,
  *                  first-use, app-update). Tier 3.
+ *
+ * Modal-unification (Track M-7) — the legacy `'flow'` Tier 3 kind
+ * was retired here. Pre-M-3 the four install-flow modals
+ * (NewInstall / Track / LoadSnapshot / QuickInstall) mounted via
+ * `kind: 'flow'` while they still rendered as panel bodies, and
+ * the M-3 migration moved them into `kind: 'takeover'` chrome. The
+ * `'flow'` kind has had no caller since M-3 shipped, so the
+ * discriminated-union member, the TIER entry, and the corresponding
+ * collision rules are gone. Tier 3 itself stays — `kind: 'takeover'`
+ * still owns first-use, the four install-flow wizards, and update-
+ * while-running, all of which need the binding-modal chrome the
+ * tier provides.
  *
  * Tier-collision rules — implemented by `openOverlay`:
  *   - Tier 1 → any tier: auto-replace silently.
@@ -45,7 +54,7 @@ import type { Installation } from '../types/ipc'
  * `Cancel "Updating ComfyUI"?`).
  */
 
-export type OverlayKind = 'manage' | 'app-update' | 'downloads' | 'progress' | 'flow' | 'takeover'
+export type OverlayKind = 'manage' | 'app-update' | 'downloads' | 'progress' | 'takeover'
 
 export interface ManageOverlay {
   kind: 'manage'
@@ -95,12 +104,15 @@ export interface ProgressOverlay {
   onCancel?: () => void
 }
 
+/**
+ * Modal-unification (Track M-7) — string union of the four install-
+ * flow takeover component identifiers. Pre-M-7 this was the body of
+ * the now-retired `FlowOverlay`; the union itself stays useful as
+ * the type of `openFlowTakeover`'s `component` parameter (and of
+ * the `TakeoverOverlay.component` value when one of these
+ * particular wizards mounts).
+ */
 export type FlowComponent = 'new-install' | 'track' | 'load-snapshot' | 'quick-install'
-
-export interface FlowOverlay {
-  kind: 'flow'
-  component: FlowComponent
-}
 
 export interface TakeoverOverlay {
   kind: 'takeover'
@@ -154,7 +166,6 @@ export type Overlay =
   | AppUpdateOverlay
   | DownloadsOverlay
   | ProgressOverlay
-  | FlowOverlay
   | TakeoverOverlay
 
 const TIER: Record<OverlayKind, 1 | 2 | 3> = {
@@ -162,7 +173,6 @@ const TIER: Record<OverlayKind, 1 | 2 | 3> = {
   'app-update': 1,
   downloads: 1,
   progress: 2,
-  flow: 3,
   takeover: 3,
 }
 
