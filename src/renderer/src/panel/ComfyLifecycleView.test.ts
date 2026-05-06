@@ -19,6 +19,7 @@ const messages = {
       crashedTitle: 'ComfyUI exited unexpectedly',
       crashedDesc: 'The ComfyUI process exited. You can restart it below.',
       crashedDescWithCode: 'The ComfyUI process exited (exit code {code}). You can restart it below.',
+      crashedDetailsToggle: 'Show error log',
       start: 'Start ComfyUI',
       restart: 'Restart ComfyUI',
       launchProgressTitle: 'Starting ComfyUI',
@@ -42,6 +43,7 @@ const SAMPLE_INSTALL: Installation = {
 interface MockApi {
   runAction: ReturnType<typeof vi.fn>
   getRunningInstances: ReturnType<typeof vi.fn>
+  getLastCrashError: ReturnType<typeof vi.fn>
   onInstanceLaunching: ReturnType<typeof vi.fn>
   onInstanceLaunchFailed: ReturnType<typeof vi.fn>
   onInstanceStarted: ReturnType<typeof vi.fn>
@@ -51,10 +53,11 @@ interface MockApi {
   onComfyExited: ReturnType<typeof vi.fn>
 }
 
-function installMockApi(): MockApi {
+function installMockApi(overrides: Partial<MockApi> = {}): MockApi {
   const api: MockApi = {
     runAction: vi.fn().mockResolvedValue({ ok: true }),
     getRunningInstances: vi.fn().mockResolvedValue([]),
+    getLastCrashError: vi.fn().mockResolvedValue(null),
     onInstanceLaunching: vi.fn(() => () => {}),
     onInstanceLaunchFailed: vi.fn(() => () => {}),
     onInstanceStarted: vi.fn(() => () => {}),
@@ -62,6 +65,7 @@ function installMockApi(): MockApi {
     onInstanceStopping: vi.fn(() => () => {}),
     onComfyOutput: vi.fn(() => () => {}),
     onComfyExited: vi.fn(() => () => {}),
+    ...overrides,
   }
   ;(window as unknown as { api: MockApi }).api = api
   return api
@@ -122,6 +126,112 @@ describe('ComfyLifecycleView', () => {
     const button = wrapper.find('button.primary')
     expect(button.exists()).toBe(true)
     expect(button.text()).toContain('Restart ComfyUI')
+  })
+
+  it('renders the stderr tail inside the crashed state when present', async () => {
+    const wrapper = mountView()
+    const sessionStore = useSessionStore()
+    sessionStore.errorInstances.set('inst-1', {
+      installationName: 'My Local Install',
+      exitCode: 1,
+      lastStderr: 'ImportError: No module named \'torch\'\n  at /path/to/main.py:42',
+    })
+    await flushPromises()
+    const detail = wrapper.find('.lifecycle-error-detail')
+    expect(detail.exists()).toBe(true)
+    expect(wrapper.find('.lifecycle-error-output').text()).toContain('ImportError: No module named')
+    expect(wrapper.find('.lifecycle-error-output').text()).toContain('main.py:42')
+    expect(wrapper.text()).toContain('Show error log')
+  })
+
+  it('omits the stderr details block when no lastStderr is recorded', async () => {
+    const wrapper = mountView()
+    const sessionStore = useSessionStore()
+    sessionStore.errorInstances.set('inst-1', {
+      installationName: 'My Local Install',
+      exitCode: 1,
+    })
+    await flushPromises()
+    expect(wrapper.find('.lifecycle-error-detail').exists()).toBe(false)
+  })
+
+  it('hydrates the crashed state from getLastCrashError on mount when no live event has fired', async () => {
+    const api = installMockApi({
+      getLastCrashError: vi.fn().mockResolvedValue({
+        installationId: 'inst-1',
+        installationName: 'My Local Install',
+        crashed: true,
+        exitCode: 9,
+        lastStderr: 'Killed by signal 9',
+      }),
+    })
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(api.getLastCrashError).toHaveBeenCalledWith('inst-1')
+    expect(wrapper.text()).toContain('ComfyUI exited unexpectedly')
+    expect(wrapper.text()).toContain('exit code 9')
+    expect(wrapper.find('.lifecycle-error-output').text()).toContain('Killed by signal 9')
+
+    const sessionStore = useSessionStore()
+    const stored = sessionStore.errorInstances.get('inst-1')
+    expect(stored?.lastStderr).toBe('Killed by signal 9')
+    expect(stored?.exitCode).toBe(9)
+  })
+
+  it('does not overwrite an existing live error when getLastCrashError later resolves', async () => {
+    let resolveCrash: ((data: unknown) => void) | undefined
+    const api = installMockApi({
+      getLastCrashError: vi.fn(
+        () => new Promise((resolve) => {
+          resolveCrash = resolve as (data: unknown) => void
+        }),
+      ),
+    })
+
+    const wrapper = mountView()
+    // The live IPC handler in sessionStore wins over the on-mount fetch.
+    const sessionStore = useSessionStore()
+    sessionStore.errorInstances.set('inst-1', {
+      installationName: 'My Local Install',
+      exitCode: 137,
+      lastStderr: 'live event stderr',
+    })
+
+    resolveCrash?.({
+      installationId: 'inst-1',
+      installationName: 'My Local Install',
+      crashed: true,
+      exitCode: 1,
+      lastStderr: 'stale buffer stderr',
+    })
+    await flushPromises()
+
+    expect(api.getLastCrashError).toHaveBeenCalledWith('inst-1')
+    const stored = sessionStore.errorInstances.get('inst-1')
+    // Live event payload (the freshest) is preserved — the buffer fetch is a
+    // best-effort backfill and must not clobber a populated entry.
+    expect(stored?.lastStderr).toBe('live event stderr')
+    expect(stored?.exitCode).toBe(137)
+    expect(wrapper.find('.lifecycle-error-output').text()).toContain('live event stderr')
+  })
+
+  it('skips the IPC fetch when an error is already in the session store', async () => {
+    const api = installMockApi()
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const sessionStore = useSessionStore()
+    sessionStore.errorInstances.set('inst-1', {
+      installationName: 'My Local Install',
+      exitCode: 1,
+      lastStderr: 'preexisting',
+    })
+    mount(ComfyLifecycleView, {
+      props: { installationId: 'inst-1', installation: SAMPLE_INSTALL },
+      global: { plugins: [createTestI18n(), pinia] },
+    })
+    await flushPromises()
+    expect(api.getLastCrashError).not.toHaveBeenCalled()
   })
 
   it('emits show-progress with a launch apiCall when Start is clicked', async () => {

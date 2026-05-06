@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Play, RefreshCcw, TriangleAlert, Loader2 } from 'lucide-vue-next'
 import { useSessionStore } from '../stores/sessionStore'
@@ -47,6 +47,46 @@ const state = computed<LifecycleState>(() => {
 
 const errorInfo = computed(() => sessionStore.errorInstances.get(props.installationId) ?? null)
 
+/**
+ * Hydrate the session-store error map from main's retained crash buffer
+ * for this install. Covers the case where the panel WebContents was
+ * recreated (refresh, body-mode swap back to lifecycle, second window
+ * opened on the same install) AFTER the live `comfy-exited` event fired
+ * — without this fetch the renderer would land on the lifecycle view
+ * with no error context to render. Triggered on mount and whenever the
+ * targeted install changes; the live IPC handler in sessionStore keeps
+ * the map fresh for crashes that happen while the view is alive.
+ */
+async function hydrateLastCrashError(installationId: string): Promise<void> {
+  if (!installationId) return
+  // Skip when the live event already populated the map for this install —
+  // the renderer copy is the freshest source of truth.
+  if (sessionStore.errorInstances.has(installationId)) return
+  try {
+    const data = await window.api.getLastCrashError(installationId)
+    if (!data || !data.crashed) return
+    if (sessionStore.errorInstances.has(installationId)) return
+    sessionStore.errorInstances.set(installationId, {
+      installationName: data.installationName,
+      exitCode: data.exitCode,
+      lastStderr: data.lastStderr,
+    })
+  } catch {
+    // Best-effort — a missing handler / IPC failure shouldn't break the view.
+  }
+}
+
+onMounted(() => {
+  void hydrateLastCrashError(props.installationId)
+})
+
+watch(
+  () => props.installationId,
+  (id) => {
+    void hydrateLastCrashError(id)
+  },
+)
+
 const installationName = computed(() => props.installation?.name ?? '')
 
 function startLaunch(): void {
@@ -93,6 +133,10 @@ function startLaunch(): void {
           {{ $t('comfyLifecycle.crashedDescWithCode', { code: errorInfo.exitCode }) }}
         </p>
         <p v-else>{{ $t('comfyLifecycle.crashedDesc') }}</p>
+        <details v-if="errorInfo?.lastStderr" class="lifecycle-error-detail">
+          <summary>{{ $t('comfyLifecycle.crashedDetailsToggle') }}</summary>
+          <pre class="lifecycle-error-output">{{ errorInfo.lastStderr }}</pre>
+        </details>
         <div class="lifecycle-actions">
           <button class="primary" type="button" @click="startLaunch">
             <RefreshCcw :size="16" />
@@ -193,5 +237,42 @@ function startLaunch(): void {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+}
+
+.lifecycle-error-detail {
+  width: 100%;
+  max-width: 100%;
+  text-align: left;
+  margin-top: 4px;
+}
+
+.lifecycle-error-detail summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 4px 0;
+  user-select: none;
+  text-align: center;
+}
+
+.lifecycle-error-detail summary:hover {
+  color: var(--text);
+}
+
+.lifecycle-error-output {
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 240px;
+  overflow: auto;
+  text-align: left;
 }
 </style>
