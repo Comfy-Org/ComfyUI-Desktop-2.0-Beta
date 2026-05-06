@@ -172,10 +172,25 @@ Sliced into two commits, both green-gated independently:
 ### Stage W-5 — Multi-window deduplication for "tile click on
 already-running install"
 - Tile click in chooser body for an install that's already running in
-  another window → focus that window AND `detachInstall()` the
-  current window (or `attachInstall(otherRunningInstall)` flip), per
-  the cross-cutting decision above. The exact UX needs a small
-  visual review.
+  another window → focus that window AND leave the chooser host
+  alive (the install-less host has no install backing to detach;
+  spawning a duplicate `attachInstall` view of the running install
+  would create two windows showing the same instance).
+- Implemented in `handleChooserPick` and the first-use chain's
+  `launchInstallationAfterFirstUse` — the post-W-4 paradigm is that
+  tile clicks transform the host the user clicked from instead of
+  closing it, so the already-running branch drops the legacy
+  `closeHostWindow()` and just focuses the existing window. The
+  surplus chooser host is the price of keeping the user's panel
+  context intact (matters for the W-4 `returnToDashboard` →
+  pick-running case where closing would lose the navigated-to
+  state).
+- Cross-window attach dedupe is a natural consequence of the
+  in-place attach machinery: simultaneous `claimAttachHost` claims
+  on the same install resolve to a single attach (last claim wins
+  + `installationIdToWindowKey`'s "existing entry" branch in
+  `onLaunch` short-circuits the second launch into the
+  already-attached window).
 
 ## Risks
 
