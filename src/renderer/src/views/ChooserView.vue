@@ -346,9 +346,16 @@ function handleTileClick(inst: Installation): void {
  *  (`_installCleanup` → `ipc.stopRunning` → webContents close →
  *  destroy), so calling `closeComfyWindow` is enough — no separate
  *  `stopComfyUI` call needed, and the user doesn't get left looking
- *  at a stale "ComfyUI is stopped" lifecycle screen. */
-function closeRunningInstance(inst: Installation): void {
-  void window.api.closeComfyWindow(inst.id)
+ *  at a stale "ComfyUI is stopped" lifecycle screen.
+ *
+ *  Focus the install window first so that if main's `close` handler
+ *  ends up consulting the panel renderer (active Tier 2 / Tier 3
+ *  overlay), the resulting cancel prompt is visible — without this
+ *  the dashboard window stays in front and the prompt would be
+ *  hidden behind it. */
+async function closeRunningInstance(inst: Installation): Promise<void> {
+  await window.api.focusComfyWindow(inst.id)
+  await window.api.closeComfyWindow(inst.id)
 }
 
 function handleCloudClick(): void {
