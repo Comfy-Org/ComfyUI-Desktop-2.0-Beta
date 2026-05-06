@@ -77,7 +77,6 @@ interface Bridge {
   onThemeChanged: (cb: (theme: { bg: string; text: string }) => void) => () => void
   onFullscreenChanged: (cb: (fullscreen: boolean) => void) => () => void
   onMenuClosed: (cb: (info: { menu: 'file' | 'install' }) => void) => () => void
-  onInertChanged: (cb: (inert: boolean) => void) => () => void
   /** Modal-unification (Track M-2.3) — first-use takeover step pushes
    *  from main. Drives the T&C-step lockdown that hides the waffle
    *  menu (the otherwise-always-live escape hatch) so the user has to
@@ -175,32 +174,28 @@ const activePanel = ref<ComfyPanelKey>('comfy')
 const canBack = ref(false)
 const canForward = ref(false)
 /**
- * Tier 3 takeover flag (Phase 3 §17). When true, the panel renderer
- * has a full-window takeover mounted; the title bar stays visible but
- * its interactive bits become inert so the user can't dismiss the
- * takeover by hitting File / install pill / Back / Forward. The OS
- * window controls (× / □) sit outside this view and stay live — the
- * user always retains an "interrupt" affordance via close.
+ * Modal-unification (Track M-2.3 / M-4) — first-use takeover step
+ * pushed from main via `comfy-titlebar:first-use-mode-changed`. The
+ * renderer uses the value to lock down the title bar during the T&C
+ * consent step (`'consent-lockdown'`) by hiding the waffle menu —
+ * the only always-live escape hatch the user would otherwise have
+ * out of the binding takeover. Post-consent steps (`'post-consent'`)
+ * leave the title bar normal so the file-menu Skip Onboarding entry
+ * the menu builder added in M-2.2 stays reachable. `'none'` is the
+ * steady state with no takeover mounted.
  *
- * Driven by `comfy-titlebar:inert-changed` from main, which forwards
- * the panel renderer's `setTitleBarInert(boolean)` call. State is
- * mirrored locally rather than asked-for; main does NOT cache the
- * flag, matching how panel-changed / theme-changed already work.
- */
-const isInert = ref(false)
-/**
- * Modal-unification (Track M-2.3) — first-use takeover step pushed
- * from main via `comfy-titlebar:first-use-mode-changed`. The renderer
- * uses the value to lock down the title bar during the T&C consent
- * step (`'consent-lockdown'`) by hiding the waffle menu — the only
- * always-live escape hatch on a Tier 3 takeover. Post-consent steps
- * (`'post-consent'`) leave the title bar normal so the file-menu
- * Skip Onboarding entry the menu builder added in M-2.2 stays
- * reachable. `'none'` is the steady state with no takeover mounted.
+ * State is local, main does NOT cache the value here (it's cached on
+ * the host entry main-side, see `ComfyWindowEntry.firstUseMode`),
+ * matching how panel-changed / theme-changed already work.
  *
- * Mirrors the inert ref above: state is local, main does NOT cache
- * the value here (it's cached on the host entry main-side, see
- * `ComfyWindowEntry.firstUseMode`).
+ * The pre-M-4 `isInert` ref that used to disable the install pill /
+ * back-forward arrows / app-update + install-update + downloads
+ * pills during ANY Tier 3 takeover was retired — the binding-modal
+ * chrome (M-3) handles "the user is in a centred dialog and the
+ * other affordances are visually subordinate", and the cancel-on-
+ * close consult (M-2.4) handles OS-X gracefully. The other title-
+ * bar affordances stay live so the user can deliberately click out
+ * via Skip Onboarding / Return-to-Dashboard / etc.
  */
 const firstUseMode = ref<'none' | 'consent-lockdown' | 'post-consent'>('none')
 const isConsentLockdown = computed(() => firstUseMode.value === 'consent-lockdown')
@@ -275,9 +270,12 @@ const themeText = ref<string | null>(null)
  * gated on `!isInstallLess` (install-less hosts have no install backing
  * the window, so an install-scoped pill is meaningless there).
  *
- * Both pills become `:disabled` during a Tier 3 takeover via `isInert`,
- * matching the file menu / install pill / nav arrows so the takeover
- * can't be dismissed via title-bar affordances.
+ * Modal-unification (Track M-4) — the pre-M-4 isInert disable that
+ * gated both pills during any Tier 3 takeover was retired together
+ * with the broader title-bar lockdown system. The pills now stay
+ * live during a takeover; the binding-modal chrome (M-3) keeps the
+ * takeover visually dominant and clicking the app-update pill is
+ * treated as a deliberate user action.
  */
 const appUpdateState = ref<{
   kind: 'available' | 'ready' | null
@@ -321,11 +319,9 @@ const showInstallUpdatePill = computed(
 )
 
 function handleAppUpdatePill(): void {
-  if (isInert.value) return
   bridge?.clickAppUpdatePill()
 }
 function handleInstallUpdatePill(): void {
-  if (isInert.value) return
   bridge?.clickInstallUpdatePill()
 }
 
@@ -345,9 +341,13 @@ function handleInstallUpdatePill(): void {
  *
  * Click sends `clickDownloadsTray()` which routes through main and
  * mounts the downloads popover in the panel renderer (same
- * `panel-trigger-overlay` pipeline the update pills use). Disabled
- * during a Tier 3 takeover via `isInert`, matching the rest of the
- * informational title-bar pills.
+ * `panel-trigger-overlay` pipeline the update pills use).
+ *
+ * Modal-unification (Track M-4) — the pre-M-4 isInert disable that
+ * dimmed this tray during any Tier 3 takeover was retired together
+ * with the rest of the title-bar lockdown system; the tray stays
+ * live during a takeover and clicking it pops the downloads
+ * popover even with a binding modal open.
  */
 const downloadsState = ref<DownloadsTrayState>({ active: [], recent: [] })
 
@@ -362,7 +362,6 @@ const downloadsTrayLabel = computed<string>(() => {
 })
 
 function handleDownloadsTray(): void {
-  if (isInert.value) return
   bridge?.clickDownloadsTray()
 }
 
@@ -406,13 +405,6 @@ function anchorBelow(el: HTMLElement | null | undefined): MenuAnchor {
 }
 
 function handleFileMenu(): void {
-  // The Tier 3 inert flag intentionally does NOT disable the file /
-  // waffle menu — the user must always be able to escape a takeover
-  // via "Return to Dashboard" / "Close Window" / "Close All Windows"
-  // / open a fresh chooser via "New Window". Without this hatch the
-  // menu would be a dead button while a takeover is mounted (and the
-  // user has no other reachable nav surface, since the install pill
-  // and back/forward arrows DO stay disabled per `isInert`).
   // Suppress click-to-toggle-close: if the file menu just closed, this
   // click is the same one that dismissed it (OS dismissed first, then
   // event propagates to the button). Don't reopen.
@@ -420,12 +412,10 @@ function handleFileMenu(): void {
   bridge?.openFileMenu(anchorBelow(fileBtnRef.value))
 }
 function handleBack(): void {
-  if (isInert.value) return
   if (!canBack.value) return
   bridge?.goBack()
 }
 function handleForward(): void {
-  if (isInert.value) return
   if (!canForward.value) return
   bridge?.goForward()
 }
@@ -433,10 +423,8 @@ function handleForward(): void {
  *  the whole pill opens the native install menu (Phase 3 §7 — the pill
  *  body and caret are no longer separate hit targets). Install-less
  *  host windows render a disabled pill, so this handler is unreachable
- *  there. Tier 3 takeover also disables the pill so the user can't
- *  pop the install menu over a takeover. */
+ *  there. */
 function handleInstallPillClick(): void {
-  if (isInert.value) return
   if (isInstallLess.value) return
   if (Date.now() - menuClosedAt.install < MENU_REOPEN_GUARD_MS) return
   bridge?.openInstallMenu(anchorBelow(pillBtnRef.value))
@@ -449,7 +437,6 @@ let unsubSourceCategory: (() => void) | undefined
 let unsubTheme: (() => void) | undefined
 let unsubFullscreen: (() => void) | undefined
 let unsubMenuClosed: (() => void) | undefined
-let unsubInert: (() => void) | undefined
 let unsubFirstUseMode: (() => void) | undefined
 let unsubAppUpdate: (() => void) | undefined
 let unsubInstallUpdate: (() => void) | undefined
@@ -501,9 +488,6 @@ onMounted(() => {
   unsubMenuClosed = bridge.onMenuClosed(({ menu }) => {
     menuClosedAt[menu] = Date.now()
   })
-  unsubInert = bridge.onInertChanged((inert) => {
-    isInert.value = inert
-  })
   unsubFirstUseMode = bridge.onFirstUseModeChanged((mode) => {
     firstUseMode.value = mode
   })
@@ -534,7 +518,6 @@ onUnmounted(() => {
   unsubTheme?.()
   unsubFullscreen?.()
   unsubMenuClosed?.()
-  unsubInert?.()
   unsubFirstUseMode?.()
   unsubAppUpdate?.()
   unsubInstallUpdate?.()
@@ -553,7 +536,6 @@ onUnmounted(() => {
       'is-light': isLight,
       'is-fullscreen': isFullscreen,
       'is-hover-active': isHoverActive,
-      'is-inert': isInert,
       'is-consent-lockdown': isConsentLockdown,
     }"
     :style="{
@@ -569,20 +551,18 @@ onUnmounted(() => {
          vertically read as redundant. The hamburger reads as a
          host-app-level menu and stays out of ComfyUI's namespace. -->
     <div class="title-left">
-      <!-- File / waffle menu button is exempt from the `isInert` disable
-           gate so the user can always reach Return-to-Dashboard /
-           Close-Window from inside a Tier 3 takeover. The install pill,
-           back/forward arrows, and update pills remain disabled — only
-           the menu stays live.
+      <!-- File / waffle menu button stays live during Tier 3 takeovers
+           so the user can always reach Return-to-Dashboard /
+           Close-Window / open a fresh chooser via "New Window" / use
+           the Skip Onboarding entry (M-2.2) without dismissing the
+           takeover via title-bar affordances.
            Modal-unification (Track M-2.3) — exception: during the
            first-use T&C consent step (`isConsentLockdown`) the menu
-           is hidden entirely. The waffle is the otherwise-always-live
-           escape hatch and the consent step is the one moment we
+           is hidden entirely. The consent step is the one moment we
            explicitly want no in-app way past the takeover — the user
            must either accept consent or close the window via OS
            chrome. The waffle reappears once the takeover advances to
-           `'post-consent'`, where the menu builder additionally
-           surfaces the Skip Onboarding entry (M-2.2). -->
+           `'post-consent'`. -->
       <button
         v-if="!isConsentLockdown"
         ref="fileBtn"
@@ -605,7 +585,6 @@ onUnmounted(() => {
         type="button"
         class="title-update-pill is-app-update"
         :class="{ 'is-ready': appUpdateState.kind === 'ready' }"
-        :disabled="isInert"
         :title="appUpdatePillLabel ?? ''"
         :aria-label="appUpdatePillLabel ?? ''"
         @click="handleAppUpdatePill"
@@ -619,14 +598,12 @@ onUnmounted(() => {
            downloads) so the title bar reads clean. The icon
            (`ArrowDownToLine`) is intentionally distinct from the
            update pills' `Download` icon so the user reads "downloads
-           tray" vs "update available pill" at a glance. Inert-disabled
-           to match the rest of the informational pills. -->
+           tray" vs "update available pill" at a glance. -->
       <button
         v-if="showDownloadsTray"
         type="button"
         class="title-downloads-tray"
         :class="{ 'has-active': downloadsActiveCount > 0 }"
-        :disabled="isInert"
         :title="downloadsTrayLabel"
         :aria-label="downloadsTrayLabel"
         @click="handleDownloadsTray"
@@ -649,7 +626,7 @@ onUnmounted(() => {
       <button
         type="button"
         class="title-nav-button"
-        :disabled="!canBack || isInert"
+        :disabled="!canBack"
         aria-label="Back"
         title="Back"
         @click="handleBack"
@@ -659,7 +636,7 @@ onUnmounted(() => {
       <button
         type="button"
         class="title-nav-button"
-        :disabled="!canForward || isInert"
+        :disabled="!canForward"
         aria-label="Forward"
         title="Forward"
         @click="handleForward"
@@ -671,8 +648,8 @@ onUnmounted(() => {
         type="button"
         class="title-install-pill"
         :class="{ 'is-install-less': isInstallLess }"
-        :disabled="isInstallLess || isInert"
-        :aria-haspopup="isInstallLess || isInert ? undefined : 'menu'"
+        :disabled="isInstallLess"
+        :aria-haspopup="isInstallLess ? undefined : 'menu'"
         @click="handleInstallPillClick"
       >
         <!-- Track B item 4 — install-type icon (Standalone laptop /
@@ -703,7 +680,6 @@ onUnmounted(() => {
         v-if="showInstallUpdatePill"
         type="button"
         class="title-update-pill is-install-update"
-        :disabled="isInert"
         :title="installUpdatePillLabel"
         :aria-label="installUpdatePillLabel"
         @click="handleInstallUpdatePill"
@@ -904,20 +880,11 @@ onUnmounted(() => {
   opacity: 0.85;
 }
 
-/* Tier 3 takeover (§17) — interactive controls are :disabled while a
-   takeover is mounted, but install-less mode also disables the pill,
-   and we want the takeover state to read more "inert" than just
-   "no-install-here". The is-inert class adds a uniform dimming pass
-   so File / Back / Forward / pill all read as paused at the same
-   visual weight. Window controls (× / □) live outside this view and
-   stay live. */
-.title-bar.is-inert .title-menu-button:disabled,
-.title-bar.is-inert .title-nav-button:disabled,
-.title-bar.is-inert .title-install-pill:disabled,
-.title-bar.is-inert .title-update-pill:disabled {
-  cursor: default;
-  opacity: 0.5;
-}
+/* Modal-unification (Track M-4) — the legacy `.title-bar.is-inert`
+   dimming block that lived here is retired. The broad title-bar
+   inert system was replaced by the binding-modal chrome (M-3) plus
+   the per-step `firstUseMode` waffle hide (M-2.3); no rule now
+   targets `.is-inert`. */
 
 /* --- Phase 3 §18 — Status pills (app-update + install-update) ---
    Compact chip styling. The pills must fit inside the 36px content
@@ -1009,11 +976,6 @@ onUnmounted(() => {
 .title-downloads-tray:focus-visible {
   outline: 2px solid var(--accent, #60a5fa);
   outline-offset: 2px;
-}
-/* Tier 3 takeover dimming — matches the other inert-disabled pills. */
-.title-bar.is-inert .title-downloads-tray:disabled {
-  cursor: default;
-  opacity: 0.5;
 }
 /* Badge counter — small numeric pill next to the icon when there
    are in-flight downloads. Suppressed in the icon-only case (recent

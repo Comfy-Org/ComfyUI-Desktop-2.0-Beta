@@ -280,9 +280,9 @@ interface ComfyWindowEntry {
    *                             `Skip Onboarding` entry (M-2.2) but
    *                             stays otherwise normal.
    *
-   * Mirrors the inert plumbing (`comfy-window:set-titlebar-inert`) but
-   * unlike inert the value IS cached on the entry — see the IPC
-   * handler comment.
+   * Cached here because `buildTitleMenuItems` (file-menu popup config
+   * builder) reads it synchronously when the user clicks the waffle —
+   * see the IPC handler comment.
    */
   firstUseMode: 'none' | 'consent-lockdown' | 'post-consent'
 }
@@ -1969,44 +1969,22 @@ ipcMain.on('comfy-window:close-current-panel', (event) => {
 })
 
 /**
- * Phase 3 §17 — Tier 3 takeover coordination. The panel renderer
- * watches its overlay tier and sends `{ inert: boolean }` whenever the
- * tier flips into / out of 3 (full-window takeover). We forward the
- * flag to the host's title-bar WebContentsView so the title bar can
- * disable its file menu / install pill / back-forward arrows for the
- * duration of the takeover (window controls stay live — they're OS
- * affordances, not part of the renderer's surface).
+ * Modal-unification (Track M-2.2 / M-4) — first-use takeover step
+ * plumbing.
  *
- * The send is a one-shot per state change; main does NOT cache the
- * inert state on the entry. The title-bar renderer keeps the local
- * flag, so a rare main↔panel resync (e.g. dev-tools reload) is the
- * caller's responsibility to re-broadcast — the same way panel and
- * theme already work.
- */
-ipcMain.on('comfy-window:set-titlebar-inert', (event, payload: { inert: boolean }) => {
-  for (const entry of comfyWindows.values()) {
-    if (entry.panelView?.webContents === event.sender) {
-      if (!entry.titleBarView.webContents.isDestroyed()) {
-        entry.titleBarView.webContents.send('comfy-titlebar:inert-changed', !!payload?.inert)
-      }
-      return
-    }
-  }
-})
-
-/**
- * Modal-unification (Track M-2.2) — first-use takeover step plumbing.
+ * Forwards the panel renderer's `setFirstUseMode(mode)` push to the
+ * host's title-bar WebContentsView (consumed by M-2.3's lockdown)
+ * AND caches the value on the entry — `buildTitleMenuItems`
+ * (file-menu popup config builder) reads `entry.firstUseMode`
+ * synchronously when the user clicks the waffle, so the cached
+ * value has to be ground-truth.
  *
- * Mirrors the inert IPC above but with one critical difference: the
- * mode value IS cached on the entry. `buildTitleMenuItems` (file-menu
- * popup config builder) reads `entry.firstUseMode` synchronously when
- * the user clicks the waffle, so the cached value has to be ground-
- * truth — a one-shot send like inert would mean the menu builder
- * couldn't recover the current step.
- *
- * The forwarded `comfy-titlebar:first-use-mode-changed` broadcast is
- * consumed by the title-bar webContents in M-2.3 (T&C step lockdown).
- * M-2.2 only plumbs the IPC end-to-end.
+ * Note: the M-4 retirement removed the `comfy-window:set-titlebar-
+ * inert` sibling that previously sat above this handler (broad
+ * "title bar disabled during Tier 3 takeover" gate). The
+ * binding-modal chrome (M-3) plus the `consent-lockdown` waffle
+ * hide (M-2.3) cover the cases that still need title-bar
+ * interactivity gating; everything else stays live.
  */
 ipcMain.on(
   'comfy-window:set-first-use-mode',

@@ -217,7 +217,6 @@ function installMockApi(initial?: {
         return () => {}
       },
     ),
-    setTitleBarInert: vi.fn(),
     setFirstUseMode: vi.fn(),
     onFirstUseSkip: vi.fn((cb: () => void) => {
       state.firstUseSkipCallbacks.push(cb)
@@ -406,25 +405,6 @@ describe('PanelApp', () => {
     await flushPromises()
     expect(wrapper.find('[data-testid="new-install-modal"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="chooser-view"]').exists()).toBe(true)
-  })
-
-  it('signals the title bar as inert when a takeover mounts and live again on close', async () => {
-    // Phase 3 §17 — the panel renderer broadcasts inert state through
-    // `window.api.setTitleBarInert(boolean)` whenever the overlay tier
-    // flips into / out of 3. Main forwards to the title-bar
-    // WebContentsView so it can disable file menu / install pill /
-    // back-forward arrows for the takeover's duration.
-    window.history.replaceState({}, '', '/?panel=chooser')
-    const wrapper = mountPanel()
-    await flushPromises()
-    const setInert = (window as unknown as { api: { setTitleBarInert: ReturnType<typeof vi.fn> } }).api.setTitleBarInert
-    expect(setInert).not.toHaveBeenCalled()
-    await wrapper.find('[data-testid="chooser-new-install"]').trigger('click')
-    await flushPromises()
-    expect(setInert).toHaveBeenLastCalledWith(true)
-    await wrapper.findComponent({ name: 'NewInstallModal' }).vm.$emit('close')
-    await flushPromises()
-    expect(setInert).toHaveBeenLastCalledWith(false)
   })
 
   it('renders the track takeover when initialised with panel=track', async () => {

@@ -54,8 +54,6 @@ const api: ElectronApi = {
     ipcRenderer.invoke('close-host-window'),
   closeCurrentPanel: () =>
     ipcRenderer.send('comfy-window:close-current-panel'),
-  setTitleBarInert: (inert: boolean) =>
-    ipcRenderer.send('comfy-window:set-titlebar-inert', { inert }),
   setFirstUseMode: (mode: 'none' | 'consent-lockdown' | 'post-consent') =>
     ipcRenderer.send('comfy-window:set-first-use-mode', { mode }),
   onFirstUseSkip: (callback) => {

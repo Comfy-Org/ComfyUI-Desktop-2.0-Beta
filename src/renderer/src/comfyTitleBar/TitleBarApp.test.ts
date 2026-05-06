@@ -22,7 +22,6 @@ interface MockBridgeState {
   themeChangedCallbacks: ((theme: { bg: string; text: string }) => void)[]
   fullscreenChangedCallbacks: ((fullscreen: boolean) => void)[]
   menuClosedCallbacks: ((info: { menu: 'file' | 'install' }) => void)[]
-  inertChangedCallbacks: ((inert: boolean) => void)[]
   firstUseModeChangedCallbacks: ((mode: 'none' | 'consent-lockdown' | 'post-consent') => void)[]
   appUpdateStateCallbacks: ((state: {
     kind: 'available' | 'ready' | null
@@ -52,7 +51,6 @@ function installMockBridge(opts: { isMac?: boolean; installationId?: string | nu
     themeChangedCallbacks: [],
     fullscreenChangedCallbacks: [],
     menuClosedCallbacks: [],
-    inertChangedCallbacks: [],
     firstUseModeChangedCallbacks: [],
     appUpdateStateCallbacks: [],
     installUpdateAvailableCallbacks: [],
@@ -104,10 +102,6 @@ function installMockBridge(opts: { isMac?: boolean; installationId?: string | nu
     },
     onMenuClosed: (cb: (info: { menu: 'file' | 'install' }) => void) => {
       state.menuClosedCallbacks.push(cb)
-      return () => {}
-    },
-    onInertChanged: (cb: (inert: boolean) => void) => {
-      state.inertChangedCallbacks.push(cb)
       return () => {}
     },
     onFirstUseModeChanged: (cb: (mode: 'none' | 'consent-lockdown' | 'post-consent') => void) => {
@@ -377,66 +371,6 @@ describe('TitleBarApp', () => {
     wrapper.unmount()
   })
 
-  it('disables install pill and back/forward when onInertChanged fires true, but leaves the file menu live', async () => {
-    // Phase 3 §17 — Tier 3 takeover broadcasts an inert flag through
-    // main → title bar so the user can't dismiss the takeover by
-    // hitting the title-bar controls. Window controls (× / □) sit
-    // outside this view and stay live regardless.
-    //
-    // Track C bug fix — the file/waffle menu is intentionally NOT
-    // gated by `isInert`. The user must always retain a reachable
-    // escape hatch from inside a takeover (Return to Dashboard /
-    // Close Window / New Window), so the menu stays both `:enabled`
-    // and click-active even when every other title-bar control is
-    // inert.
-    const { default: TitleBarApp } = await import('./TitleBarApp.vue')
-    const wrapper = mount(TitleBarApp, { attachTo: document.body })
-    await flushPromises()
-    // Enable back/forward so we can prove they're disabled by inert,
-    // not just by the absence of nav state.
-    bridgeState.navStateChangedCallbacks.forEach((cb) => cb({ canBack: true, canForward: true }))
-    await flushPromises()
-    const fileBtn = wrapper.find('.title-menu-button')
-    const pill = wrapper.find('.title-install-pill')
-    const navButtons = wrapper.findAll('.title-nav-button')
-    expect((fileBtn.element as HTMLButtonElement).disabled).toBe(false)
-    expect((pill.element as HTMLButtonElement).disabled).toBe(false)
-    expect((navButtons[0]!.element as HTMLButtonElement).disabled).toBe(false)
-    expect((navButtons[1]!.element as HTMLButtonElement).disabled).toBe(false)
-
-    // Flip into takeover.
-    bridgeState.inertChangedCallbacks.forEach((cb) => cb(true))
-    await flushPromises()
-    expect(wrapper.find('header').classes()).toContain('is-inert')
-    // File menu stays live so the user can navigate out of the
-    // takeover via the menu items.
-    expect((fileBtn.element as HTMLButtonElement).disabled).toBe(false)
-    expect((pill.element as HTMLButtonElement).disabled).toBe(true)
-    expect((navButtons[0]!.element as HTMLButtonElement).disabled).toBe(true)
-    expect((navButtons[1]!.element as HTMLButtonElement).disabled).toBe(true)
-
-    // File menu click reaches the bridge even while inert; pill and
-    // nav clicks stay no-ops.
-    await fileBtn.trigger('click')
-    await pill.trigger('click')
-    await navButtons[0]!.trigger('click')
-    await navButtons[1]!.trigger('click')
-    expect(bridgeState.fileMenuAnchors.length).toBe(1)
-    expect(bridgeState.installMenuAnchors.length).toBe(0)
-    expect(bridgeState.goBackCalls).toBe(0)
-    expect(bridgeState.goForwardCalls).toBe(0)
-
-    // Flip back out — controls become live again.
-    bridgeState.inertChangedCallbacks.forEach((cb) => cb(false))
-    await flushPromises()
-    expect(wrapper.find('header').classes()).not.toContain('is-inert')
-    expect((fileBtn.element as HTMLButtonElement).disabled).toBe(false)
-    expect((pill.element as HTMLButtonElement).disabled).toBe(false)
-    expect((navButtons[0]!.element as HTMLButtonElement).disabled).toBe(false)
-    expect((navButtons[1]!.element as HTMLButtonElement).disabled).toBe(false)
-    wrapper.unmount()
-  })
-
   it('hides the waffle menu during the first-use T&C consent step (consent-lockdown)', async () => {
     // Modal-unification (Track M-2.3) — the waffle menu is the only
     // always-live affordance during a Tier 3 takeover (it carries the
@@ -678,44 +612,6 @@ describe('TitleBarApp', () => {
     wrapper.unmount()
   })
 
-  it('disables both status pills while the title bar is inert (Tier 3 takeover)', async () => {
-    const { default: TitleBarApp } = await import('./TitleBarApp.vue')
-    const wrapper = mount(TitleBarApp, { attachTo: document.body })
-    await flushPromises()
-    bridgeState.appUpdateStateCallbacks.forEach((cb) =>
-      cb({ kind: 'available', version: '1.0.0', autoUpdate: false }),
-    )
-    bridgeState.installUpdateAvailableCallbacks.forEach((cb) => cb({ available: true, version: null }))
-    await flushPromises()
-    const appPill = wrapper.find('.title-update-pill.is-app-update')
-    const installPill = wrapper.find('.title-update-pill.is-install-update')
-    expect((appPill.element as HTMLButtonElement).disabled).toBe(false)
-    expect((installPill.element as HTMLButtonElement).disabled).toBe(false)
-
-    bridgeState.inertChangedCallbacks.forEach((cb) => cb(true))
-    await flushPromises()
-    expect((appPill.element as HTMLButtonElement).disabled).toBe(true)
-    expect((installPill.element as HTMLButtonElement).disabled).toBe(true)
-    wrapper.unmount()
-  })
-
-  it('does not forward pill clicks while inert (clicks are no-ops)', async () => {
-    const { default: TitleBarApp } = await import('./TitleBarApp.vue')
-    const wrapper = mount(TitleBarApp, { attachTo: document.body })
-    await flushPromises()
-    bridgeState.appUpdateStateCallbacks.forEach((cb) =>
-      cb({ kind: 'available', version: '1.0.0', autoUpdate: false }),
-    )
-    bridgeState.installUpdateAvailableCallbacks.forEach((cb) => cb({ available: true, version: null }))
-    bridgeState.inertChangedCallbacks.forEach((cb) => cb(true))
-    await flushPromises()
-    await wrapper.find('.title-update-pill.is-app-update').trigger('click')
-    await wrapper.find('.title-update-pill.is-install-update').trigger('click')
-    expect(bridgeState.appUpdatePillClicks).toBe(0)
-    expect(bridgeState.installUpdatePillClicks).toBe(0)
-    wrapper.unmount()
-  })
-
   it('hides the app-update pill when state transitions back to kind=null', async () => {
     const { default: TitleBarApp } = await import('./TitleBarApp.vue')
     const wrapper = mount(TitleBarApp)
@@ -880,35 +776,6 @@ describe('TitleBarApp', () => {
     await flushPromises()
     await wrapper.find('.title-downloads-tray').trigger('click')
     expect(bridgeState.downloadsTrayClicks).toBe(1)
-    wrapper.unmount()
-  })
-
-  it('disables the downloads tray while the title bar is inert (Tier 3 takeover)', async () => {
-    const { default: TitleBarApp } = await import('./TitleBarApp.vue')
-    const wrapper = mount(TitleBarApp, { attachTo: document.body })
-    await flushPromises()
-    bridgeState.downloadsChangedCallbacks.forEach((cb) =>
-      cb({
-        active: [
-          {
-            url: 'https://example.com/a.safetensors',
-            filename: 'a.safetensors',
-            directory: 'checkpoints',
-            progress: 0.5,
-            status: 'downloading',
-          },
-        ],
-        recent: [],
-      }),
-    )
-    await flushPromises()
-    const tray = wrapper.find('.title-downloads-tray')
-    expect((tray.element as HTMLButtonElement).disabled).toBe(false)
-    bridgeState.inertChangedCallbacks.forEach((cb) => cb(true))
-    await flushPromises()
-    expect((tray.element as HTMLButtonElement).disabled).toBe(true)
-    await tray.trigger('click')
-    expect(bridgeState.downloadsTrayClicks).toBe(0)
     wrapper.unmount()
   })
 

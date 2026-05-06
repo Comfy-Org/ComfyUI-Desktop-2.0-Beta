@@ -155,46 +155,30 @@ const launcherPrefs = useLauncherPrefs()
  * destructured to a top-level binding so the template can read it via
  * Vue's auto-unwrap.
  *
- * `tier` drives the title-bar inert flag — when a Tier 3 takeover is
- * mounted the title bar disables its file menu, install pill and
- * back/forward arrows so the user can't dismiss the takeover via
- * those affordances. See the watcher below.
+ * Modal-unification (Track M-4) — the `tier` watcher that pushed
+ * `setTitleBarInert(boolean)` to main was retired alongside the
+ * isInert system. Title-bar interactivity during a Tier 3 takeover
+ * is now governed by the binding-modal chrome (M-1 / M-2.1 / M-3)
+ * plus the per-step `firstUseMode` lockdown that hides the waffle
+ * during the T&C consent step (M-2.3). All other title-bar
+ * affordances stay live during a takeover so the user can
+ * deliberately escape via the file menu's Skip Onboarding entry, or
+ * via OS-X (which routes through the standardised cancel prompt —
+ * see M-2.4).
  */
-const { current: currentOverlay, tier, openOverlay, closeOverlay } = useOverlay()
+const { current: currentOverlay, openOverlay, closeOverlay } = useOverlay()
 
 /**
- * Modal-unification (Track M-2.1 / M-3) — class list for the Tier 3
- * takeover slot's wrapper div. Binding takeover-modals (first-use
- * post M-2.1, the four install-flow modals + update-while-running
- * post M-3) opt into:
- *   - `view-modal--opaque` so the backdrop reads as a fully-covering
- *     surface rather than a translucent overlay.
- *   - `is-binding-takeover-modal` so the legacy full-window
- *     `:deep(.view-modal-content)` override doesn't clobber the
- *     binding modal's `view-modal-content--takeover` width /
- *     centred-dialog chrome.
- * Every Tier 3 component is now a binding takeover-modal — the gate
- * is kept in computed shape so the wrapper class set is local to one
- * place (and the M-4 retirement of the legacy `:not(...)` override
- * has a single edit point).
+ * Modal-unification (Track M-2.1 / M-3 / M-4) — class list for the
+ * Tier 3 takeover slot's wrapper div. Every Tier 3 component is now
+ * a binding takeover-modal so the wrapper just needs the
+ * `view-modal--opaque` backdrop class. The pre-M-4 legacy
+ * `is-binding-takeover-modal` opt-out class was retired alongside
+ * the dead `:not(...)` :deep full-window override below.
  */
-const takeoverWrapperClasses = computed<Record<string, boolean>>(() => {
-  const isBinding = currentOverlay.value?.kind === 'takeover'
-  return {
-    'view-modal--opaque': isBinding,
-    'is-binding-takeover-modal': isBinding,
-  }
-})
-
-watch(tier, (newTier, oldTier) => {
-  // Only signal main on transitions into/out of the takeover tier —
-  // shifting between Tier 1 ↔ Tier 2 doesn't change the title-bar
-  // state, so we skip the redundant IPC.
-  const wasTakeover = oldTier === 3
-  const isTakeover = newTier === 3
-  if (wasTakeover === isTakeover) return
-  window.api.setTitleBarInert(isTakeover)
-})
+const takeoverWrapperClasses = computed<Record<string, boolean>>(() => ({
+  'view-modal--opaque': currentOverlay.value?.kind === 'takeover',
+}))
 
 // installationStore.fetchInstallations() is wired to onInstallationsChanged
 // inside the store itself, so the panel just needs to read from it.
@@ -1045,31 +1029,15 @@ onUnmounted(() => {
   overflow: hidden;
 }
 
-/* Tier 3 takeover slot (Phase 3 §17). The four flow modals reuse the
- * launcher window's modal components (`*Modal.vue` with a
- * `.view-modal-content` root). When mounted as a takeover they should
- * fill the panel area instead of floating with a max-width dialog
- * box, so neutralize the modal sizing and chrome — same shape as the
- * pre-§17 `.panel-flow` :deep override that lived alongside the
- * panel-body branches. The `data-overlay-key` selector keeps this
- * scoped to the takeover slot only; the progress-overlay slot still
- * renders its ProgressModal as a centred dialog.
- *
- * Modal-unification (Track M-2.1) — binding takeover-modals (first-use,
- * and later the install-flow modals in M-3) opt OUT of the full-window
- * override via `is-binding-takeover-modal` so they can render as
- * centred dialogs constrained by `view-modal-content--takeover`
- * (1000px max). Once every flow modal has migrated, this override
- * (and the legacy class set on the wrapper) goes away in M-3/M-4. */
-[data-overlay-key="takeover"]:not(.is-binding-takeover-modal) :deep(.view-modal-content) {
-  width: 100%;
-  max-width: none;
-  height: 100%;
-  border-radius: 0;
-  box-shadow: none;
-  margin: 0;
-  background: var(--bg);
-}
+/* Modal-unification (Track M-4) — the legacy
+ * `:not(.is-binding-takeover-modal) :deep(.view-modal-content)`
+ * full-window override that lived here is retired. Pre-M-3 it
+ * forced every Tier 3 takeover to fill the panel area; post-M-3
+ * (install-flow modals → binding takeover-modals) every takeover
+ * carries `view-modal-content--takeover` and renders as a centred
+ * dialog over the opaque backdrop, so the override never matched
+ * anything and the surrounding `is-binding-takeover-modal` opt-out
+ * class is also gone. */
 
 .panel-placeholder {
   padding: 24px;
