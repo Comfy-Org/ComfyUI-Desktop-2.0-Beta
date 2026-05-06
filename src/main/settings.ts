@@ -191,6 +191,17 @@ function load(): Settings {
     }
   }
 
+  // Drop a legacy `onAppClose: 'tray'` value while docking-to-tray is
+  // disabled. The setting is still in the schema (and the tray-aware
+  // close path will come back), but until then a stale `'tray'` value
+  // would silently take effect the moment docking is restored. Dropping
+  // only the `'tray'` value preserves an explicit `'quit'` choice the
+  // user may have set. See post-unification-code-review.md F14.
+  if (result.onAppClose === 'tray') {
+    delete (result as Record<string, unknown>).onAppClose
+    changed = true
+  }
+
   if (shouldSanitizeCopiedUserDefaults) {
     const nextCacheDir = sanitizeUserDefaultPath(result.cacheDir, defaults.cacheDir)
     if (nextCacheDir !== result.cacheDir) {
