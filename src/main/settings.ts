@@ -18,8 +18,14 @@ export interface KnownSettings {
   useChineseMirrors?: boolean
   chineseMirrorsPrompted?: boolean
   telemetryEnabled?: boolean
-  primaryInstallId?: string
-  pinnedInstallIds?: string[]
+  /**
+   * Phase 3 §17 Step 4 — set to `true` once the user has finished the
+   * first-use takeover (T&C + telemetry consent + locale-conditional
+   * China mirror prompt + Cloud/Local pick). Persists across launches
+   * so the takeover only shows on the very first run. Mid-flow cancel
+   * does NOT flip this — the takeover replays from step 1 next launch.
+   */
+  firstUseCompleted?: boolean
   oemManagedModelDirs?: string[]
   oemWorkflowImportVersion?: number
 }
@@ -53,8 +59,7 @@ const SETTINGS_SCHEMA = {
   useChineseMirrors: { nullable: false },
   chineseMirrorsPrompted: { nullable: false },
   telemetryEnabled: { nullable: false },
-  primaryInstallId: { nullable: false },
-  pinnedInstallIds: { nullable: false },
+  firstUseCompleted: { nullable: false },
   oemManagedModelDirs: { nullable: false },
   oemWorkflowImportVersion: { nullable: false },
 } as const satisfies Record<keyof KnownSettings, { nullable: boolean }>
@@ -77,7 +82,11 @@ function isNullableKnownSettingKey(key: KnownSettingKey): key is NullableKnownSe
 export const defaults: SettingsDefaults = {
   cacheDir: path.join(cacheDir(), "download-cache"),
   maxCachedFiles: 5,
-  onAppClose: "tray",
+  // Docking-to-tray is disabled while the unified-window flow is being
+  // rebuilt — see main/index.ts (createTray() is a no-op for now).
+  // When docking comes back, default this to 'tray' again and restore
+  // the settings UI field in registerSettingsHandlers.ts.
+  onAppClose: "quit",
   modelsDirs: [path.join(SHARED_ROOT, "models")],
   inputDir: path.join(SHARED_ROOT, "input"),
   outputDir: path.join(SHARED_ROOT, "output"),
@@ -169,6 +178,29 @@ function load(): Settings {
   }
   const result: Settings = { ...defaults, ...(parsed || {}) }
   let changed = false
+
+  // Drop legacy pin-related keys. `primaryInstallId` (the primary-install
+  // system) was retired in Phase 3 of the unified-window work;
+  // `pinnedInstallIds` (the dashboard pin/unpin affordance) was retired in
+  // the post-Phase 3 dashboard cleanup. Both are purely advisory so a
+  // drop-on-first-load is sufficient.
+  for (const key of ['primaryInstallId', 'pinnedInstallIds']) {
+    if (Object.prototype.hasOwnProperty.call(result, key)) {
+      delete result[key]
+      changed = true
+    }
+  }
+
+  // Drop a legacy `onAppClose: 'tray'` value while docking-to-tray is
+  // disabled. The setting is still in the schema (and the tray-aware
+  // close path will come back), but until then a stale `'tray'` value
+  // would silently take effect the moment docking is restored. Dropping
+  // only the `'tray'` value preserves an explicit `'quit'` choice the
+  // user may have set. See post-unification-code-review.md F14.
+  if (result.onAppClose === 'tray') {
+    delete (result as Record<string, unknown>).onAppClose
+    changed = true
+  }
 
   if (shouldSanitizeCopiedUserDefaults) {
     const nextCacheDir = sanitizeUserDefaultPath(result.cacheDir, defaults.cacheDir)

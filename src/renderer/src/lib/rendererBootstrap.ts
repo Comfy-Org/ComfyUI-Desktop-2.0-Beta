@@ -1,17 +1,27 @@
-import './assets/main.css'
+/**
+ * Renderer-side bootstrap (Phase 3) — telemetry providers, error
+ * reporting hooks, and main-process broadcast subscriptions that need
+ * to run once per renderer entry-point.
+ *
+ * Pre-Phase-3 these top-level side effects lived inside the launcher
+ * window's `src/renderer/src/main.ts`. With the launcher window
+ * retired the panel renderer (PanelApp) is the primary entry-point;
+ * this module is shared between them so the init runs regardless of
+ * which entry the user lands on.
+ *
+ * Call `initializeRendererBootstrap()` once at the top of each
+ * renderer entry's `main.ts`, before mounting the Vue app. It is a
+ * fire-and-forget initializer — internal failures are caught so a
+ * misbehaving telemetry provider can't break the renderer load.
+ */
 
 import { datadogRum, type RumBeforeSend } from '@datadog/browser-rum'
-import { createApp } from 'vue'
-import { createPinia } from 'pinia'
-import { createI18n } from 'vue-i18n'
-import App from './App.vue'
-import { useNavigation } from './composables/useNavigation'
-import { normalizeRumErrorEvent } from './lib/datadogPathNormalization'
+import { normalizeRumErrorEvent } from './datadogPathNormalization'
 import {
   TELEMETRY_ACTION_EVENT_NAME,
   type TelemetryActionEventDetail,
   type TelemetryContext,
-} from './lib/telemetry'
+} from './telemetry'
 import {
   capturePostHog,
   captureExceptionPostHog,
@@ -20,7 +30,7 @@ import {
   isInitialized as isPostHogInitialized,
   isPostHogConfigured,
   setPostHogConsent,
-} from './lib/posthogProvider'
+} from './posthogProvider'
 
 function serializeUnknownError(error: unknown): { message: string; stack?: string } {
   if (error instanceof Error) {
@@ -77,6 +87,7 @@ const isDatadogConfigured = !isFlagDisabled(import.meta.env.VITE_DATADOG_RUM_ENA
   && datadogApplicationId.length > 0
 
 let isDatadogInitialized = false
+let bootstrapInvoked = false
 
 const datadogBeforeSend: RumBeforeSend = (event) => {
   if (event.type === 'error') {
@@ -120,7 +131,6 @@ function handleTelemetryActionBridgeEvent(event: Event): void {
   const context = detail.context && typeof detail.context === 'object' ? detail.context : {}
   trackTelemetryAction(detail.actionName, context)
 }
-
 
 async function initializeProviders(): Promise<void> {
   const telemetryEnabled = await getTelemetryEnabledSetting()
@@ -195,24 +205,7 @@ async function initializeProviders(): Promise<void> {
       } catch {}
     }).catch(() => {})
   }
-
 }
-
-window.api.onTelemetrySettingChanged((enabled) => {
-  if (isDatadogConfigured) setDatadogTrackingConsent(toDatadogTrackingConsent(enabled))
-  setPostHogConsent(enabled !== false)
-})
-
-window.addEventListener(TELEMETRY_ACTION_EVENT_NAME, handleTelemetryActionBridgeEvent)
-
-// Events emitted from the main process land here and fan out to both providers.
-window.api.onTelemetryActionFromMain((data) => {
-  if (!data || typeof data.event !== 'string' || data.event.length === 0) return
-  const ctx = (data.context && typeof data.context === 'object' ? data.context : {}) as TelemetryContext
-  trackTelemetryAction(data.event, ctx)
-})
-
-void initializeProviders()
 
 function reportRendererError(payload: {
   source: string
@@ -251,107 +244,104 @@ function reportRendererError(payload: {
   }
 }
 
-window.addEventListener('error', (event) => {
-  const serialized = serializeUnknownError(event.error || event.message)
-  reportRendererError({
-    source: 'renderer-window-error',
-    message: serialized.message,
-    stack: serialized.stack,
-    context: {
-      filename: event.filename,
-      lineno: event.lineno,
-      colno: event.colno,
-    },
-  })
-})
+/**
+ * Initialise telemetry providers, error reporting hooks, and main-process
+ * broadcast subscriptions for this renderer. Idempotent — repeated calls
+ * are no-ops, so each renderer entry-point can call this safely without
+ * coordinating across modules.
+ */
+export function initializeRendererBootstrap(): void {
+  if (bootstrapInvoked) return
+  bootstrapInvoked = true
 
-window.addEventListener('unhandledrejection', (event) => {
-  const serialized = serializeUnknownError(event.reason)
-  reportRendererError({
-    source: 'renderer-unhandled-rejection',
-    message: serialized.message,
-    stack: serialized.stack,
+  window.api.onTelemetrySettingChanged((enabled) => {
+    if (isDatadogConfigured) setDatadogTrackingConsent(toDatadogTrackingConsent(enabled))
+    setPostHogConsent(enabled !== false)
   })
-})
 
-window.api.onDatadogError((data) => {
-  reportRendererError({
-    source: data.source || 'main-forwarded-error',
-    message: data.message || 'Unknown forwarded error',
-    stack: data.stack,
-    context: {
-      origin: 'main-process',
-      level: data.level,
-      ...(data.context || {}),
-    },
-    skipPostHog: data.skipPostHog === true,
+  window.addEventListener(TELEMETRY_ACTION_EVENT_NAME, handleTelemetryActionBridgeEvent)
+
+  // Events emitted from the main process land here and fan out to both providers.
+  window.api.onTelemetryActionFromMain((data) => {
+    if (!data || typeof data.event !== 'string' || data.event.length === 0) return
+    const ctx = (data.context && typeof data.context === 'object' ? data.context : {}) as TelemetryContext
+    trackTelemetryAction(data.event, ctx)
   })
-})
 
-window.api.onComfyExited((data) => {
-  trackTelemetryAction('desktop2.comfyui.exited', {
-    installation_id: data.installationId,
-    crashed: data.crashed ?? false,
-    exit_code: data.exitCode ?? null,
-    last_stderr: data.lastStderr ?? null,
-  })
-})
+  void initializeProviders()
 
-window.api.onComfyBootLog((data) => {
-  trackTelemetryAction('desktop2.comfyui.boot_log', {
-    installation_id: data.installationId,
-    boot_stderr: data.bootStderr,
-  })
-})
-
-window.api.onInstanceStarted((data) => {
-  const bootTimeMs = (data as unknown as Record<string, unknown>).bootTimeMs as number | undefined
-  window.api.getInstallationDdContext(data.installationId).then((ctx) => {
-    if (!ctx) return
-    const { snapshot_diffs, ...metadata } = ctx
-    trackTelemetryAction('desktop2.session.installation_started', {
-      ...(metadata as unknown as Record<string, string | number | boolean | null | undefined>),
-      boot_time_ms: bootTimeMs ?? null,
+  window.addEventListener('error', (event) => {
+    const serialized = serializeUnknownError(event.error || event.message)
+    reportRendererError({
+      source: 'renderer-window-error',
+      message: serialized.message,
+      stack: serialized.stack,
+      context: {
+        filename: event.filename,
+        lineno: event.lineno,
+        colno: event.colno,
+      },
     })
-    if (snapshot_diffs.length > 0) {
-      // snapshot_diffs is an array of objects, which Datadog/PostHog handle
-      // natively; bypass the typed bridge via a fresh call.
-      if (isDatadogInitialized) {
-        try { datadogRum.addAction('desktop2.session.snapshot_history', { installation_id: ctx.installation_id, snapshot_diffs }) } catch {}
+  })
+
+  window.addEventListener('unhandledrejection', (event) => {
+    const serialized = serializeUnknownError(event.reason)
+    reportRendererError({
+      source: 'renderer-unhandled-rejection',
+      message: serialized.message,
+      stack: serialized.stack,
+    })
+  })
+
+  window.api.onDatadogError((data) => {
+    reportRendererError({
+      source: data.source || 'main-forwarded-error',
+      message: data.message || 'Unknown forwarded error',
+      stack: data.stack,
+      context: {
+        origin: 'main-process',
+        level: data.level,
+        ...(data.context || {}),
+      },
+      skipPostHog: data.skipPostHog === true,
+    })
+  })
+
+  window.api.onComfyExited((data) => {
+    trackTelemetryAction('desktop2.comfyui.exited', {
+      installation_id: data.installationId,
+      crashed: data.crashed ?? false,
+      exit_code: data.exitCode ?? null,
+      last_stderr: data.lastStderr ?? null,
+    })
+  })
+
+  window.api.onComfyBootLog((data) => {
+    trackTelemetryAction('desktop2.comfyui.boot_log', {
+      installation_id: data.installationId,
+      boot_stderr: data.bootStderr,
+    })
+  })
+
+  window.api.onInstanceStarted((data) => {
+    const bootTimeMs = (data as unknown as Record<string, unknown>).bootTimeMs as number | undefined
+    window.api.getInstallationDdContext(data.installationId).then((ctx) => {
+      if (!ctx) return
+      const { snapshot_diffs, ...metadata } = ctx
+      trackTelemetryAction('desktop2.session.installation_started', {
+        ...(metadata as unknown as Record<string, string | number | boolean | null | undefined>),
+        boot_time_ms: bootTimeMs ?? null,
+      })
+      if (snapshot_diffs.length > 0) {
+        // snapshot_diffs is an array of objects, which Datadog/PostHog handle
+        // natively; bypass the typed bridge via a fresh call.
+        if (isDatadogInitialized) {
+          try { datadogRum.addAction('desktop2.session.snapshot_history', { installation_id: ctx.installation_id, snapshot_diffs }) } catch {}
+        }
+        if (isPostHogInitialized()) {
+          capturePostHog('desktop2.session.snapshot_history', { installation_id: ctx.installation_id, snapshot_diffs } as unknown as TelemetryContext)
+        }
       }
-      if (isPostHogInitialized()) {
-        capturePostHog('desktop2.session.snapshot_history', { installation_id: ctx.installation_id, snapshot_diffs } as unknown as TelemetryContext)
-      }
-    }
-  }).catch(() => {})
-})
-
-const i18n = createI18n({
-  legacy: false,
-  locale: 'en',
-  fallbackLocale: 'en',
-  messages: { en: {} },
-  missingWarn: false,
-  fallbackWarn: false,
-})
-
-const app = createApp(App)
-app.use(createPinia())
-app.use(i18n)
-app.mount('#app')
-
-// Expose navigation bridge for E2E tests.
-// These methods only mirror what UI buttons already do (present/dismiss overlays,
-// switch tabs) — no privilege escalation. The renderer's CSP and preload sandbox
-// already restrict what scripts can execute in this context.
-{
-  const nav = useNavigation()
-  ;(window as unknown as Record<string, unknown>).__E2E_NAV__ = {
-    present: nav.present,
-    dismiss: nav.dismiss,
-    dismissAll: nav.dismissAll,
-    switchTab: nav.switchTab,
-  }
+    }).catch(() => {})
+  })
 }
-
-export { i18n }

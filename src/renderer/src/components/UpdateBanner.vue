@@ -1,25 +1,31 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useElectronApi } from '../composables/useElectronApi'
 import { useModal } from '../composables/useModal'
-import type { UpdateInfo, UpdateDownloadProgress } from '../types/ipc'
+import { useAppUpdateState } from '../composables/useAppUpdateState'
 import { emitTelemetryAction } from '../lib/telemetry'
 
-type UpdateState =
-  | { type: 'available'; version: string }
-  | { type: 'downloading'; transferred: string; total: string; percent: number }
-  | { type: 'ready'; version: string }
-  | { type: 'error'; message: string }
-
-const { api, listen } = useElectronApi()
 const modal = useModal()
 const { t } = useI18n()
 
-const state = ref<UpdateState | null>(null)
+/**
+ * Phase 3 §18 — both the banner and the title-bar app-update popover
+ * subscribe to the same `useAppUpdateState` composable so the two
+ * surfaces never disagree about the current update state. The banner
+ * keeps its own local `visible` flag (independent of `state`) so the
+ * user can dismiss it without clearing the underlying state — the
+ * pill / popover stay live.
+ */
+const { state, canAutoUpdate, systemManaged, clear } = useAppUpdateState()
+
 const visible = ref(false)
-const canAutoUpdate = ref(true)
-const systemManaged = ref(false)
+// Auto-show the banner whenever a new state arrives (matches the
+// pre-§18 behaviour where each `listen()` callback flipped visible
+// on every transition). Dismiss only flips `visible`; `state` stays
+// for the popover until main pushes a fresh state.
+watch(state, (next) => {
+  if (next) visible.value = true
+})
 
 function formatMarkdown(text: string): string {
   return text.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/`([^`]+)`/g, '<code>$1</code>')
@@ -50,7 +56,7 @@ function dismiss() {
     target_version: (state.value?.type === 'available' || state.value?.type === 'ready') ? state.value.version : undefined,
   })
   visible.value = false
-  state.value = null
+  clear()
 }
 
 async function download() {
@@ -60,7 +66,7 @@ async function download() {
     target_version: state.value?.type === 'available' ? state.value.version : undefined,
   })
   state.value = { type: 'downloading', transferred: '0', total: '0', percent: 0 }
-  await api.downloadUpdate()
+  await window.api.downloadUpdate()
 }
 
 async function install() {
@@ -69,7 +75,7 @@ async function install() {
     state: state.value?.type || 'unknown',
     target_version: state.value?.type === 'ready' ? state.value.version : undefined,
   })
-  await api.installUpdate()
+  await window.api.installUpdate()
 }
 
 function retry() {
@@ -77,9 +83,9 @@ function retry() {
     action: 'retry_clicked',
     state: state.value?.type || 'unknown',
   })
-  state.value = null
+  clear()
   visible.value = false
-  api.checkForUpdate()
+  window.api.checkForUpdate()
 }
 
 async function showErrorDetails(message: string) {
@@ -88,42 +94,6 @@ async function showErrorDetails(message: string) {
     message,
   })
 }
-
-listen<UpdateInfo>(api.onUpdateAvailable, (info) => {
-  state.value = { type: 'available', version: info.version }
-  visible.value = true
-})
-
-listen<UpdateDownloadProgress>(api.onUpdateDownloadProgress, (progress) => {
-  state.value = {
-    type: 'downloading',
-    transferred: progress.transferred,
-    total: progress.total,
-    percent: progress.percent,
-  }
-  visible.value = true
-})
-
-listen<UpdateInfo>(api.onUpdateDownloaded, (info) => {
-  state.value = { type: 'ready', version: info.version }
-  visible.value = true
-})
-
-listen<{ message: string }>(api.onUpdateError, (err) => {
-  state.value = { type: 'error', message: err.message }
-  visible.value = true
-})
-
-onMounted(async () => {
-  const caps = await api.getUpdateCapabilities()
-  canAutoUpdate.value = caps.canAutoUpdate
-  systemManaged.value = caps.systemManaged
-  const pending = await api.getPendingUpdate()
-  if (pending) {
-    state.value = { type: 'ready', version: pending.version }
-    visible.value = true
-  }
-})
 </script>
 
 <template>

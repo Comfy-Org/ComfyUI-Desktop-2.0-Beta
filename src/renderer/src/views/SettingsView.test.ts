@@ -17,6 +17,16 @@ vi.mock('../composables/useModal', () => ({
   }),
 }))
 
+// Modal teleports to <body>; replace with a transparent pass-through so
+// wrapper.find() can still see the slotted content.
+vi.mock('../components/Modal.vue', () => ({
+  default: {
+    name: 'Modal',
+    props: ['binding', 'opacity', 'width', 'contentClass', 'inline'],
+    template: '<div data-testid="modal-stub"><slot /></div>',
+  },
+}))
+
 import { mount, flushPromises } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import SettingsView from './SettingsView.vue'

@@ -2,24 +2,14 @@
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import SettingsSections from '../components/SettingsSections.vue'
+import ModalShell from '../components/ModalShell.vue'
 import { useModal } from '../composables/useModal'
-import type { NavigationMode } from '../composables/useNavigation'
 import type { SettingsSection, SettingsAction } from '../types/ipc'
-
-interface Props {
-  mode?: NavigationMode
-}
-
-withDefaults(defineProps<Props>(), {
-  mode: undefined,
-})
-
-const emit = defineEmits<{
-  close: []
-}>()
 
 const { t } = useI18n()
 const modal = useModal()
+
+const emit = defineEmits<{ close: [] }>()
 
 function openUrl(url: string): void {
   window.api.openExternal(url)
@@ -62,38 +52,12 @@ defineExpose({ loadSettings })
 </script>
 
 <template>
-  <!-- Overlay mode: render inside view-modal-content with header/close -->
-  <div v-if="mode" class="view-modal-content">
-    <div class="view-modal-header">
-      <div class="view-modal-title">{{ $t('settings.title') }}</div>
-      <button class="view-modal-close" @click="emit('close')">✕</button>
-    </div>
-    <div class="view-modal-body">
-      <div class="view-scroll">
-        <SettingsSections
-          :sections="sections"
-          :checking-for-updates="checkingForUpdates"
-          @setting-updated="loadSettings"
-          @action="handleAction"
-        />
-      </div>
-    </div>
-  </div>
-
-  <!-- Tab mode: original inline layout -->
-  <div v-else class="view active">
-    <div class="toolbar">
-      <div class="breadcrumb">
-        <span class="breadcrumb-current">{{ $t('settings.title') }}</span>
-      </div>
-    </div>
-    <div class="view-scroll">
-      <SettingsSections
-        :sections="sections"
-        :checking-for-updates="checkingForUpdates"
-        @setting-updated="loadSettings"
-        @action="handleAction"
-      />
-    </div>
-  </div>
+  <ModalShell :title="t('settings.title')" @close="emit('close')">
+    <SettingsSections
+      :sections="sections"
+      :checking-for-updates="checkingForUpdates"
+      @setting-updated="loadSettings"
+      @action="handleAction"
+    />
+  </ModalShell>
 </template>

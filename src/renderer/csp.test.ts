@@ -2,9 +2,9 @@ import { describe, it, expect } from 'vitest'
 import fs from 'fs'
 import path from 'path'
 
-function parseCSP(html: string): Record<string, string> {
+function parseCSP(html: string, source: string): Record<string, string> {
   const match = html.match(/http-equiv="Content-Security-Policy"\s+content="([^"]+)"/)
-  if (!match) throw new Error('CSP meta tag not found in index.html')
+  if (!match) throw new Error(`CSP meta tag not found in ${source}`)
   const directives: Record<string, string> = {}
   for (const part of match[1].split(';')) {
     const trimmed = part.trim()
@@ -16,9 +16,16 @@ function parseCSP(html: string): Record<string, string> {
   return directives
 }
 
-describe('Content-Security-Policy', () => {
-  const html = fs.readFileSync(path.resolve(__dirname, 'index.html'), 'utf-8')
-  const csp = parseCSP(html)
+// The panel renderer hosts telemetry surfaces (Datadog + PostHog), so its CSP
+// must allow those endpoints. The title-bar renderer is telemetry-free so it
+// gets a tighter CSP — covered by a separate block below.
+const TELEMETRY_RENDERER_FILES = [
+  { file: 'panel.html', label: 'panel renderer' },
+]
+
+describe.each(TELEMETRY_RENDERER_FILES)('Content-Security-Policy ($label)', ({ file }) => {
+  const html = fs.readFileSync(path.resolve(__dirname, file), 'utf-8')
+  const csp = parseCSP(html, file)
 
   it('has a connect-src directive', () => {
     expect(csp['connect-src']).toBeDefined()
@@ -51,5 +58,25 @@ describe('Content-Security-Policy', () => {
     // Nothing in the app loads web workers; without session recording there
     // is no need for blob:/data: workers, so the directive is omitted.
     expect(csp['worker-src']).toBeUndefined()
+  })
+})
+
+describe('Content-Security-Policy (title bar renderer)', () => {
+  const file = 'comfyTitleBar.html'
+  const html = fs.readFileSync(path.resolve(__dirname, file), 'utf-8')
+  const csp = parseCSP(html, file)
+
+  it('restricts default-src to self only', () => {
+    expect(csp['default-src']).toBe("'self'")
+  })
+
+  it('restricts script-src to self only', () => {
+    expect(csp['script-src']).toBe("'self'")
+  })
+
+  it('does not allow telemetry endpoints (title bar has no telemetry)', () => {
+    expect(csp['connect-src'] || '').not.toContain('posthog.com')
+    expect(csp['connect-src'] || '').not.toContain('datadoghq.com')
+    expect(csp['img-src'] || '').not.toContain('posthog.com')
   })
 })

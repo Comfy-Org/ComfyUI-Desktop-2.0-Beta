@@ -2,10 +2,11 @@ import {
   ipcMain, nativeTheme,
   sources, settings, i18n,
   getAppVersion, resolveTheme,
-  _onLocaleChanged, _broadcastToRenderer,
+  _onLocaleChanged, _onThemeChanged, _broadcastToRenderer,
 } from './shared'
 import { updateTitleBarOverlay } from '../titleBarOverlay'
 import * as mainTelemetry from '../telemetry'
+import { detectFirstUseState } from '../firstUseDetection'
 
 export function registerSettingsHandlers(): void {
   ipcMain.handle('get-settings-sections', () => {
@@ -28,11 +29,10 @@ export function registerSettingsHandlers(): void {
               { value: 'light', label: i18n.t('settings.themeLight') },
             ] },
           { id: 'autoUpdate', label: i18n.t('settings.autoUpdate'), type: 'boolean', value: s.autoUpdate !== false },
-          { id: 'onAppClose', label: i18n.t('settings.onAppClose'), type: 'select', value: s.onAppClose || settings.defaults.onAppClose,
-            options: [
-              { value: 'quit', label: i18n.t('settings.closeQuit') },
-              { value: 'tray', label: i18n.t('settings.closeTray') },
-            ] },
+          // The `onAppClose` field is hidden while docking-to-tray is
+          // disabled (see main/index.ts createTray()). Restore this
+          // entry — and the 'tray' default in settings.ts — when the
+          // docked-app flow comes back.
           ...(isChinese ? [chineseMirrorsField] : []),
         ],
         actions: [
@@ -46,7 +46,12 @@ export function registerSettingsHandlers(): void {
         ],
       },
       {
-        title: i18n.t('settings.downloads'),
+        // Phase 3 §4: this section was previously titled "Downloads" but
+        // the contents are really the on-disk cache (model files, wheels,
+        // GitHub release tarballs, etc.) — i.e. blobs the launcher pulls
+        // down on behalf of an install. "Cache" reflects what the user
+        // actually controls here.
+        title: i18n.t('settings.cache'),
         fields: [
           { id: 'cacheDir', label: i18n.t('settings.cacheDir'), type: 'path', value: s.cacheDir, openable: true },
           { id: 'maxCachedFiles', label: i18n.t('settings.maxCachedFiles'), type: 'number', value: s.maxCachedFiles, min: 1, max: 50 },
@@ -116,6 +121,7 @@ export function registerSettingsHandlers(): void {
     if (key === 'theme') {
       _broadcastToRenderer('theme-changed', resolveTheme())
       updateTitleBarOverlay()
+      if (_onThemeChanged) _onThemeChanged()
     }
     if (key === 'language') {
       i18n.init(value as string)
@@ -126,6 +132,10 @@ export function registerSettingsHandlers(): void {
       _broadcastToRenderer('telemetry-setting-changed', value)
       mainTelemetry.setConsent(value !== false)
     }
+    // Notify all renderers (including embedded panel views) so any open
+    // settings UI can refresh and stay in sync. Cheap, fires on every
+    // setting change — listeners should refetch what they care about.
+    _broadcastToRenderer('settings-changed', { key })
   })
 
   ipcMain.handle('get-setting', (_event, key: string) => {
@@ -134,11 +144,28 @@ export function registerSettingsHandlers(): void {
 
   ipcMain.handle('get-locale-messages', () => i18n.getMessages())
   ipcMain.handle('get-available-locales', () => i18n.getAvailableLocales())
+  // Phase 3 §17 Step 4 — the first-use takeover (FirstUseTakeover.vue)
+  // needs to ask main for the resolved locale so it can decide whether
+  // to insert the China-mirror sub-step. The renderer's vue-i18n locale
+  // is always 'en' (we deep-merge messages onto the en bundle), so we
+  // can't read it from there — main owns the truth via i18n.getLocale()
+  // (which reflects the user's `language` setting + app.getLocale()
+  // fallback as initialised in main/index.ts).
+  ipcMain.handle('get-locale', () => i18n.getLocale())
+
+  // Post-Phase-3 polish: the first-use takeover asks for a categorised
+  // snapshot of the persisted installs so it can decide whether to
+  // skip the cloud-vs-local pick (returning user) and whether to surface
+  // the migrate-vs-install-new sub-step on the Local branch (legacy
+  // desktop install present). See `firstUseDetection.ts`.
+  ipcMain.handle('get-first-use-state', () => detectFirstUseState())
 
   ipcMain.handle('get-resolved-theme', () => resolveTheme())
 
   nativeTheme.on('updated', () => {
     if (((settings.get('theme') as string | undefined) || 'system') !== 'system') return
     _broadcastToRenderer('theme-changed', resolveTheme())
+    updateTitleBarOverlay()
+    if (_onThemeChanged) _onThemeChanged()
   })
 }

@@ -4,15 +4,10 @@ import { useLocalInstanceGuard } from './useLocalInstanceGuard'
 import { useSessionStore } from '../stores/sessionStore'
 import { emitTelemetryAction, toErrorBucket } from '../lib/telemetry'
 import { REQUIRES_STOPPED } from '../types/ipc'
-import type { Installation, ListAction, ActionResult } from '../types/ipc'
+import type { Installation, ListAction, ActionResult, ShowProgressOpts } from '../types/ipc'
 
 export interface ListActionCallbacks {
-  showProgress: (opts: {
-    installationId: string
-    title: string
-    apiCall: () => Promise<unknown>
-    cancellable?: boolean
-  }) => void
+  showProgress: (opts: ShowProgressOpts) => void
   onNavigate?: (result: ActionResult, action: ListAction) => void | Promise<void>
 }
 

@@ -24,6 +24,11 @@ export interface Installation {
   installPath?: string
   status?: string
   lastLaunchedAt?: number
+  /** Per-source-category last-launched timestamps (epoch ms). Written
+   *  alongside `lastLaunchedAt` by `installations.markLaunched()` on the
+   *  main side; consumed by recency-aware UI surfaces such as the
+   *  startup picker. */
+  lastLaunchedAtByCategory?: Record<string, number>
   [key: string]: unknown // allow extra fields from sources
 }
 
@@ -119,7 +124,12 @@ export interface DetailField {
 export interface ActionDef {
   id: string
   label: string
-  style?: 'primary' | 'danger'
+  /** Visual style for the action button.
+   *  - `primary`: solid blue, does the thing immediately on click.
+   *  - `accent`: hollow blue, telegraphs that a confirmation step
+   *    will run before doing anything (Phase 3 §9 convention).
+   *  - `danger`: red, destructive action. */
+  style?: 'primary' | 'accent' | 'danger'
   enabled?: boolean
   disabledMessage?: string
   tooltip?: string
@@ -193,6 +203,26 @@ export interface ListAction {
   showProgress?: boolean
   progressTitle?: string
   cancellable?: boolean
+}
+
+/** Payload carried by every component's `show-progress` emit. The host
+ *  (typically `PanelApp`) consumes the closure-bound `apiCall` to drive
+ *  ProgressModal. The pre-§17 `actionId` field is gone — the
+ *  takeover-replaces-modal rule of `useOverlay` subsumes the
+ *  chooser-host launch-swap-in-place special case. */
+export interface ShowProgressOpts {
+  installationId: string
+  title: string
+  apiCall: () => Promise<unknown>
+  cancellable?: boolean
+  returnTo?: string
+  /** Set when the operation will spawn a ComfyUI instance (launch /
+   *  restart). The chooser host listens for the resulting
+   *  `instance-started` broadcast and closes itself so the new comfy
+   *  window replaces the chooser visually. Without this flag,
+   *  launches initiated from a Tier-1 surface like DetailModal would
+   *  leave the chooser host alongside the new comfy window. */
+  triggersInstanceStart?: boolean
 }
 
 // --- Action results ---
@@ -641,6 +671,21 @@ export interface ElectronApi {
   // Locale
   getLocaleMessages(): Promise<Record<string, unknown>>
   getAvailableLocales(): Promise<{ value: string; label: string }[]>
+  /** Resolved locale string from main (`language` setting or
+   *  `app.getLocale()` fallback). The renderer's vue-i18n locale is
+   *  always 'en' (messages are deep-merged onto the en bundle), so
+   *  consumers needing the user's actual language — e.g. the first-use
+   *  takeover deciding whether to insert the China-mirror sub-step —
+   *  must read it from main via this call. */
+  getLocale(): Promise<string>
+
+  /** Categorised snapshot of the persisted installs for the first-use
+   *  takeover. `skipPick` is true when any non-cloud, non-legacy-desktop
+   *  install exists (returning user — the cloud-vs-local pick step is
+   *  suppressed). `hasLegacyDesktop` is true when the auto-tracked
+   *  Legacy Desktop install is present (gates the migrate-vs-install-new
+   *  sub-step on the Local branch). See `firstUseDetection.ts`. */
+  getFirstUseState(): Promise<{ skipPick: boolean; hasLegacyDesktop: boolean }>
 
   // Installations
   getInstallations(): Promise<Installation[]>
@@ -657,7 +702,70 @@ export interface ElectronApi {
   // Running
   stopComfyUI(installationId: string): Promise<void>
   focusComfyWindow(installationId: string): Promise<void>
+  /** Close the BrowserWindow that hosts the given installation's ComfyUI
+   *  view (and its title-bar / panel WebContentsViews). Returns true if a
+   *  window was found and closed. Used by the embedded install-settings
+   *  panel after a navigate-list emit (e.g. delete) so the parent window
+   *  doesn't linger with no install backing it. */
+  closeComfyWindow(installationId: string): Promise<boolean>
+  /** Close the BrowserWindow that contains the calling panel WebContents
+   *  (Phase 3 step 2d). Used by the chooser to retire its install-less
+   *  host window after a successful pick → launch hand-off. Returns true
+   *  if a window was found and closed. */
+  closeHostWindow(): Promise<boolean>
+  /** Page X-close (Settings / Directories / Install Settings header).
+   *  Asks main to reset the panel-history stack and return the body to
+   *  the comfy/chooser root. Fire-and-forget; the panel will receive
+   *  the resulting `panel-switch` like any other navigation. */
+  closeCurrentPanel(): void
+  /** Modal-unification (Track M-2.2) — push the first-use takeover's
+   *  current step to main so it can (a) cache the value on the host
+   *  entry for `buildTitleMenuItems` to read synchronously and (b)
+   *  forward to the title-bar webContents (consumed in M-2.3). Fire-
+   *  and-forget; FirstUseTakeover.vue calls this on every step change
+   *  and on unmount with `'none'`. */
+  setFirstUseMode(mode: 'none' | 'consent-lockdown' | 'post-consent'): void
+  /** Modal-unification (Track M-2.2) — main routes the file-menu
+   *  Skip Onboarding click here. Handler runs the same
+   *  `markFirstUseCompleted` + dismiss-takeover sequence the Cloud
+   *  pick path uses. Returns an unsubscribe. */
+  onFirstUseSkip(callback: () => void): Unsubscribe
+  /** Step 5 §16 — main consults the panel renderer before tearing down
+   *  the host window. Returns an unsubscribe; the callback receives a
+   *  `requestId` it must echo back via `respondCloseRequest` so main
+   *  can pair the response with the request that fired it. */
+  onCloseRequest(callback: (data: { requestId: string }) => void): Unsubscribe
+  /** Reply to a `comfy-window:request-close` consult — `cleared: true`
+   *  lets main proceed with destruction, `cleared: false` aborts. */
+  respondCloseRequest(payload: { requestId: string; cleared: boolean }): void
+  /** Stamp the calling chooser host window's current bounds onto the
+   *  install's saved-bounds slot (Phase 3 visual continuity). The chooser
+   *  pick flow used this BEFORE the W-4 in-place attach landed — kept
+   *  as the fallback wiring for `claimAttachHost` rejections (e.g. the
+   *  install uses `browserPartition === 'unique'` and needs a fresh
+   *  window with its own partition). No-op for install-backed callers. */
+  transferHostBoundsToInstall(installationId: string): Promise<boolean>
+  /** Window-mode unification (Stage W-4) — claim the calling install-
+   *  less host window for in-place attach. Run by the chooser-host
+   *  renderer right before kicking off the launch action; when the
+   *  launch event eventually lands in main, `onLaunch()` consumes
+   *  the claim and attaches the install to THIS host window instead
+   *  of constructing a fresh one. Returns `true` when the claim was
+   *  accepted (renderer should skip its fallback `closeHostWindow`
+   *  + `transferHostBoundsToInstall` wiring); `false` otherwise
+   *  (sender isn't an install-less host's panelView, or main rejected
+   *  the claim — fall back to the legacy close+open swap). */
+  claimAttachHost(installationId: string): Promise<boolean>
   getRunningInstances(): Promise<RunningInstance[]>
+  /**
+   * Read the retained crash detail for an installation, if any. Main holds
+   * the last `comfy-exited` payload (with stderr tail) per installation
+   * until the next launch attempt. The lifecycle view calls this on mount
+   * so a refresh / view recreation after a crash still surfaces the error
+   * context, even if the live `onComfyExited` event fired before this
+   * panel WebContents existed. Returns `null` when no crash is on record.
+   */
+  getLastCrashError(installationId: string): Promise<ComfyExitedData | null>
   cancelLaunch(): Promise<void>
   cancelOperation(installationId: string): Promise<void>
   killPortProcess(port: number): Promise<KillResult>
@@ -747,6 +855,28 @@ export interface ElectronApi {
   onTelemetryActionFromMain(callback: (data: { event: string; context: Record<string, unknown> }) => void): Unsubscribe
   onErrorDetail(callback: (data: ErrorDetailData) => void): Unsubscribe
   onSuggestChineseMirrors(callback: () => void): Unsubscribe
+  onSettingsChanged(callback: (data: { key: string }) => void): Unsubscribe
+  /**
+   * Fired by main when something requests a panel switch in the embedded
+   * panel WebContentsView (e.g. from the ComfyUI window's title-bar buttons).
+   */
+  onPanelSwitch(callback: (data: { panel: string; installationId?: string }) => void): Unsubscribe
+  /**
+   * Phase 3 §18 — main forwards a title-bar status pill click as an
+   * overlay-trigger to the panel renderer. The renderer subscribes
+   * once on mount and routes each kind through `useOverlay.openOverlay`:
+   *   - `'app-update'` → Tier 1 popover sourced from `useAppUpdateState`.
+   *   - `'install-update'` → Manage overlay (DetailModal) on the
+   *     update tab, scoped to the carried `installationId`.
+   *   - `'downloads'` → Track F Tier 1 popover listing in-flight and
+   *     recently-completed downloads from the shared `downloadStore`.
+   */
+  onPanelTriggerOverlay(
+    callback: (data: {
+      kind: 'app-update' | 'install-update' | 'downloads'
+      installationId?: string
+    }) => void,
+  ): Unsubscribe
 }
 
 /** Action IDs that require the installation to be stopped before running.

@@ -2,26 +2,20 @@
 import { ref, computed, watch, onMounted, toRaw } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useModal } from '../composables/useModal'
-import { useControllerRegistration } from '../composables/useControllerRegistration'
 
-import type { Source, SourceField, FieldOption, HardwareValidation } from '../types/ipc'
+import type { Source, SourceField, FieldOption, HardwareValidation, ShowProgressOpts } from '../types/ipc'
 import { stripVariantPrefix, sortedCardOptions } from '../lib/variants'
 import VariantCardGrid from '../components/VariantCardGrid.vue'
 import { emitTelemetryAction, toVariantBucket } from '../lib/telemetry'
 import { trackGuardrailBlocked, createDiskSpaceChecker, showPathIssueAlerts, checkNvidiaDriverOrWarn, checkDiskSpaceOrWarn } from '../lib/installHelpers'
 import InstallNamePath from '../components/InstallNamePath.vue'
+import TakeoverHeader from '../components/TakeoverHeader.vue'
+import TakeoverBack from '../components/TakeoverBack.vue'
+import ModalShell from '../components/ModalShell.vue'
 
 const emit = defineEmits<{
   close: []
-  'show-progress': [
-    opts: {
-      installationId: string
-      title: string
-      apiCall: () => Promise<unknown>
-      cancellable?: boolean
-      returnTo?: string
-    }
-  ]
+  'show-progress': [opts: ShowProgressOpts]
   'navigate-list': []
 }>()
 
@@ -521,19 +515,27 @@ function getSelectedIndex(field: SourceField): number {
   return idx >= 0 ? idx : 0
 }
 
-useControllerRegistration('new-install', { open })
-
 defineExpose({ open })
 </script>
 
 <template>
-  <div class="view-modal-content">
-      <div class="view-modal-header">
-        <div class="view-modal-title">{{ stepTitle }}</div>
-        <button class="view-modal-close" @click="emit('close')">✕</button>
-      </div>
-      <div class="view-modal-body">
+  <ModalShell binding @close="emit('close')">
+      <template #header>
+        <TakeoverBack
+          :label="$t('common.backToDashboard')"
+          @back="emit('close')"
+        />
+        <TakeoverHeader
+          :title="$t('newInstall.grandTitle')"
+          :subtitle="$t('newInstall.grandSubtitle')"
+        />
+      </template>
         <div class="view-scroll">
+          <!-- Phase 3 §19 — per-step heading reads as a sub-section
+               below the persistent grand title. The step number gives
+               the user "where am I in the wizard" context without
+               having to rebuild the same affordance for each modal. -->
+          <h2 class="new-install-step-title">{{ stepTitle }}</h2>
           <!-- Step 1: Source Selection -->
           <div v-if="currentStep === 1" class="wizard-step">
             <div v-if="sourcesLoading || initializing" class="wizard-loading with-spinner">
@@ -778,6 +780,20 @@ defineExpose({ open })
             {{ currentStep < totalSteps ? $t('newInstall.next') : $t('newInstall.addInstallation') }}
           </button>
         </div>
-      </div>
-  </div>
+  </ModalShell>
 </template>
+
+<style scoped>
+/* Phase 3 §19 — per-step sub-section heading sitting under the
+   persistent grand title in the takeover header. Spacing tuned so it
+   reads as a section break inside the wizard body, not a duplicate
+   page heading. */
+.new-install-step-title {
+  margin: 0 0 16px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+</style>

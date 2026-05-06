@@ -137,6 +137,7 @@ export type ExitCallback = (info: ExitCallbackInfo) => void
 export type RestartCallback = (info: RestartCallbackInfo) => void
 export type ModelFolderRelaunchCallback = (info: { installationId: string }) => void | Promise<void>
 export type LocaleCallback = () => void
+export type ThemeChangedCallback = () => void
 
 export interface RegisterCallbacks {
   onLaunch?: LaunchCallback
@@ -145,6 +146,13 @@ export interface RegisterCallbacks {
   onComfyRestarted?: RestartCallback
   onModelFolderRelaunch?: ModelFolderRelaunchCallback
   onLocaleChanged?: LocaleCallback
+  /** Fires whenever the resolved launcher theme flips (user changed the
+   *  setting or the OS-level dark-mode preference flipped while the
+   *  setting is `'system'`). Index registers a handler to repaint
+   *  install-less host windows' title bars + OS overlays — install-
+   *  backed comfy windows are driven by ComfyUI's own theme observer
+   *  instead. */
+  onThemeChanged?: ThemeChangedCallback
 }
 
 export type CopyReason = 'copy' | 'copy-update'
@@ -159,6 +167,7 @@ export let _onComfyExited: ExitCallback | null = null
 export let _onComfyRestarted: RestartCallback | null = null
 export let _onModelFolderRelaunch: ModelFolderRelaunchCallback | null = null
 export let _onLocaleChanged: LocaleCallback | null = null
+export let _onThemeChanged: ThemeChangedCallback | null = null
 let _gpuPromise: Promise<GpuInfo | null> | null = null
 
 export const _operationAborts = new Map<string, AbortController>()
@@ -172,6 +181,7 @@ export function setCallbacks(callbacks: RegisterCallbacks): void {
   _onComfyRestarted = callbacks.onComfyRestarted ?? null
   _onModelFolderRelaunch = callbacks.onModelFolderRelaunch ?? null
   _onLocaleChanged = callbacks.onLocaleChanged ?? null
+  _onThemeChanged = callbacks.onThemeChanged ?? null
 }
 
 export function setGpuPromise(p: Promise<GpuInfo | null> | null): void {
@@ -244,25 +254,6 @@ export async function findDuplicatePath(installPath: string): Promise<Installati
 export async function uniqueName(baseName: string): Promise<string> {
   const all = await installations.list()
   return installations.uniqueName(baseName, all)
-}
-
-export function isPromotableLocal(sourceId: string): boolean {
-  const source = sourceMap[sourceId]
-  return !!source && source.category === 'local' && sourceId !== 'desktop'
-}
-
-export async function autoAssignPrimary(removedId: string): Promise<void> {
-  const currentPrimary = settings.get('primaryInstallId')
-  if (currentPrimary !== removedId) return
-  const all = (await installations.list()).filter((i) => i.id !== removedId)
-  const firstLocal = all.find((i) => isPromotableLocal(i.sourceId))
-  settings.set('primaryInstallId', firstLocal?.id)
-}
-
-export function ensureDefaultPrimary(entry: InstallationRecord): void {
-  if (isPromotableLocal(entry.sourceId) && !settings.get('primaryInstallId')) {
-    settings.set('primaryInstallId', entry.id)
-  }
 }
 
 export async function copyBrowserPartition(sourceId: string, destId: string, sourceBrowserPartition?: string): Promise<void> {
@@ -388,19 +379,46 @@ export function _releasePort(port: number): void {
   _pendingPorts.delete(port)
 }
 
+/**
+ * Extra WebContents (e.g. WebContentsView-hosted panels and custom title bars)
+ * that should also receive broadcasts. BrowserWindow.getAllWindows() only
+ * surfaces top-level windows — child WebContentsViews must be registered here
+ * to receive 'theme-changed', 'locale-changed', etc.
+ */
+const _extraBroadcastTargets = new Set<Electron.WebContents>()
+
+export function _registerExtraBroadcastTarget(wc: Electron.WebContents): void {
+  _extraBroadcastTargets.add(wc)
+  wc.once('destroyed', () => _extraBroadcastTargets.delete(wc))
+}
+
+export function _unregisterExtraBroadcastTarget(wc: Electron.WebContents): void {
+  _extraBroadcastTargets.delete(wc)
+}
+
 export function _broadcastToRenderer(channel: string, data: unknown): void {
   BrowserWindow.getAllWindows().forEach((win) => {
     if (!win.isDestroyed()) win.webContents.send(channel, data)
   })
+  for (const wc of _extraBroadcastTargets) {
+    if (!wc.isDestroyed()) wc.send(channel, data)
+  }
 }
 
 export function _addSession(installationId: string, { proc, port, url, mode, installationName }: Omit<SessionInfo, 'startedAt'>, bootTimeMs?: number): void {
   _runningSessions.set(installationId, { proc, port, url, mode, installationName, startedAt: Date.now() })
   _broadcastToRenderer('instance-started', { installationId, port, url, mode, installationName, bootTimeMs })
-  installations.update(installationId, { lastLaunchedAt: Date.now() })
+  // Stamp both the global `lastLaunchedAt` and the per-source-category
+  // `lastLaunchedAtByCategory[category]` so recency-aware surfaces (e.g.
+  // the future startup picker) can pick the most-recent install per
+  // category without scanning every record. Category is resolved via the
+  // source map since the persisted record itself doesn't carry it; the
+  // resolver runs inside `markLaunched`'s enqueue lock so there's no
+  // separate read/lookup round-trip here.
+  installations.markLaunched(installationId, (inst) => sourceMap[inst.sourceId]?.category)
     .then(() => _broadcastToRenderer('installations-changed', {}))
     .catch((err) => {
-      console.error('Failed to update lastLaunchedAt:', err)
+      console.error('Failed to mark installation launched:', err)
     })
 }
 
@@ -476,6 +494,27 @@ export async function _resolveAndBroadcastVersions(list: InstallationRecord[]): 
       const actualHead = readGitHead(comfyuiDir) || cv.commit
 
       const resolved = await resolveLocalVersion(comfyuiDir, actualHead, undefined, override)
+
+      // Guard against clobbering a populated baseTag with undefined.
+      // findNearestTag/findLatestVersionTag can fail transiently (e.g.
+      // pygit2 API mismatch in the bundled standalone-env, network
+      // hiccup during fetchTags, missing remote, system git absent).
+      // When that happens, `resolved` comes back as { commit } only —
+      // and persisting that overwrites the previously-good
+      // `{ commit, baseTag, commitsAhead }` on disk, downgrading the
+      // chooser tile and channel-card "Installed" line to a bare SHA
+      // until a future re-resolve happens to succeed. The downgrade is
+      // a one-way ratchet because nothing else writes baseTag back
+      // for installs whose HEAD isn't exactly on a tag (i.e. the entire
+      // 'latest' channel). Bail entirely whenever the new resolution
+      // would strictly lose information for the same commit (no DB
+      // write, no broadcast, no installedTag reconciliation against the
+      // bare SHA); a genuinely-new commit (HEAD moved externally) still
+      // writes through because the commit-equality check fails, so we
+      // don't get permanently stuck on a stale baseTag.
+      if (cv?.baseTag && !resolved.baseTag && resolved.commit === cv.commit) {
+        return
+      }
       const resolvedStr = formatComfyVersion(resolved, 'short')
       const storedStr = formatComfyVersion(cv, 'short')
       const versionChanged = resolvedStr !== storedStr

@@ -15,6 +15,11 @@ interface ErrorInstance {
   installationName: string
   exitCode?: number | string
   message?: string
+  /** Scrubbed tail of the failed process's stderr, if main captured one
+   *  (only set on `crashed=true` exits — operation failures stay
+   *  message-only). The lifecycle view renders this inline so the user
+   *  doesn't have to dig into the log file to see what blew up. */
+  lastStderr?: string
 }
 
 export const useSessionStore = defineStore('session', () => {
@@ -160,6 +165,7 @@ export const useSessionStore = defineStore('session', () => {
           errorInstances.set(data.installationId, {
             installationName: data.installationName,
             exitCode: data.exitCode,
+            lastStderr: data.lastStderr,
           })
         }
       })

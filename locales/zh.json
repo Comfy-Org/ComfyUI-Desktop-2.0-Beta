@@ -2,58 +2,69 @@
   "_label": "中文",
 
   "dashboard": {
-    "title": "仪表盘",
-    "welcome": "欢迎使用 ComfyUI",
-    "welcomeDesc": "开始在您的设备上安装 ComfyUI。",
-    "installComfyUI": "安装 ComfyUI",
-    "primaryInstall": "主要安装",
-    "quickLaunch": "快速启动",
-    "recent": "最近使用",
-    "primary": "主要",
     "launchedAgo": "已启动 {time}",
     "neverLaunched": "尚未启动",
-    "changePrimary": "更改",
-    "changePrimaryTitle": "更改主要安装",
-    "setPrimary": "设为主要",
-    "setPrimaryMessage": "主要安装会显示在仪表盘顶部，方便快速访问。",
-    "setPrimaryConfirm": "将「{name}」设为主要安装？它将显示在仪表盘顶部。",
-    "cloudSection": "ComfyUI 云",
-    "pinned": "已固定",
-    "noPinned": "没有固定的安装。右键单击安装以将其固定到仪表盘。",
-    "pinnedInQuickLaunch": "已固定的安装已在上方的快速启动中显示。",
-    "pinToDashboard": "固定到仪表盘",
-    "unpinFromDashboard": "从仪表盘取消固定",
     "telemetryNotice": "我们会收集匿名使用遥测数据来改进 ComfyUI 启动器。",
     "telemetrySettings": "在设置中管理"
   },
 
-  "sidebar": {
-    "installations": "安装",
-    "running": "运行中",
-    "giveFeedback": "提交反馈"
+  "installType": {
+    "standalone": "独立版",
+    "cloud": "云端",
+    "legacyDesktop": "旧版桌面",
+    "remote": "远程",
+    "unknown": "未知"
+  },
+
+  "chooser": {
+    "title": "选择安装",
+    "recent": "最近使用",
+    "all": "全部",
+    "openCloud": "打开",
+    "emptyTitle": "尚无安装",
+    "emptyDesc": "创建你的第一个 ComfyUI 安装即可开始。",
+    "createInstall": "创建安装",
+    "newInstall": "新建安装",
+    "newInstallDesc": "搭建一个全新的 ComfyUI 环境。",
+    "filterAll": "全部",
+    "filterLocal": "本地",
+    "filterCloud": "云端",
+    "filterRemote": "远程",
+    "updatePill": "更新",
+    "migratePill": "迁移",
+    "openInstall": "打开",
+    "manageInstall": "管理…",
+    "moreActions": "更多操作",
+    "menuUpdate": "更新…",
+    "menuMigrate": "迁移到独立版…",
+    "menuRestoreSnapshot": "恢复快照…",
+    "menuRevealInFolder": "打开文件夹",
+    "menuDelete": "删除…"
+  },
+
+  "titleBar": {
+    "appUpdateAvailable": "更新 {version}",
+    "appUpdateReady": "重启以更新",
+    "installUpdateAvailable": "有可用更新"
   },
 
   "running": {
-    "empty": "没有正在运行或进行中的任务。",
-    "instances": "运行中的实例",
-    "errors": "错误",
-    "crashed": "崩溃",
-    "exitCode": "退出代码 {code}",
     "dismiss": "关闭",
-    "inProgress": "进行中",
     "showWindow": "显示窗口"
   },
 
   "media": {
-    "title": "媒体",
-    "sharedDirs": "共享目录",
+    "sharedDirs": "媒体",
     "inputDir": "输入目录",
     "outputDir": "输出目录"
   },
 
+  "directories": {
+    "title": "目录"
+  },
+
   "models": {
-    "title": "模型",
-    "directories": "共享目录",
+    "directories": "模型",
     "directoriesDesc": "所有安装共享的目录。第一个目录为主目录（ComfyUI 的默认目录）。",
     "addDir": "添加目录",
     "removeDir": "移除",
@@ -64,6 +75,8 @@
 
   "common": {
     "back": "返回",
+    "backToDashboard": "返回主面板",
+    "close": "关闭",
     "browse": "浏览…",
     "resetDefault": "重置",
     "cancel": "取消",
@@ -95,28 +108,25 @@
   },
 
   "list": {
-    "title": "安装",
-    "trackExisting": "跟踪现有安装",
-    "newInstall": "新建安装",
-    "empty": "暂无安装。",
-    "emptyHint": "安装或跟踪现有的 ComfyUI 版本。",
-    "emptyFilter": "没有匹配此筛选条件的安装。",
-
     "view": "管理",
-    "new": "新建",
-    "running": "运行中",
     "console": "控制台",
-    "viewError": "查看错误",
-    "viewProgress": "查看进度",
-    "dragToReorder": "拖动以重新排序",
-    "filterAll": "全部",
-    "filterLocal": "本地",
-    "filterRemote": "远程",
-    "filterCloud": "云端"
+    "viewProgress": "查看进度"
+  },
+
+  "loadSnapshot": {
+    "grandTitle": "从快照恢复",
+    "grandSubtitle": "加载已保存的快照文件以在此处重建安装。"
+  },
+
+  "quickInstall": {
+    "grandTitle": "快速安装",
+    "grandSubtitle": "为检测到的硬件安装最新版本的 ComfyUI。"
   },
 
   "newInstall": {
     "title": "新建安装",
+    "grandTitle": "新建安装",
+    "grandSubtitle": "搭建一个全新的 ComfyUI 安装。选择来源、命名并配置它。",
     "installMethod": "安装方式",
     "installLocation": "安装位置",
     "addInstallation": "添加安装",
@@ -170,6 +180,8 @@
 
   "track": {
     "title": "跟踪现有安装",
+    "grandTitle": "跟踪现有安装",
+    "grandSubtitle": "将本地现有的 ComfyUI 检出添加到 Desktop，无需重新安装。",
     "installDir": "安装目录",
     "selectDir": "选择目录…",
     "detectedType": "检测到的类型",
@@ -223,7 +235,7 @@
     "telemetry": "遥测",
     "telemetryEnabled": "共享匿名使用遥测数据",
     "models": "共享模型",
-    "downloads": "下载",
+    "cache": "缓存",
     "cacheDir": "缓存目录",
     "maxCachedFiles": "最大缓存下载数",
     "open": "打开",
@@ -266,6 +278,34 @@
     "required": "此字段为必填项。"
   },
 
+  "overlay": {
+    "cancelCurrentTitle": "取消当前操作？",
+    "cancelNamedTitle": "取消「{name}」？",
+    "cancelMessage": "操作将立即停止。尚未完成的内容将尽可能回滚。",
+    "cancelConfirm": "取消操作",
+    "quitSetupTitle": "退出设置？",
+    "quitSetupMessage": "如果您现在关闭，您的选择将不会被保存，下次启动 ComfyUI Desktop 时将重新进行设置。",
+    "quitSetupConfirm": "退出设置",
+    "discardSetupTitle": "放弃安装设置？",
+    "discardSetupMessage": "如果您现在关闭，向导中的选择将不会被保存。尚未创建任何安装，因此无需回滚。",
+    "discardSetupConfirm": "放弃设置"
+  },
+
+  "firstUse": {
+    "title": "欢迎使用 ComfyUI Desktop",
+    "grandTitle": "欢迎使用 ComfyUI Desktop",
+    "grandSubtitle": "完成首次设置，即可启动 ComfyUI。",
+    "consentLead": "在开始之前，请阅读使用条款并选择是否分享匿名使用遥测数据。",
+    "tosBody": "点击「接受」即表示您同意 ComfyUI Desktop 的使用条款和隐私政策。您可以随时在「应用设置」中更改遥测偏好。",
+    "telemetryHint": "遥测数据帮助我们改进启动器。我们绝不收集工作流内容、提示词、生成的媒体或个人信息。",
+    "acceptTos": "接受并继续",
+    "notNow": "暂不启用",
+    "pickTitle": "您希望如何使用 ComfyUI？",
+    "pickLead": "您可以稍后更改 — 任意类型的安装都可以随时通过启动器添加。",
+    "localLabel": "本地安装",
+    "localDesc": "在本机上安装并运行 ComfyUI。可离线使用，所有内容由您完全掌控。"
+  },
+
   "tray": {
     "showApp": "显示启动器",
     "quit": "退出"
@@ -273,6 +313,11 @@
 
   "actions": {
     "launch": "启动",
+    "restart": "重启",
+    "restartConfirmTitle": "重启 ComfyUI",
+    "restartConfirmMessage": "这将停止并重新启动 ComfyUI。任何未保存的工作将会丢失。",
+    "restartConfirm": "重启",
+    "restartProgressTitle": "正在重启 ComfyUI",
     "connect": "连接",
     "connecting": "连接中",
     "openDirectory": "打开目录",

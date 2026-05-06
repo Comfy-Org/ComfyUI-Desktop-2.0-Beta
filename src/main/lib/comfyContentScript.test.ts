@@ -29,23 +29,18 @@ describe('getModelDownloadContentScript', () => {
     expect(script).toContain('MutationObserver')
   })
 
-  it('contains theme variable reading (comfy-menu-bg)', () => {
-    expect(script).toContain('comfy-menu-bg')
-  })
-
-  it('contains the download tab element id', () => {
-    expect(script).toContain('__comfy-dl-tab')
-  })
-
   it('guards model download interception behind __comfyDesktop2Remote check', () => {
     expect(script).toContain('__comfyDesktop2Remote')
     // The createElement override should be skipped for remote sessions
     expect(script).toContain('if (!window.__comfyDesktop2Remote)')
   })
 
-  it('keeps download progress toast active regardless of remote flag', () => {
-    // onDownloadProgress listener should not be inside the remote guard
-    expect(script).toContain('onDownloadProgress')
+  it('routes captured downloads through window.__comfyDesktop2.downloadModel', () => {
+    // The Launcher's main-process download manager exposes downloadModel
+    // on the preload bridge; the createElement override calls it once it
+    // identifies the click target as a model download with a known
+    // directory hint from the missing-models scrape cache.
+    expect(script).toContain('downloadModel')
   })
 
   it('contains scrapeErrorsTab function for right side panel missing models', () => {
@@ -70,5 +65,34 @@ describe('getModelDownloadContentScript', () => {
     // When errors tab closes, it should check dialogWasOpen before clearing
     const occurrences = script.split('modelNameCache = {}').length - 1
     expect(occurrences).toBeGreaterThanOrEqual(2)
+  })
+
+  it('does not inject the legacy renderer-side downloads UI (Track F — moved to title-bar tray)', () => {
+    // Track F removed the in-page toast / dock / tab UI that used to
+    // surface download progress inside the ComfyUI page surface. The
+    // affordance now lives in the title-bar tray (see
+    // `TitleBarApp.vue` / `DownloadsTrayPopover.vue`). The DOM IDs
+    // and the `onDownloadProgress` listener that drove the legacy
+    // surface must NOT reappear in the injected script — main now
+    // re-broadcasts download state via `comfy-titlebar:downloads-changed`
+    // for the title-bar webContents to consume directly.
+    expect(script).not.toContain('__comfy-dl-tab')
+    expect(script).not.toContain('__comfy-dl-toasts')
+    expect(script).not.toContain('__comfy-dl-cardlist')
+    expect(script).not.toContain('__comfy-dl-dock')
+    expect(script).not.toContain('onDownloadProgress')
+    // Theme scraping was only consumed by the toast UI's color
+    // derivation; it has no other consumer in the injected script
+    // and is removed alongside the UI.
+    expect(script).not.toContain('comfy-menu-bg')
+  })
+
+  it('still intercepts remote/cloud workflow outputs for auto-download', () => {
+    // The remote/cloud auto-download intercept must survive the Track F
+    // removal — it has nothing to do with the injected toast UI; it
+    // ferries workflow outputs from a remote ComfyUI server back to
+    // the local output directory via the WebSocket message stream.
+    expect(script).toContain('downloadAsset')
+    expect(script).toContain('window.WebSocket')
   })
 })

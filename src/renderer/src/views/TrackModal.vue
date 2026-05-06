@@ -2,7 +2,9 @@
 import { ref, computed, toRaw } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useModal } from '../composables/useModal'
-import { useControllerRegistration } from '../composables/useControllerRegistration'
+import TakeoverHeader from '../components/TakeoverHeader.vue'
+import TakeoverBack from '../components/TakeoverBack.vue'
+import ModalShell from '../components/ModalShell.vue'
 
 import type { ProbeResult } from '../types/ipc'
 import { emitTelemetryAction, toCountBucket } from '../lib/telemetry'
@@ -143,18 +145,18 @@ async function handleSave(): Promise<void> {
   emit('navigate-list')
 }
 
-useControllerRegistration('track', { open })
-
 defineExpose({ open })
 </script>
 
 <template>
-  <div class="view-modal-content">
-      <div class="view-modal-header">
-        <div class="view-modal-title">{{ $t('track.title') }}</div>
-        <button class="view-modal-close" @click="emit('close')">✕</button>
-      </div>
-      <div class="view-modal-body">
+  <ModalShell binding @close="emit('close')">
+      <template #header>
+        <TakeoverBack
+          :label="$t('common.backToDashboard')"
+          @back="emit('close')"
+        />
+        <TakeoverHeader :title="$t('track.grandTitle')" :subtitle="$t('track.grandSubtitle')" />
+      </template>
         <div class="view-scroll">
           <!-- Track path -->
           <div class="field">
@@ -242,6 +244,5 @@ defineExpose({ open })
             {{ $t('track.trackInstallation') }}
           </button>
         </div>
-      </div>
-  </div>
+  </ModalShell>
 </template>

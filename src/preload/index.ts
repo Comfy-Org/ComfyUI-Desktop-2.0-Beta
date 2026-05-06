@@ -26,6 +26,11 @@ const api: ElectronApi = {
   // Locale
   getLocaleMessages: () => ipcRenderer.invoke('get-locale-messages'),
   getAvailableLocales: () => ipcRenderer.invoke('get-available-locales'),
+  getLocale: () => ipcRenderer.invoke('get-locale'),
+
+  // First-use takeover state (skipPick + hasLegacyDesktop). See
+  // `firstUseDetection.ts` in main for the categorisation rules.
+  getFirstUseState: () => ipcRenderer.invoke('get-first-use-state'),
 
   // Installations
   getInstallations: () => ipcRenderer.invoke('get-installations'),
@@ -43,7 +48,41 @@ const api: ElectronApi = {
   stopComfyUI: (installationId) => ipcRenderer.invoke('stop-comfyui', installationId),
   focusComfyWindow: (installationId) =>
     ipcRenderer.invoke('focus-comfy-window', installationId),
+  closeComfyWindow: (installationId) =>
+    ipcRenderer.invoke('close-comfy-window', installationId),
+  closeHostWindow: () =>
+    ipcRenderer.invoke('close-host-window'),
+  closeCurrentPanel: () =>
+    ipcRenderer.send('comfy-window:close-current-panel'),
+  setFirstUseMode: (mode: 'none' | 'consent-lockdown' | 'post-consent') =>
+    ipcRenderer.send('comfy-window:set-first-use-mode', { mode }),
+  onFirstUseSkip: (callback) => {
+    const handler = (): void => callback()
+    ipcRenderer.on('comfy-panel:first-use-skip', handler)
+    return () => ipcRenderer.removeListener('comfy-panel:first-use-skip', handler)
+  },
+  /**
+   * Step 5 §16 — main consults the panel renderer before tearing down
+   * the host window so a Tier 2 progress / Tier 3 takeover overlay can
+   * prompt the user to confirm cancellation. The renderer replies
+   * with `respondCloseRequest({ requestId, cleared })` — `cleared:
+   * true` lets main proceed with destruction, `cleared: false` aborts.
+   */
+  onCloseRequest: (callback) => {
+    const handler = (_event: IpcRendererEvent, data: unknown) =>
+      callback(data as { requestId: string })
+    ipcRenderer.on('comfy-window:request-close', handler)
+    return () => ipcRenderer.removeListener('comfy-window:request-close', handler)
+  },
+  respondCloseRequest: (payload) =>
+    ipcRenderer.send('comfy-window:request-close-response', payload),
+  transferHostBoundsToInstall: (installationId) =>
+    ipcRenderer.invoke('transfer-host-bounds-to-install', installationId),
+  claimAttachHost: (installationId) =>
+    ipcRenderer.invoke('claim-attach-host', installationId),
   getRunningInstances: () => ipcRenderer.invoke('get-running-instances'),
+  getLastCrashError: (installationId: string) =>
+    ipcRenderer.invoke('get-last-crash-error', installationId),
   cancelLaunch: () => ipcRenderer.invoke('cancel-launch'),
   cancelOperation: (installationId) =>
     ipcRenderer.invoke('cancel-operation', installationId),
@@ -248,6 +287,23 @@ const api: ElectronApi = {
     const handler = () => callback()
     ipcRenderer.on('suggest-chinese-mirrors', handler)
     return () => ipcRenderer.removeListener('suggest-chinese-mirrors', handler)
+  },
+  onSettingsChanged: (callback) => {
+    const handler = (_event: IpcRendererEvent, data: unknown) => callback(data as { key: string })
+    ipcRenderer.on('settings-changed', handler)
+    return () => ipcRenderer.removeListener('settings-changed', handler)
+  },
+  onPanelSwitch: (callback) => {
+    const handler = (_event: IpcRendererEvent, data: unknown) =>
+      callback(data as { panel: string; installationId?: string })
+    ipcRenderer.on('panel-switch', handler)
+    return () => ipcRenderer.removeListener('panel-switch', handler)
+  },
+  onPanelTriggerOverlay: (callback) => {
+    const handler = (_event: IpcRendererEvent, data: unknown) =>
+      callback(data as { kind: 'app-update' | 'install-update'; installationId?: string })
+    ipcRenderer.on('panel-trigger-overlay', handler)
+    return () => ipcRenderer.removeListener('panel-trigger-overlay', handler)
   },
 }
 

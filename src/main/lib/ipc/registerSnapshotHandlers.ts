@@ -9,7 +9,7 @@ import {
   getSnapshotDiffVsPrevious, diffAgainstCurrent, loadSnapshot, listSnapshots,
   buildExportEnvelope, validateExportEnvelope, importSnapshots,
   resolveSnapshotVersion, getVariantLabel,
-  findDuplicatePath, uniqueName, ensureDefaultPrimary, sanitizeDirName, allocateUniqueDir,
+  findDuplicatePath, uniqueName, sanitizeDirName, allocateUniqueDir,
 } from './shared'
 import type {
   LatestTagOverride, SnapshotExportEnvelope, FieldOption, Snapshot,
@@ -386,7 +386,6 @@ export function registerSnapshotHandlers(): void {
       ...instData,
       seen: false,
     })
-    ensureDefaultPrimary(entry)
 
     return { ok: true, entry: { id: entry.id, name: entry.name } }
   })

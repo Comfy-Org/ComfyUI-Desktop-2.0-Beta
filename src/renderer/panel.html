@@ -2,10 +2,11 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <title>ComfyUI Desktop 2.0</title>
+    <title>ComfyUI Desktop 2.0 — Panel</title>
     <!--
       CSP is relaxed in dev by electron-vite (it injects the HMR script).
-      In production, only 'self' origins are allowed.
+      Mirrors the launcher renderer's CSP — these two surfaces share assets
+      and behave the same way.
     -->
     <meta
       http-equiv="Content-Security-Policy"
@@ -14,6 +15,6 @@
   </head>
   <body>
     <div id="app"></div>
-    <script type="module" src="/src/main.ts"></script>
+    <script type="module" src="/src/panel/main.ts"></script>
   </body>
 </html>

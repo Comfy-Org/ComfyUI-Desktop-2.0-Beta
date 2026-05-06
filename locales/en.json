@@ -2,26 +2,8 @@
   "_label": "English",
 
   "dashboard": {
-    "title": "Dashboard",
-    "welcome": "Welcome to ComfyUI",
-    "welcomeDesc": "Get started by installing ComfyUI on your machine.",
-    "installComfyUI": "Install ComfyUI",
-    "quickLaunch": "Quick Launch",
-    "recent": "Recent",
-    "primary": "Primary",
     "launchedAgo": "Launched {time}",
     "neverLaunched": "Not launched yet",
-    "changePrimary": "Change",
-    "changePrimaryTitle": "Change Primary",
-    "setPrimary": "Set as Primary",
-    "setPrimaryMessage": "The primary installation is shown at the top of the dashboard for quick access.",
-    "setPrimaryConfirm": "Set \"{name}\" as your primary installation? It will be shown at the top of the dashboard.",
-    "cloudSection": "ComfyUI Cloud",
-    "pinned": "Pinned",
-    "noPinned": "No pinned installations. Right-click an install to pin it to the dashboard.",
-    "pinnedInQuickLaunch": "Pinned installations are already shown in Quick Launch above.",
-    "pinToDashboard": "Pin to Dashboard",
-    "unpinFromDashboard": "Unpin from Dashboard",
     "telemetryNotice": "Anonymous telemetry is collected to improve ComfyUI Desktop 2.0.",
     "telemetrySettings": "Manage in Settings",
     "migrateBannerTitle": "Migrate to Standalone",
@@ -30,21 +12,70 @@
     "migrateBannerSkip": "New Install Without Migrating"
   },
 
-  "sidebar": {
-    "installations": "Installs",
-    "running": "Running",
-    "giveFeedback": "Give Feedback"
+  "installType": {
+    "standalone": "Standalone",
+    "cloud": "Cloud",
+    "legacyDesktop": "Legacy Desktop",
+    "remote": "Remote",
+    "unknown": "Unknown"
+  },
+
+  "chooser": {
+    "title": "Choose an installation",
+    "recent": "Recent",
+    "all": "All",
+    "openCloud": "Open",
+    "emptyTitle": "No installations yet",
+    "emptyDesc": "Create your first ComfyUI installation to get started.",
+    "createInstall": "Create installation",
+    "newInstall": "New Install",
+    "newInstallDesc": "Set up a fresh ComfyUI environment.",
+    "filterAll": "All",
+    "filterLocal": "Local",
+    "filterCloud": "Cloud",
+    "filterRemote": "Remote",
+    "updatePill": "Update",
+    "migratePill": "Migrate",
+    "openInstall": "Open",
+    "manageInstall": "Manage…",
+    "moreActions": "More actions",
+    "menuUpdate": "Update…",
+    "menuMigrate": "Migrate to Standalone…",
+    "menuRestoreSnapshot": "Restore Snapshot…",
+    "menuRevealInFolder": "Open Folder",
+    "menuDelete": "Delete…"
+  },
+
+  "titleBar": {
+    "panelComfy": "ComfyUI",
+    "panelInstallSettings": "Install Settings",
+    "panelLauncherSettings": "Launcher Settings",
+    "installSettingsComingSoon": "Installation-specific settings will appear here in a future update.",
+    "installationLabel": "Installation",
+    "appUpdateAvailable": "Update {version}",
+    "appUpdateReady": "Restart to update",
+    "installUpdateAvailable": "Update available"
+  },
+
+  "comfyLifecycle": {
+    "stoppedTitle": "ComfyUI is not running",
+    "stoppedDesc": "Start ComfyUI to use this installation.",
+    "launchingTitle": "Starting ComfyUI…",
+    "launchingDesc": "Waiting for the server to come online.",
+    "stoppingTitle": "Stopping ComfyUI…",
+    "stoppingDesc": "Waiting for the process to shut down cleanly.",
+    "crashedTitle": "ComfyUI exited unexpectedly",
+    "crashedDesc": "The ComfyUI process exited. You can restart it below.",
+    "crashedDescWithCode": "The ComfyUI process exited (exit code {code}). You can restart it below.",
+    "crashedDetailsToggle": "Show error log",
+    "start": "Start ComfyUI",
+    "restart": "Restart ComfyUI",
+    "launchProgressTitle": "Starting ComfyUI"
   },
 
   "running": {
     "title": "Running",
-    "empty": "Nothing running or in progress.",
-    "instances": "Running Instances",
-    "errors": "Errors",
-    "crashed": "Crashed",
-    "exitCode": "Exit code {code}",
     "dismiss": "Dismiss",
-    "inProgress": "In Progress",
     "showWindow": "Show Window"
   },
 
@@ -66,15 +97,17 @@
   },
 
   "media": {
-    "title": "Media",
-    "sharedDirs": "Shared Directories",
+    "sharedDirs": "Media",
     "inputDir": "Input Directory",
     "outputDir": "Output Directory"
   },
 
+  "directories": {
+    "title": "Directories"
+  },
+
   "models": {
-    "title": "Models",
-    "directories": "Shared Directories",
+    "directories": "Models",
     "directoriesDesc": "Model directories shared across all installations. Models placed here are available to every ComfyUI install, avoiding duplicate downloads. The first directory is the primary (default for ComfyUI).",
     "addDir": "Add Directory",
     "removeDir": "Remove",
@@ -85,6 +118,8 @@
 
   "common": {
     "back": "Back",
+    "backToDashboard": "Back to Dashboard",
+    "close": "Close",
     "browse": "Browse…",
     "resetDefault": "Reset",
     "or": "or",
@@ -125,8 +160,6 @@
   },
 
   "list": {
-    "title": "Installs",
-    "trackExisting": "Track Existing",
     "loadSnapshot": "Load Snapshot",
     "snapshotSourceName": "Source Installation",
     "snapshotCount": "Total Snapshots",
@@ -139,33 +172,30 @@
     "snapshotOriginalRelease": "Snapshot version: {tag}",
     "snapshotDevice": "Device",
     "snapshotHardwareMismatch": "The snapshot was created with {snapshotDevice}. Your detected hardware is {detectedDevice}. The recommended variant for your hardware has been pre-selected.",
-    "newInstall": "New Install",
-    "empty": "No installs yet.",
-    "emptyHint": "Install or track an existing version of ComfyUI.",
-    "emptyFilter": "No installs match this filter.",
 
     "view": "Manage",
-    "new": "New",
-    "running": "Running",
     "console": "Console",
-    "viewError": "View Error",
-    "viewProgress": "View Progress",
-    "dragToReorder": "Drag to reorder",
-    "filterAll": "All",
-    "filterLocal": "Local",
-    "filterRemote": "Remote",
-    "filterCloud": "Cloud"
+    "viewProgress": "View Progress"
   },
 
   "quickInstall": {
     "title": "Install ComfyUI",
+    "grandTitle": "Quick Install",
+    "grandSubtitle": "Install the latest version of ComfyUI for your detected hardware.",
     "desc": "We'll install the latest version of ComfyUI. Please confirm your GPU type below.",
     "selectVariant": "Select your GPU",
     "confirmInstall": "Install ComfyUI"
   },
 
+  "loadSnapshot": {
+    "grandTitle": "Restore From Snapshot",
+    "grandSubtitle": "Load a saved snapshot file to recreate that installation here."
+  },
+
   "newInstall": {
     "title": "New Install",
+    "grandTitle": "New Install",
+    "grandSubtitle": "Set up a fresh ComfyUI installation. Pick a source, name it, and configure it.",
     "installMethod": "Install Method",
     "installLocation": "Install Location",
     "addInstallation": "Add Install",
@@ -231,6 +261,8 @@
 
   "track": {
     "title": "Track Existing Install",
+    "grandTitle": "Track Existing Install",
+    "grandSubtitle": "Add an existing local ComfyUI checkout to Desktop without reinstalling it.",
     "installDir": "Install Directory",
     "selectDir": "Select a directory…",
     "detectedType": "Detected Type",
@@ -288,7 +320,7 @@
     "telemetry": "Telemetry",
     "telemetryEnabled": "Share anonymous usage telemetry",
     "models": "Shared Models",
-    "downloads": "Downloads",
+    "cache": "Cache",
     "cacheDir": "Cache Directory",
     "maxCachedFiles": "Max Cached Downloads",
     "open": "Open",
@@ -337,6 +369,40 @@
     "required": "This field is required."
   },
 
+  "overlay": {
+    "cancelCurrentTitle": "Cancel current operation?",
+    "cancelNamedTitle": "Cancel \"{name}\"?",
+    "cancelMessage": "The operation will stop where it is. Anything not yet completed will be rolled back where possible.",
+    "cancelConfirm": "Cancel operation",
+    "quitSetupTitle": "Quit setup?",
+    "quitSetupMessage": "If you close now, your selection won't be saved and setup will start again the next time you launch ComfyUI Desktop.",
+    "quitSetupConfirm": "Quit setup",
+    "discardSetupTitle": "Discard install setup?",
+    "discardSetupMessage": "If you close now, your wizard selections won't be saved. No install has been created yet, so nothing will be rolled back.",
+    "discardSetupConfirm": "Discard setup"
+  },
+
+  "firstUse": {
+    "title": "Welcome to ComfyUI Desktop",
+    "grandTitle": "Welcome to ComfyUI Desktop",
+    "grandSubtitle": "A quick first-run setup so you're ready to launch ComfyUI.",
+    "consentLead": "Before you get started, please review the terms of use and choose whether to share anonymous usage telemetry.",
+    "tosBody": "By clicking Accept, you agree to the ComfyUI Desktop Terms of Use and Privacy Policy. You can change your telemetry preference at any time from App Settings.",
+    "telemetryHint": "Telemetry helps us improve the launcher. We never collect workflow contents, prompts, generated media, or personal information.",
+    "acceptTos": "Accept and continue",
+    "notNow": "Not now",
+    "pickTitle": "How would you like to use ComfyUI?",
+    "pickLead": "You can change this later — additional installs of either kind can be added from the launcher at any time.",
+    "localLabel": "Local install",
+    "localDesc": "Install and run ComfyUI on this machine. Works offline and keeps everything under your control.",
+    "localBranchTitle": "Existing ComfyUI install detected",
+    "localBranchLead": "We found a ComfyUI Desktop install already on this machine. Bring it forward into a fresh Standalone install, or start over with a clean install instead.",
+    "localBranchMigrateLabel": "Migrate existing install",
+    "localBranchMigrateDesc": "Carry workflows, custom nodes, settings, and user data over from your existing install.",
+    "localBranchInstallNewLabel": "Install fresh",
+    "localBranchInstallNewDesc": "Start with a brand new Standalone install. Your existing install is left untouched."
+  },
+
   "tray": {
     "showApp": "Show Desktop 2.0",
     "quit": "Quit"
@@ -344,6 +410,11 @@
 
   "actions": {
     "launch": "Launch",
+    "restart": "Restart",
+    "restartConfirmTitle": "Restart ComfyUI",
+    "restartConfirmMessage": "This will stop ComfyUI and start it again. Any unsaved work will be lost.",
+    "restartConfirm": "Restart",
+    "restartProgressTitle": "Restarting ComfyUI",
     "connect": "Connect",
     "connecting": "Connecting",
     "openDirectory": "Open Directory",

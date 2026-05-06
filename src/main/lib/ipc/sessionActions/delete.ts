@@ -5,7 +5,6 @@ import {
   findLockingProcesses,
   MARKER_FILE,
   _operationAborts,
-  autoAssignPrimary,
   makeSendProgress,
 } from '../shared'
 import type { ActionContext, ActionResult } from './types'
@@ -13,7 +12,6 @@ import type { ActionContext, ActionResult } from './types'
 export async function handleDelete({ event, installationId, inst }: ActionContext): Promise<ActionResult> {
   if (!fs.existsSync(inst.installPath)) {
     await installations.remove(installationId)
-    await autoAssignPrimary(installationId)
     return { ok: true, navigate: 'list' }
   }
   if (_operationAborts.has(installationId)) {
@@ -63,6 +61,5 @@ export async function handleDelete({ event, installationId, inst }: ActionContex
   }
   _operationAborts.delete(installationId)
   await installations.remove(installationId)
-  await autoAssignPrimary(installationId)
   return { ok: true, navigate: 'list' }
 }

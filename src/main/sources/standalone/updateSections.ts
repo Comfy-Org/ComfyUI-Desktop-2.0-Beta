@@ -38,7 +38,8 @@ export function getStatusTag(installation: InstallationRecord): StatusTag | unde
   const channel = (installation.updateChannel as string | undefined) || 'stable'
   const info = releaseCache.getEffectiveInfo(COMFYUI_REPO, channel, installation)
   if (info && releaseCache.isUpdateAvailable(installation, channel, info)) {
-    return { label: t('standalone.updateAvailableTag', { version: info.releaseName || info.latestTag || '' }), style: 'update' }
+    const version = info.releaseName || info.latestTag || ''
+    return { label: t('standalone.updateAvailableTag', { version }), style: 'update', version }
   }
   return undefined
 }
