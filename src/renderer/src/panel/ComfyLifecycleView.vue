@@ -35,10 +35,15 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const sessionStore = useSessionStore()
 
-type LifecycleState = 'launching' | 'stopping' | 'crashed' | 'stopped'
+type LifecycleState = 'running' | 'launching' | 'stopping' | 'crashed' | 'stopped'
 
 const state = computed<LifecycleState>(() => {
   const id = props.installationId
+  // 'running' renders nothing — main shows the live comfy WebContentsView
+  // for that case, and the panel only briefly becomes visible while a
+  // page/manage modal is opening on top. Without this guard the view
+  // would flash "ComfyUI is stopped" during that window.
+  if (sessionStore.isRunning(id)) return 'running'
   if (sessionStore.isLaunching(id)) return 'launching'
   if (sessionStore.isStopping(id)) return 'stopping'
   if (sessionStore.errorInstances.has(id)) return 'crashed'
@@ -107,7 +112,7 @@ function startLaunch(): void {
 
 <template>
   <div class="lifecycle-view">
-    <div class="lifecycle-card" :data-state="state">
+    <div v-if="state !== 'running'" class="lifecycle-card" :data-state="state">
       <template v-if="state === 'launching'">
         <div class="lifecycle-icon spin">
           <Loader2 :size="32" />

@@ -1484,6 +1484,16 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
       existing.comfyView.setBackgroundColor(COMFY_BG)
       void existing.comfyView.webContents.loadURL(comfyUrl).catch(() => {})
     }
+    // A relaunch implicitly means "land me in the live ComfyUI view",
+    // so force the host's activePanel back to `'comfy'` and clear any
+    // breadcrumb history. Without this, a launch kicked off from a
+    // non-comfy panel (e.g. the install-settings DetailModal) would
+    // leave the body stranded on the lifecycle / settings panel —
+    // `refreshComfyTabBody` early-returns on `activePanel !== 'comfy'`.
+    // The trailing `refreshComfyTabBody` still handles the
+    // comfy-lifecycle → comfy body-mode swap when the entry was
+    // already on `'comfy'` (setActivePanel early-returns there).
+    setActivePanel(existing.windowKey, 'comfy', 'reset')
     refreshComfyTabBody(installationId)
     if (proc) {
       proc.on('exit', () => {

@@ -493,12 +493,18 @@ async function runAction(action: ActionDef, btn: HTMLButtonElement | null): Prom
           return window.api.runAction(instId, 'launch')
         }
       : () => window.api.runAction(instId, mutableAction.id, mutableAction.data ? toRaw(mutableAction.data) : undefined)
+    // Tag launch / restart so PanelApp's handleShowProgress installs
+    // the chooser-host close-on-instance-started subscription. Without
+    // this, launches kicked off from this Tier-1 modal would leave the
+    // dashboard window open next to the new comfy window.
+    const triggersInstanceStart = mutableAction.id === 'launch' || isRestart
     emit('show-progress', {
       installationId: instId,
       title,
       apiCall,
       cancellable: !!mutableAction.cancellable,
       returnTo: 'detail',
+      triggersInstanceStart,
     })
     return
   }
