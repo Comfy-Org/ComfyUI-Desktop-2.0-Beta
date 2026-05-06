@@ -506,13 +506,18 @@ async function handleNewInstallTakeoverClose(): Promise<void> {
 /** Track D item 4 — fire the install's launch action through the
  *  same `useListAction` pipeline ChooserView uses for tile clicks.
  *  Mirrors the `handleChooserPick` shape (port-conflict resolution,
- *  telemetry, close-host-window-on-instance-started) so first-use
- *  ends with a running ComfyUI in its own window and the dashboard
- *  host shuts down behind it. */
+ *  telemetry, in-place attach via `prepareChooserHostHandoff`) so
+ *  first-use ends with a running ComfyUI inside the chooser host
+ *  window the user just dismissed the takeover from. */
 async function launchInstallationAfterFirstUse(installation: Installation): Promise<void> {
   if (sessionStore.isRunning(installation.id)) {
+    // Window-mode unification (Stage W-5) — focus the running
+    // window and leave the chooser host alive (W-4 paradigm: tile
+    // clicks transform the host the user clicked from instead of
+    // closing it). The chooser host has no install backing it, so
+    // there's no detach to do; the surplus window is the price of
+    // keeping the user's panel context intact.
     await window.api.focusComfyWindow(installation.id)
-    void window.api.closeHostWindow()
     return
   }
   const actions = await window.api.getListActions(installation.id)
@@ -661,11 +666,15 @@ async function prepareChooserHostHandoff(installationId: string): Promise<void> 
 }
 
 async function handleChooserPick(installation: Installation): Promise<void> {
-  // Already running with an open window — focus that window and retire
-  // the chooser host. No need to involve the launch action.
+  // Already running with an open window — focus that window. Window-
+  // mode unification (Stage W-5) — leave the chooser host alive
+  // (W-4 paradigm: tile clicks transform the host the user clicked
+  // from instead of closing it). The chooser host stays available
+  // for the user to pick another install or close themselves; no
+  // launch action involvement, no `attachInstall` (would create a
+  // duplicate view of the running install on this host).
   if (sessionStore.isRunning(installation.id)) {
     await window.api.focusComfyWindow(installation.id)
-    void window.api.closeHostWindow()
     return
   }
 
