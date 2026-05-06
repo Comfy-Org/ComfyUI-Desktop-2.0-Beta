@@ -325,6 +325,31 @@ function refreshComfyTabBody(installationId: string): void {
   focusActiveBody(entry)
 }
 
+/**
+ * Resolve an IPC `event.sender` to the comfy window entry whose title-bar
+ * WebContentsView owns it, by strict reference equality.
+ *
+ * This is the single chokepoint every title-bar IPC must funnel through —
+ * see `comfy-window:open-title-menu` / `comfy-window:set-panel` /
+ * `comfy-window:go-back` / `comfy-window:go-forward` /
+ * `comfy-window:click-app-update-pill` / `comfy-window:click-install-update-pill`.
+ *
+ * Aux windows are NEVER reachable through this lookup:
+ *   - OAuth / cloud-login popups spawned via `comfyContents.setWindowOpenHandler`
+ *     are unregistered loose `BrowserWindow`s with `preload: undefined`. They
+ *     have no `ipcRenderer`, can't send these IPCs, and even if a future
+ *     change re-introduced a preload they wouldn't be in `comfyWindows`.
+ *   - The `comfyView` and `panelView` WebContentsViews of a registered
+ *     entry are deliberately matched by separate predicates
+ *     (`panelView?.webContents === event.sender`) — never by this helper —
+ *     so the file/install menu can't be popped from inside ComfyUI's content
+ *     surface or from a panel renderer.
+ *
+ * Returning `null` here causes every consuming IPC handler to no-op, which
+ * is the desired behaviour for every off-path sender. Keep this contract
+ * tight when adding new title-bar IPCs: prefer this helper over open-coding
+ * a sender match.
+ */
 function findEntryByTitleBarSender(wc: Electron.WebContents): { id: string; entry: ComfyWindowEntry } | null {
   for (const [id, entry] of comfyWindows) {
     if (entry.titleBarView.webContents === wc) return { id, entry }
@@ -1128,6 +1153,21 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
   })
   comfyContents.setWindowOpenHandler(({ url }) => {
     if (shouldOpenInPopup(url)) {
+      // Aux popup contract (see also `findEntryByTitleBarSender`):
+      //   - `preload: undefined` strips our preload — the popup has no
+      //     `window.api` / `__comfyTitleBar` bridge and so cannot reach
+      //     any of the title-bar IPCs (`comfy-window:open-title-menu`
+      //     etc.). The waffle / file menu is therefore unreachable
+      //     from a cloud-login / OAuth popup, by design.
+      //   - We don't override `titleBarStyle` / `titleBarOverlay`. Per
+      //     Electron's `setWindowOpenHandler` docs only security-related
+      //     `webPreferences` inherit from the parent — chrome-style
+      //     options reset to OS defaults — so the popup gets a normal
+      //     OS title bar and looks like a regular browser window.
+      //   - The macOS passkey-unavailable banner is still injected
+      //     against this popup via `did-create-window` →
+      //     `injectMacPasskeyWarning`, so cloud-login flows on macOS
+      //     keep the password+OTP affordance.
       return { action: 'allow', overrideBrowserWindowOptions: { webPreferences: { preload: undefined } } }
     }
     shell.openExternal(url)
