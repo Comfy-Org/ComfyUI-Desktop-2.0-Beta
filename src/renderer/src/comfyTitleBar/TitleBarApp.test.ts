@@ -23,6 +23,7 @@ interface MockBridgeState {
   fullscreenChangedCallbacks: ((fullscreen: boolean) => void)[]
   menuClosedCallbacks: ((info: { menu: 'file' | 'install' }) => void)[]
   inertChangedCallbacks: ((inert: boolean) => void)[]
+  firstUseModeChangedCallbacks: ((mode: 'none' | 'consent-lockdown' | 'post-consent') => void)[]
   appUpdateStateCallbacks: ((state: {
     kind: 'available' | 'ready' | null
     version: string | null
@@ -52,6 +53,7 @@ function installMockBridge(opts: { isMac?: boolean; installationId?: string | nu
     fullscreenChangedCallbacks: [],
     menuClosedCallbacks: [],
     inertChangedCallbacks: [],
+    firstUseModeChangedCallbacks: [],
     appUpdateStateCallbacks: [],
     installUpdateAvailableCallbacks: [],
     downloadsChangedCallbacks: [],
@@ -106,6 +108,10 @@ function installMockBridge(opts: { isMac?: boolean; installationId?: string | nu
     },
     onInertChanged: (cb: (inert: boolean) => void) => {
       state.inertChangedCallbacks.push(cb)
+      return () => {}
+    },
+    onFirstUseModeChanged: (cb: (mode: 'none' | 'consent-lockdown' | 'post-consent') => void) => {
+      state.firstUseModeChangedCallbacks.push(cb)
       return () => {}
     },
     onAppUpdateStateChanged: (
@@ -428,6 +434,44 @@ describe('TitleBarApp', () => {
     expect((pill.element as HTMLButtonElement).disabled).toBe(false)
     expect((navButtons[0]!.element as HTMLButtonElement).disabled).toBe(false)
     expect((navButtons[1]!.element as HTMLButtonElement).disabled).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('hides the waffle menu during the first-use T&C consent step (consent-lockdown)', async () => {
+    // Modal-unification (Track M-2.3) — the waffle menu is the only
+    // always-live affordance during a Tier 3 takeover (it carries the
+    // Return-to-Dashboard / Close-Window escape hatch). The first-use
+    // T&C consent step deliberately removes that escape hatch so the
+    // user has to either accept consent or close the window via OS
+    // chrome — matching the binding-flow framing of consent. Once
+    // the takeover advances past consent the waffle reappears (the
+    // menu builder additionally surfaces the Skip Onboarding entry
+    // there, see M-2.2).
+    const { default: TitleBarApp } = await import('./TitleBarApp.vue')
+    const wrapper = mount(TitleBarApp)
+    await flushPromises()
+    // Steady state — waffle is rendered.
+    expect(wrapper.find('.title-menu-button--icon').exists()).toBe(true)
+    expect(wrapper.find('header').classes()).not.toContain('is-consent-lockdown')
+
+    // Consent step on screen — waffle disappears.
+    bridgeState.firstUseModeChangedCallbacks.forEach((cb) => cb('consent-lockdown'))
+    await flushPromises()
+    expect(wrapper.find('header').classes()).toContain('is-consent-lockdown')
+    expect(wrapper.find('.title-menu-button--icon').exists()).toBe(false)
+
+    // Advance to post-consent — waffle reappears (Skip Onboarding now
+    // available there).
+    bridgeState.firstUseModeChangedCallbacks.forEach((cb) => cb('post-consent'))
+    await flushPromises()
+    expect(wrapper.find('header').classes()).not.toContain('is-consent-lockdown')
+    expect(wrapper.find('.title-menu-button--icon').exists()).toBe(true)
+
+    // Takeover dismissed — back to steady state.
+    bridgeState.firstUseModeChangedCallbacks.forEach((cb) => cb('none'))
+    await flushPromises()
+    expect(wrapper.find('header').classes()).not.toContain('is-consent-lockdown')
+    expect(wrapper.find('.title-menu-button--icon').exists()).toBe(true)
     wrapper.unmount()
   })
 

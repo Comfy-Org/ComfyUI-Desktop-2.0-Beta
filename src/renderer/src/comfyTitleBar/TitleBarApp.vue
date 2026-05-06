@@ -78,6 +78,17 @@ interface Bridge {
   onFullscreenChanged: (cb: (fullscreen: boolean) => void) => () => void
   onMenuClosed: (cb: (info: { menu: 'file' | 'install' }) => void) => () => void
   onInertChanged: (cb: (inert: boolean) => void) => () => void
+  /** Modal-unification (Track M-2.3) — first-use takeover step pushes
+   *  from main. Drives the T&C-step lockdown that hides the waffle
+   *  menu (the otherwise-always-live escape hatch) so the user has to
+   *  either accept consent or close the window via OS chrome —
+   *  there's no in-app affordance that drops them past the T&C
+   *  without a recorded answer. The post-consent steps stay normal
+   *  except for the Skip Onboarding entry the menu builder adds in
+   *  M-2.2. */
+  onFirstUseModeChanged: (
+    cb: (mode: 'none' | 'consent-lockdown' | 'post-consent') => void,
+  ) => () => void
   /** Phase 3 §18 — app-update state pushes from main. `kind` is
    *  `'available'` after `update-available`, `'ready'` after
    *  `update-downloaded`, and `null` when nothing is pending.
@@ -177,6 +188,22 @@ const canForward = ref(false)
  * flag, matching how panel-changed / theme-changed already work.
  */
 const isInert = ref(false)
+/**
+ * Modal-unification (Track M-2.3) — first-use takeover step pushed
+ * from main via `comfy-titlebar:first-use-mode-changed`. The renderer
+ * uses the value to lock down the title bar during the T&C consent
+ * step (`'consent-lockdown'`) by hiding the waffle menu — the only
+ * always-live escape hatch on a Tier 3 takeover. Post-consent steps
+ * (`'post-consent'`) leave the title bar normal so the file-menu
+ * Skip Onboarding entry the menu builder added in M-2.2 stays
+ * reachable. `'none'` is the steady state with no takeover mounted.
+ *
+ * Mirrors the inert ref above: state is local, main does NOT cache
+ * the value here (it's cached on the host entry main-side, see
+ * `ComfyWindowEntry.firstUseMode`).
+ */
+const firstUseMode = ref<'none' | 'consent-lockdown' | 'post-consent'>('none')
+const isConsentLockdown = computed(() => firstUseMode.value === 'consent-lockdown')
 /**
  * Install-less host window flag (Phase 3 step 2c). When true, the center
  * install pill labels itself "Choose an install" (set by the initial
@@ -423,6 +450,7 @@ let unsubTheme: (() => void) | undefined
 let unsubFullscreen: (() => void) | undefined
 let unsubMenuClosed: (() => void) | undefined
 let unsubInert: (() => void) | undefined
+let unsubFirstUseMode: (() => void) | undefined
 let unsubAppUpdate: (() => void) | undefined
 let unsubInstallUpdate: (() => void) | undefined
 let unsubDownloads: (() => void) | undefined
@@ -476,6 +504,9 @@ onMounted(() => {
   unsubInert = bridge.onInertChanged((inert) => {
     isInert.value = inert
   })
+  unsubFirstUseMode = bridge.onFirstUseModeChanged((mode) => {
+    firstUseMode.value = mode
+  })
   unsubAppUpdate = bridge.onAppUpdateStateChanged((next) => {
     appUpdateState.value = next
   })
@@ -504,6 +535,7 @@ onUnmounted(() => {
   unsubFullscreen?.()
   unsubMenuClosed?.()
   unsubInert?.()
+  unsubFirstUseMode?.()
   unsubAppUpdate?.()
   unsubInstallUpdate?.()
   unsubDownloads?.()
@@ -522,6 +554,7 @@ onUnmounted(() => {
       'is-fullscreen': isFullscreen,
       'is-hover-active': isHoverActive,
       'is-inert': isInert,
+      'is-consent-lockdown': isConsentLockdown,
     }"
     :style="{
       background: themeBg ?? undefined,
@@ -540,8 +573,18 @@ onUnmounted(() => {
            gate so the user can always reach Return-to-Dashboard /
            Close-Window from inside a Tier 3 takeover. The install pill,
            back/forward arrows, and update pills remain disabled — only
-           the menu stays live. -->
+           the menu stays live.
+           Modal-unification (Track M-2.3) — exception: during the
+           first-use T&C consent step (`isConsentLockdown`) the menu
+           is hidden entirely. The waffle is the otherwise-always-live
+           escape hatch and the consent step is the one moment we
+           explicitly want no in-app way past the takeover — the user
+           must either accept consent or close the window via OS
+           chrome. The waffle reappears once the takeover advances to
+           `'post-consent'`, where the menu builder additionally
+           surfaces the Skip Onboarding entry (M-2.2). -->
       <button
+        v-if="!isConsentLockdown"
         ref="fileBtn"
         type="button"
         class="title-menu-button title-menu-button--icon"
