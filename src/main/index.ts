@@ -1357,32 +1357,51 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
     },
     titleBarBackground: TITLEBAR_BG,
     titleBarInstallationIdParam: installationId,
-    onTitleBarReady: (_e, tb) => {
+    onTitleBarReady: (e, tb) => {
       // Install-backed extras the shared handshake can't synthesize:
       // the install-name title text, the source-category icon string,
       // and the per-install update-pill state.
+      //
+      // Stage W-3a — the install-id is read from the entry at runtime
+      // (rather than the wrapper-scope `installationId` constant)
+      // so that once W-3c makes `entry.installationId` mutable, a
+      // detached host firing this handler against a stale title-bar
+      // mount no-ops cleanly instead of querying for an install id
+      // that no longer backs the window.
       tb.webContents.send('comfy-titlebar:title-changed', titleBarText)
       tb.webContents.send('comfy-titlebar:source-category-changed', sourceCategory)
-      void computeInstallUpdateAvailable(installationId).then((state) => {
-        if (tb.webContents.isDestroyed()) return
-        tb.webContents.send('comfy-titlebar:install-update-changed', state)
-      })
+      const id = e.installationId
+      if (id !== null) {
+        void computeInstallUpdateAvailable(id).then((state) => {
+          if (tb.webContents.isDestroyed()) return
+          tb.webContents.send('comfy-titlebar:install-update-changed', state)
+        })
+      }
     },
-    onBeforeTeardown: () => {
+    onBeforeTeardown: (e) => {
       // Install-only close-time work: detach the per-window download
       // routing that `attachSessionDownloadHandler` set up below, and
       // ask the IPC layer to stop the session backing this install.
+      // Reads the install-id from the entry at runtime (W-3a) — a
+      // host that's been detached (W-3c) skips the stop-session call
+      // since the session was already stopped at detach time.
       detachWindowDownloads(comfyWindow)
-      ipc.stopRunning(installationId)
+      const id = e.installationId
+      if (id !== null) ipc.stopRunning(id)
     },
     onClosed: () => {
       // Install-only `'closed'` cleanup. The shared handler already
       // ran `unregisterHostEntry` (which clears the install-id index
       // entry too). The retry-timer / relaunch-state maps are still
-      // install-keyed (per-install state, not per-window state).
+      // install-keyed (per-install state, not per-window state); read
+      // the id from the entry at runtime so a detached close clears
+      // nothing — there is no install backing the window to clean up.
       installationEvents.off('updated', onInstallationUpdated)
-      comfyFailRetryTimerCancels.delete(installationId)
-      relaunchStates.delete(installationId)
+      const id = entry.installationId
+      if (id !== null) {
+        comfyFailRetryTimerCancels.delete(id)
+        relaunchStates.delete(id)
+      }
     },
   })
   // The shared constructor seeds `comfyUrl` to the empty string for
@@ -1409,8 +1428,14 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
   // recompute the install-update pill state (the install's source may
   // have flipped its statusTag between releases as the release-cache
   // resolves in the background).
+  //
+  // Stage W-3a — match against `entry.installationId` (rather than the
+  // wrapper-scope `installationId` constant) so a detached host
+  // (W-3c) ignores updates for the install it used to back. The
+  // `install-update-changed` push uses `updated.id` since it has
+  // already passed the install-match guard above.
   const onInstallationUpdated = (updated: InstallationRecord): void => {
-    if (updated.id !== installationId) return
+    if (updated.id !== entry.installationId) return
     const nextTabText = computeTitleBarText(updated)
     if (nextTabText !== titleBarText) {
       titleBarText = nextTabText
@@ -1429,7 +1454,7 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
       currentInstallName = updated.name
       refreshOsWindowTitle()
     }
-    void computeInstallUpdateAvailable(installationId).then((state) => {
+    void computeInstallUpdateAvailable(updated.id).then((state) => {
       if (titleBarView.webContents.isDestroyed()) return
       titleBarView.webContents.send('comfy-titlebar:install-update-changed', state)
     })
@@ -1472,12 +1497,17 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
     return { action: 'deny' }
   })
 
-  // Sync the title bar and overlay colors with the ComfyUI frontend's theme
+  // Sync the title bar and overlay colors with the ComfyUI frontend's theme.
+  // Stage W-3a — write straight onto the wrapper-scope `entry` reference
+  // (which, post-W-1, is the same object held by the `comfyWindows` map)
+  // rather than re-resolving via `getEntryByInstallationId`. A detached
+  // host's comfyContents shouldn't be reporting a theme in the first
+  // place; if it ever does (e.g. about:blank fires a bogus event), we
+  // still write the theme onto the entry so the next attach picks it up.
   const applyComfyTheme = (bg: string, text: string): void => {
     if (comfyWindow.isDestroyed()) return
     const theme = { bg, text }
-    const e = getEntryByInstallationId(installationId)
-    if (e) e.lastTheme = theme
+    entry.lastTheme = theme
     if (!titleBarView.webContents.isDestroyed()) {
       titleBarView.webContents.send('comfy-titlebar:theme-changed', theme)
     }
@@ -1523,13 +1553,23 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
 
   comfyContents.loadURL(comfyUrl)
 
-  /** Read the current target URL from the entry; falls back to the launch
-   *  URL during the brief window before the entry is registered. */
-  const currentComfyUrl = (): string => getEntryByInstallationId(installationId)?.comfyUrl ?? comfyUrl
+  /** Read the current target URL from the entry. Falls back to the launch
+   *  URL only as a defensive default — `entry.comfyUrl` is set above to
+   *  `comfyUrl` and only changes via re-launch (onLaunch's existing-window
+   *  branch) or W-3c's detach (which clears it before the comfyContents
+   *  navigates to about:blank). */
+  const currentComfyUrl = (): string => entry.comfyUrl || comfyUrl
 
   const reloadComfy = (): void => {
     if (comfyWindow.isDestroyed()) return
-    if (relaunchStates.has(installationId)) return
+    // Stage W-3a — refuse to reload when the host is detached (no install
+    // backing the window). The relaunch-state check uses the entry's
+    // current install-id rather than the construction-time constant so a
+    // re-attached window doesn't see stale relaunch state from the
+    // previous install.
+    const id = entry.installationId
+    if (id === null) return
+    if (relaunchStates.has(id)) return
     comfyContents.stop()
     comfyContents.loadURL(currentComfyUrl())
   }
@@ -1558,11 +1598,19 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
   comfyFailRetryTimerCancels.set(installationId, cancelFailRetry)
   comfyContents.on('did-fail-load', (_e, code, _desc, _failUrl, isMainFrame) => {
     if (!isMainFrame || code === -3 || failRetryTimer) return
-    // During a model-folder relaunch, onComfyRestarted handles retry logic.
-    if (relaunchStates.has(installationId)) return
+    // Stage W-3a — read the install-id from the entry at runtime so a
+    // detached host (whose comfyContents has been navigated to
+    // about:blank) doesn't schedule a retry that would re-load the old
+    // ComfyUI URL post-detach. During a model-folder relaunch,
+    // onComfyRestarted handles retry logic.
+    const id = entry.installationId
+    if (id === null) return
+    if (relaunchStates.has(id)) return
     failRetryTimer = setTimeout(() => {
       failRetryTimer = null
-      if (relaunchStates.has(installationId)) return
+      const currentId = entry.installationId
+      if (currentId === null) return
+      if (relaunchStates.has(currentId)) return
       if (!comfyWindow.isDestroyed()) {
         comfyContents.loadURL(currentComfyUrl())
       }
@@ -1570,13 +1618,17 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
   })
 
   comfyContents.on('render-process-gone', (_event, details) => {
+    // Stage W-3a — telemetry context reads the install-id from the
+    // entry at runtime; a detached host (W-3c) reports `'(detached)'`
+    // so the crash still surfaces in Datadog without misattributing
+    // it to whichever install previously backed the window.
     forwardDatadogError({
       source: 'comfy-window-render-process-gone',
       message: `Comfy window renderer process exited (${details.reason})`,
       level: 'error',
       context: {
         origin: 'main-process',
-        installationId,
+        installationId: entry.installationId ?? '(detached)',
         reason: details.reason,
         exitCode: details.exitCode,
       },
