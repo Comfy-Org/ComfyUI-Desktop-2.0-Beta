@@ -168,18 +168,6 @@ const launcherPrefs = useLauncherPrefs()
  */
 const { current: currentOverlay, openOverlay, closeOverlay } = useOverlay()
 
-/**
- * Modal-unification (Track M-2.1 / M-3 / M-4) — class list for the
- * Tier 3 takeover slot's wrapper div. Every Tier 3 component is now
- * a binding takeover-modal so the wrapper just needs the
- * `view-modal--opaque` backdrop class. The pre-M-4 legacy
- * `is-binding-takeover-modal` opt-out class was retired alongside
- * the dead `:not(...)` :deep full-window override below.
- */
-const takeoverWrapperClasses = computed<Record<string, boolean>>(() => ({
-  'view-modal--opaque': currentOverlay.value?.kind === 'takeover',
-}))
-
 // installationStore.fetchInstallations() is wired to onInstallationsChanged
 // inside the store itself, so the panel just needs to read from it.
 const installation = computed<Installation | null>(
@@ -945,40 +933,23 @@ onUnmounted(() => {
         @show-progress="handleShowProgress"
       />
     </div>
-    <div
+    <!-- Tier 2 progress slot. ProgressModal owns its own backdrop via
+         the unified Modal primitive. -->
+    <ProgressModal
       v-else-if="currentOverlay?.kind === 'progress'"
-      class="view-modal active"
-      data-overlay-key="progress"
-    >
-      <ProgressModal
-        ref="progressRef"
-        :installation-id="currentOverlay.installationId"
-        @close="handleProgressClose"
-      />
-    </div>
+      ref="progressRef"
+      :installation-id="currentOverlay.installationId"
+      @close="handleProgressClose"
+    />
 
-    <!-- Tier 3 takeover slot. The four flow modals share the same
-         shell — the underlying panel body (chooser / launcher-settings)
-         stays mounted underneath, so `closeOverlay` returns the user
-         to wherever they came from without us having to remember it.
-         Step 5 §10 adds the `'update'` component which mounts the same
-         `ProgressModal` as the Tier 2 progress slot but with full-window
-         takeover styling (the `[data-overlay-key="takeover"]` :deep
-         override on `.view-modal-content` makes it span the panel area).
-         The `progressRef` template ref resolves to whichever
-         ProgressModal is currently mounted — the two slots are mutually
-         exclusive via the `v-if` chain. -->
-    <div
-      v-else-if="currentOverlay?.kind === 'takeover'"
-      class="view-modal active"
-      :class="takeoverWrapperClasses"
-      data-overlay-key="takeover"
-    >
+    <!-- Tier 3 binding modals. Each child component owns its own
+         backdrop via the unified Modal primitive. -->
+    <template v-else-if="currentOverlay?.kind === 'takeover'">
       <ProgressModal
         v-if="currentOverlay.component === 'update'"
         ref="progressRef"
         :installation-id="currentOverlay.installationId ?? ''"
-        takeover-chrome
+        binding
         @close="handleProgressClose"
       />
       <NewInstallModal
@@ -1013,7 +984,7 @@ onUnmounted(() => {
         @chain-local="handleFirstUseChainLocal"
         @chain-migrate="handleFirstUseChainMigrate"
       />
-    </div>
+    </template>
 
     <ModalDialog />
   </div>
@@ -1066,16 +1037,6 @@ onUnmounted(() => {
   flex-direction: column;
   overflow: hidden;
 }
-
-/* Modal-unification (Track M-4) — the legacy
- * `:not(.is-binding-takeover-modal) :deep(.view-modal-content)`
- * full-window override that lived here is retired. Pre-M-3 it
- * forced every Tier 3 takeover to fill the panel area; post-M-3
- * (install-flow modals → binding takeover-modals) every takeover
- * carries `view-modal-content--takeover` and renders as a centred
- * dialog over the opaque backdrop, so the override never matched
- * anything and the surrounding `is-binding-takeover-modal` opt-out
- * class is also gone. */
 
 .panel-placeholder {
   padding: 24px;

@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { useModal } from '../composables/useModal'
 import TakeoverHeader from '../components/TakeoverHeader.vue'
 import TakeoverBack from '../components/TakeoverBack.vue'
+import Modal from '../components/Modal.vue'
 
 import type { ProbeResult } from '../types/ipc'
 import { emitTelemetryAction, toCountBucket } from '../lib/telemetry'
@@ -148,12 +149,7 @@ defineExpose({ open })
 </script>
 
 <template>
-  <!-- Modal-unification (Track M-3) — install-flow takeover-modal.
-       See NewInstallModal.vue for the rationale; same chrome treatment. -->
-  <div class="view-modal-content view-modal-content--takeover">
-      <!-- Modal-unification (Track M-5) — back-chevron "Back to
-           Dashboard" replaces the corner ✕. See NewInstallModal.vue
-           for the rationale; same chrome treatment. -->
+  <Modal binding @close="emit('close')">
       <div class="view-modal-header">
         <TakeoverBack
           :label="$t('common.backToDashboard')"
@@ -250,5 +246,5 @@ defineExpose({ open })
           </button>
         </div>
       </div>
-  </div>
+  </Modal>
 </template>

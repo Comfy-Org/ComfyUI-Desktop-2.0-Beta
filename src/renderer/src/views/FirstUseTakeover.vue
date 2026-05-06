@@ -39,6 +39,7 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { ArrowRightLeft, Box, Cloud, Download } from 'lucide-vue-next'
 import TakeoverHeader from '../components/TakeoverHeader.vue'
+import Modal from '../components/Modal.vue'
 
 type Step = 'consent' | 'mirrors' | 'pick' | 'localBranch'
 
@@ -210,15 +211,10 @@ defineExpose({ open })
 </script>
 
 <template>
-  <div class="view-modal-content view-modal-content--takeover first-use-takeover">
-    <!-- Phase 3 §17 Step 4 / post-Phase-3 polish — first-use is a
-         binding flow, so the takeover deliberately omits the ✕ close
-         button that the other Tier 3 takeovers render. The user can
-         still close the host window via OS chrome (which routes through
-         `onCloseRequest` in main → `closeOverlay` in PanelApp) — but
-         there's no in-app dismiss affordance that drops them into the
-         dashboard mid-onboarding. See `docs/post-phase3-ux-polish.md`
-         (First Time Use). -->
+  <Modal binding content-class="first-use-takeover">
+    <!-- First-use is binding — no ✕ close. The OS-chrome window close
+         routes through main → PanelApp's closeOverlay; there's no in-app
+         dismiss affordance mid-onboarding. -->
     <div class="view-modal-header">
       <TakeoverHeader
         :title="$t('firstUse.grandTitle')"
@@ -365,17 +361,11 @@ defineExpose({ open })
         </template>
       </div>
     </div>
-  </div>
+  </Modal>
 </template>
 
 <style scoped>
-/* Modal-unification (Track M-2.1) — first-use is a binding
- * takeover-modal, so its root opts into `view-modal-content--takeover`
- * (1000px max-width, centred dialog) and the wrapper in PanelApp opts
- * OUT of the full-window `:deep(.view-modal-content)` override via
- * `is-binding-takeover-modal`. Sizing is now governed by the shared
- * `.view-modal-content` chrome — this scoped block keeps only the flex
- * layout that the body / header / footer rows depend on. */
+/* Layout for the first-use modal body. */
 .first-use-takeover {
   display: flex;
   flex-direction: column;

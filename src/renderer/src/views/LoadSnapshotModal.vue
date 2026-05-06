@@ -10,6 +10,7 @@ import { emitTelemetryAction, toVariantBucket } from '../lib/telemetry'
 import SnapshotFilePreviewContent from '../components/SnapshotFilePreviewContent.vue'
 import TakeoverHeader from '../components/TakeoverHeader.vue'
 import TakeoverBack from '../components/TakeoverBack.vue'
+import Modal from '../components/Modal.vue'
 
 const emit = defineEmits<{
   close: []
@@ -250,18 +251,7 @@ defineExpose({ open })
 </script>
 
 <template>
-  <!-- Modal-unification (Track M-3) — install-flow takeover-modal.
-       See NewInstallModal.vue for the rationale; same chrome treatment. -->
-  <div
-    ref="contentRef"
-    class="view-modal-content view-modal-content--takeover"
-    @dragover="!preview && handleDragOver($event)"
-    @dragleave="!preview && handleDragLeave($event)"
-    @drop="!preview && handleDrop($event)"
-  >
-      <!-- Modal-unification (Track M-5) — back-chevron "Back to
-           Dashboard" replaces the corner ✕. See NewInstallModal.vue
-           for the rationale; same chrome treatment. -->
+  <Modal binding @close="emit('close')">
       <div class="view-modal-header">
         <TakeoverBack
           :label="$t('common.backToDashboard')"
@@ -272,7 +262,13 @@ defineExpose({ open })
           :subtitle="$t('loadSnapshot.grandSubtitle')"
         />
       </div>
-      <div class="view-modal-body">
+      <div
+        ref="contentRef"
+        class="view-modal-body"
+        @dragover="!preview && handleDragOver($event)"
+        @dragleave="!preview && handleDragLeave($event)"
+        @drop="!preview && handleDrop($event)"
+      >
         <div class="view-scroll">
           <!-- Drop zone / file picker (shown when no preview loaded) -->
           <div v-if="!preview" class="ls-drop-zone-wrap">
@@ -367,7 +363,7 @@ defineExpose({ open })
           </button>
         </div>
       </div>
-  </div>
+  </Modal>
 </template>
 
 <style scoped>

@@ -11,6 +11,7 @@ import { trackGuardrailBlocked, createDiskSpaceChecker, showPathIssueAlerts, che
 import InstallNamePath from '../components/InstallNamePath.vue'
 import TakeoverHeader from '../components/TakeoverHeader.vue'
 import TakeoverBack from '../components/TakeoverBack.vue'
+import Modal from '../components/Modal.vue'
 
 const emit = defineEmits<{
   close: []
@@ -257,12 +258,7 @@ defineExpose({ open })
 </script>
 
 <template>
-  <!-- Modal-unification (Track M-3) — install-flow takeover-modal.
-       See NewInstallModal.vue for the rationale; same chrome treatment. -->
-  <div class="view-modal-content view-modal-content--takeover quick-install-modal">
-      <!-- Modal-unification (Track M-5) — back-chevron "Back to
-           Dashboard" replaces the corner ✕. See NewInstallModal.vue
-           for the rationale; same chrome treatment. -->
+  <Modal binding content-class="quick-install-modal" @close="emit('close')">
       <div class="view-modal-header">
         <TakeoverBack
           :label="$t('common.backToDashboard')"
@@ -325,5 +321,5 @@ defineExpose({ open })
           </button>
         </div>
       </div>
-  </div>
+  </Modal>
 </template>

@@ -11,6 +11,7 @@ import { trackGuardrailBlocked, createDiskSpaceChecker, showPathIssueAlerts, che
 import InstallNamePath from '../components/InstallNamePath.vue'
 import TakeoverHeader from '../components/TakeoverHeader.vue'
 import TakeoverBack from '../components/TakeoverBack.vue'
+import Modal from '../components/Modal.vue'
 
 const emit = defineEmits<{
   close: []
@@ -518,25 +519,7 @@ defineExpose({ open })
 </script>
 
 <template>
-  <!-- Modal-unification (Track M-3) — install-flow takeover-modal.
-       The `view-modal-content--takeover` modifier opts into the
-       1000px-max binding-modal chrome (PanelApp's takeover slot
-       additionally adds `view-modal--opaque` + `is-binding-takeover-modal`
-       on the wrapper). Pre-M-3 this rendered as a full-window override;
-       post-M-3 it renders as a centred dialog over the opaque
-       backdrop, matching first-use. -->
-  <div class="view-modal-content view-modal-content--takeover">
-      <!-- Modal-unification (Track M-5) — back-chevron "Back to
-           Dashboard" replaces the corner ✕ that lived here pre-M-5.
-           Per the plan's binding-modal semantics: no corner ✕ on
-           binding takeover-modals; the explicit "back to main
-           concern" affordance lives in the chrome instead. The
-           chevron sits at the START of the header so the user reads
-           it as "leave this flow" before they read the grand title /
-           wizard step. The wizard's per-step Back button at the
-           bottom is unchanged — it navigates between steps inside
-           the wizard, distinct from the header chevron which exits
-           the wizard entirely. -->
+  <Modal binding @close="emit('close')">
       <div class="view-modal-header">
         <TakeoverBack
           :label="$t('common.backToDashboard')"
@@ -799,7 +782,7 @@ defineExpose({ open })
           </button>
         </div>
       </div>
-  </div>
+  </Modal>
 </template>
 
 <style scoped>
