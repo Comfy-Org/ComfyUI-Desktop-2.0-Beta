@@ -71,9 +71,21 @@ export interface ComfyTitleBarBridge {
    *  `kind` is `'available'` after `update-available`, `'ready'` after
    *  `update-downloaded`, and `null` when nothing is pending. Drives
    *  the title-bar app-update pill that sits to the right of the
-   *  hamburger menu. */
+   *  hamburger menu.
+   *
+   *  Track B item 2 — `autoUpdate` mirrors the `autoUpdate` setting
+   *  at the moment the state was committed. With auto-updates ON the
+   *  `'available'` pill is suppressed entirely (main triggers the
+   *  download itself); the `'ready'` pill then reads "Update will
+   *  apply on restart". With auto-updates OFF the `'available'` pill
+   *  reads "Update v{version} available" and the `'ready'` pill keeps
+   *  the existing "Restart to update" copy. */
   onAppUpdateStateChanged(
-    cb: (state: { kind: 'available' | 'ready' | null; version: string | null }) => void,
+    cb: (state: {
+      kind: 'available' | 'ready' | null
+      version: string | null
+      autoUpdate: boolean
+    }) => void,
   ): () => void
   /** Subscribe to install-update state pushes (Phase 3 §18 status
    *  pills). `available` is `true` when the install's
@@ -191,10 +203,13 @@ const bridge: ComfyTitleBarBridge = {
   },
   onAppUpdateStateChanged: (cb) => {
     const handler = (_event: IpcRendererEvent, state: unknown): void => {
-      const data = (state || {}) as { kind?: unknown; version?: unknown }
+      const data = (state || {}) as { kind?: unknown; version?: unknown; autoUpdate?: unknown }
       const kind = data.kind === 'available' || data.kind === 'ready' ? data.kind : null
       const version = typeof data.version === 'string' ? data.version : null
-      cb({ kind, version })
+      // Default-on if main forgets to send it — matches the underlying
+      // `settings.get('autoUpdate') !== false` semantics.
+      const autoUpdate = data.autoUpdate !== false
+      cb({ kind, version, autoUpdate })
     }
     ipcRenderer.on('comfy-titlebar:app-update-state-changed', handler)
     return () => ipcRenderer.removeListener('comfy-titlebar:app-update-state-changed', handler)

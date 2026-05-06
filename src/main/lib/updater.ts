@@ -21,14 +21,33 @@ interface UpdateInfo {
  * clear the kind — the banner shows the error transiently, but the
  * pill keeps reflecting the last-known state so the user can still
  * act on a previously-discovered update once the error is dismissed.
+ *
+ * Track B item 2 — `autoUpdate` mirrors the `autoUpdate` setting at
+ * the moment the state was committed. Drives pill copy: with
+ * auto-updates ON the `'available'` state is suppressed (main
+ * triggers the download itself) so the user only ever sees the
+ * `'ready'` pill, which reads "Update will apply on restart".
+ * With auto-updates OFF the `'available'` pill reads
+ * "Update v{version} available" and clicking it surfaces the manual
+ * Download action; the subsequent `'ready'` pill keeps the existing
+ * "Restart to update" copy since the user opted in.
  */
 export interface AppUpdateState {
   kind: 'available' | 'ready' | null
   version: string | null
+  autoUpdate: boolean
 }
 
 let _updateInfo: UpdateInfo | null = null
-let _appUpdateState: AppUpdateState = { kind: null, version: null }
+let _appUpdateState: AppUpdateState = { kind: null, version: null, autoUpdate: true }
+/** Track B item 2 — guard against re-entering the update-available
+ *  → runCheck → update-available cycle. todesktop usually dedupes
+ *  per-version internally, but the intent here is explicit: we only
+ *  programmatically kick off the download once per detected version
+ *  even if the periodic auto-check refires the event. Reset on
+ *  `update-downloaded` and on `update-error` so a subsequent check
+ *  for a NEW version can trigger again. */
+let _autoDownloadTriggeredFor: string | null = null
 const _stateChangeCallbacks = new Set<(state: AppUpdateState) => void>()
 let _listenersBound = false
 
@@ -43,6 +62,14 @@ function _setUpdateState(next: AppUpdateState): void {
 
 const NO_UPDATE_AVAILABLE_MESSAGE = 'No update available. Try checking for updates first.'
 const UPDATER_UNAVAILABLE_MESSAGE = 'ToDesktop auto-updater is unavailable.'
+
+/** Track B item 2 — single source of truth for the autoUpdate flag.
+ *  Default-on: any non-`false` value (including missing) is treated as
+ *  enabled, matching the gate used by the periodic `runIfEnabled` and
+ *  the `auto_update` telemetry property. */
+function isAutoUpdateEnabled(): boolean {
+  return settings.get('autoUpdate') !== false
+}
 
 function isSystemPackageInstall(): boolean {
   if (process.platform !== 'linux' || !app.isPackaged) return false
@@ -107,7 +134,25 @@ function bindUpdaterEvents(): void {
   updater.on('update-available', (info: unknown) => {
     const version = versionFromPayload(info)
     if (!version) return
-    _setUpdateState({ kind: 'available', version })
+    const autoUpdate = isAutoUpdateEnabled()
+    if (autoUpdate) {
+      // Track B item 2 — auto-updates ON suppresses the 'available'
+      // pill entirely. Main programmatically kicks off the download
+      // (via the same runCheck path the user's manual "Download"
+      // button uses) and only re-broadcasts when the kind flips to
+      // 'ready'. The renderer banner still gets the raw event so the
+      // existing notify-on-available channel keeps working for any
+      // surface that wants to react during the silent download
+      // window — the title-bar pill is the only consumer that
+      // intentionally sits this state out.
+      broadcast('update-available', { version })
+      if (_autoDownloadTriggeredFor !== version) {
+        _autoDownloadTriggeredFor = version
+        void runCheck('auto-download').catch(() => {})
+      }
+      return
+    }
+    _setUpdateState({ kind: 'available', version, autoUpdate: false })
     broadcast('update-available', { version })
   })
 
@@ -127,12 +172,14 @@ function bindUpdaterEvents(): void {
     const version = versionFromPayload(event)
     if (!version) return
     _updateInfo = { version }
-    _setUpdateState({ kind: 'ready', version })
+    _autoDownloadTriggeredFor = null
+    _setUpdateState({ kind: 'ready', version, autoUpdate: isAutoUpdateEnabled() })
     broadcast('update-downloaded', _updateInfo)
   })
 
   updater.on('error', (...args: unknown[]) => {
     clearQuitReason()
+    _autoDownloadTriggeredFor = null
     broadcast('update-error', { message: updaterErrorMessage(args) })
   })
 }
@@ -243,7 +290,7 @@ export function register(): void {
 
   // Check on startup and periodically (respects autoUpdate setting at each check)
   const runIfEnabled = (): void => {
-    if (settings.get('autoUpdate') !== false) runCheck('auto-check').catch(() => {})
+    if (isAutoUpdateEnabled()) runCheck('auto-check').catch(() => {})
   }
   setTimeout(runIfEnabled, 2000)
   setInterval(runIfEnabled, 10 * 60 * 1000)

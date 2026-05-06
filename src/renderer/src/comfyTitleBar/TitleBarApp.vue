@@ -53,9 +53,21 @@ interface Bridge {
    *  `'available'` after `update-available`, `'ready'` after
    *  `update-downloaded`, and `null` when nothing is pending.
    *  Drives the title-bar app-update pill that sits to the right of
-   *  the hamburger menu. */
+   *  the hamburger menu.
+   *
+   *  Track B item 2 — `autoUpdate` mirrors the `autoUpdate` setting
+   *  at the moment the state was committed. With auto-updates ON the
+   *  `'available'` state never fires (main triggers the download
+   *  itself); the `'ready'` state then reads "Update will apply on
+   *  restart". With auto-updates OFF the `'available'` pill reads
+   *  "Update v{version} available" and the `'ready'` pill keeps the
+   *  existing "Restart to update" copy. */
   onAppUpdateStateChanged: (
-    cb: (state: { kind: 'available' | 'ready' | null; version: string | null }) => void,
+    cb: (state: {
+      kind: 'available' | 'ready' | null
+      version: string | null
+      autoUpdate: boolean
+    }) => void,
   ) => () => void
   /** Phase 3 §18 — install-update flag pushes from main. `available`
    *  is `true` when the install's `statusTag.style === 'update'`;
@@ -164,18 +176,27 @@ const themeText = ref<string | null>(null)
 const appUpdateState = ref<{
   kind: 'available' | 'ready' | null
   version: string | null
-}>({ kind: null, version: null })
+  autoUpdate: boolean
+}>({ kind: null, version: null, autoUpdate: true })
 const installUpdateState = ref<{ available: boolean; version: string | null }>({
   available: false,
   version: null,
 })
 
 const appUpdatePillLabel = computed<string | null>(() => {
-  if (!appUpdateState.value.kind) return null
-  if (appUpdateState.value.kind === 'ready') return 'Restart to update'
-  // 'available'
-  const v = appUpdateState.value.version
-  return v ? `Update ${v}` : 'Update available'
+  const s = appUpdateState.value
+  if (!s.kind) return null
+  if (s.kind === 'ready') {
+    // Track B item 2 — auto-updates ON downloads silently in the
+    // background, so the user's first sign of the update is a "ready
+    // to apply on restart" pill. Auto-updates OFF means the user
+    // explicitly asked to download, so the existing "Restart to
+    // update" copy still reads correctly.
+    return s.autoUpdate ? 'Update will apply on restart' : 'Restart to update'
+  }
+  // 'available' — only fires with auto-updates OFF (main suppresses
+  // it when ON and triggers the download itself).
+  return s.version ? `Update ${s.version} available` : 'Update available'
 })
 
 /** Track B item 1 — install-update pill copy. Mirrors the app-update
