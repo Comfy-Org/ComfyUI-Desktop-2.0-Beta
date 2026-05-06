@@ -376,7 +376,10 @@
     "cancelConfirm": "Cancel operation",
     "quitSetupTitle": "Quit setup?",
     "quitSetupMessage": "If you close now, your selection won't be saved and setup will start again the next time you launch ComfyUI Desktop.",
-    "quitSetupConfirm": "Quit setup"
+    "quitSetupConfirm": "Quit setup",
+    "discardSetupTitle": "Discard install setup?",
+    "discardSetupMessage": "If you close now, your wizard selections won't be saved. No install has been created yet, so nothing will be rolled back.",
+    "discardSetupConfirm": "Discard setup"
   },
 
   "firstUse": {

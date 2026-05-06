@@ -82,6 +82,17 @@ export interface ProgressOverlay {
   installationId: string
   /** Friendly label for the cancel-prompt copy ("Updating ComfyUI"). */
   operationName?: string
+  /**
+   * Modal-unification (Track M-6) — fired AFTER the user confirms the
+   * cancel-prompt during a window-close consult (or any other slot-
+   * clearing transition that triggers the prompt). Callers wire this
+   * to the underlying cancel/rollback path in main (typically
+   * `progressStore.cancelOperation(installationId)`) so the in-flight
+   * operation is told to stop rather than being orphaned by window
+   * destruction. Optional — Tier 2 progress overlays without an
+   * in-flight cancellable op leave it unset.
+   */
+  onCancel?: () => void
 }
 
 export type FlowComponent = 'new-install' | 'track' | 'load-snapshot' | 'quick-install'
@@ -104,16 +115,38 @@ export interface TakeoverOverlay {
    */
   installationId?: string
   /**
-   * Modal-unification (Track M-2.4) — opt the takeover into a non-
-   * default cancel-prompt copy when main consults the renderer via
-   * `comfy-window:request-close`. The first-use takeover sets
-   * `'quit-setup'` so the prompt reads "Quit setup?" / "If you close
-   * now, your selection won't be saved …" instead of the generic
-   * "Cancel current operation?" copy that the install-flow takeovers
-   * (M-3) will continue to use. Undefined keeps the existing
-   * `overlay.cancelCurrentTitle` / `overlay.cancelMessage` pair.
+   * Modal-unification (Track M-2.4 / M-6) — opt the takeover into a
+   * non-default cancel-prompt copy when main consults the renderer
+   * via `comfy-window:request-close`. Variants:
+   *   - `'quit-setup'` (M-2.4) — first-use bootstrap takeover
+   *     (consent / pick / mirrors / localBranch). Reads "Quit setup?"
+   *     / "your selection won't be saved …".
+   *   - `'discard-setup'` (M-6) — install-flow wizards
+   *     (NewInstall / Track / LoadSnapshot / QuickInstall) on the
+   *     dashboard. Reads "Discard install setup?" / "Your wizard
+   *     selections won't be saved …". Distinct from `'quit-setup'`
+   *     because the user is mid-wizard with no first-use bootstrap
+   *     gating, and from the generic operation-cancel copy because
+   *     no destructive op has started yet.
+   * Undefined keeps the generic
+   * `overlay.cancelCurrentTitle` / `overlay.cancelMessage` pair —
+   * appropriate for in-flight Tier 3 ops like update-while-running
+   * (`component: 'update'`) where there IS a destructive op the
+   * user might be cancelling.
    */
-  cancelCopyKey?: 'quit-setup'
+  cancelCopyKey?: 'quit-setup' | 'discard-setup'
+  /**
+   * Modal-unification (Track M-6) — fires AFTER the user confirms the
+   * cancel-prompt for this takeover. Same shape as `ProgressOverlay.
+   * onCancel` (see there). Set on `component: 'update'` (mirrors the
+   * Tier 2 progress branch — both wrap the same in-flight
+   * `progressStore` op that has to be cancel-called in main to
+   * actually roll back, otherwise the window destruction orphans the
+   * underlying process). Wizard takeovers (install flows / first-use)
+   * leave it unset — the cancel-prompt for those just dismisses the
+   * wizard with no main-side rollback to fire.
+   */
+  onCancel?: () => void
 }
 
 export type Overlay =
@@ -170,16 +203,28 @@ export function useOverlay(): UseOverlayApi {
 
   async function confirmCancelCurrent(cur: Overlay): Promise<boolean> {
     const t = i18n.global.t
-    // Modal-unification (Track M-2.4) — takeovers can opt into a
-    // dedicated copy bundle. Currently only the first-use takeover
-    // uses this (`'quit-setup'`); the install-flow takeovers
-    // migrated in M-3 will keep the generic "Cancel current
-    // operation?" copy.
+    // Modal-unification (Track M-2.4 / M-6) — takeovers can opt into a
+    // dedicated copy bundle:
+    //   - `'quit-setup'` (M-2.4) — first-use bootstrap takeover.
+    //   - `'discard-setup'` (M-6) — install-flow wizards (NewInstall
+    //     / Track / LoadSnapshot / QuickInstall) on the dashboard.
+    //     The user is mid-wizard with no destructive op in flight, so
+    //     the prompt copy is "Discard install setup?" rather than
+    //     either the bootstrap-flavoured "Quit setup?" or the
+    //     in-flight-op "Cancel current operation?".
     if (cur.kind === 'takeover' && cur.cancelCopyKey === 'quit-setup') {
       return await modal.confirm({
         title: t('overlay.quitSetupTitle'),
         message: t('overlay.quitSetupMessage'),
         confirmLabel: t('overlay.quitSetupConfirm'),
+        confirmStyle: 'danger',
+      })
+    }
+    if (cur.kind === 'takeover' && cur.cancelCopyKey === 'discard-setup') {
+      return await modal.confirm({
+        title: t('overlay.discardSetupTitle'),
+        message: t('overlay.discardSetupMessage'),
+        confirmLabel: t('overlay.discardSetupConfirm'),
         confirmStyle: 'danger',
       })
     }
@@ -204,9 +249,16 @@ export function useOverlay(): UseOverlayApi {
     // Replacing / closing an in-flight Tier 2 always prompts. Pre-empting
     // it with Tier 3 follows the same rule (the design treats Tier 3 as
     // "ends in the app" so we still give the user one chance to abort).
+    // Modal-unification (Track M-6) — when the prompt is confirmed we
+    // fire the overlay's `onCancel` BEFORE swapping the slot so the
+    // underlying main-side op is told to stop and roll back. Without
+    // this the slot-clear (or pre-empt) would orphan the in-flight
+    // process, which is exactly the rollback hole the cancel matrix
+    // calls out for Tier 2 progress + Tier 3 update-while-running.
     if (cur?.kind === 'progress' && nextTier >= 2) {
       const ok = await confirmCancelCurrent(cur)
       if (!ok) return false
+      cur.onCancel?.()
     }
     // Closing (`next === null`) an in-flight progress op also prompts —
     // window-close / dashboard-return paths drive that branch. Step 5
@@ -217,6 +269,7 @@ export function useOverlay(): UseOverlayApi {
     if (next === null && (cur?.kind === 'progress' || cur?.kind === 'takeover')) {
       const ok = await confirmCancelCurrent(cur)
       if (!ok) return false
+      cur.onCancel?.()
     }
 
     // All other transitions are silent: Tier 1 ↔ Tier 1 (chooser's

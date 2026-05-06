@@ -188,6 +188,19 @@ Per-flow choices (captured during the M-5 ship):
 - Test: kill window during install / migration / update — verify
   rollback matches `main`-branch semantics.
 
+Per-flow wiring (captured during the M-6 ship):
+
+| Overlay | Cancel-prompt copy | `onCancel` (rollback hook) |
+|---------|--------------------|----------------------------|
+| Tier 2 progress (install / migrate / delete / restore / etc.) | Generic `Cancel "<operationName>"?` (named variant). | `progressStore.cancelOperation(installationId)` — wired in `handleShowProgress`. |
+| Tier 3 takeover, `component: 'update'` (update-while-running) | Generic `Cancel "<operationName>"?` (named variant). | `progressStore.cancelOperation(installationId)` — same wiring as Tier 2 progress, both branches wrap the same store op. |
+| Tier 3 takeover, install-flow wizards (`new-install` / `track` / `load-snapshot` / `quick-install`) | Dedicated `'discard-setup'` copy → "Discard install setup?" / "Your wizard selections won't be saved …" — distinct from `'quit-setup'` (bootstrap) and from the generic in-flight-op copy. | None. The wizard has no destructive op in flight; the prompt just dismisses the wizard. |
+| Tier 3 takeover, `component: 'first-use'` | Existing `'quit-setup'` copy from M-2.4. | None. Window-close closes the app without a persistent flag (per the cancel matrix); rollback isn't applicable. |
+
+The `onCancel` hook fires from inside `useOverlay.openOverlay` immediately AFTER the user confirms the cancel-prompt and immediately BEFORE the slot is cleared / pre-empted. That ordering ensures the in-flight op is told to stop before window destruction would otherwise orphan it. The hook covers both the close-via-consult path (`closeOverlay()` → `null` swap) AND the pre-empt path (Tier 2 progress being replaced by another Tier 2 / 3 op via the same prompt).
+
+`onCancel` is unset for wizard takeovers (no main-side rollback to fire) and for first-use (the app exits, taking the renderer with it). Tier 1 popovers (manage / app-update / downloads) never trigger the prompt and so never read `onCancel`.
+
 ### Track M-7 — `useOverlay` Tier 3 retirement (if no consumer)
 - After M-2/M-3, Tier 3 (takeover) may have no remaining caller.
 - Collapse the tier system to Tier 1 (modal) + Tier 2 (in-progress).

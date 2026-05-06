@@ -285,7 +285,10 @@
     "cancelConfirm": "取消操作",
     "quitSetupTitle": "退出设置？",
     "quitSetupMessage": "如果您现在关闭，您的选择将不会被保存，下次启动 ComfyUI Desktop 时将重新进行设置。",
-    "quitSetupConfirm": "退出设置"
+    "quitSetupConfirm": "退出设置",
+    "discardSetupTitle": "放弃安装设置？",
+    "discardSetupMessage": "如果您现在关闭，向导中的选择将不会被保存。尚未创建任何安装，因此无需回滚。",
+    "discardSetupConfirm": "放弃设置"
   },
 
   "firstUse": {

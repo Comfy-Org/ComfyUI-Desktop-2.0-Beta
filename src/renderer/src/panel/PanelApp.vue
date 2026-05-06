@@ -235,6 +235,16 @@ async function handleShowProgress(opts: ShowProgressOpts): Promise<void> {
     pendingFirstUseAutoLaunchId.value = opts.installationId
   }
   const isRunning = sessionStore.isRunning(opts.installationId)
+  // Modal-unification (Track M-6) — wire `onCancel` so a window-close
+  // consult that the user confirms (or any other slot-clearing
+  // transition that fires the cancel-prompt) actually cancels the
+  // in-flight op in main rather than orphaning it via window
+  // destruction. Mirrors the manual cancel button inside ProgressModal
+  // (`handleCancel` → `progressStore.cancelOperation`); both branches
+  // wrap the same store op.
+  const onCancel = (): void => {
+    progressStore.cancelOperation(opts.installationId)
+  }
   const ok = await openOverlay(
     isRunning
       ? {
@@ -242,11 +252,13 @@ async function handleShowProgress(opts: ShowProgressOpts): Promise<void> {
           component: 'update',
           installationId: opts.installationId,
           operationName,
+          onCancel,
         }
       : {
           kind: 'progress',
           installationId: opts.installationId,
           operationName,
+          onCancel,
         },
   )
   if (!ok) return
@@ -286,7 +298,16 @@ function handleProgressClose(): void {
  * is being pre-empted — see `useOverlay`'s tier-collision rules).
  */
 async function openFlowTakeover(component: FlowComponent): Promise<void> {
-  const ok = await openOverlay({ kind: 'takeover', component })
+  // Modal-unification (Track M-6) — opt the install-flow wizards into
+  // the dedicated "Discard install setup?" cancel-prompt copy so a
+  // window-close consult during the wizard reads correctly. The
+  // wizards have no destructive op in flight (the install hasn't been
+  // kicked off yet — that happens after the wizard's final step,
+  // routed through `handleShowProgress` and the Tier 2 ProgressModal),
+  // so the generic "Cancel current operation?" copy is misleading.
+  // No `onCancel` is set — there is no main-side rollback to fire,
+  // just a wizard to dismiss.
+  const ok = await openOverlay({ kind: 'takeover', component, cancelCopyKey: 'discard-setup' })
   if (!ok) return
   // Wait for the v-if branch in the takeover slot to mount the
   // component before reaching for its ref.
