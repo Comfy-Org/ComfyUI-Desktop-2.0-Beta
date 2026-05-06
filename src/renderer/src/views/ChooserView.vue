@@ -64,14 +64,20 @@ onMounted(() => {
 })
 
 // --- Filter chips ---
-type FilterKey = 'all' | 'local' | 'desktop' | 'cloud' | 'remote'
+//
+// "Local" includes both standalone local installs and Legacy Desktop
+// installs (`sourceCategory === 'desktop'`) — Legacy Desktop is the
+// pre-2.0 install kind, conceptually the same family as Local from the
+// dashboard user's POV. The dedicated Desktop chip was retired in the
+// post-Phase 3 dashboard cleanup so the filter row stays compact and
+// Legacy Desktop installs surface alongside their Standalone siblings.
+type FilterKey = 'all' | 'local' | 'cloud' | 'remote'
 const activeFilter = ref<FilterKey>('all')
 
 interface FilterChip { key: FilterKey; labelKey: string }
 const filterChips: FilterChip[] = [
   { key: 'all', labelKey: 'chooser.filterAll' },
   { key: 'local', labelKey: 'chooser.filterLocal' },
-  { key: 'desktop', labelKey: 'chooser.filterDesktop' },
   { key: 'cloud', labelKey: 'chooser.filterCloud' },
   { key: 'remote', labelKey: 'chooser.filterRemote' },
 ]
@@ -93,13 +99,15 @@ function sortByRecency(a: Installation, b: Installation): number {
   return tb - ta
 }
 
-/** Apply the active filter to the non-cloud list. */
+/** Apply the active filter to the non-cloud list. The Local chip
+ *  includes Legacy Desktop installs (`sourceCategory === 'desktop'`)
+ *  since the dedicated Desktop chip was retired — see the FilterKey
+ *  comment above. */
 const visibleInstalls = computed<Installation[]>(() => {
   const sorted = [...nonCloudInstalls.value].sort(sortByRecency)
   switch (activeFilter.value) {
     case 'all': return sorted
-    case 'local': return sorted.filter((i) => i.sourceCategory === 'local')
-    case 'desktop': return sorted.filter((i) => i.sourceCategory === 'desktop')
+    case 'local': return sorted.filter((i) => i.sourceCategory === 'local' || i.sourceCategory === 'desktop')
     case 'remote': return sorted.filter((i) => i.sourceCategory === 'remote')
     case 'cloud': return [] // cloud installs only appear in the Cloud tile
     default: return sorted

@@ -27,7 +27,6 @@ const messages = {
       newInstallDesc: 'Set up a fresh ComfyUI environment.',
       filterAll: 'All',
       filterLocal: 'Local',
-      filterDesktop: 'Desktop',
       filterCloud: 'Cloud',
       filterRemote: 'Remote',
       moreActions: 'More actions',
@@ -211,19 +210,56 @@ describe('ChooserView', () => {
     const wrapper = mountChooser()
     await flushPromises()
 
-    // Activate the Desktop filter — only the desktop install should remain
+    // Activate the Remote filter — only the remote install should remain
     // among the install tiles. New Install stays visible; Cloud is hidden
     // when filtering to a non-cloud category.
     const chips = wrapper.findAll('.chooser-filter-chip')
-    const desktopChip = chips.find((c) => c.text() === 'Desktop')
-    expect(desktopChip).toBeTruthy()
-    await desktopChip!.trigger('click')
+    const remoteChip = chips.find((c) => c.text() === 'Remote')
+    expect(remoteChip).toBeTruthy()
+    await remoteChip!.trigger('click')
 
     const tiles = wrapper.findAll('.chooser-tile')
     const installTiles = tiles.filter(
       (t) => !t.classes().includes('chooser-tile-new') && !t.classes().includes('chooser-tile-cloud')
     )
     expect(installTiles.length).toBe(1)
-    expect(installTiles[0]!.text()).toContain('DesktopThing')
+    expect(installTiles[0]!.text()).toContain('RemoteThing')
+  })
+
+  it('groups Legacy Desktop installs under the Local filter', async () => {
+    // The dedicated Desktop filter chip was retired in the post-Phase 3
+    // dashboard cleanup; Legacy Desktop installs (sourceCategory ===
+    // 'desktop') continue to surface alongside Standalone Local installs
+    // under the Local chip rather than vanishing from the filtered view.
+    installMockApi([
+      makeInstall({ id: 'l', name: 'LocalThing', sourceCategory: 'local' }),
+      makeInstall({ id: 'd', name: 'LegacyDesktopThing', sourceCategory: 'desktop' }),
+      makeInstall({ id: 'r', name: 'RemoteThing', sourceCategory: 'remote' }),
+    ])
+    const wrapper = mountChooser()
+    await flushPromises()
+
+    const chips = wrapper.findAll('.chooser-filter-chip')
+    const localChip = chips.find((c) => c.text() === 'Local')
+    expect(localChip).toBeTruthy()
+    await localChip!.trigger('click')
+
+    const tiles = wrapper.findAll('.chooser-tile')
+    const installTiles = tiles.filter(
+      (t) => !t.classes().includes('chooser-tile-new') && !t.classes().includes('chooser-tile-cloud')
+    )
+    const labels = installTiles.map((t) => t.text())
+    expect(installTiles.length).toBe(2)
+    expect(labels.some((l) => l.includes('LocalThing'))).toBe(true)
+    expect(labels.some((l) => l.includes('LegacyDesktopThing'))).toBe(true)
+    expect(labels.some((l) => l.includes('RemoteThing'))).toBe(false)
+  })
+
+  it('does not render a Desktop filter chip', async () => {
+    installMockApi([])
+    const wrapper = mountChooser()
+    await flushPromises()
+    const chipLabels = wrapper.findAll('.chooser-filter-chip').map((c) => c.text())
+    expect(chipLabels).not.toContain('Desktop')
   })
 })

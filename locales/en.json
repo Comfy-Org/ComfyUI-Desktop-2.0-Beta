@@ -24,7 +24,6 @@
     "newInstallDesc": "Set up a fresh ComfyUI environment.",
     "filterAll": "All",
     "filterLocal": "Local",
-    "filterDesktop": "Desktop",
     "filterCloud": "Cloud",
     "filterRemote": "Remote",
     "updatePill": "Update",
