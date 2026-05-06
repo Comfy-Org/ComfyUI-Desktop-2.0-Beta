@@ -695,14 +695,15 @@ onUnmounted(() => {
 
 <style scoped>
 .title-bar {
+  position: relative;
   display: flex;
   align-items: center;
-  /* Title bar uses three columns: left (File), center (install pill,
-     centred via grid spacer), right (drag spacer / native controls). */
+  /* Symmetric base padding. OS-chrome reservations live on the side
+     children so the center cluster anchors to true window center. */
   height: 100vh;
   width: 100vw;
   padding-left: 12px;
-  padding-right: 140px; /* Reserve space for native window controls (Win/Linux) */
+  padding-right: 12px;
   box-sizing: border-box;
   background: var(--surface);
   color: var(--text-muted);
@@ -711,14 +712,6 @@ onUnmounted(() => {
   user-select: none;
   -webkit-app-region: drag;
   gap: 8px;
-}
-.title-bar.is-mac {
-  padding-left: 78px;
-  padding-right: 12px;
-}
-/* Traffic lights vanish in macOS fullscreen — reclaim the 78px padding. */
-.title-bar.is-mac.is-fullscreen {
-  padding-left: 12px;
 }
 
 /* The container DIVs stay drag-region so empty space around the buttons
@@ -732,23 +725,46 @@ onUnmounted(() => {
   align-items: center;
   gap: 2px;
   flex: 0 0 auto;
+  /* Sits above the absolutely-positioned center cluster so the
+     hamburger / update pills / downloads tray remain clickable if the
+     window narrows enough that the centered pill would otherwise
+     overlap them. */
+  z-index: 1;
+}
+/* macOS: shift past the traffic lights (78px reservation − 12px base padding). */
+.title-bar.is-mac .title-left {
+  margin-left: 66px;
+}
+/* Traffic lights vanish in macOS fullscreen — reclaim the inset. */
+.title-bar.is-mac.is-fullscreen .title-left {
+  margin-left: 0;
 }
 
 .title-center {
-  position: relative;
+  /* Anchored to true window center; shrink-wraps around its content. */
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
   display: flex;
   align-items: center;
   justify-content: center;
-  /* Back / Forward arrows + install pill cluster, centred in the bar.
-     The cluster shrink-wraps so the empty space on either side stays
-     draggable. */
   gap: 4px;
-  flex: 1 1 auto;
   min-width: 0;
+  max-width: calc(100% - 24px);
 }
 
 .drag-spacer {
-  flex: 0 0 0;
+  /* Eats the remaining flex space so the bar's drag region fills the
+     row. On Win/Linux it also reserves room for the native window
+     controls (close/min/max) on the right; on macOS the traffic
+     lights live on the left so no right reservation is needed. */
+  flex: 1 1 auto;
+  min-width: 128px; /* 140px native-controls reservation − 12px base padding */
+  height: 100%;
+}
+.title-bar.is-mac .drag-spacer {
+  min-width: 0;
 }
 
 /* --- App / hamburger menu button --- */
