@@ -54,7 +54,7 @@ import type { Installation } from '../types/ipc'
  * `Cancel "Updating ComfyUI"?`).
  */
 
-export type OverlayKind = 'manage' | 'app-update' | 'downloads' | 'progress' | 'takeover'
+export type OverlayKind = 'manage' | 'app-update' | 'downloads' | 'page' | 'progress' | 'takeover'
 
 export interface ManageOverlay {
   kind: 'manage'
@@ -84,6 +84,13 @@ export interface AppUpdateOverlay {
  */
 export interface DownloadsOverlay {
   kind: 'downloads'
+}
+
+/** Tier 1 page-style modal for waffle / install dropdown items
+ *  (Directories, App Settings). Dismissible like Manage. */
+export interface PageOverlay {
+  kind: 'page'
+  page: 'directories' | 'launcher-settings'
 }
 
 export interface ProgressOverlay {
@@ -165,6 +172,7 @@ export type Overlay =
   | ManageOverlay
   | AppUpdateOverlay
   | DownloadsOverlay
+  | PageOverlay
   | ProgressOverlay
   | TakeoverOverlay
 
@@ -172,6 +180,7 @@ const TIER: Record<OverlayKind, 1 | 2 | 3> = {
   manage: 1,
   'app-update': 1,
   downloads: 1,
+  page: 1,
   progress: 2,
   takeover: 3,
 }

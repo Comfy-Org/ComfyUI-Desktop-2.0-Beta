@@ -40,6 +40,15 @@ vi.mock('../views/ProgressModal.vue', () => ({
 vi.mock('../components/ModalDialog.vue', () => ({
   default: { name: 'ModalDialog', template: '<div />' },
 }))
+// Modal teleports its slot to <body>; replace with a transparent
+// pass-through so wrapper.find() can still see the slotted children.
+vi.mock('../components/Modal.vue', () => ({
+  default: {
+    name: 'Modal',
+    props: ['binding', 'opacity', 'width', 'contentClass', 'inline'],
+    template: '<div data-testid="modal-stub"><slot /></div>',
+  },
+}))
 vi.mock('./ComfyLifecycleView.vue', () => ({
   default: {
     name: 'ComfyLifecycleView',
@@ -137,6 +146,7 @@ import { createI18n } from 'vue-i18n'
 import { createPinia, setActivePinia } from 'pinia'
 import PanelApp from './PanelApp.vue'
 import { __resetLauncherPrefsForTest } from '../composables/useLauncherPrefs'
+import { useOverlay } from '../composables/useOverlay'
 
 const messages = {
   en: {
@@ -280,38 +290,44 @@ describe('PanelApp', () => {
     // promise — reset both so each test sees a fresh load against the
     // current mock settings (in particular `firstUseCompleted`).
     __resetLauncherPrefsForTest()
+    // useOverlay's slot is also a module-level singleton — clear it
+    // so test order doesn't leak overlays between cases.
+    useOverlay().current.value = null
     mockState = installMockApi({ installations: [SAMPLE_INSTALL] })
     // Default URL — individual tests override.
     window.history.replaceState({}, '', '/?installationId=test-id')
   })
 
-  it('renders the launcher-settings sub-view by default', async () => {
+  it('renders the comfy-lifecycle body by default for install-backed hosts', async () => {
     const wrapper = mountPanel()
     await flushPromises()
-    expect(wrapper.find('[data-testid="settings-view"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="comfy-lifecycle"]').exists()).toBe(true)
+    // Page modals (settings / directories) only mount when explicitly opened.
+    expect(wrapper.find('[data-testid="settings-view"]').exists()).toBe(false)
   })
 
-  it('switches sub-view in response to onPanelSwitch IPC events', async () => {
-    // Regression test for the mid-load race: a panel created with one initial
-    // panel must still update when main pushes a different panel after load.
+  it('opens install-settings as a manage overlay in response to onPanelSwitch', async () => {
     const wrapper = mountPanel()
     await flushPromises()
-    expect(wrapper.find('[data-testid="settings-view"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="detail-modal"]').exists()).toBe(false)
 
     expect(mockState.panelSwitchCallbacks.length).toBeGreaterThan(0)
     mockState.panelSwitchCallbacks.forEach((cb) => cb({ panel: 'install-settings' }))
     await flushPromises()
-    expect(wrapper.find('[data-testid="settings-view"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="detail-modal"]').exists()).toBe(true)
+    // Body underneath stays on the default lifecycle view.
+    expect(wrapper.find('[data-testid="comfy-lifecycle"]').exists()).toBe(true)
   })
 
   it('ignores unknown panel keys from onPanelSwitch', async () => {
     const wrapper = mountPanel()
     await flushPromises()
-    expect(wrapper.find('[data-testid="settings-view"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="comfy-lifecycle"]').exists()).toBe(true)
 
     mockState.panelSwitchCallbacks.forEach((cb) => cb({ panel: 'not-a-real-panel' }))
     await flushPromises()
-    expect(wrapper.find('[data-testid="settings-view"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="comfy-lifecycle"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="settings-view"]').exists()).toBe(false)
   })
 
   it('renders the install-settings DetailModal for the URL installationId', async () => {
@@ -339,12 +355,11 @@ describe('PanelApp', () => {
     expect(wrapper.find('[data-testid="detail-modal"]').exists()).toBe(true)
   })
 
-  it('shows a placeholder when the installationId does not match any install', async () => {
+  it('does not open install-settings as an overlay when the installationId does not match', async () => {
     window.history.replaceState({}, '', '/?installationId=missing-id&panel=install-settings')
     const wrapper = mountPanel()
     await flushPromises()
     expect(wrapper.find('[data-testid="detail-modal"]').exists()).toBe(false)
-    expect(wrapper.text()).toContain('missing-id')
   })
 
   it('renders the comfy-lifecycle view when initialised with that panel', async () => {
@@ -366,15 +381,16 @@ describe('PanelApp', () => {
     expect(wrapper.find('[data-testid="settings-view"]').exists()).toBe(false)
   })
 
-  it('switches to the directories view in response to a panel-switch IPC event', async () => {
+  it('opens the directories overlay in response to a panel-switch IPC event', async () => {
     const wrapper = mountPanel()
     await flushPromises()
-    expect(wrapper.find('[data-testid="settings-view"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="directories-view"]').exists()).toBe(false)
 
     mockState.panelSwitchCallbacks.forEach((cb) => cb({ panel: 'directories' }))
     await flushPromises()
-    expect(wrapper.find('[data-testid="settings-view"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="directories-view"]').exists()).toBe(true)
+    // Body underneath stays on the default lifecycle view.
+    expect(wrapper.find('[data-testid="comfy-lifecycle"]').exists()).toBe(true)
   })
 
   it('opens the new-install takeover above the chooser body when show-new-install fires', async () => {
@@ -531,17 +547,15 @@ describe('PanelApp', () => {
   // `setSetting` hasn't been called with `firstUseCompleted` until the
   // user makes the explicit pick.
 
-  it('switches to the comfy-lifecycle view in response to a panel-switch IPC event', async () => {
-    // Main flips us into 'comfy-lifecycle' when the install transitions out
-    // of running (stop / crash) while the user is on the Comfy tab.
+  it('keeps the comfy-lifecycle body when a panel-switch IPC event re-confirms it', async () => {
+    // The default body for an install-backed host is already comfy-lifecycle;
+    // a redundant panel-switch must leave it intact.
     const wrapper = mountPanel()
     await flushPromises()
-    expect(wrapper.find('[data-testid="settings-view"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="comfy-lifecycle"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="comfy-lifecycle"]').exists()).toBe(true)
 
     mockState.panelSwitchCallbacks.forEach((cb) => cb({ panel: 'comfy-lifecycle' }))
     await flushPromises()
-    expect(wrapper.find('[data-testid="settings-view"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="comfy-lifecycle"]').exists()).toBe(true)
   })
 

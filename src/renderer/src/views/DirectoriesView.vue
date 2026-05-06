@@ -9,10 +9,10 @@ import type { ModelsSection, SettingsSection } from '../types/ipc'
 
 const { t } = useI18n()
 
+const emit = defineEmits<{ close: [] }>()
+
 function handleClose(): void {
-  // Reset the host window's panel-history stack and return to the
-  // comfy/chooser root. Wired into main via the panel preload.
-  window.api.closeCurrentPanel()
+  emit('close')
 }
 
 /**

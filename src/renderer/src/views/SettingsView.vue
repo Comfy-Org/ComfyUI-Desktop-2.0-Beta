@@ -9,10 +9,10 @@ import type { SettingsSection, SettingsAction } from '../types/ipc'
 const { t } = useI18n()
 const modal = useModal()
 
+const emit = defineEmits<{ close: [] }>()
+
 function handleClose(): void {
-  // Reset the host window's panel-history stack and return to the
-  // comfy/chooser root. Wired into main via the panel preload.
-  window.api.closeCurrentPanel()
+  emit('close')
 }
 
 function openUrl(url: string): void {
