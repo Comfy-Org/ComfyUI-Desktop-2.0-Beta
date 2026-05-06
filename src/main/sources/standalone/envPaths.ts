@@ -56,13 +56,13 @@ export function getMasterPythonPath(installPath: string): string {
 }
 
 const COMFY_ENVIRONMENT_FILE = '.comfy_environment'
-const COMFY_ENVIRONMENT_VALUE = 'local_desktop2_standalone'
+const COMFY_ENVIRONMENT_VALUE = 'local-desktop2-standalone'
 const COMFY_ENVIRONMENT_CONTENT = COMFY_ENVIRONMENT_VALUE + '\n'
 
 /**
  * Write the `.comfy_environment` marker file consumed by ComfyUI core
  * (see Comfy-Org/ComfyUI#13425) so partner-node API requests carry the
- * `X-Comfy-Env: local_desktop2_standalone` header. Idempotent: if the file already
+ * `X-Comfy-Env: local-desktop2-standalone` header. Idempotent: if the file already
  * has the expected content, this is a no-op. Skips silently when the
  * target directory does not exist (older installs not yet migrated).
  * Errors are swallowed with a warning — this marker is non-critical and
