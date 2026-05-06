@@ -987,6 +987,289 @@ function injectMacPasskeyWarning(childWindow: BrowserWindow): void {
   childWindow.webContents.on('did-navigate-in-page', inject)
 }
 
+/**
+ * Window-mode unification (Stage W-2) — single shared constructor for
+ * host windows (install-backed and install-less). Builds the
+ * BrowserWindow + titleBarView + comfyView, wires `layoutViews` +
+ * macOS fullscreen forwarding + bounds-save listeners + the close /
+ * closed handlers + the title-bar-ready handshake, and registers the
+ * entry into the `comfyWindows` map.
+ *
+ * Mode-specific wiring is layered on AFTER this returns by the two
+ * thin wrapper paths (`onLaunch` for install-backed; the body of
+ * `openChooserHostWindow` for install-less) — comfyContents listeners
+ * (theme observer, content script, fail-retry, render-process-gone),
+ * `attachSessionDownloadHandler`, the install-record `'updated'`
+ * handler, and the chooser-only eager `ensurePanelView('chooser')`
+ * all live in the wrappers.
+ *
+ * Pre-W-2 the two constructors duplicated the BrowserWindow + views
+ * skeleton, both close handlers, both closed handlers, both
+ * `layoutViews`, both title-bar-ready broadcasts, and the macOS
+ * fullscreen forwarding. Stage W-3 will move the comfyContents-bound
+ * listeners and the install-record handler behind paired
+ * `attachInstall(id)` / `detachInstall()` operations on the entry,
+ * which is the slice that actually lets a window transform between
+ * modes in place. W-2 is the structural prep — no behaviour change
+ * apart from the side-effect of W-1's bounds unification (chooser
+ * hosts now also restore `maximized` from the saved bounds, since
+ * the bounds-key collapse made restoring meaningful for them).
+ */
+interface CreateHostWindowOpts {
+  /** Install backing this window, or `null` for chooser hosts. */
+  installationId: string | null
+  /** Initial OS-level window title (full string, including app-version suffix). */
+  windowTitle: string
+  /** Bounds-persistence cache key. */
+  boundsKey: string
+  /** Initial entry theme — title-bar background + descrip text colour. */
+  initialTheme: { bg: string; text: string }
+  /**
+   * Per-platform `titleBarOverlay` constructor option. Pass `undefined`
+   * on darwin (we use `trafficLightPosition` instead).
+   */
+  titleBarOverlay: Electron.TitleBarOverlay | undefined
+  /**
+   * comfyView WebPreferences. Install-backed gets the comfyPreload +
+   * per-install browser partition; install-less gets minimal prefs (no
+   * preload, default partition — the dummy view never loads a URL).
+   */
+  comfyWebPreferences: Electron.WebPreferences
+  /** Background colour to pre-paint the title-bar view with (avoids first-paint flash). */
+  titleBarBackground: string
+  /** `installationId` query param for the title-bar HTML load (empty string for chooser hosts). */
+  titleBarInstallationIdParam: string
+  /**
+   * Mode-specific extras pushed during the title-bar-ready handshake.
+   * Install-backed sends title text + source-category icon + install-update
+   * pill state; install-less sends just the fallback title text.
+   */
+  onTitleBarReady?: (entry: ComfyWindowEntry, titleBarView: WebContentsView) => void
+  /**
+   * Mode-specific pre-teardown. Runs inside the close handler after the
+   * panel renderer cleared, before view destruction. Install-backed
+   * detaches its download manager wiring and stops the running session
+   * here; install-less is a no-op.
+   */
+  onBeforeTeardown?: (entry: ComfyWindowEntry) => void
+  /**
+   * Mode-specific cleanup at the `'closed'` event. Runs after the entry
+   * is unregistered. Install-backed clears its install-keyed retry-timer
+   * + relaunch state and unsubscribes from `installationEvents`.
+   */
+  onClosed?: () => void
+}
+
+interface CreateHostWindowResult {
+  windowKey: number
+  comfyWindow: BrowserWindow
+  titleBarView: WebContentsView
+  comfyView: WebContentsView
+  entry: ComfyWindowEntry
+  /** Bound `layoutViews` for the new entry; the wrapper calls this once after wiring. */
+  layoutViews: () => void
+}
+
+function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowResult {
+  const windowKey = nextWindowKey()
+  const saved = getSavedBounds(opts.boundsKey)
+  const windowOptions = getWindowOptions(opts.boundsKey)
+  const comfyWindow = new BrowserWindow({
+    ...windowOptions,
+    minWidth: 800,
+    minHeight: 600,
+    icon: APP_ICON,
+    title: opts.windowTitle,
+    backgroundColor: COMFY_BG,
+    // Phase 3 §17 — drop the OS-level minimize button globally. Window
+    // controls reduce to maximize/close so the takeover-style flows
+    // (install / update / first-use) have a single, unambiguous
+    // "interrupt" affordance (×).
+    minimizable: false,
+    titleBarStyle: 'hidden',
+    ...(process.platform === 'darwin'
+      ? { trafficLightPosition: TRAFFIC_LIGHT_POSITION }
+      : { titleBarOverlay: opts.titleBarOverlay }),
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+    },
+  })
+  comfyWindow.setMenuBarVisibility(false)
+
+  // Title bar view — bounded to TITLEBAR_HEIGHT, isolated from the body.
+  // Uses the comfyTitleBarPreload bridge regardless of mode (panel switch
+  // buttons, theme updates, downloads tray, etc.).
+  const titleBarView = new WebContentsView({
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, '../preload/comfyTitleBarPreload.js'),
+    },
+  })
+  titleBarView.setBackgroundColor(opts.titleBarBackground)
+  {
+    const isDev = !!process.env['ELECTRON_RENDERER_URL']
+    const tbLoad = isDev
+      ? titleBarView.webContents.loadURL(
+          `${(process.env['ELECTRON_RENDERER_URL'] as string).replace(/\/$/, '')}/comfyTitleBar.html?installationId=${encodeURIComponent(opts.titleBarInstallationIdParam)}`,
+        )
+      : titleBarView.webContents.loadFile(
+          path.join(__dirname, '../renderer/comfyTitleBar.html'),
+          { query: { installationId: opts.titleBarInstallationIdParam } },
+        )
+    void tbLoad.catch(() => {})
+  }
+  comfyWindow.contentView.addChildView(titleBarView)
+  _registerExtraBroadcastTarget(titleBarView.webContents)
+
+  // Body view. Install-backed loads the real ComfyUI URL post-construction
+  // via the wrapper; install-less leaves it dummy and zero-sized (the
+  // chooser body lives on the panelView).
+  const comfyView = new WebContentsView({ webPreferences: opts.comfyWebPreferences })
+  comfyView.setBackgroundColor(COMFY_BG)
+  comfyWindow.contentView.addChildView(comfyView)
+
+  // Title bar is 1px taller than the overlay so a CSS border-bottom in
+  // comfyTitleBar.html sits below the native buttons.
+  const titleBarTotal = TITLEBAR_HEIGHT + 1
+  const layoutViews = (): void => {
+    if (comfyWindow.isDestroyed()) return
+    const entry = comfyWindows.get(windowKey)
+    const [width, height] = comfyWindow.getContentSize() as [number, number]
+    const bodyHeight = Math.max(0, height - titleBarTotal)
+    const bodyRect = { x: 0, y: titleBarTotal, width, height: bodyHeight }
+    titleBarView.setBounds({ x: 0, y: 0, width, height: titleBarTotal })
+
+    // The Comfy pill maps to the live ComfyUI view *or* a panel
+    // (lifecycle / chooser / settings / etc.) depending on mode.
+    // `computeBodyMode` already returns `'chooser'` for install-less
+    // hosts, so the install-backed visibility branch handles both.
+    const mode = entry ? computeBodyMode(entry) : 'comfy'
+    const showPanel = mode !== 'comfy'
+    if (showPanel && entry?.panelView) {
+      entry.panelView.setBounds(bodyRect)
+      entry.panelView.setVisible(true)
+      // Keep ComfyUI alive but collapsed so it can't intercept input.
+      comfyView.setBounds({ x: 0, y: titleBarTotal, width: 0, height: 0 })
+      comfyView.setVisible(false)
+    } else {
+      comfyView.setBounds(bodyRect)
+      comfyView.setVisible(true)
+      if (entry?.panelView) {
+        entry.panelView.setBounds({ x: 0, y: titleBarTotal, width: 0, height: 0 })
+        entry.panelView.setVisible(false)
+      }
+    }
+  }
+  comfyWindow.on('resize', layoutViews)
+
+  if (saved?.maximized) comfyWindow.maximize()
+
+  // On macOS fullscreen the traffic-light buttons disappear, so the title bar
+  // should drop its 78px left padding for that period.
+  if (process.platform === 'darwin') {
+    const sendFullscreen = (fullscreen: boolean): void => {
+      if (titleBarView.webContents.isDestroyed()) return
+      titleBarView.webContents.send('comfy-titlebar:fullscreen-changed', fullscreen)
+    }
+    comfyWindow.on('enter-full-screen', () => sendFullscreen(true))
+    comfyWindow.on('leave-full-screen', () => sendFullscreen(false))
+  }
+
+  comfyWindow.on('resize', () => saveWindowBounds(opts.boundsKey, comfyWindow))
+  comfyWindow.on('move', () => saveWindowBounds(opts.boundsKey, comfyWindow))
+
+  // Push the initial state once the title bar's preload signals readiness.
+  // Filter to this title bar's WebContents to avoid cross-talk between windows.
+  const onTitleBarReadyHandler = (event: Electron.IpcMainEvent): void => {
+    if (event.sender !== titleBarView.webContents) return
+    if (titleBarView.webContents.isDestroyed()) return
+    const entry = comfyWindows.get(windowKey)
+    titleBarView.webContents.send('comfy-titlebar:panel-changed', entry?.activePanel ?? 'comfy')
+    if (entry) {
+      titleBarView.webContents.send('comfy-titlebar:theme-changed', entry.lastTheme)
+      _notifyTitleBarNavState(entry)
+    }
+    // Phase 3 §18 — both modes get the app-update pill and the
+    // downloads tray. The install-update pill + source-category icon
+    // are install-backed only and live in `onTitleBarReady`.
+    titleBarView.webContents.send(
+      'comfy-titlebar:app-update-state-changed',
+      updater.getCurrentUpdateState(),
+    )
+    notifyTitleBarDownloads(titleBarView)
+    if (entry && opts.onTitleBarReady) opts.onTitleBarReady(entry, titleBarView)
+    // Pre-warm the title-menu popup so the user's first File / Install
+    // click doesn't pay the BrowserWindow construction + HTML/JS load
+    // cost (~100ms).
+    ensureTitleMenuPopup(comfyWindow)
+  }
+  ipcMain.on('comfy-window:title-bar-ready', onTitleBarReadyHandler)
+
+  // Step 5 §16 — close handler is async: preventDefault, consult the
+  // panel renderer (so a Tier 2/3 op can prompt the user), run the
+  // mode-specific pre-teardown if cleared, and only then destroy.
+  // The `closingInFlight` guard prevents re-entry on rapid clicks of
+  // the OS close button while the consult is pending.
+  let closingInFlight = false
+  comfyWindow.on('close', (e) => {
+    e.preventDefault()
+    if (closingInFlight) return
+    closingInFlight = true
+    void (async () => {
+      try {
+        const entry = comfyWindows.get(windowKey)
+        const skipConsult = preClearedClose.has(comfyWindow)
+        const cleared = skipConsult ? true : await consultPanelRendererClose(entry?.panelView)
+        if (!cleared) return
+        preClearedClose.delete(comfyWindow)
+        if (comfyWindow.isDestroyed()) return
+        if (entry && opts.onBeforeTeardown) opts.onBeforeTeardown(entry)
+        _unregisterExtraBroadcastTarget(titleBarView.webContents)
+        const liveEntry = comfyWindows.get(windowKey)
+        if (liveEntry?.panelView) {
+          _unregisterExtraBroadcastTarget(liveEntry.panelView.webContents)
+          liveEntry.panelView.webContents.close()
+        }
+        titleBarView.webContents.close()
+        comfyView.webContents.close()
+        comfyWindow.destroy()
+      } finally {
+        closingInFlight = false
+      }
+    })()
+  })
+
+  comfyWindow.on('closed', () => {
+    ipcMain.off('comfy-window:title-bar-ready', onTitleBarReadyHandler)
+    // Window-mode unification (Stage W-1) — unregister via the
+    // primary windowKey AND the secondary install-id index.
+    const closedEntry = comfyWindows.get(windowKey)
+    if (closedEntry) unregisterHostEntry(closedEntry)
+    if (opts.onClosed) opts.onClosed()
+  })
+
+  const entry: ComfyWindowEntry = {
+    windowKey,
+    window: comfyWindow,
+    comfyView,
+    titleBarView,
+    panelView: null,
+    activePanel: 'comfy',
+    panelHistory: ['comfy'],
+    panelHistoryIndex: 0,
+    lastTheme: opts.initialTheme,
+    layoutViews,
+    comfyUrl: '',
+    installationId: opts.installationId,
+    firstUseMode: 'none',
+  }
+  registerHostEntry(entry)
+
+  return { windowKey, comfyWindow, titleBarView, comfyView, entry, layoutViews }
+}
+
 function onLaunch({ port, url, process: proc, installation, mode }: {
   port: number
   url?: string
@@ -1021,64 +1304,18 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
     return
   }
 
-  // Window-mode unification (Stage W-1) — mint the stable numeric
-  // windowKey up front so the close / closed handlers below can
-  // capture it in their closures and unregister via the entry's
-  // primary key (rather than `installationId`, which W-3 will detach
-  // at runtime).
-  const windowKey = nextWindowKey()
-  const saved = getSavedBounds(installationId)
-  const windowOptions = getWindowOptions(installationId)
-  const comfyWindow = new BrowserWindow({
-    ...windowOptions,
-    minWidth: 800,
-    minHeight: 600,
-    icon: APP_ICON,
-    title: `${installation.name} — Desktop 2.0 v${APP_VERSION}`,
-    backgroundColor: COMFY_BG,
-    // Phase 3 §17 — drop the OS-level minimize button globally. The window
-    // controls reduce to maximize/close so the takeover-style flows
-    // (install / update / first-use) have a single, unambiguous "interrupt"
-    // affordance (×). Users who want to "set this aside while it runs" can
-    // open another chooser host window from the File menu / tray.
-    minimizable: false,
-    titleBarStyle: 'hidden',
-    ...(process.platform === 'darwin'
-      ? { trafficLightPosition: TRAFFIC_LIGHT_POSITION }
-      : { titleBarOverlay: comfyTitleBarOverlay() }),
-    webPreferences: {
-      nodeIntegration: false,
-      contextIsolation: true,
-    },
-  })
-  comfyWindow.setMenuBarVisibility(false)
+  // Window-mode unification (Stage W-2) — install-backed wrapper.
+  // The BrowserWindow + 2 views skeleton, layoutViews, macOS
+  // fullscreen forwarding, bounds-save listeners, close / closed
+  // handlers, and title-bar-ready handshake all live in
+  // `createHostWindow()`. This wrapper layers the install-specific
+  // wiring on top: theme observer + content script, fail-retry,
+  // render-process-gone, install-record `'updated'` listener, and
+  // the comfyContents URL load. Stage W-3 will move that wiring
+  // behind `attachInstall(id)` / `detachInstall()` operations on
+  // the entry so a single host window can flip between install-
+  // backed and chooser modes without re-constructing.
 
-  // Title bar view — bounded to TITLEBAR_HEIGHT, isolated from ComfyUI.
-  // Uses the comfyTitleBarPreload bridge (panel switch buttons, theme updates, etc.).
-  const titleBarView = new WebContentsView({
-    webPreferences: {
-      nodeIntegration: false,
-      contextIsolation: true,
-      preload: path.join(__dirname, '../preload/comfyTitleBarPreload.js'),
-    },
-  })
-  // Paint the title bar's dark background before its HTML loads to avoid a white flash on window show.
-  titleBarView.setBackgroundColor(TITLEBAR_BG)
-  // The title bar is a Vite-built renderer entry so it shares the Inter font
-  // + design tokens with the launcher and panel renderers. Pass installationId
-  // via the URL so the preload can expose it to the page.
-  {
-    const isDev = !!process.env['ELECTRON_RENDERER_URL']
-    const tbLoad = isDev
-      ? titleBarView.webContents.loadURL(
-          `${(process.env['ELECTRON_RENDERER_URL'] as string).replace(/\/$/, '')}/comfyTitleBar.html?installationId=${encodeURIComponent(installationId)}`,
-        )
-      : titleBarView.webContents.loadFile(
-          path.join(__dirname, '../renderer/comfyTitleBar.html'),
-          { query: { installationId } },
-        )
-    void tbLoad.catch(() => {})
-  }
   /** Format the install identity for the comfy tab in the title bar.
    *  Track B item 4 — the source category (Standalone / Cloud / Legacy
    *  Desktop / …) used to be appended as a textual `— {label}` suffix
@@ -1103,17 +1340,14 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
    *  rebuilt whenever the page title or the install name changes). */
   let currentInstallName = installation.name
   let currentPageTitle = ''
-  function refreshOsWindowTitle(): void {
-    if (comfyWindow.isDestroyed()) return
-    const suffix = currentPageTitle ? ` — ${currentPageTitle}` : ''
-    comfyWindow.setTitle(`${currentInstallName}${suffix} — Desktop 2.0 v${APP_VERSION}`)
-  }
-  comfyWindow.contentView.addChildView(titleBarView)
-  _registerExtraBroadcastTarget(titleBarView.webContents)
 
-  // ComfyUI content view — completely isolated from the title bar
-  const comfyView = new WebContentsView({
-    webPreferences: {
+  const { comfyWindow, titleBarView, comfyView, entry } = createHostWindow({
+    installationId,
+    windowTitle: `${installation.name} — Desktop 2.0 v${APP_VERSION}`,
+    boundsKey: installationId,
+    initialTheme: { bg: COMFY_BG, text: '#dddddd' },
+    titleBarOverlay: process.platform === 'darwin' ? undefined : comfyTitleBarOverlay(),
+    comfyWebPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
       preload: path.join(__dirname, '../preload/comfyPreload.js'),
@@ -1121,125 +1355,54 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
         ? `persist:${installation.id}`
         : 'persist:shared',
     },
+    titleBarBackground: TITLEBAR_BG,
+    titleBarInstallationIdParam: installationId,
+    onTitleBarReady: (_e, tb) => {
+      // Install-backed extras the shared handshake can't synthesize:
+      // the install-name title text, the source-category icon string,
+      // and the per-install update-pill state.
+      tb.webContents.send('comfy-titlebar:title-changed', titleBarText)
+      tb.webContents.send('comfy-titlebar:source-category-changed', sourceCategory)
+      void computeInstallUpdateAvailable(installationId).then((state) => {
+        if (tb.webContents.isDestroyed()) return
+        tb.webContents.send('comfy-titlebar:install-update-changed', state)
+      })
+    },
+    onBeforeTeardown: () => {
+      // Install-only close-time work: detach the per-window download
+      // routing that `attachSessionDownloadHandler` set up below, and
+      // ask the IPC layer to stop the session backing this install.
+      detachWindowDownloads(comfyWindow)
+      ipc.stopRunning(installationId)
+    },
+    onClosed: () => {
+      // Install-only `'closed'` cleanup. The shared handler already
+      // ran `unregisterHostEntry` (which clears the install-id index
+      // entry too). The retry-timer / relaunch-state maps are still
+      // install-keyed (per-install state, not per-window state).
+      installationEvents.off('updated', onInstallationUpdated)
+      comfyFailRetryTimerCancels.delete(installationId)
+      relaunchStates.delete(installationId)
+    },
   })
-  // Paint the ComfyUI view's dark background before any URL loads to avoid a white flash
-  // on window show. The parent BrowserWindow's backgroundColor never shows because the
-  // WebContentsViews cover its entire content area.
-  comfyView.setBackgroundColor(COMFY_BG)
-  comfyWindow.contentView.addChildView(comfyView)
+  // The shared constructor seeds `comfyUrl` to the empty string for
+  // both modes; install-backed entries need the real URL so reload /
+  // fail-retry can read it back later via `currentComfyUrl()`.
+  entry.comfyUrl = comfyUrl
 
-  // Title bar is 1px taller than the overlay so a CSS border-bottom in
-  // comfyTitleBar.html sits below the native buttons.
-  const titleBarTotal = TITLEBAR_HEIGHT + 1
-  const layoutViews = (): void => {
+  function refreshOsWindowTitle(): void {
     if (comfyWindow.isDestroyed()) return
-    const entry = getEntryByInstallationId(installationId)
-    const [width, height] = comfyWindow.getContentSize() as [number, number]
-    const bodyHeight = Math.max(0, height - titleBarTotal)
-    const bodyRect = { x: 0, y: titleBarTotal, width, height: bodyHeight }
-    titleBarView.setBounds({ x: 0, y: 0, width, height: titleBarTotal })
-
-    // The Comfy pill maps to the live ComfyUI view *or* the lifecycle panel
-    // depending on whether the install is currently running.
-    const mode = entry ? computeBodyMode(entry) : 'comfy'
-    const showPanel = mode !== 'comfy'
-    if (showPanel && entry?.panelView) {
-      // Panel covers the body; ComfyUI is hidden but kept alive so its state is preserved.
-      entry.panelView.setBounds(bodyRect)
-      entry.panelView.setVisible(true)
-      // Collapse the comfy view to zero so it can't intercept input, but keep it loaded.
-      comfyView.setBounds({ x: 0, y: titleBarTotal, width: 0, height: 0 })
-      comfyView.setVisible(false)
-    } else {
-      comfyView.setBounds(bodyRect)
-      comfyView.setVisible(true)
-      if (entry?.panelView) {
-        entry.panelView.setBounds({ x: 0, y: titleBarTotal, width: 0, height: 0 })
-        entry.panelView.setVisible(false)
-      }
-    }
+    const suffix = currentPageTitle ? ` — ${currentPageTitle}` : ''
+    comfyWindow.setTitle(`${currentInstallName}${suffix} — Desktop 2.0 v${APP_VERSION}`)
   }
-  comfyWindow.on('resize', layoutViews)
-
-  // Alias for the ComfyUI webContents (all handlers use this)
-  const comfyContents = comfyView.webContents
-
-  if (saved?.maximized) comfyWindow.maximize()
-
-  // On macOS fullscreen the traffic-light buttons disappear, so the title bar
-  // should drop its 78px left padding for that period. Push the state via IPC
-  // so the Vue component can toggle a class instead of mutating the DOM directly.
-  if (process.platform === 'darwin') {
-    const sendFullscreen = (fullscreen: boolean): void => {
-      if (titleBarView.webContents.isDestroyed()) return
-      titleBarView.webContents.send('comfy-titlebar:fullscreen-changed', fullscreen)
-    }
-    comfyWindow.on('enter-full-screen', () => sendFullscreen(true))
-    comfyWindow.on('leave-full-screen', () => sendFullscreen(false))
-  }
-
-  /** Send the active panel down to the title bar so it can highlight the right button. */
-  function notifyTitleBarPanel(panel: ComfyPanelKey): void {
-    if (titleBarView.webContents.isDestroyed()) return
-    titleBarView.webContents.send('comfy-titlebar:panel-changed', panel)
-  }
-
-  /** Send the title text to the title bar (replaces inline executeJavaScript). */
   function notifyTitleBarTitle(text: string): void {
     if (titleBarView.webContents.isDestroyed()) return
     titleBarView.webContents.send('comfy-titlebar:title-changed', text)
   }
-
-  /** Track B item 4 — push the install's source category so the title
-   *  bar can render the install-type icon (Standalone / Cloud /
-   *  Legacy Desktop / …) next to the install name. Replaces the old
-   *  `— {label}` textual suffix. */
   function notifyTitleBarSourceCategory(category: string | null): void {
     if (titleBarView.webContents.isDestroyed()) return
     titleBarView.webContents.send('comfy-titlebar:source-category-changed', category)
   }
-
-  // Push the initial state once the title bar's preload signals readiness.
-  // Using ipcMain.on (not handle) since the title bar uses ipcRenderer.send.
-  // Filter to this title bar's WebContents to avoid cross-talk between windows.
-  const onTitleBarReady = (event: Electron.IpcMainEvent): void => {
-    if (event.sender !== titleBarView.webContents) return
-    notifyTitleBarTitle(titleBarText)
-    notifyTitleBarSourceCategory(sourceCategory)
-    const entry = getEntryByInstallationId(installationId)
-    notifyTitleBarPanel(entry?.activePanel ?? 'comfy')
-    if (entry && !titleBarView.webContents.isDestroyed()) {
-      titleBarView.webContents.send('comfy-titlebar:theme-changed', entry.lastTheme)
-      _notifyTitleBarNavState(entry)
-    }
-    // Phase 3 §18 — push initial title-bar pill state. App-update
-    // pill mirrors the updater module's last-known state so a title
-    // bar mounting AFTER the broadcast already fired still shows the
-    // pill; install-update pill is computed from the install record's
-    // statusTag using the same source.getStatusTag() pipeline that
-    // the chooser cards / kebab menu read from.
-    if (!titleBarView.webContents.isDestroyed()) {
-      titleBarView.webContents.send(
-        'comfy-titlebar:app-update-state-changed',
-        updater.getCurrentUpdateState(),
-      )
-      void computeInstallUpdateAvailable(installationId).then((state) => {
-        if (titleBarView.webContents.isDestroyed()) return
-        titleBarView.webContents.send('comfy-titlebar:install-update-changed', state)
-      })
-      // Track F — push current downloads-tray state so a title bar
-      // mounting AFTER an in-flight download started still paints
-      // the tray. Live updates flow through
-      // `_broadcastDownloadsToTitleBars` once mounted.
-      notifyTitleBarDownloads(titleBarView)
-    }
-    // Pre-warm the title-menu popup so the user's first File / Install
-    // click doesn't pay the BrowserWindow construction + HTML/JS load
-    // cost (~100ms). The popup is created hidden, kept alive across
-    // opens, and torn down when this window is.
-    ensureTitleMenuPopup(comfyWindow)
-  }
-  ipcMain.on('comfy-window:title-bar-ready', onTitleBarReady)
 
   // Reflect rename / source change in both the comfy tab and the OS-level
   // window title as the install record mutates. Phase 3 §18 — also
@@ -1273,13 +1436,9 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
   }
   installationEvents.on('updated', onInstallationUpdated)
 
-  comfyWindow.on('closed', () => {
-    ipcMain.off('comfy-window:title-bar-ready', onTitleBarReady)
-    installationEvents.off('updated', onInstallationUpdated)
-  })
+  // Alias for the ComfyUI webContents (all install-backed handlers use this)
+  const comfyContents = comfyView.webContents
 
-  comfyWindow.on('resize', () => saveWindowBounds(installationId, comfyWindow))
-  comfyWindow.on('move', () => saveWindowBounds(installationId, comfyWindow))
   comfyContents.on('did-create-window', (childWindow) => {
     childWindow.setIcon(APP_ICON)
     if (process.platform !== 'darwin') childWindow.removeMenu()
@@ -1317,8 +1476,8 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
   const applyComfyTheme = (bg: string, text: string): void => {
     if (comfyWindow.isDestroyed()) return
     const theme = { bg, text }
-    const entry = getEntryByInstallationId(installationId)
-    if (entry) entry.lastTheme = theme
+    const e = getEntryByInstallationId(installationId)
+    if (e) e.lastTheme = theme
     if (!titleBarView.webContents.isDestroyed()) {
       titleBarView.webContents.send('comfy-titlebar:theme-changed', theme)
     }
@@ -1425,70 +1584,11 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
     reloadComfy()
   })
 
-  // Step 5 §16 — close handler is now async: preventDefault, consult
-  // the panel renderer (so a Tier 2/3 op can prompt the user), and
-  // only run the teardown sequence if cleared. The `closingInFlight`
-  // guard prevents re-entry on rapid clicks of the OS close button
-  // while the consult is pending.
-  let closingInFlight = false
-  comfyWindow.on('close', (e) => {
-    e.preventDefault()
-    if (closingInFlight) return
-    closingInFlight = true
-    void (async () => {
-      try {
-        const entry = getEntryByInstallationId(installationId)
-        const skipConsult = preClearedClose.has(comfyWindow)
-        const cleared = skipConsult ? true : await consultPanelRendererClose(entry?.panelView)
-        if (!cleared) return
-        preClearedClose.delete(comfyWindow)
-        if (comfyWindow.isDestroyed()) return
-        detachWindowDownloads(comfyWindow)
-        ipc.stopRunning(installationId)
-        _unregisterExtraBroadcastTarget(titleBarView.webContents)
-        const liveEntry = comfyWindows.get(windowKey)
-        if (liveEntry?.panelView) {
-          _unregisterExtraBroadcastTarget(liveEntry.panelView.webContents)
-          liveEntry.panelView.webContents.close()
-        }
-        titleBarView.webContents.close()
-        comfyView.webContents.close()
-        comfyWindow.destroy()
-      } finally {
-        closingInFlight = false
-      }
-    })()
-  })
-
-  comfyWindow.on('closed', () => {
-    // Window-mode unification (Stage W-1) — unregister via the
-    // primary windowKey AND the secondary install-id index. The
-    // failure-retry / relaunch maps are still install-keyed (they're
-    // per-install state, not per-window state).
-    const closedEntry = comfyWindows.get(windowKey)
-    if (closedEntry) unregisterHostEntry(closedEntry)
-    comfyFailRetryTimerCancels.delete(installationId)
-    relaunchStates.delete(installationId)
-  })
-
-  registerHostEntry({
-    windowKey,
-    window: comfyWindow,
-    comfyView,
-    titleBarView,
-    panelView: null,
-    activePanel: 'comfy',
-    panelHistory: ['comfy'],
-    panelHistoryIndex: 0,
-    lastTheme: { bg: COMFY_BG, text: '#dddddd' },
-    layoutViews,
-    comfyUrl,
-    installationId,
-    firstUseMode: 'none',
-  })
-
-  // Now that the entry exists, layout for the first time.
-  layoutViews()
+  // Now that all wiring is in place, layout for the first time.
+  // (The shared helper deferred this so the wrapper could install
+  // anything that needs to settle before the first paint, e.g. the
+  // comfyContents URL load above.)
+  entry.layoutViews()
 
   if (proc) {
     proc.on('exit', () => {
@@ -1599,225 +1699,60 @@ function applyChooserHostThemeToAll(): void {
 const CHOOSER_HOST_BOUNDS_KEY = 'chooser'
 
 function openChooserHostWindow(): BrowserWindow {
-  // Window-mode unification (Stage W-1) — primary numeric key for
-  // the host entry. The bounds-persistence key is a separate concern
-  // (see CHOOSER_HOST_BOUNDS_KEY above).
-  const windowKey = nextWindowKey()
-
+  // Window-mode unification (Stage W-2) — install-less wrapper.
+  // The shared `createHostWindow()` builds the BrowserWindow + 2
+  // views skeleton, layoutViews, macOS fullscreen, bounds-save
+  // listeners, close / closed handlers, and title-bar-ready
+  // handshake. The chooser-only extras live here: a title-bar
+  // header label override and an eager `ensurePanelView('chooser')`
+  // so the panel body paints on the first frame instead of after
+  // the next layout tick.
+  //
+  // Phase 3 — install-less host windows have no ComfyUI frontend
+  // feeding their theme, so the chooser's title bar / overlay
+  // colors are driven by the launcher theme (resolved here and
+  // refreshed via `applyChooserHostTheme` when the theme setting
+  // or OS-level dark-mode preference flips). Both the Vue
+  // `<header>` and the OS overlay paint `getChooserHostTheme().bg`
+  // (the launcher renderer's `--surface`) so the seam between
+  // them stays invisible.
   const initialChooserTheme = getChooserHostTheme()
 
-  const windowOptions = getWindowOptions(CHOOSER_HOST_BOUNDS_KEY)
-  const comfyWindow = new BrowserWindow({
-    ...windowOptions,
-    minWidth: 800,
-    minHeight: 600,
-    icon: APP_ICON,
-    title: `Choose an install — Desktop 2.0 v${APP_VERSION}`,
-    backgroundColor: COMFY_BG,
-    // Phase 3 §17 — drop the OS-level minimize button globally (mirrors
-    // the install-backed `openComfyWindow` constructor above). Keeps the
-    // window controls consistent across chooser + install host windows.
-    minimizable: false,
-    titleBarStyle: 'hidden',
-    ...(process.platform === 'darwin'
-      ? { trafficLightPosition: TRAFFIC_LIGHT_POSITION }
-      // Install-less hosts use the launcher renderer's --surface for
-      // the OS overlay so the close/min/max region matches the Vue
-      // title bar above it. Install-backed windows still use
-      // `comfyTitleBarOverlay()` (ComfyUI brand --comfy-menu-bg).
-      : { titleBarOverlay: titleBarOverlayForTheme(resolveTheme() === 'dark') }),
-    webPreferences: {
-      nodeIntegration: false,
-      contextIsolation: true,
-    },
-  })
-  comfyWindow.setMenuBarVisibility(false)
-
-  // Title bar — same renderer as install-backed windows. The empty
-  // `installationId` URL param is what the title-bar Vue uses to enter
-  // install-less mode (hide Install Settings pill, accept the fallback
-  // label).
-  const titleBarView = new WebContentsView({
-    webPreferences: {
-      nodeIntegration: false,
-      contextIsolation: true,
-      preload: path.join(__dirname, '../preload/comfyTitleBarPreload.js'),
-    },
-  })
-  // Pre-paint the title-bar WebContentsView with the launcher-theme
-  // surface colour so it doesn't flash `TITLEBAR_BG` (#353535) before
-  // the Vue header mounts and applies `themeBg` on `theme-changed`.
-  titleBarView.setBackgroundColor(initialChooserTheme.bg)
-  {
-    const isDev = !!process.env['ELECTRON_RENDERER_URL']
-    const tbLoad = isDev
-      ? titleBarView.webContents.loadURL(
-          `${(process.env['ELECTRON_RENDERER_URL'] as string).replace(/\/$/, '')}/comfyTitleBar.html?installationId=`,
-        )
-      : titleBarView.webContents.loadFile(
-          path.join(__dirname, '../renderer/comfyTitleBar.html'),
-          { query: { installationId: '' } },
-        )
-    void tbLoad.catch(() => {})
-  }
-  comfyWindow.contentView.addChildView(titleBarView)
-  _registerExtraBroadcastTarget(titleBarView.webContents)
-
-  // Dummy comfyView. Kept so `layoutViews` doesn't have to special-case the
-  // install-less branch — its body always resolves to the panelView.
-  const comfyView = new WebContentsView({
-    webPreferences: {
-      nodeIntegration: false,
-      contextIsolation: true,
-    },
-  })
-  comfyView.setBackgroundColor(COMFY_BG)
-  comfyWindow.contentView.addChildView(comfyView)
-
-  const titleBarTotal = TITLEBAR_HEIGHT + 1
-  const layoutViews = (): void => {
-    if (comfyWindow.isDestroyed()) return
-    const entry = comfyWindows.get(windowKey)
-    const [width, height] = comfyWindow.getContentSize() as [number, number]
-    const bodyHeight = Math.max(0, height - titleBarTotal)
-    const bodyRect = { x: 0, y: titleBarTotal, width, height: bodyHeight }
-    titleBarView.setBounds({ x: 0, y: 0, width, height: titleBarTotal })
-    // Install-less windows always resolve to a panel body (chooser or
-    // launcher-settings). If the panelView isn't created yet, collapse
-    // the comfy view rather than show it — the dummy comfyView has no
-    // useful URL.
-    if (entry?.panelView) {
-      entry.panelView.setBounds(bodyRect)
-      entry.panelView.setVisible(true)
-    }
-    comfyView.setBounds({ x: 0, y: titleBarTotal, width: 0, height: 0 })
-    comfyView.setVisible(false)
-  }
-  comfyWindow.on('resize', layoutViews)
-
-  // macOS fullscreen — keep the title-bar padding in sync just like the
-  // install-backed flow.
-  if (process.platform === 'darwin') {
-    const sendFullscreen = (fullscreen: boolean): void => {
-      if (titleBarView.webContents.isDestroyed()) return
-      titleBarView.webContents.send('comfy-titlebar:fullscreen-changed', fullscreen)
-    }
-    comfyWindow.on('enter-full-screen', () => sendFullscreen(true))
-    comfyWindow.on('leave-full-screen', () => sendFullscreen(false))
-  }
-
-  // Push initial state once the title bar's preload signals readiness.
-  // Filtered to this window's title-bar webContents to avoid cross-talk.
-  const onTitleBarReady = (event: Electron.IpcMainEvent): void => {
-    if (event.sender !== titleBarView.webContents) return
-    if (!titleBarView.webContents.isDestroyed()) {
-      // Fallback label — install-backed windows use the install name.
-      titleBarView.webContents.send('comfy-titlebar:title-changed', 'Choose an install')
-      const entry = comfyWindows.get(windowKey)
-      titleBarView.webContents.send('comfy-titlebar:panel-changed', entry?.activePanel ?? 'comfy')
-      if (entry) {
-        titleBarView.webContents.send('comfy-titlebar:theme-changed', entry.lastTheme)
-        _notifyTitleBarNavState(entry)
-      }
-      // Phase 3 §18 — chooser hosts get the app-update pill (no
-      // install-update pill since they have no install backing the
-      // entry). Mirrors the install-backed branch so users see the
-      // pending Desktop 2 update from the install-less window too.
-      titleBarView.webContents.send(
-        'comfy-titlebar:app-update-state-changed',
-        updater.getCurrentUpdateState(),
-      )
-      // Track F — chooser hosts also surface the downloads tray;
-      // model downloads are a global concern, not per-install, so the
-      // chooser-host title bar shows them too. Mirror of the
-      // install-backed branch initial push.
-      notifyTitleBarDownloads(titleBarView)
-    }
-    // Pre-warm the title-menu popup so the user's first File click
-    // doesn't pay the BrowserWindow construction + HTML/JS load cost.
-    // Install-less hosts only expose the File menu (no Install menu),
-    // so the warmed popup still pays off on every File-menu open.
-    ensureTitleMenuPopup(comfyWindow)
-  }
-  ipcMain.on('comfy-window:title-bar-ready', onTitleBarReady)
-
-  // Step 5 §16 — install-less host close handler now matches the
-  // install-backed shape: preventDefault, consult the panel renderer,
-  // tear down + destroy only if cleared. The chooser host's panel
-  // renderer hosts new-install / first-use takeovers; closing mid-
-  // takeover would lose the user's progress without the prompt.
-  let closingInFlight = false
-  comfyWindow.on('close', (e) => {
-    e.preventDefault()
-    if (closingInFlight) return
-    closingInFlight = true
-    void (async () => {
-      try {
-        const entry = comfyWindows.get(windowKey)
-        const skipConsult = preClearedClose.has(comfyWindow)
-        const cleared = skipConsult ? true : await consultPanelRendererClose(entry?.panelView)
-        if (!cleared) return
-        preClearedClose.delete(comfyWindow)
-        if (comfyWindow.isDestroyed()) return
-        _unregisterExtraBroadcastTarget(titleBarView.webContents)
-        const liveEntry = comfyWindows.get(windowKey)
-        if (liveEntry?.panelView) {
-          _unregisterExtraBroadcastTarget(liveEntry.panelView.webContents)
-          liveEntry.panelView.webContents.close()
-        }
-        titleBarView.webContents.close()
-        comfyView.webContents.close()
-        comfyWindow.destroy()
-      } finally {
-        closingInFlight = false
-      }
-    })()
-  })
-
-  comfyWindow.on('closed', () => {
-    ipcMain.off('comfy-window:title-bar-ready', onTitleBarReady)
-    // Window-mode unification (Stage W-1) — unregister via the
-    // entry helper so any future install-id index entry (W-3
-    // attach/detach) is cleared in lockstep with the primary map.
-    const closedEntry = comfyWindows.get(windowKey)
-    if (closedEntry) unregisterHostEntry(closedEntry)
-  })
-
-  comfyWindow.on('resize', () => saveWindowBounds(CHOOSER_HOST_BOUNDS_KEY, comfyWindow))
-  comfyWindow.on('move', () => saveWindowBounds(CHOOSER_HOST_BOUNDS_KEY, comfyWindow))
-
-  // Phase 3 — install-less host windows have no ComfyUI frontend to
-  // pull theme from, so the chooser's title bar / overlay colors are
-  // driven by the launcher theme (resolved at construction time and
-  // refreshed via `applyChooserHostTheme` when the theme setting or
-  // OS-level dark-mode preference flips). Both the Vue `<header>` and
-  // the OS overlay paint `getChooserHostTheme().bg` (i.e. the launcher
-  // renderer's `--surface`) so the seam between them stays invisible.
-  registerHostEntry({
-    windowKey,
-    window: comfyWindow,
-    comfyView,
-    titleBarView,
-    panelView: null,
-    activePanel: 'comfy',
-    panelHistory: ['comfy'],
-    panelHistoryIndex: 0,
-    lastTheme: initialChooserTheme,
-    layoutViews,
-    comfyUrl: '',
+  const { comfyWindow, entry } = createHostWindow({
     installationId: null,
-    firstUseMode: 'none',
+    windowTitle: `Choose an install — Desktop 2.0 v${APP_VERSION}`,
+    boundsKey: CHOOSER_HOST_BOUNDS_KEY,
+    initialTheme: initialChooserTheme,
+    titleBarOverlay: process.platform === 'darwin'
+      ? undefined
+      // Install-less hosts use the launcher renderer's --surface
+      // for the OS overlay so the close/min/max region matches the
+      // Vue title bar above it. Install-backed windows still use
+      // `comfyTitleBarOverlay()` (ComfyUI brand --comfy-menu-bg).
+      : titleBarOverlayForTheme(resolveTheme() === 'dark'),
+    // Dummy comfyView. Kept so layoutViews doesn't have to special-
+    // case the install-less branch — its body always resolves to
+    // the panelView. Minimal prefs (no preload, default partition)
+    // because the dummy view never loads a URL.
+    comfyWebPreferences: { nodeIntegration: false, contextIsolation: true },
+    titleBarBackground: initialChooserTheme.bg,
+    // Empty installationId URL param tells the title-bar Vue to enter
+    // install-less mode (hide Install Settings pill, accept the
+    // fallback label).
+    titleBarInstallationIdParam: '',
+    onTitleBarReady: (_e, tb) => {
+      // Fallback label — install-backed windows use the install name.
+      tb.webContents.send('comfy-titlebar:title-changed', 'Choose an install')
+    },
   })
 
-  // Force-create the panel WebContentsView with the chooser body — install-
-  // less windows always need a panel, and creating it eagerly avoids the
-  // empty body flash that would happen on the next layoutViews tick.
-  const entry = comfyWindows.get(windowKey)
-  if (entry) {
-    ensurePanelView(windowKey, entry, 'chooser')
-  }
+  // Force-create the panel WebContentsView with the chooser body —
+  // install-less windows always need a panel, and creating it eagerly
+  // avoids the empty body flash that would happen on the next
+  // layoutViews tick.
+  ensurePanelView(entry.windowKey, entry, 'chooser')
 
-  layoutViews()
+  entry.layoutViews()
   // Phase 3 — explicitly bring the new chooser host to the foreground.
   // Without this, the freshly created window can stay behind whatever
   // app the user launched Desktop 2.0 from (Windows focus-theft
