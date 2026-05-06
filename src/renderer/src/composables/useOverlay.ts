@@ -282,6 +282,17 @@ export function useOverlay(): UseOverlayApi {
       cur.onCancel?.()
     }
 
+    // Silent Tier 3 → Tier 3 swap (chain-local, e.g. first-use →
+    // new-install). The current Tier 3 is being replaced WITHOUT a
+    // prompt by design — but if it has an `onCancel` rollback
+    // attached, fire it here so the underlying main-side op (if any)
+    // is told to stop. First-use's takeover doesn't set `onCancel`,
+    // so this is a no-op for the only chain-local caller today; it
+    // closes the rollback hole for any future Tier 3 takeover that
+    // does set one. See post-unification-code-review.md F13.
+    if (cur?.kind === 'takeover' && next?.kind === 'takeover') {
+      cur.onCancel?.()
+    }
     // All other transitions are silent: Tier 1 ↔ Tier 1 (chooser's
     // manage swap), Tier 2/3 onto Tier 1 (manage being pre-empted),
     // Tier 3 onto nothing (first-use), close from Tier 1 / Tier 3.
