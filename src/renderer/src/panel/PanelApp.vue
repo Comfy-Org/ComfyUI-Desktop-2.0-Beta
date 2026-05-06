@@ -402,15 +402,20 @@ async function completeFirstUseAndDismiss(): Promise<void> {
   dismissTakeoverDirect()
 }
 
-/** First-use takeover Cloud-branch pick — one-shot completion. The
- *  chooser body underneath is what the user lands on; we additionally
- *  auto-launch the always-present Cloud install (Track D item 4) so
- *  the user reaches a running ComfyUI as the natural endpoint of
- *  first-use without having to click play again. The launch goes
- *  through the same `useListAction` pipeline the chooser uses
- *  (close-host-window-on-instance-started, etc.). If the cloud
+/** First-use takeover Cloud-branch pick (`complete-cloud` emit) — the
+ *  user explicitly picked Cloud at the cloud-vs-local fork. We mark
+ *  completion, close the takeover, and auto-launch the always-present
+ *  Cloud install so they reach a running ComfyUI as the natural
+ *  endpoint of first-use without having to click play again. The
+ *  launch goes through the same `useListAction` pipeline the chooser
+ *  uses (close-host-window-on-instance-started, etc.). If the cloud
  *  install can't be found for any reason we still mark complete and
- *  close the takeover — the chooser body underneath is the fallback. */
+ *  close the takeover — the chooser body underneath is the fallback.
+ *
+ *  The returning-user `complete-skip` emit is wired directly to
+ *  `completeFirstUseAndDismiss` instead — those users never picked
+ *  Cloud (the fork was suppressed), so auto-launching it would
+ *  hijack their existing local install. */
 async function handleFirstUseComplete(): Promise<void> {
   chainingFirstUseToNewInstall.value = false
   await completeFirstUseAndDismiss()
@@ -993,7 +998,8 @@ onUnmounted(() => {
       <FirstUseTakeover
         v-else-if="currentOverlay.component === 'first-use'"
         ref="firstUseRef"
-        @complete="handleFirstUseComplete"
+        @complete-cloud="handleFirstUseComplete"
+        @complete-skip="completeFirstUseAndDismiss"
         @chain-local="handleFirstUseChainLocal"
         @chain-migrate="handleFirstUseChainMigrate"
       />
