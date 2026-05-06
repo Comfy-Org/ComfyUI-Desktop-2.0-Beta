@@ -733,10 +733,22 @@ export interface ElectronApi {
   respondCloseRequest(payload: { requestId: string; cleared: boolean }): void
   /** Stamp the calling chooser host window's current bounds onto the
    *  install's saved-bounds slot (Phase 3 visual continuity). The chooser
-   *  pick flow calls this BEFORE kicking off the launch so the new
-   *  install window opens exactly where the chooser was — visually a
-   *  swap-in-place. No-op for install-backed callers. */
+   *  pick flow used this BEFORE the W-4 in-place attach landed — kept
+   *  as the fallback wiring for `claimAttachHost` rejections (e.g. the
+   *  install uses `browserPartition === 'unique'` and needs a fresh
+   *  window with its own partition). No-op for install-backed callers. */
   transferHostBoundsToInstall(installationId: string): Promise<boolean>
+  /** Window-mode unification (Stage W-4) — claim the calling install-
+   *  less host window for in-place attach. Run by the chooser-host
+   *  renderer right before kicking off the launch action; when the
+   *  launch event eventually lands in main, `onLaunch()` consumes
+   *  the claim and attaches the install to THIS host window instead
+   *  of constructing a fresh one. Returns `true` when the claim was
+   *  accepted (renderer should skip its fallback `closeHostWindow`
+   *  + `transferHostBoundsToInstall` wiring); `false` otherwise
+   *  (sender isn't an install-less host's panelView, or main rejected
+   *  the claim — fall back to the legacy close+open swap). */
+  claimAttachHost(installationId: string): Promise<boolean>
   getRunningInstances(): Promise<RunningInstance[]>
   /**
    * Read the retained crash detail for an installation, if any. Main holds

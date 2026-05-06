@@ -78,6 +78,8 @@ const api: ElectronApi = {
     ipcRenderer.send('comfy-window:request-close-response', payload),
   transferHostBoundsToInstall: (installationId) =>
     ipcRenderer.invoke('transfer-host-bounds-to-install', installationId),
+  claimAttachHost: (installationId) =>
+    ipcRenderer.invoke('claim-attach-host', installationId),
   getRunningInstances: () => ipcRenderer.invoke('get-running-instances'),
   getLastCrashError: (installationId: string) =>
     ipcRenderer.invoke('get-last-crash-error', installationId),

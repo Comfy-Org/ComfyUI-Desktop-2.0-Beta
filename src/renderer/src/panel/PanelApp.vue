@@ -520,14 +520,7 @@ async function launchInstallationAfterFirstUse(installation: Installation): Prom
     ?? actions.find((a) => a.style === 'primary')
     ?? null
   if (!launchAction) return
-  await window.api.transferHostBoundsToInstall(installation.id)
-  pendingPickUnsub?.()
-  pendingPickUnsub = window.api.onInstanceStarted((data) => {
-    if (data.installationId !== installation.id) return
-    pendingPickUnsub?.()
-    pendingPickUnsub = null
-    void window.api.closeHostWindow()
-  })
+  await prepareChooserHostHandoff(installation.id)
   await executeChooserAction(installation, launchAction)
 }
 
@@ -631,8 +624,41 @@ const { executeAction: executeChooserAction } = useListAction('chooser', {
   showProgress: handleShowProgress,
 })
 
-/** Pending close-on-launch subscription, so unmount can clean it up. */
+/** Pending close-on-launch subscription (legacy fallback), so unmount
+ *  can clean it up. Only set when the W-4 in-place attach claim is
+ *  rejected by main and the chooser host falls back to the close+open
+ *  swap. */
 let pendingPickUnsub: (() => void) | null = null
+
+/** Prepare the chooser host for a launch hand-off. Window-mode
+ *  unification (Stage W-4) — first try to claim the host for in-place
+ *  attach: when the launch event lands in main, `onLaunch` will
+ *  attach the install to THIS host window instead of constructing a
+ *  fresh one. If the claim is rejected (e.g. the install needs a
+ *  unique browser partition), fall back to the legacy stamp-bounds +
+ *  close-on-instance-started swap so the user still gets the
+ *  install's window at the chooser's bounds. */
+async function prepareChooserHostHandoff(installationId: string): Promise<void> {
+  const claimed = await window.api.claimAttachHost(installationId)
+  if (claimed) return
+  // Legacy fallback. Visual continuity — stamp the chooser host's
+  // current bounds onto the install's saved-bounds slot so its
+  // freshly-constructed window opens at the chooser's position.
+  await window.api.transferHostBoundsToInstall(installationId)
+  // Subscribe BEFORE kicking off the launch so we don't miss a fast-
+  // firing instance-started broadcast. The launch action runs via the
+  // ProgressModal pipeline (showProgress: true) so executeAction
+  // returns immediately after kicking it off — the actual completion
+  // signal is the instance-started event coming back from main.
+  pendingPickUnsub?.()
+  pendingPickUnsub = window.api.onInstanceStarted((data) => {
+    if (data.installationId !== installationId) return
+    pendingPickUnsub?.()
+    pendingPickUnsub = null
+    // The install's own ComfyUI window has opened — chooser host is done.
+    void window.api.closeHostWindow()
+  })
+}
 
 async function handleChooserPick(installation: Installation): Promise<void> {
   // Already running with an open window — focus that window and retire
@@ -659,26 +685,7 @@ async function handleChooserPick(installation: Installation): Promise<void> {
     return
   }
 
-  // Visual continuity — stamp the chooser host's current bounds onto the
-  // install's saved-bounds slot BEFORE the launch, so the install's own
-  // window opens exactly where the chooser was. The user perceives a
-  // swap-in-place even though it's structurally close+open.
-  await window.api.transferHostBoundsToInstall(installation.id)
-
-  // Subscribe BEFORE kicking off the launch so we don't miss a
-  // fast-firing instance-started broadcast. The launch action runs via
-  // the ProgressModal pipeline (showProgress: true) so executeAction
-  // returns immediately after kicking it off — the actual completion
-  // signal is the instance-started event coming back from main.
-  pendingPickUnsub?.()
-  pendingPickUnsub = window.api.onInstanceStarted((data) => {
-    if (data.installationId !== installation.id) return
-    pendingPickUnsub?.()
-    pendingPickUnsub = null
-    // The install's own ComfyUI window has opened — chooser host is done.
-    void window.api.closeHostWindow()
-  })
-
+  await prepareChooserHostHandoff(installation.id)
   await executeChooserAction(installation, launchAction)
 }
 

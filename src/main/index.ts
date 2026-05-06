@@ -360,6 +360,24 @@ interface ComfyWindowEntry {
  */
 const comfyWindows = new Map<number, ComfyWindowEntry>()
 const installationIdToWindowKey = new Map<string, number>()
+
+/**
+ * Window-mode unification (Stage W-4) — pending in-place attach
+ * claims, set by the chooser-host renderer right before it kicks
+ * off a launch action. `onLaunch()` consumes the claim instead of
+ * constructing a fresh BrowserWindow when the launch event arrives,
+ * so the chooser host the user clicked from becomes the install's
+ * own host in place. Keyed by installationId so a fast double-click
+ * on the same tile resolves to the same target host.
+ *
+ * The claim is only honoured when the target window is still alive
+ * and still install-less (the user may have closed the chooser host
+ * while the install spin-up was running, or picked a second install
+ * before the first one finished launching). Stale claims fall
+ * through to the legacy "fresh window" path; the chooser-host
+ * renderer keeps a fallback `closeHostWindow` wired for that case.
+ */
+const pendingAttachClaims = new Map<string, number>()
 let _nextWindowKeyValue = 0
 function nextWindowKey(): number {
   return ++_nextWindowKeyValue
@@ -1153,6 +1171,46 @@ function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowResult {
   comfyView.setBackgroundColor(COMFY_BG)
   comfyWindow.contentView.addChildView(comfyView)
 
+  // Generic comfyContents listeners that survive across attach/detach
+  // and are harmless on a chooser host's idle view (none fire until
+  // a real navigation / popup happens). Wiring them here means the
+  // post-construction `attachInstall()` only has to register the
+  // install-keyed listeners (theme observer, fail-retry, render-
+  // process-gone, etc.) — no need to re-bind the popup / window-
+  // open / context-menu handlers when the host flips modes (W-4).
+  const comfyContents = comfyView.webContents
+  comfyContents.on('did-create-window', (childWindow) => {
+    childWindow.setIcon(APP_ICON)
+    if (process.platform !== 'darwin') childWindow.removeMenu()
+    injectMacPasskeyWarning(childWindow)
+  })
+  comfyContents.setWindowOpenHandler(({ url: childUrl }) => {
+    if (shouldOpenInPopup(childUrl)) {
+      // Aux popup contract (see also `findEntryByTitleBarSender`):
+      //   - `preload: undefined` strips our preload — the popup has no
+      //     `window.api` / `__comfyTitleBar` bridge and so cannot reach
+      //     any of the title-bar IPCs (`comfy-window:open-title-menu`
+      //     etc.). The waffle / file menu is therefore unreachable
+      //     from a cloud-login / OAuth popup, by design.
+      //   - We don't override `titleBarStyle` / `titleBarOverlay`. Per
+      //     Electron's `setWindowOpenHandler` docs only security-related
+      //     `webPreferences` inherit from the parent — chrome-style
+      //     options reset to OS defaults — so the popup gets a normal
+      //     OS title bar and looks like a regular browser window.
+      //   - The macOS passkey-unavailable banner is still injected
+      //     against this popup via `did-create-window` →
+      //     `injectMacPasskeyWarning`, so cloud-login flows on macOS
+      //     keep the password+OTP affordance.
+      return { action: 'allow', overrideBrowserWindowOptions: { webPreferences: { preload: undefined } } }
+    }
+    shell.openExternal(childUrl)
+    return { action: 'deny' }
+  })
+  comfyContents.on('will-prevent-unload', (e) => {
+    e.preventDefault()
+  })
+  attachContextMenu(comfyWindow, comfyContents)
+
   // Title bar is 1px taller than the overlay so a CSS border-bottom in
   // comfyTitleBar.html sits below the native buttons.
   const titleBarTotal = TITLEBAR_HEIGHT + 1
@@ -1364,22 +1422,55 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
     return
   }
 
+  // Window-mode unification (Stage W-4) — chooser-pick in-place
+  // attach. The chooser-host renderer claims its own host window via
+  // `comfy-window:claim-attach-host` right before kicking off the
+  // launch action, so by the time the launch event lands here the
+  // claim's already in the map. Honour it only when the target host
+  // is still alive AND still install-less AND its comfyView's
+  // partition (pinned at construction) is compatible with the
+  // install — chooser hosts are built with `persist:shared` +
+  // comfyPreload, which matches the install-backed default; only
+  // unique-partition installs (`browserPartition === 'unique'`)
+  // mismatch and fall through to the legacy fresh-window path.
+  const claimedKey = pendingAttachClaims.get(installationId)
+  if (claimedKey !== undefined) {
+    pendingAttachClaims.delete(installationId)
+    const claimed = comfyWindows.get(claimedKey)
+    const wantsUniquePartition =
+      (installation.browserPartition as string | undefined) === 'unique'
+    if (
+      claimed &&
+      !claimed.window.isDestroyed() &&
+      claimed.installationId === null &&
+      !wantsUniquePartition
+    ) {
+      attachInstall(claimed, { installation, comfyUrl, isLocal: !url })
+      claimed.layoutViews()
+      if (proc) {
+        proc.on('exit', () => {
+          // Session registry handles state cleanup
+        })
+      }
+      return
+    }
+  }
+
   // Window-mode unification (Stage W-3b) — install-backed wrapper.
   // Construction is split in two:
   //   1. `createHostWindow()` — mode-agnostic skeleton (BrowserWindow +
   //      titleBarView + comfyView + layoutViews + macOS fullscreen +
-  //      bounds-save + close/closed + title-bar-ready handshake).
+  //      bounds-save + close/closed + title-bar-ready handshake +
+  //      generic comfyContents listeners — popup creation / window-
+  //      open routing / will-prevent-unload / OS context menu — all
+  //      harmless on a chooser host's idle view).
   //   2. `attachInstall()` — install-specific wiring (install-record
   //      subscription, theme observer, fail-retry, render-process-gone,
   //      before-input keystrokes, attachSessionDownloadHandler, content-
   //      script injection, comfyContents URL load).
-  // The wrapper retains only the truly generic post-construction
-  // listeners (popup creation, popup routing, will-prevent-unload, OS
-  // context menu) — these are safe on a chooser-host's dummy
-  // comfyView too because they fire only on real navigations / popups.
   const initialSourceCategory = sourceMap[installation.sourceId]?.category ?? null
 
-  const { comfyWindow, comfyView, entry } = createHostWindow({
+  const { entry } = createHostWindow({
     installationId,
     windowTitle: `${installation.name} — Desktop 2.0 v${APP_VERSION}`,
     boundsKey: installationId,
@@ -1399,47 +1490,12 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
     initialSourceCategory,
   })
 
-  const comfyContents = comfyView.webContents
-
-  // Generic comfyContents listeners that survive across attach/detach.
-  // None of these need install-id at runtime, and none fire on a
-  // dummy chooser-host comfyView (no popups, no navigations).
-  comfyContents.on('did-create-window', (childWindow) => {
-    childWindow.setIcon(APP_ICON)
-    if (process.platform !== 'darwin') childWindow.removeMenu()
-    injectMacPasskeyWarning(childWindow)
-  })
-  comfyContents.setWindowOpenHandler(({ url: childUrl }) => {
-    if (shouldOpenInPopup(childUrl)) {
-      // Aux popup contract (see also `findEntryByTitleBarSender`):
-      //   - `preload: undefined` strips our preload — the popup has no
-      //     `window.api` / `__comfyTitleBar` bridge and so cannot reach
-      //     any of the title-bar IPCs (`comfy-window:open-title-menu`
-      //     etc.). The waffle / file menu is therefore unreachable
-      //     from a cloud-login / OAuth popup, by design.
-      //   - We don't override `titleBarStyle` / `titleBarOverlay`. Per
-      //     Electron's `setWindowOpenHandler` docs only security-related
-      //     `webPreferences` inherit from the parent — chrome-style
-      //     options reset to OS defaults — so the popup gets a normal
-      //     OS title bar and looks like a regular browser window.
-      //   - The macOS passkey-unavailable banner is still injected
-      //     against this popup via `did-create-window` →
-      //     `injectMacPasskeyWarning`, so cloud-login flows on macOS
-      //     keep the password+OTP affordance.
-      return { action: 'allow', overrideBrowserWindowOptions: { webPreferences: { preload: undefined } } }
-    }
-    shell.openExternal(childUrl)
-    return { action: 'deny' }
-  })
-  comfyContents.on('will-prevent-unload', (e) => {
-    e.preventDefault()
-  })
-  attachContextMenu(comfyWindow, comfyContents)
-
   // Bind the install — wires every install-keyed listener +
   // attachSessionDownloadHandler + comfyContents.loadURL, and stashes
   // a symmetric undo on `entry._installCleanup` (consumed by the
-  // close handler, and by `detachInstall()` once W-3c lands).
+  // close handler, and by `detachInstall()` for an in-place flip).
+  // Generic listeners (popup, window-open, context-menu) are pre-
+  // wired by `createHostWindow()` so attach/detach doesn't churn them.
   attachInstall(entry, { installation, comfyUrl, isLocal: !url })
 
   // Now that all wiring is in place, layout for the first time.
@@ -1968,9 +2024,21 @@ function openChooserHostWindow(): BrowserWindow {
       : titleBarOverlayForTheme(resolveTheme() === 'dark'),
     // Dummy comfyView. Kept so layoutViews doesn't have to special-
     // case the install-less branch — its body always resolves to
-    // the panelView. Minimal prefs (no preload, default partition)
-    // because the dummy view never loads a URL.
-    comfyWebPreferences: { nodeIntegration: false, contextIsolation: true },
+    // the panelView. Window-mode unification (Stage W-4) — uses the
+    // same comfy preload + `persist:shared` partition the install-
+    // backed default uses, so a chooser-pick `attachInstall()` can
+    // navigate this view in place to the install's URL without
+    // rebuilding the WebContentsView. The preload + partition are
+    // no-ops on the idle view (nothing loads it before attach).
+    // Unique-partition installs (`browserPartition === 'unique'`)
+    // still need a fresh window — the in-place attach falls through
+    // to `createHostWindow()` for that case.
+    comfyWebPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, '../preload/comfyPreload.js'),
+      partition: 'persist:shared',
+    },
     titleBarBackground: initialChooserTheme.bg,
     // Empty installationId URL param tells the title-bar Vue to enter
     // install-less mode (hide Install Settings pill, accept the
@@ -3012,6 +3080,39 @@ ipcMain.handle('close-host-window', (event) => {
       entry.window.close()
       return true
     }
+  }
+  return false
+})
+
+/**
+ * Window-mode unification (Stage W-4) — register an in-place attach
+ * claim against the calling install-less host window. Pre-launch
+ * step the chooser-host renderer runs right before kicking off the
+ * launch action: when the launch event eventually lands in
+ * `onLaunch()`, the claim redirects it to attach the install to
+ * THIS host window instead of constructing a fresh one. The user
+ * perceives the chooser body swapping in place to a running
+ * ComfyUI; no window swap, no flicker, no stale `closeHostWindow`
+ * race.
+ *
+ * Returns `true` when the claim was accepted (renderer should skip
+ * its fallback `closeHostWindow` + `transferHostBoundsToInstall`
+ * wiring); `false` when the sender isn't an install-less host's
+ * panelView (the renderer should fall back to the legacy
+ * close+open swap).
+ *
+ * The claim is best-effort: stale entries are dropped by `onLaunch`
+ * when the target window is closed or already install-backed by
+ * the time the launch event lands. `attachInstall()`'s consume
+ * also handles the destroyed/closed cases.
+ */
+ipcMain.handle('claim-attach-host', (event, installationId: string) => {
+  for (const [, entry] of comfyWindows) {
+    if (entry.window.isDestroyed()) continue
+    if (entry.panelView?.webContents !== event.sender) continue
+    if (entry.installationId !== null) return false
+    pendingAttachClaims.set(installationId, entry.windowKey)
+    return true
   }
   return false
 })
