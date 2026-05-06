@@ -1098,9 +1098,9 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
         'comfy-titlebar:app-update-state-changed',
         updater.getCurrentUpdateState(),
       )
-      void computeInstallUpdateAvailable(installationId).then((available) => {
+      void computeInstallUpdateAvailable(installationId).then((state) => {
         if (titleBarView.webContents.isDestroyed()) return
-        titleBarView.webContents.send('comfy-titlebar:install-update-changed', available)
+        titleBarView.webContents.send('comfy-titlebar:install-update-changed', state)
       })
     }
     // Pre-warm the title-menu popup so the user's first File / Install
@@ -1127,9 +1127,9 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
       currentInstallName = updated.name
       refreshOsWindowTitle()
     }
-    void computeInstallUpdateAvailable(installationId).then((available) => {
+    void computeInstallUpdateAvailable(installationId).then((state) => {
       if (titleBarView.webContents.isDestroyed()) return
-      titleBarView.webContents.send('comfy-titlebar:install-update-changed', available)
+      titleBarView.webContents.send('comfy-titlebar:install-update-changed', state)
     })
   }
   installationEvents.on('updated', onInstallationUpdated)
@@ -1932,19 +1932,29 @@ ipcMain.on('comfy-window:set-titlebar-inert', (event, payload: { inert: boolean 
  * Phase 3 §18 — install-update pill state. Reads the install record
  * via `getInstallation`, resolves its source via `sourceMap`, and
  * applies the same `getStatusTag()` rule the chooser cards / kebab
- * menu use (`statusTag.style === 'update'`). Returns `false` for
- * install-less host windows or when the install isn't found.
+ * menu use (`statusTag.style === 'update'`). Returns
+ * `{ available: false }` for install-less host windows or when the
+ * install isn't found.
+ *
+ * Track B item 1 — also surfaces the target `version` from the status
+ * tag so the title bar's install-update pill can read
+ * "Update v{version}" matching the app-update pill (rather than the
+ * generic "Update available"). Source plugins populate
+ * `StatusTag.version` next to the localised label.
  */
-async function computeInstallUpdateAvailable(installationId: string): Promise<boolean> {
-  if (!installationId) return false
+async function computeInstallUpdateAvailable(
+  installationId: string,
+): Promise<{ available: boolean; version?: string }> {
+  if (!installationId) return { available: false }
   try {
     const inst = await getInstallation(installationId)
-    if (!inst) return false
+    if (!inst) return { available: false }
     const source = sourceMap[inst.sourceId]
     const tag = source?.getStatusTag ? source.getStatusTag(inst) : undefined
-    return tag?.style === 'update'
+    if (tag?.style !== 'update') return { available: false }
+    return { available: true, version: tag.version }
   } catch {
-    return false
+    return { available: false }
   }
 }
 

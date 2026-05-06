@@ -78,6 +78,12 @@ export interface ActionResult {
 export interface StatusTag {
   label: string
   style: string
+  /** Raw version string the tag refers to (e.g. an `update`-style tag's
+   *  target release). Surfaces beyond the chooser tile (notably the
+   *  Comfy Instance title-bar install-update pill) want to show a
+   *  bare "Update v1.2.3" label without re-parsing the localised
+   *  `label`, so source plugins now expose the version separately. */
+  version?: string
 }
 
 export interface InstallStep {

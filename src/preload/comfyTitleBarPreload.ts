@@ -76,10 +76,16 @@ export interface ComfyTitleBarBridge {
     cb: (state: { kind: 'available' | 'ready' | null; version: string | null }) => void,
   ): () => void
   /** Subscribe to install-update state pushes (Phase 3 §18 status
-   *  pills). `true` when the install's `statusTag.style === 'update'`,
-   *  `false` otherwise. Only relevant on install-backed host windows;
-   *  install-less hosts never receive this signal. */
-  onInstallUpdateAvailable(cb: (available: boolean) => void): () => void
+   *  pills). `available` is `true` when the install's
+   *  `statusTag.style === 'update'`, `false` otherwise; `version`
+   *  carries the target release version when known so the pill can
+   *  read "Update v{version}" instead of the generic
+   *  "Update available" (Track B item 1). Only relevant on
+   *  install-backed host windows; install-less hosts never receive
+   *  this signal. */
+  onInstallUpdateAvailable(
+    cb: (state: { available: boolean; version: string | null }) => void,
+  ): () => void
   /** Click handler for the app-update pill. Main responds by sending
    *  `panel-trigger-overlay` to the host's panelView so the renderer
    *  can open the app-update popover via `openOverlay`. */
@@ -194,8 +200,11 @@ const bridge: ComfyTitleBarBridge = {
     return () => ipcRenderer.removeListener('comfy-titlebar:app-update-state-changed', handler)
   },
   onInstallUpdateAvailable: (cb) => {
-    const handler = (_event: IpcRendererEvent, available: unknown): void => {
-      cb(!!available)
+    const handler = (_event: IpcRendererEvent, state: unknown): void => {
+      const data = (state || {}) as { available?: unknown; version?: unknown }
+      const available = !!data.available
+      const version = typeof data.version === 'string' ? data.version : null
+      cb({ available, version })
     }
     ipcRenderer.on('comfy-titlebar:install-update-changed', handler)
     return () => ipcRenderer.removeListener('comfy-titlebar:install-update-changed', handler)

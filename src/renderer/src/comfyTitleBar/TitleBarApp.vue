@@ -57,11 +57,16 @@ interface Bridge {
   onAppUpdateStateChanged: (
     cb: (state: { kind: 'available' | 'ready' | null; version: string | null }) => void,
   ) => () => void
-  /** Phase 3 §18 — install-update flag pushes from main. `true` when
-   *  the install's `statusTag.style === 'update'`. Only meaningful on
-   *  install-backed host windows; install-less hosts never receive
-   *  this signal. Drives the title-bar install-update pill. */
-  onInstallUpdateAvailable: (cb: (available: boolean) => void) => () => void
+  /** Phase 3 §18 — install-update flag pushes from main. `available`
+   *  is `true` when the install's `statusTag.style === 'update'`;
+   *  `version` carries the target release version when known so the
+   *  pill can read "Update v{version}" (Track B item 1). Only
+   *  meaningful on install-backed host windows; install-less hosts
+   *  never receive this signal. Drives the title-bar install-update
+   *  pill. */
+  onInstallUpdateAvailable: (
+    cb: (state: { available: boolean; version: string | null }) => void,
+  ) => () => void
   /** Phase 3 §18 — click handler for the app-update pill. */
   clickAppUpdatePill: () => void
   /** Phase 3 §18 — click handler for the install-update pill. */
@@ -160,7 +165,10 @@ const appUpdateState = ref<{
   kind: 'available' | 'ready' | null
   version: string | null
 }>({ kind: null, version: null })
-const hasInstallUpdate = ref(false)
+const installUpdateState = ref<{ available: boolean; version: string | null }>({
+  available: false,
+  version: null,
+})
 
 const appUpdatePillLabel = computed<string | null>(() => {
   if (!appUpdateState.value.kind) return null
@@ -170,8 +178,20 @@ const appUpdatePillLabel = computed<string | null>(() => {
   return v ? `Update ${v}` : 'Update available'
 })
 
+/** Track B item 1 — install-update pill copy. Mirrors the app-update
+ *  pill's "Update {version}" format when main carries a target version
+ *  through the install's status tag, falling back to the generic
+ *  "Update available" label when no version is known (e.g. legacy
+ *  payloads or sources that don't surface one). */
+const installUpdatePillLabel = computed<string>(() => {
+  const v = installUpdateState.value.version
+  return v ? `Update ${v}` : 'Update available'
+})
+
 const showAppUpdatePill = computed(() => appUpdateState.value.kind !== null)
-const showInstallUpdatePill = computed(() => !isInstallLess.value && hasInstallUpdate.value)
+const showInstallUpdatePill = computed(
+  () => !isInstallLess.value && installUpdateState.value.available,
+)
 
 function handleAppUpdatePill(): void {
   if (isInert.value) return
@@ -317,8 +337,8 @@ onMounted(() => {
   unsubAppUpdate = bridge.onAppUpdateStateChanged((next) => {
     appUpdateState.value = next
   })
-  unsubInstallUpdate = bridge.onInstallUpdateAvailable((available) => {
-    hasInstallUpdate.value = available
+  unsubInstallUpdate = bridge.onInstallUpdateAvailable((next) => {
+    installUpdateState.value = next
   })
   window.addEventListener('blur', handleWindowBlur)
   window.addEventListener('pointermove', handlePointerMove)
@@ -458,12 +478,12 @@ onUnmounted(() => {
         type="button"
         class="title-update-pill is-install-update"
         :disabled="isInert"
-        title="Update available"
-        aria-label="Update available"
+        :title="installUpdatePillLabel"
+        :aria-label="installUpdatePillLabel"
         @click="handleInstallUpdatePill"
       >
         <Download :size="14" />
-        <span class="title-update-pill-label">Update available</span>
+        <span class="title-update-pill-label">{{ installUpdatePillLabel }}</span>
       </button>
     </div>
 
