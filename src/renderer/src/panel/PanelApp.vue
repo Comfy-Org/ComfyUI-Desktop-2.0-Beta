@@ -290,15 +290,6 @@ function dismissTakeoverDirect(): void {
   currentOverlay.value = null
 }
 
-/** First-use takeover ✕ / Escape — the user dismissed mid-flow. We
- *  do NOT mark `firstUseCompleted`, so the takeover replays on the
- *  next launch (the persisted gate is only flipped via the explicit
- *  `complete` emit or the chained new-install success path). */
-function handleFirstUseClose(): void {
-  chainingFirstUseToNewInstall.value = false
-  dismissTakeoverDirect()
-}
-
 /** First-use takeover Cloud-branch pick — one-shot completion. The
  *  chooser body underneath is what the user lands on (where they can
  *  pick the cloud install to launch via the normal launch flow). */
@@ -708,7 +699,6 @@ onUnmounted(() => {
       <FirstUseTakeover
         v-else-if="currentOverlay.component === 'first-use'"
         ref="firstUseRef"
-        @close="handleFirstUseClose"
         @complete="handleFirstUseComplete"
         @chain-local="handleFirstUseChainLocal"
       />

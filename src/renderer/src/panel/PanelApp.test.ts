@@ -482,21 +482,17 @@ describe('PanelApp', () => {
     expect(setSetting).toHaveBeenCalledWith('firstUseCompleted', true)
   })
 
-  it('does NOT mark firstUseCompleted on mid-flow first-use cancel', async () => {
-    mockState.settings.firstUseCompleted = false
-    window.history.replaceState({}, '', '/?panel=chooser')
-    const wrapper = mountPanel()
-    await flushPromises()
-    await wrapper.find('[data-testid="first-use-close"]').trigger('click')
-    await flushPromises()
-
-    const setSetting = (window as unknown as {
-      api: { setSetting: ReturnType<typeof vi.fn> }
-    }).api.setSetting
-    expect(setSetting).not.toHaveBeenCalledWith('firstUseCompleted', true)
-    expect(wrapper.find('[data-testid="first-use-takeover"]').exists()).toBe(false)
-    expect(wrapper.find('[data-testid="chooser-view"]').exists()).toBe(true)
-  })
+  // Post-Phase-3 polish: the first-use takeover dropped its in-app
+  // ✕ close button (first-use is a binding flow). Mid-flow dismissal
+  // now only happens via OS-chrome window close, which routes through
+  // `onCloseRequest` → `closeOverlay` (a renderer-internal direct
+  // mutation that doesn't go through any FirstUseTakeover emit). The
+  // "doesn't mark firstUseCompleted on mid-flow exit" guarantee is
+  // preserved because no code path between mount and the explicit
+  // Cloud / Local picks calls `markFirstUseCompleted` — the cloud /
+  // chain-local tests above already assert that ordering by checking
+  // `setSetting` hasn't been called with `firstUseCompleted` until the
+  // user makes the explicit pick.
 
   it('switches to the comfy-lifecycle view in response to a panel-switch IPC event', async () => {
     // Main flips us into 'comfy-lifecycle' when the install transitions out

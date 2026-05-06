@@ -37,14 +37,12 @@
  * are reset.
  */
 import { ref, computed, onMounted } from 'vue'
+import { Box, Cloud } from 'lucide-vue-next'
 import TakeoverHeader from '../components/TakeoverHeader.vue'
 
 type Step = 'consent' | 'mirrors' | 'pick'
 
 const emit = defineEmits<{
-  /** User dismissed mid-flow (✕ / Escape). Host should NOT mark
-   *  `firstUseCompleted` — the takeover replays on the next launch. */
-  close: []
   /** Cloud branch picked, or Local branch finished — host should flip
    *  `firstUseCompleted` and close the takeover. */
   complete: []
@@ -113,12 +111,19 @@ defineExpose({ open })
 
 <template>
   <div class="view-modal-content first-use-takeover">
+    <!-- Phase 3 §17 Step 4 / post-Phase-3 polish — first-use is a
+         binding flow, so the takeover deliberately omits the ✕ close
+         button that the other Tier 3 takeovers render. The user can
+         still close the host window via OS chrome (which routes through
+         `onCloseRequest` in main → `closeOverlay` in PanelApp) — but
+         there's no in-app dismiss affordance that drops them into the
+         dashboard mid-onboarding. See `docs/post-phase3-ux-polish.md`
+         (First Time Use). -->
     <div class="view-modal-header">
       <TakeoverHeader
         :title="$t('firstUse.grandTitle')"
         :subtitle="$t('firstUse.grandSubtitle')"
       />
-      <button class="view-modal-close" @click="emit('close')">✕</button>
     </div>
     <div class="view-modal-body">
       <div class="view-scroll">
@@ -141,26 +146,36 @@ defineExpose({ open })
           <p class="first-use-lead">{{ $t('settings.chineseMirrorsSuggestMessage') }}</p>
         </template>
 
-        <!-- Step 3: Cloud vs Local picker -->
+        <!-- Step 3: Cloud vs Local picker.
+             Post-Phase-3 polish — laid out as two big horizontal
+             squares (Local on the left, Cloud on the right) so the
+             choice reads like a real fork in the road, not a pair of
+             checkbox-sized cards. Each tile is a generous click target
+             with the source-category icon ChooserView already uses
+             for the same install kinds (`Box` for Local, `Cloud` for
+             Cloud) so the iconography matches what the user will see
+             on the dashboard once they're past first-use. -->
         <template v-else-if="step === 'pick'">
           <h3 class="first-use-step-title">{{ $t('firstUse.pickTitle') }}</h3>
           <p class="first-use-lead">{{ $t('firstUse.pickLead') }}</p>
-          <div class="first-use-cards">
+          <div class="first-use-fork">
             <button
-              class="first-use-card"
-              data-testid="first-use-pick-cloud"
-              @click="pickCloud"
-            >
-              <div class="first-use-card-title">{{ $t('cloud.label') }}</div>
-              <div class="first-use-card-desc">{{ $t('cloud.desc') }}</div>
-            </button>
-            <button
-              class="first-use-card"
+              class="first-use-fork-tile"
               data-testid="first-use-pick-local"
               @click="pickLocal"
             >
-              <div class="first-use-card-title">{{ $t('firstUse.localLabel') }}</div>
-              <div class="first-use-card-desc">{{ $t('firstUse.localDesc') }}</div>
+              <div class="first-use-fork-icon"><Box :size="64" :stroke-width="1.5" /></div>
+              <div class="first-use-fork-title">{{ $t('firstUse.localLabel') }}</div>
+              <div class="first-use-fork-desc">{{ $t('firstUse.localDesc') }}</div>
+            </button>
+            <button
+              class="first-use-fork-tile"
+              data-testid="first-use-pick-cloud"
+              @click="pickCloud"
+            >
+              <div class="first-use-fork-icon"><Cloud :size="64" :stroke-width="1.5" /></div>
+              <div class="first-use-fork-title">{{ $t('cloud.label') }}</div>
+              <div class="first-use-fork-desc">{{ $t('cloud.desc') }}</div>
             </button>
           </div>
         </template>
@@ -250,41 +265,79 @@ defineExpose({ open })
   margin-top: 8px;
 }
 
-.first-use-cards {
+/* Two-tile fork layout for the cloud-vs-local pick. The tiles want
+ * to read as a real choice, not a pair of checkbox-sized cards — each
+ * one is a generous click target with the icon centered above the
+ * title and a short description underneath. The tiles stay side-by-side
+ * on the panel's normal width and shrink to a single column only on
+ * very narrow viewports (the host window has a min width that keeps
+ * the side-by-side layout for any realistic user). */
+.first-use-fork {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 16px;
-  margin-top: 16px;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  margin-top: 24px;
 }
 
-.first-use-card {
+@media (max-width: 600px) {
+  .first-use-fork {
+    grid-template-columns: 1fr;
+  }
+}
+
+.first-use-fork-tile {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 18px;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  /* Square-ish click target — `aspect-ratio` keeps the tiles balanced
+   * when the available width changes, with a min-height floor so the
+   * tile never collapses below a comfortable click target. */
+  aspect-ratio: 1 / 1;
+  min-height: 240px;
+  padding: 24px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 12px;
   background: var(--surface);
   color: var(--text);
-  text-align: left;
+  text-align: center;
   cursor: pointer;
-  transition: border-color 120ms ease, background 120ms ease;
+  transition: border-color 120ms ease, background 120ms ease, transform 120ms ease;
 }
 
-.first-use-card:hover {
+.first-use-fork-tile:hover {
   border-color: var(--accent);
   background: var(--surface-hover, var(--surface));
+  transform: translateY(-1px);
 }
 
-.first-use-card-title {
-  font-size: 16px;
+.first-use-fork-tile:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.first-use-fork-icon {
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.first-use-fork-tile:hover .first-use-fork-icon {
+  color: var(--accent);
+}
+
+.first-use-fork-title {
+  font-size: 20px;
   font-weight: 600;
 }
 
-.first-use-card-desc {
+.first-use-fork-desc {
   font-size: 13px;
   line-height: 1.5;
   color: var(--text-muted);
+  max-width: 32ch;
 }
 
 .first-use-mirror-buttons {
