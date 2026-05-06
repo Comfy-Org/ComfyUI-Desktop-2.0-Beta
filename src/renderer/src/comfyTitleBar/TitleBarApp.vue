@@ -698,11 +698,8 @@ onUnmounted(() => {
   position: relative;
   display: flex;
   align-items: center;
-  /* Symmetric base padding. The OS-specific reservations (traffic
-     lights on macOS, native window controls on Win/Linux) are pushed
-     down onto `.title-left` / `.drag-spacer` so the absolutely-
-     positioned center cluster stays anchored to true window center
-     independent of either inset. See issue #477. */
+  /* Symmetric base padding. OS-chrome reservations live on the side
+     children so the center cluster anchors to true window center. */
   height: 100vh;
   width: 100vw;
   padding-left: 12px;
@@ -734,10 +731,7 @@ onUnmounted(() => {
      overlap them. */
   z-index: 1;
 }
-/* macOS: shift the left cluster past the traffic light buttons. The
-   bar's own padding stays symmetric so the centered install pill
-   doesn't drift right with the inset (issue #477). 66px = 78px
-   traffic-light reservation − 12px symmetric base padding. */
+/* macOS: shift past the traffic lights (78px reservation − 12px base padding). */
 .title-bar.is-mac .title-left {
   margin-left: 66px;
 }
@@ -747,11 +741,7 @@ onUnmounted(() => {
 }
 
 .title-center {
-  /* Anchored to true window center so the install pill is centered
-     against the window, not against whatever residual flex space
-     remains after the asymmetric OS chrome insets. The cluster
-     shrink-wraps around its content (Back/Forward + install pill +
-     optional install-update pill). */
+  /* Anchored to true window center; shrink-wraps around its content. */
   position: absolute;
   left: 50%;
   top: 50%;
