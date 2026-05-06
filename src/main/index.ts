@@ -33,7 +33,7 @@ import { shouldOpenInPopup } from './lib/allowedPopups'
 import { showModelFolderRelaunchPage } from './lib/relaunchPage'
 import { COMFY_BG, SPLASH_DARK, TITLEBAR_BG, type SplashTheme } from './lib/theme'
 import { TITLEBAR_HEIGHT, TRAFFIC_LIGHT_POSITION, comfyTitleBarOverlay, titleBarOverlayForTheme } from './lib/titleBarOverlay'
-import { resolveTheme, sourceMap, _registerExtraBroadcastTarget, _unregisterExtraBroadcastTarget, _runningSessions, _broadcastToRenderer } from './lib/ipc/shared'
+import { resolveTheme, sourceMap, _registerExtraBroadcastTarget, _unregisterExtraBroadcastTarget, _runningSessions, _broadcastToRenderer, _operationAborts } from './lib/ipc/shared'
 import * as mainTelemetry from './lib/telemetry'
 import { getDeviceId } from './lib/deviceId'
 import { scrubAll } from './lib/piiScrub'
@@ -285,8 +285,28 @@ interface ComfyWindowEntry {
    * the "is this entry install-backed?" decision so `computeBodyMode()`
    * can route the Comfy pill to the chooser without parallel branches in
    * every call site.
+   *
+   * Window-mode unification: this is `null` at construction time for
+   * EVERY host (createHostWindow always builds install-less); the
+   * install-backed wrapper (and the W-4 chooser-pick claim path) call
+   * `attachInstall()` immediately afterwards to populate it. Treating
+   * the field as "set only by attachInstall, cleared only by
+   * _installCleanup" is what lets `attachInstall`'s already-attached
+   * guard work without a chicken-and-egg mismatch on first construction.
    */
   installationId: string | null
+  /**
+   * Window-mode unification — the partition string the comfyView was
+   * constructed with. Pinned at construction (Electron has no API to
+   * change a WebContentsView's partition without rebuilding it), so a
+   * W-4 chooser-pick claim must reject any install whose partition
+   * doesn't match this. Without this gate, attaching a non-unique
+   * install (`persist:shared`) to a host that was previously install-
+   * backed by a unique-partition install (`persist:${prevId}`) leaks
+   * the new install's session data into the previous install's
+   * partition bucket. See post-unification-code-review.md F1.
+   */
+  constructedPartition: string | null
   /**
    * Modal-unification (Track M-2.2) — current step of the first-use
    * takeover, cached on the entry so `buildTitleMenuItems` can read it
@@ -1063,8 +1083,6 @@ function injectMacPasskeyWarning(childWindow: BrowserWindow): void {
  * the bounds-key collapse made restoring meaningful for them).
  */
 interface CreateHostWindowOpts {
-  /** Install backing this window, or `null` for chooser hosts. */
-  installationId: string | null
   /** Initial OS-level window title (full string, including app-version suffix). */
   windowTitle: string
   /** Bounds-persistence cache key. */
@@ -1207,6 +1225,13 @@ function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowResult {
     return { action: 'deny' }
   })
   comfyContents.on('will-prevent-unload', (e) => {
+    // Window-mode unification — only suppress beforeunload prompts
+    // while an install is actively backing this view. A detached host
+    // (chooser mode, comfyView at `about:blank` or a stray late
+    // navigation) shouldn't silently swallow user-driven dialogs.
+    // See post-unification-code-review.md F15.
+    const liveEntry = comfyWindows.get(windowKey)
+    if (!liveEntry || liveEntry.installationId === null) return
     e.preventDefault()
   })
   attachContextMenu(comfyWindow, comfyContents)
@@ -1357,6 +1382,15 @@ function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowResult {
     // primary windowKey AND the secondary install-id index.
     const closedEntry = comfyWindows.get(windowKey)
     if (closedEntry) unregisterHostEntry(closedEntry)
+    // Window-mode unification — drop any pending W-4 attach claim
+    // whose target is THIS window. Without this, stale entries pile
+    // up over the app's lifetime AND can be silently consumed by an
+    // unrelated future `onLaunch()` (the consumer's destroyed-window
+    // check rejects them, but the side-effect `delete` still fires).
+    // See post-unification-code-review.md F2.
+    for (const [installationId, claimedKey] of pendingAttachClaims) {
+      if (claimedKey === windowKey) pendingAttachClaims.delete(installationId)
+    }
   })
 
   const entry: ComfyWindowEntry = {
@@ -1371,7 +1405,19 @@ function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowResult {
     lastTheme: opts.initialTheme,
     layoutViews,
     comfyUrl: '',
-    installationId: opts.installationId,
+    // ALWAYS install-less at construction. The install-backed wrapper
+    // calls `attachInstall()` immediately after this returns, which is
+    // the only place that populates `installationId` (and the secondary
+    // index). Pre-fix this field was seeded from `opts.installationId`,
+    // which made `attachInstall()` throw on its already-attached guard
+    // for every install-backed launch that fell past the existing-entry
+    // and claim branches in `onLaunch()` — broken for unique-partition
+    // installs (Standalone / Portable) launched from a chooser host.
+    installationId: null,
+    constructedPartition:
+      typeof opts.comfyWebPreferences.partition === 'string'
+        ? opts.comfyWebPreferences.partition
+        : null,
     firstUseMode: 'none',
     titleBarText: opts.initialTitleBarText,
     sourceCategory: opts.initialSourceCategory,
@@ -1386,6 +1432,23 @@ function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowResult {
   registerHostEntry(entry)
 
   return { windowKey, comfyWindow, titleBarView, comfyView, entry, layoutViews }
+}
+
+/**
+ * Window-mode unification — resolve the comfyView session partition
+ * an install must be loaded into. Unique-partition installs
+ * (`browserPartition === 'unique'`) get their own `persist:${id}`
+ * bucket so cookies / IndexedDB / Service Workers don't leak across
+ * sibling installs; everything else shares `persist:shared`. Used by
+ * both the install-backed wrapper (constructing a fresh comfyView)
+ * and the W-4 chooser-pick claim acceptance check (rejecting claims
+ * where the host's pinned partition doesn't match what the new
+ * install needs).
+ */
+function expectedPartitionFor(installation: InstallationRecord): string {
+  return (installation.browserPartition as string | undefined) === 'unique'
+    ? `persist:${installation.id}`
+    : 'persist:shared'
 }
 
 function onLaunch({ port, url, process: proc, installation, mode }: {
@@ -1427,32 +1490,41 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
   // `comfy-window:claim-attach-host` right before kicking off the
   // launch action, so by the time the launch event lands here the
   // claim's already in the map. Honour it only when the target host
-  // is still alive AND still install-less AND its comfyView's
-  // partition (pinned at construction) is compatible with the
-  // install — chooser hosts are built with `persist:shared` +
-  // comfyPreload, which matches the install-backed default; only
-  // unique-partition installs (`browserPartition === 'unique'`)
-  // mismatch and fall through to the legacy fresh-window path.
+  // is still alive, still install-less, AND its comfyView's partition
+  // (pinned at construction — Electron has no API to change a
+  // WebContentsView's partition without rebuilding the view) MATCHES
+  // the install's expected partition. Without the equality check, a
+  // host previously install-backed by a unique-partition install A
+  // (`persist:A.id`) that was detached via Return-to-Dashboard would
+  // accept a chooser-pick claim for any non-unique install B and
+  // load B's URL into A's session bucket — leaking session data
+  // between installs (post-unification-code-review.md F1).
   const claimedKey = pendingAttachClaims.get(installationId)
   if (claimedKey !== undefined) {
     pendingAttachClaims.delete(installationId)
     const claimed = comfyWindows.get(claimedKey)
-    const wantsUniquePartition =
-      (installation.browserPartition as string | undefined) === 'unique'
+    const expectedPartition = expectedPartitionFor(installation)
     if (
       claimed &&
       !claimed.window.isDestroyed() &&
       claimed.installationId === null &&
-      !wantsUniquePartition
+      claimed.constructedPartition === expectedPartition
     ) {
-      attachInstall(claimed, { installation, comfyUrl, isLocal: !url })
-      claimed.layoutViews()
-      if (proc) {
-        proc.on('exit', () => {
-          // Session registry handles state cleanup
-        })
+      const ok = attachInstall(claimed, { installation, comfyUrl, isLocal: !url })
+      if (ok) {
+        claimed.layoutViews()
+        if (proc) {
+          proc.on('exit', () => {
+            // Session registry handles state cleanup
+          })
+        }
+        return
       }
-      return
+      // Attach failed (telemetry-only — every current call site
+      // gates on installationId === null but the boolean return
+      // keeps us from blowing up if a future caller forgets). Fall
+      // through to the legacy fresh-window path below so the user
+      // still gets the install they asked for.
     }
   }
 
@@ -1471,7 +1543,6 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
   const initialSourceCategory = sourceMap[installation.sourceId]?.category ?? null
 
   const { entry } = createHostWindow({
-    installationId,
     windowTitle: `${installation.name} — Desktop 2.0 v${APP_VERSION}`,
     boundsKey: installationId,
     initialTheme: { bg: COMFY_BG, text: '#dddddd' },
@@ -1480,9 +1551,7 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
       nodeIntegration: false,
       contextIsolation: true,
       preload: path.join(__dirname, '../preload/comfyPreload.js'),
-      partition: (installation.browserPartition as string | undefined) === 'unique'
-        ? `persist:${installation.id}`
-        : 'persist:shared',
+      partition: expectedPartitionFor(installation),
     },
     titleBarBackground: TITLEBAR_BG,
     titleBarInstallationIdParam: installationId,
@@ -1496,7 +1565,16 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
   // close handler, and by `detachInstall()` for an in-place flip).
   // Generic listeners (popup, window-open, context-menu) are pre-
   // wired by `createHostWindow()` so attach/detach doesn't churn them.
-  attachInstall(entry, { installation, comfyUrl, isLocal: !url })
+  // attachInstall returns false only if the entry is already attached
+  // — which can't happen on a freshly-constructed entry today, but
+  // tear the just-created window down cleanly on the off-chance a
+  // future regression breaks the install-less-at-construction
+  // invariant. See post-unification-code-review.md F11.
+  const attached = attachInstall(entry, { installation, comfyUrl, isLocal: !url })
+  if (!attached) {
+    entry.window.destroy()
+    return
+  }
 
   // Now that all wiring is in place, layout for the first time.
   // (The shared helper deferred this so the wrapper could install
@@ -1551,12 +1629,32 @@ interface AttachInstallOpts {
   isLocal: boolean
 }
 
-function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts): void {
+function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts): boolean {
   if (entry.installationId !== null) {
-    throw new Error(
+    // Defensive — every current call site gates on
+    // `entry.installationId === null`, but a future caller that
+    // forgets the guard would otherwise take down the entire
+    // launch flow with an uncaught exception in main. Surface
+    // the violation to telemetry and let the caller fall back
+    // (the install-backed wrapper destroys the just-created
+    // host; the claim path skips the in-place attach and the
+    // wrapper recovers). See post-unification-code-review.md F11.
+    const message =
       `attachInstall: entry windowKey=${entry.windowKey} is already attached to ` +
-        `installationId=${entry.installationId}; detach first`,
-    )
+      `installationId=${entry.installationId}; detach first`
+    console.error(message)
+    forwardDatadogError({
+      source: 'attach-install-already-attached',
+      message,
+      level: 'error',
+      context: {
+        origin: 'main-process',
+        windowKey: String(entry.windowKey),
+        existingInstallationId: entry.installationId,
+        attemptedInstallationId: opts.installation.id,
+      },
+    })
+    return false
   }
   const { installation, comfyUrl, isLocal } = opts
   const installationId = installation.id
@@ -1786,6 +1884,30 @@ function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts): void {
     }
     const id = entry.installationId
     if (id !== null) {
+      // Abort any in-flight install / migrate / quick-install /
+      // update-while-running op for this install BEFORE killing the
+      // running session. Renderer-side overlay `onCancel` is the
+      // happy-path rollback prompt; this is the safety net that
+      // fires when the renderer side has no overlay mounted (e.g.
+      // window-close consult returns `cleared: true` immediately
+      // because the panel state is empty). Without it, in-flight
+      // operations continued running orphaned in main after window
+      // teardown — the rollback hole called out in
+      // post-unification-code-review.md F7.
+      const inFlight = _operationAborts.get(id)
+      if (inFlight) {
+        inFlight.abort()
+        _operationAborts.delete(id)
+      }
+      // Detach the relaunch will-navigate blocker before clearing the
+      // map slot — without `comfyContents.off(...)`, a re-attach
+      // (W-3c → W-4) would inherit a still-active blocker that
+      // preventDefaults every navigation until the comfyContents
+      // itself is destroyed. See post-unification-code-review.md F8.
+      const relaunch = relaunchStates.get(id)
+      if (relaunch && !comfyContents.isDestroyed()) {
+        comfyContents.off('will-navigate', relaunch.navBlocker)
+      }
       ipc.stopRunning(id)
       comfyFailRetryTimerCancels.delete(id)
       relaunchStates.delete(id)
@@ -1794,6 +1916,7 @@ function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts): void {
     }
     entry.comfyUrl = ''
   }
+  return true
 }
 
 /**
@@ -1846,11 +1969,13 @@ function _detachInstallImpl(entry: ComfyWindowEntry): void {
 
   // Step 2 — release the loaded ComfyUI page. The comfyView is kept
   // alive so a subsequent attachInstall() can navigate it back
-  // without a fresh WebContentsView construction (the partition is
-  // fixed at construction so it carries over; per the W-3 risk
-  // notes, attaching to a different unique-partition install on the
-  // same host window is a known limitation that needs visual review
-  // in W-4).
+  // without a fresh WebContentsView construction. The partition is
+  // fixed at construction (Electron has no API to change it without
+  // rebuilding the view) — `entry.constructedPartition` carries the
+  // pinned value forward, and `onLaunch()`'s claim-acceptance check
+  // refuses any install whose `expectedPartitionFor()` doesn't
+  // match. Cross-partition re-attaches fall through to the legacy
+  // fresh-window path — see post-unification-code-review.md F1.
   if (!entry.comfyView.webContents.isDestroyed()) {
     void entry.comfyView.webContents.loadURL('about:blank').catch(() => {})
     entry.comfyView.setBackgroundColor(COMFY_BG)
@@ -2011,7 +2136,6 @@ function openChooserHostWindow(): BrowserWindow {
   const initialChooserTheme = getChooserHostTheme()
 
   const { comfyWindow, entry } = createHostWindow({
-    installationId: null,
     windowTitle: `Choose an install — Desktop 2.0 v${APP_VERSION}`,
     boundsKey: CHOOSER_HOST_BOUNDS_KEY,
     initialTheme: initialChooserTheme,
@@ -3107,6 +3231,31 @@ ipcMain.handle('close-host-window', (event) => {
  * also handles the destroyed/closed cases.
  */
 ipcMain.handle('claim-attach-host', (event, installationId: string) => {
+  // Prune a stale existing claim before testing the duplicate-claim
+  // guard below — a claim whose target window is already destroyed or
+  // has since been install-backed by another launch isn't a real
+  // contender, so a fresh chooser-host pick should be allowed to
+  // overwrite it. See post-unification-code-review.md F2 / F3.
+  const existing = pendingAttachClaims.get(installationId)
+  if (existing !== undefined) {
+    const existingEntry = comfyWindows.get(existing)
+    if (
+      !existingEntry ||
+      existingEntry.window.isDestroyed() ||
+      existingEntry.installationId !== null
+    ) {
+      pendingAttachClaims.delete(installationId)
+    } else {
+      // A live, install-less host already holds a claim for this
+      // install — refuse the duplicate so two chooser hosts racing
+      // to launch the same install can't silently misdirect the
+      // attach to whichever happened to set its claim last. The
+      // renderer falls back to the legacy close-host swap, which
+      // also matches the outcome the second `handleLaunch()` will
+      // get (`errors.alreadyRunning`).
+      return false
+    }
+  }
   for (const [, entry] of comfyWindows) {
     if (entry.window.isDestroyed()) continue
     if (entry.panelView?.webContents !== event.sender) continue
