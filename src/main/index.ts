@@ -2161,6 +2161,24 @@ function buildTitleMenuItems(kind: 'file' | 'install', entry: ComfyWindowEntry):
       { id: 'close-window', label: 'Close Window' },
       { id: 'close-all-windows', label: 'Close All Windows' },
       { kind: 'separator' },
+    )
+    // Track B item 3 — install-creation / import flows live ONLY on
+    // the dashboard (chooser-host) waffle menu. Once the user is in
+    // a Comfy Instance window the only Desktop-2 escape hatch is
+    // "Return to Dashboard" — there is no silent overlap with another
+    // running install. The install-backed branch must NOT reach these
+    // panels (no setActivePanel('new-install') etc. via the file
+    // menu) so the in-Comfy chrome stays closed-off, matching the
+    // post-Phase-3 design doc's "Comfy Instance is closed-off" rule.
+    if (entry.installationId === null) {
+      items.push(
+        { id: 'new-install', label: 'New Install' },
+        { id: 'track', label: 'Track Existing Install' },
+        { id: 'load-snapshot', label: 'Load Snapshot' },
+        { kind: 'separator' },
+      )
+    }
+    items.push(
       { id: 'directories', label: 'Directories', checked: entry.activePanel === 'directories' },
       { id: 'launcher-settings', label: 'App Settings' },
     )
@@ -2433,6 +2451,17 @@ function activateTitleMenuItem(entry: TitleMenuPopupEntry, id: string): void {
       void confirmAndCloseAllHostWindows(parentWindow)
     } else if (id === 'directories') setActivePanel(entry.parentEntryId, 'directories')
     else if (id === 'launcher-settings') setActivePanel(entry.parentEntryId, 'launcher-settings')
+    else if (id === 'new-install' || id === 'track' || id === 'load-snapshot' || id === 'quick-install') {
+      // Track B item 3 — install-creation / import flows are
+      // chooser-host-only. `buildTitleMenuItems` already filters them
+      // out of the install-backed file menu; this guard is the
+      // belt-and-braces so a stale popup or an out-of-order IPC
+      // can't navigate an in-Comfy host into one of these panels.
+      const parentEntry = comfyWindows.get(entry.parentEntryId)
+      if (parentEntry?.installationId === null) {
+        setActivePanel(entry.parentEntryId, id)
+      }
+    }
   } else {
     if (id === 'install-settings') setActivePanel(entry.parentEntryId, 'install-settings')
   }
