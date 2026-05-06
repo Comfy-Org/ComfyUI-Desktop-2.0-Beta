@@ -715,14 +715,39 @@ const preClearedClose = new WeakSet<BrowserWindow>()
  *
  * Falls back to "cleared" when the panelView is missing (no panel
  * has been mounted yet — nothing to lose), the webContents is
- * destroyed (already torn down), or the renderer doesn't reply
- * within 5s (a hung renderer shouldn't permanently wedge close).
+ * destroyed (already torn down), the renderer doesn't ack receipt
+ * of the request within 2s (hung renderer), or the underlying
+ * webContents goes away (render-process-gone / destroyed).
+ *
+ * Important: once the renderer acks receipt we wait INDEFINITELY for
+ * the actual response. The renderer might be showing a confirmation
+ * modal that the user takes their time on; an extra fixed timeout
+ * here would force-close the window out from under that prompt
+ * (which was the bug observed when a sub-5s prompt-response window
+ * triggered an unconfirmed close).
  */
 async function consultPanelRendererClose(panelView: WebContentsView | null | undefined): Promise<boolean> {
   if (!panelView || panelView.webContents.isDestroyed()) return true
   return new Promise<boolean>((resolve) => {
     const requestId = `close-${Date.now()}-${Math.random().toString(36).slice(2)}`
     let settled = false
+    let acked = false
+    const cleanup = (): void => {
+      ipcMain.off('comfy-window:request-close-ack', onAck)
+      ipcMain.off('comfy-window:request-close-response', onResponse)
+      if (!panelView.webContents.isDestroyed()) {
+        panelView.webContents.off('render-process-gone', onCrash)
+        panelView.webContents.off('destroyed', onCrash)
+      }
+    }
+    const onAck = (
+      event: Electron.IpcMainEvent,
+      payload: { requestId?: string } | undefined,
+    ): void => {
+      if (event.sender !== panelView.webContents) return
+      if (payload?.requestId !== requestId) return
+      acked = true
+    }
     const onResponse = (
       event: Electron.IpcMainEvent,
       payload: { requestId?: string; cleared?: boolean } | undefined,
@@ -731,24 +756,36 @@ async function consultPanelRendererClose(panelView: WebContentsView | null | und
       if (payload?.requestId !== requestId) return
       if (settled) return
       settled = true
-      ipcMain.off('comfy-window:request-close-response', onResponse)
+      cleanup()
       resolve(!!payload?.cleared)
     }
+    const onCrash = (): void => {
+      if (settled) return
+      settled = true
+      cleanup()
+      resolve(true)
+    }
+    ipcMain.on('comfy-window:request-close-ack', onAck)
     ipcMain.on('comfy-window:request-close-response', onResponse)
+    panelView.webContents.on('render-process-gone', onCrash)
+    panelView.webContents.on('destroyed', onCrash)
     try {
       panelView.webContents.send('comfy-window:request-close', { requestId })
     } catch {
       settled = true
-      ipcMain.off('comfy-window:request-close-response', onResponse)
+      cleanup()
       resolve(true)
       return
     }
+    // Hung-renderer safety: only fires if we never got the ack. Once
+    // the renderer acks receipt we trust it to either reply or have
+    // its webContents torn down (render-process-gone covers that).
     setTimeout(() => {
-      if (settled) return
+      if (settled || acked) return
       settled = true
-      ipcMain.off('comfy-window:request-close-response', onResponse)
+      cleanup()
       resolve(true)
-    }, 5000)
+    }, 2000)
   })
 }
 

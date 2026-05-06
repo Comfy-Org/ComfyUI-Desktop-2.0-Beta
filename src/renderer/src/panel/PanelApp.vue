@@ -842,6 +842,12 @@ onMounted(async () => {
   // along with the original `requestId` so main can pair it with the
   // request that fired it.
   unsubCloseRequest = window.api.onCloseRequest(({ requestId }) => {
+    // Ack synchronously so main extends its hung-renderer timeout —
+    // the actual response can take arbitrary time when the user is
+    // looking at a cancel-prompt confirmation modal, and the old
+    // 5s response timeout was racing slow user input and force-
+    // closing the window.
+    window.api.ackCloseRequest({ requestId })
     void (async () => {
       const cleared = currentOverlay.value === null ? true : await closeOverlay()
       window.api.respondCloseRequest({ requestId, cleared })

@@ -239,6 +239,7 @@ function installMockApi(initial?: {
     // suite never fires the consult so the mock is a no-op pair.
     onCloseRequest: vi.fn(() => () => {}),
     respondCloseRequest: vi.fn(),
+    ackCloseRequest: vi.fn(),
     onInstallationsChanged: vi.fn((cb: () => void) => {
       state.installationsChangedCallbacks.push(cb)
       return () => {}
