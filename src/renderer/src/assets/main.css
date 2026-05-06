@@ -536,6 +536,14 @@ input[type="checkbox"]:checked::after { transform: translateX(16px); }
 }
 /* Width variant — narrower for per-install Manage / Preferences / confirms. */
 .view-modal-content--regular { max-width: 600px; }
+/* Progress modal — steady height so the box doesn't jump as steps stream
+ * in / terminal toggles open. Caps to viewport so very long progress
+ * still scrolls within the body. */
+.view-modal-content.progress-modal-content {
+  height: 540px;
+  min-height: 540px;
+  max-height: calc(100vh - 60px - var(--titlebar-height));
+}
 /* Inline mode (used by the embedded install-settings panel inside ComfyUI windows). */
 .view-modal-content.view-modal-inline {
   width: 100%; height: 100%;

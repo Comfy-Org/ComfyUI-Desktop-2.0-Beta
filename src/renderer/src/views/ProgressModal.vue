@@ -234,6 +234,7 @@ defineExpose({ startOperation, showOperation })
   <Modal
     v-if="installationId && currentOp"
     :binding="binding"
+    content-class="progress-modal-content"
     @close="emit('close')"
   >
     <div class="view-modal-header">
