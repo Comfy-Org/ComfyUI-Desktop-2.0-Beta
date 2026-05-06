@@ -227,6 +227,12 @@ function installMockApi(initial?: {
     setSetting: vi.fn(async (key: string, value: unknown) => {
       state.settings[key] = value
     }),
+    // Post-Phase-3 polish: PanelApp's first-use takeover host fetches
+    // the categorised install state to decide whether to skip the
+    // cloud-vs-local pick step. Default mock is "fresh user" — no
+    // prior installs, no legacy desktop — so the takeover advances
+    // through every step exactly as it did before.
+    getFirstUseState: vi.fn(async () => ({ skipPick: false, hasLegacyDesktop: false })),
   }
   ;(window as unknown as { api: typeof api }).api = api
   return state

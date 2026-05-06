@@ -6,6 +6,7 @@ import {
 } from './shared'
 import { updateTitleBarOverlay } from '../titleBarOverlay'
 import * as mainTelemetry from '../telemetry'
+import { detectFirstUseState } from '../firstUseDetection'
 
 export function registerSettingsHandlers(): void {
   ipcMain.handle('get-settings-sections', () => {
@@ -151,6 +152,13 @@ export function registerSettingsHandlers(): void {
   // (which reflects the user's `language` setting + app.getLocale()
   // fallback as initialised in main/index.ts).
   ipcMain.handle('get-locale', () => i18n.getLocale())
+
+  // Post-Phase-3 polish: the first-use takeover asks for a categorised
+  // snapshot of the persisted installs so it can decide whether to
+  // skip the cloud-vs-local pick (returning user) and whether to surface
+  // the migrate-vs-install-new sub-step on the Local branch (legacy
+  // desktop install present). See `firstUseDetection.ts`.
+  ipcMain.handle('get-first-use-state', () => detectFirstUseState())
 
   ipcMain.handle('get-resolved-theme', () => resolveTheme())
 

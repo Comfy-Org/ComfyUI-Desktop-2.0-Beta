@@ -55,6 +55,14 @@ const emit = defineEmits<{
 const step = ref<Step>('consent')
 const telemetryEnabled = ref(true)
 const locale = ref('en')
+/** Post-Phase-3 polish — when the host detects prior usage of the
+ *  launcher (any non-cloud, non-legacy-desktop install present), the
+ *  cloud-vs-local pick step is suppressed: the user's already made
+ *  the choice, no need to re-litigate. The takeover stops at consent
+ *  (and the optional China-mirror sub-step) and emits `complete`
+ *  instead of advancing to `pick`. Detection lives in main —
+ *  `window.api.getFirstUseState()` — and is plumbed in via `open()`. */
+const skipPick = ref(false)
 
 const isChinese = computed(() => locale.value.startsWith('zh'))
 
@@ -64,7 +72,16 @@ const isChinese = computed(() => locale.value.startsWith('zh'))
  *  current persisted state, not as a freshly-defaulted opt-in). */
 async function acceptConsent(): Promise<void> {
   await window.api.setSetting('telemetryEnabled', telemetryEnabled.value)
-  step.value = isChinese.value ? 'mirrors' : 'pick'
+  // skipPick suppresses the pick step entirely. China-mirror sub-step
+  // still runs first when the locale calls for it, then the takeover
+  // emits `complete` instead of ever advancing to `pick`.
+  if (isChinese.value) {
+    step.value = 'mirrors'
+  } else if (skipPick.value) {
+    emit('complete')
+  } else {
+    step.value = 'pick'
+  }
 }
 
 /** Step 2 — the China-mirror prompt always advances regardless of
@@ -76,7 +93,11 @@ async function chooseMirrors(useMirrors: boolean): Promise<void> {
     window.api.setSetting('useChineseMirrors', useMirrors),
     window.api.setSetting('chineseMirrorsPrompted', true),
   ])
-  step.value = 'pick'
+  if (skipPick.value) {
+    emit('complete')
+  } else {
+    step.value = 'pick'
+  }
 }
 
 function pickCloud(): void {
@@ -87,8 +108,15 @@ function pickLocal(): void {
   emit('chain-local')
 }
 
-async function open(): Promise<void> {
+interface OpenOpts {
+  /** Suppress the cloud-vs-local pick — caller has already detected
+   *  that the user has prior launcher usage. Defaults to false. */
+  skipPick?: boolean
+}
+
+async function open(opts: OpenOpts = {}): Promise<void> {
   step.value = 'consent'
+  skipPick.value = opts.skipPick === true
   // Pre-load existing telemetry preference so the toggle reflects the
   // user's current persisted choice if the takeover is replaying after
   // a mid-flow cancel (the consent step is the only one that can flip

@@ -28,6 +28,10 @@ const api: ElectronApi = {
   getAvailableLocales: () => ipcRenderer.invoke('get-available-locales'),
   getLocale: () => ipcRenderer.invoke('get-locale'),
 
+  // First-use takeover state (skipPick + hasLegacyDesktop). See
+  // `firstUseDetection.ts` in main for the categorisation rules.
+  getFirstUseState: () => ipcRenderer.invoke('get-first-use-state'),
+
   // Installations
   getInstallations: () => ipcRenderer.invoke('get-installations'),
   addInstallation: (data) => ipcRenderer.invoke('add-installation', data),

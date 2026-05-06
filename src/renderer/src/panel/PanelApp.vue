@@ -270,12 +270,24 @@ async function openFlowTakeover(component: FlowComponent): Promise<void> {
  * `onMounted` when `launcherPrefs.firstUseCompleted` is false; not
  * routed through `switchPanel` because there's no URL/IPC entry point
  * for it (the gate is purely the persisted pref).
+ *
+ * Post-Phase-3 polish — fetches the categorised first-use state from
+ * main (`getFirstUseState`) so the takeover can suppress the cloud-
+ * vs-local pick step for returning users (any non-cloud, non-legacy-
+ * desktop install present means the user has already used the
+ * launcher; don't re-litigate the choice). The fetch runs in parallel
+ * with the overlay mount — by the time `nextTick` resolves and we
+ * reach for the imperative `open()` the IPC has usually already
+ * settled, so the await is effectively free.
  */
 async function openFirstUseTakeover(): Promise<void> {
+  const statePromise = window.api.getFirstUseState()
+    .catch(() => ({ skipPick: false, hasLegacyDesktop: false }))
   const ok = await openOverlay({ kind: 'takeover', component: 'first-use' })
   if (!ok) return
   await nextTick()
-  await firstUseRef.value?.open()
+  const state = await statePromise
+  await firstUseRef.value?.open({ skipPick: state.skipPick })
 }
 
 /**

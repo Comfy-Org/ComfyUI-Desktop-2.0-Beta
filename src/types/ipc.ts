@@ -672,6 +672,14 @@ export interface ElectronApi {
    *  must read it from main via this call. */
   getLocale(): Promise<string>
 
+  /** Categorised snapshot of the persisted installs for the first-use
+   *  takeover. `skipPick` is true when any non-cloud, non-legacy-desktop
+   *  install exists (returning user — the cloud-vs-local pick step is
+   *  suppressed). `hasLegacyDesktop` is true when the auto-tracked
+   *  Legacy Desktop install is present (gates the migrate-vs-install-new
+   *  sub-step on the Local branch). See `firstUseDetection.ts`. */
+  getFirstUseState(): Promise<{ skipPick: boolean; hasLegacyDesktop: boolean }>
+
   // Installations
   getInstallations(): Promise<Installation[]>
   addInstallation(data: Record<string, unknown>): Promise<AddResult>
