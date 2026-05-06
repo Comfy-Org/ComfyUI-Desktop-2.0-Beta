@@ -216,6 +216,13 @@ export interface ShowProgressOpts {
   apiCall: () => Promise<unknown>
   cancellable?: boolean
   returnTo?: string
+  /** Set when the operation will spawn a ComfyUI instance (launch /
+   *  restart). The chooser host listens for the resulting
+   *  `instance-started` broadcast and closes itself so the new comfy
+   *  window replaces the chooser visually. Without this flag,
+   *  launches initiated from a Tier-1 surface like DetailModal would
+   *  leave the chooser host alongside the new comfy window. */
+  triggersInstanceStart?: boolean
 }
 
 // --- Action results ---

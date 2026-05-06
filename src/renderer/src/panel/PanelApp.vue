@@ -259,6 +259,17 @@ async function handleShowProgress(opts: ShowProgressOpts): Promise<void> {
         },
   )
   if (!ok) return
+  // Install-less host + launch-class op: subscribe to the resulting
+  // `instance-started` broadcast so the chooser host closes itself
+  // when the new comfy window opens. Mirrors what the chooser-tile
+  // path does via `performChooserLaunch`; needed here because surfaces
+  // like DetailModal route launches straight through `show-progress`
+  // without going through `prepareChooserHostHandoff`. Idempotent
+  // double-call is safe — `prepareChooserHostHandoff` clears any
+  // prior `pendingPickUnsub` before re-subscribing.
+  if (opts.triggersInstanceStart && !installationId) {
+    await prepareChooserHostHandoff(opts.installationId)
+  }
   await nextTick()
   // If an in-progress operation already exists for this ID, just show it
   const existing = progressStore.operations.get(opts.installationId)
