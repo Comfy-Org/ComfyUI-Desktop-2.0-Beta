@@ -128,12 +128,13 @@ function Set-FirstUseCompleted {
 
 function Categorise-Installs {
   param($Installs)
+  $arr = @($Installs)
   $skipPick = $false
   $hasLegacyDesktop = $false
   $cloud = 0
   $desktop = 0
   $other = 0
-  foreach ($inst in $Installs) {
+  foreach ($inst in $arr) {
     switch ($inst.sourceId) {
       'cloud'   { $cloud++ }
       'desktop' { $desktop++; $hasLegacyDesktop = $true }
@@ -146,7 +147,7 @@ function Categorise-Installs {
     Cloud            = $cloud
     Desktop          = $desktop
     Other            = $other
-    Total            = $Installs.Count
+    Total            = $arr.Count
   }
 }
 
