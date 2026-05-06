@@ -661,31 +661,26 @@ function handleNewInstallClick(): void {
       @select="handleCtxMenuSelect"
     />
 
-    <!-- Chooser overlay slot (Phase 3 §17). Owned by the local
-         `useOverlay` instance — Tier 1 today (Manage modal). Mounted
-         inline in the chooser's tree so the §8 Teleport-to-body hack
-         is gone; the unified-window contract treats chooser-host and
-         install-host overlays uniformly. PanelApp's host-level slot
-         renders Tier 2/3 overlays at a higher z-index, so an op
-         kicked off from the Manage modal visually pre-empts it
-         without needing this slot to react. DetailModal handles its
-         own actions over IPC, so it works regardless of whether the
-         chooser host has an install backing it. -->
-    <div
+    <!-- Chooser overlay slot (Tier 1 manage). DetailModal wraps itself
+         in the unified Modal primitive when `as-modal` is set, so the
+         backdrop / Teleport / dismiss behaviour is owned by Modal.vue
+         rather than a bespoke `view-modal active` wrapper. ChooserView
+         keeps the mount so chooser-specific events (navigate-list,
+         update:installation) can bubble back to refresh the cards;
+         PanelApp's host-level slot suppresses its own manage render
+         while `activePanel === 'chooser'` so the singleton useOverlay
+         doesn't double-render. -->
+    <DetailModal
       v-if="manageOverlay"
-      class="view-modal active"
-      data-overlay-key="manage-detail"
-    >
-      <DetailModal
-        :installation="manageOverlay.installation"
-        :initial-tab="manageOverlay.initialTab"
-        :auto-action="manageOverlay.autoAction"
-        @close="closeOverlay"
-        @navigate-list="handleManageNavigateList"
-        @update:installation="handleManageUpdate"
-        @show-progress="handleManageShowProgress"
-      />
-    </div>
+      :installation="manageOverlay.installation"
+      :initial-tab="manageOverlay.initialTab"
+      :auto-action="manageOverlay.autoAction"
+      :as-modal="true"
+      @close="closeOverlay"
+      @navigate-list="handleManageNavigateList"
+      @update:installation="handleManageUpdate"
+      @show-progress="handleManageShowProgress"
+    />
   </div>
 </template>
 

@@ -6,6 +6,7 @@ import { useActionGuard } from '../composables/useActionGuard'
 
 import DetailSectionComponent from '../components/DetailSection.vue'
 import SnapshotTab from '../components/SnapshotTab.vue'
+import Modal from '../components/Modal.vue'
 import { useInstallationStore } from '../stores/installationStore'
 import { useSessionStore } from '../stores/sessionStore'
 import { emitTelemetryAction, toErrorBucket } from '../lib/telemetry'
@@ -28,11 +29,16 @@ interface Props {
   installation: Installation | null
   initialTab?: string
   autoAction?: string | null
+  /** When true, render as a Tier 1 manage overlay (Modal-wrapped, dim
+   *  backdrop, no Esc/click-outside dismiss). When false (default),
+   *  render inline as the install-settings panel body. */
+  asModal?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   initialTab: 'status',
   autoAction: null,
+  asModal: false,
 })
 
 const emit = defineEmits<{
@@ -555,7 +561,13 @@ function navigateToInstallation(installationId: string): void {
 </script>
 
 <template>
-  <div v-if="installation" class="view-modal-content view-modal-inline">
+  <Modal
+    v-if="installation"
+    :inline="!asModal"
+    :binding="asModal"
+    opacity="dim"
+    @close="handleHeaderClose"
+  >
       <div class="view-modal-header">
         <div
           class="view-modal-title"
@@ -650,5 +662,5 @@ function navigateToInstallation(installationId: string): void {
           </div>
         </div>
       </div>
-  </div>
+  </Modal>
 </template>

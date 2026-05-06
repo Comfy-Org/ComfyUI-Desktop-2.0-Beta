@@ -205,11 +205,17 @@ export interface UseOverlayApi {
   closeOverlay: () => Promise<boolean>
 }
 
+// Module-level singleton — every consumer of useOverlay() shares the same
+// slot so Tier-collision rules apply across the whole app, not just within
+// one component's instance.
+const _current = ref<Overlay | null>(null)
+const _tier = computed(() => tierOf(_current.value))
+
 export function useOverlay(): UseOverlayApi {
-  const current = ref<Overlay | null>(null)
+  const current = _current
   const modal = useModal()
 
-  const tier = computed(() => tierOf(current.value))
+  const tier = _tier
 
   async function confirmCancelCurrent(cur: Overlay): Promise<boolean> {
     const t = i18n.global.t

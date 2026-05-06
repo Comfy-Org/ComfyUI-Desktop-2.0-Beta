@@ -920,19 +920,19 @@ onUnmounted(() => {
       v-else-if="currentOverlay?.kind === 'downloads'"
       @close="dismissTakeoverDirect"
     />
-    <div
-      v-else-if="currentOverlay?.kind === 'manage'"
-      class="view-modal active"
-      data-overlay-key="manage"
-    >
-      <DetailModal
-        :installation="currentOverlay.installation"
-        :initial-tab="currentOverlay.initialTab"
-        :auto-action="currentOverlay.autoAction"
-        @close="dismissTakeoverDirect"
-        @show-progress="handleShowProgress"
-      />
-    </div>
+    <!-- Tier 1 manage. ChooserView renders it inline when active so card-
+         context UX (highlight, navigate-list, etc.) works; PanelApp
+         handles every other host activePanel (install-settings pill or
+         comfy view). -->
+    <DetailModal
+      v-else-if="currentOverlay?.kind === 'manage' && activePanel !== 'chooser'"
+      :installation="currentOverlay.installation"
+      :initial-tab="currentOverlay.initialTab"
+      :auto-action="currentOverlay.autoAction"
+      :as-modal="true"
+      @close="dismissTakeoverDirect"
+      @show-progress="handleShowProgress"
+    />
     <!-- Tier 2 progress slot. ProgressModal owns its own backdrop via
          the unified Modal primitive. -->
     <ProgressModal

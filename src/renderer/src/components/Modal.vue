@@ -9,9 +9,12 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
  *   backdrop to `opaque` so the user reads "no escape via X / outside-click".
  * - `opacity`: 'dim' | 'heavy-dim' | 'opaque'.
  * - `width`: 'regular' (~600px) | 'wide' (~900px).
- *
- * Default slot is the body; render `.view-modal-header` / `.view-modal-body` /
- * `.view-modal-footer` rows inside.
+ * - `inline`: true → render the content frame only (no Teleport, no
+ *   backdrop, no Esc handling). Used when the same component renders
+ *   embedded in a panel body (e.g. DetailModal in the install-settings
+ *   panel) instead of as an overlay. The slot still goes inside a
+ *   `view-modal-content view-modal-inline` div so the inner header /
+ *   body / footer layout stays identical between modes.
  */
 type Opacity = 'dim' | 'heavy-dim' | 'opaque'
 
@@ -21,11 +24,14 @@ const props = withDefaults(defineProps<{
   width?: 'regular' | 'wide'
   /** Extra class(es) appended to the content box. */
   contentClass?: string
+  /** Render content frame only (no overlay/backdrop/dismiss). */
+  inline?: boolean
 }>(), {
   binding: false,
   opacity: undefined,
   width: 'wide',
   contentClass: '',
+  inline: false,
 })
 
 const resolvedOpacity = computed<Opacity>(() => props.opacity ?? (props.binding ? 'opaque' : 'dim'))
@@ -50,23 +56,32 @@ function handleOverlayClick(e: MouseEvent): void {
 }
 
 function handleKeydown(e: KeyboardEvent): void {
-  if (props.binding) return
+  if (props.binding || props.inline) return
   if (e.key === 'Escape') {
     emit('close')
   }
 }
 
 onMounted(() => {
-  document.addEventListener('keydown', handleKeydown)
+  if (!props.inline) document.addEventListener('keydown', handleKeydown)
 })
 
 onUnmounted(() => {
-  document.removeEventListener('keydown', handleKeydown)
+  if (!props.inline) document.removeEventListener('keydown', handleKeydown)
 })
 </script>
 
 <template>
-  <Teleport to="body">
+  <!-- Inline mode: no Teleport, no backdrop. The host panel positions
+       this; the content keeps its standard header/body/footer layout. -->
+  <div
+    v-if="inline"
+    class="view-modal-content view-modal-inline"
+    :class="contentClass"
+  >
+    <slot />
+  </div>
+  <Teleport v-else to="body">
     <div
       ref="overlayRef"
       class="view-modal active"
