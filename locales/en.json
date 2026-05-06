@@ -12,6 +12,14 @@
     "migrateBannerSkip": "New Install Without Migrating"
   },
 
+  "installType": {
+    "standalone": "Standalone",
+    "cloud": "Cloud",
+    "legacyDesktop": "Legacy Desktop",
+    "remote": "Remote",
+    "unknown": "Unknown"
+  },
+
   "chooser": {
     "title": "Choose an installation",
     "recent": "Recent",

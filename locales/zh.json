@@ -8,6 +8,14 @@
     "telemetrySettings": "在设置中管理"
   },
 
+  "installType": {
+    "standalone": "独立版",
+    "cloud": "云端",
+    "legacyDesktop": "旧版桌面",
+    "remote": "远程",
+    "unknown": "未知"
+  },
+
   "chooser": {
     "title": "选择安装",
     "recent": "最近使用",

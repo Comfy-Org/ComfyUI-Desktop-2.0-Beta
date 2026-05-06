@@ -5,9 +5,10 @@ import { useSessionStore } from '../stores/sessionStore'
 import { useProgressStore } from '../stores/progressStore'
 import { useInstallContextMenu } from '../composables/useInstallContextMenu'
 import { useOverlay, type ManageOverlay } from '../composables/useOverlay'
-import { Cloud, Plus, Box, Monitor, Globe, AlertCircle, ArrowDownToLine, ArrowRightLeft, MoreVertical, Play, ExternalLink, Square, Loader2 } from 'lucide-vue-next'
+import { Cloud, Plus, AlertCircle, ArrowDownToLine, ArrowRightLeft, MoreVertical, Play, ExternalLink, Square, Loader2 } from 'lucide-vue-next'
 import ContextMenu from '../components/ContextMenu.vue'
 import DetailModal from './DetailModal.vue'
+import { installTypeMetaFor } from '../lib/installTypeIcon'
 import type { Installation, ShowProgressOpts } from '../types/ipc'
 
 /**
@@ -145,16 +146,13 @@ function timeAgo(timestamp: number): string {
   return `${days}d ago`
 }
 
-// --- Type icon mapping — visible on each card so source kind is obvious ---
-function iconFor(category: string | undefined): typeof Cloud {
-  switch (category) {
-    case 'cloud': return Cloud
-    case 'desktop': return Monitor
-    case 'remote': return Globe
-    case 'local':
-    default: return Box
-  }
-}
+// --- Type icon mapping — visible on each card so source kind is obvious.
+// The same mapping (and its short i18n label) drives the Comfy Instance
+// title bar's source-category indicator (Track B), so the icon vocabulary
+// can't drift between the two surfaces. See `lib/installTypeIcon.ts` for
+// the per-category icon choices and rationale (notably: Standalone reads
+// as a modern laptop while Legacy Desktop reads as an older desktop tower
+// silhouette so the two install types are visibly distinct at a glance).
 
 // --- Action / context menu (Manage / Dismiss error) ---
 // The same composable powers two surfaces:
@@ -440,8 +438,11 @@ function handleNewInstallClick(): void {
         @keydown.space.prevent="openManage(inst)"
         @contextmenu.prevent="openCardMenu($event, inst)"
       >
-        <div class="chooser-tile-icon">
-          <component :is="iconFor(inst.sourceCategory)" :size="28" />
+        <div
+          class="chooser-tile-icon"
+          :title="$t(installTypeMetaFor(inst.sourceCategory).labelKey)"
+        >
+          <component :is="installTypeMetaFor(inst.sourceCategory).icon" :size="28" />
         </div>
         <!-- Top-right cluster — error badge (when set) + kebab (⋮)
              button that anchors the per-tile action menu. The kebab
