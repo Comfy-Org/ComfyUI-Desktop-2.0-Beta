@@ -9,16 +9,15 @@ vi.stubGlobal('window', {
     onInstallationsChanged: vi.fn(),
     onInstallationsVersionsUpdated: vi.fn(),
     getSetting: vi.fn().mockResolvedValue(undefined),
-    runAction: vi.fn().mockResolvedValue(undefined),
+    setSetting: vi.fn().mockResolvedValue(undefined),
   }
 })
 
-// useLauncherPrefs has module-level shared state (pinnedInstallIds,
-// loadPromise) that cannot be reset between tests. We therefore test
-// loadPrefs once and exercise the remaining API via pinInstall /
-// unpinInstall which mutate state directly.
+// useLauncherPrefs has module-level shared state (firstUseCompleted,
+// loadPromise) that must be reset between tests via the test-only
+// `__resetLauncherPrefsForTest` helper.
 
-import { useLauncherPrefs } from './useLauncherPrefs'
+import { useLauncherPrefs, __resetLauncherPrefsForTest } from './useLauncherPrefs'
 
 describe('useLauncherPrefs', () => {
   let prefs: ReturnType<typeof useLauncherPrefs>
@@ -26,65 +25,46 @@ describe('useLauncherPrefs', () => {
   beforeEach(() => {
     setActivePinia(createTestingPinia({ stubActions: false }))
     vi.clearAllMocks()
+    __resetLauncherPrefsForTest()
     prefs = useLauncherPrefs()
-    // Reset module-level shared state to isolate tests
-    prefs.pinnedInstallIds.value = []
   })
 
   describe('loadPrefs', () => {
-    it('populates pinnedInstallIds from getSetting', async () => {
+    it('populates firstUseCompleted from getSetting', async () => {
       vi.mocked(window.api.getSetting).mockImplementation((key: string) => {
-        if (key === 'pinnedInstallIds') return Promise.resolve(['inst-2', 'inst-3'])
+        if (key === 'firstUseCompleted') return Promise.resolve(true)
         return Promise.resolve(undefined)
       })
 
       await prefs.loadPrefs()
 
-      expect(prefs.isPinned('inst-2')).toBe(true)
-      expect(prefs.isPinned('inst-3')).toBe(true)
-      expect(prefs.isPinned('inst-99')).toBe(false)
+      expect(prefs.firstUseCompleted.value).toBe(true)
+      expect(prefs.loaded.value).toBe(true)
+    })
+
+    it('treats a missing firstUseCompleted as false', async () => {
+      vi.mocked(window.api.getSetting).mockResolvedValue(undefined)
+
+      await prefs.loadPrefs()
+
+      expect(prefs.firstUseCompleted.value).toBe(false)
       expect(prefs.loaded.value).toBe(true)
     })
   })
 
-  describe('isPinned', () => {
-    it('returns false for unknown ids', () => {
-      expect(prefs.isPinned('unknown')).toBe(false)
-    })
-  })
+  describe('markFirstUseCompleted', () => {
+    it('sets the persisted firstUseCompleted flag', async () => {
+      await prefs.markFirstUseCompleted()
 
-  describe('pinInstall', () => {
-    it('adds id to pinnedInstallIds and calls runAction', async () => {
-      await prefs.pinInstall('inst-10')
-
-      expect(prefs.isPinned('inst-10')).toBe(true)
-      expect(window.api.runAction).toHaveBeenCalledWith('inst-10', 'pin-install')
+      expect(prefs.firstUseCompleted.value).toBe(true)
+      expect(window.api.setSetting).toHaveBeenCalledWith('firstUseCompleted', true)
     })
 
-    it('does not duplicate already-pinned ids', async () => {
-      await prefs.pinInstall('inst-10')
-      await prefs.pinInstall('inst-10')
+    it('is idempotent — a second call is a no-op', async () => {
+      await prefs.markFirstUseCompleted()
+      await prefs.markFirstUseCompleted()
 
-      expect(prefs.pinnedInstallIds.value.filter((id) => id === 'inst-10').length).toBe(1)
-    })
-  })
-
-  describe('unpinInstall', () => {
-    it('removes id from pinnedInstallIds and calls runAction', async () => {
-      await prefs.pinInstall('inst-10')
-      expect(prefs.isPinned('inst-10')).toBe(true)
-
-      await prefs.unpinInstall('inst-10')
-
-      expect(prefs.isPinned('inst-10')).toBe(false)
-      expect(window.api.runAction).toHaveBeenCalledWith('inst-10', 'unpin-install')
-    })
-
-    it('is safe to unpin an id that is not pinned', async () => {
-      await prefs.unpinInstall('nonexistent')
-
-      expect(prefs.pinnedInstallIds.value).not.toContain('nonexistent')
-      expect(window.api.runAction).toHaveBeenCalledWith('nonexistent', 'unpin-install')
+      expect(window.api.setSetting).toHaveBeenCalledTimes(1)
     })
   })
 })

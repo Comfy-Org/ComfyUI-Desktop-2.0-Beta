@@ -11,7 +11,7 @@ import {
   stopRunning,
 } from './shared'
 import {
-  handleRemove, handlePinInstall, handleUnpinInstall, handleOpenFolder,
+  handleRemove, handleOpenFolder,
   handleDelete,
   handleCopy, handleCopyUpdate, handleReleaseUpdate,
   handleMigrateToStandalone,
@@ -69,8 +69,6 @@ export function registerSessionHandlers(): void {
 
     switch (actionId) {
       case 'remove': return handleRemove(ctx)
-      case 'pin-install': return handlePinInstall(ctx)
-      case 'unpin-install': return handleUnpinInstall(ctx)
       case 'open-folder': return handleOpenFolder(ctx)
       case 'delete': return handleDelete(ctx)
       case 'copy': return handleCopy(ctx)

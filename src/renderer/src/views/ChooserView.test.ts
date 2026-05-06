@@ -17,11 +17,8 @@ const messages = {
     cloud: { label: 'Cloud', desc: 'Try Cloud' },
     dashboard: {
       cloudSection: 'ComfyUI Cloud',
-      pinned: 'Pinned',
       launchedAgo: 'Launched {time}',
       neverLaunched: 'Not launched yet',
-      pinToDashboard: 'Pin',
-      unpinFromDashboard: 'Unpin',
     },
     list: { view: 'View' },
     running: { dismiss: 'Dismiss' },

@@ -1,7 +1,6 @@
 import { ref } from 'vue'
 
 // Module-level shared state so all components see the same values
-const pinnedInstallIds = ref<string[]>([])
 const firstUseCompleted = ref<boolean>(false)
 const loaded = ref(false)
 let loadPromise: Promise<void> | null = null
@@ -10,31 +9,11 @@ export function useLauncherPrefs() {
   async function loadPrefs(): Promise<void> {
     if (loadPromise) return loadPromise
     loadPromise = (async () => {
-      const [pinned, firstUse] = await Promise.all([
-        window.api.getSetting('pinnedInstallIds') as Promise<string[] | undefined>,
-        window.api.getSetting('firstUseCompleted') as Promise<boolean | undefined>,
-      ])
-      pinnedInstallIds.value = Array.isArray(pinned) ? pinned : []
+      const firstUse = await (window.api.getSetting('firstUseCompleted') as Promise<boolean | undefined>)
       firstUseCompleted.value = firstUse === true
       loaded.value = true
     })()
     return loadPromise
-  }
-
-  async function pinInstall(id: string): Promise<void> {
-    if (!pinnedInstallIds.value.includes(id)) {
-      pinnedInstallIds.value = [...pinnedInstallIds.value, id]
-    }
-    await window.api.runAction(id, 'pin-install')
-  }
-
-  async function unpinInstall(id: string): Promise<void> {
-    pinnedInstallIds.value = pinnedInstallIds.value.filter((i) => i !== id)
-    await window.api.runAction(id, 'unpin-install')
-  }
-
-  function isPinned(id: string): boolean {
-    return pinnedInstallIds.value.includes(id)
   }
 
   /**
@@ -56,13 +35,9 @@ export function useLauncherPrefs() {
   }
 
   return {
-    pinnedInstallIds,
     firstUseCompleted,
     loaded,
     loadPrefs,
-    pinInstall,
-    unpinInstall,
-    isPinned,
     markFirstUseCompleted,
   }
 }
@@ -76,6 +51,5 @@ export function useLauncherPrefs() {
 export function __resetLauncherPrefsForTest(): void {
   loadPromise = null
   loaded.value = false
-  pinnedInstallIds.value = []
   firstUseCompleted.value = false
 }

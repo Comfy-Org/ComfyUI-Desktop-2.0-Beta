@@ -3,10 +3,9 @@ import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
 import { useInstallationStore } from '../stores/installationStore'
 import { useSessionStore } from '../stores/sessionStore'
 import { useProgressStore } from '../stores/progressStore'
-import { useLauncherPrefs } from '../composables/useLauncherPrefs'
 import { useInstallContextMenu } from '../composables/useInstallContextMenu'
 import { useOverlay, type ManageOverlay } from '../composables/useOverlay'
-import { Cloud, Plus, Box, Monitor, Globe, Pin, AlertCircle, ArrowDownToLine, ArrowRightLeft, MoreVertical, Play, ExternalLink, Square, Loader2 } from 'lucide-vue-next'
+import { Cloud, Plus, Box, Monitor, Globe, AlertCircle, ArrowDownToLine, ArrowRightLeft, MoreVertical, Play, ExternalLink, Square, Loader2 } from 'lucide-vue-next'
 import ContextMenu from '../components/ContextMenu.vue'
 import DetailModal from './DetailModal.vue'
 import type { Installation, ShowProgressOpts } from '../types/ipc'
@@ -57,7 +56,6 @@ const emit = defineEmits<{
 const installationStore = useInstallationStore()
 const sessionStore = useSessionStore()
 const progressStore = useProgressStore()
-const prefs = useLauncherPrefs()
 
 onMounted(() => {
   if (installationStore.installations.length === 0) {
@@ -95,21 +93,9 @@ function sortByRecency(a: Installation, b: Installation): number {
   return tb - ta
 }
 
-/** Sort key: pinned installs first (recency-ordered within pinned), then
- *  unpinned installs (recency-ordered). The pin affordance promotes
- *  installs the user wants to keep visible regardless of how recently
- *  they were launched — the chooser's "Pin" context-menu item drives
- *  this ranking. */
-function sortByPinAndRecency(a: Installation, b: Installation): number {
-  const aPinned = prefs.isPinned(a.id) ? 1 : 0
-  const bPinned = prefs.isPinned(b.id) ? 1 : 0
-  if (aPinned !== bPinned) return bPinned - aPinned
-  return sortByRecency(a, b)
-}
-
 /** Apply the active filter to the non-cloud list. */
 const visibleInstalls = computed<Installation[]>(() => {
-  const sorted = [...nonCloudInstalls.value].sort(sortByPinAndRecency)
+  const sorted = [...nonCloudInstalls.value].sort(sortByRecency)
   switch (activeFilter.value) {
     case 'all': return sorted
     case 'local': return sorted.filter((i) => i.sourceCategory === 'local')
@@ -162,13 +148,15 @@ function iconFor(category: string | undefined): typeof Cloud {
   }
 }
 
-// --- Action / context menu (Pin / Manage / Dismiss error) ---
+// --- Action / context menu (Manage / Dismiss error) ---
 // The same composable powers two surfaces:
 //   - Right-click on a card → context menu at click coords.
 //   - Click on the kebab (⋮) button at the top-right of a card →
 //     dropdown anchored to the button.
-// Both menus carry the same items: Pin / Unpin, Manage… (opens the
-// install's DetailModal as an overlay), and Dismiss error (when set).
+// Both menus carry the same items: Manage… (opens the install's
+// DetailModal as an overlay) and Dismiss error (when set), plus
+// the per-install Update / Migrate / Restore Snapshot / Open Folder
+// / Delete actions surfaced by `useInstallContextMenu`.
 // The card body's bare click goes through `openManage` — the fast-
 // path for "tell me about this install" — and the kebab
 // `stopPropagation`s so it doesn't double-fire as a card click.
@@ -471,12 +459,6 @@ function handleNewInstallClick(): void {
         </div>
         <div class="chooser-tile-name">
           {{ inst.name }}
-          <Pin
-            v-if="prefs.isPinned(inst.id)"
-            :size="13"
-            class="chooser-tile-pin"
-            :title="$t('dashboard.pinned')"
-          />
         </div>
         <div class="chooser-tile-meta">
           <!-- Each datum is its own pill so they read as discrete
@@ -793,9 +775,6 @@ function handleNewInstallClick(): void {
   /* Reserve space for the type icon at top-left so name doesn't collide. */
   margin-top: auto;
 }
-.chooser-tile-pin {
-  opacity: 0.6;
-}
 
 .chooser-tile-meta {
   display: flex;
@@ -949,8 +928,9 @@ function handleNewInstallClick(): void {
 
 /* Top-right cluster — error badge + kebab (⋮) action button. Sits
  * absolute-positioned in the top-right corner of every install tile.
- * The kebab is the primary affordance for per-tile actions (Pin /
- * Manage / Dismiss); the error badge is purely a visibility indicator
+ * The kebab is the primary affordance for per-tile actions (Manage /
+ * Update / Migrate / Open Folder / Delete / Dismiss); the error
+ * badge is purely a visibility indicator
  * (click-to-dismiss is a menu item, not a tap target on the badge).
  * The cluster lives above the icon's top-left position; the source
  * icon is at top-left, so the two never collide. */

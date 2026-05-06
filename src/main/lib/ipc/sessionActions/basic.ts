@@ -1,31 +1,13 @@
 import {
   fs,
-  installations, settings, i18n,
+  installations, i18n,
   openPath,
 } from '../shared'
 import type { ActionContext, ActionResult } from './types'
 
 export async function handleRemove({ installationId }: ActionContext): Promise<ActionResult> {
   await installations.remove(installationId)
-  const pinned = (settings.get('pinnedInstallIds') as string[] | undefined) ?? []
-  if (pinned.includes(installationId)) {
-    settings.set('pinnedInstallIds', pinned.filter((id) => id !== installationId))
-  }
   return { ok: true, navigate: 'list' }
-}
-
-export function handlePinInstall({ installationId }: ActionContext): ActionResult {
-  const pinned = (settings.get('pinnedInstallIds') as string[] | undefined) ?? []
-  if (!pinned.includes(installationId)) {
-    settings.set('pinnedInstallIds', [...pinned, installationId])
-  }
-  return { ok: true }
-}
-
-export function handleUnpinInstall({ installationId }: ActionContext): ActionResult {
-  const pinned = (settings.get('pinnedInstallIds') as string[] | undefined) ?? []
-  settings.set('pinnedInstallIds', pinned.filter((id) => id !== installationId))
-  return { ok: true }
 }
 
 export async function handleOpenFolder({ inst }: ActionContext): Promise<ActionResult> {

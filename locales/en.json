@@ -4,9 +4,6 @@
   "dashboard": {
     "launchedAgo": "Launched {time}",
     "neverLaunched": "Not launched yet",
-    "pinned": "Pinned",
-    "pinToDashboard": "Pin",
-    "unpinFromDashboard": "Unpin",
     "telemetryNotice": "Anonymous telemetry is collected to improve ComfyUI Desktop 2.0.",
     "telemetrySettings": "Manage in Settings",
     "migrateBannerTitle": "Migrate to Standalone",

@@ -3,7 +3,6 @@ import { ref, computed, watch, nextTick, toRaw } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useModal } from '../composables/useModal'
 import { useActionGuard } from '../composables/useActionGuard'
-import { useLauncherPrefs } from '../composables/useLauncherPrefs'
 
 import DetailSectionComponent from '../components/DetailSection.vue'
 import SnapshotTab from '../components/SnapshotTab.vue'
@@ -13,7 +12,7 @@ import { emitTelemetryAction, toErrorBucket } from '../lib/telemetry'
 import { formatBytes } from '../lib/formatting'
 import { useMigrateAction } from '../composables/useMigrateAction'
 import { REQUIRES_STOPPED } from '../types/ipc'
-import { Pin, Pencil } from 'lucide-vue-next'
+import { Pencil } from 'lucide-vue-next'
 import TooltipWrap from '../components/TooltipWrap.vue'
 import type {
   Installation,
@@ -45,7 +44,6 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const modal = useModal()
-const prefs = useLauncherPrefs()
 const installationStore = useInstallationStore()
 const sessionStore = useSessionStore()
 const actionGuard = useActionGuard()
@@ -60,9 +58,6 @@ const { confirmMigration } = useMigrateAction()
 function handleHeaderClose(): void {
   emit('close')
 }
-
-const isCloud = computed(() => props.installation?.sourceCategory === 'cloud')
-const isPinned = computed(() => props.installation ? prefs.isPinned(props.installation.id) : false)
 
 const scrollRef = ref<HTMLDivElement | null>(null)
 
@@ -574,17 +569,6 @@ function navigateToInstallation(installationId: string): void {
           @paste="handleTitlePaste"
         >
           {{ installation.name }}<Pencil :size="14" class="edit-name-hint" contenteditable="false" />
-        </div>
-        <div class="detail-header-actions">
-          <button
-            v-if="!isCloud"
-            class="detail-header-btn"
-            :class="{ active: isPinned }"
-            :title="isPinned ? $t('dashboard.unpinFromDashboard') : $t('dashboard.pinToDashboard')"
-            @click="isPinned ? prefs.unpinInstall(installation!.id) : prefs.pinInstall(installation!.id)"
-          >
-            <Pin :size="16" />
-          </button>
         </div>
         <button
           class="view-modal-close"

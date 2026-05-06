@@ -1,6 +1,5 @@
 import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useLauncherPrefs } from './useLauncherPrefs'
 import { useSessionStore } from '../stores/sessionStore'
 import type { ContextMenuItem } from '../types/context-menu'
 import type { Installation } from '../types/ipc'
@@ -16,7 +15,6 @@ import type { Installation } from '../types/ipc'
  *
  * Items today (Phase 3 §8 expansion):
  *
- *   - **Pin / Unpin** (non-cloud installs only).
  *   - **Manage…** — opens the install's `DetailModal` overlay so the
  *     user can edit settings, run actions, etc.
  *   - **Update…** (`status === 'installed'` && `statusTag.style ===
@@ -45,8 +43,6 @@ import type { Installation } from '../types/ipc'
  * card-level open.
  */
 export type InstallMenuActionId =
-  | 'pin'
-  | 'unpin'
   | 'manage'
   | 'update'
   | 'migrate'
@@ -69,7 +65,6 @@ export function useInstallContextMenu(opts: {
   onManage?: (inst: Installation, options?: ManageOpenOptions) => void
 } = {}) {
   const { t } = useI18n()
-  const prefs = useLauncherPrefs()
   const sessionStore = useSessionStore()
 
   const ctxMenu = ref({
@@ -102,18 +97,10 @@ export function useInstallContextMenu(opts: {
   function getMenuItems(inst: Installation): ContextMenuItem[] {
     const items: ContextMenuItem[] = []
 
-    if (isLocalLikeInstall(inst)) {
-      items.push({
-        id: prefs.isPinned(inst.id) ? 'unpin' : 'pin',
-        label: prefs.isPinned(inst.id) ? t('dashboard.unpinFromDashboard') : t('dashboard.pinToDashboard'),
-      })
-    }
-
     if (opts.onManage) {
       items.push({
         id: 'manage',
         label: t('chooser.manageInstall'),
-        separator: items.length > 0,
       })
 
       if (isInstalled(inst) && hasUpdateTag(inst)) {
@@ -191,11 +178,7 @@ export function useInstallContextMenu(opts: {
    *  inst)` / `triggerAction('migrate', inst)`) and menu selections
    *  funnel through here so the two surfaces cannot diverge. */
   async function triggerAction(id: string, inst: Installation): Promise<void> {
-    if (id === 'pin') {
-      await prefs.pinInstall(inst.id)
-    } else if (id === 'unpin') {
-      await prefs.unpinInstall(inst.id)
-    } else if (id === 'manage') {
+    if (id === 'manage') {
       opts.onManage?.(inst)
     } else if (id === 'update') {
       opts.onManage?.(inst, { initialTab: 'update' })
