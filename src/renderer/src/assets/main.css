@@ -503,7 +503,6 @@ input[type="checkbox"]:checked::after { transform: translateX(16px); }
 /* View modals */
 .view-modal {
   position: fixed; inset: 0;
-  top: var(--titlebar-height);
   background: var(--overlay-bg);
   display: none; align-items: center; justify-content: center;
   z-index: 50;
@@ -530,7 +529,7 @@ input[type="checkbox"]:checked::after { transform: translateX(16px); }
   background: var(--bg); border: 1px solid var(--border);
   border-radius: 12px;
   width: 100%; max-width: 900px;
-  height: calc(100vh - 60px - var(--titlebar-height));
+  height: calc(100vh - 60px);
   margin: 0 30px;
   display: flex; flex-direction: column; overflow: hidden;
 }
@@ -581,7 +580,6 @@ input[type="checkbox"]:checked::after { transform: translateX(16px); }
 /* Modal dialog */
 .modal-overlay {
   position: fixed; inset: 0;
-  top: var(--titlebar-height);
   background: var(--overlay-bg);
   display: flex; align-items: center; justify-content: center;
   z-index: 100;
