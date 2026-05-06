@@ -480,6 +480,11 @@ async function runAction(action: ActionDef, btn: HTMLButtonElement | null): Prom
     // continuous "Restarting ComfyUI" view rather than two flashes.
     // The action's confirm dialog has already run above.
     const isRestart = mutableAction.id === 'restart'
+    // Claim the host so launching from the manage modal attaches in-
+    // place on a chooser host (matches the chooser tile-click path).
+    if (mutableAction.id === 'launch' || isRestart) {
+      await window.api.claimAttachHost(instId)
+    }
     const apiCall = isRestart
       ? async () => {
           await window.api.stopComfyUI(instId)
