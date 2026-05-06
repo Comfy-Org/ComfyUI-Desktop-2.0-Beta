@@ -1,6 +1,7 @@
 import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useSessionStore } from '../stores/sessionStore'
+import { useProgressStore } from '../stores/progressStore'
 import type { ContextMenuItem } from '../types/context-menu'
 import type { Installation } from '../types/ipc'
 
@@ -31,6 +32,14 @@ import type { Installation } from '../types/ipc'
  *     def's confirm + showProgress flow runs (Tier 2 progress for
  *     stopped installs — Delete requires stopped).
  *   - **Dismiss error** (when the install has a stored error).
+ *
+ * Items whose underlying action is REQUIRES_STOPPED — Update,
+ * Migrate, Restore Snapshot, Delete — render as `disabled` whenever
+ * the install is currently running, mid-shutdown, or has a long-
+ * running op in flight. This mirrors the gating main applies via the
+ * REQUIRES_STOPPED guard in `registerSessionHandlers`, so users see
+ * which controls are locked rather than clicking and hitting a no-op
+ * / "operation in progress" error.
  *
  * The same items power the chooser tile's update/migrate visual
  * pills via `triggerAction(id, inst)` — pill click and kebab item
@@ -66,6 +75,7 @@ export function useInstallContextMenu(opts: {
 } = {}) {
   const { t } = useI18n()
   const sessionStore = useSessionStore()
+  const progressStore = useProgressStore()
 
   const ctxMenu = ref({
     open: false,
@@ -94,8 +104,23 @@ export function useInstallContextMenu(opts: {
     return !!inst.installPath
   }
 
+  /** True when REQUIRES_STOPPED actions (update / migrate / restore /
+   *  delete) would no-op for this install: the install is currently
+   *  running, mid-shutdown, or has a long-running op in flight.
+   *  Drives the `disabled` flag on the menu items that wrap those
+   *  actions so the user can see which controls are gated. The
+   *  predicate matches the renderer-observable signals that
+   *  `registerSessionHandlers` checks via `_runningSessions` and
+   *  `_operationAborts` in main. */
+  function isStoppedActionGated(inst: Installation): boolean {
+    return sessionStore.isRunning(inst.id)
+      || sessionStore.isStopping(inst.id)
+      || progressStore.getProgressInfo(inst.id) !== null
+  }
+
   function getMenuItems(inst: Installation): ContextMenuItem[] {
     const items: ContextMenuItem[] = []
+    const stoppedActionGated = isStoppedActionGated(inst)
 
     if (opts.onManage) {
       items.push({
@@ -104,13 +129,13 @@ export function useInstallContextMenu(opts: {
       })
 
       if (isInstalled(inst) && hasUpdateTag(inst)) {
-        items.push({ id: 'update', label: t('chooser.menuUpdate') })
+        items.push({ id: 'update', label: t('chooser.menuUpdate'), disabled: stoppedActionGated })
       }
       if (hasMigratePrompt(inst)) {
-        items.push({ id: 'migrate', label: t('chooser.menuMigrate') })
+        items.push({ id: 'migrate', label: t('chooser.menuMigrate'), disabled: stoppedActionGated })
       }
       if (isInstalled(inst) && hasInstallPath(inst) && isLocalLikeInstall(inst)) {
-        items.push({ id: 'restore-snapshot', label: t('chooser.menuRestoreSnapshot') })
+        items.push({ id: 'restore-snapshot', label: t('chooser.menuRestoreSnapshot'), disabled: stoppedActionGated })
       }
     }
 
@@ -127,6 +152,7 @@ export function useInstallContextMenu(opts: {
         id: 'delete',
         label: t('chooser.menuDelete'),
         separator: items.length > 0,
+        disabled: stoppedActionGated,
       })
     }
 
@@ -217,5 +243,6 @@ export function useInstallContextMenu(opts: {
     handleCtxMenuSelect,
     closeMenu,
     triggerAction,
+    isStoppedActionGated,
   }
 }

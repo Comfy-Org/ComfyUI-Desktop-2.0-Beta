@@ -211,6 +211,7 @@ const {
   handleCtxMenuSelect,
   closeMenu,
   triggerAction,
+  isStoppedActionGated,
 } = useInstallContextMenu({
   onManage: (inst, opts) => openManage(inst, opts ?? {}),
 })
@@ -535,16 +536,24 @@ function handleNewInstallClick(): void {
                `show-migrate` shortcuts and the chooser was missing
                them after the §8 rebuild. `@click.stop` prevents the
                pill click from bubbling up to the tile body's bare
-               `pickInstall` handler. -->
+               `pickInstall` handler.
+
+               Both pills wrap REQUIRES_STOPPED actions, so they
+               render in a visibly disabled state (and their click /
+               keyboard handlers no-op) whenever
+               `isStoppedActionGated(inst)` is true — same predicate
+               that gates the matching kebab-menu items. -->
           <span
             v-if="hasUpdate(inst) && !progressFor(inst)"
             class="chooser-tile-pill chooser-tile-pill-update"
+            :class="{ 'chooser-tile-pill-disabled': isStoppedActionGated(inst) }"
             role="button"
             tabindex="0"
+            :aria-disabled="isStoppedActionGated(inst) || undefined"
             :title="inst.statusTag?.label"
-            @click.stop="triggerAction('update', inst)"
-            @keydown.enter.stop="triggerAction('update', inst)"
-            @keydown.space.prevent.stop="triggerAction('update', inst)"
+            @click.stop="isStoppedActionGated(inst) || triggerAction('update', inst)"
+            @keydown.enter.stop="isStoppedActionGated(inst) || triggerAction('update', inst)"
+            @keydown.space.prevent.stop="isStoppedActionGated(inst) || triggerAction('update', inst)"
           >
             <ArrowDownToLine :size="11" />
             {{ $t('chooser.updatePill') }}
@@ -552,12 +561,14 @@ function handleNewInstallClick(): void {
           <span
             v-if="hasMigratePrompt(inst) && !progressFor(inst)"
             class="chooser-tile-pill chooser-tile-pill-migrate"
+            :class="{ 'chooser-tile-pill-disabled': isStoppedActionGated(inst) }"
             role="button"
             tabindex="0"
+            :aria-disabled="isStoppedActionGated(inst) || undefined"
             :title="$t('dashboard.migrateBannerTitle')"
-            @click.stop="triggerAction('migrate', inst)"
-            @keydown.enter.stop="triggerAction('migrate', inst)"
-            @keydown.space.prevent.stop="triggerAction('migrate', inst)"
+            @click.stop="isStoppedActionGated(inst) || triggerAction('migrate', inst)"
+            @keydown.enter.stop="isStoppedActionGated(inst) || triggerAction('migrate', inst)"
+            @keydown.space.prevent.stop="isStoppedActionGated(inst) || triggerAction('migrate', inst)"
           >
             <ArrowRightLeft :size="11" />
             {{ $t('chooser.migratePill') }}
@@ -870,6 +881,32 @@ function handleNewInstallClick(): void {
 .chooser-tile-pill-migrate:focus-visible {
   outline: 2px solid var(--accent-warning, #d97706);
   outline-offset: 2px;
+}
+
+/* Disabled (gated) state for action pills — applied whenever the
+ * underlying REQUIRES_STOPPED action would no-op (install running /
+ * stopping / op in flight). The pill stays visible so the user
+ * knows the action exists; the dimmed colour + default cursor
+ * signal it isn't currently actionable. Hover/focus highlights are
+ * suppressed and the click handlers no-op while gated. Matches the
+ * uniform "disabled" treatment ContextMenu applies to the matching
+ * kebab-menu items. */
+.chooser-tile-pill-disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.chooser-tile-pill-disabled:hover,
+.chooser-tile-pill-disabled:focus-visible {
+  background: var(--bg-elev-2, rgba(127, 127, 127, 0.14));
+  outline: none;
+}
+.chooser-tile-pill-update.chooser-tile-pill-disabled:hover,
+.chooser-tile-pill-update.chooser-tile-pill-disabled:focus-visible {
+  background: var(--accent-soft, rgba(74, 144, 226, 0.12));
+}
+.chooser-tile-pill-migrate.chooser-tile-pill-disabled:hover,
+.chooser-tile-pill-migrate.chooser-tile-pill-disabled:focus-visible {
+  background: var(--accent-warning-soft, rgba(217, 119, 6, 0.12));
 }
 
 /* In-flight progress block — visible only when an op is running for
