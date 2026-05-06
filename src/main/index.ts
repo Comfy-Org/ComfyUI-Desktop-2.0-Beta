@@ -1484,6 +1484,23 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
       existing.comfyView.setBackgroundColor(COMFY_BG)
       void existing.comfyView.webContents.loadURL(comfyUrl).catch(() => {})
     }
+    // Issue #475 — restart-from-install-settings flow: when the user
+    // kicked off the (re)launch from a non-`'comfy'` panel (e.g. the
+    // install-settings DetailModal), `entry.activePanel` is whatever
+    // they were on, and `refreshComfyTabBody` would early-return on
+    // `entry.activePanel !== 'comfy'`, leaving the body stranded on
+    // a stale lifecycle / settings panel even though the install is
+    // now running. Force the body back to `'comfy'` so the user
+    // lands in the live ComfyUI view they implicitly asked for by
+    // launching. `setActivePanel(..., 'reset')` is a no-op when the
+    // entry is already on `'comfy'`; the trailing
+    // `refreshComfyTabBody` covers the comfy-lifecycle → comfy body
+    // mode swap that still needs to happen in the already-on-comfy
+    // case (setActivePanel early-returns there without re-laying
+    // out).
+    if (existing.activePanel !== 'comfy') {
+      setActivePanel(existing.windowKey, 'comfy', 'reset')
+    }
     refreshComfyTabBody(installationId)
     if (proc) {
       proc.on('exit', () => {
