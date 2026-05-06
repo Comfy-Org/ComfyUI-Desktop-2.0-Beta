@@ -256,7 +256,9 @@ defineExpose({ open })
 </script>
 
 <template>
-  <div class="view-modal-content quick-install-modal">
+  <!-- Modal-unification (Track M-3) — install-flow takeover-modal.
+       See NewInstallModal.vue for the rationale; same chrome treatment. -->
+  <div class="view-modal-content view-modal-content--takeover quick-install-modal">
       <div class="view-modal-header">
         <TakeoverHeader
           :title="$t('quickInstall.grandTitle')"

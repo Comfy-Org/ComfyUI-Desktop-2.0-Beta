@@ -15,9 +15,19 @@ import type {
 
 interface Props {
   installationId: string | null
+  /**
+   * Modal-unification (Track M-3) — opt the root into the
+   * `view-modal-content--takeover` (1000px max) chrome when the
+   * ProgressModal is mounted at Tier 3 (the `'update'` takeover
+   * component, see PanelApp.vue's takeover slot). Tier 2 mounts
+   * (the in-flight progress slot) leave this false so the modal
+   * renders at the default 900px max width — no behaviour change
+   * for the existing in-flight progress surface.
+   */
+  takeoverChrome?: boolean
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), { takeoverChrome: false })
 
 const emit = defineEmits<{
   close: []
@@ -228,7 +238,11 @@ defineExpose({ startOperation, showOperation })
 </script>
 
 <template>
-  <div v-if="installationId && currentOp" class="view-modal-content">
+  <div
+    v-if="installationId && currentOp"
+    class="view-modal-content"
+    :class="{ 'view-modal-content--takeover': takeoverChrome }"
+  >
     <div class="view-modal-header">
       <div class="view-modal-title">{{ currentOp.title }}</div>
       <button class="view-modal-close" @click="emit('close')">{{ currentOp.finished ? '✕' : '−' }}</button>

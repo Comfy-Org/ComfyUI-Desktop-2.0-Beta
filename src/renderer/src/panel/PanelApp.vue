@@ -163,21 +163,23 @@ const launcherPrefs = useLauncherPrefs()
 const { current: currentOverlay, tier, openOverlay, closeOverlay } = useOverlay()
 
 /**
- * Modal-unification (Track M-2.1) — class list for the Tier 3 takeover
- * slot's wrapper div. Binding takeover-modals (first-use, and later the
- * install-flow modals migrated in M-3) opt into:
+ * Modal-unification (Track M-2.1 / M-3) — class list for the Tier 3
+ * takeover slot's wrapper div. Binding takeover-modals (first-use
+ * post M-2.1, the four install-flow modals + update-while-running
+ * post M-3) opt into:
  *   - `view-modal--opaque` so the backdrop reads as a fully-covering
  *     surface rather than a translucent overlay.
  *   - `is-binding-takeover-modal` so the legacy full-window
- *     `:deep(.view-modal-content)` override (kept for the not-yet-migrated
- *     flow modals) doesn't clobber the binding modal's
- *     `view-modal-content--takeover` width / centred-dialog chrome.
- * Non-binding takeovers keep the legacy class set unchanged so their
- * appearance doesn't shift before they're individually migrated.
+ *     `:deep(.view-modal-content)` override doesn't clobber the
+ *     binding modal's `view-modal-content--takeover` width /
+ *     centred-dialog chrome.
+ * Every Tier 3 component is now a binding takeover-modal — the gate
+ * is kept in computed shape so the wrapper class set is local to one
+ * place (and the M-4 retirement of the legacy `:not(...)` override
+ * has a single edit point).
  */
 const takeoverWrapperClasses = computed<Record<string, boolean>>(() => {
-  const overlay = currentOverlay.value
-  const isBinding = overlay?.kind === 'takeover' && overlay.component === 'first-use'
+  const isBinding = currentOverlay.value?.kind === 'takeover'
   return {
     'view-modal--opaque': isBinding,
     'is-binding-takeover-modal': isBinding,
@@ -954,6 +956,7 @@ onUnmounted(() => {
         v-if="currentOverlay.component === 'update'"
         ref="progressRef"
         :installation-id="currentOverlay.installationId ?? ''"
+        takeover-chrome
         @close="handleProgressClose"
       />
       <NewInstallModal

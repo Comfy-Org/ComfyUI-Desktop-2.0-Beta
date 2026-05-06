@@ -249,9 +249,11 @@ defineExpose({ open })
 </script>
 
 <template>
+  <!-- Modal-unification (Track M-3) — install-flow takeover-modal.
+       See NewInstallModal.vue for the rationale; same chrome treatment. -->
   <div
     ref="contentRef"
-    class="view-modal-content"
+    class="view-modal-content view-modal-content--takeover"
     @dragover="!preview && handleDragOver($event)"
     @dragleave="!preview && handleDragLeave($event)"
     @drop="!preview && handleDrop($event)"

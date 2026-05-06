@@ -517,7 +517,14 @@ defineExpose({ open })
 </script>
 
 <template>
-  <div class="view-modal-content">
+  <!-- Modal-unification (Track M-3) — install-flow takeover-modal.
+       The `view-modal-content--takeover` modifier opts into the
+       1000px-max binding-modal chrome (PanelApp's takeover slot
+       additionally adds `view-modal--opaque` + `is-binding-takeover-modal`
+       on the wrapper). Pre-M-3 this rendered as a full-window override;
+       post-M-3 it renders as a centred dialog over the opaque
+       backdrop, matching first-use. -->
+  <div class="view-modal-content view-modal-content--takeover">
       <div class="view-modal-header">
         <TakeoverHeader
           :title="$t('newInstall.grandTitle')"
