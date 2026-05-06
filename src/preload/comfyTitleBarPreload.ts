@@ -49,6 +49,14 @@ export interface ComfyTitleBarBridge {
   onNavStateChanged(cb: (state: { canBack: boolean; canForward: boolean }) => void): () => void
   /** Subscribe to title text changes coming from main. */
   onTitleChanged(cb: (title: string) => void): () => void
+  /** Track B item 4 — subscribe to install source-category pushes
+   *  from main. The raw category string (e.g. `'local'`, `'cloud'`,
+   *  `'desktop'`) drives the install-type icon in the title bar via
+   *  the renderer's `installTypeMetaFor()` helper. `null` for
+   *  install-less host windows or when the install's source can't be
+   *  resolved — the renderer suppresses the icon entirely in that
+   *  case. */
+  onSourceCategoryChanged(cb: (category: string | null) => void): () => void
   /** Subscribe to theme updates (background + symbol color). */
   onThemeChanged(cb: (theme: { bg: string; text: string }) => void): () => void
   /** Subscribe to macOS fullscreen state — drives traffic-light padding. */
@@ -170,6 +178,13 @@ const bridge: ComfyTitleBarBridge = {
     }
     ipcRenderer.on('comfy-titlebar:title-changed', handler)
     return () => ipcRenderer.removeListener('comfy-titlebar:title-changed', handler)
+  },
+  onSourceCategoryChanged: (cb) => {
+    const handler = (_event: IpcRendererEvent, category: unknown): void => {
+      cb(typeof category === 'string' ? category : null)
+    }
+    ipcRenderer.on('comfy-titlebar:source-category-changed', handler)
+    return () => ipcRenderer.removeListener('comfy-titlebar:source-category-changed', handler)
   },
   onThemeChanged: (cb) => {
     const handler = (_event: IpcRendererEvent, data: unknown): void => {

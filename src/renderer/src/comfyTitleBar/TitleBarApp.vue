@@ -8,6 +8,7 @@ import {
   Menu as MenuIcon,
   RefreshCw,
 } from 'lucide-vue-next'
+import { installTypeMetaFor } from '../lib/installTypeIcon'
 
 // Inlined to keep the title-bar renderer self-contained — the preload TS
 // file isn't visible to tsconfig.web (only its .d.ts would be). Kept in
@@ -45,6 +46,12 @@ interface Bridge {
   onPanelChanged: (cb: (panel: ComfyPanelKey) => void) => () => void
   onNavStateChanged: (cb: (state: { canBack: boolean; canForward: boolean }) => void) => () => void
   onTitleChanged: (cb: (title: string) => void) => () => void
+  /** Track B item 4 — install source-category pushes from main. The
+   *  raw category string drives the install-type icon next to the
+   *  install name (Standalone / Cloud / Legacy Desktop / …). `null`
+   *  for install-less host windows; the renderer suppresses the icon
+   *  in that case. */
+  onSourceCategoryChanged: (cb: (category: string | null) => void) => () => void
   onThemeChanged: (cb: (theme: { bg: string; text: string }) => void) => () => void
   onFullscreenChanged: (cb: (fullscreen: boolean) => void) => () => void
   onMenuClosed: (cb: (info: { menu: 'file' | 'install' }) => void) => () => void
@@ -146,8 +153,47 @@ const isInert = ref(false)
  * only menu in install-less mode.
  */
 const isInstallLess = ref((bridge?.getInstallationId() ?? '') === '')
-/** Install identity (e.g. "MyInstall — Standalone") — main pushes this on ready. */
+/** Install identity ("MyInstall") — main pushes this on ready.
+ *  Track B item 4 — the source-category suffix (`— Standalone` /
+ *  `— Cloud` / …) is no longer part of the label; it's rendered as
+ *  an icon next to the name via `installTypeIcon`. */
 const installLabel = ref('ComfyUI')
+/**
+ * Track B item 4 — raw `sourceCategory` string pushed by main on the
+ * `comfy-titlebar:source-category-changed` channel. Drives the
+ * install-type icon next to the install name (Standalone laptop /
+ * Cloud / Legacy Desktop tower / …) via the shared
+ * `installTypeMetaFor()` helper. `null` for install-less host
+ * windows; the icon is suppressed entirely in that case so the
+ * "Choose an install" label reads bare.
+ */
+const sourceCategory = ref<string | null>(null)
+/** Resolved icon metadata for the active install. Wraps
+ *  `installTypeMetaFor()` so the helper isn't called inline in the
+ *  template (keeps Vue's reactivity watcher minimal). */
+const installTypeMeta = computed(() => installTypeMetaFor(sourceCategory.value))
+/** English fallbacks for the install-type tooltip — the title-bar
+ *  renderer is intentionally i18n-free (it has its own bundle and
+ *  doesn't ship vue-i18n). The same `installType.*` keys exist in
+ *  `locales/*.json` for the chooser tile, which DOES have i18n;
+ *  this map mirrors the `en.json` values verbatim so the tooltip
+ *  copy stays consistent across surfaces. */
+const INSTALL_TYPE_LABELS: Record<string, string> = {
+  'installType.standalone': 'Standalone',
+  'installType.cloud': 'Cloud',
+  'installType.legacyDesktop': 'Legacy Desktop',
+  'installType.remote': 'Remote',
+  'installType.unknown': 'Unknown',
+}
+const installTypeLabel = computed(() => {
+  return INSTALL_TYPE_LABELS[installTypeMeta.value.labelKey] ?? 'Unknown'
+})
+/** Whether to render the install-type icon. Suppressed on
+ *  install-less host windows (no install backing the entry) so the
+ *  "Choose an install" identity label reads bare. */
+const showInstallTypeIcon = computed(
+  () => !isInstallLess.value && sourceCategory.value !== null,
+)
 const themeBg = ref<string | null>(null)
 const themeText = ref<string | null>(null)
 
@@ -302,6 +348,7 @@ function handleInstallPillClick(): void {
 let unsubPanel: (() => void) | undefined
 let unsubNavState: (() => void) | undefined
 let unsubTitle: (() => void) | undefined
+let unsubSourceCategory: (() => void) | undefined
 let unsubTheme: (() => void) | undefined
 let unsubFullscreen: (() => void) | undefined
 let unsubMenuClosed: (() => void) | undefined
@@ -342,6 +389,9 @@ onMounted(() => {
   unsubTitle = bridge.onTitleChanged((title) => {
     installLabel.value = title || 'ComfyUI'
   })
+  unsubSourceCategory = bridge.onSourceCategoryChanged((category) => {
+    sourceCategory.value = category
+  })
   unsubTheme = bridge.onThemeChanged(({ bg, text }) => {
     themeBg.value = bg
     themeText.value = text
@@ -375,6 +425,7 @@ onUnmounted(() => {
   unsubPanel?.()
   unsubNavState?.()
   unsubTitle?.()
+  unsubSourceCategory?.()
   unsubTheme?.()
   unsubFullscreen?.()
   unsubMenuClosed?.()
@@ -482,6 +533,18 @@ onUnmounted(() => {
         :aria-haspopup="isInstallLess || isInert ? undefined : 'menu'"
         @click="handleInstallPillClick"
       >
+        <!-- Track B item 4 — install-type icon (Standalone laptop /
+             Cloud / Legacy Desktop tower / …) replaces the old
+             `— {label}` textual suffix. Sized at 14px to fit inside
+             the 36px content area without growing the pill. -->
+        <component
+          :is="installTypeMeta.icon"
+          v-if="showInstallTypeIcon"
+          :size="14"
+          class="title-install-type-icon"
+          :title="installTypeLabel"
+          :aria-label="installTypeLabel"
+        />
         <span class="title-install-name">{{ installLabel }}</span>
         <ChevronDown
           v-if="!isInstallLess"
@@ -689,6 +752,14 @@ onUnmounted(() => {
 .title-install-caret {
   flex-shrink: 0;
   opacity: 0.7;
+}
+/* Track B item 4 — install-type icon. Sized to fit the 36px content
+   area of the title bar without growing it; opacity matches the
+   caret so the icon reads as a calm visual cue rather than competing
+   with the install name. */
+.title-install-type-icon {
+  flex-shrink: 0;
+  opacity: 0.85;
 }
 
 /* Tier 3 takeover (§17) — interactive controls are :disabled while a

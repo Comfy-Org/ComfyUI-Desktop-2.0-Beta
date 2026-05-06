@@ -978,12 +978,26 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
         )
     void tbLoad.catch(() => {})
   }
-  /** Format the install identity for the comfy tab in the title bar. */
+  /** Format the install identity for the comfy tab in the title bar.
+   *  Track B item 4 — the source category (Standalone / Cloud / Legacy
+   *  Desktop / …) used to be appended as a textual `— {label}` suffix
+   *  here; the title bar now renders an icon for the category instead
+   *  (see `comfy-titlebar:source-category-changed` below) so the
+   *  install name reads bare. */
   function computeTitleBarText(inst: InstallationRecord): string {
-    const label = sourceMap[inst.sourceId]?.label
-    return label ? `${inst.name} — ${label}` : inst.name
+    return inst.name
   }
   let titleBarText = computeTitleBarText(installation)
+  /** Track B item 4 — install-type icon. The title bar consumes the
+   *  raw `sourceCategory` string (`local` / `cloud` / `desktop` / …)
+   *  via the `installTypeMetaFor()` helper in the renderer; we only
+   *  need to push the bare category string. Cached locally so the
+   *  initial title-bar-ready handshake can replay it without re-
+   *  resolving the source plugin. */
+  function computeSourceCategory(inst: InstallationRecord): string | null {
+    return sourceMap[inst.sourceId]?.category ?? null
+  }
+  let sourceCategory = computeSourceCategory(installation)
   /** Mirrored install fields used by the OS-level window title (which is
    *  rebuilt whenever the page title or the install name changes). */
   let currentInstallName = installation.name
@@ -1075,12 +1089,22 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
     titleBarView.webContents.send('comfy-titlebar:title-changed', text)
   }
 
+  /** Track B item 4 — push the install's source category so the title
+   *  bar can render the install-type icon (Standalone / Cloud /
+   *  Legacy Desktop / …) next to the install name. Replaces the old
+   *  `— {label}` textual suffix. */
+  function notifyTitleBarSourceCategory(category: string | null): void {
+    if (titleBarView.webContents.isDestroyed()) return
+    titleBarView.webContents.send('comfy-titlebar:source-category-changed', category)
+  }
+
   // Push the initial state once the title bar's preload signals readiness.
   // Using ipcMain.on (not handle) since the title bar uses ipcRenderer.send.
   // Filter to this title bar's WebContents to avoid cross-talk between windows.
   const onTitleBarReady = (event: Electron.IpcMainEvent): void => {
     if (event.sender !== titleBarView.webContents) return
     notifyTitleBarTitle(titleBarText)
+    notifyTitleBarSourceCategory(sourceCategory)
     const entry = comfyWindows.get(installationId)
     notifyTitleBarPanel(entry?.activePanel ?? 'comfy')
     if (entry && !titleBarView.webContents.isDestroyed()) {
@@ -1122,6 +1146,15 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
     if (nextTabText !== titleBarText) {
       titleBarText = nextTabText
       notifyTitleBarTitle(titleBarText)
+    }
+    // Track B item 4 — sourceCategory shouldn't change after install,
+    // but if the source plugin's category mapping ever shifts (e.g.
+    // future migration), keep the title-bar icon in sync rather than
+    // letting it drift until the user reopens the window.
+    const nextCategory = computeSourceCategory(updated)
+    if (nextCategory !== sourceCategory) {
+      sourceCategory = nextCategory
+      notifyTitleBarSourceCategory(sourceCategory)
     }
     if (updated.name !== currentInstallName) {
       currentInstallName = updated.name

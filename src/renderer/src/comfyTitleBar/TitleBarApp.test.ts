@@ -5,6 +5,7 @@ interface MockBridgeState {
   panelChangedCallbacks: ((panel: string) => void)[]
   navStateChangedCallbacks: ((state: { canBack: boolean; canForward: boolean }) => void)[]
   titleChangedCallbacks: ((title: string) => void)[]
+  sourceCategoryChangedCallbacks: ((category: string | null) => void)[]
   themeChangedCallbacks: ((theme: { bg: string; text: string }) => void)[]
   fullscreenChangedCallbacks: ((fullscreen: boolean) => void)[]
   menuClosedCallbacks: ((info: { menu: 'file' | 'install' }) => void)[]
@@ -31,6 +32,7 @@ function installMockBridge(opts: { isMac?: boolean; installationId?: string | nu
     panelChangedCallbacks: [],
     navStateChangedCallbacks: [],
     titleChangedCallbacks: [],
+    sourceCategoryChangedCallbacks: [],
     themeChangedCallbacks: [],
     fullscreenChangedCallbacks: [],
     menuClosedCallbacks: [],
@@ -67,6 +69,10 @@ function installMockBridge(opts: { isMac?: boolean; installationId?: string | nu
     },
     onTitleChanged: (cb: (title: string) => void) => {
       state.titleChangedCallbacks.push(cb)
+      return () => {}
+    },
+    onSourceCategoryChanged: (cb: (category: string | null) => void) => {
+      state.sourceCategoryChangedCallbacks.push(cb)
       return () => {}
     },
     onThemeChanged: (cb: (theme: { bg: string; text: string }) => void) => {
@@ -203,12 +209,16 @@ describe('TitleBarApp', () => {
   })
 
   it('updates the install pill label when main pushes a title', async () => {
+    // Track B item 4 — the source-category suffix is no longer
+    // appended to the title text in main; the install name reads
+    // bare and the category surfaces as an icon (covered by separate
+    // tests below). The test value here mirrors the new contract.
     const { default: TitleBarApp } = await import('./TitleBarApp.vue')
     const wrapper = mount(TitleBarApp)
     await flushPromises()
-    bridgeState.titleChangedCallbacks.forEach((cb) => cb('MyInstall — Standalone'))
+    bridgeState.titleChangedCallbacks.forEach((cb) => cb('MyInstall'))
     await flushPromises()
-    expect(wrapper.find('.title-install-name').text()).toBe('MyInstall — Standalone')
+    expect(wrapper.find('.title-install-name').text()).toBe('MyInstall')
   })
 
   it('does not mark the install pill active for any panel — pill is an identity label, not a tab', async () => {
@@ -407,6 +417,66 @@ describe('TitleBarApp', () => {
     bridgeState.fullscreenChangedCallbacks.forEach((cb) => cb(false))
     await flushPromises()
     expect(wrapper.find('header').classes()).not.toContain('is-fullscreen')
+  })
+
+  // ===================================================================
+  // Track B item 4 — install-type icon next to the install name
+  // (replaces the old `— {label}` textual suffix)
+  // ===================================================================
+
+  it('hides the install-type icon by default until main pushes a category', async () => {
+    const { default: TitleBarApp } = await import('./TitleBarApp.vue')
+    const wrapper = mount(TitleBarApp)
+    await flushPromises()
+    expect(wrapper.find('.title-install-type-icon').exists()).toBe(false)
+  })
+
+  it('renders the install-type icon when main pushes a recognized source category', async () => {
+    const { default: TitleBarApp } = await import('./TitleBarApp.vue')
+    const wrapper = mount(TitleBarApp)
+    await flushPromises()
+    bridgeState.sourceCategoryChangedCallbacks.forEach((cb) => cb('local'))
+    await flushPromises()
+    const icon = wrapper.find('.title-install-type-icon')
+    expect(icon.exists()).toBe(true)
+    // Tooltip mirrors the i18n `installType.standalone` value.
+    expect(icon.attributes('title')).toBe('Standalone')
+    expect(icon.attributes('aria-label')).toBe('Standalone')
+  })
+
+  it('switches the install-type icon tooltip when main pushes a different category', async () => {
+    const { default: TitleBarApp } = await import('./TitleBarApp.vue')
+    const wrapper = mount(TitleBarApp)
+    await flushPromises()
+    bridgeState.sourceCategoryChangedCallbacks.forEach((cb) => cb('cloud'))
+    await flushPromises()
+    expect(wrapper.find('.title-install-type-icon').attributes('title')).toBe('Cloud')
+    bridgeState.sourceCategoryChangedCallbacks.forEach((cb) => cb('desktop'))
+    await flushPromises()
+    expect(wrapper.find('.title-install-type-icon').attributes('title')).toBe('Legacy Desktop')
+  })
+
+  it('suppresses the install-type icon on install-less host windows even when a category arrives', async () => {
+    bridgeState = installMockBridge({ installationId: null })
+    vi.resetModules()
+    const { default: TitleBarApp } = await import('./TitleBarApp.vue')
+    const wrapper = mount(TitleBarApp)
+    await flushPromises()
+    bridgeState.sourceCategoryChangedCallbacks.forEach((cb) => cb('local'))
+    await flushPromises()
+    expect(wrapper.find('.title-install-type-icon').exists()).toBe(false)
+  })
+
+  it('hides the install-type icon when main pushes null (e.g. unresolved source)', async () => {
+    const { default: TitleBarApp } = await import('./TitleBarApp.vue')
+    const wrapper = mount(TitleBarApp)
+    await flushPromises()
+    bridgeState.sourceCategoryChangedCallbacks.forEach((cb) => cb('local'))
+    await flushPromises()
+    expect(wrapper.find('.title-install-type-icon').exists()).toBe(true)
+    bridgeState.sourceCategoryChangedCallbacks.forEach((cb) => cb(null))
+    await flushPromises()
+    expect(wrapper.find('.title-install-type-icon').exists()).toBe(false)
   })
 
   // ===================================================================
