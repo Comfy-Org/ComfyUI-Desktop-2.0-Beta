@@ -1184,57 +1184,13 @@ function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowResult {
 
   // Body view. Install-backed loads the real ComfyUI URL post-construction
   // via the wrapper; install-less leaves it dummy and zero-sized (the
-  // chooser body lives on the panelView).
-  const comfyView = new WebContentsView({ webPreferences: opts.comfyWebPreferences })
-  comfyView.setBackgroundColor(COMFY_BG)
+  // chooser body lives on the panelView). Construction is delegated to a
+  // shared helper because `attachInstall()` may need to rebuild the view
+  // (with a different partition) when the host is being re-attached to
+  // an install whose partition doesn't match what the view was pinned
+  // to — see `rebuildComfyViewIfNeeded`.
+  const comfyView = buildComfyView(comfyWindow, opts.comfyWebPreferences, windowKey)
   comfyWindow.contentView.addChildView(comfyView)
-
-  // Generic comfyContents listeners that survive across attach/detach
-  // and are harmless on a chooser host's idle view (none fire until
-  // a real navigation / popup happens). Wiring them here means the
-  // post-construction `attachInstall()` only has to register the
-  // install-keyed listeners (theme observer, fail-retry, render-
-  // process-gone, etc.) — no need to re-bind the popup / window-
-  // open / context-menu handlers when the host flips modes (W-4).
-  const comfyContents = comfyView.webContents
-  comfyContents.on('did-create-window', (childWindow) => {
-    childWindow.setIcon(APP_ICON)
-    if (process.platform !== 'darwin') childWindow.removeMenu()
-    injectMacPasskeyWarning(childWindow)
-  })
-  comfyContents.setWindowOpenHandler(({ url: childUrl }) => {
-    if (shouldOpenInPopup(childUrl)) {
-      // Aux popup contract (see also `findEntryByTitleBarSender`):
-      //   - `preload: undefined` strips our preload — the popup has no
-      //     `window.api` / `__comfyTitleBar` bridge and so cannot reach
-      //     any of the title-bar IPCs (`comfy-window:open-title-menu`
-      //     etc.). The waffle / file menu is therefore unreachable
-      //     from a cloud-login / OAuth popup, by design.
-      //   - We don't override `titleBarStyle` / `titleBarOverlay`. Per
-      //     Electron's `setWindowOpenHandler` docs only security-related
-      //     `webPreferences` inherit from the parent — chrome-style
-      //     options reset to OS defaults — so the popup gets a normal
-      //     OS title bar and looks like a regular browser window.
-      //   - The macOS passkey-unavailable banner is still injected
-      //     against this popup via `did-create-window` →
-      //     `injectMacPasskeyWarning`, so cloud-login flows on macOS
-      //     keep the password+OTP affordance.
-      return { action: 'allow', overrideBrowserWindowOptions: { webPreferences: { preload: undefined } } }
-    }
-    shell.openExternal(childUrl)
-    return { action: 'deny' }
-  })
-  comfyContents.on('will-prevent-unload', (e) => {
-    // Window-mode unification — only suppress beforeunload prompts
-    // while an install is actively backing this view. A detached host
-    // (chooser mode, comfyView at `about:blank` or a stray late
-    // navigation) shouldn't silently swallow user-driven dialogs.
-    // See post-unification-code-review.md F15.
-    const liveEntry = comfyWindows.get(windowKey)
-    if (!liveEntry || liveEntry.installationId === null) return
-    e.preventDefault()
-  })
-  attachContextMenu(comfyWindow, comfyContents)
 
   // Title bar is 1px taller than the overlay so a CSS border-bottom in
   // comfyTitleBar.html sits below the native buttons.
@@ -1451,6 +1407,120 @@ function expectedPartitionFor(installation: InstallationRecord): string {
     : 'persist:shared'
 }
 
+/**
+ * Window-mode unification — construct a comfyView with the generic
+ * (mode-agnostic) listeners attached. Extracted from `createHostWindow()`
+ * so `attachInstall()` can also rebuild the view in place when the
+ * incoming install needs a different partition than the one the view
+ * was originally constructed with (Electron pins WebContentsView
+ * partition at construction; the only way to "change" it is to
+ * destroy + rebuild the view).
+ *
+ * Generic listeners (popup creation, window-open routing,
+ * will-prevent-unload, OS context menu) survive every attach/detach
+ * cycle for the lifetime of the view — they're harmless on a chooser
+ * host's idle view (none fire until a real navigation happens) and
+ * `attachInstall()` only has to register the install-keyed listeners
+ * on top.
+ */
+function buildComfyView(
+  comfyWindow: BrowserWindow,
+  webPreferences: Electron.WebPreferences,
+  windowKey: number,
+): WebContentsView {
+  const comfyView = new WebContentsView({ webPreferences })
+  comfyView.setBackgroundColor(COMFY_BG)
+
+  const comfyContents = comfyView.webContents
+  comfyContents.on('did-create-window', (childWindow) => {
+    childWindow.setIcon(APP_ICON)
+    if (process.platform !== 'darwin') childWindow.removeMenu()
+    injectMacPasskeyWarning(childWindow)
+  })
+  comfyContents.setWindowOpenHandler(({ url: childUrl }) => {
+    if (shouldOpenInPopup(childUrl)) {
+      // Aux popup contract (see also `findEntryByTitleBarSender`):
+      //   - `preload: undefined` strips our preload — the popup has no
+      //     `window.api` / `__comfyTitleBar` bridge and so cannot reach
+      //     any of the title-bar IPCs (`comfy-window:open-title-menu`
+      //     etc.). The waffle / file menu is therefore unreachable
+      //     from a cloud-login / OAuth popup, by design.
+      //   - We don't override `titleBarStyle` / `titleBarOverlay`. Per
+      //     Electron's `setWindowOpenHandler` docs only security-related
+      //     `webPreferences` inherit from the parent — chrome-style
+      //     options reset to OS defaults — so the popup gets a normal
+      //     OS title bar and looks like a regular browser window.
+      //   - The macOS passkey-unavailable banner is still injected
+      //     against this popup via `did-create-window` →
+      //     `injectMacPasskeyWarning`, so cloud-login flows on macOS
+      //     keep the password+OTP affordance.
+      return { action: 'allow', overrideBrowserWindowOptions: { webPreferences: { preload: undefined } } }
+    }
+    shell.openExternal(childUrl)
+    return { action: 'deny' }
+  })
+  comfyContents.on('will-prevent-unload', (e) => {
+    // Window-mode unification — only suppress beforeunload prompts
+    // while an install is actively backing this view. A detached host
+    // (chooser mode, comfyView at `about:blank` or a stray late
+    // navigation) shouldn't silently swallow user-driven dialogs.
+    // See post-unification-code-review.md F15.
+    const liveEntry = comfyWindows.get(windowKey)
+    if (!liveEntry || liveEntry.installationId === null) return
+    e.preventDefault()
+  })
+  attachContextMenu(comfyWindow, comfyContents)
+  return comfyView
+}
+
+/**
+ * Window-mode unification — rebuild the entry's comfyView in place
+ * when the incoming install's partition doesn't match the one pinned
+ * at construction. Lets the W-4 in-place attach work for installs
+ * that the partition-equality claim check would otherwise have
+ * rejected (the chooser host's `persist:shared` view can't host a
+ * unique-partition install without a fresh view).
+ *
+ * Tears down the old comfyView (which is at `about:blank` post-
+ * detach), constructs a fresh one with the new partition + the
+ * matching `comfyPreload`, replaces the entry's reference, and
+ * updates `entry.constructedPartition`. Generic listeners (popup,
+ * window-open, will-prevent-unload, context-menu) are wired by
+ * `buildComfyView`. The install-keyed listeners come next when the
+ * caller proceeds with `attachInstall()`.
+ *
+ * No-op when the partition is already correct.
+ */
+function rebuildComfyViewIfNeeded(entry: ComfyWindowEntry, installation: InstallationRecord): void {
+  const expectedPartition = expectedPartitionFor(installation)
+  if (entry.constructedPartition === expectedPartition) return
+  if (entry.window.isDestroyed()) return
+
+  // Replace the old view in the BrowserWindow's contentView. The
+  // titleBarView and panelView (if any) survive — only the comfyView
+  // is being rebuilt.
+  const oldView = entry.comfyView
+  const newView = buildComfyView(
+    entry.window,
+    {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, '../preload/comfyPreload.js'),
+      partition: expectedPartition,
+    },
+    entry.windowKey,
+  )
+  entry.window.contentView.addChildView(newView)
+  // Hide the old view immediately so it doesn't intercept input
+  // before the destroy lands. The destroy is synchronous on Electron
+  // so this is mostly defensive.
+  oldView.setVisible(false)
+  entry.window.contentView.removeChildView(oldView)
+  if (!oldView.webContents.isDestroyed()) oldView.webContents.close()
+  entry.comfyView = newView
+  entry.constructedPartition = expectedPartition
+}
+
 function onLaunch({ port, url, process: proc, installation, mode }: {
   port: number
   url?: string
@@ -1489,27 +1559,28 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
   // attach. The chooser-host renderer claims its own host window via
   // `comfy-window:claim-attach-host` right before kicking off the
   // launch action, so by the time the launch event lands here the
-  // claim's already in the map. Honour it only when the target host
-  // is still alive, still install-less, AND its comfyView's partition
-  // (pinned at construction — Electron has no API to change a
-  // WebContentsView's partition without rebuilding the view) MATCHES
-  // the install's expected partition. Without the equality check, a
-  // host previously install-backed by a unique-partition install A
-  // (`persist:A.id`) that was detached via Return-to-Dashboard would
-  // accept a chooser-pick claim for any non-unique install B and
-  // load B's URL into A's session bucket — leaking session data
-  // between installs (post-unification-code-review.md F1).
+  // claim's already in the map. Honour it whenever the target host
+  // is still alive AND still install-less. Partition mismatches
+  // (chooser host's pinned `persist:shared` vs. a unique-partition
+  // install, OR a recycled host whose pinned partition is for a
+  // different install) are reconciled by `rebuildComfyViewIfNeeded`,
+  // which destroys + rebuilds the comfyView in place with the right
+  // partition before `attachInstall` loads the URL. Pre-fix the
+  // claim was rejected on partition mismatch and we fell through to
+  // the fresh-window path — that meant unique-partition installs
+  // (Standalone / Portable) launched from a chooser ALWAYS opened
+  // in a new window. The rebuild path keeps the user in the same
+  // window without leaking session data across partitions.
   const claimedKey = pendingAttachClaims.get(installationId)
   if (claimedKey !== undefined) {
     pendingAttachClaims.delete(installationId)
     const claimed = comfyWindows.get(claimedKey)
-    const expectedPartition = expectedPartitionFor(installation)
     if (
       claimed &&
       !claimed.window.isDestroyed() &&
-      claimed.installationId === null &&
-      claimed.constructedPartition === expectedPartition
+      claimed.installationId === null
     ) {
+      rebuildComfyViewIfNeeded(claimed, installation)
       const ok = attachInstall(claimed, { installation, comfyUrl, isLocal: !url })
       if (ok) {
         claimed.layoutViews()
@@ -1969,13 +2040,13 @@ function _detachInstallImpl(entry: ComfyWindowEntry): void {
 
   // Step 2 — release the loaded ComfyUI page. The comfyView is kept
   // alive so a subsequent attachInstall() can navigate it back
-  // without a fresh WebContentsView construction. The partition is
-  // fixed at construction (Electron has no API to change it without
-  // rebuilding the view) — `entry.constructedPartition` carries the
-  // pinned value forward, and `onLaunch()`'s claim-acceptance check
-  // refuses any install whose `expectedPartitionFor()` doesn't
-  // match. Cross-partition re-attaches fall through to the legacy
-  // fresh-window path — see post-unification-code-review.md F1.
+  // without a fresh WebContentsView construction. Partition mismatches
+  // (chooser host's `persist:shared` vs. a unique-partition install,
+  // or a recycled host whose pinned partition is for a different
+  // install) are reconciled at re-attach time by
+  // `rebuildComfyViewIfNeeded`, which destroys + rebuilds this view
+  // with the right partition before the next URL load. See
+  // post-unification-code-review.md F1.
   if (!entry.comfyView.webContents.isDestroyed()) {
     void entry.comfyView.webContents.loadURL('about:blank').catch(() => {})
     entry.comfyView.setBackgroundColor(COMFY_BG)
@@ -2008,6 +2079,7 @@ function _detachInstallImpl(entry: ComfyWindowEntry): void {
     entry.titleBarView.webContents.send('comfy-titlebar:panel-changed', 'comfy')
     _notifyTitleBarNavState(entry)
   }
+
   ensurePanelView(entry.windowKey, entry, 'chooser')
 
   // Step 7 — render the chooser body.
