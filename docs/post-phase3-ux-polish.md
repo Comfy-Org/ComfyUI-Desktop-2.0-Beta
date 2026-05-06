@@ -27,180 +27,124 @@ title bar, takeovers, and modals — that thread is captured in the
 > below). Prioritize getting alignment on that section before kicking
 > off the gated work.
 
+> **Update — polish slice landed.** All non-gated items are done as of
+> the Track F commits (`1e4939a`, `784c2e8`). Items below are tagged
+> **`[DONE — <commit>]`** where shipped, **`[GATED]`** where waiting on
+> the Takeover ↔ Modal / Settings split / Running-install ownership
+> decisions, or **`[DEFERRED]`** for things split into their own
+> follow-up. See the Tracks A / B / C / D / E / F / G commits for
+> implementation detail.
+
 ---
 
 ## First Time Use
 
-- **Large click targets for the cloud-vs-local pick.** Today the choice
-  cards are small. Restructure as **two big squares laid out
-  horizontally** (Local on one side, Cloud on the other) — each one a
-  generous click target so the choice reads like a real fork in the
-  road, not a checkbox-sized pick.
-- **Skip the pick step for returning users.** If the launcher detects
-  prior usage of Desktop 2.0 beta — i.e. installs exist beyond the
-  always-present Cloud and potentially Legacy Desktop entries — the
-  cloud/local pick is suppressed; the user only sees the T&Cs +
-  telemetry consent step. They've already made the choice; don't
-  re-litigate it.
-  - The first-use takeover stops at consent and emits `complete`
-    instead of advancing to `pick`.
-- **No easy escape from the first-use flow.** Today the takeover's ✕
-  button lets users punt straight to the dashboard, which is exactly
-  what we don't want for a first-time user — they should follow the
-  flow through to a real choice.
-  - Drops cleanly out of the bigger "drop the takeover ✕ button"
-    decision (cross-cutting), but specifically: for first-use we want
-    to push hard on getting the user to a working ComfyUI as their
-    first interaction.
-  - The user can still close the *window* via the OS chrome (any
-    takeover keeps that escape hatch); we just don't render an in-app
-    dismiss affordance that drops them into the dashboard mid-onboarding.
-- **First-use auto-launches on completion.**
-  - Cloud branch picked → cloud install auto-launches.
-  - Local branch picked → after the new-install completes, the
-    resulting Standalone install auto-launches.
-  - The user reaches a running ComfyUI as the natural endpoint of
-    first-use, no extra "click play" step.
-- **New branching step on Local + Legacy Desktop detected.** If the
-  user picks Local AND we detect a Legacy Desktop installation present
-  on this machine, present a follow-up screen with two options:
-  - **Migrate current install** — routes to the existing migration /
-    Quick Install path (same shortcut MigrationBanner already uses).
-  - **Install new** — routes to the regular new-install Standalone
-    path with type-pick skipped.
-
-  The migration option only renders when the detection succeeds;
-  otherwise the Local pick goes straight to new-install Standalone.
+- **Large click targets for the cloud-vs-local pick.** **`[DONE — 24cb005]`**
+  Restructured as two big horizontal squares (Local left, Cloud right).
+- **Skip the pick step for returning users.** **`[DONE — 82cc241]`**
+  Detection lives in `src/main/lib/firstUseDetection.ts`; takeover takes a
+  `skipPick` flag on `open()` and emits `complete` after consent.
+- **No easy escape from the first-use flow.** **`[DONE — 24cb005]`**
+  In-app ✕ removed; OS chrome close still works.
+- **First-use auto-launches on completion.** **`[DONE — 85178d7]`**
+  Cloud / new-install / migrate branches all auto-launch via a
+  `pendingFirstUseAutoLaunchId` ref + progressStore watcher in PanelApp.
+- **New branching step on Local + Legacy Desktop detected.** **`[DONE — 85178d7]`**
+  New `localBranch` step renders only when legacy desktop is present;
+  Migrate routes to Quick Install, Install-new routes to Standalone.
 
 ---
 
 ## Dashboard
 
-- **Drop pinning entirely.** Pin/unpin actions, the Pinned filter, the
-  gold-star UI, the `primaryInstallId` pref. Old dashboard rationale
-  (highlight a few installs) is gone now that the new dashboard shows
-  every install. Closes the §2 cleanup work too.
-- **Drop the "Desktop" install category.** Legacy Desktop installs
-  continue to live under Local (status quo before the category split).
-  Remove the `desktop` filter chip and any source-category routing
-  that depends on it.
-- **Tile play/stop overlap with progress bar.** Buttons sit too low;
-  when the progress bar renders along the card bottom they collide.
-  Fix by moving the progress bar — the empty gap between the icon and
-  the text is a natural new home for it. Buttons stay where they are.
-- **Refresh install-type icons** *(cross-cutting — see below)*.
+- **Drop pinning entirely.** **`[DONE — a425aaa]`**
+  Pin/unpin actions, Pinned filter, gold-star UI, `primaryInstallId` pref —
+  all removed. Closes the §2 cleanup.
+- **Drop the "Desktop" install category.** **`[DONE — 78c471e]`**
+  Filter chip removed; Legacy Desktop installs surface under Local.
+- **Tile play/stop overlap with progress bar.** **`[DONE — 4ff13bf]`**
+  Progress bar moved into the icon ↔ text gap.
+- **Refresh install-type icons** **`[DONE — 78b29cd]`**
+  New mapping in `src/renderer/src/lib/installTypeIcon.ts` — Standalone =
+  `LaptopMinimal`, Cloud = `Cloud`, Legacy Desktop = `Computer` (chunkier,
+  visibly older). Title-bar consumer in Track B.
 - **Don't treat new dashboard/chooser-host windows as
-  pseudo-launchers.** The dashboard *looks* launcher-ish, but each
-  window has one job — the dashboard window is the dashboard, full
-  stop. Drop affordances that try to make it more.
+  pseudo-launchers.** **`[GATED — vague, needs decision before action]`**
 - **Tile click for an already-running install closes the originating
-  dashboard window and focuses the existing instance window.** No
-  separate close button on the tile — clicking the running tile is the
-  single-action handoff. The dashboard window the click originated in
-  dies; focus lands on the live Comfy.
-- **All settings open as modals on the dashboard.** Both per-install
-  settings (clicked from a tile) and app-level / "Preferences"
-  settings (clicked from the waffle menu) — modals only, no takeovers,
-  no left-sidebar layout. *(Gated on the modal pattern decision.)*
-- **Click-outside-modal dismisses the modal.** Current behaviour
-  leaves the modal stuck unless the user finds the explicit close
-  action.
-- **Tile click for an in-progress tile opens the in-progress modal**
-  (not Manage). The user clearly wants to see what's running on that
-  install. Right-click still surfaces the action menu (where Manage…
-  lives) for users who want the full controls.
-- **Visually deactivate actions blocked by a running operation.**
-  Today disabled actions look identical to live ones until the user
-  clicks and gets a no-op or an error. Apply uniform `disabled`
-  styling so the user sees which controls are gated by the running op
-  without having to attempt them.
+  dashboard window and focuses the existing instance window.**
+  **`[GATED — running-install ownership]`**
+- **All settings open as modals on the dashboard.** **`[GATED — modal pattern]`**
+- **Click-outside-modal dismisses the modal.** **`[GATED — modal pattern]`**
+- **Tile click for an in-progress tile opens the in-progress modal.**
+  **`[GATED — modal pattern]`**
+- **Visually deactivate actions blocked by a running operation.** **`[DONE — 0c0b0c4]`**
+  Shared `isStoppedActionGated(inst)` predicate on `useInstallContextMenu`
+  drives both kebab menu items and the visible Update/Migrate pills so
+  they cannot disagree.
 - **Closing a running instance from the dashboard is right-click
-  only.** No close button on the tile itself; the action lives only in
-  the right-click action menu. And the action **actually closes the
-  running Comfy Instance window** — not the orphaned "dashboard says
-  closed but the window's still alive" half-state we have today.
-  Reuses the same close path the user would hit from the Comfy
-  Instance window's own OS chrome.
-- **Top-of-dashboard utility row.** Small "Import Existing Install"
-  button (mirrors the old launcher's affordance) **and** "Load
-  Snapshot" button, sitting alongside each other up top. These are not
-  part of the New Install flow — they're peer entry points for
-  bringing an external install in. Triggers the same Track and
-  Load-Snapshot modals that exist today, but reached via the dashboard
-  chrome rather than buried inside the new-install wizard.
+  only.** **`[GATED — running-install ownership]`**
+- **Top-of-dashboard utility row.** **`[GATED — borderline; can ship the
+  button surfaces independently of the modal pattern decision but
+  intentionally deferred to the next polish slice]`**
 
 ---
 
 ## Comfy Instance (title bar ↔ takeovers/modals)
 
-- **Install-update pill shows the target version.** Today it's a
-  generic "Update available"; switch to "Update v{version}" matching
-  how the app-update pill already reads. The version is already in the
-  install's `statusTag` payload, so it's a label change + small data
-  plumb.
-- **App-update pill behaviour gated by the auto-update setting.**
-  - *Auto-updates ON* → app downloads automatically in the background.
-    Pill stays hidden during download, then appears beside the waffle
-    menu as **"Update will apply on restart"** (or similar) once the
-    update is staged. Clicking opens the popover with a Restart-now
-    action; otherwise it applies on the next launch.
-  - *Auto-updates OFF* → pill appears as **"Update v{version}
-    available"** the moment an update is detected (current
-    `kind='available'` behaviour). Clicking opens the popover with the
-    manual Download action.
-
-  This means the existing `kind: 'available' | 'ready' | null` state
-  machine stays, but main now decides whether to enter `'available'`
-  (auto-off) or skip straight through download into `'ready'`
-  (auto-on). Pill copy diverges per kind.
+- **Install-update pill shows the target version.** **`[DONE — 52c0c9d]`**
+  `comfy-titlebar:install-update-changed` extended from `boolean` to
+  `{ available: boolean, version?: string }`; pill now reads "Update v{version}".
+- **App-update pill behaviour gated by the auto-update setting.** **`[DONE — 1c54755]`**
+  Main's updater decides `'available'` (auto-off) vs skip-to-`'ready'`
+  (auto-on); pill copy in `useAppUpdateState` diverges per kind.
 - **Spawned auxiliary windows (cloud login etc.) shouldn't expose the
-  title-bar file menu.** Regression — these windows are not full Comfy
-  hosts and should never expose the waffle/file menu. Need to identify
-  when this regressed.
+  title-bar file menu.** **`[DONE — 2f32f1d]`**
+  Investigation showed strict-equality sender match in `findEntryByTitleBarSender`
+  + `preload: undefined` for `setWindowOpenHandler` popups already prevents
+  the regression. Shipped a hardening commit with a contract comment so
+  future title-menu IPCs don't re-open the surface.
 - **Verify the macOS "passkey/token sign-in unavailable" notice still
-  fires on those auxiliary windows.** Don't lose that affordance while
-  fixing the file-menu reachability.
+  fires on those auxiliary windows.** **`[DONE — 2f32f1d]`**
+  Confirmed `injectMacPasskeyWarning` still hooked via
+  `comfyContents.on('did-create-window', …)`.
 - **Install-type icon in title bar replaces textual `— Standalone` /
-  `— Cloud` suffix.** The icon disambiguates source category at a
-  glance without consuming label width. Cross-cutting with the icon
-  refresh below.
+  `— Cloud` suffix.** **`[DONE — 82ea084]`**
+  Title bar consumes `installTypeMetaFor` from Track G's helper.
 - **Waffle menu dropdown is empty / no-ops while a new-install
-  takeover is mounted.** Bug — the menu should still be navigable from
-  inside takeovers, or if intentionally locked, it should reflect that
-  uniformly.
+  takeover is mounted.** **`[DONE — c4b13ce]`**
+  File menu exempted from `isInert` disable; pills/nav arrows stay gated.
 - **Show crash error / log inside the Comfy Instance window when its
-  instance crashes.** Currently the lifecycle view tells you it
-  crashed but doesn't surface what happened — need the error/log
-  context in-window so the user doesn't have to dig into log files.
-- **Downloads tray in the title bar.** This is the §6 follow-through,
-  but as a tray rather than a full panel. Replaces the
-  renderer-injected downloads UI currently drawn into the ComfyUI page
-  surface — pulls Desktop's download UI out of ComfyUI's namespace.
-  Visually distinct from the update pills (which already use a
-  Download icon) — needs different iconography / chrome so the user
-  reads "downloads tray" vs "update available pill" at a glance.
+  instance crashes.** **`[DONE — d43ba7d, cba61e3]`**
+  Per-install crash buffer (8 KB cap) in main + new `getLastCrashError`
+  IPC; lifecycle view's crashed state renders an inline collapsible
+  "Show error log" block.
+- **Downloads tray in the title bar.** **`[DONE — 1e4939a, 784c2e8]`**
+  `ArrowDownToLine` icon, neutral chrome, square-ish 6px radius vs
+  pills' 999px — distinct from update pills at a glance. Hidden when
+  zero in-flight + zero recent. Legacy injected toast/dock/tab UI fully
+  removed from `comfyContentScript.ts`.
 - **Settings live as a tab in the Comfy Instance view's left-sidebar
-  layout.** The this-install settings are one tab; the global /
-  Preferences tab and Directories tab share the same sidebar. This is
-  where the "unified settings with categories" surface actually lives.
-  *(Gated on the settings-split decision.)*
+  layout.** **`[GATED — settings-split decision]`**
 - **Comfy Instance is closed-off** — no New Install / Track / Load
-  Snapshot / Migrate entries in the in-Comfy waffle menu. Once in a
-  Comfy Instance window, the only Desktop-2 escape hatch is "go back
-  to dashboard" (which kills the running instance — no silent
-  overlap).
+  Snapshot / Migrate entries in the in-Comfy waffle menu. **`[DONE — dfe2bcf]`**
+  In-Comfy menu didn't actually offer them; added them to the chooser-host
+  menu plus a defensive guard in `activateTitleMenuItem` so an out-of-order
+  IPC carrying one of those item IDs against an install-backed parent is
+  dropped silently.
 
 ---
 
 ## Cross-cutting
 
-### Install-type icon set
+### Install-type icon set **`[DONE — 78b29cd (helper + tile), 82ea084 (title bar)]`**
 
-- **New iconography for install types.** Specifically: Legacy Desktop
-  should read as visibly older / different from a current Standalone
-  install — survey options. The same icons drive both:
-  - Dashboard tile (already shows source-category info)
-  - Comfy Instance title bar (replacing the textual category suffix)
+- New iconography landed via `src/renderer/src/lib/installTypeIcon.ts`:
+  - **Standalone** = `LaptopMinimal` (modern slim local device)
+  - **Cloud** = `Cloud`
+  - **Legacy Desktop** = `Computer` (chunkier tower silhouette — visibly older)
+  - **Remote** = `Globe`, **Unknown** = `Box` (fallbacks)
+- Same helper drives the dashboard tile AND the Comfy Instance title bar
+  (textual `— Standalone` / `— Cloud` suffix replaced with the icon).
 
 ### Takeover ↔ Modal rethink — **BIG DECISION**
 
@@ -349,3 +293,18 @@ with where each sits once we apply the rules above. Items marked
 |----|--------|--------|
 | §19 brand audit | [docs/unified-window-phase3-notes.md](unified-window-phase3-notes.md) §19 | [Issue #473](https://github.com/Comfy-Org/ComfyUI-Desktop-2.0-Beta/issues/473) |
 | §18 restart-required pill | [docs/unified-window-phase3-notes.md](unified-window-phase3-notes.md) §18 | Deferred to its own pass |
+| `swap-installations.{ps1,sh}` legacy `primaryInstallId` read | Track A pin-removal (a425aaa) | Dead read; scripts already fall back gracefully. Cleanup alongside other dev-tooling pass. |
+| Running-state CTAs use show/hide instead of disabled styling | Track A item 4 (0c0b0c4) | Visual consistency — extend `looks-disabled` pattern to Show Window / Stop when an op is in flight. |
+| `DetailModal` action buttons use their own `useActionGuard` | Track A item 4 (0c0b0c4) | Audit whether the chooser-tile show-but-disabled pattern can subsume `useActionGuard`. |
+| `confirmMigration` modal stacking on first-use | Track D (85178d7) | Visual layering wasn't formally verified — manual smoke test on the migrate branch. |
+| Migrate auto-launch heuristic | Track D (85178d7) | "Newest local install" fallback could pick the wrong install in concurrent-install scenarios. Expose new install id from migrate action result instead. |
+| `zh.json` locale missing `comfyLifecycle.*`/etc. | Track E (cba61e3) | Either move `zh.json` to `locales/drafts/` or fully translate. |
+| `ConsoleModal` doesn't surface new `lastStderr` field | Track E (cba61e3) | Parity polish — show stderr alongside `errorInfo.message`. |
+| Title-bar i18n parity | Track B item 4 (82ea084) | `INSTALL_TYPE_LABELS` map hard-codes English in `TitleBarApp.vue`; wire vue-i18n into title-bar renderer to use `installTypeMetaFor(...).labelKey` instead. |
+| Auto-download verification on packaged build | Track B item 2 (1c54755) | Confirm `runCheck('auto-download')` actually triggers the download in todesktop runtime when the periodic auto-check has only "checked". |
+| `DownloadsTrayPopover` ↔ `DownloadsPanel` overlap | Track F (1e4939a) | Both render the same `downloadStore` data. Decide which surface is canonical once settings-sidebar-tab work lands. |
+| App-update popover surface | Decision log | Deferred — panel-positioned card vs true title-bar child-window popup. |
+| Takeover ↔ Modal rethink (max-width, ✕ removal, "back to main" affordance) | Cross-cutting | **Open — gates Dashboard items and Settings split.** |
+| Settings split (Comfy-Instance left-sidebar tab layout) | Cross-cutting | **Open — gates Comfy Instance settings tab + parts of Dashboard.** |
+| Running-install ownership | Cross-cutting | **Open — gates running-tile click handoff, dashboard close-running, "don't treat dashboard windows as pseudo-launchers".** |
+| New-install wizard restructure | Cross-cutting | **Open — gates first-time vs subsequent install flow + snapshot-import location.** |
