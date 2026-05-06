@@ -139,13 +139,35 @@ Sliced into three commits, all green-gated independently:
   W-4.
 
 ### Stage W-4 — Swap call sites to in-place transform
-- `returnToDashboard()` → `entry.detachInstall()`. Capture-bounds /
-  open-fresh-chooser-host / dispatch-close goes away.
-- Chooser-pick (`handleChooserPick` / tile click on Comfy panel) →
-  `entry.attachInstall(id)` against the current host window instead
-  of `openComfyWindow(...)`.
+Sliced into two commits, both green-gated independently:
+
+- **W-4a (returnToDashboard)** — File menu's "Return to Dashboard"
+  flips the install-backed host in place via `entry.detachInstall()`.
+  Capture-bounds / open-fresh-chooser-host / dispatch-close goes
+  away; the same BrowserWindow stays alive so bounds + maximised
+  state are preserved by definition. Tier 2/3 consult still runs
+  upfront. The pre-cleared-close set drops `returnToDashboard` as
+  a caller (still used by `confirmAndCloseAllHostWindows`).
+- **W-4b (chooser-pick in-place attach)** — `handleChooserPick`
+  (and the first-use chain's `launchInstallationAfterFirstUse`)
+  claim the calling host for in-place attach via the new
+  `claimAttachHost` IPC right before kicking off the launch.
+  `onLaunch()` consumes the claim and calls `attachInstall()` on
+  the claimed entry instead of constructing a fresh window. The
+  legacy `transferHostBoundsToInstall` + `closeHostWindow` wiring
+  is kept as the fallback path for claim rejections (the only one
+  in current sources is `browserPartition === 'unique'`, which
+  needs a unique partition pinned at view construction).
+  Chooser-host comfyView construction switches to comfyPreload +
+  `persist:shared` so the dummy view is partition-compatible with
+  the install-backed default; the generic comfyContents listeners
+  (popup creation / window-open routing / will-prevent-unload / OS
+  context menu) move from `onLaunch` into `createHostWindow` so
+  they survive every attach/detach without re-binding.
+
 - "Stop instance" path (optional) — exposes `detachInstall()` from
   comfy-lifecycle so the user can free the window without closing it.
+  Deferred to a follow-up.
 
 ### Stage W-5 — Multi-window deduplication for "tile click on
 already-running install"
