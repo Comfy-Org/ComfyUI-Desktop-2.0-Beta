@@ -103,6 +103,17 @@ export interface TakeoverOverlay {
    * right install. Other takeover components ignore this.
    */
   installationId?: string
+  /**
+   * Modal-unification (Track M-2.4) — opt the takeover into a non-
+   * default cancel-prompt copy when main consults the renderer via
+   * `comfy-window:request-close`. The first-use takeover sets
+   * `'quit-setup'` so the prompt reads "Quit setup?" / "If you close
+   * now, your selection won't be saved …" instead of the generic
+   * "Cancel current operation?" copy that the install-flow takeovers
+   * (M-3) will continue to use. Undefined keeps the existing
+   * `overlay.cancelCurrentTitle` / `overlay.cancelMessage` pair.
+   */
+  cancelCopyKey?: 'quit-setup'
 }
 
 export type Overlay =
@@ -157,8 +168,23 @@ export function useOverlay(): UseOverlayApi {
 
   const tier = computed(() => tierOf(current.value))
 
-  async function confirmCancelCurrent(curName?: string): Promise<boolean> {
+  async function confirmCancelCurrent(cur: Overlay): Promise<boolean> {
     const t = i18n.global.t
+    // Modal-unification (Track M-2.4) — takeovers can opt into a
+    // dedicated copy bundle. Currently only the first-use takeover
+    // uses this (`'quit-setup'`); the install-flow takeovers
+    // migrated in M-3 will keep the generic "Cancel current
+    // operation?" copy.
+    if (cur.kind === 'takeover' && cur.cancelCopyKey === 'quit-setup') {
+      return await modal.confirm({
+        title: t('overlay.quitSetupTitle'),
+        message: t('overlay.quitSetupMessage'),
+        confirmLabel: t('overlay.quitSetupConfirm'),
+        confirmStyle: 'danger',
+      })
+    }
+    const curName =
+      (cur.kind === 'progress' || cur.kind === 'takeover') ? cur.operationName : undefined
     const title = curName
       ? t('overlay.cancelNamedTitle', { name: curName })
       : t('overlay.cancelCurrentTitle')
@@ -179,7 +205,7 @@ export function useOverlay(): UseOverlayApi {
     // it with Tier 3 follows the same rule (the design treats Tier 3 as
     // "ends in the app" so we still give the user one chance to abort).
     if (cur?.kind === 'progress' && nextTier >= 2) {
-      const ok = await confirmCancelCurrent(cur.operationName)
+      const ok = await confirmCancelCurrent(cur)
       if (!ok) return false
     }
     // Closing (`next === null`) an in-flight progress op also prompts —
@@ -189,7 +215,7 @@ export function useOverlay(): UseOverlayApi {
     // can't lose work without confirmation when main consults the
     // renderer via `comfy-window:request-close`.
     if (next === null && (cur?.kind === 'progress' || cur?.kind === 'takeover')) {
-      const ok = await confirmCancelCurrent(cur.operationName)
+      const ok = await confirmCancelCurrent(cur)
       if (!ok) return false
     }
 

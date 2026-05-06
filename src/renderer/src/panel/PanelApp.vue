@@ -333,7 +333,16 @@ async function openFlowTakeover(component: FlowComponent): Promise<void> {
 async function openFirstUseTakeover(): Promise<void> {
   const statePromise = window.api.getFirstUseState()
     .catch(() => ({ skipPick: false, hasLegacyDesktop: false }))
-  const ok = await openOverlay({ kind: 'takeover', component: 'first-use' })
+  // Modal-unification (Track M-2.4) — opt the takeover into the
+  // dedicated "Quit setup?" cancel-prompt copy so the OS-X consult
+  // (main → `onCloseRequest` → `closeOverlay`) reads as a binding-
+  // flow exit dialog rather than the generic
+  // `overlay.cancelCurrentTitle` ("Cancel current operation?").
+  const ok = await openOverlay({
+    kind: 'takeover',
+    component: 'first-use',
+    cancelCopyKey: 'quit-setup',
+  })
   if (!ok) return
   await nextTick()
   const state = await statePromise

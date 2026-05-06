@@ -281,7 +281,10 @@
     "cancelCurrentTitle": "取消当前操作？",
     "cancelNamedTitle": "取消「{name}」？",
     "cancelMessage": "操作将立即停止。尚未完成的内容将尽可能回滚。",
-    "cancelConfirm": "取消操作"
+    "cancelConfirm": "取消操作",
+    "quitSetupTitle": "退出设置？",
+    "quitSetupMessage": "如果您现在关闭，您的选择将不会被保存，下次启动 ComfyUI Desktop 时将重新进行设置。",
+    "quitSetupConfirm": "退出设置"
   },
 
   "firstUse": {

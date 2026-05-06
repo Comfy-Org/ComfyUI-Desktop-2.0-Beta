@@ -372,7 +372,10 @@
     "cancelCurrentTitle": "Cancel current operation?",
     "cancelNamedTitle": "Cancel \"{name}\"?",
     "cancelMessage": "The operation will stop where it is. Anything not yet completed will be rolled back where possible.",
-    "cancelConfirm": "Cancel operation"
+    "cancelConfirm": "Cancel operation",
+    "quitSetupTitle": "Quit setup?",
+    "quitSetupMessage": "If you close now, your selection won't be saved and setup will start again the next time you launch ComfyUI Desktop.",
+    "quitSetupConfirm": "Quit setup"
   },
 
   "firstUse": {
