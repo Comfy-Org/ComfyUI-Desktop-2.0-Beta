@@ -304,6 +304,34 @@ interface ComfyWindowEntry {
    * see the IPC handler comment.
    */
   firstUseMode: 'none' | 'consent-lockdown' | 'post-consent'
+  /**
+   * Window-mode unification (Stage W-3b) — current title-bar pill
+   * label. Install-backed windows mirror the install name (and re-
+   * push on rename); install-less hosts hold `'Choose an install'`.
+   * Stored on the entry so the unified `title-bar-ready` handshake
+   * in `createHostWindow()` can synthesize the initial push without
+   * a per-mode callback closure, and so `attachInstall()` /
+   * `detachInstall()` (W-3c) can swap it as the window flips modes.
+   */
+  titleBarText: string
+  /**
+   * Window-mode unification (Stage W-3b) — install-type icon
+   * category string (`local` / `cloud` / `desktop` / …) consumed by
+   * the title-bar renderer's `installTypeMetaFor()` helper. `null`
+   * for install-less host windows (no icon shown). Mirrors the
+   * `titleBarText` design: stored on the entry so the unified
+   * `title-bar-ready` handler can re-push without closure capture.
+   */
+  sourceCategory: string | null
+  /**
+   * Window-mode unification (Stage W-3b) — symmetric undo for
+   * `attachInstall()`. Set by attach (closes over every event listener
+   * and map mutation it set up); called by the close handler before
+   * view teardown AND (W-3c) by `detachInstall()` to flip the host
+   * back to install-less mode in place. `null` whenever the entry is
+   * not currently install-backed.
+   */
+  _installCleanup: (() => void) | null
 }
 /**
  * All host windows (install-backed and install-less). Window-mode
@@ -1040,24 +1068,18 @@ interface CreateHostWindowOpts {
   /** `installationId` query param for the title-bar HTML load (empty string for chooser hosts). */
   titleBarInstallationIdParam: string
   /**
-   * Mode-specific extras pushed during the title-bar-ready handshake.
-   * Install-backed sends title text + source-category icon + install-update
-   * pill state; install-less sends just the fallback title text.
+   * Initial title-bar pill label. Install-backed wrappers pass the
+   * install name; chooser hosts pass `'Choose an install'`. Stored on
+   * `entry.titleBarText` so the unified `title-bar-ready` handshake
+   * can re-push it without a per-mode callback (W-3b).
    */
-  onTitleBarReady?: (entry: ComfyWindowEntry, titleBarView: WebContentsView) => void
+  initialTitleBarText: string
   /**
-   * Mode-specific pre-teardown. Runs inside the close handler after the
-   * panel renderer cleared, before view destruction. Install-backed
-   * detaches its download manager wiring and stops the running session
-   * here; install-less is a no-op.
+   * Initial install-type icon category. Install-backed wrappers pass
+   * the resolved `sourceMap[].category`; chooser hosts pass `null`
+   * (no icon).
    */
-  onBeforeTeardown?: (entry: ComfyWindowEntry) => void
-  /**
-   * Mode-specific cleanup at the `'closed'` event. Runs after the entry
-   * is unregistered. Install-backed clears its install-keyed retry-timer
-   * + relaunch state and unsubscribes from `installationEvents`.
-   */
-  onClosed?: () => void
+  initialSourceCategory: string | null
 }
 
 interface CreateHostWindowResult {
@@ -1182,6 +1204,14 @@ function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowResult {
 
   // Push the initial state once the title bar's preload signals readiness.
   // Filter to this title bar's WebContents to avoid cross-talk between windows.
+  //
+  // Stage W-3b — the install-update pill + source-category icon
+  // (previously install-backed-only via an `onTitleBarReady` callback)
+  // are now resolved off the entry: the title text and source-category
+  // come from `entry.titleBarText` / `entry.sourceCategory` (set by
+  // `attachInstall()` for install-backed, by the chooser-host wrapper
+  // for install-less); the install-update pill is computed from
+  // `entry.installationId` when non-null.
   const onTitleBarReadyHandler = (event: Electron.IpcMainEvent): void => {
     if (event.sender !== titleBarView.webContents) return
     if (titleBarView.webContents.isDestroyed()) return
@@ -1189,17 +1219,26 @@ function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowResult {
     titleBarView.webContents.send('comfy-titlebar:panel-changed', entry?.activePanel ?? 'comfy')
     if (entry) {
       titleBarView.webContents.send('comfy-titlebar:theme-changed', entry.lastTheme)
+      titleBarView.webContents.send('comfy-titlebar:title-changed', entry.titleBarText)
+      titleBarView.webContents.send('comfy-titlebar:source-category-changed', entry.sourceCategory)
       _notifyTitleBarNavState(entry)
     }
     // Phase 3 §18 — both modes get the app-update pill and the
-    // downloads tray. The install-update pill + source-category icon
-    // are install-backed only and live in `onTitleBarReady`.
+    // downloads tray. The install-update pill is install-backed only:
+    // gated on `entry.installationId !== null` so a chooser host (or
+    // a detached install-backed host post-W-3c) skips it cleanly.
     titleBarView.webContents.send(
       'comfy-titlebar:app-update-state-changed',
       updater.getCurrentUpdateState(),
     )
     notifyTitleBarDownloads(titleBarView)
-    if (entry && opts.onTitleBarReady) opts.onTitleBarReady(entry, titleBarView)
+    const installId = entry?.installationId ?? null
+    if (installId !== null) {
+      void computeInstallUpdateAvailable(installId).then((state) => {
+        if (titleBarView.webContents.isDestroyed()) return
+        titleBarView.webContents.send('comfy-titlebar:install-update-changed', state)
+      })
+    }
     // Pre-warm the title-menu popup so the user's first File / Install
     // click doesn't pay the BrowserWindow construction + HTML/JS load
     // cost (~100ms).
@@ -1209,9 +1248,20 @@ function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowResult {
 
   // Step 5 §16 — close handler is async: preventDefault, consult the
   // panel renderer (so a Tier 2/3 op can prompt the user), run the
-  // mode-specific pre-teardown if cleared, and only then destroy.
+  // attached install's symmetric cleanup if any, and only then destroy.
   // The `closingInFlight` guard prevents re-entry on rapid clicks of
   // the OS close button while the consult is pending.
+  //
+  // Stage W-3b — pre-teardown work that used to live in a per-mode
+  // `onBeforeTeardown` opts callback (detachWindowDownloads +
+  // ipc.stopRunning + install-keyed map cleanup + installationEvents
+  // unsubscribe) is now consolidated on `entry._installCleanup`,
+  // which `attachInstall()` sets and `detachInstall()` (W-3c) /
+  // window close both invoke. Per-window cleanup
+  // (`detachWindowDownloads`) lives outside `_installCleanup` because
+  // it survives mode flips — the per-window download routing is
+  // attached at session level when the install does, and only needs
+  // to be torn down when the BrowserWindow itself goes away.
   let closingInFlight = false
   comfyWindow.on('close', (e) => {
     e.preventDefault()
@@ -1225,7 +1275,8 @@ function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowResult {
         if (!cleared) return
         preClearedClose.delete(comfyWindow)
         if (comfyWindow.isDestroyed()) return
-        if (entry && opts.onBeforeTeardown) opts.onBeforeTeardown(entry)
+        if (entry?._installCleanup) entry._installCleanup()
+        detachWindowDownloads(comfyWindow)
         _unregisterExtraBroadcastTarget(titleBarView.webContents)
         const liveEntry = comfyWindows.get(windowKey)
         if (liveEntry?.panelView) {
@@ -1247,7 +1298,6 @@ function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowResult {
     // primary windowKey AND the secondary install-id index.
     const closedEntry = comfyWindows.get(windowKey)
     if (closedEntry) unregisterHostEntry(closedEntry)
-    if (opts.onClosed) opts.onClosed()
   })
 
   const entry: ComfyWindowEntry = {
@@ -1264,6 +1314,9 @@ function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowResult {
     comfyUrl: '',
     installationId: opts.installationId,
     firstUseMode: 'none',
+    titleBarText: opts.initialTitleBarText,
+    sourceCategory: opts.initialSourceCategory,
+    _installCleanup: null,
   }
   registerHostEntry(entry)
 
@@ -1304,44 +1357,22 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
     return
   }
 
-  // Window-mode unification (Stage W-2) — install-backed wrapper.
-  // The BrowserWindow + 2 views skeleton, layoutViews, macOS
-  // fullscreen forwarding, bounds-save listeners, close / closed
-  // handlers, and title-bar-ready handshake all live in
-  // `createHostWindow()`. This wrapper layers the install-specific
-  // wiring on top: theme observer + content script, fail-retry,
-  // render-process-gone, install-record `'updated'` listener, and
-  // the comfyContents URL load. Stage W-3 will move that wiring
-  // behind `attachInstall(id)` / `detachInstall()` operations on
-  // the entry so a single host window can flip between install-
-  // backed and chooser modes without re-constructing.
+  // Window-mode unification (Stage W-3b) — install-backed wrapper.
+  // Construction is split in two:
+  //   1. `createHostWindow()` — mode-agnostic skeleton (BrowserWindow +
+  //      titleBarView + comfyView + layoutViews + macOS fullscreen +
+  //      bounds-save + close/closed + title-bar-ready handshake).
+  //   2. `attachInstall()` — install-specific wiring (install-record
+  //      subscription, theme observer, fail-retry, render-process-gone,
+  //      before-input keystrokes, attachSessionDownloadHandler, content-
+  //      script injection, comfyContents URL load).
+  // The wrapper retains only the truly generic post-construction
+  // listeners (popup creation, popup routing, will-prevent-unload, OS
+  // context menu) — these are safe on a chooser-host's dummy
+  // comfyView too because they fire only on real navigations / popups.
+  const initialSourceCategory = sourceMap[installation.sourceId]?.category ?? null
 
-  /** Format the install identity for the comfy tab in the title bar.
-   *  Track B item 4 — the source category (Standalone / Cloud / Legacy
-   *  Desktop / …) used to be appended as a textual `— {label}` suffix
-   *  here; the title bar now renders an icon for the category instead
-   *  (see `comfy-titlebar:source-category-changed` below) so the
-   *  install name reads bare. */
-  function computeTitleBarText(inst: InstallationRecord): string {
-    return inst.name
-  }
-  let titleBarText = computeTitleBarText(installation)
-  /** Track B item 4 — install-type icon. The title bar consumes the
-   *  raw `sourceCategory` string (`local` / `cloud` / `desktop` / …)
-   *  via the `installTypeMetaFor()` helper in the renderer; we only
-   *  need to push the bare category string. Cached locally so the
-   *  initial title-bar-ready handshake can replay it without re-
-   *  resolving the source plugin. */
-  function computeSourceCategory(inst: InstallationRecord): string | null {
-    return sourceMap[inst.sourceId]?.category ?? null
-  }
-  let sourceCategory = computeSourceCategory(installation)
-  /** Mirrored install fields used by the OS-level window title (which is
-   *  rebuilt whenever the page title or the install name changes). */
-  let currentInstallName = installation.name
-  let currentPageTitle = ''
-
-  const { comfyWindow, titleBarView, comfyView, entry } = createHostWindow({
+  const { comfyWindow, comfyView, entry } = createHostWindow({
     installationId,
     windowTitle: `${installation.name} — Desktop 2.0 v${APP_VERSION}`,
     boundsKey: installationId,
@@ -1357,125 +1388,22 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
     },
     titleBarBackground: TITLEBAR_BG,
     titleBarInstallationIdParam: installationId,
-    onTitleBarReady: (e, tb) => {
-      // Install-backed extras the shared handshake can't synthesize:
-      // the install-name title text, the source-category icon string,
-      // and the per-install update-pill state.
-      //
-      // Stage W-3a — the install-id is read from the entry at runtime
-      // (rather than the wrapper-scope `installationId` constant)
-      // so that once W-3c makes `entry.installationId` mutable, a
-      // detached host firing this handler against a stale title-bar
-      // mount no-ops cleanly instead of querying for an install id
-      // that no longer backs the window.
-      tb.webContents.send('comfy-titlebar:title-changed', titleBarText)
-      tb.webContents.send('comfy-titlebar:source-category-changed', sourceCategory)
-      const id = e.installationId
-      if (id !== null) {
-        void computeInstallUpdateAvailable(id).then((state) => {
-          if (tb.webContents.isDestroyed()) return
-          tb.webContents.send('comfy-titlebar:install-update-changed', state)
-        })
-      }
-    },
-    onBeforeTeardown: (e) => {
-      // Install-only close-time work: detach the per-window download
-      // routing that `attachSessionDownloadHandler` set up below, and
-      // ask the IPC layer to stop the session backing this install.
-      // Reads the install-id from the entry at runtime (W-3a) — a
-      // host that's been detached (W-3c) skips the stop-session call
-      // since the session was already stopped at detach time.
-      detachWindowDownloads(comfyWindow)
-      const id = e.installationId
-      if (id !== null) ipc.stopRunning(id)
-    },
-    onClosed: () => {
-      // Install-only `'closed'` cleanup. The shared handler already
-      // ran `unregisterHostEntry` (which clears the install-id index
-      // entry too). The retry-timer / relaunch-state maps are still
-      // install-keyed (per-install state, not per-window state); read
-      // the id from the entry at runtime so a detached close clears
-      // nothing — there is no install backing the window to clean up.
-      installationEvents.off('updated', onInstallationUpdated)
-      const id = entry.installationId
-      if (id !== null) {
-        comfyFailRetryTimerCancels.delete(id)
-        relaunchStates.delete(id)
-      }
-    },
+    initialTitleBarText: installation.name,
+    initialSourceCategory,
   })
-  // The shared constructor seeds `comfyUrl` to the empty string for
-  // both modes; install-backed entries need the real URL so reload /
-  // fail-retry can read it back later via `currentComfyUrl()`.
-  entry.comfyUrl = comfyUrl
 
-  function refreshOsWindowTitle(): void {
-    if (comfyWindow.isDestroyed()) return
-    const suffix = currentPageTitle ? ` — ${currentPageTitle}` : ''
-    comfyWindow.setTitle(`${currentInstallName}${suffix} — Desktop 2.0 v${APP_VERSION}`)
-  }
-  function notifyTitleBarTitle(text: string): void {
-    if (titleBarView.webContents.isDestroyed()) return
-    titleBarView.webContents.send('comfy-titlebar:title-changed', text)
-  }
-  function notifyTitleBarSourceCategory(category: string | null): void {
-    if (titleBarView.webContents.isDestroyed()) return
-    titleBarView.webContents.send('comfy-titlebar:source-category-changed', category)
-  }
-
-  // Reflect rename / source change in both the comfy tab and the OS-level
-  // window title as the install record mutates. Phase 3 §18 — also
-  // recompute the install-update pill state (the install's source may
-  // have flipped its statusTag between releases as the release-cache
-  // resolves in the background).
-  //
-  // Stage W-3a — match against `entry.installationId` (rather than the
-  // wrapper-scope `installationId` constant) so a detached host
-  // (W-3c) ignores updates for the install it used to back. The
-  // `install-update-changed` push uses `updated.id` since it has
-  // already passed the install-match guard above.
-  const onInstallationUpdated = (updated: InstallationRecord): void => {
-    if (updated.id !== entry.installationId) return
-    const nextTabText = computeTitleBarText(updated)
-    if (nextTabText !== titleBarText) {
-      titleBarText = nextTabText
-      notifyTitleBarTitle(titleBarText)
-    }
-    // Track B item 4 — sourceCategory shouldn't change after install,
-    // but if the source plugin's category mapping ever shifts (e.g.
-    // future migration), keep the title-bar icon in sync rather than
-    // letting it drift until the user reopens the window.
-    const nextCategory = computeSourceCategory(updated)
-    if (nextCategory !== sourceCategory) {
-      sourceCategory = nextCategory
-      notifyTitleBarSourceCategory(sourceCategory)
-    }
-    if (updated.name !== currentInstallName) {
-      currentInstallName = updated.name
-      refreshOsWindowTitle()
-    }
-    void computeInstallUpdateAvailable(updated.id).then((state) => {
-      if (titleBarView.webContents.isDestroyed()) return
-      titleBarView.webContents.send('comfy-titlebar:install-update-changed', state)
-    })
-  }
-  installationEvents.on('updated', onInstallationUpdated)
-
-  // Alias for the ComfyUI webContents (all install-backed handlers use this)
   const comfyContents = comfyView.webContents
 
+  // Generic comfyContents listeners that survive across attach/detach.
+  // None of these need install-id at runtime, and none fire on a
+  // dummy chooser-host comfyView (no popups, no navigations).
   comfyContents.on('did-create-window', (childWindow) => {
     childWindow.setIcon(APP_ICON)
     if (process.platform !== 'darwin') childWindow.removeMenu()
     injectMacPasskeyWarning(childWindow)
   })
-  comfyContents.on('page-title-updated', (e, title) => {
-    e.preventDefault()
-    currentPageTitle = title
-    refreshOsWindowTitle()
-  })
-  comfyContents.setWindowOpenHandler(({ url }) => {
-    if (shouldOpenInPopup(url)) {
+  comfyContents.setWindowOpenHandler(({ url: childUrl }) => {
+    if (shouldOpenInPopup(childUrl)) {
       // Aux popup contract (see also `findEntryByTitleBarSender`):
       //   - `preload: undefined` strips our preload — the popup has no
       //     `window.api` / `__comfyTitleBar` bridge and so cannot reach
@@ -1493,17 +1421,154 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
       //     keep the password+OTP affordance.
       return { action: 'allow', overrideBrowserWindowOptions: { webPreferences: { preload: undefined } } }
     }
-    shell.openExternal(url)
+    shell.openExternal(childUrl)
     return { action: 'deny' }
   })
+  comfyContents.on('will-prevent-unload', (e) => {
+    e.preventDefault()
+  })
+  attachContextMenu(comfyWindow, comfyContents)
+
+  // Bind the install — wires every install-keyed listener +
+  // attachSessionDownloadHandler + comfyContents.loadURL, and stashes
+  // a symmetric undo on `entry._installCleanup` (consumed by the
+  // close handler, and by `detachInstall()` once W-3c lands).
+  attachInstall(entry, { installation, comfyUrl, isLocal: !url })
+
+  // Now that all wiring is in place, layout for the first time.
+  // (The shared helper deferred this so the wrapper could install
+  // anything that needs to settle before the first paint, e.g. the
+  // comfyContents URL load inside `attachInstall`.)
+  entry.layoutViews()
+
+  if (proc) {
+    proc.on('exit', () => {
+      // Session registry handles state cleanup
+    })
+  }
+}
+
+/**
+ * Window-mode unification (Stage W-3b) — bind a host-window entry to
+ * an installation. Layered on top of `createHostWindow()` (the
+ * mode-agnostic skeleton), this is the install-only wiring that used
+ * to live inline in `onLaunch`'s post-construction code:
+ *
+ *   - mutates `entry.installationId` + `entry.comfyUrl` +
+ *     `entry.titleBarText` + `entry.sourceCategory`
+ *   - registers the entry into the `installationIdToWindowKey`
+ *     secondary index so `getEntryByInstallationId(id)` resolves
+ *   - subscribes to `installationEvents` for live rename / source
+ *     mutation push to the title bar
+ *   - attaches the per-install download manager session handler
+ *   - wires the comfyContents listeners that depend on the install
+ *     (theme report, page title, fail-retry, render-process-gone,
+ *     before-input keystrokes for F5/Ctrl+R reload, dom-ready
+ *     theme-observer + content-script injection)
+ *   - stashes `entry._installCleanup` — the symmetric undo invoked
+ *     by the close handler before view teardown AND (W-3c) by
+ *     `detachInstall()` when the host flips back to install-less
+ *     mode in place
+ *   - calls `comfyContents.loadURL(comfyUrl)` to start the load
+ *
+ * Calling on an already-attached entry throws — callers must detach
+ * first (W-3c) or construct a fresh window. The cleanup is
+ * idempotent (calling it twice is a no-op the second time) so the
+ * close handler is free to invoke it without checking detach state.
+ */
+interface AttachInstallOpts {
+  installation: InstallationRecord
+  comfyUrl: string
+  /**
+   * `true` for locally-launched installs (no `url` arg); `false` for
+   * remote / cloud installs. Drives the `__comfyDesktop2Remote` flag
+   * the content script reads at top-of-page so remote-only behaviours
+   * (e.g. cloud-storage prompts) gate correctly.
+   */
+  isLocal: boolean
+}
+
+function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts): void {
+  if (entry.installationId !== null) {
+    throw new Error(
+      `attachInstall: entry windowKey=${entry.windowKey} is already attached to ` +
+        `installationId=${entry.installationId}; detach first`,
+    )
+  }
+  const { installation, comfyUrl, isLocal } = opts
+  const installationId = installation.id
+  const comfyContents = entry.comfyView.webContents
+  const comfyWindow = entry.window
+  const titleBarView = entry.titleBarView
+
+  // Seed entry install state. The secondary index is the source of
+  // truth for `getEntryByInstallationId(id)` — keep it in lockstep
+  // with `entry.installationId` (W-3c's detach symmetrically clears
+  // both).
+  entry.installationId = installationId
+  entry.comfyUrl = comfyUrl
+  entry.titleBarText = installation.name
+  entry.sourceCategory = sourceMap[installation.sourceId]?.category ?? null
+  installationIdToWindowKey.set(installationId, entry.windowKey)
+
+  // OS-level window title is rebuilt whenever the page title or the
+  // install name changes. Closures over the install lifetime — reset
+  // by `_installCleanup` below.
+  let currentInstallName = installation.name
+  let currentPageTitle = ''
+  const refreshOsWindowTitle = (): void => {
+    if (comfyWindow.isDestroyed()) return
+    const suffix = currentPageTitle ? ` — ${currentPageTitle}` : ''
+    comfyWindow.setTitle(`${currentInstallName}${suffix} — Desktop 2.0 v${APP_VERSION}`)
+  }
+  refreshOsWindowTitle()
+
+  // Push install-derived initial state — the title bar may already
+  // be mounted (re-attach case post-W-3c). The shared title-bar-ready
+  // handshake re-pushes from entry.* on a fresh mount, but the eager
+  // push covers the in-place transform path.
+  if (!titleBarView.webContents.isDestroyed()) {
+    titleBarView.webContents.send('comfy-titlebar:title-changed', entry.titleBarText)
+    titleBarView.webContents.send('comfy-titlebar:source-category-changed', entry.sourceCategory)
+    void computeInstallUpdateAvailable(installationId).then((state) => {
+      if (titleBarView.webContents.isDestroyed()) return
+      titleBarView.webContents.send('comfy-titlebar:install-update-changed', state)
+    })
+  }
+
+  // Reflect rename / source change in both the comfy tab and the OS-level
+  // window title as the install record mutates. Phase 3 §18 — also
+  // recompute the install-update pill state (the install's source may
+  // have flipped its statusTag between releases as the release-cache
+  // resolves in the background).
+  const onInstallationUpdated = (updated: InstallationRecord): void => {
+    if (updated.id !== entry.installationId) return
+    const nextTabText = updated.name
+    if (nextTabText !== entry.titleBarText) {
+      entry.titleBarText = nextTabText
+      if (!titleBarView.webContents.isDestroyed()) {
+        titleBarView.webContents.send('comfy-titlebar:title-changed', nextTabText)
+      }
+    }
+    const nextCategory = sourceMap[updated.sourceId]?.category ?? null
+    if (nextCategory !== entry.sourceCategory) {
+      entry.sourceCategory = nextCategory
+      if (!titleBarView.webContents.isDestroyed()) {
+        titleBarView.webContents.send('comfy-titlebar:source-category-changed', nextCategory)
+      }
+    }
+    if (updated.name !== currentInstallName) {
+      currentInstallName = updated.name
+      refreshOsWindowTitle()
+    }
+    void computeInstallUpdateAvailable(updated.id).then((state) => {
+      if (titleBarView.webContents.isDestroyed()) return
+      titleBarView.webContents.send('comfy-titlebar:install-update-changed', state)
+    })
+  }
+  installationEvents.on('updated', onInstallationUpdated)
 
   // Sync the title bar and overlay colors with the ComfyUI frontend's theme.
-  // Stage W-3a — write straight onto the wrapper-scope `entry` reference
-  // (which, post-W-1, is the same object held by the `comfyWindows` map)
-  // rather than re-resolving via `getEntryByInstallationId`. A detached
-  // host's comfyContents shouldn't be reporting a theme in the first
-  // place; if it ever does (e.g. about:blank fires a bogus event), we
-  // still write the theme onto the entry so the next attach picks it up.
   const applyComfyTheme = (bg: string, text: string): void => {
     if (comfyWindow.isDestroyed()) return
     const theme = { bg, text }
@@ -1515,13 +1580,20 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
       try { comfyWindow.setTitleBarOverlay({ color: bg, symbolColor: text }) } catch {}
     }
   }
-
-  comfyContents.on('ipc-message', (_event, channel, ...args) => {
+  const onIpcMessage = (_event: Electron.IpcMainEvent, channel: string, ...args: unknown[]): void => {
     if (channel === 'desktop2-theme-report') {
       const { bg, text } = (args[0] || {}) as { bg?: string; text?: string }
       if (bg) applyComfyTheme(bg, text || '#ddd')
     }
-  })
+  }
+  comfyContents.on('ipc-message', onIpcMessage)
+
+  const onPageTitleUpdated = (e: Electron.Event, title: string): void => {
+    e.preventDefault()
+    currentPageTitle = title
+    refreshOsWindowTitle()
+  }
+  comfyContents.on('page-title-updated', onPageTitleUpdated)
 
   const COMFY_THEME_OBSERVER_JS =
     `(function(){` +
@@ -1537,48 +1609,28 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
       `read();` +
     `})()`
 
-  // Download management: attach session handler and inject content script
-  const isLocal = !url
-  attachSessionDownloadHandler(comfyContents.session)
-  comfyContents.on('dom-ready', () => {
+  const onDomReady = (): void => {
     comfyContents.executeJavaScript(COMFY_THEME_OBSERVER_JS).catch(() => {})
-
     const preamble = isLocal ? '' : 'window.__comfyDesktop2Remote = true;\n'
     comfyContents
       .executeJavaScript(preamble + getModelDownloadContentScript())
       .catch(() => {})
-  })
+  }
+  comfyContents.on('dom-ready', onDomReady)
 
-  attachContextMenu(comfyWindow, comfyContents)
-
-  comfyContents.loadURL(comfyUrl)
-
-  /** Read the current target URL from the entry. Falls back to the launch
-   *  URL only as a defensive default — `entry.comfyUrl` is set above to
-   *  `comfyUrl` and only changes via re-launch (onLaunch's existing-window
-   *  branch) or W-3c's detach (which clears it before the comfyContents
-   *  navigates to about:blank). */
+  // F5 / Ctrl+R reload — gated on the entry having an install backing
+  // it (a detached host returns early so the dummy view can't reload
+  // a stale URL).
   const currentComfyUrl = (): string => entry.comfyUrl || comfyUrl
-
   const reloadComfy = (): void => {
     if (comfyWindow.isDestroyed()) return
-    // Stage W-3a — refuse to reload when the host is detached (no install
-    // backing the window). The relaunch-state check uses the entry's
-    // current install-id rather than the construction-time constant so a
-    // re-attached window doesn't see stale relaunch state from the
-    // previous install.
     const id = entry.installationId
     if (id === null) return
     if (relaunchStates.has(id)) return
     comfyContents.stop()
     comfyContents.loadURL(currentComfyUrl())
   }
-
-  comfyContents.on('will-prevent-unload', (e) => {
-    e.preventDefault()
-  })
-
-  comfyContents.on('before-input-event', (e, input) => {
+  const onBeforeInputEvent = (e: Electron.Event, input: Electron.Input): void => {
     if (input.type !== 'keyDown') return
     const mod = input.control || input.meta
     if (mod && input.key.toLowerCase() === 'w') {
@@ -1589,20 +1641,26 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
       e.preventDefault()
       reloadComfy()
     }
-  })
+  }
+  comfyContents.on('before-input-event', onBeforeInputEvent)
 
+  // Failure retry — backoff on did-fail-load that isn't aborted /
+  // mid-relaunch. Per-install timer cancel registered into the
+  // shared map so onModelFolderRelaunch can interrupt a pending
+  // retry that would otherwise navigate away from the splash page.
   let failRetryTimer: ReturnType<typeof setTimeout> | null = null
   const cancelFailRetry = (): void => {
     if (failRetryTimer) { clearTimeout(failRetryTimer); failRetryTimer = null }
   }
   comfyFailRetryTimerCancels.set(installationId, cancelFailRetry)
-  comfyContents.on('did-fail-load', (_e, code, _desc, _failUrl, isMainFrame) => {
+  const onDidFailLoad = (
+    _e: Electron.Event,
+    code: number,
+    _desc: string,
+    _failUrl: string,
+    isMainFrame: boolean,
+  ): void => {
     if (!isMainFrame || code === -3 || failRetryTimer) return
-    // Stage W-3a — read the install-id from the entry at runtime so a
-    // detached host (whose comfyContents has been navigated to
-    // about:blank) doesn't schedule a retry that would re-load the old
-    // ComfyUI URL post-detach. During a model-folder relaunch,
-    // onComfyRestarted handles retry logic.
     const id = entry.installationId
     if (id === null) return
     if (relaunchStates.has(id)) return
@@ -1615,13 +1673,13 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
         comfyContents.loadURL(currentComfyUrl())
       }
     }, 2000)
-  })
+  }
+  comfyContents.on('did-fail-load', onDidFailLoad)
 
-  comfyContents.on('render-process-gone', (_event, details) => {
-    // Stage W-3a — telemetry context reads the install-id from the
-    // entry at runtime; a detached host (W-3c) reports `'(detached)'`
-    // so the crash still surfaces in Datadog without misattributing
-    // it to whichever install previously backed the window.
+  const onRenderProcessGone = (
+    _event: Electron.Event,
+    details: Electron.RenderProcessGoneDetails,
+  ): void => {
     forwardDatadogError({
       source: 'comfy-window-render-process-gone',
       message: `Comfy window renderer process exited (${details.reason})`,
@@ -1634,18 +1692,44 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
       },
     })
     reloadComfy()
-  })
+  }
+  comfyContents.on('render-process-gone', onRenderProcessGone)
 
-  // Now that all wiring is in place, layout for the first time.
-  // (The shared helper deferred this so the wrapper could install
-  // anything that needs to settle before the first paint, e.g. the
-  // comfyContents URL load above.)
-  entry.layoutViews()
+  // Per-window download routing — attached at session level so a
+  // download dispatched from the comfyContents lands in this
+  // window's download tray. `detachWindowDownloads` is per-window
+  // and survives mode flips (it lives in the createHostWindow close
+  // handler, not in `_installCleanup`).
+  attachSessionDownloadHandler(comfyContents.session)
 
-  if (proc) {
-    proc.on('exit', () => {
-      // Session registry handles state cleanup
-    })
+  comfyContents.loadURL(comfyUrl)
+
+  // Symmetric undo. Called by the close handler (always) and by
+  // `detachInstall()` (W-3c) when the host flips back to chooser
+  // mode in place. Idempotent — sets `_installCleanup = null` on
+  // first call so subsequent calls are no-ops.
+  entry._installCleanup = (): void => {
+    if (entry._installCleanup === null) return
+    entry._installCleanup = null
+    installationEvents.off('updated', onInstallationUpdated)
+    cancelFailRetry()
+    if (!comfyContents.isDestroyed()) {
+      comfyContents.off('ipc-message', onIpcMessage)
+      comfyContents.off('page-title-updated', onPageTitleUpdated)
+      comfyContents.off('dom-ready', onDomReady)
+      comfyContents.off('did-fail-load', onDidFailLoad)
+      comfyContents.off('render-process-gone', onRenderProcessGone)
+      comfyContents.off('before-input-event', onBeforeInputEvent)
+    }
+    const id = entry.installationId
+    if (id !== null) {
+      ipc.stopRunning(id)
+      comfyFailRetryTimerCancels.delete(id)
+      relaunchStates.delete(id)
+      installationIdToWindowKey.delete(id)
+      entry.installationId = null
+    }
+    entry.comfyUrl = ''
   }
 }
 
@@ -1792,10 +1876,12 @@ function openChooserHostWindow(): BrowserWindow {
     // install-less mode (hide Install Settings pill, accept the
     // fallback label).
     titleBarInstallationIdParam: '',
-    onTitleBarReady: (_e, tb) => {
-      // Fallback label — install-backed windows use the install name.
-      tb.webContents.send('comfy-titlebar:title-changed', 'Choose an install')
-    },
+    // Stage W-3b — initial title-bar pill text + source-category
+    // are stored on the entry; the unified title-bar-ready handshake
+    // re-pushes from the entry. Install-less hosts have no install
+    // backing so the source-category icon stays unset.
+    initialTitleBarText: 'Choose an install',
+    initialSourceCategory: null,
   })
 
   // Force-create the panel WebContentsView with the chooser body —
