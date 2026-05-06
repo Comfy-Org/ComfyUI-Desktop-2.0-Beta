@@ -1302,17 +1302,28 @@ Open question: do we hide `−` only during these flows, or globally?
 Hiding only during the flow flickers the controls in/out; hiding
 globally is a static UX decision that we can make once.
 
-### Status — minimize button drop **DONE**
+### Status — minimize button drop **REVERTED — superseded by §20**
 
-`minimizable: false` is now set on both `BrowserWindow` constructors
-in `src/main/index.ts` (the install-backed `openComfyWindow` and the
-install-less `openChooserHostWindow`). The OS-level minimize button
-disappears across every host window — the controls reduce to
-maximize / close so the takeover-style flows have a single,
-unambiguous "interrupt" affordance (×). Static decision, no
-in-flow flicker. The TitleMenu popup `BrowserWindow`
-(`ensureTitleMenuPopup`) already had `minimizable: false` for
-unrelated reasons and stays as-is.
+This subsection originally landed `minimizable: false` on both host
+`BrowserWindow` constructors on the assumption that `×` had to
+overload "interrupt" and "background" semantics, and that hiding `−`
+was the cleanest way to dodge the conflict. That assumption was
+wrong: the OS-level minimize is orthogonal to the in-app
+takeover-vs-modal split. `−` is "hide window, keep everything
+running" (a *whole-window* affordance); the in-takeover "Continue
+in background" button (§20) is "dismiss takeover only, drop back
+to the underlying body in the same window" (a *takeover-slot*
+affordance). They aren't redundant and they don't conflict.
+
+The `minimizable: false` lines + their §17 comments were dropped
+from `openComfyWindow` (~line 918) and `openChooserHostWindow`
+(~line 1421) in `src/main/index.ts`. Both host windows are now
+fully minimizable again — standard OS chrome, no special-casing.
+The TitleMenu popup `BrowserWindow` (`ensureTitleMenuPopup`) keeps
+`minimizable: false` — it's a child popup, not a host, and that
+flag landed for unrelated popup-lifecycle reasons.
+
+See §20 "Decisions" + delta 6 for the full reasoning.
 
 The takeover tier (full-screen body for install / update / first-use
 flows, with the title-bar pills/dropdowns rendered inert during a
@@ -1724,6 +1735,233 @@ go so we don't keep flip-flopping individual labels.
 
 ---
 
+## 20. Takeover-vs-modal policy + interrupt-vs-background semantics — supersedes §17 open questions
+
+§17 carved the overlay tiers and shipped the takeover surface for
+the four install flows + first-use; §10 routes Update-Now-on-running
+through the same takeover slot; §16 wrapped window-close /
+return-to-dashboard in a tier-aware consult; §18 added the Tier 1
+app-update popover. What we still don't have is a single canonical
+answer to "for surface X in phase Y, is it a takeover or a modal,
+and what does × mean right now?" — every author currently re-derives
+the answer from the four overlapping sections above. The two open
+questions §17 raised — (a) drop `−` only during flows or globally,
+and (b) when does the takeover's ✕ interrupt vs let the action keep
+running — are still unsettled in the doc even though parts of the
+answer landed implicitly.
+
+This section nails both down as a policy table the renderer can
+encode, and identifies the small additions still needed to honour it
+end-to-end.
+
+### Decisions (the bits §17 left open)
+
+- **`−` (minimize) is restored globally — DONE, REVERSES §17 Status.**
+  §17 dropped `minimize` on the assumption that `×` would have to
+  serve both "interrupt" and "background" meanings, and that two
+  contradictory semantics on one button required removing one of
+  the standard OS controls. With the new in-takeover Background
+  affordance below, the meanings are split cleanly *inside the
+  app*, so `−` is back to its standard OS role: hide the window,
+  don't close it, don't interrupt anything. It's never overloaded
+  and never needs to be hidden during any phase. The
+  `minimizable: false` lines (and §17 comments) are dropped from
+  both host `BrowserWindow` constructors in `src/main/index.ts`
+  (`openComfyWindow` and `openChooserHostWindow`); the
+  `ensureTitleMenuPopup` popup keeps its existing `minimizable:
+  false` (child popup, unrelated lifecycle reason).
+- **`×` always means "interrupt the host window's current activity".**
+  It tears down the host window. If there's an in-flight Tier 2/3
+  op mounted in the overlay slot, main consults the renderer first
+  (§16) and the standardised cancel-prompt copy fires.
+- **`−` always means "minimize the host window".** Standard OS
+  semantics — the window vanishes to the taskbar/dock, every running
+  op (install, update, ComfyUI process, model download) keeps
+  running, the user pops it back open whenever they want. No
+  consult, no prompt, no special-casing per phase. This is the
+  natural "let everything keep running while I do something else"
+  affordance for the *whole window*.
+- **"Continue in background" is an in-app affordance inside the
+  takeover, not an OS chrome control.** Distinct from `−`: where `−`
+  hides the *whole window*, "Continue in background" dismisses
+  *just the takeover* and drops the user back into the underlying
+  body of the same window (chooser tiles or launcher settings) so
+  they can keep using the host while the op runs in the background.
+  The two affordances aren't redundant — `−` is "I want this
+  window out of my way", "Continue in background" is "I want to
+  keep using this window for something else while the op runs".
+- **`×` on a *form-state* takeover does NOT prompt.** A takeover that
+  hasn't yet kicked off any subprocess is just a multi-step form;
+  prompting "cancel current operation?" with no operation in flight
+  is bad copy and a redundant click. The takeover slot needs a
+  per-component `inFlight` flag the consult path reads.
+
+### Surface × phase → tier matrix
+
+| Surface | Phase | Tier | × prompts? | "Background" affordance? |
+|---|---|---|---|---|
+| New Install | Form (pick source / dir) | 3 (takeover) | No | N/A |
+| New Install | Installing | 3 (takeover) | Yes (cancel install) | Yes — runs as chooser-tile install |
+| Quick Install | Form (pick preset) | 3 (takeover) | No | N/A |
+| Quick Install | Installing | 3 (takeover) | Yes (cancel install) | Yes — runs as chooser-tile install |
+| Track | Form (pick existing dir) | 3 (takeover) | No | N/A |
+| Track | Tracking (metadata-only) | 3 (takeover) | No (too fast to matter) | N/A |
+| Load Snapshot | Form (pick snapshot file) | 3 (takeover) | No | N/A |
+| Load Snapshot | Restoring | 3 (takeover) | Yes (cancel restore) | Yes — chooser-tile progress |
+| First-use | Any step | 3 (takeover) | No (purely a form) | N/A |
+| Update-on-running install (§10) | Updating | 3 (takeover) | Yes (cancel update) | Yes — install-tile update pill |
+| Update-on-stopped install | Updating | 2 (progress modal) | Yes (cancel update) | No — modal, no body underneath to keep running on |
+| App-update (Desktop 2) | Available / popover open | 1 (popover) | No (informational) | N/A |
+| App-update (Desktop 2) | Downloading | 1 (popover) | No — download runs in background already | The popover IS the background affordance — closing it just dismisses the surface |
+| App-update (Desktop 2) | Ready (`quitAndInstall`) | 3 (takeover) — **NEW** | Yes (cancel install) | No — `quitAndInstall` ends the process, can't background |
+| Manage… (DetailModal from chooser) | Any | 1 (modal) | No | N/A — Tier 1 is freely dismissible |
+| Per-install delete / snapshot / migrate | Running | 2 (progress modal) | Yes (cancel op) | No |
+
+The matrix collapses to three rules the code can enforce:
+
+1. **"Does this surface end in the running app?"** Yes → Tier 3
+   (full-screen takeover, title bar inert, mounts above the current
+   body). No → Tier 2 (progress modal) or Tier 1 (informational).
+2. **"Does this surface have an in-flight subprocess right now?"**
+   Yes → ✕ prompts via the standardised cancel-prompt copy. No → ✕
+   dismisses silently (form state, first-use, popover).
+3. **"Can the underlying op survive its host UI being dismissed?"**
+   Yes → expose a "Continue in background" affordance inside the
+   takeover that dismisses the surface without interrupting the op.
+   No → no background affordance; ✕ is the only exit, and it
+   prompts.
+
+### Implementation deltas (what's missing today)
+
+Most of the plumbing is already in place from §16/§17; the gaps are
+narrow:
+
+1. **`useOverlay` needs an `inFlight: boolean` on the takeover /
+   progress payload.** Today `useOverlay.openOverlay(null)` prompts
+   on *any* mounted Tier 2/3 op, which over-prompts the form-state
+   takeovers. Add `inFlight?: boolean` to `ProgressOverlay` and
+   `TakeoverOverlay` (defaults `true` for progress — in flight by
+   construction; defaults `false` for takeover — the form starts
+   idle). The takeover component flips it to `true` when its
+   internal step transitions into the "now we're really doing the
+   thing" phase (e.g. NewInstallModal calls
+   `setOverlayInFlight(true)` once the user clicks the final
+   "Install" CTA). The cancel-prompt branch in `openOverlay` and the
+   Step 5 §16 close-while-takeover branch both gate on `inFlight`.
+   - Update path: a small `setOverlayInFlight(value: boolean)`
+     mutator on the `useOverlay` API that updates the *current*
+     overlay's `inFlight` flag in place. Each Tier 3 component owns
+     calling this on the relevant step transition; the rules don't
+     need to know anything about per-component step models.
+2. **Add a `Continue in background` affordance to the Tier 3
+   takeovers whose ops survive dismissal.** Concretely:
+   `NewInstallModal`, `QuickInstallModal`, `LoadSnapshotModal`, and
+   the `'update'` takeover component. The button sits next to (or
+   replaces) the ✕ in the takeover's `view-modal-header` once
+   `inFlight === true` — visually a secondary button labelled e.g.
+   "Hide" or "Continue in background" with an icon. Clicking it
+   calls `dismissTakeoverDirect()` (the existing prompt-bypass) AND
+   intentionally does NOT `setOverlayInFlight(false)` — the op is
+   still running, just no longer surfaced. The chooser-tile pill /
+   install-pill status pill picks up the visible reporting from
+   there (already wired via §8 / §18).
+   - First-use takeover and Track takeover skip this — first-use is
+     pure form, Track's "in-flight" phase is a few hundred ms of
+     metadata write that doesn't need a background mode.
+   - The button is *inside* the takeover, not a chrome control. This
+     keeps the OS chrome rule clean ("× is interrupt") and means
+     the affordance only appears when it makes sense.
+3. **Promote the app-update `quitAndInstall` step from popover to
+   Tier 3 takeover.** Today `AppUpdatePopover` calls
+   `installUpdate()` directly from a Tier 1 popover button. The user
+   clicks "Install" and the app instantly quits — no chance to
+   reconsider, no visible "we are restarting…" state. Route it
+   through the takeover slot:
+   - New `'app-update-install'` value for
+     `TakeoverOverlay.component`. Renders a small confirmation +
+     progress shell ("Restarting Desktop 2 to install update
+     vX.Y.Z…") with a Cancel button that bails out of the takeover
+     before the actual `quitAndInstall` fires (e.g. a 3s "starting
+     install in…" countdown, or just a confirm + spinner state).
+     `inFlight = true` from mount so ✕ during the countdown prompts
+     the standardised cancel; once `quitAndInstall` fires, the
+     window is going down anyway.
+   - The popover's "Install" button becomes the entry point —
+     calls `openOverlay({ kind: 'takeover', component:
+     'app-update-install' })` instead of `installUpdate()` directly.
+   - This is the only Tier 1 → Tier 3 promotion in the matrix and
+     it's worth it: app restart-to-install is a "ends in the app"
+     moment exactly like a per-install update, and §10 already
+     established that pattern for the per-install case.
+4. **Title-bar inert flag is already correct.** It engages on
+   tier→3 transitions; no change needed. The new "Continue in
+   background" button dismisses the takeover, which transitions
+   tier→0 (or back to the underlying body's tier), which un-inerts
+   the title bar — exactly what we want.
+5. **`comfy-window:request-close` consult is already correct** once
+   `inFlight` lands. The renderer-side `onCloseRequest` handler
+   calls `closeOverlay()`; with the `inFlight` gate in place, a
+   form-state takeover returns `true` immediately without prompting,
+   while an in-flight takeover prompts as today. No main-side IPC
+   change required.
+6. **Restore `minimizable: true` on both host `BrowserWindow`
+   constructors — DONE.** The explicit `minimizable: false` lines
+   that landed in §17 Status are dropped from `openComfyWindow` and
+   `openChooserHostWindow` in `src/main/index.ts`. Both host windows
+   default-allow minimize again — the in-takeover Background button
+   covers the "keep using this window for something else" case and
+   `−` covers the "get this window out of my way" case (two
+   complementary affordances, not overlapping). The
+   `ensureTitleMenuPopup` `BrowserWindow` keeps `minimizable: false`
+   — it's a child popup, not a host, and was already that way for
+   reasons unrelated to §17.
+
+### Open questions
+
+- **"Continue in background" copy / icon.** Candidates: "Hide",
+  "Continue in background", "Run in background". Probably one of
+  the latter two — "Hide" is ambiguous about whether the op
+  continues. The icon is `Minimize2` from lucide-vue-next or a
+  custom downward chevron. Worth picking one and using it across all
+  four ops so the user learns it as a single affordance.
+- **First-use takeover dismissal copy.** Today closing first-use
+  silently leaves the gate at `false` so it replays next launch. Is
+  that the right contract or should we offer "skip for now / never
+  show again"? The matrix says ✕ is silent dismissal; a "never show
+  again" toggle would be a third option that changes the persisted
+  gate without running the flow. Defer until we have telemetry on
+  how often users dismiss first-use without completing.
+- **Track "background" affordance.** The matrix says no, on the
+  grounds that tracking is fast metadata-only work. If track grows
+  any genuinely long step (e.g. dependency-validation pass on the
+  tracked dir), we'd reclassify. Not worth designing pre-emptively.
+- **App-update install countdown duration.** A 0-second confirm
+  feels rushed; a 5s+ countdown feels patronising. Probably 3s with
+  a Cancel button is the sweet spot, matching the cadence of
+  `electron-updater`'s own "restart in N…" affordances on macOS.
+
+### Supersession of §17 open questions
+
+- "Do we drop `−` only during these flows or globally?" — **Neither
+  — restore `−` globally, reverting §17 Status.** §17's "drop −
+  globally" decision was based on the assumption that `×` would have
+  to overload "interrupt" and "background"; with the in-takeover
+  Background button splitting that responsibility cleanly inside the
+  app, `−` goes back to its standard OS semantic (hide window, keep
+  everything running) and is never overloaded by anything we do.
+  Concrete: drop `minimizable: false` from `openComfyWindow` /
+  `openChooserHostWindow` (delta 6 above).
+- "When does ✕ interrupt vs let the action keep running?" — **✕ always
+  interrupts (with a cancel-prompt when `inFlight`); a separate
+  in-takeover "Continue in background" button is the
+  let-it-keep-running affordance for the *takeover* (drops back to
+  the underlying body in the same window); `−` is the
+  let-it-keep-running affordance for the *whole window* (hides
+  everything to the taskbar/dock).** Three orthogonal controls, three
+  distinct meanings — none overloaded.
+
+---
+
 ## Status
 
 In progress. Phase 2 (`feat/unified-window-titlebar-panels`) is the
@@ -1767,17 +2005,24 @@ title-bar dropdowns rendered as child `BrowserWindow` popups in place
 of native `Menu.popup()` (§14).
 
 §15 — moving Directories out of the install pill into the global
-File / waffle menu — has landed. The remaining batch (§16–§19) is
-the next slice of open UX work: filling in the missing window-level
-lifecycle gestures — return-to-dashboard, Close All Windows, Import
-Snapshot as New Install (§16), turning startup / update modals into
-full-screen takeovers with a clear interrupt-vs-keep-running split
-on the window controls (§17), surfacing restart-required + update-
-available state via title-bar pills (Desktop-2-scoped to the right
-of the waffle, ComfyUI-scoped to the right of the install pill —
-§18), and a coordinated naming + flow-titles pass — "Desktop 2
-Settings" → "App Settings", grand title/subtitle on every hosted
-flow (§19).
+File / waffle menu — has landed. §16 (window-level lifecycle
+gestures: return-to-dashboard, Close All Windows + tier-aware close
+guard) and §17 (full-screen takeover for the four install flows +
+first-use, with `−` dropped globally and the title bar inert during
+takeovers) have both shipped. §18 landed the updates-available pills
+(restart-required pills are deferred to a follow-up); §19 covers the
+naming + flow-titles pass — "Desktop 2 Settings" → "App Settings",
+grand title/subtitle on every hosted flow.
+
+§20 (this doc) is open: it codifies the takeover-vs-modal policy as
+a surface × phase matrix, drops the open questions §17 left behind,
+and identifies three implementation deltas still needed —
+`useOverlay` `inFlight` gating to stop over-prompting form-state
+takeovers, an in-takeover "Continue in background" affordance for
+ops that survive their host-window dismissal, and promoting the
+app-update `quitAndInstall` step from a Tier 1 popover button to a
+Tier 3 takeover so the restart moment matches the per-install
+update pattern.
 
 Capture decisions made in subsequent design discussions in this file.
 The doc remains the source of truth for "what's left" on this branch
