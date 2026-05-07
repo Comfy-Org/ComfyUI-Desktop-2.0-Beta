@@ -12,6 +12,7 @@ import * as ipc from './lib/ipc'
 import { getAppVersion } from './lib/ipc'
 import * as updater from './lib/updater'
 import * as settings from './settings'
+import { installAppMenu } from './menu'
 import * as i18n from './lib/i18n'
 import { configDir, migrateXdgPaths } from './lib/paths'
 import { waitForPort, COMFY_BOOT_TIMEOUT_MS } from './lib/process'
@@ -492,6 +493,9 @@ function refreshComfyTabBody(installationId: string): void {
  *     are unregistered loose `BrowserWindow`s with `preload: undefined`. They
  *     have no `ipcRenderer`, can't send these IPCs, and even if a future
  *     change re-introduced a preload they wouldn't be in `comfyWindows`.
+ *     The destructive Electron menu items they would otherwise inherit
+ *     (Close Window / Close All Windows / Quit) are stripped globally
+ *     by `installAppMenu()` — see `menu.ts`.
  *   - The `comfyView` and `panelView` WebContentsViews of a registered
  *     entry are deliberately matched by separate predicates
  *     (`panelView?.webContents === event.sender`) — never by this helper —
@@ -3315,6 +3319,13 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
   app.whenReady().then(async () => {
     migrateXdgPaths()
     registerProcessErrorHandlers()
+
+    // Strip Electron's default menu before any BrowserWindow opens so
+    // OAuth / cloud-login popups (and every other window) can't reach
+    // destructive items like "Close All Windows" that bypass our
+    // managed shutdown. See `installAppMenu` for the per-platform
+    // template.
+    installAppMenu()
 
     // Bring up main-process telemetry as early as possible so install/migrate
     // sub-step events can fire even before the renderer mounts.
