@@ -230,6 +230,7 @@
     "closeQuitMessage": "ComfyUI 实例仍在运行。退出将停止所有实例。",
     "closeQuitConfirm": "退出",
     "autoUpdate": "启动时检查更新",
+    "autoInstallUpdates": "自动安装桌面更新",
     "checkForUpdates": "检查更新",
     "checkingForUpdates": "检查中…",
     "telemetry": "遥测",
@@ -254,21 +255,21 @@
   },
 
   "update": {
-    "available": "Desktop 2.0 有可用更新：**v{version}**",
-    "download": "下载",
-    "dismiss": "忽略",
-    "downloading": "正在下载 Desktop 2.0 更新… {progress}",
-    "ready": "Desktop 2.0 更新 **v{version}** 已准备好安装",
-    "restartUpdate": "重启并更新",
-    "later": "稍后",
-    "checkFailed": "检查更新失败",
-    "details": "详情",
-    "retry": "重试",
     "updateCheck": "检查更新",
     "updateError": "更新错误",
     "upToDate": "您正在使用最新版本的 ComfyUI Desktop 2.0。",
-    "debAvailable": "Desktop 2.0 更新 **v{version}** 可用。运行 `sudo apt update && sudo apt upgrade` 进行更新，或从发布页面下载新的 .deb 文件。",
     "debUpToDate": "您正在使用最新版本。.deb 安装的更新通过系统包管理器（apt）提供。"
+  },
+
+  "appUpdate": {
+    "fallbackVersion": "此更新",
+    "readyTitle": "桌面端更新已就绪",
+    "readyMessage": "桌面端更新（{version}）已下载完成。是否立即重启以应用此更新？",
+    "restartNow": "重启并更新",
+    "availableTitle": "桌面端更新可用",
+    "availableMessage": "有可用的桌面端更新（{version}）。是否立即下载？下载完成后将提示您重启。",
+    "download": "下载",
+    "errorTitle": "桌面端更新错误"
   },
 
   "modal": {

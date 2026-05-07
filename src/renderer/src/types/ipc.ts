@@ -41,8 +41,6 @@ export type {
   NvidiaDriverCheck,
   DiskSpaceInfo,
   PathIssue,
-  UpdateInfo,
-  UpdateDownloadProgress,
   ModelDownloadStatus,
   ModelDownloadProgress,
   TrackResult,

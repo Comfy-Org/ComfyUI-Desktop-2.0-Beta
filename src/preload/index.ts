@@ -166,7 +166,6 @@ const api: ElectronApi = {
   checkForUpdate: () => ipcRenderer.invoke('check-for-update'),
   downloadUpdate: () => ipcRenderer.invoke('download-update'),
   installUpdate: () => ipcRenderer.invoke('install-update'),
-  getPendingUpdate: () => ipcRenderer.invoke('get-pending-update'),
   getUpdateCapabilities: () => ipcRenderer.invoke('get-update-capabilities'),
 
   // Event listeners (return unsubscribe functions)
@@ -243,25 +242,17 @@ const api: ElectronApi = {
     ipcRenderer.on('installations-versions-updated', handler)
     return () => ipcRenderer.removeListener('installations-versions-updated', handler)
   },
-  onUpdateAvailable: (callback) => {
-    const handler = (_event: IpcRendererEvent, data: unknown) => callback(data as Parameters<typeof callback>[0])
-    ipcRenderer.on('update-available', handler)
-    return () => ipcRenderer.removeListener('update-available', handler)
+  onAppUpdatePromptRestart: (callback) => {
+    const handler = (_event: IpcRendererEvent, data: unknown) =>
+      callback(data as { version: string })
+    ipcRenderer.on('app-update:prompt-restart', handler)
+    return () => ipcRenderer.removeListener('app-update:prompt-restart', handler)
   },
-  onUpdateDownloadProgress: (callback) => {
-    const handler = (_event: IpcRendererEvent, data: unknown) => callback(data as Parameters<typeof callback>[0])
-    ipcRenderer.on('update-download-progress', handler)
-    return () => ipcRenderer.removeListener('update-download-progress', handler)
-  },
-  onUpdateDownloaded: (callback) => {
-    const handler = (_event: IpcRendererEvent, data: unknown) => callback(data as Parameters<typeof callback>[0])
-    ipcRenderer.on('update-downloaded', handler)
-    return () => ipcRenderer.removeListener('update-downloaded', handler)
-  },
-  onUpdateError: (callback) => {
-    const handler = (_event: IpcRendererEvent, data: unknown) => callback(data as Parameters<typeof callback>[0])
-    ipcRenderer.on('update-error', handler)
-    return () => ipcRenderer.removeListener('update-error', handler)
+  onAppUpdateUserActionFailed: (callback) => {
+    const handler = (_event: IpcRendererEvent, data: unknown) =>
+      callback(data as { message: string })
+    ipcRenderer.on('app-update:user-action-failed', handler)
+    return () => ipcRenderer.removeListener('app-update:user-action-failed', handler)
   },
   onZoomChanged: (callback) => {
     const handler = (_event: IpcRendererEvent, level: unknown) => callback(level as number)
@@ -311,7 +302,17 @@ const api: ElectronApi = {
   },
   onPanelTriggerOverlay: (callback) => {
     const handler = (_event: IpcRendererEvent, data: unknown) =>
-      callback(data as { kind: 'app-update' | 'install-update'; installationId?: string })
+      callback(
+        data as {
+          kind:
+            | 'install-update'
+            | 'downloads'
+            | 'app-update-restart-prompt'
+            | 'app-update-download-prompt'
+          installationId?: string
+          version?: string | null
+        },
+      )
     ipcRenderer.on('panel-trigger-overlay', handler)
     return () => ipcRenderer.removeListener('panel-trigger-overlay', handler)
   },

@@ -287,17 +287,20 @@ const installUpdateState = ref<{ available: boolean; version: string | null }>({
 const appUpdatePillLabel = computed<string | null>(() => {
   const s = appUpdateState.value
   if (!s.kind) return null
-  if (s.kind === 'ready') {
-    // Track B item 2 — auto-updates ON downloads silently in the
-    // background, so the user's first sign of the update is a "ready
-    // to apply on restart" pill. Auto-updates OFF means the user
-    // explicitly asked to download, so the existing "Restart to
-    // update" copy still reads correctly.
-    return s.autoUpdate ? 'Update will apply on restart' : 'Restart to update'
-  }
+  if (s.kind === 'ready') return 'Desktop Update Ready'
   // 'available' — only fires with auto-updates OFF (main suppresses
   // it when ON and triggers the download itself).
-  return s.version ? `Update ${s.version} available` : 'Update available'
+  return 'Desktop Update Available'
+})
+
+/** Tooltip / aria-label augments the pill label with the version when
+ *  one is known, so the compact pill stays scan-friendly while the
+ *  full "Desktop Update Ready (v1.2.3)" detail is one hover away. */
+const appUpdatePillTooltip = computed<string>(() => {
+  const label = appUpdatePillLabel.value
+  if (!label) return ''
+  const v = appUpdateState.value.version
+  return v ? `${label} (v${v})` : label
 })
 
 /** Track B item 1 — install-update pill copy. Mirrors the app-update
@@ -567,18 +570,17 @@ onUnmounted(() => {
       >
         <MenuIcon :size="18" />
       </button>
-      <!-- Phase 3 §18 — app-update pill. Sits right of the hamburger
-           and disappears entirely in the steady state (no update). The
-           same surface (`useAppUpdateState` via the popover) is reached
-           via the in-banner buttons; the pill is the persistent re-entry
-           after the banner has been dismissed. -->
+      <!-- Issue #488 — app-update pill. Sits right of the hamburger
+           and disappears entirely in the steady state (no update).
+           Click is routed through main (`comfy-window:click-app-update-pill`)
+           which fires the appropriate confirm modal in the panel. -->
       <button
         v-if="showAppUpdatePill"
         type="button"
         class="title-update-pill is-app-update"
         :class="{ 'is-ready': appUpdateState.kind === 'ready' }"
-        :title="appUpdatePillLabel ?? ''"
-        :aria-label="appUpdatePillLabel ?? ''"
+        :title="appUpdatePillTooltip"
+        :aria-label="appUpdatePillTooltip"
         @click="handleAppUpdatePill"
       >
         <Download v-if="appUpdateState.kind === 'available'" :size="14" />

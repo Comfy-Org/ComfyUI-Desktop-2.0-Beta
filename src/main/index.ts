@@ -12,6 +12,7 @@ import * as ipc from './lib/ipc'
 import { getAppVersion } from './lib/ipc'
 import * as updater from './lib/updater'
 import * as settings from './settings'
+import { installAppMenu } from './menu'
 import * as i18n from './lib/i18n'
 import { configDir, migrateXdgPaths } from './lib/paths'
 import { waitForPort, COMFY_BOOT_TIMEOUT_MS } from './lib/process'
@@ -492,6 +493,9 @@ function refreshComfyTabBody(installationId: string): void {
  *     are unregistered loose `BrowserWindow`s with `preload: undefined`. They
  *     have no `ipcRenderer`, can't send these IPCs, and even if a future
  *     change re-introduced a preload they wouldn't be in `comfyWindows`.
+ *     The destructive Electron menu items they would otherwise inherit
+ *     (Close Window / Close All Windows) are stripped globally by
+ *     `installAppMenu()` — see `menu.ts`.
  *   - The `comfyView` and `panelView` WebContentsViews of a registered
  *     entry are deliberately matched by separate predicates
  *     (`panelView?.webContents === event.sender`) — never by this helper —
@@ -2446,12 +2450,22 @@ function _broadcastAppUpdateStateToTitleBars(state: updater.AppUpdateState): voi
 }
 
 /**
- * Phase 3 §18 — title-bar app-update pill click. Resolves the entry
- * via the title-bar webContents sender, then sends
- * `panel-trigger-overlay` to the panel renderer so it can mount the
- * Tier 1 app-update popover via `openOverlay`. The popover overlays
- * whatever the user is currently looking at; we don't switch panels
- * here.
+ * Title-bar app-update pill click. Branches on the cached updater
+ * state:
+ *   - `'ready'` (auto-on or auto-off) → `app-update-restart-prompt`,
+ *     panel renderer fires the "Desktop Update Ready" confirm modal
+ *     ("Restart now?"). Confirm → `installUpdate()`.
+ *   - `'available'` (auto-off only — main suppresses 'available' under
+ *     auto-on) → `app-update-download-prompt`, renderer fires the
+ *     "Desktop Update Available" confirm modal. Confirm →
+ *     `downloadUpdate()`; the auto restart prompt fires once download
+ *     finishes (see `_userInitiatedDownload` in updater.ts).
+ *   - `null` → no-op (the pill is suppressed when there's no state).
+ *
+ * Modals fire via the panel renderer (which already owns `useModal`)
+ * rather than the overlay system because `useModal` is process-global
+ * and matches the spec's "modal" wording — overlays are a different
+ * surface (Tier 1/2/3 popovers).
  */
 ipcMain.on('comfy-window:click-app-update-pill', (event) => {
   const found = findEntryByTitleBarSender(event.sender)
@@ -2459,7 +2473,20 @@ ipcMain.on('comfy-window:click-app-update-pill', (event) => {
   const { entry } = found
   const panelView = entry.panelView
   if (!panelView || panelView.webContents.isDestroyed()) return
-  panelView.webContents.send('panel-trigger-overlay', { kind: 'app-update' })
+  const state = updater.getCurrentUpdateState()
+  if (state.kind === 'ready') {
+    panelView.webContents.send('panel-trigger-overlay', {
+      kind: 'app-update-restart-prompt',
+      version: state.version,
+    })
+    return
+  }
+  if (state.kind === 'available') {
+    panelView.webContents.send('panel-trigger-overlay', {
+      kind: 'app-update-download-prompt',
+      version: state.version,
+    })
+  }
 })
 
 /**
@@ -2878,7 +2905,10 @@ const POPUP_RENDER_ACK_TIMEOUT_MS = 80
  *  somewhere sensible. Skip it on the blur path — focus has already
  *  moved to wherever the user clicked, and stealing it back to the
  *  parent would yank focus out of whatever they targeted (another app
- *  window, the parent's body, etc.). */
+ *  window, the parent's body, etc.). Also skip it when the activated
+ *  item handed focus to a *different* window (e.g. `new-window` opens
+ *  and `bringToFront`s a fresh chooser host) — re-focusing the parent
+ *  here races against and defeats that hand-off. */
 function hideTitleMenuPopup(
   entry: TitleMenuPopupEntry,
   opts: { releaseFocusToParent?: boolean } = {},
@@ -2975,8 +3005,17 @@ function openTitleMenuPopup(opts: {
 }
 
 function activateTitleMenuItem(entry: TitleMenuPopupEntry, id: string): void {
+  // Default: re-focus the popup's parent on dismiss so keyboard input
+  // lands somewhere sensible. Actions that hand focus to a *different*
+  // window (e.g. `new-window` spawns a fresh chooser host and brings it
+  // to the front) flip this off so the parent doesn't immediately yank
+  // focus back from the new target.
+  let releaseFocusToParent = true
   if (entry.kind === 'file') {
-    if (id === 'new-window') openChooserHostWindow()
+    if (id === 'new-window') {
+      openChooserHostWindow()
+      releaseFocusToParent = false
+    }
     else if (id === 'return-to-dashboard') {
       // §16 — flip the install-backed host in place to chooser-host
       // mode (Stage W-4). The same BrowserWindow stays alive; the
@@ -3044,8 +3083,9 @@ function activateTitleMenuItem(entry: TitleMenuPopupEntry, id: string): void {
   } else {
     if (id === 'install-settings') setActivePanel(entry.parentEntryId, 'install-settings')
   }
-  // Item click — popup still has focus, so push it back to the parent.
-  hideTitleMenuPopup(entry, { releaseFocusToParent: true })
+  // Item click — popup still has focus, so push it back to the parent
+  // unless the action just handed focus to a different window.
+  hideTitleMenuPopup(entry, { releaseFocusToParent })
 }
 
 ipcMain.on('comfy-titlemenu:ready', (event) => {
@@ -3279,6 +3319,13 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
   app.whenReady().then(async () => {
     migrateXdgPaths()
     registerProcessErrorHandlers()
+
+    // Strip Electron's default menu before any BrowserWindow opens so
+    // OAuth / cloud-login popups (and every other window) can't reach
+    // destructive items like "Close All Windows" that bypass our
+    // managed shutdown. See `installAppMenu` for the per-platform
+    // template.
+    installAppMenu()
 
     // Bring up main-process telemetry as early as possible so install/migrate
     // sub-step events can fire even before the renderer mounts.
