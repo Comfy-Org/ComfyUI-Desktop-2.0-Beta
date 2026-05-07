@@ -2604,12 +2604,29 @@ ipcMain.on('comfy-window:click-downloads-tray', (event) => {
  * `source` is forwarded into the renderer's telemetry context as
  * `desktop2.feedback.opened` `{ source }` so we can tell which
  * affordance the user reached for.
+ *
+ * In Comfy instance windows the panelView is constructed lazily on
+ * the first non-comfy switch (Settings / Directories / lifecycle), so
+ * a feedback click that arrives while the user is still on the
+ * ComfyUI body would hit a `null` panelView and silently drop. Mirror
+ * the `click-install-update-pill` pattern: ensure the panel exists
+ * for the current body mode and defer the send until
+ * `did-finish-load` if the bundle is still loading.
  */
 function triggerOpenFeedback(entryId: number, source: 'titlebar' | 'menu'): void {
   const parentEntry = comfyWindows.get(entryId)
-  if (!parentEntry?.panelView) return
-  if (parentEntry.panelView.webContents.isDestroyed()) return
-  parentEntry.panelView.webContents.send('comfy-panel:open-feedback', { source })
+  if (!parentEntry || parentEntry.window.isDestroyed()) return
+  const panelView = parentEntry.panelView ?? ensurePanelView(entryId, parentEntry, computeBodyMode(parentEntry))
+  if (panelView.webContents.isDestroyed()) return
+  const send = (): void => {
+    if (panelView.webContents.isDestroyed()) return
+    panelView.webContents.send('comfy-panel:open-feedback', { source })
+  }
+  if (panelView.webContents.isLoadingMainFrame()) {
+    panelView.webContents.once('did-finish-load', send)
+  } else {
+    send()
+  }
 }
 
 /** Title-bar Send Feedback button click. Resolves the host entry from
