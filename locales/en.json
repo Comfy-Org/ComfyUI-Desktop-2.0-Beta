@@ -301,7 +301,7 @@
   "settingsModal": {
     "title": "Settings",
     "tabComfy": "ComfyUI Settings",
-    "tabDirectories": "Directories",
+    "tabDirectories": "Shared Directories",
     "tabGlobal": "Global Settings"
   },
 
