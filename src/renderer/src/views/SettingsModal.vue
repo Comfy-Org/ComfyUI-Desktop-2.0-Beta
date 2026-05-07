@@ -145,7 +145,20 @@ function handleUpdateInstallation(inst: Installation): void {
           <span>{{ tab.label }}</span>
         </button>
       </nav>
-      <section class="settings-content">
+      <section
+        class="settings-content"
+        :class="{ 'settings-content-padded': activeTab === 'comfy' }"
+      >
+        <!-- ComfyUI Settings: DetailModal embedded mode owns its own
+             internal layout (title row, tab strip, scrollable body
+             via `.view-scroll`, pinned bottom action bar) and was
+             designed to sit inside a 20px-padded host (legacy
+             `.view-modal-body`) — the bottom action bar's
+             `margin: 0 -20px` relies on it for the underline to span
+             the full width. We re-apply that 20px gutter here via the
+             `settings-content-padded` modifier instead of zeroing it
+             out. The column itself stays `overflow: hidden` so the
+             embedded `.view-scroll` is the only scroll surface. -->
         <DetailModal
           v-if="activeTab === 'comfy' && installation"
           :installation="installation"
@@ -156,8 +169,17 @@ function handleUpdateInstallation(inst: Installation): void {
           @navigate-list="handleNavigateList"
           @update:installation="handleUpdateInstallation"
         />
-        <DirectoriesView v-else-if="activeTab === 'directories'" />
-        <SettingsView v-else-if="activeTab === 'global'" />
+        <!-- Directories / Global Settings render as plain section
+             stacks with no internal scroll container, so we wrap each
+             in a padded scrollable column here. The wrapper supplies
+             the same 20px gutter the legacy `.view-modal-body` did
+             plus a vertical scrollbar when the section list overflows. -->
+        <div v-else-if="activeTab === 'directories'" class="settings-tab-scroll">
+          <DirectoriesView />
+        </div>
+        <div v-else-if="activeTab === 'global'" class="settings-tab-scroll">
+          <SettingsView />
+        </div>
       </section>
     </div>
   </ModalShell>
@@ -236,8 +258,25 @@ function handleUpdateInstallation(inst: Installation): void {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  /* The embedded DetailModal / DirectoriesView / SettingsView panels
-   * own their own internal scroll regions, so this column is the
-   * non-scrolling container that gives them height. */
+  /* The embedded DetailModal owns its own internal scroll region;
+   * the Directories / Global Settings tabs delegate scrolling to
+   * `.settings-tab-scroll` below. Either way this column stays
+   * non-scrolling so the chrome can pin its rows. */
+}
+
+/* ComfyUI Settings tab — the embedded DetailModal was designed for
+ * a 20px-padded host (matching the legacy `.view-modal-body`), so
+ * re-apply that padding only when this tab is active. The bottom
+ * action bar's `margin: 0 -20px` rule needs this padding to land
+ * the underline edge-to-edge. */
+.settings-content-padded {
+  padding: 20px;
+}
+
+.settings-tab-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 20px;
 }
 </style>
