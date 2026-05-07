@@ -5,6 +5,7 @@ import {
   ChevronDown,
   Download,
   Menu as MenuIcon,
+  MessageSquarePlus,
   RefreshCw,
 } from 'lucide-vue-next'
 import { installTypeMetaFor } from '../lib/installTypeIcon'
@@ -128,6 +129,11 @@ interface Bridge {
    *  the same `panel-trigger-overlay` channel as the update pills so
    *  the panel renderer can mount the downloads popover. */
   clickDownloadsTray: () => void
+  /** Click handler for the title-bar Send Feedback button. Main
+   *  forwards `comfy-panel:open-feedback` to the panel renderer,
+   *  which fires the `desktop2.feedback.opened` telemetry action and
+   *  opens the support URL via `openExternal`. */
+  clickFeedback: () => void
   ready: () => void
 }
 
@@ -354,6 +360,15 @@ const downloadsTrayLabel = computed<string>(() => {
 
 function handleDownloadsTray(): void {
   bridge?.clickDownloadsTray()
+}
+
+/** Title-bar Send Feedback button. Routes through main, which forwards
+ *  `comfy-panel:open-feedback` to the panel renderer — the renderer
+ *  fires the `desktop2.feedback.opened` telemetry action and opens the
+ *  support URL via `openExternal`. The waffle menu's "Send Feedback"
+ *  entry lands on the same panel-side handler. */
+function handleFeedback(): void {
+  bridge?.clickFeedback()
 }
 
 /** Body luminance test — drives is-light styling (lighter hover state). */
@@ -592,6 +607,20 @@ onUnmounted(() => {
           aria-hidden="true"
         >{{ downloadsActiveCount }}</span>
       </button>
+      <!-- Send Feedback — always-visible affordance restored from the
+           pre-unified-window sidebar. Hidden during the consent-lockdown
+           step for the same reason the waffle is: the only first-use
+           gesture we want available is consent or OS-chrome close. -->
+      <button
+        v-if="!isConsentLockdown"
+        type="button"
+        class="title-menu-button title-menu-button--icon title-feedback-button"
+        title="Send Feedback"
+        aria-label="Send Feedback"
+        @click="handleFeedback"
+      >
+        <MessageSquarePlus :size="16" />
+      </button>
     </div>
 
     <!-- Center: install pill. Single click target — clicking anywhere
@@ -753,6 +782,14 @@ onUnmounted(() => {
 .title-menu-button--icon {
   padding: 4px 6px;
   gap: 0;
+}
+
+/* Send Feedback sits visually apart from the
+   waffle / app-update / downloads cluster — the cluster is window-
+   chrome, the feedback button is an outbound action. The extra inset
+   (on top of the 2px container gap) reads as "different group". */
+.title-feedback-button {
+  margin-left: 10px;
 }
 
 /* --- Install pill (center) — single click target. The whole pill

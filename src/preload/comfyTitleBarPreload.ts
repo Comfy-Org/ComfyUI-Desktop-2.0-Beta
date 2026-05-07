@@ -140,6 +140,12 @@ export interface ComfyTitleBarBridge {
    *  the same `panel-trigger-overlay` channel as the app-update pill
    *  so the panel renderer can open the downloads popover. */
   clickDownloadsTray(): void
+  /** Click handler for the title-bar Send Feedback button. Main
+   *  resolves the host entry from the sender and forwards
+   *  `comfy-panel:open-feedback` to the panel renderer, which fires
+   *  the `desktop2.feedback.opened` telemetry action and opens the
+   *  support URL via `openExternal`. */
+  clickFeedback(): void
   /** Tell main this title bar is mounted; main responds with the initial state. */
   ready(): void
 }
@@ -270,6 +276,9 @@ const bridge: ComfyTitleBarBridge = {
   },
   clickDownloadsTray: () => {
     ipcRenderer.send('comfy-window:click-downloads-tray')
+  },
+  clickFeedback: () => {
+    ipcRenderer.send('comfy-window:click-feedback')
   },
   ready: () => {
     ipcRenderer.send('comfy-window:title-bar-ready')
