@@ -166,6 +166,35 @@ describe('installations.markLaunched', () => {
   })
 })
 
+describe('installations.add (id uniqueness)', () => {
+  // Regression — `inst-${Date.now()}` collided whenever two `add()` calls
+  // landed in the same millisecond (CI / fast hardware), aliasing distinct
+  // records under the same id and breaking everything keyed by id
+  // (`getRecent`, `update`, `markLaunched`, …). The fix uses a per-process
+  // counter when the wall clock hasn't ticked between calls.
+  it('produces a distinct id for each add(), even back-to-back inside the same millisecond', async () => {
+    const installations = await loadInstallations()
+    // Pin Date.now to the same value across all 5 add() calls so we
+    // exercise the same-ms collision path deterministically rather than
+    // relying on a fast machine to repro it.
+    const fixed = 1_700_000_000_000
+    vi.spyOn(Date, 'now').mockReturnValue(fixed)
+    const records = []
+    for (let i = 0; i < 5; i++) {
+      records.push(
+        await installations.add({
+          name: `Same-ms ${i}`,
+          installPath: path.join(tmpRoot, `same-ms-${i}`),
+          sourceId: 'standalone',
+          status: 'installed',
+        }),
+      )
+    }
+    const ids = records.map((r) => r.id)
+    expect(new Set(ids).size).toBe(ids.length)
+  })
+})
+
 describe('installations.getRecent', () => {
   it('returns null when no installs have been launched', async () => {
     const installations = await loadInstallations()

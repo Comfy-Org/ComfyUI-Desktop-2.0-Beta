@@ -147,10 +147,11 @@ describe('ChooserView', () => {
     expect(installTiles[2]!.text()).toContain('Never')
   })
 
-  it('emits pick when an idle install tile is single-clicked', async () => {
-    // Single-click on the tile body launches the install via
-    // pickInstall. Manage lives only behind the kebab (⋮) and the
-    // right-click context menu, asserted separately.
+  it('emits pick when an install tile is single-clicked', async () => {
+    // Single-click on the tile body launches via pickInstall — the
+    // same gesture the Cloud tile uses, so behaviour can't drift
+    // between the two surfaces. Manage / Update / Migrate / Open
+    // Folder / Delete all live behind the kebab (⋮) menu.
     installMockApi([
       makeInstall({ id: 'a', name: 'Alpha', status: 'installed' }),
     ])
@@ -165,22 +166,20 @@ describe('ChooserView', () => {
     expect((events![0]![0] as Installation).id).toBe('a')
   })
 
-  it('emits pick when the Play button on an install tile is clicked', async () => {
-    // The explicit Play CTA in the bottom-right of each tile
-    // launches via pickInstall — same as a card-body click on an
-    // idle install. The CTA stays as a discoverable affordance
-    // alongside the larger card-click target.
+  it('does not render per-state launch CTAs — only the Close-instance CTA when running', async () => {
+    // Per-state CTAs (Play / Show Window / View Progress) collapsed
+    // into the body click handler; only a "Close instance" CTA
+    // remains, and only while the install is running / stopping.
     installMockApi([
       makeInstall({ id: 'a', name: 'Alpha', status: 'installed' }),
     ])
     const wrapper = mountChooser()
     await flushPromises()
-    const playBtn = wrapper.find('.chooser-tile-cta-play')
-    expect(playBtn.exists()).toBe(true)
-    await playBtn.trigger('click')
-    const events = wrapper.emitted('pick')
-    expect(events).toBeDefined()
-    expect((events![0]![0] as Installation).id).toBe('a')
+    expect(wrapper.find('.chooser-tile-cta-play').exists()).toBe(false)
+    expect(wrapper.find('.chooser-tile-cta-show').exists()).toBe(false)
+    expect(wrapper.find('.chooser-tile-cta-progress').exists()).toBe(false)
+    // Idle install has no CTA cluster at all.
+    expect(wrapper.find('.chooser-tile-cta').exists()).toBe(false)
   })
 
   it('does not emit pick when the kebab button is clicked — only the menu opens', async () => {

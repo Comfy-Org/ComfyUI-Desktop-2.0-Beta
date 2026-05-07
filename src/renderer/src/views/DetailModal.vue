@@ -578,7 +578,6 @@ function navigateToInstallation(installationId: string): void {
   <ModalShell
     v-if="installation && !embedded"
     :inline="!asModal"
-    :binding="asModal"
     opacity="dim"
     @close="handleHeaderClose"
   >
