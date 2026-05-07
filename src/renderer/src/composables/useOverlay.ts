@@ -14,14 +14,17 @@ import type { Installation } from '../types/ipc'
  * The kinds form a discriminated union:
  *   - `manage`   — DetailModal (Manage…) + confirm/prompt/channel
  *                  cards / action menus. Tier 1.
- *   - `app-update` — Title-bar app-update pill popover. Tier 1.
  *   - `downloads`  — Title-bar downloads tray popover. Tier 1.
  *   - `progress` — ProgressModal for a long-running action that does
  *                  NOT end in the running ComfyUI app (delete,
  *                  snapshot, copy, update-while-stopped). Tier 2.
  *   - `takeover` — Full-window takeover for actions that end in the
  *                  app (launch, install, update-then-restart,
- *                  first-use, app-update). Tier 3.
+ *                  first-use). Tier 3.
+ *
+ * App-update is NOT an overlay kind — the title-bar pill click pops a
+ * `useModal.confirm` modal rendered by the global `<ModalDialog />`
+ * mount, not by this slot.
  *
  * Modal-unification (Track M-7) — the legacy `'flow'` Tier 3 kind
  * was retired here. Pre-M-3 the four install-flow modals
@@ -54,24 +57,13 @@ import type { Installation } from '../types/ipc'
  * `Cancel "Updating ComfyUI"?`).
  */
 
-export type OverlayKind = 'manage' | 'app-update' | 'downloads' | 'page' | 'progress' | 'takeover'
+export type OverlayKind = 'manage' | 'downloads' | 'page' | 'progress' | 'takeover'
 
 export interface ManageOverlay {
   kind: 'manage'
   installation: Installation
   initialTab?: string
   autoAction?: string | null
-}
-
-/**
- * Phase 3 §18 — Tier 1 popover surfaced from the title-bar app-update
- * pill. Reads its state (available / ready / version) from the shared
- * `useAppUpdateState` composable so the popover and `UpdateBanner`
- * never disagree. No additional payload — the composable owns the
- * data, the overlay just signals "render the popover".
- */
-export interface AppUpdateOverlay {
-  kind: 'app-update'
 }
 
 /**
@@ -170,7 +162,6 @@ export interface TakeoverOverlay {
 
 export type Overlay =
   | ManageOverlay
-  | AppUpdateOverlay
   | DownloadsOverlay
   | PageOverlay
   | ProgressOverlay
@@ -178,7 +169,6 @@ export type Overlay =
 
 const TIER: Record<OverlayKind, 1 | 2 | 3> = {
   manage: 1,
-  'app-update': 1,
   downloads: 1,
   page: 1,
   progress: 2,

@@ -196,7 +196,11 @@ export function registerAppHandlers(): void {
       cpu_speed_ghz: cpuSpeedGhz,
       cpu_manufacturer: cpuManufacturer,
       app_version: getAppVersion(),
-      auto_update: settings.get('autoUpdate') !== false,
+      // Issue #488 — repurposed to reflect the new `autoInstallUpdates`
+      // toggle (silent install vs prompt). The auto-check loop is no
+      // longer user-disablable, so this property captures what the
+      // remaining toggle actually controls.
+      auto_update: settings.get('autoInstallUpdates') !== false,
       locale: settings.get('language') || 'en',
       installation_count: allInstalls.length,
       installations: allInstalls.map((inst) => ({

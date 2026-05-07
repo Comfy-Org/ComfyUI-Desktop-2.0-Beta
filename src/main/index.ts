@@ -2446,12 +2446,22 @@ function _broadcastAppUpdateStateToTitleBars(state: updater.AppUpdateState): voi
 }
 
 /**
- * Phase 3 §18 — title-bar app-update pill click. Resolves the entry
- * via the title-bar webContents sender, then sends
- * `panel-trigger-overlay` to the panel renderer so it can mount the
- * Tier 1 app-update popover via `openOverlay`. The popover overlays
- * whatever the user is currently looking at; we don't switch panels
- * here.
+ * Title-bar app-update pill click. Branches on the cached updater
+ * state:
+ *   - `'ready'` (auto-on or auto-off) → `app-update-restart-prompt`,
+ *     panel renderer fires the "Desktop Update Ready" confirm modal
+ *     ("Restart now?"). Confirm → `installUpdate()`.
+ *   - `'available'` (auto-off only — main suppresses 'available' under
+ *     auto-on) → `app-update-download-prompt`, renderer fires the
+ *     "Desktop Update Available" confirm modal. Confirm →
+ *     `downloadUpdate()`; the auto restart prompt fires once download
+ *     finishes (see `_userInitiatedDownload` in updater.ts).
+ *   - `null` → no-op (the pill is suppressed when there's no state).
+ *
+ * Modals fire via the panel renderer (which already owns `useModal`)
+ * rather than the overlay system because `useModal` is process-global
+ * and matches the spec's "modal" wording — overlays are a different
+ * surface (Tier 1/2/3 popovers).
  */
 ipcMain.on('comfy-window:click-app-update-pill', (event) => {
   const found = findEntryByTitleBarSender(event.sender)
@@ -2459,7 +2469,20 @@ ipcMain.on('comfy-window:click-app-update-pill', (event) => {
   const { entry } = found
   const panelView = entry.panelView
   if (!panelView || panelView.webContents.isDestroyed()) return
-  panelView.webContents.send('panel-trigger-overlay', { kind: 'app-update' })
+  const state = updater.getCurrentUpdateState()
+  if (state.kind === 'ready') {
+    panelView.webContents.send('panel-trigger-overlay', {
+      kind: 'app-update-restart-prompt',
+      version: state.version,
+    })
+    return
+  }
+  if (state.kind === 'available') {
+    panelView.webContents.send('panel-trigger-overlay', {
+      kind: 'app-update-download-prompt',
+      version: state.version,
+    })
+  }
 })
 
 /**

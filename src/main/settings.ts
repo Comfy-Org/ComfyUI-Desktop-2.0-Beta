@@ -13,7 +13,21 @@ export interface KnownSettings {
   outputDir: string
   language?: string
   theme?: string
+  /**
+   * Legacy "Check for updates on startup" toggle. Issue #488 split this
+   * into "always auto-check" (no longer gated by a setting) and
+   * `autoInstallUpdates` (new toggle for silent install vs prompt).
+   * The key stays in the schema so existing settings.json files don't
+   * lose data; a future setting may re-expose it.
+   */
   autoUpdate?: boolean
+  /**
+   * Issue #488 — when true (default), Desktop app updates download
+   * silently in the background and are installed silently on the next
+   * relaunch (or when the user clicks the "Desktop Update Ready" pill).
+   * When false, the user is prompted before any download / install.
+   */
+  autoInstallUpdates?: boolean
   pypiMirror?: string
   useChineseMirrors?: boolean
   chineseMirrorsPrompted?: boolean
@@ -55,6 +69,7 @@ const SETTINGS_SCHEMA = {
   language: { nullable: false },
   theme: { nullable: false },
   autoUpdate: { nullable: false },
+  autoInstallUpdates: { nullable: false },
   pypiMirror: { nullable: false },
   useChineseMirrors: { nullable: false },
   chineseMirrorsPrompted: { nullable: false },
