@@ -23,6 +23,7 @@ import { useListAction } from '../composables/useListAction'
 import { useMigrateAction } from '../composables/useMigrateAction'
 import { useOverlay, type FlowComponent } from '../composables/useOverlay'
 import { emitTelemetryAction } from '../lib/telemetry'
+import { buildSupportUrl } from '../lib/supportUrl'
 import type { ActionResult, Installation, ShowProgressOpts } from '../types/ipc'
 
 /**
@@ -187,6 +188,24 @@ let unsubLocale: (() => void) | null = null
 let unsubCloseRequest: (() => void) | null = null
 let unsubPanelTriggerOverlay: (() => void) | null = null
 let unsubFirstUseSkip: (() => void) | null = null
+let unsubOpenFeedback: (() => void) | null = null
+
+/** App version cached at mount; appended to the support URL as the
+ *  `ver` query param so feedback submissions can be filtered by build.
+ *  Cached because the typeform open path is fire-and-forget and we
+ *  don't want to await an IPC inside the click handler. Empty string
+ *  while the initial fetch is in flight or if it failed — `buildSupportUrl`
+ *  treats falsy as "omit the param". */
+const appVersion = ref('')
+
+/** Forward a Send Feedback request from the title-bar button or the
+ *  file-menu entry: fire the `desktop2.feedback.opened` telemetry
+ *  action (with `source` so we can tell which affordance the user
+ *  reached for), then open the typeform support URL via `openExternal`. */
+function handleOpenFeedback(source: 'titlebar' | 'menu'): void {
+  emitTelemetryAction('desktop2.feedback.opened', { source })
+  void window.api.openExternal(buildSupportUrl(appVersion.value || undefined))
+}
 
 async function loadLocale(): Promise<void> {
   const messages = await window.api.getLocaleMessages()
@@ -919,6 +938,23 @@ onMounted(async () => {
     void completeFirstUseAndDismiss()
   })
 
+  // Title-bar Send Feedback button + file-menu "Send Feedback" entry
+  // both forward through main to this listener. See `handleOpenFeedback`;
+  // `source` identifies the affordance for telemetry.
+  unsubOpenFeedback = window.api.onOpenFeedback(({ source }) => {
+    handleOpenFeedback(source)
+  })
+
+  // Cache the app version for the support URL's `ver` query param.
+  // Fire-and-forget — `handleOpenFeedback` falls back to omitting the
+  // param while this is in flight or if it rejects.
+  void window.api
+    .getAppVersion()
+    .then((v) => {
+      appVersion.value = v
+    })
+    .catch(() => {})
+
   // Initialize stores / prefs needed by the embedded DetailModal that
   // backs the unified Settings modal's "ComfyUI Settings" tab.
   // installationStore wires its own onInstallationsChanged listener.
@@ -953,6 +989,7 @@ onUnmounted(() => {
   unsubCloseRequest?.()
   unsubPanelTriggerOverlay?.()
   unsubFirstUseSkip?.()
+  unsubOpenFeedback?.()
   pendingPickUnsub?.()
   sessionStore.dispose()
 })

@@ -56,16 +56,9 @@ export interface ComfyTitleBarBridge {
   /** Pop the File menu as a native OS menu. Avoids HTML popups that
    *  would be clipped by the title bar's WebContentsView bounds. */
   openFileMenu(anchor: TitleMenuAnchor): void
-  /** Browser-style Back arrow — step one entry backward in the host
-   *  window's panel-history stack. No-op when at the root. */
-  goBack(): void
-  /** Browser-style Forward arrow — step one entry forward in history.
-   *  No-op when there's nothing to redo (i.e. user hasn't pressed Back). */
-  goForward(): void
+
   /** Subscribe to panel-active changes coming from main. */
   onPanelChanged(cb: (panel: ComfyPanelKey) => void): () => void
-  /** Subscribe to navigation-state changes (Back/Forward enabledness). */
-  onNavStateChanged(cb: (state: { canBack: boolean; canForward: boolean }) => void): () => void
   /** Subscribe to title text changes coming from main. */
   onTitleChanged(cb: (title: string) => void): () => void
   /** Track B item 4 — subscribe to install source-category pushes
@@ -143,6 +136,12 @@ export interface ComfyTitleBarBridge {
    *  the same `panel-trigger-overlay` channel as the app-update pill
    *  so the panel renderer can open the downloads popover. */
   clickDownloadsTray(): void
+  /** Click handler for the title-bar Send Feedback button. Main
+   *  resolves the host entry from the sender and forwards
+   *  `comfy-panel:open-feedback` to the panel renderer, which fires
+   *  the `desktop2.feedback.opened` telemetry action and opens the
+   *  support URL via `openExternal`. */
+  clickFeedback(): void
   /** Tell main this title bar is mounted; main responds with the initial state. */
   ready(): void
 }
@@ -177,26 +176,13 @@ const bridge: ComfyTitleBarBridge = {
   openFileMenu: (anchor) => {
     ipcRenderer.send('comfy-window:open-title-menu', { menu: 'file', anchor })
   },
-  goBack: () => {
-    ipcRenderer.send('comfy-window:go-back')
-  },
-  goForward: () => {
-    ipcRenderer.send('comfy-window:go-forward')
-  },
+
   onPanelChanged: (cb) => {
     const handler = (_event: IpcRendererEvent, panel: unknown): void => {
       if (typeof panel === 'string') cb(panel as ComfyPanelKey)
     }
     ipcRenderer.on('comfy-titlebar:panel-changed', handler)
     return () => ipcRenderer.removeListener('comfy-titlebar:panel-changed', handler)
-  },
-  onNavStateChanged: (cb) => {
-    const handler = (_event: IpcRendererEvent, data: unknown): void => {
-      const { canBack, canForward } = (data || {}) as { canBack?: unknown; canForward?: unknown }
-      cb({ canBack: !!canBack, canForward: !!canForward })
-    }
-    ipcRenderer.on('comfy-titlebar:nav-state-changed', handler)
-    return () => ipcRenderer.removeListener('comfy-titlebar:nav-state-changed', handler)
   },
   onTitleChanged: (cb) => {
     const handler = (_event: IpcRendererEvent, title: unknown): void => {
@@ -284,6 +270,9 @@ const bridge: ComfyTitleBarBridge = {
   },
   clickDownloadsTray: () => {
     ipcRenderer.send('comfy-window:click-downloads-tray')
+  },
+  clickFeedback: () => {
+    ipcRenderer.send('comfy-window:click-feedback')
   },
   ready: () => {
     ipcRenderer.send('comfy-window:title-bar-ready')

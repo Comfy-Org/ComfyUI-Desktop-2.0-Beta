@@ -16,7 +16,6 @@ interface MockDownloadsTrayState {
 
 interface MockBridgeState {
   panelChangedCallbacks: ((panel: string) => void)[]
-  navStateChangedCallbacks: ((state: { canBack: boolean; canForward: boolean }) => void)[]
   titleChangedCallbacks: ((title: string) => void)[]
   sourceCategoryChangedCallbacks: ((category: string | null) => void)[]
   themeChangedCallbacks: ((theme: { bg: string; text: string }) => void)[]
@@ -33,18 +32,16 @@ interface MockBridgeState {
   setPanelCalls: string[]
   newWindowCalls: number
   fileMenuAnchors: { x: number; y: number }[]
-  goBackCalls: number
-  goForwardCalls: number
   appUpdatePillClicks: number
   installUpdatePillClicks: number
   downloadsTrayClicks: number
+  feedbackClicks: number
   readyCalls: number
 }
 
 function installMockBridge(opts: { isMac?: boolean; installationId?: string | null } = {}): MockBridgeState {
   const state: MockBridgeState = {
     panelChangedCallbacks: [],
-    navStateChangedCallbacks: [],
     titleChangedCallbacks: [],
     sourceCategoryChangedCallbacks: [],
     themeChangedCallbacks: [],
@@ -57,11 +54,10 @@ function installMockBridge(opts: { isMac?: boolean; installationId?: string | nu
     setPanelCalls: [],
     newWindowCalls: 0,
     fileMenuAnchors: [],
-    goBackCalls: 0,
-    goForwardCalls: 0,
     appUpdatePillClicks: 0,
     installUpdatePillClicks: 0,
     downloadsTrayClicks: 0,
+    feedbackClicks: 0,
     readyCalls: 0,
   }
   const installationId = opts.installationId === undefined ? 'test-id' : opts.installationId
@@ -71,14 +67,8 @@ function installMockBridge(opts: { isMac?: boolean; installationId?: string | nu
     setPanel: (panel: string) => state.setPanelCalls.push(panel),
     openNewWindow: () => { state.newWindowCalls += 1 },
     openFileMenu: (anchor: { x: number; y: number }) => { state.fileMenuAnchors.push(anchor) },
-    goBack: () => { state.goBackCalls += 1 },
-    goForward: () => { state.goForwardCalls += 1 },
     onPanelChanged: (cb: (panel: string) => void) => {
       state.panelChangedCallbacks.push(cb)
-      return () => {}
-    },
-    onNavStateChanged: (cb: (state: { canBack: boolean; canForward: boolean }) => void) => {
-      state.navStateChangedCallbacks.push(cb)
       return () => {}
     },
     onTitleChanged: (cb: (title: string) => void) => {
@@ -131,6 +121,9 @@ function installMockBridge(opts: { isMac?: boolean; installationId?: string | nu
     },
     clickDownloadsTray: () => {
       state.downloadsTrayClicks += 1
+    },
+    clickFeedback: () => {
+      state.feedbackClicks += 1
     },
     ready: () => {
       state.readyCalls += 1
@@ -250,47 +243,11 @@ describe('TitleBarApp', () => {
     expect(wrapper.find('.title-install-pill').classes()).not.toContain('active')
   })
 
-  it('renders Back and Forward buttons disabled by default and enables them via onNavStateChanged', async () => {
+  it('does not render any title-bar nav buttons (back/forward chevrons removed with the takeover layout)', async () => {
     const { default: TitleBarApp } = await import('./TitleBarApp.vue')
     const wrapper = mount(TitleBarApp)
     await flushPromises()
-    const navButtons = wrapper.findAll('.title-nav-button')
-    expect(navButtons.length).toBe(2)
-    const [backBtn, fwdBtn] = navButtons
-    expect((backBtn!.element as HTMLButtonElement).disabled).toBe(true)
-    expect((fwdBtn!.element as HTMLButtonElement).disabled).toBe(true)
-
-    bridgeState.navStateChangedCallbacks.forEach((cb) => cb({ canBack: true, canForward: false }))
-    await flushPromises()
-    expect((backBtn!.element as HTMLButtonElement).disabled).toBe(false)
-    expect((fwdBtn!.element as HTMLButtonElement).disabled).toBe(true)
-
-    bridgeState.navStateChangedCallbacks.forEach((cb) => cb({ canBack: true, canForward: true }))
-    await flushPromises()
-    expect((backBtn!.element as HTMLButtonElement).disabled).toBe(false)
-    expect((fwdBtn!.element as HTMLButtonElement).disabled).toBe(false)
-  })
-
-  it('forwards Back / Forward clicks through the bridge when enabled', async () => {
-    const { default: TitleBarApp } = await import('./TitleBarApp.vue')
-    const wrapper = mount(TitleBarApp)
-    await flushPromises()
-    const navButtons = wrapper.findAll('.title-nav-button')
-    const [backBtn, fwdBtn] = navButtons
-
-    // Disabled — clicks should be no-ops.
-    await backBtn!.trigger('click')
-    await fwdBtn!.trigger('click')
-    expect(bridgeState.goBackCalls).toBe(0)
-    expect(bridgeState.goForwardCalls).toBe(0)
-
-    // Enable both, then click each.
-    bridgeState.navStateChangedCallbacks.forEach((cb) => cb({ canBack: true, canForward: true }))
-    await flushPromises()
-    await backBtn!.trigger('click')
-    await fwdBtn!.trigger('click')
-    expect(bridgeState.goBackCalls).toBe(1)
-    expect(bridgeState.goForwardCalls).toBe(1)
+    expect(wrapper.findAll('.title-nav-button').length).toBe(0)
   })
 
   it('applies the is-mac class when running on macOS', async () => {
@@ -764,6 +721,39 @@ describe('TitleBarApp', () => {
     await wrapper.find('.title-downloads-tray').trigger('click')
     expect(bridgeState.downloadsTrayClicks).toBe(1)
     wrapper.unmount()
+  })
+
+  it('renders a Send Feedback button and forwards clicks through the bridge', async () => {
+    // Restored from the pre-unified-window sidebar — the title-bar
+    // entry pairs with the file-menu "Send Feedback" entry. Both
+    // route through main → panel renderer (where the telemetry +
+    // openExternal side-effects fire); the title-bar half just has
+    // to surface the affordance and forward the click.
+    const { default: TitleBarApp } = await import('./TitleBarApp.vue')
+    const wrapper = mount(TitleBarApp, { attachTo: document.body })
+    await flushPromises()
+    const btn = wrapper.find('.title-feedback-button')
+    expect(btn.exists()).toBe(true)
+    expect(btn.attributes('aria-label')).toBe('Send Feedback')
+    await btn.trigger('click')
+    expect(bridgeState.feedbackClicks).toBe(1)
+    wrapper.unmount()
+  })
+
+  it('hides the Send Feedback button during the first-use consent-lockdown step', async () => {
+    // Same gating as the waffle: during the T&C consent step the only
+    // first-use gestures we want available are explicit consent or
+    // OS-chrome window close. The feedback button reappears once the
+    // takeover advances out of the lockdown.
+    const { default: TitleBarApp } = await import('./TitleBarApp.vue')
+    const wrapper = mount(TitleBarApp)
+    await flushPromises()
+    bridgeState.firstUseModeChangedCallbacks.forEach((cb) => cb('consent-lockdown'))
+    await flushPromises()
+    expect(wrapper.find('.title-feedback-button').exists()).toBe(false)
+    bridgeState.firstUseModeChangedCallbacks.forEach((cb) => cb('post-consent'))
+    await flushPromises()
+    expect(wrapper.find('.title-feedback-button').exists()).toBe(true)
   })
 
   it('renders the downloads tray on install-less (chooser-host) windows too — downloads are global, not per-install', async () => {
