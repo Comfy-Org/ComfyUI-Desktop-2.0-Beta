@@ -3,14 +3,10 @@ import todesktop from '@todesktop/runtime'
 import * as settings from '../settings'
 import { clearQuitReason, setQuitReason } from './quit-state'
 
-interface UpdateInfo {
-  version: string
-}
-
 /**
- * Phase 3 §18 — title-bar status pills consume the current app-update
- * state via `getCurrentUpdateState()` for the initial push (when a
- * title bar mounts after the broadcast already fired) and via the
+ * Title-bar status pills consume the current app-update state via
+ * `getCurrentUpdateState()` for the initial push (when a title bar
+ * mounts after the broadcast already fired) and via the
  * `onUpdateStateChanged` callback for live updates. The two stay in
  * sync because both writes go through `_setUpdateState`, which fans
  * out to every registered callback.
@@ -18,19 +14,15 @@ interface UpdateInfo {
  * `kind` is `'available'` after `update-available`, `'ready'` after
  * `update-downloaded`, and `null` when nothing is pending. `version`
  * carries the corresponding version string. `update-error` does NOT
- * clear the kind — the banner shows the error transiently, but the
- * pill keeps reflecting the last-known state so the user can still
- * act on a previously-discovered update once the error is dismissed.
+ * clear the kind — the pill keeps reflecting the last-known state so
+ * the user can still act on a previously-discovered update.
  *
- * Track B item 2 — `autoUpdate` mirrors the `autoUpdate` setting at
- * the moment the state was committed. Drives pill copy: with
- * auto-updates ON the `'available'` state is suppressed (main
- * triggers the download itself) so the user only ever sees the
- * `'ready'` pill, which reads "Update will apply on restart".
- * With auto-updates OFF the `'available'` pill reads
- * "Update v{version} available" and clicking it surfaces the manual
- * Download action; the subsequent `'ready'` pill keeps the existing
- * "Restart to update" copy since the user opted in.
+ * `autoUpdate` mirrors the `autoUpdate` setting at the moment the
+ * state was committed. With auto-updates ON the `'available'` state
+ * is suppressed (main triggers the download itself) so the user only
+ * ever sees the `'ready'` pill ("Desktop Update Ready"). With
+ * auto-updates OFF the `'available'` pill ("Desktop Update Available")
+ * surfaces a confirm-modal that runs the download.
  */
 export interface AppUpdateState {
   kind: 'available' | 'ready' | null
@@ -38,16 +30,23 @@ export interface AppUpdateState {
   autoUpdate: boolean
 }
 
-let _updateInfo: UpdateInfo | null = null
 let _appUpdateState: AppUpdateState = { kind: null, version: null, autoUpdate: true }
-/** Track B item 2 — guard against re-entering the update-available
- *  → runCheck → update-available cycle. todesktop usually dedupes
- *  per-version internally, but the intent here is explicit: we only
- *  programmatically kick off the download once per detected version
- *  even if the periodic auto-check refires the event. Reset on
- *  `update-downloaded` and on `update-error` so a subsequent check
- *  for a NEW version can trigger again. */
+/** Guard against re-entering the update-available → runCheck →
+ *  update-available cycle. todesktop usually dedupes per-version
+ *  internally, but the intent here is explicit: we only programmatically
+ *  kick off the download once per detected version even if the periodic
+ *  auto-check refires the event. Reset on `update-downloaded` and on
+ *  `update-error` so a subsequent check for a NEW version can trigger
+ *  again. */
 let _autoDownloadTriggeredFor: string | null = null
+/** True when the most recent download was started by an explicit user
+ *  action (the auto-off "Desktop Update Available" pill confirm-modal).
+ *  Drives the post-download "restart now?" prompt: when the user opted
+ *  in to download, surface the restart prompt automatically once the
+ *  download finishes. With auto-updates ON the download is silent and
+ *  this stays false. Cleared on `update-downloaded` (after broadcasting
+ *  the prompt) and on `update-error`. */
+let _userInitiatedDownload = false
 const _stateChangeCallbacks = new Set<(state: AppUpdateState) => void>()
 let _listenersBound = false
 
@@ -69,6 +68,21 @@ const UPDATER_UNAVAILABLE_MESSAGE = 'ToDesktop auto-updater is unavailable.'
  *  the `auto_update` telemetry property. */
 function isAutoUpdateEnabled(): boolean {
   return settings.get('autoUpdate') !== false
+}
+
+/**
+ * Re-broadcast the cached `_appUpdateState` with a refreshed
+ * `autoUpdate` flag. Settings handler calls this when the user toggles
+ * the autoUpdate preference so a pending `'ready'` state immediately
+ * starts reading as auto-on / auto-off (drives the title-bar pill copy
+ * and the click-modal flow without having to wait for the next
+ * update-check broadcast). No-op when there's no cached state.
+ */
+export function notifyAutoUpdateChanged(): void {
+  if (_appUpdateState.kind === null) return
+  const refreshed = isAutoUpdateEnabled()
+  if (_appUpdateState.autoUpdate === refreshed) return
+  _setUpdateState({ ..._appUpdateState, autoUpdate: refreshed })
 }
 
 function isSystemPackageInstall(): boolean {
@@ -103,14 +117,6 @@ function versionFromPayload(payload: unknown): string | null {
   return null
 }
 
-function numberFromPayload(payload: unknown, key: string): number | null {
-  const data = asRecord(payload)
-  if (!data) return null
-  const value = data[key]
-  if (typeof value !== 'number' || Number.isNaN(value)) return null
-  return value
-}
-
 function updaterErrorMessage(args: unknown[]): string {
   for (const arg of args) {
     if (arg instanceof Error && arg.message) return arg.message
@@ -136,16 +142,11 @@ function bindUpdaterEvents(): void {
     if (!version) return
     const autoUpdate = isAutoUpdateEnabled()
     if (autoUpdate) {
-      // Track B item 2 — auto-updates ON suppresses the 'available'
-      // pill entirely. Main programmatically kicks off the download
-      // (via the same runCheck path the user's manual "Download"
-      // button uses) and only re-broadcasts when the kind flips to
-      // 'ready'. The renderer banner still gets the raw event so the
-      // existing notify-on-available channel keeps working for any
-      // surface that wants to react during the silent download
-      // window — the title-bar pill is the only consumer that
-      // intentionally sits this state out.
-      broadcast('update-available', { version })
+      // Auto-updates ON suppresses the 'available' pill entirely.
+      // Main programmatically kicks off the download in the
+      // background; only the subsequent 'ready' state surfaces
+      // ("Desktop Update Ready"). The download is silent — no user
+      // action required.
       if (_autoDownloadTriggeredFor !== version) {
         _autoDownloadTriggeredFor = version
         void runCheck('auto-download').catch(() => {})
@@ -153,34 +154,35 @@ function bindUpdaterEvents(): void {
       return
     }
     _setUpdateState({ kind: 'available', version, autoUpdate: false })
-    broadcast('update-available', { version })
-  })
-
-  updater.on('download-progress', (progress: unknown) => {
-    const percent = numberFromPayload(progress, 'percent')
-    const transferredBytes = numberFromPayload(progress, 'transferred')
-    const totalBytes = numberFromPayload(progress, 'total')
-    if (percent === null || transferredBytes === null || totalBytes === null) return
-    broadcast('update-download-progress', {
-      percent: Math.round(percent),
-      transferred: (transferredBytes / 1048576).toFixed(1),
-      total: (totalBytes / 1048576).toFixed(1),
-    })
   })
 
   updater.on('update-downloaded', (event: unknown) => {
     const version = versionFromPayload(event)
     if (!version) return
-    _updateInfo = { version }
     _autoDownloadTriggeredFor = null
     _setUpdateState({ kind: 'ready', version, autoUpdate: isAutoUpdateEnabled() })
-    broadcast('update-downloaded', _updateInfo)
+    if (_userInitiatedDownload) {
+      // The user opted in to download via the auto-off available pill
+      // modal. Push the restart prompt automatically so the flow ends
+      // on a single user gesture (Download → wait → Restart) instead
+      // of forcing them to find the pill again.
+      _userInitiatedDownload = false
+      broadcast('app-update:prompt-restart', { version })
+    }
   })
 
   updater.on('error', (...args: unknown[]) => {
+    const wasUserInitiated = _userInitiatedDownload
     clearQuitReason()
     _autoDownloadTriggeredFor = null
-    broadcast('update-error', { message: updaterErrorMessage(args) })
+    _userInitiatedDownload = false
+    if (wasUserInitiated) {
+      // Only surface failures the user is actively waiting on.
+      // Background auto-on download errors stay silent — the user
+      // hasn't asked for anything and bothering them with a modal
+      // for a transient network blip would be noisy.
+      broadcast('app-update:user-action-failed', { message: updaterErrorMessage(args) })
+    }
   })
 }
 
@@ -256,20 +258,27 @@ export function register(): void {
   })
 
   ipcMain.handle('download-update', async () => {
+    // Marks the next `update-downloaded` as user-initiated so the
+    // updater module fires the auto restart-prompt event. The flag is
+    // cleared on download completion or on error so a subsequent
+    // background auto-on download doesn't re-trigger the prompt.
+    _userInitiatedDownload = true
     try {
       const result = await runCheck('download-button')
-      if (!result.available && !_updateInfo) {
-        broadcast('update-error', { message: result.error || NO_UPDATE_AVAILABLE_MESSAGE })
+      if (!result.available && _appUpdateState.kind !== 'ready') {
+        _userInitiatedDownload = false
+        broadcast('app-update:user-action-failed', { message: result.error || NO_UPDATE_AVAILABLE_MESSAGE })
       }
     } catch (err) {
-      broadcast('update-error', { message: err instanceof Error ? err.message : String(err) })
+      _userInitiatedDownload = false
+      broadcast('app-update:user-action-failed', { message: err instanceof Error ? err.message : String(err) })
     }
   })
 
   ipcMain.handle('install-update', () => {
     const updater = getAutoUpdater()
     if (!updater) {
-      broadcast('update-error', { message: UPDATER_UNAVAILABLE_MESSAGE })
+      broadcast('app-update:user-action-failed', { message: UPDATER_UNAVAILABLE_MESSAGE })
       return
     }
     try {
@@ -277,11 +286,9 @@ export function register(): void {
       updater.restartAndInstall({ isSilent: true })
     } catch (err) {
       clearQuitReason()
-      broadcast('update-error', { message: err instanceof Error ? err.message : String(err) })
+      broadcast('app-update:user-action-failed', { message: err instanceof Error ? err.message : String(err) })
     }
   })
-
-  ipcMain.handle('get-pending-update', () => _updateInfo)
 
   ipcMain.handle('get-update-capabilities', () => {
     const systemManaged = isSystemPackageInstall()

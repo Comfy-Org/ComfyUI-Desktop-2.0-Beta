@@ -371,17 +371,6 @@ export interface DiskSpaceInfo {
 
 export type PathIssue = 'insideAppBundle' | 'oneDrive' | 'insideSharedDir' | 'insideExistingInstall'
 
-// --- Update types ---
-export interface UpdateInfo {
-  version: string
-}
-
-export interface UpdateDownloadProgress {
-  transferred: string
-  total: string
-  percent: number
-}
-
 // --- Model download types ---
 export type ModelDownloadStatus =
   | 'pending'
@@ -825,7 +814,6 @@ export interface ElectronApi {
   checkForUpdate(): Promise<{ available: boolean; version?: string; error?: string }>
   downloadUpdate(): Promise<void>
   installUpdate(): Promise<void>
-  getPendingUpdate(): Promise<UpdateInfo | null>
   getUpdateCapabilities(): Promise<{ canAutoUpdate: boolean; systemManaged: boolean }>
 
   // Model downloads
@@ -850,10 +838,20 @@ export interface ElectronApi {
   onConfirmQuit(callback: (details: QuitActiveItem[]) => void): Unsubscribe
   onInstallationsChanged(callback: () => void): Unsubscribe
   onInstallationsVersionsUpdated(callback: (updates: { id: string; version: string }[]) => void): Unsubscribe
-  onUpdateAvailable(callback: (info: UpdateInfo) => void): Unsubscribe
-  onUpdateDownloadProgress(callback: (progress: UpdateDownloadProgress) => void): Unsubscribe
-  onUpdateDownloaded(callback: (info: UpdateInfo) => void): Unsubscribe
-  onUpdateError(callback: (err: { message: string }) => void): Unsubscribe
+  /**
+   * Fires when an auto-off "Desktop Update Available" download completes
+   * (i.e. user explicitly opted in via the pill confirm-modal). The
+   * panel renderer pops the "Restart now?" follow-up modal automatically
+   * so the flow lands on a single user gesture instead of forcing the
+   * user to find the pill again.
+   */
+  onAppUpdatePromptRestart(callback: (data: { version: string }) => void): Unsubscribe
+  /**
+   * Fires when a user-initiated update action (download / install) fails.
+   * Background auto-on download errors are NOT broadcast — only failures
+   * the user is actively waiting on. Renderer pops an alert modal.
+   */
+  onAppUpdateUserActionFailed(callback: (err: { message: string }) => void): Unsubscribe
   onZoomChanged(callback: (level: number) => void): Unsubscribe
   onModelDownloadProgress(callback: (progress: ModelDownloadProgress) => void): Unsubscribe
   onTelemetrySettingChanged(callback: (enabled: boolean | undefined) => void): Unsubscribe
@@ -868,19 +866,28 @@ export interface ElectronApi {
    */
   onPanelSwitch(callback: (data: { panel: string; installationId?: string }) => void): Unsubscribe
   /**
-   * Phase 3 §18 — main forwards a title-bar status pill click as an
-   * overlay-trigger to the panel renderer. The renderer subscribes
-   * once on mount and routes each kind through `useOverlay.openOverlay`:
-   *   - `'app-update'` → Tier 1 popover sourced from `useAppUpdateState`.
+   * Main forwards a title-bar status pill / tray click here. The
+   * renderer subscribes once on mount and dispatches each kind:
+   *   - `'app-update-restart-prompt'` → `useModal.confirm` "Desktop
+   *     Update Ready" dialog. Confirm → `installUpdate()`.
+   *     Carries the target `version`.
+   *   - `'app-update-download-prompt'` → `useModal.confirm` "Desktop
+   *     Update Available" dialog. Confirm → `downloadUpdate()`.
+   *     Carries the target `version`.
    *   - `'install-update'` → Manage overlay (DetailModal) on the
    *     update tab, scoped to the carried `installationId`.
-   *   - `'downloads'` → Track F Tier 1 popover listing in-flight and
+   *   - `'downloads'` → Tier 1 popover listing in-flight and
    *     recently-completed downloads from the shared `downloadStore`.
    */
   onPanelTriggerOverlay(
     callback: (data: {
-      kind: 'app-update' | 'install-update' | 'downloads'
+      kind:
+        | 'install-update'
+        | 'downloads'
+        | 'app-update-restart-prompt'
+        | 'app-update-download-prompt'
       installationId?: string
+      version?: string | null
     }) => void,
   ): Unsubscribe
 }

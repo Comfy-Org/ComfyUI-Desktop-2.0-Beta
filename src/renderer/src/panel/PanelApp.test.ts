@@ -7,8 +7,16 @@ vi.mock('../main', () => ({
 }))
 
 vi.mock('../composables/useTheme', () => ({ useTheme: () => ({ theme: 'dark' }) }))
+/** Test-controllable `useModal` mock. Each call returns the same
+ *  shared singleton so tests can stub return values per case via
+ *  `mockModal.confirm.mockResolvedValueOnce(true)` etc. */
+const mockModal = {
+  alert: vi.fn(),
+  confirm: vi.fn(),
+  close: vi.fn(),
+}
 vi.mock('../composables/useModal', () => ({
-  useModal: () => ({ alert: vi.fn(), confirm: vi.fn(), close: vi.fn() }),
+  useModal: () => mockModal,
 }))
 
 // Stub the heavy children so we can assert which sub-panel is rendered.
@@ -121,19 +129,6 @@ vi.mock('../views/FirstUseTakeover.vue', () => ({
     methods: { open: vi.fn() },
   },
 }))
-vi.mock('../components/UpdateBanner.vue', () => ({
-  default: {
-    name: 'UpdateBanner',
-    template: '<div data-testid="update-banner" />',
-  },
-}))
-vi.mock('../components/AppUpdatePopover.vue', () => ({
-  default: {
-    name: 'AppUpdatePopover',
-    emits: ['close'],
-    template: '<div data-testid="app-update-popover" />',
-  },
-}))
 vi.mock('../components/DownloadsTrayPopover.vue', () => ({
   default: {
     name: 'DownloadsTrayPopover',
@@ -175,12 +170,21 @@ interface InstallationLike {
   sourceCategory: string
 }
 
+type PanelTriggerPayload = {
+  kind:
+    | 'install-update'
+    | 'downloads'
+    | 'app-update-restart-prompt'
+    | 'app-update-download-prompt'
+  installationId?: string
+  version?: string | null
+}
+
 interface MockApiState {
   panelSwitchCallbacks: ((data: { panel: string; installationId?: string }) => void)[]
-  panelTriggerOverlayCallbacks: ((data: {
-    kind: 'app-update' | 'install-update' | 'downloads'
-    installationId?: string
-  }) => void)[]
+  panelTriggerOverlayCallbacks: ((data: PanelTriggerPayload) => void)[]
+  appUpdatePromptRestartCallbacks: ((data: { version: string }) => void)[]
+  appUpdateUserActionFailedCallbacks: ((data: { message: string }) => void)[]
   installationsChangedCallbacks: (() => void)[]
   /** Modal-unification (Track M-2.2) — file-menu Skip Onboarding
    *  callbacks. Main fires this when the user clicks the entry in the
@@ -193,6 +197,8 @@ interface MockApiState {
    *  auto-mount can flip `firstUseCompleted` to false here. Default is
    *  `true` so existing tests don't trip the takeover. */
   settings: Record<string, unknown>
+  installUpdate: ReturnType<typeof vi.fn>
+  downloadUpdate: ReturnType<typeof vi.fn>
 }
 
 function installMockApi(initial?: {
@@ -203,11 +209,15 @@ function installMockApi(initial?: {
   const state: MockApiState = {
     panelSwitchCallbacks: [],
     panelTriggerOverlayCallbacks: [],
+    appUpdatePromptRestartCallbacks: [],
+    appUpdateUserActionFailedCallbacks: [],
     installationsChangedCallbacks: [],
     firstUseSkipCallbacks: [],
     installations,
     getInstallations: vi.fn(async () => state.installations),
     settings: { firstUseCompleted: true, ...initial?.settings },
+    installUpdate: vi.fn(async () => {}),
+    downloadUpdate: vi.fn(async () => {}),
   }
   const api = {
     getLocaleMessages: vi.fn().mockResolvedValue(messages.en),
@@ -217,17 +227,20 @@ function installMockApi(initial?: {
       state.panelSwitchCallbacks.push(cb)
       return () => {}
     }),
-    onPanelTriggerOverlay: vi.fn(
-      (
-        cb: (d: {
-          kind: 'app-update' | 'install-update' | 'downloads'
-          installationId?: string
-        }) => void,
-      ) => {
-        state.panelTriggerOverlayCallbacks.push(cb)
-        return () => {}
-      },
-    ),
+    onPanelTriggerOverlay: vi.fn((cb: (d: PanelTriggerPayload) => void) => {
+      state.panelTriggerOverlayCallbacks.push(cb)
+      return () => {}
+    }),
+    onAppUpdatePromptRestart: vi.fn((cb: (d: { version: string }) => void) => {
+      state.appUpdatePromptRestartCallbacks.push(cb)
+      return () => {}
+    }),
+    onAppUpdateUserActionFailed: vi.fn((cb: (d: { message: string }) => void) => {
+      state.appUpdateUserActionFailedCallbacks.push(cb)
+      return () => {}
+    }),
+    installUpdate: state.installUpdate,
+    downloadUpdate: state.downloadUpdate,
     setFirstUseMode: vi.fn(),
     onFirstUseSkip: vi.fn((cb: () => void) => {
       state.firstUseSkipCallbacks.push(cb)
@@ -307,6 +320,9 @@ describe('PanelApp', () => {
     // useOverlay's slot is also a module-level singleton — clear it
     // so test order doesn't leak overlays between cases.
     useOverlay().current.value = null
+    mockModal.alert.mockReset()
+    mockModal.confirm.mockReset()
+    mockModal.close.mockReset()
     mockState = installMockApi({ installations: [SAMPLE_INSTALL] })
     // Default URL — individual tests override.
     window.history.replaceState({}, '', '/?installationId=test-id')
@@ -640,20 +656,103 @@ describe('PanelApp', () => {
     expect(detail.attributes('data-installation-id')).toBe('test-id')
   })
 
-  it('mounts the AppUpdatePopover when a panel-trigger-overlay app-update event arrives', async () => {
-    const wrapper = mountPanel()
+  it('shows the "Desktop Update Ready" confirm modal when a restart-prompt event arrives, and installs on confirm', async () => {
+    // Issue #488 — auto-on click on the 'ready' pill (or the auto
+    // restart-prompt that fires on user-initiated download
+    // completion) routes through `app-update-restart-prompt`. The
+    // panel renderer pops a confirm modal; clicking Restart calls
+    // `installUpdate()`.
+    mockModal.confirm.mockResolvedValueOnce(true)
+    mountPanel()
     await flushPromises()
-    expect(wrapper.find('[data-testid="app-update-popover"]').exists()).toBe(false)
 
-    mockState.panelTriggerOverlayCallbacks.forEach((cb) => cb({ kind: 'app-update' }))
+    mockState.panelTriggerOverlayCallbacks.forEach((cb) =>
+      cb({ kind: 'app-update-restart-prompt', version: '1.2.3' }),
+    )
     await flushPromises()
-    expect(wrapper.find('[data-testid="app-update-popover"]').exists()).toBe(true)
+
+    expect(mockModal.confirm).toHaveBeenCalledTimes(1)
+    expect(mockModal.confirm.mock.calls[0]?.[0]).toMatchObject({
+      title: 'appUpdate.readyTitle',
+      confirmLabel: 'appUpdate.restartNow',
+    })
+    expect(mockState.installUpdate).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not install when the restart-prompt confirm modal is cancelled', async () => {
+    mockModal.confirm.mockResolvedValueOnce(false)
+    mountPanel()
+    await flushPromises()
+
+    mockState.panelTriggerOverlayCallbacks.forEach((cb) =>
+      cb({ kind: 'app-update-restart-prompt', version: '1.2.3' }),
+    )
+    await flushPromises()
+
+    expect(mockModal.confirm).toHaveBeenCalledTimes(1)
+    expect(mockState.installUpdate).not.toHaveBeenCalled()
+  })
+
+  it('shows the "Desktop Update Available" confirm modal when a download-prompt event arrives, and downloads on confirm', async () => {
+    // Issue #488 — auto-off click on the 'available' pill routes
+    // through `app-update-download-prompt`. Clicking Download calls
+    // `downloadUpdate()`; the auto restart-prompt fires later (covered
+    // by `onAppUpdatePromptRestart`).
+    mockModal.confirm.mockResolvedValueOnce(true)
+    mountPanel()
+    await flushPromises()
+
+    mockState.panelTriggerOverlayCallbacks.forEach((cb) =>
+      cb({ kind: 'app-update-download-prompt', version: '1.2.3' }),
+    )
+    await flushPromises()
+
+    expect(mockModal.confirm).toHaveBeenCalledTimes(1)
+    expect(mockModal.confirm.mock.calls[0]?.[0]).toMatchObject({
+      title: 'appUpdate.availableTitle',
+      confirmLabel: 'appUpdate.download',
+    })
+    expect(mockState.downloadUpdate).toHaveBeenCalledTimes(1)
+  })
+
+  it('auto-shows the restart prompt when onAppUpdatePromptRestart fires (auto-off post-download)', async () => {
+    // Closes the loop on the auto-off "Download → wait → Restart"
+    // single-gesture flow described in issue #488.
+    mockModal.confirm.mockResolvedValueOnce(true)
+    mountPanel()
+    await flushPromises()
+
+    mockState.appUpdatePromptRestartCallbacks.forEach((cb) => cb({ version: '1.2.3' }))
+    await flushPromises()
+
+    expect(mockModal.confirm).toHaveBeenCalledTimes(1)
+    expect(mockModal.confirm.mock.calls[0]?.[0]).toMatchObject({
+      title: 'appUpdate.readyTitle',
+    })
+    expect(mockState.installUpdate).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows an alert modal when onAppUpdateUserActionFailed fires', async () => {
+    mountPanel()
+    await flushPromises()
+
+    mockState.appUpdateUserActionFailedCallbacks.forEach((cb) =>
+      cb({ message: 'network down' }),
+    )
+    await flushPromises()
+
+    expect(mockModal.alert).toHaveBeenCalledTimes(1)
+    expect(mockModal.alert.mock.calls[0]?.[0]).toMatchObject({
+      title: 'appUpdate.errorTitle',
+      message: 'network down',
+    })
   })
 
   it('mounts the DownloadsTrayPopover when a panel-trigger-overlay downloads event arrives (Track F)', async () => {
     // Track F — the title-bar downloads tray click routes through
     // `panel-trigger-overlay { kind: 'downloads' }`. PanelApp opens
-    // the popover at Tier 1 (same tier as AppUpdatePopover).
+    // the popover at Tier 1 (the legacy AppUpdatePopover that shared
+    // this tier was removed for issue #488; app updates are now modal).
     const wrapper = mountPanel()
     await flushPromises()
     expect(wrapper.find('[data-testid="downloads-tray-popover"]').exists()).toBe(false)

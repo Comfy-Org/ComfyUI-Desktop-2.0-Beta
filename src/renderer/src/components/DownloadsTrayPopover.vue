@@ -250,10 +250,8 @@ function dismiss(url: string): void {
   top: 12px;
   /* Anchored to the LEFT edge — the tray button sits in the
      `.title-left` cluster, so the popover hangs below it on the same
-     side. AppUpdatePopover anchors to the right; we deliberately
-     diverge so the two popovers don't collide if both somehow opened
-     (the overlay slot gates them mutually anyway, but spatial
-     separation keeps them readable across surfaces). */
+     side. (The legacy app-update popover anchored right; the modal
+     flow that replaced it for issue #488 no longer collides here.) */
   left: 12px;
   z-index: 1000;
   background: var(--surface);

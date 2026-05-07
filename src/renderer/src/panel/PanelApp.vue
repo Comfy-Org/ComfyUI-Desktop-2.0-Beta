@@ -13,8 +13,6 @@ import TrackModal from '../views/TrackModal.vue'
 import LoadSnapshotModal from '../views/LoadSnapshotModal.vue'
 import QuickInstallModal from '../views/QuickInstallModal.vue'
 import FirstUseTakeover from '../views/FirstUseTakeover.vue'
-import UpdateBanner from '../components/UpdateBanner.vue'
-import AppUpdatePopover from '../components/AppUpdatePopover.vue'
 import DownloadsTrayPopover from '../components/DownloadsTrayPopover.vue'
 import { useTheme } from '../composables/useTheme'
 import { useSessionStore } from '../stores/sessionStore'
@@ -24,6 +22,7 @@ import { useLauncherPrefs } from '../composables/useLauncherPrefs'
 import { useListAction } from '../composables/useListAction'
 import { useMigrateAction } from '../composables/useMigrateAction'
 import { useOverlay, type FlowComponent } from '../composables/useOverlay'
+import { useModal } from '../composables/useModal'
 import type { ActionResult, Installation, ShowProgressOpts } from '../types/ipc'
 
 /**
@@ -87,7 +86,7 @@ const PAGE_PANELS: ReadonlySet<PanelKey> = new Set([
   'install-settings',
 ])
 
-const { setLocaleMessage, locale } = useI18n()
+const { setLocaleMessage, locale, t } = useI18n()
 useTheme()
 
 const params = new URLSearchParams(window.location.search)
@@ -177,6 +176,13 @@ const launcherPrefs = useLauncherPrefs()
  */
 const { current: currentOverlay, openOverlay, closeOverlay } = useOverlay()
 
+/** Used by the title-bar app-update pill modals. The pill click is
+ *  routed by main on `panel-trigger-overlay`; the panel renderer pops
+ *  a confirm modal (via the global `useModal` singleton consumed by
+ *  the mounted `<ModalDialog />`) rather than a Tier 1 overlay so the
+ *  spec's "modal" wording maps to actual modal chrome. */
+const modal = useModal()
+
 // installationStore.fetchInstallations() is wired to onInstallationsChanged
 // inside the store itself, so the panel just needs to read from it.
 const installation = computed<Installation | null>(
@@ -189,6 +195,8 @@ let unsubSettings: (() => void) | null = null
 let unsubCloseRequest: (() => void) | null = null
 let unsubPanelTriggerOverlay: (() => void) | null = null
 let unsubFirstUseSkip: (() => void) | null = null
+let unsubAppUpdatePromptRestart: (() => void) | null = null
+let unsubAppUpdateUserActionFailed: (() => void) | null = null
 
 async function loadLocale(): Promise<void> {
   const messages = await window.api.getLocaleMessages()
@@ -798,6 +806,49 @@ function handleNavigateList(): void {
   }
 }
 
+/** Format a version into the parameterised modal-copy slot. Falls back
+ *  to "this update" when no version is known so the message reads
+ *  cleanly in the (rare) version-less event payload. */
+function versionLabel(version: string | null): string {
+  return version ? `v${version}` : t('appUpdate.fallbackVersion')
+}
+
+/**
+ * "Desktop Update Ready" confirm modal. Fired by the title-bar pill
+ * click when the cached state is `'ready'`, and automatically when an
+ * auto-off user-initiated download finishes. Confirm → install &
+ * relaunch (silent); cancel leaves the pill in place so the user can
+ * trigger this prompt again later.
+ */
+async function showAppUpdateRestartPrompt(version: string | null): Promise<void> {
+  const ok = await modal.confirm({
+    title: t('appUpdate.readyTitle'),
+    message: t('appUpdate.readyMessage', { version: versionLabel(version) }),
+    confirmLabel: t('appUpdate.restartNow'),
+    confirmStyle: 'primary',
+  })
+  if (!ok) return
+  await window.api.installUpdate()
+}
+
+/**
+ * "Desktop Update Available" confirm modal. Fired by the title-bar pill
+ * click when the cached state is `'available'` (only happens with
+ * auto-updates OFF — main suppresses 'available' under auto-on).
+ * Confirm → kick off the download; the auto restart-prompt fires on
+ * `update-downloaded` to close the loop.
+ */
+async function showAppUpdateDownloadPrompt(version: string | null): Promise<void> {
+  const ok = await modal.confirm({
+    title: t('appUpdate.availableTitle'),
+    message: t('appUpdate.availableMessage', { version: versionLabel(version) }),
+    confirmLabel: t('appUpdate.download'),
+    confirmStyle: 'primary',
+  })
+  if (!ok) return
+  await window.api.downloadUpdate()
+}
+
 onMounted(async () => {
   await loadLocale()
 
@@ -844,19 +895,25 @@ onMounted(async () => {
     })()
   })
 
-  // Phase 3 §18 — main forwards a title-bar status pill click here.
-  // The renderer routes each kind through `useOverlay.openOverlay`:
-  //   - `'app-update'` → Tier 1 popover (AppUpdatePopover) reading
-  //     state from the shared `useAppUpdateState` composable.
+  // Main forwards a title-bar status pill / tray click here. Each
+  // kind gets a different surface:
+  //   - `'app-update-restart-prompt'` / `'app-update-download-prompt'`
+  //     → `useModal.confirm` (issue #488). The "modal" wording in the
+  //     spec maps to actual modal chrome rather than a Tier 1 overlay.
   //   - `'install-update'` → Manage overlay (DetailModal) on the
   //     update tab, scoped to the carried `installationId`. The
   //     install-update pill is suppressed in main on install-less
   //     hosts but we re-validate the id here defensively (the
   //     subscription is the same in both host kinds).
+  //   - `'downloads'` → Tier 1 downloads-tray popover.
   unsubPanelTriggerOverlay = window.api.onPanelTriggerOverlay((payload) => {
     void (async () => {
-      if (payload.kind === 'app-update') {
-        await openOverlay({ kind: 'app-update' })
+      if (payload.kind === 'app-update-restart-prompt') {
+        await showAppUpdateRestartPrompt(payload.version ?? null)
+        return
+      }
+      if (payload.kind === 'app-update-download-prompt') {
+        await showAppUpdateDownloadPrompt(payload.version ?? null)
         return
       }
       if (payload.kind === 'install-update') {
@@ -872,13 +929,27 @@ onMounted(async () => {
         return
       }
       if (payload.kind === 'downloads') {
-        // Track F — title-bar downloads tray click. Mounts the
-        // DownloadsTrayPopover at Tier 1; the popover reads its
-        // data from the renderer's `downloadStore` so no extra
-        // payload is needed.
         await openOverlay({ kind: 'downloads' })
       }
     })()
+  })
+
+  // Auto-fire the restart prompt when an auto-off user-initiated
+  // download finishes — closes the loop on the single-gesture flow
+  // (Download → wait → Restart) without forcing the user to find the
+  // pill again.
+  unsubAppUpdatePromptRestart = window.api.onAppUpdatePromptRestart(({ version }) => {
+    void showAppUpdateRestartPrompt(version || null)
+  })
+
+  // Surface user-initiated update failures (download/install) as an
+  // alert. Background auto-on download errors stay silent (main
+  // doesn't broadcast them on this channel).
+  unsubAppUpdateUserActionFailed = window.api.onAppUpdateUserActionFailed(({ message }) => {
+    void modal.alert({
+      title: t('appUpdate.errorTitle'),
+      message,
+    })
   })
 
   // Modal-unification (Track M-2.2) — main forwards a file-menu Skip
@@ -927,6 +998,8 @@ onUnmounted(() => {
   unsubCloseRequest?.()
   unsubPanelTriggerOverlay?.()
   unsubFirstUseSkip?.()
+  unsubAppUpdatePromptRestart?.()
+  unsubAppUpdateUserActionFailed?.()
   pendingPickUnsub?.()
   sessionStore.dispose()
 })
@@ -934,15 +1007,6 @@ onUnmounted(() => {
 
 <template>
   <div class="panel-shell">
-    <!-- Update banner — listens to `update-available` / `update-error`
-         broadcasts from the updater module. Mirrored from the launcher
-         window's App.vue so the install pill caret's "Check for Updates"
-         entry has a place to surface its result inside the host window
-         (Phase 3: launcher window goes away). The banner is auto-hide
-         when no update info is present, so this row renders nothing in
-         the steady state. -->
-    <UpdateBanner />
-
     <main class="panel-content">
       <div v-if="activePanel === 'comfy-lifecycle'" class="panel-comfy-lifecycle">
         <ComfyLifecycleView
@@ -963,34 +1027,25 @@ onUnmounted(() => {
     </main>
 
     <!-- Host-level overlay slot (Phase 3 §17). One DOM node at a
-         time, owned by `useOverlay`. Mounts either the in-flight
-         progress modal (Tier 2 — non-app-ending ops) or one of the
-         Tier 3 takeovers (the four flow modals; Step 4 will add the
-         first-use takeover here too). The two branches are mutually
-         exclusive because `useOverlay` only ever holds one overlay
-         in `current.value`.
+         time, owned by `useOverlay`. Mounts either a Tier 1 popover,
+         the in-flight progress modal (Tier 2), or one of the Tier 3
+         takeovers (the four flow modals + the first-use takeover).
+         The branches are mutually exclusive because `useOverlay` only
+         ever holds one overlay in `current.value`.
 
-         Phase 3 §18 — Tier 1 slots `app-update` (popover sourced from
-         the title-bar app-update pill) and `manage` (DetailModal
-         routed from the title-bar install-update pill, opened on the
-         update tab) sit at the top of the v-if/v-else-if chain. Tier 1
-         loses to Tier 2/3 in `useOverlay`'s collision rules, so the
-         in-flight progress / takeover branches below pre-empt these
-         silently when they fire concurrently. -->
-    <AppUpdatePopover
-      v-if="currentOverlay?.kind === 'app-update'"
-      @close="dismissTakeoverDirect"
-    />
+         App-update is NOT in this chain — the title-bar app-update
+         pill click pops a `useModal.confirm` modal (issue #488) that
+         lives in the global ModalDialog mount below, not in the
+         overlay slot. -->
     <!-- Track F — Tier 1 downloads tray popover surfaced from the
          title-bar tray. Reads its data from the shared `downloadStore`
          (same source the legacy `DownloadsPanel` consumes) so the
-         tray and any other downloads surface never disagree. Click-
-         away dismissal is handled the same way as `AppUpdatePopover`:
-         `dismissTakeoverDirect` skips the cancel-prompt because
-         closing the popover only hides the overlay; downloads keep
-         running and the next broadcast repaints if the user reopens. -->
+         tray and any other downloads surface never disagree.
+         Click-away dismissal uses `dismissTakeoverDirect` — closing
+         the popover only hides the overlay; downloads keep running
+         and the next broadcast repaints if the user reopens. -->
     <DownloadsTrayPopover
-      v-else-if="currentOverlay?.kind === 'downloads'"
+      v-if="currentOverlay?.kind === 'downloads'"
       @close="dismissTakeoverDirect"
     />
     <!-- Tier 1 manage. ChooserView renders it inline when active so

@@ -7,6 +7,7 @@ import {
 import { updateTitleBarOverlay } from '../titleBarOverlay'
 import * as mainTelemetry from '../telemetry'
 import { detectFirstUseState } from '../firstUseDetection'
+import * as updater from '../updater'
 
 export function registerSettingsHandlers(): void {
   ipcMain.handle('get-settings-sections', () => {
@@ -131,6 +132,13 @@ export function registerSettingsHandlers(): void {
     if (key === 'telemetryEnabled') {
       _broadcastToRenderer('telemetry-setting-changed', value)
       mainTelemetry.setConsent(value !== false)
+    }
+    if (key === 'autoUpdate') {
+      // Re-broadcast the cached app-update state so a pending 'ready'
+      // immediately starts reading as auto-on / auto-off — drives the
+      // title-bar pill copy and the click-modal flow without waiting
+      // for the next update-check broadcast.
+      updater.notifyAutoUpdateChanged()
     }
     // Notify all renderers (including embedded panel views) so any open
     // settings UI can refresh and stay in sync. Cheap, fires on every
