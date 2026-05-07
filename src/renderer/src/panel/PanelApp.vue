@@ -442,14 +442,26 @@ function dismissTakeoverDirect(): void {
   if (currentOverlay.value?.kind === 'takeover' && currentOverlay.value.component === 'first-use') {
     window.api.setFirstUseMode('none')
   }
-  // Page / manage overlays come from a title-bar `setPanel` IPC that
-  // also flipped main's `entry.activePanel` away from `'comfy'`,
-  // hiding the live comfy WebContentsView. Closing the overlay only
-  // clears the renderer-side modal — without IPC'ing main back to
-  // `'comfy'` the comfy view stays hidden and the user perceives the
-  // running instance as "shut down". `closeCurrentPanel` resets
-  // entry.activePanel to `'comfy'` and re-runs layoutViews().
-  if (currentOverlay.value?.kind === 'page' || currentOverlay.value?.kind === 'manage') {
+  // Any overlay opened via `setActivePanel` in main (page / manage,
+  // and the four flow takeovers fired from the file menu) flipped
+  // `entry.activePanel` away from `'comfy'`. Closing the overlay only
+  // clears the renderer-side slot — without IPC'ing main back to
+  // `'comfy'` two things break:
+  //   - For page / manage: the live comfy WebContentsView stays
+  //     hidden and the user perceives the running instance as "shut
+  //     down".
+  //   - For flow takeovers (new-install / track / load-snapshot /
+  //     quick-install): `entry.activePanel` is stuck on the wizard
+  //     key, so re-picking the same item from the file menu hits
+  //     `setActivePanel`'s same-panel early-return and the modal
+  //     never reopens.
+  // `closeCurrentPanel` resets `entry.activePanel` to `'comfy'` and
+  // re-runs layoutViews(), keeping main and the renderer in sync.
+  const cur = currentOverlay.value
+  const isFlowTakeover =
+    cur?.kind === 'takeover' &&
+    (FLOW_PANELS as ReadonlySet<string>).has(cur.component)
+  if (cur?.kind === 'page' || cur?.kind === 'manage' || isFlowTakeover) {
     window.api.closeCurrentPanel()
   }
   currentOverlay.value = null
