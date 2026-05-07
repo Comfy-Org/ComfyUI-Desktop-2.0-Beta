@@ -98,11 +98,20 @@ function Write-Json {
 
 function Backup-File {
   param([string]$Path)
-  if (Test-Path $Path) {
-    $backup = "$Path.bak"
-    Copy-Item $Path $backup -Force
-    Write-Host "Backed up $([System.IO.Path]::GetFileName($Path)) to $([System.IO.Path]::GetFileName($backup))"
-  }
+  if (-not (Test-Path $Path)) { return }
+  # Timestamped backups so repeat runs never clobber the previous
+  # snapshot. The legacy single-slot `.bak` lost the original install
+  # metadata when this script was invoked twice in a row — the second
+  # run backed up the already-filtered file over the only copy of the
+  # real one. The plain `.bak` symlink/copy is kept too so quick
+  # "restore last" tooling still works, but only if it doesn't already
+  # exist (so the original is preserved across repeat invocations).
+  $stamp = (Get-Date).ToString("yyyyMMdd-HHmmss")
+  $stamped = "$Path.$stamp.bak"
+  Copy-Item $Path $stamped -Force
+  $legacy = "$Path.bak"
+  if (-not (Test-Path $legacy)) { Copy-Item $Path $legacy -Force }
+  Write-Host "Backed up $([System.IO.Path]::GetFileName($Path)) to $([System.IO.Path]::GetFileName($stamped))"
 }
 
 function Get-Installations {

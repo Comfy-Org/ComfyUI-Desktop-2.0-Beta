@@ -64,10 +64,22 @@ fi
 
 backup_file() {
   local path="$1"
-  if [[ -f "$path" ]]; then
+  [[ -f "$path" ]] || return 0
+  # Timestamped backups so repeat runs never clobber the previous
+  # snapshot. The legacy single-slot .bak lost the original install
+  # metadata when this script was invoked twice in a row — the second
+  # run backed up the already-filtered file over the only copy of the
+  # real one. The plain .bak is kept too so quick "restore last"
+  # tooling still works, but only if it doesn't already exist (so
+  # the original is preserved across repeat invocations).
+  local stamp
+  stamp="$(date -u +%Y%m%d-%H%M%S)"
+  local stamped="${path}.${stamp}.bak"
+  cp "$path" "$stamped"
+  if [[ ! -f "${path}.bak" ]]; then
     cp "$path" "${path}.bak"
-    echo "Backed up $(basename "$path") to $(basename "$path").bak"
   fi
+  echo "Backed up $(basename "$path") to $(basename "$stamped")"
 }
 
 set_first_use_completed() {
