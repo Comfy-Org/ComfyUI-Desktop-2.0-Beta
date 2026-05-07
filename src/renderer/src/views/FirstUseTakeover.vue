@@ -40,25 +40,8 @@ import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { ArrowRightLeft, Box, Cloud, Download } from 'lucide-vue-next'
 import TakeoverHeader from '../components/TakeoverHeader.vue'
 import ModalShell from '../components/ModalShell.vue'
+import InlineRichText from '../components/InlineRichText.vue'
 import { PRIVACY_POLICY } from '../lib/privacyPolicy'
-
-/** Tiny inline-bold renderer: splits on `**…**` so we can mix bold spans
- *  into paragraphs and bullets without pulling in a markdown lib for a
- *  single legal document. The policy text is the only caller; if other
- *  surfaces want this later, lift it into `lib/`. */
-function inlineSegments(text: string): { text: string; bold: boolean }[] {
-  const out: { text: string; bold: boolean }[] = []
-  const parts = text.split(/(\*\*[^*]+\*\*)/g)
-  for (const part of parts) {
-    if (!part) continue
-    if (part.startsWith('**') && part.endsWith('**')) {
-      out.push({ text: part.slice(2, -2), bold: true })
-    } else {
-      out.push({ text: part, bold: false })
-    }
-  }
-  return out
-}
 
 type Step = 'consent' | 'mirrors' | 'pick' | 'localBranch'
 
@@ -267,31 +250,25 @@ defineExpose({ open })
               role="region"
               :aria-label="$t('firstUse.privacyPolicyTitle')"
             >
-            <header class="first-use-policy-meta">
-              <h3 class="first-use-policy-title">{{ $t('firstUse.privacyPolicyTitle') }}</h3>
-              <div class="first-use-policy-dates">
-                <span><strong>{{ $t('firstUse.privacyPolicyEffective') }}:</strong> {{ policy.effectiveDate }}</span>
-                <span><strong>{{ $t('firstUse.privacyPolicyAppliesTo') }}:</strong> {{ policy.appliesTo }}</span>
-              </div>
-            </header>
-            <template v-for="(block, i) in policy.blocks" :key="i">
-              <h2 v-if="block.kind === 'h2'" class="first-use-policy-h2">{{ block.text }}</h2>
-              <h3 v-else-if="block.kind === 'h3'" class="first-use-policy-h3">{{ block.text }}</h3>
-              <p v-else-if="block.kind === 'p' && block.text" class="first-use-policy-p">
-                <template v-for="(seg, j) in inlineSegments(block.text)" :key="j">
-                  <strong v-if="seg.bold">{{ seg.text }}</strong>
-                  <template v-else>{{ seg.text }}</template>
-                </template>
-              </p>
-              <ul v-else-if="block.kind === 'ul' && block.items" class="first-use-policy-ul">
-                <li v-for="(item, k) in block.items" :key="k">
-                  <template v-for="(seg, j) in inlineSegments(item)" :key="j">
-                    <strong v-if="seg.bold">{{ seg.text }}</strong>
-                    <template v-else>{{ seg.text }}</template>
-                  </template>
-                </li>
-              </ul>
-            </template>
+              <header class="first-use-policy-meta">
+                <h3 class="first-use-policy-title">{{ $t('firstUse.privacyPolicyTitle') }}</h3>
+                <div class="first-use-policy-dates">
+                  <span><strong>{{ $t('firstUse.privacyPolicyEffective') }}:</strong> {{ policy.effectiveDate }}</span>
+                  <span><strong>{{ $t('firstUse.privacyPolicyAppliesTo') }}:</strong> {{ policy.appliesTo }}</span>
+                </div>
+              </header>
+              <template v-for="(block, i) in policy.blocks" :key="i">
+                <h2 v-if="block.kind === 'h2'" class="first-use-policy-h2">{{ block.text }}</h2>
+                <h3 v-else-if="block.kind === 'h3'" class="first-use-policy-h3">{{ block.text }}</h3>
+                <p v-else-if="block.kind === 'p' && block.text" class="first-use-policy-p">
+                  <InlineRichText :text="block.text" />
+                </p>
+                <ul v-else-if="block.kind === 'ul' && block.items" class="first-use-policy-ul">
+                  <li v-for="(item, k) in block.items" :key="k">
+                    <InlineRichText :text="item" />
+                  </li>
+                </ul>
+              </template>
             </div>
             <label class="first-use-toggle">
               <input v-model="telemetryEnabled" type="checkbox" />
