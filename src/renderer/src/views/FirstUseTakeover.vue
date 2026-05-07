@@ -44,9 +44,16 @@ import ModalShell from '../components/ModalShell.vue'
 type Step = 'consent' | 'mirrors' | 'pick' | 'localBranch'
 
 const emit = defineEmits<{
-  /** Cloud branch picked, or Local branch finished — host should flip
-   *  `firstUseCompleted` and close the takeover. */
-  complete: []
+  /** Cloud branch explicitly picked at the cloud-vs-local fork. Host
+   *  marks `firstUseCompleted`, closes the takeover, and auto-launches
+   *  the seeded Cloud install — the user asked for it. */
+  'complete-cloud': []
+  /** Returning user — `skipPick` was true so the cloud-vs-local fork
+   *  was suppressed entirely. Host marks `firstUseCompleted` and
+   *  closes the takeover, dropping the user on the chooser body where
+   *  they can pick whichever existing install they want. NO implicit
+   *  cloud launch — they didn't ask for it. */
+  'complete-skip': []
   /** Local branch picked — host should chain into the new-install
    *  Tier 3 takeover (Tier 3 → Tier 3 swap is silent) and mark
    *  `firstUseCompleted` once new-install ends successfully. */
@@ -90,11 +97,12 @@ async function acceptConsent(): Promise<void> {
   await window.api.setSetting('telemetryEnabled', telemetryEnabled.value)
   // skipPick suppresses the pick step entirely. China-mirror sub-step
   // still runs first when the locale calls for it, then the takeover
-  // emits `complete` instead of ever advancing to `pick`.
+  // emits `complete-skip` (returning user — no implicit cloud launch)
+  // instead of advancing to `pick`.
   if (isChinese.value) {
     step.value = 'mirrors'
   } else if (skipPick.value) {
-    emit('complete')
+    emit('complete-skip')
   } else {
     step.value = 'pick'
   }
@@ -110,14 +118,14 @@ async function chooseMirrors(useMirrors: boolean): Promise<void> {
     window.api.setSetting('chineseMirrorsPrompted', true),
   ])
   if (skipPick.value) {
-    emit('complete')
+    emit('complete-skip')
   } else {
     step.value = 'pick'
   }
 }
 
 function pickCloud(): void {
-  emit('complete')
+  emit('complete-cloud')
 }
 
 /** Local branch — when a Legacy Desktop install is on the machine
