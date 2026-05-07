@@ -16,14 +16,26 @@ import type { Installation } from '../types/ipc'
  *                   embedded DetailModal, Directories tab, Global
  *                   Settings tab). Replaces the legacy `manage` and
  *                   `page` kinds. Tier 1.
- *   - `app-update` — Title-bar app-update pill popover. Tier 1.
  *   - `downloads`  — Title-bar downloads tray popover. Tier 1.
  *   - `progress` — ProgressModal for a long-running action that does
  *                  NOT end in the running ComfyUI app (delete,
  *                  snapshot, copy, update-while-stopped). Tier 2.
  *   - `takeover` — Full-window takeover for actions that end in the
  *                  app (launch, install, update-then-restart,
- *                  first-use, app-update). Tier 3.
+ *                  first-use). Tier 3.
+ *
+ * Modal-unification — the legacy `'app-update'` Tier 1 overlay popover
+ * was retired in upstream's auto-updater pill+modal flow refactor.
+ * The title-bar app-update pill now drives a `useModal.confirm` modal
+ * (rendered by the global `<ModalDialog />` mount) directly from
+ * `PanelApp`'s `panel-trigger-overlay 'app-update'` handler, instead
+ * of going through this slot. The kind is gone from `OverlayKind` and
+ * the discriminated `Overlay` union to keep the type narrow to the
+ * surfaces this slot actually owns.
+ *
+ * App-update is NOT an overlay kind — the title-bar pill click pops a
+ * `useModal.confirm` modal rendered by the global `<ModalDialog />`
+ * mount, not by this slot.
  *
  * Modal-unification (Track M-7) — the legacy `'flow'` Tier 3 kind
  * was retired here. Pre-M-3 the four install-flow modals
@@ -56,7 +68,7 @@ import type { Installation } from '../types/ipc'
  * `Cancel "Updating ComfyUI"?`).
  */
 
-export type OverlayKind = 'settings' | 'app-update' | 'downloads' | 'progress' | 'takeover'
+export type OverlayKind = 'settings' | 'downloads' | 'progress' | 'takeover'
 
 /**
  * Unified Settings modal — ModalShell with a left-rail tab switcher
@@ -89,17 +101,6 @@ export interface SettingsOverlay {
   initialDetailTab?: string
   autoAction?: string | null
   noSidebar?: boolean
-}
-
-/**
- * Phase 3 §18 — Tier 1 popover surfaced from the title-bar app-update
- * pill. Reads its state (available / ready / version) from the shared
- * `useAppUpdateState` composable so the popover and `UpdateBanner`
- * never disagree. No additional payload — the composable owns the
- * data, the overlay just signals "render the popover".
- */
-export interface AppUpdateOverlay {
-  kind: 'app-update'
 }
 
 /**
@@ -191,14 +192,12 @@ export interface TakeoverOverlay {
 
 export type Overlay =
   | SettingsOverlay
-  | AppUpdateOverlay
   | DownloadsOverlay
   | ProgressOverlay
   | TakeoverOverlay
 
 const TIER: Record<OverlayKind, 1 | 2 | 3> = {
   settings: 1,
-  'app-update': 1,
   downloads: 1,
   progress: 2,
   takeover: 3,

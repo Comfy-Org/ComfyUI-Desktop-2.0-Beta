@@ -437,11 +437,11 @@ describe('TitleBarApp', () => {
     expect(wrapper.find('.title-update-pill.is-install-update').exists()).toBe(false)
   })
 
-  it('renders the app-update pill with "Update {version} available" copy when state.kind=available (auto-updates OFF)', async () => {
-    // Track B item 2 — `kind: 'available'` only fires with auto-updates
+  it('renders the app-update pill with "Desktop Update Available" copy when state.kind=available (auto-updates OFF)', async () => {
+    // Issue #488 — `kind: 'available'` only fires with auto-updates
     // OFF (main suppresses it when ON and triggers the download
-    // itself). The copy mirrors the "Update v{version} available"
-    // wording the design doc calls out.
+    // itself). The pill label is the bare "Desktop Update Available"
+    // string; version moves to the tooltip / aria-label.
     const { default: TitleBarApp } = await import('./TitleBarApp.vue')
     const wrapper = mount(TitleBarApp)
     await flushPromises()
@@ -452,14 +452,15 @@ describe('TitleBarApp', () => {
     const pill = wrapper.find('.title-update-pill.is-app-update')
     expect(pill.exists()).toBe(true)
     expect(pill.classes()).not.toContain('is-ready')
-    expect(pill.text()).toContain('Update 2.3.4 available')
+    expect(pill.text()).toContain('Desktop Update Available')
+    expect(pill.attributes('title')).toBe('Desktop Update Available (v2.3.4)')
+    expect(pill.attributes('aria-label')).toBe('Desktop Update Available (v2.3.4)')
   })
 
-  it('renders the app-update pill with "Restart to update" copy when state.kind=ready and auto-updates OFF', async () => {
-    // Track B item 2 — auto-updates OFF means the user explicitly
-    // clicked Download, so the existing "Restart to update" copy still
-    // reads correctly. (Auto-updates ON gets the "Update will apply on
-    // restart" variant — covered by the next test.)
+  it('renders the app-update pill with "Desktop Update Ready" copy when state.kind=ready (auto-updates OFF)', async () => {
+    // Issue #488 — both auto-on and auto-off ready states share the
+    // same "Desktop Update Ready" label; the click-modal flow is what
+    // differs (handled in main, not here).
     const { default: TitleBarApp } = await import('./TitleBarApp.vue')
     const wrapper = mount(TitleBarApp)
     await flushPromises()
@@ -470,13 +471,15 @@ describe('TitleBarApp', () => {
     const pill = wrapper.find('.title-update-pill.is-app-update')
     expect(pill.exists()).toBe(true)
     expect(pill.classes()).toContain('is-ready')
-    expect(pill.text()).toContain('Restart to update')
+    expect(pill.text()).toContain('Desktop Update Ready')
+    expect(pill.attributes('title')).toBe('Desktop Update Ready (v2.3.4)')
   })
 
-  it('renders the app-update pill with "Update will apply on restart" copy when state.kind=ready and auto-updates ON (Track B item 2)', async () => {
-    // Auto-updates ON downloads silently in the background, so the
-    // user's first sign of the update is a "ready to apply on restart"
-    // pill — different copy from the manual-download path.
+  it('renders the app-update pill with "Desktop Update Ready" copy when state.kind=ready (auto-updates ON)', async () => {
+    // Issue #488 — auto-on uses the same "Desktop Update Ready" copy.
+    // The click handler in main branches on cached state to fire the
+    // restart-now modal directly (no separate "will apply on restart"
+    // hint needed in the pill itself).
     const { default: TitleBarApp } = await import('./TitleBarApp.vue')
     const wrapper = mount(TitleBarApp)
     await flushPromises()
@@ -487,7 +490,7 @@ describe('TitleBarApp', () => {
     const pill = wrapper.find('.title-update-pill.is-app-update')
     expect(pill.exists()).toBe(true)
     expect(pill.classes()).toContain('is-ready')
-    expect(pill.text()).toContain('Update will apply on restart')
+    expect(pill.text()).toContain('Desktop Update Ready')
   })
 
   it('renders the install-update pill on install-backed hosts when onInstallUpdateAvailable=true', async () => {

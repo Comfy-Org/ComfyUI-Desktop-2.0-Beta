@@ -322,6 +322,7 @@
     "closeQuitOperations": "In Progress",
     "closeQuitDownloads": "Downloading",
     "autoUpdate": "Check for updates on startup",
+    "autoInstallUpdates": "Automatically install Desktop updates",
     "checkForUpdates": "Check for updates",
     "checkingForUpdates": "Checking…",
     "telemetry": "Telemetry",
@@ -352,21 +353,21 @@
   },
 
   "update": {
-    "available": "Desktop 2.0 update available: **v{version}**",
-    "download": "Download",
-    "dismiss": "Dismiss",
-    "downloading": "Downloading Desktop 2.0 update… {progress}",
-    "ready": "Desktop 2.0 update **v{version}** ready to install",
-    "restartUpdate": "Restart & Update",
-    "later": "Later",
-    "checkFailed": "Update check failed",
-    "details": "Details",
-    "retry": "Retry",
     "updateCheck": "Update Check",
     "updateError": "Update Error",
     "upToDate": "You are running the latest version of ComfyUI Desktop 2.0.",
-    "debAvailable": "Desktop 2.0 update **v{version}** is available. Run `sudo apt update && sudo apt upgrade` to update, or download the new .deb from the releases page.",
     "debUpToDate": "You are running the latest version. Updates for .deb installs are delivered through your system package manager (apt)."
+  },
+
+  "appUpdate": {
+    "fallbackVersion": "this update",
+    "readyTitle": "Desktop Update Ready",
+    "readyMessage": "A Desktop update ({version}) has been downloaded. Restart now to apply it?",
+    "restartNow": "Restart & Update",
+    "availableTitle": "Desktop Update Available",
+    "availableMessage": "A Desktop update ({version}) is available. Download it now? You will be asked to restart once the download finishes.",
+    "download": "Download",
+    "errorTitle": "Desktop Update Error"
   },
 
   "modal": {
