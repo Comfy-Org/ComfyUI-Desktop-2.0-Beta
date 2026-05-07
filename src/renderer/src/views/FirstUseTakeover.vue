@@ -258,14 +258,15 @@ defineExpose({ open })
              for the policy text lives in `lib/privacyPolicy.ts`, which
              mirrors the canonical Notion document. -->
         <template v-if="step === 'consent'">
-          <p class="first-use-lead">{{ $t('firstUse.consentLead') }}</p>
-          <div
-            class="first-use-policy"
-            data-testid="first-use-privacy-policy"
-            tabindex="0"
-            role="region"
-            :aria-label="$t('firstUse.privacyPolicyTitle')"
-          >
+          <div class="first-use-consent">
+            <p class="first-use-lead">{{ $t('firstUse.consentLead') }}</p>
+            <div
+              class="first-use-policy"
+              data-testid="first-use-privacy-policy"
+              tabindex="0"
+              role="region"
+              :aria-label="$t('firstUse.privacyPolicyTitle')"
+            >
             <header class="first-use-policy-meta">
               <h3 class="first-use-policy-title">{{ $t('firstUse.privacyPolicyTitle') }}</h3>
               <div class="first-use-policy-dates">
@@ -291,12 +292,13 @@ defineExpose({ open })
                 </li>
               </ul>
             </template>
+            </div>
+            <label class="first-use-toggle">
+              <input v-model="telemetryEnabled" type="checkbox" />
+              <span>{{ $t('settings.telemetryEnabled') }}</span>
+            </label>
+            <p class="first-use-hint">{{ $t('firstUse.telemetryHint') }}</p>
           </div>
-          <label class="first-use-toggle">
-            <input v-model="telemetryEnabled" type="checkbox" />
-            <span>{{ $t('settings.telemetryEnabled') }}</span>
-          </label>
-          <p class="first-use-hint">{{ $t('firstUse.telemetryHint') }}</p>
         </template>
 
         <!-- Step 2: China mirror prompt (only when locale starts with 'zh') -->
@@ -440,20 +442,33 @@ defineExpose({ open })
   margin-bottom: 12px;
 }
 
+/* Consent-step layout: flex column that fills the parent `view-scroll`
+ * so the privacy-policy reading box can grow to fill the available
+ * height instead of leaving a wonky empty band below the toggle.
+ * Lead/toggle/hint are fixed-height; only the policy box scrolls. */
+.first-use-consent {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
 /* Inline privacy policy reading box. Sits inside the consent step
- * directly above the telemetry checkbox so the user can scroll the
- * full policy without leaving the app. Uses the recessed-list pattern
- * (DESIGN.md): surface background to lift it off the modal `--bg`,
- * fixed max-height with overflow-auto, focusable so keyboard users can
- * page through it. Body text remains user-selectable so the policy can
- * be copied. */
+ * directly above the telemetry checkbox so the user can read what
+ * they're agreeing to without leaving the app. Uses the recessed-list
+ * pattern (DESIGN.md): surface background to lift it off the modal
+ * `--bg`, focusable for keyboard navigation. Body text stays
+ * user-selectable so the policy can be copied. The box flex-grows to
+ * fill remaining vertical space inside `.first-use-consent` and
+ * scrolls internally. */
 .first-use-policy {
+  flex: 1 1 auto;
+  min-height: 200px;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 16px 20px;
   margin-bottom: 16px;
-  max-height: 280px;
   overflow-y: auto;
   user-select: text;
   font-size: 13px;
