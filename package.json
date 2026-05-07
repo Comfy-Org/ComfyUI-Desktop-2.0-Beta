@@ -38,6 +38,7 @@
     "build:linux": "pnpm run build && electron-builder --linux",
     "bootstrap": "node scripts/build-bootstrap-python.mjs",
     "bootstrap:fetch": "node scripts/fetch-bootstrap-python.mjs",
+    "sandbox:gen": "node scripts/generate-sandbox.mjs",
     "datadog:sourcemaps:upload": "node ./scripts/upload-datadog-sourcemaps.mjs",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
