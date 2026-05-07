@@ -2495,23 +2495,36 @@ ipcMain.on('comfy-window:click-app-update-pill', (event) => {
  * install-less hosts (the pill is suppressed there but a defensive
  * guard keeps stray IPC from triggering anything).
  *
- * The handler does two things, in order:
+ * The handler does three things, in order:
  *   1. `setActivePanel(found.id, 'settings')` — bring the panel view
  *      forward when the user is currently on the ComfyUI view (the
  *      common case for this pill since it's only visible while an
  *      install is running). Without this, the unified Settings modal
  *      mounts on a hidden panel surface and the click appears to do
- *      nothing. `setActivePanel` is a no-op when the entry is already
- *      on `'settings'` (i.e. the modal is already open), so we don't
- *      double-open it.
- *   2. `panel-trigger-overlay` with the installationId so the renderer
- *      can re-open the Manage overlay deep-linked to the Update sub-
- *      tab — same surface the chooser kebab "Update…" entry routes to.
- *      The renderer's existing `initialTab` / `initialDetailTab`
- *      watchers (added in the unified-settings-modal branch) snap the
- *      sidebar back to "ComfyUI Settings" and the inner DetailModal to
- *      the Update sub-tab even when the modal was already mounted on a
- *      different tab.
+ *      nothing. `setActivePanel` also lazily creates the panelView
+ *      on first non-comfy switch via `ensurePanelView`. It's a no-op
+ *      when the entry is already on `'settings'` (i.e. the modal is
+ *      already open), so we don't double-open it.
+ *   2. Resolve the entry's `panelView` AFTER `setActivePanel` so we
+ *      pick up any view that step 1 may have just constructed.
+ *   3. `panel-trigger-overlay` with the installationId so the renderer
+ *      can open the unified Settings modal deep-linked to the ComfyUI
+ *      Settings tab → Update sub-tab — same surface the chooser kebab
+ *      "Update…" entry routes to.
+ *
+ * Step 3 must be deferred until the panelView's renderer has finished
+ * loading. When the panel was just constructed by step 1, its preload
+ * + Vue app haven't mounted yet, so a synchronous `send()` would land
+ * before `unsubPanelTriggerOverlay = window.api.onPanelTriggerOverlay
+ * (...)` ran in `onMounted`, and the IPC would be silently dropped.
+ * `did-finish-load` fires once the JS bundle has executed (which is
+ * what Vue's `mount()` + `onMounted` ride on), so registering a
+ * `once('did-finish-load', sendDeepLink)` is a reliable trigger.
+ *
+ * The renderer's existing `initialTab` / `initialDetailTab` watchers
+ * (added in the unified-settings-modal branch) cover the
+ * already-mounted-but-on-a-different-tab case — they snap the sidebar
+ * back to "ComfyUI Settings" and the inner DetailModal to Update.
  */
 ipcMain.on('comfy-window:click-install-update-pill', (event) => {
   const found = findEntryByTitleBarSender(event.sender)
@@ -2519,13 +2532,21 @@ ipcMain.on('comfy-window:click-install-update-pill', (event) => {
   const { entry } = found
   const installationId = entry.installationId
   if (!installationId) return
+  setActivePanel(found.id, 'settings')
   const panelView = entry.panelView
   if (!panelView || panelView.webContents.isDestroyed()) return
-  setActivePanel(found.id, 'settings')
-  panelView.webContents.send('panel-trigger-overlay', {
-    kind: 'install-update',
-    installationId,
-  })
+  const sendDeepLink = (): void => {
+    if (panelView.webContents.isDestroyed()) return
+    panelView.webContents.send('panel-trigger-overlay', {
+      kind: 'install-update',
+      installationId,
+    })
+  }
+  if (panelView.webContents.isLoadingMainFrame()) {
+    panelView.webContents.once('did-finish-load', sendDeepLink)
+  } else {
+    sendDeepLink()
+  }
 })
 
 /**
