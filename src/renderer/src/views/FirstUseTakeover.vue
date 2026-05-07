@@ -40,6 +40,25 @@ import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { ArrowRightLeft, Box, Cloud, Download } from 'lucide-vue-next'
 import TakeoverHeader from '../components/TakeoverHeader.vue'
 import ModalShell from '../components/ModalShell.vue'
+import { PRIVACY_POLICY } from '../lib/privacyPolicy'
+
+/** Tiny inline-bold renderer: splits on `**…**` so we can mix bold spans
+ *  into paragraphs and bullets without pulling in a markdown lib for a
+ *  single legal document. The policy text is the only caller; if other
+ *  surfaces want this later, lift it into `lib/`. */
+function inlineSegments(text: string): { text: string; bold: boolean }[] {
+  const out: { text: string; bold: boolean }[] = []
+  const parts = text.split(/(\*\*[^*]+\*\*)/g)
+  for (const part of parts) {
+    if (!part) continue
+    if (part.startsWith('**') && part.endsWith('**')) {
+      out.push({ text: part.slice(2, -2), bold: true })
+    } else {
+      out.push({ text: part, bold: false })
+    }
+  }
+  return out
+}
 
 type Step = 'consent' | 'mirrors' | 'pick' | 'localBranch'
 
@@ -88,6 +107,8 @@ const skipPick = ref(false)
 const hasLegacyDesktop = ref(false)
 
 const isChinese = computed(() => locale.value.startsWith('zh'))
+
+const policy = PRIVACY_POLICY
 
 /** Step 1 → next: telemetry persists immediately so a mid-flow cancel
  *  still respects the user's choice (the `firstUseCompleted` gate is
@@ -230,12 +251,47 @@ defineExpose({ open })
       />
     </template>
       <div class="view-scroll">
-        <!-- Step 1: T&C + telemetry consent -->
+        <!-- Step 1: T&C + telemetry consent.
+             The full Privacy Policy is embedded inline as a scrollable
+             reading box so the user can read what they're agreeing to
+             without leaving the app or chasing a link. Source of truth
+             for the policy text lives in `lib/privacyPolicy.ts`, which
+             mirrors the canonical Notion document. -->
         <template v-if="step === 'consent'">
           <p class="first-use-lead">{{ $t('firstUse.consentLead') }}</p>
-          <p class="first-use-tos">
-            {{ $t('firstUse.tosBody') }}
-          </p>
+          <div
+            class="first-use-policy"
+            data-testid="first-use-privacy-policy"
+            tabindex="0"
+            role="region"
+            :aria-label="$t('firstUse.privacyPolicyTitle')"
+          >
+            <header class="first-use-policy-meta">
+              <h3 class="first-use-policy-title">{{ $t('firstUse.privacyPolicyTitle') }}</h3>
+              <div class="first-use-policy-dates">
+                <span><strong>{{ $t('firstUse.privacyPolicyEffective') }}:</strong> {{ policy.effectiveDate }}</span>
+                <span><strong>{{ $t('firstUse.privacyPolicyAppliesTo') }}:</strong> {{ policy.appliesTo }}</span>
+              </div>
+            </header>
+            <template v-for="(block, i) in policy.blocks" :key="i">
+              <h2 v-if="block.kind === 'h2'" class="first-use-policy-h2">{{ block.text }}</h2>
+              <h3 v-else-if="block.kind === 'h3'" class="first-use-policy-h3">{{ block.text }}</h3>
+              <p v-else-if="block.kind === 'p' && block.text" class="first-use-policy-p">
+                <template v-for="(seg, j) in inlineSegments(block.text)" :key="j">
+                  <strong v-if="seg.bold">{{ seg.text }}</strong>
+                  <template v-else>{{ seg.text }}</template>
+                </template>
+              </p>
+              <ul v-else-if="block.kind === 'ul' && block.items" class="first-use-policy-ul">
+                <li v-for="(item, k) in block.items" :key="k">
+                  <template v-for="(seg, j) in inlineSegments(item)" :key="j">
+                    <strong v-if="seg.bold">{{ seg.text }}</strong>
+                    <template v-else>{{ seg.text }}</template>
+                  </template>
+                </li>
+              </ul>
+            </template>
+          </div>
           <label class="first-use-toggle">
             <input v-model="telemetryEnabled" type="checkbox" />
             <span>{{ $t('settings.telemetryEnabled') }}</span>
@@ -384,12 +440,85 @@ defineExpose({ open })
   margin-bottom: 12px;
 }
 
-.first-use-tos {
+/* Inline privacy policy reading box. Sits inside the consent step
+ * directly above the telemetry checkbox so the user can scroll the
+ * full policy without leaving the app. Uses the recessed-list pattern
+ * (DESIGN.md): surface background to lift it off the modal `--bg`,
+ * fixed max-height with overflow-auto, focusable so keyboard users can
+ * page through it. Body text remains user-selectable so the policy can
+ * be copied. */
+.first-use-policy {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 16px 20px;
+  margin-bottom: 16px;
+  max-height: 280px;
+  overflow-y: auto;
+  user-select: text;
   font-size: 13px;
   line-height: 1.6;
+  color: var(--text);
+}
+
+.first-use-policy:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.first-use-policy-meta {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 10px;
+  margin-bottom: 12px;
+}
+
+.first-use-policy-title {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0 0 6px 0;
+  color: var(--text);
+}
+
+.first-use-policy-dates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  font-size: 12px;
   color: var(--text-muted);
-  margin-bottom: 20px;
-  white-space: pre-wrap;
+}
+
+.first-use-policy-h2 {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 16px 0 6px 0;
+  color: var(--text);
+}
+
+.first-use-policy-h3 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 12px 0 4px 0;
+  color: var(--text);
+}
+
+.first-use-policy-p {
+  margin: 0 0 8px 0;
+  color: var(--text-muted);
+}
+
+.first-use-policy-ul {
+  margin: 0 0 8px 0;
+  padding-left: 20px;
+  color: var(--text-muted);
+}
+
+.first-use-policy-ul li {
+  margin-bottom: 4px;
+}
+
+.first-use-policy strong {
+  color: var(--text);
+  font-weight: 600;
 }
 
 .first-use-step-title {
