@@ -2640,6 +2640,34 @@ ipcMain.on('comfy-window:click-downloads-tray', (event) => {
 })
 
 /**
+ * Forward a Send Feedback request to the host's panel renderer.
+ * Panel-side (`PanelApp.vue`) fires the `desktop2.feedback.opened`
+ * telemetry action and opens the typeform support URL via
+ * `openExternal`. The renderer is the natural home because
+ * `buildSupportUrl()` reads `navigator.userAgent` and the telemetry
+ * helpers live renderer-side. Used by both the file-menu "Send
+ * Feedback" entry and the title-bar feedback button.
+ *
+ * `source` is forwarded into the renderer's telemetry context as
+ * `desktop2.feedback.opened` `{ source }` so we can tell which
+ * affordance the user reached for.
+ */
+function triggerOpenFeedback(entryId: number, source: 'titlebar' | 'menu'): void {
+  const parentEntry = comfyWindows.get(entryId)
+  if (!parentEntry?.panelView) return
+  if (parentEntry.panelView.webContents.isDestroyed()) return
+  parentEntry.panelView.webContents.send('comfy-panel:open-feedback', { source })
+}
+
+/** Title-bar Send Feedback button click. Resolves the host entry from
+ *  the title-bar sender, then routes through `triggerOpenFeedback`. */
+ipcMain.on('comfy-window:click-feedback', (event) => {
+  const found = findEntryByTitleBarSender(event.sender)
+  if (!found) return
+  triggerOpenFeedback(found.entry.windowKey, 'titlebar')
+})
+
+/**
  * File menu → New Window (Phase 3 title bar v2). Always opens a fresh
  * install-less chooser host window — does NOT focus an existing one
  * (that's the tray-entry behaviour). The user explicitly asked for a
@@ -2825,6 +2853,8 @@ function buildTitleMenuItems(kind: 'file' | 'install', entry: ComfyWindowEntry):
     items.push(
       { id: 'directories', label: 'Directories', checked: entry.activePanel === 'directories' },
       { id: 'launcher-settings', label: 'App Settings' },
+      { kind: 'separator' },
+      { id: 'feedback', label: 'Send Feedback' },
     )
     return items
   }
@@ -3104,6 +3134,13 @@ function activateTitleMenuItem(entry: TitleMenuPopupEntry, id: string): void {
       if (parentEntry?.panelView && !parentEntry.panelView.webContents.isDestroyed()) {
         parentEntry.panelView.webContents.send('comfy-panel:first-use-skip')
       }
+    }
+    else if (id === 'feedback') {
+      // Forward to the panel renderer — see `triggerOpenFeedback`.
+      // The title-bar Send Feedback button lands on the same helper
+      // via `comfy-window:click-feedback`; `source` distinguishes the
+      // two entry points in the telemetry payload.
+      triggerOpenFeedback(entry.parentEntryId, 'menu')
     }
     else if (id === 'new-install' || id === 'track' || id === 'load-snapshot' || id === 'quick-install') {
       // Track B item 3 — install-creation / import flows are

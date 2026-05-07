@@ -191,8 +191,15 @@ interface MockApiState {
    *  waffle popup; tests can simulate the click by invoking each
    *  callback. */
   firstUseSkipCallbacks: (() => void)[]
+  /** Feedback callbacks. Main fires this when the user clicks the
+   *  title-bar Send Feedback button or the file-menu "Send Feedback"
+   *  entry; tests can simulate the click by invoking each callback
+   *  with the originating `source`. */
+  openFeedbackCallbacks: ((data: { source: 'titlebar' | 'menu' }) => void)[]
   installations: InstallationLike[]
   getInstallations: ReturnType<typeof vi.fn>
+  openExternal: ReturnType<typeof vi.fn>
+  getAppVersion: ReturnType<typeof vi.fn>
   /** Per-key getSetting values. Tests that need first-use takeover to
    *  auto-mount can flip `firstUseCompleted` to false here. Default is
    *  `true` so existing tests don't trip the takeover. */
@@ -209,8 +216,11 @@ function installMockApi(initial?: {
     panelTriggerOverlayCallbacks: [],
     installationsChangedCallbacks: [],
     firstUseSkipCallbacks: [],
+    openFeedbackCallbacks: [],
     installations,
     getInstallations: vi.fn(async () => state.installations),
+    openExternal: vi.fn(async () => {}),
+    getAppVersion: vi.fn(async () => '0.5.0'),
     settings: { firstUseCompleted: true, ...initial?.settings },
   }
   const api = {
@@ -237,6 +247,12 @@ function installMockApi(initial?: {
       state.firstUseSkipCallbacks.push(cb)
       return () => {}
     }),
+    onOpenFeedback: vi.fn((cb: (data: { source: 'titlebar' | 'menu' }) => void) => {
+      state.openFeedbackCallbacks.push(cb)
+      return () => {}
+    }),
+    openExternal: state.openExternal,
+    getAppVersion: state.getAppVersion,
     onSettingsChanged: vi.fn(() => () => {}),
     // Step 5 §16 — main consults the panel renderer before tearing
     // down the host window. PanelApp subscribes on mount; the test
@@ -598,6 +614,49 @@ describe('PanelApp', () => {
     expect(wrapper.find('[data-testid="first-use-takeover"]').exists()).toBe(false)
     // Chooser body underneath remains mounted, same as Cloud-pick.
     expect(wrapper.find('[data-testid="chooser-view"]').exists()).toBe(true)
+  })
+
+  it('emits desktop2.feedback.opened with the originating source and opens the support URL', async () => {
+    // Both the title-bar feedback button and the file-menu "Send
+    // Feedback" entry route through main's `comfy-panel:open-feedback`
+    // IPC. The panel renderer is the natural home for the click side-
+    // effects because `buildSupportUrl()` reads `navigator.userAgent`
+    // and the telemetry helper lives renderer-side. Verify the listener
+    // (a) emits the legacy-parity telemetry action with `source` baked
+    // into the context so we can tell the two affordances apart, and
+    // (b) opens the typeform URL with the cached app version in `ver`.
+    mountPanel()
+    await flushPromises()
+
+    interface TelemetryEvent {
+      actionName: string
+      context?: { source?: string }
+    }
+    const telemetryEvents: TelemetryEvent[] = []
+    const listener = (e: Event): void => {
+      telemetryEvents.push((e as CustomEvent<TelemetryEvent>).detail)
+    }
+    window.addEventListener('launcher-telemetry-action', listener)
+
+    expect(mockState.openFeedbackCallbacks.length).toBeGreaterThan(0)
+    // Title-bar button click.
+    mockState.openFeedbackCallbacks.forEach((cb) => cb({ source: 'titlebar' }))
+    await flushPromises()
+    // File-menu entry click.
+    mockState.openFeedbackCallbacks.forEach((cb) => cb({ source: 'menu' }))
+    await flushPromises()
+
+    window.removeEventListener('launcher-telemetry-action', listener)
+
+    const feedbackTelemetry = telemetryEvents.filter(
+      (e) => e.actionName === 'desktop2.feedback.opened',
+    )
+    expect(feedbackTelemetry.map((e) => e.context?.source)).toEqual(['titlebar', 'menu'])
+    expect(mockState.openExternal).toHaveBeenCalledTimes(2)
+    const url = (mockState.openExternal.mock.calls[0]?.[0] ?? '') as string
+    expect(url).toContain('form.typeform.com/to/VhOXmuaL')
+    expect(url).toContain('ver=0.5.0')
+    expect(url).toMatch(/[?&]platform=/)
   })
 
   // Post-Phase-3 polish: the first-use takeover dropped its in-app
