@@ -2731,7 +2731,7 @@ function buildTitleMenuItems(entry: ComfyWindowEntry): TitleMenuItem[] {
   if (entry.installationId === null) {
     items.push(
       { id: 'new-install', label: 'New Install' },
-      { id: 'track', label: 'Track Existing Install' },
+      { id: 'track', label: 'Add Existing Install' },
       { id: 'load-snapshot', label: 'Load Snapshot' },
       { kind: 'separator' },
     )
