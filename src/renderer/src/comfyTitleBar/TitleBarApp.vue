@@ -3,8 +3,6 @@ import { ref, onMounted, onUnmounted, computed, useTemplateRef } from 'vue'
 import {
   ArrowDownToLine,
   ChevronDown,
-  ChevronLeft,
-  ChevronRight,
   Download,
   Menu as MenuIcon,
   MessageSquarePlus,
@@ -64,10 +62,7 @@ interface Bridge {
   openFileMenu: (anchor: MenuAnchor) => void
   /** Pop the Install caret menu natively. No-op for install-less host windows. */
   openInstallMenu: (anchor: MenuAnchor) => void
-  goBack: () => void
-  goForward: () => void
   onPanelChanged: (cb: (panel: ComfyPanelKey) => void) => () => void
-  onNavStateChanged: (cb: (state: { canBack: boolean; canForward: boolean }) => void) => () => void
   onTitleChanged: (cb: (title: string) => void) => () => void
   /** Track B item 4 — install source-category pushes from main. The
    *  raw category string drives the install-type icon next to the
@@ -175,10 +170,6 @@ const isHoverActive = ref(true)
  *  Directories). The pill itself no longer reflects this — the pill is
  *  an identity label, not a tab indicator. */
 const activePanel = ref<ComfyPanelKey>('comfy')
-/** Browser-style Back/Forward enabledness, pushed by main after every
- *  navigation. Disabled-by-default until the first nav-state event. */
-const canBack = ref(false)
-const canForward = ref(false)
 /**
  * Modal-unification (Track M-2.3 / M-4) — first-use takeover step
  * pushed from main via `comfy-titlebar:first-use-mode-changed`. The
@@ -426,14 +417,6 @@ function handleFileMenu(): void {
   if (Date.now() - menuClosedAt.file < MENU_REOPEN_GUARD_MS) return
   bridge?.openFileMenu(anchorBelow(fileBtnRef.value))
 }
-function handleBack(): void {
-  if (!canBack.value) return
-  bridge?.goBack()
-}
-function handleForward(): void {
-  if (!canForward.value) return
-  bridge?.goForward()
-}
 /** Single click target for the install pill. On install-backed windows
  *  the whole pill opens the native install menu (Phase 3 §7 — the pill
  *  body and caret are no longer separate hit targets). Install-less
@@ -446,7 +429,6 @@ function handleInstallPillClick(): void {
 }
 
 let unsubPanel: (() => void) | undefined
-let unsubNavState: (() => void) | undefined
 let unsubTitle: (() => void) | undefined
 let unsubSourceCategory: (() => void) | undefined
 let unsubTheme: (() => void) | undefined
@@ -482,10 +464,6 @@ onMounted(() => {
   if (!bridge) return
   unsubPanel = bridge.onPanelChanged((panel) => {
     activePanel.value = panel
-  })
-  unsubNavState = bridge.onNavStateChanged(({ canBack: cb, canForward: cf }) => {
-    canBack.value = cb
-    canForward.value = cf
   })
   unsubTitle = bridge.onTitleChanged((title) => {
     installLabel.value = title || 'ComfyUI'
@@ -527,7 +505,6 @@ onMounted(() => {
 
 onUnmounted(() => {
   unsubPanel?.()
-  unsubNavState?.()
   unsubTitle?.()
   unsubSourceCategory?.()
   unsubTheme?.()
@@ -646,32 +623,11 @@ onUnmounted(() => {
       </button>
     </div>
 
-    <!-- Center: browser-style Back / Forward arrows immediately left of
-         the install pill. The pill is a single click target — clicking
-         anywhere on it opens the native install menu. The caret inside
-         is decoration, not a separate button. Install-less host windows
+    <!-- Center: install pill. Single click target — clicking anywhere
+         on it opens the native install menu. The caret inside is
+         decoration, not a separate button. Install-less host windows
          render the pill as a disabled identity label (no menu, no caret). -->
     <div class="title-center">
-      <button
-        type="button"
-        class="title-nav-button"
-        :disabled="!canBack"
-        aria-label="Back"
-        title="Back"
-        @click="handleBack"
-      >
-        <ChevronLeft :size="16" />
-      </button>
-      <button
-        type="button"
-        class="title-nav-button"
-        :disabled="!canForward"
-        aria-label="Forward"
-        title="Forward"
-        @click="handleForward"
-      >
-        <ChevronRight :size="16" />
-      </button>
       <button
         ref="pillBtn"
         type="button"
@@ -822,8 +778,7 @@ onUnmounted(() => {
   border-color: rgba(0, 0, 0, 0.18);
 }
 
-/* Icon-only variant — square padding so the hamburger sits centred
-   with the same outer height as the back/forward arrows. */
+/* Icon-only variant — square padding so the hamburger sits centred. */
 .title-menu-button--icon {
   padding: 4px 6px;
   gap: 0;
@@ -835,34 +790,6 @@ onUnmounted(() => {
    (on top of the 2px container gap) reads as "different group". */
 .title-feedback-button {
   margin-left: 10px;
-}
-
-/* --- Back / Forward arrows (browser-style nav) --- */
-.title-nav-button {
-  -webkit-app-region: no-drag;
-  background: transparent;
-  color: inherit;
-  border: 1px solid transparent;
-  border-radius: 4px;
-  padding: 2px 6px;
-  cursor: pointer;
-  opacity: 0.85;
-  display: inline-flex;
-  align-items: center;
-  transition: background-color 0.12s, opacity 0.12s, border-color 0.12s;
-}
-.title-bar.is-hover-active .title-nav-button:not(:disabled):hover {
-  opacity: 1;
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.18);
-}
-.title-bar.is-light.is-hover-active .title-nav-button:not(:disabled):hover {
-  background: rgba(0, 0, 0, 0.06);
-  border-color: rgba(0, 0, 0, 0.18);
-}
-.title-nav-button:disabled {
-  opacity: 0.3;
-  cursor: default;
 }
 
 /* --- Install pill (center) — single click target. The whole pill

@@ -61,16 +61,8 @@ export interface ComfyTitleBarBridge {
   /** Pop the Install caret menu as a native OS menu. No-op for
    *  install-less host windows (main filters by sender's entry). */
   openInstallMenu(anchor: TitleMenuAnchor): void
-  /** Browser-style Back arrow — step one entry backward in the host
-   *  window's panel-history stack. No-op when at the root. */
-  goBack(): void
-  /** Browser-style Forward arrow — step one entry forward in history.
-   *  No-op when there's nothing to redo (i.e. user hasn't pressed Back). */
-  goForward(): void
   /** Subscribe to panel-active changes coming from main. */
   onPanelChanged(cb: (panel: ComfyPanelKey) => void): () => void
-  /** Subscribe to navigation-state changes (Back/Forward enabledness). */
-  onNavStateChanged(cb: (state: { canBack: boolean; canForward: boolean }) => void): () => void
   /** Subscribe to title text changes coming from main. */
   onTitleChanged(cb: (title: string) => void): () => void
   /** Track B item 4 — subscribe to install source-category pushes
@@ -191,26 +183,12 @@ const bridge: ComfyTitleBarBridge = {
   openInstallMenu: (anchor) => {
     ipcRenderer.send('comfy-window:open-title-menu', { menu: 'install', anchor })
   },
-  goBack: () => {
-    ipcRenderer.send('comfy-window:go-back')
-  },
-  goForward: () => {
-    ipcRenderer.send('comfy-window:go-forward')
-  },
   onPanelChanged: (cb) => {
     const handler = (_event: IpcRendererEvent, panel: unknown): void => {
       if (typeof panel === 'string') cb(panel as ComfyPanelKey)
     }
     ipcRenderer.on('comfy-titlebar:panel-changed', handler)
     return () => ipcRenderer.removeListener('comfy-titlebar:panel-changed', handler)
-  },
-  onNavStateChanged: (cb) => {
-    const handler = (_event: IpcRendererEvent, data: unknown): void => {
-      const { canBack, canForward } = (data || {}) as { canBack?: unknown; canForward?: unknown }
-      cb({ canBack: !!canBack, canForward: !!canForward })
-    }
-    ipcRenderer.on('comfy-titlebar:nav-state-changed', handler)
-    return () => ipcRenderer.removeListener('comfy-titlebar:nav-state-changed', handler)
   },
   onTitleChanged: (cb) => {
     const handler = (_event: IpcRendererEvent, title: unknown): void => {
