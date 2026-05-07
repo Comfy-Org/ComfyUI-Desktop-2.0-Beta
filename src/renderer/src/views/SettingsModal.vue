@@ -203,6 +203,16 @@ function handleUpdateInstallation(inst: Installation): void {
 .settings-modal-shell > .view-modal-body {
   padding: 0;
 }
+/* Bump the modal's max-width when the sidebar is rendered so the
+ * right-hand content area keeps roughly the same effective width as
+ * the sidebar-less variant — without this the sidebar's 200px would
+ * eat directly into the content column and make Settings feel cramped
+ * compared to the chooser-Manage view. We use `:has()` to detect the
+ * sidebar's presence so the same modal collapses back to the standard
+ * 900px ceiling when ChooserView opens it with `noSidebar`. */
+.settings-modal-shell:has(.settings-modal-layout:not(.no-sidebar)) {
+  max-width: 1100px;
+}
 </style>
 
 <style scoped>
