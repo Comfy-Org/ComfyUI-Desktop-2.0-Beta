@@ -130,6 +130,15 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+:global(html),
+:global(body),
+:global(#app) {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  background: transparent !important;
+}
+
 /* The popup BrowserWindow is transparent + frameless. The .popup div is
    the visible card — solid surface fill, rounded corners, subtle border
    so it reads as a card not as floating text. The transparent gutter

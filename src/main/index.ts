@@ -2704,7 +2704,7 @@ interface TitleMenuPopupConfig {
  * can route without their own per-open context.
  */
 interface TitleMenuPopupEntry {
-  popup: BrowserWindow
+  popup: WebContentsView
   parentWindow: BrowserWindow
   /** Snapshotted at construction so we don't touch `popup.webContents`
    *  in the destroyed-window handlers. */
@@ -2750,15 +2750,6 @@ const POPUP_ITEM_HEIGHT = 28
 const POPUP_SEPARATOR_HEIGHT = 9
 const POPUP_VPADDING = 8 // 4px top + 4px bottom on the <ul>
 const POPUP_VBORDER = 2 // 1px top + 1px bottom from the .popup card
-
-/** Off-screen parking position for a "hidden" popup. We keep the window
- *  permanently `show()`n (never hide/show) so the OS compositor doesn't
- *  re-warm a transparent window on every open — that re-warm is what
- *  caused the visible flicker on first show. -32000 sits beyond every
- *  Win32 display origin so the parked window is invisible regardless
- *  of multi-monitor layout. */
-const POPUP_PARK_X = -32000
-const POPUP_PARK_Y = -32000
 
 function computePopupHeight(items: readonly TitleMenuItem[]): number {
   const content = items.reduce(
@@ -2840,58 +2831,36 @@ function buildTitleMenuItems(entry: ComfyWindowEntry): TitleMenuItem[] {
  *  + show on every open. The popup is destroyed when its parent is. */
 function ensureTitleMenuPopup(parent: BrowserWindow): TitleMenuPopupEntry {
   const existing = titleMenuPopupsByParent.get(parent.id)
-  if (existing && !existing.popup.isDestroyed()) return existing
+  if (existing && !existing.popup.webContents.isDestroyed()) return existing
 
-  const popup = new BrowserWindow({
-    parent,
-    // Constructed parked off-screen with opacity 0 — we
-    // `showInactive()` it after first paint so the OS compositor
-    // commits the transparent surface once, then flip opacity / move
-    // on every open. Never `hide()`/`show()` again — that path is what
-    // caused the first-show flicker.
-    show: false,
-    frame: false,
-    transparent: true,
-    resizable: false,
-    movable: false,
-    minimizable: false,
-    maximizable: false,
-    skipTaskbar: true,
-    hasShadow: true,
-    focusable: true,
-    opacity: 0,
-    width: POPUP_WIDTH,
-    // Initial height is overwritten by `setBounds` on every open, so the
-    // value here just has to be non-zero — Electron rejects `width: 0`
-    // / `height: 0` BrowserWindows on Windows.
-    height: 100,
-    x: POPUP_PARK_X,
-    y: POPUP_PARK_Y,
-    backgroundColor: '#00000000',
+  const popup = new WebContentsView({
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
       preload: path.join(__dirname, '../preload/comfyTitleMenuPreload.js'),
     },
   })
-  popup.setMenuBarVisibility(false)
+  // Transparent so the empty area around the rounded card lets the
+  // body view show through. WebContentsView per-pixel transparency
+  // works inside a parent BrowserWindow's opaque surface (it just
+  // alpha-blends into the parent), unlike a child BrowserWindow which
+  // would need OS-level transparency on the parent.
+  popup.setBackgroundColor('#00000000')
+  popup.setVisible(false)
+  // Bounds in window-content-local pixels. Initial values are
+  // overwritten by `setBounds` on every open; keep them small so the
+  // hidden view doesn't squat on real estate during the construction
+  // race before the first open.
+  popup.setBounds({ x: 0, y: 0, width: POPUP_WIDTH, height: 100 })
+  parent.contentView.addChildView(popup)
 
   const isDev = !!process.env['ELECTRON_RENDERER_URL']
   const loadPromise = isDev
-    ? popup.loadURL(
+    ? popup.webContents.loadURL(
         `${(process.env['ELECTRON_RENDERER_URL'] as string).replace(/\/$/, '')}/comfyTitleMenu.html`,
       )
-    : popup.loadFile(path.join(__dirname, '../renderer/comfyTitleMenu.html'))
+    : popup.webContents.loadFile(path.join(__dirname, '../renderer/comfyTitleMenu.html'))
   void loadPromise.catch(() => {})
-
-  // Once the renderer paints, flip the window into its "parked &
-  // primed" state: parked off-screen, opacity 0, but `show()`n so the
-  // compositor has fully composited the transparent surface. From this
-  // point on, opens just `setBounds` + `setOpacity(1)` + `focus()`.
-  popup.once('ready-to-show', () => {
-    if (popup.isDestroyed()) return
-    popup.showInactive()
-  })
 
   // Capture ids up-front. The `closed` event fires *after* the
   // BrowserWindow + its webContents are destroyed, so accessing
@@ -2917,24 +2886,19 @@ function ensureTitleMenuPopup(parent: BrowserWindow): TitleMenuPopupEntry {
   // ourselves. Item clicks inside the popup do NOT trigger blur —
   // focus stays in the popup webContents until we explicitly hide
   // it on item-activated, so item activations always reach main.
-  popup.on('blur', () => {
+  popup.webContents.on('blur', () => {
     if (!entry.isOpen) return
     hideTitleMenuPopup(entry)
-  })
-
-  // Popup is destroyed only when its parent is destroyed. Clean up
-  // the maps so a fresh parent with the same numeric id (vanishingly
-  // unlikely but possible) doesn't pick up a stale entry.
-  popup.on('closed', () => {
-    titleMenuPopupsByParent.delete(entry.parentWindowId)
-    titleMenuPopupsByWebContents.delete(entry.popupWebContentsId)
   })
 
   // Tear down with the parent. Without this, the popup would survive
   // its parent and reuse the wrong context on the next click in a
   // different window.
   parent.once('closed', () => {
-    if (!popup.isDestroyed()) popup.destroy()
+    titleMenuPopupsByParent.delete(entry.parentWindowId)
+    titleMenuPopupsByWebContents.delete(entry.popupWebContentsId)
+    try { parent.contentView.removeChildView(popup) } catch {}
+    if (!popup.webContents.isDestroyed()) popup.webContents.close()
   })
 
   return entry
@@ -2978,9 +2942,8 @@ function hideTitleMenuPopup(
     clearTimeout(entry.pendingShowTimer)
     entry.pendingShowTimer = null
   }
-  if (!entry.popup.isDestroyed()) {
-    entry.popup.setOpacity(0)
-    entry.popup.setPosition(POPUP_PARK_X, POPUP_PARK_Y)
+  if (!entry.popup.webContents.isDestroyed()) {
+    entry.popup.setVisible(false)
     if (opts.releaseFocusToParent && !entry.parentWindow.isDestroyed()) {
       entry.parentWindow.focus()
     }
@@ -2998,9 +2961,9 @@ function showTitleMenuPopupNow(entry: TitleMenuPopupEntry): void {
     clearTimeout(entry.pendingShowTimer)
     entry.pendingShowTimer = null
   }
-  if (entry.popup.isDestroyed()) return
-  entry.popup.setOpacity(1)
-  entry.popup.focus()
+  if (entry.popup.webContents.isDestroyed()) return
+  entry.popup.setVisible(true)
+  entry.popup.webContents.focus()
   entry.isOpen = true
 }
 
@@ -3014,7 +2977,7 @@ function openTitleMenuPopup(opts: {
   titleBarSender: Electron.WebContents
 }): void {
   const entry = ensureTitleMenuPopup(opts.parent)
-  if (entry.popup.isDestroyed()) return
+  if (entry.popup.webContents.isDestroyed()) return
 
   // Refresh the per-open routing context. `kind` + `parentEntryId` +
   // `titleBarSender` only matter for the *current* open, so we
@@ -3027,16 +2990,22 @@ function openTitleMenuPopup(opts: {
   // content (0,0) so they map to content coordinates. `getContentBounds`
   // returns screen-relative coords, so adding gives the popup's screen
   // origin.
-  const contentBounds = opts.parent.getContentBounds()
-  const screenX = Math.round(contentBounds.x + Math.max(0, opts.anchor.x))
-  const screenY = Math.round(contentBounds.y + Math.max(0, opts.anchor.y))
+  const x = Math.round(Math.max(0, opts.anchor.x))
+  const y = Math.round(Math.max(0, opts.anchor.y))
   const height = computePopupHeight(opts.items)
 
   // Move + resize while invisible. On the very first open the renderer
   // may not have had its `ready-to-show` yet (which calls
   // `showInactive`) — fall back to a regular `showInactive()` here.
-  entry.popup.setBounds({ x: screenX, y: screenY, width: POPUP_WIDTH, height })
-  if (!entry.popup.isVisible()) entry.popup.showInactive()
+  try {
+    opts.parent.contentView.removeChildView(entry.popup)
+  } catch {}
+  opts.parent.contentView.addChildView(entry.popup)
+
+  // Move + resize while invisible. On the very first open the renderer
+  // may not have had its `ready-to-show` yet (which calls
+  // `showInactive`) — fall back to a regular `showInactive()` here.
+  entry.popup.setBounds({ x, y, width: POPUP_WIDTH, height })
 
   // Push the new config and *wait* for the renderer to ack that the
   // new content has painted before flipping opacity. Without this the
