@@ -474,7 +474,7 @@ async function handleFirstUseComplete(): Promise<void> {
     // The successful happy path leaves the takeover up; the launch
     // action's `showProgress: true` swaps it for a connect-progress
     // takeover via `handleShowProgress` (Tier 3 → Tier 3 silent).
-    await performChooserLaunch(cloud, () => { dismissTakeoverDirect() })
+    await performChooserLaunch(cloud, dismissTakeoverDirect)
     return
   }
   // No cloud install to launch into — fall back to dismissing the
@@ -625,16 +625,6 @@ async function performChooserLaunch(
   await executeChooserAction(installation, launchAction)
 }
 
-/** Track D item 4 — fire the install's launch action through the
- *  same `useListAction` pipeline ChooserView uses for tile clicks.
- *  Mirrors the `handleChooserPick` shape (port-conflict resolution,
- *  telemetry, in-place attach via `prepareChooserHostHandoff`) so
- *  first-use ends with a running ComfyUI inside the chooser host
- *  window the user just dismissed the takeover from. */
-async function launchInstallationAfterFirstUse(installation: Installation): Promise<void> {
-  await performChooserLaunch(installation)
-}
-
 /** Track D item 4 — watch progressStore for the new-install /
  *  migration op finishing and auto-launch the resulting Standalone
  *  install. The chain flag (`chainingFirstUseToNewInstall`) gates
@@ -684,7 +674,7 @@ watch(
         ?? null
     }
     if (inst) {
-      void launchInstallationAfterFirstUse(inst)
+      void performChooserLaunch(inst)
     }
   },
   { deep: false },
