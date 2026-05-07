@@ -494,8 +494,8 @@ function refreshComfyTabBody(installationId: string): void {
  *     have no `ipcRenderer`, can't send these IPCs, and even if a future
  *     change re-introduced a preload they wouldn't be in `comfyWindows`.
  *     The destructive Electron menu items they would otherwise inherit
- *     (Close Window / Close All Windows / Quit) are stripped globally
- *     by `installAppMenu()` — see `menu.ts`.
+ *     (Close Window / Close All Windows) are stripped globally by
+ *     `installAppMenu()` — see `menu.ts`.
  *   - The `comfyView` and `panelView` WebContentsViews of a registered
  *     entry are deliberately matched by separate predicates
  *     (`panelView?.webContents === event.sender`) — never by this helper —

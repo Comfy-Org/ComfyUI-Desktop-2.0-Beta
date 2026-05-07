@@ -6,7 +6,7 @@ import type { MenuItemConstructorOptions } from 'electron'
  * spawn — including OAuth / cloud-login popups created via
  * `comfyContents.setWindowOpenHandler`. Without this, Electron's default
  * menu is inherited and exposes destructive items (Close Window /
- * Close All Windows / Quit) that bypass our managed shutdown:
+ * Close All Windows) that bypass our managed shutdown:
  *
  *   - On Windows / Linux the menu sits in each window's title bar (or is
  *     reachable via the system-menu icon at the top-left). We strip it
