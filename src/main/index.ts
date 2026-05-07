@@ -2698,35 +2698,36 @@ function buildTitleMenuItems(entry: ComfyWindowEntry): TitleMenuItem[] {
   if (entry.firstUseMode === 'post-consent') {
     return [{ id: 'skip-onboarding', label: 'Skip Onboarding' }]
   }
-  // Unified Settings modal — the file menu carries one Settings entry
-  // that opens the modal on its default tab (ComfyUI Settings for
-  // install-backed hosts, Global Settings for install-less hosts;
-  // PanelApp picks the tab at mount time).
-  // §16 — window-management entries (Return to Dashboard, Close
-  // Window, Close All Windows) sit between the open-new gesture and
-  // the page-nav affordances; the separator below them keeps the
-  // two groups visually distinct. Return to Dashboard is install-
-  // backed-only — install-less host windows are already on the
-  // chooser body so the entry would be a no-op there.
+  // Issue #497 — file-menu order:
+  //   New Window
+  //   ── separator ──
+  //   (install-less only) New Install / Track / Load Snapshot
+  //   ── separator ──
+  //   Settings (unified — ComfyUI Settings on install-backed hosts,
+  //             Global Settings on install-less; PanelApp picks the
+  //             default tab at mount time)
+  //   Send Feedback
+  //   ── separator ──
+  //   (install-backed only) Return to Dashboard
+  //   Close All Windows
+  //
+  // Notes:
+  //   - "Close Window" is intentionally absent — the OS-X / native
+  //     close button already covers single-window dismissal; the menu
+  //     only surfaces the cross-window kill switch.
+  //   - Install-creation / import flows (New Install / Track / Load
+  //     Snapshot) live ONLY on the dashboard (install-less host)
+  //     waffle menu. Inside a Comfy Instance window the only escape
+  //     hatch back to the dashboard is "Return to Dashboard" — the
+  //     in-Comfy chrome stays closed-off per the post-Phase-3 design
+  //     doc's "Comfy Instance is closed-off" rule.
+  //   - "Return to Dashboard" is install-backed-only; install-less
+  //     host windows are already on the chooser body so the entry
+  //     would be a no-op there.
   const items: TitleMenuItem[] = [
     { id: 'new-window', label: 'New Window' },
-  ]
-  if (entry.installationId !== null) {
-    items.push({ id: 'return-to-dashboard', label: 'Return to Dashboard' })
-  }
-  items.push(
-    { id: 'close-window', label: 'Close Window' },
-    { id: 'close-all-windows', label: 'Close All Windows' },
     { kind: 'separator' },
-  )
-  // Track B item 3 — install-creation / import flows live ONLY on
-  // the dashboard (chooser-host) waffle menu. Once the user is in
-  // a Comfy Instance window the only Desktop-2 escape hatch is
-  // "Return to Dashboard" — there is no silent overlap with another
-  // running install. The install-backed branch must NOT reach these
-  // panels (no setActivePanel('new-install') etc. via the file
-  // menu) so the in-Comfy chrome stays closed-off, matching the
-  // post-Phase-3 design doc's "Comfy Instance is closed-off" rule.
+  ]
   if (entry.installationId === null) {
     items.push(
       { id: 'new-install', label: 'New Install' },
@@ -2737,14 +2738,18 @@ function buildTitleMenuItems(entry: ComfyWindowEntry): TitleMenuItem[] {
   }
   items.push(
     { id: 'settings', label: 'Settings', checked: entry.activePanel === 'settings' },
-    { kind: 'separator' },
     // Send Feedback (#493) — restored after the legacy launcher-window
     // sidebar (which previously hosted the link) was retired by the
     // unified-window-titlebar-panels refactor. The renderer-side
     // handler resolves the support URL and emits the
     // `desktop2.feedback.opened` telemetry action with `source: 'menu'`.
     { id: 'feedback', label: 'Send Feedback' },
+    { kind: 'separator' },
   )
+  if (entry.installationId !== null) {
+    items.push({ id: 'return-to-dashboard', label: 'Return to Dashboard' })
+  }
+  items.push({ id: 'close-all-windows', label: 'Close All Windows' })
   return items
 }
 
@@ -2980,17 +2985,6 @@ function activateTitleMenuItem(entry: TitleMenuPopupEntry, id: string): void {
       // the in-place swap (no popup teardown, just a body swap
       // underneath the popup).
       void returnToDashboard(entry.parentEntryId)
-    } else if (id === 'close-window') {
-      // §16 — close just the parent host window. Each host window has
-      // its own `close` handler that runs the teardown sequence
-      // (`stopRunning` + webContents close + window.destroy), so we
-      // just dispatch close() here. The popup is auto-destroyed when
-      // its parent goes; the trailing hideTitleMenuPopup call below
-      // is guarded against an already-destroyed popup.
-      const parentEntry = comfyWindows.get(entry.parentEntryId)
-      if (parentEntry && !parentEntry.window.isDestroyed()) {
-        parentEntry.window.close()
-      }
     } else if (id === 'close-all-windows') {
       // §16 — see `closeAllHostWindows` / `confirmAndCloseAllHostWindows`.
       // For two or more open windows we confirm via a native dialog

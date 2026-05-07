@@ -318,7 +318,7 @@ describe('TitleBarApp', () => {
   it('hides the waffle menu during the first-use T&C consent step (consent-lockdown)', async () => {
     // Modal-unification (Track M-2.3) — the waffle menu is the only
     // always-live affordance during a Tier 3 takeover (it carries the
-    // Return-to-Dashboard / Close-Window escape hatch). The first-use
+    // Return-to-Dashboard / Close-All-Windows escape hatch). The first-use
     // T&C consent step deliberately removes that escape hatch so the
     // user has to either accept consent or close the window via OS
     // chrome — matching the binding-flow framing of consent. Once
