@@ -2466,10 +2466,25 @@ ipcMain.on('comfy-window:click-app-update-pill', (event) => {
 /**
  * Phase 3 §18 — title-bar install-update pill click. Refuses on
  * install-less hosts (the pill is suppressed there but a defensive
- * guard keeps stray IPC from triggering anything). Sends
- * `panel-trigger-overlay` with the entry's installationId so the
- * renderer can open the Manage overlay on the update tab — same
- * surface the chooser kebab "Update…" entry routes to.
+ * guard keeps stray IPC from triggering anything).
+ *
+ * The handler does two things, in order:
+ *   1. `setActivePanel(found.id, 'settings')` — bring the panel view
+ *      forward when the user is currently on the ComfyUI view (the
+ *      common case for this pill since it's only visible while an
+ *      install is running). Without this, the unified Settings modal
+ *      mounts on a hidden panel surface and the click appears to do
+ *      nothing. `setActivePanel` is a no-op when the entry is already
+ *      on `'settings'` (i.e. the modal is already open), so we don't
+ *      double-open it.
+ *   2. `panel-trigger-overlay` with the installationId so the renderer
+ *      can re-open the Manage overlay deep-linked to the Update sub-
+ *      tab — same surface the chooser kebab "Update…" entry routes to.
+ *      The renderer's existing `initialTab` / `initialDetailTab`
+ *      watchers (added in the unified-settings-modal branch) snap the
+ *      sidebar back to "ComfyUI Settings" and the inner DetailModal to
+ *      the Update sub-tab even when the modal was already mounted on a
+ *      different tab.
  */
 ipcMain.on('comfy-window:click-install-update-pill', (event) => {
   const found = findEntryByTitleBarSender(event.sender)
@@ -2479,6 +2494,7 @@ ipcMain.on('comfy-window:click-install-update-pill', (event) => {
   if (!installationId) return
   const panelView = entry.panelView
   if (!panelView || panelView.webContents.isDestroyed()) return
+  setActivePanel(found.id, 'settings')
   panelView.webContents.send('panel-trigger-overlay', {
     kind: 'install-update',
     installationId,
