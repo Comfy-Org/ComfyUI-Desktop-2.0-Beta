@@ -163,6 +163,18 @@ function handleUpdateInstallation(inst: Installation): void {
   </ModalShell>
 </template>
 
+<!-- Non-scoped block so we can override the standard `.view-modal-body`
+     gutter rendered inside `ModalShell` (`<slot />` content lives one
+     scope level up from the body wrapper, so a scoped `:deep()` from
+     here can't reliably pierce). We still namespace via
+     `.settings-modal-shell` (the `content-class` we pass to
+     ModalShell → Modal) so the override only applies to this modal. -->
+<style>
+.settings-modal-shell > .view-modal-body {
+  padding: 0;
+}
+</style>
+
 <style scoped>
 .settings-modal-layout {
   display: flex;
