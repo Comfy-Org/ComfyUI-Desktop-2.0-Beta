@@ -48,18 +48,14 @@ import { scrubAll } from './lib/piiScrub'
  */
 export type ComfyPanelKey =
   | 'comfy'
-  | 'install-settings'
-  | 'launcher-settings'
-  | 'directories'
+  | 'settings'
   | 'new-install'
   | 'track'
   | 'load-snapshot'
   | 'quick-install'
 const VALID_PANELS: ReadonlySet<ComfyPanelKey> = new Set([
   'comfy',
-  'install-settings',
-  'launcher-settings',
-  'directories',
+  'settings',
   'new-install',
   'track',
   'load-snapshot',
@@ -78,13 +74,14 @@ const VALID_PANELS: ReadonlySet<ComfyPanelKey> = new Set([
  * the Comfy tab of an install-less host window (one with no install backing
  * the entry yet). Picking an install in the chooser eventually swaps the
  * window in-place to a real install (Phase 3 step 2d).
+ *
+ * `'settings'` mounts the unified Settings modal (ComfyUI Settings /
+ * Directories / Global Settings) over whatever body is showing.
  */
 type BodyMode =
   | 'comfy'
   | 'comfy-lifecycle'
-  | 'install-settings'
-  | 'launcher-settings'
-  | 'directories'
+  | 'settings'
   | 'chooser'
   | 'new-install'
   | 'track'
@@ -99,6 +96,16 @@ const APP_ICON = path.join(__dirname, '..', '..', 'assets', 'Comfy_Logo_x256.png
 // reintroduced, use assets/Comfy_Logo_x64.png so Electron can downsample
 // crisply on HiDPI trays.
 const APP_VERSION = getAppVersion()
+
+/**
+ * Center pill text for install-less host windows (the chooser /
+ * dashboard host). Replaces the previous `'Choose an install'` —
+ * the pill is no longer clickable (no install caret menu), so the
+ * label is just a brand identifier.
+ */
+const CHOOSER_HOST_TITLE_TEXT = 'Desktop 2.0 Beta'
+/** OS-level window title for install-less host windows. */
+const CHOOSER_HOST_WINDOW_TITLE = `${CHOOSER_HOST_TITLE_TEXT} — v${APP_VERSION}`
 
 interface WindowBounds {
   x: number
@@ -250,10 +257,10 @@ interface ComfyWindowEntry {
   /**
    * Which panel is currently rendered. Always one of the user-visible
    * panel keys — never the internal `'comfy-lifecycle'` / `'chooser'`
-   * body modes. For install-less host windows only `'comfy'`,
-   * `'launcher-settings'`, and `'directories'` are reachable
-   * (Install Settings is hidden — the install caret menu is suppressed
-   * without an install backing the window).
+   * body modes. Both install-backed and install-less hosts can reach
+   * `'comfy'` and `'settings'`; the unified Settings modal opens on
+   * its Global tab when there is no install to back the ComfyUI
+   * Settings tab.
    */
   activePanel: ComfyPanelKey
   /** Last known theme reported by the ComfyUI frontend, applied to the panel when it loads. */
@@ -317,7 +324,7 @@ interface ComfyWindowEntry {
   /**
    * Window-mode unification (Stage W-3b) — current title-bar pill
    * label. Install-backed windows mirror the install name (and re-
-   * push on rename); install-less hosts hold `'Choose an install'`.
+   * push on rename); install-less hosts hold `'Desktop 2.0 Beta'`.
    * Stored on the entry so the unified `title-bar-ready` handshake
    * in `createHostWindow()` can synthesize the initial push without
    * a per-mode callback closure, and so `attachInstall()` /
@@ -441,8 +448,8 @@ function unregisterHostEntry(entry: ComfyWindowEntry): void {
  * map directly to themselves.
  *
  * For install-less host windows (entry.installationId === null), the Comfy
- * pill resolves to the chooser body; only the Comfy and Launcher Settings
- * pills are reachable in this mode.
+ * pill resolves to the chooser body; only the Comfy and Settings pills are
+ * reachable in this mode (Settings opens the unified modal on its Global tab).
  *
  * Centralising this so layout decisions and event-driven body swaps can't
  * disagree about which view should be visible.
@@ -450,7 +457,7 @@ function unregisterHostEntry(entry: ComfyWindowEntry): void {
 function computeBodyMode(entry: ComfyWindowEntry): BodyMode {
   if (entry.installationId === null) {
     // Install-less host window. Comfy pill → chooser; everything else
-    // (in practice only Launcher Settings) maps to itself.
+    // (in practice only Settings) maps to itself.
     return entry.activePanel === 'comfy' ? 'chooser' : entry.activePanel
   }
   if (entry.activePanel !== 'comfy') return entry.activePanel
@@ -635,7 +642,7 @@ function updateTrayMenu(): void {
   if (!tray) return
   // Phase 3 — the launcher window is retired; the install-less chooser
   // host is the primary surface. "Show App" and the previous separate
-  // "Choose an Install" entry now collapse into a single chooser-host
+  // "Desktop 2.0 Beta" / dashboard entry now collapse into a single chooser-host
   // focus action.
   const contextMenu = Menu.buildFromTemplate([
     {
@@ -1014,8 +1021,8 @@ function onComfyRestarted({ installationId, process: _proc }: { installationId?:
 
 function onStop({ installationId }: { installationId?: string } = {}): void {
   // Stopping the process no longer destroys the window — the window stays
-  // open so the user can re-launch, view logs, or run install-settings
-  // actions. Window destruction stays bound to explicit close paths
+  // open so the user can re-launch, view logs, or open Settings.
+  // Window destruction stays bound to explicit close paths
   // (user closes window, app quits, install deleted via close-comfy-window).
   if (installationId) {
     refreshComfyTabBody(installationId)
@@ -1129,7 +1136,7 @@ interface CreateHostWindowOpts {
   titleBarInstallationIdParam: string
   /**
    * Initial title-bar pill label. Install-backed wrappers pass the
-   * install name; chooser hosts pass `'Choose an install'`. Stored on
+   * install name; chooser hosts pass `'Desktop 2.0 Beta'`. Stored on
    * `entry.titleBarText` so the unified `title-bar-ready` handshake
    * can re-push it without a per-mode callback (W-3b).
    */
@@ -1966,7 +1973,7 @@ function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts): boolea
  *      comfyView is kept alive (not destroyed) so the host can be
  *      re-attached later without rebuilding.
  *   3. Resets the title-bar identity (`titleBarText` →
- *      `'Choose an install'`, `sourceCategory` → `null`) and pushes
+ *      `'Desktop 2.0 Beta'`, `sourceCategory` → `null`) and pushes
  *      to the live title-bar.
  *   4. Resets the OS-level window title.
  *   5. Re-paints the title bar to the launcher-theme surface
@@ -2000,13 +2007,13 @@ function _detachInstallImpl(entry: ComfyWindowEntry): void {
   }
 
   // Flip title-bar identity back to chooser-host shape.
-  entry.titleBarText = 'Choose an install'
+  entry.titleBarText = CHOOSER_HOST_TITLE_TEXT
   entry.sourceCategory = null
   if (!entry.titleBarView.webContents.isDestroyed()) {
     entry.titleBarView.webContents.send('comfy-titlebar:title-changed', entry.titleBarText)
     entry.titleBarView.webContents.send('comfy-titlebar:source-category-changed', null)
   }
-  entry.window.setTitle(`Choose an install — Desktop 2.0 v${APP_VERSION}`)
+  entry.window.setTitle(CHOOSER_HOST_WINDOW_TITLE)
   applyChooserHostTheme(entry)
 
   // Reset nav state to the comfy pill (chooser body for install-less hosts).
@@ -2155,7 +2162,7 @@ function openChooserHostWindow(): BrowserWindow {
   const initialChooserTheme = getChooserHostTheme()
 
   const { comfyWindow, entry } = createHostWindow({
-    windowTitle: `Choose an install — Desktop 2.0 v${APP_VERSION}`,
+    windowTitle: CHOOSER_HOST_WINDOW_TITLE,
     boundsKey: CHOOSER_HOST_BOUNDS_KEY,
     initialTheme: initialChooserTheme,
     titleBarOverlay: process.platform === 'darwin'
@@ -2184,14 +2191,13 @@ function openChooserHostWindow(): BrowserWindow {
     },
     titleBarBackground: initialChooserTheme.bg,
     // Empty installationId URL param tells the title-bar Vue to enter
-    // install-less mode (hide Install Settings pill, accept the
-    // fallback label).
+    // install-less mode (no install-type icon, dashboard pill label).
     titleBarInstallationIdParam: '',
     // Stage W-3b — initial title-bar pill text + source-category
     // are stored on the entry; the unified title-bar-ready handshake
     // re-pushes from the entry. Install-less hosts have no install
     // backing so the source-category icon stays unset.
-    initialTitleBarText: 'Choose an install',
+    initialTitleBarText: CHOOSER_HOST_TITLE_TEXT,
     initialSourceCategory: null,
   })
 
@@ -2305,15 +2311,10 @@ function focusActiveBody(entry: ComfyWindowEntry): void {
 function setActivePanel(windowKey: number, panel: ComfyPanelKey): void {
   const entry = comfyWindows.get(windowKey)
   if (!entry || entry.window.isDestroyed()) return
-  // Install Settings is install-scoped (the install caret menu in the
-  // title bar is hidden in install-less host windows). Refuse to switch
-  // to it from anywhere when there's no install backing the window — a
-  // stray IPC payload must not be able to wedge the window into a body
-  // mode that has no install to render. Directories was previously
-  // gated alongside Install Settings, but as of §15 it lives on the
-  // global File / waffle menu and is install-agnostic — install-less
-  // host windows are allowed to open it.
-  if (entry.installationId === null && panel === 'install-settings') return
+  // The unified Settings modal works in both install-backed and install-
+  // less hosts (PanelApp picks the appropriate default tab — ComfyUI
+  // Settings vs Global Settings — at mount time), so no install-less
+  // gating is required here.
 
   if (entry.activePanel === panel) return
 
@@ -2492,10 +2493,38 @@ ipcMain.on('comfy-window:click-app-update-pill', (event) => {
 /**
  * Phase 3 §18 — title-bar install-update pill click. Refuses on
  * install-less hosts (the pill is suppressed there but a defensive
- * guard keeps stray IPC from triggering anything). Sends
- * `panel-trigger-overlay` with the entry's installationId so the
- * renderer can open the Manage overlay on the update tab — same
- * surface the chooser kebab "Update…" entry routes to.
+ * guard keeps stray IPC from triggering anything).
+ *
+ * The handler does three things, in order:
+ *   1. `setActivePanel(found.id, 'settings')` — bring the panel view
+ *      forward when the user is currently on the ComfyUI view (the
+ *      common case for this pill since it's only visible while an
+ *      install is running). Without this, the unified Settings modal
+ *      mounts on a hidden panel surface and the click appears to do
+ *      nothing. `setActivePanel` also lazily creates the panelView
+ *      on first non-comfy switch via `ensurePanelView`. It's a no-op
+ *      when the entry is already on `'settings'` (i.e. the modal is
+ *      already open), so we don't double-open it.
+ *   2. Resolve the entry's `panelView` AFTER `setActivePanel` so we
+ *      pick up any view that step 1 may have just constructed.
+ *   3. `panel-trigger-overlay` with the installationId so the renderer
+ *      can open the unified Settings modal deep-linked to the ComfyUI
+ *      Settings tab → Update sub-tab — same surface the chooser kebab
+ *      "Update…" entry routes to.
+ *
+ * Step 3 must be deferred until the panelView's renderer has finished
+ * loading. When the panel was just constructed by step 1, its preload
+ * + Vue app haven't mounted yet, so a synchronous `send()` would land
+ * before `unsubPanelTriggerOverlay = window.api.onPanelTriggerOverlay
+ * (...)` ran in `onMounted`, and the IPC would be silently dropped.
+ * `did-finish-load` fires once the JS bundle has executed (which is
+ * what Vue's `mount()` + `onMounted` ride on), so registering a
+ * `once('did-finish-load', sendDeepLink)` is a reliable trigger.
+ *
+ * The renderer's existing `initialTab` / `initialDetailTab` watchers
+ * (added in the unified-settings-modal branch) cover the
+ * already-mounted-but-on-a-different-tab case — they snap the sidebar
+ * back to "ComfyUI Settings" and the inner DetailModal to Update.
  */
 ipcMain.on('comfy-window:click-install-update-pill', (event) => {
   const found = findEntryByTitleBarSender(event.sender)
@@ -2503,12 +2532,21 @@ ipcMain.on('comfy-window:click-install-update-pill', (event) => {
   const { entry } = found
   const installationId = entry.installationId
   if (!installationId) return
+  setActivePanel(found.id, 'settings')
   const panelView = entry.panelView
   if (!panelView || panelView.webContents.isDestroyed()) return
-  panelView.webContents.send('panel-trigger-overlay', {
-    kind: 'install-update',
-    installationId,
-  })
+  const sendDeepLink = (): void => {
+    if (panelView.webContents.isDestroyed()) return
+    panelView.webContents.send('panel-trigger-overlay', {
+      kind: 'install-update',
+      installationId,
+    })
+  }
+  if (panelView.webContents.isLoadingMainFrame()) {
+    panelView.webContents.once('did-finish-load', sendDeepLink)
+  } else {
+    sendDeepLink()
+  }
 })
 
 /**
@@ -2627,7 +2665,7 @@ interface TitleMenuItem {
 }
 
 interface TitleMenuPopupConfig {
-  kind: 'file' | 'install'
+  kind: 'file'
   items: TitleMenuItem[]
   theme: { bg: string; text: string }
 }
@@ -2663,7 +2701,7 @@ interface TitleMenuPopupEntry {
    */
   parentEntryId: number
   /** Updated on every open. */
-  kind: 'file' | 'install'
+  kind: 'file'
   /** Updated on every open. */
   titleBarSender: Electron.WebContents
   /** True once the renderer has signalled `comfy-titlemenu:ready`.
@@ -2713,69 +2751,70 @@ function computePopupHeight(items: readonly TitleMenuItem[]): number {
   return content + POPUP_VPADDING + POPUP_VBORDER
 }
 
-function buildTitleMenuItems(kind: 'file' | 'install', entry: ComfyWindowEntry): TitleMenuItem[] {
-  if (kind === 'file') {
-    // First-use post-consent — the takeover is mounted (or chained
-    // into new-install / migrate / install-progress), and the only
-    // file-menu entry that should be reachable is the explicit escape
-    // hatch. Surfacing New Install / Directories / etc. here would
-    // let the user wander out of the bootstrap UX into surfaces that
-    // aren't ready for it. Skip Onboarding marks completion + clears
-    // the chain state and dismisses the takeover.
-    if (entry.firstUseMode === 'post-consent') {
-      return [{ id: 'skip-onboarding', label: 'Skip Onboarding' }]
-    }
-    // §15 — Directories is a global / cross-install affordance (the
-    // launcher's view of disk: models, outputs, inputs) and lives on
-    // the File / waffle menu alongside the other app-level entries.
-    // §16 — window-management entries (Return to Dashboard, Close
-    // Window, Close All Windows) sit between the open-new gesture and
-    // the page-nav affordances; the separator below them keeps the
-    // two groups visually distinct. Return to Dashboard is install-
-    // backed-only — install-less host windows are already on the
-    // chooser body so the entry would be a no-op there.
-    const items: TitleMenuItem[] = [
-      { id: 'new-window', label: 'New Window' },
-    ]
-    if (entry.installationId !== null) {
-      items.push({ id: 'return-to-dashboard', label: 'Return to Dashboard' })
-    }
-    items.push(
-      { id: 'close-window', label: 'Close Window' },
-      { id: 'close-all-windows', label: 'Close All Windows' },
-      { kind: 'separator' },
-    )
-    // Track B item 3 — install-creation / import flows live ONLY on
-    // the dashboard (chooser-host) waffle menu. Once the user is in
-    // a Comfy Instance window the only Desktop-2 escape hatch is
-    // "Return to Dashboard" — there is no silent overlap with another
-    // running install. The install-backed branch must NOT reach these
-    // panels (no setActivePanel('new-install') etc. via the file
-    // menu) so the in-Comfy chrome stays closed-off, matching the
-    // post-Phase-3 design doc's "Comfy Instance is closed-off" rule.
-    if (entry.installationId === null) {
-      // The first-use post-consent short-circuit at the top of this
-      // function returns Skip Onboarding by itself — by the time we
-      // reach here `firstUseMode` is `'none'` so the install-creation
-      // group is the steady-state entry list.
-      items.push(
-        { id: 'new-install', label: 'New Install' },
-        { id: 'track', label: 'Track Existing Install' },
-        { id: 'load-snapshot', label: 'Load Snapshot' },
-        { kind: 'separator' },
-      )
-    }
-    items.push(
-      { id: 'directories', label: 'Directories', checked: entry.activePanel === 'directories' },
-      { id: 'launcher-settings', label: 'App Settings' },
-      { kind: 'separator' },
-      { id: 'feedback', label: 'Send Feedback' },
-    )
-    return items
+function buildTitleMenuItems(entry: ComfyWindowEntry): TitleMenuItem[] {
+  // First-use post-consent — the takeover is mounted (or chained into
+  // new-install / migrate / install-progress), and the only file-menu
+  // entry that should be reachable is the explicit escape hatch.
+  // Surfacing New Install / Settings here would let the user wander out
+  // of the bootstrap UX into surfaces that aren't ready for it. Skip
+  // Onboarding marks completion + clears the chain state and dismisses
+  // the takeover.
+  if (entry.firstUseMode === 'post-consent') {
+    return [{ id: 'skip-onboarding', label: 'Skip Onboarding' }]
   }
-  return [
-    { id: 'install-settings', label: 'Install Settings', checked: entry.activePanel === 'install-settings' },
+  // Issue #497 — file-menu order:
+  //   New Window
+  //   ── separator ──
+  //   (install-less only) New Install / Track / Load Snapshot
+  //   ── separator ──
+  //   Settings (unified — ComfyUI Settings on install-backed hosts,
+  //             Global Settings on install-less; PanelApp picks the
+  //             default tab at mount time)
+  //   Send Feedback
+  //   ── separator ──
+  //   (install-backed only) Return to Dashboard
+  //   Close All Windows
+  //
+  // Notes:
+  //   - "Close Window" is intentionally absent — the OS-X / native
+  //     close button already covers single-window dismissal; the menu
+  //     only surfaces the cross-window kill switch.
+  //   - Install-creation / import flows (New Install / Track / Load
+  //     Snapshot) live ONLY on the dashboard (install-less host)
+  //     waffle menu. Inside a Comfy Instance window the only escape
+  //     hatch back to the dashboard is "Return to Dashboard" — the
+  //     in-Comfy chrome stays closed-off per the post-Phase-3 design
+  //     doc's "Comfy Instance is closed-off" rule.
+  //   - "Return to Dashboard" is install-backed-only; install-less
+  //     host windows are already on the chooser body so the entry
+  //     would be a no-op there.
+  const items: TitleMenuItem[] = [
+    { id: 'new-window', label: 'New Window' },
+    { kind: 'separator' },
   ]
+  if (entry.installationId === null) {
+    items.push(
+      { id: 'new-install', label: 'New Install' },
+      { id: 'track', label: 'Add Existing Install' },
+      { id: 'load-snapshot', label: 'Load Snapshot' },
+      { kind: 'separator' },
+    )
+  }
+  items.push(
+    { id: 'settings', label: 'Settings', checked: entry.activePanel === 'settings' },
+    // Send Feedback (#493) — restored after the legacy launcher-window
+    // sidebar (which previously hosted the link) was retired by the
+    // unified-window-titlebar-panels refactor. The renderer-side
+    // handler resolves the support URL and emits the
+    // `desktop2.feedback.opened` telemetry action with `source: 'menu'`.
+    { id: 'feedback', label: 'Send Feedback' },
+    { kind: 'separator' },
+  )
+  if (entry.installationId !== null) {
+    items.push({ id: 'return-to-dashboard', label: 'Return to Dashboard' })
+  }
+  items.push({ id: 'close-all-windows', label: 'Close All Windows' })
+  return items
 }
 
 /** Lazily create the reusable popup BrowserWindow for the given parent.
@@ -2951,7 +2990,7 @@ function showTitleMenuPopupNow(entry: TitleMenuPopupEntry): void {
 function openTitleMenuPopup(opts: {
   parent: BrowserWindow
   parentEntryId: number
-  kind: 'file' | 'install'
+  kind: 'file'
   items: TitleMenuItem[]
   anchor: { x: number; y: number }
   theme: { bg: string; text: string }
@@ -3011,77 +3050,61 @@ function activateTitleMenuItem(entry: TitleMenuPopupEntry, id: string): void {
   // to the front) flip this off so the parent doesn't immediately yank
   // focus back from the new target.
   let releaseFocusToParent = true
-  if (entry.kind === 'file') {
-    if (id === 'new-window') {
-      openChooserHostWindow()
-      releaseFocusToParent = false
+  if (id === 'new-window') {
+    openChooserHostWindow()
+    releaseFocusToParent = false
+  }
+  else if (id === 'return-to-dashboard') {
+    // §16 — flip the install-backed host in place to chooser-host
+    // mode (Stage W-4). The same BrowserWindow stays alive; the
+    // file-menu popup is parented to it so it stays valid through
+    // the in-place swap (no popup teardown, just a body swap
+    // underneath the popup).
+    void returnToDashboard(entry.parentEntryId)
+  } else if (id === 'close-all-windows') {
+    // §16 — see `closeAllHostWindows` / `confirmAndCloseAllHostWindows`.
+    // For two or more open windows we confirm via a native dialog
+    // that lists the open windows + any active operations that
+    // would be cancelled. With one or zero windows the close
+    // happens straight through. The parent of this popup is among
+    // the windows being closed; its popup is auto-destroyed, and
+    // the trailing hideTitleMenuPopup is guarded against an
+    // already-destroyed popup.
+    const parentEntry = comfyWindows.get(entry.parentEntryId)
+    const parentWindow = parentEntry && !parentEntry.window.isDestroyed()
+      ? parentEntry.window
+      : null
+    void confirmAndCloseAllHostWindows(parentWindow)
+  } else if (id === 'settings') setActivePanel(entry.parentEntryId, 'settings')
+  else if (id === 'skip-onboarding') {
+    // Modal-unification (Track M-2.2) — forward to the panel renderer
+    // so it can run the same `markFirstUseCompleted` + dismiss
+    // sequence the Cloud-branch pick uses (PanelApp owns the
+    // `firstUseCompleted` flip and the overlay close — see
+    // `handleFirstUseComplete`). Resolve the host entry the same way
+    // the close-window branches above do.
+    const parentEntry = comfyWindows.get(entry.parentEntryId)
+    if (parentEntry?.panelView && !parentEntry.panelView.webContents.isDestroyed()) {
+      parentEntry.panelView.webContents.send('comfy-panel:first-use-skip')
     }
-    else if (id === 'return-to-dashboard') {
-      // §16 — flip the install-backed host in place to chooser-host
-      // mode (Stage W-4). The same BrowserWindow stays alive; the
-      // file-menu popup is parented to it so it stays valid through
-      // the in-place swap (no popup teardown, just a body swap
-      // underneath the popup).
-      void returnToDashboard(entry.parentEntryId)
-    } else if (id === 'close-window') {
-      // §16 — close just the parent host window. Each host window has
-      // its own `close` handler that runs the teardown sequence
-      // (`stopRunning` + webContents close + window.destroy), so we
-      // just dispatch close() here. The popup is auto-destroyed when
-      // its parent goes; the trailing hideTitleMenuPopup call below
-      // is guarded against an already-destroyed popup.
-      const parentEntry = comfyWindows.get(entry.parentEntryId)
-      if (parentEntry && !parentEntry.window.isDestroyed()) {
-        parentEntry.window.close()
-      }
-    } else if (id === 'close-all-windows') {
-      // §16 — see `closeAllHostWindows` / `confirmAndCloseAllHostWindows`.
-      // For two or more open windows we confirm via a native dialog
-      // that lists the open windows + any active operations that
-      // would be cancelled. With one or zero windows the close
-      // happens straight through. The parent of this popup is among
-      // the windows being closed; its popup is auto-destroyed, and
-      // the trailing hideTitleMenuPopup is guarded against an
-      // already-destroyed popup.
-      const parentEntry = comfyWindows.get(entry.parentEntryId)
-      const parentWindow = parentEntry && !parentEntry.window.isDestroyed()
-        ? parentEntry.window
-        : null
-      void confirmAndCloseAllHostWindows(parentWindow)
-    } else if (id === 'directories') setActivePanel(entry.parentEntryId, 'directories')
-    else if (id === 'launcher-settings') setActivePanel(entry.parentEntryId, 'launcher-settings')
-    else if (id === 'skip-onboarding') {
-      // Modal-unification (Track M-2.2) — forward to the panel renderer
-      // so it can run the same `markFirstUseCompleted` + dismiss
-      // sequence the Cloud-branch pick uses (PanelApp owns the
-      // `firstUseCompleted` flip and the overlay close — see
-      // `handleFirstUseComplete`). Resolve the host entry the same way
-      // the close-window branches above do.
-      const parentEntry = comfyWindows.get(entry.parentEntryId)
-      if (parentEntry?.panelView && !parentEntry.panelView.webContents.isDestroyed()) {
-        parentEntry.panelView.webContents.send('comfy-panel:first-use-skip')
-      }
+  }
+  else if (id === 'feedback') {
+    // Forward to the panel renderer — see `triggerOpenFeedback`.
+    // The title-bar Send Feedback button lands on the same helper
+    // via `comfy-window:click-feedback`; `source` distinguishes the
+    // two entry points in the telemetry payload.
+    triggerOpenFeedback(entry.parentEntryId, 'menu')
+  }
+  else if (id === 'new-install' || id === 'track' || id === 'load-snapshot' || id === 'quick-install') {
+    // Track B item 3 — install-creation / import flows are
+    // chooser-host-only. `buildTitleMenuItems` already filters them
+    // out of the install-backed file menu; this guard is the
+    // belt-and-braces so a stale popup or an out-of-order IPC
+    // can't navigate an in-Comfy host into one of these panels.
+    const parentEntry = comfyWindows.get(entry.parentEntryId)
+    if (parentEntry?.installationId === null) {
+      setActivePanel(entry.parentEntryId, id)
     }
-    else if (id === 'feedback') {
-      // Forward to the panel renderer — see `triggerOpenFeedback`.
-      // The title-bar Send Feedback button lands on the same helper
-      // via `comfy-window:click-feedback`; `source` distinguishes the
-      // two entry points in the telemetry payload.
-      triggerOpenFeedback(entry.parentEntryId, 'menu')
-    }
-    else if (id === 'new-install' || id === 'track' || id === 'load-snapshot' || id === 'quick-install') {
-      // Track B item 3 — install-creation / import flows are
-      // chooser-host-only. `buildTitleMenuItems` already filters them
-      // out of the install-backed file menu; this guard is the
-      // belt-and-braces so a stale popup or an out-of-order IPC
-      // can't navigate an in-Comfy host into one of these panels.
-      const parentEntry = comfyWindows.get(entry.parentEntryId)
-      if (parentEntry?.installationId === null) {
-        setActivePanel(entry.parentEntryId, id)
-      }
-    }
-  } else {
-    if (id === 'install-settings') setActivePanel(entry.parentEntryId, 'install-settings')
   }
   // Item click — popup still has focus, so push it back to the parent
   // unless the action just handed focus to a different window.
@@ -3138,15 +3161,14 @@ ipcMain.on('comfy-titlemenu:close', (event) => {
  */
 ipcMain.on(
   'comfy-window:open-title-menu',
-  (event, payload: { menu?: 'file' | 'install'; anchor?: { x?: number; y?: number } }) => {
+  (event, payload: { menu?: 'file'; anchor?: { x?: number; y?: number } }) => {
     const found = findEntryByTitleBarSender(event.sender)
     if (!found) return
     const { id: windowKey, entry } = found
     if (entry.window.isDestroyed()) return
-    const menuKind = payload?.menu
-    if (menuKind !== 'file' && menuKind !== 'install') return
-    // Install menu is install-scoped — refuse for install-less host windows.
-    if (menuKind === 'install' && entry.installationId === null) return
+    // Install caret menu was retired alongside the unified Settings
+    // modal — only the file/waffle menu is openable from the title bar.
+    if (payload?.menu !== 'file') return
 
     const x = Math.max(0, Math.round(payload?.anchor?.x ?? 0))
     const y = Math.max(0, Math.round(payload?.anchor?.y ?? TITLEBAR_HEIGHT))
@@ -3154,8 +3176,8 @@ ipcMain.on(
     openTitleMenuPopup({
       parent: entry.window,
       parentEntryId: windowKey,
-      kind: menuKind,
-      items: buildTitleMenuItems(menuKind, entry),
+      kind: 'file',
+      items: buildTitleMenuItems(entry),
       anchor: { x, y },
       theme: entry.lastTheme,
       titleBarSender: entry.titleBarView.webContents,

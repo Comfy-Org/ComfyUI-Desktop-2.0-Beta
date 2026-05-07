@@ -20,7 +20,7 @@ interface MockBridgeState {
   sourceCategoryChangedCallbacks: ((category: string | null) => void)[]
   themeChangedCallbacks: ((theme: { bg: string; text: string }) => void)[]
   fullscreenChangedCallbacks: ((fullscreen: boolean) => void)[]
-  menuClosedCallbacks: ((info: { menu: 'file' | 'install' }) => void)[]
+  menuClosedCallbacks: ((info: { menu: 'file' }) => void)[]
   firstUseModeChangedCallbacks: ((mode: 'none' | 'consent-lockdown' | 'post-consent') => void)[]
   appUpdateStateCallbacks: ((state: {
     kind: 'available' | 'ready' | null
@@ -32,7 +32,6 @@ interface MockBridgeState {
   setPanelCalls: string[]
   newWindowCalls: number
   fileMenuAnchors: { x: number; y: number }[]
-  installMenuAnchors: { x: number; y: number }[]
   appUpdatePillClicks: number
   installUpdatePillClicks: number
   downloadsTrayClicks: number
@@ -55,7 +54,6 @@ function installMockBridge(opts: { isMac?: boolean; installationId?: string | nu
     setPanelCalls: [],
     newWindowCalls: 0,
     fileMenuAnchors: [],
-    installMenuAnchors: [],
     appUpdatePillClicks: 0,
     installUpdatePillClicks: 0,
     downloadsTrayClicks: 0,
@@ -69,7 +67,6 @@ function installMockBridge(opts: { isMac?: boolean; installationId?: string | nu
     setPanel: (panel: string) => state.setPanelCalls.push(panel),
     openNewWindow: () => { state.newWindowCalls += 1 },
     openFileMenu: (anchor: { x: number; y: number }) => { state.fileMenuAnchors.push(anchor) },
-    openInstallMenu: (anchor: { x: number; y: number }) => { state.installMenuAnchors.push(anchor) },
     onPanelChanged: (cb: (panel: string) => void) => {
       state.panelChangedCallbacks.push(cb)
       return () => {}
@@ -156,17 +153,15 @@ describe('TitleBarApp', () => {
     expect(fileBtn.exists()).toBe(true)
     expect(fileBtn.attributes('aria-label')).toBe('Menu')
     expect(fileBtn.classes()).toContain('title-menu-button--icon')
-    // Install pill in the center — single button. Install-backed (mock
-    // returns 'test-id') so the chevron caret is rendered inside as
-    // decoration. The pill itself is the click target — the caret is
-    // not a separate button anymore.
+    // Center identity pill. Settings now lives on the File / waffle
+    // menu via the unified Settings modal, so the pill is no longer
+    // a click target — it renders as a non-interactive label and has
+    // no caret.
     const pill = wrapper.find('.title-install-pill')
     expect(pill.exists()).toBe(true)
-    expect(pill.element.tagName).toBe('BUTTON')
+    expect(pill.element.tagName).toBe('DIV')
     expect(wrapper.find('.title-install-name').text()).toBe('ComfyUI')
-    expect(wrapper.find('.title-install-caret').exists()).toBe(true)
-    // Caret is decoration (an SVG), not a button.
-    expect(wrapper.find('.title-install-caret').element.tagName).toBe('svg')
+    expect(wrapper.find('.title-install-caret').exists()).toBe(false)
   })
 
   it('signals readiness so main can push initial state', async () => {
@@ -176,20 +171,14 @@ describe('TitleBarApp', () => {
     expect(bridgeState.readyCalls).toBe(1)
   })
 
-  it('opens the native install menu when the install pill is clicked (whole pill is the click target)', async () => {
-    // Phase 3 §7 — the pill body and caret are no longer separate
-    // hit targets. Clicking anywhere on the pill (including over the
-    // name span or the chevron SVG) opens the native install menu.
+  it('does not route pill clicks to setPanel (pill is non-interactive)', async () => {
+    // Settings was unified into the File / waffle menu, so the center
+    // install pill is no longer a click target. Clicking it is a
+    // no-op and must not push a panel switch through the bridge.
     const { default: TitleBarApp } = await import('./TitleBarApp.vue')
     const wrapper = mount(TitleBarApp, { attachTo: document.body })
     await flushPromises()
     await wrapper.find('.title-install-pill').trigger('click')
-    expect(bridgeState.installMenuAnchors.length).toBe(1)
-    const anchor = bridgeState.installMenuAnchors[0]!
-    expect(typeof anchor.x).toBe('number')
-    expect(typeof anchor.y).toBe('number')
-    // The pill no longer routes clicks to setPanel — that gesture went
-    // away when the caret/name buttons collapsed into one.
     expect(bridgeState.setPanelCalls).toEqual([])
     wrapper.unmount()
   })
@@ -208,9 +197,11 @@ describe('TitleBarApp', () => {
     wrapper.unmount()
   })
 
-  it('does not open the install menu on install-less host windows (pill is disabled)', async () => {
-    // Phase 3 §7 — the install-less host window's pill is rendered
-    // disabled (no menu, no caret). Clicks must not reach the bridge.
+  it('renders the install-less pill as a non-interactive identity label', async () => {
+    // Install-less host windows show the static `Desktop 2.0 Beta`
+    // label set by main's initial title push. The pill is a div
+    // (no button, no caret) and carries the `is-install-less`
+    // modifier class.
     bridgeState = installMockBridge({ installationId: null })
     vi.resetModules()
     const { default: TitleBarApp } = await import('./TitleBarApp.vue')
@@ -218,10 +209,9 @@ describe('TitleBarApp', () => {
     await flushPromises()
     const pill = wrapper.find('.title-install-pill')
     expect(pill.exists()).toBe(true)
-    expect((pill.element as HTMLButtonElement).disabled).toBe(true)
+    expect(pill.element.tagName).toBe('DIV')
     expect(pill.classes()).toContain('is-install-less')
-    await pill.trigger('click')
-    expect(bridgeState.installMenuAnchors.length).toBe(0)
+    expect(wrapper.find('.title-install-caret').exists()).toBe(false)
     wrapper.unmount()
   })
 
@@ -248,7 +238,7 @@ describe('TitleBarApp', () => {
     bridgeState.panelChangedCallbacks.forEach((cb) => cb('comfy'))
     await flushPromises()
     expect(wrapper.find('.title-install-pill').classes()).not.toContain('active')
-    bridgeState.panelChangedCallbacks.forEach((cb) => cb('launcher-settings'))
+    bridgeState.panelChangedCallbacks.forEach((cb) => cb('settings'))
     await flushPromises()
     expect(wrapper.find('.title-install-pill').classes()).not.toContain('active')
   })
@@ -285,14 +275,16 @@ describe('TitleBarApp', () => {
   })
 
   it('accepts the install-less fallback label pushed by main', async () => {
+    // Main now pushes `Desktop 2.0 Beta` for install-less host
+    // windows in place of the previous `Choose an install` text.
     bridgeState = installMockBridge({ installationId: null })
     vi.resetModules()
     const { default: TitleBarApp } = await import('./TitleBarApp.vue')
     const wrapper = mount(TitleBarApp)
     await flushPromises()
-    bridgeState.titleChangedCallbacks.forEach((cb) => cb('Choose an install'))
+    bridgeState.titleChangedCallbacks.forEach((cb) => cb('Desktop 2.0 Beta'))
     await flushPromises()
-    expect(wrapper.find('.title-install-name').text()).toBe('Choose an install')
+    expect(wrapper.find('.title-install-name').text()).toBe('Desktop 2.0 Beta')
   })
 
   it('suppresses menu re-open immediately after a menu close (click-to-toggle dismiss)', async () => {
@@ -320,18 +312,13 @@ describe('TitleBarApp', () => {
     await wrapper.find('.title-menu-button').trigger('click')
     expect(bridgeState.fileMenuAnchors.length).toBe(1)
 
-    // Suppression is per-menu — clicking the install pill (different
-    // menu kind) is unaffected.
-    await wrapper.find('.title-install-pill').trigger('click')
-    expect(bridgeState.installMenuAnchors.length).toBe(1)
-
     wrapper.unmount()
   })
 
   it('hides the waffle menu during the first-use T&C consent step (consent-lockdown)', async () => {
     // Modal-unification (Track M-2.3) — the waffle menu is the only
     // always-live affordance during a Tier 3 takeover (it carries the
-    // Return-to-Dashboard / Close-Window escape hatch). The first-use
+    // Return-to-Dashboard / Close-All-Windows escape hatch). The first-use
     // T&C consent step deliberately removes that escape hatch so the
     // user has to either accept consent or close the window via OS
     // chrome — matching the binding-flow framing of consent. Once

@@ -4,7 +4,7 @@ import { i18n } from '../i18n'
 import type { Installation } from '../types/ipc'
 
 /**
- * Overlay slot foundation (Phase 3 §17 unified-window refactor).
+ * Overlay slot foundation.
  *
  * Each panel host (`PanelApp` and `ChooserView`) owns exactly ONE
  * `currentOverlay` slot — one DOM node mounted at a time. Opening a
@@ -12,8 +12,10 @@ import type { Installation } from '../types/ipc'
  * the tier-collision rules below.
  *
  * The kinds form a discriminated union:
- *   - `manage`   — DetailModal (Manage…) + confirm/prompt/channel
- *                  cards / action menus. Tier 1.
+ *   - `settings`  — Unified Settings modal (ComfyUI Settings tab via
+ *                   embedded DetailModal, Directories tab, Global
+ *                   Settings tab). Replaces the legacy `manage` and
+ *                   `page` kinds. Tier 1.
  *   - `downloads`  — Title-bar downloads tray popover. Tier 1.
  *   - `progress` — ProgressModal for a long-running action that does
  *                  NOT end in the running ComfyUI app (delete,
@@ -21,6 +23,15 @@ import type { Installation } from '../types/ipc'
  *   - `takeover` — Full-window takeover for actions that end in the
  *                  app (launch, install, update-then-restart,
  *                  first-use). Tier 3.
+ *
+ * Modal-unification — the legacy `'app-update'` Tier 1 overlay popover
+ * was retired in upstream's auto-updater pill+modal flow refactor.
+ * The title-bar app-update pill now drives a `useModal.confirm` modal
+ * (rendered by the global `<ModalDialog />` mount) directly from
+ * `PanelApp`'s `panel-trigger-overlay 'app-update'` handler, instead
+ * of going through this slot. The kind is gone from `OverlayKind` and
+ * the discriminated `Overlay` union to keep the type narrow to the
+ * surfaces this slot actually owns.
  *
  * App-update is NOT an overlay kind — the title-bar pill click pops a
  * `useModal.confirm` modal rendered by the global `<ModalDialog />`
@@ -57,13 +68,39 @@ import type { Installation } from '../types/ipc'
  * `Cancel "Updating ComfyUI"?`).
  */
 
-export type OverlayKind = 'manage' | 'downloads' | 'page' | 'progress' | 'takeover'
+export type OverlayKind = 'settings' | 'downloads' | 'progress' | 'takeover'
 
-export interface ManageOverlay {
-  kind: 'manage'
-  installation: Installation
-  initialTab?: string
+/**
+ * Unified Settings modal — ModalShell with a left-rail tab switcher
+ * hosting "ComfyUI Settings" (per-install DetailModal body),
+ * "Directories" (combined Models / Media browser), and "Global
+ * Settings" (launcher-wide settings). Replaces the legacy `manage`
+ * and `page` overlay kinds; every install-pill / waffle / chooser-
+ * card-Manage entry-point routes through here.
+ *
+ * `installation` is null on install-less host windows opening the
+ * modal from the file-menu Settings entry — the "ComfyUI Settings"
+ * tab is hidden and the default falls through to "Global Settings".
+ *
+ * `initialDetailTab` and `autoAction` are forwarded to the embedded
+ * DetailModal so chooser-card update / migrate pills can deep-link
+ * straight to the Update tab with the relevant action pre-armed.
+ *
+ * `noSidebar` collapses the modal to just the active tab's content
+ * (no left rail, no tab switcher). Used for chooser-card "Manage…" /
+ * Update / Migrate entry-points where the user picked a specific
+ * install and wants the focused per-install Settings surface — the
+ * sidebar's Directories / Global Settings tabs would be a distraction
+ * in that flow. The file-menu / title-bar Settings entry leaves it
+ * unset (default false) so the full sidebar layout renders.
+ */
+export interface SettingsOverlay {
+  kind: 'settings'
+  installation: Installation | null
+  initialTab: 'comfy' | 'directories' | 'global'
+  initialDetailTab?: string
   autoAction?: string | null
+  noSidebar?: boolean
 }
 
 /**
@@ -76,13 +113,6 @@ export interface ManageOverlay {
  */
 export interface DownloadsOverlay {
   kind: 'downloads'
-}
-
-/** Tier 1 page-style modal for waffle / install dropdown items
- *  (Directories, App Settings). Dismissible like Manage. */
-export interface PageOverlay {
-  kind: 'page'
-  page: 'directories' | 'launcher-settings'
 }
 
 export interface ProgressOverlay {
@@ -161,16 +191,14 @@ export interface TakeoverOverlay {
 }
 
 export type Overlay =
-  | ManageOverlay
+  | SettingsOverlay
   | DownloadsOverlay
-  | PageOverlay
   | ProgressOverlay
   | TakeoverOverlay
 
 const TIER: Record<OverlayKind, 1 | 2 | 3> = {
-  manage: 1,
+  settings: 1,
   downloads: 1,
-  page: 1,
   progress: 2,
   takeover: 3,
 }

@@ -357,13 +357,16 @@ describe('PanelApp', () => {
     expect(wrapper.find('[data-testid="settings-view"]').exists()).toBe(false)
   })
 
-  it('opens install-settings as a manage overlay in response to onPanelSwitch', async () => {
+  it('opens the unified Settings modal in response to onPanelSwitch', async () => {
+    // The unified Settings modal defaults to the ComfyUI Settings tab
+    // for install-backed hosts, which embeds the DetailModal body —
+    // assert via the DetailModal stub's testid.
     const wrapper = mountPanel()
     await flushPromises()
     expect(wrapper.find('[data-testid="detail-modal"]').exists()).toBe(false)
 
     expect(mockState.panelSwitchCallbacks.length).toBeGreaterThan(0)
-    mockState.panelSwitchCallbacks.forEach((cb) => cb({ panel: 'install-settings' }))
+    mockState.panelSwitchCallbacks.forEach((cb) => cb({ panel: 'settings' }))
     await flushPromises()
     expect(wrapper.find('[data-testid="detail-modal"]').exists()).toBe(true)
     // Body underneath stays on the default lifecycle view.
@@ -381,8 +384,8 @@ describe('PanelApp', () => {
     expect(wrapper.find('[data-testid="settings-view"]').exists()).toBe(false)
   })
 
-  it('renders the install-settings DetailModal for the URL installationId', async () => {
-    window.history.replaceState({}, '', '/?installationId=test-id&panel=install-settings')
+  it('renders the unified Settings modal (ComfyUI Settings tab) for the URL installationId', async () => {
+    window.history.replaceState({}, '', '/?installationId=test-id&panel=settings')
     const wrapper = mountPanel()
     await flushPromises()
     const detail = wrapper.find('[data-testid="detail-modal"]')
@@ -391,7 +394,7 @@ describe('PanelApp', () => {
   })
 
   it('refetches the installation when onInstallationsChanged fires', async () => {
-    window.history.replaceState({}, '', '/?installationId=test-id&panel=install-settings')
+    window.history.replaceState({}, '', '/?installationId=test-id&panel=settings')
     const wrapper = mountPanel()
     await flushPromises()
     expect(mockState.getInstallations).toHaveBeenCalledTimes(1)
@@ -406,8 +409,11 @@ describe('PanelApp', () => {
     expect(wrapper.find('[data-testid="detail-modal"]').exists()).toBe(true)
   })
 
-  it('does not open install-settings as an overlay when the installationId does not match', async () => {
-    window.history.replaceState({}, '', '/?installationId=missing-id&panel=install-settings')
+  it('does not open the ComfyUI Settings tab when the installationId does not match', async () => {
+    // The unified Settings modal still mounts on `panel=settings`, but
+    // with no matching installation it falls through to the Global
+    // Settings tab — DetailModal isn't embedded.
+    window.history.replaceState({}, '', '/?installationId=missing-id&panel=settings')
     const wrapper = mountPanel()
     await flushPromises()
     expect(wrapper.find('[data-testid="detail-modal"]').exists()).toBe(false)
@@ -424,24 +430,16 @@ describe('PanelApp', () => {
     expect(lifecycle.attributes('data-installation-id')).toBe('test-id')
   })
 
-  it('renders the directories view when initialised with panel=directories', async () => {
-    window.history.replaceState({}, '', '/?installationId=test-id&panel=directories')
+  it('opens the unified Settings modal on Global Settings for install-less hosts', async () => {
+    // Install-less hosts have no install backing, so the unified modal
+    // skips the ComfyUI Settings tab and lands on Global Settings —
+    // assert via the SettingsView stub's testid.
+    window.history.replaceState({}, '', '/?panel=settings')
     const wrapper = mountPanel()
     await flushPromises()
-    expect(wrapper.find('[data-testid="directories-view"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="settings-view"]').exists()).toBe(false)
-  })
-
-  it('opens the directories overlay in response to a panel-switch IPC event', async () => {
-    const wrapper = mountPanel()
-    await flushPromises()
-    expect(wrapper.find('[data-testid="directories-view"]').exists()).toBe(false)
-
-    mockState.panelSwitchCallbacks.forEach((cb) => cb({ panel: 'directories' }))
-    await flushPromises()
-    expect(wrapper.find('[data-testid="directories-view"]').exists()).toBe(true)
-    // Body underneath stays on the default lifecycle view.
-    expect(wrapper.find('[data-testid="comfy-lifecycle"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="settings-view"]').exists()).toBe(true)
+    // Body underneath stays on the chooser body for install-less hosts.
+    expect(wrapper.find('[data-testid="chooser-view"]').exists()).toBe(true)
   })
 
   it('opens the new-install takeover above the chooser body when show-new-install fires', async () => {
@@ -972,17 +970,20 @@ describe('PanelApp', () => {
       })
     })
 
-    it('fires desktop2.view.opened with the previous panel as from_view when opening directories', async () => {
+    it('fires desktop2.view.opened with the previous panel as from_view when opening unified settings', async () => {
       // Default install-backed host → comfy-lifecycle is the underlying body.
+      // The unified Settings modal replaced the legacy Directories /
+      // App Settings / Install Settings panels — switchPanel('settings')
+      // is the one telemetry-emitting overlay opener for the file menu.
       mountPanel()
       await flushPromises()
       const events = captureTelemetry()
-      mockState.panelSwitchCallbacks.forEach((cb) => cb({ panel: 'directories' }))
+      mockState.panelSwitchCallbacks.forEach((cb) => cb({ panel: 'settings' }))
       await flushPromises()
       const viewEvents = events.filter((e) => e.actionName === 'desktop2.view.opened')
       expect(viewEvents).toHaveLength(1)
       expect(viewEvents[0].context).toMatchObject({
-        view: 'directories',
+        view: 'settings',
         from_view: 'comfy-lifecycle',
       })
     })

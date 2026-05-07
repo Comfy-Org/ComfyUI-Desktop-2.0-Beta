@@ -68,6 +68,11 @@ function stubApi(overrides: Partial<ElectronApi> = {}): ElectronApi {
     getUpdateCapabilities: vi.fn().mockResolvedValue({ canAutoUpdate: true, systemManaged: false }),
     checkForUpdate: vi.fn().mockResolvedValue({ available: false }),
     openExternal: vi.fn(),
+    // Unified Settings modal moved settings-mutation refresh into
+    // SettingsView itself, so the component subscribes on mount —
+    // tests need an `onSettingsChanged` mock that returns a no-op
+    // unsubscribe function.
+    onSettingsChanged: vi.fn(() => () => {}),
     ...overrides,
   } as unknown as ElectronApi
 }

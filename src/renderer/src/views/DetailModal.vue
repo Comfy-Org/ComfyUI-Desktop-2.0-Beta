@@ -33,12 +33,20 @@ interface Props {
    *  backdrop, no Esc/click-outside dismiss). When false (default),
    *  render inline as the install-settings panel body. */
   asModal?: boolean
+  /** When true, render bare (no ModalShell wrapper, no close button)
+   *  for mounting inside a parent modal that owns the chrome — e.g.
+   *  the unified SettingsModal's "ComfyUI Settings" tab body. The
+   *  contenteditable install name renders as the first row of the
+   *  bare panel; everything else (tabs, scroll body, action bar)
+   *  follows unchanged. */
+  embedded?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   initialTab: 'status',
   autoAction: null,
   asModal: false,
+  embedded: false,
 })
 
 const emit = defineEmits<{
@@ -147,6 +155,30 @@ async function fetchInstallationSize(installationId: string): Promise<void> {
     if (gen === sizeGeneration) installationSizeLoading.value = false
   }
 }
+
+// Deep-link tab override — the title-bar install-update pill (and
+// chooser-card Update / Migrate pills) re-open the modal with a
+// non-default `initialTab` even when the same installation is
+// already in view. The installation watcher below treats those
+// re-opens as "not a new installation" so it skips the activeTab
+// reset; this watcher fills the gap and snaps the inner tab to the
+// requested one (when sections are already loaded — first-mount
+// alignment is still owned by the installation watcher's
+// `isNewInstallation` branch).
+watch(
+  () => props.initialTab,
+  (next, prev) => {
+    if (!next || next === prev) return
+    if (sections.value.length === 0) return
+    if (next === activeTab.value) return
+    const tabExists = sections.value.some((s) => s.tab === next)
+    if (!tabExists) return
+    activeTab.value = next
+    void nextTick(() => {
+      if (scrollRef.value) scrollRef.value.scrollTop = 0
+    })
+  },
+)
 
 watch(
   () => props.installation,
@@ -568,7 +600,7 @@ function navigateToInstallation(installationId: string): void {
 
 <template>
   <ModalShell
-    v-if="installation"
+    v-if="installation && !embedded"
     :inline="!asModal"
     opacity="dim"
     @close="handleHeaderClose"
@@ -659,4 +691,96 @@ function navigateToInstallation(installationId: string): void {
           </div>
         </div>
   </ModalShell>
+
+  <!-- Embedded mount: bare panel body for the unified SettingsModal's
+       "ComfyUI Settings" tab. No ModalShell, no close button — the
+       parent owns the chrome. Editable install name sits at the top
+       of the body; tabs / scroll / action-bar follow as in the
+       wrapped mount. -->
+  <div v-else-if="installation" class="detail-embedded">
+    <div class="detail-embedded-title">
+      <div
+        role="textbox"
+        :aria-label="$t('detail.editName', 'Edit installation name')"
+        contenteditable
+        spellcheck="false"
+        @blur="handleTitleBlur"
+        @keydown.enter.prevent="($event.target as HTMLElement).blur()"
+        @keydown.ctrl.a.prevent="handleTitleSelectAll"
+        @paste="handleTitlePaste"
+      >
+        {{ installation.name }}<Pencil :size="14" class="edit-name-hint" contenteditable="false" />
+      </div>
+    </div>
+    <div v-if="hasTabs" class="detail-tabs">
+      <button
+        v-for="tabId in availableTabs"
+        :key="tabId"
+        class="detail-tab"
+        :class="{ active: activeTab === tabId }"
+        @click="activeTab = tabId"
+      >
+        {{ tabLabels[tabId] ?? tabId }}
+      </button>
+    </div>
+    <div ref="scrollRef" class="view-scroll">
+      <div v-if="sectionsLoading" class="modal-loading with-spinner">{{ $t('common.loading') }}</div>
+      <SnapshotTab
+        v-else-if="activeTab === 'snapshots'"
+        :installation-id="installation.id"
+        @run-action="runAction"
+        @refresh-all="refreshAllSections"
+        @navigate-installation="navigateToInstallation"
+      />
+      <template v-else>
+        <DetailSectionComponent
+          v-for="section in mainSections"
+          :key="section.title ?? 'untitled'"
+          :installation-id="installation.id"
+          :title="section.title"
+          :description="section.description"
+          :collapsed="section.collapsed"
+          :items="section.items"
+          :fields="section.fields"
+          :actions="section.actions"
+          @run-action="runAction"
+          @refresh="refreshSection"
+          @refresh-all="refreshAllSections"
+        />
+        <div v-if="activeTab === 'status' && (installationSizeLoading || installationSize !== null)" class="detail-section">
+          <div class="detail-section-body">
+            <div class="detail-fields">
+              <div>
+                <div class="detail-field-label">{{ $t('diskSpace.sizeLabel') }}</div>
+                <div class="detail-field-value">
+                  {{ installationSizeLoading ? $t('diskSpace.calculatingSize') : (installationSize !== null ? formatBytes(installationSize) : $t('diskSpace.sizeUnavailable')) }}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </template>
+    </div>
+
+    <div v-if="bottomSection" id="detail-bottom-actions">
+      <div class="detail-actions">
+        <TooltipWrap
+          v-for="a in bottomActions"
+          :key="a.id"
+          :text="a.tooltip"
+        >
+          <button
+            :class="[
+              a.style,
+              { 'looks-disabled': a.enabled === false && a.disabledMessage }
+            ]"
+            :disabled="a.enabled === false && !a.disabledMessage"
+            @click="handleActionClick(a, $event)"
+          >
+            {{ a.label }}
+          </button>
+        </TooltipWrap>
+      </div>
+    </div>
+  </div>
 </template>
