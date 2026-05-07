@@ -198,6 +198,20 @@ let unsubAppUpdatePromptRestart: (() => void) | null = null
 let unsubAppUpdateUserActionFailed: (() => void) | null = null
 let unsubOpenFeedback: (() => void) | null = null
 
+/**
+ * Resolves once `onMounted` has finished its async bootstrap (locale +
+ * sessionStore + installationStore + launcherPrefs). The install-update
+ * deep-link handler awaits this before resolving the installation so a
+ * `panel-trigger-overlay` IPC that arrives during the panelView's
+ * first `did-finish-load` (i.e. before the store has hydrated) doesn't
+ * silently drop the click — it queues until the unified Settings modal
+ * can render against a populated store and translated copy.
+ */
+let resolveBootstrap: (() => void) | null = null
+const bootstrapReady: Promise<void> = new Promise<void>((resolve) => {
+  resolveBootstrap = resolve
+})
+
 /** App version cached at mount; appended to the support URL as the
  *  `ver` query param so feedback submissions can be filtered by build.
  *  Cached because the typeform open path is fire-and-forget and we
@@ -909,6 +923,53 @@ async function showAppUpdateDownloadPrompt(version: string | null): Promise<void
 }
 
 onMounted(async () => {
+  // Register the `panel-trigger-overlay` listener BEFORE any `await` so
+  // a deep-link IPC fired by main right after the panelView's first
+  // `did-finish-load` is never dropped. The install-update branch
+  // additionally `await`s `bootstrapReady` so it sees a populated
+  // installationStore + translated copy when it opens the unified
+  // Settings modal — without this gate the very first click on the
+  // title-bar install-update pill could either silently drop (no
+  // listener yet) or resolve `inst` to undefined and bail (store
+  // not yet hydrated), leaving the user perceiving the modal as
+  // "not navigating to the Update tab" on the first attempt.
+  //
+  // Other kinds (`app-update-*`, `downloads`) don't depend on the
+  // store, but they still benefit from the early registration since
+  // any of them can race the panelView's first load.
+  unsubPanelTriggerOverlay = window.api.onPanelTriggerOverlay((payload) => {
+    void (async () => {
+      if (payload.kind === 'app-update-restart-prompt') {
+        await bootstrapReady
+        await showAppUpdateRestartPrompt(payload.version ?? null)
+        return
+      }
+      if (payload.kind === 'app-update-download-prompt') {
+        await bootstrapReady
+        await showAppUpdateDownloadPrompt(payload.version ?? null)
+        return
+      }
+      if (payload.kind === 'install-update') {
+        const id = payload.installationId
+        if (!id || id !== installationId) return
+        await bootstrapReady
+        const inst = installationStore.getById(id)
+        if (!inst) return
+        await openOverlay({
+          kind: 'settings',
+          installation: inst,
+          initialTab: 'comfy',
+          initialDetailTab: 'update',
+        })
+        return
+      }
+      if (payload.kind === 'downloads') {
+        await bootstrapReady
+        await openOverlay({ kind: 'downloads' })
+      }
+    })()
+  })
+
   await loadLocale()
 
   unsubLocale = window.api.onLocaleChanged((messages) => {
@@ -948,47 +1009,6 @@ onMounted(async () => {
     void (async () => {
       const cleared = currentOverlay.value === null ? true : await closeOverlay()
       window.api.respondCloseRequest({ requestId, cleared })
-    })()
-  })
-
-  // Main forwards a title-bar status pill / tray click here. Each
-  // kind gets a different surface:
-  //   - `'app-update-restart-prompt'` / `'app-update-download-prompt'`
-  //     → `useModal.confirm` (issue #488). The "modal" wording in the
-  //     spec maps to actual modal chrome rather than a Tier 1 overlay.
-  //   - `'install-update'` → unified Settings modal opened on the
-  //     ComfyUI Settings tab with the embedded DetailModal pre-
-  //     selected on the Update sub-tab. The install-update pill is
-  //     suppressed in main on install-less hosts but we re-validate
-  //     the id here defensively (the subscription is the same in
-  //     both host kinds).
-  //   - `'downloads'` → Tier 1 downloads-tray popover.
-  unsubPanelTriggerOverlay = window.api.onPanelTriggerOverlay((payload) => {
-    void (async () => {
-      if (payload.kind === 'app-update-restart-prompt') {
-        await showAppUpdateRestartPrompt(payload.version ?? null)
-        return
-      }
-      if (payload.kind === 'app-update-download-prompt') {
-        await showAppUpdateDownloadPrompt(payload.version ?? null)
-        return
-      }
-      if (payload.kind === 'install-update') {
-        const id = payload.installationId
-        if (!id || id !== installationId) return
-        const inst = installationStore.getById(id)
-        if (!inst) return
-        await openOverlay({
-          kind: 'settings',
-          installation: inst,
-          initialTab: 'comfy',
-          initialDetailTab: 'update',
-        })
-        return
-      }
-      if (payload.kind === 'downloads') {
-        await openOverlay({ kind: 'downloads' })
-      }
     })()
   })
 
@@ -1047,6 +1067,14 @@ onMounted(async () => {
     installationStore.fetchInstallations(),
     launcherPrefs.loadPrefs(),
   ])
+
+  // Release any panel-trigger-overlay handler that arrived during the
+  // async bootstrap and parked on `bootstrapReady`. By this point the
+  // installation store, session store, and locales are all populated,
+  // so the unified Settings modal can render correctly on the first
+  // install-update pill click.
+  resolveBootstrap?.()
+  resolveBootstrap = null
 
   // If the URL-driven initial panel mounts as an overlay (flow wizard
   // or unified Settings modal), kick that open now — script-setup
