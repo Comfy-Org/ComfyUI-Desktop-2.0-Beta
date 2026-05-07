@@ -3,9 +3,7 @@ import type { IpcRendererEvent } from 'electron'
 
 export type ComfyPanelKey =
   | 'comfy'
-  | 'install-settings'
-  | 'launcher-settings'
-  | 'directories'
+  | 'settings'
   | 'new-install'
   | 'track'
   | 'load-snapshot'
@@ -58,9 +56,6 @@ export interface ComfyTitleBarBridge {
   /** Pop the File menu as a native OS menu. Avoids HTML popups that
    *  would be clipped by the title bar's WebContentsView bounds. */
   openFileMenu(anchor: TitleMenuAnchor): void
-  /** Pop the Install caret menu as a native OS menu. No-op for
-   *  install-less host windows (main filters by sender's entry). */
-  openInstallMenu(anchor: TitleMenuAnchor): void
   /** Browser-style Back arrow — step one entry backward in the host
    *  window's panel-history stack. No-op when at the root. */
   goBack(): void
@@ -86,11 +81,11 @@ export interface ComfyTitleBarBridge {
   /** Subscribe to macOS fullscreen state — drives traffic-light padding. */
   onFullscreenChanged(cb: (fullscreen: boolean) => void): () => void
   /** Subscribe to native title-bar menu close events. Fires when the
-   *  popup created by `openFileMenu` / `openInstallMenu` closes, after
-   *  the user picks an item or dismisses by clicking outside. The
-   *  renderer uses this to suppress an immediate re-open if the same
-   *  click that dismissed the menu also re-targets the menu button. */
-  onMenuClosed(cb: (info: { menu: 'file' | 'install' }) => void): () => void
+   *  popup created by `openFileMenu` closes, after the user picks an
+   *  item or dismisses by clicking outside. The renderer uses this to
+   *  suppress an immediate re-open if the same click that dismissed
+   *  the menu also re-targets the menu button. */
+  onMenuClosed(cb: (info: { menu: 'file' }) => void): () => void
   /** Subscribe to first-use takeover step changes (modal-unification
    *  Track M-2.2). Mode mirrors `firstUseMode` on the entry —
    *  `'none'` for no takeover mounted, `'consent-lockdown'` while the
@@ -182,9 +177,6 @@ const bridge: ComfyTitleBarBridge = {
   openFileMenu: (anchor) => {
     ipcRenderer.send('comfy-window:open-title-menu', { menu: 'file', anchor })
   },
-  openInstallMenu: (anchor) => {
-    ipcRenderer.send('comfy-window:open-title-menu', { menu: 'install', anchor })
-  },
   goBack: () => {
     ipcRenderer.send('comfy-window:go-back')
   },
@@ -238,7 +230,7 @@ const bridge: ComfyTitleBarBridge = {
   onMenuClosed: (cb) => {
     const handler = (_event: IpcRendererEvent, data: unknown): void => {
       const { menu } = (data || {}) as { menu?: unknown }
-      if (menu === 'file' || menu === 'install') cb({ menu })
+      if (menu === 'file') cb({ menu })
     }
     ipcRenderer.on('comfy-titlebar:menu-closed', handler)
     return () => ipcRenderer.removeListener('comfy-titlebar:menu-closed', handler)

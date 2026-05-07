@@ -1,13 +1,11 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import SettingsView from '../views/SettingsView.vue'
-import DetailModal from '../views/DetailModal.vue'
+import SettingsModal from '../views/SettingsModal.vue'
 import ProgressModal from '../views/ProgressModal.vue'
 import ModalDialog from '../components/ModalDialog.vue'
 import ComfyLifecycleView from './ComfyLifecycleView.vue'
 import ChooserView from '../views/ChooserView.vue'
-import DirectoriesView from '../views/DirectoriesView.vue'
 import NewInstallModal from '../views/NewInstallModal.vue'
 import TrackModal from '../views/TrackModal.vue'
 import LoadSnapshotModal from '../views/LoadSnapshotModal.vue'
@@ -31,14 +29,14 @@ import type { ActionResult, Installation, ShowProgressOpts } from '../types/ipc'
  * union in `src/main/index.ts` — `'comfy-lifecycle'` is the lifecycle UI
  * shown for the Comfy tab when no ComfyUI process is running, `'chooser'`
  * is the install-picker shown for the Comfy tab of an install-less host
- * window, the others are the title-bar pills that map directly to a panel.
+ * window, `'settings'` mounts the unified Settings modal as an overlay
+ * over the underlying body, and the remaining keys mount the install-
+ * flow wizards as Tier 3 takeovers.
  */
 export type PanelKey =
   | 'comfy-lifecycle'
   | 'chooser'
-  | 'install-settings'
-  | 'launcher-settings'
-  | 'directories'
+  | 'settings'
   | 'new-install'
   | 'track'
   | 'load-snapshot'
@@ -47,9 +45,7 @@ export type PanelKey =
 const VALID_PANELS: ReadonlySet<PanelKey> = new Set([
   'comfy-lifecycle',
   'chooser',
-  'install-settings',
-  'launcher-settings',
-  'directories',
+  'settings',
   'new-install',
   'track',
   'load-snapshot',
@@ -58,33 +54,23 @@ const VALID_PANELS: ReadonlySet<PanelKey> = new Set([
 
 /**
  * Panels that wrap a `*Modal` component which exposes an imperative
- * `open()` reset. Phase 3 §17 — these no longer mount as panel-body
- * branches; they mount in the host's takeover overlay slot (Tier 3)
- * via `useOverlay`. The set is still keyed on PanelKey because main
- * still addresses these as "panel switch" requests (URL `?panel=…`
- * and the `panel-switch` IPC) — `switchPanel` diverts them into
- * `openOverlay({ kind: 'takeover', component })` instead of assigning
- * `activePanel`.
+ * `open()` reset. These mount in the host's takeover overlay slot
+ * (Tier 3) via `useOverlay` rather than as a body branch. The set
+ * is still keyed on PanelKey because main still addresses these as
+ * "panel switch" requests (URL `?panel=…` and the `panel-switch`
+ * IPC) — `switchPanel` diverts them into
+ * `openOverlay({ kind: 'takeover', component })` instead of
+ * assigning `activePanel`.
  *
  * Each entry has a matching `*Ref` template ref so we can call the
  * imperative `open()` reset after the takeover mounts (form state
- * carries over otherwise — same reason the pre-§17 panel-body
- * branches needed the post-mount `open()`).
+ * carries over otherwise).
  */
 const FLOW_PANELS: ReadonlySet<PanelKey> = new Set([
   'new-install',
   'track',
   'load-snapshot',
   'quick-install',
-])
-
-/** Panels that mount as Tier 1 page modals (waffle / install dropdown
- *  items). Like FLOW_PANELS they never sit in `activePanel` — they
- *  open as overlays on top of the chooser / comfy-lifecycle body. */
-const PAGE_PANELS: ReadonlySet<PanelKey> = new Set([
-  'directories',
-  'launcher-settings',
-  'install-settings',
 ])
 
 const { setLocaleMessage, locale } = useI18n()
@@ -110,15 +96,14 @@ const initialPanel: PanelKey = ((): PanelKey => {
   return defaultBodyPanel()
 })()
 
-// `activePanel` is the underlying body. Flow / page keys never sit
-// here — they mount in the overlay slot via the post-mount
-// `switchPanel(initialPanel)` in `onMounted`.
+// `activePanel` is the underlying body. Flow keys and the unified
+// settings key never sit here — they mount in the overlay slot via
+// the post-mount `switchPanel(initialPanel)` in `onMounted`.
 const activePanel = ref<PanelKey>(
-  FLOW_PANELS.has(initialPanel) || PAGE_PANELS.has(initialPanel)
+  FLOW_PANELS.has(initialPanel) || initialPanel === 'settings'
     ? defaultBodyPanel()
     : initialPanel,
 )
-const settingsRef = ref<InstanceType<typeof SettingsView> | null>(null)
 const progressRef = ref<InstanceType<typeof ProgressModal> | null>(null)
 const newInstallRef = ref<InstanceType<typeof NewInstallModal> | null>(null)
 const trackRef = ref<InstanceType<typeof TrackModal> | null>(null)
@@ -185,7 +170,6 @@ const installation = computed<Installation | null>(
 
 let unsubPanel: (() => void) | null = null
 let unsubLocale: (() => void) | null = null
-let unsubSettings: (() => void) | null = null
 let unsubCloseRequest: (() => void) | null = null
 let unsubPanelTriggerOverlay: (() => void) | null = null
 let unsubFirstUseSkip: (() => void) | null = null
@@ -388,14 +372,14 @@ function dismissTakeoverDirect(): void {
   if (currentOverlay.value?.kind === 'takeover' && currentOverlay.value.component === 'first-use') {
     window.api.setFirstUseMode('none')
   }
-  // Page / manage overlays come from a title-bar `setPanel` IPC that
+  // The Settings overlay comes from a title-bar `setPanel` IPC that
   // also flipped main's `entry.activePanel` away from `'comfy'`,
   // hiding the live comfy WebContentsView. Closing the overlay only
   // clears the renderer-side modal — without IPC'ing main back to
   // `'comfy'` the comfy view stays hidden and the user perceives the
   // running instance as "shut down". `closeCurrentPanel` resets
   // entry.activePanel to `'comfy'` and re-runs layoutViews().
-  if (currentOverlay.value?.kind === 'page' || currentOverlay.value?.kind === 'manage') {
+  if (currentOverlay.value?.kind === 'settings') {
     window.api.closeCurrentPanel()
   }
   currentOverlay.value = null
@@ -626,27 +610,27 @@ watch(
  * Switch the underlying panel body. Flow keys (`new-install` / `track`
  * / `load-snapshot` / `quick-install`) divert into the Tier 3
  * takeover overlay slot instead of swapping the body — see
- * `openFlowTakeover` for why.
+ * `openFlowTakeover` for why. The unified `settings` key opens the
+ * Tier 1 SettingsModal at the default tab for the host (ComfyUI
+ * Settings on install-backed, Global Settings on install-less);
+ * deeper tab targets (e.g. install-update) come through the
+ * `panel-trigger-overlay` IPC and bypass `switchPanel`.
  *
- * For non-flow keys: the assignment is idempotent — re-selecting the
- * already-active panel is a no-op, matching what the user perceives
- * (the title-bar pill click is just "go to this page", with no reset
- * semantics needed for tab-style views like Settings / Directories).
+ * For non-overlay keys: the assignment is idempotent — re-selecting
+ * the already-active panel is a no-op.
  */
 async function switchPanel(panel: PanelKey): Promise<void> {
   if (FLOW_PANELS.has(panel)) {
     await openFlowTakeover(panel as FlowComponent)
     return
   }
-  // Waffle / install dropdown items render as Tier 1 modals on top of
-  // the underlying chooser / comfy-lifecycle body — never as a body
-  // swap that hides the home view.
-  if (panel === 'directories' || panel === 'launcher-settings') {
-    await openOverlay({ kind: 'page', page: panel })
-    return
-  }
-  if (panel === 'install-settings' && installation.value) {
-    await openOverlay({ kind: 'manage', installation: installation.value })
+  if (panel === 'settings') {
+    const inst = installation.value
+    await openOverlay({
+      kind: 'settings',
+      installation: inst,
+      initialTab: inst ? 'comfy' : 'global',
+    })
     return
   }
   activePanel.value = panel
@@ -759,11 +743,8 @@ onMounted(async () => {
     }
   })
 
-  // Settings broadcast — refetch the launcher settings sections so panels
-  // opened in multiple windows stay in sync.
-  unsubSettings = window.api.onSettingsChanged(() => {
-    settingsRef.value?.loadSettings()
-  })
+  // (Settings refetch on settings-changed lives inside SettingsView's
+  // own `onMounted`/`onUnmounted`.)
 
   // Step 5 §16 — main consults the panel renderer before tearing down
   // the host window. Funnel the consult through `closeOverlay()` so a
@@ -780,15 +761,18 @@ onMounted(async () => {
     })()
   })
 
-  // Phase 3 §18 — main forwards a title-bar status pill click here.
-  // The renderer routes each kind through `useOverlay.openOverlay`:
+  // Title-bar status pill click forwards from main. The renderer
+  // routes each kind through `useOverlay.openOverlay`:
   //   - `'app-update'` → Tier 1 popover (AppUpdatePopover) reading
   //     state from the shared `useAppUpdateState` composable.
-  //   - `'install-update'` → Manage overlay (DetailModal) on the
-  //     update tab, scoped to the carried `installationId`. The
-  //     install-update pill is suppressed in main on install-less
-  //     hosts but we re-validate the id here defensively (the
-  //     subscription is the same in both host kinds).
+  //   - `'install-update'` → unified Settings modal opened on the
+  //     ComfyUI Settings tab with the embedded DetailModal pre-
+  //     selected on the Update sub-tab. The install-update pill is
+  //     suppressed in main on install-less hosts but we re-validate
+  //     the id here defensively (the subscription is the same in
+  //     both host kinds).
+  //   - `'downloads'` → Tier 1 popover (DownloadsTrayPopover)
+  //     reading from the renderer's `downloadStore`.
   unsubPanelTriggerOverlay = window.api.onPanelTriggerOverlay((payload) => {
     void (async () => {
       if (payload.kind === 'app-update') {
@@ -801,17 +785,14 @@ onMounted(async () => {
         const inst = installationStore.getById(id)
         if (!inst) return
         await openOverlay({
-          kind: 'manage',
+          kind: 'settings',
           installation: inst,
-          initialTab: 'update',
+          initialTab: 'comfy',
+          initialDetailTab: 'update',
         })
         return
       }
       if (payload.kind === 'downloads') {
-        // Track F — title-bar downloads tray click. Mounts the
-        // DownloadsTrayPopover at Tier 1; the popover reads its
-        // data from the renderer's `downloadStore` so no extra
-        // payload is needed.
         await openOverlay({ kind: 'downloads' })
       }
     })()
@@ -829,7 +810,8 @@ onMounted(async () => {
     void completeFirstUseAndDismiss()
   })
 
-  // Initialize stores / prefs needed by the install-settings DetailModal.
+  // Initialize stores / prefs needed by the embedded DetailModal that
+  // backs the unified Settings modal's "ComfyUI Settings" tab.
   // installationStore wires its own onInstallationsChanged listener.
   await Promise.all([
     sessionStore.init(),
@@ -838,19 +820,19 @@ onMounted(async () => {
   ])
 
   // If the URL-driven initial panel mounts as an overlay (flow wizard
-  // or page modal), kick that open now — script-setup couldn't because
-  // the template hadn't rendered yet.
-  if (FLOW_PANELS.has(initialPanel) || PAGE_PANELS.has(initialPanel)) {
+  // or unified Settings modal), kick that open now — script-setup
+  // couldn't because the template hadn't rendered yet.
+  if (FLOW_PANELS.has(initialPanel) || initialPanel === 'settings') {
     void switchPanel(initialPanel)
   }
 
-  // Phase 3 §17 Step 4 — first-use takeover auto-mounts when the
-  // persisted gate is still false. Runs AFTER the URL-driven flow
-  // panel branch so a `?panel=new-install` request still wins (e.g.
-  // when main re-routes a chooser pick into new-install for an
-  // un-installed source); the first-use takeover will replay on the
-  // next launch since `firstUseCompleted` stays false until the
-  // explicit completion path runs.
+  // First-use takeover auto-mounts when the persisted gate is still
+  // false. Runs AFTER the URL-driven flow panel branch so a
+  // `?panel=new-install` request still wins (e.g. when main re-routes
+  // a chooser pick into new-install for an un-installed source); the
+  // first-use takeover will replay on the next launch since
+  // `firstUseCompleted` stays false until the explicit completion
+  // path runs.
   if (!launcherPrefs.firstUseCompleted.value && !FLOW_PANELS.has(initialPanel)) {
     void openFirstUseTakeover()
   }
@@ -859,7 +841,6 @@ onMounted(async () => {
 onUnmounted(() => {
   unsubPanel?.()
   unsubLocale?.()
-  unsubSettings?.()
   unsubCloseRequest?.()
   unsubPanelTriggerOverlay?.()
   unsubFirstUseSkip?.()
@@ -929,34 +910,24 @@ onUnmounted(() => {
       v-else-if="currentOverlay?.kind === 'downloads'"
       @close="dismissTakeoverDirect"
     />
-    <!-- Tier 1 manage. ChooserView renders it inline when active so
-         it can refresh card state; PanelApp handles every other body. -->
-    <DetailModal
-      v-else-if="currentOverlay?.kind === 'manage' && activePanel !== 'chooser'"
+    <!-- Tier 1 unified Settings modal — replaces the legacy split
+         between Install Settings (DetailModal manage), Directories,
+         and App Settings. Mounted with `installation` carried by the
+         overlay payload (chooser-card Manage uses the card's install,
+         install-pill / waffle uses the host's install, install-less
+         host's waffle entry passes null). The body underneath stays
+         on chooser / comfy-lifecycle so dismissing returns there. -->
+    <SettingsModal
+      v-else-if="currentOverlay?.kind === 'settings'"
       :installation="currentOverlay.installation"
       :initial-tab="currentOverlay.initialTab"
+      :initial-detail-tab="currentOverlay.initialDetailTab"
       :auto-action="currentOverlay.autoAction"
-      :as-modal="true"
       @close="dismissTakeoverDirect"
       @show-progress="handleShowProgress"
       @update:installation="handleUpdateInstallation"
       @navigate-list="handleNavigateList"
     />
-    <!-- Tier 1 page modals (Directories / App Settings) — fired from
-         the waffle / install dropdown menus. Each view wraps itself in
-         ModalShell; the body underneath stays on chooser /
-         comfy-lifecycle so dismissing returns there. -->
-    <template v-else-if="currentOverlay?.kind === 'page'">
-      <SettingsView
-        v-if="currentOverlay.page === 'launcher-settings'"
-        ref="settingsRef"
-        @close="dismissTakeoverDirect"
-      />
-      <DirectoriesView
-        v-else-if="currentOverlay.page === 'directories'"
-        @close="dismissTakeoverDirect"
-      />
-    </template>
     <!-- Tier 2 progress slot. ProgressModal owns its own backdrop via
          the unified Modal primitive. -->
     <ProgressModal
@@ -1036,18 +1007,15 @@ onUnmounted(() => {
   overflow: hidden;
 }
 
-/* Install-settings hosts an inline DetailModal and the comfy-lifecycle view
- * fills its own background — both own their padding, so negate the
- * panel-content gutter for those branches. The chooser owns its own
- * filter / grid padding and needs the full panel height so its grid
- * can scroll vertically. */
-.panel-content:has(.panel-install-settings),
+/* The comfy-lifecycle view fills its own background and the chooser
+ * owns its own filter / grid padding (and needs the full panel height
+ * so its grid can scroll vertically) — negate the panel-content
+ * gutter for those branches. */
 .panel-content:has(.panel-comfy-lifecycle),
 .panel-content:has(.panel-chooser) {
   padding: 0;
 }
 
-.panel-install-settings,
 .panel-comfy-lifecycle,
 .panel-chooser {
   flex: 1;

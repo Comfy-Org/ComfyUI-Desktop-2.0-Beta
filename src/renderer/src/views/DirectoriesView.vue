@@ -1,20 +1,17 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { useI18n } from 'vue-i18n'
 import DirCard from '../components/DirCard.vue'
 import SettingField from '../components/SettingField.vue'
 import InfoTooltip from '../components/InfoTooltip.vue'
-import ModalShell from '../components/ModalShell.vue'
 import type { ModelsSection, SettingsSection } from '../types/ipc'
 
-const { t } = useI18n()
-
-const emit = defineEmits<{ close: [] }>()
-
 /**
- * Combined Models + Media directory browser. Lists each on-disk
- * directory the active installation reads/writes (model paths,
- * shared input/output) and lets the user add, browse, and reorder.
+ * Bare combined Models + Media directory panel body. Mounted inside
+ * the unified SettingsModal as the "Directories" tab. Lists each
+ * on-disk directory the launcher reads/writes (model paths, shared
+ * input/output) and lets the user add, browse, and reorder. Owns
+ * its own data fetch but no chrome — the parent supplies the
+ * ModalShell and close button.
  */
 
 const modelsSystemDefault = ref('')
@@ -85,7 +82,7 @@ defineExpose({ loadAll, loadModels, loadMedia })
 </script>
 
 <template>
-  <ModalShell :title="t('directories.title')" @close="emit('close')">
+  <div class="directories-panel">
     <!-- Models section: shared model directory list with primary marker. -->
     <div
       v-for="(section, sIdx) in modelsSections"
@@ -136,5 +133,5 @@ defineExpose({ loadAll, loadModels, loadMedia })
         />
       </div>
     </div>
-  </ModalShell>
+  </div>
 </template>

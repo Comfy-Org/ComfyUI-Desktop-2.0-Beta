@@ -4,10 +4,9 @@ import { useInstallationStore } from '../stores/installationStore'
 import { useSessionStore } from '../stores/sessionStore'
 import { useProgressStore } from '../stores/progressStore'
 import { useInstallContextMenu } from '../composables/useInstallContextMenu'
-import { useOverlay, type ManageOverlay } from '../composables/useOverlay'
+import { useOverlay } from '../composables/useOverlay'
 import { Cloud, Plus, AlertCircle, ArrowDownToLine, ArrowRightLeft, MoreVertical, Play, ExternalLink, Square, Loader2 } from 'lucide-vue-next'
 import ContextMenu from '../components/ContextMenu.vue'
-import DetailModal from './DetailModal.vue'
 import { installTypeMetaFor } from '../lib/installTypeIcon'
 import type { Installation, ShowProgressOpts } from '../types/ipc'
 
@@ -159,44 +158,32 @@ function timeAgo(timestamp: number): string {
 //   - Right-click on a card → context menu at click coords.
 //   - Click on the kebab (⋮) button at the top-right of a card →
 //     dropdown anchored to the button.
-// Both menus carry the same items: Manage… (opens the install's
-// DetailModal as an overlay) and Dismiss error (when set), plus
-// the per-install Update / Migrate / Restore Snapshot / Open Folder
-// / Delete actions surfaced by `useInstallContextMenu`.
-// The card body's bare click goes through `openManage` — the fast-
-// path for "tell me about this install" — and the kebab
-// `stopPropagation`s so it doesn't double-fire as a card click.
-//
-// Phase 3 §17 — the chooser owns its own overlay slot so Manage opens
-// without the Teleport-to-body hack the §8 rebuild used. The slot is
-// Tier 1; Tier 2/3 ops kicked off from the modal flow up to PanelApp's
-// own slot which pre-empts this one visually (its z-index is higher).
-const { current: currentOverlay, openOverlay, closeOverlay } = useOverlay()
-
-/** Currently-mounted Manage overlay payload, or null. Computed from
- *  `currentOverlay` so the template binds plain refs. Manage is the
- *  only `kind` ChooserView mounts in its own slot today. */
-const manageOverlay = computed<ManageOverlay | null>(() =>
-  currentOverlay.value?.kind === 'manage' ? currentOverlay.value : null
-)
+// Both menus carry the same items: Manage… (opens the unified
+// Settings modal on the ComfyUI Settings tab) and Dismiss error
+// (when set), plus the per-install Update / Migrate / Restore
+// Snapshot / Open Folder / Delete actions surfaced by
+// `useInstallContextMenu`. The card body itself launches the
+// install — Manage is reachable only via the kebab and right-click.
+const { openOverlay } = useOverlay()
 
 /**
- * Open the Manage modal for `inst` in the chooser's overlay slot.
- *
- * Single entry-point that replaces the per-call-site duplication the
- * §8 chooser had: the kebab/right-click `onManage` callback, the
- * card-body single-click handler, and the update / migrate pill
- * click handlers all funnel through here with their preferred
- * `initialTab` / `autoAction` deep-link parameters.
+ * Open the unified Settings modal on the ComfyUI Settings tab for
+ * `inst`. Single entry-point that the kebab/right-click `onManage`
+ * callback and the update / migrate pill click handlers funnel
+ * through with their preferred `initialTab` / `autoAction` deep-
+ * link parameters (forwarded to the embedded DetailModal). The
+ * overlay is owned by the singleton `useOverlay`; `PanelApp`
+ * mounts the SettingsModal in its host-level overlay slot.
  */
 function openManage(
   installation: Installation,
   opts: { initialTab?: string; autoAction?: string | null } = {},
 ): void {
   void openOverlay({
-    kind: 'manage',
+    kind: 'settings',
     installation,
-    initialTab: opts.initialTab ?? 'status',
+    initialTab: 'comfy',
+    initialDetailTab: opts.initialTab ?? 'status',
     autoAction: opts.autoAction ?? null,
   })
 }
@@ -214,40 +201,7 @@ const {
   onManage: (inst, opts) => openManage(inst, opts ?? {}),
 })
 
-/** DetailModal `update:installation` event — the user edited the
- *  install (renamed it, changed its launch settings, etc.). Splice
- *  the new record in place so the modal and the underlying card stay
- *  in sync without round-tripping through `getInstallations`, and
- *  refresh the overlay payload so DetailModal's `installation` prop
- *  picks up the new fields. Mirrors the pattern PanelApp uses for the
- *  install-settings DetailModal. */
-function handleManageUpdate(inst: Installation): void {
-  const idx = installationStore.installations.findIndex((i) => i.id === inst.id)
-  if (idx >= 0) installationStore.installations.splice(idx, 1, inst)
-  if (manageOverlay.value) {
-    currentOverlay.value = { ...manageOverlay.value, installation: inst }
-  }
-}
 
-/** DetailModal `navigate-list` event — the install was deleted /
- *  migrated. Close the overlay so the user is returned to the chooser
- *  grid; the installationsChanged broadcast already updated the store
- *  so the deleted card has dropped out of `visibleInstalls`. */
-function handleManageNavigateList(): void {
-  void closeOverlay()
-}
-
-/** DetailModal `show-progress` event — bubble straight up to PanelApp.
- *  PanelApp's host-level overlay slot is Tier 2 and pre-empts this
- *  Tier 1 manage overlay automatically (its DOM node sits at a higher
- *  z-index over the chooser's slot). The legacy `actionId === 'launch'`
- *  swap-in-place special-case is gone — the takeover-replaces-modal
- *  rule subsumes it; the launch action's progress runs in the shared
- *  ProgressModal like everything else and the eventual swap to the
- *  install host happens after the takeover ends. */
-function handleManageShowProgress(opts: ShowProgressOpts): void {
-  emit('show-progress', opts)
-}
 
 // --- Card status classes (running, stopping, in-progress, errored) ---
 function statusClasses(inst: Installation): Record<string, boolean> {
@@ -311,6 +265,24 @@ function pickInstall(inst: Installation): void {
  *  DashboardCard "Show Window" CTA. */
 function focusInstance(inst: Installation): void {
   void window.api.focusComfyWindow(inst.id)
+}
+
+/** Single-click on the card body. Launches the install (or focuses
+ *  its existing ComfyUI window when one is already running). Manage
+ *  lives behind the kebab and right-click context menu, not the
+ *  card body itself. In-progress installs route to the View Progress
+ *  surface (the same handler the bottom-right CTA uses) so a click
+ *  during a long-running op doesn't try to launch on top of it. */
+function handleCardClick(inst: Installation): void {
+  if (sessionStore.isRunning(inst.id)) {
+    focusInstance(inst)
+    return
+  }
+  if (progressFor(inst)) {
+    viewProgress(inst)
+    return
+  }
+  pickInstall(inst)
 }
 
 /** Running card — stop the install's ComfyUI process. Mirrors the
@@ -412,19 +384,16 @@ function handleNewInstallClick(): void {
       </button>
 
       <!-- Install tiles (recents-ordered).
-           Single-click on the tile body opens the Manage modal —
-           the implicit "click-to-launch" gesture was confusing
-           ("did clicking just kick off a process?"), so the explicit
-           Play button (overlaid bottom-right) is the launch CTA and
-           a double-click on the tile body is the convenience
-           gesture for the same. The kebab (⋮) and Play button
-           `@click.stop` so they don't double-fire as a card click.
-           Right-click opens the kebab's menu at pointer coords as a
-           power-user gesture. We can't use a native <button> for
-           the tile because it carries a <button> kebab + Play CTA
-           inside; nested buttons aren't valid HTML, so the tile is
-           a `role="button"` div with explicit Enter/Space handlers
-           for keyboard activation. -->
+           Single-click on the tile body launches the install (or
+           focuses its already-running ComfyUI window). The card body
+           has no Manage gesture — Manage lives only behind the
+           kebab (⋮) and the right-click context menu. The kebab and
+           bottom-right CTA buttons `@click.stop` so they don't
+           double-fire as a card click. We can't use a native
+           <button> for the tile because it carries a <button> kebab
+           + CTA inside; nested buttons aren't valid HTML, so the
+           tile is a `role="button"` div with explicit Enter/Space
+           handlers for keyboard activation. -->
       <div
         v-for="inst in visibleInstalls"
         :key="inst.id"
@@ -432,10 +401,9 @@ function handleNewInstallClick(): void {
         tabindex="0"
         class="chooser-tile"
         :class="statusClasses(inst)"
-        @click="openManage(inst)"
-        @dblclick="pickInstall(inst)"
-        @keydown.enter="openManage(inst)"
-        @keydown.space.prevent="openManage(inst)"
+        @click="handleCardClick(inst)"
+        @keydown.enter="handleCardClick(inst)"
+        @keydown.space.prevent="handleCardClick(inst)"
         @contextmenu.prevent="openCardMenu($event, inst)"
       >
         <div
@@ -530,9 +498,10 @@ function handleNewInstallClick(): void {
           </span>
           <!-- Update / migrate pills surface card-level prompts that
                previously only lived inside Install Settings. Each
-               pill is a click target that opens the Manage modal
-               directly on the relevant surface (Update tab /
-               migrate-to-standalone auto-action) — the legacy
+               pill is a click target that opens the unified Settings
+               modal on the ComfyUI Settings tab / relevant inner
+               surface (Update tab / migrate-to-standalone
+               auto-action) — the legacy
                DashboardCard wired the same `show-update` /
                `show-migrate` shortcuts and the chooser was missing
                them after the §8 rebuild. `@click.stop` prevents the
@@ -593,7 +562,8 @@ function handleNewInstallClick(): void {
                - installed (idle): "Play" launches via pickInstall,
                  routing through PanelApp's chooser-pick pipeline.
              Each button `@click.stop`s so it doesn't double-fire as
-             a card-body click (which opens Manage). -->
+             a card-body click (which launches the install or focuses
+             the running window). -->
         <div class="chooser-tile-cta">
           <template v-if="progressFor(inst)">
             <button
@@ -659,27 +629,6 @@ function handleNewInstallClick(): void {
       :items="ctxMenuItems"
       @close="closeMenu"
       @select="handleCtxMenuSelect"
-    />
-
-    <!-- Chooser overlay slot (Tier 1 manage). DetailModal wraps itself
-         in the unified Modal primitive when `as-modal` is set, so the
-         backdrop / Teleport / dismiss behaviour is owned by Modal.vue
-         rather than a bespoke `view-modal active` wrapper. ChooserView
-         keeps the mount so chooser-specific events (navigate-list,
-         update:installation) can bubble back to refresh the cards;
-         PanelApp's host-level slot suppresses its own manage render
-         while `activePanel === 'chooser'` so the singleton useOverlay
-         doesn't double-render. -->
-    <DetailModal
-      v-if="manageOverlay"
-      :installation="manageOverlay.installation"
-      :initial-tab="manageOverlay.initialTab"
-      :auto-action="manageOverlay.autoAction"
-      :as-modal="true"
-      @close="closeOverlay"
-      @navigate-list="handleManageNavigateList"
-      @update:installation="handleManageUpdate"
-      @show-progress="handleManageShowProgress"
     />
   </div>
 </template>
@@ -1031,8 +980,8 @@ function handleNewInstallClick(): void {
 /* CTA cluster — overlay anchored to the bottom-right of each tile.
  * Sits above the meta line so it's the first thing the user reaches
  * for. The buttons inside are explicit launch / show window / stop /
- * view-progress targets, distinct from the card body's "open Manage"
- * single-click gesture. */
+ * view-progress targets, distinct from the card body's single-click
+ * launch / focus-running-window gesture. */
 .chooser-tile-cta {
   position: absolute;
   right: 12px;

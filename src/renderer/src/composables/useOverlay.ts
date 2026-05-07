@@ -4,7 +4,7 @@ import { i18n } from '../i18n'
 import type { Installation } from '../types/ipc'
 
 /**
- * Overlay slot foundation (Phase 3 §17 unified-window refactor).
+ * Overlay slot foundation.
  *
  * Each panel host (`PanelApp` and `ChooserView`) owns exactly ONE
  * `currentOverlay` slot — one DOM node mounted at a time. Opening a
@@ -12,8 +12,10 @@ import type { Installation } from '../types/ipc'
  * the tier-collision rules below.
  *
  * The kinds form a discriminated union:
- *   - `manage`   — DetailModal (Manage…) + confirm/prompt/channel
- *                  cards / action menus. Tier 1.
+ *   - `settings`  — Unified Settings modal (ComfyUI Settings tab via
+ *                   embedded DetailModal, Directories tab, Global
+ *                   Settings tab). Replaces the legacy `manage` and
+ *                   `page` kinds. Tier 1.
  *   - `app-update` — Title-bar app-update pill popover. Tier 1.
  *   - `downloads`  — Title-bar downloads tray popover. Tier 1.
  *   - `progress` — ProgressModal for a long-running action that does
@@ -54,12 +56,29 @@ import type { Installation } from '../types/ipc'
  * `Cancel "Updating ComfyUI"?`).
  */
 
-export type OverlayKind = 'manage' | 'app-update' | 'downloads' | 'page' | 'progress' | 'takeover'
+export type OverlayKind = 'settings' | 'app-update' | 'downloads' | 'progress' | 'takeover'
 
-export interface ManageOverlay {
-  kind: 'manage'
-  installation: Installation
-  initialTab?: string
+/**
+ * Unified Settings modal — ModalShell with a left-rail tab switcher
+ * hosting "ComfyUI Settings" (per-install DetailModal body),
+ * "Directories" (combined Models / Media browser), and "Global
+ * Settings" (launcher-wide settings). Replaces the legacy `manage`
+ * and `page` overlay kinds; every install-pill / waffle / chooser-
+ * card-Manage entry-point routes through here.
+ *
+ * `installation` is null on install-less host windows opening the
+ * modal from the file-menu Settings entry — the "ComfyUI Settings"
+ * tab is hidden and the default falls through to "Global Settings".
+ *
+ * `initialDetailTab` and `autoAction` are forwarded to the embedded
+ * DetailModal so chooser-card update / migrate pills can deep-link
+ * straight to the Update tab with the relevant action pre-armed.
+ */
+export interface SettingsOverlay {
+  kind: 'settings'
+  installation: Installation | null
+  initialTab: 'comfy' | 'directories' | 'global'
+  initialDetailTab?: string
   autoAction?: string | null
 }
 
@@ -84,13 +103,6 @@ export interface AppUpdateOverlay {
  */
 export interface DownloadsOverlay {
   kind: 'downloads'
-}
-
-/** Tier 1 page-style modal for waffle / install dropdown items
- *  (Directories, App Settings). Dismissible like Manage. */
-export interface PageOverlay {
-  kind: 'page'
-  page: 'directories' | 'launcher-settings'
 }
 
 export interface ProgressOverlay {
@@ -169,18 +181,16 @@ export interface TakeoverOverlay {
 }
 
 export type Overlay =
-  | ManageOverlay
+  | SettingsOverlay
   | AppUpdateOverlay
   | DownloadsOverlay
-  | PageOverlay
   | ProgressOverlay
   | TakeoverOverlay
 
 const TIER: Record<OverlayKind, 1 | 2 | 3> = {
-  manage: 1,
+  settings: 1,
   'app-update': 1,
   downloads: 1,
-  page: 1,
   progress: 2,
   takeover: 3,
 }

@@ -33,12 +33,20 @@ interface Props {
    *  backdrop, no Esc/click-outside dismiss). When false (default),
    *  render inline as the install-settings panel body. */
   asModal?: boolean
+  /** When true, render bare (no ModalShell wrapper, no close button)
+   *  for mounting inside a parent modal that owns the chrome — e.g.
+   *  the unified SettingsModal's "ComfyUI Settings" tab body. The
+   *  contenteditable install name renders as the first row of the
+   *  bare panel; everything else (tabs, scroll body, action bar)
+   *  follows unchanged. */
+  embedded?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   initialTab: 'status',
   autoAction: null,
   asModal: false,
+  embedded: false,
 })
 
 const emit = defineEmits<{
@@ -568,7 +576,7 @@ function navigateToInstallation(installationId: string): void {
 
 <template>
   <ModalShell
-    v-if="installation"
+    v-if="installation && !embedded"
     :inline="!asModal"
     :binding="asModal"
     opacity="dim"
@@ -660,4 +668,96 @@ function navigateToInstallation(installationId: string): void {
           </div>
         </div>
   </ModalShell>
+
+  <!-- Embedded mount: bare panel body for the unified SettingsModal's
+       "ComfyUI Settings" tab. No ModalShell, no close button — the
+       parent owns the chrome. Editable install name sits at the top
+       of the body; tabs / scroll / action-bar follow as in the
+       wrapped mount. -->
+  <div v-else-if="installation" class="detail-embedded">
+    <div class="detail-embedded-title">
+      <div
+        role="textbox"
+        :aria-label="$t('detail.editName', 'Edit installation name')"
+        contenteditable
+        spellcheck="false"
+        @blur="handleTitleBlur"
+        @keydown.enter.prevent="($event.target as HTMLElement).blur()"
+        @keydown.ctrl.a.prevent="handleTitleSelectAll"
+        @paste="handleTitlePaste"
+      >
+        {{ installation.name }}<Pencil :size="14" class="edit-name-hint" contenteditable="false" />
+      </div>
+    </div>
+    <div v-if="hasTabs" class="detail-tabs">
+      <button
+        v-for="tabId in availableTabs"
+        :key="tabId"
+        class="detail-tab"
+        :class="{ active: activeTab === tabId }"
+        @click="activeTab = tabId"
+      >
+        {{ tabLabels[tabId] ?? tabId }}
+      </button>
+    </div>
+    <div ref="scrollRef" class="view-scroll">
+      <div v-if="sectionsLoading" class="modal-loading with-spinner">{{ $t('common.loading') }}</div>
+      <SnapshotTab
+        v-else-if="activeTab === 'snapshots'"
+        :installation-id="installation.id"
+        @run-action="runAction"
+        @refresh-all="refreshAllSections"
+        @navigate-installation="navigateToInstallation"
+      />
+      <template v-else>
+        <DetailSectionComponent
+          v-for="section in mainSections"
+          :key="section.title ?? 'untitled'"
+          :installation-id="installation.id"
+          :title="section.title"
+          :description="section.description"
+          :collapsed="section.collapsed"
+          :items="section.items"
+          :fields="section.fields"
+          :actions="section.actions"
+          @run-action="runAction"
+          @refresh="refreshSection"
+          @refresh-all="refreshAllSections"
+        />
+        <div v-if="activeTab === 'status' && (installationSizeLoading || installationSize !== null)" class="detail-section">
+          <div class="detail-section-body">
+            <div class="detail-fields">
+              <div>
+                <div class="detail-field-label">{{ $t('diskSpace.sizeLabel') }}</div>
+                <div class="detail-field-value">
+                  {{ installationSizeLoading ? $t('diskSpace.calculatingSize') : (installationSize !== null ? formatBytes(installationSize) : $t('diskSpace.sizeUnavailable')) }}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </template>
+    </div>
+
+    <div v-if="bottomSection" id="detail-bottom-actions">
+      <div class="detail-actions">
+        <TooltipWrap
+          v-for="a in bottomActions"
+          :key="a.id"
+          :text="a.tooltip"
+        >
+          <button
+            :class="[
+              a.style,
+              { 'looks-disabled': a.enabled === false && a.disabledMessage }
+            ]"
+            :disabled="a.enabled === false && !a.disabledMessage"
+            @click="handleActionClick(a, $event)"
+          >
+            {{ a.label }}
+          </button>
+        </TooltipWrap>
+      </div>
+    </div>
+  </div>
 </template>

@@ -298,6 +298,13 @@
     "processCrashed": "Process crashed (exit code {code})"
   },
 
+  "settingsModal": {
+    "title": "Settings",
+    "tabComfy": "ComfyUI Settings",
+    "tabDirectories": "Directories",
+    "tabGlobal": "Global Settings"
+  },
+
   "settings": {
     "title": "Settings",
     "general": "General",

@@ -2,7 +2,6 @@
 import { ref, onMounted, onUnmounted, computed, useTemplateRef } from 'vue'
 import {
   ArrowDownToLine,
-  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Download,
@@ -17,9 +16,7 @@ import { installTypeMetaFor } from '../lib/installTypeIcon'
 // the ComfyPanelKey export in src/main/index.ts.
 type ComfyPanelKey =
   | 'comfy'
-  | 'install-settings'
-  | 'launcher-settings'
-  | 'directories'
+  | 'settings'
   | 'new-install'
   | 'track'
   | 'load-snapshot'
@@ -61,8 +58,6 @@ interface Bridge {
   openNewWindow: () => void
   /** Pop the File menu natively (avoids WebContentsView clipping the popup). */
   openFileMenu: (anchor: MenuAnchor) => void
-  /** Pop the Install caret menu natively. No-op for install-less host windows. */
-  openInstallMenu: (anchor: MenuAnchor) => void
   goBack: () => void
   goForward: () => void
   onPanelChanged: (cb: (panel: ComfyPanelKey) => void) => () => void
@@ -76,7 +71,7 @@ interface Bridge {
   onSourceCategoryChanged: (cb: (category: string | null) => void) => () => void
   onThemeChanged: (cb: (theme: { bg: string; text: string }) => void) => () => void
   onFullscreenChanged: (cb: (fullscreen: boolean) => void) => () => void
-  onMenuClosed: (cb: (info: { menu: 'file' | 'install' }) => void) => () => void
+  onMenuClosed: (cb: (info: { menu: 'file' }) => void) => () => void
   /** Modal-unification (Track M-2.3) — first-use takeover step pushes
    *  from main. Drives the T&C-step lockdown that hides the waffle
    *  menu (the otherwise-always-live escape hatch) so the user has to
@@ -201,11 +196,12 @@ const firstUseMode = ref<'none' | 'consent-lockdown' | 'post-consent'>('none')
 const isConsentLockdown = computed(() => firstUseMode.value === 'consent-lockdown')
 /**
  * Install-less host window flag (Phase 3 step 2c). When true, the center
- * install pill labels itself "Choose an install" (set by the initial
- * title push from main) and renders without a caret — there's no
- * install backing the window so the install-scoped menu has no items
- * to expose. The File menu (New Window, App Settings) is the
- * only menu in install-less mode.
+ * install pill labels itself "Desktop 2.0 Beta" (set by the initial
+ * title push from main) and the install-type icon next to the label is
+ * suppressed. The center pill is no longer clickable in either mode —
+ * Settings now lives on the File / waffle menu via the unified Settings
+ * modal — so this flag only affects the rendered identity, not the
+ * interaction model.
  */
 const isInstallLess = ref((bridge?.getInstallationId() ?? '') === '')
 /** Install identity ("MyInstall") — main pushes this on ready.
@@ -220,7 +216,7 @@ const installLabel = ref('ComfyUI')
  * Cloud / Legacy Desktop tower / …) via the shared
  * `installTypeMetaFor()` helper. `null` for install-less host
  * windows; the icon is suppressed entirely in that case so the
- * "Choose an install" label reads bare.
+ * "Desktop 2.0 Beta" label reads bare.
  */
 const sourceCategory = ref<string | null>(null)
 /** Resolved icon metadata for the active install. Wraps
@@ -245,7 +241,7 @@ const installTypeLabel = computed(() => {
 })
 /** Whether to render the install-type icon. Suppressed on
  *  install-less host windows (no install backing the entry) so the
- *  "Choose an install" identity label reads bare. */
+ *  "Desktop 2.0 Beta" identity label reads bare. */
 const showInstallTypeIcon = computed(
   () => !isInstallLess.value && sourceCategory.value !== null,
 )
@@ -382,7 +378,6 @@ const isLight = computed(() => {
 })
 
 const fileBtnRef = useTemplateRef<HTMLButtonElement>('fileBtn')
-const pillBtnRef = useTemplateRef<HTMLButtonElement>('pillBtn')
 
 /** Per-menu suppression window. When a native menu closes, we stamp
  *  `Date.now()` against its kind. The next click on the same menu
@@ -391,9 +386,11 @@ const pillBtnRef = useTemplateRef<HTMLButtonElement>('pillBtn')
  *  from flickering open immediately after the user clicked the open
  *  button to dismiss it. The OS dismisses the menu first, then the
  *  click event reaches our renderer button — without this guard the
- *  click handler would ask main to pop the menu again. */
+ *  click handler would ask main to pop the menu again. The center
+ *  install pill is no longer clickable, so the only menu kind we track
+ *  here is `'file'`. */
 const MENU_REOPEN_GUARD_MS = 100
-const menuClosedAt = { file: 0, install: 0 }
+const menuClosedAt: Record<'file', number> = { file: 0 }
 
 /** Anchor a native menu just below `el`'s bottom-left corner.
  *  Coordinates are in title-bar-local pixels (y is rounded down so the
@@ -419,17 +416,6 @@ function handleForward(): void {
   if (!canForward.value) return
   bridge?.goForward()
 }
-/** Single click target for the install pill. On install-backed windows
- *  the whole pill opens the native install menu (Phase 3 §7 — the pill
- *  body and caret are no longer separate hit targets). Install-less
- *  host windows render a disabled pill, so this handler is unreachable
- *  there. */
-function handleInstallPillClick(): void {
-  if (isInstallLess.value) return
-  if (Date.now() - menuClosedAt.install < MENU_REOPEN_GUARD_MS) return
-  bridge?.openInstallMenu(anchorBelow(pillBtnRef.value))
-}
-
 let unsubPanel: (() => void) | undefined
 let unsubNavState: (() => void) | undefined
 let unsubTitle: (() => void) | undefined
@@ -643,14 +629,15 @@ onUnmounted(() => {
       >
         <ChevronRight :size="16" />
       </button>
-      <button
-        ref="pillBtn"
-        type="button"
+      <!-- Center identity pill. Install-backed hosts show the install's
+           name + install-type icon; install-less hosts show the static
+           `Desktop 2.0 Beta` label. The pill is a non-interactive label
+           — Settings now opens from the File / waffle menu via the
+           unified Settings modal, so the pill no longer needs to be a
+           click target. -->
+      <div
         class="title-install-pill"
         :class="{ 'is-install-less': isInstallLess }"
-        :disabled="isInstallLess"
-        :aria-haspopup="isInstallLess ? undefined : 'menu'"
-        @click="handleInstallPillClick"
       >
         <!-- Track B item 4 — install-type icon (Standalone laptop /
              Cloud / Legacy Desktop tower / …) replaces the old
@@ -665,12 +652,7 @@ onUnmounted(() => {
           :aria-label="installTypeLabel"
         />
         <span class="title-install-name">{{ installLabel }}</span>
-        <ChevronDown
-          v-if="!isInstallLess"
-          :size="14"
-          class="title-install-caret"
-        />
-      </button>
+      </div>
       <!-- Phase 3 §18 — install-update pill. Suppressed in install-less
            mode (no install backing the host) and in the steady state
            (status tag isn't `update`). Click sends a panel-trigger to
@@ -830,9 +812,10 @@ onUnmounted(() => {
 
 /* --- Install pill (center) — single click target. The whole pill
        opens the native install menu on install-backed windows and
-       renders disabled (identity-only) on install-less host windows.
-       Always looks like a pill: solid surface fill, rounded ends,
-       visible border at rest, brighter hover. --- */
+       renders the static `Desktop 2.0 Beta` label on install-less host
+       windows. Identity-only — Settings now opens from the File / waffle
+       menu via the unified Settings modal, so the pill is no longer
+       clickable and shows no caret or hover affordance. --- */
 .title-install-pill {
   -webkit-app-region: no-drag;
   display: inline-flex;
@@ -842,38 +825,22 @@ onUnmounted(() => {
      room around the install name. */
   padding: 4px 12px;
   border-radius: 999px;
-  /* Solid surface fill so the pill always reads as a chip, not as
-     bare text. Subtle border for definition on light themes; hover
-     state lifts both. */
+  /* Solid surface fill so the pill still reads as a chip, not as bare
+     text. Subtle border for definition on light themes. */
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid rgba(255, 255, 255, 0.14);
   color: inherit;
   font: inherit;
   font-weight: 500;
-  cursor: pointer;
+  cursor: default;
   max-width: 480px;
-  transition: background-color 0.12s, border-color 0.12s, opacity 0.12s;
-}
-.title-bar.is-hover-active .title-install-pill:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.14);
-  border-color: rgba(255, 255, 255, 0.28);
-}
-.title-install-pill:focus-visible {
-  outline: 2px solid var(--accent, #60a5fa);
-  outline-offset: 2px;
 }
 .title-bar.is-light .title-install-pill {
   background: rgba(0, 0, 0, 0.04);
   border-color: rgba(0, 0, 0, 0.14);
 }
-.title-bar.is-light.is-hover-active .title-install-pill:hover:not(:disabled) {
-  background: rgba(0, 0, 0, 0.09);
-  border-color: rgba(0, 0, 0, 0.24);
-}
-/* Install-less host windows: pill is an identity-only label. Disabled
-   buttons skip the hover lift; the cursor stays default. */
+/* Install-less host windows: identity-only `Desktop 2.0 Beta` label. */
 .title-install-pill.is-install-less {
-  cursor: default;
   opacity: 0.85;
 }
 
@@ -882,10 +849,6 @@ onUnmounted(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
-}
-.title-install-caret {
-  flex-shrink: 0;
-  opacity: 0.7;
 }
 /* Track B item 4 — install-type icon. Sized to fit the 36px content
    area of the title bar without growing it; opacity matches the

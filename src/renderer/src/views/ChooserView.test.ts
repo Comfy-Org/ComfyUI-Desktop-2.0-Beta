@@ -147,13 +147,10 @@ describe('ChooserView', () => {
     expect(installTiles[2]!.text()).toContain('Never')
   })
 
-  it('emits pick when an install tile is double-clicked', async () => {
-    // Double-click on the tile body launches via pickInstall — the
-    // convenience gesture for "open this install". A single-click
-    // opens the Manage modal instead (the implicit
-    // single-click-to-launch was confusing — see the explicit Play
-    // button below). The per-tile action menu lives behind the
-    // kebab (⋮) icon in the top-right and is asserted separately.
+  it('emits pick when an idle install tile is single-clicked', async () => {
+    // Single-click on the tile body launches the install via
+    // pickInstall. Manage lives only behind the kebab (⋮) and the
+    // right-click context menu, asserted separately.
     installMockApi([
       makeInstall({ id: 'a', name: 'Alpha', status: 'installed' }),
     ])
@@ -162,7 +159,7 @@ describe('ChooserView', () => {
     const tiles = wrapper.findAll('.chooser-tile')
     const alphaTile = tiles.find((t) => t.text().includes('Alpha'))
     expect(alphaTile).toBeTruthy()
-    await alphaTile!.trigger('dblclick')
+    await alphaTile!.trigger('click')
     const events = wrapper.emitted('pick')
     expect(events).toBeDefined()
     expect((events![0]![0] as Installation).id).toBe('a')
@@ -170,9 +167,9 @@ describe('ChooserView', () => {
 
   it('emits pick when the Play button on an install tile is clicked', async () => {
     // The explicit Play CTA in the bottom-right of each tile
-    // launches via pickInstall — the primary, discoverable launch
-    // gesture (the implicit single-click-to-launch was retired in
-    // favour of single-click-opens-Manage).
+    // launches via pickInstall — same as a card-body click on an
+    // idle install. The CTA stays as a discoverable affordance
+    // alongside the larger card-click target.
     installMockApi([
       makeInstall({ id: 'a', name: 'Alpha', status: 'installed' }),
     ])
