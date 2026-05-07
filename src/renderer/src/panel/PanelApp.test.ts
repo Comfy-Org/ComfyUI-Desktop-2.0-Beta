@@ -228,6 +228,7 @@ function installMockApi(initial?: {
       },
     ),
     setFirstUseMode: vi.fn(),
+    closeCurrentPanel: vi.fn(),
     onFirstUseSkip: vi.fn((cb: () => void) => {
       state.firstUseSkipCallbacks.push(cb)
       return () => {}
@@ -442,6 +443,34 @@ describe('PanelApp', () => {
     const wrapper = mountPanel()
     await flushPromises()
     expect(wrapper.find('[data-testid="quick-install-modal"]').exists()).toBe(true)
+  })
+
+  it.each([
+    { panel: 'track', selector: '[data-testid="track-modal"]', name: 'TrackModal' },
+    { panel: 'load-snapshot', selector: '[data-testid="load-snapshot-modal"]', name: 'LoadSnapshotModal' },
+    { panel: 'quick-install', selector: '[data-testid="quick-install-modal"]', name: 'QuickInstallModal' },
+    { panel: 'new-install', selector: '[data-testid="new-install-modal"]', name: 'NewInstallModal' },
+  ])('IPCs closeCurrentPanel when the $panel takeover dismisses, so main\'s activePanel resets and the file menu can re-open it', async ({ panel, selector, name }) => {
+    // Without this IPC, main's `entry.activePanel` stays stuck on the
+    // wizard key after the renderer-side dismiss; the next file-menu
+    // pick of the same item hits `setActivePanel`'s same-panel
+    // early-return and the modal silently fails to reopen
+    // (Comfy-Org/ComfyUI-Desktop-2.0-Beta#486).
+    window.history.replaceState({}, '', `/?panel=${panel}`)
+    const wrapper = mountPanel()
+    await flushPromises()
+    expect(wrapper.find(selector).exists()).toBe(true)
+
+    const closeCurrentPanel = (window as unknown as {
+      api: { closeCurrentPanel: ReturnType<typeof vi.fn> }
+    }).api.closeCurrentPanel
+    expect(closeCurrentPanel).not.toHaveBeenCalled()
+
+    await wrapper.findComponent({ name }).vm.$emit('close')
+    await flushPromises()
+
+    expect(closeCurrentPanel).toHaveBeenCalledTimes(1)
+    expect(wrapper.find(selector).exists()).toBe(false)
   })
 
   it('does NOT auto-mount the first-use takeover when firstUseCompleted is true', async () => {
