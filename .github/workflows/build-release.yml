@@ -87,6 +87,15 @@ jobs:
       - name: Install ToDesktop CLI
         run: npm install --location=global @todesktop/cli@1.22.0
 
+      - name: Pre-fetch bootstrap-python for all platforms
+        # @todesktop/cli now eagerly validates the `extraResources` paths in
+        # todesktop.json *before* invoking the `beforeBuild` hook, so the
+        # platform-specific bootstrap-python directories must exist locally
+        # at the time `todesktop build` is invoked.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: pnpm run bootstrap:fetch
+
       - name: Build with ToDesktop
         shell: bash
         run: |
