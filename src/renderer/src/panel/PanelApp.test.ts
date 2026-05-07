@@ -107,13 +107,14 @@ vi.mock('../views/QuickInstallModal.vue', () => ({
 vi.mock('../views/FirstUseTakeover.vue', () => ({
   default: {
     name: 'FirstUseTakeover',
-    emits: ['close', 'complete', 'chain-local'],
+    emits: ['close', 'complete-cloud', 'complete-skip', 'chain-local', 'chain-migrate'],
     // Stub does NOT auto-call window.api.getLocale on mount — the host
     // exercises the imperative open() reset post-mount, which is what
     // we mock + assert on.
     template:
       '<div data-testid="first-use-takeover">' +
-      '<button data-testid="first-use-cloud" @click="$emit(\'complete\')">Cloud</button>' +
+      '<button data-testid="first-use-cloud" @click="$emit(\'complete-cloud\')">Cloud</button>' +
+      '<button data-testid="first-use-skip" @click="$emit(\'complete-skip\')">Skip</button>' +
       '<button data-testid="first-use-local" @click="$emit(\'chain-local\')">Local</button>' +
       '<button data-testid="first-use-close" @click="$emit(\'close\')">Close</button>' +
       '</div>',
@@ -147,6 +148,10 @@ import { createPinia, setActivePinia } from 'pinia'
 import PanelApp from './PanelApp.vue'
 import { __resetLauncherPrefsForTest } from '../composables/useLauncherPrefs'
 import { useOverlay } from '../composables/useOverlay'
+import {
+  TELEMETRY_ACTION_EVENT_NAME,
+  type TelemetryActionEventDetail,
+} from '../lib/telemetry'
 
 const messages = {
   en: {
@@ -239,6 +244,7 @@ function installMockApi(initial?: {
     // suite never fires the consult so the mock is a no-op pair.
     onCloseRequest: vi.fn(() => () => {}),
     respondCloseRequest: vi.fn(),
+    ackCloseRequest: vi.fn(),
     onInstallationsChanged: vi.fn((cb: () => void) => {
       state.installationsChangedCallbacks.push(cb)
       return () => {}
@@ -264,6 +270,18 @@ function installMockApi(initial?: {
     // prior installs, no legacy desktop — so the takeover advances
     // through every step exactly as it did before.
     getFirstUseState: vi.fn(async () => ({ skipPick: false, hasLegacyDesktop: false })),
+    // Cloud-pick auto-launch fans out into the chooser-launch pipeline:
+    // claim the host for in-place attach, look up the install's launch
+    // action, then execute it. Mocking the IPC surface lets the new
+    // `complete-skip` test assert these are NEVER called (returning
+    // users must NOT be teleported into Cloud they didn't pick) while
+    // the existing `complete-cloud` test continues to dismiss cleanly
+    // when no cloud install is present in the store.
+    claimAttachHost: vi.fn(async () => true),
+    transferHostBoundsToInstall: vi.fn(async () => {}),
+    closeHostWindow: vi.fn(async () => {}),
+    focusComfyWindow: vi.fn(async () => {}),
+    getListActions: vi.fn(async () => []),
   }
   ;(window as unknown as { api: typeof api }).api = api
   return state
@@ -493,21 +511,68 @@ describe('PanelApp', () => {
 
   it('marks firstUseCompleted=true and closes the takeover on Cloud-branch pick', async () => {
     mockState.settings.firstUseCompleted = false
+    // Seed a cloud install so the auto-launch path can resolve a
+    // target — the host pulls launch actions for it via the chooser
+    // launch pipeline. We assert getListActions IS called here so the
+    // returning-user `complete-skip` test below can credibly assert
+    // the opposite.
+    mockState.installations = [
+      { id: 'cloud-id', name: 'Comfy Cloud', sourceLabel: 'Cloud', sourceCategory: 'cloud' },
+    ]
     window.history.replaceState({}, '', '/?panel=chooser')
     const wrapper = mountPanel()
     await flushPromises()
-    const setSetting = (window as unknown as {
-      api: { setSetting: ReturnType<typeof vi.fn> }
-    }).api.setSetting
-    expect(setSetting).not.toHaveBeenCalledWith('firstUseCompleted', true)
+    const api = (window as unknown as {
+      api: {
+        setSetting: ReturnType<typeof vi.fn>
+        getListActions: ReturnType<typeof vi.fn>
+      }
+    }).api
+    expect(api.setSetting).not.toHaveBeenCalledWith('firstUseCompleted', true)
 
     await wrapper.find('[data-testid="first-use-cloud"]').trigger('click')
     await flushPromises()
 
-    expect(setSetting).toHaveBeenCalledWith('firstUseCompleted', true)
+    expect(api.setSetting).toHaveBeenCalledWith('firstUseCompleted', true)
     expect(wrapper.find('[data-testid="first-use-takeover"]').exists()).toBe(false)
     // Chooser body underneath remains mounted.
     expect(wrapper.find('[data-testid="chooser-view"]').exists()).toBe(true)
+    // Cloud auto-launch ran — getListActions resolves the launch
+    // action for the seeded cloud install.
+    expect(api.getListActions).toHaveBeenCalledWith('cloud-id')
+  })
+
+  it('marks firstUseCompleted=true on returning-user complete-skip WITHOUT auto-launching cloud', async () => {
+    // Issue #476 — when `skipPick` is true (returning user with prior
+    // local installs), accepting consent emits `complete-skip` rather
+    // than `complete-cloud`. The host must mark completion and dismiss,
+    // but MUST NOT launch the seeded cloud install: the user never
+    // picked Cloud (the fork was suppressed), so auto-launching it
+    // would hijack their existing local install.
+    mockState.settings.firstUseCompleted = false
+    mockState.installations = [
+      { id: 'cloud-id', name: 'Comfy Cloud', sourceLabel: 'Cloud', sourceCategory: 'cloud' },
+      SAMPLE_INSTALL,
+    ]
+    window.history.replaceState({}, '', '/?panel=chooser')
+    const wrapper = mountPanel()
+    await flushPromises()
+    const api = (window as unknown as {
+      api: {
+        setSetting: ReturnType<typeof vi.fn>
+        getListActions: ReturnType<typeof vi.fn>
+      }
+    }).api
+    expect(api.setSetting).not.toHaveBeenCalledWith('firstUseCompleted', true)
+
+    await wrapper.find('[data-testid="first-use-skip"]').trigger('click')
+    await flushPromises()
+
+    expect(api.setSetting).toHaveBeenCalledWith('firstUseCompleted', true)
+    expect(wrapper.find('[data-testid="first-use-takeover"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="chooser-view"]').exists()).toBe(true)
+    // Critical guarantee — no implicit cloud launch happened.
+    expect(api.getListActions).not.toHaveBeenCalled()
   })
 
   it('chains into the new-install takeover on Local-branch pick and marks completion when new-install closes', async () => {
@@ -641,5 +706,166 @@ describe('PanelApp', () => {
     )
     await flushPromises()
     expect(wrapper.find('[data-testid="detail-modal"]').exists()).toBe(false)
+  })
+
+  // ---------------------------------------------------------------------------
+  // Telemetry parity (issue #485) — verify the renderer-side telemetry
+  // events the pre-Phase-3 `App.vue` fired (`desktop2.install.flow.opened`
+  // and `desktop2.view.opened`) still fire from the equivalent code paths
+  // in PanelApp's `openFlowTakeover` / `switchPanel`.
+  //
+  // Captures CustomEvents on the `window` (the same channel
+  // `emitTelemetryAction` uses to bridge into the providers) so the test
+  // doesn't have to mock the Datadog / PostHog modules.
+  // ---------------------------------------------------------------------------
+  describe('telemetry', () => {
+    function captureTelemetry(): TelemetryActionEventDetail[] {
+      const events: TelemetryActionEventDetail[] = []
+      window.addEventListener(TELEMETRY_ACTION_EVENT_NAME, (event) => {
+        events.push((event as CustomEvent<TelemetryActionEventDetail>).detail)
+      })
+      return events
+    }
+
+    it('fires desktop2.install.flow.opened with entrypoint=chooser when chooser empty-state CTA fires', async () => {
+      window.history.replaceState({}, '', '/?panel=chooser')
+      const wrapper = mountPanel()
+      await flushPromises()
+      const events = captureTelemetry()
+      await wrapper.find('[data-testid="chooser-new-install"]').trigger('click')
+      await flushPromises()
+      const flowEvents = events.filter((e) => e.actionName === 'desktop2.install.flow.opened')
+      expect(flowEvents).toHaveLength(1)
+      expect(flowEvents[0].context).toMatchObject({
+        flow: 'new_install',
+        entrypoint: 'chooser',
+      })
+    })
+
+    it('fires desktop2.install.flow.opened with entrypoint=titlebar for a panel-switch IPC', async () => {
+      window.history.replaceState({}, '', '/?panel=chooser')
+      mountPanel()
+      await flushPromises()
+      const events = captureTelemetry()
+      mockState.panelSwitchCallbacks.forEach((cb) => cb({ panel: 'quick-install' }))
+      await flushPromises()
+      const flowEvents = events.filter((e) => e.actionName === 'desktop2.install.flow.opened')
+      expect(flowEvents).toHaveLength(1)
+      expect(flowEvents[0].context).toMatchObject({
+        flow: 'quick_install',
+        entrypoint: 'titlebar',
+      })
+    })
+
+    it('maps each FlowComponent to its legacy flow string', async () => {
+      window.history.replaceState({}, '', '/?panel=chooser')
+      mountPanel()
+      await flushPromises()
+      const events = captureTelemetry()
+      const cases: { panel: string; flow: string }[] = [
+        { panel: 'new-install', flow: 'new_install' },
+        { panel: 'track', flow: 'track_existing' },
+        { panel: 'load-snapshot', flow: 'load_snapshot' },
+        { panel: 'quick-install', flow: 'quick_install' },
+      ]
+      for (const { panel } of cases) {
+        mockState.panelSwitchCallbacks.forEach((cb) => cb({ panel }))
+        await flushPromises()
+        // The takeover slot only holds one component; emit close so the
+        // next case can open. Each *Modal stub emits 'close'.
+        const open = events.filter((e) => e.actionName === 'desktop2.install.flow.opened').pop()
+        // Dismiss whatever takeover is currently mounted.
+        useOverlay().current.value = null
+        await flushPromises()
+        expect(open?.context?.flow, `panel=${panel}`).toBe(
+          cases.find((c) => c.panel === panel)?.flow,
+        )
+      }
+    })
+
+    it('fires desktop2.install.flow.opened with entrypoint=url when the URL initial panel is a flow', async () => {
+      // Captures must be installed BEFORE mount because the URL-driven
+      // initial-panel branch fires from inside `onMounted`.
+      const events = captureTelemetry()
+      window.history.replaceState({}, '', '/?panel=load-snapshot')
+      mountPanel()
+      await flushPromises()
+      const flowEvents = events.filter((e) => e.actionName === 'desktop2.install.flow.opened')
+      expect(flowEvents).toHaveLength(1)
+      expect(flowEvents[0].context).toMatchObject({
+        flow: 'load_snapshot',
+        entrypoint: 'url',
+      })
+    })
+
+    it('fires desktop2.install.flow.opened with entrypoint=first_use on the first-use Local-branch chain', async () => {
+      mockState.settings.firstUseCompleted = false
+      window.history.replaceState({}, '', '/?panel=chooser')
+      const wrapper = mountPanel()
+      await flushPromises()
+      const events = captureTelemetry()
+      await wrapper.find('[data-testid="first-use-local"]').trigger('click')
+      await flushPromises()
+      const flowEvents = events.filter((e) => e.actionName === 'desktop2.install.flow.opened')
+      expect(flowEvents).toHaveLength(1)
+      expect(flowEvents[0].context).toMatchObject({
+        flow: 'new_install',
+        entrypoint: 'first_use',
+      })
+    })
+
+    it('fires desktop2.view.opened with the previous panel as from_view when opening directories', async () => {
+      // Default install-backed host → comfy-lifecycle is the underlying body.
+      mountPanel()
+      await flushPromises()
+      const events = captureTelemetry()
+      mockState.panelSwitchCallbacks.forEach((cb) => cb({ panel: 'directories' }))
+      await flushPromises()
+      const viewEvents = events.filter((e) => e.actionName === 'desktop2.view.opened')
+      expect(viewEvents).toHaveLength(1)
+      expect(viewEvents[0].context).toMatchObject({
+        view: 'directories',
+        from_view: 'comfy-lifecycle',
+      })
+    })
+
+    it('does NOT fire desktop2.view.opened when a panel-switch IPC re-confirms the active body panel', async () => {
+      mountPanel()
+      await flushPromises()
+      const events = captureTelemetry()
+      // Default body is comfy-lifecycle; re-confirming it is a no-op.
+      mockState.panelSwitchCallbacks.forEach((cb) => cb({ panel: 'comfy-lifecycle' }))
+      await flushPromises()
+      expect(events.filter((e) => e.actionName === 'desktop2.view.opened')).toHaveLength(0)
+    })
+
+    it('does NOT fire desktop2.install.flow.opened when openFlowTakeover is rejected by an in-flight Tier 2 op', async () => {
+      // useOverlay's tier-collision rules can reject a Tier 3 open if a
+      // Tier 2 progress op is in flight and the user cancels the
+      // confirm-prompt. The renderer must not fire the telemetry event
+      // when the takeover never actually mounted. Simulate by pre-
+      // populating the overlay slot with a progress op (Tier 2) and
+      // routing a flow open through panel-switch — useOverlay will
+      // request confirmation via window.api which our mock leaves
+      // unresolved, so openOverlay returns false.
+      window.history.replaceState({}, '', '/?panel=chooser')
+      mountPanel()
+      await flushPromises()
+      // Pre-populate Tier 2 progress overlay.
+      useOverlay().current.value = {
+        kind: 'progress',
+        installationId: 'test-id',
+        operationName: 'install',
+        onCancel: () => {},
+      }
+      const events = captureTelemetry()
+      // Trigger the flow open. The collision logic in useOverlay will
+      // either prompt (default-deny in tests since no confirm handler is
+      // wired) or silently reject — either way openFlowTakeover should
+      // bail before emitting telemetry.
+      mockState.panelSwitchCallbacks.forEach((cb) => cb({ panel: 'new-install' }))
+      await flushPromises()
+      expect(events.filter((e) => e.actionName === 'desktop2.install.flow.opened')).toHaveLength(0)
+    })
   })
 })

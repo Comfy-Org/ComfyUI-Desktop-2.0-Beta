@@ -5,7 +5,7 @@ import { useSessionStore } from '../stores/sessionStore'
 import { useProgressStore } from '../stores/progressStore'
 import { useInstallContextMenu } from '../composables/useInstallContextMenu'
 import { useOverlay, type ManageOverlay } from '../composables/useOverlay'
-import { Cloud, Plus, AlertCircle, ArrowDownToLine, ArrowRightLeft, MoreVertical, Play, ExternalLink, Square, Loader2 } from 'lucide-vue-next'
+import { Cloud, Plus, AlertCircle, ArrowDownToLine, ArrowRightLeft, MoreVertical, X } from 'lucide-vue-next'
 import ContextMenu from '../components/ContextMenu.vue'
 import DetailModal from './DetailModal.vue'
 import { installTypeMetaFor } from '../lib/installTypeIcon'
@@ -306,26 +306,11 @@ function pickInstall(inst: Installation): void {
   emit('pick', inst)
 }
 
-/** Running card — focus the install's existing ComfyUI window
- *  instead of trying to start a fresh one. Mirrors the legacy
- *  DashboardCard "Show Window" CTA. */
-function focusInstance(inst: Installation): void {
-  void window.api.focusComfyWindow(inst.id)
-}
-
-/** Running card — stop the install's ComfyUI process. Mirrors the
- *  legacy DashboardCard danger-solid Stop CTA. The session-status
- *  broadcast flips the card's running class off, the Play button
- *  comes back on its own. */
-function stopInstance(inst: Installation): void {
-  void window.api.stopComfyUI(inst.id)
-}
-
-/** In-progress card — re-open the ProgressModal for the operation
- *  already running against this install. The active session lives
- *  in `progressStore`; emitting `show-progress` with a no-op
- *  `apiCall` triggers PanelApp's existing-operation branch which
- *  just re-shows the modal without spawning a duplicate. */
+/** Re-open the ProgressModal for the operation already running
+ *  against this install. The active session lives in `progressStore`;
+ *  emitting `show-progress` with a no-op `apiCall` triggers PanelApp's
+ *  existing-operation branch which just re-shows the modal without
+ *  spawning a duplicate. */
 function viewProgress(inst: Installation): void {
   emit('show-progress', {
     installationId: inst.id,
@@ -334,13 +319,52 @@ function viewProgress(inst: Installation): void {
   })
 }
 
+/**
+ * Single body-click handler for both the Cloud tile and per-install
+ * tiles. Behaviour by lifecycle state, in priority order:
+ *   - in-flight op → re-open the ProgressModal for it.
+ *   - stopping → no-op (the process is mid-shutdown; nothing
+ *     useful to do on click).
+ *   - otherwise → `pickInstall`, which routes through
+ *     `performChooserLaunch` in PanelApp. That helper already
+ *     short-circuits to `focusComfyWindow` when the install is
+ *     already running, and otherwise launches it. So a single
+ *     click covers idle-launch, running-focus, and view-progress
+ *     without per-state CTAs on the card.
+ */
+function handleTileClick(inst: Installation): void {
+  if (progressFor(inst)) {
+    viewProgress(inst)
+    return
+  }
+  if (sessionStore.isStopping(inst.id)) return
+  pickInstall(inst)
+}
+
+/** Close the install's ComfyUI window AND its underlying process.
+ *  The window's main-side `close` handler runs the full teardown
+ *  (`_installCleanup` → `ipc.stopRunning` → webContents close →
+ *  destroy), so calling `closeComfyWindow` is enough — no separate
+ *  `stopComfyUI` call needed, and the user doesn't get left looking
+ *  at a stale "ComfyUI is stopped" lifecycle screen.
+ *
+ *  Focus the install window first so that if main's `close` handler
+ *  ends up consulting the panel renderer (active Tier 2 / Tier 3
+ *  overlay), the resulting cancel prompt is visible — without this
+ *  the dashboard window stays in front and the prompt would be
+ *  hidden behind it. */
+async function closeRunningInstance(inst: Installation): Promise<void> {
+  await window.api.focusComfyWindow(inst.id)
+  await window.api.closeComfyWindow(inst.id)
+}
+
 function handleCloudClick(): void {
-  // If there's an existing cloud install, pick it. Otherwise promote the
-  // new-install flow as a Try-Cloud CTA — the renderer-side handler will
-  // route to the correct screen once the new-install flow lives in the
-  // host window (step 5+ of the unified-window plan).
+  // If there's an existing cloud install, route through the same
+  // body-click handler the install tiles use so behaviour can't
+  // drift between the two surfaces. Otherwise promote the
+  // new-install flow as a Try-Cloud CTA.
   if (cloudInstall.value) {
-    pickInstall(cloudInstall.value)
+    handleTileClick(cloudInstall.value)
   } else {
     emit('show-new-install')
   }
@@ -412,18 +436,17 @@ function handleNewInstallClick(): void {
       </button>
 
       <!-- Install tiles (recents-ordered).
-           Single-click on the tile body opens the Manage modal —
-           the implicit "click-to-launch" gesture was confusing
-           ("did clicking just kick off a process?"), so the explicit
-           Play button (overlaid bottom-right) is the launch CTA and
-           a double-click on the tile body is the convenience
-           gesture for the same. The kebab (⋮) and Play button
-           `@click.stop` so they don't double-fire as a card click.
-           Right-click opens the kebab's menu at pointer coords as a
-           power-user gesture. We can't use a native <button> for
-           the tile because it carries a <button> kebab + Play CTA
-           inside; nested buttons aren't valid HTML, so the tile is
-           a `role="button"` div with explicit Enter/Space handlers
+           Single-click on the tile body launches / focuses /
+           re-opens-progress for the install (see `handleTileClick` in
+           the script section) — the same gesture the Cloud tile uses
+           so behaviour can't drift between the two. Manage…, Update,
+           Migrate, Open Folder, Delete, Dismiss-error all live behind
+           the kebab (⋮) button and right-click context menu. The
+           kebab and the Close-instance CTA `@click.stop` so they don't
+           double-fire as a card click. We can't use a native <button>
+           for the tile because it carries a <button> kebab + Close
+           CTA inside; nested buttons aren't valid HTML, so the tile
+           is a `role="button"` div with explicit Enter/Space handlers
            for keyboard activation. -->
       <div
         v-for="inst in visibleInstalls"
@@ -432,10 +455,9 @@ function handleNewInstallClick(): void {
         tabindex="0"
         class="chooser-tile"
         :class="statusClasses(inst)"
-        @click="openManage(inst)"
-        @dblclick="pickInstall(inst)"
-        @keydown.enter="openManage(inst)"
-        @keydown.space.prevent="openManage(inst)"
+        @click="handleTileClick(inst)"
+        @keydown.enter="handleTileClick(inst)"
+        @keydown.space.prevent="handleTileClick(inst)"
         @contextmenu.prevent="openCardMenu($event, inst)"
       >
         <div
@@ -528,16 +550,12 @@ function handleNewInstallClick(): void {
           >
             {{ inst.version }}
           </span>
-          <!-- Update / migrate pills surface card-level prompts that
-               previously only lived inside Install Settings. Each
+          <!-- Update / migrate pills surface card-level prompts. Each
                pill is a click target that opens the Manage modal
                directly on the relevant surface (Update tab /
-               migrate-to-standalone auto-action) — the legacy
-               DashboardCard wired the same `show-update` /
-               `show-migrate` shortcuts and the chooser was missing
-               them after the §8 rebuild. `@click.stop` prevents the
-               pill click from bubbling up to the tile body's bare
-               `pickInstall` handler.
+               migrate-to-standalone auto-action). `@click.stop`
+               prevents the pill click from bubbling up to the tile
+               body's `handleTileClick` handler.
 
                Both pills wrap REQUIRES_STOPPED actions, so they
                render in a visibly disabled state (and their click /
@@ -581,73 +599,30 @@ function handleNewInstallClick(): void {
           </span>
         </div>
         <!-- CTA cluster — overlay positioned bottom-right of the
-             tile. The button shown depends on the install's lifecycle
-             state (highest priority first):
-               - in-progress: "View Progress" reopens the existing
-                 ProgressModal for the operation already running.
-               - stopping: the running pair is shown disabled (the
-                 process is in mid-shutdown — Stop has been pressed
-                 but the OS hasn't reaped the PID yet).
-               - running: "Show Window" focuses the existing ComfyUI
-                 window + a Stop button kills the process.
-               - installed (idle): "Play" launches via pickInstall,
-                 routing through PanelApp's chooser-pick pipeline.
-             Each button `@click.stop`s so it doesn't double-fire as
-             a card-body click (which opens Manage). -->
-        <div class="chooser-tile-cta">
-          <template v-if="progressFor(inst)">
-            <button
-              type="button"
-              class="chooser-tile-cta-btn chooser-tile-cta-progress"
-              :title="$t('list.viewProgress')"
-              :aria-label="$t('list.viewProgress')"
-              @click.stop="viewProgress(inst)"
-            >
-              <Loader2 :size="16" class="chooser-tile-cta-spin" />
-            </button>
-          </template>
-          <template v-else-if="sessionStore.isStopping(inst.id)">
-            <button
-              type="button"
-              class="chooser-tile-cta-btn chooser-tile-cta-stop"
-              :title="$t('console.stopping')"
-              :aria-label="$t('console.stopping')"
-              disabled
-            >
-              <Square :size="14" />
-            </button>
-          </template>
-          <template v-else-if="sessionStore.isRunning(inst.id)">
-            <button
-              type="button"
-              class="chooser-tile-cta-btn chooser-tile-cta-show"
-              :title="$t('running.showWindow')"
-              :aria-label="$t('running.showWindow')"
-              @click.stop="focusInstance(inst)"
-            >
-              <ExternalLink :size="16" />
-            </button>
-            <button
-              type="button"
-              class="chooser-tile-cta-btn chooser-tile-cta-stop"
-              :title="$t('console.stop')"
-              :aria-label="$t('console.stop')"
-              @click.stop="stopInstance(inst)"
-            >
-              <Square :size="14" />
-            </button>
-          </template>
-          <template v-else-if="inst.status === 'installed'">
-            <button
-              type="button"
-              class="chooser-tile-cta-btn chooser-tile-cta-play"
-              :title="$t('actions.launch')"
-              :aria-label="$t('actions.launch')"
-              @click.stop="pickInstall(inst)"
-            >
-              <Play :size="16" />
-            </button>
-          </template>
+             tile. Only rendered while the install is running or
+             stopping, as a single "Close instance" button. Tapping
+             it routes through main's `closeComfyWindow` IPC, which
+             closes the OS window AND tears the process down via the
+             window's existing `close` handler — no separate Stop
+             call needed and the user doesn't get left looking at
+             the lifecycle "ComfyUI is stopped" screen.
+             For idle / in-progress states the body click handler
+             (`handleTileClick`) does the right thing on its own
+             (launch / view-progress), so no CTA is needed. -->
+        <div
+          v-if="sessionStore.isRunning(inst.id) || sessionStore.isStopping(inst.id)"
+          class="chooser-tile-cta"
+        >
+          <button
+            type="button"
+            class="chooser-tile-cta-btn chooser-tile-cta-close"
+            :title="$t('console.stop')"
+            :aria-label="$t('console.stop')"
+            :disabled="sessionStore.isStopping(inst.id)"
+            @click.stop="closeRunningInstance(inst)"
+          >
+            <X :size="16" />
+          </button>
         </div>
       </div>
     </div>
@@ -806,10 +781,13 @@ function handleNewInstallClick(): void {
    * the opacity locally so they read at full strength. */
   opacity: 0.85;
   /* Reserve space at the bottom-right for the absolutely-positioned
-   * CTA cluster (Play / Show Window + Stop / View Progress) so meta
-   * pills don't run under it on narrow tiles. The reservation
-   * accommodates the widest cluster (Show Window + Stop = ~82px). */
-  padding-right: 92px;
+   * Close-instance CTA so meta pills don't run under it on narrow
+   * tiles. Single 32px button + 12px right inset = ~50px. The CTA
+   * is only rendered while running / stopping, but the reservation
+   * is unconditional — leaving the bottom-right corner clear in
+   * idle / in-progress states keeps the visual rhythm steady as the
+   * button appears / disappears. */
+  padding-right: 50px;
 }
 
 /* Pill chips for the meta line. Each piece of card metadata
@@ -1065,53 +1043,18 @@ function handleNewInstallClick(): void {
   opacity: 0.5;
   cursor: default;
 }
-/* Play (idle / launch) — solid accent fill, the primary CTA. */
-.chooser-tile-cta-play {
-  background: var(--accent, #4a90e2);
-  color: var(--bg, #fff);
-  border-color: var(--accent, #4a90e2);
-}
-.chooser-tile-cta-play:hover:not(:disabled),
-.chooser-tile-cta-play:focus-visible {
-  background: var(--accent-hover, #3a7bc8);
-  border-color: var(--accent-hover, #3a7bc8);
-}
-/* Show Window (running) — accent outline, signals "navigate to the
- * existing window" rather than "kick off a new process". */
-.chooser-tile-cta-show {
-  color: var(--accent, #4a90e2);
-  border-color: var(--accent, #4a90e2);
-  background: var(--accent-soft, rgba(74, 144, 226, 0.12));
-}
-.chooser-tile-cta-show:hover:not(:disabled),
-.chooser-tile-cta-show:focus-visible {
-  background: var(--accent-soft-hover, rgba(74, 144, 226, 0.22));
-}
-/* Stop (running) — danger fill so it reads as a destructive CTA
- * even at the small CTA-button size. */
-.chooser-tile-cta-stop {
+/* Close instance (running / stopping) — danger fill so it reads as
+ * a destructive CTA even at the small CTA-button size. Disabled
+ * (mid-shutdown) inherits the muted base treatment. */
+.chooser-tile-cta-close {
   background: var(--accent-danger, #d92d20);
   color: var(--bg, #fff);
   border-color: var(--accent-danger, #d92d20);
 }
-.chooser-tile-cta-stop:hover:not(:disabled),
-.chooser-tile-cta-stop:focus-visible {
+.chooser-tile-cta-close:hover:not(:disabled),
+.chooser-tile-cta-close:focus-visible {
   background: var(--accent-danger-hover, #b8241a);
   border-color: var(--accent-danger-hover, #b8241a);
-}
-/* View Progress (in-flight) — accent outline + spinner so it reads
- * as "an op is running, click to peek". */
-.chooser-tile-cta-progress {
-  color: var(--accent, #4a90e2);
-  border-color: var(--accent, #4a90e2);
-  background: var(--accent-soft, rgba(74, 144, 226, 0.12));
-}
-.chooser-tile-cta-spin {
-  animation: chooser-tile-cta-spin 1.2s linear infinite;
-}
-@keyframes chooser-tile-cta-spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
 }
 
 /* The two fixed-position tiles (New Install + Cloud) get a slightly

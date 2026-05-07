@@ -76,6 +76,8 @@ const api: ElectronApi = {
   },
   respondCloseRequest: (payload) =>
     ipcRenderer.send('comfy-window:request-close-response', payload),
+  ackCloseRequest: (payload) =>
+    ipcRenderer.send('comfy-window:request-close-ack', payload),
   transferHostBoundsToInstall: (installationId) =>
     ipcRenderer.invoke('transfer-host-bounds-to-install', installationId),
   claimAttachHost: (installationId) =>

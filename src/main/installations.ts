@@ -38,6 +38,33 @@ export interface InstallationRecord {
 
 const dataPath = path.join(dataDir(), "installations.json")
 
+/**
+ * Monotonic install-id generator. The naive `inst-${Date.now()}` form
+ * collides whenever two `add()` / `seedDefaults()` calls land in the
+ * same millisecond — common on fast hardware (CI runners) and trivially
+ * reproducible in tests that issue several `add()` calls back-to-back.
+ * The collision yielded duplicate IDs which then aliased records in
+ * `getRecent()` / `getRecentByCategory()` (see the flake on installations.test.ts
+ * `returns the install with the largest global lastLaunchedAt`).
+ *
+ * Fix: keep the existing `inst-${ms}` shape for the normal case (so all
+ * persisted IDs stay readable and existing data on disk is unchanged)
+ * and append an in-process counter only for repeat calls inside the same
+ * millisecond. Counter resets on the next millisecond tick.
+ */
+let _lastIdMs = 0
+let _idSeq = 0
+function nextInstallId(): string {
+  const now = Date.now()
+  if (now === _lastIdMs) {
+    _idSeq += 1
+    return `inst-${now}-${_idSeq}`
+  }
+  _lastIdMs = now
+  _idSeq = 0
+  return `inst-${now}`
+}
+
 // Serialize all load/save operations to prevent concurrent read-modify-write races
 let _queue: Promise<void> = Promise.resolve()
 function enqueue<T>(fn: () => Promise<T>): Promise<T> {
@@ -78,7 +105,7 @@ export async function add(installation: Record<string, unknown>): Promise<Instal
     const installations = await load()
     installation.name = uniqueName(installation.name as string, installations)
     const entry = {
-      id: `inst-${Date.now()}`,
+      id: nextInstallId(),
       createdAt: new Date().toISOString(),
       ...installation,
     } as InstallationRecord
@@ -140,7 +167,7 @@ export async function ensureExists(sourceId: string, data: Record<string, unknow
     const existing = await load()
     if (existing.some((i) => i.sourceId === sourceId)) return false
     existing.push({
-      id: `inst-${Date.now()}`,
+      id: nextInstallId(),
       createdAt: new Date().toISOString(),
       ...data,
     } as InstallationRecord)
@@ -258,7 +285,7 @@ export async function seedDefaults(defaults: Record<string, unknown>[]): Promise
     if (installations.length > 0) return false
     for (const entry of defaults) {
       installations.push({
-        id: `inst-${Date.now()}`,
+        id: nextInstallId(),
         createdAt: new Date().toISOString(),
         status: "installed",
         ...entry,

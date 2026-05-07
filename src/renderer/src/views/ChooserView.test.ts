@@ -147,13 +147,11 @@ describe('ChooserView', () => {
     expect(installTiles[2]!.text()).toContain('Never')
   })
 
-  it('emits pick when an install tile is double-clicked', async () => {
-    // Double-click on the tile body launches via pickInstall — the
-    // convenience gesture for "open this install". A single-click
-    // opens the Manage modal instead (the implicit
-    // single-click-to-launch was confusing — see the explicit Play
-    // button below). The per-tile action menu lives behind the
-    // kebab (⋮) icon in the top-right and is asserted separately.
+  it('emits pick when an install tile is single-clicked', async () => {
+    // Single-click on the tile body launches via pickInstall — the
+    // same gesture the Cloud tile uses, so behaviour can't drift
+    // between the two surfaces. Manage / Update / Migrate / Open
+    // Folder / Delete all live behind the kebab (⋮) menu.
     installMockApi([
       makeInstall({ id: 'a', name: 'Alpha', status: 'installed' }),
     ])
@@ -162,28 +160,26 @@ describe('ChooserView', () => {
     const tiles = wrapper.findAll('.chooser-tile')
     const alphaTile = tiles.find((t) => t.text().includes('Alpha'))
     expect(alphaTile).toBeTruthy()
-    await alphaTile!.trigger('dblclick')
+    await alphaTile!.trigger('click')
     const events = wrapper.emitted('pick')
     expect(events).toBeDefined()
     expect((events![0]![0] as Installation).id).toBe('a')
   })
 
-  it('emits pick when the Play button on an install tile is clicked', async () => {
-    // The explicit Play CTA in the bottom-right of each tile
-    // launches via pickInstall — the primary, discoverable launch
-    // gesture (the implicit single-click-to-launch was retired in
-    // favour of single-click-opens-Manage).
+  it('does not render per-state launch CTAs — only the Close-instance CTA when running', async () => {
+    // Per-state CTAs (Play / Show Window / View Progress) collapsed
+    // into the body click handler; only a "Close instance" CTA
+    // remains, and only while the install is running / stopping.
     installMockApi([
       makeInstall({ id: 'a', name: 'Alpha', status: 'installed' }),
     ])
     const wrapper = mountChooser()
     await flushPromises()
-    const playBtn = wrapper.find('.chooser-tile-cta-play')
-    expect(playBtn.exists()).toBe(true)
-    await playBtn.trigger('click')
-    const events = wrapper.emitted('pick')
-    expect(events).toBeDefined()
-    expect((events![0]![0] as Installation).id).toBe('a')
+    expect(wrapper.find('.chooser-tile-cta-play').exists()).toBe(false)
+    expect(wrapper.find('.chooser-tile-cta-show').exists()).toBe(false)
+    expect(wrapper.find('.chooser-tile-cta-progress').exists()).toBe(false)
+    // Idle install has no CTA cluster at all.
+    expect(wrapper.find('.chooser-tile-cta').exists()).toBe(false)
   })
 
   it('does not emit pick when the kebab button is clicked — only the menu opens', async () => {
