@@ -73,6 +73,14 @@ export type OverlayKind = 'settings' | 'app-update' | 'downloads' | 'progress' |
  * `initialDetailTab` and `autoAction` are forwarded to the embedded
  * DetailModal so chooser-card update / migrate pills can deep-link
  * straight to the Update tab with the relevant action pre-armed.
+ *
+ * `noSidebar` collapses the modal to just the active tab's content
+ * (no left rail, no tab switcher). Used for chooser-card "Manage…" /
+ * Update / Migrate entry-points where the user picked a specific
+ * install and wants the focused per-install Settings surface — the
+ * sidebar's Directories / Global Settings tabs would be a distraction
+ * in that flow. The file-menu / title-bar Settings entry leaves it
+ * unset (default false) so the full sidebar layout renders.
  */
 export interface SettingsOverlay {
   kind: 'settings'
@@ -80,6 +88,7 @@ export interface SettingsOverlay {
   initialTab: 'comfy' | 'directories' | 'global'
   initialDetailTab?: string
   autoAction?: string | null
+  noSidebar?: boolean
 }
 
 /**

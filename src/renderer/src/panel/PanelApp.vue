@@ -1069,6 +1069,7 @@ onUnmounted(() => {
       :initial-tab="currentOverlay.initialTab"
       :initial-detail-tab="currentOverlay.initialDetailTab"
       :auto-action="currentOverlay.autoAction"
+      :no-sidebar="currentOverlay.noSidebar"
       @close="dismissTakeoverDirect"
       @show-progress="handleShowProgress"
       @update:installation="handleUpdateInstallation"

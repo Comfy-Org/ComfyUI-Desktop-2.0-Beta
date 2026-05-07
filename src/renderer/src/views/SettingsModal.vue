@@ -33,11 +33,19 @@ interface Props {
    *  the "auto-run this action on mount" path used by the chooser
    *  card update / migrate pills. Optional. */
   autoAction?: string | null
+  /** When true, hide the left-side rail entirely and render only the
+   *  active tab's content. Used for chooser-card "Manage…" / Update /
+   *  Migrate entry-points where the user picked a specific install
+   *  and the cross-install Directories / Global Settings tabs would
+   *  be a distraction. The file-menu / title-bar Settings entry
+   *  leaves it false so the full sidebar renders. */
+  noSidebar?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   initialDetailTab: 'status',
   autoAction: null,
+  noSidebar: false,
 })
 
 const emit = defineEmits<{
@@ -131,8 +139,8 @@ function handleUpdateInstallation(inst: Installation): void {
 
 <template>
   <ModalShell :title="t('settingsModal.title')" content-class="settings-modal-shell" @close="handleClose">
-    <div class="settings-modal-layout">
-      <nav class="settings-sidebar" :aria-label="t('settingsModal.title')">
+    <div class="settings-modal-layout" :class="{ 'no-sidebar': noSidebar }">
+      <nav v-if="!noSidebar" class="settings-sidebar" :aria-label="t('settingsModal.title')">
         <button
           v-for="tab in visibleTabs"
           :key="tab.key"

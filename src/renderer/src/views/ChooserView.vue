@@ -179,12 +179,19 @@ function openManage(
   installation: Installation,
   opts: { initialTab?: string; autoAction?: string | null } = {},
 ): void {
+  // Pass `noSidebar: true` so the unified Settings modal collapses to
+  // just the install's ComfyUI Settings surface — the user picked a
+  // specific install via the chooser-card kebab/right-click menu, so
+  // the cross-install Directories / Global Settings tabs would be a
+  // distraction here. The file-menu / title-bar Settings entry leaves
+  // the flag unset and gets the full sidebar layout instead.
   void openOverlay({
     kind: 'settings',
     installation,
     initialTab: 'comfy',
     initialDetailTab: opts.initialTab ?? 'status',
     autoAction: opts.autoAction ?? null,
+    noSidebar: true,
   })
 }
 

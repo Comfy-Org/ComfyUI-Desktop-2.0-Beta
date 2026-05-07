@@ -551,9 +551,39 @@ input[type="checkbox"]:checked::after { transform: translateX(16px); }
 .edit-name-hint {
   flex-shrink: 0; opacity: 0.25; transition: opacity 0.15s;
   pointer-events: none; user-select: none;
+  /* Keep the pencil glyph baseline-aligned with the surrounding name
+   * text rather than letting the SVG sit on the bottom edge of the
+   * line box (which would push it out from under the name text and
+   * onto the next line in narrow / contenteditable contexts). */
+  vertical-align: middle;
 }
 .view-modal-title:hover .edit-name-hint { opacity: 0.6; }
 .view-modal-title:focus .edit-name-hint { opacity: 0; }
+
+/* Embedded DetailModal title — same flex row treatment as the wrapped
+ * mode's `.view-modal-title` so the contenteditable name + pencil glyph
+ * stay on one line. The wrapping element is a plain `<div>` so without
+ * this it inherits block layout and the `.edit-name-hint` SVG falls to
+ * the next line. */
+.detail-embedded-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 16px;
+}
+.detail-embedded-title > [contenteditable] {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  outline: none;
+}
+.detail-embedded-title:hover .edit-name-hint { opacity: 0.6; }
+.detail-embedded-title > [contenteditable]:focus .edit-name-hint { opacity: 0; }
 .view-modal-header-actions { display: flex; gap: 8px; flex-shrink: 0; }
 /* Stack the optional back chevron above the grand title in Tier 3
    takeover modals (NewInstall / Track / LoadSnapshot / QuickInstall).
