@@ -23,6 +23,8 @@ import { useListAction } from '../composables/useListAction'
 import { useMigrateAction } from '../composables/useMigrateAction'
 import { useOverlay, type FlowComponent } from '../composables/useOverlay'
 import { useModal } from '../composables/useModal'
+import { emitTelemetryAction } from '../lib/telemetry'
+import { buildSupportUrl } from '../lib/supportUrl'
 import type { ActionResult, Installation, ShowProgressOpts } from '../types/ipc'
 
 /**
@@ -76,6 +78,19 @@ const FLOW_PANELS: ReadonlySet<PanelKey> = new Set([
   'load-snapshot',
   'quick-install',
 ])
+
+/**
+ * Telemetry — mirrors the `flow:` strings the pre-Phase-3 `App.vue`
+ * sent with `desktop2.install.flow.opened`. Keeping the same values
+ * means the existing PostHog / Datadog dashboards keyed off `flow`
+ * keep working post-refactor.
+ */
+const FLOW_TELEMETRY_NAMES: Record<FlowComponent, string> = {
+  'new-install': 'new_install',
+  'quick-install': 'quick_install',
+  track: 'track_existing',
+  'load-snapshot': 'load_snapshot',
+}
 
 /** Panels that mount as Tier 1 page modals (waffle / install dropdown
  *  items). Like FLOW_PANELS they never sit in `activePanel` — they
@@ -197,6 +212,24 @@ let unsubPanelTriggerOverlay: (() => void) | null = null
 let unsubFirstUseSkip: (() => void) | null = null
 let unsubAppUpdatePromptRestart: (() => void) | null = null
 let unsubAppUpdateUserActionFailed: (() => void) | null = null
+let unsubOpenFeedback: (() => void) | null = null
+
+/** App version cached at mount; appended to the support URL as the
+ *  `ver` query param so feedback submissions can be filtered by build.
+ *  Cached because the typeform open path is fire-and-forget and we
+ *  don't want to await an IPC inside the click handler. Empty string
+ *  while the initial fetch is in flight or if it failed — `buildSupportUrl`
+ *  treats falsy as "omit the param". */
+const appVersion = ref('')
+
+/** Forward a Send Feedback request from the title-bar button or the
+ *  file-menu entry: fire the `desktop2.feedback.opened` telemetry
+ *  action (with `source` so we can tell which affordance the user
+ *  reached for), then open the typeform support URL via `openExternal`. */
+function handleOpenFeedback(source: 'titlebar' | 'menu'): void {
+  emitTelemetryAction('desktop2.feedback.opened', { source })
+  void window.api.openExternal(buildSupportUrl(appVersion.value || undefined))
+}
 
 async function loadLocale(): Promise<void> {
   const messages = await window.api.getLocaleMessages()
@@ -323,7 +356,7 @@ function handleProgressClose(): void {
  * the cancel-prompt that fires when an in-flight Tier 2 progress op
  * is being pre-empted — see `useOverlay`'s tier-collision rules).
  */
-async function openFlowTakeover(component: FlowComponent): Promise<void> {
+async function openFlowTakeover(component: FlowComponent, entrypoint: string): Promise<void> {
   // Modal-unification (Track M-6) — opt the install-flow wizards into
   // the dedicated "Discard install setup?" cancel-prompt copy so a
   // window-close consult during the wizard reads correctly. The
@@ -335,6 +368,17 @@ async function openFlowTakeover(component: FlowComponent): Promise<void> {
   // just a wizard to dismiss.
   const ok = await openOverlay({ kind: 'takeover', component, cancelCopyKey: 'discard-setup' })
   if (!ok) return
+  // Telemetry parity (issue #485) — pre-Phase-3 the four `App.vue`
+  // openers (`openNewInstall` / `openQuickInstall` / `openTrack` /
+  // `openLoadSnapshot`) each fired `desktop2.install.flow.opened`
+  // before presenting the wizard. The single chokepoint here covers
+  // all four post-refactor; the `entrypoint` is supplied by the
+  // caller so the dashboard can still tell title-bar opens from
+  // chooser-empty-state opens etc.
+  emitTelemetryAction('desktop2.install.flow.opened', {
+    flow: FLOW_TELEMETRY_NAMES[component],
+    entrypoint,
+  })
   // Wait for the v-if branch in the takeover slot to mount the
   // component before reaching for its ref.
   await nextTick()
@@ -498,7 +542,7 @@ async function handleFirstUseComplete(): Promise<void> {
 async function handleFirstUseChainLocal(): Promise<void> {
   chainingFirstUseToNewInstall.value = true
   pendingFirstUseAutoLaunchId.value = null
-  await switchPanel('new-install')
+  await switchPanel('new-install', 'first_use')
   // FirstUseTakeover.onUnmounted just pushed `'none'` as the chain
   // swap unmounted it. Re-assert `'post-consent'` so the file-menu
   // builder keeps the chain locked down to Skip Onboarding while
@@ -699,23 +743,38 @@ watch(
  * (the title-bar pill click is just "go to this page", with no reset
  * semantics needed for tab-style views like Settings / Directories).
  */
-async function switchPanel(panel: PanelKey): Promise<void> {
+async function switchPanel(panel: PanelKey, entrypoint: string = 'titlebar'): Promise<void> {
+  // Capture the underlying body BEFORE any mutation so the
+  // `desktop2.view.opened` event reports the same `from_view` the
+  // pre-Phase-3 `App.vue::switchView` did (it captured `activeView`
+  // before calling `nav.switchTab`).
+  const fromView = activePanel.value
   if (FLOW_PANELS.has(panel)) {
-    await openFlowTakeover(panel as FlowComponent)
+    await openFlowTakeover(panel as FlowComponent, entrypoint)
     return
   }
   // Waffle / install dropdown items render as Tier 1 modals on top of
   // the underlying chooser / comfy-lifecycle body — never as a body
   // swap that hides the home view.
   if (panel === 'directories' || panel === 'launcher-settings') {
-    await openOverlay({ kind: 'page', page: panel })
+    const ok = await openOverlay({ kind: 'page', page: panel })
+    if (!ok) return
+    emitTelemetryAction('desktop2.view.opened', { view: panel, from_view: fromView })
     return
   }
   if (panel === 'install-settings' && installation.value) {
-    await openOverlay({ kind: 'manage', installation: installation.value })
+    const ok = await openOverlay({ kind: 'manage', installation: installation.value })
+    if (!ok) return
+    emitTelemetryAction('desktop2.view.opened', { view: panel, from_view: fromView })
     return
   }
+  // Body-swap branch — preserve the pre-Phase-3 `if (view !== fromView)`
+  // no-op guard so a redundant `panel-switch` IPC (e.g. main re-confirms
+  // `'comfy-lifecycle'` after an instance stop while we're already there)
+  // doesn't generate a noise event.
+  if (panel === fromView) return
   activePanel.value = panel
+  emitTelemetryAction('desktop2.view.opened', { view: panel, from_view: fromView })
 }
 
 function handleUpdateInstallation(inst: Installation): void {
@@ -782,7 +841,7 @@ async function handleChooserPick(installation: Installation): Promise<void> {
   // semantics for the missing-launch-action case: bounce into the
   // new-install flow inside this same host so the user can resolve
   // the missing setup step without bouncing to a separate window.
-  await performChooserLaunch(installation, () => { void switchPanel('new-install') })
+  await performChooserLaunch(installation, () => { void switchPanel('new-install', 'chooser_pick') })
 }
 
 function handleChooserShowNewInstall(): void {
@@ -791,7 +850,7 @@ function handleChooserShowNewInstall(): void {
   // window; the user perceives a wizard step rather than a navigation
   // jump, and dismissing the takeover drops them right back into the
   // chooser tile they came from.
-  void switchPanel('new-install')
+  void switchPanel('new-install', 'chooser')
 }
 
 function handleNavigateList(): void {
@@ -964,6 +1023,23 @@ onMounted(async () => {
     void completeFirstUseAndDismiss()
   })
 
+  // Title-bar Send Feedback button + file-menu "Send Feedback" entry
+  // both forward through main to this listener. See `handleOpenFeedback`;
+  // `source` identifies the affordance for telemetry.
+  unsubOpenFeedback = window.api.onOpenFeedback(({ source }) => {
+    handleOpenFeedback(source)
+  })
+
+  // Cache the app version for the support URL's `ver` query param.
+  // Fire-and-forget — `handleOpenFeedback` falls back to omitting the
+  // param while this is in flight or if it rejects.
+  void window.api
+    .getAppVersion()
+    .then((v) => {
+      appVersion.value = v
+    })
+    .catch(() => {})
+
   // Initialize stores / prefs needed by the install-settings DetailModal.
   // installationStore wires its own onInstallationsChanged listener.
   await Promise.all([
@@ -976,7 +1052,7 @@ onMounted(async () => {
   // or page modal), kick that open now — script-setup couldn't because
   // the template hadn't rendered yet.
   if (FLOW_PANELS.has(initialPanel) || PAGE_PANELS.has(initialPanel)) {
-    void switchPanel(initialPanel)
+    void switchPanel(initialPanel, 'url')
   }
 
   // Phase 3 §17 Step 4 — first-use takeover auto-mounts when the
@@ -1000,6 +1076,7 @@ onUnmounted(() => {
   unsubFirstUseSkip?.()
   unsubAppUpdatePromptRestart?.()
   unsubAppUpdateUserActionFailed?.()
+  unsubOpenFeedback?.()
   pendingPickUnsub?.()
   sessionStore.dispose()
 })

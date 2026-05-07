@@ -61,6 +61,14 @@ const api: ElectronApi = {
     ipcRenderer.on('comfy-panel:first-use-skip', handler)
     return () => ipcRenderer.removeListener('comfy-panel:first-use-skip', handler)
   },
+  onOpenFeedback: (callback) => {
+    const handler = (_event: IpcRendererEvent, data: unknown): void => {
+      const source = (data as { source?: unknown } | null)?.source
+      callback({ source: source === 'menu' ? 'menu' : 'titlebar' })
+    }
+    ipcRenderer.on('comfy-panel:open-feedback', handler)
+    return () => ipcRenderer.removeListener('comfy-panel:open-feedback', handler)
+  },
   /**
    * Step 5 §16 — main consults the panel renderer before tearing down
    * the host window so a Tier 2 progress / Tier 3 takeover overlay can

@@ -719,6 +719,14 @@ export interface ElectronApi {
    *  `markFirstUseCompleted` + dismiss-takeover sequence the Cloud
    *  pick path uses. Returns an unsubscribe. */
   onFirstUseSkip(callback: () => void): Unsubscribe
+  /** Main forwards both the title-bar feedback button and the file-menu
+   *  "Send Feedback" entry here. The panel renderer fires the
+   *  `desktop2.feedback.opened` telemetry action (with `source` so we
+   *  can tell the two affordances apart) and opens the support URL via
+   *  `openExternal` — the renderer is the natural home because
+   *  `buildSupportUrl()` reads `navigator.userAgent` and the telemetry
+   *  helpers live renderer-side. Returns an unsubscribe. */
+  onOpenFeedback(callback: (data: { source: 'titlebar' | 'menu' }) => void): Unsubscribe
   /** Step 5 §16 — main consults the panel renderer before tearing down
    *  the host window. Returns an unsubscribe; the callback receives a
    *  `requestId` it must echo back via `respondCloseRequest` so main

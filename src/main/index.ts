@@ -247,28 +247,14 @@ interface ComfyWindowEntry {
    */
   panelView: WebContentsView | null
   /**
-   * Which panel is currently rendered (== `panelHistory[panelHistoryIndex]`).
-   * Always one of the user-visible panel keys — never the internal
-   * `'comfy-lifecycle'` / `'chooser'` body modes. For install-less host
-   * windows only `'comfy'`, `'launcher-settings'`, and `'directories'`
-   * are reachable (Install Settings is hidden — the install caret menu
-   * is suppressed without an install backing the window).
+   * Which panel is currently rendered. Always one of the user-visible
+   * panel keys — never the internal `'comfy-lifecycle'` / `'chooser'`
+   * body modes. For install-less host windows only `'comfy'`,
+   * `'launcher-settings'`, and `'directories'` are reachable
+   * (Install Settings is hidden — the install caret menu is suppressed
+   * without an install backing the window).
    */
   activePanel: ComfyPanelKey
-  /**
-   * Browser-style navigation history for the title-bar Back / Forward
-   * buttons. The pill is no longer treated as a tab indicator —
-   * navigating between pages uses this stack instead.
-   *
-   * The "root" is `'comfy'` and is always at index 0. Opening a page
-   * (Settings / Directories / Install Settings / a flow) truncates any
-   * forward history and pushes the new key. Returning to the comfy
-   * body via the pill or the page's X-close button resets the stack
-   * to `['comfy']` (deliberate "I'm done with these pages" gesture
-   * — clears forward history). Back / Forward only move the index.
-   */
-  panelHistory: ComfyPanelKey[]
-  panelHistoryIndex: number
   /** Last known theme reported by the ComfyUI frontend, applied to the panel when it loads. */
   lastTheme: { bg: string; text: string }
   /** Layout function bound to this entry — updates view bounds for the current activePanel. */
@@ -499,7 +485,6 @@ function refreshComfyTabBody(installationId: string): void {
  *
  * This is the single chokepoint every title-bar IPC must funnel through —
  * see `comfy-window:open-title-menu` / `comfy-window:set-panel` /
- * `comfy-window:go-back` / `comfy-window:go-forward` /
  * `comfy-window:click-app-update-pill` / `comfy-window:click-install-update-pill`.
  *
  * Aux windows are NEVER reachable through this lookup:
@@ -1285,7 +1270,6 @@ function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowResult {
       titleBarView.webContents.send('comfy-titlebar:theme-changed', entry.lastTheme)
       titleBarView.webContents.send('comfy-titlebar:title-changed', entry.titleBarText)
       titleBarView.webContents.send('comfy-titlebar:source-category-changed', entry.sourceCategory)
-      _notifyTitleBarNavState(entry)
     }
     // Phase 3 §18 — both modes get the app-update pill and the
     // downloads tray. The install-update pill is install-backed only:
@@ -1380,8 +1364,6 @@ function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowResult {
     titleBarView,
     panelView: null,
     activePanel: 'comfy',
-    panelHistory: ['comfy'],
-    panelHistoryIndex: 0,
     lastTheme: opts.initialTheme,
     layoutViews,
     comfyUrl: '',
@@ -1523,15 +1505,14 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
       void existing.comfyView.webContents.loadURL(comfyUrl).catch(() => {})
     }
     // A relaunch implicitly means "land me in the live ComfyUI view",
-    // so force the host's activePanel back to `'comfy'` and clear any
-    // breadcrumb history. Without this, a launch kicked off from a
-    // non-comfy panel (e.g. the install-settings DetailModal) would
-    // leave the body stranded on the lifecycle / settings panel —
-    // `refreshComfyTabBody` early-returns on `activePanel !== 'comfy'`.
-    // The trailing `refreshComfyTabBody` still handles the
-    // comfy-lifecycle → comfy body-mode swap when the entry was
-    // already on `'comfy'` (setActivePanel early-returns there).
-    setActivePanel(existing.windowKey, 'comfy', 'reset')
+    // so force the host's activePanel back to `'comfy'`. Without this, a
+    // launch kicked off from a non-comfy panel (e.g. the install-settings
+    // DetailModal) would leave the body stranded on the lifecycle /
+    // settings panel — `refreshComfyTabBody` early-returns on
+    // `activePanel !== 'comfy'`. The trailing `refreshComfyTabBody`
+    // still handles the comfy-lifecycle → comfy body-mode swap when the
+    // entry was already on `'comfy'` (setActivePanel early-returns there).
+    setActivePanel(existing.windowKey, 'comfy')
     refreshComfyTabBody(installationId)
     if (proc) {
       proc.on('exit', () => {
@@ -2026,11 +2007,8 @@ function _detachInstallImpl(entry: ComfyWindowEntry): void {
 
   // Reset nav state to the comfy pill (chooser body for install-less hosts).
   entry.activePanel = 'comfy'
-  entry.panelHistory = ['comfy']
-  entry.panelHistoryIndex = 0
   if (!entry.titleBarView.webContents.isDestroyed()) {
     entry.titleBarView.webContents.send('comfy-titlebar:panel-changed', 'comfy')
-    _notifyTitleBarNavState(entry)
   }
 
   // Tear down the install-backed PanelApp and remount fresh in chooser mode.
@@ -2320,47 +2298,7 @@ function focusActiveBody(entry: ComfyWindowEntry): void {
   }
 }
 
-/**
- * How a panel switch is being requested. Drives the navigation-history
- * book-keeping so the title bar's Back / Forward buttons behave like a
- * browser tab rather than a page swap:
- *   - `'navigate'`: opening a page from a menu / dropdown / chooser →
- *     truncate forward history and push the new key.
- *   - `'back'` / `'forward'`: only move the history index. The caller
- *     resolves the destination key from the stack, this function just
- *     applies it.
- *   - `'reset'`: pill click or X-close → wipe history back to `['comfy']`
- *     and land on index 0. A deliberate "I'm done with these pages"
- *     gesture, so forward history is intentionally cleared.
- */
-type PanelNavSource = 'navigate' | 'back' | 'forward' | 'reset'
-
-/** Push `key` onto the history, truncating any forward entries first.
- *  No-op when `key` is already the current panel. */
-function _pushPanelHistory(entry: ComfyWindowEntry, key: ComfyPanelKey): void {
-  // Drop everything strictly after the current index — the user is
-  // forking history from where they currently are.
-  entry.panelHistory = entry.panelHistory.slice(0, entry.panelHistoryIndex + 1)
-  if (entry.panelHistory[entry.panelHistoryIndex] === key) return
-  entry.panelHistory.push(key)
-  entry.panelHistoryIndex = entry.panelHistory.length - 1
-}
-
-/** Send the current Back/Forward enabled state to the title bar so it can
- *  enable / disable the arrow buttons. */
-function _notifyTitleBarNavState(entry: ComfyWindowEntry): void {
-  if (entry.titleBarView.webContents.isDestroyed()) return
-  entry.titleBarView.webContents.send('comfy-titlebar:nav-state-changed', {
-    canBack: entry.panelHistoryIndex > 0,
-    canForward: entry.panelHistoryIndex < entry.panelHistory.length - 1,
-  })
-}
-
-function setActivePanel(
-  windowKey: number,
-  panel: ComfyPanelKey,
-  source: PanelNavSource = 'navigate',
-): void {
+function setActivePanel(windowKey: number, panel: ComfyPanelKey): void {
   const entry = comfyWindows.get(windowKey)
   if (!entry || entry.window.isDestroyed()) return
   // Install Settings is install-scoped (the install caret menu in the
@@ -2373,27 +2311,7 @@ function setActivePanel(
   // host windows are allowed to open it.
   if (entry.installationId === null && panel === 'install-settings') return
 
-  // Update navigation history per source. The history mutation happens
-  // BEFORE the early-return for "same panel" because a `'reset'` from a
-  // page back to `'comfy'` still has work to do (clear forward) even
-  // when the panel is already comfy by some other accident.
-  if (source === 'reset') {
-    entry.panelHistory = ['comfy']
-    entry.panelHistoryIndex = 0
-    panel = 'comfy'
-  } else if (source === 'navigate') {
-    _pushPanelHistory(entry, panel)
-  }
-  // For 'back' / 'forward' the caller has already moved
-  // panelHistoryIndex; we only apply the panel switch here.
-
-  if (entry.activePanel === panel) {
-    // Even when the panel didn't change (e.g. menu re-pick of the
-    // current page), nav state may have shifted (forward truncated)
-    // — push the latest state so the title bar arrows reflect reality.
-    _notifyTitleBarNavState(entry)
-    return
-  }
+  if (entry.activePanel === panel) return
 
   entry.activePanel = panel
   // Resolve to the actual body mode (Comfy pill maps to lifecycle / chooser
@@ -2414,7 +2332,6 @@ function setActivePanel(
     // internal `'comfy-lifecycle'` body mode.
     entry.titleBarView.webContents.send('comfy-titlebar:panel-changed', panel)
   }
-  _notifyTitleBarNavState(entry)
   focusActiveBody(entry)
 }
 
@@ -2423,43 +2340,14 @@ ipcMain.on('comfy-window:set-panel', (event, payload: { panel: string }) => {
   if (!found) return
   const panel = payload?.panel as ComfyPanelKey
   if (!VALID_PANELS.has(panel)) return
-  // Pill clicks always send `'comfy'` from the title bar — treat as a
-  // history reset (the pill is no longer a tab indicator, so going
-  // home should clear the breadcrumb of pages the user was browsing).
-  // Other panel keys from the title bar come from the File / Install
-  // dropdowns and are 'navigate'.
-  setActivePanel(found.id, panel, panel === 'comfy' ? 'reset' : 'navigate')
-})
-
-/** Title bar Back arrow → step one entry backward in history. */
-ipcMain.on('comfy-window:go-back', (event) => {
-  const found = findEntryByTitleBarSender(event.sender)
-  if (!found) return
-  const { id, entry } = found
-  if (entry.panelHistoryIndex <= 0) return
-  entry.panelHistoryIndex -= 1
-  const target = entry.panelHistory[entry.panelHistoryIndex]
-  if (!target) return
-  setActivePanel(id, target, 'back')
-})
-
-/** Title bar Forward arrow → step one entry forward in history. */
-ipcMain.on('comfy-window:go-forward', (event) => {
-  const found = findEntryByTitleBarSender(event.sender)
-  if (!found) return
-  const { id, entry } = found
-  if (entry.panelHistoryIndex >= entry.panelHistory.length - 1) return
-  entry.panelHistoryIndex += 1
-  const target = entry.panelHistory[entry.panelHistoryIndex]
-  if (!target) return
-  setActivePanel(id, target, 'forward')
+  setActivePanel(found.id, panel)
 })
 
 /**
  * Page-level X close (rendered inside the panel WebContentsView, e.g.
  * Settings / Directories / Install Settings) — same effect as a pill
- * click: history is reset and the body returns to the comfy/chooser
- * root. The panel preload exposes this as `closeCurrentPanel()`.
+ * click: the body returns to the comfy/chooser root. The panel preload
+ * exposes this as `closeCurrentPanel()`.
  *
  * We resolve the host window via the panel's WebContents sender. The
  * panelView is lazily created so we walk every entry instead of caching
@@ -2468,7 +2356,7 @@ ipcMain.on('comfy-window:go-forward', (event) => {
 ipcMain.on('comfy-window:close-current-panel', (event) => {
   for (const [id, entry] of comfyWindows) {
     if (entry.panelView?.webContents === event.sender) {
-      setActivePanel(id, 'comfy', 'reset')
+      setActivePanel(id, 'comfy')
       return
     }
   }
@@ -2663,6 +2551,34 @@ ipcMain.on('comfy-window:click-downloads-tray', (event) => {
 })
 
 /**
+ * Forward a Send Feedback request to the host's panel renderer.
+ * Panel-side (`PanelApp.vue`) fires the `desktop2.feedback.opened`
+ * telemetry action and opens the typeform support URL via
+ * `openExternal`. The renderer is the natural home because
+ * `buildSupportUrl()` reads `navigator.userAgent` and the telemetry
+ * helpers live renderer-side. Used by both the file-menu "Send
+ * Feedback" entry and the title-bar feedback button.
+ *
+ * `source` is forwarded into the renderer's telemetry context as
+ * `desktop2.feedback.opened` `{ source }` so we can tell which
+ * affordance the user reached for.
+ */
+function triggerOpenFeedback(entryId: number, source: 'titlebar' | 'menu'): void {
+  const parentEntry = comfyWindows.get(entryId)
+  if (!parentEntry?.panelView) return
+  if (parentEntry.panelView.webContents.isDestroyed()) return
+  parentEntry.panelView.webContents.send('comfy-panel:open-feedback', { source })
+}
+
+/** Title-bar Send Feedback button click. Resolves the host entry from
+ *  the title-bar sender, then routes through `triggerOpenFeedback`. */
+ipcMain.on('comfy-window:click-feedback', (event) => {
+  const found = findEntryByTitleBarSender(event.sender)
+  if (!found) return
+  triggerOpenFeedback(found.entry.windowKey, 'titlebar')
+})
+
+/**
  * File menu → New Window (Phase 3 title bar v2). Always opens a fresh
  * install-less chooser host window — does NOT focus an existing one
  * (that's the tray-entry behaviour). The user explicitly asked for a
@@ -2848,6 +2764,8 @@ function buildTitleMenuItems(kind: 'file' | 'install', entry: ComfyWindowEntry):
     items.push(
       { id: 'directories', label: 'Directories', checked: entry.activePanel === 'directories' },
       { id: 'launcher-settings', label: 'App Settings' },
+      { kind: 'separator' },
+      { id: 'feedback', label: 'Send Feedback' },
     )
     return items
   }
@@ -3127,6 +3045,13 @@ function activateTitleMenuItem(entry: TitleMenuPopupEntry, id: string): void {
       if (parentEntry?.panelView && !parentEntry.panelView.webContents.isDestroyed()) {
         parentEntry.panelView.webContents.send('comfy-panel:first-use-skip')
       }
+    }
+    else if (id === 'feedback') {
+      // Forward to the panel renderer — see `triggerOpenFeedback`.
+      // The title-bar Send Feedback button lands on the same helper
+      // via `comfy-window:click-feedback`; `source` distinguishes the
+      // two entry points in the telemetry payload.
+      triggerOpenFeedback(entry.parentEntryId, 'menu')
     }
     else if (id === 'new-install' || id === 'track' || id === 'load-snapshot' || id === 'quick-install') {
       // Track B item 3 — install-creation / import flows are
