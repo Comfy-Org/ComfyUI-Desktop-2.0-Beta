@@ -2990,7 +2990,10 @@ const POPUP_RENDER_ACK_TIMEOUT_MS = 80
  *  somewhere sensible. Skip it on the blur path — focus has already
  *  moved to wherever the user clicked, and stealing it back to the
  *  parent would yank focus out of whatever they targeted (another app
- *  window, the parent's body, etc.). */
+ *  window, the parent's body, etc.). Also skip it when the activated
+ *  item handed focus to a *different* window (e.g. `new-window` opens
+ *  and `bringToFront`s a fresh chooser host) — re-focusing the parent
+ *  here races against and defeats that hand-off. */
 function hideTitleMenuPopup(
   entry: TitleMenuPopupEntry,
   opts: { releaseFocusToParent?: boolean } = {},
@@ -3087,8 +3090,17 @@ function openTitleMenuPopup(opts: {
 }
 
 function activateTitleMenuItem(entry: TitleMenuPopupEntry, id: string): void {
+  // Default: re-focus the popup's parent on dismiss so keyboard input
+  // lands somewhere sensible. Actions that hand focus to a *different*
+  // window (e.g. `new-window` spawns a fresh chooser host and brings it
+  // to the front) flip this off so the parent doesn't immediately yank
+  // focus back from the new target.
+  let releaseFocusToParent = true
   if (entry.kind === 'file') {
-    if (id === 'new-window') openChooserHostWindow()
+    if (id === 'new-window') {
+      openChooserHostWindow()
+      releaseFocusToParent = false
+    }
     else if (id === 'return-to-dashboard') {
       // §16 — flip the install-backed host in place to chooser-host
       // mode (Stage W-4). The same BrowserWindow stays alive; the
@@ -3156,8 +3168,9 @@ function activateTitleMenuItem(entry: TitleMenuPopupEntry, id: string): void {
   } else {
     if (id === 'install-settings') setActivePanel(entry.parentEntryId, 'install-settings')
   }
-  // Item click — popup still has focus, so push it back to the parent.
-  hideTitleMenuPopup(entry, { releaseFocusToParent: true })
+  // Item click — popup still has focus, so push it back to the parent
+  // unless the action just handed focus to a different window.
+  hideTitleMenuPopup(entry, { releaseFocusToParent })
 }
 
 ipcMain.on('comfy-titlemenu:ready', (event) => {
