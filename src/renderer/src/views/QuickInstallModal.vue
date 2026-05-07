@@ -260,14 +260,16 @@ defineExpose({ open })
 <template>
   <ModalShell binding content-class="quick-install-modal" @close="emit('close')">
       <template #header>
-        <TakeoverBack
-          :label="$t('common.backToDashboard')"
-          @back="emit('close')"
-        />
-        <TakeoverHeader
-          :title="$t('quickInstall.grandTitle')"
-          :subtitle="$t('quickInstall.grandSubtitle')"
-        />
+        <div class="takeover-stacked-header">
+          <TakeoverBack
+            :label="$t('common.backToDashboard')"
+            @back="emit('close')"
+          />
+          <TakeoverHeader
+            :title="$t('quickInstall.grandTitle')"
+            :subtitle="$t('quickInstall.grandSubtitle')"
+          />
+        </div>
       </template>
         <div class="view-scroll">
           <div v-if="loading" class="wizard-loading with-spinner">

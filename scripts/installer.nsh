@@ -25,12 +25,24 @@
 !macroend
 
 !macro installVcRedist
-  File /oname=$PLUGINSDIR\vc_redist.x64.exe "${BUILD_RESOURCES_DIR}\vc_redist.x64.exe"
-  ExecWait '"$PLUGINSDIR\vc_redist.x64.exe" /install /passive /norestart' $0
+  # electron-builder calls SetDetailsPrint none for interactive installs,
+  # which silences DetailPrint output. Switch to textonly so users see what
+  # is happening in the installer's status bar while ExecWait blocks; this
+  # message stays on screen for the full duration of the VC++ install.
+  SetDetailsPrint textonly
+  DetailPrint "Installing Microsoft Visual C++ Redistributable (this may take several minutes)..."
+  SetDetailsPrint none
 
-  ${If} $0 <> 0
-  ${AndIf} $0 <> 1638
-  ${AndIf} $0 <> 3010
+  File /oname=$PLUGINSDIR\vc_redist.x64.exe "${BUILD_RESOURCES_DIR}\vc_redist.x64.exe"
+  # /quiet keeps the redistributable's own UI hidden so the user only sees
+  # our installer's status text and progress bar.
+  ExecWait '"$PLUGINSDIR\vc_redist.x64.exe" /install /quiet /norestart' $0
+
+  ${If} $0 = 0
+  ${OrIf} $0 = 1638
+  ${OrIf} $0 = 3010
+    # Success (or already-installed / reboot-required, both treated as success).
+  ${Else}
     MessageBox MB_ICONSTOP|MB_OK "Microsoft Visual C++ Redistributable installation failed (exit code $0). ComfyUI Desktop requires it to run."
     Abort
   ${EndIf}

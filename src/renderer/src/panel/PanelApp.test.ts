@@ -107,13 +107,14 @@ vi.mock('../views/QuickInstallModal.vue', () => ({
 vi.mock('../views/FirstUseTakeover.vue', () => ({
   default: {
     name: 'FirstUseTakeover',
-    emits: ['close', 'complete', 'chain-local'],
+    emits: ['close', 'complete-cloud', 'complete-skip', 'chain-local', 'chain-migrate'],
     // Stub does NOT auto-call window.api.getLocale on mount — the host
     // exercises the imperative open() reset post-mount, which is what
     // we mock + assert on.
     template:
       '<div data-testid="first-use-takeover">' +
-      '<button data-testid="first-use-cloud" @click="$emit(\'complete\')">Cloud</button>' +
+      '<button data-testid="first-use-cloud" @click="$emit(\'complete-cloud\')">Cloud</button>' +
+      '<button data-testid="first-use-skip" @click="$emit(\'complete-skip\')">Skip</button>' +
       '<button data-testid="first-use-local" @click="$emit(\'chain-local\')">Local</button>' +
       '<button data-testid="first-use-close" @click="$emit(\'close\')">Close</button>' +
       '</div>',
@@ -238,6 +239,7 @@ function installMockApi(initial?: {
     // suite never fires the consult so the mock is a no-op pair.
     onCloseRequest: vi.fn(() => () => {}),
     respondCloseRequest: vi.fn(),
+    ackCloseRequest: vi.fn(),
     onInstallationsChanged: vi.fn((cb: () => void) => {
       state.installationsChangedCallbacks.push(cb)
       return () => {}
@@ -263,6 +265,18 @@ function installMockApi(initial?: {
     // prior installs, no legacy desktop — so the takeover advances
     // through every step exactly as it did before.
     getFirstUseState: vi.fn(async () => ({ skipPick: false, hasLegacyDesktop: false })),
+    // Cloud-pick auto-launch fans out into the chooser-launch pipeline:
+    // claim the host for in-place attach, look up the install's launch
+    // action, then execute it. Mocking the IPC surface lets the new
+    // `complete-skip` test assert these are NEVER called (returning
+    // users must NOT be teleported into Cloud they didn't pick) while
+    // the existing `complete-cloud` test continues to dismiss cleanly
+    // when no cloud install is present in the store.
+    claimAttachHost: vi.fn(async () => true),
+    transferHostBoundsToInstall: vi.fn(async () => {}),
+    closeHostWindow: vi.fn(async () => {}),
+    focusComfyWindow: vi.fn(async () => {}),
+    getListActions: vi.fn(async () => []),
   }
   ;(window as unknown as { api: typeof api }).api = api
   return state
@@ -462,21 +476,68 @@ describe('PanelApp', () => {
 
   it('marks firstUseCompleted=true and closes the takeover on Cloud-branch pick', async () => {
     mockState.settings.firstUseCompleted = false
+    // Seed a cloud install so the auto-launch path can resolve a
+    // target — the host pulls launch actions for it via the chooser
+    // launch pipeline. We assert getListActions IS called here so the
+    // returning-user `complete-skip` test below can credibly assert
+    // the opposite.
+    mockState.installations = [
+      { id: 'cloud-id', name: 'Comfy Cloud', sourceLabel: 'Cloud', sourceCategory: 'cloud' },
+    ]
     window.history.replaceState({}, '', '/?panel=chooser')
     const wrapper = mountPanel()
     await flushPromises()
-    const setSetting = (window as unknown as {
-      api: { setSetting: ReturnType<typeof vi.fn> }
-    }).api.setSetting
-    expect(setSetting).not.toHaveBeenCalledWith('firstUseCompleted', true)
+    const api = (window as unknown as {
+      api: {
+        setSetting: ReturnType<typeof vi.fn>
+        getListActions: ReturnType<typeof vi.fn>
+      }
+    }).api
+    expect(api.setSetting).not.toHaveBeenCalledWith('firstUseCompleted', true)
 
     await wrapper.find('[data-testid="first-use-cloud"]').trigger('click')
     await flushPromises()
 
-    expect(setSetting).toHaveBeenCalledWith('firstUseCompleted', true)
+    expect(api.setSetting).toHaveBeenCalledWith('firstUseCompleted', true)
     expect(wrapper.find('[data-testid="first-use-takeover"]').exists()).toBe(false)
     // Chooser body underneath remains mounted.
     expect(wrapper.find('[data-testid="chooser-view"]').exists()).toBe(true)
+    // Cloud auto-launch ran — getListActions resolves the launch
+    // action for the seeded cloud install.
+    expect(api.getListActions).toHaveBeenCalledWith('cloud-id')
+  })
+
+  it('marks firstUseCompleted=true on returning-user complete-skip WITHOUT auto-launching cloud', async () => {
+    // Issue #476 — when `skipPick` is true (returning user with prior
+    // local installs), accepting consent emits `complete-skip` rather
+    // than `complete-cloud`. The host must mark completion and dismiss,
+    // but MUST NOT launch the seeded cloud install: the user never
+    // picked Cloud (the fork was suppressed), so auto-launching it
+    // would hijack their existing local install.
+    mockState.settings.firstUseCompleted = false
+    mockState.installations = [
+      { id: 'cloud-id', name: 'Comfy Cloud', sourceLabel: 'Cloud', sourceCategory: 'cloud' },
+      SAMPLE_INSTALL,
+    ]
+    window.history.replaceState({}, '', '/?panel=chooser')
+    const wrapper = mountPanel()
+    await flushPromises()
+    const api = (window as unknown as {
+      api: {
+        setSetting: ReturnType<typeof vi.fn>
+        getListActions: ReturnType<typeof vi.fn>
+      }
+    }).api
+    expect(api.setSetting).not.toHaveBeenCalledWith('firstUseCompleted', true)
+
+    await wrapper.find('[data-testid="first-use-skip"]').trigger('click')
+    await flushPromises()
+
+    expect(api.setSetting).toHaveBeenCalledWith('firstUseCompleted', true)
+    expect(wrapper.find('[data-testid="first-use-takeover"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="chooser-view"]').exists()).toBe(true)
+    // Critical guarantee — no implicit cloud launch happened.
+    expect(api.getListActions).not.toHaveBeenCalled()
   })
 
   it('chains into the new-install takeover on Local-branch pick and marks completion when new-install closes', async () => {

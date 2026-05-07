@@ -738,6 +738,12 @@ export interface ElectronApi {
   /** Reply to a `comfy-window:request-close` consult — `cleared: true`
    *  lets main proceed with destruction, `cleared: false` aborts. */
   respondCloseRequest(payload: { requestId: string; cleared: boolean }): void
+  /** Send immediately on receiving a `comfy-window:request-close` so
+   *  main knows the renderer picked it up and is processing. Main's
+   *  hung-renderer safety timeout only fires until the ack lands; once
+   *  acked main waits indefinitely for the actual response (the user
+   *  may take their time on the cancel-prompt). */
+  ackCloseRequest(payload: { requestId: string }): void
   /** Stamp the calling chooser host window's current bounds onto the
    *  install's saved-bounds slot (Phase 3 visual continuity). The chooser
    *  pick flow used this BEFORE the W-4 in-place attach landed — kept

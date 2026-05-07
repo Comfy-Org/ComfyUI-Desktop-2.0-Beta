@@ -274,7 +274,7 @@ export function register(): void {
     }
     try {
       setQuitReason('update-install')
-      updater.restartAndInstall()
+      updater.restartAndInstall({ isSilent: true })
     } catch (err) {
       clearQuitReason()
       broadcast('update-error', { message: err instanceof Error ? err.message : String(err) })

@@ -19,6 +19,16 @@ const emit = defineEmits<{
   'navigate-list': []
 }>()
 
+withDefaults(
+  defineProps<{
+    /** Hide the "Back to Dashboard" chevron — used when the wizard is
+     *  chained from the first-use takeover, where returning to the
+     *  dashboard would defeat the obfuscated bootstrap background. */
+    hideBackToDashboard?: boolean
+  }>(),
+  { hideBackToDashboard: false },
+)
+
 const { t } = useI18n()
 const modal = useModal()
 
@@ -496,14 +506,23 @@ async function handleSave(): Promise<void> {
     })
     return
   }
-  emit('close')
   if (result.entry) {
+    // Hand off to the progress overlay WITHOUT first emitting `close`.
+    // The host's overlay slot silently swaps Tier 3 takeover → progress
+    // (or takeover-update when first-use is chaining), which unmounts
+    // this wizard. Emitting `close` first would dismiss the overlay
+    // before the swap and briefly reveal the dashboard underneath —
+    // exactly the flash the first-use happy path must avoid.
     emit('show-progress', {
       installationId: result.entry.id,
       title: `${t('newInstall.installing')} — ${name}`,
       apiCall: () => window.api.installInstance(result.entry!.id)
     })
+    return
   }
+  // Defensive: addInstallation reported ok but produced no entry.
+  // Dismiss the wizard so the user isn't stuck on it.
+  emit('close')
 }
 
 function getSelectedIndex(field: SourceField): number {
@@ -521,14 +540,17 @@ defineExpose({ open })
 <template>
   <ModalShell binding @close="emit('close')">
       <template #header>
-        <TakeoverBack
-          :label="$t('common.backToDashboard')"
-          @back="emit('close')"
-        />
-        <TakeoverHeader
-          :title="$t('newInstall.grandTitle')"
-          :subtitle="$t('newInstall.grandSubtitle')"
-        />
+        <div class="takeover-stacked-header">
+          <TakeoverBack
+            v-if="!hideBackToDashboard"
+            :label="$t('common.backToDashboard')"
+            @back="emit('close')"
+          />
+          <TakeoverHeader
+            :title="$t('newInstall.grandTitle')"
+            :subtitle="$t('newInstall.grandSubtitle')"
+          />
+        </div>
       </template>
         <div class="view-scroll">
           <!-- Phase 3 §19 — per-step heading reads as a sub-section

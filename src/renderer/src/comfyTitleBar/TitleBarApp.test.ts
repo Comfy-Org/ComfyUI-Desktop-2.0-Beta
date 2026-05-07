@@ -245,7 +245,7 @@ describe('TitleBarApp', () => {
     bridgeState.panelChangedCallbacks.forEach((cb) => cb('comfy'))
     await flushPromises()
     expect(wrapper.find('.title-install-pill').classes()).not.toContain('active')
-    bridgeState.panelChangedCallbacks.forEach((cb) => cb('launcher-settings'))
+    bridgeState.panelChangedCallbacks.forEach((cb) => cb('settings'))
     await flushPromises()
     expect(wrapper.find('.title-install-pill').classes()).not.toContain('active')
   })
