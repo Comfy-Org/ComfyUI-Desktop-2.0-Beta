@@ -29,7 +29,12 @@ export function registerSettingsHandlers(): void {
               { value: 'dark', label: i18n.t('settings.themeDark') },
               { value: 'light', label: i18n.t('settings.themeLight') },
             ] },
-          { id: 'autoUpdate', label: i18n.t('settings.autoUpdate'), type: 'boolean', value: s.autoUpdate !== false },
+          // Issue #488 — old `autoUpdate` toggle ("Check for updates on
+          // startup") split into two behaviors: the auto-check loop now
+          // always runs, and this new toggle controls whether updates
+          // install silently vs prompt the user. The legacy `autoUpdate`
+          // key is retained in the schema (no UI) for a future setting.
+          { id: 'autoInstallUpdates', label: i18n.t('settings.autoInstallUpdates'), type: 'boolean', value: s.autoInstallUpdates !== false },
           // The `onAppClose` field is hidden while docking-to-tray is
           // disabled (see main/index.ts createTray()). Restore this
           // entry — and the 'tray' default in settings.ts — when the
@@ -133,11 +138,13 @@ export function registerSettingsHandlers(): void {
       _broadcastToRenderer('telemetry-setting-changed', value)
       mainTelemetry.setConsent(value !== false)
     }
-    if (key === 'autoUpdate') {
+    if (key === 'autoInstallUpdates' || key === 'autoUpdate') {
       // Re-broadcast the cached app-update state so a pending 'ready'
       // immediately starts reading as auto-on / auto-off — drives the
       // title-bar pill copy and the click-modal flow without waiting
-      // for the next update-check broadcast.
+      // for the next update-check broadcast. Both keys are watched so
+      // a future re-exposure of the legacy `autoUpdate` toggle still
+      // works without further changes here.
       updater.notifyAutoUpdateChanged()
     }
     // Notify all renderers (including embedded panel views) so any open

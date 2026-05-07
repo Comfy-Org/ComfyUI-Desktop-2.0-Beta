@@ -62,12 +62,15 @@ function _setUpdateState(next: AppUpdateState): void {
 const NO_UPDATE_AVAILABLE_MESSAGE = 'No update available. Try checking for updates first.'
 const UPDATER_UNAVAILABLE_MESSAGE = 'ToDesktop auto-updater is unavailable.'
 
-/** Track B item 2 — single source of truth for the autoUpdate flag.
+/** Issue #488 — single source of truth for the auto-install flag.
  *  Default-on: any non-`false` value (including missing) is treated as
- *  enabled, matching the gate used by the periodic `runIfEnabled` and
- *  the `auto_update` telemetry property. */
-function isAutoUpdateEnabled(): boolean {
-  return settings.get('autoUpdate') !== false
+ *  enabled. Reads the new `autoInstallUpdates` key (the legacy
+ *  `autoUpdate` setting was retired from the UI in #488 — auto-checks
+ *  always run now and only the install behavior is user-controllable).
+ *  The `AppUpdateState.autoUpdate` field name is kept for the renderer
+ *  payload so callers don't have to churn — it now mirrors this flag. */
+function isAutoInstallEnabled(): boolean {
+  return settings.get('autoInstallUpdates') !== false
 }
 
 /**
@@ -80,7 +83,7 @@ function isAutoUpdateEnabled(): boolean {
  */
 export function notifyAutoUpdateChanged(): void {
   if (_appUpdateState.kind === null) return
-  const refreshed = isAutoUpdateEnabled()
+  const refreshed = isAutoInstallEnabled()
   if (_appUpdateState.autoUpdate === refreshed) return
   _setUpdateState({ ..._appUpdateState, autoUpdate: refreshed })
 }
@@ -140,13 +143,13 @@ function bindUpdaterEvents(): void {
   updater.on('update-available', (info: unknown) => {
     const version = versionFromPayload(info)
     if (!version) return
-    const autoUpdate = isAutoUpdateEnabled()
-    if (autoUpdate) {
-      // Auto-updates ON suppresses the 'available' pill entirely.
+    const autoInstall = isAutoInstallEnabled()
+    if (autoInstall) {
+      // Auto-install ON suppresses the 'available' pill entirely.
       // Main programmatically kicks off the download in the
       // background; only the subsequent 'ready' state surfaces
       // ("Desktop Update Ready"). The download is silent — no user
-      // action required.
+      // action required, and the install is silent on next quit.
       if (_autoDownloadTriggeredFor !== version) {
         _autoDownloadTriggeredFor = version
         void runCheck('auto-download').catch(() => {})
@@ -160,7 +163,7 @@ function bindUpdaterEvents(): void {
     const version = versionFromPayload(event)
     if (!version) return
     _autoDownloadTriggeredFor = null
-    _setUpdateState({ kind: 'ready', version, autoUpdate: isAutoUpdateEnabled() })
+    _setUpdateState({ kind: 'ready', version, autoUpdate: isAutoInstallEnabled() })
     if (_userInitiatedDownload) {
       // The user opted in to download via the auto-off available pill
       // modal. Push the restart prompt automatically so the flow ends
@@ -295,10 +298,13 @@ export function register(): void {
     return { canAutoUpdate: !systemManaged, systemManaged }
   })
 
-  // Check on startup and periodically (respects autoUpdate setting at each check)
-  const runIfEnabled = (): void => {
-    if (isAutoUpdateEnabled()) runCheck('auto-check').catch(() => {})
+  // Issue #488 — always check on startup and periodically. The
+  // user-controllable `autoInstallUpdates` setting only gates whether
+  // a discovered update silently downloads + installs vs prompts the
+  // user; the check loop itself is no longer user-disablable.
+  const runAutoCheck = (): void => {
+    runCheck('auto-check').catch(() => {})
   }
-  setTimeout(runIfEnabled, 2000)
-  setInterval(runIfEnabled, 10 * 60 * 1000)
+  setTimeout(runAutoCheck, 2000)
+  setInterval(runAutoCheck, 10 * 60 * 1000)
 }
