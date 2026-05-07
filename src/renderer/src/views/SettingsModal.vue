@@ -116,6 +116,22 @@ watch(
   },
 )
 
+// Deep-link override — the title-bar install-update pill (and other
+// future deep-link entry-points) opens the overlay with a non-default
+// `initialDetailTab` even if the unified Settings modal is already
+// mounted. Without this watcher, the inner DetailModal's tab change
+// would be invisible because the user was already on Directories or
+// Global Settings. Snap the sidebar back to the ComfyUI Settings tab
+// whenever a deep-link is present so the detail-tab swap is visible.
+watch(
+  () => props.initialDetailTab,
+  (next, prev) => {
+    if (!next || next === prev) return
+    if (!hasInstallation.value) return
+    activeTab.value = 'comfy'
+  },
+)
+
 function selectTab(key: SettingsTab): void {
   activeTab.value = key
 }

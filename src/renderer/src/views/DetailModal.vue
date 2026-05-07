@@ -156,6 +156,30 @@ async function fetchInstallationSize(installationId: string): Promise<void> {
   }
 }
 
+// Deep-link tab override — the title-bar install-update pill (and
+// chooser-card Update / Migrate pills) re-open the modal with a
+// non-default `initialTab` even when the same installation is
+// already in view. The installation watcher below treats those
+// re-opens as "not a new installation" so it skips the activeTab
+// reset; this watcher fills the gap and snaps the inner tab to the
+// requested one (when sections are already loaded — first-mount
+// alignment is still owned by the installation watcher's
+// `isNewInstallation` branch).
+watch(
+  () => props.initialTab,
+  (next, prev) => {
+    if (!next || next === prev) return
+    if (sections.value.length === 0) return
+    if (next === activeTab.value) return
+    const tabExists = sections.value.some((s) => s.tab === next)
+    if (!tabExists) return
+    activeTab.value = next
+    void nextTick(() => {
+      if (scrollRef.value) scrollRef.value.scrollTop = 0
+    })
+  },
+)
+
 watch(
   () => props.installation,
   async (inst) => {
