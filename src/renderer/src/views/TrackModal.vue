@@ -151,11 +151,13 @@ defineExpose({ open })
 <template>
   <ModalShell binding @close="emit('close')">
       <template #header>
-        <TakeoverBack
-          :label="$t('common.backToDashboard')"
-          @back="emit('close')"
-        />
-        <TakeoverHeader :title="$t('track.grandTitle')" :subtitle="$t('track.grandSubtitle')" />
+        <div class="takeover-stacked-header">
+          <TakeoverBack
+            :label="$t('common.backToDashboard')"
+            @back="emit('close')"
+          />
+          <TakeoverHeader :title="$t('track.grandTitle')" :subtitle="$t('track.grandSubtitle')" />
+        </div>
       </template>
         <div class="view-scroll">
           <!-- Track path -->

@@ -62,8 +62,19 @@ profile_path() {
 
 backup_current() {
   if [[ -f "$INSTALLATIONS_FILE" ]]; then
-    cp "$INSTALLATIONS_FILE" "$DATA_DIR/installations.json.bak"
-    echo "Backed up current installations.json to installations.json.bak"
+    local stamp
+    stamp="$(date -u +%Y%m%d-%H%M%S)"
+    local stamped="$DATA_DIR/installations.json.${stamp}.bak"
+    cp "$INSTALLATIONS_FILE" "$stamped"
+    echo "Backed up current installations.json to installations.json.${stamp}.bak"
+    # Preserve the very first/original snapshot in the legacy plain .bak slot.
+    # Only create it if it does not already exist so repeated runs cannot
+    # clobber the original backup.
+    local legacy="$DATA_DIR/installations.json.bak"
+    if [[ ! -f "$legacy" ]]; then
+      cp "$INSTALLATIONS_FILE" "$legacy"
+      echo "Also created original snapshot at installations.json.bak"
+    fi
   fi
 }
 
