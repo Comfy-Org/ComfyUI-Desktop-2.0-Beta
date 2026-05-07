@@ -64,6 +64,23 @@ function Get-ProfilePath {
   return Join-Path $profilesDir "$ProfileName.json"
 }
 
+function Backup-Installations {
+  # Timestamped backups so repeat runs never clobber the previous
+  # snapshot. The legacy single-slot `.bak` could lose the original
+  # contents when the script was invoked twice in a row — the second
+  # run would back up the already-mutated file over the only copy of
+  # the real one. The plain `.bak` is kept too so quick "restore last"
+  # tooling still works, but only if it doesn't already exist (so the
+  # original is preserved across repeat invocations).
+  if (-not (Test-Path $installationsFile)) { return }
+  $stamp = (Get-Date).ToString("yyyyMMdd-HHmmss")
+  $stamped = Join-Path $dataDir "installations.json.$stamp.bak"
+  Copy-Item $installationsFile $stamped -Force
+  $legacy = Join-Path $dataDir "installations.json.bak"
+  if (-not (Test-Path $legacy)) { Copy-Item $installationsFile $legacy -Force }
+  Write-Host "Backed up current installations.json to $([System.IO.Path]::GetFileName($stamped))"
+}
+
 switch ($Action) {
   "save" {
     Require-Name
@@ -80,11 +97,7 @@ switch ($Action) {
   }
 
   "empty" {
-    if (Test-Path $installationsFile) {
-      $backup = Join-Path $dataDir "installations.json.bak"
-      Copy-Item $installationsFile $backup -Force
-      Write-Host "Backed up current installations.json to installations.json.bak"
-    }
+    Backup-Installations
     [System.IO.File]::WriteAllText($installationsFile, "[]", [System.Text.UTF8Encoding]::new($false))
     Write-Host "Replaced installations.json with empty array (fresh state)"
   }
@@ -112,9 +125,7 @@ switch ($Action) {
       Write-Error "No eligible primary installation found."
       exit 1
     }
-    $backup = Join-Path $dataDir "installations.json.bak"
-    Copy-Item $installationsFile $backup -Force
-    Write-Host "Backed up current installations.json to installations.json.bak"
+    Backup-Installations
     # Ensure the install path exists and isn't considered empty by the app's
     # startup sweep (which deletes entries whose installPath is missing/empty).
     $instPath = $primary.installPath
@@ -136,11 +147,7 @@ switch ($Action) {
       Write-Error "Profile '$Name' not found. Use 'list' to see available profiles."
       exit 1
     }
-    if (Test-Path $installationsFile) {
-      $backup = Join-Path $dataDir "installations.json.bak"
-      Copy-Item $installationsFile $backup -Force
-      Write-Host "Backed up current installations.json to installations.json.bak"
-    }
+    Backup-Installations
     Copy-Item $src $installationsFile -Force
     Write-Host "Loaded profile '$Name' as installations.json"
   }

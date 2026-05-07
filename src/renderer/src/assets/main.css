@@ -56,6 +56,13 @@
   --info: #58a6ff;
   --terminal-bg: #111112;
   --overlay-bg: rgba(0, 0, 0, 0.55);
+  /* Heavier dim used on Comfy-Instance modals. */
+  --overlay-bg-heavy: rgba(0, 0, 0, 0.75);
+  /* Fully opaque backdrop used on binding modals (install wizards,
+     first-use, update-while-running) — visually differentiates them
+     from non-binding modals and signals the lack of click-outside / ✕
+     dismiss. */
+  --overlay-bg-opaque: var(--bg);
 }
 
 [data-theme="light"] {
@@ -75,6 +82,8 @@
   --info: #2563eb;
   --terminal-bg: #f3f3f3;
   --overlay-bg: rgba(0, 0, 0, 0.35);
+  --overlay-bg-heavy: rgba(0, 0, 0, 0.55);
+  --overlay-bg-opaque: var(--bg);
 }
 
 /* ================================================================
@@ -158,10 +167,6 @@ body {
   width: 18px; height: 18px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
   flex-shrink: 0;
-}
-.sidebar-feedback {
-  margin: 0 8px;
-  width: auto;
 }
 .sidebar-version {
   padding: 8px 20px;
@@ -321,6 +326,19 @@ input[type="checkbox"]:checked::after { transform: translateX(16px); }
 .breadcrumb { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .breadcrumb-current { font-size: 24px; font-weight: 600; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* In-view page close button (X) shown next to the breadcrumb on root
+   panel pages such as Settings and Directories. Resets the host
+   window's panel-history stack via `closeCurrentPanel`. */
+.view-page-close {
+  display: inline-flex; align-items: center; justify-content: center;
+  flex-shrink: 0; width: 28px; height: 28px; padding: 0;
+  background: none; border: none; border-radius: 6px;
+  color: var(--text-muted); cursor: pointer; line-height: 1;
+  transition: background 0.15s, color 0.15s;
+}
+.view-page-close:hover { background: var(--surface); color: var(--text); }
+.view-page-close:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
 .detected-hardware {
   font-size: 13px; color: var(--text-muted);
   background: var(--surface); border: 1px solid var(--border);
@@ -370,31 +388,8 @@ input[type="checkbox"]:checked::after { transform: translateX(16px); }
 .detail-section-desc { font-size: 14px; color: var(--text-muted); margin-bottom: 8px; }
 
 /* Channel cards */
-.channel-cards-row {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: 8px; margin-top: 6px;
-}
-.channel-card {
-  display: flex; flex-direction: column; text-align: left;
-  padding: 12px 14px; background: var(--surface);
-  border: 2px solid var(--border); border-radius: 8px;
-  cursor: pointer; transition: border-color 0.15s;
-}
-.channel-card:hover { border-color: var(--border-hover); }
-.channel-card.selected { border-color: var(--selected); }
-.channel-card.current:not(.selected) { border-color: var(--border-hover); }
-.channel-card-header { display: flex; align-items: center; gap: 8px; }
-.channel-card-label { font-size: 14px; font-weight: 600; color: var(--text); }
-.channel-card-badge {
-  font-size: 11px; font-weight: 600; text-transform: uppercase;
-  color: var(--accent); letter-spacing: 0.5px;
-}
-.channel-card-current {
-  font-size: 11px; font-weight: 600; text-transform: uppercase;
-  color: var(--success); letter-spacing: 0.5px;
-}
-.channel-card-desc { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+.channel-select { max-width: 360px; }
+.channel-select-desc { font-size: 12px; color: var(--text-muted); margin-top: 6px; }
 .channel-preview {
   margin-top: 10px; padding: 10px 14px;
   background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
@@ -504,12 +499,16 @@ input[type="checkbox"]:checked::after { transform: translateX(16px); }
 /* View modals */
 .view-modal {
   position: fixed; inset: 0;
-  top: var(--titlebar-height);
   background: var(--overlay-bg);
   display: none; align-items: center; justify-content: center;
   z-index: 50;
 }
 .view-modal.active { display: flex; }
+/* Backdrop variants. `--heavy-dim` used on Comfy-Instance modals;
+ * `--opaque` used on binding modals (install wizards, first-use,
+ * update-while-running). */
+.view-modal--heavy-dim { background: var(--overlay-bg-heavy); }
+.view-modal--opaque { background: var(--overlay-bg-opaque); }
 .view-fullscreen {
   position: fixed; top: var(--titlebar-height); bottom: 0; right: 0;
   left: var(--sidebar-width);
@@ -525,9 +524,18 @@ input[type="checkbox"]:checked::after { transform: translateX(16px); }
 .view-modal-content {
   background: var(--bg); border: 1px solid var(--border);
   border-radius: 12px;
-  width: calc(100vw - var(--sidebar-width) - 60px); height: calc(100vh - 60px - var(--titlebar-height));
-  max-width: 900px;
+  width: 100%; max-width: 900px;
+  height: calc(100vh - 60px);
+  margin: 0 30px;
   display: flex; flex-direction: column; overflow: hidden;
+}
+/* Width variant — narrower for per-install Manage / Preferences / confirms. */
+.view-modal-content--regular { max-width: 600px; }
+/* Inline mode (used by the embedded install-settings panel inside ComfyUI windows). */
+.view-modal-content.view-modal-inline {
+  width: 100%; height: 100%;
+  max-width: none;
+  border: none; border-radius: 0;
 }
 .view-modal-header {
   display: flex; align-items: center;
@@ -543,10 +551,54 @@ input[type="checkbox"]:checked::after { transform: translateX(16px); }
 .edit-name-hint {
   flex-shrink: 0; opacity: 0.25; transition: opacity 0.15s;
   pointer-events: none; user-select: none;
+  /* Keep the pencil glyph baseline-aligned with the surrounding name
+   * text rather than letting the SVG sit on the bottom edge of the
+   * line box (which would push it out from under the name text and
+   * onto the next line in narrow / contenteditable contexts). */
+  vertical-align: middle;
 }
 .view-modal-title:hover .edit-name-hint { opacity: 0.6; }
 .view-modal-title:focus .edit-name-hint { opacity: 0; }
+
+/* Embedded DetailModal title — same flex row treatment as the wrapped
+ * mode's `.view-modal-title` so the contenteditable name + pencil glyph
+ * stay on one line. The wrapping element is a plain `<div>` so without
+ * this it inherits block layout and the `.edit-name-hint` SVG falls to
+ * the next line. */
+.detail-embedded-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 16px;
+}
+.detail-embedded-title > [contenteditable] {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  outline: none;
+}
+.detail-embedded-title:hover .edit-name-hint { opacity: 0.6; }
+.detail-embedded-title > [contenteditable]:focus .edit-name-hint { opacity: 0; }
 .view-modal-header-actions { display: flex; gap: 8px; flex-shrink: 0; }
+/* Stack the optional back chevron above the grand title in Tier 3
+   takeover modals (NewInstall / Track / LoadSnapshot / QuickInstall).
+   Without the wrapper the back button sits in the same row as the
+   title and shoves it right because both are flex children of
+   .view-modal-header. */
+.takeover-stacked-header {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.takeover-stacked-header > .takeover-header { width: 100%; }
 .view-modal-close {
   background: none; border: none; font-size: 18px;
   color: var(--text-muted); cursor: pointer;
@@ -568,7 +620,6 @@ input[type="checkbox"]:checked::after { transform: translateX(16px); }
 /* Modal dialog */
 .modal-overlay {
   position: fixed; inset: 0;
-  top: var(--titlebar-height);
   background: var(--overlay-bg);
   display: flex; align-items: center; justify-content: center;
   z-index: 100;
@@ -806,14 +857,11 @@ input[type="checkbox"]:checked::after { transform: translateX(16px); }
   text-transform: none; letter-spacing: 0; font-weight: 500;
 }
 .dashboard-change-btn:hover { color: var(--text); border-color: var(--border-hover); background: none; }
-.dashboard-card-badge-pinned { color: var(--text-muted); }
-
-/* Primary/Pinned card indicators */
+/* Primary card indicator */
 .card-indicator {
   display: inline-block; vertical-align: -2px; margin-left: 4px;
 }
 .card-indicator-primary { color: var(--accent); }
-.card-indicator-pinned { color: var(--text-muted); }
 
 /* Cloud card */
 .dashboard-cloud-card {
@@ -926,8 +974,6 @@ input[type="checkbox"]:checked::after { transform: translateX(16px); }
 /* Quick install modal */
 .quick-install-modal {
   max-width: 620px;
-  min-height: 420px;
-  height: auto; max-height: calc(100vh - 100px - var(--titlebar-height));
 }
 .quick-install-desc {
   font-size: 14px; color: var(--text-muted); margin-bottom: 16px;
@@ -980,31 +1026,6 @@ input[type="checkbox"]:checked::after { transform: translateX(16px); }
 }
 .context-menu-separator {
   height: 1px; background: var(--border); margin: 4px 8px;
-}
-
-/* Detail modal header actions */
-.detail-header-actions {
-  display: flex; gap: 4px; flex-shrink: 0;
-}
-button.detail-header-btn {
-  display: flex; align-items: center; justify-content: center;
-  width: 32px; height: 32px; padding: 0;
-  border-radius: 6px;
-  background: none; border: 1px solid transparent;
-  color: var(--text-muted); cursor: pointer;
-  transition: all 0.15s; font-size: 0;
-}
-button.detail-header-btn:hover:not(:disabled) {
-  color: var(--text); border-color: var(--border-hover); background: none;
-}
-button.detail-header-btn.active {
-  color: var(--accent); border-color: transparent;
-}
-button.detail-header-btn.active:hover:not(:disabled) {
-  color: var(--accent-hover); border-color: var(--border-hover); background: none;
-}
-button.detail-header-btn:disabled {
-  cursor: default; opacity: 0.4;
 }
 
 /* Shared arg-row styles — used by ArgRow, ArgRadioGroup */

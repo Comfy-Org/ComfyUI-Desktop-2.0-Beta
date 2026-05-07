@@ -13,6 +13,7 @@ files:
   - '!docs/*'
   - '!out/**/*.map'
   - '!reference/*'
+  - '!**/*.wsb'
 extraResources:
   - from: lib
     to: lib
@@ -41,7 +42,7 @@ mac:
   target:
     - dmg
     - zip
-  icon: assets/Comfy_Logo_x512.png
+  icon: assets/Comfy_Logo_x1024.png
   category: public.app-category.developer-tools
   extraResources:
     - from: bootstrap-python/mac-arm64
@@ -52,7 +53,7 @@ linux:
   target:
     - AppImage
     - deb
-  icon: assets/Comfy_Logo_x256.png
+  icon: assets/Comfy_Logo_x512.png
   category: Development
   extraResources:
     - from: resources/apparmor-profile

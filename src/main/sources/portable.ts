@@ -82,7 +82,8 @@ export const portable: SourcePlugin = {
     const channel = (installation.updateChannel as string | undefined) || 'stable'
     const info = releaseCache.getEffectiveInfo(COMFYUI_REPO, channel, installation)
     if (info && releaseCache.isUpdateAvailable(installation, channel, info)) {
-      return { label: t('portable.updateAvailableTag', { version: info.releaseName || info.latestTag || '' }), style: 'update' }
+      const version = info.releaseName || info.latestTag || ''
+      return { label: t('portable.updateAvailableTag', { version }), style: 'update', version }
     }
     if (installation.status === 'installed') {
       return { label: t('migrate.migrateToStandalonePill'), style: 'migrate' }

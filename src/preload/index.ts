@@ -26,6 +26,11 @@ const api: ElectronApi = {
   // Locale
   getLocaleMessages: () => ipcRenderer.invoke('get-locale-messages'),
   getAvailableLocales: () => ipcRenderer.invoke('get-available-locales'),
+  getLocale: () => ipcRenderer.invoke('get-locale'),
+
+  // First-use takeover state (skipPick + hasLegacyDesktop). See
+  // `firstUseDetection.ts` in main for the categorisation rules.
+  getFirstUseState: () => ipcRenderer.invoke('get-first-use-state'),
 
   // Installations
   getInstallations: () => ipcRenderer.invoke('get-installations'),
@@ -43,7 +48,51 @@ const api: ElectronApi = {
   stopComfyUI: (installationId) => ipcRenderer.invoke('stop-comfyui', installationId),
   focusComfyWindow: (installationId) =>
     ipcRenderer.invoke('focus-comfy-window', installationId),
+  closeComfyWindow: (installationId) =>
+    ipcRenderer.invoke('close-comfy-window', installationId),
+  closeHostWindow: () =>
+    ipcRenderer.invoke('close-host-window'),
+  closeCurrentPanel: () =>
+    ipcRenderer.send('comfy-window:close-current-panel'),
+  setFirstUseMode: (mode: 'none' | 'consent-lockdown' | 'post-consent') =>
+    ipcRenderer.send('comfy-window:set-first-use-mode', { mode }),
+  onFirstUseSkip: (callback) => {
+    const handler = (): void => callback()
+    ipcRenderer.on('comfy-panel:first-use-skip', handler)
+    return () => ipcRenderer.removeListener('comfy-panel:first-use-skip', handler)
+  },
+  onOpenFeedback: (callback) => {
+    const handler = (_event: IpcRendererEvent, data: unknown): void => {
+      const source = (data as { source?: unknown } | null)?.source
+      callback({ source: source === 'menu' ? 'menu' : 'titlebar' })
+    }
+    ipcRenderer.on('comfy-panel:open-feedback', handler)
+    return () => ipcRenderer.removeListener('comfy-panel:open-feedback', handler)
+  },
+  /**
+   * Step 5 §16 — main consults the panel renderer before tearing down
+   * the host window so a Tier 2 progress / Tier 3 takeover overlay can
+   * prompt the user to confirm cancellation. The renderer replies
+   * with `respondCloseRequest({ requestId, cleared })` — `cleared:
+   * true` lets main proceed with destruction, `cleared: false` aborts.
+   */
+  onCloseRequest: (callback) => {
+    const handler = (_event: IpcRendererEvent, data: unknown) =>
+      callback(data as { requestId: string })
+    ipcRenderer.on('comfy-window:request-close', handler)
+    return () => ipcRenderer.removeListener('comfy-window:request-close', handler)
+  },
+  respondCloseRequest: (payload) =>
+    ipcRenderer.send('comfy-window:request-close-response', payload),
+  ackCloseRequest: (payload) =>
+    ipcRenderer.send('comfy-window:request-close-ack', payload),
+  transferHostBoundsToInstall: (installationId) =>
+    ipcRenderer.invoke('transfer-host-bounds-to-install', installationId),
+  claimAttachHost: (installationId) =>
+    ipcRenderer.invoke('claim-attach-host', installationId),
   getRunningInstances: () => ipcRenderer.invoke('get-running-instances'),
+  getLastCrashError: (installationId: string) =>
+    ipcRenderer.invoke('get-last-crash-error', installationId),
   cancelLaunch: () => ipcRenderer.invoke('cancel-launch'),
   cancelOperation: (installationId) =>
     ipcRenderer.invoke('cancel-operation', installationId),
@@ -117,7 +166,6 @@ const api: ElectronApi = {
   checkForUpdate: () => ipcRenderer.invoke('check-for-update'),
   downloadUpdate: () => ipcRenderer.invoke('download-update'),
   installUpdate: () => ipcRenderer.invoke('install-update'),
-  getPendingUpdate: () => ipcRenderer.invoke('get-pending-update'),
   getUpdateCapabilities: () => ipcRenderer.invoke('get-update-capabilities'),
 
   // Event listeners (return unsubscribe functions)
@@ -194,25 +242,17 @@ const api: ElectronApi = {
     ipcRenderer.on('installations-versions-updated', handler)
     return () => ipcRenderer.removeListener('installations-versions-updated', handler)
   },
-  onUpdateAvailable: (callback) => {
-    const handler = (_event: IpcRendererEvent, data: unknown) => callback(data as Parameters<typeof callback>[0])
-    ipcRenderer.on('update-available', handler)
-    return () => ipcRenderer.removeListener('update-available', handler)
+  onAppUpdatePromptRestart: (callback) => {
+    const handler = (_event: IpcRendererEvent, data: unknown) =>
+      callback(data as { version: string })
+    ipcRenderer.on('app-update:prompt-restart', handler)
+    return () => ipcRenderer.removeListener('app-update:prompt-restart', handler)
   },
-  onUpdateDownloadProgress: (callback) => {
-    const handler = (_event: IpcRendererEvent, data: unknown) => callback(data as Parameters<typeof callback>[0])
-    ipcRenderer.on('update-download-progress', handler)
-    return () => ipcRenderer.removeListener('update-download-progress', handler)
-  },
-  onUpdateDownloaded: (callback) => {
-    const handler = (_event: IpcRendererEvent, data: unknown) => callback(data as Parameters<typeof callback>[0])
-    ipcRenderer.on('update-downloaded', handler)
-    return () => ipcRenderer.removeListener('update-downloaded', handler)
-  },
-  onUpdateError: (callback) => {
-    const handler = (_event: IpcRendererEvent, data: unknown) => callback(data as Parameters<typeof callback>[0])
-    ipcRenderer.on('update-error', handler)
-    return () => ipcRenderer.removeListener('update-error', handler)
+  onAppUpdateUserActionFailed: (callback) => {
+    const handler = (_event: IpcRendererEvent, data: unknown) =>
+      callback(data as { message: string })
+    ipcRenderer.on('app-update:user-action-failed', handler)
+    return () => ipcRenderer.removeListener('app-update:user-action-failed', handler)
   },
   onZoomChanged: (callback) => {
     const handler = (_event: IpcRendererEvent, level: unknown) => callback(level as number)
@@ -248,6 +288,33 @@ const api: ElectronApi = {
     const handler = () => callback()
     ipcRenderer.on('suggest-chinese-mirrors', handler)
     return () => ipcRenderer.removeListener('suggest-chinese-mirrors', handler)
+  },
+  onSettingsChanged: (callback) => {
+    const handler = (_event: IpcRendererEvent, data: unknown) => callback(data as { key: string })
+    ipcRenderer.on('settings-changed', handler)
+    return () => ipcRenderer.removeListener('settings-changed', handler)
+  },
+  onPanelSwitch: (callback) => {
+    const handler = (_event: IpcRendererEvent, data: unknown) =>
+      callback(data as { panel: string; installationId?: string })
+    ipcRenderer.on('panel-switch', handler)
+    return () => ipcRenderer.removeListener('panel-switch', handler)
+  },
+  onPanelTriggerOverlay: (callback) => {
+    const handler = (_event: IpcRendererEvent, data: unknown) =>
+      callback(
+        data as {
+          kind:
+            | 'install-update'
+            | 'downloads'
+            | 'app-update-restart-prompt'
+            | 'app-update-download-prompt'
+          installationId?: string
+          version?: string | null
+        },
+      )
+    ipcRenderer.on('panel-trigger-overlay', handler)
+    return () => ipcRenderer.removeListener('panel-trigger-overlay', handler)
   },
 }
 

@@ -3,7 +3,6 @@ import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Check, X, TriangleAlert } from 'lucide-vue-next'
 import { useModal } from '../composables/useModal'
-import { useControllerRegistration } from '../composables/useControllerRegistration'
 
 import { useTerminalScroll } from '../composables/useTerminalScroll'
 import { useProgressStore } from '../stores/progressStore'
@@ -13,12 +12,15 @@ import type {
   ProgressStep,
   KillResult
 } from '../types/ipc'
+import ModalShell from '../components/ModalShell.vue'
 
 interface Props {
   installationId: string | null
+  /** Tier 3 update-while-running mounts pass `binding`; Tier 2 doesn't. */
+  binding?: boolean
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), { binding: false })
 
 const emit = defineEmits<{
   close: []
@@ -225,18 +227,18 @@ function getStepSummary(op: Operation, step: ProgressStep, stepIndex: number): s
   return null
 }
 
-useControllerRegistration('progress', { startOperation, showOperation })
-
 defineExpose({ startOperation, showOperation })
 </script>
 
 <template>
-  <div v-if="installationId && currentOp" class="view-modal-content">
-    <div class="view-modal-header">
-      <div class="view-modal-title">{{ currentOp.title }}</div>
-      <button class="view-modal-close" @click="emit('close')">{{ currentOp.finished ? '✕' : '−' }}</button>
-    </div>
-      <div class="view-modal-body">
+  <ModalShell
+    v-if="installationId && currentOp"
+    :binding="binding"
+    :title="currentOp.title"
+    :close-glyph="currentOp.finished ? '✕' : '−'"
+    @close="emit('close')"
+  >
+      <!-- body -->
         <!-- Status banner -->
         <div
           v-if="currentOp.finished && !currentOp.result?.portConflict"
@@ -346,10 +348,9 @@ defineExpose({ startOperation, showOperation })
             @scroll="handleTerminalScroll"
           >{{ currentOp.terminalOutput }}</div>
         </template>
-      </div>
 
       <!-- Bottom bar (pinned outside scrollable body) -->
-      <div class="view-modal-footer">
+      <template #footer>
         <!-- Port conflict actions -->
         <div
           v-if="
@@ -401,6 +402,6 @@ defineExpose({ startOperation, showOperation })
             }}
           </button>
         </div>
-      </div>
-  </div>
+      </template>
+  </ModalShell>
 </template>

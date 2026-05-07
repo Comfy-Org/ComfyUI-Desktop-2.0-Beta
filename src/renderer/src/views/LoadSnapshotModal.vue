@@ -2,24 +2,19 @@
 import { ref, computed, watch, toRaw, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useModal } from '../composables/useModal'
-import { useControllerRegistration } from '../composables/useControllerRegistration'
 
-import type { SnapshotFilePreview, FieldOption, GPUInfo } from '../types/ipc'
+import type { SnapshotFilePreview, FieldOption, GPUInfo, ShowProgressOpts } from '../types/ipc'
 import { getVariantGpuLabel, sortedCardOptions, findBestVariant } from '../lib/variants'
 import VariantCardGrid from '../components/VariantCardGrid.vue'
 import { emitTelemetryAction, toVariantBucket } from '../lib/telemetry'
 import SnapshotFilePreviewContent from '../components/SnapshotFilePreviewContent.vue'
+import TakeoverHeader from '../components/TakeoverHeader.vue'
+import TakeoverBack from '../components/TakeoverBack.vue'
+import ModalShell from '../components/ModalShell.vue'
 
 const emit = defineEmits<{
   close: []
-  'show-progress': [
-    opts: {
-      installationId: string
-      title: string
-      apiCall: () => Promise<unknown>
-      cancellable?: boolean
-    }
-  ]
+  'show-progress': [opts: ShowProgressOpts]
 }>()
 
 const { t } = useI18n()
@@ -252,24 +247,30 @@ onUnmounted(() => {
   document.removeEventListener('drop', preventNav)
 })
 
-useControllerRegistration('load-snapshot', { open })
-
 defineExpose({ open })
 </script>
 
 <template>
-  <div
-    ref="contentRef"
-    class="view-modal-content"
-    @dragover="!preview && handleDragOver($event)"
-    @dragleave="!preview && handleDragLeave($event)"
-    @drop="!preview && handleDrop($event)"
-  >
-      <div class="view-modal-header">
-        <div class="view-modal-title">{{ $t('list.loadSnapshot') }}</div>
-        <button class="view-modal-close" @click="emit('close')">✕</button>
-      </div>
-      <div class="view-modal-body">
+  <ModalShell binding @close="emit('close')">
+      <template #header>
+        <div class="takeover-stacked-header">
+          <TakeoverBack
+            :label="$t('common.backToDashboard')"
+            @back="emit('close')"
+          />
+          <TakeoverHeader
+            :title="$t('loadSnapshot.grandTitle')"
+            :subtitle="$t('loadSnapshot.grandSubtitle')"
+          />
+        </div>
+      </template>
+      <div
+        ref="contentRef"
+        class="ls-drop-target"
+        @dragover="!preview && handleDragOver($event)"
+        @dragleave="!preview && handleDragLeave($event)"
+        @drop="!preview && handleDrop($event)"
+      >
         <div class="view-scroll">
           <!-- Drop zone / file picker (shown when no preview loaded) -->
           <div v-if="!preview" class="ls-drop-zone-wrap">
@@ -364,10 +365,17 @@ defineExpose({ open })
           </button>
         </div>
       </div>
-  </div>
+  </ModalShell>
 </template>
 
 <style scoped>
+/* Wraps the body so drag-leave detection (contains check) can target the
+   whole drop area and view-scroll still fills it. */
+.ls-drop-target {
+  flex: 1; min-height: 0;
+  display: flex; flex-direction: column;
+}
+
 /* Ensure view-scroll stretches the drop zone when no preview is loaded */
 .view-scroll:has(.ls-drop-zone-wrap) {
   display: flex;

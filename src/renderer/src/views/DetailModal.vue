@@ -3,16 +3,17 @@ import { ref, computed, watch, nextTick, toRaw } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useModal } from '../composables/useModal'
 import { useActionGuard } from '../composables/useActionGuard'
-import { useLauncherPrefs } from '../composables/useLauncherPrefs'
 
 import DetailSectionComponent from '../components/DetailSection.vue'
 import SnapshotTab from '../components/SnapshotTab.vue'
+import ModalShell from '../components/ModalShell.vue'
 import { useInstallationStore } from '../stores/installationStore'
+import { useSessionStore } from '../stores/sessionStore'
 import { emitTelemetryAction, toErrorBucket } from '../lib/telemetry'
 import { formatBytes } from '../lib/formatting'
 import { useMigrateAction } from '../composables/useMigrateAction'
 import { REQUIRES_STOPPED } from '../types/ipc'
-import { Star, Pin, Pencil } from 'lucide-vue-next'
+import { Pencil } from 'lucide-vue-next'
 import TooltipWrap from '../components/TooltipWrap.vue'
 import type {
   Installation,
@@ -20,59 +21,56 @@ import type {
   DetailSection,
   FieldOption,
   ActionResult,
-  DiskSpaceInfo
+  DiskSpaceInfo,
+  ShowProgressOpts
 } from '../types/ipc'
 
 interface Props {
   installation: Installation | null
   initialTab?: string
   autoAction?: string | null
+  /** When true, render as a Tier 1 manage overlay (Modal-wrapped, dim
+   *  backdrop, no Esc/click-outside dismiss). When false (default),
+   *  render inline as the install-settings panel body. */
+  asModal?: boolean
+  /** When true, render bare (no ModalShell wrapper, no close button)
+   *  for mounting inside a parent modal that owns the chrome — e.g.
+   *  the unified SettingsModal's "ComfyUI Settings" tab body. The
+   *  contenteditable install name renders as the first row of the
+   *  bare panel; everything else (tabs, scroll body, action bar)
+   *  follows unchanged. */
+  embedded?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   initialTab: 'status',
   autoAction: null,
+  asModal: false,
+  embedded: false,
 })
 
 const emit = defineEmits<{
   close: []
-  'show-progress': [
-    opts: {
-      installationId: string
-      title: string
-      apiCall: () => Promise<unknown>
-      cancellable?: boolean
-      returnTo?: string
-    }
-  ]
+  'show-progress': [opts: ShowProgressOpts]
   'navigate-list': []
   'update:installation': [inst: Installation]
 }>()
 
 const { t } = useI18n()
 const modal = useModal()
-const prefs = useLauncherPrefs()
 const installationStore = useInstallationStore()
+const sessionStore = useSessionStore()
 const actionGuard = useActionGuard()
 const { confirmMigration } = useMigrateAction()
 
-const isLocal = computed(() => props.installation?.sourceCategory === 'local')
-const isDesktop = computed(() => props.installation?.sourceId === 'desktop')
-const isCloud = computed(() => props.installation?.sourceCategory === 'cloud')
-const isPrimary = computed(() => props.installation ? prefs.isPrimary(props.installation.id) : false)
-const isPinned = computed(() => props.installation ? prefs.isPinned(props.installation.id) : false)
-
-async function confirmSetPrimary(): Promise<void> {
-  if (!props.installation) return
-  const confirmed = await modal.confirm({
-    title: t('dashboard.setPrimary'),
-    message: t('dashboard.setPrimaryConfirm', { name: props.installation.name }),
-    confirmLabel: t('dashboard.setPrimary'),
-    confirmStyle: 'primary',
-  })
-  if (confirmed) {
-    await prefs.setPrimary(props.installation.id)
-  }
+/** Header X close. Always emits `close` — the parent decides what to
+ *  do (the chooser-host overlay slot calls `closeOverlay`; the
+ *  install-settings panel body asks main to reset the host window's
+ *  panel-history stack via `closeCurrentPanel`). Phase 3 §17 dropped
+ *  the `inline` prop now that DetailModal renders one way and the
+ *  parent owns the close behaviour. */
+function handleHeaderClose(): void {
+  emit('close')
 }
 
 const scrollRef = ref<HTMLDivElement | null>(null)
@@ -108,6 +106,36 @@ const mainSections = computed(() =>
 )
 const bottomSection = computed(() => sections.value.find((s) => s.pinBottom) ?? null)
 
+/** Phase 3 §9 — When the install is already running, the primary
+ *  "Launch" action becomes "Restart": hollow-blue (`accent`) styling
+ *  to telegraph that it asks for confirmation before doing anything,
+ *  and a stop-then-launch chain instead of a bare launch. We rewrite
+ *  the action object in the renderer (synthetic id `restart`) so the
+ *  source-side action definition stays single-purpose; `runAction`
+ *  picks the synthetic id up and routes it through stopComfyUI →
+ *  launch. */
+const bottomActions = computed<ActionDef[]>(() => {
+  const acts = bottomSection.value?.actions ?? []
+  if (!props.installation) return acts
+  const running = sessionStore.isRunning(props.installation.id)
+  if (!running) return acts
+  return acts.map((a) => {
+    if (a.id !== 'launch') return a
+    return {
+      ...a,
+      id: 'restart',
+      label: t('actions.restart'),
+      style: 'accent',
+      progressTitle: t('actions.restartProgressTitle'),
+      confirm: {
+        title: t('actions.restartConfirmTitle'),
+        message: t('actions.restartConfirmMessage'),
+        confirmLabel: t('actions.restartConfirm'),
+      },
+    }
+  })
+})
+
 const previousInstId = ref<string | null>(null)
 const autoActionRun = ref(false)
 let sizeGeneration = 0
@@ -127,6 +155,30 @@ async function fetchInstallationSize(installationId: string): Promise<void> {
     if (gen === sizeGeneration) installationSizeLoading.value = false
   }
 }
+
+// Deep-link tab override — the title-bar install-update pill (and
+// chooser-card Update / Migrate pills) re-open the modal with a
+// non-default `initialTab` even when the same installation is
+// already in view. The installation watcher below treats those
+// re-opens as "not a new installation" so it skips the activeTab
+// reset; this watcher fills the gap and snaps the inner tab to the
+// requested one (when sections are already loaded — first-mount
+// alignment is still owned by the installation watcher's
+// `isNewInstallation` branch).
+watch(
+  () => props.initialTab,
+  (next, prev) => {
+    if (!next || next === prev) return
+    if (sections.value.length === 0) return
+    if (next === activeTab.value) return
+    const tabExists = sections.value.some((s) => s.tab === next)
+    if (!tabExists) return
+    activeTab.value = next
+    void nextTick(() => {
+      if (scrollRef.value) scrollRef.value.scrollTop = 0
+    })
+  },
+)
 
 watch(
   () => props.installation,
@@ -455,12 +507,36 @@ async function runAction(action: ActionDef, btn: HTMLButtonElement | null): Prom
     )
     const title = `${rawTitle} — ${instName}`
     emitTelemetryAction('desktop2.action.invoked', { action_id: mutableAction.id, ...telemetryContext })
+    // Phase 3 §9 — synthetic 'restart' action: chain stopComfyUI →
+    // launch in a single ProgressModal so the user sees one
+    // continuous "Restarting ComfyUI" view rather than two flashes.
+    // The action's confirm dialog has already run above.
+    const isRestart = mutableAction.id === 'restart'
+    const apiCall = isRestart
+      ? async () => {
+          await window.api.stopComfyUI(instId)
+          // Wait for the session to actually leave the running state
+          // before kicking off the new launch. The session store is
+          // updated by main via 'session-status' broadcasts.
+          const deadline = Date.now() + 10_000
+          while (sessionStore.isRunning(instId) && Date.now() < deadline) {
+            await new Promise((r) => setTimeout(r, 100))
+          }
+          return window.api.runAction(instId, 'launch')
+        }
+      : () => window.api.runAction(instId, mutableAction.id, mutableAction.data ? toRaw(mutableAction.data) : undefined)
+    // Tag launch / restart so PanelApp's handleShowProgress installs
+    // the chooser-host close-on-instance-started subscription. Without
+    // this, launches kicked off from this Tier-1 modal would leave the
+    // dashboard window open next to the new comfy window.
+    const triggersInstanceStart = mutableAction.id === 'launch' || isRestart
     emit('show-progress', {
       installationId: instId,
       title,
-      apiCall: () => window.api.runAction(instId, mutableAction.id, mutableAction.data ? toRaw(mutableAction.data) : undefined),
+      apiCall,
       cancellable: !!mutableAction.cancellable,
-      returnTo: 'detail'
+      returnTo: 'detail',
+      triggersInstanceStart,
     })
     return
   }
@@ -523,10 +599,14 @@ function navigateToInstallation(installationId: string): void {
 </script>
 
 <template>
-  <div v-if="installation" class="view-modal-content">
-      <div class="view-modal-header">
+  <ModalShell
+    v-if="installation && !embedded"
+    :inline="!asModal"
+    opacity="dim"
+    @close="handleHeaderClose"
+  >
+      <template #title>
         <div
-          class="view-modal-title"
           role="textbox"
           :aria-label="$t('detail.editName', 'Edit installation name')"
           contenteditable
@@ -538,30 +618,7 @@ function navigateToInstallation(installationId: string): void {
         >
           {{ installation.name }}<Pencil :size="14" class="edit-name-hint" contenteditable="false" />
         </div>
-        <div class="detail-header-actions">
-          <button
-            v-if="isLocal && !isDesktop"
-            class="detail-header-btn"
-            :class="{ active: isPrimary }"
-            :disabled="isPrimary"
-            :title="$t('dashboard.setPrimary')"
-            @click="confirmSetPrimary"
-          >
-            <Star :size="16" />
-          </button>
-          <button
-            v-if="!isCloud"
-            class="detail-header-btn"
-            :class="{ active: isPinned }"
-            :title="isPinned ? $t('dashboard.unpinFromDashboard') : $t('dashboard.pinToDashboard')"
-            @click="isPinned ? prefs.unpinInstall(installation!.id) : prefs.pinInstall(installation!.id)"
-          >
-            <Pin :size="16" />
-          </button>
-        </div>
-        <button class="view-modal-close" @click="emit('close')">✕</button>
-      </div>
-      <div class="view-modal-body">
+      </template>
         <div v-if="hasTabs" class="detail-tabs">
           <button
             v-for="tabId in availableTabs"
@@ -616,7 +673,7 @@ function navigateToInstallation(installationId: string): void {
         <div v-if="bottomSection" id="detail-bottom-actions">
           <div class="detail-actions">
             <TooltipWrap
-              v-for="a in bottomSection.actions"
+              v-for="a in bottomActions"
               :key="a.id"
               :text="a.tooltip"
             >
@@ -633,6 +690,97 @@ function navigateToInstallation(installationId: string): void {
             </TooltipWrap>
           </div>
         </div>
+  </ModalShell>
+
+  <!-- Embedded mount: bare panel body for the unified SettingsModal's
+       "ComfyUI Settings" tab. No ModalShell, no close button — the
+       parent owns the chrome. Editable install name sits at the top
+       of the body; tabs / scroll / action-bar follow as in the
+       wrapped mount. -->
+  <div v-else-if="installation" class="detail-embedded">
+    <div class="detail-embedded-title">
+      <div
+        role="textbox"
+        :aria-label="$t('detail.editName', 'Edit installation name')"
+        contenteditable
+        spellcheck="false"
+        @blur="handleTitleBlur"
+        @keydown.enter.prevent="($event.target as HTMLElement).blur()"
+        @keydown.ctrl.a.prevent="handleTitleSelectAll"
+        @paste="handleTitlePaste"
+      >
+        {{ installation.name }}<Pencil :size="14" class="edit-name-hint" contenteditable="false" />
       </div>
+    </div>
+    <div v-if="hasTabs" class="detail-tabs">
+      <button
+        v-for="tabId in availableTabs"
+        :key="tabId"
+        class="detail-tab"
+        :class="{ active: activeTab === tabId }"
+        @click="activeTab = tabId"
+      >
+        {{ tabLabels[tabId] ?? tabId }}
+      </button>
+    </div>
+    <div ref="scrollRef" class="view-scroll">
+      <div v-if="sectionsLoading" class="modal-loading with-spinner">{{ $t('common.loading') }}</div>
+      <SnapshotTab
+        v-else-if="activeTab === 'snapshots'"
+        :installation-id="installation.id"
+        @run-action="runAction"
+        @refresh-all="refreshAllSections"
+        @navigate-installation="navigateToInstallation"
+      />
+      <template v-else>
+        <DetailSectionComponent
+          v-for="section in mainSections"
+          :key="section.title ?? 'untitled'"
+          :installation-id="installation.id"
+          :title="section.title"
+          :description="section.description"
+          :collapsed="section.collapsed"
+          :items="section.items"
+          :fields="section.fields"
+          :actions="section.actions"
+          @run-action="runAction"
+          @refresh="refreshSection"
+          @refresh-all="refreshAllSections"
+        />
+        <div v-if="activeTab === 'status' && (installationSizeLoading || installationSize !== null)" class="detail-section">
+          <div class="detail-section-body">
+            <div class="detail-fields">
+              <div>
+                <div class="detail-field-label">{{ $t('diskSpace.sizeLabel') }}</div>
+                <div class="detail-field-value">
+                  {{ installationSizeLoading ? $t('diskSpace.calculatingSize') : (installationSize !== null ? formatBytes(installationSize) : $t('diskSpace.sizeUnavailable')) }}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </template>
+    </div>
+
+    <div v-if="bottomSection" id="detail-bottom-actions">
+      <div class="detail-actions">
+        <TooltipWrap
+          v-for="a in bottomActions"
+          :key="a.id"
+          :text="a.tooltip"
+        >
+          <button
+            :class="[
+              a.style,
+              { 'looks-disabled': a.enabled === false && a.disabledMessage }
+            ]"
+            :disabled="a.enabled === false && !a.disabledMessage"
+            @click="handleActionClick(a, $event)"
+          >
+            {{ a.label }}
+          </button>
+        </TooltipWrap>
+      </div>
+    </div>
   </div>
 </template>

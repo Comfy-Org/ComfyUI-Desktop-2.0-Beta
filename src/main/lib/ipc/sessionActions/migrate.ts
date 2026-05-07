@@ -3,7 +3,7 @@ import {
   installations,
   performDesktopMigration, performLocalMigration,
   _operationAborts,
-  sourceMap, uniqueName, ensureDefaultPrimary,
+  sourceMap, uniqueName,
   makeSendProgress, makeSendOutput,
 } from '../shared'
 import type { InstallationRecord } from '../shared'
@@ -36,7 +36,6 @@ export async function handleMigrateToStandalone({ event, installationId, inst, a
       signal: abort.signal,
       sourceMap,
       uniqueName,
-      ensureDefaultPrimary,
     }
     const result = await telemetry.trackedStep('desktop2.migrate.flow', flowContext, async () => {
       return inst.sourceId === 'desktop'

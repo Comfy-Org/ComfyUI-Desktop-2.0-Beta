@@ -83,18 +83,42 @@ describe('settings unset/default semantics', () => {
     fs.mkdirSync(path.dirname(settingsPath), { recursive: true })
     fs.writeFileSync(
       settingsPath,
-      JSON.stringify({ primaryInstallId: null, autoUpdate: null }, null, 2),
+      JSON.stringify({ autoUpdate: null }, null, 2),
       'utf-8'
     )
 
-    expect(settings.get('primaryInstallId')).toBeUndefined()
     expect(settings.get('autoUpdate')).toBeUndefined()
 
     settings.set('theme', 'dark')
 
     const persisted = readPersistedSettings()
-    expect(persisted).not.toHaveProperty('primaryInstallId')
     expect(persisted).not.toHaveProperty('autoUpdate')
+    expect(persisted['theme']).toBe('dark')
+  })
+
+  it('drops the legacy primaryInstallId and pinnedInstallIds keys on load', () => {
+    fs.mkdirSync(path.dirname(settingsPath), { recursive: true })
+    fs.writeFileSync(
+      settingsPath,
+      JSON.stringify(
+        {
+          primaryInstallId: 'inst-1',
+          pinnedInstallIds: ['inst-2', 'inst-3'],
+          theme: 'dark',
+        },
+        null,
+        2
+      ),
+      'utf-8'
+    )
+
+    expect(settings.get('primaryInstallId' as string)).toBeUndefined()
+    expect(settings.get('pinnedInstallIds' as string)).toBeUndefined()
+    expect(settings.get('theme')).toBe('dark')
+
+    const persisted = readPersistedSettings()
+    expect(persisted).not.toHaveProperty('primaryInstallId')
+    expect(persisted).not.toHaveProperty('pinnedInstallIds')
     expect(persisted['theme']).toBe('dark')
   })
 

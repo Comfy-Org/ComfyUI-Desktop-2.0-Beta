@@ -27,6 +27,16 @@ Flaky tests are **not acceptable** — they must be fixed immediately when disco
 
 If you encounter a flaky test during a run, investigate and fix it before continuing with other work.
 
+## Comments
+
+- **Be concise.** Don't write multi-paragraph comments to justify a small change. One sentence beats five.
+- **Never reference plan steps, phases, tracks, or stage IDs** (e.g. "Phase 3 §17", "Track M-7", "Stage W-4"). Plans change; the comment becomes a lie within hours and meaningless once the feature ships. Describe what the code does, not what plan brought it here.
+- **Don't narrate history** ("This used to do X, now it does Y"). The git log carries that.
+
+## Follow instructions
+
+When the user gives explicit direction (e.g., "move away from takeovers", "use the unified primitive"), apply it everywhere — search the whole codebase for remaining offenders. **Never silently defer or skip part of an instruction without asking.** If something looks risky, ask; don't decide unilaterally to leave it for later.
+
 ## Post-change review: deduplication
 
 After creating or modifying code, check for duplicated logic before committing:

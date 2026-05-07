@@ -17,6 +17,16 @@ vi.mock('../composables/useModal', () => ({
   }),
 }))
 
+// Modal teleports to <body>; replace with a transparent pass-through so
+// wrapper.find() can still see the slotted content.
+vi.mock('../components/Modal.vue', () => ({
+  default: {
+    name: 'Modal',
+    props: ['binding', 'opacity', 'width', 'contentClass', 'inline'],
+    template: '<div data-testid="modal-stub"><slot /></div>',
+  },
+}))
+
 import { mount, flushPromises } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import SettingsView from './SettingsView.vue'
@@ -58,6 +68,11 @@ function stubApi(overrides: Partial<ElectronApi> = {}): ElectronApi {
     getUpdateCapabilities: vi.fn().mockResolvedValue({ canAutoUpdate: true, systemManaged: false }),
     checkForUpdate: vi.fn().mockResolvedValue({ available: false }),
     openExternal: vi.fn(),
+    // Unified Settings modal moved settings-mutation refresh into
+    // SettingsView itself, so the component subscribes on mount —
+    // tests need an `onSettingsChanged` mock that returns a no-op
+    // unsubscribe function.
+    onSettingsChanged: vi.fn(() => () => {}),
     ...overrides,
   } as unknown as ElectronApi
 }

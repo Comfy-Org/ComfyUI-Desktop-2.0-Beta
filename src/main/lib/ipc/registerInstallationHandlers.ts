@@ -2,7 +2,7 @@ import {
   path, fs, ipcMain,
   sources, installations, settings, i18n,
   sourceMap, formatComfyVersion, _resolveAndBroadcastVersions,
-  isPromotableLocal, ensureDefaultPrimary, findDuplicatePath, uniqueName, sanitizeDirName, allocateUniqueDir,
+  findDuplicatePath, uniqueName, sanitizeDirName, allocateUniqueDir,
   syncOemSeedBestEffort, isEffectivelyEmptyInstallDir,
   download, createCache, extract, deleteDir, formatDeleteStatus, deleteAction, untrackAction,
   MARKER_FILE,
@@ -27,16 +27,6 @@ export function registerInstallationHandlers(): void {
         .filter(Boolean)
     )
     const list = allInstalls.filter((i) => i.status !== 'installing' && !migratedSourceIds.has(i.id))
-
-    // Ensure a primary is always set when promotable local installs exist
-    const currentPrimary = settings.get('primaryInstallId')
-    if (!currentPrimary || !list.some((i) => i.id === currentPrimary)) {
-      const firstLocal = list.find((i) => isPromotableLocal(i.sourceId))
-      const newPrimary = firstLocal?.id
-      if (currentPrimary !== newPrimary) {
-        settings.set('primaryInstallId', newPrimary)
-      }
-    }
 
     const result = list.map((inst) => {
       const source = sourceMap[inst.sourceId]
@@ -82,7 +72,6 @@ export function registerInstallationHandlers(): void {
       }
     }
     const entry = await installations.add({ ...data, seen: false })
-    ensureDefaultPrimary(entry)
     return { ok: true, entry }
   })
 
@@ -117,7 +106,6 @@ export function registerInstallationHandlers(): void {
       return { ok: false, message: `Cannot write to directory: ${(err as Error).message}` }
     }
     const entry = await installations.add({ ...data, status: 'installed', seen: false })
-    ensureDefaultPrimary(entry)
     await syncOemSeedBestEffort()
     return { ok: true, entry }
   })

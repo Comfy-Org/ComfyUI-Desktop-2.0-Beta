@@ -2,25 +2,20 @@
 import { ref, computed, watch, onMounted, toRaw } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useModal } from '../composables/useModal'
-import { useControllerRegistration } from '../composables/useControllerRegistration'
 
-import type { Source, FieldOption } from '../types/ipc'
+import type { Source, FieldOption, ShowProgressOpts } from '../types/ipc'
 import { emitTelemetryAction, toVariantBucket } from '../lib/telemetry'
 import { stripVariantPrefix, sortedCardOptions } from '../lib/variants'
 import VariantCardGrid from '../components/VariantCardGrid.vue'
 import { trackGuardrailBlocked, createDiskSpaceChecker, showPathIssueAlerts, checkNvidiaDriverOrWarn, checkDiskSpaceOrWarn } from '../lib/installHelpers'
 import InstallNamePath from '../components/InstallNamePath.vue'
+import TakeoverHeader from '../components/TakeoverHeader.vue'
+import TakeoverBack from '../components/TakeoverBack.vue'
+import ModalShell from '../components/ModalShell.vue'
 
 const emit = defineEmits<{
   close: []
-  'show-progress': [
-    opts: {
-      installationId: string
-      title: string
-      apiCall: () => Promise<unknown>
-      cancellable?: boolean
-    }
-  ]
+  'show-progress': [opts: ShowProgressOpts]
 }>()
 
 const { t } = useI18n()
@@ -259,18 +254,23 @@ async function handleInstall(): Promise<void> {
   }
 }
 
-useControllerRegistration('quick-install', { open })
-
 defineExpose({ open })
 </script>
 
 <template>
-  <div class="view-modal-content quick-install-modal">
-      <div class="view-modal-header">
-        <div class="view-modal-title">{{ $t('quickInstall.title') }}</div>
-        <button class="view-modal-close" @click="emit('close')">✕</button>
-      </div>
-      <div class="view-modal-body">
+  <ModalShell binding content-class="quick-install-modal" @close="emit('close')">
+      <template #header>
+        <div class="takeover-stacked-header">
+          <TakeoverBack
+            :label="$t('common.backToDashboard')"
+            @back="emit('close')"
+          />
+          <TakeoverHeader
+            :title="$t('quickInstall.grandTitle')"
+            :subtitle="$t('quickInstall.grandSubtitle')"
+          />
+        </div>
+      </template>
         <div class="view-scroll">
           <div v-if="loading" class="wizard-loading with-spinner">
             {{ $t('newInstall.loading') }}
@@ -321,6 +321,5 @@ defineExpose({ open })
             {{ installing ? $t('newInstall.installing') : $t('quickInstall.confirmInstall') }}
           </button>
         </div>
-      </div>
-  </div>
+  </ModalShell>
 </template>
