@@ -3256,6 +3256,19 @@ ipcMain.on(
   },
 )
 
+/** Title bar asks main to dismiss the file-menu popup. Used when the
+ *  user reclicks the file button while the popup is open: on macOS
+ *  clicking a sibling WebContentsView in the same parent window
+ *  doesn't reliably trigger a `blur` on the popup webContents, so the
+ *  blur-driven dismiss path can't be relied on for the toggle case. */
+ipcMain.on('comfy-window:dismiss-title-menu', (event) => {
+  const found = findEntryByTitleBarSender(event.sender)
+  if (!found) return
+  const popup = titleMenuPopupsByParent.get(found.entry.window.id)
+  if (!popup) return
+  hideTitleMenuPopup(popup, { releaseFocusToParent: true })
+})
+
 ipcMain.handle('focus-comfy-window', (_event, installationId: string) => {
   const entry = getEntryByInstallationId(installationId)
   if (entry && !entry.window.isDestroyed()) {

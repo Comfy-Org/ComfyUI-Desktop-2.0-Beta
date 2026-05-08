@@ -56,6 +56,11 @@ export interface ComfyTitleBarBridge {
   /** Pop the File menu as a native OS menu. Avoids HTML popups that
    *  would be clipped by the title bar's WebContentsView bounds. */
   openFileMenu(anchor: TitleMenuAnchor): void
+  /** Ask main to dismiss the File menu popup. Used to toggle the menu
+   *  closed when the user reclicks the menu button while it is open
+   *  — on macOS the blur-driven dismiss isn't reliable for sibling
+   *  WebContentsView clicks. */
+  dismissFileMenu(): void
 
   /** Subscribe to panel-active changes coming from main. */
   onPanelChanged(cb: (panel: ComfyPanelKey) => void): () => void
@@ -182,6 +187,9 @@ const bridge: ComfyTitleBarBridge = {
   },
   openFileMenu: (anchor) => {
     ipcRenderer.send('comfy-window:open-title-menu', { menu: 'file', anchor })
+  },
+  dismissFileMenu: () => {
+    ipcRenderer.send('comfy-window:dismiss-title-menu')
   },
 
   onPanelChanged: (cb) => {

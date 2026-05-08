@@ -57,6 +57,8 @@ interface Bridge {
   openNewWindow: () => void
   /** Pop the File menu natively (avoids WebContentsView clipping the popup). */
   openFileMenu: (anchor: MenuAnchor) => void
+  /** Ask main to dismiss the File menu popup (toggle-close). */
+  dismissFileMenu: () => void
   onPanelChanged: (cb: (panel: ComfyPanelKey) => void) => () => void
   onTitleChanged: (cb: (title: string) => void) => () => void
   /** Track B item 4 — install source-category pushes from main. The
@@ -420,12 +422,20 @@ function anchorBelow(el: HTMLElement | null | undefined): MenuAnchor {
 }
 
 function handleFileMenu(): void {
-  // Suppress click-to-toggle-close: if the popup is still open at click
-  // time, the click's focus shift will dismiss it via blur — we just
-  // don't ask main to reopen. The timestamp guard catches the same race
-  // on platforms where the dismiss has already propagated by the time
-  // the click event fires.
-  if (isMenuOpen.value) return
+  // Toggle-close: if the popup is open at click time, actively ask
+  // main to dismiss it. The blur-driven dismiss path can't be relied
+  // on here — on macOS clicking a sibling WebContentsView in the
+  // same parent window doesn't reliably trigger a `blur` on the
+  // popup webContents, so the popup would otherwise stay open.
+  if (isMenuOpen.value) {
+    bridge?.dismissFileMenu()
+    return
+  }
+  // Suppress reopen on platforms where the dismiss did propagate
+  // before the click event fires (Windows / Linux): the same click
+  // that dismissed the popup also retargets the menu button, and
+  // without this guard handleFileMenu would ask main to pop the
+  // menu again.
   if (Date.now() - menuClosedAt.file < MENU_REOPEN_GUARD_MS) return
   bridge?.openFileMenu(anchorBelow(fileBtnRef.value))
 }

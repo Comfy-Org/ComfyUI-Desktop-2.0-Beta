@@ -33,6 +33,7 @@ interface MockBridgeState {
   setPanelCalls: string[]
   newWindowCalls: number
   fileMenuAnchors: { x: number; y: number }[]
+  fileMenuDismisses: number
   appUpdatePillClicks: number
   installUpdatePillClicks: number
   downloadsTrayClicks: number
@@ -56,6 +57,7 @@ function installMockBridge(opts: { isMac?: boolean; installationId?: string | nu
     setPanelCalls: [],
     newWindowCalls: 0,
     fileMenuAnchors: [],
+    fileMenuDismisses: 0,
     appUpdatePillClicks: 0,
     installUpdatePillClicks: 0,
     downloadsTrayClicks: 0,
@@ -69,6 +71,7 @@ function installMockBridge(opts: { isMac?: boolean; installationId?: string | nu
     setPanel: (panel: string) => state.setPanelCalls.push(panel),
     openNewWindow: () => { state.newWindowCalls += 1 },
     openFileMenu: (anchor: { x: number; y: number }) => { state.fileMenuAnchors.push(anchor) },
+    dismissFileMenu: () => { state.fileMenuDismisses += 1 },
     onPanelChanged: (cb: (panel: string) => void) => {
       state.panelChangedCallbacks.push(cb)
       return () => {}
