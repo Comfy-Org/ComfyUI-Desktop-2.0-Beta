@@ -10,7 +10,12 @@
  */
 import posthog, { type PostHog } from 'posthog-js'
 import type { TelemetryContext } from './telemetry'
-import { DEFAULT_POSTHOG_API_KEY, DEFAULT_POSTHOG_HOST, isPostHogFlagDisabled as isFlagDisabled } from '../../../shared/posthogConfig'
+import {
+  DEFAULT_POSTHOG_API_KEY,
+  DEFAULT_POSTHOG_HOST,
+  isPostHogFlagDisabled as isFlagDisabled,
+  isValidPostHogApiKey,
+} from '../../../shared/posthogConfig'
 
 interface PosthogInitOptions {
   appVersion: string
@@ -32,7 +37,7 @@ function readHost(): string {
 
 export function isPostHogConfigured(): boolean {
   if (isFlagDisabled(import.meta.env.VITE_POSTHOG_ENABLED)) return false
-  return readApiKey().length > 0
+  return isValidPostHogApiKey(readApiKey())
 }
 
 export function initPostHog(opts: PosthogInitOptions): void {

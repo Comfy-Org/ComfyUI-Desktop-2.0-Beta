@@ -45,9 +45,6 @@ vi.mock('posthog-js', () => {
   }
 })
 
-// Stub the env Vite normally injects so `isPostHogConfigured()` returns true.
-vi.stubGlobal('import.meta', { env: { VITE_POSTHOG_API_KEY: 'phc_test_key' } })
-
 const baseOpts = {
   appVersion: '0.0.0-test',
   appEnv: 'test',
@@ -62,6 +59,9 @@ describe('posthogProvider consent ↔ disable_surveys gating', () => {
     optInCalled = 0
     optOutCalled = 0
     vi.resetModules()
+    // Inject a phc_-prefixed key so isPostHogConfigured() passes the
+    // shared isValidPostHogApiKey() guard.
+    vi.stubEnv('VITE_POSTHOG_API_KEY', 'phc_test_key')
   })
 
   afterEach(() => {

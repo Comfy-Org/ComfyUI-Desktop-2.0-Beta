@@ -63,7 +63,7 @@ describe('telemetry.bucketError', () => {
 describe('telemetry.trackedStep', () => {
   beforeEach(async () => {
     captured.length = 0
-    process.env['POSTHOG_API_KEY'] = 'test-key'
+    process.env['POSTHOG_API_KEY'] = 'phc_test_key'
     process.env['POSTHOG_ENABLED'] = '1'
     telemetry.initTelemetry({ appVersion: '0.0.0', appEnv: 'test', isPackaged: false })
     await telemetry.identify('test-distinct-id')

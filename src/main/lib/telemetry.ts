@@ -22,7 +22,12 @@
  */
 import { app, BrowserWindow } from 'electron'
 import { PostHog } from 'posthog-node'
-import { DEFAULT_POSTHOG_API_KEY, DEFAULT_POSTHOG_HOST, isPostHogFlagDisabled as isFlagDisabled } from '../../shared/posthogConfig'
+import {
+  DEFAULT_POSTHOG_API_KEY,
+  DEFAULT_POSTHOG_HOST,
+  isPostHogFlagDisabled as isFlagDisabled,
+  isValidPostHogApiKey,
+} from '../../shared/posthogConfig'
 
 export type TelemetryValue = boolean | number | string | null | undefined
 export type TelemetryContext = Record<string, TelemetryValue | TelemetryValue[]>
@@ -37,7 +42,7 @@ interface PostHogConfig {
 function readPostHogConfig(): PostHogConfig {
   const apiKey = (process.env['POSTHOG_API_KEY'] || DEFAULT_POSTHOG_API_KEY).trim()
   const host = (process.env['POSTHOG_HOST'] || DEFAULT_POSTHOG_HOST).trim()
-  const enabled = !isFlagDisabled(process.env['POSTHOG_ENABLED']) && apiKey.length > 0
+  const enabled = !isFlagDisabled(process.env['POSTHOG_ENABLED']) && isValidPostHogApiKey(apiKey)
   return { apiKey, host, enabled }
 }
 
