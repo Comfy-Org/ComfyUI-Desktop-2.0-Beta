@@ -17,6 +17,13 @@ interface PosthogInitOptions {
   appEnv: string
   isPackaged: boolean
   consent: boolean
+  /**
+   * Identifies the renderer surface (`'title-bar' | 'title-menu' | 'panel'`)
+   * so PostHog queries can roll up or filter per surface — host windows now
+   * have multiple renderers initialising PostHog, and without this tag the
+   * events blur together.
+   */
+  rendererRole?: string
 }
 
 let initialized = false
@@ -59,6 +66,7 @@ export function initPostHog(opts: PosthogInitOptions): void {
           app_env: opts.appEnv,
           app_version: opts.appVersion,
           is_packaged: opts.isPackaged,
+          ...(opts.rendererRole ? { renderer_role: opts.rendererRole } : {}),
         })
       },
     }) as PostHog

@@ -6,6 +6,19 @@ import '../assets/main.css'
 
 import { createApp } from 'vue'
 import TitleBarApp from './TitleBarApp.vue'
+import { initializeRendererBootstrap } from '../lib/rendererBootstrap'
+
+// The title bar is loaded for every host window and survives mode flips
+// (it lives in `createHostWindow()`), unlike the panel renderer which
+// only mounts in chooser / lifecycle modes. Initialising the telemetry
+// bootstrap here is what makes Datadog RUM and PostHog Browser see
+// steady-state ComfyUI sessions — without this, the panel-only init
+// caused most user-time to emit zero telemetry events.
+//
+// Main also broadcasts its own events to the title-bar renderer (via the
+// telemetry-relay-target registry in `main/lib/telemetry.ts`) so
+// main-emitted events reach Datadog RUM through this entry-point too.
+initializeRendererBootstrap('title-bar')
 
 // Apply the resolved theme as a data-theme attribute on <html> before mount
 // so the design-token CSS variables resolve immediately. Default to dark

@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { IpcRendererEvent } from 'electron'
+import { buildElectronApi } from './api'
 
 export type ComfyPanelKey =
   | 'comfy'
@@ -279,8 +280,18 @@ const bridge: ComfyTitleBarBridge = {
   },
 }
 
+// Expose the standard `window.api` bridge alongside `__comfyTitleBar` so the
+// title-bar renderer can call `initializeRendererBootstrap()` (which depends
+// on `window.api.getSetting` / `getDeviceId` / `onTelemetrySettingChanged` /
+// etc.). Without this, telemetry only fired from the panel renderer — which
+// only mounts in chooser/lifecycle modes — leaving steady-state ComfyUI
+// sessions invisible to Datadog and PostHog.
+const api = buildElectronApi()
+
 if (process.contextIsolated) {
   contextBridge.exposeInMainWorld('__comfyTitleBar', bridge)
+  contextBridge.exposeInMainWorld('api', api)
 } else {
   ;(globalThis as Record<string, unknown>).__comfyTitleBar = bridge
+  ;(globalThis as Record<string, unknown>).api = api
 }

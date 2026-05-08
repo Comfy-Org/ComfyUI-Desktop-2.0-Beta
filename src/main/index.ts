@@ -1206,6 +1206,14 @@ function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowResult {
   }
   comfyWindow.contentView.addChildView(titleBarView)
   _registerExtraBroadcastTarget(titleBarView.webContents)
+  // Title bar is the always-alive renderer per host window — register it as
+  // the canonical telemetry relay target so main-emitted events reach
+  // Datadog RUM regardless of whether the panelView is currently mounted
+  // (steady-state `comfy` mode tears the panel down). Exactly one relay
+  // target per host window prevents Datadog double-counting; PostHog is
+  // already captured by the Node SDK in main and suppressed in the relay
+  // payload (`mainAlreadyCaptured: true`).
+  mainTelemetry.registerTelemetryRelayTarget(titleBarView.webContents)
 
   // Body view. Install-less leaves it dummy and zero-sized; install-backed
   // loads the URL via attachInstall.
@@ -1337,6 +1345,7 @@ function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowResult {
         if (entry?._installCleanup) entry._installCleanup()
         detachWindowDownloads(comfyWindow)
         _unregisterExtraBroadcastTarget(titleBarView.webContents)
+        mainTelemetry.unregisterTelemetryRelayTarget(titleBarView.webContents)
         const liveEntry = comfyWindows.get(windowKey)
         if (liveEntry?.panelView) {
           _unregisterExtraBroadcastTarget(liveEntry.panelView.webContents)

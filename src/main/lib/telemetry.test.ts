@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import os from 'os'
 import path from 'path'
+import { EventEmitter } from 'events'
 
 vi.mock('electron', () => ({
   app: {
@@ -10,6 +11,31 @@ vi.mock('electron', () => ({
   },
   BrowserWindow: { getAllWindows: () => [] },
 }))
+
+/**
+ * Build a stub WebContents that records `send()` calls and emits
+ * `'destroyed'` so the relay registry can self-clean. Mirrors the surface
+ * the production registry actually consumes.
+ */
+function makeStubWebContents(): {
+  wc: Electron.WebContents
+  sends: { channel: string; data: unknown }[]
+  destroy: () => void
+} {
+  const sends: { channel: string; data: unknown }[] = []
+  let destroyed = false
+  const ee = new EventEmitter()
+  const wc = {
+    isDestroyed: () => destroyed,
+    send: (channel: string, data: unknown) => sends.push({ channel, data }),
+    once: (event: string, cb: () => void) => { ee.once(event, cb) },
+  } as unknown as Electron.WebContents
+  return {
+    wc,
+    sends,
+    destroy: () => { destroyed = true; ee.emit('destroyed') },
+  }
+}
 
 interface CapturedCall {
   distinctId: string
@@ -110,5 +136,114 @@ describe('telemetry.trackedStep', () => {
     await telemetry.trackedStep('test.step', {}, async () => 'ok')
     expect(captured).toHaveLength(0)
     telemetry.setConsent(true)
+  })
+})
+
+describe('telemetry.forwardToRenderer + telemetry-relay registry', () => {
+  beforeEach(async () => {
+    telemetry._resetTelemetryRelayTargets()
+    captured.length = 0
+    process.env['POSTHOG_API_KEY'] = 'test-key'
+    process.env['POSTHOG_ENABLED'] = '1'
+    telemetry.initTelemetry({ appVersion: '0.0.0', appEnv: 'test', isPackaged: false })
+    await telemetry.identify('test-distinct-id')
+    telemetry.setConsent(true)
+  })
+
+  afterEach(() => {
+    telemetry._resetTelemetryRelayTargets()
+    delete process.env['POSTHOG_API_KEY']
+    delete process.env['POSTHOG_ENABLED']
+  })
+
+  it('forwards to every registered relay target with mainAlreadyCaptured=true', () => {
+    const a = makeStubWebContents()
+    const b = makeStubWebContents()
+    telemetry.registerTelemetryRelayTarget(a.wc)
+    telemetry.registerTelemetryRelayTarget(b.wc)
+
+    telemetry.forwardToRenderer('foo.event', { foo: 'bar' })
+
+    expect(a.sends).toHaveLength(1)
+    expect(a.sends[0]).toMatchObject({
+      channel: 'telemetry-action-from-main',
+      data: { event: 'foo.event', context: { foo: 'bar' }, mainAlreadyCaptured: true },
+    })
+    expect(b.sends).toHaveLength(1)
+    expect(b.sends[0]).toMatchObject({
+      data: { mainAlreadyCaptured: true },
+    })
+  })
+
+  it('emit() captures via PostHog Node AND forwards to relay targets', () => {
+    const a = makeStubWebContents()
+    telemetry.registerTelemetryRelayTarget(a.wc)
+
+    telemetry.emit('install.flow.opened', { variant: 'standalone' })
+
+    // PostHog Node side
+    expect(captured.map((c) => c.event)).toEqual(['install.flow.opened'])
+    expect(captured[0]!.properties).toEqual({ variant: 'standalone' })
+    // Relay side — exactly one IPC send to the registered target
+    expect(a.sends).toHaveLength(1)
+    expect(a.sends[0]).toMatchObject({
+      channel: 'telemetry-action-from-main',
+      data: {
+        event: 'install.flow.opened',
+        context: { variant: 'standalone' },
+        mainAlreadyCaptured: true,
+      },
+    })
+  })
+
+  it('forwards with no relay targets is a no-op (event still captured by PostHog Node)', () => {
+    expect(telemetry._telemetryRelayTargetCount()).toBe(0)
+    telemetry.emit('boot.event', {})
+    // Event still captured by PostHog Node even with no renderer alive yet —
+    // the architectural guarantee that "telemetry works no matter what".
+    expect(captured.map((c) => c.event)).toEqual(['boot.event'])
+  })
+
+  it('respects consent on forwardToRenderer: relay is skipped when revoked', () => {
+    const a = makeStubWebContents()
+    telemetry.registerTelemetryRelayTarget(a.wc)
+    telemetry.setConsent(false)
+    telemetry.forwardToRenderer('foo.event', {})
+    expect(a.sends).toHaveLength(0)
+    telemetry.setConsent(true)
+  })
+
+  it('skips destroyed relay targets', () => {
+    const a = makeStubWebContents()
+    const b = makeStubWebContents()
+    telemetry.registerTelemetryRelayTarget(a.wc)
+    telemetry.registerTelemetryRelayTarget(b.wc)
+    a.destroy()
+
+    telemetry.forwardToRenderer('foo.event', {})
+
+    expect(a.sends).toHaveLength(0)
+    expect(b.sends).toHaveLength(1)
+  })
+
+  it('auto-removes relay targets on the WebContents `destroyed` event', () => {
+    const a = makeStubWebContents()
+    telemetry.registerTelemetryRelayTarget(a.wc)
+    expect(telemetry._telemetryRelayTargetCount()).toBe(1)
+
+    a.destroy()
+    expect(telemetry._telemetryRelayTargetCount()).toBe(0)
+  })
+
+  it('unregisterTelemetryRelayTarget removes the target', () => {
+    const a = makeStubWebContents()
+    telemetry.registerTelemetryRelayTarget(a.wc)
+    expect(telemetry._telemetryRelayTargetCount()).toBe(1)
+
+    telemetry.unregisterTelemetryRelayTarget(a.wc)
+    expect(telemetry._telemetryRelayTargetCount()).toBe(0)
+
+    telemetry.forwardToRenderer('foo.event', {})
+    expect(a.sends).toHaveLength(0)
   })
 })
