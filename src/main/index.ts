@@ -1875,7 +1875,19 @@ function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts): boolea
       e.preventDefault()
       if (comfyContents.isDestroyed()) return
       if (input.key === '0') {
+        const previousLevel = comfyContents.getZoomLevel()
         comfyContents.setZoomLevel(0)
+        // Only emit when this was a real reset (skip no-op presses at 1x)
+        // so the event count tracks actual recovery actions, not key-spam.
+        if (previousLevel !== 0) {
+          mainTelemetry.emit('desktop2.zoom.reset', {
+            source: 'shortcut',
+            parent_entry_id: entry.windowKey,
+            installation_id: entry.installationId,
+            previous_zoom_level: previousLevel,
+            previous_zoom_percent: Math.round(Math.pow(1.2, previousLevel) * 100),
+          })
+        }
         return
       }
       const step = input.key === '-' ? -0.5 : 0.5
@@ -3239,7 +3251,23 @@ function activateTitleMenuItem(entry: TitleMenuPopupEntry, id: string): void {
     // entry is only built when zoom is non-zero (see `buildTitleMenuItems`),
     // so this always corresponds to a visible state change.
     if (parentEntry && !parentEntry.comfyView.webContents.isDestroyed()) {
+      const previousLevel = parentEntry.comfyView.webContents.getZoomLevel()
       parentEntry.comfyView.webContents.setZoomLevel(0)
+      // Mirrors the Ctrl/Cmd + 0 shortcut emit in `attachInstall`.
+      // Same event name + payload shape so dashboards can group on the
+      // event and pivot on `source` to compare discoverability paths.
+      // No previousLevel === 0 guard here: the menu item is only built
+      // when zoom is non-zero (see `buildTitleMenuItems`), so any click
+      // is a real reset. The complementary `desktop2.title_menu.item_clicked`
+      // emit at the top of this function still fires for menu-engagement
+      // rollups; this one is the action-specific signal.
+      mainTelemetry.emit('desktop2.zoom.reset', {
+        source: 'menu',
+        parent_entry_id: entry.parentEntryId,
+        installation_id: parentEntry.installationId,
+        previous_zoom_level: previousLevel,
+        previous_zoom_percent: Math.round(Math.pow(1.2, previousLevel) * 100),
+      })
     }
   }
   else if (id === 'new-install' || id === 'track' || id === 'load-snapshot' || id === 'quick-install') {
