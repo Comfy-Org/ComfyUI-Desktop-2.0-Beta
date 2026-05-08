@@ -57,6 +57,11 @@ export interface ComfyTitleBarBridge {
   /** Pop the File menu as a native OS menu. Avoids HTML popups that
    *  would be clipped by the title bar's WebContentsView bounds. */
   openFileMenu(anchor: TitleMenuAnchor): void
+  /** Ask main to dismiss the File menu popup. Used to toggle the menu
+   *  closed when the user reclicks the menu button while it is open
+   *  — on macOS the blur-driven dismiss isn't reliable for sibling
+   *  WebContentsView clicks. */
+  dismissFileMenu(): void
 
   /** Subscribe to panel-active changes coming from main. */
   onPanelChanged(cb: (panel: ComfyPanelKey) => void): () => void
@@ -74,6 +79,13 @@ export interface ComfyTitleBarBridge {
   onThemeChanged(cb: (theme: { bg: string; text: string }) => void): () => void
   /** Subscribe to macOS fullscreen state — drives traffic-light padding. */
   onFullscreenChanged(cb: (fullscreen: boolean) => void): () => void
+  /** Subscribe to native title-bar menu open events. Fires when the
+   *  popup becomes visible. The renderer uses this to track open
+   *  state so a click on the menu button while open is suppressed
+   *  (the blur-driven dismiss handles the close on its own). On
+   *  macOS the click event can fire before the dismiss propagates,
+   *  so a timestamp-only guard isn't reliable. */
+  onMenuOpened(cb: (info: { menu: 'file' }) => void): () => void
   /** Subscribe to native title-bar menu close events. Fires when the
    *  popup created by `openFileMenu` closes, after the user picks an
    *  item or dismisses by clicking outside. The renderer uses this to
@@ -177,6 +189,9 @@ const bridge: ComfyTitleBarBridge = {
   openFileMenu: (anchor) => {
     ipcRenderer.send('comfy-window:open-title-menu', { menu: 'file', anchor })
   },
+  dismissFileMenu: () => {
+    ipcRenderer.send('comfy-window:dismiss-title-menu')
+  },
 
   onPanelChanged: (cb) => {
     const handler = (_event: IpcRendererEvent, panel: unknown): void => {
@@ -213,6 +228,14 @@ const bridge: ComfyTitleBarBridge = {
     }
     ipcRenderer.on('comfy-titlebar:fullscreen-changed', handler)
     return () => ipcRenderer.removeListener('comfy-titlebar:fullscreen-changed', handler)
+  },
+  onMenuOpened: (cb) => {
+    const handler = (_event: IpcRendererEvent, data: unknown): void => {
+      const { menu } = (data || {}) as { menu?: unknown }
+      if (menu === 'file') cb({ menu })
+    }
+    ipcRenderer.on('comfy-titlebar:menu-opened', handler)
+    return () => ipcRenderer.removeListener('comfy-titlebar:menu-opened', handler)
   },
   onMenuClosed: (cb) => {
     const handler = (_event: IpcRendererEvent, data: unknown): void => {
