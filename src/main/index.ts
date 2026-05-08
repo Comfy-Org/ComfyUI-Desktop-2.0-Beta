@@ -2688,23 +2688,27 @@ interface TitleMenuPopupConfig {
 }
 
 /**
- * One reusable popup window per parent BrowserWindow.
+ * One reusable popup `WebContentsView` per parent BrowserWindow.
  *
- * Recreating a `BrowserWindow` on every menu open meant ~100ms of
- * construction + HTML/JS load time before the popup appeared, which
- * the user noticed as a click-to-paint delay. Instead we lazily
- * create one popup the first time the user opens a menu on a given
- * parent, hide it on close (rather than destroying), and push fresh
- * config via `comfy-titlemenu:set-config` IPC on every subsequent
- * open. The window is destroyed when its parent is closed.
+ * The popup is attached as a child view of the parent window (rather
+ * than its own top-level / child BrowserWindow) so it always shares
+ * the parent's window coordinate space. That is what makes it behave
+ * like an in-window popup on Wayland, where detached popup windows
+ * can render as separate top-level surfaces.
+ *
+ * Constructing the WebContentsView + loading the renderer on every
+ * open would cost ~100ms of click-to-paint delay, so we lazily create
+ * one popup per parent, hide it between uses, and push fresh config
+ * via `comfy-titlemenu:set-config` IPC on every subsequent open. The
+ * popup webContents is closed when its parent BrowserWindow closes.
  *
  * Latest values for the *current* open are tracked here too so
- * `activate` (item click) and the `closed` callback (re-emits
+ * `activate` (item click) and the dismiss path (re-emits
  * `comfy-titlebar:menu-closed` for the reopen-suppression guard)
  * can route without their own per-open context.
  */
 interface TitleMenuPopupEntry {
-  popup: BrowserWindow
+  popup: WebContentsView
   parentWindow: BrowserWindow
   /** Snapshotted at construction so we don't touch `popup.webContents`
    *  in the destroyed-window handlers. */
@@ -2727,15 +2731,27 @@ interface TitleMenuPopupEntry {
   /** Config queued before the renderer signalled ready — flushed on
    *  ready. Overwritten if multiple opens happen before ready. */
   pendingConfig: TitleMenuPopupConfig | null
-  /** True between `setOpacity(0)`+park (hide) and `setOpacity(1)`
-   *  (show) — the blur handler ignores spurious blurs while we're
+  /** True between `setVisible(true)` (show) and `setVisible(false)`
+   *  (hide) — the blur handler ignores spurious blurs while we're
    *  already hidden. */
   isOpen: boolean
   /** Set to a non-null timer when an open is in flight, waiting for
    *  the renderer's `comfy-titlemenu:rendered` ack before flipping
-   *  opacity to 1. The timer is the fallback that flips anyway after
+   *  to visible. The timer is the fallback that shows anyway after
    *  a short window (in case the renderer is unusually slow). */
   pendingShowTimer: NodeJS.Timeout | null
+  /** JSON of the most recently sent `comfy-titlemenu:set-config`
+   *  payload — used to compare against the next open's config to skip
+   *  the renderer roundtrip when the DOM is already correct. */
+  lastConfigJson: string | null
+  /** JSON of the config the renderer has acked via
+   *  `comfy-titlemenu:rendered`. When equal to the next open's
+   *  config, the popup view's DOM matches what we want to show, so
+   *  we can `setVisible(true)` immediately without resending the
+   *  config or waiting for an ack — saves one frame + two IPC hops
+   *  per open (the common case for repeated opens of the same menu
+   *  in the same window). */
+  lastSyncedConfigJson: string | null
 }
 
 /** Active popup keyed by parent BrowserWindow id (one popup per parent,
@@ -2750,15 +2766,6 @@ const POPUP_ITEM_HEIGHT = 28
 const POPUP_SEPARATOR_HEIGHT = 9
 const POPUP_VPADDING = 8 // 4px top + 4px bottom on the <ul>
 const POPUP_VBORDER = 2 // 1px top + 1px bottom from the .popup card
-
-/** Off-screen parking position for a "hidden" popup. We keep the window
- *  permanently `show()`n (never hide/show) so the OS compositor doesn't
- *  re-warm a transparent window on every open — that re-warm is what
- *  caused the visible flicker on first show. -32000 sits beyond every
- *  Win32 display origin so the parked window is invisible regardless
- *  of multi-monitor layout. */
-const POPUP_PARK_X = -32000
-const POPUP_PARK_Y = -32000
 
 function computePopupHeight(items: readonly TitleMenuItem[]): number {
   const content = items.reduce(
@@ -2834,68 +2841,48 @@ function buildTitleMenuItems(entry: ComfyWindowEntry): TitleMenuItem[] {
   return items
 }
 
-/** Lazily create the reusable popup BrowserWindow for the given parent.
- *  Subsequent opens for the same parent reuse the same window — the
- *  renderer is loaded once, then we just push fresh config + reposition
- *  + show on every open. The popup is destroyed when its parent is. */
+/** Lazily create the reusable popup `WebContentsView` for the given
+ *  parent BrowserWindow. Subsequent opens for the same parent reuse
+ *  the same view — the renderer is loaded once, then we just push fresh
+ *  config + reposition + show on every open. The popup is closed when
+ *  its parent is. */
 function ensureTitleMenuPopup(parent: BrowserWindow): TitleMenuPopupEntry {
   const existing = titleMenuPopupsByParent.get(parent.id)
-  if (existing && !existing.popup.isDestroyed()) return existing
+  if (existing && !existing.popup.webContents.isDestroyed()) return existing
 
-  const popup = new BrowserWindow({
-    parent,
-    // Constructed parked off-screen with opacity 0 — we
-    // `showInactive()` it after first paint so the OS compositor
-    // commits the transparent surface once, then flip opacity / move
-    // on every open. Never `hide()`/`show()` again — that path is what
-    // caused the first-show flicker.
-    show: false,
-    frame: false,
-    transparent: true,
-    resizable: false,
-    movable: false,
-    minimizable: false,
-    maximizable: false,
-    skipTaskbar: true,
-    hasShadow: true,
-    focusable: true,
-    opacity: 0,
-    width: POPUP_WIDTH,
-    // Initial height is overwritten by `setBounds` on every open, so the
-    // value here just has to be non-zero — Electron rejects `width: 0`
-    // / `height: 0` BrowserWindows on Windows.
-    height: 100,
-    x: POPUP_PARK_X,
-    y: POPUP_PARK_Y,
-    backgroundColor: '#00000000',
+  const popup = new WebContentsView({
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
       preload: path.join(__dirname, '../preload/comfyTitleMenuPreload.js'),
     },
   })
-  popup.setMenuBarVisibility(false)
+  // Transparent so the empty area around the rounded card lets the
+  // body view show through. WebContentsView per-pixel transparency
+  // works inside a parent BrowserWindow's opaque surface (it just
+  // alpha-blends into the parent), unlike a child BrowserWindow which
+  // would need OS-level transparency on the parent.
+  popup.setBackgroundColor('#00000000')
+  popup.setVisible(false)
+  // Bounds in window-content-local pixels. Initial values are
+  // overwritten by `setBounds` on every open; keep them small so the
+  // hidden view doesn't squat on real estate during the construction
+  // race before the first open.
+  popup.setBounds({ x: 0, y: 0, width: POPUP_WIDTH, height: 100 })
+  parent.contentView.addChildView(popup)
 
   const isDev = !!process.env['ELECTRON_RENDERER_URL']
   const loadPromise = isDev
-    ? popup.loadURL(
+    ? popup.webContents.loadURL(
         `${(process.env['ELECTRON_RENDERER_URL'] as string).replace(/\/$/, '')}/comfyTitleMenu.html`,
       )
-    : popup.loadFile(path.join(__dirname, '../renderer/comfyTitleMenu.html'))
+    : popup.webContents.loadFile(path.join(__dirname, '../renderer/comfyTitleMenu.html'))
   void loadPromise.catch(() => {})
 
-  // Once the renderer paints, flip the window into its "parked &
-  // primed" state: parked off-screen, opacity 0, but `show()`n so the
-  // compositor has fully composited the transparent surface. From this
-  // point on, opens just `setBounds` + `setOpacity(1)` + `focus()`.
-  popup.once('ready-to-show', () => {
-    if (popup.isDestroyed()) return
-    popup.showInactive()
-  })
-
-  // Capture ids up-front. The `closed` event fires *after* the
-  // BrowserWindow + its webContents are destroyed, so accessing
-  // `popup.webContents.id` there would throw "Object has been destroyed".
+  // Capture ids up-front. The parent's `closed` event fires *after*
+  // the BrowserWindow + its child WebContentsViews' webContents are
+  // destroyed, so accessing `popup.webContents.id` there would throw
+  // "Object has been destroyed".
   const entry: TitleMenuPopupEntry = {
     popup,
     parentWindow: parent,
@@ -2908,33 +2895,63 @@ function ensureTitleMenuPopup(parent: BrowserWindow): TitleMenuPopupEntry {
     pendingConfig: null,
     isOpen: false,
     pendingShowTimer: null,
+    lastConfigJson: null,
+    lastSyncedConfigJson: null,
   }
   titleMenuPopupsByParent.set(entry.parentWindowId, entry)
   titleMenuPopupsByWebContents.set(entry.popupWebContentsId, entry)
 
-  // Click-outside dismissal: when the popup loses focus (any other
-  // window steals it — including the parent title-bar button) hide
-  // ourselves. Item clicks inside the popup do NOT trigger blur —
-  // focus stays in the popup webContents until we explicitly hide
+  // Click-outside dismissal. Item clicks inside the popup do NOT trigger
+  // blur — focus stays in the popup webContents until we explicitly hide
   // it on item-activated, so item activations always reach main.
-  popup.on('blur', () => {
-    if (!entry.isOpen) return
+  //
+  // We listen on the popup webContents (for focus moves to *another*
+  // view inside the same parent window — e.g. clicking the title-bar
+  // button or the comfy body) and on the parent BrowserWindow (for focus
+  // moves *out* of the parent window — e.g. clicking another app or
+  // another desktop window). The webContents blur alone is not reliable
+  // for cross-window focus changes on macOS.
+  //
+  // The title-bar root is `-webkit-app-region: drag`, so a click on its
+  // empty area is consumed by the OS for window dragging and never
+  // reaches the title-bar webContents — neither `popup.webContents`'s
+  // blur nor `parent`'s blur fires. `will-move` / `move` cover that
+  // path: any title-bar drag dismisses the popup as soon as the window
+  // begins to move.
+  const dismissOnBlur = (): void => {
     hideTitleMenuPopup(entry)
-  })
-
-  // Popup is destroyed only when its parent is destroyed. Clean up
-  // the maps so a fresh parent with the same numeric id (vanishingly
-  // unlikely but possible) doesn't pick up a stale entry.
-  popup.on('closed', () => {
-    titleMenuPopupsByParent.delete(entry.parentWindowId)
-    titleMenuPopupsByWebContents.delete(entry.popupWebContentsId)
-  })
+  }
+  popup.webContents.on('blur', dismissOnBlur)
+  parent.on('blur', dismissOnBlur)
+  parent.on('will-move', dismissOnBlur)
+  parent.on('move', dismissOnBlur)
 
   // Tear down with the parent. Without this, the popup would survive
   // its parent and reuse the wrong context on the next click in a
   // different window.
-  parent.once('closed', () => {
-    if (!popup.isDestroyed()) popup.destroy()
+  const onParentClosed = (): void => {
+    titleMenuPopupsByParent.delete(entry.parentWindowId)
+    titleMenuPopupsByWebContents.delete(entry.popupWebContentsId)
+    try { parent.contentView.removeChildView(popup) } catch {}
+    if (!popup.webContents.isDestroyed()) popup.webContents.close()
+  }
+  parent.once('closed', onParentClosed)
+
+  // If the popup webContents is destroyed independently (renderer
+  // crash, manual close), drop the parent-window listeners so they
+  // don't accumulate when `ensureTitleMenuPopup` constructs a fresh
+  // entry on the next open.
+  popup.webContents.once('destroyed', () => {
+    if (!parent.isDestroyed()) {
+      parent.removeListener('blur', dismissOnBlur)
+      parent.removeListener('will-move', dismissOnBlur)
+      parent.removeListener('move', dismissOnBlur)
+      parent.removeListener('closed', onParentClosed)
+    }
+    if (titleMenuPopupsByParent.get(entry.parentWindowId) === entry) {
+      titleMenuPopupsByParent.delete(entry.parentWindowId)
+    }
+    titleMenuPopupsByWebContents.delete(entry.popupWebContentsId)
   })
 
   return entry
@@ -2942,47 +2959,56 @@ function ensureTitleMenuPopup(parent: BrowserWindow): TitleMenuPopupEntry {
 
 /** Fallback timeout (ms) — if the renderer's
  *  `comfy-titlemenu:rendered` ack doesn't arrive within this window
- *  after `set-config`, flip opacity anyway so the popup never gets
+ *  after `set-config`, show the popup anyway so it never gets
  *  permanently stuck invisible. The renderer normally acks within one
  *  animation frame (~16ms). */
 const POPUP_RENDER_ACK_TIMEOUT_MS = 80
 
-/** Park the popup back off-screen and re-emit the
- *  `comfy-titlebar:menu-closed` event so the title-bar renderer's 100ms
- *  `MENU_REOPEN_GUARD_MS` suppression fires (mirrors the previous
- *  `Menu.popup()` callback path). The popup window itself stays
- *  permanently `show()`n — we just flip opacity to 0 and move it
- *  off-screen so the OS doesn't have to re-composite a transparent
- *  surface on the next open.
+/** Hide the popup view and re-emit the `comfy-titlebar:menu-closed`
+ *  event so the title-bar renderer's 100ms `MENU_REOPEN_GUARD_MS`
+ *  suppression fires.
  *
- *  `releaseFocusToParent` controls whether to explicitly focus the parent
- *  window after parking. Use it when the popup is being dismissed *while*
- *  it still has focus (item click, Escape key) so keyboard input lands
- *  somewhere sensible. Skip it on the blur path — focus has already
- *  moved to wherever the user clicked, and stealing it back to the
- *  parent would yank focus out of whatever they targeted (another app
- *  window, the parent's body, etc.). Also skip it when the activated
- *  item handed focus to a *different* window (e.g. `new-window` opens
- *  and `bringToFront`s a fresh chooser host) — re-focusing the parent
- *  here races against and defeats that hand-off. */
+ *  `releaseFocusToParent` controls whether to explicitly hand focus
+ *  back to the title-bar webContents after hiding. Use it when the
+ *  popup is being dismissed *while* it still has focus (item click,
+ *  Escape key) so keyboard input lands somewhere sensible. Skip it on
+ *  the blur path — focus has already moved to wherever the user
+ *  clicked, and stealing it back to the title bar would yank focus
+ *  out of whatever they targeted (another app window, the parent's
+ *  body, etc.). Also skip it when the activated item handed focus to
+ *  a *different* window (e.g. `new-window` opens and `bringToFront`s
+ *  a fresh chooser host) — re-focusing the title bar here races
+ *  against and defeats that hand-off. */
 function hideTitleMenuPopup(
   entry: TitleMenuPopupEntry,
   opts: { releaseFocusToParent?: boolean } = {},
 ): void {
-  if (!entry.isOpen) return
+  // Proceed if a show is in flight even when not yet visible — otherwise
+  // the pendingShowTimer would fire after this dismissal and pop the
+  // menu open unexpectedly.
+  if (!entry.isOpen && !entry.pendingShowTimer) return
   entry.isOpen = false
   // Cancel any in-flight render ack — if a hide arrives before the
-  // ack, the popup is already on its way back to opacity 0 and we
-  // shouldn't flip to 1 retroactively.
+  // ack, the popup is already on its way back to hidden and we
+  // shouldn't flip it visible retroactively.
   if (entry.pendingShowTimer) {
     clearTimeout(entry.pendingShowTimer)
     entry.pendingShowTimer = null
   }
-  if (!entry.popup.isDestroyed()) {
-    entry.popup.setOpacity(0)
-    entry.popup.setPosition(POPUP_PARK_X, POPUP_PARK_Y)
+  if (!entry.popup.webContents.isDestroyed()) {
+    entry.popup.setVisible(false)
     if (opts.releaseFocusToParent && !entry.parentWindow.isDestroyed()) {
-      entry.parentWindow.focus()
+      // Embedded WebContentsView: `BrowserWindow.focus()` raises the host
+      // window but doesn't deterministically land keyboard focus in any
+      // child view. Push focus into the title bar (the button that
+      // opened the popup) so subsequent keystrokes go somewhere
+      // sensible. Falls back to a plain window focus if the title-bar
+      // sender is no longer alive.
+      if (!entry.titleBarSender.isDestroyed()) {
+        entry.titleBarSender.focus()
+      } else {
+        entry.parentWindow.focus()
+      }
     }
   }
   if (!entry.titleBarSender.isDestroyed()) {
@@ -2990,18 +3016,25 @@ function hideTitleMenuPopup(
   }
 }
 
-/** Flip the popup to opacity 1, focus it, and mark `isOpen`. Called
- *  when the renderer acks `comfy-titlemenu:rendered` — at that point the
- *  new config has been painted and showing is safe. */
+/** Make the popup view visible, focus it, and mark `isOpen`. Called
+ *  when the renderer acks `comfy-titlemenu:rendered` — at that point
+ *  the new config has been painted and showing is safe. */
 function showTitleMenuPopupNow(entry: TitleMenuPopupEntry): void {
   if (entry.pendingShowTimer) {
     clearTimeout(entry.pendingShowTimer)
     entry.pendingShowTimer = null
   }
-  if (entry.popup.isDestroyed()) return
-  entry.popup.setOpacity(1)
-  entry.popup.focus()
+  if (entry.popup.webContents.isDestroyed()) return
+  entry.popup.setVisible(true)
+  entry.popup.webContents.focus()
   entry.isOpen = true
+  // Notify the title bar so it can suppress the next click on the
+  // menu button. Without this, on macOS the click event can fire
+  // before the blur-driven dismiss propagates back, causing the
+  // popup to reopen instead of close on a reclick.
+  if (!entry.titleBarSender.isDestroyed()) {
+    entry.titleBarSender.send('comfy-titlebar:menu-opened', { menu: entry.kind })
+  }
 }
 
 function openTitleMenuPopup(opts: {
@@ -3014,7 +3047,7 @@ function openTitleMenuPopup(opts: {
   titleBarSender: Electron.WebContents
 }): void {
   const entry = ensureTitleMenuPopup(opts.parent)
-  if (entry.popup.isDestroyed()) return
+  if (entry.popup.webContents.isDestroyed()) return
 
   // Refresh the per-open routing context. `kind` + `parentEntryId` +
   // `titleBarSender` only matter for the *current* open, so we
@@ -3024,29 +3057,48 @@ function openTitleMenuPopup(opts: {
   entry.titleBarSender = opts.titleBarSender
 
   // Anchor coords are title-bar-local; the title-bar view sits at
-  // content (0,0) so they map to content coordinates. `getContentBounds`
-  // returns screen-relative coords, so adding gives the popup's screen
-  // origin.
-  const contentBounds = opts.parent.getContentBounds()
-  const screenX = Math.round(contentBounds.x + Math.max(0, opts.anchor.x))
-  const screenY = Math.round(contentBounds.y + Math.max(0, opts.anchor.y))
+  // content (0,0) so they map directly to parent-window content
+  // coordinates, which is exactly what `WebContentsView.setBounds`
+  // expects.
+  const x = Math.round(Math.max(0, opts.anchor.x))
+  const y = Math.round(Math.max(0, opts.anchor.y))
   const height = computePopupHeight(opts.items)
 
-  // Move + resize while invisible. On the very first open the renderer
-  // may not have had its `ready-to-show` yet (which calls
-  // `showInactive`) — fall back to a regular `showInactive()` here.
-  entry.popup.setBounds({ x: screenX, y: screenY, width: POPUP_WIDTH, height })
-  if (!entry.popup.isVisible()) entry.popup.showInactive()
+  // Re-add as the most recently attached child view so the popup paints
+  // on top of `titleBarView` / `comfyView` / `panelView`. Then update
+  // bounds while still hidden — the popup is flipped visible only after
+  // the renderer acks the new content has painted.
+  try {
+    opts.parent.contentView.removeChildView(entry.popup)
+  } catch {}
+  opts.parent.contentView.addChildView(entry.popup)
+  entry.popup.setBounds({ x, y, width: POPUP_WIDTH, height })
 
   // Push the new config and *wait* for the renderer to ack that the
-  // new content has painted before flipping opacity. Without this the
-  // user sees a frame of the previous open's content while Vue is
-  // still processing the config update.
+  // new content has painted before flipping the view visible. Without
+  // this the user sees a frame of the previous open's content while
+  // Vue is still processing the config update.
   if (entry.pendingShowTimer) {
     clearTimeout(entry.pendingShowTimer)
     entry.pendingShowTimer = null
   }
   const config: TitleMenuPopupConfig = { kind: opts.kind, items: opts.items, theme: opts.theme }
+  const configJson = JSON.stringify(config)
+
+  // Fast path: the renderer's DOM already matches the config we want
+  // to show (e.g. repeat open of the same menu with no item / theme
+  // changes). Skip the set-config IPC + render-ack roundtrip and show
+  // immediately — eliminates ~1 frame + 2 IPC hops of perceived
+  // open latency on the common case.
+  if (
+    entry.lastSyncedConfigJson === configJson
+    && !entry.popup.webContents.isDestroyed()
+  ) {
+    showTitleMenuPopupNow(entry)
+    return
+  }
+
+  entry.lastConfigJson = configJson
   if (entry.rendererReady && !entry.popup.webContents.isDestroyed()) {
     entry.popup.webContents.send('comfy-titlemenu:set-config', config)
   } else {
@@ -3067,19 +3119,19 @@ function activateTitleMenuItem(entry: TitleMenuPopupEntry, id: string): void {
   // to the front) flip this off so the parent doesn't immediately yank
   // focus back from the new target.
   let releaseFocusToParent = true
+  const parentEntry = comfyWindows.get(entry.parentEntryId)
   if (id === 'new-window') {
     openChooserHostWindow()
     releaseFocusToParent = false
   }
   else if (id === 'return-to-dashboard') {
-    // §16 — flip the install-backed host in place to chooser-host
-    // mode (Stage W-4). The same BrowserWindow stays alive; the
-    // file-menu popup is parented to it so it stays valid through
-    // the in-place swap (no popup teardown, just a body swap
-    // underneath the popup).
+    // Flip the install-backed host in place to chooser-host mode.
+    // The same BrowserWindow stays alive; the file-menu popup is
+    // parented to it so it stays valid through the in-place body
+    // swap (no popup teardown).
     void returnToDashboard(entry.parentEntryId)
   } else if (id === 'close-all-windows') {
-    // §16 — see `closeAllHostWindows` / `confirmAndCloseAllHostWindows`.
+    // See `closeAllHostWindows` / `confirmAndCloseAllHostWindows`.
     // For two or more open windows we confirm via a native dialog
     // that lists the open windows + any active operations that
     // would be cancelled. With one or zero windows the close
@@ -3087,20 +3139,16 @@ function activateTitleMenuItem(entry: TitleMenuPopupEntry, id: string): void {
     // the windows being closed; its popup is auto-destroyed, and
     // the trailing hideTitleMenuPopup is guarded against an
     // already-destroyed popup.
-    const parentEntry = comfyWindows.get(entry.parentEntryId)
     const parentWindow = parentEntry && !parentEntry.window.isDestroyed()
       ? parentEntry.window
       : null
     void confirmAndCloseAllHostWindows(parentWindow)
   } else if (id === 'settings') setActivePanel(entry.parentEntryId, 'settings')
   else if (id === 'skip-onboarding') {
-    // Modal-unification (Track M-2.2) — forward to the panel renderer
-    // so it can run the same `markFirstUseCompleted` + dismiss
-    // sequence the Cloud-branch pick uses (PanelApp owns the
-    // `firstUseCompleted` flip and the overlay close — see
-    // `handleFirstUseComplete`). Resolve the host entry the same way
-    // the close-window branches above do.
-    const parentEntry = comfyWindows.get(entry.parentEntryId)
+    // Forward to the panel renderer so it runs the same
+    // `markFirstUseCompleted` + dismiss sequence the Cloud-branch
+    // pick uses (PanelApp owns the `firstUseCompleted` flip and the
+    // overlay close — see `handleFirstUseComplete`).
     if (parentEntry?.panelView && !parentEntry.panelView.webContents.isDestroyed()) {
       parentEntry.panelView.webContents.send('comfy-panel:first-use-skip')
     }
@@ -3113,12 +3161,11 @@ function activateTitleMenuItem(entry: TitleMenuPopupEntry, id: string): void {
     triggerOpenFeedback(entry.parentEntryId, 'menu')
   }
   else if (id === 'new-install' || id === 'track' || id === 'load-snapshot' || id === 'quick-install') {
-    // Track B item 3 — install-creation / import flows are
-    // chooser-host-only. `buildTitleMenuItems` already filters them
-    // out of the install-backed file menu; this guard is the
-    // belt-and-braces so a stale popup or an out-of-order IPC
-    // can't navigate an in-Comfy host into one of these panels.
-    const parentEntry = comfyWindows.get(entry.parentEntryId)
+    // Install-creation / import flows are chooser-host-only.
+    // `buildTitleMenuItems` already filters them out of the
+    // install-backed file menu; this guard is the belt-and-braces
+    // so a stale popup or an out-of-order IPC can't navigate an
+    // in-Comfy host into one of these panels.
     if (parentEntry?.installationId === null) {
       setActivePanel(entry.parentEntryId, id)
     }
@@ -3133,17 +3180,22 @@ ipcMain.on('comfy-titlemenu:ready', (event) => {
   if (!entry) return
   entry.rendererReady = true
   if (entry.pendingConfig && !entry.popup.webContents.isDestroyed()) {
+    entry.lastConfigJson = JSON.stringify(entry.pendingConfig)
     entry.popup.webContents.send('comfy-titlemenu:set-config', entry.pendingConfig)
     entry.pendingConfig = null
   }
 })
 
 // Renderer signals that it has applied the latest config and the new
-// DOM has painted. Flip opacity to 1 and focus — the user only ever
-// sees the popup once it's showing the right content.
+// DOM has painted. Show the popup view and focus it — the user only
+// ever sees the popup once it's showing the right content.
 ipcMain.on('comfy-titlemenu:rendered', (event) => {
   const entry = titleMenuPopupsByWebContents.get(event.sender.id)
   if (!entry) return
+  // Mark the renderer in sync with the most recently sent config so
+  // the next open of the same content can take the fast path in
+  // `openTitleMenuPopup`.
+  entry.lastSyncedConfigJson = entry.lastConfigJson
   if (entry.pendingShowTimer === null) return
   showTitleMenuPopupNow(entry)
 })
@@ -3164,13 +3216,14 @@ ipcMain.on('comfy-titlemenu:close', (event) => {
 })
 
 /**
- * Title-bar dropdown popups (Phase 3 title bar v2 → §14 popup rewrite).
+ * Title-bar dropdown popups.
  *
  * The title bar lives in its own WebContentsView with `height: TITLEBAR_HEIGHT`,
  * so HTML popups rendered inside it would be clipped by the view's bounds.
- * Instead of the previous native `Menu.popup()` we open a child BrowserWindow
- * (see `openTitleMenuPopup` above) that floats above all views with no
- * clipping or z-order issues.
+ * We attach a sibling `WebContentsView` (see `openTitleMenuPopup` above)
+ * to the host window's content view. It re-orders to the top of the
+ * view stack on each open, so it paints above the title bar / comfy /
+ * panel views without z-order issues.
  *
  * The renderer sends the button's bottom-left corner in title-bar-local
  * pixels; the title bar view sits at window y=0, so those coordinates
@@ -3201,6 +3254,19 @@ ipcMain.on(
     })
   },
 )
+
+/** Title bar asks main to dismiss the file-menu popup. Used when the
+ *  user reclicks the file button while the popup is open: on macOS
+ *  clicking a sibling WebContentsView in the same parent window
+ *  doesn't reliably trigger a `blur` on the popup webContents, so the
+ *  blur-driven dismiss path can't be relied on for the toggle case. */
+ipcMain.on('comfy-window:dismiss-title-menu', (event) => {
+  const found = findEntryByTitleBarSender(event.sender)
+  if (!found) return
+  const popup = titleMenuPopupsByParent.get(found.entry.window.id)
+  if (!popup) return
+  hideTitleMenuPopup(popup, { releaseFocusToParent: true })
+})
 
 ipcMain.handle('focus-comfy-window', (_event, installationId: string) => {
   const entry = getEntryByInstallationId(installationId)
