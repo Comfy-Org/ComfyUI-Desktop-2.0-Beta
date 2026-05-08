@@ -17,14 +17,22 @@ vi.mock('./pip', async (importOriginal) => {
   }
 })
 
+vi.mock('./telemetry', () => ({
+  emit: vi.fn(),
+  trackedStep: vi.fn(async (_event: string, _ctx: unknown, fn: () => unknown) => fn()),
+  capture: vi.fn(),
+}))
+
 import { buildExportEnvelope, validateExportEnvelope, importSnapshots, diffSnapshots, listSnapshots, restoreComfyUIVersion, buildPostRestoreState, restorePipPackages, formatSnapshotVersion } from './snapshots'
 import type { Snapshot, SnapshotEntry, SnapshotExportEnvelope } from './snapshots'
 import type { ScannedNode } from './nodes'
 import type { InstallationRecord } from '../installations'
 import { pipFreeze, runUvPip } from './pip'
+import * as telemetry from './telemetry'
 
 const mockedPipFreeze = vi.mocked(pipFreeze)
 const mockedRunUvPip = vi.mocked(runUvPip)
+const mockedTelemetryEmit = vi.mocked(telemetry.emit)
 
 // --- Helpers ---
 
@@ -484,7 +492,7 @@ describe('importSnapshots', () => {
       makeSnapshot({ createdAt: '2026-03-01T12:00:00.000Z', trigger: 'boot' }),
       makeSnapshot({ createdAt: '2026-03-02T12:00:00.000Z', trigger: 'manual' }),
     ])
-    const result = await importSnapshots(tmpDir, envelope)
+    const result = await importSnapshots(tmpDir, envelope, 'test-install')
     expect(result.imported).toBe(2)
 
     const entries = await listSnapshots(tmpDir)
@@ -495,8 +503,8 @@ describe('importSnapshots', () => {
     const envelope = makeEnvelope([
       makeSnapshot({ createdAt: '2026-03-01T12:00:00.000Z', trigger: 'boot' }),
     ])
-    await importSnapshots(tmpDir, envelope)
-    const result = await importSnapshots(tmpDir, envelope)
+    await importSnapshots(tmpDir, envelope, 'test-install')
+    const result = await importSnapshots(tmpDir, envelope, 'test-install')
     expect(result.imported).toBe(1)
 
     const entries = await listSnapshots(tmpDir)
@@ -507,13 +515,13 @@ describe('importSnapshots', () => {
     const first = makeEnvelope([
       makeSnapshot({ createdAt: '2026-03-01T12:00:00.000Z', trigger: 'boot' }),
     ])
-    await importSnapshots(tmpDir, first)
+    await importSnapshots(tmpDir, first, 'test-install')
 
     const second = makeEnvelope([
       makeSnapshot({ createdAt: '2026-03-01T12:00:00.000Z', trigger: 'boot' }),
       makeSnapshot({ createdAt: '2026-03-02T12:00:00.000Z', trigger: 'manual' }),
     ])
-    const result = await importSnapshots(tmpDir, second)
+    const result = await importSnapshots(tmpDir, second, 'test-install')
     expect(result.imported).toBe(2)
   })
 
@@ -524,7 +532,7 @@ describe('importSnapshots', () => {
       customNodes: [makeNode({ id: 'my-node', dirName: 'my-node', version: '1.0.0' })],
       pipPackages: { numpy: '1.24.0', pillow: '10.0.0' },
     })
-    await importSnapshots(tmpDir, makeEnvelope([original]))
+    await importSnapshots(tmpDir, makeEnvelope([original]), 'test-install')
 
     const entries = await listSnapshots(tmpDir)
     expect(entries).toHaveLength(1)
@@ -544,7 +552,7 @@ describe('importSnapshots', () => {
       makeSnapshot({ createdAt: '2026-03-03T12:00:00.000Z', trigger: 'manual' }),
       makeSnapshot({ createdAt: '2026-03-02T12:00:00.000Z', trigger: 'restart' }),
     ])
-    await importSnapshots(tmpDir, envelope)
+    await importSnapshots(tmpDir, envelope, 'test-install')
 
     const entries = await listSnapshots(tmpDir)
     expect(entries).toHaveLength(3)
@@ -563,8 +571,51 @@ describe('importSnapshots', () => {
       makeSnapshot({ createdAt: '2026-03-01T12:00:00.000Z', trigger: 'boot' }),
       makeSnapshot({ createdAt: '2026-03-01T12:00:00.000Z', trigger: 'boot' }),
     ])
-    const result = await importSnapshots(tmpDir, envelope)
+    const result = await importSnapshots(tmpDir, envelope, 'test-install')
     expect(result.imported).toBe(2)
+  })
+
+  it('emits desktop2.snapshot.imported once per imported snapshot with batch context', async () => {
+    mockedTelemetryEmit.mockClear()
+    const envelope = makeEnvelope([
+      makeSnapshot({
+        createdAt: '2026-03-02T12:00:00.000Z',
+        trigger: 'manual',
+        label: 'release-cut',
+        customNodes: [makeNode({ id: 'n1', dirName: 'n1' })],
+        pipPackages: { numpy: '1.24.0', pillow: '10.0.0' },
+      }),
+      makeSnapshot({
+        createdAt: '2026-03-01T12:00:00.000Z',
+        trigger: 'boot',
+        customNodes: [],
+        pipPackages: {},
+      }),
+    ])
+
+    await importSnapshots(tmpDir, envelope, 'install-99')
+
+    expect(mockedTelemetryEmit).toHaveBeenCalledTimes(2)
+    // First (envelope index 0) — labeled manual snapshot with nodes + pip
+    expect(mockedTelemetryEmit).toHaveBeenNthCalledWith(1, 'desktop2.snapshot.imported', {
+      installation_id: 'install-99',
+      original_trigger: 'manual',
+      custom_nodes_count: 1,
+      pip_packages_count: 2,
+      has_label: true,
+      batch_size: 2,
+      batch_index: 0,
+    })
+    // Second (envelope index 1) — empty boot snapshot
+    expect(mockedTelemetryEmit).toHaveBeenNthCalledWith(2, 'desktop2.snapshot.imported', {
+      installation_id: 'install-99',
+      original_trigger: 'boot',
+      custom_nodes_count: 0,
+      pip_packages_count: 0,
+      has_label: false,
+      batch_size: 2,
+      batch_index: 1,
+    })
   })
 })
 
