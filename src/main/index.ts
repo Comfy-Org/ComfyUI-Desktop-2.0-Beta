@@ -1188,6 +1188,16 @@ function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowResult {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      // sandbox: false — comfyTitleBarPreload imports the shared
+      // src/preload/api.ts (window.api bridge), which Rollup emits as a
+      // separate chunk under out/preload/chunks/. Sandboxed preloads can
+      // only require() from electron/events/timers/url, so the chunk
+      // require would fail silently and leave window.api undefined,
+      // which historically blanked the title-bar renderer and broke
+      // renderer-side telemetry. contextIsolation + nodeIntegration:false
+      // remain on, so renderer JS still has no Node access.
+      // Tracked: issue #521 (build-time chunk inlining to re-enable sandbox).
+      sandbox: false,
       preload: path.join(__dirname, '../preload/comfyTitleBarPreload.js'),
     },
   })
@@ -2257,6 +2267,13 @@ function ensurePanelView(windowKey: number, entry: ComfyWindowEntry, initialPane
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      // sandbox: false — preload/index.js imports the shared
+      // src/preload/api.ts chunk, same as the title-bar preload.
+      // Sandboxed preloads can't require() relative chunks, so leaving
+      // sandbox on would silently break window.api in the panel and
+      // take renderer-side telemetry with it. See issue #521 for the
+      // build-time inlining plugin that will let us turn sandbox back on.
+      sandbox: false,
       // Reuse the launcher preload — panel UI uses window.api like the main launcher window.
       preload: path.join(__dirname, '../preload/index.js'),
       // Default session (no partition) — keeps the panel isolated from the
