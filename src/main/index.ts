@@ -35,6 +35,7 @@ import { showModelFolderRelaunchPage } from './lib/relaunchPage'
 import { COMFY_BG, SPLASH_DARK, TITLEBAR_BG, type SplashTheme } from './lib/theme'
 import { TITLEBAR_HEIGHT, TRAFFIC_LIGHT_POSITION, comfyTitleBarOverlay, titleBarOverlayForTheme } from './lib/titleBarOverlay'
 import { resolveTheme, sourceMap, _registerExtraBroadcastTarget, _unregisterExtraBroadcastTarget, _runningSessions, _broadcastToRenderer, _operationAborts } from './lib/ipc/shared'
+import { triggerPanelOverlay, triggerOpenFeedback as triggerOpenFeedbackHelper } from './lib/comfy-panel-overlay'
 import * as mainTelemetry from './lib/telemetry'
 import { getDeviceId } from './lib/deviceId'
 import { scrubAll } from './lib/piiScrub'
@@ -321,6 +322,22 @@ interface ComfyWindowEntry {
    * see the IPC handler comment.
    */
   firstUseMode: 'none' | 'consent-lockdown' | 'post-consent'
+  /**
+   * Issue #523 — `true` while the panel renderer has at least one
+   * overlay (Tier 1/2/3 via `useOverlay`) or modal (`useModal`)
+   * mounted on a Comfy host whose body mode is `'comfy'`. The panel
+   * normally collapses to 0×0 + setVisible(false) under `'comfy'` so
+   * the live ComfyUI surface fills the body; with this flag set
+   * `layoutViews` lifts the panel back to the full body rect on top
+   * of the comfy view so the popover/modal is actually visible.
+   *
+   * Toggled by the `comfy-panel:set-overlay-active` IPC the panel
+   * renderer fires from a watcher on `currentOverlay !== null ||
+   * modal.state.visible`. No-op for install-less hosts (their body
+   * mode never resolves to `'comfy'` in the first place — the Comfy
+   * pill maps to `'chooser'`).
+   */
+  overlayMounted: boolean
   /**
    * Window-mode unification (Stage W-3b) — current title-bar pill
    * label. Install-backed windows mirror the install name (and re-
@@ -1245,8 +1262,16 @@ function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowResult {
     // (lifecycle / chooser / settings / etc.) depending on mode.
     // `computeBodyMode` already returns `'chooser'` for install-less
     // hosts, so the install-backed visibility branch handles both.
+    //
+    // Issue #523 — when the body mode is `'comfy'` BUT the panel
+    // renderer has an overlay/modal mounted (`entry.overlayMounted`),
+    // lift the panel up to the full body rect on top of the comfy
+    // view so the popover/modal is actually visible. The comfy view
+    // stays alive but collapsed; closing the overlay flips
+    // `overlayMounted` back to false and `layoutViews` re-runs to
+    // restore the normal comfy-on-top layout.
     const mode = entry ? computeBodyMode(entry) : 'comfy'
-    const showPanel = mode !== 'comfy'
+    const showPanel = mode !== 'comfy' || (entry?.overlayMounted ?? false)
     if (showPanel && entry?.panelView) {
       entry.panelView.setBounds(bodyRect)
       entry.panelView.setVisible(true)
@@ -1411,6 +1436,7 @@ function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowResult {
         ? opts.comfyWebPreferences.partition
         : null,
     firstUseMode: 'none',
+    overlayMounted: false,
     titleBarText: opts.initialTitleBarText,
     sourceCategory: opts.initialSourceCategory,
     _installCleanup: null,
@@ -2358,6 +2384,26 @@ function ensurePanelView(windowKey: number, entry: ComfyWindowEntry, initialPane
   return panelView
 }
 
+/**
+ * Resolve the panelView for a host entry, lazy-creating one if the
+ * window has not constructed it yet (Comfy windows defer construction
+ * until the first non-comfy switch). Returns `null` when the host
+ * window is destroyed; otherwise always returns a usable
+ * `WebContentsView`.
+ *
+ * Title-bar IPCs that need to push UI through the panel renderer
+ * (downloads tray, app-update modal, send feedback) MUST go through
+ * this — see PR #508 / issue #523 for the regressions caused by
+ * reading `entry.panelView` directly. The actual `webContents.send`
+ * lives in `triggerPanelOverlay` / `triggerOpenFeedbackHelper`
+ * (`./lib/comfy-panel-overlay.ts`), which add the matching
+ * `did-finish-load` deferral the freshly-constructed view needs.
+ */
+function getOrCreatePanelView(entry: ComfyWindowEntry): WebContentsView | null {
+  if (entry.window.isDestroyed()) return null
+  return entry.panelView ?? ensurePanelView(entry.windowKey, entry, computeBodyMode(entry))
+}
+
 /** Move OS focus to whichever body view is now active so keyboard input lands in the right place. */
 function focusActiveBody(entry: ComfyWindowEntry): void {
   if (entry.window.isDestroyed() || !entry.window.isFocused()) return
@@ -2427,6 +2473,38 @@ ipcMain.on('comfy-window:close-current-panel', (event) => {
       setActivePanel(id, 'comfy')
       return
     }
+  }
+})
+
+/**
+ * Issue #523 — panel renderer's overlay/modal mount tracker.
+ *
+ * The panel renderer (`PanelApp.vue`) runs a watcher on
+ * `currentOverlay !== null || modal.state.visible` and fires this
+ * IPC on every edge. Main flips `entry.overlayMounted` accordingly
+ * and re-runs `layoutViews()`.
+ *
+ * The flag only matters when the body mode is `'comfy'` — i.e.
+ * install-backed windows where ComfyUI is running and the user is
+ * looking at the live frontend. In that mode `layoutViews` would
+ * normally collapse the panelView to 0×0 + setVisible(false), so a
+ * popover/modal mounted by the panel renderer would have no surface
+ * to paint on. Setting `overlayMounted = true` lifts the panel back
+ * to the full body rect on top of the comfy view; setting it
+ * `false` restores the comfy-on-top layout.
+ *
+ * Resolved via the `event.sender === entry.panelView?.webContents`
+ * walk to avoid maintaining a separate reverse-map (the panelView
+ * is lazily constructed; a cached map would race construction).
+ */
+ipcMain.on('comfy-panel:set-overlay-active', (event, payload: { active: boolean }) => {
+  const active = !!payload?.active
+  for (const entry of comfyWindows.values()) {
+    if (entry.panelView?.webContents !== event.sender) continue
+    if (entry.overlayMounted === active) return
+    entry.overlayMounted = active
+    if (!entry.window.isDestroyed()) entry.layoutViews()
+    return
   }
 })
 
@@ -2535,22 +2613,19 @@ ipcMain.on('comfy-window:click-app-update-pill', (event) => {
   const found = findEntryByTitleBarSender(event.sender)
   if (!found) return
   const { entry } = found
-  const panelView = entry.panelView
-  if (!panelView || panelView.webContents.isDestroyed()) return
   const state = updater.getCurrentUpdateState()
-  if (state.kind === 'ready') {
-    panelView.webContents.send('panel-trigger-overlay', {
-      kind: 'app-update-restart-prompt',
-      version: state.version,
-    })
-    return
-  }
-  if (state.kind === 'available') {
-    panelView.webContents.send('panel-trigger-overlay', {
-      kind: 'app-update-download-prompt',
-      version: state.version,
-    })
-  }
+  if (state.kind !== 'ready' && state.kind !== 'available') return
+  // Issue #523 — Comfy windows construct the panelView lazily on
+  // first non-comfy switch; wake one if needed (the `comfy-panel:set-
+  // overlay-active` round-trip the modal kicks off below will lift it
+  // to the body rect on top of the comfy view, so the user actually
+  // sees the modal). Routes through the helper so the destroyed-view
+  // guards and the `did-finish-load` deferral are applied uniformly.
+  const panelView = getOrCreatePanelView(entry)
+  if (!panelView) return
+  triggerPanelOverlay(panelView, state.kind === 'ready'
+    ? { kind: 'app-update-restart-prompt', version: state.version }
+    : { kind: 'app-update-download-prompt', version: state.version })
 })
 
 /**
@@ -2558,36 +2633,20 @@ ipcMain.on('comfy-window:click-app-update-pill', (event) => {
  * install-less hosts (the pill is suppressed there but a defensive
  * guard keeps stray IPC from triggering anything).
  *
- * The handler does three things, in order:
- *   1. `setActivePanel(found.id, 'settings')` — bring the panel view
- *      forward when the user is currently on the ComfyUI view (the
- *      common case for this pill since it's only visible while an
- *      install is running). Without this, the unified Settings modal
- *      mounts on a hidden panel surface and the click appears to do
- *      nothing. `setActivePanel` also lazily creates the panelView
- *      on first non-comfy switch via `ensurePanelView`. It's a no-op
- *      when the entry is already on `'settings'` (i.e. the modal is
- *      already open), so we don't double-open it.
- *   2. Resolve the entry's `panelView` AFTER `setActivePanel` so we
- *      pick up any view that step 1 may have just constructed.
- *   3. `panel-trigger-overlay` with the installationId so the renderer
- *      can open the unified Settings modal deep-linked to the ComfyUI
- *      Settings tab → Update sub-tab — same surface the chooser kebab
- *      "Update…" entry routes to.
+ * `setActivePanel(found.id, 'settings')` brings the panel view
+ * forward — the unified Settings modal is the surface the user
+ * actually wants to land on (deep-linked to the ComfyUI Settings tab
+ * → Update sub-tab), so flipping the body to `'settings'` is the
+ * right thing here. Compare `click-app-update-pill` /
+ * `click-downloads-tray`, which only need a transient overlay/modal
+ * surface and rely on `entry.overlayMounted` instead.
  *
- * Step 3 must be deferred until the panelView's renderer has finished
- * loading. When the panel was just constructed by step 1, its preload
- * + Vue app haven't mounted yet, so a synchronous `send()` would land
- * before `unsubPanelTriggerOverlay = window.api.onPanelTriggerOverlay
- * (...)` ran in `onMounted`, and the IPC would be silently dropped.
- * `did-finish-load` fires once the JS bundle has executed (which is
- * what Vue's `mount()` + `onMounted` ride on), so registering a
- * `once('did-finish-load', sendDeepLink)` is a reliable trigger.
- *
- * The renderer's existing `initialTab` / `initialDetailTab` watchers
- * (added in the unified-settings-modal branch) cover the
- * already-mounted-but-on-a-different-tab case — they snap the sidebar
- * back to "ComfyUI Settings" and the inner DetailModal to Update.
+ * The send itself goes through `triggerPanelOverlay` so the
+ * destroyed-view guards and the `did-finish-load` deferral are
+ * applied uniformly. The renderer's existing `initialTab` /
+ * `initialDetailTab` watchers cover the already-mounted-but-on-a-
+ * different-tab case — they snap the sidebar back to "ComfyUI
+ * Settings" and the inner DetailModal to Update.
  */
 ipcMain.on('comfy-window:click-install-update-pill', (event) => {
   const found = findEntryByTitleBarSender(event.sender)
@@ -2596,20 +2655,11 @@ ipcMain.on('comfy-window:click-install-update-pill', (event) => {
   const installationId = entry.installationId
   if (!installationId) return
   setActivePanel(found.id, 'settings')
-  const panelView = entry.panelView
-  if (!panelView || panelView.webContents.isDestroyed()) return
-  const sendDeepLink = (): void => {
-    if (panelView.webContents.isDestroyed()) return
-    panelView.webContents.send('panel-trigger-overlay', {
-      kind: 'install-update',
-      installationId,
-    })
-  }
-  if (panelView.webContents.isLoadingMainFrame()) {
-    panelView.webContents.once('did-finish-load', sendDeepLink)
-  } else {
-    sendDeepLink()
-  }
+  // setActivePanel lazy-creates the panelView via ensurePanelView, so
+  // it's safe to read directly here (no overlay-only path needed —
+  // the body mode itself just flipped to 'settings').
+  if (!entry.panelView) return
+  triggerPanelOverlay(entry.panelView, { kind: 'install-update', installationId })
 })
 
 /**
@@ -2639,20 +2689,26 @@ function _broadcastDownloadsToTitleBars(): void {
 }
 
 /**
- * Track F — title-bar downloads-tray click. Routes through
- * `panel-trigger-overlay` so the panel renderer can mount the Tier 1
- * downloads popover via `openOverlay`. The popover reads its data
- * from the renderer's `downloadStore` (already wired via
+ * Track F / Issue #523 — title-bar downloads-tray click. Routes
+ * through `panel-trigger-overlay` so the panel renderer can mount
+ * the Tier 1 downloads popover via `openOverlay`. The popover reads
+ * its data from the renderer's `downloadStore` (already wired via
  * `onModelDownloadProgress`) so the click does not need to ship any
  * additional payload.
+ *
+ * Wakes the panelView via `getOrCreatePanelView` (lazy-construction
+ * regression, see PR #508 / issue #523) and routes through
+ * `triggerPanelOverlay` for the destroyed-view + did-finish-load
+ * guards. The actual surfacing of the panel on top of the comfy
+ * view happens via `entry.overlayMounted` once the renderer's
+ * watcher fires `comfy-panel:set-overlay-active`.
  */
 ipcMain.on('comfy-window:click-downloads-tray', (event) => {
   const found = findEntryByTitleBarSender(event.sender)
   if (!found) return
-  const { entry } = found
-  const panelView = entry.panelView
-  if (!panelView || panelView.webContents.isDestroyed()) return
-  panelView.webContents.send('panel-trigger-overlay', { kind: 'downloads' })
+  const panelView = getOrCreatePanelView(found.entry)
+  if (!panelView) return
+  triggerPanelOverlay(panelView, { kind: 'downloads' })
 })
 
 /**
@@ -2668,28 +2724,20 @@ ipcMain.on('comfy-window:click-downloads-tray', (event) => {
  * `desktop2.feedback.opened` `{ source }` so we can tell which
  * affordance the user reached for.
  *
- * In Comfy instance windows the panelView is constructed lazily on
- * the first non-comfy switch (Settings / Directories / lifecycle), so
- * a feedback click that arrives while the user is still on the
- * ComfyUI body would hit a `null` panelView and silently drop. Mirror
- * the `click-install-update-pill` pattern: ensure the panel exists
- * for the current body mode and defer the send until
- * `did-finish-load` if the bundle is still loading.
+ * The lazy-panelView + `did-finish-load` deferral that PR #508
+ * introduced for this code path now lives in
+ * `triggerOpenFeedbackHelper` (`src/main/lib/comfy-panel-overlay.ts`)
+ * alongside the matching helper for `panel-trigger-overlay`. Send
+ * Feedback only needs the renderer to RUN JS (it calls
+ * `openExternal` for the typeform URL), so it does NOT touch
+ * `entry.overlayMounted` — no panel UI is being surfaced.
  */
 function triggerOpenFeedback(entryId: number, source: 'titlebar' | 'menu'): void {
   const parentEntry = comfyWindows.get(entryId)
-  if (!parentEntry || parentEntry.window.isDestroyed()) return
-  const panelView = parentEntry.panelView ?? ensurePanelView(entryId, parentEntry, computeBodyMode(parentEntry))
-  if (panelView.webContents.isDestroyed()) return
-  const send = (): void => {
-    if (panelView.webContents.isDestroyed()) return
-    panelView.webContents.send('comfy-panel:open-feedback', { source })
-  }
-  if (panelView.webContents.isLoadingMainFrame()) {
-    panelView.webContents.once('did-finish-load', send)
-  } else {
-    send()
-  }
+  if (!parentEntry) return
+  const panelView = getOrCreatePanelView(parentEntry)
+  if (!panelView) return
+  triggerOpenFeedbackHelper(panelView, source)
 }
 
 /** Title-bar Send Feedback button click. Resolves the host entry from

@@ -83,6 +83,8 @@ export function buildElectronApi(): ElectronApi {
       ipcRenderer.send('comfy-window:close-current-panel'),
     setFirstUseMode: (mode: 'none' | 'consent-lockdown' | 'post-consent') =>
       ipcRenderer.send('comfy-window:set-first-use-mode', { mode }),
+    setOverlayActive: (active: boolean) =>
+      ipcRenderer.send('comfy-panel:set-overlay-active', { active: !!active }),
     onFirstUseSkip: (callback) => {
       const handler = (): void => callback()
       ipcRenderer.on('comfy-panel:first-use-skip', handler)

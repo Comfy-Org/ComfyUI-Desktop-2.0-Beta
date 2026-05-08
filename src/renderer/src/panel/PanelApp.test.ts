@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { reactive } from 'vue'
 
 vi.mock('../main', () => ({
   i18n: {
@@ -9,11 +10,16 @@ vi.mock('../main', () => ({
 vi.mock('../composables/useTheme', () => ({ useTheme: () => ({ theme: 'dark' }) }))
 /** Test-controllable `useModal` mock. Each call returns the same
  *  shared singleton so tests can stub return values per case via
- *  `mockModal.confirm.mockResolvedValueOnce(true)` etc. */
+ *  `mockModal.confirm.mockResolvedValueOnce(true)` etc.
+ *
+ *  `state` is `reactive` so the issue #523 overlay-active watcher in
+ *  PanelApp.vue (which tracks `modal.state.visible`) re-runs when
+ *  tests flip the flag. */
 const mockModal = {
   alert: vi.fn(),
   confirm: vi.fn(),
   close: vi.fn(),
+  state: reactive({ visible: false }),
 }
 vi.mock('../composables/useModal', () => ({
   useModal: () => mockModal,
@@ -256,6 +262,7 @@ function installMockApi(initial?: {
     installUpdate: state.installUpdate,
     downloadUpdate: state.downloadUpdate,
     setFirstUseMode: vi.fn(),
+    setOverlayActive: vi.fn(),
     closeCurrentPanel: vi.fn(),
     onFirstUseSkip: vi.fn((cb: () => void) => {
       state.firstUseSkipCallbacks.push(cb)
@@ -316,10 +323,22 @@ function installMockApi(initial?: {
   return state
 }
 
+/**
+ * Track mounted wrappers so `afterEach` can unmount them — without
+ * this every PanelApp from a prior test stays alive in the module and
+ * its watchers (notably the issue #523 overlay-active watcher) keep
+ * firing against the *current* test's `window.api.setOverlayActive`
+ * mock when shared module state (e.g. `useOverlay().current`) is
+ * reset in `beforeEach`.
+ */
+const mountedWrappers: ReturnType<typeof mount>[] = []
+
 function mountPanel() {
-  return mount(PanelApp, {
+  const wrapper = mount(PanelApp, {
     global: { plugins: [createTestI18n(), createPinia()] },
   })
+  mountedWrappers.push(wrapper)
+  return wrapper
 }
 
 const SAMPLE_INSTALL: InstallationLike = {
@@ -344,9 +363,19 @@ describe('PanelApp', () => {
     mockModal.alert.mockReset()
     mockModal.confirm.mockReset()
     mockModal.close.mockReset()
+    mockModal.state.visible = false
     mockState = installMockApi({ installations: [SAMPLE_INSTALL] })
     // Default URL — individual tests override.
     window.history.replaceState({}, '', '/?installationId=test-id')
+  })
+
+  afterEach(() => {
+    // Unmount every PanelApp this test mounted so its watchers stop
+    // — see the comment on `mountedWrappers` for why this matters.
+    while (mountedWrappers.length > 0) {
+      const wrapper = mountedWrappers.pop()
+      try { wrapper?.unmount() } catch { /* ignore double-unmount */ }
+    }
   })
 
   it('renders the comfy-lifecycle body by default for install-backed hosts', async () => {
@@ -850,6 +879,80 @@ describe('PanelApp', () => {
     mockState.panelTriggerOverlayCallbacks.forEach((cb) => cb({ kind: 'downloads' }))
     await flushPromises()
     expect(wrapper.find('[data-testid="downloads-tray-popover"]').exists()).toBe(true)
+  })
+
+  // ---------------------------------------------------------------------------
+  // Issue #523 — overlay-active watcher.
+  //
+  // PanelApp watches `currentOverlay !== null || modal.state.visible`
+  // and pushes the result to main via `window.api.setOverlayActive`.
+  // Main flips `entry.overlayMounted` and re-runs `layoutViews()` so
+  // the panelView surface lifts onto the comfy view (otherwise the
+  // popover/modal mounts on a panel that's collapsed to 0×0 under
+  // the `'comfy'` body mode and the user sees nothing).
+  // ---------------------------------------------------------------------------
+  it('pushes setOverlayActive(true) when an overlay opens and (false) when it closes', async () => {
+    mountPanel()
+    await flushPromises()
+    expect(mockState).toBeDefined()
+    const setOverlayActive = (window.api as { setOverlayActive: ReturnType<typeof vi.fn> })
+      .setOverlayActive
+    // Initial mount: watcher only fires on change, so no IPC yet.
+    expect(setOverlayActive).not.toHaveBeenCalled()
+
+    // Mount the downloads popover via the same path the title-bar
+    // tray click uses.
+    mockState.panelTriggerOverlayCallbacks.forEach((cb) => cb({ kind: 'downloads' }))
+    await flushPromises()
+    expect(setOverlayActive).toHaveBeenLastCalledWith(true)
+
+    // Close the overlay (renderer-internal close path used by the
+    // popover's own close handler).
+    useOverlay().current.value = null
+    await flushPromises()
+    expect(setOverlayActive).toHaveBeenLastCalledWith(false)
+  })
+
+  it('pushes setOverlayActive(true) when a useModal-driven modal opens and (false) when it closes', async () => {
+    mountPanel()
+    await flushPromises()
+    const setOverlayActive = (window.api as { setOverlayActive: ReturnType<typeof vi.fn> })
+      .setOverlayActive
+    expect(setOverlayActive).not.toHaveBeenCalled()
+
+    // Simulate the global `<ModalDialog />` becoming visible (e.g.
+    // the Desktop Update confirm modal the title-bar app-update pill
+    // click pops via `useModal.confirm`).
+    mockModal.state.visible = true
+    await flushPromises()
+    expect(setOverlayActive).toHaveBeenLastCalledWith(true)
+
+    mockModal.state.visible = false
+    await flushPromises()
+    expect(setOverlayActive).toHaveBeenLastCalledWith(false)
+  })
+
+  it('does not redundantly push setOverlayActive when only the overlay kind changes', async () => {
+    mountPanel()
+    await flushPromises()
+    const setOverlayActive = (window.api as { setOverlayActive: ReturnType<typeof vi.fn> })
+      .setOverlayActive
+
+    mockState.panelTriggerOverlayCallbacks.forEach((cb) => cb({ kind: 'downloads' }))
+    await flushPromises()
+    expect(setOverlayActive).toHaveBeenCalledTimes(1)
+    expect(setOverlayActive).toHaveBeenLastCalledWith(true)
+
+    // Replacing one Tier 1 overlay with another keeps `current.value`
+    // non-null the entire time — main shouldn't be re-told the panel
+    // is "now active" mid-transition.
+    useOverlay().current.value = {
+      kind: 'settings',
+      installation: null,
+      initialTab: 'global',
+    }
+    await flushPromises()
+    expect(setOverlayActive).toHaveBeenCalledTimes(1)
   })
 
   it('ignores install-update events whose installationId does not match the host', async () => {

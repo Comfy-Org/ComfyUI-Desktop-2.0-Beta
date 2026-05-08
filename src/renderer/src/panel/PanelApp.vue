@@ -183,6 +183,23 @@ const { current: currentOverlay, openOverlay, closeOverlay } = useOverlay()
  *  spec's "modal" wording maps to actual modal chrome. */
 const modal = useModal()
 
+/**
+ * Issue #523 — push the panel renderer's "is an overlay or modal
+ * mounted right now?" state to main on every edge. Main flips
+ * `entry.overlayMounted` and re-runs `layoutViews()` so the panel
+ * surface lifts onto the comfy view while a popover/modal is up
+ * (otherwise the panelView is collapsed to 0×0 + setVisible(false)
+ * under the `'comfy'` body mode and the user sees nothing). The
+ * watcher fires only on actual change — initial mount keeps the
+ * `false` default already set by main on entry construction.
+ */
+watch(
+  () => currentOverlay.value !== null || modal.state.visible,
+  (active) => {
+    window.api.setOverlayActive(active)
+  },
+)
+
 // installationStore.fetchInstallations() is wired to onInstallationsChanged
 // inside the store itself, so the panel just needs to read from it.
 const installation = computed<Installation | null>(

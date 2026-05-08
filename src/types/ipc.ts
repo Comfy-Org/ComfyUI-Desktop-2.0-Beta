@@ -714,6 +714,14 @@ export interface ElectronApi {
    *  and-forget; FirstUseTakeover.vue calls this on every step change
    *  and on unmount with `'none'`. */
   setFirstUseMode(mode: 'none' | 'consent-lockdown' | 'post-consent'): void
+  /** Issue #523 — push the panel renderer's "is an overlay/modal
+   *  currently mounted?" state to main. PanelApp.vue runs a watcher
+   *  on `currentOverlay !== null || modal.state.visible` and calls
+   *  this on every edge. Main flips `entry.overlayMounted` and
+   *  re-runs `layoutViews` so the panel surface lifts up onto the
+   *  comfy view (so the popover/modal is actually visible) while
+   *  active and drops back behind it when cleared. Fire-and-forget. */
+  setOverlayActive(active: boolean): void
   /** Modal-unification (Track M-2.2) — main routes the file-menu
    *  Skip Onboarding click here. Handler runs the same
    *  `markFirstUseCompleted` + dismiss-takeover sequence the Cloud
