@@ -20,7 +20,6 @@ interface MockBridgeState {
   sourceCategoryChangedCallbacks: ((category: string | null) => void)[]
   themeChangedCallbacks: ((theme: { bg: string; text: string }) => void)[]
   fullscreenChangedCallbacks: ((fullscreen: boolean) => void)[]
-  menuOpenedCallbacks: ((info: { menu: 'file' }) => void)[]
   menuClosedCallbacks: ((info: { menu: 'file' }) => void)[]
   firstUseModeChangedCallbacks: ((mode: 'none' | 'consent-lockdown' | 'post-consent') => void)[]
   appUpdateStateCallbacks: ((state: {
@@ -47,7 +46,6 @@ function installMockBridge(opts: { isMac?: boolean; installationId?: string | nu
     sourceCategoryChangedCallbacks: [],
     themeChangedCallbacks: [],
     fullscreenChangedCallbacks: [],
-    menuOpenedCallbacks: [],
     menuClosedCallbacks: [],
     firstUseModeChangedCallbacks: [],
     appUpdateStateCallbacks: [],
@@ -87,10 +85,6 @@ function installMockBridge(opts: { isMac?: boolean; installationId?: string | nu
     },
     onFullscreenChanged: (cb: (fullscreen: boolean) => void) => {
       state.fullscreenChangedCallbacks.push(cb)
-      return () => {}
-    },
-    onMenuOpened: (cb: (info: { menu: 'file' }) => void) => {
-      state.menuOpenedCallbacks.push(cb)
       return () => {}
     },
     onMenuClosed: (cb: (info: { menu: 'file' | 'install' }) => void) => {

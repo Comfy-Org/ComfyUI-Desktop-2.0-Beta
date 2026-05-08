@@ -3029,13 +3029,6 @@ function showTitleMenuPopupNow(entry: TitleMenuPopupEntry): void {
   entry.popup.setVisible(true)
   entry.popup.webContents.focus()
   entry.isOpen = true
-  // Notify the title bar so it can suspend its `-webkit-app-region: drag`
-  // while the popup is open. Otherwise clicks on the title bar's empty
-  // (drag) area are consumed by the OS for window dragging and never
-  // reach the title-bar webContents, leaving the popup stuck open.
-  if (!entry.titleBarSender.isDestroyed()) {
-    entry.titleBarSender.send('comfy-titlebar:menu-opened', { menu: entry.kind })
-  }
 }
 
 function openTitleMenuPopup(opts: {
