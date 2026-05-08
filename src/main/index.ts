@@ -2740,6 +2740,18 @@ interface TitleMenuPopupEntry {
    *  to visible. The timer is the fallback that shows anyway after
    *  a short window (in case the renderer is unusually slow). */
   pendingShowTimer: NodeJS.Timeout | null
+  /** JSON of the most recently sent `comfy-titlemenu:set-config`
+   *  payload — used to compare against the next open's config to skip
+   *  the renderer roundtrip when the DOM is already correct. */
+  lastConfigJson: string | null
+  /** JSON of the config the renderer has acked via
+   *  `comfy-titlemenu:rendered`. When equal to the next open's
+   *  config, the popup view's DOM matches what we want to show, so
+   *  we can `setVisible(true)` immediately without resending the
+   *  config or waiting for an ack — saves one frame + two IPC hops
+   *  per open (the common case for repeated opens of the same menu
+   *  in the same window). */
+  lastSyncedConfigJson: string | null
 }
 
 /** Active popup keyed by parent BrowserWindow id (one popup per parent,
@@ -2883,6 +2895,8 @@ function ensureTitleMenuPopup(parent: BrowserWindow): TitleMenuPopupEntry {
     pendingConfig: null,
     isOpen: false,
     pendingShowTimer: null,
+    lastConfigJson: null,
+    lastSyncedConfigJson: null,
   }
   titleMenuPopupsByParent.set(entry.parentWindowId, entry)
   titleMenuPopupsByWebContents.set(entry.popupWebContentsId, entry)
@@ -3070,6 +3084,22 @@ function openTitleMenuPopup(opts: {
     entry.pendingShowTimer = null
   }
   const config: TitleMenuPopupConfig = { kind: opts.kind, items: opts.items, theme: opts.theme }
+  const configJson = JSON.stringify(config)
+
+  // Fast path: the renderer's DOM already matches the config we want
+  // to show (e.g. repeat open of the same menu with no item / theme
+  // changes). Skip the set-config IPC + render-ack roundtrip and show
+  // immediately — eliminates ~1 frame + 2 IPC hops of perceived
+  // open latency on the common case.
+  if (
+    entry.lastSyncedConfigJson === configJson
+    && !entry.popup.webContents.isDestroyed()
+  ) {
+    showTitleMenuPopupNow(entry)
+    return
+  }
+
+  entry.lastConfigJson = configJson
   if (entry.rendererReady && !entry.popup.webContents.isDestroyed()) {
     entry.popup.webContents.send('comfy-titlemenu:set-config', config)
   } else {
@@ -3151,6 +3181,7 @@ ipcMain.on('comfy-titlemenu:ready', (event) => {
   if (!entry) return
   entry.rendererReady = true
   if (entry.pendingConfig && !entry.popup.webContents.isDestroyed()) {
+    entry.lastConfigJson = JSON.stringify(entry.pendingConfig)
     entry.popup.webContents.send('comfy-titlemenu:set-config', entry.pendingConfig)
     entry.pendingConfig = null
   }
@@ -3162,6 +3193,10 @@ ipcMain.on('comfy-titlemenu:ready', (event) => {
 ipcMain.on('comfy-titlemenu:rendered', (event) => {
   const entry = titleMenuPopupsByWebContents.get(event.sender.id)
   if (!entry) return
+  // Mark the renderer in sync with the most recently sent config so
+  // the next open of the same content can take the fast path in
+  // `openTitleMenuPopup`.
+  entry.lastSyncedConfigJson = entry.lastConfigJson
   if (entry.pendingShowTimer === null) return
   showTitleMenuPopupNow(entry)
 })
