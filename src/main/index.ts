@@ -1838,16 +1838,12 @@ function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts): boolea
       reloadComfy()
       return
     }
-    // Restore Ctrl/Cmd + =/+ /- /0 zoom shortcuts on the comfy WebContentsView.
-    // Pre-#414 ComfyUI loaded directly into BrowserWindow.webContents, where
-    // Chromium handled these natively. Now ComfyUI lives in a child
-    // WebContentsView, and after `installAppMenu` strips the default menu
-    // (Windows/Linux) or omits the View > Zoom roles (macOS) there is no
-    // accelerator path left. We re-bind them explicitly, scoped to
-    // `comfyContents` so the title bar and panel views are unaffected.
-    // Step 0.5 mirrors Electron's standard zoomLevel granularity
-    // (~91%/110%/122%/...); clamp matches Chromium's 25%–500% range.
-    if (mod && (input.key === '=' || input.key === '+' || input.key === '-' || input.key === '0')) {
+    // Restore Ctrl/Cmd + =/+/-/0 zoom on the comfy WebContentsView. The default
+    // accelerators target BrowserWindow.webContents (empty since #414) and the
+    // app menu has no View > Zoom roles, so we wire it explicitly here. Step
+    // 0.5 mirrors Electron's standard zoomLevel granularity (~91% / 110% / ...).
+    // Exclude Alt to avoid AltGr / Ctrl+Alt collisions on non-US layouts.
+    if (mod && !input.alt && (input.key === '=' || input.key === '+' || input.key === '-' || input.key === '0')) {
       e.preventDefault()
       if (comfyContents.isDestroyed()) return
       if (input.key === '0') {
@@ -1855,8 +1851,7 @@ function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts): boolea
         return
       }
       const step = input.key === '-' ? -0.5 : 0.5
-      const next = Math.max(-3, Math.min(3, comfyContents.getZoomLevel() + step))
-      comfyContents.setZoomLevel(next)
+      comfyContents.setZoomLevel(comfyContents.getZoomLevel() + step)
     }
   }
   comfyContents.on('before-input-event', onBeforeInputEvent)
