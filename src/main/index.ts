@@ -1843,6 +1843,15 @@ function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts): boolea
     // app menu has no View > Zoom roles, so we wire it explicitly here. Step
     // 0.5 mirrors Electron's standard zoomLevel granularity (~91% / 110% / ...).
     // Exclude Alt to avoid AltGr / Ctrl+Alt collisions on non-US layouts.
+    //
+    // NOTE on view hot-swapping: this handler closes over `comfyContents`
+    // captured at attach time. Today, comfyView swaps happen only before
+    // attachInstall runs, so the listener always lives on the active view and
+    // `_installCleanup` removes it symmetrically. If we later hot-swap
+    // entry.comfyView mid-attach (e.g. to reuse a host window without tearing
+    // down install state), this binding goes stale and zoom shortcuts will
+    // silently stop working until the next attach. The Reset Zoom menu item
+    // re-reads parentEntry.comfyView at click time, so it stays correct.
     if (mod && !input.alt && (input.key === '=' || input.key === '+' || input.key === '-' || input.key === '0')) {
       e.preventDefault()
       if (comfyContents.isDestroyed()) return
