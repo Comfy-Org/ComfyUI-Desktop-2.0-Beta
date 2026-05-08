@@ -3,18 +3,18 @@ import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { Check } from 'lucide-vue-next'
 
 /**
- * Title-menu popup (Phase 3 §14).
+ * Title-menu popup.
  *
- * Frameless transparent child BrowserWindow that hosts the File / Install
- * dropdowns rendered as HTML — replaces the previous native `Menu.popup()`
- * flow so we get free OS shadows, theme-matched chrome, and no clipping
- * by the title-bar WebContentsView's bounds.
+ * Hosts the File / Install dropdowns rendered as HTML inside a
+ * transparent `WebContentsView` attached to the host window — replaces
+ * the previous native `Menu.popup()` flow so we get theme-matched
+ * chrome and no clipping by the title-bar WebContentsView's bounds.
  *
- * The popup window is reused across opens (created once per parent
+ * The popup view is reused across opens (created once per parent
  * window, hidden between uses) so opening feels instant after the first
  * paint. Each open arrives as a `comfy-titlemenu:set-config` IPC carrying
  * kind / items / theme — the renderer re-renders before main shows the
- * window.
+ * view.
  */
 
 interface MenuItem {
@@ -83,8 +83,8 @@ onMounted(() => {
     themeBg.value = cfg.theme.bg
     themeText.value = cfg.theme.text
     // Ack after Vue has flushed the DOM update *and* the browser has
-    // had a chance to paint it. Main holds opacity at 0 until this
-    // ack arrives so the user never sees a frame of the previous
+    // had a chance to paint it. Main keeps the popup view hidden until
+    // this ack arrives so the user never sees a frame of the previous
     // open's content on a new open.
     void nextTick(() => {
       requestAnimationFrame(() => {
@@ -139,10 +139,11 @@ onUnmounted(() => {
   background: transparent !important;
 }
 
-/* The popup BrowserWindow is transparent + frameless. The .popup div is
-   the visible card — solid surface fill, rounded corners, subtle border
-   so it reads as a card not as floating text. The transparent gutter
-   around it lets the OS-level shadow extend past the rounded corners. */
+/* The popup view's background is transparent (set on <html>/<body>/#app
+   via the :global rules above plus `setBackgroundColor('#00000000')` on
+   the WebContentsView in main). The .popup div is the visible card —
+   solid surface fill, rounded corners, subtle border so it reads as a
+   card not as floating text. */
 .popup {
   margin: 0;
   border: 1px solid var(--border, #494a50);
@@ -150,10 +151,6 @@ onUnmounted(() => {
   font: 12px/1 var(--font-sans, 'Inter', system-ui, sans-serif);
   user-select: none;
   overflow: hidden;
-  /* Visible card fills the available client area; the OS shadow
-     handles the elevation. The body element itself stays transparent
-     (set on <html>/<body> via the global stylesheet defaults — main
-     creates the BrowserWindow with `transparent: true`). */
   height: 100%;
   width: 100%;
   box-sizing: border-box;
