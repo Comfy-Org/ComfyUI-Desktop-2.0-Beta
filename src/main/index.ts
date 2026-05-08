@@ -1855,6 +1855,31 @@ function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts): boolea
     if (input.key === 'F5' || (input.key.toLowerCase() === 'r' && mod)) {
       e.preventDefault()
       reloadComfy()
+      return
+    }
+    // Restore Ctrl/Cmd + =/+/-/0 zoom on the comfy WebContentsView. The default
+    // accelerators target BrowserWindow.webContents (empty since #414) and the
+    // app menu has no View > Zoom roles, so we wire it explicitly here. Step
+    // 0.5 mirrors Electron's standard zoomLevel granularity (~91% / 110% / ...).
+    // Exclude Alt to avoid AltGr / Ctrl+Alt collisions on non-US layouts.
+    //
+    // NOTE on view hot-swapping: this handler closes over `comfyContents`
+    // captured at attach time. Today, comfyView swaps happen only before
+    // attachInstall runs, so the listener always lives on the active view and
+    // `_installCleanup` removes it symmetrically. If we later hot-swap
+    // entry.comfyView mid-attach (e.g. to reuse a host window without tearing
+    // down install state), this binding goes stale and zoom shortcuts will
+    // silently stop working until the next attach. The Reset Zoom menu item
+    // re-reads parentEntry.comfyView at click time, so it stays correct.
+    if (mod && !input.alt && (input.key === '=' || input.key === '+' || input.key === '-' || input.key === '0')) {
+      e.preventDefault()
+      if (comfyContents.isDestroyed()) return
+      if (input.key === '0') {
+        comfyContents.setZoomLevel(0)
+        return
+      }
+      const step = input.key === '-' ? -0.5 : 0.5
+      comfyContents.setZoomLevel(comfyContents.getZoomLevel() + step)
     }
   }
   comfyContents.on('before-input-event', onBeforeInputEvent)
@@ -2863,6 +2888,18 @@ function buildTitleMenuItems(entry: ComfyWindowEntry): TitleMenuItem[] {
   if (entry.installationId !== null) {
     items.push({ id: 'return-to-dashboard', label: 'Return to Dashboard' })
   }
+  // Reset Zoom — discoverable recovery path for users who zoom the Comfy
+  // view too far to read. Only surfaced when zoom is actually non-default,
+  // and the label includes the current percent so the menu also doubles
+  // as a status indicator. The Ctrl/Cmd + 0 shortcut wired in `onLaunch`
+  // does the same thing for users who know it.
+  if (!entry.comfyView.webContents.isDestroyed()) {
+    const level = entry.comfyView.webContents.getZoomLevel()
+    if (level !== 0) {
+      const percent = Math.round(Math.pow(1.2, level) * 100)
+      items.push({ id: 'reset-zoom', label: `Reset Zoom (${percent}%)` })
+    }
+  }
   items.push({ id: 'close-all-windows', label: 'Close All Windows' })
   return items
 }
@@ -3196,6 +3233,14 @@ function activateTitleMenuItem(entry: TitleMenuPopupEntry, id: string): void {
     // via `comfy-window:click-feedback`; `source` distinguishes the
     // two entry points in the telemetry payload.
     triggerOpenFeedback(entry.parentEntryId, 'menu')
+  }
+  else if (id === 'reset-zoom') {
+    // Pair to the Ctrl/Cmd + 0 shortcut wired in `onLaunch`. The menu
+    // entry is only built when zoom is non-zero (see `buildTitleMenuItems`),
+    // so this always corresponds to a visible state change.
+    if (parentEntry && !parentEntry.comfyView.webContents.isDestroyed()) {
+      parentEntry.comfyView.webContents.setZoomLevel(0)
+    }
   }
   else if (id === 'new-install' || id === 'track' || id === 'load-snapshot' || id === 'quick-install') {
     // Install-creation / import flows are chooser-host-only.
