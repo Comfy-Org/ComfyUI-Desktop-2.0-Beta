@@ -249,8 +249,80 @@ export function onUpdateStateChanged(cb: (state: AppUpdateState) => void): () =>
   }
 }
 
+/**
+ * Issue #523 — dev-only hook for forcing the title-bar app-update
+ * pill into a deterministic state without waiting for the real
+ * todesktop event stream. Used by reviewers to QA the "Desktop
+ * Update Available" / "Desktop Update Ready" pill (and the modal
+ * surfacing fix from this issue) before merge — production builds
+ * never see this code path.
+ *
+ * Two entry points feed into this single helper:
+ *
+ *   1. The `DESKTOP2_DEBUG_UPDATE_STATE` env var, read once at
+ *      `register()`. Set to `'ready'` or `'available'` to seed the
+ *      state ~2s after startup; the broadcast pipeline pushes the
+ *      pill state to every title bar via the regular
+ *      `comfy-titlebar:app-update-state-changed` channel.
+ *
+ *   2. The `app-update:debug-set-state` IPC, available to any
+ *      renderer in dev mode. Call from the panel devtools console:
+ *
+ *        window.api.debugSetAppUpdateState({ kind: 'ready', version: '99.99.99', autoUpdate: true })
+ *
+ *      Pass `{ kind: null, version: null, autoUpdate: true }` to
+ *      clear the pill.
+ *
+ * Production guard: `app.isPackaged && !ELECTRON_RENDERER_URL` short-
+ * circuits both entry points so a packaged build can never seed a
+ * fake update state. The IPC handler is still registered (it's
+ * cheap, and registering conditionally would fork the
+ * production/dev surface for no benefit) but its body returns
+ * immediately when the dev gate is closed.
+ */
+function isDevModeForDebugUpdater(): boolean {
+  // ELECTRON_RENDERER_URL is set by electron-vite dev. !app.isPackaged
+  // covers the rarer "dev build run via `electron .`" case. Either is
+  // sufficient to enable the debug surface.
+  return !app.isPackaged || !!process.env['ELECTRON_RENDERER_URL']
+}
+
+export function debugSetAppUpdateState(state: AppUpdateState): void {
+  if (!isDevModeForDebugUpdater()) return
+  // Normalise — accept the raw payload but enforce the shape so a
+  // typo from the devtools console can't crash the title-bar
+  // renderer. `kind` is the discriminant; everything else is
+  // optional with sensible defaults.
+  const kind = state?.kind === 'available' || state?.kind === 'ready' ? state.kind : null
+  const version = typeof state?.version === 'string' && state.version ? state.version : null
+  const autoUpdate = typeof state?.autoUpdate === 'boolean' ? state.autoUpdate : isAutoInstallEnabled()
+  _setUpdateState({ kind, version, autoUpdate })
+}
+
 export function register(): void {
   bindUpdaterEvents()
+
+  ipcMain.handle(
+    'app-update:debug-set-state',
+    (_event, payload: AppUpdateState) => {
+      debugSetAppUpdateState(payload)
+    },
+  )
+
+  // Issue #523 — env-var seed for the debug pill state. Fires on the
+  // same 2s timer as the regular auto-check so the broadcast pipeline
+  // is up by the time it lands. No-op in production builds via the
+  // `isDevModeForDebugUpdater` gate inside `debugSetAppUpdateState`.
+  const envSeed = process.env['DESKTOP2_DEBUG_UPDATE_STATE']
+  if (envSeed === 'ready' || envSeed === 'available') {
+    setTimeout(() => {
+      debugSetAppUpdateState({
+        kind: envSeed,
+        version: process.env['DESKTOP2_DEBUG_UPDATE_VERSION'] || '99.99.99',
+        autoUpdate: isAutoInstallEnabled(),
+      })
+    }, 2000)
+  }
 
   ipcMain.handle('check-for-update', async () => {
     try {

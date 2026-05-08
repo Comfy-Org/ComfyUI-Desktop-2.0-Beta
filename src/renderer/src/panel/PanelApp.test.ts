@@ -262,7 +262,8 @@ function installMockApi(initial?: {
     installUpdate: state.installUpdate,
     downloadUpdate: state.downloadUpdate,
     setFirstUseMode: vi.fn(),
-    setOverlayActive: vi.fn(),
+    setOverlayLayout: vi.fn(),
+    debugSetAppUpdateState: vi.fn(),
     closeCurrentPanel: vi.fn(),
     onFirstUseSkip: vi.fn((cb: () => void) => {
       state.firstUseSkipCallbacks.push(cb)
@@ -326,8 +327,8 @@ function installMockApi(initial?: {
 /**
  * Track mounted wrappers so `afterEach` can unmount them — without
  * this every PanelApp from a prior test stays alive in the module and
- * its watchers (notably the issue #523 overlay-active watcher) keep
- * firing against the *current* test's `window.api.setOverlayActive`
+ * its watchers (notably the issue #523 overlay-layout watcher) keep
+ * firing against the *current* test's `window.api.setOverlayLayout`
  * mock when shared module state (e.g. `useOverlay().current`) is
  * reset in `beforeEach`.
  */
@@ -882,77 +883,90 @@ describe('PanelApp', () => {
   })
 
   // ---------------------------------------------------------------------------
-  // Issue #523 — overlay-active watcher.
+  // Issue #523 — overlay-layout watcher.
   //
-  // PanelApp watches `currentOverlay !== null || modal.state.visible`
-  // and pushes the result to main via `window.api.setOverlayActive`.
-  // Main flips `entry.overlayMounted` and re-runs `layoutViews()` so
-  // the panelView surface lifts onto the comfy view (otherwise the
-  // popover/modal mounts on a panel that's collapsed to 0×0 under
-  // the `'comfy'` body mode and the user sees nothing).
+  // PanelApp maps the active overlay kind (and `useModal` visibility)
+  // to one of three layouts and pushes each transition to main via
+  // `window.api.setOverlayLayout`:
+  //
+  //   - downloads overlay         → 'drawer' (panel surface stays
+  //                                 transparent so comfyView shows
+  //                                 through underneath)
+  //   - any other overlay / modal → 'modal'  (panel surface eclipses
+  //                                 comfyView)
+  //   - nothing mounted           → null     (panel collapses;
+  //                                 comfyView fills body)
+  //
+  // Main writes `entry.overlayLayout` and re-runs `layoutViews()` so
+  // the panelView surface is positioned correctly. Drawer mode is
+  // what keeps the downloads tray from blanking the entire ComfyUI
+  // view (the bug `#523` originally surfaced as a "ComfyUI disappears
+  // when downloads opens" report).
   // ---------------------------------------------------------------------------
-  it('pushes setOverlayActive(true) when an overlay opens and (false) when it closes', async () => {
+  it("pushes setOverlayLayout('drawer') for the downloads overlay and (null) when it closes", async () => {
     mountPanel()
     await flushPromises()
     expect(mockState).toBeDefined()
-    const setOverlayActive = (window.api as { setOverlayActive: ReturnType<typeof vi.fn> })
-      .setOverlayActive
+    const setOverlayLayout = (window.api as { setOverlayLayout: ReturnType<typeof vi.fn> })
+      .setOverlayLayout
     // Initial mount: watcher only fires on change, so no IPC yet.
-    expect(setOverlayActive).not.toHaveBeenCalled()
+    expect(setOverlayLayout).not.toHaveBeenCalled()
 
     // Mount the downloads popover via the same path the title-bar
     // tray click uses.
     mockState.panelTriggerOverlayCallbacks.forEach((cb) => cb({ kind: 'downloads' }))
     await flushPromises()
-    expect(setOverlayActive).toHaveBeenLastCalledWith(true)
+    expect(setOverlayLayout).toHaveBeenLastCalledWith('drawer')
 
     // Close the overlay (renderer-internal close path used by the
     // popover's own close handler).
     useOverlay().current.value = null
     await flushPromises()
-    expect(setOverlayActive).toHaveBeenLastCalledWith(false)
+    expect(setOverlayLayout).toHaveBeenLastCalledWith(null)
   })
 
-  it('pushes setOverlayActive(true) when a useModal-driven modal opens and (false) when it closes', async () => {
+  it("pushes setOverlayLayout('modal') when a useModal-driven modal opens and (null) when it closes", async () => {
     mountPanel()
     await flushPromises()
-    const setOverlayActive = (window.api as { setOverlayActive: ReturnType<typeof vi.fn> })
-      .setOverlayActive
-    expect(setOverlayActive).not.toHaveBeenCalled()
+    const setOverlayLayout = (window.api as { setOverlayLayout: ReturnType<typeof vi.fn> })
+      .setOverlayLayout
+    expect(setOverlayLayout).not.toHaveBeenCalled()
 
     // Simulate the global `<ModalDialog />` becoming visible (e.g.
     // the Desktop Update confirm modal the title-bar app-update pill
     // click pops via `useModal.confirm`).
     mockModal.state.visible = true
     await flushPromises()
-    expect(setOverlayActive).toHaveBeenLastCalledWith(true)
+    expect(setOverlayLayout).toHaveBeenLastCalledWith('modal')
 
     mockModal.state.visible = false
     await flushPromises()
-    expect(setOverlayActive).toHaveBeenLastCalledWith(false)
+    expect(setOverlayLayout).toHaveBeenLastCalledWith(null)
   })
 
-  it('does not redundantly push setOverlayActive when only the overlay kind changes', async () => {
+  it("transitions setOverlayLayout when swapping between drawer and modal overlay kinds", async () => {
     mountPanel()
     await flushPromises()
-    const setOverlayActive = (window.api as { setOverlayActive: ReturnType<typeof vi.fn> })
-      .setOverlayActive
+    const setOverlayLayout = (window.api as { setOverlayLayout: ReturnType<typeof vi.fn> })
+      .setOverlayLayout
 
     mockState.panelTriggerOverlayCallbacks.forEach((cb) => cb({ kind: 'downloads' }))
     await flushPromises()
-    expect(setOverlayActive).toHaveBeenCalledTimes(1)
-    expect(setOverlayActive).toHaveBeenLastCalledWith(true)
+    expect(setOverlayLayout).toHaveBeenCalledTimes(1)
+    expect(setOverlayLayout).toHaveBeenLastCalledWith('drawer')
 
-    // Replacing one Tier 1 overlay with another keeps `current.value`
-    // non-null the entire time — main shouldn't be re-told the panel
-    // is "now active" mid-transition.
+    // Replacing the downloads (drawer) overlay with the unified
+    // Settings modal (modal) — different layout buckets, so main
+    // should hear about the swap so it can collapse the comfy view
+    // for the new modal surface.
     useOverlay().current.value = {
       kind: 'settings',
       installation: null,
       initialTab: 'global',
     }
     await flushPromises()
-    expect(setOverlayActive).toHaveBeenCalledTimes(1)
+    expect(setOverlayLayout).toHaveBeenCalledTimes(2)
+    expect(setOverlayLayout).toHaveBeenLastCalledWith('modal')
   })
 
   it('ignores install-update events whose installationId does not match the host', async () => {

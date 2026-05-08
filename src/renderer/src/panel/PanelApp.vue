@@ -184,21 +184,51 @@ const { current: currentOverlay, openOverlay, closeOverlay } = useOverlay()
 const modal = useModal()
 
 /**
- * Issue #523 — push the panel renderer's "is an overlay or modal
- * mounted right now?" state to main on every edge. Main flips
- * `entry.overlayMounted` and re-runs `layoutViews()` so the panel
- * surface lifts onto the comfy view while a popover/modal is up
- * (otherwise the panelView is collapsed to 0×0 + setVisible(false)
- * under the `'comfy'` body mode and the user sees nothing). The
- * watcher fires only on actual change — initial mount keeps the
- * `false` default already set by main on entry construction.
+ * Issue #523 — derive the layout the panel WebContentsView should
+ * adopt while a panel-renderer overlay/modal is mounted, and push
+ * each transition to main:
+ *
+ *   - `null`     — no overlay/modal mounted; panel collapses (under
+ *                  `'comfy'` body) so the live ComfyUI view fills
+ *                  the body. Initial state — main also defaults to
+ *                  `null` on entry construction so the first push
+ *                  only fires on actual change.
+ *   - `'modal'`  — full-surface modal. Main lifts the panel to the
+ *                  full body rect and collapses the comfy view so
+ *                  the modal owns the surface. Used by SettingsModal,
+ *                  Desktop Update confirm modal, ProgressModal, every
+ *                  Tier 3 takeover, and any `useModal` confirm.
+ *   - `'drawer'` — anchored popover. Main lifts the panel on top of
+ *                  the comfy view but leaves it visible underneath;
+ *                  this renderer paints `.panel-shell` transparent
+ *                  (via `is-drawer`) so only the popover is opaque.
+ *                  Currently used only by the downloads tray —
+ *                  matches the visual model of the title-bar dropdown
+ *                  rather than blanking out the entire ComfyUI view.
+ *
+ * The downloads-tray-backdrop element rendered below in drawer mode
+ * captures click-away dismissal — clicking anywhere outside the
+ * popover's opaque rect closes the overlay (mirrors how titlebar
+ * dropdowns dismiss on outside click).
  */
-watch(
-  () => currentOverlay.value !== null || modal.state.visible,
-  (active) => {
-    window.api.setOverlayActive(active)
-  },
-)
+const overlayLayout = computed<'modal' | 'drawer' | null>(() => {
+  if (currentOverlay.value?.kind === 'downloads') return 'drawer'
+  if (currentOverlay.value !== null) return 'modal'
+  if (modal.state.visible) return 'modal'
+  return null
+})
+
+watch(overlayLayout, (layout) => {
+  window.api.setOverlayLayout(layout)
+  // Issue #523 — `body` carries the document's opaque `var(--bg)`
+  // background (see main.css). In drawer mode the panel surface
+  // needs to be fully transparent so the underlying comfyView shows
+  // through; toggling this class lets the global selector below
+  // override the body background without leaking into modal modes.
+  if (typeof document !== 'undefined') {
+    document.body.classList.toggle('panel-drawer-active', layout === 'drawer')
+  }
+})
 
 // installationStore.fetchInstallations() is wired to onInstallationsChanged
 // inside the store itself, so the panel just needs to read from it.
@@ -1127,7 +1157,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="panel-shell">
+  <div class="panel-shell" :class="{ 'is-drawer': overlayLayout === 'drawer' }">
     <main class="panel-content">
       <div v-if="activePanel === 'comfy-lifecycle'" class="panel-comfy-lifecycle">
         <ComfyLifecycleView
@@ -1162,13 +1192,24 @@ onUnmounted(() => {
          title-bar tray. Reads its data from the shared `downloadStore`
          (same source the legacy `DownloadsPanel` consumes) so the
          tray and any other downloads surface never disagree.
-         Click-away dismissal uses `dismissTakeoverDirect` — closing
-         the popover only hides the overlay; downloads keep running
-         and the next broadcast repaints if the user reopens. -->
-    <DownloadsTrayPopover
+
+         Issue #523 — wrapped in a transparent backdrop so click-away
+         outside the popover's opaque rect dismisses it (matches the
+         visual model of the title-bar dropdown). The backdrop is the
+         outermost click target; `@click.self` ensures clicks bubbling
+         from the popover itself don't dismiss. The popover is
+         `position: fixed` so the backdrop's transparent body doesn't
+         affect its placement. The drawer-mode panel layout (set by
+         the `overlayLayout` watcher above) keeps comfyView visible
+         underneath this transparent surface, so the user sees the
+         popover floating over the live ComfyUI view. -->
+    <div
       v-if="currentOverlay?.kind === 'downloads'"
-      @close="dismissTakeoverDirect"
-    />
+      class="downloads-tray-backdrop"
+      @click.self="dismissTakeoverDirect"
+    >
+      <DownloadsTrayPopover @close="dismissTakeoverDirect" />
+    </div>
     <!-- Tier 1 unified Settings modal — replaces the legacy split
          between Install Settings (DetailModal manage), Directories,
          and App Settings. Mounted with `installation` carried by the
@@ -1258,6 +1299,33 @@ onUnmounted(() => {
   overflow: hidden;
 }
 
+/* Issue #523 — drawer-mode panel surface (downloads tray). The panel
+ * WebContentsView is positioned on top of comfyView at the full body
+ * rect by main; making the shell transparent here is what lets the
+ * live ComfyUI view show through everywhere except the popover's
+ * opaque `var(--surface)` rect. The panel-content gutter would also
+ * paint over the comfy frame if left visible, so it's hidden too —
+ * the drawer overlay slot below renders the popover absolutely
+ * (`position: fixed`) so the empty content area doesn't matter. */
+.panel-shell.is-drawer {
+  background: transparent;
+}
+.panel-shell.is-drawer .panel-content {
+  visibility: hidden;
+}
+
+/* Issue #523 — click-away backdrop for the drawer-mode downloads
+ * popover. Covers the full panel surface so any click outside the
+ * popover (which sits at z-index 1000 in DownloadsTrayPopover)
+ * dismisses the overlay via `@click.self` in the template. Stays
+ * transparent so comfyView remains visible underneath. */
+.downloads-tray-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 999;
+  background: transparent;
+}
+
 .panel-content {
   flex: 1;
   min-height: 0;
@@ -1300,5 +1368,19 @@ onUnmounted(() => {
   border-radius: 4px;
   padding: 2px 6px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+</style>
+
+<!-- Issue #523 — non-scoped block so the selector reaches the
+     document `body` (toggled by the `overlayLayout` watcher in
+     `<script setup>`). In drawer mode the body's default opaque
+     `var(--bg)` background would otherwise paint over the panel
+     WebContentsView's transparent surface and prevent the
+     underlying comfyView from showing through. Scoped to a class
+     toggled only while drawer mode is active so modal-mode panels
+     keep their normal opaque background. -->
+<style>
+body.panel-drawer-active {
+  background: transparent !important;
 }
 </style>

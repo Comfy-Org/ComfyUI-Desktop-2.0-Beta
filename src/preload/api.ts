@@ -83,8 +83,11 @@ export function buildElectronApi(): ElectronApi {
       ipcRenderer.send('comfy-window:close-current-panel'),
     setFirstUseMode: (mode: 'none' | 'consent-lockdown' | 'post-consent') =>
       ipcRenderer.send('comfy-window:set-first-use-mode', { mode }),
-    setOverlayActive: (active: boolean) =>
-      ipcRenderer.send('comfy-panel:set-overlay-active', { active: !!active }),
+    setOverlayLayout: (layout: 'modal' | 'drawer' | null) => {
+      const value: 'modal' | 'drawer' | null =
+        layout === 'modal' || layout === 'drawer' ? layout : null
+      ipcRenderer.send('comfy-panel:set-overlay-layout', { layout: value })
+    },
     onFirstUseSkip: (callback) => {
       const handler = (): void => callback()
       ipcRenderer.on('comfy-panel:first-use-skip', handler)
@@ -189,6 +192,15 @@ export function buildElectronApi(): ElectronApi {
     downloadUpdate: () => ipcRenderer.invoke('download-update'),
     installUpdate: () => ipcRenderer.invoke('install-update'),
     getUpdateCapabilities: () => ipcRenderer.invoke('get-update-capabilities'),
+    /** Issue #523 — dev-only forcing of the title-bar app-update pill
+     *  state. The main-side handler is gated behind a dev-mode check
+     *  (`!app.isPackaged || ELECTRON_RENDERER_URL`); production builds
+     *  receive the IPC but no-op. Reviewers can drive the pill into
+     *  `'ready'` / `'available'` from the panel devtools console to
+     *  QA the modal-surfacing fix without waiting for a real
+     *  todesktop event. See `updater.ts` for the matching helper. */
+    debugSetAppUpdateState: (state) =>
+      ipcRenderer.invoke('app-update:debug-set-state', state),
 
     // Event listeners (return unsubscribe functions)
     onInstallProgress: (callback) => {

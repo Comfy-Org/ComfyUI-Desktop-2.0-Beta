@@ -323,21 +323,39 @@ interface ComfyWindowEntry {
    */
   firstUseMode: 'none' | 'consent-lockdown' | 'post-consent'
   /**
-   * Issue #523 — `true` while the panel renderer has at least one
-   * overlay (Tier 1/2/3 via `useOverlay`) or modal (`useModal`)
-   * mounted on a Comfy host whose body mode is `'comfy'`. The panel
-   * normally collapses to 0×0 + setVisible(false) under `'comfy'` so
-   * the live ComfyUI surface fills the body; with this flag set
-   * `layoutViews` lifts the panel back to the full body rect on top
-   * of the comfy view so the popover/modal is actually visible.
+   * Issue #523 — current panel-renderer overlay/modal layout the
+   * panel surface should adopt when the host's body mode is
+   * `'comfy'`.
    *
-   * Toggled by the `comfy-panel:set-overlay-active` IPC the panel
-   * renderer fires from a watcher on `currentOverlay !== null ||
-   * modal.state.visible`. No-op for install-less hosts (their body
-   * mode never resolves to `'comfy'` in the first place — the Comfy
-   * pill maps to `'chooser'`).
+   *   - `null`     — no overlay/modal mounted in the panel renderer.
+   *                  `layoutViews` collapses the panelView to 0×0 so
+   *                  the live ComfyUI surface fills the body.
+   *   - `'modal'`  — panel renderer has a full-surface modal mounted
+   *                  (SettingsModal, Desktop Update confirm modal,
+   *                  ProgressModal, Tier 3 takeovers). `layoutViews`
+   *                  lifts the panel to the full body rect AND
+   *                  collapses comfyView so the modal owns the
+   *                  surface — the modal expects to be the focused
+   *                  affordance and we don't want ComfyUI flickering
+   *                  through.
+   *   - `'drawer'` — panel renderer has a lightweight, anchored
+   *                  popover mounted (downloads tray). `layoutViews`
+   *                  lifts the panelView on top of comfyView at the
+   *                  full body rect (so the popover can render)
+   *                  while leaving comfyView visible underneath. The
+   *                  panel renderer paints `.panel-shell` transparent
+   *                  in this mode (with the popover keeping its
+   *                  opaque `var(--surface)`) so the user sees the
+   *                  popover floating over the live ComfyUI view —
+   *                  visually the same as the title-bar dropdown.
+   *
+   * Toggled by the `comfy-panel:set-overlay-layout` IPC the panel
+   * renderer fires from a watcher that maps the active overlay kind
+   * (and modal visibility) to one of the three values. No-op for
+   * install-less hosts (their body mode never resolves to `'comfy'`
+   * in the first place — the Comfy pill maps to `'chooser'`).
    */
-  overlayMounted: boolean
+  overlayLayout: 'modal' | 'drawer' | null
   /**
    * Window-mode unification (Stage W-3b) — current title-bar pill
    * label. Install-backed windows mirror the install name (and re-
@@ -490,7 +508,24 @@ function computeBodyMode(entry: ComfyWindowEntry): BodyMode {
  * issue #523's keyboard-focus regression on the overlay-only path.
  */
 function isPanelBodyVisible(entry: ComfyWindowEntry): boolean {
-  return computeBodyMode(entry) !== 'comfy' || entry.overlayMounted
+  return computeBodyMode(entry) !== 'comfy' || entry.overlayLayout !== null
+}
+
+/**
+ * True when the panel surface is up but should NOT eclipse the
+ * ComfyUI view — i.e. the panel renderer is showing a drawer-style
+ * popover (`overlayLayout === 'drawer'`) over a `'comfy'` body. In
+ * that mode `layoutViews` lifts the panel on top of comfyView (so
+ * the popover can render) AND keeps comfyView visible underneath
+ * (so the user still sees the live frontend). Other panel-visible
+ * states (any non-`'comfy'` body, or `'modal'` layout) eclipse the
+ * comfy view as before.
+ *
+ * Centralising the predicate so `layoutViews` can't drift from
+ * future callers (focus, comfy-view interactivity gates, etc.).
+ */
+function isComfyVisibleUnderPanelOverlay(entry: ComfyWindowEntry): boolean {
+  return computeBodyMode(entry) === 'comfy' && entry.overlayLayout === 'drawer'
 }
 
 /**
@@ -1276,21 +1311,40 @@ function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowResult {
     // hosts, so the install-backed visibility branch handles both.
     //
     // Issue #523 — when the body mode is `'comfy'` BUT the panel
-    // renderer has an overlay/modal mounted (`entry.overlayMounted`),
+    // renderer has an overlay/modal mounted (`entry.overlayLayout`),
     // lift the panel up to the full body rect on top of the comfy
-    // view so the popover/modal is actually visible. The comfy view
-    // stays alive but collapsed; closing the overlay flips
-    // `overlayMounted` back to false and `layoutViews` re-runs to
-    // restore the normal comfy-on-top layout. The shared
-    // `isPanelBodyVisible` predicate is reused by `focusActiveBody`
-    // to keep keyboard focus in step with the visible body.
+    // view so the popover/modal is actually visible. Two sub-modes:
+    //
+    //   - `'modal'`  collapses the comfy view (current behavior — used
+    //                by SettingsModal / Desktop Update / Tier 3
+    //                takeovers; the modal owns the surface).
+    //   - `'drawer'` keeps the comfy view at full body bounds and
+    //                visible UNDERNEATH the panel; the panel renderer
+    //                paints `.panel-shell` transparent so only the
+    //                anchored popover (DownloadsTrayPopover) is
+    //                opaque. Visually matches the title-bar dropdown.
+    //
+    // Closing the overlay flips `overlayLayout` back to `null` and
+    // `layoutViews` re-runs to restore the normal comfy-on-top
+    // layout. The shared `isPanelBodyVisible` predicate is reused by
+    // `focusActiveBody` to keep keyboard focus in step with whichever
+    // surface is on top.
     const showPanel = entry ? isPanelBodyVisible(entry) : false
+    const drawerMode = entry ? isComfyVisibleUnderPanelOverlay(entry) : false
     if (showPanel && entry?.panelView) {
       entry.panelView.setBounds(bodyRect)
       entry.panelView.setVisible(true)
-      // Keep ComfyUI alive but collapsed so it can't intercept input.
-      comfyView.setBounds({ x: 0, y: titleBarTotal, width: 0, height: 0 })
-      comfyView.setVisible(false)
+      if (drawerMode) {
+        // Drawer mode — keep ComfyUI visible at full body bounds
+        // underneath the (transparent) panel surface.
+        comfyView.setBounds(bodyRect)
+        comfyView.setVisible(true)
+      } else {
+        // Modal mode — keep ComfyUI alive but collapsed so it can't
+        // intercept input and isn't visible behind the modal chrome.
+        comfyView.setBounds({ x: 0, y: titleBarTotal, width: 0, height: 0 })
+        comfyView.setVisible(false)
+      }
     } else {
       comfyView.setBounds(bodyRect)
       comfyView.setVisible(true)
@@ -1449,7 +1503,7 @@ function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowResult {
         ? opts.comfyWebPreferences.partition
         : null,
     firstUseMode: 'none',
-    overlayMounted: false,
+    overlayLayout: null,
     titleBarText: opts.initialTitleBarText,
     sourceCategory: opts.initialSourceCategory,
     _installCleanup: null,
@@ -2356,7 +2410,13 @@ function ensurePanelView(windowKey: number, entry: ComfyWindowEntry, initialPane
       // ComfyUI frontend's storage even though it runs in the same window.
     },
   })
-  panelView.setBackgroundColor(resolveTheme() === 'dark' ? '#202020' : '#ffffff')
+  // Issue #523 — panel WebContentsView is intentionally transparent at
+  // the compositor level so the drawer-mode overlay (downloads tray)
+  // can render the panel surface as transparent CSS and let the
+  // ComfyUI WebContentsView underneath show through. The panel body
+  // CSS still paints `var(--bg)` opaque under normal modes, so this
+  // only affects pixels the page itself leaves transparent.
+  panelView.setBackgroundColor('#00000000')
   entry.window.contentView.addChildView(panelView)
   // Insert at zero size, behind the comfy view; layoutViews handles positioning.
   panelView.setBounds({ x: 0, y: TITLEBAR_HEIGHT + 1, width: 0, height: 0 })
@@ -2495,40 +2555,54 @@ ipcMain.on('comfy-window:close-current-panel', (event) => {
 })
 
 /**
- * Issue #523 — panel renderer's overlay/modal mount tracker.
+ * Issue #523 — panel renderer's overlay/modal layout tracker.
  *
- * The panel renderer (`PanelApp.vue`) runs a watcher on
- * `currentOverlay !== null || modal.state.visible` and fires this
- * IPC on every edge. Main flips `entry.overlayMounted` accordingly
- * and re-runs `layoutViews()`.
+ * The panel renderer (`PanelApp.vue`) runs a watcher that maps the
+ * active overlay kind (and `useModal` visibility) to one of three
+ * layouts and fires this IPC on every edge:
  *
- * The flag only matters when the body mode is `'comfy'` — i.e.
- * install-backed windows where ComfyUI is running and the user is
- * looking at the live frontend. In that mode `layoutViews` would
- * normally collapse the panelView to 0×0 + setVisible(false), so a
- * popover/modal mounted by the panel renderer would have no surface
- * to paint on. Setting `overlayMounted = true` lifts the panel back
- * to the full body rect on top of the comfy view; setting it
- * `false` restores the comfy-on-top layout.
+ *   - `null`     — no overlay/modal mounted.
+ *   - `'modal'`  — full-surface modal (Settings, Desktop Update,
+ *                  ProgressModal, Tier 3 takeovers). Panel surface
+ *                  eclipses comfy.
+ *   - `'drawer'` — anchored popover (downloads tray). Panel surface
+ *                  lifts on top of comfy but stays visually
+ *                  transparent so comfy shows through.
+ *
+ * Main writes `entry.overlayLayout` and re-runs `layoutViews()` so
+ * the panel surface is positioned/visible according to the rules in
+ * `layoutViews` (see comment there for the per-mode bounds /
+ * comfy-view visibility matrix).
+ *
+ * Only matters when the body mode is `'comfy'` — install-less hosts
+ * never resolve to `'comfy'` so the layout flag is effectively a
+ * no-op for them.
  *
  * Resolved via the `event.sender === entry.panelView?.webContents`
  * walk to avoid maintaining a separate reverse-map (the panelView
  * is lazily constructed; a cached map would race construction).
  */
-ipcMain.on('comfy-panel:set-overlay-active', (event, payload: { active: boolean }) => {
-  const active = !!payload?.active
-  for (const entry of comfyWindows.values()) {
-    if (entry.panelView?.webContents !== event.sender) continue
-    if (entry.overlayMounted === active) return
-    entry.overlayMounted = active
-    if (entry.window.isDestroyed()) return
-    entry.layoutViews()
-    // Hand keyboard focus to whichever body view just became visible
-    // so keystrokes don't land in the now-occluded one.
-    focusActiveBody(entry)
-    return
-  }
-})
+ipcMain.on(
+  'comfy-panel:set-overlay-layout',
+  (event, payload: { layout: 'modal' | 'drawer' | null }) => {
+    const raw = payload?.layout
+    const layout: 'modal' | 'drawer' | null =
+      raw === 'modal' || raw === 'drawer' ? raw : null
+    for (const entry of comfyWindows.values()) {
+      if (entry.panelView?.webContents !== event.sender) continue
+      if (entry.overlayLayout === layout) return
+      entry.overlayLayout = layout
+      if (entry.window.isDestroyed()) return
+      entry.layoutViews()
+      // Hand keyboard focus to whichever body view just became visible
+      // so keystrokes don't land in the now-occluded one. Drawer mode
+      // still wants focus on the panel (the popover holds it), so
+      // `isPanelBodyVisible` covers both modal and drawer cases.
+      focusActiveBody(entry)
+      return
+    }
+  },
+)
 
 /**
  * Modal-unification (Track M-2.2 / M-4) — first-use takeover step
@@ -2661,7 +2735,7 @@ ipcMain.on('comfy-window:click-app-update-pill', (event) => {
  * → Update sub-tab), so flipping the body to `'settings'` is the
  * right thing here. Compare `click-app-update-pill` /
  * `click-downloads-tray`, which only need a transient overlay/modal
- * surface and rely on `entry.overlayMounted` instead.
+ * surface and rely on `entry.overlayLayout` instead.
  *
  * The send itself goes through `triggerPanelOverlay` so the
  * destroyed-view guards and the `did-finish-load` deferral are
@@ -2722,8 +2796,11 @@ function _broadcastDownloadsToTitleBars(): void {
  * regression, see PR #508 / issue #523) and routes through
  * `triggerPanelOverlay` for the destroyed-view + did-finish-load
  * guards. The actual surfacing of the panel on top of the comfy
- * view happens via `entry.overlayMounted` once the renderer's
- * watcher fires `comfy-panel:set-overlay-active`.
+ * view happens via `entry.overlayLayout = 'drawer'` once the
+ * renderer's watcher fires `comfy-panel:set-overlay-layout` — drawer
+ * mode keeps comfy visible underneath the (transparent) panel
+ * surface so the popover hangs over a live ComfyUI view rather than
+ * a blank one.
  */
 ipcMain.on('comfy-window:click-downloads-tray', (event) => {
   const found = findEntryByTitleBarSender(event.sender)
@@ -2752,7 +2829,7 @@ ipcMain.on('comfy-window:click-downloads-tray', (event) => {
  * alongside the matching helper for `panel-trigger-overlay`. Send
  * Feedback only needs the renderer to RUN JS (it calls
  * `openExternal` for the typeform URL), so it does NOT touch
- * `entry.overlayMounted` — no panel UI is being surfaced.
+ * `entry.overlayLayout` — no panel UI is being surfaced.
  */
 function triggerOpenFeedback(entryId: number, source: 'titlebar' | 'menu'): void {
   const parentEntry = comfyWindows.get(entryId)
