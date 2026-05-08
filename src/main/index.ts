@@ -2907,11 +2907,27 @@ function ensureTitleMenuPopup(parent: BrowserWindow): TitleMenuPopupEntry {
   // Tear down with the parent. Without this, the popup would survive
   // its parent and reuse the wrong context on the next click in a
   // different window.
-  parent.once('closed', () => {
+  const onParentClosed = (): void => {
     titleMenuPopupsByParent.delete(entry.parentWindowId)
     titleMenuPopupsByWebContents.delete(entry.popupWebContentsId)
     try { parent.contentView.removeChildView(popup) } catch {}
     if (!popup.webContents.isDestroyed()) popup.webContents.close()
+  }
+  parent.once('closed', onParentClosed)
+
+  // If the popup webContents is destroyed independently (renderer
+  // crash, manual close), drop the parent-window listeners so they
+  // don't accumulate when `ensureTitleMenuPopup` constructs a fresh
+  // entry on the next open.
+  popup.webContents.once('destroyed', () => {
+    if (!parent.isDestroyed()) {
+      parent.removeListener('blur', dismissOnBlur)
+      parent.removeListener('closed', onParentClosed)
+    }
+    if (titleMenuPopupsByParent.get(entry.parentWindowId) === entry) {
+      titleMenuPopupsByParent.delete(entry.parentWindowId)
+    }
+    titleMenuPopupsByWebContents.delete(entry.popupWebContentsId)
   })
 
   return entry
@@ -2926,8 +2942,7 @@ const POPUP_RENDER_ACK_TIMEOUT_MS = 80
 
 /** Hide the popup view and re-emit the `comfy-titlebar:menu-closed`
  *  event so the title-bar renderer's 100ms `MENU_REOPEN_GUARD_MS`
- *  suppression fires (mirrors the previous `Menu.popup()` callback
- *  path).
+ *  suppression fires.
  *
  *  `releaseFocusToParent` controls whether to explicitly hand focus
  *  back to the title-bar webContents after hiding. Use it when the
@@ -2944,7 +2959,10 @@ function hideTitleMenuPopup(
   entry: TitleMenuPopupEntry,
   opts: { releaseFocusToParent?: boolean } = {},
 ): void {
-  if (!entry.isOpen) return
+  // Proceed if a show is in flight even when not yet visible — otherwise
+  // the pendingShowTimer would fire after this dismissal and pop the
+  // menu open unexpectedly.
+  if (!entry.isOpen && !entry.pendingShowTimer) return
   entry.isOpen = false
   // Cancel any in-flight render ack — if a hide arrives before the
   // ack, the popup is already on its way back to hidden and we
@@ -3054,19 +3072,19 @@ function activateTitleMenuItem(entry: TitleMenuPopupEntry, id: string): void {
   // to the front) flip this off so the parent doesn't immediately yank
   // focus back from the new target.
   let releaseFocusToParent = true
+  const parentEntry = comfyWindows.get(entry.parentEntryId)
   if (id === 'new-window') {
     openChooserHostWindow()
     releaseFocusToParent = false
   }
   else if (id === 'return-to-dashboard') {
-    // §16 — flip the install-backed host in place to chooser-host
-    // mode (Stage W-4). The same BrowserWindow stays alive; the
-    // file-menu popup is parented to it so it stays valid through
-    // the in-place swap (no popup teardown, just a body swap
-    // underneath the popup).
+    // Flip the install-backed host in place to chooser-host mode.
+    // The same BrowserWindow stays alive; the file-menu popup is
+    // parented to it so it stays valid through the in-place body
+    // swap (no popup teardown).
     void returnToDashboard(entry.parentEntryId)
   } else if (id === 'close-all-windows') {
-    // §16 — see `closeAllHostWindows` / `confirmAndCloseAllHostWindows`.
+    // See `closeAllHostWindows` / `confirmAndCloseAllHostWindows`.
     // For two or more open windows we confirm via a native dialog
     // that lists the open windows + any active operations that
     // would be cancelled. With one or zero windows the close
@@ -3074,20 +3092,16 @@ function activateTitleMenuItem(entry: TitleMenuPopupEntry, id: string): void {
     // the windows being closed; its popup is auto-destroyed, and
     // the trailing hideTitleMenuPopup is guarded against an
     // already-destroyed popup.
-    const parentEntry = comfyWindows.get(entry.parentEntryId)
     const parentWindow = parentEntry && !parentEntry.window.isDestroyed()
       ? parentEntry.window
       : null
     void confirmAndCloseAllHostWindows(parentWindow)
   } else if (id === 'settings') setActivePanel(entry.parentEntryId, 'settings')
   else if (id === 'skip-onboarding') {
-    // Modal-unification (Track M-2.2) — forward to the panel renderer
-    // so it can run the same `markFirstUseCompleted` + dismiss
-    // sequence the Cloud-branch pick uses (PanelApp owns the
-    // `firstUseCompleted` flip and the overlay close — see
-    // `handleFirstUseComplete`). Resolve the host entry the same way
-    // the close-window branches above do.
-    const parentEntry = comfyWindows.get(entry.parentEntryId)
+    // Forward to the panel renderer so it runs the same
+    // `markFirstUseCompleted` + dismiss sequence the Cloud-branch
+    // pick uses (PanelApp owns the `firstUseCompleted` flip and the
+    // overlay close — see `handleFirstUseComplete`).
     if (parentEntry?.panelView && !parentEntry.panelView.webContents.isDestroyed()) {
       parentEntry.panelView.webContents.send('comfy-panel:first-use-skip')
     }
@@ -3100,12 +3114,11 @@ function activateTitleMenuItem(entry: TitleMenuPopupEntry, id: string): void {
     triggerOpenFeedback(entry.parentEntryId, 'menu')
   }
   else if (id === 'new-install' || id === 'track' || id === 'load-snapshot' || id === 'quick-install') {
-    // Track B item 3 — install-creation / import flows are
-    // chooser-host-only. `buildTitleMenuItems` already filters them
-    // out of the install-backed file menu; this guard is the
-    // belt-and-braces so a stale popup or an out-of-order IPC
-    // can't navigate an in-Comfy host into one of these panels.
-    const parentEntry = comfyWindows.get(entry.parentEntryId)
+    // Install-creation / import flows are chooser-host-only.
+    // `buildTitleMenuItems` already filters them out of the
+    // install-backed file menu; this guard is the belt-and-braces
+    // so a stale popup or an out-of-order IPC can't navigate an
+    // in-Comfy host into one of these panels.
     if (parentEntry?.installationId === null) {
       setActivePanel(entry.parentEntryId, id)
     }
@@ -3155,11 +3168,10 @@ ipcMain.on('comfy-titlemenu:close', (event) => {
  *
  * The title bar lives in its own WebContentsView with `height: TITLEBAR_HEIGHT`,
  * so HTML popups rendered inside it would be clipped by the view's bounds.
- * Instead of the previous native `Menu.popup()` we attach a sibling
- * `WebContentsView` (see `openTitleMenuPopup` above) to the host
- * window's content view. It re-orders to the top of the view stack on
- * each open, so it paints above the title bar / comfy / panel views
- * without z-order issues.
+ * We attach a sibling `WebContentsView` (see `openTitleMenuPopup` above)
+ * to the host window's content view. It re-orders to the top of the
+ * view stack on each open, so it paints above the title bar / comfy /
+ * panel views without z-order issues.
  *
  * The renderer sends the button's bottom-left corner in title-bar-local
  * pixels; the title bar view sits at window y=0, so those coordinates

@@ -6,9 +6,9 @@ import { Check } from 'lucide-vue-next'
  * Title-menu popup.
  *
  * Hosts the File / Install dropdowns rendered as HTML inside a
- * transparent `WebContentsView` attached to the host window — replaces
- * the previous native `Menu.popup()` flow so we get theme-matched
- * chrome and no clipping by the title-bar WebContentsView's bounds.
+ * transparent `WebContentsView` attached to the host window so we get
+ * theme-matched chrome and no clipping by the title-bar
+ * WebContentsView's bounds.
  *
  * The popup view is reused across opens (created once per parent
  * window, hidden between uses) so opening feels instant after the first
