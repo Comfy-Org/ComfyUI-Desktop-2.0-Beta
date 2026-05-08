@@ -3122,6 +3122,17 @@ function openTitleMenuPopup(opts: {
 }
 
 function activateTitleMenuItem(entry: TitleMenuPopupEntry, id: string): void {
+  // Capture the click in main so the title-menu popup itself doesn't need
+  // to bootstrap Datadog RUM / PostHog Browser (it's a transient view that
+  // would mint a fresh session per open). PostHog Node captures here and
+  // forwardToRenderer relays to the title-bar Datadog RUM session for the
+  // parent host window — see `forwardToRenderer` + the relay-target
+  // registry in `lib/telemetry.ts`.
+  mainTelemetry.emit('desktop2.title_menu.item_clicked', {
+    item_id: id,
+    menu_kind: entry.kind,
+    parent_entry_id: entry.parentEntryId,
+  })
   // Default: re-focus the popup's parent on dismiss so keyboard input
   // lands somewhere sensible. Actions that hand focus to a *different*
   // window (e.g. `new-window` spawns a fresh chooser host and brings it
