@@ -67,6 +67,7 @@ interface Bridge {
   onSourceCategoryChanged: (cb: (category: string | null) => void) => () => void
   onThemeChanged: (cb: (theme: { bg: string; text: string }) => void) => () => void
   onFullscreenChanged: (cb: (fullscreen: boolean) => void) => () => void
+  onMenuOpened: (cb: (info: { menu: 'file' }) => void) => () => void
   onMenuClosed: (cb: (info: { menu: 'file' }) => void) => () => void
   /** Modal-unification (Track M-2.3) — first-use takeover step pushes
    *  from main. Drives the T&C-step lockdown that hides the waffle
@@ -401,6 +402,14 @@ const fileBtnRef = useTemplateRef<HTMLButtonElement>('fileBtn')
 const MENU_REOPEN_GUARD_MS = 100
 const menuClosedAt: Record<'file', number> = { file: 0 }
 
+/** True between `onMenuOpened` and `onMenuClosed`. Toggles
+ *  `is-menu-open` on the root, which suspends `-webkit-app-region: drag`
+ *  on the title-bar drag area. Without this, clicks on empty title-bar
+ *  space are consumed by the OS for window dragging and never reach
+ *  the title-bar webContents — so the popup webContents never blurs
+ *  and the menu stays open until the user clicks something else. */
+const isMenuOpen = ref(false)
+
 /** Anchor a native menu just below `el`'s bottom-left corner.
  *  Coordinates are in title-bar-local pixels (y is rounded down so the
  *  popup always sits flush with — never above — the button). */
@@ -422,6 +431,7 @@ let unsubTitle: (() => void) | undefined
 let unsubSourceCategory: (() => void) | undefined
 let unsubTheme: (() => void) | undefined
 let unsubFullscreen: (() => void) | undefined
+let unsubMenuOpened: (() => void) | undefined
 let unsubMenuClosed: (() => void) | undefined
 let unsubFirstUseMode: (() => void) | undefined
 let unsubAppUpdate: (() => void) | undefined
@@ -467,8 +477,12 @@ onMounted(() => {
   unsubFullscreen = bridge.onFullscreenChanged((fullscreen) => {
     isFullscreen.value = fullscreen
   })
+  unsubMenuOpened = bridge.onMenuOpened(() => {
+    isMenuOpen.value = true
+  })
   unsubMenuClosed = bridge.onMenuClosed(({ menu }) => {
     menuClosedAt[menu] = Date.now()
+    isMenuOpen.value = false
   })
   unsubFirstUseMode = bridge.onFirstUseModeChanged((mode) => {
     firstUseMode.value = mode
@@ -498,6 +512,7 @@ onUnmounted(() => {
   unsubSourceCategory?.()
   unsubTheme?.()
   unsubFullscreen?.()
+  unsubMenuOpened?.()
   unsubMenuClosed?.()
   unsubFirstUseMode?.()
   unsubAppUpdate?.()
@@ -518,6 +533,7 @@ onUnmounted(() => {
       'is-fullscreen': isFullscreen,
       'is-hover-active': isHoverActive,
       'is-consent-lockdown': isConsentLockdown,
+      'is-menu-open': isMenuOpen,
     }"
     :style="{
       background: themeBg ?? undefined,
@@ -681,6 +697,15 @@ onUnmounted(() => {
   user-select: none;
   -webkit-app-region: drag;
   gap: 8px;
+}
+
+/* While the file menu popup is open, suspend the drag region so a
+   click on the title-bar's empty space reaches the title-bar
+   webContents (focusing it blurs the popup → popup dismisses).
+   Otherwise the OS eats the click for window dragging and the popup
+   stays open. */
+.title-bar.is-menu-open {
+  -webkit-app-region: no-drag;
 }
 
 /* The container DIVs stay drag-region so empty space around the buttons

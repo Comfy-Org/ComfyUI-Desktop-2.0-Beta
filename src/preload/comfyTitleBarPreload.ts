@@ -73,6 +73,12 @@ export interface ComfyTitleBarBridge {
   onThemeChanged(cb: (theme: { bg: string; text: string }) => void): () => void
   /** Subscribe to macOS fullscreen state — drives traffic-light padding. */
   onFullscreenChanged(cb: (fullscreen: boolean) => void): () => void
+  /** Subscribe to native title-bar menu open events. Fires when the
+   *  popup created by `openFileMenu` becomes visible. The renderer
+   *  uses this to suspend the title-bar's drag region so clicks on
+   *  empty title-bar space dismiss the popup instead of being eaten
+   *  by the OS for window dragging. */
+  onMenuOpened(cb: (info: { menu: 'file' }) => void): () => void
   /** Subscribe to native title-bar menu close events. Fires when the
    *  popup created by `openFileMenu` closes, after the user picks an
    *  item or dismisses by clicking outside. The renderer uses this to
@@ -212,6 +218,14 @@ const bridge: ComfyTitleBarBridge = {
     }
     ipcRenderer.on('comfy-titlebar:fullscreen-changed', handler)
     return () => ipcRenderer.removeListener('comfy-titlebar:fullscreen-changed', handler)
+  },
+  onMenuOpened: (cb) => {
+    const handler = (_event: IpcRendererEvent, data: unknown): void => {
+      const { menu } = (data || {}) as { menu?: unknown }
+      if (menu === 'file') cb({ menu })
+    }
+    ipcRenderer.on('comfy-titlebar:menu-opened', handler)
+    return () => ipcRenderer.removeListener('comfy-titlebar:menu-opened', handler)
   },
   onMenuClosed: (cb) => {
     const handler = (_event: IpcRendererEvent, data: unknown): void => {

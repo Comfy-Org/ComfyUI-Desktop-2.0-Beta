@@ -2891,18 +2891,27 @@ function ensureTitleMenuPopup(parent: BrowserWindow): TitleMenuPopupEntry {
   // blur — focus stays in the popup webContents until we explicitly hide
   // it on item-activated, so item activations always reach main.
   //
-  // We listen on both the popup webContents (for focus moves to *another*
+  // We listen on the popup webContents (for focus moves to *another*
   // view inside the same parent window — e.g. clicking the title-bar
   // button or the comfy body) and on the parent BrowserWindow (for focus
   // moves *out* of the parent window — e.g. clicking another app or
   // another desktop window). The webContents blur alone is not reliable
   // for cross-window focus changes on macOS.
+  //
+  // The title-bar root is `-webkit-app-region: drag`, so a click on its
+  // empty area is consumed by the OS for window dragging and never
+  // reaches the title-bar webContents — neither `popup.webContents`'s
+  // blur nor `parent`'s blur fires. `will-move` / `move` cover that
+  // path: any title-bar drag dismisses the popup as soon as the window
+  // begins to move.
   const dismissOnBlur = (): void => {
-    if (!entry.isOpen) return
+    if (!entry.isOpen && !entry.pendingShowTimer) return
     hideTitleMenuPopup(entry)
   }
   popup.webContents.on('blur', dismissOnBlur)
   parent.on('blur', dismissOnBlur)
+  parent.on('will-move', dismissOnBlur)
+  parent.on('move', dismissOnBlur)
 
   // Tear down with the parent. Without this, the popup would survive
   // its parent and reuse the wrong context on the next click in a
@@ -2922,6 +2931,8 @@ function ensureTitleMenuPopup(parent: BrowserWindow): TitleMenuPopupEntry {
   popup.webContents.once('destroyed', () => {
     if (!parent.isDestroyed()) {
       parent.removeListener('blur', dismissOnBlur)
+      parent.removeListener('will-move', dismissOnBlur)
+      parent.removeListener('move', dismissOnBlur)
       parent.removeListener('closed', onParentClosed)
     }
     if (titleMenuPopupsByParent.get(entry.parentWindowId) === entry) {
@@ -3004,6 +3015,13 @@ function showTitleMenuPopupNow(entry: TitleMenuPopupEntry): void {
   entry.popup.setVisible(true)
   entry.popup.webContents.focus()
   entry.isOpen = true
+  // Notify the title bar so it can suspend its `-webkit-app-region: drag`
+  // while the popup is open. Otherwise clicks on the title bar's empty
+  // (drag) area are consumed by the OS for window dragging and never
+  // reach the title-bar webContents, leaving the popup stuck open.
+  if (!entry.titleBarSender.isDestroyed()) {
+    entry.titleBarSender.send('comfy-titlebar:menu-opened', { menu: entry.kind })
+  }
 }
 
 function openTitleMenuPopup(opts: {
