@@ -3616,14 +3616,20 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
   })
 
   app.on('activate', () => {
-    // macOS dock click. Focus an existing chooser host if open,
-    // otherwise spawn a fresh one. With the launcher window retired
-    // (Phase 3), the chooser host is the only fallback surface — any
-    // running install windows already accept their own focus events.
+    // macOS dock click. Prefer focusing an existing chooser host
+    // (so the dashboard stays the primary entry surface), then any
+    // live install-backed host, and only spawn a fresh chooser host
+    // when there are no host windows to bring forward.
     const chooser = findFirstChooserHostWindow()
     if (chooser) {
       bringToFront(chooser)
       return
+    }
+    for (const [, entry] of comfyWindows) {
+      if (!entry.window.isDestroyed()) {
+        bringToFront(entry.window)
+        return
+      }
     }
     openChooserHostWindow()
   })
