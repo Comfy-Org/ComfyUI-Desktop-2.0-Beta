@@ -482,6 +482,18 @@ function computeBodyMode(entry: ComfyWindowEntry): BodyMode {
 }
 
 /**
+ * Single source of truth for "is the panel surface the visible body
+ * right now?". `layoutViews` uses this to decide which view fills the
+ * body rect; `focusActiveBody` uses the same predicate to route OS
+ * keyboard focus to the matching view. Drift between the two lets
+ * keystrokes land in an invisible view, which is what triggered
+ * issue #523's keyboard-focus regression on the overlay-only path.
+ */
+function isPanelBodyVisible(entry: ComfyWindowEntry): boolean {
+  return computeBodyMode(entry) !== 'comfy' || entry.overlayMounted
+}
+
+/**
  * Re-evaluate the body mode for a comfy window after a session-state
  * transition (instance launched / stopped / crashed) and reflect it in the
  * layout. When the body mode is `'comfy-lifecycle'`, the panelView is created
@@ -1269,9 +1281,10 @@ function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowResult {
     // view so the popover/modal is actually visible. The comfy view
     // stays alive but collapsed; closing the overlay flips
     // `overlayMounted` back to false and `layoutViews` re-runs to
-    // restore the normal comfy-on-top layout.
-    const mode = entry ? computeBodyMode(entry) : 'comfy'
-    const showPanel = mode !== 'comfy' || (entry?.overlayMounted ?? false)
+    // restore the normal comfy-on-top layout. The shared
+    // `isPanelBodyVisible` predicate is reused by `focusActiveBody`
+    // to keep keyboard focus in step with the visible body.
+    const showPanel = entry ? isPanelBodyVisible(entry) : false
     if (showPanel && entry?.panelView) {
       entry.panelView.setBounds(bodyRect)
       entry.panelView.setVisible(true)
@@ -2404,16 +2417,21 @@ function getOrCreatePanelView(entry: ComfyWindowEntry): WebContentsView | null {
   return entry.panelView ?? ensurePanelView(entry.windowKey, entry, computeBodyMode(entry))
 }
 
-/** Move OS focus to whichever body view is now active so keyboard input lands in the right place. */
+/** Move OS focus to whichever body view is now active so keyboard input
+ *  lands in the right place. Uses `isPanelBodyVisible` to stay in lockstep
+ *  with `layoutViews` — the overlay-only path (#523) lifts the panel onto
+ *  the comfy view, and focus must follow or keystrokes route to the
+ *  invisible comfy frame. */
 function focusActiveBody(entry: ComfyWindowEntry): void {
   if (entry.window.isDestroyed() || !entry.window.isFocused()) return
-  const mode = computeBodyMode(entry)
-  if (mode === 'comfy') {
-    if (!entry.comfyView.webContents.isDestroyed()) entry.comfyView.webContents.focus()
-  } else if (entry.panelView && !entry.panelView.webContents.isDestroyed() && !entry.panelView.webContents.isLoadingMainFrame()) {
-    // Panel exists and is loaded — focus immediately. If still loading, the
-    // did-finish-load handler in ensurePanelView will focus it.
-    entry.panelView.webContents.focus()
+  if (isPanelBodyVisible(entry)) {
+    if (entry.panelView && !entry.panelView.webContents.isDestroyed() && !entry.panelView.webContents.isLoadingMainFrame()) {
+      // Panel exists and is loaded — focus immediately. If still loading, the
+      // did-finish-load handler in ensurePanelView will focus it.
+      entry.panelView.webContents.focus()
+    }
+  } else if (!entry.comfyView.webContents.isDestroyed()) {
+    entry.comfyView.webContents.focus()
   }
 }
 
@@ -2503,7 +2521,11 @@ ipcMain.on('comfy-panel:set-overlay-active', (event, payload: { active: boolean 
     if (entry.panelView?.webContents !== event.sender) continue
     if (entry.overlayMounted === active) return
     entry.overlayMounted = active
-    if (!entry.window.isDestroyed()) entry.layoutViews()
+    if (entry.window.isDestroyed()) return
+    entry.layoutViews()
+    // Hand keyboard focus to whichever body view just became visible
+    // so keystrokes don't land in the now-occluded one.
+    focusActiveBody(entry)
     return
   }
 })
