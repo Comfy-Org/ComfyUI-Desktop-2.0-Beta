@@ -2853,6 +2853,18 @@ function buildTitleMenuItems(entry: ComfyWindowEntry): TitleMenuItem[] {
   if (entry.installationId !== null) {
     items.push({ id: 'return-to-dashboard', label: 'Return to Dashboard' })
   }
+  // Reset Zoom — discoverable recovery path for users who zoom the Comfy
+  // view too far to read. Only surfaced when zoom is actually non-default,
+  // and the label includes the current percent so the menu also doubles
+  // as a status indicator. The Ctrl/Cmd + 0 shortcut wired in `onLaunch`
+  // does the same thing for users who know it.
+  if (!entry.comfyView.webContents.isDestroyed()) {
+    const level = entry.comfyView.webContents.getZoomLevel()
+    if (level !== 0) {
+      const percent = Math.round(Math.pow(1.2, level) * 100)
+      items.push({ id: 'reset-zoom', label: `Reset Zoom (${percent}%)` })
+    }
+  }
   items.push({ id: 'close-all-windows', label: 'Close All Windows' })
   return items
 }
@@ -3175,6 +3187,14 @@ function activateTitleMenuItem(entry: TitleMenuPopupEntry, id: string): void {
     // via `comfy-window:click-feedback`; `source` distinguishes the
     // two entry points in the telemetry payload.
     triggerOpenFeedback(entry.parentEntryId, 'menu')
+  }
+  else if (id === 'reset-zoom') {
+    // Pair to the Ctrl/Cmd + 0 shortcut wired in `onLaunch`. The menu
+    // entry is only built when zoom is non-zero (see `buildTitleMenuItems`),
+    // so this always corresponds to a visible state change.
+    if (parentEntry && !parentEntry.comfyView.webContents.isDestroyed()) {
+      parentEntry.comfyView.webContents.setZoomLevel(0)
+    }
   }
   else if (id === 'new-install' || id === 'track' || id === 'load-snapshot' || id === 'quick-install') {
     // Install-creation / import flows are chooser-host-only.
