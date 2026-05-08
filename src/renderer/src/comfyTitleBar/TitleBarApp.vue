@@ -67,6 +67,7 @@ interface Bridge {
   onSourceCategoryChanged: (cb: (category: string | null) => void) => () => void
   onThemeChanged: (cb: (theme: { bg: string; text: string }) => void) => () => void
   onFullscreenChanged: (cb: (fullscreen: boolean) => void) => () => void
+  onMenuOpened: (cb: (info: { menu: 'file' }) => void) => () => void
   onMenuClosed: (cb: (info: { menu: 'file' }) => void) => () => void
   /** Modal-unification (Track M-2.3) — first-use takeover step pushes
    *  from main. Drives the T&C-step lockdown that hides the waffle
@@ -401,6 +402,14 @@ const fileBtnRef = useTemplateRef<HTMLButtonElement>('fileBtn')
 const MENU_REOPEN_GUARD_MS = 100
 const menuClosedAt: Record<'file', number> = { file: 0 }
 
+/** Tracks whether the popup is currently visible. Set by main via
+ *  `onMenuOpened` / `onMenuClosed` IPCs. The timestamp guard above
+ *  is unreliable on macOS because the click event can fire before
+ *  the blur-driven dismiss propagates back; checking `isMenuOpen`
+ *  catches that case — the click's blur will dismiss the popup, so
+ *  we just don't ask main to reopen. */
+const isMenuOpen = ref(false)
+
 /** Anchor a native menu just below `el`'s bottom-left corner.
  *  Coordinates are in title-bar-local pixels (y is rounded down so the
  *  popup always sits flush with — never above — the button). */
@@ -411,9 +420,12 @@ function anchorBelow(el: HTMLElement | null | undefined): MenuAnchor {
 }
 
 function handleFileMenu(): void {
-  // Suppress click-to-toggle-close: if the file menu just closed, this
-  // click is the same one that dismissed it (OS dismissed first, then
-  // event propagates to the button). Don't reopen.
+  // Suppress click-to-toggle-close: if the popup is still open at click
+  // time, the click's focus shift will dismiss it via blur — we just
+  // don't ask main to reopen. The timestamp guard catches the same race
+  // on platforms where the dismiss has already propagated by the time
+  // the click event fires.
+  if (isMenuOpen.value) return
   if (Date.now() - menuClosedAt.file < MENU_REOPEN_GUARD_MS) return
   bridge?.openFileMenu(anchorBelow(fileBtnRef.value))
 }
@@ -422,6 +434,7 @@ let unsubTitle: (() => void) | undefined
 let unsubSourceCategory: (() => void) | undefined
 let unsubTheme: (() => void) | undefined
 let unsubFullscreen: (() => void) | undefined
+let unsubMenuOpened: (() => void) | undefined
 let unsubMenuClosed: (() => void) | undefined
 let unsubFirstUseMode: (() => void) | undefined
 let unsubAppUpdate: (() => void) | undefined
@@ -467,8 +480,12 @@ onMounted(() => {
   unsubFullscreen = bridge.onFullscreenChanged((fullscreen) => {
     isFullscreen.value = fullscreen
   })
+  unsubMenuOpened = bridge.onMenuOpened(() => {
+    isMenuOpen.value = true
+  })
   unsubMenuClosed = bridge.onMenuClosed(({ menu }) => {
     menuClosedAt[menu] = Date.now()
+    isMenuOpen.value = false
   })
   unsubFirstUseMode = bridge.onFirstUseModeChanged((mode) => {
     firstUseMode.value = mode
@@ -498,6 +515,7 @@ onUnmounted(() => {
   unsubSourceCategory?.()
   unsubTheme?.()
   unsubFullscreen?.()
+  unsubMenuOpened?.()
   unsubMenuClosed?.()
   unsubFirstUseMode?.()
   unsubAppUpdate?.()

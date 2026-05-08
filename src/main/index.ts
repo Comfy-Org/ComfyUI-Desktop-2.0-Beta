@@ -3029,6 +3029,13 @@ function showTitleMenuPopupNow(entry: TitleMenuPopupEntry): void {
   entry.popup.setVisible(true)
   entry.popup.webContents.focus()
   entry.isOpen = true
+  // Notify the title bar so it can suppress the next click on the
+  // menu button. Without this, on macOS the click event can fire
+  // before the blur-driven dismiss propagates back, causing the
+  // popup to reopen instead of close on a reclick.
+  if (!entry.titleBarSender.isDestroyed()) {
+    entry.titleBarSender.send('comfy-titlebar:menu-opened', { menu: entry.kind })
+  }
 }
 
 function openTitleMenuPopup(opts: {

@@ -73,6 +73,13 @@ export interface ComfyTitleBarBridge {
   onThemeChanged(cb: (theme: { bg: string; text: string }) => void): () => void
   /** Subscribe to macOS fullscreen state — drives traffic-light padding. */
   onFullscreenChanged(cb: (fullscreen: boolean) => void): () => void
+  /** Subscribe to native title-bar menu open events. Fires when the
+   *  popup becomes visible. The renderer uses this to track open
+   *  state so a click on the menu button while open is suppressed
+   *  (the blur-driven dismiss handles the close on its own). On
+   *  macOS the click event can fire before the dismiss propagates,
+   *  so a timestamp-only guard isn't reliable. */
+  onMenuOpened(cb: (info: { menu: 'file' }) => void): () => void
   /** Subscribe to native title-bar menu close events. Fires when the
    *  popup created by `openFileMenu` closes, after the user picks an
    *  item or dismisses by clicking outside. The renderer uses this to
@@ -212,6 +219,14 @@ const bridge: ComfyTitleBarBridge = {
     }
     ipcRenderer.on('comfy-titlebar:fullscreen-changed', handler)
     return () => ipcRenderer.removeListener('comfy-titlebar:fullscreen-changed', handler)
+  },
+  onMenuOpened: (cb) => {
+    const handler = (_event: IpcRendererEvent, data: unknown): void => {
+      const { menu } = (data || {}) as { menu?: unknown }
+      if (menu === 'file') cb({ menu })
+    }
+    ipcRenderer.on('comfy-titlebar:menu-opened', handler)
+    return () => ipcRenderer.removeListener('comfy-titlebar:menu-opened', handler)
   },
   onMenuClosed: (cb) => {
     const handler = (_event: IpcRendererEvent, data: unknown): void => {
