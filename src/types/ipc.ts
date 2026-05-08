@@ -864,7 +864,7 @@ export interface ElectronApi {
   onModelDownloadProgress(callback: (progress: ModelDownloadProgress) => void): Unsubscribe
   onTelemetrySettingChanged(callback: (enabled: boolean | undefined) => void): Unsubscribe
   onDatadogError(callback: (payload: DatadogForwardedError) => void): Unsubscribe
-  onTelemetryActionFromMain(callback: (data: { event: string; context: Record<string, unknown> }) => void): Unsubscribe
+  onTelemetryActionFromMain(callback: (data: { event: string; context: Record<string, unknown>; mainAlreadyCaptured?: boolean }) => void): Unsubscribe
   onErrorDetail(callback: (data: ErrorDetailData) => void): Unsubscribe
   onSuggestChineseMirrors(callback: () => void): Unsubscribe
   onSettingsChanged(callback: (data: { key: string }) => void): Unsubscribe

@@ -1,13 +1,21 @@
 /**
- * Renderer-side bootstrap (Phase 3) — telemetry providers, error
- * reporting hooks, and main-process broadcast subscriptions that need
- * to run once per renderer entry-point.
+ * Renderer-side bootstrap — telemetry providers, error reporting hooks,
+ * and main-process broadcast subscriptions that need to run once per
+ * renderer entry-point.
  *
- * Pre-Phase-3 these top-level side effects lived inside the launcher
- * window's `src/renderer/src/main.ts`. With the launcher window
- * retired the panel renderer (PanelApp) is the primary entry-point;
- * this module is shared between them so the init runs regardless of
- * which entry the user lands on.
+ * Every renderer entry-point (title bar, title menu, panel) calls
+ * `initializeRendererBootstrap(rendererRole)` so telemetry fires
+ * regardless of which renderer the user is interacting with — the
+ * panel renderer used to be the only entry that initialised this, which
+ * caused steady-state ComfyUI sessions (no panel mounted) to emit zero
+ * Datadog/PostHog events. The renderer-role tag (`renderer:title-bar |
+ * title-menu | panel`) is registered on every event so RUM/PostHog
+ * queries can roll up or filter per surface.
+ *
+ * Main-emitted events are broadcast only to the title-bar relay target
+ * (one per host window), with `mainAlreadyCaptured: true` set, so
+ * Datadog RUM gets exactly one Action per host window and PostHog
+ * isn't double-counted (PostHog Node already captured it in main).
  *
  * Call `initializeRendererBootstrap()` once at the top of each
  * renderer entry's `main.ts`, before mounting the Vue app. It is a
@@ -115,11 +123,27 @@ function setDatadogTrackingConsent(consent: DatadogTrackingConsent): void {
   } catch {}
 }
 
-function trackTelemetryAction(actionName: string, context: TelemetryContext): void {
+/**
+ * Identifies which renderer surface emitted a given event. Tagged on every
+ * Datadog Action / PostHog event so multi-renderer host windows don't blur
+ * telemetry queries together. Each renderer entry-point passes its own
+ * role when calling `initializeRendererBootstrap()`.
+ */
+export type RendererRole = 'title-bar' | 'title-menu' | 'panel'
+
+let rendererRole: RendererRole = 'panel'
+
+function trackTelemetryAction(
+  actionName: string,
+  context: TelemetryContext,
+  options: { skipPostHog?: boolean } = {},
+): void {
   if (isDatadogInitialized) {
     try { datadogRum.addAction(actionName, context) } catch {}
   }
-  if (isPostHogInitialized()) {
+  // `mainAlreadyCaptured` events come from the main-process PostHog Node
+  // SDK and would be duplicates if we recaptured them in the browser SDK.
+  if (!options.skipPostHog && isPostHogInitialized()) {
     capturePostHog(actionName, context)
   }
 }
@@ -157,6 +181,9 @@ async function initializeProviders(): Promise<void> {
         trackUserInteractions: true,
       })
       isDatadogInitialized = true
+      // Tag every RUM event with the renderer surface so queries can
+      // distinguish title-bar / title-menu / panel sessions per host window.
+      try { datadogRum.setGlobalContextProperty('renderer_role', rendererRole) } catch {}
     } catch {}
   }
 
@@ -166,6 +193,7 @@ async function initializeProviders(): Promise<void> {
       appEnv: datadogEnv,
       isPackaged: !import.meta.env.DEV,
       consent,
+      rendererRole,
     })
   }
 
@@ -249,10 +277,16 @@ function reportRendererError(payload: {
  * broadcast subscriptions for this renderer. Idempotent — repeated calls
  * are no-ops, so each renderer entry-point can call this safely without
  * coordinating across modules.
+ *
+ * @param role  Identifies the renderer surface for telemetry tagging
+ *              (`'panel'`, `'title-bar'`, or `'title-menu'`). Defaults to
+ *              `'panel'` for backward compatibility with the historical
+ *              single-renderer entry-point.
  */
-export function initializeRendererBootstrap(): void {
+export function initializeRendererBootstrap(role: RendererRole = 'panel'): void {
   if (bootstrapInvoked) return
   bootstrapInvoked = true
+  rendererRole = role
 
   window.api.onTelemetrySettingChanged((enabled) => {
     if (isDatadogConfigured) setDatadogTrackingConsent(toDatadogTrackingConsent(enabled))
@@ -261,11 +295,15 @@ export function initializeRendererBootstrap(): void {
 
   window.addEventListener(TELEMETRY_ACTION_EVENT_NAME, handleTelemetryActionBridgeEvent)
 
-  // Events emitted from the main process land here and fan out to both providers.
+  // Events emitted from the main process land here. Datadog RUM always
+  // mirrors them (one Action per host window via the title-bar relay
+  // target). PostHog Browser is suppressed when `mainAlreadyCaptured` is
+  // set, since PostHog Node already captured the event in main and we'd
+  // otherwise double-count.
   window.api.onTelemetryActionFromMain((data) => {
     if (!data || typeof data.event !== 'string' || data.event.length === 0) return
     const ctx = (data.context && typeof data.context === 'object' ? data.context : {}) as TelemetryContext
-    trackTelemetryAction(data.event, ctx)
+    trackTelemetryAction(data.event, ctx, { skipPostHog: data.mainAlreadyCaptured === true })
   })
 
   void initializeProviders()
@@ -293,55 +331,69 @@ export function initializeRendererBootstrap(): void {
     })
   })
 
-  window.api.onDatadogError((data) => {
-    reportRendererError({
-      source: data.source || 'main-forwarded-error',
-      message: data.message || 'Unknown forwarded error',
-      stack: data.stack,
-      context: {
-        origin: 'main-process',
-        level: data.level,
-        ...(data.context || {}),
-      },
-      skipPostHog: data.skipPostHog === true,
-    })
-  })
-
-  window.api.onComfyExited((data) => {
-    trackTelemetryAction('desktop2.comfyui.exited', {
-      installation_id: data.installationId,
-      crashed: data.crashed ?? false,
-      exit_code: data.exitCode ?? null,
-      last_stderr: data.lastStderr ?? null,
-    })
-  })
-
-  window.api.onComfyBootLog((data) => {
-    trackTelemetryAction('desktop2.comfyui.boot_log', {
-      installation_id: data.installationId,
-      boot_stderr: data.bootStderr,
-    })
-  })
-
-  window.api.onInstanceStarted((data) => {
-    const bootTimeMs = (data as unknown as Record<string, unknown>).bootTimeMs as number | undefined
-    window.api.getInstallationDdContext(data.installationId).then((ctx) => {
-      if (!ctx) return
-      const { snapshot_diffs, ...metadata } = ctx
-      trackTelemetryAction('desktop2.session.installation_started', {
-        ...(metadata as unknown as Record<string, string | number | boolean | null | undefined>),
-        boot_time_ms: bootTimeMs ?? null,
+  // `dd-error` is broadcast to every extra target (title bars + panels), so
+  // we gate the subscription to the title-bar role — the canonical telemetry
+  // relay per host window — to avoid recording the same main-process error
+  // twice on Datadog when a host window has both renderers alive.
+  if (rendererRole === 'title-bar') {
+    window.api.onDatadogError((data) => {
+      reportRendererError({
+        source: data.source || 'main-forwarded-error',
+        message: data.message || 'Unknown forwarded error',
+        stack: data.stack,
+        context: {
+          origin: 'main-process',
+          level: data.level,
+          ...(data.context || {}),
+        },
+        skipPostHog: data.skipPostHog === true,
       })
-      if (snapshot_diffs.length > 0) {
-        // snapshot_diffs is an array of objects, which Datadog/PostHog handle
-        // natively; bypass the typed bridge via a fresh call.
-        if (isDatadogInitialized) {
-          try { datadogRum.addAction('desktop2.session.snapshot_history', { installation_id: ctx.installation_id, snapshot_diffs }) } catch {}
+    })
+  }
+
+  // `comfy-exited` / `comfy-boot-log` / `instance-started` are install-
+  // lifecycle events whose renderer-side handlers convert them into
+  // telemetry Actions. These are owned by the panel renderer (which drives
+  // the install/lifecycle UI) — gating them to `'panel'` prevents the
+  // title-bar bootstrap from double-firing the broadcast `instance-started`
+  // event on Datadog/PostHog when both renderers are mounted.
+  if (rendererRole === 'panel') {
+    window.api.onComfyExited((data) => {
+      trackTelemetryAction('desktop2.comfyui.exited', {
+        installation_id: data.installationId,
+        crashed: data.crashed ?? false,
+        exit_code: data.exitCode ?? null,
+        last_stderr: data.lastStderr ?? null,
+      })
+    })
+
+    window.api.onComfyBootLog((data) => {
+      trackTelemetryAction('desktop2.comfyui.boot_log', {
+        installation_id: data.installationId,
+        boot_stderr: data.bootStderr,
+      })
+    })
+
+    window.api.onInstanceStarted((data) => {
+      const bootTimeMs = (data as unknown as Record<string, unknown>).bootTimeMs as number | undefined
+      window.api.getInstallationDdContext(data.installationId).then((ctx) => {
+        if (!ctx) return
+        const { snapshot_diffs, ...metadata } = ctx
+        trackTelemetryAction('desktop2.session.installation_started', {
+          ...(metadata as unknown as Record<string, string | number | boolean | null | undefined>),
+          boot_time_ms: bootTimeMs ?? null,
+        })
+        if (snapshot_diffs.length > 0) {
+          // snapshot_diffs is an array of objects, which Datadog/PostHog handle
+          // natively; bypass the typed bridge via a fresh call.
+          if (isDatadogInitialized) {
+            try { datadogRum.addAction('desktop2.session.snapshot_history', { installation_id: ctx.installation_id, snapshot_diffs }) } catch {}
+          }
+          if (isPostHogInitialized()) {
+            capturePostHog('desktop2.session.snapshot_history', { installation_id: ctx.installation_id, snapshot_diffs } as unknown as TelemetryContext)
+          }
         }
-        if (isPostHogInitialized()) {
-          capturePostHog('desktop2.session.snapshot_history', { installation_id: ctx.installation_id, snapshot_diffs } as unknown as TelemetryContext)
-        }
-      }
-    }).catch(() => {})
-  })
+      }).catch(() => {})
+    })
+  }
 }

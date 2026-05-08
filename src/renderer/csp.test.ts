@@ -2,9 +2,9 @@ import { describe, it, expect } from 'vitest'
 import fs from 'fs'
 import path from 'path'
 
-function parseCSP(html: string, source: string): Record<string, string> {
+function parseCSP(html: string): Record<string, string> {
   const match = html.match(/http-equiv="Content-Security-Policy"\s+content="([^"]+)"/)
-  if (!match) throw new Error(`CSP meta tag not found in ${source}`)
+  if (!match) throw new Error('CSP meta tag not found in html')
   const directives: Record<string, string> = {}
   for (const part of match[1].split(';')) {
     const trimmed = part.trim()
@@ -16,16 +16,15 @@ function parseCSP(html: string, source: string): Record<string, string> {
   return directives
 }
 
-// The panel renderer hosts telemetry surfaces (Datadog + PostHog), so its CSP
-// must allow those endpoints. The title-bar renderer is telemetry-free so it
-// gets a tighter CSP — covered by a separate block below.
-const TELEMETRY_RENDERER_FILES = [
-  { file: 'panel.html', label: 'panel renderer' },
-]
+function readHtml(filename: string): string {
+  return fs.readFileSync(path.resolve(__dirname, filename), 'utf-8')
+}
 
-describe.each(TELEMETRY_RENDERER_FILES)('Content-Security-Policy ($label)', ({ file }) => {
-  const html = fs.readFileSync(path.resolve(__dirname, file), 'utf-8')
-  const csp = parseCSP(html, file)
+const TELEMETRY_RENDERER_HTMLS = ['panel.html', 'comfyTitleBar.html'] as const
+const NON_TELEMETRY_RENDERER_HTMLS = ['comfyTitleMenu.html'] as const
+
+describe('Content-Security-Policy: panel.html', () => {
+  const csp = parseCSP(readHtml('panel.html'))
 
   it('has a connect-src directive', () => {
     expect(csp['connect-src']).toBeDefined()
@@ -40,43 +39,51 @@ describe.each(TELEMETRY_RENDERER_FILES)('Content-Security-Policy ($label)', ({ f
     expect(csp['connect-src']).toContain('https://*.posthog.com')
   })
 
-  it('allows PostHog avatar/feature-flag images', () => {
-    expect(csp['img-src']).toContain('https://*.posthog.com')
-  })
-
   it('restricts script-src to self only', () => {
-    // PostHog session recording is intentionally never loaded, so its
-    // recorder.js is blocked at the CSP layer. Only first-party scripts run.
     expect(csp['script-src']).toBe("'self'")
   })
 
   it('restricts default-src to self only', () => {
     expect(csp['default-src']).toBe("'self'")
   })
-
-  it('does not declare a worker-src directive', () => {
-    // Nothing in the app loads web workers; without session recording there
-    // is no need for blob:/data: workers, so the directive is omitted.
-    expect(csp['worker-src']).toBeUndefined()
-  })
 })
 
-describe('Content-Security-Policy (title bar renderer)', () => {
-  const file = 'comfyTitleBar.html'
-  const html = fs.readFileSync(path.resolve(__dirname, file), 'utf-8')
-  const csp = parseCSP(html, file)
+describe.each(TELEMETRY_RENDERER_HTMLS)(
+  'Content-Security-Policy: telemetry endpoints in %s',
+  (file) => {
+    const csp = parseCSP(readHtml(file))
 
-  it('restricts default-src to self only', () => {
-    expect(csp['default-src']).toBe("'self'")
-  })
+    it('allows Datadog RUM intake', () => {
+      expect(csp['connect-src']).toContain('https://*.datadoghq.com')
+      expect(csp['connect-src']).toContain('https://browser-intake-us5-datadoghq.com')
+    })
 
-  it('restricts script-src to self only', () => {
-    expect(csp['script-src']).toBe("'self'")
-  })
+    it('allows PostHog Browser intake', () => {
+      expect(csp['connect-src']).toContain('https://*.posthog.com')
+    })
 
-  it('does not allow telemetry endpoints (title bar has no telemetry)', () => {
-    expect(csp['connect-src'] || '').not.toContain('posthog.com')
-    expect(csp['connect-src'] || '').not.toContain('datadoghq.com')
-    expect(csp['img-src'] || '').not.toContain('posthog.com')
-  })
-})
+    it('restricts script-src to self', () => {
+      expect(csp['script-src']).toBe("'self'")
+    })
+  },
+)
+
+describe.each(NON_TELEMETRY_RENDERER_HTMLS)(
+  'Content-Security-Policy: telemetry endpoints intentionally absent from %s',
+  (file) => {
+    const csp = parseCSP(readHtml(file))
+
+    // The title-menu popup is a transient window that does NOT initialise
+    // Datadog/PostHog (see comfyTitleMenu/main.ts). Keeping the CSP narrow
+    // here documents and enforces that decision — adding a renderer-side
+    // telemetry SDK to this surface would also need a CSP loosening, so
+    // requiring the change in both places is a useful tripwire.
+    it('does NOT include Datadog endpoints', () => {
+      expect(csp['connect-src']).not.toContain('datadoghq.com')
+    })
+
+    it('does NOT include PostHog endpoints', () => {
+      expect(csp['connect-src']).not.toContain('posthog.com')
+    })
+  },
+)

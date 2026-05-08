@@ -20,12 +20,51 @@
  * launcher has no live use for them and the bootstrap/cache machinery
  * complicates startup. Reintroduce only if a concrete need appears.
  */
-import { app, BrowserWindow } from 'electron'
+import { app } from 'electron'
 import { PostHog } from 'posthog-node'
 import { DEFAULT_POSTHOG_API_KEY, DEFAULT_POSTHOG_HOST, isPostHogFlagDisabled as isFlagDisabled } from '../../shared/posthogConfig'
 
 export type TelemetryValue = boolean | number | string | null | undefined
 export type TelemetryContext = Record<string, TelemetryValue | TelemetryValue[]>
+
+/**
+ * Long-lived renderer WebContents that receive main-emitted telemetry events
+ * for fan-out to renderer-side Datadog RUM. Registered exactly once per host
+ * window — the title-bar WebContents, which is built unconditionally for
+ * every host window in `createHostWindow()` and survives mode flips, so
+ * Datadog RUM gets a session per host window regardless of whether the
+ * panelView is currently mounted.
+ *
+ * The panelView is intentionally NOT registered here because (a) it may not
+ * exist in steady-state `comfy` mode and (b) when it does exist we don't
+ * want events to fire twice on Datadog. PostHog Node already captures these
+ * events directly in main, so the relay payload sets `mainAlreadyCaptured:
+ * true` to suppress renderer-side PostHog re-capture.
+ *
+ * Kept here (rather than in `lib/ipc/shared.ts`) so this module stays
+ * lightweight and unit-testable without dragging in shared.ts's heavy
+ * dependency graph.
+ */
+const _telemetryRelayTargets = new Set<Electron.WebContents>()
+
+export function registerTelemetryRelayTarget(wc: Electron.WebContents): void {
+  _telemetryRelayTargets.add(wc)
+  wc.once('destroyed', () => _telemetryRelayTargets.delete(wc))
+}
+
+export function unregisterTelemetryRelayTarget(wc: Electron.WebContents): void {
+  _telemetryRelayTargets.delete(wc)
+}
+
+/** @internal — exposed for tests. */
+export function _resetTelemetryRelayTargets(): void {
+  _telemetryRelayTargets.clear()
+}
+
+/** @internal — exposed for tests. */
+export function _telemetryRelayTargetCount(): number {
+  return _telemetryRelayTargets.size
+}
 
 interface PostHogConfig {
   apiKey: string
@@ -189,17 +228,28 @@ export function bucketError(input: unknown): string {
 }
 
 /**
- * Forward an event to the renderer so it can fan out to PostHog JS + Datadog.
- * Use this for events that should appear in both providers (most do).
+ * Forward an event to renderer-side Datadog RUM via the registered
+ * telemetry relay targets (title bars). PostHog is intentionally NOT
+ * fanned out here — `capture()` already sent the event from PostHog Node,
+ * and the `mainAlreadyCaptured: true` flag in the payload tells the
+ * renderer-side bootstrap to skip its PostHog Browser mirror so events
+ * aren't double-counted.
+ *
+ * If no relay target is currently registered (no host window open yet),
+ * the broadcast is a silent no-op — PostHog Node still captures the event
+ * via `capture()`, so the event isn't lost; only its Datadog RUM mirror
+ * is dropped, which is acceptable for the brief window before the first
+ * host window opens.
  */
 export function forwardToRenderer(event: string, context: TelemetryContext = {}): void {
   if (!consentEnabled) return
-  for (const win of BrowserWindow.getAllWindows()) {
-    if (!win.isDestroyed()) {
+  const payload = { event, context, mainAlreadyCaptured: true }
+  for (const wc of _telemetryRelayTargets) {
+    if (!wc.isDestroyed()) {
       try {
-        win.webContents.send('telemetry-action-from-main', { event, context })
+        wc.send('telemetry-action-from-main', payload)
       } catch {
-        // ignore
+        // ignore – telemetry must never break the app
       }
     }
   }

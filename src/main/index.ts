@@ -1188,6 +1188,16 @@ function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowResult {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      // sandbox: false — comfyTitleBarPreload imports the shared
+      // src/preload/api.ts (window.api bridge), which Rollup emits as a
+      // separate chunk under out/preload/chunks/. Sandboxed preloads can
+      // only require() from electron/events/timers/url, so the chunk
+      // require would fail silently and leave window.api undefined,
+      // which historically blanked the title-bar renderer and broke
+      // renderer-side telemetry. contextIsolation + nodeIntegration:false
+      // remain on, so renderer JS still has no Node access.
+      // Tracked: issue #521 (build-time chunk inlining to re-enable sandbox).
+      sandbox: false,
       preload: path.join(__dirname, '../preload/comfyTitleBarPreload.js'),
     },
   })
@@ -1206,6 +1216,14 @@ function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowResult {
   }
   comfyWindow.contentView.addChildView(titleBarView)
   _registerExtraBroadcastTarget(titleBarView.webContents)
+  // Title bar is the always-alive renderer per host window — register it as
+  // the canonical telemetry relay target so main-emitted events reach
+  // Datadog RUM regardless of whether the panelView is currently mounted
+  // (steady-state `comfy` mode tears the panel down). Exactly one relay
+  // target per host window prevents Datadog double-counting; PostHog is
+  // already captured by the Node SDK in main and suppressed in the relay
+  // payload (`mainAlreadyCaptured: true`).
+  mainTelemetry.registerTelemetryRelayTarget(titleBarView.webContents)
 
   // Body view. Install-less leaves it dummy and zero-sized; install-backed
   // loads the URL via attachInstall.
@@ -1337,6 +1355,7 @@ function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowResult {
         if (entry?._installCleanup) entry._installCleanup()
         detachWindowDownloads(comfyWindow)
         _unregisterExtraBroadcastTarget(titleBarView.webContents)
+        mainTelemetry.unregisterTelemetryRelayTarget(titleBarView.webContents)
         const liveEntry = comfyWindows.get(windowKey)
         if (liveEntry?.panelView) {
           _unregisterExtraBroadcastTarget(liveEntry.panelView.webContents)
@@ -1856,7 +1875,19 @@ function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts): boolea
       e.preventDefault()
       if (comfyContents.isDestroyed()) return
       if (input.key === '0') {
+        const previousLevel = comfyContents.getZoomLevel()
         comfyContents.setZoomLevel(0)
+        // Only emit when this was a real reset (skip no-op presses at 1x)
+        // so the event count tracks actual recovery actions, not key-spam.
+        if (previousLevel !== 0) {
+          mainTelemetry.emit('desktop2.zoom.reset', {
+            source: 'shortcut',
+            parent_entry_id: entry.windowKey,
+            installation_id: entry.installationId,
+            previous_zoom_level: previousLevel,
+            previous_zoom_percent: Math.round(Math.pow(1.2, previousLevel) * 100),
+          })
+        }
         return
       }
       const step = input.key === '-' ? -0.5 : 0.5
@@ -2273,6 +2304,13 @@ function ensurePanelView(windowKey: number, entry: ComfyWindowEntry, initialPane
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      // sandbox: false — preload/index.js imports the shared
+      // src/preload/api.ts chunk, same as the title-bar preload.
+      // Sandboxed preloads can't require() relative chunks, so leaving
+      // sandbox on would silently break window.api in the panel and
+      // take renderer-side telemetry with it. See issue #521 for the
+      // build-time inlining plugin that will let us turn sandbox back on.
+      sandbox: false,
       // Reuse the launcher preload — panel UI uses window.api like the main launcher window.
       preload: path.join(__dirname, '../preload/index.js'),
       // Default session (no partition) — keeps the panel isolated from the
@@ -3150,6 +3188,17 @@ function openTitleMenuPopup(opts: {
 }
 
 function activateTitleMenuItem(entry: TitleMenuPopupEntry, id: string): void {
+  // Capture the click in main so the title-menu popup itself doesn't need
+  // to bootstrap Datadog RUM / PostHog Browser (it's a transient view that
+  // would mint a fresh session per open). PostHog Node captures here and
+  // forwardToRenderer relays to the title-bar Datadog RUM session for the
+  // parent host window — see `forwardToRenderer` + the relay-target
+  // registry in `lib/telemetry.ts`.
+  mainTelemetry.emit('desktop2.title_menu.item_clicked', {
+    item_id: id,
+    menu_kind: entry.kind,
+    parent_entry_id: entry.parentEntryId,
+  })
   // Default: re-focus the popup's parent on dismiss so keyboard input
   // lands somewhere sensible. Actions that hand focus to a *different*
   // window (e.g. `new-window` spawns a fresh chooser host and brings it
@@ -3202,7 +3251,23 @@ function activateTitleMenuItem(entry: TitleMenuPopupEntry, id: string): void {
     // entry is only built when zoom is non-zero (see `buildTitleMenuItems`),
     // so this always corresponds to a visible state change.
     if (parentEntry && !parentEntry.comfyView.webContents.isDestroyed()) {
+      const previousLevel = parentEntry.comfyView.webContents.getZoomLevel()
       parentEntry.comfyView.webContents.setZoomLevel(0)
+      // Mirrors the Ctrl/Cmd + 0 shortcut emit in `attachInstall`.
+      // Same event name + payload shape so dashboards can group on the
+      // event and pivot on `source` to compare discoverability paths.
+      // No previousLevel === 0 guard here: the menu item is only built
+      // when zoom is non-zero (see `buildTitleMenuItems`), so any click
+      // is a real reset. The complementary `desktop2.title_menu.item_clicked`
+      // emit at the top of this function still fires for menu-engagement
+      // rollups; this one is the action-specific signal.
+      mainTelemetry.emit('desktop2.zoom.reset', {
+        source: 'menu',
+        parent_entry_id: entry.parentEntryId,
+        installation_id: parentEntry.installationId,
+        previous_zoom_level: previousLevel,
+        previous_zoom_percent: Math.round(Math.pow(1.2, previousLevel) * 100),
+      })
     }
   }
   else if (id === 'new-install' || id === 'track' || id === 'load-snapshot' || id === 'quick-install') {

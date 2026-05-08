@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { IpcRendererEvent } from 'electron'
+import { buildElectronApi } from './api'
 
 export type ComfyPanelKey =
   | 'comfy'
@@ -302,8 +303,27 @@ const bridge: ComfyTitleBarBridge = {
   },
 }
 
+
+// Expose the standard window.api bridge alongside __comfyTitleBar so the
+// title-bar renderer can call initializeRendererBootstrap() (which depends
+// on window.api.getSetting / getDeviceId / onTelemetrySettingChanged /
+// etc.). Without this, telemetry only fired from the panel renderer (which
+// only mounts in chooser/lifecycle modes), leaving steady-state ComfyUI
+// sessions invisible to Datadog and PostHog.
+//
+// The shared ./api import is safe here because the title-bar
+// WebContentsView opts out of the sandbox via sandbox: false in
+// src/main/index.ts. Sandboxed preloads can only require() from a
+// whitelist (electron, events, timers, url); the chunked require of
+// out/preload/chunks/api-*.js that Rollup emits would fail there. See
+// issue #521 for the planned build-time chunk-inlining plugin that
+// will let us re-enable sandbox without source duplication.
+const api = buildElectronApi()
+
 if (process.contextIsolated) {
   contextBridge.exposeInMainWorld('__comfyTitleBar', bridge)
+  contextBridge.exposeInMainWorld('api', api)
 } else {
   ;(globalThis as Record<string, unknown>).__comfyTitleBar = bridge
+  ;(globalThis as Record<string, unknown>).api = api
 }

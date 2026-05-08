@@ -4,14 +4,15 @@
     <meta charset="UTF-8" />
     <title>ComfyUI Desktop 2.0 — Title Bar</title>
     <!--
-      The title bar runs in its own WebContentsView and only needs local
-      assets (Inter font, design-token CSS, the bundled JS). PostHog/Datadog
-      surfaces aren't loaded here, so connect-src/img-src can stay narrow
-      compared to the launcher and panel renderers.
+      The title bar is the always-alive renderer per host window and now
+      hosts the canonical Datadog RUM / PostHog Browser session for that
+      window — without it, steady-state ComfyUI sessions (panel torn down)
+      would emit zero telemetry. CSP must therefore allow the same
+      Datadog + PostHog endpoints as the panel renderer.
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' ws:"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://*.posthog.com; font-src 'self' data:; connect-src 'self' ws: https://*.datadoghq.com https://browser-intake-us5-datadoghq.com https://*.posthog.com"
     />
   </head>
   <body>
