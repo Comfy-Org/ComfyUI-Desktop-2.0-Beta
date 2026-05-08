@@ -2919,7 +2919,6 @@ function ensureTitleMenuPopup(parent: BrowserWindow): TitleMenuPopupEntry {
   // path: any title-bar drag dismisses the popup as soon as the window
   // begins to move.
   const dismissOnBlur = (): void => {
-    if (!entry.isOpen && !entry.pendingShowTimer) return
     hideTitleMenuPopup(entry)
   }
   popup.webContents.on('blur', dismissOnBlur)
