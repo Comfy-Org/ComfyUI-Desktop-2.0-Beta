@@ -19,6 +19,10 @@ vi.mock('../pythonEnv', () => ({
   getActivePythonPath: vi.fn(() => null),
 }))
 
+vi.mock('../telemetry', () => ({
+  emit: vi.fn(),
+}))
+
 vi.mock('fs', async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>
   return {
@@ -29,14 +33,23 @@ vi.mock('fs', async (importOriginal) => {
       readFileSync: vi.fn(() => {
         throw new Error('not found')
       }),
+      promises: {
+        mkdir: vi.fn(async () => {}),
+        writeFile: vi.fn(async () => {}),
+        rename: vi.fn(async () => {}),
+        readdir: vi.fn(async () => []),
+      },
     },
   }
 })
 
 import { readGitHead } from '../git'
 import { scanCustomNodes } from '../nodes'
-import { captureState } from './store'
+import { captureState, saveSnapshot } from './store'
+import * as telemetry from '../telemetry'
 import type { InstallationRecord } from '../../installations'
+
+const mockedTelemetryEmit = vi.mocked(telemetry.emit)
 
 const mockedReadGitHead = vi.mocked(readGitHead)
 const mockedScanCustomNodes = vi.mocked(scanCustomNodes)
@@ -134,5 +147,57 @@ describe('captureState commit-matching guard', () => {
     expect(state.comfyui.commit).toBeNull()
     expect(state.comfyui.baseTag).toBeUndefined()
     expect(state.comfyui.commitsAhead).toBeUndefined()
+  })
+})
+
+describe('saveSnapshot telemetry', () => {
+  beforeEach(() => {
+    vi.resetAllMocks()
+    mockedScanCustomNodes.mockResolvedValue([
+      { id: 'a', type: 'cnr', dirName: 'a', enabled: true, version: '1.0.0' },
+      { id: 'b', type: 'cnr', dirName: 'b', enabled: true, version: '2.0.0' },
+    ])
+    mockedReadGitHead.mockReturnValue('abc1234')
+  })
+
+  it('emits desktop2.snapshot.created with installation_id, trigger, counts, and dedup flag', async () => {
+    const installation = {
+      id: 'install-42',
+      name: 'Test',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      installPath: '/test/install',
+      sourceId: 'test',
+    } as InstallationRecord
+
+    await saveSnapshot('/test/install', installation, 'manual', 'my label')
+
+    expect(mockedTelemetryEmit).toHaveBeenCalledTimes(1)
+    expect(mockedTelemetryEmit).toHaveBeenCalledWith('desktop2.snapshot.created', {
+      installation_id: 'install-42',
+      trigger: 'manual',
+      custom_nodes_count: 2,
+      // pip freeze is short-circuited by the python-path mock returning null
+      pip_packages_count: 0,
+      has_label: true,
+      // saveSnapshot never deduplicates a previous snapshot
+      deduplicated_previous: false,
+    })
+  })
+
+  it('reports has_label: false when no label is supplied', async () => {
+    const installation = {
+      id: 'install-7',
+      name: 'Test',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      installPath: '/test/install',
+      sourceId: 'test',
+    } as InstallationRecord
+
+    await saveSnapshot('/test/install', installation, 'pre-update')
+
+    expect(mockedTelemetryEmit).toHaveBeenCalledWith(
+      'desktop2.snapshot.created',
+      expect.objectContaining({ trigger: 'pre-update', has_label: false }),
+    )
   })
 })
