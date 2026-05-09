@@ -2135,6 +2135,29 @@ function openOrFocusChooserHostWindow(): BrowserWindow {
   return openChooserHostWindow()
 }
 
+/** Focus any live host window — chooser host preferred so the dashboard
+ *  stays the entry surface, otherwise the first install-backed host —
+ *  and only spawn a fresh chooser host when no host windows exist.
+ *  Restores minimised hosts before focusing. Used by the platform
+ *  re-launch hooks (`activate` on macOS, `second-instance` on
+ *  Windows/Linux) so re-clicking the app icon brings the running
+ *  install forward instead of stacking a new dashboard on top of it. */
+function openOrFocusAnyHostWindow(): BrowserWindow {
+  const chooser = findFirstChooserHostWindow()
+  if (chooser) {
+    if (chooser.isMinimized()) chooser.restore()
+    bringToFront(chooser)
+    return chooser
+  }
+  for (const [, entry] of comfyWindows) {
+    if (entry.window.isDestroyed()) continue
+    if (entry.window.isMinimized()) entry.window.restore()
+    bringToFront(entry.window)
+    return entry.window
+  }
+  return openChooserHostWindow()
+}
+
 /** Resolve the title-bar / window-controls theme for install-less host
  *  windows. The chooser's panel body lives in the launcher renderer
  *  (which uses `--surface` from main.css), so the title-bar Vue header
@@ -3518,16 +3541,10 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
 } else {
   if (app.isPackaged) {
     app.on('second-instance', () => {
-      // Phase 3 — the launcher window is gone; route the OS-level
-      // "open another instance" attempt to the chooser host instead.
-      // Restores any minimised chooser host before focusing it.
-      const chooser = findFirstChooserHostWindow()
-      if (chooser) {
-        if (chooser.isMinimized()) chooser.restore()
-        bringToFront(chooser)
-        return
-      }
-      openChooserHostWindow()
+      // OS-level "open another instance" attempt — focus an existing
+      // host window (chooser or install-backed) instead of stacking
+      // a duplicate.
+      openOrFocusAnyHostWindow()
     })
   }
 
@@ -3616,22 +3633,9 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
   })
 
   app.on('activate', () => {
-    // macOS dock click. Prefer focusing an existing chooser host
-    // (so the dashboard stays the primary entry surface), then any
-    // live install-backed host, and only spawn a fresh chooser host
-    // when there are no host windows to bring forward.
-    const chooser = findFirstChooserHostWindow()
-    if (chooser) {
-      bringToFront(chooser)
-      return
-    }
-    for (const [, entry] of comfyWindows) {
-      if (!entry.window.isDestroyed()) {
-        bringToFront(entry.window)
-        return
-      }
-    }
-    openChooserHostWindow()
+    // macOS dock click — focus an existing host window before
+    // spawning a fresh chooser host.
+    openOrFocusAnyHostWindow()
   })
 
   app.on('before-quit', () => {
