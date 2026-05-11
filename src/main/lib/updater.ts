@@ -249,6 +249,60 @@ export function onUpdateStateChanged(cb: (state: AppUpdateState) => void): () =>
   }
 }
 
+/**
+ * User-initiated download of the pending update. Marks the next
+ * `update-downloaded` as user-initiated so the updater module fires
+ * the auto restart-prompt event; the flag is cleared on download
+ * completion or on error so a subsequent background auto-on download
+ * doesn't re-trigger the prompt. Failures broadcast
+ * `app-update:user-action-failed` so the UI can surface them.
+ *
+ * Exported so both the renderer-facing `download-update` IPC handler
+ * and main-process callers (e.g. the system-modal "Download" confirm)
+ * share a single implementation.
+ */
+export async function downloadUpdate(): Promise<void> {
+  _userInitiatedDownload = true
+  try {
+    const result = await runCheck('download-button')
+    if (!result.available && _appUpdateState.kind !== 'ready') {
+      _userInitiatedDownload = false
+      broadcast('app-update:user-action-failed', {
+        message: result.error || NO_UPDATE_AVAILABLE_MESSAGE,
+      })
+    }
+  } catch (err) {
+    _userInitiatedDownload = false
+    broadcast('app-update:user-action-failed', {
+      message: err instanceof Error ? err.message : String(err),
+    })
+  }
+}
+
+/**
+ * Apply the pending downloaded update by restarting the app under the
+ * silent installer. Failures broadcast `app-update:user-action-failed`
+ * so the UI can surface them. Exported so both the renderer-facing
+ * `install-update` IPC handler and main-process callers (e.g. the
+ * system-modal "Restart" confirm) share a single implementation.
+ */
+export function installUpdate(): void {
+  const updater = getAutoUpdater()
+  if (!updater) {
+    broadcast('app-update:user-action-failed', { message: UPDATER_UNAVAILABLE_MESSAGE })
+    return
+  }
+  try {
+    setQuitReason('update-install')
+    updater.restartAndInstall({ isSilent: true })
+  } catch (err) {
+    clearQuitReason()
+    broadcast('app-update:user-action-failed', {
+      message: err instanceof Error ? err.message : String(err),
+    })
+  }
+}
+
 export function register(): void {
   bindUpdaterEvents()
 
@@ -261,36 +315,11 @@ export function register(): void {
   })
 
   ipcMain.handle('download-update', async () => {
-    // Marks the next `update-downloaded` as user-initiated so the
-    // updater module fires the auto restart-prompt event. The flag is
-    // cleared on download completion or on error so a subsequent
-    // background auto-on download doesn't re-trigger the prompt.
-    _userInitiatedDownload = true
-    try {
-      const result = await runCheck('download-button')
-      if (!result.available && _appUpdateState.kind !== 'ready') {
-        _userInitiatedDownload = false
-        broadcast('app-update:user-action-failed', { message: result.error || NO_UPDATE_AVAILABLE_MESSAGE })
-      }
-    } catch (err) {
-      _userInitiatedDownload = false
-      broadcast('app-update:user-action-failed', { message: err instanceof Error ? err.message : String(err) })
-    }
+    await downloadUpdate()
   })
 
   ipcMain.handle('install-update', () => {
-    const updater = getAutoUpdater()
-    if (!updater) {
-      broadcast('app-update:user-action-failed', { message: UPDATER_UNAVAILABLE_MESSAGE })
-      return
-    }
-    try {
-      setQuitReason('update-install')
-      updater.restartAndInstall({ isSilent: true })
-    } catch (err) {
-      clearQuitReason()
-      broadcast('app-update:user-action-failed', { message: err instanceof Error ? err.message : String(err) })
-    }
+    installUpdate()
   })
 
   ipcMain.handle('get-update-capabilities', () => {

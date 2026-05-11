@@ -1325,6 +1325,10 @@ function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowResult {
     // click doesn't pay the BrowserWindow construction + HTML/JS load
     // cost (~100ms).
     ensureTitlePopup(comfyWindow)
+    // Pre-warm the system-modal popup so the user's first app-update
+    // pill click (or any other shell-modal trigger) doesn't pay the
+    // load cost — the modal needs to feel as instant as the pill click.
+    ensureSystemModal(comfyWindow)
   }
   ipcMain.on('comfy-window:title-bar-ready', onTitleBarReadyHandler)
 
@@ -2564,29 +2568,47 @@ function _broadcastAppUpdateStateToTitleBars(state: updater.AppUpdateState): voi
 ipcMain.on('comfy-window:click-app-update-pill', (event) => {
   const found = findEntryByTitleBarSender(event.sender)
   if (!found) return
-  const { id, entry } = found
+  const { entry } = found
   if (entry.window.isDestroyed()) return
   const state = updater.getCurrentUpdateState()
   if (state.kind !== 'ready' && state.kind !== 'available') return
-  // The confirm modal is rendered by `<ModalDialog />` inside PanelApp,
-  // which is only visible when the panel surface is the active body. In
-  // a Comfy instance window the user is typically on the ComfyUI body,
-  // so we must mirror `click-install-update-pill`: switch the active
-  // panel to 'settings' to bring the panel forward (this also lazily
-  // constructs panelView on its first non-comfy switch). Re-resolve
-  // panelView after the switch so we pick up any view that
-  // `setActivePanel` may have just created. `sendToPanelDeferred` then
-  // waits for `did-finish-load` if the bundle is still loading so the
-  // modal trigger doesn't race the renderer's listener registration.
-  setActivePanel(id, 'settings')
-  const panelView = entry.panelView
-  if (!panelView) return
-  const overlayKind = state.kind === 'ready'
-    ? 'app-update-restart-prompt'
-    : 'app-update-download-prompt'
-  sendToPanelDeferred(panelView, 'panel-trigger-overlay', {
-    kind: overlayKind,
-    version: state.version,
+  // The confirm modal renders on the dedicated system-modal popup
+  // surface, which overlays the entire host window — independent of
+  // which body view (comfy / panel / lifecycle) is currently active.
+  // No panel switch is required, so the user stays on whatever they
+  // were doing once they dismiss the prompt.
+  const isReady = state.kind === 'ready'
+  const version = state.version ?? i18n.t('appUpdate.fallbackVersion')
+  const title = isReady
+    ? i18n.t('appUpdate.readyTitle')
+    : i18n.t('appUpdate.availableTitle')
+  const message = isReady
+    ? i18n.t('appUpdate.readyMessage', { version })
+    : i18n.t('appUpdate.availableMessage', { version })
+  const confirmLabel = isReady
+    ? i18n.t('appUpdate.restartNow')
+    : i18n.t('appUpdate.download')
+  const cancelLabel = i18n.t('appUpdate.later')
+  const theme = entry.lastTheme
+  openSystemModal({
+    parent: entry.window,
+    spec: {
+      id: `app-update-${state.kind}-${version}`,
+      title,
+      message,
+      confirmLabel,
+      cancelLabel,
+      confirmStyle: 'primary',
+      theme,
+    },
+    callback: (action) => {
+      if (action !== 'confirm') return
+      if (isReady) {
+        updater.installUpdate()
+      } else {
+        void updater.downloadUpdate()
+      }
+    },
   })
 })
 
@@ -3552,6 +3574,272 @@ ipcMain.on(
       installationId: parentEntry.installationId,
       settingsTab: tab,
     })
+  },
+)
+
+/**
+ * System-modal popup.
+ *
+ * Sibling primitive to the title-popup, but full-window: a transparent
+ * `WebContentsView` per host window that overlays the entire content
+ * area when a shell-level confirm modal is open (app-update prompts,
+ * etc.). Renders backdrop + modal box; Escape / click-outside acks
+ * `cancel`, Enter / confirm-button acks `confirm`. Visually distinct
+ * from in-canvas modals owned by the comfyView (which only dim the
+ * canvas) — the system modal dims everything including the title bar
+ * so the user can tell at a glance that the prompt is from the shell.
+ */
+type SystemModalConfirmStyle = 'primary' | 'danger'
+
+interface SystemModalSpec {
+  /** Unique per open. Stamped onto the action ack so a stale ack
+   *  for a previously-dismissed modal can be ignored. */
+  id: string
+  title: string
+  message: string
+  confirmLabel: string
+  cancelLabel: string
+  confirmStyle?: SystemModalConfirmStyle
+  theme: { bg: string; text: string }
+}
+
+type SystemModalAction = 'confirm' | 'cancel'
+
+type SystemModalCallback = (action: SystemModalAction) => void
+
+interface SystemModalEntry {
+  popup: WebContentsView
+  parentWindow: BrowserWindow
+  popupWebContentsId: number
+  parentWindowId: number
+  /** True once the renderer has signalled `comfy-systemmodal:ready`. */
+  rendererReady: boolean
+  /** Spec the renderer is currently displaying (or about to display
+   *  once the rendered ack arrives). */
+  currentSpec: SystemModalSpec | null
+  currentCallback: SystemModalCallback | null
+  /** Spec queued before the renderer was ready — flushed on `ready`. */
+  pendingSpec: { spec: SystemModalSpec; callback: SystemModalCallback } | null
+  isOpen: boolean
+  pendingShowTimer: NodeJS.Timeout | null
+}
+
+const systemModalsByParent = new Map<number, SystemModalEntry>()
+const systemModalsByWebContents = new Map<number, SystemModalEntry>()
+
+function ensureSystemModal(parent: BrowserWindow): SystemModalEntry {
+  const existing = systemModalsByParent.get(parent.id)
+  if (existing && !existing.popup.webContents.isDestroyed()) return existing
+
+  const popup = new WebContentsView({
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, '../preload/comfySystemModalPreload.js'),
+    },
+  })
+  // Per-pixel transparency so the backdrop's `rgba(...)` can dim what
+  // lies beneath. Like the title-popup, this is a plain WebContentsView
+  // attached to the host BrowserWindow's content area.
+  popup.setBackgroundColor('#00000000')
+  popup.setVisible(false)
+  popup.setBounds({ x: 0, y: 0, width: 1, height: 1 })
+  parent.contentView.addChildView(popup)
+
+  const isDev = !!process.env['ELECTRON_RENDERER_URL']
+  const loadPromise = isDev
+    ? popup.webContents.loadURL(
+        `${(process.env['ELECTRON_RENDERER_URL'] as string).replace(/\/$/, '')}/comfySystemModal.html`,
+      )
+    : popup.webContents.loadFile(path.join(__dirname, '../renderer/comfySystemModal.html'))
+  void loadPromise.catch(() => {})
+
+  const entry: SystemModalEntry = {
+    popup,
+    parentWindow: parent,
+    popupWebContentsId: popup.webContents.id,
+    parentWindowId: parent.id,
+    rendererReady: false,
+    currentSpec: null,
+    currentCallback: null,
+    pendingSpec: null,
+    isOpen: false,
+    pendingShowTimer: null,
+  }
+  systemModalsByParent.set(entry.parentWindowId, entry)
+  systemModalsByWebContents.set(entry.popupWebContentsId, entry)
+
+  // Tear down with the parent.
+  const onParentClosed = (): void => {
+    systemModalsByParent.delete(entry.parentWindowId)
+    systemModalsByWebContents.delete(entry.popupWebContentsId)
+    try { parent.contentView.removeChildView(popup) } catch {}
+    if (!popup.webContents.isDestroyed()) popup.webContents.close()
+  }
+  parent.once('closed', onParentClosed)
+
+  popup.webContents.once('destroyed', () => {
+    if (!parent.isDestroyed()) {
+      parent.removeListener('closed', onParentClosed)
+    }
+    if (systemModalsByParent.get(entry.parentWindowId) === entry) {
+      systemModalsByParent.delete(entry.parentWindowId)
+    }
+    systemModalsByWebContents.delete(entry.popupWebContentsId)
+  })
+
+  // Resize with the parent window so the modal-popup always covers the
+  // body area (everything BELOW the title bar). Leaving the title-bar
+  // strip uncovered keeps it visually unblurred so the user can tell
+  // at a glance that the modal is a body-level overlay rather than a
+  // full-window takeover.
+  const layoutBelowTitleBar = (): void => {
+    if (popup.webContents.isDestroyed() || parent.isDestroyed()) return
+    const b = parent.getContentBounds()
+    const y = TITLEBAR_HEIGHT + 1
+    const h = Math.max(1, b.height - y)
+    popup.setBounds({ x: 0, y, width: b.width, height: h })
+  }
+  layoutBelowTitleBar()
+  parent.on('resize', layoutBelowTitleBar)
+  parent.once('closed', () => parent.removeListener('resize', layoutBelowTitleBar))
+
+  return entry
+}
+
+function hideSystemModal(
+  entry: SystemModalEntry,
+  opts: { releaseFocusToParent?: boolean } = {},
+): void {
+  if (!entry.isOpen && !entry.pendingShowTimer) return
+  entry.isOpen = false
+  if (entry.pendingShowTimer) {
+    clearTimeout(entry.pendingShowTimer)
+    entry.pendingShowTimer = null
+  }
+  if (!entry.popup.webContents.isDestroyed()) {
+    entry.popup.setVisible(false)
+    if (opts.releaseFocusToParent && !entry.parentWindow.isDestroyed()) {
+      entry.parentWindow.focus()
+    }
+  }
+}
+
+function showSystemModalNow(entry: SystemModalEntry): void {
+  if (entry.pendingShowTimer) {
+    clearTimeout(entry.pendingShowTimer)
+    entry.pendingShowTimer = null
+  }
+  if (entry.popup.webContents.isDestroyed() || entry.parentWindow.isDestroyed()) return
+  // Resize to cover the body area (below the title bar) on every show
+  // — the parent may have been resized between opens.
+  const b = entry.parentWindow.getContentBounds()
+  const y = TITLEBAR_HEIGHT + 1
+  const h = Math.max(1, b.height - y)
+  entry.popup.setBounds({ x: 0, y, width: b.width, height: h })
+  // Re-add to the top of the child-view stack so the modal paints
+  // above the comfy / panel views (but the title bar still sits
+  // above visually because the modal popup leaves its strip
+  // uncovered).
+  try { entry.parentWindow.contentView.removeChildView(entry.popup) } catch {}
+  entry.parentWindow.contentView.addChildView(entry.popup)
+  entry.popup.setVisible(true)
+  entry.popup.webContents.focus()
+  entry.isOpen = true
+}
+
+interface OpenSystemModalOpts {
+  parent: BrowserWindow
+  spec: Omit<SystemModalSpec, 'id'> & { id?: string }
+  callback: SystemModalCallback
+}
+
+/**
+ * Open a system-level confirm modal in the given host window. Replaces
+ * any modal currently displayed on the same surface (the previous
+ * callback is invoked with `'cancel'` so callers can tell their flow
+ * was superseded). Returns the resolved spec id so the caller can
+ * cross-reference the action ack if needed.
+ */
+function openSystemModal(opts: OpenSystemModalOpts): string {
+  const entry = ensureSystemModal(opts.parent)
+  // Supersede any in-flight modal — fire its callback as cancelled
+  // so the previous flow can clean up rather than wait forever.
+  if (entry.currentCallback) {
+    try { entry.currentCallback('cancel') } catch {}
+    entry.currentCallback = null
+    entry.currentSpec = null
+  }
+  const id = opts.spec.id ?? `sysmodal-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  const spec: SystemModalSpec = { ...opts.spec, id }
+
+  if (!entry.rendererReady) {
+    // Queue until the renderer signals ready; on `ready` we'll flush
+    // and push set-modal.
+    entry.pendingSpec = { spec, callback: opts.callback }
+    return id
+  }
+
+  entry.currentSpec = spec
+  entry.currentCallback = opts.callback
+  if (!entry.popup.webContents.isDestroyed()) {
+    entry.popup.webContents.send('comfy-systemmodal:set-modal', spec)
+  }
+  // Safety net — if the renderer's `notifyRendered` ack never arrives
+  // (mid-load crash, etc.), still flip visible after a short timeout
+  // so the user isn't stuck without UI.
+  if (!entry.pendingShowTimer) {
+    entry.pendingShowTimer = setTimeout(() => {
+      entry.pendingShowTimer = null
+      showSystemModalNow(entry)
+    }, 200)
+  }
+  return id
+}
+
+ipcMain.on('comfy-systemmodal:ready', (event) => {
+  const entry = systemModalsByWebContents.get(event.sender.id)
+  if (!entry) return
+  entry.rendererReady = true
+  if (entry.pendingSpec) {
+    const { spec, callback } = entry.pendingSpec
+    entry.pendingSpec = null
+    entry.currentSpec = spec
+    entry.currentCallback = callback
+    if (!entry.popup.webContents.isDestroyed()) {
+      entry.popup.webContents.send('comfy-systemmodal:set-modal', spec)
+    }
+    if (!entry.pendingShowTimer) {
+      entry.pendingShowTimer = setTimeout(() => {
+        entry.pendingShowTimer = null
+        showSystemModalNow(entry)
+      }, 200)
+    }
+  }
+})
+
+ipcMain.on('comfy-systemmodal:rendered', (event) => {
+  const entry = systemModalsByWebContents.get(event.sender.id)
+  if (!entry) return
+  showSystemModalNow(entry)
+})
+
+ipcMain.on(
+  'comfy-systemmodal:action',
+  (event, payload: { modalId?: unknown; action?: unknown }) => {
+    const entry = systemModalsByWebContents.get(event.sender.id)
+    if (!entry) return
+    const spec = entry.currentSpec
+    const cb = entry.currentCallback
+    if (!spec || !cb) return
+    // Stale ack — the modal was already replaced by a newer open.
+    if (payload?.modalId !== spec.id) return
+    const action = payload?.action
+    if (action !== 'confirm' && action !== 'cancel') return
+    entry.currentSpec = null
+    entry.currentCallback = null
+    hideSystemModal(entry, { releaseFocusToParent: true })
+    try { cb(action) } catch {}
   },
 )
 
