@@ -96,7 +96,7 @@ export type OverlayKind = 'settings' | 'progress' | 'takeover'
 export interface SettingsOverlay {
   kind: 'settings'
   installation: Installation | null
-  initialTab: 'comfy' | 'directories' | 'global'
+  initialTab: 'comfy' | 'directories' | 'downloads' | 'global'
   initialDetailTab?: string
   autoAction?: string | null
   noSidebar?: boolean

@@ -1,18 +1,20 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Box, FolderOpen, Settings as SettingsIcon } from 'lucide-vue-next'
+import { ArrowDownToLine, Box, FolderOpen, Settings as SettingsIcon } from 'lucide-vue-next'
 import ModalShell from '../components/ModalShell.vue'
 import DetailModal from './DetailModal.vue'
 import DirectoriesView from './DirectoriesView.vue'
+import DownloadsView from './DownloadsView.vue'
 import SettingsView from './SettingsView.vue'
 import type { Installation, ShowProgressOpts } from '../types/ipc'
 
 /**
  * Unified Settings modal — single ModalShell with a left-rail tab
- * switcher hosting the three previously-separate panels:
+ * switcher hosting the previously-separate panels:
  *   - "ComfyUI Settings" (per-install DetailModal body, embedded)
  *   - "Directories" (combined Models / Media directory browser)
+ *   - "Downloads" (rich downloads history — popup deep-links here)
  *   - "Global Settings" (launcher-wide settings — formerly "App Settings")
  *
  * "ComfyUI Settings" is gated on having an installation (install-less
@@ -20,7 +22,7 @@ import type { Installation, ShowProgressOpts } from '../types/ipc'
  * the default tab falls through to Global Settings).
  */
 
-export type SettingsTab = 'comfy' | 'directories' | 'global'
+export type SettingsTab = 'comfy' | 'directories' | 'downloads' | 'global'
 
 interface Props {
   installation: Installation | null
@@ -78,6 +80,12 @@ const tabs = computed<TabDef[]>(() => [
     key: 'directories',
     icon: FolderOpen,
     label: t('settingsModal.tabDirectories'),
+    available: true,
+  },
+  {
+    key: 'downloads',
+    icon: ArrowDownToLine,
+    label: t('settingsModal.tabDownloads'),
     available: true,
   },
   {
@@ -200,6 +208,9 @@ function handleUpdateInstallation(inst: Installation): void {
              plus a vertical scrollbar when the section list overflows. -->
         <div v-else-if="activeTab === 'directories'" class="settings-tab-scroll">
           <DirectoriesView />
+        </div>
+        <div v-else-if="activeTab === 'downloads'" class="settings-tab-scroll">
+          <DownloadsView />
         </div>
         <div v-else-if="activeTab === 'global'" class="settings-tab-scroll">
           <SettingsView />

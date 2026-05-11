@@ -960,6 +960,20 @@ onMounted(async () => {
           initialTab: 'comfy',
           initialDetailTab: 'update',
         })
+        return
+      }
+      if (payload.kind === 'open-settings') {
+        await bootstrapReady
+        const inst = installationId ? installationStore.getById(installationId) : null
+        const requested = payload.settingsTab
+        // Default to the host's natural tab — same fall-through the
+        // file-menu / title-bar Settings entries use via switchPanel.
+        const tab = requested ?? (inst ? 'comfy' : 'global')
+        await openOverlay({
+          kind: 'settings',
+          installation: inst ?? null,
+          initialTab: tab,
+        })
       }
     })()
   })

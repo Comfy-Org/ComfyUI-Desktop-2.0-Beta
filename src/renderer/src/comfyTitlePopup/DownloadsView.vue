@@ -48,9 +48,12 @@ type DownloadAction =
   | { action: 'cancel'; url: string }
   | { action: 'show-in-folder'; url: string; savePath: string }
 
+type PopupSettingsTab = 'comfy' | 'directories' | 'downloads' | 'global'
+
 interface PopupBridge {
   onDownloadsChanged(cb: (state: DownloadsState) => void): () => void
   downloadsAction(action: DownloadAction): void
+  openSettingsTab(tab: PopupSettingsTab): void
 }
 
 const bridge = (window as unknown as { __comfyTitlePopup?: PopupBridge }).__comfyTitlePopup
@@ -150,6 +153,9 @@ function cancel(url: string): void {
 function showInFolder(url: string, savePath: string): void {
   bridge?.downloadsAction({ action: 'show-in-folder', url, savePath })
 }
+function viewAllInSettings(): void {
+  bridge?.openSettingsTab('downloads')
+}
 </script>
 
 <template>
@@ -227,7 +233,7 @@ function showInFolder(url: string, savePath: string): void {
 
       <li
         v-for="d in state.recent"
-        :key="d.url"
+        :key="`recent-${d.url}`"
         class="downloads-item is-finished"
         :class="statusKindClass(d)"
       >
@@ -254,6 +260,12 @@ function showInFolder(url: string, savePath: string): void {
         </div>
       </li>
     </ul>
+
+    <footer class="downloads-foot">
+      <button type="button" class="downloads-link" @click="viewAllInSettings">
+        View all in Settings…
+      </button>
+    </footer>
   </div>
 </template>
 
@@ -386,5 +398,25 @@ function showInFolder(url: string, savePath: string): void {
 }
 .downloads-item-actions button:hover {
   filter: brightness(1.1);
+}
+
+.downloads-foot {
+  display: flex;
+  justify-content: center;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border, #494a50);
+  flex: 0 0 auto;
+}
+.downloads-link {
+  background: transparent;
+  border: none;
+  color: var(--accent, #60a5fa);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 6px;
+}
+.downloads-link:hover {
+  text-decoration: underline;
 }
 </style>

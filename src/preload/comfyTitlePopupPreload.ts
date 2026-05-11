@@ -62,6 +62,12 @@ export type PopupDownloadAction =
   | { action: 'cancel'; url: string }
   | { action: 'show-in-folder'; url: string; savePath: string }
 
+/** Settings tabs the popup can deep-link the host's panelView into.
+ *  Mirrors `SettingsTab` in `views/SettingsModal.vue` — kept inline
+ *  because the popup's tsconfig slice can't see the renderer's view
+ *  layer. */
+export type PopupSettingsTab = 'comfy' | 'directories' | 'downloads' | 'global'
+
 export interface ComfyTitlePopupBridge {
   /** A menu item was clicked — main routes by id and hides the popup. */
   activate(id: string): void
@@ -87,6 +93,10 @@ export interface ComfyTitlePopupBridge {
    *  show-in-folder) to main, which routes to the corresponding
    *  download-manager API. */
   downloadsAction(action: PopupDownloadAction): void
+  /** Close the popup and ask main to open the unified Settings modal
+   *  on the host's panelView at the given tab. Used by the downloads
+   *  view's "View all in Settings…" link. */
+  openSettingsTab(tab: PopupSettingsTab): void
 }
 
 function isPopupConfig(value: unknown): value is TitlePopupConfig {
@@ -135,6 +145,9 @@ const bridge: ComfyTitlePopupBridge = {
   },
   downloadsAction: (action) => {
     ipcRenderer.send('comfy-titlepopup:downloads-action', action)
+  },
+  openSettingsTab: (tab) => {
+    ipcRenderer.send('comfy-titlepopup:open-settings-tab', { tab })
   },
 }
 

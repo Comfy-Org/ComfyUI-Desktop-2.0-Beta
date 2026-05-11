@@ -884,8 +884,10 @@ export interface ElectronApi {
    *     Carries the target `version`.
    *   - `'install-update'` → Manage overlay (DetailModal) on the
    *     update tab, scoped to the carried `installationId`.
-   *   - `'downloads'` → Tier 1 popover listing in-flight and
-   *     recently-completed downloads from the shared `downloadStore`.
+   *   - `'open-settings'` → Tier 1 unified Settings modal at the
+   *     given `settingsTab` (defaults to the host's default tab).
+   *     Currently used by the title-bar downloads popup's
+   *     "View all in Settings…" deep-link.
    */
   onPanelTriggerOverlay(
     callback: (data: {
@@ -893,8 +895,10 @@ export interface ElectronApi {
         | 'install-update'
         | 'app-update-restart-prompt'
         | 'app-update-download-prompt'
+        | 'open-settings'
       installationId?: string
       version?: string | null
+      settingsTab?: 'comfy' | 'directories' | 'downloads' | 'global'
     }) => void,
   ): Unsubscribe
 }

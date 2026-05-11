@@ -3422,6 +3422,46 @@ ipcMain.on(
   },
 )
 
+/** Popup → host deep-link to the unified Settings modal at a given
+ *  tab. Mirrors the `click-install-update-pill` flow: bring the panel
+ *  view forward (lazily constructing it if needed), then send the
+ *  `panel-trigger-overlay 'open-settings'` IPC after the renderer has
+ *  finished loading so the listener is registered. The popup itself
+ *  is dismissed first so the overlay surface comes up unobstructed. */
+ipcMain.on(
+  'comfy-titlepopup:open-settings-tab',
+  (event, payload: { tab?: unknown }) => {
+    const popupEntry = titlePopupsByWebContents.get(event.sender.id)
+    if (!popupEntry) return
+    const tab = payload?.tab
+    if (
+      tab !== 'comfy'
+      && tab !== 'directories'
+      && tab !== 'downloads'
+      && tab !== 'global'
+    ) return
+    const parentEntry = comfyWindows.get(popupEntry.parentEntryId)
+    if (!parentEntry) return
+    hideTitlePopup(popupEntry, { releaseFocusToParent: false })
+    setActivePanel(popupEntry.parentEntryId, 'settings')
+    const panelView = parentEntry.panelView
+    if (!panelView || panelView.webContents.isDestroyed()) return
+    const sendDeepLink = (): void => {
+      if (panelView.webContents.isDestroyed()) return
+      panelView.webContents.send('panel-trigger-overlay', {
+        kind: 'open-settings',
+        installationId: parentEntry.installationId,
+        settingsTab: tab,
+      })
+    }
+    if (panelView.webContents.isLoadingMainFrame()) {
+      panelView.webContents.once('did-finish-load', sendDeepLink)
+    } else {
+      sendDeepLink()
+    }
+  },
+)
+
 /**
  * Title-bar dropdown popups.
  *
