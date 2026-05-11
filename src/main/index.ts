@@ -2568,13 +2568,19 @@ ipcMain.on('comfy-window:click-app-update-pill', (event) => {
   if (entry.window.isDestroyed()) return
   const state = updater.getCurrentUpdateState()
   if (state.kind !== 'ready' && state.kind !== 'available') return
-  // In Comfy instance windows the panelView is constructed lazily on the
-  // first non-comfy switch, so the pill click would hit a null panelView
-  // when the user is still on the ComfyUI body. Mirror the feedback /
-  // install-update-pill pattern: ensure the panel exists for the current
-  // body mode; `sendToPanelDeferred` handles the did-finish-load wait
-  // if the bundle is still loading.
-  const panelView = entry.panelView ?? ensurePanelView(id, entry, computeBodyMode(entry))
+  // The confirm modal is rendered by `<ModalDialog />` inside PanelApp,
+  // which is only visible when the panel surface is the active body. In
+  // a Comfy instance window the user is typically on the ComfyUI body,
+  // so we must mirror `click-install-update-pill`: switch the active
+  // panel to 'settings' to bring the panel forward (this also lazily
+  // constructs panelView on its first non-comfy switch). Re-resolve
+  // panelView after the switch so we pick up any view that
+  // `setActivePanel` may have just created. `sendToPanelDeferred` then
+  // waits for `did-finish-load` if the bundle is still loading so the
+  // modal trigger doesn't race the renderer's listener registration.
+  setActivePanel(id, 'settings')
+  const panelView = entry.panelView
+  if (!panelView) return
   const overlayKind = state.kind === 'ready'
     ? 'app-update-restart-prompt'
     : 'app-update-download-prompt'
