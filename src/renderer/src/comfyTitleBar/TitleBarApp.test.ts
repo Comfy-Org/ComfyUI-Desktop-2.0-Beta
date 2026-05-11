@@ -341,11 +341,13 @@ describe('TitleBarApp', () => {
     expect(wrapper.find('.title-menu-button--icon').exists()).toBe(true)
     expect(wrapper.find('header').classes()).not.toContain('is-consent-lockdown')
 
-    // Consent step on screen — waffle disappears.
+    // Consent step on screen — waffle disappears, downloads stays so an
+    // in-flight model download remains reachable while the waffle is hidden.
     bridgeState.firstUseModeChangedCallbacks.forEach((cb) => cb('consent-lockdown'))
     await flushPromises()
     expect(wrapper.find('header').classes()).toContain('is-consent-lockdown')
     expect(wrapper.find('.title-menu-button--icon').exists()).toBe(false)
+    expect(wrapper.find('.title-downloads-tray').exists()).toBe(true)
 
     // Advance to post-consent — waffle reappears (Skip Onboarding now
     // available there).
@@ -588,11 +590,17 @@ describe('TitleBarApp', () => {
   // Track F — title-bar downloads tray
   // ===================================================================
 
-  it('hides the downloads tray when there are no active or recent downloads', async () => {
+  it('renders the downloads tray with no badge in the empty steady state', async () => {
+    // The downloads tray is always-visible — the empty-state copy
+    // ("No downloads yet") lives inside the popup, not in the title
+    // bar. The badge stays absent until something is in flight.
     const { default: TitleBarApp } = await import('./TitleBarApp.vue')
     const wrapper = mount(TitleBarApp)
     await flushPromises()
-    expect(wrapper.find('.title-downloads-tray').exists()).toBe(false)
+    const tray = wrapper.find('.title-downloads-tray')
+    expect(tray.exists()).toBe(true)
+    expect(wrapper.find('.title-downloads-badge').exists()).toBe(false)
+    expect(tray.attributes('title')).toBe('Downloads')
   })
 
   it('renders the downloads tray with a badge counter when there are in-flight downloads', async () => {
@@ -686,7 +694,7 @@ describe('TitleBarApp', () => {
     expect(wrapper.find('.title-downloads-tray').attributes('title')).toBe('1 download in progress')
   })
 
-  it('hides the tray again when the state transitions back to empty', async () => {
+  it('clears the badge when the state transitions back to empty (button stays visible)', async () => {
     const { default: TitleBarApp } = await import('./TitleBarApp.vue')
     const wrapper = mount(TitleBarApp)
     await flushPromises()
@@ -706,9 +714,11 @@ describe('TitleBarApp', () => {
     )
     await flushPromises()
     expect(wrapper.find('.title-downloads-tray').exists()).toBe(true)
+    expect(wrapper.find('.title-downloads-badge').exists()).toBe(true)
     bridgeState.downloadsChangedCallbacks.forEach((cb) => cb({ active: [], recent: [] }))
     await flushPromises()
-    expect(wrapper.find('.title-downloads-tray').exists()).toBe(false)
+    expect(wrapper.find('.title-downloads-tray').exists()).toBe(true)
+    expect(wrapper.find('.title-downloads-badge').exists()).toBe(false)
   })
 
   it('forwards downloads-tray clicks through the bridge', async () => {

@@ -325,35 +325,25 @@ function handleInstallUpdatePill(): void {
 }
 
 /**
- * Track F — title-bar downloads tray. Sits in the left cluster next
- * to the app-update pill but visually distinct: an icon-only button
- * with a small badge counter (vs the update pill's text + accent
- * fill) and a different Lucide icon (`ArrowDownToLine` vs the
- * update pill's `Download`) so the user reads "downloads tray" vs
- * "update available pill" at a glance.
+ * Title-bar downloads tray. Always-visible icon button sitting in the
+ * center cluster immediately left of the install pill. Distinct from
+ * the update pills in two ways so the user reads them at a glance:
+ *   - Icon (`ArrowDownToLine` vs `Download` / `RefreshCw`).
+ *   - Chrome (neutral surface tint vs blue/green accent).
  *
- * Hidden entirely in the steady state (no active or recent
- * downloads) — there's no permanent empty-tray squatting. The
- * badge counts in-flight downloads only; recently-completed
- * entries surface in the popover but don't bump the count (so the
- * count reads as "what's still working").
+ * The badge counts in-flight downloads only; recently-completed
+ * entries surface in the popup but don't bump the count (so the
+ * count reads as "what's still working"). Click opens the title-bar
+ * dropdown popup in `'downloads'` mode; the popup carries the
+ * empty-state copy so the title-bar button stays present even when
+ * nothing is downloading.
  *
- * Click sends `clickDownloadsTray()` which routes through main and
- * mounts the downloads popover in the panel renderer (same
- * `panel-trigger-overlay` pipeline the update pills use).
- *
- * Modal-unification (Track M-4) — the pre-M-4 isInert disable that
- * dimmed this tray during any Tier 3 takeover was retired together
- * with the rest of the title-bar lockdown system; the tray stays
- * live during a takeover and clicking it pops the downloads
- * popover even with a binding modal open.
+ * Stays visible during the consent lockdown so an in-flight model
+ * download remains reachable while the waffle / feedback are hidden.
  */
 const downloadsState = ref<DownloadsTrayState>({ active: [], recent: [] })
 
 const downloadsActiveCount = computed(() => downloadsState.value.active.length)
-const showDownloadsTray = computed(
-  () => downloadsState.value.active.length > 0 || downloadsState.value.recent.length > 0,
-)
 const downloadsTrayLabel = computed<string>(() => {
   const n = downloadsActiveCount.value
   if (n === 0) return 'Downloads'
@@ -561,19 +551,15 @@ onUnmounted(() => {
          carry their own "File" — having two "File" entries stacked
          vertically read as redundant. The hamburger reads as a
          host-app-level menu and stays out of ComfyUI's namespace. -->
-    <div class="title-left">
-      <!-- File / waffle menu button stays live during Tier 3 takeovers
-           so the user can always reach Return-to-Dashboard /
-           Close-Window / open a fresh chooser via "New Window" / use
-           the Skip Onboarding entry (M-2.2) without dismissing the
-           takeover via title-bar affordances.
-           Modal-unification (Track M-2.3) — exception: during the
-           first-use T&C consent step (`isConsentLockdown`) the menu
-           is hidden entirely. The consent step is the one moment we
-           explicitly want no in-app way past the takeover — the user
-           must either accept consent or close the window via OS
-           chrome. The waffle reappears once the takeover advances to
-           `'post-consent'`. -->
+    <!-- Left cluster: waffle menu + app-update pill. Both stay live
+         during Tier 3 takeovers so the user can reach Return-to-Dashboard
+         / Close-Window / Skip Onboarding without dismissing the
+         takeover. Exception: during the first-use T&C consent step
+         (`isConsentLockdown`) the waffle is hidden entirely so the
+         user must either accept consent or close the window via OS
+         chrome; the waffle reappears once the takeover advances to
+         `'post-consent'`. -->
+    <div class="title-cluster">
       <button
         v-if="!isConsentLockdown"
         ref="fileBtn"
@@ -586,10 +572,9 @@ onUnmounted(() => {
       >
         <MenuIcon :size="18" />
       </button>
-      <!-- Issue #488 — app-update pill. Sits right of the hamburger
-           and disappears entirely in the steady state (no update).
-           Click is routed through main (`comfy-window:click-app-update-pill`)
-           which fires the appropriate confirm modal in the panel. -->
+      <!-- App-update pill (issue #488) — disappears entirely in the
+           steady state. Click routes through main, which fires the
+           appropriate confirm modal in the panel. -->
       <button
         v-if="showAppUpdatePill"
         type="button"
@@ -603,14 +588,23 @@ onUnmounted(() => {
         <RefreshCw v-else-if="appUpdateState.kind === 'ready'" :size="14" />
         <span class="title-update-pill-label">{{ appUpdatePillLabel }}</span>
       </button>
-      <!-- Track F — downloads tray. Icon-only chip with a small badge
-           counter. Hidden in the steady state (no active or recent
-           downloads) so the title bar reads clean. The icon
-           (`ArrowDownToLine`) is intentionally distinct from the
-           update pills' `Download` icon so the user reads "downloads
-           tray" vs "update available pill" at a glance. -->
+    </div>
+
+    <!-- Center: downloads tray + install pill + install-update pill.
+         Single click target on the pill opens the unified Settings
+         modal; the downloads tray is always-visible (the empty-state
+         copy lives inside the popup) and the install-update pill
+         only mounts when an install update is available. -->
+    <div class="title-center">
+      <!-- Always-visible downloads tray. Click opens the title-bar
+           dropdown popup in `'downloads'` mode anchored under the
+           button. The icon (`ArrowDownToLine`) is intentionally
+           distinct from the update pills' `Download` icon so the
+           user reads "downloads tray" vs "update available pill"
+           at a glance. Stays visible during `isConsentLockdown` so
+           in-flight model downloads remain reachable while the
+           waffle is hidden. -->
       <button
-        v-if="showDownloadsTray"
         ref="downloadsBtn"
         type="button"
         class="title-downloads-tray"
@@ -626,27 +620,6 @@ onUnmounted(() => {
           aria-hidden="true"
         >{{ downloadsActiveCount }}</span>
       </button>
-      <!-- Send Feedback — always-visible affordance restored from the
-           pre-unified-window sidebar. Hidden during the consent-lockdown
-           step for the same reason the waffle is: the only first-use
-           gesture we want available is consent or OS-chrome close. -->
-      <button
-        v-if="!isConsentLockdown"
-        type="button"
-        class="title-menu-button title-menu-button--icon title-feedback-button"
-        title="Send Feedback"
-        aria-label="Send Feedback"
-        @click="handleFeedback"
-      >
-        <MessageSquarePlus :size="16" />
-      </button>
-    </div>
-
-    <!-- Center: install pill. Single click target — clicking anywhere
-         on it opens the native install menu. The caret inside is
-         decoration, not a separate button. Install-less host windows
-         render the pill as a disabled identity label (no menu, no caret). -->
-    <div class="title-center">
       <!-- Center identity pill. Install-backed hosts show the install's
            name + install-type icon; install-less hosts show the static
            `Desktop 2.0 Beta` label. The pill is a non-interactive label
@@ -690,6 +663,23 @@ onUnmounted(() => {
     </div>
 
     <div class="drag-spacer"></div>
+
+    <!-- Trailing cluster: Send Feedback. Hidden during the consent
+         lockdown for the same reason the waffle is — the only
+         first-use gesture we want available is consent or OS-chrome
+         close. -->
+    <div class="title-trailing">
+      <button
+        v-if="!isConsentLockdown"
+        type="button"
+        class="title-menu-button title-menu-button--icon title-feedback-button"
+        title="Send Feedback"
+        aria-label="Send Feedback"
+        @click="handleFeedback"
+      >
+        <MessageSquarePlus :size="16" />
+      </button>
+    </div>
   </header>
 </template>
 
@@ -719,24 +709,24 @@ onUnmounted(() => {
    `-webkit-app-region: no-drag` (set on each <button> below). Marking
    the containers no-drag would consume the entire title bar width and
    leave only the small left/right padding zones draggable. */
-.title-left {
+.title-cluster {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 4px;
   flex: 0 0 auto;
   /* Sits above the absolutely-positioned center cluster so the
-     hamburger / update pills / downloads tray remain clickable if the
-     window narrows enough that the centered pill would otherwise
-     overlap them. */
+     hamburger / app-update pill remain clickable if the window
+     narrows enough that the centered pill would otherwise overlap
+     them. */
   z-index: 1;
 }
 /* macOS: shift past the traffic lights (78px reservation − 12px base padding). */
-.title-bar.is-mac .title-left {
+.title-bar.is-mac .title-cluster {
   margin-left: 66px;
 }
 /* Traffic lights vanish in macOS fullscreen — reclaim the inset. */
-.title-bar.is-mac.is-fullscreen .title-left {
+.title-bar.is-mac.is-fullscreen .title-cluster {
   margin-left: 0;
 }
 
@@ -752,19 +742,34 @@ onUnmounted(() => {
   gap: 4px;
   min-width: 0;
   max-width: calc(100% - 24px);
+  /* Sits above the elastic drag-spacer so the always-visible
+     downloads tray and the install-update pill stay clickable when
+     the window narrows. */
+  z-index: 1;
+}
+
+.title-trailing {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  margin-left: 12px;
+  z-index: 1;
+}
+/* Win/Linux: native close / min / max controls overlay the right
+   ~140px of the window. Push the trailing cluster past them so the
+   feedback button doesn't sit underneath the OS chrome. */
+.title-bar:not(.is-mac) .title-trailing {
+  margin-right: 128px;
 }
 
 .drag-spacer {
-  /* Eats the remaining flex space so the bar's drag region fills the
-     row. On Win/Linux it also reserves room for the native window
-     controls (close/min/max) on the right; on macOS the traffic
-     lights live on the left so no right reservation is needed. */
+  /* Eats the remaining flex space between the center cluster and the
+     trailing cluster so the bar's drag region fills the row. */
   flex: 1 1 auto;
-  min-width: 128px; /* 140px native-controls reservation − 12px base padding */
-  height: 100%;
-}
-.title-bar.is-mac .drag-spacer {
   min-width: 0;
+  height: 100%;
 }
 
 /* --- App / hamburger menu button --- */
@@ -797,14 +802,6 @@ onUnmounted(() => {
 .title-menu-button--icon {
   padding: 4px 6px;
   gap: 0;
-}
-
-/* Send Feedback sits visually apart from the
-   waffle / app-update / downloads cluster — the cluster is window-
-   chrome, the feedback button is an outbound action. The extra inset
-   (on top of the 2px container gap) reads as "different group". */
-.title-feedback-button {
-  margin-left: 10px;
 }
 
 /* --- Install pill (center) — single click target. The whole pill
