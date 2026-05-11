@@ -71,11 +71,10 @@ const UPDATER_UNAVAILABLE_MESSAGE = 'ToDesktop auto-updater is unavailable.'
 
 /** Issue #488 — single source of truth for the auto-install flag.
  *  Default-on: any non-`false` value (including missing) is treated as
- *  enabled. Reads the new `autoInstallUpdates` key (the legacy
- *  `autoUpdate` setting was retired from the UI in #488 — auto-checks
- *  always run now and only the install behavior is user-controllable).
- *  The `AppUpdateState.autoUpdate` field name is kept for the renderer
- *  payload so callers don't have to churn — it now mirrors this flag. */
+ *  enabled. Reads the `autoInstallUpdates` key — auto-checks always
+ *  run, and only the install behavior is user-controllable. The
+ *  `AppUpdateState.autoUpdate` field name is kept for the renderer
+ *  payload and mirrors this flag. */
 function isAutoInstallEnabled(): boolean {
   return settings.get('autoInstallUpdates') !== false
 }
@@ -258,8 +257,8 @@ export function runCheck(
 }
 
 /**
- * Phase 3 §18 — current app-update state for the title-bar status
- * pill. Returned by reference for cheapness; callers must not mutate.
+ * Current app-update state for the title-bar status pill. Returned by
+ * reference for cheapness; callers must not mutate.
  * Title-bar webContents that mount AFTER an `update-available` /
  * `update-downloaded` broadcast still need the latest state to render
  * their pill, so main pushes this on `comfy-titlebar:title-bar-ready`
@@ -270,7 +269,7 @@ export function getCurrentUpdateState(): AppUpdateState {
 }
 
 /**
- * Phase 3 §18 — subscribe to app-update state transitions. Main
+ * Subscribe to app-update state transitions. Main
  * registers once at startup and forwards each call to every host
  * window's title-bar webContents. Returns an unsubscribe function.
  *

@@ -33,7 +33,7 @@ interface MenuAnchor {
   y: number
 }
 
-/** Track F — single download entry surfaced by the title-bar tray.
+/** Single download entry surfaced by the title-bar tray.
  *  Inline mirror of `DownloadsTrayEntry` in
  *  `src/preload/comfyTitleBarPreload.ts` — kept in sync because the
  *  title-bar renderer can't import preload TS directly (only its
@@ -47,7 +47,7 @@ interface DownloadsTrayEntry {
   error?: string
 }
 
-/** Track F — payload pushed by main on `comfy-titlebar:downloads-changed`.
+/** Payload pushed by main on `comfy-titlebar:downloads-changed`.
  *  Inline mirror of `DownloadsTrayState` in the preload file. */
 interface DownloadsTrayState {
   active: DownloadsTrayEntry[]
@@ -65,35 +65,33 @@ interface Bridge {
   dismissFileMenu: () => void
   onPanelChanged: (cb: (panel: ComfyPanelKey) => void) => () => void
   onTitleChanged: (cb: (title: string) => void) => () => void
-  /** Track B item 4 — install source-category pushes from main. The
-   *  raw category string drives the install-type icon next to the
-   *  install name (Standalone / Cloud / Legacy Desktop / …). `null`
-   *  for install-less host windows; the renderer suppresses the icon
-   *  in that case. */
+  /** Install source-category pushes from main. The raw category
+   *  string drives the install-type icon next to the install name
+   *  (Standalone / Cloud / Legacy Desktop / …). `null` for
+   *  install-less host windows; the renderer suppresses the icon in
+   *  that case. */
   onSourceCategoryChanged: (cb: (category: string | null) => void) => () => void
   onThemeChanged: (cb: (theme: { bg: string; text: string }) => void) => () => void
   onFullscreenChanged: (cb: (fullscreen: boolean) => void) => () => void
   onMenuOpened: (cb: (info: { menu: 'menu' | 'downloads' }) => void) => () => void
   onMenuClosed: (cb: (info: { menu: 'menu' | 'downloads' }) => void) => () => void
-  /** Modal-unification (Track M-2.3) — first-use takeover step pushes
-   *  from main. Drives the T&C-step lockdown that hides the waffle
-   *  menu (the otherwise-always-live escape hatch) so the user has to
-   *  either accept consent or close the window via OS chrome —
-   *  there's no in-app affordance that drops them past the T&C
-   *  without a recorded answer. The post-consent steps stay normal
-   *  except for the Skip Onboarding entry the menu builder adds in
-   *  M-2.2. */
+  /** First-use takeover step pushes from main. Drives the T&C-step
+   *  lockdown that hides the waffle menu (the otherwise-always-live
+   *  escape hatch) so the user has to either accept consent or close
+   *  the window via OS chrome — there's no in-app affordance that
+   *  drops them past the T&C without a recorded answer. The
+   *  post-consent steps stay normal except for the Skip Onboarding
+   *  entry the menu builder adds. */
   onFirstUseModeChanged: (
     cb: (mode: 'none' | 'consent-lockdown' | 'post-consent') => void,
   ) => () => void
-  /** Phase 3 §18 — app-update state pushes from main. `kind` is
-   *  `'available'` after `update-available`, `'ready'` after
-   *  `update-downloaded`, and `null` when nothing is pending.
-   *  Drives the title-bar app-update pill that sits to the right of
-   *  the hamburger menu.
+  /** App-update state pushes from main. `kind` is `'available'`
+   *  after `update-available`, `'ready'` after `update-downloaded`,
+   *  and `null` when nothing is pending. Drives the title-bar
+   *  app-update pill that sits to the right of the hamburger menu.
    *
-   *  Track B item 2 — `autoUpdate` mirrors the `autoUpdate` setting
-   *  at the moment the state was committed. With auto-updates ON the
+   *  `autoUpdate` mirrors the `autoUpdate` setting at the moment the
+   *  state was committed. With auto-updates ON the
    *  `'available'` state never fires (main triggers the download
    *  itself); the `'ready'` state then reads "Update will apply on
    *  restart". With auto-updates OFF the `'available'` pill reads
@@ -106,21 +104,20 @@ interface Bridge {
       autoUpdate: boolean
     }) => void,
   ) => () => void
-  /** Phase 3 §18 — install-update flag pushes from main. `available`
-   *  is `true` when the install's `statusTag.style === 'update'`;
-   *  `version` carries the target release version when known so the
-   *  pill can read "Update v{version}" (Track B item 1). Only
-   *  meaningful on install-backed host windows; install-less hosts
-   *  never receive this signal. Drives the title-bar install-update
-   *  pill. */
+  /** Install-update flag pushes from main. `available` is `true`
+   *  when the install's `statusTag.style === 'update'`; `version`
+   *  carries the target release version when known so the pill can
+   *  read "Update v{version}". Only meaningful on install-backed
+   *  host windows; install-less hosts never receive this signal.
+   *  Drives the title-bar install-update pill. */
   onInstallUpdateAvailable: (
     cb: (state: { available: boolean; version: string | null }) => void,
   ) => () => void
-  /** Phase 3 §18 — click handler for the app-update pill. */
+  /** Click handler for the app-update pill. */
   clickAppUpdatePill: () => void
-  /** Phase 3 §18 — click handler for the install-update pill. */
+  /** Click handler for the install-update pill. */
   clickInstallUpdatePill: () => void
-  /** Track F — downloads tray state pushes from main. The payload
+  /** Downloads tray state pushes from main. The payload
    *  carries both in-flight downloads (`active`) and the most recent
    *  terminal entries (`recent`, capped server-side at 10). The tray
    *  is hidden entirely when both arrays are empty so it doesn't
@@ -173,33 +170,23 @@ const isHoverActive = ref(true)
  *  an identity label, not a tab indicator. */
 const activePanel = ref<ComfyPanelKey>('comfy')
 /**
- * Modal-unification (Track M-2.3 / M-4) — first-use takeover step
- * pushed from main via `comfy-titlebar:first-use-mode-changed`. The
- * renderer uses the value to lock down the title bar during the T&C
- * consent step (`'consent-lockdown'`) by hiding the waffle menu —
- * the only always-live escape hatch the user would otherwise have
- * out of the binding takeover. Post-consent steps (`'post-consent'`)
- * leave the title bar normal so the file-menu Skip Onboarding entry
- * the menu builder added in M-2.2 stays reachable. `'none'` is the
- * steady state with no takeover mounted.
+ * First-use takeover step pushed from main via
+ * `comfy-titlebar:first-use-mode-changed`. The renderer uses the
+ * value to lock down the title bar during the T&C consent step
+ * (`'consent-lockdown'`) by hiding the waffle menu — the only
+ * always-live escape hatch the user would otherwise have out of the
+ * binding takeover. Post-consent steps (`'post-consent'`) leave the
+ * title bar normal so the file-menu Skip Onboarding entry stays
+ * reachable. `'none'` is the steady state with no takeover mounted.
  *
  * State is local, main does NOT cache the value here (it's cached on
  * the host entry main-side, see `ComfyWindowEntry.firstUseMode`),
  * matching how panel-changed / theme-changed already work.
- *
- * The pre-M-4 `isInert` ref that used to disable the install pill /
- * back-forward arrows / app-update + install-update + downloads
- * pills during ANY Tier 3 takeover was retired — the binding-modal
- * chrome (M-3) handles "the user is in a centred dialog and the
- * other affordances are visually subordinate", and the cancel-on-
- * close consult (M-2.4) handles OS-X gracefully. The other title-
- * bar affordances stay live so the user can deliberately click out
- * via Skip Onboarding / Return-to-Dashboard / etc.
  */
 const firstUseMode = ref<'none' | 'consent-lockdown' | 'post-consent'>('none')
 const isConsentLockdown = computed(() => firstUseMode.value === 'consent-lockdown')
 /**
- * Install-less host window flag (Phase 3 step 2c). When true, the center
+ * Install-less host window flag. When true, the center
  * install pill labels itself "Desktop 2.0 Beta" (set by the initial
  * title push from main) and the install-type icon next to the label is
  * suppressed. The center pill is no longer clickable in either mode —
@@ -209,12 +196,12 @@ const isConsentLockdown = computed(() => firstUseMode.value === 'consent-lockdow
  */
 const isInstallLess = ref((bridge?.getInstallationId() ?? '') === '')
 /** Install identity ("MyInstall") — main pushes this on ready.
- *  Track B item 4 — the source-category suffix (`— Standalone` /
- *  `— Cloud` / …) is no longer part of the label; it's rendered as
- *  an icon next to the name via `installTypeIcon`. */
+ *  The source-category suffix (`— Standalone` / `— Cloud` / …) is
+ *  not part of the label; it's rendered as an icon next to the name
+ *  via `installTypeIcon`. */
 const installLabel = ref('ComfyUI')
 /**
- * Track B item 4 — raw `sourceCategory` string pushed by main on the
+ * Raw `sourceCategory` string pushed by main on the
  * `comfy-titlebar:source-category-changed` channel. Drives the
  * install-type icon next to the install name (Standalone laptop /
  * Cloud / Legacy Desktop tower / …) via the shared
@@ -243,7 +230,7 @@ const themeBg = ref<string | null>(null)
 const themeText = ref<string | null>(null)
 
 /**
- * Phase 3 §18 — title-bar status pills.
+ * Title-bar status pills.
  *
  * The app-update pill (right of the hamburger) shows when the
  * auto-updater has either downloaded an update (`'ready'`, prompts
@@ -259,13 +246,6 @@ const themeText = ref<string | null>(null)
  * pushed from main on `comfy-titlebar:install-update-changed` and is
  * gated on `!isInstallLess` (install-less hosts have no install backing
  * the window, so an install-scoped pill is meaningless there).
- *
- * Modal-unification (Track M-4) — the pre-M-4 isInert disable that
- * gated both pills during any Tier 3 takeover was retired together
- * with the broader title-bar lockdown system. The pills now stay
- * live during a takeover; the binding-modal chrome (M-3) keeps the
- * takeover visually dominant and clicking the app-update pill is
- * treated as a deliberate user action.
  */
 const appUpdateState = ref<{
   kind: 'available' | 'downloading' | 'ready' | null
@@ -647,10 +627,9 @@ onUnmounted(() => {
         class="title-install-pill"
         :class="{ 'is-install-less': isInstallLess }"
       >
-        <!-- Track B item 4 — install-type icon (Standalone laptop /
-             Cloud / Legacy Desktop tower / …) replaces the old
-             `— {label}` textual suffix. Sized at 14px to fit inside
-             the 36px content area without growing the pill. -->
+        <!-- Install-type icon (Standalone laptop / Cloud / Legacy
+             Desktop tower / …). Sized at 14px to fit inside the
+             36px content area without growing the pill. -->
         <component
           :is="installTypeMeta.icon"
           v-if="showInstallTypeIcon"
@@ -661,7 +640,7 @@ onUnmounted(() => {
         />
         <span class="title-install-name">{{ installLabel }}</span>
       </div>
-      <!-- Phase 3 §18 — install-update pill. Suppressed in install-less
+      <!-- Install-update pill. Suppressed in install-less
            mode (no install backing the host) and in the steady state
            (status tag isn't `update`). Click sends a panel-trigger to
            open the manage overlay on the update tab — same surface the
@@ -867,22 +846,16 @@ onUnmounted(() => {
   white-space: nowrap;
   min-width: 0;
 }
-/* Track B item 4 — install-type icon. Sized to fit the 36px content
-   area of the title bar without growing it; opacity matches the
-   caret so the icon reads as a calm visual cue rather than competing
-   with the install name. */
+/* Install-type icon. Sized to fit the 36px content area of the title
+   bar without growing it; opacity matches the caret so the icon
+   reads as a calm visual cue rather than competing with the install
+   name. */
 .title-install-type-icon {
   flex-shrink: 0;
   opacity: 0.85;
 }
 
-/* Modal-unification (Track M-4) — the legacy `.title-bar.is-inert`
-   dimming block that lived here is retired. The broad title-bar
-   inert system was replaced by the binding-modal chrome (M-3) plus
-   the per-step `firstUseMode` waffle hide (M-2.3); no rule now
-   targets `.is-inert`. */
-
-/* --- Phase 3 §18 — Status pills (app-update + install-update) ---
+/* --- Status pills (app-update + install-update) ---
    Compact chip styling. The pills must fit inside the 36px content
    area of the 37px title bar (1px bottom border) without growing it,
    so padding/font-size are kept tight. Default colour palette tracks
@@ -939,7 +912,7 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 
-/* --- Track F — downloads tray ---
+/* --- Downloads tray ---
    Icon-only chip sitting next to the app-update pill. Distinct from
    the update pills in three ways so the user reads them at a glance
    as separate things:

@@ -127,7 +127,7 @@ export interface ActionDef {
   /** Visual style for the action button.
    *  - `primary`: solid blue, does the thing immediately on click.
    *  - `accent`: hollow blue, telegraphs that a confirmation step
-   *    will run before doing anything (Phase 3 §9 convention).
+   *    will run before doing anything.
    *  - `danger`: red, destructive action. */
   style?: 'primary' | 'accent' | 'danger'
   enabled?: boolean
@@ -207,9 +207,7 @@ export interface ListAction {
 
 /** Payload carried by every component's `show-progress` emit. The host
  *  (typically `PanelApp`) consumes the closure-bound `apiCall` to drive
- *  ProgressModal. The pre-§17 `actionId` field is gone — the
- *  takeover-replaces-modal rule of `useOverlay` subsumes the
- *  chooser-host launch-swap-in-place special case. */
+ *  ProgressModal. */
 export interface ShowProgressOpts {
   installationId: string
   title: string
@@ -726,27 +724,26 @@ export interface ElectronApi {
    *  panel after a navigate-list emit (e.g. delete) so the parent window
    *  doesn't linger with no install backing it. */
   closeComfyWindow(installationId: string): Promise<boolean>
-  /** Close the BrowserWindow that contains the calling panel WebContents
-   *  (Phase 3 step 2d). Used by the chooser to retire its install-less
-   *  host window after a successful pick → launch hand-off. Returns true
-   *  if a window was found and closed. */
+  /** Close the BrowserWindow that contains the calling panel
+   *  WebContents. Used by the chooser to retire its install-less
+   *  host window after a successful pick → launch hand-off.
+   *  Returns true if a window was found and closed. */
   closeHostWindow(): Promise<boolean>
   /** Page X-close (Settings / Directories / Install Settings header).
    *  Asks main to reset the panel-history stack and return the body to
    *  the comfy/chooser root. Fire-and-forget; the panel will receive
    *  the resulting `panel-switch` like any other navigation. */
   closeCurrentPanel(): void
-  /** Modal-unification (Track M-2.2) — push the first-use takeover's
-   *  current step to main so it can (a) cache the value on the host
-   *  entry for `buildTitlePopupMenuItems` to read synchronously and (b)
-   *  forward to the title-bar webContents (consumed in M-2.3). Fire-
-   *  and-forget; FirstUseTakeover.vue calls this on every step change
-   *  and on unmount with `'none'`. */
+  /** Push the first-use takeover's current step to main so it can
+   *  (a) cache the value on the host entry for
+   *  `buildTitlePopupMenuItems` to read synchronously and (b)
+   *  forward to the title-bar webContents. Fire-and-forget;
+   *  FirstUseTakeover.vue calls this on every step change and on
+   *  unmount with `'none'`. */
   setFirstUseMode(mode: 'none' | 'consent-lockdown' | 'post-consent'): void
-  /** Modal-unification (Track M-2.2) — main routes the file-menu
-   *  Skip Onboarding click here. Handler runs the same
-   *  `markFirstUseCompleted` + dismiss-takeover sequence the Cloud
-   *  pick path uses. Returns an unsubscribe. */
+  /** Main routes the file-menu Skip Onboarding click here. Handler
+   *  runs the same `markFirstUseCompleted` + dismiss-takeover
+   *  sequence the Cloud pick path uses. Returns an unsubscribe. */
   onFirstUseSkip(callback: () => void): Unsubscribe
   /** Main forwards both the title-bar feedback button and the file-menu
    *  "Send Feedback" entry here. The panel renderer fires the
@@ -756,7 +753,7 @@ export interface ElectronApi {
    *  `buildSupportUrl()` reads `navigator.userAgent` and the telemetry
    *  helpers live renderer-side. Returns an unsubscribe. */
   onOpenFeedback(callback: (data: { source: 'titlebar' | 'menu' }) => void): Unsubscribe
-  /** Step 5 §16 — main consults the panel renderer before tearing down
+  /** Main consults the panel renderer before tearing down
    *  the host window. Returns an unsubscribe; the callback receives a
    *  `requestId` it must echo back via `respondCloseRequest` so main
    *  can pair the response with the request that fired it. */
@@ -771,22 +768,21 @@ export interface ElectronApi {
    *  may take their time on the cancel-prompt). */
   ackCloseRequest(payload: { requestId: string }): void
   /** Stamp the calling chooser host window's current bounds onto the
-   *  install's saved-bounds slot (Phase 3 visual continuity). The chooser
-   *  pick flow used this BEFORE the W-4 in-place attach landed — kept
-   *  as the fallback wiring for `claimAttachHost` rejections (e.g. the
-   *  install uses `browserPartition === 'unique'` and needs a fresh
-   *  window with its own partition). No-op for install-backed callers. */
+   *  install's saved-bounds slot (visual continuity). Fallback wiring
+   *  for `claimAttachHost` rejections (e.g. the install uses
+   *  `browserPartition === 'unique'` and needs a fresh window with
+   *  its own partition). No-op for install-backed callers. */
   transferHostBoundsToInstall(installationId: string): Promise<boolean>
-  /** Window-mode unification (Stage W-4) — claim the calling install-
-   *  less host window for in-place attach. Run by the chooser-host
-   *  renderer right before kicking off the launch action; when the
-   *  launch event eventually lands in main, `onLaunch()` consumes
-   *  the claim and attaches the install to THIS host window instead
-   *  of constructing a fresh one. Returns `true` when the claim was
-   *  accepted (renderer should skip its fallback `closeHostWindow`
-   *  + `transferHostBoundsToInstall` wiring); `false` otherwise
-   *  (sender isn't an install-less host's panelView, or main rejected
-   *  the claim — fall back to the legacy close+open swap). */
+  /** Claim the calling install-less host window for in-place attach.
+   *  Run by the chooser-host renderer right before kicking off the
+   *  launch action; when the launch event eventually lands in main,
+   *  `onLaunch()` consumes the claim and attaches the install to
+   *  THIS host window instead of constructing a fresh one. Returns
+   *  `true` when the claim was accepted (renderer should skip its
+   *  fallback `closeHostWindow` + `transferHostBoundsToInstall`
+   *  wiring); `false` otherwise (sender isn't an install-less host's
+   *  panelView, or main rejected the claim — fall back to the
+   *  close+open swap). */
   claimAttachHost(installationId: string): Promise<boolean>
   getRunningInstances(): Promise<RunningInstance[]>
   /**

@@ -225,10 +225,9 @@ describe('TitleBarApp', () => {
   })
 
   it('updates the install pill label when main pushes a title', async () => {
-    // Track B item 4 — the source-category suffix is no longer
-    // appended to the title text in main; the install name reads
-    // bare and the category surfaces as an icon (covered by separate
-    // tests below). The test value here mirrors the new contract.
+    // The source-category suffix is not appended to the title text
+    // in main; the install name reads bare and the category surfaces
+    // as an icon (covered by separate tests below).
     const { default: TitleBarApp } = await import('./TitleBarApp.vue')
     const wrapper = mount(TitleBarApp)
     await flushPromises()
@@ -269,8 +268,8 @@ describe('TitleBarApp', () => {
   })
 
   it('hides the install caret in install-less host windows', async () => {
-    // Phase 3 step 2c — install-less host windows (no installationId in
-    // the URL, so the preload returns null) only expose the File menu.
+    // Install-less host windows (no installationId in the URL, so
+    // the preload returns null) only expose the File menu.
     // The install pill name still renders (with the fallback label) but
     // the chevron caret SVG inside the pill is omitted because there's
     // no install-scoped menu to expose.
@@ -325,15 +324,14 @@ describe('TitleBarApp', () => {
   })
 
   it('hides the waffle menu during the first-use T&C consent step (consent-lockdown)', async () => {
-    // Modal-unification (Track M-2.3) — the waffle menu is the only
-    // always-live affordance during a Tier 3 takeover (it carries the
-    // Return-to-Dashboard / Close-All-Windows escape hatch). The first-use
-    // T&C consent step deliberately removes that escape hatch so the
-    // user has to either accept consent or close the window via OS
-    // chrome — matching the binding-flow framing of consent. Once
-    // the takeover advances past consent the waffle reappears (the
-    // menu builder additionally surfaces the Skip Onboarding entry
-    // there, see M-2.2).
+    // The waffle menu is the only always-live affordance during a
+    // Tier 3 takeover (it carries the Return-to-Dashboard /
+    // Close-All-Windows escape hatch). The first-use T&C consent
+    // step deliberately removes that escape hatch so the user has
+    // to either accept consent or close the window via OS chrome.
+    // Once the takeover advances past consent the waffle reappears
+    // (the menu builder additionally surfaces the Skip Onboarding
+    // entry there).
     const { default: TitleBarApp } = await import('./TitleBarApp.vue')
     const wrapper = mount(TitleBarApp)
     await flushPromises()
@@ -377,8 +375,7 @@ describe('TitleBarApp', () => {
   })
 
   // ===================================================================
-  // Track B item 4 — install-type icon next to the install name
-  // (replaces the old `— {label}` textual suffix)
+  // Install-type icon next to the install name
   // ===================================================================
 
   it('hides the install-type icon by default until main pushes a category', async () => {
@@ -437,7 +434,7 @@ describe('TitleBarApp', () => {
   })
 
   // ===================================================================
-  // Phase 3 §18 — title-bar status pills (app-update + install-update)
+  // Title-bar status pills (app-update + install-update)
   // ===================================================================
 
   it('hides both status pills by default (no update available, no install update)', async () => {
@@ -516,7 +513,7 @@ describe('TitleBarApp', () => {
     expect(pill.text()).toContain('Update available')
   })
 
-  it('renders the install-update pill with version label when main pushes a target version (Track B item 1)', async () => {
+  it('renders the install-update pill with version label when main pushes a target version', async () => {
     // Mirrors the app-update pill's "Update {version}" copy so the
     // user reads the install-update pill the same way: the target
     // release is right there in the label, not behind a popover.
@@ -587,7 +584,7 @@ describe('TitleBarApp', () => {
   })
 
   // ===================================================================
-  // Track F — title-bar downloads tray
+  // Title-bar downloads tray
   // ===================================================================
 
   it('renders the downloads tray with no badge in the empty steady state', async () => {

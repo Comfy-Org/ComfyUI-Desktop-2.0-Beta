@@ -74,10 +74,10 @@ const FLOW_PANELS: ReadonlySet<PanelKey> = new Set([
 ])
 
 /**
- * Telemetry — mirrors the `flow:` strings the pre-Phase-3 `App.vue`
- * sent with `desktop2.install.flow.opened`. Keeping the same values
- * means the existing PostHog / Datadog dashboards keyed off `flow`
- * keep working post-refactor.
+ * Telemetry — `flow:` strings sent with
+ * `desktop2.install.flow.opened`. Keep these values stable so the
+ * existing PostHog / Datadog dashboards keyed off `flow` keep
+ * working.
  */
 const FLOW_TELEMETRY_NAMES: Record<FlowComponent, string> = {
   'new-install': 'new_install',
@@ -94,8 +94,7 @@ const installationId = params.get('installationId') || ''
 /**
  * The default body panel for this host — the surface that sits
  * underneath any takeover overlay. Install-backed hosts default to
- * launcher-settings (matches the pre-Phase-3 title-bar Launcher
- * Settings pill behaviour), install-less hosts default to the chooser.
+ * launcher-settings, install-less hosts default to the chooser.
  * Used both for the initial mount (when the URL doesn't request a
  * specific panel) AND as the underlying body when the initial URL
  * panel is a flow-takeover (`?panel=new-install` etc.).
@@ -125,8 +124,8 @@ const quickInstallRef = ref<InstanceType<typeof QuickInstallModal> | null>(null)
 const firstUseRef = ref<InstanceType<typeof FirstUseTakeover> | null>(null)
 
 /**
- * Phase 3 §17 Step 4 — set when the first-use takeover's Local
- * branch chains into the new-install Tier 3 takeover. The new-install
+ * Set when the first-use takeover's Local branch chains into the
+ * new-install Tier 3 takeover. The new-install
  * modal emits `close` after a successful install (the same hook used
  * everywhere); when that fires while this flag is true the host
  * marks `firstUseCompleted` and clears the flag. A Cloud branch pick
@@ -136,8 +135,8 @@ const firstUseRef = ref<InstanceType<typeof FirstUseTakeover> | null>(null)
 const chainingFirstUseToNewInstall = ref(false)
 
 /**
- * Post-Phase-3 polish (Track D item 4) — installation id of the
- * Standalone install that the first-use chain (new-install or
+ * Installation id of the Standalone install that the first-use chain
+ * (new-install or
  * migration) just kicked off. Captured from the corresponding
  * `show-progress` while a chain flag is set. The progressStore
  * watcher below auto-launches the install once its op finishes
@@ -154,24 +153,13 @@ const progressStore = useProgressStore()
 const launcherPrefs = useLauncherPrefs()
 
 /**
- * Host-level overlay slot (Phase 3 §17). Owns the in-flight progress
- * (`progress` kind) and Tier 3 takeovers (`takeover` kind — the four
- * flow modals plus the future first-use flow). Manage / Tier 1
- * overlays driven by ChooserView mount in ChooserView's own slot —
- * see `useOverlay` for the tier-collision rules. The `current` ref is
- * destructured to a top-level binding so the template can read it via
- * Vue's auto-unwrap.
- *
- * Modal-unification (Track M-4) — the `tier` watcher that pushed
- * `setTitleBarInert(boolean)` to main was retired alongside the
- * isInert system. Title-bar interactivity during a Tier 3 takeover
- * is now governed by the binding-modal chrome (M-1 / M-2.1 / M-3)
- * plus the per-step `firstUseMode` lockdown that hides the waffle
- * during the T&C consent step (M-2.3). All other title-bar
- * affordances stay live during a takeover so the user can
- * deliberately escape via the file menu's Skip Onboarding entry, or
- * via OS-X (which routes through the standardised cancel prompt —
- * see M-2.4).
+ * Host-level overlay slot. Owns the in-flight progress (`progress`
+ * kind) and Tier 3 takeovers (`takeover` kind — the four flow
+ * modals plus the first-use flow). Manage / Tier 1 overlays driven
+ * by ChooserView mount in ChooserView's own slot — see `useOverlay`
+ * for the tier-collision rules. The `current` ref is destructured
+ * to a top-level binding so the template can read it via Vue's
+ * auto-unwrap.
  */
 const { current: currentOverlay, openOverlay, closeOverlay } = useOverlay()
 
@@ -245,8 +233,8 @@ async function loadLocale(): Promise<void> {
  * Tier 2 collision rules apply — replacing one in-flight progress op
  * with another prompts the user to cancel via the standardised copy.
  *
- * Step 5 §10 — classifier rule §4: if the install is currently running,
- * the operation must end in the running app (Update Now restarts after
+ * If the install is currently running, the operation must end in
+ * the running app (Update Now restarts after
  * applying), so route as a Tier 3 takeover instead of Tier 2 progress.
  * Both branches mount the same `ProgressModal` (one ref, since the
  * `v-if`/`v-else-if` slots are mutually exclusive) — only the wrapper
@@ -262,21 +250,21 @@ async function handleShowProgress(opts: ShowProgressOpts): Promise<void> {
   // the install suffix for the cancel-prompt copy so the prompt reads
   // `Cancel "Updating ComfyUI"?` instead of leaking the install name.
   const operationName = opts.title.split(' — ')[0] || opts.title
-  // Track D item 4 — capture the operation's installation id when a
-  // first-use chain is in flight (new-install or migrate). The
-  // progressStore watcher above auto-launches the resulting install
-  // once the op finishes successfully. New-install ops carry the
-  // new install's id directly; migrate ops carry the legacy install's
-  // id and the watcher resolves the resulting Standalone install
-  // from the store after the op finishes. Only the first chained op
+  // Capture the operation's installation id when a first-use chain
+  // is in flight (new-install or migrate). The progressStore
+  // watcher above auto-launches the resulting install once the op
+  // finishes successfully. New-install ops carry the new install's
+  // id directly; migrate ops carry the Legacy Desktop install's id
+  // and the watcher resolves the resulting Standalone install from
+  // the store after the op finishes. Only the first chained op
   // captures the id — subsequent show-progress calls (e.g. user
   // re-opens an in-progress modal) leave it untouched.
   if (chainingFirstUseToNewInstall.value && pendingFirstUseAutoLaunchId.value === null) {
     pendingFirstUseAutoLaunchId.value = opts.installationId
     // First-use chain has just kicked off the long-running install op.
     // Flip the persisted gate now so the takeover doesn't re-run on
-    // the next launch — we used to defer this to NewInstallModal's
-    // close emit, but the overlay handoff no longer goes through close.
+    // the next launch — the overlay handoff doesn't go through
+    // NewInstallModal's close emit.
     void launcherPrefs.markFirstUseCompleted()
   }
   const isRunning = sessionStore.isRunning(opts.installationId)
@@ -285,8 +273,8 @@ async function handleShowProgress(opts: ShowProgressOpts): Promise<void> {
   // from the new-install Tier 3 takeover to a Tier 2 progress overlay
   // exposes the dashboard underneath, breaking the bootstrap UX.
   const useTakeover = isRunning || chainingFirstUseToNewInstall.value
-  // Modal-unification (Track M-6) — wire `onCancel` so a window-close
-  // consult that the user confirms (or any other slot-clearing
+  // Wire `onCancel` so a window-close consult that the user
+  // confirms (or any other slot-clearing
   // transition that fires the cancel-prompt) actually cancels the
   // in-flight op in main rather than orphaning it via window
   // destruction. Mirrors the manual cancel button inside ProgressModal
@@ -348,19 +336,18 @@ function handleProgressClose(): void {
 }
 
 /**
- * Phase 3 §17 — open one of the four flow modals as a Tier 3 takeover
- * overlay (full-window body sitting above the underlying panel). The
- * imperative `open()` reset on each *Modal ref runs after the takeover
- * mounts so form state always starts fresh, the same way the pre-§17
- * panel-body branches reset on (re)entry.
+ * Open one of the four flow modals as a Tier 3 takeover overlay
+ * (full-window body sitting above the underlying panel). The
+ * imperative `open()` reset on each *Modal ref runs after the
+ * takeover mounts so form state always starts fresh.
  *
  * Returns silently if `openOverlay` was rejected (the user dismissed
  * the cancel-prompt that fires when an in-flight Tier 2 progress op
  * is being pre-empted — see `useOverlay`'s tier-collision rules).
  */
 async function openFlowTakeover(component: FlowComponent, entrypoint: string): Promise<void> {
-  // Modal-unification (Track M-6) — opt the install-flow wizards into
-  // the dedicated "Discard install setup?" cancel-prompt copy so a
+  // Opt the install-flow wizards into the dedicated "Discard install
+  // setup?" cancel-prompt copy so a
   // window-close consult during the wizard reads correctly. The
   // wizards have no destructive op in flight (the install hasn't been
   // kicked off yet — that happens after the wizard's final step,
@@ -370,13 +357,10 @@ async function openFlowTakeover(component: FlowComponent, entrypoint: string): P
   // just a wizard to dismiss.
   const ok = await openOverlay({ kind: 'takeover', component, cancelCopyKey: 'discard-setup' })
   if (!ok) return
-  // Telemetry parity (issue #485) — pre-Phase-3 the four `App.vue`
-  // openers (`openNewInstall` / `openQuickInstall` / `openTrack` /
-  // `openLoadSnapshot`) each fired `desktop2.install.flow.opened`
-  // before presenting the wizard. The single chokepoint here covers
-  // all four post-refactor; the `entrypoint` is supplied by the
-  // caller so the dashboard can still tell title-bar opens from
-  // chooser-empty-state opens etc.
+  // Telemetry (issue #485) — single chokepoint that fires
+  // `desktop2.install.flow.opened` for all four wizards. The
+  // `entrypoint` is supplied by the caller so the dashboard can
+  // tell title-bar opens from chooser-empty-state opens etc.
   emitTelemetryAction('desktop2.install.flow.opened', {
     flow: FLOW_TELEMETRY_NAMES[component],
     entrypoint,
@@ -391,7 +375,7 @@ async function openFlowTakeover(component: FlowComponent, entrypoint: string): P
 }
 
 /**
- * Phase 3 §17 Step 4 — open the first-use takeover. Same shape as
+ * Open the first-use takeover. Same shape as
  * `openFlowTakeover` but the component identifier is the free-form
  * `'first-use'` string (TakeoverOverlay.component is intentionally
  * untyped — see useOverlay.ts) and the post-mount reset goes through
@@ -400,11 +384,12 @@ async function openFlowTakeover(component: FlowComponent, entrypoint: string): P
  * routed through `switchPanel` because there's no URL/IPC entry point
  * for it (the gate is purely the persisted pref).
  *
- * Post-Phase-3 polish — fetches the categorised first-use state from
- * main (`getFirstUseState`) so the takeover can suppress the cloud-
- * vs-local pick step for returning users (any non-cloud, non-legacy-
- * desktop install present means the user has already used the
- * launcher; don't re-litigate the choice). The fetch runs in parallel
+ * Fetches the categorised first-use state from main
+ * (`getFirstUseState`) so the takeover can suppress the
+ * cloud-vs-local pick step for returning users (any non-cloud,
+ * non-legacy-desktop install present means the user has already
+ * used the launcher; don't re-litigate the choice). The fetch runs
+ * in parallel
  * with the overlay mount — by the time `nextTick` resolves and we
  * reach for the imperative `open()` the IPC has usually already
  * settled, so the await is effectively free.
@@ -412,8 +397,8 @@ async function openFlowTakeover(component: FlowComponent, entrypoint: string): P
 async function openFirstUseTakeover(): Promise<void> {
   const statePromise = window.api.getFirstUseState()
     .catch(() => ({ skipPick: false, hasLegacyDesktop: false }))
-  // Modal-unification (Track M-2.4) — opt the takeover into the
-  // dedicated "Quit setup?" cancel-prompt copy so the OS-X consult
+  // Opt the takeover into the dedicated "Quit setup?" cancel-prompt
+  // copy so the OS-X consult
   // (main → `onCloseRequest` → `closeOverlay`) reads as a binding-
   // flow exit dialog rather than the generic
   // `overlay.cancelCurrentTitle` ("Cancel current operation?").
@@ -432,7 +417,7 @@ async function openFirstUseTakeover(): Promise<void> {
 }
 
 /**
- * Step 5 §16 — bypass the takeover→null cancel-prompt for
+ * Bypass the takeover→null cancel-prompt for
  * renderer-internal intentional close paths (✕ on a takeover,
  * post-completion auto-close). The prompt belongs to the
  * consult-from-main `onCloseRequest` path; firing it on a user's
@@ -440,8 +425,8 @@ async function openFirstUseTakeover(): Promise<void> {
  * `handleProgressClose` direct-mutation pattern.
  */
 function dismissTakeoverDirect(): void {
-  // Modal-unification (Track M-2.2) — whenever a Tier 3 overlay is
-  // cleared from the renderer side, the host's first-use mode must
+  // Whenever a Tier 3 overlay is cleared from the renderer side,
+  // the host's first-use mode must
   // drop back to `'none'`. This covers both the explicit completion
   // paths (Cloud / chain-local close handlers) AND the pure-dismiss
   // paths (Track / LoadSnapshot / QuickInstall / Manage / Progress
@@ -476,8 +461,8 @@ function dismissTakeoverDirect(): void {
   currentOverlay.value = null
 }
 
-/** Modal-unification (Track M-2.2) — shared completion helper. The
- *  Cloud-branch pick (`handleFirstUseComplete`) and the file-menu
+/** Shared completion helper. The Cloud-branch pick
+ *  (`handleFirstUseComplete`) and the file-menu
  *  Skip Onboarding entry (`onFirstUseSkip` listener) and the
  *  new-install chain close (`handleNewInstallTakeoverClose`) all run
  *  the same `markFirstUseCompleted` → dismiss sequence; extracting
@@ -563,8 +548,8 @@ async function handleFirstUseChainLocal(): Promise<void> {
   window.api.setFirstUseMode('post-consent')
 }
 
-/** First-use takeover migrate-branch pick (Track D item 5) — runs
- *  the migrate-to-standalone action against the auto-tracked Legacy
+/** First-use takeover migrate-branch pick — runs the
+ *  migrate-to-standalone action against the auto-tracked Legacy
  *  Desktop install. Same shape as the chain-local path: the
  *  migration progress op flows through `handleShowProgress` (Tier 2
  *  progress modal), capturing `pendingFirstUseAutoLaunchId` for the
@@ -651,10 +636,10 @@ async function handleNewInstallTakeoverClose(): Promise<void> {
 
 /** Shared launch path for chooser-tile clicks AND the first-use
  *  takeover's auto-launch. Both surfaces want the same five-step
- *  shape (Stage W-5 already-running short-circuit → resolve launch
- *  action → in-place attach claim → executeAction). Extracted to one
- *  helper so a future change to the launch UX can't regress one
- *  surface but not the other (post-unification-code-review.md F17).
+ *  shape (already-running short-circuit → resolve launch action →
+ *  in-place attach claim → executeAction). Extracted to one helper
+ *  so a future change to the launch UX can't regress one surface
+ *  but not the other.
  *
  *  `onMissingLaunchAction` is the only thing that diverges:
  *    - chooser tile click → fall back to the new-install flow inside
@@ -669,12 +654,11 @@ async function performChooserLaunch(
   onMissingLaunchAction: () => void = () => {},
 ): Promise<void> {
   if (sessionStore.isRunning(installation.id)) {
-    // Window-mode unification (Stage W-5) — focus the running
-    // window and leave the chooser host alive (W-4 paradigm: tile
-    // clicks transform the host the user clicked from instead of
-    // closing it). The chooser host has no install backing it, so
-    // there's no detach to do; the surplus window is the price of
-    // keeping the user's panel context intact.
+    // Focus the running window and leave the chooser host alive
+    // (tile clicks transform the host the user clicked from instead
+    // of closing it). The chooser host has no install backing it,
+    // so there's no detach to do; the surplus window is the price
+    // of keeping the user's panel context intact.
     await window.api.focusComfyWindow(installation.id)
     return
   }
@@ -690,8 +674,8 @@ async function performChooserLaunch(
   await executeChooserAction(installation, launchAction)
 }
 
-/** Track D item 4 — watch progressStore for the new-install /
- *  migration op finishing and auto-launch the resulting Standalone
+/** Watch progressStore for the new-install / migration op finishing
+ *  and auto-launch the resulting Standalone
  *  install. The chain flag (`chainingFirstUseToNewInstall`) gates
  *  the watcher so we only auto-launch when the op was actually
  *  driven by the first-use chain. The captured id
@@ -717,15 +701,17 @@ watch(
     window.api.setFirstUseMode('none')
     if (!id) return
     if (op.cancelRequested || op.error || !op.result?.ok) return
-    // The migrate-to-standalone op runs against the legacy install
-    // but produces a fresh Standalone install — wait for the store
-    // to reflect the new install, then launch the most-recently-
-    // created non-cloud, non-legacy local install (the migration's
-    // result). For new-install ops, the captured id is the new
-    // install's id directly so this branch resolves immediately.
+    // The migrate-to-standalone op runs against the Legacy Desktop
+    // install but produces a fresh Standalone install — wait for
+    // the store to reflect the new install, then launch the
+    // most-recently-created non-cloud, non-legacy local install
+    // (the migration's result). For new-install ops, the captured
+    // id is the new install's id directly so this branch resolves
+    // immediately.
     let inst = installationStore.installations.find((i) => i.id === id) ?? null
     if (!inst || inst.sourceId === 'desktop') {
-      // Migration case — the captured id was the legacy install. Find
+      // Migration case — the captured id was the Legacy Desktop
+      // install. Find
       // the freshly-added Standalone install (it's the newest install
       // with `copiedFrom === id`, falling back to the newest local).
       try {
@@ -760,21 +746,17 @@ watch(
  */
 async function switchPanel(panel: PanelKey, entrypoint: string = 'titlebar'): Promise<void> {
   // Capture the underlying body BEFORE any mutation so the
-  // `desktop2.view.opened` event reports the same `from_view` the
-  // pre-Phase-3 `App.vue::switchView` did (it captured `activeView`
-  // before calling `nav.switchTab`).
+  // `desktop2.view.opened` event reports the right `from_view`.
   const fromView = activePanel.value
   if (FLOW_PANELS.has(panel)) {
     await openFlowTakeover(panel as FlowComponent, entrypoint)
     return
   }
-  // Unified Settings modal — replaces the legacy split between
-  // Install Settings (DetailModal manage), Directories, and App
-  // Settings. Mounts as a Tier 1 overlay on top of the underlying
-  // chooser / comfy-lifecycle body. The default tab is ComfyUI
-  // Settings on install-backed hosts, Global Settings on install-
-  // less hosts; deeper tab targets come through `panel-trigger-
-  // overlay`.
+  // Unified Settings modal. Mounts as a Tier 1 overlay on top of
+  // the underlying chooser / comfy-lifecycle body. The default tab
+  // is ComfyUI Settings on install-backed hosts, Global Settings on
+  // install-less hosts; deeper tab targets come through
+  // `panel-trigger-overlay`.
   if (panel === 'settings') {
     const inst = installation.value
     const ok = await openOverlay({
@@ -786,10 +768,10 @@ async function switchPanel(panel: PanelKey, entrypoint: string = 'titlebar'): Pr
     emitTelemetryAction('desktop2.view.opened', { view: panel, from_view: fromView })
     return
   }
-  // Body-swap branch — preserve the pre-Phase-3 `if (view !== fromView)`
-  // no-op guard so a redundant `panel-switch` IPC (e.g. main re-confirms
-  // `'comfy-lifecycle'` after an instance stop while we're already there)
-  // doesn't generate a noise event.
+  // Body-swap branch — `if (view !== fromView)` no-op guard so a
+  // redundant `panel-switch` IPC (e.g. main re-confirms
+  // `'comfy-lifecycle'` after an instance stop while we're already
+  // there) doesn't generate a noise event.
   if (panel === fromView) return
   activePanel.value = panel
   emitTelemetryAction('desktop2.view.opened', { view: panel, from_view: fromView })
@@ -804,7 +786,7 @@ function handleUpdateInstallation(inst: Installation): void {
 
 // --- Chooser handlers (install-less host window only) ---
 //
-// Phase 3 step 2d — chooser pick triggers the install's launch action
+// Chooser pick triggers the install's launch action
 // directly from the panel renderer, mirroring the Dashboard "Open" button
 // flow. Once the install's own ComfyUI window has opened (or it was already
 // running), the install-less chooser host window closes itself.
@@ -817,25 +799,23 @@ const { executeAction: executeChooserAction } = useListAction('chooser', {
   showProgress: handleShowProgress,
 })
 
-/** Pending close-on-launch subscription (legacy fallback), so unmount
- *  can clean it up. Only set when the W-4 in-place attach claim is
- *  rejected by main and the chooser host falls back to the close+open
- *  swap. */
+/** Pending close-on-launch subscription (fallback), so unmount can
+ *  clean it up. Only set when the in-place attach claim is rejected
+ *  by main and the chooser host falls back to the close+open swap. */
 let pendingPickUnsub: (() => void) | null = null
 
-/** Prepare the chooser host for a launch hand-off. Window-mode
- *  unification (Stage W-4) — first try to claim the host for in-place
- *  attach: when the launch event lands in main, `onLaunch` will
- *  attach the install to THIS host window instead of constructing a
- *  fresh one. If the claim is rejected (e.g. the install needs a
- *  unique browser partition), fall back to the legacy stamp-bounds +
- *  close-on-instance-started swap so the user still gets the
- *  install's window at the chooser's bounds. */
+/** Prepare the chooser host for a launch hand-off. First try to
+ *  claim the host for in-place attach: when the launch event lands
+ *  in main, `onLaunch` will attach the install to THIS host window
+ *  instead of constructing a fresh one. If the claim is rejected
+ *  (e.g. the install needs a unique browser partition), fall back
+ *  to the stamp-bounds + close-on-instance-started swap so the user
+ *  still gets the install's window at the chooser's bounds. */
 async function prepareChooserHostHandoff(installationId: string): Promise<void> {
   const claimed = await window.api.claimAttachHost(installationId)
   if (claimed) return
-  // Legacy fallback. Visual continuity — stamp the chooser host's
-  // current bounds onto the install's saved-bounds slot so its
+  // Fallback. Visual continuity — stamp the chooser host's current
+  // bounds onto the install's saved-bounds slot so its
   // freshly-constructed window opens at the chooser's position.
   await window.api.transferHostBoundsToInstall(installationId)
   // Subscribe BEFORE kicking off the launch so we don't miss a fast-
@@ -1004,7 +984,7 @@ onMounted(async () => {
   // (Settings refetch on settings-changed lives inside SettingsView's
   // own `onMounted`/`onUnmounted`.)
 
-  // Step 5 §16 — main consults the panel renderer before tearing down
+  // Main consults the panel renderer before tearing down
   // the host window. Funnel the consult through `closeOverlay()` so a
   // Tier 2 progress / Tier 3 takeover op can prompt the user via the
   // standardised cancel-prompt copy. `closeOverlay` returns true when
@@ -1043,8 +1023,8 @@ onMounted(async () => {
     })
   })
 
-  // Modal-unification (Track M-2.2) — main forwards a file-menu Skip
-  // Onboarding click here. Run the same `markFirstUseCompleted` +
+  // Main forwards a file-menu Skip Onboarding click here. Run the
+  // same `markFirstUseCompleted` +
   // dismiss-takeover sequence the Cloud-branch pick uses; if the
   // overlay isn't a first-use takeover (defensive — main only sends
   // this when the menu surfaced the entry, which only happens in
@@ -1143,7 +1123,7 @@ onUnmounted(() => {
 
     </main>
 
-    <!-- Host-level overlay slot (Phase 3 §17). One DOM node at a
+    <!-- Host-level overlay slot. One DOM node at a
          time, owned by `useOverlay`. Mounts either a Tier 1 popover,
          the in-flight progress modal (Tier 2), or one of the Tier 3
          takeovers (the four flow modals + the first-use takeover).
@@ -1154,13 +1134,12 @@ onUnmounted(() => {
          pill click pops a `useModal.confirm` modal (issue #488) that
          lives in the global ModalDialog mount below, not in the
          overlay slot. -->
-    <!-- Tier 1 unified Settings modal — replaces the legacy split
-         between Install Settings (DetailModal manage), Directories,
-         and App Settings. Mounted with `installation` carried by the
-         overlay payload (chooser-card Manage uses the card's install,
-         install-pill / waffle uses the host's install, install-less
-         host's waffle entry passes null). The body underneath stays
-         on chooser / comfy-lifecycle so dismissing returns there. -->
+    <!-- Tier 1 unified Settings modal. Mounted with `installation`
+         carried by the overlay payload (chooser-card Manage uses
+         the card's install, install-pill / waffle uses the host's
+         install, install-less host's waffle entry passes null).
+         The body underneath stays on chooser / comfy-lifecycle so
+         dismissing returns there. -->
     <SettingsModal
       v-if="currentOverlay?.kind === 'settings'"
       :installation="currentOverlay.installation"

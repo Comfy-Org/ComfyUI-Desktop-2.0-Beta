@@ -78,7 +78,7 @@ const VALID_PANELS: ReadonlySet<ComfyPanelKey> = new Set([
  * `'chooser'` is also not a title-bar pill — it's the panel rendered inside
  * the Comfy tab of an install-less host window (one with no install backing
  * the entry yet). Picking an install in the chooser eventually swaps the
- * window in-place to a real install (Phase 3 step 2d).
+ * window in-place to a real install.
  *
  * `'settings'` mounts the unified Settings modal (ComfyUI Settings /
  * Directories / Global Settings) over whatever body is showing.
@@ -213,9 +213,8 @@ function attachContextMenu(comfyWindow: BrowserWindow, webContents?: Electron.We
   })
 }
 
-// Phase 3 — `mainWindow` (the launcher window) was retired and all of its
-// historical guard branches have been scrubbed (Stage 4b). The chooser host
-// window plus per-install ComfyUI windows are now the only top-level surfaces.
+// The chooser host window plus per-install ComfyUI windows are the
+// only top-level surfaces.
 let tray: Tray | null = null
 
 /**
@@ -230,20 +229,13 @@ let tray: Tray | null = null
  */
 interface ComfyWindowEntry {
   /**
-   * Window-mode unification (Stage W-1) — stable monotonic numeric
-   * identifier minted at construction. The PRIMARY key into the
-   * `comfyWindows` map; survives attach/detach (W-2/W-3) so a host
-   * window can flip between install-backed and chooser-host modes
-   * without re-keying.
-   *
-   * Pre-W-1 the map was string-keyed by either `installationId`
-   * (install-backed) or `chooser:N` (install-less). Both rotated
-   * with the install identity, which is why the pre-W-4 swap-via-
-   * close `returnToDashboard` had to construct a brand-new window:
-   * the map key it lived under wasn't valid anymore. The numeric
-   * key uncouples "which window is this" from "what install backs
-   * it" — `returnToDashboard` is now an in-place flip via
-   * `entry.detachInstall()` (W-4).
+   * Stable monotonic numeric identifier minted at construction. The
+   * PRIMARY key into the `comfyWindows` map; survives attach/detach
+   * so a host window can flip between install-backed and
+   * chooser-host modes without re-keying. The numeric key uncouples
+   * "which window is this" from "what install backs it" so
+   * `returnToDashboard` is an in-place flip via
+   * `entry.detachInstall()`.
    *
    * Lookups by `installationId` route through
    * `getEntryByInstallationId(id)` (a `Map<string, number>`
@@ -281,45 +273,44 @@ interface ComfyWindowEntry {
   comfyUrl: string
   /**
    * Installation backing this window, or null for install-less host
-   * windows (chooser / file-menu flows in Phase 3 step 2c+). Centralises
-   * the "is this entry install-backed?" decision so `computeBodyMode()`
-   * can route the Comfy pill to the chooser without parallel branches in
-   * every call site.
+   * windows (chooser / file-menu flows). Centralises the "is this
+   * entry install-backed?" decision so `computeBodyMode()` can
+   * route the Comfy pill to the chooser without parallel branches
+   * in every call site.
    *
-   * Window-mode unification: this is `null` at construction time for
-   * EVERY host (createHostWindow always builds install-less); the
-   * install-backed wrapper (and the W-4 chooser-pick claim path) call
-   * `attachInstall()` immediately afterwards to populate it. Treating
-   * the field as "set only by attachInstall, cleared only by
-   * _installCleanup" is what lets `attachInstall`'s already-attached
-   * guard work without a chicken-and-egg mismatch on first construction.
+   * `null` at construction time for EVERY host (createHostWindow
+   * always builds install-less); the install-backed wrapper (and
+   * the chooser-pick claim path) call `attachInstall()` immediately
+   * afterwards to populate it. Treating the field as "set only by
+   * attachInstall, cleared only by _installCleanup" is what lets
+   * `attachInstall`'s already-attached guard work without a
+   * chicken-and-egg mismatch on first construction.
    */
   installationId: string | null
   /**
-   * Window-mode unification — the partition string the comfyView was
-   * constructed with. Pinned at construction (Electron has no API to
-   * change a WebContentsView's partition without rebuilding it), so a
-   * W-4 chooser-pick claim must reject any install whose partition
+   * The partition string the comfyView was constructed with. Pinned
+   * at construction (Electron has no API to change a
+   * WebContentsView's partition without rebuilding it), so a
+   * chooser-pick claim must reject any install whose partition
    * doesn't match this. Without this gate, attaching a non-unique
-   * install (`persist:shared`) to a host that was previously install-
-   * backed by a unique-partition install (`persist:${prevId}`) leaks
-   * the new install's session data into the previous install's
-   * partition bucket. See post-unification-code-review.md F1.
+   * install (`persist:shared`) to a host backed by a unique-partition
+   * install (`persist:${prevId}`) leaks the new install's session
+   * data into the previous install's partition bucket.
    */
   constructedPartition: string | null
   /**
-   * Modal-unification (Track M-2.2) — current step of the first-use
-   * takeover, cached on the entry so `buildTitlePopupMenuItems` can read it
-   * synchronously when the user opens the file menu (the menu builder
-   * runs on click, after the popup config has already been chosen).
+   * Current step of the first-use takeover, cached on the entry so
+   * `buildTitlePopupMenuItems` can read it synchronously when the
+   * user opens the file menu (the menu builder runs on click, after
+   * the popup config has already been chosen).
    *
    *   - `'none'`              — no first-use takeover mounted (default).
    *   - `'consent-lockdown'`  — consent step is on screen; the title bar
-   *                             must be fully locked down (M-2.3).
+   *                             is fully locked down.
    *   - `'post-consent'`      — consent accepted; later steps are on
    *                             screen. The waffle menu surfaces a
-   *                             `Skip Onboarding` entry (M-2.2) but
-   *                             stays otherwise normal.
+   *                             `Skip Onboarding` entry but stays
+   *                             otherwise normal.
    *
    * Cached here because `buildTitlePopupMenuItems` (file-menu popup config
    * builder) reads it synchronously when the user clicks the waffle —
@@ -327,56 +318,51 @@ interface ComfyWindowEntry {
    */
   firstUseMode: 'none' | 'consent-lockdown' | 'post-consent'
   /**
-   * Window-mode unification (Stage W-3b) — current title-bar pill
-   * label. Install-backed windows mirror the install name (and re-
-   * push on rename); install-less hosts hold `'Desktop 2.0 Beta'`.
-   * Stored on the entry so the unified `title-bar-ready` handshake
-   * in `createHostWindow()` can synthesize the initial push without
-   * a per-mode callback closure, and so `attachInstall()` /
-   * `detachInstall()` (W-3c) can swap it as the window flips modes.
+   * Current title-bar pill label. Install-backed windows mirror the
+   * install name (and re-push on rename); install-less hosts hold
+   * `'Desktop 2.0 Beta'`. Stored on the entry so the unified
+   * `title-bar-ready` handshake in `createHostWindow()` can
+   * synthesize the initial push without a per-mode callback
+   * closure, and so `attachInstall()` / `detachInstall()` can swap
+   * it as the window flips modes.
    */
   titleBarText: string
   /**
-   * Window-mode unification (Stage W-3b) — install-type icon
-   * category string (`local` / `cloud` / `desktop` / …) consumed by
-   * the title-bar renderer's `installTypeMetaFor()` helper. `null`
-   * for install-less host windows (no icon shown). Mirrors the
-   * `titleBarText` design: stored on the entry so the unified
-   * `title-bar-ready` handler can re-push without closure capture.
+   * Install-type icon category string (`local` / `cloud` /
+   * `desktop` / …) consumed by the title-bar renderer's
+   * `installTypeMetaFor()` helper. `null` for install-less host
+   * windows (no icon shown). Mirrors the `titleBarText` design:
+   * stored on the entry so the unified `title-bar-ready` handler
+   * can re-push without closure capture.
    */
   sourceCategory: string | null
   /**
-   * Window-mode unification (Stage W-3b) — symmetric undo for
-   * `attachInstall()`. Set by attach (closes over every event listener
-   * and map mutation it set up); called by the close handler before
-   * view teardown AND by `detachInstall()` to flip the host back to
-   * install-less mode in place. `null` whenever the entry is not
-   * currently install-backed.
+   * Symmetric undo for `attachInstall()`. Set by attach (closes
+   * over every event listener and map mutation it set up); called
+   * by the close handler before view teardown AND by
+   * `detachInstall()` to flip the host back to install-less mode in
+   * place. `null` whenever the entry is not currently
+   * install-backed.
    */
   _installCleanup: (() => void) | null
   /**
-   * Window-mode unification (Stage W-3c) — flip this host in place
-   * from install-backed to install-less (chooser) mode. Delegates to
-   * the freestanding `_detachInstallImpl(entry)` helper; exposed as a
-   * method so callers (W-4: `returnToDashboard`, chooser-tile re-
-   * attach) can invoke it without importing the helper. No-op when
-   * the entry is already install-less. Always populated (set in
+   * Flip this host in place from install-backed to install-less
+   * (chooser) mode. Delegates to the freestanding
+   * `_detachInstallImpl(entry)` helper; exposed as a method so
+   * callers (`returnToDashboard`, chooser-tile re-attach) can invoke
+   * it without importing the helper. No-op when the entry is
+   * already install-less. Always populated (set in
    * `createHostWindow()`).
    */
   detachInstall: () => void
 }
 /**
- * All host windows (install-backed and install-less). Window-mode
- * unification (Stage W-1) — keyed by a stable monotonic numeric
- * `windowKey` minted at construction. Pre-W-1 this was a `Map<string,
- * ...>` keyed by either `installationId` (install-backed) or
- * `chooser:<n>` (install-less); both varied with the install identity,
- * which is what blocked in-place transform between modes.
+ * All host windows (install-backed and install-less). Keyed by a
+ * stable monotonic numeric `windowKey` minted at construction.
  *
  * Install-id → window-key lookups go through
- * `getEntryByInstallationId(id)` below (the `installationIdToWindowKey`
- * secondary index). Direct `comfyWindows.get(installationId)` calls
- * are gone post-W-1.
+ * `getEntryByInstallationId(id)` below (the
+ * `installationIdToWindowKey` secondary index).
  */
 const comfyWindows = new Map<number, ComfyWindowEntry>()
 const installationIdToWindowKey = new Map<string, number>()
@@ -399,20 +385,20 @@ const installationIdToWindowKey = new Map<string, number>()
 let lastFocusedInstallationId: string | null = null
 
 /**
- * Window-mode unification (Stage W-4) — pending in-place attach
- * claims, set by the chooser-host renderer right before it kicks
- * off a launch action. `onLaunch()` consumes the claim instead of
- * constructing a fresh BrowserWindow when the launch event arrives,
- * so the chooser host the user clicked from becomes the install's
- * own host in place. Keyed by installationId so a fast double-click
- * on the same tile resolves to the same target host.
+ * Pending in-place attach claims, set by the chooser-host renderer
+ * right before it kicks off a launch action. `onLaunch()` consumes
+ * the claim instead of constructing a fresh BrowserWindow when the
+ * launch event arrives, so the chooser host the user clicked from
+ * becomes the install's own host in place. Keyed by installationId
+ * so a fast double-click on the same tile resolves to the same
+ * target host.
  *
  * The claim is only honoured when the target window is still alive
  * and still install-less (the user may have closed the chooser host
  * while the install spin-up was running, or picked a second install
  * before the first one finished launching). Stale claims fall
- * through to the legacy "fresh window" path; the chooser-host
- * renderer keeps a fallback `closeHostWindow` wired for that case.
+ * through to the fresh-window path; the chooser-host renderer keeps
+ * a fallback `closeHostWindow` wired for that case.
  */
 const pendingAttachClaims = new Map<string, number>()
 let _nextWindowKeyValue = 0
@@ -421,11 +407,11 @@ function nextWindowKey(): number {
 }
 
 /**
- * Window-mode unification (Stage W-1) — install-id → entry lookup,
- * routed through the `installationIdToWindowKey` secondary index.
- * Returns `undefined` if no install-backed entry currently carries
- * the id (install-less host windows never enter the index, and a
- * detached window — once W-3 lands — leaves the index too).
+ * Install-id → entry lookup, routed through the
+ * `installationIdToWindowKey` secondary index. Returns `undefined`
+ * if no install-backed entry currently carries the id (install-less
+ * host windows never enter the index, and a detached window leaves
+ * it too).
  */
 function getEntryByInstallationId(installationId: string): ComfyWindowEntry | undefined {
   const key = installationIdToWindowKey.get(installationId)
@@ -433,10 +419,9 @@ function getEntryByInstallationId(installationId: string): ComfyWindowEntry | un
 }
 
 /**
- * Window-mode unification (Stage W-1) — register an entry into the
- * primary map AND (when install-backed) the secondary index. Use
- * this from constructors and (W-3) `attachInstall` instead of
- * touching `comfyWindows.set` directly.
+ * Register an entry into the primary map AND (when install-backed)
+ * the secondary index. Use this from constructors and
+ * `attachInstall` instead of touching `comfyWindows.set` directly.
  */
 function registerHostEntry(entry: ComfyWindowEntry): void {
   comfyWindows.set(entry.windowKey, entry)
@@ -446,10 +431,9 @@ function registerHostEntry(entry: ComfyWindowEntry): void {
 }
 
 /**
- * Window-mode unification (Stage W-1) — unregister an entry from
- * BOTH the primary map AND the secondary index. Use this from the
- * `'closed'` handler and (W-3) `detachInstall` instead of touching
- * `comfyWindows.delete` directly.
+ * Unregister an entry from BOTH the primary map AND the secondary
+ * index. Use this from the `'closed'` handler and `detachInstall`
+ * instead of touching `comfyWindows.delete` directly.
  */
 function unregisterHostEntry(entry: ComfyWindowEntry): void {
   comfyWindows.delete(entry.windowKey)
@@ -590,11 +574,11 @@ function forwardDatadogError(payload: DatadogForwardedError): void {
     // we don't double-count exceptions in PostHog.
     skipPostHog: true,
   }
-  // The launcher window was retired in Phase 3 — broadcast to any open panel
-  // renderer instead so its `onDatadogError` listener can forward the error
-  // to Datadog RUM (the panel renderer hosts the same telemetry bootstrap
-  // the launcher renderer used to). When no panel is open the broadcast is a
-  // no-op and we still capture below via PostHog Node.
+  // Broadcast to any open panel renderer so its `onDatadogError`
+  // listener can forward the error to Datadog RUM (the panel
+  // renderer hosts the telemetry bootstrap). When no panel is open
+  // the broadcast is a no-op and we still capture below via PostHog
+  // Node.
   try {
     _broadcastToRenderer('dd-error', scrubbed)
   } catch {}
@@ -655,17 +639,10 @@ function registerProcessErrorHandlers(): void {
   })
 }
 
-// Phase 3 — `createMainWindow()` was removed. The launcher window is
-// retired; the install-less chooser host (`openChooserHostWindow`) is
-// the entry-point surface and per-install ComfyUI windows
-// (`openComfyWindow`) host install-scoped panels.
-
 function updateTrayMenu(): void {
   if (!tray) return
-  // Phase 3 — the launcher window is retired; the install-less chooser
-  // host is the primary surface. "Show App" and the previous separate
-  // "Desktop 2.0 Beta" / dashboard entry now collapse into a single chooser-host
-  // focus action.
+  // The install-less chooser host is the primary surface. "Show
+  // App" focuses the chooser host.
   const contextMenu = Menu.buildFromTemplate([
     {
       label: i18n.t('tray.showApp'),
@@ -714,21 +691,19 @@ function quitApp(): void {
 }
 
 /**
- * Step 5 §16 — pre-cleared close set. Marks a window as having
- * already passed the panel renderer's tier-aware consult so the
- * subsequent `close` event handler can skip the consult and tear
- * down immediately. Used by `confirmAndCloseAllHostWindows` (the
- * global confirm dialog already lists in-progress operations /
- * sessions / downloads, so the per-window prompt would be redundant
- * noise after the user confirmed the bulk close). Pre-W-4 also used
- * by `returnToDashboard` for its swap-via-close flow; W-4's in-place
- * detach no longer goes through the close handler.
+ * Pre-cleared close set. Marks a window as having already passed
+ * the panel renderer's tier-aware consult so the subsequent `close`
+ * event handler can skip the consult and tear down immediately.
+ * Used by `confirmAndCloseAllHostWindows` (the global confirm
+ * dialog already lists in-progress operations / sessions /
+ * downloads, so the per-window prompt would be redundant noise
+ * after the user confirmed the bulk close).
  */
 const preClearedClose = new WeakSet<BrowserWindow>()
 
 /**
- * Step 5 §16 — main consults the panel renderer before tearing down
- * a host window so a Tier 2 progress / Tier 3 takeover overlay can
+ * Main consults the panel renderer before tearing down a host
+ * window so a Tier 2 progress / Tier 3 takeover overlay can
  * prompt the user to confirm cancellation via the standardised
  * cancel-prompt copy. Returns true when the renderer cleared the
  * close (no overlay open, or the user confirmed cancellation),
@@ -812,12 +787,12 @@ async function consultPanelRendererClose(panelView: WebContentsView | null | und
 
 /**
  * Close every host window (install-backed and chooser hosts alike) but
- * leave the app / tray alive. Phase 3 §16 — File menu's "Close All
- * Windows" entry. Each window's existing `close` handler runs the full
- * teardown (`stopRunning` + webContents close + window.destroy), so we
- * just dispatch `close()` and let those handlers do the work — the
- * handlers also consult the panel renderer per Step 5 §16 unless the
- * window is already in `preClearedClose`. Snapshot the entry list
+ * leave the app / tray alive. Bound to the File menu's "Close All
+ * Windows" entry. Each window's existing `close` handler runs the
+ * full teardown (`stopRunning` + webContents close + window.destroy),
+ * so we just dispatch `close()` and let those handlers do the work
+ * — the handlers also consult the panel renderer unless the window
+ * is already in `preClearedClose`. Snapshot the entry list
  * first so the iteration isn't affected by `closed` callbacks that
  * delete from the `comfyWindows` map mid-loop.
  */
@@ -832,11 +807,11 @@ function closeAllHostWindows(): void {
  * File menu's "Return to Dashboard" entry. Closes the install-backed
  * host window and opens a chooser host window at the same bounds.
  *
- * In-place flip via `entry.detachInstall()` (Stage W-4) is currently
- * disabled — too many edge-case bugs around the in-place swap. The
- * close+open swap pays a visible flicker but exercises the same
- * close-handler teardown that production has used since main, which
- * is the codepath we trust right now. See
+ * In-place flip via `entry.detachInstall()` is currently disabled
+ * — too many edge-case bugs around the in-place swap. The close+open
+ * swap pays a visible flicker but exercises the same close-handler
+ * teardown that production has used since main, which is the
+ * codepath we trust right now. See
  * docs/window-mode-unification-revert.md.
  */
 async function returnToDashboard(parentEntryId: number): Promise<void> {
@@ -865,9 +840,8 @@ async function returnToDashboard(parentEntryId: number): Promise<void> {
  * user can see what's about to close) and any active operations that
  * will be cancelled — running ComfyUI sessions, in-progress
  * installs / updates, active model downloads — pulled from the same
- * `getActiveDetails()` helper that powered the legacy launcher's
- * quit-warning modal. With one or zero windows the close happens
- * straight through with no prompt.
+ * `getActiveDetails()` helper. With one or zero windows the close
+ * happens straight through with no prompt.
  */
 async function confirmAndCloseAllHostWindows(parentWindow: BrowserWindow | null): Promise<void> {
   const entries = Array.from(comfyWindows.values()).filter((e) => !e.window.isDestroyed())
@@ -910,9 +884,9 @@ async function confirmAndCloseAllHostWindows(parentWindow: BrowserWindow | null)
     ? await dialog.showMessageBox(parentWindow, opts)
     : await dialog.showMessageBox(opts)
   if (result.response === 0) {
-    // Step 5 §16 — the global dialog already lists in-progress ops /
-    // sessions / downloads, so the per-window tier-aware prompt would
-    // be redundant after the user confirmed the bulk close. Pre-clear
+    // The global dialog already lists in-progress ops / sessions /
+    // downloads, so the per-window tier-aware prompt would be
+    // redundant after the user confirmed the bulk close. Pre-clear
     // every entry so each window's `close` handler skips its own
     // consult and tears down immediately.
     for (const entry of entries) preClearedClose.add(entry.window)
@@ -1035,11 +1009,10 @@ function onComfyRestarted({ installationId, process: _proc }: { installationId?:
     })
     .catch((err) => {
       cleanupRelaunchState()
-      // The historical `comfy-output` broadcast to mainWindow was retired
-      // alongside the launcher window in Phase 3 — the install's own window
-      // is the right surface for restart-failure UX, but its comfyView is
-      // mid-load here so an inline message would be racy. Logging + the
-      // existing splash error path are sufficient for now.
+      // The install's own window is the right surface for
+      // restart-failure UX, but its comfyView is mid-load here so
+      // an inline message would be racy. Logging + the existing
+      // splash error path are sufficient for now.
       console.error(`ComfyUI restart failed for ${installationId}:`, err)
     })
 }
@@ -1052,8 +1025,8 @@ function onStop({ installationId }: { installationId?: string } = {}): void {
   if (installationId) {
     refreshComfyTabBody(installationId)
   } else {
-    // Window-mode unification (Stage W-1) — refresh every install-
-    // backed entry's comfy tab. Install-less host windows (entry.
+    // Refresh every install-backed entry's comfy tab. Install-less
+    // host windows (entry.
     // installationId === null) have no comfy lifecycle to refresh,
     // so they're skipped naturally.
     for (const entry of comfyWindows.values()) {
@@ -1110,32 +1083,20 @@ function injectMacPasskeyWarning(childWindow: BrowserWindow): void {
 }
 
 /**
- * Window-mode unification (Stage W-2) — single shared constructor for
- * host windows (install-backed and install-less). Builds the
- * BrowserWindow + titleBarView + comfyView, wires `layoutViews` +
- * macOS fullscreen forwarding + bounds-save listeners + the close /
- * closed handlers + the title-bar-ready handshake, and registers the
- * entry into the `comfyWindows` map.
+ * Single shared constructor for host windows (install-backed and
+ * install-less). Builds the BrowserWindow + titleBarView +
+ * comfyView, wires `layoutViews` + macOS fullscreen forwarding +
+ * bounds-save listeners + the close / closed handlers + the
+ * title-bar-ready handshake, and registers the entry into the
+ * `comfyWindows` map.
  *
  * Mode-specific wiring is layered on AFTER this returns by the two
  * thin wrapper paths (`onLaunch` for install-backed; the body of
- * `openChooserHostWindow` for install-less) — comfyContents listeners
- * (theme observer, content script, fail-retry, render-process-gone),
- * `attachSessionDownloadHandler`, the install-record `'updated'`
- * handler, and the chooser-only eager `ensurePanelView('chooser')`
- * all live in the wrappers.
- *
- * Pre-W-2 the two constructors duplicated the BrowserWindow + views
- * skeleton, both close handlers, both closed handlers, both
- * `layoutViews`, both title-bar-ready broadcasts, and the macOS
- * fullscreen forwarding. Stage W-3 will move the comfyContents-bound
- * listeners and the install-record handler behind paired
- * `attachInstall(id)` / `detachInstall()` operations on the entry,
- * which is the slice that actually lets a window transform between
- * modes in place. W-2 is the structural prep — no behaviour change
- * apart from the side-effect of W-1's bounds unification (chooser
- * hosts now also restore `maximized` from the saved bounds, since
- * the bounds-key collapse made restoring meaningful for them).
+ * `openChooserHostWindow` for install-less) — comfyContents
+ * listeners (theme observer, content script, fail-retry,
+ * render-process-gone), `attachSessionDownloadHandler`, the
+ * install-record `'updated'` handler, and the chooser-only eager
+ * `ensurePanelView('chooser')` all live in the wrappers.
  */
 interface CreateHostWindowOpts {
   /** Initial OS-level window title (full string, including app-version suffix). */
@@ -1321,13 +1282,12 @@ function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowResult {
   // Push the initial state once the title bar's preload signals readiness.
   // Filter to this title bar's WebContents to avoid cross-talk between windows.
   //
-  // Stage W-3b — the install-update pill + source-category icon
-  // (previously install-backed-only via an `onTitleBarReady` callback)
-  // are now resolved off the entry: the title text and source-category
-  // come from `entry.titleBarText` / `entry.sourceCategory` (set by
-  // `attachInstall()` for install-backed, by the chooser-host wrapper
-  // for install-less); the install-update pill is computed from
-  // `entry.installationId` when non-null.
+  // The install-update pill + source-category icon are resolved off
+  // the entry: the title text and source-category come from
+  // `entry.titleBarText` / `entry.sourceCategory` (set by
+  // `attachInstall()` for install-backed, by the chooser-host
+  // wrapper for install-less); the install-update pill is computed
+  // from `entry.installationId` when non-null.
   const onTitleBarReadyHandler = (event: Electron.IpcMainEvent): void => {
     if (event.sender !== titleBarView.webContents) return
     if (titleBarView.webContents.isDestroyed()) return
@@ -1338,10 +1298,10 @@ function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowResult {
       titleBarView.webContents.send('comfy-titlebar:title-changed', entry.titleBarText)
       titleBarView.webContents.send('comfy-titlebar:source-category-changed', entry.sourceCategory)
     }
-    // Phase 3 §18 — both modes get the app-update pill and the
-    // downloads tray. The install-update pill is install-backed only:
-    // gated on `entry.installationId !== null` so a chooser host (or
-    // a detached install-backed host post-W-3c) skips it cleanly.
+    // Both modes get the app-update pill and the downloads tray.
+    // The install-update pill is install-backed only: gated on
+    // `entry.installationId !== null` so a chooser host (or a
+    // detached install-backed host) skips it cleanly.
     titleBarView.webContents.send(
       'comfy-titlebar:app-update-state-changed',
       updater.getCurrentUpdateState(),
@@ -1365,22 +1325,21 @@ function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowResult {
   }
   ipcMain.on('comfy-window:title-bar-ready', onTitleBarReadyHandler)
 
-  // Step 5 §16 — close handler is async: preventDefault, consult the
-  // panel renderer (so a Tier 2/3 op can prompt the user), run the
-  // attached install's symmetric cleanup if any, and only then destroy.
-  // The `closingInFlight` guard prevents re-entry on rapid clicks of
-  // the OS close button while the consult is pending.
+  // Close handler is async: preventDefault, consult the panel
+  // renderer (so a Tier 2/3 op can prompt the user), run the
+  // attached install's symmetric cleanup if any, and only then
+  // destroy. The `closingInFlight` guard prevents re-entry on rapid
+  // clicks of the OS close button while the consult is pending.
   //
-  // Stage W-3b — pre-teardown work that used to live in a per-mode
-  // `onBeforeTeardown` opts callback (detachWindowDownloads +
-  // ipc.stopRunning + install-keyed map cleanup + installationEvents
-  // unsubscribe) is now consolidated on `entry._installCleanup`,
-  // which `attachInstall()` sets and `detachInstall()` (W-3c) /
-  // window close both invoke. Per-window cleanup
-  // (`detachWindowDownloads`) lives outside `_installCleanup` because
-  // it survives mode flips — the per-window download routing is
-  // attached at session level when the install does, and only needs
-  // to be torn down when the BrowserWindow itself goes away.
+  // Pre-teardown work (detachWindowDownloads + ipc.stopRunning +
+  // install-keyed map cleanup + installationEvents unsubscribe) is
+  // consolidated on `entry._installCleanup`, which `attachInstall()`
+  // sets and `detachInstall()` / window close both invoke.
+  // Per-window cleanup (`detachWindowDownloads`) lives outside
+  // `_installCleanup` because it survives mode flips — the
+  // per-window download routing is attached at session level when
+  // the install does, and only needs to be torn down when the
+  // BrowserWindow itself goes away.
   let closingInFlight = false
   comfyWindow.on('close', (e) => {
     e.preventDefault()
@@ -1414,16 +1373,15 @@ function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowResult {
 
   comfyWindow.on('closed', () => {
     ipcMain.off('comfy-window:title-bar-ready', onTitleBarReadyHandler)
-    // Window-mode unification (Stage W-1) — unregister via the
-    // primary windowKey AND the secondary install-id index.
+    // Unregister via the primary windowKey AND the secondary
+    // install-id index.
     const closedEntry = comfyWindows.get(windowKey)
     if (closedEntry) unregisterHostEntry(closedEntry)
-    // Window-mode unification — drop any pending W-4 attach claim
-    // whose target is THIS window. Without this, stale entries pile
-    // up over the app's lifetime AND can be silently consumed by an
-    // unrelated future `onLaunch()` (the consumer's destroyed-window
-    // check rejects them, but the side-effect `delete` still fires).
-    // See post-unification-code-review.md F2.
+    // Drop any pending attach claim whose target is THIS window.
+    // Without this, stale entries pile up over the app's lifetime
+    // AND can be silently consumed by an unrelated future
+    // `onLaunch()` (the consumer's destroyed-window check rejects
+    // them, but the side-effect `delete` still fires).
     for (const [installationId, claimedKey] of pendingAttachClaims) {
       if (claimedKey === windowKey) pendingAttachClaims.delete(installationId)
     }
@@ -1459,9 +1417,9 @@ function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowResult {
     // Bound below so it can self-reference the freshly-created entry.
     detachInstall: () => {},
   }
-  // Stage W-3c — bind the detach method to the freestanding impl.
-  // Done post-literal so the closure captures the registered entry
-  // by reference, not by a copy at literal-build time.
+  // Bind the detach method to the freestanding impl. Done
+  // post-literal so the closure captures the registered entry by
+  // reference, not by a copy at literal-build time.
   entry.detachInstall = () => _detachInstallImpl(entry)
   registerHostEntry(entry)
 
@@ -1469,15 +1427,14 @@ function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowResult {
 }
 
 /**
- * Window-mode unification — resolve the comfyView session partition
- * an install must be loaded into. Unique-partition installs
- * (`browserPartition === 'unique'`) get their own `persist:${id}`
- * bucket so cookies / IndexedDB / Service Workers don't leak across
- * sibling installs; everything else shares `persist:shared`. Used by
- * both the install-backed wrapper (constructing a fresh comfyView)
- * and the W-4 chooser-pick claim acceptance check (rejecting claims
- * where the host's pinned partition doesn't match what the new
- * install needs).
+ * Resolve the comfyView session partition an install must be loaded
+ * into. Unique-partition installs (`browserPartition === 'unique'`)
+ * get their own `persist:${id}` bucket so cookies / IndexedDB /
+ * Service Workers don't leak across sibling installs; everything
+ * else shares `persist:shared`. Used by both the install-backed
+ * wrapper (constructing a fresh comfyView) and the chooser-pick
+ * claim acceptance check (rejecting claims where the host's pinned
+ * partition doesn't match what the new install needs).
  */
 function expectedPartitionFor(installation: InstallationRecord): string {
   return (installation.browserPartition as string | undefined) === 'unique'
@@ -1619,13 +1576,12 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
       // Attach failed (telemetry-only — every current call site
       // gates on installationId === null but the boolean return
       // keeps us from blowing up if a future caller forgets). Fall
-      // through to the legacy fresh-window path below so the user
-      // still gets the install they asked for.
+      // through to the fresh-window path below so the user still
+      // gets the install they asked for.
     }
   }
 
-  // Window-mode unification (Stage W-3b) — install-backed wrapper.
-  // Construction is split in two:
+  // Install-backed wrapper. Construction is split in two:
   //   1. `createHostWindow()` — mode-agnostic skeleton (BrowserWindow +
   //      titleBarView + comfyView + layoutViews + macOS fullscreen +
   //      bounds-save + close/closed + title-bar-ready handshake +
@@ -1665,7 +1621,7 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
   // — which can't happen on a freshly-constructed entry today, but
   // tear the just-created window down cleanly on the off-chance a
   // future regression breaks the install-less-at-construction
-  // invariant. See post-unification-code-review.md F11.
+  // invariant.
   const attached = attachInstall(entry, { installation, comfyUrl, isLocal: !url })
   if (!attached) {
     entry.window.destroy()
@@ -1686,10 +1642,9 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
 }
 
 /**
- * Window-mode unification (Stage W-3b) — bind a host-window entry to
- * an installation. Layered on top of `createHostWindow()` (the
- * mode-agnostic skeleton), this is the install-only wiring that used
- * to live inline in `onLaunch`'s post-construction code:
+ * Bind a host-window entry to an installation. Layered on top of
+ * `createHostWindow()` (the mode-agnostic skeleton), this is the
+ * install-only wiring:
  *
  *   - mutates `entry.installationId` + `entry.comfyUrl` +
  *     `entry.titleBarText` + `entry.sourceCategory`
@@ -1703,15 +1658,15 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
  *     before-input keystrokes for F5/Ctrl+R reload, dom-ready
  *     theme-observer + content-script injection)
  *   - stashes `entry._installCleanup` — the symmetric undo invoked
- *     by the close handler before view teardown AND (W-3c) by
+ *     by the close handler before view teardown AND by
  *     `detachInstall()` when the host flips back to install-less
  *     mode in place
  *   - calls `comfyContents.loadURL(comfyUrl)` to start the load
  *
  * Calling on an already-attached entry throws — callers must detach
- * first (W-3c) or construct a fresh window. The cleanup is
- * idempotent (calling it twice is a no-op the second time) so the
- * close handler is free to invoke it without checking detach state.
+ * first or construct a fresh window. The cleanup is idempotent
+ * (calling it twice is a no-op the second time) so the close
+ * handler is free to invoke it without checking detach state.
  */
 interface AttachInstallOpts {
   installation: InstallationRecord
@@ -1734,7 +1689,7 @@ function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts): boolea
     // the violation to telemetry and let the caller fall back
     // (the install-backed wrapper destroys the just-created
     // host; the claim path skips the in-place attach and the
-    // wrapper recovers). See post-unification-code-review.md F11.
+    // wrapper recovers).
     const message =
       `attachInstall: entry windowKey=${entry.windowKey} is already attached to ` +
       `installationId=${entry.installationId}; detach first`
@@ -1801,11 +1756,11 @@ function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts): boolea
     })
   }
 
-  // Reflect rename / source change in both the comfy tab and the OS-level
-  // window title as the install record mutates. Phase 3 §18 — also
-  // recompute the install-update pill state (the install's source may
-  // have flipped its statusTag between releases as the release-cache
-  // resolves in the background).
+  // Reflect rename / source change in both the comfy tab and the
+  // OS-level window title as the install record mutates. Also
+  // recompute the install-update pill state (the install's source
+  // may have flipped its statusTag between releases as the
+  // release-cache resolves in the background).
   const onInstallationUpdated = (updated: InstallationRecord): void => {
     if (updated.id !== entry.installationId) return
     const nextTabText = updated.name
@@ -2061,12 +2016,12 @@ function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts): boolea
 }
 
 /**
- * Window-mode unification (Stage W-3c) — flip an install-backed host
- * window in place to install-less (chooser) mode. The symmetric undo
- * to `attachInstall()`. Bound onto `entry.detachInstall` by
- * `createHostWindow()`; the underscore-prefixed name signals that
- * callers should invoke `entry.detachInstall()` rather than this
- * freestanding helper directly.
+ * Flip an install-backed host window in place to install-less
+ * (chooser) mode. The symmetric undo to `attachInstall()`. Bound
+ * onto `entry.detachInstall` by `createHostWindow()`; the
+ * underscore-prefixed name signals that callers should invoke
+ * `entry.detachInstall()` rather than this freestanding helper
+ * directly.
  *
  * Steps:
  *   1. Runs `entry._installCleanup()` — `attachInstall()`'s stashed
@@ -2095,9 +2050,6 @@ function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts): boolea
  * to detach). Does not destroy the comfyView or the BrowserWindow
  * — see the close handler in `createHostWindow()` for the destroy
  * path.
- *
- * Stage W-3c only defines the operation; W-4 wires the call sites
- * (`returnToDashboard` and the chooser-tile re-attach flow).
  */
 function _detachInstallImpl(entry: ComfyWindowEntry): void {
   if (entry.installationId === null) return
@@ -2280,12 +2232,10 @@ function applyChooserHostThemeToAll(): void {
 }
 
 /**
- * Window-mode unification (Stage W-1) — bounds-persistence key for
- * install-less host windows. All chooser hosts share the same key so
- * the JSON cache holds at most one chooser bounds entry (pre-W-1
- * each chooser-host construction created a new `chooser:N` entry
- * that was never read again — a slow leak). Bounds restore now
- * works across sessions for chooser hosts as a side benefit.
+ * Bounds-persistence key for install-less host windows. All chooser
+ * hosts share the same key so the JSON cache holds at most one
+ * chooser bounds entry, and bounds restore works across sessions
+ * for chooser hosts.
  */
 const CHOOSER_HOST_BOUNDS_KEY = 'chooser'
 
@@ -2299,23 +2249,22 @@ const CHOOSER_HOST_BOUNDS_KEY = 'chooser'
  *  special-case its absence, but is sized to zero and never made
  *  visible. */
 function openChooserHostWindow(): BrowserWindow {
-  // Window-mode unification (Stage W-2) — install-less wrapper.
-  // The shared `createHostWindow()` builds the BrowserWindow + 2
-  // views skeleton, layoutViews, macOS fullscreen, bounds-save
-  // listeners, close / closed handlers, and title-bar-ready
-  // handshake. The chooser-only extras live here: a title-bar
-  // header label override and an eager `ensurePanelView('chooser')`
-  // so the panel body paints on the first frame instead of after
-  // the next layout tick.
+  // Install-less wrapper. The shared `createHostWindow()` builds
+  // the BrowserWindow + 2 views skeleton, layoutViews, macOS
+  // fullscreen, bounds-save listeners, close / closed handlers,
+  // and title-bar-ready handshake. The chooser-only extras live
+  // here: a title-bar header label override and an eager
+  // `ensurePanelView('chooser')` so the panel body paints on the
+  // first frame instead of after the next layout tick.
   //
-  // Phase 3 — install-less host windows have no ComfyUI frontend
-  // feeding their theme, so the chooser's title bar / overlay
-  // colors are driven by the launcher theme (resolved here and
-  // refreshed via `applyChooserHostTheme` when the theme setting
-  // or OS-level dark-mode preference flips). Both the Vue
-  // `<header>` and the OS overlay paint `getChooserHostTheme().bg`
-  // (the launcher renderer's `--surface`) so the seam between
-  // them stays invisible.
+  // Install-less host windows have no ComfyUI frontend feeding
+  // their theme, so the chooser's title bar / overlay colors are
+  // driven by the launcher theme (resolved here and refreshed via
+  // `applyChooserHostTheme` when the theme setting or OS-level
+  // dark-mode preference flips). Both the Vue `<header>` and the
+  // OS overlay paint `getChooserHostTheme().bg` (the launcher
+  // renderer's `--surface`) so the seam between them stays
+  // invisible.
   const initialChooserTheme = getChooserHostTheme()
 
   const { comfyWindow, entry } = createHostWindow({
@@ -2331,15 +2280,15 @@ function openChooserHostWindow(): BrowserWindow {
       : titleBarOverlayForTheme(resolveTheme() === 'dark'),
     // Dummy comfyView. Kept so layoutViews doesn't have to special-
     // case the install-less branch — its body always resolves to
-    // the panelView. Window-mode unification (Stage W-4) — uses the
-    // same comfy preload + `persist:shared` partition the install-
-    // backed default uses, so a chooser-pick `attachInstall()` can
-    // navigate this view in place to the install's URL without
-    // rebuilding the WebContentsView. The preload + partition are
-    // no-ops on the idle view (nothing loads it before attach).
-    // Unique-partition installs (`browserPartition === 'unique'`)
-    // still need a fresh window — the in-place attach falls through
-    // to `createHostWindow()` for that case.
+    // the panelView. Uses the same comfy preload + `persist:shared`
+    // partition the install-backed default uses, so a chooser-pick
+    // `attachInstall()` can navigate this view in place to the
+    // install's URL without rebuilding the WebContentsView. The
+    // preload + partition are no-ops on the idle view (nothing
+    // loads it before attach). Unique-partition installs
+    // (`browserPartition === 'unique'`) still need a fresh window —
+    // the in-place attach falls through to `createHostWindow()`
+    // for that case.
     comfyWebPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -2350,10 +2299,10 @@ function openChooserHostWindow(): BrowserWindow {
     // Empty installationId URL param tells the title-bar Vue to enter
     // install-less mode (no install-type icon, dashboard pill label).
     titleBarInstallationIdParam: '',
-    // Stage W-3b — initial title-bar pill text + source-category
-    // are stored on the entry; the unified title-bar-ready handshake
-    // re-pushes from the entry. Install-less hosts have no install
-    // backing so the source-category icon stays unset.
+    // Initial title-bar pill text + source-category are stored on
+    // the entry; the unified title-bar-ready handshake re-pushes
+    // from the entry. Install-less hosts have no install backing
+    // so the source-category icon stays unset.
     initialTitleBarText: CHOOSER_HOST_TITLE_TEXT,
     initialSourceCategory: null,
   })
@@ -2365,25 +2314,20 @@ function openChooserHostWindow(): BrowserWindow {
   ensurePanelView(entry.windowKey, entry, 'chooser')
 
   entry.layoutViews()
-  // Phase 3 — explicitly bring the new chooser host to the foreground.
-  // Without this, the freshly created window can stay behind whatever
-  // app the user launched Desktop 2.0 from (Windows focus-theft
-  // prevention is the usual culprit). The legacy launcher window had
-  // its own `ready-to-show` → `focus()` path; the chooser host needs
-  // the same treatment via `bringToFront`, which uses the always-on-top
-  // toggle trick on Windows.
+  // Explicitly bring the new chooser host to the foreground.
+  // Without this, the freshly created window can stay behind
+  // whatever app the user launched Desktop 2.0 from (Windows
+  // focus-theft prevention is the usual culprit). `bringToFront`
+  // uses the always-on-top toggle trick on Windows.
   bringToFront(comfyWindow)
   return comfyWindow
 }
 
 ipcMain.handle('quit-app', () => quitApp())
 
-// Phase 3 — `reset-zoom` was launcher-window-only (the launcher's
-// ProgressModal exposed a Reset-Zoom shortcut). With the launcher
-// retired, this IPC has no callers; the per-install ComfyUI windows
-// manage their own zoom independently. Kept as a stubbed handler so
-// any straggling renderer still bound to the channel doesn't reject
-// — a follow-up cleanup commit will scrub the preload binding too.
+// `reset-zoom` has no callers; per-install ComfyUI windows manage
+// their own zoom independently. Kept as a stubbed handler so any
+// straggling renderer still bound to the channel doesn't reject.
 ipcMain.handle('reset-zoom', () => {
   // no-op
 })
@@ -2439,7 +2383,7 @@ function ensurePanelView(windowKey: number, entry: ComfyWindowEntry, initialPane
 
   // Pass the entry's installationId (which is the empty string for
   // install-less host windows) to the panel renderer — the Map key is a
-  // numeric windowKey (Stage W-1) that PanelApp.vue must not see.
+  // numeric windowKey that PanelApp.vue must not see.
   const panelInstallationId = entry.installationId ?? ''
   const isDev = !!process.env['ELECTRON_RENDERER_URL']
   const loadPromise = isDev
@@ -2557,22 +2501,14 @@ ipcMain.on('comfy-window:close-current-panel', (event) => {
 })
 
 /**
- * Modal-unification (Track M-2.2 / M-4) — first-use takeover step
- * plumbing.
+ * First-use takeover step plumbing.
  *
  * Forwards the panel renderer's `setFirstUseMode(mode)` push to the
- * host's title-bar WebContentsView (consumed by M-2.3's lockdown)
- * AND caches the value on the entry — `buildTitlePopupMenuItems`
+ * host's title-bar WebContentsView (consumed by the lockdown) AND
+ * caches the value on the entry — `buildTitlePopupMenuItems`
  * (file-menu popup config builder) reads `entry.firstUseMode`
  * synchronously when the user clicks the waffle, so the cached
  * value has to be ground-truth.
- *
- * Note: the M-4 retirement removed the `comfy-window:set-titlebar-
- * inert` sibling that previously sat above this handler (broad
- * "title bar disabled during Tier 3 takeover" gate). The
- * binding-modal chrome (M-3) plus the `consent-lockdown` waffle
- * hide (M-2.3) cover the cases that still need title-bar
- * interactivity gating; everything else stays live.
  */
 ipcMain.on(
   'comfy-window:set-first-use-mode',
@@ -2593,18 +2529,18 @@ ipcMain.on(
 )
 
 /**
- * Phase 3 §18 — install-update pill state. Reads the install record
- * via `getInstallation`, resolves its source via `sourceMap`, and
+ * Install-update pill state. Reads the install record via
+ * `getInstallation`, resolves its source via `sourceMap`, and
  * applies the same `getStatusTag()` rule the chooser cards / kebab
  * menu use (`statusTag.style === 'update'`). Returns
  * `{ available: false }` for install-less host windows or when the
  * install isn't found.
  *
- * Track B item 1 — also surfaces the target `version` from the status
- * tag so the title bar's install-update pill can read
- * "Update v{version}" matching the app-update pill (rather than the
- * generic "Update available"). Source plugins populate
- * `StatusTag.version` next to the localised label.
+ * Also surfaces the target `version` from the status tag so the
+ * title bar's install-update pill can read "Update v{version}"
+ * matching the app-update pill (rather than the generic "Update
+ * available"). Source plugins populate `StatusTag.version` next to
+ * the localised label.
  */
 async function computeInstallUpdateAvailable(
   installationId: string,
@@ -2623,7 +2559,7 @@ async function computeInstallUpdateAvailable(
 }
 
 /**
- * Phase 3 §18 — fan out an updater state transition to every host
+ * Fan out an updater state transition to every host
  * window's title-bar webContents. Registered once at startup via
  * `updater.onUpdateStateChanged`. The chooser-host title bar
  * receives the same payload as install-backed title bars; the pill
@@ -2722,7 +2658,7 @@ ipcMain.on('comfy-window:click-app-update-pill', (event) => {
 })
 
 /**
- * Phase 3 §18 — title-bar install-update pill click. Refuses on
+ * Title-bar install-update pill click. Refuses on
  * install-less hosts (the pill is suppressed there but a defensive
  * guard keeps stray IPC from triggering anything).
  *
@@ -2773,7 +2709,7 @@ ipcMain.on('comfy-window:click-install-update-pill', (event) => {
 })
 
 /**
- * Track F — push the downloads-tray snapshot to a single title bar.
+ * Push the downloads-tray snapshot to a single title bar.
  * Used both for the initial state push on `onTitleBarReady` (slow path
  * — a title bar mounting AFTER an in-flight download started still
  * paints correctly) and from the broadcast helper below for live
@@ -2786,7 +2722,7 @@ function notifyTitleBarDownloads(titleBarView: WebContentsView): void {
 }
 
 /**
- * Track F — fan out a downloads-tray state change to every host
+ * Fan out a downloads-tray state change to every host
  * window's title-bar webContents. Subscribed once at startup to
  * `downloadEvents.on('tray-state-changed', ...)`. The chooser-host
  * title bar receives the same payload as install-backed title bars;
@@ -3060,8 +2996,8 @@ function buildTitlePopupMenuItems(entry: ComfyWindowEntry): TitlePopupMenuItem[]
   //     Snapshot) live ONLY on the dashboard (install-less host)
   //     waffle menu. Inside a Comfy Instance window the only escape
   //     hatch back to the dashboard is "Return to Dashboard" — the
-  //     in-Comfy chrome stays closed-off per the post-Phase-3 design
-  //     doc's "Comfy Instance is closed-off" rule.
+  //     in-Comfy chrome stays closed-off per the design doc's
+  //     "Comfy Instance is closed-off" rule.
   //   - "Return to Dashboard" is install-backed-only; install-less
   //     host windows are already on the chooser body so the entry
   //     would be a no-op there.
@@ -3088,11 +3024,9 @@ function buildTitlePopupMenuItems(entry: ComfyWindowEntry): TitlePopupMenuItem[]
       labelKey: 'fileMenu.settings',
       checked: entry.activePanel === 'settings',
     },
-    // Send Feedback (#493) — restored after the legacy launcher-window
-    // sidebar (which previously hosted the link) was retired by the
-    // unified-window-titlebar-panels refactor. The renderer-side
-    // handler resolves the support URL and emits the
-    // `desktop2.feedback.opened` telemetry action with `source: 'menu'`.
+    // Send Feedback (#493). The renderer-side handler resolves the
+    // support URL and emits the `desktop2.feedback.opened`
+    // telemetry action with `source: 'menu'`.
     { id: 'feedback', label: 'Send Feedback', labelKey: 'fileMenu.sendFeedback' },
     { kind: 'separator' },
   )
@@ -4030,19 +3964,18 @@ ipcMain.handle('close-comfy-window', (_event, installationId: string) => {
 })
 
 /**
- * Close the host window that contains the calling panel WebContents
- * (Phase 3 step 2d).
+ * Close the host window that contains the calling panel WebContents.
  *
- * Used by the chooser after a successful pick → launch hand-off: once the
- * install's own ComfyUI window has opened (via the existing `onLaunch`
- * flow), the install-less chooser host window is no longer needed and
- * closes itself. The renderer can't close its parent BrowserWindow
- * directly, so it asks main to do it.
+ * Used by the chooser after a successful pick → launch hand-off:
+ * once the install's own ComfyUI window has opened (via the existing
+ * `onLaunch` flow), the install-less chooser host window is no
+ * longer needed and closes itself. The renderer can't close its
+ * parent BrowserWindow directly, so it asks main to do it.
  *
  * Safe on install-backed windows too — the install-settings panel's
- * navigate-list path already handles teardown via `closeComfyWindow`, but
- * if a future renderer surface needs the same "close my window" hook this
- * IPC can stand in for it.
+ * navigate-list path already handles teardown via `closeComfyWindow`,
+ * but if a future renderer surface needs the same "close my window"
+ * hook this IPC can stand in for it.
  */
 ipcMain.handle('close-host-window', (event) => {
   for (const [, entry] of comfyWindows) {
@@ -4056,12 +3989,12 @@ ipcMain.handle('close-host-window', (event) => {
 })
 
 /**
- * In-place attach (Stage W-4) is currently disabled — too many edge-
- * case bugs (window destruction mid-attach, partition mismatches,
- * missed instance-started fallbacks closing the only remaining
- * window). Always return `false` so the renderer falls back to the
- * legacy close-host + open-fresh-install-window swap, which is the
- * pre-W-4 behaviour and the path that's been stable in production.
+ * In-place attach is currently disabled — too many edge-case bugs
+ * (window destruction mid-attach, partition mismatches, missed
+ * instance-started fallbacks closing the only remaining window).
+ * Always return `false` so the renderer falls back to the
+ * close-host + open-fresh-install-window swap, the path that's
+ * been stable in production.
  *
  * The underlying machinery (`pendingAttachClaims`, `attachInstall`,
  * `detachInstall`, `comfyWindows` keyed by `windowKey`) is left in
@@ -4074,16 +4007,16 @@ ipcMain.handle('claim-attach-host', (_event, _installationId: string) => {
 })
 
 /**
- * Copy the calling chooser host window's current bounds into the install's
- * saved-bounds slot (Phase 3 visual continuity for chooser pick).
+ * Copy the calling chooser host window's current bounds into the
+ * install's saved-bounds slot (visual continuity for chooser pick).
  *
- * The chooser pick flow currently closes the host and launches the install
- * in a fresh window. Without this transfer, the new install window opens
- * at the install's previously-saved bounds (or the default 1280x900),
- * jumping visibly away from where the user just clicked. Stamping the
- * chooser's current bounds onto the install BEFORE the launch makes the
- * new window appear in the same spot — visually a swap-in-place even
- * though it's structurally close+open.
+ * The chooser pick flow currently closes the host and launches the
+ * install in a fresh window. Without this transfer, the new install
+ * window opens at the install's saved bounds (or the default
+ * 1280x900), jumping visibly away from where the user just clicked.
+ * Stamping the chooser's current bounds onto the install BEFORE the
+ * launch makes the new window appear in the same spot — visually a
+ * swap-in-place even though it's structurally close+open.
  *
  * No-op when the calling sender isn't the panel of an install-less host
  * window (so install-backed panels can't accidentally clobber another
@@ -4112,11 +4045,9 @@ function resolveOutputDir(inst: InstallationRecord): string | null {
 function findInstallationIdForWindow(win: BrowserWindow): string | undefined {
   for (const entry of comfyWindows.values()) {
     if (entry.window !== win) continue
-    // Window-mode unification (Stage W-1) — install-less host
-    // windows (entry.installationId === null) have no install id to
-    // return; treating that case as `undefined` matches the pre-W-1
-    // semantics where chooser-host map keys (`chooser:N`) leaked
-    // through here as fake install ids that no caller could resolve.
+    // Install-less host windows (entry.installationId === null)
+    // have no install id to return; treating that case as
+    // `undefined` keeps callers from resolving fake install ids.
     return entry.installationId ?? undefined
   }
   return undefined
@@ -4197,11 +4128,11 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
       onThemeChanged: applyChooserHostThemeToAll,
     })
     updater.register()
-    // Phase 3 §18 — forward updater state transitions to every host
-    // window's title-bar webContents. Subscribed once at startup;
-    // the helper iterates `comfyWindows` so newly-opened windows
-    // pick up live transitions automatically (initial state is
-    // pushed on `comfy-window:title-bar-ready` for the slow path).
+    // Forward updater state transitions to every host window's
+    // title-bar webContents. Subscribed once at startup; the helper
+    // iterates `comfyWindows` so newly-opened windows pick up live
+    // transitions automatically (initial state is pushed on
+    // `comfy-window:title-bar-ready` for the slow path).
     updater.onUpdateStateChanged(_broadcastAppUpdateStateToTitleBars)
     // Fan out downloads-tray state changes to every host window's
     // title-bar AND to every cached title-bar dropdown popup. The
@@ -4219,11 +4150,10 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
     // and the tray-aware `window-all-closed` gating will all come back
     // when the docked-app flow is reinstated. Until then, see git
     // history for the previous tray construction code.
-    // Phase 3 — the install-less chooser host is the primary surface;
-    // the launcher window is retired. createMainWindow() is no longer
-    // called here. Each install gets its own ComfyUI window via
-    // openComfyWindow() when launched, and the chooser host is the
-    // entry-point for picking / creating installs.
+    // The install-less chooser host is the primary surface. Each
+    // install gets its own ComfyUI window via openComfyWindow()
+    // when launched, and the chooser host is the entry-point for
+    // picking / creating installs.
     openOrFocusChooserHostWindow()
 
     // Single subscription rebroadcasts every install-list mutation

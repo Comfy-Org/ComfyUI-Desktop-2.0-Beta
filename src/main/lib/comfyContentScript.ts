@@ -12,12 +12,11 @@
  * "comfy-missing-models"), the newer redesigned dialog, and the right side
  * panel's Missing Models error section.
  *
- * Track F — the renderer-injected downloads toast UI that used to live
- * here has been removed. Download progress is now surfaced via the
- * title-bar downloads tray (see `comfyTitleBarPreload.ts` /
- * `TitleBarApp.vue` / `comfyTitlePopup/DownloadsView.vue`) so the affordance
- * lives in Launcher chrome rather than inside ComfyUI's page surface.
- * What stays here is exactly what must run inside the ComfyUI page:
+ * Download progress is surfaced via the title-bar downloads tray (see
+ * `comfyTitleBarPreload.ts` / `TitleBarApp.vue` /
+ * `comfyTitlePopup/DownloadsView.vue`) so the affordance lives in
+ * Launcher chrome rather than inside ComfyUI's page surface. What
+ * stays here is exactly what must run inside the ComfyUI page:
  *   - Missing-models dialog / errors-tab scraping (we need to read
  *     the dialog DOM to know which model directory each download
  *     should land in).

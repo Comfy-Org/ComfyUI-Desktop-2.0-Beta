@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * Phase 3 §17 Step 4 — first-use takeover.
+ * First-use takeover.
  *
  * Multi-step Tier 3 takeover that runs the first time the launcher
  * starts (or any subsequent launch where `launcherPrefs.firstUseCompleted`
@@ -15,8 +15,8 @@
  *                  'zh'. Reuses the existing `chineseMirrorsSuggest*`
  *                  copy in en/zh + the `useChineseMirrors` setting; we
  *                  flip the global flag through `setSetting`, no new
- *                  per-source override surface yet (Step 5+ territory).
- *                  `chineseMirrorsPrompted` is also set so the legacy
+ *                  per-source override surface yet.
+ *                  `chineseMirrorsPrompted` is also set so the
  *                  prompt machinery doesn't re-fire later.
  *   3. `pick`    — Cloud-vs-Local card picker. Cloud emits `complete`
  *                  immediately (the chooser body underneath is what the
@@ -73,16 +73,16 @@ const emit = defineEmits<{
 const step = ref<Step>('consent')
 const telemetryEnabled = ref(true)
 const locale = ref('en')
-/** Post-Phase-3 polish — when the host detects prior usage of the
- *  launcher (any non-cloud, non-legacy-desktop install present), the
+/** When the host detects prior usage of the launcher (any
+ *  non-cloud, non-legacy-desktop install present), the
  *  cloud-vs-local pick step is suppressed: the user's already made
  *  the choice, no need to re-litigate. The takeover stops at consent
  *  (and the optional China-mirror sub-step) and emits `complete`
  *  instead of advancing to `pick`. Detection lives in main —
  *  `window.api.getFirstUseState()` — and is plumbed in via `open()`. */
 const skipPick = ref(false)
-/** Post-Phase-3 polish — when a Legacy Desktop install is detected on
- *  the machine (auto-tracked at startup as `sourceId === 'desktop'`),
+/** When a Legacy Desktop install is detected on the machine
+ *  (auto-tracked at startup as `sourceId === 'desktop'`),
  *  picking Local opens a follow-up sub-step where the user picks
  *  Migrate vs Install-new instead of immediately chaining into the
  *  new-install takeover. Detection lives in main; the host plumbs the
@@ -115,7 +115,7 @@ async function acceptConsent(): Promise<void> {
 /** Step 2 — the China-mirror prompt always advances regardless of
  *  the user's pick; only the persisted `useChineseMirrors` flag
  *  differs. `chineseMirrorsPrompted` is set in both branches so the
- *  legacy `suggest-chinese-mirrors` listener won't re-fire later. */
+ *  `suggest-chinese-mirrors` listener won't re-fire later. */
 async function chooseMirrors(useMirrors: boolean): Promise<void> {
   await Promise.all([
     window.api.setSetting('useChineseMirrors', useMirrors),
@@ -185,12 +185,10 @@ onMounted(() => {
 })
 
 /**
- * Modal-unification (Track M-2.2) — push the current step to main as
- * the host's `firstUseMode` so:
+ * Push the current step to main as the host's `firstUseMode` so:
  *   - `buildTitlePopupMenuItems` can surface the Skip Onboarding entry
  *     once we're past consent (`'post-consent'`).
- *   - The title bar can lock down during `'consent-lockdown'`
- *     (consumed in M-2.3).
+ *   - The title bar can lock down during `'consent-lockdown'`.
  *
  * `immediate: true` makes the very first mount fire the watcher so the
  * initial step (`'consent'`) lands on the host without waiting for a
@@ -208,8 +206,8 @@ watch(
 )
 
 onUnmounted(() => {
-  // Modal-unification (Track M-2.2) — clear the host's `firstUseMode`
-  // whenever the takeover unmounts, regardless of why (Cloud-branch
+  // Clear the host's `firstUseMode` whenever the takeover unmounts,
+  // regardless of why (Cloud-branch
   // completion, Local-branch chain swap, file-menu Skip Onboarding,
   // OS-chrome window close, dev-tools refresh). The host's
   // `dismissTakeoverDirect` ALSO pushes `'none'` for the renderer-
@@ -285,8 +283,8 @@ defineExpose({ open })
         </template>
 
         <!-- Step 3: Cloud vs Local picker.
-             Post-Phase-3 polish — laid out as two big horizontal
-             squares (Local on the left, Cloud on the right) so the
+             Laid out as two big horizontal squares (Local on the
+             left, Cloud on the right) so the
              choice reads like a real fork in the road, not a pair of
              checkbox-sized cards. Each tile is a generous click target
              with the source-category icon ChooserView already uses

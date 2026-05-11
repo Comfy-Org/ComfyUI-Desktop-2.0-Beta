@@ -49,15 +49,15 @@ const pendingDownloads = new Map<string, PendingDownload>()
 let mainWindow: BrowserWindow | null = null
 
 /**
- * Track F — recent terminal downloads kept in main so a title-bar tray
- * mounted AFTER a download finished can still surface it. Capped at
+ * Recent terminal downloads kept in main so a title-bar tray mounted
+ * AFTER a download finished can still surface it. Capped at
  * `RECENT_LIMIT`; oldest entries are evicted FIFO. Re-pushed on every
  * tray state broadcast and on the `onTitleBarReady` initial-state push.
  */
 const RECENT_LIMIT = 10
 const recentDownloads: DownloadProgress[] = []
 
-/** Track F — main-process event bus for the title-bar downloads tray.
+/** Main-process event bus for the title-bar downloads tray.
  *  Emits `'tray-state-changed'` whenever a progress event is broadcast
  *  (so subscribers can pull a fresh `getDownloadsTrayState()` snapshot
  *  without each consumer reimplementing the same projection). The
@@ -65,7 +65,7 @@ const recentDownloads: DownloadProgress[] = []
 export const downloadEvents = new EventEmitter()
 downloadEvents.setMaxListeners(50)
 
-/** Track F — snapshot of the downloads tray state. `active` is every
+/** Snapshot of the downloads tray state. `active` is every
  *  in-flight (`pending` / `downloading` / `paused`) entry; `recent` is
  *  the last `RECENT_LIMIT` terminal entries (oldest first). Mirror of
  *  the payload pushed on `comfy-titlebar:downloads-changed`. */
@@ -207,14 +207,11 @@ function broadcastProgress(progress: DownloadProgress): void {
     }
   }
   // Fan out to every renderer (host title-bars, panel views, popup
-  // views, …). The legacy `mainWindow` was retired in Phase 3 — its
-  // direct send used to drive the Settings tab + popup downloads
-  // store; without this broadcast the Settings → Downloads tab would
-  // never receive live progress events because no renderer subscribes
-  // to a channel sent only to a destroyed window handle.
+  // views, …) so the Settings → Downloads tab and popup downloads
+  // store both receive live progress events.
   _broadcastToRenderer('model-download-progress', progress)
-  // Track F — title-bar downloads tray state. Terminal entries land in
-  // the recent buffer first so the snapshot the listener pulls already
+  // Title-bar downloads tray state. Terminal entries land in the
+  // recent buffer first so the snapshot the listener pulls already
   // reflects the new state. The listener (registered in
   // src/main/index.ts) fans out to every comfy window's title-bar
   // webContents.

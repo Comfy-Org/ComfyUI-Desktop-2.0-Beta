@@ -67,15 +67,13 @@ describe('getModelDownloadContentScript', () => {
     expect(occurrences).toBeGreaterThanOrEqual(2)
   })
 
-  it('does not inject the legacy renderer-side downloads UI (Track F — moved to title-bar tray)', () => {
-    // Track F removed the in-page toast / dock / tab UI that used to
-    // surface download progress inside the ComfyUI page surface. The
-    // affordance now lives in the title-bar tray (see
+  it('does not inject the in-page downloads UI', () => {
+    // The downloads affordance lives in the title-bar tray (see
     // `TitleBarApp.vue` / `comfyTitlePopup/DownloadsView.vue`). The DOM IDs
-    // and the `onDownloadProgress` listener that drove the legacy
-    // surface must NOT reappear in the injected script — main now
-    // re-broadcasts download state via `comfy-titlebar:downloads-changed`
-    // for the title-bar webContents to consume directly.
+    // and the `onDownloadProgress` listener must NOT appear in the
+    // injected script — main re-broadcasts download state via
+    // `comfy-titlebar:downloads-changed` for the title-bar webContents
+    // to consume directly.
     expect(script).not.toContain('__comfy-dl-tab')
     expect(script).not.toContain('__comfy-dl-toasts')
     expect(script).not.toContain('__comfy-dl-cardlist')
@@ -88,10 +86,9 @@ describe('getModelDownloadContentScript', () => {
   })
 
   it('still intercepts remote/cloud workflow outputs for auto-download', () => {
-    // The remote/cloud auto-download intercept must survive the Track F
-    // removal — it has nothing to do with the injected toast UI; it
-    // ferries workflow outputs from a remote ComfyUI server back to
-    // the local output directory via the WebSocket message stream.
+    // The remote/cloud auto-download intercept ferries workflow outputs
+    // from a remote ComfyUI server back to the local output directory
+    // via the WebSocket message stream.
     expect(script).toContain('downloadAsset')
     expect(script).toContain('window.WebSocket')
   })
