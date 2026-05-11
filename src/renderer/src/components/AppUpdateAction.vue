@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { AppUpdateState, AppUpdateDownloadProgress } from '../types/ipc'
+import { formatBytes, formatSpeed } from '../lib/downloadFormatters'
 
 /**
  * "Desktop Updates" settings section. State-driven panel that mirrors
@@ -168,17 +169,10 @@ const progressDetail = computed<string | null>(() => {
     parts.push(`${formatBytes(p.transferred)} / ${formatBytes(p.total)}`)
   }
   if (p.bytesPerSecond !== null && p.bytesPerSecond > 0) {
-    parts.push(`${formatBytes(p.bytesPerSecond)}/s`)
+    parts.push(formatSpeed(p.bytesPerSecond))
   }
   return parts.length > 0 ? parts.join(' · ') : null
 })
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`
-}
 
 async function handleClick(): Promise<void> {
   if (buttonDisabled.value) return
