@@ -145,10 +145,10 @@ export interface ComfyTitleBarBridge {
    *  and chooser-host branches) so the tray renders correctly even
    *  when a title bar mounts AFTER an in-flight download started. */
   onDownloadsChanged(cb: (state: DownloadsTrayState) => void): () => void
-  /** Track F — click handler for the downloads tray. Routes through
-   *  the same `panel-trigger-overlay` channel as the app-update pill
-   *  so the panel renderer can open the downloads popover. */
-  clickDownloadsTray(): void
+  /** Click handler for the downloads tray. Opens the title-bar
+   *  dropdown popup in `'downloads'` mode anchored under the tray
+   *  button. */
+  clickDownloadsTray(anchor: TitleMenuAnchor): void
   /** Click handler for the title-bar Send Feedback button. Main
    *  resolves the host entry from the sender and forwards
    *  `comfy-panel:open-feedback` to the panel renderer, which fires
@@ -292,8 +292,8 @@ const bridge: ComfyTitleBarBridge = {
     ipcRenderer.on('comfy-titlebar:downloads-changed', handler)
     return () => ipcRenderer.removeListener('comfy-titlebar:downloads-changed', handler)
   },
-  clickDownloadsTray: () => {
-    ipcRenderer.send('comfy-window:click-downloads-tray')
+  clickDownloadsTray: (anchor) => {
+    ipcRenderer.send('comfy-window:click-downloads-tray', { anchor })
   },
   clickFeedback: () => {
     ipcRenderer.send('comfy-window:click-feedback')

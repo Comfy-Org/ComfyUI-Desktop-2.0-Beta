@@ -891,7 +891,6 @@ export interface ElectronApi {
     callback: (data: {
       kind:
         | 'install-update'
-        | 'downloads'
         | 'app-update-restart-prompt'
         | 'app-update-download-prompt'
       installationId?: string

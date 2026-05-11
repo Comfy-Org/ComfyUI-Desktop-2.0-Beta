@@ -15,7 +15,7 @@
  * Track F — the renderer-injected downloads toast UI that used to live
  * here has been removed. Download progress is now surfaced via the
  * title-bar downloads tray (see `comfyTitleBarPreload.ts` /
- * `TitleBarApp.vue` / `DownloadsTrayPopover.vue`) so the affordance
+ * `TitleBarApp.vue` / `comfyTitlePopup/DownloadsView.vue`) so the affordance
  * lives in Launcher chrome rather than inside ComfyUI's page surface.
  * What stays here is exactly what must run inside the ComfyUI page:
  *   - Missing-models dialog / errors-tab scraping (we need to read

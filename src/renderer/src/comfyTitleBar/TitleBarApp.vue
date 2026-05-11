@@ -123,10 +123,10 @@ interface Bridge {
    *  squat in the steady state. Pushed initially on `ready()` and
    *  on every state change (broadcast by the download manager). */
   onDownloadsChanged: (cb: (state: DownloadsTrayState) => void) => () => void
-  /** Track F — click handler for the downloads tray. Routes through
-   *  the same `panel-trigger-overlay` channel as the update pills so
-   *  the panel renderer can mount the downloads popover. */
-  clickDownloadsTray: () => void
+  /** Click handler for the downloads tray. Opens the title-bar
+   *  dropdown popup in `'downloads'` mode anchored under the tray
+   *  button. */
+  clickDownloadsTray: (anchor: MenuAnchor) => void
   /** Click handler for the title-bar Send Feedback button. Main
    *  forwards `comfy-panel:open-feedback` to the panel renderer,
    *  which fires the `desktop2.feedback.opened` telemetry action and
@@ -360,8 +360,10 @@ const downloadsTrayLabel = computed<string>(() => {
   return `${n} download${n === 1 ? '' : 's'} in progress`
 })
 
+const downloadsBtnRef = useTemplateRef<HTMLButtonElement>('downloadsBtn')
+
 function handleDownloadsTray(): void {
-  bridge?.clickDownloadsTray()
+  bridge?.clickDownloadsTray(anchorBelow(downloadsBtnRef.value))
 }
 
 /** Title-bar Send Feedback button. Routes through main, which forwards
@@ -609,6 +611,7 @@ onUnmounted(() => {
            tray" vs "update available pill" at a glance. -->
       <button
         v-if="showDownloadsTray"
+        ref="downloadsBtn"
         type="button"
         class="title-downloads-tray"
         :class="{ 'has-active': downloadsActiveCount > 0 }"

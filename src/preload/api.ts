@@ -326,7 +326,6 @@ export function buildElectronApi(): ElectronApi {
           data as {
             kind:
               | 'install-update'
-              | 'downloads'
               | 'app-update-restart-prompt'
               | 'app-update-download-prompt'
             installationId?: string

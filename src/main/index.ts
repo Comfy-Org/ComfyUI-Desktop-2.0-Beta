@@ -21,11 +21,14 @@ import type { InstallationRecord } from './installations'
 import type { DatadogForwardedError } from '../types/ipc'
 import {
   attachSessionDownloadHandler,
+  cancelModelDownload,
   cleanupTempDownloads,
   detachWindowDownloads,
   downloadEvents,
   getDownloadsTrayState,
+  pauseModelDownload,
   registerDownloadIpc,
+  resumeModelDownload,
   startAssetDownload,
 } from './lib/comfyDownloadManager'
 import { get as getInstallation, installationEvents } from './installations'
@@ -2638,22 +2641,47 @@ function _broadcastDownloadsToTitleBars(): void {
   }
 }
 
+/** Push the downloads-tray snapshot to a single popup webContents. */
+function notifyTitlePopupDownloads(popup: WebContentsView): void {
+  if (popup.webContents.isDestroyed()) return
+  popup.webContents.send('comfy-titlepopup:downloads-changed', getDownloadsTrayState())
+}
+
+/** Sibling of `_broadcastDownloadsToTitleBars` — fan out tray-state
+ *  changes to every cached title-bar dropdown popup so the downloads
+ *  view repaints live while open. */
+function _broadcastDownloadsToTitlePopups(): void {
+  for (const entry of titlePopupsByParent.values()) {
+    notifyTitlePopupDownloads(entry.popup)
+  }
+}
+
 /**
- * Track F — title-bar downloads-tray click. Routes through
- * `panel-trigger-overlay` so the panel renderer can mount the Tier 1
- * downloads popover via `openOverlay`. The popover reads its data
- * from the renderer's `downloadStore` (already wired via
- * `onModelDownloadProgress`) so the click does not need to ship any
- * additional payload.
+ * Title-bar downloads-tray click. Opens the title-bar dropdown popup
+ * in `'downloads'` mode anchored under the tray button. The popup
+ * subscribes to `comfy-titlepopup:downloads-changed` for live state
+ * and dispatches per-entry actions back via
+ * `comfy-titlepopup:downloads-action`.
  */
-ipcMain.on('comfy-window:click-downloads-tray', (event) => {
-  const found = findEntryByTitleBarSender(event.sender)
-  if (!found) return
-  const { entry } = found
-  const panelView = entry.panelView
-  if (!panelView || panelView.webContents.isDestroyed()) return
-  panelView.webContents.send('panel-trigger-overlay', { kind: 'downloads' })
-})
+ipcMain.on(
+  'comfy-window:click-downloads-tray',
+  (event, payload: { anchor?: { x?: number; y?: number } } | undefined) => {
+    const found = findEntryByTitleBarSender(event.sender)
+    if (!found) return
+    const { id: windowKey, entry } = found
+    if (entry.window.isDestroyed()) return
+    const x = Math.max(0, Math.round(payload?.anchor?.x ?? 0))
+    const y = Math.max(0, Math.round(payload?.anchor?.y ?? TITLEBAR_HEIGHT))
+    openTitlePopup({
+      parent: entry.window,
+      parentEntryId: windowKey,
+      kind: 'downloads',
+      anchor: { x, y },
+      theme: entry.lastTheme,
+      titleBarSender: entry.titleBarView.webContents,
+    })
+  },
+)
 
 /**
  * Forward a Send Feedback request to the host's panel renderer.
@@ -3173,6 +3201,14 @@ function openTitlePopup(opts: OpenTitlePopupOpts): void {
   opts.parent.contentView.addChildView(entry.popup)
   entry.popup.setBounds({ x, y, width, height })
 
+  // Downloads popup feeds on a separate channel — push the latest
+  // snapshot now so the first paint shows current state instead of
+  // the empty-state placeholder. Subsequent updates arrive via the
+  // tray-state-changed broadcast.
+  if (opts.kind === 'downloads' && entry.rendererReady) {
+    notifyTitlePopupDownloads(entry.popup)
+  }
+
   // Push the new config and *wait* for the renderer to ack that the
   // new content has painted before flipping the view visible. Without
   // this the user sees a frame of the previous open's content while
@@ -3316,9 +3352,13 @@ ipcMain.on('comfy-titlepopup:ready', (event) => {
   if (!entry) return
   entry.rendererReady = true
   if (entry.pendingConfig && !entry.popup.webContents.isDestroyed()) {
-    entry.lastConfigJson = JSON.stringify(entry.pendingConfig)
-    entry.popup.webContents.send('comfy-titlepopup:set-config', entry.pendingConfig)
+    const flushed = entry.pendingConfig
+    entry.lastConfigJson = JSON.stringify(flushed)
+    entry.popup.webContents.send('comfy-titlepopup:set-config', flushed)
     entry.pendingConfig = null
+    if (flushed.kind === 'downloads') {
+      notifyTitlePopupDownloads(entry.popup)
+    }
   }
 })
 
@@ -3350,6 +3390,37 @@ ipcMain.on('comfy-titlepopup:close', (event) => {
   // Escape key — popup still has focus, so push it back to the parent.
   hideTitlePopup(entry, { releaseFocusToParent: true })
 })
+
+/** Per-entry download action dispatched from the popup's downloads view.
+ *  Routes pause / resume / cancel through the existing download-manager
+ *  APIs and `show-in-folder` through Electron's shell. */
+ipcMain.on(
+  'comfy-titlepopup:downloads-action',
+  (event, payload: { action?: unknown; url?: unknown; savePath?: unknown }) => {
+    const entry = titlePopupsByWebContents.get(event.sender.id)
+    if (!entry) return
+    const { action, url, savePath } = payload ?? {}
+    if (typeof url !== 'string' || url.length === 0) return
+    switch (action) {
+      case 'pause':
+        pauseModelDownload(url)
+        return
+      case 'resume':
+        resumeModelDownload(url)
+        return
+      case 'cancel':
+        cancelModelDownload(url)
+        return
+      case 'show-in-folder':
+        if (typeof savePath === 'string' && savePath.length > 0) {
+          shell.showItemInFolder(savePath)
+        }
+        return
+      default:
+        return
+    }
+  },
+)
 
 /**
  * Title-bar dropdown popups.
@@ -3608,12 +3679,14 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
     // pick up live transitions automatically (initial state is
     // pushed on `comfy-window:title-bar-ready` for the slow path).
     updater.onUpdateStateChanged(_broadcastAppUpdateStateToTitleBars)
-    // Track F — fan out downloads-tray state changes to every host
-    // window's title-bar. Subscribed once at startup; the helper
-    // iterates `comfyWindows` so newly-opened windows pick up live
-    // transitions automatically (initial state is pushed on
-    // `comfy-window:title-bar-ready` for the slow path).
+    // Fan out downloads-tray state changes to every host window's
+    // title-bar AND to every cached title-bar dropdown popup. The
+    // title-bar push drives the always-visible tray icon / badge; the
+    // popup push drives the live downloads view while it's open.
+    // Newly-opened windows pick up live transitions automatically;
+    // initial state for a fresh popup is pushed in `openTitlePopup`.
     downloadEvents.on('tray-state-changed', _broadcastDownloadsToTitleBars)
+    downloadEvents.on('tray-state-changed', _broadcastDownloadsToTitlePopups)
     // Tray / docking is disabled while the unified-window flow is being
     // rebuilt — closing the last window quits the app instead of
     // collapsing it into a hidden background process. The `onAppClose`

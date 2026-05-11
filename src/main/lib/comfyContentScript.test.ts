@@ -71,7 +71,7 @@ describe('getModelDownloadContentScript', () => {
     // Track F removed the in-page toast / dock / tab UI that used to
     // surface download progress inside the ComfyUI page surface. The
     // affordance now lives in the title-bar tray (see
-    // `TitleBarApp.vue` / `DownloadsTrayPopover.vue`). The DOM IDs
+    // `TitleBarApp.vue` / `comfyTitlePopup/DownloadsView.vue`). The DOM IDs
     // and the `onDownloadProgress` listener that drove the legacy
     // surface must NOT reappear in the injected script — main now
     // re-broadcasts download state via `comfy-titlebar:downloads-changed`

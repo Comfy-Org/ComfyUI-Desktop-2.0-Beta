@@ -7,12 +7,13 @@ import type { IpcRendererEvent } from 'electron'
  * All title-bar dropdowns (waffle menu, downloads tray, …) share a single
  * frameless transparent child `WebContentsView` per parent window. This
  * preload exposes the surface that popup needs to talk back to main:
- * activate an item (menu kind), ask to close, signal readiness, and
- * receive new configuration on each open.
+ * activate an item (menu kind), ask to close, signal readiness, receive
+ * new configuration on each open, and — for the downloads kind —
+ * subscribe to live tray-state pushes and dispatch per-entry actions.
  *
  * The popup view is reused across opens (created once per parent
  * window, hidden between uses) so opening feels instant after the first
- * paint — main pushes a fresh `set-config` payload (kind, items, theme)
+ * paint — main pushes a fresh `set-config` payload (kind, theme, …)
  * each time before showing the view.
  */
 
@@ -34,10 +35,38 @@ export type TitlePopupConfig =
       theme: { bg: string; text: string }
     }
 
+/** Live downloads-tray entry pushed to the popup. Shape mirrors
+ *  `DownloadProgress` in `src/main/lib/comfyDownloadManager.ts`. */
+export interface PopupDownloadEntry {
+  url: string
+  filename: string
+  directory?: string
+  savePath?: string
+  progress: number
+  receivedBytes?: number
+  totalBytes?: number
+  speedBytesPerSec?: number
+  etaSeconds?: number
+  status: 'pending' | 'downloading' | 'paused' | 'completed' | 'error' | 'cancelled'
+  error?: string
+}
+
+export interface PopupDownloadsState {
+  active: PopupDownloadEntry[]
+  recent: PopupDownloadEntry[]
+}
+
+export type PopupDownloadAction =
+  | { action: 'pause'; url: string }
+  | { action: 'resume'; url: string }
+  | { action: 'cancel'; url: string }
+  | { action: 'show-in-folder'; url: string; savePath: string }
+
 export interface ComfyTitlePopupBridge {
   /** A menu item was clicked — main routes by id and hides the popup. */
   activate(id: string): void
-  /** Close the popup without activating anything (Escape key). */
+  /** Close the popup without activating anything (Escape key, settings
+   *  deep-link, etc.). */
   close(): void
   /** Signal that the renderer is mounted and listening for config
    *  updates — main flushes any pending config that was queued before
@@ -50,6 +79,14 @@ export interface ComfyTitlePopupBridge {
   notifyRendered(): void
   /** Subscribe to config pushes (one fires for every open). */
   onConfig(cb: (config: TitlePopupConfig) => void): () => void
+  /** Subscribe to live downloads-tray state pushes. Fires every time
+   *  the main-side download manager broadcasts a new state and on the
+   *  initial state push for a freshly-opened downloads popup. */
+  onDownloadsChanged(cb: (state: PopupDownloadsState) => void): () => void
+  /** Dispatch a per-entry action (pause / resume / cancel /
+   *  show-in-folder) to main, which routes to the corresponding
+   *  download-manager API. */
+  downloadsAction(action: PopupDownloadAction): void
 }
 
 function isPopupConfig(value: unknown): value is TitlePopupConfig {
@@ -61,6 +98,12 @@ function isPopupConfig(value: unknown): value is TitlePopupConfig {
   if (typeof theme.bg !== 'string' || typeof theme.text !== 'string') return false
   if (v.kind === 'menu' && !Array.isArray(v.items)) return false
   return true
+}
+
+function isDownloadsState(value: unknown): value is PopupDownloadsState {
+  if (!value || typeof value !== 'object') return false
+  const v = value as { active?: unknown; recent?: unknown }
+  return Array.isArray(v.active) && Array.isArray(v.recent)
 }
 
 const bridge: ComfyTitlePopupBridge = {
@@ -82,6 +125,16 @@ const bridge: ComfyTitlePopupBridge = {
     }
     ipcRenderer.on('comfy-titlepopup:set-config', handler)
     return () => ipcRenderer.removeListener('comfy-titlepopup:set-config', handler)
+  },
+  onDownloadsChanged: (cb) => {
+    const handler = (_event: IpcRendererEvent, data: unknown): void => {
+      if (isDownloadsState(data)) cb(data)
+    }
+    ipcRenderer.on('comfy-titlepopup:downloads-changed', handler)
+    return () => ipcRenderer.removeListener('comfy-titlepopup:downloads-changed', handler)
+  },
+  downloadsAction: (action) => {
+    ipcRenderer.send('comfy-titlepopup:downloads-action', action)
   },
 }
 

@@ -129,14 +129,6 @@ vi.mock('../views/FirstUseTakeover.vue', () => ({
     methods: { open: vi.fn() },
   },
 }))
-vi.mock('../components/DownloadsTrayPopover.vue', () => ({
-  default: {
-    name: 'DownloadsTrayPopover',
-    emits: ['close'],
-    template: '<div data-testid="downloads-tray-popover" />',
-  },
-}))
-
 import { mount, flushPromises } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import { createPinia, setActivePinia } from 'pinia'
@@ -177,7 +169,6 @@ interface InstallationLike {
 type PanelTriggerPayload = {
   kind:
     | 'install-update'
-    | 'downloads'
     | 'app-update-restart-prompt'
     | 'app-update-download-prompt'
   installationId?: string
@@ -836,20 +827,6 @@ describe('PanelApp', () => {
       title: 'appUpdate.errorTitle',
       message: 'network down',
     })
-  })
-
-  it('mounts the DownloadsTrayPopover when a panel-trigger-overlay downloads event arrives (Track F)', async () => {
-    // Track F — the title-bar downloads tray click routes through
-    // `panel-trigger-overlay { kind: 'downloads' }`. PanelApp opens
-    // the popover at Tier 1 (the legacy AppUpdatePopover that shared
-    // this tier was removed for issue #488; app updates are now modal).
-    const wrapper = mountPanel()
-    await flushPromises()
-    expect(wrapper.find('[data-testid="downloads-tray-popover"]').exists()).toBe(false)
-
-    mockState.panelTriggerOverlayCallbacks.forEach((cb) => cb({ kind: 'downloads' }))
-    await flushPromises()
-    expect(wrapper.find('[data-testid="downloads-tray-popover"]').exists()).toBe(true)
   })
 
   it('ignores install-update events whose installationId does not match the host', async () => {

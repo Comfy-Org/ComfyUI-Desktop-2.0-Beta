@@ -11,7 +11,6 @@ import TrackModal from '../views/TrackModal.vue'
 import LoadSnapshotModal from '../views/LoadSnapshotModal.vue'
 import QuickInstallModal from '../views/QuickInstallModal.vue'
 import FirstUseTakeover from '../views/FirstUseTakeover.vue'
-import DownloadsTrayPopover from '../components/DownloadsTrayPopover.vue'
 import { useTheme } from '../composables/useTheme'
 import { useSessionStore } from '../stores/sessionStore'
 import { useInstallationStore } from '../stores/installationStore'
@@ -934,9 +933,9 @@ onMounted(async () => {
   // not yet hydrated), leaving the user perceiving the modal as
   // "not navigating to the Update tab" on the first attempt.
   //
-  // Other kinds (`app-update-*`, `downloads`) don't depend on the
-  // store, but they still benefit from the early registration since
-  // any of them can race the panelView's first load.
+  // Other kinds (`app-update-*`) don't depend on the store, but they
+  // still benefit from the early registration since any of them can
+  // race the panelView's first load.
   unsubPanelTriggerOverlay = window.api.onPanelTriggerOverlay((payload) => {
     void (async () => {
       if (payload.kind === 'app-update-restart-prompt') {
@@ -961,11 +960,6 @@ onMounted(async () => {
           initialTab: 'comfy',
           initialDetailTab: 'update',
         })
-        return
-      }
-      if (payload.kind === 'downloads') {
-        await bootstrapReady
-        await openOverlay({ kind: 'downloads' })
       }
     })()
   })
@@ -1141,17 +1135,6 @@ onUnmounted(() => {
          pill click pops a `useModal.confirm` modal (issue #488) that
          lives in the global ModalDialog mount below, not in the
          overlay slot. -->
-    <!-- Track F — Tier 1 downloads tray popover surfaced from the
-         title-bar tray. Reads its data from the shared `downloadStore`
-         (same source the legacy `DownloadsPanel` consumes) so the
-         tray and any other downloads surface never disagree.
-         Click-away dismissal uses `dismissTakeoverDirect` — closing
-         the popover only hides the overlay; downloads keep running
-         and the next broadcast repaints if the user reopens. -->
-    <DownloadsTrayPopover
-      v-if="currentOverlay?.kind === 'downloads'"
-      @close="dismissTakeoverDirect"
-    />
     <!-- Tier 1 unified Settings modal — replaces the legacy split
          between Install Settings (DetailModal manage), Directories,
          and App Settings. Mounted with `installation` carried by the
@@ -1160,7 +1143,7 @@ onUnmounted(() => {
          host's waffle entry passes null). The body underneath stays
          on chooser / comfy-lifecycle so dismissing returns there. -->
     <SettingsModal
-      v-else-if="currentOverlay?.kind === 'settings'"
+      v-if="currentOverlay?.kind === 'settings'"
       :installation="currentOverlay.installation"
       :initial-tab="currentOverlay.initialTab"
       :initial-detail-tab="currentOverlay.initialDetailTab"

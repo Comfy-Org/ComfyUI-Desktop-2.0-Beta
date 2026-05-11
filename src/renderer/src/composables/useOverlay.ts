@@ -16,7 +16,6 @@ import type { Installation } from '../types/ipc'
  *                   embedded DetailModal, Directories tab, Global
  *                   Settings tab). Replaces the legacy `manage` and
  *                   `page` kinds. Tier 1.
- *   - `downloads`  — Title-bar downloads tray popover. Tier 1.
  *   - `progress` — ProgressModal for a long-running action that does
  *                  NOT end in the running ComfyUI app (delete,
  *                  snapshot, copy, update-while-stopped). Tier 2.
@@ -68,7 +67,7 @@ import type { Installation } from '../types/ipc'
  * `Cancel "Updating ComfyUI"?`).
  */
 
-export type OverlayKind = 'settings' | 'downloads' | 'progress' | 'takeover'
+export type OverlayKind = 'settings' | 'progress' | 'takeover'
 
 /**
  * Unified Settings modal — ModalShell with a left-rail tab switcher
@@ -101,18 +100,6 @@ export interface SettingsOverlay {
   initialDetailTab?: string
   autoAction?: string | null
   noSidebar?: boolean
-}
-
-/**
- * Track F — Tier 1 popover surfaced from the title-bar downloads tray.
- * Reads its state (active + recently-completed downloads) from the
- * shared `downloadStore` so the popover and any other consumers
- * (e.g. the legacy DownloadsPanel) never disagree. No additional
- * payload — the store owns the data, the overlay just signals
- * "render the popover".
- */
-export interface DownloadsOverlay {
-  kind: 'downloads'
 }
 
 export interface ProgressOverlay {
@@ -192,13 +179,11 @@ export interface TakeoverOverlay {
 
 export type Overlay =
   | SettingsOverlay
-  | DownloadsOverlay
   | ProgressOverlay
   | TakeoverOverlay
 
 const TIER: Record<OverlayKind, 1 | 2 | 3> = {
   settings: 1,
-  downloads: 1,
   progress: 2,
   takeover: 3,
 }
