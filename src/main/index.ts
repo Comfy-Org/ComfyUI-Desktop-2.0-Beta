@@ -377,6 +377,17 @@ const comfyWindows = new Map<number, ComfyWindowEntry>()
 const installationIdToWindowKey = new Map<string, number>()
 
 /**
+ * Most recently focused install-backed host window's key, or `null`
+ * when none has been focused yet (or the last one closed). Updated by
+ * a `'focus'` listener on every host window and consulted by the
+ * platform re-launch hooks (`activate` / `second-instance`) so the
+ * dock-icon click brings the install the user was actually working in
+ * forward, instead of an arbitrary insertion-order pick when several
+ * installs are open.
+ */
+let lastFocusedInstallWindowKey: number | null = null
+
+/**
  * Window-mode unification (Stage W-4) — pending in-place attach
  * claims, set by the chooser-host renderer right before it kicks
  * off a launch action. `onLaunch()` consumes the claim instead of
@@ -661,8 +672,11 @@ function updateTrayMenu(): void {
 // that `onLocaleChanged: updateTrayMenu` and the `before-quit` cleanup
 // path stay valid without conditional churn for the eventual restore.
 
-/** Show a window and bring it to the front, working around Windows focus-theft prevention. */
+/** Show a window and bring it to the front, working around Windows
+ *  focus-theft prevention. Restores a minimised window first so callers
+ *  don't have to remember the two-step. */
 function bringToFront(win: BrowserWindow): void {
+  if (win.isMinimized()) win.restore()
   if (process.platform === 'win32') {
     win.setAlwaysOnTop(true)
     win.show()
@@ -1280,6 +1294,17 @@ function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowResult {
   comfyWindow.on('resize', () => saveWindowBounds(opts.boundsKey, comfyWindow))
   comfyWindow.on('move', () => saveWindowBounds(opts.boundsKey, comfyWindow))
 
+  // Track the most recently focused install-backed host so the
+  // dock-icon / second-instance re-launch hooks can pick it over an
+  // arbitrary insertion-order install when several are open. Chooser
+  // hosts are excluded — they get priority via findFirstChooserHostWindow().
+  comfyWindow.on('focus', () => {
+    const entry = comfyWindows.get(windowKey)
+    if (entry && entry.installationId !== null) {
+      lastFocusedInstallWindowKey = windowKey
+    }
+  })
+
   // Push the initial state once the title bar's preload signals readiness.
   // Filter to this title bar's WebContents to avoid cross-talk between windows.
   //
@@ -1372,6 +1397,7 @@ function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowResult {
 
   comfyWindow.on('closed', () => {
     ipcMain.off('comfy-window:title-bar-ready', onTitleBarReadyHandler)
+    if (lastFocusedInstallWindowKey === windowKey) lastFocusedInstallWindowKey = null
     // Window-mode unification (Stage W-1) — unregister via the
     // primary windowKey AND the secondary install-id index.
     const closedEntry = comfyWindows.get(windowKey)
@@ -2135,25 +2161,41 @@ function openOrFocusChooserHostWindow(): BrowserWindow {
   return openChooserHostWindow()
 }
 
+/** Find the install-backed host window the user most recently focused,
+ *  falling back to the first live install-backed host in insertion
+ *  order. Returns `null` when no install-backed host is open. */
+function findPreferredInstallHostWindow(): BrowserWindow | null {
+  if (lastFocusedInstallWindowKey !== null) {
+    const entry = comfyWindows.get(lastFocusedInstallWindowKey)
+    if (entry && entry.installationId !== null && !entry.window.isDestroyed()) {
+      return entry.window
+    }
+  }
+  for (const [, entry] of comfyWindows) {
+    if (entry.installationId !== null && !entry.window.isDestroyed()) {
+      return entry.window
+    }
+  }
+  return null
+}
+
 /** Focus any live host window — chooser host preferred so the dashboard
- *  stays the entry surface, otherwise the first install-backed host —
- *  and only spawn a fresh chooser host when no host windows exist.
- *  Restores minimised hosts before focusing. Used by the platform
- *  re-launch hooks (`activate` on macOS, `second-instance` on
- *  Windows/Linux) so re-clicking the app icon brings the running
- *  install forward instead of stacking a new dashboard on top of it. */
+ *  stays the entry surface, otherwise the install-backed host the user
+ *  was most recently in — and only spawn a fresh chooser host when no
+ *  host windows exist. Used by the platform re-launch hooks
+ *  (`activate` on macOS, `second-instance` on Windows/Linux) so
+ *  re-clicking the app icon brings the running install forward instead
+ *  of stacking a new dashboard on top of it. */
 function openOrFocusAnyHostWindow(): BrowserWindow {
   const chooser = findFirstChooserHostWindow()
   if (chooser) {
-    if (chooser.isMinimized()) chooser.restore()
     bringToFront(chooser)
     return chooser
   }
-  for (const [, entry] of comfyWindows) {
-    if (entry.window.isDestroyed()) continue
-    if (entry.window.isMinimized()) entry.window.restore()
-    bringToFront(entry.window)
-    return entry.window
+  const installWin = findPreferredInstallHostWindow()
+  if (installWin) {
+    bringToFront(installWin)
+    return installWin
   }
   return openChooserHostWindow()
 }
