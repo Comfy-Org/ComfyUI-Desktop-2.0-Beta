@@ -471,6 +471,26 @@ let isTooltipVisible = false
  *  `bridge.hideTooltip()`. Drives the hover-handoff fast path. */
 let lastHiddenAt = -Infinity
 
+/**
+ * Single source of truth for tooltip-related attributes on title-bar
+ * controls. Cocoa's native HTML `title` tooltip occasionally DOES
+ * fire for our sibling-view buttons even though it's documented as
+ * unreliable; when it does, the user gets two bubbles at once (the
+ * native one plus our custom popup). Keep them mutually exclusive at
+ * the source by emitting `title` only off-mac and `data-title-tooltip`
+ * only on mac. `aria-label` is unconditional so screen readers see
+ * the same string regardless of platform.
+ */
+function tooltipAttrs(text: string): Record<string, string> {
+  const base: Record<string, string> = { 'aria-label': text }
+  if (isMac.value) {
+    base['data-title-tooltip'] = text
+  } else {
+    base.title = text
+  }
+  return base
+}
+
 function findTooltipTarget(target: EventTarget | null): {
   text: string
   rect: DOMRect
@@ -709,9 +729,7 @@ onUnmounted(() => {
         type="button"
         class="title-menu-button title-menu-button--icon"
         aria-haspopup="menu"
-        title="Menu"
-        aria-label="Menu"
-        data-title-tooltip="Menu"
+        v-bind="tooltipAttrs('Menu')"
         @click="handleFileMenu"
       >
         <MenuIcon :size="18" />
@@ -725,9 +743,7 @@ onUnmounted(() => {
         type="button"
         class="title-update-pill is-app-update"
         :class="{ 'is-ready': appUpdateState.kind === 'ready' }"
-        :title="appUpdatePillTooltip"
-        :aria-label="appUpdatePillTooltip"
-        :data-title-tooltip="appUpdatePillTooltip"
+        v-bind="tooltipAttrs(appUpdatePillTooltip)"
         @click="handleAppUpdatePill"
       >
         <Download v-if="appUpdateState.kind === 'available'" :size="14" />
@@ -745,9 +761,7 @@ onUnmounted(() => {
         type="button"
         class="title-downloads-tray"
         :class="{ 'has-active': downloadsActiveCount > 0 }"
-        :title="downloadsTrayLabel"
-        :aria-label="downloadsTrayLabel"
-        :data-title-tooltip="downloadsTrayLabel"
+        v-bind="tooltipAttrs(downloadsTrayLabel)"
         @click="handleDownloadsTray"
       >
         <ArrowDownToLine :size="14" />
@@ -765,9 +779,7 @@ onUnmounted(() => {
         v-if="!isConsentLockdown"
         type="button"
         class="title-menu-button title-menu-button--icon title-feedback-button"
-        title="Send Feedback"
-        aria-label="Send Feedback"
-        data-title-tooltip="Send Feedback"
+        v-bind="tooltipAttrs('Send Feedback')"
         @click="handleFeedback"
       >
         <MessageSquarePlus :size="16" />
@@ -798,9 +810,7 @@ onUnmounted(() => {
           v-if="showInstallTypeIcon"
           :size="14"
           class="title-install-type-icon"
-          :title="installTypeLabel"
-          :aria-label="installTypeLabel"
-          :data-title-tooltip="installTypeLabel"
+          v-bind="tooltipAttrs(installTypeLabel)"
         />
         <span class="title-install-name">{{ installLabel }}</span>
       </div>
@@ -813,9 +823,7 @@ onUnmounted(() => {
         v-if="showInstallUpdatePill"
         type="button"
         class="title-update-pill is-install-update"
-        :title="installUpdatePillLabel"
-        :aria-label="installUpdatePillLabel"
-        :data-title-tooltip="installUpdatePillLabel"
+        v-bind="tooltipAttrs(installUpdatePillLabel)"
         @click="handleInstallUpdatePill"
       >
         <Download :size="14" />

@@ -835,6 +835,41 @@ describe('TitleBarApp', () => {
     }
   })
 
+  it('emits `title` only on Win/Linux and `data-title-tooltip` only on macOS so the two tooltip systems can never both fire', async () => {
+    // Cocoa's native HTML `title` tooltip occasionally DOES fire for
+    // sibling-WebContentsView buttons on macOS, even though it's
+    // documented as unreliable — when it does, the user sees both
+    // bubbles at once (native one + our custom popup, in two
+    // different fonts/sizes). The fix is to make the two systems
+    // mutually exclusive at the source: `title` only off-mac,
+    // `data-title-tooltip` only on mac. `aria-label` stays
+    // unconditional so screen readers see the same text everywhere.
+    bridgeState = installMockBridge({ isMac: true })
+    vi.resetModules()
+    {
+      const { default: TitleBarApp } = await import('./TitleBarApp.vue')
+      const wrapper = mount(TitleBarApp)
+      await flushPromises()
+      const btn = wrapper.find('.title-menu-button')
+      expect(btn.attributes('aria-label')).toBe('Menu')
+      expect(btn.attributes('data-title-tooltip')).toBe('Menu')
+      expect(btn.attributes('title')).toBeUndefined()
+      wrapper.unmount()
+    }
+    bridgeState = installMockBridge({ isMac: false })
+    vi.resetModules()
+    {
+      const { default: TitleBarApp } = await import('./TitleBarApp.vue')
+      const wrapper = mount(TitleBarApp)
+      await flushPromises()
+      const btn = wrapper.find('.title-menu-button')
+      expect(btn.attributes('aria-label')).toBe('Menu')
+      expect(btn.attributes('title')).toBe('Menu')
+      expect(btn.attributes('data-title-tooltip')).toBeUndefined()
+      wrapper.unmount()
+    }
+  })
+
   it('routes hover through showTooltip on macOS, with the trigger text and anchor', async () => {
     bridgeState = installMockBridge({ isMac: true })
     vi.resetModules()
