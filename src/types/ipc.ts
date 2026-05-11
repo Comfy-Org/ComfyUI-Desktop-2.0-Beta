@@ -127,7 +127,7 @@ export interface ActionDef {
   /** Visual style for the action button.
    *  - `primary`: solid blue, does the thing immediately on click.
    *  - `accent`: hollow blue, telegraphs that a confirmation step
-   *    will run before doing anything (Phase 3 §9 convention).
+   *    will run before doing anything.
    *  - `danger`: red, destructive action. */
   style?: 'primary' | 'accent' | 'danger'
   enabled?: boolean
@@ -207,9 +207,7 @@ export interface ListAction {
 
 /** Payload carried by every component's `show-progress` emit. The host
  *  (typically `PanelApp`) consumes the closure-bound `apiCall` to drive
- *  ProgressModal. The pre-§17 `actionId` field is gone — the
- *  takeover-replaces-modal rule of `useOverlay` subsumes the
- *  chooser-host launch-swap-in-place special case. */
+ *  ProgressModal. */
 export interface ShowProgressOpts {
   installationId: string
   title: string
@@ -392,6 +390,12 @@ export interface ModelDownloadProgress {
   etaSeconds?: number
   status: ModelDownloadStatus
   error?: string
+  /** First-seen wall-clock timestamp (ms). Stable across status
+   *  transitions — the renderer uses it to render a single
+   *  insertion-ordered list so terminal entries don't jump to the
+   *  bottom when they leave the in-flight bucket. Optional only for
+   *  back-compat with snapshots that predate the field. */
+  createdAt?: number
 }
 
 // --- Track types ---
@@ -629,6 +633,29 @@ export interface ErrorDetailData {
   message: string
 }
 
+// --- App-update state (mirrors src/main/lib/updater.ts AppUpdateState) ---
+export interface AppUpdateState {
+  /** `'available'` after `update-available`, `'downloading'` once the
+   *  first user-initiated `download-progress` tick lands, `'ready'`
+   *  after `update-downloaded`, `null` when nothing is pending. */
+  kind: 'available' | 'downloading' | 'ready' | null
+  /** Target version when `kind` is non-null, otherwise null. */
+  version: string | null
+  /** Mirrors the `autoInstallUpdates` setting at the moment the
+   *  state was committed. */
+  autoUpdate: boolean
+}
+
+/** Narrowed slice of electron-updater's `ProgressInfo` forwarded by
+ *  main on `app-update:download-progress`. Any field may be null when
+ *  the auto-updater doesn't report it for a given tick. */
+export interface AppUpdateDownloadProgress {
+  percent: number | null
+  transferred: number | null
+  total: number | null
+  bytesPerSecond: number | null
+}
+
 // --- IPC API interface ---
 export interface ElectronApi {
   // Sources / New Install
@@ -697,27 +724,26 @@ export interface ElectronApi {
    *  panel after a navigate-list emit (e.g. delete) so the parent window
    *  doesn't linger with no install backing it. */
   closeComfyWindow(installationId: string): Promise<boolean>
-  /** Close the BrowserWindow that contains the calling panel WebContents
-   *  (Phase 3 step 2d). Used by the chooser to retire its install-less
-   *  host window after a successful pick → launch hand-off. Returns true
-   *  if a window was found and closed. */
+  /** Close the BrowserWindow that contains the calling panel
+   *  WebContents. Used by the chooser to retire its install-less
+   *  host window after a successful pick → launch hand-off.
+   *  Returns true if a window was found and closed. */
   closeHostWindow(): Promise<boolean>
   /** Page X-close (Settings / Directories / Install Settings header).
    *  Asks main to reset the panel-history stack and return the body to
    *  the comfy/chooser root. Fire-and-forget; the panel will receive
    *  the resulting `panel-switch` like any other navigation. */
   closeCurrentPanel(): void
-  /** Modal-unification (Track M-2.2) — push the first-use takeover's
-   *  current step to main so it can (a) cache the value on the host
-   *  entry for `buildTitleMenuItems` to read synchronously and (b)
-   *  forward to the title-bar webContents (consumed in M-2.3). Fire-
-   *  and-forget; FirstUseTakeover.vue calls this on every step change
-   *  and on unmount with `'none'`. */
+  /** Push the first-use takeover's current step to main so it can
+   *  (a) cache the value on the host entry for
+   *  `buildTitlePopupMenuItems` to read synchronously and (b)
+   *  forward to the title-bar webContents. Fire-and-forget;
+   *  FirstUseTakeover.vue calls this on every step change and on
+   *  unmount with `'none'`. */
   setFirstUseMode(mode: 'none' | 'consent-lockdown' | 'post-consent'): void
-  /** Modal-unification (Track M-2.2) — main routes the file-menu
-   *  Skip Onboarding click here. Handler runs the same
-   *  `markFirstUseCompleted` + dismiss-takeover sequence the Cloud
-   *  pick path uses. Returns an unsubscribe. */
+  /** Main routes the file-menu Skip Onboarding click here. Handler
+   *  runs the same `markFirstUseCompleted` + dismiss-takeover
+   *  sequence the Cloud pick path uses. Returns an unsubscribe. */
   onFirstUseSkip(callback: () => void): Unsubscribe
   /** Main forwards both the title-bar feedback button and the file-menu
    *  "Send Feedback" entry here. The panel renderer fires the
@@ -727,7 +753,7 @@ export interface ElectronApi {
    *  `buildSupportUrl()` reads `navigator.userAgent` and the telemetry
    *  helpers live renderer-side. Returns an unsubscribe. */
   onOpenFeedback(callback: (data: { source: 'titlebar' | 'menu' }) => void): Unsubscribe
-  /** Step 5 §16 — main consults the panel renderer before tearing down
+  /** Main consults the panel renderer before tearing down
    *  the host window. Returns an unsubscribe; the callback receives a
    *  `requestId` it must echo back via `respondCloseRequest` so main
    *  can pair the response with the request that fired it. */
@@ -742,22 +768,21 @@ export interface ElectronApi {
    *  may take their time on the cancel-prompt). */
   ackCloseRequest(payload: { requestId: string }): void
   /** Stamp the calling chooser host window's current bounds onto the
-   *  install's saved-bounds slot (Phase 3 visual continuity). The chooser
-   *  pick flow used this BEFORE the W-4 in-place attach landed — kept
-   *  as the fallback wiring for `claimAttachHost` rejections (e.g. the
-   *  install uses `browserPartition === 'unique'` and needs a fresh
-   *  window with its own partition). No-op for install-backed callers. */
+   *  install's saved-bounds slot (visual continuity). Fallback wiring
+   *  for `claimAttachHost` rejections (e.g. the install uses
+   *  `browserPartition === 'unique'` and needs a fresh window with
+   *  its own partition). No-op for install-backed callers. */
   transferHostBoundsToInstall(installationId: string): Promise<boolean>
-  /** Window-mode unification (Stage W-4) — claim the calling install-
-   *  less host window for in-place attach. Run by the chooser-host
-   *  renderer right before kicking off the launch action; when the
-   *  launch event eventually lands in main, `onLaunch()` consumes
-   *  the claim and attaches the install to THIS host window instead
-   *  of constructing a fresh one. Returns `true` when the claim was
-   *  accepted (renderer should skip its fallback `closeHostWindow`
-   *  + `transferHostBoundsToInstall` wiring); `false` otherwise
-   *  (sender isn't an install-less host's panelView, or main rejected
-   *  the claim — fall back to the legacy close+open swap). */
+  /** Claim the calling install-less host window for in-place attach.
+   *  Run by the chooser-host renderer right before kicking off the
+   *  launch action; when the launch event eventually lands in main,
+   *  `onLaunch()` consumes the claim and attaches the install to
+   *  THIS host window instead of constructing a fresh one. Returns
+   *  `true` when the claim was accepted (renderer should skip its
+   *  fallback `closeHostWindow` + `transferHostBoundsToInstall`
+   *  wiring); `false` otherwise (sender isn't an install-less host's
+   *  panelView, or main rejected the claim — fall back to the
+   *  close+open swap). */
   claimAttachHost(installationId: string): Promise<boolean>
   getRunningInstances(): Promise<RunningInstance[]>
   /**
@@ -823,12 +848,28 @@ export interface ElectronApi {
   downloadUpdate(): Promise<void>
   installUpdate(): Promise<void>
   getUpdateCapabilities(): Promise<{ canAutoUpdate: boolean; systemManaged: boolean }>
+  /**
+   * Snapshot of main's cached app-update state. Used by Global Settings
+   * to render the update-action panel in the right state when the
+   * panel mounts AFTER an `update-available` / `update-downloaded`
+   * broadcast already fired. Live updates arrive via
+   * `onAppUpdateStateChanged`.
+   */
+  getAppUpdateState(): Promise<AppUpdateState>
 
   // Model downloads
   listModelDownloads(): Promise<ModelDownloadProgress[]>
   pauseModelDownload(url: string): Promise<boolean>
   resumeModelDownload(url: string): Promise<boolean>
   cancelModelDownload(url: string): Promise<boolean>
+  /** Drop a single terminal (completed / error / cancelled) entry
+   *  from main's recent-downloads buffer; broadcasts a
+   *  `model-download-removed` event so every renderer surface drops
+   *  the entry from its store in lockstep. */
+  dismissModelDownload(url: string): Promise<boolean>
+  /** Bulk-dismiss every terminal entry from main's recent buffer.
+   *  Returns the number of entries removed. */
+  clearFinishedModelDownloads(): Promise<number>
   showDownloadInFolder(savePath: string): Promise<void>
 
   // Event listeners (return unsubscribe functions)
@@ -855,6 +896,22 @@ export interface ElectronApi {
    */
   onAppUpdatePromptRestart(callback: (data: { version: string }) => void): Unsubscribe
   /**
+   * Fires whenever main's cached app-update state transitions
+   * (update-available, update-downloaded, autoUpdate setting flip).
+   * Mirrors the title-bar pill's `onAppUpdateStateChanged` so the
+   * Global Settings update-action panel can stay in sync.
+   */
+  onAppUpdateStateChanged(callback: (state: AppUpdateState) => void): Unsubscribe
+  /**
+   * Per-tick download progress while electron-updater is fetching the
+   * pending update payload. Drives the progress bar in the Global
+   * Settings update panel. Any field may be null if the auto-updater
+   * didn't supply it for that tick.
+   */
+  onAppUpdateDownloadProgress(
+    callback: (progress: AppUpdateDownloadProgress) => void,
+  ): Unsubscribe
+  /**
    * Fires when a user-initiated update action (download / install) fails.
    * Background auto-on download errors are NOT broadcast — only failures
    * the user is actively waiting on. Renderer pops an alert modal.
@@ -862,6 +919,13 @@ export interface ElectronApi {
   onAppUpdateUserActionFailed(callback: (err: { message: string }) => void): Unsubscribe
   onZoomChanged(callback: (level: number) => void): Unsubscribe
   onModelDownloadProgress(callback: (progress: ModelDownloadProgress) => void): Unsubscribe
+  /** Fires when main drops a single terminal entry from its recent
+   *  buffer (via `dismissModelDownload`). */
+  onModelDownloadRemoved(callback: (data: { url: string }) => void): Unsubscribe
+  /** Fires when main bulk-dismisses every terminal entry. The payload
+   *  carries the URLs that were removed so listeners can drop them in
+   *  one pass instead of re-listing. */
+  onModelDownloadsClearedFinished(callback: (data: { urls: string[] }) => void): Unsubscribe
   onTelemetrySettingChanged(callback: (enabled: boolean | undefined) => void): Unsubscribe
   onDatadogError(callback: (payload: DatadogForwardedError) => void): Unsubscribe
   onTelemetryActionFromMain(callback: (data: { event: string; context: Record<string, unknown>; mainAlreadyCaptured?: boolean }) => void): Unsubscribe
@@ -884,18 +948,21 @@ export interface ElectronApi {
    *     Carries the target `version`.
    *   - `'install-update'` → Manage overlay (DetailModal) on the
    *     update tab, scoped to the carried `installationId`.
-   *   - `'downloads'` → Tier 1 popover listing in-flight and
-   *     recently-completed downloads from the shared `downloadStore`.
+   *   - `'open-settings'` → Tier 1 unified Settings modal at the
+   *     given `settingsTab` (defaults to the host's default tab).
+   *     Currently used by the title-bar downloads popup's
+   *     "View all in Settings…" deep-link.
    */
   onPanelTriggerOverlay(
     callback: (data: {
       kind:
         | 'install-update'
-        | 'downloads'
         | 'app-update-restart-prompt'
         | 'app-update-download-prompt'
+        | 'open-settings'
       installationId?: string
       version?: string | null
+      settingsTab?: 'comfy' | 'directories' | 'downloads' | 'global'
     }) => void,
   ): Unsubscribe
 }

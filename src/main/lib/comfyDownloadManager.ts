@@ -3,6 +3,7 @@ import { EventEmitter } from 'events'
 import fs from 'fs'
 import path from 'path'
 import * as settings from '../settings'
+import { _broadcastToRenderer } from './ipc/shared'
 
 export const ALLOWED_EXTENSIONS = ['.safetensors', '.sft', '.ckpt', '.pth', '.pt']
 
@@ -18,6 +19,12 @@ export interface DownloadProgress {
   etaSeconds?: number
   status: 'pending' | 'downloading' | 'paused' | 'completed' | 'error' | 'cancelled'
   error?: string
+  /** Wall-clock ms of the first time we saw this URL — stamped by
+   *  `reportProgress` and preserved across status transitions so the
+   *  renderer can render a single insertion-ordered list (active +
+   *  terminal entries stay in their original slot rather than terminal
+   *  ones jumping to the bottom of a separate "recent" bucket). */
+  createdAt?: number
 }
 
 interface PendingDownload {
@@ -42,15 +49,15 @@ const pendingDownloads = new Map<string, PendingDownload>()
 let mainWindow: BrowserWindow | null = null
 
 /**
- * Track F — recent terminal downloads kept in main so a title-bar tray
- * mounted AFTER a download finished can still surface it. Capped at
+ * Recent terminal downloads kept in main so a title-bar tray mounted
+ * AFTER a download finished can still surface it. Capped at
  * `RECENT_LIMIT`; oldest entries are evicted FIFO. Re-pushed on every
  * tray state broadcast and on the `onTitleBarReady` initial-state push.
  */
 const RECENT_LIMIT = 10
 const recentDownloads: DownloadProgress[] = []
 
-/** Track F — main-process event bus for the title-bar downloads tray.
+/** Main-process event bus for the title-bar downloads tray.
  *  Emits `'tray-state-changed'` whenever a progress event is broadcast
  *  (so subscribers can pull a fresh `getDownloadsTrayState()` snapshot
  *  without each consumer reimplementing the same projection). The
@@ -58,7 +65,7 @@ const recentDownloads: DownloadProgress[] = []
 export const downloadEvents = new EventEmitter()
 downloadEvents.setMaxListeners(50)
 
-/** Track F — snapshot of the downloads tray state. `active` is every
+/** Snapshot of the downloads tray state. `active` is every
  *  in-flight (`pending` / `downloading` / `paused`) entry; `recent` is
  *  the last `RECENT_LIMIT` terminal entries (oldest first). Mirror of
  *  the payload pushed on `comfy-titlebar:downloads-changed`. */
@@ -77,7 +84,14 @@ function pushRecent(progress: DownloadProgress): void {
   const idx = recentDownloads.findIndex((d) => d.url === progress.url)
   if (idx >= 0) recentDownloads.splice(idx, 1)
   recentDownloads.push({ ...progress })
-  while (recentDownloads.length > RECENT_LIMIT) recentDownloads.shift()
+  // FIFO eviction past the cap — also drop the createdAt stamp so the
+  // map doesn't grow unbounded; a re-download of the same URL after
+  // eviction gets a fresh slot at the end of the list, which is the
+  // user's expectation.
+  while (recentDownloads.length > RECENT_LIMIT) {
+    const evicted = recentDownloads.shift()
+    if (evicted) createdAtByUrl.delete(evicted.url)
+  }
 }
 
 export function getDownloadsTrayState(): DownloadsTrayState {
@@ -192,12 +206,12 @@ function broadcastProgress(progress: DownloadProgress): void {
       }
     }
   }
-  // Also send to the Launcher window
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('model-download-progress', progress)
-  }
-  // Track F — title-bar downloads tray state. Terminal entries land in
-  // the recent buffer first so the snapshot the listener pulls already
+  // Fan out to every renderer (host title-bars, panel views, popup
+  // views, …) so the Settings → Downloads tab and popup downloads
+  // store both receive live progress events.
+  _broadcastToRenderer('model-download-progress', progress)
+  // Title-bar downloads tray state. Terminal entries land in the
+  // recent buffer first so the snapshot the listener pulls already
   // reflects the new state. The listener (registered in
   // src/main/index.ts) fans out to every comfy window's title-bar
   // webContents.
@@ -220,7 +234,22 @@ function setTaskbarProgress(win: BrowserWindow, progress: DownloadProgress): voi
   }
 }
 
+/** First-seen timestamp per URL — preserved across status transitions
+ *  and across the `pendingDownloads → recentDownloads` migration that
+ *  happens on terminal status. Cleared when the URL is fully evicted
+ *  from `recentDownloads`. */
+const createdAtByUrl = new Map<string, number>()
+
 function reportProgress(progress: DownloadProgress): void {
+  // Stamp insertion timestamp once per URL so terminal entries keep
+  // their slot in the renderer's combined view rather than getting
+  // appended to the bottom of a separate "recent" bucket.
+  let createdAt = createdAtByUrl.get(progress.url)
+  if (createdAt === undefined) {
+    createdAt = Date.now()
+    createdAtByUrl.set(progress.url, createdAt)
+  }
+  progress.createdAt = createdAt
   broadcastProgress(progress)
   const pending = pendingDownloads.get(progress.url)
   if (pending) setTaskbarProgress(pending.window, progress)
@@ -705,6 +734,48 @@ export function getActiveDownloads(): DownloadProgress[] {
   return result
 }
 
+/** Full snapshot the renderer-side download store seeds itself from on
+ *  mount — active in-flight entries plus the recent terminal buffer.
+ *  Without the recent slice the Settings tab + popup history would be
+ *  empty until the next status broadcast. */
+export function getAllDownloads(): DownloadProgress[] {
+  const result: DownloadProgress[] = []
+  for (const pending of pendingDownloads.values()) {
+    result.push(pending.lastProgress)
+  }
+  for (const recent of recentDownloads) {
+    result.push(recent)
+  }
+  return result
+}
+
+/** Dismiss a single terminal entry from the recent buffer. In-flight
+ *  entries are not dismissable here — cancel them first. Broadcasts a
+ *  `model-download-removed` event so every renderer surface drops the
+ *  entry from its store in lockstep. Returns true if anything was
+ *  removed. */
+export function dismissRecentDownload(url: string): boolean {
+  const idx = recentDownloads.findIndex((d) => d.url === url)
+  if (idx < 0) return false
+  recentDownloads.splice(idx, 1)
+  createdAtByUrl.delete(url)
+  _broadcastToRenderer('model-download-removed', { url })
+  downloadEvents.emit('tray-state-changed')
+  return true
+}
+
+/** Bulk-dismiss every terminal entry from the recent buffer. */
+export function clearFinishedDownloads(): number {
+  if (recentDownloads.length === 0) return 0
+  const removed = recentDownloads.splice(0, recentDownloads.length)
+  for (const r of removed) createdAtByUrl.delete(r.url)
+  _broadcastToRenderer('model-downloads-cleared-finished', {
+    urls: removed.map((r) => r.url),
+  })
+  downloadEvents.emit('tray-state-changed')
+  return removed.length
+}
+
 // ---- Window closed: detach downloads so they continue in the background ----
 
 export function detachWindowDownloads(win: BrowserWindow): void {
@@ -754,7 +825,16 @@ export function registerDownloadIpc(): void {
     cancelModelDownload(url),
   )
 
-  ipcMain.handle('model-download-list', () => getActiveDownloads())
+  ipcMain.handle('model-download-dismiss', (_event, { url }: { url: string }) =>
+    dismissRecentDownload(url),
+  )
+
+  ipcMain.handle('model-download-clear-finished', () => clearFinishedDownloads())
+
+  // Seed the renderer-side store with active entries AND the recent
+  // terminal buffer so the Settings tab + popup history are non-empty
+  // on first paint after a window opens mid-flow.
+  ipcMain.handle('model-download-list', () => getAllDownloads())
 
   ipcMain.handle('show-download-in-folder', (_event, { savePath }: { savePath: string }) => {
     if (typeof savePath === 'string' && savePath) {

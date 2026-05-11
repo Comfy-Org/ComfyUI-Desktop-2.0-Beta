@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import SettingsSections from '../components/SettingsSections.vue'
+import AppUpdateAction from '../components/AppUpdateAction.vue'
 import { useModal } from '../composables/useModal'
 import type { SettingsSection, SettingsAction } from '../types/ipc'
 
@@ -10,6 +11,12 @@ import type { SettingsSection, SettingsAction } from '../types/ipc'
  * SettingsModal as the "Global Settings" tab. Owns its own data
  * fetch + setting-action handling but no chrome — the parent
  * supplies the ModalShell and close button.
+ *
+ * Renders the section list with the dedicated "Desktop Updates"
+ * panel inserted directly below General — the legacy
+ * `'check-for-update'` action that used to sit at the bottom of
+ * General was retired in favour of the state-driven
+ * `<AppUpdateAction />` section here.
  */
 
 const { t } = useI18n()
@@ -20,8 +27,15 @@ function openUrl(url: string): void {
 }
 
 const sections = ref<SettingsSection[]>([])
-const checkingForUpdates = ref(false)
 const systemManaged = ref(false)
+
+/** General is always the first section produced by main; everything
+ *  after it (Telemetry, Cache, Advanced, source sections, About) gets
+ *  rendered below the Desktop Updates panel. Splitting the list this
+ *  way keeps the section ordering as data-driven as possible while
+ *  still letting us interleave a renderer-only panel. */
+const generalSection = computed<SettingsSection[]>(() => sections.value.slice(0, 1))
+const tailSections = computed<SettingsSection[]>(() => sections.value.slice(1))
 
 async function loadSettings(): Promise<void> {
   sections.value = await window.api.getSettingsSections()
@@ -32,22 +46,16 @@ async function loadSettings(): Promise<void> {
 async function handleAction(action: SettingsAction): Promise<void> {
   if (action.url) {
     openUrl(action.url)
-    return
   }
-  if (action.action === 'check-for-update') {
-    checkingForUpdates.value = true
-    try {
-      const result = await window.api.checkForUpdate()
-      if (!result.available && !result.error) {
-        const message = systemManaged.value ? t('update.debUpToDate') : t('update.upToDate')
-        await modal.alert({ title: t('update.updateCheck'), message })
-      } else if (result.error) {
-        await modal.alert({ title: t('update.updateError'), message: result.error })
-      }
-    } finally {
-      checkingForUpdates.value = false
-    }
-  }
+}
+
+function handleUpToDate(): void {
+  const message = systemManaged.value ? t('update.debUpToDate') : t('update.upToDate')
+  void modal.alert({ title: t('update.updateCheck'), message })
+}
+
+function handleCheckError(message: string): void {
+  void modal.alert({ title: t('update.updateError'), message })
 }
 
 // Refetch when main broadcasts a settings change so panels opened
@@ -71,8 +79,16 @@ defineExpose({ loadSettings })
 
 <template>
   <SettingsSections
-    :sections="sections"
-    :checking-for-updates="checkingForUpdates"
+    :sections="generalSection"
+    @setting-updated="loadSettings"
+    @action="handleAction"
+  />
+  <AppUpdateAction
+    @up-to-date="handleUpToDate"
+    @check-error="handleCheckError"
+  />
+  <SettingsSections
+    :sections="tailSections"
     @setting-updated="loadSettings"
     @action="handleAction"
   />

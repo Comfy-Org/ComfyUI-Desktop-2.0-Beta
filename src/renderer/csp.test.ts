@@ -21,7 +21,7 @@ function readHtml(filename: string): string {
 }
 
 const TELEMETRY_RENDERER_HTMLS = ['panel.html', 'comfyTitleBar.html'] as const
-const NON_TELEMETRY_RENDERER_HTMLS = ['comfyTitleMenu.html', 'comfyTitleTooltip.html'] as const
+const NON_TELEMETRY_RENDERER_HTMLS = ['comfyTitlePopup.html', 'comfyTitleTooltip.html'] as const
 
 describe('Content-Security-Policy: panel.html', () => {
   const csp = parseCSP(readHtml('panel.html'))
@@ -73,11 +73,12 @@ describe.each(NON_TELEMETRY_RENDERER_HTMLS)(
   (file) => {
     const csp = parseCSP(readHtml(file))
 
-    // The title-menu popup is a transient window that does NOT initialise
-    // Datadog/PostHog (see comfyTitleMenu/main.ts). Keeping the CSP narrow
-    // here documents and enforces that decision — adding a renderer-side
-    // telemetry SDK to this surface would also need a CSP loosening, so
-    // requiring the change in both places is a useful tripwire.
+    // The title-bar dropdown popup is a transient window that does NOT
+    // initialise Datadog/PostHog (see comfyTitlePopup/main.ts). Keeping
+    // the CSP narrow here documents and enforces that decision — adding
+    // a renderer-side telemetry SDK to this surface would also need a
+    // CSP loosening, so requiring the change in both places is a useful
+    // tripwire.
     it('does NOT include Datadog endpoints', () => {
       expect(csp['connect-src']).not.toContain('datadoghq.com')
     })

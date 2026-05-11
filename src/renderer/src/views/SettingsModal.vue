@@ -1,18 +1,20 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Box, FolderOpen, Settings as SettingsIcon } from 'lucide-vue-next'
+import { ArrowDownToLine, Box, FolderOpen, Settings as SettingsIcon } from 'lucide-vue-next'
 import ModalShell from '../components/ModalShell.vue'
 import DetailModal from './DetailModal.vue'
 import DirectoriesView from './DirectoriesView.vue'
+import DownloadsView from './DownloadsView.vue'
 import SettingsView from './SettingsView.vue'
 import type { Installation, ShowProgressOpts } from '../types/ipc'
 
 /**
  * Unified Settings modal — single ModalShell with a left-rail tab
- * switcher hosting the three previously-separate panels:
+ * switcher hosting the previously-separate panels:
  *   - "ComfyUI Settings" (per-install DetailModal body, embedded)
  *   - "Directories" (combined Models / Media directory browser)
+ *   - "Downloads" (rich downloads history — popup deep-links here)
  *   - "Global Settings" (launcher-wide settings — formerly "App Settings")
  *
  * "ComfyUI Settings" is gated on having an installation (install-less
@@ -20,7 +22,7 @@ import type { Installation, ShowProgressOpts } from '../types/ipc'
  * the default tab falls through to Global Settings).
  */
 
-export type SettingsTab = 'comfy' | 'directories' | 'global'
+export type SettingsTab = 'comfy' | 'directories' | 'downloads' | 'global'
 
 interface Props {
   installation: Installation | null
@@ -67,23 +69,33 @@ interface TabDef {
   available: boolean
 }
 
+// English fallbacks supplied via `t(key, default)` so the tabs render
+// readable labels even while the en locale is missing entries (see
+// issue #531). Without these the literal key string ('settingsModal.
+// tabDownloads', etc.) leaks into the sidebar and overflows the rail.
 const tabs = computed<TabDef[]>(() => [
   {
     key: 'comfy',
     icon: Box,
-    label: t('settingsModal.tabComfy'),
+    label: t('settingsModal.tabComfy', 'ComfyUI Settings'),
     available: hasInstallation.value,
   },
   {
     key: 'directories',
     icon: FolderOpen,
-    label: t('settingsModal.tabDirectories'),
+    label: t('settingsModal.tabDirectories', 'Directories'),
+    available: true,
+  },
+  {
+    key: 'downloads',
+    icon: ArrowDownToLine,
+    label: t('settingsModal.tabDownloads', 'Downloads'),
     available: true,
   },
   {
     key: 'global',
     icon: SettingsIcon,
-    label: t('settingsModal.tabGlobal'),
+    label: t('settingsModal.tabGlobal', 'Global Settings'),
     available: true,
   },
 ])
@@ -154,9 +166,9 @@ function handleUpdateInstallation(inst: Installation): void {
 </script>
 
 <template>
-  <ModalShell :title="t('settingsModal.title')" content-class="settings-modal-shell" @close="handleClose">
+  <ModalShell :title="t('settingsModal.title', 'Settings')" content-class="settings-modal-shell" @close="handleClose">
     <div class="settings-modal-layout" :class="{ 'no-sidebar': noSidebar }">
-      <nav v-if="!noSidebar" class="settings-sidebar" :aria-label="t('settingsModal.title')">
+      <nav v-if="!noSidebar" class="settings-sidebar" :aria-label="t('settingsModal.title', 'Settings')">
         <button
           v-for="tab in visibleTabs"
           :key="tab.key"
@@ -200,6 +212,9 @@ function handleUpdateInstallation(inst: Installation): void {
              plus a vertical scrollbar when the section list overflows. -->
         <div v-else-if="activeTab === 'directories'" class="settings-tab-scroll">
           <DirectoriesView />
+        </div>
+        <div v-else-if="activeTab === 'downloads'" class="settings-tab-scroll">
+          <DownloadsView />
         </div>
         <div v-else-if="activeTab === 'global'" class="settings-tab-scroll">
           <SettingsView />

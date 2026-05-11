@@ -221,7 +221,7 @@ export function registerSnapshotHandlers(): void {
       const inst = await installations.get(installationId)
       if (!inst || !inst.installPath) return { ok: false, message: 'Installation not found.' }
 
-      const result = await importSnapshots(inst.installPath, pending.envelope)
+      const result = await importSnapshots(inst.installPath, pending.envelope, installationId)
       const snapshotCount = await getSnapshotCount(inst.installPath)
       await installations.update(installationId, { snapshotCount })
       return { ok: true, imported: result.imported, restoreFile: result.filenames[0]! }

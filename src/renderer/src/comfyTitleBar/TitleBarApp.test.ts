@@ -20,8 +20,8 @@ interface MockBridgeState {
   sourceCategoryChangedCallbacks: ((category: string | null) => void)[]
   themeChangedCallbacks: ((theme: { bg: string; text: string }) => void)[]
   fullscreenChangedCallbacks: ((fullscreen: boolean) => void)[]
-  menuOpenedCallbacks: ((info: { menu: 'file' }) => void)[]
-  menuClosedCallbacks: ((info: { menu: 'file' }) => void)[]
+  menuOpenedCallbacks: ((info: { menu: 'menu' }) => void)[]
+  menuClosedCallbacks: ((info: { menu: 'menu' }) => void)[]
   firstUseModeChangedCallbacks: ((mode: 'none' | 'consent-lockdown' | 'post-consent') => void)[]
   appUpdateStateCallbacks: ((state: {
     kind: 'available' | 'ready' | null
@@ -96,11 +96,11 @@ function installMockBridge(opts: { isMac?: boolean; installationId?: string | nu
       state.fullscreenChangedCallbacks.push(cb)
       return () => {}
     },
-    onMenuOpened: (cb: (info: { menu: 'file' }) => void) => {
+    onMenuOpened: (cb: (info: { menu: 'menu' }) => void) => {
       state.menuOpenedCallbacks.push(cb)
       return () => {}
     },
-    onMenuClosed: (cb: (info: { menu: 'file' | 'install' }) => void) => {
+    onMenuClosed: (cb: (info: { menu: 'menu' }) => void) => {
       state.menuClosedCallbacks.push(cb)
       return () => {}
     },
@@ -235,10 +235,9 @@ describe('TitleBarApp', () => {
   })
 
   it('updates the install pill label when main pushes a title', async () => {
-    // Track B item 4 — the source-category suffix is no longer
-    // appended to the title text in main; the install name reads
-    // bare and the category surfaces as an icon (covered by separate
-    // tests below). The test value here mirrors the new contract.
+    // The source-category suffix is not appended to the title text
+    // in main; the install name reads bare and the category surfaces
+    // as an icon (covered by separate tests below).
     const { default: TitleBarApp } = await import('./TitleBarApp.vue')
     const wrapper = mount(TitleBarApp)
     await flushPromises()
@@ -279,8 +278,8 @@ describe('TitleBarApp', () => {
   })
 
   it('hides the install caret in install-less host windows', async () => {
-    // Phase 3 step 2c — install-less host windows (no installationId in
-    // the URL, so the preload returns null) only expose the File menu.
+    // Install-less host windows (no installationId in the URL, so
+    // the preload returns null) only expose the File menu.
     // The install pill name still renders (with the fallback label) but
     // the chevron caret SVG inside the pill is omitted because there's
     // no install-scoped menu to expose.
@@ -307,11 +306,11 @@ describe('TitleBarApp', () => {
   })
 
   it('suppresses menu re-open immediately after a menu close (click-to-toggle dismiss)', async () => {
-    // Phase 3 §7 follow-up — when the user clicks the menu button
-    // while the native menu is open, the OS dismisses the menu first
-    // and the click event then propagates to the renderer. Without
-    // suppression the click handler would ask main to pop the menu
-    // again, making the menu flicker open immediately.
+    // When the user clicks the menu button while the popup is open,
+    // the OS dismisses the menu first and the click event then
+    // propagates to the renderer. Without suppression the click
+    // handler would ask main to pop the menu again, making the menu
+    // flicker open immediately.
     const { default: TitleBarApp } = await import('./TitleBarApp.vue')
     const wrapper = mount(TitleBarApp, { attachTo: document.body })
     await flushPromises()
@@ -324,7 +323,7 @@ describe('TitleBarApp', () => {
     // fires the popup callback → onMenuClosed handler stamps the
     // suppression timestamp. Simulate that by invoking the registered
     // callback directly.
-    bridgeState.menuClosedCallbacks.forEach((cb) => cb({ menu: 'file' }))
+    bridgeState.menuClosedCallbacks.forEach((cb) => cb({ menu: 'menu' }))
     await flushPromises()
 
     // Second click within the suppression window must NOT open the menu.
@@ -335,15 +334,14 @@ describe('TitleBarApp', () => {
   })
 
   it('hides the waffle menu during the first-use T&C consent step (consent-lockdown)', async () => {
-    // Modal-unification (Track M-2.3) — the waffle menu is the only
-    // always-live affordance during a Tier 3 takeover (it carries the
-    // Return-to-Dashboard / Close-All-Windows escape hatch). The first-use
-    // T&C consent step deliberately removes that escape hatch so the
-    // user has to either accept consent or close the window via OS
-    // chrome — matching the binding-flow framing of consent. Once
-    // the takeover advances past consent the waffle reappears (the
-    // menu builder additionally surfaces the Skip Onboarding entry
-    // there, see M-2.2).
+    // The waffle menu is the only always-live affordance during a
+    // Tier 3 takeover (it carries the Return-to-Dashboard /
+    // Close-All-Windows escape hatch). The first-use T&C consent
+    // step deliberately removes that escape hatch so the user has
+    // to either accept consent or close the window via OS chrome.
+    // Once the takeover advances past consent the waffle reappears
+    // (the menu builder additionally surfaces the Skip Onboarding
+    // entry there).
     const { default: TitleBarApp } = await import('./TitleBarApp.vue')
     const wrapper = mount(TitleBarApp)
     await flushPromises()
@@ -351,11 +349,13 @@ describe('TitleBarApp', () => {
     expect(wrapper.find('.title-menu-button--icon').exists()).toBe(true)
     expect(wrapper.find('header').classes()).not.toContain('is-consent-lockdown')
 
-    // Consent step on screen — waffle disappears.
+    // Consent step on screen — waffle disappears, downloads stays so an
+    // in-flight model download remains reachable while the waffle is hidden.
     bridgeState.firstUseModeChangedCallbacks.forEach((cb) => cb('consent-lockdown'))
     await flushPromises()
     expect(wrapper.find('header').classes()).toContain('is-consent-lockdown')
     expect(wrapper.find('.title-menu-button--icon').exists()).toBe(false)
+    expect(wrapper.find('.title-downloads-tray').exists()).toBe(true)
 
     // Advance to post-consent — waffle reappears (Skip Onboarding now
     // available there).
@@ -385,8 +385,7 @@ describe('TitleBarApp', () => {
   })
 
   // ===================================================================
-  // Track B item 4 — install-type icon next to the install name
-  // (replaces the old `— {label}` textual suffix)
+  // Install-type icon next to the install name
   // ===================================================================
 
   it('hides the install-type icon by default until main pushes a category', async () => {
@@ -445,7 +444,7 @@ describe('TitleBarApp', () => {
   })
 
   // ===================================================================
-  // Phase 3 §18 — title-bar status pills (app-update + install-update)
+  // Title-bar status pills (app-update + install-update)
   // ===================================================================
 
   it('hides both status pills by default (no update available, no install update)', async () => {
@@ -524,7 +523,7 @@ describe('TitleBarApp', () => {
     expect(pill.text()).toContain('Update available')
   })
 
-  it('renders the install-update pill with version label when main pushes a target version (Track B item 1)', async () => {
+  it('renders the install-update pill with version label when main pushes a target version', async () => {
     // Mirrors the app-update pill's "Update {version}" copy so the
     // user reads the install-update pill the same way: the target
     // release is right there in the label, not behind a popover.
@@ -595,14 +594,20 @@ describe('TitleBarApp', () => {
   })
 
   // ===================================================================
-  // Track F — title-bar downloads tray
+  // Title-bar downloads tray
   // ===================================================================
 
-  it('hides the downloads tray when there are no active or recent downloads', async () => {
+  it('renders the downloads tray with no badge in the empty steady state', async () => {
+    // The downloads tray is always-visible — the empty-state copy
+    // ("No downloads yet") lives inside the popup, not in the title
+    // bar. The badge stays absent until something is in flight.
     const { default: TitleBarApp } = await import('./TitleBarApp.vue')
     const wrapper = mount(TitleBarApp)
     await flushPromises()
-    expect(wrapper.find('.title-downloads-tray').exists()).toBe(false)
+    const tray = wrapper.find('.title-downloads-tray')
+    expect(tray.exists()).toBe(true)
+    expect(wrapper.find('.title-downloads-badge').exists()).toBe(false)
+    expect(tray.attributes('title')).toBe('Downloads')
   })
 
   it('renders the downloads tray with a badge counter when there are in-flight downloads', async () => {
@@ -696,7 +701,7 @@ describe('TitleBarApp', () => {
     expect(wrapper.find('.title-downloads-tray').attributes('title')).toBe('1 download in progress')
   })
 
-  it('hides the tray again when the state transitions back to empty', async () => {
+  it('clears the badge when the state transitions back to empty (button stays visible)', async () => {
     const { default: TitleBarApp } = await import('./TitleBarApp.vue')
     const wrapper = mount(TitleBarApp)
     await flushPromises()
@@ -716,9 +721,11 @@ describe('TitleBarApp', () => {
     )
     await flushPromises()
     expect(wrapper.find('.title-downloads-tray').exists()).toBe(true)
+    expect(wrapper.find('.title-downloads-badge').exists()).toBe(true)
     bridgeState.downloadsChangedCallbacks.forEach((cb) => cb({ active: [], recent: [] }))
     await flushPromises()
-    expect(wrapper.find('.title-downloads-tray').exists()).toBe(false)
+    expect(wrapper.find('.title-downloads-tray').exists()).toBe(true)
+    expect(wrapper.find('.title-downloads-badge').exists()).toBe(false)
   })
 
   it('forwards downloads-tray clicks through the bridge', async () => {
@@ -756,7 +763,8 @@ describe('TitleBarApp', () => {
     await flushPromises()
     const btn = wrapper.find('.title-feedback-button')
     expect(btn.exists()).toBe(true)
-    expect(btn.attributes('aria-label')).toBe('Send Feedback')
+    expect(btn.attributes('aria-label')).toBe('Beta Feedback')
+    expect(btn.text()).toContain('Beta Feedback')
     await btn.trigger('click')
     expect(bridgeState.feedbackClicks).toBe(1)
     wrapper.unmount()

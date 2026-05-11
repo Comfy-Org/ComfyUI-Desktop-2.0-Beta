@@ -267,6 +267,36 @@ input[type="checkbox"]:checked::after { transform: translateX(16px); }
   background: var(--accent); border-radius: 1px;
 }
 
+/* Filter pills — independent rounded chips with their own border,
+ * separated by gap. Used by the chooser-view filter row and the
+ * Settings → Downloads tab status filter; same chip shape and active
+ * treatment so the two surfaces read consistently. */
+.filter-pill-group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.filter-pill {
+  background: transparent;
+  color: inherit;
+  border: 1px solid var(--border, rgba(127, 127, 127, 0.25));
+  padding: 4px 12px;
+  font: inherit;
+  font-size: 12px;
+  border-radius: 999px;
+  cursor: pointer;
+  opacity: 0.8;
+  transition: background-color 100ms ease, opacity 100ms ease, border-color 100ms ease;
+}
+.filter-pill:hover {
+  opacity: 1;
+}
+.filter-pill.active {
+  background: var(--bg-elev-2, rgba(127, 127, 127, 0.16));
+  border-color: var(--border-strong, rgba(127, 127, 127, 0.4));
+  opacity: 1;
+}
+
 /* Instance list */
 .instance-list { display: flex; flex-direction: column; gap: 10px; }
 .instance-card {

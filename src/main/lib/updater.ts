@@ -1,7 +1,8 @@
-import { app, ipcMain, BrowserWindow } from 'electron'
+import { app, ipcMain } from 'electron'
 import todesktop from '@todesktop/runtime'
 import * as settings from '../settings'
 import { clearQuitReason, setQuitReason } from './quit-state'
+import { _broadcastToRenderer } from './ipc/shared'
 
 /**
  * Title-bar status pills consume the current app-update state via
@@ -25,7 +26,7 @@ import { clearQuitReason, setQuitReason } from './quit-state'
  * surfaces a confirm-modal that runs the download.
  */
 export interface AppUpdateState {
-  kind: 'available' | 'ready' | null
+  kind: 'available' | 'downloading' | 'ready' | null
   version: string | null
   autoUpdate: boolean
 }
@@ -57,6 +58,12 @@ function _setUpdateState(next: AppUpdateState): void {
       cb(next)
     } catch {}
   }
+  // Broadcast to renderer surfaces (panel views) so the Global
+  // Settings update-action panel can mirror the title-bar pill state
+  // without a separate poll. Title-bar webContents pick the state up
+  // via the dedicated `comfy-titlebar:app-update-state-changed`
+  // channel routed through `_stateChangeCallbacks`.
+  _broadcastToRenderer('app-update:state-changed', next)
 }
 
 const NO_UPDATE_AVAILABLE_MESSAGE = 'No update available. Try checking for updates first.'
@@ -64,11 +71,10 @@ const UPDATER_UNAVAILABLE_MESSAGE = 'ToDesktop auto-updater is unavailable.'
 
 /** Issue #488 — single source of truth for the auto-install flag.
  *  Default-on: any non-`false` value (including missing) is treated as
- *  enabled. Reads the new `autoInstallUpdates` key (the legacy
- *  `autoUpdate` setting was retired from the UI in #488 — auto-checks
- *  always run now and only the install behavior is user-controllable).
- *  The `AppUpdateState.autoUpdate` field name is kept for the renderer
- *  payload so callers don't have to churn — it now mirrors this flag. */
+ *  enabled. Reads the `autoInstallUpdates` key — auto-checks always
+ *  run, and only the install behavior is user-controllable. The
+ *  `AppUpdateState.autoUpdate` field name is kept for the renderer
+ *  payload and mirrors this flag. */
 function isAutoInstallEnabled(): boolean {
   return settings.get('autoInstallUpdates') !== false
 }
@@ -94,14 +100,6 @@ function isSystemPackageInstall(): boolean {
   // .deb installs place the app under /opt/ or /usr/; check the executable path
   const appPath = app.getPath('exe')
   return appPath.startsWith('/opt/') || appPath.startsWith('/usr/')
-}
-
-function broadcast(channel: string, data: unknown): void {
-  BrowserWindow.getAllWindows().forEach((win) => {
-    try {
-      if (!win.isDestroyed()) win.webContents.send(channel, data)
-    } catch {}
-  })
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -170,7 +168,7 @@ function bindUpdaterEvents(): void {
       // on a single user gesture (Download → wait → Restart) instead
       // of forcing them to find the pill again.
       _userInitiatedDownload = false
-      broadcast('app-update:prompt-restart', { version })
+      _broadcastToRenderer('app-update:prompt-restart', { version })
     }
   })
 
@@ -179,13 +177,54 @@ function bindUpdaterEvents(): void {
     clearQuitReason()
     _autoDownloadTriggeredFor = null
     _userInitiatedDownload = false
+    // Roll a `'downloading'` state back to `'available'` so the
+    // pill/panel offer "Download" again and the user can retry.
+    if (_appUpdateState.kind === 'downloading') {
+      _setUpdateState({
+        kind: 'available',
+        version: _appUpdateState.version,
+        autoUpdate: _appUpdateState.autoUpdate,
+      })
+    }
     if (wasUserInitiated) {
       // Only surface failures the user is actively waiting on.
       // Background auto-on download errors stay silent — the user
       // hasn't asked for anything and bothering them with a modal
       // for a transient network blip would be noisy.
-      broadcast('app-update:user-action-failed', { message: updaterErrorMessage(args) })
+      _broadcastToRenderer('app-update:user-action-failed', { message: updaterErrorMessage(args) })
     }
+  })
+
+  // Forward electron-updater's `download-progress` ticks to renderer
+  // surfaces (title-bar pill + Global Settings update panel) so the
+  // user has feedback during the download instead of staring at a
+  // static "Download" affordance. The payload shape is
+  // electron-updater's `ProgressInfo` — we narrow it to the fields
+  // the UI actually uses.
+  //
+  // The first tick of a user-initiated download also flips the cached
+  // app-update state from `'available'` → `'downloading'`, so the
+  // title-bar pill and the Settings panel both swap their CTAs and
+  // share a single source of truth (clicking the pill now routes to
+  // Settings instead of re-opening the Download confirm modal).
+  // Auto-on background downloads stay silent (state stays `null`)
+  // until `update-downloaded` flips to `'ready'`, preserving the
+  // existing zero-noise auto-install UX.
+  updater.on('download-progress', (info: unknown) => {
+    const p = asRecord(info)
+    if (!p) return
+    const percent = typeof p.percent === 'number' ? p.percent : null
+    const transferred = typeof p.transferred === 'number' ? p.transferred : null
+    const total = typeof p.total === 'number' ? p.total : null
+    const bytesPerSecond = typeof p.bytesPerSecond === 'number' ? p.bytesPerSecond : null
+    if (_userInitiatedDownload && _appUpdateState.kind !== 'downloading' && _appUpdateState.kind !== 'ready') {
+      _setUpdateState({
+        kind: 'downloading',
+        version: _appUpdateState.version,
+        autoUpdate: _appUpdateState.autoUpdate,
+      })
+    }
+    _broadcastToRenderer('app-update:download-progress', { percent, transferred, total, bytesPerSecond })
   })
 }
 
@@ -218,8 +257,8 @@ export function runCheck(
 }
 
 /**
- * Phase 3 §18 — current app-update state for the title-bar status
- * pill. Returned by reference for cheapness; callers must not mutate.
+ * Current app-update state for the title-bar status pill. Returned by
+ * reference for cheapness; callers must not mutate.
  * Title-bar webContents that mount AFTER an `update-available` /
  * `update-downloaded` broadcast still need the latest state to render
  * their pill, so main pushes this on `comfy-titlebar:title-bar-ready`
@@ -230,12 +269,12 @@ export function getCurrentUpdateState(): AppUpdateState {
 }
 
 /**
- * Phase 3 §18 — subscribe to app-update state transitions. Main
+ * Subscribe to app-update state transitions. Main
  * registers once at startup and forwards each call to every host
  * window's title-bar webContents. Returns an unsubscribe function.
  *
  * Skipped over a renderer-side relay (renderer → main → all-renderers
- * → title-bar) because the broadcast() helper already reaches the
+ * → title-bar) because the _broadcastToRenderer() helper already reaches the
  * title-bar webContents via BrowserWindow.getAllWindows; the title-bar
  * preload just doesn't expose those raw events. Forwarding through
  * `comfy-titlebar:app-update-state-changed` keeps the pill data path
@@ -246,6 +285,60 @@ export function onUpdateStateChanged(cb: (state: AppUpdateState) => void): () =>
   _stateChangeCallbacks.add(cb)
   return () => {
     _stateChangeCallbacks.delete(cb)
+  }
+}
+
+/**
+ * User-initiated download of the pending update. Marks the next
+ * `update-downloaded` as user-initiated so the updater module fires
+ * the auto restart-prompt event; the flag is cleared on download
+ * completion or on error so a subsequent background auto-on download
+ * doesn't re-trigger the prompt. Failures broadcast
+ * `app-update:user-action-failed` so the UI can surface them.
+ *
+ * Exported so both the renderer-facing `download-update` IPC handler
+ * and main-process callers (e.g. the system-modal "Download" confirm)
+ * share a single implementation.
+ */
+export async function downloadUpdate(): Promise<void> {
+  _userInitiatedDownload = true
+  try {
+    const result = await runCheck('download-button')
+    if (!result.available && _appUpdateState.kind !== 'ready') {
+      _userInitiatedDownload = false
+      _broadcastToRenderer('app-update:user-action-failed', {
+        message: result.error || NO_UPDATE_AVAILABLE_MESSAGE,
+      })
+    }
+  } catch (err) {
+    _userInitiatedDownload = false
+    _broadcastToRenderer('app-update:user-action-failed', {
+      message: err instanceof Error ? err.message : String(err),
+    })
+  }
+}
+
+/**
+ * Apply the pending downloaded update by restarting the app under the
+ * silent installer. Failures broadcast `app-update:user-action-failed`
+ * so the UI can surface them. Exported so both the renderer-facing
+ * `install-update` IPC handler and main-process callers (e.g. the
+ * system-modal "Restart" confirm) share a single implementation.
+ */
+export function installUpdate(): void {
+  const updater = getAutoUpdater()
+  if (!updater) {
+    _broadcastToRenderer('app-update:user-action-failed', { message: UPDATER_UNAVAILABLE_MESSAGE })
+    return
+  }
+  try {
+    setQuitReason('update-install')
+    updater.restartAndInstall({ isSilent: true })
+  } catch (err) {
+    clearQuitReason()
+    _broadcastToRenderer('app-update:user-action-failed', {
+      message: err instanceof Error ? err.message : String(err),
+    })
   }
 }
 
@@ -261,42 +354,23 @@ export function register(): void {
   })
 
   ipcMain.handle('download-update', async () => {
-    // Marks the next `update-downloaded` as user-initiated so the
-    // updater module fires the auto restart-prompt event. The flag is
-    // cleared on download completion or on error so a subsequent
-    // background auto-on download doesn't re-trigger the prompt.
-    _userInitiatedDownload = true
-    try {
-      const result = await runCheck('download-button')
-      if (!result.available && _appUpdateState.kind !== 'ready') {
-        _userInitiatedDownload = false
-        broadcast('app-update:user-action-failed', { message: result.error || NO_UPDATE_AVAILABLE_MESSAGE })
-      }
-    } catch (err) {
-      _userInitiatedDownload = false
-      broadcast('app-update:user-action-failed', { message: err instanceof Error ? err.message : String(err) })
-    }
+    await downloadUpdate()
   })
 
   ipcMain.handle('install-update', () => {
-    const updater = getAutoUpdater()
-    if (!updater) {
-      broadcast('app-update:user-action-failed', { message: UPDATER_UNAVAILABLE_MESSAGE })
-      return
-    }
-    try {
-      setQuitReason('update-install')
-      updater.restartAndInstall({ isSilent: true })
-    } catch (err) {
-      clearQuitReason()
-      broadcast('app-update:user-action-failed', { message: err instanceof Error ? err.message : String(err) })
-    }
+    installUpdate()
   })
 
   ipcMain.handle('get-update-capabilities', () => {
     const systemManaged = isSystemPackageInstall()
     return { canAutoUpdate: !systemManaged, systemManaged }
   })
+
+  // Snapshot of the cached app-update state for renderer surfaces
+  // (Global Settings) that mount AFTER an `update-available` /
+  // `update-downloaded` broadcast has already fired. Live updates
+  // arrive via the `app-update:state-changed` event.
+  ipcMain.handle('get-app-update-state', () => getCurrentUpdateState())
 
   // Issue #488 — always check on startup and periodically. The
   // user-controllable `autoInstallUpdates` setting only gates whether

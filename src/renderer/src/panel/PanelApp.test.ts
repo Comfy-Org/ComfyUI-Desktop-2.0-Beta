@@ -30,8 +30,8 @@ vi.mock('../views/SettingsView.vue', () => ({
 vi.mock('../views/DetailModal.vue', () => ({
   default: {
     name: 'DetailModal',
-    // Phase 3 §17 dropped the `inline` prop — DetailModal renders one
-    // way and the parent owns the close behaviour.
+    // DetailModal has no `inline` prop — it renders one way and the
+    // parent owns the close behaviour.
     props: ['installation', 'initialTab', 'autoAction'],
     template:
       '<div data-testid="detail-modal" :data-installation-id="installation?.id" />',
@@ -129,14 +129,6 @@ vi.mock('../views/FirstUseTakeover.vue', () => ({
     methods: { open: vi.fn() },
   },
 }))
-vi.mock('../components/DownloadsTrayPopover.vue', () => ({
-  default: {
-    name: 'DownloadsTrayPopover',
-    emits: ['close'],
-    template: '<div data-testid="downloads-tray-popover" />',
-  },
-}))
-
 import { mount, flushPromises } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import { createPinia, setActivePinia } from 'pinia'
@@ -177,7 +169,6 @@ interface InstallationLike {
 type PanelTriggerPayload = {
   kind:
     | 'install-update'
-    | 'downloads'
     | 'app-update-restart-prompt'
     | 'app-update-download-prompt'
   installationId?: string
@@ -190,10 +181,9 @@ interface MockApiState {
   appUpdatePromptRestartCallbacks: ((data: { version: string }) => void)[]
   appUpdateUserActionFailedCallbacks: ((data: { message: string }) => void)[]
   installationsChangedCallbacks: (() => void)[]
-  /** Modal-unification (Track M-2.2) — file-menu Skip Onboarding
-   *  callbacks. Main fires this when the user clicks the entry in the
-   *  waffle popup; tests can simulate the click by invoking each
-   *  callback. */
+  /** File-menu Skip Onboarding callbacks. Main fires this when the
+   *  user clicks the entry in the waffle popup; tests can simulate
+   *  the click by invoking each callback. */
   firstUseSkipCallbacks: (() => void)[]
   /** Feedback callbacks. Main fires this when the user clicks the
    *  title-bar Send Feedback button or the file-menu "Send Feedback"
@@ -268,9 +258,9 @@ function installMockApi(initial?: {
     openExternal: state.openExternal,
     getAppVersion: state.getAppVersion,
     onSettingsChanged: vi.fn(() => () => {}),
-    // Step 5 §16 — main consults the panel renderer before tearing
-    // down the host window. PanelApp subscribes on mount; the test
-    // suite never fires the consult so the mock is a no-op pair.
+    // Main consults the panel renderer before tearing down the host
+    // window. PanelApp subscribes on mount; the test suite never
+    // fires the consult so the mock is a no-op pair.
     onCloseRequest: vi.fn(() => () => {}),
     respondCloseRequest: vi.fn(),
     ackCloseRequest: vi.fn(),
@@ -293,11 +283,11 @@ function installMockApi(initial?: {
     setSetting: vi.fn(async (key: string, value: unknown) => {
       state.settings[key] = value
     }),
-    // Post-Phase-3 polish: PanelApp's first-use takeover host fetches
-    // the categorised install state to decide whether to skip the
-    // cloud-vs-local pick step. Default mock is "fresh user" — no
-    // prior installs, no legacy desktop — so the takeover advances
-    // through every step exactly as it did before.
+    // PanelApp's first-use takeover host fetches the categorised
+    // install state to decide whether to skip the cloud-vs-local
+    // pick step. Default mock is "fresh user" — no prior installs,
+    // no legacy desktop — so the takeover advances through every
+    // step.
     getFirstUseState: vi.fn(async () => ({ skipPick: false, hasLegacyDesktop: false })),
     // Cloud-pick auto-launch fans out into the chooser-launch pipeline:
     // claim the host for in-place attach, look up the install's launch
@@ -443,10 +433,10 @@ describe('PanelApp', () => {
   })
 
   it('opens the new-install takeover above the chooser body when show-new-install fires', async () => {
-    // Phase 3 §17 — flow modals migrated from panel-body to Tier 3
-    // takeover overlays. The chooser stays mounted underneath the
-    // takeover, so dismissing the takeover drops the user back into
-    // the chooser tile they came from with no navigation churn.
+    // Flow modals are Tier 3 takeover overlays. The chooser stays
+    // mounted underneath the takeover, so dismissing the takeover
+    // drops the user back into the chooser tile they came from with
+    // no navigation churn.
     window.history.replaceState({}, '', '/?panel=chooser')
     const wrapper = mountPanel()
     await flushPromises()
@@ -630,8 +620,8 @@ describe('PanelApp', () => {
   })
 
   it('marks firstUseCompleted=true and closes the takeover when main fires the file-menu Skip Onboarding event', async () => {
-    // Modal-unification (Track M-2.2) — main routes the file-menu
-    // Skip Onboarding click into the panel renderer via the
+    // Main routes the file-menu Skip Onboarding click into the
+    // panel renderer via the
     // `comfy-panel:first-use-skip` IPC. PanelApp's listener should
     // run the same `markFirstUseCompleted` + dismiss-takeover
     // sequence the Cloud-branch pick uses, so the takeover
@@ -665,8 +655,8 @@ describe('PanelApp', () => {
     // IPC. The panel renderer is the natural home for the click side-
     // effects because `buildSupportUrl()` reads `navigator.userAgent`
     // and the telemetry helper lives renderer-side. Verify the listener
-    // (a) emits the legacy-parity telemetry action with `source` baked
-    // into the context so we can tell the two affordances apart, and
+    // (a) emits the telemetry action with `source` baked into the
+    // context so we can tell the two affordances apart, and
     // (b) opens the typeform URL with the cached app version in `ver`.
     mountPanel()
     await flushPromises()
@@ -702,17 +692,17 @@ describe('PanelApp', () => {
     expect(url).toMatch(/[?&]platform=/)
   })
 
-  // Post-Phase-3 polish: the first-use takeover dropped its in-app
-  // ✕ close button (first-use is a binding flow). Mid-flow dismissal
-  // now only happens via OS-chrome window close, which routes through
-  // `onCloseRequest` → `closeOverlay` (a renderer-internal direct
-  // mutation that doesn't go through any FirstUseTakeover emit). The
-  // "doesn't mark firstUseCompleted on mid-flow exit" guarantee is
-  // preserved because no code path between mount and the explicit
-  // Cloud / Local picks calls `markFirstUseCompleted` — the cloud /
-  // chain-local tests above already assert that ordering by checking
-  // `setSetting` hasn't been called with `firstUseCompleted` until the
-  // user makes the explicit pick.
+  // The first-use takeover has no in-app ✕ close button (first-use
+  // is a binding flow). Mid-flow dismissal happens via OS-chrome
+  // window close, which routes through `onCloseRequest` →
+  // `closeOverlay` (a renderer-internal direct mutation that doesn't
+  // go through any FirstUseTakeover emit). The "doesn't mark
+  // firstUseCompleted on mid-flow exit" guarantee holds because no
+  // code path between mount and the explicit Cloud / Local picks
+  // calls `markFirstUseCompleted` — the cloud / chain-local tests
+  // above already assert that ordering by checking `setSetting`
+  // hasn't been called with `firstUseCompleted` until the user makes
+  // the explicit pick.
 
   it('keeps the comfy-lifecycle body when a panel-switch IPC event re-confirms it', async () => {
     // The default body for an install-backed host is already comfy-lifecycle;
@@ -727,8 +717,8 @@ describe('PanelApp', () => {
   })
 
   it('mounts the manage overlay (DetailModal) when a panel-trigger-overlay install-update event arrives', async () => {
-    // Phase 3 §18 — the title-bar install-update pill click is
-    // forwarded by main as an `onPanelTriggerOverlay` event with
+    // The title-bar install-update pill click is forwarded by main
+    // as an `onPanelTriggerOverlay` event with
     // `kind: 'install-update'` and the host's installationId. The
     // panel renderer routes that into a Tier 1 manage overlay with
     // initialTab='update' so the DetailModal opens directly on the
@@ -838,20 +828,6 @@ describe('PanelApp', () => {
     })
   })
 
-  it('mounts the DownloadsTrayPopover when a panel-trigger-overlay downloads event arrives (Track F)', async () => {
-    // Track F — the title-bar downloads tray click routes through
-    // `panel-trigger-overlay { kind: 'downloads' }`. PanelApp opens
-    // the popover at Tier 1 (the legacy AppUpdatePopover that shared
-    // this tier was removed for issue #488; app updates are now modal).
-    const wrapper = mountPanel()
-    await flushPromises()
-    expect(wrapper.find('[data-testid="downloads-tray-popover"]').exists()).toBe(false)
-
-    mockState.panelTriggerOverlayCallbacks.forEach((cb) => cb({ kind: 'downloads' }))
-    await flushPromises()
-    expect(wrapper.find('[data-testid="downloads-tray-popover"]').exists()).toBe(true)
-  })
-
   it('ignores install-update events whose installationId does not match the host', async () => {
     // Defensive — main scopes the install-update broadcast to the
     // matching host's panelView, but the renderer also re-validates.
@@ -865,10 +841,9 @@ describe('PanelApp', () => {
   })
 
   // ---------------------------------------------------------------------------
-  // Telemetry parity (issue #485) — verify the renderer-side telemetry
-  // events the pre-Phase-3 `App.vue` fired (`desktop2.install.flow.opened`
-  // and `desktop2.view.opened`) still fire from the equivalent code paths
-  // in PanelApp's `openFlowTakeover` / `switchPanel`.
+  // Telemetry (issue #485) — verify `desktop2.install.flow.opened`
+  // and `desktop2.view.opened` fire from PanelApp's
+  // `openFlowTakeover` / `switchPanel`.
   //
   // Captures CustomEvents on the `window` (the same channel
   // `emitTelemetryAction` uses to bridge into the providers) so the test
@@ -972,9 +947,8 @@ describe('PanelApp', () => {
 
     it('fires desktop2.view.opened with the previous panel as from_view when opening unified settings', async () => {
       // Default install-backed host → comfy-lifecycle is the underlying body.
-      // The unified Settings modal replaced the legacy Directories /
-      // App Settings / Install Settings panels — switchPanel('settings')
-      // is the one telemetry-emitting overlay opener for the file menu.
+      // switchPanel('settings') is the one telemetry-emitting overlay
+      // opener for the file menu.
       mountPanel()
       await flushPromises()
       const events = captureTelemetry()

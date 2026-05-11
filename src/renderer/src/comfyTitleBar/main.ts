@@ -7,6 +7,7 @@ import '../assets/main.css'
 import { createApp } from 'vue'
 import TitleBarApp from './TitleBarApp.vue'
 import { initializeRendererBootstrap } from '../lib/rendererBootstrap'
+import { createAppI18n } from '../lib/i18nFactory'
 
 // The title bar is loaded for every host window and survives mode flips
 // (it lives in `createHostWindow()`), unlike the panel renderer which
@@ -27,4 +28,8 @@ initializeRendererBootstrap('title-bar')
 // theme push from main arrives.
 document.documentElement.setAttribute('data-theme', 'dark')
 
-createApp(TitleBarApp).mount('#app')
+// Per-renderer vue-i18n instance — webContents are isolated JS contexts
+// so the launcher's i18n instance can't be reused here. The shared
+// factory (`lib/i18nFactory.ts`) ensures every renderer resolves keys
+// from the same en-locale catalog.
+createApp(TitleBarApp).use(createAppI18n()).mount('#app')

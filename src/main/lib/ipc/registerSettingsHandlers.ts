@@ -29,20 +29,16 @@ export function registerSettingsHandlers(): void {
               { value: 'dark', label: i18n.t('settings.themeDark') },
               { value: 'light', label: i18n.t('settings.themeLight') },
             ] },
-          // Issue #488 — old `autoUpdate` toggle ("Check for updates on
-          // startup") split into two behaviors: the auto-check loop now
-          // always runs, and this new toggle controls whether updates
-          // install silently vs prompt the user. The legacy `autoUpdate`
-          // key is retained in the schema (no UI) for a future setting.
+          // Issue #488 — auto-check loop always runs; this toggle
+          // controls whether updates install silently vs prompt the
+          // user. The `autoUpdate` key is retained in the schema (no
+          // UI) for a future setting.
           { id: 'autoInstallUpdates', label: i18n.t('settings.autoInstallUpdates'), type: 'boolean', value: s.autoInstallUpdates !== false },
           // The `onAppClose` field is hidden while docking-to-tray is
           // disabled (see main/index.ts createTray()). Restore this
           // entry — and the 'tray' default in settings.ts — when the
           // docked-app flow comes back.
           ...(isChinese ? [chineseMirrorsField] : []),
-        ],
-        actions: [
-          { label: i18n.t('settings.checkForUpdates'), action: 'check-for-update' },
         ],
       },
       {
@@ -52,11 +48,10 @@ export function registerSettingsHandlers(): void {
         ],
       },
       {
-        // Phase 3 §4: this section was previously titled "Downloads" but
-        // the contents are really the on-disk cache (model files, wheels,
-        // GitHub release tarballs, etc.) — i.e. blobs the launcher pulls
-        // down on behalf of an install. "Cache" reflects what the user
-        // actually controls here.
+        // The contents are the on-disk cache (model files, wheels,
+        // GitHub release tarballs, etc.) — blobs the launcher pulls
+        // down on behalf of an install. "Cache" reflects what the
+        // user actually controls here.
         title: i18n.t('settings.cache'),
         fields: [
           { id: 'cacheDir', label: i18n.t('settings.cacheDir'), type: 'path', value: s.cacheDir, openable: true },
@@ -143,8 +138,8 @@ export function registerSettingsHandlers(): void {
       // immediately starts reading as auto-on / auto-off — drives the
       // title-bar pill copy and the click-modal flow without waiting
       // for the next update-check broadcast. Both keys are watched so
-      // a future re-exposure of the legacy `autoUpdate` toggle still
-      // works without further changes here.
+      // a future re-exposure of the `autoUpdate` toggle still works
+      // without further changes here.
       updater.notifyAutoUpdateChanged()
     }
     // Notify all renderers (including embedded panel views) so any open
@@ -159,8 +154,8 @@ export function registerSettingsHandlers(): void {
 
   ipcMain.handle('get-locale-messages', () => i18n.getMessages())
   ipcMain.handle('get-available-locales', () => i18n.getAvailableLocales())
-  // Phase 3 §17 Step 4 — the first-use takeover (FirstUseTakeover.vue)
-  // needs to ask main for the resolved locale so it can decide whether
+  // The first-use takeover (FirstUseTakeover.vue) needs to ask main
+  // for the resolved locale so it can decide whether
   // to insert the China-mirror sub-step. The renderer's vue-i18n locale
   // is always 'en' (we deep-merge messages onto the en bundle), so we
   // can't read it from there — main owns the truth via i18n.getLocale()
@@ -168,11 +163,11 @@ export function registerSettingsHandlers(): void {
   // fallback as initialised in main/index.ts).
   ipcMain.handle('get-locale', () => i18n.getLocale())
 
-  // Post-Phase-3 polish: the first-use takeover asks for a categorised
-  // snapshot of the persisted installs so it can decide whether to
-  // skip the cloud-vs-local pick (returning user) and whether to surface
-  // the migrate-vs-install-new sub-step on the Local branch (legacy
-  // desktop install present). See `firstUseDetection.ts`.
+  // The first-use takeover asks for a categorised snapshot of the
+  // persisted installs so it can decide whether to skip the
+  // cloud-vs-local pick (returning user) and whether to surface the
+  // migrate-vs-install-new sub-step on the Local branch (Legacy
+  // Desktop install present). See `firstUseDetection.ts`.
   ipcMain.handle('get-first-use-state', () => detectFirstUseState())
 
   ipcMain.handle('get-resolved-theme', () => resolveTheme())

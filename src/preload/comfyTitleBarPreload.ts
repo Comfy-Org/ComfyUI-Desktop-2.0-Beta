@@ -19,7 +19,7 @@ export interface TitleMenuAnchor {
   y: number
 }
 
-/** Track F — single download entry surfaced by the title-bar tray.
+/** Single download entry surfaced by the title-bar tray.
  *  Mirror of the main-side `DownloadProgress` shape, kept in sync via
  *  `comfy-titlebar:downloads-changed` push. The title bar renders only
  *  a status-icon + filename + progress percent — it doesn't need
@@ -33,7 +33,7 @@ export interface DownloadsTrayEntry {
   error?: string
 }
 
-/** Track F — payload pushed by main on `comfy-titlebar:downloads-changed`.
+/** Payload pushed by main on `comfy-titlebar:downloads-changed`.
  *  `active` is every in-flight (`pending` / `downloading` / `paused`)
  *  download; `recent` is the last N terminal entries (oldest first),
  *  capped server-side. The tray icon hides entirely when both arrays
@@ -50,9 +50,9 @@ export interface ComfyTitleBarBridge {
   isMac(): boolean
   /** Request the main process to swap the active panel. */
   setPanel(panel: ComfyPanelKey): void
-  /** File menu → "New Window" (Phase 3 title bar v2). Opens a fresh
-   *  install-less chooser host window. Always creates a new one — the
-   *  focus-existing path lives on the tray entry. */
+  /** File menu → "New Window". Opens a fresh install-less chooser
+   *  host window. Always creates a new one — the focus-existing path
+   *  lives on the tray entry. */
   openNewWindow(): void
   /** Pop the File menu as a native OS menu. Avoids HTML popups that
    *  would be clipped by the title bar's WebContentsView bounds. */
@@ -67,8 +67,8 @@ export interface ComfyTitleBarBridge {
   onPanelChanged(cb: (panel: ComfyPanelKey) => void): () => void
   /** Subscribe to title text changes coming from main. */
   onTitleChanged(cb: (title: string) => void): () => void
-  /** Track B item 4 — subscribe to install source-category pushes
-   *  from main. The raw category string (e.g. `'local'`, `'cloud'`,
+  /** Subscribe to install source-category pushes from main. The raw
+   *  category string (e.g. `'local'`, `'cloud'`,
    *  `'desktop'`) drives the install-type icon in the title bar via
    *  the renderer's `installTypeMetaFor()` helper. `null` for
    *  install-less host windows or when the install's source can't be
@@ -85,30 +85,31 @@ export interface ComfyTitleBarBridge {
    *  (the blur-driven dismiss handles the close on its own). On
    *  macOS the click event can fire before the dismiss propagates,
    *  so a timestamp-only guard isn't reliable. */
-  onMenuOpened(cb: (info: { menu: 'file' }) => void): () => void
-  /** Subscribe to native title-bar menu close events. Fires when the
-   *  popup created by `openFileMenu` closes, after the user picks an
-   *  item or dismisses by clicking outside. The renderer uses this to
-   *  suppress an immediate re-open if the same click that dismissed
-   *  the menu also re-targets the menu button. */
-  onMenuClosed(cb: (info: { menu: 'file' }) => void): () => void
-  /** Subscribe to first-use takeover step changes (modal-unification
-   *  Track M-2.2). Mode mirrors `firstUseMode` on the entry —
-   *  `'none'` for no takeover mounted, `'consent-lockdown'` while the
-   *  T&C consent step is on screen, `'post-consent'` for any later
-   *  step. M-2.3 will use this to lock down the title bar during
-   *  `'consent-lockdown'`; M-2.2 only plumbs the IPC end-to-end. */
+  onMenuOpened(cb: (info: { menu: 'menu' | 'downloads' }) => void): () => void
+  /** Subscribe to title-bar popup close events. Fires when the popup
+   *  view (waffle menu OR downloads tray) closes, after the user
+   *  picks an item or dismisses by clicking outside. The renderer
+   *  uses this to suppress an immediate re-open if the same click
+   *  that dismissed the popup also re-targets the opener button. The
+   *  payload carries which kind closed so the per-button reopen
+   *  guards stay independent. */
+  onMenuClosed(cb: (info: { menu: 'menu' | 'downloads' }) => void): () => void
+  /** Subscribe to first-use takeover step changes. Mode mirrors
+   *  `firstUseMode` on the entry — `'none'` for no takeover mounted,
+   *  `'consent-lockdown'` while the T&C consent step is on screen,
+   *  `'post-consent'` for any later step. The title bar locks down
+   *  during `'consent-lockdown'`. */
   onFirstUseModeChanged(
     cb: (mode: 'none' | 'consent-lockdown' | 'post-consent') => void,
   ): () => void
-  /** Subscribe to app-update state pushes (Phase 3 §18 status pills).
-   *  `kind` is `'available'` after `update-available`, `'ready'` after
+  /** Subscribe to app-update state pushes (status pills). `kind` is
+   *  `'available'` after `update-available`, `'ready'` after
    *  `update-downloaded`, and `null` when nothing is pending. Drives
    *  the title-bar app-update pill that sits to the right of the
    *  hamburger menu.
    *
-   *  Track B item 2 — `autoUpdate` mirrors the `autoUpdate` setting
-   *  at the moment the state was committed. With auto-updates ON the
+   *  `autoUpdate` mirrors the `autoUpdate` setting at the moment the
+   *  state was committed. With auto-updates ON the
    *  `'available'` pill is suppressed entirely (main triggers the
    *  download itself); the `'ready'` pill then reads "Update will
    *  apply on restart". With auto-updates OFF the `'available'` pill
@@ -116,19 +117,18 @@ export interface ComfyTitleBarBridge {
    *  the existing "Restart to update" copy. */
   onAppUpdateStateChanged(
     cb: (state: {
-      kind: 'available' | 'ready' | null
+      kind: 'available' | 'downloading' | 'ready' | null
       version: string | null
       autoUpdate: boolean
     }) => void,
   ): () => void
-  /** Subscribe to install-update state pushes (Phase 3 §18 status
-   *  pills). `available` is `true` when the install's
+  /** Subscribe to install-update state pushes (status pills).
+   *  `available` is `true` when the install's
    *  `statusTag.style === 'update'`, `false` otherwise; `version`
    *  carries the target release version when known so the pill can
    *  read "Update v{version}" instead of the generic
-   *  "Update available" (Track B item 1). Only relevant on
-   *  install-backed host windows; install-less hosts never receive
-   *  this signal. */
+   *  "Update available". Only relevant on install-backed host
+   *  windows; install-less hosts never receive this signal. */
   onInstallUpdateAvailable(
     cb: (state: { available: boolean; version: string | null }) => void,
   ): () => void
@@ -140,15 +140,15 @@ export interface ComfyTitleBarBridge {
    *  request to the host's panelView with the entry's installationId
    *  so the renderer can open the manage overlay on the update tab. */
   clickInstallUpdatePill(): void
-  /** Track F — subscribe to downloads-tray state pushes from main.
+  /** Subscribe to downloads-tray state pushes from main.
    *  Initial push happens on `onTitleBarReady` (both install-backed
    *  and chooser-host branches) so the tray renders correctly even
    *  when a title bar mounts AFTER an in-flight download started. */
   onDownloadsChanged(cb: (state: DownloadsTrayState) => void): () => void
-  /** Track F — click handler for the downloads tray. Routes through
-   *  the same `panel-trigger-overlay` channel as the app-update pill
-   *  so the panel renderer can open the downloads popover. */
-  clickDownloadsTray(): void
+  /** Click handler for the downloads tray. Opens the title-bar
+   *  dropdown popup in `'downloads'` mode anchored under the tray
+   *  button. */
+  clickDownloadsTray(anchor: TitleMenuAnchor): void
   /** Click handler for the title-bar Send Feedback button. Main
    *  resolves the host entry from the sender and forwards
    *  `comfy-panel:open-feedback` to the panel renderer, which fires
@@ -254,7 +254,7 @@ const bridge: ComfyTitleBarBridge = {
   onMenuOpened: (cb) => {
     const handler = (_event: IpcRendererEvent, data: unknown): void => {
       const { menu } = (data || {}) as { menu?: unknown }
-      if (menu === 'file') cb({ menu })
+      if (menu === 'menu' || menu === 'downloads') cb({ menu })
     }
     ipcRenderer.on('comfy-titlebar:menu-opened', handler)
     return () => ipcRenderer.removeListener('comfy-titlebar:menu-opened', handler)
@@ -262,7 +262,7 @@ const bridge: ComfyTitleBarBridge = {
   onMenuClosed: (cb) => {
     const handler = (_event: IpcRendererEvent, data: unknown): void => {
       const { menu } = (data || {}) as { menu?: unknown }
-      if (menu === 'file') cb({ menu })
+      if (menu === 'menu' || menu === 'downloads') cb({ menu })
     }
     ipcRenderer.on('comfy-titlebar:menu-closed', handler)
     return () => ipcRenderer.removeListener('comfy-titlebar:menu-closed', handler)
@@ -278,7 +278,10 @@ const bridge: ComfyTitleBarBridge = {
   onAppUpdateStateChanged: (cb) => {
     const handler = (_event: IpcRendererEvent, state: unknown): void => {
       const data = (state || {}) as { kind?: unknown; version?: unknown; autoUpdate?: unknown }
-      const kind = data.kind === 'available' || data.kind === 'ready' ? data.kind : null
+      const kind =
+        data.kind === 'available' || data.kind === 'downloading' || data.kind === 'ready'
+          ? data.kind
+          : null
       const version = typeof data.version === 'string' ? data.version : null
       // Default-on if main forgets to send it — matches the underlying
       // `settings.get('autoUpdate') !== false` semantics.
@@ -314,8 +317,8 @@ const bridge: ComfyTitleBarBridge = {
     ipcRenderer.on('comfy-titlebar:downloads-changed', handler)
     return () => ipcRenderer.removeListener('comfy-titlebar:downloads-changed', handler)
   },
-  clickDownloadsTray: () => {
-    ipcRenderer.send('comfy-window:click-downloads-tray')
+  clickDownloadsTray: (anchor) => {
+    ipcRenderer.send('comfy-window:click-downloads-tray', { anchor })
   },
   clickFeedback: () => {
     ipcRenderer.send('comfy-window:click-feedback')
