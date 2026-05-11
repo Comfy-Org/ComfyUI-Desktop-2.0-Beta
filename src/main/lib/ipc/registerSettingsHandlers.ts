@@ -41,9 +41,6 @@ export function registerSettingsHandlers(): void {
           // docked-app flow comes back.
           ...(isChinese ? [chineseMirrorsField] : []),
         ],
-        actions: [
-          { label: i18n.t('settings.checkForUpdates'), action: 'check-for-update' },
-        ],
       },
       {
         title: i18n.t('settings.telemetry'),

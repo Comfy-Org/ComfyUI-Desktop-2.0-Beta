@@ -635,6 +635,29 @@ export interface ErrorDetailData {
   message: string
 }
 
+// --- App-update state (mirrors src/main/lib/updater.ts AppUpdateState) ---
+export interface AppUpdateState {
+  /** `'available'` after `update-available`, `'downloading'` once the
+   *  first user-initiated `download-progress` tick lands, `'ready'`
+   *  after `update-downloaded`, `null` when nothing is pending. */
+  kind: 'available' | 'downloading' | 'ready' | null
+  /** Target version when `kind` is non-null, otherwise null. */
+  version: string | null
+  /** Mirrors the `autoInstallUpdates` setting at the moment the
+   *  state was committed. */
+  autoUpdate: boolean
+}
+
+/** Narrowed slice of electron-updater's `ProgressInfo` forwarded by
+ *  main on `app-update:download-progress`. Any field may be null when
+ *  the auto-updater doesn't report it for a given tick. */
+export interface AppUpdateDownloadProgress {
+  percent: number | null
+  transferred: number | null
+  total: number | null
+  bytesPerSecond: number | null
+}
+
 // --- IPC API interface ---
 export interface ElectronApi {
   // Sources / New Install
@@ -829,6 +852,14 @@ export interface ElectronApi {
   downloadUpdate(): Promise<void>
   installUpdate(): Promise<void>
   getUpdateCapabilities(): Promise<{ canAutoUpdate: boolean; systemManaged: boolean }>
+  /**
+   * Snapshot of main's cached app-update state. Used by Global Settings
+   * to render the update-action panel in the right state when the
+   * panel mounts AFTER an `update-available` / `update-downloaded`
+   * broadcast already fired. Live updates arrive via
+   * `onAppUpdateStateChanged`.
+   */
+  getAppUpdateState(): Promise<AppUpdateState>
 
   // Model downloads
   listModelDownloads(): Promise<ModelDownloadProgress[]>
@@ -868,6 +899,22 @@ export interface ElectronApi {
    * user to find the pill again.
    */
   onAppUpdatePromptRestart(callback: (data: { version: string }) => void): Unsubscribe
+  /**
+   * Fires whenever main's cached app-update state transitions
+   * (update-available, update-downloaded, autoUpdate setting flip).
+   * Mirrors the title-bar pill's `onAppUpdateStateChanged` so the
+   * Global Settings update-action panel can stay in sync.
+   */
+  onAppUpdateStateChanged(callback: (state: AppUpdateState) => void): Unsubscribe
+  /**
+   * Per-tick download progress while electron-updater is fetching the
+   * pending update payload. Drives the progress bar in the Global
+   * Settings update panel. Any field may be null if the auto-updater
+   * didn't supply it for that tick.
+   */
+  onAppUpdateDownloadProgress(
+    callback: (progress: AppUpdateDownloadProgress) => void,
+  ): Unsubscribe
   /**
    * Fires when a user-initiated update action (download / install) fails.
    * Background auto-on download errors are NOT broadcast — only failures

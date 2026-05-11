@@ -34,6 +34,7 @@ export const en = {
     downloadsInProgress:
       'no downloads in progress | {n} download in progress | {n} downloads in progress',
     desktopUpdateAvailable: 'Desktop Update Available',
+    desktopUpdateDownloading: 'Downloading update…',
     desktopUpdateReady: 'Desktop Update Ready',
     desktopUpdateWithVersion: '{label} (v{version})',
     installUpdateAvailable: 'Update available',

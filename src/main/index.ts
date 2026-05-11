@@ -2571,7 +2571,24 @@ ipcMain.on('comfy-window:click-app-update-pill', (event) => {
   const { entry } = found
   if (entry.window.isDestroyed()) return
   const state = updater.getCurrentUpdateState()
-  if (state.kind !== 'ready' && state.kind !== 'available') return
+  if (state.kind === null) return
+  // While the download is in flight the pill click can't usefully
+  // trigger anything — instead, deep-link the user to Global Settings
+  // → Desktop Updates so they can watch the progress bar and decide
+  // whether to wait. Mirrors the install-update pill flow: bring the
+  // panel view forward (lazily constructing it if needed) then send
+  // `panel-trigger-overlay 'open-settings'` once the renderer is up.
+  if (state.kind === 'downloading') {
+    setActivePanel(found.id, 'settings')
+    const panelView = entry.panelView
+    if (!panelView) return
+    sendToPanelDeferred(panelView, 'panel-trigger-overlay', {
+      kind: 'open-settings',
+      installationId: entry.installationId,
+      settingsTab: 'global',
+    })
+    return
+  }
   // The confirm modal renders on the dedicated system-modal popup
   // surface, which overlays the entire host window — independent of
   // which body view (comfy / panel / lifecycle) is currently active.

@@ -118,7 +118,7 @@ export interface ComfyTitleBarBridge {
    *  the existing "Restart to update" copy. */
   onAppUpdateStateChanged(
     cb: (state: {
-      kind: 'available' | 'ready' | null
+      kind: 'available' | 'downloading' | 'ready' | null
       version: string | null
       autoUpdate: boolean
     }) => void,
@@ -258,7 +258,10 @@ const bridge: ComfyTitleBarBridge = {
   onAppUpdateStateChanged: (cb) => {
     const handler = (_event: IpcRendererEvent, state: unknown): void => {
       const data = (state || {}) as { kind?: unknown; version?: unknown; autoUpdate?: unknown }
-      const kind = data.kind === 'available' || data.kind === 'ready' ? data.kind : null
+      const kind =
+        data.kind === 'available' || data.kind === 'downloading' || data.kind === 'ready'
+          ? data.kind
+          : null
       const version = typeof data.version === 'string' ? data.version : null
       // Default-on if main forgets to send it — matches the underlying
       // `settings.get('autoUpdate') !== false` semantics.

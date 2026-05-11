@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import {
   ArrowDownToLine,
   Download,
+  Loader2,
   Menu as MenuIcon,
   MessageSquarePlus,
   RefreshCw,
@@ -100,7 +101,7 @@ interface Bridge {
    *  existing "Restart to update" copy. */
   onAppUpdateStateChanged: (
     cb: (state: {
-      kind: 'available' | 'ready' | null
+      kind: 'available' | 'downloading' | 'ready' | null
       version: string | null
       autoUpdate: boolean
     }) => void,
@@ -267,7 +268,7 @@ const themeText = ref<string | null>(null)
  * treated as a deliberate user action.
  */
 const appUpdateState = ref<{
-  kind: 'available' | 'ready' | null
+  kind: 'available' | 'downloading' | 'ready' | null
   version: string | null
   autoUpdate: boolean
 }>({ kind: null, version: null, autoUpdate: true })
@@ -280,6 +281,7 @@ const appUpdatePillLabel = computed<string | null>(() => {
   const s = appUpdateState.value
   if (!s.kind) return null
   if (s.kind === 'ready') return t('titleBar.desktopUpdateReady')
+  if (s.kind === 'downloading') return t('titleBar.desktopUpdateDownloading')
   // 'available' — only fires with auto-updates OFF (main suppresses
   // it when ON and triggers the download itself).
   return t('titleBar.desktopUpdateAvailable')
@@ -586,12 +588,20 @@ onUnmounted(() => {
         v-if="showAppUpdatePill"
         type="button"
         class="title-update-pill is-app-update"
-        :class="{ 'is-ready': appUpdateState.kind === 'ready' }"
+        :class="{
+          'is-ready': appUpdateState.kind === 'ready',
+          'is-downloading': appUpdateState.kind === 'downloading',
+        }"
         :title="appUpdatePillTooltip"
         :aria-label="appUpdatePillTooltip"
         @click="handleAppUpdatePill"
       >
         <Download v-if="appUpdateState.kind === 'available'" :size="14" />
+        <Loader2
+          v-else-if="appUpdateState.kind === 'downloading'"
+          :size="14"
+          class="title-update-pill-spinner"
+        />
         <RefreshCw v-else-if="appUpdateState.kind === 'ready'" :size="14" />
         <span class="title-update-pill-label">{{ appUpdatePillLabel }}</span>
       </button>
@@ -906,6 +916,20 @@ onUnmounted(() => {
 .title-bar.is-hover-active .title-update-pill.is-ready:hover:not(:disabled) {
   background: rgba(34, 197, 94, 0.28);
   border-color: rgba(34, 197, 94, 0.55);
+}
+.title-update-pill.is-downloading {
+  background: rgba(148, 163, 184, 0.18);
+  border-color: rgba(148, 163, 184, 0.4);
+}
+.title-bar.is-hover-active .title-update-pill.is-downloading:hover:not(:disabled) {
+  background: rgba(148, 163, 184, 0.28);
+  border-color: rgba(148, 163, 184, 0.55);
+}
+.title-update-pill-spinner {
+  animation: title-update-pill-spin 1s linear infinite;
+}
+@keyframes title-update-pill-spin {
+  to { transform: rotate(360deg); }
 }
 .title-update-pill:focus-visible {
   outline: 2px solid var(--accent, #60a5fa);

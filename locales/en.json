@@ -368,7 +368,13 @@
     "availableMessage": "A Desktop update ({version}) is available. Download it now? You will be asked to restart once the download finishes.",
     "download": "Download",
     "later": "Later",
-    "errorTitle": "Desktop Update Error"
+    "errorTitle": "Desktop Update Error",
+    "sectionTitle": "Desktop Updates",
+    "panelIdleTitle": "ComfyUI Desktop is up to date",
+    "panelAvailableTitle": "Update {version} available",
+    "panelReadyTitle": "Update {version} ready to install",
+    "panelDownloadingTitle": "Downloading update {version}…",
+    "downloading": "Downloading…"
   },
 
   "modal": {
