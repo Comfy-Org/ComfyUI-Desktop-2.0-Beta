@@ -2415,6 +2415,31 @@ ipcMain.on('comfy-window:set-panel', (event, payload: { panel: string }) => {
 })
 
 /**
+ * Send a payload to a panelView, deferring until `did-finish-load` if
+ * the bundle is still loading.
+ *
+ * Title-bar pill clicks and popup deep-links can land while the panel
+ * renderer is still booting — the panelView is constructed lazily on
+ * the first non-comfy switch, so its preload + Vue app aren't ready
+ * yet on the very first click. A synchronous `send()` then arrives
+ * before the renderer's `onPanelTriggerOverlay` (or other) listener
+ * runs in `onMounted`, and the IPC is silently dropped. This helper
+ * centralizes the deferral pattern used by every such handler.
+ */
+function sendToPanelDeferred(panelView: WebContentsView, channel: string, payload: unknown): void {
+  if (panelView.webContents.isDestroyed()) return
+  const send = (): void => {
+    if (panelView.webContents.isDestroyed()) return
+    panelView.webContents.send(channel, payload)
+  }
+  if (panelView.webContents.isLoadingMainFrame()) {
+    panelView.webContents.once('did-finish-load', send)
+  } else {
+    send()
+  }
+}
+
+/**
  * Page-level X close (rendered inside the panel WebContentsView, e.g.
  * Settings / Directories / Install Settings) — same effect as a pill
  * click: the body returns to the comfy/chooser root. The panel preload
@@ -2545,28 +2570,16 @@ ipcMain.on('comfy-window:click-app-update-pill', (event) => {
   // first non-comfy switch, so the pill click would hit a null panelView
   // when the user is still on the ComfyUI body. Mirror the feedback /
   // install-update-pill pattern: ensure the panel exists for the current
-  // body mode and defer the send until did-finish-load if still loading.
+  // body mode; `sendToPanelDeferred` handles the did-finish-load wait
+  // if the bundle is still loading.
   const panelView = entry.panelView ?? ensurePanelView(id, entry, computeBodyMode(entry))
-  if (panelView.webContents.isDestroyed()) return
-  const send = (): void => {
-    if (panelView.webContents.isDestroyed()) return
-    if (state.kind === 'ready') {
-      panelView.webContents.send('panel-trigger-overlay', {
-        kind: 'app-update-restart-prompt',
-        version: state.version,
-      })
-    } else {
-      panelView.webContents.send('panel-trigger-overlay', {
-        kind: 'app-update-download-prompt',
-        version: state.version,
-      })
-    }
-  }
-  if (panelView.webContents.isLoadingMainFrame()) {
-    panelView.webContents.once('did-finish-load', send)
-  } else {
-    send()
-  }
+  const overlayKind = state.kind === 'ready'
+    ? 'app-update-restart-prompt'
+    : 'app-update-download-prompt'
+  sendToPanelDeferred(panelView, 'panel-trigger-overlay', {
+    kind: overlayKind,
+    version: state.version,
+  })
 })
 
 /**
@@ -2613,19 +2626,11 @@ ipcMain.on('comfy-window:click-install-update-pill', (event) => {
   if (!installationId) return
   setActivePanel(found.id, 'settings')
   const panelView = entry.panelView
-  if (!panelView || panelView.webContents.isDestroyed()) return
-  const sendDeepLink = (): void => {
-    if (panelView.webContents.isDestroyed()) return
-    panelView.webContents.send('panel-trigger-overlay', {
-      kind: 'install-update',
-      installationId,
-    })
-  }
-  if (panelView.webContents.isLoadingMainFrame()) {
-    panelView.webContents.once('did-finish-load', sendDeepLink)
-  } else {
-    sendDeepLink()
-  }
+  if (!panelView) return
+  sendToPanelDeferred(panelView, 'panel-trigger-overlay', {
+    kind: 'install-update',
+    installationId,
+  })
 })
 
 /**
@@ -2721,16 +2726,7 @@ function triggerOpenFeedback(entryId: number, source: 'titlebar' | 'menu'): void
   const parentEntry = comfyWindows.get(entryId)
   if (!parentEntry || parentEntry.window.isDestroyed()) return
   const panelView = parentEntry.panelView ?? ensurePanelView(entryId, parentEntry, computeBodyMode(parentEntry))
-  if (panelView.webContents.isDestroyed()) return
-  const send = (): void => {
-    if (panelView.webContents.isDestroyed()) return
-    panelView.webContents.send('comfy-panel:open-feedback', { source })
-  }
-  if (panelView.webContents.isLoadingMainFrame()) {
-    panelView.webContents.once('did-finish-load', send)
-  } else {
-    send()
-  }
+  sendToPanelDeferred(panelView, 'comfy-panel:open-feedback', { source })
 }
 
 /** Title-bar Send Feedback button click. Resolves the host entry from
@@ -3458,20 +3454,12 @@ ipcMain.on(
     hideTitlePopup(popupEntry, { releaseFocusToParent: false })
     setActivePanel(popupEntry.parentEntryId, 'settings')
     const panelView = parentEntry.panelView
-    if (!panelView || panelView.webContents.isDestroyed()) return
-    const sendDeepLink = (): void => {
-      if (panelView.webContents.isDestroyed()) return
-      panelView.webContents.send('panel-trigger-overlay', {
-        kind: 'open-settings',
-        installationId: parentEntry.installationId,
-        settingsTab: tab,
-      })
-    }
-    if (panelView.webContents.isLoadingMainFrame()) {
-      panelView.webContents.once('did-finish-load', sendDeepLink)
-    } else {
-      sendDeepLink()
-    }
+    if (!panelView) return
+    sendToPanelDeferred(panelView, 'panel-trigger-overlay', {
+      kind: 'open-settings',
+      installationId: parentEntry.installationId,
+      settingsTab: tab,
+    })
   },
 )
 

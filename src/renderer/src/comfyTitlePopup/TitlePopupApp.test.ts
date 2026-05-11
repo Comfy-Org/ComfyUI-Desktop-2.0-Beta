@@ -195,6 +195,75 @@ describe('TitlePopupApp', () => {
     expect(style).toMatch(/color:\s*(#eeeeee|rgb\(238,\s*238,\s*238\))/i)
   })
 
+  it('subscribes to downloads-changed at app mount, before any DownloadsView is rendered', async () => {
+    // Regression: previously the popup's DownloadsView owned the
+    // subscription in its onMounted, so an initial state push that
+    // arrived during a fresh `'downloads'` open landed before the
+    // listener existed. The shell now owns the listener so the data
+    // is captured even while the menu view is still mounted.
+    const { default: TitlePopupApp } = await import('./TitlePopupApp.vue')
+    mount(TitlePopupApp)
+    await flushPromises()
+    expect(bridgeState.downloadsCallbacks.length).toBeGreaterThan(0)
+  })
+
+  it('forwards a downloads-changed push to the rendered DownloadsView', async () => {
+    const { default: TitlePopupApp } = await import('./TitlePopupApp.vue')
+    const wrapper = mount(TitlePopupApp)
+    await flushPromises()
+    // Push a state snapshot BEFORE switching kinds — this is the race
+    // the fix addresses: a snapshot pushed while the menu view is
+    // mounted still has to be visible once we flip to 'downloads'.
+    bridgeState.downloadsCallbacks.forEach((cb) =>
+      cb({
+        active: [
+          {
+            url: 'https://example.com/dl.bin',
+            filename: 'dl.bin',
+            progress: 0.25,
+            status: 'downloading',
+          },
+        ],
+        recent: [],
+      }),
+    )
+    bridgeState.configCallbacks.forEach((cb) =>
+      cb({ kind: 'downloads', theme: { bg: '#262729', text: '#dddddd' } }),
+    )
+    await flushPromises()
+    expect(wrapper.find('.downloads-empty').exists()).toBe(false)
+    expect(wrapper.find('.downloads-item-name').text()).toBe('dl.bin')
+  })
+
+  it('suppresses stale render-acks on rapid back-to-back configs', async () => {
+    // Regression: rapid set-config pushes used to queue overlapping
+    // rAFs that all called notifyRendered. Only the most recent
+    // config's ack should fire so main never marks an older config as
+    // synced after the user has moved past it.
+    const { default: TitlePopupApp } = await import('./TitlePopupApp.vue')
+    mount(TitlePopupApp)
+    await flushPromises()
+    const before = bridgeState.notifyRenderedCalls
+    bridgeState.configCallbacks.forEach((cb) =>
+      cb({
+        kind: 'menu',
+        items: [{ id: 'a', label: 'Alpha' }],
+        theme: { bg: '#262729', text: '#dddddd' },
+      }),
+    )
+    bridgeState.configCallbacks.forEach((cb) =>
+      cb({
+        kind: 'menu',
+        items: [{ id: 'b', label: 'Beta' }],
+        theme: { bg: '#262729', text: '#dddddd' },
+      }),
+    )
+    await flushPromises()
+    await new Promise((r) => setTimeout(r, 30))
+    // Exactly one ack — the older rAF closure no-ops via the seq guard.
+    expect(bridgeState.notifyRenderedCalls - before).toBe(1)
+  })
+
   it('removes the keydown handler on unmount', async () => {
     const { default: TitlePopupApp } = await import('./TitlePopupApp.vue')
     const wrapper = mount(TitlePopupApp, { attachTo: document.body })

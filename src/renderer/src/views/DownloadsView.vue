@@ -11,6 +11,11 @@ import {
 } from 'lucide-vue-next'
 import { useDownloadStore } from '../stores/downloadStore'
 import { isTerminalModelDownloadStatus } from '../lib/telemetry'
+import {
+  fileLabel,
+  statusKindClass,
+  statusLine as formatStatusLine,
+} from '../lib/downloadFormatters'
 import type { ModelDownloadProgress, ModelDownloadStatus } from '../types/ipc'
 
 /**
@@ -58,75 +63,11 @@ const filtered = computed<ModelDownloadProgress[]>(() => {
 
 const finishedCount = computed(() => store.finishedDownloads.length)
 
-function fileLabel(d: ModelDownloadProgress): string {
-  return d.directory ? `${d.directory} / ${d.filename}` : d.filename
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1048576) return `${(bytes / 1024).toFixed(0)} KB`
-  if (bytes < 1073741824) return `${(bytes / 1048576).toFixed(1)} MB`
-  return `${(bytes / 1073741824).toFixed(2)} GB`
-}
-
-function formatSpeed(bytesPerSec: number): string {
-  if (bytesPerSec < 1048576) return `${(bytesPerSec / 1024).toFixed(0)} KB/s`
-  return `${(bytesPerSec / 1048576).toFixed(1)} MB/s`
-}
-
-function formatEta(seconds: number): string {
-  if (seconds < 60) return `${Math.ceil(seconds)}s`
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${Math.ceil(seconds % 60)}s`
-  const h = Math.floor(seconds / 3600)
-  const m = Math.ceil((seconds % 3600) / 60)
-  return `${h}h ${m}m`
-}
-
+/** The Settings tab adds the total size to the `'completed'` status
+ *  line — opt into the variant in the shared formatter rather than
+ *  re-implementing the switch. */
 function statusLine(d: ModelDownloadProgress): string {
-  const pct = Math.round(d.progress * 100)
-  switch (d.status) {
-    case 'pending':
-      return 'Waiting…'
-    case 'downloading': {
-      const parts: string[] = []
-      if (d.totalBytes && d.totalBytes > 0 && d.receivedBytes != null) {
-        parts.push(`${formatBytes(d.receivedBytes)} / ${formatBytes(d.totalBytes)}`)
-      }
-      parts.push(`${pct}%`)
-      if (d.speedBytesPerSec && d.speedBytesPerSec > 0) {
-        parts.push(formatSpeed(d.speedBytesPerSec))
-      }
-      if (d.etaSeconds != null && d.etaSeconds > 0 && isFinite(d.etaSeconds)) {
-        parts.push(formatEta(d.etaSeconds))
-      }
-      return parts.join(' · ')
-    }
-    case 'paused':
-      return `Paused at ${pct}%`
-    case 'completed':
-      return d.totalBytes ? `Completed · ${formatBytes(d.totalBytes)}` : 'Completed'
-    case 'error':
-      return d.error || 'Error'
-    case 'cancelled':
-      return 'Cancelled'
-    default:
-      return ''
-  }
-}
-
-function statusKindClass(d: ModelDownloadProgress): string {
-  switch (d.status) {
-    case 'completed':
-      return 'is-completed'
-    case 'error':
-      return 'is-error'
-    case 'cancelled':
-      return 'is-cancelled'
-    case 'paused':
-      return 'is-paused'
-    default:
-      return 'is-active'
-  }
+  return formatStatusLine(d, { completedShowsSize: true })
 }
 
 function pause(url: string): void {

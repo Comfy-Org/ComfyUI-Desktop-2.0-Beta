@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue'
 import {
   ArrowDownToLine,
   CheckCircle2,
@@ -7,13 +6,16 @@ import {
   PlayCircle,
   XCircle,
 } from 'lucide-vue-next'
+import { fileLabel, statusKindClass, statusLine } from '../lib/downloadFormatters'
 
 /**
  * Live downloads tray view.
  *
- * Subscribes to `comfy-titlepopup:downloads-changed` pushes from main
- * (mirrored from `getDownloadsTrayState()` in `comfyDownloadManager`)
- * and dispatches per-entry actions back via
+ * Stateless — receives the latest `DownloadsState` snapshot as a prop
+ * from `TitlePopupApp` (which owns the long-lived
+ * `comfy-titlepopup:downloads-changed` subscription so the initial
+ * push on a fresh `'downloads'` open lands even before this component
+ * mounts). Per-entry actions are dispatched back via
  * `comfy-titlepopup:downloads-action`.
  *
  * The popup webContents is a transient view with its own preload — no
@@ -51,95 +53,13 @@ type DownloadAction =
 type PopupSettingsTab = 'comfy' | 'directories' | 'downloads' | 'global'
 
 interface PopupBridge {
-  onDownloadsChanged(cb: (state: DownloadsState) => void): () => void
   downloadsAction(action: DownloadAction): void
   openSettingsTab(tab: PopupSettingsTab): void
 }
 
 const bridge = (window as unknown as { __comfyTitlePopup?: PopupBridge }).__comfyTitlePopup
 
-const state = ref<DownloadsState>({ active: [], recent: [] })
-let unsubDownloads: (() => void) | undefined
-
-onMounted(() => {
-  unsubDownloads = bridge?.onDownloadsChanged((next) => {
-    state.value = next
-  })
-})
-onUnmounted(() => {
-  unsubDownloads?.()
-})
-
-function fileLabel(d: DownloadEntry): string {
-  return d.directory ? `${d.directory} / ${d.filename}` : d.filename
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1048576) return `${(bytes / 1024).toFixed(0)} KB`
-  if (bytes < 1073741824) return `${(bytes / 1048576).toFixed(1)} MB`
-  return `${(bytes / 1073741824).toFixed(2)} GB`
-}
-
-function formatSpeed(bytesPerSec: number): string {
-  if (bytesPerSec < 1048576) return `${(bytesPerSec / 1024).toFixed(0)} KB/s`
-  return `${(bytesPerSec / 1048576).toFixed(1)} MB/s`
-}
-
-function formatEta(seconds: number): string {
-  if (seconds < 60) return `${Math.ceil(seconds)}s`
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${Math.ceil(seconds % 60)}s`
-  const h = Math.floor(seconds / 3600)
-  const m = Math.ceil((seconds % 3600) / 60)
-  return `${h}h ${m}m`
-}
-
-function statusLine(d: DownloadEntry): string {
-  const pct = Math.round(d.progress * 100)
-  switch (d.status) {
-    case 'pending':
-      return 'Waiting…'
-    case 'downloading': {
-      const parts: string[] = []
-      if (d.totalBytes && d.totalBytes > 0 && d.receivedBytes != null) {
-        parts.push(`${formatBytes(d.receivedBytes)} / ${formatBytes(d.totalBytes)}`)
-      }
-      parts.push(`${pct}%`)
-      if (d.speedBytesPerSec && d.speedBytesPerSec > 0) {
-        parts.push(formatSpeed(d.speedBytesPerSec))
-      }
-      if (d.etaSeconds != null && d.etaSeconds > 0 && isFinite(d.etaSeconds)) {
-        parts.push(formatEta(d.etaSeconds))
-      }
-      return parts.join(' · ')
-    }
-    case 'paused':
-      return `Paused at ${pct}%`
-    case 'completed':
-      return 'Completed'
-    case 'error':
-      return d.error || 'Error'
-    case 'cancelled':
-      return 'Cancelled'
-    default:
-      return ''
-  }
-}
-
-function statusKindClass(d: DownloadEntry): string {
-  switch (d.status) {
-    case 'completed':
-      return 'is-completed'
-    case 'error':
-      return 'is-error'
-    case 'cancelled':
-      return 'is-cancelled'
-    case 'paused':
-      return 'is-paused'
-    default:
-      return 'is-active'
-  }
-}
+defineProps<{ state: DownloadsState }>()
 
 function pause(url: string): void {
   bridge?.downloadsAction({ action: 'pause', url })

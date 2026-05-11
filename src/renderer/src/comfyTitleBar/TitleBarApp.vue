@@ -718,8 +718,10 @@ onUnmounted(() => {
   /* Sits above the absolutely-positioned center cluster so the
      hamburger / app-update pill remain clickable if the window
      narrows enough that the centered pill would otherwise overlap
-     them. */
-  z-index: 1;
+     them. Must be > .title-center's z-index, otherwise DOM order wins
+     and the later-painted center cluster covers the cluster's
+     buttons. */
+  z-index: 2;
 }
 /* macOS: shift past the traffic lights (78px reservation − 12px base padding). */
 .title-bar.is-mac .title-cluster {
@@ -755,7 +757,10 @@ onUnmounted(() => {
   gap: 4px;
   flex: 0 0 auto;
   margin-left: 12px;
-  z-index: 1;
+  /* Same precedence rule as `.title-cluster` — must outrank
+     `.title-center` so the feedback button stays clickable when a
+     wide center cluster encroaches. */
+  z-index: 2;
 }
 /* Win/Linux: native close / min / max controls overlay the right
    ~140px of the window. Push the trailing cluster past them so the

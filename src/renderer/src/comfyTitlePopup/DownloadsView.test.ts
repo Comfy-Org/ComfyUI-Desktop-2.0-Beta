@@ -21,22 +21,16 @@ interface MockDownloadsState {
 }
 
 interface MockBridgeState {
-  downloadsCallbacks: ((state: MockDownloadsState) => void)[]
   downloadsActions: { action: string; url: string; savePath?: string }[]
   openSettingsTabCalls: string[]
 }
 
 function installMockBridge(): MockBridgeState {
   const state: MockBridgeState = {
-    downloadsCallbacks: [],
     downloadsActions: [],
     openSettingsTabCalls: [],
   }
   const bridge = {
-    onDownloadsChanged: (cb: (next: MockDownloadsState) => void) => {
-      state.downloadsCallbacks.push(cb)
-      return () => {}
-    },
     downloadsAction: (a: { action: string; url: string; savePath?: string }) => {
       state.downloadsActions.push(a)
     },
@@ -48,14 +42,7 @@ function installMockBridge(): MockBridgeState {
   return state
 }
 
-function pushState(
-  state: MockBridgeState,
-  next: { active?: MockDownloadEntry[]; recent?: MockDownloadEntry[] } = {},
-): void {
-  state.downloadsCallbacks.forEach((cb) =>
-    cb({ active: next.active ?? [], recent: next.recent ?? [] }),
-  )
-}
+const EMPTY_STATE: MockDownloadsState = { active: [], recent: [] }
 
 describe('comfyTitlePopup/DownloadsView', () => {
   let bridgeState: MockBridgeState
@@ -65,9 +52,9 @@ describe('comfyTitlePopup/DownloadsView', () => {
     vi.resetModules()
   })
 
-  it('shows the empty placeholder before any state push', async () => {
+  it('shows the empty placeholder when state has no entries', async () => {
     const { default: DownloadsView } = await import('./DownloadsView.vue')
-    const wrapper = mount(DownloadsView)
+    const wrapper = mount(DownloadsView, { props: { state: EMPTY_STATE } })
     await flushPromises()
     expect(wrapper.find('.downloads-empty').text()).toBe('No downloads yet')
     expect(wrapper.findAll('.downloads-item').length).toBe(0)
@@ -75,9 +62,7 @@ describe('comfyTitlePopup/DownloadsView', () => {
 
   it('renders an active downloading entry with a progress bar and Pause/Cancel actions', async () => {
     const { default: DownloadsView } = await import('./DownloadsView.vue')
-    const wrapper = mount(DownloadsView)
-    await flushPromises()
-    pushState(bridgeState, {
+    const state: MockDownloadsState = {
       active: [
         {
           url: 'https://example.com/a.bin',
@@ -91,7 +76,9 @@ describe('comfyTitlePopup/DownloadsView', () => {
           status: 'downloading',
         },
       ],
-    })
+      recent: [],
+    }
+    const wrapper = mount(DownloadsView, { props: { state } })
     await flushPromises()
     const item = wrapper.find('.downloads-item.is-active')
     expect(item.exists()).toBe(true)
@@ -111,9 +98,7 @@ describe('comfyTitlePopup/DownloadsView', () => {
 
   it('renders a paused entry with Resume + Cancel and an indeterminate bar for pending', async () => {
     const { default: DownloadsView } = await import('./DownloadsView.vue')
-    const wrapper = mount(DownloadsView)
-    await flushPromises()
-    pushState(bridgeState, {
+    const state: MockDownloadsState = {
       active: [
         {
           url: 'https://example.com/p.bin',
@@ -128,7 +113,9 @@ describe('comfyTitlePopup/DownloadsView', () => {
           status: 'pending',
         },
       ],
-    })
+      recent: [],
+    }
+    const wrapper = mount(DownloadsView, { props: { state } })
     await flushPromises()
     const items = wrapper.findAll('.downloads-item')
     expect(items.length).toBe(2)
@@ -144,9 +131,8 @@ describe('comfyTitlePopup/DownloadsView', () => {
 
   it('renders a completed recent entry with a Show-in-folder action when savePath is present', async () => {
     const { default: DownloadsView } = await import('./DownloadsView.vue')
-    const wrapper = mount(DownloadsView)
-    await flushPromises()
-    pushState(bridgeState, {
+    const state: MockDownloadsState = {
+      active: [],
       recent: [
         {
           url: 'https://example.com/done.bin',
@@ -156,7 +142,8 @@ describe('comfyTitlePopup/DownloadsView', () => {
           savePath: '/tmp/done.bin',
         },
       ],
-    })
+    }
+    const wrapper = mount(DownloadsView, { props: { state } })
     await flushPromises()
     const item = wrapper.find('.downloads-item.is-finished')
     expect(item.exists()).toBe(true)
@@ -168,9 +155,8 @@ describe('comfyTitlePopup/DownloadsView', () => {
 
   it('omits Show-in-folder for terminal entries that did not write to disk', async () => {
     const { default: DownloadsView } = await import('./DownloadsView.vue')
-    const wrapper = mount(DownloadsView)
-    await flushPromises()
-    pushState(bridgeState, {
+    const state: MockDownloadsState = {
+      active: [],
       recent: [
         {
           url: 'https://example.com/x.bin',
@@ -180,7 +166,8 @@ describe('comfyTitlePopup/DownloadsView', () => {
           error: 'oops',
         },
       ],
-    })
+    }
+    const wrapper = mount(DownloadsView, { props: { state } })
     await flushPromises()
     const item = wrapper.find('.downloads-item.is-error')
     expect(item.exists()).toBe(true)
@@ -190,9 +177,7 @@ describe('comfyTitlePopup/DownloadsView', () => {
 
   it('forwards pause/resume/cancel/show-in-folder to the bridge', async () => {
     const { default: DownloadsView } = await import('./DownloadsView.vue')
-    const wrapper = mount(DownloadsView)
-    await flushPromises()
-    pushState(bridgeState, {
+    const state: MockDownloadsState = {
       active: [
         {
           url: 'https://example.com/dl.bin',
@@ -216,7 +201,8 @@ describe('comfyTitlePopup/DownloadsView', () => {
           savePath: '/tmp/ok.bin',
         },
       ],
-    })
+    }
+    const wrapper = mount(DownloadsView, { props: { state } })
     await flushPromises()
     const items = wrapper.findAll('.downloads-item')
     // Pause the downloading entry.
@@ -241,7 +227,7 @@ describe('comfyTitlePopup/DownloadsView', () => {
 
   it('routes the footer link to the Settings → Downloads tab', async () => {
     const { default: DownloadsView } = await import('./DownloadsView.vue')
-    const wrapper = mount(DownloadsView)
+    const wrapper = mount(DownloadsView, { props: { state: EMPTY_STATE } })
     await flushPromises()
     await wrapper.find('.downloads-link').trigger('click')
     expect(bridgeState.openSettingsTabCalls).toEqual(['downloads'])
