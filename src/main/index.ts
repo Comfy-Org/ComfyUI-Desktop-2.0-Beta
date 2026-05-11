@@ -377,6 +377,23 @@ const comfyWindows = new Map<number, ComfyWindowEntry>()
 const installationIdToWindowKey = new Map<string, number>()
 
 /**
+ * Most recently focused installation's id, or `null` when no install
+ * has been focused yet. Tracked by install id (not by window key) so
+ * that detach + re-launch into a different host window still resolves
+ * to the same install on the next dock-icon click.
+ *
+ * Stale ids self-invalidate: `getEntryByInstallationId(id)` returns
+ * `undefined` once the install no longer backs any window (close,
+ * detach without re-launch, uninstall) and `findPreferredInstallHostWindow`
+ * falls through to the insertion-order pick — no explicit cleanup hook
+ * required when windows close or installs detach.
+ *
+ * Updated by a `'focus'` listener on every host window and consulted
+ * by the platform re-launch hooks (`activate` / `second-instance`).
+ */
+let lastFocusedInstallationId: string | null = null
+
+/**
  * Window-mode unification (Stage W-4) — pending in-place attach
  * claims, set by the chooser-host renderer right before it kicks
  * off a launch action. `onLaunch()` consumes the claim instead of
@@ -661,8 +678,11 @@ function updateTrayMenu(): void {
 // that `onLocaleChanged: updateTrayMenu` and the `before-quit` cleanup
 // path stay valid without conditional churn for the eventual restore.
 
-/** Show a window and bring it to the front, working around Windows focus-theft prevention. */
+/** Show a window and bring it to the front, working around Windows
+ *  focus-theft prevention. Restores a minimised window first so callers
+ *  don't have to remember the two-step. */
 function bringToFront(win: BrowserWindow): void {
+  if (win.isMinimized()) win.restore()
   if (process.platform === 'win32') {
     win.setAlwaysOnTop(true)
     win.show()
@@ -1280,6 +1300,19 @@ function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowResult {
   comfyWindow.on('resize', () => saveWindowBounds(opts.boundsKey, comfyWindow))
   comfyWindow.on('move', () => saveWindowBounds(opts.boundsKey, comfyWindow))
 
+  // Track the most recently focused install id so the dock-icon /
+  // second-instance re-launch hooks can pick that install over an
+  // arbitrary insertion-order pick when several are open. Tracking by
+  // id (not by windowKey) survives a detach + re-launch into a fresh
+  // host window. Chooser hosts are excluded — they have their own
+  // selection path via findPreferredChooserHostWindow().
+  comfyWindow.on('focus', () => {
+    const entry = comfyWindows.get(windowKey)
+    if (entry?.installationId) {
+      lastFocusedInstallationId = entry.installationId
+    }
+  })
+
   // Push the initial state once the title bar's preload signals readiness.
   // Filter to this title bar's WebContents to avoid cross-talk between windows.
   //
@@ -1726,6 +1759,14 @@ function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts): boolea
   entry.sourceCategory = sourceMap[installation.sourceId]?.category ?? null
   installationIdToWindowKey.set(installationId, entry.windowKey)
 
+  // Seed the MRU tracker if this in-place attach happens on the
+  // already-focused host: no fresh OS `'focus'` event would fire to
+  // catch it otherwise, leaving the tracker pointing at a stale (or
+  // null) install on the next dock-icon click.
+  if (comfyWindow.isFocused()) {
+    lastFocusedInstallationId = installationId
+  }
+
   // OS-level window title is rebuilt whenever the page title or the
   // install name changes. Closures over the install lifetime — reset
   // by `_installCleanup` below.
@@ -2096,41 +2137,83 @@ function _detachInstallImpl(entry: ComfyWindowEntry): void {
   entry.layoutViews()
 }
 
-/**
- * Open an install-less host window (Phase 3 step 2c).
- *
- * Same window shape as a comfy window — title bar pills + a body area —
- * but with no installation backing the entry. The Comfy pill resolves to
- * the chooser body via `computeBodyMode()`; the user picks an install
- * from there.
- *
- * Lean version of the install-backed `onLaunch()` flow: no comfy URL load,
- * no theme observer, no download wiring, no failure retry — those are all
- * comfy-specific and would do nothing useful in install-less mode. The
- * comfyView still exists (so `layoutViews` doesn't have to special-case
- * its absence) but is sized to zero and never made visible.
- */
-/**
- * Find the first install-less host window (chooser / file-menu mode) so
- * the startup picker / tray entry can focus an existing one instead of
- * stacking duplicates. Step 5's "File → New Window" entry-point will
- * always create a fresh one regardless.
- */
-function findFirstChooserHostWindow(): BrowserWindow | null {
+/** Find the first live host entry matching `pred`, preferring
+ *  non-minimised over minimised. Within each visibility bucket, returns
+ *  insertion order. Returns `null` when nothing matches. */
+function findPreferredHostByVisibility(
+  pred: (entry: ComfyWindowEntry) => boolean,
+): ComfyWindowEntry | null {
+  let minimisedFallback: ComfyWindowEntry | null = null
   for (const [, entry] of comfyWindows) {
-    if (entry.installationId === null && !entry.window.isDestroyed()) {
-      return entry.window
-    }
+    if (entry.window.isDestroyed() || !pred(entry)) continue
+    if (!entry.window.isMinimized()) return entry
+    if (minimisedFallback === null) minimisedFallback = entry
   }
-  return null
+  return minimisedFallback
 }
 
-/** Focus an existing chooser host window if one is open, otherwise create one. */
+/** Find a chooser (install-less) host window to focus, preferring a
+ *  visible one over a minimised one. Used by the tray entry, the
+ *  startup picker, and the chooser-first re-launch fallback. The
+ *  "File → New Window" entry-point still creates a fresh chooser
+ *  regardless of what this returns. */
+function findPreferredChooserHostWindow(): BrowserWindow | null {
+  const entry = findPreferredHostByVisibility((e) => e.installationId === null)
+  return entry?.window ?? null
+}
+
+/** Focus an existing chooser host window if one is open (visible
+ *  preferred over minimised), otherwise create a fresh one. */
 function openOrFocusChooserHostWindow(): BrowserWindow {
-  const existing = findFirstChooserHostWindow()
+  const existing = findPreferredChooserHostWindow()
   if (existing) {
     bringToFront(existing)
     return existing
+  }
+  return openChooserHostWindow()
+}
+
+/** Find the install-backed host window to focus, prioritising in this
+ *  order:
+ *    1. The most-recently-focused install, if it is still live and
+ *       visible (not minimised).
+ *    2. Any other visible install (insertion order).
+ *    3. The most-recently-focused install if it is minimised.
+ *    4. Any other minimised install (insertion order).
+ *  Returns `null` when no install-backed host is open. */
+function findPreferredInstallHostWindow(): BrowserWindow | null {
+  const mruEntry =
+    lastFocusedInstallationId !== null
+      ? getEntryByInstallationId(lastFocusedInstallationId)
+      : undefined
+  const mruAlive = mruEntry && !mruEntry.window.isDestroyed() ? mruEntry : null
+  // Helper returns the first visible install (insertion order) or, if
+  // none are visible, the first minimised install. Combined with the
+  // MRU short-circuits below, this delivers the four-tier priority
+  // (visible-MRU → any-visible → minimised-MRU → any-minimised).
+  const fallback = findPreferredHostByVisibility((e) => e.installationId !== null)
+  if (mruAlive && !mruAlive.window.isMinimized()) return mruAlive.window
+  if (fallback && !fallback.window.isMinimized()) return fallback.window
+  if (mruAlive) return mruAlive.window
+  return fallback?.window ?? null
+}
+
+/** Focus any live host window for the platform re-launch hooks
+ *  (`activate` on macOS, `second-instance` on Windows/Linux). Priority:
+ *  install-backed beats chooser, with visible beating minimised inside
+ *  each type bucket; install-backed picks track the most-recently-
+ *  focused install. Spawns a fresh chooser host only when no live host
+ *  exists. */
+function openOrFocusAnyHostWindow(): BrowserWindow {
+  const installWin = findPreferredInstallHostWindow()
+  if (installWin) {
+    bringToFront(installWin)
+    return installWin
+  }
+  const chooser = findPreferredChooserHostWindow()
+  if (chooser) {
+    bringToFront(chooser)
+    return chooser
   }
   return openChooserHostWindow()
 }
@@ -2197,6 +2280,15 @@ function applyChooserHostThemeToAll(): void {
  */
 const CHOOSER_HOST_BOUNDS_KEY = 'chooser'
 
+/** Open a fresh install-less host window. Same shape as an install-
+ *  backed comfy window — title bar pills + body area — but with no
+ *  installation backing the entry. The Comfy pill resolves to the
+ *  chooser body via `computeBodyMode()`; the user picks an install
+ *  from there. Skips the install-backed extras (comfy URL load, theme
+ *  observer, download wiring, failure retry) since none of them apply.
+ *  The comfyView still exists so `layoutViews` doesn't have to
+ *  special-case its absence, but is sized to zero and never made
+ *  visible. */
 function openChooserHostWindow(): BrowserWindow {
   // Window-mode unification (Stage W-2) — install-less wrapper.
   // The shared `createHostWindow()` builds the BrowserWindow + 2
@@ -3518,16 +3610,10 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
 } else {
   if (app.isPackaged) {
     app.on('second-instance', () => {
-      // Phase 3 — the launcher window is gone; route the OS-level
-      // "open another instance" attempt to the chooser host instead.
-      // Restores any minimised chooser host before focusing it.
-      const chooser = findFirstChooserHostWindow()
-      if (chooser) {
-        if (chooser.isMinimized()) chooser.restore()
-        bringToFront(chooser)
-        return
-      }
-      openChooserHostWindow()
+      // OS-level "open another instance" attempt — focus an existing
+      // host window (chooser or install-backed) instead of stacking
+      // a duplicate.
+      openOrFocusAnyHostWindow()
     })
   }
 
@@ -3616,16 +3702,9 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
   })
 
   app.on('activate', () => {
-    // macOS dock click. Focus an existing chooser host if open,
-    // otherwise spawn a fresh one. With the launcher window retired
-    // (Phase 3), the chooser host is the only fallback surface — any
-    // running install windows already accept their own focus events.
-    const chooser = findFirstChooserHostWindow()
-    if (chooser) {
-      bringToFront(chooser)
-      return
-    }
-    openChooserHostWindow()
+    // macOS dock click — focus an existing host window before
+    // spawning a fresh chooser host.
+    openOrFocusAnyHostWindow()
   })
 
   app.on('before-quit', () => {
