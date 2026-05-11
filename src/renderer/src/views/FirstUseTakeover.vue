@@ -187,7 +187,7 @@ onMounted(() => {
 /**
  * Modal-unification (Track M-2.2) — push the current step to main as
  * the host's `firstUseMode` so:
- *   - `buildTitleMenuItems` can surface the Skip Onboarding entry
+ *   - `buildTitlePopupMenuItems` can surface the Skip Onboarding entry
  *     once we're past consent (`'post-consent'`).
  *   - The title bar can lock down during `'consent-lockdown'`
  *     (consumed in M-2.3).

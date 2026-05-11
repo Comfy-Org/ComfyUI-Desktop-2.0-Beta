@@ -304,7 +304,7 @@ interface ComfyWindowEntry {
   constructedPartition: string | null
   /**
    * Modal-unification (Track M-2.2) — current step of the first-use
-   * takeover, cached on the entry so `buildTitleMenuItems` can read it
+   * takeover, cached on the entry so `buildTitlePopupMenuItems` can read it
    * synchronously when the user opens the file menu (the menu builder
    * runs on click, after the popup config has already been chosen).
    *
@@ -316,7 +316,7 @@ interface ComfyWindowEntry {
    *                             `Skip Onboarding` entry (M-2.2) but
    *                             stays otherwise normal.
    *
-   * Cached here because `buildTitleMenuItems` (file-menu popup config
+   * Cached here because `buildTitlePopupMenuItems` (file-menu popup config
    * builder) reads it synchronously when the user clicks the waffle —
    * see the IPC handler comment.
    */
@@ -1319,7 +1319,7 @@ function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowResult {
     // Pre-warm the title-menu popup so the user's first File / Install
     // click doesn't pay the BrowserWindow construction + HTML/JS load
     // cost (~100ms).
-    ensureTitleMenuPopup(comfyWindow)
+    ensureTitlePopup(comfyWindow)
   }
   ipcMain.on('comfy-window:title-bar-ready', onTitleBarReadyHandler)
 
@@ -2436,7 +2436,7 @@ ipcMain.on('comfy-window:close-current-panel', (event) => {
  *
  * Forwards the panel renderer's `setFirstUseMode(mode)` push to the
  * host's title-bar WebContentsView (consumed by M-2.3's lockdown)
- * AND caches the value on the entry — `buildTitleMenuItems`
+ * AND caches the value on the entry — `buildTitlePopupMenuItems`
  * (file-menu popup config builder) reads `entry.firstUseMode`
  * synchronously when the user clicks the waffle, so the cached
  * value has to be ground-truth.
@@ -2701,7 +2701,7 @@ ipcMain.on('comfy-window:click-feedback', (event) => {
 })
 
 /**
- * File menu → New Window (Phase 3 title bar v2). Always opens a fresh
+ * File menu → New Window. Always opens a fresh
  * install-less chooser host window — does NOT focus an existing one
  * (that's the tray-entry behaviour). The user explicitly asked for a
  * new window so they get one.
@@ -2711,29 +2711,26 @@ ipcMain.on('comfy-window:new-chooser-window', () => {
 })
 
 // =====================================================================
-// Title-menu popups (Phase 3 §14 — replaces native Menu.popup()).
+// Title-bar dropdown popups.
 //
-// The File / Install dropdowns are now HTML rendered inside a frameless
-// transparent child BrowserWindow, mirroring the pattern Chrome / Discord /
-// VS Code use for their title-bar menus. Compared to `Menu.popup()` this
-// gives us:
-//   - native OS shadow + theme-matched chrome (no clipping by the title-bar
-//     WebContentsView's 37px bounds, no z-order gymnastics);
-//   - free click-outside dismissal via the popup's own blur event;
-//   - styling consistent with the Vue title bar above it (Inter + design
-//     tokens) instead of the platform's default native menu look.
+// All title-bar dropdowns (waffle menu, downloads tray, …) share one
+// HTML popup rendered inside a transparent child WebContentsView per
+// parent window. Compared to `Menu.popup()` this gives us native OS
+// shadow + theme-matched chrome (no clipping by the title-bar view's
+// bounds, no z-order gymnastics), free click-outside dismissal via the
+// popup's own blur event, and Inter + design-token styling consistent
+// with the Vue title bar above it.
 //
-// The renderer-side bridge (`openFileMenu` / `openInstallMenu` →
-// `comfy-window:open-title-menu`) is unchanged. The popup webContents
-// posts `comfy-titlemenu:item-activated` for clicks and
-// `comfy-titlemenu:close` for Escape; main routes activations to the
-// existing handlers (set-panel / new-chooser-window) and closes the
-// popup. On close, main re-emits `comfy-titlebar:menu-closed` to the
-// title-bar webContents so the existing 100ms reopen-suppression guard
-// keeps working.
+// The renderer-side bridges (`openFileMenu`, `comfy-window:click-downloads-tray`)
+// route through `comfy-window:open-title-menu` and similar IPCs. The
+// popup webContents posts `comfy-titlepopup:item-activated` for clicks
+// (menu kind) and `comfy-titlepopup:close` for Escape; main routes
+// activations and closes the popup. On close, main re-emits
+// `comfy-titlebar:menu-closed` to the title-bar webContents so the
+// renderer's reopen-suppression guard keeps working.
 // =====================================================================
 
-interface TitleMenuItem {
+interface TitlePopupMenuItem {
   /** Item id — main routes activation by this. Omitted for separators. */
   id?: string
   /** Visible label. */
@@ -2744,11 +2741,18 @@ interface TitleMenuItem {
   kind?: 'separator'
 }
 
-interface TitleMenuPopupConfig {
-  kind: 'file'
-  items: TitleMenuItem[]
-  theme: { bg: string; text: string }
-}
+type TitlePopupKind = 'menu' | 'downloads'
+
+type TitlePopupConfig =
+  | {
+      kind: 'menu'
+      items: TitlePopupMenuItem[]
+      theme: { bg: string; text: string }
+    }
+  | {
+      kind: 'downloads'
+      theme: { bg: string; text: string }
+    }
 
 /**
  * One reusable popup `WebContentsView` per parent BrowserWindow.
@@ -2762,7 +2766,7 @@ interface TitleMenuPopupConfig {
  * Constructing the WebContentsView + loading the renderer on every
  * open would cost ~100ms of click-to-paint delay, so we lazily create
  * one popup per parent, hide it between uses, and push fresh config
- * via `comfy-titlemenu:set-config` IPC on every subsequent open. The
+ * via `comfy-titlepopup:set-config` IPC on every subsequent open. The
  * popup webContents is closed when its parent BrowserWindow closes.
  *
  * Latest values for the *current* open are tracked here too so
@@ -2770,45 +2774,42 @@ interface TitleMenuPopupConfig {
  * `comfy-titlebar:menu-closed` for the reopen-suppression guard)
  * can route without their own per-open context.
  */
-interface TitleMenuPopupEntry {
+interface TitlePopupEntry {
   popup: WebContentsView
   parentWindow: BrowserWindow
   /** Snapshotted at construction so we don't touch `popup.webContents`
    *  in the destroyed-window handlers. */
   popupWebContentsId: number
   parentWindowId: number
-  /**
-   *  Updated on every open. Window-mode unification (Stage W-1) — now
-   *  the numeric `windowKey` of the parent host entry. `0` is a
-   *  sentinel for "no popup has been opened yet" since `nextWindowKey`
-   *  always returns positive numbers.
-   */
+  /** Numeric `windowKey` of the parent host entry, updated on every
+   *  open. `0` is a sentinel for "no popup has been opened yet" since
+   *  `nextWindowKey` always returns positive numbers. */
   parentEntryId: number
   /** Updated on every open. */
-  kind: 'file'
+  kind: TitlePopupKind
   /** Updated on every open. */
   titleBarSender: Electron.WebContents
-  /** True once the renderer has signalled `comfy-titlemenu:ready`.
+  /** True once the renderer has signalled `comfy-titlepopup:ready`.
    *  Until then, config pushes are queued in `pendingConfig`. */
   rendererReady: boolean
   /** Config queued before the renderer signalled ready — flushed on
    *  ready. Overwritten if multiple opens happen before ready. */
-  pendingConfig: TitleMenuPopupConfig | null
+  pendingConfig: TitlePopupConfig | null
   /** True between `setVisible(true)` (show) and `setVisible(false)`
    *  (hide) — the blur handler ignores spurious blurs while we're
    *  already hidden. */
   isOpen: boolean
   /** Set to a non-null timer when an open is in flight, waiting for
-   *  the renderer's `comfy-titlemenu:rendered` ack before flipping
+   *  the renderer's `comfy-titlepopup:rendered` ack before flipping
    *  to visible. The timer is the fallback that shows anyway after
    *  a short window (in case the renderer is unusually slow). */
   pendingShowTimer: NodeJS.Timeout | null
-  /** JSON of the most recently sent `comfy-titlemenu:set-config`
+  /** JSON of the most recently sent `comfy-titlepopup:set-config`
    *  payload — used to compare against the next open's config to skip
    *  the renderer roundtrip when the DOM is already correct. */
   lastConfigJson: string | null
   /** JSON of the config the renderer has acked via
-   *  `comfy-titlemenu:rendered`. When equal to the next open's
+   *  `comfy-titlepopup:rendered`. When equal to the next open's
    *  config, the popup view's DOM matches what we want to show, so
    *  we can `setVisible(true)` immediately without resending the
    *  config or waiting for an ack — saves one frame + two IPC hops
@@ -2819,10 +2820,10 @@ interface TitleMenuPopupEntry {
 
 /** Active popup keyed by parent BrowserWindow id (one popup per parent,
  *  cached for reuse). The webContents-id index lets
- *  `comfy-titlemenu:item-activated` / `:close` / `:ready` route by
+ *  `comfy-titlepopup:item-activated` / `:close` / `:ready` route by
  *  `event.sender`. */
-const titleMenuPopupsByParent = new Map<number, TitleMenuPopupEntry>()
-const titleMenuPopupsByWebContents = new Map<number, TitleMenuPopupEntry>()
+const titlePopupsByParent = new Map<number, TitlePopupEntry>()
+const titlePopupsByWebContents = new Map<number, TitlePopupEntry>()
 
 const POPUP_WIDTH = 220
 const POPUP_ITEM_HEIGHT = 28
@@ -2830,7 +2831,7 @@ const POPUP_SEPARATOR_HEIGHT = 9
 const POPUP_VPADDING = 8 // 4px top + 4px bottom on the <ul>
 const POPUP_VBORDER = 2 // 1px top + 1px bottom from the .popup card
 
-function computePopupHeight(items: readonly TitleMenuItem[]): number {
+function computePopupHeight(items: readonly TitlePopupMenuItem[]): number {
   const content = items.reduce(
     (sum, item) => sum + (item.kind === 'separator' ? POPUP_SEPARATOR_HEIGHT : POPUP_ITEM_HEIGHT),
     0,
@@ -2838,7 +2839,7 @@ function computePopupHeight(items: readonly TitleMenuItem[]): number {
   return content + POPUP_VPADDING + POPUP_VBORDER
 }
 
-function buildTitleMenuItems(entry: ComfyWindowEntry): TitleMenuItem[] {
+function buildTitlePopupMenuItems(entry: ComfyWindowEntry): TitlePopupMenuItem[] {
   // First-use post-consent — the takeover is mounted (or chained into
   // new-install / migrate / install-progress), and the only file-menu
   // entry that should be reachable is the explicit escape hatch.
@@ -2875,7 +2876,7 @@ function buildTitleMenuItems(entry: ComfyWindowEntry): TitleMenuItem[] {
   //   - "Return to Dashboard" is install-backed-only; install-less
   //     host windows are already on the chooser body so the entry
   //     would be a no-op there.
-  const items: TitleMenuItem[] = [
+  const items: TitlePopupMenuItem[] = [
     { id: 'new-window', label: 'New Window' },
     { kind: 'separator' },
   ]
@@ -2921,15 +2922,15 @@ function buildTitleMenuItems(entry: ComfyWindowEntry): TitleMenuItem[] {
  *  the same view — the renderer is loaded once, then we just push fresh
  *  config + reposition + show on every open. The popup is closed when
  *  its parent is. */
-function ensureTitleMenuPopup(parent: BrowserWindow): TitleMenuPopupEntry {
-  const existing = titleMenuPopupsByParent.get(parent.id)
+function ensureTitlePopup(parent: BrowserWindow): TitlePopupEntry {
+  const existing = titlePopupsByParent.get(parent.id)
   if (existing && !existing.popup.webContents.isDestroyed()) return existing
 
   const popup = new WebContentsView({
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      preload: path.join(__dirname, '../preload/comfyTitleMenuPreload.js'),
+      preload: path.join(__dirname, '../preload/comfyTitlePopupPreload.js'),
     },
   })
   // Transparent so the empty area around the rounded card lets the
@@ -2949,22 +2950,22 @@ function ensureTitleMenuPopup(parent: BrowserWindow): TitleMenuPopupEntry {
   const isDev = !!process.env['ELECTRON_RENDERER_URL']
   const loadPromise = isDev
     ? popup.webContents.loadURL(
-        `${(process.env['ELECTRON_RENDERER_URL'] as string).replace(/\/$/, '')}/comfyTitleMenu.html`,
+        `${(process.env['ELECTRON_RENDERER_URL'] as string).replace(/\/$/, '')}/comfyTitlePopup.html`,
       )
-    : popup.webContents.loadFile(path.join(__dirname, '../renderer/comfyTitleMenu.html'))
+    : popup.webContents.loadFile(path.join(__dirname, '../renderer/comfyTitlePopup.html'))
   void loadPromise.catch(() => {})
 
   // Capture ids up-front. The parent's `closed` event fires *after*
   // the BrowserWindow + its child WebContentsViews' webContents are
   // destroyed, so accessing `popup.webContents.id` there would throw
   // "Object has been destroyed".
-  const entry: TitleMenuPopupEntry = {
+  const entry: TitlePopupEntry = {
     popup,
     parentWindow: parent,
     popupWebContentsId: popup.webContents.id,
     parentWindowId: parent.id,
     parentEntryId: 0,
-    kind: 'file',
+    kind: 'menu',
     titleBarSender: popup.webContents, // overwritten on first open
     rendererReady: false,
     pendingConfig: null,
@@ -2973,8 +2974,8 @@ function ensureTitleMenuPopup(parent: BrowserWindow): TitleMenuPopupEntry {
     lastConfigJson: null,
     lastSyncedConfigJson: null,
   }
-  titleMenuPopupsByParent.set(entry.parentWindowId, entry)
-  titleMenuPopupsByWebContents.set(entry.popupWebContentsId, entry)
+  titlePopupsByParent.set(entry.parentWindowId, entry)
+  titlePopupsByWebContents.set(entry.popupWebContentsId, entry)
 
   // Click-outside dismissal. Item clicks inside the popup do NOT trigger
   // blur — focus stays in the popup webContents until we explicitly hide
@@ -2994,7 +2995,7 @@ function ensureTitleMenuPopup(parent: BrowserWindow): TitleMenuPopupEntry {
   // path: any title-bar drag dismisses the popup as soon as the window
   // begins to move.
   const dismissOnBlur = (): void => {
-    hideTitleMenuPopup(entry)
+    hideTitlePopup(entry)
   }
   popup.webContents.on('blur', dismissOnBlur)
   parent.on('blur', dismissOnBlur)
@@ -3005,8 +3006,8 @@ function ensureTitleMenuPopup(parent: BrowserWindow): TitleMenuPopupEntry {
   // its parent and reuse the wrong context on the next click in a
   // different window.
   const onParentClosed = (): void => {
-    titleMenuPopupsByParent.delete(entry.parentWindowId)
-    titleMenuPopupsByWebContents.delete(entry.popupWebContentsId)
+    titlePopupsByParent.delete(entry.parentWindowId)
+    titlePopupsByWebContents.delete(entry.popupWebContentsId)
     try { parent.contentView.removeChildView(popup) } catch {}
     if (!popup.webContents.isDestroyed()) popup.webContents.close()
   }
@@ -3014,7 +3015,7 @@ function ensureTitleMenuPopup(parent: BrowserWindow): TitleMenuPopupEntry {
 
   // If the popup webContents is destroyed independently (renderer
   // crash, manual close), drop the parent-window listeners so they
-  // don't accumulate when `ensureTitleMenuPopup` constructs a fresh
+  // don't accumulate when `ensureTitlePopup` constructs a fresh
   // entry on the next open.
   popup.webContents.once('destroyed', () => {
     if (!parent.isDestroyed()) {
@@ -3023,17 +3024,17 @@ function ensureTitleMenuPopup(parent: BrowserWindow): TitleMenuPopupEntry {
       parent.removeListener('move', dismissOnBlur)
       parent.removeListener('closed', onParentClosed)
     }
-    if (titleMenuPopupsByParent.get(entry.parentWindowId) === entry) {
-      titleMenuPopupsByParent.delete(entry.parentWindowId)
+    if (titlePopupsByParent.get(entry.parentWindowId) === entry) {
+      titlePopupsByParent.delete(entry.parentWindowId)
     }
-    titleMenuPopupsByWebContents.delete(entry.popupWebContentsId)
+    titlePopupsByWebContents.delete(entry.popupWebContentsId)
   })
 
   return entry
 }
 
 /** Fallback timeout (ms) — if the renderer's
- *  `comfy-titlemenu:rendered` ack doesn't arrive within this window
+ *  `comfy-titlepopup:rendered` ack doesn't arrive within this window
  *  after `set-config`, show the popup anyway so it never gets
  *  permanently stuck invisible. The renderer normally acks within one
  *  animation frame (~16ms). */
@@ -3054,8 +3055,8 @@ const POPUP_RENDER_ACK_TIMEOUT_MS = 80
  *  a *different* window (e.g. `new-window` opens and `bringToFront`s
  *  a fresh chooser host) — re-focusing the title bar here races
  *  against and defeats that hand-off. */
-function hideTitleMenuPopup(
-  entry: TitleMenuPopupEntry,
+function hideTitlePopup(
+  entry: TitlePopupEntry,
   opts: { releaseFocusToParent?: boolean } = {},
 ): void {
   // Proceed if a show is in flight even when not yet visible — otherwise
@@ -3092,9 +3093,9 @@ function hideTitleMenuPopup(
 }
 
 /** Make the popup view visible, focus it, and mark `isOpen`. Called
- *  when the renderer acks `comfy-titlemenu:rendered` — at that point
+ *  when the renderer acks `comfy-titlepopup:rendered` — at that point
  *  the new config has been painted and showing is safe. */
-function showTitleMenuPopupNow(entry: TitleMenuPopupEntry): void {
+function showTitlePopupNow(entry: TitlePopupEntry): void {
   if (entry.pendingShowTimer) {
     clearTimeout(entry.pendingShowTimer)
     entry.pendingShowTimer = null
@@ -3112,16 +3113,26 @@ function showTitleMenuPopupNow(entry: TitleMenuPopupEntry): void {
   }
 }
 
-function openTitleMenuPopup(opts: {
+/** Downloads popup sizing — fixed width with the height capped to 60%
+ *  of the parent window's content area so a long list doesn't push past
+ *  the bottom of the host window. */
+const DOWNLOADS_POPUP_WIDTH = 360
+const DOWNLOADS_POPUP_MIN_HEIGHT = 120
+const DOWNLOADS_POPUP_MAX_HEIGHT_RATIO = 0.6
+
+type OpenTitlePopupOpts = {
   parent: BrowserWindow
   parentEntryId: number
-  kind: 'file'
-  items: TitleMenuItem[]
   anchor: { x: number; y: number }
   theme: { bg: string; text: string }
   titleBarSender: Electron.WebContents
-}): void {
-  const entry = ensureTitleMenuPopup(opts.parent)
+} & (
+  | { kind: 'menu'; items: TitlePopupMenuItem[] }
+  | { kind: 'downloads' }
+)
+
+function openTitlePopup(opts: OpenTitlePopupOpts): void {
+  const entry = ensureTitlePopup(opts.parent)
   if (entry.popup.webContents.isDestroyed()) return
 
   // Refresh the per-open routing context. `kind` + `parentEntryId` +
@@ -3137,7 +3148,20 @@ function openTitleMenuPopup(opts: {
   // expects.
   const x = Math.round(Math.max(0, opts.anchor.x))
   const y = Math.round(Math.max(0, opts.anchor.y))
-  const height = computePopupHeight(opts.items)
+
+  let width: number
+  let height: number
+  if (opts.kind === 'menu') {
+    width = POPUP_WIDTH
+    height = computePopupHeight(opts.items)
+  } else {
+    width = DOWNLOADS_POPUP_WIDTH
+    const contentHeight = opts.parent.getContentBounds().height
+    height = Math.max(
+      DOWNLOADS_POPUP_MIN_HEIGHT,
+      Math.round(contentHeight * DOWNLOADS_POPUP_MAX_HEIGHT_RATIO),
+    )
+  }
 
   // Re-add as the most recently attached child view so the popup paints
   // on top of `titleBarView` / `comfyView` / `panelView`. Then update
@@ -3147,7 +3171,7 @@ function openTitleMenuPopup(opts: {
     opts.parent.contentView.removeChildView(entry.popup)
   } catch {}
   opts.parent.contentView.addChildView(entry.popup)
-  entry.popup.setBounds({ x, y, width: POPUP_WIDTH, height })
+  entry.popup.setBounds({ x, y, width, height })
 
   // Push the new config and *wait* for the renderer to ack that the
   // new content has painted before flipping the view visible. Without
@@ -3157,7 +3181,9 @@ function openTitleMenuPopup(opts: {
     clearTimeout(entry.pendingShowTimer)
     entry.pendingShowTimer = null
   }
-  const config: TitleMenuPopupConfig = { kind: opts.kind, items: opts.items, theme: opts.theme }
+  const config: TitlePopupConfig = opts.kind === 'menu'
+    ? { kind: 'menu', items: opts.items, theme: opts.theme }
+    : { kind: 'downloads', theme: opts.theme }
   const configJson = JSON.stringify(config)
 
   // Fast path: the renderer's DOM already matches the config we want
@@ -3169,13 +3195,13 @@ function openTitleMenuPopup(opts: {
     entry.lastSyncedConfigJson === configJson
     && !entry.popup.webContents.isDestroyed()
   ) {
-    showTitleMenuPopupNow(entry)
+    showTitlePopupNow(entry)
     return
   }
 
   entry.lastConfigJson = configJson
   if (entry.rendererReady && !entry.popup.webContents.isDestroyed()) {
-    entry.popup.webContents.send('comfy-titlemenu:set-config', config)
+    entry.popup.webContents.send('comfy-titlepopup:set-config', config)
   } else {
     // Renderer hasn't mounted yet on the very first open. Queue the
     // config; the `ready` IPC handler flushes it.
@@ -3183,11 +3209,11 @@ function openTitleMenuPopup(opts: {
   }
   entry.pendingShowTimer = setTimeout(() => {
     if (entry.pendingShowTimer === null) return
-    showTitleMenuPopupNow(entry)
+    showTitlePopupNow(entry)
   }, POPUP_RENDER_ACK_TIMEOUT_MS)
 }
 
-function activateTitleMenuItem(entry: TitleMenuPopupEntry, id: string): void {
+function activateTitlePopupMenuItem(entry: TitlePopupEntry, id: string): void {
   // Capture the click in main so the title-menu popup itself doesn't need
   // to bootstrap Datadog RUM / PostHog Browser (it's a transient view that
   // would mint a fresh session per open). PostHog Node captures here and
@@ -3223,7 +3249,7 @@ function activateTitleMenuItem(entry: TitleMenuPopupEntry, id: string): void {
     // would be cancelled. With one or zero windows the close
     // happens straight through. The parent of this popup is among
     // the windows being closed; its popup is auto-destroyed, and
-    // the trailing hideTitleMenuPopup is guarded against an
+    // the trailing hideTitlePopup is guarded against an
     // already-destroyed popup.
     const parentWindow = parentEntry && !parentEntry.window.isDestroyed()
       ? parentEntry.window
@@ -3248,7 +3274,7 @@ function activateTitleMenuItem(entry: TitleMenuPopupEntry, id: string): void {
   }
   else if (id === 'reset-zoom') {
     // Pair to the Ctrl/Cmd + 0 shortcut wired in `onLaunch`. The menu
-    // entry is only built when zoom is non-zero (see `buildTitleMenuItems`),
+    // entry is only built when zoom is non-zero (see `buildTitlePopupMenuItems`),
     // so this always corresponds to a visible state change.
     if (parentEntry && !parentEntry.comfyView.webContents.isDestroyed()) {
       const previousLevel = parentEntry.comfyView.webContents.getZoomLevel()
@@ -3257,7 +3283,7 @@ function activateTitleMenuItem(entry: TitleMenuPopupEntry, id: string): void {
       // Same event name + payload shape so dashboards can group on the
       // event and pivot on `source` to compare discoverability paths.
       // No previousLevel === 0 guard here: the menu item is only built
-      // when zoom is non-zero (see `buildTitleMenuItems`), so any click
+      // when zoom is non-zero (see `buildTitlePopupMenuItems`), so any click
       // is a real reset. The complementary `desktop2.title_menu.item_clicked`
       // emit at the top of this function still fires for menu-engagement
       // rollups; this one is the action-specific signal.
@@ -3272,7 +3298,7 @@ function activateTitleMenuItem(entry: TitleMenuPopupEntry, id: string): void {
   }
   else if (id === 'new-install' || id === 'track' || id === 'load-snapshot' || id === 'quick-install') {
     // Install-creation / import flows are chooser-host-only.
-    // `buildTitleMenuItems` already filters them out of the
+    // `buildTitlePopupMenuItems` already filters them out of the
     // install-backed file menu; this guard is the belt-and-braces
     // so a stale popup or an out-of-order IPC can't navigate an
     // in-Comfy host into one of these panels.
@@ -3282,16 +3308,16 @@ function activateTitleMenuItem(entry: TitleMenuPopupEntry, id: string): void {
   }
   // Item click — popup still has focus, so push it back to the parent
   // unless the action just handed focus to a different window.
-  hideTitleMenuPopup(entry, { releaseFocusToParent })
+  hideTitlePopup(entry, { releaseFocusToParent })
 }
 
-ipcMain.on('comfy-titlemenu:ready', (event) => {
-  const entry = titleMenuPopupsByWebContents.get(event.sender.id)
+ipcMain.on('comfy-titlepopup:ready', (event) => {
+  const entry = titlePopupsByWebContents.get(event.sender.id)
   if (!entry) return
   entry.rendererReady = true
   if (entry.pendingConfig && !entry.popup.webContents.isDestroyed()) {
     entry.lastConfigJson = JSON.stringify(entry.pendingConfig)
-    entry.popup.webContents.send('comfy-titlemenu:set-config', entry.pendingConfig)
+    entry.popup.webContents.send('comfy-titlepopup:set-config', entry.pendingConfig)
     entry.pendingConfig = null
   }
 })
@@ -3299,30 +3325,30 @@ ipcMain.on('comfy-titlemenu:ready', (event) => {
 // Renderer signals that it has applied the latest config and the new
 // DOM has painted. Show the popup view and focus it — the user only
 // ever sees the popup once it's showing the right content.
-ipcMain.on('comfy-titlemenu:rendered', (event) => {
-  const entry = titleMenuPopupsByWebContents.get(event.sender.id)
+ipcMain.on('comfy-titlepopup:rendered', (event) => {
+  const entry = titlePopupsByWebContents.get(event.sender.id)
   if (!entry) return
   // Mark the renderer in sync with the most recently sent config so
   // the next open of the same content can take the fast path in
-  // `openTitleMenuPopup`.
+  // `openTitlePopup`.
   entry.lastSyncedConfigJson = entry.lastConfigJson
   if (entry.pendingShowTimer === null) return
-  showTitleMenuPopupNow(entry)
+  showTitlePopupNow(entry)
 })
 
-ipcMain.on('comfy-titlemenu:item-activated', (event, payload: { id?: unknown }) => {
-  const entry = titleMenuPopupsByWebContents.get(event.sender.id)
+ipcMain.on('comfy-titlepopup:item-activated', (event, payload: { id?: unknown }) => {
+  const entry = titlePopupsByWebContents.get(event.sender.id)
   if (!entry) return
   const id = payload?.id
   if (typeof id !== 'string') return
-  activateTitleMenuItem(entry, id)
+  activateTitlePopupMenuItem(entry, id)
 })
 
-ipcMain.on('comfy-titlemenu:close', (event) => {
-  const entry = titleMenuPopupsByWebContents.get(event.sender.id)
+ipcMain.on('comfy-titlepopup:close', (event) => {
+  const entry = titlePopupsByWebContents.get(event.sender.id)
   if (!entry) return
   // Escape key — popup still has focus, so push it back to the parent.
-  hideTitleMenuPopup(entry, { releaseFocusToParent: true })
+  hideTitlePopup(entry, { releaseFocusToParent: true })
 })
 
 /**
@@ -3330,7 +3356,7 @@ ipcMain.on('comfy-titlemenu:close', (event) => {
  *
  * The title bar lives in its own WebContentsView with `height: TITLEBAR_HEIGHT`,
  * so HTML popups rendered inside it would be clipped by the view's bounds.
- * We attach a sibling `WebContentsView` (see `openTitleMenuPopup` above)
+ * We attach a sibling `WebContentsView` (see `openTitlePopup` above)
  * to the host window's content view. It re-orders to the top of the
  * view stack on each open, so it paints above the title bar / comfy /
  * panel views without z-order issues.
@@ -3346,18 +3372,17 @@ ipcMain.on(
     if (!found) return
     const { id: windowKey, entry } = found
     if (entry.window.isDestroyed()) return
-    // Install caret menu was retired alongside the unified Settings
-    // modal — only the file/waffle menu is openable from the title bar.
+    // Only the file/waffle menu is openable from the title bar.
     if (payload?.menu !== 'file') return
 
     const x = Math.max(0, Math.round(payload?.anchor?.x ?? 0))
     const y = Math.max(0, Math.round(payload?.anchor?.y ?? TITLEBAR_HEIGHT))
 
-    openTitleMenuPopup({
+    openTitlePopup({
       parent: entry.window,
       parentEntryId: windowKey,
-      kind: 'file',
-      items: buildTitleMenuItems(entry),
+      kind: 'menu',
+      items: buildTitlePopupMenuItems(entry),
       anchor: { x, y },
       theme: entry.lastTheme,
       titleBarSender: entry.titleBarView.webContents,
@@ -3373,9 +3398,9 @@ ipcMain.on(
 ipcMain.on('comfy-window:dismiss-title-menu', (event) => {
   const found = findEntryByTitleBarSender(event.sender)
   if (!found) return
-  const popup = titleMenuPopupsByParent.get(found.entry.window.id)
+  const popup = titlePopupsByParent.get(found.entry.window.id)
   if (!popup) return
-  hideTitleMenuPopup(popup, { releaseFocusToParent: true })
+  hideTitlePopup(popup, { releaseFocusToParent: true })
 })
 
 ipcMain.handle('focus-comfy-window', (_event, installationId: string) => {

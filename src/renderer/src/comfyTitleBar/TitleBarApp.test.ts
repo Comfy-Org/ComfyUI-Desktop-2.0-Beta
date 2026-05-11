@@ -20,8 +20,8 @@ interface MockBridgeState {
   sourceCategoryChangedCallbacks: ((category: string | null) => void)[]
   themeChangedCallbacks: ((theme: { bg: string; text: string }) => void)[]
   fullscreenChangedCallbacks: ((fullscreen: boolean) => void)[]
-  menuOpenedCallbacks: ((info: { menu: 'file' }) => void)[]
-  menuClosedCallbacks: ((info: { menu: 'file' }) => void)[]
+  menuOpenedCallbacks: ((info: { menu: 'menu' }) => void)[]
+  menuClosedCallbacks: ((info: { menu: 'menu' }) => void)[]
   firstUseModeChangedCallbacks: ((mode: 'none' | 'consent-lockdown' | 'post-consent') => void)[]
   appUpdateStateCallbacks: ((state: {
     kind: 'available' | 'ready' | null
@@ -92,11 +92,11 @@ function installMockBridge(opts: { isMac?: boolean; installationId?: string | nu
       state.fullscreenChangedCallbacks.push(cb)
       return () => {}
     },
-    onMenuOpened: (cb: (info: { menu: 'file' }) => void) => {
+    onMenuOpened: (cb: (info: { menu: 'menu' }) => void) => {
       state.menuOpenedCallbacks.push(cb)
       return () => {}
     },
-    onMenuClosed: (cb: (info: { menu: 'file' | 'install' }) => void) => {
+    onMenuClosed: (cb: (info: { menu: 'menu' }) => void) => {
       state.menuClosedCallbacks.push(cb)
       return () => {}
     },
@@ -297,11 +297,11 @@ describe('TitleBarApp', () => {
   })
 
   it('suppresses menu re-open immediately after a menu close (click-to-toggle dismiss)', async () => {
-    // Phase 3 §7 follow-up — when the user clicks the menu button
-    // while the native menu is open, the OS dismisses the menu first
-    // and the click event then propagates to the renderer. Without
-    // suppression the click handler would ask main to pop the menu
-    // again, making the menu flicker open immediately.
+    // When the user clicks the menu button while the popup is open,
+    // the OS dismisses the menu first and the click event then
+    // propagates to the renderer. Without suppression the click
+    // handler would ask main to pop the menu again, making the menu
+    // flicker open immediately.
     const { default: TitleBarApp } = await import('./TitleBarApp.vue')
     const wrapper = mount(TitleBarApp, { attachTo: document.body })
     await flushPromises()
@@ -314,7 +314,7 @@ describe('TitleBarApp', () => {
     // fires the popup callback → onMenuClosed handler stamps the
     // suppression timestamp. Simulate that by invoking the registered
     // callback directly.
-    bridgeState.menuClosedCallbacks.forEach((cb) => cb({ menu: 'file' }))
+    bridgeState.menuClosedCallbacks.forEach((cb) => cb({ menu: 'menu' }))
     await flushPromises()
 
     // Second click within the suppression window must NOT open the menu.

@@ -85,13 +85,13 @@ export interface ComfyTitleBarBridge {
    *  (the blur-driven dismiss handles the close on its own). On
    *  macOS the click event can fire before the dismiss propagates,
    *  so a timestamp-only guard isn't reliable. */
-  onMenuOpened(cb: (info: { menu: 'file' }) => void): () => void
+  onMenuOpened(cb: (info: { menu: 'menu' }) => void): () => void
   /** Subscribe to native title-bar menu close events. Fires when the
    *  popup created by `openFileMenu` closes, after the user picks an
    *  item or dismisses by clicking outside. The renderer uses this to
    *  suppress an immediate re-open if the same click that dismissed
    *  the menu also re-targets the menu button. */
-  onMenuClosed(cb: (info: { menu: 'file' }) => void): () => void
+  onMenuClosed(cb: (info: { menu: 'menu' }) => void): () => void
   /** Subscribe to first-use takeover step changes (modal-unification
    *  Track M-2.2). Mode mirrors `firstUseMode` on the entry —
    *  `'none'` for no takeover mounted, `'consent-lockdown'` while the
@@ -232,7 +232,7 @@ const bridge: ComfyTitleBarBridge = {
   onMenuOpened: (cb) => {
     const handler = (_event: IpcRendererEvent, data: unknown): void => {
       const { menu } = (data || {}) as { menu?: unknown }
-      if (menu === 'file') cb({ menu })
+      if (menu === 'menu') cb({ menu })
     }
     ipcRenderer.on('comfy-titlebar:menu-opened', handler)
     return () => ipcRenderer.removeListener('comfy-titlebar:menu-opened', handler)
@@ -240,7 +240,7 @@ const bridge: ComfyTitleBarBridge = {
   onMenuClosed: (cb) => {
     const handler = (_event: IpcRendererEvent, data: unknown): void => {
       const { menu } = (data || {}) as { menu?: unknown }
-      if (menu === 'file') cb({ menu })
+      if (menu === 'menu') cb({ menu })
     }
     ipcRenderer.on('comfy-titlebar:menu-closed', handler)
     return () => ipcRenderer.removeListener('comfy-titlebar:menu-closed', handler)

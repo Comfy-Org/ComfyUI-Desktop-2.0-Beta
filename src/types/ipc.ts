@@ -709,7 +709,7 @@ export interface ElectronApi {
   closeCurrentPanel(): void
   /** Modal-unification (Track M-2.2) — push the first-use takeover's
    *  current step to main so it can (a) cache the value on the host
-   *  entry for `buildTitleMenuItems` to read synchronously and (b)
+   *  entry for `buildTitlePopupMenuItems` to read synchronously and (b)
    *  forward to the title-bar webContents (consumed in M-2.3). Fire-
    *  and-forget; FirstUseTakeover.vue calls this on every step change
    *  and on unmount with `'none'`. */

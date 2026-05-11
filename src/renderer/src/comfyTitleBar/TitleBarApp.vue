@@ -69,8 +69,8 @@ interface Bridge {
   onSourceCategoryChanged: (cb: (category: string | null) => void) => () => void
   onThemeChanged: (cb: (theme: { bg: string; text: string }) => void) => () => void
   onFullscreenChanged: (cb: (fullscreen: boolean) => void) => () => void
-  onMenuOpened: (cb: (info: { menu: 'file' }) => void) => () => void
-  onMenuClosed: (cb: (info: { menu: 'file' }) => void) => () => void
+  onMenuOpened: (cb: (info: { menu: 'menu' }) => void) => () => void
+  onMenuClosed: (cb: (info: { menu: 'menu' }) => void) => () => void
   /** Modal-unification (Track M-2.3) — first-use takeover step pushes
    *  from main. Drives the T&C-step lockdown that hides the waffle
    *  menu (the otherwise-always-live escape hatch) so the user has to
@@ -399,10 +399,10 @@ const fileBtnRef = useTemplateRef<HTMLButtonElement>('fileBtn')
  *  button to dismiss it. The OS dismisses the menu first, then the
  *  click event reaches our renderer button — without this guard the
  *  click handler would ask main to pop the menu again. The center
- *  install pill is no longer clickable, so the only menu kind we track
- *  here is `'file'`. */
+ *  install pill is no longer clickable, so the only popup kind we
+ *  track here is the waffle `'menu'`. */
 const MENU_REOPEN_GUARD_MS = 100
-const menuClosedAt: Record<'file', number> = { file: 0 }
+const menuClosedAt: Record<'menu', number> = { menu: 0 }
 
 /** Tracks whether the popup is currently visible. Set by main via
  *  `onMenuOpened` / `onMenuClosed` IPCs. The timestamp guard above
@@ -436,7 +436,7 @@ function handleFileMenu(): void {
   // that dismissed the popup also retargets the menu button, and
   // without this guard handleFileMenu would ask main to pop the
   // menu again.
-  if (Date.now() - menuClosedAt.file < MENU_REOPEN_GUARD_MS) return
+  if (Date.now() - menuClosedAt.menu < MENU_REOPEN_GUARD_MS) return
   bridge?.openFileMenu(anchorBelow(fileBtnRef.value))
 }
 let unsubPanel: (() => void) | undefined

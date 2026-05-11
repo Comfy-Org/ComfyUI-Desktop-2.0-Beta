@@ -2,10 +2,10 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <title>ComfyUI Desktop 2.0 — Title Menu</title>
+    <title>ComfyUI Desktop 2.0 — Title Popup</title>
     <!--
-      The title-menu popup runs in a transparent frameless child
-      BrowserWindow with no telemetry surfaces. CSP can stay narrow —
+      The title-bar dropdown popup runs in a transparent frameless child
+      WebContentsView with no telemetry surfaces. CSP can stay narrow —
       only the bundled JS, design-token CSS, and Inter font are needed.
     -->
     <meta
@@ -15,6 +15,6 @@
   </head>
   <body>
     <div id="app"></div>
-    <script type="module" src="/src/comfyTitleMenu/main.ts"></script>
+    <script type="module" src="/src/comfyTitlePopup/main.ts"></script>
   </body>
 </html>
