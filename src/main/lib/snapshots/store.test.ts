@@ -19,6 +19,10 @@ vi.mock('../pythonEnv', () => ({
   getActivePythonPath: vi.fn(() => null),
 }))
 
+vi.mock('../telemetry', () => ({
+  emit: vi.fn(),
+}))
+
 vi.mock('fs', async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>
   return {
@@ -29,17 +33,69 @@ vi.mock('fs', async (importOriginal) => {
       readFileSync: vi.fn(() => {
         throw new Error('not found')
       }),
+      promises: {
+        mkdir: vi.fn(async () => {}),
+        writeFile: vi.fn(async () => {}),
+        rename: vi.fn(async () => {}),
+        readdir: vi.fn(async () => []),
+        readFile: vi.fn(async () => { throw new Error('not found') }),
+        unlink: vi.fn(async () => {}),
+      },
     },
   }
 })
 
+import fs from 'fs'
+import path from 'path'
 import { readGitHead } from '../git'
 import { scanCustomNodes } from '../nodes'
-import { captureState } from './store'
+import { captureState, saveSnapshot, captureSnapshotIfChanged } from './store'
+import * as telemetry from '../telemetry'
 import type { InstallationRecord } from '../../installations'
+
+const mockedTelemetryEmit = vi.mocked(telemetry.emit)
 
 const mockedReadGitHead = vi.mocked(readGitHead)
 const mockedScanCustomNodes = vi.mocked(scanCustomNodes)
+
+/**
+ * Stateful in-memory `fs.promises` mock — `writeFile`/`rename` route into a
+ * Map keyed by absolute path; `readdir`/`readFile`/`unlink` read from the same
+ * Map. Lets us drive `captureSnapshotIfChanged`'s `loadSnapshot` /
+ * `listSnapshots` / `deduplicateRestartSnapshot` paths without spinning up
+ * real disk I/O. Reset in each `beforeEach` via `installFsMemory()`.
+ */
+function installFsMemory(): Map<string, string> {
+  const memory = new Map<string, string>()
+  vi.mocked(fs.promises.writeFile).mockImplementation(async (p, data) => {
+    memory.set(String(p), String(data))
+  })
+  vi.mocked(fs.promises.rename).mockImplementation(async (from, to) => {
+    const data = memory.get(String(from))
+    if (data === undefined) throw new Error(`rename: missing ${String(from)}`)
+    memory.set(String(to), data)
+    memory.delete(String(from))
+  })
+  vi.mocked(fs.promises.readdir).mockImplementation(async (dir) => {
+    const prefix = String(dir).replace(/[\\/]+$/, '') + path.sep
+    const files: string[] = []
+    for (const key of memory.keys()) {
+      if (key.startsWith(prefix) && !key.slice(prefix.length).includes(path.sep)) {
+        files.push(key.slice(prefix.length))
+      }
+    }
+    return files as unknown as Awaited<ReturnType<typeof fs.promises.readdir>>
+  })
+  vi.mocked(fs.promises.readFile).mockImplementation(async (p) => {
+    const data = memory.get(String(p))
+    if (data === undefined) throw new Error(`readFile: missing ${String(p)}`)
+    return data as unknown as Awaited<ReturnType<typeof fs.promises.readFile>>
+  })
+  vi.mocked(fs.promises.unlink).mockImplementation(async (p) => {
+    memory.delete(String(p))
+  })
+  return memory
+}
 
 describe('captureState commit-matching guard', () => {
   beforeEach(() => {
@@ -134,5 +190,149 @@ describe('captureState commit-matching guard', () => {
     expect(state.comfyui.commit).toBeNull()
     expect(state.comfyui.baseTag).toBeUndefined()
     expect(state.comfyui.commitsAhead).toBeUndefined()
+  })
+})
+
+describe('saveSnapshot telemetry', () => {
+  beforeEach(() => {
+    vi.resetAllMocks()
+    mockedScanCustomNodes.mockResolvedValue([
+      { id: 'a', type: 'cnr', dirName: 'a', enabled: true, version: '1.0.0' },
+      { id: 'b', type: 'cnr', dirName: 'b', enabled: true, version: '2.0.0' },
+    ])
+    mockedReadGitHead.mockReturnValue('abc1234')
+  })
+
+  it('emits desktop2.snapshot.created with installation_id, trigger, counts, and dedup flag', async () => {
+    const installation = {
+      id: 'install-42',
+      name: 'Test',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      installPath: '/test/install',
+      sourceId: 'test',
+    } as InstallationRecord
+
+    await saveSnapshot('/test/install', installation, 'manual', 'my label')
+
+    expect(mockedTelemetryEmit).toHaveBeenCalledTimes(1)
+    expect(mockedTelemetryEmit).toHaveBeenCalledWith('desktop2.snapshot.created', {
+      installation_id: 'install-42',
+      trigger: 'manual',
+      custom_nodes_count: 2,
+      // pip freeze is short-circuited by the python-path mock returning null
+      pip_packages_count: 0,
+      has_label: true,
+      // saveSnapshot never deduplicates a previous snapshot
+      deduplicated_previous: false,
+    })
+  })
+
+  it('reports has_label: false when no label is supplied', async () => {
+    const installation = {
+      id: 'install-7',
+      name: 'Test',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      installPath: '/test/install',
+      sourceId: 'test',
+    } as InstallationRecord
+
+    await saveSnapshot('/test/install', installation, 'pre-update')
+
+    expect(mockedTelemetryEmit).toHaveBeenCalledWith(
+      'desktop2.snapshot.created',
+      expect.objectContaining({ trigger: 'pre-update', has_label: false }),
+    )
+  })
+})
+
+describe('captureSnapshotIfChanged telemetry', () => {
+  beforeEach(() => {
+    vi.resetAllMocks()
+    mockedScanCustomNodes.mockResolvedValue([])
+    mockedReadGitHead.mockReturnValue('abc1234')
+  })
+
+  it('emits no telemetry when boot state matches the last snapshot (saved: false)', async () => {
+    const memory = installFsMemory()
+    // Pre-seed `lastSnapshot` with a state that matches what `captureState`
+    // will produce (manifest read fails → ref:'unknown', commit comes from
+    // mocked readGitHead, no nodes, no pip).
+    const matching = {
+      version: 1,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      trigger: 'boot' as const,
+      label: null,
+      comfyui: { ref: 'unknown', commit: 'abc1234', releaseTag: '', variant: '' },
+      customNodes: [],
+      pipPackages: {},
+      pythonVersion: undefined,
+      updateChannel: 'stable',
+    }
+    const lastFilename = 'last.json'
+    // loadSnapshot reads through `resolveSnapshotPath` which uses
+    // `path.resolve` — on Windows that prepends the drive letter, so the
+    // memory key has to be the resolved absolute path, not a path.join
+    // form, or the readFile mock won't find it.
+    memory.set(path.resolve('/test/install', '.launcher', 'snapshots', lastFilename), JSON.stringify(matching))
+
+    const installation = {
+      id: 'install-1',
+      name: 'Test',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      installPath: '/test/install',
+      sourceId: 'test',
+      lastSnapshot: lastFilename,
+    } as unknown as InstallationRecord
+
+    const result = await captureSnapshotIfChanged('/test/install', installation, 'boot')
+
+    expect(result.saved).toBe(false)
+    expect(mockedTelemetryEmit).not.toHaveBeenCalled()
+  })
+
+  it('emits deduplicated_previous: true when restart collapses the prior intermediate snapshot', async () => {
+    const memory = installFsMemory()
+    // Pre-seed an intermediate restart snapshot (no label, same comfyui +
+    // empty nodes) that should get collapsed by `deduplicateRestartSnapshot`
+    // when the new restart snapshot lands.
+    const intermediate = {
+      version: 1,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      trigger: 'restart' as const,
+      label: null,
+      comfyui: { ref: 'unknown', commit: 'abc1234', releaseTag: '', variant: '' },
+      customNodes: [],
+      pipPackages: {},
+      pythonVersion: undefined,
+      updateChannel: 'stable',
+    }
+    // Filename uses the same `YYYYMMDD_HHMMSS_mmm-<trigger>-<suffix>.json`
+    // shape `formatTimestamp` produces; an older lexicographic key ensures
+    // it sorts AFTER the freshly-written one (newest-first sort in
+    // `listSnapshots`).
+    const intermediateFilename = '20260101_120000_000-restart-aaaaaa.json'
+    memory.set(path.join('/test/install', '.launcher', 'snapshots', intermediateFilename), JSON.stringify(intermediate))
+
+    const installation = {
+      id: 'install-9',
+      name: 'Test',
+      createdAt: '2026-02-01T00:00:00.000Z',
+      installPath: '/test/install',
+      sourceId: 'test',
+    } as InstallationRecord
+
+    const result = await captureSnapshotIfChanged('/test/install', installation, 'restart')
+
+    expect(result.saved).toBe(true)
+    expect(result.deduplicated).toBe(intermediateFilename)
+    expect(mockedTelemetryEmit).toHaveBeenCalledTimes(1)
+    expect(mockedTelemetryEmit).toHaveBeenCalledWith('desktop2.snapshot.created', {
+      installation_id: 'install-9',
+      trigger: 'restart',
+      custom_nodes_count: 0,
+      pip_packages_count: 0,
+      has_label: false,
+      deduplicated_previous: true,
+    })
   })
 })

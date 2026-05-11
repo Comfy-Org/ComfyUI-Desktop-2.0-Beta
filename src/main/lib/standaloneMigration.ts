@@ -137,7 +137,7 @@ export async function restoreSnapshotIntoInstallation(
   try {
     const fileContent = await fs.promises.readFile(stagedFile, 'utf-8')
     const importEnvelope = validateExportEnvelope(JSON.parse(fileContent))
-    await importSnapshots(freshInst.installPath, importEnvelope)
+    await importSnapshots(freshInst.installPath, importEnvelope, entry.id)
     const targetSnapshot = importEnvelope.snapshots[0]!
 
     // Restore ComfyUI version
