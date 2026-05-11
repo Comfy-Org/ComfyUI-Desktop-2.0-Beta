@@ -3428,6 +3428,17 @@ const TOOLTIP_RENDER_ACK_TIMEOUT_MS = 80
 interface TitleTooltipConfig {
   text: string
   theme: { bg: string; text: string; border: string }
+  /** Round-trip token. Echoed by the renderer in `notifyRendered` so
+   *  main can discard render-acks for stale configs (e.g. when a
+   *  rapid pointer move queued a new set-config before the previous
+   *  one was painted). */
+  configToken: string
+}
+
+let _titleTooltipTokenSeq = 0
+function nextTitleTooltipToken(): string {
+  _titleTooltipTokenSeq = (_titleTooltipTokenSeq + 1) >>> 0
+  return `tt-${_titleTooltipTokenSeq}`
 }
 
 interface TitleTooltipPopupEntry {
@@ -3447,6 +3458,10 @@ interface TitleTooltipPopupEntry {
    *  awaiting render-ack). Promoted to `lastSyncedConfigJson` once the
    *  ack arrives. */
   pendingConfigJson: string | null
+  /** Token of the in-flight config (matches `pendingConfigJson`).
+   *  Only render-acks carrying this exact token cause the popup to
+   *  show; stale acks for previously-superseded configs are dropped. */
+  pendingConfigToken: string | null
   /** Timer that flips the popup visible if the renderer's render-ack
    *  takes too long. */
   pendingShowTimer: NodeJS.Timeout | null
@@ -3521,6 +3536,7 @@ function ensureTitleTooltipPopup(parent: BrowserWindow): TitleTooltipPopupEntry 
     pendingConfig: null,
     pendingAnchor: null,
     pendingConfigJson: null,
+    pendingConfigToken: null,
     pendingShowTimer: null,
     isOpen: false,
     lastSyncedConfigJson: null,
@@ -3652,17 +3668,19 @@ function openTitleTooltipPopup(opts: {
 
   entry.pendingAnchor = { centerX: opts.centerX, bottomY: opts.bottomY }
 
-  const config: TitleTooltipConfig = {
-    text: opts.text,
-    theme: resolveTooltipTheme(),
-  }
-  const configJson = JSON.stringify(config)
+  // Build the config WITHOUT the configToken first, so the JSON we
+  // compare against the last-synced config is text+theme only —
+  // tokens always differ between sends and would defeat the fast
+  // path's identity check.
+  const tooltipBody = { text: opts.text, theme: resolveTooltipTheme() }
+  const configBodyJson = JSON.stringify(tooltipBody)
 
-  // Fast path: same text + theme as the last synced config. Skip the
-  // IPC + render-ack roundtrip and just reposition + show. Reuses the
-  // last known view bounds (which already match the bubble size from
-  // the previous sync).
-  if (entry.lastSyncedConfigJson === configJson) {
+  // Fast path: same text + theme as the last *acked* config AND no
+  // unsynced config in flight (the renderer's DOM might still be
+  // mid-paint with a different config otherwise — showing now would
+  // flash the wrong text). Skip the IPC + render-ack roundtrip and
+  // reposition + show with the cached bubble size.
+  if (entry.lastSyncedConfigJson === configBodyJson && entry.pendingConfigJson === null) {
     const bounds = entry.popup.getBounds()
     positionTooltipPopup(entry, {
       width: Math.max(0, bounds.width - TOOLTIP_POPUP_SHADOW_GUTTER * 2),
@@ -3672,7 +3690,10 @@ function openTitleTooltipPopup(opts: {
     return
   }
 
-  entry.pendingConfigJson = configJson
+  const token = nextTitleTooltipToken()
+  const config: TitleTooltipConfig = { ...tooltipBody, configToken: token }
+  entry.pendingConfigJson = configBodyJson
+  entry.pendingConfigToken = token
   if (entry.rendererReady) {
     entry.popup.webContents.send('comfy-titletooltip:set-config', config)
   } else {
@@ -3706,25 +3727,34 @@ ipcMain.on('comfy-titletooltip:ready', (event) => {
   }
 })
 
-ipcMain.on('comfy-titletooltip:rendered', (event, payload: { width?: unknown; height?: unknown }) => {
-  const entry = titleTooltipPopupsByWebContents.get(event.sender.id)
-  if (!entry) return
-  const width = typeof payload?.width === 'number' && payload.width > 0 ? payload.width : 0
-  const height = typeof payload?.height === 'number' && payload.height > 0 ? payload.height : 0
-  if (entry.pendingAnchor) {
-    positionTooltipPopup(entry, { width, height })
-  }
-  // Promote the pending config to "synced" so the next open with the
-  // same text + theme can take the fast path.
-  if (entry.pendingConfigJson) {
-    entry.lastSyncedConfigJson = entry.pendingConfigJson
-    entry.pendingConfigJson = null
-  }
-  // If the timer fallback already showed the popup, no-op; otherwise
-  // show it now that the new content has painted at the correct size.
-  if (entry.pendingShowTimer === null) return
-  showTitleTooltipPopupNow(entry)
-})
+ipcMain.on(
+  'comfy-titletooltip:rendered',
+  (event, payload: { width?: unknown; height?: unknown; configToken?: unknown }) => {
+    const entry = titleTooltipPopupsByWebContents.get(event.sender.id)
+    if (!entry) return
+    const ackToken = typeof payload?.configToken === 'string' ? payload.configToken : ''
+    // Drop stale acks. A new openTitleTooltipPopup may have superseded
+    // this config while the renderer was painting it; showing now would
+    // flash the previous text at the new anchor.
+    if (!ackToken || ackToken !== entry.pendingConfigToken) return
+    const width = typeof payload?.width === 'number' && payload.width > 0 ? payload.width : 0
+    const height = typeof payload?.height === 'number' && payload.height > 0 ? payload.height : 0
+    if (entry.pendingAnchor) {
+      positionTooltipPopup(entry, { width, height })
+    }
+    // Promote the pending config to "synced" so the next open with the
+    // same text + theme can take the fast path.
+    if (entry.pendingConfigJson) {
+      entry.lastSyncedConfigJson = entry.pendingConfigJson
+      entry.pendingConfigJson = null
+      entry.pendingConfigToken = null
+    }
+    // If the timer fallback already showed the popup, no-op; otherwise
+    // show it now that the new content has painted at the correct size.
+    if (entry.pendingShowTimer === null) return
+    showTitleTooltipPopupNow(entry)
+  },
+)
 
 /** Title bar asks main to show a hover tooltip. Forwarded to the
  *  cached tooltip popup for the host window. Position is in title-bar-

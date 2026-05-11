@@ -449,16 +449,34 @@ function anchorBelow(el: HTMLElement | null | undefined): MenuAnchor {
  * ancestor and fires `showTip` / `hideTip`. New tooltipped elements
  * just need the data attribute — no per-element wiring.
  */
+/** Initial show delay (ms). Matches the cadence of native HTML
+ *  tooltips on macOS / Win so a quick fly-by across the title bar
+ *  doesn't flash bubbles. */
 const TOOLTIP_SHOW_DELAY_MS = 400
+/** Hover-handoff window (ms). If a tooltip was visible up to this
+ *  long ago, the next hover over a different tooltipped element shows
+ *  immediately — same convention as native macOS / browser tooltips,
+ *  where the first hover earns the wait but subsequent ones in a
+ *  scanning gesture feel snappy. */
+const TOOLTIP_HANDOFF_WINDOW_MS = 1500
 let tooltipShowTimer: number | null = null
+/** Text of the tooltip the renderer most recently asked main to show
+ *  (or queue). `null` while nothing is pending or visible. */
 let activeTooltipText: string | null = null
+/** True between `bridge.showTooltip()` and the corresponding
+ *  `bridge.hideTooltip()` — i.e., a tooltip is currently visible. The
+ *  pending-but-not-yet-shown state has this `false`. */
+let isTooltipVisible = false
+/** `performance.now()` timestamp of the most recent
+ *  `bridge.hideTooltip()`. Drives the hover-handoff fast path. */
+let lastHiddenAt = -Infinity
 
 function findTooltipTarget(target: EventTarget | null): {
   text: string
   rect: DOMRect
 } | null {
-  if (!(target instanceof HTMLElement)) return null
-  const el = target.closest('[data-title-tooltip]') as HTMLElement | null
+  if (!(target instanceof Element)) return null
+  const el = target.closest('[data-title-tooltip]') as HTMLElement | SVGElement | null
   if (!el) return null
   const text = el.getAttribute('data-title-tooltip')
   if (!text) return null
@@ -474,10 +492,22 @@ function cancelPendingTooltipShow(): void {
 
 function hideTip(): void {
   cancelPendingTooltipShow()
-  if (activeTooltipText !== null) {
-    activeTooltipText = null
-    bridge?.hideTooltip()
+  if (activeTooltipText === null) return
+  activeTooltipText = null
+  if (isTooltipVisible) {
+    isTooltipVisible = false
+    lastHiddenAt = performance.now()
   }
+  bridge?.hideTooltip()
+}
+
+function fireShowTooltip(text: string, rect: DOMRect): void {
+  bridge?.showTooltip({
+    text,
+    centerX: Math.round(rect.left + rect.width / 2),
+    bottomY: Math.round(rect.bottom),
+  })
+  isTooltipVisible = true
 }
 
 function handleTooltipPointer(event: PointerEvent): void {
@@ -487,26 +517,29 @@ function handleTooltipPointer(event: PointerEvent): void {
     hideTip()
     return
   }
-  if (found.text === activeTooltipText && tooltipShowTimer === null) {
-    // Same tooltip already showing — leave it alone.
+  if (found.text === activeTooltipText) {
+    // Same trigger as before — no work needed. (Either we're still
+    // waiting on the show timer, or the tooltip is already visible;
+    // either way we don't reset state mid-hover.)
     return
   }
-  if (found.text === activeTooltipText) return
-  // Different (or first) target: cancel any pending show, drop the
-  // currently-shown bubble, and queue the new one. The delay matches
-  // the native macOS tooltip cadence so hovering quickly across buttons
-  // doesn't flash bubbles.
+  // Different (or first) tooltipped target. Hide any in-flight tooltip
+  // and queue the new one. If we were just showing a tooltip moments
+  // ago (hover-handoff), skip the show delay so scanning across the
+  // title bar feels instant — matches native macOS behaviour.
+  const handoff =
+    isTooltipVisible || performance.now() - lastHiddenAt < TOOLTIP_HANDOFF_WINDOW_MS
   hideTip()
   const captured = found
   activeTooltipText = captured.text
+  if (handoff) {
+    fireShowTooltip(captured.text, captured.rect)
+    return
+  }
   tooltipShowTimer = window.setTimeout(() => {
     tooltipShowTimer = null
     if (activeTooltipText !== captured.text) return
-    bridge?.showTooltip({
-      text: captured.text,
-      centerX: Math.round(captured.rect.left + captured.rect.width / 2),
-      bottomY: Math.round(captured.rect.bottom),
-    })
+    fireShowTooltip(captured.text, captured.rect)
   }, TOOLTIP_SHOW_DELAY_MS)
 }
 

@@ -19,6 +19,13 @@ import type { IpcRendererEvent } from 'electron'
 export interface TitleTooltipConfig {
   text: string
   theme: { bg: string; text: string; border: string }
+  /** Round-trip token. Echoed verbatim by the renderer in
+   *  `notifyRendered` so main can discard render-acks that don't
+   *  match the most recently sent config (e.g. a fast pointer move
+   *  fired a new set-config while the previous one was still being
+   *  painted — the stale ack would otherwise show the popup with
+   *  outdated text at the new anchor). */
+  configToken: string
 }
 
 export interface ComfyTitleTooltipBridge {
@@ -28,8 +35,10 @@ export interface ComfyTitleTooltipBridge {
   /** Signal that the renderer has applied the latest config and the
    *  new DOM has painted. Main waits for this before flipping the
    *  popup visible so the user never sees a frame of the previous
-   *  tooltip's text on a new show. */
-  notifyRendered(payload: { width: number; height: number }): void
+   *  tooltip's text on a new show. `configToken` echoes the token
+   *  from the corresponding `set-config` push so main can discard
+   *  stale acks. */
+  notifyRendered(payload: { width: number; height: number; configToken: string }): void
   /** Subscribe to config pushes (one fires per show). */
   onConfig(cb: (config: TitleTooltipConfig) => void): () => void
 }
@@ -38,6 +47,7 @@ function isTooltipConfig(value: unknown): value is TitleTooltipConfig {
   if (!value || typeof value !== 'object') return false
   const v = value as Partial<TitleTooltipConfig>
   if (typeof v.text !== 'string') return false
+  if (typeof v.configToken !== 'string') return false
   if (!v.theme || typeof v.theme !== 'object') return false
   if (typeof v.theme.bg !== 'string') return false
   if (typeof v.theme.text !== 'string') return false
