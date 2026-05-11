@@ -377,15 +377,21 @@ const comfyWindows = new Map<number, ComfyWindowEntry>()
 const installationIdToWindowKey = new Map<string, number>()
 
 /**
- * Most recently focused install-backed host window's key, or `null`
- * when none has been focused yet (or the last one closed). Updated by
- * a `'focus'` listener on every host window and consulted by the
- * platform re-launch hooks (`activate` / `second-instance`) so the
- * dock-icon click brings the install the user was actually working in
- * forward, instead of an arbitrary insertion-order pick when several
- * installs are open.
+ * Most recently focused installation's id, or `null` when no install
+ * has been focused yet. Tracked by install id (not by window key) so
+ * that detach + re-launch into a different host window still resolves
+ * to the same install on the next dock-icon click.
+ *
+ * Stale ids self-invalidate: `getEntryByInstallationId(id)` returns
+ * `undefined` once the install no longer backs any window (close,
+ * detach without re-launch, uninstall) and `findPreferredInstallHostWindow`
+ * falls through to the insertion-order pick — no explicit cleanup hook
+ * required when windows close or installs detach.
+ *
+ * Updated by a `'focus'` listener on every host window and consulted
+ * by the platform re-launch hooks (`activate` / `second-instance`).
  */
-let lastFocusedInstallWindowKey: number | null = null
+let lastFocusedInstallationId: string | null = null
 
 /**
  * Window-mode unification (Stage W-4) — pending in-place attach
@@ -1294,15 +1300,16 @@ function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowResult {
   comfyWindow.on('resize', () => saveWindowBounds(opts.boundsKey, comfyWindow))
   comfyWindow.on('move', () => saveWindowBounds(opts.boundsKey, comfyWindow))
 
-  // Track the most recently focused install-backed host so the
-  // dock-icon / second-instance re-launch hooks can pick it over an
-  // arbitrary insertion-order install when several are open. Chooser
-  // hosts are excluded — they have their own selection path via
-  // findPreferredChooserHostWindow().
+  // Track the most recently focused install id so the dock-icon /
+  // second-instance re-launch hooks can pick that install over an
+  // arbitrary insertion-order pick when several are open. Tracking by
+  // id (not by windowKey) survives a detach + re-launch into a fresh
+  // host window. Chooser hosts are excluded — they have their own
+  // selection path via findPreferredChooserHostWindow().
   comfyWindow.on('focus', () => {
     const entry = comfyWindows.get(windowKey)
-    if (entry && entry.installationId !== null) {
-      lastFocusedInstallWindowKey = windowKey
+    if (entry?.installationId) {
+      lastFocusedInstallationId = entry.installationId
     }
   })
 
@@ -1398,7 +1405,6 @@ function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowResult {
 
   comfyWindow.on('closed', () => {
     ipcMain.off('comfy-window:title-bar-ready', onTitleBarReadyHandler)
-    if (lastFocusedInstallWindowKey === windowKey) lastFocusedInstallWindowKey = null
     // Window-mode unification (Stage W-1) — unregister via the
     // primary windowKey AND the secondary install-id index.
     const closedEntry = comfyWindows.get(windowKey)
@@ -1752,6 +1758,14 @@ function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts): boolea
   entry.titleBarText = installation.name
   entry.sourceCategory = sourceMap[installation.sourceId]?.category ?? null
   installationIdToWindowKey.set(installationId, entry.windowKey)
+
+  // Seed the MRU tracker if this in-place attach happens on the
+  // already-focused host: no fresh OS `'focus'` event would fire to
+  // catch it otherwise, leaving the tracker pointing at a stale (or
+  // null) install on the next dock-icon click.
+  if (comfyWindow.isFocused()) {
+    lastFocusedInstallationId = installationId
+  }
 
   // OS-level window title is rebuilt whenever the page title or the
   // install name changes. Closures over the install lifetime — reset
@@ -2123,20 +2137,6 @@ function _detachInstallImpl(entry: ComfyWindowEntry): void {
   entry.layoutViews()
 }
 
-/**
- * Open an install-less host window (Phase 3 step 2c).
- *
- * Same window shape as a comfy window — title bar pills + a body area —
- * but with no installation backing the entry. The Comfy pill resolves to
- * the chooser body via `computeBodyMode()`; the user picks an install
- * from there.
- *
- * Lean version of the install-backed `onLaunch()` flow: no comfy URL load,
- * no theme observer, no download wiring, no failure retry — those are all
- * comfy-specific and would do nothing useful in install-less mode. The
- * comfyView still exists (so `layoutViews` doesn't have to special-case
- * its absence) but is sized to zero and never made visible.
- */
 /** Find the first live host entry matching `pred`, preferring
  *  non-minimised over minimised. Within each visibility bucket, returns
  *  insertion order. Returns `null` when nothing matches. */
@@ -2154,7 +2154,7 @@ function findPreferredHostByVisibility(
 
 /** Find a chooser (install-less) host window to focus, preferring a
  *  visible one over a minimised one. Used by the tray entry, the
- *  startup picker, and the chooser-first re-launch fallback. Step 5's
+ *  startup picker, and the chooser-first re-launch fallback. The
  *  "File → New Window" entry-point still creates a fresh chooser
  *  regardless of what this returns. */
 function findPreferredChooserHostWindow(): BrowserWindow | null {
@@ -2182,26 +2182,19 @@ function openOrFocusChooserHostWindow(): BrowserWindow {
  *    4. Any other minimised install (insertion order).
  *  Returns `null` when no install-backed host is open. */
 function findPreferredInstallHostWindow(): BrowserWindow | null {
-  const isInstall = (e: ComfyWindowEntry): boolean => e.installationId !== null
-  const lastFocused =
-    lastFocusedInstallWindowKey !== null
-      ? comfyWindows.get(lastFocusedInstallWindowKey)
+  const mruEntry =
+    lastFocusedInstallationId !== null
+      ? getEntryByInstallationId(lastFocusedInstallationId)
       : undefined
-  const lastFocusedAlive =
-    lastFocused && isInstall(lastFocused) && !lastFocused.window.isDestroyed()
-      ? lastFocused
-      : null
-  // Visible bucket — MRU first, then any other visible install.
-  if (lastFocusedAlive && !lastFocusedAlive.window.isMinimized()) {
-    return lastFocusedAlive.window
-  }
-  for (const [, entry] of comfyWindows) {
-    if (entry.window.isDestroyed() || !isInstall(entry)) continue
-    if (!entry.window.isMinimized()) return entry.window
-  }
-  // Minimised bucket — MRU first, then any other minimised install.
-  if (lastFocusedAlive) return lastFocusedAlive.window
-  const fallback = findPreferredHostByVisibility(isInstall)
+  const mruAlive = mruEntry && !mruEntry.window.isDestroyed() ? mruEntry : null
+  // Helper returns the first visible install (insertion order) or, if
+  // none are visible, the first minimised install. Combined with the
+  // MRU short-circuits below, this delivers the four-tier priority
+  // (visible-MRU → any-visible → minimised-MRU → any-minimised).
+  const fallback = findPreferredHostByVisibility((e) => e.installationId !== null)
+  if (mruAlive && !mruAlive.window.isMinimized()) return mruAlive.window
+  if (fallback && !fallback.window.isMinimized()) return fallback.window
+  if (mruAlive) return mruAlive.window
   return fallback?.window ?? null
 }
 
@@ -2287,6 +2280,15 @@ function applyChooserHostThemeToAll(): void {
  */
 const CHOOSER_HOST_BOUNDS_KEY = 'chooser'
 
+/** Open a fresh install-less host window. Same shape as an install-
+ *  backed comfy window — title bar pills + body area — but with no
+ *  installation backing the entry. The Comfy pill resolves to the
+ *  chooser body via `computeBodyMode()`; the user picks an install
+ *  from there. Skips the install-backed extras (comfy URL load, theme
+ *  observer, download wiring, failure retry) since none of them apply.
+ *  The comfyView still exists so `layoutViews` doesn't have to
+ *  special-case its absence, but is sized to zero and never made
+ *  visible. */
 function openChooserHostWindow(): BrowserWindow {
   // Window-mode unification (Stage W-2) — install-less wrapper.
   // The shared `createHostWindow()` builds the BrowserWindow + 2
