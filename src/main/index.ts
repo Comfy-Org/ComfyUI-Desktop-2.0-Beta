@@ -2537,22 +2537,35 @@ function _broadcastAppUpdateStateToTitleBars(state: updater.AppUpdateState): voi
 ipcMain.on('comfy-window:click-app-update-pill', (event) => {
   const found = findEntryByTitleBarSender(event.sender)
   if (!found) return
-  const { entry } = found
-  const panelView = entry.panelView
-  if (!panelView || panelView.webContents.isDestroyed()) return
+  const { id, entry } = found
+  if (entry.window.isDestroyed()) return
   const state = updater.getCurrentUpdateState()
-  if (state.kind === 'ready') {
-    panelView.webContents.send('panel-trigger-overlay', {
-      kind: 'app-update-restart-prompt',
-      version: state.version,
-    })
-    return
+  if (state.kind !== 'ready' && state.kind !== 'available') return
+  // In Comfy instance windows the panelView is constructed lazily on the
+  // first non-comfy switch, so the pill click would hit a null panelView
+  // when the user is still on the ComfyUI body. Mirror the feedback /
+  // install-update-pill pattern: ensure the panel exists for the current
+  // body mode and defer the send until did-finish-load if still loading.
+  const panelView = entry.panelView ?? ensurePanelView(id, entry, computeBodyMode(entry))
+  if (panelView.webContents.isDestroyed()) return
+  const send = (): void => {
+    if (panelView.webContents.isDestroyed()) return
+    if (state.kind === 'ready') {
+      panelView.webContents.send('panel-trigger-overlay', {
+        kind: 'app-update-restart-prompt',
+        version: state.version,
+      })
+    } else {
+      panelView.webContents.send('panel-trigger-overlay', {
+        kind: 'app-update-download-prompt',
+        version: state.version,
+      })
+    }
   }
-  if (state.kind === 'available') {
-    panelView.webContents.send('panel-trigger-overlay', {
-      kind: 'app-update-download-prompt',
-      version: state.version,
-    })
+  if (panelView.webContents.isLoadingMainFrame()) {
+    panelView.webContents.once('did-finish-load', send)
+  } else {
+    send()
   }
 })
 
