@@ -37,8 +37,10 @@ import {
   initPostHog,
   isInitialized as isPostHogInitialized,
   isPostHogConfigured,
+  registerPostHog,
   setPostHogConsent,
 } from './posthogProvider'
+import { scrubAll } from '../../../shared/piiScrub'
 
 function serializeUnknownError(error: unknown): { message: string; stack?: string } {
   if (error instanceof Error) {
@@ -133,18 +135,40 @@ export type RendererRole = 'title-bar' | 'title-menu' | 'panel'
 
 let rendererRole: RendererRole = 'panel'
 
+/**
+ * Run every string-valued property through `scrubAll` before the
+ * payload reaches Datadog / PostHog. The discipline of bucketing user
+ * input (file paths, prompts, model names) into enums / IDs / numbers
+ * happens at the call sites; this pass is the safety net that catches
+ * accidental string leaks (error messages, IPC payloads forwarded as-is,
+ * etc.). Non-string values pass through untouched.
+ */
+function scrubTelemetryContext(context: TelemetryContext): TelemetryContext {
+  let mutated: TelemetryContext | null = null
+  for (const key of Object.keys(context)) {
+    const value = context[key]
+    if (typeof value !== 'string') continue
+    const cleaned = scrubAll(value)
+    if (cleaned === value) continue
+    if (!mutated) mutated = { ...context }
+    mutated[key] = cleaned
+  }
+  return mutated ?? context
+}
+
 function trackTelemetryAction(
   actionName: string,
   context: TelemetryContext,
   options: { skipPostHog?: boolean } = {},
 ): void {
+  const scrubbed = scrubTelemetryContext(context)
   if (isDatadogInitialized) {
-    try { datadogRum.addAction(actionName, context) } catch {}
+    try { datadogRum.addAction(actionName, scrubbed) } catch {}
   }
   // `mainAlreadyCaptured` events come from the main-process PostHog Node
   // SDK and would be duplicates if we recaptured them in the browser SDK.
   if (!options.skipPostHog && isPostHogInitialized()) {
-    capturePostHog(actionName, context)
+    capturePostHog(actionName, scrubbed)
   }
 }
 
@@ -154,6 +178,67 @@ function handleTelemetryActionBridgeEvent(event: Event): void {
   if (typeof detail.actionName !== 'string' || detail.actionName.length === 0) return
   const context = detail.context && typeof detail.context === 'object' ? detail.context : {}
   trackTelemetryAction(detail.actionName, context)
+}
+
+/**
+ * Derive the release channel from the semver-ish app version string.
+ * Stable releases have no pre-release suffix; pre-release builds carry
+ * `-beta` / `-canary` / `-alpha` markers. We keep the bucket coarse so
+ * a future `-rc` / `-dev` suffix that we haven't accounted for falls
+ * into `unknown` rather than silently being miscategorised.
+ */
+function deriveAppChannel(appVersion: string): string {
+  if (!appVersion) return 'unknown'
+  const v = appVersion.toLowerCase()
+  if (v.includes('-beta')) return 'beta'
+  if (v.includes('-canary')) return 'canary'
+  if (v.includes('-alpha')) return 'alpha'
+  return 'stable'
+}
+
+/**
+ * Tag every Datadog RUM Action and PostHog event with cohort context
+ * (release channel, locale, theme, install summary, consent state, etc.)
+ * so dashboards can slice by user segment without a per-event property
+ * proliferation. Reads each setting independently so a single failing
+ * IPC doesn't drop the rest of the cohort tags — telemetry must never
+ * break boot, so every read defaults to `'unknown'` / `null` on error.
+ */
+async function registerCohortContext(opts: {
+  appVersion: string
+  telemetryEnabled: boolean
+}): Promise<void> {
+  const appChannel = deriveAppChannel(opts.appVersion)
+  const locale = await window.api.getLocale().catch(() => 'unknown')
+  const theme = await window.api.getSetting('theme')
+    .then((v) => (typeof v === 'string' && v ? v : 'unknown'))
+    .catch(() => 'unknown')
+  const firstUseCompleted = await window.api.getSetting('firstUseCompleted')
+    .then((v) => (typeof v === 'boolean' ? v : null))
+    .catch(() => null)
+  const installSummary = await window.api.getInstallationsSummary().catch(() => null)
+
+  const cohort: Record<string, string | number | boolean | null> = {
+    app_channel: appChannel,
+    locale,
+    theme,
+    telemetry_enabled: opts.telemetryEnabled,
+    first_use_completed: firstUseCompleted,
+    installation_count: installSummary?.count ?? null,
+    has_cloud_install: installSummary?.hasCloud ?? null,
+    has_legacy_install: installSummary?.hasLegacyDesktop ?? null,
+  }
+
+  if (isDatadogInitialized) {
+    try {
+      for (const [key, value] of Object.entries(cohort)) {
+        datadogRum.setGlobalContextProperty(key, value)
+      }
+    } catch {}
+  }
+  if (isPostHogInitialized()) {
+    registerPostHog(cohort)
+  }
 }
 
 async function initializeProviders(): Promise<void> {
@@ -198,12 +283,11 @@ async function initializeProviders(): Promise<void> {
   }
 
   if (isDatadogInitialized || isPostHogInitialized()) {
-    trackTelemetryAction('desktop2.session.started', {
-      app_env: datadogEnv,
-      app_version: appVersion,
-      is_packaged: !import.meta.env.DEV,
-      telemetry_effective_enabled: consent,
-    })
+    // `desktop2.session.started` is owned by main (`identify()` in
+    // `src/main/lib/telemetry.ts`) because it has to ride the deferred-
+    // identify pattern that binds `distinctId` first. Firing it again
+    // here would double-count every session.
+    void registerCohortContext({ appVersion, telemetryEnabled: consent })
     window.api.getDeviceId().then((id) => {
       if (isDatadogInitialized) {
         try { datadogRum.setUser({ id }) } catch {}

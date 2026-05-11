@@ -61,6 +61,20 @@ export function registerInstallationHandlers(): void {
     return uniqueName(baseName)
   })
 
+  // Cohort summary for telemetry global context. Reads from the same
+  // `installations.list()` source as `get-installations`; values are
+  // coarse counters / booleans only (no IDs, paths, or names) so the
+  // payload is safe to register as PostHog / Datadog cohort properties.
+  ipcMain.handle('get-installations-summary', async () => {
+    const all = await installations.list()
+    const visible = all.filter((i) => i.status !== 'installing')
+    return {
+      count: visible.length,
+      hasCloud: visible.some((i) => i.sourceId === 'cloud'),
+      hasLegacyDesktop: visible.some((i) => i.sourceId === 'desktop'),
+    }
+  })
+
   ipcMain.handle('add-installation', async (_event, data: Record<string, unknown>) => {
     data.name = await uniqueName((data.name as string) || 'ComfyUI')
     if (data.installPath) {

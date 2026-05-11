@@ -61,6 +61,7 @@ export function buildElectronApi(): ElectronApi {
 
     // Installations
     getInstallations: () => ipcRenderer.invoke('get-installations'),
+    getInstallationsSummary: () => ipcRenderer.invoke('get-installations-summary'),
     addInstallation: (data) => ipcRenderer.invoke('add-installation', data),
     reorderInstallations: (orderedIds) =>
       ipcRenderer.invoke('reorder-installations', orderedIds),

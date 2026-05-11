@@ -705,6 +705,11 @@ export interface ElectronApi {
 
   // Installations
   getInstallations(): Promise<Installation[]>
+  /** Coarse cohort summary of persisted installs for telemetry global
+   *  context. Counters / booleans only — no IDs, paths, or names — so
+   *  the payload is safe to register as PostHog / Datadog cohort
+   *  properties on every event. */
+  getInstallationsSummary(): Promise<{ count: number; hasCloud: boolean; hasLegacyDesktop: boolean }>
   addInstallation(data: Record<string, unknown>): Promise<AddResult>
   reorderInstallations(orderedIds: string[]): Promise<void>
   probeInstallation(dirPath: string): Promise<ProbeResult[]>

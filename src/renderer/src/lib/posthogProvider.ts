@@ -92,6 +92,21 @@ export function identifyPostHog(id: string, properties: Record<string, unknown> 
   }
 }
 
+/**
+ * Register persistent super-properties that PostHog will attach to every
+ * subsequent event from this browser session. Used for cohort context
+ * (locale, theme, install summary) that is resolved post-init so we
+ * can't pass it through `initPostHog`'s `loaded` callback.
+ */
+export function registerPostHog(properties: Record<string, unknown>): void {
+  if (!client) return
+  try {
+    client.register(properties)
+  } catch {
+    // ignore
+  }
+}
+
 export function capturePostHog(event: string, context: TelemetryContext = {}): void {
   if (!client) return
   try {

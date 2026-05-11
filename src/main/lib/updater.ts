@@ -3,6 +3,7 @@ import todesktop from '@todesktop/runtime'
 import * as settings from '../settings'
 import { clearQuitReason, setQuitReason } from './quit-state'
 import { _broadcastToRenderer } from './ipc/shared'
+import { emit as emitTelemetry, bucketError } from './telemetry'
 
 /**
  * Title-bar status pills consume the current app-update state via
@@ -142,6 +143,10 @@ function bindUpdaterEvents(): void {
     const version = versionFromPayload(info)
     if (!version) return
     const autoInstall = isAutoInstallEnabled()
+    emitTelemetry('desktop2.app_update.available', {
+      version,
+      auto_update_setting: autoInstall ? 'on' : 'off',
+    })
     if (autoInstall) {
       // Auto-install ON suppresses the 'available' pill entirely.
       // Main programmatically kicks off the download in the
@@ -150,6 +155,7 @@ function bindUpdaterEvents(): void {
       // action required, and the install is silent on next quit.
       if (_autoDownloadTriggeredFor !== version) {
         _autoDownloadTriggeredFor = version
+        emitTelemetry('desktop2.app_update.download_started', { version, initiator: 'auto' })
         void runCheck('auto-download').catch(() => {})
       }
       return
@@ -161,6 +167,7 @@ function bindUpdaterEvents(): void {
     const version = versionFromPayload(event)
     if (!version) return
     _autoDownloadTriggeredFor = null
+    emitTelemetry('desktop2.app_update.download_complete', { version })
     _setUpdateState({ kind: 'ready', version, autoUpdate: isAutoInstallEnabled() })
     if (_userInitiatedDownload) {
       // The user opted in to download via the auto-off available pill
@@ -174,6 +181,14 @@ function bindUpdaterEvents(): void {
 
   updater.on('error', (...args: unknown[]) => {
     const wasUserInitiated = _userInitiatedDownload
+    const stage: 'download' | 'check' = _appUpdateState.kind === 'downloading' || _autoDownloadTriggeredFor
+      ? 'download'
+      : 'check'
+    emitTelemetry('desktop2.app_update.error', {
+      stage,
+      error_bucket: bucketError(updaterErrorMessage(args)),
+      user_initiated: wasUserInitiated,
+    })
     clearQuitReason()
     _autoDownloadTriggeredFor = null
     _userInitiatedDownload = false
@@ -231,6 +246,7 @@ function bindUpdaterEvents(): void {
 async function checkForUpdate(source: string): Promise<{ available: boolean; version?: string; error?: string }> {
   const updater = getAutoUpdater()
   if (!updater) {
+    emitTelemetry('desktop2.app_update.checked', { trigger: source, result: 'updater_unavailable' })
     return { available: false, error: UPDATER_UNAVAILABLE_MESSAGE }
   }
   bindUpdaterEvents()
@@ -239,6 +255,10 @@ async function checkForUpdate(source: string): Promise<{ available: boolean; ver
     disableUpdateReadyAction: true,
   })
   const version = versionFromPayload(result)
+  emitTelemetry('desktop2.app_update.checked', {
+    trigger: source,
+    result: version ? 'available' : 'up_to_date',
+  })
   return version ? { available: true, version } : { available: false }
 }
 
@@ -302,6 +322,10 @@ export function onUpdateStateChanged(cb: (state: AppUpdateState) => void): () =>
  */
 export async function downloadUpdate(): Promise<void> {
   _userInitiatedDownload = true
+  emitTelemetry('desktop2.app_update.download_started', {
+    version: _appUpdateState.version,
+    initiator: 'user',
+  })
   try {
     const result = await runCheck('download-button')
     if (!result.available && _appUpdateState.kind !== 'ready') {
@@ -331,6 +355,10 @@ export function installUpdate(): void {
     _broadcastToRenderer('app-update:user-action-failed', { message: UPDATER_UNAVAILABLE_MESSAGE })
     return
   }
+  emitTelemetry('desktop2.app_update.install_triggered', {
+    version: _appUpdateState.version,
+    auto_update_setting: isAutoInstallEnabled() ? 'on' : 'off',
+  })
   try {
     setQuitReason('update-install')
     updater.restartAndInstall({ isSilent: true })

@@ -42,6 +42,7 @@ import TakeoverHeader from '../components/TakeoverHeader.vue'
 import ModalShell from '../components/ModalShell.vue'
 import InlineRichText from '../components/InlineRichText.vue'
 import { PRIVACY_POLICY } from '../lib/privacyPolicy'
+import { emitTelemetryAction } from '../lib/telemetry'
 
 type Step = 'consent' | 'mirrors' | 'pick' | 'localBranch'
 
@@ -99,6 +100,10 @@ const policy = PRIVACY_POLICY
  *  current persisted state, not as a freshly-defaulted opt-in). */
 async function acceptConsent(): Promise<void> {
   await window.api.setSetting('telemetryEnabled', telemetryEnabled.value)
+  emitTelemetryAction('desktop2.first_use.consent_accepted', {
+    telemetry_enabled: telemetryEnabled.value,
+    locale: locale.value,
+  })
   // skipPick suppresses the pick step entirely. China-mirror sub-step
   // still runs first when the locale calls for it, then the takeover
   // emits `complete-skip` (returning user — no implicit cloud launch)
@@ -121,6 +126,7 @@ async function chooseMirrors(useMirrors: boolean): Promise<void> {
     window.api.setSetting('useChineseMirrors', useMirrors),
     window.api.setSetting('chineseMirrorsPrompted', true),
   ])
+  emitTelemetryAction('desktop2.first_use.mirrors_chosen', { use_mirrors: useMirrors })
   if (skipPick.value) {
     emit('complete-skip')
   } else {
@@ -129,6 +135,10 @@ async function chooseMirrors(useMirrors: boolean): Promise<void> {
 }
 
 function pickCloud(): void {
+  emitTelemetryAction('desktop2.first_use.fork_chosen', {
+    choice: 'cloud',
+    has_legacy_desktop: hasLegacyDesktop.value,
+  })
   emit('complete-cloud')
 }
 
@@ -138,6 +148,10 @@ function pickCloud(): void {
  *  Detection (`hasLegacyDesktop`) is computed by main and plumbed in
  *  via `open()`. */
 function pickLocal(): void {
+  emitTelemetryAction('desktop2.first_use.fork_chosen', {
+    choice: 'local',
+    has_legacy_desktop: hasLegacyDesktop.value,
+  })
   if (hasLegacyDesktop.value) {
     step.value = 'localBranch'
   } else {
@@ -146,10 +160,12 @@ function pickLocal(): void {
 }
 
 function chooseMigrate(): void {
+  emitTelemetryAction('desktop2.first_use.local_branch_chosen', { choice: 'migrate' })
   emit('chain-migrate')
 }
 
 function chooseInstallNew(): void {
+  emitTelemetryAction('desktop2.first_use.local_branch_chosen', { choice: 'install_new' })
   emit('chain-local')
 }
 
@@ -201,6 +217,11 @@ watch(
   (current) => {
     const mode = current === 'consent' ? 'consent-lockdown' : 'post-consent'
     window.api.setFirstUseMode(mode)
+    emitTelemetryAction('desktop2.first_use.step_viewed', {
+      step: current,
+      skip_pick: skipPick.value,
+      has_legacy_desktop: hasLegacyDesktop.value,
+    })
   },
   { immediate: true },
 )
