@@ -63,10 +63,18 @@ interface Bridge {
    *  popup. macOS-only path: native HTML `title` tooltips don't appear
    *  reliably for sibling chrome WebContentsViews on macOS, so the
    *  renderer routes hover through main → cached `WebContentsView`
-   *  popup. `centerX` / `bottomY` are title-bar-local pixels (the
-   *  title-bar view sits at parent-window content (0,0) so they map
-   *  directly to window coords on the main side). */
-  showTooltip: (payload: { text: string; centerX: number; bottomY: number }) => void
+   *  popup. `leftX` / `rightX` / `bottomY` are title-bar-local pixels
+   *  (the title-bar view sits at parent-window content (0,0) so they
+   *  map directly to window coords on the main side). Main prefers to
+   *  anchor the bubble's left edge to `leftX` so the bubble extends
+   *  rightward from the trigger; it falls back to right-aligning
+   *  `rightX` when growing rightward would overflow. */
+  showTooltip: (payload: {
+    text: string
+    leftX: number
+    rightX: number
+    bottomY: number
+  }) => void
   /** Issue #514 — hide the title-bar hover tooltip popup. */
   hideTooltip: () => void
   onPanelChanged: (cb: (panel: ComfyPanelKey) => void) => () => void
@@ -524,7 +532,8 @@ function hideTip(): void {
 function fireShowTooltip(text: string, rect: DOMRect): void {
   bridge?.showTooltip({
     text,
-    centerX: Math.round(rect.left + rect.width / 2),
+    leftX: Math.round(rect.left),
+    rightX: Math.round(rect.right),
     bottomY: Math.round(rect.bottom),
   })
   isTooltipVisible = true

@@ -38,7 +38,7 @@ interface MockBridgeState {
   installUpdatePillClicks: number
   downloadsTrayClicks: number
   feedbackClicks: number
-  showTooltipCalls: { text: string; centerX: number; bottomY: number }[]
+  showTooltipCalls: { text: string; leftX: number; rightX: number; bottomY: number }[]
   hideTooltipCalls: number
   readyCalls: number
 }
@@ -138,7 +138,7 @@ function installMockBridge(opts: { isMac?: boolean; installationId?: string | nu
     clickFeedback: () => {
       state.feedbackClicks += 1
     },
-    showTooltip: (payload: { text: string; centerX: number; bottomY: number }) => {
+    showTooltip: (payload: { text: string; leftX: number; rightX: number; bottomY: number }) => {
       state.showTooltipCalls.push(payload)
     },
     hideTooltip: () => {
@@ -892,8 +892,11 @@ describe('TitleBarApp', () => {
       expect(bridgeState.showTooltipCalls.length).toBe(1)
       const call = bridgeState.showTooltipCalls[0]
       expect(call.text).toBe('Menu')
-      // centerX = left + width/2 = 35; bottomY = bottom = 30.
-      expect(call.centerX).toBe(35)
+      // The bridge sends both horizontal edges so main can prefer the
+      // rightward-anchored layout (bubble.left == leftX) and fall back
+      // to right-aligned (bubble.right == rightX) on overflow.
+      expect(call.leftX).toBe(20)
+      expect(call.rightX).toBe(50)
       expect(call.bottomY).toBe(30)
       // Pointer leaves the title bar; bridge should be told to hide.
       const root = wrapper.find('header').element as HTMLElement

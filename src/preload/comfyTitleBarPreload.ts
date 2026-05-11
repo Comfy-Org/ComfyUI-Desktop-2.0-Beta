@@ -163,11 +163,17 @@ export interface ComfyTitleBarBridge {
    *  Chromium); macOS doesn't reliably surface native title tooltips
    *  for sibling chrome WebContentsViews that aren't focused.
    *
-   *  `centerX` is the trigger's horizontal center in title-bar-local
-   *  pixels — title-bar lives at window x=0 so it's also a window
-   *  coordinate. `bottomY` is the trigger's bottom edge for the same
-   *  coordinate space; main offsets the popup a few pixels below it. */
-  showTooltip(payload: { text: string; centerX: number; bottomY: number }): void
+   *  `leftX` / `rightX` are the trigger's horizontal edges in
+   *  title-bar-local pixels — title-bar lives at window x=0 so they
+   *  also map to window coordinates. Main prefers to anchor the
+   *  bubble's left edge to `leftX` so the tooltip extends rightward
+   *  from the trigger (matches native macOS / browser tooltips for
+   *  small icon buttons in the leading edge of a chrome bar). When
+   *  that would overflow the parent's right edge it falls back to
+   *  anchoring the bubble's right edge to `rightX` instead.
+   *  `bottomY` is the trigger's bottom edge for the same coordinate
+   *  space; main offsets the popup a few pixels below it. */
+  showTooltip(payload: { text: string; leftX: number; rightX: number; bottomY: number }): void
   /** Issue #514 — hide the title-bar hover tooltip popup. Sent on
    *  pointer leave, focus loss, menu open, or panel switch. */
   hideTooltip(): void

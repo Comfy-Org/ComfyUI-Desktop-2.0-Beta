@@ -3452,8 +3452,11 @@ interface TitleTooltipPopupEntry {
   pendingConfig: TitleTooltipConfig | null
   /** Last anchor used for an `openTitleTooltipPopup` call — main keeps
    *  the popup positioned around this anchor when it learns the
-   *  renderer's measured size in the render-ack. */
-  pendingAnchor: { centerX: number; bottomY: number } | null
+   *  renderer's measured size in the render-ack. `leftX` / `rightX`
+   *  bracket the trigger; main prefers to anchor the bubble's left
+   *  edge to `leftX` (extending rightward) and falls back to right-
+   *  aligning to `rightX` when growing rightward would overflow. */
+  pendingAnchor: { leftX: number; rightX: number; bottomY: number } | null
   /** JSON of the config most recently pushed to the renderer (and
    *  awaiting render-ack). Promoted to `lastSyncedConfigJson` once the
    *  ack arrives. */
@@ -3583,12 +3586,20 @@ function ensureTitleTooltipPopup(parent: BrowserWindow): TitleTooltipPopupEntry 
 }
 
 /** Position and size the tooltip popup view around its `pendingAnchor`,
- *  given the renderer's measured bubble dimensions. The bubble is
- *  centered horizontally on the trigger; the view is grown by
- *  `TOOLTIP_POPUP_SHADOW_GUTTER` on each side so the bubble's
- *  box-shadow has room to render without being clipped. The result is
- *  clamped to the parent window's content bounds so the view never
- *  extends off-screen. */
+ *  given the renderer's measured bubble dimensions. The bubble's left
+ *  edge is anchored to the trigger's left edge by default, so the
+ *  bubble extends rightward from the button (matches native macOS
+ *  tooltip behaviour for icon buttons in the leading edge of a chrome
+ *  bar — the longer the label, the more it grows toward the right).
+ *  When that would overflow the parent's right edge we fall back to
+ *  right-aligning the bubble's right edge to the trigger's right edge.
+ *  The view is grown by `TOOLTIP_POPUP_SHADOW_GUTTER` on each side so
+ *  the bubble's box-shadow has room to render without being clipped;
+ *  the bubble itself is centered inside that view by the renderer's
+ *  CSS, so anchoring the view at `leftX - SHADOW_GUTTER` puts the
+ *  bubble's visible left edge at `leftX`. The result is clamped to
+ *  the parent window's content bounds so the view never extends
+ *  off-screen. */
 function positionTooltipPopup(
   entry: TitleTooltipPopupEntry,
   bubbleSize: { width: number; height: number },
@@ -3607,11 +3618,18 @@ function positionTooltipPopup(
   )
 
   const parentBounds = entry.parentWindow.getContentBounds()
-  let x = Math.round(anchor.centerX - viewWidth / 2)
+  // Preferred: bubble.left == anchor.leftX → extends rightward.
+  let x = Math.round(anchor.leftX - TOOLTIP_POPUP_SHADOW_GUTTER)
+  // Right-edge overflow → fall back to bubble.right == anchor.rightX
+  // so the bubble extends leftward from the trigger instead.
+  if (x + viewWidth > parentBounds.width) {
+    x = Math.round(anchor.rightX + TOOLTIP_POPUP_SHADOW_GUTTER - viewWidth)
+  }
   let y = Math.round(anchor.bottomY + TOOLTIP_VERTICAL_GAP - TOOLTIP_POPUP_SHADOW_GUTTER / 2)
-  // Clamp horizontally so the bubble stays fully inside the parent
-  // content area. Vertically the popup sits just below the title bar
-  // so it can't realistically overflow, but clamp anyway as a guard.
+  // Final clamp — covers the corner case where neither alignment fits
+  // (bubble wider than the entire parent content area). Vertical
+  // overflow is unrealistic for a title-bar tooltip but clamped anyway
+  // as a guard.
   if (x < 0) x = 0
   if (x + viewWidth > parentBounds.width) x = Math.max(0, parentBounds.width - viewWidth)
   if (y < 0) y = 0
@@ -3660,13 +3678,14 @@ function hideTitleTooltipPopup(entry: TitleTooltipPopupEntry | undefined): void 
 function openTitleTooltipPopup(opts: {
   parent: BrowserWindow
   text: string
-  centerX: number
+  leftX: number
+  rightX: number
   bottomY: number
 }): void {
   const entry = ensureTitleTooltipPopup(opts.parent)
   if (entry.popup.webContents.isDestroyed()) return
 
-  entry.pendingAnchor = { centerX: opts.centerX, bottomY: opts.bottomY }
+  entry.pendingAnchor = { leftX: opts.leftX, rightX: opts.rightX, bottomY: opts.bottomY }
 
   // Build the config WITHOUT the configToken first, so the JSON we
   // compare against the last-synced config is text+theme only —
@@ -3758,24 +3777,38 @@ ipcMain.on(
 
 /** Title bar asks main to show a hover tooltip. Forwarded to the
  *  cached tooltip popup for the host window. Position is in title-bar-
- *  local pixels (`centerX` = trigger center, `bottomY` = trigger bottom);
- *  the title-bar view sits at content (0,0) so these map directly to
- *  parent-window content coordinates. */
+ *  local pixels (`leftX` / `rightX` bracket the trigger's horizontal
+ *  edges, `bottomY` = trigger bottom); the title-bar view sits at
+ *  content (0,0) so these map directly to parent-window content
+ *  coordinates. */
 ipcMain.on(
   'comfy-window:show-titlebar-tooltip',
-  (event, payload: { text?: unknown; centerX?: unknown; bottomY?: unknown }) => {
+  (
+    event,
+    payload: {
+      text?: unknown
+      leftX?: unknown
+      rightX?: unknown
+      bottomY?: unknown
+    },
+  ) => {
     const found = findEntryByTitleBarSender(event.sender)
     if (!found) return
     const { entry } = found
     if (entry.window.isDestroyed()) return
     const text = typeof payload?.text === 'string' ? payload.text : ''
     if (!text) return
-    const centerX = typeof payload?.centerX === 'number' ? payload.centerX : 0
+    const leftX = typeof payload?.leftX === 'number' ? payload.leftX : 0
+    // Fall back to leftX when rightX is missing — keeps the
+    // preferred-rightward path well-defined; the right-overflow
+    // branch then degenerates into "stay left-anchored".
+    const rightX = typeof payload?.rightX === 'number' ? payload.rightX : leftX
     const bottomY = typeof payload?.bottomY === 'number' ? payload.bottomY : TITLEBAR_HEIGHT
     openTitleTooltipPopup({
       parent: entry.window,
       text,
-      centerX: Math.round(centerX),
+      leftX: Math.round(leftX),
+      rightX: Math.round(rightX),
       bottomY: Math.round(bottomY),
     })
   },
