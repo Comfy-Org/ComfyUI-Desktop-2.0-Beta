@@ -180,6 +180,8 @@ export function buildElectronApi(): ElectronApi {
     pauseModelDownload: (url) => ipcRenderer.invoke('model-download-pause', { url }),
     resumeModelDownload: (url) => ipcRenderer.invoke('model-download-resume', { url }),
     cancelModelDownload: (url) => ipcRenderer.invoke('model-download-cancel', { url }),
+    dismissModelDownload: (url) => ipcRenderer.invoke('model-download-dismiss', { url }),
+    clearFinishedModelDownloads: () => ipcRenderer.invoke('model-download-clear-finished'),
     showDownloadInFolder: (savePath) => ipcRenderer.invoke('show-download-in-folder', { savePath }),
 
     // Updates
@@ -283,6 +285,16 @@ export function buildElectronApi(): ElectronApi {
       const handler = (_event: IpcRendererEvent, data: unknown) => callback(data as Parameters<typeof callback>[0])
       ipcRenderer.on('model-download-progress', handler)
       return () => ipcRenderer.removeListener('model-download-progress', handler)
+    },
+    onModelDownloadRemoved: (callback) => {
+      const handler = (_event: IpcRendererEvent, data: unknown) => callback(data as Parameters<typeof callback>[0])
+      ipcRenderer.on('model-download-removed', handler)
+      return () => ipcRenderer.removeListener('model-download-removed', handler)
+    },
+    onModelDownloadsClearedFinished: (callback) => {
+      const handler = (_event: IpcRendererEvent, data: unknown) => callback(data as Parameters<typeof callback>[0])
+      ipcRenderer.on('model-downloads-cleared-finished', handler)
+      return () => ipcRenderer.removeListener('model-downloads-cleared-finished', handler)
     },
     onTelemetrySettingChanged: (callback) => {
       const handler = (_event: IpcRendererEvent, enabled: unknown) => callback(enabled as Parameters<typeof callback>[0])

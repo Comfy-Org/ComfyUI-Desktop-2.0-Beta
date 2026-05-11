@@ -342,12 +342,12 @@ function handleNewInstallClick(): void {
          and Cloud tiles stay visible regardless (they're entry-points,
          not data rows), per the design — except the Cloud tile is hidden
          when filtering to local/desktop/remote where it would be noise. -->
-    <div class="chooser-filters">
+    <div class="chooser-filters filter-pill-group">
       <button
         v-for="chip in filterChips"
         :key="chip.key"
         type="button"
-        class="chooser-filter-chip"
+        class="filter-pill chooser-filter-chip"
         :class="{ active: activeFilter === chip.key }"
         @click="activeFilter = chip.key"
       >
@@ -610,33 +610,11 @@ function handleNewInstallClick(): void {
   overflow: hidden;
 }
 
+/* Layout-only — chip shape / hover / active live in the shared
+ * `.filter-pill` rules in `assets/main.css`. */
 .chooser-filters {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
   padding: 16px 24px 8px;
   flex-shrink: 0;
-}
-
-.chooser-filter-chip {
-  background: transparent;
-  color: inherit;
-  border: 1px solid var(--border, rgba(127, 127, 127, 0.25));
-  padding: 4px 12px;
-  font: inherit;
-  font-size: 12px;
-  border-radius: 999px;
-  cursor: pointer;
-  opacity: 0.8;
-  transition: background-color 100ms ease, opacity 100ms ease, border-color 100ms ease;
-}
-.chooser-filter-chip:hover {
-  opacity: 1;
-}
-.chooser-filter-chip.active {
-  background: var(--bg-elev-2, rgba(127, 127, 127, 0.16));
-  border-color: var(--border-strong, rgba(127, 127, 127, 0.4));
-  opacity: 1;
 }
 
 .chooser-loading {

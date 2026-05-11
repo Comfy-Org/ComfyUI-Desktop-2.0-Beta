@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed, useTemplateRef } from 'vue'
+import { useI18n } from 'vue-i18n'
 import {
   ArrowDownToLine,
   Download,
@@ -8,6 +9,8 @@ import {
   RefreshCw,
 } from 'lucide-vue-next'
 import { installTypeMetaFor } from '../lib/installTypeIcon'
+
+const { t } = useI18n()
 
 // Inlined to keep the title-bar renderer self-contained — the preload TS
 // file isn't visible to tsconfig.web (only its .d.ts would be). Kept in
@@ -69,8 +72,8 @@ interface Bridge {
   onSourceCategoryChanged: (cb: (category: string | null) => void) => () => void
   onThemeChanged: (cb: (theme: { bg: string; text: string }) => void) => () => void
   onFullscreenChanged: (cb: (fullscreen: boolean) => void) => () => void
-  onMenuOpened: (cb: (info: { menu: 'menu' }) => void) => () => void
-  onMenuClosed: (cb: (info: { menu: 'menu' }) => void) => () => void
+  onMenuOpened: (cb: (info: { menu: 'menu' | 'downloads' }) => void) => () => void
+  onMenuClosed: (cb: (info: { menu: 'menu' | 'downloads' }) => void) => () => void
   /** Modal-unification (Track M-2.3) — first-use takeover step pushes
    *  from main. Drives the T&C-step lockdown that hides the waffle
    *  menu (the otherwise-always-live escape hatch) so the user has to
@@ -223,21 +226,11 @@ const sourceCategory = ref<string | null>(null)
  *  `installTypeMetaFor()` so the helper isn't called inline in the
  *  template (keeps Vue's reactivity watcher minimal). */
 const installTypeMeta = computed(() => installTypeMetaFor(sourceCategory.value))
-/** English fallbacks for the install-type tooltip — the title-bar
- *  renderer is intentionally i18n-free (it has its own bundle and
- *  doesn't ship vue-i18n). The same `installType.*` keys exist in
- *  `locales/*.json` for the chooser tile, which DOES have i18n;
- *  this map mirrors the `en.json` values verbatim so the tooltip
- *  copy stays consistent across surfaces. */
-const INSTALL_TYPE_LABELS: Record<string, string> = {
-  'installType.standalone': 'Standalone',
-  'installType.cloud': 'Cloud',
-  'installType.legacyDesktop': 'Legacy Desktop',
-  'installType.remote': 'Remote',
-  'installType.unknown': 'Unknown',
-}
+/** Tooltip for the install-type icon. `installTypeMetaFor` returns
+ *  dotted keys like `installType.standalone` that match the en
+ *  catalog one-to-one. */
 const installTypeLabel = computed(() => {
-  return INSTALL_TYPE_LABELS[installTypeMeta.value.labelKey] ?? 'Unknown'
+  return t(installTypeMeta.value.labelKey, t('installType.unknown'))
 })
 /** Whether to render the install-type icon. Suppressed on
  *  install-less host windows (no install backing the entry) so the
@@ -286,10 +279,10 @@ const installUpdateState = ref<{ available: boolean; version: string | null }>({
 const appUpdatePillLabel = computed<string | null>(() => {
   const s = appUpdateState.value
   if (!s.kind) return null
-  if (s.kind === 'ready') return 'Desktop Update Ready'
+  if (s.kind === 'ready') return t('titleBar.desktopUpdateReady')
   // 'available' — only fires with auto-updates OFF (main suppresses
   // it when ON and triggers the download itself).
-  return 'Desktop Update Available'
+  return t('titleBar.desktopUpdateAvailable')
 })
 
 /** Tooltip / aria-label augments the pill label with the version when
@@ -299,17 +292,20 @@ const appUpdatePillTooltip = computed<string>(() => {
   const label = appUpdatePillLabel.value
   if (!label) return ''
   const v = appUpdateState.value.version
-  return v ? `${label} (v${v})` : label
+  return v
+    ? t('titleBar.desktopUpdateWithVersion', { label, version: v })
+    : label
 })
 
-/** Track B item 1 — install-update pill copy. Mirrors the app-update
- *  pill's "Update {version}" format when main carries a target version
+/** Install-update pill copy. Mirrors the app-update pill's
+ *  "Update {version}" format when main carries a target version
  *  through the install's status tag, falling back to the generic
- *  "Update available" label when no version is known (e.g. legacy
- *  payloads or sources that don't surface one). */
+ *  "Update available" label when no version is known. */
 const installUpdatePillLabel = computed<string>(() => {
   const v = installUpdateState.value.version
-  return v ? `Update ${v}` : 'Update available'
+  return v
+    ? t('titleBar.installUpdateVersion', { version: v })
+    : t('titleBar.installUpdateAvailable')
 })
 
 const showAppUpdatePill = computed(() => appUpdateState.value.kind !== null)
@@ -346,13 +342,23 @@ const downloadsState = ref<DownloadsTrayState>({ active: [], recent: [] })
 const downloadsActiveCount = computed(() => downloadsState.value.active.length)
 const downloadsTrayLabel = computed<string>(() => {
   const n = downloadsActiveCount.value
-  if (n === 0) return 'Downloads'
-  return `${n} download${n === 1 ? '' : 's'} in progress`
+  if (n === 0) return t('titleBar.downloads')
+  return t('titleBar.downloadsInProgress', { n }, n)
 })
 
 const downloadsBtnRef = useTemplateRef<HTMLButtonElement>('downloadsBtn')
 
 function handleDownloadsTray(): void {
+  // Toggle-close + reopen guard mirror `handleFileMenu` — the popup is
+  // a single shared WebContentsView, so the same dismiss / reopen
+  // behaviour the waffle has applies. Without this the tray button
+  // would re-pop the popup immediately after the user's click on it
+  // dismissed it, looking like the popup never closes.
+  if (isMenuOpen.value) {
+    bridge?.dismissFileMenu()
+    return
+  }
+  if (Date.now() - menuClosedAt.downloads < MENU_REOPEN_GUARD_MS) return
   bridge?.clickDownloadsTray(anchorBelow(downloadsBtnRef.value))
 }
 
@@ -383,18 +389,19 @@ const isLight = computed(() => {
 
 const fileBtnRef = useTemplateRef<HTMLButtonElement>('fileBtn')
 
-/** Per-menu suppression window. When a native menu closes, we stamp
- *  `Date.now()` against its kind. The next click on the same menu
+/** Per-menu suppression window. When the popup closes, we stamp
+ *  `Date.now()` against its kind. The next click on the same opener
  *  button within `MENU_REOPEN_GUARD_MS` is treated as "the same click
- *  that just dismissed the menu" and is dropped, preventing the menu
- *  from flickering open immediately after the user clicked the open
- *  button to dismiss it. The OS dismisses the menu first, then the
- *  click event reaches our renderer button — without this guard the
- *  click handler would ask main to pop the menu again. The center
- *  install pill is no longer clickable, so the only popup kind we
- *  track here is the waffle `'menu'`. */
+ *  that just dismissed the popup" and is dropped, preventing the
+ *  popup from flickering open immediately after the user clicked the
+ *  open button to dismiss it. The OS dismisses the popup first, then
+ *  the click event reaches our renderer button — without this guard
+ *  the handler would ask main to pop the popup again. Tracked per
+ *  popup kind because the waffle and the downloads tray are separate
+ *  buttons; clicking the downloads button shouldn't suppress a fresh
+ *  waffle open and vice versa. */
 const MENU_REOPEN_GUARD_MS = 100
-const menuClosedAt: Record<'menu', number> = { menu: 0 }
+const menuClosedAt: Record<'menu' | 'downloads', number> = { menu: 0, downloads: 0 }
 
 /** Tracks whether the popup is currently visible. Set by main via
  *  `onMenuOpened` / `onMenuClosed` IPCs. The timestamp guard above
@@ -566,8 +573,8 @@ onUnmounted(() => {
         type="button"
         class="title-menu-button title-menu-button--icon"
         aria-haspopup="menu"
-        title="Menu"
-        aria-label="Menu"
+        :title="t('titleBar.menu')"
+        :aria-label="t('titleBar.menu')"
         @click="handleFileMenu"
       >
         <MenuIcon :size="18" />
@@ -672,12 +679,13 @@ onUnmounted(() => {
       <button
         v-if="!isConsentLockdown"
         type="button"
-        class="title-menu-button title-menu-button--icon title-feedback-button"
-        title="Send Feedback"
-        aria-label="Send Feedback"
+        class="title-menu-button title-feedback-button"
+        :title="t('titleBar.feedbackTooltip')"
+        :aria-label="t('titleBar.feedback')"
         @click="handleFeedback"
       >
         <MessageSquarePlus :size="16" />
+        <span class="title-feedback-label">{{ t('titleBar.feedback') }}</span>
       </button>
     </div>
   </header>

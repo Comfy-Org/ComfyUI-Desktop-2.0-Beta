@@ -129,7 +129,7 @@ describe('comfyTitlePopup/DownloadsView', () => {
     expect(pendingFill.attributes('style')).toContain('width: 100%')
   })
 
-  it('renders a completed recent entry with a Show-in-folder action when savePath is present', async () => {
+  it('renders a completed recent entry with Show-in-folder + Remove actions when savePath is present', async () => {
     const { default: DownloadsView } = await import('./DownloadsView.vue')
     const state: MockDownloadsState = {
       active: [],
@@ -148,12 +148,13 @@ describe('comfyTitlePopup/DownloadsView', () => {
     const item = wrapper.find('.downloads-item.is-finished')
     expect(item.exists()).toBe(true)
     expect(item.find('.downloads-item-status').text()).toBe('Completed')
-    const buttons = item.findAll('button')
-    expect(buttons.length).toBe(1)
-    expect(buttons[0]!.text()).toBe('Show in folder')
+    const labels = item.findAll('button').map((b) => b.text())
+    expect(labels).toContain('Show in folder')
+    // Per-row dismiss is an icon-only X pinned to the title row.
+    expect(item.find('.downloads-item-dismiss').exists()).toBe(true)
   })
 
-  it('omits Show-in-folder for terminal entries that did not write to disk', async () => {
+  it('omits Show-in-folder for terminal entries that did not write to disk but still offers Remove', async () => {
     const { default: DownloadsView } = await import('./DownloadsView.vue')
     const state: MockDownloadsState = {
       active: [],
@@ -172,7 +173,43 @@ describe('comfyTitlePopup/DownloadsView', () => {
     const item = wrapper.find('.downloads-item.is-error')
     expect(item.exists()).toBe(true)
     expect(item.find('.downloads-item-status').text()).toBe('oops')
-    expect(item.findAll('button').length).toBe(0)
+    const labels = item.findAll('button').map((b) => b.text())
+    expect(labels.some((l) => l.includes('Show in folder'))).toBe(false)
+    // Per-row dismiss is an icon-only X pinned to the title row.
+    expect(item.find('.downloads-item-dismiss').exists()).toBe(true)
+  })
+
+  it('forwards per-row Remove and header Clear-finished to the bridge', async () => {
+    const { default: DownloadsView } = await import('./DownloadsView.vue')
+    const state: MockDownloadsState = {
+      active: [],
+      recent: [
+        {
+          url: 'https://example.com/done.bin',
+          filename: 'done.bin',
+          progress: 1,
+          status: 'completed',
+          savePath: '/tmp/done.bin',
+        },
+        {
+          url: 'https://example.com/oops.bin',
+          filename: 'oops.bin',
+          progress: 0,
+          status: 'error',
+          error: 'oops',
+        },
+      ],
+    }
+    const wrapper = mount(DownloadsView, { props: { state } })
+    await flushPromises()
+    const items = wrapper.findAll('.downloads-item')
+    const removeBtn = items[0]!.find('.downloads-item-dismiss')
+    await removeBtn.trigger('click')
+    await wrapper.find('.downloads-clear').trigger('click')
+    expect(bridgeState.downloadsActions).toEqual([
+      { action: 'dismiss', url: 'https://example.com/done.bin' },
+      { action: 'clear-finished' },
+    ])
   })
 
   it('forwards pause/resume/cancel/show-in-folder to the bridge', async () => {
@@ -211,8 +248,12 @@ describe('comfyTitlePopup/DownloadsView', () => {
     await items[1]!.find('button[aria-label="Resume"]').trigger('click')
     // Cancel the paused entry.
     await items[1]!.find('button[aria-label="Cancel"]').trigger('click')
-    // Show-in-folder for the completed entry.
-    await items[2]!.find('button').trigger('click')
+    // Show-in-folder for the completed entry — find by label so we
+    // skip past the per-row dismiss X pinned to the title row.
+    const showBtn = items[2]!
+      .findAll('button')
+      .find((b) => b.text().includes('Show in folder'))!
+    await showBtn.trigger('click')
     expect(bridgeState.downloadsActions).toEqual([
       { action: 'pause', url: 'https://example.com/dl.bin' },
       { action: 'resume', url: 'https://example.com/p.bin' },

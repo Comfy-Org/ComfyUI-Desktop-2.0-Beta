@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import {
   ArrowDownToLine,
   CheckCircle2,
+  Eraser,
   FolderOpen,
   PauseCircle,
   PlayCircle,
-  Trash2,
+  X,
   XCircle,
 } from 'lucide-vue-next'
 import { useDownloadStore } from '../stores/downloadStore'
@@ -17,6 +19,8 @@ import {
   statusLine as formatStatusLine,
 } from '../lib/downloadFormatters'
 import type { ModelDownloadProgress, ModelDownloadStatus } from '../types/ipc'
+
+const { t } = useI18n()
 
 /**
  * Settings → Downloads tab. Long-form companion to the title-bar
@@ -39,11 +43,14 @@ onMounted(() => {
 })
 
 const ordered = computed<ModelDownloadProgress[]>(() => {
-  // Active first (downloading, paused, pending), then terminal
-  // entries newest-on-top is impractical without a timestamp on the
-  // store entry — we keep insertion order, which matches the live
-  // feed the user just saw in the popup.
-  return [...store.activeDownloads, ...store.finishedDownloads]
+  // Single insertion-ordered list keyed on `createdAt` so a download
+  // that transitions active → cancelled / completed stays in its
+  // original slot rather than jumping to the bottom of a separate
+  // "finished" bucket. `createdAt` is stamped by main on first sight
+  // and preserved across status updates.
+  return [...store.downloads.values()].sort(
+    (a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0),
+  )
 })
 
 const filtered = computed<ModelDownloadProgress[]>(() => {
@@ -87,17 +94,18 @@ function clearOne(url: string): void {
   store.dismiss(url)
 }
 function clearCompleted(): void {
-  for (const d of [...store.finishedDownloads]) {
-    store.dismiss(d.url)
-  }
+  store.clearFinished()
 }
 
-const filters: { key: StatusFilter; label: string }[] = [
-  { key: 'all', label: 'All' },
-  { key: 'active', label: 'Active' },
-  { key: 'completed', label: 'Completed' },
-  { key: 'error', label: 'Errored' },
-]
+/** Filter chips. Labels resolve through i18n at render time so they
+ *  re-render if the locale ever changes; the underlying `key` is the
+ *  stable identifier that drives `filter` state. */
+const filters = computed<{ key: StatusFilter; label: string }[]>(() => [
+  { key: 'all', label: t('downloadsTab.filterAll') },
+  { key: 'active', label: t('downloadsTab.filterActive') },
+  { key: 'completed', label: t('downloadsTab.filterCompleted') },
+  { key: 'error', label: t('downloadsTab.filterErrored') },
+])
 
 function isTerminal(status: ModelDownloadStatus): boolean {
   return isTerminalModelDownloadStatus(status)
@@ -107,14 +115,18 @@ function isTerminal(status: ModelDownloadStatus): boolean {
 <template>
   <div class="downloads-tab">
     <header class="downloads-tab-head">
-      <h2 class="downloads-tab-title">Downloads</h2>
+      <h2 class="downloads-tab-title">{{ t('downloadsTab.title') }}</h2>
       <div class="downloads-tab-actions">
-        <div class="downloads-filter" role="tablist" aria-label="Status filter">
+        <div
+          class="filter-pill-group"
+          role="tablist"
+          :aria-label="t('downloadsTab.filterAriaLabel')"
+        >
           <button
             v-for="f in filters"
             :key="f.key"
             type="button"
-            class="downloads-filter-chip"
+            class="filter-pill downloads-filter-chip"
             :class="{ active: filter === f.key }"
             role="tab"
             :aria-selected="filter === f.key"
@@ -127,18 +139,18 @@ function isTerminal(status: ModelDownloadStatus): boolean {
           type="button"
           class="downloads-clear"
           :disabled="finishedCount === 0"
-          title="Remove every completed, errored, or cancelled entry from the list"
+          :title="t('downloadsPopup.clearFinishedTooltip')"
           @click="clearCompleted"
         >
-          <Trash2 :size="13" />
-          Clear finished
+          <Eraser :size="13" />
+          {{ t('downloadsPopup.clearFinished') }}
         </button>
       </div>
     </header>
 
     <div v-if="filtered.length === 0" class="downloads-tab-empty">
       <ArrowDownToLine :size="18" />
-      <span>No downloads to show</span>
+      <span>{{ t('downloadsTab.empty') }}</span>
     </div>
 
     <ul v-else class="downloads-tab-list">
@@ -161,6 +173,21 @@ function isTerminal(status: ModelDownloadStatus): boolean {
           />
           <ArrowDownToLine v-else :size="14" class="downloads-tab-icon" />
           <span class="downloads-tab-name" :title="fileLabel(d)">{{ fileLabel(d) }}</span>
+          <!-- Per-row dismiss — only offered for terminal entries.
+               A small X in the title row reads as "remove from this
+               list" rather than the destructive trashcan that was
+               there before (which implied the file would be deleted
+               from disk). -->
+          <button
+            v-if="isTerminal(d.status)"
+            type="button"
+            class="downloads-tab-dismiss"
+            :title="t('downloadsPopup.remove')"
+            :aria-label="t('downloadsPopup.remove')"
+            @click="clearOne(d.url)"
+          >
+            <X :size="14" />
+          </button>
         </div>
         <div class="downloads-tab-status">{{ statusLine(d) }}</div>
         <div v-if="d.savePath" class="downloads-tab-path" :title="d.savePath">
@@ -187,7 +214,7 @@ function isTerminal(status: ModelDownloadStatus): boolean {
             @click="pause(d.url)"
           >
             <PauseCircle :size="13" />
-            Pause
+            {{ t('downloadsPopup.pause') }}
           </button>
           <button
             v-if="d.status === 'paused'"
@@ -196,7 +223,7 @@ function isTerminal(status: ModelDownloadStatus): boolean {
             @click="resume(d.url)"
           >
             <PlayCircle :size="13" />
-            Resume
+            {{ t('downloadsPopup.resume') }}
           </button>
           <button
             v-if="d.status === 'downloading' || d.status === 'paused' || d.status === 'pending'"
@@ -205,7 +232,7 @@ function isTerminal(status: ModelDownloadStatus): boolean {
             @click="cancel(d.url)"
           >
             <XCircle :size="13" />
-            Cancel
+            {{ t('downloadsPopup.cancel') }}
           </button>
           <button
             v-if="d.status === 'completed' && d.savePath"
@@ -213,16 +240,7 @@ function isTerminal(status: ModelDownloadStatus): boolean {
             @click="showInFolder(d.savePath)"
           >
             <FolderOpen :size="13" />
-            Show in folder
-          </button>
-          <button
-            v-if="isTerminal(d.status)"
-            type="button"
-            class="muted"
-            @click="clearOne(d.url)"
-          >
-            <Trash2 :size="13" />
-            Remove
+            {{ t('downloadsPopup.showInFolder') }}
           </button>
         </div>
       </li>
@@ -258,35 +276,10 @@ function isTerminal(status: ModelDownloadStatus): boolean {
   flex-wrap: wrap;
 }
 
-.downloads-filter {
-  display: inline-flex;
-  border: 1px solid var(--border, rgba(127, 127, 127, 0.3));
-  border-radius: 6px;
-  overflow: hidden;
-}
-.downloads-filter-chip {
-  background: transparent;
-  border: none;
-  border-right: 1px solid var(--border, rgba(127, 127, 127, 0.3));
-  padding: 4px 10px;
-  font: inherit;
-  font-size: 12px;
-  color: inherit;
-  cursor: pointer;
-  opacity: 0.8;
-}
-.downloads-filter-chip:last-child {
-  border-right: none;
-}
-.downloads-filter-chip:hover {
-  background: var(--bg-elev-2, rgba(127, 127, 127, 0.12));
-  opacity: 1;
-}
-.downloads-filter-chip.active {
-  background: var(--bg-elev-2, rgba(127, 127, 127, 0.18));
-  opacity: 1;
-  font-weight: 500;
-}
+/* Status-filter chip styling lives in `assets/main.css` under the
+ * shared `.filter-pill` / `.filter-pill-group` classes (also used by
+ * ChooserView). The local `.downloads-filter-chip` class is kept only
+ * as a test selector hook. */
 
 .downloads-clear {
   display: inline-flex;
@@ -365,6 +358,30 @@ function isTerminal(status: ModelDownloadStatus): boolean {
   font-size: 13px;
 }
 
+/* Per-row dismiss "X" — pinned to the end of the title row. Same
+ * affordance as the popup so the per-row remove reads identically
+ * across surfaces. */
+.downloads-tab-dismiss {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted, #9ca0a8);
+  cursor: pointer;
+  opacity: 0.6;
+}
+.downloads-tab-dismiss:hover {
+  opacity: 1;
+  background: rgba(127, 127, 127, 0.18);
+  color: inherit;
+}
+
 .downloads-tab-status {
   font-size: 12px;
   color: var(--text-muted, #9ca0a8);
@@ -399,6 +416,12 @@ function isTerminal(status: ModelDownloadStatus): boolean {
   flex-wrap: wrap;
   gap: 6px;
   margin-top: 2px;
+}
+/* Terminal entries with no save-path (errored / cancelled) have no
+ * actions at all once Remove was lifted to the title-row X. Collapse
+ * the row so the card doesn't carry a phantom margin. */
+.downloads-tab-item-actions:empty {
+  display: none;
 }
 .downloads-tab-item-actions button {
   display: inline-flex;

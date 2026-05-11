@@ -86,7 +86,7 @@ const FLOW_TELEMETRY_NAMES: Record<FlowComponent, string> = {
   'load-snapshot': 'load_snapshot',
 }
 
-const { setLocaleMessage, locale, t } = useI18n()
+const { mergeLocaleMessage, locale, t } = useI18n()
 useTheme()
 
 const params = new URLSearchParams(window.location.search)
@@ -230,7 +230,12 @@ function handleOpenFeedback(source: 'titlebar' | 'menu'): void {
 
 async function loadLocale(): Promise<void> {
   const messages = await window.api.getLocaleMessages()
-  setLocaleMessage('en', messages)
+  // Merge — not replace — so the renderer-side catalog from
+  // `lib/i18nMessages.ts` (the authoritative en source for keys main
+  // doesn't yet ship in `locales/en.json`, e.g. `downloadsTab.*`,
+  // `downloadsPopup.*`, `fileMenu.*`) survives this layer-on of
+  // main's JSON.
+  mergeLocaleMessage('en', messages)
   locale.value = 'en'
 }
 
@@ -981,7 +986,7 @@ onMounted(async () => {
   await loadLocale()
 
   unsubLocale = window.api.onLocaleChanged((messages) => {
-    setLocaleMessage('en', messages as Record<string, unknown>)
+    mergeLocaleMessage('en', messages as Record<string, unknown>)
   })
 
   // Main can request a panel switch (e.g. from title-bar buttons, or when

@@ -392,6 +392,12 @@ export interface ModelDownloadProgress {
   etaSeconds?: number
   status: ModelDownloadStatus
   error?: string
+  /** First-seen wall-clock timestamp (ms). Stable across status
+   *  transitions — the renderer uses it to render a single
+   *  insertion-ordered list so terminal entries don't jump to the
+   *  bottom when they leave the in-flight bucket. Optional only for
+   *  back-compat with snapshots that predate the field. */
+  createdAt?: number
 }
 
 // --- Track types ---
@@ -829,6 +835,14 @@ export interface ElectronApi {
   pauseModelDownload(url: string): Promise<boolean>
   resumeModelDownload(url: string): Promise<boolean>
   cancelModelDownload(url: string): Promise<boolean>
+  /** Drop a single terminal (completed / error / cancelled) entry
+   *  from main's recent-downloads buffer; broadcasts a
+   *  `model-download-removed` event so every renderer surface drops
+   *  the entry from its store in lockstep. */
+  dismissModelDownload(url: string): Promise<boolean>
+  /** Bulk-dismiss every terminal entry from main's recent buffer.
+   *  Returns the number of entries removed. */
+  clearFinishedModelDownloads(): Promise<number>
   showDownloadInFolder(savePath: string): Promise<void>
 
   // Event listeners (return unsubscribe functions)
@@ -862,6 +876,13 @@ export interface ElectronApi {
   onAppUpdateUserActionFailed(callback: (err: { message: string }) => void): Unsubscribe
   onZoomChanged(callback: (level: number) => void): Unsubscribe
   onModelDownloadProgress(callback: (progress: ModelDownloadProgress) => void): Unsubscribe
+  /** Fires when main drops a single terminal entry from its recent
+   *  buffer (via `dismissModelDownload`). */
+  onModelDownloadRemoved(callback: (data: { url: string }) => void): Unsubscribe
+  /** Fires when main bulk-dismisses every terminal entry. The payload
+   *  carries the URLs that were removed so listeners can drop them in
+   *  one pass instead of re-listing. */
+  onModelDownloadsClearedFinished(callback: (data: { urls: string[] }) => void): Unsubscribe
   onTelemetrySettingChanged(callback: (enabled: boolean | undefined) => void): Unsubscribe
   onDatadogError(callback: (payload: DatadogForwardedError) => void): Unsubscribe
   onTelemetryActionFromMain(callback: (data: { event: string; context: Record<string, unknown>; mainAlreadyCaptured?: boolean }) => void): Unsubscribe

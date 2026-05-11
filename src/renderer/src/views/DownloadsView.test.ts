@@ -23,6 +23,8 @@ interface MockApiState {
   resumeCalls: string[]
   cancelCalls: string[]
   showInFolderCalls: string[]
+  dismissCalls: string[]
+  clearFinishedCalls: number
 }
 
 function installMockApi(): MockApiState {
@@ -31,10 +33,28 @@ function installMockApi(): MockApiState {
     resumeCalls: [],
     cancelCalls: [],
     showInFolderCalls: [],
+    dismissCalls: [],
+    clearFinishedCalls: 0,
   }
+  // Removal/cleared broadcasts are how main keeps every renderer
+  // surface in sync — the store waits for these instead of mutating
+  // locally. The mocks fake the round-trip so per-row Remove and
+  // Clear-finished tests still observe the entry leaving the store.
+  let removedCb: ((data: { url: string }) => void) | null = null
+  let clearedCb: ((data: { urls: string[] }) => void) | null = null
   window.api = {
     listModelDownloads: vi.fn().mockResolvedValue([]),
     onModelDownloadProgress: vi.fn(() => vi.fn()),
+    onModelDownloadRemoved: vi.fn((cb: (data: { url: string }) => void) => {
+      removedCb = cb
+      return vi.fn()
+    }),
+    onModelDownloadsClearedFinished: vi.fn(
+      (cb: (data: { urls: string[] }) => void) => {
+        clearedCb = cb
+        return vi.fn()
+      },
+    ),
     pauseModelDownload: vi.fn((url: string) => {
       calls.pauseCalls.push(url)
       return Promise.resolve()
@@ -50,6 +70,20 @@ function installMockApi(): MockApiState {
     showDownloadInFolder: vi.fn((path: string) => {
       calls.showInFolderCalls.push(path)
       return Promise.resolve()
+    }),
+    dismissModelDownload: vi.fn((url: string) => {
+      calls.dismissCalls.push(url)
+      removedCb?.({ url })
+      return Promise.resolve(true)
+    }),
+    clearFinishedModelDownloads: vi.fn(() => {
+      calls.clearFinishedCalls += 1
+      // The fake broadcast mirrors main's contract: emit the urls of
+      // every terminal entry currently in the store.
+      const urls = useDownloadStore()
+        .finishedDownloads.map((d) => d.url)
+      clearedCb?.({ urls })
+      return Promise.resolve(urls.length)
     }),
   } as unknown as ElectronApi
   return calls
@@ -275,7 +309,7 @@ describe('views/DownloadsView (Settings → Downloads tab)', () => {
     const wrapper = mount(DownloadsView)
     await flushPromises()
     const items = wrapper.findAll('.downloads-tab-item')
-    const removeBtn = items[0]!.findAll('button').find((b) => b.text().includes('Remove'))!
+    const removeBtn = items[0]!.find('.downloads-tab-dismiss')
     await removeBtn.trigger('click')
     await flushPromises()
     expect(store.downloads.has('https://example.com/done')).toBe(false)

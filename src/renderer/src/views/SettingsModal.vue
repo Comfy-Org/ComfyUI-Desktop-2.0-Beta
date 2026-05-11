@@ -69,29 +69,33 @@ interface TabDef {
   available: boolean
 }
 
+// English fallbacks supplied via `t(key, default)` so the tabs render
+// readable labels even while the en locale is missing entries (see
+// issue #531). Without these the literal key string ('settingsModal.
+// tabDownloads', etc.) leaks into the sidebar and overflows the rail.
 const tabs = computed<TabDef[]>(() => [
   {
     key: 'comfy',
     icon: Box,
-    label: t('settingsModal.tabComfy'),
+    label: t('settingsModal.tabComfy', 'ComfyUI Settings'),
     available: hasInstallation.value,
   },
   {
     key: 'directories',
     icon: FolderOpen,
-    label: t('settingsModal.tabDirectories'),
+    label: t('settingsModal.tabDirectories', 'Directories'),
     available: true,
   },
   {
     key: 'downloads',
     icon: ArrowDownToLine,
-    label: t('settingsModal.tabDownloads'),
+    label: t('settingsModal.tabDownloads', 'Downloads'),
     available: true,
   },
   {
     key: 'global',
     icon: SettingsIcon,
-    label: t('settingsModal.tabGlobal'),
+    label: t('settingsModal.tabGlobal', 'Global Settings'),
     available: true,
   },
 ])
@@ -162,9 +166,9 @@ function handleUpdateInstallation(inst: Installation): void {
 </script>
 
 <template>
-  <ModalShell :title="t('settingsModal.title')" content-class="settings-modal-shell" @close="handleClose">
+  <ModalShell :title="t('settingsModal.title', 'Settings')" content-class="settings-modal-shell" @close="handleClose">
     <div class="settings-modal-layout" :class="{ 'no-sidebar': noSidebar }">
-      <nav v-if="!noSidebar" class="settings-sidebar" :aria-label="t('settingsModal.title')">
+      <nav v-if="!noSidebar" class="settings-sidebar" :aria-label="t('settingsModal.title', 'Settings')">
         <button
           v-for="tab in visibleTabs"
           :key="tab.key"

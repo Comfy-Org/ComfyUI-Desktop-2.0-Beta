@@ -85,13 +85,15 @@ export interface ComfyTitleBarBridge {
    *  (the blur-driven dismiss handles the close on its own). On
    *  macOS the click event can fire before the dismiss propagates,
    *  so a timestamp-only guard isn't reliable. */
-  onMenuOpened(cb: (info: { menu: 'menu' }) => void): () => void
-  /** Subscribe to native title-bar menu close events. Fires when the
-   *  popup created by `openFileMenu` closes, after the user picks an
-   *  item or dismisses by clicking outside. The renderer uses this to
-   *  suppress an immediate re-open if the same click that dismissed
-   *  the menu also re-targets the menu button. */
-  onMenuClosed(cb: (info: { menu: 'menu' }) => void): () => void
+  onMenuOpened(cb: (info: { menu: 'menu' | 'downloads' }) => void): () => void
+  /** Subscribe to title-bar popup close events. Fires when the popup
+   *  view (waffle menu OR downloads tray) closes, after the user
+   *  picks an item or dismisses by clicking outside. The renderer
+   *  uses this to suppress an immediate re-open if the same click
+   *  that dismissed the popup also re-targets the opener button. The
+   *  payload carries which kind closed so the per-button reopen
+   *  guards stay independent. */
+  onMenuClosed(cb: (info: { menu: 'menu' | 'downloads' }) => void): () => void
   /** Subscribe to first-use takeover step changes (modal-unification
    *  Track M-2.2). Mode mirrors `firstUseMode` on the entry —
    *  `'none'` for no takeover mounted, `'consent-lockdown'` while the
@@ -232,7 +234,7 @@ const bridge: ComfyTitleBarBridge = {
   onMenuOpened: (cb) => {
     const handler = (_event: IpcRendererEvent, data: unknown): void => {
       const { menu } = (data || {}) as { menu?: unknown }
-      if (menu === 'menu') cb({ menu })
+      if (menu === 'menu' || menu === 'downloads') cb({ menu })
     }
     ipcRenderer.on('comfy-titlebar:menu-opened', handler)
     return () => ipcRenderer.removeListener('comfy-titlebar:menu-opened', handler)
@@ -240,7 +242,7 @@ const bridge: ComfyTitleBarBridge = {
   onMenuClosed: (cb) => {
     const handler = (_event: IpcRendererEvent, data: unknown): void => {
       const { menu } = (data || {}) as { menu?: unknown }
-      if (menu === 'menu') cb({ menu })
+      if (menu === 'menu' || menu === 'downloads') cb({ menu })
     }
     ipcRenderer.on('comfy-titlebar:menu-closed', handler)
     return () => ipcRenderer.removeListener('comfy-titlebar:menu-closed', handler)

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import MenuView from './MenuView.vue'
 import DownloadsView from './DownloadsView.vue'
 
@@ -21,6 +21,9 @@ import DownloadsView from './DownloadsView.vue'
 interface MenuItem {
   id?: string
   label?: string
+  /** Optional vue-i18n key — MenuView resolves it against the
+   *  shared en catalog. */
+  labelKey?: string
   checked?: boolean
   kind?: 'separator'
 }
@@ -37,6 +40,7 @@ interface DownloadEntry {
   etaSeconds?: number
   status: 'pending' | 'downloading' | 'paused' | 'completed' | 'error' | 'cancelled'
   error?: string
+  createdAt?: number
 }
 
 interface DownloadsState {
@@ -62,6 +66,10 @@ interface Bridge {
   notifyRendered(): void
   onConfig(cb: (config: PopupConfig) => void): () => void
   onDownloadsChanged(cb: (state: DownloadsState) => void): () => void
+  /** Ask main to resize the popup view to the given natural content
+   *  height (CSS px). Only meaningful for the `'downloads'` kind —
+   *  menu kind is sized deterministically from its item list. */
+  requestSize(height: number): void
 }
 
 const bridge = (window as unknown as { __comfyTitlePopup?: Bridge }).__comfyTitlePopup
@@ -114,6 +122,35 @@ let unsubDownloads: (() => void) | undefined
  *  after main has already advanced `lastConfigJson`. */
 let renderSeq = 0
 
+/** Measure the popup's natural content height and ask main to size
+ *  the WebContentsView to fit. Downloads kind only — menu kind is
+ *  sized deterministically main-side from its item list. The list
+ *  element's `scrollHeight` returns its full content size regardless
+ *  of the `overflow-y: auto` clip, so this works even when the view
+ *  is currently sized below natural and the list is internally
+ *  scrolling. */
+function measureAndRequestSize(): void {
+  if (kind.value !== 'downloads') return
+  // Header is only rendered when there's something to clear; treat
+  // missing as 0px contribution.
+  const headEl = document.querySelector('.downloads-head') as HTMLElement | null
+  const listEl = document.querySelector(
+    '.downloads-list, .downloads-empty',
+  ) as HTMLElement | null
+  const footEl = document.querySelector('.downloads-foot') as HTMLElement | null
+  if (!footEl || !listEl) return
+  const listH =
+    listEl.classList.contains('downloads-list')
+      ? listEl.scrollHeight
+      : listEl.offsetHeight
+  // +2 for the .popup card's 1px top + 1px bottom border so the inner
+  // content lands inside the bordered card without clipping the last
+  // row.
+  const total =
+    (headEl?.offsetHeight ?? 0) + listH + footEl.offsetHeight + 2
+  bridge?.requestSize(total)
+}
+
 onMounted(() => {
   unsubConfig = bridge?.onConfig((cfg) => {
     kind.value = cfg.kind
@@ -125,10 +162,14 @@ onMounted(() => {
     // had a chance to paint it. Main keeps the popup view hidden until
     // this ack arrives so the user never sees a frame of the previous
     // open's content on a new open. The seq guard suppresses stale
-    // rAFs queued by earlier configs.
+    // rAFs queued by earlier configs. Measure-and-request-size runs
+    // *before* the rendered ack so main has the correct bounds applied
+    // by the time it flips the view visible — without this the popup
+    // would flash up at the previous open's height and then resize.
     void nextTick(() => {
       requestAnimationFrame(() => {
         if (seq !== renderSeq) return
+        measureAndRequestSize()
         bridge?.notifyRendered()
       })
     })
@@ -141,6 +182,21 @@ onMounted(() => {
   // config that was queued before this point.
   bridge?.ready()
 })
+
+// Re-measure whenever the downloads state changes (entries added /
+// removed / status transitions / dismissals) so the shelf grows and
+// shrinks to fit. Wait one frame so Vue has flushed the DOM update.
+watch(
+  downloadsState,
+  () => {
+    void nextTick(() => {
+      requestAnimationFrame(() => {
+        measureAndRequestSize()
+      })
+    })
+  },
+  { deep: true },
+)
 onUnmounted(() => {
   unsubConfig?.()
   unsubDownloads?.()

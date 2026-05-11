@@ -19,7 +19,13 @@ import type { IpcRendererEvent } from 'electron'
 
 export interface TitlePopupMenuItem {
   id?: string
+  /** Visible label. English fallback when `labelKey` is set;
+   *  rendered verbatim otherwise. */
   label?: string
+  /** Optional vue-i18n key the popup's MenuView resolves against the
+   *  shared en catalog. Lets main-built labels participate in i18n
+   *  even though main itself can't run vue-i18n. */
+  labelKey?: string
   checked?: boolean
   kind?: 'separator'
 }
@@ -49,6 +55,11 @@ export interface PopupDownloadEntry {
   etaSeconds?: number
   status: 'pending' | 'downloading' | 'paused' | 'completed' | 'error' | 'cancelled'
   error?: string
+  /** First-seen wall-clock timestamp (ms). Stable across status
+   *  transitions so the popup view can render a single insertion-
+   *  ordered list (terminal entries stay in their slot rather than
+   *  jumping to the bottom of a separate "recent" bucket). */
+  createdAt?: number
 }
 
 export interface PopupDownloadsState {
@@ -61,6 +72,8 @@ export type PopupDownloadAction =
   | { action: 'resume'; url: string }
   | { action: 'cancel'; url: string }
   | { action: 'show-in-folder'; url: string; savePath: string }
+  | { action: 'dismiss'; url: string }
+  | { action: 'clear-finished' }
 
 /** Settings tabs the popup can deep-link the host's panelView into.
  *  Mirrors `SettingsTab` in `views/SettingsModal.vue` — kept inline
@@ -97,6 +110,12 @@ export interface ComfyTitlePopupBridge {
    *  on the host's panelView at the given tab. Used by the downloads
    *  view's "View all in Settings…" link. */
   openSettingsTab(tab: PopupSettingsTab): void
+  /** Ask main to resize the popup view to the given natural content
+   *  height (CSS px). Main clamps to a [min, max] band so the popup
+   *  shrinks to fit empty / few-entry states and stays compact under
+   *  long histories. Only meaningful for the `'downloads'` kind — the
+   *  menu kind is sized deterministically from its item list. */
+  requestSize(height: number): void
 }
 
 function isPopupConfig(value: unknown): value is TitlePopupConfig {
@@ -148,6 +167,10 @@ const bridge: ComfyTitlePopupBridge = {
   },
   openSettingsTab: (tab) => {
     ipcRenderer.send('comfy-titlepopup:open-settings-tab', { tab })
+  },
+  requestSize: (height) => {
+    if (!Number.isFinite(height) || height <= 0) return
+    ipcRenderer.send('comfy-titlepopup:request-size', { height })
   },
 }
 

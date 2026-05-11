@@ -23,7 +23,9 @@ import {
   attachSessionDownloadHandler,
   cancelModelDownload,
   cleanupTempDownloads,
+  clearFinishedDownloads,
   detachWindowDownloads,
+  dismissRecentDownload,
   downloadEvents,
   getDownloadsTrayState,
   pauseModelDownload,
@@ -2770,8 +2772,15 @@ ipcMain.on('comfy-window:new-chooser-window', () => {
 interface TitlePopupMenuItem {
   /** Item id — main routes activation by this. Omitted for separators. */
   id?: string
-  /** Visible label. */
+  /** Visible label. Treated as the English fallback when `labelKey`
+   *  is set; otherwise rendered verbatim by the popup view. */
   label?: string
+  /** Optional vue-i18n key the popup view resolves against its own
+   *  message catalog (`lib/i18nMessages.ts`). Lets the renderer
+   *  translate menu items even though the labels are built main-side
+   *  where vue-i18n isn't available. Falls back to `label` if the key
+   *  isn't in the catalog. */
+  labelKey?: string
   /** Render a checkmark glyph beside the label when true. */
   checked?: boolean
   /** Marks a separator row instead of an interactive item. */
@@ -2885,7 +2894,13 @@ function buildTitlePopupMenuItems(entry: ComfyWindowEntry): TitlePopupMenuItem[]
   // Onboarding marks completion + clears the chain state and dismisses
   // the takeover.
   if (entry.firstUseMode === 'post-consent') {
-    return [{ id: 'skip-onboarding', label: 'Skip Onboarding' }]
+    return [
+      {
+        id: 'skip-onboarding',
+        label: 'Skip Onboarding',
+        labelKey: 'fileMenu.skipOnboarding',
+      },
+    ]
   }
   // Issue #497 — file-menu order:
   //   New Window
@@ -2914,29 +2929,42 @@ function buildTitlePopupMenuItems(entry: ComfyWindowEntry): TitlePopupMenuItem[]
   //     host windows are already on the chooser body so the entry
   //     would be a no-op there.
   const items: TitlePopupMenuItem[] = [
-    { id: 'new-window', label: 'New Window' },
+    { id: 'new-window', label: 'New Window', labelKey: 'fileMenu.newWindow' },
     { kind: 'separator' },
   ]
   if (entry.installationId === null) {
     items.push(
-      { id: 'new-install', label: 'New Install' },
-      { id: 'track', label: 'Add Existing Install' },
-      { id: 'load-snapshot', label: 'Load Snapshot' },
+      { id: 'new-install', label: 'New Install', labelKey: 'fileMenu.newInstall' },
+      {
+        id: 'track',
+        label: 'Add Existing Install',
+        labelKey: 'fileMenu.addExistingInstall',
+      },
+      { id: 'load-snapshot', label: 'Load Snapshot', labelKey: 'fileMenu.loadSnapshot' },
       { kind: 'separator' },
     )
   }
   items.push(
-    { id: 'settings', label: 'Settings', checked: entry.activePanel === 'settings' },
+    {
+      id: 'settings',
+      label: 'Settings',
+      labelKey: 'fileMenu.settings',
+      checked: entry.activePanel === 'settings',
+    },
     // Send Feedback (#493) — restored after the legacy launcher-window
     // sidebar (which previously hosted the link) was retired by the
     // unified-window-titlebar-panels refactor. The renderer-side
     // handler resolves the support URL and emits the
     // `desktop2.feedback.opened` telemetry action with `source: 'menu'`.
-    { id: 'feedback', label: 'Send Feedback' },
+    { id: 'feedback', label: 'Send Feedback', labelKey: 'fileMenu.sendFeedback' },
     { kind: 'separator' },
   )
   if (entry.installationId !== null) {
-    items.push({ id: 'return-to-dashboard', label: 'Return to Dashboard' })
+    items.push({
+      id: 'return-to-dashboard',
+      label: 'Return to Dashboard',
+      labelKey: 'fileMenu.returnToDashboard',
+    })
   }
   // Reset Zoom — discoverable recovery path for users who zoom the Comfy
   // view too far to read. Only surfaced when zoom is actually non-default,
@@ -2950,7 +2978,11 @@ function buildTitlePopupMenuItems(entry: ComfyWindowEntry): TitlePopupMenuItem[]
       items.push({ id: 'reset-zoom', label: `Reset Zoom (${percent}%)` })
     }
   }
-  items.push({ id: 'close-all-windows', label: 'Close All Windows' })
+  items.push({
+    id: 'close-all-windows',
+    label: 'Close All Windows',
+    labelKey: 'fileMenu.closeAllWindows',
+  })
   return items
 }
 
@@ -3150,11 +3182,17 @@ function showTitlePopupNow(entry: TitlePopupEntry): void {
   }
 }
 
-/** Downloads popup sizing — fixed width with the height capped to 60%
- *  of the parent window's content area so a long list doesn't push past
- *  the bottom of the host window. */
+/** Downloads popup sizing — fixed width and a fixed pixel cap on
+ *  height. The popup view content scrolls internally past the cap so
+ *  the dropdown stays compact even with a full recent buffer. The
+ *  ratio cap is a safety net for very small windows where the fixed
+ *  cap would push past the bottom of the host. The renderer measures
+ *  its own natural height (empty placeholder + footer, or a list of
+ *  entries) and asks for it via `requestSize`, so we don't impose a
+ *  pixel floor — the empty placeholder's own padding already provides
+ *  enough visual weight that the popup never reads as a sliver. */
 const DOWNLOADS_POPUP_WIDTH = 360
-const DOWNLOADS_POPUP_MIN_HEIGHT = 120
+const DOWNLOADS_POPUP_MAX_HEIGHT_PX = 360
 const DOWNLOADS_POPUP_MAX_HEIGHT_RATIO = 0.6
 
 type OpenTitlePopupOpts = {
@@ -3194,8 +3232,15 @@ function openTitlePopup(opts: OpenTitlePopupOpts): void {
   } else {
     width = DOWNLOADS_POPUP_WIDTH
     const contentHeight = opts.parent.getContentBounds().height
-    height = Math.max(
-      DOWNLOADS_POPUP_MIN_HEIGHT,
+    // Open at the ceiling (smaller of the fixed pixel cap or 60% of the
+    // host window's content height, so the popup never overflows tiny
+    // windows). The renderer immediately measures its natural content
+    // height and asks for it via `requestSize`, which clamps back into
+    // this band. The popup stays hidden until the renderer's
+    // `notifyRendered` ack arrives, so the user never sees this
+    // provisional size.
+    height = Math.min(
+      DOWNLOADS_POPUP_MAX_HEIGHT_PX,
       Math.round(contentHeight * DOWNLOADS_POPUP_MAX_HEIGHT_RATIO),
     )
   }
@@ -3400,15 +3445,53 @@ ipcMain.on('comfy-titlepopup:close', (event) => {
   hideTitlePopup(entry, { releaseFocusToParent: true })
 })
 
+/** Renderer-driven resize for the downloads popup. The downloads
+ *  shelf has highly variable natural height (empty placeholder vs. a
+ *  full recent buffer with a mix of active + terminal entries) and
+ *  predicting it main-side is brittle, so the popup measures itself
+ *  and asks for the bounds it wants. We cap at MAX_PX and re-floor by
+ *  the host window's contentHeight ratio so the popup never overflows
+ *  tiny windows; otherwise we trust the measured natural height (the
+ *  empty placeholder's own padding keeps the empty case from reading
+ *  as a sliver). Width and position are preserved. */
+ipcMain.on(
+  'comfy-titlepopup:request-size',
+  (event, payload: { height?: unknown }) => {
+    const entry = titlePopupsByWebContents.get(event.sender.id)
+    if (!entry) return
+    // Menu popups are sized deterministically by `computePopupHeight`
+    // — ignore renderer requests to avoid fighting the source of truth.
+    if (entry.kind !== 'downloads') return
+    const requested = payload?.height
+    if (typeof requested !== 'number' || !Number.isFinite(requested)) return
+    const parent = comfyWindows.get(entry.parentEntryId)?.window
+    if (!parent || parent.isDestroyed()) return
+    const contentHeight = parent.getContentBounds().height
+    const ceiling = Math.min(
+      DOWNLOADS_POPUP_MAX_HEIGHT_PX,
+      Math.round(contentHeight * DOWNLOADS_POPUP_MAX_HEIGHT_RATIO),
+    )
+    const next = Math.max(1, Math.min(ceiling, Math.ceil(requested)))
+    const cur = entry.popup.getBounds()
+    if (cur.height === next) return
+    entry.popup.setBounds({ x: cur.x, y: cur.y, width: cur.width, height: next })
+  },
+)
+
 /** Per-entry download action dispatched from the popup's downloads view.
- *  Routes pause / resume / cancel through the existing download-manager
- *  APIs and `show-in-folder` through Electron's shell. */
+ *  Routes pause / resume / cancel / dismiss through the existing
+ *  download-manager APIs and `show-in-folder` through Electron's shell.
+ *  `clear-finished` is the only action that doesn't carry a url. */
 ipcMain.on(
   'comfy-titlepopup:downloads-action',
   (event, payload: { action?: unknown; url?: unknown; savePath?: unknown }) => {
     const entry = titlePopupsByWebContents.get(event.sender.id)
     if (!entry) return
     const { action, url, savePath } = payload ?? {}
+    if (action === 'clear-finished') {
+      clearFinishedDownloads()
+      return
+    }
     if (typeof url !== 'string' || url.length === 0) return
     switch (action) {
       case 'pause':
@@ -3419,6 +3502,9 @@ ipcMain.on(
         return
       case 'cancel':
         cancelModelDownload(url)
+        return
+      case 'dismiss':
+        dismissRecentDownload(url)
         return
       case 'show-in-folder':
         if (typeof savePath === 'string' && savePath.length > 0) {
