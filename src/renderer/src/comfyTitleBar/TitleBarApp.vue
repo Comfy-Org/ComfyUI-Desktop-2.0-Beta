@@ -468,10 +468,13 @@ let lastHiddenAt = -Infinity
  * native one plus our custom popup). Keep them mutually exclusive at
  * the source by emitting `title` only off-mac and `data-title-tooltip`
  * only on mac. `aria-label` is unconditional so screen readers see
- * the same string regardless of platform.
+ * the same string regardless of platform — pass `ariaLabel` separately
+ * when the visible label and the tooltip copy intentionally differ
+ * (e.g. the Send Feedback button shows "Beta Feedback" but the
+ * tooltip reads "Send Feedback").
  */
-function tooltipAttrs(text: string): Record<string, string> {
-  const base: Record<string, string> = { 'aria-label': text }
+function tooltipAttrs(text: string, ariaLabel?: string): Record<string, string> {
+  const base: Record<string, string> = { 'aria-label': ariaLabel ?? text }
   if (isMac.value) {
     base['data-title-tooltip'] = text
   } else {
@@ -824,7 +827,7 @@ onUnmounted(() => {
         v-if="!isConsentLockdown"
         type="button"
         class="title-menu-button title-feedback-button"
-        v-bind="tooltipAttrs(t('titleBar.feedbackTooltip'))"
+        v-bind="tooltipAttrs(t('titleBar.feedbackTooltip'), t('titleBar.feedback'))"
         @click="handleFeedback"
       >
         <MessageSquarePlus :size="16" />
