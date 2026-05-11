@@ -32,7 +32,7 @@ export default defineConfig([
       parserOptions: {
         ...commonParserOptions,
         projectService: {
-          allowDefaultProject: ['eslint.config.ts', 'vitest.config.ts']
+          allowDefaultProject: ['eslint.config.ts', 'vitest.config.ts', 'vitest.setup.ts']
         }
       }
     }

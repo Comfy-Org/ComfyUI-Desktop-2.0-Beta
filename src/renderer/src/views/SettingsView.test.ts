@@ -35,6 +35,7 @@ const messages = {
   en: {
     settings: {
       title: 'Settings',
+      checkForUpdates: 'Check for updates',
       checkingForUpdates: 'Checking…',
     },
     update: {
@@ -42,6 +43,16 @@ const messages = {
       updateError: 'Update Error',
       upToDate: 'You are running the latest version.',
       debUpToDate: 'Updates are delivered through your system package manager (apt).',
+    },
+    appUpdate: {
+      fallbackVersion: 'this update',
+      panelIdleTitle: 'Up to date',
+      panelAvailableTitle: 'Update {version} available',
+      panelReadyTitle: 'Update {version} ready',
+      panelDownloadingTitle: 'Downloading {version}…',
+      download: 'Download',
+      downloading: 'Downloading…',
+      restartNow: 'Restart & Update',
     },
   },
 }
@@ -58,15 +69,26 @@ function createTestI18n() {
 
 function stubApi(overrides: Partial<ElectronApi> = {}): ElectronApi {
   return {
+    // Main no longer emits a `'check-for-update'` action — the
+    // dedicated AppUpdateAction section owns the affordance now. Stub
+    // returns the General section without it so SettingsView's
+    // sections-vs-AppUpdateAction split renders the same way it does
+    // in production.
     getSettingsSections: vi.fn().mockResolvedValue([
       {
-        title: 'Updates',
+        title: 'General',
         fields: [],
-        actions: [{ label: 'Check for updates', action: 'check-for-update' }],
       },
     ]),
     getUpdateCapabilities: vi.fn().mockResolvedValue({ canAutoUpdate: true, systemManaged: false }),
     checkForUpdate: vi.fn().mockResolvedValue({ available: false }),
+    // AppUpdateAction owns the state-driven update affordance; it
+    // fetches the snapshot on mount and subscribes for live pushes
+    // (state, download-progress, and user-action-failed).
+    getAppUpdateState: vi.fn().mockResolvedValue({ kind: null, version: null, autoUpdate: true }),
+    onAppUpdateStateChanged: vi.fn(() => () => {}),
+    onAppUpdateDownloadProgress: vi.fn(() => () => {}),
+    onAppUpdateUserActionFailed: vi.fn(() => () => {}),
     openExternal: vi.fn(),
     // Unified Settings modal moved settings-mutation refresh into
     // SettingsView itself, so the component subscribes on mount —

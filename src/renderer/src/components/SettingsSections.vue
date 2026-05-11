@@ -4,7 +4,6 @@ import type { SettingsSection, SettingsAction } from '../types/ipc'
 
 defineProps<{
   sections: SettingsSection[]
-  checkingForUpdates: boolean
 }>()
 
 const emit = defineEmits<{
@@ -32,10 +31,9 @@ const emit = defineEmits<{
       <button
         v-for="(action, aIdx) in section.actions"
         :key="aIdx"
-        :disabled="action.action === 'check-for-update' && checkingForUpdates"
         @click="emit('action', action)"
       >
-        {{ action.action === 'check-for-update' && checkingForUpdates ? $t('settings.checkingForUpdates') : action.label }}
+        {{ action.label }}
       </button>
     </div>
   </div>

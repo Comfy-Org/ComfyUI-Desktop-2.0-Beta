@@ -55,6 +55,8 @@ export type {
   SnapshotDiffData,
   SnapshotFilePreview,
   ErrorDetailData,
+  AppUpdateState,
+  AppUpdateDownloadProgress,
   ElectronApi,
 } from '../../../types/ipc'
 export { REQUIRES_STOPPED } from '../../../types/ipc'

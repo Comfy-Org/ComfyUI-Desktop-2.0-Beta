@@ -1,13 +1,17 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed, useTemplateRef } from 'vue'
+import { useI18n } from 'vue-i18n'
 import {
   ArrowDownToLine,
   Download,
+  Loader2,
   Menu as MenuIcon,
   MessageSquarePlus,
   RefreshCw,
 } from 'lucide-vue-next'
 import { installTypeMetaFor } from '../lib/installTypeIcon'
+
+const { t } = useI18n()
 
 // Inlined to keep the title-bar renderer self-contained — the preload TS
 // file isn't visible to tsconfig.web (only its .d.ts would be). Kept in
@@ -29,7 +33,7 @@ interface MenuAnchor {
   y: number
 }
 
-/** Track F — single download entry surfaced by the title-bar tray.
+/** Single download entry surfaced by the title-bar tray.
  *  Inline mirror of `DownloadsTrayEntry` in
  *  `src/preload/comfyTitleBarPreload.ts` — kept in sync because the
  *  title-bar renderer can't import preload TS directly (only its
@@ -43,7 +47,7 @@ interface DownloadsTrayEntry {
   error?: string
 }
 
-/** Track F — payload pushed by main on `comfy-titlebar:downloads-changed`.
+/** Payload pushed by main on `comfy-titlebar:downloads-changed`.
  *  Inline mirror of `DownloadsTrayState` in the preload file. */
 interface DownloadsTrayState {
   active: DownloadsTrayEntry[]
@@ -61,35 +65,33 @@ interface Bridge {
   dismissFileMenu: () => void
   onPanelChanged: (cb: (panel: ComfyPanelKey) => void) => () => void
   onTitleChanged: (cb: (title: string) => void) => () => void
-  /** Track B item 4 — install source-category pushes from main. The
-   *  raw category string drives the install-type icon next to the
-   *  install name (Standalone / Cloud / Legacy Desktop / …). `null`
-   *  for install-less host windows; the renderer suppresses the icon
-   *  in that case. */
+  /** Install source-category pushes from main. The raw category
+   *  string drives the install-type icon next to the install name
+   *  (Standalone / Cloud / Legacy Desktop / …). `null` for
+   *  install-less host windows; the renderer suppresses the icon in
+   *  that case. */
   onSourceCategoryChanged: (cb: (category: string | null) => void) => () => void
   onThemeChanged: (cb: (theme: { bg: string; text: string }) => void) => () => void
   onFullscreenChanged: (cb: (fullscreen: boolean) => void) => () => void
-  onMenuOpened: (cb: (info: { menu: 'file' }) => void) => () => void
-  onMenuClosed: (cb: (info: { menu: 'file' }) => void) => () => void
-  /** Modal-unification (Track M-2.3) — first-use takeover step pushes
-   *  from main. Drives the T&C-step lockdown that hides the waffle
-   *  menu (the otherwise-always-live escape hatch) so the user has to
-   *  either accept consent or close the window via OS chrome —
-   *  there's no in-app affordance that drops them past the T&C
-   *  without a recorded answer. The post-consent steps stay normal
-   *  except for the Skip Onboarding entry the menu builder adds in
-   *  M-2.2. */
+  onMenuOpened: (cb: (info: { menu: 'menu' | 'downloads' }) => void) => () => void
+  onMenuClosed: (cb: (info: { menu: 'menu' | 'downloads' }) => void) => () => void
+  /** First-use takeover step pushes from main. Drives the T&C-step
+   *  lockdown that hides the waffle menu (the otherwise-always-live
+   *  escape hatch) so the user has to either accept consent or close
+   *  the window via OS chrome — there's no in-app affordance that
+   *  drops them past the T&C without a recorded answer. The
+   *  post-consent steps stay normal except for the Skip Onboarding
+   *  entry the menu builder adds. */
   onFirstUseModeChanged: (
     cb: (mode: 'none' | 'consent-lockdown' | 'post-consent') => void,
   ) => () => void
-  /** Phase 3 §18 — app-update state pushes from main. `kind` is
-   *  `'available'` after `update-available`, `'ready'` after
-   *  `update-downloaded`, and `null` when nothing is pending.
-   *  Drives the title-bar app-update pill that sits to the right of
-   *  the hamburger menu.
+  /** App-update state pushes from main. `kind` is `'available'`
+   *  after `update-available`, `'ready'` after `update-downloaded`,
+   *  and `null` when nothing is pending. Drives the title-bar
+   *  app-update pill that sits to the right of the hamburger menu.
    *
-   *  Track B item 2 — `autoUpdate` mirrors the `autoUpdate` setting
-   *  at the moment the state was committed. With auto-updates ON the
+   *  `autoUpdate` mirrors the `autoUpdate` setting at the moment the
+   *  state was committed. With auto-updates ON the
    *  `'available'` state never fires (main triggers the download
    *  itself); the `'ready'` state then reads "Update will apply on
    *  restart". With auto-updates OFF the `'available'` pill reads
@@ -97,36 +99,35 @@ interface Bridge {
    *  existing "Restart to update" copy. */
   onAppUpdateStateChanged: (
     cb: (state: {
-      kind: 'available' | 'ready' | null
+      kind: 'available' | 'downloading' | 'ready' | null
       version: string | null
       autoUpdate: boolean
     }) => void,
   ) => () => void
-  /** Phase 3 §18 — install-update flag pushes from main. `available`
-   *  is `true` when the install's `statusTag.style === 'update'`;
-   *  `version` carries the target release version when known so the
-   *  pill can read "Update v{version}" (Track B item 1). Only
-   *  meaningful on install-backed host windows; install-less hosts
-   *  never receive this signal. Drives the title-bar install-update
-   *  pill. */
+  /** Install-update flag pushes from main. `available` is `true`
+   *  when the install's `statusTag.style === 'update'`; `version`
+   *  carries the target release version when known so the pill can
+   *  read "Update v{version}". Only meaningful on install-backed
+   *  host windows; install-less hosts never receive this signal.
+   *  Drives the title-bar install-update pill. */
   onInstallUpdateAvailable: (
     cb: (state: { available: boolean; version: string | null }) => void,
   ) => () => void
-  /** Phase 3 §18 — click handler for the app-update pill. */
+  /** Click handler for the app-update pill. */
   clickAppUpdatePill: () => void
-  /** Phase 3 §18 — click handler for the install-update pill. */
+  /** Click handler for the install-update pill. */
   clickInstallUpdatePill: () => void
-  /** Track F — downloads tray state pushes from main. The payload
+  /** Downloads tray state pushes from main. The payload
    *  carries both in-flight downloads (`active`) and the most recent
    *  terminal entries (`recent`, capped server-side at 10). The tray
    *  is hidden entirely when both arrays are empty so it doesn't
    *  squat in the steady state. Pushed initially on `ready()` and
    *  on every state change (broadcast by the download manager). */
   onDownloadsChanged: (cb: (state: DownloadsTrayState) => void) => () => void
-  /** Track F — click handler for the downloads tray. Routes through
-   *  the same `panel-trigger-overlay` channel as the update pills so
-   *  the panel renderer can mount the downloads popover. */
-  clickDownloadsTray: () => void
+  /** Click handler for the downloads tray. Opens the title-bar
+   *  dropdown popup in `'downloads'` mode anchored under the tray
+   *  button. */
+  clickDownloadsTray: (anchor: MenuAnchor) => void
   /** Click handler for the title-bar Send Feedback button. Main
    *  forwards `comfy-panel:open-feedback` to the panel renderer,
    *  which fires the `desktop2.feedback.opened` telemetry action and
@@ -169,33 +170,23 @@ const isHoverActive = ref(true)
  *  an identity label, not a tab indicator. */
 const activePanel = ref<ComfyPanelKey>('comfy')
 /**
- * Modal-unification (Track M-2.3 / M-4) — first-use takeover step
- * pushed from main via `comfy-titlebar:first-use-mode-changed`. The
- * renderer uses the value to lock down the title bar during the T&C
- * consent step (`'consent-lockdown'`) by hiding the waffle menu —
- * the only always-live escape hatch the user would otherwise have
- * out of the binding takeover. Post-consent steps (`'post-consent'`)
- * leave the title bar normal so the file-menu Skip Onboarding entry
- * the menu builder added in M-2.2 stays reachable. `'none'` is the
- * steady state with no takeover mounted.
+ * First-use takeover step pushed from main via
+ * `comfy-titlebar:first-use-mode-changed`. The renderer uses the
+ * value to lock down the title bar during the T&C consent step
+ * (`'consent-lockdown'`) by hiding the waffle menu — the only
+ * always-live escape hatch the user would otherwise have out of the
+ * binding takeover. Post-consent steps (`'post-consent'`) leave the
+ * title bar normal so the file-menu Skip Onboarding entry stays
+ * reachable. `'none'` is the steady state with no takeover mounted.
  *
  * State is local, main does NOT cache the value here (it's cached on
  * the host entry main-side, see `ComfyWindowEntry.firstUseMode`),
  * matching how panel-changed / theme-changed already work.
- *
- * The pre-M-4 `isInert` ref that used to disable the install pill /
- * back-forward arrows / app-update + install-update + downloads
- * pills during ANY Tier 3 takeover was retired — the binding-modal
- * chrome (M-3) handles "the user is in a centred dialog and the
- * other affordances are visually subordinate", and the cancel-on-
- * close consult (M-2.4) handles OS-X gracefully. The other title-
- * bar affordances stay live so the user can deliberately click out
- * via Skip Onboarding / Return-to-Dashboard / etc.
  */
 const firstUseMode = ref<'none' | 'consent-lockdown' | 'post-consent'>('none')
 const isConsentLockdown = computed(() => firstUseMode.value === 'consent-lockdown')
 /**
- * Install-less host window flag (Phase 3 step 2c). When true, the center
+ * Install-less host window flag. When true, the center
  * install pill labels itself "Desktop 2.0 Beta" (set by the initial
  * title push from main) and the install-type icon next to the label is
  * suppressed. The center pill is no longer clickable in either mode —
@@ -205,12 +196,12 @@ const isConsentLockdown = computed(() => firstUseMode.value === 'consent-lockdow
  */
 const isInstallLess = ref((bridge?.getInstallationId() ?? '') === '')
 /** Install identity ("MyInstall") — main pushes this on ready.
- *  Track B item 4 — the source-category suffix (`— Standalone` /
- *  `— Cloud` / …) is no longer part of the label; it's rendered as
- *  an icon next to the name via `installTypeIcon`. */
+ *  The source-category suffix (`— Standalone` / `— Cloud` / …) is
+ *  not part of the label; it's rendered as an icon next to the name
+ *  via `installTypeIcon`. */
 const installLabel = ref('ComfyUI')
 /**
- * Track B item 4 — raw `sourceCategory` string pushed by main on the
+ * Raw `sourceCategory` string pushed by main on the
  * `comfy-titlebar:source-category-changed` channel. Drives the
  * install-type icon next to the install name (Standalone laptop /
  * Cloud / Legacy Desktop tower / …) via the shared
@@ -223,21 +214,11 @@ const sourceCategory = ref<string | null>(null)
  *  `installTypeMetaFor()` so the helper isn't called inline in the
  *  template (keeps Vue's reactivity watcher minimal). */
 const installTypeMeta = computed(() => installTypeMetaFor(sourceCategory.value))
-/** English fallbacks for the install-type tooltip — the title-bar
- *  renderer is intentionally i18n-free (it has its own bundle and
- *  doesn't ship vue-i18n). The same `installType.*` keys exist in
- *  `locales/*.json` for the chooser tile, which DOES have i18n;
- *  this map mirrors the `en.json` values verbatim so the tooltip
- *  copy stays consistent across surfaces. */
-const INSTALL_TYPE_LABELS: Record<string, string> = {
-  'installType.standalone': 'Standalone',
-  'installType.cloud': 'Cloud',
-  'installType.legacyDesktop': 'Legacy Desktop',
-  'installType.remote': 'Remote',
-  'installType.unknown': 'Unknown',
-}
+/** Tooltip for the install-type icon. `installTypeMetaFor` returns
+ *  dotted keys like `installType.standalone` that match the en
+ *  catalog one-to-one. */
 const installTypeLabel = computed(() => {
-  return INSTALL_TYPE_LABELS[installTypeMeta.value.labelKey] ?? 'Unknown'
+  return t(installTypeMeta.value.labelKey, t('installType.unknown'))
 })
 /** Whether to render the install-type icon. Suppressed on
  *  install-less host windows (no install backing the entry) so the
@@ -249,7 +230,7 @@ const themeBg = ref<string | null>(null)
 const themeText = ref<string | null>(null)
 
 /**
- * Phase 3 §18 — title-bar status pills.
+ * Title-bar status pills.
  *
  * The app-update pill (right of the hamburger) shows when the
  * auto-updater has either downloaded an update (`'ready'`, prompts
@@ -265,16 +246,9 @@ const themeText = ref<string | null>(null)
  * pushed from main on `comfy-titlebar:install-update-changed` and is
  * gated on `!isInstallLess` (install-less hosts have no install backing
  * the window, so an install-scoped pill is meaningless there).
- *
- * Modal-unification (Track M-4) — the pre-M-4 isInert disable that
- * gated both pills during any Tier 3 takeover was retired together
- * with the broader title-bar lockdown system. The pills now stay
- * live during a takeover; the binding-modal chrome (M-3) keeps the
- * takeover visually dominant and clicking the app-update pill is
- * treated as a deliberate user action.
  */
 const appUpdateState = ref<{
-  kind: 'available' | 'ready' | null
+  kind: 'available' | 'downloading' | 'ready' | null
   version: string | null
   autoUpdate: boolean
 }>({ kind: null, version: null, autoUpdate: true })
@@ -286,10 +260,11 @@ const installUpdateState = ref<{ available: boolean; version: string | null }>({
 const appUpdatePillLabel = computed<string | null>(() => {
   const s = appUpdateState.value
   if (!s.kind) return null
-  if (s.kind === 'ready') return 'Desktop Update Ready'
+  if (s.kind === 'ready') return t('titleBar.desktopUpdateReady')
+  if (s.kind === 'downloading') return t('titleBar.desktopUpdateDownloading')
   // 'available' — only fires with auto-updates OFF (main suppresses
   // it when ON and triggers the download itself).
-  return 'Desktop Update Available'
+  return t('titleBar.desktopUpdateAvailable')
 })
 
 /** Tooltip / aria-label augments the pill label with the version when
@@ -299,17 +274,20 @@ const appUpdatePillTooltip = computed<string>(() => {
   const label = appUpdatePillLabel.value
   if (!label) return ''
   const v = appUpdateState.value.version
-  return v ? `${label} (v${v})` : label
+  return v
+    ? t('titleBar.desktopUpdateWithVersion', { label, version: v })
+    : label
 })
 
-/** Track B item 1 — install-update pill copy. Mirrors the app-update
- *  pill's "Update {version}" format when main carries a target version
+/** Install-update pill copy. Mirrors the app-update pill's
+ *  "Update {version}" format when main carries a target version
  *  through the install's status tag, falling back to the generic
- *  "Update available" label when no version is known (e.g. legacy
- *  payloads or sources that don't surface one). */
+ *  "Update available" label when no version is known. */
 const installUpdatePillLabel = computed<string>(() => {
   const v = installUpdateState.value.version
-  return v ? `Update ${v}` : 'Update available'
+  return v
+    ? t('titleBar.installUpdateVersion', { version: v })
+    : t('titleBar.installUpdateAvailable')
 })
 
 const showAppUpdatePill = computed(() => appUpdateState.value.kind !== null)
@@ -325,43 +303,45 @@ function handleInstallUpdatePill(): void {
 }
 
 /**
- * Track F — title-bar downloads tray. Sits in the left cluster next
- * to the app-update pill but visually distinct: an icon-only button
- * with a small badge counter (vs the update pill's text + accent
- * fill) and a different Lucide icon (`ArrowDownToLine` vs the
- * update pill's `Download`) so the user reads "downloads tray" vs
- * "update available pill" at a glance.
+ * Title-bar downloads tray. Always-visible icon button sitting in the
+ * center cluster immediately left of the install pill. Distinct from
+ * the update pills in two ways so the user reads them at a glance:
+ *   - Icon (`ArrowDownToLine` vs `Download` / `RefreshCw`).
+ *   - Chrome (neutral surface tint vs blue/green accent).
  *
- * Hidden entirely in the steady state (no active or recent
- * downloads) — there's no permanent empty-tray squatting. The
- * badge counts in-flight downloads only; recently-completed
- * entries surface in the popover but don't bump the count (so the
- * count reads as "what's still working").
+ * The badge counts in-flight downloads only; recently-completed
+ * entries surface in the popup but don't bump the count (so the
+ * count reads as "what's still working"). Click opens the title-bar
+ * dropdown popup in `'downloads'` mode; the popup carries the
+ * empty-state copy so the title-bar button stays present even when
+ * nothing is downloading.
  *
- * Click sends `clickDownloadsTray()` which routes through main and
- * mounts the downloads popover in the panel renderer (same
- * `panel-trigger-overlay` pipeline the update pills use).
- *
- * Modal-unification (Track M-4) — the pre-M-4 isInert disable that
- * dimmed this tray during any Tier 3 takeover was retired together
- * with the rest of the title-bar lockdown system; the tray stays
- * live during a takeover and clicking it pops the downloads
- * popover even with a binding modal open.
+ * Stays visible during the consent lockdown so an in-flight model
+ * download remains reachable while the waffle / feedback are hidden.
  */
 const downloadsState = ref<DownloadsTrayState>({ active: [], recent: [] })
 
 const downloadsActiveCount = computed(() => downloadsState.value.active.length)
-const showDownloadsTray = computed(
-  () => downloadsState.value.active.length > 0 || downloadsState.value.recent.length > 0,
-)
 const downloadsTrayLabel = computed<string>(() => {
   const n = downloadsActiveCount.value
-  if (n === 0) return 'Downloads'
-  return `${n} download${n === 1 ? '' : 's'} in progress`
+  if (n === 0) return t('titleBar.downloads')
+  return t('titleBar.downloadsInProgress', { n }, n)
 })
 
+const downloadsBtnRef = useTemplateRef<HTMLButtonElement>('downloadsBtn')
+
 function handleDownloadsTray(): void {
-  bridge?.clickDownloadsTray()
+  // Toggle-close + reopen guard mirror `handleFileMenu` — the popup is
+  // a single shared WebContentsView, so the same dismiss / reopen
+  // behaviour the waffle has applies. Without this the tray button
+  // would re-pop the popup immediately after the user's click on it
+  // dismissed it, looking like the popup never closes.
+  if (isMenuOpen.value) {
+    bridge?.dismissFileMenu()
+    return
+  }
+  if (Date.now() - menuClosedAt.downloads < MENU_REOPEN_GUARD_MS) return
+  bridge?.clickDownloadsTray(anchorBelow(downloadsBtnRef.value))
 }
 
 /** Title-bar Send Feedback button. Routes through main, which forwards
@@ -391,18 +371,19 @@ const isLight = computed(() => {
 
 const fileBtnRef = useTemplateRef<HTMLButtonElement>('fileBtn')
 
-/** Per-menu suppression window. When a native menu closes, we stamp
- *  `Date.now()` against its kind. The next click on the same menu
+/** Per-menu suppression window. When the popup closes, we stamp
+ *  `Date.now()` against its kind. The next click on the same opener
  *  button within `MENU_REOPEN_GUARD_MS` is treated as "the same click
- *  that just dismissed the menu" and is dropped, preventing the menu
- *  from flickering open immediately after the user clicked the open
- *  button to dismiss it. The OS dismisses the menu first, then the
- *  click event reaches our renderer button — without this guard the
- *  click handler would ask main to pop the menu again. The center
- *  install pill is no longer clickable, so the only menu kind we track
- *  here is `'file'`. */
+ *  that just dismissed the popup" and is dropped, preventing the
+ *  popup from flickering open immediately after the user clicked the
+ *  open button to dismiss it. The OS dismisses the popup first, then
+ *  the click event reaches our renderer button — without this guard
+ *  the handler would ask main to pop the popup again. Tracked per
+ *  popup kind because the waffle and the downloads tray are separate
+ *  buttons; clicking the downloads button shouldn't suppress a fresh
+ *  waffle open and vice versa. */
 const MENU_REOPEN_GUARD_MS = 100
-const menuClosedAt: Record<'file', number> = { file: 0 }
+const menuClosedAt: Record<'menu' | 'downloads', number> = { menu: 0, downloads: 0 }
 
 /** Tracks whether the popup is currently visible. Set by main via
  *  `onMenuOpened` / `onMenuClosed` IPCs. The timestamp guard above
@@ -436,7 +417,7 @@ function handleFileMenu(): void {
   // that dismissed the popup also retargets the menu button, and
   // without this guard handleFileMenu would ask main to pop the
   // menu again.
-  if (Date.now() - menuClosedAt.file < MENU_REOPEN_GUARD_MS) return
+  if (Date.now() - menuClosedAt.menu < MENU_REOPEN_GUARD_MS) return
   bridge?.openFileMenu(anchorBelow(fileBtnRef.value))
 }
 let unsubPanel: (() => void) | undefined
@@ -559,56 +540,69 @@ onUnmounted(() => {
          carry their own "File" — having two "File" entries stacked
          vertically read as redundant. The hamburger reads as a
          host-app-level menu and stays out of ComfyUI's namespace. -->
-    <div class="title-left">
-      <!-- File / waffle menu button stays live during Tier 3 takeovers
-           so the user can always reach Return-to-Dashboard /
-           Close-Window / open a fresh chooser via "New Window" / use
-           the Skip Onboarding entry (M-2.2) without dismissing the
-           takeover via title-bar affordances.
-           Modal-unification (Track M-2.3) — exception: during the
-           first-use T&C consent step (`isConsentLockdown`) the menu
-           is hidden entirely. The consent step is the one moment we
-           explicitly want no in-app way past the takeover — the user
-           must either accept consent or close the window via OS
-           chrome. The waffle reappears once the takeover advances to
-           `'post-consent'`. -->
+    <!-- Left cluster: waffle menu + app-update pill. Both stay live
+         during Tier 3 takeovers so the user can reach Return-to-Dashboard
+         / Close-Window / Skip Onboarding without dismissing the
+         takeover. Exception: during the first-use T&C consent step
+         (`isConsentLockdown`) the waffle is hidden entirely so the
+         user must either accept consent or close the window via OS
+         chrome; the waffle reappears once the takeover advances to
+         `'post-consent'`. -->
+    <div class="title-cluster">
       <button
         v-if="!isConsentLockdown"
         ref="fileBtn"
         type="button"
         class="title-menu-button title-menu-button--icon"
         aria-haspopup="menu"
-        title="Menu"
-        aria-label="Menu"
+        :title="t('titleBar.menu')"
+        :aria-label="t('titleBar.menu')"
         @click="handleFileMenu"
       >
         <MenuIcon :size="18" />
       </button>
-      <!-- Issue #488 — app-update pill. Sits right of the hamburger
-           and disappears entirely in the steady state (no update).
-           Click is routed through main (`comfy-window:click-app-update-pill`)
-           which fires the appropriate confirm modal in the panel. -->
+      <!-- App-update pill (issue #488) — disappears entirely in the
+           steady state. Click routes through main, which fires the
+           appropriate confirm modal in the panel. -->
       <button
         v-if="showAppUpdatePill"
         type="button"
         class="title-update-pill is-app-update"
-        :class="{ 'is-ready': appUpdateState.kind === 'ready' }"
+        :class="{
+          'is-ready': appUpdateState.kind === 'ready',
+          'is-downloading': appUpdateState.kind === 'downloading',
+        }"
         :title="appUpdatePillTooltip"
         :aria-label="appUpdatePillTooltip"
         @click="handleAppUpdatePill"
       >
         <Download v-if="appUpdateState.kind === 'available'" :size="14" />
+        <Loader2
+          v-else-if="appUpdateState.kind === 'downloading'"
+          :size="14"
+          class="title-update-pill-spinner"
+        />
         <RefreshCw v-else-if="appUpdateState.kind === 'ready'" :size="14" />
         <span class="title-update-pill-label">{{ appUpdatePillLabel }}</span>
       </button>
-      <!-- Track F — downloads tray. Icon-only chip with a small badge
-           counter. Hidden in the steady state (no active or recent
-           downloads) so the title bar reads clean. The icon
-           (`ArrowDownToLine`) is intentionally distinct from the
-           update pills' `Download` icon so the user reads "downloads
-           tray" vs "update available pill" at a glance. -->
+    </div>
+
+    <!-- Center: downloads tray + install pill + install-update pill.
+         Single click target on the pill opens the unified Settings
+         modal; the downloads tray is always-visible (the empty-state
+         copy lives inside the popup) and the install-update pill
+         only mounts when an install update is available. -->
+    <div class="title-center">
+      <!-- Always-visible downloads tray. Click opens the title-bar
+           dropdown popup in `'downloads'` mode anchored under the
+           button. The icon (`ArrowDownToLine`) is intentionally
+           distinct from the update pills' `Download` icon so the
+           user reads "downloads tray" vs "update available pill"
+           at a glance. Stays visible during `isConsentLockdown` so
+           in-flight model downloads remain reachable while the
+           waffle is hidden. -->
       <button
-        v-if="showDownloadsTray"
+        ref="downloadsBtn"
         type="button"
         class="title-downloads-tray"
         :class="{ 'has-active': downloadsActiveCount > 0 }"
@@ -623,27 +617,6 @@ onUnmounted(() => {
           aria-hidden="true"
         >{{ downloadsActiveCount }}</span>
       </button>
-      <!-- Send Feedback — always-visible affordance restored from the
-           pre-unified-window sidebar. Hidden during the consent-lockdown
-           step for the same reason the waffle is: the only first-use
-           gesture we want available is consent or OS-chrome close. -->
-      <button
-        v-if="!isConsentLockdown"
-        type="button"
-        class="title-menu-button title-menu-button--icon title-feedback-button"
-        title="Send Feedback"
-        aria-label="Send Feedback"
-        @click="handleFeedback"
-      >
-        <MessageSquarePlus :size="16" />
-      </button>
-    </div>
-
-    <!-- Center: install pill. Single click target — clicking anywhere
-         on it opens the native install menu. The caret inside is
-         decoration, not a separate button. Install-less host windows
-         render the pill as a disabled identity label (no menu, no caret). -->
-    <div class="title-center">
       <!-- Center identity pill. Install-backed hosts show the install's
            name + install-type icon; install-less hosts show the static
            `Desktop 2.0 Beta` label. The pill is a non-interactive label
@@ -654,10 +627,9 @@ onUnmounted(() => {
         class="title-install-pill"
         :class="{ 'is-install-less': isInstallLess }"
       >
-        <!-- Track B item 4 — install-type icon (Standalone laptop /
-             Cloud / Legacy Desktop tower / …) replaces the old
-             `— {label}` textual suffix. Sized at 14px to fit inside
-             the 36px content area without growing the pill. -->
+        <!-- Install-type icon (Standalone laptop / Cloud / Legacy
+             Desktop tower / …). Sized at 14px to fit inside the
+             36px content area without growing the pill. -->
         <component
           :is="installTypeMeta.icon"
           v-if="showInstallTypeIcon"
@@ -668,7 +640,7 @@ onUnmounted(() => {
         />
         <span class="title-install-name">{{ installLabel }}</span>
       </div>
-      <!-- Phase 3 §18 — install-update pill. Suppressed in install-less
+      <!-- Install-update pill. Suppressed in install-less
            mode (no install backing the host) and in the steady state
            (status tag isn't `update`). Click sends a panel-trigger to
            open the manage overlay on the update tab — same surface the
@@ -687,6 +659,24 @@ onUnmounted(() => {
     </div>
 
     <div class="drag-spacer"></div>
+
+    <!-- Trailing cluster: Send Feedback. Hidden during the consent
+         lockdown for the same reason the waffle is — the only
+         first-use gesture we want available is consent or OS-chrome
+         close. -->
+    <div class="title-trailing">
+      <button
+        v-if="!isConsentLockdown"
+        type="button"
+        class="title-menu-button title-feedback-button"
+        :title="t('titleBar.feedbackTooltip')"
+        :aria-label="t('titleBar.feedback')"
+        @click="handleFeedback"
+      >
+        <MessageSquarePlus :size="16" />
+        <span class="title-feedback-label">{{ t('titleBar.feedback') }}</span>
+      </button>
+    </div>
   </header>
 </template>
 
@@ -716,24 +706,26 @@ onUnmounted(() => {
    `-webkit-app-region: no-drag` (set on each <button> below). Marking
    the containers no-drag would consume the entire title bar width and
    leave only the small left/right padding zones draggable. */
-.title-left {
+.title-cluster {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 4px;
   flex: 0 0 auto;
   /* Sits above the absolutely-positioned center cluster so the
-     hamburger / update pills / downloads tray remain clickable if the
-     window narrows enough that the centered pill would otherwise
-     overlap them. */
-  z-index: 1;
+     hamburger / app-update pill remain clickable if the window
+     narrows enough that the centered pill would otherwise overlap
+     them. Must be > .title-center's z-index, otherwise DOM order wins
+     and the later-painted center cluster covers the cluster's
+     buttons. */
+  z-index: 2;
 }
 /* macOS: shift past the traffic lights (78px reservation − 12px base padding). */
-.title-bar.is-mac .title-left {
+.title-bar.is-mac .title-cluster {
   margin-left: 66px;
 }
 /* Traffic lights vanish in macOS fullscreen — reclaim the inset. */
-.title-bar.is-mac.is-fullscreen .title-left {
+.title-bar.is-mac.is-fullscreen .title-cluster {
   margin-left: 0;
 }
 
@@ -749,19 +741,37 @@ onUnmounted(() => {
   gap: 4px;
   min-width: 0;
   max-width: calc(100% - 24px);
+  /* Sits above the elastic drag-spacer so the always-visible
+     downloads tray and the install-update pill stay clickable when
+     the window narrows. */
+  z-index: 1;
+}
+
+.title-trailing {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  margin-left: 12px;
+  /* Same precedence rule as `.title-cluster` — must outrank
+     `.title-center` so the feedback button stays clickable when a
+     wide center cluster encroaches. */
+  z-index: 2;
+}
+/* Win/Linux: native close / min / max controls overlay the right
+   ~140px of the window. Push the trailing cluster past them so the
+   feedback button doesn't sit underneath the OS chrome. */
+.title-bar:not(.is-mac) .title-trailing {
+  margin-right: 128px;
 }
 
 .drag-spacer {
-  /* Eats the remaining flex space so the bar's drag region fills the
-     row. On Win/Linux it also reserves room for the native window
-     controls (close/min/max) on the right; on macOS the traffic
-     lights live on the left so no right reservation is needed. */
+  /* Eats the remaining flex space between the center cluster and the
+     trailing cluster so the bar's drag region fills the row. */
   flex: 1 1 auto;
-  min-width: 128px; /* 140px native-controls reservation − 12px base padding */
-  height: 100%;
-}
-.title-bar.is-mac .drag-spacer {
   min-width: 0;
+  height: 100%;
 }
 
 /* --- App / hamburger menu button --- */
@@ -794,14 +804,6 @@ onUnmounted(() => {
 .title-menu-button--icon {
   padding: 4px 6px;
   gap: 0;
-}
-
-/* Send Feedback sits visually apart from the
-   waffle / app-update / downloads cluster — the cluster is window-
-   chrome, the feedback button is an outbound action. The extra inset
-   (on top of the 2px container gap) reads as "different group". */
-.title-feedback-button {
-  margin-left: 10px;
 }
 
 /* --- Install pill (center) — single click target. The whole pill
@@ -844,22 +846,16 @@ onUnmounted(() => {
   white-space: nowrap;
   min-width: 0;
 }
-/* Track B item 4 — install-type icon. Sized to fit the 36px content
-   area of the title bar without growing it; opacity matches the
-   caret so the icon reads as a calm visual cue rather than competing
-   with the install name. */
+/* Install-type icon. Sized to fit the 36px content area of the title
+   bar without growing it; opacity matches the caret so the icon
+   reads as a calm visual cue rather than competing with the install
+   name. */
 .title-install-type-icon {
   flex-shrink: 0;
   opacity: 0.85;
 }
 
-/* Modal-unification (Track M-4) — the legacy `.title-bar.is-inert`
-   dimming block that lived here is retired. The broad title-bar
-   inert system was replaced by the binding-modal chrome (M-3) plus
-   the per-step `firstUseMode` waffle hide (M-2.3); no rule now
-   targets `.is-inert`. */
-
-/* --- Phase 3 §18 — Status pills (app-update + install-update) ---
+/* --- Status pills (app-update + install-update) ---
    Compact chip styling. The pills must fit inside the 36px content
    area of the 37px title bar (1px bottom border) without growing it,
    so padding/font-size are kept tight. Default colour palette tracks
@@ -894,6 +890,20 @@ onUnmounted(() => {
   background: rgba(34, 197, 94, 0.28);
   border-color: rgba(34, 197, 94, 0.55);
 }
+.title-update-pill.is-downloading {
+  background: rgba(148, 163, 184, 0.18);
+  border-color: rgba(148, 163, 184, 0.4);
+}
+.title-bar.is-hover-active .title-update-pill.is-downloading:hover:not(:disabled) {
+  background: rgba(148, 163, 184, 0.28);
+  border-color: rgba(148, 163, 184, 0.55);
+}
+.title-update-pill-spinner {
+  animation: title-update-pill-spin 1s linear infinite;
+}
+@keyframes title-update-pill-spin {
+  to { transform: rotate(360deg); }
+}
 .title-update-pill:focus-visible {
   outline: 2px solid var(--accent, #60a5fa);
   outline-offset: 2px;
@@ -902,7 +912,7 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 
-/* --- Track F — downloads tray ---
+/* --- Downloads tray ---
    Icon-only chip sitting next to the app-update pill. Distinct from
    the update pills in three ways so the user reads them at a glance
    as separate things:

@@ -180,6 +180,8 @@ export function buildElectronApi(): ElectronApi {
     pauseModelDownload: (url) => ipcRenderer.invoke('model-download-pause', { url }),
     resumeModelDownload: (url) => ipcRenderer.invoke('model-download-resume', { url }),
     cancelModelDownload: (url) => ipcRenderer.invoke('model-download-cancel', { url }),
+    dismissModelDownload: (url) => ipcRenderer.invoke('model-download-dismiss', { url }),
+    clearFinishedModelDownloads: () => ipcRenderer.invoke('model-download-clear-finished'),
     showDownloadInFolder: (savePath) => ipcRenderer.invoke('show-download-in-folder', { savePath }),
 
     // Updates
@@ -187,6 +189,7 @@ export function buildElectronApi(): ElectronApi {
     downloadUpdate: () => ipcRenderer.invoke('download-update'),
     installUpdate: () => ipcRenderer.invoke('install-update'),
     getUpdateCapabilities: () => ipcRenderer.invoke('get-update-capabilities'),
+    getAppUpdateState: () => ipcRenderer.invoke('get-app-update-state'),
 
     // Event listeners (return unsubscribe functions)
     onInstallProgress: (callback) => {
@@ -268,6 +271,18 @@ export function buildElectronApi(): ElectronApi {
       ipcRenderer.on('app-update:prompt-restart', handler)
       return () => ipcRenderer.removeListener('app-update:prompt-restart', handler)
     },
+    onAppUpdateStateChanged: (callback) => {
+      const handler = (_event: IpcRendererEvent, data: unknown) =>
+        callback(data as Parameters<typeof callback>[0])
+      ipcRenderer.on('app-update:state-changed', handler)
+      return () => ipcRenderer.removeListener('app-update:state-changed', handler)
+    },
+    onAppUpdateDownloadProgress: (callback) => {
+      const handler = (_event: IpcRendererEvent, data: unknown) =>
+        callback(data as Parameters<typeof callback>[0])
+      ipcRenderer.on('app-update:download-progress', handler)
+      return () => ipcRenderer.removeListener('app-update:download-progress', handler)
+    },
     onAppUpdateUserActionFailed: (callback) => {
       const handler = (_event: IpcRendererEvent, data: unknown) =>
         callback(data as { message: string })
@@ -283,6 +298,16 @@ export function buildElectronApi(): ElectronApi {
       const handler = (_event: IpcRendererEvent, data: unknown) => callback(data as Parameters<typeof callback>[0])
       ipcRenderer.on('model-download-progress', handler)
       return () => ipcRenderer.removeListener('model-download-progress', handler)
+    },
+    onModelDownloadRemoved: (callback) => {
+      const handler = (_event: IpcRendererEvent, data: unknown) => callback(data as Parameters<typeof callback>[0])
+      ipcRenderer.on('model-download-removed', handler)
+      return () => ipcRenderer.removeListener('model-download-removed', handler)
+    },
+    onModelDownloadsClearedFinished: (callback) => {
+      const handler = (_event: IpcRendererEvent, data: unknown) => callback(data as Parameters<typeof callback>[0])
+      ipcRenderer.on('model-downloads-cleared-finished', handler)
+      return () => ipcRenderer.removeListener('model-downloads-cleared-finished', handler)
     },
     onTelemetrySettingChanged: (callback) => {
       const handler = (_event: IpcRendererEvent, enabled: unknown) => callback(enabled as Parameters<typeof callback>[0])
@@ -326,7 +351,6 @@ export function buildElectronApi(): ElectronApi {
           data as {
             kind:
               | 'install-update'
-              | 'downloads'
               | 'app-update-restart-prompt'
               | 'app-update-download-prompt'
             installationId?: string

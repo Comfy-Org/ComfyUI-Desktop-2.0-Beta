@@ -2,11 +2,12 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <title>ComfyUI Desktop 2.0 — Title Menu</title>
+    <title>ComfyUI Desktop 2.0 — System Modal</title>
     <!--
-      The title-menu popup runs in a transparent frameless child
-      BrowserWindow with no telemetry surfaces. CSP can stay narrow —
-      only the bundled JS, design-token CSS, and Inter font are needed.
+      The system-modal popup runs in a transparent frameless full-window
+      child WebContentsView with no telemetry surfaces. CSP can stay
+      narrow — only the bundled JS, design-token CSS, and Inter font
+      are needed.
     -->
     <meta
       http-equiv="Content-Security-Policy"
@@ -15,6 +16,6 @@
   </head>
   <body>
     <div id="app"></div>
-    <script type="module" src="/src/comfyTitleMenu/main.ts"></script>
+    <script type="module" src="/src/comfySystemModal/main.ts"></script>
   </body>
 </html>

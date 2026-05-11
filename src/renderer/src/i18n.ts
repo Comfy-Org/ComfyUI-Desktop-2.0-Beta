@@ -1,10 +1,6 @@
-import { createI18n } from 'vue-i18n'
+import { createAppI18n } from './lib/i18nFactory'
 
-export const i18n = createI18n({
-  legacy: false,
-  locale: 'en',
-  fallbackLocale: 'en',
-  messages: { en: {} },
-  missingWarn: false,
-  fallbackWarn: false,
-})
+/** Launcher renderer's vue-i18n instance. The title-bar and
+ *  title-popup webContents create their own instances via the same
+ *  factory so the resolved messages stay consistent across renderers. */
+export const i18n = createAppI18n()

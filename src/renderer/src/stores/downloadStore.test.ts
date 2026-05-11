@@ -16,18 +16,61 @@ function makeProgress(
   }
 }
 
+interface BroadcastHooks {
+  /** Invokes whatever callback the store registered via
+   *  `onModelDownloadRemoved` — used to fake main's removal
+   *  broadcast in unit tests so we can verify that the store drops
+   *  entries in lockstep with main. */
+  emitRemoved: (url: string) => void
+  emitClearedFinished: (urls: string[]) => void
+  dismissModelDownload: ReturnType<typeof vi.fn>
+  clearFinishedModelDownloads: ReturnType<typeof vi.fn>
+}
+
+function installMockApi(): BroadcastHooks {
+  let removedCb: ((data: { url: string }) => void) | null = null
+  let clearedCb: ((data: { urls: string[] }) => void) | null = null
+  const dismissModelDownload = vi.fn().mockResolvedValue(true)
+  const clearFinishedModelDownloads = vi.fn().mockResolvedValue(0)
+  window.api = {
+    listModelDownloads: vi.fn().mockResolvedValue([]),
+    onModelDownloadProgress: vi.fn(() => vi.fn()),
+    onModelDownloadRemoved: vi.fn((cb: (data: { url: string }) => void) => {
+      removedCb = cb
+      return vi.fn()
+    }),
+    onModelDownloadsClearedFinished: vi.fn(
+      (cb: (data: { urls: string[] }) => void) => {
+        clearedCb = cb
+        return vi.fn()
+      }
+    ),
+    dismissModelDownload,
+    clearFinishedModelDownloads,
+  } as unknown as ElectronApi
+  return {
+    emitRemoved: (url) => removedCb?.({ url }),
+    emitClearedFinished: (urls) => clearedCb?.({ urls }),
+    dismissModelDownload,
+    clearFinishedModelDownloads,
+  }
+}
+
 describe('useDownloadStore', () => {
   let store: ReturnType<typeof useDownloadStore>
+  let api: BroadcastHooks
 
   beforeEach(() => {
-    window.api = {
-      listModelDownloads: vi.fn().mockResolvedValue([]),
-      onModelDownloadProgress: vi.fn(() => vi.fn()),
-    } as unknown as ElectronApi
-
+    api = installMockApi()
     setActivePinia(createTestingPinia({ stubActions: false }))
     store = useDownloadStore()
-    vi.clearAllMocks()
+    // init() wires up the removed / cleared broadcast handlers that
+    // the dismiss/clearFinished tests rely on for round-tripping.
+    store.init()
+    // listModelDownloads() seeds asynchronously; we only care about
+    // the post-init state here so reset call counts.
+    api.dismissModelDownload.mockClear()
+    api.clearFinishedModelDownloads.mockClear()
   })
 
   describe('upsert', () => {
@@ -67,20 +110,45 @@ describe('useDownloadStore', () => {
   })
 
   describe('dismiss', () => {
-    it('removes the entry by url', () => {
+    it('routes through main and waits for the removed broadcast to drop the entry', () => {
       const url = 'https://example.com/a.bin'
       store.upsert(makeProgress({ url }))
-      store.dismiss(url)
 
+      store.dismiss(url)
+      expect(api.dismissModelDownload).toHaveBeenCalledWith(url)
+      // The store deliberately doesn't mutate locally — every other
+      // surface watching the same broadcast would otherwise drift out
+      // of sync. The entry is still present until main echoes back.
+      expect(store.downloads.has(url)).toBe(true)
+
+      api.emitRemoved(url)
       expect(store.downloads.has(url)).toBe(false)
-      expect(store.downloads.size).toBe(0)
     })
 
-    it('is a no-op for unknown url', () => {
+    it('forwards even unknown urls to main (main is the source of truth)', () => {
       store.upsert(makeProgress({ url: 'https://example.com/a.bin' }))
       store.dismiss('https://example.com/unknown.bin')
 
+      expect(api.dismissModelDownload).toHaveBeenCalledWith(
+        'https://example.com/unknown.bin'
+      )
       expect(store.downloads.size).toBe(1)
+    })
+  })
+
+  describe('clearFinished', () => {
+    it('routes through main and removes every url echoed back by the broadcast', () => {
+      store.upsert(makeProgress({ url: 'a', status: 'completed' }))
+      store.upsert(makeProgress({ url: 'b', status: 'error' }))
+      store.upsert(makeProgress({ url: 'c', status: 'downloading' }))
+
+      store.clearFinished()
+      expect(api.clearFinishedModelDownloads).toHaveBeenCalled()
+
+      api.emitClearedFinished(['a', 'b'])
+      expect(store.downloads.has('a')).toBe(false)
+      expect(store.downloads.has('b')).toBe(false)
+      expect(store.downloads.has('c')).toBe(true)
     })
   })
 
@@ -145,11 +213,14 @@ describe('useDownloadStore', () => {
       expect(store.hasDownloads).toBe(true)
     })
 
-    it('returns false after all entries are dismissed', () => {
+    it('returns false after all entries are removed via the broadcast', () => {
       store.upsert(makeProgress({ url: 'a' }))
       store.upsert(makeProgress({ url: 'b' }))
+
       store.dismiss('a')
       store.dismiss('b')
+      api.emitRemoved('a')
+      api.emitRemoved('b')
 
       expect(store.hasDownloads).toBe(false)
     })

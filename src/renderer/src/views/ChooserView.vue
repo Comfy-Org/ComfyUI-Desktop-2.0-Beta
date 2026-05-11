@@ -11,12 +11,11 @@ import { installTypeMetaFor } from '../lib/installTypeIcon'
 import type { Installation, ShowProgressOpts } from '../types/ipc'
 
 /**
- * Chooser view (Phase 3 step 2 — recents grid).
+ * Chooser view — recents grid.
  *
- * Replaces the standalone Dashboard + Installs + Running surfaces with a
- * single golden-ratio "tile" grid the user picks from. Renderer-only —
- * the install-less host window (Phase 3 step 2c) hosts this as the
- * Comfy tab body when no install backs the entry.
+ * A golden-ratio "tile" grid the user picks from. Renderer-only —
+ * the install-less host window hosts this as the Comfy tab body
+ * when no install backs the entry.
  *
  * Grid layout per the design discussion:
  *   - Top-left card: "New Install" (always present, fixed-position).
@@ -67,10 +66,10 @@ onMounted(() => {
 //
 // "Local" includes both standalone local installs and Legacy Desktop
 // installs (`sourceCategory === 'desktop'`) — Legacy Desktop is the
-// pre-2.0 install kind, conceptually the same family as Local from the
-// dashboard user's POV. The dedicated Desktop chip was retired in the
-// post-Phase 3 dashboard cleanup so the filter row stays compact and
-// Legacy Desktop installs surface alongside their Standalone siblings.
+// pre-2.0 install kind, conceptually the same family as Local from
+// the dashboard user's POV. There's no dedicated Desktop chip so
+// the filter row stays compact and Legacy Desktop installs surface
+// alongside their Standalone siblings.
 type FilterKey = 'all' | 'local' | 'cloud' | 'remote'
 const activeFilter = ref<FilterKey>('all')
 
@@ -101,8 +100,7 @@ function sortByRecency(a: Installation, b: Installation): number {
 
 /** Apply the active filter to the non-cloud list. The Local chip
  *  includes Legacy Desktop installs (`sourceCategory === 'desktop'`)
- *  since the dedicated Desktop chip was retired — see the FilterKey
- *  comment above. */
+ *  — see the FilterKey comment above. */
 const visibleInstalls = computed<Installation[]>(() => {
   const sorted = [...nonCloudInstalls.value].sort(sortByRecency)
   switch (activeFilter.value) {
@@ -147,8 +145,8 @@ function timeAgo(timestamp: number): string {
 
 // --- Type icon mapping — visible on each card so source kind is obvious.
 // The same mapping (and its short i18n label) drives the Comfy Instance
-// title bar's source-category indicator (Track B), so the icon vocabulary
-// can't drift between the two surfaces. See `lib/installTypeIcon.ts` for
+// title bar's source-category indicator, so the icon vocabulary can't
+// drift between the two surfaces. See `lib/installTypeIcon.ts` for
 // the per-category icon choices and rationale (notably: Standalone reads
 // as a modern laptop while Legacy Desktop reads as an older desktop tower
 // silhouette so the two install types are visibly distinct at a glance).
@@ -225,8 +223,7 @@ function statusClasses(inst: Installation): Record<string, boolean> {
 /** Whether the install's last session crashed or its last action errored.
  *  Drives both the card-level red border (statusClasses) and the
  *  AlertCircle badge in the top-right corner — surfaces card-level
- *  visibility for an error state that previously only lived inside the
- *  legacy DetailModal / Running view. */
+ *  visibility for an error state. */
 function hasError(inst: Installation): boolean {
   return sessionStore.errorInstances.has(inst.id)
 }
@@ -342,12 +339,12 @@ function handleNewInstallClick(): void {
          and Cloud tiles stay visible regardless (they're entry-points,
          not data rows), per the design — except the Cloud tile is hidden
          when filtering to local/desktop/remote where it would be noise. -->
-    <div class="chooser-filters">
+    <div class="chooser-filters filter-pill-group">
       <button
         v-for="chip in filterChips"
         :key="chip.key"
         type="button"
-        class="chooser-filter-chip"
+        class="filter-pill chooser-filter-chip"
         :class="{ active: activeFilter === chip.key }"
         @click="activeFilter = chip.key"
       >
@@ -458,9 +455,7 @@ function handleNewInstallClick(): void {
              progress bar never overlaps the bottom-right CTA cluster.
              The status line carries the live phase text and the
              progress track sits beneath it as a clear, prominent
-             bar. The pattern mirrors the legacy DashboardCard
-             `card-progress` treatment so users recognise the in-flight
-             surface. -->
+             bar. -->
         <div v-if="progressFor(inst)" class="chooser-tile-progress">
           <div class="chooser-tile-progress-status">
             {{ progressFor(inst)!.status }}
@@ -499,24 +494,19 @@ function handleNewInstallClick(): void {
                facts: the channel reads as "what stream am I tracking"
                while the version reads as "what point on that stream
                am I currently at" (e.g. `v0.14.2+21` for a Latest
-               install 21 commits ahead of the v0.14.2 tag). The
-               legacy DashboardCard hid this when listPreview was set
-               but the legacy InstallationList showed it
-               unconditionally — the chooser is now the only surface
-               that lists installs, so we restore the always-on
-               behaviour to avoid losing the at-a-glance "what am I
-               on" affordance. -->
+               install 21 commits ahead of the v0.14.2 tag). Always
+               on so the at-a-glance "what am I on" affordance is
+               visible. -->
           <span
             v-if="inst.version"
             class="chooser-tile-pill chooser-tile-pill-version"
           >
             {{ inst.version }}
           </span>
-          <!-- Update / migrate pills surface card-level prompts that
-               previously only lived inside Install Settings. Each
-               pill is a click target that opens the unified Settings
-               modal on the ComfyUI Settings tab / relevant inner
-               surface (Update tab / migrate-to-standalone
+          <!-- Update / migrate pills surface card-level prompts.
+               Each pill is a click target that opens the unified
+               Settings modal on the ComfyUI Settings tab / relevant
+               inner surface (Update tab / migrate-to-standalone
                auto-action). `@click.stop` prevents the pill click
                from bubbling up to the tile body's `handleTileClick`
                handler.
@@ -610,33 +600,11 @@ function handleNewInstallClick(): void {
   overflow: hidden;
 }
 
+/* Layout-only — chip shape / hover / active live in the shared
+ * `.filter-pill` rules in `assets/main.css`. */
 .chooser-filters {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
   padding: 16px 24px 8px;
   flex-shrink: 0;
-}
-
-.chooser-filter-chip {
-  background: transparent;
-  color: inherit;
-  border: 1px solid var(--border, rgba(127, 127, 127, 0.25));
-  padding: 4px 12px;
-  font: inherit;
-  font-size: 12px;
-  border-radius: 999px;
-  cursor: pointer;
-  opacity: 0.8;
-  transition: background-color 100ms ease, opacity 100ms ease, border-color 100ms ease;
-}
-.chooser-filter-chip:hover {
-  opacity: 1;
-}
-.chooser-filter-chip.active {
-  background: var(--bg-elev-2, rgba(127, 127, 127, 0.16));
-  border-color: var(--border-strong, rgba(127, 127, 127, 0.4));
-  opacity: 1;
 }
 
 .chooser-loading {
@@ -834,9 +802,7 @@ function handleNewInstallClick(): void {
  * absolute clusters; the bottom-right CTA cluster is also absolute
  * and well below where the progress bar sits. The last-launched /
  * update / migrate pills inside `chooser-tile-meta` still hide while
- * progressFor is non-null (the template gates them). The status line
- * + track pattern matches the legacy DashboardCard `card-progress`
- * block so users recognise the in-flight surface. */
+ * progressFor is non-null (the template gates them). */
 .chooser-tile-progress {
   display: flex;
   flex-direction: column;
@@ -879,13 +845,12 @@ function handleNewInstallClick(): void {
   100% { transform: translateX(250%); }
 }
 
-/* Status overlays — match the visual language used by DashboardCard so
- * users recognise the running / stopping / in-progress / errored states.
- * Running uses the accent blue (per §8 spec) so it reads as "this is
- * the live one"; errored uses the danger red so it reads as "look at
- * this one". The two states are mutually exclusive in practice
- * (errored installs aren't currently running), but the CSS handles
- * both being set just in case. */
+/* Status overlays — running / stopping / in-progress / errored.
+ * Running uses the accent blue so it reads as "this is the live
+ * one"; errored uses the danger red so it reads as "look at this
+ * one". The two states are mutually exclusive in practice (errored
+ * installs aren't currently running), but the CSS handles both
+ * being set just in case. */
 .chooser-tile-running {
   box-shadow: inset 0 0 0 2px var(--accent, #4a90e2);
 }
