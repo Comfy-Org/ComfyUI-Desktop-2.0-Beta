@@ -155,6 +155,22 @@ export interface ComfyTitleBarBridge {
    *  the `desktop2.feedback.opened` telemetry action and opens the
    *  support URL via `openExternal`. */
   clickFeedback(): void
+  /** Issue #514 — show the title-bar hover tooltip popup. Routed
+   *  through main, which positions a cached `WebContentsView` popup
+   *  attached to the host window so the bubble escapes the title-bar
+   *  view's 37px clip. Only fired on macOS (Win/Linux use the native
+   *  HTML `title` attribute, which works in those platforms'
+   *  Chromium); macOS doesn't reliably surface native title tooltips
+   *  for sibling chrome WebContentsViews that aren't focused.
+   *
+   *  `centerX` is the trigger's horizontal center in title-bar-local
+   *  pixels — title-bar lives at window x=0 so it's also a window
+   *  coordinate. `bottomY` is the trigger's bottom edge for the same
+   *  coordinate space; main offsets the popup a few pixels below it. */
+  showTooltip(payload: { text: string; centerX: number; bottomY: number }): void
+  /** Issue #514 — hide the title-bar hover tooltip popup. Sent on
+   *  pointer leave, focus loss, menu open, or panel switch. */
+  hideTooltip(): void
   /** Tell main this title bar is mounted; main responds with the initial state. */
   ready(): void
 }
@@ -297,6 +313,12 @@ const bridge: ComfyTitleBarBridge = {
   },
   clickFeedback: () => {
     ipcRenderer.send('comfy-window:click-feedback')
+  },
+  showTooltip: (payload) => {
+    ipcRenderer.send('comfy-window:show-titlebar-tooltip', payload)
+  },
+  hideTooltip: () => {
+    ipcRenderer.send('comfy-window:hide-titlebar-tooltip')
   },
   ready: () => {
     ipcRenderer.send('comfy-window:title-bar-ready')

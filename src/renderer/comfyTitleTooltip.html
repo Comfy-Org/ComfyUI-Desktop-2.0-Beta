@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>ComfyUI Desktop 2.0 — Title Tooltip</title>
+    <!--
+      The title-tooltip popup runs in a transparent WebContentsView and
+      does NOT initialise Datadog/PostHog (it's a transient surface that
+      shows on hover and hides on leave — telemetry would mint sessions
+      every time the user grazes a button). CSP stays narrow; if a
+      future change adds telemetry here it must also relax this CSP, and
+      the csp.test.ts tripwire enforces that the change happens in both
+      places.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' ws:"
+    />
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/comfyTitleTooltip/main.ts"></script>
+  </body>
+</html>

@@ -59,6 +59,16 @@ interface Bridge {
   openFileMenu: (anchor: MenuAnchor) => void
   /** Ask main to dismiss the File menu popup (toggle-close). */
   dismissFileMenu: () => void
+  /** Issue #514 — show a hover tooltip in the cached title-bar tooltip
+   *  popup. macOS-only path: native HTML `title` tooltips don't appear
+   *  reliably for sibling chrome WebContentsViews on macOS, so the
+   *  renderer routes hover through main → cached `WebContentsView`
+   *  popup. `centerX` / `bottomY` are title-bar-local pixels (the
+   *  title-bar view sits at parent-window content (0,0) so they map
+   *  directly to window coords on the main side). */
+  showTooltip: (payload: { text: string; centerX: number; bottomY: number }) => void
+  /** Issue #514 — hide the title-bar hover tooltip popup. */
+  hideTooltip: () => void
   onPanelChanged: (cb: (panel: ComfyPanelKey) => void) => () => void
   onTitleChanged: (cb: (title: string) => void) => () => void
   /** Track B item 4 — install source-category pushes from main. The
@@ -421,7 +431,89 @@ function anchorBelow(el: HTMLElement | null | undefined): MenuAnchor {
   return { x: Math.round(rect.left), y: Math.round(rect.bottom) }
 }
 
+/**
+ * Issue #514 — macOS hover-tooltip plumbing.
+ *
+ * On macOS the native HTML `title` tooltip does not reliably fire for
+ * controls inside a sibling chrome `WebContentsView` that isn't the
+ * focused web contents (Electron + Cocoa quirk). The title bar always
+ * sits in such a view, so on macOS we route hover through main, which
+ * positions a cached `WebContentsView` popup attached to the host
+ * window — that popup escapes the title-bar view's 37px clip. On
+ * Windows / Linux the native `title` attribute renders Chromium's own
+ * tooltip widget reliably; the JS handlers below are no-ops in that
+ * case so we don't end up with two tooltips.
+ *
+ * Implementation is delegated: a single `pointermove` / `pointerleave`
+ * pair on the header root finds the closest `[data-title-tooltip]`
+ * ancestor and fires `showTip` / `hideTip`. New tooltipped elements
+ * just need the data attribute — no per-element wiring.
+ */
+const TOOLTIP_SHOW_DELAY_MS = 400
+let tooltipShowTimer: number | null = null
+let activeTooltipText: string | null = null
+
+function findTooltipTarget(target: EventTarget | null): {
+  text: string
+  rect: DOMRect
+} | null {
+  if (!(target instanceof HTMLElement)) return null
+  const el = target.closest('[data-title-tooltip]') as HTMLElement | null
+  if (!el) return null
+  const text = el.getAttribute('data-title-tooltip')
+  if (!text) return null
+  return { text, rect: el.getBoundingClientRect() }
+}
+
+function cancelPendingTooltipShow(): void {
+  if (tooltipShowTimer !== null) {
+    window.clearTimeout(tooltipShowTimer)
+    tooltipShowTimer = null
+  }
+}
+
+function hideTip(): void {
+  cancelPendingTooltipShow()
+  if (activeTooltipText !== null) {
+    activeTooltipText = null
+    bridge?.hideTooltip()
+  }
+}
+
+function handleTooltipPointer(event: PointerEvent): void {
+  if (!isMac.value) return
+  const found = findTooltipTarget(event.target)
+  if (!found) {
+    hideTip()
+    return
+  }
+  if (found.text === activeTooltipText && tooltipShowTimer === null) {
+    // Same tooltip already showing — leave it alone.
+    return
+  }
+  if (found.text === activeTooltipText) return
+  // Different (or first) target: cancel any pending show, drop the
+  // currently-shown bubble, and queue the new one. The delay matches
+  // the native macOS tooltip cadence so hovering quickly across buttons
+  // doesn't flash bubbles.
+  hideTip()
+  const captured = found
+  activeTooltipText = captured.text
+  tooltipShowTimer = window.setTimeout(() => {
+    tooltipShowTimer = null
+    if (activeTooltipText !== captured.text) return
+    bridge?.showTooltip({
+      text: captured.text,
+      centerX: Math.round(captured.rect.left + captured.rect.width / 2),
+      bottomY: Math.round(captured.rect.bottom),
+    })
+  }, TOOLTIP_SHOW_DELAY_MS)
+}
+
 function handleFileMenu(): void {
+  // Hide any in-flight tooltip — the menu will obscure the same area
+  // and the click won't fire pointerleave.
+  hideTip()
   // Toggle-close: if the popup is open at click time, actively ask
   // main to dismiss it. The blur-driven dismiss path can't be relied
   // on here — on macOS clicking a sibling WebContentsView in the
@@ -453,16 +545,20 @@ let unsubDownloads: (() => void) | undefined
 
 /** Drop the hover gate immediately when input leaves the title-bar
  *  webContents — covers the case where a native menu (Menu.popup) or
- *  another view receives focus. */
+ *  another view receives focus. Also dismisses any in-flight tooltip
+ *  for the same reason. */
 const handleWindowBlur = (): void => {
   isHoverActive.value = false
+  hideTip()
 }
 /** Re-enable the hover gate only on a fresh `pointermove`. We do NOT
  *  re-enable on `window.focus` alone, because focus can return without
  *  any cursor movement (clicking back into the title bar to dismiss
- *  the menu refocuses the renderer with a stale cursor position). */
-const handlePointerMove = (): void => {
+ *  the menu refocuses the renderer with a stale cursor position).
+ *  Also drives the macOS tooltip dispatcher (issue #514). */
+const handlePointerMove = (event: PointerEvent): void => {
   if (!isHoverActive.value) isHoverActive.value = true
+  handleTooltipPointer(event)
 }
 /** Belt-and-braces: if the cursor leaves the title-bar's bounds, drop
  *  the gate. The renderer should normally see a `mouseleave` here, but
@@ -470,6 +566,7 @@ const handlePointerMove = (): void => {
  *  reliably, so we mirror the blur path. */
 const handlePointerLeave = (): void => {
   isHoverActive.value = false
+  hideTip()
 }
 
 onMounted(() => {
@@ -534,6 +631,7 @@ onUnmounted(() => {
   window.removeEventListener('blur', handleWindowBlur)
   window.removeEventListener('pointermove', handlePointerMove)
   document.documentElement.removeEventListener('pointerleave', handlePointerLeave)
+  hideTip()
 })
 </script>
 
@@ -580,6 +678,7 @@ onUnmounted(() => {
         aria-haspopup="menu"
         title="Menu"
         aria-label="Menu"
+        data-title-tooltip="Menu"
         @click="handleFileMenu"
       >
         <MenuIcon :size="18" />
@@ -595,6 +694,7 @@ onUnmounted(() => {
         :class="{ 'is-ready': appUpdateState.kind === 'ready' }"
         :title="appUpdatePillTooltip"
         :aria-label="appUpdatePillTooltip"
+        :data-title-tooltip="appUpdatePillTooltip"
         @click="handleAppUpdatePill"
       >
         <Download v-if="appUpdateState.kind === 'available'" :size="14" />
@@ -614,6 +714,7 @@ onUnmounted(() => {
         :class="{ 'has-active': downloadsActiveCount > 0 }"
         :title="downloadsTrayLabel"
         :aria-label="downloadsTrayLabel"
+        :data-title-tooltip="downloadsTrayLabel"
         @click="handleDownloadsTray"
       >
         <ArrowDownToLine :size="14" />
@@ -633,6 +734,7 @@ onUnmounted(() => {
         class="title-menu-button title-menu-button--icon title-feedback-button"
         title="Send Feedback"
         aria-label="Send Feedback"
+        data-title-tooltip="Send Feedback"
         @click="handleFeedback"
       >
         <MessageSquarePlus :size="16" />
@@ -665,6 +767,7 @@ onUnmounted(() => {
           class="title-install-type-icon"
           :title="installTypeLabel"
           :aria-label="installTypeLabel"
+          :data-title-tooltip="installTypeLabel"
         />
         <span class="title-install-name">{{ installLabel }}</span>
       </div>
@@ -679,6 +782,7 @@ onUnmounted(() => {
         class="title-update-pill is-install-update"
         :title="installUpdatePillLabel"
         :aria-label="installUpdatePillLabel"
+        :data-title-tooltip="installUpdatePillLabel"
         @click="handleInstallUpdatePill"
       >
         <Download :size="14" />
