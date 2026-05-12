@@ -1,6 +1,7 @@
 node_modules/
 dist/
 out/
+.worktrees/
 *.log
 *.tsbuildinfo
 result
