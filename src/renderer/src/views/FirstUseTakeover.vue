@@ -95,6 +95,18 @@ const activeLegalTab = ref<LegalDocId>('eula')
 const activeLegalDoc = computed(
   () => LEGAL_DOCS.find((d) => d.id === activeLegalTab.value) ?? DEFAULT_LEGAL_DOC,
 )
+const legalPanelEl = ref<HTMLDivElement | null>(null)
+
+/** Switch the active legal tab and reset the reading body to the top.
+ *  Without the reset, jumping from the bottom of a long doc into a
+ *  short one leaves a stale scroll position that confuses the user. */
+function onSelectTab(id: LegalDocId): void {
+  activeLegalTab.value = id
+  // Defer to next paint so the new doc's body is mounted before scroll.
+  requestAnimationFrame(() => {
+    if (legalPanelEl.value) legalPanelEl.value.scrollTop = 0
+  })
+}
 
 /** Step 1 → next: telemetry persists immediately so a mid-flow cancel
  *  still respects the user's choice (the `firstUseCompleted` gate is
@@ -244,36 +256,42 @@ defineExpose({ open })
         <template v-if="step === 'consent'">
           <div class="first-use-consent">
             <p class="first-use-lead">{{ $t('firstUse.consentLead') }}</p>
-            <!-- Tab strip: EULA / Privacy Policy / Third-Party Notices.
-                 EULA is the default tab because that's the document the
-                 user is affirmatively agreeing to via Accept. -->
+            <!-- Tabs + reading panel form a single bordered card so the
+                 tab strip reads as part of the document surface, not a
+                 floating chip group. EULA is the default since that's
+                 the document the user is affirmatively agreeing to. -->
             <div
-              class="first-use-legal-tabs"
-              role="tablist"
-              :aria-label="$t('firstUse.legalTabsLabel')"
-            >
-              <button
-                v-for="doc in LEGAL_DOCS"
-                :key="doc.id"
-                role="tab"
-                :aria-selected="activeLegalTab === doc.id"
-                :aria-controls="`first-use-legal-panel-${doc.id}`"
-                :class="['first-use-legal-tab', { active: activeLegalTab === doc.id }]"
-                :data-testid="`first-use-legal-tab-${doc.id}`"
-                @click="activeLegalTab = doc.id"
-              >
-                {{ $t(doc.labelKey) }}
-              </button>
-            </div>
-            <div
-              :id="`first-use-legal-panel-${activeLegalDoc.id}`"
-              class="first-use-policy"
+              class="first-use-legal-card"
               data-testid="first-use-legal-panel"
-              tabindex="0"
-              role="tabpanel"
               :aria-label="$t(activeLegalDoc.labelKey)"
             >
-              <MarkdownDoc :key="activeLegalDoc.id" :markdown="activeLegalDoc.markdown" />
+              <div
+                class="first-use-legal-tabs"
+                role="tablist"
+                :aria-label="$t('firstUse.legalTabsLabel')"
+              >
+                <button
+                  v-for="doc in LEGAL_DOCS"
+                  :key="doc.id"
+                  role="tab"
+                  :aria-selected="activeLegalTab === doc.id"
+                  :aria-controls="`first-use-legal-panel-${doc.id}`"
+                  :class="['first-use-legal-tab', { active: activeLegalTab === doc.id }]"
+                  :data-testid="`first-use-legal-tab-${doc.id}`"
+                  @click="onSelectTab(doc.id)"
+                >
+                  {{ $t(doc.labelKey) }}
+                </button>
+              </div>
+              <div
+                :id="`first-use-legal-panel-${activeLegalDoc.id}`"
+                ref="legalPanelEl"
+                class="first-use-legal-body"
+                tabindex="0"
+                role="tabpanel"
+              >
+                <MarkdownDoc :key="activeLegalDoc.id" :markdown="activeLegalDoc.markdown" />
+              </div>
             </div>
             <label class="first-use-toggle">
               <input v-model="telemetryEnabled" type="checkbox" />
@@ -435,73 +453,76 @@ defineExpose({ open })
   min-height: 0;
 }
 
-/* Inline privacy policy reading box. Sits inside the consent step
- * directly above the telemetry checkbox so the user can read what
- * they're agreeing to without leaving the app. Uses the recessed-list
- * pattern (DESIGN.md): surface background to lift it off the modal
- * `--bg`, focusable for keyboard navigation. Body text stays
- * user-selectable so the policy can be copied. The box flex-grows to
- * fill remaining vertical space inside `.first-use-consent` and
- * scrolls internally. */
-.first-use-policy {
+/* Tabs + reading panel as one bordered card. The tab strip is the
+ * card's header row; the panel is its scrollable body. Active tab
+ * uses an accent-coloured underline (matching the `filter-tabs` pattern
+ * elsewhere in the app) so the tabs read as navigation, not floating
+ * chips disconnected from the panel. */
+.first-use-legal-card {
   flex: 1 1 auto;
-  min-height: 200px;
+  min-height: 240px;
+  display: flex;
+  flex-direction: column;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 0 6px 6px 6px;
-  padding: 16px 20px;
+  border-radius: 8px;
+  overflow: hidden;
   margin-bottom: 16px;
-  overflow-y: auto;
-  user-select: text;
-  font-size: 13px;
-  line-height: 1.6;
-  color: var(--text);
 }
 
-.first-use-policy:focus {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
-/* Tab strip above the legal-document reading box. Three tabs (EULA,
- * Privacy Policy, Third-Party Notices) sit on the same baseline as the
- * top border of the reading box so the active tab visually connects to
- * the panel underneath. Tabs use the same recessed pattern (var(--bg)
- * inactive, var(--surface) active) the rest of the app uses for
- * tabbed surfaces. */
 .first-use-legal-tabs {
   display: flex;
-  gap: 4px;
-  margin-bottom: -1px;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
 }
 
 .first-use-legal-tab {
-  padding: 8px 16px;
+  position: relative;
+  padding: 10px 20px;
   font-size: 13px;
   font-weight: 500;
   color: var(--text-muted);
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-bottom: 1px solid transparent;
-  border-top-left-radius: 6px;
-  border-top-right-radius: 6px;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
   cursor: pointer;
-  transition: color 120ms ease, background 120ms ease;
+  transition: color 120ms ease, border-color 120ms ease;
 }
 
 .first-use-legal-tab:hover {
   color: var(--text);
+  background: color-mix(in srgb, var(--border) 20%, transparent);
 }
 
 .first-use-legal-tab.active {
   color: var(--text);
-  background: var(--surface);
   font-weight: 600;
+  border-bottom-color: var(--accent);
 }
 
 .first-use-legal-tab:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
+}
+
+/* Scrolling body. The tab strip stays pinned at the top of the card
+ * while the body scrolls underneath, so the user never loses the tab
+ * navigation when reading a long document. */
+.first-use-legal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px 20px;
+  user-select: text;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.first-use-legal-body:focus {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--accent);
 }
 
 .first-use-step-title {

@@ -1,8 +1,11 @@
 # Privacy Policy
 
 **Effective date:** 2026-05-05
+
 **Last updated:** 2026-05-08
+
 **Applies to:** ComfyUI Desktop 2.0
+
 **Data controller:** Comfy Org
 
 ---

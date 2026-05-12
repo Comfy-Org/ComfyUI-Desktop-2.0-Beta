@@ -1,7 +1,9 @@
 # End-User License Agreement (EULA)
 
 **Effective date:** 2026-05-08
+
 **Applies to:** ComfyUI Desktop 2.0 (the "Desktop App")
+
 **Publisher:** Comfy Org ("Comfy Org," "we," "us," "our")
 
 ---

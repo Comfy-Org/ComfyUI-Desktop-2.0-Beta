@@ -146,24 +146,36 @@ function openLink(url: string): void {
   line-height: 1.6;
 }
 
+/* Top-of-doc title — the tab already labels the document so we keep
+ * the H1 small and unobtrusive. It still helps readers confirm what
+ * they're reading and shows the parenthetical (e.g. "EULA"). */
 .md-h1 {
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 600;
   margin: 0 0 8px 0;
   color: var(--text);
 }
 
+.md-h1 + .md-p {
+  /* First paragraph after the H1 is typically the meta block (Effective
+   * date / Applies to / Publisher). Render it as muted, smaller, with a
+   * subtle separator below to mark the end of the doc header. */
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 0 0 4px 0;
+}
+
 .md-h2 {
   font-size: 14px;
   font-weight: 600;
-  margin: 16px 0 6px 0;
+  margin: 18px 0 6px 0;
   color: var(--text);
 }
 
 .md-h3 {
   font-size: 13px;
   font-weight: 600;
-  margin: 12px 0 4px 0;
+  margin: 14px 0 4px 0;
   color: var(--text);
 }
 
@@ -189,13 +201,29 @@ function openLink(url: string): void {
 .md-ul,
 .md-ol {
   margin: 0 0 8px 0;
-  padding-left: 20px;
+  padding-left: 22px;
   color: var(--text-muted);
+}
+
+/* Re-assert list markers — the app sets default list-style to none on
+ * <ul> in some surfaces, so be explicit here. */
+.md-ul {
+  list-style: disc outside;
+}
+
+.md-ol {
+  list-style: decimal outside;
 }
 
 .md-ul li,
 .md-ol li {
-  margin-bottom: 4px;
+  margin-bottom: 6px;
+  padding-left: 2px;
+}
+
+.md-ul li::marker,
+.md-ol li::marker {
+  color: var(--text-faint);
 }
 
 .md-blockquote {
