@@ -40,8 +40,8 @@ import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { ArrowRightLeft, Box, Cloud, Download } from 'lucide-vue-next'
 import TakeoverHeader from '../components/TakeoverHeader.vue'
 import ModalShell from '../components/ModalShell.vue'
-import InlineRichText from '../components/InlineRichText.vue'
-import { PRIVACY_POLICY } from '../lib/privacyPolicy'
+import MarkdownDoc from '../components/MarkdownDoc.vue'
+import { LEGAL_DOCS, DEFAULT_LEGAL_DOC, type LegalDocId } from '../lib/legalDocs'
 
 type Step = 'consent' | 'mirrors' | 'pick' | 'localBranch'
 
@@ -91,7 +91,10 @@ const hasLegacyDesktop = ref(false)
 
 const isChinese = computed(() => locale.value.startsWith('zh'))
 
-const policy = PRIVACY_POLICY
+const activeLegalTab = ref<LegalDocId>('eula')
+const activeLegalDoc = computed(
+  () => LEGAL_DOCS.find((d) => d.id === activeLegalTab.value) ?? DEFAULT_LEGAL_DOC,
+)
 
 /** Step 1 → next: telemetry persists immediately so a mid-flow cancel
  *  still respects the user's choice (the `firstUseCompleted` gate is
@@ -241,32 +244,36 @@ defineExpose({ open })
         <template v-if="step === 'consent'">
           <div class="first-use-consent">
             <p class="first-use-lead">{{ $t('firstUse.consentLead') }}</p>
+            <!-- Tab strip: EULA / Privacy Policy / Third-Party Notices.
+                 EULA is the default tab because that's the document the
+                 user is affirmatively agreeing to via Accept. -->
             <div
-              class="first-use-policy"
-              data-testid="first-use-privacy-policy"
-              tabindex="0"
-              role="region"
-              :aria-label="$t('firstUse.privacyPolicyTitle')"
+              class="first-use-legal-tabs"
+              role="tablist"
+              :aria-label="$t('firstUse.legalTabsLabel')"
             >
-              <header class="first-use-policy-meta">
-                <h3 class="first-use-policy-title">{{ $t('firstUse.privacyPolicyTitle') }}</h3>
-                <div class="first-use-policy-dates">
-                  <span><strong>{{ $t('firstUse.privacyPolicyEffective') }}:</strong> {{ policy.effectiveDate }}</span>
-                  <span><strong>{{ $t('firstUse.privacyPolicyAppliesTo') }}:</strong> {{ policy.appliesTo }}</span>
-                </div>
-              </header>
-              <template v-for="(block, i) in policy.blocks" :key="i">
-                <h2 v-if="block.kind === 'h2'" class="first-use-policy-h2">{{ block.text }}</h2>
-                <h3 v-else-if="block.kind === 'h3'" class="first-use-policy-h3">{{ block.text }}</h3>
-                <p v-else-if="block.kind === 'p' && block.text" class="first-use-policy-p">
-                  <InlineRichText :text="block.text" />
-                </p>
-                <ul v-else-if="block.kind === 'ul' && block.items" class="first-use-policy-ul">
-                  <li v-for="(item, k) in block.items" :key="k">
-                    <InlineRichText :text="item" />
-                  </li>
-                </ul>
-              </template>
+              <button
+                v-for="doc in LEGAL_DOCS"
+                :key="doc.id"
+                role="tab"
+                :aria-selected="activeLegalTab === doc.id"
+                :aria-controls="`first-use-legal-panel-${doc.id}`"
+                :class="['first-use-legal-tab', { active: activeLegalTab === doc.id }]"
+                :data-testid="`first-use-legal-tab-${doc.id}`"
+                @click="activeLegalTab = doc.id"
+              >
+                {{ $t(doc.labelKey) }}
+              </button>
+            </div>
+            <div
+              :id="`first-use-legal-panel-${activeLegalDoc.id}`"
+              class="first-use-policy"
+              data-testid="first-use-legal-panel"
+              tabindex="0"
+              role="tabpanel"
+              :aria-label="$t(activeLegalDoc.labelKey)"
+            >
+              <MarkdownDoc :key="activeLegalDoc.id" :markdown="activeLegalDoc.markdown" />
             </div>
             <label class="first-use-toggle">
               <input v-model="telemetryEnabled" type="checkbox" />
@@ -441,7 +448,7 @@ defineExpose({ open })
   min-height: 200px;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 0 6px 6px 6px;
   padding: 16px 20px;
   margin-bottom: 16px;
   overflow-y: auto;
@@ -456,59 +463,45 @@ defineExpose({ open })
   outline-offset: 2px;
 }
 
-.first-use-policy-meta {
-  border-bottom: 1px solid var(--border);
-  padding-bottom: 10px;
-  margin-bottom: 12px;
-}
-
-.first-use-policy-title {
-  font-size: 16px;
-  font-weight: 600;
-  margin: 0 0 6px 0;
-  color: var(--text);
-}
-
-.first-use-policy-dates {
+/* Tab strip above the legal-document reading box. Three tabs (EULA,
+ * Privacy Policy, Third-Party Notices) sit on the same baseline as the
+ * top border of the reading box so the active tab visually connects to
+ * the panel underneath. Tabs use the same recessed pattern (var(--bg)
+ * inactive, var(--surface) active) the rest of the app uses for
+ * tabbed surfaces. */
+.first-use-legal-tabs {
   display: flex;
-  flex-wrap: wrap;
-  gap: 16px;
-  font-size: 12px;
-  color: var(--text-muted);
+  gap: 4px;
+  margin-bottom: -1px;
 }
 
-.first-use-policy-h2 {
-  font-size: 14px;
-  font-weight: 600;
-  margin: 16px 0 6px 0;
-  color: var(--text);
-}
-
-.first-use-policy-h3 {
+.first-use-legal-tab {
+  padding: 8px 16px;
   font-size: 13px;
-  font-weight: 600;
-  margin: 12px 0 4px 0;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-bottom: 1px solid transparent;
+  border-top-left-radius: 6px;
+  border-top-right-radius: 6px;
+  cursor: pointer;
+  transition: color 120ms ease, background 120ms ease;
+}
+
+.first-use-legal-tab:hover {
   color: var(--text);
 }
 
-.first-use-policy-p {
-  margin: 0 0 8px 0;
-  color: var(--text-muted);
-}
-
-.first-use-policy-ul {
-  margin: 0 0 8px 0;
-  padding-left: 20px;
-  color: var(--text-muted);
-}
-
-.first-use-policy-ul li {
-  margin-bottom: 4px;
-}
-
-.first-use-policy strong {
+.first-use-legal-tab.active {
   color: var(--text);
+  background: var(--surface);
   font-weight: 600;
+}
+
+.first-use-legal-tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 
 .first-use-step-title {
