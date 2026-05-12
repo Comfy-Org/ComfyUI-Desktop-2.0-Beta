@@ -37,8 +37,10 @@ import {
   initPostHog,
   isInitialized as isPostHogInitialized,
   isPostHogConfigured,
+  registerPostHog,
   setPostHogConsent,
 } from './posthogProvider'
+import { scrubAll } from '../../../shared/piiScrub'
 
 function serializeUnknownError(error: unknown): { message: string; stack?: string } {
   if (error instanceof Error) {
@@ -133,18 +135,68 @@ export type RendererRole = 'title-bar' | 'title-menu' | 'panel'
 
 let rendererRole: RendererRole = 'panel'
 
+/**
+ * Resolved telemetry consent state, kept in sync with the persisted
+ * `telemetryEnabled` setting. `undefined` means "the user has not yet
+ * decided" (first-run, before the consent step is completed). The only
+ * event allowed to fire pre-decision is
+ * `desktop2.first_use.consent_decision` itself — the act of recording
+ * the decision. Everything else is dropped at the renderer-side gate
+ * so we never even attempt to ship a payload to RUM / PostHog before
+ * the user has affirmatively (or negatively) chosen.
+ *
+ * Updated by `initializeProviders()` at boot and by the
+ * `onTelemetrySettingChanged` watcher in `initializeRendererBootstrap`.
+ */
+let resolvedTelemetryEnabled: boolean | undefined = undefined
+
+/** Allow-list of event names that can fire before the user has made a
+ *  consent decision. Strictly the consent decision itself — adding to
+ *  this list is a privacy / compliance change, not a code change. */
+const PRE_CONSENT_ALLOWED_EVENTS: ReadonlySet<string> = new Set([
+  'desktop2.first_use.consent_decision',
+])
+
+function isTelemetryEmitAllowed(actionName: string): boolean {
+  if (resolvedTelemetryEnabled !== undefined) return true
+  return PRE_CONSENT_ALLOWED_EVENTS.has(actionName)
+}
+
+/**
+ * Run every string-valued property through `scrubAll` before the
+ * payload reaches Datadog / PostHog. The discipline of bucketing user
+ * input (file paths, prompts, model names) into enums / IDs / numbers
+ * happens at the call sites; this pass is the safety net that catches
+ * accidental string leaks (error messages, IPC payloads forwarded as-is,
+ * etc.). Non-string values pass through untouched.
+ */
+function scrubTelemetryContext(context: TelemetryContext): TelemetryContext {
+  let mutated: TelemetryContext | null = null
+  for (const key of Object.keys(context)) {
+    const value = context[key]
+    if (typeof value !== 'string') continue
+    const cleaned = scrubAll(value)
+    if (cleaned === value) continue
+    if (!mutated) mutated = { ...context }
+    mutated[key] = cleaned
+  }
+  return mutated ?? context
+}
+
 function trackTelemetryAction(
   actionName: string,
   context: TelemetryContext,
   options: { skipPostHog?: boolean } = {},
 ): void {
+  if (!isTelemetryEmitAllowed(actionName)) return
+  const scrubbed = scrubTelemetryContext(context)
   if (isDatadogInitialized) {
-    try { datadogRum.addAction(actionName, context) } catch {}
+    try { datadogRum.addAction(actionName, scrubbed) } catch {}
   }
   // `mainAlreadyCaptured` events come from the main-process PostHog Node
   // SDK and would be duplicates if we recaptured them in the browser SDK.
   if (!options.skipPostHog && isPostHogInitialized()) {
-    capturePostHog(actionName, context)
+    capturePostHog(actionName, scrubbed)
   }
 }
 
@@ -156,8 +208,87 @@ function handleTelemetryActionBridgeEvent(event: Event): void {
   trackTelemetryAction(detail.actionName, context)
 }
 
+/**
+ * Derive the release channel from the semver-ish app version string.
+ * Stable releases have no pre-release suffix; pre-release builds carry
+ * `-beta` / `-canary` / `-alpha` markers. We keep the bucket coarse so
+ * a future `-rc` / `-dev` suffix that we haven't accounted for falls
+ * into `unknown` rather than silently being miscategorised.
+ */
+function deriveAppChannel(appVersion: string): string {
+  if (!appVersion) return 'unknown'
+  const v = appVersion.toLowerCase()
+  if (v.includes('-beta')) return 'beta'
+  if (v.includes('-canary')) return 'canary'
+  if (v.includes('-alpha')) return 'alpha'
+  return 'stable'
+}
+
+/**
+ * Tag every Datadog RUM Action and PostHog event with cohort context
+ * (release channel, locale, theme, install summary, consent state, etc.)
+ * so dashboards can slice by user segment without a per-event property
+ * proliferation. Reads each setting independently so a single failing
+ * IPC doesn't drop the rest of the cohort tags — telemetry must never
+ * break boot, so every read defaults to `'unknown'` / `null` on error.
+ */
+async function registerCohortContext(opts: {
+  appVersion: string
+  telemetryEnabled: boolean
+}): Promise<void> {
+  const appChannel = deriveAppChannel(opts.appVersion)
+  const locale = await window.api.getLocale().catch(() => 'unknown')
+  const theme = await window.api.getSetting('theme')
+    .then((v) => (typeof v === 'string' && v ? v : 'unknown'))
+    .catch(() => 'unknown')
+  const firstUseCompleted = await window.api.getSetting('firstUseCompleted')
+    .then((v) => (typeof v === 'boolean' ? v : null))
+    .catch(() => null)
+  const installSummary = await window.api.getInstallationsSummary().catch(() => null)
+
+  const cohort: Record<string, string | number | boolean | null> = {
+    // `app_version` and `app_channel` are intentionally both registered:
+    // `app_version` is also pushed as a PostHog person property in the
+    // `getDeviceId` branch below, but person properties are joined at
+    // query time and aren't visible on raw RUM events. Registering
+    // `app_version` here puts it on every event payload so dashboards
+    // can filter by exact version without joining; `app_channel` is the
+    // cheap categorical filter (`stable`/`beta`/`canary`/`alpha`)
+    // derived from it.
+    app_version: opts.appVersion || 'unknown',
+    app_channel: appChannel,
+    locale,
+    theme,
+    telemetry_enabled: opts.telemetryEnabled,
+    first_use_completed: firstUseCompleted,
+    // Excludes the always-seeded Comfy Cloud entry — see
+    // `get-installations-summary` in `registerInstallationHandlers.ts`.
+    local_installation_count: installSummary?.localCount ?? null,
+    // True only when the user has actually opened the seeded Cloud
+    // entry at least once. The seeded entry's mere presence is
+    // meaningless because it's force-re-seeded on every boot.
+    has_launched_cloud: installSummary?.hasLaunchedCloud ?? null,
+    has_legacy_install: installSummary?.hasLegacyDesktop ?? null,
+  }
+
+  if (isDatadogInitialized) {
+    try {
+      for (const [key, value] of Object.entries(cohort)) {
+        datadogRum.setGlobalContextProperty(key, value)
+      }
+    } catch {}
+  }
+  if (isPostHogInitialized()) {
+    registerPostHog(cohort)
+  }
+}
+
 async function initializeProviders(): Promise<void> {
   const telemetryEnabled = await getTelemetryEnabledSetting()
+  // Snapshot the resolved consent state for the renderer-side gate.
+  // `undefined` here means "user has not yet decided" — only the
+  // consent-decision event itself can fire until they do.
+  resolvedTelemetryEnabled = telemetryEnabled
   const consent = telemetryEnabled !== false
   const appVersion = datadogVersion || 'unknown'
 
@@ -198,12 +329,11 @@ async function initializeProviders(): Promise<void> {
   }
 
   if (isDatadogInitialized || isPostHogInitialized()) {
-    trackTelemetryAction('desktop2.session.started', {
-      app_env: datadogEnv,
-      app_version: appVersion,
-      is_packaged: !import.meta.env.DEV,
-      telemetry_effective_enabled: consent,
-    })
+    // `desktop2.session.started` is owned by main (`identify()` in
+    // `src/main/lib/telemetry.ts`) because it has to ride the deferred-
+    // identify pattern that binds `distinctId` first. Firing it again
+    // here would double-count every session.
+    void registerCohortContext({ appVersion, telemetryEnabled: consent })
     window.api.getDeviceId().then((id) => {
       if (isDatadogInitialized) {
         try { datadogRum.setUser({ id }) } catch {}
@@ -211,11 +341,57 @@ async function initializeProviders(): Promise<void> {
       // For PostHog we'll merge in the system_info profile properties below.
       identifyPostHog(id)
     }).catch(() => {})
+    // Per-session boot census of every persisted install. Gated to
+    // `'panel'` (same pattern as `installation_started` /
+    // `snapshot_history` below) so it fires exactly once per session:
+    // the chooser host owns the `'panel'` renderer, every other host
+    // window has only the always-on `'title-bar'` renderer. Without
+    // this gate the inventory would fire N times per session — once
+    // per host window's title-bar bootstrap. Payload is metadata +
+    // diff counts only (no per-node / per-package contents) and is
+    // capped to ~200 KB main-side; arrays of objects bypass the typed
+    // bridge the same way `snapshot_history` does below.
+    if (rendererRole === 'panel') {
+      window.api.getInstallsInventory().then((inventory) => {
+        if (!inventory) return
+        // Honor the pre-consent gate even on the bypass path. The
+        // typed-bridge `trackTelemetryAction` route already does this;
+        // we replicate the check inline here because direct
+        // `addAction` / `capturePostHog` calls skip that wrapper.
+        if (!isTelemetryEmitAllowed('desktop2.session.installs_inventory')) return
+        if (isDatadogInitialized) {
+          try {
+            datadogRum.addAction(
+              'desktop2.session.installs_inventory',
+              inventory as unknown as Record<string, unknown>,
+            )
+          } catch {}
+        }
+        if (isPostHogInitialized()) {
+          capturePostHog(
+            'desktop2.session.installs_inventory',
+            inventory as unknown as TelemetryContext,
+          )
+        }
+      }).catch(() => {})
+    }
+    // Convention: session-wide events (one per session regardless of
+    // how many host windows the user opens) are gated to `panel`
+    // because the chooser host is the singleton owner of the panel
+    // renderer. Per-renderer SDK setup (`registerCohortContext`,
+    // `setUser`, `identifyPostHog`) is intentionally un-gated — each
+    // renderer's local SDK instance needs its own configuration.
+    // `installs_inventory` above follows the same rule.
     window.api.getSystemInfo().then(async (info) => {
       const ctx = info as unknown as Record<string, string | number | boolean | null | undefined>
-      trackTelemetryAction('desktop2.session.system_info', ctx)
+      if (rendererRole === 'panel') {
+        trackTelemetryAction('desktop2.session.system_info', ctx)
+      }
       // Promote system info to PostHog profile properties so it's queryable
       // across sessions without joining against a per-session event.
+      // Stays un-gated: it's an idempotent person-property upsert, not
+      // an event emit, so each renderer's SDK setting the same keys
+      // produces no duplication.
       try {
         const id = await window.api.getDeviceId()
         identifyPostHog(id, {
@@ -289,6 +465,12 @@ export function initializeRendererBootstrap(role: RendererRole = 'panel'): void 
   rendererRole = role
 
   window.api.onTelemetrySettingChanged((enabled) => {
+    // Keep the renderer-side pre-consent gate in sync with the
+    // persisted setting. After the user makes a consent decision in
+    // `FirstUseTakeover`, this fires with `enabled: true | false`,
+    // releasing the gate so subsequent events flow normally (the SDK
+    // consent state set just below decides whether they actually ship).
+    resolvedTelemetryEnabled = enabled
     if (isDatadogConfigured) setDatadogTrackingConsent(toDatadogTrackingConsent(enabled))
     setPostHogConsent(enabled !== false)
   })

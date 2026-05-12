@@ -1,4 +1,4 @@
-import { scrubAll } from './piiScrub'
+import { scrubAll } from '../../shared/piiScrub'
 
 export function scrubStderr(text: string): string {
   return scrubAll(text)

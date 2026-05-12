@@ -61,6 +61,32 @@ export function registerInstallationHandlers(): void {
     return uniqueName(baseName)
   })
 
+  // Cohort summary for telemetry global context. Reads from the same
+  // `installations.list()` source as `get-installations`; values are
+  // coarse counters / booleans only (no IDs, paths, or names) so the
+  // payload is safe to register as PostHog / Datadog cohort properties.
+  //
+  // `localCount` excludes the always-seeded Comfy Cloud entry (re-seeded
+  // every boot via `installations.ensureExists('cloud', …)`), which would
+  // otherwise inflate the count by 1 for every user and obscure the
+  // actual local-install footprint.
+  //
+  // `hasLaunchedCloud` is the real Cloud-usage signal: the seeded entry
+  // exists for everyone, so its presence is meaningless, but a
+  // non-null `lastLaunchedAt` on it means the user has actually opened
+  // it at least once.
+  ipcMain.handle('get-installations-summary', async () => {
+    const all = await installations.list()
+    const visible = all.filter((i) => i.status !== 'installing')
+    return {
+      localCount: visible.filter((i) => i.sourceId !== 'cloud').length,
+      hasLaunchedCloud: visible.some(
+        (i) => i.sourceId === 'cloud' && !!i.lastLaunchedAt,
+      ),
+      hasLegacyDesktop: visible.some((i) => i.sourceId === 'desktop'),
+    }
+  })
+
   ipcMain.handle('add-installation', async (_event, data: Record<string, unknown>) => {
     data.name = await uniqueName((data.name as string) || 'ComfyUI')
     if (data.installPath) {

@@ -42,7 +42,7 @@ import { TITLEBAR_HEIGHT, TRAFFIC_LIGHT_POSITION, comfyTitleBarOverlay, titleBar
 import { resolveTheme, sourceMap, _registerExtraBroadcastTarget, _unregisterExtraBroadcastTarget, _runningSessions, _broadcastToRenderer, _operationAborts } from './lib/ipc/shared'
 import * as mainTelemetry from './lib/telemetry'
 import { getDeviceId } from './lib/deviceId'
-import { scrubAll } from './lib/piiScrub'
+import { scrubAll } from '../shared/piiScrub'
 
 /**
  * Title-bar pill key — one of the three user-visible navigation tabs.

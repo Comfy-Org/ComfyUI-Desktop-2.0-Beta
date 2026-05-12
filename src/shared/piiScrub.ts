@@ -9,8 +9,13 @@
  *
  * Centralized so that everything which forwards user-visible text — the
  * renderer-bound `forwardDatadogError`, the main-process `executionTap`,
- * and the boot-log scrubber — applies identical rules. Adding a pattern
- * here updates every call site at once.
+ * the boot-log scrubber, and the renderer-side telemetry action props
+ * pass — applies identical rules. Adding a pattern here updates every
+ * call site at once.
+ *
+ * Lives in `src/shared/` because both main and renderer import it; the
+ * file has no runtime dependencies on Electron, Node, or the DOM so it
+ * is safe to bundle into either side.
  */
 
 const PII_PATH_PATTERNS: RegExp[] = [

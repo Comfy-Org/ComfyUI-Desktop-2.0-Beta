@@ -61,6 +61,7 @@ export function buildElectronApi(): ElectronApi {
 
     // Installations
     getInstallations: () => ipcRenderer.invoke('get-installations'),
+    getInstallationsSummary: () => ipcRenderer.invoke('get-installations-summary'),
     addInstallation: (data) => ipcRenderer.invoke('add-installation', data),
     reorderInstallations: (orderedIds) =>
       ipcRenderer.invoke('reorder-installations', orderedIds),
@@ -173,6 +174,7 @@ export function buildElectronApi(): ElectronApi {
     resetZoom: () => ipcRenderer.invoke('reset-zoom'),
     getSystemInfo: () => ipcRenderer.invoke('get-system-info'),
     getInstallationDdContext: (installationId: string) => ipcRenderer.invoke('get-installation-dd-context', installationId),
+    getInstallsInventory: () => ipcRenderer.invoke('get-installs-inventory'),
     getDeviceId: () => ipcRenderer.invoke('get-device-id'),
 
     // Model downloads

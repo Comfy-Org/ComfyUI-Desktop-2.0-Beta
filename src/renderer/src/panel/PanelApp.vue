@@ -759,13 +759,19 @@ async function switchPanel(panel: PanelKey, entrypoint: string = 'titlebar'): Pr
   // `panel-trigger-overlay`.
   if (panel === 'settings') {
     const inst = installation.value
+    const initialTab = inst ? 'comfy' : 'global'
     const ok = await openOverlay({
       kind: 'settings',
       installation: inst,
-      initialTab: inst ? 'comfy' : 'global',
+      initialTab,
     })
     if (!ok) return
     emitTelemetryAction('desktop2.view.opened', { view: panel, from_view: fromView })
+    emitTelemetryAction('desktop2.settings.opened', {
+      initial_tab: initialTab,
+      entrypoint,
+      has_installation: !!inst,
+    })
     return
   }
   // Body-swap branch — `if (view !== fromView)` no-op guard so a
