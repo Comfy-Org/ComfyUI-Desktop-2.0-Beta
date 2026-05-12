@@ -166,13 +166,13 @@ You have rights over your data. The specifics depend on where you live, but the 
 
 ### 9.1 Turn off data collection going forward
 
-Open the Desktop App → **Settings → Desktop panel → Telemetry** → toggle off. Future events stop immediately, including any in-flight queue (it's flushed best-effort, then halted).
+Open the Desktop App → **Settings → Telemetry** → toggle off. Future events stop immediately; any pending in-flight requests already on the wire may still complete.
 
 ### 9.2 Delete past data
 
-Email **privacy@comfy.org** with your **anonymous device ID** (Settings → About → "Copy device ID"). We'll remove records associated with that ID from our analytics, crash report, and long-term storage within 30 days.
+Email **privacy@comfy.org** with your approximate install date, platform, and version. We'll do a best-effort match against our analytics, crash report, and long-term storage and remove associated records within 30 days.
 
-If you've lost the device ID (e.g. uninstalled the app), tell us what platform/version you were on and approximately when — we'll do best-effort removal but may not be able to identify records definitively.
+*[VERIFY: replace this with the in-app device ID lookup once the "Copy device ID" affordance ships — tracked separately. Without that surface we can't ask anonymous users for an identifier they cannot retrieve.]*
 
 ### 9.3 Access, rectification, portability (GDPR/UK GDPR)
 
@@ -185,7 +185,7 @@ If you're in the EU, UK, or EEA, you have the right to:
 - **Object** to processing based on legitimate interests
 - **Data portability** — receive your data in a machine-readable format
 
-Email **privacy@comfy.org** with your device ID.
+Email **privacy@comfy.org** with your approximate install date, platform, and version (until the in-app device ID lookup ships).
 
 ### 9.4 California rights (CCPA/CPRA)
 
@@ -213,11 +213,11 @@ We'd appreciate the chance to address your concern first — email **privacy@com
 
 Uninstalling the Desktop App ends data collection. The local device ID file is removed along with the app. We don't keep tracking IDs after uninstall, so you'll be treated as a new device if you reinstall.
 
-## 9.7 How we verify identity for data requests
+### 9.7 How we verify identity for data requests
 
-Because the Desktop App doesn't require an account, you are anonymous to us by default. We identify your data through your **anonymous device ID** (Settings → About → "Copy device ID").
+Because the Desktop App doesn't require an account, you are anonymous to us by default. We identify your data through an **anonymous device ID** held locally on your machine.
 
-For deletion or access requests, please include your device ID in your email to **privacy@comfy.org**. If you can't retrieve it (e.g. you've already uninstalled), tell us your approximate install date, platform, and the type of activity you remember — we'll do a best-effort match.
+For deletion or access requests, tell us your approximate install date, platform, version, and the type of activity you remember — we'll do a best-effort match against our records. Once the in-app device ID lookup ships, include that ID for an exact match.
 
 We will **not** ask you for any additional identifying information (e.g. government ID) to process a request, because the data we hold is anonymous and we have no reliable way to match it to a real-world identity. Requests for data we don't hold will be answered with "we don't hold that data."
 

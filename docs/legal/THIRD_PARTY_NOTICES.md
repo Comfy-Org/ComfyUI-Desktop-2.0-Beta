@@ -129,9 +129,9 @@ The full text of every license listed is also available in the Desktop App's Abo
 
 ### 7zip-bin
 - **Version:** ^5.2.0
-- **License:** MIT (wrapper) + LGPL-2.1+ / Unlicense (bundled 7z binaries)
+- **License:** MIT (wrapper) + LGPL-2.1 with linking exception + BSD-3-Clause (7-Zip core) + unRAR restriction (RAR decoder component, may not be used to develop a program able to decode any RAR archive)
 - **Source:** https://github.com/develar/7zip-bin
-- **Notice:** Contains the 7-Zip binaries distributed under their respective licenses. The 7-Zip source is available at https://www.7-zip.org/.
+- **Notice:** Contains the 7-Zip binaries distributed under their respective licenses. The 7-Zip source and full license text are available at https://www.7-zip.org/license.txt.
 
 ---
 
@@ -157,12 +157,23 @@ The full text of every license listed is also available in the Desktop App's Abo
 
 ## Bundled Python runtime
 
-### bootstrap-python
-- **Source:** Python Software Foundation
-- **License:** Python Software Foundation License (PSF)
-- **Source URL:** https://www.python.org/
+The Desktop App bundles a minimal "bootstrap" Python environment as an extra resource so that the very first ComfyUI installation can proceed without the user installing Python separately. The bootstrap is built by `scripts/build-bootstrap-python.mjs` from the following components, each redistributed under its own license:
 
-The Desktop App bundles a minimal "bootstrap" Python runtime as an extra resource so that the very first ComfyUI installation can proceed without the user installing Python separately. Only this lightweight bootstrap Python is part of the Desktop App's distributed binary; full Python environments used by individual ComfyUI installs are created on-disk at runtime, are not part of our binary, and are governed by the PSF License directly.
+### python-build-standalone (CPython distribution)
+- **Source:** https://github.com/astral-sh/python-build-standalone
+- **License:** MIT (distribution build scripts and binary artifacts) + Python Software Foundation License v2 (the embedded CPython interpreter and standard library)
+
+### pygit2 (bundled into the bootstrap via pip)
+- **Source:** https://github.com/libgit2/pygit2
+- **License:** GPL v2 with a linking exception (the linking exception permits combining pygit2 with software under different licenses, including proprietary, without making the combined work GPL)
+
+### libgit2 (bundled by the pygit2 wheel)
+- **Source:** https://github.com/libgit2/libgit2
+- **License:** GPL v2 with a linking exception (same linking exception as pygit2)
+
+Only this lightweight bootstrap environment is part of the Desktop App's distributed binary; full Python environments used by individual ComfyUI installs are created on-disk at runtime, are not part of our binary, and are governed by their components' licenses directly.
+
+*[VERIFY: confirm the exact python-build-standalone release pinned in `scripts/build-bootstrap-python.mjs` and the resolved pygit2 + libgit2 versions before GA.]*
 
 ---
 
@@ -181,15 +192,15 @@ Comfy Org does not control the licensing of these components and is not a party 
 
 ## Documentation and other notices
 
-This document, the [EULA](./EULA.md), and the [Privacy Policy](./PRIVACY_POLICY.md) are © 2026 Comfy Org and are provided as starting drafts under MIT-equivalent permission (i.e., feel free to adapt them; we make no warranty about their legal sufficiency for your context).
+This document, the [EULA](./EULA.md), and the [Privacy Policy](./PRIVACY_POLICY.md) are © 2026 Comfy Org. They are AI-drafted starting points provided for internal review; we make no representation about their legal sufficiency for any other party's use, and no license is granted by their inclusion in this repository.
 
 ---
 
 ## How to generate a complete list before GA
 
-The list above covers the **direct production dependencies** declared in `package.json` plus the bundled runtimes. For a fully accurate THIRD_PARTY_NOTICES file before GA, the build pipeline should:
+The list above is hand-curated and covers the major components actually bundled into the shipped Desktop binary (renderer + main process + bootstrap Python). Note that the basis is "bundled in the shipped binary" rather than `package.json` classification — Vite bundles many `devDependencies` (Vue, Pinia, vueuse, Tailwind, etc.) into the renderer at build time. For a fully accurate THIRD_PARTY_NOTICES file before GA, the build pipeline should:
 
-1. Run a license-scanning tool against the resolved `pnpm-lock.yaml` (e.g. `license-checker`, `pnpm licenses ls`, or `npm-license-crawler`) to capture every transitive dependency.
+1. Run `pnpm licenses list --long --prod` (built-in, matches the resolved lockfile) or an equivalent license-scanning tool to capture every transitive dependency that ends up in the bundle.
 2. Filter to **runtime** dependencies that end up in the shipped binary (dev tools, test runners, linters generally don't need attribution because they're not distributed).
 3. Output a generated section appended to this document or a separate auto-generated file referenced from this one.
 4. Surface the list in the Desktop App's About panel as a scrollable view (similar to the inline privacy policy on the consent screen).
@@ -217,4 +228,4 @@ For any question about third-party components or attributions, email **legal@com
 
 ---
 
-*This document is an AI-drafted starting point. The lists above reflect the direct dependencies declared in `package.json` as of 2026-05-08 and should be expanded with a full transitive-dependency scan before GA. Items marked `[VERIFY]` flag entries that need confirmation.*
+*This document is an AI-drafted starting point. The lists above reflect the major components bundled into the shipped Desktop binary (renderer, main process, bootstrap Python) as of 2026-05-08 and should be expanded with a full transitive-dependency scan before GA. Items marked `[VERIFY]` flag entries that need confirmation.*

@@ -1,8 +1,8 @@
 # End-User License Agreement (EULA)
 
 **Effective date:** 2026-05-08
-**Applies to:** ComfyUI Desktop 2.0 (the "Desktop App," "we," "us," "our")
-**Publisher:** Comfy Org
+**Applies to:** ComfyUI Desktop 2.0 (the "Desktop App")
+**Publisher:** Comfy Org ("Comfy Org," "we," "us," "our")
 
 ---
 
@@ -21,6 +21,7 @@ If you don't agree to these terms, don't install or use the Desktop App.
 
 ## 1. Definitions
 
+- **"Comfy Org"** means the publisher of the Desktop App and the party to this EULA. *[REVIEW: insert registered legal entity name, jurisdiction of incorporation, and registered office address before GA.]*
 - **"Desktop App"** means the ComfyUI Desktop 2.0 application, including all binaries, installers, signed packages, scripts, configuration, and bundled assets we distribute under the names "ComfyUI Desktop 2.0," "Comfy Desktop 2," or any successor naming.
 - **"You"** means the individual or entity installing or using the Desktop App.
 - **"Source Code"** means the open-source source code published at [github.com/Comfy-Org/ComfyUI-Desktop-2.0-Beta](https://github.com/Comfy-Org/ComfyUI-Desktop-2.0-Beta).
@@ -47,7 +48,6 @@ You may use the Desktop App for any lawful purpose. You agree **not to**:
 - Remove, alter, or obscure any copyright, trademark, or other proprietary notices in the Desktop App's user interface.
 - Use the Comfy Org name, logo, or branding to imply endorsement or affiliation that does not exist (see Section 8, Trademarks).
 - Distribute modified compiled binaries under our trademarks (you may modify and redistribute the **Source Code** under the MIT License, but the resulting binaries must not be branded as "ComfyUI Desktop," "Comfy Desktop," or any confusingly similar name).
-- Use the Desktop App to develop a competing product that is substantially derived from the proprietary (non-MIT) portions of the distributed binary, such as our signed installer wrapper or auto-update integration. *[REVIEW: tighten or remove based on competitive-protection stance; MIT-licensed core does not allow blanket non-compete restrictions.]*
 
 ## 4. Updates and auto-update
 
@@ -55,7 +55,7 @@ The Desktop App includes an automatic update mechanism that may, from time to ti
 
 - Check our update servers for new versions.
 - Download and install updates automatically or after your confirmation, depending on your settings.
-- Update bundled dependencies (Python runtime, ComfyUI core, etc.) as part of the app's normal operation.
+- Update bundled dependencies (e.g. the Python bootstrap runtime, signed installer wrapper, application frameworks) as part of the app's normal operation. Note that ComfyUI core and custom nodes are not bundled — see Section 7.2.
 
 You can disable automatic updates in Settings. If you do, you accept responsibility for keeping the Desktop App up to date and acknowledge that security fixes will not be applied automatically.
 
@@ -63,7 +63,7 @@ We may discontinue support for older versions of the Desktop App at any time wit
 
 ## 5. Data collection
 
-The Desktop App collects anonymous telemetry (usage analytics and crash reports) as described in our [Privacy Policy](./PRIVACY_POLICY.md). You can turn telemetry off at any time in Settings → Desktop panel → Telemetry. Doing so does not affect your ability to use the Desktop App.
+The Desktop App collects anonymous telemetry (usage analytics and crash reports) as described in our [Privacy Policy](./PRIVACY_POLICY.md). You can turn telemetry off at any time in Settings → Telemetry. Doing so does not affect your ability to use the Desktop App.
 
 Your workflows, models, prompts, and generated outputs are **not** transmitted to us and remain on your local machine.
 
@@ -142,7 +142,7 @@ This EULA takes effect when you install or use the Desktop App and continues unt
 
 **You may terminate** this EULA at any time by uninstalling the Desktop App. Uninstalling stops new telemetry collection. Past anonymous telemetry records remain in our systems subject to the retention terms in the [Privacy Policy](./PRIVACY_POLICY.md).
 
-**We may terminate** this EULA if you materially breach it. Upon termination, you must stop using the Desktop App and uninstall it. Sections that by their nature survive termination (Sections 6, 9, 10, 12, 13, 14) will survive.
+**We may terminate** this EULA if you materially breach it. Upon termination, you must stop using the Desktop App and uninstall it. Sections that by their nature survive termination (Sections 6, 7, 8, 9, 10, 12, 13, 14, 18, 19) will survive.
 
 ## 12. Export and sanctions compliance
 

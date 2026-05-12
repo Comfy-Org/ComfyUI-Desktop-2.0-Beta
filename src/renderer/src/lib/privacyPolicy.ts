@@ -139,8 +139,8 @@ export const PRIVACY_POLICY: PrivacyPolicy = {
     {
       kind: 'ul',
       items: [
-        '**Turn off analytics**: Settings → Desktop panel → toggle off the analytics opt-in. Future events stop immediately.',
-        '**Delete past data**: email **privacy@comfy.org** with your anonymous device ID (Settings → About → "Copy device ID") and we’ll remove records associated with it.',
+        '**Turn off analytics**: Settings → Telemetry → toggle off the analytics opt-in. Future events stop immediately.',
+        '**Delete past data**: email **privacy@comfy.org** with your approximate install date, platform, and version, and we’ll do a best-effort match and remove associated records.',
         "**Stop using the app**: uninstalling Desktop ends data collection. We don't keep tracking IDs after uninstall.",
       ],
     },
