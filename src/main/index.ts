@@ -3027,7 +3027,7 @@ function buildTitlePopupMenuItems(entry: ComfyWindowEntry): TitlePopupMenuItem[]
     // Send Feedback (#493). The renderer-side handler resolves the
     // support URL and emits the `desktop2.feedback.opened`
     // telemetry action with `source: 'menu'`.
-    { id: 'feedback', label: 'Send Feedback', labelKey: 'fileMenu.sendFeedback' },
+    { id: 'feedback', label: 'Send Beta Feedback', labelKey: 'fileMenu.sendFeedback' },
     { kind: 'separator' },
   )
   if (entry.installationId !== null) {
