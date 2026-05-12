@@ -485,25 +485,39 @@ defineExpose({ open })
   color: var(--text-muted);
   background: transparent;
   border: none;
-  border-bottom: 2px solid transparent;
   cursor: pointer;
-  transition: color 120ms ease, border-color 120ms ease;
+  transition: color 120ms ease;
 }
 
 .first-use-legal-tab:hover {
   color: var(--text);
-  background: color-mix(in srgb, var(--border) 20%, transparent);
 }
 
 .first-use-legal-tab.active {
   color: var(--text);
   font-weight: 600;
-  border-bottom-color: var(--accent);
+}
+
+/* Pixel-aligned indicator pill underneath the active tab. Pinning it
+ * with absolute positioning instead of a border-bottom avoids the
+ * fuzzy edge that happens when a 2px border overlaps the strip's
+ * 1px divider at a half-pixel boundary. The pill is inset from the
+ * tab edges so it reads as a marker, not a full underline. */
+.first-use-legal-tab.active::after {
+  content: '';
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: -1px;
+  height: 2px;
+  background: var(--accent);
+  border-radius: 1px;
 }
 
 .first-use-legal-tab:focus-visible {
   outline: 2px solid var(--accent);
-  outline-offset: -2px;
+  outline-offset: -3px;
+  border-radius: 4px;
 }
 
 /* Scrolling body. The tab strip stays pinned at the top of the card
