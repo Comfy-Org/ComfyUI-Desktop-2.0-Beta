@@ -74,6 +74,24 @@ const emit = defineEmits<{
 const step = ref<Step>('consent')
 const telemetryEnabled = ref(true)
 const locale = ref('en')
+/** Funnel-completion bookkeeping for `desktop2.first_use.completed`.
+ *  `mountedAt` is reset in `open()` so a takeover replay measures
+ *  duration from the replay, not from the original mount.
+ *  `stepsSeen` is a Set so re-visiting a step (back-navigation, replay)
+ *  doesn't double-count. */
+let mountedAt = Date.now()
+const stepsSeen = new Set<Step>()
+let completedFired = false
+
+function emitCompleted(exitPath: 'cloud' | 'local-new' | 'local-migrate' | 'skipped'): void {
+  if (completedFired) return
+  completedFired = true
+  emitTelemetryAction('desktop2.first_use.completed', {
+    exit_path: exitPath,
+    steps_seen: stepsSeen.size,
+    duration_ms: Date.now() - mountedAt,
+  })
+}
 /** When the host detects prior usage of the launcher (any
  *  non-cloud, non-legacy-desktop install present), the
  *  cloud-vs-local pick step is suppressed: the user's already made
@@ -100,7 +118,10 @@ const policy = PRIVACY_POLICY
  *  current persisted state, not as a freshly-defaulted opt-in). */
 async function acceptConsent(): Promise<void> {
   await window.api.setSetting('telemetryEnabled', telemetryEnabled.value)
-  emitTelemetryAction('desktop2.first_use.consent_accepted', {
+  // `consent_decision` (not `consent_accepted`) because this fires for
+  // both opt-in and opt-out — the `decision` prop says which one.
+  emitTelemetryAction('desktop2.first_use.consent_decision', {
+    decision: telemetryEnabled.value ? 'accept' : 'decline',
     telemetry_enabled: telemetryEnabled.value,
     locale: locale.value,
   })
@@ -111,6 +132,7 @@ async function acceptConsent(): Promise<void> {
   if (isChinese.value) {
     step.value = 'mirrors'
   } else if (skipPick.value) {
+    emitCompleted('skipped')
     emit('complete-skip')
   } else {
     step.value = 'pick'
@@ -128,6 +150,7 @@ async function chooseMirrors(useMirrors: boolean): Promise<void> {
   ])
   emitTelemetryAction('desktop2.first_use.mirrors_chosen', { use_mirrors: useMirrors })
   if (skipPick.value) {
+    emitCompleted('skipped')
     emit('complete-skip')
   } else {
     step.value = 'pick'
@@ -139,6 +162,7 @@ function pickCloud(): void {
     choice: 'cloud',
     has_legacy_desktop: hasLegacyDesktop.value,
   })
+  emitCompleted('cloud')
   emit('complete-cloud')
 }
 
@@ -155,17 +179,20 @@ function pickLocal(): void {
   if (hasLegacyDesktop.value) {
     step.value = 'localBranch'
   } else {
+    emitCompleted('local-new')
     emit('chain-local')
   }
 }
 
 function chooseMigrate(): void {
   emitTelemetryAction('desktop2.first_use.local_branch_chosen', { choice: 'migrate' })
+  emitCompleted('local-migrate')
   emit('chain-migrate')
 }
 
 function chooseInstallNew(): void {
   emitTelemetryAction('desktop2.first_use.local_branch_chosen', { choice: 'install_new' })
+  emitCompleted('local-new')
   emit('chain-local')
 }
 
@@ -183,6 +210,11 @@ async function open(opts: OpenOpts = {}): Promise<void> {
   step.value = 'consent'
   skipPick.value = opts.skipPick === true
   hasLegacyDesktop.value = opts.hasLegacyDesktop === true
+  // Reset funnel-completion bookkeeping so a takeover replay measures
+  // duration / steps from the replay, not from the original mount.
+  mountedAt = Date.now()
+  stepsSeen.clear()
+  completedFired = false
   // Pre-load existing telemetry preference so the toggle reflects the
   // user's current persisted choice if the takeover is replaying after
   // a mid-flow cancel (the consent step is the only one that can flip
@@ -217,6 +249,7 @@ watch(
   (current) => {
     const mode = current === 'consent' ? 'consent-lockdown' : 'post-consent'
     window.api.setFirstUseMode(mode)
+    stepsSeen.add(current)
     emitTelemetryAction('desktop2.first_use.step_viewed', {
       step: current,
       skip_pick: skipPick.value,

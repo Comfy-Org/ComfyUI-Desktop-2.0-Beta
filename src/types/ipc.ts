@@ -503,6 +503,62 @@ export interface InstallationDdContext {
   snapshot_diffs: SnapshotDiffEntry[]
 }
 
+/** Compact per-install summary for the per-session boot census
+ *  emitted as `desktop2.session.installs_inventory`. Strictly metadata
+ *  + counts + diff summaries (no per-node / per-package contents) so
+ *  the inventory can pack many installs into the same RUM payload. */
+export interface InstallInventoryEntry {
+  installation_id: string
+  source_id: string
+  variant: string
+  update_channel: string
+  comfyui_version: string
+  snapshot_count: number
+  last_launched_at: number | null
+  latest_snapshot: {
+    createdAt: string
+    trigger: string
+    /** Presence flag only — user-typed labels can carry PII / paths /
+     *  model names. The inventory event bypasses the renderer-side
+     *  `scrubAll` pass, so we never ship the raw label string. */
+    has_label: boolean
+    comfyui: { ref: string; commit: string | null; releaseTag: string }
+    custom_nodes_count: number
+    pip_packages_count: number
+  } | null
+  snapshot_diffs: Array<{
+    createdAt: string
+    trigger: string
+    /** Same PII reasoning as `latest_snapshot.has_label`. */
+    has_label: boolean
+    nodesAdded: number
+    nodesRemoved: number
+    nodesChanged: number
+    pipsAdded: number
+    pipsRemoved: number
+    pipsChanged: number
+    comfyuiChanged: boolean
+    updateChannelChanged: boolean
+  }>
+}
+
+export interface InstallsInventory {
+  /** Total visible (non-`installing`) installs on disk, regardless of
+   *  whether they fit in the inventory payload. */
+  total_install_count: number
+  /** Number of installs actually packed into `installs[]` after
+   *  per-install + total byte caps were applied. */
+  included_install_count: number
+  /** True when the total byte cap was hit and one or more
+   *  least-recently-launched installs were dropped from the tail
+   *  (installs are sorted most-recent first, so truncation always
+   *  costs the oldest entries). */
+  truncated: boolean
+  /** Installs sorted most-recently-launched first; never-launched at
+   *  the end. */
+  installs: InstallInventoryEntry[]
+}
+
 export interface DatadogForwardedError {
   source: string
   message: string
@@ -708,8 +764,18 @@ export interface ElectronApi {
   /** Coarse cohort summary of persisted installs for telemetry global
    *  context. Counters / booleans only — no IDs, paths, or names — so
    *  the payload is safe to register as PostHog / Datadog cohort
-   *  properties on every event. */
-  getInstallationsSummary(): Promise<{ count: number; hasCloud: boolean; hasLegacyDesktop: boolean }>
+   *  properties on every event.
+   *
+   *  `localCount` excludes the always-seeded Comfy Cloud entry; that
+   *  entry is re-seeded on every boot, so counting it would just shift
+   *  every user's count by +1. `hasLaunchedCloud` is the meaningful
+   *  Cloud signal — it's true only when the user has actually opened
+   *  the Cloud entry at least once. */
+  getInstallationsSummary(): Promise<{
+    localCount: number
+    hasLaunchedCloud: boolean
+    hasLegacyDesktop: boolean
+  }>
   addInstallation(data: Record<string, unknown>): Promise<AddResult>
   reorderInstallations(orderedIds: string[]): Promise<void>
   probeInstallation(dirPath: string): Promise<ProbeResult[]>
@@ -846,6 +912,12 @@ export interface ElectronApi {
   resetZoom(): Promise<void>
   getSystemInfo(): Promise<SystemInfo>
   getInstallationDdContext(installationId: string): Promise<InstallationDdContext | null>
+  /** Per-session boot census of every persisted install (metadata +
+   *  snapshot diff counts). Powers the `desktop2.session.installs_inventory`
+   *  telemetry event so dashboards see the user's full install footprint
+   *  without waiting for them to launch each one. Capped to ~200 KB
+   *  total to stay under Datadog RUM's per-action context limit. */
+  getInstallsInventory(): Promise<InstallsInventory>
   getDeviceId(): Promise<string>
 
   // Updates

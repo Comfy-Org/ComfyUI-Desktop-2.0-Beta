@@ -25,7 +25,7 @@
  */
 import * as installationsApi from '../installations'
 import * as telemetry from './telemetry'
-import { scrubAll } from './piiScrub'
+import { scrubAll } from '../../shared/piiScrub'
 
 /**
  * Traceback collection state. We collect until a blank line follows an

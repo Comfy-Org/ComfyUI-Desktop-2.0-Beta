@@ -212,6 +212,114 @@ export function registerAppHandlers(): void {
     }
   })
 
+  // Per-session boot census of every persisted installation, sorted
+  // most-recently-launched first. Powers `desktop2.session.installs_inventory`
+  // so dashboards can see the user's full install footprint without
+  // having to wait for them to launch each one. Capped to 200 KB total
+  // (Datadog RUM hard-caps action context at ~256 KB; 200 KB matches the
+  // existing single-install `get-installation-dd-context` budget so the
+  // event reliably ships).
+  ipcMain.handle('get-installs-inventory', async () => {
+    const MAX_TOTAL_BYTES = 200 * 1024
+    const MAX_PER_INSTALL_BYTES = 50 * 1024
+    const all = await installations.list()
+    // `installing` entries are mid-install transient — exclude them
+    // (they'll show up on the next boot once they settle).
+    const visible = all.filter((i) => i.status !== 'installing')
+    // Most-recently-launched first; never-launched (`undefined`) sort
+    // to the end with `?? 0`.
+    visible.sort(
+      (a, b) =>
+        ((b.lastLaunchedAt as number | undefined) ?? 0) -
+        ((a.lastLaunchedAt as number | undefined) ?? 0),
+    )
+
+    const result = {
+      total_install_count: visible.length,
+      included_install_count: 0,
+      truncated: false,
+      installs: [] as Array<Record<string, unknown>>,
+    }
+    let runningSize = JSON.stringify(result).length
+
+    for (const inst of visible) {
+      const entries = inst.installPath
+        ? await listSnapshots(inst.installPath).catch(() => [])
+        : []
+      const latest = entries.length > 0 ? entries[0]!.snapshot : null
+
+      const entry: Record<string, unknown> = {
+        installation_id: inst.id,
+        source_id: (inst.sourceId as string) || '',
+        variant: (inst.variant as string) || '',
+        update_channel: (inst.updateChannel as string) || 'stable',
+        comfyui_version: (inst.comfyuiVersion as string) || '',
+        snapshot_count: entries.length,
+        last_launched_at: (inst.lastLaunchedAt as number | undefined) ?? null,
+        latest_snapshot: latest
+          ? {
+              createdAt: latest.createdAt,
+              trigger: latest.trigger,
+              // User-typed snapshot labels can carry PII / paths /
+              // model names — the inventory event bypasses the
+              // renderer-side `scrubAll` pass (it goes via `addAction`
+              // directly to RUM with arrays of objects), so we
+              // collapse the label to a presence boolean instead of
+              // shipping the raw string.
+              has_label: !!latest.label,
+              comfyui: {
+                ref: latest.comfyui.ref,
+                commit: latest.comfyui.commit,
+                releaseTag: latest.comfyui.releaseTag,
+              },
+              custom_nodes_count: latest.customNodes.length,
+              pip_packages_count: Object.keys(latest.pipPackages).length,
+            }
+          : null,
+        snapshot_diffs: [] as Array<Record<string, unknown>>,
+      }
+
+      // Pack as many diffs (newest → oldest) as fit under the
+      // per-install cap; truncation is tolerated silently to leave
+      // room for the next install in the inventory.
+      let perInstallSize = JSON.stringify(entry).length
+      for (let i = 0; i < entries.length - 1; i++) {
+        const newer = entries[i]!.snapshot
+        const older = entries[i + 1]!.snapshot
+        const d = diffSnapshots(older, newer)
+        const diffEntry: Record<string, unknown> = {
+          createdAt: newer.createdAt,
+          trigger: newer.trigger,
+          // Same PII reasoning as `latest_snapshot.has_label` above.
+          has_label: !!newer.label,
+          nodesAdded: d.nodesAdded.length,
+          nodesRemoved: d.nodesRemoved.length,
+          nodesChanged: d.nodesChanged.length,
+          pipsAdded: d.pipsAdded.length,
+          pipsRemoved: d.pipsRemoved.length,
+          pipsChanged: d.pipsChanged.length,
+          comfyuiChanged: d.comfyuiChanged,
+          updateChannelChanged: d.updateChannelChanged,
+        }
+        const diffSize = JSON.stringify(diffEntry).length + 1
+        if (perInstallSize + diffSize > MAX_PER_INSTALL_BYTES) break
+        ;(entry.snapshot_diffs as Array<Record<string, unknown>>).push(diffEntry)
+        perInstallSize += diffSize
+      }
+
+      const entrySize = JSON.stringify(entry).length + 1
+      if (runningSize + entrySize > MAX_TOTAL_BYTES) {
+        result.truncated = true
+        break
+      }
+      result.installs.push(entry)
+      result.included_install_count += 1
+      runningSize += entrySize
+    }
+
+    return result
+  })
+
   ipcMain.handle('get-installation-dd-context', async (_event, installationId: string) => {
     const MAX_CONTEXT_BYTES = 200 * 1024
     const inst = await installations.get(installationId)

@@ -181,9 +181,22 @@ function bindUpdaterEvents(): void {
 
   updater.on('error', (...args: unknown[]) => {
     const wasUserInitiated = _userInitiatedDownload
-    const stage: 'download' | 'check' = _appUpdateState.kind === 'downloading' || _autoDownloadTriggeredFor
-      ? 'download'
-      : 'check'
+    // Three buckets so dashboards can route by failure mode:
+    //   - `install`: Squirrel / restartAndInstall failed AFTER a
+    //     successful download (kind === 'ready'). Usually filesystem
+    //     permissions / antivirus / OS code-signing.
+    //   - `download`: failed mid-download OR a user-initiated download
+    //     attempt failed before the first progress tick (state still
+    //     reads `'available'`, but the user's intent was clearly
+    //     "download"). Usually network / disk.
+    //   - `check`: failed before any download step. Usually network /
+    //     GitHub release feed.
+    const stage: 'install' | 'download' | 'check' =
+      _appUpdateState.kind === 'ready'
+        ? 'install'
+        : _appUpdateState.kind === 'downloading' || _autoDownloadTriggeredFor || wasUserInitiated
+          ? 'download'
+          : 'check'
     emitTelemetry('desktop2.app_update.error', {
       stage,
       error_bucket: bucketError(updaterErrorMessage(args)),
