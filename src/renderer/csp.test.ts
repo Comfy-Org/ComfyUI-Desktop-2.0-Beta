@@ -21,7 +21,11 @@ function readHtml(filename: string): string {
 }
 
 const TELEMETRY_RENDERER_HTMLS = ['panel.html', 'comfyTitleBar.html'] as const
-const NON_TELEMETRY_RENDERER_HTMLS = ['comfyTitlePopup.html'] as const
+const NON_TELEMETRY_RENDERER_HTMLS = [
+  'comfyTitlePopup.html',
+  'comfyTitleTooltip.html',
+  'comfySystemModal.html',
+] as const
 
 describe('Content-Security-Policy: panel.html', () => {
   const csp = parseCSP(readHtml('panel.html'))

@@ -155,6 +155,28 @@ export interface ComfyTitleBarBridge {
    *  the `desktop2.feedback.opened` telemetry action and opens the
    *  support URL via `openExternal`. */
   clickFeedback(): void
+  /** Issue #514 — show the title-bar hover tooltip popup. Routed
+   *  through main, which positions a cached `WebContentsView` popup
+   *  attached to the host window so the bubble escapes the title-bar
+   *  view's 37px clip. Only fired on macOS (Win/Linux use the native
+   *  HTML `title` attribute, which works in those platforms'
+   *  Chromium); macOS doesn't reliably surface native title tooltips
+   *  for sibling chrome WebContentsViews that aren't focused.
+   *
+   *  `leftX` / `rightX` are the trigger's horizontal edges in
+   *  title-bar-local pixels — title-bar lives at window x=0 so they
+   *  also map to window coordinates. Main prefers to anchor the
+   *  bubble's left edge to `leftX` so the tooltip extends rightward
+   *  from the trigger (matches native macOS / browser tooltips for
+   *  small icon buttons in the leading edge of a chrome bar). When
+   *  that would overflow the parent's right edge it falls back to
+   *  anchoring the bubble's right edge to `rightX` instead.
+   *  `bottomY` is the trigger's bottom edge for the same coordinate
+   *  space; main offsets the popup a few pixels below it. */
+  showTooltip(payload: { text: string; leftX: number; rightX: number; bottomY: number }): void
+  /** Issue #514 — hide the title-bar hover tooltip popup. Sent on
+   *  pointer leave, focus loss, menu open, or panel switch. */
+  hideTooltip(): void
   /** Tell main this title bar is mounted; main responds with the initial state. */
   ready(): void
 }
@@ -300,6 +322,12 @@ const bridge: ComfyTitleBarBridge = {
   },
   clickFeedback: () => {
     ipcRenderer.send('comfy-window:click-feedback')
+  },
+  showTooltip: (payload) => {
+    ipcRenderer.send('comfy-window:show-titlebar-tooltip', payload)
+  },
+  hideTooltip: () => {
+    ipcRenderer.send('comfy-window:hide-titlebar-tooltip')
   },
   ready: () => {
     ipcRenderer.send('comfy-window:title-bar-ready')

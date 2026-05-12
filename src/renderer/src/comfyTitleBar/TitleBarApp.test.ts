@@ -38,6 +38,8 @@ interface MockBridgeState {
   installUpdatePillClicks: number
   downloadsTrayClicks: number
   feedbackClicks: number
+  showTooltipCalls: { text: string; leftX: number; rightX: number; bottomY: number }[]
+  hideTooltipCalls: number
   readyCalls: number
 }
 
@@ -62,6 +64,8 @@ function installMockBridge(opts: { isMac?: boolean; installationId?: string | nu
     installUpdatePillClicks: 0,
     downloadsTrayClicks: 0,
     feedbackClicks: 0,
+    showTooltipCalls: [],
+    hideTooltipCalls: 0,
     readyCalls: 0,
   }
   const installationId = opts.installationId === undefined ? 'test-id' : opts.installationId
@@ -133,6 +137,12 @@ function installMockBridge(opts: { isMac?: boolean; installationId?: string | nu
     },
     clickFeedback: () => {
       state.feedbackClicks += 1
+    },
+    showTooltip: (payload: { text: string; leftX: number; rightX: number; bottomY: number }) => {
+      state.showTooltipCalls.push(payload)
+    },
+    hideTooltip: () => {
+      state.hideTooltipCalls += 1
     },
     ready: () => {
       state.readyCalls += 1
@@ -798,5 +808,116 @@ describe('TitleBarApp', () => {
     )
     await flushPromises()
     expect(wrapper.find('.title-downloads-tray').exists()).toBe(true)
+  })
+
+  // ===================================================================
+  // Issue #514 — macOS hover-tooltip relay.
+  //
+  // On macOS the native HTML `title` attribute does not reliably surface
+  // tooltips for controls inside a sibling chrome WebContentsView, so
+  // the title bar routes hover through the bridge's `showTooltip` /
+  // `hideTooltip`. On Windows / Linux the native attribute works fine
+  // and the JS handlers must NOT fire (otherwise we'd render two
+  // tooltips). The tests below assert the platform-gated behaviour.
+  // ===================================================================
+  it('does NOT route hover through showTooltip on Win/Linux (native title is reliable there)', async () => {
+    bridgeState = installMockBridge({ isMac: false })
+    vi.resetModules()
+    vi.useFakeTimers()
+    try {
+      const { default: TitleBarApp } = await import('./TitleBarApp.vue')
+      const wrapper = mount(TitleBarApp, { attachTo: document.body })
+      await flushPromises()
+      const btn = wrapper.find('.title-menu-button').element as HTMLElement
+      // Dispatch on the button so the event bubbles up to the
+      // window-level pointermove listener carrying btn as event.target.
+      btn.dispatchEvent(new PointerEvent('pointermove', { bubbles: true }))
+      // Even after the show delay elapses the bridge should NOT be
+      // called — Win/Linux uses the native `title` attribute.
+      vi.advanceTimersByTime(1000)
+      await flushPromises()
+      expect(bridgeState.showTooltipCalls.length).toBe(0)
+      wrapper.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('emits `title` only on Win/Linux and `data-title-tooltip` only on macOS so the two tooltip systems can never both fire', async () => {
+    // Cocoa's native HTML `title` tooltip occasionally DOES fire for
+    // sibling-WebContentsView buttons on macOS, even though it's
+    // documented as unreliable — when it does, the user sees both
+    // bubbles at once (native one + our custom popup, in two
+    // different fonts/sizes). The fix is to make the two systems
+    // mutually exclusive at the source: `title` only off-mac,
+    // `data-title-tooltip` only on mac. `aria-label` stays
+    // unconditional so screen readers see the same text everywhere.
+    bridgeState = installMockBridge({ isMac: true })
+    vi.resetModules()
+    {
+      const { default: TitleBarApp } = await import('./TitleBarApp.vue')
+      const wrapper = mount(TitleBarApp)
+      await flushPromises()
+      const btn = wrapper.find('.title-menu-button')
+      expect(btn.attributes('aria-label')).toBe('Menu')
+      expect(btn.attributes('data-title-tooltip')).toBe('Menu')
+      expect(btn.attributes('title')).toBeUndefined()
+      wrapper.unmount()
+    }
+    bridgeState = installMockBridge({ isMac: false })
+    vi.resetModules()
+    {
+      const { default: TitleBarApp } = await import('./TitleBarApp.vue')
+      const wrapper = mount(TitleBarApp)
+      await flushPromises()
+      const btn = wrapper.find('.title-menu-button')
+      expect(btn.attributes('aria-label')).toBe('Menu')
+      expect(btn.attributes('title')).toBe('Menu')
+      expect(btn.attributes('data-title-tooltip')).toBeUndefined()
+      wrapper.unmount()
+    }
+  })
+
+  it('routes hover through showTooltip on macOS, with the trigger text and anchor', async () => {
+    bridgeState = installMockBridge({ isMac: true })
+    vi.resetModules()
+    vi.useFakeTimers()
+    try {
+      const { default: TitleBarApp } = await import('./TitleBarApp.vue')
+      const wrapper = mount(TitleBarApp, { attachTo: document.body })
+      await flushPromises()
+      const btn = wrapper.find('.title-menu-button').element as HTMLElement
+      // Stub a deterministic geometry — JSDOM returns 0×0 by default.
+      btn.getBoundingClientRect = () =>
+        ({ left: 20, top: 6, right: 50, bottom: 30, width: 30, height: 24, x: 20, y: 6 } as DOMRect)
+      // Dispatch on the button so the event bubbles up to the
+      // window-level pointermove listener carrying btn as event.target.
+      btn.dispatchEvent(new PointerEvent('pointermove', { bubbles: true }))
+      // Show is gated by a small delay so quick fly-bys don't pop a
+      // bubble. Advance past it.
+      vi.advanceTimersByTime(500)
+      await flushPromises()
+      expect(bridgeState.showTooltipCalls.length).toBe(1)
+      const call = bridgeState.showTooltipCalls[0]
+      expect(call.text).toBe('Menu')
+      // The bridge sends both horizontal edges so main can prefer the
+      // rightward-anchored layout (bubble.left == leftX) and fall back
+      // to right-aligned (bubble.right == rightX) on overflow.
+      expect(call.leftX).toBe(20)
+      expect(call.rightX).toBe(50)
+      expect(call.bottomY).toBe(30)
+      // Pointer leaves the title bar; bridge should be told to hide.
+      const root = wrapper.find('header').element as HTMLElement
+      root.dispatchEvent(new PointerEvent('pointerleave', { bubbles: true }))
+      // The pointerleave listener is registered on documentElement, so
+      // dispatch there too — JSDOM doesn't bubble custom PointerEvents
+      // up to the document root the way a real browser does.
+      document.documentElement.dispatchEvent(new PointerEvent('pointerleave', { bubbles: true }))
+      await flushPromises()
+      expect(bridgeState.hideTooltipCalls).toBeGreaterThanOrEqual(1)
+      wrapper.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

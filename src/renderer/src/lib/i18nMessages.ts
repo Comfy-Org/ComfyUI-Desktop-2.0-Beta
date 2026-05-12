@@ -28,7 +28,7 @@ export const en = {
   titleBar: {
     menu: 'Menu',
     feedback: 'Beta Feedback',
-    feedbackTooltip: 'Send Feedback',
+    feedbackTooltip: 'Send Beta Feedback',
     downloads: 'Downloads',
     /** vue-i18n plural rule: "no plural form | singular | plural". */
     downloadsInProgress:
@@ -46,7 +46,7 @@ export const en = {
     addExistingInstall: 'Add Existing Install',
     loadSnapshot: 'Load Snapshot',
     settings: 'Settings',
-    sendFeedback: 'Send Feedback',
+    sendFeedback: 'Send Beta Feedback',
     returnToDashboard: 'Return to Dashboard',
     closeAllWindows: 'Close All Windows',
     skipOnboarding: 'Skip Onboarding',

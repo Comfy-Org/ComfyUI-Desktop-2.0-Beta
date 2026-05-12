@@ -63,6 +63,24 @@ interface Bridge {
   openFileMenu: (anchor: MenuAnchor) => void
   /** Ask main to dismiss the File menu popup (toggle-close). */
   dismissFileMenu: () => void
+  /** Issue #514 — show a hover tooltip in the cached title-bar tooltip
+   *  popup. macOS-only path: native HTML `title` tooltips don't appear
+   *  reliably for sibling chrome WebContentsViews on macOS, so the
+   *  renderer routes hover through main → cached `WebContentsView`
+   *  popup. `leftX` / `rightX` / `bottomY` are title-bar-local pixels
+   *  (the title-bar view sits at parent-window content (0,0) so they
+   *  map directly to window coords on the main side). Main prefers to
+   *  anchor the bubble's left edge to `leftX` so the bubble extends
+   *  rightward from the trigger; it falls back to right-aligning
+   *  `rightX` when growing rightward would overflow. */
+  showTooltip: (payload: {
+    text: string
+    leftX: number
+    rightX: number
+    bottomY: number
+  }) => void
+  /** Issue #514 — hide the title-bar hover tooltip popup. */
+  hideTooltip: () => void
   onPanelChanged: (cb: (panel: ComfyPanelKey) => void) => () => void
   onTitleChanged: (cb: (title: string) => void) => () => void
   /** Install source-category pushes from main. The raw category
@@ -402,7 +420,146 @@ function anchorBelow(el: HTMLElement | null | undefined): MenuAnchor {
   return { x: Math.round(rect.left), y: Math.round(rect.bottom) }
 }
 
+/**
+ * Issue #514 — macOS hover-tooltip plumbing.
+ *
+ * On macOS the native HTML `title` tooltip does not reliably fire for
+ * controls inside a sibling chrome `WebContentsView` that isn't the
+ * focused web contents (Electron + Cocoa quirk). The title bar always
+ * sits in such a view, so on macOS we route hover through main, which
+ * positions a cached `WebContentsView` popup attached to the host
+ * window — that popup escapes the title-bar view's 37px clip. On
+ * Windows / Linux the native `title` attribute renders Chromium's own
+ * tooltip widget reliably; the JS handlers below are no-ops in that
+ * case so we don't end up with two tooltips.
+ *
+ * Implementation is delegated: a single `pointermove` / `pointerleave`
+ * pair on the header root finds the closest `[data-title-tooltip]`
+ * ancestor and fires `showTip` / `hideTip`. New tooltipped elements
+ * just need the data attribute — no per-element wiring.
+ */
+/** Initial show delay (ms). Matches the cadence of native HTML
+ *  tooltips on macOS / Win so a quick fly-by across the title bar
+ *  doesn't flash bubbles. */
+const TOOLTIP_SHOW_DELAY_MS = 400
+/** Hover-handoff window (ms). If a tooltip was visible up to this
+ *  long ago, the next hover over a different tooltipped element shows
+ *  immediately — same convention as native macOS / browser tooltips,
+ *  where the first hover earns the wait but subsequent ones in a
+ *  scanning gesture feel snappy. */
+const TOOLTIP_HANDOFF_WINDOW_MS = 1500
+let tooltipShowTimer: number | null = null
+/** Text of the tooltip the renderer most recently asked main to show
+ *  (or queue). `null` while nothing is pending or visible. */
+let activeTooltipText: string | null = null
+/** True between `bridge.showTooltip()` and the corresponding
+ *  `bridge.hideTooltip()` — i.e., a tooltip is currently visible. The
+ *  pending-but-not-yet-shown state has this `false`. */
+let isTooltipVisible = false
+/** `performance.now()` timestamp of the most recent
+ *  `bridge.hideTooltip()`. Drives the hover-handoff fast path. */
+let lastHiddenAt = -Infinity
+
+/**
+ * Single source of truth for tooltip-related attributes on title-bar
+ * controls. Cocoa's native HTML `title` tooltip occasionally DOES
+ * fire for our sibling-view buttons even though it's documented as
+ * unreliable; when it does, the user gets two bubbles at once (the
+ * native one plus our custom popup). Keep them mutually exclusive at
+ * the source by emitting `title` only off-mac and `data-title-tooltip`
+ * only on mac. `aria-label` is unconditional so screen readers see
+ * the same string regardless of platform — pass `ariaLabel` separately
+ * when the visible label and the tooltip copy intentionally differ
+ * (e.g. the Send Feedback button shows "Beta Feedback" but the
+ * tooltip reads "Send Feedback").
+ */
+function tooltipAttrs(text: string, ariaLabel?: string): Record<string, string> {
+  const base: Record<string, string> = { 'aria-label': ariaLabel ?? text }
+  if (isMac.value) {
+    base['data-title-tooltip'] = text
+  } else {
+    base.title = text
+  }
+  return base
+}
+
+function findTooltipTarget(target: EventTarget | null): {
+  text: string
+  rect: DOMRect
+} | null {
+  if (!(target instanceof Element)) return null
+  const el = target.closest('[data-title-tooltip]') as HTMLElement | SVGElement | null
+  if (!el) return null
+  const text = el.getAttribute('data-title-tooltip')
+  if (!text) return null
+  return { text, rect: el.getBoundingClientRect() }
+}
+
+function cancelPendingTooltipShow(): void {
+  if (tooltipShowTimer !== null) {
+    window.clearTimeout(tooltipShowTimer)
+    tooltipShowTimer = null
+  }
+}
+
+function hideTip(): void {
+  cancelPendingTooltipShow()
+  if (activeTooltipText === null) return
+  activeTooltipText = null
+  if (isTooltipVisible) {
+    isTooltipVisible = false
+    lastHiddenAt = performance.now()
+  }
+  bridge?.hideTooltip()
+}
+
+function fireShowTooltip(text: string, rect: DOMRect): void {
+  bridge?.showTooltip({
+    text,
+    leftX: Math.round(rect.left),
+    rightX: Math.round(rect.right),
+    bottomY: Math.round(rect.bottom),
+  })
+  isTooltipVisible = true
+}
+
+function handleTooltipPointer(event: PointerEvent): void {
+  if (!isMac.value) return
+  const found = findTooltipTarget(event.target)
+  if (!found) {
+    hideTip()
+    return
+  }
+  if (found.text === activeTooltipText) {
+    // Same trigger as before — no work needed. (Either we're still
+    // waiting on the show timer, or the tooltip is already visible;
+    // either way we don't reset state mid-hover.)
+    return
+  }
+  // Different (or first) tooltipped target. Hide any in-flight tooltip
+  // and queue the new one. If we were just showing a tooltip moments
+  // ago (hover-handoff), skip the show delay so scanning across the
+  // title bar feels instant — matches native macOS behaviour.
+  const handoff =
+    isTooltipVisible || performance.now() - lastHiddenAt < TOOLTIP_HANDOFF_WINDOW_MS
+  hideTip()
+  const captured = found
+  activeTooltipText = captured.text
+  if (handoff) {
+    fireShowTooltip(captured.text, captured.rect)
+    return
+  }
+  tooltipShowTimer = window.setTimeout(() => {
+    tooltipShowTimer = null
+    if (activeTooltipText !== captured.text) return
+    fireShowTooltip(captured.text, captured.rect)
+  }, TOOLTIP_SHOW_DELAY_MS)
+}
+
 function handleFileMenu(): void {
+  // Hide any in-flight tooltip — the menu will obscure the same area
+  // and the click won't fire pointerleave.
+  hideTip()
   // Toggle-close: if the popup is open at click time, actively ask
   // main to dismiss it. The blur-driven dismiss path can't be relied
   // on here — on macOS clicking a sibling WebContentsView in the
@@ -434,16 +591,20 @@ let unsubDownloads: (() => void) | undefined
 
 /** Drop the hover gate immediately when input leaves the title-bar
  *  webContents — covers the case where a native menu (Menu.popup) or
- *  another view receives focus. */
+ *  another view receives focus. Also dismisses any in-flight tooltip
+ *  for the same reason. */
 const handleWindowBlur = (): void => {
   isHoverActive.value = false
+  hideTip()
 }
 /** Re-enable the hover gate only on a fresh `pointermove`. We do NOT
  *  re-enable on `window.focus` alone, because focus can return without
  *  any cursor movement (clicking back into the title bar to dismiss
- *  the menu refocuses the renderer with a stale cursor position). */
-const handlePointerMove = (): void => {
+ *  the menu refocuses the renderer with a stale cursor position).
+ *  Also drives the macOS tooltip dispatcher (issue #514). */
+const handlePointerMove = (event: PointerEvent): void => {
   if (!isHoverActive.value) isHoverActive.value = true
+  handleTooltipPointer(event)
 }
 /** Belt-and-braces: if the cursor leaves the title-bar's bounds, drop
  *  the gate. The renderer should normally see a `mouseleave` here, but
@@ -451,6 +612,7 @@ const handlePointerMove = (): void => {
  *  reliably, so we mirror the blur path. */
 const handlePointerLeave = (): void => {
   isHoverActive.value = false
+  hideTip()
 }
 
 onMounted(() => {
@@ -515,6 +677,7 @@ onUnmounted(() => {
   window.removeEventListener('blur', handleWindowBlur)
   window.removeEventListener('pointermove', handlePointerMove)
   document.documentElement.removeEventListener('pointerleave', handlePointerLeave)
+  hideTip()
 })
 </script>
 
@@ -555,8 +718,7 @@ onUnmounted(() => {
         type="button"
         class="title-menu-button title-menu-button--icon"
         aria-haspopup="menu"
-        :title="t('titleBar.menu')"
-        :aria-label="t('titleBar.menu')"
+        v-bind="tooltipAttrs(t('titleBar.menu'))"
         @click="handleFileMenu"
       >
         <MenuIcon :size="18" />
@@ -572,8 +734,7 @@ onUnmounted(() => {
           'is-ready': appUpdateState.kind === 'ready',
           'is-downloading': appUpdateState.kind === 'downloading',
         }"
-        :title="appUpdatePillTooltip"
-        :aria-label="appUpdatePillTooltip"
+        v-bind="tooltipAttrs(appUpdatePillTooltip)"
         @click="handleAppUpdatePill"
       >
         <Download v-if="appUpdateState.kind === 'available'" :size="14" />
@@ -606,8 +767,7 @@ onUnmounted(() => {
         type="button"
         class="title-downloads-tray"
         :class="{ 'has-active': downloadsActiveCount > 0 }"
-        :title="downloadsTrayLabel"
-        :aria-label="downloadsTrayLabel"
+        v-bind="tooltipAttrs(downloadsTrayLabel)"
         @click="handleDownloadsTray"
       >
         <ArrowDownToLine :size="14" />
@@ -635,8 +795,7 @@ onUnmounted(() => {
           v-if="showInstallTypeIcon"
           :size="14"
           class="title-install-type-icon"
-          :title="installTypeLabel"
-          :aria-label="installTypeLabel"
+          v-bind="tooltipAttrs(installTypeLabel)"
         />
         <span class="title-install-name">{{ installLabel }}</span>
       </div>
@@ -649,8 +808,7 @@ onUnmounted(() => {
         v-if="showInstallUpdatePill"
         type="button"
         class="title-update-pill is-install-update"
-        :title="installUpdatePillLabel"
-        :aria-label="installUpdatePillLabel"
+        v-bind="tooltipAttrs(installUpdatePillLabel)"
         @click="handleInstallUpdatePill"
       >
         <Download :size="14" />
@@ -669,8 +827,7 @@ onUnmounted(() => {
         v-if="!isConsentLockdown"
         type="button"
         class="title-menu-button title-feedback-button"
-        :title="t('titleBar.feedbackTooltip')"
-        :aria-label="t('titleBar.feedback')"
+        v-bind="tooltipAttrs(t('titleBar.feedbackTooltip'), t('titleBar.feedback'))"
         @click="handleFeedback"
       >
         <MessageSquarePlus :size="16" />
