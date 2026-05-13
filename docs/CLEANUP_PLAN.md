@@ -82,15 +82,15 @@ Move: `serializeUnknownError`, `forwardDatadogError`, `registerProcessErrorHandl
 
 Exports: `registerProcessErrorHandlers`, `forwardDatadogError`.
 
-### P0.5 — `src/main/host/registry.ts`  (~250 lines)
-The spine of the seamless-transition feature. Move:
+### P0.5 — `src/main/host/registry.ts`  (~470 lines) ✅
+Moved:
 - `ComfyWindowEntry` interface
 - `BodyMode`, `ComfyPanelKey`, `VALID_PANELS`
-- Maps: `comfyWindows`, `installationIdToWindowKey`, `pendingAttachClaims`
-- `lastFocusedInstallationId` mutable
-- Helpers: `nextWindowKey`, `getEntryByInstallationId`, `registerHostEntry`, `unregisterHostEntry`, `computeBodyMode`, `findEntryByTitleBarSender`, `findPreferredHostByVisibility`, `findPreferredChooserHostWindow`, `findPreferredInstallHostWindow`, `openOrFocusChooserHostWindow`, `openOrFocusAnyHostWindow`
+- Maps: `comfyWindows`, `installationIdToWindowKey` (private), `pendingAttachClaims`
+- `lastFocusedInstallationId` mutable, exposed via `getLastFocusedInstallationId()` / `setLastFocusedInstallationId()`
+- Helpers: `nextWindowKey`, `getEntryByInstallationId`, `indexInstallationId`, `dropInstallationIndex`, `registerHostEntry`, `unregisterHostEntry`, `computeBodyMode`, `findEntryByTitleBarSender`, `findPreferredHostByVisibility`, `findPreferredChooserHostWindow`, `findPreferredInstallHostWindow`, `openOrFocusChooserHostWindow`, `openOrFocusAnyHostWindow`, `bringToFront`
 
-Note: `openOrFocusChooserHostWindow` calls `openChooserHostWindow` which lives in the host-construction code — so either the registry imports the constructor lazily or `openChooserHostWindow` becomes injected. Prefer **late-binding**: registry exposes `setHostFactories({ createChooser, createInstall })` and `index.ts` calls it at startup.
+Late-binding: registry exposes `setHostFactories({ createChooser })` and `index.ts` calls it at the top of `whenReady` so `openOrFocus*` can spawn a fresh chooser host without importing host-construction code.
 
 #### Thread C testing notes
 
@@ -213,7 +213,7 @@ Recommended execution order across follow-up threads:
 
 1. **Thread A — Test salvage** ✅ (landed in this PR).
 2. **Thread B — P0.1 + P0.2 + P0.4 + P0.8** ✅ (landed in this PR; `index.ts` 4533 → 3720 lines).
-3. **Thread C — P0.5 (registry)**. Sets up the seam for P0.3.
+3. **Thread C — P0.5 (registry)** ✅ (landed in this PR; `index.ts` 3720 → 3125 lines).
 4. **Thread D — P0.3 + P0.6 + P0.7 + P0.9**. The host-window construction split.
 5. **Thread E — P1 (popup primitive)**. After all 3 popups live in their own files.
 6. **Thread F — P3 + P4**. Renderer file splits and the comment trim sweep.
