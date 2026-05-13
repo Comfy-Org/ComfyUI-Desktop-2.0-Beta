@@ -30,52 +30,71 @@
 !macroend
 
 !macro installVcRedist
-  # Skip the multi-minute redist run when a same-or-newer v14 redist is
-  # already installed. Microsoft documents this exact registry contract:
+  # Push/Pop preserves caller registers — defensive in case electron-builder's
+  # generated wrapper relies on $0/$1/$2 across our customInstall hook.
+  Push $0
+  Push $1
+  Push $2
+
+  # Discover whether a same-or-newer v14 redist is already installed and skip
+  # the multi-minute install in that case. Microsoft documents this exact
+  # registry contract:
   # https://learn.microsoft.com/en-us/cpp/windows/redistributing-visual-cpp-files
-  # The Version value is REG_SZ in the form "v14.40.33810.0"; strip the
-  # leading "v" before comparing against ${VC_REDIST_VERSION}.
+  # Reads the REG_SZ Version value (form "v14.40.33810.0"), strips the
+  # leading "v", and compares against ${VC_REDIST_VERSION}.
+  StrCpy $1 ""
   ClearErrors
   ReadRegStr $1 HKLM "SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\X64" "Version"
-  ${IfNot} ${Errors}
-  ${AndIf} $1 != ""
+  ${If} ${Errors}
+    StrCpy $1 ""
+  ${EndIf}
+
+  ${If} $1 != ""
     StrCpy $2 $1 1
     ${If} $2 == "v"
       StrCpy $1 $1 "" 1
     ${EndIf}
-    ${VersionCompare} "$1" "${VC_REDIST_VERSION}" $0
-    # $0: 0 = equal, 1 = installed > bundled, 2 = installed < bundled.
-    ${If} $0 != 2
-      SetDetailsPrint textonly
-      DetailPrint "Microsoft Visual C++ Redistributable $1 already installed (>= bundled ${VC_REDIST_VERSION}); skipping."
-      SetDetailsPrint none
-      Goto vcRedistDone
-    ${EndIf}
   ${EndIf}
 
-  # electron-builder calls SetDetailsPrint none for interactive installs,
-  # which silences DetailPrint output. Switch to textonly so users see what
-  # is happening in the installer's status bar while ExecWait blocks; this
-  # message stays on screen for the full duration of the VC++ install.
-  SetDetailsPrint textonly
-  DetailPrint "Installing Microsoft Visual C++ Redistributable (this may take several minutes)..."
-  SetDetailsPrint none
-
-  File /oname=$PLUGINSDIR\vc_redist.x64.exe "${BUILD_RESOURCES_DIR}\vc_redist.x64.exe"
-  # /quiet keeps the redistributable's own UI hidden so the user only sees
-  # our installer's status text and progress bar.
-  ExecWait '"$PLUGINSDIR\vc_redist.x64.exe" /install /quiet /norestart' $0
-
-  ${If} $0 = 0
-  ${OrIf} $0 = 1638
-  ${OrIf} $0 = 3010
-    # Success (or already-installed / reboot-required, both treated as success).
+  # $2: 0 = equal, 1 = installed > bundled, 2 = installed < bundled or missing.
+  # Default to "needs install" if we couldn't read a version.
+  ${If} $1 == ""
+    StrCpy $2 2
   ${Else}
-    MessageBox MB_ICONSTOP|MB_OK "Microsoft Visual C++ Redistributable installation failed (exit code $0). ComfyUI Desktop requires it to run."
-    Abort
+    ${VersionCompare} "$1" "${VC_REDIST_VERSION}" $2
   ${EndIf}
 
-  vcRedistDone:
+  ${If} $2 == 2
+    # electron-builder calls SetDetailsPrint none for interactive installs,
+    # which silences DetailPrint output. Switch to textonly so users see what
+    # is happening in the installer's status bar while ExecWait blocks; this
+    # message stays on screen for the full duration of the VC++ install.
+    SetDetailsPrint textonly
+    DetailPrint "Installing Microsoft Visual C++ Redistributable (this may take several minutes)..."
+    SetDetailsPrint none
+
+    File /oname=$PLUGINSDIR\vc_redist.x64.exe "${BUILD_RESOURCES_DIR}\vc_redist.x64.exe"
+    # /quiet keeps the redistributable's own UI hidden so the user only sees
+    # our installer's status text and progress bar.
+    ExecWait '"$PLUGINSDIR\vc_redist.x64.exe" /install /quiet /norestart' $0
+
+    ${If} $0 = 0
+    ${OrIf} $0 = 1638
+    ${OrIf} $0 = 3010
+      # Success (or already-installed / reboot-required, both treated as success).
+    ${Else}
+      MessageBox MB_ICONSTOP|MB_OK "Microsoft Visual C++ Redistributable installation failed (exit code $0). ComfyUI Desktop requires it to run."
+      Abort
+    ${EndIf}
+  ${Else}
+    SetDetailsPrint textonly
+    DetailPrint "Microsoft Visual C++ Redistributable $1 already installed (>= bundled ${VC_REDIST_VERSION}); skipping."
+    SetDetailsPrint none
+  ${EndIf}
+
+  Pop $2
+  Pop $1
+  Pop $0
 !macroend
 
 !macro customInstall

@@ -7,8 +7,11 @@ import { fileURLToPath } from 'node:url'
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const vcRedistUrl = 'https://aka.ms/vc14/vc_redist.x64.exe'
 
-// Signature of VS_FIXEDFILEINFO in a Win32 PE resource section: 0xFEEF04BD (LE).
-const VS_FIXEDFILEINFO_SIGNATURE = Buffer.from([0xbd, 0x04, 0xef, 0xfe])
+// VS_FIXEDFILEINFO starts with dwSignature = 0xFEEF04BD followed by
+// dwStrucVersion = 0x00010000 (LE). Matching both eliminates any chance of a
+// false positive from the 4-byte signature appearing incidentally in code or
+// data sections of the ~24 MB redist binary.
+const VS_FIXEDFILEINFO_SIGNATURE = Buffer.from([0xbd, 0x04, 0xef, 0xfe, 0x00, 0x00, 0x01, 0x00])
 
 /**
  * Read the FileVersion (a.b.c.d) from a Win32 PE executable by locating the
@@ -79,9 +82,13 @@ async function ensureVcRedist(context) {
  * electron-builder afterPack hook.
  * Ensures the 7zip-bin binary has the execute permission in the packaged output.
  * This is necessary because AppImage mounts are read-only, so runtime chmod fails.
+ *
+ * Switches on `context.electronPlatformName` (the *target* platform) rather
+ * than `process.platform` (the *host*), so cross-builds — e.g. ToDesktop's
+ * Mac/Linux build VMs producing Windows artifacts — pick the right branch.
  */
 export default async function afterPack(context) {
-  if (process.platform === 'win32') {
+  if (context.electronPlatformName === 'win32') {
     await ensureVcRedist(context)
     return
   }
