@@ -123,6 +123,51 @@ test('title popup opens, renders menu items, and closes via bridge @windows @mac
   ).toBe(false)
 })
 
+test('title popup reopens after a blur dismiss (menu-closed IPC clears the reopen guard) @windows @macos @linux', async () => {
+  // The previous test dismissed the popup via the close bridge — that
+  // stamps the title-bar's `menuClosedAt.menu` so a click within 100ms
+  // is suppressed by the time-based reopen guard. Wait past that
+  // window so the *first* open in this test isn't dropped.
+  await new Promise((resolve) => setTimeout(resolve, 150))
+
+  // Open the popup once normally.
+  await openTitleMenu(ctx.titleBar)
+  await expect.poll(
+    () => isPopupVisible(ctx.app, 'comfyTitlePopup.html'),
+    { timeout: 5_000, intervals: [100, 200] },
+  ).toBe(true)
+
+  // Dismiss via a blur on the popup webContents — the same path the
+  // OS exercises when the user clicks anywhere outside the popup. The
+  // EmbeddedPopupView primitive's `hideOnPopupBlur` listener is what
+  // handles this; without an `onHide` notify the title-bar renderer's
+  // `isMenuOpen` flag stayed stuck true and every subsequent click was
+  // routed to `dismissFileMenu` (a no-op since the popup is already
+  // hidden) instead of reopening.
+  await ctx.app.evaluate(({ webContents }) => {
+    const wc = webContents.getAllWebContents().find((w) => w.getURL().includes('comfyTitlePopup.html'))
+    if (!wc) throw new Error('title popup webContents missing')
+    ;(wc as unknown as { emit: (event: string) => void }).emit('blur')
+  })
+  await expect.poll(
+    () => isPopupVisible(ctx.app, 'comfyTitlePopup.html'),
+    { timeout: 5_000, intervals: [100, 200] },
+  ).toBe(false)
+
+  // Step past the title-bar's 100ms reopen-guard so the second click
+  // isn't suppressed by the time-based debounce — the bug under test
+  // is the *flag*-based guard (`isMenuOpen.value`), not the timer.
+  await new Promise((resolve) => setTimeout(resolve, 150))
+
+  // Reopen — must succeed, otherwise the title bar still thinks the
+  // menu is open and the click goes to the dismiss path.
+  await openTitleMenu(ctx.titleBar)
+  await expect.poll(
+    () => isPopupVisible(ctx.app, 'comfyTitlePopup.html'),
+    { timeout: 5_000, intervals: [100, 200] },
+  ).toBe(true)
+})
+
 test('title-bar tooltip popup is created on demand and hides cleanly @windows @macos @linux', async () => {
   // No webContents for the tooltip popup exists before the first show —
   // unlike titlePopup / systemModal, the tooltip is NOT pre-warmed.

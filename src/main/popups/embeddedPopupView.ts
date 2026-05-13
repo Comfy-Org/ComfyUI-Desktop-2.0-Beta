@@ -55,6 +55,13 @@ export interface EmbeddedPopupViewOpts {
    *  the popup is destroyed independently of its parent (renderer
    *  crash) so the consumer can drop stale index entries. */
   onDestroyed?: () => void
+  /** Called from `hide()` whenever it actually transitions out of the
+   *  open/pending state — covers both manual hides and the auto-dismiss
+   *  paths wired via `hideOnParentEvents` / `hideOnPopupBlur`. Use it
+   *  when the consumer must run cleanup on every dismissal regardless
+   *  of trigger (e.g. titlePopup sends `comfy-titlebar:menu-closed` so
+   *  the title-bar renderer's reopen-suppression guard fires). */
+  onHide?: () => void
 }
 
 export class EmbeddedPopupView {
@@ -76,11 +83,13 @@ export class EmbeddedPopupView {
    *  permanently stuck invisible if the ack never arrives (mid-load
    *  crash, etc.). */
   pendingShowTimer: NodeJS.Timeout | null = null
+  private readonly onHideCallback?: () => void
 
   constructor(opts: EmbeddedPopupViewOpts) {
     const { parent } = opts
     this.parentWindow = parent
     this.parentWindowId = parent.id
+    this.onHideCallback = opts.onHide
 
     const popup = new WebContentsView({
       webPreferences: {
@@ -172,7 +181,10 @@ export class EmbeddedPopupView {
   }
 
   /** Hide the popup. Safe to call when not currently visible. Cancels
-   *  any pending show-fallback timer. */
+   *  any pending show-fallback timer. Fires the constructor's `onHide`
+   *  callback when an actual transition happens (so consumers can run
+   *  per-dismissal cleanup regardless of whether the user called
+   *  `hide()` manually or one of the auto-dismiss listeners fired). */
   hide(opts: { focusParent?: boolean } = {}): void {
     if (!this.isOpen && !this.pendingShowTimer) return
     this.isOpen = false
@@ -186,6 +198,7 @@ export class EmbeddedPopupView {
         this.parentWindow.focus()
       }
     }
+    this.onHideCallback?.()
   }
 
   /** Schedule a fallback that runs `callback()` after `timeoutMs`.

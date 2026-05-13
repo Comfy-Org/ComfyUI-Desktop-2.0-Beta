@@ -288,6 +288,30 @@ describe('EmbeddedPopupView', () => {
       vi.advanceTimersByTime(100)
       expect(fired).toBe(0)
     })
+
+    it('fires onHide on every actual transition (manual and auto-dismiss paths)', () => {
+      let hideCount = 0
+      const parent = makeBrowserWindow()
+      const view = new EmbeddedPopupView({
+        parent: parent as unknown as Electron.BrowserWindow,
+        htmlName: 'comfyTitlePopup',
+        preloadName: 'comfyTitlePopupPreload.js',
+        initialBounds: { x: 0, y: 0, width: 200, height: 100 },
+        hideOnParentEvents: ['blur'],
+        onHide: () => { hideCount++ },
+      })
+      // No-op hide doesn't fire the callback.
+      view.hide()
+      expect(hideCount).toBe(0)
+      // Manual hide after show fires once.
+      view.showOnTop()
+      view.hide()
+      expect(hideCount).toBe(1)
+      // Auto-dismiss via the parent blur listener fires once.
+      view.showOnTop()
+      parent.emit('blur')
+      expect(hideCount).toBe(2)
+    })
   })
 
   describe('scheduleShowFallback', () => {

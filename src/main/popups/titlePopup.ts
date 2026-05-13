@@ -300,6 +300,16 @@ function ensureTitlePopup(parent: BrowserWindow): TitlePopupEntry {
       }
       titlePopupsByWebContents.delete(view.popupWebContentsId)
     },
+    onHide: () => {
+      // Always fires when the popup transitions out of open/pending —
+      // including the blur / will-move / move / popup-blur auto-dismiss
+      // paths. Without this notify, the title-bar renderer's
+      // `isMenuOpen` flag stays stuck true and every subsequent click
+      // on the trigger button is suppressed by the reopen guard.
+      if (!entry.titleBarSender.isDestroyed()) {
+        entry.titleBarSender.send('comfy-titlebar:menu-closed', { menu: entry.kind })
+      }
+    },
   })
   const entry: TitlePopupEntry = {
     view,
@@ -342,6 +352,9 @@ function hideTitlePopup(
   opts: { releaseFocusToParent?: boolean } = {},
 ): void {
   const wasActive = entry.view.isOpen || entry.view.pendingShowTimer !== null
+  // The view's `onHide` callback fires the `comfy-titlebar:menu-closed`
+  // IPC, so dismissals via this wrapper and via the auto-dismiss
+  // listeners both clear the title-bar's reopen-suppression guard.
   entry.view.hide()
   if (!wasActive) return
   if (
@@ -360,9 +373,6 @@ function hideTitlePopup(
     } else {
       entry.view.parentWindow.focus()
     }
-  }
-  if (!entry.titleBarSender.isDestroyed()) {
-    entry.titleBarSender.send('comfy-titlebar:menu-closed', { menu: entry.kind })
   }
 }
 
