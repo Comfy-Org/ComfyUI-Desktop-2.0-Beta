@@ -110,8 +110,10 @@ Not testable without a real install (only `lifecycle` suite covers these — run
 - `installationIdToWindowKey` secondary-index round-trip via `getEntryByInstallationId`.
 - `findPreferredInstallHostWindow`'s 4-tier visible/MRU priority.
 
-### P0.6 — `src/main/host/createHostWindow.ts`  (~290 lines)
-Move `CreateHostWindowOpts`, `CreateHostWindowResult`, `injectMacPasskeyWarning`, `createHostWindow`, `expectedPartitionFor`, `buildComfyView`, `rebuildComfyViewIfNeeded`, plus `applyChooserHostTheme`, `applyChooserHostThemeToAll`, `getChooserHostTheme`, `openChooserHostWindow`.
+### P0.6 — `src/main/host/createHostWindow.ts`  (~660 lines) ✅
+Moved `CreateHostWindowOpts`, `CreateHostWindowResult`, `injectMacPasskeyWarning` + the `PASSKEY_BANNER_*` constants, `createHostWindow`, `expectedPartitionFor`, `buildComfyView`, `rebuildComfyViewIfNeeded`, `applyChooserHostTheme`, `applyChooserHostThemeToAll`, `getChooserHostTheme`, `openChooserHostWindow`, plus the host-only constants `APP_ICON`, `APP_VERSION`, `CHOOSER_HOST_TITLE_TEXT`, `CHOOSER_HOST_WINDOW_TITLE`, `CHOOSER_HOST_BOUNDS_KEY`.
+
+Late-binding: the module exposes `setHostWindowFactories({ consultPanelRendererClose, detachInstallImpl, preClearedClose, ensurePanelView, computeInstallUpdateAvailable })`, called once at the top of `whenReady` so `createHostWindow` can reach back into the lifecycle code that still lives in `index.ts` (and which P0.7 / P0.9 will pull out next).
 
 ### P0.7 — `src/main/host/attach.ts` and `src/main/host/detach.ts`
 Move `AttachInstallOpts`, `attachInstall` (~370 lines), `_detachInstallImpl` (~50 lines), `returnToDashboard`, `confirmAndCloseAllHostWindows`, `consultPanelRendererClose`, `closeAllHostWindows`.
