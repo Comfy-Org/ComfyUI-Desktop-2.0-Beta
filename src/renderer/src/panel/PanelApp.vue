@@ -22,6 +22,7 @@ import { useOverlay, type FlowComponent } from '../composables/useOverlay'
 import { useModal } from '../composables/useModal'
 import { useAppUpdatePrompts } from '../composables/useAppUpdatePrompts'
 import { useSendFeedback } from '../composables/useSendFeedback'
+import { useDeepLinkRouter } from '../composables/useDeepLinkRouter'
 import { emitTelemetryAction } from '../lib/telemetry'
 import type { ActionResult, Installation, ShowProgressOpts } from '../types/ipc'
 
@@ -176,7 +177,6 @@ const installation = computed<Installation | null>(
 let unsubPanel: (() => void) | null = null
 let unsubLocale: (() => void) | null = null
 let unsubCloseRequest: (() => void) | null = null
-let unsubPanelTriggerOverlay: (() => void) | null = null
 let unsubFirstUseSkip: (() => void) | null = null
 let unsubAppUpdatePromptRestart: (() => void) | null = null
 let unsubAppUpdateUserActionFailed: (() => void) | null = null
@@ -194,6 +194,14 @@ useSendFeedback()
 let resolveBootstrap: (() => void) | null = null
 const bootstrapReady: Promise<void> = new Promise<void>((resolve) => {
   resolveBootstrap = resolve
+})
+
+useDeepLinkRouter({
+  installationId,
+  bootstrapReady,
+  openOverlay,
+  showAppUpdateRestartPrompt,
+  showAppUpdateDownloadPrompt,
 })
 
 async function loadLocale(): Promise<void> {
@@ -850,62 +858,6 @@ function handleNavigateList(): void {
 }
 
 onMounted(async () => {
-  // Register the `panel-trigger-overlay` listener BEFORE any `await` so
-  // a deep-link IPC fired by main right after the panelView's first
-  // `did-finish-load` is never dropped. The install-update branch
-  // additionally `await`s `bootstrapReady` so it sees a populated
-  // installationStore + translated copy when it opens the unified
-  // Settings modal — without this gate the very first click on the
-  // title-bar install-update pill could either silently drop (no
-  // listener yet) or resolve `inst` to undefined and bail (store
-  // not yet hydrated), leaving the user perceiving the modal as
-  // "not navigating to the Update tab" on the first attempt.
-  //
-  // Other kinds (`app-update-*`) don't depend on the store, but they
-  // still benefit from the early registration since any of them can
-  // race the panelView's first load.
-  unsubPanelTriggerOverlay = window.api.onPanelTriggerOverlay((payload) => {
-    void (async () => {
-      if (payload.kind === 'app-update-restart-prompt') {
-        await bootstrapReady
-        await showAppUpdateRestartPrompt(payload.version ?? null)
-        return
-      }
-      if (payload.kind === 'app-update-download-prompt') {
-        await bootstrapReady
-        await showAppUpdateDownloadPrompt(payload.version ?? null)
-        return
-      }
-      if (payload.kind === 'install-update') {
-        const id = payload.installationId
-        if (!id || id !== installationId) return
-        await bootstrapReady
-        const inst = installationStore.getById(id)
-        if (!inst) return
-        await openOverlay({
-          kind: 'settings',
-          installation: inst,
-          initialTab: 'comfy',
-          initialDetailTab: 'update',
-        })
-        return
-      }
-      if (payload.kind === 'open-settings') {
-        await bootstrapReady
-        const inst = installationId ? installationStore.getById(installationId) : null
-        const requested = payload.settingsTab
-        // Default to the host's natural tab — same fall-through the
-        // file-menu / title-bar Settings entries use via switchPanel.
-        const tab = requested ?? (inst ? 'comfy' : 'global')
-        await openOverlay({
-          kind: 'settings',
-          installation: inst ?? null,
-          initialTab: tab,
-        })
-      }
-    })()
-  })
-
   await loadLocale()
 
   unsubLocale = window.api.onLocaleChanged((messages) => {
@@ -1018,7 +970,6 @@ onUnmounted(() => {
   unsubPanel?.()
   unsubLocale?.()
   unsubCloseRequest?.()
-  unsubPanelTriggerOverlay?.()
   unsubFirstUseSkip?.()
   unsubAppUpdatePromptRestart?.()
   unsubAppUpdateUserActionFailed?.()
