@@ -12,8 +12,8 @@ import {
   openChooserHostWindow,
 } from './createHostWindow'
 
-/** Late-bound dependency on the panelView constructor that still
- *  lives in `index.ts` (until P0.9). */
+/** Late-bound dependency on the panelView constructor; injected from
+ *  `index.ts` to avoid a circular import. */
 export interface DetachFactories {
   ensurePanelView: (
     windowKey: number,
