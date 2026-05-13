@@ -63,6 +63,15 @@ export class WebContentsPage {
   ) {}
 
   private async wcEval<T>(expr: string): Promise<T> {
+    return this.evaluate<T>(expr)
+  }
+
+  /**
+   * Evaluate an arbitrary JavaScript expression in the matching
+   * webContents. Returns the JSON-serialisable result. Use for
+   * one-off DOM probes that don't fit the named helpers below.
+   */
+  async evaluate<T>(expr: string): Promise<T> {
     const id = await findWebContentsId(this.app, this.marker)
     if (id === null) throw new Error(`webContents not found (marker=${this.marker})`)
     return this.app.evaluate(async ({ webContents }, payload) => {
@@ -182,4 +191,9 @@ export function panelPage(app: ElectronApplication): WebContentsPage {
 /** WebContentsPage for the host's native title bar. */
 export function titleBarPage(app: ElectronApplication): WebContentsPage {
   return new WebContentsPage(app, 'comfyTitleBar.html')
+}
+
+/** WebContentsPage for the title-bar dropdown popup (waffle / downloads). */
+export function titlePopupPage(app: ElectronApplication): WebContentsPage {
+  return new WebContentsPage(app, 'comfyTitlePopup.html')
 }

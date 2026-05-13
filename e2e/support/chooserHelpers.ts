@@ -39,6 +39,13 @@ export async function openTitleMenu(titleBar: WebContentsPage): Promise<void> {
   expect(ok, 'Title menu button click dispatched').toBe(true)
 }
 
+/** Click the title-bar downloads tray icon that opens the downloads popup. */
+export async function openDownloadsTray(titleBar: WebContentsPage): Promise<void> {
+  await titleBar.waitForVisible('.title-downloads-tray')
+  const ok = await titleBar.click('.title-downloads-tray')
+  expect(ok, 'Downloads tray button click dispatched').toBe(true)
+}
+
 /** Wait for any flow takeover to be visible inside the panel body. */
 export async function expectTakeoverOpen(panel: WebContentsPage): Promise<void> {
   await panel.waitForVisible('.view-modal-content', { timeout: 10_000 })

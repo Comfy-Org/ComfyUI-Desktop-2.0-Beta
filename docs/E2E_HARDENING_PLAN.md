@@ -77,20 +77,18 @@ A smoke test in [`e2e/devhooks-smoke.test.ts`](../e2e/devhooks-smoke.test.ts) ex
 
 ---
 
-## G1 — Downloads shelf coverage  ◻
+## G1 — Downloads shelf coverage  ✅
 
-`e2e/downloads-shelf.test.ts` (chooser host, fast suite):
+[`e2e/downloads-shelf.test.ts`](../e2e/downloads-shelf.test.ts) (chooser host, fast suite, 6 tests, ~3.4s total):
 
 | Test | Asserts | Catches |
 |---|---|---|
-| Empty drawer fits content | Open via title-bar tray button → popup height < 150px | Empty-state regression / over-padded empty placeholder |
-| One downloading entry fits content | Seed 1 active entry → open → popup height 130–180px (NOT clipped at the 360 ceiling) | The exact bug we just fixed (`scrollHeight === clientHeight` on flex children) |
-| Many entries cap at ceiling, list scrolls | Seed 10 active entries → open → popup height === ceiling AND `.downloads-list` has `scrollHeight > clientHeight` | Loss of internal scroll, e.g. if someone sets `overflow: visible` |
-| Per-status controls render | Seed entries with each status → open → assert pause shown only on `'downloading'`, resume only on `'paused'`, cancel hidden on terminal, dismiss only on terminal | Status-action mapping regressions |
-| `Clear finished` only when something to clear | Seed 1 active + 0 finished → open → assert no `.downloads-clear`. Seed 1 finished → open → assert visible | The header rendering condition |
-| Live repaint while open | Open shelf → seed new entry mid-open → assert renderer repaints (new row appears) | The `tray-state-changed` broadcast → `comfy-titlepopup:downloads-changed` route |
-
-Estimated 6 tests, ~2s each.
+| Empty drawer fits content | Open via title-bar tray button → popup height < 200px | Empty-state regression / over-padded empty placeholder |
+| One downloading entry fits content | Seed 1 active entry → open → popup height 80–260px (NOT clipped at the 360 ceiling) | The exact bug we just fixed (`scrollHeight === clientHeight` on flex children) |
+| Many entries cap at ceiling, list scrolls | Seed 12 active entries → open → popup height pinned to the ceiling AND `.downloads-list` has `scrollHeight > clientHeight` | Loss of internal scroll, e.g. if someone sets `overflow: visible` |
+| Per-status controls render | Seed entries with each status → open → assert pause only on `downloading`, resume only on `paused`, cancel hidden on terminal, dismiss only on terminal | Status-action mapping regressions |
+| `Clear finished` only when something to clear | Seed 1 active + 0 finished → open → assert no `.downloads-clear`. Add a finished entry mid-open → assert it appears | The header rendering condition |
+| Live repaint while open | Open empty shelf → seed new entries mid-open → assert row count tracks | The `tray-state-changed` broadcast → `comfy-titlepopup:downloads-changed` route |
 
 ---
 
