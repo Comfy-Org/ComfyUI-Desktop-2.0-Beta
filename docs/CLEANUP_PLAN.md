@@ -133,45 +133,61 @@ After P0.1–P0.9, `index.ts` should be **~600–800 lines**: imports, app-level
 
 ---
 
-## P1 — DRY: extract `EmbeddedPopupView` primitive
+## P1 — DRY: extract `EmbeddedPopupView` primitive ✅
 
-Once P0.1, P0.2, and P0.3 land as separate files, the duplication becomes obvious:
+Landed as [`src/main/popups/embeddedPopupView.ts`](../src/main/popups/embeddedPopupView.ts) (~200 lines including doc comments). Owns the lifecycle every transparent host-window popup duplicates inline:
 
 | Concern | titleTooltip | systemModal | titlePopup |
 |---|---|---|---|
 | Construct transparent `WebContentsView` with preload | ✓ | ✓ | ✓ |
 | `parent.contentView.addChildView(popup)` | ✓ | ✓ | ✓ |
 | Dev/prod URL load (env-gated) | ✓ | ✓ | ✓ |
-| By-parent + by-webContents `Map`s | ✓ | ✓ | ✓ |
 | Parent-`closed` teardown + listener cleanup | ✓ | ✓ | ✓ |
 | `webContents.once('destroyed', …)` index cleanup | ✓ | ✓ | ✓ |
 | Render-ack timer fallback (`pendingShowTimer`) | ✓ | ✓ | ✓ |
 | `setVisible(true)` + re-stack on top dance | ✓ | ✓ | ✓ |
-| `lastSyncedConfigJson` fast-path skip-re-IPC | ✓ | — | ✓ |
+| Parent dismiss listeners (`blur` / `will-move` / `move`) | ✓ | — | ✓ |
+| Popup-`blur` dismiss | — | — | ✓ |
 
-Extract `src/main/popups/embeddedPopupView.ts` exposing a class:
+Final API (no generic config wrapper — each module pushes config via its own `set-config` IPC since the renderer channels and payload shapes differ):
 
 ```ts
-class EmbeddedPopupView<TConfig> {
+class EmbeddedPopupView {
+  readonly popup: WebContentsView
+  readonly parentWindow: BrowserWindow
+  readonly popupWebContentsId: number
+  readonly parentWindowId: number
+  rendererReady: boolean    // set by the consumer's `:ready` handler
+  isOpen: boolean           // managed by show/hide
+  pendingShowTimer: NodeJS.Timeout | null
+
   constructor(opts: {
     parent: BrowserWindow
-    htmlName: 'comfyTitlePopup' | 'comfySystemModal' | 'comfyTitleTooltip'
-    preload: string
+    htmlName: string                                      // e.g. 'comfyTitlePopup'
+    preloadName: string                                   // e.g. 'comfyTitlePopupPreload.js'
     initialBounds: Electron.Rectangle
-    setConfigChannel: string  // e.g. 'comfy-titlepopup:set-config'
+    hideOnParentEvents?: ReadonlyArray<'blur' | 'will-move' | 'move' | 'resize'>
+    hideOnPopupBlur?: boolean
     onParentClosed?: () => void
+    onDestroyed?: () => void
   })
-  show(config: TConfig, position: Electron.Rectangle, opts?: { fastPath?: boolean }): void
-  hide(opts?: { releaseFocusToParent?: boolean }): void
-  destroy(): void
-  onRendererReady(cb: () => void): void
-  onRendered(cb: (token?: string) => void): void
+  showOnTop(opts?: { focus?: boolean }): void
+  hide(opts?: { focusParent?: boolean }): void
+  scheduleShowFallback(timeoutMs: number, callback: () => void): void
+  cancelPendingShow(): void
+  isDestroyed(): boolean
 }
 ```
 
-Each subsystem then keeps only its **business logic** (menu-item building, anchor math, modal spec resolution, callback wiring) and delegates lifecycle to the primitive. Estimated removal: **~250 duplicated lines**.
+The by-parent / by-webContents `Map`s and the `lastSyncedConfigJson` fast-path stayed with each consumer because the entry types and IPC channels differ across the three popups. Each consumer's entry record now collapses to `{ view: EmbeddedPopupView, ...module-specific state }`.
 
-⚠ Do not build this primitive before the 3 popups are in their own files. Building it ahead of time would force speculation about which methods to expose.
+Net change in popup module sizes:
+- `systemModal.ts`: 268 → 174 lines (–94)
+- `titleTooltip.ts`: 440 → 326 lines (–114)
+- `titlePopup.ts`: 940 → 808 lines (–132)
+- `embeddedPopupView.ts`: +198 lines (single source of truth)
+
+Test coverage: 19 new vitest cases in `embeddedPopupView.test.ts` covering child-view attachment, dev/prod URL load gating, show / hide / scheduleShowFallback / cancelPendingShow, parent-event dismiss listeners, popup-blur dismiss, and parent-closed / popup-destroyed teardown. Behavioural regressions are caught end-to-end by the existing fast suite (chooser title-popup + tooltip pre-warm tests) and the lifecycle suite (system-modal close-confirm path).
 
 ---
 
@@ -219,7 +235,7 @@ Recommended execution order across follow-up threads:
 2. **Thread B — P0.1 + P0.2 + P0.4 + P0.8** ✅ (landed in this PR; `index.ts` 4533 → 3720 lines).
 3. **Thread C — P0.5 (registry)** ✅ (landed in this PR; `index.ts` 3720 → 3125 lines).
 4. **Thread D — P0.3 + P0.6 + P0.7 + P0.9** ✅ (landed in this PR; `index.ts` 3125 → ~905 lines). The host-window construction split. Final structure: `popups/titlePopup.ts` (~890), `host/createHostWindow.ts` (~660), `host/attach.ts` (~340), `host/detach.ts` (~290), `host/panelView.ts` (~195). Lifecycle-state maps (`relaunchStates`, `comfyFailRetryTimerCancels`) and `computeInstallUpdateAvailable` still live in `index.ts` and reach the new modules via `setAttachFactories(...)` / `setHostWindowFactories(...)` / `setDetachFactories(...)` — moving them out is a P3/P4 follow-up, not blocking the seamless-transition feature.
-5. **Thread E — P1 (popup primitive)**. After all 3 popups live in their own files.
+5. **Thread E — P1 (popup primitive)** ✅ (landed in this PR; popup modules shrank by 340 lines net while gaining a 198-line shared primitive). All three popup entry records now collapse to `{ view: EmbeddedPopupView, ...module-specific state }`.
 6. **Thread F — P3 + P4**. Renderer file splits and the comment trim sweep.
 
 After Thread D, `index.ts` should be small enough that the seamless-transition feature is straightforward to start.
