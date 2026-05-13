@@ -16,13 +16,13 @@ import { useSessionStore } from '../stores/sessionStore'
 import { useInstallationStore } from '../stores/installationStore'
 import { useProgressStore } from '../stores/progressStore'
 import { useLauncherPrefs } from '../composables/useLauncherPrefs'
-import { useListAction } from '../composables/useListAction'
 import { useMigrateAction } from '../composables/useMigrateAction'
 import { useModal } from '../composables/useModal'
 import { useAppUpdatePrompts } from '../composables/useAppUpdatePrompts'
 import { useSendFeedback } from '../composables/useSendFeedback'
 import { useDeepLinkRouter } from '../composables/useDeepLinkRouter'
 import { isFlowPanel, isValidPanel, usePanelOverlays } from './usePanelOverlays'
+import { useChooserHandoff } from './useChooserHandoff'
 import type { Installation } from '../types/ipc'
 
 const { mergeLocaleMessage, locale, t } = useI18n()
@@ -91,6 +91,17 @@ const loadSnapshotRef = ref<InstanceType<typeof LoadSnapshotModal> | null>(null)
 const quickInstallRef = ref<InstanceType<typeof QuickInstallModal> | null>(null)
 const firstUseRef = ref<InstanceType<typeof FirstUseTakeover> | null>(null)
 
+// usePanelOverlays + useChooserHandoff form a small dependency cycle:
+// the overlay's `handleShowProgress` needs to subscribe the chooser
+// host's close-on-instance-started fallback when an install-less
+// host fires a launch-class op; the chooser handoff needs to mount
+// its launches through the overlay's `handleShowProgress` and use
+// `switchPanel` for the missing-launch-action fallback. Break the
+// cycle with a deferred lazy reference: the overlays composable
+// receives a callback that reads `chooserHandoff` at call time, by
+// which point chooserHandoff has been assigned below.
+let chooserHandoff!: ReturnType<typeof useChooserHandoff>
+
 const {
   activePanel,
   initialPanel,
@@ -111,7 +122,7 @@ const {
   loadSnapshotRef,
   quickInstallRef,
   firstUseRef,
-  prepareChooserHostHandoff: (id) => prepareChooserHostHandoff(id),
+  prepareChooserHostHandoff: (id) => chooserHandoff.prepareChooserHostHandoff(id),
   firstUseChain: {
     shouldForceTakeover: () => chainingFirstUseToNewInstall.value,
     onShowProgress: (showOpts) => {
@@ -133,6 +144,12 @@ const {
     },
   },
 })
+
+chooserHandoff = useChooserHandoff({
+  showProgress: handleShowProgress,
+  switchPanel,
+})
+const { performChooserLaunch, handleChooserPick, handleChooserShowNewInstall } = chooserHandoff
 
 let unsubPanel: (() => void) | null = null
 let unsubLocale: (() => void) | null = null
@@ -330,46 +347,6 @@ async function handleNewInstallTakeoverClose(): Promise<void> {
   }
 }
 
-/** Shared launch path for chooser-tile clicks AND the first-use
- *  takeover's auto-launch. Both surfaces want the same five-step
- *  shape (already-running short-circuit → resolve launch action →
- *  in-place attach claim → executeAction). Extracted to one helper
- *  so a future change to the launch UX can't regress one surface
- *  but not the other.
- *
- *  `onMissingLaunchAction` is the only thing that diverges:
- *    - chooser tile click → fall back to the new-install flow inside
- *      this host (the user picked a tile that has no launch path
- *      because the install isn't yet installed).
- *    - first-use auto-launch → silently no-op (the chained new-install
- *      op already finished, anything missing is genuinely "no
- *      launchable install" and we don't want to bounce the user back
- *      into a wizard immediately after they finished one). */
-async function performChooserLaunch(
-  installation: Installation,
-  onMissingLaunchAction: () => void = () => {},
-): Promise<void> {
-  if (sessionStore.isRunning(installation.id)) {
-    // Focus the running window and leave the chooser host alive
-    // (tile clicks transform the host the user clicked from instead
-    // of closing it). The chooser host has no install backing it,
-    // so there's no detach to do; the surplus window is the price
-    // of keeping the user's panel context intact.
-    await window.api.focusComfyWindow(installation.id)
-    return
-  }
-  const actions = await window.api.getListActions(installation.id)
-  const launchAction = actions.find((a) => a.id === 'launch')
-    ?? actions.find((a) => a.style === 'primary')
-    ?? null
-  if (!launchAction) {
-    onMissingLaunchAction()
-    return
-  }
-  await prepareChooserHostHandoff(installation.id)
-  await executeChooserAction(installation, launchAction)
-}
-
 /** Watch progressStore for the new-install / migration op finishing
  *  and auto-launch the resulting Standalone install. The chain flag
  *  (`chainingFirstUseToNewInstall`) gates the watcher so we only
@@ -427,72 +404,6 @@ function handleUpdateInstallation(inst: Installation): void {
   // refetch is in flight (e.g. rename via the editable title).
   const idx = installationStore.installations.findIndex((i) => i.id === inst.id)
   if (idx >= 0) installationStore.installations.splice(idx, 1, inst)
-}
-
-// --- Chooser handlers (install-less host window only) ---
-//
-// Chooser pick triggers the install's launch action directly from the
-// panel renderer, mirroring the Dashboard "Open" button flow. Once the
-// install's own ComfyUI window has opened (or it was already running),
-// the install-less chooser host window closes itself.
-//
-// `useListAction` covers the same launch UX paths the Dashboard already
-// uses: confirm modal, in-progress guard, port-conflict resolution via
-// ProgressModal, telemetry, etc.
-const { executeAction: executeChooserAction } = useListAction('chooser', {
-  showProgress: handleShowProgress,
-})
-
-/** Pending close-on-launch subscription (fallback), so unmount can
- *  clean it up. Only set when the in-place attach claim is rejected
- *  by main and the chooser host falls back to the close+open swap. */
-let pendingPickUnsub: (() => void) | null = null
-
-/** Prepare the chooser host for a launch hand-off. First try to claim
- *  the host for in-place attach: when the launch event lands in main,
- *  `onLaunch` will attach the install to THIS host window instead of
- *  constructing a fresh one. If the claim is rejected (e.g. the install
- *  needs a unique browser partition), fall back to the stamp-bounds +
- *  close-on-instance-started swap so the user still gets the install's
- *  window at the chooser's bounds. */
-async function prepareChooserHostHandoff(installationId: string): Promise<void> {
-  const claimed = await window.api.claimAttachHost(installationId)
-  if (claimed) return
-  // Visual continuity — stamp the chooser host's current bounds onto
-  // the install's saved-bounds slot so its freshly-constructed window
-  // opens at the chooser's position.
-  await window.api.transferHostBoundsToInstall(installationId)
-  // Subscribe BEFORE kicking off the launch so we don't miss a fast-
-  // firing instance-started broadcast. The launch action runs via the
-  // ProgressModal pipeline (showProgress: true) so executeAction
-  // returns immediately after kicking it off — the actual completion
-  // signal is the instance-started event coming back from main.
-  pendingPickUnsub?.()
-  pendingPickUnsub = window.api.onInstanceStarted((data) => {
-    if (data.installationId !== installationId) return
-    pendingPickUnsub?.()
-    pendingPickUnsub = null
-    // The install's own ComfyUI window has opened — chooser host is done.
-    void window.api.closeHostWindow()
-  })
-}
-
-async function handleChooserPick(installation: Installation): Promise<void> {
-  // Already-running short-circuit, launch-action lookup, and in-place
-  // attach claim all live in `performChooserLaunch`. Tile-click
-  // semantics for the missing-launch-action case: bounce into the
-  // new-install flow inside this same host so the user can resolve
-  // the missing setup step without bouncing to a separate window.
-  await performChooserLaunch(installation, () => { void switchPanel('new-install', 'chooser_pick') })
-}
-
-function handleChooserShowNewInstall(): void {
-  // Empty-state CTA from the chooser — opens the new-install flow as
-  // a Tier 3 takeover above the chooser body. Same install-less host
-  // window; the user perceives a wizard step rather than a navigation
-  // jump, and dismissing the takeover drops them right back into the
-  // chooser tile they came from.
-  void switchPanel('new-install', 'chooser')
 }
 
 function handleNavigateList(): void {
@@ -619,7 +530,6 @@ onUnmounted(() => {
   unsubFirstUseSkip?.()
   unsubAppUpdatePromptRestart?.()
   unsubAppUpdateUserActionFailed?.()
-  pendingPickUnsub?.()
   sessionStore.dispose()
 })
 </script>
