@@ -128,21 +128,16 @@ The desktop-update tests use `setAppUpdateState` which routes through `_setUpdat
 
 ---
 
-## G4 — Title-bar dropdown + tooltip regression coverage  ◻
+## G4 — Title-bar dropdown + tooltip regression coverage  ✅
 
-`e2e/dropdowns.test.ts` (chooser host, fast suite). Folds in the existing two title-popup tests in `chooser.test.ts` so all dropdown coverage lives in one place.
+[`e2e/dropdowns.test.ts`](../e2e/dropdowns.test.ts) (chooser host, fast suite, 4 new tests, ~3s total). The existing dropdown smoke tests stay in [`chooser.test.ts`](../e2e/chooser.test.ts) — moving them risked breaking what already works for no real benefit.
 
 | Test | Asserts | Catches |
 |---|---|---|
-| Reset Zoom menu item only when zoom is non-zero | Open menu → assert no `Reset Zoom`. Set comfyView zoom level → reopen → assert `Reset Zoom (120%)` visible | The `buildTitlePopupMenuItems` zoom branch |
-| Title-popup IPC channels are idempotent across opens | Open → close → open 3 times → assert no listener leaks (via `webContents.eventNames().length` snapshot) | Listener leak regressions in `EmbeddedPopupView` |
-| Tooltip dismisses when menu opens | Show tooltip → open menu → assert tooltip popup hidden | The `hideTitleTooltipPopup(getTitleTooltipForParent(...))` line in `openTitlePopup` |
-| Downloads popup repaints live | (covered by G1's "Live repaint while open") |  |
-| Existing: title popup opens / renders / closes via bridge | (already in `chooser.test.ts`) | Move to this file |
-| Existing: title popup reopens after blur | (already in `chooser.test.ts`) | Move to this file |
-| Existing: tooltip created on demand | (already in `chooser.test.ts`) | Move to this file |
-
-Estimated 4 new + 3 moved tests, ~0.5s each.
+| Reset Zoom item absent at zoom 0 | Open menu with comfyView at level 0 → assert no `Reset Zoom` item | The `if (level !== 0)` gate in `buildTitlePopupMenuItems` |
+| Reset Zoom item appears with percent label at non-zero zoom | Load `about:blank` into the dummy comfyView (Electron `setZoomLevel` is a no-op without a loaded URL) → set zoom to level 1 → open menu → assert item present and labelled `Reset Zoom (120%)` | The `buildTitlePopupMenuItems` zoom branch + percent computation |
+| Listener counts stable across opens | Snapshot `popup.webContents` listener total → run 5 open / close cycles → assert total unchanged | Listener leak regressions in `EmbeddedPopupView` (auto-dismiss event handlers re-attached per open would surface here) |
+| Opening the menu hides the title-bar tooltip | Show tooltip → open menu → assert tooltip popup hidden | The `hideTitleTooltipPopup(getTitleTooltipForParent(...))` line in `openTitlePopup` |
 
 ---
 
