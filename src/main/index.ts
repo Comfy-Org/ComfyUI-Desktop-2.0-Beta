@@ -1,7 +1,5 @@
-import { app, BrowserWindow, Menu, ipcMain, dialog, shell, clipboard, screen, net, WebContentsView } from 'electron'
-// `Tray` is referenced only as a type while docking-to-tray is disabled
-// (see whenReady() — createTray() has been removed). When docking comes
-// back, move this back into the runtime electron import alongside Menu.
+import { app, BrowserWindow, Menu, ipcMain, dialog, shell, net, WebContentsView } from 'electron'
+// Type-only while docking-to-tray is disabled.
 import type { Tray } from 'electron'
 import path from 'path'
 import fs from 'fs'
@@ -14,7 +12,9 @@ import * as updater from './lib/updater'
 import * as settings from './settings'
 import { installAppMenu } from './menu'
 import * as i18n from './lib/i18n'
-import { configDir, migrateXdgPaths } from './lib/paths'
+import { migrateXdgPaths } from './lib/paths'
+import { attachContextMenu } from './lib/contextMenu'
+import { getSavedBounds, getWindowOptions, saveWindowBounds } from './lib/windowState'
 import { waitForPort, COMFY_BOOT_TIMEOUT_MS } from './lib/process'
 import { isQuitInProgress, setQuitReason } from './lib/quit-state'
 import type { InstallationRecord } from './installations'
@@ -96,122 +96,12 @@ type BodyMode =
 todesktop.init({ autoUpdater: false })
 
 const APP_ICON = path.join(__dirname, '..', '..', 'assets', 'Comfy_Logo_x256.png')
-// TRAY_ICON has been removed alongside createTray() while docking-to-tray
-// is disabled — see whenReady()'s comment about restoring docking. When
-// reintroduced, use assets/Comfy_Logo_x64.png so Electron can downsample
-// crisply on HiDPI trays.
 const APP_VERSION = getAppVersion()
 
-/**
- * Center pill text for install-less host windows (the chooser /
- * dashboard host). Replaces the previous `'Choose an install'` —
- * the pill is no longer clickable (no install caret menu), so the
- * label is just a brand identifier.
- */
+/** Center pill text for install-less host windows (chooser/dashboard). */
 const CHOOSER_HOST_TITLE_TEXT = 'Desktop 2.0 Beta'
 /** OS-level window title for install-less host windows. */
 const CHOOSER_HOST_WINDOW_TITLE = `${CHOOSER_HOST_TITLE_TEXT} — v${APP_VERSION}`
-
-interface WindowBounds {
-  x: number
-  y: number
-  width: number
-  height: number
-  maximized: boolean
-}
-
-const windowStatePath = path.join(configDir(), 'window-state.json')
-let windowStateCache: Record<string, WindowBounds> | null = null
-let flushTimer: ReturnType<typeof setTimeout> | null = null
-
-function getWindowStateCache(): Record<string, WindowBounds> {
-  if (!windowStateCache) {
-    try {
-      windowStateCache = JSON.parse(fs.readFileSync(windowStatePath, 'utf-8'))
-    } catch {
-      windowStateCache = {}
-    }
-  }
-  return windowStateCache!
-}
-
-async function flushWindowState(): Promise<void> {
-  if (!windowStateCache) return
-  try {
-    await fs.promises.mkdir(path.dirname(windowStatePath), { recursive: true })
-    await fs.promises.writeFile(windowStatePath, JSON.stringify(windowStateCache, null, 2))
-  } catch {}
-}
-
-function saveWindowBounds(installationId: string, window: BrowserWindow): void {
-  const state = getWindowStateCache()
-  const maximized = window.isMaximized()
-  const bounds = window.getBounds()
-  state[installationId] = {
-    ...(maximized ? (state[installationId] ?? bounds) : bounds),
-    maximized,
-  }
-  if (flushTimer) clearTimeout(flushTimer)
-  flushTimer = setTimeout(flushWindowState, 500)
-}
-
-function getSavedBounds(installationId: string): WindowBounds | undefined {
-  return getWindowStateCache()[installationId]
-}
-
-function getWindowOptions(installationId: string): Partial<Electron.BrowserWindowConstructorOptions> {
-  const saved = getSavedBounds(installationId)
-  if (!saved) return { width: 1280, height: 900 }
-
-  const savedRect = { x: saved.x, y: saved.y, width: saved.width, height: saved.height }
-  const display = screen.getDisplayMatching(savedRect)
-  const { x: wx, y: wy, width: ww, height: wh } = display.workArea
-  const width = Math.min(saved.width, ww)
-  const height = Math.min(saved.height, wh)
-  const x = Math.max(wx, Math.min(saved.x, wx + ww - width))
-  const y = Math.max(wy, Math.min(saved.y, wy + wh - height))
-  return { x, y, width, height }
-}
-
-function attachContextMenu(comfyWindow: BrowserWindow, webContents?: Electron.WebContents): void {
-  (webContents || comfyWindow.webContents).on('context-menu', (_event, params) => {
-    const { editFlags, isEditable, selectionText, linkURL } = params
-    const hasSelection = selectionText.trim().length > 0
-    const hasLink = linkURL.length > 0
-
-    if (!isEditable && !hasSelection && !hasLink) return
-
-    const menuItems: Electron.MenuItemConstructorOptions[] = []
-
-    if (hasLink) {
-      menuItems.push(
-        { label: i18n.t('contextMenu.openLinkInBrowser'), click: () => shell.openExternal(linkURL) },
-        { label: i18n.t('contextMenu.copyLinkAddress'), click: () => clipboard.writeText(linkURL) },
-      )
-    }
-
-    if (hasLink && (isEditable || hasSelection)) {
-      menuItems.push({ type: 'separator' })
-    }
-
-    if (isEditable) {
-      menuItems.push(
-        { label: i18n.t('contextMenu.cut'), role: 'cut', enabled: editFlags.canCut },
-        { label: i18n.t('contextMenu.copy'), role: 'copy', enabled: editFlags.canCopy },
-        { label: i18n.t('contextMenu.paste'), role: 'paste', enabled: editFlags.canPaste },
-        { type: 'separator' },
-        { label: i18n.t('contextMenu.selectAll'), role: 'selectAll', enabled: editFlags.canSelectAll },
-      )
-    } else if (hasSelection) {
-      menuItems.push(
-        { label: i18n.t('contextMenu.copy'), role: 'copy', enabled: editFlags.canCopy },
-        { label: i18n.t('contextMenu.selectAll'), role: 'selectAll', enabled: editFlags.canSelectAll },
-      )
-    }
-
-    Menu.buildFromTemplate(menuItems).popup({ window: comfyWindow })
-  })
-}
 
 // The chooser host window plus per-install ComfyUI windows are the
 // only top-level surfaces.
