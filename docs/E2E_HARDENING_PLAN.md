@@ -92,22 +92,20 @@ A smoke test in [`e2e/devhooks-smoke.test.ts`](../e2e/devhooks-smoke.test.ts) ex
 
 ---
 
-## G2 — Settings panel coverage  ◻
+## G2 — Settings panel coverage  ✅
 
-`e2e/settings.test.ts` (chooser host, fast suite — install-less tabs only):
+[`e2e/settings.test.ts`](../e2e/settings.test.ts) (chooser host, fast suite — install-less tabs only, 6 tests, ~5.4s total):
 
 | Test | Asserts | Catches |
 |---|---|---|
-| Settings opens from waffle menu | Open menu → click `Settings` item → assert `.settings-modal` (or whatever the unified container is) appears in panel | The `setActivePanel('settings')` IPC chain |
-| Global tab renders | Open settings → click Global tab → assert each known control renders | Global-settings shape changes |
-| Directories tab renders | Open → Directories → assert paths list visible | Directory picker regressions |
-| Downloads tab renders | Open → Downloads (the *settings* tab, not the popup) → assert downloads list visible | Settings-side downloads view regressions |
-| Escape dismisses settings | Open → press Escape on panel → assert closed | Overlay key handling |
-| Reopens cleanly | Open → close → open → assert state correct | Single-open / re-mount regressions |
+| Settings opens from waffle menu | Open menu → click `Settings` item → assert `.settings-modal-shell` mounts AND default active tab is `global` (the install-less default) | The `setActivePanel('settings')` IPC chain + `switchPanel('settings')` overlay open |
+| Escape dismisses settings | Open → press Escape on panel → assert `.settings-modal-shell` removed | Modal Escape handler regression |
+| Reopens cleanly | Open → close → step past reopen-suppression → open → assert state correct | Single-open / re-mount regressions in the overlay slot |
+| Global tab renders | Open settings → click Global tab → assert at least one `.settings-section` mounts in `SettingsView` | Global-settings shape changes |
+| Directories tab renders | Open → Directories → assert `.directories-panel` mounts | Directory picker regressions |
+| Downloads (settings) tab renders | Open → Downloads tab (the *settings* one, not the popup) → assert `.downloads-tab` mounts | Settings-side downloads view regressions |
 
-Skip per-install ComfyUI tab in the fast suite — it requires a real install. Add one test in the lifecycle suite for that.
-
-Estimated 6 tests, ~1.5s each.
+The per-install ComfyUI Settings tab is install-backed only — sidebar gates it on `hasInstallation` — so it's left for the lifecycle suite where a real install backs the host.
 
 ---
 
