@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed, useTemplateRef } from 'vue'
+import { ref, onMounted, onUnmounted, useTemplateRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   ArrowDownToLine,
@@ -9,9 +9,9 @@ import {
   MessageSquarePlus,
   RefreshCw,
 } from 'lucide-vue-next'
-import { installTypeMetaFor } from '../lib/installTypeIcon'
 import { useTitleBarTooltip } from './useTitleBarTooltip'
 import { useTitleBarMenus } from './useTitleBarMenus'
+import { useTitleBarIdentity } from './useTitleBarIdentity'
 import { useUpdatePills } from './useUpdatePills'
 
 const { t } = useI18n()
@@ -160,7 +160,6 @@ interface Bridge {
 const bridge = (window as unknown as { __comfyTitleBar?: Bridge }).__comfyTitleBar
 
 const isMac = ref(bridge?.isMac() ?? false)
-const isFullscreen = ref(false)
 /**
  * `:hover` gating for the title-bar. The title bar lives in its own
  * WebContentsView, which doesn't receive a `mouseleave` when a native
@@ -191,64 +190,28 @@ const isHoverActive = ref(true)
  *  an identity label, not a tab indicator. */
 const activePanel = ref<ComfyPanelKey>('comfy')
 /**
- * First-use takeover step pushed from main via
- * `comfy-titlebar:first-use-mode-changed`. The renderer uses the
- * value to lock down the title bar during the T&C consent step
- * (`'consent-lockdown'`) by hiding the waffle menu — the only
- * always-live escape hatch the user would otherwise have out of the
- * binding takeover. Post-consent steps (`'post-consent'`) leave the
- * title bar normal so the file-menu Skip Onboarding entry stays
- * reachable. `'none'` is the steady state with no takeover mounted.
- *
- * State is local, main does NOT cache the value here (it's cached on
- * the host entry main-side, see `ComfyWindowEntry.firstUseMode`),
- * matching how panel-changed / theme-changed already work.
- */
-const firstUseMode = ref<'none' | 'consent-lockdown' | 'post-consent'>('none')
-const isConsentLockdown = computed(() => firstUseMode.value === 'consent-lockdown')
-/**
- * Install-less host window flag. When true, the center
- * install pill labels itself "Desktop 2.0 Beta" (set by the initial
- * title push from main) and the install-type icon next to the label is
- * suppressed. The center pill is no longer clickable in either mode —
- * Settings now lives on the File / waffle menu via the unified Settings
- * modal — so this flag only affects the rendered identity, not the
- * interaction model.
+ * Install-less host window flag — true when the host has no install
+ * backing it. Drives the center pill's static identity label and
+ * suppresses the install-type icon. Computed once on construction;
+ * the bridge never changes this for a given title-bar instance.
  */
 const isInstallLess = ref((bridge?.getInstallationId() ?? '') === '')
-/** Install identity ("MyInstall") — main pushes this on ready.
- *  The source-category suffix (`— Standalone` / `— Cloud` / …) is
- *  not part of the label; it's rendered as an icon next to the name
- *  via `installTypeIcon`. */
-const installLabel = ref('ComfyUI')
-/**
- * Raw `sourceCategory` string pushed by main on the
- * `comfy-titlebar:source-category-changed` channel. Drives the
- * install-type icon next to the install name (Standalone laptop /
- * Cloud / Legacy Desktop tower / …) via the shared
- * `installTypeMetaFor()` helper. `null` for install-less host
- * windows; the icon is suppressed entirely in that case so the
- * "Desktop 2.0 Beta" label reads bare.
- */
-const sourceCategory = ref<string | null>(null)
-/** Resolved icon metadata for the active install. Wraps
- *  `installTypeMetaFor()` so the helper isn't called inline in the
- *  template (keeps Vue's reactivity watcher minimal). */
-const installTypeMeta = computed(() => installTypeMetaFor(sourceCategory.value))
-/** Tooltip for the install-type icon. `installTypeMetaFor` returns
- *  dotted keys like `installType.standalone` that match the en
- *  catalog one-to-one. */
-const installTypeLabel = computed(() => {
-  return t(installTypeMeta.value.labelKey, t('installType.unknown'))
-})
-/** Whether to render the install-type icon. Suppressed on
- *  install-less host windows (no install backing the entry) so the
- *  "Desktop 2.0 Beta" identity label reads bare. */
-const showInstallTypeIcon = computed(
-  () => !isInstallLess.value && sourceCategory.value !== null,
-)
-const themeBg = ref<string | null>(null)
-const themeText = ref<string | null>(null)
+
+const {
+  installLabel,
+  sourceCategory,
+  themeBg,
+  themeText,
+  isFullscreen,
+  isConsentLockdown,
+  installTypeMeta,
+  installTypeLabel,
+  showInstallTypeIcon,
+  isLight,
+} = useTitleBarIdentity({ bridge, isInstallLess })
+// Mark unused — sourceCategory feeds installTypeMeta inside the
+// composable, but the template doesn't reference it directly.
+void sourceCategory
 
 const {
   appUpdateState,
@@ -269,22 +232,6 @@ const {
 function handleFeedback(): void {
   bridge?.clickFeedback()
 }
-
-/** Body luminance test — drives is-light styling (lighter hover state). */
-const isLight = computed(() => {
-  const bg = themeBg.value
-  if (!bg) return false
-  // Round-trip through canvas to normalise any color string into #rrggbb.
-  const ctx = document.createElement('canvas').getContext('2d')
-  if (!ctx) return false
-  ctx.fillStyle = bg
-  const hex = ctx.fillStyle as string
-  if (!hex.startsWith('#') || hex.length < 7) return false
-  const r = parseInt(hex.slice(1, 3), 16)
-  const g = parseInt(hex.slice(3, 5), 16)
-  const b = parseInt(hex.slice(5, 7), 16)
-  return (r * 299 + g * 587 + b * 114) / 1000 >= 128
-})
 
 const fileBtnRef = useTemplateRef<HTMLButtonElement>('fileBtn')
 const downloadsBtnRef = useTemplateRef<HTMLButtonElement>('downloadsBtn')
@@ -307,11 +254,6 @@ const {
 })
 
 let unsubPanel: (() => void) | undefined
-let unsubTitle: (() => void) | undefined
-let unsubSourceCategory: (() => void) | undefined
-let unsubTheme: (() => void) | undefined
-let unsubFullscreen: (() => void) | undefined
-let unsubFirstUseMode: (() => void) | undefined
 
 /** Drop the hover gate immediately when input leaves the title-bar
  *  webContents — covers the case where a native menu (Menu.popup) or
@@ -344,39 +286,17 @@ onMounted(() => {
   unsubPanel = bridge.onPanelChanged((panel) => {
     activePanel.value = panel
   })
-  unsubTitle = bridge.onTitleChanged((title) => {
-    installLabel.value = title || 'ComfyUI'
-  })
-  unsubSourceCategory = bridge.onSourceCategoryChanged((category) => {
-    sourceCategory.value = category
-  })
-  unsubTheme = bridge.onThemeChanged(({ bg, text }) => {
-    themeBg.value = bg
-    themeText.value = text
-  })
-  unsubFullscreen = bridge.onFullscreenChanged((fullscreen) => {
-    isFullscreen.value = fullscreen
-  })
-  unsubFirstUseMode = bridge.onFirstUseModeChanged((mode) => {
-    firstUseMode.value = mode
-  })
   window.addEventListener('blur', handleWindowBlur)
   window.addEventListener('pointermove', handlePointerMove)
   document.documentElement.addEventListener('pointerleave', handlePointerLeave)
-  // Initial state — assume hover is inert until the user actually
-  // moves the mouse over the title bar. This matches the post-blur
-  // behaviour: no hover styling without a fresh pointer position.
+  // Assume hover is inert until the user actually moves the mouse over
+  // the title bar — matches the post-blur behaviour.
   isHoverActive.value = false
   bridge.ready()
 })
 
 onUnmounted(() => {
   unsubPanel?.()
-  unsubTitle?.()
-  unsubSourceCategory?.()
-  unsubTheme?.()
-  unsubFullscreen?.()
-  unsubFirstUseMode?.()
   window.removeEventListener('blur', handleWindowBlur)
   window.removeEventListener('pointermove', handlePointerMove)
   document.documentElement.removeEventListener('pointerleave', handlePointerLeave)
