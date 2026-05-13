@@ -139,7 +139,7 @@ const POPUP_SEPARATOR_HEIGHT = 9
 const POPUP_VPADDING = 8 // 4px top + 4px bottom on the <ul>
 const POPUP_VBORDER = 2 // 1px top + 1px bottom from the .popup card
 
-function computePopupHeight(items: readonly TitlePopupMenuItem[]): number {
+export function computePopupHeight(items: readonly TitlePopupMenuItem[]): number {
   const content = items.reduce(
     (sum, item) => sum + (item.kind === 'separator' ? POPUP_SEPARATOR_HEIGHT : POPUP_ITEM_HEIGHT),
     0,
