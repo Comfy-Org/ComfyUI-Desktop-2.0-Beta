@@ -41,8 +41,8 @@ import {
   pauseModelDownload,
   registerDownloadIpc,
   resumeModelDownload,
-  startAssetDownload,
 } from './lib/comfyDownloadManager'
+import { registerAssetDownloadHandlers } from './lib/ipc/registerAssetDownloadHandlers'
 import { get as getInstallation, installationEvents } from './installations'
 import { getModelDownloadContentScript } from './lib/comfyContentScript'
 import { shouldOpenInPopup } from './lib/allowedPopups'
@@ -3570,15 +3570,6 @@ ipcMain.handle('transfer-host-bounds-to-install', (event, installationId: string
   return false
 })
 
-function resolveOutputDir(inst: InstallationRecord): string | null {
-  if ((inst.autoDownloadOutputs as boolean | undefined) === false) return null
-  if ((inst.useSharedOutputDir as boolean | undefined) !== false) {
-    return (settings.get('outputDir') as string | undefined) || settings.defaults.outputDir
-  }
-  const custom = inst.outputDir as string | undefined
-  return custom && custom.trim() !== '' ? custom : (settings.get('outputDir') as string | undefined) || settings.defaults.outputDir
-}
-
 function findInstallationIdForWindow(win: BrowserWindow): string | undefined {
   for (const entry of comfyWindows.values()) {
     if (entry.window !== win) continue
@@ -3588,23 +3579,6 @@ function findInstallationIdForWindow(win: BrowserWindow): string | undefined {
     return entry.installationId ?? undefined
   }
   return undefined
-}
-
-function registerAssetDownloadIpc(): void {
-  ipcMain.handle(
-    'desktop2-download-asset',
-    async (event, { url, filename, authToken }: { url: string; filename: string; authToken?: string }) => {
-      const win = BrowserWindow.fromWebContents(event.sender)
-      if (!win) return false
-      const installationId = findInstallationIdForWindow(win)
-      if (!installationId) return false
-      const inst = await getInstallation(installationId)
-      if (!inst) return false
-      const outputDir = resolveOutputDir(inst)
-      if (!outputDir) return false
-      return startAssetDownload(win, url, filename, outputDir, authToken, event.sender)
-    },
-  )
 }
 
 if (app.isPackaged && !app.requestSingleInstanceLock()) {
@@ -3653,7 +3627,7 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
     })
     registerSystemModalIpc()
     registerDownloadIpc()
-    registerAssetDownloadIpc()
+    registerAssetDownloadHandlers({ findInstallationIdForWindow })
     cleanupTempDownloads()
     ipc.register({
       onLaunch,
