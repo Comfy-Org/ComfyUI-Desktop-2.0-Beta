@@ -236,6 +236,7 @@ Recommended execution order across follow-up threads:
 3. **Thread C — P0.5 (registry)** ✅ (landed in this PR; `index.ts` 3720 → 3125 lines).
 4. **Thread D — P0.3 + P0.6 + P0.7 + P0.9** ✅ (landed in this PR; `index.ts` 3125 → ~905 lines). The host-window construction split. Final structure: `popups/titlePopup.ts` (~890), `host/createHostWindow.ts` (~660), `host/attach.ts` (~340), `host/detach.ts` (~290), `host/panelView.ts` (~195). Lifecycle-state maps (`relaunchStates`, `comfyFailRetryTimerCancels`) and `computeInstallUpdateAvailable` still live in `index.ts` and reach the new modules via `setAttachFactories(...)` / `setHostWindowFactories(...)` / `setDetachFactories(...)` — moving them out is a P3/P4 follow-up, not blocking the seamless-transition feature.
 5. **Thread E — P1 (popup primitive)** ✅ (landed in this PR; popup modules shrank by 340 lines net while gaining a 198-line shared primitive). All three popup entry records now collapse to `{ view: EmbeddedPopupView, ...module-specific state }`.
-6. **Thread F — P3 + P4**. Renderer file splits and the comment trim sweep.
+6. **Thread G — E2E hardening**. Grow the fast suite to cover the four UI surfaces that have repeatedly hit silent regressions during this PR (settings, dropdowns, downloads shelf, both update pills). Land *before* Thread F so renderer splits have regression coverage. See [`docs/E2E_HARDENING_PLAN.md`](./E2E_HARDENING_PLAN.md) for the full breakdown — 5 sub-phases, ~22 new tests, single shared `__e2e:*` IPC hook module behind a `process.env['E2E']` gate.
+7. **Thread F — P3 + P4**. Renderer file splits and the comment trim sweep.
 
 After Thread D, `index.ts` should be small enough that the seamless-transition feature is straightforward to start.
