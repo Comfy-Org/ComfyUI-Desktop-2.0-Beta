@@ -33,11 +33,11 @@ export interface KnownSettings {
   chineseMirrorsPrompted?: boolean
   telemetryEnabled?: boolean
   /**
-   * Phase 3 §17 Step 4 — set to `true` once the user has finished the
-   * first-use takeover (T&C + telemetry consent + locale-conditional
-   * China mirror prompt + Cloud/Local pick). Persists across launches
-   * so the takeover only shows on the very first run. Mid-flow cancel
-   * does NOT flip this — the takeover replays from step 1 next launch.
+   * `true` once the user has finished the first-use takeover (T&C +
+   * telemetry consent + locale-conditional China mirror prompt +
+   * Cloud/Local pick). Persists across launches so the takeover only
+   * shows on the very first run. Mid-flow cancel does NOT flip this —
+   * the takeover replays from step 1 next launch.
    */
   firstUseCompleted?: boolean
   oemManagedModelDirs?: string[]
@@ -194,11 +194,9 @@ function load(): Settings {
   const result: Settings = { ...defaults, ...(parsed || {}) }
   let changed = false
 
-  // Drop legacy pin-related keys. `primaryInstallId` (the primary-install
-  // system) was retired in Phase 3 of the unified-window work;
-  // `pinnedInstallIds` (the dashboard pin/unpin affordance) was retired in
-  // the post-Phase 3 dashboard cleanup. Both are purely advisory so a
-  // drop-on-first-load is sufficient.
+  // Drop legacy pin-related keys (`primaryInstallId`, `pinnedInstallIds`)
+  // that no longer back any UI affordance. Purely advisory, so dropping
+  // them on first load is sufficient.
   for (const key of ['primaryInstallId', 'pinnedInstallIds']) {
     if (Object.prototype.hasOwnProperty.call(result, key)) {
       delete result[key]
@@ -211,7 +209,7 @@ function load(): Settings {
   // close path will come back), but until then a stale `'tray'` value
   // would silently take effect the moment docking is restored. Dropping
   // only the `'tray'` value preserves an explicit `'quit'` choice the
-  // user may have set. See post-unification-code-review.md F14.
+  // user may have set.
   if (result.onAppClose === 'tray') {
     delete (result as Record<string, unknown>).onAppClose
     changed = true

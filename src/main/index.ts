@@ -1014,7 +1014,7 @@ interface CreateHostWindowOpts {
    * Initial title-bar pill label. Install-backed wrappers pass the
    * install name; chooser hosts pass `'Desktop 2.0 Beta'`. Stored on
    * `entry.titleBarText` so the unified `title-bar-ready` handshake
-   * can re-push it without a per-mode callback (W-3b).
+   * can re-push it without a per-mode callback.
    */
   initialTitleBarText: string
   /**
@@ -1605,8 +1605,7 @@ function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts): boolea
 
   // Seed entry install state. The secondary index is the source of
   // truth for `getEntryByInstallationId(id)` — keep it in lockstep
-  // with `entry.installationId` (W-3c's detach symmetrically clears
-  // both).
+  // with `entry.installationId` (detach symmetrically clears both).
   entry.installationId = installationId
   entry.comfyUrl = comfyUrl
   entry.titleBarText = installation.name
@@ -1634,9 +1633,9 @@ function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts): boolea
   refreshOsWindowTitle()
 
   // Push install-derived initial state — the title bar may already
-  // be mounted (re-attach case post-W-3c). The shared title-bar-ready
-  // handshake re-pushes from entry.* on a fresh mount, but the eager
-  // push covers the in-place transform path.
+  // be mounted (re-attach case). The shared title-bar-ready handshake
+  // re-pushes from entry.* on a fresh mount, but the eager push covers
+  // the in-place transform path.
   if (!titleBarView.webContents.isDestroyed()) {
     titleBarView.webContents.send('comfy-titlebar:title-changed', entry.titleBarText)
     titleBarView.webContents.send('comfy-titlebar:source-category-changed', entry.sourceCategory)
@@ -1877,19 +1876,16 @@ function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts): boolea
       // fires when the renderer side has no overlay mounted (e.g.
       // window-close consult returns `cleared: true` immediately
       // because the panel state is empty). Without it, in-flight
-      // operations continued running orphaned in main after window
-      // teardown — the rollback hole called out in
-      // post-unification-code-review.md F7.
+      // operations continued running orphaned in main after window teardown.
       const inFlight = _operationAborts.get(id)
       if (inFlight) {
         inFlight.abort()
         _operationAborts.delete(id)
       }
       // Detach the relaunch will-navigate blocker before clearing the
-      // map slot — without `comfyContents.off(...)`, a re-attach
-      // (W-3c → W-4) would inherit a still-active blocker that
-      // preventDefaults every navigation until the comfyContents
-      // itself is destroyed. See post-unification-code-review.md F8.
+      // map slot — without `comfyContents.off(...)`, a re-attach would
+      // inherit a still-active blocker that preventDefaults every
+      // navigation until the comfyContents itself is destroyed.
       const relaunch = relaunchStates.get(id)
       if (relaunch && !comfyContents.isDestroyed()) {
         comfyContents.off('will-navigate', relaunch.navBlocker)
