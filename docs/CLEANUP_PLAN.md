@@ -46,7 +46,7 @@ The lifecycle suite (`@lifecycle`, ~10 min/test) costs network + 500MB download 
 
 These extractions are ordered for safety: each one is self-contained at the boundary so the diff is mechanical.
 
-### P0.1 — `src/main/popups/titleTooltip.ts`  (~400 lines)
+### P0.1 — `src/main/popups/titleTooltip.ts`  (~400 lines) ✅
 Move from `index.ts`:
 - `TitleTooltipConfig`, `TitleTooltipPopupEntry` interfaces
 - `TOOLTIP_POPUP_INITIAL_WIDTH`, `TOOLTIP_POPUP_INITIAL_HEIGHT`, `TOOLTIP_POPUP_SHADOW_GUTTER`, `TOOLTIP_VERTICAL_GAP`, `TOOLTIP_RENDER_ACK_TIMEOUT_MS` constants
@@ -58,7 +58,7 @@ Exports: `openTitleTooltipPopup`, `hideTitleTooltipPopup`, `titleTooltipPopupsBy
 
 This is the lowest-risk subsystem to extract because nothing else in `index.ts` mutates its state — only `openTitlePopup` reads `titleTooltipPopupsByParent` to dismiss the tooltip when a menu opens.
 
-### P0.2 — `src/main/popups/systemModal.ts`  (~270 lines)
+### P0.2 — `src/main/popups/systemModal.ts`  (~270 lines) ✅
 Move:
 - `SystemModalSpec`, `SystemModalCallback`, `SystemModalEntry`, `OpenSystemModalOpts`
 - Maps: `systemModalsByParent`, `systemModalsByWebContents`
@@ -77,7 +77,7 @@ The biggest popup. Move:
 
 ⚠ **Friction**: this one reaches into the host registry (`comfyWindows.get`, `_runningSessions`) and triggers cross-cutting actions (`triggerOpenFeedback`, `setActivePanel`, `returnToDashboard`). Block on **P0.5** — the registry split — so the popup can take a single `host` facade as a constructor arg instead of importing 8 things from `index.ts`.
 
-### P0.4 — `src/main/lib/processErrorHandlers.ts`  (~95 lines)
+### P0.4 — `src/main/lib/processErrorHandlers.ts`  (~95 lines) ✅
 Move: `serializeUnknownError`, `forwardDatadogError`, `registerProcessErrorHandlers`, the `processErrorHandlersRegistered` flag.
 
 Exports: `registerProcessErrorHandlers`, `forwardDatadogError`.
@@ -92,6 +92,24 @@ The spine of the seamless-transition feature. Move:
 
 Note: `openOrFocusChooserHostWindow` calls `openChooserHostWindow` which lives in the host-construction code — so either the registry imports the constructor lazily or `openChooserHostWindow` becomes injected. Prefer **late-binding**: registry exposes `setHostFactories({ createChooser, createInstall })` and `index.ts` calls it at startup.
 
+#### Thread C testing notes
+
+Regression coverage already in the fast suite (`pnpm exec playwright test --project=windows`):
+- `chooser body renders on cold start` — covers `comfyWindows` registration + `computeBodyMode(entry) === 'chooser'`.
+- `title bar shows install-less pill` — covers `findEntryByTitleBarSender` resolving title-bar webContents back through `comfyWindows`.
+- `clicking New Install tile opens the new-install takeover` — covers `setActivePanel` reading from `comfyWindows.get(windowKey)`.
+- `activate hook focuses the existing chooser host instead of spawning a duplicate` — covers `openOrFocusAnyHostWindow` → `findPreferredInstallHostWindow` (returns null) → `findPreferredChooserHostWindow` → `findPreferredHostByVisibility` dedup. **Catches late-binding regressions where `setHostFactories` fires too late or returns a stale `comfyWindows` reference.**
+- `title popup opens, renders menu items, and closes via bridge` — covers `findEntryByTitleBarSender` + `comfyWindows.get` resolving the parent for `openTitlePopup`.
+
+Add as part of Thread C (after the registry module exists, the helpers are pure and trivially mockable):
+- Vitest unit suite for `nextWindowKey` (sequential unique keys), `computeBodyMode(mockEntry)` (chooser vs install vs settings vs lifecycle modes), the `pendingAttachClaims` set/get/delete round-trip, and `findPreferredHostByVisibility(predicate)` with mock entries (visible-beats-minimised, insertion order within a bucket).
+
+Not testable without a real install (only `lifecycle` suite covers these — run once at end of Thread C):
+- `pendingAttachClaims` claim-then-consume cycle when the chooser pivots to an install host.
+- `lastFocusedInstallationId` MRU tracking across multiple install hosts.
+- `installationIdToWindowKey` secondary-index round-trip via `getEntryByInstallationId`.
+- `findPreferredInstallHostWindow`'s 4-tier visible/MRU priority.
+
 ### P0.6 — `src/main/host/createHostWindow.ts`  (~290 lines)
 Move `CreateHostWindowOpts`, `CreateHostWindowResult`, `injectMacPasskeyWarning`, `createHostWindow`, `expectedPartitionFor`, `buildComfyView`, `rebuildComfyViewIfNeeded`, plus `applyChooserHostTheme`, `applyChooserHostThemeToAll`, `getChooserHostTheme`, `openChooserHostWindow`.
 
@@ -100,7 +118,7 @@ Move `AttachInstallOpts`, `attachInstall` (~370 lines), `_detachInstallImpl` (~5
 
 These are the actual pivot points for seamless transitions. After the split, the seamless-transition feature can compose them as `detachInstall(entry); attachInstall(entry, newOpts)` without rebuilding the BrowserWindow.
 
-### P0.8 — `src/main/lib/ipc/registerAssetDownloadHandlers.ts`
+### P0.8 — `src/main/lib/ipc/registerAssetDownloadHandlers.ts` ✅
 Move `registerAssetDownloadIpc`. Renames to `registerAssetDownloadHandlers` for consistency with the existing `register*Handlers.ts` files in `lib/ipc/`.
 
 ### P0.9 — Panel/body-mode glue  (~100 lines)
@@ -193,8 +211,8 @@ After the file splits, do one pass over each new module to apply AGENTS.md rules
 
 Recommended execution order across follow-up threads:
 
-1. **Thread A — Test salvage** (already landed in this PR).
-2. **Thread B — P0.1 + P0.2 + P0.4 + P0.8**. Mechanical extractions, no behaviour change. One PR.
+1. **Thread A — Test salvage** ✅ (landed in this PR).
+2. **Thread B — P0.1 + P0.2 + P0.4 + P0.8** ✅ (landed in this PR; `index.ts` 4533 → 3720 lines).
 3. **Thread C — P0.5 (registry)**. Sets up the seam for P0.3.
 4. **Thread D — P0.3 + P0.6 + P0.7 + P0.9**. The host-window construction split.
 5. **Thread E — P1 (popup primitive)**. After all 3 popups live in their own files.
