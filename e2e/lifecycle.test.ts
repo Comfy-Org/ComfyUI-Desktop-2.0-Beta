@@ -251,12 +251,39 @@ test('ComfyUI window has dark background and split-view architecture @lifecycle'
 // Stop
 // ---------------------------------------------------------------------------
 
-test('stops running ComfyUI via chooser tile close button @lifecycle', async () => {
-  // The tile gains a `.chooser-tile-cta-close` button while running. Clicking
-  // it routes through main's closeComfyWindow IPC, which tears the process
-  // down via the window's close handler.
-  await ctx.panel.waitForVisible('.chooser-tile-cta-close', { timeout: 30_000 })
-  expect(await ctx.panel.click('.chooser-tile-cta-close')).toBe(true)
+test('stops running ComfyUI by closing its host window @lifecycle', async () => {
+  // After launch, the chooser host transforms in place to host the install
+  // (the original `panel.html` body is detached). Drive the stop through the
+  // BrowserWindow `close()` call instead — the window's close handler tears
+  // the comfy process down via the same path the chooser-tile close button
+  // would use. Closing the last host window also quits the Electron app,
+  // which is why the subsequent poll treats an evaluate failure (app gone)
+  // as the terminal "stopped" state.
+  const closed = await ctx.app.evaluate(({ BrowserWindow, WebContentsView }) => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      const hasComfy = win.contentView.children.some((v) =>
+        v instanceof WebContentsView &&
+        /^http:\/\/(127\.0\.0\.1|localhost):/.test(v.webContents.getURL()),
+      )
+      if (hasComfy) {
+        win.close()
+        return true
+      }
+    }
+    return false
+  })
+  expect(closed, 'ComfyUI host window not found among open windows').toBe(true)
 
-  await expect.poll(comfyFrontendIsLoaded, { timeout: 60_000, intervals: [500] }).toBe(false)
+  await expect.poll(
+    async () => {
+      try {
+        return await comfyFrontendIsLoaded()
+      } catch {
+        // App was torn down by the close — that's a stronger "stopped" signal
+        // than the comfy webContents going away on its own.
+        return false
+      }
+    },
+    { timeout: 60_000, intervals: [500] },
+  ).toBe(false)
 })
