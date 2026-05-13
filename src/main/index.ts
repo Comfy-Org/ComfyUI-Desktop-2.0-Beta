@@ -1,4 +1,4 @@
-import { app, Menu, ipcMain, dialog, net, WebContentsView } from 'electron'
+import { app, Menu, ipcMain, net, WebContentsView } from 'electron'
 import type { BrowserWindow } from 'electron'
 // Type-only while docking-to-tray is disabled.
 import type { Tray } from 'electron'
@@ -15,7 +15,7 @@ import { installAppMenu } from './menu'
 import * as i18n from './lib/i18n'
 import { migrateXdgPaths } from './lib/paths'
 import { saveWindowBounds } from './lib/windowState'
-import { forwardDatadogError, registerProcessErrorHandlers } from './lib/processErrorHandlers'
+import { registerProcessErrorHandlers } from './lib/processErrorHandlers'
 import {
   registerTitleTooltipIpc,
 } from './popups/titleTooltip'
@@ -28,7 +28,6 @@ import { waitForPort, COMFY_BOOT_TIMEOUT_MS } from './lib/process'
 import { isQuitInProgress, setQuitReason } from './lib/quit-state'
 import type { InstallationRecord } from './installations'
 import {
-  attachSessionDownloadHandler,
   cleanupTempDownloads,
   downloadEvents,
   getDownloadsTrayState,
@@ -36,40 +35,42 @@ import {
 } from './lib/comfyDownloadManager'
 import { registerAssetDownloadHandlers } from './lib/ipc/registerAssetDownloadHandlers'
 import { get as getInstallation, installationEvents } from './installations'
-import { getModelDownloadContentScript } from './lib/comfyContentScript'
 import { showModelFolderRelaunchPage } from './lib/relaunchPage'
 import { COMFY_BG, SPLASH_DARK, TITLEBAR_BG, type SplashTheme } from './lib/theme'
 import { TITLEBAR_HEIGHT, comfyTitleBarOverlay } from './lib/titleBarOverlay'
-import { resolveTheme, sourceMap, _registerExtraBroadcastTarget, _unregisterExtraBroadcastTarget, _broadcastToRenderer, _operationAborts } from './lib/ipc/shared'
+import { resolveTheme, sourceMap, _registerExtraBroadcastTarget, _broadcastToRenderer } from './lib/ipc/shared'
 import * as mainTelemetry from './lib/telemetry'
 import { getDeviceId } from './lib/deviceId'
 
 import {
   comfyWindows,
   computeBodyMode,
-  dropInstallationIndex,
   findEntryByTitleBarSender,
   getEntryByInstallationId,
-  indexInstallationId,
   openOrFocusAnyHostWindow,
   openOrFocusChooserHostWindow,
   pendingAttachClaims,
   setHostFactories,
-  setLastFocusedInstallationId,
   VALID_PANELS,
 } from './host/registry'
 import type { BodyMode, ComfyPanelKey, ComfyWindowEntry } from './host/registry'
 import {
-  applyChooserHostTheme,
   applyChooserHostThemeToAll,
-  CHOOSER_HOST_TITLE_TEXT,
-  CHOOSER_HOST_WINDOW_TITLE,
   createHostWindow,
   expectedPartitionFor,
   openChooserHostWindow,
   rebuildComfyViewIfNeeded,
   setHostWindowFactories,
 } from './host/createHostWindow'
+import { attachInstall, setAttachFactories } from './host/attach'
+import {
+  _detachInstallImpl,
+  confirmAndCloseAllHostWindows,
+  consultPanelRendererClose,
+  preClearedClose,
+  returnToDashboard,
+  setDetachFactories,
+} from './host/detach'
 
 export type { ComfyPanelKey } from './host/registry'
 
@@ -154,209 +155,6 @@ function quitApp(): void {
   app.quit()
 }
 
-/**
- * Pre-cleared close set. Marks a window as having already passed
- * the panel renderer's tier-aware consult so the subsequent `close`
- * event handler can skip the consult and tear down immediately.
- * Used by `confirmAndCloseAllHostWindows` (the global confirm
- * dialog already lists in-progress operations / sessions /
- * downloads, so the per-window prompt would be redundant noise
- * after the user confirmed the bulk close).
- */
-const preClearedClose = new WeakSet<BrowserWindow>()
-
-/**
- * Main consults the panel renderer before tearing down a host
- * window so a Tier 2 progress / Tier 3 takeover overlay can
- * prompt the user to confirm cancellation via the standardised
- * cancel-prompt copy. Returns true when the renderer cleared the
- * close (no overlay open, or the user confirmed cancellation),
- * false when the renderer aborted (user dismissed the prompt).
- *
- * Falls back to "cleared" when the panelView is missing (no panel
- * has been mounted yet — nothing to lose), the webContents is
- * destroyed (already torn down), the renderer doesn't ack receipt
- * of the request within 2s (hung renderer), or the underlying
- * webContents goes away (render-process-gone / destroyed).
- *
- * Important: once the renderer acks receipt we wait INDEFINITELY for
- * the actual response. The renderer might be showing a confirmation
- * modal that the user takes their time on; an extra fixed timeout
- * here would force-close the window out from under that prompt
- * (which was the bug observed when a sub-5s prompt-response window
- * triggered an unconfirmed close).
- */
-async function consultPanelRendererClose(panelView: WebContentsView | null | undefined): Promise<boolean> {
-  if (!panelView || panelView.webContents.isDestroyed()) return true
-  return new Promise<boolean>((resolve) => {
-    const requestId = `close-${Date.now()}-${Math.random().toString(36).slice(2)}`
-    let settled = false
-    let acked = false
-    const cleanup = (): void => {
-      ipcMain.off('comfy-window:request-close-ack', onAck)
-      ipcMain.off('comfy-window:request-close-response', onResponse)
-      if (!panelView.webContents.isDestroyed()) {
-        panelView.webContents.off('render-process-gone', onCrash)
-        panelView.webContents.off('destroyed', onCrash)
-      }
-    }
-    const onAck = (
-      event: Electron.IpcMainEvent,
-      payload: { requestId?: string } | undefined,
-    ): void => {
-      if (event.sender !== panelView.webContents) return
-      if (payload?.requestId !== requestId) return
-      acked = true
-    }
-    const onResponse = (
-      event: Electron.IpcMainEvent,
-      payload: { requestId?: string; cleared?: boolean } | undefined,
-    ): void => {
-      if (event.sender !== panelView.webContents) return
-      if (payload?.requestId !== requestId) return
-      if (settled) return
-      settled = true
-      cleanup()
-      resolve(!!payload?.cleared)
-    }
-    const onCrash = (): void => {
-      if (settled) return
-      settled = true
-      cleanup()
-      resolve(true)
-    }
-    ipcMain.on('comfy-window:request-close-ack', onAck)
-    ipcMain.on('comfy-window:request-close-response', onResponse)
-    panelView.webContents.on('render-process-gone', onCrash)
-    panelView.webContents.on('destroyed', onCrash)
-    try {
-      panelView.webContents.send('comfy-window:request-close', { requestId })
-    } catch {
-      settled = true
-      cleanup()
-      resolve(true)
-      return
-    }
-    // Hung-renderer safety: only fires if we never got the ack. Once
-    // the renderer acks receipt we trust it to either reply or have
-    // its webContents torn down (render-process-gone covers that).
-    setTimeout(() => {
-      if (settled || acked) return
-      settled = true
-      cleanup()
-      resolve(true)
-    }, 2000)
-  })
-}
-
-/**
- * Close every host window (install-backed and chooser hosts alike) but
- * leave the app / tray alive. Bound to the File menu's "Close All
- * Windows" entry. Each window's existing `close` handler runs the
- * full teardown (`stopRunning` + webContents close + window.destroy),
- * so we just dispatch `close()` and let those handlers do the work
- * — the handlers also consult the panel renderer unless the window
- * is already in `preClearedClose`. Snapshot the entry list
- * first so the iteration isn't affected by `closed` callbacks that
- * delete from the `comfyWindows` map mid-loop.
- */
-function closeAllHostWindows(): void {
-  const entries = Array.from(comfyWindows.values())
-  for (const entry of entries) {
-    if (!entry.window.isDestroyed()) entry.window.close()
-  }
-}
-
-/**
- * File menu's "Return to Dashboard" entry. Closes the install-backed
- * host window and opens a chooser host window at the same bounds.
- *
- * In-place flip via `entry.detachInstall()` is currently disabled
- * — too many edge-case bugs around the in-place swap. The close+open
- * swap pays a visible flicker but exercises the same close-handler
- * teardown that production has used since main, which is the
- * codepath we trust right now. See
- * docs/window-mode-unification-revert.md.
- */
-async function returnToDashboard(parentEntryId: number): Promise<void> {
-  const entry = comfyWindows.get(parentEntryId)
-  if (!entry || entry.installationId === null || entry.window.isDestroyed()) return
-  const cleared = await consultPanelRendererClose(entry.panelView)
-  if (!cleared) return
-  if (entry.window.isDestroyed()) return
-  preClearedClose.add(entry.window)
-  const bounds = entry.window.getBounds()
-  const wasMaximized = entry.window.isMaximized()
-  const chooserWindow = openChooserHostWindow()
-  if (!chooserWindow.isDestroyed()) {
-    if (wasMaximized) {
-      chooserWindow.maximize()
-    } else {
-      chooserWindow.setBounds(bounds)
-    }
-  }
-  entry.window.close()
-}
-
-/**
- * Confirm a `closeAllHostWindows()` dispatch when more than one host
- * window is open. The dialog lists the open windows by title (so the
- * user can see what's about to close) and any active operations that
- * will be cancelled — running ComfyUI sessions, in-progress
- * installs / updates, active model downloads — pulled from the same
- * `getActiveDetails()` helper. With one or zero windows the close
- * happens straight through with no prompt.
- */
-async function confirmAndCloseAllHostWindows(parentWindow: BrowserWindow | null): Promise<void> {
-  const entries = Array.from(comfyWindows.values()).filter((e) => !e.window.isDestroyed())
-  if (entries.length <= 1) {
-    closeAllHostWindows()
-    return
-  }
-  const titles = entries.map((e) => e.window.getTitle() || 'Untitled window')
-  const detailLines: string[] = ['Open windows:', ...titles.map((t) => `  • ${t}`)]
-  if (ipc.hasActiveOperations()) {
-    try {
-      const items = await ipc.getActiveDetails()
-      const sessions = items.filter((i) => i.type === 'session').map((i) => i.name)
-      const operations = items.filter((i) => i.type === 'operation').map((i) => i.name)
-      const downloads = items.filter((i) => i.type === 'download').map((i) => i.name)
-      if (sessions.length > 0) {
-        detailLines.push('', 'Running ComfyUI:', ...sessions.map((n) => `  • ${n}`))
-      }
-      if (operations.length > 0) {
-        detailLines.push('', 'In-progress operations:', ...operations.map((n) => `  • ${n}`))
-      }
-      if (downloads.length > 0) {
-        detailLines.push('', 'Active downloads:', ...downloads.map((n) => `  • ${n}`))
-      }
-    } catch {
-      // If active-detail collection ever throws, fall back to just the
-      // window list — the user still sees what's about to close.
-    }
-  }
-  const opts: Electron.MessageBoxOptions = {
-    type: 'question',
-    buttons: ['Close All', 'Cancel'],
-    defaultId: 1,
-    cancelId: 1,
-    title: 'Close All Windows',
-    message: `Close ${entries.length} open windows?`,
-    detail: detailLines.join('\n'),
-  }
-  const result = parentWindow && !parentWindow.isDestroyed()
-    ? await dialog.showMessageBox(parentWindow, opts)
-    : await dialog.showMessageBox(opts)
-  if (result.response === 0) {
-    // The global dialog already lists in-progress ops / sessions /
-    // downloads, so the per-window tier-aware prompt would be
-    // redundant after the user confirmed the bulk close. Pre-clear
-    // every entry so each window's `close` handler skips its own
-    // consult and tears down immediately.
-    for (const entry of entries) preClearedClose.add(entry.window)
-    closeAllHostWindows()
-  }
-}
 
 function onComfyExited({ installationId }: { installationId?: string } = {}): void {
   if (!installationId) return
@@ -633,459 +431,6 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
       // Session registry handles state cleanup
     })
   }
-}
-
-/**
- * Bind a host-window entry to an installation. Layered on top of
- * `createHostWindow()` (the mode-agnostic skeleton), this is the
- * install-only wiring:
- *
- *   - mutates `entry.installationId` + `entry.comfyUrl` +
- *     `entry.titleBarText` + `entry.sourceCategory`
- *   - registers the entry into the `installationIdToWindowKey`
- *     secondary index so `getEntryByInstallationId(id)` resolves
- *   - subscribes to `installationEvents` for live rename / source
- *     mutation push to the title bar
- *   - attaches the per-install download manager session handler
- *   - wires the comfyContents listeners that depend on the install
- *     (theme report, page title, fail-retry, render-process-gone,
- *     before-input keystrokes for F5/Ctrl+R reload, dom-ready
- *     theme-observer + content-script injection)
- *   - stashes `entry._installCleanup` — the symmetric undo invoked
- *     by the close handler before view teardown AND by
- *     `detachInstall()` when the host flips back to install-less
- *     mode in place
- *   - calls `comfyContents.loadURL(comfyUrl)` to start the load
- *
- * Calling on an already-attached entry throws — callers must detach
- * first or construct a fresh window. The cleanup is idempotent
- * (calling it twice is a no-op the second time) so the close
- * handler is free to invoke it without checking detach state.
- */
-interface AttachInstallOpts {
-  installation: InstallationRecord
-  comfyUrl: string
-  /**
-   * `true` for locally-launched installs (no `url` arg); `false` for
-   * remote / cloud installs. Drives the `__comfyDesktop2Remote` flag
-   * the content script reads at top-of-page so remote-only behaviours
-   * (e.g. cloud-storage prompts) gate correctly.
-   */
-  isLocal: boolean
-}
-
-function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts): boolean {
-  if (entry.installationId !== null) {
-    // Defensive — every current call site gates on
-    // `entry.installationId === null`, but a future caller that
-    // forgets the guard would otherwise take down the entire
-    // launch flow with an uncaught exception in main. Surface
-    // the violation to telemetry and let the caller fall back
-    // (the install-backed wrapper destroys the just-created
-    // host; the claim path skips the in-place attach and the
-    // wrapper recovers).
-    const message =
-      `attachInstall: entry windowKey=${entry.windowKey} is already attached to ` +
-      `installationId=${entry.installationId}; detach first`
-    console.error(message)
-    forwardDatadogError({
-      source: 'attach-install-already-attached',
-      message,
-      level: 'error',
-      context: {
-        origin: 'main-process',
-        windowKey: String(entry.windowKey),
-        existingInstallationId: entry.installationId,
-        attemptedInstallationId: opts.installation.id,
-      },
-    })
-    return false
-  }
-  const { installation, comfyUrl, isLocal } = opts
-  const installationId = installation.id
-  const comfyContents = entry.comfyView.webContents
-  const comfyWindow = entry.window
-  const titleBarView = entry.titleBarView
-
-  // Seed entry install state. The secondary index is the source of
-  // truth for `getEntryByInstallationId(id)` — keep it in lockstep
-  // with `entry.installationId` (detach symmetrically clears both).
-  entry.installationId = installationId
-  entry.comfyUrl = comfyUrl
-  entry.titleBarText = installation.name
-  entry.sourceCategory = sourceMap[installation.sourceId]?.category ?? null
-  indexInstallationId(installationId, entry.windowKey)
-
-  // Seed the MRU tracker if this in-place attach happens on the
-  // already-focused host: no fresh OS `'focus'` event would fire to
-  // catch it otherwise, leaving the tracker pointing at a stale (or
-  // null) install on the next dock-icon click.
-  if (comfyWindow.isFocused()) {
-    setLastFocusedInstallationId(installationId)
-  }
-
-  // OS-level window title is rebuilt whenever the page title or the
-  // install name changes. Closures over the install lifetime — reset
-  // by `_installCleanup` below.
-  let currentInstallName = installation.name
-  let currentPageTitle = ''
-  const refreshOsWindowTitle = (): void => {
-    if (comfyWindow.isDestroyed()) return
-    const suffix = currentPageTitle ? ` — ${currentPageTitle}` : ''
-    comfyWindow.setTitle(`${currentInstallName}${suffix} — Desktop 2.0 v${APP_VERSION}`)
-  }
-  refreshOsWindowTitle()
-
-  // Push install-derived initial state — the title bar may already
-  // be mounted (re-attach case). The shared title-bar-ready handshake
-  // re-pushes from entry.* on a fresh mount, but the eager push covers
-  // the in-place transform path.
-  if (!titleBarView.webContents.isDestroyed()) {
-    titleBarView.webContents.send('comfy-titlebar:title-changed', entry.titleBarText)
-    titleBarView.webContents.send('comfy-titlebar:source-category-changed', entry.sourceCategory)
-    void computeInstallUpdateAvailable(installationId).then((state) => {
-      if (titleBarView.webContents.isDestroyed()) return
-      titleBarView.webContents.send('comfy-titlebar:install-update-changed', state)
-    })
-  }
-
-  // Reflect rename / source change in both the comfy tab and the
-  // OS-level window title as the install record mutates. Also
-  // recompute the install-update pill state (the install's source
-  // may have flipped its statusTag between releases as the
-  // release-cache resolves in the background).
-  const onInstallationUpdated = (updated: InstallationRecord): void => {
-    if (updated.id !== entry.installationId) return
-    const nextTabText = updated.name
-    if (nextTabText !== entry.titleBarText) {
-      entry.titleBarText = nextTabText
-      if (!titleBarView.webContents.isDestroyed()) {
-        titleBarView.webContents.send('comfy-titlebar:title-changed', nextTabText)
-      }
-    }
-    const nextCategory = sourceMap[updated.sourceId]?.category ?? null
-    if (nextCategory !== entry.sourceCategory) {
-      entry.sourceCategory = nextCategory
-      if (!titleBarView.webContents.isDestroyed()) {
-        titleBarView.webContents.send('comfy-titlebar:source-category-changed', nextCategory)
-      }
-    }
-    if (updated.name !== currentInstallName) {
-      currentInstallName = updated.name
-      refreshOsWindowTitle()
-    }
-    void computeInstallUpdateAvailable(updated.id).then((state) => {
-      if (titleBarView.webContents.isDestroyed()) return
-      titleBarView.webContents.send('comfy-titlebar:install-update-changed', state)
-    })
-  }
-  installationEvents.on('updated', onInstallationUpdated)
-
-  // Sync the title bar and overlay colors with the ComfyUI frontend's theme.
-  const applyComfyTheme = (bg: string, text: string): void => {
-    if (comfyWindow.isDestroyed()) return
-    const theme = { bg, text }
-    entry.lastTheme = theme
-    if (!titleBarView.webContents.isDestroyed()) {
-      titleBarView.webContents.send('comfy-titlebar:theme-changed', theme)
-    }
-    if (process.platform !== 'darwin') {
-      try { comfyWindow.setTitleBarOverlay({ color: bg, symbolColor: text }) } catch {}
-    }
-  }
-  const onIpcMessage = (_event: Electron.IpcMainEvent, channel: string, ...args: unknown[]): void => {
-    if (channel === 'desktop2-theme-report') {
-      const { bg, text } = (args[0] || {}) as { bg?: string; text?: string }
-      if (bg) applyComfyTheme(bg, text || '#ddd')
-    }
-  }
-  comfyContents.on('ipc-message', onIpcMessage)
-
-  const onPageTitleUpdated = (e: Electron.Event, title: string): void => {
-    e.preventDefault()
-    currentPageTitle = title
-    refreshOsWindowTitle()
-  }
-  comfyContents.on('page-title-updated', onPageTitleUpdated)
-
-  const COMFY_THEME_OBSERVER_JS =
-    `(function(){` +
-      `let last='';` +
-      `function read(){` +
-        `const s=getComputedStyle(document.body);` +
-        `const bg=s.getPropertyValue('--comfy-menu-bg').trim();` +
-        `const text=s.getPropertyValue('--descrip-text').trim();` +
-        `const key=bg+'|'+text;` +
-        `if(key!==last&&bg){last=key;window.__comfyDesktop2?.reportTheme?.(bg,text)}` +
-      `}` +
-      `new MutationObserver(()=>setTimeout(read,50)).observe(document.documentElement,{attributes:true,attributeFilter:['class','data-theme','style']});` +
-      `read();` +
-    `})()`
-
-  const onDomReady = (): void => {
-    comfyContents.executeJavaScript(COMFY_THEME_OBSERVER_JS).catch(() => {})
-    const preamble = isLocal ? '' : 'window.__comfyDesktop2Remote = true;\n'
-    comfyContents
-      .executeJavaScript(preamble + getModelDownloadContentScript())
-      .catch(() => {})
-  }
-  comfyContents.on('dom-ready', onDomReady)
-
-  // F5 / Ctrl+R reload — gated on the entry having an install backing
-  // it (a detached host returns early so the dummy view can't reload
-  // a stale URL).
-  const currentComfyUrl = (): string => entry.comfyUrl || comfyUrl
-  const reloadComfy = (): void => {
-    if (comfyWindow.isDestroyed()) return
-    const id = entry.installationId
-    if (id === null) return
-    if (relaunchStates.has(id)) return
-    comfyContents.stop()
-    comfyContents.loadURL(currentComfyUrl())
-  }
-  const onBeforeInputEvent = (e: Electron.Event, input: Electron.Input): void => {
-    if (input.type !== 'keyDown') return
-    const mod = input.control || input.meta
-    if (mod && input.key.toLowerCase() === 'w') {
-      e.preventDefault()
-      return
-    }
-    if (input.key === 'F5' || (input.key.toLowerCase() === 'r' && mod)) {
-      e.preventDefault()
-      reloadComfy()
-      return
-    }
-    // Restore Ctrl/Cmd + =/+/-/0 zoom on the comfy WebContentsView. The default
-    // accelerators target BrowserWindow.webContents (empty since #414) and the
-    // app menu has no View > Zoom roles, so we wire it explicitly here. Step
-    // 0.5 mirrors Electron's standard zoomLevel granularity (~91% / 110% / ...).
-    // Exclude Alt to avoid AltGr / Ctrl+Alt collisions on non-US layouts.
-    //
-    // NOTE on view hot-swapping: this handler closes over `comfyContents`
-    // captured at attach time. Today, comfyView swaps happen only before
-    // attachInstall runs, so the listener always lives on the active view and
-    // `_installCleanup` removes it symmetrically. If we later hot-swap
-    // entry.comfyView mid-attach (e.g. to reuse a host window without tearing
-    // down install state), this binding goes stale and zoom shortcuts will
-    // silently stop working until the next attach. The Reset Zoom menu item
-    // re-reads parentEntry.comfyView at click time, so it stays correct.
-    if (mod && !input.alt && (input.key === '=' || input.key === '+' || input.key === '-' || input.key === '0')) {
-      e.preventDefault()
-      if (comfyContents.isDestroyed()) return
-      if (input.key === '0') {
-        const previousLevel = comfyContents.getZoomLevel()
-        comfyContents.setZoomLevel(0)
-        // Only emit when this was a real reset (skip no-op presses at 1x)
-        // so the event count tracks actual recovery actions, not key-spam.
-        if (previousLevel !== 0) {
-          mainTelemetry.emit('desktop2.zoom.reset', {
-            source: 'shortcut',
-            parent_entry_id: entry.windowKey,
-            installation_id: entry.installationId,
-            previous_zoom_level: previousLevel,
-            previous_zoom_percent: Math.round(Math.pow(1.2, previousLevel) * 100),
-          })
-        }
-        return
-      }
-      const step = input.key === '-' ? -0.5 : 0.5
-      comfyContents.setZoomLevel(comfyContents.getZoomLevel() + step)
-    }
-  }
-  comfyContents.on('before-input-event', onBeforeInputEvent)
-
-  // Failure retry — backoff on did-fail-load that isn't aborted /
-  // mid-relaunch. Per-install timer cancel registered into the
-  // shared map so onModelFolderRelaunch can interrupt a pending
-  // retry that would otherwise navigate away from the splash page.
-  let failRetryTimer: ReturnType<typeof setTimeout> | null = null
-  const cancelFailRetry = (): void => {
-    if (failRetryTimer) { clearTimeout(failRetryTimer); failRetryTimer = null }
-  }
-  comfyFailRetryTimerCancels.set(installationId, cancelFailRetry)
-  const onDidFailLoad = (
-    _e: Electron.Event,
-    code: number,
-    _desc: string,
-    _failUrl: string,
-    isMainFrame: boolean,
-  ): void => {
-    if (!isMainFrame || code === -3 || failRetryTimer) return
-    const id = entry.installationId
-    if (id === null) return
-    if (relaunchStates.has(id)) return
-    failRetryTimer = setTimeout(() => {
-      failRetryTimer = null
-      const currentId = entry.installationId
-      if (currentId === null) return
-      if (relaunchStates.has(currentId)) return
-      if (!comfyWindow.isDestroyed()) {
-        comfyContents.loadURL(currentComfyUrl())
-      }
-    }, 2000)
-  }
-  comfyContents.on('did-fail-load', onDidFailLoad)
-
-  const onRenderProcessGone = (
-    _event: Electron.Event,
-    details: Electron.RenderProcessGoneDetails,
-  ): void => {
-    forwardDatadogError({
-      source: 'comfy-window-render-process-gone',
-      message: `Comfy window renderer process exited (${details.reason})`,
-      level: 'error',
-      context: {
-        origin: 'main-process',
-        installationId: entry.installationId ?? '(detached)',
-        reason: details.reason,
-        exitCode: details.exitCode,
-      },
-    })
-    reloadComfy()
-  }
-  comfyContents.on('render-process-gone', onRenderProcessGone)
-
-  // Per-window download routing — attached at session level so a
-  // download dispatched from the comfyContents lands in this
-  // window's download tray. `detachWindowDownloads` is per-window
-  // and survives mode flips (it lives in the createHostWindow close
-  // handler, not in `_installCleanup`).
-  attachSessionDownloadHandler(comfyContents.session)
-
-  comfyContents.loadURL(comfyUrl)
-
-  // Symmetric undo. Called by the close handler (always) and by
-  // `detachInstall()` when the host flips back to chooser mode in
-  // place. Idempotent — sets `_installCleanup = null` on first call
-  // so subsequent calls are no-ops.
-  entry._installCleanup = (): void => {
-    if (entry._installCleanup === null) return
-    entry._installCleanup = null
-    installationEvents.off('updated', onInstallationUpdated)
-    cancelFailRetry()
-    if (!comfyContents.isDestroyed()) {
-      comfyContents.off('ipc-message', onIpcMessage)
-      comfyContents.off('page-title-updated', onPageTitleUpdated)
-      comfyContents.off('dom-ready', onDomReady)
-      comfyContents.off('did-fail-load', onDidFailLoad)
-      comfyContents.off('render-process-gone', onRenderProcessGone)
-      comfyContents.off('before-input-event', onBeforeInputEvent)
-    }
-    const id = entry.installationId
-    if (id !== null) {
-      // Abort any in-flight install / migrate / quick-install /
-      // update-while-running op for this install BEFORE killing the
-      // running session. Renderer-side overlay `onCancel` is the
-      // happy-path rollback prompt; this is the safety net that
-      // fires when the renderer side has no overlay mounted (e.g.
-      // window-close consult returns `cleared: true` immediately
-      // because the panel state is empty). Without it, in-flight
-      // operations continued running orphaned in main after window teardown.
-      const inFlight = _operationAborts.get(id)
-      if (inFlight) {
-        inFlight.abort()
-        _operationAborts.delete(id)
-      }
-      // Detach the relaunch will-navigate blocker before clearing the
-      // map slot — without `comfyContents.off(...)`, a re-attach would
-      // inherit a still-active blocker that preventDefaults every
-      // navigation until the comfyContents itself is destroyed.
-      const relaunch = relaunchStates.get(id)
-      if (relaunch && !comfyContents.isDestroyed()) {
-        comfyContents.off('will-navigate', relaunch.navBlocker)
-      }
-      ipc.stopRunning(id)
-      comfyFailRetryTimerCancels.delete(id)
-      relaunchStates.delete(id)
-      dropInstallationIndex(id)
-      entry.installationId = null
-    }
-    entry.comfyUrl = ''
-  }
-  return true
-}
-
-/**
- * Flip an install-backed host window in place to install-less
- * (chooser) mode. The symmetric undo to `attachInstall()`. Bound
- * onto `entry.detachInstall` by `createHostWindow()`; the
- * underscore-prefixed name signals that callers should invoke
- * `entry.detachInstall()` rather than this freestanding helper
- * directly.
- *
- * Steps:
- *   1. Runs `entry._installCleanup()` — `attachInstall()`'s stashed
- *      undo: off all install-bound comfyContents listeners, cancel
- *      the fail-retry timer, ipc.stopRunning the running session,
- *      clear the install-keyed maps + the secondary index, and reset
- *      `entry.installationId` / `entry.comfyUrl`.
- *   2. Navigates the comfyView to `about:blank` so the loaded
- *      ComfyUI page is unloaded (releases its renderer process). The
- *      comfyView is kept alive (not destroyed) so the host can be
- *      re-attached later without rebuilding.
- *   3. Resets the title-bar identity (`titleBarText` →
- *      `'Desktop 2.0 Beta'`, `sourceCategory` → `null`) and pushes
- *      to the live title-bar.
- *   4. Resets the OS-level window title.
- *   5. Re-paints the title bar to the launcher-theme surface
- *      (chooser hosts derive their theme from the launcher setting,
- *      not from a ComfyUI frontend).
- *   6. Resets `entry.activePanel` to `'comfy'` (which now resolves
- *      to the chooser body via `computeBodyMode`) and ensures a
- *      panelView with the chooser body exists.
- *   7. Calls `entry.layoutViews()` so the chooser body becomes
- *      visible immediately.
- *
- * No-op when the entry is already install-less (no install backing
- * to detach). Does not destroy the comfyView or the BrowserWindow
- * — see the close handler in `createHostWindow()` for the destroy
- * path.
- */
-function _detachInstallImpl(entry: ComfyWindowEntry): void {
-  if (entry.installationId === null) return
-  if (entry.window.isDestroyed()) return
-
-  // Symmetric undo of attachInstall (listeners, maps, stopRunning, etc).
-  entry._installCleanup?.()
-
-  // Release the ComfyUI page; the view is kept alive for re-attach.
-  if (!entry.comfyView.webContents.isDestroyed()) {
-    void entry.comfyView.webContents.loadURL('about:blank').catch(() => {})
-    entry.comfyView.setBackgroundColor(COMFY_BG)
-  }
-
-  // Flip title-bar identity back to chooser-host shape.
-  entry.titleBarText = CHOOSER_HOST_TITLE_TEXT
-  entry.sourceCategory = null
-  if (!entry.titleBarView.webContents.isDestroyed()) {
-    entry.titleBarView.webContents.send('comfy-titlebar:title-changed', entry.titleBarText)
-    entry.titleBarView.webContents.send('comfy-titlebar:source-category-changed', null)
-  }
-  entry.window.setTitle(CHOOSER_HOST_WINDOW_TITLE)
-  applyChooserHostTheme(entry)
-
-  // Reset nav state to the comfy pill (chooser body for install-less hosts).
-  entry.activePanel = 'comfy'
-  if (!entry.titleBarView.webContents.isDestroyed()) {
-    entry.titleBarView.webContents.send('comfy-titlebar:panel-changed', 'comfy')
-  }
-
-  // Tear down the install-backed PanelApp and remount fresh in chooser mode.
-  // Preserves no per-install state (overlays, activePanel, installationId
-  // URL param) across the detach.
-  if (entry.panelView) {
-    const oldPanel = entry.panelView
-    entry.panelView = null
-    if (!oldPanel.webContents.isDestroyed()) {
-      _unregisterExtraBroadcastTarget(oldPanel.webContents)
-      oldPanel.webContents.close()
-    }
-    if (!entry.window.isDestroyed()) {
-      try { entry.window.contentView.removeChildView(oldPanel) } catch {}
-    }
-  }
-  ensurePanelView(entry.windowKey, entry, 'chooser')
-  entry.layoutViews()
 }
 
 
@@ -1675,6 +1020,12 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
       ensurePanelView,
       computeInstallUpdateAvailable,
     })
+    setAttachFactories({
+      comfyFailRetryTimerCancels,
+      relaunchStates,
+      computeInstallUpdateAvailable,
+    })
+    setDetachFactories({ ensurePanelView })
     setHostFactories({ createChooser: openChooserHostWindow })
 
     migrateXdgPaths()
