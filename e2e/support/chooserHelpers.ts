@@ -18,9 +18,17 @@ export async function clickNewInstallTile(panel: WebContentsPage): Promise<void>
   expect(ok, 'New install tile click dispatched').toBe(true)
 }
 
-/** Click an installed-card tile by its display name (case-insensitive substring). */
+/**
+ * Click an installed-card tile by its display name (case-insensitive
+ * substring). Excludes the New Install and Cloud tiles — those use
+ * dedicated class hooks and their descriptions can incidentally match
+ * install-name substrings like "ComfyUI".
+ */
 export async function clickInstallTile(panel: WebContentsPage, nameSubstring: string): Promise<void> {
-  const ok = await panel.clickByText('.chooser-tile', nameSubstring)
+  const ok = await panel.clickByText(
+    '.chooser-tile:not(.chooser-tile-new):not(.chooser-tile-cloud) .chooser-tile-name',
+    nameSubstring,
+  )
   expect(ok, `Install tile matching "${nameSubstring}" clicked`).toBe(true)
 }
 

@@ -190,10 +190,14 @@ test('completes install and tile appears in chooser @lifecycle', async () => {
     await ctx.panel.pressKey('Escape')
   }
 
-  // The newly-installed install should now show as a chooser tile.
+  // The newly-installed install should now show as a chooser tile. Match
+  // against real install tiles only (the New Install / Cloud tiles use
+  // dedicated classes and their descriptions contain "ComfyUI" too).
   await ctx.panel.waitFor(
     async () => {
-      const texts = await ctx.panel.allText('.chooser-tile')
+      const texts = await ctx.panel.allText(
+        '.chooser-tile:not(.chooser-tile-new):not(.chooser-tile-cloud) .chooser-tile-name',
+      )
       return texts.some((t) => /ComfyUI/i.test(t))
     },
     { timeout: 15_000, message: 'newly installed ComfyUI tile not found' },
