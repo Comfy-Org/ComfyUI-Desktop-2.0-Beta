@@ -33,6 +33,10 @@ If you encounter a flaky test during a run, investigate and fix it before contin
 - **Never reference plan steps, phases, tracks, or stage IDs** (e.g. "Phase 3 §17", "Track M-7", "Stage W-4"). Plans change; the comment becomes a lie within hours and meaningless once the feature ships. Describe what the code does, not what plan brought it here.
 - **Don't narrate history** ("This used to do X, now it does Y"). The git log carries that.
 
+## Never end a session with uncommitted work
+
+Never end a session with uncommitted changes or untracked work files. Before handing off or stopping, **commit** (or `git stash push -u -m "<descriptive name>"`) all in-progress work — including new untracked files. Workspaces get cleaned and untracked files vanish; if it isn't committed or stashed, it is lost. Prefer committing on a working branch over stashing.
+
 ## Follow instructions
 
 When the user gives explicit direction (e.g., "move away from takeovers", "use the unified primitive"), apply it everywhere — search the whole codebase for remaining offenders. **Never silently defer or skip part of an instruction without asking.** If something looks risky, ask; don't decide unilaterally to leave it for later.
