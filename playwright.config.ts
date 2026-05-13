@@ -16,6 +16,6 @@ export default defineConfig({
     { name: 'macos', grep: /@macos/ },
     { name: 'windows', grep: /@windows/ },
     { name: 'linux', grep: /@linux/ },
-    { name: 'lifecycle', grep: /@lifecycle/, timeout: 600_000 },
+    { name: 'lifecycle', grep: /@lifecycle/, timeout: 180_000 },
   ],
 })
