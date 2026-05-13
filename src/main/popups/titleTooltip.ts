@@ -1,8 +1,8 @@
-import { WebContentsView, ipcMain } from 'electron'
+import { ipcMain } from 'electron'
 import type { BrowserWindow, WebContents } from 'electron'
-import path from 'path'
 import { resolveTheme } from '../lib/ipc/shared'
 import { TITLEBAR_HEIGHT } from '../lib/titleBarOverlay'
+import { EmbeddedPopupView } from './embeddedPopupView'
 
 /**
  * Hover tooltip popup attached as a transparent sibling WebContentsView
@@ -49,12 +49,7 @@ function nextTitleTooltipToken(): string {
 }
 
 export interface TitleTooltipPopupEntry {
-  popup: WebContentsView
-  parentWindow: BrowserWindow
-  popupWebContentsId: number
-  parentWindowId: number
-  /** True once the renderer has signalled `comfy-titletooltip:ready`. */
-  rendererReady: boolean
+  view: EmbeddedPopupView
   /** Config queued before `ready` (only the very first open). */
   pendingConfig: TitleTooltipConfig | null
   /** Last anchor used for an `openTitleTooltipPopup` call — main keeps
@@ -72,11 +67,6 @@ export interface TitleTooltipPopupEntry {
    *  Only render-acks carrying this exact token cause the popup to
    *  show; stale acks for previously-superseded configs are dropped. */
   pendingConfigToken: string | null
-  /** Timer that flips the popup visible if the renderer's render-ack
-   *  takes too long. */
-  pendingShowTimer: NodeJS.Timeout | null
-  /** True between `setVisible(true)` and `setVisible(false)`. */
-  isOpen: boolean
   /** JSON of the most recently *acked* config. Used as a fast-path:
    *  if the next open carries the same config (same text + theme),
    *  we skip the IPC + render-ack roundtrip and reposition + show
@@ -103,98 +93,51 @@ function resolveTooltipTheme(): { bg: string; text: string; border: string } {
     : { bg: '#ffffff', text: '#1f1f1f', border: '#d0d0d0' }
 }
 
-/** Create (or reuse) a title-tooltip popup view for *parent*. The view
- *  is added as a transparent child of the parent BrowserWindow.
- *  Subsequent calls for the same parent reuse the same view — the
- *  renderer is loaded once, then we just push fresh config + reposition
- *  + show on every open. The popup is closed when its parent is. */
+/** Create (or reuse) a title-tooltip popup view for *parent*. */
 function ensureTitleTooltipPopup(parent: BrowserWindow): TitleTooltipPopupEntry {
   const existing = titleTooltipPopupsByParent.get(parent.id)
-  if (existing && !existing.popup.webContents.isDestroyed()) return existing
+  if (existing && !existing.view.isDestroyed()) return existing
 
-  const popup = new WebContentsView({
-    webPreferences: {
-      nodeIntegration: false,
-      contextIsolation: true,
-      preload: path.join(__dirname, '../preload/comfyTitleTooltipPreload.js'),
+  const view = new EmbeddedPopupView({
+    parent,
+    htmlName: 'comfyTitleTooltip',
+    preloadName: 'comfyTitleTooltipPreload.js',
+    initialBounds: {
+      x: 0,
+      y: 0,
+      width: TOOLTIP_POPUP_INITIAL_WIDTH,
+      height: TOOLTIP_POPUP_INITIAL_HEIGHT,
+    },
+    // Belt-and-braces dismiss for cases the title-bar renderer can't
+    // observe (drag-region drags, OS-level focus changes). The renderer
+    // already fires `hideTooltip()` from its own pointerleave / blur
+    // paths.
+    hideOnParentEvents: ['blur', 'will-move', 'move', 'resize'],
+    onParentClosed: () => {
+      titleTooltipPopupsByParent.delete(parent.id)
+      titleTooltipPopupsByWebContents.delete(view.popupWebContentsId)
+    },
+    onDestroyed: () => {
+      // Identity-check so we don't drop a fresher entry that may have
+      // been registered against the same parent id between the popup
+      // crash and this teardown firing.
+      const cur = titleTooltipPopupsByParent.get(parent.id)
+      if (cur && cur.view === view) {
+        titleTooltipPopupsByParent.delete(parent.id)
+      }
+      titleTooltipPopupsByWebContents.delete(view.popupWebContentsId)
     },
   })
-  // Transparent so the bubble's rounded card is the only visible
-  // surface — the popup view's bounds extend a few px past the bubble
-  // to give the box-shadow room to render.
-  popup.setBackgroundColor('#00000000')
-  popup.setVisible(false)
-  popup.setBounds({
-    x: 0,
-    y: 0,
-    width: TOOLTIP_POPUP_INITIAL_WIDTH,
-    height: TOOLTIP_POPUP_INITIAL_HEIGHT,
-  })
-  parent.contentView.addChildView(popup)
-
-  const isDev = !!process.env['ELECTRON_RENDERER_URL']
-  const loadPromise = isDev
-    ? popup.webContents.loadURL(
-        `${(process.env['ELECTRON_RENDERER_URL'] as string).replace(/\/$/, '')}/comfyTitleTooltip.html`,
-      )
-    : popup.webContents.loadFile(path.join(__dirname, '../renderer/comfyTitleTooltip.html'))
-  void loadPromise.catch(() => {})
-
-  // Capture ids up-front. The parent's `closed` event fires *after*
-  // its child WebContentsViews' webContents are destroyed, so accessing
-  // `popup.webContents.id` there would throw "Object has been destroyed".
   const entry: TitleTooltipPopupEntry = {
-    popup,
-    parentWindow: parent,
-    popupWebContentsId: popup.webContents.id,
-    parentWindowId: parent.id,
-    rendererReady: false,
+    view,
     pendingConfig: null,
     pendingAnchor: null,
     pendingConfigJson: null,
     pendingConfigToken: null,
-    pendingShowTimer: null,
-    isOpen: false,
     lastSyncedConfigJson: null,
   }
-  titleTooltipPopupsByParent.set(entry.parentWindowId, entry)
-  titleTooltipPopupsByWebContents.set(entry.popupWebContentsId, entry)
-
-  // Hide the tooltip on parent-window state changes that imply the
-  // pointer is no longer over the title bar. The title-bar renderer
-  // also fires `hideTooltip()` from its own pointerleave / blur paths,
-  // but these listeners are belt-and-braces for cases the renderer
-  // can't observe (drag-region drags, OS-level focus changes).
-  const dismissOnBlur = (): void => {
-    hideTitleTooltipPopup(entry)
-  }
-  parent.on('blur', dismissOnBlur)
-  parent.on('will-move', dismissOnBlur)
-  parent.on('move', dismissOnBlur)
-  parent.on('resize', dismissOnBlur)
-
-  const onParentClosed = (): void => {
-    titleTooltipPopupsByParent.delete(entry.parentWindowId)
-    titleTooltipPopupsByWebContents.delete(entry.popupWebContentsId)
-    try { parent.contentView.removeChildView(popup) } catch {}
-    if (!popup.webContents.isDestroyed()) popup.webContents.close()
-  }
-  parent.once('closed', onParentClosed)
-
-  popup.webContents.once('destroyed', () => {
-    if (!parent.isDestroyed()) {
-      parent.removeListener('blur', dismissOnBlur)
-      parent.removeListener('will-move', dismissOnBlur)
-      parent.removeListener('move', dismissOnBlur)
-      parent.removeListener('resize', dismissOnBlur)
-      parent.removeListener('closed', onParentClosed)
-    }
-    if (titleTooltipPopupsByParent.get(entry.parentWindowId) === entry) {
-      titleTooltipPopupsByParent.delete(entry.parentWindowId)
-    }
-    titleTooltipPopupsByWebContents.delete(entry.popupWebContentsId)
-  })
-
+  titleTooltipPopupsByParent.set(view.parentWindowId, entry)
+  titleTooltipPopupsByWebContents.set(view.popupWebContentsId, entry)
   return entry
 }
 
@@ -219,7 +162,7 @@ function positionTooltipPopup(
 ): void {
   const anchor = entry.pendingAnchor
   if (!anchor) return
-  if (entry.popup.webContents.isDestroyed() || entry.parentWindow.isDestroyed()) return
+  if (entry.view.isDestroyed()) return
 
   const viewWidth = Math.max(
     bubbleSize.width + TOOLTIP_POPUP_SHADOW_GUTTER * 2,
@@ -230,7 +173,7 @@ function positionTooltipPopup(
     TOOLTIP_POPUP_SHADOW_GUTTER + 1,
   )
 
-  const parentBounds = entry.parentWindow.getContentBounds()
+  const parentBounds = entry.view.parentWindow.getContentBounds()
   // Preferred: bubble.left == anchor.leftX → extends rightward.
   let x = Math.round(anchor.leftX - TOOLTIP_POPUP_SHADOW_GUTTER)
   // Right-edge overflow → fall back to bubble.right == anchor.rightX
@@ -248,42 +191,13 @@ function positionTooltipPopup(
   if (y < 0) y = 0
   if (y + viewHeight > parentBounds.height) y = Math.max(0, parentBounds.height - viewHeight)
 
-  entry.popup.setBounds({ x, y, width: viewWidth, height: viewHeight })
-}
-
-/** Make the popup view visible. Called once the renderer acks
- *  `comfy-titletooltip:rendered` — at that point the new text has been
- *  painted. We do NOT focus the popup; tooltips are display-only. */
-function showTitleTooltipPopupNow(entry: TitleTooltipPopupEntry): void {
-  if (entry.pendingShowTimer) {
-    clearTimeout(entry.pendingShowTimer)
-    entry.pendingShowTimer = null
-  }
-  if (entry.popup.webContents.isDestroyed()) return
-  // Re-add as the most recently attached child view so the popup paints
-  // on top of `titleBarView` / `comfyView` / `panelView`.
-  if (!entry.parentWindow.isDestroyed()) {
-    try {
-      entry.parentWindow.contentView.removeChildView(entry.popup)
-    } catch {}
-    entry.parentWindow.contentView.addChildView(entry.popup)
-  }
-  entry.popup.setVisible(true)
-  entry.isOpen = true
+  entry.view.popup.setBounds({ x, y, width: viewWidth, height: viewHeight })
 }
 
 /** Hide the popup view. Safe to call when not currently visible. */
 export function hideTitleTooltipPopup(entry: TitleTooltipPopupEntry | undefined): void {
   if (!entry) return
-  if (!entry.isOpen && !entry.pendingShowTimer) return
-  entry.isOpen = false
-  if (entry.pendingShowTimer) {
-    clearTimeout(entry.pendingShowTimer)
-    entry.pendingShowTimer = null
-  }
-  if (!entry.popup.webContents.isDestroyed()) {
-    entry.popup.setVisible(false)
-  }
+  entry.view.hide()
 }
 
 /** Show or update the title-bar hover tooltip popup. Constructs the
@@ -296,7 +210,7 @@ export function openTitleTooltipPopup(opts: {
   bottomY: number
 }): void {
   const entry = ensureTitleTooltipPopup(opts.parent)
-  if (entry.popup.webContents.isDestroyed()) return
+  if (entry.view.isDestroyed()) return
 
   entry.pendingAnchor = { leftX: opts.leftX, rightX: opts.rightX, bottomY: opts.bottomY }
 
@@ -313,12 +227,12 @@ export function openTitleTooltipPopup(opts: {
   // flash the wrong text). Skip the IPC + render-ack roundtrip and
   // reposition + show with the cached bubble size.
   if (entry.lastSyncedConfigJson === configBodyJson && entry.pendingConfigJson === null) {
-    const bounds = entry.popup.getBounds()
+    const bounds = entry.view.popup.getBounds()
     positionTooltipPopup(entry, {
       width: Math.max(0, bounds.width - TOOLTIP_POPUP_SHADOW_GUTTER * 2),
       height: Math.max(0, bounds.height - TOOLTIP_POPUP_SHADOW_GUTTER),
     })
-    showTitleTooltipPopupNow(entry)
+    entry.view.showOnTop()
     return
   }
 
@@ -326,27 +240,23 @@ export function openTitleTooltipPopup(opts: {
   const config: TitleTooltipConfig = { ...tooltipBody, configToken: token }
   entry.pendingConfigJson = configBodyJson
   entry.pendingConfigToken = token
-  if (entry.rendererReady) {
-    entry.popup.webContents.send('comfy-titletooltip:set-config', config)
+  if (entry.view.rendererReady) {
+    entry.view.popup.webContents.send('comfy-titletooltip:set-config', config)
   } else {
     // Renderer hasn't mounted yet on the very first show. Queue the
     // config; the `ready` IPC handler flushes it.
     entry.pendingConfig = config
   }
-  if (entry.pendingShowTimer) {
-    clearTimeout(entry.pendingShowTimer)
-  }
-  entry.pendingShowTimer = setTimeout(() => {
-    if (entry.pendingShowTimer === null) return
+  entry.view.scheduleShowFallback(TOOLTIP_RENDER_ACK_TIMEOUT_MS, () => {
     // Render-ack timed out — show with the current bounds anyway so
     // the tooltip never gets permanently stuck invisible.
-    const bounds = entry.popup.getBounds()
+    const bounds = entry.view.popup.getBounds()
     positionTooltipPopup(entry, {
       width: Math.max(0, bounds.width - TOOLTIP_POPUP_SHADOW_GUTTER * 2),
       height: Math.max(0, bounds.height - TOOLTIP_POPUP_SHADOW_GUTTER),
     })
-    showTitleTooltipPopupNow(entry)
-  }, TOOLTIP_RENDER_ACK_TIMEOUT_MS)
+    entry.view.showOnTop()
+  })
 }
 
 /** Wire the IPC handlers that drive the title-tooltip popup. Called
@@ -359,9 +269,9 @@ export function registerTitleTooltipIpc(opts: {
   ipcMain.on('comfy-titletooltip:ready', (event) => {
     const entry = titleTooltipPopupsByWebContents.get(event.sender.id)
     if (!entry) return
-    entry.rendererReady = true
+    entry.view.rendererReady = true
     if (entry.pendingConfig) {
-      entry.popup.webContents.send('comfy-titletooltip:set-config', entry.pendingConfig)
+      entry.view.popup.webContents.send('comfy-titletooltip:set-config', entry.pendingConfig)
       entry.pendingConfig = null
     }
   })
@@ -390,8 +300,8 @@ export function registerTitleTooltipIpc(opts: {
       }
       // If the timer fallback already showed the popup, no-op; otherwise
       // show it now that the new content has painted at the correct size.
-      if (entry.pendingShowTimer === null) return
-      showTitleTooltipPopupNow(entry)
+      if (entry.view.pendingShowTimer === null) return
+      entry.view.showOnTop()
     },
   )
 

@@ -1,6 +1,5 @@
-import { WebContentsView, ipcMain, shell } from 'electron'
-import type { BrowserWindow } from 'electron'
-import path from 'path'
+import { ipcMain, shell } from 'electron'
+import type { BrowserWindow, WebContentsView } from 'electron'
 import { TITLEBAR_HEIGHT } from '../lib/titleBarOverlay'
 import {
   cancelModelDownload,
@@ -21,6 +20,7 @@ import {
   getTitleTooltipForParent,
   hideTitleTooltipPopup,
 } from './titleTooltip'
+import { EmbeddedPopupView } from './embeddedPopupView'
 
 /**
  * Title-bar dropdown popups (waffle menu, downloads tray). All title-bar
@@ -83,12 +83,7 @@ type TitlePopupConfig =
  * can route without their own per-open context.
  */
 interface TitlePopupEntry {
-  popup: WebContentsView
-  parentWindow: BrowserWindow
-  /** Snapshotted at construction so we don't touch `popup.webContents`
-   *  in the destroyed-window handlers. */
-  popupWebContentsId: number
-  parentWindowId: number
+  view: EmbeddedPopupView
   /** Numeric `windowKey` of the parent host entry, updated on every
    *  open. `0` is a sentinel for "no popup has been opened yet" since
    *  `nextWindowKey` always returns positive numbers. */
@@ -97,21 +92,9 @@ interface TitlePopupEntry {
   kind: TitlePopupKind
   /** Updated on every open. */
   titleBarSender: Electron.WebContents
-  /** True once the renderer has signalled `comfy-titlepopup:ready`.
-   *  Until then, config pushes are queued in `pendingConfig`. */
-  rendererReady: boolean
   /** Config queued before the renderer signalled ready — flushed on
    *  ready. Overwritten if multiple opens happen before ready. */
   pendingConfig: TitlePopupConfig | null
-  /** True between `setVisible(true)` (show) and `setVisible(false)`
-   *  (hide) — the blur handler ignores spurious blurs while we're
-   *  already hidden. */
-  isOpen: boolean
-  /** Set to a non-null timer when an open is in flight, waiting for
-   *  the renderer's `comfy-titlepopup:rendered` ack before flipping
-   *  to visible. The timer is the fallback that shows anyway after
-   *  a short window (in case the renderer is unusually slow). */
-  pendingShowTimer: NodeJS.Timeout | null
   /** JSON of the most recently sent `comfy-titlepopup:set-config`
    *  payload — used to compare against the next open's config to skip
    *  the renderer roundtrip when the DOM is already correct. */
@@ -260,7 +243,7 @@ function notifyTitlePopupDownloads(popup: WebContentsView): void {
  *  so the downloads view repaints live while open. */
 function broadcastDownloadsToTitlePopups(): void {
   for (const entry of titlePopupsByParent.values()) {
-    notifyTitlePopupDownloads(entry.popup)
+    notifyTitlePopupDownloads(entry.view.popup)
   }
 }
 
@@ -277,58 +260,7 @@ export function prewarmTitlePopup(parent: BrowserWindow): void {
  *  its parent is. */
 function ensureTitlePopup(parent: BrowserWindow): TitlePopupEntry {
   const existing = titlePopupsByParent.get(parent.id)
-  if (existing && !existing.popup.webContents.isDestroyed()) return existing
-
-  const popup = new WebContentsView({
-    webPreferences: {
-      nodeIntegration: false,
-      contextIsolation: true,
-      preload: path.join(__dirname, '../preload/comfyTitlePopupPreload.js'),
-    },
-  })
-  // Transparent so the empty area around the rounded card lets the
-  // body view show through. WebContentsView per-pixel transparency
-  // works inside a parent BrowserWindow's opaque surface (it just
-  // alpha-blends into the parent), unlike a child BrowserWindow which
-  // would need OS-level transparency on the parent.
-  popup.setBackgroundColor('#00000000')
-  popup.setVisible(false)
-  // Bounds in window-content-local pixels. Initial values are
-  // overwritten by `setBounds` on every open; keep them small so the
-  // hidden view doesn't squat on real estate during the construction
-  // race before the first open.
-  popup.setBounds({ x: 0, y: 0, width: POPUP_WIDTH, height: 100 })
-  parent.contentView.addChildView(popup)
-
-  const isDev = !!process.env['ELECTRON_RENDERER_URL']
-  const loadPromise = isDev
-    ? popup.webContents.loadURL(
-        `${(process.env['ELECTRON_RENDERER_URL'] as string).replace(/\/$/, '')}/comfyTitlePopup.html`,
-      )
-    : popup.webContents.loadFile(path.join(__dirname, '../renderer/comfyTitlePopup.html'))
-  void loadPromise.catch(() => {})
-
-  // Capture ids up-front. The parent's `closed` event fires *after*
-  // the BrowserWindow + its child WebContentsViews' webContents are
-  // destroyed, so accessing `popup.webContents.id` there would throw
-  // "Object has been destroyed".
-  const entry: TitlePopupEntry = {
-    popup,
-    parentWindow: parent,
-    popupWebContentsId: popup.webContents.id,
-    parentWindowId: parent.id,
-    parentEntryId: 0,
-    kind: 'menu',
-    titleBarSender: popup.webContents, // overwritten on first open
-    rendererReady: false,
-    pendingConfig: null,
-    isOpen: false,
-    pendingShowTimer: null,
-    lastConfigJson: null,
-    lastSyncedConfigJson: null,
-  }
-  titlePopupsByParent.set(entry.parentWindowId, entry)
-  titlePopupsByWebContents.set(entry.popupWebContentsId, entry)
+  if (existing && !existing.view.isDestroyed()) return existing
 
   // Click-outside dismissal. Item clicks inside the popup do NOT trigger
   // blur — focus stays in the popup webContents until we explicitly hide
@@ -347,42 +279,39 @@ function ensureTitlePopup(parent: BrowserWindow): TitlePopupEntry {
   // blur nor `parent`'s blur fires. `will-move` / `move` cover that
   // path: any title-bar drag dismisses the popup as soon as the window
   // begins to move.
-  const dismissOnBlur = (): void => {
-    hideTitlePopup(entry)
-  }
-  popup.webContents.on('blur', dismissOnBlur)
-  parent.on('blur', dismissOnBlur)
-  parent.on('will-move', dismissOnBlur)
-  parent.on('move', dismissOnBlur)
-
-  // Tear down with the parent. Without this, the popup would survive
-  // its parent and reuse the wrong context on the next click in a
-  // different window.
-  const onParentClosed = (): void => {
-    titlePopupsByParent.delete(entry.parentWindowId)
-    titlePopupsByWebContents.delete(entry.popupWebContentsId)
-    try { parent.contentView.removeChildView(popup) } catch {}
-    if (!popup.webContents.isDestroyed()) popup.webContents.close()
-  }
-  parent.once('closed', onParentClosed)
-
-  // If the popup webContents is destroyed independently (renderer
-  // crash, manual close), drop the parent-window listeners so they
-  // don't accumulate when `ensureTitlePopup` constructs a fresh
-  // entry on the next open.
-  popup.webContents.once('destroyed', () => {
-    if (!parent.isDestroyed()) {
-      parent.removeListener('blur', dismissOnBlur)
-      parent.removeListener('will-move', dismissOnBlur)
-      parent.removeListener('move', dismissOnBlur)
-      parent.removeListener('closed', onParentClosed)
-    }
-    if (titlePopupsByParent.get(entry.parentWindowId) === entry) {
-      titlePopupsByParent.delete(entry.parentWindowId)
-    }
-    titlePopupsByWebContents.delete(entry.popupWebContentsId)
+  const view = new EmbeddedPopupView({
+    parent,
+    htmlName: 'comfyTitlePopup',
+    preloadName: 'comfyTitlePopupPreload.js',
+    initialBounds: { x: 0, y: 0, width: POPUP_WIDTH, height: 100 },
+    hideOnParentEvents: ['blur', 'will-move', 'move'],
+    hideOnPopupBlur: true,
+    onParentClosed: () => {
+      titlePopupsByParent.delete(parent.id)
+      titlePopupsByWebContents.delete(view.popupWebContentsId)
+    },
+    onDestroyed: () => {
+      // Identity-check so we don't drop a fresher entry that may have
+      // been registered against the same parent id between the popup
+      // crash and this teardown firing.
+      const cur = titlePopupsByParent.get(parent.id)
+      if (cur && cur.view === view) {
+        titlePopupsByParent.delete(parent.id)
+      }
+      titlePopupsByWebContents.delete(view.popupWebContentsId)
+    },
   })
-
+  const entry: TitlePopupEntry = {
+    view,
+    parentEntryId: 0,
+    kind: 'menu',
+    titleBarSender: view.popup.webContents, // overwritten on first open
+    pendingConfig: null,
+    lastConfigJson: null,
+    lastSyncedConfigJson: null,
+  }
+  titlePopupsByParent.set(view.parentWindowId, entry)
+  titlePopupsByWebContents.set(view.popupWebContentsId, entry)
   return entry
 }
 
@@ -412,32 +341,24 @@ function hideTitlePopup(
   entry: TitlePopupEntry,
   opts: { releaseFocusToParent?: boolean } = {},
 ): void {
-  // Proceed if a show is in flight even when not yet visible — otherwise
-  // the pendingShowTimer would fire after this dismissal and pop the
-  // menu open unexpectedly.
-  if (!entry.isOpen && !entry.pendingShowTimer) return
-  entry.isOpen = false
-  // Cancel any in-flight render ack — if a hide arrives before the
-  // ack, the popup is already on its way back to hidden and we
-  // shouldn't flip it visible retroactively.
-  if (entry.pendingShowTimer) {
-    clearTimeout(entry.pendingShowTimer)
-    entry.pendingShowTimer = null
-  }
-  if (!entry.popup.webContents.isDestroyed()) {
-    entry.popup.setVisible(false)
-    if (opts.releaseFocusToParent && !entry.parentWindow.isDestroyed()) {
-      // Embedded WebContentsView: `BrowserWindow.focus()` raises the host
-      // window but doesn't deterministically land keyboard focus in any
-      // child view. Push focus into the title bar (the button that
-      // opened the popup) so subsequent keystrokes go somewhere
-      // sensible. Falls back to a plain window focus if the title-bar
-      // sender is no longer alive.
-      if (!entry.titleBarSender.isDestroyed()) {
-        entry.titleBarSender.focus()
-      } else {
-        entry.parentWindow.focus()
-      }
+  const wasActive = entry.view.isOpen || entry.view.pendingShowTimer !== null
+  entry.view.hide()
+  if (!wasActive) return
+  if (
+    opts.releaseFocusToParent
+    && !entry.view.popup.webContents.isDestroyed()
+    && !entry.view.parentWindow.isDestroyed()
+  ) {
+    // Embedded WebContentsView: `BrowserWindow.focus()` raises the host
+    // window but doesn't deterministically land keyboard focus in any
+    // child view. Push focus into the title bar (the button that
+    // opened the popup) so subsequent keystrokes go somewhere
+    // sensible. Falls back to a plain window focus if the title-bar
+    // sender is no longer alive.
+    if (!entry.titleBarSender.isDestroyed()) {
+      entry.titleBarSender.focus()
+    } else {
+      entry.view.parentWindow.focus()
     }
   }
   if (!entry.titleBarSender.isDestroyed()) {
@@ -449,14 +370,8 @@ function hideTitlePopup(
  *  when the renderer acks `comfy-titlepopup:rendered` — at that point
  *  the new config has been painted and showing is safe. */
 function showTitlePopupNow(entry: TitlePopupEntry): void {
-  if (entry.pendingShowTimer) {
-    clearTimeout(entry.pendingShowTimer)
-    entry.pendingShowTimer = null
-  }
-  if (entry.popup.webContents.isDestroyed()) return
-  entry.popup.setVisible(true)
-  entry.popup.webContents.focus()
-  entry.isOpen = true
+  if (entry.view.popup.webContents.isDestroyed()) return
+  entry.view.showOnTop({ focus: true })
   // Notify the title bar so it can suppress the next click on the
   // menu button. Without this, on macOS the click event can fire
   // before the blur-driven dismiss propagates back, causing the
@@ -497,7 +412,7 @@ function openTitlePopup(opts: OpenTitlePopupOpts): void {
   // a click moves focus straight into the popup.
   hideTitleTooltipPopup(getTitleTooltipForParent(opts.parent.id))
   const entry = ensureTitlePopup(opts.parent)
-  if (entry.popup.webContents.isDestroyed()) return
+  if (entry.view.popup.webContents.isDestroyed()) return
 
   // Refresh the per-open routing context. `kind` + `parentEntryId` +
   // `titleBarSender` only matter for the *current* open, so we
@@ -539,27 +454,24 @@ function openTitlePopup(opts: OpenTitlePopupOpts): void {
   // bounds while still hidden — the popup is flipped visible only after
   // the renderer acks the new content has painted.
   try {
-    opts.parent.contentView.removeChildView(entry.popup)
+    opts.parent.contentView.removeChildView(entry.view.popup)
   } catch {}
-  opts.parent.contentView.addChildView(entry.popup)
-  entry.popup.setBounds({ x, y, width, height })
+  opts.parent.contentView.addChildView(entry.view.popup)
+  entry.view.popup.setBounds({ x, y, width, height })
 
   // Downloads popup feeds on a separate channel — push the latest
   // snapshot now so the first paint shows current state instead of
   // the empty-state placeholder. Subsequent updates arrive via the
   // tray-state-changed broadcast.
-  if (opts.kind === 'downloads' && entry.rendererReady) {
-    notifyTitlePopupDownloads(entry.popup)
+  if (opts.kind === 'downloads' && entry.view.rendererReady) {
+    notifyTitlePopupDownloads(entry.view.popup)
   }
 
   // Push the new config and *wait* for the renderer to ack that the
   // new content has painted before flipping the view visible. Without
   // this the user sees a frame of the previous open's content while
   // Vue is still processing the config update.
-  if (entry.pendingShowTimer) {
-    clearTimeout(entry.pendingShowTimer)
-    entry.pendingShowTimer = null
-  }
+  entry.view.cancelPendingShow()
   const config: TitlePopupConfig = opts.kind === 'menu'
     ? { kind: 'menu', items: opts.items, theme: opts.theme }
     : { kind: 'downloads', theme: opts.theme }
@@ -572,24 +484,23 @@ function openTitlePopup(opts: OpenTitlePopupOpts): void {
   // open latency on the common case.
   if (
     entry.lastSyncedConfigJson === configJson
-    && !entry.popup.webContents.isDestroyed()
+    && !entry.view.popup.webContents.isDestroyed()
   ) {
     showTitlePopupNow(entry)
     return
   }
 
   entry.lastConfigJson = configJson
-  if (entry.rendererReady && !entry.popup.webContents.isDestroyed()) {
-    entry.popup.webContents.send('comfy-titlepopup:set-config', config)
+  if (entry.view.rendererReady && !entry.view.popup.webContents.isDestroyed()) {
+    entry.view.popup.webContents.send('comfy-titlepopup:set-config', config)
   } else {
     // Renderer hasn't mounted yet on the very first open. Queue the
     // config; the `ready` IPC handler flushes it.
     entry.pendingConfig = config
   }
-  entry.pendingShowTimer = setTimeout(() => {
-    if (entry.pendingShowTimer === null) return
+  entry.view.scheduleShowFallback(POPUP_RENDER_ACK_TIMEOUT_MS, () => {
     showTitlePopupNow(entry)
-  }, POPUP_RENDER_ACK_TIMEOUT_MS)
+  })
 }
 
 export interface TitlePopupHostBindings {
@@ -726,14 +637,14 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
   ipcMain.on('comfy-titlepopup:ready', (event) => {
     const entry = titlePopupsByWebContents.get(event.sender.id)
     if (!entry) return
-    entry.rendererReady = true
-    if (entry.pendingConfig && !entry.popup.webContents.isDestroyed()) {
+    entry.view.rendererReady = true
+    if (entry.pendingConfig && !entry.view.popup.webContents.isDestroyed()) {
       const flushed = entry.pendingConfig
       entry.lastConfigJson = JSON.stringify(flushed)
-      entry.popup.webContents.send('comfy-titlepopup:set-config', flushed)
+      entry.view.popup.webContents.send('comfy-titlepopup:set-config', flushed)
       entry.pendingConfig = null
       if (flushed.kind === 'downloads') {
-        notifyTitlePopupDownloads(entry.popup)
+        notifyTitlePopupDownloads(entry.view.popup)
       }
     }
   })
@@ -748,7 +659,7 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
     // the next open of the same content can take the fast path in
     // `openTitlePopup`.
     entry.lastSyncedConfigJson = entry.lastConfigJson
-    if (entry.pendingShowTimer === null) return
+    if (entry.view.pendingShowTimer === null) return
     showTitlePopupNow(entry)
   })
 
@@ -794,9 +705,9 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
         Math.round(contentHeight * DOWNLOADS_POPUP_MAX_HEIGHT_RATIO),
       )
       const next = Math.max(1, Math.min(ceiling, Math.ceil(requested)))
-      const cur = entry.popup.getBounds()
+      const cur = entry.view.popup.getBounds()
       if (cur.height === next) return
-      entry.popup.setBounds({ x: cur.x, y: cur.y, width: cur.width, height: next })
+      entry.view.popup.setBounds({ x: cur.x, y: cur.y, width: cur.width, height: next })
     },
   )
 
