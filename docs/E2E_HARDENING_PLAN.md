@@ -111,22 +111,22 @@ Estimated 6 tests, ~1.5s each.
 
 ---
 
-## G3 — Update pills coverage  ◻
+## G3 — Update pills coverage  ✅
 
-`e2e/update-pills.test.ts` (chooser host, fast suite):
+[`e2e/update-pills.test.ts`](../e2e/update-pills.test.ts) (chooser host, fast suite, 6 tests, ~3.2s total):
 
 | Test | Asserts | Catches |
 |---|---|---|
-| Install-update pill hidden by default | Seed no installations → assert `.install-update-pill` (or selector) absent in title bar | Default state |
-| Install-update pill appears when seeded | Seed installation + `__e2e:set-install-update` → assert pill visible with version label | The whole `computeInstallUpdateAvailable` → title-bar state path |
-| Clicking install-update pill opens ComfyUI Settings tab | With pill visible, click it → assert settings panel opens AND ComfyUI tab is active | The `panel-trigger-overlay 'open-settings' { settingsTab: 'comfy' }` flow |
-| Desktop-update pill hidden by default | `getCurrentUpdateState()` returns `'idle'` → assert no desktop pill | Default state |
-| Desktop-update pill renders each lifecycle state | Seed `available` / `downloading` / `downloaded` / `error` → assert correct pill text + click handler per state | The 4-way state machine in `updater.ts` |
-| Clicking `Restart to Update` shows confirm modal | Seed `'downloaded'` → click pill → assert system modal appears asking to restart | The `app-update:install` IPC + system-modal flow |
+| Desktop-update pill hidden when state is idle | `setAppUpdateState({kind: null, ...})` → assert no `.title-update-pill.is-app-update` | Default state |
+| Desktop-update pill renders for state=available | Push state → pill visible + label includes "update" + no `is-ready`/`is-downloading` modifier | The `kind === 'available'` branch in `appUpdatePillLabel` |
+| Desktop-update pill renders for state=downloading | Push state → pill visible with `is-downloading` class | The `kind === 'downloading'` branch + spinner class |
+| Desktop-update pill renders for state=ready | Push state → pill visible with `is-ready` class | The `kind === 'ready'` branch |
+| Clicking the ready pill opens the system-modal restart prompt | Push `ready` → click pill → assert `comfySystemModal.html` popup visible | The `comfy-window:click-app-update-pill` → `openSystemModal` flow |
+| Install-update pill suppressed on install-less chooser | Seed install-update override → assert pill stays hidden | The `!isInstallLess` gate in `showInstallUpdatePill` |
 
-The desktop-update tests use `__e2e:set-app-update-state` which routes through the existing `app-update:state-changed` broadcast, so the renderer code path is exactly the production one.
+The "install-update pill renders + clicks open Settings" path is install-backed-only (the pill is suppressed on install-less hosts by design) — that flow is left for the lifecycle suite, which has a real install to launch a window against.
 
-Estimated 6 tests, ~1.5s each.
+The desktop-update tests use `setAppUpdateState` which routes through `_setUpdateState` → `_stateChangeCallbacks` → `_broadcastAppUpdateStateToTitleBars`, so the renderer code path is exactly the production one.
 
 ---
 
