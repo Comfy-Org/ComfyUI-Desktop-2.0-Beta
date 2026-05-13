@@ -206,12 +206,12 @@ These are concrete hot-spots that will hurt when the feature lands. Address only
 
 | File | Action | Notes |
 |---|---|---|
-| `PanelApp.vue` | **Split** | Per-panel routing → composables. Keep `PanelApp.vue` as shell. Will be touched by seamless-transition work anyway. |
-| `TitleBarApp.vue` | **Split** | Pull pill buttons + tooltip coordinator + update-pill state into composables. The tooltip composable will pair with **P1**. |
-| `SnapshotTab.vue` | **Split** | List / diff / actions are independent. |
-| `ChooserView.vue` | **Split** | Card grid, onboarding banner, pinned/recent are independent. Will be touched by seamless transitions. |
-| `comfyDownloadManager.ts` | **Split** | Pull IPC registration → `lib/ipc/registerDownloadHandlers.ts`. |
-| `lib/ipc/shared.ts` | **Trim** | Coherent — don't split, but trim long historical doc-comments. |
+| `PanelApp.vue` | 🟡 **Split (in progress)** | Per-panel routing → composables. Keep `PanelApp.vue` as shell. Will be touched by seamless-transition work anyway. Done so far: `useAppUpdatePrompts`, `useSendFeedback`, `useDeepLinkRouter`. 1203 → 1080 lines. Still to extract: first-use chain (~250 lines, tightly coupled to `dismissTakeoverDirect` / `switchPanel` / `handleShowProgress` / `performChooserLaunch`), chooser handoff (~80 lines), and the remaining overlay-orchestration helpers (`handleShowProgress`, `openFlowTakeover`, `dismissTakeoverDirect`, `switchPanel`). |
+| `TitleBarApp.vue` | 🟡 **Split (in progress)** | Pull pill buttons + tooltip coordinator + update-pill state into composables. The tooltip composable will pair with **P1**. Done so far: `useTitleBarTooltip`, `useUpdatePills`. 1090 → 900 lines. Still to extract: downloads-tray state + click handler, file-menu + menu-reopen-guard, source-category / install-label / theme bridge subscriptions. |
+| `SnapshotTab.vue` | ◻ **Split** | List / diff / actions are independent. |
+| `ChooserView.vue` | ◻ **Split** | Card grid, onboarding banner, pinned/recent are independent. Will be touched by seamless transitions. |
+| `comfyDownloadManager.ts` | ✅ **Done** | IPC registration extracted to [`lib/ipc/registerDownloadHandlers.ts`](../src/main/lib/ipc/registerDownloadHandlers.ts). |
+| `lib/ipc/shared.ts` | ◻ **Trim** | Coherent — don't split, but trim long historical doc-comments. Initial review found most existing comments are genuine "why" notes (race conditions, OS quirks) that AGENTS.md says to keep. |
 | `lib/snapshots/restore.ts` | **Leave** | One algorithm, well-commented. |
 
 ---
