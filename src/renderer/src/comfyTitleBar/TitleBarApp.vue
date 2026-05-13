@@ -11,6 +11,7 @@ import {
 } from 'lucide-vue-next'
 import { installTypeMetaFor } from '../lib/installTypeIcon'
 import { useTitleBarTooltip } from './useTitleBarTooltip'
+import { useTitleBarMenus } from './useTitleBarMenus'
 import { useUpdatePills } from './useUpdatePills'
 
 const { t } = useI18n()
@@ -260,48 +261,6 @@ const {
   handleInstallUpdatePill,
 } = useUpdatePills({ bridge, isInstallLess })
 
-/**
- * Title-bar downloads tray. Always-visible icon button sitting in the
- * center cluster immediately left of the install pill. Distinct from
- * the update pills in two ways so the user reads them at a glance:
- *   - Icon (`ArrowDownToLine` vs `Download` / `RefreshCw`).
- *   - Chrome (neutral surface tint vs blue/green accent).
- *
- * The badge counts in-flight downloads only; recently-completed
- * entries surface in the popup but don't bump the count (so the
- * count reads as "what's still working"). Click opens the title-bar
- * dropdown popup in `'downloads'` mode; the popup carries the
- * empty-state copy so the title-bar button stays present even when
- * nothing is downloading.
- *
- * Stays visible during the consent lockdown so an in-flight model
- * download remains reachable while the waffle / feedback are hidden.
- */
-const downloadsState = ref<DownloadsTrayState>({ active: [], recent: [] })
-
-const downloadsActiveCount = computed(() => downloadsState.value.active.length)
-const downloadsTrayLabel = computed<string>(() => {
-  const n = downloadsActiveCount.value
-  if (n === 0) return t('titleBar.downloads')
-  return t('titleBar.downloadsInProgress', { n }, n)
-})
-
-const downloadsBtnRef = useTemplateRef<HTMLButtonElement>('downloadsBtn')
-
-function handleDownloadsTray(): void {
-  // Toggle-close + reopen guard mirror `handleFileMenu` — the popup is
-  // a single shared WebContentsView, so the same dismiss / reopen
-  // behaviour the waffle has applies. Without this the tray button
-  // would re-pop the popup immediately after the user's click on it
-  // dismissed it, looking like the popup never closes.
-  if (isMenuOpen.value) {
-    bridge?.dismissFileMenu()
-    return
-  }
-  if (Date.now() - menuClosedAt.downloads < MENU_REOPEN_GUARD_MS) return
-  bridge?.clickDownloadsTray(anchorBelow(downloadsBtnRef.value))
-}
-
 /** Title-bar Send Feedback button. Routes through main, which forwards
  *  `comfy-panel:open-feedback` to the panel renderer — the renderer
  *  fires the `desktop2.feedback.opened` telemetry action and opens the
@@ -328,73 +287,31 @@ const isLight = computed(() => {
 })
 
 const fileBtnRef = useTemplateRef<HTMLButtonElement>('fileBtn')
-
-/** Per-menu suppression window. When the popup closes, we stamp
- *  `Date.now()` against its kind. The next click on the same opener
- *  button within `MENU_REOPEN_GUARD_MS` is treated as "the same click
- *  that just dismissed the popup" and is dropped, preventing the
- *  popup from flickering open immediately after the user clicked the
- *  open button to dismiss it. The OS dismisses the popup first, then
- *  the click event reaches our renderer button — without this guard
- *  the handler would ask main to pop the popup again. Tracked per
- *  popup kind because the waffle and the downloads tray are separate
- *  buttons; clicking the downloads button shouldn't suppress a fresh
- *  waffle open and vice versa. */
-const MENU_REOPEN_GUARD_MS = 100
-const menuClosedAt: Record<'menu' | 'downloads', number> = { menu: 0, downloads: 0 }
-
-/** Tracks whether the popup is currently visible. Set by main via
- *  `onMenuOpened` / `onMenuClosed` IPCs. The timestamp guard above
- *  is unreliable on macOS because the click event can fire before
- *  the blur-driven dismiss propagates back; checking `isMenuOpen`
- *  catches that case — the click's blur will dismiss the popup, so
- *  we just don't ask main to reopen. */
-const isMenuOpen = ref(false)
-
-/** Anchor a native menu just below `el`'s bottom-left corner.
- *  Coordinates are in title-bar-local pixels (y is rounded down so the
- *  popup always sits flush with — never above — the button). */
-function anchorBelow(el: HTMLElement | null | undefined): MenuAnchor {
-  if (!el) return { x: 0, y: 0 }
-  const rect = el.getBoundingClientRect()
-  return { x: Math.round(rect.left), y: Math.round(rect.bottom) }
-}
+const downloadsBtnRef = useTemplateRef<HTMLButtonElement>('downloadsBtn')
 
 const { tooltipAttrs, handleTooltipPointer, hideTip } = useTitleBarTooltip({
   bridge,
   isMac,
 })
 
-function handleFileMenu(): void {
-  // Hide any in-flight tooltip — the menu will obscure the same area
-  // and the click won't fire pointerleave.
-  hideTip()
-  // Toggle-close: if the popup is open at click time, actively ask
-  // main to dismiss it. The blur-driven dismiss path can't be relied
-  // on here — on macOS clicking a sibling WebContentsView in the
-  // same parent window doesn't reliably trigger a `blur` on the
-  // popup webContents, so the popup would otherwise stay open.
-  if (isMenuOpen.value) {
-    bridge?.dismissFileMenu()
-    return
-  }
-  // Suppress reopen on platforms where the dismiss did propagate
-  // before the click event fires (Windows / Linux): the same click
-  // that dismissed the popup also retargets the menu button, and
-  // without this guard handleFileMenu would ask main to pop the
-  // menu again.
-  if (Date.now() - menuClosedAt.menu < MENU_REOPEN_GUARD_MS) return
-  bridge?.openFileMenu(anchorBelow(fileBtnRef.value))
-}
+const {
+  downloadsActiveCount,
+  downloadsTrayLabel,
+  handleFileMenu,
+  handleDownloadsTray,
+} = useTitleBarMenus({
+  bridge,
+  hideTip,
+  fileBtnRef,
+  downloadsBtnRef,
+})
+
 let unsubPanel: (() => void) | undefined
 let unsubTitle: (() => void) | undefined
 let unsubSourceCategory: (() => void) | undefined
 let unsubTheme: (() => void) | undefined
 let unsubFullscreen: (() => void) | undefined
-let unsubMenuOpened: (() => void) | undefined
-let unsubMenuClosed: (() => void) | undefined
 let unsubFirstUseMode: (() => void) | undefined
-let unsubDownloads: (() => void) | undefined
 
 /** Drop the hover gate immediately when input leaves the title-bar
  *  webContents — covers the case where a native menu (Menu.popup) or
@@ -440,18 +357,8 @@ onMounted(() => {
   unsubFullscreen = bridge.onFullscreenChanged((fullscreen) => {
     isFullscreen.value = fullscreen
   })
-  unsubMenuOpened = bridge.onMenuOpened(() => {
-    isMenuOpen.value = true
-  })
-  unsubMenuClosed = bridge.onMenuClosed(({ menu }) => {
-    menuClosedAt[menu] = Date.now()
-    isMenuOpen.value = false
-  })
   unsubFirstUseMode = bridge.onFirstUseModeChanged((mode) => {
     firstUseMode.value = mode
-  })
-  unsubDownloads = bridge.onDownloadsChanged((next) => {
-    downloadsState.value = next
   })
   window.addEventListener('blur', handleWindowBlur)
   window.addEventListener('pointermove', handlePointerMove)
@@ -469,10 +376,7 @@ onUnmounted(() => {
   unsubSourceCategory?.()
   unsubTheme?.()
   unsubFullscreen?.()
-  unsubMenuOpened?.()
-  unsubMenuClosed?.()
   unsubFirstUseMode?.()
-  unsubDownloads?.()
   window.removeEventListener('blur', handleWindowBlur)
   window.removeEventListener('pointermove', handlePointerMove)
   document.documentElement.removeEventListener('pointerleave', handlePointerLeave)
