@@ -31,9 +31,9 @@ import {
   cleanupTempDownloads,
   downloadEvents,
   getDownloadsTrayState,
-  registerDownloadIpc,
 } from './lib/comfyDownloadManager'
 import { registerAssetDownloadHandlers } from './lib/ipc/registerAssetDownloadHandlers'
+import { registerDownloadHandlers } from './lib/ipc/registerDownloadHandlers'
 import { get as getInstallation, installationEvents } from './installations'
 import { showModelFolderRelaunchPage } from './lib/relaunchPage'
 import { COMFY_BG, SPLASH_DARK, TITLEBAR_BG, type SplashTheme } from './lib/theme'
@@ -895,7 +895,7 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
       triggerOpenFeedback,
       sendToPanelDeferred,
     })
-    registerDownloadIpc()
+    registerDownloadHandlers()
     registerAssetDownloadHandlers({ findInstallationIdForWindow })
     cleanupTempDownloads()
     ipc.register({
