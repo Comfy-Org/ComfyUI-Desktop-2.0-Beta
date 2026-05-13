@@ -39,6 +39,7 @@ import { showModelFolderRelaunchPage } from './lib/relaunchPage'
 import { COMFY_BG, SPLASH_DARK, TITLEBAR_BG, type SplashTheme } from './lib/theme'
 import { comfyTitleBarOverlay } from './lib/titleBarOverlay'
 import { sourceMap, _broadcastToRenderer } from './lib/ipc/shared'
+import { lookupInstallUpdateOverride } from './lib/e2eOverrides'
 import * as mainTelemetry from './lib/telemetry'
 import { getDeviceId } from './lib/deviceId'
 
@@ -471,6 +472,9 @@ async function computeInstallUpdateAvailable(
   installationId: string,
 ): Promise<{ available: boolean; version?: string }> {
   if (!installationId) return { available: false }
+  // Test-only override (E2E suite). Empty in production.
+  const override = lookupInstallUpdateOverride(installationId)
+  if (override) return override
   try {
     const inst = await getInstallation(installationId)
     if (!inst) return { available: false }
@@ -824,6 +828,14 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
   }
 
   app.whenReady().then(async () => {
+    // Test-only hooks for the E2E suite. Registered before any host
+    // opens so seeded state (downloads, install-update overrides,
+    // app-update state) is visible to the very first title-bar paint.
+    if (process.env['E2E'] === '1') {
+      const { registerE2EHooks } = await import('./lib/e2eHooks')
+      registerE2EHooks()
+    }
+
     // Wire late-bound host factories before any openOrFocus* runs (the
     // tray menu, activate / second-instance handlers, and the startup
     // picker all flow through the registry).

@@ -383,6 +383,18 @@ export function installUpdate(): void {
   }
 }
 
+/**
+ * Test-only: push an arbitrary `AppUpdateState` through the same
+ * `_setUpdateState` path the real updater uses, so every subscribed
+ * surface (title-bar pills, Global Settings panel) repaints exactly
+ * as it would for a real `update-available` / `update-downloaded`
+ * event. Only called from `e2eHooks.ts` which is itself only loaded
+ * when `process.env['E2E'] === '1'`.
+ */
+export function _test_setUpdateState(next: AppUpdateState): void {
+  _setUpdateState(next)
+}
+
 export function register(): void {
   bindUpdaterEvents()
 

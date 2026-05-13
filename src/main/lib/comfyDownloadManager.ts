@@ -801,6 +801,45 @@ export async function cleanupTempDownloads(): Promise<void> {
   } catch {}
 }
 
+// ---- E2E test seeding ----
+
+/**
+ * Test-only: replace the in-memory active + recent buffers with the
+ * provided snapshot and emit `tray-state-changed` so every renderer
+ * surface (title-bar tray, popup, Settings tab) repaints exactly as
+ * if the snapshot had arrived through the production
+ * `broadcastProgress` path.
+ *
+ * The seeded `active` entries are stub `PendingDownload` records that
+ * carry only the fields `getDownloadsTrayState()` reads
+ * (`lastProgress`); the unused fields are nulled out so test code
+ * never has to fabricate a `BrowserWindow` / `DownloadItem`. Only
+ * called from `e2eHooks.ts` which is itself only loaded when
+ * `process.env['E2E'] === '1'`.
+ */
+export function _test_setSeededTrayState(snapshot: DownloadsTrayState): void {
+  pendingDownloads.clear()
+  for (const entry of snapshot.active) {
+    const stub: PendingDownload = {
+      url: entry.url,
+      filename: entry.filename,
+      directory: entry.directory ?? '',
+      savePath: entry.savePath ?? '',
+      window: null as unknown as BrowserWindow,
+      subscriberWindows: new Set(),
+      lastProgress: { ...entry },
+      lastSpeedBytes: 0,
+      lastSpeedTime: Date.now(),
+    }
+    pendingDownloads.set(entry.url, stub)
+  }
+  recentDownloads.length = 0
+  for (const entry of snapshot.recent) {
+    recentDownloads.push({ ...entry })
+  }
+  downloadEvents.emit('tray-state-changed')
+}
+
 // ---- IPC registration ----
 
 export function registerDownloadIpc(): void {

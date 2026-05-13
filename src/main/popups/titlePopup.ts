@@ -860,3 +860,21 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
   // state for a fresh popup is pushed in `openTitlePopup`.
   downloadEvents.on('tray-state-changed', broadcastDownloadsToTitlePopups)
 }
+
+/**
+ * Test-only: return the bounds + kind of the first currently-open
+ * title-bar dropdown popup, or `null` when no popup is visible. The
+ * downloads-shelf E2E tests use this to assert the popup sized
+ * itself to its content (the regression that motivated the
+ * `scrollHeight === clientHeight` fix). Only called from
+ * `e2eHooks.ts` which is itself only loaded when
+ * `process.env['E2E'] === '1'`.
+ */
+export function _test_getOpenTitlePopupBounds(): { kind: TitlePopupKind; bounds: Electron.Rectangle } | null {
+  for (const entry of titlePopupsByParent.values()) {
+    if (!entry.view.isOpen) continue
+    if (entry.view.popup.webContents.isDestroyed()) continue
+    return { kind: entry.kind, bounds: entry.view.popup.getBounds() }
+  }
+  return null
+}

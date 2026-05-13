@@ -45,6 +45,9 @@ function buildIsolatedEnv(homeDir: string): Record<string, string> {
     XDG_CACHE_HOME: path.join(homeDir, '.cache'),
     XDG_DATA_HOME: path.join(homeDir, '.local', 'share'),
     XDG_STATE_HOME: path.join(homeDir, '.local', 'state'),
+    // Gates `registerE2EHooks()` in main so test-only helpers
+    // (`globalThis.__e2e`) are wired up. See `src/main/lib/e2eHooks.ts`.
+    E2E: '1',
   }
 
   // On Windows, Electron resolves userData via APPDATA (%APPDATA%\<appName>).
