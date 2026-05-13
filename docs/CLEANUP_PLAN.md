@@ -115,10 +115,12 @@ Moved `CreateHostWindowOpts`, `CreateHostWindowResult`, `injectMacPasskeyWarning
 
 Late-binding: the module exposes `setHostWindowFactories({ consultPanelRendererClose, detachInstallImpl, preClearedClose, ensurePanelView, computeInstallUpdateAvailable })`, called once at the top of `whenReady` so `createHostWindow` can reach back into the lifecycle code that still lives in `index.ts` (and which P0.7 / P0.9 will pull out next).
 
-### P0.7 — `src/main/host/attach.ts` and `src/main/host/detach.ts`
-Move `AttachInstallOpts`, `attachInstall` (~370 lines), `_detachInstallImpl` (~50 lines), `returnToDashboard`, `confirmAndCloseAllHostWindows`, `consultPanelRendererClose`, `closeAllHostWindows`.
+### P0.7 — `src/main/host/attach.ts` and `src/main/host/detach.ts` ✅
+Moved:
+- `host/attach.ts` (~340 lines): `AttachInstallOpts`, `attachInstall`. Late-bound via `setAttachFactories({ comfyFailRetryTimerCancels, relaunchStates, computeInstallUpdateAvailable })` so the lifecycle-state maps still owned by `index.ts` reach the listener wiring without forcing a circular import.
+- `host/detach.ts` (~290 lines): `_detachInstallImpl`, `returnToDashboard`, `confirmAndCloseAllHostWindows`, `closeAllHostWindows`, `consultPanelRendererClose`, plus the `preClearedClose` `WeakSet<BrowserWindow>` they share. The createHostWindow close handler imports `preClearedClose` via `setHostWindowFactories(...)` so all three sites read the same set.
 
-These are the actual pivot points for seamless transitions. After the split, the seamless-transition feature can compose them as `detachInstall(entry); attachInstall(entry, newOpts)` without rebuilding the BrowserWindow.
+These are the actual pivot points for seamless transitions. After the split, the seamless-transition feature can compose them as `entry.detachInstall(); attachInstall(entry, newOpts)` without rebuilding the BrowserWindow.
 
 ### P0.8 — `src/main/lib/ipc/registerAssetDownloadHandlers.ts` ✅
 Move `registerAssetDownloadIpc`. Renames to `registerAssetDownloadHandlers` for consistency with the existing `register*Handlers.ts` files in `lib/ipc/`.
