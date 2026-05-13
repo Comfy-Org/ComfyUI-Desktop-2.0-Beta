@@ -15,6 +15,12 @@ export interface LauncherAppHandle {
 export interface SeedOptions {
   /** Seed installation records into the isolated data directory. */
   installations?: SeedInstallation[]
+  /**
+   * Merge into the seeded `settings.json` before launch. Use to bypass
+   * one-time gates (e.g., `firstUseCompleted: true`) so a test isn't
+   * racing the first-use takeover for control of the chooser host.
+   */
+  settings?: Record<string, unknown>
 }
 
 export interface SeedInstallation {
@@ -60,6 +66,17 @@ export async function launchLauncherApp(options?: SeedOptions): Promise<Launcher
     : path.join(homeDir, '.config', 'comfyui-desktop-2')
   await mkdir(appDataDir, { recursive: true })
 
+  // Settings are seeded BEFORE launch so the renderer's first read sees them.
+  // Without this, gates like `firstUseCompleted` race the renderer mount
+  // (the first-use takeover would briefly open and lock the title bar).
+  if (options?.settings && Object.keys(options.settings).length > 0) {
+    const { writeFile: writeFileFs } = await import('node:fs/promises')
+    await writeFileFs(
+      path.join(appDataDir, 'settings.json'),
+      JSON.stringify(options.settings, null, 2),
+    )
+  }
+
   // Expose a CDP remote-debugging port so tests can connect to non-BrowserWindow
   // webContents (e.g. the ComfyUI WebContentsView) via chromium.connectOverCDP().
   // Derive port from Playwright worker index to avoid collisions in parallel runs.
@@ -99,8 +116,10 @@ export async function launchLauncherApp(options?: SeedOptions): Promise<Launcher
     electronApp.on('render-process-gone', () => electronApp.exit(1))
   })
 
-  // Seed data files after launch so we can query app.getPath('userData') for
-  // the correct directory (Electron may capitalize or modify the app name).
+  // Seed installations after launch so we can query app.getPath('userData')
+  // for the correct directory (Electron may capitalize or modify the app
+  // name on some platforms). Installations are read on chooser refresh, so
+  // a post-launch write is fine.
   if (options?.installations && options.installations.length > 0) {
     const userDataDir = await application.evaluate(async ({ app: electronApp }) => {
       return electronApp.getPath('userData')

@@ -2,9 +2,13 @@
  * Chooser E2E: validates the install-less host window's chooser body and
  * its title bar after launch. No installs seeded — covers the cold-start
  * path where the user lands on the chooser.
+ *
+ * Includes regression tests for the three embedded WebContentsView popups
+ * hung off the chooser host (titlePopup, systemModal, titleTooltip) so the
+ * upcoming P0.1 / P0.2 extractions can be validated end-to-end.
  */
 
-import { test, expect } from '@playwright/test'
+import { test, expect, type ElectronApplication } from '@playwright/test'
 import { launchApp, type AppContext } from './launchApp'
 import {
   clickNewInstallTile,
@@ -13,13 +17,17 @@ import {
   expectTakeoverOpen,
   dismissOverlay,
 } from './support/chooserHelpers'
+import { findWebContentsId, waitForWebContents } from './support/cdpPages'
 
 let ctx: AppContext
 
 test.describe.configure({ mode: 'serial' })
 
 test.beforeAll(async () => {
-  ctx = await launchApp()
+  // `firstUseCompleted: true` keeps the first-use takeover from racing
+  // the renderer mount and locking the title bar (consent-lockdown hides
+  // the waffle button, breaking the title-popup tests below).
+  ctx = await launchApp({ settings: { firstUseCompleted: true, telemetryEnabled: false } })
 })
 
 test.afterAll(async () => {
@@ -43,9 +51,123 @@ test('clicking New Install tile opens the new-install takeover @windows @macos @
   await expectChooserVisible(ctx.panel)
 })
 
-test('title-bar menu button is reachable via the eval bridge @windows @macos @linux', async () => {
-  // The menu popup itself lives in another WebContentsView (comfyTitlePopup)
-  // we don't drive in this test; ensure the click dispatches without throwing.
-  await openTitleMenu(ctx.titleBar)
-  await ctx.titleBar.pressKey('Escape')
+// ---------------------------------------------------------------------------
+// Embedded popup WebContentsView regression coverage. These all live on the
+// chooser host and use the same `EmbeddedPopupView`-shaped lifecycle that
+// the upcoming P0.1 (titleTooltip) / P0.2 (systemModal) extractions need to
+// preserve.
+// ---------------------------------------------------------------------------
+
+test('title popup + system modal webContents are pre-warmed on the chooser host @windows @macos @linux', async () => {
+  // Both popups are pre-warmed in `comfy-window:title-bar-ready` so the
+  // first user trigger doesn't pay the load cost.
+  await waitForWebContents(ctx.app, 'comfyTitlePopup.html', 10_000)
+  await waitForWebContents(ctx.app, 'comfySystemModal.html', 10_000)
 })
+
+test('title popup opens, renders menu items, and closes via bridge @windows @macos @linux', async () => {
+  // Click the waffle menu — main pushes a config to the cached title popup
+  // and flips it visible. We assert the popup is no longer marked hidden
+  // by the EmbeddedPopupView contract (the WebContentsView's bounds become
+  // non-empty when shown).
+  await openTitleMenu(ctx.titleBar)
+
+  await expect.poll(
+    () => isPopupVisible(ctx.app, 'comfyTitlePopup.html'),
+    { timeout: 5_000, intervals: [100, 200] },
+  ).toBe(true)
+
+  // Renderer mounts an unordered menu list with at least one actionable item.
+  const popupItems = await readPopupMenuItems(ctx.app, 'comfyTitlePopup.html')
+  expect(popupItems.length).toBeGreaterThan(0)
+
+  // Close via the popup's own bridge — Escape on the title-bar webContents
+  // doesn't reach the popup (separate WebContentsView with its own DOM).
+  await ctx.app.evaluate(({ webContents }) => {
+    const wc = webContents.getAllWebContents().find((w) => w.getURL().includes('comfyTitlePopup.html'))
+    if (!wc) throw new Error('title popup webContents missing')
+    return wc.executeJavaScript(`(window).__comfyTitlePopup.close()`)
+  })
+  await expect.poll(
+    () => isPopupVisible(ctx.app, 'comfyTitlePopup.html'),
+    { timeout: 5_000, intervals: [100, 200] },
+  ).toBe(false)
+})
+
+test('title-bar tooltip popup is created on demand and hides cleanly @windows @macos @linux', async () => {
+  // No webContents for the tooltip popup exists before the first show —
+  // unlike titlePopup / systemModal, the tooltip is NOT pre-warmed.
+  expect(await findWebContentsId(ctx.app, 'comfyTitleTooltip.html')).toBeNull()
+
+  // Drive the bridge directly from the title-bar webContents so the test
+  // works on Windows too (the Vue `pointermove` handler short-circuits
+  // off-mac, so a hover-based test would only cover macOS).
+  await ctx.app.evaluate(({ webContents }) => {
+    const wc = webContents.getAllWebContents().find((w) => w.getURL().includes('comfyTitleBar.html'))
+    if (!wc) throw new Error('title-bar webContents missing')
+    return wc.executeJavaScript(
+      `(window).__comfyTitleBar.showTooltip({ text: 'e2e tooltip', leftX: 50, rightX: 200, bottomY: 30 })`,
+    )
+  })
+
+  // Tooltip popup webContents now exists.
+  await waitForWebContents(ctx.app, 'comfyTitleTooltip.html', 5_000)
+  await expect.poll(
+    () => isPopupVisible(ctx.app, 'comfyTitleTooltip.html'),
+    { timeout: 5_000, intervals: [100, 200] },
+  ).toBe(true)
+
+  // Hide via the same bridge.
+  await ctx.app.evaluate(({ webContents }) => {
+    const wc = webContents.getAllWebContents().find((w) => w.getURL().includes('comfyTitleBar.html'))
+    if (!wc) throw new Error('title-bar webContents missing')
+    return wc.executeJavaScript(`(window).__comfyTitleBar.hideTooltip()`)
+  })
+
+  await expect.poll(
+    () => isPopupVisible(ctx.app, 'comfyTitleTooltip.html'),
+    { timeout: 5_000, intervals: [100, 200] },
+  ).toBe(false)
+})
+
+/**
+ * True iff a WebContentsView whose webContents URL contains `marker` is
+ * currently `visible` AND has non-zero bounds — the EmbeddedPopupView
+ * contract for "shown to the user".
+ */
+async function isPopupVisible(app: ElectronApplication, marker: string): Promise<boolean> {
+  return app.evaluate(({ BrowserWindow, WebContentsView }, m) => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      for (const child of win.contentView.children) {
+        if (!(child instanceof WebContentsView)) continue
+        if (!child.webContents.getURL().includes(m)) continue
+        if (!child.getVisible()) return false
+        const b = child.getBounds()
+        return b.width > 0 && b.height > 0
+      }
+    }
+    return false
+  }, marker)
+}
+
+/** Read the popup's currently-rendered menu item labels. */
+async function readPopupMenuItems(app: ElectronApplication, marker: string): Promise<string[]> {
+  return app.evaluate(({ webContents }, m) => {
+    const wc = webContents.getAllWebContents().find((w) => w.getURL().includes(m))
+    if (!wc) throw new Error(`${m} webContents missing`)
+    return wc.executeJavaScript(`(() => {
+      const candidates = [
+        'button.menu-item',
+        '[role="menuitem"]',
+        '.title-popup-menu-item',
+        'li button',
+        'button',
+      ]
+      for (const sel of candidates) {
+        const els = Array.from(document.querySelectorAll(sel))
+        if (els.length > 0) return els.map(el => (el.textContent || '').trim()).filter(Boolean)
+      }
+      return []
+    })()`) as Promise<string[]>
+  }, marker)
+}
