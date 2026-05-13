@@ -20,8 +20,9 @@ import { useListAction } from '../composables/useListAction'
 import { useMigrateAction } from '../composables/useMigrateAction'
 import { useOverlay, type FlowComponent } from '../composables/useOverlay'
 import { useModal } from '../composables/useModal'
+import { useAppUpdatePrompts } from '../composables/useAppUpdatePrompts'
+import { useSendFeedback } from '../composables/useSendFeedback'
 import { emitTelemetryAction } from '../lib/telemetry'
-import { buildSupportUrl } from '../lib/supportUrl'
 import type { ActionResult, Installation, ShowProgressOpts } from '../types/ipc'
 
 /**
@@ -163,12 +164,8 @@ const launcherPrefs = useLauncherPrefs()
  */
 const { current: currentOverlay, openOverlay, closeOverlay } = useOverlay()
 
-/** Used by the title-bar app-update pill modals. The pill click is
- *  routed by main on `panel-trigger-overlay`; the panel renderer pops
- *  a confirm modal (via the global `useModal` singleton consumed by
- *  the mounted `<ModalDialog />`) rather than a Tier 1 overlay so the
- *  spec's "modal" wording maps to actual modal chrome. */
 const modal = useModal()
+const { showAppUpdateRestartPrompt, showAppUpdateDownloadPrompt } = useAppUpdatePrompts()
 
 // installationStore.fetchInstallations() is wired to onInstallationsChanged
 // inside the store itself, so the panel just needs to read from it.
@@ -183,7 +180,7 @@ let unsubPanelTriggerOverlay: (() => void) | null = null
 let unsubFirstUseSkip: (() => void) | null = null
 let unsubAppUpdatePromptRestart: (() => void) | null = null
 let unsubAppUpdateUserActionFailed: (() => void) | null = null
-let unsubOpenFeedback: (() => void) | null = null
+useSendFeedback()
 
 /**
  * Resolves once `onMounted` has finished its async bootstrap (locale +
@@ -198,23 +195,6 @@ let resolveBootstrap: (() => void) | null = null
 const bootstrapReady: Promise<void> = new Promise<void>((resolve) => {
   resolveBootstrap = resolve
 })
-
-/** App version cached at mount; appended to the support URL as the
- *  `ver` query param so feedback submissions can be filtered by build.
- *  Cached because the typeform open path is fire-and-forget and we
- *  don't want to await an IPC inside the click handler. Empty string
- *  while the initial fetch is in flight or if it failed — `buildSupportUrl`
- *  treats falsy as "omit the param". */
-const appVersion = ref('')
-
-/** Forward a Send Feedback request from the title-bar button or the
- *  file-menu entry: fire the `desktop2.feedback.opened` telemetry
- *  action (with `source` so we can tell which affordance the user
- *  reached for), then open the typeform support URL via `openExternal`. */
-function handleOpenFeedback(source: 'titlebar' | 'menu'): void {
-  emitTelemetryAction('desktop2.feedback.opened', { source })
-  void window.api.openExternal(buildSupportUrl(appVersion.value || undefined))
-}
 
 async function loadLocale(): Promise<void> {
   const messages = await window.api.getLocaleMessages()
@@ -869,49 +849,6 @@ function handleNavigateList(): void {
   }
 }
 
-/** Format a version into the parameterised modal-copy slot. Falls back
- *  to "this update" when no version is known so the message reads
- *  cleanly in the (rare) version-less event payload. */
-function versionLabel(version: string | null): string {
-  return version ? `v${version}` : t('appUpdate.fallbackVersion')
-}
-
-/**
- * "Desktop Update Ready" confirm modal. Fired by the title-bar pill
- * click when the cached state is `'ready'`, and automatically when an
- * auto-off user-initiated download finishes. Confirm → install &
- * relaunch (silent); cancel leaves the pill in place so the user can
- * trigger this prompt again later.
- */
-async function showAppUpdateRestartPrompt(version: string | null): Promise<void> {
-  const ok = await modal.confirm({
-    title: t('appUpdate.readyTitle'),
-    message: t('appUpdate.readyMessage', { version: versionLabel(version) }),
-    confirmLabel: t('appUpdate.restartNow'),
-    confirmStyle: 'primary',
-  })
-  if (!ok) return
-  await window.api.installUpdate()
-}
-
-/**
- * "Desktop Update Available" confirm modal. Fired by the title-bar pill
- * click when the cached state is `'available'` (only happens with
- * auto-updates OFF — main suppresses 'available' under auto-on).
- * Confirm → kick off the download; the auto restart-prompt fires on
- * `update-downloaded` to close the loop.
- */
-async function showAppUpdateDownloadPrompt(version: string | null): Promise<void> {
-  const ok = await modal.confirm({
-    title: t('appUpdate.availableTitle'),
-    message: t('appUpdate.availableMessage', { version: versionLabel(version) }),
-    confirmLabel: t('appUpdate.download'),
-    confirmStyle: 'primary',
-  })
-  if (!ok) return
-  await window.api.downloadUpdate()
-}
-
 onMounted(async () => {
   // Register the `panel-trigger-overlay` listener BEFORE any `await` so
   // a deep-link IPC fired by main right after the panelView's first
@@ -1041,23 +978,6 @@ onMounted(async () => {
     void completeFirstUseAndDismiss()
   })
 
-  // Title-bar Send Feedback button + file-menu "Send Feedback" entry
-  // both forward through main to this listener. See `handleOpenFeedback`;
-  // `source` identifies the affordance for telemetry.
-  unsubOpenFeedback = window.api.onOpenFeedback(({ source }) => {
-    handleOpenFeedback(source)
-  })
-
-  // Cache the app version for the support URL's `ver` query param.
-  // Fire-and-forget — `handleOpenFeedback` falls back to omitting the
-  // param while this is in flight or if it rejects.
-  void window.api
-    .getAppVersion()
-    .then((v) => {
-      appVersion.value = v
-    })
-    .catch(() => {})
-
   // Initialize stores / prefs needed by the embedded DetailModal that
   // backs the unified Settings modal's "ComfyUI Settings" tab.
   // installationStore wires its own onInstallationsChanged listener.
@@ -1102,7 +1022,6 @@ onUnmounted(() => {
   unsubFirstUseSkip?.()
   unsubAppUpdatePromptRestart?.()
   unsubAppUpdateUserActionFailed?.()
-  unsubOpenFeedback?.()
   pendingPickUnsub?.()
   sessionStore.dispose()
 })
