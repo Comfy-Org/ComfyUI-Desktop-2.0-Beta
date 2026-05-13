@@ -1,47 +1,65 @@
 /**
- * Shared Electron app launcher for E2E navigation tests.
+ * Shared Electron app launcher for E2E tests.
  *
- * Builds on the existing electronHarness (isolated temp home dir).
- * Waits for the Vue app to fully mount before returning.
- *
- * Usage:
- *   import { launchApp, type AppContext } from './launchApp'
- *
- *   let ctx: AppContext
- *   test.beforeAll(async () => { ctx = await launchApp() })
- *   test.afterAll(async () => { await ctx.cleanup() })
+ * Returns the chooser host wrapped in eval-bridge `WebContentsPage` facades
+ * for the panel body and title bar. The parent BrowserWindow has no DOM,
+ * so all renderer assertions go through these facades, which run
+ * `executeJavaScript` against the underlying WebContentsView's webContents.
  */
 
-import type { ElectronApplication, Page } from '@playwright/test'
+import { expect, type ElectronApplication } from '@playwright/test'
 import { launchLauncherApp, type SeedOptions } from './support/electronHarness'
+import { panelPage, titleBarPage, waitForWebContents, type WebContentsPage } from './support/cdpPages'
+
+/** Poll the main process until both panel.html and comfyTitleBar.html webContents exist. */
+async function waitForChooserWebContents(app: ElectronApplication, timeoutMs = 30_000): Promise<void> {
+  await expect.poll(
+    () => app.evaluate(({ webContents }) => {
+      const urls = webContents.getAllWebContents().map((wc) => wc.getURL())
+      return {
+        hasPanel: urls.some((u) => u.includes('panel.html')),
+        hasTitleBar: urls.some((u) => u.includes('comfyTitleBar.html')),
+      }
+    }).then((s) => s.hasPanel && s.hasTitleBar),
+    { timeout: timeoutMs, intervals: [250, 500, 1000] },
+  ).toBe(true)
+}
 
 export type { SeedOptions, SeedInstallation } from './support/electronHarness'
 
 export interface AppContext {
   app: ElectronApplication
-  page: Page
-  /** CDP remote-debugging port for connecting to WebContentsView targets. */
-  cdpPort: number
+  /** Eval-bridge facade over the chooser host's panel webContents. */
+  panel: WebContentsPage
+  /** Eval-bridge facade over the chooser host's title-bar webContents. */
+  titleBar: WebContentsPage
   cleanup: () => Promise<void>
 }
 
 export async function launchApp(options?: SeedOptions): Promise<AppContext> {
-  const { application, cdpPort, cleanup } = await launchLauncherApp(options)
+  const { application, cleanup: cleanupHarness } = await launchLauncherApp(options)
 
-  const page = await application.firstWindow()
+  // Wait for the chooser host's panel + title-bar webContents to actually
+  // exist on the main side BEFORE attempting CDP discovery. The parent
+  // BrowserWindow has no DOM; both renderers live in child WebContentsViews
+  // that are constructed asynchronously after `whenReady()`.
+  await waitForChooserWebContents(application)
 
-  // Wait for the Vue app to mount — the sidebar brand text is a reliable marker
-  await page.waitForSelector('.sidebar-brand', { timeout: 30_000 })
+  await waitForWebContents(application, 'panel.html')
+  await waitForWebContents(application, 'comfyTitleBar.html')
 
-  // If installations were seeded after launch, the renderer needs to
-  // re-fetch the list. Navigate to the Installs tab to trigger a refresh.
-  if (options?.installations && options.installations.length > 0) {
-    await page.locator('.sidebar-item', { hasText: 'Installs' }).click()
-    // Wait for the seeded card to appear
-    await page.waitForSelector('.instance-card', { timeout: 10_000 })
-    // Return to dashboard
-    await page.locator('.sidebar-item', { hasText: 'Dashboard' }).click()
+  const panel = panelPage(application)
+  const titleBar = titleBarPage(application)
+
+  // Wait for the Vue trees to mount inside each surface.
+  await panel.waitForSelector('.panel-shell', { timeout: 30_000 })
+  await panel.waitForSelector('.chooser-view, .panel-chooser', { timeout: 15_000 })
+  await titleBar.waitForSelector('.title-bar', { timeout: 15_000 })
+
+  return {
+    app: application,
+    panel,
+    titleBar,
+    cleanup: cleanupHarness,
   }
-
-  return { app: application, page, cdpPort, cleanup }
 }
