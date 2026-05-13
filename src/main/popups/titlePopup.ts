@@ -459,14 +459,15 @@ function openTitlePopup(opts: OpenTitlePopupOpts): void {
     )
   }
 
-  // Re-add as the most recently attached child view so the popup paints
-  // on top of `titleBarView` / `comfyView` / `panelView`. Then update
-  // bounds while still hidden — the popup is flipped visible only after
-  // the renderer acks the new content has painted.
-  try {
-    opts.parent.contentView.removeChildView(entry.view.popup)
-  } catch {}
-  opts.parent.contentView.addChildView(entry.view.popup)
+  // Update bounds while still hidden — the popup is flipped visible
+  // only after the renderer acks the new content has painted, by
+  // `showTitlePopupNow` → `view.showOnTop()` (which also re-stacks the
+  // popup as the most recent child view so it paints above
+  // `titleBarView` / `comfyView` / `panelView`). Re-stacking here too
+  // would race with the renderer's `request-size` resize: re-attaching
+  // the WebContentsView appears to reset bounds back to whatever was
+  // last set before the attach, undoing the natural-height resize and
+  // leaving the downloads popup stuck at the ceiling height.
   entry.view.popup.setBounds({ x, y, width, height })
 
   // Downloads popup feeds on a separate channel — push the latest
