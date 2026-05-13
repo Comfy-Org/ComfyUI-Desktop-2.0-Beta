@@ -125,8 +125,8 @@ These are the actual pivot points for seamless transitions. After the split, the
 ### P0.8 — `src/main/lib/ipc/registerAssetDownloadHandlers.ts` ✅
 Move `registerAssetDownloadIpc`. Renames to `registerAssetDownloadHandlers` for consistency with the existing `register*Handlers.ts` files in `lib/ipc/`.
 
-### P0.9 — Panel/body-mode glue  (~100 lines)
-Move `ensurePanelView`, `focusActiveBody`, `setActivePanel`, `refreshComfyTabBody`, `sendToPanelDeferred`, the `comfy-window:set-panel` and `comfy-window:close-current-panel` handlers into `src/main/host/panelView.ts`.
+### P0.9 — `src/main/host/panelView.ts`  (~195 lines) ✅
+Moved `ensurePanelView`, `focusActiveBody`, `setActivePanel`, `refreshComfyTabBody`, `sendToPanelDeferred`, plus the `comfy-window:set-panel` and `comfy-window:close-current-panel` IPC handlers (now wrapped in an exported `registerPanelViewIpc()` called once from `whenReady`). Pure relocation — the module imports its dependencies directly from `host/registry`, `lib/titleBarOverlay`, and `lib/ipc/shared` with no callback bag needed.
 
 ### Target end state
 After P0.1–P0.9, `index.ts` should be **~600–800 lines**: imports, app-level wiring, `whenReady`, `before-quit` orchestration, lifecycle event routing (`onComfyExited`/`onLaunch`/`onStop`), tray menu, the `quit-app` / `focus-comfy-window` / `close-host-window` handlers, and the `register*Ipc()` startup calls for each subsystem.
@@ -218,7 +218,7 @@ Recommended execution order across follow-up threads:
 1. **Thread A — Test salvage** ✅ (landed in this PR).
 2. **Thread B — P0.1 + P0.2 + P0.4 + P0.8** ✅ (landed in this PR; `index.ts` 4533 → 3720 lines).
 3. **Thread C — P0.5 (registry)** ✅ (landed in this PR; `index.ts` 3720 → 3125 lines).
-4. **Thread D — P0.3 + P0.6 + P0.7 + P0.9**. The host-window construction split.
+4. **Thread D — P0.3 + P0.6 + P0.7 + P0.9** ✅ (landed in this PR; `index.ts` 3125 → ~905 lines). The host-window construction split. Final structure: `popups/titlePopup.ts` (~890), `host/createHostWindow.ts` (~660), `host/attach.ts` (~340), `host/detach.ts` (~290), `host/panelView.ts` (~195). Lifecycle-state maps (`relaunchStates`, `comfyFailRetryTimerCancels`) and `computeInstallUpdateAvailable` still live in `index.ts` and reach the new modules via `setAttachFactories(...)` / `setHostWindowFactories(...)` / `setDetachFactories(...)` — moving them out is a P3/P4 follow-up, not blocking the seamless-transition feature.
 5. **Thread E — P1 (popup primitive)**. After all 3 popups live in their own files.
 6. **Thread F — P3 + P4**. Renderer file splits and the comment trim sweep.
 
