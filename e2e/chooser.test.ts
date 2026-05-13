@@ -52,6 +52,35 @@ test('clicking New Install tile opens the new-install takeover @windows @macos @
 })
 
 // ---------------------------------------------------------------------------
+// Host registry regression coverage. `openOrFocusAnyHostWindow` /
+// `openOrFocusChooserHostWindow` must dedup against the existing chooser
+// host instead of spawning a duplicate; the popup-open tests below double
+// as a check that title-bar IPC routing still resolves the existing entry
+// after the dedup path runs.
+// ---------------------------------------------------------------------------
+
+test('activate hook focuses the existing chooser host instead of spawning a duplicate @windows @macos @linux', async () => {
+  // Baseline: exactly one host BrowserWindow is open from `beforeAll`.
+  const before = await ctx.app.evaluate(({ BrowserWindow }) =>
+    BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed()).length,
+  )
+  expect(before).toBe(1)
+
+  // Trigger the platform re-launch hook the registry guards against.
+  // `app.on('activate', () => openOrFocusAnyHostWindow())` is registered
+  // unconditionally in `whenReady` so emitting it is portable across OSes.
+  await ctx.app.evaluate(({ app }) => { app.emit('activate') })
+  // Window construction is synchronous in the dedup miss path; the dedup
+  // hit path is even faster. A short settle covers both.
+  await new Promise((r) => setTimeout(r, 200))
+
+  const after = await ctx.app.evaluate(({ BrowserWindow }) =>
+    BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed()).length,
+  )
+  expect(after).toBe(1)
+})
+
+// ---------------------------------------------------------------------------
 // Embedded popup WebContentsView regression coverage. These all live on the
 // chooser host and use the same `EmbeddedPopupView`-shaped lifecycle that
 // the upcoming P0.1 (titleTooltip) / P0.2 (systemModal) extractions need to
