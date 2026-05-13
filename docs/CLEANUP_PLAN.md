@@ -67,15 +67,15 @@ Move:
 
 Exports: `openSystemModal`, `registerSystemModalIpc()`.
 
-### P0.3 — `src/main/popups/titlePopup.ts`  (~700 lines)
-The biggest popup. Move:
+### P0.3 — `src/main/popups/titlePopup.ts`  (~890 lines) ✅
+Moved:
 - `TitlePopupMenuItem`, `TitlePopupConfig`, `TitlePopupEntry`, `OpenTitlePopupOpts`
 - Constants: `POPUP_WIDTH`, `POPUP_RENDER_ACK_TIMEOUT_MS`, `DOWNLOADS_POPUP_*`
 - Maps: `titlePopupsByParent`, `titlePopupsByWebContents`
-- Functions: `computePopupHeight`, `buildTitlePopupMenuItems`, `ensureTitlePopup`, `hideTitlePopup`, `showTitlePopupNow`, `openTitlePopup`, `activateTitlePopupMenuItem`, `notifyTitlePopupDownloads`, `_broadcastDownloadsToTitlePopups`
-- ~10 IPC handlers under `comfy-titlepopup:*` and the title-bar menu/downloads triggers
+- Functions: `computePopupHeight`, `buildTitlePopupMenuItems`, `ensureTitlePopup`, `hideTitlePopup`, `showTitlePopupNow`, `openTitlePopup`, `activateTitlePopupMenuItem`, `notifyTitlePopupDownloads`, plus a `prewarmTitlePopup(parent)` so `index.ts` can pre-create the popup on host construction without leaking the internal `ensureTitlePopup`.
+- All `comfy-titlepopup:*` IPC handlers plus the title-bar triggers (`comfy-window:click-downloads-tray`, `comfy-window:open-title-menu`, `comfy-window:dismiss-title-menu`).
 
-⚠ **Friction**: this one reaches into the host registry (`comfyWindows.get`, `_runningSessions`) and triggers cross-cutting actions (`triggerOpenFeedback`, `setActivePanel`, `returnToDashboard`). Block on **P0.5** — the registry split — so the popup can take a single `host` facade as a constructor arg instead of importing 8 things from `index.ts`.
+The popup module now subscribes to `downloadEvents` itself for live tray updates — `index.ts` no longer needs `_broadcastDownloadsToTitlePopups`. Cross-cutting actions reach the popup via a `TitlePopupHostBindings` callback bag passed to `registerTitlePopupIpc({ openChooserHostWindow, returnToDashboard, confirmAndCloseAllHostWindows, setActivePanel, triggerOpenFeedback, sendToPanelDeferred })`.
 
 ### P0.4 — `src/main/lib/processErrorHandlers.ts`  (~95 lines) ✅
 Move: `serializeUnknownError`, `forwardDatadogError`, `registerProcessErrorHandlers`, the `processErrorHandlersRegistered` flag.
