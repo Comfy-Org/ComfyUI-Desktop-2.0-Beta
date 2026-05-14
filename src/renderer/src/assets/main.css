@@ -117,8 +117,19 @@
   --comfy-yellow: var(--neutral-50);
   --focus-ring: var(--neutral-100);
   --accent-plum: #afa3db;
+  --accent-label: #8a8a8a;
+  --accent-primary: #0b8ce9;
 
   --surface-recessed: var(--neutral-900);
+
+  /* Brand-surface frosted-glass recipe — shared across brand takeover
+   * screens (ChoiceCard, config card, brand form fields). One source of
+   * truth so palette tweaks land in one place. */
+  --brand-surface-bg: rgba(137, 137, 137, 0.05);
+  --brand-surface-bg-hover: rgba(137, 137, 137, 0.09);
+  --brand-surface-border: rgba(255, 255, 255, 0.09);
+  --brand-surface-border-hover: rgba(255, 255, 255, 0.18);
+  --brand-surface-blur: 75px;
 
   /* Takeover fluid type + spacing — Utopia clamp, anchored 1024px → 1920px. */
   --takeover-fs-caption: clamp(0.75rem, 0.6071rem + 0.2232vw, 0.875rem); /* 12→14px */
@@ -129,7 +140,7 @@
   --takeover-fs-title: clamp(1.625rem, 0.3393rem + 2.0089vw, 2.75rem); /* 26→44px */
   --takeover-fs-display: clamp(2rem, 0.2857rem + 2.6786vw, 3.5rem); /* 32→56px */
 
-  --takeover-logo-size: clamp(1.5rem, 0.9286rem + 0.8929vw, 2rem); /* 24→32px */
+  --takeover-logo-size: clamp(1.5rem, 0.9286rem + 0.8929vw, 2.5rem); /* 24→32px */
   --takeover-gap-sm: clamp(0.5rem, 0.1786rem + 0.4464vw, 0.75rem); /* 8→12px */
   --takeover-gap-md: clamp(0.75rem, 0.1071rem + 0.8929vw, 1.25rem); /* 12→20px */
   --takeover-gap-lg: clamp(3rem, 1.8571rem + 1.7857vw, 4rem); /* 48→64px */
@@ -172,8 +183,18 @@
   --comfy-yellow: var(--neutral-50);
   --focus-ring: var(--neutral-100);
   --accent-plum: #afa3db;
+  --accent-primary: #0b8ce9;
 
   --surface-recessed: var(--neutral-900);
+
+  /* Brand-surface tokens — mirror of dark-theme block. Light-mode
+   * brand chrome isn't shipping yet; keep the variable surface so
+   * consumers don't have to re-thread later. */
+  --brand-surface-bg: rgba(137, 137, 137, 0.05);
+  --brand-surface-bg-hover: rgba(137, 137, 137, 0.09);
+  --brand-surface-border: rgba(255, 255, 255, 0.09);
+  --brand-surface-border-hover: rgba(255, 255, 255, 0.18);
+  --brand-surface-blur: 75px;
 
   /* Takeover fluid type + spacing — mirror of dark-theme block. */
   --takeover-fs-caption: clamp(0.75rem, 0.6071rem + 0.2232vw, 0.875rem);
@@ -332,9 +353,9 @@ body {
 
 /* Buttons */
 button {
-  padding: 7px 16px;
+  padding: 8px 16px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 8px;
   background: var(--surface);
   color: var(--text);
   font-size: 14px;
@@ -344,14 +365,14 @@ button:hover {
   background: var(--border);
 }
 button.primary {
-  background: var(--accent);
-  color: var(--bg);
-  border-color: var(--accent);
-  font-weight: 600;
+  background: var(--accent-primary);
+  color: var(--text);
+  border-color: var(--accent-primary);
+  font-weight: 500;
 }
 button.primary:hover {
-  background: var(--accent-hover);
-  border-color: var(--accent-hover);
+  background: color-mix(in srgb, var(--accent-primary) 85%, #000);
+  border-color: color-mix(in srgb, var(--accent-primary) 85%, #000);
 }
 button.accent {
   color: var(--accent);
@@ -382,6 +403,119 @@ button:disabled,
 button.looks-disabled {
   opacity: 0.4;
   cursor: default;
+}
+
+/* ================================================================
+ * Brand takeover primitives — shared across brand-wrapped screens
+ * (cloud-vs-local pick, Configure Comfy Desktop, future migrate /
+ * progress screens). All rules consume --brand-surface-* tokens so
+ * palette tweaks land in one place.
+ * ================================================================ */
+
+.brand-hero {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 960px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.brand-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: var(--takeover-fs-title);
+  line-height: 1.15;
+  letter-spacing: 0;
+  color: var(--color-text);
+  text-align: center;
+}
+
+.brand-lead {
+  margin: var(--takeover-gap-md) 0 var(--takeover-gap-lg);
+  font-family: var(--font-sans);
+  font-size: var(--takeover-fs-lead);
+  font-weight: 400;
+  line-height: normal;
+  color: var(--neutral-200);
+  text-align: center;
+}
+
+.brand-input {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid var(--brand-surface-border);
+  border-radius: 6px;
+  background: var(--brand-surface-bg);
+  color: var(--neutral-100);
+  font: inherit;
+  font-size: var(--takeover-fs-body);
+  transition:
+    border-color 120ms ease,
+    background 120ms ease;
+}
+.brand-input:hover {
+  border-color: var(--brand-surface-border-hover);
+  background: var(--brand-surface-bg-hover);
+}
+.brand-input:focus-within {
+  border-color: var(--brand-surface-border-hover);
+}
+.brand-input:has(input:focus-visible) {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.brand-input input[type='text'],
+.brand-input input[type='number'],
+.brand-input input:not([type]) {
+  all: unset;
+  -webkit-appearance: none;
+  appearance: none;
+  flex: 1 1 auto;
+  min-width: 0;
+  width: auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: text;
+  outline: 0;
+}
+.brand-input input::placeholder {
+  color: var(--neutral-400);
+}
+
+button.brand-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 16px;
+  border: 1px solid var(--brand-surface-border);
+  border-radius: 6px;
+  background: var(--brand-surface-bg);
+  color: var(--neutral-100);
+  font: inherit;
+  font-size: var(--takeover-fs-body);
+  cursor: pointer;
+  transition:
+    border-color 120ms ease,
+    background 120ms ease;
+}
+button.brand-secondary:hover {
+  border-color: var(--brand-surface-border-hover);
+  background: var(--brand-surface-bg-hover);
+}
+button.brand-secondary:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
 }
 button.loading {
   opacity: 0.7;

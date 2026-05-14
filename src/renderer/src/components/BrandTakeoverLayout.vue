@@ -97,7 +97,7 @@ withDefaults(
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: clamp(2rem, 5vw, 6rem);
+  padding: clamp(2rem, 5vw, 48px);
   border-radius: 8px;
   background: var(--neutral-900);
   overflow: hidden;
@@ -109,7 +109,7 @@ withDefaults(
   top: 0;
   left: 0;
   z-index: 3;
-  padding: 8px 16px;
+  padding: 16px 15px;
   display: flex;
   align-items: center;
 }

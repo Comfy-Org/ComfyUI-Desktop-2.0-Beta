@@ -56,10 +56,10 @@ defineEmits<{ click: [] }>()
   align-items: stretch;
   gap: 0;
   padding: 0;
-  border: 1px solid rgba(255, 255, 255, 0.09);
+  border: 1px solid var(--brand-surface-border);
   border-radius: 6px;
-  background: rgba(137, 137, 137, 0.05);
-  backdrop-filter: blur(75px);
+  background: var(--brand-surface-bg);
+  backdrop-filter: blur(var(--brand-surface-blur));
   color: var(--neutral-100);
   text-align: left;
   cursor: pointer;
@@ -70,8 +70,8 @@ defineEmits<{ click: [] }>()
   font: inherit;
 }
 .choice-card:hover:not(:disabled) {
-  border-color: rgba(255, 255, 255, 0.18);
-  background: rgba(137, 137, 137, 0.09);
+  border-color: var(--brand-surface-border-hover);
+  background: var(--brand-surface-bg-hover);
 }
 .choice-card:hover:not(:disabled) .choice-card__label {
   color: var(--text);
@@ -93,7 +93,7 @@ defineEmits<{ click: [] }>()
   height: 120px;
   border-radius: 50%;
   background: var(--accent-plum);
-  opacity: 0.6;
+  opacity: 0.7;
   filter: blur(80px);
   pointer-events: none;
   z-index: 0;
@@ -102,6 +102,7 @@ defineEmits<{ click: [] }>()
 .choice-card__glow {
   top: 10%;
   left: 60%;
+  width: 300px;
   transform: translateX(-50%);
 }
 
