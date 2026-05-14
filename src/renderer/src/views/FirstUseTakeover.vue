@@ -301,9 +301,9 @@ defineExpose({ open })
 
 <template>
   <BrandTakeoverLayout v-if="step === 'pick'">
-    <div class="pick-hero">
-      <h1 class="pick-title">{{ $t('firstUse.pickTitle') }}</h1>
-      <p class="pick-lead">{{ $t('firstUse.pickLead') }}</p>
+    <div class="brand-hero">
+      <h1 class="brand-title">{{ $t('firstUse.pickTitle') }}</h1>
+      <p class="brand-lead">{{ $t('firstUse.pickLead') }}</p>
       <div class="pick-grid" role="radiogroup" :aria-label="$t('firstUse.pickTitle')">
         <ChoiceCard
           :label="$t('cloud.label')"
@@ -626,40 +626,11 @@ defineExpose({ open })
   margin-top: 8px;
 }
 
-/* Pick step. Brand chrome (background, beams, logo) lives in
- * BrandTakeoverLayout; only the hero block is styled here.
+/* Pick step. Hero/title/lead live as the global `.brand-*` classes
+ * (main.css) so the Configure screen can reuse the same primitives.
  * `.pick-why-cloud` is rendered via the layout's #footer-left slot
  * and stays here because its absolute positioning resolves against the
  * outer frame, which the layout preserves as its positioning context. */
-.pick-hero {
-  position: relative;
-  z-index: 1;
-  width: 100%;
-  max-width: 960px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-}
-.pick-title {
-  margin: 0;
-  font-family: var(--font-display);
-  font-weight: 800;
-  font-size: var(--takeover-fs-title);
-  line-height: 1.15;
-  letter-spacing: 0;
-  color: var(--color-text);
-  text-align: center;
-}
-.pick-lead {
-  margin: var(--takeover-gap-md) 0 var(--takeover-gap-lg);
-  font-family: var(--font-sans);
-  font-size: var(--takeover-fs-lead);
-  font-weight: 400;
-  line-height: normal;
-  color: var(--neutral-200);
-  text-align: center;
-}
 .pick-grid {
   display: grid;
   width: 100%;
@@ -680,11 +651,12 @@ defineExpose({ open })
   padding: 6px 4px;
   color: color-mix(in oklab, var(--neutral-100) 70%, transparent);
   font: inherit;
-  font-size: var(--takeover-fs-caption);
+  font-size: var(--takeover-fs-body);
   cursor: pointer;
 }
 .pick-why-cloud:hover {
   color: var(--neutral-100);
+  transition: color 120ms ease;
 }
 .pick-why-cloud:focus-visible {
   outline: 2px solid var(--focus-ring);
