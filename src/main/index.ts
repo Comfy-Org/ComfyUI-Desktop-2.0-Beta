@@ -46,11 +46,13 @@ import { getDeviceId } from './lib/deviceId'
 import {
   comfyWindows,
   computeBodyMode,
+  consumeAttachClaim,
   findEntryByTitleBarSender,
   getEntryByInstallationId,
+  isChooserHost,
+  isInstallHost,
   openOrFocusAnyHostWindow,
   openOrFocusChooserHostWindow,
-  pendingAttachClaims,
   setHostFactories,
 } from './host/registry'
 import {
@@ -270,12 +272,10 @@ function onStop({ installationId }: { installationId?: string } = {}): void {
   if (installationId) {
     refreshComfyTabBody(installationId)
   } else {
-    // Refresh every install-backed entry's comfy tab. Install-less
-    // host windows (entry.
-    // installationId === null) have no comfy lifecycle to refresh,
-    // so they're skipped naturally.
+    // Refresh every install-backed entry's comfy tab; chooser hosts
+    // have no comfy lifecycle to refresh, so they're skipped naturally.
     for (const entry of comfyWindows.values()) {
-      if (entry.installationId !== null) {
+      if (isInstallHost(entry)) {
         refreshComfyTabBody(entry.installationId)
       }
     }
@@ -328,14 +328,13 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
 
   // Chooser-pick in-place attach — the chooser claimed this host before
   // launching. Reconcile partition mismatches by rebuilding the comfyView.
-  const claimedKey = pendingAttachClaims.get(installationId)
+  const claimedKey = consumeAttachClaim(installationId)
   if (claimedKey !== undefined) {
-    pendingAttachClaims.delete(installationId)
     const claimed = comfyWindows.get(claimedKey)
     if (
       claimed &&
       !claimed.window.isDestroyed() &&
-      claimed.installationId === null
+      isChooserHost(claimed)
     ) {
       rebuildComfyViewIfNeeded(claimed, installation)
       const ok = attachInstall(claimed, { installation, comfyUrl, isLocal: !url })
@@ -349,9 +348,9 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
         return
       }
       // Attach failed (telemetry-only — every current call site
-      // gates on installationId === null but the boolean return
-      // keeps us from blowing up if a future caller forgets). Fall
-      // through to the fresh-window path below so the user still
+      // already gates with `isChooserHost(entry)` but the boolean
+      // return keeps us from blowing up if a future caller forgets).
+      // Fall through to the fresh-window path below so the user still
       // gets the install they asked for.
     }
   }
@@ -767,11 +766,11 @@ ipcMain.handle('close-host-window', (event) => {
  * close-host + open-fresh-install-window swap, the path that's
  * been stable in production.
  *
- * The underlying machinery (`pendingAttachClaims`, `attachInstall`,
- * `detachInstall`, `comfyWindows` keyed by `windowKey`) is left in
- * place so this revert is a one-line tactical disable; removing the
- * infra entirely would be a much larger change. See
- * docs/window-mode-unification-revert.md.
+ * The underlying machinery (`claimAttachHost` / `consumeAttachClaim`,
+ * `attachInstall`, `detachInstall`, `comfyWindows` keyed by
+ * `windowKey`) is left in place so this revert is a one-line
+ * tactical disable; removing the infra entirely would be a much
+ * larger change. See docs/window-mode-unification-revert.md.
  */
 ipcMain.handle('claim-attach-host', (_event, _installationId: string) => {
   return false
@@ -796,7 +795,7 @@ ipcMain.handle('claim-attach-host', (_event, _installationId: string) => {
 ipcMain.handle('transfer-host-bounds-to-install', (event, installationId: string) => {
   for (const [, entry] of comfyWindows) {
     if (entry.window.isDestroyed()) continue
-    if (entry.installationId !== null) continue
+    if (isInstallHost(entry)) continue
     if (entry.panelView?.webContents !== event.sender) continue
     saveWindowBounds(installationId, entry.window)
     return true
@@ -807,8 +806,7 @@ ipcMain.handle('transfer-host-bounds-to-install', (event, installationId: string
 function findInstallationIdForWindow(win: BrowserWindow): string | undefined {
   for (const entry of comfyWindows.values()) {
     if (entry.window !== win) continue
-    // Install-less host windows (entry.installationId === null)
-    // have no install id to return; treating that case as
+    // Chooser hosts have no install id to return; treating that as
     // `undefined` keeps callers from resolving fake install ids.
     return entry.installationId ?? undefined
   }

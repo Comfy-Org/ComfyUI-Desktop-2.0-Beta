@@ -9,6 +9,7 @@ import { installationEvents, type InstallationRecord } from '../installations'
 import {
   dropInstallationIndex,
   indexInstallationId,
+  isInstallHost,
   setLastFocusedInstallationId,
 } from './registry'
 import type { ComfyWindowEntry } from './registry'
@@ -75,15 +76,14 @@ export interface AttachInstallOpts {
  * handler is free to invoke it without checking detach state.
  */
 export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts): boolean {
-  if (entry.installationId !== null) {
-    // Defensive — every current call site gates on
-    // `entry.installationId === null`, but a future caller that
-    // forgets the guard would otherwise take down the entire
-    // launch flow with an uncaught exception in main. Surface
-    // the violation to telemetry and let the caller fall back
-    // (the install-backed wrapper destroys the just-created
-    // host; the claim path skips the in-place attach and the
-    // wrapper recovers).
+  if (isInstallHost(entry)) {
+    // Defensive — every current call site already gates with
+    // `isChooserHost(entry)`, but a future caller that forgets
+    // the guard would otherwise take down the entire launch flow
+    // with an uncaught exception in main. Surface the violation
+    // to telemetry and let the caller fall back (the install-
+    // backed wrapper destroys the just-created host; the claim
+    // path skips the in-place attach and the wrapper recovers).
     const message =
       `attachInstall: entry windowKey=${entry.windowKey} is already attached to ` +
       `installationId=${entry.installationId}; detach first`

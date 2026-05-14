@@ -25,8 +25,10 @@ import {
   bringToFront,
   comfyWindows,
   computeBodyMode,
+  dropAttachClaimsForWindow,
+  isChooserHost,
+  isInstallHost,
   nextWindowKey,
-  pendingAttachClaims,
   registerHostEntry,
   setLastFocusedInstallationId,
   unregisterHostEntry,
@@ -348,9 +350,8 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
       titleBarView.webContents.send('comfy-titlebar:source-category-changed', entry.sourceCategory)
     }
     // Both modes get the app-update pill and the downloads tray.
-    // The install-update pill is install-backed only: gated on
-    // `entry.installationId !== null` so a chooser host (or a
-    // detached install-backed host) skips it cleanly.
+    // The install-update pill is install-backed only — chooser hosts
+    // (and detached install-backed hosts) skip it cleanly.
     titleBarView.webContents.send(
       'comfy-titlebar:app-update-state-changed',
       updater.getCurrentUpdateState(),
@@ -431,9 +432,7 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
     // AND can be silently consumed by an unrelated future
     // `onLaunch()` (the consumer's destroyed-window check rejects
     // them, but the side-effect `delete` still fires).
-    for (const [installationId, claimedKey] of pendingAttachClaims) {
-      if (claimedKey === windowKey) pendingAttachClaims.delete(installationId)
-    }
+    dropAttachClaimsForWindow(windowKey)
   })
 
   const entry: ComfyWindowEntry = {
@@ -522,7 +521,7 @@ export function buildComfyView(
   comfyContents.on('will-prevent-unload', (e) => {
     // Only suppress beforeunload while an install actually backs the view.
     const liveEntry = comfyWindows.get(windowKey)
-    if (!liveEntry || liveEntry.installationId === null) return
+    if (!liveEntry || isChooserHost(liveEntry)) return
     e.preventDefault()
   })
   attachContextMenu(comfyWindow, comfyContents)
@@ -582,7 +581,7 @@ export function getChooserHostTheme(): { bg: string; text: string } {
  *  in-page theme observer — install-less hosts have no ComfyUI
  *  frontend feeding them. */
 export function applyChooserHostTheme(entry: ComfyWindowEntry): void {
-  if (entry.installationId !== null) return
+  if (isInstallHost(entry)) return
   if (entry.window.isDestroyed()) return
   const theme = getChooserHostTheme()
   entry.lastTheme = theme
@@ -607,7 +606,7 @@ export function applyChooserHostTheme(entry: ComfyWindowEntry): void {
  *  the panel body inside it. */
 export function applyChooserHostThemeToAll(): void {
   for (const [, entry] of comfyWindows) {
-    if (entry.installationId === null) {
+    if (isChooserHost(entry)) {
       applyChooserHostTheme(entry)
     }
   }

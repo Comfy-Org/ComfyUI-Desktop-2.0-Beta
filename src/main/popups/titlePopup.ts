@@ -14,6 +14,8 @@ import * as mainTelemetry from '../lib/telemetry'
 import {
   comfyWindows,
   findEntryByTitleBarSender,
+  isChooserHost,
+  isInstallHost,
 } from '../host/registry'
 import type { ComfyPanelKey, ComfyWindowEntry } from '../host/registry'
 import {
@@ -181,7 +183,7 @@ export function buildTitlePopupMenuItems(entry: ComfyWindowEntry): TitlePopupMen
     { id: 'new-window', label: 'New Window', labelKey: 'fileMenu.newWindow' },
     { kind: 'separator' },
   ]
-  if (entry.installationId === null) {
+  if (isChooserHost(entry)) {
     items.push(
       { id: 'new-install', label: 'New Install', labelKey: 'fileMenu.newInstall' },
       {
@@ -206,7 +208,7 @@ export function buildTitlePopupMenuItems(entry: ComfyWindowEntry): TitlePopupMen
     { id: 'feedback', label: 'Send Beta Feedback', labelKey: 'fileMenu.sendFeedback' },
     { kind: 'separator' },
   )
-  if (entry.installationId !== null) {
+  if (isInstallHost(entry)) {
     items.push({
       id: 'return-to-dashboard',
       label: 'Return to Dashboard',
@@ -623,7 +625,7 @@ function activateTitlePopupMenuItem(
     // install-backed file menu; this guard is the belt-and-braces
     // so a stale popup or an out-of-order IPC can't navigate an
     // in-Comfy host into one of these panels.
-    if (parentEntry?.installationId === null) {
+    if (parentEntry && isChooserHost(parentEntry)) {
       bindings.setActivePanel(entry.parentEntryId, id)
     }
   }

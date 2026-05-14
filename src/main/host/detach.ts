@@ -3,7 +3,7 @@ import type { BrowserWindow, WebContentsView } from 'electron'
 import * as ipc from '../lib/ipc'
 import { COMFY_BG } from '../lib/theme'
 import { _unregisterExtraBroadcastTarget } from '../lib/ipc/shared'
-import { comfyWindows } from './registry'
+import { comfyWindows, isChooserHost } from './registry'
 import type { ComfyWindowEntry } from './registry'
 import {
   applyChooserHostTheme,
@@ -163,7 +163,7 @@ export function closeAllHostWindows(): void {
  */
 export async function returnToDashboard(parentEntryId: number): Promise<void> {
   const entry = comfyWindows.get(parentEntryId)
-  if (!entry || entry.installationId === null || entry.window.isDestroyed()) return
+  if (!entry || isChooserHost(entry) || entry.window.isDestroyed()) return
   const cleared = await consultPanelRendererClose(entry.panelView)
   if (!cleared) return
   if (entry.window.isDestroyed()) return
@@ -280,7 +280,7 @@ export async function confirmAndCloseAllHostWindows(
  * path.
  */
 export function _detachInstallImpl(entry: ComfyWindowEntry): void {
-  if (entry.installationId === null) return
+  if (isChooserHost(entry)) return
   if (entry.window.isDestroyed()) return
   const fx = getFactories()
 

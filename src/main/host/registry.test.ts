@@ -17,13 +17,16 @@ vi.mock('electron', () => ({
 
 import { _runningSessions } from '../lib/ipc/shared'
 import {
+  _resetAttachClaimsForTest,
+  claimAttachHost,
   comfyWindows,
   computeBodyMode,
+  consumeAttachClaim,
+  dropAttachClaimsForWindow,
   findPreferredHostByVisibility,
   getEntryByInstallationId,
   indexInstallationId,
   nextWindowKey,
-  pendingAttachClaims,
   registerHostEntry,
   unregisterHostEntry,
   type ComfyWindowEntry,
@@ -78,13 +81,13 @@ function makeEntry(opts: {
 
 beforeEach(() => {
   comfyWindows.clear()
-  pendingAttachClaims.clear()
+  _resetAttachClaimsForTest()
   _runningSessions.clear()
 })
 
 afterEach(() => {
   comfyWindows.clear()
-  pendingAttachClaims.clear()
+  _resetAttachClaimsForTest()
   _runningSessions.clear()
 })
 
@@ -136,21 +139,35 @@ describe('computeBodyMode', () => {
   })
 })
 
-describe('pendingAttachClaims', () => {
-  it('round-trips set / get / delete by installation id', () => {
-    pendingAttachClaims.set('inst-A', 7)
-    pendingAttachClaims.set('inst-B', 9)
-    expect(pendingAttachClaims.get('inst-A')).toBe(7)
-    expect(pendingAttachClaims.get('inst-B')).toBe(9)
-    pendingAttachClaims.delete('inst-A')
-    expect(pendingAttachClaims.has('inst-A')).toBe(false)
-    expect(pendingAttachClaims.get('inst-B')).toBe(9)
+describe('attach-claim helpers', () => {
+  it('consumeAttachClaim returns the claimed key and clears the entry', () => {
+    claimAttachHost('inst-A', 7)
+    claimAttachHost('inst-B', 9)
+    expect(consumeAttachClaim('inst-A')).toBe(7)
+    // Second consume on the same id is empty — the take-once contract
+    // is what guarantees onLaunch can't double-attach the same host.
+    expect(consumeAttachClaim('inst-A')).toBeUndefined()
+    expect(consumeAttachClaim('inst-B')).toBe(9)
   })
 
-  it('overwrites a prior claim for the same installation id', () => {
-    pendingAttachClaims.set('inst-A', 1)
-    pendingAttachClaims.set('inst-A', 42)
-    expect(pendingAttachClaims.get('inst-A')).toBe(42)
+  it('consumeAttachClaim returns undefined when no claim exists', () => {
+    expect(consumeAttachClaim('inst-missing')).toBeUndefined()
+  })
+
+  it('claimAttachHost overwrites a prior claim for the same id', () => {
+    claimAttachHost('inst-A', 1)
+    claimAttachHost('inst-A', 42)
+    expect(consumeAttachClaim('inst-A')).toBe(42)
+  })
+
+  it('dropAttachClaimsForWindow removes only claims targeting that windowKey', () => {
+    claimAttachHost('inst-A', 7)
+    claimAttachHost('inst-B', 9)
+    claimAttachHost('inst-C', 7)
+    dropAttachClaimsForWindow(7)
+    expect(consumeAttachClaim('inst-A')).toBeUndefined()
+    expect(consumeAttachClaim('inst-C')).toBeUndefined()
+    expect(consumeAttachClaim('inst-B')).toBe(9)
   })
 })
 

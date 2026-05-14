@@ -240,8 +240,36 @@ export function setLastFocusedInstallationId(id: string | null): void {
  * before the first one finished launching). Stale claims fall
  * through to the fresh-window path; the chooser-host renderer keeps
  * a fallback `closeHostWindow` wired for that case.
+ *
+ * Internal — mutate only via the helpers below so the producer/
+ * consumer/cleanup sites can't drift apart.
  */
-export const pendingAttachClaims = new Map<string, number>()
+const pendingAttachClaims = new Map<string, number>()
+
+/** Stake an in-place attach claim from the chooser host. */
+export function claimAttachHost(installationId: string, windowKey: number): void {
+  pendingAttachClaims.set(installationId, windowKey)
+}
+
+/** Atomically take the claim for `installationId` (returns `undefined` if none). */
+export function consumeAttachClaim(installationId: string): number | undefined {
+  const key = pendingAttachClaims.get(installationId)
+  if (key === undefined) return undefined
+  pendingAttachClaims.delete(installationId)
+  return key
+}
+
+/** Drop every claim whose target was `windowKey` (host-window close cleanup). */
+export function dropAttachClaimsForWindow(windowKey: number): void {
+  for (const [installationId, claimedKey] of pendingAttachClaims) {
+    if (claimedKey === windowKey) pendingAttachClaims.delete(installationId)
+  }
+}
+
+/** Test-only escape hatch — reset state between cases. */
+export function _resetAttachClaimsForTest(): void {
+  pendingAttachClaims.clear()
+}
 
 let _nextWindowKeyValue = 0
 export function nextWindowKey(): number {
@@ -303,6 +331,26 @@ export function unregisterHostEntry(entry: ComfyWindowEntry): void {
       installationIdToWindowKey.delete(entry.installationId)
     }
   }
+}
+
+/**
+ * Predicate: this entry is a chooser/install-less host (no install
+ * attached). Use anywhere code branches on chooser-vs-install
+ * semantics so the contract can't drift between sites — and so
+ * TypeScript narrows `entry.installationId` to `null` /
+ * `string` on each side of the branch.
+ */
+export function isChooserHost(
+  entry: ComfyWindowEntry,
+): entry is ComfyWindowEntry & { installationId: null } {
+  return entry.installationId === null
+}
+
+/** Predicate: this entry is an install-backed host. Inverse of `isChooserHost`. */
+export function isInstallHost(
+  entry: ComfyWindowEntry,
+): entry is ComfyWindowEntry & { installationId: string } {
+  return entry.installationId !== null
 }
 
 /**
