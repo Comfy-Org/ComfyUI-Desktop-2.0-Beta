@@ -11,6 +11,7 @@
   "appId": "org.comfy.comfyui-desktop-2",
   "icon": "./assets/Comfy_Logo_x512.png",
   "packageManager": "pnpm",
+  "pnpmVersion": "10.28.1",
   "packageJson": {
     "extends": "package.json",
     "productName": "ComfyUI Desktop 2.0",
