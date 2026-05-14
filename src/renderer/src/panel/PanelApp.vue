@@ -49,7 +49,7 @@ const VALID_PANELS: ReadonlySet<PanelKey> = new Set([
   'new-install',
   'track',
   'load-snapshot',
-  'quick-install',
+  'quick-install'
 ])
 
 /**
@@ -70,7 +70,7 @@ const FLOW_PANELS: ReadonlySet<PanelKey> = new Set([
   'new-install',
   'track',
   'load-snapshot',
-  'quick-install',
+  'quick-install'
 ])
 
 /**
@@ -83,7 +83,7 @@ const FLOW_TELEMETRY_NAMES: Record<FlowComponent, string> = {
   'new-install': 'new_install',
   'quick-install': 'quick_install',
   track: 'track_existing',
-  'load-snapshot': 'load_snapshot',
+  'load-snapshot': 'load_snapshot'
 }
 
 const { mergeLocaleMessage, locale, t } = useI18n()
@@ -112,9 +112,7 @@ const initialPanel: PanelKey = ((): PanelKey => {
 // settings key never sit here — they mount in the overlay slot via
 // the post-mount `switchPanel(initialPanel)` in `onMounted`.
 const activePanel = ref<PanelKey>(
-  FLOW_PANELS.has(initialPanel) || initialPanel === 'settings'
-    ? defaultBodyPanel()
-    : initialPanel,
+  FLOW_PANELS.has(initialPanel) || initialPanel === 'settings' ? defaultBodyPanel() : initialPanel
 )
 const progressRef = ref<InstanceType<typeof ProgressModal> | null>(null)
 const newInstallRef = ref<InstanceType<typeof NewInstallModal> | null>(null)
@@ -172,8 +170,8 @@ const modal = useModal()
 
 // installationStore.fetchInstallations() is wired to onInstallationsChanged
 // inside the store itself, so the panel just needs to read from it.
-const installation = computed<Installation | null>(
-  () => (installationId ? installationStore.getById(installationId) ?? null : null),
+const installation = computed<Installation | null>(() =>
+  installationId ? (installationStore.getById(installationId) ?? null) : null
 )
 
 let unsubPanel: (() => void) | null = null
@@ -290,14 +288,14 @@ async function handleShowProgress(opts: ShowProgressOpts): Promise<void> {
           component: 'update',
           installationId: opts.installationId,
           operationName,
-          onCancel,
+          onCancel
         }
       : {
           kind: 'progress',
           installationId: opts.installationId,
           operationName,
-          onCancel,
-        },
+          onCancel
+        }
   )
   if (!ok) return
   // Install-less host + launch-class op: subscribe to the resulting
@@ -323,7 +321,7 @@ async function handleShowProgress(opts: ShowProgressOpts): Promise<void> {
     title: opts.title,
     apiCall: opts.apiCall as () => Promise<ActionResult>,
     cancellable: opts.cancellable,
-    returnTo: opts.returnTo,
+    returnTo: opts.returnTo
   })
 }
 
@@ -363,7 +361,7 @@ async function openFlowTakeover(component: FlowComponent, entrypoint: string): P
   // tell title-bar opens from chooser-empty-state opens etc.
   emitTelemetryAction('desktop2.install.flow.opened', {
     flow: FLOW_TELEMETRY_NAMES[component],
-    entrypoint,
+    entrypoint
   })
   // Wait for the v-if branch in the takeover slot to mount the
   // component before reaching for its ref.
@@ -395,7 +393,8 @@ async function openFlowTakeover(component: FlowComponent, entrypoint: string): P
  * settled, so the await is effectively free.
  */
 async function openFirstUseTakeover(): Promise<void> {
-  const statePromise = window.api.getFirstUseState()
+  const statePromise = window.api
+    .getFirstUseState()
     .catch(() => ({ skipPick: false, hasLegacyDesktop: false }))
   // Opt the takeover into the dedicated "Quit setup?" cancel-prompt
   // copy so the OS-X consult
@@ -405,14 +404,14 @@ async function openFirstUseTakeover(): Promise<void> {
   const ok = await openOverlay({
     kind: 'takeover',
     component: 'first-use',
-    cancelCopyKey: 'quit-setup',
+    cancelCopyKey: 'quit-setup'
   })
   if (!ok) return
   await nextTick()
   const state = await statePromise
   await firstUseRef.value?.open({
     skipPick: state.skipPick,
-    hasLegacyDesktop: state.hasLegacyDesktop,
+    hasLegacyDesktop: state.hasLegacyDesktop
   })
 }
 
@@ -453,8 +452,7 @@ function dismissTakeoverDirect(): void {
   // re-runs layoutViews(), keeping main and the renderer in sync.
   const cur = currentOverlay.value
   const isFlowTakeover =
-    cur?.kind === 'takeover' &&
-    (FLOW_PANELS as ReadonlySet<string>).has(cur.component)
+    cur?.kind === 'takeover' && (FLOW_PANELS as ReadonlySet<string>).has(cur.component)
   if (cur?.kind === 'settings' || isFlowTakeover) {
     window.api.closeCurrentPanel()
   }
@@ -593,7 +591,7 @@ async function handleFirstUseChainMigrate(): Promise<void> {
     installationId: legacy.id,
     title: `Migrating — ${legacy.name}`,
     apiCall: () => window.api.runAction(legacy!.id, 'migrate-to-standalone', result),
-    cancellable: true,
+    cancellable: true
   })
   // dismissTakeoverDirect pushed `'none'` as it cleared the first-use
   // overlay; re-assert `'post-consent'` so the file-menu builder
@@ -627,8 +625,8 @@ async function handleNewInstallTakeoverClose(): Promise<void> {
   // skipInstall branch — and dismissing then would clear an unrelated
   // overlay if anything else has claimed the slot in between.
   if (
-    currentOverlay.value?.kind === 'takeover'
-    && currentOverlay.value.component === 'new-install'
+    currentOverlay.value?.kind === 'takeover' &&
+    currentOverlay.value.component === 'new-install'
   ) {
     dismissTakeoverDirect()
   }
@@ -651,7 +649,7 @@ async function handleNewInstallTakeoverClose(): Promise<void> {
  *      into a wizard immediately after they finished one). */
 async function performChooserLaunch(
   installation: Installation,
-  onMissingLaunchAction: () => void = () => {},
+  onMissingLaunchAction: () => void = () => {}
 ): Promise<void> {
   if (sessionStore.isRunning(installation.id)) {
     // Focus the running window and leave the chooser host alive
@@ -663,9 +661,8 @@ async function performChooserLaunch(
     return
   }
   const actions = await window.api.getListActions(installation.id)
-  const launchAction = actions.find((a) => a.id === 'launch')
-    ?? actions.find((a) => a.style === 'primary')
-    ?? null
+  const launchAction =
+    actions.find((a) => a.id === 'launch') ?? actions.find((a) => a.style === 'primary') ?? null
   if (!launchAction) {
     onMissingLaunchAction()
     return
@@ -717,18 +714,22 @@ watch(
       try {
         await installationStore.fetchInstallations()
       } catch {}
-      inst = installationStore.installations.find(
-        (i) => (i as unknown as { copiedFrom?: string }).copiedFrom === id,
-      ) ?? installationStore.installations
-        .filter((i) => i.sourceCategory === 'local')
-        .sort((a, b) => Date.parse(String(b.createdAt ?? '')) - Date.parse(String(a.createdAt ?? '')))[0]
-        ?? null
+      inst =
+        installationStore.installations.find(
+          (i) => (i as unknown as { copiedFrom?: string }).copiedFrom === id
+        ) ??
+        installationStore.installations
+          .filter((i) => i.sourceCategory === 'local')
+          .sort(
+            (a, b) => Date.parse(String(b.createdAt ?? '')) - Date.parse(String(a.createdAt ?? ''))
+          )[0] ??
+        null
     }
     if (inst) {
       void performChooserLaunch(inst)
     }
   },
-  { deep: false },
+  { deep: false }
 )
 
 /**
@@ -763,14 +764,14 @@ async function switchPanel(panel: PanelKey, entrypoint: string = 'titlebar'): Pr
     const ok = await openOverlay({
       kind: 'settings',
       installation: inst,
-      initialTab,
+      initialTab
     })
     if (!ok) return
     emitTelemetryAction('desktop2.view.opened', { view: panel, from_view: fromView })
     emitTelemetryAction('desktop2.settings.opened', {
       initial_tab: initialTab,
       entrypoint,
-      has_installation: !!inst,
+      has_installation: !!inst
     })
     return
   }
@@ -802,7 +803,7 @@ function handleUpdateInstallation(inst: Installation): void {
 // ProgressModal, telemetry, etc. Reusing it keeps the chooser pick from
 // re-implementing launch semantics.
 const { executeAction: executeChooserAction } = useListAction('chooser', {
-  showProgress: handleShowProgress,
+  showProgress: handleShowProgress
 })
 
 /** Pending close-on-launch subscription (fallback), so unmount can
@@ -845,7 +846,9 @@ async function handleChooserPick(installation: Installation): Promise<void> {
   // semantics for the missing-launch-action case: bounce into the
   // new-install flow inside this same host so the user can resolve
   // the missing setup step without bouncing to a separate window.
-  await performChooserLaunch(installation, () => { void switchPanel('new-install', 'chooser_pick') })
+  await performChooserLaunch(installation, () => {
+    void switchPanel('new-install', 'chooser_pick')
+  })
 }
 
 function handleChooserShowNewInstall(): void {
@@ -888,7 +891,7 @@ async function showAppUpdateRestartPrompt(version: string | null): Promise<void>
     title: t('appUpdate.readyTitle'),
     message: t('appUpdate.readyMessage', { version: versionLabel(version) }),
     confirmLabel: t('appUpdate.restartNow'),
-    confirmStyle: 'primary',
+    confirmStyle: 'primary'
   })
   if (!ok) return
   await window.api.installUpdate()
@@ -906,7 +909,7 @@ async function showAppUpdateDownloadPrompt(version: string | null): Promise<void
     title: t('appUpdate.availableTitle'),
     message: t('appUpdate.availableMessage', { version: versionLabel(version) }),
     confirmLabel: t('appUpdate.download'),
-    confirmStyle: 'primary',
+    confirmStyle: 'primary'
   })
   if (!ok) return
   await window.api.downloadUpdate()
@@ -949,7 +952,7 @@ onMounted(async () => {
           kind: 'settings',
           installation: inst,
           initialTab: 'comfy',
-          initialDetailTab: 'update',
+          initialDetailTab: 'update'
         })
         return
       }
@@ -963,7 +966,7 @@ onMounted(async () => {
         await openOverlay({
           kind: 'settings',
           installation: inst ?? null,
-          initialTab: tab,
+          initialTab: tab
         })
       }
     })()
@@ -1025,7 +1028,7 @@ onMounted(async () => {
   unsubAppUpdateUserActionFailed = window.api.onAppUpdateUserActionFailed(({ message }) => {
     void modal.alert({
       title: t('appUpdate.errorTitle'),
-      message,
+      message
     })
   })
 
@@ -1064,7 +1067,7 @@ onMounted(async () => {
   await Promise.all([
     sessionStore.init(),
     installationStore.fetchInstallations(),
-    launcherPrefs.loadPrefs(),
+    launcherPrefs.loadPrefs()
   ])
 
   // Release any panel-trigger-overlay handler that arrived during the
@@ -1126,7 +1129,6 @@ onUnmounted(() => {
           @show-progress="handleShowProgress"
         />
       </div>
-
     </main>
 
     <!-- Host-level overlay slot. One DOM node at a
@@ -1175,6 +1177,7 @@ onUnmounted(() => {
         ref="progressRef"
         :installation-id="currentOverlay.installationId ?? ''"
         binding
+        :brand-chrome="chainingFirstUseToNewInstall"
         @close="handleProgressClose"
       />
       <NewInstallModal
