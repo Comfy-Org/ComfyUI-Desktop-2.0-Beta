@@ -43,3 +43,34 @@ After creating or modifying code, check for duplicated logic before committing:
 
 - Look for repeated filter predicates, conditions, or expressions that could be extracted into a shared variable, computed property, or helper.
 - If two call sites must stay in sync (e.g., a visibility check and the action it guards), extract the shared logic so they cannot diverge.
+
+## Linear tracking — `DESK2-N` branch convention
+
+All Desktop 2.0 work is tracked in the **`DESK2`** Linear team. Every PR and
+issue should carry its Linear identifier in at least one place so the
+`pr-tracker` integration can light up the linkage pill, run mismatch
+diagnostics, and let `linear backfill --branches` skip already-tracked work.
+
+**Required** (pick whichever is least intrusive):
+
+- **Branch name** — prefer `desk2-N-short-slug` (case-insensitive, dashes
+  only). Example: `desk2-42-fix-installer-crash`.
+- **PR title** — fine to embed, e.g. `[DESK2-42] Fix installer crash`.
+- **PR / issue body** — a closing-keyword line works best:
+  `Fixes DESK2-42` (also accepts `Closes`, `Resolves`, `Fix`, `Close`,
+  `Resolve`). The Linear GitHub bot uses this to auto-attach the PR and
+  auto-close the ticket on merge.
+
+If you forget on the branch, add `Fixes DESK2-N` to the PR body — the
+pr-tracker daily view shows a yellow `⚠ DESK2-N (no ref)` warning when a
+Linear issue has the PR attached but no `DESK2-N` reference appears in
+branch / title / body. Either add the reference or accept the warning if
+the link is intentionally only via Linear's attachment.
+
+If a Linear ticket doesn't exist yet, create one from the TUI
+(`pr-tracker` → press `c` on the row) or via CLI:
+
+```sh
+pr-tracker linear create --from-pr Comfy-Org/ComfyUI-Desktop-2.0-Beta#123
+pr-tracker linear backfill --branches Comfy-Org/ComfyUI-Desktop-2.0-Beta
+```
