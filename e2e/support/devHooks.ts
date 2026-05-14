@@ -8,6 +8,7 @@
  */
 
 import type { ElectronApplication } from 'playwright'
+import { evalWithRetry } from './evalRetry'
 
 export type DownloadStatus =
   | 'pending'
@@ -52,41 +53,41 @@ export async function seedDownloads(
   app: ElectronApplication,
   snapshot: DownloadsTrayStateLike,
 ): Promise<void> {
-  await app.evaluate((_electron, s) => {
+  await evalWithRetry(() => app.evaluate((_electron, s) => {
     const helpers = (globalThis as unknown as { __e2e?: { seedDownloads: (s: unknown) => void } }).__e2e
     if (!helpers) throw new Error('E2E helpers not registered (process.env.E2E !== "1"?)')
     helpers.seedDownloads(s)
-  }, snapshot)
+  }, snapshot))
 }
 
 export async function setInstallUpdate(
   app: ElectronApplication,
   opts: { installationId?: string; available: boolean; version?: string },
 ): Promise<void> {
-  await app.evaluate((_electron, o) => {
+  await evalWithRetry(() => app.evaluate((_electron, o) => {
     const helpers = (globalThis as unknown as { __e2e?: { setInstallUpdate: (o: unknown) => void } }).__e2e
     if (!helpers) throw new Error('E2E helpers not registered (process.env.E2E !== "1"?)')
     helpers.setInstallUpdate(o)
-  }, opts)
+  }, opts))
 }
 
 export async function setAppUpdateState(
   app: ElectronApplication,
   state: AppUpdateStateLike,
 ): Promise<void> {
-  await app.evaluate((_electron, s) => {
+  await evalWithRetry(() => app.evaluate((_electron, s) => {
     const helpers = (globalThis as unknown as { __e2e?: { setAppUpdateState: (s: unknown) => void } }).__e2e
     if (!helpers) throw new Error('E2E helpers not registered (process.env.E2E !== "1"?)')
     helpers.setAppUpdateState(s)
-  }, state)
+  }, state))
 }
 
 export async function getTitlePopupBounds(
   app: ElectronApplication,
 ): Promise<PopupBoundsResult | null> {
-  return await app.evaluate(() => {
+  return await evalWithRetry(() => app.evaluate(() => {
     const helpers = (globalThis as unknown as { __e2e?: { getTitlePopupBounds: () => unknown } }).__e2e
     if (!helpers) throw new Error('E2E helpers not registered (process.env.E2E !== "1"?)')
     return helpers.getTitlePopupBounds() as PopupBoundsResult | null
-  })
+  }))
 }

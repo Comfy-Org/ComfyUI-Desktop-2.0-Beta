@@ -17,18 +17,19 @@
  */
 import type { ElectronApplication } from '@playwright/test'
 import { expect } from '@playwright/test'
+import { evalWithRetry } from './evalRetry'
 
 /** Find the webContents id whose URL contains `marker`. Returns null if none. */
 export function findWebContentsId(
   app: ElectronApplication,
   marker: string,
 ): Promise<number | null> {
-  return app.evaluate(({ webContents }, m) => {
+  return evalWithRetry(() => app.evaluate(({ webContents }, m) => {
     for (const wc of webContents.getAllWebContents()) {
       if (wc.getURL().includes(m)) return wc.id
     }
     return null
-  }, marker)
+  }, marker))
 }
 
 /** Wait until a webContents whose URL contains `marker` exists. */
@@ -74,11 +75,11 @@ export class WebContentsPage {
   async evaluate<T>(expr: string): Promise<T> {
     const id = await findWebContentsId(this.app, this.marker)
     if (id === null) throw new Error(`webContents not found (marker=${this.marker})`)
-    return this.app.evaluate(async ({ webContents }, payload) => {
+    return evalWithRetry(() => this.app.evaluate(async ({ webContents }, payload) => {
       const wc = webContents.fromId(payload.id)
       if (!wc || wc.isDestroyed()) throw new Error('webContents destroyed')
       return wc.executeJavaScript(payload.expr) as Promise<unknown>
-    }, { id, expr }) as Promise<T>
+    }, { id, expr })) as Promise<T>
   }
 
   url(): Promise<string> {
