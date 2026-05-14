@@ -37,10 +37,13 @@
  * are reset.
  */
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
-import { ArrowRightLeft, Box, Cloud, Download } from 'lucide-vue-next'
+import { ArrowRightLeft, Download, Info } from 'lucide-vue-next'
 import TakeoverHeader from '../components/TakeoverHeader.vue'
 import ModalShell from '../components/ModalShell.vue'
 import InlineRichText from '../components/InlineRichText.vue'
+import ChoiceCard from '../components/ChoiceCard.vue'
+import WhyTryCloudModal from '../components/WhyTryCloudModal.vue'
+import BrandTakeoverLayout from '../components/BrandTakeoverLayout.vue'
 import { PRIVACY_POLICY } from '../lib/privacyPolicy'
 import { emitTelemetryAction } from '../lib/telemetry'
 
@@ -89,7 +92,7 @@ function emitCompleted(exitPath: 'cloud' | 'local-new' | 'local-migrate' | 'skip
   emitTelemetryAction('desktop2.first_use.completed', {
     exit_path: exitPath,
     steps_seen: stepsSeen.size,
-    duration_ms: Date.now() - mountedAt,
+    duration_ms: Date.now() - mountedAt
   })
 }
 /** When the host detects prior usage of the launcher (any
@@ -107,6 +110,7 @@ const skipPick = ref(false)
  *  new-install takeover. Detection lives in main; the host plumbs the
  *  flag in via `open()`. */
 const hasLegacyDesktop = ref(false)
+const whyCloudOpen = ref(false)
 
 const isChinese = computed(() => locale.value.startsWith('zh'))
 
@@ -123,7 +127,7 @@ async function acceptConsent(): Promise<void> {
   emitTelemetryAction('desktop2.first_use.consent_decision', {
     decision: telemetryEnabled.value ? 'accept' : 'decline',
     telemetry_enabled: telemetryEnabled.value,
-    locale: locale.value,
+    locale: locale.value
   })
   // skipPick suppresses the pick step entirely. China-mirror sub-step
   // still runs first when the locale calls for it, then the takeover
@@ -146,7 +150,7 @@ async function acceptConsent(): Promise<void> {
 async function chooseMirrors(useMirrors: boolean): Promise<void> {
   await Promise.all([
     window.api.setSetting('useChineseMirrors', useMirrors),
-    window.api.setSetting('chineseMirrorsPrompted', true),
+    window.api.setSetting('chineseMirrorsPrompted', true)
   ])
   emitTelemetryAction('desktop2.first_use.mirrors_chosen', { use_mirrors: useMirrors })
   if (skipPick.value) {
@@ -160,7 +164,7 @@ async function chooseMirrors(useMirrors: boolean): Promise<void> {
 function pickCloud(): void {
   emitTelemetryAction('desktop2.first_use.fork_chosen', {
     choice: 'cloud',
-    has_legacy_desktop: hasLegacyDesktop.value,
+    has_legacy_desktop: hasLegacyDesktop.value
   })
   emitCompleted('cloud')
   emit('complete-cloud')
@@ -174,7 +178,7 @@ function pickCloud(): void {
 function pickLocal(): void {
   emitTelemetryAction('desktop2.first_use.fork_chosen', {
     choice: 'local',
-    has_legacy_desktop: hasLegacyDesktop.value,
+    has_legacy_desktop: hasLegacyDesktop.value
   })
   if (hasLegacyDesktop.value) {
     step.value = 'localBranch'
@@ -182,6 +186,22 @@ function pickLocal(): void {
     emitCompleted('local-new')
     emit('chain-local')
   }
+}
+
+function openWhyCloud(): void {
+  whyCloudOpen.value = true
+  emitTelemetryAction('desktop2.first_use.why_cloud_opened', {})
+}
+
+function dismissWhyCloud(action: 'maybe_later' | 'dismiss'): void {
+  whyCloudOpen.value = false
+  emitTelemetryAction('desktop2.first_use.why_cloud_action', { action })
+}
+
+function onWhyCloudTryCloud(): void {
+  whyCloudOpen.value = false
+  emitTelemetryAction('desktop2.first_use.why_cloud_action', { action: 'try_cloud' })
+  pickCloud()
 }
 
 function chooseMigrate(): void {
@@ -210,16 +230,21 @@ async function open(opts: OpenOpts = {}): Promise<void> {
   step.value = 'consent'
   skipPick.value = opts.skipPick === true
   hasLegacyDesktop.value = opts.hasLegacyDesktop === true
+  whyCloudOpen.value = false
   // Reset funnel-completion bookkeeping so a takeover replay measures
   // duration / steps from the replay, not from the original mount.
   mountedAt = Date.now()
   stepsSeen.clear()
+  // Re-seed with the current step so the funnel count includes the
+  // initial step on both first mount and replay. The immediate watcher
+  // also adds it on first mount, but Set.add is idempotent.
+  stepsSeen.add(step.value)
   completedFired = false
   // Pre-load existing telemetry preference so the toggle reflects the
   // user's current persisted choice if the takeover is replaying after
   // a mid-flow cancel (the consent step is the only one that can flip
   // a destructive default).
-  const existing = await window.api.getSetting('telemetryEnabled') as boolean | undefined
+  const existing = (await window.api.getSetting('telemetryEnabled')) as boolean | undefined
   telemetryEnabled.value = existing !== false
   locale.value = await window.api.getLocale().catch(() => 'en')
 }
@@ -253,10 +278,10 @@ watch(
     emitTelemetryAction('desktop2.first_use.step_viewed', {
       step: current,
       skip_pick: skipPick.value,
-      has_legacy_desktop: hasLegacyDesktop.value,
+      has_legacy_desktop: hasLegacyDesktop.value
     })
   },
-  { immediate: true },
+  { immediate: true }
 )
 
 onUnmounted(() => {
@@ -275,102 +300,113 @@ defineExpose({ open })
 </script>
 
 <template>
-  <ModalShell binding hide-close content-class="first-use-takeover">
+  <BrandTakeoverLayout v-if="step === 'pick'">
+    <div class="pick-hero">
+      <h1 class="pick-title">{{ $t('firstUse.pickTitle') }}</h1>
+      <p class="pick-lead">{{ $t('firstUse.pickLead') }}</p>
+      <div class="pick-grid" role="radiogroup" :aria-label="$t('firstUse.pickTitle')">
+        <ChoiceCard
+          :label="$t('cloud.label')"
+          :tagline="$t('firstUse.cloudTagline')"
+          :description="$t('firstUse.cloudDesc')"
+          glow
+          data-testid="first-use-pick-cloud"
+          @click="pickCloud"
+        />
+        <ChoiceCard
+          :label="$t('firstUse.localLabel')"
+          :tagline="$t('firstUse.localTagline')"
+          :description="$t('firstUse.localDesc')"
+          data-testid="first-use-pick-local"
+          @click="pickLocal"
+        />
+      </div>
+    </div>
+    <template #footer-left>
+      <button
+        class="pick-why-cloud"
+        type="button"
+        data-testid="first-use-why-cloud"
+        @click="openWhyCloud"
+      >
+        <Info :size="14" />
+        <span>{{ $t('firstUse.whyTryCloud') }}</span>
+      </button>
+    </template>
+    <WhyTryCloudModal
+      v-if="whyCloudOpen"
+      @close="dismissWhyCloud('dismiss')"
+      @try-cloud="onWhyCloudTryCloud"
+    />
+  </BrandTakeoverLayout>
+  <ModalShell v-else binding hide-close content-class="first-use-takeover">
     <!-- First-use is binding — no ✕ close. The OS-chrome window close
          routes through main → PanelApp's closeOverlay; there's no in-app
          dismiss affordance mid-onboarding. -->
     <template #header>
-      <TakeoverHeader
-        :title="$t('firstUse.grandTitle')"
-        :subtitle="$t('firstUse.grandSubtitle')"
-      />
+      <TakeoverHeader :title="$t('firstUse.grandTitle')" :subtitle="$t('firstUse.grandSubtitle')" />
     </template>
-      <div class="view-scroll">
-        <!-- Step 1: T&C + telemetry consent.
+    <div class="view-scroll">
+      <!-- Step 1: T&C + telemetry consent.
              The full Privacy Policy is embedded inline as a scrollable
              reading box so the user can read what they're agreeing to
              without leaving the app or chasing a link. Source of truth
              for the policy text lives in `lib/privacyPolicy.ts`, which
              mirrors the canonical Notion document. -->
-        <template v-if="step === 'consent'">
-          <div class="first-use-consent">
-            <p class="first-use-lead">{{ $t('firstUse.consentLead') }}</p>
-            <div
-              class="first-use-policy"
-              data-testid="first-use-privacy-policy"
-              tabindex="0"
-              role="region"
-              :aria-label="$t('firstUse.privacyPolicyTitle')"
-            >
-              <header class="first-use-policy-meta">
-                <h3 class="first-use-policy-title">{{ $t('firstUse.privacyPolicyTitle') }}</h3>
-                <div class="first-use-policy-dates">
-                  <span><strong>{{ $t('firstUse.privacyPolicyEffective') }}:</strong> {{ policy.effectiveDate }}</span>
-                  <span><strong>{{ $t('firstUse.privacyPolicyAppliesTo') }}:</strong> {{ policy.appliesTo }}</span>
-                </div>
-              </header>
-              <template v-for="(block, i) in policy.blocks" :key="i">
-                <h2 v-if="block.kind === 'h2'" class="first-use-policy-h2">{{ block.text }}</h2>
-                <h3 v-else-if="block.kind === 'h3'" class="first-use-policy-h3">{{ block.text }}</h3>
-                <p v-else-if="block.kind === 'p' && block.text" class="first-use-policy-p">
-                  <InlineRichText :text="block.text" />
-                </p>
-                <ul v-else-if="block.kind === 'ul' && block.items" class="first-use-policy-ul">
-                  <li v-for="(item, k) in block.items" :key="k">
-                    <InlineRichText :text="item" />
-                  </li>
-                </ul>
-              </template>
-            </div>
-            <label class="first-use-toggle">
-              <input v-model="telemetryEnabled" type="checkbox" />
-              <span>{{ $t('settings.telemetryEnabled') }}</span>
-            </label>
-            <p class="first-use-hint">{{ $t('firstUse.telemetryHint') }}</p>
+      <template v-if="step === 'consent'">
+        <div class="first-use-consent">
+          <p class="first-use-lead">{{ $t('firstUse.consentLead') }}</p>
+          <div
+            class="first-use-policy"
+            data-testid="first-use-privacy-policy"
+            tabindex="0"
+            role="region"
+            :aria-label="$t('firstUse.privacyPolicyTitle')"
+          >
+            <header class="first-use-policy-meta">
+              <h3 class="first-use-policy-title">{{ $t('firstUse.privacyPolicyTitle') }}</h3>
+              <div class="first-use-policy-dates">
+                <span
+                  ><strong>{{ $t('firstUse.privacyPolicyEffective') }}:</strong>
+                  {{ policy.effectiveDate }}</span
+                >
+                <span
+                  ><strong>{{ $t('firstUse.privacyPolicyAppliesTo') }}:</strong>
+                  {{ policy.appliesTo }}</span
+                >
+              </div>
+            </header>
+            <template v-for="(block, i) in policy.blocks" :key="i">
+              <h2 v-if="block.kind === 'h2'" class="first-use-policy-h2">{{ block.text }}</h2>
+              <h3 v-else-if="block.kind === 'h3'" class="first-use-policy-h3">{{ block.text }}</h3>
+              <p v-else-if="block.kind === 'p' && block.text" class="first-use-policy-p">
+                <InlineRichText :text="block.text" />
+              </p>
+              <ul v-else-if="block.kind === 'ul' && block.items" class="first-use-policy-ul">
+                <li v-for="(item, k) in block.items" :key="k">
+                  <InlineRichText :text="item" />
+                </li>
+              </ul>
+            </template>
           </div>
-        </template>
+          <label class="first-use-toggle">
+            <input v-model="telemetryEnabled" type="checkbox" />
+            <span>{{ $t('settings.telemetryEnabled') }}</span>
+          </label>
+          <p class="first-use-hint">{{ $t('firstUse.telemetryHint') }}</p>
+        </div>
+      </template>
 
-        <!-- Step 2: China mirror prompt (only when locale starts with 'zh') -->
-        <template v-else-if="step === 'mirrors'">
-          <h3 class="first-use-step-title">{{ $t('settings.chineseMirrorsSuggestTitle') }}</h3>
-          <p class="first-use-lead">{{ $t('settings.chineseMirrorsSuggestMessage') }}</p>
-        </template>
+      <!-- Step 2: China mirror prompt (only when locale starts with 'zh') -->
+      <template v-else-if="step === 'mirrors'">
+        <h3 class="first-use-step-title">{{ $t('settings.chineseMirrorsSuggestTitle') }}</h3>
+        <p class="first-use-lead">{{ $t('settings.chineseMirrorsSuggestMessage') }}</p>
+      </template>
 
-        <!-- Step 3: Cloud vs Local picker.
-             Laid out as two big horizontal squares (Local on the
-             left, Cloud on the right) so the
-             choice reads like a real fork in the road, not a pair of
-             checkbox-sized cards. Each tile is a generous click target
-             with the source-category icon ChooserView already uses
-             for the same install kinds (`Box` for Local, `Cloud` for
-             Cloud) so the iconography matches what the user will see
-             on the dashboard once they're past first-use. -->
-        <template v-else-if="step === 'pick'">
-          <h3 class="first-use-step-title">{{ $t('firstUse.pickTitle') }}</h3>
-          <p class="first-use-lead">{{ $t('firstUse.pickLead') }}</p>
-          <div class="first-use-fork">
-            <button
-              class="first-use-fork-tile"
-              data-testid="first-use-pick-local"
-              @click="pickLocal"
-            >
-              <div class="first-use-fork-icon"><Box :size="64" :stroke-width="1.5" /></div>
-              <div class="first-use-fork-title">{{ $t('firstUse.localLabel') }}</div>
-              <div class="first-use-fork-desc">{{ $t('firstUse.localDesc') }}</div>
-            </button>
-            <button
-              class="first-use-fork-tile"
-              data-testid="first-use-pick-cloud"
-              @click="pickCloud"
-            >
-              <div class="first-use-fork-icon"><Cloud :size="64" :stroke-width="1.5" /></div>
-              <div class="first-use-fork-title">{{ $t('cloud.label') }}</div>
-              <div class="first-use-fork-desc">{{ $t('cloud.desc') }}</div>
-            </button>
-          </div>
-        </template>
+      <!-- Step 3 (pick) renders outside ModalShell — see Teleport
+             block at the top of <template>. -->
 
-        <!-- Step 4 (conditional): Local + Legacy Desktop detected.
+      <!-- Step 4 (conditional): Local + Legacy Desktop detected.
              A Legacy Desktop install was auto-tracked at startup
              (sourceId === 'desktop'), so before chaining into the
              new-install Standalone takeover we ask whether the user
@@ -380,80 +416,82 @@ defineExpose({ open })
              pick — same fork-style click target. The Back link in
              the footer returns to the pick step in case the user
              changes their mind. -->
-        <template v-else-if="step === 'localBranch'">
-          <h3 class="first-use-step-title">{{ $t('firstUse.localBranchTitle') }}</h3>
-          <p class="first-use-lead">{{ $t('firstUse.localBranchLead') }}</p>
-          <div class="first-use-fork">
-            <button
-              class="first-use-fork-tile"
-              data-testid="first-use-local-migrate"
-              @click="chooseMigrate"
-            >
-              <div class="first-use-fork-icon"><ArrowRightLeft :size="64" :stroke-width="1.5" /></div>
-              <div class="first-use-fork-title">{{ $t('firstUse.localBranchMigrateLabel') }}</div>
-              <div class="first-use-fork-desc">{{ $t('firstUse.localBranchMigrateDesc') }}</div>
-            </button>
-            <button
-              class="first-use-fork-tile"
-              data-testid="first-use-local-install-new"
-              @click="chooseInstallNew"
-            >
-              <div class="first-use-fork-icon"><Download :size="64" :stroke-width="1.5" /></div>
-              <div class="first-use-fork-title">{{ $t('firstUse.localBranchInstallNewLabel') }}</div>
-              <div class="first-use-fork-desc">{{ $t('firstUse.localBranchInstallNewDesc') }}</div>
-            </button>
-          </div>
-        </template>
-      </div>
+      <template v-else-if="step === 'localBranch'">
+        <h3 class="first-use-step-title">{{ $t('firstUse.localBranchTitle') }}</h3>
+        <p class="first-use-lead">{{ $t('firstUse.localBranchLead') }}</p>
+        <div
+          class="local-branch-grid"
+          role="radiogroup"
+          :aria-label="$t('firstUse.localBranchTitle')"
+        >
+          <ChoiceCard
+            :label="$t('firstUse.localBranchMigrateLabel')"
+            :description="$t('firstUse.localBranchMigrateDesc')"
+            data-testid="first-use-local-migrate"
+            @click="chooseMigrate"
+          >
+            <template #icon>
+              <ArrowRightLeft :size="20" :stroke-width="1.5" />
+            </template>
+          </ChoiceCard>
+          <ChoiceCard
+            :label="$t('firstUse.localBranchInstallNewLabel')"
+            :description="$t('firstUse.localBranchInstallNewDesc')"
+            data-testid="first-use-local-install-new"
+            @click="chooseInstallNew"
+          >
+            <template #icon>
+              <Download :size="20" :stroke-width="1.5" />
+            </template>
+          </ChoiceCard>
+        </div>
+      </template>
+    </div>
 
-      <div class="wizard-footer">
-        <!-- Back nav for the localBranch sub-step. The user reached
+    <div class="wizard-footer">
+      <!-- Back nav for the localBranch sub-step. The user reached
              this step by picking Local at the pick step; if they
              change their mind the Back link returns them to the pick
              step (the only other reachable predecessor — consent
              can't loop). -->
-        <div class="wizard-back-placeholder">
+      <div class="wizard-back-placeholder">
+        <button
+          v-if="step === 'localBranch'"
+          class="wizard-back"
+          data-testid="first-use-local-branch-back"
+          @click="step = 'pick'"
+        >
+          ← {{ $t('common.back') }}
+        </button>
+      </div>
+      <div></div>
+      <template v-if="step === 'consent'">
+        <button class="primary" data-testid="first-use-accept-consent" @click="acceptConsent">
+          {{ $t('firstUse.acceptTos') }}
+        </button>
+      </template>
+      <template v-else-if="step === 'mirrors'">
+        <div class="first-use-mirror-buttons">
           <button
-            v-if="step === 'localBranch'"
-            class="wizard-back"
-            data-testid="first-use-local-branch-back"
-            @click="step = 'pick'"
+            class="secondary"
+            data-testid="first-use-mirrors-skip"
+            @click="chooseMirrors(false)"
           >
-            ← {{ $t('common.back') }}
+            {{ $t('firstUse.notNow') }}
           </button>
-        </div>
-        <div></div>
-        <template v-if="step === 'consent'">
           <button
             class="primary"
-            data-testid="first-use-accept-consent"
-            @click="acceptConsent"
+            data-testid="first-use-mirrors-accept"
+            @click="chooseMirrors(true)"
           >
-            {{ $t('firstUse.acceptTos') }}
+            {{ $t('settings.chineseMirrorsSuggestConfirm') }}
           </button>
-        </template>
-        <template v-else-if="step === 'mirrors'">
-          <div class="first-use-mirror-buttons">
-            <button
-              class="secondary"
-              data-testid="first-use-mirrors-skip"
-              @click="chooseMirrors(false)"
-            >
-              {{ $t('firstUse.notNow') }}
-            </button>
-            <button
-              class="primary"
-              data-testid="first-use-mirrors-accept"
-              @click="chooseMirrors(true)"
-            >
-              {{ $t('settings.chineseMirrorsSuggestConfirm') }}
-            </button>
-          </div>
-        </template>
-        <template v-else>
-          <div></div>
-        </template>
-      </div>
+        </div>
+      </template>
+      <template v-else>
+        <div></div>
+      </template>
+    </div>
   </ModalShell>
 </template>
 
@@ -588,79 +626,77 @@ defineExpose({ open })
   margin-top: 8px;
 }
 
-/* Two-tile fork layout for the cloud-vs-local pick. The tiles want
- * to read as a real choice, not a pair of checkbox-sized cards — each
- * one is a generous click target with the icon centered above the
- * title and a short description underneath. The tiles stay side-by-side
- * on the panel's normal width and shrink to a single column only on
- * very narrow viewports (the host window has a min width that keeps
- * the side-by-side layout for any realistic user). */
-.first-use-fork {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 20px;
-  margin-top: 24px;
-}
-
-@media (max-width: 600px) {
-  .first-use-fork {
-    grid-template-columns: 1fr;
-  }
-}
-
-.first-use-fork-tile {
+/* Pick step. Brand chrome (background, beams, logo) lives in
+ * BrandTakeoverLayout; only the hero block is styled here.
+ * `.pick-why-cloud` is rendered via the layout's #footer-left slot
+ * and stays here because its absolute positioning resolves against the
+ * outer frame, which the layout preserves as its positioning context. */
+.pick-hero {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 960px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 14px;
-  /* Square-ish click target — `aspect-ratio` keeps the tiles balanced
-   * when the available width changes, with a min-height floor so the
-   * tile never collapses below a comfortable click target. */
-  aspect-ratio: 1 / 1;
-  min-height: 240px;
-  padding: 24px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--surface);
-  color: var(--text);
   text-align: center;
-  cursor: pointer;
-  transition: border-color 120ms ease, background 120ms ease, transform 120ms ease;
+}
+.pick-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: var(--takeover-fs-title);
+  line-height: 1.15;
+  letter-spacing: 0;
+  color: var(--color-text);
+  text-align: center;
+}
+.pick-lead {
+  margin: var(--takeover-gap-md) 0 var(--takeover-gap-lg);
+  font-family: var(--font-sans);
+  font-size: var(--takeover-fs-lead);
+  font-weight: 400;
+  line-height: normal;
+  color: var(--neutral-200);
+  text-align: center;
+}
+.pick-grid {
+  display: grid;
+  width: 100%;
+  grid-template-columns: repeat(auto-fit, minmax(min(360px, 100%), 1fr));
+  gap: 30px;
 }
 
-.first-use-fork-tile:hover {
-  border-color: var(--accent);
-  background: var(--surface-hover, var(--surface));
-  transform: translateY(-1px);
-}
-
-.first-use-fork-tile:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
-.first-use-fork-icon {
-  color: var(--text-muted);
-  display: flex;
+.pick-why-cloud {
+  position: absolute;
+  left: clamp(1.25rem, 2vw, 2rem);
+  bottom: clamp(1.25rem, 2vw, 2rem);
+  z-index: 2;
+  display: inline-flex;
   align-items: center;
-  justify-content: center;
+  gap: 6px;
+  background: transparent;
+  border: none;
+  padding: 6px 4px;
+  color: color-mix(in oklab, var(--neutral-100) 70%, transparent);
+  font: inherit;
+  font-size: var(--takeover-fs-caption);
+  cursor: pointer;
+}
+.pick-why-cloud:hover {
+  color: var(--neutral-100);
+}
+.pick-why-cloud:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: 4px;
 }
 
-.first-use-fork-tile:hover .first-use-fork-icon {
-  color: var(--accent);
-}
-
-.first-use-fork-title {
-  font-size: 20px;
-  font-weight: 600;
-}
-
-.first-use-fork-desc {
-  font-size: 13px;
-  line-height: 1.5;
-  color: var(--text-muted);
-  max-width: 32ch;
+.local-branch-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr));
+  gap: clamp(0.75rem, 1.5vw, 1.25rem);
+  margin-top: 24px;
 }
 
 .first-use-mirror-buttons {
