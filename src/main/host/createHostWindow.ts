@@ -195,8 +195,28 @@ export interface CreateHostWindowResult {
   layoutViews: () => void
 }
 
-export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowResult {
-  const fx = getFactories()
+/** Mode-agnostic skeleton produced by `buildHostSkeleton`. The
+ *  install-backed wrapper layers comfyContents listeners on top via
+ *  `attachInstall`; the chooser wrapper layers an eager
+ *  `ensurePanelView('chooser')`. */
+interface HostSkeleton {
+  windowKey: number
+  comfyWindow: BrowserWindow
+  titleBarView: WebContentsView
+  comfyView: WebContentsView
+  layoutViews: () => void
+}
+
+/**
+ * Build the BrowserWindow + titleBarView + comfyView and the bound
+ * `layoutViews`, plus the resize / move / fullscreen / focus
+ * listeners that touch only window-level state. No IPC handlers, no
+ * close-time teardown — those live in `wireTitleBarHandshake` and
+ * `installLifecycleListeners` respectively so a future
+ * `swapInstallInPlace` can re-run the IPC + lifecycle wiring against
+ * an existing skeleton.
+ */
+function buildHostSkeleton(opts: CreateHostWindowOpts): HostSkeleton {
   const windowKey = nextWindowKey()
   const saved = getSavedBounds(opts.boundsKey)
   const windowOptions = getWindowOptions(opts.boundsKey)
@@ -330,16 +350,32 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
     }
   })
 
-  // Push the initial state once the title bar's preload signals readiness.
+  return { windowKey, comfyWindow, titleBarView, comfyView, layoutViews }
+}
+
+/**
+ * Register the `comfy-window:title-bar-ready` IPC handler that pushes
+ * the initial state (panel, theme, title text, source category, app-
+ * update pill, downloads tray, install-update pill) and pre-warms the
+ * file-menu and system-modal popups. Returns the bound handler so the
+ * lifecycle module can `ipcMain.off` it on `closed`.
+ *
+ * The install-update pill + source-category icon are resolved off the
+ * entry: the title text and source-category come from
+ * `entry.titleBarText` / `entry.sourceCategory` (set by
+ * `attachInstall()` for install-backed, by the chooser-host wrapper
+ * for install-less); the install-update pill is computed from
+ * `entry.installationId` when non-null.
+ */
+function wireTitleBarHandshake(args: {
+  windowKey: number
+  comfyWindow: BrowserWindow
+  titleBarView: WebContentsView
+  computeInstallUpdateAvailable: HostWindowFactories['computeInstallUpdateAvailable']
+}): (event: Electron.IpcMainEvent) => void {
+  const { windowKey, comfyWindow, titleBarView, computeInstallUpdateAvailable } = args
   // Filter to this title bar's WebContents to avoid cross-talk between windows.
-  //
-  // The install-update pill + source-category icon are resolved off
-  // the entry: the title text and source-category come from
-  // `entry.titleBarText` / `entry.sourceCategory` (set by
-  // `attachInstall()` for install-backed, by the chooser-host
-  // wrapper for install-less); the install-update pill is computed
-  // from `entry.installationId` when non-null.
-  const onTitleBarReadyHandler = (event: Electron.IpcMainEvent): void => {
+  const handler = (event: Electron.IpcMainEvent): void => {
     if (event.sender !== titleBarView.webContents) return
     if (titleBarView.webContents.isDestroyed()) return
     const entry = comfyWindows.get(windowKey)
@@ -359,7 +395,7 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
     titleBarView.webContents.send('comfy-titlebar:downloads-changed', getDownloadsTrayState())
     const installId = entry?.installationId ?? null
     if (installId !== null) {
-      void fx.computeInstallUpdateAvailable(installId).then((state) => {
+      void computeInstallUpdateAvailable(installId).then((state) => {
         if (titleBarView.webContents.isDestroyed()) return
         titleBarView.webContents.send('comfy-titlebar:install-update-changed', state)
       })
@@ -373,23 +409,37 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
     // load cost — the modal needs to feel as instant as the pill click.
     ensureSystemModal(comfyWindow)
   }
-  ipcMain.on('comfy-window:title-bar-ready', onTitleBarReadyHandler)
+  ipcMain.on('comfy-window:title-bar-ready', handler)
+  return handler
+}
 
-  // Close handler is async: preventDefault, consult the panel
-  // renderer (so a Tier 2/3 op can prompt the user), run the
-  // attached install's symmetric cleanup if any, and only then
-  // destroy. The `closingInFlight` guard prevents re-entry on rapid
-  // clicks of the OS close button while the consult is pending.
-  //
-  // Pre-teardown work (detachWindowDownloads + ipc.stopRunning +
-  // install-keyed map cleanup + installationEvents unsubscribe) is
-  // consolidated on `entry._installCleanup`, which `attachInstall()`
-  // sets and `detachInstall()` / window close both invoke.
-  // Per-window cleanup (`detachWindowDownloads`) lives outside
-  // `_installCleanup` because it survives mode flips — the
-  // per-window download routing is attached at session level when
-  // the install does, and only needs to be torn down when the
-  // BrowserWindow itself goes away.
+/**
+ * Wire the close + closed handlers for a host window.
+ *
+ * Close is async: preventDefault, consult the panel renderer (so a
+ * Tier 2/3 op can prompt the user), run the attached install's
+ * symmetric cleanup if any, and only then destroy. The
+ * `closingInFlight` guard prevents re-entry on rapid clicks of the
+ * OS close button while the consult is pending.
+ *
+ * Pre-teardown work (detachWindowDownloads + ipc.stopRunning +
+ * install-keyed map cleanup + installationEvents unsubscribe) is
+ * consolidated on `entry._installCleanup`, which `attachInstall()`
+ * sets and `detachInstall()` / window close both invoke. Per-window
+ * cleanup (`detachWindowDownloads`) lives outside `_installCleanup`
+ * because it survives mode flips — the per-window download routing
+ * is attached at session level when the install does, and only needs
+ * to be torn down when the BrowserWindow itself goes away.
+ */
+function installLifecycleListeners(args: {
+  windowKey: number
+  comfyWindow: BrowserWindow
+  titleBarView: WebContentsView
+  comfyView: WebContentsView
+  onTitleBarReadyHandler: (event: Electron.IpcMainEvent) => void
+  fx: HostWindowFactories
+}): void {
+  const { windowKey, comfyWindow, titleBarView, comfyView, onTitleBarReadyHandler, fx } = args
   let closingInFlight = false
   comfyWindow.on('close', (e) => {
     e.preventDefault()
@@ -423,8 +473,7 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
 
   comfyWindow.on('closed', () => {
     ipcMain.off('comfy-window:title-bar-ready', onTitleBarReadyHandler)
-    // Unregister via the primary windowKey AND the secondary
-    // install-id index.
+    // Unregister via the primary windowKey AND the secondary install-id index.
     const closedEntry = comfyWindows.get(windowKey)
     if (closedEntry) unregisterHostEntry(closedEntry)
     // Drop any pending attach claim whose target is THIS window.
@@ -433,6 +482,28 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
     // `onLaunch()` (the consumer's destroyed-window check rejects
     // them, but the side-effect `delete` still fires).
     dropAttachClaimsForWindow(windowKey)
+  })
+}
+
+export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowResult {
+  const fx = getFactories()
+  const skeleton = buildHostSkeleton(opts)
+  const { windowKey, comfyWindow, titleBarView, comfyView, layoutViews } = skeleton
+
+  const onTitleBarReadyHandler = wireTitleBarHandshake({
+    windowKey,
+    comfyWindow,
+    titleBarView,
+    computeInstallUpdateAvailable: fx.computeInstallUpdateAvailable,
+  })
+
+  installLifecycleListeners({
+    windowKey,
+    comfyWindow,
+    titleBarView,
+    comfyView,
+    onTitleBarReadyHandler,
+    fx,
   })
 
   const entry: ComfyWindowEntry = {

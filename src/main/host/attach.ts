@@ -62,6 +62,162 @@ export interface AttachInstallOpts {
   isLocal: boolean
 }
 
+type Teardown = () => void
+
+/**
+ * F5 / Ctrl+R reload + Ctrl/Cmd + =/+/-/0 zoom shortcuts on the comfy
+ * WebContentsView. The default Electron accelerators target
+ * `BrowserWindow.webContents` (empty since the layered child views
+ * landed) and the app menu has no View > Zoom roles, so we wire it
+ * explicitly here. Step 0.5 mirrors Electron's standard zoomLevel
+ * granularity (~91% / 110% / ...). Excludes Alt to avoid AltGr /
+ * Ctrl+Alt collisions on non-US layouts.
+ *
+ * View-hot-swap caveat: this handler closes over `comfyContents`
+ * captured at attach time. Today, comfyView swaps happen only before
+ * `attachInstall` runs, so the listener always lives on the active
+ * view and the returned teardown removes it symmetrically. If we
+ * later hot-swap `entry.comfyView` mid-attach (e.g. to reuse a host
+ * window without tearing down install state), this binding goes
+ * stale and zoom shortcuts will silently stop working until the
+ * next attach. The Reset Zoom menu item re-reads
+ * `parentEntry.comfyView` at click time, so it stays correct.
+ */
+function wireKeyboardShortcuts(args: {
+  entry: ComfyWindowEntry
+  comfyContents: Electron.WebContents
+  reloadComfy: () => void
+}): Teardown {
+  const { entry, comfyContents, reloadComfy } = args
+  const onBeforeInputEvent = (e: Electron.Event, input: Electron.Input): void => {
+    if (input.type !== 'keyDown') return
+    const mod = input.control || input.meta
+    if (mod && input.key.toLowerCase() === 'w') {
+      e.preventDefault()
+      return
+    }
+    if (input.key === 'F5' || (input.key.toLowerCase() === 'r' && mod)) {
+      e.preventDefault()
+      reloadComfy()
+      return
+    }
+    if (mod && !input.alt && (input.key === '=' || input.key === '+' || input.key === '-' || input.key === '0')) {
+      e.preventDefault()
+      if (comfyContents.isDestroyed()) return
+      if (input.key === '0') {
+        const previousLevel = comfyContents.getZoomLevel()
+        comfyContents.setZoomLevel(0)
+        // Only emit when this was a real reset (skip no-op presses at 1x)
+        // so the event count tracks actual recovery actions, not key-spam.
+        if (previousLevel !== 0) {
+          mainTelemetry.emit('desktop2.zoom.reset', {
+            source: 'shortcut',
+            parent_entry_id: entry.windowKey,
+            installation_id: entry.installationId,
+            previous_zoom_level: previousLevel,
+            previous_zoom_percent: Math.round(Math.pow(1.2, previousLevel) * 100),
+          })
+        }
+        return
+      }
+      const step = input.key === '-' ? -0.5 : 0.5
+      comfyContents.setZoomLevel(comfyContents.getZoomLevel() + step)
+    }
+  }
+  comfyContents.on('before-input-event', onBeforeInputEvent)
+  return () => {
+    if (!comfyContents.isDestroyed()) {
+      comfyContents.off('before-input-event', onBeforeInputEvent)
+    }
+  }
+}
+
+/**
+ * Backoff retry on `did-fail-load` (excluding aborts and mid-relaunch
+ * navigations). Returns the cancel function so the relaunch flow can
+ * interrupt a pending retry that would otherwise navigate away from
+ * the splash page — the same function doubles as the teardown.
+ */
+function wireFailRetry(args: {
+  entry: ComfyWindowEntry
+  comfyContents: Electron.WebContents
+  comfyWindow: Electron.BrowserWindow
+  relaunchStates: Map<string, unknown>
+  currentComfyUrl: () => string
+}): { cancel: Teardown } {
+  const { entry, comfyContents, comfyWindow, relaunchStates, currentComfyUrl } = args
+  let failRetryTimer: ReturnType<typeof setTimeout> | null = null
+  const cancelTimer = (): void => {
+    if (failRetryTimer) {
+      clearTimeout(failRetryTimer)
+      failRetryTimer = null
+    }
+  }
+  const onDidFailLoad = (
+    _e: Electron.Event,
+    code: number,
+    _desc: string,
+    _failUrl: string,
+    isMainFrame: boolean,
+  ): void => {
+    if (!isMainFrame || code === -3 || failRetryTimer) return
+    const id = entry.installationId
+    if (id === null) return
+    if (relaunchStates.has(id)) return
+    failRetryTimer = setTimeout(() => {
+      failRetryTimer = null
+      const currentId = entry.installationId
+      if (currentId === null) return
+      if (relaunchStates.has(currentId)) return
+      if (!comfyWindow.isDestroyed()) {
+        comfyContents.loadURL(currentComfyUrl())
+      }
+    }, 2000)
+  }
+  comfyContents.on('did-fail-load', onDidFailLoad)
+  const cancel: Teardown = () => {
+    cancelTimer()
+    if (!comfyContents.isDestroyed()) {
+      comfyContents.off('did-fail-load', onDidFailLoad)
+    }
+  }
+  return { cancel }
+}
+
+/**
+ * Datadog-error report + automatic reload on renderer crash.
+ */
+function wireRenderProcessGone(args: {
+  entry: ComfyWindowEntry
+  comfyContents: Electron.WebContents
+  reloadComfy: () => void
+}): Teardown {
+  const { entry, comfyContents, reloadComfy } = args
+  const onRenderProcessGone = (
+    _event: Electron.Event,
+    details: Electron.RenderProcessGoneDetails,
+  ): void => {
+    forwardDatadogError({
+      source: 'comfy-window-render-process-gone',
+      message: `Comfy window renderer process exited (${details.reason})`,
+      level: 'error',
+      context: {
+        origin: 'main-process',
+        installationId: entry.installationId ?? '(detached)',
+        reason: details.reason,
+        exitCode: details.exitCode,
+      },
+    })
+    reloadComfy()
+  }
+  comfyContents.on('render-process-gone', onRenderProcessGone)
+  return () => {
+    if (!comfyContents.isDestroyed()) {
+      comfyContents.off('render-process-gone', onRenderProcessGone)
+    }
+  }
+}
+
 /**
  * Bind an install to a freshly-constructed (or detached) host entry.
  * Wires every install-keyed listener — install-record subscription,
@@ -244,107 +400,21 @@ export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts):
     comfyContents.stop()
     comfyContents.loadURL(currentComfyUrl())
   }
-  const onBeforeInputEvent = (e: Electron.Event, input: Electron.Input): void => {
-    if (input.type !== 'keyDown') return
-    const mod = input.control || input.meta
-    if (mod && input.key.toLowerCase() === 'w') {
-      e.preventDefault()
-      return
-    }
-    if (input.key === 'F5' || (input.key.toLowerCase() === 'r' && mod)) {
-      e.preventDefault()
-      reloadComfy()
-      return
-    }
-    // Restore Ctrl/Cmd + =/+/-/0 zoom on the comfy WebContentsView. The default
-    // accelerators target BrowserWindow.webContents (empty since #414) and the
-    // app menu has no View > Zoom roles, so we wire it explicitly here. Step
-    // 0.5 mirrors Electron's standard zoomLevel granularity (~91% / 110% / ...).
-    // Exclude Alt to avoid AltGr / Ctrl+Alt collisions on non-US layouts.
-    //
-    // NOTE on view hot-swapping: this handler closes over `comfyContents`
-    // captured at attach time. Today, comfyView swaps happen only before
-    // attachInstall runs, so the listener always lives on the active view and
-    // `_installCleanup` removes it symmetrically. If we later hot-swap
-    // entry.comfyView mid-attach (e.g. to reuse a host window without tearing
-    // down install state), this binding goes stale and zoom shortcuts will
-    // silently stop working until the next attach. The Reset Zoom menu item
-    // re-reads parentEntry.comfyView at click time, so it stays correct.
-    if (mod && !input.alt && (input.key === '=' || input.key === '+' || input.key === '-' || input.key === '0')) {
-      e.preventDefault()
-      if (comfyContents.isDestroyed()) return
-      if (input.key === '0') {
-        const previousLevel = comfyContents.getZoomLevel()
-        comfyContents.setZoomLevel(0)
-        // Only emit when this was a real reset (skip no-op presses at 1x)
-        // so the event count tracks actual recovery actions, not key-spam.
-        if (previousLevel !== 0) {
-          mainTelemetry.emit('desktop2.zoom.reset', {
-            source: 'shortcut',
-            parent_entry_id: entry.windowKey,
-            installation_id: entry.installationId,
-            previous_zoom_level: previousLevel,
-            previous_zoom_percent: Math.round(Math.pow(1.2, previousLevel) * 100),
-          })
-        }
-        return
-      }
-      const step = input.key === '-' ? -0.5 : 0.5
-      comfyContents.setZoomLevel(comfyContents.getZoomLevel() + step)
-    }
-  }
-  comfyContents.on('before-input-event', onBeforeInputEvent)
+  const teardownKeyboardShortcuts = wireKeyboardShortcuts({ entry, comfyContents, reloadComfy })
 
-  // Failure retry — backoff on did-fail-load that isn't aborted /
-  // mid-relaunch. Per-install timer cancel registered into the
-  // shared map so onModelFolderRelaunch can interrupt a pending
-  // retry that would otherwise navigate away from the splash page.
-  let failRetryTimer: ReturnType<typeof setTimeout> | null = null
-  const cancelFailRetry = (): void => {
-    if (failRetryTimer) { clearTimeout(failRetryTimer); failRetryTimer = null }
-  }
+  // Per-install fail-retry timer cancel registered into the shared map
+  // so `onModelFolderRelaunch` can interrupt a pending retry that would
+  // otherwise navigate away from the splash page.
+  const { cancel: cancelFailRetry } = wireFailRetry({
+    entry,
+    comfyContents,
+    comfyWindow,
+    relaunchStates: fx.relaunchStates,
+    currentComfyUrl,
+  })
   fx.comfyFailRetryTimerCancels.set(installationId, cancelFailRetry)
-  const onDidFailLoad = (
-    _e: Electron.Event,
-    code: number,
-    _desc: string,
-    _failUrl: string,
-    isMainFrame: boolean,
-  ): void => {
-    if (!isMainFrame || code === -3 || failRetryTimer) return
-    const id = entry.installationId
-    if (id === null) return
-    if (fx.relaunchStates.has(id)) return
-    failRetryTimer = setTimeout(() => {
-      failRetryTimer = null
-      const currentId = entry.installationId
-      if (currentId === null) return
-      if (fx.relaunchStates.has(currentId)) return
-      if (!comfyWindow.isDestroyed()) {
-        comfyContents.loadURL(currentComfyUrl())
-      }
-    }, 2000)
-  }
-  comfyContents.on('did-fail-load', onDidFailLoad)
 
-  const onRenderProcessGone = (
-    _event: Electron.Event,
-    details: Electron.RenderProcessGoneDetails,
-  ): void => {
-    forwardDatadogError({
-      source: 'comfy-window-render-process-gone',
-      message: `Comfy window renderer process exited (${details.reason})`,
-      level: 'error',
-      context: {
-        origin: 'main-process',
-        installationId: entry.installationId ?? '(detached)',
-        reason: details.reason,
-        exitCode: details.exitCode,
-      },
-    })
-    reloadComfy()
-  }
-  comfyContents.on('render-process-gone', onRenderProcessGone)
+  const teardownRenderProcessGone = wireRenderProcessGone({ entry, comfyContents, reloadComfy })
 
   // Per-window download routing — attached at session level so a
   // download dispatched from the comfyContents lands in this
@@ -363,14 +433,13 @@ export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts):
     if (entry._installCleanup === null) return
     entry._installCleanup = null
     installationEvents.off('updated', onInstallationUpdated)
+    teardownKeyboardShortcuts()
     cancelFailRetry()
+    teardownRenderProcessGone()
     if (!comfyContents.isDestroyed()) {
       comfyContents.off('ipc-message', onIpcMessage)
       comfyContents.off('page-title-updated', onPageTitleUpdated)
       comfyContents.off('dom-ready', onDomReady)
-      comfyContents.off('did-fail-load', onDidFailLoad)
-      comfyContents.off('render-process-gone', onRenderProcessGone)
-      comfyContents.off('before-input-event', onBeforeInputEvent)
     }
     const id = entry.installationId
     if (id !== null) {
