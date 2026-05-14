@@ -759,18 +759,9 @@ ipcMain.handle('close-host-window', (event) => {
 })
 
 /**
- * In-place attach is currently disabled — too many edge-case bugs
- * (window destruction mid-attach, partition mismatches, missed
- * instance-started fallbacks closing the only remaining window).
- * Always return `false` so the renderer falls back to the
- * close-host + open-fresh-install-window swap, the path that's
- * been stable in production.
- *
- * The underlying machinery (`claimAttachHost` / `consumeAttachClaim`,
- * `attachInstall`, `detachInstall`, `comfyWindows` keyed by
- * `windowKey`) is left in place so this revert is a one-line
- * tactical disable; removing the infra entirely would be a much
- * larger change. See docs/window-mode-unification-revert.md.
+ * In-place attach is disabled. Returning `false` forces the renderer
+ * down the close-host + open-fresh-install-window swap path. See
+ * docs/window-mode-unification-revert.md for the re-enable conditions.
  */
 ipcMain.handle('claim-attach-host', (_event, _installationId: string) => {
   return false
