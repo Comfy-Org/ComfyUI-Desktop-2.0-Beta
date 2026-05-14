@@ -104,7 +104,9 @@
     "useSharedPaths": "使用共享目录",
     "done": "完成",
     "noItems": "没有可用项目。",
-    "advanced": "高级"
+    "advanced": "高级",
+    "continue": "继续",
+    "learnMore": "了解更多"
   },
 
   "list": {
@@ -138,6 +140,11 @@
     "installing": "正在安装",
     "chooseMethod": "选择安装方式",
     "configuration": "配置",
+    "configureTitle": "配置 Comfy 桌面版",
+    "configureLead": "您希望如何安装此版本？",
+    "detectedGpuLabel": "已检测到的 GPU",
+    "helpImproveTitle": "帮助改进 Comfy",
+    "helpImproveHint": "共享匿名使用数据，帮助我们修复缺陷并确定功能优先级。",
     "nameLocation": "名称和位置",
     "next": "下一步",
     "recommended": "推荐"
