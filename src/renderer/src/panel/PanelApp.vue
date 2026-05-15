@@ -133,6 +133,18 @@ const firstUseRef = ref<InstanceType<typeof FirstUseTakeover> | null>(null)
 const chainingFirstUseToNewInstall = ref(false)
 
 /**
+ * Pre-seed name forwarded by the first-use takeover's `nameInstall`
+ * sub-step (only reached when a Legacy Desktop install was detected
+ * and the user chose Start Fresh). Consumed in `openFlowTakeover` when
+ * it calls `newInstallRef.value?.open({ initialName })` for the
+ * chained new-install Tier 3 takeover, then cleared. Fresh-machine
+ * chains (`hasLegacyDesktop === false`) skip the name step and leave
+ * this `null`, so NewInstallModal's silent `'ComfyUI'` fallback in
+ * `handleSave()` still applies.
+ */
+const pendingFirstUseInstName = ref<string | null>(null)
+
+/**
  * Installation id of the Standalone install that the first-use chain
  * (new-install or
  * migration) just kicked off. Captured from the corresponding
@@ -366,7 +378,11 @@ async function openFlowTakeover(component: FlowComponent, entrypoint: string): P
   // Wait for the v-if branch in the takeover slot to mount the
   // component before reaching for its ref.
   await nextTick()
-  if (component === 'new-install') await newInstallRef.value?.open()
+  if (component === 'new-install') {
+    const initialName = pendingFirstUseInstName.value
+    pendingFirstUseInstName.value = null
+    await newInstallRef.value?.open(initialName ? { initialName } : {})
+  }
   else if (component === 'track') trackRef.value?.open()
   else if (component === 'load-snapshot') loadSnapshotRef.value?.open()
   else if (component === 'quick-install') await quickInstallRef.value?.open()
@@ -535,9 +551,10 @@ async function handleFirstUseComplete(): Promise<void> {
  *  `useOverlay`, so the first-use takeover unmounts as the
  *  new-install takeover mounts. The completion flip is deferred to
  *  the new-install close path (see `handleNewInstallTakeoverClose`). */
-async function handleFirstUseChainLocal(): Promise<void> {
+async function handleFirstUseChainLocal(payload?: { instName?: string }): Promise<void> {
   chainingFirstUseToNewInstall.value = true
   pendingFirstUseAutoLaunchId.value = null
+  pendingFirstUseInstName.value = payload?.instName?.trim() || null
   await switchPanel('new-install', 'first_use')
   // FirstUseTakeover.onUnmounted just pushed `'none'` as the chain
   // swap unmounted it. Re-assert `'post-consent'` so the file-menu
