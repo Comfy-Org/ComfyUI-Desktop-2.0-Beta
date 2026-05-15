@@ -198,3 +198,55 @@ export function titleBarPage(app: ElectronApplication): WebContentsPage {
 export function titlePopupPage(app: ElectronApplication): WebContentsPage {
   return new WebContentsPage(app, 'comfyTitlePopup.html')
 }
+
+/**
+ * True iff the WebContentsView whose URL contains `marker` is currently
+ * `setVisible(true)` AND has non-zero bounds — the EmbeddedPopupView
+ * contract for "shown to the user". Shared by every popup-asserting
+ * e2e test (chooser, downloads-shelf, dropdowns, update-pills, …).
+ */
+export function isPopupVisible(
+  app: ElectronApplication,
+  marker: string,
+): Promise<boolean> {
+  return app.evaluate(({ BrowserWindow, WebContentsView }, m) => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      for (const child of win.contentView.children) {
+        if (!(child instanceof WebContentsView)) continue
+        if (!child.webContents.getURL().includes(m)) continue
+        if (!child.getVisible()) return false
+        const b = child.getBounds()
+        return b.width > 0 && b.height > 0
+      }
+    }
+    return false
+  }, marker)
+}
+
+/**
+ * Force-close the title popup via its bridge if it is currently visible.
+ * Used by every test that opens the popup, in `beforeEach` to start from
+ * a known state.
+ */
+export async function closeTitlePopupIfOpen(app: ElectronApplication): Promise<void> {
+  const id = await findWebContentsId(app, 'comfyTitlePopup.html')
+  if (id === null) return
+  if (!(await isPopupVisible(app, 'comfyTitlePopup.html'))) return
+  await app.evaluate(({ webContents }) => {
+    const wc = webContents.getAllWebContents().find((w) => w.getURL().includes('comfyTitlePopup.html'))
+    if (!wc) return
+    return wc.executeJavaScript(`(window).__comfyTitlePopup.close()`)
+  })
+  await expect.poll(
+    () => isPopupVisible(app, 'comfyTitlePopup.html'),
+    { timeout: 3_000, intervals: [100, 200] },
+  ).toBe(false)
+}
+
+/**
+ * Window in milliseconds to wait past the title bar's reopen-suppression
+ * debounce (100ms in production) before the next open click. Generously
+ * over the 100ms threshold so CI flakiness from timer drift can't push
+ * the wait under the suppression window.
+ */
+export const TITLE_REOPEN_SUPPRESSION_MS = 300

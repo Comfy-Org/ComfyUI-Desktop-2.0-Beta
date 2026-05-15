@@ -17,7 +17,12 @@ import {
   expectTakeoverOpen,
   dismissOverlay,
 } from './support/chooserHelpers'
-import { findWebContentsId, waitForWebContents } from './support/cdpPages'
+import {
+  findWebContentsId,
+  isPopupVisible,
+  TITLE_REOPEN_SUPPRESSION_MS,
+  waitForWebContents,
+} from './support/cdpPages'
 
 let ctx: AppContext
 
@@ -128,7 +133,7 @@ test('title popup reopens after a blur dismiss (menu-closed IPC clears the reope
   // stamps the title-bar's `menuClosedAt.menu` so a click within 100ms
   // is suppressed by the time-based reopen guard. Wait past that
   // window so the *first* open in this test isn't dropped.
-  await new Promise((resolve) => setTimeout(resolve, 150))
+  await new Promise((resolve) => setTimeout(resolve, TITLE_REOPEN_SUPPRESSION_MS))
 
   // Open the popup once normally.
   await openTitleMenu(ctx.titleBar)
@@ -157,7 +162,7 @@ test('title popup reopens after a blur dismiss (menu-closed IPC clears the reope
   // Step past the title-bar's 100ms reopen-guard so the second click
   // isn't suppressed by the time-based debounce — the bug under test
   // is the *flag*-based guard (`isMenuOpen.value`), not the timer.
-  await new Promise((resolve) => setTimeout(resolve, 150))
+  await new Promise((resolve) => setTimeout(resolve, TITLE_REOPEN_SUPPRESSION_MS))
 
   // Reopen — must succeed, otherwise the title bar still thinks the
   // menu is open and the click goes to the dismiss path.
@@ -203,26 +208,6 @@ test('title-bar tooltip popup is created on demand and hides cleanly @windows @m
     { timeout: 5_000, intervals: [100, 200] },
   ).toBe(false)
 })
-
-/**
- * True iff a WebContentsView whose webContents URL contains `marker` is
- * currently `visible` AND has non-zero bounds — the EmbeddedPopupView
- * contract for "shown to the user".
- */
-async function isPopupVisible(app: ElectronApplication, marker: string): Promise<boolean> {
-  return app.evaluate(({ BrowserWindow, WebContentsView }, m) => {
-    for (const win of BrowserWindow.getAllWindows()) {
-      for (const child of win.contentView.children) {
-        if (!(child instanceof WebContentsView)) continue
-        if (!child.webContents.getURL().includes(m)) continue
-        if (!child.getVisible()) return false
-        const b = child.getBounds()
-        return b.width > 0 && b.height > 0
-      }
-    }
-    return false
-  }, marker)
-}
 
 /** Read the popup's currently-rendered menu item labels. */
 async function readPopupMenuItems(app: ElectronApplication, marker: string): Promise<string[]> {

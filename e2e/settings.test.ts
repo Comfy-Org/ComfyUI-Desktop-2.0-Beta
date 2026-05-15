@@ -12,7 +12,11 @@
 import { test, expect } from '@playwright/test'
 import { launchApp, type AppContext } from './launchApp'
 import { openTitleMenu } from './support/chooserHelpers'
-import { titlePopupPage, type WebContentsPage } from './support/cdpPages'
+import {
+  titlePopupPage,
+  TITLE_REOPEN_SUPPRESSION_MS,
+  type WebContentsPage,
+} from './support/cdpPages'
 
 let ctx: AppContext
 let popup: WebContentsPage
@@ -41,7 +45,7 @@ test.beforeEach(async () => {
   }
   // Step past the title-bar reopen-suppression window so the next open
   // doesn't get debounced.
-  await new Promise((r) => setTimeout(r, 150))
+  await new Promise((r) => setTimeout(r, TITLE_REOPEN_SUPPRESSION_MS))
 })
 
 // ---------------------------------------------------------------------------
@@ -76,7 +80,7 @@ test('Settings reopens cleanly after a close @windows @macos @linux', async () =
   }).toBe(false)
 
   // Step past reopen-suppression and open again.
-  await new Promise((r) => setTimeout(r, 150))
+  await new Promise((r) => setTimeout(r, TITLE_REOPEN_SUPPRESSION_MS))
   await openSettingsViaWaffle(ctx, popup)
   expect(await ctx.panel.exists('.settings-modal-shell')).toBe(true)
 })

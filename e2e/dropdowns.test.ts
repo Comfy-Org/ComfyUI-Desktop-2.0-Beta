@@ -16,8 +16,10 @@ import { test, expect, type ElectronApplication } from '@playwright/test'
 import { launchApp, type AppContext } from './launchApp'
 import { openTitleMenu } from './support/chooserHelpers'
 import {
-  findWebContentsId,
+  closeTitlePopupIfOpen,
+  isPopupVisible,
   titlePopupPage,
+  TITLE_REOPEN_SUPPRESSION_MS,
   waitForWebContents,
   type WebContentsPage,
 } from './support/cdpPages'
@@ -38,7 +40,7 @@ test.afterAll(async () => {
 
 test.beforeEach(async () => {
   await closeTitlePopupIfOpen(ctx.app)
-  await new Promise((r) => setTimeout(r, 150))
+  await new Promise((r) => setTimeout(r, TITLE_REOPEN_SUPPRESSION_MS))
 })
 
 // ---------------------------------------------------------------------------
@@ -82,7 +84,7 @@ test('title-popup webContents listener counts are stable across repeated opens @
   await popup.waitForSelector('[role="menuitem"]', { timeout: 5_000 })
   await closeTitlePopupViaBridge(ctx.app)
   await waitForPopupHidden(ctx.app)
-  await new Promise((r) => setTimeout(r, 150))
+  await new Promise((r) => setTimeout(r, TITLE_REOPEN_SUPPRESSION_MS))
 
   const before = await getPopupListenerCount(ctx.app)
   expect(before).toBeGreaterThan(0)
@@ -93,7 +95,7 @@ test('title-popup webContents listener counts are stable across repeated opens @
     await popup.waitForSelector('[role="menuitem"]', { timeout: 5_000 })
     await closeTitlePopupViaBridge(ctx.app)
     await waitForPopupHidden(ctx.app)
-    await new Promise((r) => setTimeout(r, 150))
+    await new Promise((r) => setTimeout(r, TITLE_REOPEN_SUPPRESSION_MS))
   }
 
   const after = await getPopupListenerCount(ctx.app)
@@ -164,23 +166,6 @@ async function setComfyViewZoomLevel(app: ElectronApplication, level: number): P
   }, level)
 }
 
-/** True iff the WebContentsView whose URL contains `marker` is visible
- *  AND has non-zero bounds — same contract as the chooser test. */
-async function isPopupVisible(app: ElectronApplication, marker: string): Promise<boolean> {
-  return app.evaluate(({ BrowserWindow, WebContentsView }, m) => {
-    for (const win of BrowserWindow.getAllWindows()) {
-      for (const child of win.contentView.children) {
-        if (!(child instanceof WebContentsView)) continue
-        if (!child.webContents.getURL().includes(m)) continue
-        if (!child.getVisible()) return false
-        const b = child.getBounds()
-        return b.width > 0 && b.height > 0
-      }
-    }
-    return false
-  }, marker)
-}
-
 async function waitForPopupHidden(app: ElectronApplication): Promise<void> {
   await expect.poll(() => isPopupVisible(app, 'comfyTitlePopup.html'), {
     timeout: 5_000,
@@ -194,14 +179,6 @@ async function closeTitlePopupViaBridge(app: ElectronApplication): Promise<void>
     if (!wc) return
     return wc.executeJavaScript(`(window).__comfyTitlePopup.close()`)
   })
-}
-
-async function closeTitlePopupIfOpen(app: ElectronApplication): Promise<void> {
-  const id = await findWebContentsId(app, 'comfyTitlePopup.html')
-  if (id === null) return
-  if (!(await isPopupVisible(app, 'comfyTitlePopup.html'))) return
-  await closeTitlePopupViaBridge(app)
-  await waitForPopupHidden(app)
 }
 
 /** Sum of registered listeners on the popup webContents, summed across

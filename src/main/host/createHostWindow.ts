@@ -22,6 +22,7 @@ import * as updater from '../lib/updater'
 import { getSavedBounds, getWindowOptions, saveWindowBounds } from '../lib/windowState'
 import { ensureSystemModal } from '../popups/systemModal'
 import { prewarmTitlePopup } from '../popups/titlePopup'
+import { destroyPanelView, ensurePanelView } from './panelView'
 import {
   bringToFront,
   comfyWindows,
@@ -34,7 +35,7 @@ import {
   setLastFocusedInstallationId,
   unregisterHostEntry,
 } from './registry'
-import type { BodyMode, ComfyWindowEntry } from './registry'
+import type { ComfyWindowEntry } from './registry'
 
 /** Default size for a freshly-spawned host window when an existing
  *  host of the same identity is already open. Matches the
@@ -71,14 +72,6 @@ export interface HostWindowFactories {
   /** WeakSet of host windows whose close was pre-cleared by the
    *  consult-once-and-confirm path. */
   preClearedClose: WeakSet<BrowserWindow>
-  /** Lazily create the panel WebContentsView for a host entry. */
-  ensurePanelView: (
-    windowKey: number,
-    entry: ComfyWindowEntry,
-    initialPanel: BodyMode,
-  ) => WebContentsView
-  /** Tear down the entry's panelView (overlays + broadcast target + WebContents). */
-  destroyPanelView: (entry: ComfyWindowEntry) => void
   /** Compute whether an install has a pending in-app update. */
   computeInstallUpdateAvailable: (
     installationId: string,
@@ -566,7 +559,7 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
         const liveEntry = comfyWindows.get(windowKey)
         const activeComfyView = liveEntry?.comfyView ?? comfyView
         if (liveEntry) {
-          safeTeardown('host-window-close-destroy-panel-view', () => fx.destroyPanelView(liveEntry))
+          safeTeardown('host-window-close-destroy-panel-view', () => destroyPanelView(liveEntry))
         }
         safeTeardown('host-window-close-title-bar-webcontents-close',
           () => titleBarView.webContents.close())
@@ -825,7 +818,6 @@ export function applyChooserHostThemeToAll(): void {
  *  special-case its absence, but is sized to zero and never made
  *  visible. */
 export function openChooserHostWindow(): BrowserWindow {
-  const fx = getFactories()
   // Install-less wrapper. The shared `createHostWindow()` builds
   // the BrowserWindow + 2 views skeleton, layoutViews, macOS
   // fullscreen, bounds-save listeners, close / closed handlers,
@@ -888,7 +880,7 @@ export function openChooserHostWindow(): BrowserWindow {
   // install-less windows always need a panel, and creating it eagerly
   // avoids the empty body flash that would happen on the next
   // layoutViews tick.
-  fx.ensurePanelView(entry.windowKey, entry, 'chooser')
+  ensurePanelView(entry.windowKey, entry, 'chooser')
 
   entry.layoutViews()
   // Explicitly bring the new chooser host to the foreground.

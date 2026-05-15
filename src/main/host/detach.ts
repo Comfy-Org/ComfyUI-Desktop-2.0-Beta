@@ -2,6 +2,7 @@ import { dialog, ipcMain } from 'electron'
 import type { BrowserWindow, WebContentsView } from 'electron'
 import * as ipc from '../lib/ipc'
 import { COMFY_BG } from '../lib/theme'
+import { destroyPanelView, ensurePanelView } from './panelView'
 import { comfyWindows, isChooserHost } from './registry'
 import type { ComfyWindowEntry } from './registry'
 import {
@@ -10,30 +11,6 @@ import {
   CHOOSER_HOST_WINDOW_TITLE,
   loadTitleBarUrl,
 } from './createHostWindow'
-
-/** Late-bound dependency on the panelView constructor; injected from
- *  `index.ts` to avoid a circular import. */
-export interface DetachFactories {
-  ensurePanelView: (
-    windowKey: number,
-    entry: ComfyWindowEntry,
-    initialPanel: 'chooser',
-  ) => WebContentsView
-  destroyPanelView: (entry: ComfyWindowEntry) => void
-}
-
-let factories: DetachFactories | null = null
-
-export function setDetachFactories(opts: DetachFactories): void {
-  factories = opts
-}
-
-function getFactories(): DetachFactories {
-  if (!factories) {
-    throw new Error('setDetachFactories must be called before detach')
-  }
-  return factories
-}
 
 /**
  * WeakSet of host windows whose `close` should skip the panel-renderer
@@ -273,7 +250,6 @@ export async function confirmAndCloseAllHostWindows(
 export function _detachInstallImpl(entry: ComfyWindowEntry): void {
   if (isChooserHost(entry)) return
   if (entry.window.isDestroyed()) return
-  const fx = getFactories()
 
   // Symmetric undo of attachInstall (listeners, maps, stopRunning, etc).
   entry._installCleanup?.()
@@ -305,7 +281,7 @@ export function _detachInstallImpl(entry: ComfyWindowEntry): void {
   // Tear down the install-backed PanelApp and remount fresh in chooser mode.
   // Preserves no per-install state (overlays, activePanel, installationId
   // URL param) across the detach.
-  fx.destroyPanelView(entry)
-  fx.ensurePanelView(entry.windowKey, entry, 'chooser')
+  destroyPanelView(entry)
+  ensurePanelView(entry.windowKey, entry, 'chooser')
   entry.layoutViews()
 }

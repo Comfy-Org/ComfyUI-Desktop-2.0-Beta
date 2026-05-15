@@ -1,5 +1,6 @@
 import path from 'path'
 import fs from 'fs'
+import { app } from 'electron'
 import { configDir, cacheDir, homeDir } from './lib/paths'
 import { MODEL_FOLDER_TYPES } from './lib/models'
 import { readFileSafe, writeFileSafe } from './lib/safe-file'
@@ -184,9 +185,16 @@ let e2eSeedApplied = false
 function maybeSeedFromEnv(): void {
   if (e2eSeedApplied) return
   e2eSeedApplied = true
+  // Hard guard: never run in production builds, even if a malicious
+  // env var sneaks in.
+  if (app.isPackaged) return
   if (process.env['E2E'] !== '1') return
   const seed = process.env['E2E_SETTINGS_SEED']
   if (!seed) return
+  // Drop the env var immediately so it doesn't leak into child
+  // processes (Python, ComfyUI server) — the JSON payload may carry
+  // sensitive test fixtures we don't want exposed beyond this process.
+  delete process.env['E2E_SETTINGS_SEED']
   try {
     JSON.parse(seed) // validate before writing
     fs.mkdirSync(path.dirname(dataPath), { recursive: true })

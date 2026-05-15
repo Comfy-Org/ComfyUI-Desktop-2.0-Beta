@@ -12,11 +12,18 @@
 import { test, expect, type ElectronApplication } from '@playwright/test'
 import { launchApp, type AppContext } from './launchApp'
 import { openDownloadsTray } from './support/chooserHelpers'
-import { findWebContentsId, titlePopupPage, type WebContentsPage } from './support/cdpPages'
+import {
+  closeTitlePopupIfOpen,
+  isPopupVisible,
+  titlePopupPage,
+  TITLE_REOPEN_SUPPRESSION_MS,
+  type WebContentsPage,
+} from './support/cdpPages'
 import { getTitlePopupBounds, seedDownloads, type DownloadProgressLike } from './support/devHooks'
 
 let ctx: AppContext
 let popup: WebContentsPage
+let entryCounter = 0
 
 test.describe.configure({ mode: 'serial' })
 
@@ -35,11 +42,16 @@ test.afterAll(async () => {
  *   2. Wait past the 100ms reopen-suppression window in the title bar.
  *   3. Clear the seeded downloads buffer so empty-state assertions
  *      aren't polluted by a previous test's residue.
+ *   4. Reset the makeEntry counter so each test gets deterministic
+ *      `createdAt` ordering — without this, parallel test pollution
+ *      (or shifts in test order) would couple downstream `createdAt`
+ *      assertions to the previous test's seeding.
  */
 test.beforeEach(async () => {
   await closeTitlePopupIfOpen(ctx.app)
-  await new Promise((r) => setTimeout(r, 150))
+  await new Promise((r) => setTimeout(r, TITLE_REOPEN_SUPPRESSION_MS))
   await seedDownloads(ctx.app, { active: [], recent: [] })
+  entryCounter = 0
 })
 
 // ---------------------------------------------------------------------------
@@ -232,14 +244,16 @@ test('the open popup repaints live when tray state changes @windows @macos @linu
 // ---------------------------------------------------------------------------
 // Helpers — kept inline so the test file stays self-contained; promote
 // to `support/` if a second test file ends up needing the same logic.
+// (`isPopupVisible` and `closeTitlePopupIfOpen` already live in
+// `support/cdpPages.ts` because they are shared with chooser /
+// dropdowns / downloads tests.)
 // ---------------------------------------------------------------------------
-
-let entryCounter = 0
 
 /** Build a minimal `DownloadProgressLike` with sensible defaults so tests
  *  only set the fields they actually care about. `createdAt` defaults to
  *  a monotonically-increasing counter so insertion-ordered list assertions
- *  match the order the test wrote them. */
+ *  match the order the test wrote them. The counter resets in
+ *  `beforeEach` so each test starts from 1. */
 function makeEntry(partial: Partial<DownloadProgressLike> & { url: string; filename: string }): DownloadProgressLike {
   return {
     progress: 0,
@@ -249,25 +263,8 @@ function makeEntry(partial: Partial<DownloadProgressLike> & { url: string; filen
   }
 }
 
-/** True iff the title popup webContentsView is `setVisible(true)` AND has
- *  non-zero bounds — the EmbeddedPopupView contract for "shown to user". */
-async function isPopupVisible(app: ElectronApplication): Promise<boolean> {
-  return app.evaluate(({ BrowserWindow, WebContentsView }) => {
-    for (const win of BrowserWindow.getAllWindows()) {
-      for (const child of win.contentView.children) {
-        if (!(child instanceof WebContentsView)) continue
-        if (!child.webContents.getURL().includes('comfyTitlePopup.html')) continue
-        if (!child.getVisible()) return false
-        const b = child.getBounds()
-        return b.width > 0 && b.height > 0
-      }
-    }
-    return false
-  })
-}
-
 async function waitForPopupVisible(app: ElectronApplication): Promise<void> {
-  await expect.poll(() => isPopupVisible(app), {
+  await expect.poll(() => isPopupVisible(app, 'comfyTitlePopup.html'), {
     timeout: 5_000,
     intervals: [100, 200],
   }).toBe(true)
@@ -296,16 +293,4 @@ async function waitForStableBounds(
     }
     await new Promise((r) => setTimeout(r, 50))
   }
-}
-
-async function closeTitlePopupIfOpen(app: ElectronApplication): Promise<void> {
-  const id = await findWebContentsId(app, 'comfyTitlePopup.html')
-  if (id === null) return
-  if (!(await isPopupVisible(app))) return
-  await app.evaluate(({ webContents }) => {
-    const wc = webContents.getAllWebContents().find((w) => w.getURL().includes('comfyTitlePopup.html'))
-    if (!wc) return
-    return wc.executeJavaScript(`(window).__comfyTitlePopup.close()`)
-  })
-  await expect.poll(() => isPopupVisible(app), { timeout: 3_000, intervals: [100, 200] }).toBe(false)
 }

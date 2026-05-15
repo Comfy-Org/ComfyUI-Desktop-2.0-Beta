@@ -72,7 +72,6 @@ import {
   consultPanelRendererClose,
   preClearedClose,
   returnToDashboard,
-  setDetachFactories,
 } from './host/detach'
 import {
   destroyPanelView,
@@ -876,8 +875,6 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
       consultPanelRendererClose,
       detachInstallImpl: _detachInstallImpl,
       preClearedClose,
-      ensurePanelView,
-      destroyPanelView,
       computeInstallUpdateAvailable,
     })
     setAttachFactories({
@@ -885,7 +882,6 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
       relaunchStates,
       computeInstallUpdateAvailable,
     })
-    setDetachFactories({ ensurePanelView, destroyPanelView })
     setHostFactories({ createChooser: openChooserHostWindow })
     registerPanelViewIpc()
 
