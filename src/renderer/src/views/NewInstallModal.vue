@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, nextTick, toRaw } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ChevronRight, HardDrive } from 'lucide-vue-next'
+import { Check, ChevronDown, ChevronRight, HardDrive } from 'lucide-vue-next'
 import { useModal } from '../composables/useModal'
 
 import type {
@@ -11,7 +11,7 @@ import type {
   HardwareValidation,
   ShowProgressOpts
 } from '../types/ipc'
-import { stripVariantPrefix, sortedCardOptions } from '../lib/variants'
+import { stripVariantPrefix, sortedCardOptions, getVariantImage } from '../lib/variants'
 import VariantCardGrid from '../components/VariantCardGrid.vue'
 import { emitTelemetryAction, toVariantBucket } from '../lib/telemetry'
 import {
@@ -229,10 +229,17 @@ onMounted(() => {
     })
 })
 
-async function open(): Promise<void> {
+interface OpenOpts {
+  /** Optional pre-seeded install name from the first-use chain's
+   *  `nameInstall` step. Blank/undefined falls back to the silent
+   *  `'ComfyUI'` default in `handleSave()`. */
+  initialName?: string
+}
+
+async function open(opts: OpenOpts = {}): Promise<void> {
   loadGeneration++
   currentStep.value = 1
-  instName.value = ''
+  instName.value = opts.initialName?.trim() ?? ''
   instPath.value = ''
   selections.value = {}
   currentSource.value = null
@@ -620,6 +627,27 @@ function getSelectedIndex(field: SourceField): number {
   return idx >= 0 ? idx : 0
 }
 
+/** Resolved display string for the `.brand-select` trigger — mirrors
+ *  the `<option>` text formatter inline-rendered in the template
+ *  (label · em-dash · description · "(Recommended)") so the trigger
+ *  reads exactly like the picked option. Returns a fallback label
+ *  for the loading / empty / error states the underlying select
+ *  shows. */
+function getSelectTriggerLabel(field: SourceField): string {
+  if (fieldLoading.value.get(field.id)) return t('newInstall.loading')
+  const options = fieldOptions.value.get(field.id)
+  if (!options || options.length === 0) {
+    const err = fieldErrors.value.get(field.id)
+    if (err) return `Error: ${err}`
+    if (fieldOptions.value.has(field.id)) return t('newInstall.noOptions')
+    return '—'
+  }
+  const opt = options[getSelectedIndex(field)]
+  if (!opt) return '—'
+  const base = opt.description ? `${opt.label}  —  ${opt.description}` : opt.label
+  return opt.recommended ? `${base} (${t('newInstall.recommended')})` : base
+}
+
 defineExpose({ open })
 </script>
 
@@ -715,7 +743,7 @@ defineExpose({ open })
                     @click="selectSourceCard(s)"
                   >
                     <span class="config-method__label">{{ s.label }}</span>
-                    <span v-if="s.id === 'standalone'" class="config-method__badge">
+                    <span v-if="s.id === 'standalone'" class="brand-tag-recommended">
                       {{ $t('newInstall.recommended') }}
                     </span>
                   </button>
@@ -776,15 +804,64 @@ defineExpose({ open })
                       <div v-if="fieldLoading.get(field.id)" class="wizard-loading with-spinner">
                         {{ $t('newInstall.loading') }}
                       </div>
-                      <VariantCardGrid
+                      <!-- Brand-config horizontal-row variant list.
+                           Same data + select handler as VariantCardGrid;
+                           re-styled inline because this dense row
+                           layout is specific to the brand Configure
+                           surface (the classic 3-step wizard at line
+                           ~1057 keeps using VariantCardGrid). -->
+                      <div
                         v-else-if="
                           fieldOptions.has(field.id) &&
                           (fieldOptions.get(field.id)?.length ?? 0) > 0
                         "
-                        :options="sortedCardOptions(fieldOptions.get(field.id)!)"
-                        :selected-value="selections[field.id]?.value"
-                        @select="(opt) => selectCardOption(field, fieldIndex, opt)"
-                      />
+                        class="config-variant-list"
+                        role="radiogroup"
+                        :aria-label="field.label"
+                      >
+                        <button
+                          v-for="opt in sortedCardOptions(fieldOptions.get(field.id)!)"
+                          :key="opt.value"
+                          type="button"
+                          role="radio"
+                          :aria-checked="selections[field.id]?.value === opt.value"
+                          :class="[
+                            'config-variant-row',
+                            {
+                              'config-variant-row--selected':
+                                selections[field.id]?.value === opt.value
+                            }
+                          ]"
+                          @click="selectCardOption(field, fieldIndex, opt)"
+                        >
+                          <span class="config-variant-row__icon" aria-hidden="true">
+                            <img
+                              v-if="getVariantImage(opt)"
+                              :src="getVariantImage(opt)!"
+                              :alt="opt.label"
+                              draggable="false"
+                            />
+                          </span>
+                          <span class="config-variant-row__text">
+                            <span class="config-variant-row__label">
+                              {{ opt.label }}
+                              <span v-if="opt.recommended" class="brand-tag-recommended">
+                                {{ $t('newInstall.recommended') }}
+                              </span>
+                            </span>
+                            <span v-if="opt.description" class="config-variant-row__meta">
+                              {{ opt.description }}
+                            </span>
+                          </span>
+                          <Check
+                            v-if="selections[field.id]?.value === opt.value"
+                            class="config-variant-row__check"
+                            :size="16"
+                            :stroke-width="2"
+                            aria-hidden="true"
+                          />
+                        </button>
+                      </div>
                       <div v-else-if="fieldOptions.has(field.id)" class="wizard-loading">
                         {{
                           fieldErrors.get(field.id)
@@ -795,49 +872,70 @@ defineExpose({ open })
                     </template>
 
                     <template v-else>
-                      <select
-                        :id="`sf-${field.id}`"
-                        :disabled="
-                          fieldLoading.get(field.id) ||
-                          !fieldOptions.has(field.id) ||
-                          fieldOptions.get(field.id)?.length === 0
-                        "
-                        :value="getSelectedIndex(field)"
-                        @change="
-                          handleFieldSelectChange(
-                            field,
-                            fieldIndex,
-                            ($event.target as HTMLSelectElement).value
-                          )
-                        "
-                      >
-                        <option v-if="fieldLoading.get(field.id)">
-                          {{ $t('newInstall.loading') }}
-                        </option>
-                        <option
-                          v-else-if="
-                            !fieldOptions.has(field.id) || fieldOptions.get(field.id)?.length === 0
+                      <!-- Native <select> re-skinned for the brand
+                           surface: the real <select> sits invisibly
+                           on top (keeps a11y + keyboard), painted
+                           trigger reads the resolved option text. -->
+                      <div class="brand-input brand-select">
+                        <span class="brand-select__trigger" aria-hidden="true">
+                          <span class="brand-select__trigger-value">
+                            {{ getSelectTriggerLabel(field) }}
+                          </span>
+                          <ChevronDown
+                            :size="14"
+                            class="brand-select__trigger-chevron"
+                          />
+                        </span>
+                        <select
+                          :id="`sf-${field.id}`"
+                          :disabled="
+                            fieldLoading.get(field.id) ||
+                            !fieldOptions.has(field.id) ||
+                            fieldOptions.get(field.id)?.length === 0
+                          "
+                          :value="getSelectedIndex(field)"
+                          @change="
+                            handleFieldSelectChange(
+                              field,
+                              fieldIndex,
+                              ($event.target as HTMLSelectElement).value
+                            )
                           "
                         >
-                          {{
-                            fieldErrors.get(field.id)
-                              ? `Error: ${fieldErrors.get(field.id)}`
-                              : fieldOptions.has(field.id)
-                                ? $t('newInstall.noOptions')
-                                : '—'
-                          }}
-                        </option>
-                        <template v-else>
-                          <option
-                            v-for="(opt, i) in fieldOptions.get(field.id)"
-                            :key="opt.value"
-                            :value="i"
-                          >
-                            {{ opt.description ? `${opt.label}  —  ${opt.description}` : opt.label
-                            }}{{ opt.recommended ? ` (${$t('newInstall.recommended')})` : '' }}
+                          <option v-if="fieldLoading.get(field.id)">
+                            {{ $t('newInstall.loading') }}
                           </option>
-                        </template>
-                      </select>
+                          <option
+                            v-else-if="
+                              !fieldOptions.has(field.id) ||
+                              fieldOptions.get(field.id)?.length === 0
+                            "
+                          >
+                            {{
+                              fieldErrors.get(field.id)
+                                ? `Error: ${fieldErrors.get(field.id)}`
+                                : fieldOptions.has(field.id)
+                                  ? $t('newInstall.noOptions')
+                                  : '—'
+                            }}
+                          </option>
+                          <template v-else>
+                            <option
+                              v-for="(opt, i) in fieldOptions.get(field.id)"
+                              :key="opt.value"
+                              :value="i"
+                            >
+                              {{
+                                opt.description
+                                  ? `${opt.label}  —  ${opt.description}`
+                                  : opt.label
+                              }}{{
+                                opt.recommended ? ` (${$t('newInstall.recommended')})` : ''
+                              }}
+                            </option>
+                          </template>
+                        </select>
+                      </div>
                     </template>
                   </div>
                 </div>
@@ -1331,18 +1429,109 @@ defineExpose({ open })
   background: color-mix(in srgb, var(--accent) 14%, transparent);
   color: var(--neutral-100);
 }
-.config-method__badge {
-  padding: 2px 6px;
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--accent) 22%, transparent);
-  color: var(--accent);
-  font-size: 11px;
+
+.config-variant-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+}
+.config-variant-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: var(--brand-surface-bg);
+  color: var(--neutral-200);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+.config-variant-row:hover {
+  background: var(--brand-surface-bg-hover);
+  border-color: var(--brand-surface-border);
+  color: var(--neutral-100);
+}
+.config-variant-row:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+.config-variant-row--selected {
+  background: var(--brand-surface-bg-hover);
+  border-color: var(--brand-surface-border-hover);
+  box-shadow: 0 1px 0 0 rgba(255, 255, 255, 0.08) inset;
+  color: var(--neutral-100);
+}
+.config-variant-row__icon {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  overflow: hidden;
+}
+.config-variant-row__icon img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.config-variant-row__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.config-variant-row__label {
+  display: inline-flex;
+  align-items: center;
+  font-size: var(--takeover-fs-body);
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  color: var(--neutral-100);
+}
+.config-variant-row__meta {
+  font-size: var(--takeover-fs-caption);
+  color: var(--neutral-300);
+}
+.config-variant-row__check {
+  flex: 0 0 auto;
+  color: var(--neutral-100);
 }
 
 .config-continue {
   min-width: 120px;
+}
+/* Brand-yellow primary CTA — scoped to this one button. The
+ * Configure Continue is the launchpad into the install loader, so
+ * the brand color emphasises "this is the action". Selector beats
+ * the global `button.primary` blue via the .primary compound. All
+ * other primary CTAs in the launcher stay blue. */
+.config-continue.primary {
+  background: var(--comfy-yellow);
+  border-color: var(--comfy-yellow);
+  color: var(--neutral-900);
+}
+.config-continue.primary:hover {
+  background: color-mix(in srgb, var(--comfy-yellow) 88%, #000);
+  border-color: color-mix(in srgb, var(--comfy-yellow) 88%, #000);
+}
+.config-continue.primary:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--comfy-yellow) 80%, var(--neutral-100));
+  outline-offset: 2px;
+}
+.config-continue.primary[disabled] {
+  background: color-mix(in srgb, var(--comfy-yellow) 35%, transparent);
+  border-color: color-mix(in srgb, var(--comfy-yellow) 35%, transparent);
+  color: color-mix(in srgb, var(--neutral-900) 55%, transparent);
 }
 </style>
