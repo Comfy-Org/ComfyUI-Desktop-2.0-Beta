@@ -309,6 +309,12 @@
     "privacyPolicyAppliesTo": "适用版本",
     "telemetryHint": "遥测数据帮助我们改进启动器。我们绝不收集工作流内容、提示词、生成的媒体或个人信息。",
     "acceptTos": "接受并继续",
+    "consentTosTitle": "接受服务条款",
+    "consentTosHint": "继续即表示您同意 ComfyUI Desktop 服务条款及隐私政策。",
+    "consentTelemetryTitle": "帮助改进 Comfy",
+    "consentTelemetryHint": "共享匿名使用数据，帮助我们修复缺陷并确定功能优先级。",
+    "consentGetStarted": "开始使用",
+    "termsModalTitle": "ComfyUI Desktop 隐私政策",
     "notNow": "暂不启用",
     "pickTitle": "您想如何运行 Comfy？",
     "pickLead": "选择适合您工作方式的设置。稍后可随时切换。",
@@ -332,7 +338,17 @@
       "maybeLater": "稍后再说",
       "tryCta": "免费试用云端",
       "imageAlt": "云端算力插图"
-    }
+    },
+    "localBranchTitle": "看起来您之前安装过 Comfy",
+    "localBranchLead": "您希望如何安装此版本？",
+    "localBranchMigrateLabel": "迁移",
+    "localBranchMigrateDesc": "导入现有的工作流、模型和设置。",
+    "localBranchInstallNewLabel": "全新安装",
+    "localBranchInstallNewDesc": "干净安装。现有项目将保留在 Comfy-{'{'}Name{'}'} 中。",
+    "nameInstallTitle": "看起来您之前安装过 Comfy",
+    "nameInstallLead": "您希望如何安装此版本？",
+    "nameInstallLabel": "为新安装命名",
+    "nameInstallHint": "您的旧安装将保持不变。为新的安装命名，方便区分。"
   },
 
   "tray": {
