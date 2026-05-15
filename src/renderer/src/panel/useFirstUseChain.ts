@@ -5,6 +5,7 @@ import { useLauncherPrefs } from '../composables/useLauncherPrefs'
 import { useMigrateAction } from '../composables/useMigrateAction'
 import { useOverlay } from '../composables/useOverlay'
 import type { Installation, ShowProgressOpts } from '../types/ipc'
+import type { ChooserLaunchOutcome } from './useChooserHandoff'
 import type { FirstUseChainHooks, PanelKey } from './usePanelOverlays'
 
 export interface FirstUseChainOpts {
@@ -23,7 +24,7 @@ export interface FirstUseChainOpts {
   performChooserLaunch: (
     installation: Installation,
     onMissingLaunchAction?: () => void,
-  ) => Promise<void>
+  ) => Promise<ChooserLaunchOutcome>
 }
 
 export interface FirstUseChainApi {
@@ -171,7 +172,16 @@ export function useFirstUseChain(opts: FirstUseChainOpts): FirstUseChainApi {
       // the takeover so the user lands on the chooser body. The happy
       // path leaves the takeover up; the launch action's `showProgress:
       // true` swaps it for a connect-progress takeover (Tier 3 → Tier 3).
-      await opts.performChooserLaunch(cloud, opts.dismissTakeoverDirect)
+      const outcome = await opts.performChooserLaunch(cloud, opts.dismissTakeoverDirect)
+      // `'launched'` swaps the takeover for the connect-progress
+      // takeover automatically; `'missing-action'` already ran the
+      // dismiss callback. `'focused-running'` short-circuits launch and
+      // never opens a replacement — we have to dismiss here so the
+      // first-use takeover doesn't sit stranded over the existing
+      // running window.
+      if (outcome === 'focused-running') {
+        opts.dismissTakeoverDirect()
+      }
       return
     }
     // No cloud install to launch into — fall back to dismissing the

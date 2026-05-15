@@ -80,10 +80,6 @@ export interface FirstUseChainHooks {
    *  persisted first-use gate. Called once per chain at the moment the
    *  install/migrate op begins. */
   onShowProgress: (opts: ShowProgressOpts) => void
-  /** Read by `dismissTakeoverDirect` so the chain state is cleared
-   *  when a chained takeover dismisses without going through the
-   *  dedicated completion paths. */
-  reset?: () => void
 }
 
 export interface UsePanelOverlaysOpts {

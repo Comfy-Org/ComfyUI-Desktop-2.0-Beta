@@ -110,6 +110,7 @@ export function useTitleBarMenus(opts: UseTitleBarMenusOpts): TitleBarMenusApi {
   }
 
   function handleDownloadsTray(): void {
+    opts.hideTip()
     if (isMenuOpen.value) {
       opts.bridge?.dismissFileMenu()
       return

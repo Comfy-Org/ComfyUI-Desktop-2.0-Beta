@@ -132,7 +132,6 @@ const { handleChooserPick, handleChooserShowNewInstall } = chooserHandoff
 let unsubPanel: (() => void) | null = null
 let unsubLocale: (() => void) | null = null
 let unsubCloseRequest: (() => void) | null = null
-let unsubFirstUseSkip: (() => void) | null = null
 let unsubAppUpdatePromptRestart: (() => void) | null = null
 let unsubAppUpdateUserActionFailed: (() => void) | null = null
 
@@ -175,7 +174,15 @@ function handleNavigateList(): void {
 }
 
 onMounted(async () => {
-  await loadLocale()
+  try {
+    await loadLocale()
+  } catch (err) {
+    // Bootstrap failures must NOT leave bootstrapReady pending forever
+    // (deep-link routing awaits it), so the entire mount is wrapped in
+    // try/finally below. Log here so the partial-bootstrap surface
+    // stays visible in the console even when the whole app keeps going.
+    console.error('Panel: loadLocale failed', err)
+  }
 
   unsubLocale = window.api.onLocaleChanged((messages) => {
     mergeLocaleMessage('en', messages as Record<string, unknown>)
@@ -232,50 +239,46 @@ onMounted(async () => {
     })
   })
 
-  // Main forwards a file-menu Skip Onboarding click here. Run the
-  // same `markFirstUseCompleted` + dismiss-takeover sequence the
-  // Cloud-branch pick uses; if the overlay isn't a first-use takeover
-  // (defensive — main only sends this when the menu surfaced the
-  // entry, which only happens in `post-consent`) the dismiss is a
-  // no-op for the overlay slot but the gate flip still has to land
-  // so the takeover doesn't auto-remount on the next launch.
-  unsubFirstUseSkip = window.api.onFirstUseSkip(() => {
-    void completeFirstUseAndDismiss()
-  })
+  // The file-menu "Skip Onboarding" IPC subscription lives in
+  // useFirstUseChain so the chain owns its own input surface; no
+  // duplicate listener here.
 
-  // Initialize stores / prefs needed by the embedded DetailModal that
-  // backs the unified Settings modal's "ComfyUI Settings" tab.
-  // installationStore wires its own onInstallationsChanged listener.
-  await Promise.all([
-    sessionStore.init(),
-    installationStore.fetchInstallations(),
-    launcherPrefs.loadPrefs(),
-  ])
+  try {
+    // Initialize stores / prefs needed by the embedded DetailModal that
+    // backs the unified Settings modal's "ComfyUI Settings" tab.
+    // installationStore wires its own onInstallationsChanged listener.
+    await Promise.all([
+      sessionStore.init(),
+      installationStore.fetchInstallations(),
+      launcherPrefs.loadPrefs(),
+    ])
 
-  // Release any panel-trigger-overlay handler that arrived during the
-  // async bootstrap and parked on `bootstrapReady`. By this point the
-  // installation store, session store, and locales are all populated,
-  // so the unified Settings modal can render correctly on the first
-  // install-update pill click.
-  resolveBootstrap?.()
-  resolveBootstrap = null
+    // If the URL-driven initial panel mounts as an overlay (flow wizard
+    // or unified Settings modal), kick that open now — script-setup
+    // couldn't because the template hadn't rendered yet.
+    if (isFlowPanel(initialPanel) || initialPanel === 'settings') {
+      void switchPanel(initialPanel, 'url')
+    }
 
-  // If the URL-driven initial panel mounts as an overlay (flow wizard
-  // or unified Settings modal), kick that open now — script-setup
-  // couldn't because the template hadn't rendered yet.
-  if (isFlowPanel(initialPanel) || initialPanel === 'settings') {
-    void switchPanel(initialPanel, 'url')
-  }
-
-  // First-use takeover auto-mounts when the persisted gate is still
-  // false. Runs AFTER the URL-driven flow panel branch so a
-  // `?panel=new-install` request still wins (e.g. when main re-routes
-  // a chooser pick into new-install for an un-installed source); the
-  // first-use takeover will replay on the next launch since
-  // `firstUseCompleted` stays false until the explicit completion
-  // path runs.
-  if (!launcherPrefs.firstUseCompleted.value && !isFlowPanel(initialPanel)) {
-    void openFirstUseTakeover()
+    // First-use takeover auto-mounts when the persisted gate is still
+    // false. Runs AFTER the URL-driven flow panel branch so a
+    // `?panel=new-install` request still wins (e.g. when main re-routes
+    // a chooser pick into new-install for an un-installed source); the
+    // first-use takeover will replay on the next launch since
+    // `firstUseCompleted` stays false until the explicit completion
+    // path runs.
+    if (!launcherPrefs.firstUseCompleted.value && !isFlowPanel(initialPanel)) {
+      void openFirstUseTakeover()
+    }
+  } catch (err) {
+    console.error('Panel: bootstrap failed', err)
+  } finally {
+    // bootstrapReady must always resolve — useDeepLinkRouter awaits it
+    // before resolving overlay deep-links, and a never-resolved promise
+    // would silently wedge any panel-trigger-overlay IPC the user fires
+    // after a partial-bootstrap failure.
+    resolveBootstrap?.()
+    resolveBootstrap = null
   }
 })
 
@@ -283,7 +286,6 @@ onUnmounted(() => {
   unsubPanel?.()
   unsubLocale?.()
   unsubCloseRequest?.()
-  unsubFirstUseSkip?.()
   unsubAppUpdatePromptRestart?.()
   unsubAppUpdateUserActionFailed?.()
   sessionStore.dispose()

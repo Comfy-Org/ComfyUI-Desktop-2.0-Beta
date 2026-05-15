@@ -14,6 +14,16 @@ export interface ChooserHandoffOpts {
   switchPanel: (panel: PanelKey, entrypoint?: string) => Promise<void>
 }
 
+/**
+ * Outcome of a `performChooserLaunch()` call. Distinguishes the three
+ * post-launch states so callers (e.g. the first-use takeover) can react
+ * appropriately — `'launched'` will swap a takeover for the
+ * connect-progress overlay automatically, but `'focused-running'` and
+ * `'missing-action'` leave the slot untouched and require the caller to
+ * dismiss the takeover explicitly.
+ */
+export type ChooserLaunchOutcome = 'focused-running' | 'launched' | 'missing-action'
+
 export interface ChooserHandoffApi {
   /** Prepares the install-less chooser host for a launch hand-off — see
    *  function comment for the in-place attach + close-on-instance-started
@@ -22,11 +32,12 @@ export interface ChooserHandoffApi {
    *  pipeline (e.g. DetailModal). */
   prepareChooserHostHandoff: (installationId: string) => Promise<void>
   /** Shared launch path for chooser-tile clicks AND the first-use
-   *  takeover's auto-launch. */
+   *  takeover's auto-launch. Returns the outcome so callers can dismiss
+   *  any orphaned overlay when launch short-circuits. */
   performChooserLaunch: (
     installation: Installation,
     onMissingLaunchAction?: () => void,
-  ) => Promise<void>
+  ) => Promise<ChooserLaunchOutcome>
   /** Bound to ChooserView's `pick` emit. */
   handleChooserPick: (installation: Installation) => Promise<void>
   /** Bound to ChooserView's `show-new-install` empty-state CTA. */
@@ -72,6 +83,12 @@ export function useChooserHandoff(opts: ChooserHandoffOpts): ChooserHandoffApi {
    *  so the user still gets the install's window at the chooser's
    *  bounds. */
   async function prepareChooserHostHandoff(installationId: string): Promise<void> {
+    // Drop any prior fallback subscription unconditionally. Without this,
+    // a previous launch that was claimed by main (no fallback fired) or
+    // failed mid-flight would leave its listener live, and a later
+    // unrelated `instance-started` could close this chooser host.
+    pendingPickUnsub?.()
+    pendingPickUnsub = null
     const claimed = await window.api.claimAttachHost(installationId)
     if (claimed) return
     // Visual continuity — stamp the chooser host's current bounds onto
@@ -83,7 +100,6 @@ export function useChooserHandoff(opts: ChooserHandoffOpts): ChooserHandoffApi {
     // ProgressModal pipeline (showProgress: true) so executeAction
     // returns immediately after kicking it off — the actual completion
     // signal is the instance-started event coming back from main.
-    pendingPickUnsub?.()
     pendingPickUnsub = window.api.onInstanceStarted((data) => {
       if (data.installationId !== installationId) return
       pendingPickUnsub?.()
@@ -111,7 +127,7 @@ export function useChooserHandoff(opts: ChooserHandoffOpts): ChooserHandoffApi {
   async function performChooserLaunch(
     installation: Installation,
     onMissingLaunchAction: () => void = () => {},
-  ): Promise<void> {
+  ): Promise<ChooserLaunchOutcome> {
     if (sessionStore.isRunning(installation.id)) {
       // Focus the running window and leave the chooser host alive
       // (tile clicks transform the host the user clicked from instead
@@ -119,7 +135,7 @@ export function useChooserHandoff(opts: ChooserHandoffOpts): ChooserHandoffApi {
       // so there's no detach to do; the surplus window is the price
       // of keeping the user's panel context intact.
       await window.api.focusComfyWindow(installation.id)
-      return
+      return 'focused-running'
     }
     const actions = await window.api.getListActions(installation.id)
     const launchAction = actions.find((a) => a.id === 'launch')
@@ -127,10 +143,11 @@ export function useChooserHandoff(opts: ChooserHandoffOpts): ChooserHandoffApi {
       ?? null
     if (!launchAction) {
       onMissingLaunchAction()
-      return
+      return 'missing-action'
     }
     await prepareChooserHostHandoff(installation.id)
     await executeChooserAction(installation, launchAction)
+    return 'launched'
   }
 
   async function handleChooserPick(installation: Installation): Promise<void> {
