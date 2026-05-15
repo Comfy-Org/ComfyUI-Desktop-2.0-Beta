@@ -246,7 +246,6 @@ defineExpose({ startOperation, showOperation })
   <BrandTakeoverLayout v-if="brandChrome && installationId && currentOp">
     <div class="brand-progress">
       <BrandProgressGlyph class="brand-progress__glyph" aria-hidden="true" />
-      <div class="brand-progress__mask" aria-hidden="true" />
       <div class="brand-progress__stack">
         <ComfyWordmark class="brand-progress__wordmark" />
         <div
@@ -469,19 +468,7 @@ defineExpose({ startOperation, showOperation })
   z-index: 0;
   opacity: 0.9;
 }
-.brand-progress__mask {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: clamp(220px, 22vw, 360px);
-  aspect-ratio: 1;
-  transform: translate(-50%, -50%);
-  border-radius: 50%;
-  background: var(--neutral-900);
-  filter: blur(34px);
-  pointer-events: none;
-  z-index: 1;
-}
+
 .brand-progress__stack {
   position: relative;
   z-index: 2;
@@ -496,6 +483,7 @@ defineExpose({ startOperation, showOperation })
   width: clamp(140px, 9.7vw, 240px);
   height: auto;
   color: var(--comfy-yellow);
+  anchor-name: --brand-beam-target;
 }
 .brand-progress__bar {
   width: 100%;
