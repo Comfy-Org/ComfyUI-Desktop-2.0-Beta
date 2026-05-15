@@ -517,6 +517,84 @@ button.brand-secondary:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
+
+.brand-checkbox {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  cursor: pointer;
+}
+.brand-checkbox input[type='checkbox'] {
+  appearance: none;
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  margin: 2px 0 0 0;
+  border: 1px solid var(--brand-surface-border-hover);
+  border-radius: 4px;
+  background-color: var(--brand-surface-bg);
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 14px 14px;
+  position: relative;
+  cursor: pointer;
+  transition:
+    background-color 180ms cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.brand-checkbox input[type='checkbox']::after {
+  content: '';
+  display: none;
+}
+.brand-checkbox input[type='checkbox']:checked {
+  background-color: var(--accent);
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='white' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='3,9 7,12 13,5'/></svg>");
+  border-color: var(--accent);
+}
+.brand-checkbox input[type='checkbox']:checked::after {
+  display: none;
+}
+.brand-checkbox input[type='checkbox']:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+.brand-checkbox__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.brand-checkbox__title {
+  font-size: var(--takeover-fs-body);
+  font-weight: 600;
+  color: var(--neutral-100);
+}
+.brand-checkbox__hint {
+  font-size: var(--takeover-fs-caption);
+  color: var(--neutral-300);
+  line-height: 1.5;
+}
+.brand-checkbox__link,
+button.brand-checkbox__link {
+  color: var(--neutral-100);
+  text-decoration: underline;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  border-radius: 2px;
+}
+.brand-checkbox__link:hover,
+button.brand-checkbox__link:hover {
+  color: var(--comfy-yellow);
+  background: transparent;
+}
+.brand-checkbox__link:focus-visible,
+button.brand-checkbox__link:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
 button.loading {
   opacity: 0.7;
   pointer-events: none;

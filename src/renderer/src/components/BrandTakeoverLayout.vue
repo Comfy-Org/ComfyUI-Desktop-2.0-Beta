@@ -60,6 +60,24 @@ withDefaults(
   z-index: 50;
   display: flex;
   background: var(--neutral-900);
+  animation: brand-takeover-in 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes brand-takeover-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .brand-takeover-root {
+    animation: none;
+  }
 }
 
 .brand-outer-frame {

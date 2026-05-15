@@ -667,14 +667,14 @@ defineExpose({ open })
             />
           </div>
 
-          <label class="config-help">
+          <label class="brand-checkbox">
             <input v-model="telemetryEnabled" type="checkbox" />
-            <span class="config-help__text">
-              <span class="config-help__title">{{ $t('newInstall.helpImproveTitle') }}</span>
-              <span class="config-help__hint">
+            <span class="brand-checkbox__text">
+              <span class="brand-checkbox__title">{{ $t('newInstall.helpImproveTitle') }}</span>
+              <span class="brand-checkbox__hint">
                 {{ $t('newInstall.helpImproveHint') }}
                 <a
-                  class="config-help__link"
+                  class="brand-checkbox__link"
                   :href="learnMoreHref"
                   target="_blank"
                   rel="noreferrer"
@@ -1235,70 +1235,6 @@ defineExpose({ open })
 .config-path-row > button.brand-secondary {
   padding-inline: 14px;
   font-size: 13px;
-}
-
-.config-help {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  cursor: pointer;
-}
-/* Override the global toggle-style checkbox with a square check that
- * matches the Figma. Square box, accent fill when checked, white tick
- * drawn via a CSS clip-path on ::after. */
-.config-help input[type='checkbox'] {
-  appearance: none;
-  flex: 0 0 auto;
-  width: 18px;
-  height: 18px;
-  margin: 2px 0 0 0;
-  border: 1px solid var(--brand-surface-border-hover);
-  border-radius: 4px;
-  background-color: var(--brand-surface-bg);
-  background-repeat: no-repeat;
-  background-position: center;
-  background-size: 14px 14px;
-  position: relative;
-  cursor: pointer;
-  transition:
-    background-color 180ms cubic-bezier(0.22, 1, 0.36, 1),
-    border-color 180ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-/* Tick rendered with an SVG-encoded background-image so the global
- * `::after` pseudo from main.css doesn't paint its toggle dot. */
-.config-help input[type='checkbox']::after {
-  content: '';
-  display: none;
-}
-.config-help input[type='checkbox']:checked {
-  background-color: var(--accent);
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='white' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='3,9 7,12 13,5'/></svg>");
-  background-repeat: no-repeat;
-  background-position: center;
-  background-size: 14px 14px;
-  border-color: var(--accent);
-}
-.config-help input[type='checkbox']:checked::after {
-  display: none;
-}
-.config-help__text {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.config-help__title {
-  font-size: var(--takeover-fs-body);
-  font-weight: 600;
-  color: var(--neutral-100);
-}
-.config-help__hint {
-  font-size: var(--takeover-fs-caption);
-  color: var(--neutral-300);
-  line-height: 1.5;
-}
-.config-help__link {
-  color: var(--neutral-100);
-  text-decoration: underline;
 }
 
 .config-advanced {
