@@ -329,7 +329,7 @@ defineExpose({ open })
 </script>
 
 <template>
-  <BrandTakeoverLayout v-if="isBrandStep">
+  <BrandTakeoverLayout v-if="isBrandStep" :vignette="step === 'pick'">
     <!-- Step 1: T&C + telemetry consent. Brand-wrapped: wordmark
          centered, two square brand checkboxes (T&C + telemetry), then
          the Get Started / Cancel action row. Full policy text moves
@@ -374,7 +374,7 @@ defineExpose({ open })
       </div>
       <div class="consent-actions">
         <button
-          class="btn-brand-primary"
+          class="primary consent-get-started"
           type="button"
           data-testid="first-use-accept-consent"
           :disabled="!acceptedTos"
@@ -564,12 +564,18 @@ defineExpose({ open })
   gap: 12px;
   margin-top: var(--takeover-gap-lg);
 }
-.btn-brand-primary[disabled] {
+.consent-get-started {
+  padding: 10px 18px;
+  border-radius: 8px;
+  font-size: var(--takeover-fs-body);
+}
+.consent-get-started[disabled] {
   opacity: 0.45;
   cursor: not-allowed;
 }
-.btn-brand-primary[disabled]:hover {
-  background: var(--comfy-yellow);
+.consent-get-started[disabled]:hover {
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
 }
 .consent-cancel {
   background: transparent;

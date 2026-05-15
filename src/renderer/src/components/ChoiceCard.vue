@@ -28,9 +28,6 @@ defineEmits<{ click: [] }>()
     :disabled="disabled"
     @click="$emit('click')"
   >
-    <span v-if="glow" class="choice-card__glow_top" aria-hidden="true" />
-    <span v-if="glow" class="choice-card__glow" aria-hidden="true" />
-    <span v-if="glow" class="choice-card__glow_bottom" aria-hidden="true" />
     <div v-if="tagline" class="choice-card__tagline">{{ tagline }}</div>
     <div class="choice-card__body">
       <div class="choice-card__indicator" aria-hidden="true">
@@ -85,48 +82,12 @@ defineEmits<{ click: [] }>()
   cursor: not-allowed;
 }
 
-.choice-card__glow,
-.choice-card__glow_top,
-.choice-card__glow_bottom {
-  position: absolute;
-  width: 150px;
-  height: 120px;
-  border-radius: 50%;
-  background: var(--accent-plum);
-  opacity: 0.7;
-  filter: blur(80px);
-  pointer-events: none;
-  z-index: 0;
-}
-
-.choice-card__glow {
-  top: 10%;
-  left: 60%;
-  width: 300px;
-  transform: translateX(-50%);
-}
-
-.choice-card__glow_top {
-  top: 0;
-  left: 30%;
-  width: 180px;
-  height: 140px;
-  transform: translateX(-50%);
-}
-.choice-card__glow_bottom {
-  bottom: -50%;
-  right: 10%;
-  transform: translateX(50%);
-}
-
 .choice-card__tagline {
   position: relative;
   z-index: 1;
   padding: 4px 12px;
   margin: 4px 4px 0 4px;
-  font-family: var(--font-sans);
   font-size: var(--takeover-fs-lead);
-  font-weight: 400;
   line-height: normal;
   color: var(--neutral-100);
   border-radius: 4px 4px 0 0;

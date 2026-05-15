@@ -30,8 +30,9 @@ withDefaults(
     /** Theme override. Defaults to 'dark' — the brand chrome only
      *  ships dark today. Pass 'light' once light-mode parity lands. */
     theme?: 'dark' | 'light'
+    vignette?: boolean
   }>(),
-  { theme: 'dark' }
+  { theme: 'dark', vignette: false }
 )
 </script>
 
@@ -41,7 +42,7 @@ withDefaults(
       <div class="brand-outer-frame">
         <div class="brand-beam" aria-hidden="true" v-html="beamSvg" />
         <div class="brand-beam brand-beam--2" aria-hidden="true" v-html="beam2Svg" />
-        <div class="brand-inner-frame">
+        <div class="brand-inner-frame" :class="{ 'brand-inner-frame--vignette': vignette }">
           <div class="brand-logo-row">
             <ComfyCLogo class="brand-logo" />
           </div>
@@ -93,15 +94,16 @@ withDefaults(
 }
 
 .brand-beam {
-  position: absolute;
+  position: fixed;
   top: -17%;
-  left: 10%;
+  left: 50%;
+  transform: translateX(calc(-50% + clamp(-110px, -6vw, -45px)));
   pointer-events: none;
   z-index: 1;
   overflow: visible;
 }
 .brand-beam--2 {
-  left: 41%;
+  transform: translateX(calc(-50% + clamp(45px, 5vw, 100px)));
 }
 .brand-beam :deep(svg) {
   display: block;
@@ -117,9 +119,15 @@ withDefaults(
   justify-content: center;
   padding: clamp(2rem, 5vw, 48px);
   border-radius: 8px;
-  background: var(--neutral-900);
+  background: var(--neutral-800);
   overflow: hidden;
   isolation: isolate;
+}
+
+.brand-inner-frame--vignette {
+  background:
+    radial-gradient(circle 196px at 50% 50%, #151317 0%, #151317 35%, var(--neutral-800) 100%),
+    var(--neutral-800);
 }
 
 .brand-logo-row {

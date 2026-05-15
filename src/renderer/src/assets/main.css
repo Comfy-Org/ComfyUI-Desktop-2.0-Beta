@@ -542,6 +542,9 @@ button.brand-secondary:focus-visible {
     background-color 180ms cubic-bezier(0.22, 1, 0.36, 1),
     border-color 180ms cubic-bezier(0.22, 1, 0.36, 1);
 }
+.brand-checkbox input[type='checkbox']:hover {
+  border-color: var(--text);
+}
 .brand-checkbox input[type='checkbox']::after {
   content: '';
   display: none;
