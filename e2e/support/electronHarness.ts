@@ -62,11 +62,16 @@ function buildIsolatedEnv(homeDir: string): Record<string, string> {
 export async function launchLauncherApp(options?: SeedOptions): Promise<LauncherAppHandle> {
   const homeDir = await mkdtemp(path.join(os.tmpdir(), 'comfyui-launcher-e2e-'))
 
-  // Pre-create directories that Electron expects to exist.
-  // On Windows, Electron uses %APPDATA%/<appName> for userData.
+  // Pre-create the directory `src/main/settings.ts` reads `settings.json`
+  // from. The path mirrors `configDir()` per platform — on Linux it's
+  // `XDG_CONFIG_HOME/<appName>` (the harness points XDG_CONFIG_HOME at
+  // `${homeDir}/.config`); on Windows + macOS it's Electron's userData
+  // dir, which derives from APPDATA / HOME respectively.
   const appDataDir = process.platform === 'win32'
     ? path.join(homeDir, 'AppData', 'Roaming', 'comfyui-desktop-2')
-    : path.join(homeDir, '.config', 'comfyui-desktop-2')
+    : process.platform === 'darwin'
+      ? path.join(homeDir, 'Library', 'Application Support', 'comfyui-desktop-2')
+      : path.join(homeDir, '.config', 'comfyui-desktop-2')
   await mkdir(appDataDir, { recursive: true })
 
   // Settings are seeded BEFORE launch so the renderer's first read sees them.
