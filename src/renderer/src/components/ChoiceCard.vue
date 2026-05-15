@@ -129,7 +129,7 @@ defineEmits<{ click: [] }>()
 }
 .choice-card__desc {
   font-family: var(--font-sans);
-  font-size: var(--takeover-fs-lead);
+  font-size: var(--takeover-fs-body);
   font-weight: 400;
   line-height: normal;
   color: var(--neutral-300);
