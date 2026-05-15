@@ -288,19 +288,29 @@ function findLiveSiblingOrigin(boundsKey: string): { x: number; y: number } | nu
 export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowResult {
   const fx = getFactories()
   const windowKey = nextWindowKey()
-  const saved = getSavedBounds(opts.boundsKey)
+  const isChooserKey = opts.boundsKey === CHOOSER_HOST_BOUNDS_KEY
+  // Chooser hosts always open at the canonical default size: the
+  // dashboard isn't a workspace the user customizes — it's a launcher
+  // surface, so persisting last-session bounds across cold starts
+  // (and especially across in-place flips that drifted the slot)
+  // makes the dashboard feel like it inherited an unrelated window's
+  // shape. Install-backed hosts still restore their saved bounds on
+  // first spawn so users keep the size they prefer for that install.
+  const saved = isChooserKey ? undefined : getSavedBounds(opts.boundsKey)
   // Sibling-aware initial bounds: if a live host of the same identity
   // already exists (e.g. File → New Window with a chooser already open),
   // open at the canonical default size offset from the sibling's origin
   // instead of restoring the saved bounds — saved bounds inheritance
   // there would size + place the new window identically to the live
   // one, making it look like the existing window had simply re-rendered.
-  // First-spawn (no sibling) keeps the saved-bounds restore so app
-  // relaunches land at the user's preferred size from last session.
+  // For install-backed first-spawn (no sibling), restore saved bounds
+  // so app relaunches land at the user's preferred size for that install.
   const sibling = findLiveSiblingOrigin(opts.boundsKey)
   const initialOptions = sibling
     ? { x: sibling.x, y: sibling.y, width: DEFAULT_HOST_WIDTH, height: DEFAULT_HOST_HEIGHT }
-    : getWindowOptions(opts.boundsKey)
+    : isChooserKey
+      ? { width: DEFAULT_HOST_WIDTH, height: DEFAULT_HOST_HEIGHT }
+      : getWindowOptions(opts.boundsKey)
   const windowOptions = cascadeOffsetForCollisions(initialOptions, liveHostOrigins())
   const comfyWindow = new BrowserWindow({
     ...windowOptions,
@@ -415,12 +425,15 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
   // Save under the LIVE identity, not the construction-time `opts.boundsKey`.
   // A chooser host that flips to install-backed in place via the chooser-pick
   // claim path needs to save its bounds under the install id from then on,
-  // and back to `'chooser'` if it's later detached via Return to Dashboard.
+  // and back to skipping persistence if detached via Return to Dashboard.
   // Using the captured construction key would persist the install-mode user
   // adjustments under the chooser slot (and vice versa).
+  //
+  // Chooser hosts skip persistence entirely: the dashboard always opens at
+  // the canonical default size, so there's nothing to remember.
   const persistBounds = (): void => {
     const live = comfyWindows.get(windowKey)
-    if (!live) return
+    if (!live || isChooserHost(live)) return
     saveWindowBounds(liveBoundsKeyFor(live), comfyWindow)
   }
   comfyWindow.on('resize', persistBounds)
