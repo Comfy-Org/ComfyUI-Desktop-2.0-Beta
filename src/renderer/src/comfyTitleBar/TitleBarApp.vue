@@ -7,9 +7,10 @@ import {
   Loader2,
   Menu as MenuIcon,
   MessageSquarePlus,
-  RefreshCw,
+  RefreshCw
 } from 'lucide-vue-next'
 import { installTypeMetaFor } from '../lib/installTypeIcon'
+import ComfyCLogo from '../components/icons/ComfyCLogo.vue'
 
 const { t } = useI18n()
 
@@ -73,12 +74,7 @@ interface Bridge {
    *  anchor the bubble's left edge to `leftX` so the bubble extends
    *  rightward from the trigger; it falls back to right-aligning
    *  `rightX` when growing rightward would overflow. */
-  showTooltip: (payload: {
-    text: string
-    leftX: number
-    rightX: number
-    bottomY: number
-  }) => void
+  showTooltip: (payload: { text: string; leftX: number; rightX: number; bottomY: number }) => void
   /** Issue #514 — hide the title-bar hover tooltip popup. */
   hideTooltip: () => void
   onPanelChanged: (cb: (panel: ComfyPanelKey) => void) => () => void
@@ -101,7 +97,7 @@ interface Bridge {
    *  post-consent steps stay normal except for the Skip Onboarding
    *  entry the menu builder adds. */
   onFirstUseModeChanged: (
-    cb: (mode: 'none' | 'consent-lockdown' | 'post-consent') => void,
+    cb: (mode: 'none' | 'consent-lockdown' | 'post-consent') => void
   ) => () => void
   /** App-update state pushes from main. `kind` is `'available'`
    *  after `update-available`, `'ready'` after `update-downloaded`,
@@ -120,7 +116,7 @@ interface Bridge {
       kind: 'available' | 'downloading' | 'ready' | null
       version: string | null
       autoUpdate: boolean
-    }) => void,
+    }) => void
   ) => () => void
   /** Install-update flag pushes from main. `available` is `true`
    *  when the install's `statusTag.style === 'update'`; `version`
@@ -129,7 +125,7 @@ interface Bridge {
    *  host windows; install-less hosts never receive this signal.
    *  Drives the title-bar install-update pill. */
   onInstallUpdateAvailable: (
-    cb: (state: { available: boolean; version: string | null }) => void,
+    cb: (state: { available: boolean; version: string | null }) => void
   ) => () => void
   /** Click handler for the app-update pill. */
   clickAppUpdatePill: () => void
@@ -204,6 +200,16 @@ const activePanel = ref<ComfyPanelKey>('comfy')
 const firstUseMode = ref<'none' | 'consent-lockdown' | 'post-consent'>('none')
 const isConsentLockdown = computed(() => firstUseMode.value === 'consent-lockdown')
 /**
+ * Any active first-use takeover step (consent + post-consent). During
+ * onboarding the title bar strips itself down to a minimal identity
+ * bar: hamburger, downloads tray, install-pill chrome and feedback
+ * button all hide, leaving just the centered identity label. Reverts
+ * to the full steady-state chrome once `firstUseMode === 'none'`.
+ */
+const isFirstUseTakeover = computed(
+  () => firstUseMode.value === 'consent-lockdown' || firstUseMode.value === 'post-consent'
+)
+/**
  * Install-less host window flag. When true, the center
  * install pill labels itself "Desktop 2.0 Beta" (set by the initial
  * title push from main) and the install-type icon next to the label is
@@ -241,9 +247,7 @@ const installTypeLabel = computed(() => {
 /** Whether to render the install-type icon. Suppressed on
  *  install-less host windows (no install backing the entry) so the
  *  "Desktop 2.0 Beta" identity label reads bare. */
-const showInstallTypeIcon = computed(
-  () => !isInstallLess.value && sourceCategory.value !== null,
-)
+const showInstallTypeIcon = computed(() => !isInstallLess.value && sourceCategory.value !== null)
 const themeBg = ref<string | null>(null)
 const themeText = ref<string | null>(null)
 
@@ -272,7 +276,7 @@ const appUpdateState = ref<{
 }>({ kind: null, version: null, autoUpdate: true })
 const installUpdateState = ref<{ available: boolean; version: string | null }>({
   available: false,
-  version: null,
+  version: null
 })
 
 const appUpdatePillLabel = computed<string | null>(() => {
@@ -292,9 +296,7 @@ const appUpdatePillTooltip = computed<string>(() => {
   const label = appUpdatePillLabel.value
   if (!label) return ''
   const v = appUpdateState.value.version
-  return v
-    ? t('titleBar.desktopUpdateWithVersion', { label, version: v })
-    : label
+  return v ? t('titleBar.desktopUpdateWithVersion', { label, version: v }) : label
 })
 
 /** Install-update pill copy. Mirrors the app-update pill's
@@ -310,7 +312,7 @@ const installUpdatePillLabel = computed<string>(() => {
 
 const showAppUpdatePill = computed(() => appUpdateState.value.kind !== null)
 const showInstallUpdatePill = computed(
-  () => !isInstallLess.value && installUpdateState.value.available,
+  () => !isInstallLess.value && installUpdateState.value.available
 )
 
 function handleAppUpdatePill(): void {
@@ -518,7 +520,7 @@ function fireShowTooltip(text: string, rect: DOMRect): void {
     text,
     leftX: Math.round(rect.left),
     rightX: Math.round(rect.right),
-    bottomY: Math.round(rect.bottom),
+    bottomY: Math.round(rect.bottom)
   })
   isTooltipVisible = true
 }
@@ -540,8 +542,7 @@ function handleTooltipPointer(event: PointerEvent): void {
   // and queue the new one. If we were just showing a tooltip moments
   // ago (hover-handoff), skip the show delay so scanning across the
   // title bar feels instant — matches native macOS behaviour.
-  const handoff =
-    isTooltipVisible || performance.now() - lastHiddenAt < TOOLTIP_HANDOFF_WINDOW_MS
+  const handoff = isTooltipVisible || performance.now() - lastHiddenAt < TOOLTIP_HANDOFF_WINDOW_MS
   hideTip()
   const captured = found
   activeTooltipText = captured.text
@@ -689,11 +690,11 @@ onUnmounted(() => {
       'is-light': isLight,
       'is-fullscreen': isFullscreen,
       'is-hover-active': isHoverActive,
-      'is-consent-lockdown': isConsentLockdown,
+      'is-consent-lockdown': isConsentLockdown
     }"
     :style="{
       background: themeBg ?? undefined,
-      color: themeText ?? undefined,
+      color: themeText ?? undefined
     }"
   >
     <!-- Left: app menu (hamburger). Anchors a native OS menu in main —
@@ -703,17 +704,13 @@ onUnmounted(() => {
          carry their own "File" — having two "File" entries stacked
          vertically read as redundant. The hamburger reads as a
          host-app-level menu and stays out of ComfyUI's namespace. -->
-    <!-- Left cluster: waffle menu + app-update pill. Both stay live
-         during Tier 3 takeovers so the user can reach Return-to-Dashboard
-         / Close-Window / Skip Onboarding without dismissing the
-         takeover. Exception: during the first-use T&C consent step
-         (`isConsentLockdown`) the waffle is hidden entirely so the
-         user must either accept consent or close the window via OS
-         chrome; the waffle reappears once the takeover advances to
-         `'post-consent'`. -->
+    <!-- Left cluster: waffle menu + app-update pill. Hidden for the
+         full duration of the first-use takeover (consent + post-consent)
+         so the onboarding screens read as a clean identity bar. The
+         waffle returns once `firstUseMode === 'none'` (steady state). -->
     <div class="title-cluster">
       <button
-        v-if="!isConsentLockdown"
+        v-if="!isFirstUseTakeover"
         ref="fileBtn"
         type="button"
         class="title-menu-button title-menu-button--icon"
@@ -732,7 +729,7 @@ onUnmounted(() => {
         class="title-update-pill is-app-update"
         :class="{
           'is-ready': appUpdateState.kind === 'ready',
-          'is-downloading': appUpdateState.kind === 'downloading',
+          'is-downloading': appUpdateState.kind === 'downloading'
         }"
         v-bind="tooltipAttrs(appUpdatePillTooltip)"
         @click="handleAppUpdatePill"
@@ -754,15 +751,15 @@ onUnmounted(() => {
          copy lives inside the popup) and the install-update pill
          only mounts when an install update is available. -->
     <div class="title-center">
-      <!-- Always-visible downloads tray. Click opens the title-bar
-           dropdown popup in `'downloads'` mode anchored under the
-           button. The icon (`ArrowDownToLine`) is intentionally
-           distinct from the update pills' `Download` icon so the
-           user reads "downloads tray" vs "update available pill"
-           at a glance. Stays visible during `isConsentLockdown` so
-           in-flight model downloads remain reachable while the
-           waffle is hidden. -->
+      <!-- Downloads tray. Click opens the title-bar dropdown popup in
+           `'downloads'` mode anchored under the button. The icon
+           (`ArrowDownToLine`) is intentionally distinct from the update
+           pills' `Download` icon so the user reads "downloads tray" vs
+           "update available pill" at a glance. Hidden during the
+           first-use takeover — no installs exist yet, so no model
+           downloads can be in flight. -->
       <button
+        v-if="!isFirstUseTakeover"
         ref="downloadsBtn"
         type="button"
         class="title-downloads-tray"
@@ -771,11 +768,9 @@ onUnmounted(() => {
         @click="handleDownloadsTray"
       >
         <ArrowDownToLine :size="14" />
-        <span
-          v-if="downloadsActiveCount > 0"
-          class="title-downloads-badge"
-          aria-hidden="true"
-        >{{ downloadsActiveCount }}</span>
+        <span v-if="downloadsActiveCount > 0" class="title-downloads-badge" aria-hidden="true">{{
+          downloadsActiveCount
+        }}</span>
       </button>
       <!-- Center identity pill. Install-backed hosts show the install's
            name + install-type icon; install-less hosts show the static
@@ -783,21 +778,31 @@ onUnmounted(() => {
            — Settings now opens from the File / waffle menu via the
            unified Settings modal, so the pill no longer needs to be a
            click target. -->
-      <div
-        class="title-install-pill"
-        :class="{ 'is-install-less': isInstallLess }"
-      >
-        <!-- Install-type icon (Standalone laptop / Cloud / Legacy
-             Desktop tower / …). Sized at 14px to fit inside the
-             36px content area without growing the pill. -->
-        <component
-          :is="installTypeMeta.icon"
-          v-if="showInstallTypeIcon"
-          :size="14"
-          class="title-install-type-icon"
-          v-bind="tooltipAttrs(installTypeLabel)"
-        />
-        <span class="title-install-name">{{ installLabel }}</span>
+      <div class="title-install-pill" :class="{ 'is-install-less': isInstallLess }">
+        <!-- Left slot: brand mark. Static for now — will become
+             state-aware in a later pass (different mark for cloud vs
+             local instances). -->
+        <div class="title-install-slot title-install-slot--leading">
+          <ComfyCLogo class="title-install-brand-mark" :size="16" />
+        </div>
+        <!-- Center slot: install identity. Renders the install-type
+             icon (Standalone laptop / Cloud / Legacy Desktop tower /
+             …) on install-backed windows alongside the install name. -->
+        <div class="title-install-slot title-install-slot--center">
+          <component
+            :is="installTypeMeta.icon"
+            v-if="showInstallTypeIcon"
+            :size="14"
+            class="title-install-type-icon"
+            v-bind="tooltipAttrs(installTypeLabel)"
+          />
+          <span class="title-install-name">{{ installLabel }}</span>
+        </div>
+        <!-- Trailing slot: reserved for the instance-picker dropdown
+             caret / status indicator (wired up in a later pass). Empty
+             for now but kept in the layout so the center slot stays
+             optically balanced under the fixed-width pill. -->
+        <div class="title-install-slot title-install-slot--trailing"></div>
       </div>
       <!-- Install-update pill. Suppressed in install-less
            mode (no install backing the host) and in the steady state
@@ -818,13 +823,13 @@ onUnmounted(() => {
 
     <div class="drag-spacer"></div>
 
-    <!-- Trailing cluster: Send Feedback. Hidden during the consent
-         lockdown for the same reason the waffle is — the only
-         first-use gesture we want available is consent or OS-chrome
-         close. -->
+    <!-- Trailing cluster: Send Feedback. Hidden for the full duration
+         of the first-use takeover — nothing to send feedback about
+         until the user has actually used the app. Returns in the
+         steady state. -->
     <div class="title-trailing">
       <button
-        v-if="!isConsentLockdown"
+        v-if="!isFirstUseTakeover"
         type="button"
         class="title-menu-button title-feedback-button"
         v-bind="tooltipAttrs(t('titleBar.feedbackTooltip'), t('titleBar.feedback'))"
@@ -849,7 +854,7 @@ onUnmounted(() => {
   padding-left: 12px;
   padding-right: 12px;
   box-sizing: border-box;
-  background: var(--surface);
+  background: var(--titlebar-bg);
   color: var(--text-muted);
   border-bottom: 1px solid var(--border);
   font: 12px/1 var(--font-sans, 'Inter', system-ui, sans-serif);
@@ -945,7 +950,10 @@ onUnmounted(() => {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  transition: background-color 0.12s, opacity 0.12s, border-color 0.12s;
+  transition:
+    background-color 0.12s,
+    opacity 0.12s,
+    border-color 0.12s;
 }
 .title-bar.is-hover-active .title-menu-button:hover {
   opacity: 1;
@@ -973,28 +981,38 @@ onUnmounted(() => {
   -webkit-app-region: no-drag;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  /* Pill shape — pill-radius (999px) + horizontal padding for breathing
-     room around the install name. */
-  padding: 4px 12px;
+  justify-content: space-between;
+  width: 360px;
+  height: 28px;
+  padding: 5px 8px;
   border-radius: 999px;
-  /* Solid surface fill so the pill still reads as a chip, not as bare
-     text. Subtle border for definition on light themes. */
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  color: inherit;
-  font: inherit;
-  font-weight: 500;
+  background: var(--brand-surface-bg);
+  border: 1px solid var(--comfy-yellow);
+  color: var(--neutral-100);
+  font-size: 12px;
   cursor: default;
-  max-width: 480px;
-}
-.title-bar.is-light .title-install-pill {
-  background: rgba(0, 0, 0, 0.04);
-  border-color: rgba(0, 0, 0, 0.14);
 }
 /* Install-less host windows: identity-only `Desktop 2.0 Beta` label. */
 .title-install-pill.is-install-less {
   opacity: 0.85;
+}
+
+.title-install-slot {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 18px;
+}
+.title-install-slot--center {
+  flex: 1 1 auto;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+}
+/* Brand-mark color tracks the yellow ring so the C reads as the
+   pill's owning brand, not a content element. */
+.title-install-brand-mark {
+  flex-shrink: 0;
+  color: var(--comfy-yellow);
 }
 
 .title-install-name {
@@ -1033,7 +1051,10 @@ onUnmounted(() => {
   background: rgba(96, 165, 250, 0.18);
   color: inherit;
   border: 1px solid rgba(96, 165, 250, 0.35);
-  transition: background-color 0.12s, border-color 0.12s, opacity 0.12s;
+  transition:
+    background-color 0.12s,
+    border-color 0.12s,
+    opacity 0.12s;
 }
 .title-bar.is-hover-active .title-update-pill:hover:not(:disabled) {
   background: rgba(96, 165, 250, 0.28);
@@ -1059,7 +1080,9 @@ onUnmounted(() => {
   animation: title-update-pill-spin 1s linear infinite;
 }
 @keyframes title-update-pill-spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 .title-update-pill:focus-visible {
   outline: 2px solid var(--accent, #60a5fa);
@@ -1099,7 +1122,10 @@ onUnmounted(() => {
   background: rgba(255, 255, 255, 0.06);
   color: inherit;
   border: 1px solid rgba(255, 255, 255, 0.14);
-  transition: background-color 0.12s, border-color 0.12s, opacity 0.12s;
+  transition:
+    background-color 0.12s,
+    border-color 0.12s,
+    opacity 0.12s;
 }
 .title-bar.is-hover-active .title-downloads-tray:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.14);
