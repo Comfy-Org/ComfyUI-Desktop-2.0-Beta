@@ -587,7 +587,7 @@ button.brand-secondary:focus-visible {
   flex: 0 0 auto;
   width: 18px;
   height: 18px;
-  margin: 2px 0 0 0;
+  margin: 4px 0 0 0;
   border: 1px solid var(--brand-surface-border-hover);
   border-radius: 4px;
   background-color: var(--brand-surface-bg);
@@ -630,9 +630,9 @@ button.brand-secondary:focus-visible {
   color: var(--neutral-100);
 }
 .brand-checkbox__hint {
-  font-size: var(--takeover-fs-caption);
+  font-size: var(--takeover-fs-body);
   color: var(--neutral-300);
-  line-height: 1.5;
+  line-height: normal;
 }
 .brand-checkbox__link,
 button.brand-checkbox__link {
