@@ -48,7 +48,7 @@ interface MockApi {
   // progressStore subscribes to onErrorDetail at construction time, so
   // the mock has to expose at least the listener-registration shape it
   // expects. ChooserView reads progressStore.getProgressInfo() per
-  // tile via §8's in-flight-progress affordance.
+  // tile to drive in-flight-progress affordances.
   onErrorDetail: ReturnType<typeof vi.fn>
 }
 
@@ -223,10 +223,10 @@ describe('ChooserView', () => {
   })
 
   it('groups Legacy Desktop installs under the Local filter', async () => {
-    // The dedicated Desktop filter chip was retired in the post-Phase 3
-    // dashboard cleanup; Legacy Desktop installs (sourceCategory ===
-    // 'desktop') continue to surface alongside Standalone Local installs
-    // under the Local chip rather than vanishing from the filtered view.
+    // The dedicated Desktop filter chip is gone; Legacy Desktop installs
+    // (sourceCategory === 'desktop') continue to surface alongside
+    // Standalone Local installs under the Local chip rather than vanishing
+    // from the filtered view.
     installMockApi([
       makeInstall({ id: 'l', name: 'LocalThing', sourceCategory: 'local' }),
       makeInstall({ id: 'd', name: 'LegacyDesktopThing', sourceCategory: 'desktop' }),

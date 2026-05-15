@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, dialog } from 'electron'
 import { EventEmitter } from 'events'
 import fs from 'fs'
 import path from 'path'
@@ -801,44 +801,43 @@ export async function cleanupTempDownloads(): Promise<void> {
   } catch {}
 }
 
-// ---- IPC registration ----
+// ---- E2E test seeding ----
 
-export function registerDownloadIpc(): void {
-  ipcMain.handle(
-    'desktop2-download-model',
-    (event, { url, filename, directory }: { url: string; filename: string; directory: string }) => {
-      const win = BrowserWindow.fromWebContents(event.sender)
-      if (!win) return false
-      return startModelDownload(win, url, filename, directory, event.sender)
-    },
-  )
-
-  ipcMain.handle('model-download-pause', (_event, { url }: { url: string }) =>
-    pauseModelDownload(url),
-  )
-
-  ipcMain.handle('model-download-resume', (_event, { url }: { url: string }) =>
-    resumeModelDownload(url),
-  )
-
-  ipcMain.handle('model-download-cancel', (_event, { url }: { url: string }) =>
-    cancelModelDownload(url),
-  )
-
-  ipcMain.handle('model-download-dismiss', (_event, { url }: { url: string }) =>
-    dismissRecentDownload(url),
-  )
-
-  ipcMain.handle('model-download-clear-finished', () => clearFinishedDownloads())
-
-  // Seed the renderer-side store with active entries AND the recent
-  // terminal buffer so the Settings tab + popup history are non-empty
-  // on first paint after a window opens mid-flow.
-  ipcMain.handle('model-download-list', () => getAllDownloads())
-
-  ipcMain.handle('show-download-in-folder', (_event, { savePath }: { savePath: string }) => {
-    if (typeof savePath === 'string' && savePath) {
-      shell.showItemInFolder(path.resolve(savePath))
+/**
+ * Test-only: replace the in-memory active + recent buffers with the
+ * provided snapshot and emit `tray-state-changed` so every renderer
+ * surface (title-bar tray, popup, Settings tab) repaints exactly as
+ * if the snapshot had arrived through the production
+ * `broadcastProgress` path.
+ *
+ * The seeded `active` entries are stub `PendingDownload` records that
+ * carry only the fields `getDownloadsTrayState()` reads
+ * (`lastProgress`); the unused fields are nulled out so test code
+ * never has to fabricate a `BrowserWindow` / `DownloadItem`. Only
+ * called from `e2eHooks.ts` which is itself only loaded when
+ * `process.env['E2E'] === '1'`.
+ */
+export function _test_setSeededTrayState(snapshot: DownloadsTrayState): void {
+  pendingDownloads.clear()
+  for (const entry of snapshot.active) {
+    const stub: PendingDownload = {
+      url: entry.url,
+      filename: entry.filename,
+      directory: entry.directory ?? '',
+      savePath: entry.savePath ?? '',
+      window: null as unknown as BrowserWindow,
+      subscriberWindows: new Set(),
+      lastProgress: { ...entry },
+      lastSpeedBytes: 0,
+      lastSpeedTime: Date.now(),
     }
-  })
+    pendingDownloads.set(entry.url, stub)
+  }
+  recentDownloads.length = 0
+  for (const entry of snapshot.recent) {
+    recentDownloads.push({ ...entry })
+  }
+  downloadEvents.emit('tray-state-changed')
 }
+
+

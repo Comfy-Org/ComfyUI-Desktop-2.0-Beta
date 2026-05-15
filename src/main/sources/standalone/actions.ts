@@ -47,7 +47,6 @@ export async function handleAction(
 
     const targetSnapshot = await snapshots.loadSnapshot(installation.installPath, file)
 
-    // Phase 1: Restore ComfyUI version (checkout target commit)
     sendOutput('\n── Restore ComfyUI Version ──\n')
     const comfyResult = await snapshots.restoreComfyUIVersion(
       installation.installPath, targetSnapshot, sendOutput
@@ -56,7 +55,7 @@ export async function handleAction(
 
     if (signal?.aborted) return { ok: false, message: 'Cancelled' }
 
-    // Phase 2: Restore custom nodes first (node installs may add pip dependencies)
+    // Restore custom nodes before pip — node installs may add pip dependencies.
     sendOutput('\n── Restore Nodes ──\n')
     const nodeResult = await snapshots.restoreCustomNodes(
       installation.installPath, installation, targetSnapshot, sendProgress, sendOutput, signal,
@@ -65,7 +64,6 @@ export async function handleAction(
 
     if (signal?.aborted) return { ok: false, message: 'Cancelled' }
 
-    // Phase 3: Restore pip packages (syncs to exact target state)
     sendOutput('\n── Restore Packages ──\n')
     const pipResult = await snapshots.restorePipPackages(
       installation.installPath, installation, targetSnapshot,

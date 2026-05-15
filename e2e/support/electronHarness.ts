@@ -15,6 +15,12 @@ export interface LauncherAppHandle {
 export interface SeedOptions {
   /** Seed installation records into the isolated data directory. */
   installations?: SeedInstallation[]
+  /**
+   * Merge into the seeded `settings.json` before launch. Use to bypass
+   * one-time gates (e.g., `firstUseCompleted: true`) so a test isn't
+   * racing the first-use takeover for control of the chooser host.
+   */
+  settings?: Record<string, unknown>
 }
 
 export interface SeedInstallation {
@@ -26,7 +32,7 @@ export interface SeedInstallation {
   [key: string]: unknown
 }
 
-function buildIsolatedEnv(homeDir: string): Record<string, string> {
+function buildIsolatedEnv(homeDir: string, settingsSeed?: Record<string, unknown>): Record<string, string> {
   const inheritedEnv = Object.fromEntries(
     Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
   )
@@ -39,6 +45,9 @@ function buildIsolatedEnv(homeDir: string): Record<string, string> {
     XDG_CACHE_HOME: path.join(homeDir, '.cache'),
     XDG_DATA_HOME: path.join(homeDir, '.local', 'share'),
     XDG_STATE_HOME: path.join(homeDir, '.local', 'state'),
+    // Gates `registerE2EHooks()` in main so test-only helpers
+    // (`globalThis.__e2e`) are wired up. See `src/main/lib/e2eHooks.ts`.
+    E2E: '1',
   }
 
   // On Windows, Electron resolves userData via APPDATA (%APPDATA%\<appName>).
@@ -47,17 +56,33 @@ function buildIsolatedEnv(homeDir: string): Record<string, string> {
     env['APPDATA'] = path.join(homeDir, 'AppData', 'Roaming')
   }
 
+  // Settings seed read by main `settings.maybeSeedFromEnv()` before first
+  // load. Bypasses platform-specific userData path resolution (notably
+  // macOS Application Support, which ignores HOME).
+  if (settingsSeed && Object.keys(settingsSeed).length > 0) {
+    env['E2E_SETTINGS_SEED'] = JSON.stringify(settingsSeed)
+  }
+
   return env
 }
 
 export async function launchLauncherApp(options?: SeedOptions): Promise<LauncherAppHandle> {
   const homeDir = await mkdtemp(path.join(os.tmpdir(), 'comfyui-launcher-e2e-'))
 
-  // Pre-create directories that Electron expects to exist.
-  // On Windows, Electron uses %APPDATA%/<appName> for userData.
+  // Pre-create the platform-specific config dir Electron's `userData`
+  // (or our XDG override on Linux) resolves to. macOS Application Support
+  // is rooted at `getpwuid(getuid())->pw_dir`, NOT $HOME — even when
+  // HOME is overridden — so the directory lives outside the test's
+  // mkdtemp sandbox. We still create it so `settings.set()` writes
+  // succeed, and we seed the persisted settings via the
+  // `E2E_SETTINGS_SEED` env var (read by main pre-chooser) instead of
+  // by writing a settings.json file the harness would have to guess
+  // the location of.
   const appDataDir = process.platform === 'win32'
     ? path.join(homeDir, 'AppData', 'Roaming', 'comfyui-desktop-2')
-    : path.join(homeDir, '.config', 'comfyui-desktop-2')
+    : process.platform === 'darwin'
+      ? path.join(homeDir, 'Library', 'Application Support', 'comfyui-desktop-2')
+      : path.join(homeDir, '.config', 'comfyui-desktop-2')
   await mkdir(appDataDir, { recursive: true })
 
   // Expose a CDP remote-debugging port so tests can connect to non-BrowserWindow
@@ -74,7 +99,7 @@ export async function launchLauncherApp(options?: SeedOptions): Promise<Launcher
 
   const application = await electron.launch({
     args,
-    env: buildIsolatedEnv(homeDir),
+    env: buildIsolatedEnv(homeDir, options?.settings),
   })
 
   // The main window starts with show:false and transitions via ready-to-show.
@@ -99,8 +124,10 @@ export async function launchLauncherApp(options?: SeedOptions): Promise<Launcher
     electronApp.on('render-process-gone', () => electronApp.exit(1))
   })
 
-  // Seed data files after launch so we can query app.getPath('userData') for
-  // the correct directory (Electron may capitalize or modify the app name).
+  // Seed installations after launch so we can query app.getPath('userData')
+  // for the correct directory (Electron may capitalize or modify the app
+  // name on some platforms). Installations are read on chooser refresh, so
+  // a post-launch write is fine.
   if (options?.installations && options.installations.length > 0) {
     const userDataDir = await application.evaluate(async ({ app: electronApp }) => {
       return electronApp.getPath('userData')

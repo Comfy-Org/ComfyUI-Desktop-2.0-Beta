@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed, useTemplateRef } from 'vue'
+import { ref, onMounted, onUnmounted, useTemplateRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   ArrowDownToLine,
@@ -9,7 +9,11 @@ import {
   MessageSquarePlus,
   RefreshCw,
 } from 'lucide-vue-next'
-import { installTypeMetaFor } from '../lib/installTypeIcon'
+import { useTitleBarTooltip } from './useTitleBarTooltip'
+import { useTitleBarMenus } from './useTitleBarMenus'
+import { useTitleBarIdentity } from './useTitleBarIdentity'
+import { useUpdatePills } from './useUpdatePills'
+import { useTitleBarHoverGate } from './useTitleBarHoverGate'
 
 const { t } = useI18n()
 
@@ -157,210 +161,45 @@ interface Bridge {
 const bridge = (window as unknown as { __comfyTitleBar?: Bridge }).__comfyTitleBar
 
 const isMac = ref(bridge?.isMac() ?? false)
-const isFullscreen = ref(false)
-/**
- * `:hover` gating for the title-bar. The title bar lives in its own
- * WebContentsView, which doesn't receive a `mouseleave` when a native
- * OS menu (Menu.popup, install pill dropdown, etc.) opens over it,
- * and the renderer's last-known cursor position stays "frozen" while
- * the OS menu has the input. Plain `window.blur`/`focus` is not
- * enough on its own — the user can dismiss the menu by clicking back
- * inside the title bar, which immediately refocuses the renderer
- * with a stale cursor position still pointing at the button that
- * opened the menu, leaving `:hover` stuck.
- *
- * The fix is two-step:
- *   1. On `window.blur`, drop the hover gate (`isHoverActive = false`).
- *   2. Re-enable the gate ONLY after a fresh `pointermove` arrives —
- *      i.e. once we know the cursor's position is current. Pure
- *      `window.focus` does NOT re-enable hover, because focus can
- *      return without the cursor having moved (clicking back into
- *      the title bar to dismiss the menu does exactly that).
- *
- * Hover styles are keyed on `.title-bar.is-hover-active` in scoped
- * CSS, so flipping this single flag covers menu, nav, and pill
- * buttons uniformly.
- */
-const isHoverActive = ref(true)
 /** Active body-mode pill, mirrored from main. Drives the native Install
  *  menu's checkmark for install-scoped pages (Install Settings /
  *  Directories). The pill itself no longer reflects this — the pill is
  *  an identity label, not a tab indicator. */
 const activePanel = ref<ComfyPanelKey>('comfy')
 /**
- * First-use takeover step pushed from main via
- * `comfy-titlebar:first-use-mode-changed`. The renderer uses the
- * value to lock down the title bar during the T&C consent step
- * (`'consent-lockdown'`) by hiding the waffle menu — the only
- * always-live escape hatch the user would otherwise have out of the
- * binding takeover. Post-consent steps (`'post-consent'`) leave the
- * title bar normal so the file-menu Skip Onboarding entry stays
- * reachable. `'none'` is the steady state with no takeover mounted.
- *
- * State is local, main does NOT cache the value here (it's cached on
- * the host entry main-side, see `ComfyWindowEntry.firstUseMode`),
- * matching how panel-changed / theme-changed already work.
- */
-const firstUseMode = ref<'none' | 'consent-lockdown' | 'post-consent'>('none')
-const isConsentLockdown = computed(() => firstUseMode.value === 'consent-lockdown')
-/**
- * Install-less host window flag. When true, the center
- * install pill labels itself "Desktop 2.0 Beta" (set by the initial
- * title push from main) and the install-type icon next to the label is
- * suppressed. The center pill is no longer clickable in either mode —
- * Settings now lives on the File / waffle menu via the unified Settings
- * modal — so this flag only affects the rendered identity, not the
- * interaction model.
+ * Install-less host window flag — true when the host has no install
+ * backing it. Drives the center pill's static identity label and
+ * suppresses the install-type icon. Computed once on construction;
+ * the bridge never changes this for a given title-bar instance.
  */
 const isInstallLess = ref((bridge?.getInstallationId() ?? '') === '')
-/** Install identity ("MyInstall") — main pushes this on ready.
- *  The source-category suffix (`— Standalone` / `— Cloud` / …) is
- *  not part of the label; it's rendered as an icon next to the name
- *  via `installTypeIcon`. */
-const installLabel = ref('ComfyUI')
-/**
- * Raw `sourceCategory` string pushed by main on the
- * `comfy-titlebar:source-category-changed` channel. Drives the
- * install-type icon next to the install name (Standalone laptop /
- * Cloud / Legacy Desktop tower / …) via the shared
- * `installTypeMetaFor()` helper. `null` for install-less host
- * windows; the icon is suppressed entirely in that case so the
- * "Desktop 2.0 Beta" label reads bare.
- */
-const sourceCategory = ref<string | null>(null)
-/** Resolved icon metadata for the active install. Wraps
- *  `installTypeMetaFor()` so the helper isn't called inline in the
- *  template (keeps Vue's reactivity watcher minimal). */
-const installTypeMeta = computed(() => installTypeMetaFor(sourceCategory.value))
-/** Tooltip for the install-type icon. `installTypeMetaFor` returns
- *  dotted keys like `installType.standalone` that match the en
- *  catalog one-to-one. */
-const installTypeLabel = computed(() => {
-  return t(installTypeMeta.value.labelKey, t('installType.unknown'))
-})
-/** Whether to render the install-type icon. Suppressed on
- *  install-less host windows (no install backing the entry) so the
- *  "Desktop 2.0 Beta" identity label reads bare. */
-const showInstallTypeIcon = computed(
-  () => !isInstallLess.value && sourceCategory.value !== null,
-)
-const themeBg = ref<string | null>(null)
-const themeText = ref<string | null>(null)
 
-/**
- * Title-bar status pills.
- *
- * The app-update pill (right of the hamburger) shows when the
- * auto-updater has either downloaded an update (`'ready'`, prompts
- * Restart-to-update via the popover) or detected one is available
- * (`'available'`, prompts Download via the popover). State is pushed
- * from main on `comfy-titlebar:app-update-state-changed`; the pill
- * disappears entirely when `kind` is `null` so the title bar reads
- * clean in the steady state.
- *
- * The install-update pill (right of the install pill in the center)
- * fires when the active install's `statusTag.style === 'update'` —
- * the same signal the chooser tile's "Update" pill consumes. State is
- * pushed from main on `comfy-titlebar:install-update-changed` and is
- * gated on `!isInstallLess` (install-less hosts have no install backing
- * the window, so an install-scoped pill is meaningless there).
- */
-const appUpdateState = ref<{
-  kind: 'available' | 'downloading' | 'ready' | null
-  version: string | null
-  autoUpdate: boolean
-}>({ kind: null, version: null, autoUpdate: true })
-const installUpdateState = ref<{ available: boolean; version: string | null }>({
-  available: false,
-  version: null,
-})
+const {
+  installLabel,
+  sourceCategory,
+  themeBg,
+  themeText,
+  isFullscreen,
+  isConsentLockdown,
+  installTypeMeta,
+  installTypeLabel,
+  showInstallTypeIcon,
+  isLight,
+} = useTitleBarIdentity({ bridge, isInstallLess })
+// Mark unused — sourceCategory feeds installTypeMeta inside the
+// composable, but the template doesn't reference it directly.
+void sourceCategory
 
-const appUpdatePillLabel = computed<string | null>(() => {
-  const s = appUpdateState.value
-  if (!s.kind) return null
-  if (s.kind === 'ready') return t('titleBar.desktopUpdateReady')
-  if (s.kind === 'downloading') return t('titleBar.desktopUpdateDownloading')
-  // 'available' — only fires with auto-updates OFF (main suppresses
-  // it when ON and triggers the download itself).
-  return t('titleBar.desktopUpdateAvailable')
-})
-
-/** Tooltip / aria-label augments the pill label with the version when
- *  one is known, so the compact pill stays scan-friendly while the
- *  full "Desktop Update Ready (v1.2.3)" detail is one hover away. */
-const appUpdatePillTooltip = computed<string>(() => {
-  const label = appUpdatePillLabel.value
-  if (!label) return ''
-  const v = appUpdateState.value.version
-  return v
-    ? t('titleBar.desktopUpdateWithVersion', { label, version: v })
-    : label
-})
-
-/** Install-update pill copy. Mirrors the app-update pill's
- *  "Update {version}" format when main carries a target version
- *  through the install's status tag, falling back to the generic
- *  "Update available" label when no version is known. */
-const installUpdatePillLabel = computed<string>(() => {
-  const v = installUpdateState.value.version
-  return v
-    ? t('titleBar.installUpdateVersion', { version: v })
-    : t('titleBar.installUpdateAvailable')
-})
-
-const showAppUpdatePill = computed(() => appUpdateState.value.kind !== null)
-const showInstallUpdatePill = computed(
-  () => !isInstallLess.value && installUpdateState.value.available,
-)
-
-function handleAppUpdatePill(): void {
-  bridge?.clickAppUpdatePill()
-}
-function handleInstallUpdatePill(): void {
-  bridge?.clickInstallUpdatePill()
-}
-
-/**
- * Title-bar downloads tray. Always-visible icon button sitting in the
- * center cluster immediately left of the install pill. Distinct from
- * the update pills in two ways so the user reads them at a glance:
- *   - Icon (`ArrowDownToLine` vs `Download` / `RefreshCw`).
- *   - Chrome (neutral surface tint vs blue/green accent).
- *
- * The badge counts in-flight downloads only; recently-completed
- * entries surface in the popup but don't bump the count (so the
- * count reads as "what's still working"). Click opens the title-bar
- * dropdown popup in `'downloads'` mode; the popup carries the
- * empty-state copy so the title-bar button stays present even when
- * nothing is downloading.
- *
- * Stays visible during the consent lockdown so an in-flight model
- * download remains reachable while the waffle / feedback are hidden.
- */
-const downloadsState = ref<DownloadsTrayState>({ active: [], recent: [] })
-
-const downloadsActiveCount = computed(() => downloadsState.value.active.length)
-const downloadsTrayLabel = computed<string>(() => {
-  const n = downloadsActiveCount.value
-  if (n === 0) return t('titleBar.downloads')
-  return t('titleBar.downloadsInProgress', { n }, n)
-})
-
-const downloadsBtnRef = useTemplateRef<HTMLButtonElement>('downloadsBtn')
-
-function handleDownloadsTray(): void {
-  // Toggle-close + reopen guard mirror `handleFileMenu` — the popup is
-  // a single shared WebContentsView, so the same dismiss / reopen
-  // behaviour the waffle has applies. Without this the tray button
-  // would re-pop the popup immediately after the user's click on it
-  // dismissed it, looking like the popup never closes.
-  if (isMenuOpen.value) {
-    bridge?.dismissFileMenu()
-    return
-  }
-  if (Date.now() - menuClosedAt.downloads < MENU_REOPEN_GUARD_MS) return
-  bridge?.clickDownloadsTray(anchorBelow(downloadsBtnRef.value))
-}
+const {
+  appUpdateState,
+  appUpdatePillLabel,
+  appUpdatePillTooltip,
+  installUpdatePillLabel,
+  showAppUpdatePill,
+  showInstallUpdatePill,
+  handleAppUpdatePill,
+  handleInstallUpdatePill,
+} = useUpdatePills({ bridge, isInstallLess })
 
 /** Title-bar Send Feedback button. Routes through main, which forwards
  *  `comfy-panel:open-feedback` to the panel renderer — the renderer
@@ -371,312 +210,40 @@ function handleFeedback(): void {
   bridge?.clickFeedback()
 }
 
-/** Body luminance test — drives is-light styling (lighter hover state). */
-const isLight = computed(() => {
-  const bg = themeBg.value
-  if (!bg) return false
-  // Round-trip through canvas to normalise any color string into #rrggbb.
-  const ctx = document.createElement('canvas').getContext('2d')
-  if (!ctx) return false
-  ctx.fillStyle = bg
-  const hex = ctx.fillStyle as string
-  if (!hex.startsWith('#') || hex.length < 7) return false
-  const r = parseInt(hex.slice(1, 3), 16)
-  const g = parseInt(hex.slice(3, 5), 16)
-  const b = parseInt(hex.slice(5, 7), 16)
-  return (r * 299 + g * 587 + b * 114) / 1000 >= 128
+const fileBtnRef = useTemplateRef<HTMLButtonElement>('fileBtn')
+const downloadsBtnRef = useTemplateRef<HTMLButtonElement>('downloadsBtn')
+
+const { tooltipAttrs, handleTooltipPointer, hideTip } = useTitleBarTooltip({
+  bridge,
+  isMac,
 })
 
-const fileBtnRef = useTemplateRef<HTMLButtonElement>('fileBtn')
+const { isHoverActive } = useTitleBarHoverGate({ hideTip, handleTooltipPointer })
 
-/** Per-menu suppression window. When the popup closes, we stamp
- *  `Date.now()` against its kind. The next click on the same opener
- *  button within `MENU_REOPEN_GUARD_MS` is treated as "the same click
- *  that just dismissed the popup" and is dropped, preventing the
- *  popup from flickering open immediately after the user clicked the
- *  open button to dismiss it. The OS dismisses the popup first, then
- *  the click event reaches our renderer button — without this guard
- *  the handler would ask main to pop the popup again. Tracked per
- *  popup kind because the waffle and the downloads tray are separate
- *  buttons; clicking the downloads button shouldn't suppress a fresh
- *  waffle open and vice versa. */
-const MENU_REOPEN_GUARD_MS = 100
-const menuClosedAt: Record<'menu' | 'downloads', number> = { menu: 0, downloads: 0 }
+const {
+  downloadsActiveCount,
+  downloadsTrayLabel,
+  handleFileMenu,
+  handleDownloadsTray,
+} = useTitleBarMenus({
+  bridge,
+  hideTip,
+  fileBtnRef,
+  downloadsBtnRef,
+})
 
-/** Tracks whether the popup is currently visible. Set by main via
- *  `onMenuOpened` / `onMenuClosed` IPCs. The timestamp guard above
- *  is unreliable on macOS because the click event can fire before
- *  the blur-driven dismiss propagates back; checking `isMenuOpen`
- *  catches that case — the click's blur will dismiss the popup, so
- *  we just don't ask main to reopen. */
-const isMenuOpen = ref(false)
-
-/** Anchor a native menu just below `el`'s bottom-left corner.
- *  Coordinates are in title-bar-local pixels (y is rounded down so the
- *  popup always sits flush with — never above — the button). */
-function anchorBelow(el: HTMLElement | null | undefined): MenuAnchor {
-  if (!el) return { x: 0, y: 0 }
-  const rect = el.getBoundingClientRect()
-  return { x: Math.round(rect.left), y: Math.round(rect.bottom) }
-}
-
-/**
- * Issue #514 — macOS hover-tooltip plumbing.
- *
- * On macOS the native HTML `title` tooltip does not reliably fire for
- * controls inside a sibling chrome `WebContentsView` that isn't the
- * focused web contents (Electron + Cocoa quirk). The title bar always
- * sits in such a view, so on macOS we route hover through main, which
- * positions a cached `WebContentsView` popup attached to the host
- * window — that popup escapes the title-bar view's 37px clip. On
- * Windows / Linux the native `title` attribute renders Chromium's own
- * tooltip widget reliably; the JS handlers below are no-ops in that
- * case so we don't end up with two tooltips.
- *
- * Implementation is delegated: a single `pointermove` / `pointerleave`
- * pair on the header root finds the closest `[data-title-tooltip]`
- * ancestor and fires `showTip` / `hideTip`. New tooltipped elements
- * just need the data attribute — no per-element wiring.
- */
-/** Initial show delay (ms). Matches the cadence of native HTML
- *  tooltips on macOS / Win so a quick fly-by across the title bar
- *  doesn't flash bubbles. */
-const TOOLTIP_SHOW_DELAY_MS = 400
-/** Hover-handoff window (ms). If a tooltip was visible up to this
- *  long ago, the next hover over a different tooltipped element shows
- *  immediately — same convention as native macOS / browser tooltips,
- *  where the first hover earns the wait but subsequent ones in a
- *  scanning gesture feel snappy. */
-const TOOLTIP_HANDOFF_WINDOW_MS = 1500
-let tooltipShowTimer: number | null = null
-/** Text of the tooltip the renderer most recently asked main to show
- *  (or queue). `null` while nothing is pending or visible. */
-let activeTooltipText: string | null = null
-/** True between `bridge.showTooltip()` and the corresponding
- *  `bridge.hideTooltip()` — i.e., a tooltip is currently visible. The
- *  pending-but-not-yet-shown state has this `false`. */
-let isTooltipVisible = false
-/** `performance.now()` timestamp of the most recent
- *  `bridge.hideTooltip()`. Drives the hover-handoff fast path. */
-let lastHiddenAt = -Infinity
-
-/**
- * Single source of truth for tooltip-related attributes on title-bar
- * controls. Cocoa's native HTML `title` tooltip occasionally DOES
- * fire for our sibling-view buttons even though it's documented as
- * unreliable; when it does, the user gets two bubbles at once (the
- * native one plus our custom popup). Keep them mutually exclusive at
- * the source by emitting `title` only off-mac and `data-title-tooltip`
- * only on mac. `aria-label` is unconditional so screen readers see
- * the same string regardless of platform — pass `ariaLabel` separately
- * when the visible label and the tooltip copy intentionally differ
- * (e.g. the Send Feedback button shows "Beta Feedback" but the
- * tooltip reads "Send Feedback").
- */
-function tooltipAttrs(text: string, ariaLabel?: string): Record<string, string> {
-  const base: Record<string, string> = { 'aria-label': ariaLabel ?? text }
-  if (isMac.value) {
-    base['data-title-tooltip'] = text
-  } else {
-    base.title = text
-  }
-  return base
-}
-
-function findTooltipTarget(target: EventTarget | null): {
-  text: string
-  rect: DOMRect
-} | null {
-  if (!(target instanceof Element)) return null
-  const el = target.closest('[data-title-tooltip]') as HTMLElement | SVGElement | null
-  if (!el) return null
-  const text = el.getAttribute('data-title-tooltip')
-  if (!text) return null
-  return { text, rect: el.getBoundingClientRect() }
-}
-
-function cancelPendingTooltipShow(): void {
-  if (tooltipShowTimer !== null) {
-    window.clearTimeout(tooltipShowTimer)
-    tooltipShowTimer = null
-  }
-}
-
-function hideTip(): void {
-  cancelPendingTooltipShow()
-  if (activeTooltipText === null) return
-  activeTooltipText = null
-  if (isTooltipVisible) {
-    isTooltipVisible = false
-    lastHiddenAt = performance.now()
-  }
-  bridge?.hideTooltip()
-}
-
-function fireShowTooltip(text: string, rect: DOMRect): void {
-  bridge?.showTooltip({
-    text,
-    leftX: Math.round(rect.left),
-    rightX: Math.round(rect.right),
-    bottomY: Math.round(rect.bottom),
-  })
-  isTooltipVisible = true
-}
-
-function handleTooltipPointer(event: PointerEvent): void {
-  if (!isMac.value) return
-  const found = findTooltipTarget(event.target)
-  if (!found) {
-    hideTip()
-    return
-  }
-  if (found.text === activeTooltipText) {
-    // Same trigger as before — no work needed. (Either we're still
-    // waiting on the show timer, or the tooltip is already visible;
-    // either way we don't reset state mid-hover.)
-    return
-  }
-  // Different (or first) tooltipped target. Hide any in-flight tooltip
-  // and queue the new one. If we were just showing a tooltip moments
-  // ago (hover-handoff), skip the show delay so scanning across the
-  // title bar feels instant — matches native macOS behaviour.
-  const handoff =
-    isTooltipVisible || performance.now() - lastHiddenAt < TOOLTIP_HANDOFF_WINDOW_MS
-  hideTip()
-  const captured = found
-  activeTooltipText = captured.text
-  if (handoff) {
-    fireShowTooltip(captured.text, captured.rect)
-    return
-  }
-  tooltipShowTimer = window.setTimeout(() => {
-    tooltipShowTimer = null
-    if (activeTooltipText !== captured.text) return
-    fireShowTooltip(captured.text, captured.rect)
-  }, TOOLTIP_SHOW_DELAY_MS)
-}
-
-function handleFileMenu(): void {
-  // Hide any in-flight tooltip — the menu will obscure the same area
-  // and the click won't fire pointerleave.
-  hideTip()
-  // Toggle-close: if the popup is open at click time, actively ask
-  // main to dismiss it. The blur-driven dismiss path can't be relied
-  // on here — on macOS clicking a sibling WebContentsView in the
-  // same parent window doesn't reliably trigger a `blur` on the
-  // popup webContents, so the popup would otherwise stay open.
-  if (isMenuOpen.value) {
-    bridge?.dismissFileMenu()
-    return
-  }
-  // Suppress reopen on platforms where the dismiss did propagate
-  // before the click event fires (Windows / Linux): the same click
-  // that dismissed the popup also retargets the menu button, and
-  // without this guard handleFileMenu would ask main to pop the
-  // menu again.
-  if (Date.now() - menuClosedAt.menu < MENU_REOPEN_GUARD_MS) return
-  bridge?.openFileMenu(anchorBelow(fileBtnRef.value))
-}
 let unsubPanel: (() => void) | undefined
-let unsubTitle: (() => void) | undefined
-let unsubSourceCategory: (() => void) | undefined
-let unsubTheme: (() => void) | undefined
-let unsubFullscreen: (() => void) | undefined
-let unsubMenuOpened: (() => void) | undefined
-let unsubMenuClosed: (() => void) | undefined
-let unsubFirstUseMode: (() => void) | undefined
-let unsubAppUpdate: (() => void) | undefined
-let unsubInstallUpdate: (() => void) | undefined
-let unsubDownloads: (() => void) | undefined
-
-/** Drop the hover gate immediately when input leaves the title-bar
- *  webContents — covers the case where a native menu (Menu.popup) or
- *  another view receives focus. Also dismisses any in-flight tooltip
- *  for the same reason. */
-const handleWindowBlur = (): void => {
-  isHoverActive.value = false
-  hideTip()
-}
-/** Re-enable the hover gate only on a fresh `pointermove`. We do NOT
- *  re-enable on `window.focus` alone, because focus can return without
- *  any cursor movement (clicking back into the title bar to dismiss
- *  the menu refocuses the renderer with a stale cursor position).
- *  Also drives the macOS tooltip dispatcher (issue #514). */
-const handlePointerMove = (event: PointerEvent): void => {
-  if (!isHoverActive.value) isHoverActive.value = true
-  handleTooltipPointer(event)
-}
-/** Belt-and-braces: if the cursor leaves the title-bar's bounds, drop
- *  the gate. The renderer should normally see a `mouseleave` here, but
- *  on some platforms / WebContentsView setups the leave doesn't fire
- *  reliably, so we mirror the blur path. */
-const handlePointerLeave = (): void => {
-  isHoverActive.value = false
-  hideTip()
-}
 
 onMounted(() => {
   if (!bridge) return
   unsubPanel = bridge.onPanelChanged((panel) => {
     activePanel.value = panel
   })
-  unsubTitle = bridge.onTitleChanged((title) => {
-    installLabel.value = title || 'ComfyUI'
-  })
-  unsubSourceCategory = bridge.onSourceCategoryChanged((category) => {
-    sourceCategory.value = category
-  })
-  unsubTheme = bridge.onThemeChanged(({ bg, text }) => {
-    themeBg.value = bg
-    themeText.value = text
-  })
-  unsubFullscreen = bridge.onFullscreenChanged((fullscreen) => {
-    isFullscreen.value = fullscreen
-  })
-  unsubMenuOpened = bridge.onMenuOpened(() => {
-    isMenuOpen.value = true
-  })
-  unsubMenuClosed = bridge.onMenuClosed(({ menu }) => {
-    menuClosedAt[menu] = Date.now()
-    isMenuOpen.value = false
-  })
-  unsubFirstUseMode = bridge.onFirstUseModeChanged((mode) => {
-    firstUseMode.value = mode
-  })
-  unsubAppUpdate = bridge.onAppUpdateStateChanged((next) => {
-    appUpdateState.value = next
-  })
-  unsubInstallUpdate = bridge.onInstallUpdateAvailable((next) => {
-    installUpdateState.value = next
-  })
-  unsubDownloads = bridge.onDownloadsChanged((next) => {
-    downloadsState.value = next
-  })
-  window.addEventListener('blur', handleWindowBlur)
-  window.addEventListener('pointermove', handlePointerMove)
-  document.documentElement.addEventListener('pointerleave', handlePointerLeave)
-  // Initial state — assume hover is inert until the user actually
-  // moves the mouse over the title bar. This matches the post-blur
-  // behaviour: no hover styling without a fresh pointer position.
-  isHoverActive.value = false
   bridge.ready()
 })
 
 onUnmounted(() => {
   unsubPanel?.()
-  unsubTitle?.()
-  unsubSourceCategory?.()
-  unsubTheme?.()
-  unsubFullscreen?.()
-  unsubMenuOpened?.()
-  unsubMenuClosed?.()
-  unsubFirstUseMode?.()
-  unsubAppUpdate?.()
-  unsubInstallUpdate?.()
-  unsubDownloads?.()
-  window.removeEventListener('blur', handleWindowBlur)
-  window.removeEventListener('pointermove', handlePointerMove)
-  document.documentElement.removeEventListener('pointerleave', handlePointerLeave)
   hideTip()
 })
 </script>

@@ -13,6 +13,12 @@ pnpm run test
 
 Typecheck and lint are enforced automatically by a husky pre-commit hook.
 
+## Committing and pushing
+
+When the current branch is a working / feature branch (anything other than `main`), it is fine to `git commit` and `git push` without asking for explicit confirmation each time — keep the branch up to date as you make progress. Run the pre-commit checks above first, fix everything they surface, and only then commit + push.
+
+Do **not** push directly to `main`, force-push (`--force` / `--force-with-lease`), or rewrite already-published history without explicit user instruction.
+
 ## Fix all issues found by checks
 
 Any errors or warnings surfaced by typecheck, lint, audit, or tests are **our responsibility to fix** — even if they appear to be pre-existing. Do not skip, ignore, or work around them with `--no-verify`. If a pre-commit hook fails, fix the underlying issues before committing.
