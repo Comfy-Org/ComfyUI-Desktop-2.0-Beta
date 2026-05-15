@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Check, X } from 'lucide-vue-next'
 import heroUrl from '../assets/first-use/why-cloud-hero.svg'
@@ -17,7 +17,12 @@ const benefits = computed<string[]>(() => {
 })
 
 const overlayRef = ref<HTMLDivElement | null>(null)
+const closeBtnRef = ref<HTMLButtonElement | null>(null)
 const mouseDownOnOverlay = ref(false)
+/** Element that owned focus before the modal opened. Captured on mount
+ *  so close (any path: ESC, ✕, overlay click, parent v-if flip) can
+ *  restore focus to the original trigger. */
+let returnFocusTo: HTMLElement | null = null
 
 function onOverlayMouseDown(e: MouseEvent) {
   mouseDownOnOverlay.value = e.target === overlayRef.value
@@ -30,8 +35,15 @@ function onKeydown(e: KeyboardEvent) {
   if (e.key === 'Escape') emit('close')
 }
 
-onMounted(() => document.addEventListener('keydown', onKeydown))
-onUnmounted(() => document.removeEventListener('keydown', onKeydown))
+onMounted(() => {
+  document.addEventListener('keydown', onKeydown)
+  returnFocusTo = document.activeElement instanceof HTMLElement ? document.activeElement : null
+  void nextTick(() => closeBtnRef.value?.focus())
+})
+onUnmounted(() => {
+  document.removeEventListener('keydown', onKeydown)
+  returnFocusTo?.focus()
+})
 </script>
 
 <template>
@@ -48,6 +60,7 @@ onUnmounted(() => document.removeEventListener('keydown', onKeydown))
       >
         <div class="why-cloud-content modal-fade-panel">
           <button
+            ref="closeBtnRef"
             class="why-cloud-close"
             type="button"
             :aria-label="$t('common.close')"
@@ -119,7 +132,7 @@ onUnmounted(() => document.removeEventListener('keydown', onKeydown))
   overflow: hidden;
   background: var(--neutral-900);
   border: 1px solid color-mix(in oklab, var(--neutral-100) 8%, transparent);
-  box-shadow: 0 40px 100px 0 rgba(0, 0, 0, 0.45);
+  /* box-shadow: 0 40px 100px 0 rgba(0, 0, 0, 0.45); */
 }
 
 .why-cloud-close {
@@ -139,12 +152,12 @@ onUnmounted(() => document.removeEventListener('keydown', onKeydown))
   color: var(--neutral-100);
   cursor: pointer;
   transition:
-    background 120ms ease,
-    border-color 120ms ease;
+    border-color 120ms ease,
+    opacity 120ms ease;
 }
 .why-cloud-close:hover {
-  background: color-mix(in oklab, var(--neutral-950) 85%, transparent);
   border-color: color-mix(in oklab, var(--neutral-100) 44%, transparent);
+  opacity: 1;
 }
 .why-cloud-close:focus-visible {
   outline: 2px solid var(--focus-ring);
@@ -238,9 +251,7 @@ onUnmounted(() => document.removeEventListener('keydown', onKeydown))
   align-items: start;
   gap: 12px;
   font-size: var(--takeover-fs-lead);
-  color: var(--neutral-300);
-  font-weight: 400;
-  font-family: var(--font-sans);
+  color: var(--neutral-100);
   line-height: normal;
 }
 .why-cloud-check {
@@ -260,12 +271,9 @@ onUnmounted(() => document.removeEventListener('keydown', onKeydown))
   background: transparent;
   border: none;
   color: var(--neutral-100);
-  font-weight: 400;
-  font-family: var(--font-sans);
-  line-height: normal;
   font-size: var(--takeover-fs-body);
   cursor: pointer;
-  padding: 8px 16px;
+  padding: 10px 18px;
 }
 .why-cloud-maybe:hover {
   color: var(--text);
