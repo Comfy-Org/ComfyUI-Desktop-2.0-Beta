@@ -263,15 +263,18 @@ test('ComfyUI window has dark background and split-view architecture @lifecycle'
   const arch = await ctx.app.evaluate(({ BrowserWindow, WebContentsView }) => {
     for (const win of BrowserWindow.getAllWindows()) {
       const children = win.contentView.children
-      const hasComfy = children.some((v) =>
+      const comfyChild = children.find((v) =>
         v instanceof WebContentsView &&
         /^http:\/\/(127\.0\.0\.1|localhost):/.test(v.webContents.getURL()),
-      )
-      if (!hasComfy) continue
+      ) as { getBounds(): { x: number; y: number; width: number; height: number }; getVisible(): boolean } | undefined
+      if (!comfyChild) continue
+      const bounds = comfyChild.getBounds()
       return {
         childCount: children.length,
         allWebContentsViews: children.every((v) => v instanceof WebContentsView),
         bg: win.getBackgroundColor(),
+        comfyBounds: bounds,
+        comfyVisible: comfyChild.getVisible(),
       }
     }
     return null
@@ -281,6 +284,13 @@ test('ComfyUI window has dark background and split-view architecture @lifecycle'
   expect(arch!.childCount).toBeGreaterThanOrEqual(2)
   expect(arch!.allWebContentsViews).toBe(true)
   expect(arch!.bg.toLowerCase()).toBe('#171717')
+  // Regression guard for the chooser-pick in-place attach onto a unique-
+  // partition install: rebuildComfyViewIfNeeded swaps entry.comfyView, and
+  // a stale closure in layoutViews used to leave the freshly-built view
+  // at default 0×0 invisible bounds — ComfyUI would load but never paint.
+  expect(arch!.comfyVisible, 'comfyView is hidden').toBe(true)
+  expect(arch!.comfyBounds.width, 'comfyView width is 0').toBeGreaterThan(0)
+  expect(arch!.comfyBounds.height, 'comfyView height is 0').toBeGreaterThan(0)
 })
 
 // ---------------------------------------------------------------------------

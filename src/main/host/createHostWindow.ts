@@ -270,6 +270,13 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
     const bodyRect = { x: 0, y: titleBarTotal, width, height: bodyHeight }
     titleBarView.setBounds({ x: 0, y: 0, width, height: titleBarTotal })
 
+    // Read comfyView off the live entry — `rebuildComfyViewIfNeeded`
+    // swaps it during the chooser-pick in-place attach onto a unique-
+    // partition install (Standalone / Portable). The captured `comfyView`
+    // would point at an already-destroyed view, leaving the freshly-built
+    // one with default bounds and invisible — ComfyUI loads but never paints.
+    const activeComfyView = entry?.comfyView ?? comfyView
+
     // The Comfy pill maps to the live ComfyUI view *or* a panel
     // (lifecycle / chooser / settings / etc.) depending on mode.
     // `computeBodyMode` already returns `'chooser'` for install-less
@@ -280,11 +287,11 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
       entry.panelView.setBounds(bodyRect)
       entry.panelView.setVisible(true)
       // Keep ComfyUI alive but collapsed so it can't intercept input.
-      comfyView.setBounds({ x: 0, y: titleBarTotal, width: 0, height: 0 })
-      comfyView.setVisible(false)
+      activeComfyView.setBounds({ x: 0, y: titleBarTotal, width: 0, height: 0 })
+      activeComfyView.setVisible(false)
     } else {
-      comfyView.setBounds(bodyRect)
-      comfyView.setVisible(true)
+      activeComfyView.setBounds(bodyRect)
+      activeComfyView.setVisible(true)
       if (entry?.panelView) {
         entry.panelView.setBounds({ x: 0, y: titleBarTotal, width: 0, height: 0 })
         entry.panelView.setVisible(false)
