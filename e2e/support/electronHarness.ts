@@ -32,7 +32,7 @@ export interface SeedInstallation {
   [key: string]: unknown
 }
 
-function buildIsolatedEnv(homeDir: string): Record<string, string> {
+function buildIsolatedEnv(homeDir: string, settingsSeed?: Record<string, unknown>): Record<string, string> {
   const inheritedEnv = Object.fromEntries(
     Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
   )
@@ -56,49 +56,34 @@ function buildIsolatedEnv(homeDir: string): Record<string, string> {
     env['APPDATA'] = path.join(homeDir, 'AppData', 'Roaming')
   }
 
+  // Settings seed read by main `settings.maybeSeedFromEnv()` before first
+  // load. Bypasses platform-specific userData path resolution (notably
+  // macOS Application Support, which ignores HOME).
+  if (settingsSeed && Object.keys(settingsSeed).length > 0) {
+    env['E2E_SETTINGS_SEED'] = JSON.stringify(settingsSeed)
+  }
+
   return env
 }
 
 export async function launchLauncherApp(options?: SeedOptions): Promise<LauncherAppHandle> {
   const homeDir = await mkdtemp(path.join(os.tmpdir(), 'comfyui-launcher-e2e-'))
 
-  // Candidate userData / configDir locations the main process may read
-  // `settings.json` from. We seed every plausible location for the host
-  // OS so the seed lands regardless of whether `app.name` resolves to
-  // the package.json name (`comfyui-desktop-2`) or Electron's binary
-  // name (`Electron`) for the non-packaged test launch:
-  //   - Linux: `${XDG_CONFIG_HOME}/comfyui-desktop-2` — `configDir()`
-  //     reads XDG_CONFIG_HOME on Linux, which the harness env points at
-  //     `${homeDir}/.config`.
-  //   - Windows: `${APPDATA}/comfyui-desktop-2` — Electron's `userData`
-  //     uses APPDATA, which the harness env points at
-  //     `${homeDir}/AppData/Roaming`.
-  //   - macOS: `${HOME}/Library/Application Support/{comfyui-desktop-2,Electron}`
-  //     — Electron's `userData` is `${HOME}/Library/Application Support/{appName}`,
-  //     and `appName` may resolve to either depending on how the run
-  //     binary is set up; seeding both is the safe play.
-  const appDataDirs = process.platform === 'win32'
-    ? [path.join(homeDir, 'AppData', 'Roaming', 'comfyui-desktop-2')]
+  // Pre-create the platform-specific config dir Electron's `userData`
+  // (or our XDG override on Linux) resolves to. macOS Application Support
+  // is rooted at `getpwuid(getuid())->pw_dir`, NOT $HOME — even when
+  // HOME is overridden — so the directory lives outside the test's
+  // mkdtemp sandbox. We still create it so `settings.set()` writes
+  // succeed, and we seed the persisted settings via the
+  // `E2E_SETTINGS_SEED` env var (read by main pre-chooser) instead of
+  // by writing a settings.json file the harness would have to guess
+  // the location of.
+  const appDataDir = process.platform === 'win32'
+    ? path.join(homeDir, 'AppData', 'Roaming', 'comfyui-desktop-2')
     : process.platform === 'darwin'
-      ? [
-          path.join(homeDir, 'Library', 'Application Support', 'comfyui-desktop-2'),
-          path.join(homeDir, 'Library', 'Application Support', 'Electron'),
-        ]
-      : [path.join(homeDir, '.config', 'comfyui-desktop-2')]
-  for (const dir of appDataDirs) {
-    await mkdir(dir, { recursive: true })
-  }
-
-  // Settings are seeded BEFORE launch so the renderer's first read sees them.
-  // Without this, gates like `firstUseCompleted` race the renderer mount
-  // (the first-use takeover would briefly open and lock the title bar).
-  if (options?.settings && Object.keys(options.settings).length > 0) {
-    const { writeFile: writeFileFs } = await import('node:fs/promises')
-    const json = JSON.stringify(options.settings, null, 2)
-    for (const dir of appDataDirs) {
-      await writeFileFs(path.join(dir, 'settings.json'), json)
-    }
-  }
+      ? path.join(homeDir, 'Library', 'Application Support', 'comfyui-desktop-2')
+      : path.join(homeDir, '.config', 'comfyui-desktop-2')
+  await mkdir(appDataDir, { recursive: true })
 
   // Expose a CDP remote-debugging port so tests can connect to non-BrowserWindow
   // webContents (e.g. the ComfyUI WebContentsView) via chromium.connectOverCDP().
@@ -114,7 +99,7 @@ export async function launchLauncherApp(options?: SeedOptions): Promise<Launcher
 
   const application = await electron.launch({
     args,
-    env: buildIsolatedEnv(homeDir),
+    env: buildIsolatedEnv(homeDir, options?.settings),
   })
 
   // The main window starts with show:false and transitions via ready-to-show.

@@ -173,7 +173,31 @@ function sanitizeModelsDirs(value: unknown, currentDefault: string): string[] {
   return result
 }
 
+/**
+ * E2E-only: write the contents of `E2E_SETTINGS_SEED` to settings.json
+ * before the first read. Avoids the harness having to guess the
+ * platform-specific `userData` path (especially on macOS where
+ * Application Support is rooted at the real pw_dir, ignoring HOME).
+ * Runs at most once per process.
+ */
+let e2eSeedApplied = false
+function maybeSeedFromEnv(): void {
+  if (e2eSeedApplied) return
+  e2eSeedApplied = true
+  if (process.env['E2E'] !== '1') return
+  const seed = process.env['E2E_SETTINGS_SEED']
+  if (!seed) return
+  try {
+    JSON.parse(seed) // validate before writing
+    fs.mkdirSync(path.dirname(dataPath), { recursive: true })
+    writeFileSafe(dataPath, seed, true)
+  } catch (err) {
+    console.warn('Settings: failed to apply E2E_SETTINGS_SEED:', (err as Error).message)
+  }
+}
+
 function load(): Settings {
+  maybeSeedFromEnv()
   let parsed: Record<string, unknown> | null = null
   const raw = readFileSafe(dataPath)
   if (raw) {
