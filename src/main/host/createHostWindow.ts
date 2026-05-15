@@ -36,6 +36,14 @@ import {
 } from './registry'
 import type { BodyMode, ComfyWindowEntry } from './registry'
 
+/** Default size for a freshly-spawned host window when an existing
+ *  host of the same identity is already open. Matches the
+ *  no-saved-bounds default in `getWindowOptions()` so File → New
+ *  Window opens at a clean canonical size instead of inheriting the
+ *  drift of whichever window happened to be the most recent. */
+const DEFAULT_HOST_WIDTH = 1280
+const DEFAULT_HOST_HEIGHT = 900
+
 /** Constants reused by both host modes. Defined here because they only
  *  matter in the context of host-window construction. */
 const APP_ICON = path.join(__dirname, '..', '..', 'assets', 'Comfy_Logo_x256.png')
@@ -251,11 +259,49 @@ function liveHostOrigins(): { x: number; y: number }[] {
   return origins
 }
 
+/** Identity-driven bounds-persistence key for an entry — `'chooser'`
+ *  for install-less hosts, the `installationId` for install-backed
+ *  hosts. Used by the resize/move save listeners so a host that
+ *  flips identity (chooser → install via in-place attach, or back
+ *  via Return to Dashboard) saves its bounds under the slot that
+ *  matches what it currently IS, not the slot it was constructed as. */
+function liveBoundsKeyFor(entry: ComfyWindowEntry): string {
+  return entry.installationId ?? CHOOSER_HOST_BOUNDS_KEY
+}
+
+/** Find the origin of a live host whose runtime identity matches
+ *  `boundsKey` — used to decide that a freshly-spawned host should
+ *  open at a clean default size rather than inheriting the saved
+ *  bounds (which may have drifted from another session). Returns the
+ *  first matching live host's bounds origin, or `null` when none
+ *  exists. */
+function findLiveSiblingOrigin(boundsKey: string): { x: number; y: number } | null {
+  for (const [, entry] of comfyWindows) {
+    if (entry.window.isDestroyed()) continue
+    if (liveBoundsKeyFor(entry) !== boundsKey) continue
+    const { x, y } = entry.window.getBounds()
+    return { x, y }
+  }
+  return null
+}
+
 export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowResult {
   const fx = getFactories()
   const windowKey = nextWindowKey()
   const saved = getSavedBounds(opts.boundsKey)
-  const windowOptions = cascadeOffsetForCollisions(getWindowOptions(opts.boundsKey), liveHostOrigins())
+  // Sibling-aware initial bounds: if a live host of the same identity
+  // already exists (e.g. File → New Window with a chooser already open),
+  // open at the canonical default size offset from the sibling's origin
+  // instead of restoring the saved bounds — saved bounds inheritance
+  // there would size + place the new window identically to the live
+  // one, making it look like the existing window had simply re-rendered.
+  // First-spawn (no sibling) keeps the saved-bounds restore so app
+  // relaunches land at the user's preferred size from last session.
+  const sibling = findLiveSiblingOrigin(opts.boundsKey)
+  const initialOptions = sibling
+    ? { x: sibling.x, y: sibling.y, width: DEFAULT_HOST_WIDTH, height: DEFAULT_HOST_HEIGHT }
+    : getWindowOptions(opts.boundsKey)
+  const windowOptions = cascadeOffsetForCollisions(initialOptions, liveHostOrigins())
   const comfyWindow = new BrowserWindow({
     ...windowOptions,
     minWidth: 800,
@@ -366,8 +412,19 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
     comfyWindow.on('leave-full-screen', () => sendFullscreen(false))
   }
 
-  comfyWindow.on('resize', () => saveWindowBounds(opts.boundsKey, comfyWindow))
-  comfyWindow.on('move', () => saveWindowBounds(opts.boundsKey, comfyWindow))
+  // Save under the LIVE identity, not the construction-time `opts.boundsKey`.
+  // A chooser host that flips to install-backed in place via the chooser-pick
+  // claim path needs to save its bounds under the install id from then on,
+  // and back to `'chooser'` if it's later detached via Return to Dashboard.
+  // Using the captured construction key would persist the install-mode user
+  // adjustments under the chooser slot (and vice versa).
+  const persistBounds = (): void => {
+    const live = comfyWindows.get(windowKey)
+    if (!live) return
+    saveWindowBounds(liveBoundsKeyFor(live), comfyWindow)
+  }
+  comfyWindow.on('resize', persistBounds)
+  comfyWindow.on('move', persistBounds)
 
   // Track the most recently focused install id so the dock-icon /
   // second-instance re-launch hooks can pick that install over an
@@ -586,6 +643,14 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
  * navigation lands and re-pushes title text, source category, theme,
  * panel state, and the install-update pill from `entry.*` — so
  * callers don't need to re-emit those events themselves.
+ *
+ * IMPORTANT: any new piece of title-bar renderer state must also be
+ * re-pushed by the `onTitleBarReadyHandler` in `createHostWindow()`
+ * — the navigation here drops every cached message the renderer was
+ * holding. The current contract covers: panel-changed,
+ * theme-changed, title-changed, source-category-changed,
+ * fullscreen-changed (macOS), app-update-state-changed,
+ * downloads-changed, install-update-changed (install-backed only).
  */
 export function loadTitleBarUrl(
   titleBarView: WebContentsView,

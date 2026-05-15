@@ -306,6 +306,12 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
   // and let `refreshComfyTabBody` swap the body back from lifecycle to comfy.
   const existing = getEntryByInstallationId(installationId)
   if (existing && !existing.window.isDestroyed()) {
+    // Drop any pending in-place attach claim for this install — the
+    // chooser host renderer may have staked one before kicking off the
+    // launch, but we're reusing the existing window instead of flipping
+    // the chooser host. Without this drop the claim sits in the map
+    // until the chooser host closes (`dropAttachClaimsForWindow`).
+    consumeAttachClaim(installationId)
     existing.comfyUrl = comfyUrl
     if (!existing.comfyView.webContents.isDestroyed()) {
       existing.comfyView.setBackgroundColor(COMFY_BG)

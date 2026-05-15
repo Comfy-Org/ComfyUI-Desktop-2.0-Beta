@@ -62,10 +62,15 @@ export function useChooserHandoff(opts: ChooserHandoffOpts): ChooserHandoffApi {
   /** Prepare the chooser host for a launch hand-off. First try to
    *  claim the host for in-place attach: when the launch event lands
    *  in main, `onLaunch` will attach the install to THIS host window
-   *  instead of constructing a fresh one. If the claim is rejected
-   *  (e.g. the install needs a unique browser partition), fall back
-   *  to the stamp-bounds + close-on-instance-started swap so the user
-   *  still gets the install's window at the chooser's bounds. */
+   *  instead of constructing a fresh one (`rebuildComfyViewIfNeeded`
+   *  handles partition mismatches by swapping the comfyView, so even
+   *  unique-partition installs reuse this host). If the claim is
+   *  rejected — only happens when the panel webContents isn't
+   *  registered against any chooser host (race during construction,
+   *  or this composable being used outside an install-less host) —
+   *  fall back to the stamp-bounds + close-on-instance-started swap
+   *  so the user still gets the install's window at the chooser's
+   *  bounds. */
   async function prepareChooserHostHandoff(installationId: string): Promise<void> {
     const claimed = await window.api.claimAttachHost(installationId)
     if (claimed) return
