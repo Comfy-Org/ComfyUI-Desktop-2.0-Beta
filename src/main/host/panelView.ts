@@ -1,7 +1,11 @@
 import { WebContentsView, ipcMain } from 'electron'
 import path from 'path'
 import { TITLEBAR_HEIGHT } from '../lib/titleBarOverlay'
-import { _registerExtraBroadcastTarget, resolveTheme } from '../lib/ipc/shared'
+import {
+  _registerExtraBroadcastTarget,
+  _unregisterExtraBroadcastTarget,
+  resolveTheme,
+} from '../lib/ipc/shared'
 import {
   comfyWindows,
   computeBodyMode,
@@ -84,6 +88,30 @@ export function ensurePanelView(
   _registerExtraBroadcastTarget(panelView.webContents)
   entry.panelView = panelView
   return panelView
+}
+
+/**
+ * Tear down the entry's current panelView (if any) so the next
+ * `ensurePanelView()` call rebuilds it fresh. Used by the chooser-pick
+ * in-place attach path (`onLaunch`) to drop the chooser PanelApp —
+ * including any in-flight launch progress overlay it was holding —
+ * before the install takes over the host. Without this, the
+ * still-mounted chooser panel's overlay state would survive the
+ * attach, hidden behind the live comfyView, and a later
+ * `consultPanelRendererClose` (window close) would funnel through
+ * its cancel-prompt and hang waiting for input the user can't see.
+ */
+export function destroyPanelView(entry: ComfyWindowEntry): void {
+  if (!entry.panelView) return
+  const oldPanel = entry.panelView
+  entry.panelView = null
+  if (!oldPanel.webContents.isDestroyed()) {
+    _unregisterExtraBroadcastTarget(oldPanel.webContents)
+    oldPanel.webContents.close()
+  }
+  if (!entry.window.isDestroyed()) {
+    try { entry.window.contentView.removeChildView(oldPanel) } catch {}
+  }
 }
 
 /** Move OS focus to whichever body view is now active so keyboard input lands in the right place. */

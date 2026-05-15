@@ -44,6 +44,7 @@ import * as mainTelemetry from './lib/telemetry'
 import { getDeviceId } from './lib/deviceId'
 
 import {
+  claimAttachHost,
   comfyWindows,
   computeBodyMode,
   consumeAttachClaim,
@@ -59,6 +60,7 @@ import {
   applyChooserHostThemeToAll,
   createHostWindow,
   expectedPartitionFor,
+  loadTitleBarUrl,
   openChooserHostWindow,
   rebuildComfyViewIfNeeded,
   setHostWindowFactories,
@@ -73,6 +75,7 @@ import {
   setDetachFactories,
 } from './host/detach'
 import {
+  destroyPanelView,
   ensurePanelView,
   refreshComfyTabBody,
   registerPanelViewIpc,
@@ -337,6 +340,23 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
       isChooserHost(claimed)
     ) {
       rebuildComfyViewIfNeeded(claimed, installation)
+      // Re-navigate the title-bar so its URL carries the new install id;
+      // the renderer reads `installationId` once at startup, so without
+      // this re-load `isInstallLess` would stay `true` and the install
+      // pill would render in chooser-mode shape. The title-bar-ready
+      // handshake re-fires after the navigation lands and re-pushes
+      // title text / source category / theme / install-update pill.
+      loadTitleBarUrl(claimed.titleBarView, installationId)
+      // Drop the chooser PanelApp before the install takes over the
+      // host. The chooser pick flow runs the launch action through a
+      // Tier 2 progress overlay mounted on this panel; once the
+      // install-backed comfyView is shown, the overlay would survive
+      // hidden behind it, and a later `consultPanelRendererClose`
+      // (window close) would funnel through its cancel-prompt and
+      // hang waiting for input the user can't see. The next
+      // `ensurePanelView` (Settings click, comfy-lifecycle body, …)
+      // builds a fresh install-backed panel.
+      destroyPanelView(claimed)
       const ok = attachInstall(claimed, { installation, comfyUrl, isLocal: !url })
       if (ok) {
         claimed.layoutViews()
@@ -759,11 +779,29 @@ ipcMain.handle('close-host-window', (event) => {
 })
 
 /**
- * In-place attach is disabled. Returning `false` forces the renderer
- * down the close-host + open-fresh-install-window swap path. See
- * docs/window-mode-unification-revert.md for the re-enable conditions.
+ * Stake an in-place attach claim from a chooser-host renderer. When
+ * the launch event subsequently lands in `onLaunch()`, the matching
+ * `consumeAttachClaim()` call rebuilds the comfyView's partition if
+ * needed and runs `attachInstall()` against THIS host window — the
+ * user perceives the chooser tile they clicked transforming into the
+ * install window without a flicker / window-swap.
+ *
+ * Rejected (returns `false`, renderer falls back to the
+ * `transferHostBoundsToInstall` + close-on-instance-started swap)
+ * when:
+ *   - the calling sender isn't the panelView of any registered host,
+ *   - that host is already install-backed (chooser-pick from an
+ *     install-backed host wouldn't make semantic sense), or
+ *   - the host's BrowserWindow is destroyed.
  */
-ipcMain.handle('claim-attach-host', (_event, _installationId: string) => {
+ipcMain.handle('claim-attach-host', (event, installationId: string) => {
+  for (const [, entry] of comfyWindows) {
+    if (entry.window.isDestroyed()) continue
+    if (isInstallHost(entry)) continue
+    if (entry.panelView?.webContents !== event.sender) continue
+    claimAttachHost(installationId, entry.windowKey)
+    return true
+  }
   return false
 })
 
@@ -833,6 +871,7 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
       detachInstallImpl: _detachInstallImpl,
       preClearedClose,
       ensurePanelView,
+      destroyPanelView,
       computeInstallUpdateAvailable,
     })
     setAttachFactories({
@@ -840,7 +879,7 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
       relaunchStates,
       computeInstallUpdateAvailable,
     })
-    setDetachFactories({ ensurePanelView })
+    setDetachFactories({ ensurePanelView, destroyPanelView })
     setHostFactories({ createChooser: openChooserHostWindow })
     registerPanelViewIpc()
 

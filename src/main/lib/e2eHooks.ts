@@ -19,6 +19,8 @@ import {
 } from './comfyDownloadManager'
 import { _test_setUpdateState, type AppUpdateState } from './updater'
 import { _test_getOpenTitlePopupBounds } from '../popups/titlePopup'
+import { returnToDashboard } from '../host/detach'
+import { comfyWindows, isInstallHost } from '../host/registry'
 import {
   installUpdateOverrides,
   INSTALL_UPDATE_GLOBAL_KEY,
@@ -41,6 +43,11 @@ export interface E2EHelpers {
   setAppUpdateState(state: AppUpdateState): void
   /** Read the bounds of the currently-open title-bar dropdown popup. */
   getTitlePopupBounds(): ReturnType<typeof _test_getOpenTitlePopupBounds>
+  /** Trigger the File menu's "Return to Dashboard" action on the
+   *  first install-backed host window — flips it in place to chooser
+   *  mode without going through the popup. Resolves to the BrowserWindow
+   *  id that was flipped (or null if no install-backed host exists). */
+  returnFirstInstallHostToDashboard(): Promise<number | null>
 }
 
 export function registerE2EHooks(): void {
@@ -56,6 +63,15 @@ export function registerE2EHooks(): void {
     },
     setAppUpdateState: _test_setUpdateState,
     getTitlePopupBounds: _test_getOpenTitlePopupBounds,
+    async returnFirstInstallHostToDashboard() {
+      for (const entry of comfyWindows.values()) {
+        if (entry.window.isDestroyed() || !isInstallHost(entry)) continue
+        const id = entry.window.id
+        await returnToDashboard(entry.windowKey)
+        return id
+      }
+      return null
+    },
   }
   ;(globalThis as unknown as { __e2e: E2EHelpers }).__e2e = helpers
 }

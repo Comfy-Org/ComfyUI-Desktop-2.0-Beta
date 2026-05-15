@@ -2,14 +2,13 @@ import { dialog, ipcMain } from 'electron'
 import type { BrowserWindow, WebContentsView } from 'electron'
 import * as ipc from '../lib/ipc'
 import { COMFY_BG } from '../lib/theme'
-import { _unregisterExtraBroadcastTarget } from '../lib/ipc/shared'
 import { comfyWindows, isChooserHost } from './registry'
 import type { ComfyWindowEntry } from './registry'
 import {
   applyChooserHostTheme,
   CHOOSER_HOST_TITLE_TEXT,
   CHOOSER_HOST_WINDOW_TITLE,
-  openChooserHostWindow,
+  loadTitleBarUrl,
 } from './createHostWindow'
 
 /** Late-bound dependency on the panelView constructor; injected from
@@ -20,6 +19,7 @@ export interface DetachFactories {
     entry: ComfyWindowEntry,
     initialPanel: 'chooser',
   ) => WebContentsView
+  destroyPanelView: (entry: ComfyWindowEntry) => void
 }
 
 let factories: DetachFactories | null = null
@@ -151,15 +151,17 @@ export function closeAllHostWindows(): void {
 }
 
 /**
- * File menu's "Return to Dashboard" entry. Closes the install-backed
- * host window and opens a chooser host window at the same bounds.
+ * File menu's "Return to Dashboard" entry. Flips the install-backed
+ * host window in place to chooser mode via `entry.detachInstall()` —
+ * same BrowserWindow, same bounds, same window-key; the install
+ * binding is torn down (listeners off, comfyView navigated to
+ * about:blank, panelView remounted in chooser mode) and the title
+ * bar repaints to the chooser-host identity.
  *
- * In-place flip via `entry.detachInstall()` is currently disabled
- * — too many edge-case bugs around the in-place swap. The close+open
- * swap pays a visible flicker but exercises the same close-handler
- * teardown that production has used since main, which is the
- * codepath we trust right now. See
- * docs/window-mode-unification-revert.md.
+ * Funnels through the same `consultPanelRendererClose` cancel-prompt
+ * the close handler uses, so a Tier 2/3 progress overlay still gets
+ * to prompt the user before its install gets detached out from under
+ * it.
  */
 export async function returnToDashboard(parentEntryId: number): Promise<void> {
   const entry = comfyWindows.get(parentEntryId)
@@ -167,18 +169,7 @@ export async function returnToDashboard(parentEntryId: number): Promise<void> {
   const cleared = await consultPanelRendererClose(entry.panelView)
   if (!cleared) return
   if (entry.window.isDestroyed()) return
-  preClearedClose.add(entry.window)
-  const bounds = entry.window.getBounds()
-  const wasMaximized = entry.window.isMaximized()
-  const chooserWindow = openChooserHostWindow()
-  if (!chooserWindow.isDestroyed()) {
-    if (wasMaximized) {
-      chooserWindow.maximize()
-    } else {
-      chooserWindow.setBounds(bounds)
-    }
-  }
-  entry.window.close()
+  entry.detachInstall()
 }
 
 /**
@@ -293,36 +284,28 @@ export function _detachInstallImpl(entry: ComfyWindowEntry): void {
     entry.comfyView.setBackgroundColor(COMFY_BG)
   }
 
-  // Flip title-bar identity back to chooser-host shape.
+  // Flip entry identity back to chooser-host shape, then re-navigate
+  // the title-bar so its URL no longer carries an install id (the
+  // renderer reads `installationId` once at startup; without the
+  // re-load `isInstallLess` would stay `false` and the title pill
+  // would still render the old install's icon). The title-bar-ready
+  // handshake re-fires after the navigation lands and re-pushes
+  // title text / source category / theme / panel state from
+  // `entry.*` — entry state must therefore be reset BEFORE we call
+  // `loadTitleBarUrl`.
   entry.titleBarText = CHOOSER_HOST_TITLE_TEXT
   entry.sourceCategory = null
-  if (!entry.titleBarView.webContents.isDestroyed()) {
-    entry.titleBarView.webContents.send('comfy-titlebar:title-changed', entry.titleBarText)
-    entry.titleBarView.webContents.send('comfy-titlebar:source-category-changed', null)
-  }
-  entry.window.setTitle(CHOOSER_HOST_WINDOW_TITLE)
-  applyChooserHostTheme(entry)
-
-  // Reset nav state to the comfy pill (chooser body for install-less hosts).
   entry.activePanel = 'comfy'
+  entry.window.setTitle(CHOOSER_HOST_WINDOW_TITLE)
   if (!entry.titleBarView.webContents.isDestroyed()) {
-    entry.titleBarView.webContents.send('comfy-titlebar:panel-changed', 'comfy')
+    loadTitleBarUrl(entry.titleBarView, '')
   }
+  applyChooserHostTheme(entry)
 
   // Tear down the install-backed PanelApp and remount fresh in chooser mode.
   // Preserves no per-install state (overlays, activePanel, installationId
   // URL param) across the detach.
-  if (entry.panelView) {
-    const oldPanel = entry.panelView
-    entry.panelView = null
-    if (!oldPanel.webContents.isDestroyed()) {
-      _unregisterExtraBroadcastTarget(oldPanel.webContents)
-      oldPanel.webContents.close()
-    }
-    if (!entry.window.isDestroyed()) {
-      try { entry.window.contentView.removeChildView(oldPanel) } catch {}
-    }
-  }
+  fx.destroyPanelView(entry)
   fx.ensurePanelView(entry.windowKey, entry, 'chooser')
   entry.layoutViews()
 }

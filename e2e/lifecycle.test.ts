@@ -22,6 +22,8 @@ import {
   expectChooserVisible,
   expectTakeoverOpen,
 } from './support/chooserHelpers'
+import { returnFirstInstallHostToDashboard } from './support/devHooks'
+import { waitForWebContents } from './support/cdpPages'
 
 let ctx: AppContext
 
@@ -213,8 +215,42 @@ test('completes install and tile appears in chooser @lifecycle', async () => {
 // ---------------------------------------------------------------------------
 
 test('launches ComfyUI from chooser tile @lifecycle', async () => {
+  // In-place attach guard: the chooser-host BrowserWindow is supposed
+  // to flip into the install's host without spawning a fresh one. Snap
+  // the live BrowserWindow ids and the count BEFORE the click so the
+  // post-launch assertion can prove the same window survived.
+  const before = await ctx.app.evaluate(({ BrowserWindow }) => {
+    const wins = BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed())
+    return { count: wins.length, ids: wins.map((w) => w.id) }
+  })
+
   await clickInstallTile(ctx.panel, 'ComfyUI')
   await expect.poll(comfyFrontendIsLoaded, { timeout: 180_000, intervals: [1_000] }).toBe(true)
+
+  const after = await ctx.app.evaluate(({ BrowserWindow, WebContentsView }) => {
+    const wins = BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed())
+    const comfyHost = wins.find((w) =>
+      w.contentView.children.some((v) =>
+        v instanceof WebContentsView &&
+        /^http:\/\/(127\.0\.0\.1|localhost):/.test(v.webContents.getURL()),
+      ),
+    )
+    return {
+      count: wins.length,
+      ids: wins.map((w) => w.id),
+      comfyHostId: comfyHost?.id ?? null,
+    }
+  })
+
+  // Same BrowserWindow count: chooser host was reused, no fresh window
+  // was spawned (close+open swap path would briefly land at count + 1
+  // and then settle back to count, but the comfyHostId would be NEW).
+  expect(after.count).toBe(before.count)
+  expect(after.comfyHostId).not.toBeNull()
+  // The id of the BrowserWindow hosting ComfyUI must be one of the
+  // ids that existed BEFORE the click — proving the chooser host
+  // flipped in place rather than being closed and replaced.
+  expect(before.ids).toContain(after.comfyHostId)
 })
 
 /**
@@ -245,6 +281,67 @@ test('ComfyUI window has dark background and split-view architecture @lifecycle'
   expect(arch!.childCount).toBeGreaterThanOrEqual(2)
   expect(arch!.allWebContentsViews).toBe(true)
   expect(arch!.bg.toLowerCase()).toBe('#171717')
+})
+
+// ---------------------------------------------------------------------------
+// Return to Dashboard — symmetric undo of in-place attach
+// ---------------------------------------------------------------------------
+
+test('return-to-dashboard flips install host in place (same window id) @lifecycle', async () => {
+  // Snapshot the live BrowserWindow ids BEFORE the flip so the
+  // post-flip assertion can prove the install-backed host was reused
+  // as the chooser host instead of being closed and replaced.
+  const before = await ctx.app.evaluate(({ BrowserWindow }) => {
+    const wins = BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed())
+    return { count: wins.length, ids: wins.map((w) => w.id) }
+  })
+
+  // Trigger the same code path the File menu's "Return to Dashboard"
+  // entry runs (popup item handler calls `returnToDashboard(parentEntryId)`).
+  const flippedId = await returnFirstInstallHostToDashboard(ctx.app)
+  expect(flippedId, 'no install-backed host window found to flip').not.toBeNull()
+  expect(before.ids).toContain(flippedId)
+
+  // After the flip the comfyView should no longer be loading a localhost URL
+  // (the install was detached and the comfyView navigated to about:blank).
+  await expect.poll(comfyFrontendIsLoaded, { timeout: 30_000, intervals: [500] }).toBe(false)
+
+  const after = await ctx.app.evaluate(({ BrowserWindow }) => {
+    const wins = BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed())
+    return { count: wins.length, ids: wins.map((w) => w.id) }
+  })
+
+  // Same window count (no fresh window) and the flipped id is still alive —
+  // proving the install-backed host stayed the same BrowserWindow when it
+  // returned to chooser mode.
+  expect(after.count).toBe(before.count)
+  expect(after.ids).toContain(flippedId)
+
+  // The chooser body should be visible again on the same window. The
+  // install-backed PanelApp was destroyed at attach time, so wait for
+  // the chooser PanelApp's webContents to be (re-)created by the in-place
+  // detach before driving DOM assertions through it.
+  await waitForWebContents(ctx.app, 'panel.html')
+  await expectChooserVisible(ctx.panel)
+
+  // Re-launch ComfyUI from the same chooser host so the subsequent stop
+  // test can find a running comfy webContents to close. The host id must
+  // STILL be the same one we just flipped (chooser → install in place).
+  await clickInstallTile(ctx.panel, 'ComfyUI')
+  await expect.poll(comfyFrontendIsLoaded, { timeout: 180_000, intervals: [1_000] }).toBe(true)
+
+  const reattached = await ctx.app.evaluate(({ BrowserWindow, WebContentsView }) => {
+    const wins = BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed())
+    const comfyHost = wins.find((w) =>
+      w.contentView.children.some((v) =>
+        v instanceof WebContentsView &&
+        /^http:\/\/(127\.0\.0\.1|localhost):/.test(v.webContents.getURL()),
+      ),
+    )
+    return { count: wins.length, comfyHostId: comfyHost?.id ?? null }
+  })
+  expect(reattached.count).toBe(before.count)
+  expect(reattached.comfyHostId).toBe(flippedId)
 })
 
 // ---------------------------------------------------------------------------

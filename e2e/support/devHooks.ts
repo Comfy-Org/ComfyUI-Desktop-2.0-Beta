@@ -91,3 +91,15 @@ export async function getTitlePopupBounds(
     return helpers.getTitlePopupBounds() as PopupBoundsResult | null
   }))
 }
+
+export async function returnFirstInstallHostToDashboard(
+  app: ElectronApplication,
+): Promise<number | null> {
+  return await evalWithRetry(() => app.evaluate(async () => {
+    const helpers = (globalThis as unknown as {
+      __e2e?: { returnFirstInstallHostToDashboard: () => Promise<number | null> }
+    }).__e2e
+    if (!helpers) throw new Error('E2E helpers not registered (process.env.E2E !== "1"?)')
+    return helpers.returnFirstInstallHostToDashboard()
+  }))
+}

@@ -17,6 +17,7 @@ import {
   resolveTheme,
 } from '../lib/ipc/shared'
 import * as mainTelemetry from '../lib/telemetry'
+import { forwardDatadogError } from '../lib/processErrorHandlers'
 import * as updater from '../lib/updater'
 import { getSavedBounds, getWindowOptions, saveWindowBounds } from '../lib/windowState'
 import { ensureSystemModal } from '../popups/systemModal'
@@ -68,6 +69,8 @@ export interface HostWindowFactories {
     entry: ComfyWindowEntry,
     initialPanel: BodyMode,
   ) => WebContentsView
+  /** Tear down the entry's panelView (overlays + broadcast target + WebContents). */
+  destroyPanelView: (entry: ComfyWindowEntry) => void
   /** Compute whether an install has a pending in-app update. */
   computeInstallUpdateAvailable: (
     installationId: string,
@@ -239,18 +242,7 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
     },
   })
   titleBarView.setBackgroundColor(opts.titleBarBackground)
-  {
-    const isDev = !!process.env['ELECTRON_RENDERER_URL']
-    const tbLoad = isDev
-      ? titleBarView.webContents.loadURL(
-          `${(process.env['ELECTRON_RENDERER_URL'] as string).replace(/\/$/, '')}/comfyTitleBar.html?installationId=${encodeURIComponent(opts.titleBarInstallationIdParam)}`,
-        )
-      : titleBarView.webContents.loadFile(
-          path.join(__dirname, '../renderer/comfyTitleBar.html'),
-          { query: { installationId: opts.titleBarInstallationIdParam } },
-        )
-    void tbLoad.catch(() => {})
-  }
+  loadTitleBarUrl(titleBarView, opts.titleBarInstallationIdParam)
   comfyWindow.contentView.addChildView(titleBarView)
   _registerExtraBroadcastTarget(titleBarView.webContents)
   // Title bar is the always-alive renderer per host window — register it as
@@ -403,17 +395,64 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
         if (!cleared) return
         fx.preClearedClose.delete(comfyWindow)
         if (comfyWindow.isDestroyed()) return
-        if (entry?._installCleanup) entry._installCleanup()
-        detachWindowDownloads(comfyWindow)
-        _unregisterExtraBroadcastTarget(titleBarView.webContents)
-        mainTelemetry.unregisterTelemetryRelayTarget(titleBarView.webContents)
-        const liveEntry = comfyWindows.get(windowKey)
-        if (liveEntry?.panelView) {
-          _unregisterExtraBroadcastTarget(liveEntry.panelView.webContents)
-          liveEntry.panelView.webContents.close()
+        // Each cleanup step is wrapped so a single throw can't skip the
+        // BrowserWindow.destroy() at the end. Without this, an exception
+        // in (e.g.) `activeComfyView.webContents.close()` — observed in the
+        // in-place attach path where the chooser's reused comfyView's
+        // `.webContents` can come back undefined after the install's
+        // navigation churn — left the host window alive forever, with
+        // ComfyUI still loaded. Errors are forwarded to Datadog so silent
+        // teardown failures stay visible in telemetry instead of being
+        // swallowed by the safety net.
+        const reportTeardownError = (source: string, err: unknown): void => {
+          const message = err instanceof Error ? err.message : String(err)
+          const stack = err instanceof Error ? err.stack : undefined
+          forwardDatadogError({
+            source,
+            message,
+            stack,
+            level: 'error',
+            context: { origin: 'main-process', windowKey: String(windowKey) },
+          })
         }
-        titleBarView.webContents.close()
-        comfyView.webContents.close()
+        try { if (entry?._installCleanup) entry._installCleanup() } catch (err) {
+          reportTeardownError('host-window-close-install-cleanup', err)
+        }
+        try { detachWindowDownloads(comfyWindow) } catch (err) {
+          reportTeardownError('host-window-close-detach-downloads', err)
+        }
+        try { _unregisterExtraBroadcastTarget(titleBarView.webContents) } catch (err) {
+          reportTeardownError('host-window-close-unregister-broadcast-target', err)
+        }
+        try { mainTelemetry.unregisterTelemetryRelayTarget(titleBarView.webContents) } catch (err) {
+          reportTeardownError('host-window-close-unregister-telemetry-relay', err)
+        }
+        // Re-read the entry from the live registry: rebuildComfyViewIfNeeded
+        // can have swapped `entry.comfyView` since the closure was captured
+        // (in-place attach onto a chooser host with a different partition),
+        // so the captured `comfyView` would point at an already-destroyed
+        // WebContentsView and `.webContents.close()` would throw.
+        const liveEntry = comfyWindows.get(windowKey)
+        const activeComfyView = liveEntry?.comfyView ?? comfyView
+        if (liveEntry) {
+          try { fx.destroyPanelView(liveEntry) } catch (err) {
+            reportTeardownError('host-window-close-destroy-panel-view', err)
+          }
+        }
+        try { titleBarView.webContents.close() } catch (err) {
+          reportTeardownError('host-window-close-title-bar-webcontents-close', err)
+        }
+        try {
+          // `webContents` can come back undefined on a reused chooser
+          // comfyView after the install's navigation churn — the optional
+          // chain avoids a TypeError that would needlessly spam Datadog
+          // during otherwise expected teardowns.
+          if (activeComfyView.webContents && !activeComfyView.webContents.isDestroyed()) {
+            activeComfyView.webContents.close()
+          }
+        } catch (err) {
+          reportTeardownError('host-window-close-comfy-webcontents-close', err)
+        }
         comfyWindow.destroy()
       } finally {
         closingInFlight = false
@@ -475,14 +514,44 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
 }
 
 /**
+ * (Re)load the title-bar webContents at the URL for `installationId`
+ * (empty string for chooser hosts). Used by `createHostWindow()`
+ * for the initial mount and by `attachInstall` / `_detachInstallImpl`
+ * to swap the URL in place when a host flips between chooser and
+ * install-backed mode — re-mounting the Vue app is what flips
+ * `isInstallLess` and the install-pill identity (the title-bar
+ * renderer reads `installationId` once at startup from the URL).
+ *
+ * The `comfy-window:title-bar-ready` handshake re-fires after the
+ * navigation lands and re-pushes title text, source category, theme,
+ * panel state, and the install-update pill from `entry.*` — so
+ * callers don't need to re-emit those events themselves.
+ */
+export function loadTitleBarUrl(
+  titleBarView: WebContentsView,
+  installationId: string,
+): void {
+  const isDev = !!process.env['ELECTRON_RENDERER_URL']
+  const tbLoad = isDev
+    ? titleBarView.webContents.loadURL(
+        `${(process.env['ELECTRON_RENDERER_URL'] as string).replace(/\/$/, '')}/comfyTitleBar.html?installationId=${encodeURIComponent(installationId)}`,
+      )
+    : titleBarView.webContents.loadFile(
+        path.join(__dirname, '../renderer/comfyTitleBar.html'),
+        { query: { installationId } },
+      )
+  void tbLoad.catch(() => {})
+}
+
+/**
  * Resolve the comfyView session partition an install must be loaded
  * into. Unique-partition installs (`browserPartition === 'unique'`)
  * get their own `persist:${id}` bucket so cookies / IndexedDB /
  * Service Workers don't leak across sibling installs; everything
  * else shares `persist:shared`. Used by both the install-backed
- * wrapper (constructing a fresh comfyView) and the chooser-pick
- * claim acceptance check (rejecting claims where the host's pinned
- * partition doesn't match what the new install needs).
+ * wrapper (constructing a fresh comfyView) and `rebuildComfyViewIfNeeded`
+ * to flip a chooser host's view onto a partition that matches the
+ * install being attached in place.
  */
 export function expectedPartitionFor(installation: InstallationRecord): string {
   return (installation.browserPartition as string | undefined) === 'unique'
