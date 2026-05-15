@@ -62,27 +62,42 @@ function buildIsolatedEnv(homeDir: string): Record<string, string> {
 export async function launchLauncherApp(options?: SeedOptions): Promise<LauncherAppHandle> {
   const homeDir = await mkdtemp(path.join(os.tmpdir(), 'comfyui-launcher-e2e-'))
 
-  // Pre-create the directory `src/main/settings.ts` reads `settings.json`
-  // from. The path mirrors `configDir()` per platform — on Linux it's
-  // `XDG_CONFIG_HOME/<appName>` (the harness points XDG_CONFIG_HOME at
-  // `${homeDir}/.config`); on Windows + macOS it's Electron's userData
-  // dir, which derives from APPDATA / HOME respectively.
-  const appDataDir = process.platform === 'win32'
-    ? path.join(homeDir, 'AppData', 'Roaming', 'comfyui-desktop-2')
+  // Candidate userData / configDir locations the main process may read
+  // `settings.json` from. We seed every plausible location for the host
+  // OS so the seed lands regardless of whether `app.name` resolves to
+  // the package.json name (`comfyui-desktop-2`) or Electron's binary
+  // name (`Electron`) for the non-packaged test launch:
+  //   - Linux: `${XDG_CONFIG_HOME}/comfyui-desktop-2` — `configDir()`
+  //     reads XDG_CONFIG_HOME on Linux, which the harness env points at
+  //     `${homeDir}/.config`.
+  //   - Windows: `${APPDATA}/comfyui-desktop-2` — Electron's `userData`
+  //     uses APPDATA, which the harness env points at
+  //     `${homeDir}/AppData/Roaming`.
+  //   - macOS: `${HOME}/Library/Application Support/{comfyui-desktop-2,Electron}`
+  //     — Electron's `userData` is `${HOME}/Library/Application Support/{appName}`,
+  //     and `appName` may resolve to either depending on how the run
+  //     binary is set up; seeding both is the safe play.
+  const appDataDirs = process.platform === 'win32'
+    ? [path.join(homeDir, 'AppData', 'Roaming', 'comfyui-desktop-2')]
     : process.platform === 'darwin'
-      ? path.join(homeDir, 'Library', 'Application Support', 'comfyui-desktop-2')
-      : path.join(homeDir, '.config', 'comfyui-desktop-2')
-  await mkdir(appDataDir, { recursive: true })
+      ? [
+          path.join(homeDir, 'Library', 'Application Support', 'comfyui-desktop-2'),
+          path.join(homeDir, 'Library', 'Application Support', 'Electron'),
+        ]
+      : [path.join(homeDir, '.config', 'comfyui-desktop-2')]
+  for (const dir of appDataDirs) {
+    await mkdir(dir, { recursive: true })
+  }
 
   // Settings are seeded BEFORE launch so the renderer's first read sees them.
   // Without this, gates like `firstUseCompleted` race the renderer mount
   // (the first-use takeover would briefly open and lock the title bar).
   if (options?.settings && Object.keys(options.settings).length > 0) {
     const { writeFile: writeFileFs } = await import('node:fs/promises')
-    await writeFileFs(
-      path.join(appDataDir, 'settings.json'),
-      JSON.stringify(options.settings, null, 2),
-    )
+    const json = JSON.stringify(options.settings, null, 2)
+    for (const dir of appDataDirs) {
+      await writeFileFs(path.join(dir, 'settings.json'), json)
+    }
   }
 
   // Expose a CDP remote-debugging port so tests can connect to non-BrowserWindow
