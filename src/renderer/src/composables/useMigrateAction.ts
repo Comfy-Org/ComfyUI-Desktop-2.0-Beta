@@ -50,17 +50,17 @@ export function useMigrateAction() {
     const isDesktop = installation.sourceId === 'desktop'
     const migrateItems = isDesktop
       ? [
-          t('desktop.copyUserData'),
-          t('desktop.copyInput'),
-          t('desktop.copyOutput'),
-          t('desktop.addModels'),
-        ]
+        t('desktop.copyUserData'),
+        t('desktop.copyInput'),
+        t('desktop.copyOutput'),
+        t('desktop.addModels'),
+      ]
       : [
-          t('migrate.mergeUserData'),
-          t('migrate.mergeInput'),
-          t('migrate.mergeOutput'),
-          t('migrate.addModels'),
-        ]
+        t('migrate.mergeUserData'),
+        t('migrate.mergeInput'),
+        t('migrate.mergeOutput'),
+        t('migrate.addModels'),
+      ]
 
     // Show the modal immediately with a loading indicator
     const confirmPromise = modal.confirm({
@@ -93,11 +93,16 @@ export function useMigrateAction() {
       return null
     }
 
-    // Update the modal with the loaded preview data + start loading variant options
+    // Update the modal with the loaded preview data. The device-picker
+    // UI was dropped per CTO ask — the device hasn't changed since the
+    // prior install, so we silently pre-pick the recommended variant
+    // below and submit it as part of the result payload. The legacy
+    // `variantLoading: true` write that primed the picker is commented
+    // out (not removed) so the data flow stays legible.
     modal.updateConfirm({
       loading: false,
       snapshotPreview: previewResult.preview?.newestSnapshot,
-      variantLoading: true,
+      // variantLoading: true,
       messageDetails: [{
         label: t('migrate.migrationWill'),
         items: migrateItems,
@@ -107,42 +112,43 @@ export function useMigrateAction() {
       ],
     })
 
-    // Fetch release + variant options for device selection
+    // Fetch release + variant options. The variant cards used to be
+    // surfaced to the user; now `findBestVariant` silently picks the
+    // recommended one and `result.target` carries it through to
+    // `runAction('migrate-to-standalone', …)` unchanged.
     let migrateRelease: FieldOption | null = null
+    let autoPickedVariant: FieldOption | null = null
     try {
       const releaseOptions = await window.api.getFieldOptions('standalone', 'release', {})
       migrateRelease = releaseOptions[0] || null
       if (migrateRelease) {
         const variantOptions = await window.api.getFieldOptions('standalone', 'variant', { release: toRaw(migrateRelease) })
         const snapshotVariantId = previewResult.preview?.newestSnapshot.comfyui.variant || ''
-        const defaultVariant = findBestVariant(variantOptions, snapshotVariantId)
-
-        modal.updateConfirm({
-          variantCards: variantOptions,
-          selectedVariant: defaultVariant,
-          variantLoading: false,
-        })
-      } else {
-        modal.updateConfirm({ variantLoading: false })
+        autoPickedVariant = findBestVariant(variantOptions, snapshotVariantId)
+        // modal.updateConfirm({
+        //   variantCards: variantOptions,
+        //   selectedVariant: autoPickedVariant,
+        //   variantLoading: false,
+        // })
       }
+      // else { modal.updateConfirm({ variantLoading: false }) }
     } catch {
-      modal.updateConfirm({ variantLoading: false })
+      // modal.updateConfirm({ variantLoading: false })
     }
 
     const confirmed = await confirmPromise
     if (!confirmed) return null
     const checkboxValues = modal.getLastCheckboxValues()
 
-    const selectedVariant = modal.state.selectedVariant
     const result: MigrateActionResult = {
       snapshotPath: previewResult.snapshotPath,
       enablePipSync: !!checkboxValues.enablePipSync,
     }
-    if (selectedVariant && migrateRelease) {
+    if (autoPickedVariant && migrateRelease) {
       result.target = {
         mode: 'selected',
         release: toRaw(migrateRelease),
-        variant: toRaw(selectedVariant),
+        variant: toRaw(autoPickedVariant),
       }
     }
 

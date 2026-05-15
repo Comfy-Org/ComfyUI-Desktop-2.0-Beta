@@ -2,6 +2,7 @@
 import { ref, computed, watch, nextTick, onMounted, onUnmounted, reactive } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useModal, type ModalOption } from '../composables/useModal'
+import { Check } from 'lucide-vue-next'
 import { sortedCardOptions } from '../lib/variants'
 import type { FieldOption } from '../types/ipc'
 import InfoTooltip from './InfoTooltip.vue'
@@ -13,6 +14,14 @@ const { t } = useI18n()
 const { state, close, updateConfirm } = useModal()
 
 const sortedVariants = computed(() => sortedCardOptions(state.variantCards))
+
+/** Whether the current confirm modal is the Migrate-to-Standalone flow.
+ *  `snapshotPreview` is only set by `useMigrateAction`, so its presence
+ *  is a reliable cue to swap into the brand layout (counts only, no
+ *  device picker, yellow primary CTA — parallel to the Configure
+ *  Continue precedent). Other `confirm` callers keep the legacy
+ *  modal-box. */
+const isMigrateConfirm = computed(() => state.type === 'confirm' && state.snapshotPreview != null)
 
 function selectVariant(opt: FieldOption): void {
   updateConfirm({ selectedVariant: opt })
@@ -43,13 +52,16 @@ function escapeHtml(text: string): string {
 function linkify(text: string): string {
   if (!text) return ''
   const parts = text.split(/(https?:\/\/[^\s<>"']+)/g)
-  return parts.map((part, i) => {
-    const escaped = escapeHtml(part)
-    if (i % 2 === 1) {
-      return `<a href="#" class="modal-link" data-url="${escaped}">${escaped}</a>`
-    }
-    return escaped
-  }).join('').replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+  return parts
+    .map((part, i) => {
+      const escaped = escapeHtml(part)
+      if (i % 2 === 1) {
+        return `<a href="#" class="modal-link" data-url="${escaped}">${escaped}</a>`
+      }
+      return escaped
+    })
+    .join('')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
 }
 
 const linkifiedMessage = computed(() => linkify(state.message))
@@ -104,17 +116,23 @@ function resetSnapshotExpansion(): void {
   spPipExpanded.value = false
 }
 
-watch(() => state.snapshotPreview, () => {
-  if (state.visible && state.type === 'confirm') {
-    resetSnapshotExpansion()
+watch(
+  () => state.snapshotPreview,
+  () => {
+    if (state.visible && state.type === 'confirm') {
+      resetSnapshotExpansion()
+    }
   }
-})
+)
 
-watch(() => state.variantCards, () => {
-  if (state.visible && state.type === 'confirm' && state.variantCards.length > 0) {
-    spNodesExpanded.value = false
+watch(
+  () => state.variantCards,
+  () => {
+    if (state.visible && state.type === 'confirm' && state.variantCards.length > 0) {
+      spNodesExpanded.value = false
+    }
   }
-})
+)
 
 function handleKeydown(event: KeyboardEvent): void {
   if (!state.visible) return
@@ -174,21 +192,32 @@ onUnmounted(() => {
       <!-- Alert -->
       <div v-if="state.type === 'alert'" class="modal-box">
         <div class="modal-title">{{ state.title }}</div>
-        <div
-          class="modal-message"
-          @click="handleMessageClick"
-          v-html="linkifiedMessage"
-        ></div>
+        <div class="modal-message" @click="handleMessageClick" v-html="linkifiedMessage"></div>
         <div class="modal-actions">
           <button class="primary" @click="close(undefined)">{{ state.buttonLabel }}</button>
         </div>
       </div>
 
       <!-- Confirm -->
-      <div v-else-if="state.type === 'confirm'" class="modal-box" :class="{ 'modal-box-wide': state.snapshotPreview || state.loading || state.variantLoading || state.variantCards.length > 0 }">
+      <div
+        v-else-if="state.type === 'confirm'"
+        class="modal-box"
+        :class="{
+          'modal-box-wide':
+            state.snapshotPreview ||
+            state.loading ||
+            state.variantLoading ||
+            state.variantCards.length > 0,
+          'modal-box--brand mig-modal': isMigrateConfirm
+        }"
+      >
         <div class="modal-title">{{ state.title }}</div>
         <div class="modal-body">
+          <!-- Prompt card hidden when message is empty (the migrate
+               flow doesn't set a message; rendering an empty card
+               leaves a stray box at the top of the modal). -->
           <div
+            v-if="state.message"
             class="modal-prompt-card"
             @click="handleMessageClick"
             v-html="linkifiedMessage"
@@ -200,8 +229,63 @@ onUnmounted(() => {
             <span>{{ $t('common.loading') }}</span>
           </div>
 
-          <!-- Snapshot preview -->
-          <template v-if="!state.loading && state.snapshotPreview">
+          <!-- ──────────────────────────────────────────────────────
+               Migrate-flow brand layout. Lives next to the legacy
+               snapshot-preview / variant-picker / details blocks
+               below so the older code is preserved (commented via
+               v-if="false") for reference. CTO note: drop device
+               picker entirely + collapse Custom Nodes / Pip Packages
+               to counts only.
+               ────────────────────────────────────────────────────── -->
+          <template v-if="isMigrateConfirm && !state.loading && state.snapshotPreview">
+            <div class="mig-summary">
+              <div class="mig-summary__row">
+                <span class="mig-summary__label">{{ $t('snapshots.comfyuiVersion') }}</span>
+                <span class="mig-summary__value">{{ state.snapshotPreview.comfyuiVersion }}</span>
+              </div>
+              <div class="mig-summary__row">
+                <span class="mig-summary__label">{{ $t('snapshots.customNodes') }}</span>
+                <span class="mig-summary__value">{{
+                  state.snapshotPreview.customNodes.length
+                }}</span>
+              </div>
+              <div class="mig-summary__row">
+                <span class="mig-summary__label">{{ $t('snapshots.pipPackages') }}</span>
+                <span class="mig-summary__value">{{ state.snapshotPreview.pipPackageCount }}</span>
+              </div>
+            </div>
+
+            <div v-if="state.messageDetails.length" class="mig-actions-list">
+              <div v-for="(group, gi) in state.messageDetails" :key="gi" class="mig-actions-group">
+                <span class="mig-actions-label">{{ group.label }}</span>
+                <ul class="mig-actions-items">
+                  <li v-for="(item, ii) in group.items" :key="ii" class="mig-actions-item">
+                    <Check
+                      :size="14"
+                      :stroke-width="2"
+                      class="mig-actions-check"
+                      aria-hidden="true"
+                    />
+                    <span>{{ item }}</span>
+                  </li>
+                </ul>
+              </div>
+            </div>
+
+            <div v-if="state.checkboxes.length" class="modal-options">
+              <label v-for="cb in state.checkboxes" :key="cb.id" class="modal-option">
+                <input v-model="cb.checked" type="checkbox" />
+                <span>{{ cb.label }}</span>
+              </label>
+            </div>
+          </template>
+
+          <!-- Legacy snapshot preview (expandables) — preserved but
+               disabled. Rendering is gated on `!isMigrateConfirm` so
+               the brand layout above is the only thing the user sees
+               in the migrate flow today; flip the flag back on if we
+               ever need the detailed view. -->
+          <template v-if="!isMigrateConfirm && !state.loading && state.snapshotPreview">
             <div class="ls-grid">
               <div class="ls-field">
                 <span class="ls-label">{{ $t('snapshots.comfyuiVersion') }}</span>
@@ -215,18 +299,28 @@ onUnmounted(() => {
                 <span class="ls-label">{{ $t('snapshots.pythonVersion') }}</span>
                 <span class="ls-value">{{ state.snapshotPreview.pythonVersion }}</span>
               </div>
-
             </div>
 
             <div class="ls-subsection">
               <div class="ls-subsection-title" @click="spNodesExpanded = !spNodesExpanded">
-                <span>{{ $t('snapshots.customNodes') }} ({{ state.snapshotPreview.customNodes.length }})<InfoTooltip :text="t('tooltips.customNodes')" side="bottom" /></span>
+                <span
+                  >{{ $t('snapshots.customNodes') }} ({{
+                    state.snapshotPreview.customNodes.length
+                  }})<InfoTooltip :text="t('tooltips.customNodes')" side="bottom"
+                /></span>
                 <span class="ls-collapse">{{ spNodesExpanded ? '▾' : '▸' }}</span>
               </div>
               <template v-if="spNodesExpanded">
                 <div v-if="state.snapshotPreview.customNodes.length > 0" class="recessed-list">
-                  <div v-for="node in state.snapshotPreview.customNodes" :key="node.id" class="ls-node-row">
-                    <span class="ls-node-status" :class="node.enabled ? 'ls-node-enabled' : 'ls-node-disabled'" />
+                  <div
+                    v-for="node in state.snapshotPreview.customNodes"
+                    :key="node.id"
+                    class="ls-node-row"
+                  >
+                    <span
+                      class="ls-node-status"
+                      :class="node.enabled ? 'ls-node-enabled' : 'ls-node-disabled'"
+                    />
                     <span class="ls-node-name">{{ node.id }}</span>
                     <span class="ls-node-type">{{ node.type }}</span>
                     <span class="ls-node-version">{{ formatNodeVersion(node) }}</span>
@@ -238,12 +332,20 @@ onUnmounted(() => {
 
             <div class="ls-subsection">
               <div class="ls-subsection-title" @click="spPipExpanded = !spPipExpanded">
-                <span>{{ $t('snapshots.pipPackages') }} ({{ state.snapshotPreview.pipPackageCount }})<InfoTooltip :text="t('tooltips.pipPackages')" side="bottom" /></span>
+                <span
+                  >{{ $t('snapshots.pipPackages') }} ({{
+                    state.snapshotPreview.pipPackageCount
+                  }})<InfoTooltip :text="t('tooltips.pipPackages')" side="bottom"
+                /></span>
                 <span class="ls-collapse">{{ spPipExpanded ? '▾' : '▸' }}</span>
               </div>
               <template v-if="spPipExpanded">
                 <div v-if="state.snapshotPreview.pipPackageCount > 0" class="recessed-list">
-                  <div v-for="(version, name) in state.snapshotPreview.pipPackages" :key="name" class="ls-pip-row">
+                  <div
+                    v-for="(version, name) in state.snapshotPreview.pipPackages"
+                    :key="name"
+                    class="ls-pip-row"
+                  >
                     <span class="ls-pip-name">{{ name }}</span>
                     <span class="ls-pip-version" :title="version">{{ version }}</span>
                   </div>
@@ -253,8 +355,17 @@ onUnmounted(() => {
             </div>
           </template>
 
-          <!-- Variant / device selection -->
-          <div v-if="!state.loading && (state.variantCards.length > 0 || state.variantLoading)" class="ls-subsection">
+          <!-- Variant / device selection — disabled per CTO ask. The
+               device hasn't changed since the prior install, so we
+               auto-pick the recommended variant silently in
+               useMigrateAction. Markup retained for future reference;
+               `v-if="false"` keeps it parseable but never rendered. -->
+          <div
+            v-if="
+              false && !state.loading && (state.variantCards.length > 0 || state.variantLoading)
+            "
+            class="ls-subsection"
+          >
             <div class="ls-subsection-title">
               <span>{{ $t('list.snapshotDevice') }}</span>
             </div>
@@ -270,24 +381,43 @@ onUnmounted(() => {
             />
           </div>
 
-          <div v-if="state.messageDetails.length" class="modal-details">
-            <div v-for="(group, gi) in state.messageDetails" :key="gi" class="modal-detail-group">
-              <span class="modal-detail-label">{{ group.label }}</span>
-              <div class="modal-detail-recessed" @click="handleMessageClick">
-                <div v-for="(item, ii) in group.items" :key="ii" class="modal-detail-item" v-html="linkify(item)"></div>
+          <!-- Generic message details + checkboxes (non-migrate
+               confirms). The migrate brand layout above renders its
+               own action list + checkbox row, so skip this when
+               migrate is active to avoid duplication. -->
+          <template v-if="!isMigrateConfirm">
+            <div v-if="state.messageDetails.length" class="modal-details">
+              <div v-for="(group, gi) in state.messageDetails" :key="gi" class="modal-detail-group">
+                <span class="modal-detail-label">{{ group.label }}</span>
+                <div class="modal-detail-recessed" @click="handleMessageClick">
+                  <div
+                    v-for="(item, ii) in group.items"
+                    :key="ii"
+                    class="modal-detail-item"
+                    v-html="linkify(item)"
+                  ></div>
+                </div>
               </div>
             </div>
-          </div>
-          <div v-if="state.checkboxes.length" class="modal-options">
-            <label v-for="cb in state.checkboxes" :key="cb.id" class="modal-option">
-              <input v-model="cb.checked" type="checkbox" />
-              <span>{{ cb.label }}</span>
-            </label>
-          </div>
+            <div v-if="state.checkboxes.length" class="modal-options">
+              <label v-for="cb in state.checkboxes" :key="cb.id" class="modal-option">
+                <input v-model="cb.checked" type="checkbox" />
+                <span>{{ cb.label }}</span>
+              </label>
+            </div>
+          </template>
         </div>
         <div class="modal-actions">
           <button @click="close(false)">{{ $t('common.cancel') }}</button>
-          <button :class="confirmClass" :disabled="state.loading || state.variantLoading || (state.variantCards.length > 0 && !state.selectedVariant)" @click="close(true)">
+          <button
+            :class="confirmClass"
+            :disabled="
+              state.loading ||
+              state.variantLoading ||
+              (state.variantCards.length > 0 && !state.selectedVariant)
+            "
+            @click="close(true)"
+          >
             {{ state.confirmLabel }}
           </button>
         </div>
@@ -305,18 +435,18 @@ onUnmounted(() => {
         </div>
         <div class="modal-actions">
           <button @click="close(null)">{{ $t('common.cancel') }}</button>
-          <button
-            :class="confirmClass"
-            :disabled="!anyChecked"
-            @click="submitOptions()"
-          >
+          <button :class="confirmClass" :disabled="!anyChecked" @click="submitOptions()">
             {{ state.confirmLabel }}
           </button>
         </div>
       </div>
 
       <!-- Prompt -->
-      <div v-else-if="state.type === 'prompt'" class="modal-box" :class="{ 'modal-box-wide': state.messageDetails.length > 0 }">
+      <div
+        v-else-if="state.type === 'prompt'"
+        class="modal-box"
+        :class="{ 'modal-box-wide': state.messageDetails.length > 0 }"
+      >
         <div class="modal-title">{{ state.title }}</div>
         <div class="modal-body">
           <div class="modal-prompt-card" v-html="linkify(state.message)"></div>
@@ -324,7 +454,12 @@ onUnmounted(() => {
             <div v-for="(group, gi) in state.messageDetails" :key="gi" class="modal-detail-group">
               <span class="modal-detail-label">{{ group.label }}</span>
               <div class="modal-detail-recessed" @click="handleMessageClick">
-                <div v-for="(item, ii) in group.items" :key="ii" class="modal-detail-item" v-html="linkify(item)"></div>
+                <div
+                  v-for="(item, ii) in group.items"
+                  :key="ii"
+                  class="modal-detail-item"
+                  v-html="linkify(item)"
+                ></div>
               </div>
             </div>
           </div>
@@ -372,3 +507,75 @@ onUnmounted(() => {
   </Teleport>
 </template>
 
+<style scoped>
+/* Migrate-to-Standalone confirm body. Scoped because the layout is
+ * one-off: compact summary card (counts only — per CTO ask) + an
+ * action list. Brand-yellow primary CTA is parallel to the Configure
+ * Continue precedent — both are launchpads into the install loader. */
+.mig-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 14px 16px;
+  border: 1px solid var(--brand-surface-border);
+  border-radius: 8px;
+  background: var(--brand-surface-bg);
+}
+.mig-summary__row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 6px 0;
+  font-size: var(--takeover-fs-body);
+}
+.mig-summary__row + .mig-summary__row {
+  border-top: 1px solid color-mix(in oklab, var(--neutral-100) 6%, transparent);
+}
+.mig-summary__label {
+  color: var(--neutral-300);
+}
+.mig-summary__value {
+  color: var(--neutral-100);
+  font-weight: 500;
+}
+
+.mig-actions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.mig-actions-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.mig-actions-label {
+  font-size: var(--takeover-fs-caption);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--neutral-300);
+}
+.mig-actions-items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--neutral-100);
+}
+.mig-actions-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: var(--takeover-fs-body);
+  color: var(--neutral-200);
+  line-height: 1.5;
+}
+.mig-actions-check {
+  flex: 0 0 auto;
+  margin-top: 4px;
+  color: var(--seconda);
+}
+</style>

@@ -1832,14 +1832,15 @@ input[type='checkbox']:checked::after {
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: var(--overlay-bg);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 100;
 }
 .modal-box {
-  background: var(--surface);
+  background: var(--neutral-800);
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 16px 24px;
@@ -2135,6 +2136,39 @@ input[type='checkbox']:checked::after {
 .modal-body > .modal-prompt-card:first-child {
   margin-top: 0;
 }
+
+/* Brand-styled confirm modal — generic modifier for any confirm that
+ * needs to feel continuous with the brand chrome it sits on top of.
+ * Currently only the Migrate to Standalone flow opts in. Migrate-
+ * specific layout (`.mig-*`) lives scoped in ModalDialog.vue. */
+.modal-box.modal-box--brand {
+  background: var(--neutral-800);
+  border: 1px solid var(--brand-surface-border);
+  border-radius: 12px;
+  padding: 20px 24px 18px;
+  width: min(100%, 600px);
+  max-width: 600px;
+  box-shadow: 0 24px 64px 0 rgba(0, 0, 0, 0.35);
+}
+.modal-box--brand .modal-title {
+  font-size: var(--takeover-fs-h3);
+  font-weight: 500;
+  color: var(--text);
+  border-bottom: 1px solid color-mix(in oklab, var(--neutral-100) 8%, transparent);
+  margin: 0 -24px 16px;
+  padding: 0 24px 14px;
+}
+.modal-box--brand .modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-height: 70vh;
+}
+.modal-box--brand .modal-actions {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid color-mix(in oklab, var(--neutral-100) 8%, transparent);
+}
 .modal-input-label {
   display: block;
   font-size: 13px;
@@ -2244,6 +2278,7 @@ input[type='checkbox']:checked::after {
   margin-bottom: 16px;
   max-height: 40vh;
   overflow-y: auto;
+  color: var(--neutral-100);
 }
 .modal-select-item {
   display: flex;

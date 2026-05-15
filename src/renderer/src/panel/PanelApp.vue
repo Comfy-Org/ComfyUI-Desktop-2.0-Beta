@@ -382,8 +382,7 @@ async function openFlowTakeover(component: FlowComponent, entrypoint: string): P
     const initialName = pendingFirstUseInstName.value
     pendingFirstUseInstName.value = null
     await newInstallRef.value?.open(initialName ? { initialName } : {})
-  }
-  else if (component === 'track') trackRef.value?.open()
+  } else if (component === 'track') trackRef.value?.open()
   else if (component === 'load-snapshot') loadSnapshotRef.value?.open()
   else if (component === 'quick-install') await quickInstallRef.value?.open()
 }
