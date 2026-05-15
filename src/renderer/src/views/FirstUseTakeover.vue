@@ -440,6 +440,7 @@ defineExpose({ open })
       <p class="brand-lead">{{ $t('firstUse.pickLead') }}</p>
       <div class="pick-grid" role="radiogroup" :aria-label="$t('firstUse.pickTitle')">
         <ChoiceCard
+          class="pick-card-cloud"
           :label="$t('cloud.label')"
           :tagline="$t('firstUse.cloudTagline')"
           :description="$t('firstUse.cloudDesc')"
@@ -646,6 +647,7 @@ defineExpose({ open })
   color: #f0ff41;
   margin-bottom: var(--takeover-gap-md);
   isolation: isolate;
+  anchor-name: --brand-beam-target;
 }
 .consent-checkboxes {
   display: flex;
@@ -705,6 +707,10 @@ defineExpose({ open })
   width: 100%;
   grid-template-columns: repeat(auto-fit, minmax(min(360px, 100%), 1fr));
   gap: 30px;
+}
+
+.pick-card-cloud {
+  anchor-name: --brand-beam-target;
 }
 
 .pick-why-cloud {

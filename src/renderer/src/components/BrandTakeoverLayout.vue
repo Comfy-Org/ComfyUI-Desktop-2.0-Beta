@@ -40,9 +40,9 @@ withDefaults(
   <Teleport to="body">
     <div class="brand-takeover-root" :data-theme="theme">
       <div class="brand-outer-frame">
-        <div class="brand-beam" aria-hidden="true" v-html="beamSvg" />
-        <div class="brand-beam brand-beam--2" aria-hidden="true" v-html="beam2Svg" />
         <div class="brand-inner-frame" :class="{ 'brand-inner-frame--vignette': vignette }">
+          <div class="brand-beam" aria-hidden="true" v-html="beamSvg" />
+          <div class="brand-beam brand-beam--2" aria-hidden="true" v-html="beam2Svg" />
           <div class="brand-logo-row">
             <ComfyCLogo class="brand-logo" />
           </div>
@@ -90,20 +90,23 @@ withDefaults(
   background:
     linear-gradient(0deg, rgba(240, 240, 240, 0.54) 0%, rgba(240, 240, 240, 0.54) 100%),
     var(--neutral-800);
-  isolation: isolate;
 }
 
 .brand-beam {
-  position: fixed;
+  position: absolute;
+  position-anchor: --brand-beam-torch;
   top: -17%;
-  left: 50%;
-  transform: translateX(calc(-50% + clamp(-110px, -6vw, -45px)));
+  left: anchor(center, clamp(39%, calc(52.5vw - 135px), 44%));
   pointer-events: none;
-  z-index: 1;
+  z-index: -1;
   overflow: visible;
+  transform: translateX(-50%);
 }
 .brand-beam--2 {
-  transform: translateX(calc(-50% + clamp(45px, 5vw, 100px)));
+  position-anchor: --brand-beam-target;
+  anchor-name: --brand-beam-torch;
+  top: -10%;
+  left: anchor(end, clamp(45%, calc(56vw - 115px), 50%));
 }
 .brand-beam :deep(svg) {
   display: block;
@@ -134,7 +137,7 @@ withDefaults(
   position: absolute;
   top: 0;
   left: 0;
-  z-index: 3;
+  z-index: 2;
   padding: 16px 15px;
   display: flex;
   align-items: center;
