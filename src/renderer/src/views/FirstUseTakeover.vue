@@ -643,8 +643,9 @@ defineExpose({ open })
 .consent-wordmark {
   width: clamp(140px, 9.7vw, 240px);
   height: auto;
-  color: var(--comfy-yellow);
+  color: #f0ff41;
   margin-bottom: var(--takeover-gap-md);
+  isolation: isolate;
 }
 .consent-checkboxes {
   display: flex;
