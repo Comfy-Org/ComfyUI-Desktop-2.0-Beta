@@ -525,38 +525,39 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
         if (!cleared) return
         fx.preClearedClose.delete(comfyWindow)
         if (comfyWindow.isDestroyed()) return
-        // Each cleanup step is wrapped so a single throw can't skip the
-        // BrowserWindow.destroy() at the end. Without this, an exception
-        // in (e.g.) `activeComfyView.webContents.close()` — observed in the
-        // in-place attach path where the chooser's reused comfyView's
-        // `.webContents` can come back undefined after the install's
-        // navigation churn — left the host window alive forever, with
-        // ComfyUI still loaded. Errors are forwarded to Datadog so silent
-        // teardown failures stay visible in telemetry instead of being
-        // swallowed by the safety net.
-        const reportTeardownError = (source: string, err: unknown): void => {
-          const message = err instanceof Error ? err.message : String(err)
-          const stack = err instanceof Error ? err.stack : undefined
-          forwardDatadogError({
-            source,
-            message,
-            stack,
-            level: 'error',
-            context: { origin: 'main-process', windowKey: String(windowKey) },
-          })
+        // Each cleanup step is wrapped via `safeTeardown` so a single
+        // throw can't skip the BrowserWindow.destroy() at the end.
+        // Without this, an exception in (e.g.) the comfy webContents
+        // close — observed in the in-place attach path where the
+        // chooser's reused comfyView's `.webContents` can come back
+        // undefined after the install's navigation churn — left the
+        // host window alive forever, with ComfyUI still loaded.
+        // Errors are forwarded to Datadog so silent teardown failures
+        // stay visible in telemetry instead of being swallowed by the
+        // safety net.
+        const safeTeardown = (source: string, fn: () => void): void => {
+          try {
+            fn()
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err)
+            const stack = err instanceof Error ? err.stack : undefined
+            forwardDatadogError({
+              source,
+              message,
+              stack,
+              level: 'error',
+              context: { origin: 'main-process', windowKey: String(windowKey) },
+            })
+          }
         }
-        try { if (entry?._installCleanup) entry._installCleanup() } catch (err) {
-          reportTeardownError('host-window-close-install-cleanup', err)
-        }
-        try { detachWindowDownloads(comfyWindow) } catch (err) {
-          reportTeardownError('host-window-close-detach-downloads', err)
-        }
-        try { _unregisterExtraBroadcastTarget(titleBarView.webContents) } catch (err) {
-          reportTeardownError('host-window-close-unregister-broadcast-target', err)
-        }
-        try { mainTelemetry.unregisterTelemetryRelayTarget(titleBarView.webContents) } catch (err) {
-          reportTeardownError('host-window-close-unregister-telemetry-relay', err)
-        }
+        safeTeardown('host-window-close-install-cleanup', () => {
+          if (entry?._installCleanup) entry._installCleanup()
+        })
+        safeTeardown('host-window-close-detach-downloads', () => detachWindowDownloads(comfyWindow))
+        safeTeardown('host-window-close-unregister-broadcast-target',
+          () => _unregisterExtraBroadcastTarget(titleBarView.webContents))
+        safeTeardown('host-window-close-unregister-telemetry-relay',
+          () => mainTelemetry.unregisterTelemetryRelayTarget(titleBarView.webContents))
         // Re-read the entry from the live registry: rebuildComfyViewIfNeeded
         // can have swapped `entry.comfyView` since the closure was captured
         // (in-place attach onto a chooser host with a different partition),
@@ -565,14 +566,11 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
         const liveEntry = comfyWindows.get(windowKey)
         const activeComfyView = liveEntry?.comfyView ?? comfyView
         if (liveEntry) {
-          try { fx.destroyPanelView(liveEntry) } catch (err) {
-            reportTeardownError('host-window-close-destroy-panel-view', err)
-          }
+          safeTeardown('host-window-close-destroy-panel-view', () => fx.destroyPanelView(liveEntry))
         }
-        try { titleBarView.webContents.close() } catch (err) {
-          reportTeardownError('host-window-close-title-bar-webcontents-close', err)
-        }
-        try {
+        safeTeardown('host-window-close-title-bar-webcontents-close',
+          () => titleBarView.webContents.close())
+        safeTeardown('host-window-close-comfy-webcontents-close', () => {
           // `webContents` can come back undefined on a reused chooser
           // comfyView after the install's navigation churn — the optional
           // chain avoids a TypeError that would needlessly spam Datadog
@@ -580,9 +578,7 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
           if (activeComfyView.webContents && !activeComfyView.webContents.isDestroyed()) {
             activeComfyView.webContents.close()
           }
-        } catch (err) {
-          reportTeardownError('host-window-close-comfy-webcontents-close', err)
-        }
+        })
         comfyWindow.destroy()
       } finally {
         closingInFlight = false
