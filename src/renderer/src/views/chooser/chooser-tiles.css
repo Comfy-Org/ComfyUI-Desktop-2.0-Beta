@@ -1,0 +1,295 @@
+/*
+ * Shared chooser-tile styles.
+ *
+ * Imported by ChooserView (for the New Install + Cloud tiles) and by
+ * ChooserInstallTile (for the per-install tiles) so the two surfaces
+ * render identical-looking tiles without duplicating the rules.
+ */
+
+.chooser-tile {
+  /* Golden ratio (1.618 : 1) — the design specifies tiles of this shape. */
+  aspect-ratio: 1.618 / 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 16px 18px;
+  border-radius: 12px;
+  background: var(--bg-elev-1, rgba(127, 127, 127, 0.08));
+  border: 1px solid var(--border-subtle, rgba(127, 127, 127, 0.18));
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  position: relative;
+  transition: background-color 120ms ease, border-color 120ms ease, transform 120ms ease;
+}
+.chooser-tile:hover {
+  background: var(--bg-elev-2, rgba(127, 127, 127, 0.14));
+  border-color: var(--border-strong, rgba(127, 127, 127, 0.4));
+  transform: translateY(-1px);
+}
+.chooser-tile:focus-visible {
+  outline: 2px solid var(--accent, #4a90e2);
+  outline-offset: 2px;
+}
+
+.chooser-tile-icon {
+  position: absolute;
+  /* Float the icon to the top-left of the tile. */
+  top: 14px;
+  left: 16px;
+  opacity: 0.85;
+}
+
+.chooser-tile-name {
+  font-size: 16px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  /* Reserve space for the type icon at top-left so name doesn't collide. */
+  margin-top: auto;
+}
+
+.chooser-tile-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: 100%;
+  font-size: 12px;
+  /* Container-level mute for plain-text meta on the New Install / Cloud
+   * tiles; install-tile pill chips override the opacity locally. */
+  opacity: 0.85;
+  /* Reserve space at the bottom-right for the absolutely-positioned
+   * Close-instance CTA so pills don't run under it on narrow tiles. */
+  padding-right: 50px;
+}
+
+.chooser-tile-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--bg-elev-2, rgba(127, 127, 127, 0.14));
+  border: 1px solid var(--border-subtle, rgba(127, 127, 127, 0.18));
+  font-size: 11px;
+  white-space: nowrap;
+  opacity: 0.9;
+}
+.chooser-tile-pill-version {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+/* Update-available pill — accent-blue tinted, click-target. */
+.chooser-tile-pill-update {
+  gap: 4px;
+  color: var(--accent, #4a90e2);
+  background: var(--accent-soft, rgba(74, 144, 226, 0.12));
+  border-color: var(--accent, #4a90e2);
+  opacity: 1;
+  cursor: pointer;
+  transition: background-color 0.12s, border-color 0.12s, transform 0.12s;
+}
+.chooser-tile-pill-update:hover,
+.chooser-tile-pill-update:focus-visible {
+  background: var(--accent-soft-hover, rgba(74, 144, 226, 0.22));
+  outline: none;
+}
+.chooser-tile-pill-update:focus-visible {
+  outline: 2px solid var(--accent, #4a90e2);
+  outline-offset: 2px;
+}
+
+/* Migrate-available pill — warning amber so it's distinct from update. */
+.chooser-tile-pill-migrate {
+  gap: 4px;
+  color: var(--accent-warning, #d97706);
+  background: var(--accent-warning-soft, rgba(217, 119, 6, 0.12));
+  border-color: var(--accent-warning, #d97706);
+  opacity: 1;
+  cursor: pointer;
+  transition: background-color 0.12s, border-color 0.12s, transform 0.12s;
+}
+.chooser-tile-pill-migrate:hover,
+.chooser-tile-pill-migrate:focus-visible {
+  background: var(--accent-warning-soft-hover, rgba(217, 119, 6, 0.22));
+  outline: none;
+}
+.chooser-tile-pill-migrate:focus-visible {
+  outline: 2px solid var(--accent-warning, #d97706);
+  outline-offset: 2px;
+}
+
+/* Disabled (gated) state for action pills — pill stays visible so the
+ * action is discoverable; click handlers no-op while gated. */
+.chooser-tile-pill-disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.chooser-tile-pill-disabled:hover,
+.chooser-tile-pill-disabled:focus-visible {
+  background: var(--bg-elev-2, rgba(127, 127, 127, 0.14));
+  outline: none;
+}
+.chooser-tile-pill-update.chooser-tile-pill-disabled:hover,
+.chooser-tile-pill-update.chooser-tile-pill-disabled:focus-visible {
+  background: var(--accent-soft, rgba(74, 144, 226, 0.12));
+}
+.chooser-tile-pill-migrate.chooser-tile-pill-disabled:hover,
+.chooser-tile-pill-migrate.chooser-tile-pill-disabled:focus-visible {
+  background: var(--accent-warning-soft, rgba(217, 119, 6, 0.12));
+}
+
+/* In-flight progress block — visible only when an op is running.
+ * Sits in the empty top-of-tile gap between the source icon
+ * (top-left) and the action cluster (top-right). */
+.chooser-tile-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  padding-left: 36px;
+  padding-right: 56px;
+  box-sizing: border-box;
+}
+.chooser-tile-progress-status {
+  font-size: 11px;
+  color: var(--accent, #4a90e2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chooser-tile-progress-track {
+  position: relative;
+  height: 6px;
+  background: var(--bg-elev-2, rgba(127, 127, 127, 0.16));
+  border-radius: 3px;
+  overflow: hidden;
+}
+.chooser-tile-progress-fill {
+  height: 100%;
+  background: var(--accent, #4a90e2);
+  transition: width 200ms ease;
+}
+.chooser-tile-progress-track.indeterminate .chooser-tile-progress-fill {
+  animation: chooser-tile-progress-sweep 1.4s ease-in-out infinite;
+}
+@keyframes chooser-tile-progress-sweep {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(250%); }
+}
+
+/* Status overlays — running / stopping / in-progress / errored. */
+.chooser-tile-running {
+  box-shadow: inset 0 0 0 2px var(--accent, #4a90e2);
+}
+.chooser-tile-errored {
+  box-shadow: inset 0 0 0 2px var(--accent-danger, #d92d20);
+}
+.chooser-tile-running.chooser-tile-errored {
+  /* Errored takes precedence — a crashed-while-running install reads more usefully as "errored". */
+  box-shadow: inset 0 0 0 2px var(--accent-danger, #d92d20);
+}
+.chooser-tile-stopping,
+.chooser-tile-in-progress {
+  opacity: 0.7;
+}
+
+/* Top-right cluster — error badge + kebab (⋮) action button. */
+.chooser-tile-actions {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  z-index: 1;
+}
+.chooser-tile-error {
+  color: var(--accent-danger, #d92d20);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  padding: 0 4px;
+}
+.chooser-tile-kebab {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 4px;
+  color: inherit;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.65;
+  transition: background-color 100ms ease, opacity 100ms ease, border-color 100ms ease;
+}
+.chooser-tile-kebab:hover,
+.chooser-tile-kebab:focus-visible {
+  background: var(--bg-elev-2, rgba(127, 127, 127, 0.18));
+  border-color: var(--border-strong, rgba(127, 127, 127, 0.4));
+  opacity: 1;
+  outline: none;
+}
+
+/* CTA cluster — overlay anchored to the bottom-right of each tile. */
+.chooser-tile-cta {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  z-index: 1;
+}
+.chooser-tile-cta-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong, rgba(127, 127, 127, 0.4));
+  background: var(--bg-elev-2, rgba(127, 127, 127, 0.14));
+  color: inherit;
+  cursor: pointer;
+  padding: 0;
+  transition: background-color 100ms ease, border-color 100ms ease, transform 100ms ease, color 100ms ease;
+}
+.chooser-tile-cta-btn:hover:not(:disabled),
+.chooser-tile-cta-btn:focus-visible {
+  transform: scale(1.05);
+  outline: none;
+}
+.chooser-tile-cta-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+/* Close instance — danger fill so it reads as a destructive CTA at small size. */
+.chooser-tile-cta-close {
+  background: var(--accent-danger, #d92d20);
+  color: var(--bg, #fff);
+  border-color: var(--accent-danger, #d92d20);
+}
+.chooser-tile-cta-close:hover:not(:disabled),
+.chooser-tile-cta-close:focus-visible {
+  background: var(--accent-danger-hover, #b8241a);
+  border-color: var(--accent-danger-hover, #b8241a);
+}
+
+/* Fixed-position entry-point tiles — distinct so they read as entry-points, not data rows. */
+.chooser-tile-new {
+  background: var(--accent-soft, rgba(74, 144, 226, 0.10));
+  border-style: dashed;
+  border-color: var(--border-strong, rgba(127, 127, 127, 0.4));
+}
+.chooser-tile-new:hover {
+  background: var(--accent-soft-hover, rgba(74, 144, 226, 0.18));
+}
+.chooser-tile-cloud {
+  background: var(--bg-elev-1, rgba(127, 127, 127, 0.08));
+}

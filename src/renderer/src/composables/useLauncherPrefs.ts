@@ -17,16 +17,14 @@ export function useLauncherPrefs() {
   }
 
   /**
-   * Phase 3 §17 Step 4 — flip the first-use takeover gate to "complete"
-   * after the user finishes the consent + pick flow (Cloud branch:
-   * immediately on Cloud-card pick; Local branch: when the chained
-   * new-install Tier 3 takeover signals a successful install via close
-   * or navigate-list). Mid-flow cancel never calls this — the takeover
-   * replays on the next launch.
+   * Flip the first-use takeover gate to "complete" after the user finishes
+   * the consent + pick flow (Cloud branch: immediately on Cloud-card pick;
+   * Local branch: when the chained new-install Tier 3 takeover signals a
+   * successful install via close or navigate-list). Mid-flow cancel never
+   * calls this — the takeover replays on the next launch.
    *
-   * Idempotent: a second call is a no-op if the flag is already set,
-   * so the chain-to-new-install plumbing in PanelApp can listen on
-   * close-after-success without worrying about double-fire.
+   * Idempotent: a second call is a no-op if the flag is already set, so
+   * close-after-success listeners don't need to dedupe.
    */
   async function markFirstUseCompleted(): Promise<void> {
     if (firstUseCompleted.value) return

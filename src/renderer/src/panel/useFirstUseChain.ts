@@ -1,0 +1,389 @@
+import { onMounted, onUnmounted, ref, watch, type Ref } from 'vue'
+import { useInstallationStore } from '../stores/installationStore'
+import { useProgressStore } from '../stores/progressStore'
+import { useLauncherPrefs } from '../composables/useLauncherPrefs'
+import { useMigrateAction } from '../composables/useMigrateAction'
+import { useOverlay } from '../composables/useOverlay'
+import type { Installation, ShowProgressOpts } from '../types/ipc'
+import type { ChooserLaunchOutcome } from './useChooserHandoff'
+import type { FirstUseChainHooks, PanelKey } from './usePanelOverlays'
+
+export interface FirstUseChainOpts {
+  /** Routes the migrate-to-standalone op through the shared overlay
+   *  pipeline (Tier 2 progress modal) and lets `usePanelOverlays`
+   *  capture the auto-launch id via the `firstUseChain.onShowProgress`
+   *  hook. */
+  handleShowProgress: (opts: ShowProgressOpts) => Promise<void>
+  /** Used by chain-local to mount the new-install Tier 3 takeover. */
+  switchPanel: (panel: PanelKey, entrypoint?: string) => Promise<void>
+  /** Direct-mutation overlay clear (no cancel-prompt) used by every
+   *  completion path. */
+  dismissTakeoverDirect: () => void
+  /** Cloud-branch auto-launch and the post-install auto-launch
+   *  watcher both reuse the chooser's launch pipeline. */
+  performChooserLaunch: (
+    installation: Installation,
+    onMissingLaunchAction?: () => void,
+  ) => Promise<ChooserLaunchOutcome>
+}
+
+export interface FirstUseChainApi {
+  /** Hooks the parent passes back into
+   *  `usePanelOverlays({ firstUseChain: … })`. */
+  hooks: FirstUseChainHooks
+  /** Bound on `<NewInstallModal :hide-back-to-dashboard>` so the
+   *  back-to-dashboard button hides during a chain. Also drives the
+   *  brand-takeover wrapping on the chained new-install + the
+   *  `:brand-chrome` flag on the chained ProgressModal. */
+  chainingFirstUseToNewInstall: Ref<boolean>
+  /** Pre-seed name forwarded by the first-use takeover's `nameInstall`
+   *  sub-step (only reached when a Legacy Desktop install was detected
+   *  and the user chose Start Fresh). Consumed by
+   *  `usePanelOverlays.openFlowTakeover` when it calls
+   *  `newInstallRef.value?.open({ initialName })` for the chained
+   *  new-install Tier 3 takeover, then cleared. Fresh-machine chains
+   *  (`hasLegacyDesktop === false`) skip the name step and leave this
+   *  `null`, so NewInstallModal's silent `'ComfyUI'` fallback in
+   *  `handleSave()` still applies. */
+  pendingFirstUseInstName: Ref<string | null>
+  /** FirstUseTakeover `complete-skip` emit + file-menu Skip Onboarding. */
+  completeFirstUseAndDismiss: () => Promise<void>
+  /** FirstUseTakeover `complete-cloud` emit. */
+  handleFirstUseComplete: () => Promise<void>
+  /** FirstUseTakeover `chain-local` emit. The optional payload carries
+   *  the user-typed install name from the takeover's `nameInstall`
+   *  sub-step (legacy-detected fork only). */
+  handleFirstUseChainLocal: (payload?: { instName?: string }) => Promise<void>
+  /** FirstUseTakeover `chain-migrate` emit. */
+  handleFirstUseChainMigrate: () => Promise<void>
+  /** NewInstallModal `close` / `navigate-list` emit when mounted as a
+   *  takeover. */
+  handleNewInstallTakeoverClose: () => Promise<void>
+}
+
+/**
+ * Owns the first-use bootstrap chain — the consent → cloud-vs-local
+ * fork that runs on the user's first launch. The chain has three
+ * branches (Cloud auto-launch, Local → new-install takeover, Migrate
+ * → migrate-to-standalone op) plus a Skip Onboarding entry from the
+ * file menu, all of which converge on the same `markFirstUseCompleted`
+ * → dismiss → `setFirstUseMode('none')` triple.
+ *
+ * Also owns the auto-launch watcher that fires once a chained
+ * new-install or migration op finishes successfully — the user lands
+ * on a running ComfyUI as the natural endpoint of bootstrap without
+ * having to click play again.
+ *
+ * Dependencies on `usePanelOverlays` (showProgress, switchPanel,
+ * dismissTakeoverDirect, currentOverlay) and `useChooserHandoff`
+ * (performChooserLaunch) are passed in via opts. The `hooks` exit
+ * point is wired back into `usePanelOverlays.firstUseChain` from the
+ * parent; usePanelOverlays reads `shouldForceTakeover` to keep opaque
+ * takeover chrome up across the install op, and calls `onShowProgress`
+ * to capture the resulting install's id for the auto-launch watcher.
+ */
+export function useFirstUseChain(opts: FirstUseChainOpts): FirstUseChainApi {
+  const installationStore = useInstallationStore()
+  const progressStore = useProgressStore()
+  const launcherPrefs = useLauncherPrefs()
+  const { confirmMigration } = useMigrateAction()
+  // Module singleton — same slot the overlay composable owns.
+  const { current: currentOverlay } = useOverlay()
+
+  /** Set when the first-use takeover's Local branch chains into the
+   *  new-install Tier 3 takeover. The new-install modal emits `close`
+   *  after a successful install (the same hook used everywhere); when
+   *  that fires while this flag is true the host marks
+   *  `firstUseCompleted` and clears the flag. A Cloud-branch pick
+   *  marks completion immediately and never sets this flag, so the
+   *  two paths can't double-fire the pref write. */
+  const chainingFirstUseToNewInstall = ref(false)
+
+  /** See the `FirstUseChainApi.pendingFirstUseInstName` doc — captured
+   *  here from the takeover's `chain-local` payload, drained by
+   *  `usePanelOverlays.openFlowTakeover` when the new-install modal
+   *  opens. */
+  const pendingFirstUseInstName = ref<string | null>(null)
+
+  /** Installation id of the Standalone install that the first-use
+   *  chain (new-install or migration) just kicked off. Captured from
+   *  the corresponding `show-progress` while the chain flag is set.
+   *  The auto-launch watcher below launches the install once its op
+   *  finishes successfully. */
+  const pendingFirstUseAutoLaunchId = ref<string | null>(null)
+
+  const hooks: FirstUseChainHooks = {
+    shouldForceTakeover: () => chainingFirstUseToNewInstall.value,
+    consumePendingFirstUseInstName: () => {
+      const name = pendingFirstUseInstName.value
+      pendingFirstUseInstName.value = null
+      return name
+    },
+    onShowProgress: (showOpts) => {
+      // Capture the operation's installation id when a first-use chain
+      // is in flight (new-install or migrate). New-install ops carry
+      // the new install's id directly; migrate ops carry the Legacy
+      // Desktop install's id and the watcher resolves the resulting
+      // Standalone install from the store after the op finishes. Only
+      // the first chained op captures the id — subsequent show-progress
+      // calls leave it untouched.
+      if (chainingFirstUseToNewInstall.value && pendingFirstUseAutoLaunchId.value === null) {
+        pendingFirstUseAutoLaunchId.value = showOpts.installationId
+        // Flip the persisted gate now so the takeover doesn't re-run
+        // on the next launch — the overlay handoff doesn't go through
+        // NewInstallModal's close emit.
+        void launcherPrefs.markFirstUseCompleted()
+      }
+    },
+  }
+
+  /** Shared completion helper. The Cloud-branch pick
+   *  (`handleFirstUseComplete`), the file-menu Skip Onboarding entry,
+   *  and the new-install chain close (`handleNewInstallTakeoverClose`)
+   *  all run the same `markFirstUseCompleted` → dismiss sequence;
+   *  extracting the pair keeps them in sync if the gate flip ever
+   *  needs extra state cleanup. */
+  async function completeFirstUseAndDismiss(): Promise<void> {
+    // Clear chain state so the auto-launch watcher doesn't fire after
+    // a Skip Onboarding triggered mid-chain (the user wants OUT of
+    // onboarding, not to land on a freshly-installed Comfy).
+    chainingFirstUseToNewInstall.value = false
+    pendingFirstUseAutoLaunchId.value = null
+    pendingFirstUseInstName.value = null
+    await launcherPrefs.markFirstUseCompleted()
+    // dismissTakeoverDirect pushes `'none'` only when the overlay is
+    // the first-use takeover itself; chain dismiss paths can have a
+    // new-install / progress takeover in the slot, so push it
+    // explicitly to keep the file-menu builder in steady state.
+    window.api.setFirstUseMode('none')
+    opts.dismissTakeoverDirect()
+  }
+
+  /** First-use takeover Cloud-branch pick (`complete-cloud` emit).
+   *  Mark completion, close the takeover, and auto-launch the always-
+   *  present Cloud install so the user reaches a running ComfyUI as
+   *  the natural endpoint of first-use without having to click play
+   *  again. The launch goes through the same `useListAction` pipeline
+   *  the chooser uses. If the cloud install can't be found we still
+   *  mark complete and close the takeover — the chooser body
+   *  underneath is the fallback.
+   *
+   *  The returning-user `complete-skip` emit is wired directly to
+   *  `completeFirstUseAndDismiss` instead — those users never picked
+   *  Cloud (the fork was suppressed), so auto-launching it would
+   *  hijack their existing local install. */
+  async function handleFirstUseComplete(): Promise<void> {
+    chainingFirstUseToNewInstall.value = false
+    // Mark completion but DON'T dismiss the takeover yet — dismissing
+    // first would expose the dashboard underneath while the launch
+    // action races to mount its own progress overlay. Cloud's launch
+    // action has `showProgress: true`, so the launch goes through
+    // `handleShowProgress` → `openOverlay({ kind: 'takeover',
+    // component: 'update' })` which silently swaps the first-use
+    // takeover for the connect-progress takeover (Tier 3 → Tier 3).
+    await launcherPrefs.markFirstUseCompleted()
+    window.api.setFirstUseMode('none')
+    // Find the auto-seeded Cloud install. The store may not be hydrated
+    // yet on first-launch, so we fall back to a fresh fetch via main.
+    let cloud = installationStore.installations.find((i) => i.sourceCategory === 'cloud') ?? null
+    if (!cloud) {
+      try {
+        const all = await window.api.getInstallations()
+        cloud = all.find((i) => i.sourceCategory === 'cloud') ?? null
+      } catch {}
+    }
+    if (cloud) {
+      // If the cloud install has no resolvable launch action (defensive
+      // fallback — production cloud sources always provide one), dismiss
+      // the takeover so the user lands on the chooser body. The happy
+      // path leaves the takeover up; the launch action's `showProgress:
+      // true` swaps it for a connect-progress takeover (Tier 3 → Tier 3).
+      const outcome = await opts.performChooserLaunch(cloud, opts.dismissTakeoverDirect)
+      // `'launched'` swaps the takeover for the connect-progress
+      // takeover automatically; `'missing-action'` already ran the
+      // dismiss callback. `'focused-running'` short-circuits launch and
+      // never opens a replacement — we have to dismiss here so the
+      // first-use takeover doesn't sit stranded over the existing
+      // running window.
+      if (outcome === 'focused-running') {
+        opts.dismissTakeoverDirect()
+      }
+      return
+    }
+    // No cloud install to launch into — fall back to dismissing the
+    // takeover so the user lands on the chooser body underneath.
+    opts.dismissTakeoverDirect()
+  }
+
+  /** First-use takeover Local-branch pick — chain into the new-install
+   *  Tier 3 takeover. The Tier 3 → Tier 3 swap is silent in
+   *  `useOverlay`, so the first-use takeover unmounts as the new-install
+   *  takeover mounts. The completion flip is deferred to the new-install
+   *  close path (see `handleNewInstallTakeoverClose`). */
+  async function handleFirstUseChainLocal(payload?: { instName?: string }): Promise<void> {
+    chainingFirstUseToNewInstall.value = true
+    pendingFirstUseAutoLaunchId.value = null
+    pendingFirstUseInstName.value = payload?.instName?.trim() || null
+    await opts.switchPanel('new-install', 'first_use')
+    // FirstUseTakeover.onUnmounted just pushed `'none'` as the chain
+    // swap unmounted it. Re-assert `'post-consent'` so the file-menu
+    // builder keeps the chain locked down to Skip Onboarding while
+    // the new-install / install-progress takeover is up.
+    window.api.setFirstUseMode('post-consent')
+  }
+
+  /** First-use takeover migrate-branch pick — runs migrate-to-standalone
+   *  against the auto-tracked Legacy Desktop install. Same shape as
+   *  the chain-local path: the migration progress op flows through
+   *  `handleShowProgress` (Tier 2 progress modal), capturing
+   *  `pendingFirstUseAutoLaunchId` for the resulting Standalone install
+   *  along the way. The auto-launch watcher fires once the op finishes
+   *  successfully. */
+  async function handleFirstUseChainMigrate(): Promise<void> {
+    let legacy = installationStore.installations.find((i) => i.sourceId === 'desktop') ?? null
+    if (!legacy) {
+      try {
+        const all = await window.api.getInstallations()
+        legacy = all.find((i) => i.sourceId === 'desktop') ?? null
+      } catch {}
+    }
+    if (!legacy) {
+      // Detection drift — main flagged hasLegacyDesktop=true but the
+      // install is gone now. Bail to chain-local so the user still
+      // gets to the new-install Standalone path.
+      void handleFirstUseChainLocal()
+      return
+    }
+    // confirmMigration shows its own modal (variant pick / preview /
+    // confirm); a `null` return means user cancelled, in which case we
+    // leave the takeover mounted on the localBranch step (no state
+    // change).
+    const result = await confirmMigration(legacy)
+    if (!result) return
+
+    // Pre-mark the chain so the new install kicked off by migration
+    // gets captured as the auto-launch target.
+    chainingFirstUseToNewInstall.value = true
+    pendingFirstUseAutoLaunchId.value = null
+    // Dismiss the takeover before kicking off the migration so the
+    // Tier 2 progress modal isn't blocked by the takeover overlay.
+    opts.dismissTakeoverDirect()
+    await opts.handleShowProgress({
+      installationId: legacy.id,
+      title: `Migrating — ${legacy.name}`,
+      apiCall: () => window.api.runAction(legacy!.id, 'migrate-to-standalone', result),
+      cancellable: true,
+    })
+    // dismissTakeoverDirect pushed `'none'` as it cleared the first-use
+    // overlay; re-assert `'post-consent'` so the file-menu builder
+    // keeps the chain locked down to Skip Onboarding for the duration
+    // of the migration progress + auto-launch.
+    window.api.setFirstUseMode('post-consent')
+  }
+
+  /** Wrapper around `closeOverlay` for the new-install takeover branch
+   *  that also flips `firstUseCompleted` when the close arrives at the
+   *  end of a first-use → Local chain. The new-install modal emits
+   *  `close` after a successful install AND on user-cancel (✕); both
+   *  cases count as "the user got past the cloud-or-local pick". */
+  async function handleNewInstallTakeoverClose(): Promise<void> {
+    if (chainingFirstUseToNewInstall.value) {
+      await launcherPrefs.markFirstUseCompleted()
+      // The chain pushed `'post-consent'` to keep Skip Onboarding the
+      // only file-menu entry while the new-install takeover was up.
+      // Clear it here — whatever follows (dismiss back to chooser, or
+      // an in-flight progress / launch overlay swap) is post-onboarding.
+      window.api.setFirstUseMode('none')
+      // Don't clear `chainingFirstUseToNewInstall` yet — the auto-launch
+      // watcher uses it together with `pendingFirstUseAutoLaunchId` to
+      // decide whether to fire. The watcher clears both after launch.
+    }
+    // Only dismiss when the new-install takeover is still in the slot.
+    // The happy-path install handoff in NewInstallModal swaps the
+    // overlay to a progress takeover via @show-progress without first
+    // emitting `close`, but `@navigate-list` still routes here for the
+    // skipInstall branch — and dismissing then would clear an unrelated
+    // overlay if anything else has claimed the slot in between.
+    if (
+      currentOverlay.value?.kind === 'takeover'
+      && currentOverlay.value.component === 'new-install'
+    ) {
+      opts.dismissTakeoverDirect()
+    }
+  }
+
+  // Auto-launch watcher — fires once a chained new-install or
+  // migration op finishes successfully. The chain flag gates the
+  // watcher so we only auto-launch when the op was actually driven
+  // by the first-use chain. The captured id is set by `hooks.
+  // onShowProgress` at the moment the chained op begins.
+  const stopWatch = watch(
+    () => {
+      const id = pendingFirstUseAutoLaunchId.value
+      if (!id) return null
+      const op = progressStore.operations.get(id)
+      return op && op.finished ? op : null
+    },
+    async (op) => {
+      if (!op) return
+      if (!chainingFirstUseToNewInstall.value) return
+      const id = pendingFirstUseAutoLaunchId.value
+      chainingFirstUseToNewInstall.value = false
+      pendingFirstUseAutoLaunchId.value = null
+      // Chain is done (success or failure) — drop the file-menu lock.
+      // The launch path that follows (when the op succeeded) replaces
+      // the install-progress takeover with its own connect-progress
+      // takeover; either way the user is past onboarding now.
+      window.api.setFirstUseMode('none')
+      if (!id) return
+      if (op.cancelRequested || op.error || !op.result?.ok) return
+      // The migrate-to-standalone op runs against the Legacy Desktop
+      // install but produces a fresh Standalone install — wait for the
+      // store to reflect the new install, then launch the most-recently-
+      // created non-cloud, non-legacy local install (the migration's
+      // result). For new-install ops, the captured id is the new install's
+      // id directly so this branch resolves immediately.
+      let inst = installationStore.installations.find((i) => i.id === id) ?? null
+      if (!inst || inst.sourceId === 'desktop') {
+        try {
+          await installationStore.fetchInstallations()
+        } catch {}
+        inst = installationStore.installations.find(
+          (i) => (i as unknown as { copiedFrom?: string }).copiedFrom === id,
+        ) ?? installationStore.installations
+          .filter((i) => i.sourceCategory === 'local')
+          .sort((a, b) => Date.parse(String(b.createdAt ?? '')) - Date.parse(String(a.createdAt ?? '')))[0]
+          ?? null
+      }
+      if (inst) {
+        void opts.performChooserLaunch(inst)
+      }
+    },
+    { deep: false },
+  )
+
+  // File-menu Skip Onboarding entry — main forwards the click here.
+  // Run the same completion sequence the Cloud-branch pick uses.
+  let unsubFirstUseSkip: (() => void) | null = null
+  onMounted(() => {
+    unsubFirstUseSkip = window.api.onFirstUseSkip(() => {
+      void completeFirstUseAndDismiss()
+    })
+  })
+
+  onUnmounted(() => {
+    stopWatch()
+    unsubFirstUseSkip?.()
+  })
+
+  return {
+    hooks,
+    chainingFirstUseToNewInstall,
+    pendingFirstUseInstName,
+    completeFirstUseAndDismiss,
+    handleFirstUseComplete,
+    handleFirstUseChainLocal,
+    handleFirstUseChainMigrate,
+    handleNewInstallTakeoverClose,
+  }
+}

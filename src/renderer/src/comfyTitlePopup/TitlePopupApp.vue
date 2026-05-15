@@ -124,11 +124,7 @@ let renderSeq = 0
 
 /** Measure the popup's natural content height and ask main to size
  *  the WebContentsView to fit. Downloads kind only — menu kind is
- *  sized deterministically main-side from its item list. The list
- *  element's `scrollHeight` returns its full content size regardless
- *  of the `overflow-y: auto` clip, so this works even when the view
- *  is currently sized below natural and the list is internally
- *  scrolling. */
+ *  sized deterministically main-side from its item list. */
 function measureAndRequestSize(): void {
   if (kind.value !== 'downloads') return
   // Header is only rendered when there's something to clear; treat
@@ -139,10 +135,27 @@ function measureAndRequestSize(): void {
   ) as HTMLElement | null
   const footEl = document.querySelector('.downloads-foot') as HTMLElement | null
   if (!footEl || !listEl) return
-  const listH =
-    listEl.classList.contains('downloads-list')
-      ? listEl.scrollHeight
-      : listEl.offsetHeight
+  let listH: number
+  if (listEl.classList.contains('downloads-list')) {
+    // `.downloads-list` is `flex: 1 1 auto` so it stretches to fill
+    // the popup body — `scrollHeight` would equal `clientHeight` when
+    // the items fit (per the CSS spec: with no overflow,
+    // `scrollHeight === clientHeight`), reporting the flex-allocated
+    // size instead of the natural content size. Sum the children's
+    // own offset heights to get the unstretched height the list wants.
+    let childrenH = 0
+    for (const child of listEl.children) {
+      childrenH += (child as HTMLElement).offsetHeight
+    }
+    const cs = getComputedStyle(listEl)
+    listH = childrenH
+      + parseFloat(cs.paddingTop || '0')
+      + parseFloat(cs.paddingBottom || '0')
+  } else {
+    // `.downloads-empty` shrinks to content, so its `offsetHeight` is
+    // already the natural rendered size.
+    listH = listEl.offsetHeight
+  }
   // +2 for the .popup card's 1px top + 1px bottom border so the inner
   // content lands inside the bordered card without clipping the last
   // row.

@@ -4,11 +4,18 @@ import { useI18n } from 'vue-i18n'
 import { useModal } from '../composables/useModal'
 import { ChevronDown } from 'lucide-vue-next'
 import { emitTelemetryAction, toCountBucket } from '../lib/telemetry'
-import SnapshotDiffView from './SnapshotDiffView.vue'
+import SnapshotInspector from './SnapshotInspector.vue'
 import RestoreModal from './RestoreModal.vue'
 import ImportPreviewModal from './ImportPreviewModal.vue'
-import InfoTooltip from './InfoTooltip.vue'
-import { triggerLabel as _triggerLabel, formatDate, formatNodeVersion } from '../lib/snapshots'
+import {
+  triggerLabel as _triggerLabel,
+  triggerClass,
+  formatDate,
+  formatRelative as _formatRelative,
+  copyReasonLabel as _copyReasonLabel,
+  changeSummary as _changeSummary,
+  diffHasChanges,
+} from '../lib/snapshots'
 import type {
   ActionDef,
   CopyEvent,
@@ -16,7 +23,6 @@ import type {
   SnapshotListData,
   SnapshotDetailData,
   SnapshotDiffData,
-  SnapshotDiffResult,
   SnapshotFilePreview,
 } from '../types/ipc'
 
@@ -43,16 +49,13 @@ const detailLoading = ref(false)
 const diffData = ref<SnapshotDiffData | null>(null)
 const diffLoading = ref(false)
 const diffMode = ref<'previous' | 'current' | null>(null)
-const pipSearch = ref('')
-const pipExpanded = ref(false)
-const nodeSearch = ref('')
-const nodesExpanded = ref(true)
 const restorePreviewFilename = ref<string | null>(null)
 const restorePreviewDiff = ref<SnapshotDiffData | null>(null)
 const restorePreviewLoading = ref(false)
 const importPreview = ref<SnapshotFilePreview | null>(null)
 const importPreviewLoading = ref(false)
-const pendingImport = ref(false)  // true when restore modal is showing an import diff
+// True when the restore modal is showing an import diff (no snapshots written yet).
+const pendingImport = ref(false)
 
 const snapshots = computed(() => listData.value?.snapshots ?? [])
 const copyEvents = computed(() => listData.value?.copyEvents ?? [])
@@ -63,7 +66,7 @@ type TimelineItem =
   | { kind: 'copy'; event: CopyEvent }
 
 const timelineItems = computed<TimelineItem[]>(() => {
-  // Merge snapshots and copy events by timestamp, newest first
+  // Merge snapshots and copy events by timestamp, newest first.
   const items: TimelineItem[] = []
   let si = 0
   let ci = 0
@@ -105,62 +108,10 @@ watch(() => props.installationId, () => {
   load()
 }, { immediate: true })
 
-function triggerLabel(trigger: string): string {
-  return _triggerLabel(trigger, t)
-}
-
-function triggerClass(trigger: string): string {
-  switch (trigger) {
-    case 'boot': return 'trigger-boot'
-    case 'restart': return 'trigger-restart'
-    case 'manual': return 'trigger-manual'
-    case 'pre-update': return 'trigger-preupdate'
-    case 'post-update': return 'trigger-postupdate'
-    case 'post-restore': return 'trigger-postrestore'
-    default: return ''
-  }
-}
-
-function formatRelative(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime()
-  const mins = Math.floor(diff / 60000)
-  if (mins < 1) return t('snapshots.timeJustNow')
-  if (mins < 60) return t('snapshots.timeMinutesAgo', { count: mins })
-  const hours = Math.floor(mins / 60)
-  if (hours < 24) return t('snapshots.timeHoursAgo', { count: hours })
-  const days = Math.floor(hours / 24)
-  if (days < 30) return t('snapshots.timeDaysAgo', { count: days })
-  return new Date(iso).toLocaleDateString()
-}
-
-function copyReasonLabel(reason: string): string {
-  switch (reason) {
-    case 'copy-update': return t('snapshots.copyUpdatedAs')
-    case 'release-update': return t('snapshots.releaseUpdatedAs')
-    default: return t('snapshots.copiedAs')
-  }
-}
-
-function changeSummary(s: SnapshotSummary): string[] {
-  if (!s.diffVsPrevious) return []
-  const parts: string[] = []
-  const d = s.diffVsPrevious
-  if (d.comfyuiChanged) parts.push(t('snapshots.comfyuiUpdated'))
-  if (d.updateChannelChanged) parts.push(t('snapshots.channelChanged'))
-  const nodeChanges = d.nodesAdded + d.nodesRemoved + d.nodesChanged
-  if (nodeChanges > 0) {
-    const nodeParts: string[] = []
-    if (d.nodesAdded > 0) nodeParts.push(`+${d.nodesAdded}`)
-    if (d.nodesRemoved > 0) nodeParts.push(`−${d.nodesRemoved}`)
-    if (d.nodesChanged > 0) nodeParts.push(`~${d.nodesChanged}`)
-    parts.push(`${nodeParts.join(' ')} nodes`)
-  }
-  const pipChanges = d.pipsAdded + d.pipsRemoved + d.pipsChanged
-  if (pipChanges > 0) {
-    parts.push(`${pipChanges} pkg changes`)
-  }
-  return parts
-}
+const triggerLabel = (trigger: string): string => _triggerLabel(trigger, t)
+const formatRelative = (iso: string): string => _formatRelative(iso, t)
+const copyReasonLabel = (reason: string): string => _copyReasonLabel(reason, t)
+const changeSummary = (s: SnapshotSummary): string[] => _changeSummary(s, t)
 
 async function selectSnapshot(filename: string): Promise<void> {
   if (selectedFilename.value === filename) {
@@ -175,10 +126,6 @@ async function selectSnapshot(filename: string): Promise<void> {
   selectedFilename.value = filename
   diffData.value = null
   diffMode.value = null
-  pipSearch.value = ''
-  pipExpanded.value = false
-  nodeSearch.value = ''
-  nodesExpanded.value = true
   detailLoading.value = true
   try {
     detail.value = await window.api.getSnapshotDetail(props.installationId, filename)
@@ -231,11 +178,10 @@ async function saveSnapshot(): Promise<void> {
 }
 
 async function handleRestore(filename: string): Promise<void> {
-  // Select the snapshot to show context
   if (selectedFilename.value !== filename) {
     await selectSnapshot(filename)
   }
-  // Load restore preview diff (current state → target snapshot)
+  // Load restore preview diff (current state → target snapshot).
   restorePreviewFilename.value = filename
   restorePreviewLoading.value = true
   try {
@@ -261,7 +207,7 @@ async function confirmRestore(): Promise<void> {
   let filename = restorePreviewFilename.value
 
   if (pendingImport.value) {
-    // Import flow: write snapshots to disk now, then restore the newest
+    // Import flow: write snapshots to disk now, then restore the newest.
     pendingImport.value = false
     restorePreviewFilename.value = null
     restorePreviewDiff.value = null
@@ -369,7 +315,7 @@ async function confirmImportPreview(): Promise<void> {
     return
   }
 
-  // Show the restore modal with the import diff (nothing written to disk yet)
+  // Hand the diff straight to the restore modal; nothing on disk until confirm.
   selectedFilename.value = null
   detail.value = null
   diffData.value = null
@@ -378,37 +324,14 @@ async function confirmImportPreview(): Promise<void> {
   restorePreviewDiff.value = result.diff ?? null
   restorePreviewFilename.value = '__pending_import__'
 }
-
-const filteredCustomNodes = computed(() => {
-  if (!detail.value) return []
-  if (!nodeSearch.value) return detail.value.customNodes
-  const q = nodeSearch.value.toLowerCase()
-  return detail.value.customNodes.filter((n) => n.id.toLowerCase().includes(q))
-})
-
-const filteredPipPackages = computed(() => {
-  if (!detail.value) return []
-  const entries = Object.entries(detail.value.pipPackages)
-  if (!pipSearch.value) return entries
-  const q = pipSearch.value.toLowerCase()
-  return entries.filter(([name]) => name.toLowerCase().includes(q))
-})
-
-function diffHasChanges(diff: SnapshotDiffResult): boolean {
-  return diff.comfyuiChanged || diff.updateChannelChanged || diff.nodesAdded.length > 0 || diff.nodesRemoved.length > 0 ||
-         diff.nodesChanged.length > 0 || diff.pipsAdded.length > 0 || diff.pipsRemoved.length > 0 ||
-         diff.pipsChanged.length > 0
-}
 </script>
 
 <template>
   <div class="snapshot-tab">
-    <!-- Empty state -->
     <div v-if="!loading && snapshots.length === 0" class="snapshot-empty">
       {{ t('snapshots.empty') }}
     </div>
 
-    <!-- Header with save button -->
     <div v-if="snapshots.length > 0 || !loading" class="snapshot-header">
       <button class="snapshot-save-btn" @click="saveSnapshot">
         {{ t('snapshots.saveSnapshot') }}
@@ -421,13 +344,10 @@ function diffHasChanges(diff: SnapshotDiffResult): boolean {
       </button>
     </div>
 
-    <!-- Loading -->
     <div v-if="loading" class="snapshot-loading with-spinner">{{ t('common.loading') }}</div>
 
-    <!-- Timeline -->
     <div v-if="!loading && snapshots.length > 0" class="snapshot-timeline">
       <template v-for="(item, index) in timelineItems" :key="item.kind === 'snapshot' ? item.snapshot.filename : `copy-${item.event.installationId}`">
-        <!-- Copy event -->
         <div v-if="item.kind === 'copy'" class="timeline-entry">
           <div class="timeline-gutter">
             <div class="timeline-line timeline-line-top" :class="{ invisible: index === 0 }" />
@@ -448,193 +368,75 @@ function diffHasChanges(diff: SnapshotDiffResult): boolean {
           </div>
         </div>
 
-        <!-- Snapshot entry -->
         <div
           v-else
           class="timeline-entry"
           :class="{ selected: selectedFilename === item.snapshot.filename }"
         >
-        <!-- Timeline dot and line -->
-        <div class="timeline-gutter">
-          <div class="timeline-line timeline-line-top" :class="{ invisible: index === 0 }" />
-          <div class="timeline-dot" :class="triggerClass(item.snapshot.trigger)" />
-          <div class="timeline-line-rest" :class="{ invisible: index === timelineItems.length - 1 }" />
-        </div>
-
-        <!-- Card -->
-        <div class="timeline-content">
-          <div class="timeline-card" @click="selectSnapshot(item.snapshot.filename)">
-            <div class="timeline-card-header">
-              <span class="timeline-trigger" :class="triggerClass(item.snapshot.trigger)">{{ triggerLabel(item.snapshot.trigger) }}</span>
-              <span v-if="item.snapshotIndex === 0" class="timeline-current-tag">{{ t('snapshots.current') }}</span>
-              <span class="timeline-time" :title="formatDate(item.snapshot.createdAt)">{{ formatRelative(item.snapshot.createdAt) }}</span>
-            </div>
-            <div v-if="item.snapshot.label && !['after-update', 'before-update', 'after-restore'].includes(item.snapshot.label)" class="timeline-label">{{ item.snapshot.label }}</div>
-            <div class="timeline-card-body">
-              <div class="timeline-meta">
-                <span>{{ item.snapshot.comfyuiVersion }}</span>
-                <span class="timeline-meta-sep">·</span>
-                <span>{{ t('snapshots.nodesCount', { count: item.snapshot.nodeCount }) }}</span>
-                <span class="timeline-meta-sep">·</span>
-                <span>{{ t('snapshots.packagesCount', { count: item.snapshot.pipPackageCount }) }}</span>
-              </div>
-              <!-- Restore button (not on current) -->
-              <button
-                v-if="item.snapshotIndex > 0"
-                class="timeline-action-btn timeline-restore-btn"
-                @click.stop="handleRestore(item.snapshot.filename)"
-              >
-                {{ t('snapshots.restore') }}
-              </button>
-              <!-- Export button -->
-              <button
-                class="timeline-action-btn timeline-export-btn"
-                @click.stop="handleExport(item.snapshot.filename)"
-              >
-                {{ t('snapshots.exportSnapshot') }}
-              </button>
-              <!-- Delete button (manual snapshots only) -->
-              <button
-                v-if="item.snapshot.trigger === 'manual'"
-                class="timeline-action-btn timeline-delete-btn"
-                @click.stop="handleDelete(item.snapshot.filename)"
-              >✕</button>
-              <ChevronDown :size="14" class="timeline-expand-icon" :class="{ expanded: selectedFilename === item.snapshot.filename }" />
-            </div>
-            <div v-if="changeSummary(item.snapshot).length > 0" class="timeline-changes">
-              <span v-for="part in changeSummary(item.snapshot)" :key="part" class="timeline-change-badge">{{ part }}</span>
-            </div>
+          <div class="timeline-gutter">
+            <div class="timeline-line timeline-line-top" :class="{ invisible: index === 0 }" />
+            <div class="timeline-dot" :class="triggerClass(item.snapshot.trigger)" />
+            <div class="timeline-line-rest" :class="{ invisible: index === timelineItems.length - 1 }" />
           </div>
 
-          <!-- Inspector (inline, shown when selected) -->
-          <div v-if="selectedFilename === item.snapshot.filename" class="snapshot-inspector" @click.stop>
-          <div v-if="detailLoading" class="snapshot-loading with-spinner">{{ t('common.loading') }}</div>
-          <template v-else-if="detail">
-            <!-- Diff toggle buttons -->
-            <div class="diff-toggle">
-              <button
-                :class="{ active: diffMode === 'previous' }"
-                :disabled="item.snapshotIndex === snapshots.length - 1"
-                @click="loadDiff('previous')"
-              >
-                {{ t('snapshots.diffPrevious') }}
-              </button>
-              <button
-                :class="{ active: diffMode === 'current' }"
-                :disabled="item.snapshotIndex === 0"
-                @click="loadDiff('current')"
-              >
-                {{ t('snapshots.diffCurrent') }}
-              </button>
-            </div>
-
-            <!-- Diff view -->
-            <div v-if="diffMode && !diffLoading && diffData" class="diff-view">
-              <div v-if="!diffHasChanges(diffData.diff)" class="diff-empty">
-                {{ t('snapshots.diffNoChanges') }}
+          <div class="timeline-content">
+            <div class="timeline-card" @click="selectSnapshot(item.snapshot.filename)">
+              <div class="timeline-card-header">
+                <span class="timeline-trigger" :class="triggerClass(item.snapshot.trigger)">{{ triggerLabel(item.snapshot.trigger) }}</span>
+                <span v-if="item.snapshotIndex === 0" class="timeline-current-tag">{{ t('snapshots.current') }}</span>
+                <span class="timeline-time" :title="formatDate(item.snapshot.createdAt)">{{ formatRelative(item.snapshot.createdAt) }}</span>
               </div>
-              <SnapshotDiffView v-else :diff="diffData.diff" />
-            </div>
-            <div v-else-if="diffMode && diffLoading" class="snapshot-loading with-spinner">{{ t('common.loading') }}</div>
-
-            <!-- Environment info -->
-            <div class="inspector-section">
-              <div class="inspector-section-title">{{ t('snapshots.environment') }}</div>
-              <div class="inspector-grid">
-                <div class="inspector-field">
-                  <span class="inspector-field-label">{{ t('snapshots.comfyuiVersion') }}</span>
-                  <span class="inspector-field-value">{{ detail.comfyuiVersion }}</span>
+              <div v-if="item.snapshot.label && !['after-update', 'before-update', 'after-restore'].includes(item.snapshot.label)" class="timeline-label">{{ item.snapshot.label }}</div>
+              <div class="timeline-card-body">
+                <div class="timeline-meta">
+                  <span>{{ item.snapshot.comfyuiVersion }}</span>
+                  <span class="timeline-meta-sep">·</span>
+                  <span>{{ t('snapshots.nodesCount', { count: item.snapshot.nodeCount }) }}</span>
+                  <span class="timeline-meta-sep">·</span>
+                  <span>{{ t('snapshots.packagesCount', { count: item.snapshot.pipPackageCount }) }}</span>
                 </div>
-                <div class="inspector-field">
-                  <span class="inspector-field-label">{{ t('snapshots.releaseTag') }}</span>
-                  <span class="inspector-field-value">{{ detail.comfyui.releaseTag || '—' }}</span>
-                </div>
-                <div class="inspector-field">
-                  <span class="inspector-field-label">{{ t('snapshots.variant') }}</span>
-                  <span class="inspector-field-value">{{ context?.variantLabel || detail.comfyui.variant || '—' }}</span>
-                </div>
-                <div class="inspector-field">
-                  <span class="inspector-field-label">{{ t('snapshots.updateChannel') }}</span>
-                  <span class="inspector-field-value">{{ detail.updateChannel || context?.updateChannel || '—' }}</span>
-                </div>
-                <div class="inspector-field">
-                  <span class="inspector-field-label">{{ t('snapshots.pythonVersion') }}</span>
-                  <span class="inspector-field-value">{{ detail.pythonVersion || context?.pythonVersion || '—' }}</span>
-                </div>
-                <div class="inspector-field">
-                  <span class="inspector-field-label">{{ t('snapshots.capturedAt') }}</span>
-                  <span class="inspector-field-value">{{ formatDate(detail.createdAt) }}</span>
-                </div>
+                <button
+                  v-if="item.snapshotIndex > 0"
+                  class="timeline-action-btn timeline-restore-btn"
+                  @click.stop="handleRestore(item.snapshot.filename)"
+                >
+                  {{ t('snapshots.restore') }}
+                </button>
+                <button
+                  class="timeline-action-btn timeline-export-btn"
+                  @click.stop="handleExport(item.snapshot.filename)"
+                >
+                  {{ t('snapshots.exportSnapshot') }}
+                </button>
+                <button
+                  v-if="item.snapshot.trigger === 'manual'"
+                  class="timeline-action-btn timeline-delete-btn"
+                  @click.stop="handleDelete(item.snapshot.filename)"
+                >✕</button>
+                <ChevronDown :size="14" class="timeline-expand-icon" :class="{ expanded: selectedFilename === item.snapshot.filename }" />
+              </div>
+              <div v-if="changeSummary(item.snapshot).length > 0" class="timeline-changes">
+                <span v-for="part in changeSummary(item.snapshot)" :key="part" class="timeline-change-badge">{{ part }}</span>
               </div>
             </div>
 
-            <!-- Custom nodes -->
-            <div class="inspector-section">
-              <div
-                class="inspector-section-title collapsible"
-                @click="nodesExpanded = !nodesExpanded"
-              >
-                <span>{{ t('snapshots.customNodes') }} ({{ detail.customNodes.length }})<InfoTooltip :text="t('tooltips.customNodes')" side="bottom" /></span>
-                <span class="collapse-indicator">{{ nodesExpanded ? '▾' : '▸' }}</span>
-              </div>
-              <template v-if="nodesExpanded">
-                <div v-if="detail.customNodes.length === 0" class="inspector-empty">—</div>
-                <div v-else class="node-list recessed-list">
-                  <input
-                    v-if="detail.customNodes.length > 5"
-                    v-model="nodeSearch"
-                    class="recessed-search"
-                    type="text"
-                    :placeholder="t('snapshots.searchNodes')"
-                  >
-                  <div v-if="filteredCustomNodes.length === 0 && nodeSearch" class="inspector-empty">{{ t('snapshots.searchNoResults') }}</div>
-                  <template v-else>
-                    <div v-for="node in filteredCustomNodes" :key="node.id" class="ls-node-row">
-                      <span class="ls-node-status" :class="node.enabled ? 'ls-node-enabled' : 'ls-node-disabled'" />
-                      <span class="ls-node-name">{{ node.id }}</span>
-                      <span class="ls-node-type">{{ node.type }}</span>
-                      <span class="ls-node-version" :title="formatNodeVersion(node)">{{ formatNodeVersion(node) }}</span>
-                    </div>
-                  </template>
-                </div>
-              </template>
-            </div>
-
-            <!-- Pip packages -->
-            <div class="inspector-section">
-              <div
-                class="inspector-section-title collapsible"
-                @click="pipExpanded = !pipExpanded"
-              >
-                <span>{{ t('snapshots.pipPackages') }} ({{ detail.pipPackageCount }})<InfoTooltip :text="t('tooltips.pipPackages')" side="bottom" /></span>
-                <span class="collapse-indicator">{{ pipExpanded ? '▾' : '▸' }}</span>
-              </div>
-              <template v-if="pipExpanded">
-                <div class="pip-list recessed-list">
-                  <input
-                    v-model="pipSearch"
-                    class="recessed-search"
-                    type="text"
-                    :placeholder="t('snapshots.searchPackages')"
-                  >
-                  <div v-if="filteredPipPackages.length === 0 && pipSearch" class="inspector-empty">{{ t('snapshots.searchNoResults') }}</div>
-                  <template v-else>
-                    <div v-for="[name, version] in filteredPipPackages" :key="name" class="ls-pip-row">
-                      <span class="ls-pip-name">{{ name }}</span>
-                      <span class="ls-pip-version" :title="version">{{ version }}</span>
-                    </div>
-                  </template>
-                </div>
-              </template>
-            </div>
-          </template>
+            <SnapshotInspector
+              v-if="selectedFilename === item.snapshot.filename"
+              :detail="detail"
+              :detail-loading="detailLoading"
+              :diff-mode="diffMode"
+              :diff-data="diffData"
+              :diff-loading="diffLoading"
+              :snapshot-index="item.snapshotIndex"
+              :total-snapshots="snapshots.length"
+              :context="context"
+              @toggle-diff="loadDiff"
+            />
+          </div>
         </div>
-        </div>
-      </div>
       </template>
     </div>
 
-    <!-- Restore modal -->
     <RestoreModal
       v-if="restorePreviewFilename"
       :diff-data="restorePreviewDiff"
@@ -643,7 +445,6 @@ function diffHasChanges(diff: SnapshotDiffResult): boolean {
       @confirm="confirmRestore"
     />
 
-    <!-- Import preview modal -->
     <ImportPreviewModal
       v-if="importPreview || importPreviewLoading"
       :preview="importPreview"
@@ -817,7 +618,6 @@ function diffHasChanges(diff: SnapshotDiffResult): boolean {
 .timeline-trigger.trigger-restart { color: var(--info); }
 .timeline-trigger.trigger-copy { color: var(--text-muted); }
 
-/* Copy event card */
 .timeline-copy-card {
   display: flex;
   align-items: center;
@@ -956,147 +756,5 @@ function diffHasChanges(diff: SnapshotDiffResult): boolean {
 }
 .timeline-card:hover .timeline-expand-icon {
   color: var(--text-muted);
-}
-
-/* Inspector (inline below the card) */
-.snapshot-inspector {
-  background: var(--surface);
-  border: 1px solid var(--selected);
-  border-top: none;
-  border-radius: 0 0 8px 8px;
-  padding: 12px 14px;
-  margin-bottom: 6px;
-}
-
-/* Diff toggle */
-.diff-toggle {
-  display: flex;
-  gap: 4px;
-  margin-bottom: 12px;
-}
-.diff-toggle button {
-  flex: 1;
-  padding: 5px 10px;
-  font-size: 12px;
-  border-radius: 5px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  color: var(--text-muted);
-  cursor: pointer;
-  transition: all 0.15s;
-}
-.diff-toggle button:hover:not(:disabled) {
-  color: var(--text);
-  border-color: var(--border-hover);
-}
-.diff-toggle button.active {
-  background: color-mix(in srgb, var(--accent) 15%, transparent);
-  border-color: var(--accent);
-  color: var(--accent);
-}
-.diff-toggle button:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-
-/* Diff view */
-.diff-view {
-  margin-bottom: 12px;
-  background: var(--bg);
-  border-radius: 6px;
-  padding: 10px 12px;
-}
-
-.diff-empty {
-  font-size: 13px;
-  color: var(--text-muted);
-  text-align: center;
-  padding: 8px 0;
-}
-
-/* Inspector sections */
-.inspector-section {
-  margin-bottom: 12px;
-}
-.inspector-section:last-child {
-  margin-bottom: 0;
-}
-
-.inspector-section-title {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
-  margin-bottom: 8px;
-}
-.inspector-section-title.collapsible {
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  user-select: none;
-}
-.collapse-indicator {
-  font-size: 14px;
-}
-
-.inspector-empty {
-  font-size: 14px;
-  color: var(--text-muted);
-}
-
-/* Environment grid */
-.inspector-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 4px 16px;
-}
-
-.inspector-field {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-
-.inspector-field-label {
-  font-size: 13px;
-  color: var(--text-muted);
-}
-
-.inspector-field-value {
-  font-size: 14px;
-  color: var(--text);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  user-select: text;
-}
-
-/* Search input inside recessed containers */
-.recessed-search {
-  width: 100%;
-  padding: 6px 10px;
-  font-size: 13px;
-  border-radius: 5px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  color: var(--text);
-  margin-bottom: 6px;
-  box-sizing: border-box;
-}
-.recessed-search:focus {
-  outline: none;
-  border-color: var(--accent);
-}
-
-.pip-list {
-  max-height: 300px;
-  overflow-y: auto;
-}
-
-/* Override global ls-node-disabled to match original SnapshotTab styling */
-.ls-node-disabled {
-  background: var(--text-faint);
 }
 </style>
