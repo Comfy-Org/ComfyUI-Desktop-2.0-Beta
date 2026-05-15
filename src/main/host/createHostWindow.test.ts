@@ -18,7 +18,7 @@ vi.mock('electron', () => ({
 }))
 
 import type { InstallationRecord } from '../installations'
-import { expectedPartitionFor } from './createHostWindow'
+import { cascadeOffsetForCollisions, expectedPartitionFor } from './createHostWindow'
 
 function makeInstallation(overrides: Partial<InstallationRecord> = {}): InstallationRecord {
   return {
@@ -52,5 +52,35 @@ describe('expectedPartitionFor', () => {
     const inst = makeInstallation({ id: 'with spaces & symbols' } as Partial<InstallationRecord>)
     ;(inst as unknown as { browserPartition: string }).browserPartition = 'unique'
     expect(expectedPartitionFor(inst)).toBe('persist:with spaces & symbols')
+  })
+})
+
+describe('cascadeOffsetForCollisions', () => {
+  it('returns the input unchanged when no x/y is set (centered window)', () => {
+    const opts = { width: 1280, height: 900 }
+    expect(cascadeOffsetForCollisions(opts, [{ x: 100, y: 100 }])).toEqual(opts)
+  })
+
+  it('returns the input unchanged when no existing windows collide', () => {
+    const opts = { x: 200, y: 300, width: 1280, height: 900 }
+    expect(cascadeOffsetForCollisions(opts, [{ x: 999, y: 999 }])).toEqual(opts)
+  })
+
+  it('offsets by 30px when one existing window matches the origin', () => {
+    const opts = { x: 100, y: 100, width: 1280, height: 900 }
+    expect(cascadeOffsetForCollisions(opts, [{ x: 100, y: 100 }]))
+      .toEqual({ x: 130, y: 130, width: 1280, height: 900 })
+  })
+
+  it('cascades past chains of pre-cascaded windows', () => {
+    const opts = { x: 100, y: 100, width: 1280, height: 900 }
+    const existing = [{ x: 100, y: 100 }, { x: 130, y: 130 }, { x: 160, y: 160 }]
+    expect(cascadeOffsetForCollisions(opts, existing))
+      .toEqual({ x: 190, y: 190, width: 1280, height: 900 })
+  })
+
+  it('skips destroyed/empty origin lists cleanly', () => {
+    const opts = { x: 50, y: 50, width: 800, height: 600 }
+    expect(cascadeOffsetForCollisions(opts, [])).toEqual(opts)
   })
 })

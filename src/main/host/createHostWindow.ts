@@ -198,11 +198,64 @@ export interface CreateHostWindowResult {
   layoutViews: () => void
 }
 
+/** Per-step cascade in screen pixels — matches the macOS / Windows
+ *  default for OS-level "open new window" cascading. */
+const CASCADE_STEP_PX = 30
+
+/** Offset `windowOptions` by `(CASCADE_STEP_PX, CASCADE_STEP_PX)` for every
+ *  live host window already at the same x/y, so a freshly-spawned host
+ *  doesn't land directly on top of an existing one (which made the new
+ *  window look like the old one had simply re-rendered).
+ *
+ *  Only applies when `getWindowOptions()` returned an explicit (x, y) — i.e.
+ *  there were saved bounds. Without saved bounds Electron centers the
+ *  window itself, and we leave that path alone.
+ */
+export function cascadeOffsetForCollisions(
+  windowOptions: Partial<Electron.BrowserWindowConstructorOptions>,
+  existingOrigins: ReadonlyArray<{ x: number; y: number }>,
+): Partial<Electron.BrowserWindowConstructorOptions> {
+  if (typeof windowOptions.x !== 'number' || typeof windowOptions.y !== 'number') {
+    return windowOptions
+  }
+  let { x, y } = windowOptions
+  // Walk the existing-windows list: each live host whose origin matches
+  // our current target bumps us by one cascade step. Re-checking after
+  // each bump catches chains (windows already cascaded from each other)
+  // so we land beyond the deepest overlap.
+  let bumped = true
+  while (bumped) {
+    bumped = false
+    for (const origin of existingOrigins) {
+      if (origin.x === x && origin.y === y) {
+        x += CASCADE_STEP_PX
+        y += CASCADE_STEP_PX
+        bumped = true
+        break
+      }
+    }
+  }
+  return { ...windowOptions, x, y }
+}
+
+/** Snapshot the origins of every live host window, for the cascade
+ *  collision check. Excludes destroyed windows so a not-yet-GC'd
+ *  closed entry doesn't cause a phantom offset. */
+function liveHostOrigins(): { x: number; y: number }[] {
+  const origins: { x: number; y: number }[] = []
+  for (const [, entry] of comfyWindows) {
+    if (entry.window.isDestroyed()) continue
+    const { x, y } = entry.window.getBounds()
+    origins.push({ x, y })
+  }
+  return origins
+}
+
 export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowResult {
   const fx = getFactories()
   const windowKey = nextWindowKey()
   const saved = getSavedBounds(opts.boundsKey)
-  const windowOptions = getWindowOptions(opts.boundsKey)
+  const windowOptions = cascadeOffsetForCollisions(getWindowOptions(opts.boundsKey), liveHostOrigins())
   const comfyWindow = new BrowserWindow({
     ...windowOptions,
     minWidth: 800,
