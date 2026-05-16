@@ -541,22 +541,33 @@ async function runAction(action: ActionDef, btn: HTMLButtonElement | null): Prom
     // so the user gets a single uninterrupted view instead of having
     // to click Done and then Start ComfyUI afterwards.
     const isUpdateAndRestart = mutableAction.id === 'update-comfyui' && updateWillRestart
-    const waitForStopped = async (): Promise<void> => {
-      const deadline = Date.now() + 10_000
+    // Returns true once the session has actually left the running
+    // state, false if the 30s deadline expired with the session still
+    // running. Callers must short-circuit on false — the backend
+    // enforces REQUIRES_STOPPED and would reject the chained call
+    // with a vague {ok:false, running:true}, surfacing as a generic
+    // failure banner that doesn't tell the user what happened.
+    const waitForStopped = async (): Promise<boolean> => {
+      const deadline = Date.now() + 30_000
       while (sessionStore.isRunning(instId) && Date.now() < deadline) {
         await new Promise((r) => setTimeout(r, 100))
       }
+      return !sessionStore.isRunning(instId)
     }
+    const stopTimeoutResult = (): ActionResult => ({
+      ok: false,
+      message: t('errors.stopTimeout'),
+    })
     const apiCall = isRestart
       ? async () => {
           await window.api.stopComfyUI(instId)
-          await waitForStopped()
+          if (!(await waitForStopped())) return stopTimeoutResult()
           return window.api.runAction(instId, 'launch')
         }
       : isUpdateAndRestart
       ? async () => {
           await window.api.stopComfyUI(instId)
-          await waitForStopped()
+          if (!(await waitForStopped())) return stopTimeoutResult()
           const updateResult = await window.api.runAction(
             instId,
             mutableAction.id,

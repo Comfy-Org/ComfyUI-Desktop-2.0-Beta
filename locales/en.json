@@ -832,6 +832,7 @@
     "stopRequired": "This installation is currently running and must be stopped first.",
     "stopRequiredConfirm": "This installation is currently running. Would you like to stop it to continue?",
     "stopRunning": "Stop Running",
+    "stopTimeout": "ComfyUI is still shutting down. Please wait a moment and try again.",
     "folderPermissionDenied": "macOS denied access to \"{path}\". Please open System Settings → Privacy & Security → Files and Folders, grant access to ComfyUI Desktop 2.0, then retry."
   },
 
