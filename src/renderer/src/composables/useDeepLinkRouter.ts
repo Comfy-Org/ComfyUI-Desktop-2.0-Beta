@@ -48,11 +48,16 @@ export function useDeepLinkRouter(opts: DeepLinkRouterOpts): void {
           await opts.bootstrapReady
           const inst = installationStore.getById(id)
           if (!inst) return
+          // Issue #557 — pill click drives straight to the update
+          // confirm dialog. The Update tab still opens behind the
+          // dialog so a cancel returns the user to the surface that
+          // shows release notes / channel info.
           await opts.openOverlay({
             kind: 'settings',
             installation: inst,
             initialTab: 'comfy',
             initialDetailTab: 'update',
+            autoAction: 'update-comfyui',
           })
           return
         }

@@ -614,6 +614,7 @@
     "updateConfirmMessage": "Update from {installed} to {latest}?\n\nLocal changes will be stashed and a backup branch created.",
     "updateConfirmMessageLatest": "Update from {installed} to latest on master ({latest})?\n\nThis will pull the newest commits from the master branch. Local changes will be stashed and a backup branch created.",
     "updateConfirmMessageDowngrade": "Roll back from {installed} to stable release {latest}?\n\nYour install is currently ahead of the latest stable release. This will check out the stable tag, removing any newer commits. Local changes will be stashed and a backup branch created.",
+    "updateRestartNotice": "ComfyUI is currently running and will be restarted to apply this update.",
     "updatingTitle": "Updating to {version}",
     "updatePrepare": "Prepare",
     "updatePrepareSnapshot": "Saving snapshot of current state…",

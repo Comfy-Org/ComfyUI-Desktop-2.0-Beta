@@ -318,11 +318,35 @@ async function runAction(action: ActionDef, btn: HTMLButtonElement | null): Prom
 
   // Pre-flight: check if the installation is busy or running
   // Skip for migrate-to-standalone — the useMigrateAction composable handles its own guard
-  if (action.id !== 'migrate-to-standalone' && REQUIRES_STOPPED.has(action.id)) {
+  // Skip for update-comfyui — the smooth update flow folds the
+  //   stop-required prompt into the action's own confirm dialog and
+  //   chains stopComfyUI → update → launch in `apiCall` (issue #557).
+  if (
+    action.id !== 'migrate-to-standalone' &&
+    action.id !== 'update-comfyui' &&
+    REQUIRES_STOPPED.has(action.id)
+  ) {
     if (!await actionGuard.checkBeforeAction(props.installation.id, action.label)) return
   }
 
   let mutableAction = { ...action }
+
+  // Smooth update flow — when the install is running, the post-update
+  // auto-launch is implied by the action; tell the user that in the
+  // single confirm dialog rather than as a separate stop-required
+  // prompt. The chained stop+launch lives in the showProgress branch.
+  const updateWillRestart =
+    mutableAction.id === 'update-comfyui' && sessionStore.isRunning(props.installation.id)
+  if (updateWillRestart && mutableAction.confirm) {
+    const baseMsg = mutableAction.confirm.message ?? ''
+    mutableAction = {
+      ...mutableAction,
+      confirm: {
+        ...mutableAction.confirm,
+        message: `${t('standalone.updateRestartNotice')}\n\n${baseMsg}`,
+      },
+    }
+  }
 
   // fieldSelects chain
   if (mutableAction.fieldSelects) {
@@ -512,24 +536,42 @@ async function runAction(action: ActionDef, btn: HTMLButtonElement | null): Prom
     // continuous "Restarting ComfyUI" view rather than two flashes.
     // The action's confirm dialog has already run above.
     const isRestart = mutableAction.id === 'restart'
+    // Issue #557 — smooth update flow: when the install is running,
+    // chain stopComfyUI → update → launch in the same ProgressModal
+    // so the user gets a single uninterrupted view instead of having
+    // to click Done and then Start ComfyUI afterwards.
+    const isUpdateAndRestart = mutableAction.id === 'update-comfyui' && updateWillRestart
+    const waitForStopped = async (): Promise<void> => {
+      const deadline = Date.now() + 10_000
+      while (sessionStore.isRunning(instId) && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 100))
+      }
+    }
     const apiCall = isRestart
       ? async () => {
           await window.api.stopComfyUI(instId)
-          // Wait for the session to actually leave the running state
-          // before kicking off the new launch. The session store is
-          // updated by main via 'session-status' broadcasts.
-          const deadline = Date.now() + 10_000
-          while (sessionStore.isRunning(instId) && Date.now() < deadline) {
-            await new Promise((r) => setTimeout(r, 100))
-          }
+          await waitForStopped()
+          return window.api.runAction(instId, 'launch')
+        }
+      : isUpdateAndRestart
+      ? async () => {
+          await window.api.stopComfyUI(instId)
+          await waitForStopped()
+          const updateResult = await window.api.runAction(
+            instId,
+            mutableAction.id,
+            mutableAction.data ? toRaw(mutableAction.data) : undefined,
+          )
+          if (!updateResult.ok || updateResult.cancelled) return updateResult
           return window.api.runAction(instId, 'launch')
         }
       : () => window.api.runAction(instId, mutableAction.id, mutableAction.data ? toRaw(mutableAction.data) : undefined)
-    // Tag launch / restart so PanelApp's handleShowProgress installs
-    // the chooser-host close-on-instance-started subscription. Without
-    // this, launches kicked off from this Tier-1 modal would leave the
-    // dashboard window open next to the new comfy window.
-    const triggersInstanceStart = mutableAction.id === 'launch' || isRestart
+    // Tag launch / restart / update-and-restart so PanelApp's
+    // handleShowProgress installs the chooser-host close-on-instance-
+    // started subscription. Without this, launches kicked off from
+    // this Tier-1 modal would leave the dashboard window open next to
+    // the new comfy window.
+    const triggersInstanceStart = mutableAction.id === 'launch' || isRestart || isUpdateAndRestart
     emit('show-progress', {
       installationId: instId,
       title,

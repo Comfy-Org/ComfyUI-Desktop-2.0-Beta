@@ -34,7 +34,7 @@ vi.mock('../views/DetailModal.vue', () => ({
     // parent owns the close behaviour.
     props: ['installation', 'initialTab', 'autoAction'],
     template:
-      '<div data-testid="detail-modal" :data-installation-id="installation?.id" />',
+      '<div data-testid="detail-modal" :data-installation-id="installation?.id" :data-auto-action="autoAction ?? \'\'" />',
   },
 }))
 vi.mock('../views/ProgressModal.vue', () => ({
@@ -722,7 +722,9 @@ describe('PanelApp', () => {
     // `kind: 'install-update'` and the host's installationId. The
     // panel renderer routes that into a Tier 1 manage overlay with
     // initialTab='update' so the DetailModal opens directly on the
-    // update tab.
+    // update tab. Issue #557: it also pre-arms the `update-comfyui`
+    // auto-action so the confirm dialog fires immediately instead of
+    // making the user click "Update Now" inside the tab.
     const wrapper = mountPanel()
     await flushPromises()
     expect(wrapper.find('[data-testid="detail-modal"]').exists()).toBe(false)
@@ -734,6 +736,7 @@ describe('PanelApp', () => {
     const detail = wrapper.find('[data-testid="detail-modal"]')
     expect(detail.exists()).toBe(true)
     expect(detail.attributes('data-installation-id')).toBe('test-id')
+    expect(detail.attributes('data-auto-action')).toBe('update-comfyui')
   })
 
   it('shows the "Desktop Update Ready" confirm modal when a restart-prompt event arrives, and installs on confirm', async () => {
