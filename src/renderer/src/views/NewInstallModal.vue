@@ -32,6 +32,10 @@ const emit = defineEmits<{
   close: []
   'show-progress': [opts: ShowProgressOpts]
   'navigate-list': []
+  /** Emitted from the Configure footer's Back link when this overlay was
+   *  opened by the first-use chain (`cameFromLocalBranch === true`).
+   *  Host returns the user to the FirstUseTakeover localBranch step. */
+  'back-to-local-branch': []
 }>()
 
 const props = withDefaults(
@@ -51,6 +55,12 @@ const sources = ref<Source[]>([])
 const currentSource = ref<Source | null>(null)
 const selections = ref<Record<string, FieldOption>>({})
 const instName = ref('')
+/** Live-suggested default the placeholder reads. Computed in `open()` so
+ *  it reflects existing install names (`ComfyUI` → `ComfyUI (2)` if the
+ *  first is taken). When the user leaves the field blank, `handleSave`'s
+ *  fallback produces the same value — so the placeholder is truthful,
+ *  not aspirational. */
+const suggestedName = ref('')
 const instPath = ref('')
 const defaultInstPath = ref('')
 const detectedGpu = ref('')
@@ -105,7 +115,6 @@ const useBrandConfig = computed(() => props.hideBackToDashboard)
  *  hydration can't clobber an early user toggle. */
 const telemetryEnabled = ref(true)
 const telemetryHydrated = ref(false)
-const learnMoreHref = 'https://www.comfy.org/legal/privacy-policy'
 const advancedOpen = ref(false)
 const advancedRef = ref<HTMLElement | null>(null)
 
@@ -230,16 +239,33 @@ onMounted(() => {
 })
 
 interface OpenOpts {
-  /** Optional pre-seeded install name from the first-use chain's
-   *  `nameInstall` step. Blank/undefined falls back to the silent
-   *  `'ComfyUI'` default in `handleSave()`. */
+  // TODO(brand-cleanup): `initialName` was used by the now-retired
+  // nameInstall step. Naming is captured inline on the Configure screen
+  // and the silent `'ComfyUI'` fallback in `handleSave()` handles the
+  // blank case. Kept here as optional for one review cycle in case any
+  // caller is still passing it; remove after sign-off.
   initialName?: string
+  /** Set by the host when this overlay is opened by the first-use chain
+   *  from the localBranch → Start Fresh path. Surfaces a Back link in
+   *  the Configure footer that returns the user to the localBranch
+   *  sub-step instead of closing the takeover. */
+  cameFromLocalBranch?: boolean
 }
+
+const cameFromLocalBranch = ref(false)
 
 async function open(opts: OpenOpts = {}): Promise<void> {
   loadGeneration++
   currentStep.value = 1
   instName.value = opts.initialName?.trim() ?? ''
+  cameFromLocalBranch.value = opts.cameFromLocalBranch === true
+  suggestedName.value = ''
+  void window.api
+    .getUniqueName('ComfyUI')
+    .then((name) => {
+      suggestedName.value = name
+    })
+    .catch(() => {})
   instPath.value = ''
   selections.value = {}
   currentSource.value = null
@@ -658,6 +684,23 @@ defineExpose({ open })
       <p class="brand-lead">{{ $t('newInstall.configureLead') }}</p>
       <div v-if="useBrandConfig" class="config-card">
         <div class="config-card__body">
+          <!-- Name field for the Standalone path. Remote Connection has
+               its own Name input rendered above the source-field loop
+               below (skipInstall sources need explicit naming). Blank
+               commits the silent `'ComfyUI'` fallback in handleSave. -->
+          <div v-if="!currentSource?.skipInstall" class="config-field">
+            <label class="config-label" for="inst-name-standalone">{{ $t('common.name') }}</label>
+            <div class="brand-input">
+              <input
+                id="inst-name-standalone"
+                :value="instName"
+                type="text"
+                :placeholder="suggestedName || $t('common.namePlaceholder')"
+                @input="instName = ($event.target as HTMLInputElement).value"
+              />
+            </div>
+          </div>
+
           <!-- GPU + Install Location are Standalone-only. Remote
                Connection (skipInstall) doesn't manage local hardware
                or a filesystem path — its field set comes entirely
@@ -683,7 +726,7 @@ defineExpose({ open })
                   @input="instPath = ($event.target as HTMLInputElement).value"
                 />
               </div>
-              <button class="brand-secondary" type="button" @click="handleBrowse">
+              <button class="brand-tertiary" type="button" @click="handleBrowse">
                 {{ $t('common.browse') }}
               </button>
             </div>
@@ -695,22 +738,15 @@ defineExpose({ open })
             />
           </div>
 
-          <label class="brand-checkbox">
-            <input v-model="telemetryEnabled" type="checkbox" />
-            <span class="brand-checkbox__text">
-              <span class="brand-checkbox__title">{{ $t('newInstall.helpImproveTitle') }}</span>
-              <span class="brand-checkbox__hint">
-                {{ $t('newInstall.helpImproveHint') }}
-                <a
-                  class="brand-checkbox__link"
-                  :href="learnMoreHref"
-                  target="_blank"
-                  rel="noreferrer"
-                  >{{ $t('common.learnMore') }}</a
-                >
-              </span>
-            </span>
-          </label>
+          <!-- TODO(brand-cleanup): "Help improve Comfy" telemetry toggle
+               removed — it already appears on the first-use consent
+               screen, so re-asking on Configure was redundant. Setting
+               continues to hydrate from `telemetryEnabled` for the watch
+               that persists user intent; the UI control on this screen
+               is gone. Leave the script-side wiring intact in case the
+               control is re-introduced on another surface.
+          <label class="brand-checkbox"> ... </label>
+          -->
 
           <div ref="advancedRef" class="config-advanced" :class="{ 'is-open': advancedOpen }">
             <button
@@ -761,7 +797,7 @@ defineExpose({ open })
                       id="inst-name"
                       :value="instName"
                       type="text"
-                      :placeholder="$t('common.namePlaceholder')"
+                      :placeholder="suggestedName || $t('common.namePlaceholder')"
                       @input="instName = ($event.target as HTMLInputElement).value"
                     />
                   </div>
@@ -777,19 +813,25 @@ defineExpose({ open })
 
                     <template v-if="field.type === 'text'">
                       <div class="path-input">
-                        <input
-                          :id="`sf-${field.id}`"
-                          type="text"
-                          :value="textFieldValues.get(field.id) ?? ''"
-                          :placeholder="field.defaultValue || ''"
-                          @input="
-                            textFieldValues.set(field.id, ($event.target as HTMLInputElement).value)
-                          "
-                        />
+                        <div class="brand-input config-source-text">
+                          <input
+                            :id="`sf-${field.id}`"
+                            type="text"
+                            :value="textFieldValues.get(field.id) ?? ''"
+                            :placeholder="field.defaultValue || ''"
+                            @input="
+                              textFieldValues.set(
+                                field.id,
+                                ($event.target as HTMLInputElement).value
+                              )
+                            "
+                          />
+                        </div>
                         <button
                           v-if="field.action"
                           :id="`sf-${field.id}-action`"
                           type="button"
+                          class="brand-tertiary"
                           @click="handleTextAction(field)"
                         >
                           {{ field.action.label }}
@@ -881,10 +923,7 @@ defineExpose({ open })
                           <span class="brand-select__trigger-value">
                             {{ getSelectTriggerLabel(field) }}
                           </span>
-                          <ChevronDown
-                            :size="14"
-                            class="brand-select__trigger-chevron"
-                          />
+                          <ChevronDown :size="14" class="brand-select__trigger-chevron" />
                         </span>
                         <select
                           :id="`sf-${field.id}`"
@@ -926,12 +965,8 @@ defineExpose({ open })
                               :value="i"
                             >
                               {{
-                                opt.description
-                                  ? `${opt.label}  —  ${opt.description}`
-                                  : opt.label
-                              }}{{
-                                opt.recommended ? ` (${$t('newInstall.recommended')})` : ''
-                              }}
+                                opt.description ? `${opt.label}  —  ${opt.description}` : opt.label
+                              }}{{ opt.recommended ? ` (${$t('newInstall.recommended')})` : '' }}
                             </option>
                           </template>
                         </select>
@@ -945,7 +980,20 @@ defineExpose({ open })
         </div>
 
         <div class="config-card__footer">
-          <button class="primary config-continue" :disabled="!canContinue" @click="handleSave">
+          <button
+            v-if="cameFromLocalBranch"
+            type="button"
+            class="brand-ghost config-back"
+            data-testid="config-back-to-local-branch"
+            @click="emit('back-to-local-branch')"
+          >
+            {{ $t('common.back') }}
+          </button>
+          <button
+            class="brand-primary config-continue"
+            :disabled="!canContinue"
+            @click="handleSave"
+          >
             {{ $t('common.continue') }}
           </button>
         </div>
@@ -1287,6 +1335,11 @@ defineExpose({ open })
   background: var(--brand-surface-bg);
   display: flex;
   justify-content: flex-end;
+  align-items: center;
+  gap: 12px;
+}
+.config-back {
+  margin-right: auto;
 }
 
 .config-field {
@@ -1297,6 +1350,14 @@ defineExpose({ open })
 .config-label {
   font-size: 13px;
   color: var(--neutral-200);
+}
+
+/* Source-text input inside Advanced (Remote Connection's URL field,
+ * etc.) — the .brand-input wrapper takes the row's flex 1 so the input
+ * and any sibling action button line up on the same row. */
+.config-source-text {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .config-select {
@@ -1319,7 +1380,7 @@ defineExpose({ open })
   align-items: stretch;
 }
 .config-path-row > .config-path-input,
-.config-path-row > button.brand-secondary {
+.config-path-row > button.brand-tertiary {
   height: 40px;
   padding-block: 0;
   display: flex;
@@ -1330,7 +1391,7 @@ defineExpose({ open })
   min-width: 0;
   padding-inline: 12px;
 }
-.config-path-row > button.brand-secondary {
+.config-path-row > button.brand-tertiary {
   padding-inline: 14px;
   font-size: 13px;
 }
@@ -1378,6 +1439,8 @@ defineExpose({ open })
 .config-advanced__body {
   min-height: 0;
   overflow: hidden;
+  padding-inline: 3px;
+  margin-inline: -3px;
   opacity: 0;
   transform: translateY(-4px);
   transition:
@@ -1510,28 +1573,5 @@ defineExpose({ open })
 
 .config-continue {
   min-width: 120px;
-}
-/* Brand-yellow primary CTA — scoped to this one button. The
- * Configure Continue is the launchpad into the install loader, so
- * the brand color emphasises "this is the action". Selector beats
- * the global `button.primary` blue via the .primary compound. All
- * other primary CTAs in the launcher stay blue. */
-.config-continue.primary {
-  background: var(--comfy-yellow);
-  border-color: var(--comfy-yellow);
-  color: var(--neutral-900);
-}
-.config-continue.primary:hover {
-  background: color-mix(in srgb, var(--comfy-yellow) 88%, #000);
-  border-color: color-mix(in srgb, var(--comfy-yellow) 88%, #000);
-}
-.config-continue.primary:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--comfy-yellow) 80%, var(--neutral-100));
-  outline-offset: 2px;
-}
-.config-continue.primary[disabled] {
-  background: color-mix(in srgb, var(--comfy-yellow) 35%, transparent);
-  border-color: color-mix(in srgb, var(--comfy-yellow) 35%, transparent);
-  color: color-mix(in srgb, var(--neutral-900) 55%, transparent);
 }
 </style>

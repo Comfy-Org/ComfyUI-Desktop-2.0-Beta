@@ -11,13 +11,14 @@ import TrackModal from '../views/TrackModal.vue'
 import LoadSnapshotModal from '../views/LoadSnapshotModal.vue'
 import QuickInstallModal from '../views/QuickInstallModal.vue'
 import FirstUseTakeover from '../views/FirstUseTakeover.vue'
+import MigrateConfirmTakeover from '../views/MigrateConfirmTakeover.vue'
 import { useTheme } from '../composables/useTheme'
 import { useSessionStore } from '../stores/sessionStore'
 import { useInstallationStore } from '../stores/installationStore'
 import { useProgressStore } from '../stores/progressStore'
 import { useLauncherPrefs } from '../composables/useLauncherPrefs'
 import { useListAction } from '../composables/useListAction'
-import { useMigrateAction } from '../composables/useMigrateAction'
+import { useMigrateAction, registerMigrateTakeover } from '../composables/useMigrateAction'
 import { useOverlay, type FlowComponent } from '../composables/useOverlay'
 import { useModal } from '../composables/useModal'
 import { emitTelemetryAction } from '../lib/telemetry'
@@ -120,6 +121,7 @@ const trackRef = ref<InstanceType<typeof TrackModal> | null>(null)
 const loadSnapshotRef = ref<InstanceType<typeof LoadSnapshotModal> | null>(null)
 const quickInstallRef = ref<InstanceType<typeof QuickInstallModal> | null>(null)
 const firstUseRef = ref<InstanceType<typeof FirstUseTakeover> | null>(null)
+const migrateTakeoverRef = ref<InstanceType<typeof MigrateConfirmTakeover> | null>(null)
 
 /**
  * Set when the first-use takeover's Local branch chains into the
@@ -142,7 +144,17 @@ const chainingFirstUseToNewInstall = ref(false)
  * this `null`, so NewInstallModal's silent `'ComfyUI'` fallback in
  * `handleSave()` still applies.
  */
+// TODO(brand-cleanup): `pendingFirstUseInstName` was the FirstUseTakeover →
+// NewInstallModal name bridge for the retired nameInstall step. Naming now
+// happens inline on the Configure screen. Kept for one review cycle in
+// case any external caller still references it; safe to remove after
+// sign-off.
 const pendingFirstUseInstName = ref<string | null>(null)
+
+/** Set by `handleFirstUseChainLocal` so NewInstallModal opens with a
+ *  Back link in its Configure footer (returns the user to the
+ *  FirstUseTakeover localBranch step). Cleared on close. */
+const pendingCameFromLocalBranch = ref(false)
 
 /**
  * Installation id of the Standalone install that the first-use chain
@@ -380,8 +392,13 @@ async function openFlowTakeover(component: FlowComponent, entrypoint: string): P
   await nextTick()
   if (component === 'new-install') {
     const initialName = pendingFirstUseInstName.value
+    const cameFromLocalBranch = pendingCameFromLocalBranch.value
     pendingFirstUseInstName.value = null
-    await newInstallRef.value?.open(initialName ? { initialName } : {})
+    pendingCameFromLocalBranch.value = false
+    await newInstallRef.value?.open({
+      ...(initialName ? { initialName } : {}),
+      ...(cameFromLocalBranch ? { cameFromLocalBranch } : {})
+    })
   } else if (component === 'track') trackRef.value?.open()
   else if (component === 'load-snapshot') loadSnapshotRef.value?.open()
   else if (component === 'quick-install') await quickInstallRef.value?.open()
@@ -550,15 +567,45 @@ async function handleFirstUseComplete(): Promise<void> {
  *  `useOverlay`, so the first-use takeover unmounts as the
  *  new-install takeover mounts. The completion flip is deferred to
  *  the new-install close path (see `handleNewInstallTakeoverClose`). */
-async function handleFirstUseChainLocal(payload?: { instName?: string }): Promise<void> {
+async function handleFirstUseChainLocal(
+  payload?: { cameFromLocalBranch?: boolean }
+): Promise<void> {
   chainingFirstUseToNewInstall.value = true
   pendingFirstUseAutoLaunchId.value = null
-  pendingFirstUseInstName.value = payload?.instName?.trim() || null
+  // TODO(brand-cleanup): instName bridge retired with the nameInstall
+  // step. Naming captured inline on the Configure screen.
+  pendingFirstUseInstName.value = null
+  pendingCameFromLocalBranch.value = payload?.cameFromLocalBranch === true
   await switchPanel('new-install', 'first_use')
-  // FirstUseTakeover.onUnmounted just pushed `'none'` as the chain
-  // swap unmounted it. Re-assert `'post-consent'` so the file-menu
-  // builder keeps the chain locked down to Skip Onboarding while
-  // the new-install / install-progress takeover is up.
+}
+
+/** Configure → Back: silent Tier 3 → Tier 3 swap back to the FirstUseTakeover
+ *  localBranch sub-step. Passes `initialStep: 'localBranch'` so the
+ *  takeover lands on the sub-step the user came from (default opens at
+ *  consent). Drops the chain bookkeeping so the close handler doesn't
+ *  mistake the swap for first-use completion. */
+async function handleNewInstallBackToLocalBranch(): Promise<void> {
+  chainingFirstUseToNewInstall.value = false
+  pendingFirstUseInstName.value = null
+  pendingCameFromLocalBranch.value = false
+  const statePromise = window.api
+    .getFirstUseState()
+    .catch(() => ({ skipPick: false, hasLegacyDesktop: false }))
+  const ok = await openOverlay({
+    kind: 'takeover',
+    component: 'first-use',
+    cancelCopyKey: 'quit-setup'
+  })
+  if (!ok) return
+  await nextTick()
+  const state = await statePromise
+  await firstUseRef.value?.open({
+    skipPick: state.skipPick,
+    hasLegacyDesktop: state.hasLegacyDesktop,
+    initialStep: 'localBranch'
+  })
+  // Re-assert post-consent so the file-menu keeps Skip Onboarding as
+  // the only entry while the takeover is up.
   window.api.setFirstUseMode('post-consent')
 }
 
@@ -586,11 +633,10 @@ async function handleFirstUseChainMigrate(): Promise<void> {
     handleFirstUseChainLocal()
     return
   }
-  // confirmMigration shows its own modal (variant pick / preview /
-  // confirm); a `null` return means user cancelled, in which case we
-  // leave the takeover mounted on the localBranch step (no state
-  // change).
-  const result = await confirmMigration(legacy)
+  // First-use chain renders the migrate confirm as a brand takeover
+  // (registered below in onMounted). Other callsites (MigrationBanner,
+  // DetailModal) default to the legacy Modal surface.
+  const result = await confirmMigration(legacy, undefined, { surface: 'takeover' })
   if (!result) return
 
   // Pre-mark the chain so the new install kicked off by migration
@@ -932,6 +978,15 @@ async function showAppUpdateDownloadPrompt(version: string | null): Promise<void
 }
 
 onMounted(async () => {
+  // Register the brand-takeover surface so `useMigrateAction` can route
+  // chain-migrate confirms here instead of the legacy Modal. Other
+  // callsites (MigrationBanner, DetailModal) keep the Modal default.
+  registerMigrateTakeover({
+    open: (title, confirmLabel) =>
+      migrateTakeoverRef.value!.open(title, confirmLabel),
+    update: (opts) => migrateTakeoverRef.value?.update(opts)
+  })
+
   // Register the `panel-trigger-overlay` listener BEFORE any `await` so
   // a deep-link IPC fired by main right after the panelView's first
   // `did-finish-load` is never dropped. The install-update branch
@@ -1114,6 +1169,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  registerMigrateTakeover(null)
   unsubPanel?.()
   unsubLocale?.()
   unsubCloseRequest?.()
@@ -1203,6 +1259,7 @@ onUnmounted(() => {
         @close="handleNewInstallTakeoverClose"
         @navigate-list="handleNewInstallTakeoverClose"
         @show-progress="handleShowProgress"
+        @back-to-local-branch="handleNewInstallBackToLocalBranch"
       />
       <TrackModal
         v-else-if="currentOverlay.component === 'track'"
@@ -1233,6 +1290,7 @@ onUnmounted(() => {
     </template>
 
     <ModalDialog />
+    <MigrateConfirmTakeover ref="migrateTakeoverRef" />
   </div>
 </template>
 

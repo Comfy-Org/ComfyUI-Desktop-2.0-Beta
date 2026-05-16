@@ -36,7 +36,7 @@
  * locale; the host calls it post-mount the same way the flow modals
  * are reset.
  */
-import { nextTick, ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { Check, Copy, FolderInput, Info } from 'lucide-vue-next'
 import TakeoverHeader from '../components/TakeoverHeader.vue'
 import ModalShell from '../components/ModalShell.vue'
@@ -62,13 +62,12 @@ const emit = defineEmits<{
   'complete-skip': []
   /** Local branch picked — host should chain into the new-install
    *  Tier 3 takeover (Tier 3 → Tier 3 swap is silent) and mark
-   *  `firstUseCompleted` once new-install ends successfully.
-   *  When the Legacy-Desktop sub-flow surfaces the name step, the
-   *  user-chosen name is forwarded as the payload so the chained
-   *  new-install can seed its name field. Fresh-machine path (no
-   *  legacy install) emits with no payload — NewInstallModal's silent
-   *  `'ComfyUI'` fallback in `handleSave()` applies. */
-  'chain-local': [payload?: { instName?: string }]
+   *  `firstUseCompleted` once new-install ends successfully. Naming
+   *  happens inline on the Configure screen now. The optional payload
+   *  flags whether the chain was reached via the Local → Start Fresh
+   *  sub-step (vs. the direct no-legacy path) so the Configure screen
+   *  can surface a Back link to return the user to localBranch. */
+  'chain-local': [payload?: { cameFromLocalBranch?: boolean }]
   /** Local-branch follow-up: a Legacy Desktop install was detected
    *  and the user chose to migrate it instead of installing fresh.
    *  Host runs the migration flow (`useMigrateAction.confirmMigration`
@@ -122,13 +121,10 @@ const termsOpen = ref(false)
  *  telemetry checkbox is a separate, optional opt-in (see
  *  `telemetryEnabled`). */
 const acceptedTos = ref(false)
-/** Holds the user-chosen Standalone install name for the
- *  `nameInstall` sub-step. Forwarded with `chain-local` so
- *  NewInstallModal can pre-seed `instName` instead of falling back to
- *  `'ComfyUI'`. Blank input still allows Continue — the silent
- *  fallback in `handleSave()` covers that path. */
-const installName = ref('')
-const nameInstallInput = ref<HTMLInputElement | null>(null)
+// TODO(brand-cleanup): nameInstall step merged into Configure screen —
+// remove these refs after reviewer sign-off.
+// const installName = ref('')
+// const nameInstallInput = ref<HTMLInputElement | null>(null)
 
 const isChinese = computed(() => locale.value.startsWith('zh'))
 
@@ -141,8 +137,7 @@ const isBrandStep = computed(
   () =>
     step.value === 'consent' ||
     step.value === 'pick' ||
-    step.value === 'localBranch' ||
-    step.value === 'nameInstall'
+    step.value === 'localBranch'
 )
 
 /** Cancel on the consent step closes the host window. The figma's
@@ -255,27 +250,25 @@ function chooseMigrate(): void {
 
 function chooseInstallNew(): void {
   emitTelemetryAction('desktop2.first_use.local_branch_chosen', { choice: 'install_new' })
-  // Detour to the name step before emitting `chain-local` — see
-  // `confirmInstallName` for the actual emit. Completion telemetry is
-  // also deferred until the user commits to install on the name step.
-  step.value = 'nameInstall'
-}
-
-/** Name step → chain. Forward the trimmed name as the `chain-local`
- *  payload so NewInstallModal pre-seeds `instName`; blank trim emits
- *  with no payload so the existing `'ComfyUI'` fallback applies. */
-function confirmInstallName(): void {
-  const trimmed = installName.value.trim()
+  // Skip the dedicated name screen — naming now happens inline on the
+  // Configure screen (NewInstallModal brand-config). Flag the origin so
+  // Configure surfaces a Back link returning to localBranch.
   emitCompleted('local-new')
-  emit('chain-local', trimmed ? { instName: trimmed } : undefined)
+  emit('chain-local', { cameFromLocalBranch: true })
 }
 
-/** Name step Back — returns to the Migrate-vs-Install-new choice. The
- *  chain has not fired yet (we never emitted `chain-local`), so this
- *  is a pure local step transition. */
-function backFromNameInstall(): void {
-  step.value = 'localBranch'
-}
+// TODO(brand-cleanup): name-install step merged into the Configure
+// screen. `confirmInstallName` / `backFromNameInstall` / `installName` /
+// `nameInstallInput` / the `nameInstall` step branch / its auto-focus
+// watcher are kept commented below for one review cycle, then removed.
+// function confirmInstallName(): void {
+//   const trimmed = installName.value.trim()
+//   emitCompleted('local-new')
+//   emit('chain-local', trimmed ? { instName: trimmed } : undefined)
+// }
+// function backFromNameInstall(): void {
+//   step.value = 'localBranch'
+// }
 
 interface OpenOpts {
   /** Suppress the cloud-vs-local pick — caller has already detected
@@ -285,16 +278,21 @@ interface OpenOpts {
    *  because a Legacy Desktop install was detected on this machine.
    *  Defaults to false. */
   hasLegacyDesktop?: boolean
+  /** Skip ahead to a specific brand step on open. Used by the
+   *  Configure → Back chain to land the user back on the localBranch
+   *  sub-step instead of restarting at consent. Defaults to 'consent'. */
+  initialStep?: 'consent' | 'pick' | 'localBranch'
 }
 
 async function open(opts: OpenOpts = {}): Promise<void> {
-  step.value = 'consent'
+  step.value = opts.initialStep ?? 'consent'
   skipPick.value = opts.skipPick === true
   hasLegacyDesktop.value = opts.hasLegacyDesktop === true
   whyCloudOpen.value = false
   termsOpen.value = false
   acceptedTos.value = false
-  installName.value = ''
+  // TODO(brand-cleanup): installName.value = '' — ref removed; Configure
+  // screen now owns naming.
   // Reset funnel-completion bookkeeping so a takeover replay measures
   // duration / steps from the replay, not from the original mount.
   mountedAt = Date.now()
@@ -344,12 +342,11 @@ watch(
       skip_pick: skipPick.value,
       has_legacy_desktop: hasLegacyDesktop.value
     })
-    // Auto-focus the name input when entering the nameInstall step so
-    // the user can start typing immediately. `nextTick` waits for the
-    // template branch to mount the input.
-    if (current === 'nameInstall') {
-      void nextTick(() => nameInstallInput.value?.focus())
-    }
+    // TODO(brand-cleanup): nameInstall step retired; Configure screen
+    // owns its own input focus.
+    // if (current === 'nameInstall') {
+    //   void nextTick(() => nameInstallInput.value?.focus())
+    // }
   },
   { immediate: true }
 )
@@ -415,7 +412,7 @@ defineExpose({ open })
       </div>
       <div class="consent-actions">
         <button
-          class="primary consent-get-started"
+          class="brand-primary consent-get-started"
           type="button"
           data-testid="first-use-accept-consent"
           :disabled="!acceptedTos"
@@ -424,7 +421,7 @@ defineExpose({ open })
           {{ $t('firstUse.consentGetStarted') }}
         </button>
         <button
-          class="consent-cancel"
+          class="brand-ghost consent-cancel"
           type="button"
           data-testid="first-use-cancel-consent"
           @click="cancelConsent"
@@ -503,46 +500,14 @@ defineExpose({ open })
       </div>
     </div>
 
-    <!-- Step 5 (conditional): name the new Standalone install before
-         chaining into NewInstallModal. Only reached via Start Fresh on
-         the localBranch sub-step (i.e. hasLegacyDesktop === true). -->
-    <div v-else-if="step === 'nameInstall'" class="brand-hero name-install-hero">
-      <h1 class="brand-title">{{ $t('firstUse.nameInstallTitle') }}</h1>
-      <p class="brand-lead">{{ $t('firstUse.nameInstallLead') }}</p>
-      <form class="name-install-card" @submit.prevent="confirmInstallName">
-        <label class="name-install-label" for="first-use-install-name">
-          {{ $t('firstUse.nameInstallLabel') }}
-        </label>
-        <div class="brand-input name-install-input">
-          <input
-            id="first-use-install-name"
-            ref="nameInstallInput"
-            v-model="installName"
-            type="text"
-            :placeholder="$t('common.namePlaceholder')"
-            data-testid="first-use-install-name"
-          />
-        </div>
-        <p class="name-install-hint">{{ $t('firstUse.nameInstallHint') }}</p>
-        <div class="name-install-actions">
-          <button
-            type="button"
-            class="name-install-back"
-            data-testid="first-use-name-install-back"
-            @click="backFromNameInstall"
-          >
-            {{ $t('common.back') }}
-          </button>
-          <button
-            type="submit"
-            class="primary name-install-continue"
-            data-testid="first-use-name-install-continue"
-          >
-            {{ $t('common.continue') }}
-          </button>
-        </div>
-      </form>
-    </div>
+    <!--
+    TODO(brand-cleanup): nameInstall step retired. The Configure screen
+    (NewInstallModal brand-config) now hosts the Name input inline. The
+    original template/script lives in git history. Restore script refs
+    (installName, nameInstallInput, confirmInstallName, backFromNameInstall)
+    and the isBrandStep branch if this is ever resurrected.
+    -->
+
 
     <template #footer-left>
       <button
@@ -661,40 +626,6 @@ defineExpose({ open })
   align-items: center;
   gap: 12px;
   margin-top: var(--takeover-gap-lg);
-}
-.consent-get-started {
-  padding: 10px 18px;
-  border-radius: 8px;
-  font-size: var(--takeover-fs-body);
-}
-.consent-get-started[disabled] {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-.consent-get-started[disabled]:hover {
-  background: var(--accent-primary);
-  border-color: var(--accent-primary);
-}
-.consent-cancel {
-  background: transparent;
-  border: none;
-  color: var(--neutral-200);
-  font: inherit;
-  font-size: var(--takeover-fs-body);
-  padding: 10px 16px;
-  border-radius: 8px;
-  cursor: pointer;
-  transition:
-    background 120ms ease,
-    color 120ms ease;
-}
-.consent-cancel:hover {
-  color: var(--neutral-100);
-  background: color-mix(in oklab, var(--neutral-100) 8%, transparent);
-}
-.consent-cancel:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
 }
 
 /* Pick step. Hero/title/lead live as the global `.brand-*` classes
@@ -827,79 +758,5 @@ defineExpose({ open })
   gap: 8px;
 }
 
-/* Name-install step: brand-wrapped naming page reached from
- * localBranch → Start Fresh. Mirrors the consent step's hero shape but
- * with a single labelled input inside a card and an inline Back +
- * Continue action row at the bottom of the card. */
-.name-install-hero {
-  max-width: 560px;
-  gap: var(--takeover-gap-md);
-}
-.name-install-card {
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 18px;
-  border-radius: 10px;
-  border: 1px solid var(--brand-surface-border);
-  background: var(--brand-surface-bg);
-  text-align: left;
-}
-.name-install-label {
-  font-size: var(--takeover-fs-body);
-  color: var(--neutral-200);
-}
-.name-install-input input {
-  width: 100%;
-  background: transparent;
-  border: none;
-  outline: none;
-  color: var(--neutral-100);
-  font: inherit;
-  font-size: var(--takeover-fs-body);
-}
-.name-install-hint {
-  margin: 4px 0 0 0;
-  font-size: var(--takeover-fs-caption);
-  color: var(--neutral-300);
-}
-.name-install-actions {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-top: var(--takeover-gap-md);
-}
-.name-install-back {
-  background: transparent;
-  border: none;
-  color: var(--neutral-200);
-  font: inherit;
-  font-size: var(--takeover-fs-body);
-  padding: 10px 14px;
-  border-radius: 8px;
-  cursor: pointer;
-  transition:
-    background 120ms ease,
-    color 120ms ease;
-}
-.name-install-back:hover {
-  color: var(--neutral-100);
-  background: color-mix(in oklab, var(--neutral-100) 8%, transparent);
-}
-.name-install-back:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
-}
-/* Brand-CTA shape (padding/radius/size) is duplicated here from
- * `.consent-get-started` — second caller is the threshold to promote,
- * but the consent button is a primary CTA on a hero column while this
- * one lives inside a card. Leaving as scoped duplicate until a third
- * caller justifies a shared `.brand-cta`. */
-.name-install-continue {
-  padding: 10px 18px;
-  border-radius: 8px;
-  font-size: var(--takeover-fs-body);
-}
+/* TODO(brand-cleanup): name-install scoped styles removed — step retired. */
 </style>

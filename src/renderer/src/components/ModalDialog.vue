@@ -2,11 +2,11 @@
 import { ref, computed, watch, nextTick, onMounted, onUnmounted, reactive } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useModal, type ModalOption } from '../composables/useModal'
-import { Check } from 'lucide-vue-next'
 import { sortedCardOptions } from '../lib/variants'
 import type { FieldOption } from '../types/ipc'
 import InfoTooltip from './InfoTooltip.vue'
 import VariantCardGrid from './VariantCardGrid.vue'
+import MigrateConfirmBody from './MigrateConfirmBody.vue'
 import { formatNodeVersion } from '../lib/snapshots'
 
 const { t } = useI18n()
@@ -25,6 +25,14 @@ const isMigrateConfirm = computed(() => state.type === 'confirm' && state.snapsh
 
 function selectVariant(opt: FieldOption): void {
   updateConfirm({ selectedVariant: opt })
+}
+
+/** MigrateConfirmBody emits when a checkbox flips. Mirror the change
+ *  back into `state.checkboxes` so `useModal.getLastCheckboxValues()`
+ *  picks up the new value at submit time. */
+function onMigrateCheckboxToggle(id: string, checked: boolean): void {
+  const cb = state.checkboxes.find((c) => c.id === id)
+  if (cb) cb.checked = checked
 }
 
 const inputValue = ref('')
@@ -238,46 +246,12 @@ onUnmounted(() => {
                to counts only.
                ────────────────────────────────────────────────────── -->
           <template v-if="isMigrateConfirm && !state.loading && state.snapshotPreview">
-            <div class="mig-summary">
-              <div class="mig-summary__row">
-                <span class="mig-summary__label">{{ $t('snapshots.comfyuiVersion') }}</span>
-                <span class="mig-summary__value">{{ state.snapshotPreview.comfyuiVersion }}</span>
-              </div>
-              <div class="mig-summary__row">
-                <span class="mig-summary__label">{{ $t('snapshots.customNodes') }}</span>
-                <span class="mig-summary__value">{{
-                  state.snapshotPreview.customNodes.length
-                }}</span>
-              </div>
-              <div class="mig-summary__row">
-                <span class="mig-summary__label">{{ $t('snapshots.pipPackages') }}</span>
-                <span class="mig-summary__value">{{ state.snapshotPreview.pipPackageCount }}</span>
-              </div>
-            </div>
-
-            <div v-if="state.messageDetails.length" class="mig-actions-list">
-              <div v-for="(group, gi) in state.messageDetails" :key="gi" class="mig-actions-group">
-                <span class="mig-actions-label">{{ group.label }}</span>
-                <ul class="mig-actions-items">
-                  <li v-for="(item, ii) in group.items" :key="ii" class="mig-actions-item">
-                    <Check
-                      :size="14"
-                      :stroke-width="2"
-                      class="mig-actions-check"
-                      aria-hidden="true"
-                    />
-                    <span>{{ item }}</span>
-                  </li>
-                </ul>
-              </div>
-            </div>
-
-            <div v-if="state.checkboxes.length" class="modal-options">
-              <label v-for="cb in state.checkboxes" :key="cb.id" class="modal-option">
-                <input v-model="cb.checked" type="checkbox" />
-                <span>{{ cb.label }}</span>
-              </label>
-            </div>
+            <MigrateConfirmBody
+              :preview="state.snapshotPreview"
+              :details="state.messageDetails"
+              :checkboxes="state.checkboxes"
+              @toggle-checkbox="onMigrateCheckboxToggle"
+            />
           </template>
 
           <!-- Legacy snapshot preview (expandables) — preserved but
@@ -507,75 +481,4 @@ onUnmounted(() => {
   </Teleport>
 </template>
 
-<style scoped>
-/* Migrate-to-Standalone confirm body. Scoped because the layout is
- * one-off: compact summary card (counts only — per CTO ask) + an
- * action list. Brand-yellow primary CTA is parallel to the Configure
- * Continue precedent — both are launchpads into the install loader. */
-.mig-summary {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 14px 16px;
-  border: 1px solid var(--brand-surface-border);
-  border-radius: 8px;
-  background: var(--brand-surface-bg);
-}
-.mig-summary__row {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  padding: 6px 0;
-  font-size: var(--takeover-fs-body);
-}
-.mig-summary__row + .mig-summary__row {
-  border-top: 1px solid color-mix(in oklab, var(--neutral-100) 6%, transparent);
-}
-.mig-summary__label {
-  color: var(--neutral-300);
-}
-.mig-summary__value {
-  color: var(--neutral-100);
-  font-weight: 500;
-}
-
-.mig-actions-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.mig-actions-group {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.mig-actions-label {
-  font-size: var(--takeover-fs-caption);
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--neutral-300);
-}
-.mig-actions-items {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  color: var(--neutral-100);
-}
-.mig-actions-item {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  font-size: var(--takeover-fs-body);
-  color: var(--neutral-200);
-  line-height: 1.5;
-}
-.mig-actions-check {
-  flex: 0 0 auto;
-  margin-top: 4px;
-  color: var(--seconda);
-}
-</style>
+<style scoped></style>

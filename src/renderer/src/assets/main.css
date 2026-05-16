@@ -553,29 +553,98 @@ button.looks-disabled {
   color: var(--neutral-400);
 }
 
-button.brand-secondary {
+/* Canonical brand button system. Four classes cover every CTA in the
+ * brand takeover surfaces (install flow, brand-wrapped modals):
+ *   - primary   : high-emphasis (yellow). The action.
+ *   - secondary : medium-emphasis (blue solid). Supporting action.
+ *   - tertiary  : low-emphasis (frosted glass). Field-adjacent helper
+ *                 actions like Browse / Action — sits next to an input
+ *                 inside a frosted card without competing.
+ *   - ghost     : zero-emphasis (transparent). Cancel, Back, Skip.
+ * Inside Comfy proper (dashboard) buttons still use the legacy
+ * `primary` / `danger` / `accent` classes above. When dashboard gets
+ * its refresh, those callsites migrate here too — one source of truth. */
+button.brand-primary,
+button.brand-secondary,
+button.brand-tertiary,
+button.brand-ghost {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   padding: 10px 16px;
-  border: 1px solid var(--brand-surface-border);
   border-radius: 6px;
-  background: var(--brand-surface-bg);
-  color: var(--neutral-100);
+  border: 1px solid transparent;
   font: inherit;
   font-size: var(--takeover-fs-body);
+  font-weight: 500;
   cursor: pointer;
   transition:
+    background 120ms ease,
     border-color 120ms ease,
-    background 120ms ease;
+    color 120ms ease;
 }
-button.brand-secondary:hover {
-  border-color: var(--brand-surface-border-hover);
-  background: var(--brand-surface-bg-hover);
-}
-button.brand-secondary:focus-visible {
+button.brand-primary:focus-visible,
+button.brand-secondary:focus-visible,
+button.brand-tertiary:focus-visible,
+button.brand-ghost:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
+}
+button.brand-primary[disabled],
+button.brand-secondary[disabled],
+button.brand-tertiary[disabled],
+button.brand-ghost[disabled] {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+/* Yellow primary — install-flow CTAs (Get Started, Continue, Try Cloud). */
+button.brand-primary {
+  background: var(--comfy-yellow);
+  border-color: var(--comfy-yellow);
+  color: var(--neutral-900);
+}
+button.brand-primary:hover:not([disabled]) {
+  background: color-mix(in srgb, var(--comfy-yellow) 88%, #000);
+  border-color: color-mix(in srgb, var(--comfy-yellow) 88%, #000);
+}
+button.brand-primary:focus-visible {
+  outline-color: color-mix(in srgb, var(--comfy-yellow) 80%, var(--neutral-100));
+}
+
+/* Blue secondary — supporting action next to a primary (Browse, etc.). */
+button.brand-secondary {
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+  color: #fff;
+}
+button.brand-secondary:hover:not([disabled]) {
+  background: color-mix(in srgb, var(--accent-primary) 88%, #000);
+  border-color: color-mix(in srgb, var(--accent-primary) 88%, #000);
+}
+
+/* Frosted-glass tertiary — sits next to inputs inside brand-surface
+ * cards (Browse, source-field actions). Low-emphasis so it doesn't
+ * compete with the primary CTA, but still reads as a button. */
+button.brand-tertiary {
+  background: var(--brand-surface-bg);
+  border-color: var(--brand-surface-border);
+  color: var(--neutral-100);
+}
+button.brand-tertiary:hover:not([disabled]) {
+  background: var(--brand-surface-bg-hover);
+  border-color: var(--brand-surface-border-hover);
+}
+
+/* Ghost — low-importance escape hatches (Cancel, Back, Skip). */
+button.brand-ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--neutral-300);
+}
+button.brand-ghost:hover:not([disabled]) {
+  color: var(--neutral-100);
+  background: var(--brand-surface-bg);
 }
 
 .brand-checkbox {
@@ -744,7 +813,7 @@ input[type='checkbox']:checked::after {
 .field {
   display: flex;
   flex-direction: column;
-  margin-bottom: 12px;
+  margin-top: 16px;
 }
 .path-input {
   display: flex;
@@ -1660,30 +1729,6 @@ input[type='checkbox']:checked::after {
   border: none;
 }
 
-/* Brand-yellow CTA used on takeover screens (e.g. WhyTryCloudModal's
- * "Try Cloud For Free"). Single source of truth for the yellow button
- * pattern so downstream brand screens can reuse it. */
-.btn-brand-primary {
-  background: var(--comfy-yellow);
-  color: var(--neutral-900);
-  font-family: 'Inter', system-ui, sans-serif;
-  font-weight: 500;
-  border: none;
-  border-radius: 8px;
-  padding: 10px 18px;
-  font-size: var(--takeover-fs-body);
-  cursor: pointer;
-  transition:
-    background 120ms ease,
-    transform 120ms ease;
-}
-.btn-brand-primary:hover {
-  background: color-mix(in oklab, var(--comfy-yellow) 88%, var(--neutral-800) 12%);
-}
-.btn-brand-primary:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
-}
 .view-modal-content {
   background: var(--bg);
   border: 1px solid var(--border);

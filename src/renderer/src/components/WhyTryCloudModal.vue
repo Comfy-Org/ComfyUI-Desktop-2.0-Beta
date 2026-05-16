@@ -87,7 +87,7 @@ onUnmounted(() => {
               </div>
               <footer class="why-cloud-footer">
                 <button
-                  class="why-cloud-maybe"
+                  class="brand-ghost why-cloud-maybe"
                   type="button"
                   data-testid="why-cloud-maybe"
                   @click="emit('close')"
@@ -95,7 +95,7 @@ onUnmounted(() => {
                   {{ $t('firstUse.whyCloud.maybeLater') }}
                 </button>
                 <button
-                  class="btn-brand-primary"
+                  class="brand-primary"
                   type="button"
                   data-testid="why-cloud-try"
                   @click="emit('try-cloud')"
@@ -266,23 +266,5 @@ onUnmounted(() => {
   gap: 16px;
   padding-top: clamp(1rem, 1.5vw, 1.5rem);
   border-top: 1px solid color-mix(in oklab, var(--neutral-100) 8%, transparent);
-}
-.why-cloud-maybe {
-  background: transparent;
-  border: none;
-  color: var(--neutral-100);
-  font-size: var(--takeover-fs-body);
-  cursor: pointer;
-  padding: 10px 18px;
-}
-.why-cloud-maybe:hover {
-  color: var(--text);
-  background: color-mix(in oklab, var(--neutral-100) 8%, transparent);
-  transition: background 120ms ease;
-}
-.why-cloud-maybe:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
-  border-radius: 4px;
 }
 </style>
