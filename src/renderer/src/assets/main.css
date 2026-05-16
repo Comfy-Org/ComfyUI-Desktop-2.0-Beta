@@ -658,6 +658,142 @@ button.brand-checkbox__link:focus-visible {
   outline-offset: 2px;
 }
 
+/* Brand-card layout primitives — shared across the Tier 3 install
+ * wizards (NewInstall, Track, LoadSnapshot, QuickInstall) so the
+ * .config-shell / .config-card / .config-field markup stays
+ * single-sourced. Modal-specific extensions (variant lists, advanced
+ * disclosure, drop zones) stay scoped to the owning modal. */
+.config-shell {
+  align-self: stretch;
+  height: 100%;
+  max-height: 100%;
+  width: 100%;
+  max-width: 640px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding-block: clamp(1.5rem, 4vh, 3rem);
+  min-height: 0;
+}
+
+.config-card {
+  width: 100%;
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--brand-surface-border);
+  border-radius: 8px;
+  background: var(--brand-surface-bg);
+  backdrop-filter: blur(var(--brand-surface-blur));
+  overflow: hidden;
+  text-align: left;
+}
+
+.config-card__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  scrollbar-width: none;
+}
+.config-card__body::-webkit-scrollbar {
+  display: none;
+}
+
+.config-card__footer {
+  flex: 0 0 auto;
+  padding: 14px 20px;
+  border-top: 1px solid var(--brand-surface-border);
+  background: var(--brand-surface-bg);
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.config-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.config-label {
+  font-size: 13px;
+  color: var(--neutral-200);
+}
+
+.config-select {
+  padding: 8px 12px;
+  cursor: default;
+}
+.config-select__value {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--neutral-100);
+  font-size: 14px;
+}
+
+/* Read-only painted field (no native input). Suppresses the text
+ * cursor since there is nothing to type into. */
+.brand-input--readonly {
+  cursor: default;
+}
+
+.config-path-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+.config-path-row > .config-path-input,
+.config-path-row > button.brand-secondary {
+  height: 40px;
+  padding-block: 0;
+  display: flex;
+  align-items: center;
+}
+.config-path-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding-inline: 12px;
+}
+.config-path-row > button.brand-secondary {
+  padding-inline: 14px;
+  font-size: 13px;
+}
+
+/* Brand-yellow primary CTA — the launchpad button on each Tier 3
+ * wizard's footer. Selector beats the global `button.primary` blue
+ * via the .primary compound. All other primary CTAs in the launcher
+ * stay blue. */
+.config-continue {
+  min-width: 120px;
+}
+.config-continue.primary {
+  background: var(--comfy-yellow);
+  border-color: var(--comfy-yellow);
+  color: var(--neutral-900);
+}
+.config-continue.primary:hover {
+  background: color-mix(in srgb, var(--comfy-yellow) 88%, #000);
+  border-color: color-mix(in srgb, var(--comfy-yellow) 88%, #000);
+}
+.config-continue.primary:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--comfy-yellow) 80%, var(--neutral-100));
+  outline-offset: 2px;
+}
+.config-continue.primary[disabled] {
+  background: color-mix(in srgb, var(--comfy-yellow) 35%, transparent);
+  border-color: color-mix(in srgb, var(--comfy-yellow) 35%, transparent);
+  color: color-mix(in srgb, var(--neutral-900) 55%, transparent);
+}
+
 button.loading {
   opacity: 0.7;
   pointer-events: none;

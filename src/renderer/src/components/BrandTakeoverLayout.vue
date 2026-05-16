@@ -12,6 +12,10 @@
  *
  * Slots:
  *   - default: hero content (heading, body, action).
+ *   - back: top-right affordance for "back to dashboard" on Tier 3
+ *     install-flow wizards (Track / LoadSnapshot / QuickInstall).
+ *     First-use surfaces (NewInstallModal, FirstUseTakeover) leave
+ *     this empty.
  *   - footer-left: bottom-left affordance (e.g. pick step's
  *     "Why try Cloud?"). Rendered inside `.brand-outer-frame` so any
  *     `position: absolute` rules on the slotted child resolve against
@@ -45,6 +49,9 @@ withDefaults(
           <div class="brand-beam brand-beam--2" aria-hidden="true" v-html="beam2Svg" />
           <div class="brand-logo-row">
             <ComfyCLogo class="brand-logo" />
+          </div>
+          <div v-if="$slots.back" class="brand-back-row">
+            <slot name="back" />
           </div>
           <slot />
         </div>
@@ -147,5 +154,18 @@ withDefaults(
   display: inline-flex;
   width: var(--takeover-logo-size);
   height: var(--takeover-logo-size);
+}
+
+/* Back-to-dashboard affordance for Tier 3 wizards. Mirrors logo
+ * placement on the opposite corner so it never collides with the
+ * heading or the brand beams. */
+.brand-back-row {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 2;
+  padding: 16px 15px;
+  display: flex;
+  align-items: center;
 }
 </style>

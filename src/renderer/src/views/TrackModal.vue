@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { ref, computed, toRaw } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { ChevronDown, HardDrive } from 'lucide-vue-next'
 import { useModal } from '../composables/useModal'
-import TakeoverHeader from '../components/TakeoverHeader.vue'
 import TakeoverBack from '../components/TakeoverBack.vue'
-import ModalShell from '../components/ModalShell.vue'
+import BrandTakeoverLayout from '../components/BrandTakeoverLayout.vue'
 
 import type { ProbeResult } from '../types/ipc'
 import { emitTelemetryAction, toCountBucket } from '../lib/telemetry'
@@ -103,6 +103,14 @@ const effectiveVenvName = computed(() => {
   return p.split(sep).pop() || ''
 })
 
+const detectedTriggerLabel = computed(() => {
+  if (probing.value) return t('track.detecting')
+  if (probeResults.value.length === 0) {
+    return trackPath.value ? t('track.noDetected') : t('track.browseDirFirst')
+  }
+  return selectedProbe.value?.sourceLabel || ''
+})
+
 async function handleBrowseVenv(): Promise<void> {
   const defaultPath = effectiveVenvPath.value || trackPath.value || undefined
   const dir = await window.api.browseFolder(defaultPath)
@@ -149,69 +157,85 @@ defineExpose({ open })
 </script>
 
 <template>
-  <ModalShell binding @close="emit('close')">
-      <template #header>
-        <div class="takeover-stacked-header">
-          <TakeoverBack
-            :label="$t('common.backToDashboard')"
-            @back="emit('close')"
-          />
-          <TakeoverHeader :title="$t('track.grandTitle')" :subtitle="$t('track.grandSubtitle')" />
-        </div>
-      </template>
-        <div class="view-scroll">
+  <BrandTakeoverLayout>
+    <template #back>
+      <TakeoverBack
+        :label="$t('common.backToDashboard')"
+        @back="emit('close')"
+      />
+    </template>
+    <div class="config-shell">
+      <h1 class="brand-title">{{ $t('track.grandTitle') }}</h1>
+      <p class="brand-lead">{{ $t('track.grandSubtitle') }}</p>
+      <div class="config-card">
+        <div class="config-card__body">
           <!-- Track path -->
-          <div class="field">
-            <label for="track-path">{{ $t('track.installDir') }}</label>
-            <div class="path-input">
-              <input
-                id="track-path"
-                v-model="trackPath"
-                type="text"
-                :placeholder="$t('track.selectDir')"
-              />
-              <button @click="handleBrowse">{{ $t('common.browse') }}</button>
+          <div class="config-field">
+            <label class="config-label" for="track-path">{{ $t('track.installDir') }}</label>
+            <div class="config-path-row">
+              <div class="brand-input config-path-input">
+                <HardDrive :size="14" aria-hidden="true" />
+                <input
+                  id="track-path"
+                  v-model="trackPath"
+                  type="text"
+                  :placeholder="$t('track.selectDir')"
+                />
+              </div>
+              <button class="brand-secondary" type="button" @click="handleBrowse">
+                {{ $t('common.browse') }}
+              </button>
             </div>
           </div>
 
           <!-- Installation name -->
-          <div class="field">
-            <label for="track-name">{{ $t('common.name') }}</label>
-            <input
-              id="track-name"
-              v-model="trackName"
-              type="text"
-              :placeholder="$t('common.namePlaceholder')"
-            />
+          <div class="config-field">
+            <label class="config-label" for="track-name">{{ $t('common.name') }}</label>
+            <div class="brand-input">
+              <input
+                id="track-name"
+                v-model="trackName"
+                type="text"
+                :placeholder="$t('common.namePlaceholder')"
+              />
+            </div>
           </div>
 
           <!-- Detected type -->
-          <div class="field">
-            <label for="track-source">{{ $t('track.detectedType') }}</label>
-            <div v-if="probing" class="track-probing with-spinner">{{ $t('track.detecting') }}</div>
-            <select
-              v-else
-              id="track-source"
-              :disabled="probeResults.length <= 1"
-              @change="handleSourceChange"
+          <div class="config-field">
+            <label class="config-label" for="track-source">{{ $t('track.detectedType') }}</label>
+            <div
+              v-if="probing"
+              class="brand-input config-select brand-input--readonly with-spinner"
+              role="textbox"
+              aria-readonly="true"
             >
-              <option v-if="probeResults.length === 0">
-                {{
-                  trackPath
-                    ? $t('track.noDetected')
-                    : $t('track.browseDirFirst')
-                }}
-              </option>
-              <template v-else>
-                <option
-                  v-for="(r, i) in probeResults"
-                  :key="i"
-                  :value="i"
-                >
-                  {{ r.sourceLabel }}
+              <span class="config-select__value">{{ $t('track.detecting') }}</span>
+            </div>
+            <div v-else class="brand-input brand-select">
+              <span class="brand-select__trigger" aria-hidden="true">
+                <span class="brand-select__trigger-value">{{ detectedTriggerLabel }}</span>
+                <ChevronDown :size="14" class="brand-select__trigger-chevron" />
+              </span>
+              <select
+                id="track-source"
+                :disabled="probeResults.length <= 1"
+                @change="handleSourceChange"
+              >
+                <option v-if="probeResults.length === 0">
+                  {{ detectedTriggerLabel }}
                 </option>
-              </template>
-            </select>
+                <template v-else>
+                  <option
+                    v-for="(r, i) in probeResults"
+                    :key="i"
+                    :value="i"
+                  >
+                    {{ r.sourceLabel }}
+                  </option>
+                </template>
+              </select>
+            </div>
           </div>
 
           <!-- Probe detail fields -->
@@ -223,28 +247,60 @@ defineExpose({ open })
           </div>
 
           <!-- Virtual environment selector (git source) -->
-          <div v-if="showVenvField" class="field">
-            <label>{{ $t('git.venv') }}</label>
-            <div class="path-input">
-              <input
-                type="text"
-                :value="effectiveVenvName || $t('git.venvNotFound')"
-                disabled
-              />
-              <button @click="handleBrowseVenv">{{ $t('common.browse') }}</button>
+          <div v-if="showVenvField" class="config-field">
+            <label class="config-label">{{ $t('git.venv') }}</label>
+            <div class="config-path-row">
+              <div
+                class="brand-input config-path-input config-select brand-input--readonly"
+                role="textbox"
+                aria-readonly="true"
+              >
+                <HardDrive :size="14" aria-hidden="true" />
+                <span class="config-select__value">{{ effectiveVenvName || $t('git.venvNotFound') }}</span>
+              </div>
+              <button class="brand-secondary" type="button" @click="handleBrowseVenv">
+                {{ $t('common.browse') }}
+              </button>
             </div>
           </div>
         </div>
 
-        <!-- Save button -->
-        <div class="view-bottom">
+        <div class="config-card__footer">
           <button
-            class="primary"
+            class="primary config-continue"
             :disabled="saveDisabled"
             @click="handleSave"
           >
             {{ $t('track.trackInstallation') }}
           </button>
         </div>
-  </ModalShell>
+      </div>
+    </div>
+  </BrandTakeoverLayout>
 </template>
+
+<style scoped>
+/* Probe detail rows — compact label/value pairs surfaced after a
+ * successful probe. Tokens align with the brand-card copy palette. */
+.detail-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--brand-surface-border);
+  border-radius: 6px;
+  background: var(--brand-surface-bg);
+}
+.detail-field-label {
+  font-size: 12px;
+  color: var(--neutral-300);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.detail-field-value {
+  font-size: 13px;
+  color: var(--neutral-100);
+  word-break: break-all;
+  margin-top: 2px;
+}
+</style>

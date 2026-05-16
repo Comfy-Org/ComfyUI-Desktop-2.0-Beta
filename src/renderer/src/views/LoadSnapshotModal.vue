@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, toRaw, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { ChevronDown } from 'lucide-vue-next'
 import { useModal } from '../composables/useModal'
 
 import type { SnapshotFilePreview, FieldOption, GPUInfo, ShowProgressOpts } from '../types/ipc'
@@ -8,9 +9,8 @@ import { getVariantGpuLabel, sortedCardOptions, findBestVariant } from '../lib/v
 import VariantCardGrid from '../components/VariantCardGrid.vue'
 import { emitTelemetryAction, toVariantBucket } from '../lib/telemetry'
 import SnapshotFilePreviewContent from '../components/SnapshotFilePreviewContent.vue'
-import TakeoverHeader from '../components/TakeoverHeader.vue'
 import TakeoverBack from '../components/TakeoverBack.vue'
-import ModalShell from '../components/ModalShell.vue'
+import BrandTakeoverLayout from '../components/BrandTakeoverLayout.vue'
 
 const emit = defineEmits<{
   close: []
@@ -52,6 +52,14 @@ const hardwareMismatch = computed(() => {
 
 const INVALID_NAME_CHARS = /[<>:"/\\|?*]/
 const nameHasInvalidChars = computed(() => INVALID_NAME_CHARS.test(installName.value))
+
+const releaseTriggerLabel = computed(() => {
+  if (releaseLoading.value) return t('newInstall.loading')
+  if (releaseOptions.value.length === 0) return t('newInstall.noOptions')
+  const opt = selectedRelease.value
+  if (!opt) return ''
+  return opt.recommended ? `${opt.label} (${t('newInstall.recommended')})` : opt.label
+})
 
 
 function open(): void {
@@ -251,27 +259,24 @@ defineExpose({ open })
 </script>
 
 <template>
-  <ModalShell binding @close="emit('close')">
-      <template #header>
-        <div class="takeover-stacked-header">
-          <TakeoverBack
-            :label="$t('common.backToDashboard')"
-            @back="emit('close')"
-          />
-          <TakeoverHeader
-            :title="$t('loadSnapshot.grandTitle')"
-            :subtitle="$t('loadSnapshot.grandSubtitle')"
-          />
-        </div>
-      </template>
-      <div
-        ref="contentRef"
-        class="ls-drop-target"
-        @dragover="!preview && handleDragOver($event)"
-        @dragleave="!preview && handleDragLeave($event)"
-        @drop="!preview && handleDrop($event)"
-      >
-        <div class="view-scroll">
+  <BrandTakeoverLayout>
+    <template #back>
+      <TakeoverBack
+        :label="$t('common.backToDashboard')"
+        @back="emit('close')"
+      />
+    </template>
+    <div class="config-shell">
+      <h1 class="brand-title">{{ $t('loadSnapshot.grandTitle') }}</h1>
+      <p class="brand-lead">{{ $t('loadSnapshot.grandSubtitle') }}</p>
+      <div class="config-card">
+        <div
+          ref="contentRef"
+          class="config-card__body ls-drop-target"
+          @dragover="!preview && handleDragOver($event)"
+          @dragleave="!preview && handleDragLeave($event)"
+          @drop="!preview && handleDrop($event)"
+        >
           <!-- Drop zone / file picker (shown when no preview loaded) -->
           <div v-if="!preview" class="ls-drop-zone-wrap">
             <div
@@ -282,7 +287,9 @@ defineExpose({ open })
               <template v-else>
                 <div class="ls-drop-text">{{ $t('list.snapshotDropHint') }}</div>
                 <div class="ls-drop-or">{{ $t('common.or') }}</div>
-                <button class="ls-browse-btn" @click="handleBrowse">{{ $t('common.browse') }}</button>
+                <button class="brand-secondary" type="button" @click="handleBrowse">
+                  {{ $t('common.browse') }}
+                </button>
               </template>
             </div>
           </div>
@@ -290,26 +297,40 @@ defineExpose({ open })
           <!-- Preview content -->
           <template v-if="preview">
             <!-- Install name -->
-            <div class="ls-section">
-              <div class="ls-field">
-                <span class="ls-label">{{ $t('common.name') }}</span>
+            <div class="config-field">
+              <label class="config-label" for="ls-name">{{ $t('common.name') }}</label>
+              <div class="brand-input">
                 <input
+                  id="ls-name"
                   v-model="installName"
-                  class="ls-name-input"
                   type="text"
                   :placeholder="$t('common.namePlaceholder')"
-                >
-                <span v-if="nameHasInvalidChars" class="ls-name-hint">{{ $t('list.snapshotNameHint') }}</span>
+                />
               </div>
+              <span v-if="nameHasInvalidChars" class="ls-name-hint">
+                {{ $t('list.snapshotNameHint') }}
+              </span>
             </div>
 
             <!-- Release selection -->
-            <div class="ls-section">
-              <div class="ls-field">
-                <span class="ls-label">{{ $t('list.snapshotRelease') }}</span>
+            <div class="config-field">
+              <label class="config-label" for="ls-release">{{ $t('list.snapshotRelease') }}</label>
+              <div
+                v-if="releaseLoading || releaseOptions.length === 0"
+                class="brand-input config-select brand-input--readonly"
+                :class="{ 'with-spinner': releaseLoading }"
+                role="textbox"
+                aria-readonly="true"
+              >
+                <span class="config-select__value">{{ releaseTriggerLabel }}</span>
+              </div>
+              <div v-else class="brand-input brand-select">
+                <span class="brand-select__trigger" aria-hidden="true">
+                  <span class="brand-select__trigger-value">{{ releaseTriggerLabel }}</span>
+                  <ChevronDown :size="14" class="brand-select__trigger-chevron" />
+                </span>
                 <select
-                  v-if="!releaseLoading && releaseOptions.length > 0"
-                  class="ls-select"
+                  id="ls-release"
                   :value="releaseOptions.indexOf(selectedRelease!)"
                   @change="selectedRelease = releaseOptions[Number(($event.target as HTMLSelectElement).value)] ?? null"
                 >
@@ -321,29 +342,26 @@ defineExpose({ open })
                     {{ opt.label }}{{ opt.recommended ? ` (${$t('newInstall.recommended')})` : '' }}
                   </option>
                 </select>
-                <span v-else-if="releaseLoading" class="ls-value ls-value-loading with-spinner">{{ $t('newInstall.loading') }}</span>
-                <span v-else class="ls-value">{{ $t('newInstall.noOptions') }}</span>
-                <span v-if="preview.newestSnapshot.comfyui.releaseTag" class="ls-release-hint">
-                  {{ $t('list.snapshotOriginalRelease', { tag: preview.newestSnapshot.comfyui.releaseTag }) }}
-                </span>
               </div>
+              <span v-if="preview.newestSnapshot.comfyui.releaseTag" class="ls-release-hint">
+                {{ $t('list.snapshotOriginalRelease', { tag: preview.newestSnapshot.comfyui.releaseTag }) }}
+              </span>
             </div>
 
             <!-- Device / variant selection -->
-            <div class="ls-section">
-              <div class="ls-field">
-                <span class="ls-label">{{ $t('list.snapshotDevice') }}</span>
-                <div v-if="variantLoading" class="ls-value ls-value-loading with-spinner">{{ $t('newInstall.loading') }}</div>
-                <VariantCardGrid
-                  v-else-if="variantOptions.length > 0"
-                  :options="sortedVariants"
-                  :selected-value="selectedVariant?.value"
-                  @select="selectVariant"
-                />
-                <span v-else class="ls-value">{{ $t('newInstall.noOptions') }}</span>
+            <div class="config-field">
+              <label class="config-label">{{ $t('list.snapshotDevice') }}</label>
+              <div v-if="variantLoading" class="ls-loading with-spinner">
+                {{ $t('newInstall.loading') }}
               </div>
+              <VariantCardGrid
+                v-else-if="variantOptions.length > 0"
+                :options="sortedVariants"
+                :selected-value="selectedVariant?.value"
+                @select="selectVariant"
+              />
+              <span v-else class="ls-loading">{{ $t('newInstall.noOptions') }}</span>
 
-              <!-- Hardware mismatch warning -->
               <div v-if="hardwareMismatch" class="ls-hw-warning">
                 {{ $t('list.snapshotHardwareMismatch', { snapshotDevice: snapshotGpuLabel, detectedDevice: detectedGpuLabel }) }}
               </div>
@@ -353,11 +371,18 @@ defineExpose({ open })
           </template>
         </div>
 
-        <!-- Bottom actions -->
-        <div class="view-bottom">
-          <button v-if="preview" @click="handleClearPreview">{{ $t('common.back') }}</button>
+        <div class="config-card__footer">
           <button
-            class="primary"
+            v-if="preview"
+            class="brand-secondary"
+            type="button"
+            @click="handleClearPreview"
+          >
+            {{ $t('common.back') }}
+          </button>
+          <button
+            class="primary config-continue"
+            :class="{ loading: creating }"
             :disabled="!preview || creating || !selectedVariant"
             @click="handleCreate"
           >
@@ -365,19 +390,13 @@ defineExpose({ open })
           </button>
         </div>
       </div>
-  </ModalShell>
+    </div>
+  </BrandTakeoverLayout>
 </template>
 
 <style scoped>
-/* Wraps the body so drag-leave detection (contains check) can target the
-   whole drop area and view-scroll still fills it. */
 .ls-drop-target {
-  flex: 1; min-height: 0;
-  display: flex; flex-direction: column;
-}
-
-/* Ensure view-scroll stretches the drop zone when no preview is loaded */
-.view-scroll:has(.ls-drop-zone-wrap) {
+  /* Stretch the body so the drop zone can grow into it. */
   display: flex;
   flex-direction: column;
 }
@@ -387,7 +406,8 @@ defineExpose({ open })
   display: flex;
   align-items: center;
   justify-content: center;
-  flex: 1;
+  flex: 1 1 auto;
+  min-height: 220px;
 }
 
 .ls-drop-zone {
@@ -395,93 +415,50 @@ defineExpose({ open })
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  gap: 12px;
   width: 100%;
   height: 100%;
-  border: 2px dashed var(--border);
+  border: 2px dashed var(--brand-surface-border);
   border-radius: 8px;
   padding: 32px;
   transition: border-color 0.15s, background 0.15s;
+  background: var(--brand-surface-bg);
 }
 .ls-drop-zone-active {
   border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--brand-surface-bg));
 }
 .ls-drop-zone-loading {
   opacity: 0.6;
   pointer-events: none;
 }
 
-.ls-drop-loading {
+.ls-drop-loading,
+.ls-loading {
   flex-direction: column;
   justify-content: center;
   font-size: 14px;
-  color: var(--text-muted);
+  color: var(--neutral-300);
 }
 
 .ls-drop-text {
   font-size: 14px;
-  color: var(--text-muted);
+  color: var(--neutral-200);
   text-align: center;
 }
 .ls-drop-or {
   font-size: 13px;
-  color: var(--text-muted);
-}
-.ls-browse-btn {
-  padding: 6px 20px;
-  font-size: 14px;
-  border-radius: 6px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  color: var(--text);
-  cursor: pointer;
-}
-.ls-browse-btn:hover {
-  border-color: var(--border-hover);
-}
-
-.ls-name-input {
-  font-size: 14px;
-  padding: 6px 10px;
-  border-radius: 5px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  color: var(--text);
-  box-sizing: border-box;
-  width: 100%;
-}
-.ls-name-input:focus {
-  outline: none;
-  border-color: var(--accent);
+  color: var(--neutral-300);
 }
 
 .ls-name-hint {
   font-size: 11px;
   color: var(--warning);
-  margin-top: 2px;
 }
 
 .ls-release-hint {
   font-size: 12px;
-  color: var(--text-muted);
-  margin-top: 2px;
-}
-
-/* Release select */
-.ls-select {
-  font-size: 14px;
-  padding: 6px 10px;
-  border-radius: 5px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  color: var(--text);
-  box-sizing: border-box;
-  width: 100%;
-}
-.ls-select:focus {
-  outline: none;
-  border-color: var(--accent);
+  color: var(--neutral-300);
 }
 
 /* Hardware mismatch warning */

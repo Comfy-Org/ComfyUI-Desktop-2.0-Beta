@@ -1,17 +1,23 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, toRaw } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { HardDrive } from 'lucide-vue-next'
 import { useModal } from '../composables/useModal'
 
 import type { Source, FieldOption, ShowProgressOpts } from '../types/ipc'
 import { emitTelemetryAction, toVariantBucket } from '../lib/telemetry'
 import { stripVariantPrefix, sortedCardOptions } from '../lib/variants'
 import VariantCardGrid from '../components/VariantCardGrid.vue'
-import { trackGuardrailBlocked, createDiskSpaceChecker, showPathIssueAlerts, checkNvidiaDriverOrWarn, checkDiskSpaceOrWarn } from '../lib/installHelpers'
-import InstallNamePath from '../components/InstallNamePath.vue'
-import TakeoverHeader from '../components/TakeoverHeader.vue'
+import {
+  trackGuardrailBlocked,
+  createDiskSpaceChecker,
+  showPathIssueAlerts,
+  checkNvidiaDriverOrWarn,
+  checkDiskSpaceOrWarn,
+} from '../lib/installHelpers'
+import PathDiskInfo from '../components/PathDiskInfo.vue'
 import TakeoverBack from '../components/TakeoverBack.vue'
-import ModalShell from '../components/ModalShell.vue'
+import BrandTakeoverLayout from '../components/BrandTakeoverLayout.vue'
 
 const emit = defineEmits<{
   close: []
@@ -258,35 +264,33 @@ defineExpose({ open })
 </script>
 
 <template>
-  <ModalShell binding content-class="quick-install-modal" @close="emit('close')">
-      <template #header>
-        <div class="takeover-stacked-header">
-          <TakeoverBack
-            :label="$t('common.backToDashboard')"
-            @back="emit('close')"
-          />
-          <TakeoverHeader
-            :title="$t('quickInstall.grandTitle')"
-            :subtitle="$t('quickInstall.grandSubtitle')"
-          />
-        </div>
-      </template>
-        <div class="view-scroll">
-          <div v-if="loading" class="wizard-loading with-spinner">
+  <BrandTakeoverLayout>
+    <template #back>
+      <TakeoverBack
+        :label="$t('common.backToDashboard')"
+        @back="emit('close')"
+      />
+    </template>
+    <div class="config-shell">
+      <h1 class="brand-title">{{ $t('quickInstall.grandTitle') }}</h1>
+      <p class="brand-lead">{{ $t('quickInstall.grandSubtitle') }}</p>
+      <div class="config-card">
+        <div class="config-card__body">
+          <div v-if="loading" class="quick-loading with-spinner">
             {{ $t('newInstall.loading') }}
           </div>
 
-          <div v-else-if="errorMessage" class="wizard-loading">
+          <div v-else-if="errorMessage" class="quick-error">
             {{ errorMessage }}
           </div>
 
           <template v-else>
-            <p class="quick-install-desc">{{ $t('quickInstall.desc') }}</p>
+            <p class="quick-desc">{{ $t('quickInstall.desc') }}</p>
 
-            <div class="detected-hardware">{{ detectedGpu }}</div>
+            <div class="quick-detected">{{ detectedGpu }}</div>
 
-            <div class="field">
-              <label>{{ $t('quickInstall.selectVariant') }}</label>
+            <div class="config-field">
+              <label class="config-label">{{ $t('quickInstall.selectVariant') }}</label>
               <VariantCardGrid
                 :options="sortedCardOptions(variantOptions)"
                 :selected-value="selectedVariant?.value"
@@ -294,26 +298,54 @@ defineExpose({ open })
               />
             </div>
 
-            <InstallNamePath
-              :name="instName"
-              :path="instPath"
-              :default-path="defaultInstPath"
-              :path-issues="pathIssues"
-              :disk-space-loading="diskSpaceLoading"
-              :disk-space="diskSpace"
-              :estimated-size="estimatedInstallSize"
-              @update:name="instName = $event"
-              @update:path="instPath = $event"
-              @browse="handleBrowse"
-            />
+            <div class="config-field">
+              <label class="config-label" for="qi-name">{{ $t('common.name') }}</label>
+              <div class="brand-input">
+                <input
+                  id="qi-name"
+                  v-model="instName"
+                  type="text"
+                  :placeholder="$t('common.namePlaceholder')"
+                />
+              </div>
+            </div>
+
+            <div class="config-field">
+              <label class="config-label" for="qi-path">{{ $t('newInstall.installLocation') }}</label>
+              <div class="config-path-row">
+                <div class="brand-input config-path-input">
+                  <HardDrive :size="14" aria-hidden="true" />
+                  <input
+                    id="qi-path"
+                    v-model="instPath"
+                    type="text"
+                  />
+                </div>
+                <button class="brand-secondary" type="button" @click="handleBrowse">
+                  {{ $t('common.browse') }}
+                </button>
+                <button
+                  v-if="instPath !== defaultInstPath"
+                  class="brand-secondary"
+                  type="button"
+                  @click="instPath = defaultInstPath"
+                >
+                  {{ $t('common.resetDefault') }}
+                </button>
+              </div>
+              <PathDiskInfo
+                :path-issues="pathIssues"
+                :disk-space-loading="diskSpaceLoading"
+                :disk-space="diskSpace"
+                :estimated-size="estimatedInstallSize"
+              />
+            </div>
           </template>
         </div>
 
-        <div class="wizard-footer">
-          <div class="wizard-back-placeholder"></div>
-          <div></div>
+        <div class="config-card__footer">
           <button
-            class="primary quick-install-btn"
+            class="primary config-continue"
             :class="{ loading: installing }"
             :disabled="!canInstall"
             @click="handleInstall"
@@ -321,5 +353,28 @@ defineExpose({ open })
             {{ installing ? $t('newInstall.installing') : $t('quickInstall.confirmInstall') }}
           </button>
         </div>
-  </ModalShell>
+      </div>
+    </div>
+  </BrandTakeoverLayout>
 </template>
+
+<style scoped>
+.quick-loading,
+.quick-error {
+  font-size: 14px;
+  color: var(--neutral-200);
+  text-align: center;
+  padding: 24px 0;
+}
+
+.quick-desc {
+  margin: 0;
+  font-size: 14px;
+  color: var(--neutral-200);
+}
+
+.quick-detected {
+  font-size: 13px;
+  color: var(--neutral-300);
+}
+</style>
