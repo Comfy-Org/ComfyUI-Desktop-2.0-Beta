@@ -1,10 +1,9 @@
 import {
-  ipcMain, nativeTheme,
+  ipcMain,
   sources, settings, i18n,
   getAppVersion, resolveTheme,
-  _onLocaleChanged, _onThemeChanged, _broadcastToRenderer,
+  _onLocaleChanged, _broadcastToRenderer,
 } from './shared'
-import { updateTitleBarOverlay } from '../titleBarOverlay'
 import * as mainTelemetry from '../telemetry'
 import { detectFirstUseState } from '../firstUseDetection'
 import * as updater from '../updater'
@@ -23,12 +22,8 @@ export function registerSettingsHandlers(): void {
         fields: [
           { id: 'language', label: i18n.t('settings.language'), type: 'select', value: s.language || i18n.getLocale(),
             options: i18n.getAvailableLocales() },
-          { id: 'theme', label: i18n.t('settings.theme'), type: 'select', value: s.theme || 'system',
-            options: [
-              { value: 'system', label: i18n.t('settings.themeSystem') },
-              { value: 'dark', label: i18n.t('settings.themeDark') },
-              { value: 'light', label: i18n.t('settings.themeLight') },
-            ] },
+          // Theme picker removed — the launcher is dark-only by design
+          // (see resolveTheme() in src/main/lib/ipc/shared.ts).
           // Issue #488 — auto-check loop always runs; this toggle
           // controls whether updates install silently vs prompt the
           // user. The `autoUpdate` key is retained in the schema (no
@@ -119,11 +114,6 @@ export function registerSettingsHandlers(): void {
 
   ipcMain.handle('set-setting', (_event, key: string, value: unknown) => {
     settings.set(key, value)
-    if (key === 'theme') {
-      _broadcastToRenderer('theme-changed', resolveTheme())
-      updateTitleBarOverlay()
-      if (_onThemeChanged) _onThemeChanged()
-    }
     if (key === 'language') {
       i18n.init(value as string)
       _broadcastToRenderer('locale-changed', i18n.getMessages())
@@ -172,10 +162,7 @@ export function registerSettingsHandlers(): void {
 
   ipcMain.handle('get-resolved-theme', () => resolveTheme())
 
-  nativeTheme.on('updated', () => {
-    if (((settings.get('theme') as string | undefined) || 'system') !== 'system') return
-    _broadcastToRenderer('theme-changed', resolveTheme())
-    updateTitleBarOverlay()
-    if (_onThemeChanged) _onThemeChanged()
-  })
+  // Launcher is dark-only — no nativeTheme listener and no theme-changed
+  // broadcast. The IPC channel + preload subscription remain for ABI
+  // compatibility but are never fired.
 }

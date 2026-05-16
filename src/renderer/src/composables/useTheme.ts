@@ -1,22 +1,17 @@
-import { ref, onMounted } from 'vue'
-import { useElectronApi } from './useElectronApi'
+import { ref } from 'vue'
 import type { ResolvedTheme } from '../../../types/ipc'
 
+/**
+ * Dark-only launcher theme. The Theme / ResolvedTheme types remain for
+ * IPC compatibility (the title-bar bridge still pushes a per-page bg /
+ * text colour for the install's own ComfyUI theme), but the launcher
+ * UI itself is dark-only — no system / light variants.
+ *
+ * This composable just stamps `data-theme="dark"` on the documentElement
+ * once on mount. There's no listener to drop and no IPC roundtrip needed.
+ */
 export function useTheme() {
-  const { api, listen } = useElectronApi()
   const theme = ref<ResolvedTheme>('dark')
-
-  function applyTheme(newTheme: ResolvedTheme): void {
-    theme.value = newTheme || 'dark'
-    document.documentElement.setAttribute('data-theme', theme.value)
-  }
-
-  onMounted(async () => {
-    const resolved = await api.getResolvedTheme()
-    applyTheme(resolved)
-  })
-
-  listen(api.onThemeChanged, applyTheme)
-
+  document.documentElement.setAttribute('data-theme', 'dark')
   return { theme }
 }

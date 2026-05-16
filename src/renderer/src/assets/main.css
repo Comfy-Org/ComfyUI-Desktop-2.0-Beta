@@ -65,26 +65,10 @@
   --overlay-bg-opaque: var(--bg);
 }
 
-[data-theme="light"] {
-  --bg: #ffffff;
-  --text: #202121;
-  --text-muted: #a0a0a0;
-  --text-faint: #b4b4b4;
-  --accent: #3b82f6;
-  --accent-hover: #2563eb;
-  --selected: rgba(0, 0, 0, 0.7);
-  --surface: #e9e9e9;
-  --border: #b4b4b4;
-  --border-hover: #d9d9d9;
-  --danger: #f75951;
-  --warning: #fcbf64;
-  --success: #00cd72;
-  --info: #2563eb;
-  --terminal-bg: #f3f3f3;
-  --overlay-bg: rgba(0, 0, 0, 0.35);
-  --overlay-bg-heavy: rgba(0, 0, 0, 0.55);
-  --overlay-bg-opaque: var(--bg);
-}
+/* Light theme block removed — the launcher is dark-only by design.
+ * The Theme / ResolvedTheme types are kept for IPC compatibility but
+ * resolveTheme() in src/main/lib/ipc/shared.ts always returns 'dark'
+ * and useTheme() always sets [data-theme='dark'] on the documentElement. */
 
 /* ================================================================
  * Base styles from renderer/styles.css
