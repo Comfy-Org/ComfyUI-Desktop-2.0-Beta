@@ -26,7 +26,7 @@ interface Props {
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  initialTab: 'config',
+  initialTab: 'config'
 })
 
 const emit = defineEmits<{
@@ -49,14 +49,14 @@ watch(
   () => props.open,
   (next) => {
     internalOpen.value = next
-  },
+  }
 )
 
 watch(
   () => props.initialTab,
   (next) => {
     activeTab.value = next
-  },
+  }
 )
 
 function requestClose(): void {
@@ -85,15 +85,20 @@ const tabs = computed<TabDef[]>(() => [
   { key: 'config', sectionTab: 'settings', label: t('globalSettings.tabConfig', 'Config') },
   { key: 'status', sectionTab: 'status', label: t('globalSettings.tabStatus', 'Status') },
   { key: 'update', sectionTab: 'update', label: t('globalSettings.tabUpdate', 'Update') },
-  { key: 'snapshots', sectionTab: 'snapshots', label: t('globalSettings.tabSnapshots', 'Snapshots') },
+  {
+    key: 'snapshots',
+    sectionTab: 'snapshots',
+    label: t('globalSettings.tabSnapshots', 'Snapshots')
+  }
 ])
 
 const installation = toRef(props, 'installation')
-const { loading, error, updateField, runAction, sectionsForTab, diskUsageItem, pinBottomSection } =
-  useGlobalSettings({
+const { loading, error, updateField, runAction, sectionsForTab, diskUsageItem } = useGlobalSettings(
+  {
     installation,
-    onShowProgress: (opts) => emit('show-progress', opts),
-  })
+    onShowProgress: (opts) => emit('show-progress', opts)
+  }
+)
 
 const visibleSections = computed(() => {
   const tab = tabs.value.find((tt) => tt.key === activeTab.value)?.sectionTab ?? 'settings'
@@ -130,7 +135,7 @@ function handleTab(event: KeyboardEvent): void {
   const root = drawerRef.value
   if (!root) return
   const focusables = Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(
-    (el) => el.offsetParent !== null || el === document.activeElement,
+    (el) => el.offsetParent !== null || el === document.activeElement
   )
   if (focusables.length === 0) return
   const first = focusables[0]!
@@ -164,21 +169,18 @@ async function handleRelaunch(): Promise<void> {
   await window.api.relaunchApp()
 }
 
-watch(
-  internalOpen,
-  async (next) => {
-    if (next) {
-      lastFocusedBeforeOpen = (document.activeElement as HTMLElement | null) ?? null
-      activeTab.value = props.initialTab
-      await nextTick()
-      const firstTab = drawerRef.value?.querySelector<HTMLButtonElement>('.settings-v2-tab.is-active')
-      firstTab?.focus()
-    } else if (lastFocusedBeforeOpen && document.contains(lastFocusedBeforeOpen)) {
-      lastFocusedBeforeOpen.focus()
-      lastFocusedBeforeOpen = null
-    }
-  },
-)
+watch(internalOpen, async (next) => {
+  if (next) {
+    lastFocusedBeforeOpen = (document.activeElement as HTMLElement | null) ?? null
+    activeTab.value = props.initialTab
+    await nextTick()
+    const firstTab = drawerRef.value?.querySelector<HTMLButtonElement>('.settings-v2-tab.is-active')
+    firstTab?.focus()
+  } else if (lastFocusedBeforeOpen && document.contains(lastFocusedBeforeOpen)) {
+    lastFocusedBeforeOpen.focus()
+    lastFocusedBeforeOpen = null
+  }
+})
 
 onMounted(() => {
   document.addEventListener('keydown', handleEsc)
@@ -210,7 +212,11 @@ onUnmounted(() => {
         aria-modal="true"
         :aria-label="t('globalSettings.title', 'Settings')"
       >
-        <nav class="settings-v2-tabs" role="tablist" :aria-label="t('globalSettings.title', 'Settings')">
+        <nav
+          class="settings-v2-tabs"
+          role="tablist"
+          :aria-label="t('globalSettings.title', 'Settings')"
+        >
           <button
             v-for="(tab, i) in tabs"
             :key="tab.key"
@@ -229,29 +235,27 @@ onUnmounted(() => {
 
         <section class="settings-v2-body">
           <p v-if="!installation" class="empty">
-            {{ t('globalSettings.emptyInstallLess', 'Open a ComfyUI install to view its settings.') }}
+            {{
+              t('globalSettings.emptyInstallLess', 'Open a ComfyUI install to view its settings.')
+            }}
           </p>
           <p v-else-if="loading" class="empty">{{ t('common.loading', 'Loading…') }}</p>
           <p v-else-if="error" class="empty error">{{ error }}</p>
           <template v-else>
-            <article v-for="(section, si) in visibleSections" :key="`s-${si}`" class="settings-v2-section">
+            <article
+              v-for="(section, si) in visibleSections"
+              :key="`s-${si}`"
+              class="settings-v2-section"
+            >
               <header v-if="section.title" class="settings-v2-section-title">
                 {{ section.title }}
               </header>
 
-              <div
-                v-for="(item, i) in section.items"
-                :key="`i-${i}`"
-                class="settings-v2-item"
-              >
+              <div v-for="(item, i) in section.items" :key="`i-${i}`" class="settings-v2-item">
                 {{ item.label }}
               </div>
 
-              <div
-                v-for="field in section.fields"
-                :key="field.id"
-                class="settings-v2-field"
-              >
+              <div v-for="field in section.fields" :key="field.id" class="settings-v2-field">
                 <label class="settings-v2-field-label">{{ field.label }}</label>
 
                 <input
@@ -285,7 +289,10 @@ onUnmounted(() => {
                 <span v-else-if="field.editType === 'env-vars'" class="settings-v2-field-readonly">
                   {{ t('globalSettings.envVarsCount', { n: envVarsCount(field.value) }) }}
                 </span>
-                <span v-else-if="field.editType === 'channel-cards'" class="settings-v2-field-readonly">
+                <span
+                  v-else-if="field.editType === 'channel-cards'"
+                  class="settings-v2-field-readonly"
+                >
                   {{ asString(field.value) }}
                 </span>
 
@@ -298,7 +305,10 @@ onUnmounted(() => {
                   :key="action.id"
                   type="button"
                   class="settings-v2-action"
-                  :class="{ 'is-primary': action.style === 'primary', 'is-danger': action.style === 'danger' }"
+                  :class="{
+                    'is-primary': action.style === 'primary',
+                    'is-danger': action.style === 'danger'
+                  }"
                   :disabled="action.enabled === false"
                   @click="runAction(action)"
                 >
@@ -314,27 +324,7 @@ onUnmounted(() => {
         </section>
 
         <footer class="settings-v2-footer">
-          <div
-            v-if="pinBottomSection?.actions?.length"
-            class="settings-v2-footer-row settings-v2-actions"
-          >
-            <button
-              v-for="action in pinBottomSection.actions"
-              :key="action.id"
-              type="button"
-              class="settings-v2-action"
-              :class="{ 'is-primary': action.style === 'primary', 'is-danger': action.style === 'danger' }"
-              :disabled="action.enabled === false"
-              @click="runAction(action)"
-            >
-              {{ action.label }}
-            </button>
-          </div>
-          <button
-            type="button"
-            class="primary settings-v2-relaunch"
-            @click="handleRelaunch"
-          >
+          <button type="button" class="primary settings-v2-relaunch" @click="handleRelaunch">
             {{ t('globalSettings.relaunch', 'Relaunch') }}
           </button>
           <!-- TODO(global-settings-v2): wire More menu when product nails
@@ -404,7 +394,9 @@ onUnmounted(() => {
   font-size: 13px;
   cursor: pointer;
   margin-bottom: -1px;
-  transition: color 120ms ease, border-color 120ms ease;
+  transition:
+    color 120ms ease,
+    border-color 120ms ease;
 }
 
 .settings-v2-tab:hover {
@@ -543,7 +535,6 @@ onUnmounted(() => {
 .settings-v2-footer {
   flex-shrink: 0;
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   padding: 12px 16px;
@@ -551,13 +542,8 @@ onUnmounted(() => {
   background: var(--surface);
 }
 
-.settings-v2-footer-row {
-  width: 100%;
-}
-
 .settings-v2-relaunch {
   flex: 1;
-  min-width: 0;
 }
 
 .settings-v2-more {
@@ -574,5 +560,4 @@ onUnmounted(() => {
   cursor: not-allowed;
   opacity: 0.6;
 }
-
 </style>
