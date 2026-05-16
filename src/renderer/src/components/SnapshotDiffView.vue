@@ -1,4 +1,6 @@
 <script setup lang="ts">
+// TODO(stale-old-modal): delete after Settings drawer (v2,
+// GlobalSettingsPanel) reaches functional parity and ships everywhere.
 import { useI18n } from 'vue-i18n'
 import type { SnapshotDiffResult } from '../types/ipc'
 import { formatNodeVersion } from '../lib/snapshots'

@@ -1,15 +1,20 @@
 import { computed, ref, toValue, watch, type ComputedRef, type MaybeRefOrGetter, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useModal } from './useModal'
-import { emitTelemetryAction } from '../lib/telemetry'
-import type {
-  ActionDef,
-  DetailField,
-  DetailItem,
-  DetailSection,
-  DiskSpaceInfo,
-  Installation,
-  ShowProgressOpts,
+import { useActionGuard } from './useActionGuard'
+import { useMigrateAction } from './useMigrateAction'
+import { useSessionStore } from '../stores/sessionStore'
+import { emitTelemetryAction, toErrorBucket } from '../lib/telemetry'
+import {
+  REQUIRES_STOPPED,
+  type ActionDef,
+  type DetailField,
+  type DetailItem,
+  type DetailSection,
+  type DiskSpaceInfo,
+  type FieldOption,
+  type Installation,
+  type ShowProgressOpts,
 } from '../types/ipc'
 
 /**
@@ -23,13 +28,16 @@ import type {
  * `runAction`. Disk Usage is a separate `get-disk-space` call merged
  * into the Status tab as a synthetic row.
  *
- * Action handling is a trimmed mirror of `DetailModal.runAction`:
- *   - `action.confirm` → useModal.confirm
- *   - `action.showProgress` → invokes the caller's `onShowProgress`
- *     (so PanelApp drives the existing ProgressModal flow)
- *   - else → invoke `window.api.runAction` inline + reload sections
- * Prompt / fieldSelects / select dialog flows are not ported yet; see
- * TODO(global-settings-v2) inside `runAction`.
+ * Action handling mirrors `DetailModal.runAction` exactly:
+ *   1. REQUIRES_STOPPED guard via useActionGuard
+ *   2. `migrate-to-standalone` special case → useMigrateAction
+ *   3. fieldSelects chain → modal.select per fieldSelect
+ *   4. select chain → modal.select (e.g. installations)
+ *   5. prompt chain → modal.prompt
+ *   6. confirm chain → modal.confirm or modal.confirmWithOptions
+ *   7. disk-space check for copy / copy-update / release-update
+ *   8. showProgress → opts.onShowProgress with synthetic-restart support
+ *   9. inline → window.api.runAction with result navigation
  */
 
 export interface UseGlobalSettingsOpts {
@@ -40,6 +48,15 @@ export interface UseGlobalSettingsOpts {
    *  (`PanelApp.vue`) already owns the modal and consumes this shape
    *  via `usePanelOverlays.handleShowProgress`. */
   onShowProgress: (opts: ShowProgressOpts) => void
+  /** Fired when an action's `result.navigate === 'list'` — the install
+   *  was removed (delete / untrack). The drawer host should close the
+   *  drawer and tear down the comfy window — mirrors DetailModal's
+   *  `emit('navigate-list')`. */
+  onNavigateList?: () => void
+  /** Fired alongside `onNavigateList` so the drawer can animate its
+   *  own dismissal before the host completes the navigation — mirrors
+   *  DetailModal's `emit('close')`. */
+  onClose?: () => void
 }
 
 export interface UseGlobalSettingsApi {
@@ -68,6 +85,12 @@ export interface UseGlobalSettingsApi {
 
   /** Install-level actions (`pinBottom` section from main). */
   pinBottomSection: ComputedRef<DetailSection | null>
+
+  /** `pinBottomSection.actions` with the renderer-side Launch→Restart
+   *  swap applied — when the install is running, `'launch'` becomes
+   *  `'restart'` (confirm + stop→launch chain). Mirrors DetailModal's
+   *  `bottomActions` computed exactly. */
+  pinBottomActions: ComputedRef<ActionDef[]>
 }
 
 function formatBytes(bytes: number): string {
@@ -85,6 +108,9 @@ function formatBytes(bytes: number): string {
 export function useGlobalSettings(opts: UseGlobalSettingsOpts): UseGlobalSettingsApi {
   const { t } = useI18n()
   const modal = useModal()
+  const actionGuard = useActionGuard()
+  const { confirmMigration } = useMigrateAction()
+  const sessionStore = useSessionStore()
 
   const sections = ref<DetailSection[]>([])
   const diskSpace = ref<DiskSpaceInfo | null>(null)
@@ -134,41 +160,254 @@ export function useGlobalSettings(opts: UseGlobalSettingsOpts): UseGlobalSetting
     const inst = toValue(opts.installation)
     if (!inst) return
 
-    // TODO(global-settings-v2): prompt / fieldSelects / select dialogs
-    // aren't ported yet — see DetailModal.vue `runAction` for the full
-    // shape. Actions with those payloads fall through to a plain invoke.
-    if (action.confirm) {
-      const ok = await modal.confirm({
-        title: action.confirm.title || action.label,
-        message: action.confirm.message || '',
-        confirmLabel: action.confirm.confirmLabel || action.label,
-        confirmStyle: action.style === 'danger' ? 'danger' : 'primary',
-      })
-      if (!ok) return
+    const telemetryContext = { action_id: action.id }
+
+    // 1. REQUIRES_STOPPED guard — actions that need ComfyUI stopped
+    //    first (snapshot restore, release-update, …). migrate-to-
+    //    standalone manages its own guard via useMigrateAction below.
+    if (action.id !== 'migrate-to-standalone' && REQUIRES_STOPPED.has(action.id)) {
+      const proceed = await actionGuard.checkBeforeAction(inst.id, action.label)
+      if (!proceed) return
     }
 
-    if (action.showProgress) {
-      const rawTitle = (action.progressTitle || action.label).replace(
+    let mutableAction: ActionDef = { ...action }
+
+    // 2. migrate-to-standalone — dedicated brand takeover registered by
+    //    PanelApp via `registerMigrateTakeover`. Returns the form data
+    //    (checkbox values, etc.) which we merge into the action data.
+    if (mutableAction.id === 'migrate-to-standalone') {
+      const migrateResult = await confirmMigration(inst, mutableAction.confirm)
+      if (!migrateResult) return
+      mutableAction = {
+        ...mutableAction,
+        data: { ...mutableAction.data, ...migrateResult },
+      }
+    }
+
+    // 3. fieldSelects chain — each step prompts the user to pick from a
+    //    main-side source via `getFieldOptions`. Selections feed the
+    //    next step + accumulate on `mutableAction.data`.
+    if (mutableAction.fieldSelects) {
+      const selections: Record<string, FieldOption> = {}
+      for (const fs of mutableAction.fieldSelects) {
+        let items: FieldOption[]
+        try {
+          items = await window.api.getFieldOptions(fs.sourceId, fs.fieldId, selections)
+        } catch (err: unknown) {
+          await modal.alert({
+            title: mutableAction.label,
+            message: (err as Error).message || String(err),
+          })
+          return
+        }
+        if (!items || items.length === 0) {
+          await modal.alert({
+            title: mutableAction.label,
+            message: fs.emptyMessage || t('common.noItems'),
+          })
+          return
+        }
+        const selectItems = items.map((item) => ({
+          value: item.value,
+          label: (item.recommended ? '★ ' : '') + item.label,
+          description: item.description,
+        }))
+        const selected = await modal.select({
+          title: fs.title || mutableAction.label,
+          message: fs.message || '',
+          items: selectItems,
+        })
+        if (!selected) return
+        const selectedItem = items.find((i) => i.value === selected)
+        if (selectedItem) selections[fs.fieldId] = selectedItem
+        mutableAction = {
+          ...mutableAction,
+          data: { ...mutableAction.data, [fs.field]: selectedItem },
+        }
+      }
+    }
+
+    // 4. select chain — single-shot select against a named source
+    //    (e.g. `'installations'` for "copy from which install").
+    if (mutableAction.select) {
+      let items: { value: string; label: string; description?: string }[] | undefined
+      if (mutableAction.select.source === 'installations') {
+        let all = await window.api.getInstallations()
+        if (mutableAction.select.excludeSelf) {
+          all = all.filter((i) => i.id !== inst.id)
+        }
+        if (mutableAction.select.filters) {
+          for (const [key, value] of Object.entries(mutableAction.select.filters)) {
+            all = all.filter((i) => (i as Record<string, unknown>)[key] === value)
+          }
+        }
+        items = all.map((i) => ({ value: i.id, label: i.name, description: i.sourceLabel }))
+      }
+      if (!items || items.length === 0) {
+        await modal.alert({
+          title: mutableAction.label,
+          message: mutableAction.select.emptyMessage || t('common.noItems'),
+        })
+        return
+      }
+      const selected = await modal.select({
+        title: mutableAction.select.title || mutableAction.label,
+        message: mutableAction.select.message || '',
+        items,
+      })
+      if (!selected) return
+      mutableAction = {
+        ...mutableAction,
+        data: { ...mutableAction.data, [mutableAction.select.field]: selected },
+      }
+    }
+
+    // 5. prompt chain — free-form text input (e.g. Copy Installation
+    //    new-name prompt).
+    if (mutableAction.prompt) {
+      const value = await modal.prompt({
+        title: mutableAction.prompt.title || mutableAction.label,
+        message: mutableAction.prompt.message || '',
+        placeholder: mutableAction.prompt.placeholder,
+        defaultValue: mutableAction.prompt.defaultValue,
+        confirmLabel: mutableAction.prompt.confirmLabel || mutableAction.label,
+        required: mutableAction.prompt.required,
+        messageDetails: mutableAction.prompt.messageDetails,
+      })
+      if (!value) return
+      mutableAction = {
+        ...mutableAction,
+        data: { ...mutableAction.data, [mutableAction.prompt.field]: value },
+      }
+    }
+
+    // 6. confirm chain — skip for migrate-to-standalone (handled in #2).
+    //    `confirm.options` flips us to `confirmWithOptions` (checkbox
+    //    confirm — e.g. Delete Installation's "Also delete files" toggle).
+    if (mutableAction.confirm && mutableAction.id !== 'migrate-to-standalone') {
+      if (mutableAction.confirm.options) {
+        const result = await modal.confirmWithOptions({
+          title: mutableAction.confirm.title || 'Confirm',
+          message: mutableAction.confirm.message || 'Are you sure?',
+          options: mutableAction.confirm.options,
+          confirmLabel: mutableAction.confirm.confirmLabel || mutableAction.label,
+          confirmStyle: mutableAction.style || 'danger',
+        })
+        if (!result) return
+        mutableAction = { ...mutableAction, data: { ...mutableAction.data, ...result } }
+      } else {
+        const confirmed = await modal.confirm({
+          title: mutableAction.confirm.title || 'Confirm',
+          message: mutableAction.confirm.message || 'Are you sure?',
+          messageDetails: mutableAction.confirm.messageDetails,
+          confirmLabel: mutableAction.label,
+          confirmStyle: mutableAction.style || 'danger',
+        })
+        if (!confirmed) return
+      }
+    }
+
+    // 7. Disk-space sanity check for actions that write significant
+    //    data. Estimate via `getInstallationSize` for copy / copy-update;
+    //    fall back to a generic 1 GiB threshold otherwise.
+    const diskCheckActions = new Set(['copy', 'copy-update', 'release-update'])
+    if (diskCheckActions.has(mutableAction.id) && inst.installPath) {
+      try {
+        const space: DiskSpaceInfo = await window.api.getDiskSpace(inst.installPath)
+        let estimatedRequired = 0
+        if (mutableAction.id === 'copy' || mutableAction.id === 'copy-update') {
+          try {
+            const r = await window.api.getInstallationSize(inst.id)
+            estimatedRequired = r.sizeBytes
+          } catch {
+            // ignore — fall through to generic threshold
+          }
+        }
+        const threshold = estimatedRequired > 0 ? Math.ceil(estimatedRequired * 1.1) : 1073741824
+        if (space.free < threshold) {
+          const freeStr = formatBytes(space.free)
+          const message = estimatedRequired > 0
+            ? t('diskSpace.warningMessage', { free: freeStr, required: formatBytes(estimatedRequired) })
+            : t('diskSpace.warningMessageGeneric', { free: freeStr })
+          const ok = await modal.confirm({
+            title: t('diskSpace.warningTitle'),
+            message,
+            confirmLabel: t('diskSpace.continueAnyway'),
+            confirmStyle: 'primary',
+          })
+          if (!ok) return
+        }
+      } catch {
+        // If the disk check itself fails, proceed.
+      }
+    }
+
+    // 8. showProgress — emit show-progress for the host's ProgressModal.
+    //    The synthetic `restart` id maps to stop → wait → launch so the
+    //    user sees one continuous "Restarting ComfyUI" progress view.
+    if (mutableAction.showProgress) {
+      const rawTitle = (mutableAction.progressTitle || mutableAction.label).replace(
         /\{(\w+)\}/g,
-        (_, k: string) => String((action.data as Record<string, unknown>)?.[k] ?? k),
+        (_, k: string) => String((mutableAction.data as Record<string, unknown>)?.[k] ?? k),
       )
+      const title = `${rawTitle} — ${inst.name}`
+      const isRestart = mutableAction.id === 'restart'
+      const apiCall = isRestart
+        ? async (): Promise<ReturnType<typeof window.api.runAction>> => {
+          await window.api.stopComfyUI(inst.id)
+          const deadline = Date.now() + 10_000
+          while (sessionStore.isRunning(inst.id) && Date.now() < deadline) {
+            await new Promise((r) => setTimeout(r, 100))
+          }
+          return window.api.runAction(inst.id, 'launch')
+        }
+        : (): ReturnType<typeof window.api.runAction> =>
+          window.api.runAction(inst.id, mutableAction.id, mutableAction.data)
+      emitTelemetryAction('desktop2.action.invoked', telemetryContext)
       opts.onShowProgress({
         installationId: inst.id,
-        title: `${rawTitle} — ${inst.name}`,
-        apiCall: () => window.api.runAction(inst.id, action.id, action.data),
-        cancellable: !!action.cancellable,
+        title,
+        apiCall,
+        cancellable: !!mutableAction.cancellable,
         returnTo: 'detail',
-        triggersInstanceStart: action.id === 'launch' || action.id === 'restart',
+        triggersInstanceStart: mutableAction.id === 'launch' || isRestart,
       })
       return
     }
 
-    emitTelemetryAction('desktop2.action.invoked', { action_id: action.id })
-    const result = await window.api.runAction(inst.id, action.id, action.data)
-    if (result.message) {
-      await modal.alert({ title: action.label, message: result.message })
+    // 9. Inline invoke + result navigation.
+    try {
+      emitTelemetryAction('desktop2.action.invoked', telemetryContext)
+      const result = await window.api.runAction(inst.id, mutableAction.id, mutableAction.data)
+      if (result.running) {
+        // Backend detected a race — surface the action guard so the
+        // user can stop ComfyUI and retry.
+        await actionGuard.checkBeforeAction(inst.id, mutableAction.label)
+        return
+      }
+      const resultValue = result.cancelled ? 'cancelled' : (result.ok === false ? 'failed' : 'ok')
+      emitTelemetryAction('desktop2.action.result', { result: resultValue, ...telemetryContext })
+      if (result.navigate === 'list') {
+        opts.onClose?.()
+        opts.onNavigateList?.()
+      } else if (result.navigate === 'detail') {
+        await reload()
+      } else if (result.message) {
+        await modal.alert({ title: mutableAction.label, message: result.message })
+      } else {
+        await reload()
+      }
+    } catch (err: unknown) {
+      emitTelemetryAction('desktop2.action.result', {
+        result: 'failed',
+        error_bucket: toErrorBucket(err),
+        ...telemetryContext,
+      })
+      await modal.alert({
+        title: mutableAction.label,
+        message: err instanceof Error ? err.message : String(err),
+      })
     }
-    await reload()
   }
 
   function sectionsForTab(tab: 'settings' | 'status' | 'update' | 'snapshots'): ComputedRef<DetailSection[]> {
@@ -180,6 +419,32 @@ export function useGlobalSettings(opts: UseGlobalSettingsOpts): UseGlobalSetting
   const pinBottomSection = computed<DetailSection | null>(
     () => sections.value.find((s) => s.pinBottom) ?? null,
   )
+
+  // Launch→Restart synthetic swap, mirrored from DetailModal.vue's
+  // `bottomActions`. Source action definitions stay single-purpose
+  // (`launch`); `runAction` picks the synthetic `'restart'` id up and
+  // routes through stopComfyUI → wait → launch.
+  const pinBottomActions = computed<ActionDef[]>(() => {
+    const acts = pinBottomSection.value?.actions ?? []
+    const inst = toValue(opts.installation)
+    if (!inst) return acts
+    if (!sessionStore.isRunning(inst.id)) return acts
+    return acts.map((a) => {
+      if (a.id !== 'launch') return a
+      return {
+        ...a,
+        id: 'restart',
+        label: t('actions.restart'),
+        style: 'accent',
+        progressTitle: t('actions.restartProgressTitle'),
+        confirm: {
+          title: t('actions.restartConfirmTitle'),
+          message: t('actions.restartConfirmMessage'),
+          confirmLabel: t('actions.restartConfirm'),
+        },
+      }
+    })
+  })
 
   const diskUsageItem = computed<DetailItem | null>(() => {
     const ds = diskSpace.value
@@ -211,5 +476,6 @@ export function useGlobalSettings(opts: UseGlobalSettingsOpts): UseGlobalSetting
     sectionsForTab,
     diskUsageItem,
     pinBottomSection,
+    pinBottomActions,
   }
 }

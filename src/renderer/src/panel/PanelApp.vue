@@ -457,6 +457,7 @@ onUnmounted(() => {
       :installation="installation"
       @close="closeSettingsV2"
       @show-progress="handleShowProgress"
+      @navigate-list="handleNavigateList"
     />
 
     <ModalDialog />

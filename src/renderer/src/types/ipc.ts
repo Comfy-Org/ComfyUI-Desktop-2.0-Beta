@@ -21,6 +21,7 @@ export type {
   ListAction,
   ShowProgressOpts,
   ActionResult,
+  ComfyArgDef,
   PortConflictInfo,
   AddResult,
   KillResult,

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+// TODO(stale-old-modal): delete after Settings drawer (v2,
+// GlobalSettingsPanel) reaches functional parity and ships everywhere.
 // TODO(brand-cleanup): superseded by GlobalSettingsPanel + useGlobalSettings
 // for the Status / Update / Snapshots / Settings tab surface. This file
 // still backs the hamburger → Settings → ComfyUI Settings flow during

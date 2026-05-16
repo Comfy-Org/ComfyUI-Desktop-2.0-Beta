@@ -1,4 +1,6 @@
 <script setup lang="ts">
+// TODO(stale-old-modal): delete after Settings drawer (v2,
+// GlobalSettingsPanel) reaches functional parity and ships everywhere.
 import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ArrowDownToLine, Box, FolderOpen, Settings as SettingsIcon } from 'lucide-vue-next'

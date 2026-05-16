@@ -3,7 +3,14 @@ import { computed, nextTick, onMounted, onUnmounted, ref, toRef, useTemplateRef,
 import { useI18n } from 'vue-i18n'
 import { ChevronDown } from 'lucide-vue-next'
 import { useGlobalSettings } from '../composables/useGlobalSettings'
-import type { DetailField, Installation, ShowProgressOpts } from '../types/ipc'
+import MoreMenu from './globalSettings/MoreMenu.vue'
+import PathField from './globalSettings/PathField.vue'
+import EnvVarsField from './globalSettings/EnvVarsField.vue'
+import ChannelPicker from './globalSettings/ChannelPicker.vue'
+import ArgsBuilderField from './globalSettings/ArgsBuilderField.vue'
+import ArgsBuilderPage from './globalSettings/ArgsBuilderPage.vue'
+import SnapshotsView from './globalSettings/SnapshotsView.vue'
+import type { ActionDef, DetailField, Installation, ShowProgressOpts } from '../types/ipc'
 
 /**
  * Brand-redesigned Settings drawer (v2). Right-anchored slide-in panel
@@ -32,6 +39,10 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<{
   close: []
   'show-progress': [opts: ShowProgressOpts]
+  /** Fired when an action's `result.navigate === 'list'` — the install
+   *  was removed (delete / untrack). The host should close this drawer
+   *  and tear down the comfy window. Mirrors DetailModal's emit. */
+  'navigate-list': []
 }>()
 
 const { t } = useI18n()
@@ -93,12 +104,21 @@ const tabs = computed<TabDef[]>(() => [
 ])
 
 const installation = toRef(props, 'installation')
-const { loading, error, updateField, runAction, sectionsForTab, diskUsageItem } = useGlobalSettings(
-  {
-    installation,
-    onShowProgress: (opts) => emit('show-progress', opts)
-  }
-)
+const {
+  loading,
+  error,
+  updateField,
+  runAction,
+  sectionsForTab,
+  diskUsageItem,
+  pinBottomActions,
+  reload
+} = useGlobalSettings({
+  installation,
+  onShowProgress: (opts) => emit('show-progress', opts),
+  onNavigateList: () => emit('navigate-list'),
+  onClose: () => requestClose()
+})
 
 const visibleSections = computed(() => {
   const tab = tabs.value.find((tt) => tt.key === activeTab.value)?.sectionTab ?? 'settings'
@@ -107,10 +127,6 @@ const visibleSections = computed(() => {
 
 function asString(v: DetailField['value']): string {
   return typeof v === 'string' ? v : v == null ? '' : String(v)
-}
-
-function envVarsCount(v: DetailField['value']): number {
-  return v && typeof v === 'object' && !Array.isArray(v) ? Object.keys(v).length : 0
 }
 
 // --- A11y + transitions -------------------------------------------------
@@ -167,6 +183,74 @@ function handleTabKeydown(event: KeyboardEvent, index: number): void {
 
 async function handleRelaunch(): Promise<void> {
   await window.api.relaunchApp()
+}
+
+// Footer "More" dropdown state. Local to the drawer; the menu component
+// owns its own outside-click + ESC handlers and emits `close` when the
+// user dismisses it that way.
+const moreMenuOpen = ref(false)
+function toggleMoreMenu(): void {
+  moreMenuOpen.value = !moreMenuOpen.value
+}
+function closeMoreMenu(): void {
+  moreMenuOpen.value = false
+}
+
+// Close the More menu whenever the drawer closes — leaving it open
+// after a slide-out would leave a dangling popover.
+watch(internalOpen, (next) => {
+  if (!next) moreMenuOpen.value = false
+})
+
+// Drawer sub-page state. When set, the drawer body swaps to the
+// dedicated sub-page (e.g. the args builder) instead of the tab list.
+// Closing the sub-page returns to the tab list; closing the drawer
+// also clears the sub-page so re-opening starts fresh.
+type SubPage = 'args' | null
+const subPage = ref<SubPage>(null)
+watch(internalOpen, (next) => {
+  if (!next) subPage.value = null
+})
+function openArgsPage(): void {
+  subPage.value = 'args'
+}
+function closeSubPage(): void {
+  subPage.value = null
+}
+
+// Active launch-args field, found in the current sections so the sub-
+// page can commit changes through the same updateField path.
+const argsField = computed<DetailField | null>(() => {
+  for (const s of sectionsForTab('settings').value) {
+    for (const f of s.fields ?? []) {
+      if (f.editType === 'args-builder') return f
+    }
+  }
+  return null
+})
+
+const argsValue = computed(() => {
+  const v = argsField.value?.value
+  return typeof v === 'string' ? v : v == null ? '' : String(v)
+})
+
+function handleArgsUpdate(value: string): void {
+  const f = argsField.value
+  if (f) void updateField(f, value)
+}
+
+// SnapshotsView emits a typed `run-action` that needs to reach the
+// composable's `runAction` (which fires the show-progress flow for
+// long-running restore ops).
+function handleSnapshotAction(action: ActionDef): void {
+  void runAction(action)
+}
+
+// Snapshot ops (save / delete / restore-confirmed) ask the host to
+// reload sections so any synthetic disk-usage row / pinBottomActions
+// stay in sync with the new on-disk state.
+function handleSnapshotsRefresh(): void {
+  void reload()
 }
 
 watch(internalOpen, async (next) => {
@@ -241,6 +325,30 @@ onUnmounted(() => {
           </p>
           <p v-else-if="loading" class="empty">{{ t('common.loading', 'Loading…') }}</p>
           <p v-else-if="error" class="empty error">{{ error }}</p>
+
+          <!-- Args sub-page takes over the body when active. Mirror of
+               the macOS Settings pattern — narrower than the legacy
+               inline editor would fit. -->
+          <ArgsBuilderPage
+            v-else-if="subPage === 'args' && installation"
+            :installation-id="installation.id"
+            :initial-value="argsValue"
+            @back="closeSubPage"
+            @update="handleArgsUpdate"
+          />
+
+          <!-- Snapshots tab body owns its own list + action flows.
+               Long-running restore ops flow via `run-action` → composable's
+               runAction → onShowProgress; no separate show-progress emit
+               needed on this child. -->
+          <SnapshotsView
+            v-else-if="activeTab === 'snapshots' && installation"
+            :installation-id="installation.id"
+            @run-action="handleSnapshotAction"
+            @refresh-all="handleSnapshotsRefresh"
+          />
+
+          <!-- Default: section loop for Config / Status / Update tabs. -->
           <template v-else>
             <article
               v-for="(section, si) in visibleSections"
@@ -275,26 +383,37 @@ onUnmounted(() => {
                   </option>
                 </select>
 
+                <PathField
+                  v-else-if="field.editType === 'path'"
+                  :field="field"
+                  @update="updateField"
+                />
+
+                <ArgsBuilderField
+                  v-else-if="field.editType === 'args-builder'"
+                  :field="field"
+                  @open="openArgsPage"
+                  @update="updateField"
+                />
+
+                <EnvVarsField
+                  v-else-if="field.editType === 'env-vars'"
+                  :field="field"
+                  @update="updateField"
+                />
+
+                <ChannelPicker
+                  v-else-if="field.editType === 'channel-cards'"
+                  :field="field"
+                  @action="runAction"
+                />
+
                 <input
-                  v-else-if="field.editType === 'args-builder' || field.editType === 'text'"
+                  v-else-if="field.editType === 'text'"
                   type="text"
                   :value="asString(field.value)"
                   @change="updateField(field, ($event.target as HTMLInputElement).value)"
                 />
-
-                <!-- TODO(global-settings-v2): inline env-vars editor +
-                     channel-cards picker. For now show a read-only
-                     summary; rich editing still happens via the
-                     hamburger → Settings → ComfyUI Settings flow. -->
-                <span v-else-if="field.editType === 'env-vars'" class="settings-v2-field-readonly">
-                  {{ t('globalSettings.envVarsCount', { n: envVarsCount(field.value) }) }}
-                </span>
-                <span
-                  v-else-if="field.editType === 'channel-cards'"
-                  class="settings-v2-field-readonly"
-                >
-                  {{ asString(field.value) }}
-                </span>
 
                 <span v-else class="settings-v2-field-readonly">{{ asString(field.value) }}</span>
               </div>
@@ -327,17 +446,28 @@ onUnmounted(() => {
           <button type="button" class="primary settings-v2-relaunch" @click="handleRelaunch">
             {{ t('globalSettings.relaunch', 'Relaunch') }}
           </button>
-          <!-- TODO(global-settings-v2): wire More menu when product nails
-               down contents (open install folder, reveal logs, reset…). -->
-          <button
-            type="button"
-            class="settings-v2-more"
-            disabled
-            :aria-label="t('globalSettings.more', 'More')"
-          >
-            {{ t('globalSettings.more', 'More') }}
-            <ChevronDown :size="14" />
-          </button>
+          <div class="settings-v2-more-wrap">
+            <button
+              type="button"
+              class="settings-v2-more"
+              data-more-trigger
+              :class="{ 'is-active': moreMenuOpen }"
+              aria-haspopup="menu"
+              :aria-expanded="moreMenuOpen"
+              :aria-label="t('globalSettings.more', 'More')"
+              :disabled="!installation || pinBottomActions.length === 0"
+              @click="toggleMoreMenu"
+            >
+              {{ t('globalSettings.more', 'More') }}
+              <ChevronDown :size="14" />
+            </button>
+            <MoreMenu
+              :open="moreMenuOpen"
+              :actions="pinBottomActions"
+              @close="closeMoreMenu"
+              @pick="runAction"
+            />
+          </div>
         </footer>
       </aside>
     </Transition>
@@ -546,6 +676,12 @@ onUnmounted(() => {
   flex: 1;
 }
 
+/* Wrap so the absolutely-positioned MoreMenu anchors to the button. */
+.settings-v2-more-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
 .settings-v2-more {
   display: inline-flex;
   align-items: center;
@@ -554,10 +690,29 @@ onUnmounted(() => {
   background: transparent;
   border: 1px solid var(--border);
   border-radius: 4px;
-  color: var(--text-muted);
+  color: var(--text);
   font: inherit;
   font-size: 13px;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+
+.settings-v2-more:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+  border-color: var(--border-hover);
+}
+
+.settings-v2-more.is-active {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.settings-v2-more:disabled {
   cursor: not-allowed;
-  opacity: 0.6;
+  opacity: 0.5;
+  color: var(--text-muted);
 }
 </style>

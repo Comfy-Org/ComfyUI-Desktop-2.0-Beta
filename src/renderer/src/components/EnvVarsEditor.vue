@@ -1,4 +1,7 @@
 <script setup lang="ts">
+// TODO(stale-old-modal): delete after Settings drawer (v2,
+// GlobalSettingsPanel + EnvVarsField) reaches functional parity and
+// ships everywhere.
 import { ref, watch, computed } from 'vue'
 import { ShieldAlert } from 'lucide-vue-next'
 
