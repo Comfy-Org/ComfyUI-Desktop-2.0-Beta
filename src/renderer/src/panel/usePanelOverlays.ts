@@ -24,6 +24,7 @@ export type PanelKey =
   | 'comfy-lifecycle'
   | 'chooser'
   | 'settings'
+  | 'settings-v2'
   | 'new-install'
   | 'track'
   | 'load-snapshot'
@@ -33,6 +34,7 @@ const VALID_PANELS: ReadonlySet<PanelKey> = new Set([
   'comfy-lifecycle',
   'chooser',
   'settings',
+  'settings-v2',
   'new-install',
   'track',
   'load-snapshot',
@@ -155,7 +157,7 @@ export function usePanelOverlays(opts: UsePanelOverlaysOpts): UsePanelOverlaysAp
   })()
 
   const activePanel = ref<PanelKey>(
-    FLOW_PANELS.has(initialPanel) || initialPanel === 'settings'
+    FLOW_PANELS.has(initialPanel) || initialPanel === 'settings' || initialPanel === 'settings-v2'
       ? defaultBodyPanel()
       : initialPanel,
   )

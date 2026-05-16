@@ -5,6 +5,7 @@ import { buildElectronApi } from './api'
 export type ComfyPanelKey =
   | 'comfy'
   | 'settings'
+  | 'settings-v2'
   | 'new-install'
   | 'track'
   | 'load-snapshot'
