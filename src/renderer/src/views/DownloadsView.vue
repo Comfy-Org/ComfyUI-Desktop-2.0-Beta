@@ -43,13 +43,14 @@ onMounted(() => {
 })
 
 const ordered = computed<ModelDownloadProgress[]>(() => {
-  // Single insertion-ordered list keyed on `createdAt` so a download
-  // that transitions active → cancelled / completed stays in its
-  // original slot rather than jumping to the bottom of a separate
-  // "finished" bucket. `createdAt` is stamped by main on first sight
+  // Single list ordered newest-first by `createdAt` so the most
+  // recently kicked-off download surfaces at the top and finished
+  // ones drift down as new ones come in. A download that transitions
+  // active → cancelled / completed keeps its slot rather than jumping
+  // between buckets. `createdAt` is stamped by main on first sight
   // and preserved across status updates.
   return [...store.downloads.values()].sort(
-    (a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0),
+    (a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0),
   )
 })
 
