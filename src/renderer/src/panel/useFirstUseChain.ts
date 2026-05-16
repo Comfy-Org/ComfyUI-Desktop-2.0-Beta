@@ -25,6 +25,10 @@ export interface FirstUseChainOpts {
     installation: Installation,
     onMissingLaunchAction?: () => void,
   ) => Promise<ChooserLaunchOutcome>
+  /** Re-opens the FirstUseTakeover from the Configure → Back chain.
+   *  Owned by usePanelOverlays. Pass `{ initialStep: 'localBranch' }`
+   *  so the user lands on the sub-step they came from. */
+  openFirstUseTakeover: (opts?: { initialStep?: 'consent' | 'pick' | 'localBranch' }) => Promise<void>
 }
 
 export interface FirstUseChainApi {
@@ -38,13 +42,20 @@ export interface FirstUseChainApi {
   completeFirstUseAndDismiss: () => Promise<void>
   /** FirstUseTakeover `complete-cloud` emit. */
   handleFirstUseComplete: () => Promise<void>
-  /** FirstUseTakeover `chain-local` emit. */
-  handleFirstUseChainLocal: () => Promise<void>
+  /** FirstUseTakeover `chain-local` emit. Optional payload flags
+   *  whether the chain reached us via the Local → Start Fresh
+   *  sub-step (vs the direct no-legacy path). */
+  handleFirstUseChainLocal: (
+    payload?: { cameFromLocalBranch?: boolean }
+  ) => Promise<void>
   /** FirstUseTakeover `chain-migrate` emit. */
   handleFirstUseChainMigrate: () => Promise<void>
   /** NewInstallModal `close` / `navigate-list` emit when mounted as a
    *  takeover. */
   handleNewInstallTakeoverClose: () => Promise<void>
+  /** NewInstallModal `back-to-local-branch` emit. Silent Tier 3 → Tier 3
+   *  swap back to the FirstUseTakeover localBranch step. */
+  handleNewInstallBackToLocalBranch: () => Promise<void>
 }
 
 /**
@@ -92,8 +103,19 @@ export function useFirstUseChain(opts: FirstUseChainOpts): FirstUseChainApi {
    *  finishes successfully. */
   const pendingFirstUseAutoLaunchId = ref<string | null>(null)
 
+  /** Set by `handleFirstUseChainLocal` when the chain arrives via
+   *  Local → Start Fresh. Read + cleared by usePanelOverlays via the
+   *  `consumeCameFromLocalBranch` hook so NewInstallModal opens with a
+   *  Back link in its Configure footer. */
+  const pendingCameFromLocalBranch = ref(false)
+
   const hooks: FirstUseChainHooks = {
     shouldForceTakeover: () => chainingFirstUseToNewInstall.value,
+    consumeCameFromLocalBranch: () => {
+      const v = pendingCameFromLocalBranch.value
+      pendingCameFromLocalBranch.value = false
+      return v
+    },
     onShowProgress: (showOpts) => {
       // Capture the operation's installation id when a first-use chain
       // is in flight (new-install or migrate). New-install ops carry
@@ -194,14 +216,33 @@ export function useFirstUseChain(opts: FirstUseChainOpts): FirstUseChainApi {
    *  `useOverlay`, so the first-use takeover unmounts as the new-install
    *  takeover mounts. The completion flip is deferred to the new-install
    *  close path (see `handleNewInstallTakeoverClose`). */
-  async function handleFirstUseChainLocal(): Promise<void> {
+  async function handleFirstUseChainLocal(
+    payload?: { cameFromLocalBranch?: boolean },
+  ): Promise<void> {
     chainingFirstUseToNewInstall.value = true
     pendingFirstUseAutoLaunchId.value = null
+    pendingCameFromLocalBranch.value = payload?.cameFromLocalBranch === true
     await opts.switchPanel('new-install', 'first_use')
     // FirstUseTakeover.onUnmounted just pushed `'none'` as the chain
     // swap unmounted it. Re-assert `'post-consent'` so the file-menu
     // builder keeps the chain locked down to Skip Onboarding while
     // the new-install / install-progress takeover is up.
+    window.api.setFirstUseMode('post-consent')
+  }
+
+  /** NewInstallModal `back-to-local-branch` emit. Silent Tier 3 → Tier 3
+   *  swap that re-opens the FirstUseTakeover on its localBranch
+   *  sub-step (the step the user came from). Drops chain bookkeeping so
+   *  the close handler doesn't mistake the swap for first-use
+   *  completion. */
+  async function handleNewInstallBackToLocalBranch(): Promise<void> {
+    chainingFirstUseToNewInstall.value = false
+    pendingFirstUseAutoLaunchId.value = null
+    pendingCameFromLocalBranch.value = false
+    await opts.openFirstUseTakeover({ initialStep: 'localBranch' })
+    // openFirstUseTakeover routes through openOverlay which pushes
+    // `'consent-lockdown'` on mount; re-assert `'post-consent'` since
+    // the user already passed consent earlier in this chain.
     window.api.setFirstUseMode('post-consent')
   }
 
@@ -227,11 +268,12 @@ export function useFirstUseChain(opts: FirstUseChainOpts): FirstUseChainApi {
       void handleFirstUseChainLocal()
       return
     }
-    // confirmMigration shows its own modal (variant pick / preview /
-    // confirm); a `null` return means user cancelled, in which case we
-    // leave the takeover mounted on the localBranch step (no state
-    // change).
-    const result = await confirmMigration(legacy)
+    // First-use chain renders the migrate confirm as a brand takeover
+    // (registered by PanelApp via `registerMigrateTakeover`). Other
+    // callsites (MigrationBanner, DetailModal) default to the legacy
+    // Modal surface. `null` return means user cancelled; leave the
+    // takeover mounted on the localBranch step (no state change).
+    const result = await confirmMigration(legacy, undefined, { surface: 'takeover' })
     if (!result) return
 
     // Pre-mark the chain so the new install kicked off by migration
@@ -357,5 +399,6 @@ export function useFirstUseChain(opts: FirstUseChainOpts): FirstUseChainApi {
     handleFirstUseChainLocal,
     handleFirstUseChainMigrate,
     handleNewInstallTakeoverClose,
+    handleNewInstallBackToLocalBranch,
   }
 }

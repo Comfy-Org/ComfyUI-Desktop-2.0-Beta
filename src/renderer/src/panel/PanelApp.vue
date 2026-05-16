@@ -12,6 +12,7 @@ import TrackModal from '../views/TrackModal.vue'
 import LoadSnapshotModal from '../views/LoadSnapshotModal.vue'
 import QuickInstallModal from '../views/QuickInstallModal.vue'
 import FirstUseTakeover from '../views/FirstUseTakeover.vue'
+import MigrateConfirmTakeover from '../views/MigrateConfirmTakeover.vue'
 import { useTheme } from '../composables/useTheme'
 import { useSessionStore } from '../stores/sessionStore'
 import { useInstallationStore } from '../stores/installationStore'
@@ -20,6 +21,7 @@ import { useModal } from '../composables/useModal'
 import { useAppUpdatePrompts } from '../composables/useAppUpdatePrompts'
 import { useSendFeedback } from '../composables/useSendFeedback'
 import { useDeepLinkRouter } from '../composables/useDeepLinkRouter'
+import { registerMigrateTakeover } from '../composables/useMigrateAction'
 import { isFlowPanel, isValidPanel, usePanelOverlays } from './usePanelOverlays'
 import { useChooserHandoff } from './useChooserHandoff'
 import { useFirstUseChain } from './useFirstUseChain'
@@ -41,8 +43,8 @@ useSendFeedback()
 
 // installationStore.fetchInstallations() is wired to onInstallationsChanged
 // inside the store itself, so the panel just needs to read from it.
-const installation = computed<Installation | null>(
-  () => (installationId ? installationStore.getById(installationId) ?? null : null),
+const installation = computed<Installation | null>(() =>
+  installationId ? (installationStore.getById(installationId) ?? null) : null
 )
 
 /**
@@ -68,6 +70,7 @@ const trackRef = ref<InstanceType<typeof TrackModal> | null>(null)
 const loadSnapshotRef = ref<InstanceType<typeof LoadSnapshotModal> | null>(null)
 const quickInstallRef = ref<InstanceType<typeof QuickInstallModal> | null>(null)
 const firstUseRef = ref<InstanceType<typeof FirstUseTakeover> | null>(null)
+const migrateTakeoverRef = ref<InstanceType<typeof MigrateConfirmTakeover> | null>(null)
 
 // The three panel composables form a small dependency cycle:
 //   - useFirstUseChain needs overlay helpers (dismissTakeoverDirect,
@@ -89,6 +92,7 @@ const firstUseChain = useFirstUseChain({
   switchPanel: (panel, entrypoint) => overlays.switchPanel(panel, entrypoint),
   handleShowProgress: (showOpts) => overlays.handleShowProgress(showOpts),
   performChooserLaunch: (inst, onMissing) => chooserHandoff.performChooserLaunch(inst, onMissing),
+  openFirstUseTakeover: (firstUseOpts) => overlays.openFirstUseTakeover(firstUseOpts),
 })
 const {
   chainingFirstUseToNewInstall,
@@ -97,6 +101,7 @@ const {
   handleFirstUseChainLocal,
   handleFirstUseChainMigrate,
   handleNewInstallTakeoverClose,
+  handleNewInstallBackToLocalBranch,
 } = firstUseChain
 
 overlays = usePanelOverlays({
@@ -182,6 +187,18 @@ function closeSettingsV2(): void {
 }
 
 onMounted(async () => {
+  // Register the brand-takeover surface so `useMigrateAction` can route
+  // chain-migrate confirms here instead of the legacy Modal. Other
+  // callsites (MigrationBanner, DetailModal) keep the Modal default.
+  // Wired before bootstrap because the surface is read by the
+  // FirstUseTakeover chain — if it landed mid-takeover (e.g. due to a
+  // slow bootstrap) the chain would silently fall back to the modal.
+  registerMigrateTakeover({
+    open: (title, confirmLabel) =>
+      migrateTakeoverRef.value!.open(title, confirmLabel),
+    update: (opts) => migrateTakeoverRef.value?.update(opts)
+  })
+
   try {
     await loadLocale()
   } catch (err) {
@@ -243,7 +260,7 @@ onMounted(async () => {
   unsubAppUpdateUserActionFailed = window.api.onAppUpdateUserActionFailed(({ message }) => {
     void modal.alert({
       title: t('appUpdate.errorTitle'),
-      message,
+      message
     })
   })
 
@@ -291,6 +308,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  registerMigrateTakeover(null)
   unsubPanel?.()
   unsubLocale?.()
   unsubCloseRequest?.()
@@ -318,7 +336,6 @@ onUnmounted(() => {
           @show-progress="handleShowProgress"
         />
       </div>
-
     </main>
 
     <!-- Host-level overlay slot. One DOM node at a
@@ -367,6 +384,7 @@ onUnmounted(() => {
         ref="progressRef"
         :installation-id="currentOverlay.installationId ?? ''"
         binding
+        :brand-chrome="chainingFirstUseToNewInstall"
         @close="handleProgressClose"
       />
       <NewInstallModal
@@ -376,6 +394,7 @@ onUnmounted(() => {
         @close="handleNewInstallTakeoverClose"
         @navigate-list="handleNewInstallTakeoverClose"
         @show-progress="handleShowProgress"
+        @back-to-local-branch="handleNewInstallBackToLocalBranch"
       />
       <TrackModal
         v-else-if="currentOverlay.component === 'track'"
@@ -423,6 +442,7 @@ onUnmounted(() => {
     />
 
     <ModalDialog />
+    <MigrateConfirmTakeover ref="migrateTakeoverRef" />
   </div>
 </template>
 

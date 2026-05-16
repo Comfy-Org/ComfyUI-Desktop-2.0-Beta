@@ -333,42 +333,41 @@ describe('TitleBarApp', () => {
     wrapper.unmount()
   })
 
-  it('hides the waffle menu during the first-use T&C consent step (consent-lockdown)', async () => {
-    // The waffle menu is the only always-live affordance during a
-    // Tier 3 takeover (it carries the Return-to-Dashboard /
-    // Close-All-Windows escape hatch). The first-use T&C consent
-    // step deliberately removes that escape hatch so the user has
-    // to either accept consent or close the window via OS chrome.
-    // Once the takeover advances past consent the waffle reappears
-    // (the menu builder additionally surfaces the Skip Onboarding
-    // entry there).
+  it('hides the waffle menu and downloads tray for the full first-use takeover (consent + post-consent)', async () => {
+    // The title bar strips itself down to a minimal identity bar for
+    // the entire onboarding flow — waffle, downloads tray, and
+    // feedback button all disappear. No installs exist yet so the
+    // downloads tray is meaningless, and the takeover screens read
+    // cleaner without the surrounding chrome. The chrome returns once
+    // `firstUseMode === 'none'` (steady state).
     const { default: TitleBarApp } = await import('./TitleBarApp.vue')
     const wrapper = mount(TitleBarApp)
     await flushPromises()
-    // Steady state — waffle is rendered.
+    // Steady state — waffle + downloads tray are rendered.
     expect(wrapper.find('.title-menu-button--icon').exists()).toBe(true)
+    expect(wrapper.find('.title-downloads-tray').exists()).toBe(true)
     expect(wrapper.find('header').classes()).not.toContain('is-consent-lockdown')
 
-    // Consent step on screen — waffle disappears, downloads stays so an
-    // in-flight model download remains reachable while the waffle is hidden.
+    // Consent step on screen — waffle + downloads tray disappear.
     bridgeState.firstUseModeChangedCallbacks.forEach((cb) => cb('consent-lockdown'))
     await flushPromises()
     expect(wrapper.find('header').classes()).toContain('is-consent-lockdown')
     expect(wrapper.find('.title-menu-button--icon').exists()).toBe(false)
-    expect(wrapper.find('.title-downloads-tray').exists()).toBe(true)
+    expect(wrapper.find('.title-downloads-tray').exists()).toBe(false)
 
-    // Advance to post-consent — waffle reappears (Skip Onboarding now
-    // available there).
+    // Advance to post-consent — chrome stays stripped (no waffle, no tray).
     bridgeState.firstUseModeChangedCallbacks.forEach((cb) => cb('post-consent'))
     await flushPromises()
     expect(wrapper.find('header').classes()).not.toContain('is-consent-lockdown')
-    expect(wrapper.find('.title-menu-button--icon').exists()).toBe(true)
+    expect(wrapper.find('.title-menu-button--icon').exists()).toBe(false)
+    expect(wrapper.find('.title-downloads-tray').exists()).toBe(false)
 
-    // Takeover dismissed — back to steady state.
+    // Takeover dismissed — back to steady state with full chrome.
     bridgeState.firstUseModeChangedCallbacks.forEach((cb) => cb('none'))
     await flushPromises()
     expect(wrapper.find('header').classes()).not.toContain('is-consent-lockdown')
     expect(wrapper.find('.title-menu-button--icon').exists()).toBe(true)
+    expect(wrapper.find('.title-downloads-tray').exists()).toBe(true)
     wrapper.unmount()
   })
 
@@ -881,11 +880,11 @@ describe('TitleBarApp', () => {
     wrapper.unmount()
   })
 
-  it('hides the Send Feedback button during the first-use consent-lockdown step', async () => {
-    // Same gating as the waffle: during the T&C consent step the only
-    // first-use gestures we want available are explicit consent or
-    // OS-chrome window close. The feedback button reappears once the
-    // takeover advances out of the lockdown.
+  it('hides the Send Feedback button for the full first-use takeover (consent + post-consent)', async () => {
+    // Same gating as the waffle: the feedback button stays hidden for
+    // the entire onboarding flow (nothing meaningful to feed back about
+    // before the user has used the app) and only returns in the steady
+    // state.
     const { default: TitleBarApp } = await import('./TitleBarApp.vue')
     const wrapper = mount(TitleBarApp)
     await flushPromises()
@@ -893,6 +892,9 @@ describe('TitleBarApp', () => {
     await flushPromises()
     expect(wrapper.find('.title-feedback-button').exists()).toBe(false)
     bridgeState.firstUseModeChangedCallbacks.forEach((cb) => cb('post-consent'))
+    await flushPromises()
+    expect(wrapper.find('.title-feedback-button').exists()).toBe(false)
+    bridgeState.firstUseModeChangedCallbacks.forEach((cb) => cb('none'))
     await flushPromises()
     expect(wrapper.find('.title-feedback-button').exists()).toBe(true)
   })

@@ -82,6 +82,11 @@ export interface FirstUseChainHooks {
    *  persisted first-use gate. Called once per chain at the moment the
    *  install/migrate op begins. */
   onShowProgress: (opts: ShowProgressOpts) => void
+  /** Read-and-clear: returns true if the next new-install takeover open
+   *  should surface a Back link in its Configure footer (chain reached
+   *  the new-install screen via Local → Start Fresh). Called by
+   *  `openFlowTakeover` right before `newInstallRef.value?.open(...)`. */
+  consumeCameFromLocalBranch: () => boolean
 }
 
 export interface UsePanelOverlaysOpts {
@@ -118,7 +123,9 @@ export interface UsePanelOverlaysApi {
   handleShowProgress: (opts: ShowProgressOpts) => Promise<void>
   handleProgressClose: () => void
   openFlowTakeover: (component: FlowComponent, entrypoint: string) => Promise<void>
-  openFirstUseTakeover: () => Promise<void>
+  openFirstUseTakeover: (opts?: {
+    initialStep?: 'consent' | 'pick' | 'localBranch'
+  }) => Promise<void>
   dismissTakeoverDirect: () => void
   switchPanel: (panel: PanelKey, entrypoint?: string) => Promise<void>
 }
@@ -266,7 +273,17 @@ export function usePanelOverlays(opts: UsePanelOverlaysOpts): UsePanelOverlaysAp
     // Wait for the v-if branch in the takeover slot to mount the
     // component before reaching for its ref.
     await nextTick()
-    if (component === 'new-install') await newInstallRef.value?.open()
+    if (component === 'new-install') {
+      // Surface a Back link in the Configure footer when the chain
+      // arrived via Local → Start Fresh. Read-and-clear so a subsequent
+      // dashboard-initiated open() doesn't inherit the flag.
+      const cameFromLocalBranch = opts.firstUseChain
+        ? opts.firstUseChain.consumeCameFromLocalBranch() === true
+        : false
+      await newInstallRef.value?.open(
+        cameFromLocalBranch ? { cameFromLocalBranch } : undefined,
+      )
+    }
     else if (component === 'track') trackRef.value?.open()
     else if (component === 'load-snapshot') loadSnapshotRef.value?.open()
     else if (component === 'quick-install') await quickInstallRef.value?.open()
@@ -282,7 +299,9 @@ export function usePanelOverlays(opts: UsePanelOverlaysOpts): UsePanelOverlaysAp
    * can suppress the cloud-vs-local pick step for returning users. The
    * fetch runs in parallel with the overlay mount.
    */
-  async function openFirstUseTakeover(): Promise<void> {
+  async function openFirstUseTakeover(
+    firstUseOpts?: { initialStep?: 'consent' | 'pick' | 'localBranch' },
+  ): Promise<void> {
     const statePromise = window.api
       .getFirstUseState()
       .catch(() => ({ skipPick: false, hasLegacyDesktop: false }))
@@ -300,6 +319,7 @@ export function usePanelOverlays(opts: UsePanelOverlaysOpts): UsePanelOverlaysAp
     await firstUseRef.value?.open({
       skipPick: state.skipPick,
       hasLegacyDesktop: state.hasLegacyDesktop,
+      ...(firstUseOpts?.initialStep ? { initialStep: firstUseOpts.initialStep } : {}),
     })
   }
 

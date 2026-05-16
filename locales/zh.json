@@ -104,7 +104,9 @@
     "useSharedPaths": "使用共享目录",
     "done": "完成",
     "noItems": "没有可用项目。",
-    "advanced": "高级"
+    "advanced": "高级",
+    "continue": "继续",
+    "learnMore": "了解更多"
   },
 
   "list": {
@@ -138,6 +140,11 @@
     "installing": "正在安装",
     "chooseMethod": "选择安装方式",
     "configuration": "配置",
+    "configureTitle": "配置 Comfy 桌面版",
+    "configureLead": "您希望如何安装此版本？",
+    "detectedGpuLabel": "已检测到的 GPU",
+    "helpImproveTitle": "帮助改进 Comfy",
+    "helpImproveHint": "共享匿名使用数据，帮助我们修复缺陷并确定功能优先级。",
     "nameLocation": "名称和位置",
     "next": "下一步",
     "recommended": "推荐"
@@ -302,11 +309,46 @@
     "privacyPolicyAppliesTo": "适用版本",
     "telemetryHint": "遥测数据帮助我们改进启动器。我们绝不收集工作流内容、提示词、生成的媒体或个人信息。",
     "acceptTos": "接受并继续",
+    "consentTosTitle": "接受服务条款",
+    "consentTosHint": "继续即表示您同意 ComfyUI Desktop 服务条款及隐私政策。",
+    "consentTelemetryTitle": "帮助改进 Comfy",
+    "consentTelemetryHint": "共享匿名使用数据，帮助我们修复缺陷并确定功能优先级。",
+    "consentGetStarted": "开始使用",
+    "termsModalTitle": "ComfyUI Desktop 隐私政策",
     "notNow": "暂不启用",
-    "pickTitle": "您希望如何使用 ComfyUI？",
-    "pickLead": "您可以稍后更改 — 任意类型的安装都可以随时通过启动器添加。",
-    "localLabel": "本地安装",
-    "localDesc": "在本机上安装并运行 ComfyUI。可离线使用，所有内容由您完全掌控。"
+    "pickTitle": "您想如何运行 Comfy？",
+    "pickLead": "选择适合您工作方式的设置。稍后可随时切换。",
+    "cloudTagline": "即时设置，全部算力。",
+    "cloudDesc": "适合**大多数用户**，可在任何地方使用经过商用授权验证的模型。",
+    "localLabel": "本地",
+    "localTagline": "完全掌控。您的硬件。",
+    "localDesc": "适合**高级用户**，可自行管理版本、自定义节点和离线工作流。",
+    "whyTryCloud": "为什么试用云端？",
+    "whyCloud": {
+      "title": "为什么试用云端？",
+      "creditsPill": "400 免费额度",
+      "lead": "您的硬件有限制，云端没有。",
+      "benefits": [
+        "适用于任何设备",
+        "无需下载，无内存不足错误",
+        "始终保持最新，无需维护",
+        "模型即开即用，经过商用授权验证",
+        "预装热门自定义节点包"
+      ],
+      "maybeLater": "稍后再说",
+      "tryCta": "免费试用云端",
+      "imageAlt": "云端算力插图"
+    },
+    "localBranchTitle": "看起来您之前安装过 Comfy",
+    "localBranchLead": "您希望如何安装此版本？",
+    "localBranchMigrateLabel": "迁移",
+    "localBranchMigrateDesc": "导入现有的工作流、模型和设置。",
+    "localBranchInstallNewLabel": "全新安装",
+    "localBranchInstallNewDesc": "干净安装。现有项目将保留在 Comfy-{'{'}Name{'}'} 中。",
+    "nameInstallTitle": "看起来您之前安装过 Comfy",
+    "nameInstallLead": "您希望如何安装此版本？",
+    "nameInstallLabel": "为新安装命名",
+    "nameInstallHint": "您的旧安装将保持不变。为新的安装命名，方便区分。"
   },
 
   "tray": {
