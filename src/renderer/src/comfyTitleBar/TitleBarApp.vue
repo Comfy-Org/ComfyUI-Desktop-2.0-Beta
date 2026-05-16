@@ -174,7 +174,6 @@ const isInstallLess = ref((bridge?.getInstallationId() ?? '') === '')
 const {
   installLabel,
   sourceCategory,
-  themeBg,
   themeText,
   isFullscreen,
   firstUseMode,
@@ -294,7 +293,6 @@ onUnmounted(() => {
       'is-consent-lockdown': isConsentLockdown
     }"
     :style="{
-      background: themeBg ?? undefined,
       color: themeText ?? undefined
     }"
   >
