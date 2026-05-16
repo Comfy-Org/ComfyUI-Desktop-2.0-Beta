@@ -86,13 +86,15 @@ function isTerminal(d: DownloadEntry): boolean {
   return TERMINAL_STATUSES.has(d.status)
 }
 
-/** Combined insertion-ordered list — active + terminal entries
- *  preserve their original slot. `createdAt` is the source of truth;
- *  the active/recent split survives only because that's the shape main
- *  pushes over the IPC. */
+/** Combined list ordered newest-first by `createdAt` — both active
+ *  and terminal entries share one slot so a download that transitions
+ *  active → cancelled / completed stays in place rather than jumping
+ *  between buckets. The active/recent split survives only because
+ *  that's the shape main pushes over the IPC; on screen the most
+ *  recently kicked-off download surfaces at the top of the list. */
 const orderedEntries = computed<DownloadEntry[]>(() =>
   [...props.state.active, ...props.state.recent].sort(
-    (a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0),
+    (a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0),
   ),
 )
 

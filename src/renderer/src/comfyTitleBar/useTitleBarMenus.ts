@@ -1,0 +1,230 @@
+import { computed, onMounted, onUnmounted, reactive, ref, type ComputedRef, type Ref, type ShallowRef } from 'vue'
+import { useI18n } from 'vue-i18n'
+
+interface MenuAnchor {
+  x: number
+  y: number
+}
+
+interface DownloadsTrayEntry {
+  url: string
+  filename: string
+  directory?: string
+  progress: number
+  status: 'pending' | 'downloading' | 'paused' | 'completed' | 'error' | 'cancelled'
+  error?: string
+}
+
+interface DownloadsTrayState {
+  active: DownloadsTrayEntry[]
+  recent: DownloadsTrayEntry[]
+}
+
+interface TitleBarMenusBridge {
+  openFileMenu: (anchor: MenuAnchor) => void
+  dismissFileMenu: () => void
+  clickDownloadsTray: (anchor: MenuAnchor) => void
+  onMenuOpened: (cb: (info: { menu: 'menu' | 'downloads' }) => void) => () => void
+  onMenuClosed: (cb: (info: { menu: 'menu' | 'downloads' }) => void) => () => void
+  onDownloadsChanged: (cb: (state: DownloadsTrayState) => void) => () => void
+}
+
+interface UseTitleBarMenusOpts {
+  bridge: TitleBarMenusBridge | undefined
+  /** Hide any in-flight tooltip — the menu will obscure the same area
+   *  and the click won't fire pointerleave. */
+  hideTip: () => void
+  /** Template ref for the waffle / file-menu button. */
+  fileBtnRef: Readonly<ShallowRef<HTMLElement | null>>
+  /** Template ref for the downloads-tray button. */
+  downloadsBtnRef: Readonly<ShallowRef<HTMLElement | null>>
+}
+
+interface TitleBarMenusApi {
+  isMenuOpen: Ref<boolean>
+  downloadsState: Ref<DownloadsTrayState>
+  downloadsActiveCount: ComputedRef<number>
+  /** Number of `recent` (terminal) entries the user hasn't reviewed
+   *  yet. Reset to zero whenever the downloads popup is opened. */
+  unseenFinishedCount: ComputedRef<number>
+  /** Tooltip / aria-label for the tray button — switches between an
+   *  in-progress label, an unseen-finished label, and the idle
+   *  "Downloads" label. */
+  downloadsTrayLabel: ComputedRef<string>
+  /** Monotonic timestamp bumped each time a brand-new active download
+   *  appears so the title bar can play a one-shot "downloads started"
+   *  attention animation. `0` means "no pulse yet" — the renderer can
+   *  treat it as a guard for the initial mount. */
+  downloadsStartedAt: Ref<number>
+  handleFileMenu: () => void
+  handleDownloadsTray: () => void
+}
+
+/**
+ * Title-bar native-menu openers + downloads-tray state.
+ *
+ * Both popups (the waffle / file menu and the downloads tray) share a
+ * single WebContentsView in main, so they share dismiss / reopen
+ * behaviour:
+ *   - `isMenuOpen` is mirrored from main via `onMenuOpened` /
+ *     `onMenuClosed` so click handlers can toggle-close instead of
+ *     racing the OS-driven dismiss.
+ *   - `menuClosedAt` per-kind suppression catches the platform case
+ *     where the dismiss propagates before our click handler runs (the
+ *     same click that closed the popup also retargets the opener
+ *     button); without it the popup flickers immediately back open.
+ *
+ * Tracked per-kind because the waffle and the downloads-tray live on
+ * separate buttons — clicking one shouldn't suppress a fresh open of
+ * the other.
+ *
+ * The composable also owns the "unseen finished" book-keeping for the
+ * downloads tray (issue #558): when downloads complete while the user
+ * isn't looking, the tray tags itself as unseen until the popup is
+ * opened. URLs already in `recent` on first sight are treated as
+ * already-acknowledged so a window opening mid-flow doesn't paint a
+ * stale indicator.
+ */
+export function useTitleBarMenus(opts: UseTitleBarMenusOpts): TitleBarMenusApi {
+  const { t } = useI18n()
+
+  /** Per-menu suppression window: the OS dismisses the popup before
+   *  the click event reaches the renderer, so a naïve handler would
+   *  re-pop the popup on the same click. 100ms covers the worst-case
+   *  Windows / Linux retarget gap. */
+  const MENU_REOPEN_GUARD_MS = 100
+  const menuClosedAt: Record<'menu' | 'downloads', number> = { menu: 0, downloads: 0 }
+
+  const isMenuOpen = ref(false)
+  const downloadsState = ref<DownloadsTrayState>({ active: [], recent: [] })
+  /** URLs the user has already acknowledged. Used to derive the
+   *  unseen-finished count without persisting per-entry state on the
+   *  upstream payload. */
+  const seenUrls = reactive(new Set<string>())
+  /** Last set of active URLs — diffed against the next push to detect
+   *  "a new download appeared". */
+  const previousActiveUrls = new Set<string>()
+  let firstDownloadsPush = true
+  const downloadsStartedAt = ref(0)
+
+  const downloadsActiveCount = computed(() => downloadsState.value.active.length)
+  const unseenFinishedCount = computed(() =>
+    downloadsState.value.recent.filter((d) => !seenUrls.has(d.url)).length,
+  )
+  const downloadsTrayLabel = computed<string>(() => {
+    const active = downloadsActiveCount.value
+    if (active > 0) return t('titleBar.downloadsInProgress', { n: active }, active)
+    const unseen = unseenFinishedCount.value
+    if (unseen > 0) return t('titleBar.downloadsCompleteUnseen', { n: unseen }, unseen)
+    return t('titleBar.downloads')
+  })
+
+  /** Anchor a native menu just below `el`'s bottom-left corner.
+   *  Coordinates are title-bar-local px; main translates to window
+   *  coords (the title-bar view sits at parent (0,0)). */
+  function anchorBelow(el: HTMLElement | null | undefined): MenuAnchor {
+    if (!el) return { x: 0, y: 0 }
+    const rect = el.getBoundingClientRect()
+    return { x: Math.round(rect.left), y: Math.round(rect.bottom) }
+  }
+
+  function handleFileMenu(): void {
+    opts.hideTip()
+    // Toggle-close: on macOS clicking a sibling WebContentsView in the
+    // same parent window doesn't reliably blur the popup webContents,
+    // so the renderer asks main to dismiss explicitly.
+    if (isMenuOpen.value) {
+      opts.bridge?.dismissFileMenu()
+      return
+    }
+    if (Date.now() - menuClosedAt.menu < MENU_REOPEN_GUARD_MS) return
+    opts.bridge?.openFileMenu(anchorBelow(opts.fileBtnRef.value))
+  }
+
+  function handleDownloadsTray(): void {
+    opts.hideTip()
+    if (isMenuOpen.value) {
+      opts.bridge?.dismissFileMenu()
+      return
+    }
+    if (Date.now() - menuClosedAt.downloads < MENU_REOPEN_GUARD_MS) return
+    opts.bridge?.clickDownloadsTray(anchorBelow(opts.downloadsBtnRef.value))
+  }
+
+  /** Mark every current `recent` entry as seen. Triggered by main
+   *  pushing `menu: 'downloads'` in `onMenuOpened` so opening the
+   *  popup is what acknowledges the indicator. */
+  function acknowledgeRecent(): void {
+    for (const d of downloadsState.value.recent) seenUrls.add(d.url)
+  }
+
+  /** Diff helper — returns true if `next.active` carries a URL that
+   *  wasn't in the previous active set. Used to bump the "started"
+   *  timestamp once per new in-flight item. */
+  function hasNewActive(next: DownloadsTrayState): boolean {
+    for (const d of next.active) {
+      if (!previousActiveUrls.has(d.url)) return true
+    }
+    return false
+  }
+
+  function ingestDownloadsState(next: DownloadsTrayState): void {
+    if (firstDownloadsPush) {
+      // The first push happens after main's `ready()` and reflects
+      // whatever was in flight when the window came up. Treat all
+      // entries (active + recent) as already-known so we don't fire
+      // the "started" pulse for downloads the user already initiated
+      // and don't paint an unseen indicator for items that finished
+      // before the window opened.
+      for (const d of next.active) previousActiveUrls.add(d.url)
+      for (const d of next.recent) seenUrls.add(d.url)
+      firstDownloadsPush = false
+      downloadsState.value = next
+      return
+    }
+    if (hasNewActive(next)) downloadsStartedAt.value = Date.now()
+    previousActiveUrls.clear()
+    for (const d of next.active) previousActiveUrls.add(d.url)
+    // Drop seen URLs that no longer appear in `recent` so the set
+    // doesn't grow unbounded across the window's lifetime.
+    const stillRecent = new Set(next.recent.map((d) => d.url))
+    for (const url of [...seenUrls]) {
+      if (!stillRecent.has(url)) seenUrls.delete(url)
+    }
+    downloadsState.value = next
+  }
+
+  let unsubMenuOpened: (() => void) | undefined
+  let unsubMenuClosed: (() => void) | undefined
+  let unsubDownloads: (() => void) | undefined
+
+  onMounted(() => {
+    if (!opts.bridge) return
+    unsubMenuOpened = opts.bridge.onMenuOpened((info) => {
+      isMenuOpen.value = true
+      if (info.menu === 'downloads') acknowledgeRecent()
+    })
+    unsubMenuClosed = opts.bridge.onMenuClosed(({ menu }) => {
+      menuClosedAt[menu] = Date.now()
+      isMenuOpen.value = false
+    })
+    unsubDownloads = opts.bridge.onDownloadsChanged(ingestDownloadsState)
+  })
+
+  onUnmounted(() => {
+    unsubMenuOpened?.()
+    unsubMenuClosed?.()
+    unsubDownloads?.()
+  })
+
+  return {
+    isMenuOpen,
+    downloadsState,
+    downloadsActiveCount,
+    unseenFinishedCount,
+    downloadsTrayLabel,
+    downloadsStartedAt,
+    handleFileMenu,
+    handleDownloadsTray,
+  }
+}

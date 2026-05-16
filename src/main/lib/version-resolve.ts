@@ -53,7 +53,7 @@ async function findBestBackportTag(
   stopTag: string,
   ancestorDist?: number,
 ): Promise<{ tag: string; commitsAhead: number } | undefined> {
-  // Phase 1: collect candidate tags by walking backward.
+  // Collect candidate tags by walking backward from startRef.
   const candidates: string[] = []
   let ref = startRef
   for (let i = 0; i < MAX_BACKPORT_WALK; i++) {
@@ -64,18 +64,14 @@ async function findBestBackportTag(
   }
   if (candidates.length === 0) return undefined
 
-  // Phase 2: evaluate from lowest (closest to stopTag) to highest.
-  // The threshold for each candidate is the total number of commits
-  // between stopTag and that candidate on the release branch — this
-  // accounts for version-bump commits plus any release-only cherry-picks
-  // (e.g. workflow template bumps) that have no patch-id equivalent on
-  // the commit's branch.
+  // Evaluate candidates from lowest (closest to stopTag) to highest. A tag
+  // qualifies when its unique commits don't exceed the branch distance from
+  // stopTag (which accounts for version bumps + release-only cherry-picks).
   //
   // Sanity check: in shallow clones, countUniqueCommits can return wildly
   // inflated values because the truncated graph prevents patch-id matching.
-  // If any result exceeds ancestorDist (the total commits from ancestor tag
-  // to the commit on master), the data is unreliable — bail out entirely
-  // so the caller can fall back to the merge-base approach.
+  // If any result exceeds ancestorDist, bail out so the caller can fall back
+  // to the merge-base approach.
   let best: { tag: string; commitsAhead: number } | undefined
   for (let pos = candidates.length - 1; pos >= 0; pos--) {
     const tag = candidates[pos]!

@@ -146,12 +146,10 @@ export interface RegisterCallbacks {
   onComfyRestarted?: RestartCallback
   onModelFolderRelaunch?: ModelFolderRelaunchCallback
   onLocaleChanged?: LocaleCallback
-  /** Fires whenever the resolved launcher theme flips (user changed the
-   *  setting or the OS-level dark-mode preference flipped while the
-   *  setting is `'system'`). Index registers a handler to repaint
-   *  install-less host windows' title bars + OS overlays — install-
-   *  backed comfy windows are driven by ComfyUI's own theme observer
-   *  instead. */
+  /** Fires when the resolved theme flips (setting change OR OS-level
+   *  dark-mode flip while setting is `'system'`). Index repaints
+   *  install-less host title bars + OS overlays; install-backed comfy
+   *  windows track ComfyUI's own theme observer instead. */
   onThemeChanged?: ThemeChangedCallback
 }
 
@@ -408,13 +406,9 @@ export function _broadcastToRenderer(channel: string, data: unknown): void {
 export function _addSession(installationId: string, { proc, port, url, mode, installationName }: Omit<SessionInfo, 'startedAt'>, bootTimeMs?: number): void {
   _runningSessions.set(installationId, { proc, port, url, mode, installationName, startedAt: Date.now() })
   _broadcastToRenderer('instance-started', { installationId, port, url, mode, installationName, bootTimeMs })
-  // Stamp both the global `lastLaunchedAt` and the per-source-category
-  // `lastLaunchedAtByCategory[category]` so recency-aware surfaces (e.g.
-  // the future startup picker) can pick the most-recent install per
-  // category without scanning every record. Category is resolved via the
-  // source map since the persisted record itself doesn't carry it; the
-  // resolver runs inside `markLaunched`'s enqueue lock so there's no
-  // separate read/lookup round-trip here.
+  // Stamps `lastLaunchedAt` + `lastLaunchedAtByCategory[category]` so
+  // per-category recency surfaces don't scan every record. Resolver
+  // runs inside `markLaunched`'s lock to avoid an extra read.
   installations.markLaunched(installationId, (inst) => sourceMap[inst.sourceId]?.category)
     .then(() => _broadcastToRenderer('installations-changed', {}))
     .catch((err) => {
@@ -495,23 +489,15 @@ export async function _resolveAndBroadcastVersions(list: InstallationRecord[]): 
 
       const resolved = await resolveLocalVersion(comfyuiDir, actualHead, undefined, override)
 
-      // Guard against clobbering a populated baseTag with undefined.
-      // findNearestTag/findLatestVersionTag can fail transiently (e.g.
-      // pygit2 API mismatch in the bundled standalone-env, network
-      // hiccup during fetchTags, missing remote, system git absent).
-      // When that happens, `resolved` comes back as { commit } only —
-      // and persisting that overwrites the previously-good
-      // `{ commit, baseTag, commitsAhead }` on disk, downgrading the
-      // chooser tile and channel-card "Installed" line to a bare SHA
-      // until a future re-resolve happens to succeed. The downgrade is
-      // a one-way ratchet because nothing else writes baseTag back
-      // for installs whose HEAD isn't exactly on a tag (i.e. the entire
-      // 'latest' channel). Bail entirely whenever the new resolution
-      // would strictly lose information for the same commit (no DB
-      // write, no broadcast, no installedTag reconciliation against the
-      // bare SHA); a genuinely-new commit (HEAD moved externally) still
-      // writes through because the commit-equality check fails, so we
-      // don't get permanently stuck on a stale baseTag.
+      // Guard a one-way downgrade ratchet: tag-resolution can fail
+      // transiently (pygit2 mismatch, network blip, missing remote /
+      // git), returning a bare `{ commit }`. Persisting it would clobber
+      // a populated `{ commit, baseTag, commitsAhead }` and downgrade
+      // the chooser tile to a bare SHA — nothing else writes baseTag
+      // back for installs whose HEAD isn't on a tag (the entire
+      // 'latest' channel). Bail when the new resolution would strictly
+      // lose info for the same commit; a genuinely-new commit still
+      // writes through because commit-equality fails.
       if (cv?.baseTag && !resolved.baseTag && resolved.commit === cv.commit) {
         return
       }

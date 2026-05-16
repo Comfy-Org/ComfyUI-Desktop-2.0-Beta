@@ -14,7 +14,7 @@ import type { Installation } from '../types/ipc'
  *     anchored at the kebab button's bottom-right so the menu drops
  *     down beneath the icon. Same items either way.
  *
- * Items today (Phase 3 §8 expansion):
+ * Items:
  *
  *   - **Manage…** — opens the install's `DetailModal` overlay so the
  *     user can edit settings, run actions, etc.

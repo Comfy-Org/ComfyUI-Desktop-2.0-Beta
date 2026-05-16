@@ -11,8 +11,7 @@ describe('TakeoverBack', () => {
     expect(btn.attributes('title')).toBe('Back to Dashboard')
     expect(btn.attributes('aria-label')).toBe('Back to Dashboard')
     // The label is also rendered visibly so the chevron isn't a
-    // mystery icon — Track M-5 explicitly chose chevron + label
-    // over chevron-only.
+    // mystery icon — chevron + label, not chevron-only.
     expect(wrapper.find('.takeover-back-label').text()).toBe('Back to Dashboard')
   })
 
