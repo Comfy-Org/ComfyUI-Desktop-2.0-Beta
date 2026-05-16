@@ -1711,6 +1711,44 @@ input[type='checkbox']:checked::after {
   transform: scale(0.98);
 }
 
+/* Settings drawer (v2) — paired transitions for the right-anchored
+ * slide-in panel. Global (not scoped) for the same reason `.modal-fade-*`
+ * is: the elements are teleported to <body>, and Vue's scoped data-v
+ * attribute matching doesn't reliably apply transient transition
+ * classes added to teleported nodes. Apply via:
+ *   <Transition name="settings-drawer-fade" appear> for the backdrop
+ *   <Transition name="settings-drawer-slide" appear> for the panel
+ */
+.settings-drawer-fade-enter-active,
+.settings-drawer-fade-leave-active {
+  transition: opacity 220ms ease;
+}
+.settings-drawer-fade-enter-from,
+.settings-drawer-fade-leave-to {
+  opacity: 0;
+}
+
+.settings-drawer-slide-enter-active,
+.settings-drawer-slide-leave-active {
+  transition: transform 220ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+.settings-drawer-slide-enter-from,
+.settings-drawer-slide-leave-to {
+  transform: translateX(100%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-drawer-slide-enter-active,
+  .settings-drawer-slide-leave-active {
+    transition: opacity 120ms ease;
+  }
+  .settings-drawer-slide-enter-from,
+  .settings-drawer-slide-leave-to {
+    opacity: 0;
+    transform: none;
+  }
+}
+
 .view-fullscreen {
   position: fixed;
   top: var(--titlebar-height);

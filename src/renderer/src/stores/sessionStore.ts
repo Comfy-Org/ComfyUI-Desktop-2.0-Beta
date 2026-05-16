@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { reactive, computed } from 'vue'
+import { reactive, computed, ref } from 'vue'
 import type { RunningInstance, ComfyOutputData, ComfyExitedData } from '../types/ipc'
 
 interface SessionBuffer {
@@ -30,6 +30,16 @@ export const useSessionStore = defineStore('session', () => {
   const stoppingInstances = reactive(new Set<string>())
   const stoppingTimeouts = new Map<string, ReturnType<typeof setTimeout>>()
   const sessions = reactive(new Map<string, SessionBuffer>())
+
+  /** Flips to `true` after the first `init()` completes (running-instance
+   *  hydration + IPC subscriptions wired). Views that key off the
+   *  derived lifecycle state — most importantly `ComfyLifecycleView` —
+   *  must gate their default render branches on this so they don't
+   *  flash the 'stopped' card during the brief window between mount and
+   *  hydration. Before `ready` flips, the maps are empty and lifecycle
+   *  state would compute `'stopped'` even when an auto-launch is about
+   *  to fire. */
+  const ready = ref(false)
 
   const runningTabCount = computed(() => activeSessions.size + runningInstances.size)
   const hasErrors = computed(() => errorInstances.size > 0)
@@ -170,6 +180,8 @@ export const useSessionStore = defineStore('session', () => {
         }
       })
     )
+
+    ready.value = true
   }
 
   function dispose(): void {
@@ -177,6 +189,7 @@ export const useSessionStore = defineStore('session', () => {
     cleanups.length = 0
     for (const timeout of stoppingTimeouts.values()) clearTimeout(timeout)
     stoppingTimeouts.clear()
+    ready.value = false
   }
 
   return {
@@ -185,6 +198,7 @@ export const useSessionStore = defineStore('session', () => {
     activeSessions,
     errorInstances,
     sessions,
+    ready,
     runningTabCount,
     hasErrors,
     isRunning,

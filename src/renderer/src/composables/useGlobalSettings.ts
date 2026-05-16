@@ -65,6 +65,9 @@ export interface UseGlobalSettingsApi {
    *  status section payload doesn't include this — it lives on its own
    *  IPC — so the component renders it alongside the regular items. */
   diskUsageItem: ComputedRef<DetailItem | null>
+
+  /** Install-level actions (`pinBottom` section from main). */
+  pinBottomSection: ComputedRef<DetailSection | null>
 }
 
 function formatBytes(bytes: number): string {
@@ -169,8 +172,14 @@ export function useGlobalSettings(opts: UseGlobalSettingsOpts): UseGlobalSetting
   }
 
   function sectionsForTab(tab: 'settings' | 'status' | 'update' | 'snapshots'): ComputedRef<DetailSection[]> {
-    return computed(() => sections.value.filter((s) => s.tab === tab))
+    // `pinBottom` sections live in the drawer footer, not the tab body —
+    // mirror DetailModal.vue's split (`mainSections` vs `bottomSection`).
+    return computed(() => sections.value.filter((s) => s.tab === tab && !s.pinBottom))
   }
+
+  const pinBottomSection = computed<DetailSection | null>(
+    () => sections.value.find((s) => s.pinBottom) ?? null,
+  )
 
   const diskUsageItem = computed<DetailItem | null>(() => {
     const ds = diskSpace.value
@@ -201,5 +210,6 @@ export function useGlobalSettings(opts: UseGlobalSettingsOpts): UseGlobalSetting
     runAction,
     sectionsForTab,
     diskUsageItem,
+    pinBottomSection,
   }
 }

@@ -66,6 +66,10 @@ interface Bridge {
   getInstallationId: () => string | null
   isMac: () => boolean
   setPanel: (panel: ComfyPanelKey) => void
+  /** Title-bar Settings icon close path. Routes through main → panel
+   *  renderer → drawer's local `requestClose()` so the slide-out
+   *  animation runs before `layoutViews` collapses the panelView. */
+  requestCloseDrawer: () => void
   openNewWindow: () => void
   /** Pop the File menu natively (avoids WebContentsView clipping the popup). */
   openFileMenu: (anchor: MenuAnchor) => void
@@ -221,13 +225,25 @@ function handleFeedback(): void {
   bridge?.clickFeedback()
 }
 
-/** Toggle the brand-redesigned global Settings drawer. Coexists with
- *  the hamburger → Settings flow during rollout — this entry-point owns
- *  the `'settings-v2'` panel key, the file-menu entry stays on the
- *  legacy `'settings'` key. */
+// Icon is ComfyUI-tab only; also visible while the drawer is open so
+// it can act as the close toggle.
+const showSettingsIcon = computed(
+  () =>
+    !isInstallLess.value &&
+    !isConsentLockdown.value &&
+    (activePanel.value === 'comfy' || activePanel.value === 'settings-v2')
+)
+
+// Open is synchronous (`setPanel`); close routes through main → panel
+// renderer so the drawer's leave animation can complete before
+// `layoutViews` collapses the panelView.
 function handleSettingsToggle(): void {
   if (!bridge) return
-  bridge.setPanel(activePanel.value === 'settings-v2' ? 'comfy' : 'settings-v2')
+  if (activePanel.value === 'settings-v2') {
+    bridge.requestCloseDrawer()
+  } else {
+    bridge.setPanel('settings-v2')
+  }
 }
 
 const fileBtnRef = useTemplateRef<HTMLButtonElement>('fileBtn')
@@ -471,7 +487,7 @@ onUnmounted(() => {
         <span class="title-feedback-label">{{ t('titleBar.feedback') }}</span>
       </button>
       <button
-        v-if="!isConsentLockdown"
+        v-if="showSettingsIcon"
         type="button"
         class="title-menu-button title-menu-button--icon title-settings-button"
         :class="{ 'is-active': activePanel === 'settings-v2' }"
@@ -925,7 +941,4 @@ onUnmounted(() => {
     animation: none;
   }
 }
-
-/* Dropdown popups are now native OS menus rendered via Menu.popup() in
-   main — no HTML popup styles needed here. */
 </style>

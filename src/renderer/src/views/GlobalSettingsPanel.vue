@@ -38,12 +38,39 @@ const { t } = useI18n()
 
 const activeTab = ref<GlobalSettingsTab>(props.initialTab)
 
+// Decoupled from `props.open` so we own the leave-animation timing —
+// the user-dismiss path (ESC/backdrop/icon) flips `internalOpen` first
+// and only emits 'close' on `@after-leave`. An external prop flip
+// (e.g. forced close on host teardown / install removal) follows
+// synchronously and intentionally skips the animation.
+const internalOpen = ref(props.open)
+
+watch(
+  () => props.open,
+  (next) => {
+    internalOpen.value = next
+  },
+)
+
 watch(
   () => props.initialTab,
   (next) => {
     activeTab.value = next
   },
 )
+
+function requestClose(): void {
+  // Start the leave animation locally; defer emit until @after-leave.
+  internalOpen.value = false
+}
+
+// Exposed so the title-bar close path (via panel:request-close-drawer
+// IPC) can drive the same animated dismiss as ESC / backdrop.
+defineExpose({ requestClose })
+
+function handleAfterLeave(): void {
+  emit('close')
+}
 
 interface TabDef {
   key: GlobalSettingsTab
@@ -62,10 +89,11 @@ const tabs = computed<TabDef[]>(() => [
 ])
 
 const installation = toRef(props, 'installation')
-const { loading, error, updateField, runAction, sectionsForTab, diskUsageItem } = useGlobalSettings({
-  installation,
-  onShowProgress: (opts) => emit('show-progress', opts),
-})
+const { loading, error, updateField, runAction, sectionsForTab, diskUsageItem, pinBottomSection } =
+  useGlobalSettings({
+    installation,
+    onShowProgress: (opts) => emit('show-progress', opts),
+  })
 
 const visibleSections = computed(() => {
   const tab = tabs.value.find((tt) => tt.key === activeTab.value)?.sectionTab ?? 'settings'
@@ -86,9 +114,34 @@ const drawerRef = useTemplateRef<HTMLElement>('drawer')
 let lastFocusedBeforeOpen: HTMLElement | null = null
 
 function handleEsc(event: KeyboardEvent): void {
-  if (event.key === 'Escape' && props.open) {
+  if (event.key === 'Escape' && internalOpen.value) {
     event.preventDefault()
-    emit('close')
+    requestClose()
+  }
+}
+
+const FOCUSABLE_SELECTOR =
+  'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+
+// `aria-modal="true"` promises tab order is constrained — without this
+// trap Tab would leak into the underlying ComfyUI canvas.
+function handleTab(event: KeyboardEvent): void {
+  if (event.key !== 'Tab' || !internalOpen.value) return
+  const root = drawerRef.value
+  if (!root) return
+  const focusables = Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(
+    (el) => el.offsetParent !== null || el === document.activeElement,
+  )
+  if (focusables.length === 0) return
+  const first = focusables[0]!
+  const last = focusables[focusables.length - 1]!
+  const active = document.activeElement as HTMLElement | null
+  if (event.shiftKey && (active === first || !root.contains(active))) {
+    event.preventDefault()
+    last.focus()
+  } else if (!event.shiftKey && active === last) {
+    event.preventDefault()
+    first.focus()
   }
 }
 
@@ -112,7 +165,7 @@ async function handleRelaunch(): Promise<void> {
 }
 
 watch(
-  () => props.open,
+  internalOpen,
   async (next) => {
     if (next) {
       lastFocusedBeforeOpen = (document.activeElement as HTMLElement | null) ?? null
@@ -129,26 +182,28 @@ watch(
 
 onMounted(() => {
   document.addEventListener('keydown', handleEsc)
+  document.addEventListener('keydown', handleTab)
 })
 
 onUnmounted(() => {
   document.removeEventListener('keydown', handleEsc)
+  document.removeEventListener('keydown', handleTab)
 })
 </script>
 
 <template>
   <Teleport to="body">
-    <Transition name="settings-v2-backdrop">
+    <Transition name="settings-drawer-fade" appear>
       <div
-        v-if="open"
+        v-if="internalOpen"
         class="settings-v2-backdrop"
         :aria-hidden="true"
-        @click="emit('close')"
+        @click="requestClose"
       ></div>
     </Transition>
-    <Transition name="settings-v2-drawer">
+    <Transition name="settings-drawer-slide" appear @after-leave="handleAfterLeave">
       <aside
-        v-if="open"
+        v-if="internalOpen"
         ref="drawer"
         class="settings-v2-drawer"
         role="dialog"
@@ -259,6 +314,22 @@ onUnmounted(() => {
         </section>
 
         <footer class="settings-v2-footer">
+          <div
+            v-if="pinBottomSection?.actions?.length"
+            class="settings-v2-footer-row settings-v2-actions"
+          >
+            <button
+              v-for="action in pinBottomSection.actions"
+              :key="action.id"
+              type="button"
+              class="settings-v2-action"
+              :class="{ 'is-primary': action.style === 'primary', 'is-danger': action.style === 'danger' }"
+              :disabled="action.enabled === false"
+              @click="runAction(action)"
+            >
+              {{ action.label }}
+            </button>
+          </div>
           <button
             type="button"
             class="primary settings-v2-relaunch"
@@ -302,9 +373,15 @@ onUnmounted(() => {
   z-index: 61;
   display: flex;
   flex-direction: column;
-  background: var(--surface);
+  /* Transparent-black glass surface so the live ComfyUI canvas shows
+   * through subtly. `color-mix` keeps us on tokens (no hardcoded
+   * alpha-hex) — 80% of `--bg` (dark `#202020` / light `#ffffff`)
+   * over transparency. */
+  background: color-mix(in srgb, var(--bg) 80%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   border-left: 1px solid var(--border);
-  box-shadow: -8px 0 32px rgba(0, 0, 0, 0.25);
+  box-shadow: -8px 0 32px rgba(0, 0, 0, 0.35);
   color: var(--text);
 }
 
@@ -466,6 +543,7 @@ onUnmounted(() => {
 .settings-v2-footer {
   flex-shrink: 0;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   padding: 12px 16px;
@@ -473,8 +551,13 @@ onUnmounted(() => {
   background: var(--surface);
 }
 
+.settings-v2-footer-row {
+  width: 100%;
+}
+
 .settings-v2-relaunch {
   flex: 1;
+  min-width: 0;
 }
 
 .settings-v2-more {
@@ -492,33 +575,4 @@ onUnmounted(() => {
   opacity: 0.6;
 }
 
-.settings-v2-backdrop-enter-active,
-.settings-v2-backdrop-leave-active {
-  transition: opacity 220ms ease;
-}
-.settings-v2-backdrop-enter-from,
-.settings-v2-backdrop-leave-to {
-  opacity: 0;
-}
-
-.settings-v2-drawer-enter-active,
-.settings-v2-drawer-leave-active {
-  transition: transform 220ms cubic-bezier(0.32, 0.72, 0, 1);
-}
-.settings-v2-drawer-enter-from,
-.settings-v2-drawer-leave-to {
-  transform: translateX(100%);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .settings-v2-drawer-enter-active,
-  .settings-v2-drawer-leave-active {
-    transition: opacity 120ms ease;
-  }
-  .settings-v2-drawer-enter-from,
-  .settings-v2-drawer-leave-to {
-    opacity: 0;
-    transform: none;
-  }
-}
 </style>

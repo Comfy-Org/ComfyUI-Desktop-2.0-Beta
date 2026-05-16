@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import SettingsModal from '../views/SettingsModal.vue'
 import GlobalSettingsPanel from '../views/GlobalSettingsPanel.vue'
@@ -140,6 +140,11 @@ let unsubLocale: (() => void) | null = null
 let unsubCloseRequest: (() => void) | null = null
 let unsubAppUpdatePromptRestart: (() => void) | null = null
 let unsubAppUpdateUserActionFailed: (() => void) | null = null
+let unsubRequestCloseDrawer: (() => void) | null = null
+
+// Drives the title-bar icon close path's animated dismiss (see
+// `onRequestCloseDrawer` below).
+const globalSettingsPanelRef = ref<{ requestClose: () => void } | null>(null)
 
 useDeepLinkRouter({
   installationId,
@@ -179,12 +184,21 @@ function handleNavigateList(): void {
   }
 }
 
-/** Drawer close — flip main's `activePanel` back to `'comfy'` (which
- *  resolves to the appropriate body mode for this host). Same IPC the
- *  legacy in-panel X uses. */
+// Drawer's `@after-leave` fires this, so the panel is already gone
+// visually by the time main flips `activePanel`.
 function closeSettingsV2(): void {
   window.api.closeCurrentPanel()
 }
+
+// Toggles transparency rules in the non-scoped <style> block so the
+// live ComfyUI canvas composites through while the drawer is open.
+watch(
+  activePanel,
+  (next) => {
+    document.body.classList.toggle('panel-overlay-mode', next === 'settings-v2')
+  },
+  { immediate: true },
+)
 
 onMounted(async () => {
   // Register the brand-takeover surface so `useMigrateAction` can route
@@ -264,6 +278,12 @@ onMounted(async () => {
     })
   })
 
+  // Title-bar close → drawer's local dismiss path (animated). Skipped
+  // when the ref is null because the drawer is already gone.
+  unsubRequestCloseDrawer = window.api.onRequestCloseDrawer(() => {
+    globalSettingsPanelRef.value?.requestClose()
+  })
+
   // The file-menu "Skip Onboarding" IPC subscription lives in
   // useFirstUseChain so the chain owns its own input surface; no
   // duplicate listener here.
@@ -314,6 +334,10 @@ onUnmounted(() => {
   unsubCloseRequest?.()
   unsubAppUpdatePromptRestart?.()
   unsubAppUpdateUserActionFailed?.()
+  unsubRequestCloseDrawer?.()
+  // Strip the overlay-mode class so HMR / view reload / host teardown
+  // while the drawer is open doesn't leak transparency past unmount.
+  document.body.classList.remove('panel-overlay-mode')
   sessionStore.dispose()
 })
 </script>
@@ -424,17 +448,11 @@ onUnmounted(() => {
       />
     </template>
 
-    <!-- Brand-redesigned Settings drawer (v2). Coexists with the legacy
-         `<SettingsModal>` above during rollout — the hamburger entry
-         still opens the modal (overlay key `'settings'`), the title-bar
-         Settings icon opens this drawer (panel key `'settings-v2'`).
-         Lives outside the `useOverlay` v-if chain: it's a right-
-         anchored slide-in driven directly by `activePanel`, not a
-         centered modal. Sits after the overlay chain so its presence
-         doesn't break the `v-if`/`v-else-if` discriminant-narrowing
-         the overlay slot relies on. Uses Teleport(to="body")
-         internally so DOM placement is independent of this position. -->
+    <!-- Settings drawer (v2). Right-anchored slide-in driven by
+         `activePanel === 'settings-v2'`; sits outside the overlay
+         v-if chain so it doesn't break its discriminant-narrowing. -->
     <GlobalSettingsPanel
+      ref="globalSettingsPanelRef"
       :open="activePanel === 'settings-v2'"
       :installation="installation"
       @close="closeSettingsV2"
@@ -445,6 +463,19 @@ onUnmounted(() => {
     <MigrateConfirmTakeover ref="migrateTakeoverRef" />
   </div>
 </template>
+
+<!-- Non-scoped: targets `body` and overrides main.css's `body { background:
+     var(--bg) }` only while the drawer is open. Specificity
+     (`body.panel-overlay-mode` vs `body`) wins regardless of CSS load
+     order. -->
+<style>
+body.panel-overlay-mode {
+  background: transparent;
+}
+body.panel-overlay-mode .panel-shell {
+  background: transparent;
+}
+</style>
 
 <style scoped>
 .panel-shell {
