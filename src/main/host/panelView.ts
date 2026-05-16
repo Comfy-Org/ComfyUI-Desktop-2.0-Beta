@@ -4,7 +4,6 @@ import { TITLEBAR_HEIGHT } from '../lib/titleBarOverlay'
 import {
   _registerExtraBroadcastTarget,
   _unregisterExtraBroadcastTarget,
-  resolveTheme,
 } from '../lib/ipc/shared'
 import {
   comfyWindows,
@@ -49,7 +48,9 @@ export function ensurePanelView(
       // ComfyUI frontend's storage even though it runs in the same window.
     },
   })
-  panelView.setBackgroundColor(resolveTheme() === 'dark' ? '#202020' : '#ffffff')
+  // Transparent so settings-v2 can composite the live comfyView through;
+  // other modes paint `var(--bg)` in the renderer.
+  panelView.setBackgroundColor('#00000000')
   entry.window.contentView.addChildView(panelView)
   // Insert at zero size, behind the comfy view; layoutViews handles positioning.
   panelView.setBounds({ x: 0, y: TITLEBAR_HEIGHT + 1, width: 0, height: 0 })
@@ -130,30 +131,20 @@ export function focusActiveBody(entry: ComfyWindowEntry): void {
 export function setActivePanel(windowKey: number, panel: ComfyPanelKey): void {
   const entry = comfyWindows.get(windowKey)
   if (!entry || entry.window.isDestroyed()) return
-  // The unified Settings modal works in both install-backed and install-
-  // less hosts (PanelApp picks the appropriate default tab — ComfyUI
-  // Settings vs Global Settings — at mount time), so no install-less
-  // gating is required here.
-
   if (entry.activePanel === panel) return
 
   entry.activePanel = panel
-  // Resolve to the actual body mode (Comfy pill maps to lifecycle / chooser
-  // depending on running state and whether the window is install-backed).
   const mode = computeBodyMode(entry)
+  // Broadcast every body-mode change to the panel renderer — including
+  // 'comfy'. Without the 'comfy' broadcast the renderer's activePanel ref
+  // goes stale after a drawer close and the next open no-ops.
   if (mode !== 'comfy') {
-    const panelView = ensurePanelView(windowKey, entry, mode)
-    // If panel view already loaded, push the switch immediately. If still
-    // loading, the did-finish-load handler in ensurePanelView will push the
-    // current body mode — guarding against rapid clicks during first load.
-    if (!panelView.webContents.isDestroyed() && !panelView.webContents.isLoadingMainFrame()) {
-      panelView.webContents.send('panel-switch', { panel: mode, installationId: entry.installationId ?? '' })
-    }
+    ensurePanelView(windowKey, entry, mode)
   }
+  forwardToPanelRenderer(entry, 'panel-switch', { panel: mode, installationId: entry.installationId ?? '' })
   entry.layoutViews()
   if (!entry.titleBarView.webContents.isDestroyed()) {
-    // Title bar pill stays on the user-visible key — never reflects the
-    // internal `'comfy-lifecycle'` body mode.
+    // Title bar pill stays on the user-visible key, not 'comfy-lifecycle'.
     entry.titleBarView.webContents.send('comfy-titlebar:panel-changed', panel)
   }
   focusActiveBody(entry)
@@ -173,26 +164,20 @@ export function refreshComfyTabBody(installationId: string): void {
 
   const mode = computeBodyMode(entry)
   if (mode === 'comfy-lifecycle') {
-    const panelView = ensurePanelView(entry.windowKey, entry, 'comfy-lifecycle')
-    if (!panelView.webContents.isDestroyed() && !panelView.webContents.isLoadingMainFrame()) {
-      panelView.webContents.send('panel-switch', { panel: 'comfy-lifecycle', installationId })
-    }
+    ensurePanelView(entry.windowKey, entry, 'comfy-lifecycle')
   }
+  // Tell an already-mounted panel renderer about the new body mode so it
+  // unmounts/mounts the lifecycle view in step with main's state.
+  forwardToPanelRenderer(entry, 'panel-switch', { panel: mode, installationId })
   entry.layoutViews()
   focusActiveBody(entry)
 }
 
 /**
  * Send a payload to a panelView, deferring until `did-finish-load` if
- * the bundle is still loading.
- *
- * Title-bar pill clicks and popup deep-links can land while the panel
- * renderer is still booting — the panelView is constructed lazily on
- * the first non-comfy switch, so its preload + Vue app aren't ready
- * yet on the very first click. A synchronous `send()` then arrives
- * before the renderer's `onPanelTriggerOverlay` (or other) listener
- * runs in `onMounted`, and the IPC is silently dropped. This helper
- * centralizes the deferral pattern used by every such handler.
+ * the bundle is still loading. Centralizes the deferral pattern so
+ * pill clicks / IPC that land during the lazy first-load aren't
+ * silently dropped before the renderer's listener wires up.
  */
 export function sendToPanelDeferred(
   panelView: WebContentsView,
@@ -209,6 +194,17 @@ export function sendToPanelDeferred(
   } else {
     send()
   }
+}
+
+/** Forward an IPC to the entry's panel renderer, no-op if absent. */
+function forwardToPanelRenderer(
+  entry: ComfyWindowEntry,
+  channel: string,
+  payload?: unknown,
+): void {
+  const pv = entry.panelView
+  if (!pv || pv.webContents.isDestroyed()) return
+  sendToPanelDeferred(pv, channel, payload)
 }
 
 /** Wire the panel-routing IPC handlers. Called once at app `whenReady`. */
@@ -234,5 +230,14 @@ export function registerPanelViewIpc(): void {
         return
       }
     }
+  })
+
+  // Title-bar Settings icon close → forward to the panel renderer so
+  // the drawer's leave animation plays before `activePanel` flips.
+  // Same dismiss path as ESC / backdrop click.
+  ipcMain.on('comfy-window:request-close-drawer', (event) => {
+    const found = findEntryByTitleBarSender(event.sender)
+    if (!found) return
+    forwardToPanelRenderer(found.entry, 'panel:request-close-drawer')
   })
 }
