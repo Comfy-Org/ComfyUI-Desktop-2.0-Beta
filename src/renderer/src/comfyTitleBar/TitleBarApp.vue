@@ -9,6 +9,7 @@ import {
   Menu as MenuIcon,
   MessageSquarePlus,
   RefreshCw,
+  Settings as SettingsIcon,
 } from 'lucide-vue-next'
 import { useTitleBarTooltip } from './useTitleBarTooltip'
 import { useTitleBarMenus } from './useTitleBarMenus'
@@ -25,6 +26,7 @@ const { t } = useI18n()
 type ComfyPanelKey =
   | 'comfy'
   | 'settings'
+  | 'settings-v2'
   | 'new-install'
   | 'track'
   | 'load-snapshot'
@@ -209,6 +211,15 @@ const {
  *  entry lands on the same panel-side handler. */
 function handleFeedback(): void {
   bridge?.clickFeedback()
+}
+
+/** Toggle the brand-redesigned global Settings drawer. Coexists with
+ *  the hamburger → Settings flow during rollout — this entry-point owns
+ *  the `'settings-v2'` panel key, the file-menu entry stays on the
+ *  legacy `'settings'` key. */
+function handleSettingsToggle(): void {
+  if (!bridge) return
+  bridge.setPanel(activePanel.value === 'settings-v2' ? 'comfy' : 'settings-v2')
 }
 
 const fileBtnRef = useTemplateRef<HTMLButtonElement>('fileBtn')
@@ -448,6 +459,17 @@ onUnmounted(() => {
         <MessageSquarePlus :size="16" />
         <span class="title-feedback-label">{{ t('titleBar.feedback') }}</span>
       </button>
+      <button
+        v-if="!isConsentLockdown"
+        type="button"
+        class="title-menu-button title-menu-button--icon title-settings-button"
+        :class="{ 'is-active': activePanel === 'settings-v2' }"
+        :aria-pressed="activePanel === 'settings-v2'"
+        v-bind="tooltipAttrs(t('titleBar.settingsTooltip', 'Settings'), t('titleBar.settings', 'Settings'))"
+        @click="handleSettingsToggle"
+      >
+        <SettingsIcon :size="16" />
+      </button>
     </div>
   </header>
 </template>
@@ -576,6 +598,23 @@ onUnmounted(() => {
 .title-menu-button--icon {
   padding: 4px 6px;
   gap: 0;
+}
+
+/* --- Settings drawer toggle ---
+   Closed: inherits the title-bar's muted text colour (#8A8A8A via
+   `--text-muted`). Open: tinted to `--accent` with a matching outline so
+   the title bar reflects the drawer's open state — same active treatment
+   the install-update pill uses. TODO(brand-cleanup): once the
+   `--comfy-yellow` brand token lands, swap `--accent` here for it. */
+.title-settings-button {
+  color: var(--text-muted);
+}
+.title-settings-button.is-active,
+.title-settings-button.is-active:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  opacity: 1;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
 }
 
 /* --- Install pill (center) — single click target. The whole pill

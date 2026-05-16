@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import SettingsModal from '../views/SettingsModal.vue'
+import GlobalSettingsPanel from '../views/GlobalSettingsPanel.vue'
 import ProgressModal from '../views/ProgressModal.vue'
 import ModalDialog from '../components/ModalDialog.vue'
 import ComfyLifecycleView from './ComfyLifecycleView.vue'
@@ -171,6 +172,13 @@ function handleNavigateList(): void {
   if (installationId) {
     void window.api.closeComfyWindow(installationId)
   }
+}
+
+/** Drawer close — flip main's `activePanel` back to `'comfy'` (which
+ *  resolves to the appropriate body mode for this host). Same IPC the
+ *  legacy in-panel X uses. */
+function closeSettingsV2(): void {
+  window.api.closeCurrentPanel()
 }
 
 onMounted(async () => {
@@ -396,6 +404,23 @@ onUnmounted(() => {
         @chain-migrate="handleFirstUseChainMigrate"
       />
     </template>
+
+    <!-- Brand-redesigned Settings drawer (v2). Coexists with the legacy
+         `<SettingsModal>` above during rollout — the hamburger entry
+         still opens the modal (overlay key `'settings'`), the title-bar
+         Settings icon opens this drawer (panel key `'settings-v2'`).
+         Lives outside the `useOverlay` v-if chain: it's a right-
+         anchored slide-in driven directly by `activePanel`, not a
+         centered modal. Sits after the overlay chain so its presence
+         doesn't break the `v-if`/`v-else-if` discriminant-narrowing
+         the overlay slot relies on. Uses Teleport(to="body")
+         internally so DOM placement is independent of this position. -->
+    <GlobalSettingsPanel
+      :open="activePanel === 'settings-v2'"
+      :installation="installation"
+      @close="closeSettingsV2"
+      @show-progress="handleShowProgress"
+    />
 
     <ModalDialog />
   </div>

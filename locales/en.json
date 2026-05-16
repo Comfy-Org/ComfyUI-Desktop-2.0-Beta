@@ -54,7 +54,22 @@
     "installationLabel": "Installation",
     "appUpdateAvailable": "Update {version}",
     "appUpdateReady": "Restart to update",
-    "installUpdateAvailable": "Update available"
+    "installUpdateAvailable": "Update available",
+    "settings": "Settings",
+    "settingsTooltip": "Settings"
+  },
+
+  "globalSettings": {
+    "title": "Settings",
+    "tabConfig": "Config",
+    "tabStatus": "Status",
+    "tabUpdate": "Update",
+    "tabSnapshots": "Snapshots",
+    "relaunch": "Relaunch",
+    "more": "More",
+    "diskUsage": "Disk Usage",
+    "envVarsCount": "{n} defined",
+    "emptyInstallLess": "Open a ComfyUI install to view its settings."
   },
 
   "comfyLifecycle": {
