@@ -572,12 +572,11 @@ export async function migrateDefaults(): Promise<void> {
   }
 }
 
-const VALID_THEMES: readonly string[] = ['system', 'dark', 'light'] satisfies readonly Theme[]
-
+/** Launcher is dark-only by design. The Theme / ResolvedTheme types
+ *  are kept on the IPC contract so a future re-introduction wouldn't
+ *  break the renderer / preload, but every caller resolves to 'dark'. */
 export function resolveTheme(): ResolvedTheme {
-  const raw = settings.get('theme') as string | undefined
-  const theme: Theme = raw && VALID_THEMES.includes(raw) ? (raw as Theme) : 'system'
-  return theme === 'system' ? (nativeTheme.shouldUseDarkColors ? 'dark' : 'light') : theme
+  return 'dark'
 }
 
 export async function checkInstallationUpdates(): Promise<void> {
