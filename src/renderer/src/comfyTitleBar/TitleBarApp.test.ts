@@ -648,11 +648,13 @@ describe('TitleBarApp', () => {
     expect(tray.attributes('aria-label')).toBe('2 downloads in progress')
   })
 
-  it('renders the downloads tray icon-only (no badge) when only recent entries exist', async () => {
-    // The badge counts ACTIVE downloads, not recent ones — so a tray
-    // with only completed entries should still show the icon (so the
-    // user can reopen the popover) but without a numeric badge that
-    // would otherwise read as "things still working".
+  it('treats recent entries already present on the first push as already-acknowledged', async () => {
+    // The first downloads-changed push is the initial state main
+    // hands the title bar after `ready()`. Anything `recent` there
+    // finished before this window even opened, so we suppress the
+    // unseen-finished indicator (it would otherwise misfire on every
+    // window mount). The tray collapses back to its idle label and
+    // shows neither a numeric nor an unseen badge.
     const { default: TitleBarApp } = await import('./TitleBarApp.vue')
     const wrapper = mount(TitleBarApp)
     await flushPromises()
@@ -673,10 +675,119 @@ describe('TitleBarApp', () => {
     await flushPromises()
     expect(wrapper.find('.title-downloads-tray').exists()).toBe(true)
     expect(wrapper.find('.title-downloads-badge').exists()).toBe(false)
+    expect(wrapper.find('.title-downloads-tray').classes()).not.toContain('has-unseen')
     // Idle label — no in-flight downloads, but the tray is still
     // reachable so the recent-completed row in the popover stays
     // accessible until the user dismisses it.
     expect(wrapper.find('.title-downloads-tray').attributes('title')).toBe('Downloads')
+  })
+
+  it('marks the tray as unseen when a download completes after the initial state', async () => {
+    // Simulate the real flow: the window opens with nothing in flight
+    // (initial empty push), then a download starts and finishes. The
+    // user never opened the popup, so the tray should switch to its
+    // success-coloured unseen state with a labelled badge.
+    const { default: TitleBarApp } = await import('./TitleBarApp.vue')
+    const wrapper = mount(TitleBarApp)
+    await flushPromises()
+    bridgeState.downloadsChangedCallbacks.forEach((cb) =>
+      cb({ active: [], recent: [] }),
+    )
+    await flushPromises()
+    bridgeState.downloadsChangedCallbacks.forEach((cb) =>
+      cb({
+        active: [
+          {
+            url: 'https://example.com/a.safetensors',
+            filename: 'a.safetensors',
+            progress: 0.4,
+            status: 'downloading',
+          },
+        ],
+        recent: [],
+      }),
+    )
+    await flushPromises()
+    bridgeState.downloadsChangedCallbacks.forEach((cb) =>
+      cb({
+        active: [],
+        recent: [
+          {
+            url: 'https://example.com/a.safetensors',
+            filename: 'a.safetensors',
+            progress: 1,
+            status: 'completed',
+          },
+        ],
+      }),
+    )
+    await flushPromises()
+    const tray = wrapper.find('.title-downloads-tray')
+    expect(tray.classes()).toContain('has-unseen')
+    expect(tray.classes()).not.toContain('has-active')
+    const badge = wrapper.find('.title-downloads-badge.is-unseen')
+    expect(badge.exists()).toBe(true)
+    expect(badge.text()).toBe('1')
+    expect(tray.attributes('title')).toBe('1 download finished — click to review')
+  })
+
+  it('clears the unseen indicator when the downloads popup is opened', async () => {
+    const { default: TitleBarApp } = await import('./TitleBarApp.vue')
+    const wrapper = mount(TitleBarApp)
+    await flushPromises()
+    bridgeState.downloadsChangedCallbacks.forEach((cb) =>
+      cb({ active: [], recent: [] }),
+    )
+    await flushPromises()
+    bridgeState.downloadsChangedCallbacks.forEach((cb) =>
+      cb({
+        active: [],
+        recent: [
+          {
+            url: 'https://example.com/a.safetensors',
+            filename: 'a.safetensors',
+            progress: 1,
+            status: 'completed',
+          },
+        ],
+      }),
+    )
+    await flushPromises()
+    expect(wrapper.find('.title-downloads-tray').classes()).toContain('has-unseen')
+    bridgeState.menuOpenedCallbacks.forEach((cb) =>
+      cb({ menu: 'downloads' } as { menu: 'menu' }),
+    )
+    await flushPromises()
+    const tray = wrapper.find('.title-downloads-tray')
+    expect(tray.classes()).not.toContain('has-unseen')
+    expect(wrapper.find('.title-downloads-badge.is-unseen').exists()).toBe(false)
+    expect(tray.attributes('title')).toBe('Downloads')
+  })
+
+  it('flashes the tray when a brand-new active download appears', async () => {
+    const { default: TitleBarApp } = await import('./TitleBarApp.vue')
+    const wrapper = mount(TitleBarApp)
+    await flushPromises()
+    // Initial empty state so the next push counts as a real new arrival.
+    bridgeState.downloadsChangedCallbacks.forEach((cb) =>
+      cb({ active: [], recent: [] }),
+    )
+    await flushPromises()
+    bridgeState.downloadsChangedCallbacks.forEach((cb) =>
+      cb({
+        active: [
+          {
+            url: 'https://example.com/a.safetensors',
+            filename: 'a.safetensors',
+            progress: 0.1,
+            status: 'pending',
+          },
+        ],
+        recent: [],
+      }),
+    )
+    await flushPromises()
+    expect(wrapper.find('.title-downloads-tray').classes()).toContain('is-flashing')
   })
 
   it('uses singular copy when exactly one download is in flight', async () => {

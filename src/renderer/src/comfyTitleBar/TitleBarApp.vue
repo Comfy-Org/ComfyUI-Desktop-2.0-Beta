@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, useTemplateRef } from 'vue'
+import { ref, onMounted, onUnmounted, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   ArrowDownToLine,
+  Check,
   Download,
   Loader2,
   Menu as MenuIcon,
@@ -222,7 +223,9 @@ const { isHoverActive } = useTitleBarHoverGate({ hideTip, handleTooltipPointer }
 
 const {
   downloadsActiveCount,
+  unseenFinishedCount,
   downloadsTrayLabel,
+  downloadsStartedAt,
   handleFileMenu,
   handleDownloadsTray,
 } = useTitleBarMenus({
@@ -230,6 +233,25 @@ const {
   hideTip,
   fileBtnRef,
   downloadsBtnRef,
+})
+
+/** One-shot "downloads started" attention flash. Driven by
+ *  `downloadsStartedAt` from the menus composable, which bumps each
+ *  time a brand-new active download appears. The flash is purely
+ *  decorative — it overlays the existing pulsing badge / count so the
+ *  user immediately notices the tray came alive even if they were
+ *  looking elsewhere on screen. The 1600 ms window matches one full
+ *  cycle of the underlying CSS keyframes. */
+const downloadsFlash = ref(false)
+let flashTimer: ReturnType<typeof setTimeout> | null = null
+watch(downloadsStartedAt, (next) => {
+  if (next === 0) return
+  downloadsFlash.value = true
+  if (flashTimer) clearTimeout(flashTimer)
+  flashTimer = setTimeout(() => {
+    downloadsFlash.value = false
+    flashTimer = null
+  }, 1600)
 })
 
 let unsubPanel: (() => void) | undefined
@@ -245,6 +267,10 @@ onMounted(() => {
 onUnmounted(() => {
   unsubPanel?.()
   hideTip()
+  if (flashTimer) {
+    clearTimeout(flashTimer)
+    flashTimer = null
+  }
 })
 </script>
 
@@ -333,16 +359,38 @@ onUnmounted(() => {
         ref="downloadsBtn"
         type="button"
         class="title-downloads-tray"
-        :class="{ 'has-active': downloadsActiveCount > 0 }"
+        :class="{
+          'has-active': downloadsActiveCount > 0,
+          'has-unseen': downloadsActiveCount === 0 && unseenFinishedCount > 0,
+          'is-flashing': downloadsFlash,
+        }"
         v-bind="tooltipAttrs(downloadsTrayLabel)"
         @click="handleDownloadsTray"
       >
         <ArrowDownToLine :size="14" />
+        <!-- Active queue badge: count of in-flight downloads. Pulses
+             via CSS while `.has-active`; the one-shot `.is-flashing`
+             class layers a brighter scale-bounce on top whenever a
+             brand-new download appears so the user catches the
+             "started" event even if they were looking elsewhere. -->
         <span
           v-if="downloadsActiveCount > 0"
           class="title-downloads-badge"
           aria-hidden="true"
         >{{ downloadsActiveCount }}</span>
+        <!-- Unseen-finished badge (issue #558): only shown when the
+             queue is idle AND something terminal landed since the
+             user last opened the popup. Distinct success colour +
+             check icon so it doesn't read as "still working". Cleared
+             on the next `onMenuOpened({menu:'downloads'})` push. -->
+        <span
+          v-else-if="unseenFinishedCount > 0"
+          class="title-downloads-badge is-unseen"
+          aria-hidden="true"
+        >
+          <Check :size="9" :stroke-width="3" />
+          <span class="title-downloads-badge-count">{{ unseenFinishedCount }}</span>
+        </span>
       </button>
       <!-- Center identity pill. Install-backed hosts show the install's
            name + install-type icon; install-less hosts show the static
@@ -701,6 +749,103 @@ onUnmounted(() => {
   font-size: 10px;
   font-weight: 600;
   line-height: 1;
+  gap: 2px;
+}
+
+/* Active-queue attention treatment (issue #558).
+   While downloads are in flight the tray shouldn't read as the same
+   passive surface chip it has in the steady state — slow ring pulse
+   + a subtle accent-tinted border draws the eye without being noisy
+   enough to feel like an alert. */
+.title-downloads-tray.has-active {
+  border-color: rgba(96, 165, 250, 0.55);
+  background: rgba(96, 165, 250, 0.16);
+}
+.title-bar.is-light .title-downloads-tray.has-active {
+  border-color: rgba(37, 99, 235, 0.55);
+  background: rgba(37, 99, 235, 0.12);
+}
+.title-downloads-tray.has-active .title-downloads-badge {
+  animation: title-downloads-pulse 1.6s ease-in-out infinite;
+}
+
+/* One-shot "downloads started" flash. Layered on top of `.has-active`
+   so a fresh download that arrives while others are running still
+   triggers a noticeable bump rather than blending into the existing
+   pulse. The class is owned by the renderer (set for ~1.6 s after
+   `downloadsStartedAt` bumps) so the animation re-runs cleanly each
+   time. */
+.title-downloads-tray.is-flashing .title-downloads-badge {
+  animation:
+    title-downloads-flash 0.55s cubic-bezier(0.2, 0.9, 0.3, 1.4) 1,
+    title-downloads-pulse 1.6s ease-in-out infinite 0.6s;
+}
+.title-downloads-tray.is-flashing {
+  animation: title-downloads-tray-flash 0.9s ease-out 1;
+}
+
+/* Unseen-finished treatment. Distinct success-coloured chrome so
+   "downloads completed while you weren't looking" reads as a
+   different state than "downloads in flight". Cleared the moment the
+   user opens the popup. */
+.title-downloads-tray.has-unseen {
+  border-color: rgba(34, 197, 94, 0.55);
+  background: rgba(34, 197, 94, 0.16);
+}
+.title-bar.is-light .title-downloads-tray.has-unseen {
+  border-color: rgba(22, 163, 74, 0.55);
+  background: rgba(22, 163, 74, 0.12);
+}
+.title-downloads-badge.is-unseen {
+  background: #22c55e;
+  padding: 0 4px;
+}
+.title-downloads-badge.is-unseen .title-downloads-badge-count {
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+@keyframes title-downloads-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(96, 165, 250, 0.55);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(96, 165, 250, 0);
+  }
+}
+@keyframes title-downloads-flash {
+  0% {
+    transform: scale(0.6);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.25);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+@keyframes title-downloads-tray-flash {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(96, 165, 250, 0);
+  }
+  20% {
+    box-shadow: 0 0 0 4px rgba(96, 165, 250, 0.55);
+  }
+}
+
+/* Honour reduced-motion preferences — fall back to a static accent
+   border for the running state and skip the bounce / pulse loops
+   entirely. */
+@media (prefers-reduced-motion: reduce) {
+  .title-downloads-tray.has-active .title-downloads-badge,
+  .title-downloads-tray.is-flashing,
+  .title-downloads-tray.is-flashing .title-downloads-badge {
+    animation: none;
+  }
 }
 
 /* Dropdown popups are now native OS menus rendered via Menu.popup() in

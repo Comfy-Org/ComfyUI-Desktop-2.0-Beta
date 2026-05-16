@@ -33,6 +33,11 @@ export const en = {
     /** vue-i18n plural rule: "no plural form | singular | plural". */
     downloadsInProgress:
       'no downloads in progress | {n} download in progress | {n} downloads in progress',
+    /** Tooltip used when the in-flight queue is empty but one or more
+     *  downloads have finished since the user last opened the tray.
+     *  The unseen indicator clears as soon as the popup is opened. */
+    downloadsCompleteUnseen:
+      'no recent downloads | {n} download finished — click to review | {n} downloads finished — click to review',
     desktopUpdateAvailable: 'Desktop Update Available',
     desktopUpdateDownloading: 'Downloading update…',
     desktopUpdateReady: 'Desktop Update Ready',
