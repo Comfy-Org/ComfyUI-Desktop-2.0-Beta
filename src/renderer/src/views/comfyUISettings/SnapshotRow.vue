@@ -95,16 +95,18 @@ const absoluteCopy = computed(() => formatDate(props.snapshot.createdAt))
   gap: 8px;
   padding: 10px 12px;
   border: 1px solid var(--border);
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--bg) 60%, transparent);
+  border-radius: 8px;
+  background: var(--surface);
   transition: border-color 120ms ease, background-color 120ms ease;
 }
 
 .snapshot-row.is-expanded {
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  border-color: var(--accent-primary);
+  background: color-mix(in srgb, var(--accent-primary) 6%, var(--surface));
 }
 
+/* Summary button — overrides global button chrome because it's a
+ * borderless full-row click target, not a freestanding button. */
 .snapshot-row-summary {
   flex: 1;
   min-width: 0;
@@ -118,11 +120,14 @@ const absoluteCopy = computed(() => formatDate(props.snapshot.createdAt))
   font: inherit;
   color: inherit;
   text-align: left;
-  cursor: pointer;
+}
+
+.snapshot-row-summary:hover {
+  background: transparent;
 }
 
 .snapshot-row-summary:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--accent-primary);
   outline-offset: 2px;
   border-radius: 4px;
 }
@@ -136,15 +141,13 @@ const absoluteCopy = computed(() => formatDate(props.snapshot.createdAt))
 }
 
 .snapshot-row-time {
-  font-size: 13px;
+  font-size: var(--takeover-fs-body);
   font-weight: 500;
   color: var(--text);
 }
 
 .snapshot-row-trigger {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  font-size: var(--takeover-fs-caption);
   color: var(--text-muted);
   padding: 2px 6px;
   background: color-mix(in srgb, var(--text) 8%, transparent);
@@ -156,7 +159,7 @@ const absoluteCopy = computed(() => formatDate(props.snapshot.createdAt))
   display: flex;
   align-items: center;
   gap: 4px;
-  font-size: 12px;
+  font-size: var(--takeover-fs-caption);
   color: var(--text-muted);
 }
 
@@ -183,28 +186,25 @@ const absoluteCopy = computed(() => formatDate(props.snapshot.createdAt))
   gap: 4px;
 }
 
+/* Square icon-only action buttons. Override global button padding so
+ * the icon centers in a compact 28×28 box. */
 .snapshot-row-action {
   width: 28px;
   height: 28px;
+  padding: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: 4px;
   color: var(--text-muted);
-  cursor: pointer;
-  transition: color 120ms ease, border-color 120ms ease, background-color 120ms ease;
 }
 
 .snapshot-row-action:hover {
   color: var(--text);
   border-color: var(--border-hover);
-  background: color-mix(in srgb, var(--text) 6%, transparent);
 }
 
 .snapshot-row-action:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--accent-primary);
   outline-offset: 2px;
 }
 

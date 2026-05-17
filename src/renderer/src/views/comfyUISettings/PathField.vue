@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { FolderOpen } from 'lucide-vue-next'
+import BaseInput from '../../components/ui/BaseInput.vue'
 import type { DetailField } from '../../types/ipc'
 
 /**
@@ -12,9 +13,6 @@ import type { DetailField } from '../../types/ipc'
  * `field.browseOnly === true` → the text input is read-only and the
  * user can only change the value via the Browse button (matches the
  * legacy behavior for paths where typing would be error-prone).
- *
- * The component is presentational; the parent owns the `updateField`
- * call so the same path goes through the composable's IPC + reload.
  */
 
 interface Props {
@@ -37,88 +35,27 @@ async function handleBrowse(): Promise<void> {
   if (dir) emit('update', props.field, dir)
 }
 
-function handleTextChange(event: Event): void {
+function handleChange(value: string): void {
   if (isBrowseOnly.value) return
-  const value = (event.target as HTMLInputElement).value
   emit('update', props.field, value)
 }
 </script>
 
 <template>
-  <div class="path-field">
-    <input
-      type="text"
-      class="path-field-input"
-      :class="{ 'is-readonly': isBrowseOnly }"
-      :value="stringValue"
-      :readonly="isBrowseOnly"
-      :aria-label="field.label"
-      @change="handleTextChange"
-    />
-    <button
-      type="button"
-      class="path-field-browse"
-      :aria-label="t('common.browse', 'Browse')"
-      @click="handleBrowse"
-    >
-      <FolderOpen :size="14" />
-      <span>{{ t('common.browse', 'Browse') }}</span>
-    </button>
-  </div>
+  <BaseInput
+    :model-value="stringValue"
+    :readonly="isBrowseOnly"
+    :aria-label="field.label"
+    @change="handleChange"
+  >
+    <template #trailing>
+      <button
+        type="button"
+        :aria-label="t('common.browse', 'Browse')"
+        @click="handleBrowse"
+      >
+        <FolderOpen :size="14" />
+      </button>
+    </template>
+  </BaseInput>
 </template>
-
-<style scoped>
-.path-field {
-  display: flex;
-  align-items: stretch;
-  gap: 6px;
-}
-
-.path-field-input {
-  flex: 1;
-  min-width: 0;
-  padding: 6px 8px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  color: var(--text);
-  font: inherit;
-  font-size: 13px;
-}
-
-.path-field-input:focus {
-  outline: none;
-  border-color: var(--accent);
-}
-
-.path-field-input.is-readonly {
-  color: var(--text-muted);
-  cursor: default;
-}
-
-.path-field-browse {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 6px 10px;
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  color: var(--text);
-  font: inherit;
-  font-size: 13px;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: background-color 120ms ease, border-color 120ms ease;
-}
-
-.path-field-browse:hover {
-  background: color-mix(in srgb, var(--text) 6%, transparent);
-  border-color: var(--border-hover);
-}
-
-.path-field-browse:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-</style>

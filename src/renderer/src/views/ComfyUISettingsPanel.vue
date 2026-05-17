@@ -1,15 +1,20 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, toRef, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ChevronDown } from 'lucide-vue-next'
+import { ChevronDown, ChevronRight, X } from 'lucide-vue-next'
 import { useComfyUISettings } from '../composables/useComfyUISettings'
 import MoreMenu from './comfyUISettings/MoreMenu.vue'
 import PathField from './comfyUISettings/PathField.vue'
 import EnvVarsField from './comfyUISettings/EnvVarsField.vue'
 import ChannelPicker from './comfyUISettings/ChannelPicker.vue'
 import ArgsBuilderField from './comfyUISettings/ArgsBuilderField.vue'
+import BooleanToggle from './comfyUISettings/BooleanToggle.vue'
+import BaseInput from '../components/ui/BaseInput.vue'
+import BaseSelect, { type BaseSelectOption } from '../components/ui/BaseSelect.vue'
 import ArgsBuilderPage from './comfyUISettings/ArgsBuilderPage.vue'
 import SnapshotsView from './comfyUISettings/SnapshotsView.vue'
+import InfoTooltip from '../components/InfoTooltip.vue'
+import TooltipWrap from '../components/TooltipWrap.vue'
 import type { ActionDef, DetailField, Installation, ShowProgressOpts } from '../types/ipc'
 
 /**
@@ -127,6 +132,42 @@ const visibleSections = computed(() => {
 
 function asString(v: DetailField['value']): string {
   return typeof v === 'string' ? v : v == null ? '' : String(v)
+}
+
+/** Per-title collapse state (parity with legacy DetailSection's
+ *  `collapsed`). Sections opt into collapsibility by carrying a
+ *  `section.collapsed` boolean in their payload; the initial value
+ *  pre-seeds the set. Only titled sections are collapsible since the
+ *  title is the click target. */
+const collapsedTitles = ref(new Set<string>())
+
+watch(
+  visibleSections,
+  (sections) => {
+    for (const s of sections) {
+      if (s.title && s.collapsed === true && !collapsedTitles.value.has(s.title)) {
+        collapsedTitles.value.add(s.title)
+      }
+    }
+  },
+  { immediate: true }
+)
+
+function isCollapsible(section: { title?: string; collapsed?: boolean }): boolean {
+  return Boolean(section.title) && section.collapsed !== undefined
+}
+
+function isCollapsed(section: { title?: string }): boolean {
+  return section.title ? collapsedTitles.value.has(section.title) : false
+}
+
+function toggleCollapsed(section: { title?: string }): void {
+  if (!section.title) return
+  if (collapsedTitles.value.has(section.title)) {
+    collapsedTitles.value.delete(section.title)
+  } else {
+    collapsedTitles.value.add(section.title)
+  }
 }
 
 // --- A11y + transitions -------------------------------------------------
@@ -296,6 +337,20 @@ onUnmounted(() => {
         aria-modal="true"
         :aria-label="t('comfyUISettings.title', 'Settings')"
       >
+        <header class="settings-v2-header">
+          <h2 class="settings-v2-header-title">
+            {{ t('comfyUISettings.title', 'Settings') }}
+          </h2>
+          <button
+            type="button"
+            class="settings-v2-header-close"
+            :aria-label="t('common.close', 'Close')"
+            @click="requestClose"
+          >
+            <X :size="14" />
+          </button>
+        </header>
+
         <nav
           class="settings-v2-tabs"
           role="tablist"
@@ -323,7 +378,9 @@ onUnmounted(() => {
               t('comfyUISettings.emptyInstallLess', 'Open a ComfyUI install to view its settings.')
             }}
           </p>
-          <p v-else-if="loading" class="empty">{{ t('common.loading', 'Loading…') }}</p>
+          <p v-else-if="loading && !visibleSections.length" class="empty">
+            {{ t('common.loading', 'Loading…') }}
+          </p>
           <p v-else-if="error" class="empty error">{{ error }}</p>
 
           <!-- Args sub-page takes over the body when active. Mirror of
@@ -348,40 +405,102 @@ onUnmounted(() => {
             @refresh-all="handleSnapshotsRefresh"
           />
 
-          <!-- Default: section loop for Config / Status / Update tabs. -->
+          <!-- Default: section loop for Config / Status / Update tabs.
+               Status tab uses a hairline-divider readonly list treatment
+               (label-over-value, no input chrome, dividers between rows)
+               per Figma. The `.is-readonly-list` modifier swaps the
+               section CSS without forking the template. -->
           <template v-else>
             <article
               v-for="(section, si) in visibleSections"
               :key="`s-${si}`"
               class="settings-v2-section"
+              :class="{
+                'is-readonly-list': activeTab === 'status',
+                'is-collapsible': isCollapsible(section),
+                'is-collapsed': isCollapsible(section) && isCollapsed(section)
+              }"
             >
-              <header v-if="section.title" class="settings-v2-section-title">
+              <!-- Section title. When collapsible (`section.collapsed`
+                   is defined in payload), the title becomes a click
+                   target with a chevron that flips on collapse state.
+                   Static titles render as a plain header. -->
+              <button
+                v-if="isCollapsible(section)"
+                type="button"
+                class="settings-v2-section-title is-toggle"
+                :aria-expanded="!isCollapsed(section)"
+                @click="toggleCollapsed(section)"
+              >
+                <ChevronRight
+                  :size="14"
+                  class="settings-v2-section-chevron"
+                  :class="{ 'is-open': !isCollapsed(section) }"
+                />
                 {{ section.title }}
-              </header>
+              </button>
+
+              <p
+                v-if="section.description && !isCollapsed(section)"
+                class="settings-v2-section-desc"
+              >
+                {{ section.description }}
+              </p>
 
               <div v-for="(item, i) in section.items" :key="`i-${i}`" class="settings-v2-item">
-                {{ item.label }}
+                <span class="settings-v2-item-label">
+                  {{ item.label }}{{ item.active ? ` (${t('common.active', 'active')})` : '' }}
+                  <span v-if="item.tag" class="settings-v2-item-tag">{{ item.tag }}</span>
+                </span>
+                <span v-if="item.actions && item.actions.length" class="settings-v2-item-actions">
+                  <TooltipWrap
+                    v-for="a in item.actions"
+                    :key="a.id"
+                    :text="a.enabled === false && a.disabledMessage ? a.disabledMessage : a.tooltip"
+                  >
+                    <button
+                      type="button"
+                      :class="[
+                        'settings-v2-action',
+                        a.style,
+                        { 'looks-disabled': a.enabled === false && a.disabledMessage }
+                      ]"
+                      :disabled="a.enabled === false && !a.disabledMessage"
+                      @click="runAction(a)"
+                    >
+                      {{ a.label }}
+                    </button>
+                  </TooltipWrap>
+                </span>
               </div>
 
               <div v-for="field in section.fields" :key="field.id" class="settings-v2-field">
-                <label class="settings-v2-field-label">{{ field.label }}</label>
+                <label class="settings-v2-field-label">
+                  {{ field.label }}
+                  <InfoTooltip v-if="field.tooltip" :text="field.tooltip" />
+                </label>
 
-                <input
+                <BooleanToggle
                   v-if="field.editType === 'boolean'"
-                  type="checkbox"
-                  :checked="field.value === true"
-                  @change="updateField(field, ($event.target as HTMLInputElement).checked)"
+                  :field="field"
+                  @update="(v) => updateField(field, v)"
                 />
 
-                <select
+                <BaseSelect
                   v-else-if="field.editType === 'select'"
-                  :value="asString(field.value)"
-                  @change="updateField(field, ($event.target as HTMLSelectElement).value)"
-                >
-                  <option v-for="opt in field.options" :key="opt.value" :value="opt.value">
-                    {{ opt.label }}
-                  </option>
-                </select>
+                  :model-value="asString(field.value)"
+                  :options="
+                    (field.options ?? []).map(
+                      (opt): BaseSelectOption => ({
+                        value: opt.value,
+                        label: opt.label,
+                        description: opt.description
+                      })
+                    )
+                  "
+                  :aria-label="field.label"
+                  @update:model-value="(v: string) => updateField(field, v)"
+                />
 
                 <PathField
                   v-else-if="field.editType === 'path'"
@@ -408,36 +527,55 @@ onUnmounted(() => {
                   @action="runAction"
                 />
 
-                <input
+                <BaseInput
                   v-else-if="field.editType === 'text'"
-                  type="text"
-                  :value="asString(field.value)"
-                  @change="updateField(field, ($event.target as HTMLInputElement).value)"
+                  :model-value="asString(field.value)"
+                  :aria-label="field.label"
+                  @change="(v: string) => updateField(field, v)"
                 />
 
                 <span v-else class="settings-v2-field-readonly">{{ asString(field.value) }}</span>
               </div>
 
               <div v-if="section.actions && section.actions.length" class="settings-v2-actions">
-                <button
+                <TooltipWrap
                   v-for="action in section.actions"
                   :key="action.id"
-                  type="button"
-                  class="settings-v2-action"
-                  :class="{
-                    'is-primary': action.style === 'primary',
-                    'is-danger': action.style === 'danger'
-                  }"
-                  :disabled="action.enabled === false"
-                  @click="runAction(action)"
+                  :text="
+                    action.enabled === false && action.disabledMessage
+                      ? action.disabledMessage
+                      : action.tooltip
+                  "
                 >
-                  {{ action.label }}
-                </button>
+                  <button
+                    type="button"
+                    :class="[
+                      'settings-v2-action',
+                      {
+                        primary: action.style === 'primary',
+                        danger: action.style === 'danger',
+                        'looks-disabled': action.enabled === false && action.disabledMessage
+                      }
+                    ]"
+                    :disabled="action.enabled === false && !action.disabledMessage"
+                    @click="runAction(action)"
+                  >
+                    {{ action.label }}
+                  </button>
+                </TooltipWrap>
               </div>
             </article>
 
-            <article v-if="activeTab === 'status' && diskUsageItem" class="settings-v2-section">
-              <div class="settings-v2-item">{{ diskUsageItem.label }}</div>
+            <article
+              v-if="activeTab === 'status' && diskUsageItem"
+              class="settings-v2-section is-readonly-list"
+            >
+              <div class="settings-v2-field">
+                <label class="settings-v2-field-label">
+                  {{ t('comfyUISettings.diskUsage', 'Disk Usage') }}
+                </label>
+                <span class="settings-v2-field-readonly">{{ diskUsageItem.label }}</span>
+              </div>
             </article>
           </template>
         </section>
@@ -446,6 +584,7 @@ onUnmounted(() => {
           <button type="button" class="primary settings-v2-relaunch" @click="handleRelaunch">
             {{ t('comfyUISettings.relaunch', 'Relaunch') }}
           </button>
+
           <div class="settings-v2-more-wrap">
             <button
               type="button"
@@ -493,71 +632,97 @@ onUnmounted(() => {
   z-index: 61;
   display: flex;
   flex-direction: column;
-  /* Transparent-black glass surface so the live ComfyUI canvas shows
-   * through subtly. `color-mix` keeps us on tokens (no hardcoded
-   * alpha-hex) — 80% of `--bg` (dark `#202020` / light `#ffffff`)
-   * over transparency. */
-  background: color-mix(in srgb, var(--bg) 80%, transparent);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  /* Solid surface per Figma — `--titlebar-bg` is `#171718` in dark,
+   * which is the same `semantic/base/background` Figma uses for this
+   * drawer. Glass/blur was a leftover from earlier iterations; the
+   * Figma drawer is opaque. */
+  background: var(--titlebar-bg);
   border-left: 1px solid var(--border);
   box-shadow: -8px 0 32px rgba(0, 0, 0, 0.35);
   color: var(--text);
 }
 
+/* Drawer header — Figma: title left + close right, hairline divider
+ * separating from the tab strip. */
+.settings-v2-header {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 12px 12px 16px;
+  border-bottom: 1px solid var(--border-hover);
+  -webkit-app-region: drag;
+}
+
+.settings-v2-header-title {
+  margin: 0;
+  font-size: var(--takeover-fs-body);
+  font-weight: 500;
+  color: var(--neutral-100);
+  letter-spacing: 0;
+}
+
+.settings-v2-header-close {
+  -webkit-app-region: no-drag;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--neutral-100);
+  border: none;
+}
+
 .settings-v2-tabs {
   flex-shrink: 0;
   display: flex;
-  gap: 4px;
-  padding: 12px 16px 0;
-  border-bottom: 1px solid var(--border);
+  gap: 2px;
+  padding: 12px 12px 12px;
+  border-bottom: 1px solid var(--border-hover);
 }
 
 .settings-v2-tab {
   -webkit-app-region: no-drag;
-  padding: 8px 12px;
+  padding: 6px 12px;
   background: transparent;
-  border: none;
-  border-bottom: 2px solid transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
   color: var(--text-muted);
-  font: inherit;
-  font-size: 13px;
-  cursor: pointer;
-  margin-bottom: -1px;
+  font-size: var(--takeover-fs-body);
+  font-weight: 500;
   transition:
     color 120ms ease,
-    border-color 120ms ease;
+    background-color 120ms ease;
 }
 
 .settings-v2-tab:hover {
   color: var(--text);
+  background: color-mix(in srgb, var(--text) 4%, transparent);
 }
 
 .settings-v2-tab:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--accent-primary);
   outline-offset: 2px;
-  border-radius: 4px;
 }
 
 .settings-v2-tab.is-active {
-  color: var(--text);
-  border-bottom-color: var(--accent);
-  font-weight: 500;
+  color: var(--neutral-100);
+  background: var(--surface);
 }
 
 .settings-v2-body {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 20px 16px;
+  padding: 16px;
   display: flex;
   flex-direction: column;
-  gap: 20px;
 }
 
 .empty {
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: var(--takeover-fs-body);
   margin: 0;
 }
 
@@ -568,20 +733,94 @@ onUnmounted(() => {
 .settings-v2-section {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
 .settings-v2-section-title {
-  font-size: 12px;
-  font-weight: 600;
+  font-size: var(--takeover-fs-body);
+  font-weight: 500;
   color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
 }
 
-.settings-v2-item {
-  font-size: 13px;
+.settings-v2-section-title.is-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  text-align: left;
+  align-self: flex-start;
+}
+
+.settings-v2-section-title.is-toggle:hover {
+  background: transparent;
   color: var(--text);
+}
+
+.settings-v2-section-chevron {
+  color: var(--text-muted);
+  transition: transform 160ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.settings-v2-section-chevron.is-open {
+  transform: rotate(90deg);
+}
+
+/* Collapse the body: hide every direct child of the section EXCEPT
+ * the title button (which the user clicks to toggle). Description and
+ * the items/fields/actions blocks share this rule so the entire
+ * section body disappears in one go. */
+.settings-v2-section.is-collapsed > *:not(.settings-v2-section-title) {
+  display: none;
+}
+
+/* Optional section subtext (parity with legacy DetailSection). */
+.settings-v2-section-desc {
+  margin: -4px 0 4px;
+  font-size: var(--takeover-fs-caption);
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+/* Items: label-left + optional inline actions-right. Items with no
+ * actions render label-only; the flex layout no-ops on row direction
+ * when only one child is present. */
+.settings-v2-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: var(--takeover-fs-body);
+  color: var(--text);
+  line-height: 1.4;
+}
+
+.settings-v2-item-label {
+  flex: 1;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Small pill marker shown next to item labels (e.g. "default",
+ * "recommended"). Parity with legacy `item.tag`. */
+.settings-v2-item-tag {
+  padding: 2px 6px;
+  font-size: var(--takeover-fs-caption);
+  font-weight: 500;
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  border-radius: 999px;
+}
+
+.settings-v2-item-actions {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .settings-v2-field {
@@ -591,31 +830,18 @@ onUnmounted(() => {
 }
 
 .settings-v2-field-label {
-  font-size: 12px;
-  color: var(--text-muted);
-}
-
-.settings-v2-field input[type='text'],
-.settings-v2-field select {
-  width: 100%;
-  padding: 6px 8px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  color: var(--text);
-  font: inherit;
-  font-size: 13px;
-}
-
-.settings-v2-field input[type='text']:focus,
-.settings-v2-field select:focus {
-  outline: none;
-  border-color: var(--accent);
+  display: inline-flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 14px;
+  color: var(--neutral-100);
+  line-height: 19.5px;
 }
 
 .settings-v2-field-readonly {
-  font-size: 13px;
-  color: var(--text-muted);
+  font-size: 14px;
+  color: var(--neutral-100);
+  line-height: 21px;
 }
 
 .settings-v2-actions {
@@ -626,40 +852,26 @@ onUnmounted(() => {
 }
 
 .settings-v2-action {
-  padding: 6px 10px;
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  color: var(--text);
-  font: inherit;
-  font-size: 13px;
-  cursor: pointer;
+  font-size: var(--takeover-fs-body);
 }
 
-.settings-v2-action:hover:not(:disabled) {
-  border-color: var(--border-hover);
+.settings-v2-actions:has(> .settings-v2-action:only-child) .settings-v2-action {
+  flex: 1;
 }
 
-.settings-v2-action.is-primary {
-  background: var(--accent);
-  color: var(--bg);
-  border-color: var(--accent);
-  font-weight: 600;
+.settings-v2-section.is-readonly-list {
+  gap: 0;
 }
 
-.settings-v2-action.is-primary:hover:not(:disabled) {
-  background: var(--accent-hover);
-  border-color: var(--accent-hover);
+.settings-v2-section.is-readonly-list .settings-v2-field {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border-hover);
+  gap: 2px;
 }
 
-.settings-v2-action.is-danger {
-  color: var(--danger);
-  border-color: var(--danger);
-}
-
-.settings-v2-action:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+.settings-v2-section.is-readonly-list .settings-v2-field-label {
+  color: var(--text-muted);
+  font-weight: 400;
 }
 
 .settings-v2-footer {
@@ -668,10 +880,12 @@ onUnmounted(() => {
   align-items: center;
   gap: 8px;
   padding: 12px 16px;
-  border-top: 1px solid var(--border);
-  background: var(--surface);
+  border-top: 1px solid var(--border-hover);
+  background: var(--titlebar-bg);
 }
 
+/* Relaunch consumes global `.primary`. Only override is `flex: 1` to
+ * fill the footer width next to the More dropdown. */
 .settings-v2-relaunch {
   flex: 1;
 }
@@ -682,37 +896,18 @@ onUnmounted(() => {
   display: inline-flex;
 }
 
+/* More button consumes the global button chrome; only adds the inline
+ * chevron layout and the active-state accent treatment. */
 .settings-v2-more {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 6px 10px;
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  color: var(--text);
-  font: inherit;
-  font-size: 13px;
-  cursor: pointer;
-  transition:
-    background-color 120ms ease,
-    border-color 120ms ease;
-}
-
-.settings-v2-more:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--text) 6%, transparent);
-  border-color: var(--border-hover);
+  font-size: var(--takeover-fs-body);
 }
 
 .settings-v2-more.is-active {
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
-.settings-v2-more:disabled {
-  cursor: not-allowed;
-  opacity: 0.5;
-  color: var(--text-muted);
+  background: color-mix(in srgb, var(--accent-primary) 14%, var(--surface));
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
 }
 </style>

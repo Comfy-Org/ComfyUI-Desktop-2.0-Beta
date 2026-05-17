@@ -4,7 +4,12 @@ import { useI18n } from 'vue-i18n'
 import { FilePlus, FolderInput, Save } from 'lucide-vue-next'
 import { useModal } from '../../composables/useModal'
 import { emitTelemetryAction, toCountBucket } from '../../lib/telemetry'
-import { changeSummary as _changeSummary, diffHasChanges, formatDate } from '../../lib/snapshots'
+import {
+  changeSummary as _changeSummary,
+  diffHasChanges,
+  formatDate,
+  formatRelative as _formatRelative,
+} from '../../lib/snapshots'
 import type {
   ActionDef,
   CopyEvent,
@@ -86,6 +91,15 @@ const timeline = computed<TimelineItem[]>(() => {
     }
   }
   return out
+})
+
+/** Header "Latest: 8d ago" stat — derives from the newest timeline
+ *  item (snapshot OR copy event). null when there's nothing yet. */
+const latestRelative = computed<string | null>(() => {
+  const first = timeline.value[0]
+  if (!first) return null
+  const iso = first.kind === 'snapshot' ? first.snapshot.createdAt : first.event.copiedAt
+  return _formatRelative(iso, t)
 })
 
 async function load(): Promise<void> {
@@ -316,18 +330,20 @@ async function handleImport(): Promise<void> {
 
 <template>
   <div class="snapshots-view">
+    <!-- Header per Figma: "Latest: 8d ago" left + Import / Export All
+         right. Save moves out of the toolbar and into the timeline rail
+         below as its own dashed-pending node. -->
     <header class="snapshots-view-header">
-      <h2 class="snapshots-view-title">{{ t('snapshots.timeline', 'Snapshots') }}</h2>
+      <span class="snapshots-view-latest">
+        <template v-if="latestRelative">
+          {{ t('snapshots.latestLabel', 'Latest:') }}
+          <strong>{{ latestRelative }}</strong>
+        </template>
+        <template v-else>
+          {{ t('snapshots.noneYet', 'No snapshots yet') }}
+        </template>
+      </span>
       <div class="snapshots-view-toolbar">
-        <button
-          type="button"
-          class="snapshots-view-toolbtn primary"
-          :aria-label="t('snapshots.saveSnapshot', 'Save Snapshot')"
-          @click="handleSave"
-        >
-          <Save :size="13" />
-          <span>{{ t('snapshots.saveSnapshot', 'Save') }}</span>
-        </button>
         <button
           type="button"
           class="snapshots-view-toolbtn"
@@ -357,46 +373,80 @@ async function handleImport(): Promise<void> {
         {{ t('common.retry', 'Retry') }}
       </button>
     </div>
-    <p v-else-if="timeline.length === 0" class="snapshots-view-status">
-      {{ t('snapshots.empty', 'No snapshots yet. Save one to record the current install state.') }}
-    </p>
 
-    <ul v-else class="snapshots-view-list">
+    <!-- Timeline rail. Vertical 2px line on the left, dot markers per
+         entry. The first node is always the dashed-pending "Save New
+         Snapshot" CTA. Below it: snapshots (yellow dots) and copy
+         events (muted dots), newest first. The rail itself is a
+         pseudo-element on the <ul> so it spans the full list height
+         without per-item border tricks. -->
+    <ul class="snapshots-rail" :class="{ 'is-empty': timeline.length === 0 }">
+      <li class="snapshots-rail-node is-save">
+        <span class="snapshots-rail-dot is-pending" :aria-hidden="true"></span>
+        <div class="snapshots-rail-content">
+          <span class="snapshots-rail-label">{{ t('snapshots.saveLabel', 'Save Snapshot') }}</span>
+          <button
+            type="button"
+            class="snapshots-rail-cta primary"
+            :aria-label="t('snapshots.saveSnapshot', 'Save Snapshot')"
+            @click="handleSave"
+          >
+            <Save :size="13" />
+            <span>{{ t('snapshots.saveNew', 'Save New Snapshot') }}</span>
+          </button>
+        </div>
+      </li>
+
       <li
         v-for="(item, i) in timeline"
         :key="item.kind === 'snapshot' ? `s-${item.snapshot.filename}` : `c-${i}`"
-        class="snapshots-view-item"
+        class="snapshots-rail-node"
+        :class="{
+          'is-snapshot': item.kind === 'snapshot',
+          'is-copy': item.kind === 'copy',
+          'is-current': item.kind === 'snapshot' && i === 0,
+        }"
       >
-        <template v-if="item.kind === 'snapshot'">
-          <SnapshotRow
-            :snapshot="item.snapshot"
-            :expanded="expanded === item.snapshot.filename"
-            @toggle="toggleExpand(item.snapshot.filename)"
-            @restore="handleRestore(item.snapshot.filename)"
-            @export="handleExport(item.snapshot.filename)"
-            @delete="handleDelete(item.snapshot.filename)"
-          />
-          <div
-            v-if="expanded === item.snapshot.filename"
-            class="snapshots-view-detail"
-          >
-            <p v-if="item.snapshot.label" class="snapshots-view-label">
-              {{ item.snapshot.label }}
-            </p>
-            <ul v-if="changeSummaryFor(item.snapshot).length > 0" class="snapshots-view-changes">
-              <li v-for="line in changeSummaryFor(item.snapshot)" :key="line">{{ line }}</li>
-            </ul>
-            <p v-else class="snapshots-view-no-changes">
-              {{ t('snapshots.noChangesSinceLast', 'No changes since the previous snapshot.') }}
-            </p>
+        <span
+          class="snapshots-rail-dot"
+          :class="{
+            'is-current': item.kind === 'snapshot' && i === 0,
+            'is-muted': item.kind === 'copy',
+          }"
+          :aria-hidden="true"
+        ></span>
+        <div class="snapshots-rail-content">
+          <template v-if="item.kind === 'snapshot'">
+            <SnapshotRow
+              :snapshot="item.snapshot"
+              :expanded="expanded === item.snapshot.filename"
+              @toggle="toggleExpand(item.snapshot.filename)"
+              @restore="handleRestore(item.snapshot.filename)"
+              @export="handleExport(item.snapshot.filename)"
+              @delete="handleDelete(item.snapshot.filename)"
+            />
+            <div
+              v-if="expanded === item.snapshot.filename"
+              class="snapshots-view-detail"
+            >
+              <p v-if="item.snapshot.label" class="snapshots-view-label">
+                {{ item.snapshot.label }}
+              </p>
+              <ul v-if="changeSummaryFor(item.snapshot).length > 0" class="snapshots-view-changes">
+                <li v-for="line in changeSummaryFor(item.snapshot)" :key="line">{{ line }}</li>
+              </ul>
+              <p v-else class="snapshots-view-no-changes">
+                {{ t('snapshots.noChangesSinceLast', 'No changes since the previous snapshot.') }}
+              </p>
+            </div>
+          </template>
+          <div v-else class="snapshots-view-copy-event">
+            <span class="snapshots-view-copy-icon" :aria-hidden="true">→</span>
+            <span class="snapshots-view-copy-label">
+              {{ t('snapshots.copyEventLabel', { source: item.event.installationName || item.event.installationId }) }}
+            </span>
+            <span class="snapshots-view-copy-time">{{ formatDate(item.event.copiedAt) }}</span>
           </div>
-        </template>
-        <div v-else class="snapshots-view-copy-event">
-          <span class="snapshots-view-copy-icon" :aria-hidden="true">→</span>
-          <span class="snapshots-view-copy-label">
-            {{ t('snapshots.copyEventLabel', { source: item.event.installationName || item.event.installationId }) }}
-          </span>
-          <span class="snapshots-view-copy-time">{{ formatDate(item.event.copiedAt) }}</span>
         </div>
       </li>
     </ul>
@@ -410,67 +460,42 @@ async function handleImport(): Promise<void> {
   gap: 12px;
 }
 
+/* Header row: "Latest: 8d ago" left, Import / Export All right. */
 .snapshots-view-header {
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
   gap: 8px;
 }
 
-.snapshots-view-title {
-  margin: 0;
-  font-size: 13px;
-  font-weight: 600;
+.snapshots-view-latest {
+  font-size: var(--takeover-fs-body);
   color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+}
+
+.snapshots-view-latest strong {
+  color: var(--text);
+  font-weight: 500;
 }
 
 .snapshots-view-toolbar {
-  display: flex;
+  display: inline-flex;
   flex-wrap: wrap;
   gap: 6px;
 }
 
+/* Toolbar buttons consume global `button` chrome. Only need the type
+ * token + inline icon layout. */
 .snapshots-view-toolbtn {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 6px 10px;
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  color: var(--text);
-  font: inherit;
-  font-size: 12px;
-  cursor: pointer;
-  transition: background-color 120ms ease, border-color 120ms ease;
-}
-
-.snapshots-view-toolbtn:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--text) 6%, transparent);
-  border-color: var(--border-hover);
-}
-
-.snapshots-view-toolbtn.primary {
-  background: var(--accent);
-  color: var(--bg);
-  border-color: var(--accent);
-  font-weight: 600;
-}
-
-.snapshots-view-toolbtn.primary:hover:not(:disabled) {
-  background: var(--accent-hover);
-  border-color: var(--accent-hover);
-}
-
-.snapshots-view-toolbtn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+  font-size: var(--takeover-fs-caption);
 }
 
 .snapshots-view-status {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--takeover-fs-body);
   color: var(--text-muted);
 }
 
@@ -486,31 +511,114 @@ async function handleImport(): Promise<void> {
   margin: 0;
 }
 
-.snapshots-view-list {
+/* --- Timeline rail --------------------------------------------------
+ * Vertical 2px rail anchored on the left, with circular dot markers
+ * per node. The rail is a single `::before` pseudo on the <ul>, which
+ * means the line spans the full list height automatically (no per-item
+ * border tricks). Dots are absolutely positioned inside each node so
+ * they overlap the rail; content shifts right via padding-left to
+ * leave room for the rail. */
+.snapshots-rail {
   list-style: none;
   margin: 0;
   padding: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Vertical line. Sits behind the dots (z-index 0). The 6px inset top
+ * and bottom keeps the line from poking past the first/last dot. */
+.snapshots-rail::before {
+  content: '';
+  position: absolute;
+  left: 5px;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  background: var(--border);
+  border-radius: 1px;
+  z-index: 0;
+}
+
+.snapshots-rail.is-empty::before {
+  bottom: auto;
+  height: 24px;
+}
+
+.snapshots-rail-node {
+  position: relative;
+  padding-left: 24px;
+  min-height: 12px;
+}
+
+/* Dot marker. 12px circle centered on the rail's 2px line. Variants:
+ *   default snapshot          → border-only, surface fill
+ *   .is-current               → solid yellow (highlights the active
+ *                                snapshot per Figma)
+ *   .is-muted (copy events)   → muted border, surface fill
+ *   .is-pending (Save CTA)    → dashed, no fill — pending action */
+.snapshots-rail-dot {
+  position: absolute;
+  left: 0;
+  top: 6px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--titlebar-bg);
+  border: 2px solid var(--border);
+  z-index: 1;
+}
+
+.snapshots-rail-dot.is-current {
+  background: var(--comfy-yellow);
+  border-color: var(--comfy-yellow);
+}
+
+.snapshots-rail-dot.is-muted {
+  border-color: var(--border-hover);
+}
+
+.snapshots-rail-dot.is-pending {
+  background: transparent;
+  border-style: dashed;
+  border-color: var(--text-muted);
+}
+
+.snapshots-rail-content {
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 
-.snapshots-view-item {
-  display: flex;
-  flex-direction: column;
+/* Save-new-snapshot CTA — dashed-border full-width primary button.
+ * Override global `button` padding so it reads as a tall pending
+ * affordance, distinct from the snapshot row chrome below it. */
+.snapshots-rail-cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   gap: 6px;
+  width: 100%;
+  font-size: var(--takeover-fs-body);
+}
+
+.snapshots-rail-node.is-save .snapshots-rail-label {
+  font-size: var(--takeover-fs-caption);
+  color: var(--text-muted);
 }
 
 .snapshots-view-detail {
-  padding: 10px 12px;
-  background: color-mix(in srgb, var(--bg) 80%, transparent);
+  padding: 12px;
+  background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 8px;
 }
 
 .snapshots-view-label {
   margin: 0 0 6px;
-  font-size: 12px;
+  font-size: var(--takeover-fs-caption);
   font-weight: 500;
   color: var(--text);
 }
@@ -519,7 +627,7 @@ async function handleImport(): Promise<void> {
   list-style: disc;
   margin: 0;
   padding-left: 18px;
-  font-size: 12px;
+  font-size: var(--takeover-fs-caption);
   color: var(--text-muted);
   display: flex;
   flex-direction: column;
@@ -528,7 +636,7 @@ async function handleImport(): Promise<void> {
 
 .snapshots-view-no-changes {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--takeover-fs-caption);
   color: var(--text-muted);
   font-style: italic;
 }
@@ -540,13 +648,13 @@ async function handleImport(): Promise<void> {
   padding: 8px 12px;
   background: transparent;
   border: 1px dashed var(--border);
-  border-radius: 6px;
-  font-size: 12px;
+  border-radius: 8px;
+  font-size: var(--takeover-fs-caption);
   color: var(--text-muted);
 }
 
 .snapshots-view-copy-icon {
-  color: var(--accent);
+  color: var(--accent-primary);
 }
 
 .snapshots-view-copy-label {

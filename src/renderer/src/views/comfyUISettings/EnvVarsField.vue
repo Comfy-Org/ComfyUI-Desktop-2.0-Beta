@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Plus, ShieldAlert, X } from 'lucide-vue-next'
+import BaseInput from '../../components/ui/BaseInput.vue'
 import type { DetailField } from '../../types/ipc'
 
 /**
@@ -40,16 +41,15 @@ const rows = ref<Row[]>([])
 watch(
   () => props.field.value,
   (val) => {
-    const dict = (val && typeof val === 'object' && !Array.isArray(val))
-      ? (val as Record<string, string>)
-      : {}
+    const dict =
+      val && typeof val === 'object' && !Array.isArray(val) ? (val as Record<string, string>) : {}
     const incoming: Row[] = Object.entries(dict).map(([key, value]) => ({ key, value }))
     const currentNonEmpty = rows.value.filter((r) => r.key || r.value)
     if (JSON.stringify(incoming) !== JSON.stringify(currentNonEmpty)) {
       rows.value = incoming
     }
   },
-  { immediate: true },
+  { immediate: true }
 )
 
 const duplicateKeys = computed(() => {
@@ -111,23 +111,25 @@ function onValueChange(i: number, val: string): void {
         <span>{{ t('envVars.securityWarning') }}</span>
       </div>
       <div v-for="(row, i) in rows" :key="i" class="env-var-row">
-        <input
-          type="text"
-          class="env-var-input env-var-key"
-          :class="{ 'is-duplicate': isDuplicate(i) }"
-          :value="row.key"
-          :placeholder="t('envVars.namePlaceholder', 'NAME')"
-          :aria-label="t('envVars.namePlaceholder', 'NAME')"
-          @change="onKeyChange(i, ($event.target as HTMLInputElement).value)"
-        />
-        <input
-          type="text"
-          class="env-var-input env-var-value"
-          :value="row.value"
-          :placeholder="t('envVars.valuePlaceholder', 'value')"
-          :aria-label="t('envVars.valuePlaceholder', 'value')"
-          @change="onValueChange(i, ($event.target as HTMLInputElement).value)"
-        />
+        <div class="env-var-cell env-var-key">
+          <BaseInput
+            mono
+            :model-value="row.key"
+            :placeholder="t('envVars.namePlaceholder', 'NAME')"
+            :aria-label="t('envVars.namePlaceholder', 'NAME')"
+            :invalid="isDuplicate(i)"
+            @change="onKeyChange(i, $event)"
+          />
+        </div>
+        <div class="env-var-cell env-var-value">
+          <BaseInput
+            mono
+            :model-value="row.value"
+            :placeholder="t('envVars.valuePlaceholder', 'value')"
+            :aria-label="t('envVars.valuePlaceholder', 'value')"
+            @change="onValueChange(i, $event)"
+          />
+        </div>
         <button
           type="button"
           class="env-var-remove"
@@ -138,11 +140,7 @@ function onValueChange(i: number, val: string): void {
         </button>
       </div>
     </div>
-    <button
-      type="button"
-      class="env-var-add"
-      @click="addRow"
-    >
+    <button type="button" class="env-var-add" @click="addRow">
       <Plus :size="13" />
       <span>{{ t('envVars.add', 'Add Variable') }}</span>
     </button>
@@ -160,7 +158,7 @@ function onValueChange(i: number, val: string): void {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 11px;
+  font-size: var(--takeover-fs-caption);
   color: var(--info);
 }
 
@@ -176,51 +174,38 @@ function onValueChange(i: number, val: string): void {
   gap: 6px;
 }
 
-.env-var-input {
+/* Cell wrappers around BaseInput — only own the flex sizing.
+ * Input chrome (bg, border, focus, invalid) is delegated to the
+ * shared primitive in components/ui/. */
+.env-var-cell {
   min-width: 0;
-  padding: 6px 8px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  color: var(--text);
-  font: 12px ui-monospace, SFMono-Regular, Menlo, monospace;
-}
-
-.env-var-input:focus {
-  outline: none;
-  border-color: var(--accent);
 }
 
 .env-var-key {
   flex: 2;
 }
 
-.env-var-key.is-duplicate {
-  border-color: var(--danger);
-}
-
 .env-var-value {
   flex: 3;
 }
 
+/* Remove (X) button — square override on top of the global button
+ * chrome. The hover color flips to danger only on this button. */
 .env-var-remove {
   flex-shrink: 0;
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
+  padding: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: 4px;
   color: var(--text-muted);
-  cursor: pointer;
-  transition: color 120ms ease, border-color 120ms ease;
 }
 
 .env-var-remove:hover {
   color: var(--danger);
   border-color: var(--danger);
+  background: var(--surface);
 }
 
 .env-var-add {
@@ -228,24 +213,21 @@ function onValueChange(i: number, val: string): void {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 6px 10px;
-  background: transparent;
-  border: 1px dashed var(--border);
-  border-radius: 4px;
-  color: var(--text-muted);
-  font: inherit;
-  font-size: 12px;
-  cursor: pointer;
-  transition: color 120ms ease, border-color 120ms ease;
+  padding: 8px 16px 8px 8px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  color: var(--neutral-100);
+  font-weight: 500;
+  font-size: 14px;
 }
 
 .env-var-add:hover {
   color: var(--text);
-  border-color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.15);
 }
 
 .env-var-add:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--accent-primary);
   outline-offset: 2px;
 }
 </style>

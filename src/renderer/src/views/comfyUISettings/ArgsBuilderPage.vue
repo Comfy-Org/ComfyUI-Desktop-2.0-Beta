@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ArrowLeft, Search } from 'lucide-vue-next'
+import BaseInput from '../../components/ui/BaseInput.vue'
 import type { ComfyArgDef } from '../../types/ipc'
 import { parseArgs, serialize, tokenize } from '../../lib/argsParser'
 
@@ -200,8 +201,7 @@ const structuredGroups = computed(() => {
 const hasResults = computed(() => Array.from(structuredGroups.value.values()).some((items) => items.length > 0))
 
 // Free-text mirror — lets the user paste raw args directly.
-function onRawChange(event: Event): void {
-  const value = (event.target as HTMLInputElement).value
+function onRawChange(value: string): void {
   localValue.value = value
   emit('update', value)
 }
@@ -240,10 +240,9 @@ const unknownFlags = computed(() => {
 
     <div class="args-page-raw">
       <label class="args-page-raw-label">{{ t('comfyUISettings.argsRawLabel', 'Raw arguments') }}</label>
-      <input
-        type="text"
-        class="args-page-raw-input"
-        :value="localValue"
+      <BaseInput
+        mono
+        :model-value="localValue"
         :placeholder="t('comfyUISettings.argsPlaceholder', 'No arguments set')"
         @change="onRawChange"
       />
@@ -252,16 +251,17 @@ const unknownFlags = computed(() => {
       </p>
     </div>
 
-    <div class="args-page-search">
-      <Search :size="14" />
-      <input
-        type="text"
-        :value="search"
-        :placeholder="t('comfyUISettings.argsSearchPlaceholder', 'Search arguments…')"
-        :aria-label="t('comfyUISettings.argsSearchPlaceholder', 'Search arguments')"
-        @input="search = ($event.target as HTMLInputElement).value"
-      />
-    </div>
+    <BaseInput
+      class="args-page-search"
+      :model-value="search"
+      :placeholder="t('comfyUISettings.argsSearchPlaceholder', 'Search arguments…')"
+      :aria-label="t('comfyUISettings.argsSearchPlaceholder', 'Search arguments')"
+      @update:model-value="search = $event"
+    >
+      <template #leading>
+        <Search :size="14" />
+      </template>
+    </BaseInput>
 
     <p v-if="loading" class="args-page-status">{{ t('common.loading', 'Loading…') }}</p>
     <p v-else-if="loadError" class="args-page-status args-page-status-error">{{ loadError }}</p>
@@ -318,16 +318,15 @@ const unknownFlags = computed(() => {
             </label>
           </div>
           <p class="args-page-help">{{ item.arg.help }}</p>
-          <input
+          <BaseInput
             v-if="
               isActive(item.arg.name) &&
               (item.arg.type === 'value' || item.arg.type === 'optional-value')
             "
-            type="text"
             class="args-page-value-input"
-            :value="getValue(item.arg.name)"
+            :model-value="getValue(item.arg.name)"
             :placeholder="item.arg.metavar ?? (item.arg.type === 'optional-value' ? t('comfyUISettings.argsOptionalPlaceholder', 'optional') : t('comfyUISettings.argsValuePlaceholder', 'value'))"
-            @change="setValue(item.arg!, ($event.target as HTMLInputElement).value)"
+            @change="(v) => setValue(item.arg!, v)"
           />
         </template>
       </div>
@@ -397,46 +396,10 @@ const unknownFlags = computed(() => {
   letter-spacing: 0.04em;
 }
 
-.args-page-raw-input {
-  padding: 6px 8px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  color: var(--text);
-  font: 12px ui-monospace, SFMono-Regular, Menlo, monospace;
-}
-
-.args-page-raw-input:focus {
-  outline: none;
-  border-color: var(--accent);
-}
-
 .args-page-unknown {
   margin: 4px 0 0;
   font-size: 12px;
   color: var(--warning);
-}
-
-.args-page-search {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  color: var(--text-muted);
-}
-
-.args-page-search input {
-  flex: 1;
-  min-width: 0;
-  border: none;
-  background: transparent;
-  outline: none;
-  color: var(--text);
-  font: inherit;
-  font-size: 13px;
 }
 
 .args-page-status {
@@ -508,16 +471,5 @@ const unknownFlags = computed(() => {
 
 .args-page-value-input {
   margin-top: 4px;
-  padding: 4px 6px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  color: var(--text);
-  font: 12px ui-monospace, SFMono-Regular, Menlo, monospace;
-}
-
-.args-page-value-input:focus {
-  outline: none;
-  border-color: var(--accent);
 }
 </style>

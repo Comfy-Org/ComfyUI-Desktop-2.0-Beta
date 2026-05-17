@@ -145,15 +145,15 @@ const visibleActions = computed(() => props.actions)
   padding: 4px;
   list-style: none;
   min-width: 200px;
-  background: color-mix(in srgb, var(--bg) 90%, transparent);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  background: var(--titlebar-bg);
   border: 1px solid var(--border);
   border-radius: 8px;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
   z-index: 62;
 }
 
+/* Menu items override the global `button` chrome — they're transparent
+ * full-row items in a popover, not freestanding buttons. */
 .more-menu-item {
   width: 100%;
   display: block;
@@ -162,10 +162,8 @@ const visibleActions = computed(() => props.actions)
   border: none;
   border-radius: 4px;
   color: var(--text);
-  font: inherit;
-  font-size: 13px;
+  font-size: var(--takeover-fs-body);
   text-align: left;
-  cursor: pointer;
   transition: background-color 120ms ease, color 120ms ease;
 }
 
@@ -174,7 +172,7 @@ const visibleActions = computed(() => props.actions)
 }
 
 .more-menu-item:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--accent-primary);
   outline-offset: -2px;
 }
 
@@ -183,7 +181,7 @@ const visibleActions = computed(() => props.actions)
 }
 
 .more-menu-item.is-accent {
-  color: var(--accent);
+  color: var(--accent-primary);
 }
 
 .more-menu-item.is-disabled,

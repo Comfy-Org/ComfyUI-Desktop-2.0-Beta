@@ -21,13 +21,19 @@ interface EnvVar {
 const entries = ref<EnvVar[]>([])
 
 // Sync from prop to local state
-watch(() => props.modelValue, (val) => {
-  const incoming = Object.entries(val || {}).map(([key, value]) => ({ key, value }))
-  // Only reset if structurally different to avoid cursor jumps
-  if (JSON.stringify(incoming) !== JSON.stringify(entries.value.filter(e => e.key || e.value))) {
-    entries.value = incoming.length > 0 ? incoming : []
-  }
-}, { immediate: true })
+watch(
+  () => props.modelValue,
+  (val) => {
+    const incoming = Object.entries(val || {}).map(([key, value]) => ({ key, value }))
+    // Only reset if structurally different to avoid cursor jumps
+    if (
+      JSON.stringify(incoming) !== JSON.stringify(entries.value.filter((e) => e.key || e.value))
+    ) {
+      entries.value = incoming.length > 0 ? incoming : []
+    }
+  },
+  { immediate: true }
+)
 
 const duplicateKeys = computed(() => {
   const seen = new Map<string, number>()
@@ -79,7 +85,9 @@ function onValueChange(index: number, val: string): void {
 <template>
   <div class="env-vars-editor">
     <div v-if="entries.length" class="env-vars-list">
-      <div class="env-vars-notice"><ShieldAlert :size="14" class="env-vars-notice-icon" />{{ $t('envVars.securityWarning') }}</div>
+      <div class="env-vars-notice">
+        <ShieldAlert :size="14" class="env-vars-notice-icon" />{{ $t('envVars.securityWarning') }}
+      </div>
       <div v-for="(entry, i) in entries" :key="i" class="env-var-row">
         <input
           type="text"
@@ -88,15 +96,22 @@ function onValueChange(index: number, val: string): void {
           :value="entry.key"
           :placeholder="$t('envVars.namePlaceholder')"
           @change="onKeyChange(i, ($event.target as HTMLInputElement).value)"
-        >
+        />
         <input
           type="text"
           class="env-var-input env-var-value"
           :value="entry.value"
           :placeholder="$t('envVars.valuePlaceholder')"
           @change="onValueChange(i, ($event.target as HTMLInputElement).value)"
+        />
+        <button
+          class="env-var-remove"
+          :title="$t('common.cancel')"
+          aria-label="Remove variable"
+          @click="removeEntry(i)"
         >
-        <button class="env-var-remove" :title="$t('common.cancel')" aria-label="Remove variable" @click="removeEntry(i)">✕</button>
+          ✕
+        </button>
       </div>
     </div>
     <button class="env-var-add" @click="addEntry">+ {{ $t('envVars.add') }}</button>
@@ -176,17 +191,20 @@ function onValueChange(index: number, val: string): void {
 }
 
 .env-var-add {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 16px 8px 8px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  color: var(--neutral-100);
+  font-weight: 500;
   font-size: 14px;
-  padding: 6px 12px;
-  border: 1px dashed var(--border);
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text-muted);
-  cursor: pointer;
 }
 
 .env-var-add:hover {
   color: var(--text);
-  border-color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.15);
 }
 </style>

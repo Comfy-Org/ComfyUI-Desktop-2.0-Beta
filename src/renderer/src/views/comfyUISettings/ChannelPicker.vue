@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, reactive, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import BaseSelect, { type BaseSelectOption } from '../../components/ui/BaseSelect.vue'
 import type { ActionDef, DetailField, DetailFieldOption } from '../../types/ipc'
 
 /**
@@ -85,25 +86,34 @@ function optionLabel(opt: DetailFieldOption): string {
   }
   return opt.label
 }
+
+const selectOptions = computed<BaseSelectOption[]>(() =>
+  (props.field.options ?? []).map((opt) => ({
+    value: opt.value,
+    label: optionLabel(opt),
+    description: opt.description,
+  })),
+)
 </script>
 
 <template>
   <div class="channel-picker">
-    <select
-      class="channel-picker-select"
-      :value="state.draft"
+    <BaseSelect
+      :model-value="state.draft"
+      :options="selectOptions"
       :aria-label="field.label"
-      @change="state.draft = ($event.target as HTMLSelectElement).value"
-    >
-      <option v-for="opt in field.options" :key="opt.value" :value="opt.value">
-        {{ optionLabel(opt) }}
-      </option>
-    </select>
+      @update:model-value="state.draft = $event"
+    />
 
     <p v-if="selectedOption?.description" class="channel-picker-desc">
       {{ selectedOption.description }}
     </p>
 
+    <!-- Preview card. Per Figma, the channel-level actions (Update Now,
+         Copy & Update, etc.) live INSIDE this card, separated from the
+         info rows by a hairline. When there's no preview (channel switch
+         drafted but no metadata for it) the actions are surfaced below
+         the empty placeholder instead, since the card wouldn't render. -->
     <div v-if="preview" class="channel-picker-preview">
       <div class="channel-picker-row">
         <span class="channel-picker-label">{{ t('channelCards.installedVersion', 'Installed Version') }}</span>
@@ -128,12 +138,43 @@ function optionLabel(opt: DetailFieldOption): string {
             : t('channelCards.upToDate', 'Up to date') }}
         </span>
       </div>
+
+      <div v-if="selectedActions.length > 0" class="channel-picker-card-actions">
+        <p v-if="!draftIsCurrent" class="channel-picker-switch-hint">
+          {{ t('channelCards.switchTo', { channel: selectedOption?.label ?? '' }) }}
+        </p>
+        <div class="channel-picker-action-row">
+          <button
+            v-for="action in selectedActions"
+            :key="action.id"
+            type="button"
+            :class="[
+              'channel-picker-action',
+              {
+                primary: action.style === 'primary',
+                accent: action.style === 'accent',
+                danger: action.style === 'danger',
+              },
+            ]"
+            :disabled="action.enabled === false"
+            :title="action.tooltip"
+            @click="emit('action', action)"
+          >
+            {{ action.label }}
+          </button>
+        </div>
+      </div>
     </div>
     <p v-else-if="!draftIsCurrent" class="channel-picker-empty">
       {{ t('channelCards.noInfo', 'No information available for this channel.') }}
     </p>
 
-    <div v-if="selectedActions.length > 0" class="channel-picker-actions">
+    <!-- Fallback action row for the no-preview case (drafted channel
+         has no cached metadata yet). -->
+    <div
+      v-if="!preview && selectedActions.length > 0"
+      class="channel-picker-actions"
+    >
       <p v-if="!draftIsCurrent" class="channel-picker-switch-hint">
         {{ t('channelCards.switchTo', { channel: selectedOption?.label ?? '' }) }}
       </p>
@@ -142,12 +183,14 @@ function optionLabel(opt: DetailFieldOption): string {
           v-for="action in selectedActions"
           :key="action.id"
           type="button"
-          class="channel-picker-action"
-          :class="{
-            'is-primary': action.style === 'primary',
-            'is-accent': action.style === 'accent',
-            'is-danger': action.style === 'danger',
-          }"
+          :class="[
+            'channel-picker-action',
+            {
+              primary: action.style === 'primary',
+              accent: action.style === 'accent',
+              danger: action.style === 'danger',
+            },
+          ]"
           :disabled="action.enabled === false"
           :title="action.tooltip"
           @click="emit('action', action)"
@@ -163,27 +206,12 @@ function optionLabel(opt: DetailFieldOption): string {
 .channel-picker {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-}
-
-.channel-picker-select {
-  padding: 6px 8px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  color: var(--text);
-  font: inherit;
-  font-size: 13px;
-}
-
-.channel-picker-select:focus {
-  outline: none;
-  border-color: var(--accent);
+  gap: var(--takeover-gap-sm);
 }
 
 .channel-picker-desc {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--takeover-fs-caption);
   color: var(--text-muted);
   line-height: 1.4;
 }
@@ -191,19 +219,18 @@ function optionLabel(opt: DetailFieldOption): string {
 .channel-picker-preview {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 10px 12px;
-  background: color-mix(in srgb, var(--bg) 60%, transparent);
+  gap: 6px;
+  padding: 12px;
+  background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 8px;
 }
 
 .channel-picker-row {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  font-size: 12px;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--takeover-fs-caption);
 }
 
 .channel-picker-label {
@@ -213,7 +240,7 @@ function optionLabel(opt: DetailFieldOption): string {
 .channel-picker-value {
   color: var(--text);
   font-weight: 500;
-  font: 500 12px ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--takeover-fs-body);
 }
 
 .channel-picker-value.is-update-available {
@@ -222,10 +249,10 @@ function optionLabel(opt: DetailFieldOption): string {
 
 .channel-picker-empty {
   margin: 0;
-  padding: 10px 12px;
+  padding: 12px;
   border: 1px dashed var(--border);
-  border-radius: 6px;
-  font-size: 12px;
+  border-radius: 8px;
+  font-size: var(--takeover-fs-caption);
   color: var(--text-muted);
 }
 
@@ -237,7 +264,7 @@ function optionLabel(opt: DetailFieldOption): string {
 
 .channel-picker-switch-hint {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--takeover-fs-caption);
   color: var(--text-muted);
 }
 
@@ -247,47 +274,21 @@ function optionLabel(opt: DetailFieldOption): string {
   gap: 6px;
 }
 
+/* Card-internal action row (Figma: actions sit inside the preview
+ * card, separated from the metadata rows by a hairline divider). */
+.channel-picker-card-actions {
+  margin-top: 4px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-hover);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* Action buttons consume global button + global `.primary` / `.accent`
+ * / `.danger` chrome. Only need the type token here so they scale with
+ * the rest of the drawer body. */
 .channel-picker-action {
-  padding: 6px 12px;
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  color: var(--text);
-  font: inherit;
-  font-size: 13px;
-  cursor: pointer;
-  transition: background-color 120ms ease, border-color 120ms ease;
-}
-
-.channel-picker-action:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--text) 6%, transparent);
-  border-color: var(--border-hover);
-}
-
-.channel-picker-action.is-primary {
-  background: var(--accent);
-  color: var(--bg);
-  border-color: var(--accent);
-  font-weight: 600;
-}
-
-.channel-picker-action.is-primary:hover:not(:disabled) {
-  background: var(--accent-hover);
-  border-color: var(--accent-hover);
-}
-
-.channel-picker-action.is-accent {
-  color: var(--accent);
-  border-color: var(--accent);
-}
-
-.channel-picker-action.is-danger {
-  color: var(--danger);
-  border-color: var(--danger);
-}
-
-.channel-picker-action:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+  font-size: var(--takeover-fs-body);
 }
 </style>

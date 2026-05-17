@@ -68,6 +68,13 @@ export interface UseComfyUISettingsApi {
   /** Refresh sections + disk usage for the current installation. */
   reload: () => Promise<void>
 
+  /** Per-section refresh (parity with legacy DetailModal). Splices
+   *  only the named section in-place — leaves the other sections'
+   *  Vue subtrees intact, so collapse state and internal scrolls
+   *  survive the refresh. Falls back to full `reload()` when the
+   *  title is missing or no longer in the new payload. */
+  refreshSection: (sectionTitle: string | undefined) => Promise<void>
+
   /** Push a single field mutation through `update-installation` and
    *  reload sections so the UI tracks main-side defaults / clamping. */
   updateField: (field: DetailField, value: unknown) => Promise<void>
@@ -144,6 +151,37 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
     await loadAll(inst.id, inst.installPath ?? '')
   }
 
+  /** Per-section refresh (parity with legacy DetailModal). Fetches
+   *  the full sections payload but only splices the matching title
+   *  in-place — leaves the other sections' Vue subtrees intact, which
+   *  preserves things like collapse state and any internal scroll. */
+  async function refreshSection(sectionTitle: string | undefined): Promise<void> {
+    if (!sectionTitle) {
+      await reload()
+      return
+    }
+    const inst = toValue(opts.installation)
+    if (!inst) return
+    try {
+      const fresh = await window.api.getDetailSections(inst.id)
+      const updated = fresh.find((s) => s.title === sectionTitle)
+      if (!updated) {
+        // Title disappeared from the new payload — main mutated the
+        // section list, so fall back to a full replace to stay coherent.
+        sections.value = fresh
+        return
+      }
+      const idx = sections.value.findIndex((s) => s.title === sectionTitle)
+      if (idx >= 0) {
+        sections.value.splice(idx, 1, updated)
+      } else {
+        sections.value = fresh
+      }
+    } catch (e) {
+      error.value = e instanceof Error ? e.message : String(e)
+    }
+  }
+
   async function updateField(field: DetailField, value: unknown): Promise<void> {
     const inst = toValue(opts.installation)
     if (!inst) return
@@ -153,7 +191,33 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
       value_kind: field.editType || 'text',
       bool_value: typeof value === 'boolean' ? value : undefined,
     })
-    await reload()
+    // Parity with legacy DetailSection: a field can declare an
+    // `onChangeAction` to fire automatically after its value changes
+    // (e.g. switching update channel triggers `check-update` so the
+    // preview metadata refreshes without an extra click). Surface
+    // failures via modal so the user can react.
+    if (field.onChangeAction) {
+      try {
+        await window.api.runAction(inst.id, field.onChangeAction)
+      } catch (err: unknown) {
+        await modal.alert({
+          title: t('common.error', 'Error'),
+          message: err instanceof Error ? err.message : String(err),
+        })
+      }
+    }
+    // Parity with legacy DetailSection (PARITY-G): when a field opts
+    // into `refreshSection`, splice only that section instead of
+    // replacing the whole array — preserves Vue subtrees and collapse
+    // state for sections the user wasn't touching.
+    if (field.refreshSection) {
+      const owningSection = sections.value.find(
+        (s) => s.fields?.some((f) => f.id === field.id),
+      )
+      await refreshSection(owningSection?.title)
+    } else {
+      await reload()
+    }
   }
 
   async function runAction(action: ActionDef): Promise<void> {
@@ -471,6 +535,7 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
     loading,
     error,
     reload,
+    refreshSection,
     updateField,
     runAction,
     sectionsForTab,
