@@ -10,7 +10,7 @@ import type { DetailField } from '../../types/ipc'
  * VALUE rows, duplicate-key highlight, single emit when any cell
  * changes — but in the drawer's design language.
  *
- * The parent (`GlobalSettingsPanel`) listens for `update` and runs the
+ * The parent (`ComfyUISettingsPanel`) listens for `update` and runs the
  * value through the composable's `updateField` → `update-installation`
  * IPC. Same path the legacy modal uses; main applies `sanitizeEnvVars`
  * server-side.

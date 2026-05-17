@@ -2,7 +2,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import SettingsModal from '../views/SettingsModal.vue'
-import GlobalSettingsPanel from '../views/GlobalSettingsPanel.vue'
+import ComfyUISettingsPanel from '../views/ComfyUISettingsPanel.vue'
 import ProgressModal from '../views/ProgressModal.vue'
 import ModalDialog from '../components/ModalDialog.vue'
 import ComfyLifecycleView from './ComfyLifecycleView.vue'
@@ -144,7 +144,7 @@ let unsubRequestCloseDrawer: (() => void) | null = null
 
 // Drives the title-bar icon close path's animated dismiss (see
 // `onRequestCloseDrawer` below).
-const globalSettingsPanelRef = ref<{ requestClose: () => void } | null>(null)
+const comfyUISettingsPanelRef = ref<{ requestClose: () => void } | null>(null)
 
 useDeepLinkRouter({
   installationId,
@@ -281,7 +281,7 @@ onMounted(async () => {
   // Title-bar close → drawer's local dismiss path (animated). Skipped
   // when the ref is null because the drawer is already gone.
   unsubRequestCloseDrawer = window.api.onRequestCloseDrawer(() => {
-    globalSettingsPanelRef.value?.requestClose()
+    comfyUISettingsPanelRef.value?.requestClose()
   })
 
   // The file-menu "Skip Onboarding" IPC subscription lives in
@@ -451,8 +451,8 @@ onUnmounted(() => {
     <!-- Settings drawer (v2). Right-anchored slide-in driven by
          `activePanel === 'settings-v2'`; sits outside the overlay
          v-if chain so it doesn't break its discriminant-narrowing. -->
-    <GlobalSettingsPanel
-      ref="globalSettingsPanelRef"
+    <ComfyUISettingsPanel
+      ref="comfyUISettingsPanelRef"
       :open="activePanel === 'settings-v2'"
       :installation="installation"
       @close="closeSettingsV2"

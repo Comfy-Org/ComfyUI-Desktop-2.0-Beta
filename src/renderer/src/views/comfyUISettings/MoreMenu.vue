@@ -12,7 +12,7 @@ import type { ActionDef } from '../../types/ipc'
  * UX:
  *   - The drawer's footer renders a single "More" button (with a
  *     chevron). Clicking it opens this menu anchored above the button.
- *   - Items are sourced from `pinBottomActions` in `useGlobalSettings`
+ *   - Items are sourced from `pinBottomActions` in `useComfyUISettings`
  *     (which already applies the Launch→Restart synthetic swap).
  *   - Clicking an item closes the menu and emits `'pick'` with the
  *     `ActionDef` — the parent runs it through `runAction` so all the
@@ -80,7 +80,7 @@ function handleKeydown(event: KeyboardEvent): void {
 // so we only close when the click lands outside both the trigger and
 // the menu. Detecting "outside the trigger" needs the trigger's
 // element; the drawer's footer passes us a `data-more-trigger` attr
-// (see GlobalSettingsPanel template) so we don't have to thread a ref.
+// (see ComfyUISettingsPanel template) so we don't have to thread a ref.
 function handleDocumentClick(event: MouseEvent): void {
   if (!props.open) return
   const target = event.target as Node | null

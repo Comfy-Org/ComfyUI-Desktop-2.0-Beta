@@ -59,7 +59,7 @@
     "settingsTooltip": "Settings"
   },
 
-  "globalSettings": {
+  "comfyUISettings": {
     "title": "Settings",
     "tabConfig": "Config",
     "tabStatus": "Status",

@@ -2,14 +2,14 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, toRef, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ChevronDown } from 'lucide-vue-next'
-import { useGlobalSettings } from '../composables/useGlobalSettings'
-import MoreMenu from './globalSettings/MoreMenu.vue'
-import PathField from './globalSettings/PathField.vue'
-import EnvVarsField from './globalSettings/EnvVarsField.vue'
-import ChannelPicker from './globalSettings/ChannelPicker.vue'
-import ArgsBuilderField from './globalSettings/ArgsBuilderField.vue'
-import ArgsBuilderPage from './globalSettings/ArgsBuilderPage.vue'
-import SnapshotsView from './globalSettings/SnapshotsView.vue'
+import { useComfyUISettings } from '../composables/useComfyUISettings'
+import MoreMenu from './comfyUISettings/MoreMenu.vue'
+import PathField from './comfyUISettings/PathField.vue'
+import EnvVarsField from './comfyUISettings/EnvVarsField.vue'
+import ChannelPicker from './comfyUISettings/ChannelPicker.vue'
+import ArgsBuilderField from './comfyUISettings/ArgsBuilderField.vue'
+import ArgsBuilderPage from './comfyUISettings/ArgsBuilderPage.vue'
+import SnapshotsView from './comfyUISettings/SnapshotsView.vue'
 import type { ActionDef, DetailField, Installation, ShowProgressOpts } from '../types/ipc'
 
 /**
@@ -20,16 +20,16 @@ import type { ActionDef, DetailField, Installation, ShowProgressOpts } from '../
  *
  * Chrome only: tab strip + scrollable body + pinned footer. All section
  * loading / field updates / action plumbing lives in
- * `useGlobalSettings.ts`. All four tabs render through one section loop
+ * `useComfyUISettings.ts`. All four tabs render through one section loop
  * — they differ only in the `DetailSection.tab` filter key.
  */
 
-export type GlobalSettingsTab = 'config' | 'status' | 'update' | 'snapshots'
+export type ComfyUISettingsTab = 'config' | 'status' | 'update' | 'snapshots'
 
 interface Props {
   open: boolean
   installation: Installation | null
-  initialTab?: GlobalSettingsTab
+  initialTab?: ComfyUISettingsTab
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -47,7 +47,7 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 
-const activeTab = ref<GlobalSettingsTab>(props.initialTab)
+const activeTab = ref<ComfyUISettingsTab>(props.initialTab)
 
 // Decoupled from `props.open` so we own the leave-animation timing —
 // the user-dismiss path (ESC/backdrop/icon) flips `internalOpen` first
@@ -84,7 +84,7 @@ function handleAfterLeave(): void {
 }
 
 interface TabDef {
-  key: GlobalSettingsTab
+  key: ComfyUISettingsTab
   /** The `DetailSection.tab` literal we filter for. The Figma's "Config"
    *  is sourced from sections tagged `'settings'` (launch-settings
    *  fields built by `buildLaunchSettingsFields` in main). */
@@ -93,13 +93,13 @@ interface TabDef {
 }
 
 const tabs = computed<TabDef[]>(() => [
-  { key: 'config', sectionTab: 'settings', label: t('globalSettings.tabConfig', 'Config') },
-  { key: 'status', sectionTab: 'status', label: t('globalSettings.tabStatus', 'Status') },
-  { key: 'update', sectionTab: 'update', label: t('globalSettings.tabUpdate', 'Update') },
+  { key: 'config', sectionTab: 'settings', label: t('comfyUISettings.tabConfig', 'Config') },
+  { key: 'status', sectionTab: 'status', label: t('comfyUISettings.tabStatus', 'Status') },
+  { key: 'update', sectionTab: 'update', label: t('comfyUISettings.tabUpdate', 'Update') },
   {
     key: 'snapshots',
     sectionTab: 'snapshots',
-    label: t('globalSettings.tabSnapshots', 'Snapshots')
+    label: t('comfyUISettings.tabSnapshots', 'Snapshots')
   }
 ])
 
@@ -113,7 +113,7 @@ const {
   diskUsageItem,
   pinBottomActions,
   reload
-} = useGlobalSettings({
+} = useComfyUISettings({
   installation,
   onShowProgress: (opts) => emit('show-progress', opts),
   onNavigateList: () => emit('navigate-list'),
@@ -294,12 +294,12 @@ onUnmounted(() => {
         class="settings-v2-drawer"
         role="dialog"
         aria-modal="true"
-        :aria-label="t('globalSettings.title', 'Settings')"
+        :aria-label="t('comfyUISettings.title', 'Settings')"
       >
         <nav
           class="settings-v2-tabs"
           role="tablist"
-          :aria-label="t('globalSettings.title', 'Settings')"
+          :aria-label="t('comfyUISettings.title', 'Settings')"
         >
           <button
             v-for="(tab, i) in tabs"
@@ -320,7 +320,7 @@ onUnmounted(() => {
         <section class="settings-v2-body">
           <p v-if="!installation" class="empty">
             {{
-              t('globalSettings.emptyInstallLess', 'Open a ComfyUI install to view its settings.')
+              t('comfyUISettings.emptyInstallLess', 'Open a ComfyUI install to view its settings.')
             }}
           </p>
           <p v-else-if="loading" class="empty">{{ t('common.loading', 'Loading…') }}</p>
@@ -444,7 +444,7 @@ onUnmounted(() => {
 
         <footer class="settings-v2-footer">
           <button type="button" class="primary settings-v2-relaunch" @click="handleRelaunch">
-            {{ t('globalSettings.relaunch', 'Relaunch') }}
+            {{ t('comfyUISettings.relaunch', 'Relaunch') }}
           </button>
           <div class="settings-v2-more-wrap">
             <button
@@ -454,11 +454,11 @@ onUnmounted(() => {
               :class="{ 'is-active': moreMenuOpen }"
               aria-haspopup="menu"
               :aria-expanded="moreMenuOpen"
-              :aria-label="t('globalSettings.more', 'More')"
+              :aria-label="t('comfyUISettings.more', 'More')"
               :disabled="!installation || pinBottomActions.length === 0"
               @click="toggleMoreMenu"
             >
-              {{ t('globalSettings.more', 'More') }}
+              {{ t('comfyUISettings.more', 'More') }}
               <ChevronDown :size="14" />
             </button>
             <MoreMenu

@@ -67,7 +67,7 @@ async function fetchSchema(): Promise<void> {
     } else if (result?.error) {
       loadError.value = result.error
     } else {
-      loadError.value = t('globalSettings.argsSchemaUnavailable', 'Argument schema unavailable for this install.')
+      loadError.value = t('comfyUISettings.argsSchemaUnavailable', 'Argument schema unavailable for this install.')
     }
   } catch (err) {
     loadError.value = err instanceof Error ? err.message : String(err)
@@ -235,20 +235,20 @@ const unknownFlags = computed(() => {
         <ArrowLeft :size="16" />
         <span>{{ t('common.back', 'Back') }}</span>
       </button>
-      <h2 class="args-page-title">{{ t('globalSettings.argsTitle', 'Startup Arguments') }}</h2>
+      <h2 class="args-page-title">{{ t('comfyUISettings.argsTitle', 'Startup Arguments') }}</h2>
     </header>
 
     <div class="args-page-raw">
-      <label class="args-page-raw-label">{{ t('globalSettings.argsRawLabel', 'Raw arguments') }}</label>
+      <label class="args-page-raw-label">{{ t('comfyUISettings.argsRawLabel', 'Raw arguments') }}</label>
       <input
         type="text"
         class="args-page-raw-input"
         :value="localValue"
-        :placeholder="t('globalSettings.argsPlaceholder', 'No arguments set')"
+        :placeholder="t('comfyUISettings.argsPlaceholder', 'No arguments set')"
         @change="onRawChange"
       />
       <p v-if="unknownFlags.length > 0" class="args-page-unknown">
-        {{ t('globalSettings.argsUnknown', { flags: unknownFlags.join(', ') }) }}
+        {{ t('comfyUISettings.argsUnknown', { flags: unknownFlags.join(', ') }) }}
       </p>
     </div>
 
@@ -257,8 +257,8 @@ const unknownFlags = computed(() => {
       <input
         type="text"
         :value="search"
-        :placeholder="t('globalSettings.argsSearchPlaceholder', 'Search arguments…')"
-        :aria-label="t('globalSettings.argsSearchPlaceholder', 'Search arguments')"
+        :placeholder="t('comfyUISettings.argsSearchPlaceholder', 'Search arguments…')"
+        :aria-label="t('comfyUISettings.argsSearchPlaceholder', 'Search arguments')"
         @input="search = ($event.target as HTMLInputElement).value"
       />
     </div>
@@ -266,7 +266,7 @@ const unknownFlags = computed(() => {
     <p v-if="loading" class="args-page-status">{{ t('common.loading', 'Loading…') }}</p>
     <p v-else-if="loadError" class="args-page-status args-page-status-error">{{ loadError }}</p>
     <p v-else-if="!hasResults" class="args-page-status">
-      {{ t('globalSettings.argsNoMatches', 'No arguments match your search.') }}
+      {{ t('comfyUISettings.argsNoMatches', 'No arguments match your search.') }}
     </p>
 
     <template v-else>
@@ -281,7 +281,7 @@ const unknownFlags = computed(() => {
         <!-- Exclusive radio cluster -->
         <template v-if="item.kind === 'exclusive' && item.args && item.group">
           <div class="args-page-row">
-            <div class="args-page-row-label">{{ t('globalSettings.argsExclusiveLabel', 'Choose one') }}</div>
+            <div class="args-page-row-label">{{ t('comfyUISettings.argsExclusiveLabel', 'Choose one') }}</div>
           </div>
           <div
             v-for="member in item.args"
@@ -326,7 +326,7 @@ const unknownFlags = computed(() => {
             type="text"
             class="args-page-value-input"
             :value="getValue(item.arg.name)"
-            :placeholder="item.arg.metavar ?? (item.arg.type === 'optional-value' ? t('globalSettings.argsOptionalPlaceholder', 'optional') : t('globalSettings.argsValuePlaceholder', 'value'))"
+            :placeholder="item.arg.metavar ?? (item.arg.type === 'optional-value' ? t('comfyUISettings.argsOptionalPlaceholder', 'optional') : t('comfyUISettings.argsValuePlaceholder', 'value'))"
             @change="setValue(item.arg!, ($event.target as HTMLInputElement).value)"
           />
         </template>

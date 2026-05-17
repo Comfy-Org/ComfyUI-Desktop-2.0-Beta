@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // TODO(stale-old-modal): delete after Settings drawer (v2,
-// GlobalSettingsPanel + ArgsBuilderPage) reaches functional parity and
+// ComfyUISettingsPanel + ArgsBuilderPage) reaches functional parity and
 // ships everywhere. Pure parsing logic now lives in `lib/argsParser.ts`.
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import type { ComfyArgDef } from '../../../types/ipc'

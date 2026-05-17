@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // TODO(stale-old-modal): delete after Settings drawer (v2,
-// GlobalSettingsPanel) reaches functional parity and ships everywhere.
+// ComfyUISettingsPanel) reaches functional parity and ships everywhere.
 import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ArrowDownToLine, Box, FolderOpen, Settings as SettingsIcon } from 'lucide-vue-next'
@@ -236,7 +236,7 @@ function handleUpdateInstallation(inst: Installation): void {
 .settings-modal-shell > .view-modal-body {
   padding: 0;
 }
-/* Match GlobalSettingsPanel's transparent-black glass surface during
+/* Match ComfyUISettingsPanel's transparent-black glass surface during
  * the v2 coexistence window so both Settings entry-points read the
  * same. TODO(brand-cleanup): drop when the legacy SettingsModal is
  * removed. */

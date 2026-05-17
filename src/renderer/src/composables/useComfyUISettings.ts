@@ -19,7 +19,7 @@ import {
 
 /**
  * Backing state + IPC plumbing for the brand-redesigned Settings drawer
- * (`GlobalSettingsPanel.vue`). Extracted into a composable so the
+ * (`ComfyUISettingsPanel.vue`). Extracted into a composable so the
  * component stays UI-only — same convention as the title-bar
  * `useTitleBarMenus` / `usePanelOverlays` split.
  *
@@ -40,7 +40,7 @@ import {
  *   9. inline → window.api.runAction with result navigation
  */
 
-export interface UseGlobalSettingsOpts {
+export interface UseComfyUISettingsOpts {
   /** Accept any reactive source — `Ref`, `ComputedRef`, or getter — so
    *  callers can pass `toRef(props, 'installation')` directly. */
   installation: MaybeRefOrGetter<Installation | null>
@@ -59,7 +59,7 @@ export interface UseGlobalSettingsOpts {
   onClose?: () => void
 }
 
-export interface UseGlobalSettingsApi {
+export interface UseComfyUISettingsApi {
   sections: Ref<DetailSection[]>
   diskSpace: Ref<DiskSpaceInfo | null>
   loading: Ref<boolean>
@@ -105,7 +105,7 @@ function formatBytes(bytes: number): string {
   return `${n.toFixed(n >= 10 || i === 0 ? 0 : 1)} ${units[i]}`
 }
 
-export function useGlobalSettings(opts: UseGlobalSettingsOpts): UseGlobalSettingsApi {
+export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISettingsApi {
   const { t } = useI18n()
   const modal = useModal()
   const actionGuard = useActionGuard()
@@ -453,7 +453,7 @@ export function useGlobalSettings(opts: UseGlobalSettingsOpts): UseGlobalSetting
     // total − free. Same arithmetic the legacy DetailModal uses.
     const used = Math.max(0, ds.total - ds.free)
     return {
-      label: `${t('globalSettings.diskUsage', 'Disk Usage')}: ${formatBytes(used)}`,
+      label: `${t('comfyUISettings.diskUsage', 'Disk Usage')}: ${formatBytes(used)}`,
     }
   })
 

@@ -74,7 +74,10 @@ function installMockApi(overrides: Partial<MockApi> = {}): MockApi {
 function mountView(installationId = 'inst-1', installation: Installation | null = SAMPLE_INSTALL) {
   return mount(ComfyLifecycleView, {
     props: { installationId, installation },
-    global: { plugins: [createTestI18n(), createPinia()] },
+    // No createPinia() here — beforeEach installs the active pinia via
+    // setActivePinia so beforeEach mutations (e.g. ready = true) land on
+    // the same instance the component sees via useSessionStore().
+    global: { plugins: [createTestI18n()] },
   })
 }
 
@@ -82,6 +85,10 @@ describe('ComfyLifecycleView', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     installMockApi()
+    // The view gates on sessionStore.ready to avoid flashing the stopped
+    // card before hydration. Production flips it after init() — tests
+    // bypass init() so flip it manually to opt into rendering.
+    useSessionStore().ready = true
   })
 
   it('renders the stopped state by default with a Start button', async () => {

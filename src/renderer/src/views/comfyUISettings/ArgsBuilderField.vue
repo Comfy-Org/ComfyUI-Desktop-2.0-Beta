@@ -51,14 +51,14 @@ function handleTextChange(event: Event): void {
       class="args-field-input"
       :class="{ 'is-empty': isEmpty }"
       :value="stringValue"
-      :placeholder="t('globalSettings.argsPlaceholder', 'No arguments set')"
+      :placeholder="t('comfyUISettings.argsPlaceholder', 'No arguments set')"
       :aria-label="field.label"
       @change="handleTextChange"
     />
     <button
       type="button"
       class="args-field-edit"
-      :aria-label="t('globalSettings.configureArgs', 'Configure arguments')"
+      :aria-label="t('comfyUISettings.configureArgs', 'Configure arguments')"
       @click="handleEdit"
     >
       <Settings2 :size="14" />

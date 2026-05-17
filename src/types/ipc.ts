@@ -1019,7 +1019,7 @@ export interface ElectronApi {
    * Title-bar Settings icon → main routes a close request here so the
    * panel renderer can play the drawer's local leave animation BEFORE
    * `closeCurrentPanel()` fires and `layoutViews` collapses the
-   * panelView. PanelApp holds a ref to `<GlobalSettingsPanel>` and
+   * panelView. PanelApp holds a ref to `<ComfyUISettingsPanel>` and
    * calls its exposed `requestClose()` when this fires.
    */
   onRequestCloseDrawer(callback: () => void): Unsubscribe

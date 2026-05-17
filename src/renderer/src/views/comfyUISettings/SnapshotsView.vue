@@ -43,7 +43,7 @@ const props = defineProps<Props>()
 
 const emit = defineEmits<{
   /** Fires when restore commits — parent (drawer) routes through
-   *  `useGlobalSettings.runAction` so the standard show-progress
+   *  `useComfyUISettings.runAction` so the standard show-progress
    *  flow (ProgressModal in PanelApp) handles the long-running op. */
   'run-action': [action: ActionDef]
   /** Lets the drawer host re-load sections after a snapshot op (e.g.

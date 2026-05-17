@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // TODO(stale-old-modal): delete after Settings drawer (v2,
-// GlobalSettingsPanel) reaches functional parity and ships everywhere.
+// ComfyUISettingsPanel) reaches functional parity and ships everywhere.
 import { useI18n } from 'vue-i18n'
 import { useModalOverlay } from '../composables/useModalOverlay'
 import SnapshotDiffView from './SnapshotDiffView.vue'

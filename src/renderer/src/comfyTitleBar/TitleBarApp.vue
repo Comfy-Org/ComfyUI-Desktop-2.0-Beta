@@ -226,11 +226,13 @@ function handleFeedback(): void {
 }
 
 // Icon is ComfyUI-tab only; also visible while the drawer is open so
-// it can act as the close toggle.
+// it can act as the close toggle. Hidden during any first-use takeover
+// step (consent + post-consent) so it matches the waffle/tray/feedback
+// chrome that also strips out during onboarding.
 const showSettingsIcon = computed(
   () =>
     !isInstallLess.value &&
-    !isConsentLockdown.value &&
+    !isFirstUseTakeover.value &&
     (activePanel.value === 'comfy' || activePanel.value === 'settings-v2')
 )
 
