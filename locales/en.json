@@ -760,6 +760,8 @@
     "diffNoChanges": "No changes",
     "nodesCount": "{count} nodes",
     "packagesCount": "{count} packages",
+    "pipChanges": "{count} pkg changes",
+    "nodeChanges": "{count} node changes",
     "searchPackages": "Search packages…",
     "searchNodes": "Search nodes…",
     "searchNoResults": "No matches found",

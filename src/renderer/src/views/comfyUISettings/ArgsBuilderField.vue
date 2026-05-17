@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Settings2 } from 'lucide-vue-next'
+import { Settings } from 'lucide-vue-next'
 import BaseInput from '../../components/ui/BaseInput.vue'
 import type { DetailField } from '../../types/ipc'
 
@@ -58,7 +58,7 @@ function handleChange(value: string): void {
         :aria-label="t('comfyUISettings.configureArgs', 'Configure arguments')"
         @click="handleEdit"
       >
-        <Settings2 :size="14" />
+        <Settings :size="14" />
       </button>
     </template>
   </BaseInput>

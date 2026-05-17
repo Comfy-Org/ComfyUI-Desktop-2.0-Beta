@@ -630,36 +630,27 @@ onUnmounted(() => {
   background: rgba(0, 0, 0, 0.06);
   border-color: rgba(0, 0, 0, 0.18);
 }
-
-/* Icon-only variant — square padding so the hamburger sits centred. */
 .title-menu-button--icon {
   padding: 4px 6px;
   gap: 0;
 }
-
-/* --- Settings drawer toggle ---
-   Closed: inherits the title-bar's muted text colour (#8A8A8A via
-   `--text-muted`). Open: tinted to `--accent` with a matching outline so
-   the title bar reflects the drawer's open state — same active treatment
-   the install-update pill uses. TODO(brand-cleanup): once the
-   `--comfy-yellow` brand token lands, swap `--accent` here for it. */
 .title-settings-button {
+  display: inline-flex;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  justify-content: center;
+  align-items: center;
+  border-radius: 999px;
   color: var(--text-muted);
 }
 .title-settings-button.is-active,
 .title-settings-button.is-active:hover {
-  color: var(--accent);
-  border-color: var(--accent);
+  color: var(--comfy-yellow);
+  border-color: var(--comfy-yellow);
   opacity: 1;
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
 }
 
-/* --- Install pill (center) — single click target. The whole pill
-       opens the native install menu on install-backed windows and
-       renders the static `Desktop 2.0 Beta` label on install-less host
-       windows. Identity-only — Settings now opens from the File / waffle
-       menu via the unified Settings modal, so the pill is no longer
-       clickable and shows no caret or hover affordance. --- */
 .title-install-pill {
   -webkit-app-region: no-drag;
   display: inline-flex;

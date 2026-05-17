@@ -33,7 +33,7 @@ const { t } = useI18n()
 // Local draft selection — reset whenever main commits a new value
 // (e.g. after a successful channel switch).
 const state = reactive({
-  draft: '' as string,
+  draft: '' as string
 })
 
 watch(
@@ -41,7 +41,7 @@ watch(
   (next) => {
     state.draft = String(next ?? '')
   },
-  { immediate: true },
+  { immediate: true }
 )
 
 const currentValue = computed(() => String(props.field.value ?? ''))
@@ -73,7 +73,7 @@ const preview = computed<PreviewData | null>(() => {
     installedVersion: data.installedVersion,
     latestVersion: data.latestVersion,
     lastChecked: data.lastChecked,
-    updateAvailable: data.updateAvailable,
+    updateAvailable: data.updateAvailable
   }
 })
 
@@ -91,8 +91,8 @@ const selectOptions = computed<BaseSelectOption[]>(() =>
   (props.field.options ?? []).map((opt) => ({
     value: opt.value,
     label: optionLabel(opt),
-    description: opt.description,
-  })),
+    description: opt.description
+  }))
 )
 </script>
 
@@ -116,15 +116,21 @@ const selectOptions = computed<BaseSelectOption[]>(() =>
          the empty placeholder instead, since the card wouldn't render. -->
     <div v-if="preview" class="channel-picker-preview">
       <div class="channel-picker-row">
-        <span class="channel-picker-label">{{ t('channelCards.installedVersion', 'Installed Version') }}</span>
+        <span class="channel-picker-label">{{
+          t('channelCards.installedVersion', 'Installed Version')
+        }}</span>
         <span class="channel-picker-value">{{ preview.installedVersion ?? '—' }}</span>
       </div>
       <div class="channel-picker-row">
-        <span class="channel-picker-label">{{ t('channelCards.latestVersion', 'Latest Version') }}</span>
+        <span class="channel-picker-label">{{
+          t('channelCards.latestVersion', 'Latest Version')
+        }}</span>
         <span class="channel-picker-value">{{ preview.latestVersion ?? '—' }}</span>
       </div>
       <div class="channel-picker-row">
-        <span class="channel-picker-label">{{ t('channelCards.lastChecked', 'Last Checked') }}</span>
+        <span class="channel-picker-label">{{
+          t('channelCards.lastChecked', 'Last Checked')
+        }}</span>
         <span class="channel-picker-value">{{ preview.lastChecked ?? '—' }}</span>
       </div>
       <div class="channel-picker-row">
@@ -133,9 +139,11 @@ const selectOptions = computed<BaseSelectOption[]>(() =>
           class="channel-picker-value"
           :class="{ 'is-update-available': preview.updateAvailable }"
         >
-          {{ preview.updateAvailable
-            ? t('channelCards.updateAvailable', 'Update available')
-            : t('channelCards.upToDate', 'Up to date') }}
+          {{
+            preview.updateAvailable
+              ? t('channelCards.updateAvailable', 'Update available')
+              : t('channelCards.upToDate', 'Up to date')
+          }}
         </span>
       </div>
 
@@ -153,8 +161,8 @@ const selectOptions = computed<BaseSelectOption[]>(() =>
               {
                 primary: action.style === 'primary',
                 accent: action.style === 'accent',
-                danger: action.style === 'danger',
-              },
+                danger: action.style === 'danger'
+              }
             ]"
             :disabled="action.enabled === false"
             :title="action.tooltip"
@@ -171,10 +179,7 @@ const selectOptions = computed<BaseSelectOption[]>(() =>
 
     <!-- Fallback action row for the no-preview case (drafted channel
          has no cached metadata yet). -->
-    <div
-      v-if="!preview && selectedActions.length > 0"
-      class="channel-picker-actions"
-    >
+    <div v-if="!preview && selectedActions.length > 0" class="channel-picker-actions">
       <p v-if="!draftIsCurrent" class="channel-picker-switch-hint">
         {{ t('channelCards.switchTo', { channel: selectedOption?.label ?? '' }) }}
       </p>
@@ -188,8 +193,8 @@ const selectOptions = computed<BaseSelectOption[]>(() =>
             {
               primary: action.style === 'primary',
               accent: action.style === 'accent',
-              danger: action.style === 'danger',
-            },
+              danger: action.style === 'danger'
+            }
           ]"
           :disabled="action.enabled === false"
           :title="action.tooltip"
@@ -211,36 +216,50 @@ const selectOptions = computed<BaseSelectOption[]>(() =>
 
 .channel-picker-desc {
   margin: 0;
-  font-size: var(--takeover-fs-caption);
+  font-size: 12px;
   color: var(--text-muted);
-  line-height: 1.4;
+  line-height: 16.5px;
 }
 
 .channel-picker-preview {
   display: flex;
   flex-direction: column;
-  gap: 6px;
   padding: 12px;
-  background: var(--surface);
-  border: 1px solid var(--border);
+  border: 1px solid var(--secondary-background);
   border-radius: 8px;
+  margin-top: 12px;
 }
 
+/* Each metadata row gets a hairline divider to the next, per Figma. The
+ * last row before the in-card action area has no divider — `:has()`
+ * keeps the rule declarative without a Vue-template branch. */
 .channel-picker-row {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
+  padding: 12px 0;
   font-size: var(--takeover-fs-caption);
+  border-top: 1px solid var(--border-hover);
+}
+
+.channel-picker-row:first-child {
+  padding-top: 4px;
+  border-top: none;
+}
+
+.channel-picker-preview:not(:has(.channel-picker-card-actions)) .channel-picker-row:last-child {
+  padding-bottom: 4px;
 }
 
 .channel-picker-label {
   color: var(--text-muted);
+  font-size: var(--takeover-fs-caption);
 }
 
 .channel-picker-value {
-  color: var(--text);
-  font-weight: 500;
-  font-size: var(--takeover-fs-body);
+  color: var(--neutral-100);
+  font-size: 14px;
+  line-height: 21px;
 }
 
 .channel-picker-value.is-update-available {
@@ -275,20 +294,26 @@ const selectOptions = computed<BaseSelectOption[]>(() =>
 }
 
 /* Card-internal action row (Figma: actions sit inside the preview
- * card, separated from the metadata rows by a hairline divider). */
+ * card, separated from the metadata rows by a hairline divider, and
+ * fill the card width as an evenly-split pair). */
 .channel-picker-card-actions {
   margin-top: 4px;
-  padding-top: 10px;
+  padding-top: 14px;
   border-top: 1px solid var(--border-hover);
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
 
-/* Action buttons consume global button + global `.primary` / `.accent`
- * / `.danger` chrome. Only need the type token here so they scale with
- * the rest of the drawer body. */
+.channel-picker-card-actions .channel-picker-action-row {
+  gap: 8px;
+}
+
+.channel-picker-card-actions .channel-picker-action {
+  flex: 1;
+}
+
 .channel-picker-action {
-  font-size: var(--takeover-fs-body);
+  border: none;
 }
 </style>

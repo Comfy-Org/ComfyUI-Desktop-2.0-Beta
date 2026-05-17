@@ -266,11 +266,10 @@ onBeforeUnmount(() => {
   width: 100%;
   padding: 8px 10px;
   background: var(--surface);
-  border: 1px solid var(--border);
   border-radius: 8px;
   color: var(--text);
   font: inherit;
-  font-size: var(--takeover-fs-body);
+  font-size: 14px;
   text-align: left;
   cursor: pointer;
   transition: border-color 150ms ease;

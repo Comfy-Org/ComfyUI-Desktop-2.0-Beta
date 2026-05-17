@@ -214,7 +214,7 @@ function handleTabKeydown(event: KeyboardEvent, index: number): void {
   const next = (index + delta + tabs.value.length) % tabs.value.length
   const nextKey = tabs.value[next]?.key
   if (nextKey) {
-    activeTab.value = nextKey
+    selectTab(nextKey)
     nextTick(() => {
       const buttons = drawerRef.value?.querySelectorAll<HTMLButtonElement>('.settings-v2-tab')
       buttons?.[next]?.focus()
@@ -249,13 +249,29 @@ watch(internalOpen, (next) => {
 // also clears the sub-page so re-opening starts fresh.
 type SubPage = 'args' | null
 const subPage = ref<SubPage>(null)
+// Direction of the sub-page transition. Push = forward (slide in from
+// right, like iOS/macOS Settings push). Pop = back (slide out to right).
+// Tab-switch reset uses 'pop' so the args page slides off-screen as the
+// new tab content fades in.
+const subPageTransition = ref<'subpage-push' | 'subpage-pop'>('subpage-push')
 watch(internalOpen, (next) => {
   if (!next) subPage.value = null
 })
 function openArgsPage(): void {
+  subPageTransition.value = 'subpage-push'
   subPage.value = 'args'
 }
 function closeSubPage(): void {
+  subPageTransition.value = 'subpage-pop'
+  subPage.value = null
+}
+
+// Tab switch must also dismiss any open sub-page — the args field lives
+// in the Config tab, so navigating away should not leave its editor
+// orphaned over the new tab's content.
+function selectTab(key: ComfyUISettingsTab): void {
+  if (subPage.value !== null) subPageTransition.value = 'subpage-pop'
+  activeTab.value = key
   subPage.value = null
 }
 
@@ -365,7 +381,7 @@ onUnmounted(() => {
             :tabindex="activeTab === tab.key ? 0 : -1"
             class="settings-v2-tab"
             :class="{ 'is-active': activeTab === tab.key }"
-            @click="activeTab = tab.key"
+            @click="selectTab(tab.key)"
             @keydown="handleTabKeydown($event, i)"
           >
             {{ tab.label }}
@@ -383,201 +399,218 @@ onUnmounted(() => {
           </p>
           <p v-else-if="error" class="empty error">{{ error }}</p>
 
-          <!-- Args sub-page takes over the body when active. Mirror of
+          <!-- Body content with sub-page push/pop transition. The
+               transition wraps the sub-page and the tab-content branch
+               so navigating into and out of the args editor slides
+               horizontally (iOS / macOS Settings convention). -->
+          <Transition v-else :name="subPageTransition" mode="out-in">
+            <!-- Args sub-page takes over the body when active. Mirror of
                the macOS Settings pattern — narrower than the legacy
                inline editor would fit. -->
-          <ArgsBuilderPage
-            v-else-if="subPage === 'args' && installation"
-            :installation-id="installation.id"
-            :initial-value="argsValue"
-            @back="closeSubPage"
-            @update="handleArgsUpdate"
-          />
+            <ArgsBuilderPage
+              v-if="subPage === 'args' && installation"
+              key="subpage-args"
+              :installation-id="installation.id"
+              :initial-value="argsValue"
+              @back="closeSubPage"
+              @update="handleArgsUpdate"
+            />
 
-          <!-- Snapshots tab body owns its own list + action flows.
+            <div v-else key="subpage-root" class="settings-v2-body-root">
+              <!-- Snapshots tab body owns its own list + action flows.
                Long-running restore ops flow via `run-action` → composable's
                runAction → onShowProgress; no separate show-progress emit
                needed on this child. -->
-          <SnapshotsView
-            v-else-if="activeTab === 'snapshots' && installation"
-            :installation-id="installation.id"
-            @run-action="handleSnapshotAction"
-            @refresh-all="handleSnapshotsRefresh"
-          />
+              <SnapshotsView
+                v-if="activeTab === 'snapshots' && installation"
+                :installation-id="installation.id"
+                @run-action="handleSnapshotAction"
+                @refresh-all="handleSnapshotsRefresh"
+              />
 
-          <!-- Default: section loop for Config / Status / Update tabs.
+              <!-- Default: section loop for Config / Status / Update tabs.
                Status tab uses a hairline-divider readonly list treatment
                (label-over-value, no input chrome, dividers between rows)
                per Figma. The `.is-readonly-list` modifier swaps the
                section CSS without forking the template. -->
-          <template v-else>
-            <article
-              v-for="(section, si) in visibleSections"
-              :key="`s-${si}`"
-              class="settings-v2-section"
-              :class="{
-                'is-readonly-list': activeTab === 'status',
-                'is-collapsible': isCollapsible(section),
-                'is-collapsed': isCollapsible(section) && isCollapsed(section)
-              }"
-            >
-              <!-- Section title. When collapsible (`section.collapsed`
+              <template v-else>
+                <article
+                  v-for="(section, si) in visibleSections"
+                  :key="`s-${si}`"
+                  class="settings-v2-section"
+                  :class="{
+                    'is-readonly-list': activeTab === 'status',
+                    'is-collapsible': isCollapsible(section),
+                    'is-collapsed': isCollapsible(section) && isCollapsed(section)
+                  }"
+                >
+                  <!-- Section title. When collapsible (`section.collapsed`
                    is defined in payload), the title becomes a click
                    target with a chevron that flips on collapse state.
                    Static titles render as a plain header. -->
-              <button
-                v-if="isCollapsible(section)"
-                type="button"
-                class="settings-v2-section-title is-toggle"
-                :aria-expanded="!isCollapsed(section)"
-                @click="toggleCollapsed(section)"
-              >
-                <ChevronRight
-                  :size="14"
-                  class="settings-v2-section-chevron"
-                  :class="{ 'is-open': !isCollapsed(section) }"
-                />
-                {{ section.title }}
-              </button>
-
-              <p
-                v-if="section.description && !isCollapsed(section)"
-                class="settings-v2-section-desc"
-              >
-                {{ section.description }}
-              </p>
-
-              <div v-for="(item, i) in section.items" :key="`i-${i}`" class="settings-v2-item">
-                <span class="settings-v2-item-label">
-                  {{ item.label }}{{ item.active ? ` (${t('common.active', 'active')})` : '' }}
-                  <span v-if="item.tag" class="settings-v2-item-tag">{{ item.tag }}</span>
-                </span>
-                <span v-if="item.actions && item.actions.length" class="settings-v2-item-actions">
-                  <TooltipWrap
-                    v-for="a in item.actions"
-                    :key="a.id"
-                    :text="a.enabled === false && a.disabledMessage ? a.disabledMessage : a.tooltip"
-                  >
-                    <button
-                      type="button"
-                      :class="[
-                        'settings-v2-action',
-                        a.style,
-                        { 'looks-disabled': a.enabled === false && a.disabledMessage }
-                      ]"
-                      :disabled="a.enabled === false && !a.disabledMessage"
-                      @click="runAction(a)"
-                    >
-                      {{ a.label }}
-                    </button>
-                  </TooltipWrap>
-                </span>
-              </div>
-
-              <div v-for="field in section.fields" :key="field.id" class="settings-v2-field">
-                <label class="settings-v2-field-label">
-                  {{ field.label }}
-                  <InfoTooltip v-if="field.tooltip" :text="field.tooltip" />
-                </label>
-
-                <BooleanToggle
-                  v-if="field.editType === 'boolean'"
-                  :field="field"
-                  @update="(v) => updateField(field, v)"
-                />
-
-                <BaseSelect
-                  v-else-if="field.editType === 'select'"
-                  :model-value="asString(field.value)"
-                  :options="
-                    (field.options ?? []).map(
-                      (opt): BaseSelectOption => ({
-                        value: opt.value,
-                        label: opt.label,
-                        description: opt.description
-                      })
-                    )
-                  "
-                  :aria-label="field.label"
-                  @update:model-value="(v: string) => updateField(field, v)"
-                />
-
-                <PathField
-                  v-else-if="field.editType === 'path'"
-                  :field="field"
-                  @update="updateField"
-                />
-
-                <ArgsBuilderField
-                  v-else-if="field.editType === 'args-builder'"
-                  :field="field"
-                  @open="openArgsPage"
-                  @update="updateField"
-                />
-
-                <EnvVarsField
-                  v-else-if="field.editType === 'env-vars'"
-                  :field="field"
-                  @update="updateField"
-                />
-
-                <ChannelPicker
-                  v-else-if="field.editType === 'channel-cards'"
-                  :field="field"
-                  @action="runAction"
-                />
-
-                <BaseInput
-                  v-else-if="field.editType === 'text'"
-                  :model-value="asString(field.value)"
-                  :aria-label="field.label"
-                  @change="(v: string) => updateField(field, v)"
-                />
-
-                <span v-else class="settings-v2-field-readonly">{{ asString(field.value) }}</span>
-              </div>
-
-              <div v-if="section.actions && section.actions.length" class="settings-v2-actions">
-                <TooltipWrap
-                  v-for="action in section.actions"
-                  :key="action.id"
-                  :text="
-                    action.enabled === false && action.disabledMessage
-                      ? action.disabledMessage
-                      : action.tooltip
-                  "
-                >
                   <button
+                    v-if="isCollapsible(section)"
                     type="button"
-                    :class="[
-                      'settings-v2-action',
-                      {
-                        primary: action.style === 'primary',
-                        danger: action.style === 'danger',
-                        'looks-disabled': action.enabled === false && action.disabledMessage
-                      }
-                    ]"
-                    :disabled="action.enabled === false && !action.disabledMessage"
-                    @click="runAction(action)"
+                    class="settings-v2-section-title is-toggle"
+                    :aria-expanded="!isCollapsed(section)"
+                    @click="toggleCollapsed(section)"
                   >
-                    {{ action.label }}
+                    <ChevronRight
+                      :size="14"
+                      class="settings-v2-section-chevron"
+                      :class="{ 'is-open': !isCollapsed(section) }"
+                    />
+                    {{ section.title }}
                   </button>
-                </TooltipWrap>
-              </div>
-            </article>
 
-            <article
-              v-if="activeTab === 'status' && diskUsageItem"
-              class="settings-v2-section is-readonly-list"
-            >
-              <div class="settings-v2-field">
-                <label class="settings-v2-field-label">
-                  {{ t('comfyUISettings.diskUsage', 'Disk Usage') }}
-                </label>
-                <span class="settings-v2-field-readonly">{{ diskUsageItem.label }}</span>
-              </div>
-            </article>
-          </template>
+                  <p
+                    v-if="section.description && !isCollapsed(section)"
+                    class="settings-v2-section-desc"
+                  >
+                    {{ section.description }}
+                  </p>
+
+                  <div v-for="(item, i) in section.items" :key="`i-${i}`" class="settings-v2-item">
+                    <span class="settings-v2-item-label">
+                      {{ item.label }}{{ item.active ? ` (${t('common.active', 'active')})` : '' }}
+                      <span v-if="item.tag" class="settings-v2-item-tag">{{ item.tag }}</span>
+                    </span>
+                    <span
+                      v-if="item.actions && item.actions.length"
+                      class="settings-v2-item-actions"
+                    >
+                      <TooltipWrap
+                        v-for="a in item.actions"
+                        :key="a.id"
+                        :text="
+                          a.enabled === false && a.disabledMessage ? a.disabledMessage : a.tooltip
+                        "
+                      >
+                        <button
+                          type="button"
+                          :class="[
+                            'settings-v2-action',
+                            a.style,
+                            { 'looks-disabled': a.enabled === false && a.disabledMessage }
+                          ]"
+                          :disabled="a.enabled === false && !a.disabledMessage"
+                          @click="runAction(a)"
+                        >
+                          {{ a.label }}
+                        </button>
+                      </TooltipWrap>
+                    </span>
+                  </div>
+
+                  <div v-for="field in section.fields" :key="field.id" class="settings-v2-field">
+                    <label class="settings-v2-field-label">
+                      {{ field.label }}
+                      <InfoTooltip v-if="field.tooltip" :text="field.tooltip" />
+                    </label>
+
+                    <BooleanToggle
+                      v-if="field.editType === 'boolean'"
+                      :field="field"
+                      @update="(v) => updateField(field, v)"
+                    />
+
+                    <BaseSelect
+                      v-else-if="field.editType === 'select'"
+                      :model-value="asString(field.value)"
+                      :options="
+                        (field.options ?? []).map(
+                          (opt): BaseSelectOption => ({
+                            value: opt.value,
+                            label: opt.label,
+                            description: opt.description
+                          })
+                        )
+                      "
+                      :aria-label="field.label"
+                      @update:model-value="(v: string) => updateField(field, v)"
+                    />
+
+                    <PathField
+                      v-else-if="field.editType === 'path'"
+                      :field="field"
+                      @update="updateField"
+                    />
+
+                    <ArgsBuilderField
+                      v-else-if="field.editType === 'args-builder'"
+                      :field="field"
+                      @open="openArgsPage"
+                      @update="updateField"
+                    />
+
+                    <EnvVarsField
+                      v-else-if="field.editType === 'env-vars'"
+                      :field="field"
+                      @update="updateField"
+                    />
+
+                    <ChannelPicker
+                      v-else-if="field.editType === 'channel-cards'"
+                      :field="field"
+                      @action="runAction"
+                    />
+
+                    <BaseInput
+                      v-else-if="field.editType === 'text'"
+                      :model-value="asString(field.value)"
+                      :aria-label="field.label"
+                      @change="(v: string) => updateField(field, v)"
+                    />
+
+                    <span v-else class="settings-v2-field-readonly">{{
+                      asString(field.value)
+                    }}</span>
+                  </div>
+
+                  <div v-if="section.actions && section.actions.length" class="settings-v2-actions">
+                    <TooltipWrap
+                      v-for="action in section.actions"
+                      :key="action.id"
+                      class="settings-v2-action-tooltip"
+                      :text="
+                        action.enabled === false && action.disabledMessage
+                          ? action.disabledMessage
+                          : action.tooltip
+                      "
+                    >
+                      <button
+                        type="button"
+                        :class="[
+                          'settings-v2-action',
+                          {
+                            primary: action.style === 'primary',
+                            danger: action.style === 'danger',
+                            'looks-disabled': action.enabled === false && action.disabledMessage
+                          }
+                        ]"
+                        :disabled="action.enabled === false && !action.disabledMessage"
+                        @click="runAction(action)"
+                      >
+                        {{ action.label }}
+                      </button>
+                    </TooltipWrap>
+                  </div>
+                </article>
+
+                <article
+                  v-if="activeTab === 'status' && diskUsageItem"
+                  class="settings-v2-section is-readonly-list"
+                >
+                  <div class="settings-v2-field">
+                    <label class="settings-v2-field-label">
+                      {{ t('comfyUISettings.diskUsage', 'Disk Usage') }}
+                    </label>
+                    <span class="settings-v2-field-readonly">{{ diskUsageItem.label }}</span>
+                  </div>
+                </article>
+              </template>
+            </div>
+          </Transition>
         </section>
 
         <footer class="settings-v2-footer">
@@ -715,9 +748,30 @@ onUnmounted(() => {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  /* Hide horizontal overflow so the sub-page slide does not push the
+   * drawer scrollbar during the transition. The transitioning child
+   * still gets a full-height column to render into. */
+  overflow-x: hidden;
   padding: 16px;
   display: flex;
   flex-direction: column;
+  position: relative;
+  scrollbar-width: none;
+}
+
+.settings-v2-body::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
+/* Wrapper around the tab-content branch so the Transition has a single
+ * sibling for `mode="out-in"`. Inherits the body's flex column so the
+ * section loop continues to stack as before. */
+.settings-v2-body-root {
+  display: flex;
+  flex-direction: column;
+  gap: inherit;
 }
 
 .empty {
@@ -848,11 +902,16 @@ onUnmounted(() => {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-top: 4px;
+  margin-top: 8px;
 }
 
 .settings-v2-action {
-  font-size: var(--takeover-fs-body);
+  border: none;
+  width: 100%;
+}
+
+.settings-v2-action-tooltip {
+  width: 100%;
 }
 
 .settings-v2-actions:has(> .settings-v2-action:only-child) .settings-v2-action {
@@ -884,20 +943,15 @@ onUnmounted(() => {
   background: var(--titlebar-bg);
 }
 
-/* Relaunch consumes global `.primary`. Only override is `flex: 1` to
- * fill the footer width next to the More dropdown. */
 .settings-v2-relaunch {
   flex: 1;
 }
 
-/* Wrap so the absolutely-positioned MoreMenu anchors to the button. */
 .settings-v2-more-wrap {
   position: relative;
   display: inline-flex;
 }
 
-/* More button consumes the global button chrome; only adds the inline
- * chevron layout and the active-state accent treatment. */
 .settings-v2-more {
   display: inline-flex;
   align-items: center;

@@ -1,21 +1,21 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { FilePlus, FolderInput, Save } from 'lucide-vue-next'
+import { Download, RotateCcw, Trash2 } from 'lucide-vue-next'
 import { useModal } from '../../composables/useModal'
 import { emitTelemetryAction, toCountBucket } from '../../lib/telemetry'
 import {
   changeSummary as _changeSummary,
   diffHasChanges,
   formatDate,
-  formatRelative as _formatRelative,
+  formatRelative as _formatRelative
 } from '../../lib/snapshots'
 import type {
   ActionDef,
   CopyEvent,
   SnapshotDiffData,
   SnapshotListData,
-  SnapshotSummary,
+  SnapshotSummary
 } from '../../types/ipc'
 import SnapshotRow from './SnapshotRow.vue'
 
@@ -77,7 +77,7 @@ const timeline = computed<TimelineItem[]>(() => {
   let ci = 0
   const snaps = snapshots.value
   const copies = [...copyEvents.value].sort(
-    (a, b) => new Date(b.copiedAt).getTime() - new Date(a.copiedAt).getTime(),
+    (a, b) => new Date(b.copiedAt).getTime() - new Date(a.copiedAt).getTime()
   )
   while (si < snaps.length || ci < copies.length) {
     const snapTime = si < snaps.length ? new Date(snaps[si]!.createdAt).getTime() : -Infinity
@@ -132,7 +132,7 @@ watch(
     expanded.value = null
     void load()
   },
-  { immediate: true },
+  { immediate: true }
 )
 
 function changeSummaryFor(s: SnapshotSummary): string[] {
@@ -147,23 +147,23 @@ async function handleSave(): Promise<void> {
     message: t('standalone.snapshotSaveMessage'),
     placeholder: t('standalone.snapshotLabelPlaceholder'),
     confirmLabel: t('snapshots.saveSnapshot'),
-    required: false,
+    required: false
   })
   if (label === null) return
   try {
     await window.api.runAction(props.installationId, 'snapshot-save', {
-      label: label || undefined,
+      label: label || undefined
     })
   } catch (err: unknown) {
     await modal.alert({
       title: t('snapshots.saveSnapshot'),
-      message: (err as Error).message || String(err),
+      message: (err as Error).message || String(err)
     })
     return
   }
   emitTelemetryAction('desktop2.snapshot.flow', {
     action: 'save',
-    snapshot_count_bucket: toCountBucket(snapshots.value.length),
+    snapshot_count_bucket: toCountBucket(snapshots.value.length)
   })
   expanded.value = null
   await load()
@@ -182,23 +182,27 @@ async function handleRestore(filename: string): Promise<void> {
   const target = snapshots.value.find((s) => s.filename === filename)
   const summaryLines = target ? _changeSummary(target, t) : []
   const hasChanges = diff ? diffHasChanges(diff.diff) : undefined
-  const messageDetails = summaryLines.length > 0
-    ? [{ label: t('snapshots.willChange', 'Changes when restoring'), items: summaryLines }]
-    : undefined
+  const messageDetails =
+    summaryLines.length > 0
+      ? [{ label: t('snapshots.willChange', 'Changes when restoring'), items: summaryLines }]
+      : undefined
 
   const ok = await modal.confirm({
     title: t('standalone.snapshotRestore', 'Restore Snapshot'),
-    message: t('snapshots.restoreConfirm', 'Are you sure you want to restore this snapshot? Your current install state will be replaced.'),
+    message: t(
+      'snapshots.restoreConfirm',
+      'Are you sure you want to restore this snapshot? Your current install state will be replaced.'
+    ),
     messageDetails,
     confirmLabel: t('standalone.snapshotRestore', 'Restore'),
-    confirmStyle: 'primary',
+    confirmStyle: 'primary'
   })
   if (!ok) return
 
   emitTelemetryAction('desktop2.snapshot.flow', {
     action: 'restore_complete',
     snapshot_count_bucket: toCountBucket(snapshots.value.length),
-    has_diff: hasChanges,
+    has_diff: hasChanges
   })
 
   emit('run-action', {
@@ -207,7 +211,7 @@ async function handleRestore(filename: string): Promise<void> {
     data: { file: filename },
     showProgress: true,
     progressTitle: t('standalone.snapshotRestoringTitle', 'Restoring snapshot'),
-    cancellable: true,
+    cancellable: true
   })
 }
 
@@ -217,7 +221,7 @@ async function handleDelete(filename: string): Promise<void> {
   const ok = await modal.confirm({
     title: t('standalone.snapshotDelete'),
     message: t('snapshots.deleteConfirm'),
-    confirmStyle: 'danger',
+    confirmStyle: 'danger'
   })
   if (!ok) return
   try {
@@ -225,13 +229,13 @@ async function handleDelete(filename: string): Promise<void> {
   } catch (err: unknown) {
     await modal.alert({
       title: t('snapshots.delete', 'Delete Snapshot'),
-      message: (err as Error).message || String(err),
+      message: (err as Error).message || String(err)
     })
     return
   }
   emitTelemetryAction('desktop2.snapshot.flow', {
     action: 'delete',
-    snapshot_count_bucket: toCountBucket(snapshots.value.length),
+    snapshot_count_bucket: toCountBucket(snapshots.value.length)
   })
   if (expanded.value === filename) expanded.value = null
   await load()
@@ -244,7 +248,7 @@ async function handleExport(filename: string): Promise<void> {
   await window.api.exportSnapshot(props.installationId, filename)
   emitTelemetryAction('desktop2.snapshot.flow', {
     action: 'export_one',
-    snapshot_count_bucket: toCountBucket(snapshots.value.length),
+    snapshot_count_bucket: toCountBucket(snapshots.value.length)
   })
 }
 
@@ -252,7 +256,7 @@ async function handleExportAll(): Promise<void> {
   await window.api.exportAllSnapshots(props.installationId)
   emitTelemetryAction('desktop2.snapshot.flow', {
     action: 'export_all',
-    snapshot_count_bucket: toCountBucket(snapshots.value.length),
+    snapshot_count_bucket: toCountBucket(snapshots.value.length)
   })
 }
 
@@ -265,21 +269,24 @@ async function handleImport(): Promise<void> {
     if (preview.message) {
       await modal.alert({
         title: t('snapshots.importSnapshots', 'Import Snapshots'),
-        message: preview.message,
+        message: preview.message
       })
     }
     return
   }
   const previewItems = preview.preview?.snapshots ?? []
-  const previewLines = previewItems.map((p) => `${p.label || p.filename} (${formatDate(p.createdAt)})`)
+  const previewLines = previewItems.map(
+    (p) => `${p.label || p.filename} (${formatDate(p.createdAt)})`
+  )
   const ok = await modal.confirm({
     title: t('snapshots.importSnapshots', 'Import Snapshots'),
     message: t('snapshots.importPreviewMessage', 'Review the snapshots to import.'),
-    messageDetails: previewLines.length > 0
-      ? [{ label: t('snapshots.importPreviewLabel', 'Snapshots'), items: previewLines }]
-      : undefined,
+    messageDetails:
+      previewLines.length > 0
+        ? [{ label: t('snapshots.importPreviewLabel', 'Snapshots'), items: previewLines }]
+        : undefined,
     confirmLabel: t('snapshots.importContinue', 'Continue'),
-    confirmStyle: 'primary',
+    confirmStyle: 'primary'
   })
   if (!ok) return
 
@@ -289,7 +296,7 @@ async function handleImport(): Promise<void> {
     if (diff.message) {
       await modal.alert({
         title: t('snapshots.importSnapshots', 'Import Snapshots'),
-        message: diff.message,
+        message: diff.message
       })
     }
     return
@@ -301,7 +308,7 @@ async function handleImport(): Promise<void> {
     if (result.message) {
       await modal.alert({
         title: t('snapshots.importSnapshots', 'Import Snapshots'),
-        message: result.message,
+        message: result.message
       })
     }
     return
@@ -309,7 +316,7 @@ async function handleImport(): Promise<void> {
   emitTelemetryAction('desktop2.snapshot.flow', {
     action: 'import',
     snapshot_count_bucket: toCountBucket(snapshots.value.length),
-    imported_bucket: toCountBucket(result.imported ?? 0),
+    imported_bucket: toCountBucket(result.imported ?? 0)
   })
 
   await load()
@@ -322,7 +329,7 @@ async function handleImport(): Promise<void> {
       data: { file: result.restoreFile },
       showProgress: true,
       progressTitle: t('standalone.snapshotRestoringTitle', 'Restoring snapshot'),
-      cancellable: true,
+      cancellable: true
     })
   }
 }
@@ -337,7 +344,7 @@ async function handleImport(): Promise<void> {
       <span class="snapshots-view-latest">
         <template v-if="latestRelative">
           {{ t('snapshots.latestLabel', 'Latest:') }}
-          <strong>{{ latestRelative }}</strong>
+          {{ latestRelative }}
         </template>
         <template v-else>
           {{ t('snapshots.noneYet', 'No snapshots yet') }}
@@ -350,7 +357,6 @@ async function handleImport(): Promise<void> {
           :aria-label="t('snapshots.importSnapshots', 'Import')"
           @click="handleImport"
         >
-          <FilePlus :size="13" />
           <span>{{ t('snapshots.importSnapshots', 'Import') }}</span>
         </button>
         <button
@@ -360,7 +366,6 @@ async function handleImport(): Promise<void> {
           :aria-label="t('snapshots.exportAll', 'Export All')"
           @click="handleExportAll"
         >
-          <FolderInput :size="13" />
           <span>{{ t('snapshots.exportAll', 'Export All') }}</span>
         </button>
       </div>
@@ -384,16 +389,22 @@ async function handleImport(): Promise<void> {
       <li class="snapshots-rail-node is-save">
         <span class="snapshots-rail-dot is-pending" :aria-hidden="true"></span>
         <div class="snapshots-rail-content">
-          <span class="snapshots-rail-label">{{ t('snapshots.saveLabel', 'Save Snapshot') }}</span>
-          <button
-            type="button"
-            class="snapshots-rail-cta primary"
-            :aria-label="t('snapshots.saveSnapshot', 'Save Snapshot')"
-            @click="handleSave"
-          >
-            <Save :size="13" />
-            <span>{{ t('snapshots.saveNew', 'Save New Snapshot') }}</span>
-          </button>
+          <!-- "Save Snapshot" label is on the rail (next to the dashed
+               dot), matching the trigger label position on snapshot
+               rows below. The dashed box wraps only the CTA. -->
+          <span class="snapshots-rail-label">
+            {{ t('snapshots.saveLabel', 'Save Snapshot') }}
+          </span>
+          <div class="snapshots-rail-save-box">
+            <button
+              type="button"
+              class="snapshots-rail-cta primary"
+              :aria-label="t('snapshots.saveSnapshot', 'Save Snapshot')"
+              @click="handleSave"
+            >
+              <span>{{ t('snapshots.saveNew', 'Save New Snapshot') }}</span>
+            </button>
+          </div>
         </div>
       </li>
 
@@ -404,14 +415,16 @@ async function handleImport(): Promise<void> {
         :class="{
           'is-snapshot': item.kind === 'snapshot',
           'is-copy': item.kind === 'copy',
-          'is-current': item.kind === 'snapshot' && i === 0,
+          'is-current': item.kind === 'snapshot' && i === 0
         }"
       >
         <span
           class="snapshots-rail-dot"
           :class="{
-            'is-current': item.kind === 'snapshot' && i === 0,
-            'is-muted': item.kind === 'copy',
+            'is-state':
+              item.kind === 'snapshot' &&
+              (item.snapshot.trigger === 'post-update' || item.snapshot.trigger === 'post-restore'),
+            'is-muted': item.kind === 'copy'
           }"
           :aria-hidden="true"
         ></span>
@@ -420,30 +433,66 @@ async function handleImport(): Promise<void> {
             <SnapshotRow
               :snapshot="item.snapshot"
               :expanded="expanded === item.snapshot.filename"
+              :is-current="i === 0"
               @toggle="toggleExpand(item.snapshot.filename)"
-              @restore="handleRestore(item.snapshot.filename)"
-              @export="handleExport(item.snapshot.filename)"
-              @delete="handleDelete(item.snapshot.filename)"
-            />
-            <div
-              v-if="expanded === item.snapshot.filename"
-              class="snapshots-view-detail"
             >
-              <p v-if="item.snapshot.label" class="snapshots-view-label">
-                {{ item.snapshot.label }}
-              </p>
-              <ul v-if="changeSummaryFor(item.snapshot).length > 0" class="snapshots-view-changes">
-                <li v-for="line in changeSummaryFor(item.snapshot)" :key="line">{{ line }}</li>
-              </ul>
-              <p v-else class="snapshots-view-no-changes">
-                {{ t('snapshots.noChangesSinceLast', 'No changes since the previous snapshot.') }}
-              </p>
-            </div>
+              <template #expanded>
+                <p v-if="item.snapshot.label" class="snapshots-view-label">
+                  {{ item.snapshot.label }}
+                </p>
+                <ul
+                  v-if="changeSummaryFor(item.snapshot).length > 0"
+                  class="snapshots-view-changes"
+                >
+                  <li v-for="line in changeSummaryFor(item.snapshot)" :key="line">{{ line }}</li>
+                </ul>
+                <p v-else class="snapshots-view-no-changes">
+                  {{ t('snapshots.noChangesSinceLast', 'No changes since the previous snapshot.') }}
+                </p>
+                <!-- Actions live in the expanded detail (per Figma): the
+                     collapsed row stays a clean tap target, and the
+                     destructive / mutating ops only surface once the
+                     user has expressed intent by expanding the row. -->
+                <div class="snapshots-view-detail-actions">
+                  <button
+                    type="button"
+                    class="snapshots-view-detail-btn primary"
+                    :aria-label="t('snapshots.restore', 'Restore')"
+                    @click="handleRestore(item.snapshot.filename)"
+                  >
+                    <RotateCcw :size="13" />
+                    <span>{{ t('snapshots.restore', 'Restore') }}</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="snapshots-view-detail-btn"
+                    :aria-label="t('snapshots.exportSnapshot', 'Export')"
+                    @click="handleExport(item.snapshot.filename)"
+                  >
+                    <Download :size="13" />
+                    <span>{{ t('snapshots.exportSnapshot', 'Export') }}</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="snapshots-view-detail-btn snapshots-view-detail-btn-danger"
+                    :aria-label="t('snapshots.delete', 'Delete')"
+                    @click="handleDelete(item.snapshot.filename)"
+                  >
+                    <Trash2 :size="13" />
+                    <span>{{ t('snapshots.delete', 'Delete') }}</span>
+                  </button>
+                </div>
+              </template>
+            </SnapshotRow>
           </template>
           <div v-else class="snapshots-view-copy-event">
             <span class="snapshots-view-copy-icon" :aria-hidden="true">→</span>
             <span class="snapshots-view-copy-label">
-              {{ t('snapshots.copyEventLabel', { source: item.event.installationName || item.event.installationId }) }}
+              {{
+                t('snapshots.copyEventLabel', {
+                  source: item.event.installationName || item.event.installationId
+                })
+              }}
             </span>
             <span class="snapshots-view-copy-time">{{ formatDate(item.event.copiedAt) }}</span>
           </div>
@@ -457,7 +506,7 @@ async function handleImport(): Promise<void> {
 .snapshots-view {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 24px;
 }
 
 /* Header row: "Latest: 8d ago" left, Import / Export All right. */
@@ -466,11 +515,13 @@ async function handleImport(): Promise<void> {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  border-bottom: 1px solid var(--secondary-background);
+  padding-bottom: 16px;
 }
 
 .snapshots-view-latest {
-  font-size: var(--takeover-fs-body);
-  color: var(--text-muted);
+  font-size: 14px;
+  color: var(--neutral-100);
 }
 
 .snapshots-view-latest strong {
@@ -484,13 +535,12 @@ async function handleImport(): Promise<void> {
   gap: 6px;
 }
 
-/* Toolbar buttons consume global `button` chrome. Only need the type
- * token + inline icon layout. */
 .snapshots-view-toolbtn {
   display: inline-flex;
   align-items: center;
+  font-size: 12px;
+  color: var(--neutral-100);
   gap: 4px;
-  font-size: var(--takeover-fs-caption);
 }
 
 .snapshots-view-status {
@@ -528,23 +578,22 @@ async function handleImport(): Promise<void> {
   gap: 12px;
 }
 
-/* Vertical line. Sits behind the dots (z-index 0). The 6px inset top
- * and bottom keeps the line from poking past the first/last dot. */
-.snapshots-rail::before {
+/* Per-node connector line: runs from THIS dot's center down to the
+ * NEXT dot's center. Last node has no connector — that's what was
+ * making the global `::before` overshoot the bottom of the rail
+ * previously. Gap between nodes is 12px and dots are 12px tall with
+ * `top: 6px`, so dot-center sits at 12px and the connector needs to
+ * reach 12px past the node's bottom (next dot center). */
+.snapshots-rail-node:not(:last-child)::before {
   content: '';
   position: absolute;
   left: 5px;
-  top: 6px;
-  bottom: 6px;
+  top: 12px;
+  height: calc(100% + 12px);
   width: 2px;
   background: var(--border);
   border-radius: 1px;
   z-index: 0;
-}
-
-.snapshots-rail.is-empty::before {
-  bottom: auto;
-  height: 24px;
 }
 
 .snapshots-rail-node {
@@ -553,37 +602,41 @@ async function handleImport(): Promise<void> {
   min-height: 12px;
 }
 
-/* Dot marker. 12px circle centered on the rail's 2px line. Variants:
- *   default snapshot          → border-only, surface fill
- *   .is-current               → solid yellow (highlights the active
- *                                snapshot per Figma)
- *   .is-muted (copy events)   → muted border, surface fill
- *   .is-pending (Save CTA)    → dashed, no fill — pending action */
+/* Dot marker — solid 12px filled circle. Color reflects the trigger
+ * semantic rather than chronological position, so the eye is drawn to
+ * meaningful state-changing snapshots (update / restore) rather than
+ * always to the newest entry. Variants:
+ *   default snapshot   → neutral muted fill
+ *   .is-state          → orange — post-update / post-restore
+ *   .is-muted          → desaturated muted — copy events
+ *   .is-pending        → dashed ring, no fill — Save CTA placeholder */
 .snapshots-rail-dot {
   position: absolute;
   left: 0;
-  top: 6px;
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  background: var(--titlebar-bg);
-  border: 2px solid var(--border);
+  top: 4px;
+  width: 14px;
+  height: 14px;
+  border: none;
   z-index: 1;
+  border-radius: 7px;
+  border: 2px solid #262729;
+  background: linear-gradient(0deg, #8a8a8a 0%, #8a8a8a 100%), #fd9903;
 }
 
-.snapshots-rail-dot.is-current {
-  background: var(--comfy-yellow);
-  border-color: var(--comfy-yellow);
+.snapshots-rail-dot.is-state {
+  background: var(--warning);
+  border-radius: 7px;
+  border: 2px solid var(--color-surface);
 }
 
 .snapshots-rail-dot.is-muted {
-  border-color: var(--border-hover);
+  background: color-mix(in srgb, var(--text-muted) 55%, transparent);
 }
 
 .snapshots-rail-dot.is-pending {
-  background: transparent;
-  border-style: dashed;
-  border-color: var(--text-muted);
+  border-radius: 7px;
+  border: 2px dashed var(--neutral-400);
+  background: var(--titlebar-bg);
 }
 
 .snapshots-rail-content {
@@ -592,9 +645,14 @@ async function handleImport(): Promise<void> {
   gap: 6px;
 }
 
-/* Save-new-snapshot CTA — dashed-border full-width primary button.
- * Override global `button` padding so it reads as a tall pending
- * affordance, distinct from the snapshot row chrome below it. */
+.snapshots-rail-save-box {
+  display: flex;
+  flex-direction: column;
+  padding: 12px;
+  border: 1px dashed var(--secondary-background);
+  border-radius: 8px;
+}
+
 .snapshots-rail-cta {
   display: inline-flex;
   align-items: center;
@@ -602,18 +660,46 @@ async function handleImport(): Promise<void> {
   gap: 6px;
   width: 100%;
   font-size: var(--takeover-fs-body);
+  padding: 10px 14px;
+  border-radius: 8px;
 }
 
 .snapshots-rail-node.is-save .snapshots-rail-label {
-  font-size: var(--takeover-fs-caption);
-  color: var(--text-muted);
+  font-size: 12px;
+  color: var(--neutral-100);
 }
 
 .snapshots-view-detail {
-  padding: 12px;
-  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  background: color-mix(in srgb, var(--surface) 60%, var(--titlebar-bg));
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-top: none;
+  border-radius: 0 0 10px 10px;
+  margin-top: -4px;
+}
+
+.snapshots-view-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.snapshots-view-detail-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 10px;
+  font-size: 12px;
+  border-radius: 6px;
+}
+
+.snapshots-view-detail-btn-danger:hover {
+  color: var(--danger);
+  border-color: var(--danger);
 }
 
 .snapshots-view-label {
