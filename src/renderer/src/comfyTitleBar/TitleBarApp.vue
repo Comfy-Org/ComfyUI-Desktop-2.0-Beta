@@ -259,6 +259,7 @@ const { tooltipAttrs, handleTooltipPointer, hideTip } = useTitleBarTooltip({
 const { isHoverActive } = useTitleBarHoverGate({ hideTip, handleTooltipPointer })
 
 const {
+  isDownloadsOpen,
   downloadsActiveCount,
   unseenFinishedCount,
   downloadsTrayLabel,
@@ -332,10 +333,9 @@ onUnmounted(() => {
          carry their own "File" — having two "File" entries stacked
          vertically read as redundant. The hamburger reads as a
          host-app-level menu and stays out of ComfyUI's namespace. -->
-    <!-- Left cluster: waffle menu + app-update pill. Hidden for the
-         full duration of the first-use takeover (consent + post-consent)
-         so the onboarding screens read as a clean identity bar. The
-         waffle returns once `firstUseMode === 'none'` (steady state). -->
+    <!-- Left cluster: waffle menu. The app-update pill moved to the
+         right trailing cluster so all user-action controls
+         (update / feedback / downloads / settings) live together. -->
     <div class="title-cluster">
       <button
         v-if="!isFirstUseTakeover"
@@ -348,80 +348,13 @@ onUnmounted(() => {
       >
         <MenuIcon :size="18" />
       </button>
-      <!-- App-update pill (issue #488) — disappears entirely in the
-           steady state. Click routes through main, which fires the
-           appropriate confirm modal in the panel. -->
-      <button
-        v-if="showAppUpdatePill"
-        type="button"
-        class="title-update-pill is-app-update"
-        :class="{
-          'is-ready': appUpdateState.kind === 'ready',
-          'is-downloading': appUpdateState.kind === 'downloading'
-        }"
-        v-bind="tooltipAttrs(appUpdatePillTooltip)"
-        @click="handleAppUpdatePill"
-      >
-        <Download v-if="appUpdateState.kind === 'available'" :size="14" />
-        <Loader2
-          v-else-if="appUpdateState.kind === 'downloading'"
-          :size="14"
-          class="title-update-pill-spinner"
-        />
-        <RefreshCw v-else-if="appUpdateState.kind === 'ready'" :size="14" />
-        <span class="title-update-pill-label">{{ appUpdatePillLabel }}</span>
-      </button>
     </div>
 
-    <!-- Center: downloads tray + install pill + install-update pill.
-         Single click target on the pill opens the unified Settings
-         modal; the downloads tray is always-visible (the empty-state
-         copy lives inside the popup) and the install-update pill
-         only mounts when an install update is available. -->
+    <!-- Center: install pill + install-update pill. The downloads tray
+         moved to the right trailing cluster alongside the other
+         user-action controls; the install-update pill remains here so
+         it stays adjacent to the install identity. -->
     <div class="title-center">
-      <!-- Downloads tray. Click opens the title-bar dropdown popup in
-           `'downloads'` mode anchored under the button. The icon
-           (`ArrowDownToLine`) is intentionally distinct from the update
-           pills' `Download` icon so the user reads "downloads tray" vs
-           "update available pill" at a glance. Hidden during the
-           first-use takeover — no installs exist yet, so no model
-           downloads can be in flight. -->
-      <button
-        v-if="!isFirstUseTakeover"
-        ref="downloadsBtn"
-        type="button"
-        class="title-downloads-tray"
-        :class="{
-          'has-active': downloadsActiveCount > 0,
-          'has-unseen': downloadsActiveCount === 0 && unseenFinishedCount > 0,
-          'is-flashing': downloadsFlash
-        }"
-        v-bind="tooltipAttrs(downloadsTrayLabel)"
-        @click="handleDownloadsTray"
-      >
-        <ArrowDownToLine :size="14" />
-        <!-- Active queue badge: count of in-flight downloads. Pulses
-             via CSS while `.has-active`; the one-shot `.is-flashing`
-             class layers a brighter scale-bounce on top whenever a
-             brand-new download appears so the user catches the
-             "started" event even if they were looking elsewhere. -->
-        <span v-if="downloadsActiveCount > 0" class="title-downloads-badge" aria-hidden="true">{{
-          downloadsActiveCount
-        }}</span>
-        <!-- Unseen-finished badge (issue #558): only shown when the
-             queue is idle AND something terminal landed since the
-             user last opened the popup. Distinct success colour +
-             check icon so it doesn't read as "still working". Cleared
-             on the next `onMenuOpened({menu:'downloads'})` push. -->
-        <span
-          v-else-if="unseenFinishedCount > 0"
-          class="title-downloads-badge is-unseen"
-          aria-hidden="true"
-        >
-          <Check :size="9" :stroke-width="3" />
-          <span class="title-downloads-badge-count">{{ unseenFinishedCount }}</span>
-        </span>
-      </button>
       <!-- Center identity pill. Install-backed hosts show the install's
            name + install-type icon; install-less hosts show the static
            `Desktop 2.0 Beta` label. The pill is a non-interactive label
@@ -459,25 +392,46 @@ onUnmounted(() => {
            (status tag isn't `update`). Click sends a panel-trigger to
            open the manage overlay on the update tab — same surface the
            chooser kebab "Update…" entry lands on. -->
+    </div>
+
+    <div class="drag-spacer"></div>
+
+    <div class="title-trailing">
       <button
         v-if="showInstallUpdatePill"
         type="button"
-        class="title-update-pill is-install-update"
+        class="title-update-pill-v2 is-install-update"
         v-bind="tooltipAttrs(installUpdatePillLabel)"
         @click="handleInstallUpdatePill"
       >
         <Download :size="14" />
         <span class="title-update-pill-label">{{ installUpdatePillLabel }}</span>
       </button>
-    </div>
-
-    <div class="drag-spacer"></div>
-
-    <!-- Trailing cluster: Send Feedback. Hidden for the full duration
-         of the first-use takeover — nothing to send feedback about
-         until the user has actually used the app. Returns in the
-         steady state. -->
-    <div class="title-trailing">
+      <!-- App-update pill (issue #488) — disappears entirely in the
+           steady state. Click routes through main, which fires the
+           appropriate confirm modal in the panel. The neutral pill
+           styling uses the new brand spec; state is communicated
+           via icon (download / spinner / refresh) rather than tint. -->
+      <button
+        v-if="showAppUpdatePill"
+        type="button"
+        class="title-update-pill-v2 is-app-update"
+        :class="{
+          'is-ready': appUpdateState.kind === 'ready',
+          'is-downloading': appUpdateState.kind === 'downloading'
+        }"
+        v-bind="tooltipAttrs(appUpdatePillTooltip)"
+        @click="handleAppUpdatePill"
+      >
+        <Download v-if="appUpdateState.kind === 'available'" :size="14" />
+        <Loader2
+          v-else-if="appUpdateState.kind === 'downloading'"
+          :size="14"
+          class="title-update-pill-spinner"
+        />
+        <RefreshCw v-else-if="appUpdateState.kind === 'ready'" :size="14" />
+        <span class="title-update-pill-label">{{ appUpdatePillLabel ?? 'Update Available' }}</span>
+      </button>
       <button
         v-if="!isFirstUseTakeover"
         type="button"
@@ -487,6 +441,38 @@ onUnmounted(() => {
       >
         <MessageSquarePlus :size="16" />
         <span class="title-feedback-label">{{ t('titleBar.feedback') }}</span>
+      </button>
+      <!-- Downloads tray. Click opens the title-bar dropdown popup in
+           `'downloads'` mode anchored under the button. Distinct
+           `ArrowDownToLine` icon vs. the update pills' `Download` so
+           the user reads "downloads tray" vs "update available" at a
+           glance. Hidden during first-use takeover — no installs yet. -->
+      <button
+        v-if="!isFirstUseTakeover"
+        ref="downloadsBtn"
+        type="button"
+        class="title-downloads-tray"
+        :class="{
+          'has-active': downloadsActiveCount > 0,
+          'has-unseen': downloadsActiveCount === 0 && unseenFinishedCount > 0,
+          'is-flashing': downloadsFlash,
+          'is-open': isDownloadsOpen
+        }"
+        v-bind="tooltipAttrs(downloadsTrayLabel)"
+        @click="handleDownloadsTray"
+      >
+        <ArrowDownToLine :size="16" />
+        <span v-if="downloadsActiveCount > 0" class="title-downloads-badge" aria-hidden="true">{{
+          downloadsActiveCount
+        }}</span>
+        <span
+          v-else-if="unseenFinishedCount > 0"
+          class="title-downloads-badge is-unseen"
+          aria-hidden="true"
+        >
+          <Check :size="9" :stroke-width="3" />
+          <span class="title-downloads-badge-count">{{ unseenFinishedCount }}</span>
+        </span>
       </button>
       <button
         v-if="showSettingsIcon"
@@ -734,22 +720,6 @@ onUnmounted(() => {
   background: rgba(96, 165, 250, 0.28);
   border-color: rgba(96, 165, 250, 0.5);
 }
-.title-update-pill.is-ready {
-  background: rgba(34, 197, 94, 0.18);
-  border-color: rgba(34, 197, 94, 0.4);
-}
-.title-bar.is-hover-active .title-update-pill.is-ready:hover:not(:disabled) {
-  background: rgba(34, 197, 94, 0.28);
-  border-color: rgba(34, 197, 94, 0.55);
-}
-.title-update-pill.is-downloading {
-  background: rgba(148, 163, 184, 0.18);
-  border-color: rgba(148, 163, 184, 0.4);
-}
-.title-bar.is-hover-active .title-update-pill.is-downloading:hover:not(:disabled) {
-  background: rgba(148, 163, 184, 0.28);
-  border-color: rgba(148, 163, 184, 0.55);
-}
 .title-update-pill-spinner {
   animation: title-update-pill-spin 1s linear infinite;
 }
@@ -764,6 +734,52 @@ onUnmounted(() => {
 }
 .title-update-pill-label {
   white-space: nowrap;
+}
+
+/* --- App-update pill (v2 — brand neutral spec) ---
+   Neutral pill rendered in the right trailing cluster. State is
+   communicated via icon (Download / Loader2 / RefreshCw), not tint —
+   the chrome stays the same across `available`, `downloading`, and
+   `ready` so the eye lands on the icon for status.
+   TODO(brand-cleanup): the white-alpha-04/10 values aren't tokenized
+   yet; the existing `--brand-surface-*` recipe is .05/.09. Migrate to
+   a shared `--white-alpha-*` ramp when one is introduced. */
+.title-update-pill-v2 {
+  -webkit-app-region: no-drag;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--neutral-100);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 16px;
+  cursor: pointer;
+  transition:
+    background-color 0.12s,
+    border-color 0.12s,
+    opacity 0.12s;
+}
+.title-bar.is-hover-active .title-update-pill-v2:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+.title-bar.is-light .title-update-pill-v2 {
+  background: rgba(0, 0, 0, 0.04);
+  border-color: rgba(0, 0, 0, 0.1);
+  color: var(--neutral-700);
+}
+.title-bar.is-light.is-hover-active .title-update-pill-v2:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.08);
+  border-color: rgba(0, 0, 0, 0.18);
+}
+.title-update-pill-v2:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
 }
 
 /* --- Downloads tray ---
@@ -782,45 +798,20 @@ onUnmounted(() => {
 .title-downloads-tray {
   -webkit-app-region: no-drag;
   position: relative;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  padding: 3px 6px;
-  font: inherit;
-  font-size: 11px;
-  font-weight: 500;
-  line-height: 1;
-  border-radius: 6px;
   cursor: pointer;
-  background: rgba(255, 255, 255, 0.06);
-  color: inherit;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  transition:
-    background-color 0.12s,
-    border-color 0.12s,
-    opacity 0.12s;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  padding: 0;
+  transition: color 0.12s;
 }
 .title-bar.is-hover-active .title-downloads-tray:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.14);
-  border-color: rgba(255, 255, 255, 0.28);
+  color: var(--comfy-yellow);
 }
 .title-bar.is-light .title-downloads-tray {
-  background: rgba(0, 0, 0, 0.04);
-  border-color: rgba(0, 0, 0, 0.14);
+  color: var(--comfy-yellow);
 }
-.title-bar.is-light.is-hover-active .title-downloads-tray:hover:not(:disabled) {
-  background: rgba(0, 0, 0, 0.09);
-  border-color: rgba(0, 0, 0, 0.24);
-}
-.title-downloads-tray:focus-visible {
-  outline: 2px solid var(--accent, #60a5fa);
-  outline-offset: 2px;
-}
-/* Badge counter — small numeric pill next to the icon when there
-   are in-flight downloads. Suppressed in the icon-only case (recent
-   entries with no active ones) so the tray collapses to just the
-   icon when nothing is moving. */
+
 .title-downloads-badge {
   display: inline-flex;
   align-items: center;
@@ -837,11 +828,6 @@ onUnmounted(() => {
   gap: 2px;
 }
 
-/* Active-queue attention treatment (issue #558).
-   While downloads are in flight the tray shouldn't read as the same
-   passive surface chip it has in the steady state — slow ring pulse
-   + a subtle accent-tinted border draws the eye without being noisy
-   enough to feel like an alert. */
 .title-downloads-tray.has-active {
   border-color: rgba(96, 165, 250, 0.55);
   background: rgba(96, 165, 250, 0.16);
@@ -854,12 +840,11 @@ onUnmounted(() => {
   animation: title-downloads-pulse 1.6s ease-in-out infinite;
 }
 
-/* One-shot "downloads started" flash. Layered on top of `.has-active`
-   so a fresh download that arrives while others are running still
-   triggers a noticeable bump rather than blending into the existing
-   pulse. The class is owned by the renderer (set for ~1.6 s after
-   `downloadsStartedAt` bumps) so the animation re-runs cleanly each
-   time. */
+.title-downloads-tray.is-open,
+.title-bar.is-hover-active .title-downloads-tray.is-open:hover {
+  color: var(--neutral-50);
+}
+
 .title-downloads-tray.is-flashing .title-downloads-badge {
   animation:
     title-downloads-flash 0.55s cubic-bezier(0.2, 0.9, 0.3, 1.4) 1,
@@ -869,10 +854,6 @@ onUnmounted(() => {
   animation: title-downloads-tray-flash 0.9s ease-out 1;
 }
 
-/* Unseen-finished treatment. Distinct success-coloured chrome so
-   "downloads completed while you weren't looking" reads as a
-   different state than "downloads in flight". Cleared the moment the
-   user opens the popup. */
 .title-downloads-tray.has-unseen {
   border-color: rgba(34, 197, 94, 0.55);
   background: rgba(34, 197, 94, 0.16);
