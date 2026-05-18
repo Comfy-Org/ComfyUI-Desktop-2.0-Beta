@@ -5,6 +5,7 @@ import { AlertCircle, ArrowLeft, Loader2, Search, SearchX, X } from 'lucide-vue-
 import BaseInput from '../../components/ui/BaseInput.vue'
 import type { ComfyArgDef } from '../../types/ipc'
 import { parseArgs, serialize, tokenize } from '../../lib/argsParser'
+import { scoreName } from '../../utils/fuzzyMatch'
 
 /**
  * Sub-page editor for the `launchArgs` field. Takes over the drawer
@@ -153,60 +154,6 @@ function selectExclusive(group: string, name: string): void {
   }
   next.set(name, '')
   commit(next)
-}
-
-/**
- * Score a single query token against a flag *name* (short, identifier-
- * like, e.g. "cuda-device"). Names get the full ranking ladder:
- *
- *   - Exact match            (1000)
- *   - Word-prefix at start   (900 - len penalty)   e.g. "cuda" → "cuda-device"
- *   - Word-prefix elsewhere  (800)                 e.g. "device" → "cuda-device"
- *   - Contiguous substring   (600 - position penalty)
- *   - Acronym hit            (400)                 e.g. "cd" → "cuda-device"
- *   - Tight subsequence      (200 - span penalty)  span must be ≤ 2× needle
- *
- * Loose subsequence matches are explicitly *not* allowed — they were the
- * root cause of "cuda" matching `--enable-cors-header` via c…r…s in help.
- */
-function scoreName(needle: string, name: string): number {
-  if (!needle) return 1
-  if (!name) return 0
-  if (name === needle) return 1000
-  if (name.startsWith(needle)) return 900 - Math.min(needle.length, 50)
-  // Word-prefix on any segment of a hyphen/underscore-delimited name.
-  const segments = name.split(/[-_]+/)
-  for (const seg of segments) {
-    if (seg.startsWith(needle)) return 800
-  }
-  const idx = name.indexOf(needle)
-  if (idx >= 0) return 600 - Math.min(idx, 100)
-  const acronym = segments.map((s) => s[0] ?? '').join('')
-  if (acronym && acronym.includes(needle)) return 400
-  // Tight subsequence: every char of needle appears in order in name,
-  // AND the span is at most 2× the needle length so we don't match
-  // unrelated long names.
-  let h = 0
-  let firstHit = -1
-  let lastHit = -1
-  for (let n = 0; n < needle.length; n++) {
-    const c = needle[n]!
-    let found = -1
-    while (h < name.length) {
-      if (name[h] === c) {
-        found = h
-        h++
-        break
-      }
-      h++
-    }
-    if (found === -1) return 0
-    if (firstHit === -1) firstHit = found
-    lastHit = found
-  }
-  const span = lastHit - firstHit + 1
-  if (span > needle.length * 2) return 0
-  return Math.max(50, 200 - span)
 }
 
 /**
