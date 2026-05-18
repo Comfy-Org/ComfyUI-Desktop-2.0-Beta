@@ -93,6 +93,10 @@ export const en = {
     tabDownloads: 'Downloads',
     tabGlobal: 'Global Settings',
   },
+  chooser: {
+    searchPlaceholder: 'Search for and open an instance',
+    noMatches: 'No instances match',
+  },
 }
 
 export type AppLocale = typeof en
