@@ -1,17 +1,17 @@
 <script setup lang="ts">
-import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
+import { onMounted, toRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useInstallationStore } from '../stores/installationStore'
 import { useSessionStore } from '../stores/sessionStore'
 import { useProgressStore } from '../stores/progressStore'
 import { useInstallContextMenu } from '../composables/useInstallContextMenu'
+import { useInstallList } from '../composables/useInstallList'
 import { useOverlay } from '../composables/useOverlay'
 import { Cloud, Plus, Search } from 'lucide-vue-next'
 import ContextMenu from '../components/ContextMenu.vue'
 import BrandBackground from '../components/BrandBackground.vue'
 import BaseInput from '../components/ui/BaseInput.vue'
 import ChooserInstallTile from './chooser/ChooserInstallTile.vue'
-import { scoreName } from '../utils/fuzzyMatch'
 import type { Installation, ShowProgressOpts } from '../types/ipc'
 
 /**
@@ -65,115 +65,33 @@ onMounted(() => {
   }
 })
 
-// --- Filter chips ---
+// Filter / search / recency / cloud-split logic is shared with the
+// title-bar instance picker popover via `useInstallList` so the two
+// surfaces cannot drift. The chip UI is currently hidden in the brand
+// redesign but the underlying `activeFilter` ref + filter switch stay
+// wired; tests reach into `vm.activeFilter` to drive the filter-based
+// regressions guard.
 //
 // "Local" includes both standalone local installs and Legacy Desktop
-// installs (`sourceCategory === 'desktop'`) — Legacy Desktop is the
-// pre-2.0 install kind, conceptually the same family as Local from
-// the user's POV. There's no dedicated Desktop chip so the filter row
-// stays compact.
-type FilterKey = 'all' | 'local' | 'cloud' | 'remote'
-const activeFilter = ref<FilterKey>('all')
+// installs (`sourceCategory === 'desktop'`) — they're conceptually the
+// same family from the user's POV.
+const installationsRef = toRef(installationStore, 'installations')
+const {
+  searchQuery,
+  activeFilter,
+  cloudInstall,
+  nonCloudInstalls,
+  visibleInstalls,
+  showCloudCard,
+  showEmptyHint,
+  lastLaunchedLabel,
+} = useInstallList({ installations: installationsRef })
 
-// Fuzzy search across install names. Reuses `scoreName` (shared with the
-// Comfy args builder) so the ranking ladder stays consistent.
-const searchQuery = ref('')
-function matchesQuery(name: string): boolean {
-  const q = searchQuery.value.trim().toLowerCase()
-  if (!q) return true
-  return scoreName(q, name.toLowerCase()) > 0
-}
-
-/* TODO(brand-cleanup): category filter chips are hidden in the brand
- * redesign; keep the FilterKey state + visibleInstalls switch wired so
- * they can be restored without re-deriving the filter logic. The chip
- * data array itself isn't rendered today.
- *
- * interface FilterChip { key: FilterKey; labelKey: string }
- * const filterChips: FilterChip[] = [
- *   { key: 'all', labelKey: 'chooser.filterAll' },
- *   { key: 'local', labelKey: 'chooser.filterLocal' },
- *   { key: 'cloud', labelKey: 'chooser.filterCloud' },
- *   { key: 'remote', labelKey: 'chooser.filterRemote' },
- * ]
- */
-
-const cloudInstall = computed<Installation | null>(
-  () => installationStore.installations.find((i) => i.sourceCategory === 'cloud') ?? null
-)
-
-const nonCloudInstalls = computed<Installation[]>(() =>
-  installationStore.installations.filter((i) => i.sourceCategory !== 'cloud')
-)
-
-function sortByRecency(a: Installation, b: Installation): number {
-  const ta = typeof a.lastLaunchedAt === 'number' ? a.lastLaunchedAt : -Infinity
-  const tb = typeof b.lastLaunchedAt === 'number' ? b.lastLaunchedAt : -Infinity
-  return tb - ta
-}
-
-const visibleInstalls = computed<Installation[]>(() => {
-  const sorted = [...nonCloudInstalls.value].sort(sortByRecency)
-  const byCategory = (() => {
-    switch (activeFilter.value) {
-      case 'all':
-        return sorted
-      case 'local':
-        return sorted.filter((i) => i.sourceCategory === 'local' || i.sourceCategory === 'desktop')
-      case 'remote':
-        return sorted.filter((i) => i.sourceCategory === 'remote')
-      case 'cloud':
-        return [] // Cloud installs only appear in the Cloud tile.
-      default:
-        return sorted
-    }
-  })()
-  return byCategory.filter((i) => matchesQuery(i.name))
-})
-
-const showCloudCard = computed(() => {
-  const inCategory = activeFilter.value === 'all' || activeFilter.value === 'cloud'
-  if (!inCategory) return false
-  // When a real cloud install exists, gate it on the search query; the
-  // generic Try-Cloud CTA tile stays visible until the user types.
-  if (cloudInstall.value) return matchesQuery(cloudInstall.value.name)
-  return !searchQuery.value.trim()
-})
-
-// Show "no matches" hint only when the user has typed something and
-// nothing visible matches. New Install stays visible regardless.
-const showEmptyHint = computed(
-  () => !!searchQuery.value.trim() && visibleInstalls.value.length === 0 && !showCloudCard.value
-)
-
-// --- Relative-time formatting (shared with DashboardView's pattern) ---
-const now = ref(Date.now())
-let nowTimer: ReturnType<typeof setInterval> | null = null
-onMounted(() => {
-  nowTimer = setInterval(() => {
-    now.value = Date.now()
-  }, 60_000)
-})
-onBeforeUnmount(() => {
-  if (nowTimer) clearInterval(nowTimer)
-})
-
-function timeAgo(timestamp: number): string {
-  const diff = now.value - timestamp
-  const minutes = Math.floor(diff / 60_000)
-  if (minutes < 1) return 'just now'
-  if (minutes < 60) return `${minutes}m ago`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h ago`
-  const days = Math.floor(hours / 24)
-  return `${days}d ago`
-}
-
-function lastLaunchedLabel(inst: Installation): string {
-  return typeof inst.lastLaunchedAt === 'number'
-    ? t('dashboard.launchedAgo', { time: timeAgo(inst.lastLaunchedAt) })
-    : t('dashboard.neverLaunched')
-}
+// Explicitly expose `activeFilter` so the brand-redesign tests can
+// drive the underlying filter state without the chip UI mounted.
+// `<script setup>` would otherwise auto-hide it because the template
+// doesn't reference the ref directly (chips are TODO(brand-cleanup)).
+defineExpose({ activeFilter })
 
 // --- Manage / context menu ---
 const { openOverlay } = useOverlay()

@@ -42,6 +42,13 @@ export interface ChooserHandoffApi {
   handleChooserPick: (installation: Installation) => Promise<void>
   /** Bound to ChooserView's `show-new-install` empty-state CTA. */
   handleChooserShowNewInstall: () => void
+  /** Picker-popover variant of `performChooserLaunch`: same
+   *  already-running / launch-action lookup / `useListAction` dispatch,
+   *  but WITHOUT `prepareChooserHostHandoff` — the picker is invoked
+   *  from an install-backed host that must not be swapped out from
+   *  under the user. Launch lands in a fresh Comfy window for the
+   *  picked install instead. */
+  performPickerLaunch: (installation: Installation) => Promise<ChooserLaunchOutcome>
 }
 
 /**
@@ -161,6 +168,33 @@ export function useChooserHandoff(opts: ChooserHandoffOpts): ChooserHandoffApi {
     })
   }
 
+  /** Picker-popover launch path. Same shape as `performChooserLaunch`
+   *  but skips `prepareChooserHostHandoff` so the host that opened the
+   *  picker is preserved — the picked install opens in its own fresh
+   *  Comfy window via the existing `onLaunch` flow.
+   *
+   *  Main already handles the focus-if-running short-circuit before
+   *  forwarding the IPC, so this composable only sees pick events for
+   *  installs that aren't currently running. The already-running guard
+   *  remains as belt-and-braces for the race window where main has
+   *  already forwarded the IPC but the install transitioned to
+   *  running before we got here. */
+  async function performPickerLaunch(
+    installation: Installation,
+  ): Promise<ChooserLaunchOutcome> {
+    if (sessionStore.isRunning(installation.id)) {
+      await window.api.focusComfyWindow(installation.id)
+      return 'focused-running'
+    }
+    const actions = await window.api.getListActions(installation.id)
+    const launchAction = actions.find((a) => a.id === 'launch')
+      ?? actions.find((a) => a.style === 'primary')
+      ?? null
+    if (!launchAction) return 'missing-action'
+    await executeChooserAction(installation, launchAction)
+    return 'launched'
+  }
+
   function handleChooserShowNewInstall(): void {
     // Empty-state CTA from the chooser — opens the new-install flow as
     // a Tier 3 takeover above the chooser body. Same install-less host
@@ -179,5 +213,6 @@ export function useChooserHandoff(opts: ChooserHandoffOpts): ChooserHandoffApi {
     performChooserLaunch,
     handleChooserPick,
     handleChooserShowNewInstall,
+    performPickerLaunch,
   }
 }

@@ -93,9 +93,47 @@ export const en = {
     tabDownloads: 'Downloads',
     tabGlobal: 'Global Settings',
   },
+  /** Strings shared by every install-listing surface (the dashboard
+   *  grid in `ChooserView.vue` and the title-bar instance-picker
+   *  popover). Keep all install-list strings here so the two surfaces
+   *  literally share keys — when copy needs to change, it changes in
+   *  one place. */
   chooser: {
     searchPlaceholder: 'Search for and open an instance',
     noMatches: 'No instances match',
+    filterAll: 'All',
+    filterLocal: 'Local',
+    filterCloud: 'Cloud',
+    filterRemote: 'Remote',
+    newInstall: 'New Install',
+  },
+  /** Cloud-card copy used by ChooserView's empty cloud CTA AND the
+   *  instance-picker popover's empty cloud row. Mirrored from the
+   *  panel-side `locales/en.json` `cloud.*` namespace so the popup
+   *  process (which doesn't merge from there) can resolve them. */
+  cloud: {
+    label: 'Cloud',
+    desc: 'Connect to Comfy Cloud for remote GPU-powered workflows.',
+  },
+  /** Shared relative-time labels used by both ChooserView (via the
+   *  panel renderer's merged `locales/en.json`) and the title-bar
+   *  instance picker popover (via this same catalog). The popup has
+   *  no main-side locale merge, so the keys must be available here. */
+  dashboard: {
+    launchedAgo: 'Launched {time}',
+    neverLaunched: 'Not launched yet',
+  },
+  /** Picker-only strings (right pane + section titles + a11y labels).
+   *  Strings used by BOTH surfaces live under `chooser.*` above. */
+  instancePicker: {
+    instances: 'Instances',
+    newInstance: 'New Instance',
+    latestOnGithub: 'Latest on GitHub',
+    open: 'Open',
+    more: 'More',
+    settings: 'Settings',
+    snapshots: 'Snapshots',
+    empty: 'Select an instance',
   },
 }
 
