@@ -1,6 +1,5 @@
 import { app, Menu, ipcMain, net } from 'electron'
 import type { BrowserWindow, WebContentsView } from 'electron'
-// Type-only while docking-to-tray is disabled.
 import type { Tray } from 'electron'
 import path from 'path'
 import fs from 'fs'
@@ -23,7 +22,7 @@ import {
   openSystemModal,
   registerSystemModalIpc,
 } from './popups/systemModal'
-import { registerTitlePopupIpc } from './popups/titlePopup'
+import { registerTitlePopupIpc, type InstancePickerInstall } from './popups/titlePopup'
 import { waitForPort, COMFY_BOOT_TIMEOUT_MS } from './lib/process'
 import { isQuitInProgress, setQuitReason } from './lib/quit-state'
 import type { InstallationRecord } from './installations'
@@ -34,11 +33,12 @@ import {
 } from './lib/comfyDownloadManager'
 import { registerAssetDownloadHandlers } from './lib/ipc/registerAssetDownloadHandlers'
 import { registerDownloadHandlers } from './lib/ipc/registerDownloadHandlers'
-import { get as getInstallation, installationEvents } from './installations'
+import { get as getInstallation, installationEvents, list as listInstallations } from './installations'
 import { showModelFolderRelaunchPage } from './lib/relaunchPage'
 import { COMFY_BG, SPLASH_DARK, TITLEBAR_BG, type SplashTheme } from './lib/theme'
 import { comfyTitleBarOverlay } from './lib/titleBarOverlay'
-import { sourceMap, _broadcastToRenderer } from './lib/ipc/shared'
+import { sourceMap, _broadcastToRenderer, _runningSessions } from './lib/ipc/shared'
+import { enrichInstallationsForRenderer } from './lib/ipc/registerInstallationHandlers'
 import { lookupInstallUpdateOverride } from './lib/e2eOverrides'
 import * as mainTelemetry from './lib/telemetry'
 import { getDeviceId } from './lib/deviceId'
@@ -99,12 +99,12 @@ function focusExternalProcessWindow(pid: number): void {
     const vbsPath = path.join(app.getPath('temp'), `comfy-focus-${pid}.vbs`)
     fs.writeFileSync(vbsPath, `CreateObject("WScript.Shell").AppActivate ${pid}`)
     execFile('wscript.exe', ['//Nologo', '//B', vbsPath], { windowsHide: true }, () => {
-      fs.unlink(vbsPath, () => {})
+      fs.unlink(vbsPath, () => { })
     })
   } else if (process.platform === 'darwin') {
     execFile('osascript', ['-e',
       `tell application "System Events" to set frontmost of (first process whose unix id is ${pid}) to true`,
-    ], () => {})
+    ], () => { })
   }
 }
 function updateTrayMenu(): void {
@@ -314,7 +314,7 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
     existing.comfyUrl = comfyUrl
     if (!existing.comfyView.webContents.isDestroyed()) {
       existing.comfyView.setBackgroundColor(COMFY_BG)
-      void existing.comfyView.webContents.loadURL(comfyUrl).catch(() => {})
+      void existing.comfyView.webContents.loadURL(comfyUrl).catch(() => { })
     }
     // A relaunch implicitly means "land me in the live ComfyUI view",
     // so force the host's activePanel back to `'comfy'`. Without this, a
@@ -539,7 +539,7 @@ function _broadcastAppUpdateStateToTitleBars(state: updater.AppUpdateState): voi
     if (wc.isDestroyed()) continue
     try {
       wc.send('comfy-titlebar:app-update-state-changed', state)
-    } catch {}
+    } catch { }
   }
 }
 
@@ -939,6 +939,48 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
       setActivePanel,
       triggerOpenFeedback,
       sendToPanelDeferred,
+      getInstancePickerInstalls: async () => {
+        // Same shape `get-installations` returns to the renderer-side
+        // `installationStore` — sharing the enrichment helper means the
+        // picker can't drift from the chooser tile's data layout.
+        const all = await listInstallations()
+        const { enriched } = enrichInstallationsForRenderer(all)
+        return enriched as unknown as InstancePickerInstall[]
+      },
+      getRunningInstallationIds: () => Array.from(_runningSessions.keys()),
+      pickInstallFromPicker: (installationId, parentEntryId) => {
+        // Focus-or-launch contract: never swap install A out of the
+        // host that opened the picker. Already-running → focus its
+        // window. Not running → route through the picker's parent
+        // host's panel renderer which fires the install's launch
+        // action via the same `useListAction` flow the chooser uses
+        // (skipping the chooser-host attach claim so it opens its own
+        // fresh window).
+        const existing = getEntryByInstallationId(installationId)
+        if (existing && !existing.window.isDestroyed()) {
+          existing.window.show()
+          existing.window.focus()
+          return
+        }
+        const parentEntry = comfyWindows.get(parentEntryId)
+        if (!parentEntry || parentEntry.window.isDestroyed()) return
+        // Install-backed Comfy windows lazily construct their
+        // panelView — it stays null until something forces it
+        // (settings drawer, chooser body, etc.). Without this
+        // `ensurePanelView` call the picker would silently drop
+        // launches on every Comfy-instance window that hadn't yet
+        // opened the settings drawer at least once. Mirrors the
+        // `triggerOpenFeedback` pattern above and lets
+        // `sendToPanelDeferred` queue the IPC until the freshly-
+        // constructed panel's `did-finish-load` fires.
+        const panelView = parentEntry.panelView
+          ?? ensurePanelView(parentEntryId, parentEntry, computeBodyMode(parentEntry))
+        if (panelView.webContents.isDestroyed()) return
+        sendToPanelDeferred(panelView, 'panel-trigger-overlay', {
+          kind: 'picker-pick-install',
+          installationId,
+        })
+      },
     })
     registerDownloadHandlers()
     registerAssetDownloadHandlers({ findInstallationIdForWindow })

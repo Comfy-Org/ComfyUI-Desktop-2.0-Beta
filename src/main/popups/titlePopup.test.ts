@@ -21,7 +21,12 @@ vi.mock('electron', () => ({
 // inside the IPC registration helper, so importing it here is safe — the
 // titlePopup module exports `buildTitlePopupMenuItems` / `computePopupHeight`
 // without subscribing to anything.
-import { buildTitlePopupMenuItems, computePopupHeight } from './titlePopup'
+import {
+  buildInstancePickerSnapshot,
+  buildTitlePopupMenuItems,
+  computePopupHeight,
+  type InstancePickerInstall,
+} from './titlePopup'
 import { nextWindowKey, type ComfyWindowEntry } from '../host/registry'
 
 interface FakeComfyWebContents {
@@ -179,5 +184,66 @@ describe('buildTitlePopupMenuItems', () => {
     expect(items[newWindowIdx + 1]?.kind).toBe('separator')
     const newInstallIdx = items.findIndex((i) => i.id === 'new-install')
     expect(newInstallIdx).toBeGreaterThan(newWindowIdx + 1)
+  })
+})
+
+describe('buildInstancePickerSnapshot', () => {
+  function makeInstall(overrides: Partial<InstancePickerInstall>): InstancePickerInstall {
+    return {
+      id: 'x',
+      name: 'X',
+      sourceLabel: 'Standalone',
+      sourceCategory: 'local',
+      ...overrides,
+    } as InstancePickerInstall
+  }
+
+  it('forwards the install array verbatim under `installs`', () => {
+    const installs = [
+      makeInstall({ id: 'a', name: 'A' }),
+      makeInstall({ id: 'b', name: 'B' }),
+    ]
+    const snap = buildInstancePickerSnapshot({
+      installs,
+      hostInstallationId: null,
+      runningInstallationIds: [],
+    })
+    expect(snap.installs).toEqual(installs)
+  })
+
+  it('echoes the host installation id under `activeInstallationId`', () => {
+    const snap = buildInstancePickerSnapshot({
+      installs: [makeInstall({ id: 'a' })],
+      hostInstallationId: 'a',
+      runningInstallationIds: [],
+    })
+    expect(snap.activeInstallationId).toBe('a')
+  })
+
+  it('sets `activeInstallationId` to null on an install-less host', () => {
+    const snap = buildInstancePickerSnapshot({
+      installs: [],
+      hostInstallationId: null,
+      runningInstallationIds: [],
+    })
+    expect(snap.activeInstallationId).toBeNull()
+  })
+
+  it('flattens running ids into a stable string array', () => {
+    const snap = buildInstancePickerSnapshot({
+      installs: [],
+      hostInstallationId: null,
+      runningInstallationIds: ['b', 'a', 'c'],
+    })
+    expect(snap.runningInstallationIds).toEqual(['b', 'a', 'c'])
+  })
+
+  it('returns an empty runningInstallationIds when nothing is running', () => {
+    const snap = buildInstancePickerSnapshot({
+      installs: [makeInstall({ id: 'a' })],
+      hostInstallationId: null,
+      runningInstallationIds: [],
+    })
+    expect(snap.runningInstallationIds).toEqual([])
   })
 })

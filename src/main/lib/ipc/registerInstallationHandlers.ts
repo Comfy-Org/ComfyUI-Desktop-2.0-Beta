@@ -10,51 +10,73 @@ import {
   sanitizeEnvVars,
   getComfyArgsSchema,
 } from './shared'
-import type { ComfyVersion, ComfyArgDef } from './shared'
+import type { ComfyVersion, ComfyArgDef, InstallationRecord } from './shared'
 import { restoreSnapshotIntoInstallation } from '../standaloneMigration'
+
+/**
+ * Apply the migration-source filter + per-install source enrichment
+ * (sourceLabel / sourceCategory / hasConsole / listPreview / statusTag
+ * / formatted version) the renderer's `Installation` shape expects.
+ *
+ * Shared so the renderer-facing IPC handler AND the title-bar instance-
+ * picker popup snapshot push the *same* per-install shape — without
+ * sharing, the two surfaces would render different data for the same
+ * install (e.g. picker missing the version pill because nobody attached
+ * the comfyVersion → version mapping).
+ */
+export function enrichInstallationsForRenderer(
+  allInstalls: InstallationRecord[],
+): {
+  visible: InstallationRecord[]
+  enriched: Record<string, unknown>[]
+} {
+  // Hide source installs that have been migrated to standalone, as long
+  // as at least one child install (with copiedFrom pointing to them)
+  // still exists.
+  const migratedSourceIds = new Set(
+    allInstalls
+      .filter((i) => (i.copyReason as string | undefined) === 'standalone-migration' && i.status !== 'installing')
+      .map((i) => i.copiedFrom as string)
+      .filter(Boolean),
+  )
+  const visible = allInstalls.filter(
+    (i) => i.status !== 'installing' && !migratedSourceIds.has(i.id),
+  )
+  const enriched = visible.map((inst) => {
+    const source = sourceMap[inst.sourceId]
+    if (!source) return inst as unknown as Record<string, unknown>
+    const listPreview = source.getListPreview ? source.getListPreview(inst) : undefined
+    const statusTag = inst.status === 'partial-delete'
+      ? { label: i18n.t('errors.deleteInterrupted'), style: 'danger' }
+      : inst.status === 'failed'
+      ? { label: i18n.t('errors.installFailed'), style: 'danger' }
+      : (source.getStatusTag ? source.getStatusTag(inst) : undefined)
+    const cv = inst.comfyVersion as ComfyVersion | undefined
+    const rawVersion = cv ? formatComfyVersion(cv, 'short') : (inst.version as string | undefined)
+    const version = rawVersion === inst.sourceId ? undefined : rawVersion
+    return {
+      ...inst,
+      version,
+      sourceLabel: source.label,
+      sourceCategory: source.category,
+      hasConsole: source.hasConsole !== false,
+      ...(listPreview != null ? { listPreview } : {}),
+      ...(statusTag ? { statusTag } : {}),
+    }
+  })
+  return { visible, enriched }
+}
 
 export function registerInstallationHandlers(): void {
   // Installations
   ipcMain.handle('get-installations', async () => {
     const allInstalls = await installations.list()
+    const { visible, enriched } = enrichInstallationsForRenderer(allInstalls)
 
-    // Hide source installs that have been migrated to standalone, as long as
-    // at least one child install (with copiedFrom pointing to them) still exists.
-    const migratedSourceIds = new Set(
-      allInstalls
-        .filter((i) => (i.copyReason as string | undefined) === 'standalone-migration' && i.status !== 'installing')
-        .map((i) => i.copiedFrom as string)
-        .filter(Boolean)
-    )
-    const list = allInstalls.filter((i) => i.status !== 'installing' && !migratedSourceIds.has(i.id))
+    // Resolve versions from git state in the background.
+    _resolveAndBroadcastVersions(visible).catch(() => {})
 
-    const result = list.map((inst) => {
-      const source = sourceMap[inst.sourceId]
-      if (!source) return inst
-      const listPreview = source.getListPreview ? source.getListPreview(inst) : undefined
-      const statusTag = inst.status === 'partial-delete'
-        ? { label: i18n.t('errors.deleteInterrupted'), style: 'danger' }
-        : inst.status === 'failed'
-        ? { label: i18n.t('errors.installFailed'), style: 'danger' }
-        : (source.getStatusTag ? source.getStatusTag(inst) : undefined)
-      const cv = inst.comfyVersion as ComfyVersion | undefined
-      const rawVersion = cv ? formatComfyVersion(cv, 'short') : (inst.version as string | undefined)
-      const version = rawVersion === inst.sourceId ? undefined : rawVersion
-      return {
-        ...inst,
-        version,
-        sourceLabel: source.label,
-        sourceCategory: source.category,
-        hasConsole: source.hasConsole !== false,
-        ...(listPreview != null ? { listPreview } : {}),
-        ...(statusTag ? { statusTag } : {}),
-      }
-    })
-
-    // Resolve versions from git state in the background
-    _resolveAndBroadcastVersions(list).catch(() => {})
-
-    return result
+    return enriched
   })
 
   ipcMain.handle('get-unique-name', async (_event, baseName: string) => {
