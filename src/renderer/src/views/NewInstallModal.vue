@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, nextTick, toRaw } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick, toRaw } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Check, ChevronDown, ChevronRight, HardDrive } from 'lucide-vue-next'
 import { useModal } from '../composables/useModal'
@@ -207,7 +207,20 @@ function rawSelections(): Record<string, FieldOption> {
 let installDirPromise: Promise<string> | null = null
 let sourcesPromise: Promise<Source[]> | null = null
 
+const brandShellRef = ref<HTMLElement | null>(null)
+let returnFocusTo: HTMLElement | null = null
+
 onMounted(() => {
+  if (props.hideBackToDashboard) {
+    returnFocusTo = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    void nextTick(() => {
+      const target = brandShellRef.value?.querySelector<HTMLElement>(
+        'input, button, select, textarea, [tabindex]:not([tabindex="-1"])'
+      )
+      target?.focus()
+    })
+  }
+
   window.api
     .detectGPU()
     .then((gpu) => {
@@ -236,6 +249,13 @@ onMounted(() => {
     .finally(() => {
       telemetryHydrated.value = true
     })
+})
+
+onBeforeUnmount(() => {
+  if (returnFocusTo && document.contains(returnFocusTo)) {
+    returnFocusTo.focus()
+  }
+  returnFocusTo = null
 })
 
 interface OpenOpts {
@@ -679,7 +699,7 @@ defineExpose({ open })
 
 <template>
   <BrandTakeoverLayout v-if="hideBackToDashboard">
-    <div class="config-shell">
+    <div ref="brandShellRef" class="config-shell">
       <h1 class="brand-title">{{ $t('newInstall.configureTitle') }}</h1>
       <p class="brand-lead">{{ $t('newInstall.configureLead') }}</p>
       <div v-if="useBrandConfig" class="config-card">

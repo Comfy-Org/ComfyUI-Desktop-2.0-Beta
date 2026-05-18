@@ -45,7 +45,22 @@
   "titleBar": {
     "appUpdateAvailable": "更新 {version}",
     "appUpdateReady": "重启以更新",
-    "installUpdateAvailable": "有可用更新"
+    "installUpdateAvailable": "有可用更新",
+    "settings": "设置",
+    "settingsTooltip": "设置"
+  },
+
+  "comfyUISettings": {
+    "title": "设置",
+    "tabConfig": "配置",
+    "tabStatus": "状态",
+    "tabUpdate": "更新",
+    "tabSnapshots": "快照",
+    "relaunch": "重新启动",
+    "more": "更多",
+    "diskUsage": "磁盘占用",
+    "envVarsCount": "已定义 {n} 项",
+    "emptyInstallLess": "打开一个 ComfyUI 安装以查看其设置。"
   },
 
   "running": {
