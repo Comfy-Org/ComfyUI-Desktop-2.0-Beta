@@ -2,6 +2,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import MenuView from './MenuView.vue'
 import DownloadsView from './DownloadsView.vue'
+import InstancePickerView from './InstancePickerView.vue'
 
 /**
  * Title-bar dropdown popup shell.
@@ -48,6 +49,24 @@ interface DownloadsState {
   recent: DownloadEntry[]
 }
 
+interface PickerInstall {
+  id: string
+  name: string
+  sourceLabel: string
+  sourceCategory: string
+  version?: string
+  lastLaunchedAt?: number
+  installPath?: string
+  status?: string
+  statusTag?: { style: string; label: string }
+}
+
+interface PickerSnapshot {
+  installs: PickerInstall[]
+  activeInstallationId: string | null
+  runningInstallationIds: string[]
+}
+
 type PopupConfig =
   | {
       kind: 'menu'
@@ -58,6 +77,11 @@ type PopupConfig =
       kind: 'downloads'
       theme: { bg: string; text: string }
     }
+  | {
+      kind: 'instance-picker'
+      snapshot: PickerSnapshot
+      theme: { bg: string; text: string }
+    }
 
 interface Bridge {
   activate(id: string): void
@@ -66,18 +90,29 @@ interface Bridge {
   notifyRendered(): void
   onConfig(cb: (config: PopupConfig) => void): () => void
   onDownloadsChanged(cb: (state: DownloadsState) => void): () => void
+  onInstancePickerSnapshot(cb: (snapshot: PickerSnapshot) => void): () => void
   /** Ask main to resize the popup view to the given natural content
-   *  height (CSS px). Only meaningful for the `'downloads'` kind —
-   *  menu kind is sized deterministically from its item list. */
+   *  height (CSS px). Only meaningful for the `'downloads'` and
+   *  `'instance-picker'` kinds — menu kind is sized deterministically
+   *  from its item list. */
   requestSize(height: number): void
 }
 
 const bridge = (window as unknown as { __comfyTitlePopup?: Bridge }).__comfyTitlePopup
 
-const kind = ref<'menu' | 'downloads'>('menu')
+const kind = ref<'menu' | 'downloads' | 'instance-picker'>('menu')
 const items = ref<MenuItem[]>([])
 const themeBg = ref<string>('#262729')
 const themeText = ref<string>('#dddddd')
+/** Latest instance-picker snapshot — owned at the app level so the
+ *  initial state from `set-config` AND subsequent live pushes via
+ *  `comfy-titlepopup:installs-changed` both land here, regardless of
+ *  whether `<InstancePickerView>` is currently mounted. */
+const pickerSnapshot = ref<PickerSnapshot>({
+  installs: [],
+  activeInstallationId: null,
+  runningInstallationIds: [],
+})
 /** Bumped on every `set-config` so the `.popup` root is keyed and Vue
  *  recreates the element on each open, guaranteeing the CSS open
  *  animation replays. The WebContentsView is reused across opens, so
@@ -119,6 +154,7 @@ function handleKeydown(event: KeyboardEvent): void {
 
 let unsubConfig: (() => void) | undefined
 let unsubDownloads: (() => void) | undefined
+let unsubInstancePicker: (() => void) | undefined
 
 /** Sequence counter — only the rAF closure for the most recently
  *  applied config gets to fire `notifyRendered`. Without this guard,
@@ -132,43 +168,56 @@ let renderSeq = 0
  *  the WebContentsView to fit. Downloads kind only — menu kind is
  *  sized deterministically main-side from its item list. */
 function measureAndRequestSize(): void {
-  if (kind.value !== 'downloads') return
-  // Header is only rendered when there's something to clear; treat
-  // missing as 0px contribution.
-  const headEl = document.querySelector('.downloads-head') as HTMLElement | null
-  const listEl = document.querySelector('.downloads-list, .downloads-empty') as HTMLElement | null
-  const footEl = document.querySelector('.downloads-foot') as HTMLElement | null
-  if (!footEl || !listEl) return
-  let listH: number
-  if (listEl.classList.contains('downloads-list')) {
-    // `.downloads-list` is `flex: 1 1 auto` so it stretches to fill
-    // the popup body — `scrollHeight` would equal `clientHeight` when
-    // the items fit (per the CSS spec: with no overflow,
-    // `scrollHeight === clientHeight`), reporting the flex-allocated
-    // size instead of the natural content size. Sum the children's
-    // own offset heights to get the unstretched height the list wants.
-    let childrenH = 0
-    for (const child of listEl.children) {
-      childrenH += (child as HTMLElement).offsetHeight
+  if (kind.value === 'downloads') {
+    // Header is only rendered when there's something to clear; treat
+    // missing as 0px contribution.
+    const headEl = document.querySelector('.downloads-head') as HTMLElement | null
+    const listEl = document.querySelector('.downloads-list, .downloads-empty') as HTMLElement | null
+    const footEl = document.querySelector('.downloads-foot') as HTMLElement | null
+    if (!footEl || !listEl) return
+    let listH: number
+    if (listEl.classList.contains('downloads-list')) {
+      // `.downloads-list` is `flex: 1 1 auto` so it stretches to fill
+      // the popup body — `scrollHeight` would equal `clientHeight` when
+      // the items fit (per the CSS spec: with no overflow,
+      // `scrollHeight === clientHeight`), reporting the flex-allocated
+      // size instead of the natural content size. Sum the children's
+      // own offset heights to get the unstretched height the list wants.
+      let childrenH = 0
+      for (const child of listEl.children) {
+        childrenH += (child as HTMLElement).offsetHeight
+      }
+      const cs = getComputedStyle(listEl)
+      listH = childrenH + parseFloat(cs.paddingTop || '0') + parseFloat(cs.paddingBottom || '0')
+    } else {
+      // `.downloads-empty` shrinks to content, so its `offsetHeight` is
+      // already the natural rendered size.
+      listH = listEl.offsetHeight
     }
-    const cs = getComputedStyle(listEl)
-    listH = childrenH + parseFloat(cs.paddingTop || '0') + parseFloat(cs.paddingBottom || '0')
-  } else {
-    // `.downloads-empty` shrinks to content, so its `offsetHeight` is
-    // already the natural rendered size.
-    listH = listEl.offsetHeight
+    // +2 for the .popup card's 1px top + 1px bottom border so the inner
+    // content lands inside the bordered card without clipping the last
+    // row.
+    const total = (headEl?.offsetHeight ?? 0) + listH + footEl.offsetHeight + 2
+    bridge?.requestSize(total)
+    return
   }
-  // +2 for the .popup card's 1px top + 1px bottom border so the inner
-  // content lands inside the bordered card without clipping the last
-  // row.
-  const total = (headEl?.offsetHeight ?? 0) + listH + footEl.offsetHeight + 2
-  bridge?.requestSize(total)
+  if (kind.value === 'instance-picker') {
+    // Picker measures its rendered root and asks main to size the popup
+    // view to fit. Main clamps to the ceiling band so the popup never
+    // overflows the host window.
+    const rootEl = document.querySelector('.picker') as HTMLElement | null
+    if (!rootEl) return
+    bridge?.requestSize(rootEl.offsetHeight + 2)
+  }
 }
 
 onMounted(() => {
   unsubConfig = bridge?.onConfig((cfg) => {
     kind.value = cfg.kind
     items.value = cfg.kind === 'menu' ? cfg.items : []
+    if (cfg.kind === 'instance-picker') {
+      pickerSnapshot.value = cfg.snapshot
+    }
     themeBg.value = cfg.theme.bg
     themeText.value = cfg.theme.text
     openSeq.value++
@@ -192,6 +241,9 @@ onMounted(() => {
   unsubDownloads = bridge?.onDownloadsChanged((next) => {
     downloadsState.value = next
   })
+  unsubInstancePicker = bridge?.onInstancePickerSnapshot((snapshot) => {
+    pickerSnapshot.value = snapshot
+  })
   window.addEventListener('keydown', handleKeydown)
   // Tell main the renderer is mounted and listening — main flushes any
   // config that was queued before this point.
@@ -212,9 +264,24 @@ watch(
   },
   { deep: true }
 )
+// Re-measure when the picker snapshot changes — install added/removed
+// affects the list height, and the row count can flip past the popup
+// ceiling without an open-time `requestSize`.
+watch(
+  pickerSnapshot,
+  () => {
+    void nextTick(() => {
+      requestAnimationFrame(() => {
+        measureAndRequestSize()
+      })
+    })
+  },
+  { deep: true }
+)
 onUnmounted(() => {
   unsubConfig?.()
   unsubDownloads?.()
+  unsubInstancePicker?.()
   window.removeEventListener('keydown', handleKeydown)
 })
 </script>
@@ -223,11 +290,12 @@ onUnmounted(() => {
   <div
     :key="openSeq"
     class="popup"
-    :class="{ 'is-light': isLight }"
+    :class="{ 'is-light': isLight, 'is-picker': kind === 'instance-picker' }"
     :style="{ background: themeBg, color: themeText }"
   >
     <MenuView v-if="kind === 'menu'" :items="items" @activate="handleActivate" />
-    <DownloadsView v-else :state="downloadsState" />
+    <DownloadsView v-else-if="kind === 'downloads'" :state="downloadsState" />
+    <InstancePickerView v-else :snapshot="pickerSnapshot" />
   </div>
 </template>
 
@@ -243,7 +311,7 @@ onUnmounted(() => {
 
 .popup {
   margin: 0;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--chooser-surface-border);
   border-radius: 8px;
   user-select: none;
   overflow: hidden;
@@ -251,17 +319,29 @@ onUnmounted(() => {
   width: 100%;
   box-sizing: border-box;
   transform-origin: top center;
-  animation: title-popup-fade-in 150ms ease-out;
+  animation: title-popup-spring-in 240ms cubic-bezier(0.32, 0.72, 0, 1);
 }
 
-@keyframes title-popup-fade-in {
+/* Instance picker surface chrome per Figma — deeper plum bg, 12px
+ * radius, layered drop-shadow. Menu / downloads kinds keep the legacy
+ * lightweight surface. */
+.popup.is-picker {
+  background: var(--neutral-800, #211927) !important;
+  border-radius: 12px;
+  box-shadow:
+    0 20px 24px -4px rgba(10, 13, 18, 0.08),
+    0 8px 8px -4px rgba(10, 13, 18, 0.03),
+    0 3px 3px -1.5px rgba(10, 13, 18, 0.04);
+}
+
+@keyframes title-popup-spring-in {
   from {
     opacity: 0;
-    transform: translateY(-4px);
+    transform: scale(0.96) translateY(-8px);
   }
   to {
     opacity: 1;
-    transform: translateY(0);
+    transform: scale(1) translateY(0);
   }
 }
 
