@@ -133,6 +133,14 @@
   --brand-surface-border-hover: rgba(255, 255, 255, 0.18);
   --brand-surface-blur: 75px;
 
+  /* Chooser-surface — denser glass than --brand-surface-*, tuned for
+   * the chooser dashboard tiles + search input where the lighter brand
+   * recipe washed out against the plum background. Same shape (bg /
+   * bg-hover / border) so swap sites mirror brand-surface usage. */
+  --chooser-surface-bg: rgba(53, 49, 57, 0.5);
+  --chooser-surface-bg-hover: rgba(53, 49, 57, 0.7);
+  --chooser-surface-border: rgba(255, 255, 255, 0.1);
+
   /* Takeover fluid type + spacing — Utopia clamp, anchored 1024px → 1920px. */
   --takeover-fs-caption: clamp(0.75rem, 0.6071rem + 0.2232vw, 0.875rem); /* 12→14px */
   --takeover-fs-body: clamp(0.875rem, 0.7321rem + 0.2232vw, 1rem); /* 14→16px */
@@ -199,6 +207,12 @@
   --brand-surface-border-hover: rgba(255, 255, 255, 0.18);
   --brand-surface-blur: 75px;
 
+  /* Chooser-surface — mirror of dark-theme block. Light-mode chooser
+   * chrome isn't shipping yet; placeholder until light brand parity. */
+  --chooser-surface-bg: rgba(53, 49, 57, 0.5);
+  --chooser-surface-bg-hover: rgba(53, 49, 57, 0.7);
+  --chooser-surface-border: rgba(255, 255, 255, 0.1);
+
   /* Takeover fluid type + spacing — mirror of dark-theme block. */
   --takeover-fs-caption: clamp(0.75rem, 0.6071rem + 0.2232vw, 0.875rem);
   --takeover-fs-body: clamp(0.875rem, 0.7321rem + 0.2232vw, 1rem);
@@ -227,7 +241,7 @@
 }
 
 ::-webkit-scrollbar {
-  width: 8px;
+  width: 0px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
