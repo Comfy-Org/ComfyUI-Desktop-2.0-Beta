@@ -94,15 +94,19 @@ export interface ComfyTitleBarBridge {
    *  (the blur-driven dismiss handles the close on its own). On
    *  macOS the click event can fire before the dismiss propagates,
    *  so a timestamp-only guard isn't reliable. */
-  onMenuOpened(cb: (info: { menu: 'menu' | 'downloads' }) => void): () => void
+  onMenuOpened(
+    cb: (info: { menu: 'menu' | 'downloads' | 'instance-picker' }) => void,
+  ): () => void
   /** Subscribe to title-bar popup close events. Fires when the popup
-   *  view (waffle menu OR downloads tray) closes, after the user
-   *  picks an item or dismisses by clicking outside. The renderer
-   *  uses this to suppress an immediate re-open if the same click
-   *  that dismissed the popup also re-targets the opener button. The
-   *  payload carries which kind closed so the per-button reopen
-   *  guards stay independent. */
-  onMenuClosed(cb: (info: { menu: 'menu' | 'downloads' }) => void): () => void
+   *  view (waffle menu, downloads tray, OR instance-picker) closes,
+   *  after the user picks an item or dismisses by clicking outside.
+   *  The renderer uses this to suppress an immediate re-open if the
+   *  same click that dismissed the popup also re-targets the opener
+   *  button. The payload carries which kind closed so the per-button
+   *  reopen guards stay independent. */
+  onMenuClosed(
+    cb: (info: { menu: 'menu' | 'downloads' | 'instance-picker' }) => void,
+  ): () => void
   /** Subscribe to first-use takeover step changes. Mode mirrors
    *  `firstUseMode` on the entry — `'none'` for no takeover mounted,
    *  `'consent-lockdown'` while the T&C consent step is on screen,
@@ -158,6 +162,12 @@ export interface ComfyTitleBarBridge {
    *  dropdown popup in `'downloads'` mode anchored under the tray
    *  button. */
   clickDownloadsTray(anchor: TitleMenuAnchor): void
+  /** Click handler for the centre install pill. Opens the title-bar
+   *  dropdown popup in `'instance-picker'` mode anchored below the
+   *  pill. Main filters install-less hosts (chooser body) — for those
+   *  hosts the click silently no-ops, matching the design call:
+   *  the dashboard already IS the picker. */
+  clickInstallPill(anchor: TitleMenuAnchor): void
   /** Click handler for the title-bar Send Feedback button. Main
    *  resolves the host entry from the sender and forwards
    *  `comfy-panel:open-feedback` to the panel renderer, which fires
@@ -266,7 +276,10 @@ const bridge: ComfyTitleBarBridge = {
   onMenuOpened: (cb) => {
     const handler = (_event: IpcRendererEvent, data: unknown): void => {
       const { menu } = (data || {}) as { menu?: unknown }
-      if (menu === 'menu' || menu === 'downloads') cb({ menu })
+      // Forward only the menu kinds the title-bar renderer knows about.
+      // Without `'instance-picker'` here the pill's `is-open` state
+      // never flips true and the brand-yellow lift doesn't fire.
+      if (menu === 'menu' || menu === 'downloads' || menu === 'instance-picker') cb({ menu })
     }
     ipcRenderer.on('comfy-titlebar:menu-opened', handler)
     return () => ipcRenderer.removeListener('comfy-titlebar:menu-opened', handler)
@@ -274,7 +287,7 @@ const bridge: ComfyTitleBarBridge = {
   onMenuClosed: (cb) => {
     const handler = (_event: IpcRendererEvent, data: unknown): void => {
       const { menu } = (data || {}) as { menu?: unknown }
-      if (menu === 'menu' || menu === 'downloads') cb({ menu })
+      if (menu === 'menu' || menu === 'downloads' || menu === 'instance-picker') cb({ menu })
     }
     ipcRenderer.on('comfy-titlebar:menu-closed', handler)
     return () => ipcRenderer.removeListener('comfy-titlebar:menu-closed', handler)
@@ -331,6 +344,9 @@ const bridge: ComfyTitleBarBridge = {
   },
   clickDownloadsTray: (anchor) => {
     ipcRenderer.send('comfy-window:click-downloads-tray', { anchor })
+  },
+  clickInstallPill: (anchor) => {
+    ipcRenderer.send('comfy-window:click-install-pill', { anchor })
   },
   clickFeedback: () => {
     ipcRenderer.send('comfy-window:click-feedback')

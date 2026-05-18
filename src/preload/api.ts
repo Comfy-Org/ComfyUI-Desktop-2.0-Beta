@@ -361,8 +361,11 @@ export function buildElectronApi(): ElectronApi {
               | 'install-update'
               | 'app-update-restart-prompt'
               | 'app-update-download-prompt'
+              | 'open-settings'
+              | 'picker-pick-install'
             installationId?: string
             version?: string | null
+            settingsTab?: 'comfy' | 'directories' | 'downloads' | 'global'
           },
         )
       ipcRenderer.on('panel-trigger-overlay', handler)
