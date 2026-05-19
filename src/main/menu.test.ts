@@ -20,18 +20,40 @@ beforeEach(() => {
 })
 
 describe('installAppMenu', () => {
-  it('clears the application menu on win32', () => {
+  it('clears the application menu on win32 without dev overrides', () => {
     installAppMenu('win32')
     expect(setApplicationMenu).toHaveBeenCalledTimes(1)
     expect(setApplicationMenu).toHaveBeenCalledWith(null)
     expect(buildFromTemplate).not.toHaveBeenCalled()
   })
 
-  it('clears the application menu on linux', () => {
+  it('clears the application menu on linux without dev overrides', () => {
     installAppMenu('linux')
     expect(setApplicationMenu).toHaveBeenCalledTimes(1)
     expect(setApplicationMenu).toHaveBeenCalledWith(null)
     expect(buildFromTemplate).not.toHaveBeenCalled()
+  })
+
+  it('installs a View submenu on win32 when dev overrides wire Toggle DevTools', () => {
+    const toggleEmbeddedDevTools = vi.fn()
+    installAppMenu('win32', { toggleEmbeddedDevTools })
+    expect(buildFromTemplate).toHaveBeenCalledTimes(1)
+    expect(setApplicationMenu).toHaveBeenCalledTimes(1)
+
+    const template = buildFromTemplate.mock.calls[0]?.[0] as Array<{
+      role?: string
+      label?: string
+      submenu?: Array<{ role?: string; label?: string; click?: () => void }>
+    }>
+    expect(template).toEqual([
+      expect.objectContaining({
+        label: 'View',
+        submenu: expect.arrayContaining([
+          expect.objectContaining({ role: 'reload' }),
+          expect.objectContaining({ label: 'Toggle Developer Tools', click: expect.any(Function) }),
+        ]),
+      }),
+    ])
   })
 
   it('installs a sanitized template on darwin without close / closeAllWindows', () => {
@@ -46,7 +68,6 @@ describe('installAppMenu', () => {
     }>
     expect(template).toBeTruthy()
 
-    // Top-level: appMenu, editMenu, custom Window — File / View / Help dropped.
     const topLevelRoles = template.map((entry) => entry.role ?? entry.label)
     expect(topLevelRoles).toEqual(['appMenu', 'editMenu', 'Window'])
 
@@ -59,7 +80,6 @@ describe('installAppMenu', () => {
     expect(windowRoles).not.toContain('close')
     expect(windowRoles).not.toContain('closeAllWindows')
 
-    // Recursively walk the entire template — no destructive role anywhere.
     const collectRoles = (
       items: Array<{ role?: string; submenu?: unknown }> | undefined,
     ): string[] => {
@@ -76,5 +96,20 @@ describe('installAppMenu', () => {
     const allRoles = collectRoles(template as unknown as Array<{ role?: string; submenu?: unknown }>)
     expect(allRoles).not.toContain('close')
     expect(allRoles).not.toContain('closeAllWindows')
+  })
+
+  it('inserts a View submenu with click-based Toggle Developer Tools when dev overrides are passed', () => {
+    const toggleEmbeddedDevTools = vi.fn()
+    installAppMenu('darwin', { toggleEmbeddedDevTools })
+    const template = buildFromTemplate.mock.calls[0]?.[0] as Array<{
+      role?: string
+      label?: string
+      submenu?: Array<{ label?: string; click?: (...args: unknown[]) => void }>
+    }>
+    const labels = template.map((e) => e.role ?? e.label)
+    expect(labels).toContain('View')
+    const viewEntry = template.find((e) => e.label === 'View')
+    const toggle = viewEntry?.submenu?.find((i) => i.label === 'Toggle Developer Tools')
+    expect(typeof toggle?.click).toBe('function')
   })
 })
