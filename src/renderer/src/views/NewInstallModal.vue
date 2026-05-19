@@ -598,7 +598,8 @@ async function handleSave(): Promise<void> {
     emit('show-progress', {
       installationId: result.entry.id,
       title: `${t('newInstall.installing')} — ${name}`,
-      apiCall: () => window.api.installInstance(result.entry!.id)
+      apiCall: () => window.api.installInstance(result.entry!.id),
+      autoLaunchOnFinish: true
     })
     return
   }
