@@ -22,6 +22,12 @@ interface DeepLinkRouterOpts {
    *  chooser-host attach-claim (which would swap install A out of
    *  this host). */
   pickInstallFromPicker?: (installation: Installation) => Promise<void> | void
+  /** Instance-picker popover's "More" menu selected an install-level
+   *  action (Open Folder / Copy / Untrack / Delete). Routed to the
+   *  panel so it dispatches through the same `useInstallContextMenu`
+   *  path the dashboard kebab uses — confirm dialogs + showProgress
+   *  + DetailModal-mediated Delete all live there. */
+  runInstallActionFromPicker?: (installation: Installation, actionId: string) => Promise<void> | void
 }
 
 /**
@@ -84,6 +90,16 @@ export function useDeepLinkRouter(opts: DeepLinkRouterOpts): void {
           const inst = installationStore.getById(id)
           if (!inst) return
           await opts.pickInstallFromPicker?.(inst)
+          return
+        }
+        if (payload.kind === 'picker-install-action') {
+          await opts.bootstrapReady
+          const id = payload.installationId
+          const actionId = payload.actionId
+          if (!id || !actionId) return
+          const inst = installationStore.getById(id)
+          if (!inst) return
+          await opts.runInstallActionFromPicker?.(inst, actionId)
         }
       })()
     })
