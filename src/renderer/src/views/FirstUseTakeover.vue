@@ -47,7 +47,7 @@ import BrandTakeoverLayout from '../components/BrandTakeoverLayout.vue'
 import ComfyWordmark from '../components/icons/ComfyWordmark.vue'
 import { emitTelemetryAction } from '../lib/telemetry'
 
-type Step = 'consent' | 'mirrors' | 'pick' | 'localBranch' | 'nameInstall'
+type Step = 'consent' | 'mirrors' | 'pick' | 'localBranch'
 
 const emit = defineEmits<{
   /** Cloud branch explicitly picked at the cloud-vs-local fork. Host
@@ -121,10 +121,6 @@ const termsOpen = ref(false)
  *  telemetry checkbox is a separate, optional opt-in (see
  *  `telemetryEnabled`). */
 const acceptedTos = ref(false)
-// TODO(brand-cleanup): nameInstall step merged into Configure screen —
-// remove these refs after reviewer sign-off.
-// const installName = ref('')
-// const nameInstallInput = ref<HTMLInputElement | null>(null)
 
 const isChinese = computed(() => locale.value.startsWith('zh'))
 
@@ -257,19 +253,6 @@ function chooseInstallNew(): void {
   emit('chain-local', { cameFromLocalBranch: true })
 }
 
-// TODO(brand-cleanup): name-install step merged into the Configure
-// screen. `confirmInstallName` / `backFromNameInstall` / `installName` /
-// `nameInstallInput` / the `nameInstall` step branch / its auto-focus
-// watcher are kept commented below for one review cycle, then removed.
-// function confirmInstallName(): void {
-//   const trimmed = installName.value.trim()
-//   emitCompleted('local-new')
-//   emit('chain-local', trimmed ? { instName: trimmed } : undefined)
-// }
-// function backFromNameInstall(): void {
-//   step.value = 'localBranch'
-// }
-
 interface OpenOpts {
   /** Suppress the cloud-vs-local pick — caller has already detected
    *  that the user has prior launcher usage. Defaults to false. */
@@ -291,8 +274,6 @@ async function open(opts: OpenOpts = {}): Promise<void> {
   whyCloudOpen.value = false
   termsOpen.value = false
   acceptedTos.value = false
-  // TODO(brand-cleanup): installName.value = '' — ref removed; Configure
-  // screen now owns naming.
   // Reset funnel-completion bookkeeping so a takeover replay measures
   // duration / steps from the replay, not from the original mount.
   mountedAt = Date.now()
@@ -342,11 +323,6 @@ watch(
       skip_pick: skipPick.value,
       has_legacy_desktop: hasLegacyDesktop.value
     })
-    // TODO(brand-cleanup): nameInstall step retired; Configure screen
-    // owns its own input focus.
-    // if (current === 'nameInstall') {
-    //   void nextTick(() => nameInstallInput.value?.focus())
-    // }
   },
   { immediate: true }
 )
@@ -499,15 +475,6 @@ defineExpose({ open })
         </button>
       </div>
     </div>
-
-    <!--
-    TODO(brand-cleanup): nameInstall step retired. The Configure screen
-    (NewInstallModal brand-config) now hosts the Name input inline. The
-    original template/script lives in git history. Restore script refs
-    (installName, nameInstallInput, confirmInstallName, backFromNameInstall)
-    and the isBrandStep branch if this is ever resurrected.
-    -->
-
 
     <template #footer-left>
       <button
@@ -757,6 +724,4 @@ defineExpose({ open })
   display: flex;
   gap: 8px;
 }
-
-/* TODO(brand-cleanup): name-install scoped styles removed — step retired. */
 </style>

@@ -6,8 +6,7 @@ import { useModal } from '../composables/useModal'
 
 import { useTerminalScroll } from '../composables/useTerminalScroll'
 import { useProgressStore } from '../stores/progressStore'
-import type { Operation } from '../stores/progressStore'
-import type { ActionResult, ProgressStep, KillResult } from '../types/ipc'
+import type { ActionResult, KillResult } from '../types/ipc'
 import ModalShell from '../components/ModalShell.vue'
 import BrandTakeoverLayout from '../components/BrandTakeoverLayout.vue'
 import ComfyWordmark from '../components/icons/ComfyWordmark.vue'
@@ -50,22 +49,55 @@ const currentOp = computed(() => {
 const displayId = computed(() => currentId.value ?? props.installationId)
 
 /**
- * Caption text for the brand progress screen. Stepped installs (the
- * new-install flow) write live status into `lastStatus[activePhase]`
- * and leave `flatStatus` frozen at "Starting…"; flat installs write
- * straight to `flatStatus`. Read the active-phase status first so the
- * caption reflects the in-flight phase (e.g. "Downloading… X / Y MB"),
- * with `flatStatus` and the i18n fallback below it.
+ * Unified 0→100 progress for the bar. Reads through `progressStore.
+ * globalProgressFor` which handles flat vs stepped + the monotonic
+ * clamp + the held-fill-on-indeterminate trick. See the store helper
+ * for the full contract.
  */
-const brandCaption = computed(() => {
+const globalProgress = computed<{ percent: number; indeterminate: boolean }>(() => {
+  const op = currentOp.value
+  if (!op) return { percent: 0, indeterminate: true }
+  return progressStore.globalProgressFor(op)
+})
+
+/**
+ * User-facing caption that swaps as phases advance.
+ *
+ * Stepped ops: maps `activePhase` to `progress.phaseLabel.<phase>` —
+ * curated strings like "Downloading ComfyUI…" instead of the developer-y
+ * `lastStatus` string. Falls back to `lastStatus[activePhase]` for any
+ * phase not in the i18n table (e.g. a new main-side phase shipped before
+ * the table is updated) so we never go blank.
+ *
+ * Flat ops: pass through `flatStatus` — chooser-launch overrides this
+ * anyway via the existing `launchCaption` branch.
+ */
+const friendlyCaption = computed<string>(() => {
   const op = currentOp.value
   if (!op) return t('progress.starting')
-  if (op.activePhase) {
-    const phaseStatus = op.lastStatus[op.activePhase]
-    if (phaseStatus) return phaseStatus
+  if (op.steps && op.activePhase) {
+    const key = `progress.phaseLabel.${op.activePhase}`
+    const friendly = t(key)
+    // vue-i18n returns the key itself when missing — fall back to the raw
+    // status string so the UI never shows the dotted key.
+    if (friendly !== key) return friendly
+    return op.lastStatus[op.activePhase] || op.activePhase
   }
   return op.flatStatus || t('progress.starting')
 })
+
+/**
+ * Optional plain-English sub-line under the main caption. Reserved for
+ * curated copy only — we intentionally do NOT surface raw
+ * `lastStatus[activePhase]` here (it's developer-y, like
+ * "Copying packages… 4123 / 8721 files"). When there's no curated
+ * sub-copy for a phase, this returns null and the sub-line is hidden.
+ *
+ * Today no phase has curated sub-copy, so this always returns null.
+ * Kept wired so a future "Almost there, just a moment…" type line can
+ * drop in without retemplating.
+ */
+const subStatus = computed<string | null>(() => null)
 
 /**
  * Brand-loader launch step list — chooser-tile launch path only.
@@ -78,7 +110,7 @@ const brandCaption = computed(() => {
  *
  * Launch ops are flat (`steps === null`) so this list activates cleanly
  * for chooser-tile launches and stays dormant everywhere else. When
- * dormant, the brand branch keeps showing the existing `brandCaption`.
+ * dormant, the brand branch falls through to `friendlyCaption`.
  *
  * Five narrative rows:
  *   1. securityScan     — narrative, advanced by the timer below.
@@ -433,62 +465,6 @@ async function handleKillProcess(port: number): Promise<void> {
   }
 }
 
-function getStepClass(op: Operation, stepIndex: number): string {
-  if (!op.steps) return 'progress-step'
-  const activeIndex = op.activePhase ? op.steps.findIndex((s) => s.phase === op.activePhase) : -1
-
-  if (stepIndex < activeIndex) return 'progress-step done'
-  if (stepIndex === activeIndex) {
-    if (op.finished && op.cancelRequested) return 'progress-step cancelled'
-    if (op.finished && op.error) return 'progress-step error'
-    if (op.done) return 'progress-step done'
-    return 'progress-step active'
-  }
-  if (op.done && !op.cancelRequested && !op.error) return 'progress-step done'
-  return 'progress-step'
-}
-
-function getStepIndicator(
-  op: Operation,
-  stepIndex: number
-): 'check' | 'error' | 'cancelled' | 'number' {
-  if (!op.steps) return 'number'
-  const activeIndex = op.activePhase ? op.steps.findIndex((s) => s.phase === op.activePhase) : -1
-
-  if (stepIndex < activeIndex) return 'check'
-  if (stepIndex === activeIndex) {
-    if (op.finished && op.cancelRequested) return 'cancelled'
-    if (op.finished && op.error) return 'error'
-    if (op.done) return 'check'
-  }
-  return 'number'
-}
-
-function isStepDetailVisible(op: Operation, stepIndex: number): boolean {
-  if (!op.steps) return false
-  const activeIndex = op.activePhase ? op.steps.findIndex((s) => s.phase === op.activePhase) : -1
-  if (stepIndex !== activeIndex) return false
-  if (op.done) return false
-  return true
-}
-
-function getStepStatus(op: Operation, step: ProgressStep): string {
-  if (op.error && op.activePhase === step.phase) {
-    return t('progress.error', { message: op.error })
-  }
-  if (op.cancelRequested) return t('progress.cancelling')
-  return op.lastStatus[step.phase] || step.phase
-}
-
-function getStepSummary(op: Operation, step: ProgressStep, stepIndex: number): string | null {
-  if (!op.steps) return null
-  const activeIndex = op.activePhase ? op.steps.findIndex((s) => s.phase === op.activePhase) : -1
-  if ((op.done || stepIndex < activeIndex) && op.lastStatus[step.phase]) {
-    return op.lastStatus[step.phase] ?? null
-  }
-  return null
-}
-
 defineExpose({ startOperation, showOperation })
 </script>
 
@@ -500,14 +476,19 @@ defineExpose({ startOperation, showOperation })
         <ComfyWordmark class="brand-progress__wordmark" />
         <div
           class="brand-progress__bar"
-          :class="{ 'is-indeterminate': currentOp.activePercent < 0 }"
+          :class="{ 'is-indeterminate': globalProgress.indeterminate }"
         >
           <div
             class="brand-progress__bar-fill"
-            :style="{
-              width: currentOp.activePercent >= 0 ? `${currentOp.activePercent}%` : '0%'
-            }"
+            :style="{ width: `${globalProgress.percent}%` }"
           />
+        </div>
+        <div
+          v-if="!isBrandLaunch && !globalProgress.indeterminate"
+          class="brand-progress__percent"
+          aria-hidden="true"
+        >
+          {{ Math.round(globalProgress.percent) }}%
         </div>
 
         <!-- Single rolling caption. For chooser-tile launches the
@@ -524,11 +505,15 @@ defineExpose({ startOperation, showOperation })
              like a stutter when the underlying text is identical. -->
         <Transition name="brand-caption-fade" mode="out-in">
           <div
-            :key="isBrandLaunch ? `launch-${launchActiveIndex}-${vramGb ?? 'na'}` : 'caption'"
+            :key="
+              isBrandLaunch
+                ? `launch-${launchActiveIndex}-${vramGb ?? 'na'}`
+                : (currentOp.activePhase ?? 'caption')
+            "
             class="brand-progress__caption"
             aria-live="polite"
           >
-            {{ isBrandLaunch ? launchCaption : brandCaption }}
+            {{ isBrandLaunch ? launchCaption : friendlyCaption }}
           </div>
         </Transition>
 
@@ -597,79 +582,59 @@ defineExpose({ startOperation, showOperation })
       </span>
     </div>
 
-    <!-- Stepped progress -->
-    <template v-if="currentOp.steps">
-      <div class="progress-steps">
-        <div
-          v-for="(step, i) in currentOp.steps"
-          :key="step.phase"
-          :class="getStepClass(currentOp, i)"
-          :data-phase="step.phase"
-        >
-          <div class="progress-step-header">
-            <span class="progress-step-indicator">
-              <Check v-if="getStepIndicator(currentOp, i) === 'check'" :size="14" />
-              <X v-else-if="getStepIndicator(currentOp, i) === 'error'" :size="14" />
-              <TriangleAlert
-                v-else-if="getStepIndicator(currentOp, i) === 'cancelled'"
-                :size="14"
-              />
-              <template v-else>{{ i + 1 }}</template>
-            </span>
-            <span class="progress-step-label">{{ step.label }}</span>
-          </div>
-          <div v-if="isStepDetailVisible(currentOp, i)" class="progress-step-detail">
-            <div class="progress-step-status">
-              {{ getStepStatus(currentOp, step) }}
-            </div>
-            <div
-              v-if="!(currentOp.error && currentOp.activePhase === step.phase)"
-              class="progress-bar-track"
-              :class="{ indeterminate: currentOp.activePercent < 0 }"
-            >
-              <div
-                class="progress-bar-fill"
-                :style="{
-                  width: currentOp.activePercent >= 0 ? `${currentOp.activePercent}%` : '0%'
-                }"
-              ></div>
-            </div>
-          </div>
-          <div v-if="getStepSummary(currentOp, step, i)" class="progress-step-summary">
-            {{ getStepSummary(currentOp, step, i) }}
-          </div>
-        </div>
-      </div>
-    </template>
+    <!-- Unified progress block — same shape for stepped + flat ops.
+         The CTO ask is: ONE 0→100 bar across the whole op, with the
+         caption underneath changing through phases. Stepped ops feed
+         their per-phase percent into `globalProgressFor` (weighted),
+         flat ops pass through. Caption swaps via the brand-caption-fade
+         transition keyed on `activePhase`.
 
-    <!-- Flat progress -->
+         Error / port-conflict copy is preserved as a finished-op
+         overlay — fires for both stepped and flat ops if the op ends
+         badly (previously the stepped branch had no inline error
+         render). -->
+    <div
+      v-if="currentOp.finished && currentOp.error"
+      class="progress-status progress-error-message"
+    >
+      {{ currentOp.error }}
+    </div>
+    <div
+      v-else-if="currentOp.finished && currentOp.result?.portConflict && !resolvingConflict"
+      class="progress-status progress-error-message"
+    >
+      {{ currentOp.result.message }}
+    </div>
     <template v-else>
+      <Transition name="brand-caption-fade" mode="out-in">
+        <div
+          :key="currentOp.activePhase ?? 'flat'"
+          class="progress-status"
+          aria-live="polite"
+        >
+          {{ friendlyCaption }}
+        </div>
+      </Transition>
+      <div v-if="subStatus" class="progress-substatus">{{ subStatus }}</div>
+    </template>
+    <div v-if="!currentOp.finished" class="progress-bar-wrap">
       <div
-        v-if="currentOp.finished && currentOp.error"
-        class="progress-status progress-error-message"
-      >
-        {{ currentOp.error }}
-      </div>
-      <div
-        v-else-if="currentOp.finished && currentOp.result?.portConflict && !resolvingConflict"
-        class="progress-status progress-error-message"
-      >
-        {{ currentOp.result.message }}
-      </div>
-      <div v-else class="progress-status">{{ currentOp.flatStatus }}</div>
-      <div
-        v-if="!currentOp.finished"
         class="progress-bar-track"
-        :class="{ indeterminate: currentOp.flatPercent < 0 }"
+        :class="{ indeterminate: globalProgress.indeterminate }"
       >
         <div
           class="progress-bar-fill"
-          :style="{
-            width: currentOp.flatPercent >= 0 ? `${currentOp.flatPercent}%` : '0%'
-          }"
+          :style="{ width: `${globalProgress.percent}%` }"
         ></div>
       </div>
-    </template>
+      <div
+        v-if="!globalProgress.indeterminate"
+        class="progress-bar-percent"
+        aria-hidden="true"
+      >
+        {{ Math.round(globalProgress.percent) }}%
+      </div>
+    </div>
 
     <!-- Terminal output -->
     <template v-if="currentOp.terminalOutput">
@@ -815,6 +780,14 @@ defineExpose({ startOperation, showOperation })
   color: var(--neutral-300);
   text-align: center;
   min-height: 1.5em;
+}
+.brand-progress__percent {
+  font-size: 12px;
+  color: var(--neutral-400);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  margin-top: -4px;
+  align-self: flex-end;
 }
 
 .brand-caption-fade-enter-active,

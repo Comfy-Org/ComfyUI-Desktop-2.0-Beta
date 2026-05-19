@@ -359,11 +359,7 @@
     "localBranchMigrateLabel": "迁移",
     "localBranchMigrateDesc": "导入现有的工作流、模型和设置。",
     "localBranchInstallNewLabel": "全新安装",
-    "localBranchInstallNewDesc": "干净安装。现有项目将保留在 Comfy-{'{'}Name{'}'} 中。",
-    "nameInstallTitle": "看起来您之前安装过 Comfy",
-    "nameInstallLead": "您希望如何安装此版本？",
-    "nameInstallLabel": "为新安装命名",
-    "nameInstallHint": "您的旧安装将保持不变。为新的安装命名，方便区分。"
+    "localBranchInstallNewDesc": "干净安装。现有项目将保留在 Comfy-{'{'}Name{'}'} 中。"
   },
 
   "tray": {
