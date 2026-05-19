@@ -57,6 +57,8 @@ export type InstallMenuActionId =
   | 'migrate'
   | 'restore-snapshot'
   | 'reveal-in-folder'
+  | 'copy-install'
+  | 'untrack'
   | 'delete'
   | 'dismiss-error'
 
@@ -147,7 +149,27 @@ export function useInstallContextMenu(opts: {
       })
     }
 
-    if (opts.onManage && isInstalled(inst) && isLocalLikeInstall(inst)) {
+    // Copy Installation — standalone source only (the `'copy'` action
+    // def lives in standalone/updateSections.ts). REQUIRES_STOPPED.
+    if (isInstalled(inst) && inst.sourceCategory === 'local') {
+      items.push({
+        id: 'copy-install',
+        label: t('actions.copyInstallation'),
+        disabled: stoppedActionGated,
+      })
+    }
+
+    // Untrack Installation — drops the install from the app's registry
+    // without touching disk. Available for any local-like installed
+    // install (matches the existing `untrackAction()` source-side gating).
+    if (isInstalled(inst) && isLocalLikeInstall(inst)) {
+      items.push({
+        id: 'untrack',
+        label: t('actions.untrack'),
+      })
+    }
+
+    if (isInstalled(inst) && isLocalLikeInstall(inst)) {
       items.push({
         id: 'delete',
         label: t('chooser.menuDelete'),
@@ -218,8 +240,39 @@ export function useInstallContextMenu(opts: {
       } catch {
         // The action surfaces its own error to the user via main; nothing to do here.
       }
+    } else if (id === 'copy-install') {
+      // Standalone-only. Source-side `'copy'` action def owns its
+      // native confirm dialog + showProgress chain, so the panel still
+      // sees a progress overlay when this fires.
+      try {
+        await window.api.runAction(inst.id, 'copy')
+      } catch {
+        // Source action surfaces its own error path.
+      }
+    } else if (id === 'untrack') {
+      // Source-side `'remove'` action def owns its native confirm.
+      try {
+        await window.api.runAction(inst.id, 'remove')
+      } catch {
+        // Source action surfaces its own error path.
+      }
     } else if (id === 'delete') {
-      opts.onManage?.(inst, { autoAction: 'delete' })
+      // When `onManage` is wired (chooser / dashboard kebab) we route
+      // through DetailModal so the source's auto-action chain runs in
+      // the modal context. When it isn't (e.g. picker forwarded path),
+      // fire the source-side `'delete'` action directly — the action
+      // def owns its own native confirm + showProgress wiring, so the
+      // panel's progress overlay still fires through the standard
+      // `show-progress` → ProgressModal path.
+      if (opts.onManage) {
+        opts.onManage(inst, { autoAction: 'delete' })
+      } else {
+        try {
+          await window.api.runAction(inst.id, 'delete')
+        } catch {
+          // Source action surfaces its own error path.
+        }
+      }
     } else if (id === 'dismiss-error') {
       sessionStore.clearErrorInstance(inst.id)
     }
