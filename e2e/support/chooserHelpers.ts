@@ -48,7 +48,7 @@ export async function openDownloadsTray(titleBar: WebContentsPage): Promise<void
 
 /** Wait for any flow takeover to be visible inside the panel body. */
 export async function expectTakeoverOpen(panel: WebContentsPage): Promise<void> {
-  await panel.waitForVisible('.view-modal-content', { timeout: 10_000 })
+  await panel.waitForVisible('.brand-takeover-root', { timeout: 10_000 })
 }
 
 /** Dispatch Escape to dismiss the active overlay. */
