@@ -41,26 +41,55 @@ interface MockSnapshot {
   installs: MockInstall[]
   activeInstallationId: string | null
   runningInstallationIds: string[]
+  selectedInstallationId?: string | null
+  selectedSettings?: unknown[] | null
+  selectedSnapshots?: unknown | null
 }
 
 interface BridgeState {
   picks: string[]
+  restarts: string[]
   newInstallCount: number
+  selectedInstallSets: (string | null)[]
+  updateFieldCalls: { installationId: string; fieldId: string; value: unknown }[]
+  runActionCalls: { installationId: string; actionId: string; actionData?: unknown }[]
 }
 
 function installMockBridge(): BridgeState {
   const state: BridgeState = {
     picks: [],
+    restarts: [],
     newInstallCount: 0,
+    selectedInstallSets: [],
+    updateFieldCalls: [],
+    runActionCalls: [],
   }
   const bridge = {
     pickInstall: (id: string) => {
       state.picks.push(id)
     },
+    restartInstall: (id: string) => {
+      state.restarts.push(id)
+    },
     openNewInstall: () => {
       state.newInstallCount += 1
     },
     openSettingsTab: vi.fn(),
+    setPickerSelectedInstall: (id: string | null) => {
+      state.selectedInstallSets.push(id)
+    },
+    pickerUpdateField: vi.fn(
+      async (installationId: string, fieldId: string, value: unknown) => {
+        state.updateFieldCalls.push({ installationId, fieldId, value })
+        return { ok: true }
+      },
+    ),
+    pickerRunAction: vi.fn(
+      async (installationId: string, actionId: string, actionData?: unknown) => {
+        state.runActionCalls.push({ installationId, actionId, actionData })
+        return { ok: true }
+      },
+    ),
   }
   ;(window as unknown as { __comfyTitlePopup: typeof bridge }).__comfyTitlePopup = bridge
   return state
@@ -83,8 +112,18 @@ async function mountPicker(snapshot: MockSnapshot) {
   // before the component touches `window.__comfyTitlePopup` — same
   // convention DownloadsView's test uses.
   const { default: InstancePickerView } = await import('./InstancePickerView.vue')
+  // Fill in the new snapshot fields with safe defaults — tests that
+  // exercise the picker's right-pane Settings/Snapshots accordions
+  // override these explicitly. Older test cases predate these fields
+  // and don't care.
+  const enriched = {
+    selectedInstallationId: snapshot.activeInstallationId,
+    selectedSettings: null,
+    selectedSnapshots: null,
+    ...snapshot,
+  }
   return mount(InstancePickerView, {
-    props: { snapshot },
+    props: { snapshot: enriched },
     global: { plugins: [i18n, pinia] },
   })
 }
@@ -213,6 +252,64 @@ describe('comfyTitlePopup/InstancePickerView', () => {
       expect(openButton.exists()).toBe(true)
       await openButton.trigger('click')
       expect(bridge.picks).toEqual(['a'])
+      expect(bridge.restarts).toEqual([])
+    })
+
+    it('switches the primary CTA to "Restart" when the selected install is running', async () => {
+      // Clicking Open on a running install would be a no-op visually
+      // (main just refocuses the existing window), so the CTA flips to
+      // Restart and dispatches the restart flow (stop → re-launch)
+      // through the dedicated bridge method. Main confirms via a
+      // native dialog before actually killing the session.
+      const wrapper = await mountPicker({
+        installs: [makeInstall({ id: 'a', name: 'Alpha' })],
+        activeInstallationId: 'a',
+        runningInstallationIds: ['a'],
+      })
+      const openButton = wrapper.find('.picker-detail-open')
+      expect(openButton.text()).toBe('Restart')
+      await openButton.trigger('click')
+      expect(bridge.restarts).toEqual(['a'])
+      expect(bridge.picks).toEqual([])
+    })
+
+    it('pushes the selected install id to main when the user picks a different row', async () => {
+      // The picker tells main about its current selection via
+      // `setPickerSelectedInstall` whenever the user picks a different
+      // row. Main re-resolves Settings + Snapshots for the new install
+      // and pushes a fresh snapshot back. The initial selection on
+      // mount does NOT fire this IPC — main already seeded
+      // `pickerSelectedInstallationId` with the host's active install
+      // and kicked the initial details fetch before showing the
+      // popup, so an `immediate: true` watcher would cause a spurious
+      // re-broadcast → resize-during-open flicker.
+      const wrapper = await mountPicker({
+        installs: [
+          makeInstall({ id: 'a', name: 'Alpha' }),
+          makeInstall({ id: 'b', name: 'Bravo' }),
+        ],
+        activeInstallationId: 'a',
+        runningInstallationIds: [],
+      })
+      expect(bridge.selectedInstallSets).toEqual([])
+      const bravoRow = wrapper
+        .findAll('.picker-row')
+        .find((r) => r.text().includes('Bravo'))
+      await bravoRow!.trigger('click')
+      await flushPromises()
+      expect(bridge.selectedInstallSets[bridge.selectedInstallSets.length - 1]).toBe('b')
+    })
+
+    it('keeps the primary CTA as "Open" for non-running selections', async () => {
+      const wrapper = await mountPicker({
+        installs: [
+          makeInstall({ id: 'a', name: 'Alpha' }),
+          makeInstall({ id: 'b', name: 'Bravo' }),
+        ],
+        activeInstallationId: 'a',
+        runningInstallationIds: ['b'],
+      })
+      expect(wrapper.find('.picker-detail-open').text()).toBe('Open')
     })
 
     it('filters install rows by search query', async () => {
