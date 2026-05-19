@@ -116,10 +116,10 @@ const skipPick = ref(false)
 const hasLegacyDesktop = ref(false)
 const whyCloudOpen = ref(false)
 /** Which legal document to show when the terms modal is open, or null
- *  when the modal is closed. The two Learn more links on the consent
- *  step set this to 'eula' (Terms checkbox) or 'privacy' (telemetry
- *  checkbox). TermsModal receives the value via its `doc` prop. */
-const termsDoc = ref<'eula' | 'privacy' | 'notices' | null>(null)
+ *  when the modal is closed. The two consent-row links on the Terms
+ *  checkbox set this to 'eula' or 'tos'; the telemetry-row link sets
+ *  it to 'privacy'. TermsModal receives the value via its `doc` prop. */
+const termsDoc = ref<'eula' | 'tos' | 'privacy' | 'notices' | null>(null)
 /** Required acceptance of the Terms of Service / Privacy Policy. The
  *  primary "Get Started" CTA stays disabled until this flips true. The
  *  telemetry checkbox is a separate, optional opt-in (see
@@ -384,15 +384,20 @@ defineExpose({ open })
           <span class="brand-checkbox__text">
             <span class="brand-checkbox__title">{{ $t('firstUse.consentTosTitle') }}</span>
             <span class="brand-checkbox__hint">
-              {{ $t('firstUse.consentTosHint') }}
+              {{ $t('firstUse.consentTosHintPrefix') }}
               <button
                 type="button"
                 class="brand-checkbox__link"
-                data-testid="first-use-tos-learn-more"
+                data-testid="first-use-eula-link"
                 @click.prevent="termsDoc = 'eula'"
-              >
-                {{ $t('common.learnMore') }}
-              </button>
+              >{{ $t('firstUse.eulaLinkLabel') }}</button>
+              {{ $t('firstUse.consentTosHintSep') }}
+              <button
+                type="button"
+                class="brand-checkbox__link"
+                data-testid="first-use-tos-link"
+                @click.prevent="termsDoc = 'tos'"
+              >{{ $t('firstUse.tosLinkLabel') }}</button>{{ $t('firstUse.consentTosHintSuffix') }}
             </span>
           </span>
         </label>
@@ -407,9 +412,7 @@ defineExpose({ open })
                 class="brand-checkbox__link"
                 data-testid="first-use-telemetry-learn-more"
                 @click.prevent="termsDoc = 'privacy'"
-              >
-                {{ $t('common.learnMore') }}
-              </button>
+              >{{ $t('common.learnMore') }}</button>
             </span>
           </span>
         </label>

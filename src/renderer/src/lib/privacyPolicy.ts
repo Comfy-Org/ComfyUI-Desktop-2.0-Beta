@@ -34,7 +34,7 @@ export interface PrivacyPolicy {
 }
 
 /** Doc ids surfaced by `TermsModal`'s `doc` prop. */
-export type LegalDocId = 'eula' | 'privacy' | 'notices'
+export type LegalDocId = 'eula' | 'tos' | 'privacy' | 'notices'
 
 /* ============================================================
  * EULA — End-User License Agreement
@@ -44,22 +44,10 @@ export const EULA: PrivacyPolicy = {
   effectiveDate: '2026-05-19',
   appliesTo: 'ComfyUI Desktop 2.0',
   blocks: [
-    { kind: 'h2', text: 'TL;DR (plain-English)' },
-    {
-      kind: 'ul',
-      items: [
-        'ComfyUI Desktop 2.0 is **free to install and use, including commercially**.',
-        'Our **source code is open-source under the MIT License** (see `/LICENSE`). This EULA governs only the compiled binary we distribute via comfy.org and our update servers.',
-        'Your workflows, models, prompts, and generated content **stay on your machine**. We don\'t see them, store them, or have any rights to them.',
-        'We collect **anonymous usage analytics and crash reports** if you opt in. You can turn them off at any time in Settings — covered by the Privacy Policy.',
-        'We provide the Desktop App **"as-is"** — no warranties. To the extent permitted by law, our liability is capped.',
-        'You can stop using the Desktop App at any time. Uninstalling ends our agreement.',
-      ],
-    },
     {
       kind: 'p',
       text:
-        "If you don't agree to these terms, don't install or use the Desktop App.",
+        'This End-User License Agreement is a binding agreement between you and Comfy Org governing your installation and use of the ComfyUI Desktop 2.0 application. By installing or using the Desktop App, you accept this EULA. If you do not agree, do not install or use the Desktop App.',
     },
 
     { kind: 'h2', text: '1. Definitions' },
@@ -141,7 +129,7 @@ export const EULA: PrivacyPolicy = {
     {
       kind: 'p',
       text:
-        'The Desktop App collects anonymous telemetry (usage analytics and crash reports) as described in the Privacy Policy linked from the same consent screen. You can turn telemetry off at any time in **Settings → Telemetry**. Doing so does not affect your ability to use the Desktop App.',
+        'The Desktop App collects telemetry (usage analytics and crash reports) as described in the Privacy Policy linked from the same consent screen. Before you sign in to Comfy Cloud, this data is keyed only by a local device ID; if you sign in, it is linked to your Comfy account. You can turn telemetry off at any time in **Settings → Telemetry**. Doing so does not affect your ability to use the Desktop App.',
     },
     {
       kind: 'p',
@@ -219,7 +207,7 @@ export const EULA: PrivacyPolicy = {
     {
       kind: 'p',
       text:
-        '**You may terminate** this EULA at any time by uninstalling the Desktop App. Uninstalling stops new telemetry collection; past anonymous telemetry records remain subject to the retention terms in the Privacy Policy.',
+        '**You may terminate** this EULA at any time by uninstalling the Desktop App. Uninstalling stops new telemetry collection; past telemetry records remain subject to the retention terms in the Privacy Policy.',
     },
     {
       kind: 'p',
@@ -268,6 +256,130 @@ export const EULA: PrivacyPolicy = {
 }
 
 /* ============================================================
+ * Terms of Service
+ *
+ * The EULA above governs the binary distribution (license grant,
+ * restrictions on the binary, third-party components). The Terms of
+ * Service here govern how you USE the Desktop App — acceptable use,
+ * user obligations, content policy, and dispute resolution.
+ * ============================================================ */
+
+export const TOS: PrivacyPolicy = {
+  effectiveDate: '2026-05-19',
+  appliesTo: 'ComfyUI Desktop 2.0',
+  blocks: [
+    {
+      kind: 'p',
+      text:
+        'These Terms of Service govern your use of the ComfyUI Desktop 2.0 application. They apply alongside the End-User License Agreement (EULA), which grants your license to install and run the Desktop App binary. The EULA covers the technical license; these Terms cover usage.',
+    },
+
+    { kind: 'h2', text: '1. Acceptance' },
+    {
+      kind: 'p',
+      text:
+        'By installing or using ComfyUI Desktop 2.0 (the "Desktop App"), you agree to these Terms of Service and the EULA. If you don\'t agree, don\'t install or use the Desktop App.',
+    },
+
+    { kind: 'h2', text: '2. Acceptable use' },
+    { kind: 'p', text: 'You agree **not to**:' },
+    {
+      kind: 'ul',
+      items: [
+        'Use the Desktop App to generate or distribute content that is illegal in your jurisdiction, including (without limitation) child sexual abuse material (CSAM), non-consensual intimate imagery, or material that infringes another person\'s intellectual property.',
+        'Use the Desktop App to harass, threaten, defame, or impersonate any person.',
+        'Use the Desktop App in violation of applicable export-control, sanctions, or privacy laws.',
+        'Attempt to interfere with the Desktop App\'s update servers, telemetry endpoints, or any of our other services.',
+        'Use the Desktop App to develop or train systems that compete with the Desktop App by reverse-engineering the proprietary portions of the distributed binary (this restriction does not apply to use of the open-source Source Code, which is governed by MIT).',
+      ],
+    },
+
+    { kind: 'h2', text: '3. Your Content' },
+    {
+      kind: 'p',
+      text:
+        'You retain **all rights** to the workflows, prompts, models, and generated outputs you produce using the Desktop App (collectively, "Your Content"). We claim no ownership, license, or interest in Your Content, and we do not see, store, or have any access to it — see the Privacy Policy.',
+    },
+    {
+      kind: 'p',
+      text:
+        'You are responsible for ensuring Your Content complies with applicable law and the licenses of the models you use. Comfy Org has no role in moderating Your Content, because we never see it.',
+    },
+
+    { kind: 'h2', text: '4. Third-party models and custom nodes' },
+    {
+      kind: 'p',
+      text:
+        'The Desktop App installs ComfyUI, custom nodes, and AI models on your machine at your direction at runtime. Those components are governed by their own licenses, which apply directly between you and their respective authors. Comfy Org is not a party to those agreements, does not distribute those components, and is not responsible for their behavior, outputs, or licensing.',
+    },
+    {
+      kind: 'p',
+      text:
+        'You agree to comply with the license terms of every model and custom node you install. Many model licenses restrict commercial use, certain content categories, or specific kinds of training — check each before using it.',
+    },
+
+    { kind: 'h2', text: '5. Comfy Cloud' },
+    {
+      kind: 'p',
+      text:
+        'If you sign in to Comfy Cloud from the Desktop App, your use of Comfy Cloud is governed by the **Comfy Org Terms of Service** at comfy.org/terms — not by these Desktop Terms. Comfy Cloud has its own pricing, privacy notice, and acceptable-use rules.',
+    },
+
+    { kind: 'h2', text: '6. Telemetry and privacy' },
+    {
+      kind: 'p',
+      text:
+        'The Desktop App collects usage analytics and crash reports if you opt in on the first-launch consent screen. Before you sign in to Comfy Cloud, this data is keyed by a local device ID; if you sign in, it is linked to your Comfy account. You can turn this off at any time in **Settings → Telemetry**. Workflows, prompts, models, and outputs are never collected. See the Privacy Policy for details.',
+    },
+
+    { kind: 'h2', text: '7. Disclaimer of warranty' },
+    {
+      kind: 'p',
+      text:
+        '**THE DESKTOP APP IS PROVIDED "AS-IS" AND "AS-AVAILABLE,"** without warranties of any kind. Generative AI outputs may be inaccurate, biased, offensive, or otherwise unsuitable. We make no representation about output quality, fitness for a particular purpose, or compatibility with your hardware. See Section 9 of the EULA for the full disclaimer.',
+    },
+
+    { kind: 'h2', text: '8. Limitation of liability' },
+    {
+      kind: 'p',
+      text:
+        '**TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW**, Comfy Org will not be liable for indirect, incidental, special, consequential, or punitive damages, or for loss of profits, revenue, data, or business opportunity arising from or related to your use of the Desktop App. Our total cumulative liability is capped per Section 10 of the EULA.',
+    },
+
+    { kind: 'h2', text: '9. Term and termination' },
+    {
+      kind: 'p',
+      text:
+        'These Terms take effect when you install or use the Desktop App and continue until terminated. You may terminate by uninstalling the app. We may terminate or suspend your access if you materially breach these Terms or the EULA. Sections 2 (acceptable use), 3 (Your Content), 4 (third-party models), 7 (warranty), 8 (liability), 10 (governing law) survive termination.',
+    },
+
+    { kind: 'h2', text: '10. Governing law and disputes' },
+    {
+      kind: 'p',
+      text:
+        'These Terms are governed by the laws of the **State of Delaware, USA**, excluding its conflict-of-law rules. Any dispute will be resolved exclusively in the state or federal courts located in Delaware. If you are a consumer in a jurisdiction that grants non-waivable consumer rights, this section does not override those rights.',
+    },
+
+    { kind: 'h2', text: '11. Changes to these Terms' },
+    {
+      kind: 'p',
+      text:
+        'We may update these Terms from time to time. The **Effective date** at the top reflects the latest version. Material changes will be surfaced in the Desktop App on first launch after the change. Continued use after the Effective date means you accept the updated Terms.',
+    },
+
+    { kind: 'h2', text: '12. Contact' },
+    {
+      kind: 'ul',
+      items: [
+        'Terms questions: **legal@comfy.org**',
+        'Privacy questions: **privacy@comfy.org**',
+        'General: **comfy.org**',
+      ],
+    },
+  ],
+}
+
+/* ============================================================
  * Privacy Policy
  * ============================================================ */
 
@@ -275,31 +387,20 @@ export const PRIVACY_POLICY: PrivacyPolicy = {
   effectiveDate: '2026-05-19',
   appliesTo: 'ComfyUI Desktop 2.0',
   blocks: [
-    { kind: 'h2', text: 'Plain-English summary' },
     {
       kind: 'p',
       text:
-        "ComfyUI Desktop runs locally on your computer. Your workflows, prompts, models, and generated outputs stay on your machine. We don't see them, we don't upload them, and we have no copy of them.",
-    },
-    {
-      kind: 'p',
-      text:
-        'The only data that leaves your computer is anonymous product analytics (which features get used, how often the app launches, what version + OS you\'re on) and crash reports. You can turn both off in Settings at any time.',
-    },
-    {
-      kind: 'p',
-      text:
-        "If you sign in to Comfy Cloud, that's a separate flow with its own terms — this policy doesn't cover the cloud service.",
+        'This Privacy Policy describes what data Comfy Org collects from your use of the ComfyUI Desktop 2.0 application, how it is used, who processes it, and the choices and rights you have.',
     },
 
     { kind: 'h2', text: 'What we collect' },
-    { kind: 'h3', text: 'Anonymous usage analytics (via PostHog)' },
+    { kind: 'h3', text: 'Usage analytics (via PostHog)' },
     { kind: 'p', text: 'Sent only if you have analytics enabled (toggle on the consent screen and in Settings).' },
     {
       kind: 'ul',
       items: [
         'App version and platform (e.g. "Desktop 2.0.1, macOS 14.4 ARM")',
-        'Anonymous device ID generated locally (not tied to your name, email, or hardware identifiers we can reverse)',
+        'A local device ID generated locally. Before you sign in to Comfy Cloud, this ID is not tied to your name, email, or any hardware identifier we can reverse. Once you sign in, the device ID is linked to your Comfy account.',
         'Feature events ("install completed," "workflow opened," "settings panel opened") with non-identifying metadata',
         'Approximate timing of those events',
       ],
@@ -324,7 +425,7 @@ export const PRIVACY_POLICY: PrivacyPolicy = {
       items: [
         'Stack traces and error messages from crashes',
         'App version, platform',
-        'Anonymous device ID',
+        'Local device ID (or Comfy account ID if you have signed in)',
       ],
     },
     {
@@ -390,11 +491,11 @@ export const PRIVACY_POLICY: PrivacyPolicy = {
     {
       kind: 'ul',
       items: [
-        'Anonymous usage analytics: up to **24 months** rolling, then anonymized further or deleted.',
+        'Usage analytics: up to **24 months** rolling, then aggregated further or deleted.',
         'Crash reports: up to **15 days** at full fidelity, then sampled or aggregated.',
         'Long-term aggregate analytics: up to **36 months** in aggregated form.',
         'Update-server logs: up to **90 days**.',
-        'Local anonymous device ID: stored on your machine only, removed on uninstall.',
+        'Local device ID: stored on your machine only, removed on uninstall.',
       ],
     },
 
@@ -429,7 +530,7 @@ export const PRIVACY_POLICY: PrivacyPolicy = {
     {
       kind: 'p',
       text:
-        'Because the Desktop App doesn\'t require an account, you are anonymous to us by default. For deletion or access requests, tell us your approximate install date, platform, and version — we\'ll do a best-effort match against our records. We will **not** ask for additional identifying information (e.g. government ID) because the data we hold is anonymous and cannot reliably be matched to a real-world identity.',
+        'The Desktop App doesn\'t require an account, so before you sign in to Comfy Cloud you are not directly identified to us — the only identifier we hold is a local device ID. If you sign in to Comfy Cloud, your telemetry is linked to your account from that point forward. For deletion or access requests, sign in and use your account to identify yourself; or, if you have never signed in, tell us your approximate install date, platform, and version and we\'ll do a best-effort match against our records.',
     },
 
     { kind: 'h2', text: 'Children' },
@@ -583,6 +684,7 @@ export const THIRD_PARTY_NOTICES: PrivacyPolicy = {
 
 export const LEGAL_DOCS: Record<LegalDocId, PrivacyPolicy> = {
   eula: EULA,
+  tos: TOS,
   privacy: PRIVACY_POLICY,
   notices: THIRD_PARTY_NOTICES,
 }

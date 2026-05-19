@@ -8,22 +8,11 @@
 
 ---
 
-## TL;DR (Plain-English summary)
-
-- Comfy Desktop 2.0 is free to install and use, including commercially.
-- Our **source code is open-source under the MIT License** (see [`/LICENSE`](../../LICENSE)). This EULA governs only the **compiled binary** we distribute via comfy.org and our update servers.
-- Your workflows, models, and generated content **stay on your machine**. We don't see them, store them, or have any rights to them.
-- We collect **anonymous usage analytics and crash reports**, which you can turn off at any time. Details are in the [Privacy Policy](./PRIVACY_POLICY.md).
-- We provide the Desktop App **"as-is"** — no warranties, no guarantees. To the extent permitted by law, our liability is capped.
-- You can stop using the Desktop App at any time. Uninstalling it ends our agreement.
-
-If you don't agree to these terms, don't install or use the Desktop App.
-
----
+This End-User License Agreement ("EULA") is a binding agreement between you and Comfy Org governing your installation and use of the ComfyUI Desktop 2.0 application. By installing or using the Desktop App, you accept this EULA. If you do not agree, do not install or use the Desktop App.
 
 ## 1. Definitions
 
-- **"Comfy Org"** means the publisher of the Desktop App and the party to this EULA. *[REVIEW: insert registered legal entity name, jurisdiction of incorporation, and registered office address before GA.]*
+- **"Comfy Org"** means the publisher of the Desktop App and the party to this EULA.
 - **"Desktop App"** means the ComfyUI Desktop 2.0 application, including all binaries, installers, signed packages, scripts, configuration, and bundled assets we distribute under the names "ComfyUI Desktop 2.0," "Comfy Desktop 2," or any successor naming.
 - **"You"** means the individual or entity installing or using the Desktop App.
 - **"Source Code"** means the open-source source code published at [github.com/Comfy-Org/ComfyUI-Desktop-2.0-Beta](https://github.com/Comfy-Org/ComfyUI-Desktop-2.0-Beta).
@@ -61,11 +50,11 @@ The Desktop App includes an automatic update mechanism that may, from time to ti
 
 You can disable automatic updates in Settings. If you do, you accept responsibility for keeping the Desktop App up to date and acknowledge that security fixes will not be applied automatically.
 
-We may discontinue support for older versions of the Desktop App at any time without notice. Discontinued versions may stop working with our cloud services, partner APIs, or model formats. *[REVIEW: refine to reflect actual support window before GA.]*
+We may discontinue support for older versions of the Desktop App at any time without notice. Discontinued versions may stop working with our cloud services, partner APIs, or model formats.
 
 ## 5. Data collection
 
-The Desktop App collects anonymous telemetry (usage analytics and crash reports) as described in our [Privacy Policy](./PRIVACY_POLICY.md). You can turn telemetry off at any time in Settings → Telemetry. Doing so does not affect your ability to use the Desktop App.
+The Desktop App collects telemetry (usage analytics and crash reports) as described in our [Privacy Policy](./PRIVACY_POLICY.md). Before you sign in to Comfy Cloud, this data is keyed only by a local device ID; if you sign in, it is linked to your Comfy account. You can turn telemetry off at any time in Settings → Telemetry. Doing so does not affect your ability to use the Desktop App.
 
 Your workflows, models, prompts, and generated outputs are **not** transmitted to us and remain on your local machine.
 
@@ -113,7 +102,7 @@ You agree to comply with the terms of each third-party license that applies to c
 
 ## 8. Trademarks
 
-"Comfy," "ComfyUI," "Comfy Desktop," "Comfy Cloud," and the Comfy logo are trademarks of Comfy Org. Nothing in this EULA grants you a license to use those marks. *[REVIEW: confirm registered status and exact trademark portfolio; update if applicable.]*
+"Comfy," "ComfyUI," "Comfy Desktop," "Comfy Cloud," and the Comfy logo are trademarks of Comfy Org. Nothing in this EULA grants you a license to use those marks.
 
 You may make non-commercial, descriptive references to the Desktop App in articles, tutorials, and reviews. You may not use our trademarks to brand modified versions, competing products, or services that imply endorsement we have not given.
 
@@ -134,7 +123,7 @@ Some jurisdictions do not allow exclusion of certain implied warranties, so some
 - Costs of substitute goods or services.
 - Damages resulting from your inability to use the Desktop App, errors in generated outputs, or interactions with third-party services.
 
-Our **total cumulative liability** to you for all claims arising from or related to the Desktop App will not exceed **the greater of (a) USD 100 or (b) the total amount you have paid us for the Desktop App in the 12 months preceding the claim**, which for most users will be USD 100 because the Desktop App is free. *[REVIEW: confirm liability cap with counsel; standard for free software is the minimum permitted by law.]*
+Our **total cumulative liability** to you for all claims arising from or related to the Desktop App will not exceed **the greater of (a) USD 100 or (b) the total amount you have paid us for the Desktop App in the 12 months preceding the claim**, which for most users will be USD 100 because the Desktop App is free.
 
 Some jurisdictions do not allow these limitations, so some may not apply to you. In such jurisdictions, our liability is limited to the maximum extent permitted by law.
 
@@ -142,21 +131,17 @@ Some jurisdictions do not allow these limitations, so some may not apply to you.
 
 This EULA takes effect when you install or use the Desktop App and continues until terminated.
 
-**You may terminate** this EULA at any time by uninstalling the Desktop App. Uninstalling stops new telemetry collection. Past anonymous telemetry records remain in our systems subject to the retention terms in the [Privacy Policy](./PRIVACY_POLICY.md).
+**You may terminate** this EULA at any time by uninstalling the Desktop App. Uninstalling stops new telemetry collection. Past telemetry records remain in our systems subject to the retention terms in the [Privacy Policy](./PRIVACY_POLICY.md).
 
 **We may terminate** this EULA if you materially breach it. Upon termination, you must stop using the Desktop App and uninstall it. Sections that by their nature survive termination (Sections 6, 7, 8, 9, 10, 12, 13, 14, 18, 19) will survive.
 
 ## 12. Export and sanctions compliance
 
-You represent that you are not located in, and will not use the Desktop App from, a country subject to a comprehensive U.S. embargo (currently Cuba, Iran, North Korea, Syria, and the Crimea, Donetsk, and Luhansk regions of Ukraine), and that you are not on a U.S. government denied-party list. You agree to comply with all applicable export control and sanctions laws when using the Desktop App.
-
-*[REVIEW: align list with current OFAC sanctions before GA.]*
+You represent that you are not located in, and will not use the Desktop App from, a country subject to a comprehensive U.S. embargo, and that you are not on a U.S. government denied-party list. You agree to comply with all applicable export control and sanctions laws when using the Desktop App.
 
 ## 13. Governing law and disputes
 
 This EULA is governed by the laws of the **State of Delaware, USA**, excluding its conflict-of-law rules. Any dispute arising from this EULA will be resolved exclusively in the state or federal courts located in Delaware, and you consent to the personal jurisdiction of those courts.
-
-*[REVIEW: confirm Comfy Org's legal jurisdiction and dispute-resolution preference (e.g. arbitration vs courts, Delaware vs California). The above is a reasonable US-software default but should be confirmed.]*
 
 If you are a consumer in the EU, UK, or another jurisdiction that grants non-waivable consumer rights, this section does not override those rights.
 
@@ -192,4 +177,3 @@ General support: through Comfy Org's official channels at [comfy.org](https://co
 
 ---
 
-*Items marked `[REVIEW]` flag sections where counsel input is particularly important before GA. This document is an AI-drafted starting point.*

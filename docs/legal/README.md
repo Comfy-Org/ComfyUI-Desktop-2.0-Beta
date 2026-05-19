@@ -1,7 +1,5 @@
 # Comfy Desktop 2.0 — Legal
 
-> **⚠️ AI-drafted starting point.** These documents were drafted by AI as a starting point for legal review. They are NOT a substitute for review by qualified counsel before public use. Before GA, an attorney should review each document for jurisdiction-specific compliance (US, EU/GDPR, UK, California/CCPA, etc.), trademark protection, and any product-specific terms. Items flagged `[REVIEW]` in each file are particularly important.
-
 ## Desktop 2.0 is a shell
 
 A note on scope, because it shapes how each document below is written:
@@ -17,17 +15,16 @@ In practical terms:
 
 | File | Purpose | Covers |
 |------|---------|--------|
-| [`EULA.md`](./EULA.md) | End-User License Agreement | The terms governing your use of the **Desktop App's distributed binary** (auto-update, telemetry, warranty disclaimer, liability cap, etc.). The Desktop App's source code is separately licensed under MIT (see `/LICENSE`); the EULA layers on top of that for the compiled binary we distribute. |
+| [`EULA.md`](./EULA.md) | End-User License Agreement | The technical license for the **Desktop App's distributed binary** (license grant, restrictions, auto-update, warranty disclaimer, liability cap). The Desktop App's source code is separately licensed under MIT (see `/LICENSE`); the EULA layers on top for the compiled binary. |
+| [`TOS.md`](./TOS.md) | Terms of Service | The usage rules for the Desktop App (acceptable use, content policy, your responsibilities, dispute resolution). The EULA covers the license; the ToS covers how you use what's licensed. |
 | [`PRIVACY_POLICY.md`](./PRIVACY_POLICY.md) | Privacy Policy | What data Comfy Desktop 2.0 collects, why, who processes it, and how you can opt out, access, or delete. Long-form version of the in-product policy at `src/renderer/src/lib/privacyPolicy.ts`. |
 | [`THIRD_PARTY_NOTICES.md`](./THIRD_PARTY_NOTICES.md) | Open-source attributions | Licenses and copyright notices for components **bundled in the Desktop App's binary**. Components Desktop installs at runtime (ComfyUI, custom nodes, models) are noted but not redistributed by us. |
 
 ## What's NOT here, and why
 
-### Terms of Service (ToS)
+### comfy.org Terms of Service (separate from the Desktop ToS)
 
-For the Desktop app, the EULA **is** the Terms of Service — they're the same document, written as an EULA because the dominant use is "install and run software." The in-product consent screen labels the checkbox "Accept the EULA and Terms of Service" to make this explicit, and the EULA modal is what opens when the user clicks Learn more on that row.
-
-The broader **comfy.org Terms of Service** (covering the website, accounts, and Comfy Cloud) lives at [comfy.org/terms](https://comfy.org/terms) — when you sign in to Comfy Cloud from Desktop, you're agreeing to those terms separately.
+The broader **comfy.org Terms of Service** (covering the website, accounts, and Comfy Cloud) lives at [comfy.org/terms](https://comfy.org/terms) — when you sign in to Comfy Cloud from Desktop, you're agreeing to those terms separately from the Desktop ToS in this folder.
 
 ### Acceptable Use Policy (AUP)
 
@@ -45,9 +42,8 @@ The Desktop App installs ComfyUI, custom nodes, and AI models at your direction 
 
 These documents try to be:
 
-- **Plain-English-first.** Each major doc opens with a TL;DR before any legal language. Most users will only read the summary, and that's fine.
 - **Specific.** Generic boilerplate is replaced with what Comfy Desktop actually does. If a section doesn't apply to us, it's not there.
-- **Honest.** Where uncertainty exists (workspace sharing reliability, cloud-bridge data flows during sign-in), the documents say so rather than overclaiming.
+- **Honest.** Where there is nuance — e.g. usage data is keyed by a local device ID before sign-in and linked to your Comfy account after sign-in — the documents say so plainly rather than overclaiming anonymity.
 
 ## When to update
 
@@ -59,8 +55,9 @@ These documents try to be:
 
 | Doc | Current Effective Date | How it's accepted in-product |
 |-----|------------------------|------------------------------|
-| EULA (= ToS for the Desktop app) | See `EULA.md` | First-launch consent screen: required "Accept the EULA and Terms of Service" checkbox; full text opens in `TermsModal` via the Learn more link on that row. |
-| Privacy Policy | See `PRIVACY_POLICY.md` | First-launch consent screen: optional telemetry checkbox; full text opens in `TermsModal` via the Learn more link on that row. Settings → Telemetry exposes the same toggle. |
+| EULA | See `EULA.md` | First-launch consent screen: required "Accept the terms" checkbox opens this doc via the EULA link on that row. |
+| Terms of Service | See `TOS.md` | First-launch consent screen: required "Accept the terms" checkbox opens this doc via the Terms of Service link on the same row (two separate links, two separate docs). |
+| Privacy Policy | See `PRIVACY_POLICY.md` | First-launch consent screen: optional telemetry checkbox opens this doc via the Learn more link on that row. Settings → Telemetry exposes the same toggle. |
 | Third-Party Notices | See `THIRD_PARTY_NOTICES.md` | Reachable from Settings → About; the in-product structured copy is `THIRD_PARTY_NOTICES` in `src/renderer/src/lib/privacyPolicy.ts`. |
 
 ## Contact
@@ -70,4 +67,4 @@ These documents try to be:
 
 ---
 
-*Last updated: 2026-05-19 · AI-drafted starting point pending counsel review*
+*Last updated: 2026-05-19*

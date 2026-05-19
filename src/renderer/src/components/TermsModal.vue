@@ -26,6 +26,8 @@ const titleKey = computed(() => {
   switch (props.doc) {
     case 'eula':
       return 'firstUse.eulaModalTitle'
+    case 'tos':
+      return 'firstUse.tosModalTitle'
     case 'notices':
       return 'firstUse.noticesModalTitle'
     default:

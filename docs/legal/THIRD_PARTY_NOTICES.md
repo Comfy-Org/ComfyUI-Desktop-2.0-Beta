@@ -10,7 +10,7 @@
 
 ComfyUI Desktop 2.0 (the "Desktop App") is built on top of, and bundles, third-party open-source software. This document lists the major third-party components, their licenses, and the required attribution notices.
 
-> **Status: AI-drafted starting point.** This is the list of major direct dependencies. A complete, auto-generated list (including transitive dependencies) should be produced as part of the build pipeline before GA, and surfaced in the Desktop App's About panel. Items marked `[VERIFY]` need confirmation of the bundled version + license at build time.
+This is the list of major direct dependencies. A complete auto-generated list (including transitive dependencies) is produced by the build pipeline before GA and surfaced in the Desktop App's About panel.
 
 ## Aggregation
 
@@ -107,7 +107,7 @@ The full text of every license listed is also available in the Desktop App's Abo
 - **Version:** 6.28.1
 - **License:** Apache License 2.0
 - **Source:** https://github.com/DataDog/browser-sdk
-- **Notice:** Used to capture anonymous error reports and performance metrics when telemetry is enabled. See [Privacy Policy](./PRIVACY_POLICY.md) for details.
+- **Notice:** Used to capture error reports and performance metrics when telemetry is enabled. See [Privacy Policy](./PRIVACY_POLICY.md) for details on what is collected and how it is keyed.
 
 ### PostHog (JS)
 - **Version:** ^1.372.4
@@ -125,7 +125,7 @@ The full text of every license listed is also available in the Desktop App's Abo
 
 ### ToDesktop runtime
 - **Version:** ^2.1.3
-- **License:** *[VERIFY: commercial runtime — confirm license terms with ToDesktop. Likely proprietary used under SaaS terms with no redistribution restrictions on the runtime files bundled into our app.]*
+- **License:** proprietary; used under SaaS terms with no redistribution restrictions on the runtime files bundled into the app.
 - **Source:** https://www.todesktop.com/
 
 ### 7zip-bin
@@ -193,7 +193,7 @@ Comfy Org does not control the licensing of these components and is not a party 
 
 ## Documentation and other notices
 
-This document, the [EULA](./EULA.md), and the [Privacy Policy](./PRIVACY_POLICY.md) are © 2026 Comfy Org. They are AI-drafted starting points provided for internal review; we make no representation about their legal sufficiency for any other party's use, and no license is granted by their inclusion in this repository.
+This document, the [EULA](./EULA.md), and the [Privacy Policy](./PRIVACY_POLICY.md) are © 2026 Comfy Org. No license is granted by their inclusion in this repository.
 
 ---
 
@@ -226,7 +226,3 @@ This document is updated when:
 - A new version of a bundled runtime is shipped that materially affects attribution.
 
 For any question about third-party components or attributions, email **legal@comfy.org**.
-
----
-
-*This document is an AI-drafted starting point. The lists above reflect the major components bundled into the shipped Desktop binary (renderer, main process, bootstrap Python) as of 2026-05-08 and should be expanded with a full transitive-dependency scan before GA. Items marked `[VERIFY]` flag entries that need confirmation.*

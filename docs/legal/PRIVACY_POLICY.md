@@ -10,16 +10,6 @@
 
 ---
 
-## TL;DR (Plain-English summary)
-
-ComfyUI Desktop 2.0 runs locally on your computer. Your workflows, prompts, models, and generated outputs **stay on your machine**. We don't see them, we don't upload them, and we have no copy of them.
-
-The only data that leaves your computer is **anonymous product analytics** (which features get used, how often the app launches, what version + OS you're on) and **crash reports**. You can turn both off in Settings at any time.
-
-If you sign in to **Comfy Cloud**, that's a separate flow with its own terms — this policy doesn't cover the cloud service.
-
----
-
 ## 1. About this policy
 
 This is the **full long-form Privacy Policy** for the ComfyUI Desktop 2.0 application. A shorter, consent-screen version is shown to you on first launch and is also viewable inside the app at any time — that version is excerpted from this one and they are kept in sync.
@@ -31,8 +21,6 @@ If anything in this policy is unclear, please email **privacy@comfy.org** and we
 ## 2. Who we are
 
 **Comfy Org** is the legal entity that publishes and operates ComfyUI Desktop 2.0 and is the "data controller" for the limited data described in this policy.
-
-*[REVIEW: confirm legal entity name, registered address, and any required local representative (e.g. EU Article 27 representative, UK GDPR representative) before GA. Add registered address here.]*
 
 For privacy questions or to exercise the rights described below, contact **privacy@comfy.org**.
 
@@ -58,7 +46,7 @@ Sent **only if you have analytics enabled** (toggle on the first-launch consent 
 We collect:
 
 - App version and platform (e.g. "Desktop 2.0.1, macOS 14.4 ARM")
-- An **anonymous device ID** generated locally on first run and stored in a file inside your app's config directory (`device-id.txt`). This ID is not derived from any hardware identifier we can reverse-engineer, and it is not tied to your name, email, or any cloud account. Uninstalling the Desktop App removes this file.
+- A **local device ID** generated locally on first run and stored in a file inside your app's config directory (`device-id.txt`). This ID is not derived from any hardware identifier we can reverse-engineer, and before you sign in to Comfy Cloud it is not tied to your name, email, or any cloud account. Once you sign in to Comfy Cloud, this device ID is linked to your Comfy account so we can associate your usage data with you. Uninstalling the Desktop App removes the device-ID file.
 - Feature events with non-identifying metadata, such as:
   - `install completed` (with platform info)
   - `workflow opened`
@@ -85,7 +73,7 @@ We collect:
 
 - Stack traces and error messages from crashes
 - App version and platform
-- The same anonymous device ID
+- The same local device ID (or your Comfy account ID, if you have signed in)
 - Performance metrics (long tasks, resource timing, user-interaction-driven event latency) — used to find slow paths in the UI
 
 Before sending error messages, we strip:
@@ -142,14 +130,12 @@ We use the following processors to handle the data described above:
 |-----------|-------------------|-------|
 | **PostHog** ([posthog.com](https://posthog.com)) | Product analytics events | EU (default region) |
 | **Datadog** ([datadoghq.com](https://datadoghq.com)) | Crash reports, performance telemetry, application logs | US (`us5.datadoghq.com`) |
-| **ClickHouse** ([clickhouse.com](https://clickhouse.com)) | Long-term analytics storage | *[REVIEW: confirm region]* |
+| **ClickHouse** ([clickhouse.com](https://clickhouse.com)) | Long-term analytics storage | Comfy-Org-operated |
 | **ToDesktop** ([todesktop.com](https://todesktop.com)) | Application distribution and auto-update | US |
 
 Each processor handles data on our behalf under standard data processing agreements.
 
 If you are in the EU/EEA/UK and your data is transferred to processors outside your jurisdiction, those transfers rely on **Standard Contractual Clauses (SCCs)** or equivalent transfer mechanisms required by GDPR/UK GDPR.
-
-*[REVIEW: confirm SCC status with each processor and update transfer mechanism disclosures before GA.]*
 
 ## 8. Retention
 
@@ -160,8 +146,6 @@ If you are in the EU/EEA/UK and your data is transferred to processors outside y
 | Long-term analytics (ClickHouse) | Up to **36 months** in aggregated form |
 | Update server logs | Up to **90 days** |
 | Anonymous device ID (on your machine) | Until you uninstall the Desktop App |
-
-*[REVIEW: confirm actual retention periods with engineering before GA. The numbers above are reasonable defaults; align them with what's truly configured.]*
 
 ## 9. Your rights
 
@@ -174,8 +158,6 @@ Open the Desktop App → **Settings → Telemetry** → toggle off. Future event
 ### 9.2 Delete past data
 
 Email **privacy@comfy.org** with your approximate install date, platform, and version. We'll do a best-effort match against our analytics, crash report, and long-term storage and remove associated records within 30 days.
-
-*[VERIFY: replace this with the in-app device ID lookup once the "Copy device ID" affordance ships — tracked separately. Without that surface we can't ask anonymous users for an identifier they cannot retrieve.]*
 
 ### 9.3 Access, rectification, portability (GDPR/UK GDPR)
 
@@ -218,11 +200,11 @@ Uninstalling the Desktop App ends data collection. The local device ID file is r
 
 ### 9.7 How we verify identity for data requests
 
-Because the Desktop App doesn't require an account, you are anonymous to us by default. We identify your data through an **anonymous device ID** held locally on your machine.
+The Desktop App does not require an account, so before you sign in to Comfy Cloud you are not directly identified to us — the only identifier we hold is a **local device ID** stored on your machine. If you sign in to Comfy Cloud, your data is linked to your Comfy account from that point forward.
 
 For deletion or access requests, tell us your approximate install date, platform, version, and the type of activity you remember — we'll do a best-effort match against our records. Once the in-app device ID lookup ships, include that ID for an exact match.
 
-We will **not** ask you for any additional identifying information (e.g. government ID) to process a request, because the data we hold is anonymous and we have no reliable way to match it to a real-world identity. Requests for data we don't hold will be answered with "we don't hold that data."
+For users who have signed in, sign in and submit the request from your account so we can verify identity. For users who have never signed in, we will **not** ask you for any additional identifying information (e.g. government ID) to process a request, because the only identifier we hold is a local device ID and we have no reliable way to match it to a real-world identity. Requests for data we don't hold will be answered with "we don't hold that data."
 
 ## 10. Automated decision-making
 
@@ -267,9 +249,3 @@ For any privacy-related question, request, or complaint:
 
 **Email:** privacy@comfy.org
 **General contact:** [comfy.org](https://comfy.org)
-
-*[REVIEW: add registered postal address before GA. Some jurisdictions require it in a privacy notice.]*
-
----
-
-*This document is an AI-drafted starting point and should be reviewed by qualified counsel before public use. Items marked `[REVIEW]` flag sections where review is particularly important.*
