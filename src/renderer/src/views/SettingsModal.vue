@@ -1,4 +1,6 @@
 <script setup lang="ts">
+// TODO(stale-old-modal): delete after Settings drawer (v2,
+// ComfyUISettingsPanel) reaches functional parity and ships everywhere.
 import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ArrowDownToLine, Box, FolderOpen, Settings as SettingsIcon } from 'lucide-vue-next'
@@ -233,6 +235,15 @@ function handleUpdateInstallation(inst: Installation): void {
 <style>
 .settings-modal-shell > .view-modal-body {
   padding: 0;
+}
+/* Match ComfyUISettingsPanel's transparent-black glass surface during
+ * the v2 coexistence window so both Settings entry-points read the
+ * same. TODO(brand-cleanup): drop when the legacy SettingsModal is
+ * removed. */
+.settings-modal-shell {
+  background: color-mix(in srgb, var(--bg) 80%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }
 /* Bump the modal's max-width when the sidebar is rendered so the
  * right-hand content area keeps roughly the same effective width as

@@ -2,13 +2,14 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
-  ArrowDownToLine,
-  CheckCircle2,
+  CircleAlert,
+  CircleCheck,
   Eraser,
+  LoaderCircle,
   PauseCircle,
-  PlayCircle,
-  X,
-  XCircle,
+  // TODO(brand-cleanup): PlayCircle was the Resume action icon — redesign skips it; restore if Pause/Resume comes back.
+  // PlayCircle,
+  X
 } from 'lucide-vue-next'
 import { fileLabel, statusKindClass, statusLine } from '../lib/downloadFormatters'
 
@@ -76,11 +77,7 @@ const bridge = (window as unknown as { __comfyTitlePopup?: PopupBridge }).__comf
 
 const props = defineProps<{ state: DownloadsState }>()
 
-const TERMINAL_STATUSES = new Set<DownloadEntry['status']>([
-  'completed',
-  'error',
-  'cancelled',
-])
+const TERMINAL_STATUSES = new Set<DownloadEntry['status']>(['completed', 'error', 'cancelled'])
 
 function isTerminal(d: DownloadEntry): boolean {
   return TERMINAL_STATUSES.has(d.status)
@@ -94,23 +91,22 @@ function isTerminal(d: DownloadEntry): boolean {
  *  recently kicked-off download surfaces at the top of the list. */
 const orderedEntries = computed<DownloadEntry[]>(() =>
   [...props.state.active, ...props.state.recent].sort(
-    (a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0),
-  ),
+    (a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0)
+  )
 )
 
-const finishedCount = computed(
-  () => props.state.recent.length,
-)
+const finishedCount = computed(() => props.state.recent.length)
 
-function pause(url: string): void {
-  bridge?.downloadsAction({ action: 'pause', url })
-}
-function resume(url: string): void {
-  bridge?.downloadsAction({ action: 'resume', url })
-}
 function cancel(url: string): void {
   bridge?.downloadsAction({ action: 'cancel', url })
 }
+// TODO(brand-cleanup): redesign skips pause/resume — keep handlers wired for an easy restore.
+// function pause(url: string): void {
+//   bridge?.downloadsAction({ action: 'pause', url })
+// }
+// function resume(url: string): void {
+//   bridge?.downloadsAction({ action: 'resume', url })
+// }
 function showInFolder(url: string, savePath: string): void {
   bridge?.downloadsAction({ action: 'show-in-folder', url, savePath })
 }
@@ -123,33 +119,94 @@ function clearFinished(): void {
 function viewAllInSettings(): void {
   bridge?.openSettingsTab('downloads')
 }
+
+/** Right-edge X dispatches the contextually correct action: for an
+ *  in-flight entry it cancels the download (replacing the old explicit
+ *  Cancel button), for a terminal entry it removes the row from the
+ *  list. Functions identical to the prior actions row — only the
+ *  affordance moved into the title row per the redesign. */
+function handleClose(d: DownloadEntry): void {
+  if (isTerminal(d)) dismiss(d.url)
+  else cancel(d.url)
+}
+
+function closeLabel(d: DownloadEntry): string {
+  return isTerminal(d) ? t('downloadsPopup.remove') : t('downloadsPopup.cancel')
+}
+
+/** Subtitle under the filename. Per the new design the active row
+ *  shows just the percentage (e.g. `55%`) instead of the full
+ *  bytes/speed/ETA breakdown; terminal rows show `Show in Finder` if
+ *  a save path is known so the row reads as a click affordance. The
+ *  full `statusLine()` helper still feeds error/cancelled rows that
+ *  lack a save path. */
+function subtitle(d: DownloadEntry): string {
+  if (d.status === 'downloading' || d.status === 'pending') {
+    return d.status === 'pending' ? statusLine(d) : `${Math.round(d.progress * 100)}%`
+  }
+  if (d.status === 'paused') {
+    return `${t('downloadsPopup.pause')} · ${Math.round(d.progress * 100)}%`
+  }
+  if (d.status === 'completed' && d.savePath) {
+    return t('downloadsPopup.showInFolder')
+  }
+  if ((d.status === 'error' || d.status === 'cancelled') && d.savePath) {
+    return t('downloadsPopup.showInFolder')
+  }
+  return statusLine(d)
+}
+
+/** Whole-row click — completed entries with a save path open the file
+ *  location, matching the design's removal of the explicit
+ *  "Show in folder" button. Other statuses are not clickable. */
+function handleRowClick(d: DownloadEntry, event: MouseEvent): void {
+  if ((event.target as HTMLElement).closest('.downloads-item-close')) return
+  if (d.status === 'completed' && d.savePath) showInFolder(d.url, d.savePath)
+}
+
+function isRowClickable(d: DownloadEntry): boolean {
+  return d.status === 'completed' && !!d.savePath
+}
+
+/** Inline progress-fill background — only meaningful for active
+ *  downloads. The card itself reads as the progress bar (gradient stop
+ *  at the progress%); pending/idle states fall back to the solid card
+ *  background via CSS class. */
+function progressStyle(d: DownloadEntry): Record<string, string> | undefined {
+  if (d.status !== 'downloading' && d.status !== 'pending') return undefined
+  const pct = d.status === 'pending' ? 0 : Math.max(0, Math.min(1, d.progress)) * 100
+  // Two-stop gradient with a ~1% transition so the leading edge reads
+  // as a crisp line — matches the Figma spec `0% / 54% / 54.91%`.
+  // At 100% the gradient collapses to a solid card, so a completed
+  // row keeps its filled appearance with no special-case.
+  const next = Math.min(100, pct + 0.91)
+  return {
+    background: `linear-gradient(90deg, var(--downloads-card) 0%, var(--downloads-card) ${pct}%, var(--downloads-bar-rest) ${next}%)`
+  }
+}
+
+// TODO(brand-cleanup): redesign skips Pause/Resume in the popover. The
+// bridge handlers + i18n strings remain so re-introducing them is just
+// reinstating the buttons below.
 </script>
 
 <template>
   <div class="downloads">
-    <!-- The popup is self-explanatory (it's anchored under the title-bar
-         downloads icon), so no header title — that left only the
-         "Clear finished" affordance, which now sits alone at the
-         right edge of the head row when there's anything to clear. -->
-    <header
-      v-if="finishedCount > 0"
-      class="downloads-head"
-    >
+    <header class="downloads-head">
+      <h2 class="downloads-title">{{ t('downloadsPopup.title') }}</h2>
       <button
+        v-if="finishedCount > 0"
         type="button"
         class="downloads-clear"
         :title="t('downloadsPopup.clearFinishedTooltip')"
         @click="clearFinished"
       >
-        <Eraser :size="12" />
+        <Eraser :size="14" />
         {{ t('downloadsPopup.clearFinished') }}
       </button>
     </header>
 
-    <div
-      v-if="orderedEntries.length === 0"
-      class="downloads-empty"
-    >
+    <div v-if="orderedEntries.length === 0" class="downloads-empty">
       {{ t('downloadsPopup.empty') }}
     </div>
 
@@ -158,96 +215,53 @@ function viewAllInSettings(): void {
         v-for="d in orderedEntries"
         :key="d.url"
         class="downloads-item"
-        :class="[statusKindClass(d), { 'is-finished': isTerminal(d) }]"
+        :class="[
+          statusKindClass(d),
+          {
+            'is-finished': isTerminal(d),
+            'is-clickable': isRowClickable(d)
+          }
+        ]"
+        :style="progressStyle(d)"
+        @click="(e) => handleRowClick(d, e)"
       >
-        <div class="downloads-item-row">
-          <CheckCircle2
-            v-if="d.status === 'completed'"
-            :size="14"
-            class="downloads-item-icon ok"
-          />
-          <XCircle
+        <span class="downloads-item-icon">
+          <CircleCheck v-if="d.status === 'completed'" :size="16" class="ok" />
+          <CircleAlert
             v-else-if="d.status === 'error' || d.status === 'cancelled'"
-            :size="14"
-            class="downloads-item-icon bad"
+            :size="16"
+            class="bad"
           />
-          <ArrowDownToLine v-else :size="14" class="downloads-item-icon" />
-          <span class="downloads-item-name" :title="fileLabel(d)">
-            {{ fileLabel(d) }}
-          </span>
-          <!-- Per-row dismiss — only offered for terminal entries.
-               Lives in the title row (not the actions row) so the
-               affordance reads as "remove from this list" rather
-               than a destructive delete; the trashcan was confusing
-               because it implied the downloaded file would be
-               deleted from disk. -->
-          <button
-            v-if="isTerminal(d)"
-            type="button"
-            class="downloads-item-dismiss"
-            :title="t('downloadsPopup.remove')"
-            :aria-label="t('downloadsPopup.remove')"
-            @click="dismiss(d.url)"
-          >
-            <X :size="12" />
-          </button>
+          <PauseCircle v-else-if="d.status === 'paused'" :size="16" />
+          <LoaderCircle v-else :size="16" class="spin" />
+        </span>
+        <div class="downloads-item-text">
+          <span class="downloads-item-name" :title="fileLabel(d)">{{ fileLabel(d) }}</span>
+          <span class="downloads-item-sub">{{ subtitle(d) }}</span>
         </div>
-        <div class="downloads-item-status">{{ statusLine(d) }}</div>
-        <div
-          v-if="!isTerminal(d)"
-          class="downloads-bar"
+        <!-- TODO(brand-cleanup): redesign skips Pause/Resume — restore here if needed.
+        <button
+          v-if="d.status === 'downloading'"
+          type="button"
+          :aria-label="t('downloadsPopup.pause')"
+          @click.stop="pause(d.url)"
+        ><PauseCircle :size="14" /></button>
+        <button
+          v-if="d.status === 'paused'"
+          type="button"
+          :aria-label="t('downloadsPopup.resume')"
+          @click.stop="resume(d.url)"
+        ><PlayCircle :size="14" /></button>
+        -->
+        <button
+          type="button"
+          class="downloads-item-close"
+          :title="closeLabel(d)"
+          :aria-label="closeLabel(d)"
+          @click.stop="handleClose(d)"
         >
-          <div
-            class="downloads-bar-fill"
-            :class="{ indeterminate: d.status === 'pending' }"
-            :style="
-              d.status === 'pending'
-                ? { width: '100%' }
-                : { width: `${Math.round(d.progress * 100)}%` }
-            "
-          />
-        </div>
-        <div class="downloads-item-actions">
-          <button
-            v-if="d.status === 'downloading'"
-            type="button"
-            :title="t('downloadsPopup.pause')"
-            :aria-label="t('downloadsPopup.pause')"
-            @click="pause(d.url)"
-          >
-            <PauseCircle :size="14" />
-            {{ t('downloadsPopup.pause') }}
-          </button>
-          <button
-            v-if="d.status === 'paused'"
-            type="button"
-            class="primary"
-            :title="t('downloadsPopup.resume')"
-            :aria-label="t('downloadsPopup.resume')"
-            @click="resume(d.url)"
-          >
-            <PlayCircle :size="14" />
-            {{ t('downloadsPopup.resume') }}
-          </button>
-          <button
-            v-if="!isTerminal(d)"
-            type="button"
-            class="danger"
-            :title="t('downloadsPopup.cancel')"
-            :aria-label="t('downloadsPopup.cancel')"
-            @click="cancel(d.url)"
-          >
-            <XCircle :size="14" />
-            {{ t('downloadsPopup.cancel') }}
-          </button>
-          <button
-            v-if="d.status === 'completed' && d.savePath"
-            type="button"
-            @click="showInFolder(d.url, d.savePath)"
-          >
-            {{ t('downloadsPopup.showInFolder') }}
-          </button>
-        </div>
+          <X :size="16" />
+        </button>
       </li>
     </ul>
 
@@ -261,48 +275,68 @@ function viewAllInSettings(): void {
 
 <style scoped>
 .downloads {
+  /* Local design tokens — kept here (not in main.css) because they're
+   * only consumed by this view. Sourced from the Figma spec; gradient
+   * rest stop is the one non-ramp value (sits between --neutral-700
+   * and --neutral-800). */
+  --downloads-card: #322c3d;
+  --downloads-bar-rest: #2a2332;
+  --downloads-border: rgba(255, 255, 255, 0.1);
+  --downloads-text: var(--neutral-100);
+  --downloads-text-muted: var(--text-muted);
+  --downloads-danger: #ff5454;
+
   display: flex;
   flex-direction: column;
   height: 100%;
   width: 100%;
-  box-sizing: border-box;
-  font: 12px/1.4 var(--font-sans, 'Inter', system-ui, sans-serif);
+  background: var(--neutral-800);
 }
 
-/* The header now only carries the optional "Clear finished" button —
- * right-align so it sits flush with the right edge of the popup card. */
 .downloads-head {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
   gap: 8px;
-  padding: 8px 10px 6px;
-  border-bottom: 1px solid var(--border, #494a50);
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--downloads-border);
   flex: 0 0 auto;
+}
+
+.downloads-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--neutral-100);
 }
 
 .downloads-clear {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  background: transparent;
-  border: 1px solid var(--border, rgba(127, 127, 127, 0.3));
-  border-radius: 4px;
-  padding: 2px 8px;
-  font: inherit;
-  font-size: 11px;
-  color: inherit;
+  gap: 6px;
+  height: 32px;
+  padding: 8px 16px 8px 8px;
+  color: var(--downloads-text);
+  border: none;
+  border-radius: 8px;
+  background: var(--downloads-card);
+  font-size: 12px;
   cursor: pointer;
-  opacity: 0.85;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
 }
 .downloads-clear:hover {
-  opacity: 1;
-  background: rgba(127, 127, 127, 0.12);
+  background: color-mix(in srgb, var(--downloads-card) 80%, var(--neutral-500));
+}
+.downloads-clear:focus-visible {
+  outline: 2px solid var(--neutral-50);
+  outline-offset: 2px;
 }
 
 .downloads-empty {
-  padding: 20px 14px;
-  color: var(--text-muted, #9ca0a8);
+  padding: 24px 16px;
+  color: var(--downloads-text-muted);
   text-align: center;
   font-size: 12px;
 }
@@ -313,154 +347,153 @@ function viewAllInSettings(): void {
 .downloads-list {
   list-style: none;
   margin: 0;
-  padding: 4px 0;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   overflow-y: auto;
   flex: 1 1 auto;
   min-height: 0;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.downloads-list::-webkit-scrollbar {
+  display: none;
 }
 
 .downloads-item {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 8px 14px;
-  border-bottom: 1px solid var(--border, #494a50);
-}
-.downloads-item:last-child {
-  border-bottom: none;
-}
-
-.downloads-item-row {
-  display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+  padding: 12px 16px;
+  border-radius: 8px;
+  background: var(--downloads-card);
+  transition: background 220ms ease;
+}
+.downloads-item.is-finished {
+  background: var(--downloads-card);
+}
+.downloads-item.is-error,
+.downloads-item.is-cancelled {
+  background: color-mix(in srgb, var(--downloads-card) 50%, transparent);
+}
+.downloads-item.is-clickable {
+  cursor: pointer;
+}
+.downloads-item.is-clickable:hover {
+  background: color-mix(in srgb, var(--downloads-card) 85%, var(--neutral-500));
 }
 
 .downloads-item-icon {
-  flex: 0 0 auto;
-  color: var(--accent, #60a5fa);
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--downloads-text);
+  margin-top: 2px;
+  align-self: flex-start;
 }
-.downloads-item-icon.ok {
-  color: #22c55e;
+.downloads-item-icon .ok {
+  color: var(--downloads-text);
 }
-.downloads-item-icon.bad {
-  color: #ef4444;
+.downloads-item-icon .bad {
+  color: var(--downloads-danger);
+}
+.downloads-item-icon .spin {
+  animation: downloads-spin 0.9s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .downloads-item-icon .spin {
+    animation: none;
+  }
+}
+@keyframes downloads-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.downloads-item-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
 }
 
 .downloads-item-name {
-  flex: 1 1 auto;
-  min-width: 0;
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--downloads-text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12px;
-  font-weight: 500;
 }
 
-/* Per-row dismiss "X" — small, low-contrast affordance pinned to the
- * end of the title row. Reads as "remove from this list" rather than
- * a destructive trashcan. */
-.downloads-item-dismiss {
+.downloads-item-sub {
+  font-size: 12px;
+  line-height: 1.2;
+  color: var(--downloads-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.downloads-item-close {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 18px;
+  width: 24px;
+  height: 24px;
   padding: 0;
+  margin-left: 4px;
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   background: transparent;
-  color: var(--text-muted, #9ca0a8);
+  color: var(--downloads-text-muted);
   cursor: pointer;
-  opacity: 0.6;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
 }
-.downloads-item-dismiss:hover {
-  opacity: 1;
-  background: rgba(127, 127, 127, 0.18);
-  color: inherit;
+.downloads-item-close:hover {
+  background: color-mix(in srgb, var(--neutral-500) 35%, transparent);
+  color: var(--downloads-text);
 }
-
-.downloads-item-status {
-  font-size: 11px;
-  color: var(--text-muted, #9ca0a8);
-}
-
-.downloads-bar {
-  height: 3px;
-  background: rgba(127, 127, 127, 0.18);
-  border-radius: 2px;
-  overflow: hidden;
-}
-.downloads-bar-fill {
-  height: 100%;
-  background: var(--accent, #60a5fa);
-  transition: width 0.3s ease;
-}
-.downloads-item.is-paused .downloads-bar-fill {
-  background: #f59e0b;
-}
-.downloads-item.is-error .downloads-bar-fill {
-  background: #ef4444;
-}
-
-.downloads-item-actions {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-/* Terminal entries with no save-path (errored / cancelled) have no
- * actions at all once Remove was lifted to the title-row X. Collapse
- * the row so the card doesn't carry a phantom margin. */
-.downloads-item-actions:empty {
-  display: none;
-}
-.downloads-item-actions button {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  background: var(--surface-2, rgba(127, 127, 127, 0.1));
-  color: inherit;
-  border: 1px solid var(--border, #494a50);
-  border-radius: 4px;
-  padding: 3px 8px;
-  font: inherit;
-  font-size: 11px;
-  cursor: pointer;
-}
-.downloads-item-actions button.primary {
-  background: var(--accent, #3b82f6);
-  color: #fff;
-  border-color: transparent;
-}
-.downloads-item-actions button.danger {
-  border-color: rgba(239, 68, 68, 0.45);
-  color: #ef4444;
-}
-.downloads-item-actions button.muted {
-  opacity: 0.75;
-}
-.downloads-item-actions button:hover {
-  filter: brightness(1.1);
+.downloads-item-close:focus-visible {
+  outline: 2px solid var(--neutral-50);
+  outline-offset: 1px;
 }
 
 .downloads-foot {
   display: flex;
-  justify-content: center;
-  padding: 8px 12px;
-  border-top: 1px solid var(--border, #494a50);
+  align-items: center;
+  padding: 8px;
+  border-top: 1px solid var(--downloads-border);
   flex: 0 0 auto;
 }
 .downloads-link {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
   background: transparent;
   border: none;
-  color: var(--accent, #60a5fa);
-  font: inherit;
-  font-size: 12px;
+  color: var(--neutral-100);
+  font-size: 14px;
+  text-align: left;
   cursor: pointer;
-  padding: 2px 6px;
+  padding: 8px;
+  border-radius: 6px;
+  transition: background-color 120ms ease;
 }
 .downloads-link:hover {
-  text-decoration: underline;
+  background: color-mix(in srgb, var(--neutral-500) 25%, transparent);
+}
+.downloads-link:focus-visible {
+  outline: 2px solid var(--neutral-50);
+  outline-offset: 1px;
 }
 </style>

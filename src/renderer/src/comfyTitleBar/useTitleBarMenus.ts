@@ -42,6 +42,11 @@ interface UseTitleBarMenusOpts {
 
 interface TitleBarMenusApi {
   isMenuOpen: Ref<boolean>
+  /** Mirror of `isMenuOpen` scoped to the downloads-tray popup only.
+   *  Used by the title-bar to highlight the download-tray icon (brand
+   *  yellow) while the popover is showing — matches the convention
+   *  the waffle button already enjoys via its native-menu open state. */
+  isDownloadsOpen: Ref<boolean>
   downloadsState: Ref<DownloadsTrayState>
   downloadsActiveCount: ComputedRef<number>
   /** Number of `recent` (terminal) entries the user hasn't reviewed
@@ -96,6 +101,7 @@ export function useTitleBarMenus(opts: UseTitleBarMenusOpts): TitleBarMenusApi {
   const menuClosedAt: Record<'menu' | 'downloads', number> = { menu: 0, downloads: 0 }
 
   const isMenuOpen = ref(false)
+  const isDownloadsOpen = ref(false)
   const downloadsState = ref<DownloadsTrayState>({ active: [], recent: [] })
   /** URLs the user has already acknowledged. Used to derive the
    *  unseen-finished count without persisting per-entry state on the
@@ -128,6 +134,14 @@ export function useTitleBarMenus(opts: UseTitleBarMenusOpts): TitleBarMenusApi {
     return { x: Math.round(rect.left), y: Math.round(rect.bottom) }
   }
 
+  /** Same as `anchorBelow` but nudged down so the downloads card clears
+   *  the title-bar chrome (border/shadow) instead of sitting flush. */
+  function anchorDownloadsBelow(el: HTMLElement | null | undefined): MenuAnchor {
+    const base = anchorBelow(el)
+    const DOWNLOADS_POPUP_GAP_BELOW_TRIGGER_PX = 12
+    return { x: base.x, y: base.y + DOWNLOADS_POPUP_GAP_BELOW_TRIGGER_PX }
+  }
+
   function handleFileMenu(): void {
     opts.hideTip()
     // Toggle-close: on macOS clicking a sibling WebContentsView in the
@@ -148,7 +162,7 @@ export function useTitleBarMenus(opts: UseTitleBarMenusOpts): TitleBarMenusApi {
       return
     }
     if (Date.now() - menuClosedAt.downloads < MENU_REOPEN_GUARD_MS) return
-    opts.bridge?.clickDownloadsTray(anchorBelow(opts.downloadsBtnRef.value))
+    opts.bridge?.clickDownloadsTray(anchorDownloadsBelow(opts.downloadsBtnRef.value))
   }
 
   /** Mark every current `recent` entry as seen. Triggered by main
@@ -202,11 +216,15 @@ export function useTitleBarMenus(opts: UseTitleBarMenusOpts): TitleBarMenusApi {
     if (!opts.bridge) return
     unsubMenuOpened = opts.bridge.onMenuOpened((info) => {
       isMenuOpen.value = true
-      if (info.menu === 'downloads') acknowledgeRecent()
+      if (info.menu === 'downloads') {
+        isDownloadsOpen.value = true
+        acknowledgeRecent()
+      }
     })
     unsubMenuClosed = opts.bridge.onMenuClosed(({ menu }) => {
       menuClosedAt[menu] = Date.now()
       isMenuOpen.value = false
+      if (menu === 'downloads') isDownloadsOpen.value = false
     })
     unsubDownloads = opts.bridge.onDownloadsChanged(ingestDownloadsState)
   })
@@ -219,6 +237,7 @@ export function useTitleBarMenus(opts: UseTitleBarMenusOpts): TitleBarMenusApi {
 
   return {
     isMenuOpen,
+    isDownloadsOpen,
     downloadsState,
     downloadsActiveCount,
     unseenFinishedCount,

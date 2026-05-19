@@ -1,4 +1,11 @@
 <script setup lang="ts">
+// TODO(stale-old-modal): delete after Settings drawer (v2,
+// ComfyUISettingsPanel) reaches functional parity and ships everywhere.
+// TODO(brand-cleanup): superseded by ComfyUISettingsPanel + useComfyUISettings
+// for the Status / Update / Snapshots / Settings tab surface. This file
+// still backs the hamburger → Settings → ComfyUI Settings flow during
+// the v2 coexistence window. Remove (or split: keep the Directories /
+// Downloads halves) once ComfyUISettingsPanel reaches parity.
 import { ref, computed, watch, nextTick, toRaw } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useModal } from '../composables/useModal'

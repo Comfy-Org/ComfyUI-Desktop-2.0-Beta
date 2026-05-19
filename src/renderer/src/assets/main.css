@@ -120,6 +120,7 @@
   --accent-plum: #afa3db;
   --accent-label: #8a8a8a;
   --accent-primary: #0b8ce9;
+  --secondary-background: #2d2e32;
 
   --surface-recessed: var(--neutral-900);
 
@@ -1709,6 +1710,89 @@ input[type='checkbox']:checked::after {
 .modal-fade-leave-to .modal-fade-panel {
   opacity: 0;
   transform: scale(0.98);
+}
+
+/* Settings drawer (v2) — paired transitions for the right-anchored
+ * slide-in panel. Global (not scoped) for the same reason `.modal-fade-*`
+ * is: the elements are teleported to <body>, and Vue's scoped data-v
+ * attribute matching doesn't reliably apply transient transition
+ * classes added to teleported nodes. Apply via:
+ *   <Transition name="settings-drawer-fade" appear> for the backdrop
+ *   <Transition name="settings-drawer-slide" appear> for the panel
+ */
+.settings-drawer-fade-enter-active,
+.settings-drawer-fade-leave-active {
+  transition: opacity 220ms ease;
+}
+.settings-drawer-fade-enter-from,
+.settings-drawer-fade-leave-to {
+  opacity: 0;
+}
+
+.settings-drawer-slide-enter-active,
+.settings-drawer-slide-leave-active {
+  transition: transform 220ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+.settings-drawer-slide-enter-from,
+.settings-drawer-slide-leave-to {
+  transform: translateX(100%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-drawer-slide-enter-active,
+  .settings-drawer-slide-leave-active {
+    transition: opacity 120ms ease;
+  }
+  .settings-drawer-slide-enter-from,
+  .settings-drawer-slide-leave-to {
+    opacity: 0;
+    transform: none;
+  }
+}
+
+/* Settings drawer sub-page push/pop transition. Mirrors iOS / macOS
+ * Settings sub-page navigation: forward (push) slides in from the right
+ * while the outgoing root slides left; back (pop) reverses. Used by
+ * `ComfyUISettingsPanel.vue` when toggling `subPage` between the args
+ * editor and the tab root. */
+.subpage-push-enter-active,
+.subpage-push-leave-active,
+.subpage-pop-enter-active,
+.subpage-pop-leave-active {
+  transition:
+    transform 220ms cubic-bezier(0.32, 0.72, 0, 1),
+    opacity 180ms ease;
+}
+.subpage-push-enter-from {
+  transform: translateX(24px);
+  opacity: 0;
+}
+.subpage-push-leave-to {
+  transform: translateX(-12px);
+  opacity: 0;
+}
+.subpage-pop-enter-from {
+  transform: translateX(-12px);
+  opacity: 0;
+}
+.subpage-pop-leave-to {
+  transform: translateX(24px);
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .subpage-push-enter-active,
+  .subpage-push-leave-active,
+  .subpage-pop-enter-active,
+  .subpage-pop-leave-active {
+    transition: opacity 140ms ease;
+  }
+  .subpage-push-enter-from,
+  .subpage-push-leave-to,
+  .subpage-pop-enter-from,
+  .subpage-pop-leave-to {
+    transform: none;
+  }
 }
 
 .view-fullscreen {

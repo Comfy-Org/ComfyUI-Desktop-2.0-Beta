@@ -21,7 +21,7 @@ interface MockDownloadsState {
 }
 
 interface MockBridgeState {
-  downloadsActions: { action: string; url: string; savePath?: string }[]
+  downloadsActions: { action: string; url?: string; savePath?: string }[]
   openSettingsTabCalls: string[]
 }
 
@@ -31,7 +31,7 @@ function installMockBridge(): MockBridgeState {
     openSettingsTabCalls: [],
   }
   const bridge = {
-    downloadsAction: (a: { action: string; url: string; savePath?: string }) => {
+    downloadsAction: (a: { action: string; url?: string; savePath?: string }) => {
       state.downloadsActions.push(a)
     },
     openSettingsTab: (tab: string) => {
@@ -44,6 +44,17 @@ function installMockBridge(): MockBridgeState {
 
 const EMPTY_STATE: MockDownloadsState = { active: [], recent: [] }
 
+/**
+ * The redesigned popover collapses the per-row action button cluster
+ * (Pause / Resume / Cancel / Show-in-folder) into:
+ *  - a single right-edge X (cancel for active rows; dismiss for terminal)
+ *  - a row-click affordance that opens the save location on completed rows
+ *
+ * Pause / Resume are dropped from the UI (the bridge handlers stay in
+ * the component, commented out — redesign skips them, easy to restore).
+ * Tests reflect the new affordances; the bridge IPC shapes are unchanged.
+ */
+
 describe('comfyTitlePopup/DownloadsView', () => {
   let bridgeState: MockBridgeState
 
@@ -52,15 +63,17 @@ describe('comfyTitlePopup/DownloadsView', () => {
     vi.resetModules()
   })
 
-  it('shows the empty placeholder when state has no entries', async () => {
+  it('shows the "Downloads" title and the empty placeholder when state has no entries', async () => {
     const { default: DownloadsView } = await import('./DownloadsView.vue')
     const wrapper = mount(DownloadsView, { props: { state: EMPTY_STATE } })
     await flushPromises()
+    expect(wrapper.find('.downloads-title').text()).toBe('Downloads')
     expect(wrapper.find('.downloads-empty').text()).toBe('No downloads yet')
     expect(wrapper.findAll('.downloads-item').length).toBe(0)
+    expect(wrapper.find('.downloads-clear').exists()).toBe(false)
   })
 
-  it('renders an active downloading entry with a progress bar and Pause/Cancel actions', async () => {
+  it('renders an active downloading entry with a percentage subtitle and an inline progress gradient', async () => {
     const { default: DownloadsView } = await import('./DownloadsView.vue')
     const state: MockDownloadsState = {
       active: [
@@ -85,18 +98,14 @@ describe('comfyTitlePopup/DownloadsView', () => {
     expect(item.find('.downloads-item-name').text()).toBe(
       'models/checkpoints / a.bin',
     )
-    const status = item.find('.downloads-item-status').text()
-    expect(status).toContain('42%')
-    expect(status).toContain('1.0 MB/s')
-    const fill = item.find('.downloads-bar-fill')
-    expect(fill.attributes('style')).toContain('width: 42%')
-    const labels = item.findAll('button').map((b) => b.text())
-    expect(labels.some((l) => l.includes('Pause'))).toBe(true)
-    expect(labels.some((l) => l.includes('Cancel'))).toBe(true)
-    expect(labels.some((l) => l.includes('Resume'))).toBe(false)
+    expect(item.find('.downloads-item-sub').text()).toBe('42%')
+    // The row itself acts as the progress bar (gradient stop at 42%).
+    const style = item.attributes('style') ?? ''
+    expect(style).toContain('linear-gradient')
+    expect(style).toContain('42%')
   })
 
-  it('renders a paused entry with Resume + Cancel and an indeterminate bar for pending', async () => {
+  it('renders a paused entry with a paused subtitle showing the percentage', async () => {
     const { default: DownloadsView } = await import('./DownloadsView.vue')
     const state: MockDownloadsState = {
       active: [
@@ -106,30 +115,17 @@ describe('comfyTitlePopup/DownloadsView', () => {
           progress: 0.1,
           status: 'paused',
         },
-        {
-          url: 'https://example.com/q.bin',
-          filename: 'q.bin',
-          progress: 0,
-          status: 'pending',
-        },
       ],
       recent: [],
     }
     const wrapper = mount(DownloadsView, { props: { state } })
     await flushPromises()
-    const items = wrapper.findAll('.downloads-item')
-    expect(items.length).toBe(2)
-    const pausedLabels = items[0]!.findAll('button').map((b) => b.text())
-    expect(pausedLabels.some((l) => l.includes('Resume'))).toBe(true)
-    expect(pausedLabels.some((l) => l.includes('Cancel'))).toBe(true)
-    expect(pausedLabels.some((l) => l.includes('Pause'))).toBe(false)
-    // Pending entries get a full-width indeterminate bar.
-    const pendingFill = items[1]!.find('.downloads-bar-fill')
-    expect(pendingFill.classes()).toContain('indeterminate')
-    expect(pendingFill.attributes('style')).toContain('width: 100%')
+    const item = wrapper.find('.downloads-item.is-paused')
+    expect(item.exists()).toBe(true)
+    expect(item.find('.downloads-item-sub').text()).toContain('10%')
   })
 
-  it('renders a completed recent entry with Show-in-folder + Remove actions when savePath is present', async () => {
+  it('renders a completed entry as a clickable row with a Show-in-folder subtitle and a dismiss X', async () => {
     const { default: DownloadsView } = await import('./DownloadsView.vue')
     const state: MockDownloadsState = {
       active: [],
@@ -147,14 +143,15 @@ describe('comfyTitlePopup/DownloadsView', () => {
     await flushPromises()
     const item = wrapper.find('.downloads-item.is-finished')
     expect(item.exists()).toBe(true)
-    expect(item.find('.downloads-item-status').text()).toBe('Completed')
-    const labels = item.findAll('button').map((b) => b.text())
-    expect(labels).toContain('Show in folder')
-    // Per-row dismiss is an icon-only X pinned to the title row.
-    expect(item.find('.downloads-item-dismiss').exists()).toBe(true)
+    expect(item.classes()).toContain('is-completed')
+    expect(item.classes()).toContain('is-clickable')
+    expect(item.find('.downloads-item-sub').text()).toBe('Show in Finder')
+    const close = item.find('.downloads-item-close')
+    expect(close.exists()).toBe(true)
+    expect(close.attributes('aria-label')).toBe('Remove from list')
   })
 
-  it('omits Show-in-folder for terminal entries that did not write to disk but still offers Remove', async () => {
+  it('renders an errored entry without a save path using the status line as subtitle and keeps the X', async () => {
     const { default: DownloadsView } = await import('./DownloadsView.vue')
     const state: MockDownloadsState = {
       active: [],
@@ -172,14 +169,44 @@ describe('comfyTitlePopup/DownloadsView', () => {
     await flushPromises()
     const item = wrapper.find('.downloads-item.is-error')
     expect(item.exists()).toBe(true)
-    expect(item.find('.downloads-item-status').text()).toBe('oops')
-    const labels = item.findAll('button').map((b) => b.text())
-    expect(labels.some((l) => l.includes('Show in folder'))).toBe(false)
-    // Per-row dismiss is an icon-only X pinned to the title row.
-    expect(item.find('.downloads-item-dismiss').exists()).toBe(true)
+    expect(item.find('.downloads-item-sub').text()).toBe('oops')
+    expect(item.classes()).not.toContain('is-clickable')
+    expect(item.find('.downloads-item-close').exists()).toBe(true)
   })
 
-  it('forwards per-row Remove and header Clear-finished to the bridge', async () => {
+  it('routes the close X to cancel for active rows and dismiss for terminal rows', async () => {
+    const { default: DownloadsView } = await import('./DownloadsView.vue')
+    const state: MockDownloadsState = {
+      active: [
+        {
+          url: 'https://example.com/dl.bin',
+          filename: 'dl.bin',
+          progress: 0.5,
+          status: 'downloading',
+        },
+      ],
+      recent: [
+        {
+          url: 'https://example.com/done.bin',
+          filename: 'done.bin',
+          progress: 1,
+          status: 'completed',
+          savePath: '/tmp/done.bin',
+        },
+      ],
+    }
+    const wrapper = mount(DownloadsView, { props: { state } })
+    await flushPromises()
+    const items = wrapper.findAll('.downloads-item')
+    await items[0]!.find('.downloads-item-close').trigger('click')
+    await items[1]!.find('.downloads-item-close').trigger('click')
+    expect(bridgeState.downloadsActions).toEqual([
+      { action: 'cancel', url: 'https://example.com/dl.bin' },
+      { action: 'dismiss', url: 'https://example.com/done.bin' },
+    ])
+  })
+
+  it('forwards Clear Finished from the header chip when there are terminal entries', async () => {
     const { default: DownloadsView } = await import('./DownloadsView.vue')
     const state: MockDownloadsState = {
       active: [],
@@ -191,44 +218,21 @@ describe('comfyTitlePopup/DownloadsView', () => {
           status: 'completed',
           savePath: '/tmp/done.bin',
         },
-        {
-          url: 'https://example.com/oops.bin',
-          filename: 'oops.bin',
-          progress: 0,
-          status: 'error',
-          error: 'oops',
-        },
       ],
     }
     const wrapper = mount(DownloadsView, { props: { state } })
     await flushPromises()
-    const items = wrapper.findAll('.downloads-item')
-    const removeBtn = items[0]!.find('.downloads-item-dismiss')
-    await removeBtn.trigger('click')
-    await wrapper.find('.downloads-clear').trigger('click')
-    expect(bridgeState.downloadsActions).toEqual([
-      { action: 'dismiss', url: 'https://example.com/done.bin' },
-      { action: 'clear-finished' },
-    ])
+    const chip = wrapper.find('.downloads-clear')
+    expect(chip.exists()).toBe(true)
+    expect(chip.text()).toContain('Clear Finished')
+    await chip.trigger('click')
+    expect(bridgeState.downloadsActions).toEqual([{ action: 'clear-finished' }])
   })
 
-  it('forwards pause/resume/cancel/show-in-folder to the bridge', async () => {
+  it('clicking a completed row body opens the file location via the bridge', async () => {
     const { default: DownloadsView } = await import('./DownloadsView.vue')
     const state: MockDownloadsState = {
-      active: [
-        {
-          url: 'https://example.com/dl.bin',
-          filename: 'dl.bin',
-          progress: 0.5,
-          status: 'downloading',
-        },
-        {
-          url: 'https://example.com/p.bin',
-          filename: 'p.bin',
-          progress: 0.1,
-          status: 'paused',
-        },
-      ],
+      active: [],
       recent: [
         {
           url: 'https://example.com/ok.bin',
@@ -241,23 +245,8 @@ describe('comfyTitlePopup/DownloadsView', () => {
     }
     const wrapper = mount(DownloadsView, { props: { state } })
     await flushPromises()
-    const items = wrapper.findAll('.downloads-item')
-    // Pause the downloading entry.
-    await items[0]!.find('button[aria-label="Pause"]').trigger('click')
-    // Resume the paused entry.
-    await items[1]!.find('button[aria-label="Resume"]').trigger('click')
-    // Cancel the paused entry.
-    await items[1]!.find('button[aria-label="Cancel"]').trigger('click')
-    // Show-in-folder for the completed entry — find by label so we
-    // skip past the per-row dismiss X pinned to the title row.
-    const showBtn = items[2]!
-      .findAll('button')
-      .find((b) => b.text().includes('Show in folder'))!
-    await showBtn.trigger('click')
+    await wrapper.find('.downloads-item.is-finished').trigger('click')
     expect(bridgeState.downloadsActions).toEqual([
-      { action: 'pause', url: 'https://example.com/dl.bin' },
-      { action: 'resume', url: 'https://example.com/p.bin' },
-      { action: 'cancel', url: 'https://example.com/p.bin' },
       {
         action: 'show-in-folder',
         url: 'https://example.com/ok.bin',
@@ -266,10 +255,33 @@ describe('comfyTitlePopup/DownloadsView', () => {
     ])
   })
 
+  it('clicking the X on a completed row dismisses without triggering show-in-folder', async () => {
+    const { default: DownloadsView } = await import('./DownloadsView.vue')
+    const state: MockDownloadsState = {
+      active: [],
+      recent: [
+        {
+          url: 'https://example.com/ok.bin',
+          filename: 'ok.bin',
+          progress: 1,
+          status: 'completed',
+          savePath: '/tmp/ok.bin',
+        },
+      ],
+    }
+    const wrapper = mount(DownloadsView, { props: { state } })
+    await flushPromises()
+    await wrapper.find('.downloads-item-close').trigger('click')
+    expect(bridgeState.downloadsActions).toEqual([
+      { action: 'dismiss', url: 'https://example.com/ok.bin' },
+    ])
+  })
+
   it('routes the footer link to the Settings → Downloads tab', async () => {
     const { default: DownloadsView } = await import('./DownloadsView.vue')
     const wrapper = mount(DownloadsView, { props: { state: EMPTY_STATE } })
     await flushPromises()
+    expect(wrapper.find('.downloads-link').text()).toBe('View All Downloads')
     await wrapper.find('.downloads-link').trigger('click')
     expect(bridgeState.openSettingsTabCalls).toEqual(['downloads'])
   })

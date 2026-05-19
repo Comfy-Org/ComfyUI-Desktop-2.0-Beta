@@ -264,6 +264,11 @@ function installMockApi(initial?: {
     onCloseRequest: vi.fn(() => () => {}),
     respondCloseRequest: vi.fn(),
     ackCloseRequest: vi.fn(),
+    // Title-bar Settings icon → main routes a drawer-close request here
+    // so the ComfyUISettingsPanel can play its leave animation before
+    // closeCurrentPanel collapses the panelView. The test suite never
+    // fires it; mock is a no-op.
+    onRequestCloseDrawer: vi.fn(() => () => {}),
     onInstallationsChanged: vi.fn((cb: () => void) => {
       state.installationsChangedCallbacks.push(cb)
       return () => {}

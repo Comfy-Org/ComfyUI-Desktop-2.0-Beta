@@ -1,4 +1,7 @@
 <script setup lang="ts">
+// TODO(stale-old-modal): delete after Settings drawer (v2,
+// ComfyUISettingsPanel + ArgsBuilderPage) reaches functional parity and
+// ships everywhere.
 import type { ComfyArgDef } from '../../../types/ipc'
 import InfoTooltip from './InfoTooltip.vue'
 

@@ -443,6 +443,21 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
 
 ipcMain.handle('quit-app', () => quitApp())
 
+ipcMain.handle('app:relaunch', () => {
+  setQuitReason('user-quit')
+  ipc.cancelAll()
+  for (const [, entry] of comfyWindows) {
+    if (!entry.window.isDestroyed()) entry.window.destroy()
+  }
+  comfyWindows.clear()
+  if (tray) {
+    tray.destroy()
+    tray = null
+  }
+  app.relaunch()
+  app.quit()
+})
+
 // `reset-zoom` has no callers; per-install ComfyUI windows manage
 // their own zoom independently. Kept as a stubbed handler so any
 // straggling renderer still bound to the channel doesn't reject.

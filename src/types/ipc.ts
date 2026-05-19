@@ -909,6 +909,7 @@ export interface ElectronApi {
   // App
   getAppVersion(): Promise<string>
   quitApp(): Promise<void>
+  relaunchApp(): Promise<void>
   resetZoom(): Promise<void>
   getSystemInfo(): Promise<SystemInfo>
   getInstallationDdContext(installationId: string): Promise<InstallationDdContext | null>
@@ -1014,6 +1015,14 @@ export interface ElectronApi {
    * panel WebContentsView (e.g. from the ComfyUI window's title-bar buttons).
    */
   onPanelSwitch(callback: (data: { panel: string; installationId?: string }) => void): Unsubscribe
+  /**
+   * Title-bar Settings icon → main routes a close request here so the
+   * panel renderer can play the drawer's local leave animation BEFORE
+   * `closeCurrentPanel()` fires and `layoutViews` collapses the
+   * panelView. PanelApp holds a ref to `<ComfyUISettingsPanel>` and
+   * calls its exposed `requestClose()` when this fires.
+   */
+  onRequestCloseDrawer(callback: () => void): Unsubscribe
   /**
    * Main forwards a title-bar status pill / tray click here. The
    * renderer subscribes once on mount and dispatches each kind:

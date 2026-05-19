@@ -229,9 +229,9 @@ describe('views/DownloadsView (Settings → Downloads tab)', () => {
     await resumeBtn.trigger('click')
     expect(apiCalls.resumeCalls).toEqual(['https://example.com/p.bin'])
 
-    // completed entry: Show in folder
+    // completed entry: Show in Finder
     const completedButtons = items[2]!.findAll('button')
-    const showBtn = completedButtons.find((b) => b.text().includes('Show in folder'))!
+    const showBtn = completedButtons.find((b) => b.text().includes('Show in Finder'))!
     await showBtn.trigger('click')
     expect(apiCalls.showInFolderCalls).toEqual(['/tmp/ok.bin'])
   })

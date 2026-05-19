@@ -55,14 +55,14 @@ type TitlePopupKind = 'menu' | 'downloads'
 
 type TitlePopupConfig =
   | {
-      kind: 'menu'
-      items: TitlePopupMenuItem[]
-      theme: { bg: string; text: string }
-    }
+    kind: 'menu'
+    items: TitlePopupMenuItem[]
+    theme: { bg: string; text: string }
+  }
   | {
-      kind: 'downloads'
-      theme: { bg: string; text: string }
-    }
+    kind: 'downloads'
+    theme: { bg: string; text: string }
+  }
 
 /**
  * One reusable popup `WebContentsView` per parent BrowserWindow.
@@ -402,9 +402,28 @@ function showTitlePopupNow(entry: TitlePopupEntry): void {
  *  entries) and asks for it via `requestSize`, so we don't impose a
  *  pixel floor — the empty placeholder's own padding already provides
  *  enough visual weight that the popup never reads as a sliver. */
-const DOWNLOADS_POPUP_WIDTH = 360
-const DOWNLOADS_POPUP_MAX_HEIGHT_PX = 360
+const DOWNLOADS_POPUP_WIDTH = 664
+const DOWNLOADS_POPUP_MAX_HEIGHT_PX = 396
 const DOWNLOADS_POPUP_MAX_HEIGHT_RATIO = 0.6
+
+/** Right-edge gutter when the popup gets shifted away from its
+ *  anchor to fit inside the host window. Keeps a small breathing
+ *  space between the card and the window edge so the rounded corner
+ *  doesn't visually collide with the window chrome. */
+const POPUP_EDGE_GUTTER = 8
+
+/** Shift `x` left until `x + width` fits inside the host window's
+ *  content area, leaving an 8px gutter. The renderer anchors at the
+ *  trigger button's left edge — works for left-side triggers, but
+ *  the downloads tray sits at the right edge of the title bar and
+ *  would otherwise spill past the window. Clamps to 0 so popups
+ *  wider than the window collapse against the left edge instead of
+ *  rendering at negative x. */
+function clampPopupX(x: number, width: number, parent: BrowserWindow): number {
+  const contentWidth = parent.getContentBounds().width
+  const maxX = Math.max(0, contentWidth - width - POPUP_EDGE_GUTTER)
+  return Math.min(x, maxX)
+}
 
 type OpenTitlePopupOpts = {
   parent: BrowserWindow
@@ -413,9 +432,9 @@ type OpenTitlePopupOpts = {
   theme: { bg: string; text: string }
   titleBarSender: Electron.WebContents
 } & (
-  | { kind: 'menu'; items: TitlePopupMenuItem[] }
-  | { kind: 'downloads' }
-)
+    | { kind: 'menu'; items: TitlePopupMenuItem[] }
+    | { kind: 'downloads' }
+  )
 
 function openTitlePopup(opts: OpenTitlePopupOpts): void {
   // Dismiss any in-flight title-bar tooltip — the popup will obscure
@@ -437,7 +456,7 @@ function openTitlePopup(opts: OpenTitlePopupOpts): void {
   // content (0,0) so they map directly to parent-window content
   // coordinates, which is exactly what `WebContentsView.setBounds`
   // expects.
-  const x = Math.round(Math.max(0, opts.anchor.x))
+  const rawX = Math.round(Math.max(0, opts.anchor.x))
   const y = Math.round(Math.max(0, opts.anchor.y))
 
   let width: number
@@ -460,6 +479,15 @@ function openTitlePopup(opts: OpenTitlePopupOpts): void {
       Math.round(contentHeight * DOWNLOADS_POPUP_MAX_HEIGHT_RATIO),
     )
   }
+
+  // Clamp horizontally so the popup never spills past the right edge
+  // of the host window. The renderer anchors at the trigger button's
+  // left, which works for the waffle (sitting on the left) but the
+  // downloads tray + future right-edge triggers would otherwise clip
+  // — we shift left until the popup fits, with an 8px gutter from the
+  // edge. Vertical clamping is unnecessary because `y` is always under
+  // the title bar and the height stays inside the window.
+  const x = clampPopupX(rawX, width, opts.parent)
 
   // Update bounds while still hidden — the popup is flipped visible
   // only after the renderer acks the new content has painted, by

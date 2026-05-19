@@ -11,28 +11,26 @@ import { useSessionStore } from '../stores/sessionStore'
 import { emitTelemetryAction } from '../lib/telemetry'
 import type { ActionResult, Installation, ShowProgressOpts } from '../types/ipc'
 
-/**
- * Body modes the panel WebContentsView can render. Mirrors `BodyMode`
- * in `src/main/index.ts` — `'comfy-lifecycle'` is the lifecycle UI for
- * an install-backed Comfy tab when no process is running, `'chooser'`
- * is the install-picker on install-less host windows, `'settings'`
- * mounts the unified Settings modal as an overlay over the underlying
- * body, and the remaining keys mount install-flow wizards as Tier 3
- * takeovers.
- */
+// Body modes the panel WebContentsView can render. Mirrors `BodyMode`
+// in main; `'comfy'` is admitted so the renderer can reflect main's
+// activePanel after a drawer close.
 export type PanelKey =
+  | 'comfy'
   | 'comfy-lifecycle'
   | 'chooser'
   | 'settings'
+  | 'settings-v2'
   | 'new-install'
   | 'track'
   | 'load-snapshot'
   | 'quick-install'
 
 const VALID_PANELS: ReadonlySet<PanelKey> = new Set([
+  'comfy',
   'comfy-lifecycle',
   'chooser',
   'settings',
+  'settings-v2',
   'new-install',
   'track',
   'load-snapshot',
@@ -162,7 +160,7 @@ export function usePanelOverlays(opts: UsePanelOverlaysOpts): UsePanelOverlaysAp
   })()
 
   const activePanel = ref<PanelKey>(
-    FLOW_PANELS.has(initialPanel) || initialPanel === 'settings'
+    FLOW_PANELS.has(initialPanel) || initialPanel === 'settings' || initialPanel === 'settings-v2'
       ? defaultBodyPanel()
       : initialPanel,
   )

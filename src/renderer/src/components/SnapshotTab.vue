@@ -1,4 +1,6 @@
 <script setup lang="ts">
+// TODO(stale-old-modal): delete after Settings drawer (v2,
+// ComfyUISettingsPanel) reaches functional parity and ships everywhere.
 import { ref, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useModal } from '../composables/useModal'
@@ -90,6 +92,8 @@ async function load(): Promise<void> {
   loading.value = true
   try {
     listData.value = await window.api.getSnapshots(props.installationId)
+  } catch (err) {
+    console.error('SnapshotTab.load failed', err)
   } finally {
     loading.value = false
   }

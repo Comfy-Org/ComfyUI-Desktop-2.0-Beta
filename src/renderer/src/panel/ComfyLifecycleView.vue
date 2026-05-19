@@ -35,14 +35,14 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const sessionStore = useSessionStore()
 
-type LifecycleState = 'running' | 'launching' | 'stopping' | 'crashed' | 'stopped'
+type LifecycleState = 'running' | 'launching' | 'stopping' | 'crashed' | 'stopped' | 'unknown'
 
 const state = computed<LifecycleState>(() => {
+  // 'unknown' = sessionStore hasn't hydrated yet. The template renders
+  // nothing for this branch so we don't flash the stopped card before
+  // the first init() reports whether something is already running.
+  if (!sessionStore.ready) return 'unknown'
   const id = props.installationId
-  // 'running' renders nothing — main shows the live comfy WebContentsView
-  // for that case, and the panel only briefly becomes visible while a
-  // page/manage modal is opening on top. Without this guard the view
-  // would flash "ComfyUI is stopped" during that window.
   if (sessionStore.isRunning(id)) return 'running'
   if (sessionStore.isLaunching(id)) return 'launching'
   if (sessionStore.isStopping(id)) return 'stopping'
@@ -112,7 +112,9 @@ function startLaunch(): void {
 
 <template>
   <div class="lifecycle-view">
-    <div v-if="state !== 'running'" class="lifecycle-card" :data-state="state">
+    <!-- 'unknown' = pre-hydration; render nothing so the stopped card
+         doesn't flash before sessionStore.init() reports state. -->
+    <div v-if="state !== 'running' && state !== 'unknown'" class="lifecycle-card" :data-state="state">
       <template v-if="state === 'launching'">
         <div class="lifecycle-icon spin">
           <Loader2 :size="32" />

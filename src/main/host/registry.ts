@@ -11,6 +11,7 @@ import { _runningSessions } from '../lib/ipc/shared'
 export type ComfyPanelKey =
   | 'comfy'
   | 'settings'
+  | 'settings-v2'
   | 'new-install'
   | 'track'
   | 'load-snapshot'
@@ -19,6 +20,7 @@ export type ComfyPanelKey =
 export const VALID_PANELS: ReadonlySet<ComfyPanelKey> = new Set([
   'comfy',
   'settings',
+  'settings-v2',
   'new-install',
   'track',
   'load-snapshot',
@@ -45,6 +47,7 @@ export type BodyMode =
   | 'comfy'
   | 'comfy-lifecycle'
   | 'settings'
+  | 'settings-v2'
   | 'chooser'
   | 'new-install'
   | 'track'

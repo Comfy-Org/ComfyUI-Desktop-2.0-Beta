@@ -61,16 +61,16 @@ export const en = {
   },
   downloadsPopup: {
     title: 'Downloads',
-    clearFinished: 'Clear finished',
+    clearFinished: 'Clear Finished',
     clearFinishedTooltip:
       'Remove every completed, errored, or cancelled entry from the list',
     empty: 'No downloads yet',
     pause: 'Pause',
     resume: 'Resume',
     cancel: 'Cancel',
-    showInFolder: 'Show in folder',
+    showInFolder: 'Show in Finder',
     remove: 'Remove from list',
-    viewAllInSettings: 'View all in Settings…',
+    viewAllInSettings: 'View All Downloads',
     completed: 'Completed',
   },
   /** Settings → Downloads tab — superset of the popup view with a

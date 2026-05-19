@@ -171,6 +171,7 @@ export function buildElectronApi(): ElectronApi {
     // App
     getAppVersion: () => ipcRenderer.invoke('get-app-version'),
     quitApp: () => ipcRenderer.invoke('quit-app'),
+    relaunchApp: () => ipcRenderer.invoke('app:relaunch'),
     resetZoom: () => ipcRenderer.invoke('reset-zoom'),
     getSystemInfo: () => ipcRenderer.invoke('get-system-info'),
     getInstallationDdContext: (installationId: string) => ipcRenderer.invoke('get-installation-dd-context', installationId),
@@ -346,6 +347,11 @@ export function buildElectronApi(): ElectronApi {
         callback(data as { panel: string; installationId?: string })
       ipcRenderer.on('panel-switch', handler)
       return () => ipcRenderer.removeListener('panel-switch', handler)
+    },
+    onRequestCloseDrawer: (callback) => {
+      const handler = (): void => callback()
+      ipcRenderer.on('panel:request-close-drawer', handler)
+      return () => ipcRenderer.removeListener('panel:request-close-drawer', handler)
     },
     onPanelTriggerOverlay: (callback) => {
       const handler = (_event: IpcRendererEvent, data: unknown) =>

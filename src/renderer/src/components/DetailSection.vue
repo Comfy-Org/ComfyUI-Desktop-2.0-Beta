@@ -1,4 +1,6 @@
 <script setup lang="ts">
+// TODO(stale-old-modal): delete after Settings drawer (v2,
+// ComfyUISettingsPanel) reaches functional parity and ships everywhere.
 import { ref, reactive, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useModal } from '../composables/useModal'

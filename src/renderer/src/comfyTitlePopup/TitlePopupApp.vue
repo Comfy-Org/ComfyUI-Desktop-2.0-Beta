@@ -78,6 +78,12 @@ const kind = ref<'menu' | 'downloads'>('menu')
 const items = ref<MenuItem[]>([])
 const themeBg = ref<string>('#262729')
 const themeText = ref<string>('#dddddd')
+/** Bumped on every `set-config` so the `.popup` root is keyed and Vue
+ *  recreates the element on each open, guaranteeing the CSS open
+ *  animation replays. The WebContentsView is reused across opens, so
+ *  without the key the animation would only run on the very first
+ *  mount. */
+const openSeq = ref(0)
 
 /** Owned at the app level — the listener stays registered for the
  *  popup's entire lifetime so the initial state push from main on a
@@ -130,9 +136,7 @@ function measureAndRequestSize(): void {
   // Header is only rendered when there's something to clear; treat
   // missing as 0px contribution.
   const headEl = document.querySelector('.downloads-head') as HTMLElement | null
-  const listEl = document.querySelector(
-    '.downloads-list, .downloads-empty',
-  ) as HTMLElement | null
+  const listEl = document.querySelector('.downloads-list, .downloads-empty') as HTMLElement | null
   const footEl = document.querySelector('.downloads-foot') as HTMLElement | null
   if (!footEl || !listEl) return
   let listH: number
@@ -148,9 +152,7 @@ function measureAndRequestSize(): void {
       childrenH += (child as HTMLElement).offsetHeight
     }
     const cs = getComputedStyle(listEl)
-    listH = childrenH
-      + parseFloat(cs.paddingTop || '0')
-      + parseFloat(cs.paddingBottom || '0')
+    listH = childrenH + parseFloat(cs.paddingTop || '0') + parseFloat(cs.paddingBottom || '0')
   } else {
     // `.downloads-empty` shrinks to content, so its `offsetHeight` is
     // already the natural rendered size.
@@ -159,8 +161,7 @@ function measureAndRequestSize(): void {
   // +2 for the .popup card's 1px top + 1px bottom border so the inner
   // content lands inside the bordered card without clipping the last
   // row.
-  const total =
-    (headEl?.offsetHeight ?? 0) + listH + footEl.offsetHeight + 2
+  const total = (headEl?.offsetHeight ?? 0) + listH + footEl.offsetHeight + 2
   bridge?.requestSize(total)
 }
 
@@ -170,6 +171,7 @@ onMounted(() => {
     items.value = cfg.kind === 'menu' ? cfg.items : []
     themeBg.value = cfg.theme.bg
     themeText.value = cfg.theme.text
+    openSeq.value++
     const seq = ++renderSeq
     // Ack after Vue has flushed the DOM update *and* the browser has
     // had a chance to paint it. Main keeps the popup view hidden until
@@ -208,7 +210,7 @@ watch(
       })
     })
   },
-  { deep: true },
+  { deep: true }
 )
 onUnmounted(() => {
   unsubConfig?.()
@@ -219,6 +221,7 @@ onUnmounted(() => {
 
 <template>
   <div
+    :key="openSeq"
     class="popup"
     :class="{ 'is-light': isLight }"
     :style="{ background: themeBg, color: themeText }"
@@ -238,20 +241,33 @@ onUnmounted(() => {
   background: transparent !important;
 }
 
-/* The popup view's background is transparent (set on <html>/<body>/#app
-   via the :global rules above plus `setBackgroundColor('#00000000')` on
-   the WebContentsView in main). The .popup div is the visible card —
-   solid surface fill, rounded corners, subtle border so it reads as a
-   card not as floating text. */
 .popup {
   margin: 0;
-  border: 1px solid var(--border, #494a50);
-  border-radius: 6px;
-  font: 12px/1 var(--font-sans, 'Inter', system-ui, sans-serif);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
   user-select: none;
   overflow: hidden;
   height: 100%;
   width: 100%;
   box-sizing: border-box;
+  transform-origin: top center;
+  animation: title-popup-fade-in 150ms ease-out;
+}
+
+@keyframes title-popup-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .popup {
+    animation: none;
+  }
 }
 </style>
