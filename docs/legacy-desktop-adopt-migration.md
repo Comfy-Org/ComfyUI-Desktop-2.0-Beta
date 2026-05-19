@@ -141,6 +141,7 @@ clobber it (the bundle replacement only touches `resources/`, not
   browserPartition: 'unique',
   portConflict: 'auto',
   autoUpdateComfyUI: false,               // opt-in only; see §6
+  useSharedPaths: false,                  // hybrid mode; see §3.3
   copiedFrom: 'legacy-desktop',
   copyReason: 'in-place-adoption',
   status: 'installed',
@@ -251,8 +252,9 @@ user from accidentally breaking the data linkage by editing
 | `userData/comfy.settings.json` | `Comfy-Desktop.SendStatistics` | Desktop 2.0 `settings.telemetryEnabled` | Only when not already set. |
 | `userData/comfy.settings.json` | `Comfy-Desktop.AutoUpdate` | `installation.autoUpdateComfyUI` | Was wired to the *app* updater in legacy; in Desktop 2.0 it controls the **ComfyUI source** updater. Default `false`; see §6. |
 | `userData/comfy.settings.json` | `extra_server_args` (object) | appended to `launchArgs` as `--key value` | Empty values stripped. |
-| `userData/extra_models_config.yaml` | top‑level `basePath` model dirs | merged into `settings.modelsDirs` | De‑duped and resolved. Belt‑and‑suspenders with `--base-directory`. |
-| `userData/extra_models_config.yaml` | extra mounts (e.g. A1111 `base_path`) | merged into `settings.modelsDirs` | Each subtree's base_path added; per‑folder overrides ignored (matches standalone). |
+| `userData/extra_models_config.yaml` | top‑level `basePath` model dirs | merged into `settings.modelsDirs` | Cross‑install visibility only — the adopted install reads them via `--base-directory`. See §3.3. |
+| `userData/extra_models_config.yaml` | extra mounts (e.g. A1111 `base_path`) | merged into `settings.modelsDirs` | Same — cross‑install visibility for *other* installs. Per‑folder overrides ignored (matches standalone). |
+| `basePath/models` | model folder | also appended to `settings.modelsDirs` | Cross‑install visibility only. The adopted install reads them via `--base-directory`. See §3.3. |
 | `userData/window.json` | size/position | drop | Desktop 2.0 has [`windowState.ts`](../src/main/lib/windowState.ts). |
 | `basePath/.venv` | uv‑managed Python 3.12 | `installation.adoptedPythonPath` | Used verbatim; never written to. |
 | `basePath/{models,user,input,output,custom_nodes}` | data | left in place | No copy, no move, no symlink. |
@@ -281,6 +283,50 @@ At adoption time:
 
 The staged copy is deleted from `<userData>/legacy-staging/` after a
 successful adoption.
+
+### 3.3 Coexistence with Desktop 2.0 shared paths (hybrid model)
+
+Desktop 2.0 normally appends shared‑path args to every launch
+([`launch.ts#L121-L140`](../src/main/lib/ipc/sessionActions/launch.ts#L121-L140)),
+gated on `installation.useSharedPaths !== false`:
+
+```ts
+if (useSharedPaths) {
+  launchCmd.args.push('--extra-model-paths-config', sharedYamlPath)
+  launchCmd.args.push('--input-directory',  settings.inputDir)
+  launchCmd.args.push('--output-directory', settings.outputDir)
+}
+```
+
+Because argparse uses last‑wins, the relationship between an adopted
+install's per‑install args and the shared‑path injection is set entirely
+by the `useSharedPaths` flag on the record. Three behaviors are possible:
+
+| | `useSharedPaths` | What `getLaunchCommand` appends | Net behavior |
+|---|---|---|---|
+| **A. Full shared** | `true` | `--base-directory`, `--user-directory` only | Adopted install uses Desktop 2.0 shared input/output/models. Requires copying legacy `basePath/{input,output}` → shared dirs to avoid hiding files. |
+| **B. Full per‑install** | `false` | All four legacy paths | Pure adopt‑in‑place. Zero copies. Other installs can't see this user's models. |
+| **C. Hybrid (chosen)** | `false` | All four legacy paths | Same launch behavior as B, **plus** `basePath/models` is appended to `settings.modelsDirs` so *other* installs can see those models. No files moved at adoption. |
+
+The adopted record ships with **`useSharedPaths: false`** (matching the
+legacy [`desktop`](../src/main/sources/desktop.ts#L42-L47) plugin's existing
+`buildInstallation` default), so:
+
+- `getLaunchCommand` appends `--base-directory`, `--user-directory`,
+  `--input-directory`, `--output-directory` — all rooted at the legacy
+  `basePath`.
+- The shared‑path injection in `launch.ts` short‑circuits, so it never
+  appends `--extra-model-paths-config` or its own `--input-directory` /
+  `--output-directory` for the adopted install.
+- `basePath/models` (plus any mounts from
+  `userData/extra_models_config.yaml`) is appended to `settings.modelsDirs`
+  purely for cross‑install visibility — future installs picking up shared
+  paths see the user's models, while the adopted install itself reads
+  them via `--base-directory`.
+
+No files are moved at adoption time. Users who want to consolidate into
+Desktop 2.0's shared dirs can do it manually later by copying files and
+flipping `useSharedPaths` in settings.
 
 ---
 
@@ -524,10 +570,6 @@ legacy repo.
 
 ## 11. Open questions
 
-- **Should `basePath/models` be added to `settings.modelsDirs` (shared
-  across all installs) in addition to being passed via `--base-directory`?**
-  Today's plan goes with the former for consistency with the existing
-  fresh‑install migration. Worth confirming with product.
 - **What do we do when the user has multiple legacy `basePath`s over time?**
   Only the most recent (from `config.json`) is adopted; older orphans are
   invisible. We could expose a "Locate other ComfyUI folders" flow later.
