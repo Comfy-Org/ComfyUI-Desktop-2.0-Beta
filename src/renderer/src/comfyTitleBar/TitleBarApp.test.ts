@@ -230,11 +230,12 @@ describe('TitleBarApp', () => {
     wrapper.unmount()
   })
 
-  it('renders the install-less pill as a non-interactive identity label', async () => {
-    // Install-less host windows show the static `Desktop 2.0 Beta`
-    // label set by main's initial title push. The pill is a div
-    // (no button, no caret) and carries the `is-install-less`
-    // modifier class.
+  it('renders the install-less pill as an interactive opener for the instance picker', async () => {
+    // Install-less host windows (the dashboard / chooser host) used to
+    // render the pill as a static div, but the picker now opens from
+    // here too so the user has one consistent way to switch instances.
+    // The pill is a button with the dropdown caret and carries the
+    // `is-install-less` modifier class for surface-specific styling.
     bridgeState = installMockBridge({ installationId: null })
     vi.resetModules()
     const { default: TitleBarApp } = await import('./TitleBarApp.vue')
@@ -242,9 +243,9 @@ describe('TitleBarApp', () => {
     await flushPromises()
     const pill = wrapper.find('.title-install-pill')
     expect(pill.exists()).toBe(true)
-    expect(pill.element.tagName).toBe('DIV')
+    expect(pill.element.tagName).toBe('BUTTON')
     expect(pill.classes()).toContain('is-install-less')
-    expect(wrapper.find('.title-install-caret').exists()).toBe(false)
+    expect(wrapper.find('.title-install-caret').exists()).toBe(true)
     wrapper.unmount()
   })
 
@@ -291,19 +292,20 @@ describe('TitleBarApp', () => {
     expect(wrapper.find('header').classes()).toContain('is-mac')
   })
 
-  it('hides the install caret in install-less host windows', async () => {
-    // Install-less host windows (no installationId in the URL, so
-    // the preload returns null) only expose the File menu.
-    // The install pill name still renders (with the fallback label) but
-    // the chevron caret SVG inside the pill is omitted because there's
-    // no install-scoped menu to expose.
+  it('shows the dropdown caret on install-less host windows so the picker opener reads as actionable', async () => {
+    // Install-less host windows (no installationId in the URL, so the
+    // preload returns null) used to render the pill as a static label
+    // because the dashboard body already IS the picker. The pill now
+    // also opens the picker popover from anywhere in the app, so the
+    // caret renders here too for visual consistency with install-backed
+    // hosts.
     bridgeState = installMockBridge({ installationId: null })
     vi.resetModules()
     const { default: TitleBarApp } = await import('./TitleBarApp.vue')
     const wrapper = mount(TitleBarApp)
     await flushPromises()
     expect(wrapper.find('.title-install-name').exists()).toBe(true)
-    expect(wrapper.find('.title-install-caret').exists()).toBe(false)
+    expect(wrapper.find('.title-install-caret').exists()).toBe(true)
   })
 
   it('accepts the install-less fallback label pushed by main', async () => {

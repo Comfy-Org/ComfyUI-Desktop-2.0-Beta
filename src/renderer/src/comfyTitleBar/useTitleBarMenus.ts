@@ -187,15 +187,16 @@ export function useTitleBarMenus(opts: UseTitleBarMenusOpts): TitleBarMenusApi {
 
   function handleInstallPill(): void {
     opts.hideTip()
-    // Toggle-close: same blur-isn't-reliable rationale as the file menu
-    // and downloads tray. The file menu's dismiss IPC is reused because
-    // main hides whichever popup is currently open for the parent
-    // window (one popup per parent — see `titlePopupsByParent`).
-    if (isMenuOpen.value) {
-      opts.bridge?.dismissFileMenu()
-      return
-    }
-    if (Date.now() - menuClosedAt['instance-picker'] < MENU_REOPEN_GUARD_MS) return
+    // Main owns the toggle + reopen-suppression for the picker —
+    // single source of truth. The renderer just dispatches the click;
+    // main checks `titlePopupsByParent` to decide open vs close vs
+    // suppress-spurious-reopen-after-blur. This eliminates the IPC
+    // race between the blur-driven close (fires on focus shift /
+    // mousedown) and the renderer's `menu-closed` listener (lags by
+    // an IPC roundtrip) — the renderer's `isMenuOpen` could be
+    // wrong at the moment the click handler runs, so trusting it
+    // here was the source of the "click closes, immediately
+    // reopens, click again to actually close" bug.
     opts.bridge?.clickInstallPill(anchorDownloadsBelow(opts.installPillRef.value))
   }
 
