@@ -221,6 +221,13 @@ export interface ShowProgressOpts {
    *  launches initiated from a Tier-1 surface like DetailModal would
    *  leave the chooser host alongside the new comfy window. */
   triggersInstanceStart?: boolean
+  /** Set on install ops that should auto-launch the resulting install
+   *  once the op finishes successfully. Routes the install op through
+   *  the Tier 3 brand-chrome takeover so the install bar and the
+   *  subsequent launch sequence (security scan → starting server) share
+   *  one continuous screen. The auto-launch is wired in
+   *  `useFirstUseChain` (its existing watcher fits the same shape). */
+  autoLaunchOnFinish?: boolean
 }
 
 // --- Action results ---
@@ -1044,6 +1051,12 @@ export interface ElectronApi {
    *     same `useListAction` confirm/port-conflict UX the chooser
    *     uses fires for picker launches too. NEVER swaps the active
    *     install out of the host (that's the chooser-host path).
+   *   - `'picker-install-action'` → instance-picker popover's "More"
+   *     menu picked a per-install action (Open Folder / Copy /
+   *     Untrack / Delete). Forwarded to the panel so the panel-side
+   *     `useInstallContextMenu` dispatch reuses the dashboard's same
+   *     code path — same source-action confirms, same progress UI,
+   *     no parallel implementation in the picker.
    */
   onPanelTriggerOverlay(
     callback: (data: {
@@ -1053,7 +1066,9 @@ export interface ElectronApi {
         | 'app-update-download-prompt'
         | 'open-settings'
         | 'picker-pick-install'
+        | 'picker-install-action'
       installationId?: string
+      actionId?: string
       version?: string | null
       settingsTab?: 'comfy' | 'directories' | 'downloads' | 'global'
     }) => void,

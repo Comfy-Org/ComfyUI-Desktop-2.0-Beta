@@ -363,7 +363,9 @@ export function buildElectronApi(): ElectronApi {
               | 'app-update-download-prompt'
               | 'open-settings'
               | 'picker-pick-install'
+              | 'picker-install-action'
             installationId?: string
+            actionId?: string
             version?: string | null
             settingsTab?: 'comfy' | 'directories' | 'downloads' | 'global'
           },
