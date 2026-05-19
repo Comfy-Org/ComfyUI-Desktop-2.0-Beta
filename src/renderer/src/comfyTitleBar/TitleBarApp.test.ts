@@ -37,6 +37,7 @@ interface MockBridgeState {
   appUpdatePillClicks: number
   installUpdatePillClicks: number
   downloadsTrayClicks: number
+  installPillClicks: { x: number; y: number }[]
   feedbackClicks: number
   showTooltipCalls: { text: string; leftX: number; rightX: number; bottomY: number }[]
   hideTooltipCalls: number
@@ -63,6 +64,7 @@ function installMockBridge(opts: { isMac?: boolean; installationId?: string | nu
     appUpdatePillClicks: 0,
     installUpdatePillClicks: 0,
     downloadsTrayClicks: 0,
+    installPillClicks: [],
     feedbackClicks: 0,
     showTooltipCalls: [],
     hideTooltipCalls: 0,
@@ -135,6 +137,9 @@ function installMockBridge(opts: { isMac?: boolean; installationId?: string | nu
     clickDownloadsTray: () => {
       state.downloadsTrayClicks += 1
     },
+    clickInstallPill: (anchor: { x: number; y: number }) => {
+      state.installPillClicks.push(anchor)
+    },
     clickFeedback: () => {
       state.feedbackClicks += 1
     },
@@ -172,15 +177,17 @@ describe('TitleBarApp', () => {
     expect(fileBtn.exists()).toBe(true)
     expect(fileBtn.attributes('aria-label')).toBe('Menu')
     expect(fileBtn.classes()).toContain('title-menu-button--icon')
-    // Center identity pill. Settings now lives on the File / waffle
-    // menu via the unified Settings modal, so the pill is no longer
-    // a click target — it renders as a non-interactive label and has
-    // no caret.
+    // Center identity pill. On install-backed hosts the pill renders
+    // as a `<button>` that opens the instance-picker popover —
+    // matching the rest of the title-bar dropdown buttons (waffle +
+    // downloads). The trailing slot carries a ChevronDown caret so
+    // the pill reads as actionable.
     const pill = wrapper.find('.title-install-pill')
     expect(pill.exists()).toBe(true)
-    expect(pill.element.tagName).toBe('DIV')
+    expect(pill.element.tagName).toBe('BUTTON')
+    expect(pill.attributes('aria-haspopup')).toBe('dialog')
     expect(wrapper.find('.title-install-name').text()).toBe('ComfyUI')
-    expect(wrapper.find('.title-install-caret').exists()).toBe(false)
+    expect(wrapper.find('.title-install-caret').exists()).toBe(true)
   })
 
   it('signals readiness so main can push initial state', async () => {
@@ -190,15 +197,22 @@ describe('TitleBarApp', () => {
     expect(bridgeState.readyCalls).toBe(1)
   })
 
-  it('does not route pill clicks to setPanel (pill is non-interactive)', async () => {
-    // Settings was unified into the File / waffle menu, so the center
-    // install pill is no longer a click target. Clicking it is a
-    // no-op and must not push a panel switch through the bridge.
+  it('routes pill clicks to the install-picker bridge handler with an anchor', async () => {
+    // The pill replaces the now-retired Settings click target. Clicking
+    // it asks main to open the instance-picker popup anchored beneath
+    // the pill — NOT a `setPanel` route. The waffle / downloads-tray
+    // / pill clicks all share the `useTitleBarMenus` open/close
+    // suppression book-keeping so the three buttons can't fight each
+    // other on reclick.
     const { default: TitleBarApp } = await import('./TitleBarApp.vue')
     const wrapper = mount(TitleBarApp, { attachTo: document.body })
     await flushPromises()
     await wrapper.find('.title-install-pill').trigger('click')
     expect(bridgeState.setPanelCalls).toEqual([])
+    expect(bridgeState.installPillClicks.length).toBe(1)
+    const anchor = bridgeState.installPillClicks[0]!
+    expect(typeof anchor.x).toBe('number')
+    expect(typeof anchor.y).toBe('number')
     wrapper.unmount()
   })
 

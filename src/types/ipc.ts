@@ -1038,6 +1038,12 @@ export interface ElectronApi {
    *     given `settingsTab` (defaults to the host's default tab).
    *     Currently used by the title-bar downloads popup's
    *     "View all in Settings…" deep-link.
+   *   - `'picker-pick-install'` → instance-picker popover picked an
+   *     install that isn't already running on another window. Routed
+   *     to the panel renderer (rather than launched main-side) so the
+   *     same `useListAction` confirm/port-conflict UX the chooser
+   *     uses fires for picker launches too. NEVER swaps the active
+   *     install out of the host (that's the chooser-host path).
    */
   onPanelTriggerOverlay(
     callback: (data: {
@@ -1046,6 +1052,7 @@ export interface ElectronApi {
         | 'app-update-restart-prompt'
         | 'app-update-download-prompt'
         | 'open-settings'
+        | 'picker-pick-install'
       installationId?: string
       version?: string | null
       settingsTab?: 'comfy' | 'directories' | 'downloads' | 'global'

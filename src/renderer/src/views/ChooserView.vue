@@ -1,13 +1,16 @@
 <script setup lang="ts">
-import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
+import { onMounted, toRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useInstallationStore } from '../stores/installationStore'
 import { useSessionStore } from '../stores/sessionStore'
 import { useProgressStore } from '../stores/progressStore'
 import { useInstallContextMenu } from '../composables/useInstallContextMenu'
+import { useInstallList } from '../composables/useInstallList'
 import { useOverlay } from '../composables/useOverlay'
-import { Cloud, Plus } from 'lucide-vue-next'
+import { Cloud, Plus, Search } from 'lucide-vue-next'
 import ContextMenu from '../components/ContextMenu.vue'
+import BrandBackground from '../components/BrandBackground.vue'
+import BaseInput from '../components/ui/BaseInput.vue'
 import ChooserInstallTile from './chooser/ChooserInstallTile.vue'
 import type { Installation, ShowProgressOpts } from '../types/ipc'
 
@@ -29,11 +32,14 @@ import type { Installation, ShowProgressOpts } from '../types/ipc'
  * Per-install tile rendering lives in `chooser/ChooserInstallTile.vue`.
  */
 
-const props = withDefaults(defineProps<{
-  visible?: boolean
-}>(), {
-  visible: true,
-})
+const props = withDefaults(
+  defineProps<{
+    visible?: boolean
+  }>(),
+  {
+    visible: true
+  }
+)
 
 const emit = defineEmits<{
   /** User picked an install — caller decides whether to swap-in-place,
@@ -59,86 +65,40 @@ onMounted(() => {
   }
 })
 
-// --- Filter chips ---
+// Filter / search / recency / cloud-split logic is shared with the
+// title-bar instance picker popover via `useInstallList` so the two
+// surfaces cannot drift. The chip UI is currently hidden in the brand
+// redesign but the underlying `activeFilter` ref + filter switch stay
+// wired; tests reach into `vm.activeFilter` to drive the filter-based
+// regressions guard.
 //
 // "Local" includes both standalone local installs and Legacy Desktop
-// installs (`sourceCategory === 'desktop'`) — Legacy Desktop is the
-// pre-2.0 install kind, conceptually the same family as Local from
-// the user's POV. There's no dedicated Desktop chip so the filter row
-// stays compact.
-type FilterKey = 'all' | 'local' | 'cloud' | 'remote'
-const activeFilter = ref<FilterKey>('all')
+// installs (`sourceCategory === 'desktop'`) — they're conceptually the
+// same family from the user's POV.
+const installationsRef = toRef(installationStore, 'installations')
+const {
+  searchQuery,
+  activeFilter,
+  cloudInstall,
+  nonCloudInstalls,
+  visibleInstalls,
+  showCloudCard,
+  showEmptyHint,
+  lastLaunchedLabel,
+} = useInstallList({ installations: installationsRef })
 
-interface FilterChip { key: FilterKey; labelKey: string }
-const filterChips: FilterChip[] = [
-  { key: 'all', labelKey: 'chooser.filterAll' },
-  { key: 'local', labelKey: 'chooser.filterLocal' },
-  { key: 'cloud', labelKey: 'chooser.filterCloud' },
-  { key: 'remote', labelKey: 'chooser.filterRemote' },
-]
-
-const cloudInstall = computed<Installation | null>(() =>
-  installationStore.installations.find((i) => i.sourceCategory === 'cloud') ?? null,
-)
-
-const nonCloudInstalls = computed<Installation[]>(() =>
-  installationStore.installations.filter((i) => i.sourceCategory !== 'cloud'),
-)
-
-function sortByRecency(a: Installation, b: Installation): number {
-  const ta = typeof a.lastLaunchedAt === 'number' ? a.lastLaunchedAt : -Infinity
-  const tb = typeof b.lastLaunchedAt === 'number' ? b.lastLaunchedAt : -Infinity
-  return tb - ta
-}
-
-const visibleInstalls = computed<Installation[]>(() => {
-  const sorted = [...nonCloudInstalls.value].sort(sortByRecency)
-  switch (activeFilter.value) {
-    case 'all': return sorted
-    case 'local': return sorted.filter((i) => i.sourceCategory === 'local' || i.sourceCategory === 'desktop')
-    case 'remote': return sorted.filter((i) => i.sourceCategory === 'remote')
-    case 'cloud': return [] // Cloud installs only appear in the Cloud tile.
-    default: return sorted
-  }
-})
-
-const showCloudCard = computed(() =>
-  activeFilter.value === 'all' || activeFilter.value === 'cloud',
-)
-
-// --- Relative-time formatting (shared with DashboardView's pattern) ---
-const now = ref(Date.now())
-let nowTimer: ReturnType<typeof setInterval> | null = null
-onMounted(() => {
-  nowTimer = setInterval(() => { now.value = Date.now() }, 60_000)
-})
-onBeforeUnmount(() => {
-  if (nowTimer) clearInterval(nowTimer)
-})
-
-function timeAgo(timestamp: number): string {
-  const diff = now.value - timestamp
-  const minutes = Math.floor(diff / 60_000)
-  if (minutes < 1) return 'just now'
-  if (minutes < 60) return `${minutes}m ago`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h ago`
-  const days = Math.floor(hours / 24)
-  return `${days}d ago`
-}
-
-function lastLaunchedLabel(inst: Installation): string {
-  return typeof inst.lastLaunchedAt === 'number'
-    ? t('dashboard.launchedAgo', { time: timeAgo(inst.lastLaunchedAt) })
-    : t('dashboard.neverLaunched')
-}
+// Explicitly expose `activeFilter` so the brand-redesign tests can
+// drive the underlying filter state without the chip UI mounted.
+// `<script setup>` would otherwise auto-hide it because the template
+// doesn't reference the ref directly (chips are TODO(brand-cleanup)).
+defineExpose({ activeFilter })
 
 // --- Manage / context menu ---
 const { openOverlay } = useOverlay()
 
 function openManage(
   installation: Installation,
-  opts: { initialTab?: string; autoAction?: string | null } = {},
+  opts: { initialTab?: string; autoAction?: string | null } = {}
 ): void {
   // `noSidebar: true` collapses the unified Settings modal to just this
   // install's ComfyUI Settings surface — the user picked a specific
@@ -151,7 +111,7 @@ function openManage(
     initialTab: 'comfy',
     initialDetailTab: opts.initialTab ?? 'status',
     autoAction: opts.autoAction ?? null,
-    noSidebar: true,
+    noSidebar: true
   })
 }
 
@@ -163,9 +123,9 @@ const {
   handleCtxMenuSelect,
   closeMenu,
   triggerAction,
-  isStoppedActionGated,
+  isStoppedActionGated
 } = useInstallContextMenu({
-  onManage: (inst, opts) => openManage(inst, opts ?? {}),
+  onManage: (inst, opts) => openManage(inst, opts ?? {})
 })
 
 function hasError(inst: Installation): boolean {
@@ -183,7 +143,7 @@ function viewProgress(inst: Installation): void {
   emit('show-progress', {
     installationId: inst.id,
     title: '',
-    apiCall: async () => ({}),
+    apiCall: async () => ({})
   })
 }
 
@@ -221,121 +181,156 @@ function handleNewInstallClick(): void {
 </script>
 
 <template>
-  <div v-show="props.visible" class="chooser-view">
-    <!-- Filter chips: narrow the grid by source category. New Install +
-         Cloud stay visible regardless (they're entry-points, not data
-         rows) — except Cloud is hidden when filtering to local/remote. -->
-    <div class="chooser-filters filter-pill-group">
-      <button
-        v-for="chip in filterChips"
-        :key="chip.key"
-        type="button"
-        class="filter-pill chooser-filter-chip"
-        :class="{ active: activeFilter === chip.key }"
-        @click="activeFilter = chip.key"
+  <BrandBackground v-show="props.visible" class="chooser-bg">
+    <div class="chooser-view">
+      <div class="chooser-search">
+        <BaseInput
+          v-model="searchQuery"
+          :placeholder="t('chooser.searchPlaceholder')"
+          :aria-label="t('chooser.searchPlaceholder')"
+        >
+          <template #leading><Search :size="16" /></template>
+        </BaseInput>
+      </div>
+
+      <div
+        v-if="installationStore.loading && nonCloudInstalls.length === 0"
+        class="chooser-loading"
       >
-        {{ t(chip.labelKey) }}
-      </button>
-    </div>
+        {{ t('common.loading') }}
+      </div>
 
-    <div
-      v-if="installationStore.loading && nonCloudInstalls.length === 0"
-      class="chooser-loading"
-    >
-      {{ t('common.loading') }}
-    </div>
+      <div v-else-if="showEmptyHint" class="chooser-empty">
+        {{ t('chooser.noMatches') }}
+      </div>
 
-    <div v-else class="chooser-grid">
-      <button
-        type="button"
-        class="chooser-tile chooser-tile-new"
-        @click="handleNewInstallClick"
-      >
-        <div class="chooser-tile-icon"><Plus :size="32" /></div>
-        <div class="chooser-tile-name">{{ t('chooser.newInstall') }}</div>
-        <div class="chooser-tile-meta">{{ t('chooser.newInstallDesc') }}</div>
-      </button>
+      <div v-else class="chooser-grid">
+        <button type="button" class="chooser-tile chooser-tile-new" @click="handleNewInstallClick">
+          <div class="chooser-tile-icon"><Plus :size="32" /></div>
+          <div class="chooser-tile-name">{{ t('chooser.newInstall') }}</div>
+          <div class="chooser-tile-meta">{{ t('chooser.newInstallDesc') }}</div>
+        </button>
 
-      <button
-        v-if="showCloudCard"
-        type="button"
-        class="chooser-tile chooser-tile-cloud"
-        @click="handleCloudClick"
-        @contextmenu.prevent="cloudInstall ? openCardMenu($event, cloudInstall) : null"
-      >
-        <div class="chooser-tile-icon"><Cloud :size="32" /></div>
-        <div class="chooser-tile-name">
-          {{ cloudInstall ? cloudInstall.name : t('cloud.label') }}
-        </div>
-        <div class="chooser-tile-meta">
-          <span class="chooser-tile-pill">
-            {{ cloudInstall ? cloudInstall.sourceLabel : t('cloud.desc') }}
-          </span>
-        </div>
-      </button>
+        <button
+          v-if="showCloudCard"
+          type="button"
+          class="chooser-tile chooser-tile-cloud"
+          @click="handleCloudClick"
+          @contextmenu.prevent="cloudInstall ? openCardMenu($event, cloudInstall) : null"
+        >
+          <div class="chooser-tile-icon"><Cloud :size="32" /></div>
+          <div class="chooser-tile-name">
+            {{ cloudInstall ? cloudInstall.name : t('cloud.label') }}
+          </div>
+          <div class="chooser-tile-meta">
+            <span class="chooser-tile-pill">
+              {{ cloudInstall ? cloudInstall.sourceLabel : t('cloud.desc') }}
+            </span>
+          </div>
+        </button>
 
-      <ChooserInstallTile
-        v-for="inst in visibleInstalls"
-        :key="inst.id"
-        :installation="inst"
-        :is-stopped-action-gated="isStoppedActionGated(inst)"
-        :last-launched-label="lastLaunchedLabel(inst)"
-        :has-error="hasError(inst)"
-        @pick="pickInstall"
-        @show-progress="viewProgress"
-        @open-card-menu="openCardMenu"
-        @open-kebab-menu="openKebabMenu"
-        @trigger-action="(action, installation) => triggerAction(action, installation)"
-        @close-running="closeRunningInstance"
+        <ChooserInstallTile
+          v-for="inst in visibleInstalls"
+          :key="inst.id"
+          :installation="inst"
+          :is-stopped-action-gated="isStoppedActionGated(inst)"
+          :last-launched-label="lastLaunchedLabel(inst)"
+          :has-error="hasError(inst)"
+          @pick="pickInstall"
+          @show-progress="viewProgress"
+          @open-card-menu="openCardMenu"
+          @open-kebab-menu="openKebabMenu"
+          @trigger-action="(action, installation) => triggerAction(action, installation)"
+          @close-running="closeRunningInstance"
+        />
+      </div>
+
+      <ContextMenu
+        :open="ctxMenu.open"
+        :x="ctxMenu.x"
+        :y="ctxMenu.y"
+        :items="ctxMenuItems"
+        @close="closeMenu"
+        @select="handleCtxMenuSelect"
       />
     </div>
-
-    <ContextMenu
-      :open="ctxMenu.open"
-      :x="ctxMenu.x"
-      :y="ctxMenu.y"
-      :items="ctxMenuItems"
-      @close="closeMenu"
-      @select="handleCtxMenuSelect"
-    />
-  </div>
+  </BrandBackground>
 </template>
 
 <style scoped>
 @import './chooser/chooser-tiles.css';
 
+.chooser-bg :deep(.brand-inner-frame) {
+  justify-content: flex-start;
+  padding: 0;
+}
+
+.chooser-bg :deep(.brand-outer-frame) {
+  padding: 0;
+  background: transparent;
+}
+
 .chooser-view {
   display: flex;
   flex-direction: column;
+  align-items: center;
+  width: 100%;
+  max-width: 1080px;
   height: 100%;
-  overflow: hidden;
+  padding: clamp(64px, 31vh, 240px) 24px 24px;
+  gap: var(--takeover-gap-lg);
 }
 
-/* Layout-only — chip shape / hover / active live in `.filter-pill` (assets/main.css). */
-.chooser-filters {
-  padding: 16px 24px 8px;
+.chooser-search {
+  display: flex;
+  justify-content: center;
+  width: 100%;
   flex-shrink: 0;
 }
 
-.chooser-loading {
-  flex: 1;
+.chooser-search :deep(.ui-input) {
+  max-width: 600px;
+  border-radius: 12px;
+  border: 1px solid var(--chooser-surface-border);
+  background: var(--chooser-surface-bg);
+  padding: 8px;
+}
+
+.chooser-search :deep(.ui-input-control) {
+  font-size: 14px;
+  padding-top: 0;
+}
+
+.chooser-loading,
+.chooser-empty {
   display: flex;
   align-items: center;
   justify-content: center;
-  opacity: 0.7;
-  padding: 48px 24px;
+  opacity: 0.6;
+  padding: 24px;
 }
 
 .chooser-grid {
-  flex: 1;
+  width: 100%;
+  flex: 1 1 0;
+  min-height: 0;
   overflow-y: auto;
-  /* auto-fill + 1fr so tiles grow more columns on wide windows; on narrow
-   * windows fewer columns appear and the grid scrolls vertically.
-   * Min 320px keeps room for icon + name + pills. */
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 16px;
-  padding: 8px 24px 24px;
   align-content: start;
+  padding: 16px 0 8px 0;
+}
+
+@supports (mask-image: linear-gradient(black, black)) {
+  .chooser-grid {
+    mask-image: linear-gradient(
+      to bottom,
+      transparent 0,
+      black 24px,
+      black calc(100% - 24px),
+      transparent 100%
+    );
+  }
 }
 </style>

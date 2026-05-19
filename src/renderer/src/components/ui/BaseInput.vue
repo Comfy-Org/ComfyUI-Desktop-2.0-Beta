@@ -77,6 +77,7 @@ function onChange(event: Event): void {
   border: 1px solid var(--border);
   border-radius: 8px;
   transition: border-color 150ms ease;
+  gap: 8px;
 }
 
 .ui-input:focus-within {
@@ -90,7 +91,7 @@ function onChange(event: Event): void {
 .ui-input-control {
   flex: 1;
   min-width: 0;
-  padding: 0px 10px 8px 10px;
+  padding: 0px 10px 6px 10px;
   background: transparent;
   border: none;
   outline: none;
@@ -109,7 +110,8 @@ function onChange(event: Event): void {
 }
 
 .ui-input-control::placeholder {
-  color: var(--text-muted);
+  color: var(--neutral-100);
+  opacity: 0.67;
 }
 
 .ui-input[data-leading] .ui-input-control {
@@ -129,7 +131,7 @@ function onChange(event: Event): void {
 }
 
 .ui-input-leading {
-  padding-left: 10px;
+  padding-left: 8px;
 }
 
 .ui-input-trailing {

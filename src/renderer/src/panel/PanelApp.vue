@@ -152,6 +152,9 @@ useDeepLinkRouter({
   openOverlay,
   showAppUpdateRestartPrompt,
   showAppUpdateDownloadPrompt,
+  pickInstallFromPicker: async (inst) => {
+    await chooserHandoff.performPickerLaunch(inst)
+  },
 })
 
 async function loadLocale(): Promise<void> {

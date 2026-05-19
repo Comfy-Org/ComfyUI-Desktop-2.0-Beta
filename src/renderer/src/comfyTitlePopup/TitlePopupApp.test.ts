@@ -29,24 +29,34 @@ type MockPopupConfig =
 interface MockBridgeState {
   configCallbacks: ((cfg: MockPopupConfig) => void)[]
   downloadsCallbacks: ((state: MockDownloadsState) => void)[]
+  /** Snapshot push callbacks for the instance-picker kind. Mirrors
+   *  the bridge's `onInstancePickerSnapshot` subscription — registered
+   *  at app mount, so callers can also assert the listener is wired
+   *  before any picker view exists. */
+  instancePickerSnapshotCallbacks: ((snapshot: unknown) => void)[]
   activateCalls: string[]
   closeCalls: number
   readyCalls: number
   notifyRenderedCalls: number
   openSettingsTabCalls: string[]
   downloadsActionCalls: unknown[]
+  pickInstallCalls: string[]
+  openNewInstallCalls: number
 }
 
 function installMockBridge(): MockBridgeState {
   const state: MockBridgeState = {
     configCallbacks: [],
     downloadsCallbacks: [],
+    instancePickerSnapshotCallbacks: [],
     activateCalls: [],
     closeCalls: 0,
     readyCalls: 0,
     notifyRenderedCalls: 0,
     openSettingsTabCalls: [],
     downloadsActionCalls: [],
+    pickInstallCalls: [],
+    openNewInstallCalls: 0,
   }
   const bridge = {
     activate: (id: string) => state.activateCalls.push(id),
@@ -67,12 +77,23 @@ function installMockBridge(): MockBridgeState {
       state.downloadsCallbacks.push(cb)
       return () => {}
     },
+    onInstancePickerSnapshot: (cb: (snapshot: unknown) => void) => {
+      state.instancePickerSnapshotCallbacks.push(cb)
+      return () => {}
+    },
     downloadsAction: (action: unknown) => {
       state.downloadsActionCalls.push(action)
     },
     openSettingsTab: (tab: string) => {
       state.openSettingsTabCalls.push(tab)
     },
+    pickInstall: (installationId: string) => {
+      state.pickInstallCalls.push(installationId)
+    },
+    openNewInstall: () => {
+      state.openNewInstallCalls += 1
+    },
+    requestSize: () => {},
   }
   ;(window as unknown as { __comfyTitlePopup: typeof bridge }).__comfyTitlePopup = bridge
   return state

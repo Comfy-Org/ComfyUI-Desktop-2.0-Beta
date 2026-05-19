@@ -30,6 +30,31 @@ export interface TitlePopupMenuItem {
   kind?: 'separator'
 }
 
+/** Single install row pushed to the instance-picker popup. Mirror of
+ *  `InstancePickerInstall` in `src/main/popups/titlePopup.ts` — kept in
+ *  sync because the popup's tsconfig slice can't see the main process's
+ *  types. Renderer-side `useInstallList` consumes this through the
+ *  `Installation` interface in `src/types/ipc.ts` so the fields here
+ *  must remain a superset of that. */
+export interface PopupInstancePickerInstall {
+  id: string
+  name: string
+  sourceLabel: string
+  sourceCategory: string
+  version?: string
+  statusTag?: { style: string; label: string }
+  lastLaunchedAt?: number
+  installPath?: string
+  status?: string
+  [key: string]: unknown
+}
+
+export interface PopupInstancePickerSnapshot {
+  installs: PopupInstancePickerInstall[]
+  activeInstallationId: string | null
+  runningInstallationIds: string[]
+}
+
 export type TitlePopupConfig =
   | {
       kind: 'menu'
@@ -38,6 +63,11 @@ export type TitlePopupConfig =
     }
   | {
       kind: 'downloads'
+      theme: { bg: string; text: string }
+    }
+  | {
+      kind: 'instance-picker'
+      snapshot: PopupInstancePickerSnapshot
       theme: { bg: string; text: string }
     }
 
@@ -113,19 +143,44 @@ export interface ComfyTitlePopupBridge {
   /** Ask main to resize the popup view to the given natural content
    *  height (CSS px). Main clamps to a [min, max] band so the popup
    *  shrinks to fit empty / few-entry states and stays compact under
-   *  long histories. Only meaningful for the `'downloads'` kind — the
-   *  menu kind is sized deterministically from its item list. */
+   *  long histories. Only meaningful for the `'downloads'` /
+   *  `'instance-picker'` kinds — the menu kind is sized deterministically
+   *  from its item list. */
   requestSize(height: number): void
+  /** Subscribe to live instance-picker snapshot pushes. Fires whenever
+   *  the install registry changes while a picker is open (add / remove
+   *  / rename / mark-launched / running-state transitions). The popup
+   *  re-binds its row list + re-evaluates the active row from the
+   *  pushed `activeInstallationId`. */
+  onInstancePickerSnapshot(
+    cb: (snapshot: PopupInstancePickerSnapshot) => void,
+  ): () => void
+  /** Picker → pick install. Main implements the focus-or-launch
+   *  contract: focus the running window if any, otherwise route to the
+   *  host's panel renderer to launch in a new Comfy window. The popup
+   *  is dismissed before the launch fires so the new window comes up
+   *  unobstructed. */
+  pickInstall(installationId: string): void
+  /** Picker → "+ New Install" row. Routes to a fresh chooser host
+   *  window's new-install panel — same surface the file menu's
+   *  "New Install" entry lands on. */
+  openNewInstall(): void
 }
 
 function isPopupConfig(value: unknown): value is TitlePopupConfig {
   if (!value || typeof value !== 'object') return false
-  const v = value as { kind?: unknown; items?: unknown; theme?: unknown }
-  if (v.kind !== 'menu' && v.kind !== 'downloads') return false
+  const v = value as {
+    kind?: unknown
+    items?: unknown
+    theme?: unknown
+    snapshot?: unknown
+  }
+  if (v.kind !== 'menu' && v.kind !== 'downloads' && v.kind !== 'instance-picker') return false
   if (!v.theme || typeof v.theme !== 'object') return false
   const theme = v.theme as { bg?: unknown; text?: unknown }
   if (typeof theme.bg !== 'string' || typeof theme.text !== 'string') return false
   if (v.kind === 'menu' && !Array.isArray(v.items)) return false
+  if (v.kind === 'instance-picker' && !isInstancePickerSnapshot(v.snapshot)) return false
   return true
 }
 
@@ -133,6 +188,19 @@ function isDownloadsState(value: unknown): value is PopupDownloadsState {
   if (!value || typeof value !== 'object') return false
   const v = value as { active?: unknown; recent?: unknown }
   return Array.isArray(v.active) && Array.isArray(v.recent)
+}
+
+function isInstancePickerSnapshot(value: unknown): value is PopupInstancePickerSnapshot {
+  if (!value || typeof value !== 'object') return false
+  const v = value as {
+    installs?: unknown
+    activeInstallationId?: unknown
+    runningInstallationIds?: unknown
+  }
+  if (!Array.isArray(v.installs)) return false
+  if (v.activeInstallationId !== null && typeof v.activeInstallationId !== 'string') return false
+  if (!Array.isArray(v.runningInstallationIds)) return false
+  return true
 }
 
 const bridge: ComfyTitlePopupBridge = {
@@ -171,6 +239,19 @@ const bridge: ComfyTitlePopupBridge = {
   requestSize: (height) => {
     if (!Number.isFinite(height) || height <= 0) return
     ipcRenderer.send('comfy-titlepopup:request-size', { height })
+  },
+  onInstancePickerSnapshot: (cb) => {
+    const handler = (_event: IpcRendererEvent, data: unknown): void => {
+      if (isInstancePickerSnapshot(data)) cb(data)
+    }
+    ipcRenderer.on('comfy-titlepopup:installs-changed', handler)
+    return () => ipcRenderer.removeListener('comfy-titlepopup:installs-changed', handler)
+  },
+  pickInstall: (installationId) => {
+    ipcRenderer.send('comfy-titlepopup:pick-install', { installationId })
+  },
+  openNewInstall: () => {
+    ipcRenderer.send('comfy-titlepopup:open-new-install')
   },
 }
 

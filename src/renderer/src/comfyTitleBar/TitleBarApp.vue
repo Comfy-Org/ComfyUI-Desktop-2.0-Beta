@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import {
   ArrowDownToLine,
   Check,
+  ChevronDown,
   Download,
   Loader2,
   Menu as MenuIcon,
@@ -153,6 +154,12 @@ interface Bridge {
    *  dropdown popup in `'downloads'` mode anchored under the tray
    *  button. */
   clickDownloadsTray: (anchor: MenuAnchor) => void
+  /** Click handler for the centre install pill. Opens the instance-
+   *  picker popover anchored beneath the pill. Main filters install-
+   *  less hosts (the chooser host pill stays non-interactive — the
+   *  dashboard body already IS the picker, so a smaller copy on top
+   *  would be redundant). */
+  clickInstallPill: (anchor: MenuAnchor) => void
   /** Click handler for the title-bar Send Feedback button. Main
    *  forwards `comfy-panel:open-feedback` to the panel renderer,
    *  which fires the `desktop2.feedback.opened` telemetry action and
@@ -250,6 +257,7 @@ function handleSettingsToggle(): void {
 
 const fileBtnRef = useTemplateRef<HTMLButtonElement>('fileBtn')
 const downloadsBtnRef = useTemplateRef<HTMLButtonElement>('downloadsBtn')
+const installPillRef = useTemplateRef<HTMLButtonElement>('installPill')
 
 const { tooltipAttrs, handleTooltipPointer, hideTip } = useTitleBarTooltip({
   bridge,
@@ -260,17 +268,20 @@ const { isHoverActive } = useTitleBarHoverGate({ hideTip, handleTooltipPointer }
 
 const {
   isDownloadsOpen,
+  isInstancePickerOpen,
   downloadsActiveCount,
   unseenFinishedCount,
   downloadsTrayLabel,
   downloadsStartedAt,
   handleFileMenu,
-  handleDownloadsTray
+  handleDownloadsTray,
+  handleInstallPill
 } = useTitleBarMenus({
   bridge,
   hideTip,
   fileBtnRef,
-  downloadsBtnRef
+  downloadsBtnRef,
+  installPillRef
 })
 
 /** One-shot "downloads started" attention flash. Driven by
@@ -355,22 +366,26 @@ onUnmounted(() => {
          user-action controls; the install-update pill remains here so
          it stays adjacent to the install identity. -->
     <div class="title-center">
-      <!-- Center identity pill. Install-backed hosts show the install's
-           name + install-type icon; install-less hosts show the static
-           `Desktop 2.0 Beta` label. The pill is a non-interactive label
-           — Settings now opens from the File / waffle menu via the
-           unified Settings modal, so the pill no longer needs to be a
-           click target. -->
-      <div class="title-install-pill" :class="{ 'is-install-less': isInstallLess }">
-        <!-- Left slot: brand mark. Static for now — will become
-             state-aware in a later pass (different mark for cloud vs
-             local instances). -->
+      <!-- Center identity pill. Install-backed hosts render as a
+           button that opens the instance-picker popover (matching the
+           rest of the title-bar dropdown buttons — waffle menu +
+           downloads tray). Install-less hosts (the chooser host) AND
+           first-use-takeover steps render as a static label — the
+           chooser body already IS the picker, and the takeover locks
+           down all chrome to avoid wandering out of bootstrap. -->
+      <button
+        v-if="!isInstallLess && !isFirstUseTakeover"
+        ref="installPill"
+        type="button"
+        class="title-install-pill"
+        :class="{ 'is-open': isInstancePickerOpen }"
+        aria-haspopup="dialog"
+        :aria-expanded="isInstancePickerOpen"
+        @click="handleInstallPill"
+      >
         <div class="title-install-slot title-install-slot--leading">
           <ComfyCLogo class="title-install-brand-mark" :size="16" />
         </div>
-        <!-- Center slot: install identity. Renders the install-type
-             icon (Standalone laptop / Cloud / Legacy Desktop tower /
-             …) on install-backed windows alongside the install name. -->
         <div class="title-install-slot title-install-slot--center">
           <component
             :is="installTypeMeta.icon"
@@ -381,10 +396,30 @@ onUnmounted(() => {
           />
           <span class="title-install-name">{{ installLabel }}</span>
         </div>
-        <!-- Trailing slot: reserved for the instance-picker dropdown
-             caret / status indicator (wired up in a later pass). Empty
-             for now but kept in the layout so the center slot stays
-             optically balanced under the fixed-width pill. -->
+        <!-- Trailing slot: dropdown caret. Marks the pill as an
+             interactive opener so the user reads it as actionable. -->
+        <div class="title-install-slot title-install-slot--trailing">
+          <ChevronDown :size="12" class="title-install-caret" aria-hidden="true" />
+        </div>
+      </button>
+      <div
+        v-else
+        class="title-install-pill"
+        :class="{ 'is-install-less': isInstallLess }"
+      >
+        <div class="title-install-slot title-install-slot--leading">
+          <ComfyCLogo class="title-install-brand-mark" :size="16" />
+        </div>
+        <div class="title-install-slot title-install-slot--center">
+          <component
+            :is="installTypeMeta.icon"
+            v-if="showInstallTypeIcon"
+            :size="14"
+            class="title-install-type-icon"
+            v-bind="tooltipAttrs(installTypeLabel)"
+          />
+          <span class="title-install-name">{{ installLabel }}</span>
+        </div>
         <div class="title-install-slot title-install-slot--trailing"></div>
       </div>
       <!-- Install-update pill. Suppressed in install-less
@@ -647,10 +682,39 @@ onUnmounted(() => {
   padding: 5px 8px;
   border-radius: 999px;
   background: var(--brand-surface-bg);
-  border: 1px solid var(--comfy-yellow);
+  border: 1px solid var(--neutral-100);
   color: var(--neutral-100);
+  font: inherit;
   font-size: 12px;
   cursor: default;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+/* Button variant — install-backed hosts. The pill is an actionable
+ * picker opener: hover repaints to the brand-surface hover token,
+ * open state lifts border/text/logo to brand yellow (--neutral-50)
+ * so the pill reads as engaged. */
+button.title-install-pill {
+  cursor: pointer;
+}
+button.title-install-pill:hover,
+button.title-install-pill:focus-visible {
+  background: var(--brand-surface-bg-hover);
+  outline: none;
+}
+button.title-install-pill.is-open {
+  /* Lift border + text to brand yellow when the picker is showing.
+   * The brand mark + caret both use `currentColor` so they inherit
+   * this lift automatically — one source of truth for the open tint. */
+  border-color: var(--neutral-50);
+  color: var(--neutral-50);
+}
+.title-install-caret {
+  color: currentColor;
+  opacity: 0.7;
+  flex-shrink: 0;
 }
 /* Install-less host windows: identity-only `Desktop 2.0 Beta` label. */
 .title-install-pill.is-install-less {
@@ -668,11 +732,12 @@ onUnmounted(() => {
   gap: 6px;
   min-width: 0;
 }
-/* Brand-mark color tracks the yellow ring so the C reads as the
-   pill's owning brand, not a content element. */
+/* Brand-mark tracks the pill's `color` token so it lifts to brand
+   yellow alongside the border / name / caret when the picker opens.
+   `currentColor` keeps it in sync without a separate hover/open rule. */
 .title-install-brand-mark {
   flex-shrink: 0;
-  color: var(--comfy-yellow);
+  color: currentColor;
 }
 
 .title-install-name {

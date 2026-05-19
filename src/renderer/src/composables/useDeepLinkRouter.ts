@@ -1,5 +1,6 @@
 import { onMounted, onUnmounted } from 'vue'
 import { useInstallationStore } from '../stores/installationStore'
+import type { Installation } from '../types/ipc'
 import type { Overlay } from './useOverlay'
 
 interface DeepLinkRouterOpts {
@@ -15,6 +16,12 @@ interface DeepLinkRouterOpts {
   openOverlay: (next: Overlay | null) => Promise<boolean>
   showAppUpdateRestartPrompt: (version: string | null) => Promise<void>
   showAppUpdateDownloadPrompt: (version: string | null) => Promise<void>
+  /** Instance-picker popover picked an install that's not already
+   *  running. Routed to the panel so it can run the same
+   *  `useListAction` launch flow the chooser uses — without the
+   *  chooser-host attach-claim (which would swap install A out of
+   *  this host). */
+  pickInstallFromPicker?: (installation: Installation) => Promise<void> | void
 }
 
 /**
@@ -68,6 +75,15 @@ export function useDeepLinkRouter(opts: DeepLinkRouterOpts): void {
             installation: inst ?? null,
             initialTab: tab,
           })
+          return
+        }
+        if (payload.kind === 'picker-pick-install') {
+          await opts.bootstrapReady
+          const id = payload.installationId
+          if (!id) return
+          const inst = installationStore.getById(id)
+          if (!inst) return
+          await opts.pickInstallFromPicker?.(inst)
         }
       })()
     })

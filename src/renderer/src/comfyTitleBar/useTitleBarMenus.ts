@@ -20,12 +20,15 @@ interface DownloadsTrayState {
   recent: DownloadsTrayEntry[]
 }
 
+type TitleMenuKind = 'menu' | 'downloads' | 'instance-picker'
+
 interface TitleBarMenusBridge {
   openFileMenu: (anchor: MenuAnchor) => void
   dismissFileMenu: () => void
   clickDownloadsTray: (anchor: MenuAnchor) => void
-  onMenuOpened: (cb: (info: { menu: 'menu' | 'downloads' }) => void) => () => void
-  onMenuClosed: (cb: (info: { menu: 'menu' | 'downloads' }) => void) => () => void
+  clickInstallPill: (anchor: MenuAnchor) => void
+  onMenuOpened: (cb: (info: { menu: TitleMenuKind }) => void) => () => void
+  onMenuClosed: (cb: (info: { menu: TitleMenuKind }) => void) => () => void
   onDownloadsChanged: (cb: (state: DownloadsTrayState) => void) => () => void
 }
 
@@ -38,6 +41,9 @@ interface UseTitleBarMenusOpts {
   fileBtnRef: Readonly<ShallowRef<HTMLElement | null>>
   /** Template ref for the downloads-tray button. */
   downloadsBtnRef: Readonly<ShallowRef<HTMLElement | null>>
+  /** Template ref for the centre install pill — used to anchor the
+   *  instance-picker popup below the pill. */
+  installPillRef: Readonly<ShallowRef<HTMLElement | null>>
 }
 
 interface TitleBarMenusApi {
@@ -61,8 +67,17 @@ interface TitleBarMenusApi {
    *  attention animation. `0` means "no pulse yet" — the renderer can
    *  treat it as a guard for the initial mount. */
   downloadsStartedAt: Ref<number>
+  /** Mirror of `isMenuOpen` scoped to the instance-picker popup.
+   *  Drives the centre pill's `is-open` pressed-state styling so the
+   *  pill reads as actively engaged while the popover is showing — same
+   *  convention the waffle + downloads tray buttons use. */
+  isInstancePickerOpen: Ref<boolean>
   handleFileMenu: () => void
   handleDownloadsTray: () => void
+  /** Click handler for the centre install pill. Toggle-closes if the
+   *  picker is already open; otherwise opens the popup anchored
+   *  beneath the pill's bottom edge. */
+  handleInstallPill: () => void
 }
 
 /**
@@ -98,10 +113,15 @@ export function useTitleBarMenus(opts: UseTitleBarMenusOpts): TitleBarMenusApi {
    *  re-pop the popup on the same click. 100ms covers the worst-case
    *  Windows / Linux retarget gap. */
   const MENU_REOPEN_GUARD_MS = 100
-  const menuClosedAt: Record<'menu' | 'downloads', number> = { menu: 0, downloads: 0 }
+  const menuClosedAt: Record<TitleMenuKind, number> = {
+    menu: 0,
+    downloads: 0,
+    'instance-picker': 0,
+  }
 
   const isMenuOpen = ref(false)
   const isDownloadsOpen = ref(false)
+  const isInstancePickerOpen = ref(false)
   const downloadsState = ref<DownloadsTrayState>({ active: [], recent: [] })
   /** URLs the user has already acknowledged. Used to derive the
    *  unseen-finished count without persisting per-entry state on the
@@ -165,6 +185,20 @@ export function useTitleBarMenus(opts: UseTitleBarMenusOpts): TitleBarMenusApi {
     opts.bridge?.clickDownloadsTray(anchorDownloadsBelow(opts.downloadsBtnRef.value))
   }
 
+  function handleInstallPill(): void {
+    opts.hideTip()
+    // Toggle-close: same blur-isn't-reliable rationale as the file menu
+    // and downloads tray. The file menu's dismiss IPC is reused because
+    // main hides whichever popup is currently open for the parent
+    // window (one popup per parent — see `titlePopupsByParent`).
+    if (isMenuOpen.value) {
+      opts.bridge?.dismissFileMenu()
+      return
+    }
+    if (Date.now() - menuClosedAt['instance-picker'] < MENU_REOPEN_GUARD_MS) return
+    opts.bridge?.clickInstallPill(anchorDownloadsBelow(opts.installPillRef.value))
+  }
+
   /** Mark every current `recent` entry as seen. Triggered by main
    *  pushing `menu: 'downloads'` in `onMenuOpened` so opening the
    *  popup is what acknowledges the indicator. */
@@ -219,12 +253,15 @@ export function useTitleBarMenus(opts: UseTitleBarMenusOpts): TitleBarMenusApi {
       if (info.menu === 'downloads') {
         isDownloadsOpen.value = true
         acknowledgeRecent()
+      } else if (info.menu === 'instance-picker') {
+        isInstancePickerOpen.value = true
       }
     })
     unsubMenuClosed = opts.bridge.onMenuClosed(({ menu }) => {
       menuClosedAt[menu] = Date.now()
       isMenuOpen.value = false
       if (menu === 'downloads') isDownloadsOpen.value = false
+      if (menu === 'instance-picker') isInstancePickerOpen.value = false
     })
     unsubDownloads = opts.bridge.onDownloadsChanged(ingestDownloadsState)
   })
@@ -238,6 +275,7 @@ export function useTitleBarMenus(opts: UseTitleBarMenusOpts): TitleBarMenusApi {
   return {
     isMenuOpen,
     isDownloadsOpen,
+    isInstancePickerOpen,
     downloadsState,
     downloadsActiveCount,
     unseenFinishedCount,
@@ -245,5 +283,6 @@ export function useTitleBarMenus(opts: UseTitleBarMenusOpts): TitleBarMenusApi {
     downloadsStartedAt,
     handleFileMenu,
     handleDownloadsTray,
+    handleInstallPill,
   }
 }
