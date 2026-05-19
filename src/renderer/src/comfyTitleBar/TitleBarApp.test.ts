@@ -464,8 +464,8 @@ describe('TitleBarApp', () => {
     const { default: TitleBarApp } = await import('./TitleBarApp.vue')
     const wrapper = mount(TitleBarApp)
     await flushPromises()
-    expect(wrapper.find('.title-update-pill-v2.is-app-update').exists()).toBe(false)
-    expect(wrapper.find('.title-update-pill-v2.is-install-update').exists()).toBe(false)
+    expect(wrapper.find('.title-update-pill.is-app-update').exists()).toBe(false)
+    expect(wrapper.find('.title-update-pill.is-install-update').exists()).toBe(false)
   })
 
   it('renders the app-update pill with "Desktop Update Available" copy when state.kind=available (auto-updates OFF)', async () => {
@@ -480,7 +480,7 @@ describe('TitleBarApp', () => {
       cb({ kind: 'available', version: '2.3.4', autoUpdate: false }),
     )
     await flushPromises()
-    const pill = wrapper.find('.title-update-pill-v2.is-app-update')
+    const pill = wrapper.find('.title-update-pill.is-app-update')
     expect(pill.exists()).toBe(true)
     expect(pill.classes()).not.toContain('is-ready')
     expect(pill.text()).toContain('Desktop Update Available')
@@ -499,7 +499,7 @@ describe('TitleBarApp', () => {
       cb({ kind: 'ready', version: '2.3.4', autoUpdate: false }),
     )
     await flushPromises()
-    const pill = wrapper.find('.title-update-pill-v2.is-app-update')
+    const pill = wrapper.find('.title-update-pill.is-app-update')
     expect(pill.exists()).toBe(true)
     expect(pill.classes()).toContain('is-ready')
     expect(pill.text()).toContain('Desktop Update Ready')
@@ -518,7 +518,7 @@ describe('TitleBarApp', () => {
       cb({ kind: 'ready', version: '2.3.4', autoUpdate: true }),
     )
     await flushPromises()
-    const pill = wrapper.find('.title-update-pill-v2.is-app-update')
+    const pill = wrapper.find('.title-update-pill.is-app-update')
     expect(pill.exists()).toBe(true)
     expect(pill.classes()).toContain('is-ready')
     expect(pill.text()).toContain('Desktop Update Ready')
@@ -528,10 +528,10 @@ describe('TitleBarApp', () => {
     const { default: TitleBarApp } = await import('./TitleBarApp.vue')
     const wrapper = mount(TitleBarApp)
     await flushPromises()
-    expect(wrapper.find('.title-update-pill-v2.is-install-update').exists()).toBe(false)
+    expect(wrapper.find('.title-update-pill.is-install-update').exists()).toBe(false)
     bridgeState.installUpdateAvailableCallbacks.forEach((cb) => cb({ available: true, version: null }))
     await flushPromises()
-    const pill = wrapper.find('.title-update-pill-v2.is-install-update')
+    const pill = wrapper.find('.title-update-pill.is-install-update')
     expect(pill.exists()).toBe(true)
     expect(pill.text()).toContain('Update available')
   })
@@ -547,7 +547,7 @@ describe('TitleBarApp', () => {
       cb({ available: true, version: 'v1.2.3' }),
     )
     await flushPromises()
-    const pill = wrapper.find('.title-update-pill-v2.is-install-update')
+    const pill = wrapper.find('.title-update-pill.is-install-update')
     expect(pill.exists()).toBe(true)
     expect(pill.text()).toContain('Update v1.2.3')
     // Tooltip + aria-label track the same copy.
@@ -563,7 +563,7 @@ describe('TitleBarApp', () => {
     await flushPromises()
     bridgeState.installUpdateAvailableCallbacks.forEach((cb) => cb({ available: true, version: null }))
     await flushPromises()
-    expect(wrapper.find('.title-update-pill-v2.is-install-update').exists()).toBe(false)
+    expect(wrapper.find('.title-update-pill.is-install-update').exists()).toBe(false)
   })
 
   it('forwards app-update pill clicks through the bridge', async () => {
@@ -574,7 +574,7 @@ describe('TitleBarApp', () => {
       cb({ kind: 'available', version: '1.0.0', autoUpdate: false }),
     )
     await flushPromises()
-    await wrapper.find('.title-update-pill-v2.is-app-update').trigger('click')
+    await wrapper.find('.title-update-pill.is-app-update').trigger('click')
     expect(bridgeState.appUpdatePillClicks).toBe(1)
     wrapper.unmount()
   })
@@ -585,7 +585,7 @@ describe('TitleBarApp', () => {
     await flushPromises()
     bridgeState.installUpdateAvailableCallbacks.forEach((cb) => cb({ available: true, version: null }))
     await flushPromises()
-    await wrapper.find('.title-update-pill-v2.is-install-update').trigger('click')
+    await wrapper.find('.title-update-pill.is-install-update').trigger('click')
     expect(bridgeState.installUpdatePillClicks).toBe(1)
     wrapper.unmount()
   })
@@ -598,12 +598,12 @@ describe('TitleBarApp', () => {
       cb({ kind: 'ready', version: '2.0.0', autoUpdate: false }),
     )
     await flushPromises()
-    expect(wrapper.find('.title-update-pill-v2.is-app-update').exists()).toBe(true)
+    expect(wrapper.find('.title-update-pill.is-app-update').exists()).toBe(true)
     bridgeState.appUpdateStateCallbacks.forEach((cb) =>
       cb({ kind: null, version: null, autoUpdate: true }),
     )
     await flushPromises()
-    expect(wrapper.find('.title-update-pill-v2.is-app-update').exists()).toBe(false)
+    expect(wrapper.find('.title-update-pill.is-app-update').exists()).toBe(false)
   })
 
   // ===================================================================
