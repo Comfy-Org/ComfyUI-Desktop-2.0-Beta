@@ -1,8 +1,8 @@
 /**
- * Canonical structured-data for the three legal documents rendered
- * inside `TermsModal.vue`: the EULA, the Privacy Policy, and the
- * Third-Party Notices. Long-form mirrors live in `docs/legal/*.md`
- * and must be kept in sync with these in-product excerpts.
+ * Canonical structured-data for the four legal documents rendered
+ * inside `TermsModal.vue`: the EULA, the Terms of Service, the
+ * Privacy Policy, and the Third-Party Notices. This is the source of
+ * truth — what the app actually displays.
  *
  * Kept in source (not i18n) because legal text shouldn't be machine-
  * translated and the consent step needs the exact wording the user is
@@ -10,9 +10,9 @@
  * EULA / privacy surfaces in desktop installers.
  *
  * Variable naming note: `PRIVACY_POLICY` and the `PolicyBlock` /
- * `PrivacyPolicy` type names predate the EULA/Notices additions. They
- * stay for compatibility with existing call sites. The structure is
- * doc-agnostic — `LEGAL_DOCS` is the lookup the consent flow uses.
+ * `PrivacyPolicy` type names predate the EULA/ToS/Notices additions.
+ * They stay for compatibility with existing call sites. The structure
+ * is doc-agnostic — `LEGAL_DOCS` is the lookup the consent flow uses.
  */
 
 export interface PolicyBlock {
