@@ -1,4 +1,4 @@
-import { app, Menu, ipcMain, net } from 'electron'
+import { app, Menu, ipcMain, net, dialog } from 'electron'
 import type { BrowserWindow, WebContentsView } from 'electron'
 import type { Tray } from 'electron'
 import path from 'path'
@@ -39,6 +39,8 @@ import { COMFY_BG, SPLASH_DARK, TITLEBAR_BG, type SplashTheme } from './lib/them
 import { comfyTitleBarOverlay } from './lib/titleBarOverlay'
 import { sourceMap, _broadcastToRenderer, _runningSessions } from './lib/ipc/shared'
 import { enrichInstallationsForRenderer } from './lib/ipc/registerInstallationHandlers'
+import { getSnapshotListData } from './lib/snapshots'
+import { update as updateInstallation } from './installations'
 import { lookupInstallUpdateOverride } from './lib/e2eOverrides'
 import * as mainTelemetry from './lib/telemetry'
 import { getDeviceId } from './lib/deviceId'
@@ -940,6 +942,100 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
       findParentByTitleBarSender: (wc) => findEntryByTitleBarSender(wc)?.entry.window ?? null,
     })
     registerSystemModalIpc()
+    // Swap-in-place contract: when the user picks a different install
+    // from a Comfy-instance window, the picked install replaces the
+    // current install IN THE SAME WINDOW (workflow continuity from the
+    // user's perspective — they stay in the window they were in). The
+    // current install's session is stopped first; on confirm the
+    // window detaches (flips to chooser-shape briefly) and then
+    // re-attaches the picked install via the same in-place attach
+    // claim path the dashboard chooser uses.
+    //
+    // Three exits short-circuit the swap:
+    //   - Target already running in another window → focus that
+    //     window. Avoids spawning a duplicate session of the same
+    //     install and keeps the user's other window intact.
+    //   - Target equals the host's own install → no-op. Picker already
+    //     dismissed at the IPC boundary; refocusing the window would
+    //     be redundant.
+    //   - User cancels the swap-confirm dialog → no-op.
+    //
+    // The renderer-side `useLocalInstanceGuard` handles cross-window
+    // local-instance conflicts (port collision on the same port) via
+    // a modal that renders inside the panel — naturally visible after
+    // the detach since the host is now chooser-shape with the panel
+    // on top.
+    const pickInstallFromPicker = async (
+      installationId: string,
+      parentEntryId: number,
+    ): Promise<void> => {
+      const existing = getEntryByInstallationId(installationId)
+      if (existing && !existing.window.isDestroyed()) {
+        existing.window.show()
+        existing.window.focus()
+        return
+      }
+      const parentEntry = comfyWindows.get(parentEntryId)
+      if (!parentEntry || parentEntry.window.isDestroyed()) return
+
+      // Picking the host's own install — picker already dismissed at
+      // the IPC boundary, nothing more to do.
+      if (parentEntry.installationId === installationId) return
+
+      // Install-backed parent → confirm before swap (the user is
+      // about to lose any unsaved work in the current install's
+      // workflow). Chooser hosts skip the dialog because there's no
+      // active workflow to lose — they're a launcher surface.
+      if (parentEntry.installationId != null) {
+        let targetName = installationId
+        try {
+          const target = await getInstallation(installationId)
+          if (target?.name) targetName = target.name
+        } catch {
+          // Name lookup is cosmetic — fall through with the id as the label.
+        }
+        const result = await dialog.showMessageBox(parentEntry.window, {
+          type: 'question',
+          buttons: ['Switch', 'Cancel'],
+          defaultId: 0,
+          cancelId: 1,
+          title: 'Switch instance?',
+          message: `Switch to ${targetName}?`,
+          detail:
+            'The current instance will be stopped and replaced in this window. Any unsaved work in the workflow will be lost.',
+        })
+        if (result.response !== 0) return
+        // `entry.detachInstall()` runs the full symmetric undo of
+        // `attachInstall`: stops the running session, releases the
+        // comfyView URL, re-navigates the title-bar back to chooser
+        // mode, destroys + remounts the panelView in chooser shape.
+        // After this the entry is structurally identical to a fresh
+        // chooser host (`isChooserHost(parentEntry) === true`).
+        parentEntry.detachInstall()
+      }
+
+      // Route through the chooser-pick path. After the detach (or for
+      // a parent that was already chooser-shape), the host is
+      // chooser-shape; PanelApp's `useDeepLinkRouter` branches the
+      // picker-pick-install payload to `handleChooserPick`, which
+      // stakes an attach claim against this same window. `onLaunch`
+      // consumes the claim and runs `attachInstall` against the
+      // existing host — the user perceives one in-place swap, not a
+      // detach + relaunch.
+      //
+      // The newly-remounted panel renderer takes a beat to load + ack
+      // `did-finish-load`. `sendToPanelDeferred` queues the IPC until
+      // that ack arrives so the listener has been registered by the
+      // time the payload fires.
+      const panelView = parentEntry.panelView
+        ?? ensurePanelView(parentEntryId, parentEntry, computeBodyMode(parentEntry))
+      if (panelView.webContents.isDestroyed()) return
+      sendToPanelDeferred(panelView, 'panel-trigger-overlay', {
+        kind: 'picker-pick-install',
+        installationId,
+      })
+    }
+
     registerTitlePopupIpc({
       openChooserHostWindow,
       returnToDashboard,
@@ -956,31 +1052,135 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
         return enriched as unknown as InstancePickerInstall[]
       },
       getRunningInstallationIds: () => Array.from(_runningSessions.keys()),
-      pickInstallFromPicker: (installationId, parentEntryId) => {
-        // Focus-or-launch contract: never swap install A out of the
-        // host that opened the picker. Already-running → focus its
-        // window. Not running → route through the picker's parent
-        // host's panel renderer which fires the install's launch
-        // action via the same `useListAction` flow the chooser uses
-        // (skipping the chooser-host attach claim so it opens its own
-        // fresh window).
-        const existing = getEntryByInstallationId(installationId)
-        if (existing && !existing.window.isDestroyed()) {
-          existing.window.show()
-          existing.window.focus()
+      // Per-install Settings + Snapshots payload for the picker's
+      // right-pane accordions. Both reads route through the same
+      // source helpers the unified Settings drawer uses
+      // (`getDetailSections` + `getSnapshotListData`) so the picker
+      // can't render data that diverges from the drawer's view.
+      getPickerDetailsForInstall: async (installationId) => {
+        const inst = await getInstallation(installationId)
+        if (!inst) return { settings: null, snapshots: null }
+        const source = sourceMap[inst.sourceId]
+        const settings = source
+          ? (source.getDetailSections(inst) as Record<string, unknown>[])
+          : null
+        let snapshots: Record<string, unknown> | null = null
+        if (inst.installPath) {
+          try {
+            const data = await getSnapshotListData(inst.installPath)
+            snapshots = { ...data, copyEvents: [] }
+          } catch (err) {
+            console.error(`Picker: snapshot read failed for ${installationId}:`, err)
+            snapshots = null
+          }
+        }
+        return { settings, snapshots }
+      },
+      pickerUpdateField: async (installationId, fieldId, value) => {
+        // Single-field update routes through the existing
+        // `update-installation` shape the drawer uses. The whitelist
+        // there derives editable ids from each source's
+        // `getDetailSections`, so a picker-side edit is automatically
+        // rejected if the field isn't editable — no separate guard
+        // needed.
+        const inst = await getInstallation(installationId)
+        if (!inst) return { ok: false, message: 'Installation not found.' }
+        const source = sourceMap[inst.sourceId]
+        if (!source) return { ok: false, message: 'Unknown source.' }
+        const sections = source.getDetailSections(inst) as Record<string, unknown>[]
+        const allowed = new Set<string>(['name', 'seen'])
+        for (const section of sections) {
+          const fields = section.fields as Record<string, unknown>[] | undefined
+          if (!fields) continue
+          for (const f of fields) {
+            if (f.editable && typeof f.id === 'string') allowed.add(f.id)
+          }
+        }
+        if (!allowed.has(fieldId)) {
+          return { ok: false, message: `Field '${fieldId}' is not editable.` }
+        }
+        try {
+          await updateInstallation(installationId, { [fieldId]: value })
+          return { ok: true }
+        } catch (err) {
+          return { ok: false, message: err instanceof Error ? err.message : 'Update failed.' }
+        }
+      },
+      pickerRunAction: async (installationId, actionId, actionData) => {
+        // Delegate to the same source-action dispatch the
+        // `run-action` IPC uses. The action allowlist enforced one
+        // layer up (`comfy-titlepopup:picker-run-action`) restricts
+        // this to short snapshot-lifecycle actions that don't need
+        // streaming progress UI, so we pass stub progress callbacks
+        // rather than wiring a sender — the picker handles
+        // success/failure via the awaited return.
+        try {
+          const inst = await getInstallation(installationId)
+          if (!inst) return { ok: false, message: 'Installation not found.' }
+          const source = sourceMap[inst.sourceId]
+          if (!source) return { ok: false, message: 'Unknown source.' }
+          const abort = new AbortController()
+          const result = await source.handleAction(actionId, inst, actionData, {
+            update: (data) => updateInstallation(installationId, data).then(() => { }),
+            sendProgress: () => { },
+            sendOutput: () => { },
+            signal: abort.signal,
+          })
+          return {
+            ok: result.ok !== false,
+            message: typeof result.message === 'string' ? result.message : undefined,
+          }
+        } catch (err) {
+          return { ok: false, message: err instanceof Error ? err.message : 'Action failed.' }
+        }
+      },
+      pickInstallFromPicker,
+      restartInstallFromPicker: async (installationId, parentEntryId) => {
+        // Restart: same install, same window. The session is stopped
+        // and a fresh launch is triggered; `onLaunch`'s existing-
+        // window short-circuit reloads the comfyView URL in place
+        // without re-creating the BrowserWindow or the entry.
+        //
+        // Confirm with a native dialog parented to the host so the
+        // prompt visually belongs to the window that initiated the
+        // restart. Reuses the same dialog idiom as
+        // `confirmAndCloseAllHostWindows` for visual consistency.
+        const parentEntry = comfyWindows.get(parentEntryId)
+        const parentWindow = parentEntry && !parentEntry.window.isDestroyed()
+          ? parentEntry.window
+          : null
+        const opts: Electron.MessageBoxOptions = {
+          type: 'question',
+          buttons: ['Restart', 'Cancel'],
+          defaultId: 1,
+          cancelId: 1,
+          title: 'Restart instance?',
+          message: 'Restart this instance?',
+          detail:
+            'Restarting will stop the running session. Any unsaved work in the workflow will be lost.',
+        }
+        const result = parentWindow
+          ? await dialog.showMessageBox(parentWindow, opts)
+          : await dialog.showMessageBox(opts)
+        if (result.response !== 0) return
+        // Stop is idempotent — awaiting ensures the process is fully
+        // gone before the re-launch so the new session doesn't race a
+        // port that's still bound.
+        try {
+          await ipc.stopRunning(installationId)
+        } catch (err) {
+          console.error(`Picker restart: stop failed for ${installationId}:`, err)
           return
         }
-        const parentEntry = comfyWindows.get(parentEntryId)
+        // Direct-fire the launch action through the host's panel —
+        // bypasses `pickInstallFromPicker`'s focus-existing short-
+        // circuit (which would block re-launch because the host's
+        // window is still alive and bound to this install). The panel's
+        // `useDeepLinkRouter` routes `picker-pick-install` to
+        // `performPickerLaunch`, which runs the launch action; the
+        // existing-window onLaunch path handles the in-place URL
+        // reload — no detach, no window churn.
         if (!parentEntry || parentEntry.window.isDestroyed()) return
-        // Install-backed Comfy windows lazily construct their
-        // panelView — it stays null until something forces it
-        // (settings drawer, chooser body, etc.). Without this
-        // `ensurePanelView` call the picker would silently drop
-        // launches on every Comfy-instance window that hadn't yet
-        // opened the settings drawer at least once. Mirrors the
-        // `triggerOpenFeedback` pattern above and lets
-        // `sendToPanelDeferred` queue the IPC until the freshly-
-        // constructed panel's `did-finish-load` fires.
         const panelView = parentEntry.panelView
           ?? ensurePanelView(parentEntryId, parentEntry, computeBodyMode(parentEntry))
         if (panelView.webContents.isDestroyed()) return
