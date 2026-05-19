@@ -59,21 +59,22 @@ test.beforeEach(async () => {
 // flex-allocated-height regression without manual smoke testing.
 // ---------------------------------------------------------------------------
 
-test('empty drawer fits content (popup height < 200px) @windows @macos @linux', async () => {
+test('empty drawer fits content (popup height < 260px) @windows @macos @linux', async () => {
   await openDownloadsTray(ctx.titleBar)
   await waitForPopupVisible(ctx.app)
   await waitForStableBounds(ctx.app)
 
   const bounds = await getTitlePopupBounds(ctx.app)
   expect(bounds?.kind).toBe('downloads')
-  // Empty placeholder + footer link + ~2px borders comes out to ~80–110px;
-  // anything under 200 means the popup didn't pin to the 360 ceiling.
-  expect(bounds!.bounds.height).toBeLessThan(200)
+  // Header + empty placeholder + footer link + ~2px borders measures
+  // ~220px after the brand padding bump; anything under 260 means the
+  // popup didn't pin to the 396 ceiling.
+  expect(bounds!.bounds.height).toBeLessThan(260)
   // Also greater than zero so we know we measured a real visible popup.
   expect(bounds!.bounds.height).toBeGreaterThan(40)
 })
 
-test('one downloading entry fits content (NOT clipped at 360 ceiling) @windows @macos @linux', async () => {
+test('one downloading entry fits content (NOT clipped at 396 ceiling) @windows @macos @linux', async () => {
   await seedDownloads(ctx.app, {
     active: [makeEntry({ url: 'https://example.test/m1.safetensors', filename: 'm1.safetensors', status: 'downloading', progress: 0.5 })],
     recent: [],
@@ -84,7 +85,7 @@ test('one downloading entry fits content (NOT clipped at 360 ceiling) @windows @
 
   const bounds = await getTitlePopupBounds(ctx.app)
   // One row + footer ≈ 130–200px; the bug under test would have left
-  // it stuck at the 360 ceiling because `.downloads-list` reports
+  // it stuck at the 396 ceiling because `.downloads-list` reports
   // `scrollHeight === clientHeight` when items fit.
   expect(bounds!.bounds.height).toBeGreaterThan(80)
   expect(bounds!.bounds.height).toBeLessThan(260)
@@ -109,12 +110,12 @@ test('many entries cap at the ceiling and the list scrolls @windows @macos @linu
   await waitForStableBounds(ctx.app)
 
   const bounds = await getTitlePopupBounds(ctx.app)
-  // Ceiling is min(360, 0.6 * windowContentHeight). The default chooser
-  // window is at least 600px tall, so 360 wins under default test bounds.
-  expect(bounds!.bounds.height).toBeLessThanOrEqual(360)
+  // Ceiling is min(396, 0.6 * windowContentHeight). The default chooser
+  // window is at least 660px tall, so 396 wins under default test bounds.
+  expect(bounds!.bounds.height).toBeLessThanOrEqual(396)
   // Pinned to the ceiling (within a few px for borders / fractional
   // pixel rounding).
-  expect(bounds!.bounds.height).toBeGreaterThan(320)
+  expect(bounds!.bounds.height).toBeGreaterThan(356)
 
   // The internal list overflows.
   const overflow = await popup.evaluate<{ scroll: number; client: number }>(`(() => {
@@ -125,10 +126,11 @@ test('many entries cap at the ceiling and the list scrolls @windows @macos @linu
 })
 
 // ---------------------------------------------------------------------------
-// Per-status row controls — pause / resume / cancel / dismiss visibility.
+// Per-status row controls — contextual close-X visibility (cancel for
+// active rows, remove for terminal rows).
 // ---------------------------------------------------------------------------
 
-test('per-status row controls render the right action buttons @windows @macos @linux', async () => {
+test('per-status row close button maps to the right action @windows @macos @linux', async () => {
   await seedDownloads(ctx.app, {
     active: [
       makeEntry({ url: 'u-dl', filename: 'dl.safetensors', status: 'downloading', progress: 0.5 }),
@@ -145,34 +147,31 @@ test('per-status row controls render the right action buttons @windows @macos @l
   await waitForPopupVisible(ctx.app)
   await waitForStableBounds(ctx.app)
 
-  // Key the per-row affordance check by the seeded filename so tests
-  // don't depend on the renderer's `statusKindClass` mapping.
-  const summary = await popup.evaluate<Record<string, { pause: boolean; resume: boolean; cancel: boolean; dismiss: boolean }>>(`(() => {
+  // The redesign replaced the per-row pause/resume/cancel/dismiss
+  // button row with a single right-edge close X whose aria-label
+  // switches between "Cancel" (active rows) and "Remove from list"
+  // (terminal rows). Check the affordance via that aria-label so the
+  // test asserts what the user actually sees.
+  const summary = await popup.evaluate<Record<string, { close: string | null }>>(`(() => {
     const out = {}
     for (const li of document.querySelectorAll('.downloads-item')) {
       const name = (li.querySelector('.downloads-item-name')?.textContent || '').trim()
-      const labels = Array.from(li.querySelectorAll('.downloads-item-actions button'))
-        .map(b => (b.getAttribute('aria-label') || b.textContent || '').toLowerCase().trim())
+      const closeBtn = li.querySelector('.downloads-item-close')
       out[name] = {
-        pause: labels.some(l => l.includes('pause')),
-        resume: labels.some(l => l.includes('resume')),
-        cancel: labels.some(l => l.includes('cancel')),
-        dismiss: !!li.querySelector('.downloads-item-dismiss'),
+        close: closeBtn ? (closeBtn.getAttribute('aria-label') || '').toLowerCase() : null,
       }
     }
     return out
   })()`)
 
-  // Downloading: pause + cancel; no resume or dismiss.
-  expect(summary['dl.safetensors']).toMatchObject({ pause: true, resume: false, cancel: true, dismiss: false })
-  // Paused: resume + cancel; no pause; no dismiss (still active).
-  expect(summary['pa.safetensors']).toMatchObject({ pause: false, resume: true, cancel: true, dismiss: false })
-  // Pending: cancel only; pause/resume gated on actual progress phase.
-  expect(summary['pe.safetensors']).toMatchObject({ pause: false, resume: false, cancel: true, dismiss: false })
-  // Terminal entries: cancel hidden, dismiss shown.
-  expect(summary['co.safetensors']).toMatchObject({ pause: false, resume: false, cancel: false, dismiss: true })
-  expect(summary['er.safetensors']).toMatchObject({ pause: false, resume: false, cancel: false, dismiss: true })
-  expect(summary['ca.safetensors']).toMatchObject({ pause: false, resume: false, cancel: false, dismiss: true })
+  // Active rows: close X cancels the in-flight download.
+  expect(summary['dl.safetensors']?.close).toContain('cancel')
+  expect(summary['pa.safetensors']?.close).toContain('cancel')
+  expect(summary['pe.safetensors']?.close).toContain('cancel')
+  // Terminal rows: close X removes the entry from the list.
+  expect(summary['co.safetensors']?.close).toContain('remove')
+  expect(summary['er.safetensors']?.close).toContain('remove')
+  expect(summary['ca.safetensors']?.close).toContain('remove')
 })
 
 // ---------------------------------------------------------------------------
