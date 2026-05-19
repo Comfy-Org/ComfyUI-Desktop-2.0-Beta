@@ -435,7 +435,7 @@ onUnmounted(() => {
       <button
         v-if="showInstallUpdatePill"
         type="button"
-        class="title-update-pill-v2 is-install-update"
+        class="title-update-pill is-install-update"
         v-bind="tooltipAttrs(installUpdatePillLabel)"
         @click="handleInstallUpdatePill"
       >
@@ -450,7 +450,7 @@ onUnmounted(() => {
       <button
         v-if="showAppUpdatePill"
         type="button"
-        class="title-update-pill-v2 is-app-update"
+        class="title-update-pill is-app-update"
         :class="{
           'is-ready': appUpdateState.kind === 'ready',
           'is-downloading': appUpdateState.kind === 'downloading'
@@ -756,60 +756,16 @@ button.title-install-pill.is-open {
 }
 
 /* --- Status pills (app-update + install-update) ---
-   Compact chip styling. The pills must fit inside the 36px content
-   area of the 37px title bar (1px bottom border) without growing it,
-   so padding/font-size are kept tight. Default colour palette tracks
-   the title bar text colour with a coloured tint so the pill draws
-   the eye but doesn't dominate the bar. */
-.title-update-pill {
-  -webkit-app-region: no-drag;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 8px;
-  font: inherit;
-  font-size: 11px;
-  font-weight: 500;
-  line-height: 1;
-  border-radius: 999px;
-  cursor: pointer;
-  background: rgba(96, 165, 250, 0.18);
-  color: inherit;
-  border: 1px solid rgba(96, 165, 250, 0.35);
-  transition:
-    background-color 0.12s,
-    border-color 0.12s,
-    opacity 0.12s;
-}
-.title-bar.is-hover-active .title-update-pill:hover:not(:disabled) {
-  background: rgba(96, 165, 250, 0.28);
-  border-color: rgba(96, 165, 250, 0.5);
-}
-.title-update-pill-spinner {
-  animation: title-update-pill-spin 1s linear infinite;
-}
-@keyframes title-update-pill-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-.title-update-pill:focus-visible {
-  outline: 2px solid var(--accent, #60a5fa);
-  outline-offset: 2px;
-}
-.title-update-pill-label {
-  white-space: nowrap;
-}
-
-/* --- App-update pill (v2 — brand neutral spec) ---
    Neutral pill rendered in the right trailing cluster. State is
    communicated via icon (Download / Loader2 / RefreshCw), not tint —
    the chrome stays the same across `available`, `downloading`, and
-   `ready` so the eye lands on the icon for status.
+   `ready` so the eye lands on the icon for status. Sized to fit
+   inside the 36px content area of the 37px title bar without growing
+   it.
    TODO(brand-cleanup): the white-alpha-04/10 values aren't tokenized
    yet; the existing `--brand-surface-*` recipe is .05/.09. Migrate to
    a shared `--white-alpha-*` ramp when one is introduced. */
-.title-update-pill-v2 {
+.title-update-pill {
   -webkit-app-region: no-drag;
   display: inline-flex;
   align-items: center;
@@ -829,22 +785,33 @@ button.title-install-pill.is-open {
     border-color 0.12s,
     opacity 0.12s;
 }
-.title-bar.is-hover-active .title-update-pill-v2:hover:not(:disabled) {
+.title-bar.is-hover-active .title-update-pill:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.08);
   border-color: rgba(255, 255, 255, 0.18);
 }
-.title-bar.is-light .title-update-pill-v2 {
+.title-bar.is-light .title-update-pill {
   background: rgba(0, 0, 0, 0.04);
   border-color: rgba(0, 0, 0, 0.1);
   color: var(--neutral-700);
 }
-.title-bar.is-light.is-hover-active .title-update-pill-v2:hover:not(:disabled) {
+.title-bar.is-light.is-hover-active .title-update-pill:hover:not(:disabled) {
   background: rgba(0, 0, 0, 0.08);
   border-color: rgba(0, 0, 0, 0.18);
 }
-.title-update-pill-v2:focus-visible {
+.title-update-pill:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
+}
+.title-update-pill-spinner {
+  animation: title-update-pill-spin 1s linear infinite;
+}
+@keyframes title-update-pill-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.title-update-pill-label {
+  white-space: nowrap;
 }
 
 /* --- Downloads tray ---
