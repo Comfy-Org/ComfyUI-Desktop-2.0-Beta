@@ -2,7 +2,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { X } from 'lucide-vue-next'
 import InlineRichText from './InlineRichText.vue'
-import { LEGAL_DOCS, PRIVACY_POLICY, type LegalDocId } from '../lib/privacyPolicy'
+import { LEGAL_DOCS, type LegalDocId } from '../lib/legalDocs'
 
 const props = withDefaults(
   defineProps<{
@@ -19,7 +19,7 @@ const emit = defineEmits<{
   close: []
 }>()
 
-const policy = computed(() => LEGAL_DOCS[props.doc] ?? PRIVACY_POLICY)
+const policy = computed(() => LEGAL_DOCS[props.doc] ?? LEGAL_DOCS.privacy)
 /** i18n key for the modal title, picked per doc so screen readers and
  *  the visible heading both reflect what the user is actually viewing. */
 const titleKey = computed(() => {
@@ -92,11 +92,11 @@ onUnmounted(() => {
             <h2 class="terms-title">{{ $t(titleKey) }}</h2>
             <div class="terms-meta">
               <span
-                ><strong>{{ $t('firstUse.privacyPolicyEffective') }}:</strong>
+                ><strong>{{ $t('firstUse.legalDocEffective') }}:</strong>
                 {{ policy.effectiveDate }}</span
               >
               <span
-                ><strong>{{ $t('firstUse.privacyPolicyAppliesTo') }}:</strong>
+                ><strong>{{ $t('firstUse.legalDocAppliesTo') }}:</strong>
                 {{ policy.appliesTo }}</span
               >
             </div>

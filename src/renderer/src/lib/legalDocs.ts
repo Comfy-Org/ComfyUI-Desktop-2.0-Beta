@@ -9,13 +9,13 @@
  * agreeing to. The English text is shown to all locales — standard for
  * EULA / privacy surfaces in desktop installers.
  *
- * Variable naming note: `PRIVACY_POLICY` and the `PolicyBlock` /
- * `PrivacyPolicy` type names predate the EULA/ToS/Notices additions.
- * They stay for compatibility with existing call sites. The structure
- * is doc-agnostic — `LEGAL_DOCS` is the lookup the consent flow uses.
+ * `LEGAL_DOCS` is the lookup the consent flow uses via the modal's
+ * `doc` prop. The individual `EULA`, `TOS`, `PRIVACY_POLICY`, and
+ * `THIRD_PARTY_NOTICES` exports are convenience handles for direct
+ * imports.
  */
 
-export interface PolicyBlock {
+export interface LegalDocBlock {
   /** Visual hierarchy:
    *   - 'h2'   — top-level section heading
    *   - 'h3'   — subsection heading
@@ -27,10 +27,10 @@ export interface PolicyBlock {
   items?: string[]
 }
 
-export interface PrivacyPolicy {
+export interface LegalDoc {
   effectiveDate: string
   appliesTo: string
-  blocks: PolicyBlock[]
+  blocks: LegalDocBlock[]
 }
 
 /** Doc ids surfaced by `TermsModal`'s `doc` prop. */
@@ -40,7 +40,7 @@ export type LegalDocId = 'eula' | 'tos' | 'privacy' | 'notices'
  * EULA — End-User License Agreement
  * ============================================================ */
 
-export const EULA: PrivacyPolicy = {
+export const EULA: LegalDoc = {
   effectiveDate: '2026-05-19',
   appliesTo: 'ComfyUI Desktop 2.0',
   blocks: [
@@ -264,7 +264,7 @@ export const EULA: PrivacyPolicy = {
  * user obligations, content policy, and dispute resolution.
  * ============================================================ */
 
-export const TOS: PrivacyPolicy = {
+export const TOS: LegalDoc = {
   effectiveDate: '2026-05-19',
   appliesTo: 'ComfyUI Desktop 2.0',
   blocks: [
@@ -383,7 +383,7 @@ export const TOS: PrivacyPolicy = {
  * Privacy Policy
  * ============================================================ */
 
-export const PRIVACY_POLICY: PrivacyPolicy = {
+export const PRIVACY_POLICY: LegalDoc = {
   effectiveDate: '2026-05-19',
   appliesTo: 'ComfyUI Desktop 2.0',
   blocks: [
@@ -559,7 +559,7 @@ export const PRIVACY_POLICY: PrivacyPolicy = {
  * Third-Party Notices
  * ============================================================ */
 
-export const THIRD_PARTY_NOTICES: PrivacyPolicy = {
+export const THIRD_PARTY_NOTICES: LegalDoc = {
   effectiveDate: '2026-05-19',
   appliesTo: 'ComfyUI Desktop 2.0',
   blocks: [
@@ -682,7 +682,7 @@ export const THIRD_PARTY_NOTICES: PrivacyPolicy = {
  * Lookup map for `TermsModal`'s `doc` prop.
  * ============================================================ */
 
-export const LEGAL_DOCS: Record<LegalDocId, PrivacyPolicy> = {
+export const LEGAL_DOCS: Record<LegalDocId, LegalDoc> = {
   eula: EULA,
   tos: TOS,
   privacy: PRIVACY_POLICY,
