@@ -115,7 +115,11 @@ const skipPick = ref(false)
  *  flag in via `open()`. */
 const hasLegacyDesktop = ref(false)
 const whyCloudOpen = ref(false)
-const termsOpen = ref(false)
+/** Which legal document to show when the terms modal is open, or null
+ *  when the modal is closed. The two consent-row links on the Terms
+ *  checkbox set this to 'eula' or 'tos'; the telemetry-row link sets
+ *  it to 'privacy'. TermsModal receives the value via its `doc` prop. */
+const termsDoc = ref<'eula' | 'tos' | 'privacy' | 'notices' | null>(null)
 /** Required acceptance of the Terms of Service / Privacy Policy. The
  *  primary "Get Started" CTA stays disabled until this flips true. The
  *  telemetry checkbox is a separate, optional opt-in (see
@@ -272,7 +276,7 @@ async function open(opts: OpenOpts = {}): Promise<void> {
   skipPick.value = opts.skipPick === true
   hasLegacyDesktop.value = opts.hasLegacyDesktop === true
   whyCloudOpen.value = false
-  termsOpen.value = false
+  termsDoc.value = null
   acceptedTos.value = false
   // Reset funnel-completion bookkeeping so a takeover replay measures
   // duration / steps from the replay, not from the original mount.
@@ -356,15 +360,20 @@ defineExpose({ open })
           <span class="brand-checkbox__text">
             <span class="brand-checkbox__title">{{ $t('firstUse.consentTosTitle') }}</span>
             <span class="brand-checkbox__hint">
-              {{ $t('firstUse.consentTosHint') }}
+              {{ $t('firstUse.consentTosHintPrefix') }}
               <button
                 type="button"
                 class="brand-checkbox__link"
-                data-testid="first-use-tos-learn-more"
-                @click.prevent="termsOpen = true"
-              >
-                {{ $t('common.learnMore') }}
-              </button>
+                data-testid="first-use-eula-link"
+                @click.prevent="termsDoc = 'eula'"
+              >{{ $t('firstUse.eulaLinkLabel') }}</button>
+              {{ $t('firstUse.consentTosHintSep') }}
+              <button
+                type="button"
+                class="brand-checkbox__link"
+                data-testid="first-use-tos-link"
+                @click.prevent="termsDoc = 'tos'"
+              >{{ $t('firstUse.tosLinkLabel') }}</button>{{ $t('firstUse.consentTosHintSuffix') }}
             </span>
           </span>
         </label>
@@ -378,10 +387,8 @@ defineExpose({ open })
                 type="button"
                 class="brand-checkbox__link"
                 data-testid="first-use-telemetry-learn-more"
-                @click.prevent="termsOpen = true"
-              >
-                {{ $t('common.learnMore') }}
-              </button>
+                @click.prevent="termsDoc = 'privacy'"
+              >{{ $t('common.learnMore') }}</button>
             </span>
           </span>
         </label>
@@ -503,7 +510,7 @@ defineExpose({ open })
       @close="dismissWhyCloud('dismiss')"
       @try-cloud="onWhyCloudTryCloud"
     />
-    <TermsModal v-if="termsOpen" @close="termsOpen = false" />
+    <TermsModal v-if="termsDoc" :doc="termsDoc" @close="termsDoc = null" />
   </BrandTakeoverLayout>
   <ModalShell v-else binding hide-close content-class="first-use-takeover">
     <!-- Mirrors step retains the legacy ModalShell chrome until it gets
