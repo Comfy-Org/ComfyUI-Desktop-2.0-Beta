@@ -8,7 +8,7 @@
 
 .chooser-tile {
   /* Golden ratio (1.618 : 1) — the design specifies tiles of this shape. */
-  aspect-ratio: 1.618 / 1;
+  aspect-ratio: 1.8 / 1;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -16,19 +16,37 @@
   gap: 6px;
   padding: 16px 18px;
   border-radius: 12px;
-  background: var(--bg-elev-1, rgba(127, 127, 127, 0.08));
-  border: 1px solid var(--border-subtle, rgba(127, 127, 127, 0.18));
+  border: 1px solid var(--chooser-surface-border);
+  background: var(--chooser-surface-bg);
   cursor: pointer;
   text-align: left;
   font: inherit;
   color: inherit;
   position: relative;
-  transition: background-color 120ms ease, border-color 120ms ease, transform 120ms ease;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    transform 120ms ease;
 }
-.chooser-tile:hover {
-  background: var(--bg-elev-2, rgba(127, 127, 127, 0.14));
-  border-color: var(--border-strong, rgba(127, 127, 127, 0.4));
-  transform: translateY(-1px);
+.chooser-tile:hover,
+.chooser-tile:focus-visible {
+  background: var(--chooser-surface-bg-hover);
+}
+/* Group-hover / -focus: lift the muted resting `--neutral-100` text /
+ * icon to full-strength `--text` so the tile reads as actively focused.
+ * Keyboard users get the same lift as mouse users. */
+.chooser-tile:hover .chooser-tile-icon,
+.chooser-tile:focus-visible .chooser-tile-icon,
+.chooser-tile:hover .chooser-tile-name,
+.chooser-tile:focus-visible .chooser-tile-name,
+.chooser-tile:hover .chooser-tile-meta,
+.chooser-tile:focus-visible .chooser-tile-meta {
+  color: var(--text);
+}
+.chooser-tile:hover .chooser-tile-icon,
+.chooser-tile:focus-visible .chooser-tile-icon {
+  /* Drop the resting opacity so the icon matches the brightened text. */
+  opacity: 1;
 }
 .chooser-tile:focus-visible {
   outline: 2px solid var(--accent, #4a90e2);
@@ -37,10 +55,10 @@
 
 .chooser-tile-icon {
   position: absolute;
-  /* Float the icon to the top-left of the tile. */
   top: 14px;
   left: 16px;
   opacity: 0.85;
+  color: var(--neutral-100);
 }
 
 .chooser-tile-name {
@@ -48,6 +66,7 @@
   font-weight: 600;
   display: flex;
   align-items: center;
+  color: var(--neutral-100);
   gap: 6px;
   /* Reserve space for the type icon at top-left so name doesn't collide. */
   margin-top: auto;
@@ -59,9 +78,7 @@
   gap: 6px;
   max-width: 100%;
   font-size: 12px;
-  /* Container-level mute for plain-text meta on the New Install / Cloud
-   * tiles; install-tile pill chips override the opacity locally. */
-  opacity: 0.85;
+  color: var(--neutral-100);
   /* Reserve space at the bottom-right for the absolutely-positioned
    * Close-instance CTA so pills don't run under it on narrow tiles. */
   padding-right: 50px;
@@ -90,7 +107,10 @@
   border-color: var(--accent, #4a90e2);
   opacity: 1;
   cursor: pointer;
-  transition: background-color 0.12s, border-color 0.12s, transform 0.12s;
+  transition:
+    background-color 0.12s,
+    border-color 0.12s,
+    transform 0.12s;
 }
 .chooser-tile-pill-update:hover,
 .chooser-tile-pill-update:focus-visible {
@@ -110,7 +130,10 @@
   border-color: var(--accent-warning, #d97706);
   opacity: 1;
   cursor: pointer;
-  transition: background-color 0.12s, border-color 0.12s, transform 0.12s;
+  transition:
+    background-color 0.12s,
+    border-color 0.12s,
+    transform 0.12s;
 }
 .chooser-tile-pill-migrate:hover,
 .chooser-tile-pill-migrate:focus-visible {
@@ -177,8 +200,12 @@
   animation: chooser-tile-progress-sweep 1.4s ease-in-out infinite;
 }
 @keyframes chooser-tile-progress-sweep {
-  0%   { transform: translateX(-100%); }
-  100% { transform: translateX(250%); }
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(250%);
+  }
 }
 
 /* Status overlays — running / stopping / in-progress / errored. */
@@ -226,7 +253,10 @@
   align-items: center;
   justify-content: center;
   opacity: 0.65;
-  transition: background-color 100ms ease, opacity 100ms ease, border-color 100ms ease;
+  transition:
+    background-color 100ms ease,
+    opacity 100ms ease,
+    border-color 100ms ease;
 }
 .chooser-tile-kebab:hover,
 .chooser-tile-kebab:focus-visible {
@@ -258,7 +288,11 @@
   color: inherit;
   cursor: pointer;
   padding: 0;
-  transition: background-color 100ms ease, border-color 100ms ease, transform 100ms ease, color 100ms ease;
+  transition:
+    background-color 100ms ease,
+    border-color 100ms ease,
+    transform 100ms ease,
+    color 100ms ease;
 }
 .chooser-tile-cta-btn:hover:not(:disabled),
 .chooser-tile-cta-btn:focus-visible {
@@ -279,17 +313,4 @@
 .chooser-tile-cta-close:focus-visible {
   background: var(--accent-danger-hover, #b8241a);
   border-color: var(--accent-danger-hover, #b8241a);
-}
-
-/* Fixed-position entry-point tiles — distinct so they read as entry-points, not data rows. */
-.chooser-tile-new {
-  background: var(--accent-soft, rgba(74, 144, 226, 0.10));
-  border-style: dashed;
-  border-color: var(--border-strong, rgba(127, 127, 127, 0.4));
-}
-.chooser-tile-new:hover {
-  background: var(--accent-soft-hover, rgba(74, 144, 226, 0.18));
-}
-.chooser-tile-cloud {
-  background: var(--bg-elev-1, rgba(127, 127, 127, 0.08));
 }
