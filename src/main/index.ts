@@ -883,6 +883,14 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
       registerE2EHooks()
     }
 
+    // Dev-only keyboard shortcuts for driving title-bar pill state by
+    // hand on an unpackaged build. Cmd/Ctrl+Alt+U cycles the app-update
+    // pill; Cmd/Ctrl+Alt+I toggles the install-update override.
+    if (!app.isPackaged) {
+      const { registerDevShortcuts } = await import('./lib/devShortcuts')
+      registerDevShortcuts({ computeInstallUpdateAvailable })
+    }
+
     // Wire late-bound host factories before any openOrFocus* runs (the
     // tray menu, activate / second-instance handlers, and the startup
     // picker all flow through the registry).
