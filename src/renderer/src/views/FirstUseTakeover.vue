@@ -115,7 +115,11 @@ const skipPick = ref(false)
  *  flag in via `open()`. */
 const hasLegacyDesktop = ref(false)
 const whyCloudOpen = ref(false)
-const termsOpen = ref(false)
+/** Which legal document to show when the terms modal is open, or null
+ *  when the modal is closed. The two Learn more links on the consent
+ *  step set this to 'eula' (Terms checkbox) or 'privacy' (telemetry
+ *  checkbox). TermsModal receives the value via its `doc` prop. */
+const termsDoc = ref<'eula' | 'privacy' | 'notices' | null>(null)
 /** Required acceptance of the Terms of Service / Privacy Policy. The
  *  primary "Get Started" CTA stays disabled until this flips true. The
  *  telemetry checkbox is a separate, optional opt-in (see
@@ -289,7 +293,7 @@ async function open(opts: OpenOpts = {}): Promise<void> {
   skipPick.value = opts.skipPick === true
   hasLegacyDesktop.value = opts.hasLegacyDesktop === true
   whyCloudOpen.value = false
-  termsOpen.value = false
+  termsDoc.value = null
   acceptedTos.value = false
   // TODO(brand-cleanup): installName.value = '' — ref removed; Configure
   // screen now owns naming.
@@ -385,7 +389,7 @@ defineExpose({ open })
                 type="button"
                 class="brand-checkbox__link"
                 data-testid="first-use-tos-learn-more"
-                @click.prevent="termsOpen = true"
+                @click.prevent="termsDoc = 'eula'"
               >
                 {{ $t('common.learnMore') }}
               </button>
@@ -402,7 +406,7 @@ defineExpose({ open })
                 type="button"
                 class="brand-checkbox__link"
                 data-testid="first-use-telemetry-learn-more"
-                @click.prevent="termsOpen = true"
+                @click.prevent="termsDoc = 'privacy'"
               >
                 {{ $t('common.learnMore') }}
               </button>
@@ -536,7 +540,7 @@ defineExpose({ open })
       @close="dismissWhyCloud('dismiss')"
       @try-cloud="onWhyCloudTryCloud"
     />
-    <TermsModal v-if="termsOpen" @close="termsOpen = false" />
+    <TermsModal v-if="termsDoc" :doc="termsDoc" @close="termsDoc = null" />
   </BrandTakeoverLayout>
   <ModalShell v-else binding hide-close content-class="first-use-takeover">
     <!-- Mirrors step retains the legacy ModalShell chrome until it gets

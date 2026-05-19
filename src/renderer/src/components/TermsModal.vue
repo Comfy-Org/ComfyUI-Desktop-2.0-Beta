@@ -1,14 +1,37 @@
 <script setup lang="ts">
-import { nextTick, onMounted, onUnmounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { X } from 'lucide-vue-next'
 import InlineRichText from './InlineRichText.vue'
-import { PRIVACY_POLICY } from '../lib/privacyPolicy'
+import { LEGAL_DOCS, PRIVACY_POLICY, type LegalDocId } from '../lib/privacyPolicy'
+
+const props = withDefaults(
+  defineProps<{
+    /** Which legal document to render. The consent screen passes
+     *  'eula' for the EULA-and-ToS checkbox link and 'privacy' for
+     *  the analytics-consent link. Defaults to privacy so existing
+     *  call sites keep working. */
+    doc?: LegalDocId
+  }>(),
+  { doc: 'privacy' },
+)
 
 const emit = defineEmits<{
   close: []
 }>()
 
-const policy = PRIVACY_POLICY
+const policy = computed(() => LEGAL_DOCS[props.doc] ?? PRIVACY_POLICY)
+/** i18n key for the modal title, picked per doc so screen readers and
+ *  the visible heading both reflect what the user is actually viewing. */
+const titleKey = computed(() => {
+  switch (props.doc) {
+    case 'eula':
+      return 'firstUse.eulaModalTitle'
+    case 'notices':
+      return 'firstUse.noticesModalTitle'
+    default:
+      return 'firstUse.privacyModalTitle'
+  }
+})
 
 const overlayRef = ref<HTMLDivElement | null>(null)
 const closeBtnRef = ref<HTMLButtonElement | null>(null)
@@ -48,7 +71,7 @@ onUnmounted(() => {
         class="terms-overlay"
         role="dialog"
         aria-modal="true"
-        :aria-label="$t('firstUse.termsModalTitle')"
+        :aria-label="$t(titleKey)"
         @mousedown="onOverlayMouseDown"
         @click="onOverlayClick"
       >
@@ -64,7 +87,7 @@ onUnmounted(() => {
             <X :size="18" />
           </button>
           <header class="terms-header">
-            <h2 class="terms-title">{{ $t('firstUse.termsModalTitle') }}</h2>
+            <h2 class="terms-title">{{ $t(titleKey) }}</h2>
             <div class="terms-meta">
               <span
                 ><strong>{{ $t('firstUse.privacyPolicyEffective') }}:</strong>
@@ -77,7 +100,7 @@ onUnmounted(() => {
             </div>
           </header>
           <div class="terms-body" tabindex="0">
-            <template v-for="(block, i) in policy.blocks" :key="i">
+            <template v-for="(block, i) in policy.blocks" :key="`${doc}-${i}`">
               <h2 v-if="block.kind === 'h2'" class="terms-h2">{{ block.text }}</h2>
               <h3 v-else-if="block.kind === 'h3'" class="terms-h3">{{ block.text }}</h3>
               <p v-else-if="block.kind === 'p' && block.text" class="terms-p">
