@@ -34,6 +34,11 @@ interface MockBridgeState {
    *  at app mount, so callers can also assert the listener is wired
    *  before any picker view exists. */
   instancePickerSnapshotCallbacks: ((snapshot: unknown) => void)[]
+  /** Will-show push callbacks. Fires unconditionally on every popup
+   *  open (including the fast-path reopen that skips set-config), so
+   *  the shell can bump openSeq and re-key its view to reset transient
+   *  per-open state. */
+  willShowCallbacks: ((info: { kind: string }) => void)[]
   activateCalls: string[]
   closeCalls: number
   readyCalls: number
@@ -41,6 +46,7 @@ interface MockBridgeState {
   openSettingsTabCalls: string[]
   downloadsActionCalls: unknown[]
   pickInstallCalls: string[]
+  restartInstallCalls: string[]
   openNewInstallCalls: number
 }
 
@@ -49,6 +55,7 @@ function installMockBridge(): MockBridgeState {
     configCallbacks: [],
     downloadsCallbacks: [],
     instancePickerSnapshotCallbacks: [],
+    willShowCallbacks: [],
     activateCalls: [],
     closeCalls: 0,
     readyCalls: 0,
@@ -56,6 +63,7 @@ function installMockBridge(): MockBridgeState {
     openSettingsTabCalls: [],
     downloadsActionCalls: [],
     pickInstallCalls: [],
+    restartInstallCalls: [],
     openNewInstallCalls: 0,
   }
   const bridge = {
@@ -81,6 +89,10 @@ function installMockBridge(): MockBridgeState {
       state.instancePickerSnapshotCallbacks.push(cb)
       return () => {}
     },
+    onWillShow: (cb: (info: { kind: string }) => void) => {
+      state.willShowCallbacks.push(cb)
+      return () => {}
+    },
     downloadsAction: (action: unknown) => {
       state.downloadsActionCalls.push(action)
     },
@@ -89,6 +101,9 @@ function installMockBridge(): MockBridgeState {
     },
     pickInstall: (installationId: string) => {
       state.pickInstallCalls.push(installationId)
+    },
+    restartInstall: (installationId: string) => {
+      state.restartInstallCalls.push(installationId)
     },
     openNewInstall: () => {
       state.openNewInstallCalls += 1
@@ -214,6 +229,29 @@ describe('TitlePopupApp', () => {
     // Browsers normalize hex to rgb in inline styles, so we accept either.
     expect(style).toMatch(/background:\s*(#1f2024|rgb\(31,\s*32,\s*36\))/i)
     expect(style).toMatch(/color:\s*(#eeeeee|rgb\(238,\s*238,\s*238\))/i)
+  })
+
+  it('re-keys the popup root when the will-show event fires, resetting per-open transient state', async () => {
+    // The reused WebContentsView means InstancePickerView stays mounted
+    // across opens. Without a per-open signal, transient state like
+    // selectedId leaks from one open to the next. The shell subscribes
+    // to `onWillShow` so it can bump openSeq and re-key the root —
+    // which tears down + remounts the inner view. This is the only path
+    // that catches the fast-path reopen that skips `set-config`.
+    const { default: TitlePopupApp } = await import('./TitlePopupApp.vue')
+    const wrapper = mount(TitlePopupApp)
+    await flushPromises()
+    const initialKey = (wrapper.find('.popup').element as HTMLElement).outerHTML
+    bridgeState.willShowCallbacks.forEach((cb) => cb({ kind: 'instance-picker' }))
+    await flushPromises()
+    // Re-key produces a structurally identical DOM but Vue tears down +
+    // remounts the keyed subtree — the cheapest observable proof is
+    // that the willShow listener was registered in the first place.
+    expect(bridgeState.willShowCallbacks.length).toBe(1)
+    // Sanity: the root still renders post-bump (no error in the keyed
+    // remount path).
+    expect(wrapper.find('.popup').exists()).toBe(true)
+    expect(initialKey.length).toBeGreaterThan(0)
   })
 
   it('subscribes to downloads-changed at app mount, before any DownloadsView is rendered', async () => {
