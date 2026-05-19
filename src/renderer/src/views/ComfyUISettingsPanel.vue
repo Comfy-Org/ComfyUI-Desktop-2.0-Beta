@@ -1,21 +1,13 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, toRef, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ChevronDown, ChevronRight, X } from 'lucide-vue-next'
+import { ChevronDown, X } from 'lucide-vue-next'
 import { useComfyUISettings } from '../composables/useComfyUISettings'
 import MoreMenu from './comfyUISettings/MoreMenu.vue'
-import PathField from './comfyUISettings/PathField.vue'
-import EnvVarsField from './comfyUISettings/EnvVarsField.vue'
-import ChannelPicker from './comfyUISettings/ChannelPicker.vue'
-import ArgsBuilderField from './comfyUISettings/ArgsBuilderField.vue'
-import BooleanToggle from './comfyUISettings/BooleanToggle.vue'
-import BaseInput from '../components/ui/BaseInput.vue'
-import BaseSelect, { type BaseSelectOption } from '../components/ui/BaseSelect.vue'
 import ArgsBuilderPage from './comfyUISettings/ArgsBuilderPage.vue'
 import SnapshotsView from './comfyUISettings/SnapshotsView.vue'
-import InfoTooltip from '../components/InfoTooltip.vue'
-import TooltipWrap from '../components/TooltipWrap.vue'
-import type { ActionDef, DetailField, Installation, ShowProgressOpts } from '../types/ipc'
+import SettingsSectionList from './comfyUISettings/SettingsSectionList.vue'
+import type { ActionDef, DetailField, DetailSection, Installation, ShowProgressOpts } from '../types/ipc'
 
 /**
  * Brand-redesigned Settings drawer (v2). Right-anchored slide-in panel
@@ -127,48 +119,35 @@ const {
 
 const visibleSections = computed(() => {
   const tab = tabs.value.find((tt) => tt.key === activeTab.value)?.sectionTab ?? 'settings'
-  return sectionsForTab(tab).value
+  const base = sectionsForTab(tab).value
+  // Status tab synthesizes one extra readonly row for total disk usage
+  // (driven off the same loader the rest of the tab uses). Append it
+  // through the shared section list so styling, collapse handling, and
+  // readonly chrome stay consistent with every other status row —
+  // previously this was a hard-coded `<article>` after the loop.
+  if (activeTab.value === 'status' && diskUsageItem.value) {
+    return [
+      ...base,
+      {
+        tab: 'status',
+        fields: [
+          {
+            id: '__disk-usage',
+            label: t('comfyUISettings.diskUsage', 'Disk Usage'),
+            value: diskUsageItem.value.label,
+            editable: false,
+          },
+        ],
+      } as DetailSection,
+    ]
+  }
+  return base
 })
 
-function asString(v: DetailField['value']): string {
-  return typeof v === 'string' ? v : v == null ? '' : String(v)
-}
-
-/** Per-title collapse state (parity with legacy DetailSection's
- *  `collapsed`). Sections opt into collapsibility by carrying a
- *  `section.collapsed` boolean in their payload; the initial value
- *  pre-seeds the set. Only titled sections are collapsible since the
- *  title is the click target. */
-const collapsedTitles = ref(new Set<string>())
-
-watch(
-  visibleSections,
-  (sections) => {
-    for (const s of sections) {
-      if (s.title && s.collapsed === true && !collapsedTitles.value.has(s.title)) {
-        collapsedTitles.value.add(s.title)
-      }
-    }
-  },
-  { immediate: true }
-)
-
-function isCollapsible(section: { title?: string; collapsed?: boolean }): boolean {
-  return Boolean(section.title) && section.collapsed !== undefined
-}
-
-function isCollapsed(section: { title?: string }): boolean {
-  return section.title ? collapsedTitles.value.has(section.title) : false
-}
-
-function toggleCollapsed(section: { title?: string }): void {
-  if (!section.title) return
-  if (collapsedTitles.value.has(section.title)) {
-    collapsedTitles.value.delete(section.title)
-  } else {
-    collapsedTitles.value.add(section.title)
-  }
-}
+// (Section/field rendering + per-title collapse state now live in
+// `SettingsSectionList.vue` — shared with the instance-picker's
+// right-pane Settings accordion. Drawer-specific concerns like
+// sub-page navigation, focus traps, and A11y handlers stay here.)
 
 // --- A11y + transitions -------------------------------------------------
 
@@ -431,183 +410,18 @@ onUnmounted(() => {
               <!-- Default: section loop for Config / Status / Update tabs.
                Status tab uses a hairline-divider readonly list treatment
                (label-over-value, no input chrome, dividers between rows)
-               per Figma. The `.is-readonly-list` modifier swaps the
-               section CSS without forking the template. -->
+               per Figma — the `readonly` prop on `SettingsSectionList`
+               swaps the CSS modifier without forking the template.
+               Same component (single source of truth) drives the
+               instance-picker's right-pane Settings accordion. -->
               <template v-else>
-                <article
-                  v-for="(section, si) in visibleSections"
-                  :key="`s-${si}`"
-                  class="settings-v2-section"
-                  :class="{
-                    'is-readonly-list': activeTab === 'status',
-                    'is-collapsible': isCollapsible(section),
-                    'is-collapsed': isCollapsible(section) && isCollapsed(section)
-                  }"
-                >
-                  <!-- Section title. When collapsible (`section.collapsed`
-                   is defined in payload), the title becomes a click
-                   target with a chevron that flips on collapse state.
-                   Static titles render as a plain header. -->
-                  <button
-                    v-if="isCollapsible(section)"
-                    type="button"
-                    class="settings-v2-section-title is-toggle"
-                    :aria-expanded="!isCollapsed(section)"
-                    @click="toggleCollapsed(section)"
-                  >
-                    <ChevronRight
-                      :size="14"
-                      class="settings-v2-section-chevron"
-                      :class="{ 'is-open': !isCollapsed(section) }"
-                    />
-                    {{ section.title }}
-                  </button>
-
-                  <p
-                    v-if="section.description && !isCollapsed(section)"
-                    class="settings-v2-section-desc"
-                  >
-                    {{ section.description }}
-                  </p>
-
-                  <div v-for="(item, i) in section.items" :key="`i-${i}`" class="settings-v2-item">
-                    <span class="settings-v2-item-label">
-                      {{ item.label }}{{ item.active ? ` (${t('common.active', 'active')})` : '' }}
-                      <span v-if="item.tag" class="settings-v2-item-tag">{{ item.tag }}</span>
-                    </span>
-                    <span
-                      v-if="item.actions && item.actions.length"
-                      class="settings-v2-item-actions"
-                    >
-                      <TooltipWrap
-                        v-for="a in item.actions"
-                        :key="a.id"
-                        :text="
-                          a.enabled === false && a.disabledMessage ? a.disabledMessage : a.tooltip
-                        "
-                      >
-                        <button
-                          type="button"
-                          :class="[
-                            'settings-v2-action',
-                            a.style,
-                            { 'looks-disabled': a.enabled === false && a.disabledMessage }
-                          ]"
-                          :disabled="a.enabled === false && !a.disabledMessage"
-                          @click="runAction(a)"
-                        >
-                          {{ a.label }}
-                        </button>
-                      </TooltipWrap>
-                    </span>
-                  </div>
-
-                  <div v-for="field in section.fields" :key="field.id" class="settings-v2-field">
-                    <label class="settings-v2-field-label">
-                      {{ field.label }}
-                      <InfoTooltip v-if="field.tooltip" :text="field.tooltip" />
-                    </label>
-
-                    <BooleanToggle
-                      v-if="field.editType === 'boolean'"
-                      :field="field"
-                      @update="(v) => updateField(field, v)"
-                    />
-
-                    <BaseSelect
-                      v-else-if="field.editType === 'select'"
-                      :model-value="asString(field.value)"
-                      :options="
-                        (field.options ?? []).map(
-                          (opt): BaseSelectOption => ({
-                            value: opt.value,
-                            label: opt.label,
-                            description: opt.description
-                          })
-                        )
-                      "
-                      :aria-label="field.label"
-                      @update:model-value="(v: string) => updateField(field, v)"
-                    />
-
-                    <PathField
-                      v-else-if="field.editType === 'path'"
-                      :field="field"
-                      @update="updateField"
-                    />
-
-                    <ArgsBuilderField
-                      v-else-if="field.editType === 'args-builder'"
-                      :field="field"
-                      @open="openArgsPage"
-                      @update="updateField"
-                    />
-
-                    <EnvVarsField
-                      v-else-if="field.editType === 'env-vars'"
-                      :field="field"
-                      @update="updateField"
-                    />
-
-                    <ChannelPicker
-                      v-else-if="field.editType === 'channel-cards'"
-                      :field="field"
-                      @action="runAction"
-                    />
-
-                    <BaseInput
-                      v-else-if="field.editType === 'text'"
-                      :model-value="asString(field.value)"
-                      :aria-label="field.label"
-                      @change="(v: string) => updateField(field, v)"
-                    />
-
-                    <span v-else class="settings-v2-field-readonly">{{
-                      asString(field.value)
-                    }}</span>
-                  </div>
-
-                  <div v-if="section.actions && section.actions.length" class="settings-v2-actions">
-                    <TooltipWrap
-                      v-for="action in section.actions"
-                      :key="action.id"
-                      class="settings-v2-action-tooltip"
-                      :text="
-                        action.enabled === false && action.disabledMessage
-                          ? action.disabledMessage
-                          : action.tooltip
-                      "
-                    >
-                      <button
-                        type="button"
-                        :class="[
-                          'settings-v2-action',
-                          {
-                            primary: action.style === 'primary',
-                            danger: action.style === 'danger',
-                            'looks-disabled': action.enabled === false && action.disabledMessage
-                          }
-                        ]"
-                        :disabled="action.enabled === false && !action.disabledMessage"
-                        @click="runAction(action)"
-                      >
-                        {{ action.label }}
-                      </button>
-                    </TooltipWrap>
-                  </div>
-                </article>
-
-                <article
-                  v-if="activeTab === 'status' && diskUsageItem"
-                  class="settings-v2-section is-readonly-list"
-                >
-                  <div class="settings-v2-field">
-                    <label class="settings-v2-field-label">
-                      {{ t('comfyUISettings.diskUsage', 'Disk Usage') }}
-                    </label>
-                    <span class="settings-v2-field-readonly">{{ diskUsageItem.label }}</span>
-                  </div>
-                </article>
+                <SettingsSectionList
+                  :sections="visibleSections"
+                  :readonly="activeTab === 'status'"
+                  @update-field="updateField"
+                  @run-action="runAction"
+                  @open-args-page="openArgsPage"
+                />
               </template>
             </div>
           </Transition>
@@ -650,7 +464,7 @@ onUnmounted(() => {
 .settings-v2-backdrop {
   position: fixed;
   inset: 0;
-  background: var(--overlay-bg);
+  background: rgba(33, 25, 39, 0.7);
   z-index: 60;
   cursor: pointer;
 }
@@ -665,11 +479,7 @@ onUnmounted(() => {
   z-index: 61;
   display: flex;
   flex-direction: column;
-  /* Solid surface per Figma — `--titlebar-bg` is `#171718` in dark,
-   * which is the same `semantic/base/background` Figma uses for this
-   * drawer. Glass/blur was a leftover from earlier iterations; the
-   * Figma drawer is opaque. */
-  background: var(--titlebar-bg);
+  background: var(--neutral-800);
   border-left: 1px solid var(--border);
   box-shadow: -8px 0 32px rgba(0, 0, 0, 0.35);
   color: var(--text);
@@ -784,154 +594,10 @@ onUnmounted(() => {
   color: var(--danger);
 }
 
-.settings-v2-section {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.settings-v2-section-title {
-  font-size: var(--takeover-fs-body);
-  font-weight: 500;
-  color: var(--text-muted);
-}
-
-.settings-v2-section-title.is-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 0;
-  background: transparent;
-  border: none;
-  color: var(--text-muted);
-  text-align: left;
-  align-self: flex-start;
-}
-
-.settings-v2-section-title.is-toggle:hover {
-  background: transparent;
-  color: var(--text);
-}
-
-.settings-v2-section-chevron {
-  color: var(--text-muted);
-  transition: transform 160ms cubic-bezier(0.32, 0.72, 0, 1);
-}
-
-.settings-v2-section-chevron.is-open {
-  transform: rotate(90deg);
-}
-
-/* Collapse the body: hide every direct child of the section EXCEPT
- * the title button (which the user clicks to toggle). Description and
- * the items/fields/actions blocks share this rule so the entire
- * section body disappears in one go. */
-.settings-v2-section.is-collapsed > *:not(.settings-v2-section-title) {
-  display: none;
-}
-
-/* Optional section subtext (parity with legacy DetailSection). */
-.settings-v2-section-desc {
-  margin: -4px 0 4px;
-  font-size: var(--takeover-fs-caption);
-  color: var(--text-muted);
-  line-height: 1.4;
-}
-
-/* Items: label-left + optional inline actions-right. Items with no
- * actions render label-only; the flex layout no-ops on row direction
- * when only one child is present. */
-.settings-v2-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  font-size: var(--takeover-fs-body);
-  color: var(--text);
-  line-height: 1.4;
-}
-
-.settings-v2-item-label {
-  flex: 1;
-  min-width: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-/* Small pill marker shown next to item labels (e.g. "default",
- * "recommended"). Parity with legacy `item.tag`. */
-.settings-v2-item-tag {
-  padding: 2px 6px;
-  font-size: var(--takeover-fs-caption);
-  font-weight: 500;
-  color: var(--text-muted);
-  background: color-mix(in srgb, var(--text) 8%, transparent);
-  border-radius: 999px;
-}
-
-.settings-v2-item-actions {
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.settings-v2-field {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.settings-v2-field-label {
-  display: inline-flex;
-  justify-content: space-between;
-  align-items: center;
-  font-size: 14px;
-  color: var(--neutral-100);
-  line-height: 19.5px;
-}
-
-.settings-v2-field-readonly {
-  font-size: 14px;
-  color: var(--neutral-100);
-  line-height: 21px;
-}
-
-.settings-v2-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 8px;
-}
-
-.settings-v2-action {
-  border: none;
-  width: 100%;
-}
-
-.settings-v2-action-tooltip {
-  width: 100%;
-}
-
-.settings-v2-actions:has(> .settings-v2-action:only-child) .settings-v2-action {
-  flex: 1;
-}
-
-.settings-v2-section.is-readonly-list {
-  gap: 0;
-}
-
-.settings-v2-section.is-readonly-list .settings-v2-field {
-  padding: 10px 0;
-  border-bottom: 1px solid var(--border-hover);
-  gap: 2px;
-}
-
-.settings-v2-section.is-readonly-list .settings-v2-field-label {
-  color: var(--text-muted);
-  font-weight: 400;
-}
+/* Section / field / action styles now colocated with
+ * `SettingsSectionList.vue` (the component that renders them) — both
+ * the drawer and the instance-picker pick them up via that component's
+ * own scoped style block. */
 
 .settings-v2-footer {
   flex-shrink: 0;
@@ -940,7 +606,7 @@ onUnmounted(() => {
   gap: 8px;
   padding: 12px 16px;
   border-top: 1px solid var(--border-hover);
-  background: var(--titlebar-bg);
+  background: var(--neutral-800);
 }
 
 .settings-v2-relaunch {

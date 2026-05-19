@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { reactive } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useSessionStore } from './sessionStore'
+import { getPhaseWeights } from '../lib/progressWeights'
 import type {
   ActionResult,
   ErrorDetailData,
@@ -29,6 +30,11 @@ export interface Operation {
   unsubProgress: Unsubscribe | null
   unsubOutput: Unsubscribe | null
   apiCall: (() => Promise<ActionResult>) | null
+  /** Monotonic floor for the unified `globalProgressFor` bar. Lazily
+   *  raised; never decremented. See `globalProgressFor` for the full
+   *  contract. Underscored because it's internal to the store — UI code
+   *  should read through `globalProgressFor`, not this field. */
+  _globalFloor: number
 }
 
 export const useProgressStore = defineStore('progress', () => {
@@ -100,7 +106,8 @@ export const useProgressStore = defineStore('progress', () => {
       result: null,
       unsubProgress: null,
       unsubOutput: null,
-      apiCall
+      apiCall,
+      _globalFloor: 0,
     }
     operations.set(installationId, op)
     const rop = operations.get(installationId)!
@@ -203,9 +210,99 @@ export const useProgressStore = defineStore('progress', () => {
     window.api.stopComfyUI(installationId)
   }
 
+  /**
+   * Unified 0→100 progress across an op's phases.
+   *
+   * Flat op (`steps === null`): passes through `flatPercent` — zero
+   * behavioral change for chooser-launch / port-conflict / single-phase
+   * ops.
+   *
+   * Stepped op:
+   *   - Each phase has a weight from `getPhaseWeights`, summing to 1.0.
+   *   - Phases strictly before the active phase contribute their full
+   *     weight. The active phase contributes `weight * (percent/100)`
+   *     when determinate; 0 when indeterminate (`-1`).
+   *   - When the active phase is indeterminate, the bar fill HOLDS at
+   *     the previous floor; the caller renders the slide animation on
+   *     top via `indeterminate: true`. That's what stops the bar from
+   *     regressing every time a `cleanup` / `update` phase starts.
+   *
+   * Monotonic clamp via `_globalFloor` on the op: a late-arriving smaller
+   * value (retry, re-entering an earlier phase) can never walk the bar
+   * backward.
+   *
+   * Finished ops snap to 100 on success; otherwise hold at the last
+   * floor — the bar's "error" / "cancelled" visuals come from existing
+   * `flatStatus` / `cancelRequested` paths, we just hand them a number
+   * that doesn't reset.
+   */
+  function globalProgressFor(op: Operation): {
+    percent: number
+    indeterminate: boolean
+  } {
+    if (op.finished) {
+      if (op.result?.ok) return { percent: 100, indeterminate: false }
+      return { percent: op._globalFloor, indeterminate: false }
+    }
+
+    // Flat path — pass-through. Bar fills 0→flatPercent. The chooser-
+    // launch path uses this (flat op, percent stays at -1 the whole time
+    // → indeterminate slide animation flows left↔right, exactly what the
+    // CTO described for the "starting server" stage).
+    if (!op.steps) {
+      const raw = op.flatPercent
+      if (raw < 0) {
+        return { percent: op._globalFloor, indeterminate: true }
+      }
+      const next = Math.max(op._globalFloor, raw)
+      op._globalFloor = next
+      return { percent: next, indeterminate: false }
+    }
+
+    // Stepped path.
+    const weights = getPhaseWeights(op.steps)
+    const activeIdx = op.activePhase
+      ? op.steps.findIndex((s) => s.phase === op.activePhase)
+      : -1
+
+    if (activeIdx < 0 || !op.activePhase) {
+      // Steps payload landed but no per-phase update yet. Hold the floor.
+      return { percent: op._globalFloor, indeterminate: false }
+    }
+
+    // Sum the weight of every phase strictly before the active one.
+    let baseline = 0
+    for (let i = 0; i < activeIdx; i++) {
+      const prev = op.steps[i]
+      if (!prev) continue
+      baseline += (weights[prev.phase] ?? 0) * 100
+    }
+    const activeWeight = (weights[op.activePhase] ?? 0) * 100
+
+    // For an indeterminate active phase we have no granular percent to
+    // report. Advance the bar smoothly to the END of this phase's slot
+    // (`baseline + activeWeight`) so the user sees forward motion when
+    // we transition from a determinate phase to an indeterminate one
+    // (e.g. download → cleanup). Once the next phase starts, the
+    // baseline absorbs that slot fully and the bar stays where it is.
+    const total = op.activePercent < 0
+      ? baseline + activeWeight
+      : baseline + activeWeight * (op.activePercent / 100)
+
+    const next = Math.max(op._globalFloor, total)
+    op._globalFloor = next
+
+    // No indeterminate flag for stepped ops — every phase shows a static
+    // fill. The flat path is where the slide animation lives, which is
+    // what the chooser-launch path uses for its "Starting server…"
+    // final stage.
+    return { percent: next, indeterminate: false }
+  }
+
   return {
     operations,
     getProgressInfo,
+    globalProgressFor,
     startOperation,
     cleanupOperation,
     cancelOperation,

@@ -83,6 +83,13 @@ export class EmbeddedPopupView {
    *  permanently stuck invisible if the ack never arrives (mid-load
    *  crash, etc.). */
   pendingShowTimer: NodeJS.Timeout | null = null
+  /** Owner-toggled opt-out for the blur-driven dismiss path. The
+   *  picker sets this to true while open because it owns its own
+   *  outside-click handling via a full-body backdrop view — the
+   *  blur-based dismiss would race the toggle-close click and cause
+   *  open → immediate-reopen flicker. Other popup kinds leave this
+   *  false so blur dismissal continues to work for them. */
+  suppressBlurDismiss = false
   private readonly onHideCallback?: () => void
 
   constructor(opts: EmbeddedPopupViewOpts) {
@@ -118,6 +125,14 @@ export class EmbeddedPopupView {
     void loadPromise.catch(() => {})
 
     const dismiss = (): void => {
+      // `suppressBlurDismiss` covers EVERY auto-dismiss path
+      // (parent:blur / parent:will-move / parent:move / parent:resize /
+      // popup:blur). The picker owns its own outside-click handling
+      // via the backdrop view; any of these auto-paths firing during
+      // the open transition would close the popup and immediately
+      // re-open on the trigger click → visible flicker. Owners that
+      // want the auto-dismiss back can leave the flag false.
+      if (this.suppressBlurDismiss) return
       this.hide()
     }
     // BrowserWindow's overloaded `on(event, listener)` typings narrow the
@@ -130,7 +145,9 @@ export class EmbeddedPopupView {
     }
     const dismissEvents = opts.hideOnParentEvents ?? []
     const parentEmitter = parent as unknown as DismissEmitter
+    const parentListeners = new Map<string, () => void>()
     for (const event of dismissEvents) {
+      parentListeners.set(event, dismiss)
       parentEmitter.on(event, dismiss)
     }
     if (opts.hideOnPopupBlur) {
@@ -147,7 +164,8 @@ export class EmbeddedPopupView {
     popup.webContents.once('destroyed', () => {
       if (!parent.isDestroyed()) {
         for (const event of dismissEvents) {
-          parentEmitter.removeListener(event, dismiss)
+          const listener = parentListeners.get(event)
+          if (listener) parentEmitter.removeListener(event, listener)
         }
         parent.removeListener('closed', onParentClosed)
       }

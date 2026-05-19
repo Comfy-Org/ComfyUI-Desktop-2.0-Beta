@@ -1446,11 +1446,37 @@ input[type='checkbox']:checked::after {
 .progress-status {
   font-size: 14px;
   color: var(--text-muted);
+  margin-bottom: 4px;
+  user-select: text;
+}
+.progress-substatus {
+  font-size: 12px;
+  color: var(--text-muted);
+  opacity: 0.7;
   margin-bottom: 12px;
   user-select: text;
 }
 .progress-error-message {
   color: var(--danger);
+  margin-bottom: 12px;
+}
+.progress-bar-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.progress-bar-wrap .progress-bar-track {
+  flex: 1 1 auto;
+  margin-bottom: 0;
+}
+.progress-bar-percent {
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  min-width: 3ch;
+  text-align: right;
 }
 .progress-bar-track {
   width: 100%;

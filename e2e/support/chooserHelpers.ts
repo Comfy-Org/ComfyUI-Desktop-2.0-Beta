@@ -23,12 +23,26 @@ export async function clickNewInstallTile(panel: WebContentsPage): Promise<void>
  * substring). Excludes the New Install and Cloud tiles — those use
  * dedicated class hooks and their descriptions can incidentally match
  * install-name substrings like "ComfyUI".
+ *
+ * The chooser PanelApp is freshly remounted whenever a host window
+ * flips back to chooser mode (e.g. Return to Dashboard). Its
+ * InstallationStore hydrates asynchronously via an IPC fetch on
+ * mount, so the tile we want may not be in the DOM yet by the time
+ * the helper is invoked. Poll for the tile's *named* presence — that
+ * is the readiness signal (rather than `.chooser-view` which is up
+ * before any tiles exist).
  */
 export async function clickInstallTile(panel: WebContentsPage, nameSubstring: string): Promise<void> {
-  const ok = await panel.clickByText(
-    '.chooser-tile:not(.chooser-tile-new):not(.chooser-tile-cloud) .chooser-tile-name',
-    nameSubstring,
+  const selector = '.chooser-tile:not(.chooser-tile-new):not(.chooser-tile-cloud) .chooser-tile-name'
+  const needle = nameSubstring.toLowerCase()
+  await panel.waitFor(
+    async () => {
+      const texts = await panel.allText(selector)
+      return texts.some((t) => t.toLowerCase().includes(needle))
+    },
+    { timeout: 15_000, message: `Install tile matching "${nameSubstring}" never appeared in chooser` },
   )
+  const ok = await panel.clickByText(selector, nameSubstring)
   expect(ok, `Install tile matching "${nameSubstring}" clicked`).toBe(true)
 }
 
@@ -48,7 +62,7 @@ export async function openDownloadsTray(titleBar: WebContentsPage): Promise<void
 
 /** Wait for any flow takeover to be visible inside the panel body. */
 export async function expectTakeoverOpen(panel: WebContentsPage): Promise<void> {
-  await panel.waitForVisible('.view-modal-content', { timeout: 10_000 })
+  await panel.waitForVisible('.brand-takeover-root', { timeout: 10_000 })
 }
 
 /** Dispatch Escape to dismiss the active overlay. */

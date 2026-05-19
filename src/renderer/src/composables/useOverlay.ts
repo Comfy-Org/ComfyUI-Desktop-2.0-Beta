@@ -154,6 +154,18 @@ export interface TakeoverOverlay {
    * wizard with no main-side rollback to fire.
    */
   onCancel?: () => void
+  /**
+   * Opt the `component: 'update'` takeover into ProgressModal's brand
+   * chrome (BrandTakeoverLayout + wordmark + step list) instead of the
+   * binding-modal chrome. Set today by:
+   *   - First-use → new-install chain (continuity with the takeover
+   *     above).
+   *   - Dashboard chooser-tile launch (screen swap to the brand loader
+   *     for parity with the onboarding install screen).
+   * Update-while-running on a regular dashboard install leaves it unset
+   * so that path keeps the original binding chrome.
+   */
+  brandChrome?: boolean
 }
 
 export type Overlay =

@@ -58,11 +58,17 @@ export function useListAction(uiSurface: string, callbacks: ListActionCallbacks)
     emitTelemetryAction('desktop2.action.invoked', { action_id: action.id, ...telemetryContext })
 
     if (action.showProgress) {
+      // Tag launch / restart so PanelApp's `handleShowProgress` installs
+      // the chooser-host close-on-instance-started subscription AND
+      // routes through the brand-chrome takeover when the source is an
+      // install-less chooser host. Mirrors DetailModal's flag.
+      const triggersInstanceStart = action.id === 'launch' || action.id === 'restart'
       callbacks.showProgress({
         installationId: inst.id,
         title: `${action.progressTitle || action.label} — ${inst.name}`,
         apiCall: () => window.api.runAction(inst.id, action.id),
         cancellable: !!action.cancellable,
+        triggersInstanceStart,
       })
       return
     }

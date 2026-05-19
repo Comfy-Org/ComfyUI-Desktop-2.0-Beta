@@ -242,7 +242,8 @@ async function handleInstall(): Promise<void> {
       emit('show-progress', {
         installationId: result.entry.id,
         title: `${t('newInstall.installing')} — ${name}`,
-        apiCall: () => window.api.installInstance(result.entry!.id)
+        apiCall: () => window.api.installInstance(result.entry!.id),
+        autoLaunchOnFinish: true
       })
     }
   } catch (err: unknown) {

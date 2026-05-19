@@ -28,6 +28,10 @@ const messages = {
       menuRevealInFolder: 'Open Folder',
       menuDelete: 'Delete…',
     },
+    actions: {
+      copyInstallation: 'Copy Install',
+      untrack: 'Untrack',
+    },
     progress: { working: 'Working…' },
     running: { dismiss: 'Dismiss' },
   },

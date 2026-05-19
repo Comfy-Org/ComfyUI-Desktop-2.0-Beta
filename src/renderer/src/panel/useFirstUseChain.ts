@@ -103,6 +103,14 @@ export function useFirstUseChain(opts: FirstUseChainOpts): FirstUseChainApi {
    *  finishes successfully. */
   const pendingFirstUseAutoLaunchId = ref<string | null>(null)
 
+  /** Installation id of an install op that opted in to auto-launch via
+   *  `showOpts.autoLaunchOnFinish` (chooser tile, instance picker, File
+   *  menu — every non-first-use install entry). The same watcher below
+   *  fires `performChooserLaunch` when this id's op finishes, giving
+   *  every install entry point the continuous install → security scan
+   *  → starting server brand-loader experience first-use already has. */
+  const pendingAutoLaunchId = ref<string | null>(null)
+
   /** Set by `handleFirstUseChainLocal` when the chain arrives via
    *  Local → Start Fresh. Read + cleared by usePanelOverlays via the
    *  `consumeCameFromLocalBranch` hook so NewInstallModal opens with a
@@ -130,6 +138,15 @@ export function useFirstUseChain(opts: FirstUseChainOpts): FirstUseChainApi {
         // on the next launch — the overlay handoff doesn't go through
         // NewInstallModal's close emit.
         void launcherPrefs.markFirstUseCompleted()
+        return
+      }
+      // Non-first-use install entry points (chooser tile, instance
+      // picker, File menu) opt into the same auto-launch via the
+      // `autoLaunchOnFinish` flag. The watcher below fires the launch
+      // once the op finishes. No `markFirstUseCompleted` here — that's
+      // first-use-only.
+      if (showOpts.autoLaunchOnFinish === true && pendingAutoLaunchId.value === null) {
+        pendingAutoLaunchId.value = showOpts.installationId
       }
     },
   }
@@ -327,29 +344,43 @@ export function useFirstUseChain(opts: FirstUseChainOpts): FirstUseChainApi {
     }
   }
 
-  // Auto-launch watcher — fires once a chained new-install or
-  // migration op finishes successfully. The chain flag gates the
-  // watcher so we only auto-launch when the op was actually driven
-  // by the first-use chain. The captured id is set by `hooks.
-  // onShowProgress` at the moment the chained op begins.
+  // Auto-launch watcher — fires once a captured install / migration op
+  // finishes successfully. Two paths feed it:
+  //   1. First-use chain (`pendingFirstUseAutoLaunchId`) — set by the
+  //      chain-local / chain-migrate flows. Also clears first-use
+  //      bookkeeping (`setFirstUseMode('none')`).
+  //   2. `autoLaunchOnFinish` opt-in (`pendingAutoLaunchId`) — set by
+  //      every non-first-use install entry point so chooser-tile /
+  //      picker / File-menu installs get the same continuous install →
+  //      launch brand-loader experience.
+  // Whichever id is captured first wins for that op; the other ref
+  // stays null. The launch action that runs at the end carries
+  // `triggersInstanceStart: true`, so `usePanelOverlays` swaps the
+  // install Tier 3 takeover for the launch Tier 3 takeover silently —
+  // one continuous brand-loader screen.
   const stopWatch = watch(
     () => {
-      const id = pendingFirstUseAutoLaunchId.value
+      const id = pendingFirstUseAutoLaunchId.value ?? pendingAutoLaunchId.value
       if (!id) return null
       const op = progressStore.operations.get(id)
       return op && op.finished ? op : null
     },
     async (op) => {
       if (!op) return
-      if (!chainingFirstUseToNewInstall.value) return
-      const id = pendingFirstUseAutoLaunchId.value
+      const fromFirstUse = chainingFirstUseToNewInstall.value
+      const id = pendingFirstUseAutoLaunchId.value ?? pendingAutoLaunchId.value
+      // Clear both refs and the first-use chain flag up-front so a
+      // late-arriving op event can't double-fire the watcher.
       chainingFirstUseToNewInstall.value = false
       pendingFirstUseAutoLaunchId.value = null
-      // Chain is done (success or failure) — drop the file-menu lock.
-      // The launch path that follows (when the op succeeded) replaces
-      // the install-progress takeover with its own connect-progress
-      // takeover; either way the user is past onboarding now.
-      window.api.setFirstUseMode('none')
+      pendingAutoLaunchId.value = null
+      if (fromFirstUse) {
+        // Chain is done (success or failure) — drop the file-menu lock.
+        // The launch path that follows (when the op succeeded) replaces
+        // the install-progress takeover with its own connect-progress
+        // takeover; either way the user is past onboarding now.
+        window.api.setFirstUseMode('none')
+      }
       if (!id) return
       if (op.cancelRequested || op.error || !op.result?.ok) return
       // The migrate-to-standalone op runs against the Legacy Desktop
