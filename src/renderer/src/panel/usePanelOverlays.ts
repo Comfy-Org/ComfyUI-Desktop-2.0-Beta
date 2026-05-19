@@ -185,11 +185,24 @@ export function usePanelOverlays(opts: UsePanelOverlaysOpts): UsePanelOverlaysAp
     const operationName = showOpts.title.split(' — ')[0] || showOpts.title
     opts.firstUseChain?.onShowProgress(showOpts)
     const isRunning = sessionStore.isRunning(showOpts.installationId)
+    // Dashboard chooser-tile launch (install-less host + launch-class
+    // op). We route this as a Tier 3 takeover with `brandChrome` so the
+    // dashboard fades into the same brand loader the onboarding chain
+    // already uses, instead of stacking a Tier 2 modal on top of the
+    // chooser. `prepareChooserHostHandoff` further down handles closing
+    // this host once the install's own ComfyUI window opens.
+    const isChooserLaunch = showOpts.triggersInstanceStart === true && !installationId
     // Keep opaque takeover chrome alive when first-use is chaining into
     // the install + auto-launch sequence — without this the swap from
     // the new-install Tier 3 takeover to a Tier 2 progress overlay
     // exposes the dashboard underneath, breaking the bootstrap UX.
-    const useTakeover = isRunning || (opts.firstUseChain?.shouldForceTakeover() ?? false)
+    const useTakeover =
+      isRunning || isChooserLaunch || (opts.firstUseChain?.shouldForceTakeover() ?? false)
+    // Brand chrome stays gated to the two "continuation of onboarding"
+    // surfaces: the first-use chain (existing) and chooser-tile launch
+    // (new). Update-while-running keeps the original binding chrome.
+    const useBrandChrome =
+      isChooserLaunch || (opts.firstUseChain?.shouldForceTakeover() ?? false)
     // Wire `onCancel` so a window-close consult (or any other slot-
     // clearing transition that fires the cancel-prompt) actually
     // cancels the in-flight op in main rather than orphaning it via
@@ -206,6 +219,7 @@ export function usePanelOverlays(opts: UsePanelOverlaysOpts): UsePanelOverlaysAp
             installationId: showOpts.installationId,
             operationName,
             onCancel,
+            brandChrome: useBrandChrome,
           }
         : {
             kind: 'progress',

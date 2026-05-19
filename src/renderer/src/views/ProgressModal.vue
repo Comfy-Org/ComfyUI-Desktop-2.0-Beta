@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Check, X, TriangleAlert } from 'lucide-vue-next'
+import { Check, X, TriangleAlert, ChevronDown } from 'lucide-vue-next'
 import { useModal } from '../composables/useModal'
 
 import { useTerminalScroll } from '../composables/useTerminalScroll'
@@ -12,6 +12,7 @@ import ModalShell from '../components/ModalShell.vue'
 import BrandTakeoverLayout from '../components/BrandTakeoverLayout.vue'
 import ComfyWordmark from '../components/icons/ComfyWordmark.vue'
 import BrandProgressGlyph from '../components/icons/BrandProgressGlyph.vue'
+import BaseAccordion from '../components/ui/BaseAccordion.vue'
 
 interface Props {
   installationId: string | null
@@ -66,11 +67,260 @@ const brandCaption = computed(() => {
   return op.flatStatus || t('progress.starting')
 })
 
+/**
+ * Brand-loader launch step list — chooser-tile launch path only.
+ *
+ * Active ONLY when `brandChrome && currentOp && currentOp.steps === null`.
+ * That second guard is what keeps this off the other surfaces that also
+ * mount the brand branch:
+ *   - First-use install op (`steps` is non-null → multi-step install).
+ *   - Update-while-running on first-use (also has `steps`).
+ *
+ * Launch ops are flat (`steps === null`) so this list activates cleanly
+ * for chooser-tile launches and stays dormant everywhere else. When
+ * dormant, the brand branch keeps showing the existing `brandCaption`.
+ *
+ * Five narrative rows:
+ *   1. securityScan     — narrative, advanced by the timer below.
+ *   2. mountLibraries   — narrative, advanced by the timer below.
+ *   3. gpu              — Comfy stdout `Total VRAM <N> MB` line. Falls
+ *                         back to the no-VRAM label until parsed.
+ *   4. customNodes      — Comfy stdout custom-node / ComfyUI-Manager
+ *                         load lines.
+ *   5. startingServer   — stays active until the launch op finishes
+ *                         (terminal "To see the GUI go to: …" line or
+ *                          op.finished).
+ *
+ * Steps 1 + 2 are decorative — main only emits launch.starting /
+ * launch.waiting today. If real integrity / library-mount phases land
+ * in main later (sendProgress in launch.ts), drop the narrative timer
+ * and key off `op.lastStatus.launch` instead.
+ */
+type LaunchStepKey =
+  | 'securityScan'
+  | 'mountLibraries'
+  | 'gpu'
+  | 'customNodes'
+  | 'startingServer'
+
+const LAUNCH_STEP_ORDER: readonly LaunchStepKey[] = [
+  'securityScan',
+  'mountLibraries',
+  'gpu',
+  'customNodes',
+  'startingServer',
+]
+
+const isBrandLaunch = computed(
+  () => props.brandChrome && !!currentOp.value && currentOp.value.steps === null,
+)
+
+/**
+ * `captionFloor` is a monotonically-rising index ticked by a fixed-
+ * interval timer (900ms). The active caption is `max(floor, stdoutStep)`
+ * clamped so it never gets more than one step *ahead* of the floor —
+ * that's what guarantees the first two narrative captions ("security
+ * scan", "mount libraries") each get ~900ms of airtime even when Comfy
+ * stdout immediately races to step 4. Without the clamp, a fast local
+ * launch would silently skip both rows.
+ */
+const captionFloor = ref(0)
+let captionTimer: ReturnType<typeof setInterval> | null = null
+const CAPTION_TICK_MS = 900
+
+/**
+ * Latched VRAM (GB) and furthest stdout-driven step, both maintained by
+ * the tail-walking watcher below.
+ *
+ * Why a watcher instead of a `computed(() => out.match(…))`:
+ * `terminalOutput` is mutated on every Comfy stdout chunk (string += in
+ * the progress store). A computed would re-scan the *entire* growing
+ * buffer per chunk — O(N) per chunk, O(N²) cumulative across a launch.
+ * ComfyUI-Manager dumps hundreds of lines while custom nodes load and
+ * the buffer easily hits hundreds of KB, so the quadratic shape is real
+ * even on a launch the user perceives as a few seconds.
+ *
+ * Instead, we scan only the *new tail* of stdout, keep a small overlap
+ * so a pattern split across the chunk boundary still matches, and short-
+ * circuit once every regex has hit (no further work for the rest of the
+ * launch).
+ */
+const vramGb = ref<number | null>(null)
+const stdoutStep = ref(-1)
+let lastScanLen = 0
+const SCAN_OVERLAP_CHARS = 64
+
+function clearCaptionTimer(): void {
+  if (captionTimer) {
+    clearInterval(captionTimer)
+    captionTimer = null
+  }
+}
+
+function startCaptionTimer(): void {
+  clearCaptionTimer()
+  captionTimer = setInterval(() => {
+    // Stop ticking the moment stdout (or op completion) has already
+    // walked us to the last step — saves a per-900ms ref bump after the
+    // server is up and complements the watcher short-circuit above.
+    if (
+      currentOp.value?.finished ||
+      stdoutStep.value >= LAUNCH_STEP_ORDER.length - 1 ||
+      captionFloor.value >= LAUNCH_STEP_ORDER.length - 1
+    ) {
+      clearCaptionTimer()
+      return
+    }
+    captionFloor.value += 1
+  }, CAPTION_TICK_MS)
+}
+
+// Reset + (re)arm the caption timer when the brand-launch op changes.
+// Keyed on `displayId` so each launch starts the rolling caption fresh.
+watch(
+  () => (isBrandLaunch.value ? displayId.value : null),
+  (id) => {
+    captionFloor.value = 0
+    vramGb.value = null
+    stdoutStep.value = -1
+    lastScanLen = 0
+    clearCaptionTimer()
+    if (id && !currentOp.value?.finished) {
+      startCaptionTimer()
+    }
+  },
+  { immediate: true },
+)
+
+// Snap to the terminal caption the moment the op finishes (success or
+// cancel) so the user doesn't see "Mounting model libraries…" hanging
+// after the server is up.
+watch(
+  () => currentOp.value?.finished ?? false,
+  (finished) => {
+    if (finished) {
+      clearCaptionTimer()
+      captionFloor.value = LAUNCH_STEP_ORDER.length - 1
+    }
+  },
+)
+
+onBeforeUnmount(clearCaptionTimer)
+
+// Tail-only stdout scanner. Replaces two full-buffer regex computeds
+// (see comment on `vramGb` above for why).
+watch(
+  () => (isBrandLaunch.value ? (currentOp.value?.terminalOutput ?? '') : ''),
+  (out) => {
+    if (!out) {
+      lastScanLen = 0
+      return
+    }
+    // Already at the terminal step — nothing left to detect.
+    if (stdoutStep.value >= LAUNCH_STEP_ORDER.length - 1 && vramGb.value !== null) {
+      lastScanLen = out.length
+      return
+    }
+    const tail = out.slice(Math.max(0, lastScanLen - SCAN_OVERLAP_CHARS))
+    lastScanLen = out.length
+
+    if (vramGb.value === null) {
+      const m = tail.match(/Total VRAM\s+(\d+)\s*MB/i)
+      if (m) {
+        const mb = Number(m[1])
+        if (Number.isFinite(mb) && mb > 0) vramGb.value = Math.round(mb / 1024)
+        if (stdoutStep.value < 2) stdoutStep.value = 2
+      }
+    }
+    if (stdoutStep.value < 3 && /custom[\s_-]*node|ComfyUI-Manager/i.test(tail)) {
+      stdoutStep.value = 3
+    }
+    if (
+      stdoutStep.value < 4 &&
+      /To see the GUI|Starting server|server started|Uvicorn running on/i.test(tail)
+    ) {
+      stdoutStep.value = 4
+    }
+  },
+)
+
+const launchActiveIndex = computed(() => {
+  if (!isBrandLaunch.value) return 0
+  const op = currentOp.value
+  if (!op) return 0
+  if (op.finished) return LAUNCH_STEP_ORDER.length - 1
+  // Cap stdout's contribution at floor+1: that's what makes the timer
+  // load-bearing instead of decorative — stdout can fast-forward by at
+  // most one step per tick, so every caption gets its ~900ms of airtime.
+  const stdoutClamped = Math.min(stdoutStep.value, captionFloor.value + 1)
+  return Math.max(captionFloor.value, stdoutClamped)
+})
+
+/** Single rolling caption — picks the label for the current active step
+ *  (or the last one once the op has finished). The bar shows progress
+ *  visually; this just swaps the text as phases advance. */
+const launchCaption = computed<string>(() => {
+  if (!isBrandLaunch.value) return ''
+  const idx = Math.min(launchActiveIndex.value, LAUNCH_STEP_ORDER.length - 1)
+  const key = LAUNCH_STEP_ORDER[idx]
+  if (key === 'gpu') {
+    return vramGb.value !== null
+      ? t('launch.steps.gpu', { vram: vramGb.value })
+      : t('launch.steps.gpuFallback')
+  }
+  return t(`launch.steps.${key}`)
+})
+
+// Independent of the modal-branch terminal toggle (`terminalExpanded`)
+// so the brand accordion's state doesn't leak into the Tier-2 modal
+// reopen path.
+const brandLogsExpanded = ref(false)
+const brandTerminalRef = ref<HTMLDivElement | null>(null)
+// Short-circuit the watcher inside `useTerminalScroll` when the
+// accordion is closed: with two `useTerminalScroll` instances live on
+// this surface (brand + modal terminal), every stdout chunk would wake
+// both watchers and post a `nextTick → scrollToBottom` on a `null` ref.
+// Gating the getter elides that fan-out until the disclosure is open.
+const {
+  isAtBottom: brandIsAtBottom,
+  handleTerminalScroll: handleBrandTerminalScroll,
+} = useTerminalScroll(brandTerminalRef, () =>
+  brandLogsExpanded.value ? currentOp.value?.terminalOutput : undefined,
+)
+
+function toggleBrandLogs(): void {
+  brandLogsExpanded.value = !brandLogsExpanded.value
+}
+
+// Collapse brand logs when the op id changes — each launch starts with
+// the accordion closed.
+watch(
+  () => (isBrandLaunch.value ? displayId.value : null),
+  () => {
+    brandLogsExpanded.value = false
+    brandIsAtBottom.value = true
+  },
+)
+
 const terminalRef = ref<HTMLDivElement | null>(null)
 const { isAtBottom, terminalExpanded, handleTerminalScroll } = useTerminalScroll(
   terminalRef,
   () => currentOp.value?.terminalOutput
 )
+
+/**
+ * Cap what we actually render. The store keeps the full unbounded
+ * `terminalOutput` string (telemetry / error reports still see the
+ * whole thing) but rendering megabytes of text into a single text
+ * node — which is what install-class ops can produce — re-layouts the
+ * whole takeover. A trailing window is what the user wants anyway when
+ * inspecting "what just happened."
+ */
+const MAX_LOG_TAIL_CHARS = 256 * 1024
+const displayedTerminalOutput = computed(() => {
+  const s = currentOp.value?.terminalOutput ?? ''
+  return s.length > MAX_LOG_TAIL_CHARS ? s.slice(-MAX_LOG_TAIL_CHARS) : s
+})
 
 // Sync currentId with prop
 watch(
@@ -259,9 +509,58 @@ defineExpose({ startOperation, showOperation })
             }"
           />
         </div>
-        <div class="brand-progress__caption">
-          {{ brandCaption }}
-        </div>
+
+        <!-- Single rolling caption. For chooser-tile launches the
+             caption cycles through `launchCaption` (5 narrative + stdout-
+             driven phases). All other brand mounts (install screen,
+             update-while-running) keep the existing `brandCaption` so
+             their UX is untouched. The `:key` swap drives a tiny
+             crossfade on text change.
+
+             ⚠️ The key embeds `vramGb` because that's the only
+             *intra-step* dynamic var we want to crossfade on (null → 24).
+             Don't add more parametric vars to this key without thinking —
+             every value change forces a remount + crossfade, which looks
+             like a stutter when the underlying text is identical. -->
+        <Transition name="brand-caption-fade" mode="out-in">
+          <div
+            :key="isBrandLaunch ? `launch-${launchActiveIndex}-${vramGb ?? 'na'}` : 'caption'"
+            class="brand-progress__caption"
+            aria-live="polite"
+          >
+            {{ isBrandLaunch ? launchCaption : brandCaption }}
+          </div>
+        </Transition>
+
+        <!-- View logs disclosure — brand-launch only, and only when stdout
+             has actually emitted something. Independent state from the
+             modal-branch terminal toggle. -->
+        <template v-if="isBrandLaunch && currentOp.terminalOutput">
+          <button
+            type="button"
+            class="brand-progress__logs-toggle"
+            :aria-expanded="brandLogsExpanded"
+            aria-controls="brand-progress-logs"
+            @click="toggleBrandLogs"
+          >
+            <ChevronDown
+              :size="14"
+              class="brand-progress__logs-chevron"
+              :class="{ 'is-open': brandLogsExpanded }"
+            />
+            <span>{{ $t('launch.viewLogs') }}</span>
+          </button>
+          <BaseAccordion :open="brandLogsExpanded" class="brand-progress__logs-wrap">
+            <div
+              id="brand-progress-logs"
+              ref="brandTerminalRef"
+              class="brand-progress__logs"
+              @scroll="handleBrandTerminalScroll"
+            >
+              {{ displayedTerminalOutput }}
+            </div>
+          </BaseAccordion>
+        </template>
       </div>
     </div>
   </BrandTakeoverLayout>
@@ -390,7 +689,7 @@ defineExpose({ startOperation, showOperation })
         class="terminal-output"
         @scroll="handleTerminalScroll"
       >
-        {{ currentOp.terminalOutput }}
+        {{ displayedTerminalOutput }}
       </div>
     </template>
 
@@ -514,5 +813,78 @@ defineExpose({ startOperation, showOperation })
 .brand-progress__caption {
   font-size: var(--takeover-fs-body);
   color: var(--neutral-300);
+  text-align: center;
+  min-height: 1.5em;
+}
+
+.brand-caption-fade-enter-active,
+.brand-caption-fade-leave-active {
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+.brand-caption-fade-enter-from {
+  opacity: 0;
+  transform: translateY(4px);
+}
+.brand-caption-fade-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .brand-caption-fade-enter-active,
+  .brand-caption-fade-leave-active {
+    transition-duration: 0ms;
+  }
+  .brand-caption-fade-enter-from,
+  .brand-caption-fade-leave-to {
+    transform: none;
+  }
+}
+
+.brand-progress__logs-toggle {
+  appearance: none;
+  background: transparent;
+  border: none;
+  color: var(--neutral-400);
+  font-size: var(--takeover-fs-caption, 12px);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: color 160ms ease, background-color 160ms ease;
+}
+.brand-progress__logs-toggle:hover,
+.brand-progress__logs-toggle:focus-visible {
+  color: var(--neutral-200);
+  background: var(--brand-surface-bg);
+  outline: none;
+}
+.brand-progress__logs-chevron {
+  transition: transform 200ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.brand-progress__logs-chevron.is-open {
+  transform: rotate(180deg);
+}
+.brand-progress__logs-wrap {
+  width: 100%;
+}
+.brand-progress__logs {
+  width: 100%;
+  height: clamp(160px, 28vh, 320px);
+  overflow-y: auto;
+  margin-top: 8px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--brand-surface-border);
+  background: var(--brand-surface-bg);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--neutral-300);
+  text-align: left;
+  white-space: pre-wrap;
+  word-break: break-word;
+  backdrop-filter: blur(4px);
 }
 </style>

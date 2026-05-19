@@ -848,7 +848,16 @@
     "instanceRunningProceed": "Launch Alongside",
     "instanceRunningReplace": "Close Running & Launch",
     "modelFolderRelaunchTitle": "Restarting ComfyUI",
-    "modelFolderRelaunchDesc": "New model folders were detected from custom nodes. Restarting so ComfyUI can use them right away."
+    "modelFolderRelaunchDesc": "New model folders were detected from custom nodes. Restarting so ComfyUI can use them right away.",
+    "steps": {
+      "securityScan": "Running security scan…",
+      "mountLibraries": "Mounting model libraries…",
+      "gpu": "Spinning up the GPU ({vram} GB VRAM)…",
+      "gpuFallback": "Spinning up the GPU…",
+      "customNodes": "Loading custom nodes & ComfyUI-Manager…",
+      "startingServer": "Starting server…"
+    },
+    "viewLogs": "View logs"
   },
 
   "errors": {

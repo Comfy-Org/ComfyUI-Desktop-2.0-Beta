@@ -411,7 +411,7 @@ onUnmounted(() => {
         ref="progressRef"
         :installation-id="currentOverlay.installationId ?? ''"
         binding
-        :brand-chrome="chainingFirstUseToNewInstall"
+        :brand-chrome="currentOverlay.brandChrome ?? chainingFirstUseToNewInstall"
         @close="handleProgressClose"
       />
       <NewInstallModal
