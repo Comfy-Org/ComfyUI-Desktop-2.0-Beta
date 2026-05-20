@@ -13,10 +13,15 @@
       content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://*.posthog.com; connect-src 'self' ws: https://*.datadoghq.com https://browser-intake-us5-datadoghq.com https://*.posthog.com"
     />
     <style>
+      /* No html/body background here — settings-v2 toggles
+       * `body.panel-overlay-mode` to transparent so the drawer
+       * backdrop can composite the live comfyView through. Painting
+       * the html element opaque shows behind the transparent body and
+       * blocks compositing. The splash div alone covers cold-start
+       * paint until panel/main.ts removes it after Vue mount. */
       html,
       body {
         margin: 0;
-        background: #171718;
       }
       #panel-boot-splash {
         position: fixed;
