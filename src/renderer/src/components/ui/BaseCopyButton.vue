@@ -26,6 +26,8 @@ interface Props {
 }
 
 const props = withDefaults(defineProps<Props>(), {
+  value: undefined,
+  getValue: undefined,
   size: 14,
   ariaLabel: 'Copy to clipboard',
 })
