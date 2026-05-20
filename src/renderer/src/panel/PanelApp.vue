@@ -38,6 +38,11 @@ const installationId = params.get('installationId') || ''
 const sessionStore = useSessionStore()
 const installationStore = useInstallationStore()
 const launcherPrefs = useLauncherPrefs()
+// Surface `loaded` as a top-level template binding so Vue auto-unwraps
+// it in the body-gate `v-if`. Refs accessed as object properties on
+// `launcherPrefs` aren't auto-unwrapped in templates, only top-level
+// setup bindings are.
+const { loaded: launcherPrefsLoaded } = launcherPrefs
 
 const modal = useModal()
 const { showAppUpdateRestartPrompt, showAppUpdateDownloadPrompt } = useAppUpdatePrompts()
@@ -403,20 +408,48 @@ onUnmounted(() => {
 <template>
   <div class="panel-shell">
     <main class="panel-content">
-      <div v-if="activePanel === 'comfy-lifecycle'" class="panel-comfy-lifecycle">
-        <ComfyLifecycleView
-          :installation="installation"
-          :installation-id="installationId"
-          @show-progress="handleShowProgress"
-        />
-      </div>
+      <!-- Body branches are gated on two conditions:
+           1. `launcherPrefsLoaded` — chooser/lifecycle cannot paint
+              before the first-use takeover gate (`firstUseCompleted`)
+              has resolved. Both flip in the same microtask (after the
+              bootstrap `Promise.all`), so Vue resolves either the body
+              or the overlay slot in a single paint.
+           2. Not under the first-use takeover specifically — the
+              first-use auto-mount races with bootstrap (overlay opens
+              in the same tick the body would first paint), and
+              BrandTakeoverLayout has a 240ms `opacity 0 → 1` entrance
+              that lets the chooser bleed through for ~14 frames. The
+              user has never seen the chooser at this point, so
+              suppressing it costs nothing — there's no scroll/filter
+              state to preserve. Flow takeovers (new-install / track /
+              load-snapshot / quick-install) are NOT excluded: they're
+              dashboard-initiated, the user has already interacted with
+              the chooser, and gating the chooser out on every flow
+              open would re-mount it (lose scroll/filter state) on
+              every dismiss. Settings (Tier 1) and progress (Tier 2)
+              layer over the body by design. -->
+      <div
+        v-if="
+          launcherPrefsLoaded &&
+          !(currentOverlay?.kind === 'takeover' && currentOverlay.component === 'first-use')
+        "
+        class="panel-body"
+      >
+        <div v-if="activePanel === 'comfy-lifecycle'" class="panel-comfy-lifecycle">
+          <ComfyLifecycleView
+            :installation="installation"
+            :installation-id="installationId"
+            @show-progress="handleShowProgress"
+          />
+        </div>
 
-      <div v-else-if="activePanel === 'chooser'" class="panel-chooser">
-        <ChooserView
-          @pick="handleChooserPick"
-          @show-new-install="handleChooserShowNewInstall"
-          @show-progress="handleShowProgress"
-        />
+        <div v-else-if="activePanel === 'chooser'" class="panel-chooser">
+          <ChooserView
+            @pick="handleChooserPick"
+            @show-new-install="handleChooserShowNewInstall"
+            @show-progress="handleShowProgress"
+          />
+        </div>
       </div>
     </main>
 
@@ -577,6 +610,17 @@ body.panel-overlay-mode .panel-shell {
 .panel-content:has(.panel-comfy-lifecycle),
 .panel-content:has(.panel-chooser) {
   padding: 0;
+}
+
+/* The gated body wrapper must transparently inherit the panel-content
+ * flex behaviour so the chooser / lifecycle branches keep filling the
+ * shell. Without `min-height: 0` the chooser grid overflows the host. */
+.panel-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .panel-comfy-lifecycle,

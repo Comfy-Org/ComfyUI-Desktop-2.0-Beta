@@ -525,13 +525,19 @@ describe('PanelApp', () => {
     expect(wrapper.find('[data-testid="first-use-takeover"]').exists()).toBe(false)
   })
 
-  it('auto-mounts the first-use takeover above the chooser body when firstUseCompleted is false', async () => {
+  it('auto-mounts the first-use takeover and suppresses the chooser body when firstUseCompleted is false', async () => {
+    // Body is gated out while a Tier 3 takeover owns the overlay slot —
+    // BrandTakeoverLayout has a 240ms opacity fade-in, so rendering the
+    // chooser behind it would bleed through during the entrance. The
+    // dismiss tests below assert the body reveals when the takeover
+    // clears (see "marks firstUseCompleted=true and closes the takeover
+    // on Cloud-branch pick").
     mockState.settings.firstUseCompleted = false
     window.history.replaceState({}, '', '/?panel=chooser')
     const wrapper = mountPanel()
     await flushPromises()
-    expect(wrapper.find('[data-testid="chooser-view"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="first-use-takeover"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="chooser-view"]').exists()).toBe(false)
   })
 
   it('marks firstUseCompleted=true and closes the takeover on Cloud-branch pick', async () => {
