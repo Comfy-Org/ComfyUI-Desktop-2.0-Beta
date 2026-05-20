@@ -4,6 +4,20 @@ import { createI18n } from 'vue-i18n'
 import { createPinia, setActivePinia } from 'pinia'
 
 import { en } from '../lib/i18nMessages.ts'
+import type { SnapshotListData } from '../types/ipc'
+
+/** Minimal list payload — main always sends this for local installs; cloud omits it. */
+const emptySnapshotListPayload: SnapshotListData = {
+  snapshots: [],
+  copyEvents: [],
+  totalCount: 0,
+  context: {
+    updateChannel: 'stable',
+    pythonVersion: '3.12',
+    variant: 'cpu',
+    variantLabel: 'CPU',
+  },
+}
 
   // `useInstallContextMenu` (used by the picker for kebab dispatch)
   // reaches into the panel renderer's session + progress stores; both
@@ -386,11 +400,12 @@ describe('comfyTitlePopup/InstancePickerView', () => {
       expect(detail.text()).toContain('Latest on GitHub')
     })
 
-    it('shows Settings and Snapshots nav rows in the detail pane', async () => {
+    it('shows Settings and Snapshots nav when main sent a snapshots list payload', async () => {
       const wrapper = await mountPicker({
         installs: [makeInstall({ id: 'a', name: 'Alpha' })],
         activeInstallationId: 'a',
         runningInstallationIds: [],
+        selectedSnapshots: emptySnapshotListPayload,
       })
       const nav = wrapper.find('.picker-detail-nav')
       expect(nav.text()).toContain('Settings')

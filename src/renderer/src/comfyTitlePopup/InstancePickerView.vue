@@ -317,6 +317,12 @@ const selectedSettingsSections = computed<DetailSection[]>(() => {
 const selectedSnapshotsData = computed<SnapshotListData | null>(
   () => (props.snapshot.selectedSnapshots as SnapshotListData | null) ?? null,
 )
+// Cloud sources don't push a snapshots payload at all (see
+// urlSource.ts — only `status` and `settings` sections are emitted),
+// so absence of the payload is the same rule the drawer applies
+// server-side. Local installs always send one, even when empty —
+// PickerSnapshotsList owns the empty state inside the accordion.
+const hasSnapshots = computed(() => selectedSnapshotsData.value != null)
 
 async function handlePickerUpdateField(field: DetailField, value: unknown): Promise<void> {
   if (!selectedInstall.value) return
@@ -483,30 +489,32 @@ function handleOpenArgsPage(_field: DetailField): void {
                 </div>
               </BaseAccordion>
 
-              <button
-                type="button"
-                class="picker-detail-nav-item"
-                :aria-expanded="snapshotsOpen"
-                @click="toggleSnapshotsAccordion"
-              >
-                <ChevronRight
-                  :size="12"
-                  aria-hidden="true"
-                  class="picker-detail-nav-chevron"
-                  :class="{ 'is-open': snapshotsOpen }"
-                />
-                <span>{{ t('instancePicker.snapshots') }}</span>
-              </button>
-              <BaseAccordion :open="snapshotsOpen">
-                <div class="picker-detail-accordion-body">
-                  <PickerSnapshotsList
-                    :data="selectedSnapshotsData"
-                    @save="() => selectedInstall && bridge?.pickerRunAction(selectedInstall.id, 'snapshot-save')"
-                    @restore="(filename) => selectedInstall && bridge?.pickerRunAction(selectedInstall.id, 'snapshot-restore', { file: filename })"
-                    @delete="(filename) => selectedInstall && bridge?.pickerRunAction(selectedInstall.id, 'snapshot-delete', { file: filename })"
+              <template v-if="hasSnapshots">
+                <button
+                  type="button"
+                  class="picker-detail-nav-item"
+                  :aria-expanded="snapshotsOpen"
+                  @click="toggleSnapshotsAccordion"
+                >
+                  <ChevronRight
+                    :size="12"
+                    aria-hidden="true"
+                    class="picker-detail-nav-chevron"
+                    :class="{ 'is-open': snapshotsOpen }"
                   />
-                </div>
-              </BaseAccordion>
+                  <span>{{ t('instancePicker.snapshots') }}</span>
+                </button>
+                <BaseAccordion :open="snapshotsOpen">
+                  <div class="picker-detail-accordion-body">
+                    <PickerSnapshotsList
+                      :data="selectedSnapshotsData"
+                      @save="() => selectedInstall && bridge?.pickerRunAction(selectedInstall.id, 'snapshot-save')"
+                      @restore="(filename) => selectedInstall && bridge?.pickerRunAction(selectedInstall.id, 'snapshot-restore', { file: filename })"
+                      @delete="(filename) => selectedInstall && bridge?.pickerRunAction(selectedInstall.id, 'snapshot-delete', { file: filename })"
+                    />
+                  </div>
+                </BaseAccordion>
+              </template>
             </div>
 
             <div class="picker-detail-cta">
