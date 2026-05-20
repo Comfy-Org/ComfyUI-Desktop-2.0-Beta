@@ -177,13 +177,10 @@ const comfyUISettingsPanelRef = ref<{ requestClose: () => void } | null>(null)
 
 // Picker More-menu dispatch lives on the panel because the install-level
 // actions need `window.api.runAction` (only exposed in the panel
-// renderer) and Delete needs the panel's overlay slot for the
-// DetailModal autoAction surface. `useInstallContextMenu` is the single
-// source of truth for these items — same dispatch the dashboard kebab
-// uses. `onManage` is wired so that the composable's Delete branch
-// (which routes through `onManage` with `autoAction: 'delete'`) lands
-// on the Settings overlay with the source-action chain primed; the
-// chooser tile's `openManage` uses the same shape.
+// renderer) and Delete routes through the panel's overlay slot via
+// `handleShowProgress` (fast path) with a ManageInstallModal autoAction
+// fallback. `useInstallContextMenu` is the single source of truth for
+// these items — same dispatch the dashboard kebab uses.
 const { triggerAction: triggerInstallAction } = useInstallContextMenu({
   onManage: (inst, manageOpts) => {
     void openOverlay({
@@ -195,6 +192,10 @@ const { triggerAction: triggerInstallAction } = useInstallContextMenu({
       noSidebar: true,
     })
   },
+  // Fast-path for Delete: skips the ManageInstallModal flash and routes
+  // straight through the same handleShowProgress used by every other
+  // ProgressModal entry point.
+  onShowProgress: (showOpts) => handleShowProgress(showOpts),
 })
 
 useDeepLinkRouter({
@@ -489,24 +490,15 @@ onUnmounted(() => {
       @update:installation="handleUpdateInstallation"
       @navigate-list="handleNavigateList"
     />
-    <!-- Tier 2 progress slot. ProgressModal owns its own backdrop via
-         the unified Modal primitive. -->
-    <ProgressModal
-      v-else-if="currentOverlay?.kind === 'progress'"
-      ref="progressRef"
-      :installation-id="currentOverlay.installationId"
-      @close="handleProgressClose"
-    />
-
-    <!-- Tier 3 binding modals. Each child component owns its own
-         backdrop via the unified Modal primitive. -->
+    <!-- Tier 3 takeover slot. ProgressModal renders as the universal
+         brand loader for every show-progress op (delete, install,
+         update, copy, migrate, snapshot, launch) — the legacy Tier 2
+         ModalShell branch was removed in the same phase. -->
     <template v-else-if="currentOverlay?.kind === 'takeover'">
       <ProgressModal
         v-if="currentOverlay.component === 'update'"
         ref="progressRef"
         :installation-id="currentOverlay.installationId ?? ''"
-        binding
-        :brand-chrome="currentOverlay.brandChrome ?? chainingFirstUseToNewInstall"
         @close="handleProgressClose"
       />
       <NewInstallModal

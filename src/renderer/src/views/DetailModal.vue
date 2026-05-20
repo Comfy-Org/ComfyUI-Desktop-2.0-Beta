@@ -18,6 +18,7 @@ import { useInstallationStore } from '../stores/installationStore'
 import { useSessionStore } from '../stores/sessionStore'
 import { emitTelemetryAction, toErrorBucket } from '../lib/telemetry'
 import { formatBytes } from '../lib/formatting'
+import { progressOpKindForActionId } from '../lib/progressOpKind'
 import { useMigrateAction } from '../composables/useMigrateAction'
 import { REQUIRES_STOPPED } from '../types/ipc'
 import { Pencil } from 'lucide-vue-next'
@@ -544,6 +545,7 @@ async function runAction(action: ActionDef, btn: HTMLButtonElement | null): Prom
       cancellable: !!mutableAction.cancellable,
       returnTo: 'detail',
       triggersInstanceStart,
+      opKind: isRestart ? 'launch' : progressOpKindForActionId(mutableAction.id),
     })
     return
   }

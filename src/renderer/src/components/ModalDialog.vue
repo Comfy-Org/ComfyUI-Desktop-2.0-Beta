@@ -2,19 +2,14 @@
 import { ref, computed, watch, nextTick, onMounted, onUnmounted, reactive } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useModal, type ModalOption } from '../composables/useModal'
-import { sortedCardOptions } from '../lib/variants'
-import type { FieldOption } from '../types/ipc'
 import InfoTooltip from './InfoTooltip.vue'
-import VariantCardGrid from './VariantCardGrid.vue'
 import MigrateConfirmBody from './MigrateConfirmBody.vue'
 import BaseAlert from './ui/BaseAlert.vue'
 import { formatNodeVersion } from '../lib/snapshots'
 
 const { t } = useI18n()
 
-const { state, close, updateConfirm } = useModal()
-
-const sortedVariants = computed(() => sortedCardOptions(state.variantCards))
+const { state, close } = useModal()
 
 /** Whether the current confirm modal is the Migrate-to-Standalone flow.
  *  `snapshotPreview` is only set by `useMigrateAction`, so its presence
@@ -64,10 +59,6 @@ function onBaseAlertClose(): void {
 function onBaseAlertCancel(): void {
   // Only reached for simple confirms (showCancel=true).
   close(false)
-}
-
-function selectVariant(opt: FieldOption): void {
-  updateConfirm({ selectedVariant: opt })
 }
 
 /** MigrateConfirmBody emits when a checkbox flips. Mirror the change
@@ -386,32 +377,6 @@ onUnmounted(() => {
               </template>
             </div>
           </template>
-
-          <!-- Variant / device selection — disabled per CTO ask. The
-               device hasn't changed since the prior install, so we
-               auto-pick the recommended variant silently in
-               useMigrateAction. Markup retained for future reference;
-               `v-if="false"` keeps it parseable but never rendered. -->
-          <div
-            v-if="
-              false && !state.loading && (state.variantCards.length > 0 || state.variantLoading)
-            "
-            class="ls-subsection"
-          >
-            <div class="ls-subsection-title">
-              <span>{{ $t('list.snapshotDevice') }}</span>
-            </div>
-            <div v-if="state.variantLoading" class="modal-loading">
-              <div class="modal-loading-spinner" />
-              <span>{{ $t('common.loading') }}</span>
-            </div>
-            <VariantCardGrid
-              v-else
-              :options="sortedVariants"
-              :selected-value="state.selectedVariant?.value"
-              @select="selectVariant"
-            />
-          </div>
 
           <!-- Generic message details + checkboxes (non-migrate
                confirms). The migrate brand layout above renders its

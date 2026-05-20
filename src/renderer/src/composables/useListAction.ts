@@ -3,6 +3,7 @@ import { useActionGuard } from './useActionGuard'
 import { useLocalInstanceGuard } from './useLocalInstanceGuard'
 import { useSessionStore } from '../stores/sessionStore'
 import { emitTelemetryAction, toErrorBucket } from '../lib/telemetry'
+import { progressOpKindForActionId } from '../lib/progressOpKind'
 import { REQUIRES_STOPPED } from '../types/ipc'
 import type { Installation, ListAction, ActionResult, ShowProgressOpts } from '../types/ipc'
 
@@ -69,6 +70,7 @@ export function useListAction(uiSurface: string, callbacks: ListActionCallbacks)
         apiCall: () => window.api.runAction(inst.id, action.id),
         cancellable: !!action.cancellable,
         triggersInstanceStart,
+        opKind: progressOpKindForActionId(action.id),
       })
       return
     }

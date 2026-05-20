@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Play, RefreshCcw, TriangleAlert, Loader2 } from 'lucide-vue-next'
 import { useSessionStore } from '../stores/sessionStore'
+import BaseCopyButton from '../components/ui/BaseCopyButton.vue'
 import type { Installation, ShowProgressOpts } from '../types/ipc'
 
 /**
@@ -51,6 +52,46 @@ const state = computed<LifecycleState>(() => {
 })
 
 const errorInfo = computed(() => sessionStore.errorInstances.get(props.installationId) ?? null)
+
+/**
+ * Grey-window guard — the original `state === 'unknown'` branch
+ * rendered nothing so a fast hydration (the common case) wouldn't
+ * flash a stopped card. But on a slow init the user saw a bare grey
+ * panel with no indication anything was loading. This ref flips to
+ * true if hydration takes longer than `UNKNOWN_PLACEHOLDER_GRACE_MS`,
+ * which is enough to skip the visible card on every normal load but
+ * surface a small spinning placeholder when something's genuinely
+ * stuck. Reset whenever sessionStore re-enters the unknown state
+ * (e.g. across an install swap).
+ */
+const UNKNOWN_PLACEHOLDER_GRACE_MS = 150
+const showUnknownPlaceholder = ref(false)
+let unknownGraceTimer: ReturnType<typeof setTimeout> | null = null
+
+function clearUnknownGraceTimer(): void {
+  if (unknownGraceTimer) {
+    clearTimeout(unknownGraceTimer)
+    unknownGraceTimer = null
+  }
+}
+
+watch(
+  () => state.value === 'unknown',
+  (isUnknown) => {
+    clearUnknownGraceTimer()
+    if (!isUnknown) {
+      showUnknownPlaceholder.value = false
+      return
+    }
+    unknownGraceTimer = setTimeout(() => {
+      showUnknownPlaceholder.value = true
+      unknownGraceTimer = null
+    }, UNKNOWN_PLACEHOLDER_GRACE_MS)
+  },
+  { immediate: true },
+)
+
+onBeforeUnmount(clearUnknownGraceTimer)
 
 /**
  * Hydrate the session-store error map from main's retained crash buffer
@@ -106,15 +147,32 @@ function startLaunch(): void {
       : t('comfyLifecycle.launchProgressTitle'),
     apiCall: () => window.api.runAction(props.installationId, 'launch'),
     cancellable: true,
+    opKind: 'launch',
   })
 }
 </script>
 
 <template>
   <div class="lifecycle-view">
-    <!-- 'unknown' = pre-hydration; render nothing so the stopped card
-         doesn't flash before sessionStore.init() reports state. -->
-    <div v-if="state !== 'running' && state !== 'unknown'" class="lifecycle-card" :data-state="state">
+    <!-- `unknown` = pre-hydration. The card is hidden for the first
+         `UNKNOWN_PLACEHOLDER_GRACE_MS` so a fast `sessionStore.init()`
+         (the common case) doesn't flash the stopped card before the
+         real state lands. If hydration drags past that grace window
+         we render a minimal spinning placeholder so the user never
+         stares at a bare grey panel — that was the "screen turns
+         into a grey window" regression. -->
+    <div
+      v-if="state === 'unknown' && showUnknownPlaceholder"
+      class="lifecycle-card"
+      data-state="unknown"
+    >
+      <div class="lifecycle-icon spin">
+        <Loader2 :size="32" />
+      </div>
+      <h2>{{ $t('comfyLifecycle.preparingTitle') }}</h2>
+    </div>
+
+    <div v-else-if="state !== 'running' && state !== 'unknown'" class="lifecycle-card" :data-state="state">
       <template v-if="state === 'launching'">
         <div class="lifecycle-icon spin">
           <Loader2 :size="32" />
@@ -141,7 +199,15 @@ function startLaunch(): void {
         </p>
         <p v-else>{{ $t('comfyLifecycle.crashedDesc') }}</p>
         <details v-if="errorInfo?.lastStderr" class="lifecycle-error-detail">
-          <summary>{{ $t('comfyLifecycle.crashedDetailsToggle') }}</summary>
+          <summary class="lifecycle-error-summary">
+            <span>{{ $t('comfyLifecycle.crashedDetailsToggle') }}</span>
+            <BaseCopyButton
+              :value="errorInfo.lastStderr"
+              :aria-label="$t('common.copy')"
+              class="lifecycle-error-copy"
+              @click.stop.prevent
+            />
+          </summary>
           <pre class="lifecycle-error-output">{{ errorInfo.lastStderr }}</pre>
         </details>
         <div class="lifecycle-actions">
@@ -266,6 +332,19 @@ function startLaunch(): void {
   color: var(--text);
 }
 
+/* Summary row hosting the label + an inline Copy button. Flex so the
+   copy affordance sits to the right without affecting the disclosure
+   triangle. The button stops click propagation so tapping it doesn't
+   toggle the <details> open/closed state. */
+.lifecycle-error-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.lifecycle-error-copy {
+  margin-left: 2px;
+}
+
 .lifecycle-error-output {
   margin: 8px 0 0;
   padding: 10px 12px;
@@ -281,5 +360,10 @@ function startLaunch(): void {
   max-height: 240px;
   overflow: auto;
   text-align: left;
+  /* Selectable so users can copy the stderr tail manually as a
+     fallback to the inline Copy button — important for the
+     paste-into-issue-thread flow. */
+  user-select: text;
+  -webkit-user-select: text;
 }
 </style>

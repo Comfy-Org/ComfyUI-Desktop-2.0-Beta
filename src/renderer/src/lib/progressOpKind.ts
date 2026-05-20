@@ -1,0 +1,24 @@
+import type { ShowProgressOpts } from '../types/ipc'
+
+export type ProgressOpKind = NonNullable<ShowProgressOpts['opKind']>
+
+export function progressOpKindForActionId(actionId: string): ProgressOpKind {
+  switch (actionId) {
+    case 'launch':
+    case 'restart':
+      return 'launch'
+    case 'delete':
+      return 'destructive'
+    case 'restore-snapshot':
+      return 'snapshot'
+    case 'release-update':
+    case 'copy-update':
+    case 'update':
+      return 'update'
+    default:
+      if (actionId.startsWith('install')) return 'install'
+      if (actionId.startsWith('snapshot')) return 'snapshot'
+      if (actionId.includes('update')) return 'update'
+      return 'generic'
+  }
+}

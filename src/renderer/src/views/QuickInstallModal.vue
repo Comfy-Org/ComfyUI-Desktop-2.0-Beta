@@ -243,7 +243,8 @@ async function handleInstall(): Promise<void> {
         installationId: result.entry.id,
         title: `${t('newInstall.installing')} — ${name}`,
         apiCall: () => window.api.installInstance(result.entry!.id),
-        autoLaunchOnFinish: true
+        autoLaunchOnFinish: true,
+        opKind: 'install',
       })
     }
   } catch (err: unknown) {

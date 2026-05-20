@@ -601,7 +601,8 @@ async function handleSave(): Promise<void> {
       installationId: result.entry.id,
       title: `${t('newInstall.installing')} — ${name}`,
       apiCall: () => window.api.installInstance(result.entry!.id),
-      autoLaunchOnFinish: true
+      autoLaunchOnFinish: true,
+      opKind: 'install',
     })
     return
   }

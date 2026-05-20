@@ -233,6 +233,14 @@ export interface ShowProgressOpts {
    *  one continuous screen. The auto-launch is wired in
    *  `useFirstUseChain` (its existing watcher fits the same shape). */
   autoLaunchOnFinish?: boolean
+  /** Categorises the op for ProgressModal so the brand branch can pick
+   *  the right caption set, iconography, and finished-state copy. Launch
+   *  ops keep the rolling 5-step `launchCaption`; everything else maps
+   *  through `friendlyCaption` (per-phase i18n) instead — without this
+   *  flag, delete and update ops inherit the launch captions ("Mounting
+   *  model libraries…") which read as wrong copy. Falls back to
+   *  `'generic'` when omitted so legacy callers keep working. */
+  opKind?: 'launch' | 'install' | 'update' | 'destructive' | 'snapshot' | 'generic'
 }
 
 // --- Action results ---

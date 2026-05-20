@@ -6,26 +6,18 @@ import { useModal } from '../composables/useModal'
 
 import { useTerminalScroll } from '../composables/useTerminalScroll'
 import { useProgressStore } from '../stores/progressStore'
-import type { ActionResult, KillResult } from '../types/ipc'
-import ModalShell from '../components/ModalShell.vue'
+import type { ActionResult, KillResult, ShowProgressOpts } from '../types/ipc'
 import BrandTakeoverLayout from '../components/BrandTakeoverLayout.vue'
 import ComfyWordmark from '../components/icons/ComfyWordmark.vue'
 import BrandProgressGlyph from '../components/icons/BrandProgressGlyph.vue'
 import BaseAccordion from '../components/ui/BaseAccordion.vue'
+import BaseCopyButton from '../components/ui/BaseCopyButton.vue'
 
 interface Props {
   installationId: string | null
-  /** Tier 3 update-while-running mounts pass `binding`; Tier 2 doesn't. */
-  binding?: boolean
-  /** Render minimal brand chrome (BrandTakeoverLayout) instead of
-   *  ModalShell. Set by the host only on the first-use install chain. */
-  brandChrome?: boolean
 }
 
-const props = withDefaults(defineProps<Props>(), {
-  binding: false,
-  brandChrome: false
-})
+const props = defineProps<Props>()
 
 const emit = defineEmits<{
   close: []
@@ -47,6 +39,42 @@ const currentOp = computed(() => {
 })
 
 const displayId = computed(() => currentId.value ?? props.installationId)
+
+/**
+ * Whether the op finished with an unresolved port conflict. Used by
+ * the brand layout to swap the generic finished-state UI (banner + Back
+ * to dashboard) for the port-specific banner + Use-Port / Kill-Process
+ * footer. `resolvingConflict` flips to true the moment the user picks
+ * a fix and the op is re-started, which drops us back into the running
+ * state — so this guard fires only while the conflict is actionable.
+ */
+const isPortConflictOpen = computed<boolean>(() => {
+  const op = currentOp.value
+  if (!op?.finished) return false
+  if (resolvingConflict.value) return false
+  const conflict = op.result?.portConflict
+  if (!conflict) return false
+  if (op.result?.ok) return false
+  return true
+})
+
+/**
+ * Detail-line text to render under the finished-state banner — either
+ * the generic error string or the port-conflict message. Centralised
+ * so the `<div>` gate and the `<BaseCopyButton>` `value` can't drift:
+ * whatever the user sees is exactly what gets copied.
+ *
+ * Returns null while the op is in flight or in any other terminal
+ * state (success, cancelled) so the row collapses cleanly.
+ */
+const finishedErrorMessage = computed<string | null>(() => {
+  const op = currentOp.value
+  if (!op?.finished) return null
+  if (op.cancelRequested) return null
+  if (isPortConflictOpen.value) return op.result?.message ?? null
+  if (op.error) return op.error
+  return null
+})
 
 /**
  * Unified 0→100 progress for the bar. Reads through `progressStore.
@@ -87,17 +115,34 @@ const friendlyCaption = computed<string>(() => {
 })
 
 /**
- * Optional plain-English sub-line under the main caption. Reserved for
- * curated copy only — we intentionally do NOT surface raw
- * `lastStatus[activePhase]` here (it's developer-y, like
- * "Copying packages… 4123 / 8721 files"). When there's no curated
- * sub-copy for a phase, this returns null and the sub-line is hidden.
+ * Optional second-line caption rendered under `friendlyCaption`. Today
+ * surfaces the main-side rich `lastStatus[activePhase]` string for any
+ * stepped phase where `friendlyCaption` is showing a curated label —
+ * giving the user the bytes / speed / ETA detail main already computed
+ * (see `installer.ts` download progress emitter) without the dev-y
+ * raw phase id leaking through as a headline.
  *
- * Today no phase has curated sub-copy, so this always returns null.
- * Kept wired so a future "Almost there, just a moment…" type line can
- * drop in without retemplating.
+ * Gated on:
+ *  - stepped op (so the launch-style flat ops don't get a substatus —
+ *    their narrative captions already convey what's happening).
+ *  - the curated phase label *was* found (`friendlyCaption !==
+ *    op.lastStatus[activePhase]`); otherwise headline + substatus would
+ *    say the same thing.
+ *  - the raw status is meaningfully different from the headline (a
+ *    string equality check) — for phases that only emit the curated
+ *    label, this collapses to null and the line is hidden.
+ *
+ * Flat ops fall through to null since `flatStatus` already lands as
+ * the headline.
  */
-const subStatus = computed<string | null>(() => null)
+const subStatus = computed<string | null>(() => {
+  const op = currentOp.value
+  if (!op?.steps || !op.activePhase) return null
+  const raw = op.lastStatus[op.activePhase]
+  if (!raw) return null
+  if (raw === friendlyCaption.value) return null
+  return raw
+})
 
 /**
  * Brand-loader launch step list — chooser-tile launch path only.
@@ -143,8 +188,18 @@ const LAUNCH_STEP_ORDER: readonly LaunchStepKey[] = [
   'startingServer',
 ]
 
+// True only for launch-class ops in the brand layout. Drives the
+// rolling 5-step launchCaption pipeline ("security scan → mount
+// libraries → GPU → custom nodes → starting server") + the GPU stdout
+// scanner. Non-launch ops (delete / update / install / snapshot / generic)
+// fall through to `friendlyCaption`, which maps `progress.phaseLabel.<phase>`
+// or `flatStatus` to a user-facing string — so a delete op now reads
+// "Deleting installation…" instead of "Mounting model libraries…".
 const isBrandLaunch = computed(
-  () => props.brandChrome && !!currentOp.value && currentOp.value.steps === null,
+  () =>
+    !!currentOp.value &&
+    currentOp.value.opKind === 'launch' &&
+    currentOp.value.steps === null,
 )
 
 /**
@@ -324,21 +379,12 @@ function toggleBrandLogs(): void {
   brandLogsExpanded.value = !brandLogsExpanded.value
 }
 
-// Collapse brand logs when the op id changes — each launch starts with
-// the accordion closed.
-watch(
-  () => (isBrandLaunch.value ? displayId.value : null),
-  () => {
-    brandLogsExpanded.value = false
-    brandIsAtBottom.value = true
-  },
-)
-
-const terminalRef = ref<HTMLDivElement | null>(null)
-const { isAtBottom, terminalExpanded, handleTerminalScroll } = useTerminalScroll(
-  terminalRef,
-  () => currentOp.value?.terminalOutput
-)
+// Collapse brand logs when the op id changes — each op (launch, delete,
+// update, …) starts with the accordion closed.
+watch(displayId, () => {
+  brandLogsExpanded.value = false
+  brandIsAtBottom.value = true
+})
 
 /**
  * Cap what we actually render. The store keeps the full unbounded
@@ -354,14 +400,22 @@ const displayedTerminalOutput = computed(() => {
   return s.length > MAX_LOG_TAIL_CHARS ? s.slice(-MAX_LOG_TAIL_CHARS) : s
 })
 
+/** Copy-button getter for the log Copy affordance — returns the FULL
+ *  unbounded `terminalOutput` (not the truncated render copy), since
+ *  the user copies for sharing and the whole buffer is what they want
+ *  in the issue thread / Google query. Wrapped as a function so the
+ *  string is materialised at click time instead of on every keystroke
+ *  the buffer grows. */
+function getTerminalLogText(): string {
+  return currentOp.value?.terminalOutput ?? ''
+}
+
 // Sync currentId with prop
 watch(
   () => props.installationId,
   (id) => {
     if (id) {
       currentId.value = id
-      isAtBottom.value = true
-      terminalExpanded.value = true
     }
   },
   { immediate: true }
@@ -379,22 +433,25 @@ function startOperation(opts: {
   apiCall: () => Promise<ActionResult>
   cancellable?: boolean
   returnTo?: string
+  opKind?: ShowProgressOpts['opKind']
 }): void {
   currentId.value = opts.installationId
   resolvingConflict.value = false
   progressStore.startOperation(opts)
 }
 
-// Auto-close modal on window-mode launch success
+// Auto-close modal on window-mode launch success. Other op kinds are
+// auto-closed via the brand-loader's `handleDone`-driven watcher below
+// (after a short delay so the success banner registers visually).
+// Window-mode launches need to close instantly so the new comfy
+// window can take focus without the takeover lingering.
 watch(
   () => {
     const id = displayId.value
     if (!id) return null
     const op = progressStore.operations.get(id)
     if (!op) return null
-    return op.finished && (op.result?.cancelled || (op.result?.ok && op.result.mode === 'window'))
-      ? id
-      : null
+    return op.finished && op.result?.ok && op.result.mode === 'window' ? id : null
   },
   (autoCloseId) => {
     if (autoCloseId && displayId.value === autoCloseId && props.installationId !== null) {
@@ -403,10 +460,14 @@ watch(
   }
 )
 
-function handleCancel(): void {
-  const id = displayId.value
-  if (!id) return
-  progressStore.cancelOperation(id)
+/** Minimize: close the takeover but leave the op running on
+ *  `progressStore`. The dashboard's in-flight surfaces (chooser tile
+ *  progress pill, MigrationBanner "View progress") let the user re-
+ *  open the loader; `handleShowProgress`'s existing-op branch in
+ *  `usePanelOverlays` re-attaches ProgressModal to the live op when
+ *  they do, so no state is lost. */
+function handleMinimize(): void {
+  emit('close')
 }
 
 function handleDone(): void {
@@ -421,6 +482,48 @@ function handleDone(): void {
     emit('show-console', id)
   }
 }
+
+/** Error exit for any op: close the loader and let the host return
+ *  the user to wherever they came from. The install may already be
+ *  gone (delete on success → list view underneath), so a
+ *  `show-detail` would route to a stale view. The host's `close`
+ *  listener handles teardown. */
+function handleBackToDashboard(): void {
+  emit('close')
+}
+
+/** Auto-close the brand loader on success or cancel so the user
+ *  doesn't have to click Done. A short delay (~700 ms) lets the
+ *  banner crossfade in long enough to register, then `handleDone`
+ *  runs the same navigation logic as the manual click. Errors
+ *  don't auto-close — the user needs time to read / copy the
+ *  message and pick their next step. */
+const AUTO_CLOSE_DELAY_MS = 700
+let autoCloseTimer: ReturnType<typeof setTimeout> | null = null
+function clearAutoCloseTimer(): void {
+  if (autoCloseTimer) {
+    clearTimeout(autoCloseTimer)
+    autoCloseTimer = null
+  }
+}
+watch(
+  () => {
+    const op = currentOp.value
+    if (!op?.finished) return null
+    if (op.error) return null
+    if (op.result?.portConflict) return null
+    return displayId.value
+  },
+  (id) => {
+    clearAutoCloseTimer()
+    if (!id) return
+    autoCloseTimer = setTimeout(() => {
+      autoCloseTimer = null
+      if (displayId.value === id) handleDone()
+    }, AUTO_CLOSE_DELAY_MS)
+  },
+)
+onBeforeUnmount(clearAutoCloseTimer)
 
 function handleUseNextPort(nextPort: number): void {
   if (resolvingConflict.value) return
@@ -469,42 +572,104 @@ defineExpose({ startOperation, showOperation })
 </script>
 
 <template>
-  <BrandTakeoverLayout v-if="brandChrome && installationId && currentOp">
+  <BrandTakeoverLayout v-if="installationId && currentOp">
     <div class="brand-progress">
       <BrandProgressGlyph class="brand-progress__glyph" aria-hidden="true" />
       <div class="brand-progress__stack">
         <ComfyWordmark class="brand-progress__wordmark" />
-        <div
-          class="brand-progress__bar"
-          :class="{ 'is-indeterminate': globalProgress.indeterminate }"
-        >
+
+        <!-- Progress bar — hidden once the op finishes so the
+             finished-state banner owns the visual focus. -->
+        <template v-if="!currentOp.finished">
           <div
-            class="brand-progress__bar-fill"
-            :style="{ width: `${globalProgress.percent}%` }"
-          />
-        </div>
-        <div
-          v-if="!isBrandLaunch && !globalProgress.indeterminate"
-          class="brand-progress__percent"
-          aria-hidden="true"
-        >
-          {{ Math.round(globalProgress.percent) }}%
-        </div>
+            class="brand-progress__bar"
+            :class="{ 'is-indeterminate': globalProgress.indeterminate }"
+          >
+            <div
+              class="brand-progress__bar-fill"
+              :style="{ width: `${globalProgress.percent}%` }"
+            />
+          </div>
+          <div
+            v-if="!isBrandLaunch && !globalProgress.indeterminate"
+            class="brand-progress__percent"
+            aria-hidden="true"
+          >
+            {{ Math.round(globalProgress.percent) }}%
+          </div>
+        </template>
 
-        <!-- Single rolling caption. For chooser-tile launches the
-             caption cycles through `launchCaption` (5 narrative + stdout-
-             driven phases). All other brand mounts (install screen,
-             update-while-running) keep the existing `brandCaption` so
-             their UX is untouched. The `:key` swap drives a tiny
-             crossfade on text change.
-
-             ⚠️ The key embeds `vramGb` because that's the only
-             *intra-step* dynamic var we want to crossfade on (null → 24).
-             Don't add more parametric vars to this key without thinking —
-             every value change forces a remount + crossfade, which looks
-             like a stutter when the underlying text is identical. -->
+        <!-- Finished-state banner — appears in place of the running
+             caption when the op resolves. Success / cancelled auto-
+             close after a short delay (see auto-close watcher); error
+             stays mounted so the user can read and copy the message.
+             Port-conflict ops render their own "Port N is in use…"
+             variant so the footer's Use-Port / Kill-Process actions
+             have matching headline copy — falling through to the
+             generic "Operation failed" banner alongside port-conflict
+             buttons reads as inconsistent.
+             `resolvingConflict` flips back to `false` once the new
+             launch attempt starts, so the in-flight caption block
+             takes over again automatically. -->
         <Transition name="brand-caption-fade" mode="out-in">
           <div
+            v-if="currentOp.finished && isPortConflictOpen"
+            key="finished-port-conflict"
+            class="brand-progress__banner brand-progress__banner--error"
+            aria-live="polite"
+          >
+            <X :size="20" />
+            <span>{{ $t('errors.portConflictTitle') }}</span>
+          </div>
+          <div
+            v-else-if="currentOp.finished"
+            :key="`finished-${
+              currentOp.cancelRequested
+                ? 'cancelled'
+                : currentOp.error
+                  ? 'error'
+                  : 'success'
+            }`"
+            class="brand-progress__banner"
+            :class="{
+              'brand-progress__banner--success':
+                !currentOp.cancelRequested && currentOp.result?.ok,
+              'brand-progress__banner--error':
+                !currentOp.cancelRequested && !!currentOp.error,
+              'brand-progress__banner--cancelled': currentOp.cancelRequested
+            }"
+            aria-live="polite"
+          >
+            <Check v-if="!currentOp.cancelRequested && currentOp.result?.ok" :size="20" />
+            <X v-else-if="!currentOp.cancelRequested" :size="20" />
+            <TriangleAlert v-else :size="20" />
+            <span>
+              {{
+                currentOp.cancelRequested
+                  ? $t('progress.completedCancelled')
+                  : currentOp.result?.ok
+                    ? $t('progress.completedSuccess')
+                    : $t('progress.completedError')
+              }}
+            </span>
+          </div>
+
+          <!-- Running caption. For chooser-tile launches the caption
+               cycles through `launchCaption` (5 narrative + stdout-driven
+               phases). Every other op kind (delete, update, install,
+               snapshot, generic) maps through `friendlyCaption` which
+               resolves `progress.phaseLabel.<phase>` or `flatStatus` —
+               so a delete reads "Deleting installation…" instead of the
+               launch-flow "Mounting model libraries…". The `:key` swap
+               drives a tiny crossfade on text change.
+
+               ⚠️ The key embeds `vramGb` because that's the only
+               *intra-step* dynamic var we want to crossfade on (null → 24).
+               Don't add more parametric vars to this key without thinking —
+               every value change forces a remount + crossfade, which looks
+               like a stutter when the underlying text is identical. -->
+          <div
+            v-else
             :key="
               isBrandLaunch
                 ? `launch-${launchActiveIndex}-${vramGb ?? 'na'}`
@@ -517,24 +682,69 @@ defineExpose({ startOperation, showOperation })
           </div>
         </Transition>
 
-        <!-- View logs disclosure — brand-launch only, and only when stdout
-             has actually emitted something. Independent state from the
-             modal-branch terminal toggle. -->
-        <template v-if="isBrandLaunch && currentOp.terminalOutput">
-          <button
-            type="button"
-            class="brand-progress__logs-toggle"
-            :aria-expanded="brandLogsExpanded"
-            aria-controls="brand-progress-logs"
-            @click="toggleBrandLogs"
-          >
-            <ChevronDown
-              :size="14"
-              class="brand-progress__logs-chevron"
-              :class="{ 'is-open': brandLogsExpanded }"
+        <!-- Substatus line — the rich main-side detail string (bytes
+             received / total, MB/s, elapsed, ETA) for stepped phases
+             whose curated label hides those numbers. Launch ops keep
+             it hidden because their rolling launchCaption already
+             cycles through narrative phases. -->
+        <div
+          v-if="!currentOp.finished && !isBrandLaunch && subStatus"
+          class="brand-progress__substatus"
+          aria-live="polite"
+        >
+          {{ subStatus }}
+        </div>
+
+        <!-- Error / port-conflict detail line beneath the banner.
+             • Generic error: `currentOp.error` is set.
+             • Port conflict: `result.portConflict` set, not mid-
+               resolution. Uses `result.message` (server-side copy
+               with the port number filled in).
+             Body text is selectable; the inline Copy button writes
+             the same string the user could grab manually so the
+             share-to-Google / paste-into-issue-thread flow doesn't
+             require keyboard chording. -->
+        <div
+          v-if="finishedErrorMessage"
+          class="brand-progress__error-row"
+        >
+          <div class="brand-progress__error-message">
+            {{ finishedErrorMessage }}
+          </div>
+          <BaseCopyButton
+            :value="finishedErrorMessage"
+            :aria-label="$t('common.copy')"
+            class="brand-progress__error-copy"
+          />
+        </div>
+
+        <!-- View logs disclosure — any op with stdout (launch, delete,
+             update, install, snapshot…) can expand the log tail. State
+             is independent from the legacy modal-branch terminal toggle
+             so re-mounts on swap don't leak open/closed state. -->
+        <template v-if="currentOp.terminalOutput">
+          <div class="brand-progress__logs-header">
+            <button
+              type="button"
+              class="brand-progress__logs-toggle"
+              :aria-expanded="brandLogsExpanded"
+              aria-controls="brand-progress-logs"
+              @click="toggleBrandLogs"
+            >
+              <ChevronDown
+                :size="14"
+                class="brand-progress__logs-chevron"
+                :class="{ 'is-open': brandLogsExpanded }"
+              />
+              <span>{{ $t('launch.viewLogs') }}</span>
+            </button>
+            <BaseCopyButton
+              v-if="brandLogsExpanded"
+              :get-value="getTerminalLogText"
+              :aria-label="$t('common.copy')"
+              class="brand-progress__logs-copy"
             />
-            <span>{{ $t('launch.viewLogs') }}</span>
-          </button>
+          </div>
           <BaseAccordion :open="brandLogsExpanded" class="brand-progress__logs-wrap">
             <div
               id="brand-progress-logs"
@@ -546,169 +756,82 @@ defineExpose({ startOperation, showOperation })
             </div>
           </BaseAccordion>
         </template>
+
       </div>
     </div>
-  </BrandTakeoverLayout>
-
-  <ModalShell
-    v-else-if="installationId && currentOp"
-    :binding="binding"
-    :title="currentOp.title"
-    :close-glyph="currentOp.finished ? '✕' : '−'"
-    @close="emit('close')"
-  >
-    <!-- body -->
-    <!-- Status banner -->
-    <div
-      v-if="currentOp.finished && !currentOp.result?.portConflict"
-      class="progress-banner"
-      :class="{
-        'progress-banner-cancelled': currentOp.cancelRequested,
-        'progress-banner-success': !currentOp.cancelRequested && currentOp.result?.ok,
-        'progress-banner-error': !currentOp.cancelRequested && currentOp.error
-      }"
-    >
-      <TriangleAlert v-if="currentOp.cancelRequested" :size="16" />
-      <Check v-else-if="currentOp.result?.ok" :size="16" />
-      <X v-else :size="16" />
-      <span>
-        {{
-          currentOp.cancelRequested
-            ? $t('progress.completedCancelled')
-            : currentOp.result?.ok
-              ? $t('progress.completedSuccess')
-              : $t('progress.completedError')
-        }}
-      </span>
-    </div>
-
-    <!-- Unified progress block — same shape for stepped + flat ops.
-         The CTO ask is: ONE 0→100 bar across the whole op, with the
-         caption underneath changing through phases. Stepped ops feed
-         their per-phase percent into `globalProgressFor` (weighted),
-         flat ops pass through. Caption swaps via the brand-caption-fade
-         transition keyed on `activePhase`.
-
-         Error / port-conflict copy is preserved as a finished-op
-         overlay — fires for both stepped and flat ops if the op ends
-         badly (previously the stepped branch had no inline error
-         render). -->
-    <div
-      v-if="currentOp.finished && currentOp.error"
-      class="progress-status progress-error-message"
-    >
-      {{ currentOp.error }}
-    </div>
-    <div
-      v-else-if="currentOp.finished && currentOp.result?.portConflict && !resolvingConflict"
-      class="progress-status progress-error-message"
-    >
-      {{ currentOp.result.message }}
-    </div>
-    <template v-else>
-      <Transition name="brand-caption-fade" mode="out-in">
-        <div
-          :key="currentOp.activePhase ?? 'flat'"
-          class="progress-status"
-          aria-live="polite"
-        >
-          {{ friendlyCaption }}
-        </div>
-      </Transition>
-      <div v-if="subStatus" class="progress-substatus">{{ subStatus }}</div>
-    </template>
-    <div v-if="!currentOp.finished" class="progress-bar-wrap">
-      <div
-        class="progress-bar-track"
-        :class="{ indeterminate: globalProgress.indeterminate }"
-      >
-        <div
-          class="progress-bar-fill"
-          :style="{ width: `${globalProgress.percent}%` }"
-        ></div>
-      </div>
-      <div
-        v-if="!globalProgress.indeterminate"
-        class="progress-bar-percent"
-        aria-hidden="true"
-      >
-        {{ Math.round(globalProgress.percent) }}%
-      </div>
-    </div>
-
-    <!-- Terminal output -->
-    <template v-if="currentOp.terminalOutput">
-      <button
-        type="button"
-        class="terminal-toggle"
-        :aria-expanded="terminalExpanded"
-        @click="terminalExpanded = !terminalExpanded"
-      >
-        <span class="terminal-toggle-icon">{{ terminalExpanded ? '▾' : '▸' }}</span>
-        <span>{{ $t('list.console') }}</span>
-      </button>
-      <div
-        v-show="terminalExpanded"
-        id="progress-terminal"
-        ref="terminalRef"
-        class="terminal-output"
-        @scroll="handleTerminalScroll"
-      >
-        {{ displayedTerminalOutput }}
-      </div>
-    </template>
-
-    <!-- Bottom bar (pinned outside scrollable body) -->
+    <!-- Footer band — sibling to the centered hero stack so the action
+         row pins to the takeover's bottom edge without crowding the
+         caption / banner area above. Same geometry as
+         NewInstallModal's Configure footer.
+         • In-flight → Minimize. Closes the takeover but leaves the
+           op running on `progressStore`; the dashboard's existing
+           in-flight detection (chooser tile progress pill,
+           MigrationBanner "View progress") surfaces the re-open path,
+           and `handleShowProgress`'s existing-op branch re-attaches
+           ProgressModal when the user comes back.
+         • Port conflict → up to two source-driven actions:
+           Use port N (when main suggested a next port) and Kill
+           process (when the offender is itself a ComfyUI process).
+           `handleUseNextPort` / `handleKillProcess` restart the op
+           with the appropriate fix and flip `resolvingConflict`, which
+           collapses the conflict UI back to the running state.
+         • Error → Back to dashboard (Copy-error sibling lands in
+           Phase 2.5).
+         Success / cancelled auto-close after a short delay so no
+         buttons render then — the band collapses to zero height. -->
     <template #footer>
-      <!-- Port conflict actions -->
       <div
         v-if="
-          currentOp.finished &&
-          currentOp.result?.portConflict &&
-          !currentOp.result.ok &&
-          !resolvingConflict
+          currentOp &&
+            (!currentOp.finished ||
+              isPortConflictOpen ||
+              (!!currentOp.error && !currentOp.cancelRequested))
         "
-        class="progress-conflict-actions"
+        class="brand-progress__footer"
       >
-        <button
-          v-if="currentOp.result.portConflict.nextPort"
-          class="primary"
-          @click="handleUseNextPort(currentOp.result.portConflict.nextPort!)"
-        >
-          {{
-            $t('errors.portConflictUsePort', {
-              port: currentOp.result.portConflict.nextPort
-            })
-          }}
-        </button>
-        <button
-          v-if="currentOp.result.portConflict.isComfy"
-          class="danger"
-          @click="handleKillProcess(currentOp.result.portConflict.port)"
-        >
-          {{ $t('errors.portConflictKill') }}
-        </button>
-      </div>
-
-      <div class="view-bottom">
-        <button
-          v-if="currentOp.finished && currentOp.result?.ok"
-          class="primary"
-          @click="handleDone"
-        >
-          {{ $t('common.done') }}
-        </button>
-        <button
-          v-else-if="!currentOp.finished"
-          class="danger-solid"
-          :disabled="currentOp.cancelRequested"
-          @click="handleCancel"
-        >
-          {{ currentOp.cancelRequested ? $t('progress.cancelling') : $t('common.cancel') }}
-        </button>
+        <template v-if="!currentOp.finished">
+          <button
+            type="button"
+            class="brand-ghost brand-progress__footer-btn"
+            @click="handleMinimize"
+          >
+            {{ $t('progress.minimize') }}
+          </button>
+        </template>
+        <template v-else-if="isPortConflictOpen && currentOp.result?.portConflict">
+          <button
+            v-if="currentOp.result.portConflict.nextPort"
+            type="button"
+            class="brand-primary brand-progress__footer-btn"
+            @click="handleUseNextPort(currentOp.result.portConflict.nextPort!)"
+          >
+            {{
+              $t('errors.portConflictUsePort', {
+                port: currentOp.result.portConflict.nextPort
+              })
+            }}
+          </button>
+          <button
+            v-if="currentOp.result.portConflict.isComfy"
+            type="button"
+            class="brand-ghost brand-progress__footer-btn brand-progress__footer-btn--danger"
+            @click="handleKillProcess(currentOp.result.portConflict.port)"
+          >
+            {{ $t('errors.portConflictKill') }}
+          </button>
+        </template>
+        <template v-else>
+          <button
+            type="button"
+            class="brand-primary brand-progress__footer-btn"
+            @click="handleBackToDashboard"
+          >
+            {{ $t('common.backToDashboard') }}
+          </button>
+        </template>
       </div>
     </template>
-  </ModalShell>
+  </BrandTakeoverLayout>
 </template>
 
 <style scoped>
@@ -780,6 +903,28 @@ defineExpose({ startOperation, showOperation })
   color: var(--neutral-300);
   text-align: center;
   min-height: 1.5em;
+  /* Selectable so users can copy the running phase label (e.g.
+     "Counting files…") into bug reports without waiting for the op
+     to finish. Same allowance now applies to the finished-state
+     banner via `.brand-progress__banner span`. */
+  user-select: text;
+  -webkit-user-select: text;
+}
+/* Second-line detail under the curated phase headline. Used for the
+   bytes / speed / ETA string main computes for download + extract
+   phases. Tabular numbers keep the digits from jittering as totals
+   tick, and `pre-wrap` + `min-height` prevent reflow when the line
+   collapses between updates. */
+.brand-progress__substatus {
+  margin-top: -8px;
+  font-size: var(--takeover-fs-caption, 12px);
+  color: var(--neutral-400);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+  min-height: 1.4em;
+  user-select: text;
+  -webkit-user-select: text;
 }
 .brand-progress__percent {
   font-size: 12px;
@@ -859,5 +1004,119 @@ defineExpose({ startOperation, showOperation })
   white-space: pre-wrap;
   word-break: break-word;
   backdrop-filter: blur(4px);
+  /* Selectable so users can copy the visible log tail manually even
+     before clicking the BaseCopyButton (which writes the FULL
+     unbounded buffer — see `getTerminalLogText`). */
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* Header row hosting the "View logs" disclosure + a Copy button on
+   the right. Copy is only visible while the accordion is open so a
+   collapsed log doesn't suggest there's anything to copy yet. */
+.brand-progress__logs-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+.brand-progress__logs-copy {
+  margin-left: 4px;
+}
+
+/* Row hosting the error / port-conflict detail line + its inline
+   Copy button. Flex with the copy button hugging the right edge so
+   the message text reads naturally on the left. */
+.brand-progress__error-row {
+  width: 100%;
+  max-width: 640px;
+  margin-top: -4px;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.brand-progress__error-row .brand-progress__error-message {
+  margin-top: 0;
+  flex: 1 1 auto;
+}
+.brand-progress__error-copy {
+  flex: none;
+  margin-top: 4px;
+}
+
+/* Finished-state banner. Sits in place of the running caption when the
+   op resolves. Icon + label crossfade in via the existing
+   brand-caption-fade transition that wraps both branches. */
+.brand-progress__banner {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: var(--takeover-fs-body);
+  letter-spacing: 0.01em;
+  min-height: 1.5em;
+  color: var(--neutral-200);
+}
+.brand-progress__banner :deep(svg) {
+  flex: none;
+}
+.brand-progress__banner--success {
+  color: var(--semantic-success, var(--neutral-50));
+}
+.brand-progress__banner--error {
+  color: var(--semantic-danger, #ff7a7a);
+}
+.brand-progress__banner--cancelled {
+  color: var(--neutral-300);
+}
+
+/* Error detail line beneath the banner. Selectable so users can copy
+   manually (Copy-button affordance lands in Phase 2.5). */
+.brand-progress__error-message {
+  width: 100%;
+  max-width: 640px;
+  margin-top: -4px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--brand-surface-border);
+  background: var(--brand-surface-bg);
+  color: var(--neutral-200);
+  font-size: 13px;
+  line-height: 1.55;
+  text-align: left;
+  user-select: text;
+  -webkit-user-select: text;
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+/* Pinned footer band — slotted into BrandTakeoverLayout's `#footer`
+   so the buttons hug the takeover's bottom edge instead of crowding
+   the centered hero stack above. */
+.brand-progress__footer {
+  position: absolute;
+  bottom: clamp(24px, 4vh, 48px);
+  left: 50%;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  z-index: 3;
+}
+.brand-progress__footer-btn {
+  min-width: 160px;
+}
+/* Destructive variant for the port-conflict Kill Process button.
+   Pairs with `.brand-ghost` to keep the chrome consistent — same
+   border/padding as the primary button — but tinted with the
+   semantic danger color so the irreversible action reads as such. */
+.brand-progress__footer-btn--danger {
+  color: var(--semantic-danger, #ff7a7a);
+  border-color: color-mix(in srgb, var(--semantic-danger, #ff7a7a) 40%, transparent);
+}
+.brand-progress__footer-btn--danger:hover,
+.brand-progress__footer-btn--danger:focus-visible {
+  background: color-mix(in srgb, var(--semantic-danger, #ff7a7a) 14%, transparent);
+  border-color: var(--semantic-danger, #ff7a7a);
 }
 </style>

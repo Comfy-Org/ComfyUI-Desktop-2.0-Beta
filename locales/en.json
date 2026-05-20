@@ -73,6 +73,7 @@
   },
 
   "comfyLifecycle": {
+    "preparingTitle": "Preparing…",
     "stoppedTitle": "ComfyUI is not running",
     "stoppedDesc": "Start ComfyUI to use this installation.",
     "launchingTitle": "Starting ComfyUI…",
@@ -135,6 +136,7 @@
     "back": "Back",
     "backToDashboard": "Back to Dashboard",
     "close": "Close",
+    "copy": "Copy",
     "browse": "Browse…",
     "resetDefault": "Reset",
     "or": "or",
@@ -308,6 +310,7 @@
     "completedSuccess": "Completed successfully",
     "completedError": "Operation failed",
     "completedCancelled": "Operation was cancelled",
+    "minimize": "Minimize",
     "phaseLabel": {
       "download": "Downloading ComfyUI…",
       "extract": "Unpacking the install…",
@@ -893,6 +896,7 @@
     "portConflictLauncher": "Port {port} is already in use by \"{name}\", launched from another ComfyUI Desktop 2.0 instance. You can use the next available port, stop it first, or change the port in Startup Arguments.",
     "portConflictComfy": "Port {port} is already in use by {process}, which appears to be a ComfyUI instance. You can use the next available port, stop the process, or change the port in Startup Arguments.",
     "portConflictOther": "Port {port} is already in use by {process}. You can use the next available port or change the port in Startup Arguments.",
+    "portConflictTitle": "Port already in use",
     "portConflictUsePort": "Use port {port} instead",
     "portConflictKill": "Stop process and retry",
     "portConflictKillConfirmTitle": "Stop Existing Process",

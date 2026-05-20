@@ -30,6 +30,7 @@ withDefaults(
         <slot />
       </div>
       <slot name="footer-left" />
+      <slot name="footer" />
     </div>
   </div>
 </template>
