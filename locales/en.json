@@ -679,6 +679,7 @@
     "updateConfirmMessage": "Update from {installed} to {latest}?\n\nLocal changes will be stashed and a backup branch created.",
     "updateConfirmMessageLatest": "Update from {installed} to latest on master ({latest})?\n\nThis will pull the newest commits from the master branch. Local changes will be stashed and a backup branch created.",
     "updateConfirmMessageDowngrade": "Roll back from {installed} to stable release {latest}?\n\nYour install is currently ahead of the latest stable release. This will check out the stable tag, removing any newer commits. Local changes will be stashed and a backup branch created.",
+    "updateRestartNotice": "ComfyUI is currently running and will be restarted to apply this update.",
     "updatingTitle": "Updating to {version}",
     "updatePrepare": "Prepare",
     "updatePrepareSnapshot": "Saving snapshot of current state…",
@@ -907,6 +908,7 @@
     "stopRequired": "This installation is currently running and must be stopped first.",
     "stopRequiredConfirm": "This installation is currently running. Would you like to stop it to continue?",
     "stopRunning": "Stop Running",
+    "stopTimeout": "ComfyUI is still shutting down. Please wait a moment and try again.",
     "folderPermissionDenied": "macOS denied access to \"{path}\". Please open System Settings → Privacy & Security → Files and Folders, grant access to ComfyUI Desktop 2.0, then retry."
   },
 
