@@ -17,7 +17,7 @@ import MigrateConfirmTakeover from '../views/MigrateConfirmTakeover.vue'
 import { useTheme } from '../composables/useTheme'
 import { useSessionStore } from '../stores/sessionStore'
 import { useInstallationStore } from '../stores/installationStore'
-import { useLauncherPrefs } from '../composables/useLauncherPrefs'
+import { seedLauncherPrefsFromUrl, useLauncherPrefs } from '../composables/useLauncherPrefs'
 import { useModal } from '../composables/useModal'
 import { useAppUpdatePrompts } from '../composables/useAppUpdatePrompts'
 import { useSendFeedback } from '../composables/useSendFeedback'
@@ -34,15 +34,22 @@ useTheme()
 
 const params = new URLSearchParams(window.location.search)
 const installationId = params.get('installationId') || ''
+// Main passes the persisted first-use gate synchronously so cold
+// start doesn't wait on IPC before painting chooser vs takeover.
+seedLauncherPrefsFromUrl(window.location.search)
+const urlFirstUseCompleted = params.get('firstUseCompleted') === 'true'
+const urlFirstUsePending = params.get('firstUseCompleted') === 'false'
 
 const sessionStore = useSessionStore()
 const installationStore = useInstallationStore()
 const launcherPrefs = useLauncherPrefs()
+// Overlap the IPC round-trip with panel bundle parse / Vue mount.
+void launcherPrefs.loadPrefs()
 // Surface `loaded` as a top-level template binding so Vue auto-unwraps
 // it in the body-gate `v-if`. Refs accessed as object properties on
 // `launcherPrefs` aren't auto-unwrapped in templates, only top-level
 // setup bindings are.
-const { loaded: launcherPrefsLoaded } = launcherPrefs
+const { loaded: launcherPrefsLoaded, firstUseCompleted } = launcherPrefs
 
 const modal = useModal()
 const { showAppUpdateRestartPrompt, showAppUpdateDownloadPrompt } = useAppUpdatePrompts()
@@ -135,6 +142,21 @@ const {
   dismissTakeoverDirect,
   switchPanel,
 } = overlays
+
+const firstUseTakeoverActive = computed(
+  () =>
+    currentOverlay.value?.kind === 'takeover' &&
+    currentOverlay.value.component === 'first-use',
+)
+
+/** Chooser/lifecycle body: show immediately when main already knows
+ *  first-use is done; otherwise wait for prefs IPC. Always hide while
+ *  the first-use takeover is mounted (prevents chooser bleed-through). */
+const showPanelBody = computed(() => {
+  if (firstUseTakeoverActive.value) return false
+  if (urlFirstUseCompleted) return true
+  return launcherPrefsLoaded.value && firstUseCompleted.value
+})
 
 chooserHandoff = useChooserHandoff({
   showProgress: handleShowProgress,
@@ -276,16 +298,6 @@ onMounted(async () => {
     update: (opts) => migrateTakeoverRef.value?.update(opts)
   })
 
-  try {
-    await loadLocale()
-  } catch (err) {
-    // Bootstrap failures must NOT leave bootstrapReady pending forever
-    // (deep-link routing awaits it), so the entire mount is wrapped in
-    // try/finally below. Log here so the partial-bootstrap surface
-    // stays visible in the console even when the whole app keeps going.
-    console.error('Panel: loadLocale failed', err)
-  }
-
   unsubLocale = window.api.onLocaleChanged((messages) => {
     mergeLocaleMessage('en', messages as Record<string, unknown>)
   })
@@ -355,10 +367,22 @@ onMounted(async () => {
     // Initialize stores / prefs needed by the embedded DetailModal that
     // backs the unified Settings modal's "ComfyUI Settings" tab.
     // installationStore wires its own onInstallationsChanged listener.
+    const shouldOpenFirstUse =
+      urlFirstUsePending ||
+      (!urlFirstUseCompleted &&
+        (!launcherPrefsLoaded.value || !firstUseCompleted.value))
+
+    if (shouldOpenFirstUse && !isFlowPanel(initialPanel)) {
+      void openFirstUseTakeover()
+    }
+
     await Promise.all([
       sessionStore.init(),
       installationStore.fetchInstallations(),
       launcherPrefs.loadPrefs(),
+      loadLocale().catch((err) => {
+        console.error('Panel: loadLocale failed', err)
+      }),
     ])
 
     // If the URL-driven initial panel mounts as an overlay (flow wizard
@@ -375,7 +399,7 @@ onMounted(async () => {
     // first-use takeover will replay on the next launch since
     // `firstUseCompleted` stays false until the explicit completion
     // path runs.
-    if (!launcherPrefs.firstUseCompleted.value && !isFlowPanel(initialPanel)) {
+    if (!firstUseCompleted.value && !isFlowPanel(initialPanel)) {
       void openFirstUseTakeover()
     }
   } catch (err) {
@@ -408,33 +432,11 @@ onUnmounted(() => {
 <template>
   <div class="panel-shell">
     <main class="panel-content">
-      <!-- Body branches are gated on two conditions:
-           1. `launcherPrefsLoaded` — chooser/lifecycle cannot paint
-              before the first-use takeover gate (`firstUseCompleted`)
-              has resolved. Both flip in the same microtask (after the
-              bootstrap `Promise.all`), so Vue resolves either the body
-              or the overlay slot in a single paint.
-           2. Not under the first-use takeover specifically — the
-              first-use auto-mount races with bootstrap (overlay opens
-              in the same tick the body would first paint), and
-              BrandTakeoverLayout has a 240ms `opacity 0 → 1` entrance
-              that lets the chooser bleed through for ~14 frames. The
-              user has never seen the chooser at this point, so
-              suppressing it costs nothing — there's no scroll/filter
-              state to preserve. Flow takeovers (new-install / track /
-              load-snapshot / quick-install) are NOT excluded: they're
-              dashboard-initiated, the user has already interacted with
-              the chooser, and gating the chooser out on every flow
-              open would re-mount it (lose scroll/filter state) on
-              every dismiss. Settings (Tier 1) and progress (Tier 2)
-              layer over the body by design. -->
-      <div
-        v-if="
-          launcherPrefsLoaded &&
-          !(currentOverlay?.kind === 'takeover' && currentOverlay.component === 'first-use')
-        "
-        class="panel-body"
-      >
+      <!-- `showPanelBody` — chooser when main/IPC says first-use is done;
+           hidden while the first-use takeover is mounted (no chooser
+           bleed-through during BrandTakeoverLayout's fade-in). Flow
+           takeovers keep the chooser mounted underneath by design. -->
+      <div v-if="showPanelBody" class="panel-body">
         <div v-if="activePanel === 'comfy-lifecycle'" class="panel-comfy-lifecycle">
           <ComfyLifecycleView
             :installation="installation"

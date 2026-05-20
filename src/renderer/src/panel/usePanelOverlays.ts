@@ -412,6 +412,20 @@ export function usePanelOverlays(opts: UsePanelOverlaysOpts): UsePanelOverlaysAp
     if (panel === 'settings') {
       const inst = installation.value
       const initialTab = inst ? 'comfy' : 'global'
+      // Install-less (chooser host) → open the new Global Settings popup
+      // via main. The per-install (`'comfy'`) branch still routes to the
+      // legacy SettingsModal pending the ComfyUISettingsPanel migration
+      // (see `docs/per-install-settings-handoff.md`).
+      if (initialTab === 'global') {
+        window.api.openGlobalSettings()
+        emitTelemetryAction('desktop2.view.opened', { view: panel, from_view: fromView })
+        emitTelemetryAction('desktop2.settings.opened', {
+          initial_tab: initialTab,
+          entrypoint,
+          has_installation: !!inst,
+        })
+        return
+      }
       const ok = await openOverlay({
         kind: 'settings',
         installation: inst,

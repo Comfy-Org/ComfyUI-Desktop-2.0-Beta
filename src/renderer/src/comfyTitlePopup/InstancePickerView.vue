@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, ref, toRef, watch } from 'vue'
+import { computed, ref, toRef, useTemplateRef, watch } from 'vue'
+import { useTitlePopupAutoResize } from '../composables/useTitlePopupAutoResize'
 import { useI18n } from 'vue-i18n'
 import { ChevronRight, ChevronUp, Plus, Search } from 'lucide-vue-next'
 import BaseInput from '../components/ui/BaseInput.vue'
@@ -93,6 +94,10 @@ interface PickerBridge {
    *  panel; the panel resolves to the same code path the dashboard
    *  kebab uses, so confirm dialogs + showProgress wiring are shared. */
   openInstallAction: (installationId: string, actionId: string) => void
+  /** Ask main to resize the popup view to the given natural height.
+   *  Same plumbing as `GlobalSettingsView` — main clamps to the picker's
+   *  ceiling band so unbounded growth is impossible. */
+  requestSize: (height: number) => void
 }
 const bridge = (window as unknown as { __comfyTitlePopup?: PickerBridge }).__comfyTitlePopup
 
@@ -310,6 +315,32 @@ function toggleSnapshotsAccordion(): void {
   snapshotsOpen.value = !snapshotsOpen.value
 }
 
+// Fit-to-content resize for the right-pane Settings / Snapshots
+// accordions. The `.picker` root is `height: 100%`-clamped to the
+// WebContentsView's current bounds and the `.picker-detail-nav` is
+// `overflow-y: auto`, so observing either directly saturates the
+// natural-height signal. `detailNavContentRef` sits inside the nav's
+// scroll container and reports the unclamped accordion content
+// height; `useTitlePopupAutoResize` re-derives total popup height by
+// nudging the current root height by the delta between what the nav
+// is currently allowed to be vs. what the content wants.
+const pickerRootRef = useTemplateRef<HTMLDivElement>('pickerRootRef')
+const detailNavRef = useTemplateRef<HTMLDivElement>('detailNavRef')
+const detailNavContentRef = useTemplateRef<HTMLDivElement>('detailNavContentRef')
+
+useTitlePopupAutoResize(
+  detailNavContentRef,
+  () => {
+    const root = pickerRootRef.value
+    const nav = detailNavRef.value
+    const content = detailNavContentRef.value
+    if (!root || !nav || !content) return NaN
+    // +2 for the `.popup` 1px top + 1px bottom border.
+    return root.offsetHeight + (content.offsetHeight - nav.offsetHeight) + 2
+  },
+  bridge?.requestSize ? bridge.requestSize.bind(bridge) : undefined,
+)
+
 // Picker right-pane Settings accordion shows ONLY the Config tab —
 // not status / update. Same filter the drawer uses
 // (`useComfyUISettings.sectionsForTab('settings')`) just applied
@@ -365,7 +396,7 @@ function handleOpenArgsPage(_field: DetailField): void {
 </script>
 
 <template>
-  <div class="picker">
+  <div ref="pickerRootRef" class="picker">
     <div class="picker-search">
       <BaseInput
         v-model="searchQuery"
@@ -465,7 +496,8 @@ function handleOpenArgsPage(_field: DetailField): void {
               </div>
             </div>
 
-            <div class="picker-detail-nav picker-compact">
+            <div ref="detailNavRef" class="picker-detail-nav picker-compact">
+              <div ref="detailNavContentRef" class="picker-detail-nav-content">
               <button
                 type="button"
                 class="picker-detail-nav-item"
@@ -538,6 +570,7 @@ function handleOpenArgsPage(_field: DetailField): void {
                   </div>
                 </BaseAccordion>
               </template>
+              </div>
             </div>
 
             <div class="picker-detail-cta">
@@ -830,13 +863,20 @@ function handleOpenArgsPage(_field: DetailField): void {
   flex: 1 1 0;
   min-height: 0;
   overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
   padding-top: 16px;
   border-top: 1px solid var(--chooser-surface-border);
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+}
+
+/* Holds the Settings + Snapshots accordion buttons; the parent nav
+ * owns the scroll container so this wrapper reports the unclamped
+ * natural content height to the ResizeObserver hooked up in
+ * `InstancePickerView`. */
+.picker-detail-nav-content {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 .picker-detail-nav-item {
   display: inline-flex;

@@ -95,20 +95,30 @@ const tabs = computed<TabDef[]>(() => [
     available: true,
   },
   {
+    // TODO(brand-cleanup): Global tab is fully unreachable as of the
+    // Global Settings popup landing — hamburger Settings, panel file-
+    // menu Settings, and `comfy://open-settings?tab=global` deep links
+    // all route to the title-popup via the
+    // `comfy-titlepopup:open-global-settings` IPC. The TabDef stays
+    // here with `available: false` to keep the v-else-if branch's
+    // diff clean for the eventual hard-delete; bring it back to true
+    // only as an emergency rollback path.
     key: 'global',
     icon: SettingsIcon,
     label: t('settingsModal.tabGlobal', 'Global Settings'),
-    available: true,
+    available: false,
   },
 ])
 
 const visibleTabs = computed(() => tabs.value.filter((t) => t.available))
 
 /** Resolve the initial tab against availability: a request for
- *  `comfy` on an install-less host falls through to the default
- *  install-less tab (`global`). */
+ *  `comfy` on an install-less host falls through to `directories`.
+ *  (The legacy `'global'` fallback is unreachable now — Global Settings
+ *  opens via the title-popup IPC instead of this modal.) */
 function resolveInitial(req: SettingsTab): SettingsTab {
-  if (req === 'comfy' && !hasInstallation.value) return 'global'
+  if (req === 'comfy' && !hasInstallation.value) return 'directories'
+  if (req === 'global') return 'directories'
   return req
 }
 
@@ -121,7 +131,7 @@ watch(
   () => [props.initialTab, hasInstallation.value] as const,
   ([req, hasInst]) => {
     if (activeTab.value === 'comfy' && !hasInst) {
-      activeTab.value = 'global'
+      activeTab.value = 'directories'
       return
     }
     // If the caller explicitly bumps `initialTab` after mount (rare —

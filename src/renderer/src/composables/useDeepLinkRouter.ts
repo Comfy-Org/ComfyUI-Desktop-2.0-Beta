@@ -76,6 +76,14 @@ export function useDeepLinkRouter(opts: DeepLinkRouterOpts): void {
           // Default to the host's natural tab — same fall-through the
           // file-menu / title-bar Settings entries use via switchPanel.
           const tab = requested ?? (inst ? 'comfy' : 'global')
+          // Global tab → new Global Settings popup. Per-install tabs
+          // still hit the legacy SettingsModal pending the
+          // ComfyUISettingsPanel migration (see
+          // `docs/per-install-settings-handoff.md`).
+          if (tab === 'global') {
+            window.api.openGlobalSettings()
+            return
+          }
           await opts.openOverlay({
             kind: 'settings',
             installation: inst ?? null,

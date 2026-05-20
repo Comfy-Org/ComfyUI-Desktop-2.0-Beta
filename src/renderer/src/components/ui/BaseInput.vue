@@ -9,6 +9,11 @@ interface Props {
   readonly?: boolean
   invalid?: boolean
   type?: string
+  // Number-input hints. Only meaningful when `type === 'number'`; the
+  // browser handles clamp + step UI from these.
+  min?: number
+  max?: number
+  step?: number
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -17,7 +22,10 @@ const props = withDefaults(defineProps<Props>(), {
   mono: false,
   readonly: false,
   invalid: false,
-  type: 'text'
+  type: 'text',
+  min: undefined,
+  max: undefined,
+  step: undefined,
 })
 
 const emit = defineEmits<{
@@ -58,6 +66,9 @@ function onChange(event: Event): void {
       :aria-label="ariaLabel"
       :aria-invalid="invalid || undefined"
       :readonly="readonly"
+      :min="min"
+      :max="max"
+      :step="step"
       @input="onInput"
       @change="onChange"
     />

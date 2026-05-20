@@ -218,7 +218,18 @@ const visibleSections = computed(() => props.sections)
         v-else-if="field.editType === 'text'"
         :model-value="asString(field.value)"
         :aria-label="field.label"
+        :placeholder="field.placeholder"
         @change="(v: string) => emit('update-field', field, v)"
+      />
+
+      <BaseInput
+        v-else-if="field.editType === 'number'"
+        :model-value="asString(field.value)"
+        :aria-label="field.label"
+        type="number"
+        :min="field.min"
+        :max="field.max"
+        @change="(v: string) => emit('update-field', field, v === '' ? null : Number(v))"
       />
 
       <span v-else class="settings-v2-field-readonly">{{ asString(field.value) }}</span>
