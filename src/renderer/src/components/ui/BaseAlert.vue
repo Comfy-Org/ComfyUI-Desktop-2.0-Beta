@@ -26,6 +26,9 @@ interface Props {
   showCancel?: boolean
   /** Cancel label when `showCancel`. Defaults to i18n `common.cancel`. */
   cancelLabel?: string
+  /** Primary-action visual treatment. `danger` = destructive (red),
+   *  `primary` = standard yellow CTA. Default `'primary'`. */
+  tone?: 'primary' | 'danger'
   ariaLabel?: string
   ariaLabelledby?: string
   /** Dismiss when Escape is pressed. Default true. */
@@ -41,6 +44,7 @@ const props = withDefaults(defineProps<Props>(), {
   buttonLabel: undefined,
   showCancel: false,
   cancelLabel: undefined,
+  tone: 'primary',
   ariaLabel: undefined,
   ariaLabelledby: undefined,
   dismissOnEscape: true,
@@ -165,7 +169,7 @@ onBeforeUnmount(() => {
               <button
                 ref="actionBtnRef"
                 type="button"
-                class="primary"
+                :class="tone === 'danger' ? 'danger-solid' : 'primary'"
                 data-testid="base-alert-action"
                 @click="onActionClick"
               >
@@ -183,11 +187,19 @@ onBeforeUnmount(() => {
 .base-alert-overlay {
   position: fixed;
   inset: 0;
-  z-index: 60;
+  /* Alerts always sit above other modals (legacy `.modal-overlay` is
+   * 100, DetailModal's `.view-modal` is 50, ProgressModal overlay is
+   * 100). When an alert fires from inside a modal-driven action chain
+   * — e.g. right-click → Delete confirm — the alert must own the
+   * foreground, not stack behind its parent surface. Context menus
+   * (10000) intentionally still win. */
+  z-index: 1000;
   display: grid;
   place-items: center;
   padding: clamp(32px, 6vh, 72px) clamp(16px, 4vw, 48px);
-  background: color-mix(in oklab, var(--neutral-800) 70%, transparent);
+  background: color-mix(in oklab, var(--neutral-800) 60%, transparent);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
 }
 
 .base-alert-panel {
@@ -199,8 +211,14 @@ onBeforeUnmount(() => {
   border-radius: 12px;
   overflow: hidden;
   background: var(--neutral-800);
-  border: 1px solid color-mix(in oklab, var(--neutral-100) 6%, transparent);
-  box-shadow: 0 24px 64px 0 rgba(0, 0, 0, 0.35);
+  /* Match the popup-shell chrome used on the instance picker / global
+   * settings windows: a soft white-tinted hairline plus a layered
+   * shadow that reads as elevation rather than a hard drop. */
+  border: 1px solid var(--chooser-surface-border);
+  box-shadow:
+    0 20px 24px -4px rgba(10, 13, 18, 0.4),
+    0 8px 8px -4px rgba(10, 13, 18, 0.25),
+    0 3px 3px -1.5px rgba(10, 13, 18, 0.2);
   color: var(--neutral-100);
   padding: 16px 24px;
 }
@@ -233,5 +251,25 @@ onBeforeUnmount(() => {
   margin: 0 -24px;
   padding: 12px 24px 0;
   border-top: 1px solid color-mix(in oklab, var(--neutral-100) 8%, transparent);
+}
+
+/* Tone-scoped destructive red. The global `--danger` (#b33a3a) reads
+ * muddy against the plum-warm neutral-800 panel surface; a slightly
+ * warmer, more saturated tone sits cleaner on this palette without
+ * tipping into neon. Scoped to BaseAlert so the global token (used
+ * across the app) stays untouched. */
+.base-alert-panel button.danger-solid {
+  --base-alert-danger: #c8443d;
+  background: var(--base-alert-danger);
+  border-color: var(--base-alert-danger);
+  color: #fff;
+}
+.base-alert-panel button.danger-solid:hover {
+  background: color-mix(in srgb, var(--base-alert-danger) 88%, #000);
+  border-color: color-mix(in srgb, var(--base-alert-danger) 88%, #000);
+}
+.base-alert-panel button.danger-solid:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--base-alert-danger) 60%, #fff);
+  outline-offset: 2px;
 }
 </style>

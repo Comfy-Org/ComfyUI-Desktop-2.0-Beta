@@ -7,6 +7,7 @@ import type { FieldOption } from '../types/ipc'
 import InfoTooltip from './InfoTooltip.vue'
 import VariantCardGrid from './VariantCardGrid.vue'
 import MigrateConfirmBody from './MigrateConfirmBody.vue'
+import BaseAlert from './ui/BaseAlert.vue'
 import { formatNodeVersion } from '../lib/snapshots'
 
 const { t } = useI18n()
@@ -22,6 +23,48 @@ const sortedVariants = computed(() => sortedCardOptions(state.variantCards))
  *  Continue precedent). Other `confirm` callers keep the legacy
  *  modal-box. */
 const isMigrateConfirm = computed(() => state.type === 'confirm' && state.snapshotPreview != null)
+
+/** A confirm is "simple" when it has no extras — no snapshot preview,
+ *  no detail groups, no checkboxes, no loading state, no variant cards.
+ *  These render through `BaseAlert` (cancel + primary). Rich confirms
+ *  (migrate, snapshot preview, multi-line detail confirms) keep the
+ *  legacy markup with its scrollable body. */
+const isSimpleConfirm = computed(
+  () =>
+    state.type === 'confirm' &&
+    !state.loading &&
+    state.snapshotPreview == null &&
+    state.messageDetails.length === 0 &&
+    state.checkboxes.length === 0 &&
+    state.variantCards.length === 0 &&
+    !state.variantLoading
+)
+
+/** True when the current modal is rendered by `BaseAlert` (which owns
+ *  its own teleport + overlay). The legacy overlay below must skip in
+ *  that case so we don't double-mount a backdrop. */
+const usesBaseAlert = computed(() => state.type === 'alert' || isSimpleConfirm.value)
+
+const baseAlertTone = computed<'primary' | 'danger'>(() =>
+  state.type === 'confirm' && state.confirmStyle === 'danger' ? 'danger' : 'primary'
+)
+
+/** Alert uses `buttonLabel` (single OK action); simple confirm uses
+ *  `confirmLabel` (the primary action like "Delete" / "Switch"). */
+const baseAlertButtonLabel = computed(() =>
+  state.type === 'alert' ? state.buttonLabel : state.confirmLabel
+)
+
+function onBaseAlertClose(): void {
+  // Alert: resolve void. Simple confirm: resolve `true`.
+  if (state.type === 'alert') close(undefined)
+  else close(true)
+}
+
+function onBaseAlertCancel(): void {
+  // Only reached for simple confirms (showCancel=true).
+  close(false)
+}
 
 function selectVariant(opt: FieldOption): void {
   updateConfirm({ selectedVariant: opt })
@@ -144,6 +187,9 @@ watch(
 
 function handleKeydown(event: KeyboardEvent): void {
   if (!state.visible) return
+  // BaseAlert owns its own ESC dismissal for alert + simple confirm.
+  // Skip here to avoid double-resolving the promise.
+  if (usesBaseAlert.value) return
   if (event.key === 'Escape') {
     if (state.type === 'alert') {
       close(undefined)
@@ -189,26 +235,38 @@ onUnmounted(() => {
 </script>
 
 <template>
+  <!-- Alerts and simple confirms render through the shared `BaseAlert`
+       primitive (compact, role=alertdialog, focus restore, scroll lock,
+       a11y baked in). Rich confirms / prompt / select / options stay in
+       the legacy markup below until each gets its own dedicated
+       primitive — they have substantial bespoke UI (snapshot preview,
+       variant grid, detail groups) that doesn't fit the alert shape.
+       Single <BaseAlert> handles both intents; computed props swap the
+       primary label/tone and toggle Cancel based on `state.type`. -->
+  <BaseAlert
+    :open="state.visible && usesBaseAlert"
+    :title="state.title"
+    :message="state.message"
+    :show-cancel="isSimpleConfirm"
+    :button-label="baseAlertButtonLabel"
+    :tone="baseAlertTone"
+    @close="onBaseAlertClose"
+    @cancel="onBaseAlertCancel"
+  />
+
   <Teleport to="body">
     <div
-      v-if="state.visible"
+      v-if="state.visible && !usesBaseAlert"
       ref="overlayRef"
       class="modal-overlay"
       @mousedown="handleOverlayMouseDown"
       @click="handleOverlayClick"
     >
-      <!-- Alert -->
-      <div v-if="state.type === 'alert'" class="modal-box">
-        <div class="modal-title">{{ state.title }}</div>
-        <div class="modal-message" @click="handleMessageClick" v-html="linkifiedMessage"></div>
-        <div class="modal-actions">
-          <button class="primary" @click="close(undefined)">{{ state.buttonLabel }}</button>
-        </div>
-      </div>
-
-      <!-- Confirm -->
+      <!-- Confirm (rich: snapshot preview, variants, details, checkboxes,
+           or loading state). Simple confirms fall through to BaseAlert
+           above. -->
       <div
-        v-else-if="state.type === 'confirm'"
+        v-if="state.type === 'confirm'"
         class="modal-box"
         :class="{
           'modal-box-wide':

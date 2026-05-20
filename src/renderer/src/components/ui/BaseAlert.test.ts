@@ -119,4 +119,18 @@ describe('BaseAlert', () => {
     expect(wrapper.emitted('cancel')).toHaveLength(1)
     expect(wrapper.emitted('close')).toBeUndefined()
   })
+
+  it('applies primary tone class by default', () => {
+    const wrapper = mountAlert({ showCancel: true })
+    const action = wrapper.find('[data-testid="base-alert-action"]')
+    expect(action.classes()).toContain('primary')
+    expect(action.classes()).not.toContain('danger-solid')
+  })
+
+  it('applies danger tone class when tone="danger"', () => {
+    const wrapper = mountAlert({ showCancel: true, tone: 'danger' })
+    const action = wrapper.find('[data-testid="base-alert-action"]')
+    expect(action.classes()).toContain('danger-solid')
+    expect(action.classes()).not.toContain('primary')
+  })
 })
