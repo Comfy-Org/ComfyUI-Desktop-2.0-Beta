@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, toRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ChevronDown, ChevronRight, Plus, Search } from 'lucide-vue-next'
+import { ChevronRight, ChevronUp, Plus, Search } from 'lucide-vue-next'
 import BaseInput from '../components/ui/BaseInput.vue'
 import BaseAccordion from '../components/ui/BaseAccordion.vue'
 import BaseMenu, { type BaseMenuItem } from '../components/ui/BaseMenu.vue'
@@ -16,7 +16,7 @@ import type {
   DetailField,
   DetailSection,
   Installation,
-  SnapshotListData,
+  SnapshotListData
 } from '../types/ipc'
 
 /**
@@ -80,12 +80,12 @@ interface PickerBridge {
   pickerUpdateField: (
     installationId: string,
     fieldId: string,
-    value: unknown,
+    value: unknown
   ) => Promise<{ ok: boolean; message?: string }>
   pickerRunAction: (
     installationId: string,
     actionId: 'snapshot-save' | 'snapshot-restore' | 'snapshot-delete',
-    actionData?: Record<string, unknown>,
+    actionData?: Record<string, unknown>
   ) => Promise<{ ok: boolean; message?: string }>
   /** Picker → run an install-level action via the parent panel's
    *  `useInstallContextMenu` dispatch (Open Folder / Copy / Untrack /
@@ -149,6 +149,13 @@ const selectedTypeMeta = computed(() =>
   selectedInstall.value ? installTypeMetaFor(selectedInstall.value.sourceCategory) : null
 )
 
+/** Install versions may already include a leading "v"; avoid "vv…". */
+const selectedVersionLabel = computed(() => {
+  const raw = selectedInstall.value?.version
+  if (!raw) return ''
+  return raw.startsWith('v') || raw.startsWith('V') ? raw : `v${raw}`
+})
+
 const runningSet = computed(() => new Set(props.snapshot.runningInstallationIds))
 
 function isRowRunning(inst: Installation): boolean {
@@ -156,7 +163,7 @@ function isRowRunning(inst: Installation): boolean {
 }
 
 const isSelectedRunning = computed(
-  () => selectedInstall.value != null && runningSet.value.has(selectedInstall.value.id),
+  () => selectedInstall.value != null && runningSet.value.has(selectedInstall.value.id)
 )
 
 // --- action dispatch ---
@@ -192,7 +199,7 @@ const moreMenuItems = computed<BaseMenuItem[]>(() => {
     items.push({
       id: 'copy-install',
       label: t('actions.copyInstallation'),
-      disabled: requiresStoppedDisabled,
+      disabled: requiresStoppedDisabled
     })
   }
   if (isInstalled && isLocalLike) {
@@ -204,7 +211,7 @@ const moreMenuItems = computed<BaseMenuItem[]>(() => {
       label: t('chooser.menuDelete'),
       style: 'danger',
       separator: true,
-      disabled: requiresStoppedDisabled,
+      disabled: requiresStoppedDisabled
     })
   }
   return items
@@ -235,7 +242,7 @@ function handleOpenButton(): void {
 }
 
 const openCtaLabel = computed(() =>
-  isSelectedRunning.value ? t('instancePicker.restart') : t('instancePicker.open'),
+  isSelectedRunning.value ? t('instancePicker.restart') : t('instancePicker.open')
 )
 
 function handleNewInstall(): void {
@@ -278,7 +285,7 @@ watch(
   () => selectedInstall.value?.id ?? null,
   (next) => {
     bridge?.setPickerSelectedInstall(next)
-  },
+  }
 )
 
 // Per-accordion open state. Both collapsed by default — the popup is
@@ -293,7 +300,7 @@ watch(
   () => {
     settingsOpen.value = false
     snapshotsOpen.value = false
-  },
+  }
 )
 
 function toggleSettingsAccordion(): void {
@@ -315,7 +322,7 @@ const selectedSettingsSections = computed<DetailSection[]>(() => {
   return all.filter((s) => s.tab === 'settings')
 })
 const selectedSnapshotsData = computed<SnapshotListData | null>(
-  () => (props.snapshot.selectedSnapshots as SnapshotListData | null) ?? null,
+  () => (props.snapshot.selectedSnapshots as SnapshotListData | null) ?? null
 )
 // Cloud sources don't push a snapshots payload at all (see
 // urlSource.ts — only `status` and `settings` sections are emitted),
@@ -365,7 +372,7 @@ function handleOpenArgsPage(_field: DetailField): void {
         :placeholder="t('chooser.searchPlaceholder')"
         :aria-label="t('chooser.searchPlaceholder')"
       >
-        <template #leading><Search :size="14" class="picker-search-icon" /></template>
+        <template #leading><Search :size="20" class="picker-search-icon" /></template>
       </BaseInput>
     </div>
 
@@ -449,7 +456,7 @@ function handleOpenArgsPage(_field: DetailField): void {
                     v-if="selectedInstall.version"
                     class="picker-detail-pill picker-detail-pill-version"
                   >
-                    v{{ selectedInstall.version }}
+                    {{ selectedVersionLabel }}
                   </span>
                   <span class="picker-detail-pill">
                     {{ lastLaunchedLabel(selectedInstall) }}
@@ -508,9 +515,25 @@ function handleOpenArgsPage(_field: DetailField): void {
                   <div class="picker-detail-accordion-body">
                     <PickerSnapshotsList
                       :data="selectedSnapshotsData"
-                      @save="() => selectedInstall && bridge?.pickerRunAction(selectedInstall.id, 'snapshot-save')"
-                      @restore="(filename) => selectedInstall && bridge?.pickerRunAction(selectedInstall.id, 'snapshot-restore', { file: filename })"
-                      @delete="(filename) => selectedInstall && bridge?.pickerRunAction(selectedInstall.id, 'snapshot-delete', { file: filename })"
+                      @save="
+                        () =>
+                          selectedInstall &&
+                          bridge?.pickerRunAction(selectedInstall.id, 'snapshot-save')
+                      "
+                      @restore="
+                        (filename) =>
+                          selectedInstall &&
+                          bridge?.pickerRunAction(selectedInstall.id, 'snapshot-restore', {
+                            file: filename
+                          })
+                      "
+                      @delete="
+                        (filename) =>
+                          selectedInstall &&
+                          bridge?.pickerRunAction(selectedInstall.id, 'snapshot-delete', {
+                            file: filename
+                          })
+                      "
                     />
                   </div>
                 </BaseAccordion>
@@ -530,7 +553,7 @@ function handleOpenArgsPage(_field: DetailField): void {
                 @select="handleMoreMenuSelect"
               >
                 <span>{{ t('instancePicker.more') }}</span>
-                <ChevronDown :size="16" aria-hidden="true" />
+                <ChevronUp :size="16" aria-hidden="true" />
               </BaseMenu>
             </div>
           </template>
@@ -545,12 +568,6 @@ function handleOpenArgsPage(_field: DetailField): void {
 
 <style scoped>
 .picker {
-  --pick-bg: rgba(255, 255, 255, 0.04);
-  --pick-bg-active: rgba(255, 255, 255, 0.1);
-  --pick-bg-hover: rgba(255, 255, 255, 0.08);
-  --pick-stroke: rgba(255, 255, 255, 0.1);
-  --pick-stroke-active: rgba(255, 255, 255, 0.3);
-
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -559,8 +576,8 @@ function handleOpenArgsPage(_field: DetailField): void {
 }
 
 .picker-search {
-  padding: 8px;
-  border-bottom: 1px solid var(--pick-stroke);
+  border-bottom: 1px solid var(--chooser-surface-border);
+  padding: 8px 10px 16px 10px;
 }
 .picker-search :deep(.ui-input) {
   background: transparent;
@@ -576,8 +593,9 @@ function handleOpenArgsPage(_field: DetailField): void {
   color: var(--neutral-100);
 }
 .picker-search :deep(.ui-input-control) {
-  padding: 0;
-  font-size: 14px;
+  padding: 4px 0 0 0;
+  font-size: 16px;
+  line-height: 24px;
   color: var(--text);
 }
 .picker-search :deep(.ui-input-control::placeholder) {
@@ -586,8 +604,7 @@ function handleOpenArgsPage(_field: DetailField): void {
 }
 
 .picker-search-icon {
-  color: var(--neutral-100);
-  opacity: 0.67;
+  color: var(--accent-label);
   margin-top: 6px;
 }
 .picker-chips {
@@ -596,14 +613,14 @@ function handleOpenArgsPage(_field: DetailField): void {
   gap: 8px;
   flex-wrap: wrap;
   padding: 8px 16px;
-  border-bottom: 1px solid var(--pick-stroke);
+  border-bottom: 1px solid var(--chooser-surface-border);
 }
 .picker-chip {
   height: 24px;
   padding: 3px 11px;
   border-radius: 9999px;
-  border: 1px solid var(--pick-stroke);
-  background: var(--pick-bg);
+  border: 1px solid var(--chooser-surface-border);
+  background: var(--brand-surface-bg);
   font-size: 12px;
   line-height: 16px;
   color: var(--neutral-100);
@@ -619,8 +636,8 @@ function handleOpenArgsPage(_field: DetailField): void {
   outline: none;
 }
 .picker-chip.is-active {
-  background: var(--pick-bg-active);
-  border-color: var(--pick-stroke-active);
+  background: var(--chooser-surface-border);
+  border-color: var(--brand-surface-border-hover);
 }
 
 .picker-body {
@@ -628,6 +645,7 @@ function handleOpenArgsPage(_field: DetailField): void {
   min-height: 0;
   display: grid;
   grid-template-columns: 280px minmax(0, 1fr);
+  padding: 8px 0px 12px 0;
 }
 
 .picker-left {
@@ -636,15 +654,13 @@ function handleOpenArgsPage(_field: DetailField): void {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  padding-bottom: 24px;
-  border-right: 1px solid var(--pick-stroke);
+  border-right: 1px solid var(--chooser-surface-border);
 }
 .picker-list-section {
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  padding: 8px 0;
   overflow: hidden;
 }
 .picker-list-section-title {
@@ -652,9 +668,8 @@ function handleOpenArgsPage(_field: DetailField): void {
   font-size: 14px;
   font-weight: 500;
   line-height: 20px;
-  color: var(--neutral-100);
-  opacity: 0.75;
-  padding: 8px 18px 0;
+  color: rgba(194, 191, 185, 0.75);
+  padding: 8px 18px 0 16px;
 }
 .picker-list {
   flex: 1 1 auto;
@@ -662,12 +677,12 @@ function handleOpenArgsPage(_field: DetailField): void {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
+  gap: 4px;
 }
 .picker-list-empty {
-  padding: 12px 18px;
-  font-size: 12px;
-  color: var(--neutral-100);
-  opacity: 0.7;
+  padding: 8px 18px;
+  font-size: 14px;
+  color: var(--neutral-200);
 }
 
 .picker-new-install {
@@ -681,7 +696,7 @@ function handleOpenArgsPage(_field: DetailField): void {
   border-radius: 8px;
   width: fit-content;
   border: none;
-  background: var(--pick-bg-active);
+  background: var(--chooser-surface-border);
   color: var(--neutral-100);
   font-size: 12px;
   font-weight: 500;
@@ -691,7 +706,7 @@ function handleOpenArgsPage(_field: DetailField): void {
 }
 .picker-new-install:hover,
 .picker-new-install:focus-visible {
-  background: var(--pick-bg-hover);
+  background: var(--brand-surface-bg-hover);
   outline: none;
 }
 
@@ -719,11 +734,11 @@ function handleOpenArgsPage(_field: DetailField): void {
 }
 .picker-row:hover,
 .picker-row:focus-visible {
-  background: var(--pick-bg);
+  background: var(--chooser-surface-border);
   outline: none;
 }
 .picker-row.is-active {
-  background: var(--pick-bg-active);
+  background: var(--chooser-surface-border);
 }
 .picker-row-icon {
   display: flex;
@@ -731,7 +746,7 @@ function handleOpenArgsPage(_field: DetailField): void {
   justify-content: center;
   width: 24px;
   height: 24px;
-  color: var(--neutral-100);
+  color: var(--accent-label);
 }
 .picker-row-body {
   min-width: 0;
@@ -756,7 +771,7 @@ function handleOpenArgsPage(_field: DetailField): void {
 .picker-detail-wrap {
   min-width: 0;
   min-height: 0;
-  padding: 24px 20px;
+  padding: 0 8px;
   display: flex;
   overflow: hidden;
 }
@@ -774,7 +789,7 @@ function handleOpenArgsPage(_field: DetailField): void {
   gap: 12px;
 }
 .picker-detail-type-icon {
-  color: var(--neutral-100);
+  color: var(--accent-label);
   flex: 0 0 auto;
 }
 .picker-detail-text {
@@ -801,8 +816,8 @@ function handleOpenArgsPage(_field: DetailField): void {
   height: 24px;
   padding: 3px 11px;
   border-radius: 9999px;
-  background: var(--pick-bg);
-  border: 1px solid var(--pick-stroke);
+  background: var(--brand-surface-bg);
+  border: 1px solid var(--chooser-surface-border);
   font-size: 12px;
   line-height: 16px;
   color: var(--neutral-100);
@@ -817,19 +832,16 @@ function handleOpenArgsPage(_field: DetailField): void {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 8px;
   padding-top: 16px;
-  border-top: 1px solid var(--pick-stroke);
-  /* Native scrollbar styling — keeps the popup chrome consistent with
-   * the rest of the app's dark surfaces instead of dropping into the
-   * default light-themed gutter. */
+  border-top: 1px solid var(--chooser-surface-border);
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
 }
 .picker-detail-nav-item {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   padding: 0;
   border: none;
   background: transparent;
@@ -851,43 +863,120 @@ function handleOpenArgsPage(_field: DetailField): void {
   transform: rotate(90deg);
 }
 .picker-detail-accordion-body {
-  padding: 8px 0 4px 17px;
+  padding: 8px;
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
-/* Compact density inside the picker's previewer. The drawer keeps
-   the shared component's roomier defaults; only this scope overrides
-   them so a switched-on accordion fits more rows before scrolling. */
+/* Compact density inside the picker's Settings / Snapshots accordions.
+   The drawer keeps roomier defaults; one step smaller type + neutral-100
+   text so controls read as secondary chrome. */
 .picker-compact .picker-detail-accordion-body {
   padding-top: 6px;
   gap: 8px;
 }
+.picker-compact .picker-detail-empty-inline {
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--neutral-100);
+  opacity: 0.67;
+  padding: 4px 0;
+}
 .picker-compact :deep(.settings-v2-field) {
   gap: 4px;
 }
-.picker-compact :deep(.settings-v2-field-label) {
+.picker-compact :deep(.settings-v2-section-title),
+.picker-compact :deep(.settings-v2-item),
+.picker-compact :deep(.settings-v2-field-label),
+.picker-compact :deep(.settings-v2-field-readonly),
+.picker-compact :deep(.ui-input-control),
+.picker-compact :deep(.ui-select-trigger),
+.picker-compact :deep(.bt-switch),
+.picker-compact :deep(.env-var-add),
+.picker-compact :deep(.channel-picker-value) {
+  color: var(--neutral-100);
+}
+.picker-compact :deep(.settings-v2-section-title),
+.picker-compact :deep(.settings-v2-item),
+.picker-compact :deep(.settings-v2-field-label),
+.picker-compact :deep(.settings-v2-field-readonly),
+.picker-compact :deep(.ui-input-control),
+.picker-compact :deep(.ui-select-trigger),
+.picker-compact :deep(.bt-switch),
+.picker-compact :deep(.env-var-add) {
   font-size: 13px;
   line-height: 18px;
+}
+.picker-compact :deep(.settings-v2-section-desc),
+.picker-compact :deep(.channel-picker-desc),
+.picker-compact :deep(.channel-picker-label) {
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--neutral-100);
+  opacity: 0.67;
+}
+.picker-compact :deep(.channel-picker-value) {
+  font-size: 13px;
+  line-height: 19px;
+}
+.picker-compact :deep(.channel-picker-value.is-update-available) {
+  color: var(--info);
+}
+.picker-compact :deep(.ui-input-control::placeholder),
+.picker-compact :deep(.ui-select-trigger[data-placeholder] .ui-select-label) {
+  color: var(--neutral-100);
+  opacity: 0.67;
 }
 .picker-compact :deep(.picker-snapshots-list) {
   gap: 8px;
 }
+.picker-compact :deep(.picker-snapshots-save),
+.picker-compact :deep(.picker-snapshots-empty),
+.picker-compact :deep(.picker-snapshot-summary-line),
+.picker-compact :deep(.picker-snapshot-action) {
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--neutral-100);
+}
 .picker-compact :deep(.snapshot-row-card) {
   padding: 6px;
 }
-.picker-detail-empty-inline {
-  font-size: 12px;
+.picker-compact :deep(.snapshot-row-trigger),
+.picker-compact :deep(.snapshot-row-time) {
+  font-size: 11px;
+  line-height: 16px;
   color: var(--neutral-100);
-  opacity: 0.6;
-  padding: 4px 0;
+}
+.picker-compact :deep(.snapshot-row-trigger[data-tone='state']) {
+  color: var(--warning);
+}
+.picker-compact :deep(.snapshot-row-current) {
+  font-size: 10px;
+  line-height: 15px;
+}
+.picker-compact :deep(.snapshot-row-chip),
+.picker-compact :deep(.snapshot-row-meta) {
+  font-size: 10px;
+  line-height: 14px;
+  color: var(--neutral-100);
+  opacity: 0.67;
+}
+.picker-compact :deep(.args-field-ac-item) {
+  font-size: 11px;
+  color: var(--neutral-100);
+}
+.picker-compact :deep(.args-field-ac-meta),
+.picker-compact :deep(.args-field-ac-help),
+.picker-compact :deep(.args-field-ac-hint) {
+  font-size: 10px;
+  color: var(--neutral-100);
+  opacity: 0.67;
 }
 .picker-detail-cta {
   flex: 0 0 auto;
   display: flex;
   align-items: flex-end;
   gap: 8px;
-  min-height: 40px;
 }
 .picker-detail-open {
   flex: 1 1 auto;
@@ -897,7 +986,7 @@ function handleOpenArgsPage(_field: DetailField): void {
   border: 1px solid var(--accent-primary, #0b8ce9);
   background: var(--accent-primary, #0b8ce9);
   color: var(--text);
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 500;
   line-height: normal;
   cursor: pointer;
@@ -908,10 +997,7 @@ function handleOpenArgsPage(_field: DetailField): void {
   filter: brightness(1.08);
   outline: none;
 }
-/* BaseMenu's default trigger chrome already matches the dark pill
- * affordance the picker wants; this consumer-side rule only sets the
- * flex-layout role on the popover root so the More button doesn't
- * stretch alongside the primary Open CTA. */
+
 .picker-detail-more {
   flex: 0 0 auto;
 }

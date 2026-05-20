@@ -128,7 +128,7 @@ const pickerSnapshot = ref<PickerSnapshot>({
   runningInstallationIds: [],
   selectedInstallationId: null,
   selectedSettings: null,
-  selectedSnapshots: null,
+  selectedSnapshots: null
 })
 /** Owned at the app level — the listener stays registered for the
  *  popup's entire lifetime so the initial state push from main on a
@@ -356,16 +356,15 @@ onUnmounted(() => {
   box-sizing: border-box;
 }
 
-/* Instance picker surface chrome per Figma — deeper plum bg, 12px
- * radius, layered drop-shadow. Menu / downloads kinds keep the legacy
- * lightweight surface. */
+/* Instance picker surface chrome per Figma. Menu / downloads kinds keep
+ * the legacy lightweight surface. */
 .popup.is-picker {
   background: var(--neutral-800, #211927) !important;
+  border: 1px solid var(--chooser-surface-border);
   border-radius: 12px;
   box-shadow:
     0 20px 24px -4px rgba(10, 13, 18, 0.08),
     0 8px 8px -4px rgba(10, 13, 18, 0.03),
     0 3px 3px -1.5px rgba(10, 13, 18, 0.04);
 }
-
 </style>

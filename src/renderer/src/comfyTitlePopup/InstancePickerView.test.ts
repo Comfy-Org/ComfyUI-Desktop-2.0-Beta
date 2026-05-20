@@ -387,7 +387,21 @@ describe('comfyTitlePopup/InstancePickerView', () => {
       })
       const detail = wrapper.find('.picker-detail')
       expect(detail.text()).toContain('Alpha')
-      expect(detail.text()).toContain('0.20.2+57')
+      expect(detail.text()).toContain('v0.20.2+57')
+      expect(detail.text()).not.toContain('vv0.20.2+57')
+    })
+
+    it('does not double-prefix the version pill when version already starts with v', async () => {
+      const wrapper = await mountPicker({
+        installs: [
+          makeInstall({ id: 'a', name: 'Alpha', version: 'v0.21.1' }),
+        ],
+        activeInstallationId: 'a',
+        runningInstallationIds: [],
+      })
+      const detail = wrapper.find('.picker-detail')
+      expect(detail.text()).toContain('v0.21.1')
+      expect(detail.text()).not.toContain('vv0.21.1')
     })
 
     it('exposes the "Latest on GitHub" pill in the detail pane', async () => {
