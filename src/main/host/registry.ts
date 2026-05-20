@@ -177,6 +177,12 @@ export interface ComfyWindowEntry {
    */
   sourceCategory: string | null
   /**
+   * Chooser cold-start keeps the BrowserWindow hidden until the panel's
+   * first `did-finish-load` so the user doesn't stare at an empty body
+   * while panel.html boots. Cleared when the window is revealed.
+   */
+  coldStartPendingReveal: boolean
+  /**
    * Symmetric undo for `attachInstall()`. Set by attach (closes
    * over every event listener and map mutation it set up); called
    * by the close handler before view teardown AND by

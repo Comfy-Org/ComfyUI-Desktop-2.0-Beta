@@ -641,6 +641,7 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
     firstUseMode: 'none',
     titleBarText: opts.initialTitleBarText,
     sourceCategory: opts.initialSourceCategory,
+    coldStartPendingReveal: false,
     _installCleanup: null,
     // Bound below so it can self-reference the freshly-created entry.
     detachInstall: () => {},
@@ -900,14 +901,24 @@ export function openChooserHostWindow(): BrowserWindow {
   // install-less windows always need a panel, and creating it eagerly
   // avoids the empty body flash that would happen on the next
   // layoutViews tick.
+  // Hide until the panel's first load completes — panel.html can take
+  // ~1s on cold start (especially in dev). `panelView`'s
+  // `did-finish-load` handler reveals via `bringToFront`.
+  entry.coldStartPendingReveal = true
+  comfyWindow.hide()
+
   ensurePanelView(entry.windowKey, entry, 'chooser')
 
   entry.layoutViews()
-  // Explicitly bring the new chooser host to the foreground.
-  // Without this, the freshly created window can stay behind
-  // whatever app the user launched Desktop 2.0 from (Windows
-  // focus-theft prevention is the usual culprit). `bringToFront`
-  // uses the always-on-top toggle trick on Windows.
-  bringToFront(comfyWindow)
+
+  const revealKey = entry.windowKey
+  setTimeout(() => {
+    const live = comfyWindows.get(revealKey)
+    if (!live?.coldStartPendingReveal || live.window.isDestroyed()) return
+    live.coldStartPendingReveal = false
+    live.layoutViews()
+    bringToFront(live.window)
+  }, 10_000)
+
   return comfyWindow
 }

@@ -1,11 +1,15 @@
 import { WebContentsView, ipcMain } from 'electron'
 import path from 'path'
-import { TITLEBAR_HEIGHT } from '../lib/titleBarOverlay'
+import { resolveTheme } from '../lib/ipc/shared'
+import { get as getSetting } from '../settings'
+import { TITLEBAR_BG } from '../lib/theme'
+import { TITLEBAR_HEIGHT, titleBarOverlayForTheme } from '../lib/titleBarOverlay'
 import {
   _registerExtraBroadcastTarget,
   _unregisterExtraBroadcastTarget,
 } from '../lib/ipc/shared'
 import {
+  bringToFront,
   comfyWindows,
   computeBodyMode,
   findEntryByTitleBarSender,
@@ -48,9 +52,15 @@ export function ensurePanelView(
       // ComfyUI frontend's storage even though it runs in the same window.
     },
   })
-  // Transparent so settings-v2 can composite the live comfyView through;
-  // other modes paint `var(--bg)` in the renderer.
-  panelView.setBackgroundColor('#00000000')
+  // Chooser/lifecycle paint `var(--bg)` in the renderer; use an opaque
+  // launcher-surface colour during load so the host window doesn't read
+  // as empty black while panel.html boots. Overlay modes (settings-v2)
+  // need transparency to composite the live comfyView through.
+  const chooserPanelBg = (): string => {
+    const overlay = titleBarOverlayForTheme(resolveTheme() === 'dark')
+    return overlay.color ?? TITLEBAR_BG
+  }
+  panelView.setBackgroundColor(initialPanel === 'chooser' ? chooserPanelBg() : '#00000000')
   entry.window.contentView.addChildView(panelView)
   // Insert at zero size, behind the comfy view; layoutViews handles positioning.
   panelView.setBounds({ x: 0, y: TITLEBAR_HEIGHT + 1, width: 0, height: 0 })
@@ -62,6 +72,11 @@ export function ensurePanelView(
   panelView.webContents.once('did-finish-load', () => {
     const latest = comfyWindows.get(windowKey)
     if (!latest || latest.window.isDestroyed() || panelView.webContents.isDestroyed()) return
+    if (latest.coldStartPendingReveal) {
+      latest.coldStartPendingReveal = false
+      latest.layoutViews()
+      bringToFront(latest.window)
+    }
     const mode = computeBodyMode(latest)
     if (mode !== 'comfy') {
       panelView.webContents.send('panel-switch', { panel: mode, installationId: latest.installationId ?? '' })
@@ -73,14 +88,20 @@ export function ensurePanelView(
   // install-less host windows) to the panel renderer — the Map key is a
   // numeric windowKey that PanelApp.vue must not see.
   const panelInstallationId = entry.installationId ?? ''
+  const firstUseCompleted = getSetting('firstUseCompleted') === true
+  const panelQuery = {
+    installationId: panelInstallationId,
+    panel: initialPanel,
+    firstUseCompleted: String(firstUseCompleted),
+  }
   const isDev = !!process.env['ELECTRON_RENDERER_URL']
   const loadPromise = isDev
     ? panelView.webContents.loadURL(
-        `${(process.env['ELECTRON_RENDERER_URL'] as string).replace(/\/$/, '')}/panel.html?installationId=${encodeURIComponent(panelInstallationId)}&panel=${encodeURIComponent(initialPanel)}`,
+        `${(process.env['ELECTRON_RENDERER_URL'] as string).replace(/\/$/, '')}/panel.html?${new URLSearchParams(panelQuery).toString()}`,
       )
     : panelView.webContents.loadFile(
         path.join(__dirname, '../renderer/panel.html'),
-        { query: { installationId: panelInstallationId, panel: initialPanel } },
+        { query: panelQuery },
       )
   // Loads can reject if the window closes mid-load — swallow to avoid noisy
   // unhandledRejection forwarding from the main-process error handlers.
