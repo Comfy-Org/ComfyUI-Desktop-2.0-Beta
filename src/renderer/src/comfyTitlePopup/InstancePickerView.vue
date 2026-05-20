@@ -470,6 +470,7 @@ function handleOpenArgsPage(_field: DetailField): void {
                   <SettingsSectionList
                     v-if="selectedSettingsSections.length > 0"
                     :sections="selectedSettingsSections"
+                    :installation-id="selectedInstall?.id"
                     @update-field="handlePickerUpdateField"
                     @run-action="handlePickerRunAction"
                     @open-args-page="handleOpenArgsPage"

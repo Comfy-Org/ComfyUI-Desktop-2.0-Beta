@@ -418,6 +418,7 @@ onUnmounted(() => {
                 <SettingsSectionList
                   :sections="visibleSections"
                   :readonly="activeTab === 'status'"
+                  :installation-id="installation?.id"
                   @update-field="updateField"
                   @run-action="runAction"
                   @open-args-page="openArgsPage"

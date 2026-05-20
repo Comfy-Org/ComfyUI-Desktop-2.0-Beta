@@ -35,10 +35,16 @@ interface Props {
    *  (no input chrome). Equivalent to the drawer's
    *  `is-readonly-list` section modifier. */
   readonly?: boolean
+  /** Installation context for fields that need to hit install-scoped
+   *  IPCs (e.g. ArgsBuilderField loads the arg schema via
+   *  `getComfyArgs(id)`). Optional so call sites without a current
+   *  install degrade gracefully. */
+  installationId?: string
 }
 
 const props = withDefaults(defineProps<Props>(), {
   readonly: false,
+  installationId: undefined,
 })
 
 const emit = defineEmits<{
@@ -191,6 +197,7 @@ const visibleSections = computed(() => props.sections)
       <ArgsBuilderField
         v-else-if="field.editType === 'args-builder'"
         :field="field"
+        :installation-id="props.installationId"
         @open="emit('open-args-page', field)"
         @update="(f, v) => emit('update-field', f, v)"
       />
