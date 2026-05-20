@@ -12,6 +12,7 @@ import {
   X
 } from 'lucide-vue-next'
 import { fileLabel, statusKindClass, statusLine } from '../lib/downloadFormatters'
+import { revealInFolderLabel } from '../composables/usePlatform'
 
 const { t } = useI18n()
 
@@ -69,12 +70,14 @@ type DownloadAction =
 type PopupSettingsTab = 'comfy' | 'directories' | 'downloads' | 'global'
 
 interface PopupBridge {
+  platform?: string
   downloadsAction(action: DownloadAction): void
   openSettingsTab(tab: PopupSettingsTab): void
   openDownloadsModal(): void
 }
 
 const bridge = (window as unknown as { __comfyTitlePopup?: PopupBridge }).__comfyTitlePopup
+const revealLabel = computed(() => revealInFolderLabel(bridge?.platform))
 
 const props = defineProps<{ state: DownloadsState }>()
 
@@ -153,10 +156,10 @@ function subtitle(d: DownloadEntry): string {
     return `${t('downloadsPopup.pause')} · ${statusLine(d)}`
   }
   if (d.status === 'completed' && d.savePath) {
-    return t('downloadsPopup.showInFolder')
+    return revealLabel.value
   }
   if ((d.status === 'error' || d.status === 'cancelled') && d.savePath) {
-    return t('downloadsPopup.showInFolder')
+    return revealLabel.value
   }
   return statusLine(d)
 }

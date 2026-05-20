@@ -2,6 +2,7 @@ import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useSessionStore } from '../stores/sessionStore'
 import { useProgressStore } from '../stores/progressStore'
+import { revealInFolderLabel } from './usePlatform'
 import type { ContextMenuItem } from '../types/context-menu'
 import type { Installation } from '../types/ipc'
 
@@ -144,7 +145,7 @@ export function useInstallContextMenu(opts: {
     if (hasInstallPath(inst) && isLocalLikeInstall(inst)) {
       items.push({
         id: 'reveal-in-folder',
-        label: t('chooser.menuRevealInFolder'),
+        label: revealInFolderLabel(window.api?.platform),
         separator: items.length > 0,
       })
     }

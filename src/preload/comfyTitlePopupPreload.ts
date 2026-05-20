@@ -127,6 +127,10 @@ export type PopupDownloadAction =
 export type PopupSettingsTab = 'comfy' | 'directories' | 'downloads' | 'global'
 
 export interface ComfyTitlePopupBridge {
+  /** Host OS — set synchronously from `process.platform`. Used by popup
+   *  views for OS-conditional copy (e.g. "Show in Finder" vs
+   *  "Show in Explorer") without IPC. */
+  platform: NodeJS.Platform
   /** A menu item was clicked — main routes by id and hides the popup. */
   activate(id: string): void
   /** Close the popup without activating anything (Escape key, settings
@@ -289,6 +293,7 @@ function isInstancePickerSnapshot(value: unknown): value is PopupInstancePickerS
 }
 
 const bridge: ComfyTitlePopupBridge = {
+  platform: process.platform,
   activate: (id) => {
     ipcRenderer.send('comfy-titlepopup:item-activated', { id })
   },

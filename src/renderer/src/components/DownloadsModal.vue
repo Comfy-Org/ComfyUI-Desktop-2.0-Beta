@@ -19,9 +19,11 @@ import {
   statusKindClass,
   statusLine as formatStatusLine,
 } from '../lib/downloadFormatters'
+import { revealInFolderLabel } from '../composables/usePlatform'
 import type { ModelDownloadProgress, ModelDownloadStatus } from '../types/ipc'
 
 const { t } = useI18n()
+const revealLabel = computed(() => revealInFolderLabel(window.api?.platform))
 
 /**
  * "View All Downloads" — the brand-redesigned, full surface that the
@@ -259,7 +261,7 @@ function isTerminal(status: ModelDownloadStatus): boolean {
             @click="showInFolder(d.savePath)"
           >
             <FolderOpen :size="13" />
-            {{ t('downloadsPopup.showInFolder') }}
+            {{ revealLabel }}
           </button>
         </div>
       </li>

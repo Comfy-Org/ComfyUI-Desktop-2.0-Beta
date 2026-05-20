@@ -8,6 +8,7 @@ import BaseMenu, { type BaseMenuItem } from '../components/ui/BaseMenu.vue'
 import SettingsSectionList from '../views/comfyUISettings/SettingsSectionList.vue'
 import PickerSnapshotsList from './instancePicker/PickerSnapshotsList.vue'
 import { FILTER_CHIPS, useInstallList } from '../composables/useInstallList'
+import { revealInFolderLabel } from '../composables/usePlatform'
 import { installTypeMetaFor } from '../lib/installTypeIcon'
 import InstanceRow from './instancePicker/InstanceRow.vue'
 import type {
@@ -71,6 +72,7 @@ const { t } = useI18n()
 // shell (TitlePopupApp.vue), so we don't subscribe here too — that
 // would race with the shell's incoming-snapshot handling.
 interface PickerBridge {
+  platform?: string
   pickInstall: (installationId: string) => void
   openNewInstall: () => void
   restartInstall: (installationId: string) => void
@@ -182,7 +184,7 @@ const moreMenuItems = computed<BaseMenuItem[]>(() => {
   const requiresStoppedDisabled = isSelectedRunning.value
   const items: BaseMenuItem[] = []
   if (hasPath && isLocalLike) {
-    items.push({ id: 'reveal-in-folder', label: t('chooser.menuRevealInFolder') })
+    items.push({ id: 'reveal-in-folder', label: revealInFolderLabel(bridge?.platform) })
   }
   // Copy Installation — standalone source only (mirrors the
   // composable's gating). REQUIRES_STOPPED.

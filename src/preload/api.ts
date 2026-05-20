@@ -31,6 +31,8 @@ import type { ElectronApi, ResolvedTheme } from '../types/ipc'
 
 export function buildElectronApi(): ElectronApi {
   return {
+    platform: process.platform,
+
     // Sources / New Install
     getSources: () => ipcRenderer.invoke('get-sources'),
     getFieldOptions: (sourceId, fieldId, selections, context) =>

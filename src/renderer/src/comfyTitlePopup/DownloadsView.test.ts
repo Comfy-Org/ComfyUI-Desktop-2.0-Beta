@@ -26,13 +26,14 @@ interface MockBridgeState {
   openDownloadsModalCalls: number
 }
 
-function installMockBridge(): MockBridgeState {
+function installMockBridge(platform: string = 'darwin'): MockBridgeState {
   const state: MockBridgeState = {
     downloadsActions: [],
     openSettingsTabCalls: [],
     openDownloadsModalCalls: 0,
   }
   const bridge = {
+    platform,
     downloadsAction: (a: { action: string; url?: string; savePath?: string }) => {
       state.downloadsActions.push(a)
     },

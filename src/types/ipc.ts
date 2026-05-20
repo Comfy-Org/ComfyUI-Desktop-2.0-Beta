@@ -721,6 +721,11 @@ export interface AppUpdateDownloadProgress {
 
 // --- IPC API interface ---
 export interface ElectronApi {
+  /** Host OS — set synchronously by the preload from `process.platform`.
+   *  Renderer uses this for OS-conditional copy (e.g. "Show in Finder"
+   *  vs "Show in Explorer") without IPC. */
+  platform: NodeJS.Platform
+
   // Sources / New Install
   getSources(): Promise<Source[]>
   getFieldOptions(
