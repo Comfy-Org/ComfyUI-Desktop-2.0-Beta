@@ -256,6 +256,10 @@
 
 body {
   font-family: 'Inter', system-ui, sans-serif;
+  /* Tailwind `antialiased` — macOS WebKit/Chromium only; ignored on
+   * Windows/Linux where the engine handles ClearType/DirectWrite. */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   background: var(--bg);
   color: var(--text);
   user-select: none;
