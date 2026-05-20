@@ -20,6 +20,7 @@ export type PanelKey =
   | 'chooser'
   | 'settings'
   | 'settings-v2'
+  | 'downloads-v2'
   | 'new-install'
   | 'track'
   | 'load-snapshot'
@@ -31,6 +32,7 @@ const VALID_PANELS: ReadonlySet<PanelKey> = new Set([
   'chooser',
   'settings',
   'settings-v2',
+  'downloads-v2',
   'new-install',
   'track',
   'load-snapshot',

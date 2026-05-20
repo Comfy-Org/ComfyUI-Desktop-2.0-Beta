@@ -155,6 +155,12 @@ export interface ComfyTitlePopupBridge {
    *  on the host's panelView at the given tab. Used by the downloads
    *  view's "View all in Settings…" link. */
   openSettingsTab(tab: PopupSettingsTab): void
+  /** Close the popup and ask main to mount the standalone "View All
+   *  Downloads" modal on the host's panelView. The richer, brand-
+   *  redesigned companion to the popup tray — used when users want to
+   *  monitor large multi-GB downloads without the popup auto-dismissing
+   *  on focus loss. */
+  openDownloadsModal(): void
   /** Ask main to resize the popup view to the given natural content
    *  height (CSS px). Main clamps to a [min, max] band so the popup
    *  shrinks to fit empty / few-entry states and stays compact under
@@ -314,6 +320,9 @@ const bridge: ComfyTitlePopupBridge = {
   },
   openSettingsTab: (tab) => {
     ipcRenderer.send('comfy-titlepopup:open-settings-tab', { tab })
+  },
+  openDownloadsModal: () => {
+    ipcRenderer.send('comfy-titlepopup:open-downloads-modal')
   },
   requestSize: (height) => {
     if (!Number.isFinite(height) || height <= 0) return

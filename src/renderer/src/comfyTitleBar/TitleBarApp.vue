@@ -893,19 +893,30 @@ button.title-install-pill.is-open {
 }
 
 .title-downloads-badge {
+  /* Sized so the badge breathes around its three possible payloads:
+   *   - single digit (most common active state) — still reads as a clean
+   *     ~16px dot
+   *   - two-plus digits — `tabular-nums` keeps the column stable so the
+   *     pill doesn't shimmy as counts tick
+   *   - check + count (unseen-finished variant) — the 9px Check icon
+   *     plus a 1ch count text fit without overlapping the chevron's
+   *     left edge against the digit's right edge, which was the visible
+   *     squeeze before. `min-width` is the floor; flex grows past it. */
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 14px;
-  height: 14px;
-  padding: 0 4px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 5px;
   border-radius: 999px;
   background: var(--accent, #60a5fa);
   color: #fff;
   font-size: 10px;
   font-weight: 600;
   line-height: 1;
-  gap: 2px;
+  font-variant-numeric: tabular-nums;
+  gap: 3px;
+  white-space: nowrap;
 }
 
 .title-downloads-tray.has-active {
@@ -943,8 +954,15 @@ button.title-install-pill.is-open {
   background: rgba(22, 163, 74, 0.12);
 }
 .title-downloads-badge.is-unseen {
+  /* Colour stays as-is (brand-locked); drop the redundant padding
+   * override and let the base rule's `0 5px` apply uniformly. */
   background: #22c55e;
-  padding: 0 4px;
+}
+.title-downloads-badge.is-unseen svg {
+  /* Pull the Check glyph onto the same optical baseline as the count
+   * digit — without this the icon sits ~1px high vs the numeral. */
+  display: inline-block;
+  vertical-align: -1px;
 }
 .title-downloads-badge.is-unseen .title-downloads-badge-count {
   font-size: 10px;

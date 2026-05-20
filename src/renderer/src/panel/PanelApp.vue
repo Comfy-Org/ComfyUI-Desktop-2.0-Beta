@@ -5,6 +5,7 @@ import SettingsModal from '../views/SettingsModal.vue'
 import ComfyUISettingsPanel from '../views/ComfyUISettingsPanel.vue'
 import ProgressModal from '../views/ProgressModal.vue'
 import ModalDialog from '../components/ModalDialog.vue'
+import DownloadsModal from '../components/DownloadsModal.vue'
 import ComfyLifecycleView from './ComfyLifecycleView.vue'
 import ChooserView from '../views/ChooserView.vue'
 import NewInstallModal from '../views/NewInstallModal.vue'
@@ -235,12 +236,24 @@ function closeSettingsV2(): void {
   window.api.closeCurrentPanel()
 }
 
+// `'downloads-v2'` is the same overlay-mode trick the Settings drawer
+// uses — main brings the panel forward, the renderer mounts the
+// `DownloadsModal`, and dismiss routes back through `closeCurrentPanel`
+// so the body returns to comfy/lifecycle without leaving stale state.
+function closeDownloadsV2(): void {
+  window.api.closeCurrentPanel()
+}
+
 // Toggles transparency rules in the non-scoped <style> block so the
-// live ComfyUI canvas composites through while the drawer is open.
+// live ComfyUI canvas composites through while either overlay-mode
+// panel is open (settings drawer or downloads modal).
 watch(
   activePanel,
   (next) => {
-    document.body.classList.toggle('panel-overlay-mode', next === 'settings-v2')
+    document.body.classList.toggle(
+      'panel-overlay-mode',
+      next === 'settings-v2' || next === 'downloads-v2',
+    )
   },
   { immediate: true },
 )
@@ -503,6 +516,18 @@ onUnmounted(() => {
       @close="closeSettingsV2"
       @show-progress="handleShowProgress"
       @navigate-list="handleNavigateList"
+    />
+
+    <!-- Brand-redesigned "View All Downloads" surface. Mounts only
+         when main flips us into `'downloads-v2'` mode (from the title-
+         bar downloads popup's footer link). `v-if` mirrors the rest of
+         this file's overlay convention — keeps the store init + body
+         scroll lock out of every PanelApp mount that doesn't open the
+         modal. Dismiss routes back through `closeCurrentPanel()`. -->
+    <DownloadsModal
+      v-if="activePanel === 'downloads-v2'"
+      open
+      @close="closeDownloadsV2"
     />
 
     <ModalDialog />

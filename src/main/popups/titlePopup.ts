@@ -628,6 +628,17 @@ function ensureTitlePopup(parent: BrowserWindow): TitlePopupEntry {
   }
   titlePopupsByParent.set(view.parentWindowId, entry)
   titlePopupsByWebContents.set(view.popupWebContentsId, entry)
+
+  // Re-fit the popup whenever the host window resizes — without this
+  // the popup keeps its original bounds and spills past the new right
+  // / bottom edges when the user drags the window smaller. Listener
+  // lives on the parent (one per popup-entry) and is implicitly torn
+  // down with the BrowserWindow itself; the `refitPopupForParent`
+  // helper no-ops when the popup is hidden so an idle parent resize
+  // costs effectively nothing.
+  const onParentResize = (): void => refitPopupForParent(entry)
+  parent.on('resize', onParentResize)
+
   return entry
 }
 
@@ -724,7 +735,7 @@ function showTitlePopupNow(entry: TitlePopupEntry): void {
  *  entries) and asks for it via `requestSize`, so we don't impose a
  *  pixel floor — the empty placeholder's own padding already provides
  *  enough visual weight that the popup never reads as a sliver. */
-const DOWNLOADS_POPUP_WIDTH = 664
+const DOWNLOADS_POPUP_WIDTH = 405
 const DOWNLOADS_POPUP_MAX_HEIGHT_PX = 396
 const DOWNLOADS_POPUP_MAX_HEIGHT_RATIO = 0.6
 
@@ -753,6 +764,63 @@ function clampPopupX(x: number, width: number, parent: BrowserWindow): number {
   const contentWidth = parent.getContentBounds().width
   const maxX = Math.max(0, contentWidth - width - POPUP_EDGE_GUTTER)
   return Math.min(x, maxX)
+}
+
+/** Re-fit an open popup to a shrunken parent. Triggered by the
+ *  parent window's `resize` event while the popup is visible — the
+ *  initial open path clamps X / height once, but if the user drags the
+ *  window smaller AFTER the popup opens the bounds go stale and the
+ *  popup's right + bottom edges spill past the new window edge.
+ *
+ *  We re-clamp X (same `clampPopupX` rule the open path uses) and
+ *  re-clamp height to the kind's ceiling so a downloads / picker popup
+ *  full of entries doesn't keep its tall ceiling when the window has
+ *  no room for it. The menu kind is sized deterministically from its
+ *  item list and doesn't need height refits — only X.
+ *
+ *  Y is left at the current value because every popup anchors directly
+ *  under the title bar; resizing doesn't move the title bar.
+ *
+ *  No-op when the popup isn't currently open — the next open will
+ *  re-clamp from scratch. */
+function refitPopupForParent(entry: TitlePopupEntry): void {
+  if (!entry.view.isOpen) return
+  if (entry.view.popup.webContents.isDestroyed()) return
+  if (entry.view.parentWindow.isDestroyed()) return
+
+  const cur = entry.view.popup.getBounds()
+  const parent = entry.view.parentWindow
+  const contentHeight = parent.getContentBounds().height
+
+  let height = cur.height
+  if (entry.kind === 'downloads') {
+    const ceiling = Math.min(
+      DOWNLOADS_POPUP_MAX_HEIGHT_PX,
+      Math.round(contentHeight * DOWNLOADS_POPUP_MAX_HEIGHT_RATIO),
+    )
+    height = Math.max(1, Math.min(cur.height, ceiling))
+  } else if (entry.kind === 'instance-picker') {
+    const ceiling = Math.min(
+      INSTANCE_PICKER_POPUP_MAX_HEIGHT_PX,
+      Math.round(contentHeight * INSTANCE_PICKER_POPUP_MAX_HEIGHT_RATIO),
+    )
+    height = Math.max(1, Math.min(cur.height, ceiling))
+  }
+
+  // Re-anchor the instance picker on the new window centre so it doesn't
+  // drift off-axis after a resize. Other kinds anchor at their trigger
+  // button — that's already in title-bar-local coords (which don't move
+  // on resize) so a fresh `clampPopupX` of the existing X is sufficient.
+  let x: number
+  if (entry.kind === 'instance-picker') {
+    const contentWidth = parent.getContentBounds().width
+    x = Math.max(0, Math.round((contentWidth - cur.width) / 2))
+  } else {
+    x = clampPopupX(cur.x, cur.width, parent)
+  }
+
+  if (x === cur.x && height === cur.height) return
+  entry.view.popup.setBounds({ x, y: cur.y, width: cur.width, height })
 }
 
 type OpenTitlePopupOpts = {
@@ -1277,6 +1345,23 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
       })
     },
   )
+
+  // Popup → host deep-link to the standalone "View All Downloads"
+  // modal. Flips the host into the `'downloads-v2'` overlay panel mode,
+  // which `layoutViews` recognises as a transparent panel-forward state
+  // (sibling to `'settings-v2'`). The renderer mounts `DownloadsModal`
+  // by watching `activePanel === 'downloads-v2'`. No deep-link IPC
+  // needed — the mode swap IS the open signal — and dismiss routes
+  // through the existing `closeCurrentPanel()` which returns the body
+  // to `'comfy'`.
+  ipcMain.on('comfy-titlepopup:open-downloads-modal', (event) => {
+    const popupEntry = titlePopupsByWebContents.get(event.sender.id)
+    if (!popupEntry) return
+    const parentEntry = comfyWindows.get(popupEntry.parentEntryId)
+    if (!parentEntry) return
+    hideTitlePopup(popupEntry, { releaseFocusToParent: false })
+    bindings.setActivePanel(popupEntry.parentEntryId, 'downloads-v2')
+  })
 
   // Title-bar downloads-tray click. Opens the title-bar dropdown popup
   // in `'downloads'` mode anchored under the tray button. The popup

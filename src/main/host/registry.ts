@@ -12,6 +12,7 @@ export type ComfyPanelKey =
   | 'comfy'
   | 'settings'
   | 'settings-v2'
+  | 'downloads-v2'
   | 'new-install'
   | 'track'
   | 'load-snapshot'
@@ -21,6 +22,7 @@ export const VALID_PANELS: ReadonlySet<ComfyPanelKey> = new Set([
   'comfy',
   'settings',
   'settings-v2',
+  'downloads-v2',
   'new-install',
   'track',
   'load-snapshot',
@@ -48,6 +50,7 @@ export type BodyMode =
   | 'comfy-lifecycle'
   | 'settings'
   | 'settings-v2'
+  | 'downloads-v2'
   | 'chooser'
   | 'new-install'
   | 'track'
