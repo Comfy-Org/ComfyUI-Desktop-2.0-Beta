@@ -106,6 +106,17 @@ export const en = {
     filterCloud: 'Cloud',
     filterRemote: 'Remote',
     newInstall: 'New Install',
+    moreActions: 'More actions',
+    menuRevealInFolder: 'Open Folder',
+    menuDelete: 'Delete…',
+  },
+  /** Picker-only install-action menu labels. The corresponding keys
+   *  live under `actions.*` in `locales/en.json` for the panel
+   *  renderer; this picker bundle has no main-side locale merge, so
+   *  the keys are mirrored here. */
+  actions: {
+    copyInstallation: 'Copy Install',
+    untrack: 'Untrack',
   },
   /** Cloud-card copy used by ChooserView's empty cloud CTA AND the
    *  instance-picker popover's empty cloud row. Mirrored from the
@@ -130,10 +141,53 @@ export const en = {
     newInstance: 'New Instance',
     latestOnGithub: 'Latest on GitHub',
     open: 'Open',
+    restart: 'Restart',
+    restartConfirmTitle: 'Restart this instance?',
+    restartConfirmDetail:
+      'Restarting will stop the running session. Any unsaved work in the workflow will be lost.',
+    restartConfirmAction: 'Restart',
     more: 'More',
     settings: 'Settings',
     snapshots: 'Snapshots',
     empty: 'Select an instance',
+  },
+  /** Snapshot strings consumed by `SnapshotRow` + `formatRelative` +
+   *  `triggerLabel` + `changeSummary` in the popup process. Mirrors
+   *  the corresponding keys in `locales/en.json` (the panel
+   *  process's catalog merged via `loadLocale()`); the popup process
+   *  can only see THIS catalog so missing keys here render as raw
+   *  dotted strings ("snapshots.timeHoursAgo" appearing in the UI). */
+  snapshots: {
+    saveSnapshot: 'Save snapshot',
+    restore: 'Restore',
+    delete: 'Delete',
+    empty: 'No snapshots yet. Snapshots are captured automatically when ComfyUI starts.',
+    current: 'Current',
+    deleteConfirm: 'Delete this snapshot?',
+    restoreConfirm:
+      'Are you sure you want to restore this snapshot? Your current install state will be replaced.',
+    // Trigger labels — `triggerLabel(trigger, t)` resolves these.
+    triggerBoot: 'Boot',
+    triggerRestart: 'Manager',
+    triggerManual: 'Manual',
+    triggerPreUpdate: 'Update',
+    triggerPostUpdate: 'Updated',
+    triggerPostRestore: 'Restored',
+    // Relative-time strings — `formatRelative(iso, t)` resolves these.
+    timeJustNow: 'just now',
+    timeMinutesAgo: '{count}m ago',
+    timeHoursAgo: '{count}h ago',
+    timeDaysAgo: '{count}d ago',
+    // Row meta + chips.
+    nodesCount: '{count} nodes',
+    packagesCount: '{count} packages',
+    nodeChanges: '{count} node changes',
+    pipChanges: '{count} pkg changes',
+    comfyuiUpdated: 'ComfyUI updated',
+    channelChanged: 'Channel changed',
+    added: 'Added',
+    removed: 'Removed',
+    changed: 'Changed',
   },
 }
 

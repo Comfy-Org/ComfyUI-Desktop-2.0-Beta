@@ -323,6 +323,16 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
   })
   comfyWindow.setMenuBarVisibility(false)
 
+  // Pre-warm the title-bar dropdown popup (file menu / downloads tray /
+  // instance picker) as early as possible — fired here rather than from
+  // the `title-bar-ready` handler so the popup's WebContentsView + HTML/JS
+  // bundle starts loading in parallel with the title-bar renderer rather
+  // than after it. Cold-start cost is ~150-200ms; the user can click the
+  // pill before the title-bar even finishes painting, so every millisecond
+  // of head-start matters. `ensureTitlePopup` is idempotent so any later
+  // accidental call from the same parent is a no-op.
+  prewarmTitlePopup(comfyWindow)
+
   // Title bar view — bounded to TITLEBAR_HEIGHT, isolated from the body.
   // Uses the comfyTitleBarPreload bridge regardless of mode (panel switch
   // buttons, theme updates, downloads tray, etc.).
@@ -491,13 +501,12 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
         titleBarView.webContents.send('comfy-titlebar:install-update-changed', state)
       })
     }
-    // Pre-warm the title-menu popup so the user's first File / Install
-    // click doesn't pay the BrowserWindow construction + HTML/JS load
-    // cost (~100ms).
-    prewarmTitlePopup(comfyWindow)
     // Pre-warm the system-modal popup so the user's first app-update
     // pill click (or any other shell-modal trigger) doesn't pay the
     // load cost — the modal needs to feel as instant as the pill click.
+    // (Title-popup prewarm runs earlier, right after BrowserWindow
+    // construction, so the popup webContents has the longest possible
+    // head start before the user's first click.)
     ensureSystemModal(comfyWindow)
   }
   ipcMain.on('comfy-window:title-bar-ready', onTitleBarReadyHandler)

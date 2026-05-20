@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import MenuView from './MenuView.vue'
 import DownloadsView from './DownloadsView.vue'
 import InstancePickerView from './InstancePickerView.vue'
+import type { DetailSection, SnapshotListData } from '../types/ipc'
 
 /**
  * Title-bar dropdown popup shell.
@@ -65,6 +66,15 @@ interface PickerSnapshot {
   installs: PickerInstall[]
   activeInstallationId: string | null
   runningInstallationIds: string[]
+  /** Per-row Settings + Snapshots payload for the picker's right
+   *  pane. Scoped to the picker's currently-selected install (changes
+   *  every time the user clicks a different row; popup tells main via
+   *  `setPickerSelectedInstall` and main rebroadcasts). Null fields
+   *  mean "no selection / no install path / source failure" — the
+   *  picker renders the empty state in that case. */
+  selectedInstallationId: string | null
+  selectedSettings: DetailSection[] | null
+  selectedSnapshots: SnapshotListData | null
 }
 
 type PopupConfig =
@@ -96,6 +106,10 @@ interface Bridge {
    *  `'instance-picker'` kinds — menu kind is sized deterministically
    *  from its item list. */
   requestSize(height: number): void
+  /** Per-open notification — fires on every show including the fast
+   *  path that skips `set-config`. Used to bump `openSeq` so popup
+   *  views can reset transient per-open state. */
+  onWillShow(cb: (info: { kind: 'menu' | 'downloads' | 'instance-picker' }) => void): () => void
 }
 
 const bridge = (window as unknown as { __comfyTitlePopup?: Bridge }).__comfyTitlePopup
@@ -112,14 +126,10 @@ const pickerSnapshot = ref<PickerSnapshot>({
   installs: [],
   activeInstallationId: null,
   runningInstallationIds: [],
+  selectedInstallationId: null,
+  selectedSettings: null,
+  selectedSnapshots: null,
 })
-/** Bumped on every `set-config` so the `.popup` root is keyed and Vue
- *  recreates the element on each open, guaranteeing the CSS open
- *  animation replays. The WebContentsView is reused across opens, so
- *  without the key the animation would only run on the very first
- *  mount. */
-const openSeq = ref(0)
-
 /** Owned at the app level — the listener stays registered for the
  *  popup's entire lifetime so the initial state push from main on a
  *  fresh `'downloads'` open lands even though `<DownloadsView>` is not
@@ -155,6 +165,7 @@ function handleKeydown(event: KeyboardEvent): void {
 let unsubConfig: (() => void) | undefined
 let unsubDownloads: (() => void) | undefined
 let unsubInstancePicker: (() => void) | undefined
+let unsubWillShow: (() => void) | undefined
 
 /** Sequence counter — only the rAF closure for the most recently
  *  applied config gets to fire `notifyRendered`. Without this guard,
@@ -220,7 +231,11 @@ onMounted(() => {
     }
     themeBg.value = cfg.theme.bg
     themeText.value = cfg.theme.text
-    openSeq.value++
+    // Do NOT bump openSeq here. Main always sends `will-show` right
+    // after `set-config` on every open, and that handler bumps the
+    // seq. Bumping here too caused a double remount → the popup
+    // animated in, the keyed root tore down, then animated in again
+    // → visible flicker on the first frame of every open.
     const seq = ++renderSeq
     // Ack after Vue has flushed the DOM update *and* the browser has
     // had a chance to paint it. Main keeps the popup view hidden until
@@ -243,6 +258,18 @@ onMounted(() => {
   })
   unsubInstancePicker = bridge?.onInstancePickerSnapshot((snapshot) => {
     pickerSnapshot.value = snapshot
+  })
+  // `onWillShow` fires on every open (including the fast-path reopen
+  // that doesn't re-send `set-config`). We deliberately do NOT bump
+  // a key to re-mount the root here — re-mounting after the
+  // WebContentsView is already visible was the visible flicker on
+  // 2nd+ opens. The picker view's local state (selectedId, accordion
+  // open flags) intentionally persists across reopens of the same
+  // host; transient resets that used to depend on the remount now
+  // ride on `props.snapshot.activeInstallationId` changes via the
+  // existing prop watcher in `InstancePickerView.vue`.
+  unsubWillShow = bridge?.onWillShow(() => {
+    /* no-op for now — kept registered for forward compatibility */
   })
   window.addEventListener('keydown', handleKeydown)
   // Tell main the renderer is mounted and listening — main flushes any
@@ -282,13 +309,22 @@ onUnmounted(() => {
   unsubConfig?.()
   unsubDownloads?.()
   unsubInstancePicker?.()
+  unsubWillShow?.()
   window.removeEventListener('keydown', handleKeydown)
 })
 </script>
 
 <template>
+  <!-- No `:key` on the root.
+       Keying the root by `openSeq` unmounts + remounts the popup on
+       every reopen so the CSS open animation replays — but for a
+       reused WebContentsView that unmount happens AFTER `showOnTop()`
+       has made the view visible, so the user sees the popup appear,
+       its DOM tear down (looks like a close), and the freshly-mounted
+       DOM animate back in. That was the visible "open → close → open"
+       flicker on the 2nd+ click. VS Code / Cursor dropdowns just
+       appear; we do the same — no key, no animation. -->
   <div
-    :key="openSeq"
     class="popup"
     :class="{ 'is-light': isLight, 'is-picker': kind === 'instance-picker' }"
     :style="{ background: themeBg, color: themeText }"
@@ -318,8 +354,6 @@ onUnmounted(() => {
   height: 100%;
   width: 100%;
   box-sizing: border-box;
-  transform-origin: top center;
-  animation: title-popup-spring-in 240ms cubic-bezier(0.32, 0.72, 0, 1);
 }
 
 /* Instance picker surface chrome per Figma — deeper plum bg, 12px
@@ -334,20 +368,4 @@ onUnmounted(() => {
     0 3px 3px -1.5px rgba(10, 13, 18, 0.04);
 }
 
-@keyframes title-popup-spring-in {
-  from {
-    opacity: 0;
-    transform: scale(0.96) translateY(-8px);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1) translateY(0);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .popup {
-    animation: none;
-  }
-}
 </style>

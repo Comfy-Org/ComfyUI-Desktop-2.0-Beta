@@ -1,7 +1,7 @@
 /**
- * Lifecycle E2E: New Install (CPU standalone, older release) → tile shows up
- * in chooser → Launch → ComfyUI loads → Stop. The Update flow is exercised
- * only when the upstream R2 backend exposes ≥2 release tags.
+ * Lifecycle E2E: New Install (recommended standalone variant for the host
+ * GPU, latest stable release) → ComfyUI auto-launches via brand chrome →
+ * dashboard return → relaunch → stop.
  *
  * Downloads ~500 MB of standalone payload. Tagged @lifecycle and runs under
  * the dedicated Playwright project (10-minute per-test timeout).
@@ -10,6 +10,24 @@
  *   pnpm run build && pnpm run test:e2e:windows -- --project=lifecycle
  *
  * Requirements: network access, ~2 GB free disk.
+ *
+ * Redesign notes (vs. the pre-2.0-Beta lifecycle test):
+ * - The new-install takeover is a single Configure screen wrapped in
+ *   `BrandTakeoverLayout` (root: `.brand-takeover-root`). No multi-step
+ *   wizard, no Next button.
+ * - Standalone is pre-selected on open. `loadFieldOptions('release')`
+ *   picks the recommended option ("Latest Stable") and recursively
+ *   loads `loadFieldOptions('variant')` which picks its own recommended
+ *   option (CPU on a no-GPU CI runner, NVIDIA on an NVIDIA box, etc.).
+ *   So by the time `saveDisabled` flips false, the form is fully
+ *   pre-filled — no explicit release / variant picking needed.
+ * - The primary CTA is `.brand-primary.config-continue` labelled
+ *   "Continue" (formerly `button.primary` "Add Install").
+ * - `handleSave` emits `show-progress` with `autoLaunchOnFinish: true`,
+ *   so the install op chains directly into a launch op under the same
+ *   brand-takeover chrome. There is no intermediate "Done" button and
+ *   no need to click the chooser tile to launch — the chooser host
+ *   transforms in place into the install host (issue #449 path).
  */
 
 import { readFileSync } from 'node:fs'
@@ -26,12 +44,6 @@ import { returnFirstInstallHostToDashboard } from './support/devHooks'
 import { waitForWebContents } from './support/cdpPages'
 
 let ctx: AppContext
-
-/** Release tag captured during install; verified again after launch + update. */
-let installedReleaseTag = ''
-
-/** False when only one release tag is published (skip update tests). */
-let hasOlderRelease = false
 
 test.describe.configure({ mode: 'serial' })
 
@@ -53,20 +65,6 @@ test.afterAll(async () => {
   await ctx.cleanup()
 })
 
-/** Wait for any progress flow to reach a terminal banner. */
-async function waitForProgressDone(timeoutMs = 480_000): Promise<'success' | 'error'> {
-  await expect.poll(
-    async () => {
-      if (await ctx.panel.exists('.progress-banner-success')) return 'success'
-      if (await ctx.panel.exists('.progress-banner-error')) return 'error'
-      return null
-    },
-    { timeout: timeoutMs, intervals: [500, 1000, 2000] },
-  ).not.toBeNull()
-  if (await ctx.panel.exists('.progress-banner-success')) return 'success'
-  return 'error'
-}
-
 /** True iff a webContents with a localhost URL exists and is loaded. */
 async function comfyFrontendIsLoaded(): Promise<boolean> {
   return ctx.app.evaluate(({ webContents }) =>
@@ -74,34 +72,6 @@ async function comfyFrontendIsLoaded(): Promise<boolean> {
       /^http:\/\/(127\.0\.0\.1|localhost):/.test(wc.getURL()) && !wc.isLoading(),
     ),
   )
-}
-
-/** True iff a `button.primary` with matching text exists and is not disabled. */
-function isPrimaryButtonEnabled(textSubstring: string): Promise<boolean> {
-  return ctx.app.evaluate(async ({ webContents }, payload) => {
-    const wc = webContents.getAllWebContents().find((w) => w.getURL().includes('panel.html'))
-    if (!wc) return false
-    return wc.executeJavaScript(`(() => {
-      const needle = ${JSON.stringify(payload.needle)}
-      const btns = Array.from(document.querySelectorAll('button.primary'))
-      const m = btns.find(b => (b.textContent || '').toLowerCase().includes(needle))
-      return !!m && !m.disabled
-    })()`) as Promise<boolean>
-  }, { needle: textSubstring.toLowerCase() }) as Promise<boolean>
-}
-
-/** Read the current options of the #sf-release dropdown via the panel webContents. */
-async function readReleaseOptions(): Promise<{ count: number; options: { value: string; text: string }[] }> {
-  return ctx.app.evaluate(({ webContents }) => {
-    const wc = webContents.getAllWebContents().find((w) => w.getURL().includes('panel.html'))
-    if (!wc) throw new Error('panel webContents missing')
-    return wc.executeJavaScript(`(() => {
-      const sel = document.querySelector('#sf-release')
-      if (!sel) return { count: 0, options: [] }
-      const opts = Array.from(sel.options).map(o => ({ value: o.value, text: o.textContent || '' }))
-      return { count: opts.length, options: opts }
-    })()`) as Promise<{ count: number; options: { value: string; text: string }[] }>
-  })
 }
 
 // ---------------------------------------------------------------------------
@@ -113,121 +83,58 @@ test('chooser shows New Install tile on cold start @lifecycle', async () => {
   expect(await ctx.panel.exists('.chooser-tile-new')).toBe(true)
 })
 
-test('opens New Install takeover and selects standalone source @lifecycle', async () => {
+test('opens New Install takeover with form pre-filled @lifecycle', async () => {
   await clickNewInstallTile(ctx.panel)
   await expectTakeoverOpen(ctx.panel)
 
-  // Wait for the source list to load.
-  await expect.poll(() => ctx.panel.count('.wizard-loading'), { timeout: 30_000 }).toBe(0)
-
-  // Step 1 may auto-advance on supported hardware; if a hero source card is
-  // visible, select it and click Next.
-  if (await ctx.panel.isVisible('.source-card-hero')) {
-    expect(await ctx.panel.click('.source-card-hero')).toBe(true)
-    await ctx.panel.waitFor(
-      () => isPrimaryButtonEnabled('Next'),
-      { timeout: 10_000, message: 'Next button never became enabled' },
-    )
-    expect(await ctx.panel.clickByText('button.primary', 'Next')).toBe(true)
-  }
-
-  await ctx.panel.waitForSelector('#sf-release', { timeout: 30_000 })
-
-  // Wait for the dropdown's options to populate (release fetch + GPU detection
-  // both have to settle before the select is enabled with real values).
-  await expect.poll(
-    () => readReleaseOptions().then((info) => info.count),
-    { timeout: 60_000, intervals: [500, 1000, 2000], message: 'release dropdown never populated' },
-  ).toBeGreaterThanOrEqual(2)
-})
-
-test('selects an installable older release @lifecycle', async () => {
-  const optionInfo = await readReleaseOptions()
-
-  expect(optionInfo.count).toBeGreaterThanOrEqual(2)
-  hasOlderRelease = optionInfo.count >= 3
-  const targetIndex = hasOlderRelease ? 2 : 1
-  const target = optionInfo.options[targetIndex]
-  expect(target, `release option at index ${targetIndex}`).toBeDefined()
-  installedReleaseTag = target!.text.match(/(v[\d.]+\S*)/)?.[1] ?? ''
-  expect(installedReleaseTag).toBeTruthy()
-
-  // Set the select via JS (matching the dropdown implementation).
-  await ctx.app.evaluate(async ({ webContents }, payload) => {
-    const wc = webContents.getAllWebContents().find((w) => w.getURL().includes('panel.html'))
-    if (!wc) throw new Error('panel webContents missing')
-    return wc.executeJavaScript(`(() => {
-      const sel = document.querySelector('#sf-release')
-      if (!sel) return false
-      sel.value = ${JSON.stringify(payload.value)}
-      sel.dispatchEvent(new Event('input', { bubbles: true }))
-      sel.dispatchEvent(new Event('change', { bubbles: true }))
-      return true
-    })()`)
-  }, { value: target!.value })
-
-  await ctx.panel.waitForSelector('.variant-card', { timeout: 30_000 })
-})
-
-test('selects CPU variant and proceeds to name step @lifecycle', async () => {
-  expect(await ctx.panel.clickByText('.variant-card', 'CPU')).toBe(true)
-  // Ensure a Next button is enabled, then click it.
+  // Standalone is pre-selected on open. The release + variant fields
+  // live inside the Advanced disclosure but are populated eagerly via
+  // `loadFieldOptions('release')` → recursive `loadFieldOptions('variant')`.
+  // `.brand-primary.config-continue` is bound to `:disabled="!canContinue"`,
+  // so once it goes enabled the form is fully pre-filled (release picked,
+  // variant picked, no path issues). That's the single signal we need
+  // before clicking Continue.
   await ctx.panel.waitFor(
-    async () => (await ctx.panel.exists('button.primary')) && !!(await ctx.panel.textOf('button.primary')),
-    { timeout: 5_000 },
+    async () => ctx.app.evaluate(({ webContents }) => {
+      const wc = webContents.getAllWebContents().find((w) => w.getURL().includes('panel.html'))
+      if (!wc) return false
+      return wc.executeJavaScript(`(() => {
+        const btn = document.querySelector('.brand-primary.config-continue')
+        return !!btn && !btn.disabled
+      })()`) as Promise<boolean>
+    }),
+    { timeout: 60_000, message: 'Continue button never became enabled (form did not pre-fill)' },
   )
-  expect(await ctx.panel.clickByText('button.primary', 'Next')).toBe(true)
-  await ctx.panel.waitForSelector('#inst-name', { timeout: 5_000 })
 })
 
-test('completes install and tile appears in chooser @lifecycle', async () => {
-  expect(await ctx.panel.clickByText('button.primary', 'Add Install')).toBe(true)
-  await ctx.panel.waitForVisible('.view-modal-content', { timeout: 10_000 })
+test('completes install (auto-launches via brand chrome) @lifecycle', async () => {
+  // No explicit variant / release / name picking — trust the
+  // recommended defaults the modal has already filled in. On a no-GPU
+  // CI runner that's CPU; on a GPU box it's the matching GPU variant.
+  // Either is fine for the lifecycle smoke test.
+  expect(await ctx.panel.clickByText('.brand-primary', 'Continue')).toBe(true)
 
-  const result = await waitForProgressDone()
-  expect(result).toBe('success')
-
-  // Dismiss progress.
-  if (!(await ctx.panel.clickByText('button.primary', 'Done'))) {
-    await ctx.panel.pressKey('Escape')
-  }
-
-  // The newly-installed install should now show as a chooser tile. Match
-  // against real install tiles only (the New Install / Cloud tiles use
-  // dedicated classes and their descriptions contain "ComfyUI" too).
-  await ctx.panel.waitFor(
-    async () => {
-      const texts = await ctx.panel.allText(
-        '.chooser-tile:not(.chooser-tile-new):not(.chooser-tile-cloud) .chooser-tile-name',
-      )
-      return texts.some((t) => /ComfyUI/i.test(t))
-    },
-    { timeout: 15_000, message: 'newly installed ComfyUI tile not found' },
-  )
-
-  // Sanity: the captured release tag is non-empty so downstream tests can
-  // verify it was actually installed.
-  expect(installedReleaseTag).toBeTruthy()
+  // Install op mounts the brand-progress takeover, then auto-launches
+  // into a launch op under the same chrome. The terminal signal is
+  // the comfy webContents loading a localhost URL — covers both the
+  // install completing and the server coming up.
+  await ctx.panel.waitForVisible('.brand-progress', { timeout: 10_000 })
+  await expect.poll(comfyFrontendIsLoaded, { timeout: 480_000, intervals: [1_000, 2_000] }).toBe(true)
 })
 
 // ---------------------------------------------------------------------------
 // Launch & verify split-view + dark background
 // ---------------------------------------------------------------------------
 
-test('launches ComfyUI from chooser tile @lifecycle', async () => {
-  // In-place attach guard: the chooser-host BrowserWindow is supposed
-  // to flip into the install's host without spawning a fresh one. Snap
-  // the live BrowserWindow ids and the count BEFORE the click so the
-  // post-launch assertion can prove the same window survived.
-  const before = await ctx.app.evaluate(({ BrowserWindow }) => {
-    const wins = BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed())
-    return { count: wins.length, ids: wins.map((w) => w.id) }
-  })
-
-  await clickInstallTile(ctx.panel, 'ComfyUI')
-  await expect.poll(comfyFrontendIsLoaded, { timeout: 180_000, intervals: [1_000] }).toBe(true)
-
-  const after = await ctx.app.evaluate(({ BrowserWindow, WebContentsView }) => {
+test('auto-launch landed on a single host window (in-place attach) @lifecycle', async () => {
+  // In-place attach guard: the redesigned install flow has
+  // `autoLaunchOnFinish: true`, so the chooser host transforms into
+  // the install host without spawning a fresh BrowserWindow. The
+  // previous test already polled `comfyFrontendIsLoaded` to true — at
+  // this point exactly one window should exist and it should host the
+  // comfy webContents. A close+open swap path would leak windows or
+  // leave the original chooser host alive alongside a new install host.
+  const state = await ctx.app.evaluate(({ BrowserWindow, WebContentsView }) => {
     const wins = BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed())
     const comfyHost = wins.find((w) =>
       w.contentView.children.some((v) =>
@@ -235,22 +142,10 @@ test('launches ComfyUI from chooser tile @lifecycle', async () => {
         /^http:\/\/(127\.0\.0\.1|localhost):/.test(v.webContents.getURL()),
       ),
     )
-    return {
-      count: wins.length,
-      ids: wins.map((w) => w.id),
-      comfyHostId: comfyHost?.id ?? null,
-    }
+    return { count: wins.length, comfyHostId: comfyHost?.id ?? null }
   })
-
-  // Same BrowserWindow count: chooser host was reused, no fresh window
-  // was spawned (close+open swap path would briefly land at count + 1
-  // and then settle back to count, but the comfyHostId would be NEW).
-  expect(after.count).toBe(before.count)
-  expect(after.comfyHostId).not.toBeNull()
-  // The id of the BrowserWindow hosting ComfyUI must be one of the
-  // ids that existed BEFORE the click — proving the chooser host
-  // flipped in place rather than being closed and replaced.
-  expect(before.ids).toContain(after.comfyHostId)
+  expect(state.count).toBe(1)
+  expect(state.comfyHostId).not.toBeNull()
 })
 
 /**

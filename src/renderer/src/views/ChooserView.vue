@@ -11,6 +11,7 @@ import { Cloud, Plus, Search } from 'lucide-vue-next'
 import ContextMenu from '../components/ContextMenu.vue'
 import BrandBackground from '../components/BrandBackground.vue'
 import BaseInput from '../components/ui/BaseInput.vue'
+import ComfyWordmark from '../components/icons/ComfyWordmark.vue'
 import ChooserInstallTile from './chooser/ChooserInstallTile.vue'
 import type { Installation, ShowProgressOpts } from '../types/ipc'
 
@@ -84,7 +85,7 @@ const {
   visibleInstalls,
   showCloudCard,
   showEmptyHint,
-  lastLaunchedLabel,
+  lastLaunchedLabel
 } = useInstallList({ installations: installationsRef })
 
 // Explicitly expose `activeFilter` so the brand-redesign tests can
@@ -183,6 +184,7 @@ function handleNewInstallClick(): void {
 <template>
   <BrandBackground v-show="props.visible" class="chooser-bg">
     <div class="chooser-view">
+      <ComfyWordmark class="chooser-wordmark" aria-hidden="true" />
       <div class="chooser-search">
         <BaseInput
           v-model="searchQuery"
@@ -277,8 +279,16 @@ function handleNewInstallClick(): void {
   width: 100%;
   max-width: 1080px;
   height: 100%;
-  padding: clamp(64px, 31vh, 240px) 24px 24px;
+  padding: clamp(64px, 31vh, 200px) 24px 24px;
   gap: var(--takeover-gap-lg);
+}
+
+.chooser-wordmark {
+  width: clamp(120px, 8vw, 180px);
+  height: auto;
+  color: var(--comfy-yellow);
+  flex-shrink: 0;
+  margin-bottom: var(--takeover-gap-sm);
 }
 
 .chooser-search {

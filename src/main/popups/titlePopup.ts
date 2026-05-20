@@ -77,17 +77,28 @@ export interface InstancePickerInstall {
  *  install-registry change. `activeInstallationId` lets the popup pre-
  *  select the host window's currently-attached install; `runningInstallationIds`
  *  drives the row-side "running" indicator and the focus-vs-launch
- *  decision in the click handler. */
+ *  decision in the click handler. `selectedInstallationId` /
+ *  `selectedSettings` / `selectedSnapshots` carry the per-row Settings
+ *  + Snapshots payload for the currently-selected install in the
+ *  picker's right pane (changes whenever the user clicks a different
+ *  row — picker tells main via `set-picker-selected-install` IPC and
+ *  main re-broadcasts a fresh snapshot). */
 export interface InstancePickerSnapshot {
   installs: InstancePickerInstall[]
   activeInstallationId: string | null
   runningInstallationIds: string[]
+  selectedInstallationId: string | null
+  selectedSettings: Record<string, unknown>[] | null
+  selectedSnapshots: Record<string, unknown> | null
 }
 
 interface BuildInstancePickerSnapshotArgs {
   installs: InstancePickerInstall[]
   hostInstallationId: string | null
   runningInstallationIds: string[]
+  selectedInstallationId?: string | null
+  selectedSettings?: Record<string, unknown>[] | null
+  selectedSnapshots?: Record<string, unknown> | null
 }
 
 /**
@@ -102,6 +113,9 @@ export function buildInstancePickerSnapshot(
     installs: args.installs,
     activeInstallationId: args.hostInstallationId,
     runningInstallationIds: args.runningInstallationIds,
+    selectedInstallationId: args.selectedInstallationId ?? null,
+    selectedSettings: args.selectedSettings ?? null,
+    selectedSnapshots: args.selectedSnapshots ?? null,
   }
 }
 
@@ -166,6 +180,29 @@ interface TitlePopupEntry {
    *  per open (the common case for repeated opens of the same menu
    *  in the same window). */
   lastSyncedConfigJson: string | null
+  /** The instance-picker's currently-selected install (the row whose
+   *  Settings + Snapshots accordions are showing in the right pane).
+   *  The picker pushes its selection here via
+   *  `comfy-titlepopup:set-picker-selected-install`; main uses it to
+   *  scope `selectedSettings` + `selectedSnapshots` in subsequent
+   *  snapshot pushes. Defaults to the host's active install on open. */
+  pickerSelectedInstallationId: string | null
+  /** JSON of the most recent `installs-changed` snapshot sent to this
+   *  popup. Used by `broadcastInstancePickerSnapshotToTitlePopups` to
+   *  skip pushes that would re-render identical data — important
+   *  because the renderer's `pickerSnapshot` watcher schedules a
+   *  measure-and-resize on EVERY snapshot change, and resizing the
+   *  `WebContentsView` while the open animation is still playing
+   *  makes the popup visibly snap. */
+  lastPickerBroadcastJson: string | null
+  /** Wall-clock time of the most recent `showTitlePopupNow()` for this
+   *  entry. The backdrop's `mousedown` listener can fire during the
+   *  same tick as the trigger click (the backdrop covers the body, and
+   *  on some macOS click paths the down-event lands on the backdrop
+   *  before the popup is fully composited). Guard the backdrop-dismiss
+   *  IPC against dismissing inside a short window after open so the
+   *  picker doesn't open → close → reopen. `0` means "never opened". */
+  openedAt: number
 }
 
 /** Active popup keyed by parent BrowserWindow id (one popup per parent,
@@ -174,6 +211,51 @@ interface TitlePopupEntry {
  *  `event.sender`. */
 const titlePopupsByParent = new Map<number, TitlePopupEntry>()
 const titlePopupsByWebContents = new Map<number, TitlePopupEntry>()
+
+/** Cached install list used to open the picker SYNCHRONOUSLY on click
+ *  (no `await` on the click path → instant first frame, same as the
+ *  file menu). Kept fresh by:
+ *
+ *   - `prewarmTitlePopup` priming the cache once at host construction,
+ *   - the `installationEvents.on('changed')` subscription re-fetching
+ *     on every install-registry mutation (add / remove / rename /
+ *     launch — same trigger that broadcasts to open pickers),
+ *   - the picker's own click handler kicking a background refresh
+ *     after the synchronous open so any change since the last cache
+ *     hit lands within a tick via `installs-changed` push.
+ *
+ *  Without this cache the click handler would have to `await
+ *  bindings.getInstancePickerInstalls()` (a disk read) before the
+ *  popup can be shown, which was the source of the "first click feels
+ *  laggy" symptom. */
+const cachedInstallsForPicker: InstancePickerInstall[] = []
+let cachedInstallsResolved = false
+
+/** Module-level binding stash. Populated by `registerTitlePopupIpc`
+ *  (called once at `whenReady`) so `prewarmTitlePopup` can call the
+ *  installs fetcher without re-threading the bindings through every
+ *  host-construction site. */
+let activeBindings: TitlePopupHostBindings | null = null
+
+async function refreshCachedInstallsForPicker(): Promise<void> {
+  if (!activeBindings) return
+  try {
+    const installs = await activeBindings.getInstancePickerInstalls()
+    cachedInstallsForPicker.length = 0
+    for (const i of installs) cachedInstallsForPicker.push(i)
+    cachedInstallsResolved = true
+  } catch {
+    // Leave the cache as-is; the click path falls back to an empty
+    // list and the background refresh after open will retry.
+  }
+}
+
+/* The picker's open/close is driven by explicit user actions only —
+ * pill toggle, backdrop click, ESC, item activation. The blur-based
+ * dismiss path is suppressed for the picker (see
+ * `EmbeddedPopupView.suppressBlurDismiss`) so click-on-trigger always
+ * behaves predictably: open if closed, close if open, no timing
+ * guards, no reopen races. */
 
 /* ----------------------------------------------------------------
  * Instance-picker backdrop
@@ -202,9 +284,7 @@ const pickerBackdropsByWebContents = new Map<number, number /* parentId */>()
 const PICKER_BACKDROP_HTML = `<!doctype html>
 <html><head><meta charset="utf-8"><style>
   html,body{margin:0;width:100%;height:100%;background:transparent;overflow:hidden;-webkit-user-select:none;user-select:none}
-  .scrim{position:fixed;inset:0;width:100%;height:100%;background:#211927;opacity:0.7;cursor:default;animation:f 180ms ease-out}
-  @keyframes f{from{opacity:0}to{opacity:.7}}
-  @media (prefers-reduced-motion:reduce){.scrim{animation:none}}
+  .scrim{position:fixed;inset:0;width:100%;height:100%;background:#211927;opacity:0.7;cursor:default}
 </style></head><body>
 <div class="scrim" id="s"></div>
 <script>
@@ -415,7 +495,8 @@ async function broadcastInstancePickerSnapshotToTitlePopups(
   bindings: TitlePopupHostBindings,
 ): Promise<void> {
   const hasActivePicker = Array.from(titlePopupsByParent.values()).some(
-    (entry) => entry.kind === 'instance-picker' && entry.view.isOpen,
+    (entry) => entry.kind === 'instance-picker'
+      && (entry.view.isOpen || entry.view.pendingShowTimer !== null),
   )
   if (!hasActivePicker) return
   // Resolve the install list once and reuse for every open picker —
@@ -424,22 +505,50 @@ async function broadcastInstancePickerSnapshotToTitlePopups(
   const installs = await bindings.getInstancePickerInstalls()
   const runningInstallationIds = bindings.getRunningInstallationIds()
   for (const entry of titlePopupsByParent.values()) {
-    if (entry.kind !== 'instance-picker' || !entry.view.isOpen) continue
+    if (entry.kind !== 'instance-picker') continue
+    if (!entry.view.isOpen && entry.view.pendingShowTimer === null) continue
     if (entry.view.popup.webContents.isDestroyed()) continue
     const parentEntry = comfyWindows.get(entry.parentEntryId)
+    const selectedId = entry.pickerSelectedInstallationId ?? parentEntry?.installationId ?? null
+    const details = selectedId
+      ? await bindings.getPickerDetailsForInstall(selectedId).catch(() => ({
+          settings: null,
+          snapshots: null,
+        }))
+      : { settings: null, snapshots: null }
     const snapshot = buildInstancePickerSnapshot({
       installs,
       hostInstallationId: parentEntry?.installationId ?? null,
       runningInstallationIds,
+      selectedInstallationId: selectedId,
+      selectedSettings: details.settings,
+      selectedSnapshots: details.snapshots,
     })
+    // Dedupe: every snapshot broadcast triggers a `pickerSnapshot`
+    // prop change in the renderer, which schedules a measure-and-
+    // resize on the WebContentsView. Resizing during the open
+    // animation makes the popup visibly snap → reads as "open →
+    // close → open" flicker on the 2nd+ click (where the fast path
+    // already had the install list, so the background refresh was
+    // pushing identical data). Only broadcast when the JSON actually
+    // changed.
+    const snapshotJson = JSON.stringify(snapshot)
+    if (entry.lastPickerBroadcastJson === snapshotJson) continue
+    entry.lastPickerBroadcastJson = snapshotJson
     entry.view.popup.webContents.send('comfy-titlepopup:installs-changed', snapshot)
   }
 }
 
 /** Pre-warm the title-bar popup for a host window so the user's first
- *  click doesn't pay the WebContentsView + HTML/JS load cost (~100ms). */
+ *  click doesn't pay the WebContentsView + HTML/JS load cost (~100ms).
+ *  Also primes the install-list cache so the picker click handler can
+ *  open synchronously without an `await` on a disk read (the cause of
+ *  the "first click feels slow" symptom). */
 export function prewarmTitlePopup(parent: BrowserWindow): void {
   ensureTitlePopup(parent)
+  if (!cachedInstallsResolved) {
+    void refreshCachedInstallsForPicker()
+  }
 }
 
 /** Lazily create the reusable popup `WebContentsView` for the given
@@ -513,18 +622,24 @@ function ensureTitlePopup(parent: BrowserWindow): TitlePopupEntry {
     pendingConfig: null,
     lastConfigJson: null,
     lastSyncedConfigJson: null,
+    pickerSelectedInstallationId: null,
+    openedAt: 0,
+    lastPickerBroadcastJson: null,
   }
   titlePopupsByParent.set(view.parentWindowId, entry)
   titlePopupsByWebContents.set(view.popupWebContentsId, entry)
   return entry
 }
 
-/** Fallback timeout (ms) — if the renderer's
- *  `comfy-titlepopup:rendered` ack doesn't arrive within this window
- *  after `set-config`, show the popup anyway so it never gets
- *  permanently stuck invisible. The renderer normally acks within one
- *  animation frame (~16ms). */
-const POPUP_RENDER_ACK_TIMEOUT_MS = 80
+/** Minimum lifetime (ms) of a freshly-shown picker popup before its
+ *  backdrop `mousedown` is allowed to dismiss it. The trigger pill's
+ *  click can produce a body mousedown that lands on the backdrop a
+ *  few ticks after `showTitlePopupNow` paints — without this guard
+ *  the picker opens then immediately closes (and the renderer's
+ *  pending render-ack re-opens it on the next tick → visible flicker).
+ *  Pick this larger than typical OS click-resolution latency
+ *  (~50-80ms on macOS) plus one compositor frame. */
+const BACKDROP_DISMISS_GUARD_MS = 180
 
 /** Hide the popup view and re-emit the `comfy-titlebar:menu-closed`
  *  event so the title-bar renderer's 100ms `MENU_REOPEN_GUARD_MS`
@@ -581,7 +696,16 @@ function showTitlePopupNow(entry: TitlePopupEntry): void {
   if (entry.kind === 'instance-picker' && !entry.view.parentWindow.isDestroyed()) {
     showPickerBackdrop(entry.view.parentWindow)
   }
+  // Tell the renderer the popup is about to be shown. Unlike
+  // `set-config` (which is skipped on the fast path when the config is
+  // unchanged), this fires on *every* open, so popup-side views can
+  // reset transient per-open state (e.g. the instance picker's selected
+  // row falls back to the host's currently-active install). Without
+  // this signal a reopen-with-identical-config would inherit whatever
+  // row the user left selected last time.
+  entry.view.popup.webContents.send('comfy-titlepopup:will-show', { kind: entry.kind })
   entry.view.showOnTop({ focus: true })
+  entry.openedAt = Date.now()
   // Notify the title bar so it can suppress the next click on the
   // menu button. Without this, on macOS the click event can fire
   // before the blur-driven dismiss propagates back, causing the
@@ -658,6 +782,11 @@ function openTitlePopup(opts: OpenTitlePopupOpts): void {
   entry.parentEntryId = opts.parentEntryId
   entry.kind = opts.kind
   entry.titleBarSender = opts.titleBarSender
+  // Picker owns its own outside-click dismiss via the backdrop view —
+  // skip the blur-driven hide path so the toggle-on-pill-click is
+  // deterministic. File menu + downloads tray have no backdrop and
+  // still rely on blur to close when the user clicks away.
+  entry.view.suppressBlurDismiss = opts.kind === 'instance-picker'
 
   // Anchor coords are title-bar-local; the title-bar view sits at
   // content (0,0) so they map directly to parent-window content
@@ -769,9 +898,16 @@ function openTitlePopup(opts: OpenTitlePopupOpts): void {
     // config; the `ready` IPC handler flushes it.
     entry.pendingConfig = config
   }
-  entry.view.scheduleShowFallback(POPUP_RENDER_ACK_TIMEOUT_MS, () => {
-    showTitlePopupNow(entry)
-  })
+
+  // Show INSTANTLY in the same frame as the click — same as native
+  // apps / VS Code / Cursor. The render-ack handshake used to wait
+  // up to 250ms for Vue to repaint, but cold Vue mount itself takes
+  // ~270ms so the fallback timer was always the floor on first open.
+  // The "stale content flash" the ack was guarding against is a
+  // single frame of the previous open's content (~16ms on a warm
+  // renderer) — invisible in practice. The renderer's own paint
+  // settles within one frame of `set-config` arriving.
+  showTitlePopupNow(entry)
 }
 
 export interface TitlePopupHostBindings {
@@ -811,6 +947,47 @@ export interface TitlePopupHostBindings {
     installationId: string,
     parentEntryId: number,
   ) => Promise<void> | void
+  /** Picker → Restart on a running install. Implementations confirm
+   *  with the user (parented to the picker's host window), gracefully
+   *  stop the running session, and then re-launch via the same
+   *  focus-or-launch path the picker normally uses. `parentEntryId`
+   *  threads the picker's host through so the confirm dialog is parented
+   *  to the right window and post-stop relaunch routes back through
+   *  the picker's own parent. */
+  restartInstallFromPicker: (
+    installationId: string,
+    parentEntryId: number,
+  ) => Promise<void> | void
+  /** Resolve the per-install Settings sections + Snapshots payload the
+   *  picker's right-pane accordions render. Returns `null` for either
+   *  on the install's missing or source-failure case so the picker can
+   *  fall back gracefully without crashing the popup. Resolves the
+   *  same `getDetailSections` + `getSnapshotListData` data the unified
+   *  Settings drawer reads, so the picker's accordions can't drift
+   *  from the drawer's content. */
+  getPickerDetailsForInstall: (installationId: string) => Promise<{
+    settings: Record<string, unknown>[] | null
+    snapshots: Record<string, unknown> | null
+  }>
+  /** Picker → mutate a field on the install's launch settings. Routes
+   *  to the same `update-field` handler the drawer uses. After the
+   *  update lands, main rebroadcasts a fresh picker snapshot so the
+   *  popup's UI reflects the new value without the popup having to
+   *  refetch. Returns the action result for error display. */
+  pickerUpdateField: (
+    installationId: string,
+    fieldId: string,
+    value: unknown,
+  ) => Promise<{ ok: boolean; message?: string }>
+  /** Picker → run an arbitrary install action. Same handler the
+   *  drawer uses for snapshot-save / snapshot-restore / snapshot-delete
+   *  / channel-pick / etc. The popup constrains the action id to a
+   *  small safe set in the IPC validator before this resolves. */
+  pickerRunAction: (
+    installationId: string,
+    actionId: string,
+    actionData?: Record<string, unknown>,
+  ) => Promise<{ ok: boolean; message?: string }>
 }
 
 function activateTitlePopupMenuItem(
@@ -927,6 +1104,10 @@ function activateTitlePopupMenuItem(
  * bar / comfy / panel views without z-order issues.
  */
 export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
+  // Stash for `prewarmTitlePopup` (host-construction site doesn't have
+  // bindings). Last writer wins; only called once at `whenReady`.
+  activeBindings = bindings
+
   ipcMain.on('comfy-titlepopup:ready', (event) => {
     const entry = titlePopupsByWebContents.get(event.sender.id)
     if (!entry) return
@@ -974,11 +1155,19 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
   // Click on the picker backdrop — dismiss the matching parent's
   // picker popup. The backdrop is keyed by the parent windowId so we
   // can route from any backdrop instance back to its popup.
+  //
+  // Guarded against a stray dismiss during the open transition: if the
+  // popup was opened less than `BACKDROP_DISMISS_GUARD_MS` ago, ignore.
+  // Without this, a click that lands on the trigger pill can fire the
+  // backdrop's mousedown after the popup is composited but before the
+  // OS settles focus, causing open → immediate-close → reopen flicker.
   ipcMain.on('comfy-picker-backdrop:dismiss', (event) => {
     const parentId = pickerBackdropsByWebContents.get(event.sender.id)
     if (parentId === undefined) return
     const popup = titlePopupsByParent.get(parentId)
     if (!popup || popup.kind !== 'instance-picker') return
+    if (!popup.view.isOpen) return
+    if (Date.now() - popup.openedAt < BACKDROP_DISMISS_GUARD_MS) return
     hideTitlePopup(popup, { releaseFocusToParent: true })
   })
 
@@ -1155,25 +1344,66 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
   })
 
   // Title-bar centre-pill click. Opens the instance-picker popup
-  // anchored under the pill. Skipped on install-less hosts — the
-  // chooser-host pill is non-interactive (the chooser body already IS
-  // the picker, so a smaller copy of itself would be redundant).
+  // anchored under the pill. Available on both install-backed AND
+  // install-less (chooser) hosts so users have one consistent way to
+  // switch instances from anywhere in the app. On chooser hosts the
+  // pick commits via the in-place swap path (see PanelApp's
+  // `pickInstallFromPicker` wiring) so the dashboard becomes the
+  // picked install; on install-backed hosts the pick opens a new
+  // Comfy window per the focus-or-launch contract.
   ipcMain.on(
     'comfy-window:click-install-pill',
-    async (event, payload: { anchor?: { x?: number; y?: number } } | undefined) => {
+    (event, payload: { anchor?: { x?: number; y?: number } } | undefined) => {
       const found = findEntryByTitleBarSender(event.sender)
       if (!found) return
       const { id: windowKey, entry } = found
       if (entry.window.isDestroyed()) return
-      if (!isInstallHost(entry)) return
+
+      const existingPopup = titlePopupsByParent.get(entry.window.id)
+      // Toggle: open if closed, close if open (or opening). Single
+      // source of truth for the decision lives here in main. The
+      // picker's `suppressBlurDismiss` flag (set below on every open)
+      // disables the blur-based dismiss path, so there's no race
+      // between the click event and a blur-driven close — clicking
+      // the trigger pill is the ONLY way to open it and one of three
+      // ways to close it (trigger reclick, backdrop click, ESC). No
+      // timing guards needed.
+      if (
+        existingPopup
+        && existingPopup.kind === 'instance-picker'
+        && (existingPopup.view.isOpen || existingPopup.view.pendingShowTimer !== null)
+      ) {
+        hideTitlePopup(existingPopup, { releaseFocusToParent: true })
+        return
+      }
+
       const x = Math.max(0, Math.round(payload?.anchor?.x ?? 0))
       const y = Math.max(0, Math.round(payload?.anchor?.y ?? TITLEBAR_HEIGHT))
-      const installs = await bindings.getInstancePickerInstalls()
+
+      // Open SYNCHRONOUSLY with whatever data is already in memory.
+      // The cache is primed at host construction (`prewarmTitlePopup`)
+      // and kept fresh by the `installationEvents.on('changed')`
+      // subscription, so on the warm path this list is correct. On a
+      // very cold first click it may be empty; the background refresh
+      // below repopulates the popup within a tick via the
+      // `installs-changed` push — exact same channel that handles live
+      // updates while the picker is open.
+      const installs: InstancePickerInstall[] = cachedInstallsForPicker.slice()
       const runningInstallationIds = bindings.getRunningInstallationIds()
+      const initialSelectedId = entry.installationId
+      const popupEntry = titlePopupsByParent.get(entry.window.id)
+      if (popupEntry) popupEntry.pickerSelectedInstallationId = initialSelectedId
+      // Right-pane Settings + Snapshots arrive via the same background
+      // refresh — `selectedSettings: null` / `selectedSnapshots: null`
+      // make the accordion content render as empty (existing prop
+      // handling), then the post-open broadcast fills them in.
       const snapshot = buildInstancePickerSnapshot({
         installs,
         hostInstallationId: entry.installationId,
         runningInstallationIds,
+        selectedInstallationId: initialSelectedId,
+        selectedSettings: null,
+        selectedSnapshots: null,
       })
       openTitlePopup({
         parent: entry.window,
@@ -1184,6 +1414,95 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
         theme: entry.lastTheme,
         titleBarSender: entry.titleBarView.webContents,
       })
+
+      // Kick the data refresh asynchronously. When it lands,
+      // `broadcastInstancePickerSnapshotToTitlePopups` pushes the
+      // updated snapshot to the open picker (and any other open
+      // picker, though there's usually only one). Same channel the
+      // install-registry change broadcast uses, so the picker handles
+      // both initial fill and live updates with one code path.
+      void (async () => {
+        await refreshCachedInstallsForPicker()
+        await broadcastInstancePickerSnapshotToTitlePopups(bindings)
+      })()
+    },
+  )
+
+  // Picker → "I'm now showing details for this install." Updates the
+  // popup entry's selected-id and rebroadcasts a fresh snapshot so the
+  // right pane gets the new install's settings + snapshots. Idempotent
+  // if the selection is unchanged.
+  ipcMain.on(
+    'comfy-titlepopup:set-picker-selected-install',
+    async (event, payload: { installationId?: unknown }) => {
+      const popupEntry = titlePopupsByWebContents.get(event.sender.id)
+      if (!popupEntry || popupEntry.kind !== 'instance-picker') return
+      const id = payload?.installationId
+      if (id !== null && typeof id !== 'string') return
+      const nextId = typeof id === 'string' && id.length > 0 ? id : null
+      if (popupEntry.pickerSelectedInstallationId === nextId) return
+      popupEntry.pickerSelectedInstallationId = nextId
+      await broadcastInstancePickerSnapshotToTitlePopups(bindings)
+    },
+  )
+
+  // Picker → field update. Routes to the existing handler the drawer
+  // uses; main rebroadcasts a fresh snapshot on success so the popup
+  // sees the latest value without polling. Errors surface via the
+  // returned message (popup can show inline error UX).
+  ipcMain.handle(
+    'comfy-titlepopup:picker-update-field',
+    async (event, payload: { installationId?: unknown; fieldId?: unknown; value?: unknown }) => {
+      const popupEntry = titlePopupsByWebContents.get(event.sender.id)
+      if (!popupEntry || popupEntry.kind !== 'instance-picker') {
+        return { ok: false, message: 'Picker not active.' }
+      }
+      const installationId = payload?.installationId
+      const fieldId = payload?.fieldId
+      if (typeof installationId !== 'string' || typeof fieldId !== 'string') {
+        return { ok: false, message: 'Invalid payload.' }
+      }
+      const result = await bindings.pickerUpdateField(installationId, fieldId, payload.value)
+      if (result.ok) {
+        await broadcastInstancePickerSnapshotToTitlePopups(bindings)
+      }
+      return result
+    },
+  )
+
+  // Picker → run a whitelisted install action. Constrained to the
+  // snapshot lifecycle actions (save / restore / delete) so the popup
+  // can't fire arbitrary actions — the full action surface stays in
+  // the drawer where the user has the room and context to handle the
+  // outcome (delete-install navigation, channel-pick wizard, etc.).
+  const PICKER_ALLOWED_ACTIONS = new Set([
+    'snapshot-save',
+    'snapshot-restore',
+    'snapshot-delete',
+  ])
+  ipcMain.handle(
+    'comfy-titlepopup:picker-run-action',
+    async (event, payload: { installationId?: unknown; actionId?: unknown; actionData?: unknown }) => {
+      const popupEntry = titlePopupsByWebContents.get(event.sender.id)
+      if (!popupEntry || popupEntry.kind !== 'instance-picker') {
+        return { ok: false, message: 'Picker not active.' }
+      }
+      const installationId = payload?.installationId
+      const actionId = payload?.actionId
+      if (typeof installationId !== 'string' || typeof actionId !== 'string') {
+        return { ok: false, message: 'Invalid payload.' }
+      }
+      if (!PICKER_ALLOWED_ACTIONS.has(actionId)) {
+        return { ok: false, message: `Action '${actionId}' is not available from the picker.` }
+      }
+      const actionData = (payload.actionData && typeof payload.actionData === 'object')
+        ? payload.actionData as Record<string, unknown>
+        : undefined
+      const result = await bindings.pickerRunAction(installationId, actionId, actionData)
+      if (result.ok) {
+        await broadcastInstancePickerSnapshotToTitlePopups(bindings)
+      }
+      return result
     },
   )
 
@@ -1204,6 +1523,57 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
       if (typeof installationId !== 'string' || installationId.length === 0) return
       hideTitlePopup(entry, { releaseFocusToParent: false })
       void bindings.pickInstallFromPicker(installationId, entry.parentEntryId)
+    },
+  )
+
+  // Picker → restart a running install. Same contract as
+  // `pick-install` but routed through `restartInstallFromPicker`, which
+  // confirms with the user, stops the running session, then re-runs
+  // the focus-or-launch flow. The popup is dismissed before the
+  // confirm fires so the dialog comes up over the host body, not the
+  // open popup.
+  ipcMain.on(
+    'comfy-titlepopup:restart-install',
+    (event, payload: { installationId?: unknown }) => {
+      const entry = titlePopupsByWebContents.get(event.sender.id)
+      if (!entry) return
+      const installationId = payload?.installationId
+      if (typeof installationId !== 'string' || installationId.length === 0) return
+      hideTitlePopup(entry, { releaseFocusToParent: false })
+      void bindings.restartInstallFromPicker(installationId, entry.parentEntryId)
+    },
+  )
+
+  // Picker → install-level action from the "More" menu (Open Folder /
+  // Copy Installation / Untrack / Delete). Forwarded to the parent
+  // host's panel renderer so the panel-side `useInstallContextMenu`
+  // dispatch runs — same code path the dashboard kebab uses for these
+  // actions, so the picker can't drift from the dashboard's confirm
+  // dialogs / showProgress wiring.
+  //
+  // The popup is dismissed before the action fires so any native
+  // confirm dialog the source-action opens (Copy / Untrack / Delete
+  // each have one) comes up over the host body rather than the open
+  // popup.
+  ipcMain.on(
+    'comfy-titlepopup:open-install-action',
+    (event, payload: { installationId?: unknown; actionId?: unknown }) => {
+      const popupEntry = titlePopupsByWebContents.get(event.sender.id)
+      if (!popupEntry || popupEntry.kind !== 'instance-picker') return
+      const installationId = payload?.installationId
+      const actionId = payload?.actionId
+      if (typeof installationId !== 'string' || installationId.length === 0) return
+      if (typeof actionId !== 'string' || actionId.length === 0) return
+      const parentEntry = comfyWindows.get(popupEntry.parentEntryId)
+      if (!parentEntry) return
+      hideTitlePopup(popupEntry, { releaseFocusToParent: false })
+      const panelView = parentEntry.panelView
+      if (!panelView || panelView.webContents.isDestroyed()) return
+      bindings.sendToPanelDeferred(panelView, 'panel-trigger-overlay', {
+        kind: 'picker-install-action',
+        installationId,
+        actionId,
+      })
     },
   )
 
@@ -1234,6 +1604,11 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
   // state for a fresh popup is pushed in `openTitlePopup`.
   downloadEvents.on('tray-state-changed', broadcastDownloadsToTitlePopups)
   installationEvents.on('changed', () => {
+    // Keep the click-path cache fresh (next picker open uses the new
+    // list directly) AND repaint any currently-open picker with the
+    // updated snapshot. Order doesn't matter — both read from the
+    // same underlying source.
+    void refreshCachedInstallsForPicker()
     void broadcastInstancePickerSnapshotToTitlePopups(bindings)
   })
 }

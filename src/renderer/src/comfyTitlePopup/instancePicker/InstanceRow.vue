@@ -71,10 +71,7 @@ function handleClick(): void {
       </div>
       <div class="picker-row-body">
         <div class="picker-row-name">{{ installation.name }}</div>
-        <div v-if="installation.installPath" class="picker-row-sub">
-          {{ installation.installPath }}
-        </div>
-        <div v-else class="picker-row-sub">{{ lastLaunchedLabel }}</div>
+        <div class="picker-row-sub">{{ lastLaunchedLabel }}</div>
       </div>
       <span v-if="running" class="picker-row-running-dot" aria-hidden="true"></span>
     </div>
@@ -121,30 +118,27 @@ function handleClick(): void {
 .picker-row-body {
   min-width: 0;
   display: flex;
-  align-items: baseline;
-  gap: 8px;
+  flex-direction: column;
+  gap: 2px;
   overflow: hidden;
 }
 .picker-row-name {
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 500;
-  line-height: 20px;
+  line-height: 24px;
   color: var(--neutral-100);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  flex: 0 1 auto;
 }
 .picker-row-sub {
   font-size: 12px;
-  line-height: normal;
+  line-height: 16px;
   color: var(--neutral-100);
-  opacity: 0.75;
+  opacity: 0.65;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  flex: 1 1 auto;
-  min-width: 0;
 }
 .picker-row-running-dot {
   width: 6px;

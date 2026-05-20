@@ -306,7 +306,18 @@
     "unknownError": "An unknown error occurred",
     "completedSuccess": "Completed successfully",
     "completedError": "Operation failed",
-    "completedCancelled": "Operation was cancelled"
+    "completedCancelled": "Operation was cancelled",
+    "phaseLabel": {
+      "download": "Downloading ComfyUI…",
+      "extract": "Unpacking the install…",
+      "setup": "Setting up your Python environment…",
+      "cleanup": "Tidying up dependencies…",
+      "update": "Pulling the latest ComfyUI release…",
+      "migration": "Migrating your Legacy Desktop install…",
+      "restore-nodes": "Restoring custom nodes from your snapshot…",
+      "restore-pip": "Reinstalling Python packages from your snapshot…",
+      "launch": "Starting ComfyUI…"
+    }
   },
 
   "console": {
@@ -424,17 +435,24 @@
     "grandTitle": "Welcome to ComfyUI Desktop",
     "grandSubtitle": "A quick first-run setup so you're ready to launch ComfyUI.",
     "consentLead": "Before you get started, please review the privacy policy below and choose whether to share anonymous usage telemetry.",
-    "privacyPolicyTitle": "ComfyUI Desktop Privacy Policy",
-    "privacyPolicyEffective": "Effective",
-    "privacyPolicyAppliesTo": "Applies to",
+    "legalDocEffective": "Effective",
+    "legalDocAppliesTo": "Applies to",
     "telemetryHint": "Telemetry helps us improve the launcher. We never collect workflow contents, prompts, generated media, or personal information.",
     "acceptTos": "Accept and continue",
-    "consentTosTitle": "Accept Terms of Service",
-    "consentTosHint": "By continuing, you agree to the ComfyUI Desktop Terms of Service and Privacy Policy.",
+    "consentTosTitle": "Accept the terms",
+    "consentTosHintPrefix": "By continuing you agree to the",
+    "consentTosHintSep": "and",
+    "consentTosHintSuffix": ".",
     "consentTelemetryTitle": "Help improve Comfy",
-    "consentTelemetryHint": "Share anonymous usage data so we can fix bugs and prioritize features.",
+    "consentTelemetryHint": "Send usage data to help us fix bugs and prioritize features.",
     "consentGetStarted": "Get Started",
-    "termsModalTitle": "ComfyUI Desktop Privacy Policy",
+    "termsModalTitle": "ComfyUI Desktop Terms",
+    "eulaModalTitle": "End-User License Agreement",
+    "tosModalTitle": "Terms of Service",
+    "privacyModalTitle": "Privacy Policy",
+    "noticesModalTitle": "Third-Party Notices",
+    "eulaLinkLabel": "EULA",
+    "tosLinkLabel": "Terms of Service",
     "notNow": "Not now",
     "pickTitle": "How do you want to run Comfy?",
     "pickLead": "Choose the setup that fits how you work. You can switch later.",
@@ -464,11 +482,7 @@
     "localBranchMigrateLabel": "Migrate",
     "localBranchMigrateDesc": "Bring over existing workflows, models, and settings.",
     "localBranchInstallNewLabel": "Start Fresh",
-    "localBranchInstallNewDesc": "Clean install. Leave existing projects in Comfy-{'{'}Name{'}'}.",
-    "nameInstallTitle": "It looks like you've installed Comfy before",
-    "nameInstallLead": "How would you like this version installed?",
-    "nameInstallLabel": "Name your new install",
-    "nameInstallHint": "Your old install will stay the same. Name your new one so you can tell the difference."
+    "localBranchInstallNewDesc": "Clean install. Leave existing projects in Comfy-{'{'}Name{'}'}."
   },
 
   "tray": {
@@ -848,7 +862,16 @@
     "instanceRunningProceed": "Launch Alongside",
     "instanceRunningReplace": "Close Running & Launch",
     "modelFolderRelaunchTitle": "Restarting ComfyUI",
-    "modelFolderRelaunchDesc": "New model folders were detected from custom nodes. Restarting so ComfyUI can use them right away."
+    "modelFolderRelaunchDesc": "New model folders were detected from custom nodes. Restarting so ComfyUI can use them right away.",
+    "steps": {
+      "securityScan": "Running security scan…",
+      "mountLibraries": "Mounting model libraries…",
+      "gpu": "Spinning up the GPU ({vram} GB VRAM)…",
+      "gpuFallback": "Spinning up the GPU…",
+      "customNodes": "Loading custom nodes & ComfyUI-Manager…",
+      "startingServer": "Starting server…"
+    },
+    "viewLogs": "View logs"
   },
 
   "errors": {

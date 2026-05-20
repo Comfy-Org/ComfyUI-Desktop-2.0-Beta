@@ -373,12 +373,17 @@ onUnmounted(() => {
            first-use-takeover steps render as a static label — the
            chooser body already IS the picker, and the takeover locks
            down all chrome to avoid wandering out of bootstrap. -->
+      <!-- Interactive on both install-backed AND install-less (chooser)
+           hosts so the user has one consistent way to switch instances
+           from anywhere in the app. First-use takeover still renders the
+           static label — the bootstrap UX locks down all chrome to keep
+           the user inside the flow. -->
       <button
-        v-if="!isInstallLess && !isFirstUseTakeover"
+        v-if="!isFirstUseTakeover"
         ref="installPill"
         type="button"
         class="title-install-pill"
-        :class="{ 'is-open': isInstancePickerOpen }"
+        :class="{ 'is-open': isInstancePickerOpen, 'is-install-less': isInstallLess }"
         aria-haspopup="dialog"
         :aria-expanded="isInstancePickerOpen"
         @click="handleInstallPill"
@@ -405,7 +410,6 @@ onUnmounted(() => {
       <div
         v-else
         class="title-install-pill"
-        :class="{ 'is-install-less': isInstallLess }"
       >
         <div class="title-install-slot title-install-slot--leading">
           <ComfyCLogo class="title-install-brand-mark" :size="16" />

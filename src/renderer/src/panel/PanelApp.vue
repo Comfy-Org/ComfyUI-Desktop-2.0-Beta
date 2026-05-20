@@ -21,6 +21,7 @@ import { useModal } from '../composables/useModal'
 import { useAppUpdatePrompts } from '../composables/useAppUpdatePrompts'
 import { useSendFeedback } from '../composables/useSendFeedback'
 import { useDeepLinkRouter } from '../composables/useDeepLinkRouter'
+import { useInstallContextMenu } from '../composables/useInstallContextMenu'
 import { registerMigrateTakeover } from '../composables/useMigrateAction'
 import { isFlowPanel, isValidPanel, usePanelOverlays } from './usePanelOverlays'
 import { useChooserHandoff } from './useChooserHandoff'
@@ -146,6 +147,28 @@ let unsubRequestCloseDrawer: (() => void) | null = null
 // `onRequestCloseDrawer` below).
 const comfyUISettingsPanelRef = ref<{ requestClose: () => void } | null>(null)
 
+// Picker More-menu dispatch lives on the panel because the install-level
+// actions need `window.api.runAction` (only exposed in the panel
+// renderer) and Delete needs the panel's overlay slot for the
+// DetailModal autoAction surface. `useInstallContextMenu` is the single
+// source of truth for these items — same dispatch the dashboard kebab
+// uses. `onManage` is wired so that the composable's Delete branch
+// (which routes through `onManage` with `autoAction: 'delete'`) lands
+// on the Settings overlay with the source-action chain primed; the
+// chooser tile's `openManage` uses the same shape.
+const { triggerAction: triggerInstallAction } = useInstallContextMenu({
+  onManage: (inst, manageOpts) => {
+    void openOverlay({
+      kind: 'settings',
+      installation: inst,
+      initialTab: 'comfy',
+      initialDetailTab: manageOpts?.initialTab ?? 'status',
+      autoAction: manageOpts?.autoAction ?? null,
+      noSidebar: true,
+    })
+  },
+})
+
 useDeepLinkRouter({
   installationId,
   bootstrapReady,
@@ -153,7 +176,26 @@ useDeepLinkRouter({
   showAppUpdateRestartPrompt,
   showAppUpdateDownloadPrompt,
   pickInstallFromPicker: async (inst) => {
-    await chooserHandoff.performPickerLaunch(inst)
+    // Chooser-host pick (no installationId backing this host) → swap
+    // in-place via the same path the dashboard chooser uses, so the
+    // dashboard window becomes the picked install. Install-backed
+    // pick → spawn a new Comfy window for the picked install
+    // (focus-or-launch contract — main already short-circuits to
+    // focus-existing when the install is already running in another
+    // window before this IPC fires, so we only ever see launches
+    // here for installs that aren't running yet).
+    if (!installationId) {
+      await chooserHandoff.handleChooserPick(inst)
+    } else {
+      await chooserHandoff.performPickerLaunch(inst)
+    }
+  },
+  runInstallActionFromPicker: async (inst, actionId) => {
+    // The IPC carries the composable's menu-item id (`copy-install`,
+    // `untrack`, `delete`, `reveal-in-folder`), so this is a direct
+    // dispatch — `triggerAction` resolves each id to either a
+    // `runAction` IPC or an `onManage` overlay open.
+    await triggerInstallAction(actionId, inst)
   },
 })
 
@@ -411,7 +453,7 @@ onUnmounted(() => {
         ref="progressRef"
         :installation-id="currentOverlay.installationId ?? ''"
         binding
-        :brand-chrome="chainingFirstUseToNewInstall"
+        :brand-chrome="currentOverlay.brandChrome ?? chainingFirstUseToNewInstall"
         @close="handleProgressClose"
       />
       <NewInstallModal

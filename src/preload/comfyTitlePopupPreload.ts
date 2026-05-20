@@ -53,6 +53,21 @@ export interface PopupInstancePickerSnapshot {
   installs: PopupInstancePickerInstall[]
   activeInstallationId: string | null
   runningInstallationIds: string[]
+  /** Currently-selected install in the picker's right pane. Drives
+   *  which install's Settings + Snapshots accordions render. Defaults
+   *  to the host's active install on open; flips when the user picks
+   *  a different row (popup pushes via `setPickerSelectedInstall`). */
+  selectedInstallationId: string | null
+  /** Detail sections for the selected install — same shape
+   *  `getDetailSections` returns to the renderer. `null` when no
+   *  selection or the source can't produce sections. Typed loosely
+   *  here because the preload's tsconfig slice can't see the
+   *  renderer's `DetailSection` type. */
+  selectedSettings: Record<string, unknown>[] | null
+  /** Snapshot list payload for the selected install — same shape
+   *  `get-snapshots` returns. `null` when no selection or no install
+   *  path. */
+  selectedSnapshots: Record<string, unknown> | null
 }
 
 export type TitlePopupConfig =
@@ -165,6 +180,50 @@ export interface ComfyTitlePopupBridge {
    *  window's new-install panel — same surface the file menu's
    *  "New Install" entry lands on. */
   openNewInstall(): void
+  /** Picker → Restart on a running install. Main confirms via a native
+   *  dialog (parented to the picker's host window), stops the running
+   *  session, then re-runs the focus-or-launch flow against the same
+   *  install so the user lands in a fresh Comfy window. Cancelling the
+   *  confirm is a no-op. */
+  restartInstall(installationId: string): void
+  /** Tell main the picker's right-pane has switched to this install
+   *  (or `null` when nothing is selected). Main re-resolves the
+   *  install's Settings + Snapshots and pushes a fresh snapshot so
+   *  the accordions render the new install's data. Idempotent. */
+  setPickerSelectedInstall(installationId: string | null): void
+  /** Picker → mutate a field on the selected install's settings.
+   *  Routes through the same allowlist + handler the drawer uses.
+   *  Resolves with `{ok, message?}` so the popup can show inline
+   *  error UX without polling for a refreshed snapshot. */
+  pickerUpdateField(
+    installationId: string,
+    fieldId: string,
+    value: unknown,
+  ): Promise<{ ok: boolean; message?: string }>
+  /** Picker → run a snapshot-lifecycle action (save / restore /
+   *  delete). Main enforces a strict allowlist on the channel so
+   *  this can't fire arbitrary actions. */
+  pickerRunAction(
+    installationId: string,
+    actionId: 'snapshot-save' | 'snapshot-restore' | 'snapshot-delete',
+    actionData?: Record<string, unknown>,
+  ): Promise<{ ok: boolean; message?: string }>
+  /** Picker → run an install-level action via the parent panel's
+   *  `useInstallContextMenu` dispatch. Main hides the popup, then
+   *  forwards the action to the picker's parent host's panel renderer
+   *  (panel-trigger-overlay `picker-install-action`). Allowed action
+   *  ids match the picker's More menu: `open-folder`, `copy`, `remove`
+   *  (untrack), `delete`. Delete routes through DetailModal so the
+   *  source-side confirm + showProgress chain runs in its modal
+   *  context; the rest fire `window.api.runAction` directly. */
+  openInstallAction(installationId: string, actionId: string): void
+  /** Fires every time main is about to show the popup view, including
+   *  the fast path that skips re-sending `set-config` when the config
+   *  is unchanged. Popup-side views use this to reset transient
+   *  per-open state (e.g. the instance picker re-selects the host's
+   *  currently-active install) — `onConfig` alone would miss the
+   *  fast-path reopens. */
+  onWillShow(cb: (info: { kind: TitlePopupConfig['kind'] }) => void): () => void
 }
 
 function isPopupConfig(value: unknown): value is TitlePopupConfig {
@@ -196,10 +255,30 @@ function isInstancePickerSnapshot(value: unknown): value is PopupInstancePickerS
     installs?: unknown
     activeInstallationId?: unknown
     runningInstallationIds?: unknown
+    selectedInstallationId?: unknown
+    selectedSettings?: unknown
+    selectedSnapshots?: unknown
   }
   if (!Array.isArray(v.installs)) return false
   if (v.activeInstallationId !== null && typeof v.activeInstallationId !== 'string') return false
   if (!Array.isArray(v.runningInstallationIds)) return false
+  // Selected fields are optional on the wire — pre-v2 snapshots from
+  // older bundles that haven't been rebuilt yet still validate.
+  if (
+    v.selectedInstallationId !== undefined
+    && v.selectedInstallationId !== null
+    && typeof v.selectedInstallationId !== 'string'
+  ) return false
+  if (
+    v.selectedSettings !== undefined
+    && v.selectedSettings !== null
+    && !Array.isArray(v.selectedSettings)
+  ) return false
+  if (
+    v.selectedSnapshots !== undefined
+    && v.selectedSnapshots !== null
+    && typeof v.selectedSnapshots !== 'object'
+  ) return false
   return true
 }
 
@@ -252,6 +331,40 @@ const bridge: ComfyTitlePopupBridge = {
   },
   openNewInstall: () => {
     ipcRenderer.send('comfy-titlepopup:open-new-install')
+  },
+  restartInstall: (installationId) => {
+    ipcRenderer.send('comfy-titlepopup:restart-install', { installationId })
+  },
+  setPickerSelectedInstall: (installationId) => {
+    ipcRenderer.send('comfy-titlepopup:set-picker-selected-install', { installationId })
+  },
+  pickerUpdateField: (installationId, fieldId, value) =>
+    ipcRenderer.invoke('comfy-titlepopup:picker-update-field', {
+      installationId,
+      fieldId,
+      value,
+    }),
+  pickerRunAction: (installationId, actionId, actionData) =>
+    ipcRenderer.invoke('comfy-titlepopup:picker-run-action', {
+      installationId,
+      actionId,
+      actionData,
+    }),
+  openInstallAction: (installationId, actionId) => {
+    ipcRenderer.send('comfy-titlepopup:open-install-action', {
+      installationId,
+      actionId,
+    })
+  },
+  onWillShow: (cb) => {
+    const handler = (_event: IpcRendererEvent, data: unknown): void => {
+      if (!data || typeof data !== 'object') return
+      const kind = (data as { kind?: unknown }).kind
+      if (kind !== 'menu' && kind !== 'downloads' && kind !== 'instance-picker') return
+      cb({ kind })
+    }
+    ipcRenderer.on('comfy-titlepopup:will-show', handler)
+    return () => ipcRenderer.removeListener('comfy-titlepopup:will-show', handler)
   },
 }
 

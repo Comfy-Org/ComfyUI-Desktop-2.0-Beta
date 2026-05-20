@@ -12,7 +12,6 @@ import type {
   ShowProgressOpts
 } from '../types/ipc'
 import { stripVariantPrefix, sortedCardOptions, getVariantImage } from '../lib/variants'
-import VariantCardGrid from '../components/VariantCardGrid.vue'
 import { emitTelemetryAction, toVariantBucket } from '../lib/telemetry'
 import {
   trackGuardrailBlocked,
@@ -21,10 +20,7 @@ import {
   checkNvidiaDriverOrWarn,
   checkDiskSpaceOrWarn
 } from '../lib/installHelpers'
-import InstallNamePath from '../components/InstallNamePath.vue'
-import TakeoverHeader from '../components/TakeoverHeader.vue'
 import TakeoverBack from '../components/TakeoverBack.vue'
-import ModalShell from '../components/ModalShell.vue'
 import BrandTakeoverLayout from '../components/BrandTakeoverLayout.vue'
 import PathDiskInfo from '../components/PathDiskInfo.vue'
 
@@ -68,7 +64,6 @@ const saveDisabled = ref(true)
 const sourcesLoading = ref(false)
 const initializing = ref(false)
 const sourceError = ref('')
-const currentStep = ref(1)
 
 // Per-field state
 const fieldOptions = ref(new Map<string, FieldOption[]>())
@@ -100,14 +95,15 @@ const estimatedInstallSize = computed(() => {
 /**
  * Brand-wrapped single-screen Configure flow.
  *
- * Active whenever this modal is chained from the first-use takeover
- * (`hideBackToDashboard === true`). The install-method picker lives
- * inside the Advanced disclosure, so switching sources (Standalone ↔
- * Remote Connection ↔ …) must NOT toggle the chrome — the brand
- * layout stays mounted regardless of which source is currently
- * selected. Dashboard-entry callers keep the classic 3-step stepper.
+ * This is now the only path — every entry point (dashboard tile,
+ * Cloud empty-state, title-bar picker, file-menu, first-use chain)
+ * renders here. The install-method picker lives inside the Advanced
+ * disclosure, so switching sources (Standalone ↔ Remote Connection
+ * ↔ …) doesn't toggle chrome. `hideBackToDashboard` is independent:
+ * it only controls whether the top-left "Back to Dashboard" chevron
+ * is visible (hidden during the first-use chain, visible for all
+ * other entries).
  */
-const useBrandConfig = computed(() => props.hideBackToDashboard)
 
 /** Mirrored from the consent step so the user can re-affirm or flip
  *  telemetry on the Configure screen. Same setting key — no new state.
@@ -135,12 +131,7 @@ watch(advancedOpen, async (open) => {
 watch(instPath, (newPath) => {
   diskSpace.value = null
   pathIssues.value = []
-  // Brand-config exposes the path field at step 2 (the classic wizard
-  // only shows it on step 3), so eagerly fetch disk-space whenever the
-  // brand path is active.
-  if (currentStep.value >= 3 || currentSource.value?.skipInstall || useBrandConfig.value) {
-    fetchDiskSpace(newPath)
-  }
+  fetchDiskSpace(newPath)
 })
 
 /** Persist telemetry flips immediately (mirrors the consent step) so
@@ -155,39 +146,10 @@ watch(telemetryEnabled, (v) => {
 /** Generation counter — incremented on each open/source change to discard stale responses */
 let loadGeneration = 0
 
-const totalSteps = computed(() => {
-  if (!currentSource.value) return 3
-  return currentSource.value.skipInstall ? 2 : 3
-})
-
-const heroSources = computed(() => sources.value.filter((s) => s.id === 'standalone'))
-const otherSources = computed(() => sources.value.filter((s) => s.id !== 'standalone'))
-
-const stepTitle = computed(() => {
-  if (currentStep.value === 1) return t('newInstall.chooseMethod')
-  if (currentStep.value === 2) {
-    return currentSource.value?.skipInstall
-      ? t('newInstall.nameLocation')
-      : t('newInstall.configuration')
-  }
-  return t('newInstall.nameLocation')
-})
-
-const canProceed = computed(() => {
-  if (currentStep.value === 1) return currentSource.value !== null
-  if (currentStep.value === 2) {
-    if (currentSource.value?.skipInstall) return true
-    return !saveDisabled.value
-  }
-  if (currentStep.value === 3) return pathIssues.value.length === 0
-  return true
-})
-
-/** Both step-2 and step-3 gates rolled into one. The brand screen
- *  exposes all inputs at once, so Continue must respect every guardrail
- *  the classic wizard ran across two steps. `skipInstall` sources
- *  (Remote Connection) have no install path, so the path-issue guard
- *  doesn't apply to them. */
+/** Single-screen guardrail gate. Continue must respect every check
+ *  the user can interact with on the Configure surface. `skipInstall`
+ *  sources (Remote Connection) have no install path, so the path-issue
+ *  guard doesn't apply to them. */
 const canContinue = computed(() => {
   if (!currentSource.value) return false
   if (currentSource.value.skipInstall) return !saveDisabled.value
@@ -259,12 +221,6 @@ onBeforeUnmount(() => {
 })
 
 interface OpenOpts {
-  // TODO(brand-cleanup): `initialName` was used by the now-retired
-  // nameInstall step. Naming is captured inline on the Configure screen
-  // and the silent `'ComfyUI'` fallback in `handleSave()` handles the
-  // blank case. Kept here as optional for one review cycle in case any
-  // caller is still passing it; remove after sign-off.
-  initialName?: string
   /** Set by the host when this overlay is opened by the first-use chain
    *  from the localBranch → Start Fresh path. Surfaces a Back link in
    *  the Configure footer that returns the user to the localBranch
@@ -276,8 +232,7 @@ const cameFromLocalBranch = ref(false)
 
 async function open(opts: OpenOpts = {}): Promise<void> {
   loadGeneration++
-  currentStep.value = 1
-  instName.value = opts.initialName?.trim() ?? ''
+  instName.value = ''
   cameFromLocalBranch.value = opts.cameFromLocalBranch === true
   suggestedName.value = ''
   void window.api
@@ -306,11 +261,12 @@ async function open(opts: OpenOpts = {}): Promise<void> {
     defaultInstPath.value = installDir ?? ''
     instPath.value = defaultInstPath.value
 
-    // Auto-select standalone and skip to device selection (step 2)
+    // Pre-select Standalone so Configure opens with the recommended
+    // method already in place. Remote / other sources are reachable
+    // via the Advanced disclosure's method-picker chips.
     hardwareValidation = await window.api.validateHardware()
     const standalone = sources.value.find((s) => s.id === 'standalone')
     if (standalone && hardwareValidation.supported) {
-      currentStep.value = 2
       await selectSourceCard(standalone)
     } else if (standalone) {
       detectedGpu.value = hardwareValidation.error || t('newInstall.noGpuDetected')
@@ -537,19 +493,6 @@ async function handleBrowse(): Promise<void> {
   if (chosen) instPath.value = chosen
 }
 
-function nextStep(): void {
-  if (currentStep.value < totalSteps.value && canProceed.value) {
-    currentStep.value++
-    if (instPath.value) fetchDiskSpace(instPath.value)
-  }
-}
-
-function prevStep(): void {
-  if (currentStep.value > 1) {
-    currentStep.value--
-  }
-}
-
 async function handleSave(): Promise<void> {
   const source = currentSource.value
   if (!source) return
@@ -655,7 +598,8 @@ async function handleSave(): Promise<void> {
     emit('show-progress', {
       installationId: result.entry.id,
       title: `${t('newInstall.installing')} — ${name}`,
-      apiCall: () => window.api.installInstance(result.entry!.id)
+      apiCall: () => window.api.installInstance(result.entry!.id),
+      autoLaunchOnFinish: true
     })
     return
   }
@@ -698,11 +642,11 @@ defineExpose({ open })
 </script>
 
 <template>
-  <BrandTakeoverLayout v-if="hideBackToDashboard">
+  <BrandTakeoverLayout>
     <div ref="brandShellRef" class="config-shell">
       <h1 class="brand-title">{{ $t('newInstall.configureTitle') }}</h1>
       <p class="brand-lead">{{ $t('newInstall.configureLead') }}</p>
-      <div v-if="useBrandConfig" class="config-card">
+      <div class="config-card">
         <div class="config-card__body">
           <!-- Name field for the Standalone path. Remote Connection has
                its own Name input rendered above the source-field loop
@@ -757,16 +701,6 @@ defineExpose({ open })
               :estimated-size="estimatedInstallSize"
             />
           </div>
-
-          <!-- TODO(brand-cleanup): "Help improve Comfy" telemetry toggle
-               removed — it already appears on the first-use consent
-               screen, so re-asking on Configure was redundant. Setting
-               continues to hydrate from `telemetryEnabled` for the watch
-               that persists user intent; the UI control on this screen
-               is gone. Leave the script-side wiring intact in case the
-               control is re-introduced on another surface.
-          <label class="brand-checkbox"> ... </label>
-          -->
 
           <div ref="advancedRef" class="config-advanced" :class="{ 'is-open': advancedOpen }">
             <button
@@ -866,12 +800,10 @@ defineExpose({ open })
                       <div v-if="fieldLoading.get(field.id)" class="wizard-loading with-spinner">
                         {{ $t('newInstall.loading') }}
                       </div>
-                      <!-- Brand-config horizontal-row variant list.
-                           Same data + select handler as VariantCardGrid;
-                           re-styled inline because this dense row
-                           layout is specific to the brand Configure
-                           surface (the classic 3-step wizard at line
-                           ~1057 keeps using VariantCardGrid). -->
+                      <!-- Horizontal-row variant list dense enough to fit
+                           inside the Advanced disclosure without the full
+                           VariantCardGrid layout. -->
+
                       <div
                         v-else-if="
                           fieldOptions.has(field.id) &&
@@ -1019,282 +951,18 @@ defineExpose({ open })
         </div>
       </div>
     </div>
-  </BrandTakeoverLayout>
-
-  <ModalShell v-else binding @close="emit('close')">
-    <template #header>
-      <div class="takeover-stacked-header">
-        <TakeoverBack
-          v-if="!hideBackToDashboard"
-          :label="$t('common.backToDashboard')"
-          @back="emit('close')"
-        />
-        <TakeoverHeader
-          :title="$t('newInstall.grandTitle')"
-          :subtitle="$t('newInstall.grandSubtitle')"
-        />
-      </div>
+    <template #footer-left>
+      <TakeoverBack
+        v-if="!hideBackToDashboard"
+        class="config-back-to-dashboard"
+        :label="$t('common.backToDashboard')"
+        @back="emit('close')"
+      />
     </template>
-    <div class="view-scroll">
-      <!-- Phase 3 §19 — per-step heading reads as a sub-section
-               below the persistent grand title. The step number gives
-               the user "where am I in the wizard" context without
-               having to rebuild the same affordance for each modal. -->
-      <h2 class="new-install-step-title">{{ stepTitle }}</h2>
-      <!-- Step 1: Source Selection -->
-      <div v-if="currentStep === 1" class="wizard-step">
-        <div v-if="sourcesLoading || initializing" class="wizard-loading with-spinner">
-          {{ $t('newInstall.loading') }}
-        </div>
-        <template v-else>
-          <!-- Hero card (Standalone) -->
-          <div
-            v-for="s in heroSources"
-            :key="s.id"
-            :class="['source-card', 'source-card-hero', { selected: currentSource?.id === s.id }]"
-            @click="selectSourceCard(s)"
-          >
-            <div class="source-card-header">
-              <div class="source-card-label">{{ s.label }}</div>
-              <div class="source-card-badge">{{ $t('newInstall.recommended') }}</div>
-            </div>
-            <div v-if="s.description" class="source-card-desc">{{ s.description }}</div>
-          </div>
-
-          <!-- Other source cards -->
-          <div class="source-cards-row">
-            <div
-              v-for="s in otherSources"
-              :key="s.id"
-              :class="['source-card', { selected: currentSource?.id === s.id }]"
-              @click="selectSourceCard(s)"
-            >
-              <div class="source-card-label">{{ s.label }}</div>
-              <div v-if="s.description" class="source-card-desc">{{ s.description }}</div>
-            </div>
-          </div>
-        </template>
-      </div>
-
-      <!-- Step 2: Configuration (or combined step for skipInstall) -->
-      <div v-else-if="currentStep === 2" class="wizard-step">
-        <!-- For skipInstall sources: combined config + name -->
-        <template v-if="currentSource?.skipInstall">
-          <div v-if="currentSource" id="source-fields">
-            <div v-for="field in currentSource.fields" :key="field.id" class="field">
-              <label :for="`sf-${field.id}`">{{ field.label }}</label>
-              <template v-if="field.type === 'text'">
-                <div class="path-input">
-                  <input
-                    :id="`sf-${field.id}`"
-                    type="text"
-                    :value="textFieldValues.get(field.id) ?? ''"
-                    :placeholder="field.defaultValue || ''"
-                    @input="
-                      textFieldValues.set(field.id, ($event.target as HTMLInputElement).value)
-                    "
-                  />
-                  <button
-                    v-if="field.action"
-                    :id="`sf-${field.id}-action`"
-                    type="button"
-                    @click="handleTextAction(field)"
-                  >
-                    {{ field.action.label }}
-                  </button>
-                </div>
-                <div v-if="fieldErrors.get(field.id)" class="field-error">
-                  {{ fieldErrors.get(field.id) }}
-                </div>
-              </template>
-            </div>
-          </div>
-
-          <!-- Name field for skipInstall -->
-          <InstallNamePath
-            :name="instName"
-            :path="instPath"
-            :default-path="defaultInstPath"
-            hide-install-path
-            :path-issues="pathIssues"
-            :disk-space-loading="diskSpaceLoading"
-            :disk-space="diskSpace"
-            :estimated-size="estimatedInstallSize"
-            @update:name="instName = $event"
-            @update:path="instPath = $event"
-            @browse="handleBrowse"
-          />
-        </template>
-
-        <!-- For local sources: configuration fields -->
-        <template v-else>
-          <div class="detected-hardware">{{ detectedGpu }}</div>
-
-          <div v-if="sourceError" class="wizard-error">
-            {{ sourceError }}
-          </div>
-
-          <div v-if="currentSource" id="source-fields">
-            <div v-for="(field, fieldIndex) in currentSource.fields" :key="field.id" class="field">
-              <label :for="`sf-${field.id}`">{{ field.label }}</label>
-
-              <!-- Text field -->
-              <template v-if="field.type === 'text'">
-                <div class="path-input">
-                  <input
-                    :id="`sf-${field.id}`"
-                    type="text"
-                    :value="textFieldValues.get(field.id) ?? ''"
-                    :placeholder="field.defaultValue || ''"
-                    @input="
-                      textFieldValues.set(field.id, ($event.target as HTMLInputElement).value)
-                    "
-                  />
-                  <button
-                    v-if="field.action"
-                    :id="`sf-${field.id}-action`"
-                    type="button"
-                    @click="handleTextAction(field)"
-                  >
-                    {{ field.action.label }}
-                  </button>
-                </div>
-                <div v-if="fieldErrors.get(field.id)" class="field-error">
-                  {{ fieldErrors.get(field.id) }}
-                </div>
-              </template>
-
-              <!-- Card-rendered select field -->
-              <template v-else-if="field.renderAs === 'cards'">
-                <div v-if="fieldLoading.get(field.id)" class="wizard-loading with-spinner">
-                  {{ $t('newInstall.loading') }}
-                </div>
-                <VariantCardGrid
-                  v-else-if="
-                    fieldOptions.has(field.id) && (fieldOptions.get(field.id)?.length ?? 0) > 0
-                  "
-                  :options="sortedCardOptions(fieldOptions.get(field.id)!)"
-                  :selected-value="selections[field.id]?.value"
-                  @select="(opt) => selectCardOption(field, fieldIndex, opt)"
-                />
-                <div v-else-if="fieldOptions.has(field.id)" class="wizard-loading">
-                  {{
-                    fieldErrors.get(field.id)
-                      ? `Error: ${fieldErrors.get(field.id)}`
-                      : $t('newInstall.noOptions')
-                  }}
-                </div>
-              </template>
-
-              <!-- Regular select field -->
-              <template v-else>
-                <select
-                  :id="`sf-${field.id}`"
-                  :disabled="
-                    fieldLoading.get(field.id) ||
-                    !fieldOptions.has(field.id) ||
-                    fieldOptions.get(field.id)?.length === 0
-                  "
-                  :value="getSelectedIndex(field)"
-                  @change="
-                    handleFieldSelectChange(
-                      field,
-                      fieldIndex,
-                      ($event.target as HTMLSelectElement).value
-                    )
-                  "
-                >
-                  <option v-if="fieldLoading.get(field.id)">
-                    {{ $t('newInstall.loading') }}
-                  </option>
-                  <option
-                    v-else-if="
-                      !fieldOptions.has(field.id) || fieldOptions.get(field.id)?.length === 0
-                    "
-                  >
-                    {{
-                      fieldErrors.get(field.id)
-                        ? `Error: ${fieldErrors.get(field.id)}`
-                        : fieldOptions.has(field.id)
-                          ? $t('newInstall.noOptions')
-                          : '—'
-                    }}
-                  </option>
-                  <template v-else>
-                    <option
-                      v-for="(opt, i) in fieldOptions.get(field.id)"
-                      :key="opt.value"
-                      :value="i"
-                    >
-                      {{ opt.description ? `${opt.label}  —  ${opt.description}` : opt.label
-                      }}{{ opt.recommended ? ` (${$t('newInstall.recommended')})` : '' }}
-                    </option>
-                  </template>
-                </select>
-              </template>
-            </div>
-          </div>
-        </template>
-      </div>
-
-      <!-- Step 3: Name & Location (local sources only) -->
-      <div v-else-if="currentStep === 3" class="wizard-step">
-        <InstallNamePath
-          :name="instName"
-          :path="instPath"
-          :default-path="defaultInstPath"
-          :hide-install-path="currentSource?.hideInstallPath"
-          :path-issues="pathIssues"
-          :disk-space-loading="diskSpaceLoading"
-          :disk-space="diskSpace"
-          :estimated-size="estimatedInstallSize"
-          @update:name="instName = $event"
-          @update:path="instPath = $event"
-          @browse="handleBrowse"
-        />
-      </div>
-    </div>
-
-    <!-- Wizard footer -->
-    <div class="wizard-footer">
-      <button v-if="currentStep > 1" class="wizard-back" @click="prevStep">
-        ← {{ currentStep === 2 ? $t('newInstall.changeInstallType') : $t('common.back') }}
-      </button>
-      <div v-else class="wizard-back-placeholder"></div>
-
-      <div class="wizard-dots">
-        <div
-          v-for="s in totalSteps"
-          :key="s"
-          :class="['wizard-dot', { active: s === currentStep, completed: s < currentStep }]"
-        />
-      </div>
-
-      <button
-        class="primary"
-        :disabled="!canProceed"
-        @click="currentStep < totalSteps ? nextStep() : handleSave()"
-      >
-        {{ currentStep < totalSteps ? $t('newInstall.next') : $t('newInstall.addInstallation') }}
-      </button>
-    </div>
-  </ModalShell>
+  </BrandTakeoverLayout>
 </template>
 
 <style scoped>
-/* Phase 3 §19 — per-step sub-section heading sitting under the
-   persistent grand title in the takeover header. Spacing tuned so it
-   reads as a section break inside the wizard body, not a duplicate
-   page heading. */
-.new-install-step-title {
-  margin: 0 0 16px 0;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
 .config-shell {
   align-self: stretch;
   height: 100%;
@@ -1360,6 +1028,13 @@ defineExpose({ open })
 }
 .config-back {
   margin-right: auto;
+}
+
+.config-back-to-dashboard {
+  position: absolute;
+  left: clamp(1.25rem, 2vw, 2rem);
+  bottom: clamp(1.25rem, 2vw, 2rem);
+  z-index: 2;
 }
 
 .config-field {
