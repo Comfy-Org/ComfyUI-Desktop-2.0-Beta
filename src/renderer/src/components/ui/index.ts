@@ -1,3 +1,4 @@
+export { default as BaseAlert } from './BaseAlert.vue'
 export { default as BaseInput } from './BaseInput.vue'
 export { default as BaseModal } from './BaseModal.vue'
 export { default as BaseSelect } from './BaseSelect.vue'
