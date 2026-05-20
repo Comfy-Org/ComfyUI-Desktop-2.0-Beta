@@ -458,7 +458,7 @@ function handleOpenArgsPage(_field: DetailField): void {
               </div>
             </div>
 
-            <div class="picker-detail-nav">
+            <div class="picker-detail-nav picker-compact">
               <button
                 type="button"
                 class="picker-detail-nav-item"
@@ -855,6 +855,26 @@ function handleOpenArgsPage(_field: DetailField): void {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+/* Compact density inside the picker's previewer. The drawer keeps
+   the shared component's roomier defaults; only this scope overrides
+   them so a switched-on accordion fits more rows before scrolling. */
+.picker-compact .picker-detail-accordion-body {
+  padding-top: 6px;
+  gap: 8px;
+}
+.picker-compact :deep(.settings-v2-field) {
+  gap: 4px;
+}
+.picker-compact :deep(.settings-v2-field-label) {
+  font-size: 13px;
+  line-height: 18px;
+}
+.picker-compact :deep(.picker-snapshots-list) {
+  gap: 8px;
+}
+.picker-compact :deep(.snapshot-row-card) {
+  padding: 6px;
 }
 .picker-detail-empty-inline {
   font-size: 12px;

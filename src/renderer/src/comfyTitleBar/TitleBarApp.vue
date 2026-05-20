@@ -681,6 +681,9 @@ onUnmounted(() => {
   padding: 4px 6px;
   gap: 0;
 }
+.title-feedback-button {
+  color: var(--text-muted);
+}
 .title-settings-button {
   display: inline-flex;
   width: 24px;
