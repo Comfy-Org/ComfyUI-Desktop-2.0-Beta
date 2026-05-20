@@ -70,6 +70,48 @@ export interface PopupInstancePickerSnapshot {
   selectedSnapshots: Record<string, unknown> | null
 }
 
+/** One models-directory row pushed in the global-settings snapshot.
+ *  Mirrors `GlobalSettingsModelsDir` in `src/main/popups/titlePopup.ts`. */
+export interface PopupGlobalSettingsModelsDir {
+  path: string
+  isPrimary: boolean
+  isDefault: boolean
+}
+
+/** Snapshot pushed to the global-settings popup. Field arrays + the
+ *  `channelPickerField` are loose-typed (renderer casts to `DetailField`
+ *  on receipt) because the preload tsconfig slice can't see the
+ *  renderer's view types. */
+export interface PopupGlobalSettingsSnapshot {
+  overviewFields: Record<string, unknown>[]
+  cacheFields: Record<string, unknown>[]
+  advancedFields: Record<string, unknown>[]
+  sharedDirectoriesFields: Record<string, unknown>[]
+  modelsDirs: PopupGlobalSettingsModelsDir[]
+  modelsSystemDefault: string
+  appUpdate: {
+    state: Record<string, unknown>
+    progress: Record<string, unknown> | null
+    isDownloading: boolean
+    capabilities: { systemManaged: boolean; canSelfUpdate: boolean }
+    installedVersion: string
+    platform: NodeJS.Platform
+    lastCheckedAt: number | null
+  }
+  channelPickerField: Record<string, unknown> | null
+  activeInstallationId: string | null
+  hasActiveInstall: boolean
+  githubUrl: string
+  i18n: {
+    overview: string
+    updates: string
+    cache: string
+    models: string
+    advanced: string
+    sharedDirectories: string
+  }
+}
+
 export type TitlePopupConfig =
   | {
       kind: 'menu'
@@ -83,6 +125,11 @@ export type TitlePopupConfig =
   | {
       kind: 'instance-picker'
       snapshot: PopupInstancePickerSnapshot
+      theme: { bg: string; text: string }
+    }
+  | {
+      kind: 'global-settings'
+      snapshot: PopupGlobalSettingsSnapshot
       theme: { bg: string; text: string }
     }
 
@@ -234,6 +281,44 @@ export interface ComfyTitlePopupBridge {
    *  currently-active install) — `onConfig` alone would miss the
    *  fast-path reopens. */
   onWillShow(cb: (info: { kind: TitlePopupConfig['kind'] }) => void): () => void
+  /** Subscribe to live global-settings snapshot pushes. Fires whenever
+   *  any input changes (settings write / updater state / install-list
+   *  change) while a global-settings popup is open. */
+  onGlobalSettingsSnapshot(
+    cb: (snapshot: PopupGlobalSettingsSnapshot) => void,
+  ): () => void
+  /** Global Settings → write a setting. Same side-effects as
+   *  `window.api.setSetting`, but routed through the popup bridge so
+   *  the popup renderer (which lacks `window.api`) can mutate. */
+  globalSettingsUpdateField(
+    fieldId: string,
+    value: unknown,
+  ): Promise<{ ok: boolean; message?: string }>
+  /** Global Settings → persist the full models-dir list (add / remove
+   *  / reorder). */
+  globalSettingsSetModelsDirs(dirs: string[]): Promise<{ ok: boolean }>
+  /** Open a directory picker. Returns the chosen path or `null` when
+   *  the user cancels. */
+  globalSettingsBrowseFolder(defaultPath?: string): Promise<string | null>
+  /** Open a folder in the OS file manager. */
+  globalSettingsOpenPath(path: string): void
+  /** Open an external URL — restricted to http/https main-side. */
+  globalSettingsOpenExternal(url: string): void
+  /** Launcher updater — check / download / install. */
+  globalSettingsCheckForUpdate(): Promise<{ available: boolean; version?: string; error?: string }>
+  globalSettingsDownloadUpdate(): Promise<void>
+  globalSettingsInstallUpdate(): void
+  /** Renderer mirrors `localStorage.lastCheckedAt` back to main so the
+   *  next snapshot rebroadcast shows the freshest timestamp. */
+  globalSettingsSetLastCheckedAt(value: number): void
+  /** ChannelPicker `@action` route. The IPC handler enforces the
+   *  allowlist (`copy-update | release-update | switch-channel |
+   *  update`); the popup just forwards whatever the picker emits. */
+  globalSettingsRunInstallAction(
+    installationId: string,
+    actionId: string,
+    actionData?: Record<string, unknown>,
+  ): Promise<{ ok: boolean; message?: string }>
 }
 
 function isPopupConfig(value: unknown): value is TitlePopupConfig {
@@ -244,12 +329,31 @@ function isPopupConfig(value: unknown): value is TitlePopupConfig {
     theme?: unknown
     snapshot?: unknown
   }
-  if (v.kind !== 'menu' && v.kind !== 'downloads' && v.kind !== 'instance-picker') return false
+  if (
+    v.kind !== 'menu'
+    && v.kind !== 'downloads'
+    && v.kind !== 'instance-picker'
+    && v.kind !== 'global-settings'
+  ) return false
   if (!v.theme || typeof v.theme !== 'object') return false
   const theme = v.theme as { bg?: unknown; text?: unknown }
   if (typeof theme.bg !== 'string' || typeof theme.text !== 'string') return false
   if (v.kind === 'menu' && !Array.isArray(v.items)) return false
   if (v.kind === 'instance-picker' && !isInstancePickerSnapshot(v.snapshot)) return false
+  if (v.kind === 'global-settings' && !isGlobalSettingsSnapshot(v.snapshot)) return false
+  return true
+}
+
+function isGlobalSettingsSnapshot(value: unknown): value is PopupGlobalSettingsSnapshot {
+  if (!value || typeof value !== 'object') return false
+  const v = value as Record<string, unknown>
+  if (!Array.isArray(v['overviewFields'])) return false
+  if (!Array.isArray(v['cacheFields'])) return false
+  if (!Array.isArray(v['advancedFields'])) return false
+  if (!Array.isArray(v['sharedDirectoriesFields'])) return false
+  if (!Array.isArray(v['modelsDirs'])) return false
+  if (typeof v['modelsSystemDefault'] !== 'string') return false
+  if (!v['appUpdate'] || typeof v['appUpdate'] !== 'object') return false
   return true
 }
 
@@ -374,12 +478,52 @@ const bridge: ComfyTitlePopupBridge = {
     const handler = (_event: IpcRendererEvent, data: unknown): void => {
       if (!data || typeof data !== 'object') return
       const kind = (data as { kind?: unknown }).kind
-      if (kind !== 'menu' && kind !== 'downloads' && kind !== 'instance-picker') return
+      if (
+        kind !== 'menu'
+        && kind !== 'downloads'
+        && kind !== 'instance-picker'
+        && kind !== 'global-settings'
+      ) return
       cb({ kind })
     }
     ipcRenderer.on('comfy-titlepopup:will-show', handler)
     return () => ipcRenderer.removeListener('comfy-titlepopup:will-show', handler)
   },
+  onGlobalSettingsSnapshot: (cb) => {
+    const handler = (_event: IpcRendererEvent, data: unknown): void => {
+      if (isGlobalSettingsSnapshot(data)) cb(data)
+    }
+    ipcRenderer.on('comfy-titlepopup:global-settings-changed', handler)
+    return () => ipcRenderer.removeListener('comfy-titlepopup:global-settings-changed', handler)
+  },
+  globalSettingsUpdateField: (fieldId, value) =>
+    ipcRenderer.invoke('comfy-titlepopup:global-settings-update-field', { fieldId, value }),
+  globalSettingsSetModelsDirs: (dirs) =>
+    ipcRenderer.invoke('comfy-titlepopup:global-settings-set-models-dirs', { dirs }),
+  globalSettingsBrowseFolder: (defaultPath) =>
+    ipcRenderer.invoke('comfy-titlepopup:global-settings-browse-folder', { defaultPath }),
+  globalSettingsOpenPath: (path) => {
+    ipcRenderer.send('comfy-titlepopup:global-settings-open-path', { path })
+  },
+  globalSettingsOpenExternal: (url) => {
+    ipcRenderer.send('comfy-titlepopup:global-settings-open-external', { url })
+  },
+  globalSettingsCheckForUpdate: () =>
+    ipcRenderer.invoke('comfy-titlepopup:global-settings-check-for-update'),
+  globalSettingsDownloadUpdate: () =>
+    ipcRenderer.invoke('comfy-titlepopup:global-settings-download-update'),
+  globalSettingsInstallUpdate: () => {
+    ipcRenderer.send('comfy-titlepopup:global-settings-install-update')
+  },
+  globalSettingsSetLastCheckedAt: (value) => {
+    ipcRenderer.send('comfy-titlepopup:global-settings-set-last-checked', { value })
+  },
+  globalSettingsRunInstallAction: (installationId, actionId, actionData) =>
+    ipcRenderer.invoke('comfy-titlepopup:global-settings-run-install-action', {
+      installationId,
+      actionId,
+      actionData,
+    }),
 }
 
 if (process.contextIsolated) {
