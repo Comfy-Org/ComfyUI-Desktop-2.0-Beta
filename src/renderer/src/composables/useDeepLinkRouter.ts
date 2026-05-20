@@ -77,9 +77,9 @@ export function useDeepLinkRouter(opts: DeepLinkRouterOpts): void {
           // file-menu / title-bar Settings entries use via switchPanel.
           const tab = requested ?? (inst ? 'comfy' : 'global')
           // Global tab → new Global Settings popup. Per-install tabs
-          // still hit the legacy SettingsModal pending the
-          // ComfyUISettingsPanel migration (see
-          // `docs/per-install-settings-handoff.md`).
+          // open `ManageInstallModal` (BaseModal-backed) via the
+          // `kind: 'settings'` overlay slot; `initialDetailTab` from
+          // the payload carries the inner tab choice.
           if (tab === 'global') {
             window.api.openGlobalSettings()
             return

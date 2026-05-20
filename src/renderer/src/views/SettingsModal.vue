@@ -1,6 +1,31 @@
 <script setup lang="ts">
-// TODO(stale-old-modal): delete after Settings drawer (v2,
-// ComfyUISettingsPanel) reaches functional parity and ships everywhere.
+// TODO(brand-cleanup): SOFT-DELETED post-brand-redesign.
+//
+// This component is no longer wired into the live overlay slot. As of
+// the brand-redesign migration:
+//   • The 'global' tab moved to the title-popup (`GlobalSettingsView.vue`)
+//     and `usePanelOverlays.switchPanel('settings')` short-circuits to
+//     `window.api.openGlobalSettings()` for install-less hosts.
+//   • The 'comfy' (per-install) tab moved to `ManageInstallModal.vue`,
+//     a thin wrapper around the shared `BaseModal` primitive that
+//     embeds `DetailModal` directly — no left rail, no sidebar.
+//   • The 'directories' / 'downloads' tabs have other homes already
+//     (title-popup Storage accordion / Downloads tray).
+//
+// The four dashboard/chooser callsites (`ChooserView` kebab "Manage…",
+// `PanelApp` install-pill Manage, two deeplinks in `useDeepLinkRouter`)
+// still emit `kind: 'settings'` overlay payloads, but `PanelApp.vue`'s
+// render branch now mounts `ManageInstallModal` instead of this file
+// (the legacy <SettingsModal> branch is preserved as an HTML comment
+// in PanelApp.vue per the soft-delete convention).
+//
+// Retained on disk so the migration can be reverted in one block if
+// needed. Remove after one release cycle if no regressions surface.
+// See `docs/per-install-settings-handoff.md`.
+//
+// (Previous TODO: "stale-old-modal" — superseded by this one. Drawer
+// parity is not the gate anymore; the new gate is regression confidence
+// on the BaseModal-backed wrapper.)
 import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ArrowDownToLine, Box, FolderOpen, Settings as SettingsIcon } from 'lucide-vue-next'

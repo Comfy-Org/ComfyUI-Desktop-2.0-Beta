@@ -1176,41 +1176,43 @@ input[type='checkbox']:checked::after {
   padding-right: 8px;
 }
 
-/* Detail tabs */
+/* Detail tabs — brand-redesign parity with `.settings-v2-tabs` in
+ * `ComfyUISettingsPanel.vue`. Pill-shaped active state (background fill,
+ * no underline indicator), `--border-hover` hairline between tab strip
+ * and body, fluid `--takeover-fs-body` font sizing. */
 .detail-tabs {
   display: flex;
-  gap: 4px;
+  gap: 2px;
   margin-bottom: 16px;
-  border-bottom: 1px solid var(--border);
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border-hover);
   flex-shrink: 0;
 }
 .detail-tab {
-  padding: 6px 16px;
-  border: none;
-  border-radius: 0;
-  background: none;
+  padding: 6px 12px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
   color: var(--text-muted);
-  font-size: 14px;
+  font-size: var(--takeover-fs-body);
   font-weight: 500;
   cursor: pointer;
-  position: relative;
+  transition:
+    color 120ms ease,
+    background-color 120ms ease;
 }
 .detail-tab:hover {
   color: var(--text);
+  background: color-mix(in srgb, var(--text) 4%, transparent);
+}
+.detail-tab:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
 }
 .detail-tab.active {
   color: var(--text);
-  font-weight: 600;
-}
-.detail-tab.active::after {
-  content: '';
-  position: absolute;
-  bottom: -1px;
-  left: 4px;
-  right: 4px;
-  height: 2px;
-  background: var(--accent);
-  border-radius: 1px;
+  font-weight: 500;
+  background: var(--surface);
 }
 
 /* Detail sections */

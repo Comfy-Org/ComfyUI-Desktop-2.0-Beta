@@ -89,6 +89,9 @@ function installMockBridge(): MockBridgeState {
       state.instancePickerSnapshotCallbacks.push(cb)
       return () => {}
     },
+    onGlobalSettingsSnapshot: (_cb: (snapshot: unknown) => void) => {
+      return () => {}
+    },
     onWillShow: (cb: (info: { kind: string }) => void) => {
       state.willShowCallbacks.push(cb)
       return () => {}

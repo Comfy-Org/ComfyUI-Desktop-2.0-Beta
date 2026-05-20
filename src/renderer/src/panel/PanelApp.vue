@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import SettingsModal from '../views/SettingsModal.vue'
+import ManageInstallModal from '../views/ManageInstallModal.vue'
 import ComfyUISettingsPanel from '../views/ComfyUISettingsPanel.vue'
 import ProgressModal from '../views/ProgressModal.vue'
 import ModalDialog from '../components/ModalDialog.vue'
@@ -466,19 +466,24 @@ onUnmounted(() => {
          pill click pops a `useModal.confirm` modal (issue #488) that
          lives in the global ModalDialog mount below, not in the
          overlay slot. -->
-    <!-- Tier 1 unified Settings modal. Mounted with `installation`
-         carried by the overlay payload (chooser-card Manage uses
-         the card's install, install-pill / waffle uses the host's
-         install, install-less host's waffle entry passes null).
-         The body underneath stays on chooser / comfy-lifecycle so
-         dismissing returns there. -->
-    <SettingsModal
+    <!-- Tier 1 per-install management modal. Mounted with `installation`
+         carried by the overlay payload (chooser-card Manage uses the
+         card's install, install-pill Manage uses the host's install).
+         Install-less hosts never reach here — `switchPanel`'s 'settings'
+         arm short-circuits to `window.api.openGlobalSettings()` before
+         the overlay is opened, so `installation` is always non-null in
+         practice. The body underneath stays on chooser / comfy-lifecycle
+         so dismissing returns there.
+
+         Maps the legacy `initialDetailTab` payload field to
+         ManageInstallModal's `initialTab` prop. Tab values:
+         'status' | 'update' | 'snapshots' | 'settings' (DetailModal's
+         tab keys). -->
+    <ManageInstallModal
       v-if="currentOverlay?.kind === 'settings'"
       :installation="currentOverlay.installation"
-      :initial-tab="currentOverlay.initialTab"
-      :initial-detail-tab="currentOverlay.initialDetailTab"
+      :initial-tab="(currentOverlay.initialDetailTab as 'status' | 'update' | 'snapshots' | 'settings' | undefined) ?? 'status'"
       :auto-action="currentOverlay.autoAction"
-      :no-sidebar="currentOverlay.noSidebar"
       @close="dismissTakeoverDirect"
       @show-progress="handleShowProgress"
       @update:installation="handleUpdateInstallation"

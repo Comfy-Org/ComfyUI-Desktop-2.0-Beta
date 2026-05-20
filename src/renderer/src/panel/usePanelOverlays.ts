@@ -397,10 +397,11 @@ export function usePanelOverlays(opts: UsePanelOverlaysOpts): UsePanelOverlaysAp
 
   /**
    * Switch the underlying panel body. Flow keys divert into the Tier 3
-   * takeover overlay slot instead of swapping the body. The unified
-   * `settings` key opens the Tier 1 SettingsModal at the default tab
-   * for the host (ComfyUI Settings on install-backed, Global Settings
-   * on install-less); deeper tab targets come through the
+   * takeover overlay slot instead of swapping the body. The `'settings'`
+   * key splits two ways: install-less hosts open the Global Settings
+   * title-popup via `window.api.openGlobalSettings()`; install-backed
+   * hosts open `ManageInstallModal` (BaseModal-backed) via the Tier 1
+   * overlay slot. Deeper tab targets come through the
    * `panel-trigger-overlay` IPC and bypass `switchPanel`.
    */
   async function switchPanel(panel: PanelKey, entrypoint: string = 'titlebar'): Promise<void> {
@@ -412,10 +413,12 @@ export function usePanelOverlays(opts: UsePanelOverlaysOpts): UsePanelOverlaysAp
     if (panel === 'settings') {
       const inst = installation.value
       const initialTab = inst ? 'comfy' : 'global'
-      // Install-less (chooser host) → open the new Global Settings popup
-      // via main. The per-install (`'comfy'`) branch still routes to the
-      // legacy SettingsModal pending the ComfyUISettingsPanel migration
-      // (see `docs/per-install-settings-handoff.md`).
+      // Install-less (chooser host) → open the Global Settings popup
+      // via main. Install-backed → open `ManageInstallModal` through the
+      // overlay slot (renders `DetailModal` in `embedded` mode inside
+      // `BaseModal`). The legacy `initialTab: 'comfy'` value on the
+      // payload is kept for backward compatibility with deeplinks but
+      // the modal ignores it — `initialDetailTab` is the active field.
       if (initialTab === 'global') {
         window.api.openGlobalSettings()
         emitTelemetryAction('desktop2.view.opened', { view: panel, from_view: fromView })
