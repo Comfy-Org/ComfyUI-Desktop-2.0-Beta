@@ -80,8 +80,8 @@
   --accent: #60a5fa;
   --accent-hover: #93c5fd;
   --selected: rgba(255, 255, 255, 0.85);
-  --surface: #262729;
-  --titlebar-bg: #171718;
+  --surface: #29252c;
+  --titlebar-bg: var(--neutral-800);
   --border: #494a50;
   --border-hover: #3c3d42;
   --danger: #b33a3a;

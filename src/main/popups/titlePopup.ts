@@ -816,8 +816,8 @@ const DOWNLOADS_POPUP_MAX_HEIGHT_RATIO = 0.6
  *  Renderer measures + asks for natural height via `requestSize`, same
  *  pattern as downloads, clamped by the same window-ratio safety net. */
 const INSTANCE_PICKER_POPUP_WIDTH = 640
-const INSTANCE_PICKER_POPUP_MIN_HEIGHT_PX = 300
-const INSTANCE_PICKER_POPUP_MAX_HEIGHT_PX = 500
+const INSTANCE_PICKER_POPUP_MIN_HEIGHT_PX = 450
+const INSTANCE_PICKER_POPUP_MAX_HEIGHT_PX = 600
 const INSTANCE_PICKER_POPUP_MAX_HEIGHT_RATIO = 0.7
 
 /** Global-settings popup sizing — mirrors the picker so the chrome

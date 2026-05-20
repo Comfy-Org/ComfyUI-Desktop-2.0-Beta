@@ -80,7 +80,7 @@ export function useTitleBarIdentity(opts: UseTitleBarIdentityOpts): TitleBarIden
 
   /** Body luminance test — drives is-light styling (lighter hover state).
    *  Locked to `false` for now: the title bar surface is hard-coded to the
-   *  dark token (`--titlebar-bg: #171718`) in both themes, so the light
+   *  dark token (`--titlebar-bg: var(--neutral-800)`) in both themes, so the light
    *  hover variants would produce light chrome on a dark bar.
    *  TODO(titlebar-light-theme): restore the luminance branch below when
    *  every title-bar surface is theme-aware. */

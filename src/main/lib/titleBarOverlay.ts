@@ -14,11 +14,11 @@ export const TRAFFIC_LIGHT_POSITION: Electron.Point = { x: 13, y: Math.round((TI
  *  and rendering the bar in two themes while half the chrome inside it
  *  isn't theme-aware looks broken. Once light theme is plumbed through
  *  every title-bar surface, restore the `isDark`-branched values below.
- *  TODO(titlebar-light-theme): re-enable `color: isDark ? '#171718' : '#e9e9e9'`
+ *  TODO(titlebar-light-theme): re-enable `color: isDark ? '#211927' : '#e9e9e9'`
  *  and `symbolColor: isDark ? '#dddddd' : '#333333'`. */
 export function titleBarOverlayForTheme(_isDark: boolean): Electron.TitleBarOverlayOptions {
   return {
-    color: '#171718',
+    color: '#211927',
     symbolColor: '#dddddd',
     height: TITLEBAR_HEIGHT,
   }
