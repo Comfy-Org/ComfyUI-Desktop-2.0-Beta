@@ -514,50 +514,6 @@ button.looks-disabled {
   color: var(--neutral-400);
 }
 
-.brand-select {
-  position: relative;
-  cursor: pointer;
-}
-.brand-select select {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: transparent;
-  appearance: none;
-  -webkit-appearance: none;
-  cursor: pointer;
-  opacity: 0;
-}
-.brand-select__trigger {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  width: 100%;
-  pointer-events: none;
-}
-.brand-select__trigger-value {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--neutral-100);
-}
-.brand-select__trigger-chevron {
-  flex: 0 0 auto;
-  color: var(--neutral-300);
-}
-.brand-select:has(select:focus-visible) {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent);
-}
-
 .brand-tag-recommended {
   display: inline-block;
   margin-left: 8px;

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick, toRaw } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Check, ChevronDown, ChevronRight, HardDrive } from 'lucide-vue-next'
+import { Check, ChevronRight, HardDrive } from 'lucide-vue-next'
 import { useModal } from '../composables/useModal'
 
 import type {
@@ -23,6 +23,8 @@ import {
 import TakeoverBack from '../components/TakeoverBack.vue'
 import BrandTakeoverLayout from '../components/BrandTakeoverLayout.vue'
 import PathDiskInfo from '../components/PathDiskInfo.vue'
+import TooltipWrap from '../components/TooltipWrap.vue'
+import { BaseSelect, type BaseSelectOption } from '../components/ui'
 
 const emit = defineEmits<{
   close: []
@@ -608,34 +610,30 @@ async function handleSave(): Promise<void> {
   emit('close')
 }
 
-function getSelectedIndex(field: SourceField): number {
+function getSelectOptions(field: SourceField): BaseSelectOption[] {
   const options = fieldOptions.value.get(field.id)
-  if (!options) return 0
-  const sel = selections.value[field.id]
-  if (!sel) return 0
-  const idx = options.findIndex((o) => o.value === sel.value)
-  return idx >= 0 ? idx : 0
+  if (!options) return []
+  return options.map((opt) => ({
+    value: opt.value,
+    label: opt.recommended ? `${opt.label} (${t('newInstall.recommended')})` : opt.label,
+    description: opt.description
+  }))
 }
 
-/** Resolved display string for the `.brand-select` trigger — mirrors
- *  the `<option>` text formatter inline-rendered in the template
- *  (label · em-dash · description · "(Recommended)") so the trigger
- *  reads exactly like the picked option. Returns a fallback label
- *  for the loading / empty / error states the underlying select
- *  shows. */
-function getSelectTriggerLabel(field: SourceField): string {
+function getSelectPlaceholder(field: SourceField): string {
   if (fieldLoading.value.get(field.id)) return t('newInstall.loading')
+  const err = fieldErrors.value.get(field.id)
+  if (err) return `Error: ${err}`
+  if (fieldOptions.value.has(field.id)) return t('newInstall.noOptions')
+  return '—'
+}
+
+function onSelectFieldChange(field: SourceField, fieldIndex: number, value: string): void {
   const options = fieldOptions.value.get(field.id)
-  if (!options || options.length === 0) {
-    const err = fieldErrors.value.get(field.id)
-    if (err) return `Error: ${err}`
-    if (fieldOptions.value.has(field.id)) return t('newInstall.noOptions')
-    return '—'
-  }
-  const opt = options[getSelectedIndex(field)]
-  if (!opt) return '—'
-  const base = opt.description ? `${opt.label}  —  ${opt.description}` : opt.label
-  return opt.recommended ? `${base} (${t('newInstall.recommended')})` : base
+  if (!options) return
+  const idx = options.findIndex((o) => o.value === value)
+  if (idx < 0) return
+  handleFieldSelectChange(field, fieldIndex, String(idx))
 }
 
 defineExpose({ open })
@@ -648,11 +646,7 @@ defineExpose({ open })
       <p class="brand-lead">{{ $t('newInstall.configureLead') }}</p>
       <div class="config-card">
         <div class="config-card__body">
-          <!-- Name field for the Standalone path. Remote Connection has
-               its own Name input rendered above the source-field loop
-               below (skipInstall sources need explicit naming). Blank
-               commits the silent `'ComfyUI'` fallback in handleSave. -->
-          <div v-if="!currentSource?.skipInstall" class="config-field">
+          <div class="config-field">
             <label class="config-label" for="inst-name-standalone">{{ $t('common.name') }}</label>
             <div class="brand-input">
               <input
@@ -665,42 +659,67 @@ defineExpose({ open })
             </div>
           </div>
 
-          <!-- GPU + Install Location are Standalone-only. Remote
-               Connection (skipInstall) doesn't manage local hardware
-               or a filesystem path — its field set comes entirely
-               from the dynamic loop below. -->
-          <div v-if="!currentSource?.skipInstall" class="config-field">
-            <label class="config-label">{{ $t('newInstall.detectedGpuLabel') }}</label>
-            <div class="brand-input config-select" role="textbox" aria-readonly="true">
-              <span class="config-select__value">{{ detectedGpu }}</span>
-            </div>
-          </div>
-
-          <div v-if="!currentSource?.skipInstall" class="config-field">
-            <label class="config-label" for="inst-path">{{
-              $t('newInstall.installLocation')
-            }}</label>
-            <div class="config-path-row">
-              <div class="brand-input config-path-input">
-                <HardDrive :size="14" aria-hidden="true" />
-                <input
-                  id="inst-path"
-                  :value="instPath"
-                  type="text"
-                  @input="instPath = ($event.target as HTMLInputElement).value"
-                />
+          <!-- GPU + Install Location stay visible across sources but
+               are disabled in Remote Connection mode (no local hardware
+               or filesystem path). Hover surfaces a tooltip explaining
+               why. -->
+          <TooltipWrap
+            class="config-field-wrap"
+            side="bottom"
+            :text="currentSource?.skipInstall ? $t('newInstall.notAvailableRemote') : ''"
+          >
+            <div
+              class="config-field"
+              :class="{ 'config-field--disabled': currentSource?.skipInstall }"
+            >
+              <label class="config-label">{{ $t('newInstall.detectedGpuLabel') }}</label>
+              <div class="brand-input config-select" role="textbox" aria-readonly="true">
+                <span class="config-select__value">{{ detectedGpu }}</span>
               </div>
-              <button class="brand-tertiary" type="button" @click="handleBrowse">
-                {{ $t('common.browse') }}
-              </button>
             </div>
-            <PathDiskInfo
-              :path-issues="pathIssues"
-              :disk-space-loading="diskSpaceLoading"
-              :disk-space="diskSpace"
-              :estimated-size="estimatedInstallSize"
-            />
-          </div>
+          </TooltipWrap>
+
+          <TooltipWrap
+            class="config-field-wrap"
+            side="bottom"
+            :text="currentSource?.skipInstall ? $t('newInstall.notAvailableRemote') : ''"
+          >
+            <div
+              class="config-field"
+              :class="{ 'config-field--disabled': currentSource?.skipInstall }"
+            >
+              <label class="config-label" for="inst-path">{{
+                $t('newInstall.installLocation')
+              }}</label>
+              <div class="config-path-row">
+                <div class="brand-input config-path-input">
+                  <HardDrive :size="14" aria-hidden="true" />
+                  <input
+                    id="inst-path"
+                    :value="instPath"
+                    type="text"
+                    :disabled="!!currentSource?.skipInstall"
+                    @input="instPath = ($event.target as HTMLInputElement).value"
+                  />
+                </div>
+                <button
+                  class="brand-tertiary"
+                  type="button"
+                  :disabled="!!currentSource?.skipInstall"
+                  @click="handleBrowse"
+                >
+                  {{ $t('common.browse') }}
+                </button>
+              </div>
+              <PathDiskInfo
+                v-if="!currentSource?.skipInstall"
+                :path-issues="pathIssues"
+                :disk-space-loading="diskSpaceLoading"
+                :disk-space="diskSpace"
+                :estimated-size="estimatedInstallSize"
+              />
+            </div>
+          </TooltipWrap>
 
           <div ref="advancedRef" class="config-advanced" :class="{ 'is-open': advancedOpen }">
             <button
@@ -737,24 +756,6 @@ defineExpose({ open })
                       {{ $t('newInstall.recommended') }}
                     </span>
                   </button>
-                </div>
-                <!-- Remote Connection (skipInstall) has no install path,
-                     so the classic step-3 Name field never renders. Surface
-                     it here above the source-fields loop so the user can
-                     name their connection. Standalone falls back to
-                     `'ComfyUI'` in handleSave when blank, so it doesn't
-                     need a Name input here. -->
-                <div v-if="currentSource?.skipInstall" class="config-field">
-                  <label class="config-label" for="inst-name">{{ $t('common.name') }}</label>
-                  <div class="brand-input">
-                    <input
-                      id="inst-name"
-                      :value="instName"
-                      type="text"
-                      :placeholder="suggestedName || $t('common.namePlaceholder')"
-                      @input="instName = ($event.target as HTMLInputElement).value"
-                    />
-                  </div>
                 </div>
                 <div v-if="sourceError" class="wizard-error">{{ sourceError }}</div>
                 <div v-if="currentSource" id="source-fields">
@@ -866,63 +867,19 @@ defineExpose({ open })
                     </template>
 
                     <template v-else>
-                      <!-- Native <select> re-skinned for the brand
-                           surface: the real <select> sits invisibly
-                           on top (keeps a11y + keyboard), painted
-                           trigger reads the resolved option text. -->
-                      <div class="brand-input brand-select">
-                        <span class="brand-select__trigger" aria-hidden="true">
-                          <span class="brand-select__trigger-value">
-                            {{ getSelectTriggerLabel(field) }}
-                          </span>
-                          <ChevronDown :size="14" class="brand-select__trigger-chevron" />
-                        </span>
-                        <select
-                          :id="`sf-${field.id}`"
-                          :disabled="
-                            fieldLoading.get(field.id) ||
-                            !fieldOptions.has(field.id) ||
-                            fieldOptions.get(field.id)?.length === 0
-                          "
-                          :value="getSelectedIndex(field)"
-                          @change="
-                            handleFieldSelectChange(
-                              field,
-                              fieldIndex,
-                              ($event.target as HTMLSelectElement).value
-                            )
-                          "
-                        >
-                          <option v-if="fieldLoading.get(field.id)">
-                            {{ $t('newInstall.loading') }}
-                          </option>
-                          <option
-                            v-else-if="
-                              !fieldOptions.has(field.id) ||
-                              fieldOptions.get(field.id)?.length === 0
-                            "
-                          >
-                            {{
-                              fieldErrors.get(field.id)
-                                ? `Error: ${fieldErrors.get(field.id)}`
-                                : fieldOptions.has(field.id)
-                                  ? $t('newInstall.noOptions')
-                                  : '—'
-                            }}
-                          </option>
-                          <template v-else>
-                            <option
-                              v-for="(opt, i) in fieldOptions.get(field.id)"
-                              :key="opt.value"
-                              :value="i"
-                            >
-                              {{
-                                opt.description ? `${opt.label}  —  ${opt.description}` : opt.label
-                              }}{{ opt.recommended ? ` (${$t('newInstall.recommended')})` : '' }}
-                            </option>
-                          </template>
-                        </select>
-                      </div>
+                      <BaseSelect
+                        variant="brand"
+                        :model-value="selections[field.id]?.value ?? ''"
+                        :options="getSelectOptions(field)"
+                        :placeholder="getSelectPlaceholder(field)"
+                        :disabled="
+                          fieldLoading.get(field.id) ||
+                          !fieldOptions.has(field.id) ||
+                          (fieldOptions.get(field.id)?.length ?? 0) === 0
+                        "
+                        :aria-label="field.label"
+                        @update:model-value="onSelectFieldChange(field, fieldIndex, $event)"
+                      />
                     </template>
                   </div>
                 </div>
@@ -1041,6 +998,25 @@ defineExpose({ open })
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+.config-field--disabled {
+  opacity: 0.5;
+}
+/* Keep the wrap hoverable for TooltipWrap; block interaction on controls only. */
+.config-field--disabled input,
+.config-field--disabled button,
+.config-field--disabled .brand-input {
+  pointer-events: none;
+}
+/* TooltipWrap defaults to `display: inline-flex`; promote to block-level
+ * so the wrapped .config-field still fills the card width. */
+.config-field-wrap {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+.config-field-wrap > .config-field--disabled {
+  cursor: not-allowed;
 }
 .config-label {
   font-size: 13px;

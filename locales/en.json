@@ -231,6 +231,7 @@
     "configureTitle": "Configure Comfy Desktop",
     "configureLead": "How would you like this version installed?",
     "detectedGpuLabel": "Detected GPU",
+    "notAvailableRemote": "Not available in Remote Connection mode",
     "helpImproveTitle": "Help improve Comfy",
     "helpImproveHint": "Share anonymous usage data so we can fix bugs and prioritize features.",
     "nameLocation": "Name & Location",
