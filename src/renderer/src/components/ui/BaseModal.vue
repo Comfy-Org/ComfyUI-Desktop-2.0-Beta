@@ -46,14 +46,14 @@ const props = withDefaults(defineProps<Props>(), {
   dismissOnOutside: true,
   showCloseButton: true,
   preventScroll: true,
-  contentClass: undefined,
+  contentClass: undefined
 })
 
 const emit = defineEmits<{ close: [] }>()
 
 if (!props.ariaLabel && !props.ariaLabelledby) {
   console.warn(
-    '[BaseModal] requires `aria-label` or `aria-labelledby` — modal has no accessible name.',
+    '[BaseModal] requires `aria-label` or `aria-labelledby` — modal has no accessible name.'
   )
 }
 
@@ -69,7 +69,7 @@ const { handleOverlayMouseDown, handleOverlayClick } = useModalOverlay(
   // ESC fires through the composable's keydown listener; the closure
   // re-checks the dismiss-on-escape prop so a same-tick flip still wins.
   () => props.open && props.dismissOnEscape,
-  () => emit('close'),
+  () => emit('close')
 )
 
 function onOverlayMouseDown(e: MouseEvent) {
@@ -127,7 +127,7 @@ watch(
       restoreFocus()
     }
   },
-  { immediate: true },
+  { immediate: true }
 )
 
 onBeforeUnmount(() => {
@@ -188,8 +188,7 @@ const sizeClass = computed(() => `is-size-${props.size}`)
   display: grid;
   place-items: center;
   padding: clamp(32px, 6vh, 72px) clamp(16px, 4vw, 48px);
-  background: color-mix(in oklab, var(--neutral-950) 60%, transparent);
-  backdrop-filter: blur(2px);
+  background: color-mix(in oklab, var(--neutral-800) 70%, transparent);
 }
 
 .base-modal-panel {
@@ -203,18 +202,27 @@ const sizeClass = computed(() => `is-size-${props.size}`)
   flex-direction: column;
   width: var(--base-modal-width, var(--base-modal-width-md));
   max-width: 100%;
+  min-height: clamp(360px, 50vh, 540px);
   max-height: clamp(360px, 80vh, 920px);
   border-radius: 14px;
   overflow: hidden;
-  background: var(--neutral-900);
+  background: var(--neutral-800);
   border: 1px solid color-mix(in oklab, var(--neutral-100) 6%, transparent);
   box-shadow: 0 24px 64px 0 rgba(0, 0, 0, 0.35);
   color: var(--neutral-100);
 }
-.base-modal-panel.is-size-sm { --base-modal-width: var(--base-modal-width-sm); }
-.base-modal-panel.is-size-md { --base-modal-width: var(--base-modal-width-md); }
-.base-modal-panel.is-size-lg { --base-modal-width: var(--base-modal-width-lg); }
-.base-modal-panel.is-size-xl { --base-modal-width: var(--base-modal-width-xl); }
+.base-modal-panel.is-size-sm {
+  --base-modal-width: var(--base-modal-width-sm);
+}
+.base-modal-panel.is-size-md {
+  --base-modal-width: var(--base-modal-width-md);
+}
+.base-modal-panel.is-size-lg {
+  --base-modal-width: var(--base-modal-width-lg);
+}
+.base-modal-panel.is-size-xl {
+  --base-modal-width: var(--base-modal-width-xl);
+}
 
 .base-modal-close {
   position: absolute;
@@ -233,7 +241,10 @@ const sizeClass = computed(() => `is-size-${props.size}`)
   opacity: 0.7;
   color: var(--neutral-100);
   cursor: pointer;
-  transition: background 120ms ease, border-color 120ms ease, opacity 120ms ease;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    opacity 120ms ease;
 }
 .base-modal-close:hover {
   opacity: 1;

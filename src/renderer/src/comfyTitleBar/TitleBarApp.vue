@@ -3,7 +3,6 @@ import { computed, ref, onMounted, onUnmounted, useTemplateRef, watch } from 'vu
 import { useI18n } from 'vue-i18n'
 import {
   ArrowDownToLine,
-  Check,
   ChevronDown,
   CloudDownload,
   Loader2,
@@ -529,17 +528,16 @@ onUnmounted(() => {
         @click="handleDownloadsTray"
       >
         <ArrowDownToLine :size="16" />
-        <span v-if="downloadsActiveCount > 0" class="title-downloads-badge" aria-hidden="true">{{
-          downloadsActiveCount
-        }}</span>
+        <span
+          v-if="downloadsActiveCount > 0"
+          class="title-downloads-badge"
+          aria-hidden="true"
+        >{{ downloadsActiveCount }}</span>
         <span
           v-else-if="unseenFinishedCount > 0"
           class="title-downloads-badge is-unseen"
           aria-hidden="true"
-        >
-          <Check :size="9" :stroke-width="3" />
-          <span class="title-downloads-badge-count">{{ unseenFinishedCount }}</span>
-        </span>
+        >{{ unseenFinishedCount }}</span>
       </button>
       <button
         v-if="showSettingsIcon"
@@ -882,7 +880,10 @@ button.title-install-pill.is-open {
   color: var(--text-muted);
   background: transparent;
   border: 1px solid transparent;
-  padding: 0;
+  /* Pad the button so the icon centers freely and the badge has a
+   * corner to anchor into without crowding the glyph. */
+  padding: 4px 6px;
+  border-radius: 8px;
   transition: color 0.12s;
 }
 .title-bar.is-hover-active .title-downloads-tray:hover:not(:disabled) {
@@ -893,30 +894,31 @@ button.title-install-pill.is-open {
 }
 
 .title-downloads-badge {
-  /* Sized so the badge breathes around its three possible payloads:
-   *   - single digit (most common active state) — still reads as a clean
-   *     ~16px dot
-   *   - two-plus digits — `tabular-nums` keeps the column stable so the
-   *     pill doesn't shimmy as counts tick
-   *   - check + count (unseen-finished variant) — the 9px Check icon
-   *     plus a 1ch count text fit without overlapping the chevron's
-   *     left edge against the digit's right edge, which was the visible
-   *     squeeze before. `min-width` is the floor; flex grows past it. */
+  /* Standard notification-badge pattern: small pill floating in the
+   * top-right corner of the button, anchored to the existing
+   * `position: relative` on `.title-downloads-tray`. The icon below
+   * gets the full button real-estate; the badge layers above without
+   * competing for inline space. */
+  position: absolute;
+  top: -4px;
+  right: -4px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 16px;
-  height: 16px;
-  padding: 0 5px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 4px;
   border-radius: 999px;
+  /* Subtle ring against the title-bar background so the badge reads
+   * as a separate token from the icon underneath at any zoom. */
+  box-shadow: 0 0 0 2px var(--titlebar-bg, var(--neutral-900));
   background: var(--accent, #60a5fa);
   color: #fff;
-  font-size: 10px;
-  font-weight: 600;
+  font-size: 9px;
+  font-weight: 700;
   line-height: 1;
   font-variant-numeric: tabular-nums;
-  gap: 3px;
-  white-space: nowrap;
+  pointer-events: none;
 }
 
 .title-downloads-tray.has-active {
@@ -954,20 +956,10 @@ button.title-install-pill.is-open {
   background: rgba(22, 163, 74, 0.12);
 }
 .title-downloads-badge.is-unseen {
-  /* Colour stays as-is (brand-locked); drop the redundant padding
-   * override and let the base rule's `0 5px` apply uniformly. */
+  /* Colour-only delta against the active variant — the green tone
+   * carries the "done, unseen" meaning so the icon+count combo can
+   * stay identical in shape and size. */
   background: #22c55e;
-}
-.title-downloads-badge.is-unseen svg {
-  /* Pull the Check glyph onto the same optical baseline as the count
-   * digit — without this the icon sits ~1px high vs the numeral. */
-  display: inline-block;
-  vertical-align: -1px;
-}
-.title-downloads-badge.is-unseen .title-downloads-badge-count {
-  font-size: 10px;
-  font-weight: 600;
-  line-height: 1;
 }
 
 @keyframes title-downloads-pulse {
