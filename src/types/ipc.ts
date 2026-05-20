@@ -113,12 +113,17 @@ export interface DetailField {
   label: string
   value: string | boolean | number | Record<string, string> | null
   editable?: boolean
-  editType?: 'select' | 'boolean' | 'text' | 'path' | 'channel-cards' | 'args-builder' | 'env-vars'
+  editType?: 'select' | 'boolean' | 'text' | 'number' | 'path' | 'channel-cards' | 'args-builder' | 'env-vars'
   options?: DetailFieldOption[]
   refreshSection?: boolean
   browseOnly?: boolean
   onChangeAction?: string
   tooltip?: string
+  // text / number support — surfaced from SettingsField when DetailField
+  // is built from a global SettingsSection (Global Settings panel).
+  placeholder?: string
+  min?: number
+  max?: number
 }
 
 export interface ActionDef {
@@ -817,6 +822,12 @@ export interface ElectronApi {
    *  the comfy/chooser root. Fire-and-forget; the panel will receive
    *  the resulting `panel-switch` like any other navigation. */
   closeCurrentPanel(): void
+  /** Open the Global Settings popup for the panel's host window. Used
+   *  by the panel-side file-menu "Settings" item and the
+   *  `comfy://open-settings?tab=global` deep link — both previously
+   *  routed to the legacy `SettingsModal` overlay. Main reuses the same
+   *  helper the hamburger Settings entry calls. */
+  openGlobalSettings(): void
   /** Push the first-use takeover's current step to main so it can
    *  (a) cache the value on the host entry for
    *  `buildTitlePopupMenuItems` to read synchronously and (b)
