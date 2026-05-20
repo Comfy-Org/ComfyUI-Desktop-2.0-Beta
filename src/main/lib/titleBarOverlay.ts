@@ -7,10 +7,16 @@ export const TITLEBAR_HEIGHT = 36
 /** Position of macOS traffic-light buttons, vertically centered within the title bar. */
 export const TRAFFIC_LIGHT_POSITION: Electron.Point = { x: 13, y: Math.round((TITLEBAR_HEIGHT - 16) / 2) }
 
-/** Colors must stay in sync with `--surface` in `src/renderer/src/assets/main.css`. */
+/** Colors must stay in sync with `--titlebar-bg` in `src/renderer/src/assets/main.css`.
+ *  Dark mode: `--titlebar-bg: #171718` (deliberately darker than `--surface: #262729`
+ *  so the bar reads as a recessed deck below the body). Light mode aliases
+ *  `--titlebar-bg: var(--surface)`, so #e9e9e9 covers both. The Vue title bar
+ *  paints `var(--titlebar-bg)` on `.title-bar`; this overlay paints the
+ *  Win/Linux native min/max/close strip — both must match or a visible seam
+ *  appears at the right edge on Windows. */
 export function titleBarOverlayForTheme(isDark: boolean): Electron.TitleBarOverlayOptions {
   return {
-    color: isDark ? '#262729' : '#e9e9e9',
+    color: isDark ? '#171718' : '#e9e9e9',
     symbolColor: isDark ? '#dddddd' : '#333333',
     height: TITLEBAR_HEIGHT,
   }

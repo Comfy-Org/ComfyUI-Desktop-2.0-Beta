@@ -778,14 +778,12 @@ export function rebuildComfyViewIfNeeded(
 
 /** Resolve the launcher-theme-driven background + symbol colours used
  *  by install-less host windows. Install-less hosts have no ComfyUI
- *  frontend feeding their theme so the chooser body uses the launcher
- *  renderer's `--surface` (which uses `--surface` from main.css), so
- *  the title-bar Vue header and the OS-level window-controls overlay
- *  both need to track that same colour. `titleBarOverlayForTheme`
- *  already returns the matching `--surface` values (#262729 dark /
- *  #e9e9e9 light) so this helper is a thin wrapper that just maps that
- *  to the `comfy-titlebar:theme-changed` `{ bg, text }` shape consumed
- *  by TitleBarApp.vue. */
+ *  frontend feeding their theme so the title-bar Vue header and the
+ *  OS-level window-controls overlay both track `--titlebar-bg` from
+ *  main.css. `titleBarOverlayForTheme` returns the matching
+ *  `--titlebar-bg` values (#171718 dark / #e9e9e9 light) so this helper
+ *  is a thin wrapper that maps them to the `comfy-titlebar:theme-changed`
+ *  `{ bg, text }` shape consumed by TitleBarApp.vue. */
 export function getChooserHostTheme(): { bg: string; text: string } {
   const overlay = titleBarOverlayForTheme(resolveTheme() === 'dark')
   return { bg: overlay.color ?? TITLEBAR_BG, text: overlay.symbolColor ?? '#dddddd' }

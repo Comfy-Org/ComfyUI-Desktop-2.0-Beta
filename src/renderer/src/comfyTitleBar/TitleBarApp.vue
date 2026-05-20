@@ -5,7 +5,7 @@ import {
   ArrowDownToLine,
   Check,
   ChevronDown,
-  Download,
+  CloudDownload,
   Loader2,
   Menu as MenuIcon,
   MessageSquarePlus,
@@ -258,6 +258,21 @@ function handleSettingsToggle(): void {
 const fileBtnRef = useTemplateRef<HTMLButtonElement>('fileBtn')
 const downloadsBtnRef = useTemplateRef<HTMLButtonElement>('downloadsBtn')
 const installPillRef = useTemplateRef<HTMLButtonElement>('installPill')
+const titleTrailingRef = useTemplateRef<HTMLElement>('titleTrailing')
+
+/** Mirrors the trailing cluster's measured width onto the title bar as
+ *  `--title-trailing-width`, which the left cluster reads as a
+ *  `min-width` reservation. This keeps the install pill anchored to
+ *  true window center even when only the right side has variable
+ *  content (update pills, feedback collapsing to icon, etc.) — the
+ *  left cluster grows to match so both 1fr-flanking tracks stay equal.
+ *
+ *  Pure-CSS can't do this because the left and right clusters have
+ *  asymmetric content (waffle menu vs. 5 pills), so neither side can
+ *  be a `1fr` mirror of the other. ResizeObserver is the standard
+ *  pattern apps like Figma use for the same problem. */
+const trailingWidthPx = ref(0)
+let trailingObserver: ResizeObserver | undefined
 
 const { tooltipAttrs, handleTooltipPointer, hideTip } = useTitleBarTooltip({
   bridge,
@@ -306,6 +321,22 @@ watch(downloadsStartedAt, (next) => {
 let unsubPanel: (() => void) | undefined
 
 onMounted(() => {
+  // Observe the trailing cluster so the left cluster can mirror its
+  // width (keeps the centered install pill at true window centre).
+  // Pills appearing/disappearing (update pills, feedback collapse)
+  // change the trailing width — ResizeObserver fires on each.
+  if (titleTrailingRef.value && typeof ResizeObserver !== 'undefined') {
+    trailingObserver = new ResizeObserver((entries) => {
+      const entry = entries[0]
+      if (!entry) return
+      const width = Math.ceil(entry.contentRect.width)
+      if (width !== trailingWidthPx.value) {
+        trailingWidthPx.value = width
+      }
+    })
+    trailingObserver.observe(titleTrailingRef.value)
+  }
+
   if (!bridge) return
   unsubPanel = bridge.onPanelChanged((panel) => {
     activePanel.value = panel
@@ -316,6 +347,8 @@ onMounted(() => {
 onUnmounted(() => {
   unsubPanel?.()
   hideTip()
+  trailingObserver?.disconnect()
+  trailingObserver = undefined
   if (flashTimer) {
     clearTimeout(flashTimer)
     flashTimer = null
@@ -334,7 +367,8 @@ onUnmounted(() => {
       'is-consent-lockdown': isConsentLockdown
     }"
     :style="{
-      color: themeText ?? undefined
+      color: themeText ?? undefined,
+      '--title-trailing-width': `${trailingWidthPx}px`
     }"
   >
     <!-- Left: app menu (hamburger). Anchors a native OS menu in main —
@@ -426,16 +460,15 @@ onUnmounted(() => {
         </div>
         <div class="title-install-slot title-install-slot--trailing"></div>
       </div>
-      <!-- Install-update pill. Suppressed in install-less
-           mode (no install backing the host) and in the steady state
-           (status tag isn't `update`). Click sends a panel-trigger to
-           open the manage overlay on the update tab — same surface the
-           chooser kebab "Update…" entry lands on. -->
     </div>
 
-    <div class="drag-spacer"></div>
-
-    <div class="title-trailing">
+    <div ref="titleTrailing" class="title-trailing">
+      <!-- Install-update pill ("ComfyUI X.Y.Z") and app-update pill
+           ("Desktop Update") both live in the trailing cluster so the
+           center stays clean — only the install identity sits at true
+           window center. The two updates read as a paired CTA group:
+           ComfyCLogo icon = ComfyUI core; CloudDownload icon = Desktop
+           app. Same chrome (brand-yellow tint), different icons. -->
       <button
         v-if="showInstallUpdatePill"
         type="button"
@@ -443,14 +476,9 @@ onUnmounted(() => {
         v-bind="tooltipAttrs(installUpdatePillLabel)"
         @click="handleInstallUpdatePill"
       >
-        <Download :size="14" />
+        <ComfyCLogo :size="14" class="title-update-pill-glyph" />
         <span class="title-update-pill-label">{{ installUpdatePillLabel }}</span>
       </button>
-      <!-- App-update pill (issue #488) — disappears entirely in the
-           steady state. Click routes through main, which fires the
-           appropriate confirm modal in the panel. The neutral pill
-           styling uses the new brand spec; state is communicated
-           via icon (download / spinner / refresh) rather than tint. -->
       <button
         v-if="showAppUpdatePill"
         type="button"
@@ -462,14 +490,14 @@ onUnmounted(() => {
         v-bind="tooltipAttrs(appUpdatePillTooltip)"
         @click="handleAppUpdatePill"
       >
-        <Download v-if="appUpdateState.kind === 'available'" :size="14" />
+        <CloudDownload v-if="appUpdateState.kind === 'available'" :size="14" />
         <Loader2
           v-else-if="appUpdateState.kind === 'downloading'"
           :size="14"
           class="title-update-pill-spinner"
         />
         <RefreshCw v-else-if="appUpdateState.kind === 'ready'" :size="14" />
-        <span class="title-update-pill-label">{{ appUpdatePillLabel ?? 'Update Available' }}</span>
+        <span class="title-update-pill-label">{{ appUpdatePillLabel ?? 'Desktop Update' }}</span>
       </button>
       <button
         v-if="!isFirstUseTakeover"
@@ -536,14 +564,28 @@ onUnmounted(() => {
 <style scoped>
 .title-bar {
   position: relative;
-  display: flex;
+  /* Three-track grid: [left auto | center 1fr | trailing auto]. Each
+     cluster owns its own track, so they cannot overlap regardless of
+     how wide the center cluster's content gets. The center pill stays
+     visually centered via `justify-self: center` on `.title-center`
+     while the 1fr track absorbs all remaining space.
+
+     This replaces an earlier `display: flex` + `position: absolute;
+     left: 50%` center cluster that didn't know the trailing cluster's
+     width and could be painted under the right-side pills when both
+     update pills + Feedback were showing. Grid makes that overlap
+     structurally impossible. */
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  /* Symmetric base padding. OS-chrome reservations live on the side
-     children so the center cluster anchors to true window center. */
   height: 100vh;
   width: 100vw;
-  padding-left: 12px;
-  padding-right: 12px;
+  /* OS-chrome reservations live in the title-bar padding (NOT in
+     cluster margins) so the grid tracks see clean inner space. Mac
+     reserves 78px on the left for traffic lights (vanishes in
+     fullscreen via the .is-fullscreen override below); Win/Linux
+     reserves 140px on the right for native min/max/close. */
+  padding: 0 12px;
   box-sizing: border-box;
   background: var(--titlebar-bg);
   color: var(--text-muted);
@@ -551,7 +593,24 @@ onUnmounted(() => {
   font: 12px/1 var(--font-sans, 'Inter', system-ui, sans-serif);
   user-select: none;
   -webkit-app-region: drag;
-  gap: 8px;
+  column-gap: 12px;
+  /* Container query root for responsive pill collapse. The breakpoint
+     rules below (`@container title-bar`) read the title bar's own
+     inline size so the layout responds correctly regardless of which
+     OS reservation is in play. */
+  container: title-bar / inline-size;
+}
+/* macOS: reserve 78px on the left for the traffic-light cluster. */
+.title-bar.is-mac {
+  padding-left: 78px;
+}
+/* Traffic lights vanish in macOS fullscreen — reclaim the inset. */
+.title-bar.is-mac.is-fullscreen {
+  padding-left: 12px;
+}
+/* Win/Linux: reserve 140px on the right for native window controls. */
+.title-bar:not(.is-mac) {
+  padding-right: 140px;
 }
 
 /* The container DIVs stay drag-region so empty space around the buttons
@@ -560,71 +619,36 @@ onUnmounted(() => {
    the containers no-drag would consume the entire title bar width and
    leave only the small left/right padding zones draggable. */
 .title-cluster {
-  position: relative;
   display: flex;
   align-items: center;
   gap: 4px;
-  flex: 0 0 auto;
-  /* Sits above the absolutely-positioned center cluster so the
-     hamburger / app-update pill remain clickable if the window
-     narrows enough that the centered pill would otherwise overlap
-     them. Must be > .title-center's z-index, otherwise DOM order wins
-     and the later-painted center cluster covers the cluster's
-     buttons. */
-  z-index: 2;
-}
-/* macOS: shift past the traffic lights (78px reservation − 12px base padding). */
-.title-bar.is-mac .title-cluster {
-  margin-left: 66px;
-}
-/* Traffic lights vanish in macOS fullscreen — reclaim the inset. */
-.title-bar.is-mac.is-fullscreen .title-cluster {
-  margin-left: 0;
+  /* Mirror the trailing cluster's measured width (set by the
+     ResizeObserver in <script>) so the left + trailing grid tracks
+     stay equal-width. This keeps the centre 1fr track perfectly
+     window-centred regardless of which side has more content — the
+     install pill anchors to true window centre at every width. */
+  min-width: var(--title-trailing-width, 0px);
 }
 
 .title-center {
-  /* Anchored to true window center; shrink-wraps around its content. */
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
+  /* Lives in the middle 1fr grid track and is centered within it via
+     `justify-self`, so the install pill anchors to the visual centre
+     of whatever space the track has — without overlapping the left
+     or trailing tracks. */
+  justify-self: center;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 4px;
   min-width: 0;
-  max-width: calc(100% - 24px);
-  /* Sits above the elastic drag-spacer so the always-visible
-     downloads tray and the install-update pill stay clickable when
-     the window narrows. */
-  z-index: 1;
+  max-width: 100%;
 }
 
 .title-trailing {
-  position: relative;
   display: flex;
   align-items: center;
-  gap: 4px;
-  flex: 0 0 auto;
-  margin-left: 12px;
-  /* Same precedence rule as `.title-cluster` — must outrank
-     `.title-center` so the feedback button stays clickable when a
-     wide center cluster encroaches. */
-  z-index: 2;
-}
-/* Win/Linux: native close / min / max controls overlay the right
-   ~140px of the window. Push the trailing cluster past them so the
-   feedback button doesn't sit underneath the OS chrome. */
-.title-bar:not(.is-mac) .title-trailing {
-  margin-right: 128px;
-}
-
-.drag-spacer {
-  /* Eats the remaining flex space between the center cluster and the
-     trailing cluster so the bar's drag region fills the row. */
-  flex: 1 1 auto;
-  min-width: 0;
-  height: 100%;
+  gap: 8px;
+  justify-self: end;
 }
 
 /* --- App / hamburger menu button --- */
@@ -681,7 +705,13 @@ onUnmounted(() => {
   display: inline-flex;
   align-items: center;
   justify-content: space-between;
-  width: 360px;
+  /* Fluid width: floor at 220px (enough for brand mark + install-type
+     icon + caret + ~14 chars of name before ellipsis), preferred
+     ~22% of title-bar inline size, ceiling at 360px. Tuned to coexist
+     with the adjacent install-update pill in the center cluster +
+     leave the right cluster room for the desktop-update pill and
+     trailing buttons without overlap. */
+  width: clamp(220px, 22cqi, 360px);
   height: 28px;
   padding: 5px 8px;
   border-radius: 999px;
@@ -776,9 +806,13 @@ button.title-install-pill.is-open {
   gap: 4px;
   padding: 2px 10px;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--neutral-100);
+  /* High-attention tint: updates are user-actionable CTAs, not passive
+     status indicators — they earn the brand-yellow lift to compete
+     with the surrounding neutrals. Background stays calm so the
+     border + text/icon carry the accent. */
+  border: 1px solid color-mix(in srgb, var(--comfy-yellow) 55%, transparent);
+  background: color-mix(in srgb, var(--comfy-yellow) 8%, transparent);
+  color: var(--comfy-yellow);
   font: inherit;
   font-size: 12px;
   font-weight: 400;
@@ -790,17 +824,20 @@ button.title-install-pill.is-open {
     opacity 0.12s;
 }
 .title-bar.is-hover-active .title-update-pill:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.18);
+  background: color-mix(in srgb, var(--comfy-yellow) 14%, transparent);
+  border-color: var(--comfy-yellow);
 }
 .title-bar.is-light .title-update-pill {
-  background: rgba(0, 0, 0, 0.04);
-  border-color: rgba(0, 0, 0, 0.1);
+  /* Light theme: brand yellow on white needs darker text for contrast.
+     Keep the yellow border + tinted background as the visual signal;
+     text drops to neutral-700 for readability. */
+  background: color-mix(in srgb, var(--comfy-yellow) 18%, transparent);
+  border-color: color-mix(in srgb, var(--comfy-yellow) 65%, var(--neutral-700));
   color: var(--neutral-700);
 }
 .title-bar.is-light.is-hover-active .title-update-pill:hover:not(:disabled) {
-  background: rgba(0, 0, 0, 0.08);
-  border-color: rgba(0, 0, 0, 0.18);
+  background: color-mix(in srgb, var(--comfy-yellow) 26%, transparent);
+  border-color: color-mix(in srgb, var(--comfy-yellow) 85%, var(--neutral-700));
 }
 .title-update-pill:focus-visible {
   outline: 2px solid var(--focus-ring);
@@ -816,6 +853,13 @@ button.title-install-pill.is-open {
 }
 .title-update-pill-label {
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* Cap the label width so unusually long version strings (or longer
+     localized labels) don't push the trailing cluster wide enough to
+     shove the centered install pill off-center. Tooltips on each pill
+     carry the full label, so truncated state stays accessible. */
+  max-width: clamp(80px, 14cqi, 200px);
 }
 
 /* --- Downloads tray ---
@@ -949,6 +993,75 @@ button.title-install-pill.is-open {
   .title-downloads-tray.is-flashing,
   .title-downloads-tray.is-flashing .title-downloads-badge {
     animation: none;
+  }
+}
+
+/* --- Responsive pill collapse ---
+   Container queries read `.title-bar`'s own inline size (set up via
+   `container: title-bar / inline-size` above). Two tiers:
+
+     - Mid  (≤ 1199px on Mac, ≤ 1279px on Win): Feedback label drops
+       to icon-only. Saves ~80px on the trailing cluster.
+     - Narrow (≤ 899px on Mac, ≤ 979px on Win): both update pill
+       labels drop to icon-only. Saves another ~140–180px.
+
+   Tooltips already carry the full label on every pill (see
+   `tooltipAttrs(...)` bindings on each <button>), so icon-only states
+   remain accessible without extra markup.
+
+   The Win thresholds are higher because the trailing cluster reserves
+   128px on the right for native window controls vs. Mac's 66px
+   left-side traffic-light reservation — Win needs to collapse earlier
+   to keep the same effective usable width as Mac. */
+
+/* Mid tier — Feedback label collapses. */
+@container title-bar (max-width: 1199px) {
+  .title-bar.is-mac .title-feedback-label {
+    display: none;
+  }
+  .title-bar.is-mac .title-feedback-button {
+    padding: 4px 6px;
+    gap: 0;
+  }
+}
+@container title-bar (max-width: 1279px) {
+  .title-bar:not(.is-mac) .title-feedback-label {
+    display: none;
+  }
+  .title-bar:not(.is-mac) .title-feedback-button {
+    padding: 4px 6px;
+    gap: 0;
+  }
+}
+
+/* Narrow tier — both update pill labels collapse to icon-only. The
+   collapsed pill becomes a 24×24 circle (matching the Settings + other
+   icon buttons) instead of an oval, so it reads as an icon affordance
+   not a "shrunk pill". */
+@container title-bar (max-width: 1099px) {
+  .title-bar.is-mac .title-update-pill-label {
+    display: none;
+  }
+  .title-bar.is-mac .title-update-pill {
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    gap: 0;
+    justify-content: center;
+    border-radius: 999px;
+  }
+}
+@container title-bar (max-width: 1179px) {
+  .title-bar:not(.is-mac) .title-update-pill-label {
+    display: none;
+  }
+  .title-bar:not(.is-mac) .title-update-pill {
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    gap: 0;
+    justify-content: center;
+    border-radius: 999px;
   }
 }
 </style>
