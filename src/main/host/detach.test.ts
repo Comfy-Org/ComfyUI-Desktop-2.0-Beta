@@ -53,6 +53,7 @@ function makeEntry(window: FakeWindow): ComfyWindowEntry {
     titleBarText: '',
     sourceCategory: null,
     previewInstallationId: null,
+    previewMode: false,
     coldStartPendingReveal: false,
     _installCleanup: null,
     detachInstall: () => {},

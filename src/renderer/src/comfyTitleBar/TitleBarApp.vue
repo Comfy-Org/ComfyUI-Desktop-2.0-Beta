@@ -110,6 +110,14 @@ interface Bridge {
   onFirstUseModeChanged: (
     cb: (mode: 'none' | 'consent-lockdown' | 'post-consent') => void
   ) => () => void
+  /** Preview-mode flag pushed by main. `true` while an in-progress
+   *  install identity preview is active on a chooser host (an op was
+   *  claimed and the install's title + source icon are showing in the
+   *  title bar but the host is still install-less); `false`
+   *  otherwise. Drives renderer gates that would normally suppress
+   *  install-scoped chrome on install-less hosts so the previewed
+   *  install's identity surfaces cleanly. */
+  onPreviewModeChanged: (cb: (preview: boolean) => void) => () => void
   /** App-update state pushes from main. `kind` is `'available'`
    *  after `update-available`, `'ready'` after `update-downloaded`,
    *  and `null` when nothing is pending. Drives the title-bar

@@ -188,6 +188,17 @@ export interface ComfyWindowEntry {
    */
   previewInstallationId: string | null
   /**
+   * `true` when an in-progress install identity preview is active on
+   * this chooser host. Mirrors `previewInstallationId !== null`; kept
+   * as an explicit boolean so the title-bar-ready handshake can
+   * replay it on a fresh mount without re-deriving from the id, and
+   * so the title bar renderer can subscribe to a single boolean
+   * channel for preview-vs-real-attach gating (e.g. showing the
+   * install-type icon while the host stays install-less). Always
+   * `false` when no preview is active.
+   */
+  previewMode: boolean
+  /**
    * Chooser cold-start keeps the BrowserWindow hidden until the panel's
    * first `did-finish-load` so the user doesn't stare at an empty body
    * while panel.html boots. Cleared when the window is revealed.

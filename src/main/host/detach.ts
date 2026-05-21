@@ -295,6 +295,7 @@ export function _detachInstallImpl(entry: ComfyWindowEntry): void {
   entry.titleBarText = CHOOSER_HOST_TITLE_TEXT
   entry.sourceCategory = null
   entry.previewInstallationId = null
+  entry.previewMode = false
   entry.activePanel = 'comfy'
   entry.window.setTitle(CHOOSER_HOST_WINDOW_TITLE)
   if (!entry.titleBarView.webContents.isDestroyed()) {

@@ -15,6 +15,7 @@ interface TitleBarIdentityBridge {
   onThemeChanged: (cb: (theme: { bg: string; text: string }) => void) => () => void
   onFullscreenChanged: (cb: (fullscreen: boolean) => void) => () => void
   onFirstUseModeChanged: (cb: (mode: FirstUseMode) => void) => () => void
+  onPreviewModeChanged: (cb: (preview: boolean) => void) => () => void
 }
 
 interface UseTitleBarIdentityOpts {
@@ -32,6 +33,7 @@ interface TitleBarIdentityApi {
   themeText: Ref<string | null>
   isFullscreen: Ref<boolean>
   firstUseMode: Ref<FirstUseMode>
+  isPreviewMode: Ref<boolean>
   isConsentLockdown: ComputedRef<boolean>
   installTypeMeta: ComputedRef<InstallTypeMeta>
   installTypeLabel: ComputedRef<string>
@@ -63,6 +65,13 @@ export function useTitleBarIdentity(opts: UseTitleBarIdentityOpts): TitleBarIden
   const themeText = ref<string | null>(null)
   const isFullscreen = ref(false)
   const firstUseMode = ref<FirstUseMode>('none')
+  /** Mirrors `entry.previewMode` on main — `true` while an in-progress
+   *  install identity preview is active on a chooser host. The title
+   *  bar treats a preview as identity-equivalent to a real attach for
+   *  install-less-suppressed chrome (e.g. the install-type icon) so
+   *  the user sees the chosen install's identity, not the bare chooser
+   *  host, while the op runs. */
+  const isPreviewMode = ref(false)
 
   const isConsentLockdown = computed(() => firstUseMode.value === 'consent-lockdown')
 
@@ -73,9 +82,13 @@ export function useTitleBarIdentity(opts: UseTitleBarIdentityOpts): TitleBarIden
   )
 
   /** Suppressed on install-less host windows so the static identity
-   *  label reads bare. */
+   *  label reads bare — except when an install identity preview is
+   *  active, in which case the icon shows alongside the previewed
+   *  install name so the chrome reads as the install's identity for
+   *  the duration of the op. */
   const showInstallTypeIcon = computed(
-    () => !opts.isInstallLess.value && sourceCategory.value !== null,
+    () =>
+      (!opts.isInstallLess.value || isPreviewMode.value) && sourceCategory.value !== null,
   )
 
   /** Body luminance test — drives is-light styling (lighter hover state).
@@ -105,6 +118,7 @@ export function useTitleBarIdentity(opts: UseTitleBarIdentityOpts): TitleBarIden
   let unsubTheme: (() => void) | undefined
   let unsubFullscreen: (() => void) | undefined
   let unsubFirstUseMode: (() => void) | undefined
+  let unsubPreviewMode: (() => void) | undefined
 
   onMounted(() => {
     if (!opts.bridge) return
@@ -124,6 +138,9 @@ export function useTitleBarIdentity(opts: UseTitleBarIdentityOpts): TitleBarIden
     unsubFirstUseMode = opts.bridge.onFirstUseModeChanged((mode) => {
       firstUseMode.value = mode
     })
+    unsubPreviewMode = opts.bridge.onPreviewModeChanged((preview) => {
+      isPreviewMode.value = preview
+    })
   })
 
   onUnmounted(() => {
@@ -132,6 +149,7 @@ export function useTitleBarIdentity(opts: UseTitleBarIdentityOpts): TitleBarIden
     unsubTheme?.()
     unsubFullscreen?.()
     unsubFirstUseMode?.()
+    unsubPreviewMode?.()
   })
 
   return {
@@ -141,6 +159,7 @@ export function useTitleBarIdentity(opts: UseTitleBarIdentityOpts): TitleBarIden
     themeText,
     isFullscreen,
     firstUseMode,
+    isPreviewMode,
     isConsentLockdown,
     installTypeMeta,
     installTypeLabel,

@@ -118,7 +118,11 @@ export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts):
   entry.sourceCategory = sourceMap[installation.sourceId]?.category ?? null
   // The attach consumes any in-progress identity preview; clearing the
   // state field keeps a later detach from clobbering identity twice.
+  // `previewMode` is reset symmetrically so the title-bar renderer
+  // stops treating the host as a preview the moment real install
+  // identity takes over.
   entry.previewInstallationId = null
+  entry.previewMode = false
   indexInstallationId(installationId, entry.windowKey)
 
   // Seed the MRU tracker if this in-place attach happens on the
@@ -148,6 +152,10 @@ export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts):
   if (!titleBarView.webContents.isDestroyed()) {
     titleBarView.webContents.send('comfy-titlebar:title-changed', entry.titleBarText)
     titleBarView.webContents.send('comfy-titlebar:source-category-changed', entry.sourceCategory)
+    // Cancel any active preview-mode state on the renderer so the
+    // post-attach title bar drops back to the steady-state install
+    // gating. No-op when no preview was pushed before this attach.
+    titleBarView.webContents.send('comfy-titlebar:preview-mode-changed', false)
     void fx.computeInstallUpdateAvailable(installationId).then((state) => {
       if (titleBarView.webContents.isDestroyed()) return
       titleBarView.webContents.send('comfy-titlebar:install-update-changed', state)

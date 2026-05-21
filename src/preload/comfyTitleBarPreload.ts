@@ -115,6 +115,15 @@ export interface ComfyTitleBarBridge {
   onFirstUseModeChanged(
     cb: (mode: 'none' | 'consent-lockdown' | 'post-consent') => void,
   ): () => void
+  /** Subscribe to preview-mode pushes from main. `true` while an
+   *  in-progress install identity preview is active on a chooser
+   *  host (an op was claimed and the install's title + source icon
+   *  are showing in the title bar but the host is still install-
+   *  less), `false` in every other state. Drives renderer gates
+   *  that would otherwise suppress install-scoped chrome on
+   *  install-less hosts — e.g. the install-type icon next to the
+   *  centre pill. */
+  onPreviewModeChanged(cb: (preview: boolean) => void): () => void
   /** Subscribe to app-update state pushes (status pills). `kind` is
    *  `'available'` after `update-available`, `'ready'` after
    *  `update-downloaded`, and `null` when nothing is pending. Drives
@@ -299,6 +308,13 @@ const bridge: ComfyTitleBarBridge = {
     }
     ipcRenderer.on('comfy-titlebar:first-use-mode-changed', handler)
     return () => ipcRenderer.removeListener('comfy-titlebar:first-use-mode-changed', handler)
+  },
+  onPreviewModeChanged: (cb) => {
+    const handler = (_event: IpcRendererEvent, preview: unknown): void => {
+      cb(!!preview)
+    }
+    ipcRenderer.on('comfy-titlebar:preview-mode-changed', handler)
+    return () => ipcRenderer.removeListener('comfy-titlebar:preview-mode-changed', handler)
   },
   onAppUpdateStateChanged: (cb) => {
     const handler = (_event: IpcRendererEvent, state: unknown): void => {
