@@ -112,21 +112,21 @@ afterEach(() => {
 
 describe('setActivePanel', () => {
   it('no-ops when the requested panel is already active', () => {
-    const fixture = makeEntry({ activePanel: 'settings' })
+    const fixture = makeEntry({ activePanel: 'downloads-v2' })
     comfyWindows.set(fixture.entry.windowKey, fixture.entry)
-    setActivePanel(fixture.entry.windowKey, 'settings')
+    setActivePanel(fixture.entry.windowKey, 'downloads-v2')
     expect(fixture.layoutCalls).toBe(0)
     expect(fixture.titleBarWc.sent).toHaveLength(0)
   })
 
   it('no-ops when the windowKey does not resolve to an entry', () => {
-    expect(() => setActivePanel(999_999, 'settings')).not.toThrow()
+    expect(() => setActivePanel(999_999, 'downloads-v2')).not.toThrow()
   })
 
   it('no-ops when the host window has been destroyed', () => {
     const fixture = makeEntry({ activePanel: 'comfy', destroyed: true })
     comfyWindows.set(fixture.entry.windowKey, fixture.entry)
-    setActivePanel(fixture.entry.windowKey, 'settings')
+    setActivePanel(fixture.entry.windowKey, 'downloads-v2')
     expect(fixture.layoutCalls).toBe(0)
     expect(fixture.entry.activePanel).toBe('comfy')
   })
@@ -146,7 +146,7 @@ describe('refreshComfyTabBody', () => {
   })
 
   it('no-ops when the entry is currently parked on a non-comfy panel', () => {
-    const fixture = makeEntry({ installationId: 'inst-1', activePanel: 'settings' })
+    const fixture = makeEntry({ installationId: 'inst-1', activePanel: 'downloads-v2' })
     comfyWindows.set(fixture.entry.windowKey, fixture.entry)
     indexInstallationId('inst-1', fixture.entry.windowKey)
     refreshComfyTabBody('inst-1')
