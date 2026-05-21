@@ -301,7 +301,6 @@ describe('adoptDesktopInstall — orchestrator', () => {
       configFiles: {
         'comfy.settings.json': JSON.stringify({ 'server_config.listen': '0.0.0.0', 'server_config.port': 8188 }),
       },
-      baseFiles: { '.comfyui-legacy-version': '0.3.45' },
     })
     try {
       writeFakeStagedSource(path.join(legacy.configDir, 'legacy-staging', 'comfyui'), '0.3.45')
@@ -346,31 +345,6 @@ describe('adoptDesktopInstall — orchestrator', () => {
       expect(cloneFn).toHaveBeenCalledOnce()
       expect(record.adoptedSourceMode).toBe('git-clone-fallback')
       expect(record.version).toBe('0.9.9')
-    } finally { legacy.cleanup() }
-  })
-
-  it('falls back to git clone when staged source version mismatches', async () => {
-    const legacy = buildFakeLegacy({
-      configFiles: { 'comfy.settings.json': '{}' },
-      baseFiles: { '.comfyui-legacy-version': '0.3.45' },
-    })
-    try {
-      writeFakeStagedSource(path.join(legacy.configDir, 'legacy-staging', 'comfyui'), '0.9.9')
-      const copyFn = vi.fn(async () => undefined)
-      const cloneFn = vi.fn(async (_url: string, dest: string) => {
-        fs.mkdirSync(dest, { recursive: true })
-        fs.writeFileSync(path.join(dest, 'main.py'), '# fallback clone')
-        return { ok: true as const }
-      })
-      const tools = buildSilentTools()
-      const record = await adoptDesktopInstall({
-        trigger: 'beta-action',
-        tools,
-        deps: buildDeps({ copyStagedSource: copyFn, cloneSourceFromGit: cloneFn }, legacy.info),
-      })
-      expect(copyFn).not.toHaveBeenCalled()
-      expect(cloneFn).toHaveBeenCalledOnce()
-      expect(record.adoptedSourceMode).toBe('git-clone-fallback')
     } finally { legacy.cleanup() }
   })
 

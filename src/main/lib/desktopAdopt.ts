@@ -4,7 +4,7 @@ import { execFile } from 'child_process'
 
 import { detectDesktopInstall, captureDesktopSnapshot, type DesktopInstallInfo } from './desktopDetect'
 import { defaultInstallDir, allocateUniqueDir, sanitizeDirName } from './paths'
-import { gitClone, gitCheckoutCommit } from './git'
+import { gitClone } from './git'
 import { getComfyUIRemoteUrl } from './github-mirror'
 import * as installations from '../installations'
 import type { InstallationRecord } from '../installations'
@@ -12,7 +12,6 @@ import * as settings from '../settings'
 import * as telemetry from './telemetry'
 
 const MARKER_FILE = '.comfyui-desktop-2'
-const LEGACY_VERSION_FILE = '.comfyui-legacy-version'
 const STAGED_SOURCE_REL = path.join('legacy-staging', 'comfyui')
 const BACKUP_REL = 'legacy-backup'
 const SNAPSHOTS_REL = '.snapshots'
@@ -48,7 +47,6 @@ export interface AdoptDeps {
   cloneSourceFromGit: (
     url: string,
     dest: string,
-    ref: string | null,
     sendOutput: (t: string) => void,
     signal: AbortSignal,
   ) => Promise<{ ok: true } | { ok: false; message: string }>
@@ -135,25 +133,20 @@ export async function copyStagedSourceDefault(src: string, dest: string): Promis
 }
 
 /**
- * Shallow-clone the upstream ComfyUI repo into `dest` and check out a
- * specific ref when provided.
+ * Shallow-clone the upstream ComfyUI repo into `dest`. We don't try to
+ * match the legacy bundled snapshot's exact commit — adopted installs
+ * roll forward to the current stable on their first ComfyUI update
+ * anyway, so cloning `main` (or the mirror's default branch) is fine.
  */
 export async function cloneSourceFromGitDefault(
   url: string,
   dest: string,
-  ref: string | null,
   sendOutput: (t: string) => void,
   signal: AbortSignal,
 ): Promise<{ ok: true } | { ok: false; message: string }> {
   const cloneResult = await gitClone(url, dest, sendOutput, signal)
   if (cloneResult.exitCode !== 0) {
     return { ok: false, message: cloneResult.stderr.slice(0, 1000) || 'clone failed' }
-  }
-  if (ref) {
-    const checkout = await gitCheckoutCommit(dest, ref, sendOutput, signal)
-    if (checkout.exitCode !== 0) {
-      return { ok: false, message: checkout.stderr.slice(0, 1000) || `checkout ${ref} failed` }
-    }
   }
   return { ok: true }
 }
@@ -239,15 +232,6 @@ function readLegacyDesktopConfig(configDir: string): Record<string, unknown> {
   return {}
 }
 
-function readLegacyVersionFile(basePath: string): string | null {
-  try {
-    const raw = fs.readFileSync(path.join(basePath, LEGACY_VERSION_FILE), 'utf-8').trim()
-    return raw || null
-  } catch {
-    return null
-  }
-}
-
 /**
  * Best-effort: read the legacy desktop app's `package.json` version from the
  * bundle next to the executable. Returns `null` when the bundle is gone
@@ -322,13 +306,9 @@ async function backupLegacyState(configDir: string, timestamp: string, sendOutpu
 }
 
 /**
- * Inspect `<userData>/legacy-staging/comfyui` and verify it contains a
- * recognisable ComfyUI source tree whose embedded version matches the
- * legacy `.comfyui-legacy-version` token (when both are present).
- */
-/**
  * Read the upstream version embedded in a ComfyUI source tree's
- * `comfyui_version.py`, which looks like `__version__ = "0.3.45"`.
+ * `comfyui_version.py`, which looks like `__version__ = "0.3.45"`. Used
+ * to populate the adopted record's `version` field for UI display.
  */
 function readComfyVersion(sourceDir: string): string | null {
   try {
@@ -340,13 +320,13 @@ function readComfyVersion(sourceDir: string): string | null {
   }
 }
 
-function isStagedSourceValid(stagingDir: string, expectedVersion: string | null): boolean {
-  if (!fs.existsSync(path.join(stagingDir, 'main.py'))) return false
-  const actual = readComfyVersion(stagingDir)
-  if (actual === null) return false
-  if (!expectedVersion) return true
-  // Tolerate `v0.3.45` vs `0.3.45` cosmetic mismatches.
-  return expectedVersion.replace(/^v/, '').trim() === actual
+/**
+ * A staged source tree is usable as long as it has the expected entry
+ * points. The first ComfyUI update rolls forward to current stable, so
+ * the bundled snapshot's exact version doesn't need to match anything.
+ */
+function isStagedSourceValid(stagingDir: string): boolean {
+  return fs.existsSync(path.join(stagingDir, 'main.py'))
 }
 
 /**
@@ -374,13 +354,12 @@ async function findExistingAdoption(basePath: string): Promise<InstallationRecor
  */
 async function sourceComfyUI(
   info: DesktopInstallInfo,
-  legacyVersion: string | null,
   destDir: string,
   tools: AdoptTools,
   deps: AdoptDeps,
 ): Promise<{ mode: AdoptSourceMode } | { mode: 'failed'; message: string }> {
   const stagedDir = path.join(info.configDir, STAGED_SOURCE_REL)
-  if (fs.existsSync(stagedDir) && isStagedSourceValid(stagedDir, legacyVersion)) {
+  if (fs.existsSync(stagedDir) && isStagedSourceValid(stagedDir)) {
     try {
       await deps.copyStagedSource(stagedDir, destDir)
       tools.sendOutput(`Sourced ComfyUI from pre-swap copy at ${stagedDir}\n`)
@@ -390,7 +369,7 @@ async function sourceComfyUI(
     }
   }
   const url = getComfyUIRemoteUrl(settings.get('useChineseMirrors') === true)
-  const cloneResult = await deps.cloneSourceFromGit(url, destDir, legacyVersion, tools.sendOutput, tools.signal)
+  const cloneResult = await deps.cloneSourceFromGit(url, destDir, tools.sendOutput, tools.signal)
   if (!cloneResult.ok) {
     return { mode: 'failed', message: cloneResult.message }
   }
@@ -567,14 +546,13 @@ async function runAdoption(
   await fs.promises.mkdir(installPath, { recursive: true })
 
   sendProgress('source', { percent: 0 })
-  const legacyVersion = readLegacyVersionFile(info.basePath)
   const destSource = path.join(installPath, 'ComfyUI')
   let sourceMode: AdoptSourceMode | null = null
   let sourceAttempts = 0
   while (sourceMode === null) {
     sourceAttempts++
     const sourceResult = await telemetry.trackedStep('desktop2.adopt.source', { ...telemetryContext, attempt: sourceAttempts }, async () => {
-      return sourceComfyUI(info, legacyVersion, destSource, tools, deps)
+      return sourceComfyUI(info, destSource, tools, deps)
     })
     if (sourceResult.mode !== 'failed') {
       sourceMode = sourceResult.mode

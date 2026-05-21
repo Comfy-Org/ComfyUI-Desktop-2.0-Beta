@@ -108,9 +108,14 @@ to the adopted install regardless. Three options were considered; we adopt
 
 | Strategy | How | Pros | Cons |
 |---|---|---|---|
-| **A — Pre‑swap copy** | Final legacy release copies `resources/ComfyUI/` → `<staging>/legacy-comfyui-source/` at startup, **and** writes `basePath/.comfyui-legacy-version`. Adoption reads from the staged source. | No network at adopt time. Bit‑exact match with what user's `.venv` was built against. Offline‑capable. | Requires a final legacy‑repo release before the swap. ~100 MB extra disk during staging. |
-| **B — Post‑swap git clone** | Final legacy release just writes `basePath/.comfyui-legacy-version`. Adoption clones the matching tag into `installPath/ComfyUI/` using Desktop 2.0's bootstrap pygit2. | Smaller disk footprint. Same code path Desktop 2.0 uses for updates. | Needs network at first launch after swap. Risk if exact commit isn't tag‑identifiable. |
-| **C — Hybrid (chosen)** | Final legacy release does **both**: stages source AND writes version file. Adoption prefers the staged copy if present, falls back to git clone if not. | Robust to either path failing. Offline‑first. | Slightly more legacy‑release work. |
+| **A — Pre‑swap copy** | Final legacy release copies `resources/ComfyUI/` → `<staging>/legacy-comfyui-source/` at startup. Adoption reads from the staged source. | No network at adopt time. Offline‑capable. | Requires a final legacy‑repo release before the swap. ~100 MB extra disk during staging. |
+| **B — Post‑swap git clone** | Adoption clones current stable ComfyUI into `installPath/ComfyUI/` using Desktop 2.0's bootstrap pygit2. | Smaller disk footprint. Same code path Desktop 2.0 uses for updates. | Needs network at first launch after swap. |
+| **C — Hybrid (chosen)** | Final legacy release stages the source. Adoption prefers the staged copy if present, falls back to git clone of current stable if not. | Robust to either path failing. Offline‑first. | Slightly more legacy‑release work. |
+
+We don't try to match the legacy bundled snapshot's exact commit — adopted
+installs roll forward to current stable on their first ComfyUI update
+anyway, so the staged copy is treated as a "good enough until first
+update" placeholder. No `.comfyui-legacy-version` token is needed.
 
 Staging location for Strategy C is `<userData>/legacy-staging/comfyui/` —
 inside the legacy app's existing `userData` directory so the swap doesn't
@@ -479,12 +484,9 @@ the first update. On the first "Update ComfyUI" click we:
 1. `git init` in `installPath/ComfyUI/` with per‑repo
    `core.autocrlf=false`, `core.fileMode=false`.
 2. `git remote add origin <upstream>`.
-3. `git fetch --depth=1 origin tag <target>`.
-4. `git reset --hard <target>` — safe because the existing files came from
-   the exact bundled snapshot.
-5. Verify clean `git status`; if dirty (line‑ending churn etc.) the
-   reset is repeated with `--quiet --no-verify`. If still dirty, surface a
-   warning and offer "Switch to managed environment" as a fallback.
+3. `git fetch --depth=1 origin <latest-stable-tag>`.
+4. `git reset --hard <latest-stable-tag>` — we don't try to match the
+   bundled snapshot's commit, just roll forward to current stable.
 
 After that first update, future updates are vanilla `fetch` + `reset`.
 
@@ -500,12 +502,12 @@ Before swapping the legacy ToDesktop build payload to Desktop 2.0:
 1. **Final legacy release must implement Strategy C staging.** At startup,
    the final legacy build:
    - Copies its own `resources/ComfyUI/` → `<userData>/legacy-staging/comfyui/`.
-   - Reads `comfyui_version.py` and writes `basePath/.comfyui-legacy-version`
-     containing the upstream ref string (tag or commit).
-   - Both steps are idempotent and best‑effort; failure logs a warning but
-     does not block launch.
+   - Idempotent and best‑effort; failure logs a warning but does not
+     block launch.
    - This is the **hard blocker** for the swap. Without it, post‑swap users
-     have no offline path to ComfyUI source.
+     who are offline at first launch have no path to ComfyUI source.
+   - No version‑token file is needed — the first update rolls the install
+     forward to current stable regardless of what got staged.
 2. **Keep `productName: "ComfyUI"`** in the cutover build's `package.json`
    only, so `app.getPath('userData')` resolves to the existing legacy dir.
    (Internal `name` can stay `comfyui-desktop-2` — Electron prefers
