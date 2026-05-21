@@ -129,31 +129,6 @@ vi.mock('../views/FirstUseTakeover.vue', () => ({
     methods: { open: vi.fn() },
   },
 }))
-// ManageInstallModal is the active `kind: 'settings'` renderer.
-// Wraps BaseModal + DetailModal (embedded). Tests assert on
-// `data-testid="manage-install-modal"` for the modal root and the
-// nested `data-testid="detail-modal"` for the per-install body —
-// mirrors how the runtime nests them.
-vi.mock('../views/ManageInstallModal.vue', () => ({
-  default: {
-    name: 'ManageInstallModal',
-    props: ['installation', 'initialTab', 'autoAction'],
-    emits: ['close', 'show-progress', 'update:installation', 'navigate-list'],
-    template:
-      '<div data-testid="manage-install-modal" :data-installation-id="installation?.id">' +
-      '<div v-if="installation" data-testid="detail-modal" :data-installation-id="installation.id" :data-initial-tab="initialTab" />' +
-      '</div>',
-  },
-}))
-vi.mock('../views/ComfyUISettingsPanel.vue', () => ({
-  default: {
-    name: 'ComfyUISettingsPanel',
-    props: ['open', 'installation'],
-    emits: ['close', 'show-progress', 'navigate-list'],
-    template: '<div data-testid="comfyui-settings-panel" />',
-    methods: { requestClose: vi.fn() },
-  },
-}))
 vi.mock('../components/DownloadsModal.vue', () => ({
   default: {
     name: 'DownloadsModal',
@@ -348,6 +323,7 @@ function installMockApi(initial?: {
     focusComfyWindow: vi.fn(async () => {}),
     getListActions: vi.fn(async () => []),
     openGlobalSettings: vi.fn(),
+    openInstancePicker: vi.fn(),
   }
   ;(window as unknown as { api: typeof api }).api = api
   return state
@@ -399,23 +375,7 @@ describe('PanelApp', () => {
     expect(wrapper.find('[data-testid="settings-view"]').exists()).toBe(false)
   })
 
-  it('opens the unified Settings modal in response to onPanelSwitch', async () => {
-    // The unified Settings modal defaults to the ComfyUI Settings tab
-    // for install-backed hosts, which embeds the DetailModal body —
-    // assert via the DetailModal stub's testid.
-    const wrapper = mountPanel()
-    await flushPromises()
-    expect(wrapper.find('[data-testid="detail-modal"]').exists()).toBe(false)
-
-    expect(mockState.panelSwitchCallbacks.length).toBeGreaterThan(0)
-    mockState.panelSwitchCallbacks.forEach((cb) => cb({ panel: 'settings' }))
-    await flushPromises()
-    expect(wrapper.find('[data-testid="detail-modal"]').exists()).toBe(true)
-    // Body underneath stays on the default lifecycle view.
-    expect(wrapper.find('[data-testid="comfy-lifecycle"]').exists()).toBe(true)
-  })
-
-  it('ignores unknown panel keys from onPanelSwitch', async () => {
+it('ignores unknown panel keys from onPanelSwitch', async () => {
     const wrapper = mountPanel()
     await flushPromises()
     expect(wrapper.find('[data-testid="comfy-lifecycle"]').exists()).toBe(true)
@@ -426,42 +386,21 @@ describe('PanelApp', () => {
     expect(wrapper.find('[data-testid="settings-view"]').exists()).toBe(false)
   })
 
-  it('renders the unified Settings modal (ComfyUI Settings tab) for the URL installationId', async () => {
-    window.history.replaceState({}, '', '/?installationId=test-id&panel=settings&firstUseCompleted=true')
-    const wrapper = mountPanel()
-    await flushPromises()
-    const detail = wrapper.find('[data-testid="detail-modal"]')
-    expect(detail.exists()).toBe(true)
-    expect(detail.attributes('data-installation-id')).toBe('test-id')
-  })
-
   it('refetches the installation when onInstallationsChanged fires', async () => {
-    window.history.replaceState({}, '', '/?installationId=test-id&panel=settings&firstUseCompleted=true')
-    const wrapper = mountPanel()
+    window.history.replaceState({}, '', '/?installationId=test-id&firstUseCompleted=true')
+    mountPanel()
     await flushPromises()
     expect(mockState.getInstallations).toHaveBeenCalledTimes(1)
 
-    // Mutate the underlying list, then fire the broadcast.
     mockState.installations = [{ ...SAMPLE_INSTALL, name: 'Renamed Install' }]
     expect(mockState.installationsChangedCallbacks.length).toBeGreaterThan(0)
     mockState.installationsChangedCallbacks.forEach((cb) => cb())
     await flushPromises()
 
     expect(mockState.getInstallations).toHaveBeenCalledTimes(2)
-    expect(wrapper.find('[data-testid="detail-modal"]').exists()).toBe(true)
   })
 
-  it('does not open the ComfyUI Settings tab when the installationId does not match', async () => {
-    // The unified Settings modal still mounts on `panel=settings`, but
-    // with no matching installation it falls through to the Global
-    // Settings tab — DetailModal isn't embedded.
-    window.history.replaceState({}, '', '/?installationId=missing-id&panel=settings&firstUseCompleted=true')
-    const wrapper = mountPanel()
-    await flushPromises()
-    expect(wrapper.find('[data-testid="detail-modal"]').exists()).toBe(false)
-  })
-
-  it('renders the comfy-lifecycle view when initialised with that panel', async () => {
+it('renders the comfy-lifecycle view when initialised with that panel', async () => {
     // Main initialises panel.html with `panel=comfy-lifecycle` when the
     // Comfy tab body needs to show the lifecycle UI (instance not running).
     window.history.replaceState({}, '', '/?installationId=test-id&panel=comfy-lifecycle&firstUseCompleted=true')
@@ -472,17 +411,7 @@ describe('PanelApp', () => {
     expect(lifecycle.attributes('data-installation-id')).toBe('test-id')
   })
 
-  it('opens the unified Settings modal on Global Settings for install-less hosts', async () => {
-    // Install-less (chooser) hosts now delegate to main via
-    // window.api.openGlobalSettings() — no in-panel modal opens.
-    window.history.replaceState({}, '', '/?panel=settings&firstUseCompleted=true')
-    mountPanel()
-    await flushPromises()
-    const api = (window as unknown as { api: { openGlobalSettings: ReturnType<typeof vi.fn> } }).api
-    expect(api.openGlobalSettings).toHaveBeenCalledTimes(1)
-  })
-
-  it('opens the new-install takeover above the chooser body when show-new-install fires', async () => {
+it('opens the new-install takeover above the chooser body when show-new-install fires', async () => {
     // Flow modals are Tier 3 takeover overlays. The chooser stays
     // mounted underneath the takeover, so dismissing the takeover
     // drops the user back into the chooser tile they came from with
@@ -772,24 +701,30 @@ describe('PanelApp', () => {
     expect(wrapper.find('[data-testid="comfy-lifecycle"]').exists()).toBe(true)
   })
 
-  it('mounts the manage overlay (DetailModal) when a panel-trigger-overlay install-update event arrives', async () => {
+  it('opens the instance picker (expanded, Update tab) when a panel-trigger-overlay install-update event arrives', async () => {
     // The title-bar install-update pill click is forwarded by main
     // as an `onPanelTriggerOverlay` event with
-    // `kind: 'install-update'` and the host's installationId. The
-    // panel renderer routes that into a Tier 1 manage overlay with
-    // initialTab='update' so the DetailModal opens directly on the
-    // update tab.
-    const wrapper = mountPanel()
+    // `kind: 'install-update'`. Post-redesign the panel renderer
+    // routes that into the instance picker popup (expanded, Update
+    // tab) instead of mounting a Tier 1 DetailModal — same surface
+    // the chooser-card kebab Update entry now opens.
+    mountPanel()
     await flushPromises()
-    expect(wrapper.find('[data-testid="detail-modal"]').exists()).toBe(false)
+    const api = (
+      window as unknown as { api: { openInstancePicker: ReturnType<typeof vi.fn> } }
+    ).api
 
     mockState.panelTriggerOverlayCallbacks.forEach((cb) =>
       cb({ kind: 'install-update', installationId: 'test-id' }),
     )
     await flushPromises()
-    const detail = wrapper.find('[data-testid="detail-modal"]')
-    expect(detail.exists()).toBe(true)
-    expect(detail.attributes('data-installation-id')).toBe('test-id')
+
+    expect(api.openInstancePicker).toHaveBeenCalledTimes(1)
+    expect(api.openInstancePicker).toHaveBeenCalledWith({
+      installationId: 'test-id',
+      mode: 'expanded',
+      initialTab: 'update',
+    })
   })
 
   it('shows the "Desktop Update Ready" confirm modal when a restart-prompt event arrives, and installs on confirm', async () => {
@@ -1001,24 +936,7 @@ describe('PanelApp', () => {
       })
     })
 
-    it('fires desktop2.view.opened with the previous panel as from_view when opening unified settings', async () => {
-      // Default install-backed host → comfy-lifecycle is the underlying body.
-      // switchPanel('settings') is the one telemetry-emitting overlay
-      // opener for the file menu.
-      mountPanel()
-      await flushPromises()
-      const events = captureTelemetry()
-      mockState.panelSwitchCallbacks.forEach((cb) => cb({ panel: 'settings' }))
-      await flushPromises()
-      const viewEvents = events.filter((e) => e.actionName === 'desktop2.view.opened')
-      expect(viewEvents).toHaveLength(1)
-      expect(viewEvents[0].context).toMatchObject({
-        view: 'settings',
-        from_view: 'comfy-lifecycle',
-      })
-    })
-
-    it('does NOT fire desktop2.view.opened when a panel-switch IPC re-confirms the active body panel', async () => {
+it('does NOT fire desktop2.view.opened when a panel-switch IPC re-confirms the active body panel', async () => {
       mountPanel()
       await flushPromises()
       const events = captureTelemetry()

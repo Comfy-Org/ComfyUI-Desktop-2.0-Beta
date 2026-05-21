@@ -1,23 +1,21 @@
 <script setup lang="ts">
-import { computed, ref, toRef, useTemplateRef, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, toRef, useTemplateRef, watch } from 'vue'
 import { useTitlePopupAutoResize } from '../composables/useTitlePopupAutoResize'
 import { useI18n } from 'vue-i18n'
-import { ChevronRight, ChevronUp, Plus, Search } from 'lucide-vue-next'
+import { ChevronLeft, Plus, Search, X } from 'lucide-vue-next'
 import BaseInput from '../components/ui/BaseInput.vue'
-import BaseAccordion from '../components/ui/BaseAccordion.vue'
-import BaseMenu, { type BaseMenuItem } from '../components/ui/BaseMenu.vue'
-import SettingsSectionList from '../views/comfyUISettings/SettingsSectionList.vue'
-import PickerSnapshotsList from './instancePicker/PickerSnapshotsList.vue'
 import { FILTER_CHIPS, useInstallList } from '../composables/useInstallList'
-import { revealInFolderLabel } from '../composables/usePlatform'
-import { installTypeMetaFor } from '../lib/installTypeIcon'
+import { useSessionStore } from '../stores/sessionStore'
+import ComfyUISettingsContent from '../components/settings/ComfyUISettingsContent.vue'
 import InstanceRow from './instancePicker/InstanceRow.vue'
+import PickerRow from './instancePicker/PickerRow.vue'
+import { mergePanelLocaleIntoPopup } from './pickerSettingsApiShim'
 import type {
-  ActionDef,
-  DetailField,
   DetailSection,
   Installation,
-  SnapshotListData
+  RunningInstance,
+  ShowProgressOpts,
+  SnapshotListData,
 } from '../types/ipc'
 
 /**
@@ -60,13 +58,56 @@ interface PickerSnapshot {
   selectedInstallationId: string | null
   selectedSettings: DetailSection[] | null
   selectedSnapshots: SnapshotListData | null
+  /** Compact = identity-card right pane; expanded = full per-install
+   *  settings UI in the right pane and the popup bounds grow to
+   *  95dvw × 95dvh. Flipped via the `setPickerMode` bridge. */
+  mode?: 'compact' | 'expanded'
+  /** When `mode === 'expanded'`, the tab the settings UI opens on. */
+  initialTab?: string | null
+  /** When `mode === 'expanded'`, an action id to fire automatically. */
+  autoAction?: string | null
 }
 
 const props = defineProps<{
   snapshot: PickerSnapshot
 }>()
 
-const { t } = useI18n()
+const { t, mergeLocaleMessage } = useI18n()
+
+// Per-install settings UI depends on session-running state for the
+// synthetic Launch→Restart swap. The popup doesn't subscribe to the
+// session-lifecycle IPC fan-out (no `init()`); instead we hydrate the
+// store's `runningInstances` map directly from the picker snapshot's
+// `runningInstallationIds`. Each snapshot refresh re-syncs.
+const sessionStore = useSessionStore()
+function hydrateSessionStoreFromSnapshot(): void {
+  const next = new Set(props.snapshot.runningInstallationIds)
+  // Drop ids that are no longer running.
+  for (const id of Array.from(sessionStore.runningInstances.keys())) {
+    if (!next.has(id)) sessionStore.runningInstances.delete(id)
+  }
+  // Add ids that are newly running. We don't carry the full
+  // `RunningInstance` payload through the snapshot (the picker only
+  // surfaces ids), so seed with a minimal record — `useComfyUISettings`
+  // only reads `.has(id)` via `isRunning(id)`.
+  for (const id of next) {
+    if (!sessionStore.runningInstances.has(id)) {
+      const placeholder: RunningInstance = {
+        installationId: id,
+        installationName: '',
+        mode: '',
+      }
+      sessionStore.runningInstances.set(id, placeholder)
+    }
+  }
+}
+
+// Merge main's locale catalog on first expand; compact path stays IPC-free.
+let panelLocaleMerge: Promise<void> | null = null
+function ensurePanelLocaleMerged(): Promise<void> {
+  panelLocaleMerge ??= mergePanelLocaleIntoPopup(mergeLocaleMessage)
+  return panelLocaleMerge
+}
 
 // Bridge surface — only the methods the picker dispatches on user
 // actions. `onInstancePickerSnapshot` subscription is owned by the
@@ -98,6 +139,23 @@ interface PickerBridge {
    *  Same plumbing as `GlobalSettingsView` — main clamps to the picker's
    *  ceiling band so unbounded growth is impossible. */
   requestSize: (height: number) => void
+  /** Picker → flip between compact and expanded modes. Main animates
+   *  the popup bounds (compact → 95dvw × 95dvh centred). */
+  setPickerMode: (
+    mode: 'compact' | 'expanded',
+    opts?: { initialTab?: string; autoAction?: string | null },
+  ) => void
+  /** Picker → forward a `show-progress` request to the panel renderer. */
+  pickerForwardShowProgress: (payload: {
+    installationId: string
+    actionId: string
+    actionData?: Record<string, unknown>
+    title: string
+    cancellable?: boolean
+    triggersInstanceStart?: boolean
+    opKind?: 'launch' | 'install' | 'update' | 'destructive' | 'snapshot' | 'generic'
+    isRestart?: boolean
+  }) => void
 }
 const bridge = (window as unknown as { __comfyTitlePopup?: PickerBridge }).__comfyTitlePopup
 
@@ -124,18 +182,48 @@ const {
 // Chips come from the shared `FILTER_CHIPS` constant in
 // `useInstallList`, so ChooserView (when its hidden chip row comes
 // back) and the picker can't drift in chip order or labels.
+//
+// Hide chips with zero installs in that bucket (except "All", which
+// always shows) so the chip row stays useful instead of decorative.
+const visibleChips = computed(() => {
+  return FILTER_CHIPS.filter((chip) => {
+    if (chip.key === 'all') return true
+    const count = installations.value.filter((i) => {
+      if (chip.key === 'local') {
+        return i.sourceCategory === 'local' || i.sourceCategory === 'desktop'
+      }
+      return i.sourceCategory === chip.key
+    }).length
+    return count > 0
+  })
+})
+
 
 // --- selection state ---
 //
-// Pre-select the host's active install on open. Watch the prop so a
-// fresh `set-config` (popover re-opens against a different host)
-// re-syncs the selection.
-const selectedId = ref<string | null>(props.snapshot.activeInstallationId)
+// Pre-select the install the snapshot points at. `selectedInstallationId`
+// wins over `activeInstallationId` because it carries the explicit
+// caller intent (chooser-card kebab "Restore Snapshot" / "Update" sends
+// it), while `activeInstallationId` is just the host's currently-focused
+// install. Falling back to `activeInstallationId` covers the title-bar
+// pill click path where no specific install was requested.
+function resolveInitialSelection(snapshot: PickerSnapshot): string | null {
+  return snapshot.selectedInstallationId ?? snapshot.activeInstallationId
+}
+const selectedId = ref<string | null>(resolveInitialSelection(props.snapshot))
+watch(
+  () => props.snapshot.selectedInstallationId,
+  (next) => {
+    if (next) selectedId.value = next
+  },
+)
 watch(
   () => props.snapshot.activeInstallationId,
   (next) => {
-    selectedId.value = next
-  }
+    if (!props.snapshot.selectedInstallationId) {
+      selectedId.value = next
+    }
+  },
 )
 
 // Fall back to the first visible install when the active one isn't in
@@ -150,26 +238,11 @@ const selectedInstall = computed<Installation | null>(() => {
   return null
 })
 
-const selectedTypeMeta = computed(() =>
-  selectedInstall.value ? installTypeMetaFor(selectedInstall.value.sourceCategory) : null
-)
-
-/** Install versions may already include a leading "v"; avoid "vv…". */
-const selectedVersionLabel = computed(() => {
-  const raw = selectedInstall.value?.version
-  if (!raw) return ''
-  return raw.startsWith('v') || raw.startsWith('V') ? raw : `v${raw}`
-})
-
 const runningSet = computed(() => new Set(props.snapshot.runningInstallationIds))
 
 function isRowRunning(inst: Installation): boolean {
   return runningSet.value.has(inst.id)
 }
-
-const isSelectedRunning = computed(
-  () => selectedInstall.value != null && runningSet.value.has(selectedInstall.value.id)
-)
 
 // --- action dispatch ---
 //
@@ -183,215 +256,161 @@ function handleSelect(inst: Installation): void {
   selectedId.value = inst.id
 }
 
-// Per-install "More" menu. Item ids match the `InstallMenuActionId`
-// strings `useInstallContextMenu` dispatches on, so the panel-side
-// router can hand each id straight to the composable's `triggerAction`
-// without a translation table.
-const moreMenuItems = computed<BaseMenuItem[]>(() => {
-  const inst = selectedInstall.value
-  if (!inst) return []
-  const isInstalled = inst.status === 'installed'
-  const isLocalLike = inst.sourceCategory !== 'cloud'
-  const hasPath = !!inst.installPath
-  const requiresStoppedDisabled = isSelectedRunning.value
-  const items: BaseMenuItem[] = []
-  if (hasPath && isLocalLike) {
-    items.push({ id: 'reveal-in-folder', label: revealInFolderLabel(bridge?.platform) })
-  }
-  // Copy Installation — standalone source only (mirrors the
-  // composable's gating). REQUIRES_STOPPED.
-  if (isInstalled && inst.sourceCategory === 'local') {
-    items.push({
-      id: 'copy-install',
-      label: t('actions.copyInstallation'),
-      disabled: requiresStoppedDisabled
-    })
-  }
-  if (isInstalled && isLocalLike) {
-    items.push({ id: 'untrack', label: t('actions.untrack') })
-  }
-  if (isInstalled && isLocalLike) {
-    items.push({
-      id: 'delete',
-      label: t('chooser.menuDelete'),
-      style: 'danger',
-      separator: true,
-      disabled: requiresStoppedDisabled
-    })
-  }
-  return items
-})
-
-function handleMoreMenuSelect(id: string): void {
-  if (!selectedInstall.value) return
-  bridge?.openInstallAction(selectedInstall.value.id, id)
-}
-
-function handleOpenButton(): void {
-  if (!selectedInstall.value) return
-  // Even when the user clicked Open on the host's own install (a
-  // visual no-op because main just refocuses the existing window),
-  // the picker still dismisses — that's the canonical "I committed"
-  // signal back to the user.
-  //
-  // Branch on running state: a running selected install means "Open"
-  // wouldn't do anything visible (main would just refocus the existing
-  // window), so the CTA reads "Restart" and dispatches the restart
-  // flow — main confirms with a native dialog, stops the session, then
-  // re-launches into a fresh Comfy window.
-  if (isSelectedRunning.value) {
-    bridge?.restartInstall(selectedInstall.value.id)
+/** Primary CTA dispatch for a row. Branches on running state: a
+ *  running install means "Open" wouldn't do anything visible (main
+ *  refocuses the existing window) so the CTA reads "Restart" and
+ *  dispatches the restart flow — main confirms with a native dialog,
+ *  stops the session, then re-launches. Otherwise "Open" → pickInstall
+ *  (focus-or-launch) and the popup dismisses. */
+function handleRowOpen(inst: Installation): void {
+  if (runningSet.value.has(inst.id)) {
+    bridge?.restartInstall(inst.id)
   } else {
-    bridge?.pickInstall(selectedInstall.value.id)
+    bridge?.pickInstall(inst.id)
   }
 }
 
-const openCtaLabel = computed(() =>
-  isSelectedRunning.value ? t('instancePicker.restart') : t('instancePicker.open')
-)
+/** Per-row Manage CTA. Seeds the picker's selection to this install
+ *  before flipping into expanded mode so the expanded view's left
+ *  list lands on the row the user clicked. Pre-merges the panel
+ *  locale catalog so the settings UI never paints with dotted-key
+ *  placeholders during the morph. */
+async function handleRowManage(inst: Installation): Promise<void> {
+  selectedId.value = inst.id
+  await ensurePanelLocaleMerged()
+  bridge?.setPickerMode('expanded', { initialTab: 'config' })
+}
+
+function openCtaLabelFor(inst: Installation): string {
+  return runningSet.value.has(inst.id)
+    ? t('instancePicker.restart')
+    : t('instancePicker.open')
+}
 
 function handleNewInstall(): void {
   bridge?.openNewInstall()
 }
 
-function handleCloudClick(): void {
-  // Cloud row body click = select-only (same switcher contract as the
-  // regular install rows). The Open button commits.
-  if (cloudInstall.value) {
-    selectedId.value = cloudInstall.value.id
-  } else {
-    // Empty Cloud CTA — no install to select, the click commits
-    // directly into the new-install flow.
-    bridge?.openNewInstall()
-  }
-}
-
-const isCloudRowActive = computed(
-  () => cloudInstall.value != null && selectedId.value === cloudInstall.value.id
-)
-
-// --- Settings + Snapshots accordions (right pane) ---
+// --- Mode + resize plumbing ---
 //
 // Selection sync: when the user picks a DIFFERENT install row, tell
-// main so it can resolve that install's Settings + Snapshots and push
-// a fresh snapshot back. The snapshot prop's `selectedSettings` /
-// `selectedSnapshots` carry the resolved data that the accordions
-// below render.
+// main so it can update its selection bookkeeping (used by the
+// install-action dispatch + by Step 4-5's expanded-mode data flow).
 //
 // No `immediate: true` here: main's click handler already seeded
-// `pickerSelectedInstallationId` with the host's active install and
-// kicked the initial details fetch before showing the popup. Firing
-// this watcher on mount would re-tell main "I selected X" (where X
-// is the value main itself just set), causing a snapshot rebroadcast
-// → a `pickerSnapshot` prop change → a `measureAndRequestSize` call
-// → a `setBounds` on the WebContentsView mid-open-animation. That
-// resize was the visible "open → close → open" flicker.
+// `pickerSelectedInstallationId` with the host's active install before
+// showing the popup. Firing this watcher on mount would cause a
+// no-op snapshot rebroadcast → mid-open-animation `setBounds` flicker.
 watch(
   () => selectedInstall.value?.id ?? null,
   (next) => {
     bridge?.setPickerSelectedInstall(next)
-  }
+  },
 )
 
-// Per-accordion open state. Both collapsed by default — the popup is
-// already a focused glance affordance; expanding takes one click to
-// reveal the heavier UI. Keyed by `selectedInstall.value.id` so a
-// switch between rows resets the open state (the previous install's
-// expansion was scoped to its context).
-const settingsOpen = ref(false)
-const snapshotsOpen = ref(false)
-watch(
-  () => selectedInstall.value?.id ?? null,
-  () => {
-    settingsOpen.value = false
-    snapshotsOpen.value = false
-  }
-)
-
-function toggleSettingsAccordion(): void {
-  settingsOpen.value = !settingsOpen.value
-}
-function toggleSnapshotsAccordion(): void {
-  snapshotsOpen.value = !snapshotsOpen.value
-}
-
-// Fit-to-content resize for the right-pane Settings / Snapshots
-// accordions. The `.picker` root is `height: 100%`-clamped to the
-// WebContentsView's current bounds and the `.picker-detail-nav` is
-// `overflow-y: auto`, so observing either directly saturates the
-// natural-height signal. `detailNavContentRef` sits inside the nav's
-// scroll container and reports the unclamped accordion content
-// height; `useTitlePopupAutoResize` re-derives total popup height by
-// nudging the current root height by the delta between what the nav
-// is currently allowed to be vs. what the content wants.
+// Resize plumbing for the natural-height popup. The right-pane
+// identity card + CTA stack is the dominant height driver now that
+// the Settings / Snapshots accordions are gone, so observe the
+// detail column directly.
 const pickerRootRef = useTemplateRef<HTMLDivElement>('pickerRootRef')
-const detailNavRef = useTemplateRef<HTMLDivElement>('detailNavRef')
-const detailNavContentRef = useTemplateRef<HTMLDivElement>('detailNavContentRef')
+const detailRef = useTemplateRef<HTMLDivElement>('detailRef')
 
 useTitlePopupAutoResize(
-  detailNavContentRef,
+  detailRef,
   () => {
     const root = pickerRootRef.value
-    const nav = detailNavRef.value
-    const content = detailNavContentRef.value
-    if (!root || !nav || !content) return NaN
+    if (!root) return NaN
     // +2 for the `.popup` 1px top + 1px bottom border.
-    return root.offsetHeight + (content.offsetHeight - nav.offsetHeight) + 2
+    return root.offsetHeight + 2
   },
   bridge?.requestSize ? bridge.requestSize.bind(bridge) : undefined,
 )
 
-// Picker right-pane Settings accordion shows ONLY the Config tab —
-// not status / update. Same filter the drawer uses
-// (`useComfyUISettings.sectionsForTab('settings')`) just applied
-// renderer-side over the already-pushed payload. Status + Update belong
-// in the full drawer where there's room for the readonly-list chrome
-// and the update-channel controls; the picker accordion is for the
-// settings the user actually toggles.
-const selectedSettingsSections = computed<DetailSection[]>(() => {
-  const all = (props.snapshot.selectedSettings as DetailSection[] | null) ?? []
-  return all.filter((s) => s.tab === 'settings')
-})
-const selectedSnapshotsData = computed<SnapshotListData | null>(
-  () => (props.snapshot.selectedSnapshots as SnapshotListData | null) ?? null
+/** Mode the popup is currently in, from the most recent snapshot. */
+const snapshotMode = computed<'compact' | 'expanded'>(
+  () => props.snapshot.mode ?? 'compact',
 )
-// Cloud sources don't push a snapshots payload at all (see
-// urlSource.ts — only `status` and `settings` sections are emitted),
-// so absence of the payload is the same rule the drawer applies
-// server-side. Local installs always send one, even when empty —
-// PickerSnapshotsList owns the empty state inside the accordion.
-const hasSnapshots = computed(() => selectedSnapshotsData.value != null)
 
-async function handlePickerUpdateField(field: DetailField, value: unknown): Promise<void> {
-  if (!selectedInstall.value) return
-  await bridge?.pickerUpdateField(selectedInstall.value.id, field.id, value)
-  // Main rebroadcasts the picker snapshot on success, so the new
-  // field value flows back automatically. Errors surface in the
-  // returned message — the picker doesn't have its own toast surface
-  // yet, so for now we just no-op-on-error (the value visibly snaps
-  // back to whatever's in the latest snapshot).
+/** Initial tab to seed `ComfyUISettingsContent` with on the expanded
+ *  branch's first mount. */
+const initialExpandedTab = computed<'config' | 'status' | 'update' | 'snapshots'>(() => {
+  const raw = props.snapshot.initialTab
+  if (raw === 'status' || raw === 'update' || raw === 'snapshots') return raw
+  return 'config'
+})
+
+function handleCollapseToCompact(): void {
+  bridge?.setPickerMode('compact')
 }
 
-async function handlePickerRunAction(action: ActionDef): Promise<void> {
-  if (!selectedInstall.value) return
-  const id = action.id
-  if (id !== 'snapshot-save' && id !== 'snapshot-restore' && id !== 'snapshot-delete') {
-    // The shared SettingsSectionList emits all section actions
-    // through `run-action`, but the picker only whitelists the
-    // snapshot lifecycle. Non-snapshot actions (channel-pick,
-    // delete-install, etc.) belong in the full Settings drawer.
-    return
+// Keep `sessionStore.runningInstances` in sync with the snapshot's
+// `runningInstallationIds`. Fires `immediate` so the very first render
+// of the expanded UI already has correct running state.
+watch(
+  () => props.snapshot.runningInstallationIds.join(','),
+  () => hydrateSessionStoreFromSnapshot(),
+  { immediate: true },
+)
+
+// If main opens the picker directly in expanded mode (chooser-card
+// kebab Update / Migrate / Restore / Delete in Step 6), pre-merge the
+// locale on the first snapshot that lands so the settings UI's keys
+// resolve from frame one.
+watch(
+  () => snapshotMode.value,
+  (next, prev) => {
+    if (next === 'expanded' && prev !== 'expanded') {
+      void ensurePanelLocaleMerged()
+    }
+  },
+  { immediate: true },
+)
+
+// ESC: collapse to compact when expanded, otherwise let the popup's
+// existing close-on-ESC behaviour close the popup. Capture-phase
+// listener so we win against any nested handlers inside the settings
+// UI.
+function handleEsc(event: KeyboardEvent): void {
+  if (event.key !== 'Escape') return
+  if (snapshotMode.value === 'expanded') {
+    event.preventDefault()
+    event.stopPropagation()
+    handleCollapseToCompact()
   }
-  await bridge?.pickerRunAction(selectedInstall.value.id, id)
 }
+onMounted(() => {
+  document.addEventListener('keydown', handleEsc, true)
+})
+onUnmounted(() => {
+  document.removeEventListener('keydown', handleEsc, true)
+})
 
-function handleOpenArgsPage(_field: DetailField): void {
-  // The args builder is a sub-page nav in the full drawer; the popup
-  // doesn't have room for it. Silently no-op here; users who need to
-  // edit args open the drawer from the title-bar Settings icon. Field
-  // arg is intentionally unused — the picker doesn't expose the args
-  // builder yet.
-  void _field
+// Popup has no `ProgressModal` of its own; forward the request to the
+// parent panel which mounts one. Main hides the popup so the modal is
+// unobstructed; the panel rebuilds `apiCall` from actionId/actionData
+// and runs it through its existing `handleShowProgress` pipeline.
+function handleSettingsShowProgress(opts: ShowProgressOpts): void {
+  if (!opts.actionId) return
+  bridge?.pickerForwardShowProgress({
+    installationId: opts.installationId,
+    actionId: opts.actionId,
+    actionData: opts.actionData,
+    title: opts.title,
+    cancellable: opts.cancellable,
+    triggersInstanceStart: opts.triggersInstanceStart,
+    opKind: opts.opKind,
+    isRestart: opts.actionId === 'restart',
+  })
+}
+function handleSettingsNavigateList(): void {
+  // The selected install was deleted/untracked — flip back to compact
+  // and let the snapshot rebroadcast scrub the row from the list.
+  handleCollapseToCompact()
+}
+function handleSettingsRelaunch(): void {
+  bridge?.setPickerMode('compact')
+  // Fire the relaunch through the shim — main exits the app.
+  ;(window as unknown as { api?: { relaunchApp(): void } }).api?.relaunchApp()
 }
 </script>
 
@@ -409,7 +428,7 @@ function handleOpenArgsPage(_field: DetailField): void {
 
     <div class="picker-chips" role="tablist" aria-label="Source filter">
       <button
-        v-for="chip in FILTER_CHIPS"
+        v-for="chip in visibleChips"
         :key="chip.key"
         type="button"
         role="tab"
@@ -422,29 +441,73 @@ function handleOpenArgsPage(_field: DetailField): void {
       </button>
     </div>
 
-    <div class="picker-body">
+    <!-- Compact mode: single-column list of rich PickerRow cards. No
+         left/right split — each row is self-contained with its own
+         Open + Manage. Comfy Cloud renders as the same PickerRow shape
+         so the visual rhythm holds. The "+ New Instance" affordance is
+         pinned in a sticky footer so it stays visible while the list
+         scrolls. -->
+    <div v-if="snapshotMode !== 'expanded'" ref="detailRef" class="picker-rows-wrap">
+      <div class="picker-rows" role="list">
+        <PickerRow
+          v-if="showCloudCard && cloudInstall"
+          :key="cloudInstall.id"
+          :installation="cloudInstall"
+          :active="selectedId === cloudInstall.id"
+          :running="isRowRunning(cloudInstall)"
+          :last-launched-label="lastLaunchedLabel(cloudInstall)"
+          :open-label="openCtaLabelFor(cloudInstall)"
+          :manage-label="t('instancePicker.manage')"
+          :running-label="t('instancePicker.running')"
+          @open="handleRowOpen"
+          @manage="handleRowManage"
+        />
+
+        <PickerRow
+          v-for="inst in visibleInstalls"
+          :key="inst.id"
+          :installation="inst"
+          :active="selectedId === inst.id"
+          :running="isRowRunning(inst)"
+          :last-launched-label="lastLaunchedLabel(inst)"
+          :open-label="openCtaLabelFor(inst)"
+          :manage-label="t('instancePicker.manage')"
+          :running-label="t('instancePicker.running')"
+          @open="handleRowOpen"
+          @manage="handleRowManage"
+        />
+
+        <div v-if="showEmptyHint" class="picker-rows-empty">
+          {{ t('chooser.noMatches') }}
+        </div>
+      </div>
+
+      <footer class="picker-rows-footer">
+        <button type="button" class="picker-new-install-row" @click="handleNewInstall">
+          <Plus :size="16" aria-hidden="true" />
+          <span>{{ t('instancePicker.newInstance') }}</span>
+        </button>
+      </footer>
+    </div>
+
+    <!-- Expanded mode: list-left + settings-right. Unchanged from
+         the previous design — the per-install settings UI mounts in
+         the right pane and the popup bounds grow to fill inner area. -->
+    <div v-else class="picker-body">
       <div class="picker-left">
         <div class="picker-list-section">
           <div class="picker-list-section-title">{{ t('instancePicker.instances') }}</div>
 
           <div class="picker-list" role="listbox">
-            <div v-if="showCloudCard" class="picker-row-wrap">
-              <button
-                type="button"
-                class="picker-row picker-row-cloud"
-                :class="{ 'is-active': isCloudRowActive }"
-                @click="handleCloudClick"
-              >
-                <div class="picker-row-icon">
-                  <component :is="installTypeMetaFor('cloud').icon" :size="20" />
-                </div>
-                <div class="picker-row-body picker-row-body-single">
-                  <div class="picker-row-name">
-                    {{ cloudInstall ? cloudInstall.name : t('cloud.label') }}
-                  </div>
-                </div>
-              </button>
-            </div>
+            <InstanceRow
+              v-if="showCloudCard && cloudInstall"
+              :key="cloudInstall.id"
+              :installation="cloudInstall"
+              :active="selectedId === cloudInstall.id"
+              :running="isRowRunning(cloudInstall)"
+              :last-launched-label="lastLaunchedLabel(cloudInstall)"
+              @select="handleSelect"
+            />
 
             <InstanceRow
               v-for="inst in visibleInstalls"
@@ -462,133 +525,47 @@ function handleOpenArgsPage(_field: DetailField): void {
           </div>
         </div>
 
-        <button type="button" class="picker-new-install" @click="handleNewInstall">
-          <Plus :size="16" />
-          <span>{{ t('instancePicker.newInstance') }}</span>
-        </button>
+        <footer class="picker-left-footer">
+          <button type="button" class="picker-new-install" @click="handleNewInstall">
+            <Plus :size="16" />
+            <span>{{ t('instancePicker.newInstance') }}</span>
+          </button>
+        </footer>
       </div>
 
-      <div class="picker-detail-wrap">
+      <div class="picker-detail-wrap is-expanded">
         <div class="picker-detail">
           <template v-if="selectedInstall">
-            <div class="picker-detail-main">
-              <component
-                :is="selectedTypeMeta.icon"
-                v-if="selectedTypeMeta"
-                :size="32"
-                class="picker-detail-type-icon"
-                :title="t(selectedTypeMeta.labelKey)"
-              />
-              <div class="picker-detail-text">
-                <div class="picker-detail-name">{{ selectedInstall.name }}</div>
-                <div class="picker-detail-pills">
-                  <span class="picker-detail-pill">{{ t('instancePicker.latestOnGithub') }}</span>
-                  <span
-                    v-if="selectedInstall.version"
-                    class="picker-detail-pill picker-detail-pill-version"
-                  >
-                    {{ selectedVersionLabel }}
-                  </span>
-                  <span class="picker-detail-pill">
-                    {{ lastLaunchedLabel(selectedInstall) }}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            <div ref="detailNavRef" class="picker-detail-nav picker-compact">
-              <div ref="detailNavContentRef" class="picker-detail-nav-content">
+            <header class="picker-expanded-header">
               <button
                 type="button"
-                class="picker-detail-nav-item"
-                :aria-expanded="settingsOpen"
-                @click="toggleSettingsAccordion"
+                class="picker-expanded-back"
+                :aria-label="t('common.back')"
+                @click="handleCollapseToCompact"
               >
-                <ChevronRight
-                  :size="12"
-                  aria-hidden="true"
-                  class="picker-detail-nav-chevron"
-                  :class="{ 'is-open': settingsOpen }"
-                />
-                <span>{{ t('instancePicker.settings') }}</span>
+                <ChevronLeft :size="16" aria-hidden="true" />
               </button>
-              <BaseAccordion :open="settingsOpen">
-                <div class="picker-detail-accordion-body">
-                  <SettingsSectionList
-                    v-if="selectedSettingsSections.length > 0"
-                    :sections="selectedSettingsSections"
-                    :installation-id="selectedInstall?.id"
-                    @update-field="handlePickerUpdateField"
-                    @run-action="handlePickerRunAction"
-                    @open-args-page="handleOpenArgsPage"
-                  />
-                  <div v-else class="picker-detail-empty-inline">
-                    {{ t('instancePicker.empty') }}
-                  </div>
-                </div>
-              </BaseAccordion>
-
-              <template v-if="hasSnapshots">
-                <button
-                  type="button"
-                  class="picker-detail-nav-item"
-                  :aria-expanded="snapshotsOpen"
-                  @click="toggleSnapshotsAccordion"
-                >
-                  <ChevronRight
-                    :size="12"
-                    aria-hidden="true"
-                    class="picker-detail-nav-chevron"
-                    :class="{ 'is-open': snapshotsOpen }"
-                  />
-                  <span>{{ t('instancePicker.snapshots') }}</span>
-                </button>
-                <BaseAccordion :open="snapshotsOpen">
-                  <div class="picker-detail-accordion-body">
-                    <PickerSnapshotsList
-                      :data="selectedSnapshotsData"
-                      @save="
-                        () =>
-                          selectedInstall &&
-                          bridge?.pickerRunAction(selectedInstall.id, 'snapshot-save')
-                      "
-                      @restore="
-                        (filename) =>
-                          selectedInstall &&
-                          bridge?.pickerRunAction(selectedInstall.id, 'snapshot-restore', {
-                            file: filename
-                          })
-                      "
-                      @delete="
-                        (filename) =>
-                          selectedInstall &&
-                          bridge?.pickerRunAction(selectedInstall.id, 'snapshot-delete', {
-                            file: filename
-                          })
-                      "
-                    />
-                  </div>
-                </BaseAccordion>
-              </template>
-              </div>
-            </div>
-
-            <div class="picker-detail-cta">
-              <button type="button" class="picker-detail-open" @click="handleOpenButton">
-                {{ openCtaLabel }}
-              </button>
-              <BaseMenu
-                v-if="moreMenuItems.length > 0"
-                :items="moreMenuItems"
-                align="end"
-                :trigger-aria-label="t('chooser.moreActions')"
-                class="picker-detail-more"
-                @select="handleMoreMenuSelect"
+              <h2 class="picker-expanded-title">
+                {{ selectedInstall.name }}
+              </h2>
+              <button
+                type="button"
+                class="picker-expanded-close"
+                :aria-label="t('common.close')"
+                @click="handleCollapseToCompact"
               >
-                <span>{{ t('instancePicker.more') }}</span>
-                <ChevronUp :size="16" aria-hidden="true" />
-              </BaseMenu>
-            </div>
+                <X :size="14" />
+              </button>
+            </header>
+
+            <ComfyUISettingsContent
+              :installation="selectedInstall"
+              :initial-tab="initialExpandedTab"
+              class="picker-expanded-body"
+              @show-progress="handleSettingsShowProgress"
+              @navigate-list="handleSettingsNavigateList"
+              @relaunch="handleSettingsRelaunch"
+            />
           </template>
           <div v-else class="picker-detail-empty">
             {{ t('instancePicker.empty') }}
@@ -609,8 +586,8 @@ function handleOpenArgsPage(_field: DetailField): void {
 }
 
 .picker-search {
-  border-bottom: 1px solid var(--chooser-surface-border);
-  padding: 8px 10px 16px 10px;
+  border-bottom: 1px solid var(--brand-surface-border-hover, var(--chooser-surface-border));
+  padding: 6px 12px 8px 12px;
 }
 .picker-search :deep(.ui-input) {
   background: transparent;
@@ -623,38 +600,39 @@ function handleOpenArgsPage(_field: DetailField): void {
   border-color: transparent;
 }
 .picker-search :deep(.ui-input-leading) {
-  color: var(--neutral-100);
+  color: var(--text);
 }
 .picker-search :deep(.ui-input-control) {
-  padding: 4px 0 0 0;
-  font-size: 16px;
-  line-height: 24px;
+  padding: 2px 0 0 0;
+  font-size: 14px;
+  line-height: 20px;
   color: var(--text);
 }
 .picker-search :deep(.ui-input-control::placeholder) {
-  color: var(--neutral-100);
-  opacity: 0.67;
+  color: var(--text);
+  opacity: 0.6;
 }
 
 .picker-search-icon {
   color: var(--accent-label);
-  margin-top: 6px;
+  margin-top: 2px;
 }
 .picker-chips {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   flex-wrap: wrap;
-  padding: 8px 16px;
-  border-bottom: 1px solid var(--chooser-surface-border);
+  padding: 8px 16px 10px 16px;
+  border-bottom: 1px solid var(--brand-surface-border-hover, var(--chooser-surface-border));
 }
 .picker-chip {
-  height: 24px;
-  padding: 3px 11px;
+  height: 22px;
+  padding: 2px 10px;
   border-radius: 9999px;
-  border: 1px solid var(--chooser-surface-border);
-  background: var(--brand-surface-bg);
-  font-size: 12px;
+  border: 1px solid var(--brand-surface-border-hover, var(--chooser-surface-border));
+  background: transparent;
+  font-size: 11px;
+  font-weight: 500;
   line-height: 16px;
   color: var(--neutral-100);
   cursor: pointer;
@@ -662,15 +640,18 @@ function handleOpenArgsPage(_field: DetailField): void {
   align-items: center;
   transition:
     background-color 100ms ease,
-    border-color 100ms ease;
+    border-color 100ms ease,
+    color 100ms ease;
 }
 .picker-chip:hover,
 .picker-chip:focus-visible {
   outline: none;
+  color: var(--text);
 }
 .picker-chip.is-active {
   background: var(--chooser-surface-border);
   border-color: var(--brand-surface-border-hover);
+  color: var(--text);
 }
 
 .picker-body {
@@ -678,7 +659,6 @@ function handleOpenArgsPage(_field: DetailField): void {
   min-height: 0;
   display: grid;
   grid-template-columns: 280px minmax(0, 1fr);
-  padding: 8px 0px 12px 0;
 }
 
 .picker-left {
@@ -686,8 +666,18 @@ function handleOpenArgsPage(_field: DetailField): void {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 16px;
   border-right: 1px solid var(--chooser-surface-border);
+}
+/* Footer band — mirrors the right pane's `.settings-v2-footer` shape
+ * (full-bleed bordered band, same padding + bg) so the two footers
+ * line up at the bottom of the expanded popup. */
+.picker-left-footer {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border-hover);
+  background: var(--neutral-800);
 }
 .picker-list-section {
   flex: 1 1 auto;
@@ -701,7 +691,7 @@ function handleOpenArgsPage(_field: DetailField): void {
   font-size: 14px;
   font-weight: 500;
   line-height: 20px;
-  color: rgba(194, 191, 185, 0.75);
+  color: var(--text);
   padding: 8px 18px 0 16px;
 }
 .picker-list {
@@ -715,22 +705,22 @@ function handleOpenArgsPage(_field: DetailField): void {
 .picker-list-empty {
   padding: 8px 18px;
   font-size: 14px;
-  color: var(--neutral-200);
+  color: var(--neutral-100);
 }
 
 .picker-new-install {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 4px;
   height: 32px;
-  margin: 0 18px;
-  padding: 8px 16px 8px 8px;
+  padding: 8px 14px;
   border-radius: 8px;
   width: fit-content;
   border: none;
   background: var(--chooser-surface-border);
-  color: var(--neutral-100);
+  color: var(--text);
   font-size: 12px;
   font-weight: 500;
   line-height: 16px;
@@ -743,64 +733,77 @@ function handleOpenArgsPage(_field: DetailField): void {
   outline: none;
 }
 
-/* Cloud row — mirrors InstanceRow inner chrome. */
-.picker-row-wrap {
-  padding: 2px 8px;
-  width: 100%;
-  box-sizing: border-box;
-}
-.picker-row {
-  display: grid;
-  grid-template-columns: 24px 1fr;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 8px 8px 8px 10px;
-  border-radius: 8px;
-  border: none;
-  cursor: pointer;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  background: transparent;
-  transition: background-color 120ms ease;
-}
-.picker-row:hover,
-.picker-row:focus-visible {
-  background: var(--chooser-surface-border);
-  outline: none;
-}
-.picker-row.is-active {
-  background: var(--chooser-surface-border);
-}
-.picker-row-icon {
+/* ---- Compact mode: single-column rows ----
+ * Two-section flex column: scrollable rows list on top, sticky footer
+ * with the "+ New Instance" affordance below. The outer envelope is
+ * capped at 720px by `computePickerBounds`; rows fill that envelope
+ * edge-to-edge (minus the wrap's 16px gutter) so they don't read as
+ * undersized inside a too-wide popup. */
+.picker-rows-wrap {
+  flex: 1 1 0;
+  min-height: 0;
   display: flex;
+  flex-direction: column;
+  padding: 12px 16px 0 16px;
+  overflow: hidden;
+}
+.picker-rows {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  /* Hide the native scrollbar — popup is a focused glance affordance,
+   * a visible scrollbar would compete with the row chrome. */
+  scrollbar-width: none;
+}
+.picker-rows::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+.picker-rows-empty {
+  padding: 16px;
+  font-size: 13px;
+  color: var(--neutral-100);
+  text-align: center;
+}
+.picker-rows-footer {
+  flex: 0 0 auto;
+  display: flex;
+  padding: 12px 0 16px 0;
+}
+.picker-new-install-row {
+  flex: 1 1 auto;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
-  color: var(--accent-label);
-}
-.picker-row-body {
-  min-width: 0;
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  overflow: hidden;
-}
-.picker-row-body-single {
-  align-items: center;
-}
-.picker-row-name {
-  font-size: 16px;
-  font-weight: 500;
-  line-height: 24px;
+  gap: 6px;
+  min-height: 36px;
+  padding: 8px 14px;
+  border-radius: 10px;
+  border: 1px dashed var(--brand-surface-border-hover, var(--chooser-surface-border));
+  background: transparent;
   color: var(--neutral-100);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+.picker-new-install-row:hover,
+.picker-new-install-row:focus-visible {
+  background: var(--brand-surface-bg-hover);
+  color: var(--text);
+  outline: none;
 }
 
+/* ---- Expanded mode: list-left + settings-right ---- */
 .picker-detail-wrap {
   min-width: 0;
   min-height: 0;
@@ -815,236 +818,91 @@ function handleOpenArgsPage(_field: DetailField): void {
   flex-direction: column;
   gap: 24px;
 }
-.picker-detail-main {
-  flex: 0 0 auto;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-.picker-detail-type-icon {
-  color: var(--accent-label);
-  flex: 0 0 auto;
-}
-.picker-detail-text {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-width: 0;
-}
-.picker-detail-name {
-  font-size: 16px;
-  font-weight: 600;
-  line-height: 24px;
-  color: var(--neutral-100);
-}
-.picker-detail-pills {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px;
-}
-.picker-detail-pill {
-  display: inline-flex;
-  align-items: center;
-  height: 24px;
-  padding: 3px 11px;
-  border-radius: 9999px;
-  background: var(--brand-surface-bg);
-  border: 1px solid var(--chooser-surface-border);
-  font-size: 12px;
-  line-height: 16px;
-  color: var(--neutral-100);
-  white-space: nowrap;
-}
-.picker-detail-pill-version {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-}
-.picker-detail-nav {
-  flex: 1 1 0;
-  min-height: 0;
-  overflow-y: auto;
-  padding-top: 16px;
-  border-top: 1px solid var(--chooser-surface-border);
-  scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
-}
-
-/* Holds the Settings + Snapshots accordion buttons; the parent nav
- * owns the scroll container so this wrapper reports the unclamped
- * natural content height to the ResizeObserver hooked up in
- * `InstancePickerView`. */
-.picker-detail-nav-content {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.picker-detail-nav-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 0;
-  border: none;
-  background: transparent;
-  color: var(--neutral-100);
-  font-size: 14px;
-  line-height: normal;
-  cursor: pointer;
-  text-align: left;
-}
-.picker-detail-nav-item:hover,
-.picker-detail-nav-item:focus-visible {
-  opacity: 0.85;
-  outline: none;
-}
-.picker-detail-nav-chevron {
-  transition: transform 180ms cubic-bezier(0.32, 0.72, 0, 1);
-}
-.picker-detail-nav-chevron.is-open {
-  transform: rotate(90deg);
-}
-.picker-detail-accordion-body {
-  padding: 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-/* Compact density inside the picker's Settings / Snapshots accordions.
-   The drawer keeps roomier defaults; one step smaller type + neutral-100
-   text so controls read as secondary chrome. */
-.picker-compact .picker-detail-accordion-body {
-  padding-top: 6px;
-  gap: 8px;
-}
-.picker-compact .picker-detail-empty-inline {
-  font-size: 11px;
-  line-height: 16px;
-  color: var(--neutral-100);
-  opacity: 0.67;
-  padding: 4px 0;
-}
-.picker-compact :deep(.settings-v2-field) {
-  gap: 4px;
-}
-.picker-compact :deep(.settings-v2-section-title),
-.picker-compact :deep(.settings-v2-item),
-.picker-compact :deep(.settings-v2-field-label),
-.picker-compact :deep(.settings-v2-field-readonly),
-.picker-compact :deep(.ui-input-control),
-.picker-compact :deep(.ui-select-trigger),
-.picker-compact :deep(.bt-switch),
-.picker-compact :deep(.env-var-add),
-.picker-compact :deep(.channel-picker-value) {
-  color: var(--neutral-100);
-}
-.picker-compact :deep(.settings-v2-section-title),
-.picker-compact :deep(.settings-v2-item),
-.picker-compact :deep(.settings-v2-field-label),
-.picker-compact :deep(.settings-v2-field-readonly),
-.picker-compact :deep(.ui-input-control),
-.picker-compact :deep(.ui-select-trigger),
-.picker-compact :deep(.bt-switch),
-.picker-compact :deep(.env-var-add) {
-  font-size: 13px;
-  line-height: 18px;
-}
-.picker-compact :deep(.settings-v2-section-desc),
-.picker-compact :deep(.channel-picker-desc),
-.picker-compact :deep(.channel-picker-label) {
-  font-size: 11px;
-  line-height: 16px;
-  color: var(--neutral-100);
-  opacity: 0.67;
-}
-.picker-compact :deep(.channel-picker-value) {
-  font-size: 13px;
-  line-height: 19px;
-}
-.picker-compact :deep(.channel-picker-value.is-update-available) {
-  color: var(--info);
-}
-.picker-compact :deep(.ui-input-control::placeholder),
-.picker-compact :deep(.ui-select-trigger[data-placeholder] .ui-select-label) {
-  color: var(--neutral-100);
-  opacity: 0.67;
-}
-.picker-compact :deep(.picker-snapshots-list) {
-  gap: 8px;
-}
-.picker-compact :deep(.picker-snapshots-save),
-.picker-compact :deep(.picker-snapshots-empty),
-.picker-compact :deep(.picker-snapshot-summary-line),
-.picker-compact :deep(.picker-snapshot-action) {
-  font-size: 11px;
-  line-height: 16px;
-  color: var(--neutral-100);
-}
-.picker-compact :deep(.snapshot-row-card) {
-  padding: 6px;
-}
-.picker-compact :deep(.snapshot-row-trigger),
-.picker-compact :deep(.snapshot-row-time) {
-  font-size: 11px;
-  line-height: 16px;
-  color: var(--neutral-100);
-}
-.picker-compact :deep(.snapshot-row-trigger[data-tone='state']) {
-  color: var(--warning);
-}
-.picker-compact :deep(.snapshot-row-current) {
-  font-size: 10px;
-  line-height: 15px;
-}
-.picker-compact :deep(.snapshot-row-chip),
-.picker-compact :deep(.snapshot-row-meta) {
-  font-size: 10px;
-  line-height: 14px;
-  color: var(--neutral-100);
-  opacity: 0.67;
-}
-.picker-compact :deep(.args-field-ac-item) {
-  font-size: 11px;
-  color: var(--neutral-100);
-}
-.picker-compact :deep(.args-field-ac-meta),
-.picker-compact :deep(.args-field-ac-help),
-.picker-compact :deep(.args-field-ac-hint) {
-  font-size: 10px;
-  color: var(--neutral-100);
-  opacity: 0.67;
-}
-.picker-detail-cta {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: flex-end;
-  gap: 8px;
-}
-.picker-detail-open {
-  flex: 1 1 auto;
-  min-height: 32px;
-  padding: 8px 16px;
-  border-radius: 8px;
-  border: 1px solid var(--accent-primary, #0b8ce9);
-  background: var(--accent-primary, #0b8ce9);
-  color: var(--text);
-  font-size: 14px;
-  font-weight: 500;
-  line-height: normal;
-  cursor: pointer;
-  transition: filter 100ms ease;
-}
-.picker-detail-open:hover,
-.picker-detail-open:focus-visible {
-  filter: brightness(1.08);
-  outline: none;
-}
-
-.picker-detail-more {
-  flex: 0 0 auto;
-}
 .picker-detail-empty {
   margin: auto;
   font-size: 14px;
   color: var(--neutral-100);
   opacity: 0.7;
+}
+
+/* ---- Expanded Manage state ---- */
+/* When the popup is in expanded mode (main has animated bounds to
+ * ~95dvw × 95dvh), the right pane drops the identity-card padding so
+ * `<ComfyUISettingsContent>` can fill the available area edge-to-edge.
+ * `.picker-detail-wrap` already has horizontal padding for compact;
+ * remove it on the expanded variant. */
+.picker-detail-wrap.is-expanded {
+  padding: 0;
+}
+.picker-detail-wrap.is-expanded .picker-detail {
+  gap: 0;
+}
+
+/* Expanded header sits above the settings body — back chevron + title
+ * + close. Mirrors the legacy drawer chrome's header pattern. */
+.picker-expanded-header {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 12px 12px 4px;
+  border-bottom: 1px solid var(--chooser-surface-border);
+}
+.picker-expanded-back {
+  -webkit-app-region: no-drag;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text);
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.picker-expanded-back:hover,
+.picker-expanded-back:focus-visible {
+  background: var(--chooser-surface-border);
+  outline: none;
+}
+.picker-expanded-title {
+  flex: 1 1 auto;
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.picker-expanded-close {
+  -webkit-app-region: no-drag;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text);
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.picker-expanded-close:hover,
+.picker-expanded-close:focus-visible {
+  background: var(--chooser-surface-border);
+  outline: none;
+}
+.picker-expanded-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  /* Brighten dim text inside the embedded settings UI. Most labels +
+   * meta strings inside `ComfyUISettingsContent` and its children
+   * resolve via `var(--text-muted)`; overriding the token at this
+   * scope cascades the bump without touching the shared token. */
+  --text-muted: var(--neutral-100);
 }
 </style>

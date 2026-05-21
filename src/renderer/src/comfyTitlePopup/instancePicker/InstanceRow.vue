@@ -4,26 +4,11 @@ import { installTypeMetaFor } from '../../lib/installTypeIcon'
 import type { Installation } from '../../types/ipc'
 
 /**
- * Compact row for the instance-picker popover's left pane.
- *
- * Designed as a row variant of the chooser-tile, NOT a re-wrapping of
- * `ChooserInstallTile.vue` — its golden-ratio tile dimensions + CTA
- * cluster don't fit a list, and shoehorning a row-variant prop into a
- * tile component would hurt both surfaces. The glass tokens
- * (`--chooser-surface-bg`, `--chooser-surface-bg-hover`,
- * `--chooser-surface-border`) are the same so the picker reads as a
- * compact chooser.
- *
- * Interactions:
- *   - Body click → `select` (switcher contract: updates the right
- *     detail pane only; the actual launch waits on the Open button).
- *   - Hover / focus → background highlight; active state when the row
- *     is the currently-selected install.
- *
- * Per-install action menu (Manage / Update / Delete / etc.)
- * intentionally NOT exposed here — see `InstancePickerView.vue` for
- * the rationale. The picker is single-purpose; install actions live
- * on the ComfyUI Settings drawer.
+ * Compact list-row for the picker's expanded-mode left pane: icon + name +
+ * sub-label + running dot. Body click → `select` (switcher contract — updates
+ * the right detail pane only, doesn't launch). Reuses chooser glass tokens
+ * so the picker reads as a compact chooser; install actions live on the
+ * settings drawer, not here.
  */
 
 interface Props {
@@ -58,7 +43,8 @@ function handleClick(): void {
 <template>
   <div class="picker-row-wrap">
     <div
-      role="button"
+      role="option"
+      :aria-selected="active"
       tabindex="0"
       class="picker-row"
       :class="{ 'is-active': active, 'is-running': running }"
@@ -131,7 +117,7 @@ function handleClick(): void {
   font-size: 16px;
   font-weight: 500;
   line-height: 24px;
-  color: var(--neutral-100);
+  color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -139,7 +125,7 @@ function handleClick(): void {
 .picker-row-sub {
   font-size: 12px;
   line-height: 16px;
-  color: var(--text-muted);
+  color: var(--neutral-100);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -148,7 +134,7 @@ function handleClick(): void {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--accent-primary, #0b8ce9);
+  background: var(--accent-primary);
   flex: 0 0 auto;
 }
 </style>

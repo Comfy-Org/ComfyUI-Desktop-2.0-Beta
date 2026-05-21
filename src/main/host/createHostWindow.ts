@@ -395,14 +395,13 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
     // hosts, so the install-backed visibility branch handles both.
     const mode = entry ? computeBodyMode(entry) : 'comfy'
     const showPanel = mode !== 'comfy'
-    // `'settings-v2'` and `'downloads-v2'` are overlay modes — the
-    // brand-redesigned Settings drawer / downloads modal mount over the
-    // live ComfyUI canvas, so unlike the other panel modes we keep
-    // `comfyView` visible underneath at full bodyRect. The panel
-    // renderer paints itself transparent (see `PanelApp.vue`'s
-    // `panel-overlay-mode` body class) except for the drawer + dim
-    // backdrop, so the canvas composites through on macOS CALayers.
-    const isOverlayMode = mode === 'settings-v2' || mode === 'downloads-v2'
+    // `'downloads-v2'` is an overlay mode — the downloads modal mounts over
+    // the live ComfyUI canvas, so unlike other panel modes we keep
+    // `comfyView` visible underneath at full bodyRect. The panel renderer
+    // paints itself transparent (see `PanelApp.vue`'s `panel-overlay-mode`
+    // body class) except for the modal + dim backdrop, so the canvas
+    // composites through on macOS CALayers.
+    const isOverlayMode = mode === 'downloads-v2'
     if (showPanel && entry?.panelView) {
       entry.panelView.setBounds(bodyRect)
       entry.panelView.setVisible(true)

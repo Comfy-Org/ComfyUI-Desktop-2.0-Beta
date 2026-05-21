@@ -135,19 +135,7 @@ describe('buildTitlePopupMenuItems', () => {
     }
   })
 
-  it('checks the Settings entry when settings panel is active', () => {
-    const items = buildTitlePopupMenuItems(makeEntry({ activePanel: 'settings' }))
-    const settings = items.find((i) => i.id === 'settings')
-    expect(settings?.checked).toBe(true)
-  })
-
-  it('does not check the Settings entry on other panels', () => {
-    const items = buildTitlePopupMenuItems(makeEntry({ activePanel: 'comfy' }))
-    const settings = items.find((i) => i.id === 'settings')
-    expect(settings?.checked).toBe(false)
-  })
-
-  it('exposes Reset Zoom only when comfy zoom is non-zero, with the percent in the label', () => {
+it('exposes Reset Zoom only when comfy zoom is non-zero, with the percent in the label', () => {
     const noZoom = buildTitlePopupMenuItems(makeEntry({ zoomLevel: 0 }))
     expect(noZoom.find((i) => i.id === 'reset-zoom')).toBeUndefined()
 
