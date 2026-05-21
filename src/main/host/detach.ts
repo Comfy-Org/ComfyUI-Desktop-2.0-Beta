@@ -9,7 +9,6 @@ import {
   applyChooserHostTheme,
   CHOOSER_HOST_TITLE_TEXT,
   CHOOSER_HOST_WINDOW_TITLE,
-  loadTitleBarUrl,
 } from './createHostWindow'
 
 /**
@@ -283,23 +282,34 @@ export function _detachInstallImpl(entry: ComfyWindowEntry): void {
     entry.comfyView.setBackgroundColor(COMFY_BG)
   }
 
-  // Flip entry identity back to chooser-host shape, then re-navigate
-  // the title-bar so its URL no longer carries an install id (the
-  // renderer reads `installationId` once at startup; without the
-  // re-load `isInstallLess` would stay `false` and the title pill
-  // would still render the old install's icon). The title-bar-ready
-  // handshake re-fires after the navigation lands and re-pushes
-  // title text / source category / theme / panel state from
-  // `entry.*` — entry state must therefore be reset BEFORE we call
-  // `loadTitleBarUrl`.
+  // Flip entry identity back to chooser-host shape, then push every
+  // identity-derived signal to the title-bar renderer. The title bar
+  // is a long-lived view that doesn't reload across attach / detach
+  // (cf. the install-id push at `attachInstall`); we push title /
+  // source-category / installation-id / install-update / preview-mode
+  // here explicitly so the renderer sees the chooser identity
+  // without relying on a fresh title-bar-ready handshake.
   entry.titleBarText = CHOOSER_HOST_TITLE_TEXT
   entry.sourceCategory = null
   entry.previewInstallationId = null
-  entry.previewMode = false
   entry.activePanel = 'comfy'
   entry.window.setTitle(CHOOSER_HOST_WINDOW_TITLE)
   if (!entry.titleBarView.webContents.isDestroyed()) {
-    loadTitleBarUrl(entry.titleBarView, '')
+    entry.titleBarView.webContents.send('comfy-titlebar:title-changed', entry.titleBarText)
+    entry.titleBarView.webContents.send(
+      'comfy-titlebar:source-category-changed',
+      entry.sourceCategory,
+    )
+    entry.titleBarView.webContents.send('comfy-titlebar:installation-id-changed', null)
+    entry.titleBarView.webContents.send('comfy-titlebar:preview-mode-changed', false)
+    // Install-update pill state is install-scoped; reset to the
+    // "no update" shape on the way back to chooser identity so the
+    // pill clears immediately instead of inheriting the prior
+    // install's pending-update flag until a re-attach happens.
+    entry.titleBarView.webContents.send('comfy-titlebar:install-update-changed', {
+      available: false,
+      version: null,
+    })
   }
   applyChooserHostTheme(entry)
 

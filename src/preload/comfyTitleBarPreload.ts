@@ -114,6 +114,13 @@ export interface ComfyTitleBarBridge {
    *  install-less hosts — e.g. the install-type icon next to the
    *  centre pill. */
   onPreviewModeChanged(cb: (preview: boolean) => void): () => void
+  /** Subscribe to installation-id changes pushed by main. The title
+   *  bar is a long-lived view across attach / detach (no URL reload
+   *  on identity flips), so the URL `installationId` query param is
+   *  only a cold-boot seed — this push is the runtime-authoritative
+   *  source for `isInstallLess` and any install-scoped chrome gated
+   *  by the install id. `null` for install-less hosts. */
+  onInstallationIdChanged(cb: (installationId: string | null) => void): () => void
   /** Subscribe to app-update state pushes (status pills). `kind` is
    *  `'available'` after `update-available`, `'ready'` after
    *  `update-downloaded`, and `null` when nothing is pending. Drives
@@ -302,6 +309,13 @@ const bridge: ComfyTitleBarBridge = {
     }
     ipcRenderer.on('comfy-titlebar:preview-mode-changed', handler)
     return () => ipcRenderer.removeListener('comfy-titlebar:preview-mode-changed', handler)
+  },
+  onInstallationIdChanged: (cb) => {
+    const handler = (_event: IpcRendererEvent, installationId: unknown): void => {
+      cb(typeof installationId === 'string' ? installationId : null)
+    }
+    ipcRenderer.on('comfy-titlebar:installation-id-changed', handler)
+    return () => ipcRenderer.removeListener('comfy-titlebar:installation-id-changed', handler)
   },
   onAppUpdateStateChanged: (cb) => {
     const handler = (_event: IpcRendererEvent, state: unknown): void => {

@@ -111,6 +111,13 @@ interface Bridge {
    *  install-scoped chrome on install-less hosts so the previewed
    *  install's identity surfaces cleanly. */
   onPreviewModeChanged: (cb: (preview: boolean) => void) => () => void
+  /** Installation-id pushes from main. The title bar is a long-lived
+   *  view across attach / detach (no URL reload), so the URL query
+   *  param is only a cold-boot seed; this push is the
+   *  runtime-authoritative source of truth that drives `isInstallLess`
+   *  and any install-scoped chrome gated by the install id. `null`
+   *  for install-less hosts. */
+  onInstallationIdChanged: (cb: (installationId: string | null) => void) => () => void
   /** App-update state pushes from main. `kind` is `'available'`
    *  after `update-available`, `'ready'` after `update-downloaded`,
    *  and `null` when nothing is pending. Drives the title-bar
@@ -177,10 +184,12 @@ const isMac = ref(bridge?.isMac() ?? false)
  *  an identity label, not a tab indicator. */
 const activePanel = ref<ComfyPanelKey>('comfy')
 /**
- * Install-less host window flag — true when the host has no install
+ * Install-less host window flag — `true` when the host has no install
  * backing it. Drives the center pill's static identity label and
- * suppresses the install-type icon. Computed once on construction;
- * the bridge never changes this for a given title-bar instance.
+ * suppresses the install-type icon. Seeded from the URL `installationId`
+ * query param so the first paint reads correctly, then updated reactively
+ * via `onInstallationIdChanged` pushes from main as the host transitions
+ * across attach / detach without a title-bar URL reload.
  */
 const isInstallLess = ref((bridge?.getInstallationId() ?? '') === '')
 
@@ -297,6 +306,7 @@ watch(downloadsStartedAt, (next) => {
 })
 
 let unsubPanel: (() => void) | undefined
+let unsubInstallationId: (() => void) | undefined
 
 onMounted(() => {
   // Observe the trailing cluster so the left cluster can mirror its
@@ -319,11 +329,15 @@ onMounted(() => {
   unsubPanel = bridge.onPanelChanged((panel) => {
     activePanel.value = panel
   })
+  unsubInstallationId = bridge.onInstallationIdChanged((installationId) => {
+    isInstallLess.value = installationId === null
+  })
   bridge.ready()
 })
 
 onUnmounted(() => {
   unsubPanel?.()
+  unsubInstallationId?.()
   hideTip()
   trailingObserver?.disconnect()
   trailingObserver = undefined

@@ -32,7 +32,6 @@ export async function applyAttachHostPreview(
   const installation = await getInstallation(installationId)
   if (!installation) return
   entry.previewInstallationId = installationId
-  entry.previewMode = true
   entry.titleBarText = installation.name
   entry.sourceCategory = sourceMap[installation.sourceId]?.category ?? null
   // OS-level title (taskbar / Alt+Tab / dock) — mirror the install-
@@ -59,7 +58,6 @@ export async function applyAttachHostPreview(
 export function clearAttachHostPreview(entry: ComfyWindowEntry): void {
   if (entry.previewInstallationId === null) return
   entry.previewInstallationId = null
-  entry.previewMode = false
   if (entry.window.isDestroyed()) return
   if (isInstallHost(entry)) return
   entry.titleBarText = CHOOSER_HOST_TITLE_TEXT

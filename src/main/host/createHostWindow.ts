@@ -488,10 +488,22 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
       titleBarView.webContents.send('comfy-titlebar:theme-changed', entry.lastTheme)
       titleBarView.webContents.send('comfy-titlebar:title-changed', entry.titleBarText)
       titleBarView.webContents.send('comfy-titlebar:source-category-changed', entry.sourceCategory)
+      // Authoritative installation-id push — the title bar is now a
+      // long-lived view that doesn't reload across attach / detach
+      // (see `loadTitleBarUrl` callers); the URL `installationId`
+      // query param is only a cold-boot seed for the renderer's
+      // initial `isInstallLess` paint.
+      titleBarView.webContents.send(
+        'comfy-titlebar:installation-id-changed',
+        entry.installationId,
+      )
       // Replay preview-mode so a re-mount during an in-progress preview
       // keeps showing the install-type icon next to the previewed name
       // instead of the bare chooser-host identity.
-      titleBarView.webContents.send('comfy-titlebar:preview-mode-changed', entry.previewMode)
+      titleBarView.webContents.send(
+        'comfy-titlebar:preview-mode-changed',
+        entry.previewInstallationId !== null,
+      )
     }
     // Both modes get the app-update pill and the downloads tray.
     // The install-update pill is install-backed only — chooser hosts
@@ -648,7 +660,6 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
     titleBarText: opts.initialTitleBarText,
     sourceCategory: opts.initialSourceCategory,
     previewInstallationId: null,
-    previewMode: false,
     coldStartPendingReveal: false,
     _installCleanup: null,
     // Bound below so it can self-reference the freshly-created entry.

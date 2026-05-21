@@ -63,7 +63,6 @@ import {
   applyChooserHostThemeToAll,
   createHostWindow,
   expectedPartitionFor,
-  loadTitleBarUrl,
   openChooserHostWindow,
   rebuildComfyViewIfNeeded,
   setHostWindowFactories,
@@ -350,13 +349,12 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
       isChooserHost(claimed)
     ) {
       rebuildComfyViewIfNeeded(claimed, installation)
-      // Re-navigate the title-bar so its URL carries the new install id;
-      // the renderer reads `installationId` once at startup, so without
-      // this re-load `isInstallLess` would stay `true` and the install
-      // pill would render in chooser-mode shape. The title-bar-ready
-      // handshake re-fires after the navigation lands and re-pushes
-      // title text / source category / theme / install-update pill.
-      loadTitleBarUrl(claimed.titleBarView, installationId)
+      // No title-bar URL reload here — `attachInstall` pushes the new
+      // installationId via `comfy-titlebar:installation-id-changed` and
+      // the renderer's `isInstallLess` is reactive on that channel.
+      // Keeping the long-lived title-bar webContents avoids the
+      // blank-then-rehydrate flicker the URL reload used to cause
+      // between preview identity and the post-attach steady state.
       // Drop the chooser PanelApp before the install takes over the
       // host. The chooser pick flow runs the launch action through a
       // Tier 2 progress overlay mounted on this panel; once the
