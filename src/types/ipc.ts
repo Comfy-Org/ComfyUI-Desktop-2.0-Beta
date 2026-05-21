@@ -1131,3 +1131,32 @@ export const REQUIRES_STOPPED = new Set([
   'update-comfyui',
   'migrate-from',
 ])
+
+/** Picker popup's settings-passthrough IPC channels — main registers them,
+ *  preload invokes them. Single source so a typo can't desync the two sides. */
+export const PICKER_SETTINGS_CHANNELS = {
+  getDetailSections: 'comfy-titlepopup:picker-settings-get-detail-sections',
+  getDiskSpace: 'comfy-titlepopup:picker-settings-get-disk-space',
+  getInstallationSize: 'comfy-titlepopup:picker-settings-get-installation-size',
+  updateInstallation: 'comfy-titlepopup:picker-settings-update-installation',
+  runAction: 'comfy-titlepopup:picker-settings-run-action',
+  getFieldOptions: 'comfy-titlepopup:picker-settings-get-field-options',
+  getInstallations: 'comfy-titlepopup:picker-settings-get-installations',
+  stopComfyUI: 'comfy-titlepopup:picker-settings-stop-comfyui',
+  cancelOperation: 'comfy-titlepopup:picker-settings-cancel-operation',
+  getSnapshots: 'comfy-titlepopup:picker-settings-get-snapshots',
+  getSnapshotDetail: 'comfy-titlepopup:picker-settings-get-snapshot-detail',
+  getSnapshotDiff: 'comfy-titlepopup:picker-settings-get-snapshot-diff',
+  exportSnapshot: 'comfy-titlepopup:picker-settings-export-snapshot',
+  exportAllSnapshots: 'comfy-titlepopup:picker-settings-export-all-snapshots',
+  importSnapshotsPreview: 'comfy-titlepopup:picker-settings-import-snapshots-preview',
+  importSnapshotsDiff: 'comfy-titlepopup:picker-settings-import-snapshots-diff',
+  importSnapshotsConfirm: 'comfy-titlepopup:picker-settings-import-snapshots-confirm',
+  previewSnapshotFile: 'comfy-titlepopup:picker-settings-preview-snapshot-file',
+  getComfyArgs: 'comfy-titlepopup:picker-settings-get-comfy-args',
+  browseFolder: 'comfy-titlepopup:picker-settings-browse-folder',
+  previewDesktopMigration: 'comfy-titlepopup:picker-settings-preview-desktop-migration',
+  previewLocalMigration: 'comfy-titlepopup:picker-settings-preview-local-migration',
+  relaunchApp: 'comfy-titlepopup:picker-settings-relaunch-app',
+  getLocaleMessages: 'comfy-titlepopup:picker-settings-get-locale-messages',
+} as const

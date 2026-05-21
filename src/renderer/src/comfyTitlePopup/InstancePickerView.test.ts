@@ -317,7 +317,7 @@ describe('comfyTitlePopup/InstancePickerView', () => {
       expect(alphaCard!.find('.picker-row-card-open').text()).toBe('Open')
     })
 
-    it('dispatches setPickerMode("expanded") when a row\'s Manage button is clicked', async () => {
+    it('dispatches setPickerMode("expanded") with config tab when Manage is clicked', async () => {
       const wrapper = await mountPicker({
         installs: [makeInstall({ id: 'a', name: 'Alpha' })],
         activeInstallationId: 'a',
@@ -327,7 +327,10 @@ describe('comfyTitlePopup/InstancePickerView', () => {
       await manageButton.trigger('click')
       await flushPromises()
       expect(bridge.setPickerModeCalls.length).toBe(1)
-      expect(bridge.setPickerModeCalls[0]!.mode).toBe('expanded')
+      expect(bridge.setPickerModeCalls[0]).toEqual({
+        mode: 'expanded',
+        opts: { initialTab: 'config' },
+      })
     })
 
     it('filters install rows by search query', async () => {
@@ -393,6 +396,21 @@ describe('comfyTitlePopup/InstancePickerView', () => {
       expect(wrapper.find('.picker-detail-wrap.is-expanded').exists()).toBe(true)
       // Compact rows are NOT mounted in expanded mode.
       expect(wrapper.find('.picker-rows').exists()).toBe(false)
+    })
+
+    it('pulls main\'s locale catalog on first expand', async () => {
+      await mountPicker({
+        installs: [makeInstall({ id: 'a', name: 'Alpha' })],
+        activeInstallationId: 'a',
+        runningInstallationIds: [],
+        mode: 'expanded',
+        selectedSnapshots: emptySnapshotListPayload,
+      })
+      await flushPromises()
+      const bridgeRef = (window as unknown as {
+        __comfyTitlePopup: { pickerSettingsGetLocaleMessages: ReturnType<typeof vi.fn> }
+      }).__comfyTitlePopup
+      expect(bridgeRef.pickerSettingsGetLocaleMessages).toHaveBeenCalled()
     })
   })
 })

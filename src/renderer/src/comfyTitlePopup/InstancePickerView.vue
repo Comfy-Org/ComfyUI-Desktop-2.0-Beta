@@ -102,14 +102,11 @@ function hydrateSessionStoreFromSnapshot(): void {
   }
 }
 
-// Track whether we've merged main's locale catalog into the popup's
-// static one. Merge lazily on the first expand so the compact path
-// stays IPC-free.
-let mergedPanelLocale = false
-async function ensurePanelLocaleMerged(): Promise<void> {
-  if (mergedPanelLocale) return
-  mergedPanelLocale = true
-  await mergePanelLocaleIntoPopup(mergeLocaleMessage)
+// Merge main's locale catalog on first expand; compact path stays IPC-free.
+let panelLocaleMerge: Promise<void> | null = null
+function ensurePanelLocaleMerged(): Promise<void> {
+  panelLocaleMerge ??= mergePanelLocaleIntoPopup(mergeLocaleMessage)
+  return panelLocaleMerge
 }
 
 // Bridge surface — only the methods the picker dispatches on user

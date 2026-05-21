@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { IpcRendererEvent } from 'electron'
+import { PICKER_SETTINGS_CHANNELS as CH } from '../types/ipc'
 
 /**
  * Title-bar dropdown popup bridge.
@@ -655,100 +656,53 @@ const bridge: ComfyTitlePopupBridge = {
       actionId,
       actionData,
     }),
-  // Per-install settings (picker expanded Manage). Each handler is a
-  // 1:1 pass-through over the corresponding main-side IPC. Channel
-  // names are namespaced `comfy-titlepopup:picker-settings-*` so they
-  // don't collide with the panel's `window.api` IPCs (those operate on
-  // the panel's webContents.id, this lane operates on the popup's).
+  // Per-install settings (picker expanded Manage). Each handler is a 1:1
+  // pass-through to the main-side IPC. Channels namespaced `comfy-titlepopup:*`
+  // so they don't collide with the panel's `window.api` IPCs.
   pickerSettingsGetDetailSections: (installationId) =>
-    ipcRenderer.invoke('comfy-titlepopup:picker-settings-get-detail-sections', {
-      installationId,
-    }),
-  pickerSettingsGetDiskSpace: (path) =>
-    ipcRenderer.invoke('comfy-titlepopup:picker-settings-get-disk-space', { path }),
+    ipcRenderer.invoke(CH.getDetailSections, { installationId }),
+  pickerSettingsGetDiskSpace: (path) => ipcRenderer.invoke(CH.getDiskSpace, { path }),
   pickerSettingsUpdateInstallation: (installationId, data) =>
-    ipcRenderer.invoke('comfy-titlepopup:picker-settings-update-installation', {
-      installationId,
-      data,
-    }),
+    ipcRenderer.invoke(CH.updateInstallation, { installationId, data }),
   pickerSettingsRunAction: (installationId, actionId, actionData) =>
-    ipcRenderer.invoke('comfy-titlepopup:picker-settings-run-action', {
-      installationId,
-      actionId,
-      actionData,
-    }),
+    ipcRenderer.invoke(CH.runAction, { installationId, actionId, actionData }),
   pickerSettingsGetFieldOptions: (sourceId, fieldId, selections) =>
-    ipcRenderer.invoke('comfy-titlepopup:picker-settings-get-field-options', {
-      sourceId,
-      fieldId,
-      selections,
-    }),
-  pickerSettingsGetInstallations: () =>
-    ipcRenderer.invoke('comfy-titlepopup:picker-settings-get-installations'),
+    ipcRenderer.invoke(CH.getFieldOptions, { sourceId, fieldId, selections }),
+  pickerSettingsGetInstallations: () => ipcRenderer.invoke(CH.getInstallations),
   pickerSettingsGetInstallationSize: (installationId) =>
-    ipcRenderer.invoke('comfy-titlepopup:picker-settings-get-installation-size', {
-      installationId,
-    }),
+    ipcRenderer.invoke(CH.getInstallationSize, { installationId }),
   pickerSettingsStopComfyUI: (installationId) =>
-    ipcRenderer.invoke('comfy-titlepopup:picker-settings-stop-comfyui', { installationId }),
+    ipcRenderer.invoke(CH.stopComfyUI, { installationId }),
   pickerSettingsGetSnapshots: (installationId) =>
-    ipcRenderer.invoke('comfy-titlepopup:picker-settings-get-snapshots', { installationId }),
+    ipcRenderer.invoke(CH.getSnapshots, { installationId }),
   pickerSettingsGetSnapshotDetail: (installationId, filename) =>
-    ipcRenderer.invoke('comfy-titlepopup:picker-settings-get-snapshot-detail', {
-      installationId,
-      filename,
-    }),
+    ipcRenderer.invoke(CH.getSnapshotDetail, { installationId, filename }),
   pickerSettingsGetSnapshotDiff: (installationId, filename, mode) =>
-    ipcRenderer.invoke('comfy-titlepopup:picker-settings-get-snapshot-diff', {
-      installationId,
-      filename,
-      mode,
-    }),
+    ipcRenderer.invoke(CH.getSnapshotDiff, { installationId, filename, mode }),
   pickerSettingsExportSnapshot: (installationId, filename) =>
-    ipcRenderer.invoke('comfy-titlepopup:picker-settings-export-snapshot', {
-      installationId,
-      filename,
-    }),
+    ipcRenderer.invoke(CH.exportSnapshot, { installationId, filename }),
   pickerSettingsExportAllSnapshots: (installationId) =>
-    ipcRenderer.invoke('comfy-titlepopup:picker-settings-export-all-snapshots', {
-      installationId,
-    }),
-  pickerSettingsImportSnapshotsPreview: () =>
-    ipcRenderer.invoke('comfy-titlepopup:picker-settings-import-snapshots-preview'),
+    ipcRenderer.invoke(CH.exportAllSnapshots, { installationId }),
+  pickerSettingsImportSnapshotsPreview: () => ipcRenderer.invoke(CH.importSnapshotsPreview),
   pickerSettingsImportSnapshotsDiff: (installationId) =>
-    ipcRenderer.invoke('comfy-titlepopup:picker-settings-import-snapshots-diff', {
-      installationId,
-    }),
+    ipcRenderer.invoke(CH.importSnapshotsDiff, { installationId }),
   pickerSettingsImportSnapshotsConfirm: (installationId) =>
-    ipcRenderer.invoke('comfy-titlepopup:picker-settings-import-snapshots-confirm', {
-      installationId,
-    }),
-  pickerSettingsPreviewSnapshotFile: () =>
-    ipcRenderer.invoke('comfy-titlepopup:picker-settings-preview-snapshot-file'),
+    ipcRenderer.invoke(CH.importSnapshotsConfirm, { installationId }),
+  pickerSettingsPreviewSnapshotFile: () => ipcRenderer.invoke(CH.previewSnapshotFile),
   pickerSettingsGetComfyArgs: (installationId) =>
-    ipcRenderer.invoke('comfy-titlepopup:picker-settings-get-comfy-args', { installationId }),
+    ipcRenderer.invoke(CH.getComfyArgs, { installationId }),
   pickerSettingsBrowseFolder: (opts) =>
-    ipcRenderer.invoke('comfy-titlepopup:picker-settings-browse-folder', {
-      defaultPath: opts?.defaultPath,
-    }),
+    ipcRenderer.invoke(CH.browseFolder, { defaultPath: opts?.defaultPath }),
   pickerSettingsCancelOperation: (installationId) =>
-    ipcRenderer.invoke('comfy-titlepopup:picker-settings-cancel-operation', {
-      installationId,
-    }),
+    ipcRenderer.invoke(CH.cancelOperation, { installationId }),
   pickerSettingsPreviewDesktopMigration: (installationId, desktopId) =>
-    ipcRenderer.invoke('comfy-titlepopup:picker-settings-preview-desktop-migration', {
-      installationId,
-      desktopId,
-    }),
+    ipcRenderer.invoke(CH.previewDesktopMigration, { installationId, desktopId }),
   pickerSettingsPreviewLocalMigration: (installationId) =>
-    ipcRenderer.invoke('comfy-titlepopup:picker-settings-preview-local-migration', {
-      installationId,
-    }),
+    ipcRenderer.invoke(CH.previewLocalMigration, { installationId }),
   pickerSettingsRelaunchApp: () => {
-    ipcRenderer.send('comfy-titlepopup:picker-settings-relaunch-app')
+    ipcRenderer.send(CH.relaunchApp)
   },
-  pickerSettingsGetLocaleMessages: () =>
-    ipcRenderer.invoke('comfy-titlepopup:picker-settings-get-locale-messages'),
+  pickerSettingsGetLocaleMessages: () => ipcRenderer.invoke(CH.getLocaleMessages),
   setPickerMode: (mode, opts) => {
     ipcRenderer.send('comfy-titlepopup:set-picker-mode', {
       mode,

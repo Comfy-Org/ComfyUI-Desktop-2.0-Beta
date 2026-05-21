@@ -4,13 +4,9 @@ import { installTypeMetaFor } from '../../lib/installTypeIcon'
 import type { Installation } from '../../types/ipc'
 
 /**
- * Row card for the instance-picker's compact mode.
- *
- * Layout is a two-column grid: identity on the left (icon + name +
- * running pill, then a row of meta pills), CTA stack on the right
- * (Open + Manage, two rows). No kebab in compact — power actions
- * (reveal/copy/untrack/delete) live in expanded mode where the user
- * has already committed to "manage this install".
+ * Compact-mode row card: identity (icon + name + running pill + meta pills)
+ * on the left, Open + Manage CTA stack on the right. Power actions
+ * (reveal/copy/untrack/delete) live in expanded mode, not here.
  */
 
 interface Props {
@@ -134,7 +130,7 @@ function handleManage(): void {
   bottom: 10px;
   width: 2px;
   border-radius: 2px;
-  background: var(--accent-primary, #0b8ce9);
+  background: var(--accent-primary);
 }
 
 .picker-row-card-identity {
@@ -184,8 +180,8 @@ function handleManage(): void {
   height: 18px;
   padding: 0 8px;
   border-radius: 9999px;
-  background: color-mix(in srgb, var(--success, #34c759) 18%, transparent);
-  color: var(--success, #34c759);
+  background: color-mix(in srgb, var(--success) 18%, transparent);
+  color: var(--success);
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.2px;
@@ -196,7 +192,7 @@ function handleManage(): void {
   width: 6px;
   height: 6px;
   border-radius: 9999px;
-  background: var(--success, #34c759);
+  background: var(--success);
 }
 
 .picker-row-card-pills {
@@ -252,8 +248,8 @@ function handleManage(): void {
 }
 
 .picker-row-card-open {
-  border: 1px solid var(--accent-primary, #0b8ce9);
-  background: var(--accent-primary, #0b8ce9);
+  border: 1px solid var(--accent-primary);
+  background: var(--accent-primary);
   color: var(--text);
 }
 .picker-row-card-open:hover,
