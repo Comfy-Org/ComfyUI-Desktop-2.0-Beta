@@ -1,13 +1,14 @@
 /**
  * Title-bar hover-gate state machine on the install-backed comfy
  * window. Mirrors `title-bar-hover-gate.test.ts` but runs after
- * clicking the always-seeded Cloud chooser tile, which reconstructs
- * the host's title-bar webContents in install-backed mode
- * (`installationId=inst-…`, `sourceCategory='cloud'`,
- * `is-install-less` dropped). Past title-bar bugs have surfaced only
- * once an install attached, so the install-backed surface needs its
- * own regression net even though the underlying composable is shared
- * with the chooser host.
+ * clicking the always-seeded Cloud chooser tile, which transitions
+ * the host's title bar into install-backed mode (`sourceCategory='cloud'`,
+ * `is-install-less` dropped) reactively over IPC — the title-bar
+ * WebContentsView is long-lived and no longer reloads on identity
+ * flips. Past title-bar bugs have surfaced only once an install
+ * attached, so the install-backed surface needs its own regression
+ * net even though the underlying composable is shared with the
+ * chooser host.
  *
  * Network: the cloud launch path runs `waitForUrl(remoteUrl, 15s)`
  * against `https://cloud.comfy.org/`. The probe accepts any HTTP
@@ -17,7 +18,7 @@
 
 import { test, expect } from '@playwright/test'
 import { launchApp, type AppContext } from './launchApp'
-import { WebContentsPage, waitForWebContents } from './support/cdpPages'
+import type { WebContentsPage } from './support/cdpPages'
 import {
   dispatchPointerLeave,
   dispatchPointerMove,
@@ -34,23 +35,18 @@ test.describe.configure({ mode: 'serial' })
 
 test.beforeAll(async () => {
   ctx = await launchApp({ settings: { firstUseCompleted: true, telemetryEnabled: false } })
+  titleBar = ctx.titleBar
 
-  // Click the always-present Cloud tile and wait for the host's
-  // title-bar view to be reconstructed in install-backed mode (URL
-  // flips from `installationId=` to `installationId=inst-…`). The
-  // claim-attach-host path swaps the title-bar WebContentsView in
-  // place rather than spawning a second BrowserWindow.
+  // Click the always-present Cloud tile and wait for the existing
+  // title-bar view to flip into install-backed mode via the
+  // `comfy-titlebar:installation-id-changed` IPC. The pill dropping
+  // `.is-install-less` is the user-visible signal that the identity
+  // handshake completed; it doubles as a sanity check before the
+  // hover-gate assertions below.
   await ctx.panel.click('.chooser-tile-cloud')
-  await waitForWebContents(ctx.app, 'comfyTitleBar.html?installationId=inst-', 30_000)
-  titleBar = new WebContentsPage(ctx.app, 'comfyTitleBar.html?installationId=inst-')
-  await titleBar.waitForSelector('.title-bar')
-
-  // Sanity: pill flipped out of install-less mode and shows the
-  // cloud install's name. Catches a drift in the IPC handshake order
-  // before any hover-gate assertion would mask the real failure.
   await expect.poll(() => titleBar.exists('.title-install-pill:not(.is-install-less)'), {
-    timeout: 5_000,
-    intervals: [100, 200],
+    timeout: 30_000,
+    intervals: [100, 200, 500],
   }).toBe(true)
 })
 
