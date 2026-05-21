@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Check, X, TriangleAlert, ChevronDown } from 'lucide-vue-next'
+import { Check, X, TriangleAlert, ChevronDown, ArrowLeft, RefreshCcw } from 'lucide-vue-next'
 import { useModal } from '../composables/useModal'
+import { useReturnToDashboardConfirm, type ReturnToDashboardReason } from '../composables/useReturnToDashboardConfirm'
+import { useInstallationStore } from '../stores/installationStore'
+import { emitTelemetryAction } from '../lib/telemetry'
 
 import { useTerminalScroll } from '../composables/useTerminalScroll'
 import { useProgressStore } from '../stores/progressStore'
@@ -28,6 +31,8 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const modal = useModal()
 const progressStore = useProgressStore()
+const installationStore = useInstallationStore()
+const { confirmReturnToDashboard } = useReturnToDashboardConfirm()
 
 const currentId = ref<string | null>(null)
 const resolvingConflict = ref(false)
@@ -460,16 +465,6 @@ watch(
   }
 )
 
-/** Minimize: close the takeover but leave the op running on
- *  `progressStore`. The dashboard's in-flight surfaces (chooser tile
- *  progress pill, MigrationBanner "View progress") let the user re-
- *  open the loader; `handleShowProgress`'s existing-op branch in
- *  `usePanelOverlays` re-attaches ProgressModal to the live op when
- *  they do, so no state is lost. */
-function handleMinimize(): void {
-  emit('close')
-}
-
 function handleDone(): void {
   const id = displayId.value
   if (!id) return
@@ -483,13 +478,45 @@ function handleDone(): void {
   }
 }
 
-/** Error exit for any op: close the loader and let the host return
- *  the user to wherever they came from. The install may already be
- *  gone (delete on success → list view underneath), so a
- *  `show-detail` would route to a stale view. The host's `close`
- *  listener handles teardown. */
-function handleBackToDashboard(): void {
+/** Return-to-Dashboard from any op state. In-flight uses the Phase 4
+ *  confirm (local installs are prompted because returning stops a
+ *  running ComfyUI); error / finished states skip the prompt because
+ *  the install is already idle. Closes the takeover and, if the
+ *  current window is install-backed, flips it back to chooser mode in
+ *  place via the panel IPC. */
+async function returnToDashboard(reason: ReturnToDashboardReason): Promise<void> {
+  const id = displayId.value
+  const op = id ? progressStore.operations.get(id) : null
+  if (reason === 'in_flight' && id) {
+    const installation = installationStore.getById(id) ?? null
+    const ok = await confirmReturnToDashboard(installation, reason)
+    if (!ok) return
+    // Cancel the in-flight op so it doesn't keep running in the background.
+    if (op && !op.finished) progressStore.cancelOperation(id)
+  }
+  emitTelemetryAction('desktop2.instance.return_to_dashboard', { from: 'progress', reason })
   emit('close')
+  // No-op when the calling host isn't install-backed (chooser host
+  // launches that errored before the swap).
+  await window.api.returnToDashboard()
+}
+
+/** Re-run the same op that just errored. Mirrors the port-conflict
+ *  retry pattern: feed the stored `apiCall` (or, for legacy launch
+ *  ops without one, fall back to a fresh `runAction('launch')`) back
+ *  into `startOperation`. */
+function handleReboot(): void {
+  const id = displayId.value
+  if (!id) return
+  const op = progressStore.operations.get(id)
+  if (!op) return
+  startOperation({
+    installationId: id,
+    title: op.title,
+    apiCall: op.apiCall || (() => window.api.runAction(id, 'launch')),
+    returnTo: op.returnTo,
+    opKind: op.opKind,
+  })
 }
 
 /** Auto-close the brand loader on success or cancel so the user
@@ -763,20 +790,18 @@ defineExpose({ startOperation, showOperation })
          row pins to the takeover's bottom edge without crowding the
          caption / banner area above. Same geometry as
          NewInstallModal's Configure footer.
-         • In-flight → Minimize. Closes the takeover but leaves the
-           op running on `progressStore`; the dashboard's existing
-           in-flight detection (chooser tile progress pill,
-           MigrationBanner "View progress") surfaces the re-open path,
-           and `handleShowProgress`'s existing-op branch re-attaches
-           ProgressModal when the user comes back.
+         • In-flight → Return to Dashboard (Phase 4 confirm gates
+           local installs because returning cancels the running op /
+           ComfyUI). Cancels the op then flips the host back to
+           chooser mode in place.
          • Port conflict → up to two source-driven actions:
            Use port N (when main suggested a next port) and Kill
            process (when the offender is itself a ComfyUI process).
            `handleUseNextPort` / `handleKillProcess` restart the op
            with the appropriate fix and flip `resolvingConflict`, which
            collapses the conflict UI back to the running state.
-         • Error → Back to dashboard (Copy-error sibling lands in
-           Phase 2.5).
+         • Error → Reboot (re-runs the same `apiCall`) + Return to
+           Dashboard.
          Success / cancelled auto-close after a short delay so no
          buttons render then — the band collapses to zero height. -->
     <template #footer>
@@ -793,9 +818,10 @@ defineExpose({ startOperation, showOperation })
           <button
             type="button"
             class="brand-ghost brand-progress__footer-btn"
-            @click="handleMinimize"
+            @click="returnToDashboard('in_flight')"
           >
-            {{ $t('progress.minimize') }}
+            <ArrowLeft :size="16" />
+            {{ $t('progress.returnToDashboard') }}
           </button>
         </template>
         <template v-else-if="isPortConflictOpen && currentOp.result?.portConflict">
@@ -824,9 +850,18 @@ defineExpose({ startOperation, showOperation })
           <button
             type="button"
             class="brand-primary brand-progress__footer-btn"
-            @click="handleBackToDashboard"
+            @click="handleReboot"
           >
-            {{ $t('common.backToDashboard') }}
+            <RefreshCcw :size="16" />
+            {{ $t('progress.reboot') }}
+          </button>
+          <button
+            type="button"
+            class="brand-ghost brand-progress__footer-btn"
+            @click="returnToDashboard('crashed')"
+          >
+            <ArrowLeft :size="16" />
+            {{ $t('progress.returnToDashboard') }}
           </button>
         </template>
       </div>

@@ -316,7 +316,8 @@
     "completedSuccess": "Completed successfully",
     "completedError": "Operation failed",
     "completedCancelled": "Operation was cancelled",
-    "minimize": "Minimize",
+    "returnToDashboard": "Return to Dashboard",
+    "reboot": "Reboot",
     "phaseLabel": {
       "download": "Downloading ComfyUI…",
       "extract": "Unpacking the install…",

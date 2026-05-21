@@ -15,10 +15,10 @@ import type { ActionResult, PortConflictInfo } from '../types/ipc'
  * snap the op to a precise state and assert what renders. The branches
  * under test:
  *
- *   - in-flight                     → bar + caption + Minimize button
+ *   - in-flight                     → bar + caption + Return-to-Dashboard
  *   - finished success              → success banner + auto-close
  *   - finished error                → error banner + message + Copy +
- *                                     Back-to-Dashboard
+ *                                     Reboot + Return-to-Dashboard
  *   - finished cancelled            → cancelled banner + auto-close
  *   - finished port conflict        → port banner + dual-action footer
  *
@@ -33,8 +33,14 @@ import type { ActionResult, PortConflictInfo } from '../types/ipc'
 const messages = {
   en: {
     common: {
-      backToDashboard: 'Back to Dashboard',
       copy: 'Copy',
+    },
+    dashboard: {
+      confirmStopLocal: {
+        title: 'Return to Dashboard?',
+        message: 'ComfyUI for this installation will be stopped.',
+        confirmLabel: 'Stop & Return',
+      },
     },
     progress: {
       working: 'Working…',
@@ -43,7 +49,8 @@ const messages = {
       completedSuccess: 'Completed successfully',
       completedError: 'Operation failed',
       completedCancelled: 'Operation was cancelled',
-      minimize: 'Minimize',
+      returnToDashboard: 'Return to Dashboard',
+      reboot: 'Reboot',
       phaseLabel: {
         download: 'Downloading ComfyUI…',
       },
@@ -71,6 +78,10 @@ interface MockApi {
   stopComfyUI: ReturnType<typeof vi.fn>
   runAction: ReturnType<typeof vi.fn>
   killPortProcess: ReturnType<typeof vi.fn>
+  returnToDashboard: ReturnType<typeof vi.fn>
+  getInstallations: ReturnType<typeof vi.fn>
+  onInstallationsChanged: ReturnType<typeof vi.fn>
+  onInstallationsVersionsUpdated: ReturnType<typeof vi.fn>
 }
 
 function installMockApi(overrides: Partial<MockApi> = {}): MockApi {
@@ -82,6 +93,10 @@ function installMockApi(overrides: Partial<MockApi> = {}): MockApi {
     stopComfyUI: vi.fn().mockResolvedValue(undefined),
     runAction: vi.fn().mockResolvedValue({ ok: true }),
     killPortProcess: vi.fn().mockResolvedValue({ ok: true }),
+    returnToDashboard: vi.fn().mockResolvedValue(true),
+    getInstallations: vi.fn().mockResolvedValue([]),
+    onInstallationsChanged: vi.fn(() => () => {}),
+    onInstallationsVersionsUpdated: vi.fn(() => () => {}),
     ...overrides,
   }
   ;(window as unknown as { api: MockApi }).api = api
@@ -223,7 +238,7 @@ describe('ProgressModal — brand branch state transitions', () => {
     vi.useRealTimers()
   })
 
-  it('renders in-flight state with the Minimize button and no banner', async () => {
+  it('renders in-flight state with a Return to Dashboard button and no banner', async () => {
     const { body } = await mountWithOp('inst-1', {
       flatStatus: 'Deleting installation…',
       flatPercent: 42,
@@ -234,8 +249,9 @@ describe('ProgressModal — brand branch state transitions', () => {
     expect(body.exists('.brand-progress__bar')).toBe(true)
 
     expect(body.exists('.brand-progress__footer')).toBe(true)
-    expect(body.selectorText('.brand-progress__footer')).toContain('Minimize')
-    expect(body.selectorText('.brand-progress__footer')).not.toContain('Back to Dashboard')
+    expect(body.selectorText('.brand-progress__footer')).toContain('Return to Dashboard')
+    expect(body.selectorText('.brand-progress__footer')).not.toContain('Minimize')
+    expect(body.selectorText('.brand-progress__footer')).not.toContain('Reboot')
   })
 
   it('renders the success banner on a finished+ok op and auto-closes after the grace delay', async () => {
@@ -275,7 +291,7 @@ describe('ProgressModal — brand branch state transitions', () => {
     expect(wrapper.emitted('close')?.length).toBeGreaterThan(0)
   })
 
-  it('renders the error banner + error message + Back-to-Dashboard, and does NOT auto-close', async () => {
+  it('renders the error banner + error message + Reboot + Return-to-Dashboard, and does NOT auto-close', async () => {
     const { wrapper, body } = await mountWithOp('inst-1', {
       finished: true,
       error: 'Disk write failed: ENOSPC',
@@ -294,7 +310,8 @@ describe('ProgressModal — brand branch state transitions', () => {
     expect(body.exists('.brand-progress__error-copy')).toBe(true)
 
     expect(body.exists('.brand-progress__footer')).toBe(true)
-    expect(body.selectorText('.brand-progress__footer')).toContain('Back to Dashboard')
+    expect(body.selectorText('.brand-progress__footer')).toContain('Reboot')
+    expect(body.selectorText('.brand-progress__footer')).toContain('Return to Dashboard')
     expect(body.selectorText('.brand-progress__footer')).not.toContain('Minimize')
 
     // Errors stay mounted so the user can read / copy. Verify no close
@@ -331,11 +348,11 @@ describe('ProgressModal — brand branch state transitions', () => {
       'Port 8188 is already in use',
     )
 
-    // Footer carries Use-Port + Kill-Process — not Back-to-Dashboard.
+    // Footer carries Use-Port + Kill-Process — not Return-to-Dashboard.
     expect(body.exists('.brand-progress__footer')).toBe(true)
     expect(body.selectorText('.brand-progress__footer')).toContain('Use port 8189 instead')
     expect(body.selectorText('.brand-progress__footer')).toContain('Stop process and retry')
-    expect(body.selectorText('.brand-progress__footer')).not.toContain('Back to Dashboard')
+    expect(body.selectorText('.brand-progress__footer')).not.toContain('Return to Dashboard')
 
     // Port conflict is explicitly excluded from auto-close so the user
     // has time to pick a resolution.
@@ -365,22 +382,25 @@ describe('ProgressModal — brand branch state transitions', () => {
     expect(body.selectorText('.brand-progress__footer')).not.toContain('Stop process and retry')
   })
 
-  it('emits `close` (Minimize) without cancelling the underlying op', async () => {
+  it('emits close, cancels the in-flight op, and calls returnToDashboard when the in-flight Return button is clicked', async () => {
     const { wrapper, body } = await mountWithOp('inst-1', {
       flatStatus: 'Deleting installation…',
       flatPercent: 42,
     })
 
-    const minimizeBtn = body.buttonByText('Minimize')
-    expect(minimizeBtn).not.toBeNull()
-    minimizeBtn!.click()
+    const returnBtn = body.buttonByText('Return to Dashboard')
+    expect(returnBtn).not.toBeNull()
+    returnBtn!.click()
     await flushPromises()
 
     expect(wrapper.emitted('close')?.length).toBeGreaterThan(0)
-    // Minimize must NOT call cancelOperation — the op is meant to keep
-    // running in the background.
+    // No installation in the store for inst-1 so the confirm is skipped
+    // and the in-flight op is cancelled.
+    const store = useProgressStore()
+    const op = store.operations.get('inst-1')
+    expect(op?.cancelRequested).toBe(true)
     const api = (window as unknown as { api: MockApi }).api
-    expect(api.cancelOperation).not.toHaveBeenCalled()
+    expect(api.returnToDashboard).toHaveBeenCalled()
   })
 
   it('uses friendlyCaption (not launchCaption) for non-launch ops', async () => {

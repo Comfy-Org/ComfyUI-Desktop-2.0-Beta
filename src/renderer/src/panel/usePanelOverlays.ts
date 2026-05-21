@@ -187,10 +187,7 @@ export function usePanelOverlays(opts: UsePanelOverlaysOpts): UsePanelOverlaysAp
     // Window-close consult or any other slot-clearing transition that
     // fires the cancel-prompt routes through here so the in-flight op
     // is actually cancelled in main rather than orphaned via window
-    // destruction. ProgressModal's footer no longer exposes a Cancel
-    // button (Minimize is preferred so the op can finish in the
-    // background and the dashboard re-attaches it), but this hook
-    // still cleans up if the takeover is force-closed.
+    // destruction.
     const onCancel = (): void => {
       progressStore.cancelOperation(showOpts.installationId)
     }
