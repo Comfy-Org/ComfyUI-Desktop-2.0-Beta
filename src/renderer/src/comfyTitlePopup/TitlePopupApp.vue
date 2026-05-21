@@ -4,6 +4,7 @@ import MenuView from './MenuView.vue'
 import DownloadsView from './DownloadsView.vue'
 import InstancePickerView from './InstancePickerView.vue'
 import GlobalSettingsView from './GlobalSettingsView.vue'
+import ModalDialog from '../components/ModalDialog.vue'
 import type { DetailSection, SnapshotListData } from '../types/ipc'
 
 /**
@@ -293,13 +294,9 @@ function measureAndRequestSize(): void {
     const rootEl = document.querySelector('.picker') as HTMLElement | null
     if (!rootEl) return
     bridge?.requestSize(rootEl.offsetHeight + 2)
-    return
   }
-  if (kind.value === 'global-settings') {
-    const rootEl = document.querySelector('.global-settings') as HTMLElement | null
-    if (!rootEl) return
-    bridge?.requestSize(rootEl.offsetHeight + 2)
-  }
+  // global-settings is sized once main-side from host content bounds —
+  // the two-pane card doesn't grow with content. No measure needed.
 }
 
 onMounted(() => {
@@ -390,19 +387,9 @@ watch(
   },
   { deep: true }
 )
-// Re-measure when the global-settings snapshot changes — accordion
-// counts + field values affect natural height.
-watch(
-  globalSettingsSnapshot,
-  () => {
-    void nextTick(() => {
-      requestAnimationFrame(() => {
-        measureAndRequestSize()
-      })
-    })
-  },
-  { deep: true }
-)
+// global-settings does not re-measure on snapshot change — the popup
+// is pinned to a fluid-clamped size main-side and the right pane
+// scrolls internally instead of growing the popup.
 onUnmounted(() => {
   unsubConfig?.()
   unsubDownloads?.()
@@ -427,6 +414,7 @@ onUnmounted(() => {
     class="popup"
     :class="{
       'is-light': isLight,
+      'is-menu': kind === 'menu',
       'is-picker': kind === 'instance-picker',
       'is-global-settings': kind === 'global-settings',
     }"
@@ -436,6 +424,12 @@ onUnmounted(() => {
     <DownloadsView v-else-if="kind === 'downloads'" :state="downloadsState" />
     <InstancePickerView v-else-if="kind === 'instance-picker'" :snapshot="pickerSnapshot" />
     <GlobalSettingsView v-else :snapshot="globalSettingsSnapshot" />
+    <!-- Singleton ModalDialog host for `useModal.confirm/alert/select`
+         calls fired by anything inside the popup (per-install settings
+         UI's confirm chains, snapshot prompts, etc.). The panel mounts
+         its own copy; this one keeps `useModal` working inside the
+         popup's separate WebContentsView. -->
+    <ModalDialog />
   </div>
 </template>
 
@@ -460,13 +454,29 @@ onUnmounted(() => {
   box-sizing: border-box;
 }
 
-/* Instance picker surface chrome per Figma. Menu / downloads kinds keep
- * the legacy lightweight surface. */
+/* Hamburger menu (kind === 'menu') uses a fixed surface across both
+ * the chooser/dashboard host and the install-backed canvas host so the
+ * dropdown reads consistently. The per-host title-bar theme still
+ * paints the title bar itself; only the popped-out menu is unified.
+ * `!important` overrides the inline `background`/`color` applied via
+ * `:style="{ background: themeBg, color: themeText }"` on `.popup`. */
+.popup.is-menu {
+  background: var(--neutral-800) !important;
+  color: var(--neutral-100) !important;
+  border-color: var(--chooser-surface-border);
+  font-size: 13px;
+}
+
+/* Instance picker + Global Settings share one modal-card chrome —
+ * `--modal-surface-bg` outer, `--modal-surface-border` hairline, same
+ * radius + layered shadow. Keeps both popups visually consistent with
+ * in-app modals (DownloadsModal, TermsModal). Menu / downloads kinds
+ * keep the legacy lightweight surface. */
 .popup.is-picker,
 .popup.is-global-settings {
-  background: var(--neutral-800, #211927) !important;
-  border: 1px solid var(--chooser-surface-border);
-  border-radius: 12px;
+  background: var(--modal-surface-bg) !important;
+  border: 1px solid var(--modal-surface-border);
+  border-radius: 14px;
   box-shadow:
     0 20px 24px -4px rgba(10, 13, 18, 0.08),
     0 8px 8px -4px rgba(10, 13, 18, 0.03),

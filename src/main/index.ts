@@ -23,6 +23,7 @@ import {
   registerSystemModalIpc,
 } from './popups/systemModal'
 import { registerTitlePopupIpc, type InstancePickerInstall } from './popups/titlePopup'
+import { registerPickerSettingsIpc } from './popups/pickerSettingsHandlers'
 import { waitForPort, COMFY_BOOT_TIMEOUT_MS } from './lib/process'
 import { isQuitInProgress, setQuitReason } from './lib/quit-state'
 import type { InstallationRecord } from './installations'
@@ -571,13 +572,10 @@ ipcMain.on('comfy-window:click-app-update-pill', (event) => {
   const state = updater.getCurrentUpdateState()
   if (state.kind === null) return
   // While the download is in flight the pill click can't usefully
-  // trigger anything — instead, deep-link the user to Global Settings
-  // → Desktop Updates so they can watch the progress bar and decide
-  // whether to wait. Mirrors the install-update pill flow: bring the
-  // panel view forward (lazily constructing it if needed) then send
-  // `panel-trigger-overlay 'open-settings'` once the renderer is up.
+  // trigger anything — deep-link the user to Global Settings → Desktop
+  // Updates instead. The renderer's deep-link router (`useDeepLinkRouter`)
+  // handles `settingsTab: 'global'` by calling `openGlobalSettings()`.
   if (state.kind === 'downloading') {
-    setActivePanel(found.id, 'settings')
     const panelView = entry.panelView
     if (!panelView) return
     sendToPanelDeferred(panelView, 'panel-trigger-overlay', {
@@ -628,40 +626,13 @@ ipcMain.on('comfy-window:click-app-update-pill', (event) => {
 })
 
 /**
- * Title-bar install-update pill click. Refuses on
- * install-less hosts (the pill is suppressed there but a defensive
- * guard keeps stray IPC from triggering anything).
+ * Title-bar install-update pill click. Refuses on install-less hosts.
  *
- * The handler does three things, in order:
- *   1. `setActivePanel(found.id, 'settings')` — bring the panel view
- *      forward when the user is currently on the ComfyUI view (the
- *      common case for this pill since it's only visible while an
- *      install is running). Without this, the unified Settings modal
- *      mounts on a hidden panel surface and the click appears to do
- *      nothing. `setActivePanel` also lazily creates the panelView
- *      on first non-comfy switch via `ensurePanelView`. It's a no-op
- *      when the entry is already on `'settings'` (i.e. the modal is
- *      already open), so we don't double-open it.
- *   2. Resolve the entry's `panelView` AFTER `setActivePanel` so we
- *      pick up any view that step 1 may have just constructed.
- *   3. `panel-trigger-overlay` with the installationId so the renderer
- *      can open the unified Settings modal deep-linked to the ComfyUI
- *      Settings tab → Update sub-tab — same surface the chooser kebab
- *      "Update…" entry routes to.
- *
- * Step 3 must be deferred until the panelView's renderer has finished
- * loading. When the panel was just constructed by step 1, its preload
- * + Vue app haven't mounted yet, so a synchronous `send()` would land
- * before `unsubPanelTriggerOverlay = window.api.onPanelTriggerOverlay
- * (...)` ran in `onMounted`, and the IPC would be silently dropped.
- * `did-finish-load` fires once the JS bundle has executed (which is
- * what Vue's `mount()` + `onMounted` ride on), so registering a
- * `once('did-finish-load', sendDeepLink)` is a reliable trigger.
- *
- * The renderer's existing `initialTab` / `initialDetailTab` watchers
- * (added in the unified-settings-modal branch) cover the
- * already-mounted-but-on-a-different-tab case — they snap the sidebar
- * back to "ComfyUI Settings" and the inner DetailModal to Update.
+ * Forwards `panel-trigger-overlay { kind: 'install-update' }` to the panel
+ * renderer; `useDeepLinkRouter` handles it by opening the instance picker
+ * in expanded mode on the Update tab. `sendToPanelDeferred` waits for
+ * `did-finish-load` so the IPC isn't dropped if the panelView was just
+ * lazily constructed.
  */
 ipcMain.on('comfy-window:click-install-update-pill', (event) => {
   const found = findEntryByTitleBarSender(event.sender)
@@ -669,7 +640,6 @@ ipcMain.on('comfy-window:click-install-update-pill', (event) => {
   const { entry } = found
   const installationId = entry.installationId
   if (!installationId) return
-  setActivePanel(found.id, 'settings')
   const panelView = entry.panelView
   if (!panelView) return
   sendToPanelDeferred(panelView, 'panel-trigger-overlay', {
@@ -1229,6 +1199,14 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
         })
       },
     })
+    // Picker expanded-Manage IPC: thin pass-throughs from the popup
+    // process to the existing panel-facing IPC handlers. Must register
+    // AFTER `ipc.register()` (or anything else that mounts the panel-
+    // facing channels we forward to) — `_invokeHandlers.get()` resolves
+    // lazily on each invoke, but registering this side first wouldn't
+    // change behaviour, only ordering. Place it next to the existing
+    // popup IPC registration for grouping.
+    registerPickerSettingsIpc()
     registerDownloadHandlers()
     registerAssetDownloadHandlers({ findInstallationIdForWindow })
     cleanupTempDownloads()

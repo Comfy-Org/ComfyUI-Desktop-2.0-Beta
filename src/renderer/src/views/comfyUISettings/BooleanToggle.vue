@@ -68,11 +68,11 @@ function handleClick(): void {
   gap: 10px;
   width: 100%;
   padding: 8px 12px;
-  background: var(--surface);
-  border: none;
+  background: var(--neutral-800);
+  border: 1px solid var(--chooser-surface-border);
   border-radius: 8px;
-  color: var(--text);
-  font-size: 14px;
+  color: var(--neutral-100);
+  font-size: 13px;
   text-align: left;
   cursor: pointer;
 }

@@ -75,7 +75,6 @@ onUnmounted(() => {
               <div class="why-cloud-body-main">
                 <header class="why-cloud-header">
                   <h2 class="why-cloud-title">{{ $t('firstUse.whyCloud.title') }}</h2>
-                  <span class="why-cloud-pill">{{ $t('firstUse.whyCloud.creditsPill') }}</span>
                 </header>
                 <p class="why-cloud-lead">{{ $t('firstUse.whyCloud.lead') }}</p>
                 <ul class="why-cloud-list">

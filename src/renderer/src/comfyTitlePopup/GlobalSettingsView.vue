@@ -1,9 +1,15 @@
 <script setup lang="ts">
-import { computed, onMounted, useTemplateRef } from 'vue'
-import { useTitlePopupAutoResize } from '../composables/useTitlePopupAutoResize'
+import { computed, onMounted, ref, type Component } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Github, Plus, X } from 'lucide-vue-next'
-import GlobalSettingsAccordion from './globalSettings/GlobalSettingsAccordion.vue'
+import {
+  Github,
+  HardDrive,
+  Plus,
+  RefreshCcw,
+  Settings2,
+  SlidersHorizontal,
+  X
+} from 'lucide-vue-next'
 import UpdatesSection from './globalSettings/UpdatesSection.vue'
 import SettingsSectionList from '../views/comfyUISettings/SettingsSectionList.vue'
 import DirCard from '../components/DirCard.vue'
@@ -12,20 +18,20 @@ import type {
   AppUpdateDownloadProgress,
   AppUpdateState,
   DetailField,
-  DetailSection,
+  DetailSection
 } from '../types/ipc'
 
 /**
- * Global Settings popup view.
+ * Global Settings popup view — two-pane tabbed card.
  *
- * Pure-prop mirror of `InstancePickerView.vue`:
- *  - Receives a `snapshot` prop built main-side by
- *    `buildGlobalSettingsSnapshot` in `src/main/popups/titlePopup.ts`.
- *  - Dispatches mutations through `window.__comfyTitlePopup`. The popup
- *    renderer does NOT have `window.api` — every mutation is a
- *    bridge method.
- *  - Snapshot pushes from main (settings-changed / app-update-state /
- *    installations-changed) repaint the accordions automatically.
+ * Receives a `snapshot` prop built main-side by `buildGlobalSettingsSnapshot`
+ * in `src/main/popups/titlePopup.ts` and dispatches mutations through
+ * `window.__comfyTitlePopup`. The popup renderer does NOT have
+ * `window.api` — every mutation is a bridge method.
+ *
+ * The popup itself is sized once main-side from host content bounds
+ * (fluid clamp on width + height); the right pane scrolls when its
+ * content overflows so switching tabs never resizes the popup.
  */
 
 interface ModelsDir {
@@ -66,14 +72,9 @@ interface Snapshot {
 
 interface GlobalSettingsBridge {
   close(): void
-  /** Ask main to resize the popup view to the given natural height —
-   *  used by the ResizeObserver below to track BaseAccordion's
-   *  expand/collapse animation. Main clamps to the 720px / 70% host
-   *  content-height ceiling, so unbounded growth is impossible. */
-  requestSize(height: number): void
   globalSettingsUpdateField(
     fieldId: string,
-    value: unknown,
+    value: unknown
   ): Promise<{ ok: boolean; message?: string }>
   globalSettingsBrowseFolder(defaultPath?: string): Promise<string | null>
   globalSettingsOpenPath(path: string): void
@@ -86,7 +87,7 @@ interface GlobalSettingsBridge {
   globalSettingsRunInstallAction(
     installationId: string,
     actionId: string,
-    actionData?: Record<string, unknown>,
+    actionData?: Record<string, unknown>
   ): Promise<{ ok: boolean; message?: string }>
 }
 
@@ -96,27 +97,45 @@ const bridge = (window as unknown as { __comfyTitlePopup?: GlobalSettingsBridge 
 
 const LAST_CHECKED_KEY = 'globalSettings.lastCheckedAt'
 
-// ---- Section adapters: cast loose-typed snapshot fields to DetailField. ----
-const overviewSections = computed<DetailSection[]>(() => [{
-  fields: props.snapshot.overviewFields as unknown as DetailField[],
-}])
-const cacheSections = computed<DetailSection[]>(() => [{
-  fields: props.snapshot.cacheFields as unknown as DetailField[],
-}])
-const advancedSections = computed<DetailSection[]>(() => [{
-  fields: props.snapshot.advancedFields as unknown as DetailField[],
-}])
-const sharedDirsSections = computed<DetailSection[]>(() => [{
-  fields: props.snapshot.sharedDirectoriesFields as unknown as DetailField[],
-}])
-const channelPickerField = computed<DetailField | null>(() =>
-  props.snapshot.channelPickerField as unknown as DetailField | null,
+type TabId = 'general' | 'updates' | 'cache' | 'storage' | 'advanced'
+const activeTab = ref<TabId>('general')
+
+const tabs = computed<{ id: TabId; label: string; icon: Component }[]>(() => [
+  { id: 'general', label: props.snapshot.i18n.overview, icon: Settings2 },
+  { id: 'updates', label: props.snapshot.i18n.updates, icon: RefreshCcw },
+  { id: 'cache', label: props.snapshot.i18n.cache, icon: HardDrive },
+  { id: 'storage', label: props.snapshot.i18n.models, icon: HardDrive },
+  { id: 'advanced', label: props.snapshot.i18n.advanced, icon: SlidersHorizontal }
+])
+
+const overviewSections = computed<DetailSection[]>(() => [
+  {
+    fields: props.snapshot.overviewFields as unknown as DetailField[]
+  }
+])
+const cacheSections = computed<DetailSection[]>(() => [
+  {
+    fields: props.snapshot.cacheFields as unknown as DetailField[]
+  }
+])
+const advancedSections = computed<DetailSection[]>(() => [
+  {
+    fields: props.snapshot.advancedFields as unknown as DetailField[]
+  }
+])
+const sharedDirsSections = computed<DetailSection[]>(() => [
+  {
+    fields: props.snapshot.sharedDirectoriesFields as unknown as DetailField[]
+  }
+])
+const channelPickerField = computed<DetailField | null>(
+  () => props.snapshot.channelPickerField as unknown as DetailField | null
 )
-const appUpdateState = computed<AppUpdateState>(() =>
-  props.snapshot.appUpdate.state as unknown as AppUpdateState,
+const appUpdateState = computed<AppUpdateState>(
+  () => props.snapshot.appUpdate.state as unknown as AppUpdateState
 )
-const appUpdateProgress = computed<AppUpdateDownloadProgress | null>(() =>
-  props.snapshot.appUpdate.progress as unknown as AppUpdateDownloadProgress | null,
+const appUpdateProgress = computed<AppUpdateDownloadProgress | null>(
+  () => props.snapshot.appUpdate.progress as unknown as AppUpdateDownloadProgress | null
 )
 const platformLabel = computed(() => {
   const p = props.snapshot.appUpdate.platform
@@ -126,11 +145,7 @@ const platformLabel = computed(() => {
   return p
 })
 
-// ---- Mutation handlers — every action routes through the bridge. ----
 async function handleUpdateField(field: DetailField, value: unknown): Promise<void> {
-  // Path fields' "Open" button reuses the field id with an `__open__`
-  // sentinel value. SettingsSectionList's PathField wires this via
-  // separate emits, so handle the conventional update flow only.
   await bridge?.globalSettingsUpdateField(field.id, value)
 }
 
@@ -165,7 +180,6 @@ function handleOpenModelsDir(path: string): void {
   bridge?.globalSettingsOpenPath(path)
 }
 
-// ---- Updates section handlers ----
 async function handleUpdateNow(): Promise<void> {
   const kind = (appUpdateState.value as AppUpdateState).kind
   if (kind === 'ready') {
@@ -184,7 +198,11 @@ async function handleCheckForUpdate(): Promise<void> {
     await bridge?.globalSettingsCheckForUpdate()
   } finally {
     const now = Date.now()
-    try { window.localStorage.setItem(LAST_CHECKED_KEY, String(now)) } catch { /* noop */ }
+    try {
+      window.localStorage.setItem(LAST_CHECKED_KEY, String(now))
+    } catch {
+      /* noop */
+    }
     bridge?.globalSettingsSetLastCheckedAt(now)
   }
 }
@@ -192,35 +210,22 @@ async function handleCheckForUpdate(): Promise<void> {
 async function handleRunInstallAction(action: ActionDef): Promise<void> {
   const id = props.snapshot.activeInstallationId
   if (!id) return
-  await bridge?.globalSettingsRunInstallAction(id, action.id, action.data as Record<string, unknown> | undefined)
+  await bridge?.globalSettingsRunInstallAction(
+    id,
+    action.id,
+    action.data as Record<string, unknown> | undefined
+  )
 }
 
-const headerRef = useTemplateRef<HTMLDivElement>('headerRef')
-const bodyRef = useTemplateRef<HTMLDivElement>('bodyRef')
-const contentRef = useTemplateRef<HTMLDivElement>('contentRef')
-
-// Fit-to-content resize. The `.global-settings` root is
-// `max-height: 100%`-clamped to the popup view's current bounds, so
-// observing it directly saturates the natural-height signal once main
-// has already resized the popup smaller. The `contentRef` wrapper
-// sits inside `overflow-y: auto`, so its `offsetHeight` is the
-// unclamped natural height of the accordions in both directions —
-// `useTitlePopupAutoResize` re-derives total popup height from
-// header + body padding + content + .popup border on every frame of
-// the BaseAccordion grid-row transition.
-useTitlePopupAutoResize(
-  contentRef,
-  () => {
-    const header = headerRef.value
-    const body = bodyRef.value
-    const content = contentRef.value
-    if (!header || !body || !content) return NaN
-    const cs = getComputedStyle(body)
-    const bodyPadding = parseFloat(cs.paddingTop || '0') + parseFloat(cs.paddingBottom || '0')
-    return header.offsetHeight + bodyPadding + content.offsetHeight + 2
-  },
-  bridge?.requestSize ? bridge.requestSize.bind(bridge) : undefined,
-)
+function handleTabKey(event: KeyboardEvent): void {
+  if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return
+  event.preventDefault()
+  const ids = tabs.value.map((t) => t.id)
+  const idx = ids.indexOf(activeTab.value)
+  const next =
+    event.key === 'ArrowDown' ? (idx + 1) % ids.length : (idx - 1 + ids.length) % ids.length
+  activeTab.value = ids[next] as TabId
+}
 
 onMounted(() => {
   // Last-checked back-fill: if main's snapshot has no lastCheckedAt but
@@ -233,93 +238,111 @@ onMounted(() => {
         const n = Number(raw)
         if (Number.isFinite(n)) bridge?.globalSettingsSetLastCheckedAt(n)
       }
-    } catch { /* noop */ }
+    } catch {
+      /* noop */
+    }
   }
 })
 </script>
 
 <template>
   <div class="global-settings">
-    <div ref="headerRef" class="global-settings-header">
-      <span class="global-settings-title">{{ t('settingsModal.tabGlobal', 'Settings') }}</span>
+    <header class="gs-header">
+      <h2 class="gs-title">{{ t('settingsModal.tabGlobal', 'Settings') }}</h2>
       <button
         type="button"
-        class="global-settings-close"
+        class="gs-close"
         :aria-label="t('common.close', 'Close')"
         @click="bridge?.close()"
       >
-        <X :size="14" aria-hidden="true" />
+        <X :size="16" aria-hidden="true" />
       </button>
-    </div>
+    </header>
 
-    <div ref="bodyRef" class="global-settings-body">
-      <div ref="contentRef" class="global-settings-content">
-      <GlobalSettingsAccordion :title="snapshot.i18n.overview" :default-open="true">
-        <SettingsSectionList :sections="overviewSections" @update-field="handleUpdateField" />
+    <div class="gs-body">
+      <nav class="gs-tabs" role="tablist" aria-orientation="vertical" @keydown="handleTabKey">
         <button
+          v-for="tab in tabs"
+          :id="`gs-tab-${tab.id}`"
+          :key="tab.id"
           type="button"
-          class="global-settings-github"
-          @click="handleOpenExternal(snapshot.githubUrl)"
+          class="gs-tab"
+          :class="{ active: activeTab === tab.id }"
+          role="tab"
+          :aria-selected="activeTab === tab.id"
+          :aria-controls="`gs-panel-${tab.id}`"
+          :tabindex="activeTab === tab.id ? 0 : -1"
+          @click="activeTab = tab.id"
         >
-          <Github :size="14" aria-hidden="true" />
-          <span>GitHub</span>
+          <component :is="tab.icon" :size="14" aria-hidden="true" />
+          <span>{{ tab.label }}</span>
         </button>
-      </GlobalSettingsAccordion>
+      </nav>
 
-      <GlobalSettingsAccordion :title="snapshot.i18n.updates">
-        <UpdatesSection
-          :state="appUpdateState"
-          :progress="appUpdateProgress"
-          :is-downloading="snapshot.appUpdate.isDownloading"
-          :checking="false"
-          :last-checked-at="snapshot.appUpdate.lastCheckedAt"
-          :installed-version="snapshot.appUpdate.installedVersion"
-          :platform-label="platformLabel"
-          :channel-picker-field="channelPickerField"
-          @update-now="handleUpdateNow"
-          @check-for-update="handleCheckForUpdate"
-          @install-action="handleRunInstallAction"
-        />
-      </GlobalSettingsAccordion>
+      <section
+        :id="`gs-panel-${activeTab}`"
+        class="gs-pane"
+        role="tabpanel"
+        :aria-labelledby="`gs-tab-${activeTab}`"
+      >
+        <template v-if="activeTab === 'general'">
+          <SettingsSectionList :sections="overviewSections" @update-field="handleUpdateField" />
+          <button type="button" class="gs-github" @click="handleOpenExternal(snapshot.githubUrl)">
+            <Github :size="14" aria-hidden="true" />
+            <span>GitHub</span>
+          </button>
+        </template>
 
-      <GlobalSettingsAccordion :title="snapshot.i18n.cache">
-        <!-- Storage bucket: Cache, Models, and Shared Directories. The
-             three were separate accordions in the original handoff but
-             share one mental model ("where files live on disk") so they
-             collapse into one section. Three sub-groups keep the rows
-             scannable without subtitles. -->
-        <div class="global-settings-subgroup">
+        <template v-else-if="activeTab === 'updates'">
+          <UpdatesSection
+            :state="appUpdateState"
+            :progress="appUpdateProgress"
+            :is-downloading="snapshot.appUpdate.isDownloading"
+            :checking="false"
+            :last-checked-at="snapshot.appUpdate.lastCheckedAt"
+            :installed-version="snapshot.appUpdate.installedVersion"
+            :platform-label="platformLabel"
+            :channel-picker-field="channelPickerField"
+            @update-now="handleUpdateNow"
+            @check-for-update="handleCheckForUpdate"
+            @install-action="handleRunInstallAction"
+          />
+        </template>
+
+        <template v-else-if="activeTab === 'cache'">
           <SettingsSectionList :sections="cacheSections" @update-field="handleUpdateField" />
-        </div>
-        <div class="global-settings-subgroup">
-          <div class="global-settings-subgroup-title">{{ snapshot.i18n.models }}</div>
-          <div class="global-settings-models">
-            <DirCard
-              v-for="(d, i) in snapshot.modelsDirs"
-              :key="d.path"
-              :path="d.path"
-              :is-primary="d.isPrimary"
-              :is-default="d.isDefault"
-              @open="handleOpenModelsDir(d.path)"
-              @remove="handleRemoveModelsDir(i)"
-              @make-primary="handleMakePrimary(i)"
-            />
-            <button type="button" class="global-settings-add-dir" @click="handleAddModelsDir">
-              <Plus :size="14" aria-hidden="true" />
-              <span>{{ t('models.addDir', 'Add directory') }}</span>
-            </button>
-          </div>
-        </div>
-        <div class="global-settings-subgroup">
-          <div class="global-settings-subgroup-title">{{ snapshot.i18n.sharedDirectories }}</div>
-          <SettingsSectionList :sections="sharedDirsSections" @update-field="handleUpdateField" />
-        </div>
-      </GlobalSettingsAccordion>
+        </template>
 
-      <GlobalSettingsAccordion :title="snapshot.i18n.advanced">
-        <SettingsSectionList :sections="advancedSections" @update-field="handleUpdateField" />
-      </GlobalSettingsAccordion>
-      </div>
+        <template v-else-if="activeTab === 'storage'">
+          <div class="gs-subgroup">
+            <div class="gs-subgroup-title">{{ snapshot.i18n.models }}</div>
+            <div class="gs-models">
+              <DirCard
+                v-for="(d, i) in snapshot.modelsDirs"
+                :key="d.path"
+                :path="d.path"
+                :is-primary="d.isPrimary"
+                :is-default="d.isDefault"
+                @open="handleOpenModelsDir(d.path)"
+                @remove="handleRemoveModelsDir(i)"
+                @make-primary="handleMakePrimary(i)"
+              />
+              <button type="button" class="gs-add-dir" @click="handleAddModelsDir">
+                <Plus :size="14" aria-hidden="true" />
+                <span>{{ t('models.addDir', 'Add directory') }}</span>
+              </button>
+            </div>
+          </div>
+          <div class="gs-subgroup">
+            <div class="gs-subgroup-title">{{ snapshot.i18n.sharedDirectories }}</div>
+            <SettingsSectionList :sections="sharedDirsSections" @update-field="handleUpdateField" />
+          </div>
+        </template>
+
+        <template v-else>
+          <SettingsSectionList :sections="advancedSections" @update-field="handleUpdateField" />
+        </template>
+      </section>
     </div>
   </div>
 </template>
@@ -329,61 +352,119 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   width: 100%;
-  max-height: 100%;
+  height: 100%;
   color: var(--neutral-100);
   font-size: 14px;
 }
 
-.global-settings-header {
+.gs-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--chooser-surface-border);
-  font-weight: 600;
+  padding: 14px 16px;
+  border-bottom: 1px solid color-mix(in oklab, var(--neutral-100) 8%, transparent);
+  flex: 0 0 auto;
 }
 
-.global-settings-title {
-  font-size: 14px;
-  color: var(--neutral-100);
+.gs-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 700;
+  color: color-mix(in oklab, var(--text) 90%, transparent);
 }
 
-.global-settings-close {
+.gs-close {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
-  border: none;
-  background: transparent;
-  border-radius: 6px;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid transparent;
+  background: color-mix(in oklab, var(--text) 4%, transparent);
+  border-radius: 8px;
   color: var(--neutral-100);
+  opacity: 0.7;
   cursor: pointer;
-  transition: background-color 100ms ease;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    opacity 120ms ease;
 }
 
-.global-settings-close:hover,
-.global-settings-close:focus-visible {
-  background: var(--brand-surface-bg-hover);
+.gs-close:hover,
+.gs-close:focus-visible {
+  opacity: 1;
+  background: color-mix(in oklab, var(--neutral-950) 85%, transparent);
+  border-color: color-mix(in oklab, var(--neutral-100) 44%, transparent);
   outline: none;
 }
 
-.global-settings-body {
-  padding: 12px 16px;
+.gs-body {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.gs-tabs {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 0 0 196px;
+  width: 196px;
+  padding: 12px 8px;
+  background: var(--neutral-800);
+  border-right: 1px solid var(--chooser-surface-border);
   overflow-y: auto;
 }
 
-/* Holds the accordions and owns the inter-accordion gap. Lives inside
- * `.global-settings-body` so the body keeps `overflow-y: auto` for the
- * ceiling-clamped overflow case, while this wrapper reports the
- * unclamped natural content height to the ResizeObserver above. */
-.global-settings-content {
+.gs-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  height: 32px;
+  padding: 0 10px;
+  border: none;
+  background: transparent;
+  border-radius: 8px;
+  color: var(--neutral-100);
+  opacity: 0.72;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color 100ms ease,
+    opacity 100ms ease;
+}
+
+.gs-tab:hover {
+  opacity: 1;
+  background: var(--brand-surface-bg-hover);
+}
+
+.gs-tab:focus-visible {
+  outline: 2px solid var(--focus-ring, var(--neutral-50));
+  outline-offset: -2px;
+}
+
+.gs-tab.active {
+  opacity: 1;
+  background: var(--brand-surface-bg-hover);
+  color: var(--neutral-100);
+}
+
+.gs-pane {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 16px 20px;
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
 
-.global-settings-github {
+.gs-github {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -398,53 +479,63 @@ onMounted(() => {
   transition: opacity 100ms ease;
 }
 
-.global-settings-github:hover,
-.global-settings-github:focus-visible {
+.gs-github:hover,
+.gs-github:focus-visible {
   opacity: 1;
   outline: none;
 }
 
-.global-settings-subgroup {
+.gs-subgroup {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
-.global-settings-subgroup + .global-settings-subgroup {
+.gs-subgroup + .gs-subgroup {
   padding-top: 12px;
-  border-top: 1px solid var(--chooser-surface-border);
+  border-top: 1px solid color-mix(in oklab, var(--neutral-100) 8%, transparent);
 }
 
-.global-settings-subgroup-title {
+.gs-subgroup-title {
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: rgba(194, 191, 185, 0.75);
 }
 
-.global-settings-models {
+.gs-models {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
-/* One-step density tightening for the popup vs. the legacy
- * `SettingsView`. Scoped via `:deep()` so SettingsSectionList's field
- * chrome inherits without us forking the component. Real class names
- * come from `SettingsSectionList.vue` (`.settings-v2-field`) and the
- * shared `BaseInput` / `BaseSelect` primitives (`.ui-input`,
- * `.ui-input-control`, `.ui-select-trigger`). */
+.gs-add-dir {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px dashed color-mix(in oklab, var(--neutral-100) 18%, transparent);
+  background: transparent;
+  border-radius: 8px;
+  color: var(--neutral-100);
+  cursor: pointer;
+  align-self: flex-start;
+  transition: background-color 100ms ease;
+}
+
+.gs-add-dir:hover,
+.gs-add-dir:focus-visible {
+  background: var(--brand-surface-bg-hover);
+  outline: none;
+}
+
 .global-settings :deep(.settings-v2-field) {
   gap: 4px;
 }
 
-.global-settings :deep(.settings-v2-field-label) {
-  font-size: 12px;
-  line-height: 16px;
-  color: var(--text-muted);
-  font-weight: 400;
-}
-
+/* Density bump for the popup — slightly tighter input chrome than the
+ * default `BaseInput` / `BaseSelect` so the two-pane card stays
+ * compact. Label + field text colors come from the base components. */
 .global-settings :deep(.ui-input),
 .global-settings :deep(.ui-select-trigger) {
   min-height: 28px;
@@ -456,34 +547,8 @@ onMounted(() => {
   font-size: 13px;
 }
 
-.global-settings :deep(.ui-input-control) {
-  padding: 4px 10px;
-}
-
-/* The default trailing-slot button is a 28x28 square in BaseInput —
- * shrink to match the tightened input height. */
 .global-settings :deep(.ui-input-trailing button) {
   width: 26px;
   height: 26px;
-}
-
-.global-settings-add-dir {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
-  border: 1px dashed var(--chooser-surface-border);
-  background: transparent;
-  border-radius: 8px;
-  color: var(--neutral-100);
-  cursor: pointer;
-  align-self: flex-start;
-  transition: background-color 100ms ease;
-}
-
-.global-settings-add-dir:hover,
-.global-settings-add-dir:focus-visible {
-  background: var(--brand-surface-bg-hover);
-  outline: none;
 }
 </style>

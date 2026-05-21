@@ -241,6 +241,12 @@ export interface ShowProgressOpts {
    *  model libraries…") which read as wrong copy. Falls back to
    *  `'generic'` when omitted so legacy callers keep working. */
   opKind?: 'launch' | 'install' | 'update' | 'destructive' | 'snapshot' | 'generic'
+  /** Raw action identity, included so a host that can't run the closure
+   *  itself (the picker popup) can forward the request to one that can
+   *  (the panel) and have it rebuild `apiCall`. Drawer/panel callers
+   *  ignore these and use `apiCall` directly. */
+  actionId?: string
+  actionData?: Record<string, unknown>
 }
 
 // --- Action results ---
@@ -836,6 +842,26 @@ export interface ElectronApi {
    *  routed to the legacy `SettingsModal` overlay. Main reuses the same
    *  helper the hamburger Settings entry calls. */
   openGlobalSettings(): void
+  /** Open the instance-picker popup for the panel's host window with
+   *  `installationId` seeded as the picker's right-pane selection.
+   *  Used by chooser-card "Manage…" (and future per-install entry
+   *  points) to land on the same WebContentsView popup the title-bar
+   *  centre pill opens. Omitting `installationId` falls back to the
+   *  host's active install — matches the pill-click behaviour.
+   *
+   *  `mode: 'expanded'` opens the picker directly in the full
+   *  per-install settings UI (mounted in the right pane), with
+   *  `initialTab` seeding the active tab and `autoAction` firing an
+   *  action on mount. Used by the chooser kebab's specialised entries
+   *  (Update / Migrate / Restore-Snapshot / Delete) and by the
+   *  per-install deep links (`comfy://install-update/<id>`,
+   *  `comfy://open-settings?tab=comfy`). */
+  openInstancePicker(opts?: {
+    installationId?: string | null
+    mode?: 'compact' | 'expanded'
+    initialTab?: 'config' | 'status' | 'update' | 'snapshots'
+    autoAction?: string | null
+  }): void
   /** Push the first-use takeover's current step to main so it can
    *  (a) cache the value on the host entry for
    *  `buildTitlePopupMenuItems` to read synchronously and (b)
@@ -1047,14 +1073,6 @@ export interface ElectronApi {
    */
   onPanelSwitch(callback: (data: { panel: string; installationId?: string }) => void): Unsubscribe
   /**
-   * Title-bar Settings icon → main routes a close request here so the
-   * panel renderer can play the drawer's local leave animation BEFORE
-   * `closeCurrentPanel()` fires and `layoutViews` collapses the
-   * panelView. PanelApp holds a ref to `<ComfyUISettingsPanel>` and
-   * calls its exposed `requestClose()` when this fires.
-   */
-  onRequestCloseDrawer(callback: () => void): Unsubscribe
-  /**
    * Main forwards a title-bar status pill / tray click here. The
    * renderer subscribes once on mount and dispatches each kind:
    *   - `'app-update-restart-prompt'` → `useModal.confirm` "Desktop
@@ -1091,10 +1109,17 @@ export interface ElectronApi {
         | 'open-settings'
         | 'picker-pick-install'
         | 'picker-install-action'
+        | 'picker-show-progress'
       installationId?: string
       actionId?: string
+      actionData?: Record<string, unknown>
       version?: string | null
       settingsTab?: 'comfy' | 'directories' | 'downloads' | 'global'
+      title?: string
+      cancellable?: boolean
+      triggersInstanceStart?: boolean
+      opKind?: 'launch' | 'install' | 'update' | 'destructive' | 'snapshot' | 'generic'
+      isRestart?: boolean
     }) => void,
   ): Unsubscribe
 }
@@ -1111,3 +1136,32 @@ export const REQUIRES_STOPPED = new Set([
   'update-comfyui',
   'migrate-from',
 ])
+
+/** Picker popup's settings-passthrough IPC channels — main registers them,
+ *  preload invokes them. Single source so a typo can't desync the two sides. */
+export const PICKER_SETTINGS_CHANNELS = {
+  getDetailSections: 'comfy-titlepopup:picker-settings-get-detail-sections',
+  getDiskSpace: 'comfy-titlepopup:picker-settings-get-disk-space',
+  getInstallationSize: 'comfy-titlepopup:picker-settings-get-installation-size',
+  updateInstallation: 'comfy-titlepopup:picker-settings-update-installation',
+  runAction: 'comfy-titlepopup:picker-settings-run-action',
+  getFieldOptions: 'comfy-titlepopup:picker-settings-get-field-options',
+  getInstallations: 'comfy-titlepopup:picker-settings-get-installations',
+  stopComfyUI: 'comfy-titlepopup:picker-settings-stop-comfyui',
+  cancelOperation: 'comfy-titlepopup:picker-settings-cancel-operation',
+  getSnapshots: 'comfy-titlepopup:picker-settings-get-snapshots',
+  getSnapshotDetail: 'comfy-titlepopup:picker-settings-get-snapshot-detail',
+  getSnapshotDiff: 'comfy-titlepopup:picker-settings-get-snapshot-diff',
+  exportSnapshot: 'comfy-titlepopup:picker-settings-export-snapshot',
+  exportAllSnapshots: 'comfy-titlepopup:picker-settings-export-all-snapshots',
+  importSnapshotsPreview: 'comfy-titlepopup:picker-settings-import-snapshots-preview',
+  importSnapshotsDiff: 'comfy-titlepopup:picker-settings-import-snapshots-diff',
+  importSnapshotsConfirm: 'comfy-titlepopup:picker-settings-import-snapshots-confirm',
+  previewSnapshotFile: 'comfy-titlepopup:picker-settings-preview-snapshot-file',
+  getComfyArgs: 'comfy-titlepopup:picker-settings-get-comfy-args',
+  browseFolder: 'comfy-titlepopup:picker-settings-browse-folder',
+  previewDesktopMigration: 'comfy-titlepopup:picker-settings-preview-desktop-migration',
+  previewLocalMigration: 'comfy-titlepopup:picker-settings-preview-local-migration',
+  relaunchApp: 'comfy-titlepopup:picker-settings-relaunch-app',
+  getLocaleMessages: 'comfy-titlepopup:picker-settings-get-locale-messages',
+} as const
