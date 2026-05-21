@@ -25,8 +25,6 @@ interface Props {
   openLabel: string
   /** Localised secondary CTA label ("Manage"). */
   manageLabel: string
-  /** Localised "running" pill label. */
-  runningLabel: string
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -61,20 +59,19 @@ function handleManage(): void {
     :class="{ 'is-active': active, 'is-running': running }"
   >
     <div class="picker-row-card-identity">
-      <component
-        :is="typeMeta.icon"
-        :size="22"
-        class="picker-row-card-icon"
-        :title="$t(typeMeta.labelKey)"
-        aria-hidden="true"
-      />
+      <span class="picker-row-card-icon-wrap">
+        <component
+          :is="typeMeta.icon"
+          :size="22"
+          class="picker-row-card-icon"
+          :title="$t(typeMeta.labelKey)"
+          aria-hidden="true"
+        />
+        <span v-if="running" class="picker-row-card-running-dot" aria-hidden="true" />
+      </span>
       <div class="picker-row-card-text">
         <div class="picker-row-card-name-row">
           <h3 class="picker-row-card-name">{{ installation.name }}</h3>
-          <span v-if="running" class="picker-row-card-running-pill">
-            <span class="picker-row-card-running-dot" aria-hidden="true" />
-            {{ runningLabel }}
-          </span>
         </div>
         <div class="picker-row-card-pills">
           <span class="picker-row-card-pill">{{ installation.sourceLabel }}</span>
@@ -111,8 +108,8 @@ function handleManage(): void {
   gap: 16px;
   padding: 12px 14px;
   border-radius: 10px;
-  border: 1px solid var(--brand-surface-border-hover, var(--chooser-surface-border));
-  background: var(--brand-surface-bg);
+  border: 1px solid var(--chooser-surface-border);
+  background: var(--neutral-800);
   transition:
     background-color 120ms ease,
     border-color 120ms ease;
@@ -122,15 +119,11 @@ function handleManage(): void {
   background: var(--brand-surface-bg-hover);
 }
 
-.picker-row-card.is-active::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 10px;
-  bottom: 10px;
-  width: 2px;
-  border-radius: 2px;
-  background: var(--accent-primary);
+/* Active state — no blue accent bar. Border lifts to the brighter
+ * hairline so the selected card reads as "picked" without competing
+ * with the running-dot status indicator. */
+.picker-row-card.is-active {
+  border-color: var(--brand-surface-border-hover, var(--chooser-surface-border));
 }
 
 .picker-row-card-identity {
@@ -141,9 +134,22 @@ function handleManage(): void {
   min-width: 0;
 }
 
-.picker-row-card-icon {
-  color: var(--accent-label);
+.picker-row-card-icon-wrap {
+  position: relative;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex: 0 0 auto;
+}
+
+.picker-row-card-icon {
+  color: var(--neutral-100);
+  transition: color 120ms ease;
+}
+.picker-row-card.is-active .picker-row-card-icon {
+  color: var(--text);
 }
 
 .picker-row-card-text {
@@ -163,36 +169,25 @@ function handleManage(): void {
 .picker-row-card-name {
   margin: 0;
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 500;
   line-height: 20px;
-  letter-spacing: -0.1px;
-  color: var(--text);
+  color: var(--neutral-100);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.picker-row-card-running-pill {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  height: 18px;
-  padding: 0 8px;
-  border-radius: 9999px;
-  background: color-mix(in srgb, var(--success) 18%, transparent);
-  color: var(--success);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.2px;
-  text-transform: uppercase;
-}
-
+/* Green status dot pinned to the icon's top-right when the install
+ * is currently running. Replaces the previous "Running" text pill —
+ * status is communicated by the dot alone. */
 .picker-row-card-running-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 9999px;
-  background: var(--success);
+  position: absolute;
+  top: -1px;
+  right: -1px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--success, #00cd72);
 }
 
 .picker-row-card-pills {
@@ -259,13 +254,14 @@ function handleManage(): void {
 }
 
 .picker-row-card-manage {
-  border: 1px solid var(--brand-surface-border-hover, var(--chooser-surface-border));
+  border: 1px solid var(--chooser-surface-border);
   background: transparent;
-  color: var(--text);
+  color: var(--neutral-100);
 }
 .picker-row-card-manage:hover,
 .picker-row-card-manage:focus-visible {
-  background: var(--chooser-surface-border);
+  background: var(--brand-surface-bg-hover);
+  color: var(--neutral-100);
   outline: none;
 }
 </style>

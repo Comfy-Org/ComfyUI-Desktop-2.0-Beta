@@ -54,6 +54,7 @@ function handleClick(): void {
     >
       <div class="picker-row-icon" :title="$t(typeMeta.labelKey)">
         <component :is="typeMeta.icon" :size="20" />
+        <span v-if="running" class="picker-row-running-dot" aria-hidden="true"></span>
       </div>
       <div class="picker-row-body">
         <div class="picker-row-name">{{ installation.name }}</div>
@@ -64,7 +65,6 @@ function handleClick(): void {
           {{ lastLaunchedLabel }}
         </div>
       </div>
-      <span v-if="running" class="picker-row-running-dot" aria-hidden="true"></span>
     </div>
   </div>
 </template>
@@ -98,13 +98,22 @@ function handleClick(): void {
   background: var(--chooser-surface-border);
 }
 .picker-row-icon {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
   width: 24px;
   height: 24px;
-  color: var(--accent-label);
+  color: var(--neutral-100);
   flex: 0 0 auto;
+  transition: color 120ms ease;
+}
+/* Active row → icon goes full white (and gets a green status dot
+ * overlaid on top-right when also running). Inactive running rows
+ * still get the green dot so the user sees "running in another
+ * window" status, but the icon stays its resting neutral colour. */
+.picker-row.is-active .picker-row-icon {
+  color: var(--text);
 }
 .picker-row-body {
   min-width: 0;
@@ -114,27 +123,34 @@ function handleClick(): void {
   overflow: hidden;
 }
 .picker-row-name {
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 500;
-  line-height: 24px;
-  color: var(--text);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.picker-row-sub {
-  font-size: 12px;
-  line-height: 16px;
+  line-height: 20px;
   color: var(--neutral-100);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.picker-row.is-active .picker-row-name {
+  color: var(--text);
+}
+.picker-row-sub {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Green running indicator pinned to the top-right of the icon. Uses
+ * the existing `--success` token. */
 .picker-row-running-dot {
-  width: 6px;
-  height: 6px;
+  position: absolute;
+  top: -1px;
+  right: -1px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
-  background: var(--accent-primary);
-  flex: 0 0 auto;
+  background: var(--success, #00cd72);
 }
 </style>

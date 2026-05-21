@@ -2,7 +2,7 @@
 import { computed, onMounted, onUnmounted, ref, toRef, useTemplateRef, watch } from 'vue'
 import { useTitlePopupAutoResize } from '../composables/useTitlePopupAutoResize'
 import { useI18n } from 'vue-i18n'
-import { ChevronLeft, Plus, Search, X } from 'lucide-vue-next'
+import { ChevronLeft, Plus, Search } from 'lucide-vue-next'
 import BaseInput from '../components/ui/BaseInput.vue'
 import { FILTER_CHIPS, useInstallList } from '../composables/useInstallList'
 import { useSessionStore } from '../stores/sessionStore'
@@ -407,10 +407,20 @@ function handleSettingsNavigateList(): void {
   // and let the snapshot rebroadcast scrub the row from the list.
   handleCollapseToCompact()
 }
-function handleSettingsRelaunch(): void {
-  bridge?.setPickerMode('compact')
-  // Fire the relaunch through the shim — main exits the app.
-  ;(window as unknown as { api?: { relaunchApp(): void } }).api?.relaunchApp()
+
+/** Expanded view's footer Open/Restart button. Routes through the
+ *  exact same bridge calls the compact `PickerRow` Open/Restart
+ *  button uses (`handleRowOpen`) so both surfaces share one
+ *  native-confirm flow. The `running` flag is passed up from
+ *  `ComfyUISettingsContent` so we don't re-derive it. */
+function handleExpandedPrimaryAction(running: boolean): void {
+  const inst = selectedInstall.value
+  if (!inst) return
+  if (running) {
+    bridge?.restartInstall(inst.id)
+  } else {
+    bridge?.pickInstall(inst.id)
+  }
 }
 </script>
 
@@ -458,7 +468,6 @@ function handleSettingsRelaunch(): void {
           :last-launched-label="lastLaunchedLabel(cloudInstall)"
           :open-label="openCtaLabelFor(cloudInstall)"
           :manage-label="t('instancePicker.manage')"
-          :running-label="t('instancePicker.running')"
           @open="handleRowOpen"
           @manage="handleRowManage"
         />
@@ -472,7 +481,6 @@ function handleSettingsRelaunch(): void {
           :last-launched-label="lastLaunchedLabel(inst)"
           :open-label="openCtaLabelFor(inst)"
           :manage-label="t('instancePicker.manage')"
-          :running-label="t('instancePicker.running')"
           @open="handleRowOpen"
           @manage="handleRowManage"
         />
@@ -536,27 +544,19 @@ function handleSettingsRelaunch(): void {
       <div class="picker-detail-wrap is-expanded">
         <div class="picker-detail">
           <template v-if="selectedInstall">
-            <header class="picker-expanded-header">
-              <button
-                type="button"
-                class="picker-expanded-back"
-                :aria-label="t('common.back')"
-                @click="handleCollapseToCompact"
-              >
-                <ChevronLeft :size="16" aria-hidden="true" />
-              </button>
-              <h2 class="picker-expanded-title">
-                {{ selectedInstall.name }}
-              </h2>
-              <button
-                type="button"
-                class="picker-expanded-close"
-                :aria-label="t('common.close')"
-                @click="handleCollapseToCompact"
-              >
-                <X :size="14" />
-              </button>
-            </header>
+            <!-- Floating close ✕ sits at the top-right corner of the
+                 expanded pane, overlaid on the tab strip. Returns to the
+                 compact (rows) view. ESC also handles this. The previous
+                 back-arrow + title + close header row was redundant
+                 (back and close both collapsed to compact). -->
+            <button
+              type="button"
+              class="picker-expanded-close"
+              :aria-label="t('common.back')"
+              @click="handleCollapseToCompact"
+            >
+              <ChevronLeft :size="16" aria-hidden="true" />
+            </button>
 
             <ComfyUISettingsContent
               :installation="selectedInstall"
@@ -564,7 +564,7 @@ function handleSettingsRelaunch(): void {
               class="picker-expanded-body"
               @show-progress="handleSettingsShowProgress"
               @navigate-list="handleSettingsNavigateList"
-              @relaunch="handleSettingsRelaunch"
+              @primary-action="handleExpandedPrimaryAction"
             />
           </template>
           <div v-else class="picker-detail-empty">
@@ -667,6 +667,7 @@ function handleSettingsRelaunch(): void {
   display: flex;
   flex-direction: column;
   border-right: 1px solid var(--chooser-surface-border);
+  background: var(--neutral-800);
 }
 /* Footer band — mirrors the right pane's `.settings-v2-footer` shape
  * (full-bleed bordered band, same padding + bg) so the two footers
@@ -676,7 +677,7 @@ function handleSettingsRelaunch(): void {
   display: flex;
   align-items: center;
   padding: 12px 16px;
-  border-top: 1px solid var(--border-hover);
+  border-top: 1px solid var(--chooser-surface-border);
   background: var(--neutral-800);
 }
 .picker-list-section {
@@ -812,6 +813,7 @@ function handleSettingsRelaunch(): void {
   overflow: hidden;
 }
 .picker-detail {
+  position: relative;
   flex: 1 1 0;
   min-height: 0;
   display: flex;
@@ -838,62 +840,39 @@ function handleSettingsRelaunch(): void {
   gap: 0;
 }
 
-/* Expanded header sits above the settings body — back chevron + title
- * + close. Mirrors the legacy drawer chrome's header pattern. */
-.picker-expanded-header {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 12px 12px 12px 4px;
-  border-bottom: 1px solid var(--chooser-surface-border);
-}
-.picker-expanded-back {
-  -webkit-app-region: no-drag;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text);
-  border: none;
-  background: transparent;
-  border-radius: 6px;
-  cursor: pointer;
-}
-.picker-expanded-back:hover,
-.picker-expanded-back:focus-visible {
-  background: var(--chooser-surface-border);
-  outline: none;
-}
-.picker-expanded-title {
-  flex: 1 1 auto;
-  margin: 0;
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
+/* Floating "back" chevron for the expanded view — pinned to the
+ * right pane's top-right corner, overlaid on the tab strip. Returns
+ * to the compact row list. ESC also handles this. Replaces the
+ * previous back + title + close header row (back and close both did
+ * the same thing, so the row was redundant). z-index keeps it above
+ * the tab strip. Muted resting color matches body-text caption tone;
+ * hover brings it to full neutral-100 without adding a heavy chip
+ * background so the affordance reads as inline chrome, not a button. */
 .picker-expanded-close {
   -webkit-app-region: no-drag;
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 2;
   width: 28px;
   height: 28px;
   padding: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: var(--text);
-  border: none;
   background: transparent;
+  border: none;
   border-radius: 6px;
+  color: var(--text-muted);
   cursor: pointer;
+  transition:
+    color 120ms ease,
+    background-color 120ms ease;
 }
 .picker-expanded-close:hover,
 .picker-expanded-close:focus-visible {
-  background: var(--chooser-surface-border);
+  color: var(--neutral-100);
+  background: var(--brand-surface-bg-hover);
   outline: none;
 }
 .picker-expanded-body {
