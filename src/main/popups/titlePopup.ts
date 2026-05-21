@@ -558,9 +558,8 @@ export function buildTitlePopupMenuItems(entry: ComfyWindowEntry): TitlePopupMen
   items.push(
     {
       id: 'settings',
-      label: 'Settings',
-      labelKey: 'fileMenu.settings',
-      checked: entry.activePanel === 'settings',
+      label: 'Global Settings',
+      labelKey: 'fileMenu.globalSettings',
     },
     // Send Feedback (#493). The renderer-side handler resolves the
     // support URL and emits the `desktop2.feedback.opened`
@@ -1931,12 +1930,9 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
     },
   )
 
-  // Popup → host deep-link to the unified Settings modal at a given
-  // tab. Mirrors the `click-install-update-pill` flow: bring the panel
-  // view forward (lazily constructing it if needed), then send the
-  // `panel-trigger-overlay 'open-settings'` IPC after the renderer has
-  // finished loading so the listener is registered. The popup itself
-  // is dismissed first so the overlay surface comes up unobstructed.
+  // Popup → host deep-link to per-install settings (instance picker) or
+  // global settings, depending on `tab`. The popup dismisses first; the
+  // renderer's deep-link router routes `tab` to the correct surface.
   ipcMain.on(
     'comfy-titlepopup:open-settings-tab',
     (event, payload: { tab?: unknown }) => {
@@ -1952,7 +1948,6 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
       const parentEntry = comfyWindows.get(popupEntry.parentEntryId)
       if (!parentEntry) return
       hideTitlePopup(popupEntry, { releaseFocusToParent: false })
-      bindings.setActivePanel(popupEntry.parentEntryId, 'settings')
       const panelView = parentEntry.panelView
       if (!panelView) return
       bindings.sendToPanelDeferred(panelView, 'panel-trigger-overlay', {
@@ -1963,14 +1958,12 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
     },
   )
 
-  // Popup → host deep-link to the standalone "View All Downloads"
-  // modal. Flips the host into the `'downloads-v2'` overlay panel mode,
-  // which `layoutViews` recognises as a transparent panel-forward state
-  // (sibling to `'settings-v2'`). The renderer mounts `DownloadsModal`
-  // by watching `activePanel === 'downloads-v2'`. No deep-link IPC
-  // needed — the mode swap IS the open signal — and dismiss routes
-  // through the existing `closeCurrentPanel()` which returns the body
-  // to `'comfy'`.
+  // Popup → host deep-link to the standalone "View All Downloads" modal.
+  // Flips the host into the `'downloads-v2'` overlay panel mode, which
+  // `layoutViews` recognises as a transparent panel-forward state. The
+  // renderer mounts `DownloadsModal` by watching `activePanel === 'downloads-v2'`.
+  // No deep-link IPC needed — the mode swap IS the open signal — and dismiss
+  // routes through `closeCurrentPanel()` which returns the body to `'comfy'`.
   ipcMain.on('comfy-titlepopup:open-downloads-modal', (event) => {
     const popupEntry = titlePopupsByWebContents.get(event.sender.id)
     if (!popupEntry) return
