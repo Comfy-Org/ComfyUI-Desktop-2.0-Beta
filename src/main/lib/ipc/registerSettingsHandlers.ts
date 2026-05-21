@@ -29,12 +29,12 @@ export function buildSettingsSections(): SettingsSection[] {
       fields: [
         { id: 'language', label: i18n.t('settings.language'), type: 'select', value: s.language || i18n.getLocale(),
           options: i18n.getAvailableLocales() },
-        { id: 'theme', label: i18n.t('settings.theme'), type: 'select', value: s.theme || 'system',
-          options: [
-            { value: 'system', label: i18n.t('settings.themeSystem') },
-            { value: 'dark', label: i18n.t('settings.themeDark') },
-            { value: 'light', label: i18n.t('settings.themeLight') },
-          ] },
+        // Theme picker is hidden — the app is dark-only across every
+        // title-bar surface (Vue pills, dropdown popups, tooltips, OS
+        // overlay). The underlying `theme` setting key + the
+        // applySettingSet broadcast + the nativeTheme listener stay
+        // wired so a future re-introduction is just re-adding this
+        // field, with no other plumbing changes.
         // Issue #488 — auto-check loop always runs; this toggle
         // controls whether updates install silently vs prompt the
         // user. The `autoUpdate` key is retained in the schema (no

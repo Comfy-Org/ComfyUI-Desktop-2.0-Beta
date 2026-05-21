@@ -3,6 +3,7 @@ import { getAppVersion } from '../lib/ipc'
 import { attachSessionDownloadHandler } from '../lib/comfyDownloadManager'
 import { getModelDownloadContentScript } from '../lib/comfyContentScript'
 import { _operationAborts, sourceMap } from '../lib/ipc/shared'
+import { TITLEBAR_BG } from '../lib/theme'
 import * as mainTelemetry from '../lib/telemetry'
 import { forwardDatadogError } from '../lib/processErrorHandlers'
 import { installationEvents, type InstallationRecord } from '../installations'
@@ -186,15 +187,22 @@ export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts):
   installationEvents.on('updated', onInstallationUpdated)
 
   // Sync the title bar and overlay colors with the ComfyUI frontend's theme.
-  const applyComfyTheme = (bg: string, text: string): void => {
+  // Currently locked to the dark title-bar palette regardless of the
+  // reported bg/text — the app's title-bar surfaces (Vue pills,
+  // dropdown popups, tooltips, OS overlay) are dark-only today, and
+  // pushing a light bg into the OS overlay paints the min/max/close
+  // symbols light over the still-dark Vue header. The arguments are
+  // kept so the observer + ipc-message wiring stays intact for a
+  // future re-introduction of theme tracking.
+  const applyComfyTheme = (_bg: string, _text: string): void => {
     if (comfyWindow.isDestroyed()) return
-    const theme = { bg, text }
+    const theme = { bg: TITLEBAR_BG, text: '#dddddd' }
     entry.lastTheme = theme
     if (!titleBarView.webContents.isDestroyed()) {
       titleBarView.webContents.send('comfy-titlebar:theme-changed', theme)
     }
     if (process.platform !== 'darwin') {
-      try { comfyWindow.setTitleBarOverlay({ color: bg, symbolColor: text }) } catch {}
+      try { comfyWindow.setTitleBarOverlay({ color: theme.bg, symbolColor: theme.text }) } catch {}
     }
   }
   const onIpcMessage = (_event: Electron.IpcMainEvent, channel: string, ...args: unknown[]): void => {
