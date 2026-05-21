@@ -293,13 +293,9 @@ function measureAndRequestSize(): void {
     const rootEl = document.querySelector('.picker') as HTMLElement | null
     if (!rootEl) return
     bridge?.requestSize(rootEl.offsetHeight + 2)
-    return
   }
-  if (kind.value === 'global-settings') {
-    const rootEl = document.querySelector('.global-settings') as HTMLElement | null
-    if (!rootEl) return
-    bridge?.requestSize(rootEl.offsetHeight + 2)
-  }
+  // global-settings is sized once main-side from host content bounds —
+  // the two-pane card doesn't grow with content. No measure needed.
 }
 
 onMounted(() => {
@@ -390,19 +386,9 @@ watch(
   },
   { deep: true }
 )
-// Re-measure when the global-settings snapshot changes — accordion
-// counts + field values affect natural height.
-watch(
-  globalSettingsSnapshot,
-  () => {
-    void nextTick(() => {
-      requestAnimationFrame(() => {
-        measureAndRequestSize()
-      })
-    })
-  },
-  { deep: true }
-)
+// global-settings does not re-measure on snapshot change — the popup
+// is pinned to a fluid-clamped size main-side and the right pane
+// scrolls internally instead of growing the popup.
 onUnmounted(() => {
   unsubConfig?.()
   unsubDownloads?.()
@@ -462,8 +448,7 @@ onUnmounted(() => {
 
 /* Instance picker surface chrome per Figma. Menu / downloads kinds keep
  * the legacy lightweight surface. */
-.popup.is-picker,
-.popup.is-global-settings {
+.popup.is-picker {
   background: var(--neutral-800, #211927) !important;
   border: 1px solid var(--chooser-surface-border);
   border-radius: 12px;
@@ -471,5 +456,16 @@ onUnmounted(() => {
     0 20px 24px -4px rgba(10, 13, 18, 0.08),
     0 8px 8px -4px rgba(10, 13, 18, 0.03),
     0 3px 3px -1.5px rgba(10, 13, 18, 0.04);
+}
+
+/* Global-settings surface chrome mirrors `.base-modal-panel` from
+ * BaseModal.vue so the popup reads as a sibling of in-app modals
+ * (DownloadsModal, TermsModal). Tokens, radius, border alpha, and
+ * shadow stay in lockstep with BaseModal. */
+.popup.is-global-settings {
+  background: var(--neutral-800, #211927) !important;
+  border: 1px solid color-mix(in oklab, var(--neutral-100) 6%, transparent);
+  border-radius: 14px;
+  box-shadow: 0 24px 64px 0 rgba(0, 0, 0, 0.35);
 }
 </style>
