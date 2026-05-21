@@ -60,14 +60,14 @@ export function installPickerSettingsApiShim(): void {
     const method = bridge[bridgeKey as keyof ComfyTitlePopupBridge] as (
       ...args: unknown[]
     ) => unknown
-    ;(api as Record<string, unknown>)[apiKey] = method.bind(bridge)
+      ; (api as Record<string, unknown>)[apiKey] = method.bind(bridge)
   }
   // Adapters for the two methods whose shape diverges from a pure pass-through.
   api.browseFolder = (defaultPath?: string) =>
     bridge.pickerSettingsBrowseFolder(defaultPath ? { defaultPath } : undefined)
   api.relaunchApp = () => bridge.pickerSettingsRelaunchApp()
 
-  ;(window as unknown as { api: ShimApi }).api = api
+    ; (window as unknown as { api: ShimApi }).api = api
 }
 
 /**
