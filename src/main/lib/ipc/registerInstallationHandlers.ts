@@ -9,8 +9,11 @@ import {
   _operationAborts,
   sanitizeEnvVars,
   getComfyArgsSchema,
+  COMFYUI_REPO,
 } from './shared'
 import type { ComfyVersion, ComfyArgDef, InstallationRecord } from './shared'
+import * as releaseCache from '../release-cache'
+import { hasGitDir } from '../git'
 import { restoreSnapshotIntoInstallation } from '../standaloneMigration'
 
 /**
@@ -332,6 +335,20 @@ export function registerInstallationHandlers(): void {
           actions,
         },
       ]
+    }
+    // Resolve commitsAhead for the `latest` channel against the install's
+    // own git checkout before building the channel cards — otherwise the
+    // "Latest from GitHub" preview falls back to `tag (sha)` instead of
+    // `tag+N (sha)`. The enrich helper short-circuits when commitsAhead
+    // is already populated or the install has no git dir, so this is a
+    // no-op for cloud installs and on repeat opens.
+    if (inst.installPath) {
+      const comfyuiDir = path.join(inst.installPath, 'ComfyUI')
+      if (hasGitDir(comfyuiDir)) {
+        try {
+          await releaseCache.enrichCommitsAhead(COMFYUI_REPO, comfyuiDir)
+        } catch { /* enrichment is best-effort; never block the section render */ }
+      }
     }
     return source.getDetailSections(inst)
   })
