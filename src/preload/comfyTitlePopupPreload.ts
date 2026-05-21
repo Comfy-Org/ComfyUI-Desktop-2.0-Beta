@@ -1,6 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { IpcRendererEvent } from 'electron'
-import { PICKER_SETTINGS_CHANNELS as CH } from '../types/ipc'
 
 /**
  * Title-bar dropdown popup bridge.
@@ -69,18 +68,6 @@ export interface PopupInstancePickerSnapshot {
    *  `get-snapshots` returns. `null` when no selection or no install
    *  path. */
   selectedSnapshots: Record<string, unknown> | null
-  /** Compact = default identity-card right pane. Expanded = full
-   *  per-install settings UI in the right pane + 95dvw×95dvh popup
-   *  bounds. Flipped by `setPickerMode` IPC. */
-  mode: 'compact' | 'expanded'
-  /** When `mode === 'expanded'`, the tab the settings UI opens on
-   *  ('config' | 'status' | 'update' | 'snapshots'). `null` in
-   *  compact mode. */
-  initialTab: string | null
-  /** When `mode === 'expanded'`, an action id to fire automatically
-   *  after the settings UI mounts (kebab Update / Migrate / etc.).
-   *  `null` once consumed. */
-  autoAction: string | null
 }
 
 /** One models-directory row pushed in the global-settings snapshot.
@@ -332,123 +319,6 @@ export interface ComfyTitlePopupBridge {
     actionId: string,
     actionData?: Record<string, unknown>,
   ): Promise<{ ok: boolean; message?: string }>
-
-  // ----- Per-install (ComfyUI) settings bridge -----
-  //
-  // Picker's expanded Manage state runs the same per-install settings
-  // UI the legacy drawer used (`ComfyUISettingsContent.vue` +
-  // `useComfyUISettings`). The popup process has no `window.api`, so
-  // each `window.api.*` method that UI calls gets a thin pass-through
-  // here. Naming is `pickerSettings*` to keep these clearly distinct
-  // from `globalSettings*` (which is the launcher-wide settings popup
-  // — different surface, different scope).
-  //
-  // Each one is a 1:1 wrapper over the corresponding main-side handler
-  // (no validation or transformation in the popup process). The popup's
-  // `window.api` shim in `comfyTitlePopup/main.ts` re-exports these
-  // under their original `window.api.*` names so the settings UI runs
-  // unchanged.
-  pickerSettingsGetDetailSections(installationId: string): Promise<Record<string, unknown>[]>
-  pickerSettingsGetDiskSpace(path: string): Promise<{ total: number; free: number }>
-  pickerSettingsUpdateInstallation(
-    installationId: string,
-    data: Record<string, unknown>,
-  ): Promise<Record<string, unknown> | void>
-  pickerSettingsRunAction(
-    installationId: string,
-    actionId: string,
-    actionData?: Record<string, unknown>,
-  ): Promise<Record<string, unknown>>
-  pickerSettingsGetFieldOptions(
-    sourceId: string,
-    fieldId: string,
-    selections: Record<string, unknown>,
-  ): Promise<Record<string, unknown>[]>
-  pickerSettingsGetInstallations(): Promise<Record<string, unknown>[]>
-  pickerSettingsGetInstallationSize(installationId: string): Promise<{ sizeBytes: number }>
-  pickerSettingsStopComfyUI(installationId: string): Promise<void>
-  pickerSettingsGetSnapshots(installationId: string): Promise<Record<string, unknown>>
-  pickerSettingsGetSnapshotDetail(
-    installationId: string,
-    filename: string,
-  ): Promise<Record<string, unknown>>
-  pickerSettingsGetSnapshotDiff(
-    installationId: string,
-    filename: string,
-    mode: 'previous' | 'current',
-  ): Promise<Record<string, unknown>>
-  pickerSettingsExportSnapshot(
-    installationId: string,
-    filename: string,
-  ): Promise<{ ok: boolean; message?: string }>
-  pickerSettingsExportAllSnapshots(
-    installationId: string,
-  ): Promise<{ ok: boolean; message?: string }>
-  pickerSettingsImportSnapshotsPreview(): Promise<{
-    ok: boolean
-    preview?: Record<string, unknown>
-    message?: string
-  }>
-  pickerSettingsImportSnapshotsDiff(
-    installationId: string,
-  ): Promise<{ ok: boolean; diff?: Record<string, unknown>; message?: string }>
-  pickerSettingsImportSnapshotsConfirm(installationId: string): Promise<{
-    ok: boolean
-    imported?: number
-    restoreFile?: string
-    message?: string
-  }>
-  pickerSettingsPreviewSnapshotFile(): Promise<{
-    ok: boolean
-    preview?: Record<string, unknown>
-    message?: string
-  }>
-  pickerSettingsGetComfyArgs(
-    installationId: string,
-  ): Promise<{ args: Record<string, unknown>[]; error?: string } | null>
-  pickerSettingsBrowseFolder(opts?: { defaultPath?: string }): Promise<string | null>
-  pickerSettingsCancelOperation(installationId: string): Promise<void>
-  pickerSettingsPreviewDesktopMigration(
-    installationId: string,
-    desktopId: string,
-  ): Promise<Record<string, unknown>>
-  pickerSettingsPreviewLocalMigration(
-    installationId: string,
-  ): Promise<Record<string, unknown>>
-  /** Relaunch the app — used by `ComfyUISettingsContent`'s footer
-   *  Relaunch button. Routes to `app.relaunch()` main-side. */
-  pickerSettingsRelaunchApp(): void
-  /** Pull the panel-side i18n catalog (loaded from main's
-   *  `locales/en.json`). The popup process boots with a minimal static
-   *  catalog (`i18nMessages.ts`); the expanded settings UI needs keys
-   *  the panel catalog has but the static one doesn't (`actions.*`,
-   *  `diskSpace.*`, etc.). The popup merges this payload on top of its
-   *  static catalog once the expanded mode opens. */
-  pickerSettingsGetLocaleMessages(): Promise<Record<string, unknown>>
-  /** Flip the picker between its compact and expanded states. Main
-   *  animates the popup bounds (compact ~720×natural → expanded
-   *  ~95dvw×95dvh) and rebroadcasts a snapshot with `mode` set so the
-   *  picker view re-renders the right pane (compact identity card vs.
-   *  expanded `ComfyUISettingsContent`). */
-  setPickerMode(
-    mode: 'compact' | 'expanded',
-    opts?: { initialTab?: string; autoAction?: string | null },
-  ): void
-  /** Forward a `show-progress` request from the picker's settings UI to
-   *  the parent host's panel renderer. The panel rebuilds the apiCall
-   *  closure from `actionId`/`actionData` and routes through its existing
-   *  ProgressModal pipeline. Picker collapses to compact so the modal is
-   *  not occluded. */
-  pickerForwardShowProgress(payload: {
-    installationId: string
-    actionId: string
-    actionData?: Record<string, unknown>
-    title: string
-    cancellable?: boolean
-    triggersInstanceStart?: boolean
-    opKind?: 'launch' | 'install' | 'update' | 'destructive' | 'snapshot' | 'generic'
-    isRestart?: boolean
-  }): void
 }
 
 function isPopupConfig(value: unknown): value is TitlePopupConfig {
@@ -502,9 +372,6 @@ function isInstancePickerSnapshot(value: unknown): value is PopupInstancePickerS
     selectedInstallationId?: unknown
     selectedSettings?: unknown
     selectedSnapshots?: unknown
-    mode?: unknown
-    initialTab?: unknown
-    autoAction?: unknown
   }
   if (!Array.isArray(v.installs)) return false
   if (v.activeInstallationId !== null && typeof v.activeInstallationId !== 'string') return false
@@ -525,20 +392,6 @@ function isInstancePickerSnapshot(value: unknown): value is PopupInstancePickerS
     v.selectedSnapshots !== undefined
     && v.selectedSnapshots !== null
     && typeof v.selectedSnapshots !== 'object'
-  ) return false
-  // Mode fields are also optional on the wire — old main builds that
-  // don't yet emit them still validate. Default to compact in the
-  // consumer when missing.
-  if (v.mode !== undefined && v.mode !== 'compact' && v.mode !== 'expanded') return false
-  if (
-    v.initialTab !== undefined
-    && v.initialTab !== null
-    && typeof v.initialTab !== 'string'
-  ) return false
-  if (
-    v.autoAction !== undefined
-    && v.autoAction !== null
-    && typeof v.autoAction !== 'string'
   ) return false
   return true
 }
@@ -671,63 +524,6 @@ const bridge: ComfyTitlePopupBridge = {
       actionId,
       actionData,
     }),
-  // Per-install settings (picker expanded Manage). Each handler is a 1:1
-  // pass-through to the main-side IPC. Channels namespaced `comfy-titlepopup:*`
-  // so they don't collide with the panel's `window.api` IPCs.
-  pickerSettingsGetDetailSections: (installationId) =>
-    ipcRenderer.invoke(CH.getDetailSections, { installationId }),
-  pickerSettingsGetDiskSpace: (path) => ipcRenderer.invoke(CH.getDiskSpace, { path }),
-  pickerSettingsUpdateInstallation: (installationId, data) =>
-    ipcRenderer.invoke(CH.updateInstallation, { installationId, data }),
-  pickerSettingsRunAction: (installationId, actionId, actionData) =>
-    ipcRenderer.invoke(CH.runAction, { installationId, actionId, actionData }),
-  pickerSettingsGetFieldOptions: (sourceId, fieldId, selections) =>
-    ipcRenderer.invoke(CH.getFieldOptions, { sourceId, fieldId, selections }),
-  pickerSettingsGetInstallations: () => ipcRenderer.invoke(CH.getInstallations),
-  pickerSettingsGetInstallationSize: (installationId) =>
-    ipcRenderer.invoke(CH.getInstallationSize, { installationId }),
-  pickerSettingsStopComfyUI: (installationId) =>
-    ipcRenderer.invoke(CH.stopComfyUI, { installationId }),
-  pickerSettingsGetSnapshots: (installationId) =>
-    ipcRenderer.invoke(CH.getSnapshots, { installationId }),
-  pickerSettingsGetSnapshotDetail: (installationId, filename) =>
-    ipcRenderer.invoke(CH.getSnapshotDetail, { installationId, filename }),
-  pickerSettingsGetSnapshotDiff: (installationId, filename, mode) =>
-    ipcRenderer.invoke(CH.getSnapshotDiff, { installationId, filename, mode }),
-  pickerSettingsExportSnapshot: (installationId, filename) =>
-    ipcRenderer.invoke(CH.exportSnapshot, { installationId, filename }),
-  pickerSettingsExportAllSnapshots: (installationId) =>
-    ipcRenderer.invoke(CH.exportAllSnapshots, { installationId }),
-  pickerSettingsImportSnapshotsPreview: () => ipcRenderer.invoke(CH.importSnapshotsPreview),
-  pickerSettingsImportSnapshotsDiff: (installationId) =>
-    ipcRenderer.invoke(CH.importSnapshotsDiff, { installationId }),
-  pickerSettingsImportSnapshotsConfirm: (installationId) =>
-    ipcRenderer.invoke(CH.importSnapshotsConfirm, { installationId }),
-  pickerSettingsPreviewSnapshotFile: () => ipcRenderer.invoke(CH.previewSnapshotFile),
-  pickerSettingsGetComfyArgs: (installationId) =>
-    ipcRenderer.invoke(CH.getComfyArgs, { installationId }),
-  pickerSettingsBrowseFolder: (opts) =>
-    ipcRenderer.invoke(CH.browseFolder, { defaultPath: opts?.defaultPath }),
-  pickerSettingsCancelOperation: (installationId) =>
-    ipcRenderer.invoke(CH.cancelOperation, { installationId }),
-  pickerSettingsPreviewDesktopMigration: (installationId, desktopId) =>
-    ipcRenderer.invoke(CH.previewDesktopMigration, { installationId, desktopId }),
-  pickerSettingsPreviewLocalMigration: (installationId) =>
-    ipcRenderer.invoke(CH.previewLocalMigration, { installationId }),
-  pickerSettingsRelaunchApp: () => {
-    ipcRenderer.send(CH.relaunchApp)
-  },
-  pickerSettingsGetLocaleMessages: () => ipcRenderer.invoke(CH.getLocaleMessages),
-  setPickerMode: (mode, opts) => {
-    ipcRenderer.send('comfy-titlepopup:set-picker-mode', {
-      mode,
-      initialTab: opts?.initialTab,
-      autoAction: opts?.autoAction ?? null,
-    })
-  },
-  pickerForwardShowProgress: (payload) => {
-    ipcRenderer.send('comfy-titlepopup:forward-show-progress', payload)
-  },
 }
 
 if (process.contextIsolated) {

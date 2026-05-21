@@ -15,7 +15,7 @@ const extraFileExtensions = ['.vue']
 const commonParserOptions = {
   parser: tseslintParser,
   projectService: true,
-  tsconfigRootDir: import.meta.dirname,
+  tsConfigRootDir: import.meta.dirname,
   ecmaVersion: 2020,
   sourceType: 'module',
   extraFileExtensions
@@ -23,7 +23,7 @@ const commonParserOptions = {
 
 export default defineConfig([
   {
-    ignores: ['out/*', 'dist/*', 'node_modules/*', '.claude/**']
+    ignores: ['out/*', 'dist/*', 'node_modules/*']
   },
   {
     files: ['./**/*.{ts,mts}'],

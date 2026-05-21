@@ -1,6 +1,7 @@
 import { ref, computed, type Ref, type ComputedRef } from 'vue'
 import { useModal } from './useModal'
 import { i18n } from '../i18n'
+import type { Installation } from '../types/ipc'
 
 /**
  * Overlay slot foundation.
@@ -49,7 +50,52 @@ import { i18n } from '../i18n'
  * `Cancel "Updating ComfyUI"?`).
  */
 
-export type OverlayKind = 'progress' | 'takeover'
+export type OverlayKind = 'settings' | 'progress' | 'takeover'
+
+/**
+ * Unified Settings modal — ModalShell with a left-rail tab switcher
+ * hosting "ComfyUI Settings" (per-install DetailModal body),
+ * "Directories" (combined Models / Media browser), and "Global
+ * Settings" (launcher-wide settings). Every install-pill / waffle /
+ * chooser-card-Manage entry-point routes through here.
+ *
+ * `installation` is null on install-less host windows opening the
+ * modal from the file-menu Settings entry — the "ComfyUI Settings"
+ * tab is hidden and the default falls through to "Global Settings".
+ *
+ * `initialDetailTab` and `autoAction` are forwarded to the embedded
+ * DetailModal so chooser-card update / migrate pills can deep-link
+ * straight to the Update tab with the relevant action pre-armed.
+ *
+ * `noSidebar` collapses the modal to just the active tab's content
+ * (no left rail, no tab switcher). Used for chooser-card "Manage…" /
+ * Update / Migrate entry-points where the user picked a specific
+ * install and wants the focused per-install Settings surface — the
+ * sidebar's Directories / Global Settings tabs would be a distraction
+ * in that flow. The file-menu / title-bar Settings entry leaves it
+ * unset (default false) so the full sidebar layout renders.
+ */
+/**
+ * TODO(brand-cleanup): post-brand-redesign this payload is consumed by
+ * `ManageInstallModal` (BaseModal-backed, per-install only). The
+ * `initialTab` field is now effectively unused — install-less hosts
+ * short-circuit to `window.api.openGlobalSettings()` before reaching
+ * the overlay, so every payload that lands here has `initialTab: 'comfy'`
+ * by construction. `initialDetailTab` carries the real per-install
+ * landing tab (`'status' | 'update' | 'snapshots' | 'settings'`) and
+ * `noSidebar` is dead (the new modal has no sidebar). Fields kept for
+ * now to avoid breaking the legacy `SettingsModal` (soft-deleted but
+ * still present per `feedback_soft_delete_convention`). Drop the legacy
+ * fields when `SettingsModal.vue` is hard-deleted.
+ */
+export interface SettingsOverlay {
+  kind: 'settings'
+  installation: Installation | null
+  initialTab: 'comfy' | 'directories' | 'downloads' | 'global'
+  initialDetailTab?: string
+  autoAction?: string | null
+  noSidebar?: boolean
+}
 
 export interface ProgressOverlay {
   kind: 'progress'
@@ -124,15 +170,17 @@ export interface TakeoverOverlay {
 }
 
 export type Overlay =
+  | SettingsOverlay
   | ProgressOverlay
   | TakeoverOverlay
 
-const TIER: Record<OverlayKind, 2 | 3> = {
+const TIER: Record<OverlayKind, 1 | 2 | 3> = {
+  settings: 1,
   progress: 2,
   takeover: 3,
 }
 
-export function tierOf(o: Overlay | null): 0 | 2 | 3 {
+export function tierOf(o: Overlay | null): 0 | 1 | 2 | 3 {
   return o ? TIER[o.kind] : 0
 }
 

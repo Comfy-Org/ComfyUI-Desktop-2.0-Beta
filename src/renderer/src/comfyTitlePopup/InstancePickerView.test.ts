@@ -33,12 +33,10 @@ const emptySnapshotListPayload: SnapshotListData = {
   }
 
 /**
- * Component tests for the instance-picker popover view. Compact mode
- * is a single-column list of self-contained PickerRow cards; expanded
- * mode mounts ComfyUISettingsContent in a list-left + settings-right
- * split. Tests below cover the compact-mode contract — each row is
- * its own affordance with Open + Manage CTAs and the picker dispatches
- * the right bridge IPC for each click.
+ * Component tests for the instance-picker popover view. The component
+ * is prop-driven (snapshot + theme passed in by the title-popup shell)
+ * so tests don't need to mock the IPC handshake — only the bridge
+ * methods invoked on user actions (pickInstall, openNewInstall).
  */
 
 interface MockInstall {
@@ -60,7 +58,6 @@ interface MockSnapshot {
   selectedInstallationId?: string | null
   selectedSettings?: unknown[] | null
   selectedSnapshots?: unknown | null
-  mode?: 'compact' | 'expanded'
 }
 
 interface BridgeState {
@@ -70,7 +67,6 @@ interface BridgeState {
   selectedInstallSets: (string | null)[]
   updateFieldCalls: { installationId: string; fieldId: string; value: unknown }[]
   runActionCalls: { installationId: string; actionId: string; actionData?: unknown }[]
-  setPickerModeCalls: { mode: 'compact' | 'expanded'; opts?: unknown }[]
 }
 
 function installMockBridge(): BridgeState {
@@ -81,7 +77,6 @@ function installMockBridge(): BridgeState {
     selectedInstallSets: [],
     updateFieldCalls: [],
     runActionCalls: [],
-    setPickerModeCalls: [],
   }
   const bridge = {
     pickInstall: (id: string) => {
@@ -109,10 +104,6 @@ function installMockBridge(): BridgeState {
         return { ok: true }
       },
     ),
-    setPickerMode: (mode: 'compact' | 'expanded', opts?: unknown) => {
-      state.setPickerModeCalls.push({ mode, opts })
-    },
-    pickerSettingsGetLocaleMessages: vi.fn(async () => ({})),
   }
   ;(window as unknown as { __comfyTitlePopup: typeof bridge }).__comfyTitlePopup = bridge
   return state
@@ -136,12 +127,13 @@ async function mountPicker(snapshot: MockSnapshot) {
   // convention DownloadsView's test uses.
   const { default: InstancePickerView } = await import('./InstancePickerView.vue')
   // Fill in the new snapshot fields with safe defaults — tests that
-  // exercise expanded mode pass `mode: 'expanded'` explicitly.
+  // exercise the picker's right-pane Settings/Snapshots accordions
+  // override these explicitly. Older test cases predate these fields
+  // and don't care.
   const enriched = {
     selectedInstallationId: snapshot.activeInstallationId,
     selectedSettings: null,
     selectedSnapshots: null,
-    mode: 'compact' as const,
     ...snapshot,
   }
   return mount(InstancePickerView, {
@@ -159,7 +151,7 @@ describe('comfyTitlePopup/InstancePickerView', () => {
   })
 
   describe('structural shell', () => {
-    it('renders the search input, chip row, and rows pane', async () => {
+    it('renders the search input, chip row, list pane and detail pane', async () => {
       const wrapper = await mountPicker({
         installs: [],
         activeInstallationId: null,
@@ -167,21 +159,22 @@ describe('comfyTitlePopup/InstancePickerView', () => {
       })
       expect(wrapper.find('.picker-search input').exists()).toBe(true)
       expect(wrapper.findAll('.picker-chip').length).toBeGreaterThan(0)
-      expect(wrapper.find('.picker-rows').exists()).toBe(true)
+      expect(wrapper.find('.picker-list').exists()).toBe(true)
+      expect(wrapper.find('.picker-detail').exists()).toBe(true)
     })
 
-    it('renders the "+ New Instance" CTA at the bottom of compact mode', async () => {
+    it('renders the "+ New Instance" CTA pinned to the bottom of the left pane', async () => {
       const wrapper = await mountPicker({
         installs: [makeInstall({ id: 'a', name: 'Alpha' })],
         activeInstallationId: null,
         runningInstallationIds: [],
       })
-      const newInstall = wrapper.find('.picker-new-install-row')
+      const newInstall = wrapper.find('.picker-new-install')
       expect(newInstall.exists()).toBe(true)
     })
   })
 
-  describe('row rendering', () => {
+  describe('list rendering', () => {
     it('orders install rows by recency desc with never-launched last', async () => {
       const wrapper = await mountPicker({
         installs: [
@@ -192,10 +185,28 @@ describe('comfyTitlePopup/InstancePickerView', () => {
         activeInstallationId: null,
         runningInstallationIds: [],
       })
-      const namesInOrder = wrapper
-        .findAll('.picker-row-card-name')
-        .map((n) => n.text())
+      const installRows = wrapper
+        .findAll('.picker-row')
+        .filter((r) => !r.classes().includes('picker-row-cloud'))
+      // Row text includes the install name AND the formatted last-
+      // launched label — assert on the name + order via the name slot,
+      // not full row text.
+      const namesInOrder = installRows.map((r) => r.find('.picker-row-name').text())
       expect(namesInOrder).toEqual(['New', 'Old', 'Never'])
+    })
+
+    it('highlights the active row from snapshot.activeInstallationId', async () => {
+      const wrapper = await mountPicker({
+        installs: [
+          makeInstall({ id: 'a', name: 'Alpha' }),
+          makeInstall({ id: 'b', name: 'Bravo' }),
+        ],
+        activeInstallationId: 'b',
+        runningInstallationIds: [],
+      })
+      const activeRow = wrapper.find('.picker-row.is-active')
+      expect(activeRow.exists()).toBe(true)
+      expect(activeRow.text()).toContain('Bravo')
     })
 
     it('marks running rows with the is-running class', async () => {
@@ -207,102 +218,103 @@ describe('comfyTitlePopup/InstancePickerView', () => {
         activeInstallationId: null,
         runningInstallationIds: ['a'],
       })
-      const cards = wrapper.findAll('.picker-row-card')
-      const alphaCard = cards.find((c) => c.text().includes('Alpha'))
-      expect(alphaCard!.classes()).toContain('is-running')
-    })
-
-    it('renders Open + Manage CTAs on every row', async () => {
-      const wrapper = await mountPicker({
-        installs: [
-          makeInstall({ id: 'a', name: 'Alpha' }),
-          makeInstall({ id: 'b', name: 'Bravo' }),
-        ],
-        activeInstallationId: null,
-        runningInstallationIds: [],
-      })
-      const opens = wrapper.findAll('.picker-row-card-open')
-      const manages = wrapper.findAll('.picker-row-card-manage')
-      expect(opens.length).toBe(2)
-      expect(manages.length).toBe(2)
-    })
-
-    it('shows the source-label and version pills on each row', async () => {
-      const wrapper = await mountPicker({
-        installs: [
-          makeInstall({
-            id: 'a',
-            name: 'Alpha',
-            version: '0.20.2+57',
-            sourceLabel: 'GitHub',
-          }),
-        ],
-        activeInstallationId: null,
-        runningInstallationIds: [],
-      })
-      const card = wrapper.find('.picker-row-card')
-      expect(card.text()).toContain('Alpha')
-      expect(card.text()).toContain('GitHub')
-      expect(card.text()).toContain('v0.20.2+57')
-      expect(card.text()).not.toContain('vv0.20.2+57')
-    })
-
-    it('does not double-prefix the version pill when version already starts with v', async () => {
-      const wrapper = await mountPicker({
-        installs: [
-          makeInstall({ id: 'a', name: 'Alpha', version: 'v0.21.1' }),
-        ],
-        activeInstallationId: null,
-        runningInstallationIds: [],
-      })
-      const card = wrapper.find('.picker-row-card')
-      expect(card.text()).toContain('v0.21.1')
-      expect(card.text()).not.toContain('vv0.21.1')
+      const alphaRow = wrapper
+        .findAll('.picker-row')
+        .find((r) => r.text().includes('Alpha'))
+      expect(alphaRow!.classes()).toContain('is-running')
     })
   })
 
   describe('user actions', () => {
+    it('selects (without launching) when an install row is clicked', async () => {
+      // Switcher contract: row click updates the right detail pane
+      // only. The actual launch waits on the Open button so the user
+      // can browse multiple installs before committing — popup stays
+      // open across row clicks. The pickInstall IPC must NOT fire.
+      const wrapper = await mountPicker({
+        installs: [makeInstall({ id: 'a', name: 'Alpha' })],
+        activeInstallationId: null,
+        runningInstallationIds: [],
+      })
+      const alphaRow = wrapper
+        .findAll('.picker-row')
+        .find((r) => r.text().includes('Alpha'))
+      await alphaRow!.trigger('click')
+      expect(bridge.picks).toEqual([])
+      // Selection landed: Alpha is now the active row in the detail pane.
+      expect(wrapper.find('.picker-row.is-active').text()).toContain('Alpha')
+    })
+
     it('dispatches openNewInstall when the New Install row is clicked', async () => {
       const wrapper = await mountPicker({
         installs: [],
         activeInstallationId: null,
         runningInstallationIds: [],
       })
-      const newInstallRow = wrapper.find('.picker-new-install-row')
+      const newInstallRow = wrapper.find('.picker-new-install')
       await newInstallRow.trigger('click')
       expect(bridge.newInstallCount).toBe(1)
     })
 
-    it('dispatches pickInstall when a row\'s Open button is clicked', async () => {
+    it('dispatches pickInstall when the primary Open button is clicked', async () => {
       const wrapper = await mountPicker({
         installs: [makeInstall({ id: 'a', name: 'Alpha' })],
         activeInstallationId: 'a',
         runningInstallationIds: [],
       })
-      const openButton = wrapper.find('.picker-row-card-open')
+      const openButton = wrapper.find('.picker-detail-open')
       expect(openButton.exists()).toBe(true)
       await openButton.trigger('click')
       expect(bridge.picks).toEqual(['a'])
       expect(bridge.restarts).toEqual([])
     })
 
-    it('switches a row\'s primary CTA to "Restart" when the install is running', async () => {
+    it('switches the primary CTA to "Restart" when the selected install is running', async () => {
       // Clicking Open on a running install would be a no-op visually
-      // (main just refocuses the existing window), so the per-row CTA
-      // flips to Restart and dispatches the restart flow.
+      // (main just refocuses the existing window), so the CTA flips to
+      // Restart and dispatches the restart flow (stop → re-launch)
+      // through the dedicated bridge method. Main confirms via a
+      // native dialog before actually killing the session.
       const wrapper = await mountPicker({
         installs: [makeInstall({ id: 'a', name: 'Alpha' })],
         activeInstallationId: 'a',
         runningInstallationIds: ['a'],
       })
-      const openButton = wrapper.find('.picker-row-card-open')
+      const openButton = wrapper.find('.picker-detail-open')
       expect(openButton.text()).toBe('Restart')
       await openButton.trigger('click')
       expect(bridge.restarts).toEqual(['a'])
       expect(bridge.picks).toEqual([])
     })
 
-    it('keeps the primary CTA as "Open" for non-running rows', async () => {
+    it('pushes the selected install id to main when the user picks a different row', async () => {
+      // The picker tells main about its current selection via
+      // `setPickerSelectedInstall` whenever the user picks a different
+      // row. Main re-resolves Settings + Snapshots for the new install
+      // and pushes a fresh snapshot back. The initial selection on
+      // mount does NOT fire this IPC — main already seeded
+      // `pickerSelectedInstallationId` with the host's active install
+      // and kicked the initial details fetch before showing the
+      // popup, so an `immediate: true` watcher would cause a spurious
+      // re-broadcast → resize-during-open flicker.
+      const wrapper = await mountPicker({
+        installs: [
+          makeInstall({ id: 'a', name: 'Alpha' }),
+          makeInstall({ id: 'b', name: 'Bravo' }),
+        ],
+        activeInstallationId: 'a',
+        runningInstallationIds: [],
+      })
+      expect(bridge.selectedInstallSets).toEqual([])
+      const bravoRow = wrapper
+        .findAll('.picker-row')
+        .find((r) => r.text().includes('Bravo'))
+      await bravoRow!.trigger('click')
+      await flushPromises()
+      expect(bridge.selectedInstallSets[bridge.selectedInstallSets.length - 1]).toBe('b')
+    })
+
+    it('keeps the primary CTA as "Open" for non-running selections', async () => {
       const wrapper = await mountPicker({
         installs: [
           makeInstall({ id: 'a', name: 'Alpha' }),
@@ -311,26 +323,7 @@ describe('comfyTitlePopup/InstancePickerView', () => {
         activeInstallationId: 'a',
         runningInstallationIds: ['b'],
       })
-      // Alpha is not running — its Open button should read "Open".
-      const cards = wrapper.findAll('.picker-row-card')
-      const alphaCard = cards.find((c) => c.text().includes('Alpha'))
-      expect(alphaCard!.find('.picker-row-card-open').text()).toBe('Open')
-    })
-
-    it('dispatches setPickerMode("expanded") with config tab when Manage is clicked', async () => {
-      const wrapper = await mountPicker({
-        installs: [makeInstall({ id: 'a', name: 'Alpha' })],
-        activeInstallationId: 'a',
-        runningInstallationIds: [],
-      })
-      const manageButton = wrapper.find('.picker-row-card-manage')
-      await manageButton.trigger('click')
-      await flushPromises()
-      expect(bridge.setPickerModeCalls.length).toBe(1)
-      expect(bridge.setPickerModeCalls[0]).toEqual({
-        mode: 'expanded',
-        opts: { initialTab: 'config' },
-      })
+      expect(wrapper.find('.picker-detail-open').text()).toBe('Open')
     })
 
     it('filters install rows by search query', async () => {
@@ -345,9 +338,11 @@ describe('comfyTitlePopup/InstancePickerView', () => {
       const input = wrapper.find('.picker-search input')
       await input.setValue('alph')
       await flushPromises()
-      const cards = wrapper.findAll('.picker-row-card')
-      expect(cards.length).toBe(1)
-      expect(cards[0]!.text()).toContain('Alpha')
+      const installRows = wrapper
+        .findAll('.picker-row')
+        .filter((r) => !r.classes().includes('picker-row-cloud'))
+      expect(installRows.map((r) => r.text()).join(' ')).toContain('Alpha')
+      expect(installRows.map((r) => r.text()).join(' ')).not.toContain('Bravo')
     })
 
     it('switches visible rows when a non-all filter chip is activated', async () => {
@@ -363,54 +358,72 @@ describe('comfyTitlePopup/InstancePickerView', () => {
       const remoteChip = chips.find((c) => c.text() === 'Remote')
       expect(remoteChip).toBeTruthy()
       await remoteChip!.trigger('click')
-      const cards = wrapper.findAll('.picker-row-card')
-      expect(cards.length).toBe(1)
-      expect(cards[0]!.text()).toContain('RemoteThing')
+      const installRows = wrapper
+        .findAll('.picker-row')
+        .filter((r) => !r.classes().includes('picker-row-cloud'))
+      expect(installRows.length).toBe(1)
+      expect(installRows[0]!.text()).toContain('RemoteThing')
     })
+  })
 
-    it('shows the empty-state hint when no rows match', async () => {
+  describe('detail pane', () => {
+    it('shows the empty state when nothing is selected', async () => {
       const wrapper = await mountPicker({
         installs: [makeInstall({ id: 'a', name: 'Alpha' })],
         activeInstallationId: null,
         runningInstallationIds: [],
       })
-      const input = wrapper.find('.picker-search input')
-      await input.setValue('zzzz-no-match')
-      await flushPromises()
-      expect(wrapper.find('.picker-rows-empty').exists()).toBe(true)
+      expect(wrapper.find('.picker-detail-empty').exists()).toBe(true)
+      expect(wrapper.find('.picker-detail-open').exists()).toBe(false)
     })
-  })
 
-  describe('expanded mode', () => {
-    it('mounts the list-left + settings-right split when mode is expanded', async () => {
+    it('shows the install name + version pill in the detail pane', async () => {
+      const wrapper = await mountPicker({
+        installs: [
+          makeInstall({ id: 'a', name: 'Alpha', version: '0.20.2+57' }),
+        ],
+        activeInstallationId: 'a',
+        runningInstallationIds: [],
+      })
+      const detail = wrapper.find('.picker-detail')
+      expect(detail.text()).toContain('Alpha')
+      expect(detail.text()).toContain('v0.20.2+57')
+      expect(detail.text()).not.toContain('vv0.20.2+57')
+    })
+
+    it('does not double-prefix the version pill when version already starts with v', async () => {
+      const wrapper = await mountPicker({
+        installs: [
+          makeInstall({ id: 'a', name: 'Alpha', version: 'v0.21.1' }),
+        ],
+        activeInstallationId: 'a',
+        runningInstallationIds: [],
+      })
+      const detail = wrapper.find('.picker-detail')
+      expect(detail.text()).toContain('v0.21.1')
+      expect(detail.text()).not.toContain('vv0.21.1')
+    })
+
+    it('exposes the "Latest on GitHub" pill in the detail pane', async () => {
       const wrapper = await mountPicker({
         installs: [makeInstall({ id: 'a', name: 'Alpha' })],
         activeInstallationId: 'a',
         runningInstallationIds: [],
-        mode: 'expanded',
-        selectedSnapshots: emptySnapshotListPayload,
       })
-      // Expanded mode keeps the left list (compact InstanceRow shape)
-      // and mounts ComfyUISettingsContent on the right.
-      expect(wrapper.find('.picker-list').exists()).toBe(true)
-      expect(wrapper.find('.picker-detail-wrap.is-expanded').exists()).toBe(true)
-      // Compact rows are NOT mounted in expanded mode.
-      expect(wrapper.find('.picker-rows').exists()).toBe(false)
+      const detail = wrapper.find('.picker-detail')
+      expect(detail.text()).toContain('Latest on GitHub')
     })
 
-    it('pulls main\'s locale catalog on first expand', async () => {
-      await mountPicker({
+    it('shows Settings and Snapshots nav when main sent a snapshots list payload', async () => {
+      const wrapper = await mountPicker({
         installs: [makeInstall({ id: 'a', name: 'Alpha' })],
         activeInstallationId: 'a',
         runningInstallationIds: [],
-        mode: 'expanded',
         selectedSnapshots: emptySnapshotListPayload,
       })
-      await flushPromises()
-      const bridgeRef = (window as unknown as {
-        __comfyTitlePopup: { pickerSettingsGetLocaleMessages: ReturnType<typeof vi.fn> }
-      }).__comfyTitlePopup
-      expect(bridgeRef.pickerSettingsGetLocaleMessages).toHaveBeenCalled()
+      const nav = wrapper.find('.picker-detail-nav')
+      expect(nav.text()).toContain('Settings')
+      expect(nav.text()).toContain('Snapshots')
     })
   })
 })

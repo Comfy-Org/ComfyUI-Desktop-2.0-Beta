@@ -253,4 +253,12 @@ export function registerPanelViewIpc(): void {
     }
   })
 
+  // Title-bar Settings icon close → forward to the panel renderer so
+  // the drawer's leave animation plays before `activePanel` flips.
+  // Same dismiss path as ESC / backdrop click.
+  ipcMain.on('comfy-window:request-close-drawer', (event) => {
+    const found = findEntryByTitleBarSender(event.sender)
+    if (!found) return
+    forwardToPanelRenderer(found.entry, 'panel:request-close-drawer')
+  })
 }

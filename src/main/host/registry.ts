@@ -10,6 +10,8 @@ import { _runningSessions } from '../lib/ipc/shared'
  */
 export type ComfyPanelKey =
   | 'comfy'
+  | 'settings'
+  | 'settings-v2'
   | 'downloads-v2'
   | 'new-install'
   | 'track'
@@ -18,6 +20,8 @@ export type ComfyPanelKey =
 
 export const VALID_PANELS: ReadonlySet<ComfyPanelKey> = new Set([
   'comfy',
+  'settings',
+  'settings-v2',
   'downloads-v2',
   'new-install',
   'track',
@@ -37,10 +41,15 @@ export const VALID_PANELS: ReadonlySet<ComfyPanelKey> = new Set([
  * the Comfy tab of an install-less host window (one with no install backing
  * the entry yet). Picking an install in the chooser eventually swaps the
  * window in-place to a real install.
+ *
+ * `'settings'` mounts the unified Settings modal (ComfyUI Settings /
+ * Directories / Global Settings) over whatever body is showing.
  */
 export type BodyMode =
   | 'comfy'
   | 'comfy-lifecycle'
+  | 'settings'
+  | 'settings-v2'
   | 'downloads-v2'
   | 'chooser'
   | 'new-install'
@@ -85,7 +94,10 @@ export interface ComfyWindowEntry {
   /**
    * Which panel is currently rendered. Always one of the user-visible
    * panel keys — never the internal `'comfy-lifecycle'` / `'chooser'`
-   * body modes.
+   * body modes. Both install-backed and install-less hosts can reach
+   * `'comfy'` and `'settings'`; the unified Settings modal opens on
+   * its Global tab when there is no install to back the ComfyUI
+   * Settings tab.
    */
   activePanel: ComfyPanelKey
   /** Last known theme reported by the ComfyUI frontend, applied to the panel when it loads. */

@@ -4,6 +4,8 @@ import { buildElectronApi } from './api'
 
 export type ComfyPanelKey =
   | 'comfy'
+  | 'settings'
+  | 'settings-v2'
   | 'new-install'
   | 'track'
   | 'load-snapshot'
@@ -49,6 +51,14 @@ export interface ComfyTitleBarBridge {
   isMac(): boolean
   /** Request the main process to swap the active panel. */
   setPanel(panel: ComfyPanelKey): void
+  /** Title-bar Settings icon → close the v2 drawer with animation.
+   *  Routes through main → panel renderer → drawer's local
+   *  `requestClose()` so the slide-out plays BEFORE `layoutViews`
+   *  collapses the panelView. A direct `setPanel('comfy')` here would
+   *  flip `activePanel` first and cut the leave animation mid-frame.
+   *  Use this instead of `setPanel('comfy')` whenever the icon click
+   *  needs to dismiss the drawer. */
+  requestCloseDrawer(): void
   /** File menu → "New Window". Opens a fresh install-less chooser
    *  host window. Always creates a new one — the focus-existing path
    *  lives on the tray entry. */
@@ -213,6 +223,9 @@ const bridge: ComfyTitleBarBridge = {
   isMac: () => (g.navigator?.userAgent ?? '').toLowerCase().includes('mac'),
   setPanel: (panel) => {
     ipcRenderer.send('comfy-window:set-panel', { panel })
+  },
+  requestCloseDrawer: () => {
+    ipcRenderer.send('comfy-window:request-close-drawer')
   },
   openNewWindow: () => {
     ipcRenderer.send('comfy-window:new-chooser-window')

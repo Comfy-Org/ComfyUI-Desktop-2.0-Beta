@@ -9,6 +9,7 @@ import {
   Menu as MenuIcon,
   MessageSquarePlus,
   RefreshCw,
+  Settings as SettingsIcon
 } from 'lucide-vue-next'
 import { useTitleBarTooltip } from './useTitleBarTooltip'
 import { useTitleBarMenus } from './useTitleBarMenus'
@@ -25,6 +26,8 @@ const { t } = useI18n()
 // the ComfyPanelKey export in src/main/index.ts.
 type ComfyPanelKey =
   | 'comfy'
+  | 'settings'
+  | 'settings-v2'
   | 'new-install'
   | 'track'
   | 'load-snapshot'
@@ -63,6 +66,10 @@ interface Bridge {
   getInstallationId: () => string | null
   isMac: () => boolean
   setPanel: (panel: ComfyPanelKey) => void
+  /** Title-bar Settings icon close path. Routes through main → panel
+   *  renderer → drawer's local `requestClose()` so the slide-out
+   *  animation runs before `layoutViews` collapses the panelView. */
+  requestCloseDrawer: () => void
   openNewWindow: () => void
   /** Pop the File menu natively (avoids WebContentsView clipping the popup). */
   openFileMenu: (anchor: MenuAnchor) => void
@@ -225,6 +232,28 @@ function handleFeedback(): void {
 }
 
 // Icon is ComfyUI-tab only; also visible while the drawer is open so
+// it can act as the close toggle. Hidden during any first-use takeover
+// step (consent + post-consent) so it matches the waffle/tray/feedback
+// chrome that also strips out during onboarding.
+const showSettingsIcon = computed(
+  () =>
+    !isInstallLess.value &&
+    !isFirstUseTakeover.value &&
+    (activePanel.value === 'comfy' || activePanel.value === 'settings-v2')
+)
+
+// Open is synchronous (`setPanel`); close routes through main → panel
+// renderer so the drawer's leave animation can complete before
+// `layoutViews` collapses the panelView.
+function handleSettingsToggle(): void {
+  if (!bridge) return
+  if (activePanel.value === 'settings-v2') {
+    bridge.requestCloseDrawer()
+  } else {
+    bridge.setPanel('settings-v2')
+  }
+}
+
 const fileBtnRef = useTemplateRef<HTMLButtonElement>('fileBtn')
 const downloadsBtnRef = useTemplateRef<HTMLButtonElement>('downloadsBtn')
 const installPillRef = useTemplateRef<HTMLButtonElement>('installPill')
@@ -510,6 +539,22 @@ onUnmounted(() => {
           aria-hidden="true"
         >{{ unseenFinishedCount }}</span>
       </button>
+      <button
+        v-if="showSettingsIcon"
+        type="button"
+        class="title-menu-button title-menu-button--icon title-settings-button"
+        :class="{ 'is-active': activePanel === 'settings-v2' }"
+        :aria-pressed="activePanel === 'settings-v2'"
+        v-bind="
+          tooltipAttrs(
+            t('titleBar.settingsTooltip', 'Settings'),
+            t('titleBar.settings', 'Settings')
+          )
+        "
+        @click="handleSettingsToggle"
+      >
+        <SettingsIcon :size="16" />
+      </button>
     </div>
   </header>
 </template>
@@ -639,6 +684,23 @@ onUnmounted(() => {
 .title-feedback-button {
   color: var(--text-muted);
 }
+.title-settings-button {
+  display: inline-flex;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  justify-content: center;
+  align-items: center;
+  border-radius: 999px;
+  color: var(--text-muted);
+}
+.title-settings-button.is-active,
+.title-settings-button.is-active:hover {
+  color: var(--comfy-yellow);
+  border-color: var(--comfy-yellow);
+  opacity: 1;
+}
+
 .title-install-pill {
   -webkit-app-region: no-drag;
   display: inline-flex;

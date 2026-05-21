@@ -119,8 +119,8 @@ describe('computeBodyMode', () => {
   })
 
   it('passes non-comfy panels through for install-less hosts', () => {
-    const entry = makeEntry({ installationId: null, activePanel: 'downloads-v2' })
-    expect(computeBodyMode(entry)).toBe('downloads-v2')
+    const entry = makeEntry({ installationId: null, activePanel: 'settings' })
+    expect(computeBodyMode(entry)).toBe('settings')
   })
 
   it('routes the comfy pill to comfy when the install session is running', () => {

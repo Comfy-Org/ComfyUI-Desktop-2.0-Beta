@@ -100,19 +100,6 @@ export interface InstancePickerSnapshot {
   selectedInstallationId: string | null
   selectedSettings: Record<string, unknown>[] | null
   selectedSnapshots: Record<string, unknown> | null
-  /** Compact = default identity-card right pane; expanded = full
-   *  per-install settings UI (`ComfyUISettingsContent`) in the right
-   *  pane. Driven by `comfy-titlepopup:set-picker-mode` IPC; main
-   *  animates the popup bounds when this flips. */
-  mode: 'compact' | 'expanded'
-  /** When `mode === 'expanded'`, the tab the settings UI opens on
-   *  ('config' | 'status' | 'update' | 'snapshots'). Ignored in
-   *  compact mode. */
-  initialTab: string | null
-  /** When `mode === 'expanded'`, an action id to fire automatically
-   *  after the settings UI mounts (e.g. `'update-comfyui'` for the
-   *  kebab Update entry). Cleared after consumption. */
-  autoAction: string | null
 }
 
 /** Single Models-directory row pushed to the global-settings popup.
@@ -168,9 +155,6 @@ interface BuildInstancePickerSnapshotArgs {
   selectedInstallationId?: string | null
   selectedSettings?: Record<string, unknown>[] | null
   selectedSnapshots?: Record<string, unknown> | null
-  mode?: 'compact' | 'expanded'
-  initialTab?: string | null
-  autoAction?: string | null
 }
 
 /**
@@ -188,9 +172,6 @@ export function buildInstancePickerSnapshot(
     selectedInstallationId: args.selectedInstallationId ?? null,
     selectedSettings: args.selectedSettings ?? null,
     selectedSnapshots: args.selectedSnapshots ?? null,
-    mode: args.mode ?? 'compact',
-    initialTab: args.initialTab ?? null,
-    autoAction: args.autoAction ?? null,
   }
 }
 
@@ -267,22 +248,6 @@ interface TitlePopupEntry {
    *  scope `selectedSettings` + `selectedSnapshots` in subsequent
    *  snapshot pushes. Defaults to the host's active install on open. */
   pickerSelectedInstallationId: string | null
-  /** Picker's right-pane mode. `'compact'` = identity card + Open/Manage
-   *  CTAs (the original popup size). `'expanded'` = the full per-install
-   *  settings UI mounts in the right pane and main animates the popup
-   *  bounds to ~95dvw × 95dvh. Driven by `comfy-titlepopup:set-picker-mode`
-   *  IPC; main rebroadcasts a snapshot with the new value so the picker
-   *  view re-renders the right pane. */
-  pickerMode: 'compact' | 'expanded'
-  /** When `pickerMode === 'expanded'`, the tab id the settings UI opens
-   *  on. Forwarded into the snapshot for the picker view to consume on
-   *  first render. */
-  pickerInitialTab: string | null
-  /** When `pickerMode === 'expanded'`, an action id the settings UI
-   *  fires automatically after mounting (kebab Update / Migrate /
-   *  Restore-Snapshot / Delete entry points). Cleared after the picker
-   *  view consumes it. */
-  pickerAutoAction: string | null
   /** JSON of the most recent `installs-changed` snapshot sent to this
    *  popup. Used by `broadcastInstancePickerSnapshotToTitlePopups` to
    *  skip pushes that would re-render identical data — important
@@ -294,14 +259,6 @@ interface TitlePopupEntry {
   /** JSON of the most recent `global-settings-changed` snapshot pushed
    *  to this popup. Same dedup role as `lastPickerBroadcastJson`. */
   lastGlobalSettingsBroadcastJson: string | null
-  /** Most recent natural-content height the picker renderer reported
-   *  via `comfy-titlepopup:request-size`. The compact-mode bounds
-   *  computation reads this so the popup tracks the renderer's
-   *  measured height even after a host-window resize — without it the
-   *  resize listener would have to ask the renderer again, racing the
-   *  observer. `null` until the first `request-size` lands; only
-   *  populated for the instance-picker kind. */
-  lastReportedNaturalHeight: number | null
   /** Wall-clock time of the most recent `showTitlePopupNow()` for this
    *  entry. The backdrop's `mousedown` listener can fire during the
    *  same tick as the trigger click (the backdrop covers the body, and
@@ -385,14 +342,13 @@ const popupBackdropsByParent = new Map<number, PopupBackdropEntry>()
 const popupBackdropsByWebContents = new Map<number, number /* parentId */>()
 
 /** Inline HTML loaded into the backdrop view. Fixed `position: fixed`
- *  scrim — 60% opacity over the host body with a 2px backdrop blur so
- *  the dim reads as a soft veil instead of a hard wall. Same scrim
- *  color as before (`#211927`). A click anywhere fires the dismiss
- *  IPC; main routes it through to hide the picker popup. */
+ *  scrim with the figma spec (`background: #211927; opacity: 0.7;`).
+ *  A click anywhere fires the dismiss IPC; main routes it through to
+ *  hide the picker popup. */
 const POPUP_BACKDROP_HTML = `<!doctype html>
 <html><head><meta charset="utf-8"><style>
   html,body{margin:0;width:100%;height:100%;background:transparent;overflow:hidden;-webkit-user-select:none;user-select:none}
-  .scrim{position:fixed;inset:0;width:100%;height:100%;background:#211927;opacity:0.6;backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px);cursor:default}
+  .scrim{position:fixed;inset:0;width:100%;height:100%;background:#211927;opacity:0.7;cursor:default}
 </style></head><body>
 <div class="scrim" id="s"></div>
 <script>
@@ -423,21 +379,6 @@ function ensurePopupBackdrop(parent: BrowserWindow): PopupBackdropEntry {
   const entry: PopupBackdropEntry = { view, visible: false }
   popupBackdropsByParent.set(parent.id, entry)
   popupBackdropsByWebContents.set(view.webContents.id, parent.id)
-  // Re-fit the scrim to the host's content area on every parent
-  // resize while visible. Without this the scrim stays at its
-  // open-time bounds and either leaks past the new edges or leaves
-  // an undimmed strip when the window grows. Idle ticks (popup
-  // hidden) are no-ops.
-  parent.on('resize', () => {
-    if (!entry.visible || parent.isDestroyed() || view.webContents.isDestroyed()) return
-    const cb = parent.getContentBounds()
-    view.setBounds({
-      x: 0,
-      y: TITLEBAR_HEIGHT,
-      width: cb.width,
-      height: Math.max(0, cb.height - TITLEBAR_HEIGHT),
-    })
-  })
   const onParentClosed = (): void => {
     try { parent.contentView.removeChildView(view) } catch { /* noop */ }
     if (!view.webContents.isDestroyed()) view.webContents.close()
@@ -558,8 +499,9 @@ export function buildTitlePopupMenuItems(entry: ComfyWindowEntry): TitlePopupMen
   items.push(
     {
       id: 'settings',
-      label: 'Global Settings',
-      labelKey: 'fileMenu.globalSettings',
+      label: 'Settings',
+      labelKey: 'fileMenu.settings',
+      checked: entry.activePanel === 'settings',
     },
     // Send Feedback (#493). The renderer-side handler resolves the
     // support URL and emits the `desktop2.feedback.opened`
@@ -645,9 +587,6 @@ async function broadcastInstancePickerSnapshotToTitlePopups(
       selectedInstallationId: selectedId,
       selectedSettings: details.settings,
       selectedSnapshots: details.snapshots,
-      mode: entry.pickerMode,
-      initialTab: entry.pickerInitialTab,
-      autoAction: entry.pickerAutoAction,
     })
     // Dedupe: every snapshot broadcast triggers a `pickerSnapshot`
     // prop change in the renderer, which schedules a measure-and-
@@ -752,13 +691,9 @@ function ensureTitlePopup(parent: BrowserWindow): TitlePopupEntry {
     lastConfigJson: null,
     lastSyncedConfigJson: null,
     pickerSelectedInstallationId: null,
-    pickerMode: 'compact',
-    pickerInitialTab: null,
-    pickerAutoAction: null,
     openedAt: 0,
     lastPickerBroadcastJson: null,
     lastGlobalSettingsBroadcastJson: null,
-    lastReportedNaturalHeight: null,
   }
   titlePopupsByParent.set(view.parentWindowId, entry)
   titlePopupsByWebContents.set(view.popupWebContentsId, entry)
@@ -876,117 +811,14 @@ const DOWNLOADS_POPUP_WIDTH = 405
 const DOWNLOADS_POPUP_MAX_HEIGHT_PX = 396
 const DOWNLOADS_POPUP_MAX_HEIGHT_RATIO = 0.6
 
-/** Instance-picker popup geometry. The picker has two modes (compact
- *  list of rows + expanded settings UI) and historically had a stack of
- *  per-mode pixel constants — wide, min height, max height, ratio —
- *  layered to keep the popup inside the host window. That worked but
- *  meant a different math path for every site that needed bounds
- *  (open, mode-flip morph, parent-resize refit, request-size handler).
- *  The four sites drifted from each other (the morph forgot the title-
- *  bar inset; the resize handler used a different ratio than the open
- *  path) and the popup would visibly slip past the title chrome.
- *
- *  Replaced with a single `computePickerBounds()` function and three
- *  inset constants. The function is the only place that decides where
- *  the picker sits inside the host window — every call site (open,
- *  morph target, parent-resize refit, request-size clamp) reads from it
- *  so they can't drift.
- *
- *  - `PICKER_SIDE_GUTTER` / `PICKER_BOTTOM_GUTTER`: breathing room
- *    between the popup card and the host window's right + bottom
- *    edges. Top edge is handled by `TITLEBAR_HEIGHT`.
- *  - `PICKER_COMPACT_MAX_WIDTH`: the natural cap on the compact
- *    single-column list. On wide monitors the row list would otherwise
- *    stretch to absurd line lengths; capping at 720px keeps it
- *    legible. Expanded mode ignores this and fills the available
- *    inner width. */
-const PICKER_SIDE_GUTTER = 24
-const PICKER_BOTTOM_GUTTER = 24
-/** Extra breathing room between the title bar and the popup card.
- *  `TITLEBAR_HEIGHT` is the title-bar's measured height; without this
- *  gutter the popup kisses the chrome and reads as glued-on. */
-const PICKER_TOP_GUTTER = 8
-const PICKER_COMPACT_MAX_WIDTH = 720
-/** Expanded mode width ceiling. The settings UI inside the right pane
- *  is form-shaped — inputs at full width just look stretched, not
- *  more useful. Cap at 960px so on big screens the box sits centred
- *  with side gutters and the form fields read at a comfortable line
- *  length. */
-const PICKER_EXPANDED_MAX_WIDTH = 960
-/** Compact mode height ceiling as a fraction of the host window's
- *  content height. The natural-height signal from the renderer wins
- *  when it's smaller (typical 2-3 row case). On a tall window with
- *  many installs we'd otherwise grow the tray to fill the screen —
- *  cap at 60% so it reads as a "glance" affordance instead of a
- *  takeover. */
-const PICKER_COMPACT_MAX_HEIGHT_RATIO = 0.6
-
-interface PickerBounds {
-  x: number
-  y: number
-  width: number
-  height: number
-}
-
-/**
- * Single source of truth for picker popup bounds.
- *
- * Every site that needs to place the picker (open, mode-flip morph,
- * parent-resize refit, renderer-driven natural-height request) calls
- * this — so the popup can't end up at one set of bounds at open and a
- * different set after a resize.
- *
- * Geometry:
- *  - Top edge always sits at `TITLEBAR_HEIGHT` so the popup never
- *    paints over the host's title chrome.
- *  - Side gutters keep the card from kissing the host window's edges.
- *  - Compact mode caps at `PICKER_COMPACT_MAX_WIDTH` so the row list
- *    doesn't stretch into illegible line lengths on wide monitors; the
- *    renderer's natural-height request decides compact height (passed
- *    in as `naturalHeight`).
- *  - Expanded mode fills the full inner area (max width minus gutters,
- *    height from title bar to bottom gutter). `naturalHeight` is
- *    ignored — the per-install settings UI fills whatever it gets.
- *
- * The popup is horizontally centred on the host window's content. In
- * compact mode (where height < innerHeight) the popup is vertically
- * pinned to the top inset so it reads as a "tray under the title bar";
- * expanded mode fills top-to-bottom so vertical centring doesn't
- * apply.
- */
-function computePickerBounds(
-  parent: BrowserWindow,
-  mode: 'compact' | 'expanded',
-  naturalHeight?: number | null,
-): PickerBounds {
-  const content = parent.getContentBounds()
-  const innerTop = TITLEBAR_HEIGHT + PICKER_TOP_GUTTER
-  const innerHeight = Math.max(0, content.height - innerTop - PICKER_BOTTOM_GUTTER)
-  const innerWidth = Math.max(0, content.width - 2 * PICKER_SIDE_GUTTER)
-
-  let width: number
-  let height: number
-  if (mode === 'expanded') {
-    width = Math.min(PICKER_EXPANDED_MAX_WIDTH, innerWidth)
-    height = innerHeight
-  } else {
-    width = Math.min(PICKER_COMPACT_MAX_WIDTH, innerWidth)
-    const compactCeiling = Math.min(
-      innerHeight,
-      Math.round(content.height * PICKER_COMPACT_MAX_HEIGHT_RATIO),
-    )
-    const requested = typeof naturalHeight === 'number' && naturalHeight > 0
-      ? Math.ceil(naturalHeight)
-      : compactCeiling
-    height = Math.max(1, Math.min(requested, compactCeiling))
-  }
-  const x = Math.max(PICKER_SIDE_GUTTER, Math.round((content.width - width) / 2))
-  // Compact: pin to top inset (popup is a tray under the title bar).
-  // Expanded: same — height already fills the inner area so the y value
-  // collapses to innerTop regardless of the vertical-centre math.
-  const y = innerTop
-  return { x, y, width, height }
-}
+/** Instance-picker popup sizing — wider than downloads to fit the
+ *  two-pane (recents list + selected-detail) layout from the Figma.
+ *  Renderer measures + asks for natural height via `requestSize`, same
+ *  pattern as downloads, clamped by the same window-ratio safety net. */
+const INSTANCE_PICKER_POPUP_WIDTH = 640
+const INSTANCE_PICKER_POPUP_MIN_HEIGHT_PX = 450
+const INSTANCE_PICKER_POPUP_MAX_HEIGHT_PX = 600
+const INSTANCE_PICKER_POPUP_MAX_HEIGHT_RATIO = 0.7
 
 /** Global-settings popup sizing — mirrors the picker so the chrome
  *  reads as a sibling card. Renderer measures its own natural height
@@ -1039,29 +871,6 @@ function refitPopupForParent(entry: TitlePopupEntry): void {
 
   const cur = entry.view.popup.getBounds()
   const parent = entry.view.parentWindow
-
-  // Instance picker has its own geometry function (compact + expanded
-  // modes both clamped to the inner area below the title bar). Route
-  // through it so a parent resize lands on the same bounds the open /
-  // mode-flip paths would compute — single source of truth.
-  if (entry.kind === 'instance-picker') {
-    const target = computePickerBounds(
-      parent,
-      entry.pickerMode,
-      entry.lastReportedNaturalHeight,
-    )
-    if (
-      target.x === cur.x
-      && target.y === cur.y
-      && target.width === cur.width
-      && target.height === cur.height
-    ) {
-      return
-    }
-    entry.view.popup.setBounds(target)
-    return
-  }
-
   const contentHeight = parent.getContentBounds().height
 
   let height = cur.height
@@ -1071,6 +880,12 @@ function refitPopupForParent(entry: TitlePopupEntry): void {
       Math.round(contentHeight * DOWNLOADS_POPUP_MAX_HEIGHT_RATIO),
     )
     height = Math.max(1, Math.min(cur.height, ceiling))
+  } else if (entry.kind === 'instance-picker') {
+    const ceiling = Math.min(
+      INSTANCE_PICKER_POPUP_MAX_HEIGHT_PX,
+      Math.round(contentHeight * INSTANCE_PICKER_POPUP_MAX_HEIGHT_RATIO),
+    )
+    height = Math.max(INSTANCE_PICKER_POPUP_MIN_HEIGHT_PX, Math.min(cur.height, ceiling))
   } else if (entry.kind === 'global-settings') {
     const ceiling = Math.min(
       GLOBAL_SETTINGS_POPUP_MAX_HEIGHT_PX,
@@ -1079,13 +894,13 @@ function refitPopupForParent(entry: TitlePopupEntry): void {
     height = Math.max(1, Math.min(cur.height, ceiling))
   }
 
-  // Re-anchor the centred-card kinds (global-settings) on the new
-  // window centre so they don't drift off-axis after a resize. Other
-  // kinds anchor at their trigger button — that's already in title-
-  // bar-local coords (which don't move on resize) so a fresh
+  // Re-anchor the centred-card kinds (picker, global-settings) on the
+  // new window centre so they don't drift off-axis after a resize.
+  // Other kinds anchor at their trigger button — that's already in
+  // title-bar-local coords (which don't move on resize) so a fresh
   // `clampPopupX` of the existing X is sufficient.
   let x: number
-  if (entry.kind === 'global-settings') {
+  if (entry.kind === 'instance-picker' || entry.kind === 'global-settings') {
     const contentWidth = parent.getContentBounds().width
     x = Math.max(0, Math.round((contentWidth - cur.width) / 2))
   } else {
@@ -1137,15 +952,13 @@ function openTitlePopup(opts: OpenTitlePopupOpts): void {
   // coordinates, which is exactly what `WebContentsView.setBounds`
   // expects.
   const rawX = Math.round(Math.max(0, opts.anchor.x))
-  let y = Math.round(Math.max(0, opts.anchor.y))
+  const y = Math.round(Math.max(0, opts.anchor.y))
 
   let width: number
   let height: number
-  let x: number
   if (opts.kind === 'menu') {
     width = POPUP_WIDTH
     height = computePopupHeight(opts.items)
-    x = clampPopupX(rawX, width, opts.parent)
   } else if (opts.kind === 'downloads') {
     width = DOWNLOADS_POPUP_WIDTH
     const contentHeight = opts.parent.getContentBounds().height
@@ -1160,33 +973,49 @@ function openTitlePopup(opts: OpenTitlePopupOpts): void {
       DOWNLOADS_POPUP_MAX_HEIGHT_PX,
       Math.round(contentHeight * DOWNLOADS_POPUP_MAX_HEIGHT_RATIO),
     )
-    x = clampPopupX(rawX, width, opts.parent)
   } else if (opts.kind === 'instance-picker') {
-    // instance-picker geometry is delegated to `computePickerBounds`
-    // — single source of truth shared with the mode-flip morph, the
-    // parent-resize refit, and the renderer's natural-height request
-    // handler so all four paths produce consistent bounds. The initial
-    // open passes `null` for naturalHeight; the renderer measures once
-    // it mounts and pushes the real height via
-    // `comfy-titlepopup:request-size`, which stores it on the entry
-    // and re-applies bounds. Geometry function also owns the title-bar
-    // inset, so the popup never paints over the title chrome.
-    const bounds = computePickerBounds(opts.parent, entry.pickerMode, null)
-    width = bounds.width
-    height = bounds.height
-    x = bounds.x
-    y = bounds.y
+    // instance-picker — fixed-width card sized to fit the two-pane
+    // layout. Open at the ceiling cap (same downloads-style
+    // renderer-driven sizing — picker measures and asks for its
+    // natural height via `requestSize`, main clamps back into the
+    // band).
+    width = INSTANCE_PICKER_POPUP_WIDTH
+    const contentHeight = opts.parent.getContentBounds().height
+    const ceiling = Math.min(
+      INSTANCE_PICKER_POPUP_MAX_HEIGHT_PX,
+      Math.round(contentHeight * INSTANCE_PICKER_POPUP_MAX_HEIGHT_RATIO),
+    )
+    // Floor at the picker's minimum so the two-pane layout never
+    // collapses below a usable size on tiny windows. If the host is
+    // genuinely smaller than the floor, the popup still overflows the
+    // ratio cap — that's preferable to a sliver-sized picker.
+    height = Math.max(INSTANCE_PICKER_POPUP_MIN_HEIGHT_PX, ceiling)
   } else {
-    // global-settings — centred-card layout, same horizontal rule as
-    // the legacy picker had (centre on host content area).
+    // global-settings — same centred-card sizing as the picker.
     width = GLOBAL_SETTINGS_POPUP_WIDTH
     const contentHeight = opts.parent.getContentBounds().height
     height = Math.min(
       GLOBAL_SETTINGS_POPUP_MAX_HEIGHT_PX,
       Math.round(contentHeight * GLOBAL_SETTINGS_POPUP_MAX_HEIGHT_RATIO),
     )
+  }
+
+  // Horizontal position: most kinds anchor at the trigger button and
+  // shift-left to fit the window. The centred-card kinds (picker,
+  // global-settings) centre on the host window because their trigger
+  // (the centre pill / hamburger Settings entry) is optically centred
+  // — anchoring at the pill's left edge would make the wide card hang
+  // off to the right.
+  let x: number
+  if (opts.kind === 'instance-picker' || opts.kind === 'global-settings') {
     const contentWidth = opts.parent.getContentBounds().width
     x = Math.max(0, Math.round((contentWidth - width) / 2))
+  } else {
+    // Other kinds: shift left until the popup fits, with an 8px gutter
+    // from the edge. Vertical clamping is unnecessary because `y` is
+    // always under the title bar and the height stays inside the
+    // window.
+    x = clampPopupX(rawX, width, opts.parent)
   }
 
   // Update bounds while still hidden — the popup is flipped visible
@@ -1390,83 +1219,6 @@ function openGlobalSettingsForHost(
       theme: parentEntry.lastTheme,
       titleBarSender,
     })
-  })()
-}
-
-/**
- * Open the instance-picker popup parented to the given host window.
- * Shared by the title-bar centre-pill click and the panel-side
- * "Manage" entry-point (chooser-card kebab → `useInstallContextMenu`'s
- * `onManage`). Both call sites land on the same WebContentsView popup,
- * so the picker's open/close lifecycle (including the
- * `comfy-titlebar:menu-opened` / `menu-closed` broadcasts that drive
- * the pill's pressed-state) is identical regardless of which surface
- * initiated the open.
- *
- * `anchor` is title-bar-local pixels. For the panel-initiated path the
- * caller passes `{ x: 0, y: TITLEBAR_HEIGHT }` (or any value — main
- * horizontally centres the picker on the host window regardless of x,
- * see the `'instance-picker'` branch in `openTitlePopup`).
- *
- * `selectedInstallationId` seeds the picker's right-pane detail to a
- * specific install — used by the panel "Manage" path so the user lands
- * on the card they clicked. The title-bar pill leaves this unset (it
- * defaults to the host's active install inside the snapshot builder).
- */
-function openInstancePickerForHost(
-  parentEntry: ComfyWindowEntry,
-  parentEntryId: number,
-  bindings: TitlePopupHostBindings,
-  titleBarSender: Electron.WebContents,
-  anchor: { x: number; y: number },
-  selectedInstallationId?: string | null,
-  initialMode?: 'compact' | 'expanded',
-  initialTab?: string | null,
-  autoAction?: string | null,
-): void {
-  if (parentEntry.window.isDestroyed()) return
-  const installs: InstancePickerInstall[] = cachedInstallsForPicker.slice()
-  const runningInstallationIds = bindings.getRunningInstallationIds()
-  const initialSelectedId = selectedInstallationId ?? parentEntry.installationId
-  const popupEntry = titlePopupsByParent.get(parentEntry.window.id)
-  if (popupEntry) {
-    popupEntry.pickerSelectedInstallationId = initialSelectedId
-    // Seed the mode + auto-action on the entry so the next snapshot
-    // broadcast picks them up. The chooser-card kebab path passes
-    // `'expanded'` + a specific tab; the title-bar pill path leaves
-    // these unset and the popup opens compact.
-    popupEntry.pickerMode = initialMode ?? 'compact'
-    popupEntry.pickerInitialTab = initialTab ?? null
-    popupEntry.pickerAutoAction = autoAction ?? null
-  }
-  const snapshot = buildInstancePickerSnapshot({
-    installs,
-    hostInstallationId: parentEntry.installationId,
-    runningInstallationIds,
-    selectedInstallationId: initialSelectedId,
-    selectedSettings: null,
-    selectedSnapshots: null,
-    mode: initialMode ?? 'compact',
-    initialTab: initialTab ?? null,
-    autoAction: autoAction ?? null,
-  })
-  openTitlePopup({
-    parent: parentEntry.window,
-    parentEntryId,
-    kind: 'instance-picker',
-    snapshot,
-    anchor,
-    theme: parentEntry.lastTheme,
-    titleBarSender,
-  })
-
-  // Kick the data refresh asynchronously. When it lands,
-  // `broadcastInstancePickerSnapshotToTitlePopups` pushes the updated
-  // snapshot to the open picker — same channel that handles live
-  // updates while the picker is open.
-  void (async () => {
-    await refreshCachedInstallsForPicker()
-    await broadcastInstancePickerSnapshotToTitlePopups(bindings)
   })()
 }
 
@@ -1853,40 +1605,27 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
       if (typeof requested !== 'number' || !Number.isFinite(requested)) return
       const parent = comfyWindows.get(entry.parentEntryId)?.window
       if (!parent || parent.isDestroyed()) return
-
-      // Instance picker routes through `computePickerBounds` — same
-      // function used at open, on parent resize, and on mode flip.
-      // We also stash the reported height on the entry so a subsequent
-      // parent resize can re-derive bounds without needing the renderer
-      // to re-measure. Skipped in expanded mode (the settings UI fills
-      // available height; we don't want a measured natural height to
-      // override the full-fit layout).
-      if (entry.kind === 'instance-picker') {
-        entry.lastReportedNaturalHeight = Math.ceil(requested)
-        if (entry.pickerMode === 'expanded') return
-        const target = computePickerBounds(parent, 'compact', entry.lastReportedNaturalHeight)
-        const cur = entry.view.popup.getBounds()
-        if (
-          target.x === cur.x
-          && target.y === cur.y
-          && target.width === cur.width
-          && target.height === cur.height
-        ) return
-        entry.view.popup.setBounds(target)
-        return
-      }
-
       const contentHeight = parent.getContentBounds().height
       const ceiling = entry.kind === 'downloads'
         ? Math.min(
           DOWNLOADS_POPUP_MAX_HEIGHT_PX,
           Math.round(contentHeight * DOWNLOADS_POPUP_MAX_HEIGHT_RATIO),
         )
-        : Math.min(
-          GLOBAL_SETTINGS_POPUP_MAX_HEIGHT_PX,
-          Math.round(contentHeight * GLOBAL_SETTINGS_POPUP_MAX_HEIGHT_RATIO),
-        )
-      const next = Math.max(1, Math.min(ceiling, Math.ceil(requested)))
+        : entry.kind === 'instance-picker'
+          ? Math.min(
+            INSTANCE_PICKER_POPUP_MAX_HEIGHT_PX,
+            Math.round(contentHeight * INSTANCE_PICKER_POPUP_MAX_HEIGHT_RATIO),
+          )
+          : Math.min(
+            GLOBAL_SETTINGS_POPUP_MAX_HEIGHT_PX,
+            Math.round(contentHeight * GLOBAL_SETTINGS_POPUP_MAX_HEIGHT_RATIO),
+          )
+      // Picker has a per-kind minimum so the two-pane layout never
+      // shrinks below a usable size when the right-pane accordions are
+      // all collapsed. Other kinds keep the 1px floor (renderer-driven
+      // fit-to-content with no minimum aspect to defend).
+      const floor = entry.kind === 'instance-picker' ? INSTANCE_PICKER_POPUP_MIN_HEIGHT_PX : 1
+      const next = Math.max(floor, Math.min(ceiling, Math.ceil(requested)))
       const cur = entry.view.popup.getBounds()
       if (cur.height === next) return
       entry.view.popup.setBounds({ x: cur.x, y: cur.y, width: cur.width, height: next })
@@ -1930,9 +1669,12 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
     },
   )
 
-  // Popup → host deep-link to per-install settings (instance picker) or
-  // global settings, depending on `tab`. The popup dismisses first; the
-  // renderer's deep-link router routes `tab` to the correct surface.
+  // Popup → host deep-link to the unified Settings modal at a given
+  // tab. Mirrors the `click-install-update-pill` flow: bring the panel
+  // view forward (lazily constructing it if needed), then send the
+  // `panel-trigger-overlay 'open-settings'` IPC after the renderer has
+  // finished loading so the listener is registered. The popup itself
+  // is dismissed first so the overlay surface comes up unobstructed.
   ipcMain.on(
     'comfy-titlepopup:open-settings-tab',
     (event, payload: { tab?: unknown }) => {
@@ -1948,6 +1690,7 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
       const parentEntry = comfyWindows.get(popupEntry.parentEntryId)
       if (!parentEntry) return
       hideTitlePopup(popupEntry, { releaseFocusToParent: false })
+      bindings.setActivePanel(popupEntry.parentEntryId, 'settings')
       const panelView = parentEntry.panelView
       if (!panelView) return
       bindings.sendToPanelDeferred(panelView, 'panel-trigger-overlay', {
@@ -1958,12 +1701,14 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
     },
   )
 
-  // Popup → host deep-link to the standalone "View All Downloads" modal.
-  // Flips the host into the `'downloads-v2'` overlay panel mode, which
-  // `layoutViews` recognises as a transparent panel-forward state. The
-  // renderer mounts `DownloadsModal` by watching `activePanel === 'downloads-v2'`.
-  // No deep-link IPC needed — the mode swap IS the open signal — and dismiss
-  // routes through `closeCurrentPanel()` which returns the body to `'comfy'`.
+  // Popup → host deep-link to the standalone "View All Downloads"
+  // modal. Flips the host into the `'downloads-v2'` overlay panel mode,
+  // which `layoutViews` recognises as a transparent panel-forward state
+  // (sibling to `'settings-v2'`). The renderer mounts `DownloadsModal`
+  // by watching `activePanel === 'downloads-v2'`. No deep-link IPC
+  // needed — the mode swap IS the open signal — and dismiss routes
+  // through the existing `closeCurrentPanel()` which returns the body
+  // to `'comfy'`.
   ipcMain.on('comfy-titlepopup:open-downloads-modal', (event) => {
     const popupEntry = titlePopupsByWebContents.get(event.sender.id)
     if (!popupEntry) return
@@ -2080,73 +1825,46 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
       // and kept fresh by the `installationEvents.on('changed')`
       // subscription, so on the warm path this list is correct. On a
       // very cold first click it may be empty; the background refresh
-      // inside `openInstancePickerForHost` repopulates the popup within
-      // a tick via the `installs-changed` push.
-      openInstancePickerForHost(
-        entry,
-        windowKey,
-        bindings,
-        entry.titleBarView.webContents,
-        { x, y },
-      )
-    },
-  )
+      // below repopulates the popup within a tick via the
+      // `installs-changed` push — exact same channel that handles live
+      // updates while the picker is open.
+      const installs: InstancePickerInstall[] = cachedInstallsForPicker.slice()
+      const runningInstallationIds = bindings.getRunningInstallationIds()
+      const initialSelectedId = entry.installationId
+      const popupEntry = titlePopupsByParent.get(entry.window.id)
+      if (popupEntry) popupEntry.pickerSelectedInstallationId = initialSelectedId
+      // Right-pane Settings + Snapshots arrive via the same background
+      // refresh — `selectedSettings: null` / `selectedSnapshots: null`
+      // make the accordion content render as empty (existing prop
+      // handling), then the post-open broadcast fills them in.
+      const snapshot = buildInstancePickerSnapshot({
+        installs,
+        hostInstallationId: entry.installationId,
+        runningInstallationIds,
+        selectedInstallationId: initialSelectedId,
+        selectedSettings: null,
+        selectedSnapshots: null,
+      })
+      openTitlePopup({
+        parent: entry.window,
+        parentEntryId: windowKey,
+        kind: 'instance-picker',
+        snapshot,
+        anchor: { x, y },
+        theme: entry.lastTheme,
+        titleBarSender: entry.titleBarView.webContents,
+      })
 
-  // Panel renderer → open the instance-picker popup for a specific
-  // install (chooser-card kebab "Manage…"). Routes through the same
-  // WebContentsView popup the title-bar pill uses, so the picker's
-  // open lifecycle (including the `comfy-titlebar:menu-opened`
-  // broadcast that lights the centre pill green) fires identically
-  // regardless of which surface initiated the open.
-  //
-  // `installationId` seeds the picker's right-pane to the install the
-  // user clicked. Omitting it falls back to the host's active install
-  // (matches the pill click behaviour).
-  ipcMain.on(
-    'comfy-window:open-instance-picker-for-install',
-    (
-      event,
-      payload:
-        | {
-            installationId?: unknown
-            mode?: unknown
-            initialTab?: unknown
-            autoAction?: unknown
-          }
-        | undefined,
-    ) => {
-      const win = BrowserWindow.fromWebContents(event.sender)
-      if (!win || win.isDestroyed()) return
-      let parentEntryId: number | undefined
-      let parentEntry: ComfyWindowEntry | undefined
-      for (const [id, e] of comfyWindows) {
-        if (e.window === win) {
-          parentEntryId = id
-          parentEntry = e
-          break
-        }
-      }
-      if (parentEntryId === undefined || !parentEntry) return
-      const requestedId = payload?.installationId
-      const selectedInstallationId =
-        typeof requestedId === 'string' && requestedId.length > 0 ? requestedId : null
-      const mode: 'compact' | 'expanded' =
-        payload?.mode === 'expanded' ? 'expanded' : 'compact'
-      const initialTab =
-        typeof payload?.initialTab === 'string' ? payload.initialTab : null
-      const autoAction =
-        typeof payload?.autoAction === 'string' ? payload.autoAction : null
-      openInstancePickerForHost(
-        parentEntry,
-        parentEntryId,
-        bindings,
-        parentEntry.titleBarView.webContents,
-        { x: 0, y: TITLEBAR_HEIGHT },
-        selectedInstallationId,
-        mode,
-        initialTab,
-        autoAction,
-      )
+      // Kick the data refresh asynchronously. When it lands,
+      // `broadcastInstancePickerSnapshotToTitlePopups` pushes the
+      // updated snapshot to the open picker (and any other open
+      // picker, though there's usually only one). Same channel the
+      // install-registry change broadcast uses, so the picker handles
+      // both initial fill and live updates with one code path.
+      void (async () => {
+        await refreshCachedInstallsForPicker()
+        await broadcastInstancePickerSnapshotToTitlePopups(bindings)
+      })()
     },
   )
 
@@ -2164,96 +1882,6 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
       const nextId = typeof id === 'string' && id.length > 0 ? id : null
       if (popupEntry.pickerSelectedInstallationId === nextId) return
       popupEntry.pickerSelectedInstallationId = nextId
-      await broadcastInstancePickerSnapshotToTitlePopups(bindings)
-    },
-  )
-
-  // Picker → flip between compact and expanded modes. Main animates the
-  // popup bounds (compact card → 95dvw × 95dvh centred), then
-  // rebroadcasts a snapshot so the picker view re-renders the right
-  // pane (identity card → full per-install settings UI).
-  //
-  // Animation: 240ms cubic-bezier(0.32, 0.72, 0, 1) tween via repeated
-  // `popup.setBounds()` at ~60fps. Same curve the global-settings
-  // popup uses for its resize. Reduced-motion users get a snap (the
-  // renderer-side `prefers-reduced-motion` query co-handles the inner
-  // chrome cross-fade).
-  ipcMain.on(
-    'comfy-titlepopup:set-picker-mode',
-    async (
-      event,
-      payload: { mode?: unknown; initialTab?: unknown; autoAction?: unknown },
-    ) => {
-      const popupEntry = titlePopupsByWebContents.get(event.sender.id)
-      if (!popupEntry || popupEntry.kind !== 'instance-picker') return
-      if (popupEntry.view.popup.webContents.isDestroyed()) return
-      const mode: 'compact' | 'expanded' =
-        payload?.mode === 'expanded' ? 'expanded' : 'compact'
-      const initialTab =
-        typeof payload?.initialTab === 'string' ? payload.initialTab : null
-      const autoAction =
-        typeof payload?.autoAction === 'string' ? payload.autoAction : null
-      if (popupEntry.pickerMode === mode) {
-        // No-op flip — still refresh the seeded tab/auto-action so a
-        // second Manage click against the same install can target a
-        // different tab without closing first.
-        popupEntry.pickerInitialTab = initialTab
-        popupEntry.pickerAutoAction = autoAction
-        return
-      }
-      popupEntry.pickerMode = mode
-      popupEntry.pickerInitialTab = initialTab
-      popupEntry.pickerAutoAction = autoAction
-
-      // Target bounds come from the same `computePickerBounds`
-      // function the open / parent-resize / natural-height paths use.
-      // Single source of truth — the morph end-state always matches
-      // what a freshly-opened or freshly-resized picker would land on.
-      const parent = popupEntry.view.parentWindow
-      if (parent.isDestroyed()) return
-      const fromBounds = popupEntry.view.popup.getBounds()
-      const toBounds = computePickerBounds(
-        parent,
-        mode,
-        popupEntry.lastReportedNaturalHeight,
-      )
-      const toX = toBounds.x
-      const toY = toBounds.y
-      const toWidth = toBounds.width
-      const toHeight = toBounds.height
-
-      const fromX = fromBounds.x
-      const fromY = fromBounds.y
-      const fromW = fromBounds.width
-      const fromH = fromBounds.height
-
-      const DURATION_MS = 240
-      const FRAME_MS = 16
-      // cubic-bezier(0.32, 0.72, 0, 1) — approximated via the standard
-      // easeOutCubic curve. The full bezier eval is ~10 lines of code
-      // for a barely-visible refinement; easeOutCubic is the canonical
-      // shorthand and is what existing global-settings resize uses.
-      const easeOutCubic = (t: number): number => 1 - Math.pow(1 - t, 3)
-
-      const start = Date.now()
-      const lerp = (a: number, b: number, t: number): number => a + (b - a) * t
-
-      const tick = (): void => {
-        if (popupEntry.view.popup.webContents.isDestroyed()) return
-        if (popupEntry.view.parentWindow.isDestroyed()) return
-        const elapsed = Date.now() - start
-        const t = Math.min(1, elapsed / DURATION_MS)
-        const e = easeOutCubic(t)
-        popupEntry.view.popup.setBounds({
-          x: Math.round(lerp(fromX, toX, e)),
-          y: Math.round(lerp(fromY, toY, e)),
-          width: Math.round(lerp(fromW, toWidth, e)),
-          height: Math.round(lerp(fromH, toHeight, e)),
-        })
-        if (t < 1) setTimeout(tick, FRAME_MS)
-      }
-      tick()
-
       await broadcastInstancePickerSnapshotToTitlePopups(bindings)
     },
   )
@@ -2367,37 +1995,6 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
   // confirm dialog the source-action opens (Copy / Untrack / Delete
   // each have one) comes up over the host body rather than the open
   // popup.
-  // Picker → forward a `show-progress` request to the parent host's panel
-  // renderer. The popup hides so the panel's ProgressModal is unobstructed;
-  // the panel rebuilds the apiCall closure from actionId/actionData.
-  ipcMain.on(
-    'comfy-titlepopup:forward-show-progress',
-    (event, payload: Record<string, unknown>) => {
-      const popupEntry = titlePopupsByWebContents.get(event.sender.id)
-      if (!popupEntry || popupEntry.kind !== 'instance-picker') return
-      const installationId = payload?.installationId
-      const actionId = payload?.actionId
-      if (typeof installationId !== 'string' || installationId.length === 0) return
-      if (typeof actionId !== 'string' || actionId.length === 0) return
-      const parentEntry = comfyWindows.get(popupEntry.parentEntryId)
-      if (!parentEntry) return
-      hideTitlePopup(popupEntry, { releaseFocusToParent: false })
-      const panelView = parentEntry.panelView
-      if (!panelView || panelView.webContents.isDestroyed()) return
-      bindings.sendToPanelDeferred(panelView, 'panel-trigger-overlay', {
-        kind: 'picker-show-progress',
-        installationId,
-        actionId,
-        actionData: payload?.actionData,
-        title: payload?.title,
-        cancellable: payload?.cancellable,
-        triggersInstanceStart: payload?.triggersInstanceStart,
-        opKind: payload?.opKind,
-        isRestart: payload?.isRestart,
-      })
-    },
-  )
-
   ipcMain.on(
     'comfy-titlepopup:open-install-action',
     (event, payload: { installationId?: unknown; actionId?: unknown }) => {
@@ -2420,19 +2017,26 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
     },
   )
 
-  // Picker → "+ New Install" row. Fires the `NewInstallModal` as a
-  // Tier 3 takeover on the current host, regardless of whether that
-  // host is a chooser or an install-backed window. This matches the
-  // chooser dashboard's "+ New Install" card behaviour — the user
-  // expects to land in the install-creation flow, not in a second
-  // dashboard window.
+  // Picker → "+ New Install" row. Forwards to the host's panel
+  // renderer via the same panel-trigger the file menu's New Install
+  // entry uses on a chooser host. On an install-backed host, the
+  // panel renderer is responsible for routing this to a fresh chooser
+  // window — same UX as `new-window` then New Install.
   ipcMain.on('comfy-titlepopup:open-new-install', (event) => {
     const entry = titlePopupsByWebContents.get(event.sender.id)
     if (!entry) return
     const parentEntry = comfyWindows.get(entry.parentEntryId)
     if (!parentEntry) return
     hideTitlePopup(entry, { releaseFocusToParent: false })
-    bindings.setActivePanel(entry.parentEntryId, 'new-install')
+    // Install-creation flows live on chooser hosts; on an install-
+    // backed host (where the picker actually lives), open a fresh
+    // chooser-host window for it instead. `openChooserHostWindow` is
+    // the same path the file-menu New Window entry uses.
+    if (isChooserHost(parentEntry)) {
+      bindings.setActivePanel(entry.parentEntryId, 'new-install')
+    } else {
+      bindings.openChooserHostWindow()
+    }
   })
 
 

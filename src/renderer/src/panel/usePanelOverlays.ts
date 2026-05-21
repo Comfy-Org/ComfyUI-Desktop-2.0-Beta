@@ -1,4 +1,4 @@
-import { nextTick, ref, type Ref } from 'vue'
+import { nextTick, ref, type ComputedRef, type Ref } from 'vue'
 import type ProgressModal from '../views/ProgressModal.vue'
 import type NewInstallModal from '../views/NewInstallModal.vue'
 import type TrackModal from '../views/TrackModal.vue'
@@ -8,7 +8,7 @@ import type FirstUseTakeover from '../views/FirstUseTakeover.vue'
 import { useOverlay, type FlowComponent } from '../composables/useOverlay'
 import { useProgressStore } from '../stores/progressStore'
 import { emitTelemetryAction } from '../lib/telemetry'
-import type { ActionResult, ShowProgressOpts } from '../types/ipc'
+import type { ActionResult, Installation, ShowProgressOpts } from '../types/ipc'
 
 // Body modes the panel WebContentsView can render. Mirrors `BodyMode`
 // in main; `'comfy'` is admitted so the renderer can reflect main's
@@ -17,6 +17,8 @@ export type PanelKey =
   | 'comfy'
   | 'comfy-lifecycle'
   | 'chooser'
+  | 'settings'
+  | 'settings-v2'
   | 'downloads-v2'
   | 'new-install'
   | 'track'
@@ -27,6 +29,8 @@ const VALID_PANELS: ReadonlySet<PanelKey> = new Set([
   'comfy',
   'comfy-lifecycle',
   'chooser',
+  'settings',
+  'settings-v2',
   'downloads-v2',
   'new-install',
   'track',
@@ -84,6 +88,7 @@ export interface FirstUseChainHooks {
 
 export interface UsePanelOverlaysOpts {
   installationId: string
+  installation: ComputedRef<Installation | null>
   /** Hand-off subscription used by `handleShowProgress` when the
    *  in-flight op will end in a freshly-launched comfy window on an
    *  install-less host. Optional: install-backed hosts pass nothing. */
@@ -134,6 +139,7 @@ export interface UsePanelOverlaysApi {
 export function usePanelOverlays(opts: UsePanelOverlaysOpts): UsePanelOverlaysApi {
   const {
     installationId,
+    installation,
     progressRef,
     newInstallRef,
     trackRef,
@@ -154,7 +160,9 @@ export function usePanelOverlays(opts: UsePanelOverlaysOpts): UsePanelOverlaysAp
   })()
 
   const activePanel = ref<PanelKey>(
-    FLOW_PANELS.has(initialPanel) ? defaultBodyPanel() : initialPanel,
+    FLOW_PANELS.has(initialPanel) || initialPanel === 'settings' || initialPanel === 'settings-v2'
+      ? defaultBodyPanel()
+      : initialPanel,
   )
 
   /**
@@ -339,7 +347,7 @@ export function usePanelOverlays(opts: UsePanelOverlaysOpts): UsePanelOverlaysAp
     const cur = currentOverlay.value
     const isFlowTakeover =
       cur?.kind === 'takeover' && (FLOW_PANELS as ReadonlySet<string>).has(cur.component)
-    if (isFlowTakeover) {
+    if (cur?.kind === 'settings' || isFlowTakeover) {
       window.api.closeCurrentPanel()
     }
     currentOverlay.value = null
@@ -347,14 +355,50 @@ export function usePanelOverlays(opts: UsePanelOverlaysOpts): UsePanelOverlaysAp
 
   /**
    * Switch the underlying panel body. Flow keys divert into the Tier 3
-   * takeover overlay slot instead of swapping the body. Per-install settings
-   * is no longer a panel key — it's reached via `openInstancePicker(mode:
-   * 'expanded')`. Global Settings is reached via `openGlobalSettings()`.
+   * takeover overlay slot instead of swapping the body. The `'settings'`
+   * key splits two ways: install-less hosts open the Global Settings
+   * title-popup via `window.api.openGlobalSettings()`; install-backed
+   * hosts open `ManageInstallModal` (BaseModal-backed) via the Tier 1
+   * overlay slot. Deeper tab targets come through the
+   * `panel-trigger-overlay` IPC and bypass `switchPanel`.
    */
   async function switchPanel(panel: PanelKey, entrypoint: string = 'titlebar'): Promise<void> {
     const fromView = activePanel.value
     if (FLOW_PANELS.has(panel)) {
       await openFlowTakeover(panel as FlowComponent, entrypoint)
+      return
+    }
+    if (panel === 'settings') {
+      const inst = installation.value
+      const initialTab = inst ? 'comfy' : 'global'
+      // Install-less (chooser host) → open the Global Settings popup
+      // via main. Install-backed → open `ManageInstallModal` through the
+      // overlay slot (renders `DetailModal` in `embedded` mode inside
+      // `BaseModal`). The legacy `initialTab: 'comfy'` value on the
+      // payload is kept for backward compatibility with deeplinks but
+      // the modal ignores it — `initialDetailTab` is the active field.
+      if (initialTab === 'global') {
+        window.api.openGlobalSettings()
+        emitTelemetryAction('desktop2.view.opened', { view: panel, from_view: fromView })
+        emitTelemetryAction('desktop2.settings.opened', {
+          initial_tab: initialTab,
+          entrypoint,
+          has_installation: !!inst,
+        })
+        return
+      }
+      const ok = await openOverlay({
+        kind: 'settings',
+        installation: inst,
+        initialTab,
+      })
+      if (!ok) return
+      emitTelemetryAction('desktop2.view.opened', { view: panel, from_view: fromView })
+      emitTelemetryAction('desktop2.settings.opened', {
+        initial_tab: initialTab,
+        entrypoint,
+        has_installation: !!inst,
+      })
       return
     }
     // No-op guard so a redundant `panel-switch` IPC (e.g. main re-

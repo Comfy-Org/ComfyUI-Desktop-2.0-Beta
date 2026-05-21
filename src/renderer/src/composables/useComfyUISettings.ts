@@ -440,8 +440,6 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
         // op to the brand caption pipeline, mirroring its
         // triggersInstanceStart flag.
         opKind: isRestart ? 'launch' : progressOpKindForActionId(mutableAction.id),
-        actionId: mutableAction.id,
-        actionData: mutableAction.data,
       })
       return
     }

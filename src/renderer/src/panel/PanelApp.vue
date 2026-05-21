@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import ManageInstallModal from '../views/ManageInstallModal.vue'
+import ComfyUISettingsPanel from '../views/ComfyUISettingsPanel.vue'
 import ProgressModal from '../views/ProgressModal.vue'
 import ModalDialog from '../components/ModalDialog.vue'
 import DownloadsModal from '../components/DownloadsModal.vue'
@@ -118,6 +120,7 @@ const {
 
 overlays = usePanelOverlays({
   installationId,
+  installation,
   progressRef,
   newInstallRef,
   trackRef,
@@ -166,30 +169,32 @@ let unsubLocale: (() => void) | null = null
 let unsubCloseRequest: (() => void) | null = null
 let unsubAppUpdatePromptRestart: (() => void) | null = null
 let unsubAppUpdateUserActionFailed: (() => void) | null = null
-type PickerTab = 'config' | 'status' | 'update' | 'snapshots'
-const PICKER_TABS: ReadonlySet<PickerTab> = new Set(['config', 'status', 'update', 'snapshots'])
-const isPickerTab = (t: string | undefined): t is PickerTab =>
-  t !== undefined && PICKER_TABS.has(t as PickerTab)
+let unsubRequestCloseDrawer: (() => void) | null = null
 
-// All Manage routes go through `window.api.openInstancePicker` — the picker's
-// expanded mode is the single per-install settings surface. Delete keeps its
-// fast path (confirm + show-progress) so the user never sees the picker for
-// that action; everything else opens the picker.
+// Drives the title-bar icon close path's animated dismiss (see
+// `onRequestCloseDrawer` below).
+const comfyUISettingsPanelRef = ref<{ requestClose: () => void } | null>(null)
+
+// Picker More-menu dispatch lives on the panel because the install-level
+// actions need `window.api.runAction` (only exposed in the panel
+// renderer) and Delete routes through the panel's overlay slot via
+// `handleShowProgress` (fast path) with a ManageInstallModal autoAction
+// fallback. `useInstallContextMenu` is the single source of truth for
+// these items — same dispatch the dashboard kebab uses.
 const { triggerAction: triggerInstallAction } = useInstallContextMenu({
   onManage: (inst, manageOpts) => {
-    const autoAction = manageOpts?.autoAction ?? null
-    const initialTab = manageOpts?.initialTab
-    if (initialTab === undefined && autoAction === null) {
-      window.api.openInstancePicker({ installationId: inst.id })
-      return
-    }
-    window.api.openInstancePicker({
-      installationId: inst.id,
-      mode: 'expanded',
-      initialTab: isPickerTab(initialTab) ? initialTab : 'config',
-      autoAction,
+    void openOverlay({
+      kind: 'settings',
+      installation: inst,
+      initialTab: 'comfy',
+      initialDetailTab: manageOpts?.initialTab ?? 'status',
+      autoAction: manageOpts?.autoAction ?? null,
+      noSidebar: true,
     })
   },
+  // Fast-path for Delete: skips the ManageInstallModal flash and routes
+  // straight through the same handleShowProgress used by every other
+  // ProgressModal entry point.
   onShowProgress: (showOpts) => handleShowProgress(showOpts),
 })
 
@@ -221,7 +226,6 @@ useDeepLinkRouter({
     // `runAction` IPC or an `onManage` overlay open.
     await triggerInstallAction(actionId, inst)
   },
-  showProgressFromPicker: (showOpts) => handleShowProgress(showOpts),
 })
 
 async function loadLocale(): Promise<void> {
@@ -235,20 +239,49 @@ async function loadLocale(): Promise<void> {
   locale.value = 'en'
 }
 
-// `'downloads-v2'` brings the panel forward in an overlay mode; the renderer
-// mounts `DownloadsModal` and dismiss routes back through `closeCurrentPanel`
+function handleUpdateInstallation(inst: Installation): void {
+  // Optimistic local update for snappier UX while the broadcast-driven
+  // refetch is in flight (e.g. rename via the editable title).
+  const idx = installationStore.installations.findIndex((i) => i.id === inst.id)
+  if (idx >= 0) installationStore.installations.splice(idx, 1, inst)
+}
+
+function handleNavigateList(): void {
+  // The install was removed from the list (e.g. deleted, migrated). The
+  // ComfyUI window that hosts this panel no longer has an install backing
+  // it, so ask main to close the parent window. Falls back to the
+  // missing-install placeholder if the close fails for any reason
+  // (e.g. window already torn down) — the onInstallationsChanged broadcast
+  // wired into installationStore has already cleared the local record.
+  if (installationId) {
+    void window.api.closeComfyWindow(installationId)
+  }
+}
+
+// Drawer's `@after-leave` fires this, so the panel is already gone
+// visually by the time main flips `activePanel`.
+function closeSettingsV2(): void {
+  window.api.closeCurrentPanel()
+}
+
+// `'downloads-v2'` is the same overlay-mode trick the Settings drawer
+// uses — main brings the panel forward, the renderer mounts the
+// `DownloadsModal`, and dismiss routes back through `closeCurrentPanel`
 // so the body returns to comfy/lifecycle without leaving stale state.
 function closeDownloadsV2(): void {
   window.api.closeCurrentPanel()
 }
 
 // Toggles transparency rules in the non-scoped <style> block so the
-// live ComfyUI canvas composites through while the downloads-v2 overlay
-// panel is open.
+// live ComfyUI canvas composites through while either overlay-mode
+// panel is open (settings drawer or downloads modal).
 watch(
   activePanel,
   (next) => {
-    document.body.classList.toggle('panel-overlay-mode', next === 'downloads-v2')
+    document.body.classList.toggle(
+      'panel-overlay-mode',
+      next === 'settings-v2' || next === 'downloads-v2',
+    )
   },
   { immediate: true },
 )
@@ -321,7 +354,13 @@ onMounted(async () => {
     })
   })
 
-// The file-menu "Skip Onboarding" IPC subscription lives in
+  // Title-bar close → drawer's local dismiss path (animated). Skipped
+  // when the ref is null because the drawer is already gone.
+  unsubRequestCloseDrawer = window.api.onRequestCloseDrawer(() => {
+    comfyUISettingsPanelRef.value?.requestClose()
+  })
+
+  // The file-menu "Skip Onboarding" IPC subscription lives in
   // useFirstUseChain so the chain owns its own input surface; no
   // duplicate listener here.
 
@@ -347,10 +386,10 @@ onMounted(async () => {
       }),
     ])
 
-    // If the URL-driven initial panel mounts as a flow wizard takeover,
-    // kick it open now — script-setup couldn't because the template
-    // hadn't rendered yet.
-    if (isFlowPanel(initialPanel)) {
+    // If the URL-driven initial panel mounts as an overlay (flow wizard
+    // or unified Settings modal), kick that open now — script-setup
+    // couldn't because the template hadn't rendered yet.
+    if (isFlowPanel(initialPanel) || initialPanel === 'settings') {
       void switchPanel(initialPanel, 'url')
     }
 
@@ -383,6 +422,7 @@ onUnmounted(() => {
   unsubCloseRequest?.()
   unsubAppUpdatePromptRestart?.()
   unsubAppUpdateUserActionFailed?.()
+  unsubRequestCloseDrawer?.()
   // Strip the overlay-mode class so HMR / view reload / host teardown
   // while the drawer is open doesn't leak transparency past unmount.
   document.body.classList.remove('panel-overlay-mode')
@@ -427,11 +467,34 @@ onUnmounted(() => {
          pill click pops a `useModal.confirm` modal (issue #488) that
          lives in the global ModalDialog mount below, not in the
          overlay slot. -->
+    <!-- Tier 1 per-install management modal. Mounted with `installation`
+         carried by the overlay payload (chooser-card Manage uses the
+         card's install, install-pill Manage uses the host's install).
+         Install-less hosts never reach here — `switchPanel`'s 'settings'
+         arm short-circuits to `window.api.openGlobalSettings()` before
+         the overlay is opened, so `installation` is always non-null in
+         practice. The body underneath stays on chooser / comfy-lifecycle
+         so dismissing returns there.
+
+         Maps the legacy `initialDetailTab` payload field to
+         ManageInstallModal's `initialTab` prop. Tab values:
+         'status' | 'update' | 'snapshots' | 'settings' (DetailModal's
+         tab keys). -->
+    <ManageInstallModal
+      v-if="currentOverlay?.kind === 'settings'"
+      :installation="currentOverlay.installation"
+      :initial-tab="(currentOverlay.initialDetailTab as 'status' | 'update' | 'snapshots' | 'settings' | undefined) ?? 'status'"
+      :auto-action="currentOverlay.autoAction"
+      @close="dismissTakeoverDirect"
+      @show-progress="handleShowProgress"
+      @update:installation="handleUpdateInstallation"
+      @navigate-list="handleNavigateList"
+    />
     <!-- Tier 3 takeover slot. ProgressModal renders as the universal
          brand loader for every show-progress op (delete, install,
          update, copy, migrate, snapshot, launch) — the legacy Tier 2
          ModalShell branch was removed in the same phase. -->
-    <template v-if="currentOverlay?.kind === 'takeover'">
+    <template v-else-if="currentOverlay?.kind === 'takeover'">
       <ProgressModal
         v-if="currentOverlay.component === 'update'"
         ref="progressRef"
@@ -475,7 +538,19 @@ onUnmounted(() => {
       />
     </template>
 
-<!-- Brand-redesigned "View All Downloads" surface. Mounts only
+    <!-- Settings drawer (v2). Right-anchored slide-in driven by
+         `activePanel === 'settings-v2'`; sits outside the overlay
+         v-if chain so it doesn't break its discriminant-narrowing. -->
+    <ComfyUISettingsPanel
+      ref="comfyUISettingsPanelRef"
+      :open="activePanel === 'settings-v2'"
+      :installation="installation"
+      @close="closeSettingsV2"
+      @show-progress="handleShowProgress"
+      @navigate-list="handleNavigateList"
+    />
+
+    <!-- Brand-redesigned "View All Downloads" surface. Mounts only
          when main flips us into `'downloads-v2'` mode (from the title-
          bar downloads popup's footer link). `v-if` mirrors the rest of
          this file's overlay convention — keeps the store init + body

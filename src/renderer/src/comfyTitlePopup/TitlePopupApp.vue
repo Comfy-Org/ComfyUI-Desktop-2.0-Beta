@@ -4,7 +4,6 @@ import MenuView from './MenuView.vue'
 import DownloadsView from './DownloadsView.vue'
 import InstancePickerView from './InstancePickerView.vue'
 import GlobalSettingsView from './GlobalSettingsView.vue'
-import ModalDialog from '../components/ModalDialog.vue'
 import type { DetailSection, SnapshotListData } from '../types/ipc'
 
 /**
@@ -437,12 +436,6 @@ onUnmounted(() => {
     <DownloadsView v-else-if="kind === 'downloads'" :state="downloadsState" />
     <InstancePickerView v-else-if="kind === 'instance-picker'" :snapshot="pickerSnapshot" />
     <GlobalSettingsView v-else :snapshot="globalSettingsSnapshot" />
-    <!-- Singleton ModalDialog host for `useModal.confirm/alert/select`
-         calls fired by anything inside the popup (per-install settings
-         UI's confirm chains, snapshot prompts, etc.). The panel mounts
-         its own copy; this one keeps `useModal` working inside the
-         popup's separate WebContentsView. -->
-    <ModalDialog />
   </div>
 </template>
 

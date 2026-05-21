@@ -6,6 +6,7 @@ import { useSessionStore } from '../stores/sessionStore'
 import { useProgressStore } from '../stores/progressStore'
 import { useInstallContextMenu } from '../composables/useInstallContextMenu'
 import { useInstallList } from '../composables/useInstallList'
+import { useOverlay } from '../composables/useOverlay'
 import { Cloud, Plus, Search } from 'lucide-vue-next'
 import ContextMenu from '../components/ContextMenu.vue'
 import BrandBackground from '../components/BrandBackground.vue'
@@ -94,36 +95,24 @@ const {
 defineExpose({ activeFilter })
 
 // --- Manage / context menu ---
-// All Manage routes go through `window.api.openInstancePicker` (the
-// picker popup) — the legacy `useOverlay`-driven `ManageInstallModal`
-// route is retired.
+const { openOverlay } = useOverlay()
 
 function openManage(
   installation: Installation,
   opts: { initialTab?: string; autoAction?: string | null } = {}
 ): void {
-  // Every Manage entry — bare "Manage…" and the specialised kebab
-  // items (Update / Migrate / Restore Snapshot / Delete) — routes to
-  // the instance-picker popup. Bare goes to compact (default identity
-  // card + CTAs); specialised paths open the picker directly in
-  // expanded mode on the relevant tab with `autoAction` so the action
-  // fires on mount of `ComfyUISettingsContent`.
-  const hasSpecialisedOpts =
-    opts.initialTab !== undefined || (opts.autoAction !== undefined && opts.autoAction !== null)
-  if (!hasSpecialisedOpts) {
-    window.api.openInstancePicker({ installationId: installation.id })
-    return
-  }
-  const mappedTab =
-    opts.initialTab === 'config' || opts.initialTab === 'status'
-      || opts.initialTab === 'update' || opts.initialTab === 'snapshots'
-      ? opts.initialTab
-      : 'status'
-  window.api.openInstancePicker({
-    installationId: installation.id,
-    mode: 'expanded',
-    initialTab: mappedTab,
+  // `noSidebar: true` collapses the unified Settings modal to just this
+  // install's ComfyUI Settings surface — the user picked a specific
+  // install via the kebab/right-click, so cross-install tabs are noise.
+  // The file-menu Settings entry leaves the flag unset and gets the
+  // full sidebar layout.
+  void openOverlay({
+    kind: 'settings',
+    installation,
+    initialTab: 'comfy',
+    initialDetailTab: opts.initialTab ?? 'status',
     autoAction: opts.autoAction ?? null,
+    noSidebar: true
   })
 }
 
