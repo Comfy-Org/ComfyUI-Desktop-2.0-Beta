@@ -131,7 +131,7 @@ function handleClick(): void {
   font-size: 16px;
   font-weight: 500;
   line-height: 24px;
-  color: var(--neutral-100);
+  color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -139,7 +139,7 @@ function handleClick(): void {
 .picker-row-sub {
   font-size: 12px;
   line-height: 16px;
-  color: var(--text-muted);
+  color: var(--neutral-100);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

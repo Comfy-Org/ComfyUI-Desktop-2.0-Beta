@@ -15,6 +15,7 @@ export const en = {
   common: {
     close: 'Close',
     cancel: 'Cancel',
+    back: 'Back',
   },
   /** Top-level so the dotted keys returned by `installTypeMetaFor`
    *  (`installType.standalone`, …) map directly without a prefix. */
@@ -149,6 +150,8 @@ export const en = {
     more: 'More',
     settings: 'Settings',
     snapshots: 'Snapshots',
+    manage: 'Manage',
+    running: 'Running',
     empty: 'Select an instance',
   },
   /** Snapshot strings consumed by `SnapshotRow` + `formatRelative` +
