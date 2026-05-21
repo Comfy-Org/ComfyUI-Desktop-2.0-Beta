@@ -348,6 +348,7 @@ function installMockApi(initial?: {
     focusComfyWindow: vi.fn(async () => {}),
     getListActions: vi.fn(async () => []),
     openGlobalSettings: vi.fn(),
+    openInstancePicker: vi.fn(),
   }
   ;(window as unknown as { api: typeof api }).api = api
   return state
@@ -772,24 +773,30 @@ describe('PanelApp', () => {
     expect(wrapper.find('[data-testid="comfy-lifecycle"]').exists()).toBe(true)
   })
 
-  it('mounts the manage overlay (DetailModal) when a panel-trigger-overlay install-update event arrives', async () => {
+  it('opens the instance picker (expanded, Update tab) when a panel-trigger-overlay install-update event arrives', async () => {
     // The title-bar install-update pill click is forwarded by main
     // as an `onPanelTriggerOverlay` event with
-    // `kind: 'install-update'` and the host's installationId. The
-    // panel renderer routes that into a Tier 1 manage overlay with
-    // initialTab='update' so the DetailModal opens directly on the
-    // update tab.
-    const wrapper = mountPanel()
+    // `kind: 'install-update'`. Post-redesign the panel renderer
+    // routes that into the instance picker popup (expanded, Update
+    // tab) instead of mounting a Tier 1 DetailModal — same surface
+    // the chooser-card kebab Update entry now opens.
+    mountPanel()
     await flushPromises()
-    expect(wrapper.find('[data-testid="detail-modal"]').exists()).toBe(false)
+    const api = (
+      window as unknown as { api: { openInstancePicker: ReturnType<typeof vi.fn> } }
+    ).api
 
     mockState.panelTriggerOverlayCallbacks.forEach((cb) =>
       cb({ kind: 'install-update', installationId: 'test-id' }),
     )
     await flushPromises()
-    const detail = wrapper.find('[data-testid="detail-modal"]')
-    expect(detail.exists()).toBe(true)
-    expect(detail.attributes('data-installation-id')).toBe('test-id')
+
+    expect(api.openInstancePicker).toHaveBeenCalledTimes(1)
+    expect(api.openInstancePicker).toHaveBeenCalledWith({
+      installationId: 'test-id',
+      mode: 'expanded',
+      initialTab: 'update',
+    })
   })
 
   it('shows the "Desktop Update Ready" confirm modal when a restart-prompt event arrives, and installs on confirm', async () => {
