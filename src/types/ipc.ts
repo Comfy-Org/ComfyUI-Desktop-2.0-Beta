@@ -918,6 +918,14 @@ export interface ElectronApi {
    *  panelView, or main rejected the claim — fall back to the
    *  close+open swap). */
   claimAttachHost(installationId: string): Promise<boolean>
+  /** Release the in-progress install identity preview that
+   *  `claimAttachHost` installed on this chooser host's title bar.
+   *  Fired by the panel renderer when an overlay (progress / takeover)
+   *  closes without producing an attach — the op was cancelled,
+   *  errored, or the user backed out — so the title bar reverts to
+   *  the chooser-host identity. No-op for install-backed callers and
+   *  for chooser hosts with no preview currently active. */
+  releaseAttachHostPreview(): Promise<boolean>
   getRunningInstances(): Promise<RunningInstance[]>
   /**
    * Read the retained crash detail for an installation, if any. Main holds

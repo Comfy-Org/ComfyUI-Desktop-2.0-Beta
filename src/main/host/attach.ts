@@ -115,6 +115,9 @@ export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts):
   entry.comfyUrl = comfyUrl
   entry.titleBarText = installation.name
   entry.sourceCategory = sourceMap[installation.sourceId]?.category ?? null
+  // The attach consumes any in-progress identity preview; clearing the
+  // state field keeps a later detach from clobbering identity twice.
+  entry.previewInstallationId = null
   indexInstallationId(installationId, entry.windowKey)
 
   // Seed the MRU tracker if this in-place attach happens on the

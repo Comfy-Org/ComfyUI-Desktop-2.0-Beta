@@ -347,6 +347,7 @@ function installMockApi(initial?: {
     // the existing `complete-cloud` test continues to dismiss cleanly
     // when no cloud install is present in the store.
     claimAttachHost: vi.fn(async () => true),
+    releaseAttachHostPreview: vi.fn(async () => true),
     transferHostBoundsToInstall: vi.fn(async () => {}),
     closeHostWindow: vi.fn(async () => {}),
     focusComfyWindow: vi.fn(async () => {}),

@@ -128,6 +128,8 @@ export function buildElectronApi(): ElectronApi {
       ipcRenderer.invoke('transfer-host-bounds-to-install', installationId),
     claimAttachHost: (installationId) =>
       ipcRenderer.invoke('claim-attach-host', installationId),
+    releaseAttachHostPreview: () =>
+      ipcRenderer.invoke('release-attach-host-preview'),
     getRunningInstances: () => ipcRenderer.invoke('get-running-instances'),
     getLastCrashError: (installationId: string) =>
       ipcRenderer.invoke('get-last-crash-error', installationId),

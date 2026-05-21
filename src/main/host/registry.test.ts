@@ -74,6 +74,7 @@ function makeEntry(opts: {
     firstUseMode: 'none',
     titleBarText: '',
     sourceCategory: null,
+    previewInstallationId: null,
     coldStartPendingReveal: false,
     _installCleanup: null,
     detachInstall: () => {},

@@ -641,6 +641,7 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
     firstUseMode: 'none',
     titleBarText: opts.initialTitleBarText,
     sourceCategory: opts.initialSourceCategory,
+    previewInstallationId: null,
     coldStartPendingReveal: false,
     _installCleanup: null,
     // Bound below so it can self-reference the freshly-created entry.

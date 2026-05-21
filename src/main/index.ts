@@ -68,6 +68,7 @@ import {
   setHostWindowFactories,
 } from './host/createHostWindow'
 import { attachInstall, setAttachFactories } from './host/attach'
+import { applyAttachHostPreview, clearAttachHostPreview } from './host/attachHostPreview'
 import {
   _detachInstallImpl,
   confirmAndCloseAllHostWindows,
@@ -843,6 +844,32 @@ ipcMain.handle('claim-attach-host', (event, installationId: string) => {
     if (isInstallHost(entry)) continue
     if (entry.panelView?.webContents !== event.sender) continue
     claimAttachHost(installationId, entry.windowKey)
+    // Push the install's identity to the title bar immediately so the
+    // user can see which install is being acted on while the op runs;
+    // attachInstall later overwrites with the same values, so there's
+    // no flicker on the happy path.
+    void applyAttachHostPreview(entry, installationId)
+    return true
+  }
+  return false
+})
+
+/**
+ * Release the in-progress install identity preview on the calling
+ * chooser host. Fired by the panel renderer when an overlay (progress
+ * / takeover) closes without producing an attach — the op was
+ * cancelled, errored, or the user backed out — so the title bar
+ * reverts to the chooser-host identity.
+ *
+ * No-op when the calling sender isn't an install-less host's panel
+ * webContents, or when no preview is currently active.
+ */
+ipcMain.handle('release-attach-host-preview', (event) => {
+  for (const [, entry] of comfyWindows) {
+    if (entry.window.isDestroyed()) continue
+    if (isInstallHost(entry)) continue
+    if (entry.panelView?.webContents !== event.sender) continue
+    clearAttachHostPreview(entry)
     return true
   }
   return false

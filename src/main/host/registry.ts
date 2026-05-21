@@ -177,6 +177,17 @@ export interface ComfyWindowEntry {
    */
   sourceCategory: string | null
   /**
+   * Install id whose identity is currently being previewed in the
+   * title bar while this host is still install-less but has claimed
+   * itself for an op (launch / install / update / migrate / copy).
+   * The user sees "Launching MyInstall…" in the title bar instead of
+   * the generic chooser-host label while the op runs. Cleared when
+   * the op completes (attach takes over identity) or aborts (the
+   * panel renderer fires `release-attach-host-preview`). `null`
+   * whenever no op is in flight.
+   */
+  previewInstallationId: string | null
+  /**
    * Chooser cold-start keeps the BrowserWindow hidden until the panel's
    * first `did-finish-load` so the user doesn't stare at an empty body
    * while panel.html boots. Cleared when the window is revealed.

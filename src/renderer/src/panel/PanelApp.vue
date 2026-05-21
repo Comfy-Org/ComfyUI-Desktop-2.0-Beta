@@ -166,6 +166,20 @@ chooserHandoff = useChooserHandoff({
 })
 const { handleChooserPick, handleChooserShowNewInstall } = chooserHandoff
 
+// When an overlay closes on a chooser host without producing an attach
+// (cancel / error / dismiss), revert the install identity preview that
+// `claimAttachHost` pushed to the title bar — otherwise the chooser host
+// keeps showing the last-attempted install's name. On a successful
+// attach the chooser PanelApp tears down before this watcher fires, so
+// the happy path never triggers a release.
+if (!installationId) {
+  watch(currentOverlay, (next, prev) => {
+    if (prev && !next) {
+      void window.api.releaseAttachHostPreview()
+    }
+  })
+}
+
 let unsubPanel: (() => void) | null = null
 let unsubLocale: (() => void) | null = null
 let unsubCloseRequest: (() => void) | null = null
