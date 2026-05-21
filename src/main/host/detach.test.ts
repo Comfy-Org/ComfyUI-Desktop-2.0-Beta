@@ -17,7 +17,7 @@ vi.mock('electron', () => ({
 
 import { _runningSessions } from '../lib/ipc/shared'
 import { comfyWindows, nextWindowKey, type ComfyWindowEntry } from './registry'
-import { closeAllHostWindows, preClearedClose } from './detach'
+import { closeAllHostWindows, detachOrphanedInstallHosts, preClearedClose } from './detach'
 
 interface FakeWindow {
   destroyed: boolean
@@ -128,6 +128,51 @@ describe('closeAllHostWindows', () => {
 
     expect(a.closed).toBe(true)
     expect(b.closed).toBe(true)
+  })
+})
+
+describe('detachOrphanedInstallHosts', () => {
+  function makeInstallEntry(installationId: string | null): ComfyWindowEntry {
+    const win = makeWindow()
+    const entry = makeEntry(win)
+    entry.installationId = installationId
+    entry.detachInstall = vi.fn()
+    return entry
+  }
+
+  it('detaches install-backed entries whose install id is no longer in the registry', () => {
+    const live = makeInstallEntry('inst-A')
+    const orphan = makeInstallEntry('inst-B')
+    comfyWindows.set(live.windowKey, live)
+    comfyWindows.set(orphan.windowKey, orphan)
+
+    detachOrphanedInstallHosts(new Set(['inst-A']))
+
+    expect(live.detachInstall).not.toHaveBeenCalled()
+    expect(orphan.detachInstall).toHaveBeenCalledTimes(1)
+  })
+
+  it('leaves chooser hosts (no installationId) untouched', () => {
+    const chooser = makeInstallEntry(null)
+    comfyWindows.set(chooser.windowKey, chooser)
+
+    detachOrphanedInstallHosts(new Set())
+
+    expect(chooser.detachInstall).not.toHaveBeenCalled()
+  })
+
+  it('skips destroyed windows', () => {
+    const dead = makeInstallEntry('inst-X')
+    ;(dead.window as unknown as FakeWindow).destroyed = true
+    comfyWindows.set(dead.windowKey, dead)
+
+    detachOrphanedInstallHosts(new Set())
+
+    expect(dead.detachInstall).not.toHaveBeenCalled()
+  })
+
+  it('is safe when comfyWindows is empty', () => {
+    expect(() => detachOrphanedInstallHosts(new Set(['inst-A']))).not.toThrow()
   })
 })
 

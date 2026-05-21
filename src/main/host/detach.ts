@@ -3,7 +3,7 @@ import type { BrowserWindow, WebContentsView } from 'electron'
 import * as ipc from '../lib/ipc'
 import { COMFY_BG } from '../lib/theme'
 import { destroyPanelView, ensurePanelView } from './panelView'
-import { comfyWindows, isChooserHost } from './registry'
+import { comfyWindows, isChooserHost, isInstallHost } from './registry'
 import type { ComfyWindowEntry } from './registry'
 import {
   applyChooserHostTheme,
@@ -284,4 +284,25 @@ export function _detachInstallImpl(entry: ComfyWindowEntry): void {
   destroyPanelView(entry)
   ensurePanelView(entry.windowKey, entry, 'chooser')
   entry.layoutViews()
+}
+
+/**
+ * Detach every install-backed host window whose backing install is no
+ * longer in the provided live-id set. Covers the delete-action and
+ * untrack-action paths (both emit `installationEvents.changed`); without
+ * this, an install-backed host would keep rendering chrome / IPC wiring
+ * for a non-existent install.
+ *
+ * Snapshots the entry list up front so a synchronous detach callback
+ * that mutates `comfyWindows` doesn't skip later entries.
+ */
+export function detachOrphanedInstallHosts(liveIds: ReadonlySet<string>): void {
+  const entries = Array.from(comfyWindows.values())
+  for (const entry of entries) {
+    if (entry.window.isDestroyed()) continue
+    if (!isInstallHost(entry)) continue
+    if (!entry.installationId) continue
+    if (liveIds.has(entry.installationId)) continue
+    entry.detachInstall()
+  }
 }

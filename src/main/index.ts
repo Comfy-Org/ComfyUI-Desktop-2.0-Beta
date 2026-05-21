@@ -72,6 +72,7 @@ import {
   _detachInstallImpl,
   confirmAndCloseAllHostWindows,
   consultPanelRendererClose,
+  detachOrphanedInstallHosts,
   preClearedClose,
   returnToDashboard,
 } from './host/detach'
@@ -1310,13 +1311,7 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
     installationEvents.on('changed', () => {
       void (async () => {
         const liveIds = new Set((await listInstallations()).map((i) => i.id))
-        for (const entry of comfyWindows.values()) {
-          if (entry.window.isDestroyed()) continue
-          if (!isInstallHost(entry)) continue
-          if (entry.installationId && !liveIds.has(entry.installationId)) {
-            entry.detachInstall()
-          }
-        }
+        detachOrphanedInstallHosts(liveIds)
       })()
     })
   })
