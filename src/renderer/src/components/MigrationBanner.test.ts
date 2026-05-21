@@ -6,11 +6,10 @@ import { nextTick } from 'vue'
 
 import type { Installation } from '../types/ipc'
 
-// Stub window.api before any component import (progressStore accesses it at setup time)
+// Stub window.api before any component import.
 vi.stubGlobal('window', {
   ...window,
   api: {
-    onErrorDetail: vi.fn(() => vi.fn()),
     runAction: vi.fn().mockResolvedValue({}),
   },
 })
@@ -22,7 +21,6 @@ vi.mock('../composables/useMigrateAction', () => ({
 }))
 
 import MigrationBanner from './MigrationBanner.vue'
-import { useProgressStore } from '../stores/progressStore'
 
 const messages = {
   en: {
@@ -35,8 +33,6 @@ const messages = {
       telemetrySettings: 'Manage in Settings',
     },
     desktop: { migrating: 'Migrating' },
-    progress: { starting: 'Starting…' },
-    list: { viewProgress: 'View Progress' },
   },
 }
 
@@ -121,52 +117,4 @@ describe('MigrationBanner', () => {
     })
   })
 
-  describe('in-progress state', () => {
-    function mountWithActiveOp() {
-      const pinia = createTestingPinia()
-      const wrapper = mount(MigrationBanner, {
-        global: { plugins: [createTestI18n(), pinia] },
-        props: { installation: stubInstallation },
-      })
-      // Set the operation directly on the store's reactive Map
-      const store = useProgressStore(pinia)
-      store.operations.set('test-desktop-1', {
-        finished: false,
-        error: null,
-        output: [],
-        progress: null,
-        unsubProgress: null,
-        unsubOutput: null,
-      } as never)
-      return { wrapper, pinia }
-    }
-
-    it('shows progress UI when an active operation exists', async () => {
-      const { wrapper } = mountWithActiveOp()
-      await nextTick()
-      expect(wrapper.text()).toContain('Migrating')
-      expect(wrapper.text()).toContain('View Progress')
-    })
-
-    it('hides skip button during migration', async () => {
-      const { wrapper } = mountWithActiveOp()
-      await nextTick()
-      expect(wrapper.text()).not.toContain('New Install Without Migrating')
-    })
-
-    it('hides Migrate Now button during migration', async () => {
-      const { wrapper } = mountWithActiveOp()
-      await nextTick()
-      expect(wrapper.text()).not.toContain('Migrate Now')
-    })
-
-    it('emits show-progress when View Progress is clicked', async () => {
-      const { wrapper } = mountWithActiveOp()
-      await nextTick()
-      const btn = findButtonByText(wrapper, 'View Progress')!
-      ;(btn.element as HTMLButtonElement).click()
-      await nextTick()
-      expect(wrapper.emitted('show-progress')).toHaveLength(1)
-    })
-  })
 })

@@ -3,7 +3,6 @@ import { onMounted, toRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useInstallationStore } from '../stores/installationStore'
 import { useSessionStore } from '../stores/sessionStore'
-import { useProgressStore } from '../stores/progressStore'
 import { useInstallContextMenu } from '../composables/useInstallContextMenu'
 import { useInstallList } from '../composables/useInstallList'
 import { useOverlay } from '../composables/useOverlay'
@@ -58,7 +57,6 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const installationStore = useInstallationStore()
 const sessionStore = useSessionStore()
-const progressStore = useProgressStore()
 
 onMounted(() => {
   if (installationStore.installations.length === 0) {
@@ -141,17 +139,6 @@ function pickInstall(inst: Installation): void {
   emit('pick', inst)
 }
 
-/** Re-open the ProgressModal for the active op on this install — emits
- *  `show-progress` with a no-op `apiCall` so PanelApp's existing-op
- *  branch just re-shows the modal without spawning a duplicate. */
-function viewProgress(inst: Installation): void {
-  emit('show-progress', {
-    installationId: inst.id,
-    title: '',
-    apiCall: async () => ({})
-  })
-}
-
 /** Close the install's window AND its underlying process. The window's
  *  main-side `close` handler runs the full teardown, so closeComfyWindow
  *  is enough — no separate stop call needed.
@@ -169,10 +156,6 @@ function handleCloudClick(): void {
   // the install tiles use so behaviour can't drift between the two.
   // Otherwise promote new-install as a Try-Cloud CTA.
   if (cloudInstall.value) {
-    if (progressStore.getProgressInfo(cloudInstall.value.id)) {
-      viewProgress(cloudInstall.value)
-      return
-    }
     if (sessionStore.isStopping(cloudInstall.value.id)) return
     pickInstall(cloudInstall.value)
   } else {
@@ -243,7 +226,6 @@ function handleNewInstallClick(): void {
           :last-launched-label="lastLaunchedLabel(inst)"
           :has-error="hasError(inst)"
           @pick="pickInstall"
-          @show-progress="viewProgress"
           @open-card-menu="openCardMenu"
           @open-kebab-menu="openKebabMenu"
           @trigger-action="(action, installation) => triggerAction(action, installation)"

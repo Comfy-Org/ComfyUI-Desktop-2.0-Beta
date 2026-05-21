@@ -165,50 +165,7 @@
   background: var(--accent-warning-soft, rgba(217, 119, 6, 0.12));
 }
 
-/* In-flight progress block — visible only when an op is running.
- * Sits in the empty top-of-tile gap between the source icon
- * (top-left) and the action cluster (top-right). */
-.chooser-tile-progress {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  width: 100%;
-  padding-left: 36px;
-  padding-right: 56px;
-  box-sizing: border-box;
-}
-.chooser-tile-progress-status {
-  font-size: 11px;
-  color: var(--accent, #4a90e2);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.chooser-tile-progress-track {
-  position: relative;
-  height: 6px;
-  background: var(--bg-elev-2, rgba(127, 127, 127, 0.16));
-  border-radius: 3px;
-  overflow: hidden;
-}
-.chooser-tile-progress-fill {
-  height: 100%;
-  background: var(--accent, #4a90e2);
-  transition: width 200ms ease;
-}
-.chooser-tile-progress-track.indeterminate .chooser-tile-progress-fill {
-  animation: chooser-tile-progress-sweep 1.4s ease-in-out infinite;
-}
-@keyframes chooser-tile-progress-sweep {
-  0% {
-    transform: translateX(-100%);
-  }
-  100% {
-    transform: translateX(250%);
-  }
-}
-
-/* Status overlays — running / stopping / in-progress / errored. */
+/* Status overlays — running / stopping / errored. */
 .chooser-tile-running {
   box-shadow: inset 0 0 0 2px var(--accent, #4a90e2);
 }
@@ -219,8 +176,7 @@
   /* Errored takes precedence — a crashed-while-running install reads more usefully as "errored". */
   box-shadow: inset 0 0 0 2px var(--accent-danger, #d92d20);
 }
-.chooser-tile-stopping,
-.chooser-tile-in-progress {
+.chooser-tile-stopping {
   opacity: 0.7;
 }
 

@@ -2586,10 +2586,6 @@ input[type='checkbox']:checked::after {
   padding: 10px 24px;
   font-size: 14px;
 }
-.migration-banner-progress {
-  max-width: 400px;
-  margin-bottom: 20px;
-}
 .dashboard-telemetry-notice {
   margin-top: 28px;
   max-width: 460px;

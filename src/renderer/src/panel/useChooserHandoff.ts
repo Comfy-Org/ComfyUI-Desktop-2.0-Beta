@@ -25,12 +25,17 @@ export interface ChooserHandoffOpts {
 export type ChooserLaunchOutcome = 'focused-running' | 'launched' | 'missing-action'
 
 export interface ChooserHandoffApi {
-  /** Prepares the install-less chooser host for a launch hand-off — see
+  /** Prepares the install-less chooser host for an op hand-off — see
    *  function comment for the in-place attach + close-on-instance-started
    *  fallback. Exported separately so `usePanelOverlays.handleShowProgress`
-   *  can subscribe when a launch-class op originates outside the chooser
-   *  pipeline (e.g. DetailModal). */
-  prepareChooserHostHandoff: (installationId: string) => Promise<void>
+   *  can claim the host for any chooser-originated op (launch, install,
+   *  update, migrate, copy, load-snapshot-as-new). Pass
+   *  `triggersInstanceStart: false` for non-launch ops to skip the
+   *  fallback close-on-instance-started subscription. */
+  prepareChooserHostHandoff: (
+    installationId: string,
+    triggersInstanceStart?: boolean,
+  ) => Promise<void>
   /** Shared launch path for chooser-tile clicks AND the first-use
    *  takeover's auto-launch. Returns the outcome so callers can dismiss
    *  any orphaned overlay when launch short-circuits. */
@@ -77,19 +82,31 @@ export function useChooserHandoff(opts: ChooserHandoffOpts): ChooserHandoffApi {
    *  `instance-started` lands. */
   let pendingPickUnsub: (() => void) | null = null
 
-  /** Prepare the chooser host for a launch hand-off. First try to
-   *  claim the host for in-place attach: when the launch event lands
-   *  in main, `onLaunch` will attach the install to THIS host window
-   *  instead of constructing a fresh one (`rebuildComfyViewIfNeeded`
-   *  handles partition mismatches by swapping the comfyView, so even
-   *  unique-partition installs reuse this host). If the claim is
-   *  rejected — only happens when the panel webContents isn't
-   *  registered against any chooser host (race during construction,
-   *  or this composable being used outside an install-less host) —
-   *  fall back to the stamp-bounds + close-on-instance-started swap
-   *  so the user still gets the install's window at the chooser's
-   *  bounds. */
-  async function prepareChooserHostHandoff(installationId: string): Promise<void> {
+  /** Prepare the chooser host for an op hand-off. First try to claim
+   *  the host for in-place attach: when the install eventually becomes
+   *  install-backed (`onLaunch` consumes the claim on launch), the
+   *  install is attached to THIS host window instead of constructing a
+   *  fresh one (`rebuildComfyViewIfNeeded` handles partition mismatches
+   *  by swapping the comfyView, so even unique-partition installs reuse
+   *  this host). If the claim is rejected — only happens when the panel
+   *  webContents isn't registered against any chooser host (race during
+   *  construction, or this composable being used outside an install-less
+   *  host) — fall back to stamping the chooser host's current bounds onto
+   *  the install's saved-bounds slot so its freshly-constructed window
+   *  opens at the chooser's position.
+   *
+   *  When `triggersInstanceStart` is true (launch-class ops) AND the
+   *  claim was rejected, additionally subscribe to the resulting
+   *  `instance-started` broadcast so this chooser host closes itself
+   *  when the new comfy window opens. Non-launch ops (install / update /
+   *  migrate / copy / load-snapshot-as-new) don't subscribe — they end
+   *  in this host directly (claim path) or leave the chooser intact
+   *  (fallback path; the resulting install is launchable later from the
+   *  same host). */
+  async function prepareChooserHostHandoff(
+    installationId: string,
+    triggersInstanceStart = true,
+  ): Promise<void> {
     // Drop any prior fallback subscription unconditionally. Without this,
     // a previous launch that was claimed by main (no fallback fired) or
     // failed mid-flight would leave its listener live, and a later
@@ -102,6 +119,7 @@ export function useChooserHandoff(opts: ChooserHandoffOpts): ChooserHandoffApi {
     // the install's saved-bounds slot so its freshly-constructed window
     // opens at the chooser's position.
     await window.api.transferHostBoundsToInstall(installationId)
+    if (!triggersInstanceStart) return
     // Subscribe BEFORE kicking off the launch so we don't miss a fast-
     // firing instance-started broadcast. The launch action runs via the
     // ProgressModal pipeline (showProgress: true) so executeAction

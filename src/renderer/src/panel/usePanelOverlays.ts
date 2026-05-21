@@ -89,10 +89,14 @@ export interface FirstUseChainHooks {
 export interface UsePanelOverlaysOpts {
   installationId: string
   installation: ComputedRef<Installation | null>
-  /** Hand-off subscription used by `handleShowProgress` when the
-   *  in-flight op will end in a freshly-launched comfy window on an
-   *  install-less host. Optional: install-backed hosts pass nothing. */
-  prepareChooserHostHandoff?: (installationId: string) => Promise<void>
+  /** Hand-off helper used by `handleShowProgress` to claim the chooser
+   *  host for any chooser-originated op. The second arg signals whether
+   *  the op ends in a launch (true) so the fallback path subscribes to
+   *  `instance-started`. Optional: install-backed hosts pass nothing. */
+  prepareChooserHostHandoff?: (
+    installationId: string,
+    triggersInstanceStart?: boolean,
+  ) => Promise<void>
   /** Optional first-use chain integration — see `FirstUseChainHooks`. */
   firstUseChain?: FirstUseChainHooks
   // Template refs declared by the parent and bound via `ref="…"`.
@@ -205,14 +209,24 @@ export function usePanelOverlays(opts: UsePanelOverlaysOpts): UsePanelOverlaysAp
       onCancel,
     })
     if (!ok) return
-    // Install-less host + launch-class op: subscribe to the resulting
-    // `instance-started` broadcast so the chooser host closes itself
-    // when the new comfy window opens. Mirrors what the chooser-tile
-    // path does via `performChooserLaunch`; needed here because surfaces
-    // like DetailModal route launches straight through `show-progress`
-    // without going through `prepareChooserHostHandoff`.
-    if (showOpts.triggersInstanceStart && !installationId && opts.prepareChooserHostHandoff) {
-      await opts.prepareChooserHostHandoff(showOpts.installationId)
+    // Install-less host: claim the chooser host for any non-destructive
+    // op so the host becomes the install-backed window once the op
+    // completes (launch consumes the claim in main's `onLaunch`; install /
+    // update / migrate / copy / load-snapshot-as-new ops complete in
+    // place via the claim and any subsequent launch lands in the same
+    // host). Destructive ops stay in the initiating window — there's
+    // nothing to attach. The `triggersInstanceStart` flag drives the
+    // fallback close-on-instance-started subscription (launch-class only)
+    // when the claim is rejected.
+    if (
+      !installationId &&
+      opts.prepareChooserHostHandoff &&
+      showOpts.opKind !== 'destructive'
+    ) {
+      await opts.prepareChooserHostHandoff(
+        showOpts.installationId,
+        !!showOpts.triggersInstanceStart,
+      )
     }
     await nextTick()
     // If an in-progress operation already exists for this ID, just show it.
