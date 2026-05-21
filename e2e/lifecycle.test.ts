@@ -117,8 +117,7 @@ test('accept consent + pick local opens New Install takeover with form pre-fille
   // `loadFieldOptions('release')` → recursive `loadFieldOptions('variant')`.
   // `.brand-primary.config-continue` is bound to `:disabled="!canContinue"`,
   // so once it goes enabled the form is fully pre-filled (release picked,
-  // variant picked, no path issues). That's the single signal we need
-  // before clicking Continue.
+  // variant picked, no path issues).
   await ctx.panel.waitFor(
     async () => ctx.app.evaluate(({ webContents }) => {
       const wc = webContents.getAllWebContents().find((w) => w.getURL().includes('panel.html'))
@@ -129,6 +128,31 @@ test('accept consent + pick local opens New Install takeover with form pre-fille
       })()`) as Promise<boolean>
     }),
     { timeout: 60_000, message: 'Continue button never became enabled (form did not pre-fill)' },
+  )
+
+  // Force the CPU variant so the test is deterministic across runners
+  // (NVIDIA hosts would otherwise download a multi-GB GPU payload).
+  // The variant rows live inside the Advanced disclosure; the body is
+  // always rendered (CSS-hidden when collapsed), so clicking the row
+  // works even without expanding — but expand anyway to mirror the
+  // real user gesture.
+  expect(await ctx.panel.click('.config-advanced__summary')).toBe(true)
+  await ctx.panel.waitForSelector('.config-variant-row', { timeout: 5_000 })
+  expect(
+    await ctx.panel.clickByText('.config-variant-row', 'CPU'),
+    'CPU variant row clicked',
+  ).toBe(true)
+  // Confirm the CPU row is the selected one before continuing — otherwise
+  // a label-substring miss (e.g. an i18n change) would silently fall
+  // back to the recommended GPU variant.
+  await ctx.panel.waitFor(
+    async () => ctx.panel.evaluate<boolean>(
+      `(() => {
+        const sel = document.querySelector('.config-variant-row--selected .config-variant-row__label')
+        return !!sel && /CPU/i.test(sel.textContent || '')
+      })()`,
+    ),
+    { timeout: 5_000, message: 'CPU variant did not become the selected variant row' },
   )
 })
 
