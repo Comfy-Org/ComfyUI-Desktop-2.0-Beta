@@ -4,26 +4,11 @@ import { installTypeMetaFor } from '../../lib/installTypeIcon'
 import type { Installation } from '../../types/ipc'
 
 /**
- * Compact row for the instance-picker popover's left pane.
- *
- * Designed as a row variant of the chooser-tile, NOT a re-wrapping of
- * `ChooserInstallTile.vue` — its golden-ratio tile dimensions + CTA
- * cluster don't fit a list, and shoehorning a row-variant prop into a
- * tile component would hurt both surfaces. The glass tokens
- * (`--chooser-surface-bg`, `--chooser-surface-bg-hover`,
- * `--chooser-surface-border`) are the same so the picker reads as a
- * compact chooser.
- *
- * Interactions:
- *   - Body click → `select` (switcher contract: updates the right
- *     detail pane only; the actual launch waits on the Open button).
- *   - Hover / focus → background highlight; active state when the row
- *     is the currently-selected install.
- *
- * Per-install action menu (Manage / Update / Delete / etc.)
- * intentionally NOT exposed here — see `InstancePickerView.vue` for
- * the rationale. The picker is single-purpose; install actions live
- * on the ComfyUI Settings drawer.
+ * Compact list-row for the picker's expanded-mode left pane: icon + name +
+ * sub-label + running dot. Body click → `select` (switcher contract — updates
+ * the right detail pane only, doesn't launch). Reuses chooser glass tokens
+ * so the picker reads as a compact chooser; install actions live on the
+ * settings drawer, not here.
  */
 
 interface Props {
@@ -58,7 +43,8 @@ function handleClick(): void {
 <template>
   <div class="picker-row-wrap">
     <div
-      role="button"
+      role="option"
+      :aria-selected="active"
       tabindex="0"
       class="picker-row"
       :class="{ 'is-active': active, 'is-running': running }"
@@ -68,6 +54,7 @@ function handleClick(): void {
     >
       <div class="picker-row-icon" :title="$t(typeMeta.labelKey)">
         <component :is="typeMeta.icon" :size="20" />
+        <span v-if="running" class="picker-row-running-dot" aria-hidden="true"></span>
       </div>
       <div class="picker-row-body">
         <div class="picker-row-name">{{ installation.name }}</div>
@@ -78,7 +65,6 @@ function handleClick(): void {
           {{ lastLaunchedLabel }}
         </div>
       </div>
-      <span v-if="running" class="picker-row-running-dot" aria-hidden="true"></span>
     </div>
   </div>
 </template>
@@ -112,13 +98,22 @@ function handleClick(): void {
   background: var(--chooser-surface-border);
 }
 .picker-row-icon {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
   width: 24px;
   height: 24px;
-  color: var(--accent-label);
+  color: var(--neutral-100);
   flex: 0 0 auto;
+  transition: color 120ms ease;
+}
+/* Active row → icon goes full white (and gets a green status dot
+ * overlaid on top-right when also running). Inactive running rows
+ * still get the green dot so the user sees "running in another
+ * window" status, but the icon stays its resting neutral colour. */
+.picker-row.is-active .picker-row-icon {
+  color: var(--text);
 }
 .picker-row-body {
   min-width: 0;
@@ -128,13 +123,16 @@ function handleClick(): void {
   overflow: hidden;
 }
 .picker-row-name {
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 500;
-  line-height: 24px;
+  line-height: 20px;
   color: var(--neutral-100);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.picker-row.is-active .picker-row-name {
+  color: var(--text);
 }
 .picker-row-sub {
   font-size: 12px;
@@ -144,11 +142,15 @@ function handleClick(): void {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Green running indicator pinned to the top-right of the icon. Uses
+ * the existing `--success` token. */
 .picker-row-running-dot {
-  width: 6px;
-  height: 6px;
+  position: absolute;
+  top: -1px;
+  right: -1px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
-  background: var(--accent-primary, #0b8ce9);
-  flex: 0 0 auto;
+  background: var(--success, #00cd72);
 }
 </style>

@@ -187,6 +187,8 @@ export interface CreateHostWindowOpts {
    * (no icon).
    */
   initialSourceCategory: string | null
+  /** Construct hidden; caller owns the reveal (see `coldStartPendingReveal`). */
+  initiallyHidden?: boolean
 }
 
 export interface CreateHostWindowResult {
@@ -307,6 +309,7 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
   const windowOptions = cascadeOffsetForCollisions(initialOptions, liveHostOrigins())
   const comfyWindow = new BrowserWindow({
     ...windowOptions,
+    show: !opts.initiallyHidden,
     minWidth: 800,
     minHeight: 600,
     icon: APP_ICON,
@@ -395,14 +398,13 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
     // hosts, so the install-backed visibility branch handles both.
     const mode = entry ? computeBodyMode(entry) : 'comfy'
     const showPanel = mode !== 'comfy'
-    // `'settings-v2'` and `'downloads-v2'` are overlay modes — the
-    // brand-redesigned Settings drawer / downloads modal mount over the
-    // live ComfyUI canvas, so unlike the other panel modes we keep
-    // `comfyView` visible underneath at full bodyRect. The panel
-    // renderer paints itself transparent (see `PanelApp.vue`'s
-    // `panel-overlay-mode` body class) except for the drawer + dim
-    // backdrop, so the canvas composites through on macOS CALayers.
-    const isOverlayMode = mode === 'settings-v2' || mode === 'downloads-v2'
+    // `'downloads-v2'` is an overlay mode — the downloads modal mounts over
+    // the live ComfyUI canvas, so unlike other panel modes we keep
+    // `comfyView` visible underneath at full bodyRect. The panel renderer
+    // paints itself transparent (see `PanelApp.vue`'s `panel-overlay-mode`
+    // body class) except for the modal + dim backdrop, so the canvas
+    // composites through on macOS CALayers.
+    const isOverlayMode = mode === 'downloads-v2'
     if (showPanel && entry?.panelView) {
       entry.panelView.setBounds(bodyRect)
       entry.panelView.setVisible(true)
@@ -901,17 +903,10 @@ export function openChooserHostWindow(): BrowserWindow {
     // so the source-category icon stays unset.
     initialTitleBarText: CHOOSER_HOST_TITLE_TEXT,
     initialSourceCategory: null,
+    initiallyHidden: true,
   })
 
-  // Force-create the panel WebContentsView with the chooser body —
-  // install-less windows always need a panel, and creating it eagerly
-  // avoids the empty body flash that would happen on the next
-  // layoutViews tick.
-  // Hide until the panel's first load completes — panel.html can take
-  // ~1s on cold start (especially in dev). `panelView`'s
-  // `did-finish-load` handler reveals via `bringToFront`.
   entry.coldStartPendingReveal = true
-  comfyWindow.hide()
 
   ensurePanelView(entry.windowKey, entry, 'chooser')
 

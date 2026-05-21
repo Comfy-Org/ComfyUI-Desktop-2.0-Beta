@@ -206,9 +206,12 @@ const sizeClass = computed(() => `is-size-${props.size}`)
   max-height: clamp(360px, 80vh, 920px);
   border-radius: 14px;
   overflow: hidden;
-  background: var(--neutral-800);
-  border: 1px solid color-mix(in oklab, var(--neutral-100) 6%, transparent);
-  box-shadow: 0 24px 64px 0 rgba(0, 0, 0, 0.35);
+  background: var(--modal-surface-bg);
+  border: 1px solid var(--modal-surface-border);
+  box-shadow:
+    0 20px 24px -4px rgba(10, 13, 18, 0.08),
+    0 8px 8px -4px rgba(10, 13, 18, 0.03),
+    0 3px 3px -1.5px rgba(10, 13, 18, 0.04);
   color: var(--neutral-100);
 }
 .base-modal-panel.is-size-sm {

@@ -441,6 +441,8 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
         // triggersInstanceStart flag.
         opKind: isRestart ? 'launch' : progressOpKindForActionId(mutableAction.id),
         destroysInstance: destroysInstanceForActionId(mutableAction.id),
+        actionId: mutableAction.id,
+        actionData: mutableAction.data,
       })
       return
     }

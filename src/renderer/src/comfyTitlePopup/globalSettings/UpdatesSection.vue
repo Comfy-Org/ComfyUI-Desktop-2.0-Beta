@@ -153,7 +153,13 @@ const progressDetail = computed<string | null>(() => {
     <!-- Launcher-level action buttons. Rendered only when no channel
          picker is present (i.e. install-less host) — the picker already
          surfaces an Update Now button bundled into its own action row,
-         so showing two would be confusing. -->
+         so showing two would be confusing.
+         When state is `idle`, the primary's `updateNowLabel` falls back
+         to "Check for updates" — same as the secondary — so we drop the
+         secondary in that case to avoid two identical buttons. The
+         secondary only re-appears once there's a real "Update Now" /
+         "Restart" primary action and the user needs a way to manually
+         re-check. -->
     <div v-if="!channelPickerField" class="updates-actions">
       <button
         type="button"
@@ -164,6 +170,7 @@ const progressDetail = computed<string | null>(() => {
         {{ updateNowLabel }}
       </button>
       <button
+        v-if="state.kind !== null"
         type="button"
         class="updates-action"
         :disabled="updateNowDisabled"

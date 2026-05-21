@@ -1,6 +1,7 @@
 import { onMounted, onUnmounted } from 'vue'
 import { useInstallationStore } from '../stores/installationStore'
-import type { Installation } from '../types/ipc'
+import type { Installation, ShowProgressOpts } from '../types/ipc'
+
 import type { Overlay } from './useOverlay'
 
 interface DeepLinkRouterOpts {
@@ -28,6 +29,10 @@ interface DeepLinkRouterOpts {
    *  path the dashboard kebab uses — confirm dialogs + showProgress
    *  + DetailModal-mediated Delete all live there. */
   runInstallActionFromPicker?: (installation: Installation, actionId: string) => Promise<void> | void
+  /** Instance-picker's expanded settings UI fired `show-progress`; the
+   *  popup forwarded it here so the panel's existing ProgressModal
+   *  pipeline can run the operation. */
+  showProgressFromPicker?: (opts: ShowProgressOpts) => void
 }
 
 /**
@@ -61,11 +66,13 @@ export function useDeepLinkRouter(opts: DeepLinkRouterOpts): void {
           await opts.bootstrapReady
           const inst = installationStore.getById(id)
           if (!inst) return
-          await opts.openOverlay({
-            kind: 'settings',
-            installation: inst,
-            initialTab: 'comfy',
-            initialDetailTab: 'update',
+          // `comfy://install-update/<id>` opens the picker directly
+          // in expanded mode on the Update tab — same surface the
+          // chooser-card kebab Update entry routes to.
+          window.api.openInstancePicker({
+            installationId: inst.id,
+            mode: 'expanded',
+            initialTab: 'update',
           })
           return
         }
@@ -76,19 +83,24 @@ export function useDeepLinkRouter(opts: DeepLinkRouterOpts): void {
           // Default to the host's natural tab — same fall-through the
           // file-menu / title-bar Settings entries use via switchPanel.
           const tab = requested ?? (inst ? 'comfy' : 'global')
-          // Global tab → new Global Settings popup. Per-install tabs
-          // open `ManageInstallModal` (BaseModal-backed) via the
-          // `kind: 'settings'` overlay slot; `initialDetailTab` from
-          // the payload carries the inner tab choice.
           if (tab === 'global') {
             window.api.openGlobalSettings()
             return
           }
-          await opts.openOverlay({
-            kind: 'settings',
-            installation: inst ?? null,
-            initialTab: tab,
-          })
+          // Per-install deep links (`comfy://open-settings?tab=comfy`)
+          // open the picker in expanded mode on the Config tab. If we
+          // don't have an install context (chooser host, no active
+          // install), fall back to compact so the user picks an install
+          // first.
+          if (inst) {
+            window.api.openInstancePicker({
+              installationId: inst.id,
+              mode: 'expanded',
+              initialTab: 'config',
+            })
+          } else {
+            window.api.openInstancePicker()
+          }
           return
         }
         if (payload.kind === 'picker-pick-install') {
@@ -108,6 +120,48 @@ export function useDeepLinkRouter(opts: DeepLinkRouterOpts): void {
           const inst = installationStore.getById(id)
           if (!inst) return
           await opts.runInstallActionFromPicker?.(inst, actionId)
+          return
+        }
+        if (payload.kind === 'picker-show-progress') {
+          await opts.bootstrapReady
+          const id = payload.installationId
+          const actionId = payload.actionId
+          const title = payload.title
+          if (!id || !actionId || !title) return
+          const inst = installationStore.getById(id)
+          if (!inst) return
+          const isRestart = !!payload.isRestart
+          const actionData = (payload.actionData ?? undefined) as
+            | Record<string, unknown>
+            | undefined
+          const apiCall = isRestart
+            ? async () => {
+              await window.api.stopComfyUI(id)
+              const deadline = Date.now() + 10_000
+              while (Date.now() < deadline) {
+                try {
+                  const installs = await window.api.getInstallations()
+                  const stillRunning = installs.find((i) => i.id === id)?.status === 'running'
+                  if (!stillRunning) break
+                } catch {
+                  break
+                }
+                await new Promise((r) => setTimeout(r, 100))
+              }
+              return window.api.runAction(id, 'launch')
+            }
+            : () => window.api.runAction(id, actionId, actionData)
+          opts.showProgressFromPicker?.({
+            installationId: id,
+            title,
+            apiCall,
+            cancellable: !!payload.cancellable,
+            returnTo: 'detail',
+            triggersInstanceStart: !!payload.triggersInstanceStart,
+            opKind: payload.opKind,
+            actionId,
+            actionData,
+          })
         }
       })()
     })

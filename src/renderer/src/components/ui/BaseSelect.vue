@@ -272,9 +272,10 @@ onBeforeUnmount(() => {
   gap: 8px;
   width: 100%;
   padding: 8px 10px;
-  background: var(--surface);
+  background: var(--neutral-800);
+  border: 1px solid var(--chooser-surface-border);
   border-radius: 8px;
-  color: var(--text);
+  color: var(--neutral-100);
   font: inherit;
   font-size: 14px;
   text-align: left;
@@ -355,8 +356,8 @@ onBeforeUnmount(() => {
   margin: 0;
   padding: 4px;
   list-style: none;
-  background: var(--surface);
-  border: 1px solid var(--border);
+  background: var(--neutral-800);
+  border: 1px solid var(--chooser-surface-border);
   border-radius: 8px;
   box-shadow:
     0 8px 24px rgba(0, 0, 0, 0.28),

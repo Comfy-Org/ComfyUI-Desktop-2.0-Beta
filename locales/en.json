@@ -59,9 +59,7 @@
     "installationLabel": "Installation",
     "appUpdateAvailable": "Update {version}",
     "appUpdateReady": "Restart to update",
-    "installUpdateAvailable": "Update available",
-    "settings": "Settings",
-    "settingsTooltip": "Settings"
+    "installUpdateAvailable": "Update available"
   },
 
   "comfyUISettings": {

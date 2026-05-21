@@ -84,8 +84,8 @@ function onChange(event: Event): void {
   display: flex;
   align-items: center;
   width: 100%;
-  background: var(--surface);
-  border: 1px solid var(--border);
+  background: var(--neutral-800);
+  border: 1px solid var(--chooser-surface-border);
   border-radius: 8px;
   transition: border-color 150ms ease;
   gap: 8px;
@@ -106,7 +106,7 @@ function onChange(event: Event): void {
   background: transparent;
   border: none;
   outline: none;
-  color: var(--text);
+  color: var(--neutral-100);
   font-family: var(--font-sans);
   font-size: 14px;
 }
