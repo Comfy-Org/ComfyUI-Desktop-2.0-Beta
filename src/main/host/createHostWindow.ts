@@ -187,6 +187,8 @@ export interface CreateHostWindowOpts {
    * (no icon).
    */
   initialSourceCategory: string | null
+  /** Construct hidden; caller owns the reveal (see `coldStartPendingReveal`). */
+  initiallyHidden?: boolean
 }
 
 export interface CreateHostWindowResult {
@@ -307,6 +309,7 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
   const windowOptions = cascadeOffsetForCollisions(initialOptions, liveHostOrigins())
   const comfyWindow = new BrowserWindow({
     ...windowOptions,
+    show: !opts.initiallyHidden,
     minWidth: 800,
     minHeight: 600,
     icon: APP_ICON,
@@ -894,17 +897,10 @@ export function openChooserHostWindow(): BrowserWindow {
     // so the source-category icon stays unset.
     initialTitleBarText: CHOOSER_HOST_TITLE_TEXT,
     initialSourceCategory: null,
+    initiallyHidden: true,
   })
 
-  // Force-create the panel WebContentsView with the chooser body —
-  // install-less windows always need a panel, and creating it eagerly
-  // avoids the empty body flash that would happen on the next
-  // layoutViews tick.
-  // Hide until the panel's first load completes — panel.html can take
-  // ~1s on cold start (especially in dev). `panelView`'s
-  // `did-finish-load` handler reveals via `bringToFront`.
   entry.coldStartPendingReveal = true
-  comfyWindow.hide()
 
   ensurePanelView(entry.windowKey, entry, 'chooser')
 
