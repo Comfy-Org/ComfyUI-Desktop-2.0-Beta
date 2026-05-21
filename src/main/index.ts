@@ -23,6 +23,7 @@ import {
   registerSystemModalIpc,
 } from './popups/systemModal'
 import { registerTitlePopupIpc, type InstancePickerInstall } from './popups/titlePopup'
+import { registerPickerSettingsIpc } from './popups/pickerSettingsHandlers'
 import { waitForPort, COMFY_BOOT_TIMEOUT_MS } from './lib/process'
 import { isQuitInProgress, setQuitReason } from './lib/quit-state'
 import type { InstallationRecord } from './installations'
@@ -1229,6 +1230,14 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
         })
       },
     })
+    // Picker expanded-Manage IPC: thin pass-throughs from the popup
+    // process to the existing panel-facing IPC handlers. Must register
+    // AFTER `ipc.register()` (or anything else that mounts the panel-
+    // facing channels we forward to) — `_invokeHandlers.get()` resolves
+    // lazily on each invoke, but registering this side first wouldn't
+    // change behaviour, only ordering. Place it next to the existing
+    // popup IPC registration for grouping.
+    registerPickerSettingsIpc()
     registerDownloadHandlers()
     registerAssetDownloadHandlers({ findInstallationIdForWindow })
     cleanupTempDownloads()

@@ -86,6 +86,13 @@ export function buildElectronApi(): ElectronApi {
       ipcRenderer.send('comfy-window:close-current-panel'),
     openGlobalSettings: () =>
       ipcRenderer.send('comfy-titlepopup:open-global-settings'),
+    openInstancePicker: (opts) =>
+      ipcRenderer.send('comfy-window:open-instance-picker-for-install', {
+        installationId: opts?.installationId ?? null,
+        mode: opts?.mode ?? 'compact',
+        initialTab: opts?.initialTab ?? null,
+        autoAction: opts?.autoAction ?? null,
+      }),
     setFirstUseMode: (mode: 'none' | 'consent-lockdown' | 'post-consent') =>
       ipcRenderer.send('comfy-window:set-first-use-mode', { mode }),
     onFirstUseSkip: (callback) => {

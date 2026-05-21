@@ -836,6 +836,26 @@ export interface ElectronApi {
    *  routed to the legacy `SettingsModal` overlay. Main reuses the same
    *  helper the hamburger Settings entry calls. */
   openGlobalSettings(): void
+  /** Open the instance-picker popup for the panel's host window with
+   *  `installationId` seeded as the picker's right-pane selection.
+   *  Used by chooser-card "Manage…" (and future per-install entry
+   *  points) to land on the same WebContentsView popup the title-bar
+   *  centre pill opens. Omitting `installationId` falls back to the
+   *  host's active install — matches the pill-click behaviour.
+   *
+   *  `mode: 'expanded'` opens the picker directly in the full
+   *  per-install settings UI (mounted in the right pane), with
+   *  `initialTab` seeding the active tab and `autoAction` firing an
+   *  action on mount. Used by the chooser kebab's specialised entries
+   *  (Update / Migrate / Restore-Snapshot / Delete) and by the
+   *  per-install deep links (`comfy://install-update/<id>`,
+   *  `comfy://open-settings?tab=comfy`). */
+  openInstancePicker(opts?: {
+    installationId?: string | null
+    mode?: 'compact' | 'expanded'
+    initialTab?: 'config' | 'status' | 'update' | 'snapshots'
+    autoAction?: string | null
+  }): void
   /** Push the first-use takeover's current step to main so it can
    *  (a) cache the value on the host entry for
    *  `buildTitlePopupMenuItems` to read synchronously and (b)
