@@ -1,7 +1,15 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, type Component } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Github, HardDrive, Plus, RefreshCcw, Settings2, SlidersHorizontal, X } from 'lucide-vue-next'
+import {
+  Github,
+  HardDrive,
+  Plus,
+  RefreshCcw,
+  Settings2,
+  SlidersHorizontal,
+  X
+} from 'lucide-vue-next'
 import UpdatesSection from './globalSettings/UpdatesSection.vue'
 import SettingsSectionList from '../views/comfyUISettings/SettingsSectionList.vue'
 import DirCard from '../components/DirCard.vue'
@@ -10,7 +18,7 @@ import type {
   AppUpdateDownloadProgress,
   AppUpdateState,
   DetailField,
-  DetailSection,
+  DetailSection
 } from '../types/ipc'
 
 /**
@@ -66,7 +74,7 @@ interface GlobalSettingsBridge {
   close(): void
   globalSettingsUpdateField(
     fieldId: string,
-    value: unknown,
+    value: unknown
   ): Promise<{ ok: boolean; message?: string }>
   globalSettingsBrowseFolder(defaultPath?: string): Promise<string | null>
   globalSettingsOpenPath(path: string): void
@@ -79,7 +87,7 @@ interface GlobalSettingsBridge {
   globalSettingsRunInstallAction(
     installationId: string,
     actionId: string,
-    actionData?: Record<string, unknown>,
+    actionData?: Record<string, unknown>
   ): Promise<{ ok: boolean; message?: string }>
 }
 
@@ -97,29 +105,37 @@ const tabs = computed<{ id: TabId; label: string; icon: Component }[]>(() => [
   { id: 'updates', label: props.snapshot.i18n.updates, icon: RefreshCcw },
   { id: 'cache', label: props.snapshot.i18n.cache, icon: HardDrive },
   { id: 'storage', label: props.snapshot.i18n.models, icon: HardDrive },
-  { id: 'advanced', label: props.snapshot.i18n.advanced, icon: SlidersHorizontal },
+  { id: 'advanced', label: props.snapshot.i18n.advanced, icon: SlidersHorizontal }
 ])
 
-const overviewSections = computed<DetailSection[]>(() => [{
-  fields: props.snapshot.overviewFields as unknown as DetailField[],
-}])
-const cacheSections = computed<DetailSection[]>(() => [{
-  fields: props.snapshot.cacheFields as unknown as DetailField[],
-}])
-const advancedSections = computed<DetailSection[]>(() => [{
-  fields: props.snapshot.advancedFields as unknown as DetailField[],
-}])
-const sharedDirsSections = computed<DetailSection[]>(() => [{
-  fields: props.snapshot.sharedDirectoriesFields as unknown as DetailField[],
-}])
-const channelPickerField = computed<DetailField | null>(() =>
-  props.snapshot.channelPickerField as unknown as DetailField | null,
+const overviewSections = computed<DetailSection[]>(() => [
+  {
+    fields: props.snapshot.overviewFields as unknown as DetailField[]
+  }
+])
+const cacheSections = computed<DetailSection[]>(() => [
+  {
+    fields: props.snapshot.cacheFields as unknown as DetailField[]
+  }
+])
+const advancedSections = computed<DetailSection[]>(() => [
+  {
+    fields: props.snapshot.advancedFields as unknown as DetailField[]
+  }
+])
+const sharedDirsSections = computed<DetailSection[]>(() => [
+  {
+    fields: props.snapshot.sharedDirectoriesFields as unknown as DetailField[]
+  }
+])
+const channelPickerField = computed<DetailField | null>(
+  () => props.snapshot.channelPickerField as unknown as DetailField | null
 )
-const appUpdateState = computed<AppUpdateState>(() =>
-  props.snapshot.appUpdate.state as unknown as AppUpdateState,
+const appUpdateState = computed<AppUpdateState>(
+  () => props.snapshot.appUpdate.state as unknown as AppUpdateState
 )
-const appUpdateProgress = computed<AppUpdateDownloadProgress | null>(() =>
-  props.snapshot.appUpdate.progress as unknown as AppUpdateDownloadProgress | null,
+const appUpdateProgress = computed<AppUpdateDownloadProgress | null>(
+  () => props.snapshot.appUpdate.progress as unknown as AppUpdateDownloadProgress | null
 )
 const platformLabel = computed(() => {
   const p = props.snapshot.appUpdate.platform
@@ -182,7 +198,11 @@ async function handleCheckForUpdate(): Promise<void> {
     await bridge?.globalSettingsCheckForUpdate()
   } finally {
     const now = Date.now()
-    try { window.localStorage.setItem(LAST_CHECKED_KEY, String(now)) } catch { /* noop */ }
+    try {
+      window.localStorage.setItem(LAST_CHECKED_KEY, String(now))
+    } catch {
+      /* noop */
+    }
     bridge?.globalSettingsSetLastCheckedAt(now)
   }
 }
@@ -190,7 +210,11 @@ async function handleCheckForUpdate(): Promise<void> {
 async function handleRunInstallAction(action: ActionDef): Promise<void> {
   const id = props.snapshot.activeInstallationId
   if (!id) return
-  await bridge?.globalSettingsRunInstallAction(id, action.id, action.data as Record<string, unknown> | undefined)
+  await bridge?.globalSettingsRunInstallAction(
+    id,
+    action.id,
+    action.data as Record<string, unknown> | undefined
+  )
 }
 
 function handleTabKey(event: KeyboardEvent): void {
@@ -198,9 +222,8 @@ function handleTabKey(event: KeyboardEvent): void {
   event.preventDefault()
   const ids = tabs.value.map((t) => t.id)
   const idx = ids.indexOf(activeTab.value)
-  const next = event.key === 'ArrowDown'
-    ? (idx + 1) % ids.length
-    : (idx - 1 + ids.length) % ids.length
+  const next =
+    event.key === 'ArrowDown' ? (idx + 1) % ids.length : (idx - 1 + ids.length) % ids.length
   activeTab.value = ids[next] as TabId
 }
 
@@ -215,7 +238,9 @@ onMounted(() => {
         const n = Number(raw)
         if (Number.isFinite(n)) bridge?.globalSettingsSetLastCheckedAt(n)
       }
-    } catch { /* noop */ }
+    } catch {
+      /* noop */
+    }
   }
 })
 </script>
@@ -235,12 +260,7 @@ onMounted(() => {
     </header>
 
     <div class="gs-body">
-      <nav
-        class="gs-tabs"
-        role="tablist"
-        aria-orientation="vertical"
-        @keydown="handleTabKey"
-      >
+      <nav class="gs-tabs" role="tablist" aria-orientation="vertical" @keydown="handleTabKey">
         <button
           v-for="tab in tabs"
           :id="`gs-tab-${tab.id}`"
@@ -267,11 +287,7 @@ onMounted(() => {
       >
         <template v-if="activeTab === 'general'">
           <SettingsSectionList :sections="overviewSections" @update-field="handleUpdateField" />
-          <button
-            type="button"
-            class="gs-github"
-            @click="handleOpenExternal(snapshot.githubUrl)"
-          >
+          <button type="button" class="gs-github" @click="handleOpenExternal(snapshot.githubUrl)">
             <Github :size="14" aria-hidden="true" />
             <span>GitHub</span>
           </button>
@@ -355,7 +371,7 @@ onMounted(() => {
   font-family: var(--font-display);
   font-size: 16px;
   font-weight: 700;
-  color: var(--neutral-100);
+  color: color-mix(in oklab, var(--text) 90%, transparent);
 }
 
 .gs-close {
@@ -398,7 +414,8 @@ onMounted(() => {
   flex: 0 0 196px;
   width: 196px;
   padding: 12px 8px;
-  border-right: 1px solid color-mix(in oklab, var(--neutral-100) 8%, transparent);
+  background: var(--neutral-800);
+  border-right: 1px solid var(--chooser-surface-border);
   overflow-y: auto;
 }
 
@@ -416,7 +433,9 @@ onMounted(() => {
   font-size: 13px;
   text-align: left;
   cursor: pointer;
-  transition: background-color 100ms ease, opacity 100ms ease;
+  transition:
+    background-color 100ms ease,
+    opacity 100ms ease;
 }
 
 .gs-tab:hover {
@@ -432,7 +451,7 @@ onMounted(() => {
 .gs-tab.active {
   opacity: 1;
   background: var(--brand-surface-bg-hover);
-  color: var(--neutral-50);
+  color: var(--neutral-100);
 }
 
 .gs-pane {
@@ -514,13 +533,9 @@ onMounted(() => {
   gap: 4px;
 }
 
-.global-settings :deep(.settings-v2-field-label) {
-  font-size: 12px;
-  line-height: 16px;
-  color: var(--text-muted);
-  font-weight: 400;
-}
-
+/* Density bump for the popup — slightly tighter input chrome than the
+ * default `BaseInput` / `BaseSelect` so the two-pane card stays
+ * compact. Label + field text colors come from the base components. */
 .global-settings :deep(.ui-input),
 .global-settings :deep(.ui-select-trigger) {
   min-height: 28px;
@@ -530,10 +545,6 @@ onMounted(() => {
 .global-settings :deep(.ui-input-control),
 .global-settings :deep(.ui-select-trigger) {
   font-size: 13px;
-}
-
-.global-settings :deep(.ui-input-control) {
-  padding: 4px 10px;
 }
 
 .global-settings :deep(.ui-input-trailing button) {
