@@ -43,6 +43,20 @@ export interface KnownSettings {
   firstUseCompleted?: boolean
   oemManagedModelDirs?: string[]
   oemWorkflowImportVersion?: number
+  /**
+   * `true` once the silent first-launch Legacy Desktop adoption has
+   * completed (success or definitive failure with the user dismissing
+   * the splash). Prevents the cutover detection from re-running on
+   * subsequent launches even if the legacy `config.json` still exists.
+   */
+  legacyCutoverCompleted?: boolean
+  /**
+   * Installation ids that adopted a Legacy Desktop `.venv` whose
+   * `import torch` probe failed (the user — or cutover-mode default —
+   * picked "use anyway"). Consumed on the install's next launch to
+   * trigger a one-time Python repair task, then cleared.
+   */
+  pendingPythonRepairInstallIds?: string[]
 }
 
 export type Settings = KnownSettings & Record<string, unknown>
@@ -78,6 +92,8 @@ const SETTINGS_SCHEMA = {
   firstUseCompleted: { nullable: false },
   oemManagedModelDirs: { nullable: false },
   oemWorkflowImportVersion: { nullable: false },
+  legacyCutoverCompleted: { nullable: false },
+  pendingPythonRepairInstallIds: { nullable: false },
 } as const satisfies Record<keyof KnownSettings, { nullable: boolean }>
 
 export type KnownSettingKey = keyof typeof SETTINGS_SCHEMA

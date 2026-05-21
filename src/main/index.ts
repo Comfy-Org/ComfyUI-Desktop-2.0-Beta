@@ -34,6 +34,8 @@ import {
 import { registerAssetDownloadHandlers } from './lib/ipc/registerAssetDownloadHandlers'
 import { registerDownloadHandlers } from './lib/ipc/registerDownloadHandlers'
 import { get as getInstallation, installationEvents, list as listInstallations } from './installations'
+import { detectDesktopInstall } from './lib/desktopDetect'
+import { adoptDesktopInstall, type AdoptPromptKind, type UserChoice } from './lib/desktopAdopt'
 import { showModelFolderRelaunchPage } from './lib/relaunchPage'
 import { COMFY_BG, SPLASH_DARK, TITLEBAR_BG, type SplashTheme } from './lib/theme'
 import { comfyTitleBarOverlay } from './lib/titleBarOverlay'
@@ -144,6 +146,119 @@ function quitApp(): void {
   app.quit()
 }
 
+
+/**
+ * One-time native splash for the legacy-to-Desktop-2.0 cutover. Returns
+ * `'continue'` when the user accepts (or it's auto-dismissed on
+ * non-darwin), `'cancel'` when the user backs out. Auto-`'continue'` on
+ * Windows/Linux keeps the UX flow non-blocking — the splash is mainly
+ * about the macOS TCC pre-prompt and the rebrand notice.
+ */
+async function showCutoverSplash(): Promise<'continue' | 'cancel'> {
+  const buttons = [i18n.t('desktop.cutoverSplashContinue'), i18n.t('common.cancel')]
+  const result = await dialog.showMessageBox({
+    type: 'info',
+    title: i18n.t('desktop.cutoverSplashTitle'),
+    message: i18n.t('desktop.cutoverSplashMessage'),
+    detail: process.platform === 'darwin'
+      ? i18n.t('desktop.cutoverSplashTccDetail')
+      : i18n.t('desktop.cutoverSplashDetail'),
+    buttons,
+    defaultId: 0,
+    cancelId: 1,
+    noLink: true,
+  })
+  return result.response === 0 ? 'continue' : 'cancel'
+}
+
+/**
+ * Show the cutover error splash after a failed silent adoption. Offers
+ * Retry and Open Logs; returns `'retry'` or `'dismiss'`.
+ */
+async function showCutoverErrorSplash(message: string): Promise<'retry' | 'dismiss'> {
+  const buttons = [i18n.t('desktop.cutoverErrorRetry'), i18n.t('desktop.cutoverErrorOpenLogs'), i18n.t('common.close')]
+  const result = await dialog.showMessageBox({
+    type: 'error',
+    title: i18n.t('desktop.cutoverErrorTitle'),
+    message: i18n.t('desktop.cutoverErrorMessage'),
+    detail: message.slice(0, 500),
+    buttons,
+    defaultId: 0,
+    cancelId: 2,
+    noLink: true,
+  })
+  if (result.response === 1) {
+    void execFile('explorer.exe', [app.getPath('logs')], { windowsHide: true }, () => {})
+    return 'dismiss'
+  }
+  return result.response === 0 ? 'retry' : 'dismiss'
+}
+
+/**
+ * Detect a legacy install with no existing Desktop 2.0 installations and
+ * silently adopt it after a brief splash. Sets `legacyCutoverCompleted`
+ * once finished so subsequent launches skip this path even if the legacy
+ * `config.json` is still on disk. Skipped (banner path) when the user
+ * already has Desktop 2.0 installs side-by-side; the chooser banner picks
+ * up the rest.
+ */
+async function maybeRunLegacyCutover(): Promise<void> {
+  if (settings.get('legacyCutoverCompleted') === true) return
+  let legacy: ReturnType<typeof detectDesktopInstall>
+  try {
+    legacy = detectDesktopInstall()
+  } catch (err) {
+    console.warn('Cutover: legacy detection failed:', (err as Error).message)
+    return
+  }
+  if (!legacy) return
+  const existing = await listInstallations()
+  if (existing.length > 0) {
+    // Side-by-side case — the chooser-view banner offers an explicit
+    // adopt action. Don't auto-fire here.
+    return
+  }
+
+  let attempts = 0
+  while (attempts < 3) {
+    attempts++
+    const splash = await showCutoverSplash()
+    if (splash === 'cancel') {
+      // User dismissed the splash — record completion so we don't nag
+      // on every subsequent launch. The legacy plugin's adopt-in-place
+      // action stays available from the dashboard.
+      settings.set('legacyCutoverCompleted', true)
+      return
+    }
+    try {
+      const silentTools = {
+        sendProgress: () => {},
+        sendOutput: (t: string) => { console.log('[cutover-adopt]', t.trimEnd()) },
+        signal: new AbortController().signal,
+        promptUser: async (_kind: AdoptPromptKind): Promise<UserChoice> => {
+          // Cutover runs non-interactively; the orchestrator picks
+          // sensible defaults internally and never reaches this fn.
+          throw new Error('unexpected prompt in cutover mode')
+        },
+      }
+      await adoptDesktopInstall({ trigger: 'first-launch-cutover', tools: silentTools })
+      settings.set('legacyCutoverCompleted', true)
+      return
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      console.error('Cutover: adoption failed:', message)
+      const choice = await showCutoverErrorSplash(message)
+      if (choice === 'dismiss') {
+        // The user can retry later via the legacy plugin's adopt
+        // action; don't mark completed so the splash re-appears on
+        // their next launch (giving them another chance after they
+        // fix whatever blocked us).
+        return
+      }
+      // 'retry' — loop.
+    }
+  }
+}
 
 function onComfyExited({ installationId }: { installationId?: string } = {}): void {
   if (!installationId) return
@@ -1264,6 +1379,14 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
     // and the tray-aware `window-all-closed` gating will all come back
     // when the docked-app flow is reinstated. Until then, see git
     // history for the previous tray construction code.
+    // First-launch cutover detection — silently adopt a legacy Desktop
+    // install when one is detected, there are no existing Desktop 2.0
+    // installations, and the cutover hasn't already run. Gated behind
+    // the env flag while the feature is internal-only.
+    if (process.env['COMFY_ENABLE_LEGACY_CUTOVER'] === '1') {
+      await maybeRunLegacyCutover()
+    }
+
     // The install-less chooser host is the primary surface. Each
     // install gets its own ComfyUI window via openComfyWindow()
     // when launched, and the chooser host is the entry-point for

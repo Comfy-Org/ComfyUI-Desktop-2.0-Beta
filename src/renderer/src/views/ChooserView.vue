@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, toRef } from 'vue'
+import { computed, onMounted, ref, toRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useInstallationStore } from '../stores/installationStore'
 import { useSessionStore } from '../stores/sessionStore'
@@ -13,6 +13,7 @@ import BrandBackground from '../components/BrandBackground.vue'
 import BaseInput from '../components/ui/BaseInput.vue'
 import ComfyWordmark from '../components/icons/ComfyWordmark.vue'
 import ChooserInstallTile from './chooser/ChooserInstallTile.vue'
+import AdoptLegacyBanner from '../components/AdoptLegacyBanner.vue'
 import type { Installation, ShowProgressOpts } from '../types/ipc'
 
 /**
@@ -183,6 +184,28 @@ function handleCloudClick(): void {
 function handleNewInstallClick(): void {
   emit('show-new-install')
 }
+
+// Side-by-side adopt banner: a detected Legacy Desktop install
+// (`sourceId === 'desktop'`) alongside at least one non-legacy managed
+// install. The cutover splash never fires in this case, so the user
+// needs an in-app affordance to start adoption.
+const adoptBannerDismissed = ref(false)
+const legacyDesktopInstall = computed<Installation | null>(() => {
+  return installationStore.installations.find((i) => i.sourceId === 'desktop') ?? null
+})
+const showAdoptBanner = computed<boolean>(() => {
+  if (adoptBannerDismissed.value) return false
+  if (!legacyDesktopInstall.value) return false
+  return installationStore.installations.some((i) => i.sourceId !== 'desktop')
+})
+
+function forwardAdoptProgress(opts: ShowProgressOpts): void {
+  emit('show-progress', opts)
+}
+
+function dismissAdoptBanner(): void {
+  adoptBannerDismissed.value = true
+}
 </script>
 
 <template>
@@ -198,6 +221,13 @@ function handleNewInstallClick(): void {
           <template #leading><Search :size="16" /></template>
         </BaseInput>
       </div>
+
+      <AdoptLegacyBanner
+        v-if="showAdoptBanner && legacyDesktopInstall"
+        :installation="legacyDesktopInstall"
+        @show-progress="forwardAdoptProgress"
+        @dismiss="dismissAdoptBanner"
+      />
 
       <div
         v-if="installationStore.loading && nonCloudInstalls.length === 0"

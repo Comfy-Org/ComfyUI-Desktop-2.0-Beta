@@ -398,6 +398,17 @@ async function sourceComfyUI(
 }
 
 /**
+ * Mark an adopted install for a one-time Python repair on next launch. The
+ * launcher reads `pendingPythonRepairInstallIds` from settings and pops the
+ * matching id when it kicks off the repair task.
+ */
+export function enqueuePythonRepair(installationId: string): void {
+  const current = (settings.get('pendingPythonRepairInstallIds') as string[] | undefined) ?? []
+  if (current.includes(installationId)) return
+  settings.set('pendingPythonRepairInstallIds', [...current, installationId])
+}
+
+/**
  * Persist `modelsDirs` and (when unset) the telemetry consent flag derived
  * from the legacy install. Existing `telemetryEnabled` user choice wins.
  */
@@ -522,16 +533,19 @@ async function runAdoption(
     ? path.join(info.basePath, '.venv', 'Scripts', 'python.exe')
     : path.join(info.basePath, '.venv', 'bin', 'python3')
 
+  let venvNeedsRepair = false
   await telemetry.trackedStep('desktop2.adopt.validate_venv', telemetryContext, async () => {
     if (!fs.existsSync(pythonPath)) {
       const choice = await prompt('venv-broken', { reason: 'venv-missing', pythonPath })
       if (choice.kind === 'venv-broken' && choice.choice === 'cancel') throw new Error('venv-broken-cancelled')
+      venvNeedsRepair = true
       return
     }
     const result = await deps.validateLegacyVenv(pythonPath, signal)
     if (!result.ok) {
       const choice = await prompt('venv-broken', { reason: 'import-failed', message: result.message })
       if (choice.kind === 'venv-broken' && choice.choice === 'cancel') throw new Error('venv-broken-cancelled')
+      venvNeedsRepair = true
     }
   })
 
@@ -623,6 +637,7 @@ async function runAdoption(
     // Marker is written only after the record exists so a crash in between
     // doesn't poison the next adoption attempt with a dangling marker.
     await fs.promises.writeFile(path.join(info.basePath, MARKER_FILE), entry.id)
+    if (venvNeedsRepair) enqueuePythonRepair(entry.id)
     return entry
   })
 

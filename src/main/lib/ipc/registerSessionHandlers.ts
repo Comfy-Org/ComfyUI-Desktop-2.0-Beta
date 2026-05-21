@@ -15,6 +15,7 @@ import {
   handleDelete,
   handleCopy, handleCopyUpdate, handleReleaseUpdate,
   handleMigrateToStandalone,
+  handleAdoptInPlace,
   handleLaunch,
   handleDelegateToSource,
 } from './sessionActions'
@@ -83,6 +84,7 @@ export function registerSessionHandlers(): void {
       case 'copy-update': return handleCopyUpdate(ctx)
       case 'release-update': return handleReleaseUpdate(ctx)
       case 'migrate-to-standalone': return handleMigrateToStandalone(ctx)
+      case 'adopt-in-place': return handleAdoptInPlace(ctx)
       case 'launch': return handleLaunch(ctx)
       default: return handleDelegateToSource(ctx, actionId)
     }

@@ -52,7 +52,7 @@ export const desktop: SourcePlugin = {
 
   getStatusTag(installation: InstallationRecord): StatusTag | undefined {
     if (installation.status === 'installed') {
-      return { label: t('migrate.migrateToStandalonePill'), style: 'migrate' }
+      return { label: t('desktop.adoptInPlacePill'), style: 'migrate' }
     }
     return undefined
   },
@@ -111,6 +111,20 @@ export const desktop: SourcePlugin = {
         title: 'Actions',
         pinBottom: true,
         actions: [
+          {
+            id: 'adopt-in-place',
+            label: t('desktop.adoptInPlace'),
+            style: 'primary',
+            enabled: installation.status === 'installed',
+            showProgress: true,
+            progressTitle: t('desktop.adopting'),
+            cancellable: true,
+            confirm: {
+              title: t('desktop.adoptConfirmTitle'),
+              message: t('desktop.adoptConfirmMessage'),
+              confirmLabel: t('desktop.adoptConfirm'),
+            },
+          },
           {
             id: 'migrate-to-standalone',
             label: t('desktop.migrateToStandalone'),
