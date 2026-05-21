@@ -61,11 +61,13 @@ export function useDeepLinkRouter(opts: DeepLinkRouterOpts): void {
           await opts.bootstrapReady
           const inst = installationStore.getById(id)
           if (!inst) return
-          await opts.openOverlay({
-            kind: 'settings',
-            installation: inst,
-            initialTab: 'comfy',
-            initialDetailTab: 'update',
+          // `comfy://install-update/<id>` opens the picker directly
+          // in expanded mode on the Update tab — same surface the
+          // chooser-card kebab Update entry routes to.
+          window.api.openInstancePicker({
+            installationId: inst.id,
+            mode: 'expanded',
+            initialTab: 'update',
           })
           return
         }
@@ -76,19 +78,24 @@ export function useDeepLinkRouter(opts: DeepLinkRouterOpts): void {
           // Default to the host's natural tab — same fall-through the
           // file-menu / title-bar Settings entries use via switchPanel.
           const tab = requested ?? (inst ? 'comfy' : 'global')
-          // Global tab → new Global Settings popup. Per-install tabs
-          // open `ManageInstallModal` (BaseModal-backed) via the
-          // `kind: 'settings'` overlay slot; `initialDetailTab` from
-          // the payload carries the inner tab choice.
           if (tab === 'global') {
             window.api.openGlobalSettings()
             return
           }
-          await opts.openOverlay({
-            kind: 'settings',
-            installation: inst ?? null,
-            initialTab: tab,
-          })
+          // Per-install deep links (`comfy://open-settings?tab=comfy`)
+          // open the picker in expanded mode on the Config tab. If we
+          // don't have an install context (chooser host, no active
+          // install), fall back to compact so the user picks an install
+          // first.
+          if (inst) {
+            window.api.openInstancePicker({
+              installationId: inst.id,
+              mode: 'expanded',
+              initialTab: 'config',
+            })
+          } else {
+            window.api.openInstancePicker()
+          }
           return
         }
         if (payload.kind === 'picker-pick-install') {
