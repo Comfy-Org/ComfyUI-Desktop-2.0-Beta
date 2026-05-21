@@ -24,37 +24,34 @@ import {
 export const preClearedClose = new WeakSet<BrowserWindow>()
 
 /**
- * Main consults the panel renderer before tearing down a host
- * window so a Tier 2 progress / Tier 3 takeover overlay can
- * prompt the user to confirm cancellation via the standardised
- * cancel-prompt copy. Returns true when the renderer cleared the
- * close (no overlay open, or the user confirmed cancellation),
- * false when the renderer aborted (user dismissed the prompt).
+ * Shared wire logic for both panel-renderer consult flows. Sends
+ * `{requestPrefix}`, listens for `{requestPrefix}-ack` and
+ * `{requestPrefix}-response`. Returns `cleared`. Falls back to
+ * "cleared" when the panelView is missing, the webContents is
+ * destroyed, the renderer doesn't ack within 2s, or the
+ * webContents goes away mid-flight.
  *
- * Falls back to "cleared" when the panelView is missing (no panel
- * has been mounted yet — nothing to lose), the webContents is
- * destroyed (already torn down), the renderer doesn't ack receipt
- * of the request within 2s (hung renderer), or the underlying
- * webContents goes away (render-process-gone / destroyed).
- *
- * Important: once the renderer acks receipt we wait INDEFINITELY for
- * the actual response. The renderer might be showing a confirmation
- * modal that the user takes their time on; an extra fixed timeout
- * here would force-close the window out from under that prompt
- * (which was the bug observed when a sub-5s prompt-response window
- * triggered an unconfirmed close).
+ * Once the renderer acks receipt we wait INDEFINITELY for the actual
+ * response — the user may be staring at a confirm modal, and a fixed
+ * timeout would force-close out from under their prompt.
  */
-export async function consultPanelRendererClose(
+async function consultPanelRenderer(
   panelView: WebContentsView | null | undefined,
+  requestPrefix:
+    | 'comfy-window:request-close'
+    | 'comfy-window:request-return-to-dashboard',
 ): Promise<boolean> {
   if (!panelView || panelView.webContents.isDestroyed()) return true
   return new Promise<boolean>((resolve) => {
-    const requestId = `close-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    const prefix = requestPrefix === 'comfy-window:request-close' ? 'close' : 'rtd'
+    const requestId = `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    const ackChannel = `${requestPrefix}-ack`
+    const responseChannel = `${requestPrefix}-response`
     let settled = false
     let acked = false
     const cleanup = (): void => {
-      ipcMain.off('comfy-window:request-close-ack', onAck)
-      ipcMain.off('comfy-window:request-close-response', onResponse)
+      ipcMain.off(ackChannel, onAck)
+      ipcMain.off(responseChannel, onResponse)
       if (!panelView.webContents.isDestroyed()) {
         panelView.webContents.off('render-process-gone', onCrash)
         panelView.webContents.off('destroyed', onCrash)
@@ -85,21 +82,18 @@ export async function consultPanelRendererClose(
       cleanup()
       resolve(true)
     }
-    ipcMain.on('comfy-window:request-close-ack', onAck)
-    ipcMain.on('comfy-window:request-close-response', onResponse)
+    ipcMain.on(ackChannel, onAck)
+    ipcMain.on(responseChannel, onResponse)
     panelView.webContents.on('render-process-gone', onCrash)
     panelView.webContents.on('destroyed', onCrash)
     try {
-      panelView.webContents.send('comfy-window:request-close', { requestId })
+      panelView.webContents.send(requestPrefix, { requestId })
     } catch {
       settled = true
       cleanup()
       resolve(true)
       return
     }
-    // Hung-renderer safety: only fires if we never got the ack. Once
-    // the renderer acks receipt we trust it to either reply or have
-    // its webContents torn down (render-process-gone covers that).
     setTimeout(() => {
       if (settled || acked) return
       settled = true
@@ -107,6 +101,35 @@ export async function consultPanelRendererClose(
       resolve(true)
     }, 2000)
   })
+}
+
+/**
+ * Main consults the panel renderer before tearing down a host
+ * window so a Tier 2 progress / Tier 3 takeover overlay can
+ * prompt the user to confirm cancellation via the standardised
+ * cancel-prompt copy. Returns true when the renderer cleared the
+ * close (no overlay open, or the user confirmed cancellation),
+ * false when the renderer aborted (user dismissed the prompt).
+ */
+export async function consultPanelRendererClose(
+  panelView: WebContentsView | null | undefined,
+): Promise<boolean> {
+  return consultPanelRenderer(panelView, 'comfy-window:request-close')
+}
+
+/**
+ * Main consults the panel renderer before flipping an install-backed
+ * host window back to the dashboard (File menu's Return to Dashboard).
+ * Layers two prompts on the renderer side:
+ *   - Tier 2/3 overlay in flight → standard cancel-prompt copy.
+ *   - No overlay + local install → "Stop ComfyUI?" confirm so the
+ *     user knows the running session is about to be torn down.
+ * Cloud / remote installs (and chooser hosts) clear immediately.
+ */
+export async function consultPanelRendererReturnToDashboard(
+  panelView: WebContentsView | null | undefined,
+): Promise<boolean> {
+  return consultPanelRenderer(panelView, 'comfy-window:request-return-to-dashboard')
 }
 
 /**
@@ -135,15 +158,15 @@ export function closeAllHostWindows(): void {
  * about:blank, panelView remounted in chooser mode) and the title
  * bar repaints to the chooser-host identity.
  *
- * Funnels through the same `consultPanelRendererClose` cancel-prompt
- * the close handler uses, so a Tier 2/3 progress overlay still gets
- * to prompt the user before its install gets detached out from under
- * it.
+ * Funnels through `consultPanelRendererReturnToDashboard` so the
+ * renderer can layer the in-flight cancel-prompt (Tier 2/3 overlays)
+ * AND the local-install "Stop ComfyUI?" confirm on top of one another;
+ * cloud / remote installs clear silently.
  */
 export async function returnToDashboard(parentEntryId: number): Promise<void> {
   const entry = comfyWindows.get(parentEntryId)
   if (!entry || isChooserHost(entry) || entry.window.isDestroyed()) return
-  const cleared = await consultPanelRendererClose(entry.panelView)
+  const cleared = await consultPanelRendererReturnToDashboard(entry.panelView)
   if (!cleared) return
   if (entry.window.isDestroyed()) return
   entry.detachInstall()

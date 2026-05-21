@@ -20,7 +20,9 @@ import { useInstallationStore } from '../stores/installationStore'
 import { seedLauncherPrefsFromUrl, useLauncherPrefs } from '../composables/useLauncherPrefs'
 import { useModal } from '../composables/useModal'
 import { useAppUpdatePrompts } from '../composables/useAppUpdatePrompts'
+import { useReturnToDashboardConfirm } from '../composables/useReturnToDashboardConfirm'
 import { useSendFeedback } from '../composables/useSendFeedback'
+import { emitTelemetryAction } from '../lib/telemetry'
 import { useDeepLinkRouter } from '../composables/useDeepLinkRouter'
 import { useInstallContextMenu } from '../composables/useInstallContextMenu'
 import { registerMigrateTakeover } from '../composables/useMigrateAction'
@@ -167,9 +169,12 @@ const { handleChooserPick, handleChooserShowNewInstall } = chooserHandoff
 let unsubPanel: (() => void) | null = null
 let unsubLocale: (() => void) | null = null
 let unsubCloseRequest: (() => void) | null = null
+let unsubReturnToDashboardRequest: (() => void) | null = null
 let unsubAppUpdatePromptRestart: (() => void) | null = null
 let unsubAppUpdateUserActionFailed: (() => void) | null = null
 let unsubRequestCloseDrawer: (() => void) | null = null
+
+const { confirmReturnToDashboard } = useReturnToDashboardConfirm()
 
 // Drives the title-bar icon close path's animated dismiss (see
 // `onRequestCloseDrawer` below).
@@ -336,6 +341,37 @@ onMounted(async () => {
     })()
   })
 
+  // File menu's "Return to Dashboard" consult. Layered:
+  //   - In-flight overlay → tier-aware cancel-prompt via `closeOverlay`.
+  //   - No overlay + local install → "Stop ComfyUI?" confirm so the
+  //     user knows the running session is about to be stopped.
+  // Cloud / remote installs (and chooser hosts) clear silently.
+  unsubReturnToDashboardRequest = window.api.onReturnToDashboardRequest(({ requestId }) => {
+    window.api.ackReturnToDashboardRequest({ requestId })
+    void (async () => {
+      let cleared: boolean
+      let reason: 'in_flight' | 'running' | 'stopped' | 'crashed'
+      if (currentOverlay.value !== null) {
+        reason = 'in_flight'
+        cleared = await closeOverlay()
+      } else {
+        const id = installationId
+        const inst = id ? (installationStore.getById(id) ?? null) : null
+        if (id && sessionStore.isRunning(id)) reason = 'running'
+        else if (id && sessionStore.errorInstances.has(id)) reason = 'crashed'
+        else reason = 'stopped'
+        cleared = await confirmReturnToDashboard(inst, reason)
+      }
+      if (cleared) {
+        emitTelemetryAction('desktop2.instance.return_to_dashboard', {
+          from: 'menu',
+          reason,
+        })
+      }
+      window.api.respondReturnToDashboardRequest({ requestId, cleared })
+    })()
+  })
+
   // Auto-fire the restart prompt when an auto-off user-initiated
   // download finishes — closes the loop on the single-gesture flow
   // (Download → wait → Restart) without forcing the user to find the
@@ -420,6 +456,7 @@ onUnmounted(() => {
   unsubPanel?.()
   unsubLocale?.()
   unsubCloseRequest?.()
+  unsubReturnToDashboardRequest?.()
   unsubAppUpdatePromptRestart?.()
   unsubAppUpdateUserActionFailed?.()
   unsubRequestCloseDrawer?.()

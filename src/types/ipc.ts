@@ -887,6 +887,20 @@ export interface ElectronApi {
    *  acked main waits indefinitely for the actual response (the user
    *  may take their time on the cancel-prompt). */
   ackCloseRequest(payload: { requestId: string }): void
+  /** Main consults the panel renderer before flipping an install-backed
+   *  host window back to the dashboard (File menu Return to Dashboard).
+   *  The renderer layers the Tier 2/3 cancel-prompt on top of the
+   *  local-install "Stop ComfyUI?" confirm and echoes the result back
+   *  via `respondReturnToDashboardRequest`. */
+  onReturnToDashboardRequest(callback: (data: { requestId: string }) => void): Unsubscribe
+  /** Reply to a `comfy-window:request-return-to-dashboard` consult —
+   *  `cleared: true` lets main detach the install, `cleared: false`
+   *  aborts. */
+  respondReturnToDashboardRequest(payload: { requestId: string; cleared: boolean }): void
+  /** Sent immediately on receiving the return-to-dashboard request so
+   *  main extends its hung-renderer timeout while the renderer prompts
+   *  the user. Symmetric with `ackCloseRequest`. */
+  ackReturnToDashboardRequest(payload: { requestId: string }): void
   /** Stamp the calling chooser host window's current bounds onto the
    *  install's saved-bounds slot (visual continuity). Fallback wiring
    *  for `claimAttachHost` rejections (e.g. the install uses

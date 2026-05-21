@@ -113,6 +113,17 @@ export function buildElectronApi(): ElectronApi {
       ipcRenderer.send('comfy-window:request-close-response', payload),
     ackCloseRequest: (payload) =>
       ipcRenderer.send('comfy-window:request-close-ack', payload),
+    onReturnToDashboardRequest: (callback) => {
+      const handler = (_event: IpcRendererEvent, data: unknown) =>
+        callback(data as { requestId: string })
+      ipcRenderer.on('comfy-window:request-return-to-dashboard', handler)
+      return () =>
+        ipcRenderer.removeListener('comfy-window:request-return-to-dashboard', handler)
+    },
+    respondReturnToDashboardRequest: (payload) =>
+      ipcRenderer.send('comfy-window:request-return-to-dashboard-response', payload),
+    ackReturnToDashboardRequest: (payload) =>
+      ipcRenderer.send('comfy-window:request-return-to-dashboard-ack', payload),
     transferHostBoundsToInstall: (installationId) =>
       ipcRenderer.invoke('transfer-host-bounds-to-install', installationId),
     claimAttachHost: (installationId) =>

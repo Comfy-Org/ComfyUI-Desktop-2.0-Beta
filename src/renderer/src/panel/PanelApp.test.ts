@@ -305,6 +305,10 @@ function installMockApi(initial?: {
     onCloseRequest: vi.fn(() => () => {}),
     respondCloseRequest: vi.fn(),
     ackCloseRequest: vi.fn(),
+    // Symmetric mock pair for the File menu's Return to Dashboard consult.
+    onReturnToDashboardRequest: vi.fn(() => () => {}),
+    respondReturnToDashboardRequest: vi.fn(),
+    ackReturnToDashboardRequest: vi.fn(),
     // Title-bar Settings icon → main routes a drawer-close request here
     // so the ComfyUISettingsPanel can play its leave animation before
     // closeCurrentPanel collapses the panelView. The test suite never

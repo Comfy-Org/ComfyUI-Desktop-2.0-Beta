@@ -493,8 +493,8 @@ function handleDone(): void {
   }
 }
 
-/** Return-to-Dashboard from any op state. In-flight uses the Phase 4
- *  confirm (local installs are prompted because returning stops a
+/** Return-to-Dashboard from any op state. In-flight runs the
+ *  shared confirm (local installs are prompted because returning stops a
  *  running ComfyUI); error / finished states skip the prompt because
  *  the install is already idle. Closes the takeover and, if the
  *  current window is install-backed, flips it back to chooser mode in
@@ -828,7 +828,7 @@ defineExpose({ startOperation, showOperation })
          row pins to the takeover's bottom edge without crowding the
          caption / banner area above. Same geometry as
          NewInstallModal's Configure footer.
-         • In-flight → Return to Dashboard (Phase 4 confirm gates
+         • In-flight → Return to Dashboard (shared confirm gates
            local installs because returning cancels the running op /
            ComfyUI). Cancels the op then flips the host back to
            chooser mode in place.
