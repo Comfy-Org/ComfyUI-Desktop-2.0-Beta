@@ -57,9 +57,10 @@ export function installPickerSettingsApiShim(): void {
 
   const api = {} as ShimApi
   for (const [apiKey, bridgeKey] of Object.entries(API_MAP)) {
-    ;(api as Record<string, unknown>)[apiKey] = (
-      bridge[bridgeKey as keyof ComfyTitlePopupBridge] as unknown as Function
-    ).bind(bridge)
+    const method = bridge[bridgeKey as keyof ComfyTitlePopupBridge] as (
+      ...args: unknown[]
+    ) => unknown
+    ;(api as Record<string, unknown>)[apiKey] = method.bind(bridge)
   }
   // Adapters for the two methods whose shape diverges from a pure pass-through.
   api.browseFolder = (defaultPath?: string) =>
