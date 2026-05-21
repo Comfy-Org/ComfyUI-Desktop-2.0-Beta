@@ -29,7 +29,41 @@ export interface SeedInstallation {
   sourceId?: string
   installPath?: string
   status?: string
+  /**
+   * Snapshot JSON records to seed into `<installPath>/.launcher/snapshots/`.
+   * Each entry is written as a standalone `<timestamp>-<trigger>-<6hex>.json`
+   * file in the same format the live snapshot store produces.
+   */
+  snapshots?: SeedSnapshot[]
   [key: string]: unknown
+}
+
+/** Loose Snapshot shape — duplicated locally to keep the harness free of
+ *  src/ imports. Keep in sync with `src/main/lib/snapshots/types.ts`. */
+export interface SeedSnapshot {
+  version?: 1
+  createdAt?: string
+  trigger: 'boot' | 'restart' | 'manual' | 'pre-update' | 'post-update' | 'post-restore'
+  label?: string | null
+  comfyui: {
+    ref: string
+    commit: string | null
+    releaseTag: string
+    variant: string
+    baseTag?: string
+    commitsAhead?: number
+  }
+  customNodes?: unknown[]
+  pipPackages?: Record<string, string>
+  pythonVersion?: string
+  updateChannel?: string
+}
+
+/** Mirrors `formatTimestamp` in `src/main/lib/snapshots/store.ts` so seeded
+ *  filenames sort identically to live ones (newest-first by name). */
+function formatSeedTimestamp(date: Date): string {
+  const pad = (n: number, len = 2): string => String(n).padStart(len, '0')
+  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}_${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}_${pad(date.getMilliseconds(), 3)}`
 }
 
 function buildIsolatedEnv(homeDir: string, settingsSeed?: Record<string, unknown>): Record<string, string> {
@@ -132,21 +166,50 @@ export async function launchLauncherApp(options?: SeedOptions): Promise<Launcher
     const userDataDir = await application.evaluate(async ({ app: electronApp }) => {
       return electronApp.getPath('userData')
     })
-    const records = options.installations.map((inst, i) => ({
-      id: inst.id ?? `inst-test-${i}`,
-      name: inst.name ?? `Test Install ${i + 1}`,
-      createdAt: new Date().toISOString(),
-      installPath: inst.installPath ?? path.join(homeDir, `install-${i}`),
-      sourceId: inst.sourceId ?? 'standalone',
-      status: inst.status ?? 'installed',
-      ...inst,
-    }))
+    const records = options.installations.map((inst, i) => {
+      const { snapshots: _snapshots, ...rest } = inst
+      return {
+        id: inst.id ?? `inst-test-${i}`,
+        name: inst.name ?? `Test Install ${i + 1}`,
+        createdAt: new Date().toISOString(),
+        installPath: inst.installPath ?? path.join(homeDir, `install-${i}`),
+        sourceId: inst.sourceId ?? 'standalone',
+        status: inst.status ?? 'installed',
+        ...rest,
+      }
+    })
     const { writeFile: writeFileFs } = await import('node:fs/promises')
     await mkdir(userDataDir, { recursive: true })
     await writeFileFs(
       path.join(userDataDir, 'installations.json'),
       JSON.stringify(records, null, 2),
     )
+    // Seed snapshot JSON files under `<installPath>/.launcher/snapshots/` so
+    // the snapshots tab finds them on first read.
+    for (let i = 0; i < options.installations.length; i++) {
+      const snaps = options.installations[i]!.snapshots
+      if (!snaps || snaps.length === 0) continue
+      const installPath = records[i]!.installPath
+      const snapshotsDir = path.join(installPath, '.launcher', 'snapshots')
+      await mkdir(snapshotsDir, { recursive: true })
+      for (let j = 0; j < snaps.length; j++) {
+        const s = snaps[j]!
+        const createdAt = s.createdAt ?? new Date(Date.now() - (snaps.length - j) * 1000).toISOString()
+        const full = {
+          version: 1,
+          createdAt,
+          trigger: s.trigger,
+          label: s.label ?? null,
+          comfyui: s.comfyui,
+          customNodes: s.customNodes ?? [],
+          pipPackages: s.pipPackages ?? {},
+          pythonVersion: s.pythonVersion,
+          updateChannel: s.updateChannel ?? 'stable',
+        }
+        const filename = `${formatSeedTimestamp(new Date(createdAt))}-${s.trigger}-${(j + 1).toString(16).padStart(6, '0')}.json`
+        await writeFileFs(path.join(snapshotsDir, filename), JSON.stringify(full, null, 2))
+      }
+    }
   }
 
   const cleanup = async (): Promise<void> => {
