@@ -414,6 +414,7 @@ onUnmounted(() => {
     class="popup"
     :class="{
       'is-light': isLight,
+      'is-menu': kind === 'menu',
       'is-picker': kind === 'instance-picker',
       'is-global-settings': kind === 'global-settings',
     }"
@@ -453,26 +454,32 @@ onUnmounted(() => {
   box-sizing: border-box;
 }
 
-/* Instance picker surface chrome per Figma. Menu / downloads kinds keep
- * the legacy lightweight surface. */
-.popup.is-picker {
-  background: var(--neutral-800, #211927) !important;
-  border: 1px solid var(--chooser-surface-border);
-  border-radius: 12px;
+/* Hamburger menu (kind === 'menu') uses a fixed surface across both
+ * the chooser/dashboard host and the install-backed canvas host so the
+ * dropdown reads consistently. The per-host title-bar theme still
+ * paints the title bar itself; only the popped-out menu is unified.
+ * `!important` overrides the inline `background`/`color` applied via
+ * `:style="{ background: themeBg, color: themeText }"` on `.popup`. */
+.popup.is-menu {
+  background: var(--neutral-800) !important;
+  color: var(--neutral-100) !important;
+  border-color: var(--chooser-surface-border);
+  font-size: 13px;
+}
+
+/* Instance picker + Global Settings share one modal-card chrome —
+ * `--modal-surface-bg` outer, `--modal-surface-border` hairline, same
+ * radius + layered shadow. Keeps both popups visually consistent with
+ * in-app modals (DownloadsModal, TermsModal). Menu / downloads kinds
+ * keep the legacy lightweight surface. */
+.popup.is-picker,
+.popup.is-global-settings {
+  background: var(--modal-surface-bg) !important;
+  border: 1px solid var(--modal-surface-border);
+  border-radius: 14px;
   box-shadow:
     0 20px 24px -4px rgba(10, 13, 18, 0.08),
     0 8px 8px -4px rgba(10, 13, 18, 0.03),
     0 3px 3px -1.5px rgba(10, 13, 18, 0.04);
-}
-
-/* Global-settings surface chrome mirrors `.base-modal-panel` from
- * BaseModal.vue so the popup reads as a sibling of in-app modals
- * (DownloadsModal, TermsModal). Tokens, radius, border alpha, and
- * shadow stay in lockstep with BaseModal. */
-.popup.is-global-settings {
-  background: var(--neutral-800, #211927) !important;
-  border: 1px solid color-mix(in oklab, var(--neutral-100) 6%, transparent);
-  border-radius: 14px;
-  box-shadow: 0 24px 64px 0 rgba(0, 0, 0, 0.35);
 }
 </style>

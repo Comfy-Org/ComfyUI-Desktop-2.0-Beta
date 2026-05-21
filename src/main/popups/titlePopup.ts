@@ -385,14 +385,16 @@ const popupBackdropsByParent = new Map<number, PopupBackdropEntry>()
 const popupBackdropsByWebContents = new Map<number, number /* parentId */>()
 
 /** Inline HTML loaded into the backdrop view. Fixed `position: fixed`
- *  scrim — 60% opacity over the host body with a 2px backdrop blur so
- *  the dim reads as a soft veil instead of a hard wall. Same scrim
- *  color as before (`#211927`). A click anywhere fires the dismiss
- *  IPC; main routes it through to hide the picker popup. */
+ *  scrim — translucent dim over the host body with a 14px backdrop
+ *  blur so the underlying chrome reads as a frosted-glass background
+ *  behind the centred-card popup. Scrim color (`#211927`) matches the
+ *  app's neutral-800; opacity is low (40%) so the blur is the dominant
+ *  effect, not the dim. A click anywhere fires the dismiss IPC; main
+ *  routes it through to hide the picker / global-settings popup. */
 const POPUP_BACKDROP_HTML = `<!doctype html>
 <html><head><meta charset="utf-8"><style>
   html,body{margin:0;width:100%;height:100%;background:transparent;overflow:hidden;-webkit-user-select:none;user-select:none}
-  .scrim{position:fixed;inset:0;width:100%;height:100%;background:#211927;opacity:0.6;backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px);cursor:default}
+  .scrim{position:fixed;inset:0;width:100%;height:100%;background:rgba(33,25,39,0.4);backdrop-filter:blur(14px) saturate(140%);-webkit-backdrop-filter:blur(14px) saturate(140%);cursor:default}
 </style></head><body>
 <div class="scrim" id="s"></div>
 <script>
@@ -995,11 +997,11 @@ function computePickerBounds(
  *  host window itself resizes. Clamps keep the card usable on both
  *  narrow and ultra-wide windows. */
 const GLOBAL_SETTINGS_POPUP_MIN_WIDTH = 640
-const GLOBAL_SETTINGS_POPUP_MAX_WIDTH = 960
-const GLOBAL_SETTINGS_POPUP_WIDTH_RATIO = 0.7
-const GLOBAL_SETTINGS_POPUP_MIN_HEIGHT = 480
-const GLOBAL_SETTINGS_POPUP_MAX_HEIGHT = 720
-const GLOBAL_SETTINGS_POPUP_HEIGHT_RATIO = 0.75
+const GLOBAL_SETTINGS_POPUP_MAX_WIDTH = 880
+const GLOBAL_SETTINGS_POPUP_WIDTH_RATIO = 0.65
+const GLOBAL_SETTINGS_POPUP_MIN_HEIGHT = 420
+const GLOBAL_SETTINGS_POPUP_MAX_HEIGHT = 560
+const GLOBAL_SETTINGS_POPUP_HEIGHT_RATIO = 0.7
 
 function computeGlobalSettingsBounds(parent: BrowserWindow): { width: number; height: number } {
   const { width: cw, height: ch } = parent.getContentBounds()
@@ -1104,15 +1106,20 @@ function refitPopupForParent(entry: TitlePopupEntry): void {
   // bar-local coords (which don't move on resize) so a fresh
   // `clampPopupX` of the existing X is sufficient.
   let x: number
+  let y = cur.y
   if (entry.kind === 'global-settings') {
-    const contentWidth = parent.getContentBounds().width
+    const { width: contentWidth, height: contentHeightForY } = parent.getContentBounds()
     x = Math.max(0, Math.round((contentWidth - width) / 2))
+    y = Math.max(
+      TITLEBAR_HEIGHT,
+      Math.round(TITLEBAR_HEIGHT + (contentHeightForY - TITLEBAR_HEIGHT - height) / 2),
+    )
   } else {
     x = clampPopupX(cur.x, cur.width, parent)
   }
 
-  if (x === cur.x && width === cur.width && height === cur.height) return
-  entry.view.popup.setBounds({ x, y: cur.y, width, height })
+  if (x === cur.x && y === cur.y && width === cur.width && height === cur.height) return
+  entry.view.popup.setBounds({ x, y, width, height })
 }
 
 type OpenTitlePopupOpts = {
@@ -1198,10 +1205,17 @@ function openTitlePopup(opts: OpenTitlePopupOpts): void {
   } else {
     // global-settings — fluid-clamped centred card. Width + height are
     // pinned once from host content bounds; tab switches inside the
-    // popup never trigger a resize.
+    // popup never trigger a resize. Both axes centre on the area
+    // below the title bar. Anchor coords are title-bar-local so `y=0`
+    // sits at the title-bar top; the centred-y formula recentres
+    // inside the `contentHeight - TITLEBAR_HEIGHT` band beneath it.
     ;({ width, height } = computeGlobalSettingsBounds(opts.parent))
-    const contentWidth = opts.parent.getContentBounds().width
+    const { width: contentWidth, height: contentHeight } = opts.parent.getContentBounds()
     x = Math.max(0, Math.round((contentWidth - width) / 2))
+    y = Math.max(
+      TITLEBAR_HEIGHT,
+      Math.round(TITLEBAR_HEIGHT + (contentHeight - TITLEBAR_HEIGHT - height) / 2),
+    )
   }
 
   // Update bounds while still hidden — the popup is flipped visible
