@@ -35,7 +35,6 @@ import { resolve } from 'node:path'
 import { test, expect } from '@playwright/test'
 import { launchApp, type AppContext } from './launchApp'
 import {
-  clickNewInstallTile,
   clickInstallTile,
   expectChooserVisible,
   expectTakeoverOpen,
@@ -58,6 +57,11 @@ test.beforeAll(async () => {
       } catch { /* try next depth */ }
     }
   }
+  // True cold start: no `firstUseCompleted` seed, so the host opens on
+  // the first-use takeover. The first test below drives through consent
+  // + pick-local, which chains directly into the new-install takeover
+  // (Tier 3 → Tier 3 silent swap) — the same surface the user reaches
+  // on the no-existing-installs cold-start path.
   ctx = await launchApp()
 })
 
@@ -75,16 +79,37 @@ async function comfyFrontendIsLoaded(): Promise<boolean> {
 }
 
 // ---------------------------------------------------------------------------
-// Install via the New Install takeover
+// First-use takeover → New Install takeover
 // ---------------------------------------------------------------------------
 
-test('chooser shows New Install tile on cold start @lifecycle', async () => {
-  await expectChooserVisible(ctx.panel)
-  expect(await ctx.panel.exists('.chooser-tile-new')).toBe(true)
+test('cold start lands on first-use consent screen @lifecycle', async () => {
+  // The first-use takeover gates the chooser body until consent +
+  // cloud/local pick are completed. On a fresh profile the consent
+  // step is what the user lands on.
+  await ctx.panel.waitForVisible('.consent-hero', { timeout: 15_000 })
+  await ctx.panel.waitForVisible('[data-testid="first-use-accept-consent"]')
 })
 
-test('opens New Install takeover with form pre-filled @lifecycle', async () => {
-  await clickNewInstallTile(ctx.panel)
+test('accept consent + pick local opens New Install takeover with form pre-filled @lifecycle', async () => {
+  // Tick the required ToS checkbox (telemetry stays at its default
+  // opt-in; the test settings already disable telemetry network egress
+  // separately, so the actual value doesn't matter here).
+  expect(await ctx.panel.click('[data-testid="first-use-consent-tos"]')).toBe(true)
+  await ctx.panel.waitFor(
+    async () => ctx.panel.evaluate<boolean>(
+      `!document.querySelector('[data-testid="first-use-accept-consent"]').disabled`,
+    ),
+    { timeout: 5_000, message: 'Get Started never became enabled after ticking ToS' },
+  )
+
+  // Accept consent → advance to the cloud-vs-local pick step.
+  expect(await ctx.panel.click('[data-testid="first-use-accept-consent"]')).toBe(true)
+  await ctx.panel.waitForVisible('[data-testid="first-use-pick-local"]', { timeout: 10_000 })
+
+  // Pick Local — with no legacy desktop install detected, this emits
+  // `chain-local`, which the host swaps for the new-install Tier 3
+  // takeover (silent Tier 3 → Tier 3 swap inside `useOverlay`).
+  expect(await ctx.panel.click('[data-testid="first-use-pick-local"]')).toBe(true)
   await expectTakeoverOpen(ctx.panel)
 
   // Standalone is pre-selected on open. The release + variant fields
