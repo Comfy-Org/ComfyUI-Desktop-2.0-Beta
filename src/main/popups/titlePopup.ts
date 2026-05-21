@@ -820,13 +820,31 @@ const INSTANCE_PICKER_POPUP_MIN_HEIGHT_PX = 450
 const INSTANCE_PICKER_POPUP_MAX_HEIGHT_PX = 600
 const INSTANCE_PICKER_POPUP_MAX_HEIGHT_RATIO = 0.7
 
-/** Global-settings popup sizing — mirrors the picker so the chrome
- *  reads as a sibling card. Renderer measures its own natural height
- *  and asks for it via `requestSize`, clamped by the same window-ratio
- *  safety net. */
-const GLOBAL_SETTINGS_POPUP_WIDTH = 720
-const GLOBAL_SETTINGS_POPUP_MAX_HEIGHT_PX = 720
-const GLOBAL_SETTINGS_POPUP_MAX_HEIGHT_RATIO = 0.7
+/** Global-settings popup sizing — two-pane tabbed card. Width and
+ *  height are computed once per open from host content bounds (no
+ *  renderer-driven `requestSize` loop) so the popup stays a fixed
+ *  size regardless of which tab is selected and only re-fits when the
+ *  host window itself resizes. Clamps keep the card usable on both
+ *  narrow and ultra-wide windows. */
+const GLOBAL_SETTINGS_POPUP_MIN_WIDTH = 640
+const GLOBAL_SETTINGS_POPUP_MAX_WIDTH = 960
+const GLOBAL_SETTINGS_POPUP_WIDTH_RATIO = 0.7
+const GLOBAL_SETTINGS_POPUP_MIN_HEIGHT = 480
+const GLOBAL_SETTINGS_POPUP_MAX_HEIGHT = 720
+const GLOBAL_SETTINGS_POPUP_HEIGHT_RATIO = 0.75
+
+function computeGlobalSettingsBounds(parent: BrowserWindow): { width: number; height: number } {
+  const { width: cw, height: ch } = parent.getContentBounds()
+  const width = Math.min(
+    GLOBAL_SETTINGS_POPUP_MAX_WIDTH,
+    Math.max(GLOBAL_SETTINGS_POPUP_MIN_WIDTH, Math.round(cw * GLOBAL_SETTINGS_POPUP_WIDTH_RATIO)),
+  )
+  const height = Math.min(
+    GLOBAL_SETTINGS_POPUP_MAX_HEIGHT,
+    Math.max(GLOBAL_SETTINGS_POPUP_MIN_HEIGHT, Math.round(ch * GLOBAL_SETTINGS_POPUP_HEIGHT_RATIO)),
+  )
+  return { width, height }
+}
 
 /** Right-edge gutter when the popup gets shifted away from its
  *  anchor to fit inside the host window. Keeps a small breathing
@@ -874,6 +892,7 @@ function refitPopupForParent(entry: TitlePopupEntry): void {
   const contentHeight = parent.getContentBounds().height
 
   let height = cur.height
+  let width = cur.width
   if (entry.kind === 'downloads') {
     const ceiling = Math.min(
       DOWNLOADS_POPUP_MAX_HEIGHT_PX,
@@ -887,11 +906,11 @@ function refitPopupForParent(entry: TitlePopupEntry): void {
     )
     height = Math.max(INSTANCE_PICKER_POPUP_MIN_HEIGHT_PX, Math.min(cur.height, ceiling))
   } else if (entry.kind === 'global-settings') {
-    const ceiling = Math.min(
-      GLOBAL_SETTINGS_POPUP_MAX_HEIGHT_PX,
-      Math.round(contentHeight * GLOBAL_SETTINGS_POPUP_MAX_HEIGHT_RATIO),
-    )
-    height = Math.max(1, Math.min(cur.height, ceiling))
+    // Recompute both dimensions from the same clamp the open path uses
+    // — the popup tracks the host window proportionally as it resizes,
+    // not the renderer-reported content height (the right pane scrolls,
+    // not the popup).
+    ;({ width, height } = computeGlobalSettingsBounds(parent))
   }
 
   // Re-anchor the centred-card kinds (picker, global-settings) on the
@@ -902,13 +921,13 @@ function refitPopupForParent(entry: TitlePopupEntry): void {
   let x: number
   if (entry.kind === 'instance-picker' || entry.kind === 'global-settings') {
     const contentWidth = parent.getContentBounds().width
-    x = Math.max(0, Math.round((contentWidth - cur.width) / 2))
+    x = Math.max(0, Math.round((contentWidth - width) / 2))
   } else {
     x = clampPopupX(cur.x, cur.width, parent)
   }
 
-  if (x === cur.x && height === cur.height) return
-  entry.view.popup.setBounds({ x, y: cur.y, width: cur.width, height })
+  if (x === cur.x && width === cur.width && height === cur.height) return
+  entry.view.popup.setBounds({ x, y: cur.y, width, height })
 }
 
 type OpenTitlePopupOpts = {
@@ -991,13 +1010,10 @@ function openTitlePopup(opts: OpenTitlePopupOpts): void {
     // ratio cap — that's preferable to a sliver-sized picker.
     height = Math.max(INSTANCE_PICKER_POPUP_MIN_HEIGHT_PX, ceiling)
   } else {
-    // global-settings — same centred-card sizing as the picker.
-    width = GLOBAL_SETTINGS_POPUP_WIDTH
-    const contentHeight = opts.parent.getContentBounds().height
-    height = Math.min(
-      GLOBAL_SETTINGS_POPUP_MAX_HEIGHT_PX,
-      Math.round(contentHeight * GLOBAL_SETTINGS_POPUP_MAX_HEIGHT_RATIO),
-    )
+    // global-settings — fluid-clamped centred card. Width + height are
+    // pinned once from host content bounds; tab switches inside the
+    // popup never trigger a resize.
+    ;({ width, height } = computeGlobalSettingsBounds(opts.parent))
   }
 
   // Horizontal position: most kinds anchor at the trigger button and
@@ -1596,11 +1612,7 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
       if (!entry) return
       // Menu popups are sized deterministically by `computePopupHeight`
       // — ignore renderer requests to avoid fighting the source of truth.
-      if (
-        entry.kind !== 'downloads'
-        && entry.kind !== 'instance-picker'
-        && entry.kind !== 'global-settings'
-      ) return
+      if (entry.kind !== 'downloads' && entry.kind !== 'instance-picker') return
       const requested = payload?.height
       if (typeof requested !== 'number' || !Number.isFinite(requested)) return
       const parent = comfyWindows.get(entry.parentEntryId)?.window
@@ -1611,15 +1623,10 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
           DOWNLOADS_POPUP_MAX_HEIGHT_PX,
           Math.round(contentHeight * DOWNLOADS_POPUP_MAX_HEIGHT_RATIO),
         )
-        : entry.kind === 'instance-picker'
-          ? Math.min(
-            INSTANCE_PICKER_POPUP_MAX_HEIGHT_PX,
-            Math.round(contentHeight * INSTANCE_PICKER_POPUP_MAX_HEIGHT_RATIO),
-          )
-          : Math.min(
-            GLOBAL_SETTINGS_POPUP_MAX_HEIGHT_PX,
-            Math.round(contentHeight * GLOBAL_SETTINGS_POPUP_MAX_HEIGHT_RATIO),
-          )
+        : Math.min(
+          INSTANCE_PICKER_POPUP_MAX_HEIGHT_PX,
+          Math.round(contentHeight * INSTANCE_PICKER_POPUP_MAX_HEIGHT_RATIO),
+        )
       // Picker has a per-kind minimum so the two-pane layout never
       // shrinks below a usable size when the right-pane accordions are
       // all collapsed. Other kinds keep the 1px floor (renderer-driven
