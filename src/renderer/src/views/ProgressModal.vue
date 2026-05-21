@@ -502,12 +502,14 @@ function handleDone(): void {
 async function returnToDashboard(reason: ReturnToDashboardReason): Promise<void> {
   const id = displayId.value
   const op = id ? progressStore.operations.get(id) : null
-  if (reason === 'in_flight' && id) {
-    const installation = installationStore.getById(id) ?? null
-    const ok = await confirmReturnToDashboard(installation, reason)
-    if (!ok) return
-    // Cancel the in-flight op so it doesn't keep running in the background.
-    if (op && !op.finished) progressStore.cancelOperation(id)
+  const installation = id ? (installationStore.getById(id) ?? null) : null
+  // confirmReturnToDashboard is a no-op for the crashed / finished branches —
+  // only the in-flight footer button can actually surface the prompt.
+  const ok = await confirmReturnToDashboard(installation, reason)
+  if (!ok) return
+  // Cancel the in-flight op so it doesn't keep running in the background.
+  if (reason === 'in_flight' && op && !op.finished && id) {
+    progressStore.cancelOperation(id)
   }
   emitTelemetryAction('desktop2.instance.return_to_dashboard', { from: 'progress', reason })
   emit('close')

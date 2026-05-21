@@ -15,9 +15,13 @@ export function useReturnToDashboardConfirm() {
 
   async function confirmReturnToDashboard(
     installation: Installation | null | undefined,
-    _reason: ReturnToDashboardReason,
+    reason: ReturnToDashboardReason,
   ): Promise<boolean> {
     if (!installation || installation.sourceCategory !== 'local') return true
+    // Already-idle states (stopped / crashed) have nothing to stop, so the
+    // user can back out freely — skip the prompt copy that mentions
+    // stopping ComfyUI.
+    if (reason === 'stopped' || reason === 'crashed') return true
     return modal.confirm({
       title: t('dashboard.confirmStopLocal.title'),
       message: t('dashboard.confirmStopLocal.message'),

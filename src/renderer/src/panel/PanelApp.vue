@@ -349,19 +349,31 @@ onMounted(async () => {
   unsubReturnToDashboardRequest = window.api.onReturnToDashboardRequest(({ requestId }) => {
     window.api.ackReturnToDashboardRequest({ requestId })
     void (async () => {
-      let cleared: boolean
-      let reason: 'in_flight' | 'running' | 'stopped' | 'crashed'
-      if (currentOverlay.value !== null) {
-        reason = 'in_flight'
-        cleared = await closeOverlay()
-      } else {
-        const id = installationId
-        const inst = id ? (installationStore.getById(id) ?? null) : null
-        if (id && sessionStore.isRunning(id)) reason = 'running'
-        else if (id && sessionStore.errorInstances.has(id)) reason = 'crashed'
-        else reason = 'stopped'
-        cleared = await confirmReturnToDashboard(inst, reason)
-      }
+      // The inner await chain is wrapped so a thrown / rejected confirm doesn't
+      // strand main waiting forever on the response; the catch returns a
+      // default `cleared: false` and the response always fires below.
+      const { cleared, reason } = await (async (): Promise<{
+        cleared: boolean
+        reason: 'in_flight' | 'running' | 'stopped' | 'crashed'
+      }> => {
+        try {
+          if (currentOverlay.value !== null) {
+            return { cleared: await closeOverlay(), reason: 'in_flight' }
+          }
+          const id = installationId
+          const inst = id ? (installationStore.getById(id) ?? null) : null
+          const r: 'running' | 'crashed' | 'stopped' =
+            id && sessionStore.isRunning(id)
+              ? 'running'
+              : id && sessionStore.errorInstances.has(id)
+                ? 'crashed'
+                : 'stopped'
+          return { cleared: await confirmReturnToDashboard(inst, r), reason: r }
+        } catch (err) {
+          console.error('return-to-dashboard consult failed', err)
+          return { cleared: false, reason: 'stopped' }
+        }
+      })()
       if (cleared) {
         emitTelemetryAction('desktop2.instance.return_to_dashboard', {
           from: 'menu',

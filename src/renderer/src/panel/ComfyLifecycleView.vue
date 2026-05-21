@@ -157,14 +157,12 @@ const { confirmReturnToDashboard } = useReturnToDashboardConfirm()
 
 async function returnToDashboard(): Promise<void> {
   const id = props.installationId
-  // Only the brief running-but-lifecycle-mounted window needs the
-  // confirm; stopped / crashed branches let the user back out freely.
+  // confirmReturnToDashboard is a no-op for stopped / crashed states; only the
+  // brief running-but-lifecycle-mounted window actually triggers the prompt.
   const isRunning = id ? sessionStore.isRunning(id) : false
   const reason = isRunning ? 'running' : state.value === 'crashed' ? 'crashed' : 'stopped'
-  if (isRunning) {
-    const ok = await confirmReturnToDashboard(props.installation, reason)
-    if (!ok) return
-  }
+  const ok = await confirmReturnToDashboard(props.installation, reason)
+  if (!ok) return
   emitTelemetryAction('desktop2.instance.return_to_dashboard', { from: 'lifecycle', reason })
   await window.api.returnToDashboard()
 }

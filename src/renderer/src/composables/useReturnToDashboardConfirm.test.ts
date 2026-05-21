@@ -82,6 +82,14 @@ describe('useReturnToDashboardConfirm', () => {
     expect(result).toBe(true)
   })
 
+  it('skips confirmation for local installs in stopped / crashed states (nothing to stop)', async () => {
+    const { confirmReturnToDashboard } = useReturnToDashboardConfirm()
+
+    expect(await confirmReturnToDashboard(makeInstallation(), 'stopped')).toBe(true)
+    expect(await confirmReturnToDashboard(makeInstallation(), 'crashed')).toBe(true)
+    expect(mockConfirm).not.toHaveBeenCalled()
+  })
+
   it('skips confirmation for null/undefined installation (defensive)', async () => {
     const { confirmReturnToDashboard } = useReturnToDashboardConfirm()
 
