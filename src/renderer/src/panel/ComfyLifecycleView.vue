@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Play, RefreshCcw, TriangleAlert, Loader2 } from 'lucide-vue-next'
+import { Play, RefreshCcw, TriangleAlert, Loader2, ArrowLeft } from 'lucide-vue-next'
 import { useSessionStore } from '../stores/sessionStore'
+import { useReturnToDashboardConfirm } from '../composables/useReturnToDashboardConfirm'
+import { emitTelemetryAction } from '../lib/telemetry'
 import BaseCopyButton from '../components/ui/BaseCopyButton.vue'
 import type { Installation, ShowProgressOpts } from '../types/ipc'
 
@@ -150,6 +152,22 @@ function startLaunch(): void {
     opKind: 'launch',
   })
 }
+
+const { confirmReturnToDashboard } = useReturnToDashboardConfirm()
+
+async function returnToDashboard(): Promise<void> {
+  const id = props.installationId
+  // Only the brief running-but-lifecycle-mounted window needs the
+  // confirm; stopped / crashed branches let the user back out freely.
+  const isRunning = id ? sessionStore.isRunning(id) : false
+  const reason = isRunning ? 'running' : state.value === 'crashed' ? 'crashed' : 'stopped'
+  if (isRunning) {
+    const ok = await confirmReturnToDashboard(props.installation, reason)
+    if (!ok) return
+  }
+  emitTelemetryAction('desktop2.instance.return_to_dashboard', { from: 'lifecycle', reason })
+  await window.api.returnToDashboard()
+}
 </script>
 
 <template>
@@ -215,6 +233,10 @@ function startLaunch(): void {
             <RefreshCcw :size="16" />
             {{ $t('comfyLifecycle.restart') }}
           </button>
+          <button class="secondary" type="button" @click="returnToDashboard">
+            <ArrowLeft :size="16" />
+            {{ $t('comfyLifecycle.returnToDashboard') }}
+          </button>
         </div>
       </template>
 
@@ -228,6 +250,10 @@ function startLaunch(): void {
           <button class="primary" type="button" @click="startLaunch">
             <Play :size="16" />
             {{ $t('comfyLifecycle.start') }}
+          </button>
+          <button class="secondary" type="button" @click="returnToDashboard">
+            <ArrowLeft :size="16" />
+            {{ $t('comfyLifecycle.returnToDashboard') }}
           </button>
         </div>
       </template>

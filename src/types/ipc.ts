@@ -825,6 +825,13 @@ export interface ElectronApi {
    *  host window after a successful pick → launch hand-off.
    *  Returns true if a window was found and closed. */
   closeHostWindow(): Promise<boolean>
+  /** Flip the install-backed host window containing the calling panel
+   *  WebContents back to chooser mode in place — same BrowserWindow,
+   *  same bounds, same window-key; the install binding is torn down
+   *  (running ComfyUI stopped, listeners off, comfyView navigated to
+   *  about:blank) and the title bar repaints to the chooser identity.
+   *  Returns true when an install-backed entry was found and detached. */
+  returnToDashboard(): Promise<boolean>
   /** Page X-close (Settings / Directories / Install Settings header).
    *  Asks main to reset the panel-history stack and return the body to
    *  the comfy/chooser root. Fire-and-forget; the panel will receive

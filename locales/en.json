@@ -91,6 +91,7 @@
     "crashedDetailsToggle": "Show error log",
     "start": "Start ComfyUI",
     "restart": "Restart ComfyUI",
+    "returnToDashboard": "Return to Dashboard",
     "launchProgressTitle": "Starting ComfyUI"
   },
 

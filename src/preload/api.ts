@@ -82,6 +82,8 @@ export function buildElectronApi(): ElectronApi {
       ipcRenderer.invoke('close-comfy-window', installationId),
     closeHostWindow: () =>
       ipcRenderer.invoke('close-host-window'),
+    returnToDashboard: () =>
+      ipcRenderer.invoke('return-to-dashboard'),
     closeCurrentPanel: () =>
       ipcRenderer.send('comfy-window:close-current-panel'),
     openGlobalSettings: () =>

@@ -22,7 +22,15 @@ const messages = {
       crashedDetailsToggle: 'Show error log',
       start: 'Start ComfyUI',
       restart: 'Restart ComfyUI',
+      returnToDashboard: 'Return to Dashboard',
       launchProgressTitle: 'Starting ComfyUI',
+    },
+    dashboard: {
+      confirmStopLocal: {
+        title: 'Return to Dashboard?',
+        message: 'ComfyUI for this installation will be stopped.',
+        confirmLabel: 'Stop & Return',
+      },
     },
   },
 }
@@ -44,6 +52,7 @@ interface MockApi {
   runAction: ReturnType<typeof vi.fn>
   getRunningInstances: ReturnType<typeof vi.fn>
   getLastCrashError: ReturnType<typeof vi.fn>
+  returnToDashboard: ReturnType<typeof vi.fn>
   onInstanceLaunching: ReturnType<typeof vi.fn>
   onInstanceLaunchFailed: ReturnType<typeof vi.fn>
   onInstanceStarted: ReturnType<typeof vi.fn>
@@ -58,6 +67,7 @@ function installMockApi(overrides: Partial<MockApi> = {}): MockApi {
     runAction: vi.fn().mockResolvedValue({ ok: true }),
     getRunningInstances: vi.fn().mockResolvedValue([]),
     getLastCrashError: vi.fn().mockResolvedValue(null),
+    returnToDashboard: vi.fn().mockResolvedValue(true),
     onInstanceLaunching: vi.fn(() => () => {}),
     onInstanceLaunchFailed: vi.fn(() => () => {}),
     onInstanceStarted: vi.fn(() => () => {}),
@@ -263,5 +273,34 @@ describe('ComfyLifecycleView', () => {
     await payload.apiCall()
     const api = (window as unknown as { api: MockApi }).api
     expect(api.runAction).toHaveBeenCalledWith('inst-1', 'launch')
+  })
+
+  it('renders a Return to Dashboard button in the stopped state and calls returnToDashboard without confirm', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    const buttons = wrapper.findAll('button.secondary')
+    const ret = buttons.find((b) => b.text().includes('Return to Dashboard'))
+    expect(ret?.exists()).toBe(true)
+    await ret!.trigger('click')
+    await flushPromises()
+    const api = (window as unknown as { api: MockApi }).api
+    expect(api.returnToDashboard).toHaveBeenCalled()
+  })
+
+  it('renders a Return to Dashboard button in the crashed state and calls returnToDashboard without confirm', async () => {
+    const wrapper = mountView()
+    const sessionStore = useSessionStore()
+    sessionStore.errorInstances.set('inst-1', {
+      installationName: 'My Local Install',
+      exitCode: 1,
+    })
+    await flushPromises()
+    const buttons = wrapper.findAll('button.secondary')
+    const ret = buttons.find((b) => b.text().includes('Return to Dashboard'))
+    expect(ret?.exists()).toBe(true)
+    await ret!.trigger('click')
+    await flushPromises()
+    const api = (window as unknown as { api: MockApi }).api
+    expect(api.returnToDashboard).toHaveBeenCalled()
   })
 })

@@ -801,6 +801,26 @@ ipcMain.handle('close-host-window', (event) => {
 })
 
 /**
+ * Flip the install-backed host window that owns the calling panel
+ * WebContents back to chooser mode in place (same window, same bounds).
+ * Returns `true` when an install-backed entry was found and detached.
+ *
+ * Used by panel-side surfaces (ProgressModal Return-to-Dashboard,
+ * ComfyLifecycleView, etc.) to send the user back to the dashboard
+ * without closing the window.
+ */
+ipcMain.handle('return-to-dashboard', (event) => {
+  for (const [, entry] of comfyWindows) {
+    if (entry.window.isDestroyed()) continue
+    if (!isInstallHost(entry)) continue
+    if (entry.panelView?.webContents !== event.sender) continue
+    entry.detachInstall()
+    return true
+  }
+  return false
+})
+
+/**
  * Stake an in-place attach claim from a chooser-host renderer. When
  * the launch event subsequently lands in `onLaunch()`, the matching
  * `consumeAttachClaim()` call rebuilds the comfyView's partition if
