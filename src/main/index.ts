@@ -1299,6 +1299,26 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
     installationEvents.on('changed', () => {
       _broadcastToRenderer('installations-changed', {})
     })
+
+    // Auto-detach install-backed host windows whose install has been
+    // removed from the registry (delete-action or untrack-action). Without
+    // this, an install-backed host would keep rendering chrome / IPC
+    // wiring for a non-existent install, leading to broken state on the
+    // next reload and dangling references in the title-bar / panel. The
+    // hook is generic — any future removal path is covered by the same
+    // registry-membership check.
+    installationEvents.on('changed', () => {
+      void (async () => {
+        const liveIds = new Set((await listInstallations()).map((i) => i.id))
+        for (const entry of comfyWindows.values()) {
+          if (entry.window.isDestroyed()) continue
+          if (!isInstallHost(entry)) continue
+          if (entry.installationId && !liveIds.has(entry.installationId)) {
+            entry.detachInstall()
+          }
+        }
+      })()
+    })
   })
 
   app.on('activate', () => {
