@@ -43,6 +43,7 @@ function installMockApi(): MockApiState {
   let removedCb: ((data: { url: string }) => void) | null = null
   let clearedCb: ((data: { urls: string[] }) => void) | null = null
   window.api = {
+    platform: 'darwin',
     listModelDownloads: vi.fn().mockResolvedValue([]),
     onModelDownloadProgress: vi.fn(() => vi.fn()),
     onModelDownloadRemoved: vi.fn((cb: (data: { url: string }) => void) => {

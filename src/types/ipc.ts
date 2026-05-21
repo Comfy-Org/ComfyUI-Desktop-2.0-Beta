@@ -113,12 +113,17 @@ export interface DetailField {
   label: string
   value: string | boolean | number | Record<string, string> | null
   editable?: boolean
-  editType?: 'select' | 'boolean' | 'text' | 'path' | 'channel-cards' | 'args-builder' | 'env-vars'
+  editType?: 'select' | 'boolean' | 'text' | 'number' | 'path' | 'channel-cards' | 'args-builder' | 'env-vars'
   options?: DetailFieldOption[]
   refreshSection?: boolean
   browseOnly?: boolean
   onChangeAction?: string
   tooltip?: string
+  // text / number support — surfaced from SettingsField when DetailField
+  // is built from a global SettingsSection (Global Settings panel).
+  placeholder?: string
+  min?: number
+  max?: number
 }
 
 export interface ActionDef {
@@ -228,6 +233,14 @@ export interface ShowProgressOpts {
    *  one continuous screen. The auto-launch is wired in
    *  `useFirstUseChain` (its existing watcher fits the same shape). */
   autoLaunchOnFinish?: boolean
+  /** Categorises the op for ProgressModal so the brand branch can pick
+   *  the right caption set, iconography, and finished-state copy. Launch
+   *  ops keep the rolling 5-step `launchCaption`; everything else maps
+   *  through `friendlyCaption` (per-phase i18n) instead — without this
+   *  flag, delete and update ops inherit the launch captions ("Mounting
+   *  model libraries…") which read as wrong copy. Falls back to
+   *  `'generic'` when omitted so legacy callers keep working. */
+  opKind?: 'launch' | 'install' | 'update' | 'destructive' | 'snapshot' | 'generic'
 }
 
 // --- Action results ---
@@ -721,6 +734,11 @@ export interface AppUpdateDownloadProgress {
 
 // --- IPC API interface ---
 export interface ElectronApi {
+  /** Host OS — set synchronously by the preload from `process.platform`.
+   *  Renderer uses this for OS-conditional copy (e.g. "Show in Finder"
+   *  vs "Show in Explorer") without IPC. */
+  platform: NodeJS.Platform
+
   // Sources / New Install
   getSources(): Promise<Source[]>
   getFieldOptions(
@@ -812,6 +830,12 @@ export interface ElectronApi {
    *  the comfy/chooser root. Fire-and-forget; the panel will receive
    *  the resulting `panel-switch` like any other navigation. */
   closeCurrentPanel(): void
+  /** Open the Global Settings popup for the panel's host window. Used
+   *  by the panel-side file-menu "Settings" item and the
+   *  `comfy://open-settings?tab=global` deep link — both previously
+   *  routed to the legacy `SettingsModal` overlay. Main reuses the same
+   *  helper the hamburger Settings entry calls. */
+  openGlobalSettings(): void
   /** Push the first-use takeover's current step to main so it can
    *  (a) cache the value on the host entry for
    *  `buildTitlePopupMenuItems` to read synchronously and (b)

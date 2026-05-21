@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { AlertCircle, ArrowLeft, Loader2, Search, SearchX, X } from 'lucide-vue-next'
 import BaseInput from '../../components/ui/BaseInput.vue'
+import BaseSelect, { type BaseSelectOption } from '../../components/ui/BaseSelect.vue'
 import type { ComfyArgDef } from '../../types/ipc'
 import { parseArgs, serialize, tokenize } from '../../lib/argsParser'
 import { scoreName } from '../../utils/fuzzyMatch'
@@ -156,6 +157,41 @@ function selectExclusive(group: string, name: string): void {
   commit(next)
 }
 
+// Clearing an exclusive group is the affordance the native-radio version
+// lost — radios can't deselect, so the user had to hand-edit the raw text
+// to get back to "no flag from this group". The select picker below
+// surfaces a synthetic "None" option that calls this.
+function clearExclusive(group: string): void {
+  const next = new Map(parsed.value.known)
+  for (const a of schema.value) {
+    if (a.exclusiveGroup === group) next.delete(a.name)
+  }
+  commit(next)
+}
+
+function activeInGroup(group: string): string {
+  for (const a of schema.value) {
+    if (a.exclusiveGroup === group && parsed.value.known.has(a.name)) return a.name
+  }
+  return ''
+}
+
+function optionsForGroup(args: ComfyArgDef[]): BaseSelectOption[] {
+  return [
+    {
+      value: '',
+      label: t('comfyUISettings.argsExclusiveNone', 'None (default)'),
+      description: t('comfyUISettings.argsExclusiveNoneHint', 'No flag from this group is set.'),
+    },
+    ...args.map((a) => ({ value: a.name, label: `--${a.name}`, description: a.help })),
+  ]
+}
+
+function onExclusiveChange(group: string, value: string): void {
+  if (value === '') clearExclusive(group)
+  else selectExclusive(group, value)
+}
+
 /**
  * Score a single query token against a flag *help* text. Help is long
  * prose, so the scorer is intentionally strict — only word-boundary or
@@ -278,7 +314,10 @@ const structuredGroups = computed(() => {
 
 const hasResults = computed(() => Array.from(structuredGroups.value.values()).some((items) => items.length > 0))
 
-// Free-text mirror — lets the user paste raw args directly.
+// Free-text mirror — lets the user paste raw args directly. The
+// outer ArgsBuilderField on the main settings panel owns the inline
+// autocomplete affordance; this sub-page is for categorized browsing
+// + the search box below, so the raw row stays a plain text input.
 function onRawChange(value: string): void {
   localValue.value = value
   emit('update', value)
@@ -298,6 +337,17 @@ const unknownFlags = computed(() => {
     if (name && !known.has(name)) out.push(name)
   }
   return out
+})
+
+// Render the warning ourselves rather than going through vue-i18n's
+// interpolated key — no catalog entry exists, so the bare key was
+// leaking into the UI. Fallback string lives here; a locale catalog
+// can override by registering the key with `{flags}` placeholder.
+const unknownFlagsMessage = computed(() => {
+  const flags = unknownFlags.value.join(', ')
+  return t('comfyUISettings.argsUnknown', { flags }) === 'comfyUISettings.argsUnknown'
+    ? `Unknown flag(s): ${flags}`
+    : t('comfyUISettings.argsUnknown', { flags })
 })
 </script>
 
@@ -329,7 +379,7 @@ const unknownFlags = computed(() => {
       </p>
       <p v-if="unknownFlags.length > 0" class="args-page-unknown" role="status">
         <AlertCircle :size="12" aria-hidden="true" />
-        <span>{{ t('comfyUISettings.argsUnknown', { flags: unknownFlags.join(', ') }) }}</span>
+        <span>{{ unknownFlagsMessage }}</span>
       </p>
     </div>
 
@@ -379,35 +429,33 @@ const unknownFlags = computed(() => {
       <header class="args-page-category-title">{{ category }}</header>
 
       <div v-for="(item, idx) in items" :key="idx" class="args-page-item">
-        <!-- Exclusive cluster: segmented option list. "Choose one"
-             semantics — selecting one disables siblings. Rendered as a
-             stack of radio rows where only the active member shows the
-             accent dot. -->
+        <!-- Exclusive cluster: a single select picker. Members render as
+             options (label = `--flag`, description = help text) with a
+             synthetic "None" entry as the first option so the group is
+             clearable — the native-radio version this replaced had no
+             way to deselect, forcing users to edit the raw text. The
+             surrounding category heading + the "Choose one" label
+             below supply the human-readable context the auto-assigned
+             `group_N` ID can't. -->
         <template v-if="item.kind === 'exclusive' && item.args && item.group">
           <div class="args-page-row args-page-row-cluster-label">
             <span class="args-page-cluster-label">
               {{ t('comfyUISettings.argsExclusiveLabel', 'Choose one') }}
             </span>
           </div>
-          <label
-            v-for="member in item.args"
-            :key="member.name"
-            class="args-page-radio-row"
-            :class="{ 'is-active': isActive(member.name) }"
-          >
-            <input
-              type="radio"
-              class="args-page-radio-input"
-              :name="`exclusive-${item.group}`"
-              :checked="isActive(member.name)"
-              @change="selectExclusive(item.group!, member.name)"
+          <!-- BaseSelect has two root nodes (trigger + Teleport) so
+               attributes don't auto-fall through. Wrap in a div to
+               carry the layout class. -->
+          <div class="args-page-exclusive-select">
+            <BaseSelect
+              variant="brand"
+              :model-value="activeInGroup(item.group)"
+              :options="optionsForGroup(item.args)"
+              :aria-label="t('comfyUISettings.argsExclusiveLabel', 'Choose one')"
+              :placeholder="t('comfyUISettings.argsExclusiveNone', 'None (default)')"
+              @update:model-value="(v) => onExclusiveChange(item.group!, v)"
             />
-            <span class="args-page-radio-indicator" aria-hidden="true"></span>
-            <span class="args-page-radio-body">
-              <span class="args-page-flag">--{{ member.name }}</span>
-              <span class="args-page-help">{{ member.help }}</span>
-            </span>
-          </label>
+          </div>
         </template>
 
         <!-- Single arg row: leading switch + flag/help stack. The
@@ -757,10 +805,10 @@ const unknownFlags = computed(() => {
   }
 }
 
-/* Exclusive ("choose one") cluster — segmented option list. The inline
- * label is faint, each option is a full-row radio with an accent dot
- * indicator on the active member. Mutually-exclusive selection reads
- * better as a segmented list than as multiple switches. */
+/* Exclusive ("choose one") cluster — the faint inline label sits above
+ * a BaseSelect picker so the group can be cleared via a synthetic "None"
+ * option (native radios couldn't deselect). The brand-variant trigger
+ * tints when a member is active and dims to the placeholder when not. */
 .args-page-row-cluster-label {
   padding: 0 2px;
   margin: 2px 0 4px;
@@ -774,6 +822,17 @@ const unknownFlags = computed(() => {
   letter-spacing: 0.06em;
 }
 
+.args-page-exclusive-select {
+  /* Align the trigger with sibling .args-page-arg-row, which uses the
+   * same -10px negative margin to extend its hover background to the
+   * page edges. */
+  margin: 0 -10px;
+}
+
+/* TODO(brand-cleanup): the radio cluster styles below are no longer
+ * referenced — the exclusive group renders as a BaseSelect above. Kept
+ * for one release cycle of validation per the soft-delete convention,
+ * then drop the block entirely. */
 .args-page-radio-row {
   display: grid;
   grid-template-columns: auto 1fr;

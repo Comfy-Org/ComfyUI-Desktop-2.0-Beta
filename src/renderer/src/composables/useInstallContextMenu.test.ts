@@ -13,6 +13,7 @@ import type { ContextMenuItem } from '../types/context-menu'
 vi.stubGlobal('window', {
   ...window,
   api: {
+    platform: 'darwin',
     runAction: vi.fn().mockResolvedValue({ ok: true }),
     onErrorDetail: vi.fn(() => () => {}),
   },

@@ -34,8 +34,8 @@ interface Props {
   /** Install is currently running in some other window — drives the
    *  small running dot on the row. */
   running?: boolean
-  /** Pre-formatted "Launched 17m ago" / "Not launched yet" — the
-   *  picker view owns the formatter so all rows render the same clock. */
+  /** Pre-formatted "Launched 17m ago" — hidden when the install has never
+   *  launched; the picker view owns the formatter. */
   lastLaunchedLabel: string
 }
 
@@ -71,7 +71,12 @@ function handleClick(): void {
       </div>
       <div class="picker-row-body">
         <div class="picker-row-name">{{ installation.name }}</div>
-        <div class="picker-row-sub">{{ lastLaunchedLabel }}</div>
+        <div
+          v-if="installation.lastLaunchedAt != null"
+          class="picker-row-sub"
+        >
+          {{ lastLaunchedLabel }}
+        </div>
       </div>
       <span v-if="running" class="picker-row-running-dot" aria-hidden="true"></span>
     </div>
@@ -100,11 +105,11 @@ function handleClick(): void {
 }
 .picker-row:hover,
 .picker-row:focus-visible {
-  background: var(--pick-bg);
+  background: var(--chooser-surface-border);
   outline: none;
 }
 .picker-row.is-active {
-  background: var(--pick-bg-active);
+  background: var(--chooser-surface-border);
 }
 .picker-row-icon {
   display: flex;
@@ -112,7 +117,7 @@ function handleClick(): void {
   justify-content: center;
   width: 24px;
   height: 24px;
-  color: var(--neutral-100);
+  color: var(--accent-label);
   flex: 0 0 auto;
 }
 .picker-row-body {
@@ -134,8 +139,7 @@ function handleClick(): void {
 .picker-row-sub {
   font-size: 12px;
   line-height: 16px;
-  color: var(--neutral-100);
-  opacity: 0.65;
+  color: var(--text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

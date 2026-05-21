@@ -7,11 +7,19 @@ export const TITLEBAR_HEIGHT = 36
 /** Position of macOS traffic-light buttons, vertically centered within the title bar. */
 export const TRAFFIC_LIGHT_POSITION: Electron.Point = { x: 13, y: Math.round((TITLEBAR_HEIGHT - 16) / 2) }
 
-/** Colors must stay in sync with `--surface` in `src/renderer/src/assets/main.css`. */
-export function titleBarOverlayForTheme(isDark: boolean): Electron.TitleBarOverlayOptions {
+/** Colors must stay in sync with `--titlebar-bg` in `src/renderer/src/assets/main.css`.
+ *  The title bar is locked to the dark surface for now regardless of the
+ *  app theme — light-theme support across every title-bar surface (Vue
+ *  pills, dropdown popups, tooltips, OS overlay) hasn't been audited yet,
+ *  and rendering the bar in two themes while half the chrome inside it
+ *  isn't theme-aware looks broken. Once light theme is plumbed through
+ *  every title-bar surface, restore the `isDark`-branched values below.
+ *  TODO(titlebar-light-theme): re-enable `color: isDark ? '#211927' : '#e9e9e9'`
+ *  and `symbolColor: isDark ? '#dddddd' : '#333333'`. */
+export function titleBarOverlayForTheme(_isDark: boolean): Electron.TitleBarOverlayOptions {
   return {
-    color: isDark ? '#262729' : '#e9e9e9',
-    symbolColor: isDark ? '#dddddd' : '#333333',
+    color: '#211927',
+    symbolColor: '#dddddd',
     height: TITLEBAR_HEIGHT,
   }
 }

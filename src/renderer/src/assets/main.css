@@ -80,8 +80,8 @@
   --accent: #60a5fa;
   --accent-hover: #93c5fd;
   --selected: rgba(255, 255, 255, 0.85);
-  --surface: #262729;
-  --titlebar-bg: #171718;
+  --surface: #29252c;
+  --titlebar-bg: var(--neutral-800);
   --border: #494a50;
   --border-hover: #3c3d42;
   --danger: #b33a3a;
@@ -165,7 +165,7 @@
   --accent-hover: #2563eb;
   --selected: rgba(0, 0, 0, 0.7);
   --surface: #e9e9e9;
-  --titlebar-bg: var(--surface);
+  --titlebar-bg: #171718;
   --border: #b4b4b4;
   --border-hover: #d9d9d9;
   --danger: #f75951;
@@ -256,6 +256,10 @@
 
 body {
   font-family: 'Inter', system-ui, sans-serif;
+  /* Tailwind `antialiased` — macOS WebKit/Chromium only; ignored on
+   * Windows/Linux where the engine handles ClearType/DirectWrite. */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   background: var(--bg);
   color: var(--text);
   user-select: none;
@@ -512,50 +516,6 @@ button.looks-disabled {
 }
 .brand-input input::placeholder {
   color: var(--neutral-400);
-}
-
-.brand-select {
-  position: relative;
-  cursor: pointer;
-}
-.brand-select select {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: transparent;
-  appearance: none;
-  -webkit-appearance: none;
-  cursor: pointer;
-  opacity: 0;
-}
-.brand-select__trigger {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  width: 100%;
-  pointer-events: none;
-}
-.brand-select__trigger-value {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--neutral-100);
-}
-.brand-select__trigger-chevron {
-  flex: 0 0 auto;
-  color: var(--neutral-300);
-}
-.brand-select:has(select:focus-visible) {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent);
 }
 
 .brand-tag-recommended {
@@ -1216,41 +1176,43 @@ input[type='checkbox']:checked::after {
   padding-right: 8px;
 }
 
-/* Detail tabs */
+/* Detail tabs — brand-redesign parity with `.settings-v2-tabs` in
+ * `ComfyUISettingsPanel.vue`. Pill-shaped active state (background fill,
+ * no underline indicator), `--border-hover` hairline between tab strip
+ * and body, fluid `--takeover-fs-body` font sizing. */
 .detail-tabs {
   display: flex;
-  gap: 4px;
+  gap: 2px;
   margin-bottom: 16px;
-  border-bottom: 1px solid var(--border);
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border-hover);
   flex-shrink: 0;
 }
 .detail-tab {
-  padding: 6px 16px;
-  border: none;
-  border-radius: 0;
-  background: none;
+  padding: 6px 12px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
   color: var(--text-muted);
-  font-size: 14px;
+  font-size: var(--takeover-fs-body);
   font-weight: 500;
   cursor: pointer;
-  position: relative;
+  transition:
+    color 120ms ease,
+    background-color 120ms ease;
 }
 .detail-tab:hover {
   color: var(--text);
+  background: color-mix(in srgb, var(--text) 4%, transparent);
+}
+.detail-tab:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
 }
 .detail-tab.active {
   color: var(--text);
-  font-weight: 600;
-}
-.detail-tab.active::after {
-  content: '';
-  position: absolute;
-  bottom: -1px;
-  left: 4px;
-  right: 4px;
-  height: 2px;
-  background: var(--accent);
-  border-radius: 1px;
+  font-weight: 500;
+  background: var(--surface);
 }
 
 /* Detail sections */

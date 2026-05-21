@@ -12,6 +12,7 @@ import {
   X
 } from 'lucide-vue-next'
 import { fileLabel, statusKindClass, statusLine } from '../lib/downloadFormatters'
+import { revealInFolderLabel } from '../composables/usePlatform'
 
 const { t } = useI18n()
 
@@ -69,11 +70,14 @@ type DownloadAction =
 type PopupSettingsTab = 'comfy' | 'directories' | 'downloads' | 'global'
 
 interface PopupBridge {
+  platform?: string
   downloadsAction(action: DownloadAction): void
   openSettingsTab(tab: PopupSettingsTab): void
+  openDownloadsModal(): void
 }
 
 const bridge = (window as unknown as { __comfyTitlePopup?: PopupBridge }).__comfyTitlePopup
+const revealLabel = computed(() => revealInFolderLabel(bridge?.platform))
 
 const props = defineProps<{ state: DownloadsState }>()
 
@@ -116,8 +120,12 @@ function dismiss(url: string): void {
 function clearFinished(): void {
   bridge?.downloadsAction({ action: 'clear-finished' })
 }
-function viewAllInSettings(): void {
-  bridge?.openSettingsTab('downloads')
+function viewAllDownloads(): void {
+  // Opens the brand-redesigned `DownloadsModal` on the host's panel
+  // view instead of deep-linking to the Settings → Downloads tab.
+  // Browser-style surface designed for monitoring multi-GB checkpoint
+  // downloads.
+  bridge?.openDownloadsModal()
 }
 
 /** Right-edge X dispatches the contextually correct action: for an
@@ -134,24 +142,24 @@ function closeLabel(d: DownloadEntry): string {
   return isTerminal(d) ? t('downloadsPopup.remove') : t('downloadsPopup.cancel')
 }
 
-/** Subtitle under the filename. Per the new design the active row
- *  shows just the percentage (e.g. `55%`) instead of the full
- *  bytes/speed/ETA breakdown; terminal rows show `Show in Finder` if
- *  a save path is known so the row reads as a click affordance. The
- *  full `statusLine()` helper still feeds error/cancelled rows that
- *  lack a save path. */
+/** Subtitle under the filename. Surfaces the full bytes/speed/ETA
+ *  breakdown (`statusLine`) for active rows so users tracking large
+ *  model downloads (10–40 GB checkpoints) see the same information a
+ *  browser tray would — without leaving the app. Terminal rows still
+ *  collapse to "Show in Finder" when a save path is known so the row
+ *  reads as a single click affordance. */
 function subtitle(d: DownloadEntry): string {
   if (d.status === 'downloading' || d.status === 'pending') {
-    return d.status === 'pending' ? statusLine(d) : `${Math.round(d.progress * 100)}%`
+    return statusLine(d)
   }
   if (d.status === 'paused') {
-    return `${t('downloadsPopup.pause')} · ${Math.round(d.progress * 100)}%`
+    return `${t('downloadsPopup.pause')} · ${statusLine(d)}`
   }
   if (d.status === 'completed' && d.savePath) {
-    return t('downloadsPopup.showInFolder')
+    return revealLabel.value
   }
   if ((d.status === 'error' || d.status === 'cancelled') && d.savePath) {
-    return t('downloadsPopup.showInFolder')
+    return revealLabel.value
   }
   return statusLine(d)
 }
@@ -266,7 +274,7 @@ function progressStyle(d: DownloadEntry): Record<string, string> | undefined {
     </ul>
 
     <footer class="downloads-foot">
-      <button type="button" class="downloads-link" @click="viewAllInSettings">
+      <button type="button" class="downloads-link" @click="viewAllDownloads">
         {{ t('downloadsPopup.viewAllInSettings') }}
       </button>
     </footer>

@@ -7,7 +7,6 @@ import type QuickInstallModal from '../views/QuickInstallModal.vue'
 import type FirstUseTakeover from '../views/FirstUseTakeover.vue'
 import { useOverlay, type FlowComponent } from '../composables/useOverlay'
 import { useProgressStore } from '../stores/progressStore'
-import { useSessionStore } from '../stores/sessionStore'
 import { emitTelemetryAction } from '../lib/telemetry'
 import type { ActionResult, Installation, ShowProgressOpts } from '../types/ipc'
 
@@ -20,6 +19,7 @@ export type PanelKey =
   | 'chooser'
   | 'settings'
   | 'settings-v2'
+  | 'downloads-v2'
   | 'new-install'
   | 'track'
   | 'load-snapshot'
@@ -31,6 +31,7 @@ const VALID_PANELS: ReadonlySet<PanelKey> = new Set([
   'chooser',
   'settings',
   'settings-v2',
+  'downloads-v2',
   'new-install',
   'track',
   'load-snapshot',
@@ -146,7 +147,6 @@ export function usePanelOverlays(opts: UsePanelOverlaysOpts): UsePanelOverlaysAp
     quickInstallRef,
     firstUseRef,
   } = opts
-  const sessionStore = useSessionStore()
   const progressStore = useProgressStore()
   const { current: currentOverlay, openOverlay, closeOverlay } = useOverlay()
 
@@ -184,70 +184,29 @@ export function usePanelOverlays(opts: UsePanelOverlaysOpts): UsePanelOverlaysAp
     // `Cancel "Updating ComfyUI"?` instead of leaking the install name.
     const operationName = showOpts.title.split(' — ')[0] || showOpts.title
     opts.firstUseChain?.onShowProgress(showOpts)
-    const isRunning = sessionStore.isRunning(showOpts.installationId)
-    // Any op that will end in a freshly-launched / re-launched ComfyUI
-    // window. Routed as a Tier 3 takeover with brand chrome so the
-    // user sees the same loading screen regardless of where the launch
-    // was initiated (chooser tile, DetailModal, ComfyUI Settings drawer,
-    // picker Open/Restart, first-use chain). `prepareChooserHostHandoff`
-    // further down is still gated on the install-less host case so the
-    // chooser host close-on-instance-started behaviour only fires when
-    // it should.
-    const isLaunchLikeOp = showOpts.triggersInstanceStart === true
-    // Install ops that opted into auto-launch (every non-first-use
-    // install entry point now sets this). Route through the brand
-    // takeover so the install bar and the subsequent launch sequence
-    // (security scan → starting server) share one continuous Tier 3
-    // screen. The auto-launch fires from `useFirstUseChain`'s watcher
-    // when the install op finishes; the launch op carries
-    // `triggersInstanceStart`, so the silent Tier 3 → Tier 3 swap keeps
-    // the brand chrome in place across the handoff.
-    const isAutoLaunchInstall = showOpts.autoLaunchOnFinish === true
-    // Keep opaque takeover chrome alive when first-use is chaining into
-    // the install + auto-launch sequence — without this the swap from
-    // the new-install Tier 3 takeover to a Tier 2 progress overlay
-    // exposes the dashboard underneath, breaking the bootstrap UX.
-    const useTakeover =
-      isRunning ||
-      isLaunchLikeOp ||
-      isAutoLaunchInstall ||
-      (opts.firstUseChain?.shouldForceTakeover() ?? false)
-    // Brand chrome on every launch-class op (consolidating chooser-tile,
-    // DetailModal Launch/Restart, drawer actions, picker launches), plus
-    // the first-use chain's onboarding sequence and auto-launch installs
-    // (so the bar shape and captions match across the install → launch
-    // handoff). Update-while-running (`isRunning && !isLaunchLikeOp &&
-    // !isAutoLaunchInstall`) keeps the original binding chrome because
-    // the op is mutating the live install, not starting a new window.
-    const useBrandChrome =
-      isLaunchLikeOp ||
-      isAutoLaunchInstall ||
-      (opts.firstUseChain?.shouldForceTakeover() ?? false)
-    // Wire `onCancel` so a window-close consult (or any other slot-
-    // clearing transition that fires the cancel-prompt) actually
-    // cancels the in-flight op in main rather than orphaning it via
-    // window destruction. Mirrors ProgressModal's manual cancel
-    // button (`handleCancel` → `progressStore.cancelOperation`).
+    // Window-close consult or any other slot-clearing transition that
+    // fires the cancel-prompt routes through here so the in-flight op
+    // is actually cancelled in main rather than orphaned via window
+    // destruction. ProgressModal's footer no longer exposes a Cancel
+    // button (Minimize is preferred so the op can finish in the
+    // background and the dashboard re-attaches it), but this hook
+    // still cleans up if the takeover is force-closed.
     const onCancel = (): void => {
       progressStore.cancelOperation(showOpts.installationId)
     }
-    const ok = await openOverlay(
-      useTakeover
-        ? {
-            kind: 'takeover',
-            component: 'update',
-            installationId: showOpts.installationId,
-            operationName,
-            onCancel,
-            brandChrome: useBrandChrome,
-          }
-        : {
-            kind: 'progress',
-            installationId: showOpts.installationId,
-            operationName,
-            onCancel,
-          },
-    )
+    // Every show-progress op renders as a Tier 3 brand takeover now —
+    // delete, copy, migrate, install, update, launch, and snapshot ops
+    // share the same loader chrome (BrandTakeoverLayout + glyph +
+    // wordmark + brand progress bar + brand finished-state banner).
+    // The legacy ModalShell variant of ProgressModal was removed in
+    // the same phase; `brandChrome` is no longer a toggle.
+    const ok = await openOverlay({
+      kind: 'takeover',
+      component: 'update',
+      installationId: showOpts.installationId,
+      operationName,
+      onCancel,
+    })
     if (!ok) return
     // Install-less host + launch-class op: subscribe to the resulting
     // `instance-started` broadcast so the chooser host closes itself
@@ -271,6 +230,7 @@ export function usePanelOverlays(opts: UsePanelOverlaysOpts): UsePanelOverlaysAp
       apiCall: showOpts.apiCall as () => Promise<ActionResult>,
       cancellable: showOpts.cancellable,
       returnTo: showOpts.returnTo,
+      opKind: showOpts.opKind,
     })
   }
 
@@ -395,10 +355,11 @@ export function usePanelOverlays(opts: UsePanelOverlaysOpts): UsePanelOverlaysAp
 
   /**
    * Switch the underlying panel body. Flow keys divert into the Tier 3
-   * takeover overlay slot instead of swapping the body. The unified
-   * `settings` key opens the Tier 1 SettingsModal at the default tab
-   * for the host (ComfyUI Settings on install-backed, Global Settings
-   * on install-less); deeper tab targets come through the
+   * takeover overlay slot instead of swapping the body. The `'settings'`
+   * key splits two ways: install-less hosts open the Global Settings
+   * title-popup via `window.api.openGlobalSettings()`; install-backed
+   * hosts open `ManageInstallModal` (BaseModal-backed) via the Tier 1
+   * overlay slot. Deeper tab targets come through the
    * `panel-trigger-overlay` IPC and bypass `switchPanel`.
    */
   async function switchPanel(panel: PanelKey, entrypoint: string = 'titlebar'): Promise<void> {
@@ -410,6 +371,22 @@ export function usePanelOverlays(opts: UsePanelOverlaysOpts): UsePanelOverlaysAp
     if (panel === 'settings') {
       const inst = installation.value
       const initialTab = inst ? 'comfy' : 'global'
+      // Install-less (chooser host) → open the Global Settings popup
+      // via main. Install-backed → open `ManageInstallModal` through the
+      // overlay slot (renders `DetailModal` in `embedded` mode inside
+      // `BaseModal`). The legacy `initialTab: 'comfy'` value on the
+      // payload is kept for backward compatibility with deeplinks but
+      // the modal ignores it — `initialDetailTab` is the active field.
+      if (initialTab === 'global') {
+        window.api.openGlobalSettings()
+        emitTelemetryAction('desktop2.view.opened', { view: panel, from_view: fromView })
+        emitTelemetryAction('desktop2.settings.opened', {
+          initial_tab: initialTab,
+          entrypoint,
+          has_installation: !!inst,
+        })
+        return
+      }
       const ok = await openOverlay({
         kind: 'settings',
         installation: inst,

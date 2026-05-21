@@ -5,6 +5,16 @@ const firstUseCompleted = ref<boolean>(false)
 const loaded = ref(false)
 let loadPromise: Promise<void> | null = null
 
+/** Seed from the panel URL so the first paint can gate on first-use
+ *  without waiting for the async `getSetting` IPC round-trip. Main
+ *  passes the persisted value synchronously when loading panel.html. */
+export function seedLauncherPrefsFromUrl(search: string): void {
+  const value = new URLSearchParams(search).get('firstUseCompleted')
+  if (value !== 'true' && value !== 'false') return
+  firstUseCompleted.value = value === 'true'
+  loaded.value = true
+}
+
 export function useLauncherPrefs() {
   async function loadPrefs(): Promise<void> {
     if (loadPromise) return loadPromise

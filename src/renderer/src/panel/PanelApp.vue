@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import SettingsModal from '../views/SettingsModal.vue'
+import ManageInstallModal from '../views/ManageInstallModal.vue'
 import ComfyUISettingsPanel from '../views/ComfyUISettingsPanel.vue'
 import ProgressModal from '../views/ProgressModal.vue'
 import ModalDialog from '../components/ModalDialog.vue'
+import DownloadsModal from '../components/DownloadsModal.vue'
 import ComfyLifecycleView from './ComfyLifecycleView.vue'
 import ChooserView from '../views/ChooserView.vue'
 import NewInstallModal from '../views/NewInstallModal.vue'
@@ -16,7 +17,7 @@ import MigrateConfirmTakeover from '../views/MigrateConfirmTakeover.vue'
 import { useTheme } from '../composables/useTheme'
 import { useSessionStore } from '../stores/sessionStore'
 import { useInstallationStore } from '../stores/installationStore'
-import { useLauncherPrefs } from '../composables/useLauncherPrefs'
+import { seedLauncherPrefsFromUrl, useLauncherPrefs } from '../composables/useLauncherPrefs'
 import { useModal } from '../composables/useModal'
 import { useAppUpdatePrompts } from '../composables/useAppUpdatePrompts'
 import { useSendFeedback } from '../composables/useSendFeedback'
@@ -33,10 +34,22 @@ useTheme()
 
 const params = new URLSearchParams(window.location.search)
 const installationId = params.get('installationId') || ''
+// Main passes the persisted first-use gate synchronously so cold
+// start doesn't wait on IPC before painting chooser vs takeover.
+seedLauncherPrefsFromUrl(window.location.search)
+const urlFirstUseCompleted = params.get('firstUseCompleted') === 'true'
+const urlFirstUsePending = params.get('firstUseCompleted') === 'false'
 
 const sessionStore = useSessionStore()
 const installationStore = useInstallationStore()
 const launcherPrefs = useLauncherPrefs()
+// Overlap the IPC round-trip with panel bundle parse / Vue mount.
+void launcherPrefs.loadPrefs()
+// Surface `loaded` as a top-level template binding so Vue auto-unwraps
+// it in the body-gate `v-if`. Refs accessed as object properties on
+// `launcherPrefs` aren't auto-unwrapped in templates, only top-level
+// setup bindings are.
+const { loaded: launcherPrefsLoaded, firstUseCompleted } = launcherPrefs
 
 const modal = useModal()
 const { showAppUpdateRestartPrompt, showAppUpdateDownloadPrompt } = useAppUpdatePrompts()
@@ -130,6 +143,21 @@ const {
   switchPanel,
 } = overlays
 
+const firstUseTakeoverActive = computed(
+  () =>
+    currentOverlay.value?.kind === 'takeover' &&
+    currentOverlay.value.component === 'first-use',
+)
+
+/** Chooser/lifecycle body: show immediately when main already knows
+ *  first-use is done; otherwise wait for prefs IPC. Always hide while
+ *  the first-use takeover is mounted (prevents chooser bleed-through). */
+const showPanelBody = computed(() => {
+  if (firstUseTakeoverActive.value) return false
+  if (urlFirstUseCompleted) return true
+  return launcherPrefsLoaded.value && firstUseCompleted.value
+})
+
 chooserHandoff = useChooserHandoff({
   showProgress: handleShowProgress,
   switchPanel,
@@ -149,13 +177,10 @@ const comfyUISettingsPanelRef = ref<{ requestClose: () => void } | null>(null)
 
 // Picker More-menu dispatch lives on the panel because the install-level
 // actions need `window.api.runAction` (only exposed in the panel
-// renderer) and Delete needs the panel's overlay slot for the
-// DetailModal autoAction surface. `useInstallContextMenu` is the single
-// source of truth for these items — same dispatch the dashboard kebab
-// uses. `onManage` is wired so that the composable's Delete branch
-// (which routes through `onManage` with `autoAction: 'delete'`) lands
-// on the Settings overlay with the source-action chain primed; the
-// chooser tile's `openManage` uses the same shape.
+// renderer) and Delete routes through the panel's overlay slot via
+// `handleShowProgress` (fast path) with a ManageInstallModal autoAction
+// fallback. `useInstallContextMenu` is the single source of truth for
+// these items — same dispatch the dashboard kebab uses.
 const { triggerAction: triggerInstallAction } = useInstallContextMenu({
   onManage: (inst, manageOpts) => {
     void openOverlay({
@@ -167,6 +192,10 @@ const { triggerAction: triggerInstallAction } = useInstallContextMenu({
       noSidebar: true,
     })
   },
+  // Fast-path for Delete: skips the ManageInstallModal flash and routes
+  // straight through the same handleShowProgress used by every other
+  // ProgressModal entry point.
+  onShowProgress: (showOpts) => handleShowProgress(showOpts),
 })
 
 useDeepLinkRouter({
@@ -235,12 +264,24 @@ function closeSettingsV2(): void {
   window.api.closeCurrentPanel()
 }
 
+// `'downloads-v2'` is the same overlay-mode trick the Settings drawer
+// uses — main brings the panel forward, the renderer mounts the
+// `DownloadsModal`, and dismiss routes back through `closeCurrentPanel`
+// so the body returns to comfy/lifecycle without leaving stale state.
+function closeDownloadsV2(): void {
+  window.api.closeCurrentPanel()
+}
+
 // Toggles transparency rules in the non-scoped <style> block so the
-// live ComfyUI canvas composites through while the drawer is open.
+// live ComfyUI canvas composites through while either overlay-mode
+// panel is open (settings drawer or downloads modal).
 watch(
   activePanel,
   (next) => {
-    document.body.classList.toggle('panel-overlay-mode', next === 'settings-v2')
+    document.body.classList.toggle(
+      'panel-overlay-mode',
+      next === 'settings-v2' || next === 'downloads-v2',
+    )
   },
   { immediate: true },
 )
@@ -257,16 +298,6 @@ onMounted(async () => {
       migrateTakeoverRef.value!.open(title, confirmLabel),
     update: (opts) => migrateTakeoverRef.value?.update(opts)
   })
-
-  try {
-    await loadLocale()
-  } catch (err) {
-    // Bootstrap failures must NOT leave bootstrapReady pending forever
-    // (deep-link routing awaits it), so the entire mount is wrapped in
-    // try/finally below. Log here so the partial-bootstrap surface
-    // stays visible in the console even when the whole app keeps going.
-    console.error('Panel: loadLocale failed', err)
-  }
 
   unsubLocale = window.api.onLocaleChanged((messages) => {
     mergeLocaleMessage('en', messages as Record<string, unknown>)
@@ -337,10 +368,22 @@ onMounted(async () => {
     // Initialize stores / prefs needed by the embedded DetailModal that
     // backs the unified Settings modal's "ComfyUI Settings" tab.
     // installationStore wires its own onInstallationsChanged listener.
+    const shouldOpenFirstUse =
+      urlFirstUsePending ||
+      (!urlFirstUseCompleted &&
+        (!launcherPrefsLoaded.value || !firstUseCompleted.value))
+
+    if (shouldOpenFirstUse && !isFlowPanel(initialPanel)) {
+      void openFirstUseTakeover()
+    }
+
     await Promise.all([
       sessionStore.init(),
       installationStore.fetchInstallations(),
       launcherPrefs.loadPrefs(),
+      loadLocale().catch((err) => {
+        console.error('Panel: loadLocale failed', err)
+      }),
     ])
 
     // If the URL-driven initial panel mounts as an overlay (flow wizard
@@ -357,7 +400,7 @@ onMounted(async () => {
     // first-use takeover will replay on the next launch since
     // `firstUseCompleted` stays false until the explicit completion
     // path runs.
-    if (!launcherPrefs.firstUseCompleted.value && !isFlowPanel(initialPanel)) {
+    if (!firstUseCompleted.value && !isFlowPanel(initialPanel)) {
       void openFirstUseTakeover()
     }
   } catch (err) {
@@ -390,20 +433,26 @@ onUnmounted(() => {
 <template>
   <div class="panel-shell">
     <main class="panel-content">
-      <div v-if="activePanel === 'comfy-lifecycle'" class="panel-comfy-lifecycle">
-        <ComfyLifecycleView
-          :installation="installation"
-          :installation-id="installationId"
-          @show-progress="handleShowProgress"
-        />
-      </div>
+      <!-- `showPanelBody` — chooser when main/IPC says first-use is done;
+           hidden while the first-use takeover is mounted (no chooser
+           bleed-through during BrandTakeoverLayout's fade-in). Flow
+           takeovers keep the chooser mounted underneath by design. -->
+      <div v-if="showPanelBody" class="panel-body">
+        <div v-if="activePanel === 'comfy-lifecycle'" class="panel-comfy-lifecycle">
+          <ComfyLifecycleView
+            :installation="installation"
+            :installation-id="installationId"
+            @show-progress="handleShowProgress"
+          />
+        </div>
 
-      <div v-else-if="activePanel === 'chooser'" class="panel-chooser">
-        <ChooserView
-          @pick="handleChooserPick"
-          @show-new-install="handleChooserShowNewInstall"
-          @show-progress="handleShowProgress"
-        />
+        <div v-else-if="activePanel === 'chooser'" class="panel-chooser">
+          <ChooserView
+            @pick="handleChooserPick"
+            @show-new-install="handleChooserShowNewInstall"
+            @show-progress="handleShowProgress"
+          />
+        </div>
       </div>
     </main>
 
@@ -418,42 +467,38 @@ onUnmounted(() => {
          pill click pops a `useModal.confirm` modal (issue #488) that
          lives in the global ModalDialog mount below, not in the
          overlay slot. -->
-    <!-- Tier 1 unified Settings modal. Mounted with `installation`
-         carried by the overlay payload (chooser-card Manage uses
-         the card's install, install-pill / waffle uses the host's
-         install, install-less host's waffle entry passes null).
-         The body underneath stays on chooser / comfy-lifecycle so
-         dismissing returns there. -->
-    <SettingsModal
+    <!-- Tier 1 per-install management modal. Mounted with `installation`
+         carried by the overlay payload (chooser-card Manage uses the
+         card's install, install-pill Manage uses the host's install).
+         Install-less hosts never reach here — `switchPanel`'s 'settings'
+         arm short-circuits to `window.api.openGlobalSettings()` before
+         the overlay is opened, so `installation` is always non-null in
+         practice. The body underneath stays on chooser / comfy-lifecycle
+         so dismissing returns there.
+
+         Maps the legacy `initialDetailTab` payload field to
+         ManageInstallModal's `initialTab` prop. Tab values:
+         'status' | 'update' | 'snapshots' | 'settings' (DetailModal's
+         tab keys). -->
+    <ManageInstallModal
       v-if="currentOverlay?.kind === 'settings'"
       :installation="currentOverlay.installation"
-      :initial-tab="currentOverlay.initialTab"
-      :initial-detail-tab="currentOverlay.initialDetailTab"
+      :initial-tab="(currentOverlay.initialDetailTab as 'status' | 'update' | 'snapshots' | 'settings' | undefined) ?? 'status'"
       :auto-action="currentOverlay.autoAction"
-      :no-sidebar="currentOverlay.noSidebar"
       @close="dismissTakeoverDirect"
       @show-progress="handleShowProgress"
       @update:installation="handleUpdateInstallation"
       @navigate-list="handleNavigateList"
     />
-    <!-- Tier 2 progress slot. ProgressModal owns its own backdrop via
-         the unified Modal primitive. -->
-    <ProgressModal
-      v-else-if="currentOverlay?.kind === 'progress'"
-      ref="progressRef"
-      :installation-id="currentOverlay.installationId"
-      @close="handleProgressClose"
-    />
-
-    <!-- Tier 3 binding modals. Each child component owns its own
-         backdrop via the unified Modal primitive. -->
+    <!-- Tier 3 takeover slot. ProgressModal renders as the universal
+         brand loader for every show-progress op (delete, install,
+         update, copy, migrate, snapshot, launch) — the legacy Tier 2
+         ModalShell branch was removed in the same phase. -->
     <template v-else-if="currentOverlay?.kind === 'takeover'">
       <ProgressModal
         v-if="currentOverlay.component === 'update'"
         ref="progressRef"
         :installation-id="currentOverlay.installationId ?? ''"
-        binding
-        :brand-chrome="currentOverlay.brandChrome ?? chainingFirstUseToNewInstall"
         @close="handleProgressClose"
       />
       <NewInstallModal
@@ -505,6 +550,18 @@ onUnmounted(() => {
       @navigate-list="handleNavigateList"
     />
 
+    <!-- Brand-redesigned "View All Downloads" surface. Mounts only
+         when main flips us into `'downloads-v2'` mode (from the title-
+         bar downloads popup's footer link). `v-if` mirrors the rest of
+         this file's overlay convention — keeps the store init + body
+         scroll lock out of every PanelApp mount that doesn't open the
+         modal. Dismiss routes back through `closeCurrentPanel()`. -->
+    <DownloadsModal
+      v-if="activePanel === 'downloads-v2'"
+      open
+      @close="closeDownloadsV2"
+    />
+
     <ModalDialog />
     <MigrateConfirmTakeover ref="migrateTakeoverRef" />
   </div>
@@ -552,6 +609,17 @@ body.panel-overlay-mode .panel-shell {
 .panel-content:has(.panel-comfy-lifecycle),
 .panel-content:has(.panel-chooser) {
   padding: 0;
+}
+
+/* The gated body wrapper must transparently inherit the panel-content
+ * flex behaviour so the chooser / lifecycle branches keep filling the
+ * shell. Without `min-height: 0` the chooser grid overflows the host. */
+.panel-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .panel-comfy-lifecycle,

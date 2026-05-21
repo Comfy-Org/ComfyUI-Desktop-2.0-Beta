@@ -395,13 +395,14 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
     // hosts, so the install-backed visibility branch handles both.
     const mode = entry ? computeBodyMode(entry) : 'comfy'
     const showPanel = mode !== 'comfy'
-    // `'settings-v2'` is an overlay mode — the brand-redesigned Settings
-    // drawer slides in over the live ComfyUI canvas, so unlike the other
-    // panel modes we keep `comfyView` visible underneath at full bodyRect.
-    // The panel renderer paints itself transparent (see `PanelApp.vue`'s
+    // `'settings-v2'` and `'downloads-v2'` are overlay modes — the
+    // brand-redesigned Settings drawer / downloads modal mount over the
+    // live ComfyUI canvas, so unlike the other panel modes we keep
+    // `comfyView` visible underneath at full bodyRect. The panel
+    // renderer paints itself transparent (see `PanelApp.vue`'s
     // `panel-overlay-mode` body class) except for the drawer + dim
     // backdrop, so the canvas composites through on macOS CALayers.
-    const isOverlayMode = mode === 'settings-v2'
+    const isOverlayMode = mode === 'settings-v2' || mode === 'downloads-v2'
     if (showPanel && entry?.panelView) {
       entry.panelView.setBounds(bodyRect)
       entry.panelView.setVisible(true)
@@ -640,6 +641,7 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
     firstUseMode: 'none',
     titleBarText: opts.initialTitleBarText,
     sourceCategory: opts.initialSourceCategory,
+    coldStartPendingReveal: false,
     _installCleanup: null,
     // Bound below so it can self-reference the freshly-created entry.
     detachInstall: () => {},
@@ -778,14 +780,12 @@ export function rebuildComfyViewIfNeeded(
 
 /** Resolve the launcher-theme-driven background + symbol colours used
  *  by install-less host windows. Install-less hosts have no ComfyUI
- *  frontend feeding their theme so the chooser body uses the launcher
- *  renderer's `--surface` (which uses `--surface` from main.css), so
- *  the title-bar Vue header and the OS-level window-controls overlay
- *  both need to track that same colour. `titleBarOverlayForTheme`
- *  already returns the matching `--surface` values (#262729 dark /
- *  #e9e9e9 light) so this helper is a thin wrapper that just maps that
- *  to the `comfy-titlebar:theme-changed` `{ bg, text }` shape consumed
- *  by TitleBarApp.vue. */
+ *  frontend feeding their theme so the title-bar Vue header and the
+ *  OS-level window-controls overlay both track `--titlebar-bg` from
+ *  main.css. `titleBarOverlayForTheme` returns the matching
+ *  `--titlebar-bg` values (#171718 dark / #e9e9e9 light) so this helper
+ *  is a thin wrapper that maps them to the `comfy-titlebar:theme-changed`
+ *  `{ bg, text }` shape consumed by TitleBarApp.vue. */
 export function getChooserHostTheme(): { bg: string; text: string } {
   const overlay = titleBarOverlayForTheme(resolveTheme() === 'dark')
   return { bg: overlay.color ?? TITLEBAR_BG, text: overlay.symbolColor ?? '#dddddd' }
@@ -901,14 +901,24 @@ export function openChooserHostWindow(): BrowserWindow {
   // install-less windows always need a panel, and creating it eagerly
   // avoids the empty body flash that would happen on the next
   // layoutViews tick.
+  // Hide until the panel's first load completes — panel.html can take
+  // ~1s on cold start (especially in dev). `panelView`'s
+  // `did-finish-load` handler reveals via `bringToFront`.
+  entry.coldStartPendingReveal = true
+  comfyWindow.hide()
+
   ensurePanelView(entry.windowKey, entry, 'chooser')
 
   entry.layoutViews()
-  // Explicitly bring the new chooser host to the foreground.
-  // Without this, the freshly created window can stay behind
-  // whatever app the user launched Desktop 2.0 from (Windows
-  // focus-theft prevention is the usual culprit). `bringToFront`
-  // uses the always-on-top toggle trick on Windows.
-  bringToFront(comfyWindow)
+
+  const revealKey = entry.windowKey
+  setTimeout(() => {
+    const live = comfyWindows.get(revealKey)
+    if (!live?.coldStartPendingReveal || live.window.isDestroyed()) return
+    live.coldStartPendingReveal = false
+    live.layoutViews()
+    bringToFront(live.window)
+  }, 10_000)
+
   return comfyWindow
 }

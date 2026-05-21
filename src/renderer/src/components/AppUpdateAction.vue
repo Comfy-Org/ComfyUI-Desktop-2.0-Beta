@@ -1,4 +1,10 @@
 <script setup lang="ts">
+// TODO(brand-cleanup): Same update-state subscription + button logic is
+// lifted into src/renderer/src/views/globalSettings/UpdatesSection.vue
+// (which is rendered inside the new picker-style Global Settings popup
+// when that lands). This component is still live inside the legacy
+// SettingsView.vue / SettingsModal global tab — safe to delete once the
+// new popup ships parity. See docs/global-settings-handoff.md.
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { AppUpdateState, AppUpdateDownloadProgress } from '../types/ipc'

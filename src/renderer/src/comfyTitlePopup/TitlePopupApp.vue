@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import MenuView from './MenuView.vue'
 import DownloadsView from './DownloadsView.vue'
 import InstancePickerView from './InstancePickerView.vue'
+import GlobalSettingsView from './GlobalSettingsView.vue'
 import type { DetailSection, SnapshotListData } from '../types/ipc'
 
 /**
@@ -77,6 +78,42 @@ interface PickerSnapshot {
   selectedSnapshots: SnapshotListData | null
 }
 
+interface GlobalSettingsModelsDir {
+  path: string
+  isPrimary: boolean
+  isDefault: boolean
+}
+
+interface GlobalSettingsSnapshot {
+  overviewFields: Record<string, unknown>[]
+  cacheFields: Record<string, unknown>[]
+  advancedFields: Record<string, unknown>[]
+  sharedDirectoriesFields: Record<string, unknown>[]
+  modelsDirs: GlobalSettingsModelsDir[]
+  modelsSystemDefault: string
+  appUpdate: {
+    state: Record<string, unknown>
+    progress: Record<string, unknown> | null
+    isDownloading: boolean
+    capabilities: { systemManaged: boolean; canSelfUpdate: boolean }
+    installedVersion: string
+    platform: string
+    lastCheckedAt: number | null
+  }
+  channelPickerField: Record<string, unknown> | null
+  activeInstallationId: string | null
+  hasActiveInstall: boolean
+  githubUrl: string
+  i18n: {
+    overview: string
+    updates: string
+    cache: string
+    models: string
+    advanced: string
+    sharedDirectories: string
+  }
+}
+
 type PopupConfig =
   | {
       kind: 'menu'
@@ -92,6 +129,11 @@ type PopupConfig =
       snapshot: PickerSnapshot
       theme: { bg: string; text: string }
     }
+  | {
+      kind: 'global-settings'
+      snapshot: GlobalSettingsSnapshot
+      theme: { bg: string; text: string }
+    }
 
 interface Bridge {
   activate(id: string): void
@@ -101,20 +143,21 @@ interface Bridge {
   onConfig(cb: (config: PopupConfig) => void): () => void
   onDownloadsChanged(cb: (state: DownloadsState) => void): () => void
   onInstancePickerSnapshot(cb: (snapshot: PickerSnapshot) => void): () => void
+  onGlobalSettingsSnapshot(cb: (snapshot: GlobalSettingsSnapshot) => void): () => void
   /** Ask main to resize the popup view to the given natural content
-   *  height (CSS px). Only meaningful for the `'downloads'` and
-   *  `'instance-picker'` kinds — menu kind is sized deterministically
-   *  from its item list. */
+   *  height (CSS px). Only meaningful for the `'downloads'` /
+   *  `'instance-picker'` / `'global-settings'` kinds — menu kind is
+   *  sized deterministically from its item list. */
   requestSize(height: number): void
   /** Per-open notification — fires on every show including the fast
    *  path that skips `set-config`. Used to bump `openSeq` so popup
    *  views can reset transient per-open state. */
-  onWillShow(cb: (info: { kind: 'menu' | 'downloads' | 'instance-picker' }) => void): () => void
+  onWillShow(cb: (info: { kind: 'menu' | 'downloads' | 'instance-picker' | 'global-settings' }) => void): () => void
 }
 
 const bridge = (window as unknown as { __comfyTitlePopup?: Bridge }).__comfyTitlePopup
 
-const kind = ref<'menu' | 'downloads' | 'instance-picker'>('menu')
+const kind = ref<'menu' | 'downloads' | 'instance-picker' | 'global-settings'>('menu')
 const items = ref<MenuItem[]>([])
 const themeBg = ref<string>('#262729')
 const themeText = ref<string>('#dddddd')
@@ -128,7 +171,37 @@ const pickerSnapshot = ref<PickerSnapshot>({
   runningInstallationIds: [],
   selectedInstallationId: null,
   selectedSettings: null,
-  selectedSnapshots: null,
+  selectedSnapshots: null
+})
+/** Latest global-settings snapshot — same lifecycle as `pickerSnapshot`. */
+const globalSettingsSnapshot = ref<GlobalSettingsSnapshot>({
+  overviewFields: [],
+  cacheFields: [],
+  advancedFields: [],
+  sharedDirectoriesFields: [],
+  modelsDirs: [],
+  modelsSystemDefault: '',
+  appUpdate: {
+    state: { kind: null, version: null, autoUpdate: true },
+    progress: null,
+    isDownloading: false,
+    capabilities: { systemManaged: false, canSelfUpdate: true },
+    installedVersion: '',
+    platform: 'darwin',
+    lastCheckedAt: null,
+  },
+  channelPickerField: null,
+  activeInstallationId: null,
+  hasActiveInstall: false,
+  githubUrl: '',
+  i18n: {
+    overview: 'Overview',
+    updates: 'Updates',
+    cache: 'Cache',
+    models: 'Models',
+    advanced: 'Advanced',
+    sharedDirectories: 'Shared Directories',
+  },
 })
 /** Owned at the app level — the listener stays registered for the
  *  popup's entire lifetime so the initial state push from main on a
@@ -165,6 +238,7 @@ function handleKeydown(event: KeyboardEvent): void {
 let unsubConfig: (() => void) | undefined
 let unsubDownloads: (() => void) | undefined
 let unsubInstancePicker: (() => void) | undefined
+let unsubGlobalSettings: (() => void) | undefined
 let unsubWillShow: (() => void) | undefined
 
 /** Sequence counter — only the rAF closure for the most recently
@@ -219,6 +293,12 @@ function measureAndRequestSize(): void {
     const rootEl = document.querySelector('.picker') as HTMLElement | null
     if (!rootEl) return
     bridge?.requestSize(rootEl.offsetHeight + 2)
+    return
+  }
+  if (kind.value === 'global-settings') {
+    const rootEl = document.querySelector('.global-settings') as HTMLElement | null
+    if (!rootEl) return
+    bridge?.requestSize(rootEl.offsetHeight + 2)
   }
 }
 
@@ -228,6 +308,8 @@ onMounted(() => {
     items.value = cfg.kind === 'menu' ? cfg.items : []
     if (cfg.kind === 'instance-picker') {
       pickerSnapshot.value = cfg.snapshot
+    } else if (cfg.kind === 'global-settings') {
+      globalSettingsSnapshot.value = cfg.snapshot
     }
     themeBg.value = cfg.theme.bg
     themeText.value = cfg.theme.text
@@ -258,6 +340,9 @@ onMounted(() => {
   })
   unsubInstancePicker = bridge?.onInstancePickerSnapshot((snapshot) => {
     pickerSnapshot.value = snapshot
+  })
+  unsubGlobalSettings = bridge?.onGlobalSettingsSnapshot((snapshot) => {
+    globalSettingsSnapshot.value = snapshot
   })
   // `onWillShow` fires on every open (including the fast-path reopen
   // that doesn't re-send `set-config`). We deliberately do NOT bump
@@ -305,10 +390,24 @@ watch(
   },
   { deep: true }
 )
+// Re-measure when the global-settings snapshot changes — accordion
+// counts + field values affect natural height.
+watch(
+  globalSettingsSnapshot,
+  () => {
+    void nextTick(() => {
+      requestAnimationFrame(() => {
+        measureAndRequestSize()
+      })
+    })
+  },
+  { deep: true }
+)
 onUnmounted(() => {
   unsubConfig?.()
   unsubDownloads?.()
   unsubInstancePicker?.()
+  unsubGlobalSettings?.()
   unsubWillShow?.()
   window.removeEventListener('keydown', handleKeydown)
 })
@@ -326,12 +425,17 @@ onUnmounted(() => {
        appear; we do the same — no key, no animation. -->
   <div
     class="popup"
-    :class="{ 'is-light': isLight, 'is-picker': kind === 'instance-picker' }"
+    :class="{
+      'is-light': isLight,
+      'is-picker': kind === 'instance-picker',
+      'is-global-settings': kind === 'global-settings',
+    }"
     :style="{ background: themeBg, color: themeText }"
   >
     <MenuView v-if="kind === 'menu'" :items="items" @activate="handleActivate" />
     <DownloadsView v-else-if="kind === 'downloads'" :state="downloadsState" />
-    <InstancePickerView v-else :snapshot="pickerSnapshot" />
+    <InstancePickerView v-else-if="kind === 'instance-picker'" :snapshot="pickerSnapshot" />
+    <GlobalSettingsView v-else :snapshot="globalSettingsSnapshot" />
   </div>
 </template>
 
@@ -356,16 +460,16 @@ onUnmounted(() => {
   box-sizing: border-box;
 }
 
-/* Instance picker surface chrome per Figma — deeper plum bg, 12px
- * radius, layered drop-shadow. Menu / downloads kinds keep the legacy
- * lightweight surface. */
-.popup.is-picker {
+/* Instance picker surface chrome per Figma. Menu / downloads kinds keep
+ * the legacy lightweight surface. */
+.popup.is-picker,
+.popup.is-global-settings {
   background: var(--neutral-800, #211927) !important;
+  border: 1px solid var(--chooser-surface-border);
   border-radius: 12px;
   box-shadow:
     0 20px 24px -4px rgba(10, 13, 18, 0.08),
     0 8px 8px -4px rgba(10, 13, 18, 0.03),
     0 3px 3px -1.5px rgba(10, 13, 18, 0.04);
 }
-
 </style>

@@ -5,6 +5,7 @@ import { useActionGuard } from './useActionGuard'
 import { useMigrateAction } from './useMigrateAction'
 import { useSessionStore } from '../stores/sessionStore'
 import { emitTelemetryAction, toErrorBucket } from '../lib/telemetry'
+import { progressOpKindForActionId } from '../lib/progressOpKind'
 import {
   REQUIRES_STOPPED,
   type ActionDef,
@@ -435,6 +436,10 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
         cancellable: !!mutableAction.cancellable,
         returnTo: 'detail',
         triggersInstanceStart: mutableAction.id === 'launch' || isRestart,
+        // Synthetic `restart` id (stop → wait → launch) reads as a launch
+        // op to the brand caption pipeline, mirroring its
+        // triggersInstanceStart flag.
+        opKind: isRestart ? 'launch' : progressOpKindForActionId(mutableAction.id),
       })
       return
     }

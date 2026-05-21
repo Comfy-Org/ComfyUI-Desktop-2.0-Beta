@@ -31,6 +31,8 @@ import type { ElectronApi, ResolvedTheme } from '../types/ipc'
 
 export function buildElectronApi(): ElectronApi {
   return {
+    platform: process.platform,
+
     // Sources / New Install
     getSources: () => ipcRenderer.invoke('get-sources'),
     getFieldOptions: (sourceId, fieldId, selections, context) =>
@@ -82,6 +84,8 @@ export function buildElectronApi(): ElectronApi {
       ipcRenderer.invoke('close-host-window'),
     closeCurrentPanel: () =>
       ipcRenderer.send('comfy-window:close-current-panel'),
+    openGlobalSettings: () =>
+      ipcRenderer.send('comfy-titlepopup:open-global-settings'),
     setFirstUseMode: (mode: 'none' | 'consent-lockdown' | 'post-consent') =>
       ipcRenderer.send('comfy-window:set-first-use-mode', { mode }),
     onFirstUseSkip: (callback) => {

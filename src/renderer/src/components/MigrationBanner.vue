@@ -46,6 +46,7 @@ async function startMigration(): Promise<void> {
         result,
       ),
       cancellable: true,
+      opKind: 'update',
     })
   } finally {
     migrating.value = false
