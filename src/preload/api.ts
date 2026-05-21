@@ -359,11 +359,6 @@ export function buildElectronApi(): ElectronApi {
       ipcRenderer.on('panel-switch', handler)
       return () => ipcRenderer.removeListener('panel-switch', handler)
     },
-    onRequestCloseDrawer: (callback) => {
-      const handler = (): void => callback()
-      ipcRenderer.on('panel:request-close-drawer', handler)
-      return () => ipcRenderer.removeListener('panel:request-close-drawer', handler)
-    },
     onPanelTriggerOverlay: (callback) => {
       const handler = (_event: IpcRendererEvent, data: unknown) =>
         callback(
