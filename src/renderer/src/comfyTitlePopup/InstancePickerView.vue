@@ -145,6 +145,17 @@ interface PickerBridge {
     mode: 'compact' | 'expanded',
     opts?: { initialTab?: string; autoAction?: string | null },
   ) => void
+  /** Picker → forward a `show-progress` request to the panel renderer. */
+  pickerForwardShowProgress: (payload: {
+    installationId: string
+    actionId: string
+    actionData?: Record<string, unknown>
+    title: string
+    cancellable?: boolean
+    triggersInstanceStart?: boolean
+    opKind?: 'launch' | 'install' | 'update' | 'destructive' | 'snapshot' | 'generic'
+    isRestart?: boolean
+  }) => void
 }
 const bridge = (window as unknown as { __comfyTitlePopup?: PickerBridge }).__comfyTitlePopup
 
@@ -374,28 +385,22 @@ onUnmounted(() => {
   document.removeEventListener('keydown', handleEsc, true)
 })
 
-// `<ComfyUISettingsContent>` emits `show-progress` for long-running
-// actions, `navigate-list` after Delete / Untrack (the install is
-// gone), and `request-close` alongside `navigate-list`. For now,
-// `show-progress` is owned by the existing in-popup modal mounted via
-// `useModal` — the composable's runAction path uses `modal.alert`
-// for inline errors and `onShowProgress` for the long ops. Since the
-// popup mounts its own Pinia and `useModal` is a renderer-local Vue
-// singleton, the modal infrastructure works inside the popup as-is.
-//
-// The `show-progress` route here surfaces the same `ProgressModal`
-// concept as the panel — but since the popup has no `ProgressModal`
-// component mounted, we instead pipe the work straight through to
-// the host's panel (which has it) via a fire-and-forget IPC. The
-// popup stays open during the operation, and the panel's modal
-// surfaces underneath, then the action completion broadcasts (via
-// installations-changed) refresh the snapshot.
-//
-// TODO(brand-cleanup): once the legacy `ManageInstallModal` is
-// retired, mount a `ProgressModal` directly inside the popup so
-// progress UI doesn't require a host-panel hand-off.
+// Popup has no `ProgressModal` of its own; forward the request to the
+// parent panel which mounts one. Main hides the popup so the modal is
+// unobstructed; the panel rebuilds `apiCall` from actionId/actionData
+// and runs it through its existing `handleShowProgress` pipeline.
 function handleSettingsShowProgress(opts: ShowProgressOpts): void {
-  void opts
+  if (!opts.actionId) return
+  bridge?.pickerForwardShowProgress({
+    installationId: opts.installationId,
+    actionId: opts.actionId,
+    actionData: opts.actionData,
+    title: opts.title,
+    cancellable: opts.cancellable,
+    triggersInstanceStart: opts.triggersInstanceStart,
+    opKind: opts.opKind,
+    isRestart: opts.actionId === 'restart',
+  })
 }
 function handleSettingsNavigateList(): void {
   // The selected install was deleted/untracked — flip back to compact

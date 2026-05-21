@@ -1,6 +1,7 @@
 import { onMounted, onUnmounted } from 'vue'
 import { useInstallationStore } from '../stores/installationStore'
-import type { Installation } from '../types/ipc'
+import type { Installation, ShowProgressOpts } from '../types/ipc'
+
 import type { Overlay } from './useOverlay'
 
 interface DeepLinkRouterOpts {
@@ -28,6 +29,10 @@ interface DeepLinkRouterOpts {
    *  path the dashboard kebab uses — confirm dialogs + showProgress
    *  + DetailModal-mediated Delete all live there. */
   runInstallActionFromPicker?: (installation: Installation, actionId: string) => Promise<void> | void
+  /** Instance-picker's expanded settings UI fired `show-progress`; the
+   *  popup forwarded it here so the panel's existing ProgressModal
+   *  pipeline can run the operation. */
+  showProgressFromPicker?: (opts: ShowProgressOpts) => void
 }
 
 /**
@@ -115,6 +120,48 @@ export function useDeepLinkRouter(opts: DeepLinkRouterOpts): void {
           const inst = installationStore.getById(id)
           if (!inst) return
           await opts.runInstallActionFromPicker?.(inst, actionId)
+          return
+        }
+        if (payload.kind === 'picker-show-progress') {
+          await opts.bootstrapReady
+          const id = payload.installationId
+          const actionId = payload.actionId
+          const title = payload.title
+          if (!id || !actionId || !title) return
+          const inst = installationStore.getById(id)
+          if (!inst) return
+          const isRestart = !!payload.isRestart
+          const actionData = (payload.actionData ?? undefined) as
+            | Record<string, unknown>
+            | undefined
+          const apiCall = isRestart
+            ? async () => {
+              await window.api.stopComfyUI(id)
+              const deadline = Date.now() + 10_000
+              while (Date.now() < deadline) {
+                try {
+                  const installs = await window.api.getInstallations()
+                  const stillRunning = installs.find((i) => i.id === id)?.status === 'running'
+                  if (!stillRunning) break
+                } catch {
+                  break
+                }
+                await new Promise((r) => setTimeout(r, 100))
+              }
+              return window.api.runAction(id, 'launch')
+            }
+            : () => window.api.runAction(id, actionId, actionData)
+          opts.showProgressFromPicker?.({
+            installationId: id,
+            title,
+            apiCall,
+            cancellable: !!payload.cancellable,
+            returnTo: 'detail',
+            triggersInstanceStart: !!payload.triggersInstanceStart,
+            opKind: payload.opKind,
+            actionId,
+            actionData,
+          })
         }
       })()
     })

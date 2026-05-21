@@ -2367,6 +2367,37 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
   // confirm dialog the source-action opens (Copy / Untrack / Delete
   // each have one) comes up over the host body rather than the open
   // popup.
+  // Picker → forward a `show-progress` request to the parent host's panel
+  // renderer. The popup hides so the panel's ProgressModal is unobstructed;
+  // the panel rebuilds the apiCall closure from actionId/actionData.
+  ipcMain.on(
+    'comfy-titlepopup:forward-show-progress',
+    (event, payload: Record<string, unknown>) => {
+      const popupEntry = titlePopupsByWebContents.get(event.sender.id)
+      if (!popupEntry || popupEntry.kind !== 'instance-picker') return
+      const installationId = payload?.installationId
+      const actionId = payload?.actionId
+      if (typeof installationId !== 'string' || installationId.length === 0) return
+      if (typeof actionId !== 'string' || actionId.length === 0) return
+      const parentEntry = comfyWindows.get(popupEntry.parentEntryId)
+      if (!parentEntry) return
+      hideTitlePopup(popupEntry, { releaseFocusToParent: false })
+      const panelView = parentEntry.panelView
+      if (!panelView || panelView.webContents.isDestroyed()) return
+      bindings.sendToPanelDeferred(panelView, 'panel-trigger-overlay', {
+        kind: 'picker-show-progress',
+        installationId,
+        actionId,
+        actionData: payload?.actionData,
+        title: payload?.title,
+        cancellable: payload?.cancellable,
+        triggersInstanceStart: payload?.triggersInstanceStart,
+        opKind: payload?.opKind,
+        isRestart: payload?.isRestart,
+      })
+    },
+  )
+
   ipcMain.on(
     'comfy-titlepopup:open-install-action',
     (event, payload: { installationId?: unknown; actionId?: unknown }) => {

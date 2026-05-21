@@ -241,6 +241,12 @@ export interface ShowProgressOpts {
    *  model libraries…") which read as wrong copy. Falls back to
    *  `'generic'` when omitted so legacy callers keep working. */
   opKind?: 'launch' | 'install' | 'update' | 'destructive' | 'snapshot' | 'generic'
+  /** Raw action identity, included so a host that can't run the closure
+   *  itself (the picker popup) can forward the request to one that can
+   *  (the panel) and have it rebuild `apiCall`. Drawer/panel callers
+   *  ignore these and use `apiCall` directly. */
+  actionId?: string
+  actionData?: Record<string, unknown>
 }
 
 // --- Action results ---
@@ -1103,10 +1109,17 @@ export interface ElectronApi {
         | 'open-settings'
         | 'picker-pick-install'
         | 'picker-install-action'
+        | 'picker-show-progress'
       installationId?: string
       actionId?: string
+      actionData?: Record<string, unknown>
       version?: string | null
       settingsTab?: 'comfy' | 'directories' | 'downloads' | 'global'
+      title?: string
+      cancellable?: boolean
+      triggersInstanceStart?: boolean
+      opKind?: 'launch' | 'install' | 'update' | 'destructive' | 'snapshot' | 'generic'
+      isRestart?: boolean
     }) => void,
   ): Unsubscribe
 }

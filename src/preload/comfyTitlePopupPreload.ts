@@ -434,6 +434,21 @@ export interface ComfyTitlePopupBridge {
     mode: 'compact' | 'expanded',
     opts?: { initialTab?: string; autoAction?: string | null },
   ): void
+  /** Forward a `show-progress` request from the picker's settings UI to
+   *  the parent host's panel renderer. The panel rebuilds the apiCall
+   *  closure from `actionId`/`actionData` and routes through its existing
+   *  ProgressModal pipeline. Picker collapses to compact so the modal is
+   *  not occluded. */
+  pickerForwardShowProgress(payload: {
+    installationId: string
+    actionId: string
+    actionData?: Record<string, unknown>
+    title: string
+    cancellable?: boolean
+    triggersInstanceStart?: boolean
+    opKind?: 'launch' | 'install' | 'update' | 'destructive' | 'snapshot' | 'generic'
+    isRestart?: boolean
+  }): void
 }
 
 function isPopupConfig(value: unknown): value is TitlePopupConfig {
@@ -709,6 +724,9 @@ const bridge: ComfyTitlePopupBridge = {
       initialTab: opts?.initialTab,
       autoAction: opts?.autoAction ?? null,
     })
+  },
+  pickerForwardShowProgress: (payload) => {
+    ipcRenderer.send('comfy-titlepopup:forward-show-progress', payload)
   },
 }
 

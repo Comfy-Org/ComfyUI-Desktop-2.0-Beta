@@ -221,6 +221,7 @@ useDeepLinkRouter({
     // `runAction` IPC or an `onManage` overlay open.
     await triggerInstallAction(actionId, inst)
   },
+  showProgressFromPicker: (showOpts) => handleShowProgress(showOpts),
 })
 
 async function loadLocale(): Promise<void> {
