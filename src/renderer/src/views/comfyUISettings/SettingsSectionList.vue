@@ -369,15 +369,16 @@ const visibleSections = computed(() => props.sections)
   display: inline-flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 14px;
-  color: var(--neutral-100);
-  line-height: 19.5px;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-muted);
+  line-height: 16px;
 }
 
 .settings-v2-field-readonly {
-  font-size: 14px;
+  font-size: 13px;
   color: var(--neutral-100);
-  line-height: 21px;
+  line-height: 19px;
 }
 
 .settings-v2-actions {
@@ -408,7 +409,7 @@ const visibleSections = computed(() => props.sections)
 
 .settings-v2-section.is-readonly-list .settings-v2-field {
   padding: 10px 0;
-  border-bottom: 1px solid var(--border-hover);
+  border-bottom: 1px solid var(--chooser-surface-border);
   gap: 2px;
 }
 

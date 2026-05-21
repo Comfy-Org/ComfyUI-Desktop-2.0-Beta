@@ -3,6 +3,7 @@ import { computed, nextTick, ref, toRef, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ChevronDown } from 'lucide-vue-next'
 import { useComfyUISettings } from '../../composables/useComfyUISettings'
+import { useSessionStore } from '../../stores/sessionStore'
 import MoreMenu from '../../views/comfyUISettings/MoreMenu.vue'
 import ArgsBuilderPage from '../../views/comfyUISettings/ArgsBuilderPage.vue'
 import SnapshotsView from '../../views/comfyUISettings/SnapshotsView.vue'
@@ -42,9 +43,13 @@ const emit = defineEmits<{
   /** Composable requested host dismissal (currently fires alongside
    *  `navigate-list` so the host can animate out before navigation). */
   'request-close': []
-  /** Footer Relaunch button. Host decides whether this restarts the
-   *  install, the app, or both — keeps this component side-effect free. */
-  relaunch: []
+  /** Footer primary CTA — host decides whether to call its bridge's
+   *  `pickInstall` (not-running case → Open) or `restartInstall`
+   *  (running case → Restart) so the same native-confirm flow runs
+   *  whether the affordance is clicked from the compact row or the
+   *  expanded view's footer. Payload carries the running flag so the
+   *  host doesn't have to re-derive it. */
+  'primary-action': [running: boolean]
 }>()
 
 const { t } = useI18n()
@@ -59,6 +64,7 @@ watch(
 )
 
 const installation = toRef(props, 'installation')
+const sessionStore = useSessionStore()
 const {
   loading,
   error,
@@ -233,6 +239,28 @@ function handleSnapshotsRefresh(): void {
   void reload()
 }
 
+/** Footer primary CTA — host-agnostic. The host (picker / drawer)
+ *  receives `primary-action` with the current running state and
+ *  dispatches its own bridge call: `restartInstall` when running,
+ *  `pickInstall` when not. This keeps the same native-confirm flow
+ *  the compact PickerRow already uses for its Open/Restart button,
+ *  so both surfaces share one underlying path. */
+const isInstallRunning = computed(() => {
+  const inst = installation.value
+  return inst ? sessionStore.isRunning(inst.id) : false
+})
+
+const primaryActionLabel = computed(() =>
+  isInstallRunning.value
+    ? t('instancePicker.restart', 'Restart')
+    : t('instancePicker.open', 'Open'),
+)
+
+function handlePrimaryAction(): void {
+  if (!installation.value) return
+  emit('primary-action', isInstallRunning.value)
+}
+
 defineExpose({
   /** Host can force-focus the active tab — drawer uses this when it
    *  opens so initial focus lands inside the body. */
@@ -310,8 +338,13 @@ defineExpose({
     </section>
 
     <footer class="settings-v2-footer">
-      <button type="button" class="primary settings-v2-relaunch" @click="emit('relaunch')">
-        {{ t('comfyUISettings.relaunch', 'Relaunch') }}
+      <button
+        type="button"
+        class="primary settings-v2-relaunch"
+        :disabled="!installation"
+        @click="handlePrimaryAction"
+      >
+        {{ primaryActionLabel }}
       </button>
 
       <div class="settings-v2-more-wrap">
@@ -351,38 +384,42 @@ defineExpose({
 .settings-v2-tabs {
   flex-shrink: 0;
   display: flex;
-  gap: 2px;
+  gap: 6px;
   padding: 12px 12px 12px;
-  border-bottom: 1px solid var(--border-hover);
+  border-bottom: 1px solid var(--chooser-surface-border);
 }
 
 .settings-v2-tab {
   -webkit-app-region: no-drag;
   padding: 6px 12px;
   background: transparent;
-  border: 1px solid transparent;
+  border: none;
   border-radius: 6px;
-  color: var(--text-muted);
-  font-size: var(--takeover-fs-body);
-  font-weight: 500;
+  color: var(--neutral-100);
+  opacity: 0.72;
+  font-size: 13px;
+  font-weight: 400;
   transition:
     color 120ms ease,
-    background-color 120ms ease;
+    background-color 120ms ease,
+    opacity 120ms ease;
 }
 
 .settings-v2-tab:hover {
-  color: var(--text);
-  background: color-mix(in srgb, var(--text) 4%, transparent);
+  opacity: 1;
+  color: var(--neutral-100);
+  background: var(--brand-surface-bg-hover);
 }
 
 .settings-v2-tab:focus-visible {
-  outline: 2px solid var(--accent-primary);
-  outline-offset: 2px;
+  outline: 2px solid var(--focus-ring, var(--neutral-50));
+  outline-offset: -2px;
 }
 
 .settings-v2-tab.is-active {
-  color: var(--text);
-  background: var(--surface);
+  opacity: 1;
+  color: var(--neutral-100);
+  background: var(--neutral-800);
 }
 
 .settings-v2-body {
@@ -426,13 +463,22 @@ defineExpose({
   justify-content: flex-end;
   gap: 8px;
   padding: 12px 16px;
-  border-top: 1px solid var(--border-hover);
+  border-top: 1px solid var(--chooser-surface-border);
   background: var(--neutral-800);
 }
 
+/* Pin both footer buttons to the same 32px height as the left
+ * footer's "+ New Instance" so the two footer bands stack visually
+ * aligned — global `button` rule defaults to ~38px, which would push
+ * the right footer taller than the left. */
 .settings-v2-relaunch {
   flex: 0 1 auto;
   min-width: 200px;
+  height: 32px;
+  padding: 0 14px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
 }
 
 .settings-v2-more-wrap {
@@ -444,7 +490,11 @@ defineExpose({
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: var(--takeover-fs-body);
+  height: 32px;
+  padding: 0 14px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
 }
 
 .settings-v2-more.is-active {
