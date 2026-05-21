@@ -241,6 +241,17 @@ export interface ShowProgressOpts {
    *  model libraries…") which read as wrong copy. Falls back to
    *  `'generic'` when omitted so legacy callers keep working. */
   opKind?: 'launch' | 'install' | 'update' | 'destructive' | 'snapshot' | 'generic'
+  /** Set on ops that remove the install from the registry as a
+   *  successful side-effect (today: the install-level delete action).
+   *  Drives three carve-outs on top of the standard takeover flow:
+   *    - skip the chooser-host claim (host stays in the initiating
+   *      window — nothing meaningful to attach when the install is
+   *      about to vanish),
+   *    - in-flight footer swaps Return-to-Dashboard for Cancel,
+   *    - on success the host auto-detaches before the takeover closes,
+   *    - on error only Return-to-Dashboard renders (no Reboot — the
+   *      install state is undefined after a partial destroy). */
+  destroysInstance?: boolean
 }
 
 // --- Action results ---

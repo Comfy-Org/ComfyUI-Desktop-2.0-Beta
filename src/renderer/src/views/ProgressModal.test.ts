@@ -34,6 +34,7 @@ const messages = {
   en: {
     common: {
       copy: 'Copy',
+      cancel: 'Cancel',
     },
     dashboard: {
       confirmStopLocal: {
@@ -119,6 +120,7 @@ function snapOp(installationId: string, patch: Partial<Operation> = {}): Operati
     title: 'Deleting — My Install',
     returnTo: 'list',
     opKind: 'destructive',
+    destroysInstance: false,
     steps: null,
     activePhase: null,
     activePercent: -1,
@@ -380,6 +382,57 @@ describe('ProgressModal — brand branch state transitions', () => {
     // Kill-Process is only shown when the offender is itself a Comfy
     // process — there's nothing safe to suggest killing otherwise.
     expect(body.selectorText('.brand-progress__footer')).not.toContain('Stop process and retry')
+  })
+
+  it('renders Cancel (not Return to Dashboard) in flight for destroy ops', async () => {
+    const { body } = await mountWithOp('inst-1', {
+      destroysInstance: true,
+      flatStatus: 'Deleting installation…',
+      flatPercent: 30,
+    })
+    expect(body.exists('.brand-progress__footer')).toBe(true)
+    expect(body.selectorText('.brand-progress__footer')).toContain('Cancel')
+    expect(body.selectorText('.brand-progress__footer')).not.toContain('Return to Dashboard')
+  })
+
+  it('renders Return to Dashboard (no Reboot) on a destroy op error', async () => {
+    const { body } = await mountWithOp('inst-1', {
+      destroysInstance: true,
+      finished: true,
+      error: 'Partial delete failed',
+    })
+    expect(body.exists('.brand-progress__footer')).toBe(true)
+    expect(body.selectorText('.brand-progress__footer')).toContain('Return to Dashboard')
+    expect(body.selectorText('.brand-progress__footer')).not.toContain('Reboot')
+  })
+
+  it('cancels the in-flight destroy op and emits close when Cancel is clicked', async () => {
+    const { wrapper, body } = await mountWithOp('inst-1', {
+      destroysInstance: true,
+      flatStatus: 'Deleting installation…',
+      flatPercent: 30,
+    })
+    const cancelBtn = body.buttonByText('Cancel')
+    expect(cancelBtn).not.toBeNull()
+    cancelBtn!.click()
+    await flushPromises()
+    expect(wrapper.emitted('close')?.length).toBeGreaterThan(0)
+    const store = useProgressStore()
+    const op = store.operations.get('inst-1')
+    expect(op?.cancelRequested).toBe(true)
+  })
+
+  it('auto-detaches the host on destroy-op success before the takeover auto-closes', async () => {
+    const { wrapper } = await mountWithOp('inst-1', {
+      destroysInstance: true,
+      finished: true,
+      result: { ok: true, navigate: 'list' } as ActionResult,
+    })
+    vi.advanceTimersByTime(800)
+    await flushPromises()
+    expect(wrapper.emitted('close')?.length).toBeGreaterThan(0)
+    const api = (window as unknown as { api: MockApi }).api
+    expect(api.returnToDashboard).toHaveBeenCalled()
   })
 
   it('emits close, cancels the in-flight op, and calls returnToDashboard when the in-flight Return button is clicked', async () => {

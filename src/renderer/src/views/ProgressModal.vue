@@ -439,6 +439,7 @@ function startOperation(opts: {
   cancellable?: boolean
   returnTo?: string
   opKind?: ShowProgressOpts['opKind']
+  destroysInstance?: boolean
 }): void {
   currentId.value = opts.installationId
   resolvingConflict.value = false
@@ -470,8 +471,22 @@ function handleDone(): void {
   if (!id) return
   const op = progressStore.operations.get(id)
   if (!op?.result) return
+  // Destroy ops: detach the host (no-op if not install-backed) before
+  // closing the takeover, so a delete that finished against the install
+  // currently backing this window doesn't leave the host pointing at a
+  // now-removed install.
+  if (op.destroysInstance) {
+    void window.api.returnToDashboard()
+  }
   emit('close')
-  if (op.returnTo === 'detail' || op.result.navigate === 'detail') {
+  // Guard show-detail against a stale install id — destroy ops (or any
+  // op whose success removes the install from the registry) would
+  // otherwise route to a now-missing detail view.
+  const installStillExists = !!installationStore.getById(id)
+  if (
+    installStillExists &&
+    (op.returnTo === 'detail' || op.result.navigate === 'detail')
+  ) {
     emit('show-detail', id)
   } else if (op.result.mode === 'console') {
     emit('show-console', id)
@@ -516,7 +531,30 @@ function handleReboot(): void {
     apiCall: op.apiCall || (() => window.api.runAction(id, 'launch')),
     returnTo: op.returnTo,
     opKind: op.opKind,
+    destroysInstance: op.destroysInstance,
   })
+}
+
+/** Cancel an in-flight destroy op. Gated by the same local-install
+ *  confirm helper for consistency (a delete-in-flight cancel still
+ *  leaves the install in an unknown partial state, so the prompt is
+ *  worth the friction). Closes the takeover after main acknowledges
+ *  the cancel — the destroy op leaves the host in its current state
+ *  rather than auto-detaching. */
+async function cancelDestructiveOp(): Promise<void> {
+  const id = displayId.value
+  if (!id) return
+  const op = progressStore.operations.get(id)
+  if (!op || op.finished) return
+  const installation = installationStore.getById(id) ?? null
+  const ok = await confirmReturnToDashboard(installation, 'in_flight')
+  if (!ok) return
+  emitTelemetryAction('desktop2.instance.return_to_dashboard', {
+    from: 'progress',
+    reason: 'in_flight',
+  })
+  progressStore.cancelOperation(id)
+  emit('close')
 }
 
 /** Auto-close the brand loader on success or cancel so the user
@@ -816,6 +854,16 @@ defineExpose({ startOperation, showOperation })
       >
         <template v-if="!currentOp.finished">
           <button
+            v-if="currentOp.destroysInstance"
+            type="button"
+            class="brand-ghost brand-progress__footer-btn"
+            @click="cancelDestructiveOp"
+          >
+            <X :size="16" />
+            {{ $t('common.cancel') }}
+          </button>
+          <button
+            v-else
             type="button"
             class="brand-ghost brand-progress__footer-btn"
             @click="returnToDashboard('in_flight')"
@@ -848,6 +896,7 @@ defineExpose({ startOperation, showOperation })
         </template>
         <template v-else>
           <button
+            v-if="!currentOp.destroysInstance"
             type="button"
             class="brand-primary brand-progress__footer-btn"
             @click="handleReboot"
@@ -857,7 +906,11 @@ defineExpose({ startOperation, showOperation })
           </button>
           <button
             type="button"
-            class="brand-ghost brand-progress__footer-btn"
+            :class="
+              currentOp.destroysInstance
+                ? 'brand-primary brand-progress__footer-btn'
+                : 'brand-ghost brand-progress__footer-btn'
+            "
             @click="returnToDashboard('crashed')"
           >
             <ArrowLeft :size="16" />

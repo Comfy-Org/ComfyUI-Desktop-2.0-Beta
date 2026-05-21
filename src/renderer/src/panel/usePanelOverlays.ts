@@ -209,19 +209,19 @@ export function usePanelOverlays(opts: UsePanelOverlaysOpts): UsePanelOverlaysAp
       onCancel,
     })
     if (!ok) return
-    // Install-less host: claim the chooser host for any non-destructive
-    // op so the host becomes the install-backed window once the op
-    // completes (launch consumes the claim in main's `onLaunch`; install /
-    // update / migrate / copy / load-snapshot-as-new ops complete in
-    // place via the claim and any subsequent launch lands in the same
-    // host). Destructive ops stay in the initiating window — there's
-    // nothing to attach. The `triggersInstanceStart` flag drives the
-    // fallback close-on-instance-started subscription (launch-class only)
-    // when the claim is rejected.
+    // Install-less host: claim the chooser host for any op that doesn't
+    // remove the install on success, so the host becomes the install-
+    // backed window once the op completes (launch consumes the claim in
+    // main's `onLaunch`; install / update / migrate / copy / load-
+    // snapshot-as-new ops complete in place via the claim and any
+    // subsequent launch lands in the same host). Destroy ops stay in
+    // the initiating window — there's nothing to attach. The
+    // `triggersInstanceStart` flag drives the fallback close-on-instance-
+    // started subscription (launch-class only) when the claim is rejected.
     if (
       !installationId &&
       opts.prepareChooserHostHandoff &&
-      showOpts.opKind !== 'destructive'
+      !showOpts.destroysInstance
     ) {
       await opts.prepareChooserHostHandoff(
         showOpts.installationId,
@@ -242,6 +242,7 @@ export function usePanelOverlays(opts: UsePanelOverlaysOpts): UsePanelOverlaysAp
       cancellable: showOpts.cancellable,
       returnTo: showOpts.returnTo,
       opKind: showOpts.opKind,
+      destroysInstance: showOpts.destroysInstance,
     })
   }
 

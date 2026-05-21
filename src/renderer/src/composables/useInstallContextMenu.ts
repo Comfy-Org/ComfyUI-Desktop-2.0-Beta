@@ -4,7 +4,7 @@ import { useSessionStore } from '../stores/sessionStore'
 import { useProgressStore } from '../stores/progressStore'
 import { useModal } from './useModal'
 import { revealInFolderLabel } from './usePlatform'
-import { progressOpKindForActionId } from '../lib/progressOpKind'
+import { progressOpKindForActionId, destroysInstanceForActionId } from '../lib/progressOpKind'
 import type { ContextMenuItem } from '../types/context-menu'
 import type { ActionDef, Installation, ShowProgressOpts } from '../types/ipc'
 
@@ -152,6 +152,7 @@ export function useInstallContextMenu(opts: {
       cancellable: !!action.cancellable,
       returnTo: 'list',
       opKind: progressOpKindForActionId(action.id),
+      destroysInstance: destroysInstanceForActionId(action.id),
     })
     return true
   }

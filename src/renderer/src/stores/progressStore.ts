@@ -21,6 +21,10 @@ export interface Operation {
    *  `'generic'` when the host doesn't tag the op; only launch ops
    *  drive the rolling 5-step launchCaption pipeline. */
   opKind: NonNullable<ShowProgressOpts['opKind']>
+  /** Mirrors `ShowProgressOpts.destroysInstance`. Carried on the op so
+   *  ProgressModal's footer can swap Reboot for a no-Reboot finished
+   *  state and the success path can auto-detach the host. */
+  destroysInstance: boolean
   steps: ProgressStep[] | null
   activePhase: string | null
   activePercent: number
@@ -87,8 +91,9 @@ export const useProgressStore = defineStore('progress', () => {
     cancellable?: boolean
     returnTo?: string
     opKind?: ShowProgressOpts['opKind']
+    destroysInstance?: boolean
   }): void {
-    const { installationId, title, apiCall, returnTo, opKind } = opts
+    const { installationId, title, apiCall, returnTo, opKind, destroysInstance } = opts
 
     cleanupOperation(installationId)
 
@@ -100,6 +105,7 @@ export const useProgressStore = defineStore('progress', () => {
       title: title || t('progress.working'),
       returnTo,
       opKind: opKind ?? 'generic',
+      destroysInstance: !!destroysInstance,
       steps: null,
       activePhase: null,
       activePercent: -1,
