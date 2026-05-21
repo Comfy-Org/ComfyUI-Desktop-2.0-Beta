@@ -126,7 +126,11 @@ const {
   triggerAction,
   isStoppedActionGated
 } = useInstallContextMenu({
-  onManage: (inst, opts) => openManage(inst, opts ?? {})
+  onManage: (inst, opts) => openManage(inst, opts ?? {}),
+  // Fast-path for Delete: forwards to PanelApp so the same ProgressModal
+  // pipeline used by every other long op fires here too, without the
+  // brief ManageInstallModal flash that the autoAction route produced.
+  onShowProgress: (showOpts) => emit('show-progress', showOpts)
 })
 
 function hasError(inst: Installation): boolean {

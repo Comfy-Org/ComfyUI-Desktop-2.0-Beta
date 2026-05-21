@@ -23,19 +23,25 @@ interface MockDownloadsState {
 interface MockBridgeState {
   downloadsActions: { action: string; url?: string; savePath?: string }[]
   openSettingsTabCalls: string[]
+  openDownloadsModalCalls: number
 }
 
-function installMockBridge(): MockBridgeState {
+function installMockBridge(platform: string = 'darwin'): MockBridgeState {
   const state: MockBridgeState = {
     downloadsActions: [],
     openSettingsTabCalls: [],
+    openDownloadsModalCalls: 0,
   }
   const bridge = {
+    platform,
     downloadsAction: (a: { action: string; url?: string; savePath?: string }) => {
       state.downloadsActions.push(a)
     },
     openSettingsTab: (tab: string) => {
       state.openSettingsTabCalls.push(tab)
+    },
+    openDownloadsModal: () => {
+      state.openDownloadsModalCalls += 1
     },
   }
   ;(window as unknown as { __comfyTitlePopup: typeof bridge }).__comfyTitlePopup = bridge
@@ -73,7 +79,7 @@ describe('comfyTitlePopup/DownloadsView', () => {
     expect(wrapper.find('.downloads-clear').exists()).toBe(false)
   })
 
-  it('renders an active downloading entry with a percentage subtitle and an inline progress gradient', async () => {
+  it('renders an active downloading entry with the full browser-style status line (size / speed / ETA) and an inline progress gradient', async () => {
     const { default: DownloadsView } = await import('./DownloadsView.vue')
     const state: MockDownloadsState = {
       active: [
@@ -98,7 +104,14 @@ describe('comfyTitlePopup/DownloadsView', () => {
     expect(item.find('.downloads-item-name').text()).toBe(
       'models/checkpoints / a.bin',
     )
-    expect(item.find('.downloads-item-sub').text()).toBe('42%')
+    // Drives the "zero reason to prefer the browser" requirement —
+    // for a 40 GB checkpoint download the user has to see all four
+    // facets without leaving the tray.
+    const sub = item.find('.downloads-item-sub').text()
+    expect(sub).toContain('4.0 MB / 9.5 MB')
+    expect(sub).toContain('42%')
+    expect(sub).toContain('1.0 MB/s')
+    expect(sub).toContain('30s')
     // The row itself acts as the progress bar (gradient stop at 42%).
     const style = item.attributes('style') ?? ''
     expect(style).toContain('linear-gradient')
@@ -122,7 +135,11 @@ describe('comfyTitlePopup/DownloadsView', () => {
     await flushPromises()
     const item = wrapper.find('.downloads-item.is-paused')
     expect(item.exists()).toBe(true)
-    expect(item.find('.downloads-item-sub').text()).toContain('10%')
+    const sub = item.find('.downloads-item-sub').text()
+    // Prefix is the i18n "Pause" label; suffix is the shared
+    // statusLine() output for paused state ("Paused at 10%").
+    expect(sub).toContain('Pause')
+    expect(sub).toContain('10%')
   })
 
   it('renders a completed entry as a clickable row with a Show-in-folder subtitle and a dismiss X', async () => {
@@ -277,12 +294,16 @@ describe('comfyTitlePopup/DownloadsView', () => {
     ])
   })
 
-  it('routes the footer link to the Settings → Downloads tab', async () => {
+  it('routes the footer link to the standalone DownloadsModal (not the Settings tab)', async () => {
     const { default: DownloadsView } = await import('./DownloadsView.vue')
     const wrapper = mount(DownloadsView, { props: { state: EMPTY_STATE } })
     await flushPromises()
     expect(wrapper.find('.downloads-link').text()).toBe('View All Downloads')
     await wrapper.find('.downloads-link').trigger('click')
-    expect(bridgeState.openSettingsTabCalls).toEqual(['downloads'])
+    expect(bridgeState.openDownloadsModalCalls).toBe(1)
+    // The old `openSettingsTab('downloads')` route is no longer the
+    // primary destination — the new modal is. Settings tab is still
+    // reachable directly through the Settings entry-point.
+    expect(bridgeState.openSettingsTabCalls).toEqual([])
   })
 })

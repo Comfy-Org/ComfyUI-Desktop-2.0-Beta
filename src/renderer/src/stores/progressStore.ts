@@ -9,12 +9,18 @@ import type {
   ProgressData,
   ProgressStep,
   ComfyOutputData,
+  ShowProgressOpts,
   Unsubscribe,
 } from '../types/ipc'
 
 export interface Operation {
   title: string
   returnTo?: string
+  /** Categorises this op for ProgressModal so the brand branch can
+   *  pick the right caption set + finished-state copy. Defaults to
+   *  `'generic'` when the host doesn't tag the op; only launch ops
+   *  drive the rolling 5-step launchCaption pipeline. */
+  opKind: NonNullable<ShowProgressOpts['opKind']>
   steps: ProgressStep[] | null
   activePhase: string | null
   activePercent: number
@@ -80,8 +86,9 @@ export const useProgressStore = defineStore('progress', () => {
     apiCall: () => Promise<ActionResult>
     cancellable?: boolean
     returnTo?: string
+    opKind?: ShowProgressOpts['opKind']
   }): void {
-    const { installationId, title, apiCall, returnTo } = opts
+    const { installationId, title, apiCall, returnTo, opKind } = opts
 
     cleanupOperation(installationId)
 
@@ -92,6 +99,7 @@ export const useProgressStore = defineStore('progress', () => {
     const op: Operation = {
       title: title || t('progress.working'),
       returnTo,
+      opKind: opKind ?? 'generic',
       steps: null,
       activePhase: null,
       activePercent: -1,

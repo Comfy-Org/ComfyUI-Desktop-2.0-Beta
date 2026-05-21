@@ -27,7 +27,7 @@ export const en = {
   },
   titleBar: {
     menu: 'Menu',
-    feedback: 'Beta Feedback',
+    feedback: 'Feedback',
     feedbackTooltip: 'Send Beta Feedback',
     downloads: 'Downloads',
     /** vue-i18n plural rule: "no plural form | singular | plural". */
@@ -38,12 +38,12 @@ export const en = {
      *  The unseen indicator clears as soon as the popup is opened. */
     downloadsCompleteUnseen:
       'no recent downloads | {n} download finished — click to review | {n} downloads finished — click to review',
-    desktopUpdateAvailable: 'Desktop Update Available',
+    desktopUpdateAvailable: 'Desktop Update',
     desktopUpdateDownloading: 'Downloading update…',
     desktopUpdateReady: 'Desktop Update Ready',
     desktopUpdateWithVersion: '{label} (v{version})',
-    installUpdateAvailable: 'Update available',
-    installUpdateVersion: 'Update {version}',
+    installUpdateAvailable: 'ComfyUI Update',
+    installUpdateVersion: 'ComfyUI {version}',
   },
   fileMenu: {
     newWindow: 'New Window',

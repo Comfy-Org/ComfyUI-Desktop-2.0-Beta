@@ -30,6 +30,7 @@ withDefaults(
         <slot />
       </div>
       <slot name="footer-left" />
+      <slot name="footer" />
     </div>
   </div>
 </template>
@@ -47,11 +48,6 @@ withDefaults(
   position: relative;
   flex: 1 1 auto;
   display: flex;
-  padding: 5px;
-  border-radius: 10px;
-  background:
-    linear-gradient(0deg, rgba(240, 240, 240, 0.54) 0%, rgba(240, 240, 240, 0.54) 100%),
-    var(--neutral-800);
 }
 
 .brand-beam {

@@ -274,3 +274,29 @@ On **Linux**, the app follows the [XDG Base Directory Specification](https://wik
 | Default install dir | `~/ComfyUI-Installs` |
 
 Existing files at the old `~/.config/comfyui-desktop-2` location are automatically migrated on first launch.
+
+### Reset / clean install
+
+If a manual update leaves the app in a broken state (no styling, no i18n, dead dropdowns, etc. — usually caused by a stale Chromium profile from a prior beta version), the [`scripts/reset-*`](scripts/) helpers wipe every known data location for the current build **and** the older beta names (`ComfyUI Launcher`, `comfyui-launcher`, `com.kosinkadink.comfyui-launcher`, `org.comfy.comfyui-launcher`). They prompt before deleting anything and **do not touch** `~/ComfyUI-Installs` (Windows: `%USERPROFILE%\ComfyUI-Installs`).
+
+Quit the app first, then:
+
+**macOS:**
+```sh
+curl -fsSLO https://raw.githubusercontent.com/Comfy-Org/ComfyUI-Desktop-2.0-Beta/main/scripts/reset-mac.sh
+bash reset-mac.sh
+```
+
+**Linux:**
+```sh
+curl -fsSLO https://raw.githubusercontent.com/Comfy-Org/ComfyUI-Desktop-2.0-Beta/main/scripts/reset-linux.sh
+bash reset-linux.sh
+```
+
+**Windows (PowerShell):**
+```powershell
+iwr -useb https://raw.githubusercontent.com/Comfy-Org/ComfyUI-Desktop-2.0-Beta/main/scripts/reset-windows.ps1 -OutFile reset-windows.ps1
+powershell -ExecutionPolicy Bypass -File .\reset-windows.ps1
+```
+
+Pass `--yes` (or `-Yes` on Windows) to skip the confirmation prompt. After cleanup, reinstall from the latest release and launch — the app should come up with a clean profile. You may need to re-add existing installations via **"Add existing installation"** since `installations.json` is wiped too.

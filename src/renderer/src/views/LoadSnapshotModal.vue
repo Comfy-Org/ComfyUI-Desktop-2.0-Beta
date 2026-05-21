@@ -226,6 +226,7 @@ async function handleCreate(): Promise<void> {
         apiCall: () => window.api.installInstance(result.entry!.id),
         cancellable: true,
         autoLaunchOnFinish: true,
+        opKind: 'install',
       })
       return
     }

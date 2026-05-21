@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 
 interface MockDownloadsTrayEntry {
@@ -80,35 +80,35 @@ function installMockBridge(opts: { isMac?: boolean; installationId?: string | nu
     dismissFileMenu: () => { state.fileMenuDismisses += 1 },
     onPanelChanged: (cb: (panel: string) => void) => {
       state.panelChangedCallbacks.push(cb)
-      return () => {}
+      return () => { }
     },
     onTitleChanged: (cb: (title: string) => void) => {
       state.titleChangedCallbacks.push(cb)
-      return () => {}
+      return () => { }
     },
     onSourceCategoryChanged: (cb: (category: string | null) => void) => {
       state.sourceCategoryChangedCallbacks.push(cb)
-      return () => {}
+      return () => { }
     },
     onThemeChanged: (cb: (theme: { bg: string; text: string }) => void) => {
       state.themeChangedCallbacks.push(cb)
-      return () => {}
+      return () => { }
     },
     onFullscreenChanged: (cb: (fullscreen: boolean) => void) => {
       state.fullscreenChangedCallbacks.push(cb)
-      return () => {}
+      return () => { }
     },
     onMenuOpened: (cb: (info: { menu: 'menu' }) => void) => {
       state.menuOpenedCallbacks.push(cb)
-      return () => {}
+      return () => { }
     },
     onMenuClosed: (cb: (info: { menu: 'menu' }) => void) => {
       state.menuClosedCallbacks.push(cb)
-      return () => {}
+      return () => { }
     },
     onFirstUseModeChanged: (cb: (mode: 'none' | 'consent-lockdown' | 'post-consent') => void) => {
       state.firstUseModeChangedCallbacks.push(cb)
-      return () => {}
+      return () => { }
     },
     onAppUpdateStateChanged: (
       cb: (next: {
@@ -118,11 +118,11 @@ function installMockBridge(opts: { isMac?: boolean; installationId?: string | nu
       }) => void,
     ) => {
       state.appUpdateStateCallbacks.push(cb)
-      return () => {}
+      return () => { }
     },
     onInstallUpdateAvailable: (cb: (next: { available: boolean; version: string | null }) => void) => {
       state.installUpdateAvailableCallbacks.push(cb)
-      return () => {}
+      return () => { }
     },
     clickAppUpdatePill: () => {
       state.appUpdatePillClicks += 1
@@ -132,7 +132,7 @@ function installMockBridge(opts: { isMac?: boolean; installationId?: string | nu
     },
     onDownloadsChanged: (cb: (next: MockDownloadsTrayState) => void) => {
       state.downloadsChangedCallbacks.push(cb)
-      return () => {}
+      return () => { }
     },
     clickDownloadsTray: () => {
       state.downloadsTrayClicks += 1
@@ -153,7 +153,7 @@ function installMockBridge(opts: { isMac?: boolean; installationId?: string | nu
       state.readyCalls += 1
     },
   }
-  ;(window as unknown as { __comfyTitleBar: typeof bridge }).__comfyTitleBar = bridge
+    ; (window as unknown as { __comfyTitleBar: typeof bridge }).__comfyTitleBar = bridge
   return state
 }
 
@@ -470,10 +470,10 @@ describe('TitleBarApp', () => {
     expect(wrapper.find('.title-update-pill.is-install-update').exists()).toBe(false)
   })
 
-  it('renders the app-update pill with "Desktop Update Available" copy when state.kind=available (auto-updates OFF)', async () => {
+  it('renders the app-update pill with "Desktop Update" copy when state.kind=available (auto-updates OFF)', async () => {
     // Issue #488 — `kind: 'available'` only fires with auto-updates
     // OFF (main suppresses it when ON and triggers the download
-    // itself). The pill label is the bare "Desktop Update Available"
+    // itself). The pill label is the bare "Desktop Update"
     // string; version moves to the tooltip / aria-label.
     const { default: TitleBarApp } = await import('./TitleBarApp.vue')
     const wrapper = mount(TitleBarApp)
@@ -485,9 +485,9 @@ describe('TitleBarApp', () => {
     const pill = wrapper.find('.title-update-pill.is-app-update')
     expect(pill.exists()).toBe(true)
     expect(pill.classes()).not.toContain('is-ready')
-    expect(pill.text()).toContain('Desktop Update Available')
-    expect(pill.attributes('title')).toBe('Desktop Update Available (v2.3.4)')
-    expect(pill.attributes('aria-label')).toBe('Desktop Update Available (v2.3.4)')
+    expect(pill.text()).toContain('Desktop Update')
+    expect(pill.attributes('title')).toBe('Desktop Update (v2.3.4)')
+    expect(pill.attributes('aria-label')).toBe('Desktop Update (v2.3.4)')
   })
 
   it('renders the app-update pill with "Desktop Update Ready" copy when state.kind=ready (auto-updates OFF)', async () => {
@@ -535,13 +535,14 @@ describe('TitleBarApp', () => {
     await flushPromises()
     const pill = wrapper.find('.title-update-pill.is-install-update')
     expect(pill.exists()).toBe(true)
-    expect(pill.text()).toContain('Update available')
+    expect(pill.text()).toContain('ComfyUI Update')
   })
 
   it('renders the install-update pill with version label when main pushes a target version', async () => {
-    // Mirrors the app-update pill's "Update {version}" copy so the
-    // user reads the install-update pill the same way: the target
-    // release is right there in the label, not behind a popover.
+    // Mirrors the app-update pill's "Desktop Update" copy pattern so
+    // the user reads the install-update pill the same way: the
+    // ComfyUI target release is right there in the label, not behind
+    // a popover, and visually distinct from the desktop-update pill.
     const { default: TitleBarApp } = await import('./TitleBarApp.vue')
     const wrapper = mount(TitleBarApp)
     await flushPromises()
@@ -551,10 +552,10 @@ describe('TitleBarApp', () => {
     await flushPromises()
     const pill = wrapper.find('.title-update-pill.is-install-update')
     expect(pill.exists()).toBe(true)
-    expect(pill.text()).toContain('Update v1.2.3')
+    expect(pill.text()).toContain('ComfyUI v1.2.3')
     // Tooltip + aria-label track the same copy.
-    expect(pill.attributes('title')).toBe('Update v1.2.3')
-    expect(pill.attributes('aria-label')).toBe('Update v1.2.3')
+    expect(pill.attributes('title')).toBe('ComfyUI v1.2.3')
+    expect(pill.attributes('aria-label')).toBe('ComfyUI v1.2.3')
   })
 
   it('suppresses the install-update pill on install-less host windows even when push fires', async () => {
@@ -889,8 +890,8 @@ describe('TitleBarApp', () => {
     await flushPromises()
     const btn = wrapper.find('.title-feedback-button')
     expect(btn.exists()).toBe(true)
-    expect(btn.attributes('aria-label')).toBe('Beta Feedback')
-    expect(btn.text()).toContain('Beta Feedback')
+    expect(btn.attributes('aria-label')).toBe('Feedback')
+    expect(btn.text()).toContain('Feedback')
     await btn.trigger('click')
     expect(bridgeState.feedbackClicks).toBe(1)
     wrapper.unmount()
@@ -1048,5 +1049,151 @@ describe('TitleBarApp', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  // Centered-pill mirror — the trailing cluster's width is measured
+  // via ResizeObserver and reflected onto the title bar as
+  // `--title-trailing-width`. The left cluster reads that var as
+  // `min-width`, so the centre grid track stays equidistant from
+  // both sides and the install pill anchors to true window centre at
+  // every width (including when update pills appear / collapse).
+  describe('trailing-width mirror (true-centered install pill)', () => {
+    type ResizeCallback = (entries: ResizeObserverEntry[], obs: ResizeObserver) => void
+    interface ResizeObserverHandle {
+      observed: Element[]
+      fire: (width: number) => void
+    }
+
+    let handles: ResizeObserverHandle[]
+    let originalResizeObserver: typeof globalThis.ResizeObserver | undefined
+
+    function installStub(): void {
+      function StubCtor(this: unknown, cb: ResizeCallback) {
+        const self = this as { observed: Element[]; cb: ResizeCallback }
+        self.observed = []
+        self.cb = cb
+        const handle: ResizeObserverHandle = {
+          observed: self.observed,
+          fire(width: number) {
+            self.cb(
+              [{ contentRect: { width, height: 28 } as DOMRectReadOnly } as ResizeObserverEntry],
+              self as unknown as ResizeObserver,
+            )
+          },
+        }
+        handles.push(handle)
+      }
+      StubCtor.prototype.observe = function observe(this: { observed: Element[] }, el: Element) {
+        this.observed.push(el)
+      }
+      StubCtor.prototype.disconnect = function disconnect(this: { observed: Element[] }) {
+        this.observed.length = 0
+      }
+      StubCtor.prototype.unobserve = function unobserve() {
+        // no-op
+      }
+      ;(globalThis as { ResizeObserver?: unknown }).ResizeObserver =
+        StubCtor as unknown as typeof globalThis.ResizeObserver
+    }
+
+    beforeEach(() => {
+      handles = []
+      originalResizeObserver = (globalThis as { ResizeObserver?: typeof globalThis.ResizeObserver })
+        .ResizeObserver
+      installStub()
+    })
+
+    afterEach(() => {
+      if (originalResizeObserver) {
+        ;(globalThis as { ResizeObserver?: typeof globalThis.ResizeObserver }).ResizeObserver =
+          originalResizeObserver
+      } else {
+        delete (globalThis as { ResizeObserver?: typeof globalThis.ResizeObserver }).ResizeObserver
+      }
+    })
+
+    it('observes the trailing cluster on mount and disconnects on unmount', async () => {
+      const mod = await import('./TitleBarApp.vue')
+      const wrapper = mount(mod.default, { attachTo: document.body })
+      await flushPromises()
+      // Exactly one observer is created (the trailing-cluster mirror).
+      expect(handles).toHaveLength(1)
+      const handle = handles[0]!
+      // It observed the `.title-trailing` element.
+      const trailingEl = wrapper.find('.title-trailing').element
+      expect(handle.observed[0]).toBe(trailingEl)
+      // Tear-down disconnects so the observer doesn't leak across
+      // the WebContentsView's lifecycle.
+      wrapper.unmount()
+      expect(handle.observed).toHaveLength(0)
+    })
+
+    it('mirrors trailing width onto the title bar as `--title-trailing-width`', async () => {
+      const mod = await import('./TitleBarApp.vue')
+      const wrapper = mount(mod.default, { attachTo: document.body })
+      await flushPromises()
+      const titleBar = wrapper.find('.title-bar').element as HTMLElement
+      const handle = handles[0]!
+      // Initial state — no resize fired yet, var resolves to 0px.
+      expect(titleBar.style.getPropertyValue('--title-trailing-width')).toBe('0px')
+      // Simulate the trailing cluster measuring 240px (e.g. icon-only
+      // narrow tier: feedback + downloads + settings + collapsed
+      // update pill icons).
+      handle.fire(240)
+      await flushPromises()
+      expect(titleBar.style.getPropertyValue('--title-trailing-width')).toBe('240px')
+      // Now simulate the wide tier where both update pills carry
+      // full labels — trailing grows.
+      handle.fire(520)
+      await flushPromises()
+      expect(titleBar.style.getPropertyValue('--title-trailing-width')).toBe('520px')
+      wrapper.unmount()
+    })
+
+    it('does not update the CSS var when the width is unchanged (avoids redundant style writes)', async () => {
+      const mod = await import('./TitleBarApp.vue')
+      const wrapper = mount(mod.default, { attachTo: document.body })
+      await flushPromises()
+      const titleBar = wrapper.find('.title-bar').element as HTMLElement
+      const handle = handles[0]!
+      handle.fire(300)
+      await flushPromises()
+      expect(titleBar.style.getPropertyValue('--title-trailing-width')).toBe('300px')
+      // Firing the same width is a no-op — guard inside the observer
+      // callback skips the assignment so the layout doesn't churn.
+      handle.fire(300)
+      await flushPromises()
+      expect(titleBar.style.getPropertyValue('--title-trailing-width')).toBe('300px')
+      wrapper.unmount()
+    })
+
+    it('rounds fractional widths up so the left-cluster reservation never under-shoots', async () => {
+      // Sub-pixel widths from the layout engine should round to the
+      // next whole pixel — a 0.4px under-shoot would let the trailing
+      // cluster nudge the centre off true window centre.
+      const mod = await import('./TitleBarApp.vue')
+      const wrapper = mount(mod.default, { attachTo: document.body })
+      await flushPromises()
+      const titleBar = wrapper.find('.title-bar').element as HTMLElement
+      const handle = handles[0]!
+      handle.fire(287.4)
+      await flushPromises()
+      expect(titleBar.style.getPropertyValue('--title-trailing-width')).toBe('288px')
+      wrapper.unmount()
+    })
+
+    it('does not crash if ResizeObserver is unavailable (older Electron / SSR-safety)', async () => {
+      delete (globalThis as { ResizeObserver?: typeof globalThis.ResizeObserver }).ResizeObserver
+      const mod = await import('./TitleBarApp.vue')
+      const wrapper = mount(mod.default, { attachTo: document.body })
+      await flushPromises()
+      // No observer attached, but the component still renders. Var
+      // falls back to 0px via the CSS default, so the left cluster
+      // takes no reservation and the centre track is full-width.
+      const titleBar = wrapper.find('.title-bar').element as HTMLElement
+      expect(titleBar.style.getPropertyValue('--title-trailing-width')).toBe('0px')
+      expect(wrapper.find('.title-install-pill').exists()).toBe(true)
+      wrapper.unmount()
+    })
   })
 })

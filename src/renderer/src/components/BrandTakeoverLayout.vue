@@ -20,6 +20,10 @@
  *     "Why try Cloud?"). Forwarded into BrandBackground's same-named
  *     slot so any `position: absolute` rules on the slotted child still
  *     resolve against `.brand-outer-frame` like before the extraction.
+ *   - footer: bottom-centered action band (e.g. ProgressModal's
+ *     Cancel / Back-to-Dashboard buttons on a finished op). Sibling to
+ *     `footer-left` so `position: absolute; bottom; left/right` rules
+ *     resolve against `.brand-outer-frame` consistently.
  *
  * The chrome forces `data-theme="dark"` — light-mode brand parity is
  * deferred. Same approach the inline implementation used before this
@@ -49,6 +53,9 @@ withDefaults(
         <slot />
         <template #footer-left>
           <slot name="footer-left" />
+        </template>
+        <template #footer>
+          <slot name="footer" />
         </template>
       </BrandBackground>
     </div>

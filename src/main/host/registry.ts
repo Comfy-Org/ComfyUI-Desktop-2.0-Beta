@@ -12,6 +12,7 @@ export type ComfyPanelKey =
   | 'comfy'
   | 'settings'
   | 'settings-v2'
+  | 'downloads-v2'
   | 'new-install'
   | 'track'
   | 'load-snapshot'
@@ -21,6 +22,7 @@ export const VALID_PANELS: ReadonlySet<ComfyPanelKey> = new Set([
   'comfy',
   'settings',
   'settings-v2',
+  'downloads-v2',
   'new-install',
   'track',
   'load-snapshot',
@@ -48,6 +50,7 @@ export type BodyMode =
   | 'comfy-lifecycle'
   | 'settings'
   | 'settings-v2'
+  | 'downloads-v2'
   | 'chooser'
   | 'new-install'
   | 'track'
@@ -173,6 +176,12 @@ export interface ComfyWindowEntry {
    * can re-push without closure capture.
    */
   sourceCategory: string | null
+  /**
+   * Chooser cold-start keeps the BrowserWindow hidden until the panel's
+   * first `did-finish-load` so the user doesn't stare at an empty body
+   * while panel.html boots. Cleared when the window is revealed.
+   */
+  coldStartPendingReveal: boolean
   /**
    * Symmetric undo for `attachInstall()`. Set by attach (closes
    * over every event listener and map mutation it set up); called

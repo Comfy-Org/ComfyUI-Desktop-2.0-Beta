@@ -1,4 +1,10 @@
 <script setup lang="ts">
+// TODO(brand-cleanup): Slated to be replaced by the new Global Settings
+// popup (picker-style WebContentsView, kind='global-settings' in
+// comfyTitlePopup). The extracted composable + UpdatesSection +
+// Accordion live in src/renderer/src/composables/useGlobalSettings.ts
+// and src/renderer/src/views/globalSettings/ for that future view to
+// consume. See docs/global-settings-handoff.md.
 import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import SettingsSections from '../components/SettingsSections.vue'

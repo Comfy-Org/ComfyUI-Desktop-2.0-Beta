@@ -1,6 +1,31 @@
 <script setup lang="ts">
-// TODO(stale-old-modal): delete after Settings drawer (v2,
-// ComfyUISettingsPanel) reaches functional parity and ships everywhere.
+// TODO(brand-cleanup): SOFT-DELETED post-brand-redesign.
+//
+// This component is no longer wired into the live overlay slot. As of
+// the brand-redesign migration:
+//   • The 'global' tab moved to the title-popup (`GlobalSettingsView.vue`)
+//     and `usePanelOverlays.switchPanel('settings')` short-circuits to
+//     `window.api.openGlobalSettings()` for install-less hosts.
+//   • The 'comfy' (per-install) tab moved to `ManageInstallModal.vue`,
+//     a thin wrapper around the shared `BaseModal` primitive that
+//     embeds `DetailModal` directly — no left rail, no sidebar.
+//   • The 'directories' / 'downloads' tabs have other homes already
+//     (title-popup Storage accordion / Downloads tray).
+//
+// The four dashboard/chooser callsites (`ChooserView` kebab "Manage…",
+// `PanelApp` install-pill Manage, two deeplinks in `useDeepLinkRouter`)
+// still emit `kind: 'settings'` overlay payloads, but `PanelApp.vue`'s
+// render branch now mounts `ManageInstallModal` instead of this file
+// (the legacy <SettingsModal> branch is preserved as an HTML comment
+// in PanelApp.vue per the soft-delete convention).
+//
+// Retained on disk so the migration can be reverted in one block if
+// needed. Remove after one release cycle if no regressions surface.
+// See `docs/per-install-settings-handoff.md`.
+//
+// (Previous TODO: "stale-old-modal" — superseded by this one. Drawer
+// parity is not the gate anymore; the new gate is regression confidence
+// on the BaseModal-backed wrapper.)
 import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ArrowDownToLine, Box, FolderOpen, Settings as SettingsIcon } from 'lucide-vue-next'
@@ -95,20 +120,30 @@ const tabs = computed<TabDef[]>(() => [
     available: true,
   },
   {
+    // TODO(brand-cleanup): Global tab is fully unreachable as of the
+    // Global Settings popup landing — hamburger Settings, panel file-
+    // menu Settings, and `comfy://open-settings?tab=global` deep links
+    // all route to the title-popup via the
+    // `comfy-titlepopup:open-global-settings` IPC. The TabDef stays
+    // here with `available: false` to keep the v-else-if branch's
+    // diff clean for the eventual hard-delete; bring it back to true
+    // only as an emergency rollback path.
     key: 'global',
     icon: SettingsIcon,
     label: t('settingsModal.tabGlobal', 'Global Settings'),
-    available: true,
+    available: false,
   },
 ])
 
 const visibleTabs = computed(() => tabs.value.filter((t) => t.available))
 
 /** Resolve the initial tab against availability: a request for
- *  `comfy` on an install-less host falls through to the default
- *  install-less tab (`global`). */
+ *  `comfy` on an install-less host falls through to `directories`.
+ *  (The legacy `'global'` fallback is unreachable now — Global Settings
+ *  opens via the title-popup IPC instead of this modal.) */
 function resolveInitial(req: SettingsTab): SettingsTab {
-  if (req === 'comfy' && !hasInstallation.value) return 'global'
+  if (req === 'comfy' && !hasInstallation.value) return 'directories'
+  if (req === 'global') return 'directories'
   return req
 }
 
@@ -121,7 +156,7 @@ watch(
   () => [props.initialTab, hasInstallation.value] as const,
   ([req, hasInst]) => {
     if (activeTab.value === 'comfy' && !hasInst) {
-      activeTab.value = 'global'
+      activeTab.value = 'directories'
       return
     }
     // If the caller explicitly bumps `initialTab` after mount (rare —

@@ -2,18 +2,14 @@
 import { ref, computed, watch, nextTick, onMounted, onUnmounted, reactive } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useModal, type ModalOption } from '../composables/useModal'
-import { sortedCardOptions } from '../lib/variants'
-import type { FieldOption } from '../types/ipc'
 import InfoTooltip from './InfoTooltip.vue'
-import VariantCardGrid from './VariantCardGrid.vue'
 import MigrateConfirmBody from './MigrateConfirmBody.vue'
+import BaseAlert from './ui/BaseAlert.vue'
 import { formatNodeVersion } from '../lib/snapshots'
 
 const { t } = useI18n()
 
-const { state, close, updateConfirm } = useModal()
-
-const sortedVariants = computed(() => sortedCardOptions(state.variantCards))
+const { state, close } = useModal()
 
 /** Whether the current confirm modal is the Migrate-to-Standalone flow.
  *  `snapshotPreview` is only set by `useMigrateAction`, so its presence
@@ -23,8 +19,46 @@ const sortedVariants = computed(() => sortedCardOptions(state.variantCards))
  *  modal-box. */
 const isMigrateConfirm = computed(() => state.type === 'confirm' && state.snapshotPreview != null)
 
-function selectVariant(opt: FieldOption): void {
-  updateConfirm({ selectedVariant: opt })
+/** A confirm is "simple" when it has no extras — no snapshot preview,
+ *  no detail groups, no checkboxes, no loading state, no variant cards.
+ *  These render through `BaseAlert` (cancel + primary). Rich confirms
+ *  (migrate, snapshot preview, multi-line detail confirms) keep the
+ *  legacy markup with its scrollable body. */
+const isSimpleConfirm = computed(
+  () =>
+    state.type === 'confirm' &&
+    !state.loading &&
+    state.snapshotPreview == null &&
+    state.messageDetails.length === 0 &&
+    state.checkboxes.length === 0 &&
+    state.variantCards.length === 0 &&
+    !state.variantLoading
+)
+
+/** True when the current modal is rendered by `BaseAlert` (which owns
+ *  its own teleport + overlay). The legacy overlay below must skip in
+ *  that case so we don't double-mount a backdrop. */
+const usesBaseAlert = computed(() => state.type === 'alert' || isSimpleConfirm.value)
+
+const baseAlertTone = computed<'primary' | 'danger'>(() =>
+  state.type === 'confirm' && state.confirmStyle === 'danger' ? 'danger' : 'primary'
+)
+
+/** Alert uses `buttonLabel` (single OK action); simple confirm uses
+ *  `confirmLabel` (the primary action like "Delete" / "Switch"). */
+const baseAlertButtonLabel = computed(() =>
+  state.type === 'alert' ? state.buttonLabel : state.confirmLabel
+)
+
+function onBaseAlertClose(): void {
+  // Alert: resolve void. Simple confirm: resolve `true`.
+  if (state.type === 'alert') close(undefined)
+  else close(true)
+}
+
+function onBaseAlertCancel(): void {
+  // Only reached for simple confirms (showCancel=true).
+  close(false)
 }
 
 /** MigrateConfirmBody emits when a checkbox flips. Mirror the change
@@ -144,6 +178,9 @@ watch(
 
 function handleKeydown(event: KeyboardEvent): void {
   if (!state.visible) return
+  // BaseAlert owns its own ESC dismissal for alert + simple confirm.
+  // Skip here to avoid double-resolving the promise.
+  if (usesBaseAlert.value) return
   if (event.key === 'Escape') {
     if (state.type === 'alert') {
       close(undefined)
@@ -189,26 +226,38 @@ onUnmounted(() => {
 </script>
 
 <template>
+  <!-- Alerts and simple confirms render through the shared `BaseAlert`
+       primitive (compact, role=alertdialog, focus restore, scroll lock,
+       a11y baked in). Rich confirms / prompt / select / options stay in
+       the legacy markup below until each gets its own dedicated
+       primitive — they have substantial bespoke UI (snapshot preview,
+       variant grid, detail groups) that doesn't fit the alert shape.
+       Single <BaseAlert> handles both intents; computed props swap the
+       primary label/tone and toggle Cancel based on `state.type`. -->
+  <BaseAlert
+    :open="state.visible && usesBaseAlert"
+    :title="state.title"
+    :message="state.message"
+    :show-cancel="isSimpleConfirm"
+    :button-label="baseAlertButtonLabel"
+    :tone="baseAlertTone"
+    @close="onBaseAlertClose"
+    @cancel="onBaseAlertCancel"
+  />
+
   <Teleport to="body">
     <div
-      v-if="state.visible"
+      v-if="state.visible && !usesBaseAlert"
       ref="overlayRef"
       class="modal-overlay"
       @mousedown="handleOverlayMouseDown"
       @click="handleOverlayClick"
     >
-      <!-- Alert -->
-      <div v-if="state.type === 'alert'" class="modal-box">
-        <div class="modal-title">{{ state.title }}</div>
-        <div class="modal-message" @click="handleMessageClick" v-html="linkifiedMessage"></div>
-        <div class="modal-actions">
-          <button class="primary" @click="close(undefined)">{{ state.buttonLabel }}</button>
-        </div>
-      </div>
-
-      <!-- Confirm -->
+      <!-- Confirm (rich: snapshot preview, variants, details, checkboxes,
+           or loading state). Simple confirms fall through to BaseAlert
+           above. -->
       <div
-        v-else-if="state.type === 'confirm'"
+        v-if="state.type === 'confirm'"
         class="modal-box"
         :class="{
           'modal-box-wide':
@@ -328,32 +377,6 @@ onUnmounted(() => {
               </template>
             </div>
           </template>
-
-          <!-- Variant / device selection — disabled per CTO ask. The
-               device hasn't changed since the prior install, so we
-               auto-pick the recommended variant silently in
-               useMigrateAction. Markup retained for future reference;
-               `v-if="false"` keeps it parseable but never rendered. -->
-          <div
-            v-if="
-              false && !state.loading && (state.variantCards.length > 0 || state.variantLoading)
-            "
-            class="ls-subsection"
-          >
-            <div class="ls-subsection-title">
-              <span>{{ $t('list.snapshotDevice') }}</span>
-            </div>
-            <div v-if="state.variantLoading" class="modal-loading">
-              <div class="modal-loading-spinner" />
-              <span>{{ $t('common.loading') }}</span>
-            </div>
-            <VariantCardGrid
-              v-else
-              :options="sortedVariants"
-              :selected-value="state.selectedVariant?.value"
-              @select="selectVariant"
-            />
-          </div>
 
           <!-- Generic message details + checkboxes (non-migrate
                confirms). The migrate brand layout above renders its

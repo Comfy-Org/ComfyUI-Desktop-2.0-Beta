@@ -75,6 +75,19 @@ export type OverlayKind = 'settings' | 'progress' | 'takeover'
  * in that flow. The file-menu / title-bar Settings entry leaves it
  * unset (default false) so the full sidebar layout renders.
  */
+/**
+ * TODO(brand-cleanup): post-brand-redesign this payload is consumed by
+ * `ManageInstallModal` (BaseModal-backed, per-install only). The
+ * `initialTab` field is now effectively unused — install-less hosts
+ * short-circuit to `window.api.openGlobalSettings()` before reaching
+ * the overlay, so every payload that lands here has `initialTab: 'comfy'`
+ * by construction. `initialDetailTab` carries the real per-install
+ * landing tab (`'status' | 'update' | 'snapshots' | 'settings'`) and
+ * `noSidebar` is dead (the new modal has no sidebar). Fields kept for
+ * now to avoid breaking the legacy `SettingsModal` (soft-deleted but
+ * still present per `feedback_soft_delete_convention`). Drop the legacy
+ * fields when `SettingsModal.vue` is hard-deleted.
+ */
 export interface SettingsOverlay {
   kind: 'settings'
   installation: Installation | null
@@ -154,18 +167,6 @@ export interface TakeoverOverlay {
    * wizard with no main-side rollback to fire.
    */
   onCancel?: () => void
-  /**
-   * Opt the `component: 'update'` takeover into ProgressModal's brand
-   * chrome (BrandTakeoverLayout + wordmark + step list) instead of the
-   * binding-modal chrome. Set today by:
-   *   - First-use → new-install chain (continuity with the takeover
-   *     above).
-   *   - Dashboard chooser-tile launch (screen swap to the brand loader
-   *     for parity with the onboarding install screen).
-   * Update-while-running on a regular dashboard install leaves it unset
-   * so that path keeps the original binding chrome.
-   */
-  brandChrome?: boolean
 }
 
 export type Overlay =

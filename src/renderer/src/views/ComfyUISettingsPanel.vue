@@ -89,17 +89,6 @@ interface TabDef {
   label: string
 }
 
-const tabs = computed<TabDef[]>(() => [
-  { key: 'config', sectionTab: 'settings', label: t('comfyUISettings.tabConfig', 'Config') },
-  { key: 'status', sectionTab: 'status', label: t('comfyUISettings.tabStatus', 'Status') },
-  { key: 'update', sectionTab: 'update', label: t('comfyUISettings.tabUpdate', 'Update') },
-  {
-    key: 'snapshots',
-    sectionTab: 'snapshots',
-    label: t('comfyUISettings.tabSnapshots', 'Snapshots')
-  }
-])
-
 const installation = toRef(props, 'installation')
 const {
   loading,
@@ -115,6 +104,34 @@ const {
   onShowProgress: (opts) => emit('show-progress', opts),
   onNavigateList: () => emit('navigate-list'),
   onClose: () => requestClose()
+})
+
+// Tab visibility is data-driven: a tab is shown iff main emitted at
+// least one section for it. Cloud sources don't emit `update` or
+// `snapshots` sections (see urlSource.ts), so cloud opens with only
+// Config + Status — matching the picker's right-pane visibility rule.
+const ALL_TABS: TabDef[] = [
+  { key: 'config', sectionTab: 'settings', label: t('comfyUISettings.tabConfig', 'Config') },
+  { key: 'status', sectionTab: 'status', label: t('comfyUISettings.tabStatus', 'Status') },
+  { key: 'update', sectionTab: 'update', label: t('comfyUISettings.tabUpdate', 'Update') },
+  {
+    key: 'snapshots',
+    sectionTab: 'snapshots',
+    label: t('comfyUISettings.tabSnapshots', 'Snapshots')
+  }
+]
+const tabs = computed<TabDef[]>(() =>
+  ALL_TABS.filter((tab) => sectionsForTab(tab.sectionTab).value.length > 0)
+)
+
+// If the currently selected tab disappeared (e.g. swapping a local
+// install for a cloud one while the drawer is open), fall back to the
+// first surviving tab so the body never renders against a stale key.
+watch(tabs, (next) => {
+  if (next.length === 0) return
+  if (!next.some((tab) => tab.key === activeTab.value)) {
+    activeTab.value = next[0]!.key
+  }
 })
 
 const visibleSections = computed(() => {
@@ -418,6 +435,7 @@ onUnmounted(() => {
                 <SettingsSectionList
                   :sections="visibleSections"
                   :readonly="activeTab === 'status'"
+                  :installation-id="installation?.id"
                   @update-field="updateField"
                   @run-action="runAction"
                   @open-args-page="openArgsPage"
