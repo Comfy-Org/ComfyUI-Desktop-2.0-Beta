@@ -51,7 +51,7 @@ export const en = {
     newInstall: 'New Install',
     addExistingInstall: 'Add Existing Install',
     loadSnapshot: 'Load Snapshot',
-    settings: 'Settings',
+    globalSettings: 'Global Settings',
     sendFeedback: 'Send Beta Feedback',
     returnToDashboard: 'Return to Dashboard',
     closeAllWindows: 'Close All Windows',
