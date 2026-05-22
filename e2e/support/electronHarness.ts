@@ -64,6 +64,9 @@ export interface SeedSnapshot {
   pipPackages?: Record<string, string>
   pythonVersion?: string
   updateChannel?: string
+  /** Set on the seeded snapshot so `snapshot-restore` skips the live
+   *  pip phase (avoids needing a real `uv` + Python env on disk). */
+  skipPipSync?: boolean
 }
 
 /** Mirrors `formatTimestamp` in `src/main/lib/snapshots/store.ts` so seeded
@@ -216,6 +219,7 @@ export async function launchLauncherApp(options?: SeedOptions): Promise<Launcher
           pipPackages: s.pipPackages ?? {},
           pythonVersion: s.pythonVersion,
           updateChannel: s.updateChannel ?? 'stable',
+          ...(s.skipPipSync ? { skipPipSync: true } : {}),
         }
         const filename = `${formatSeedTimestamp(new Date(createdAt))}-${s.trigger}-${(j + 1).toString(16).padStart(6, '0')}.json`
         await writeFileFs(path.join(snapshotsDir, filename), JSON.stringify(full, null, 2))
