@@ -935,16 +935,14 @@ const PICKER_COMPACT_MAX_WIDTH = 720
  *  with side gutters and the form fields read at a comfortable line
  *  length. */
 const PICKER_EXPANDED_MAX_WIDTH = 960
-/** Compact mode height ceiling as a fraction of the host window's
- *  content height. The natural-height signal from the renderer wins
- *  when it's smaller (typical 2-3 row case). On a tall window with
- *  many installs we'd otherwise grow the tray to fill the screen —
- *  cap at 60% so it reads as a "glance" affordance instead of a
- *  takeover. */
-const PICKER_COMPACT_MAX_HEIGHT_RATIO = 0.6
-/** Hard ceiling for the compact tray on tall windows. The ratio above
- *  scales the tray to host height so it stays "a glance, never a
- *  takeover", but on a 1600px-tall window 60% is still ~960px — too
+/** Hard ceiling for the compact tray on tall windows. Previously
+ *  paired with a 60% × window ratio cap, but on a *short* host
+ *  window the ratio choked the tray even when `naturalHeight` fit
+ *  comfortably in the available `innerHeight` (e.g. a 700px-tall
+ *  window: 60% = 420px, clipping a 500px natural-height tray for no
+ *  good reason). The hard 560px cap alone holds the anti-takeover
+ *  intent on tall windows, and `innerHeight` already caps growth on
+ *  short ones.
  *  much vertical real-estate for two installs. Cap so the tray reads
  *  as a tray. */
 const PICKER_COMPACT_MAX_HEIGHT = 560
@@ -1013,11 +1011,11 @@ function computePickerBounds(
     )
   } else {
     width = Math.min(PICKER_COMPACT_MAX_WIDTH, innerWidth)
-    const compactCeiling = Math.min(
-      innerHeight,
-      Math.round(content.height * PICKER_COMPACT_MAX_HEIGHT_RATIO),
-      PICKER_COMPACT_MAX_HEIGHT,
-    )
+    // `innerHeight` caps growth against the host window (anti-overflow);
+    // the hard 560px cap holds the anti-takeover intent on tall windows.
+    // No window-ratio cap — that previously choked the tray on *short*
+    // windows where the natural height would otherwise have fit fine.
+    const compactCeiling = Math.min(innerHeight, PICKER_COMPACT_MAX_HEIGHT)
     const requested = typeof naturalHeight === 'number' && naturalHeight > 0
       ? Math.ceil(naturalHeight)
       : compactCeiling
