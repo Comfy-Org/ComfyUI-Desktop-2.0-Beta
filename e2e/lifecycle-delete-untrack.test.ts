@@ -13,7 +13,7 @@
 
 import os from 'node:os'
 import path from 'node:path'
-import { access, mkdir, mkdtemp, writeFile } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { test, expect } from '@playwright/test'
 import { launchApp, type AppContext } from './launchApp'
 import { expectChooserVisible } from './support/chooserHelpers'
@@ -82,7 +82,12 @@ test.beforeAll(async () => {
 })
 
 test.afterAll(async () => {
-  await ctx.cleanup()
+  await ctx?.cleanup()
+  // untrackPath is preserved on disk by design (untrack contract); delete
+  // already removed deletePath, but force-clean both in case a test failed
+  // mid-flow and left either dir behind.
+  if (untrackPath) await rm(untrackPath, { recursive: true, force: true })
+  if (deletePath) await rm(deletePath, { recursive: true, force: true })
 })
 
 test('chooser lists both seeded installs @lifecycle', async () => {

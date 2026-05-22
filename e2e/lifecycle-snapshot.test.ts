@@ -16,12 +16,13 @@
 
 import os from 'node:os'
 import path from 'node:path'
-import { mkdir, mkdtemp } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { test, expect } from '@playwright/test'
 import { launchApp, type AppContext } from './launchApp'
 import { titlePopupPage } from './support/cdpPages'
 
 let ctx: AppContext
+let stagedInstallPath = ''
 
 const INSTALL_ID = 'inst-snapshot-test'
 const INSTALL_NAME = 'Snapshot Test Install'
@@ -36,11 +37,11 @@ test.beforeAll(async () => {
   // Use an explicit installPath outside the harness home dir so we can
   // assert against the snapshot files we wrote without round-tripping
   // through `app.getPath('userData')`.
-  const installPath = await mkdtemp(path.join(os.tmpdir(), 'comfyui-launcher-snapshot-e2e-'))
+  stagedInstallPath = await mkdtemp(path.join(os.tmpdir(), 'comfyui-launcher-snapshot-e2e-'))
   // saveSnapshot scans `<installPath>/ComfyUI/custom_nodes` and reads
   // git head; both tolerate missing dirs, but materializing the parent
   // keeps the capture path off the slow-stat error branch on Windows.
-  await mkdir(path.join(installPath, 'ComfyUI'), { recursive: true })
+  await mkdir(path.join(stagedInstallPath, 'ComfyUI'), { recursive: true })
 
   ctx = await launchApp({
     settings: { firstUseCompleted: true, telemetryEnabled: false },
@@ -48,7 +49,7 @@ test.beforeAll(async () => {
       {
         id: INSTALL_ID,
         name: INSTALL_NAME,
-        installPath,
+        installPath: stagedInstallPath,
         sourceId: 'standalone',
         status: 'installed',
         snapshots: [
@@ -71,7 +72,8 @@ test.beforeAll(async () => {
 })
 
 test.afterAll(async () => {
-  await ctx.cleanup()
+  await ctx?.cleanup()
+  if (stagedInstallPath) await rm(stagedInstallPath, { recursive: true, force: true })
 })
 
 test('seeded snapshot row renders the backend-formatted version @lifecycle', async () => {

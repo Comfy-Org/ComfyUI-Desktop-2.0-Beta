@@ -16,7 +16,7 @@
 import os from 'node:os'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { test, expect } from '@playwright/test'
 import { launchApp, type AppContext } from './launchApp'
 import { expectChooserVisible } from './support/chooserHelpers'
@@ -99,7 +99,8 @@ test.beforeAll(async () => {
 })
 
 test.afterAll(async () => {
-  await ctx.cleanup()
+  await ctx?.cleanup()
+  if (stagedPath) await rm(stagedPath, { recursive: true, force: true })
 })
 
 test('probe detects the staged standalone-shaped directory @lifecycle', async () => {
