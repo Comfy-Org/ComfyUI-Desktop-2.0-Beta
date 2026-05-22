@@ -19,7 +19,7 @@
  */
 
 import { readFileSync } from 'node:fs'
-import { access, mkdir, mkdtemp, writeFile } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { resolve } from 'node:path'
@@ -30,6 +30,7 @@ import { expectChooserVisible } from './support/chooserHelpers'
 let ctx: AppContext
 let legacyBasePath: string
 let legacyInstallId = ''
+let stagedSnapshotPath = ''
 
 const LEGACY_NAME = 'ComfyUI Legacy Desktop'
 
@@ -94,7 +95,9 @@ test.beforeAll(async () => {
 })
 
 test.afterAll(async () => {
-  if (ctx) await ctx.cleanup()
+  await ctx?.cleanup()
+  if (legacyBasePath) await rm(legacyBasePath, { recursive: true, force: true })
+  if (stagedSnapshotPath) await rm(stagedSnapshotPath, { force: true })
 })
 
 test('auto-tracker registers Legacy Desktop install on boot @lifecycle', async () => {
@@ -131,6 +134,9 @@ test('preview-desktop-migration stages a snapshot envelope from the legacy insta
   expect(result.snapshotPath, 'preview did not return a staged snapshot file').toBeTruthy()
   expect(await pathExists(result.snapshotPath!), 'staged snapshot file missing on disk').toBe(true)
   expect(result.preview?.snapshotCount).toBe(1)
+  // Track for afterAll cleanup — the handler only auto-deletes the
+  // previous file on its NEXT invocation, so a one-shot test leaks it.
+  stagedSnapshotPath = result.snapshotPath!
 })
 
 test('standalone source exposes a CPU variant the migration target picker can pin @lifecycle', async () => {
