@@ -418,7 +418,7 @@ defineExpose({ open })
     <div v-else-if="step === 'pick'" class="brand-hero">
       <h1 class="brand-title">{{ $t('firstUse.pickTitle') }}</h1>
       <p class="brand-lead">{{ $t('firstUse.pickLead') }}</p>
-      <div class="pick-grid" role="radiogroup" :aria-label="$t('firstUse.pickTitle')">
+      <div class="pick-grid">
         <ChoiceCard
           class="pick-card-cloud"
           :label="$t('cloud.label')"
@@ -610,8 +610,15 @@ defineExpose({ open })
 .pick-grid {
   display: grid;
   width: 100%;
-  grid-template-columns: repeat(auto-fit, minmax(min(360px, 100%), 1fr));
-  gap: 30px;
+  /* Constrain the grid below the hero's 960px max so the cards sit
+   * narrower under the centred light beam (the Cloud card is the
+   * `--brand-beam-target` anchor). Without this cap the cards stretch
+   * to the full hero width and the spotlight no longer lands on the
+   * card's centre line. */
+  max-width: 760px;
+  margin-inline: auto;
+  grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr));
+  gap: 24px;
 }
 
 .pick-card-cloud {
