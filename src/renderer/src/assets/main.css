@@ -133,13 +133,14 @@
   --brand-surface-border-hover: rgba(255, 255, 255, 0.18);
   --brand-surface-blur: 75px;
 
-  /* Chooser-surface — denser glass than --brand-surface-*, tuned for
-   * the chooser dashboard tiles + search input where the lighter brand
-   * recipe washed out against the plum background. Same shape (bg /
-   * bg-hover / border) so swap sites mirror brand-surface usage. */
-  --chooser-surface-bg: rgba(53, 49, 57, 0.5);
-  --chooser-surface-bg-hover: rgba(53, 49, 57, 0.7);
-  --chooser-surface-border: rgba(255, 255, 255, 0.1);
+  /* Chooser-surface — neutral white-glass recipe used by the chooser
+   * dashboard tiles + search input. Hover lifts both bg and border one
+   * step so the tile reads as interactive without leaving the white-
+   * glass family. Transition is declared on .chooser-tile. */
+  --chooser-surface-bg: rgba(255, 255, 255, 0.04);
+  --chooser-surface-bg-hover: rgba(255, 255, 255, 0.07);
+  --chooser-surface-border: rgba(255, 255, 255, 0.05);
+  --chooser-surface-border-hover: rgba(255, 255, 255, 0.1);
 
   /* Modal / alert surface — sits one notch lighter than --neutral-800
    * (#211927) so inputs/fields rendered inside the modal read as
@@ -216,9 +217,10 @@
 
   /* Chooser-surface — mirror of dark-theme block. Light-mode chooser
    * chrome isn't shipping yet; placeholder until light brand parity. */
-  --chooser-surface-bg: rgba(53, 49, 57, 0.5);
-  --chooser-surface-bg-hover: rgba(53, 49, 57, 0.7);
-  --chooser-surface-border: rgba(255, 255, 255, 0.1);
+  --chooser-surface-bg: rgba(255, 255, 255, 0.04);
+  --chooser-surface-bg-hover: rgba(255, 255, 255, 0.07);
+  --chooser-surface-border: rgba(255, 255, 255, 0.05);
+  --chooser-surface-border-hover: rgba(255, 255, 255, 0.1);
 
   /* Modal / alert surface — light-theme placeholder mirrors dark-theme
    * value until light brand parity ships. */
