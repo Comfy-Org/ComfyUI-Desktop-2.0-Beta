@@ -30,7 +30,9 @@
  *   transforms in place into the install host (issue #449 path).
  */
 
+import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
+import path from 'node:path'
 import { resolve } from 'node:path'
 import { test, expect } from '@playwright/test'
 import { launchApp, type AppContext } from './launchApp'
@@ -301,6 +303,104 @@ test('return-to-dashboard flips install host in place (same window id) @lifecycl
   })
   expect(reattached.count).toBe(before.count)
   expect(reattached.comfyHostId).toBe(flippedId)
+})
+
+// ---------------------------------------------------------------------------
+// Real update — exercise runComfyUIUpdate end-to-end against GitHub.
+//
+// The install above lands on the latest stable tag. To prove the update
+// path *actually does something*, force ComfyUI's working tree backwards
+// a few commits via real `git reset --hard`, then drive the in-place
+// `update-comfyui` action and assert the working-tree HEAD moves forward
+// again. This exercises:
+//   - the bundled `update_comfyui.py` script (real Python subprocess)
+//   - real `git fetch` from github.com/comfyanonymous/ComfyUI
+//   - real `git checkout` of the latest stable tag
+//   - filtered `uv pip install -r requirements.txt` if requirements
+//     changed across the rolled-back range
+// ---------------------------------------------------------------------------
+
+interface InstallationLite {
+  id: string
+  installPath: string
+}
+
+interface UpdateActionResult {
+  ok: boolean
+  message?: string
+  navigate?: string
+}
+
+let _updateInstallId = ''
+let _updateInstallPath = ''
+let _comfyUIDir = ''
+let _rolledBackCommit = ''
+
+test('stop ComfyUI again so update-comfyui (requires stopped) can run @lifecycle', async () => {
+  // `update-comfyui` is in REQUIRES_STOPPED; the prior test re-launched.
+  // Detach in place rather than closing the window so the chooser host
+  // stays alive for the subsequent re-launch.
+  await returnFirstInstallHostToDashboard(ctx.app)
+  await expect.poll(comfyFrontendIsLoaded, { timeout: 30_000, intervals: [500] }).toBe(false)
+  await waitForWebContents(ctx.app, 'panel.html')
+  await expectChooserVisible(ctx.panel)
+})
+
+test('roll ComfyUI HEAD back so the update has work to do @lifecycle', async () => {
+  const installs = await ctx.panel.evaluate<InstallationLite[]>(
+    `window.api.getInstallations()`,
+  )
+  expect(installs.length, 'no tracked installation after install').toBeGreaterThan(0)
+  const inst = installs[0]!
+  _updateInstallId = inst.id
+  _updateInstallPath = inst.installPath
+  _comfyUIDir = path.join(_updateInstallPath, 'ComfyUI')
+
+  const headBefore = execFileSync('git', ['rev-parse', 'HEAD'], {
+    cwd: _comfyUIDir, encoding: 'utf-8', windowsHide: true,
+  }).trim()
+  expect(headBefore).toMatch(/^[a-f0-9]{40}$/)
+
+  // Roll back 3 commits. Small enough to (usually) avoid a requirements
+  // change crossing it — if it does, the update still runs, just slower.
+  execFileSync('git', ['reset', '--hard', 'HEAD~3'], {
+    cwd: _comfyUIDir, stdio: 'pipe', windowsHide: true,
+  })
+
+  const headAfter = execFileSync('git', ['rev-parse', 'HEAD'], {
+    cwd: _comfyUIDir, encoding: 'utf-8', windowsHide: true,
+  }).trim()
+  expect(headAfter, 'git reset --hard did not move HEAD').not.toBe(headBefore)
+  _rolledBackCommit = headAfter
+})
+
+test('update-comfyui drives the real updater and moves HEAD forward @lifecycle', async () => {
+  // Real update can run pip-install if requirements.txt crossed our 3-commit
+  // rollback. Stretch the per-test timeout to cover that worst case.
+  test.setTimeout(600_000)
+  expect(_rolledBackCommit, 'rolled-back commit not captured').toBeTruthy()
+
+  const result = await ctx.panel.evaluate<UpdateActionResult>(
+    `window.api.runAction(${JSON.stringify(_updateInstallId)}, 'update-comfyui', { channel: 'stable' })`,
+  )
+  expect(result.ok, `update-comfyui failed: ${result.message ?? ''}`).toBe(true)
+
+  const headAfter = execFileSync('git', ['rev-parse', 'HEAD'], {
+    cwd: _comfyUIDir, encoding: 'utf-8', windowsHide: true,
+  }).trim()
+  expect(headAfter, 'update did not move HEAD off the rolled-back commit').not.toBe(_rolledBackCommit)
+
+  // The update should land on a commit reachable from origin/master that is
+  // strictly newer than (or equal to) the rolled-back one — never older.
+  const aheadCount = execFileSync('git', ['rev-list', '--count', `${_rolledBackCommit}..${headAfter}`], {
+    cwd: _comfyUIDir, encoding: 'utf-8', windowsHide: true,
+  }).trim()
+  expect(parseInt(aheadCount, 10), `post-update HEAD ${headAfter} is not ahead of rolled-back commit ${_rolledBackCommit}`).toBeGreaterThan(0)
+})
+
+test('re-launch ComfyUI after update so the stop test has something to close @lifecycle', async () => {
+  await clickInstallTile(ctx.panel, 'ComfyUI')
+  await expect.poll(comfyFrontendIsLoaded, { timeout: 180_000, intervals: [1_000] }).toBe(true)
 })
 
 // ---------------------------------------------------------------------------
