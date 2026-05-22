@@ -251,7 +251,7 @@ function chooseMigrate(): void {
 function chooseInstallNew(): void {
   emitTelemetryAction('desktop2.first_use.local_branch_chosen', { choice: 'install_new' })
   // Skip the dedicated name screen — naming now happens inline on the
-  // Configure screen (NewInstallModal brand-config). Flag the origin so
+  // Configure screen (InstallWizardModal brand-config). Flag the origin so
   // Configure surfaces a Back link returning to localBranch.
   emitCompleted('local-new')
   emit('chain-local', { cameFromLocalBranch: true })

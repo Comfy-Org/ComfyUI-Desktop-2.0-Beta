@@ -80,9 +80,9 @@ vi.mock('../views/ChooserView.vue', () => ({
       '<div data-testid="chooser-view"><button data-testid="chooser-new-install" @click="$emit(\'show-new-install\')">New</button></div>',
   },
 }))
-vi.mock('../views/NewInstallModal.vue', () => ({
+vi.mock('../views/InstallWizardModal.vue', () => ({
   default: {
-    name: 'NewInstallModal',
+    name: 'InstallWizardModal',
     emits: ['close', 'navigate-list', 'show-progress'],
     template: '<div data-testid="new-install-modal" />',
     methods: { open: vi.fn() },
@@ -440,7 +440,7 @@ it('opens the new-install takeover above the chooser body when show-new-install 
     // body (chooser, since there's no installationId).
     expect(wrapper.find('[data-testid="new-install-modal"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="chooser-view"]').exists()).toBe(true)
-    await wrapper.findComponent({ name: 'NewInstallModal' }).vm.$emit('close')
+    await wrapper.findComponent({ name: 'InstallWizardModal' }).vm.$emit('close')
     await flushPromises()
     expect(wrapper.find('[data-testid="new-install-modal"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="chooser-view"]').exists()).toBe(true)
@@ -471,7 +471,7 @@ it('opens the new-install takeover above the chooser body when show-new-install 
     { panel: 'track', selector: '[data-testid="track-modal"]', name: 'TrackModal' },
     { panel: 'load-snapshot', selector: '[data-testid="load-snapshot-modal"]', name: 'LoadSnapshotModal' },
     { panel: 'quick-install', selector: '[data-testid="quick-install-modal"]', name: 'QuickInstallModal' },
-    { panel: 'new-install', selector: '[data-testid="new-install-modal"]', name: 'NewInstallModal' },
+    { panel: 'new-install', selector: '[data-testid="new-install-modal"]', name: 'InstallWizardModal' },
   ])('IPCs closeCurrentPanel when the $panel takeover dismisses, so main\'s activePanel resets and the file menu can re-open it', async ({ panel, selector, name }) => {
     // Without this IPC, main's `entry.activePanel` stays stuck on the
     // wizard key after the renderer-side dismiss; the next file-menu
@@ -604,7 +604,7 @@ it('opens the new-install takeover above the chooser body when show-new-install 
     expect(setSetting).not.toHaveBeenCalledWith('firstUseCompleted', true)
 
     // New-install close (success or cancel) flips the persisted gate.
-    await wrapper.findComponent({ name: 'NewInstallModal' }).vm.$emit('close')
+    await wrapper.findComponent({ name: 'InstallWizardModal' }).vm.$emit('close')
     await flushPromises()
     expect(setSetting).toHaveBeenCalledWith('firstUseCompleted', true)
   })

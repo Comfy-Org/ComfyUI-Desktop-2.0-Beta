@@ -2444,7 +2444,7 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
     },
   )
 
-  // Picker → "+ New Install" row. Fires the `NewInstallModal` as a
+  // Picker → "+ New Install" row. Fires the `InstallWizardModal` as a
   // Tier 3 takeover on the current host, regardless of whether that
   // host is a chooser or an install-backed window. This matches the
   // chooser dashboard's "+ New Install" card behaviour — the user

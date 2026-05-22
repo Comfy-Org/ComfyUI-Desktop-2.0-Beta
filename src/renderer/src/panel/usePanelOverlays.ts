@@ -1,6 +1,6 @@
 import { nextTick, ref, type Ref } from 'vue'
 import type ProgressModal from '../views/ProgressModal.vue'
-import type NewInstallModal from '../views/NewInstallModal.vue'
+import type InstallWizardModal from '../views/InstallWizardModal.vue'
 import type TrackModal from '../views/TrackModal.vue'
 import type LoadSnapshotModal from '../views/LoadSnapshotModal.vue'
 import type QuickInstallModal from '../views/QuickInstallModal.vue'
@@ -99,7 +99,7 @@ export interface UsePanelOverlaysOpts {
   // template (destructuring out of the composable hides the binding
   // and trips `noUnusedLocals`).
   progressRef: Ref<InstanceType<typeof ProgressModal> | null>
-  newInstallRef: Ref<InstanceType<typeof NewInstallModal> | null>
+  newInstallRef: Ref<InstanceType<typeof InstallWizardModal> | null>
   trackRef: Ref<InstanceType<typeof TrackModal> | null>
   loadSnapshotRef: Ref<InstanceType<typeof LoadSnapshotModal> | null>
   quickInstallRef: Ref<InstanceType<typeof QuickInstallModal> | null>

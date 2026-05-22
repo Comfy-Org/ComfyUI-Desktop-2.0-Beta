@@ -6,7 +6,7 @@ import ModalDialog from '../components/ModalDialog.vue'
 import DownloadsModal from '../components/DownloadsModal.vue'
 import ComfyLifecycleView from './ComfyLifecycleView.vue'
 import ChooserView from '../views/ChooserView.vue'
-import NewInstallModal from '../views/NewInstallModal.vue'
+import InstallWizardModal from '../views/InstallWizardModal.vue'
 import TrackModal from '../views/TrackModal.vue'
 import LoadSnapshotModal from '../views/LoadSnapshotModal.vue'
 import QuickInstallModal from '../views/QuickInstallModal.vue'
@@ -80,7 +80,7 @@ const bootstrapReady: Promise<void> = new Promise<void>((resolve) => {
 // composable consumes these but doesn't own them so vue-tsc can see
 // the bindings as used by the template's `ref="…"` props.
 const progressRef = ref<InstanceType<typeof ProgressModal> | null>(null)
-const newInstallRef = ref<InstanceType<typeof NewInstallModal> | null>(null)
+const newInstallRef = ref<InstanceType<typeof InstallWizardModal> | null>(null)
 const trackRef = ref<InstanceType<typeof TrackModal> | null>(null)
 const loadSnapshotRef = ref<InstanceType<typeof LoadSnapshotModal> | null>(null)
 const quickInstallRef = ref<InstanceType<typeof QuickInstallModal> | null>(null)
@@ -497,7 +497,7 @@ onUnmounted(() => {
         :installation-id="currentOverlay.installationId ?? ''"
         @close="handleProgressClose"
       />
-      <NewInstallModal
+      <InstallWizardModal
         v-else-if="currentOverlay.component === 'new-install'"
         ref="newInstallRef"
         :hide-back-to-dashboard="chainingFirstUseToNewInstall"
