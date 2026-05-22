@@ -21,6 +21,13 @@ export interface SeedOptions {
    * racing the first-use takeover for control of the chooser host.
    */
   settings?: Record<string, unknown>
+  /**
+   * Runs after the isolated home + app-data dirs are created but before
+   * the Electron app is spawned. Use to drop platform-specific files
+   * (e.g. legacy Desktop `config.json` under `%APPDATA%/ComfyUI/`) the
+   * main process inspects during early boot.
+   */
+  onSetup?: (paths: { homeDir: string; appDataDir: string }) => Promise<void>
 }
 
 export interface SeedInstallation {
@@ -118,6 +125,10 @@ export async function launchLauncherApp(options?: SeedOptions): Promise<Launcher
       ? path.join(homeDir, 'Library', 'Application Support', 'comfyui-desktop-2')
       : path.join(homeDir, '.config', 'comfyui-desktop-2')
   await mkdir(appDataDir, { recursive: true })
+
+  if (options?.onSetup) {
+    await options.onSetup({ homeDir, appDataDir })
+  }
 
   // Expose a CDP remote-debugging port so tests can connect to non-BrowserWindow
   // webContents (e.g. the ComfyUI WebContentsView) via chromium.connectOverCDP().
