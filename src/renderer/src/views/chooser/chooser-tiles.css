@@ -7,8 +7,10 @@
  */
 
 .chooser-tile {
-  /* Golden ratio (1.618 : 1) — the design specifies tiles of this shape. */
-  aspect-ratio: 1.8 / 1;
+  /* Figma spec: 246 × 156.678 → aspect 246 / 156.678. Combined with
+   * the fixed-track grid in ChooserView, every tile renders at this
+   * exact size. */
+  aspect-ratio: 246 / 156.678;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -31,6 +33,7 @@
 .chooser-tile:hover,
 .chooser-tile:focus-visible {
   background: var(--chooser-surface-bg-hover);
+  border-color: var(--chooser-surface-border-hover);
 }
 /* Group-hover / -focus: lift the muted resting `--neutral-100` text /
  * icon to full-strength `--text` so the tile reads as actively focused.
@@ -73,15 +76,22 @@
 }
 
 .chooser-tile-meta {
+  /* Single-row pill layout: no wrap, so a long source pill shrinks
+   * (via the pill's own max-width / min-width: 0) and triggers
+   * ellipsis. Wrapping pills would otherwise size each one to its
+   * content and defeat truncation. */
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 6px;
-  max-width: 100%;
+  width: 100%;
+  min-width: 0;
   font-size: 12px;
   color: var(--neutral-100);
   /* Reserve space at the bottom-right for the absolutely-positioned
-   * Close-instance CTA so pills don't run under it on narrow tiles. */
-  padding-right: 50px;
+   * Close-instance CTA so pills don't run under it. The CTA is only
+   * present while running/stopping, but reserving unconditionally
+   * keeps the pill row's geometry stable across states. */
+  padding-right: 40px;
 }
 
 .chooser-tile-pill {
@@ -92,16 +102,34 @@
   background: var(--bg-elev-2, rgba(127, 127, 127, 0.14));
   border: 1px solid var(--border-subtle, rgba(127, 127, 127, 0.18));
   font-size: 11px;
-  white-space: nowrap;
   opacity: 0.9;
+  /* Single-line truncation so long source labels don't break tile
+   * layout. `min-width: 0` overrides the flex-child default that
+   * would otherwise block shrinkage below content width. */
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .chooser-tile-pill-version {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  /* Action/version pills hold their content width so the source pill
+   * is the one that truncates when the row is tight. */
+  flex-shrink: 0;
+}
+
+/* Launched-time pill — secondary info, lower contrast so it doesn't
+ * compete with source/action pills. Holds its width like the others. */
+.chooser-tile-pill-launched {
+  flex-shrink: 0;
+  opacity: 0.7;
 }
 
 /* Update-available pill — accent-blue tinted, click-target. */
 .chooser-tile-pill-update {
   gap: 4px;
+  flex-shrink: 0;
   color: var(--accent, #4a90e2);
   background: var(--accent-soft, rgba(74, 144, 226, 0.12));
   border-color: var(--accent, #4a90e2);
@@ -125,6 +153,7 @@
 /* Migrate-available pill — warning amber so it's distinct from update. */
 .chooser-tile-pill-migrate {
   gap: 4px;
+  flex-shrink: 0;
   color: var(--accent-warning, #d97706);
   background: var(--accent-warning-soft, rgba(217, 119, 6, 0.12));
   border-color: var(--accent-warning, #d97706);
