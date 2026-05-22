@@ -19,6 +19,7 @@ import { seedLauncherPrefsFromUrl, useLauncherPrefs } from '../composables/useLa
 import { useModal } from '../composables/useModal'
 import { useAppUpdatePrompts } from '../composables/useAppUpdatePrompts'
 import { useReturnToDashboardConfirm } from '../composables/useReturnToDashboardConfirm'
+import { useQuitDesktopConfirm } from '../composables/useQuitDesktopConfirm'
 import { useSendFeedback } from '../composables/useSendFeedback'
 import { emitTelemetryAction } from '../lib/telemetry'
 import { useDeepLinkRouter } from '../composables/useDeepLinkRouter'
@@ -185,6 +186,7 @@ let unsubReturnToDashboardRequest: (() => void) | null = null
 let unsubAppUpdatePromptRestart: (() => void) | null = null
 let unsubAppUpdateUserActionFailed: (() => void) | null = null
 const { confirmReturnToDashboard } = useReturnToDashboardConfirm()
+const { confirmQuitDesktop } = useQuitDesktopConfirm()
 
 // All Manage routes go through `window.api.openInstancePicker` — the picker's
 // expanded mode is the single per-install settings surface. Delete keeps its
@@ -305,6 +307,11 @@ onMounted(async () => {
   // the user dismissed the prompt. We echo the boolean back to main
   // along with the original `requestId` so main can pair it with the
   // request that fired it.
+  //
+  // Chooser host (install-less) idle close pops a "Quit Desktop?"
+  // confirm instead of clearing silently. Install-backed hosts still
+  // clear silently when no overlay is in flight — only the dashboard
+  // ✕ is gated.
   unsubCloseRequest = window.api.onCloseRequest(({ requestId }) => {
     // Ack synchronously so main extends its hung-renderer timeout —
     // the actual response can take arbitrary time when the user is
@@ -313,7 +320,14 @@ onMounted(async () => {
     // closing the window.
     window.api.ackCloseRequest({ requestId })
     void (async () => {
-      const cleared = currentOverlay.value === null ? true : await closeOverlay()
+      let cleared: boolean
+      if (currentOverlay.value !== null) {
+        cleared = await closeOverlay()
+      } else if (!installationId) {
+        cleared = await confirmQuitDesktop()
+      } else {
+        cleared = true
+      }
       window.api.respondCloseRequest({ requestId, cleared })
     })()
   })

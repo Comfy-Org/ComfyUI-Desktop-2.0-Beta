@@ -206,6 +206,9 @@ interface MockApiState {
    *  entry; tests can simulate the click by invoking each callback
    *  with the originating `source`. */
   openFeedbackCallbacks: ((data: { source: 'titlebar' | 'menu' }) => void)[]
+  /** Window-close consult callbacks. Main fires `comfy-window:request-close`
+   *  when the user clicks the ✕; tests fire each callback to simulate that. */
+  closeRequestCallbacks: ((data: { requestId: string }) => void)[]
   installations: InstallationLike[]
   getInstallations: ReturnType<typeof vi.fn>
   openExternal: ReturnType<typeof vi.fn>
@@ -231,6 +234,7 @@ function installMockApi(initial?: {
     installationsChangedCallbacks: [],
     firstUseSkipCallbacks: [],
     openFeedbackCallbacks: [],
+    closeRequestCallbacks: [],
     installations,
     getInstallations: vi.fn(async () => state.installations),
     openExternal: vi.fn(async () => {}),
@@ -275,9 +279,12 @@ function installMockApi(initial?: {
     getAppVersion: state.getAppVersion,
     onSettingsChanged: vi.fn(() => () => {}),
     // Main consults the panel renderer before tearing down the host
-    // window. PanelApp subscribes on mount; the test suite never
-    // fires the consult so the mock is a no-op pair.
-    onCloseRequest: vi.fn(() => () => {}),
+    // window. PanelApp subscribes on mount; tests can fire the consult
+    // by invoking each captured callback with a `requestId`.
+    onCloseRequest: vi.fn((cb: (d: { requestId: string }) => void) => {
+      state.closeRequestCallbacks.push(cb)
+      return () => {}
+    }),
     respondCloseRequest: vi.fn(),
     ackCloseRequest: vi.fn(),
     // Symmetric mock pair for the File menu's Return to Dashboard consult.
@@ -978,6 +985,50 @@ it('does NOT fire desktop2.view.opened when a panel-switch IPC re-confirms the a
       mockState.panelSwitchCallbacks.forEach((cb) => cb({ panel: 'new-install' }))
       await flushPromises()
       expect(events.filter((e) => e.actionName === 'desktop2.install.flow.opened')).toHaveLength(0)
+    })
+  })
+
+  describe('chooser host close consult', () => {
+    it('shows the Quit Desktop confirm on the chooser ✕ and clears when confirmed', async () => {
+      window.history.replaceState({}, '', '/?panel=chooser&firstUseCompleted=true')
+      mockModal.confirm.mockResolvedValueOnce(true)
+      mountPanel()
+      await flushPromises()
+
+      mockState.closeRequestCallbacks.forEach((cb) => cb({ requestId: 'req-1' }))
+      await flushPromises()
+
+      expect(mockModal.confirm).toHaveBeenCalledWith(
+        expect.objectContaining({ title: 'dashboard.confirmQuit.title' }),
+      )
+      const api = (window as unknown as { api: { respondCloseRequest: ReturnType<typeof vi.fn> } }).api
+      expect(api.respondCloseRequest).toHaveBeenCalledWith({ requestId: 'req-1', cleared: true })
+    })
+
+    it('keeps the window open when the user cancels the Quit Desktop confirm', async () => {
+      window.history.replaceState({}, '', '/?panel=chooser&firstUseCompleted=true')
+      mockModal.confirm.mockResolvedValueOnce(false)
+      mountPanel()
+      await flushPromises()
+
+      mockState.closeRequestCallbacks.forEach((cb) => cb({ requestId: 'req-2' }))
+      await flushPromises()
+
+      const api = (window as unknown as { api: { respondCloseRequest: ReturnType<typeof vi.fn> } }).api
+      expect(api.respondCloseRequest).toHaveBeenCalledWith({ requestId: 'req-2', cleared: false })
+    })
+
+    it('clears silently on install-backed host ✕ with no overlay (no Quit confirm)', async () => {
+      // Default URL already set in beforeEach: installationId=test-id
+      mountPanel()
+      await flushPromises()
+
+      mockState.closeRequestCallbacks.forEach((cb) => cb({ requestId: 'req-3' }))
+      await flushPromises()
+
+      expect(mockModal.confirm).not.toHaveBeenCalled()
+      const api = (window as unknown as { api: { respondCloseRequest: ReturnType<typeof vi.fn> } }).api
+      expect(api.respondCloseRequest).toHaveBeenCalledWith({ requestId: 'req-3', cleared: true })
     })
   })
 })
