@@ -211,12 +211,12 @@ defineExpose({ open })
       <p class="brand-lead">{{ $t('track.grandSubtitle') }}</p>
       <div
         ref="cardRef"
-        class="track-card"
+        class="brand-card"
         role="dialog"
         aria-modal="true"
         :aria-label="$t('track.grandTitle')"
       >
-        <div class="track-card__body">
+        <div class="brand-card__body">
           <div class="track-field">
             <label class="track-label" for="track-path">{{ $t('track.installDir') }}</label>
             <div class="track-path-row">
@@ -260,10 +260,10 @@ defineExpose({ open })
             />
           </div>
 
-          <div v-if="detailFields.length > 0" class="track-summary">
-            <div v-for="field in detailFields" :key="field.label" class="track-summary__row">
-              <span class="track-summary__label">{{ field.label }}</span>
-              <span class="track-summary__value">{{ field.value }}</span>
+          <div v-if="detailFields.length > 0" class="brand-summary">
+            <div v-for="field in detailFields" :key="field.label" class="brand-summary__row">
+              <span class="brand-summary__label">{{ field.label }}</span>
+              <span class="brand-summary__value">{{ field.value }}</span>
             </div>
           </div>
 
@@ -285,7 +285,7 @@ defineExpose({ open })
           </div>
         </div>
 
-        <div class="track-card__footer">
+        <div class="brand-card__footer">
           <button
             class="brand-primary track-save"
             :disabled="saveDisabled"
@@ -321,44 +321,6 @@ defineExpose({ open })
   text-align: center;
   padding-block: clamp(1.5rem, 4vh, 3rem);
   min-height: 0;
-}
-
-.track-card {
-  width: 100%;
-  max-height: 100%;
-  display: flex;
-  flex-direction: column;
-  border: 1px solid var(--brand-surface-border);
-  border-radius: 8px;
-  background: var(--brand-surface-bg);
-  backdrop-filter: blur(var(--brand-surface-blur));
-  overflow: hidden;
-  text-align: left;
-}
-
-.track-card__body {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-  scrollbar-width: none;
-}
-.track-card__body::-webkit-scrollbar {
-  display: none;
-}
-
-.track-card__footer {
-  flex: 0 0 auto;
-  padding: 14px 20px;
-  border-top: 1px solid var(--brand-surface-border);
-  background: var(--brand-surface-bg);
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  gap: 12px;
 }
 
 .track-back-to-dashboard {
@@ -398,37 +360,6 @@ defineExpose({ open })
 .track-path-row > button.brand-tertiary {
   padding-inline: 14px;
   font-size: 13px;
-}
-
-.track-summary {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 14px 16px;
-  border: 1px solid var(--brand-surface-border);
-  border-radius: 8px;
-  background: var(--brand-surface-bg);
-}
-.track-summary__row {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  padding: 6px 0;
-  font-size: var(--takeover-fs-body);
-}
-.track-summary__row + .track-summary__row {
-  border-top: 1px solid color-mix(in oklab, var(--neutral-100) 6%, transparent);
-}
-.track-summary__label {
-  color: var(--neutral-300);
-}
-.track-summary__value {
-  color: var(--neutral-100);
-  font-weight: 500;
-  max-width: 60%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .track-save {
