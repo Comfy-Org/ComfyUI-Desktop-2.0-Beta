@@ -1,11 +1,11 @@
-import { nextTick, ref, type Ref } from 'vue'
+import { nextTick, ref, watch, type Ref } from 'vue'
 import type ProgressModal from '../views/ProgressModal.vue'
 import type InstallWizardModal from '../views/InstallWizardModal.vue'
 import type TrackModal from '../views/TrackModal.vue'
 import type LoadSnapshotModal from '../views/LoadSnapshotModal.vue'
 import type QuickInstallModal from '../views/QuickInstallModal.vue'
 import type FirstUseTakeover from '../views/FirstUseTakeover.vue'
-import { useOverlay, type FlowComponent } from '../composables/useOverlay'
+import { useOverlay, type FlowComponent, type Overlay } from '../composables/useOverlay'
 import { useProgressStore } from '../stores/progressStore'
 import { emitTelemetryAction } from '../lib/telemetry'
 import type { ActionResult, ShowProgressOpts } from '../types/ipc'
@@ -149,6 +149,27 @@ export function usePanelOverlays(opts: UsePanelOverlaysOpts): UsePanelOverlaysAp
   } = opts
   const progressStore = useProgressStore()
   const { current: currentOverlay, openOverlay, closeOverlay } = useOverlay()
+
+  /**
+   * Title-bar chrome lockdown for the ProgressModal takeover. Push
+   * `'loading-lockdown'` when ProgressModal mounts, restore `'none'`
+   * when it leaves. FirstUseTakeover.vue owns its own consent / post-
+   * consent pushes, so we no-op while a first-use takeover is on
+   * screen.
+   */
+  const isProgressTakeover = (o: Overlay | null): boolean =>
+    o?.kind === 'takeover' && o.component === 'update'
+  const isFirstUseTakeover = (o: Overlay | null): boolean =>
+    o?.kind === 'takeover' && o.component === 'first-use'
+
+  watch(currentOverlay, (next, prev) => {
+    if (isProgressTakeover(next) && !isProgressTakeover(prev)) {
+      window.api.setFirstUseMode('loading-lockdown')
+    }
+    else if (isProgressTakeover(prev) && !isFirstUseTakeover(next)) {
+      window.api.setFirstUseMode('none')
+    }
+  })
 
   const defaultBodyPanel = (): PanelKey => (installationId ? 'comfy-lifecycle' : 'chooser')
 

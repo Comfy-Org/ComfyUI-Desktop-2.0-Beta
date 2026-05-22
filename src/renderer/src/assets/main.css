@@ -82,6 +82,7 @@
   --selected: rgba(255, 255, 255, 0.85);
   --surface: #29252c;
   --titlebar-bg: var(--neutral-800);
+  --titlebar-icon: var(--color-text-muted);
   --border: #494a50;
   --border-hover: #3c3d42;
   --danger: #b33a3a;
@@ -174,6 +175,7 @@
   --selected: rgba(0, 0, 0, 0.7);
   --surface: #e9e9e9;
   --titlebar-bg: #171718;
+  --titlebar-icon: var(--color-text-muted);
   --border: #b4b4b4;
   --border-hover: #d9d9d9;
   --danger: #f75951;

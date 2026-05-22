@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, onMounted, onUnmounted, useTemplateRef, watch } from 'vue'
+import { ref, onMounted, onUnmounted, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   ArrowDownToLine,
@@ -200,6 +200,7 @@ const {
   isFullscreen,
   firstUseMode,
   isConsentLockdown,
+  isChromeLocked,
   installTypeMeta,
   installTypeLabel,
   showInstallTypeIcon,
@@ -207,19 +208,21 @@ const {
 } = useTitleBarIdentity({ bridge, isInstallLess })
 // Mark unused — sourceCategory feeds installTypeMeta inside the
 // composable, but the template doesn't reference it directly.
+// firstUseMode is consumed by isChromeLocked / isConsentLockdown inside
+// the composable; the template only reads the derived booleans.
 void sourceCategory
+void firstUseMode
 
 /**
- * Any active first-use takeover step (consent + post-consent). During
- * onboarding the title bar strips itself down to a minimal identity
- * bar: hamburger, downloads tray, and feedback button all hide,
- * leaving just the centered brand pill. Reverts to the full
- * steady-state chrome once `firstUseMode === 'none'`. `isConsentLockdown`
- * is kept around for the existing CSS class hook on the bar root.
+ * Title-bar chrome lockdown. True whenever the bar should collapse to
+ * just the static centre pill:
+ *   - First-use takeover (consent + post-consent steps).
+ *   - ProgressModal takeover (`'loading-lockdown'`) for any long-running
+ *     op (install / update / migrate / snapshot / launch).
+ * Single derived flag — every gate below reads the same source.
+ * `isConsentLockdown` is kept around for the existing CSS class hook
+ * on the bar root.
  */
-const isFirstUseTakeover = computed(
-  () => firstUseMode.value === 'consent-lockdown' || firstUseMode.value === 'post-consent'
-)
 
 const {
   appUpdateState,
@@ -375,7 +378,7 @@ onUnmounted(() => {
          (update / feedback / downloads / settings) live together. -->
     <div class="title-cluster">
       <button
-        v-if="!isFirstUseTakeover"
+        v-if="!isChromeLocked"
         ref="fileBtn"
         type="button"
         class="title-menu-button title-menu-button--icon"
@@ -405,7 +408,7 @@ onUnmounted(() => {
            static label — the bootstrap UX locks down all chrome to keep
            the user inside the flow. -->
       <button
-        v-if="!isFirstUseTakeover"
+        v-if="!isChromeLocked"
         ref="installPill"
         type="button"
         class="title-install-pill"
@@ -492,7 +495,7 @@ onUnmounted(() => {
         <span class="title-update-pill-label">{{ appUpdatePillLabel ?? 'Desktop Update' }}</span>
       </button>
       <button
-        v-if="!isFirstUseTakeover"
+        v-if="!isChromeLocked"
         type="button"
         class="title-menu-button title-feedback-button"
         v-bind="tooltipAttrs(t('titleBar.feedbackTooltip'), t('titleBar.feedback'))"
@@ -507,7 +510,7 @@ onUnmounted(() => {
            the user reads "downloads tray" vs "update available" at a
            glance. Hidden during first-use takeover — no installs yet. -->
       <button
-        v-if="!isFirstUseTakeover"
+        v-if="!isChromeLocked"
         ref="downloadsBtn"
         type="button"
         class="title-downloads-tray"
@@ -630,7 +633,7 @@ onUnmounted(() => {
 .title-menu-button {
   -webkit-app-region: no-drag;
   background: transparent;
-  color: inherit;
+  color: var(--titlebar-icon);
   border: 1px solid transparent;
   padding: 4px 10px;
   font: inherit;
@@ -659,7 +662,7 @@ onUnmounted(() => {
   gap: 0;
 }
 .title-feedback-button {
-  color: var(--text-muted);
+  color: var(--titlebar-icon);
 }
 .title-install-pill {
   -webkit-app-region: no-drag;
@@ -840,7 +843,7 @@ button.title-install-pill.is-open {
   -webkit-app-region: no-drag;
   position: relative;
   cursor: pointer;
-  color: var(--text-muted);
+  color: var(--titlebar-icon);
   background: transparent;
   border: 1px solid transparent;
   /* Pad the button so the icon centers freely and the badge has a
