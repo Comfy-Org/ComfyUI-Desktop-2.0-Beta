@@ -18,6 +18,7 @@ export type PanelKey =
   | 'comfy-lifecycle'
   | 'chooser'
   | 'downloads-v2'
+  | 'feedback'
   | 'new-install'
   | 'track'
   | 'load-snapshot'
@@ -28,6 +29,7 @@ const VALID_PANELS: ReadonlySet<PanelKey> = new Set([
   'comfy-lifecycle',
   'chooser',
   'downloads-v2',
+  'feedback',
   'new-install',
   'track',
   'load-snapshot',
