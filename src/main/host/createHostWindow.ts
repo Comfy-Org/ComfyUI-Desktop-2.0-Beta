@@ -21,7 +21,7 @@ import { forwardDatadogError } from '../lib/processErrorHandlers'
 import * as updater from '../lib/updater'
 import { getSavedBounds, getWindowOptions, saveWindowBounds } from '../lib/windowState'
 import { ensureSystemModal } from '../popups/systemModal'
-import { prewarmTitlePopup } from '../popups/titlePopup'
+import { hideTitlePopupForParent, prewarmTitlePopup } from '../popups/titlePopup'
 import { destroyPanelView, ensurePanelView } from './panelView'
 import {
   bringToFront,
@@ -554,6 +554,12 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
       try {
         const entry = comfyWindows.get(windowKey)
         const skipConsult = fx.preClearedClose.has(comfyWindow)
+        // Hide any open title-bar popup before the panel-side
+        // quit-confirm fires. The popup is a sibling WebContentsView
+        // stacked above the panel view in the same BrowserWindow, so
+        // a panel-rendered `modal.confirm()` would otherwise sit
+        // behind the (visually opaque) popup and be unreachable.
+        if (!skipConsult) hideTitlePopupForParent(comfyWindow)
         const cleared = skipConsult ? true : await fx.consultPanelRendererClose(entry?.panelView)
         if (!cleared) return
         fx.preClearedClose.delete(comfyWindow)

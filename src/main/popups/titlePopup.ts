@@ -680,6 +680,24 @@ export function prewarmTitlePopup(parent: BrowserWindow): void {
   }
 }
 
+/** Hide any open title-bar popup attached to the given parent window.
+ *  The popup is a sibling WebContentsView stacked on top of the panel
+ *  view, so a renderer-side modal in the panel (e.g. the quit-confirm
+ *  from `comfy-window:request-close`) is obscured by an open picker
+ *  until we hide it. Callers in the close / before-quit path invoke
+ *  this *before* dispatching the panel-side confirm so the modal
+ *  always reaches the user.
+ *
+ *  No-op when no popup is open for this parent. Safe to call on a
+ *  destroyed window. */
+export function hideTitlePopupForParent(parent: BrowserWindow): void {
+  if (parent.isDestroyed()) return
+  const entry = titlePopupsByParent.get(parent.id)
+  if (!entry) return
+  if (entry.view.isDestroyed()) return
+  hideTitlePopup(entry, { releaseFocusToParent: false })
+}
+
 /** Lazily create the reusable popup `WebContentsView` for the given
  *  parent BrowserWindow. Subsequent opens for the same parent reuse
  *  the same view — the renderer is loaded once, then we just push fresh
@@ -924,6 +942,22 @@ const PICKER_EXPANDED_MAX_WIDTH = 960
  *  cap at 60% so it reads as a "glance" affordance instead of a
  *  takeover. */
 const PICKER_COMPACT_MAX_HEIGHT_RATIO = 0.6
+/** Hard ceiling for the compact tray on tall windows. The ratio above
+ *  scales the tray to host height so it stays "a glance, never a
+ *  takeover", but on a 1600px-tall window 60% is still ~960px — too
+ *  much vertical real-estate for two installs. Cap so the tray reads
+ *  as a tray. */
+const PICKER_COMPACT_MAX_HEIGHT = 560
+/** Expanded mode height ceiling as a fraction of the host window's
+ *  content height. Mirrors the compact-mode ratio reasoning — the
+ *  per-install settings UI is form-shaped, so filling a 4K window
+ *  top-to-bottom just leaves the form fields adrift in negative
+ *  space. */
+const PICKER_EXPANDED_MAX_HEIGHT_RATIO = 0.85
+/** Hard ceiling for expanded mode on tall windows. 720px fits the
+ *  settings UI's longest tab (Snapshots) without internal scroll on
+ *  typical install counts. */
+const PICKER_EXPANDED_MAX_HEIGHT = 720
 
 interface PickerBounds {
   x: number
@@ -972,12 +1006,17 @@ function computePickerBounds(
   let height: number
   if (mode === 'expanded') {
     width = Math.min(PICKER_EXPANDED_MAX_WIDTH, innerWidth)
-    height = innerHeight
+    height = Math.min(
+      innerHeight,
+      Math.round(content.height * PICKER_EXPANDED_MAX_HEIGHT_RATIO),
+      PICKER_EXPANDED_MAX_HEIGHT,
+    )
   } else {
     width = Math.min(PICKER_COMPACT_MAX_WIDTH, innerWidth)
     const compactCeiling = Math.min(
       innerHeight,
       Math.round(content.height * PICKER_COMPACT_MAX_HEIGHT_RATIO),
+      PICKER_COMPACT_MAX_HEIGHT,
     )
     const requested = typeof naturalHeight === 'number' && naturalHeight > 0
       ? Math.ceil(naturalHeight)
@@ -985,10 +1024,15 @@ function computePickerBounds(
     height = Math.max(1, Math.min(requested, compactCeiling))
   }
   const x = Math.max(PICKER_SIDE_GUTTER, Math.round((content.width - width) / 2))
-  // Compact: pin to top inset (popup is a tray under the title bar).
-  // Expanded: same — height already fills the inner area so the y value
-  // collapses to innerTop regardless of the vertical-centre math.
-  const y = innerTop
+  // Compact: pin to top inset so the tray reads as anchored to the
+  // title bar. Expanded: drop down by a third of the slack so on a
+  // tall window the card sits slightly above centre — title bar still
+  // anchors it visually, but it doesn't kiss the bottom gutter on a
+  // 1440px-tall window.
+  const slack = Math.max(0, innerHeight - height)
+  const y = mode === 'expanded' && slack > 0
+    ? innerTop + Math.round(slack / 3)
+    : innerTop
   return { x, y, width, height }
 }
 
@@ -2255,7 +2299,11 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
       const fromW = fromBounds.width
       const fromH = fromBounds.height
 
-      const DURATION_MS = 240
+      // 200ms reads as "decisive" — closer to Linear / Raycast snap feel.
+      // 240ms drifted into "soft" territory; the renderer-side 160ms
+      // cross-fade finishes just before the shell does so contents land
+      // settled, not mid-tween.
+      const DURATION_MS = 200
       const FRAME_MS = 16
       // cubic-bezier(0.32, 0.72, 0, 1) — approximated via the standard
       // easeOutCubic curve. The full bezier eval is ~10 lines of code
@@ -2266,18 +2314,37 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
       const start = Date.now()
       const lerp = (a: number, b: number, t: number): number => a + (b - a) * t
 
+      // Per-frame dedupe: every 16ms `setBounds` call hits an IPC
+      // boundary + a native paint, even when the eased value rounds to
+      // the same integer on all four axes (common on short tweens or
+      // small deltas). Skip those no-op frames.
+      let prevX = fromX
+      let prevY = fromY
+      let prevW = fromW
+      let prevH = fromH
+
       const tick = (): void => {
         if (popupEntry.view.popup.webContents.isDestroyed()) return
         if (popupEntry.view.parentWindow.isDestroyed()) return
         const elapsed = Date.now() - start
         const t = Math.min(1, elapsed / DURATION_MS)
         const e = easeOutCubic(t)
-        popupEntry.view.popup.setBounds({
-          x: Math.round(lerp(fromX, toX, e)),
-          y: Math.round(lerp(fromY, toY, e)),
-          width: Math.round(lerp(fromW, toWidth, e)),
-          height: Math.round(lerp(fromH, toHeight, e)),
-        })
+        const nextX = Math.round(lerp(fromX, toX, e))
+        const nextY = Math.round(lerp(fromY, toY, e))
+        const nextW = Math.round(lerp(fromW, toWidth, e))
+        const nextH = Math.round(lerp(fromH, toHeight, e))
+        if (nextX !== prevX || nextY !== prevY || nextW !== prevW || nextH !== prevH) {
+          popupEntry.view.popup.setBounds({
+            x: nextX,
+            y: nextY,
+            width: nextW,
+            height: nextH,
+          })
+          prevX = nextX
+          prevY = nextY
+          prevW = nextW
+          prevH = nextH
+        }
         if (t < 1) setTimeout(tick, FRAME_MS)
       }
       tick()
