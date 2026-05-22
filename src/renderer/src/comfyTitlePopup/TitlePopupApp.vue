@@ -105,6 +105,7 @@ interface GlobalSettingsSnapshot {
   activeInstallationId: string | null
   hasActiveInstall: boolean
   githubUrl: string
+  githubStars: number | null
   i18n: {
     overview: string
     updates: string
@@ -197,6 +198,7 @@ const globalSettingsSnapshot = ref<GlobalSettingsSnapshot>({
   activeInstallationId: null,
   hasActiveInstall: false,
   githubUrl: '',
+  githubStars: null,
   i18n: {
     overview: 'Overview',
     updates: 'Updates',

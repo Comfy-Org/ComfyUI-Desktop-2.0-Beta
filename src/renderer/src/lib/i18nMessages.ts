@@ -74,7 +74,7 @@ export const en = {
     newInstall: 'New Install',
     addExistingInstall: 'Add Existing Install',
     loadSnapshot: 'Load Snapshot',
-    globalSettings: 'Global Settings',
+    globalSettings: 'Desktop Settings',
     sendFeedback: 'Send Beta Feedback',
     returnToDashboard: 'Return to Dashboard',
     closeAllWindows: 'Close All Windows',
@@ -115,7 +115,7 @@ export const en = {
     tabComfy: 'ComfyUI Settings',
     tabDirectories: 'Directories',
     tabDownloads: 'Downloads',
-    tabGlobal: 'Global Settings',
+    tabGlobal: 'Desktop Settings',
   },
   /** Strings shared by every install-listing surface (the dashboard
    *  grid in `ChooserView.vue` and the title-bar instance-picker

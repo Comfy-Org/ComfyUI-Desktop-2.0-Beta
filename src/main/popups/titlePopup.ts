@@ -22,6 +22,7 @@ import {
   buildModelsPayload,
 } from '../lib/ipc/registerSettingsHandlers'
 import { globalSettingsEvents } from '../lib/globalSettingsEvents'
+import { getGithubStarCount } from '../lib/githubStars'
 import {
   comfyWindows,
   findEntryByTitleBarSender,
@@ -151,6 +152,7 @@ export interface GlobalSettingsSnapshot {
   activeInstallationId: string | null
   hasActiveInstall: boolean
   githubUrl: string
+  githubStars: number | null
   i18n: {
     overview: string
     updates: string
@@ -560,7 +562,7 @@ export function buildTitlePopupMenuItems(entry: ComfyWindowEntry): TitlePopupMen
   items.push(
     {
       id: 'settings',
-      label: 'Global Settings',
+      label: 'Desktop Settings',
       labelKey: 'fileMenu.globalSettings',
     },
     // Send Feedback (#493). The renderer-side handler resolves the
@@ -1708,6 +1710,7 @@ async function buildGlobalSettingsSnapshot(
   const appUpdateState = updater.getCurrentUpdateState() as unknown as Record<string, unknown>
   const isDownloading = (appUpdateState['kind'] === 'downloading')
   if (!isDownloading) lastAppUpdateProgress = null
+  const githubStars = await getGithubStarCount('comfy-org/ComfyUI').catch(() => null)
   return {
     overviewFields: [...general, ...telemetry],
     cacheFields: cache,
@@ -1735,6 +1738,7 @@ async function buildGlobalSettingsSnapshot(
     activeInstallationId: hostInstallationId,
     hasActiveInstall: !!hostInstallationId,
     githubUrl: GLOBAL_SETTINGS_GITHUB_URL,
+    githubStars,
     // Section titles. Section count is intentionally trimmed from six
     // (Overview / Updates / Cache / Models / Advanced / Shared Dirs)
     // to four — Cache + Models + Shared Dirs collapse into one
