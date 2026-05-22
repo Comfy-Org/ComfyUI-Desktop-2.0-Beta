@@ -4,7 +4,6 @@ import { useI18n } from 'vue-i18n'
 import {
   ArrowDownToLine,
   CheckCircle2,
-  Eraser,
   FolderOpen,
   PauseCircle,
   PlayCircle,
@@ -79,8 +78,6 @@ const filtered = computed<ModelDownloadProgress[]>(() => {
   }
 })
 
-const finishedCount = computed(() => store.finishedDownloads.length)
-
 /** Append total size to `'completed'` rows (the long-form variant the
  *  Settings tab also opts into) — opt into the shared formatter rather
  *  than re-implementing the switch. */
@@ -115,10 +112,6 @@ function showInFolder(savePath: string | undefined): void {
 function dismissOne(url: string): void {
   store.dismiss(url)
 }
-function clearFinished(): void {
-  store.clearFinished()
-}
-
 const filters = computed<{ key: StatusFilter; label: string }[]>(() => [
   { key: 'all', label: t('downloadsTab.filterAll') },
   { key: 'active', label: t('downloadsTab.filterActive') },
@@ -160,16 +153,6 @@ function isTerminal(status: ModelDownloadStatus): boolean {
               {{ f.label }}
             </button>
           </div>
-          <button
-            type="button"
-            class="dlm-clear"
-            :disabled="finishedCount === 0"
-            :title="t('downloadsPopup.clearFinishedTooltip')"
-            @click="clearFinished"
-          >
-            <Eraser :size="13" />
-            {{ t('downloadsPopup.clearFinished') }}
-          </button>
         </div>
       </div>
     </template>
@@ -296,27 +279,6 @@ function isTerminal(status: ModelDownloadStatus): boolean {
 /* `.filter-pill` / `.filter-pill-group` are global (assets/main.css)
  * and shared with ChooserView + the Settings tab. The local
  * `.dlm-filter-chip` class is a test-selector hook only. */
-
-.dlm-clear {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  background: transparent;
-  border: 1px solid color-mix(in oklab, var(--neutral-100) 18%, transparent);
-  border-radius: 6px;
-  padding: 4px 10px;
-  font: inherit;
-  font-size: 12px;
-  color: inherit;
-  cursor: pointer;
-}
-.dlm-clear:hover:not(:disabled) {
-  background: color-mix(in oklab, var(--neutral-100) 8%, transparent);
-}
-.dlm-clear:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
 
 .dlm-empty {
   display: flex;

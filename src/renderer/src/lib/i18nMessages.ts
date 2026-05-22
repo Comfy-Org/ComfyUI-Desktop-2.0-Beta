@@ -85,9 +85,6 @@ export const en = {
   },
   downloadsPopup: {
     title: 'Downloads',
-    clearFinished: 'Clear Finished',
-    clearFinishedTooltip:
-      'Remove every completed, errored, or cancelled entry from the list',
     empty: 'No downloads yet',
     pause: 'Pause',
     resume: 'Resume',
@@ -107,7 +104,7 @@ export const en = {
     filterAll: 'All',
     filterActive: 'Active',
     filterCompleted: 'Completed',
-    filterErrored: 'Errored',
+    filterErrored: 'Failed',
     filterAriaLabel: 'Status filter',
   },
   settingsModal: {
