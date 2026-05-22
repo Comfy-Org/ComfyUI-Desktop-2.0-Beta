@@ -31,7 +31,7 @@
  */
 
 import { execFileSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { resolve } from 'node:path'
 import { test, expect } from '@playwright/test'
@@ -398,48 +398,73 @@ test('update-comfyui drives the real updater and moves HEAD forward @lifecycle',
   expect(parseInt(aheadCount, 10), `post-update HEAD ${headAfter} is not ahead of rolled-back commit ${_rolledBackCommit}`).toBeGreaterThan(0)
 })
 
-test('re-launch ComfyUI after update so the stop test has something to close @lifecycle', async () => {
+test('re-launch ComfyUI after update validates the updated install runs @lifecycle', async () => {
   await clickInstallTile(ctx.panel, 'ComfyUI')
   await expect.poll(comfyFrontendIsLoaded, { timeout: 180_000, intervals: [1_000] }).toBe(true)
 })
 
 // ---------------------------------------------------------------------------
-// Stop
+// Stop + Delete — real fs cleanup of a fully-installed standalone tree
+// (~500MB on disk: ComfyUI/.git + standalone-env/ + ComfyUI/.venv).
+//
+// Validates the delete handler's marker-file safety check + recursive
+// `fs.rm` against an install that actually has the contents users care
+// about losing — including the Windows .venv where in-use file locks can
+// make recursive deletion fight back.
+//
+// Note on the missing "close-window stops comfy" test: that path is now
+// covered implicitly by the return-to-dashboard stop test above (same
+// `detachInstall` teardown). We drop the explicit `win.close()` variant
+// here because it always quits the app (closes the only host window),
+// which would prevent the delete IPC below from running.
 // ---------------------------------------------------------------------------
 
-test('stops running ComfyUI by closing its host window @lifecycle', async () => {
-  // After launch, the chooser host transforms in place to host the install
-  // (the original `panel.html` body is detached). Drive the stop through the
-  // BrowserWindow `close()` call instead — the window's close handler tears
-  // the comfy process down via the same path the chooser-tile close button
-  // would use. Closing the last host window also quits the Electron app,
-  // which is why the subsequent poll treats an evaluate failure (app gone)
-  // as the terminal "stopped" state.
-  const closed = await ctx.app.evaluate(({ BrowserWindow, WebContentsView }) => {
-    for (const win of BrowserWindow.getAllWindows()) {
-      const hasComfy = win.contentView.children.some((v) =>
-        v instanceof WebContentsView &&
-        /^http:\/\/(127\.0\.0\.1|localhost):/.test(v.webContents.getURL()),
-      )
-      if (hasComfy) {
-        win.close()
-        return true
-      }
-    }
-    return false
-  })
-  expect(closed, 'ComfyUI host window not found among open windows').toBe(true)
+let _deleteInstallId = ''
+let _deleteInstallPath = ''
 
-  await expect.poll(
-    async () => {
-      try {
-        return await comfyFrontendIsLoaded()
-      } catch {
-        // App was torn down by the close — that's a stronger "stopped" signal
-        // than the comfy webContents going away on its own.
-        return false
-      }
-    },
-    { timeout: 60_000, intervals: [500] },
-  ).toBe(false)
+test('stops comfy and captures the installed dir state before driving delete @lifecycle', async () => {
+  // delete is in REQUIRES_STOPPED — stop comfy via return-to-dashboard so
+  // the IPC handler doesn't bail on us. rtd preserves the chooser host so
+  // we still have an IPC target for delete + getInstallations.
+  await returnFirstInstallHostToDashboard(ctx.app)
+  await expect.poll(comfyFrontendIsLoaded, { timeout: 30_000, intervals: [500] }).toBe(false)
+  await waitForWebContents(ctx.app, 'panel.html')
+  await expectChooserVisible(ctx.panel)
+
+  const installs = await ctx.panel.evaluate<InstallationLite[]>(`window.api.getInstallations()`)
+  expect(installs.length, 'no tracked installation after install').toBeGreaterThan(0)
+  const inst = installs[0]!
+  _deleteInstallId = inst.id
+  _deleteInstallPath = inst.installPath
+
+  // Sanity: this should be a fully-installed standalone tree, not the
+  // empty placeholder dirs the lifecycle-delete-untrack test uses. The
+  // install dir is on the same filesystem the test runs on (the harness
+  // home temp dir), so we can stat it directly from the test process.
+  expect(existsSync(path.join(_deleteInstallPath, 'ComfyUI', '.git')), 'installed dir missing ComfyUI/.git').toBe(true)
+  expect(existsSync(path.join(_deleteInstallPath, 'standalone-env')), 'installed dir missing standalone-env/').toBe(true)
+  expect(existsSync(path.join(_deleteInstallPath, '.comfyui-desktop-2')), 'installed dir missing .comfyui-desktop-2 marker').toBe(true)
+})
+
+test('real delete wipes the fully-installed ~500MB tree off disk @lifecycle', async () => {
+  // Recursive delete of a full standalone install can take a while on
+  // Windows when files are large (the .venv ships thousands of small
+  // files plus a few hundred-MB torch wheels). Stretch the timeout.
+  test.setTimeout(300_000)
+  expect(_deleteInstallPath, 'install path not captured').toBeTruthy()
+
+  const result = await ctx.panel.evaluate<UpdateActionResult>(
+    `window.api.runAction(${JSON.stringify(_deleteInstallId)}, 'delete')`,
+  )
+  expect(result.ok, `runAction('delete') failed: ${result.message ?? ''}`).toBe(true)
+
+  // Disk verification — the entire install tree must be gone, not just
+  // a few top-level entries. Probes both the root + a deep file the
+  // standalone install always materializes (ComfyUI/main.py).
+  expect(existsSync(_deleteInstallPath), `install dir ${_deleteInstallPath} still exists after delete`).toBe(false)
+  expect(existsSync(path.join(_deleteInstallPath, 'ComfyUI', 'main.py')), 'ComfyUI/main.py still on disk after delete').toBe(false)
+
+  // The installation record must also be gone.
+  const remaining = await ctx.panel.evaluate<InstallationLite[]>(`window.api.getInstallations()`)
+  expect(remaining.find((i) => i.id === _deleteInstallId), 'install record not removed after delete').toBeUndefined()
 })
