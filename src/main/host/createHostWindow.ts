@@ -4,7 +4,7 @@ import type { InstallationRecord } from '../installations'
 import { getAppVersion } from '../lib/ipc'
 import { attachContextMenu } from '../lib/contextMenu'
 import { detachWindowDownloads, getDownloadsTrayState } from '../lib/comfyDownloadManager'
-import { shouldOpenInPopup, isDirectDownloadUrl } from '../lib/allowedPopups'
+import { shouldOpenInPopup } from '../lib/allowedPopups'
 import { COMFY_BG, TITLEBAR_BG } from '../lib/theme'
 import {
   TITLEBAR_HEIGHT,
@@ -752,20 +752,6 @@ export function buildComfyView(
       // preload: undefined strips our title-bar bridge so OAuth/cloud-login
       // popups can't reach the file menu IPCs.
       return { action: 'allow', overrideBrowserWindowOptions: { webPreferences: { preload: undefined } } }
-    }
-    if (isDirectDownloadUrl(childUrl)) {
-      // Asset links (.zip, .safetensors, …) — keep the download in-app
-      // via the session's will-download handler (already wired by
-      // attachSessionDownloadHandler in host/attach.ts) instead of
-      // handing off to the user's default browser. If the session is
-      // mid-teardown the call can throw — fall back to openExternal
-      // so the click is never silently swallowed.
-      try {
-        comfyContents.session.downloadURL(childUrl)
-        return { action: 'deny' }
-      } catch {
-        // fall through to the external-shell branch below
-      }
     }
     shell.openExternal(childUrl)
     return { action: 'deny' }

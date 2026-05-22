@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { POPUP_ALLOWED_PREFIXES, shouldOpenInPopup, isDirectDownloadUrl } from './allowedPopups'
+import { POPUP_ALLOWED_PREFIXES, shouldOpenInPopup } from './allowedPopups'
 
 describe('POPUP_ALLOWED_PREFIXES', () => {
   it('includes the Firebase auth domain', () => {
@@ -42,52 +42,5 @@ describe('shouldOpenInPopup', () => {
 
   it('returns false for partial prefix matches', () => {
     expect(shouldOpenInPopup('https://dreamboothy.firebaseapp.com.evil.com/')).toBe(false)
-  })
-})
-
-describe('isDirectDownloadUrl', () => {
-  it('returns true for .zip URLs', () => {
-    expect(isDirectDownloadUrl('https://example.com/models/pack.zip')).toBe(true)
-  })
-
-  it('returns true for .safetensors URLs', () => {
-    expect(isDirectDownloadUrl('https://huggingface.co/repo/resolve/main/model.safetensors')).toBe(true)
-  })
-
-  it('returns true for .gguf URLs', () => {
-    expect(isDirectDownloadUrl('https://example.com/weights.gguf')).toBe(true)
-  })
-
-  it('returns true for .tar.gz URLs', () => {
-    expect(isDirectDownloadUrl('https://example.com/archive.tar.gz')).toBe(true)
-  })
-
-  it('returns true regardless of query string', () => {
-    expect(isDirectDownloadUrl('https://example.com/file.zip?token=abc&t=1')).toBe(true)
-  })
-
-  it('returns true for uppercase extensions', () => {
-    expect(isDirectDownloadUrl('https://example.com/PACK.ZIP')).toBe(true)
-  })
-
-  it('returns false for HTML pages', () => {
-    expect(isDirectDownloadUrl('https://example.com/page.html')).toBe(false)
-  })
-
-  it('returns false for paths without an extension', () => {
-    expect(isDirectDownloadUrl('https://example.com/download')).toBe(false)
-  })
-
-  it('returns false for OAuth callback URLs', () => {
-    expect(isDirectDownloadUrl('https://accounts.google.com/o/oauth2/auth?client_id=abc')).toBe(false)
-  })
-
-  it('returns false for malformed URLs', () => {
-    expect(isDirectDownloadUrl('not a real url')).toBe(false)
-    expect(isDirectDownloadUrl('')).toBe(false)
-  })
-
-  it('does not match extension-like substrings inside the host', () => {
-    expect(isDirectDownloadUrl('https://zip.example.com/page')).toBe(false)
   })
 })

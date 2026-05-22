@@ -627,7 +627,14 @@ export function attachSessionDownloadHandler(sess: Electron.Session): void {
       // General download — browser-like save dialog
       const suggestedName = item.getFilename()
       const downloadsDir = app.getPath('downloads')
-      const win = BrowserWindow.fromWebContents(webContents)
+      // `webContents` is null for downloads initiated via
+      // `session.downloadURL(...)` (e.g. our setWindowOpenHandler
+      // intercept in createHostWindow.ts) — Electron only populates it
+      // when a real page-initiated navigation triggered the download.
+      // Fall back to the focused window so the Save dialog still has a
+      // parent and the user gets the expected modal sheet.
+      const sourceWin = webContents ? BrowserWindow.fromWebContents(webContents) : null
+      const win = sourceWin ?? BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? null
 
       let savePath: string | undefined
       if (win) {
