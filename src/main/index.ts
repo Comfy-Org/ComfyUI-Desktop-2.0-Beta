@@ -697,13 +697,7 @@ function _broadcastDownloadsToTitleBars(): void {
 function triggerOpenFeedback(entryId: number, source: 'titlebar' | 'menu'): void {
   const parentEntry = comfyWindows.get(entryId)
   if (!parentEntry || parentEntry.window.isDestroyed()) return
-  // Flip into the 'feedback' overlay panel — same pattern as
-  // 'downloads-v2'. setActivePanel lazily ensures the panel view,
-  // makes it visible over comfyView, and broadcasts `panel-switch` to
-  // the renderer. The IPC below carries the click `source` so the
-  // renderer's telemetry payload can distinguish titlebar vs. menu.
-  const panelView = parentEntry.panelView ?? ensurePanelView(entryId, parentEntry, 'feedback')
-  setActivePanel(entryId, 'feedback')
+  const panelView = parentEntry.panelView ?? ensurePanelView(entryId, parentEntry, computeBodyMode(parentEntry))
   sendToPanelDeferred(panelView, 'comfy-panel:open-feedback', { source })
 }
 
