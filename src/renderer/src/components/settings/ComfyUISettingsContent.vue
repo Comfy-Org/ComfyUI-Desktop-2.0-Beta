@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, toRef, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ChevronDown } from 'lucide-vue-next'
+import { ChevronUp, ArrowLeft } from 'lucide-vue-next'
 import { useComfyUISettings } from '../../composables/useComfyUISettings'
 import { useSessionStore } from '../../stores/sessionStore'
 import MoreMenu from '../../views/comfyUISettings/MoreMenu.vue'
@@ -30,10 +30,15 @@ export type ComfyUISettingsTab = PickerTab
 interface Props {
   installation: Installation | null
   initialTab?: ComfyUISettingsTab
+  /** Render a leading "← Back" affordance in the tab strip. Opt-in
+   *  because the drawer host owns its own back-chrome; only the
+   *  picker's expanded right pane needs an in-content back. */
+  showBack?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   initialTab: 'config',
+  showBack: false,
 })
 
 const emit = defineEmits<{
@@ -51,6 +56,10 @@ const emit = defineEmits<{
    *  expanded view's footer. Payload carries the running flag so the
    *  host doesn't have to re-derive it. */
   'primary-action': [running: boolean]
+  /** Leading back affordance click (only rendered when
+   *  `showBack === true`). Host decides what "back" means — for the
+   *  picker it collapses the expanded mode. */
+  back: []
 }>()
 
 const { t } = useI18n()
@@ -197,8 +206,26 @@ function closeSubPage(): void {
   subPage.value = null
 }
 
+// Tab-swap transition direction. Forward = the user moved right
+// along the tab strip (Config → Status → Update → Snapshots),
+// backward = the user moved left. Reuses the existing
+// `subpage-push` / `subpage-pop` keyframes so all main-pane motion
+// in this component speaks one language. We compare tab *indices*
+// from the visible `tabs` list (not the static ALL_TABS order)
+// because cloud installs hide Update + Snapshots — swapping
+// Config ↔ Status on a cloud install should still feel right.
+const tabTransition = ref<'subpage-push' | 'subpage-pop'>('subpage-push')
+
 function selectTab(key: ComfyUISettingsTab): void {
   if (subPage.value !== null) subPageTransition.value = 'subpage-pop'
+  if (key !== activeTab.value) {
+    const list = tabs.value
+    const fromIdx = list.findIndex((t) => t.key === activeTab.value)
+    const toIdx = list.findIndex((t) => t.key === key)
+    if (fromIdx >= 0 && toIdx >= 0) {
+      tabTransition.value = toIdx > fromIdx ? 'subpage-push' : 'subpage-pop'
+    }
+  }
   activeTab.value = key
   subPage.value = null
 }
@@ -282,6 +309,16 @@ defineExpose({
       :aria-label="t('comfyUISettings.title', 'Settings')"
     >
       <button
+        v-if="showBack"
+        type="button"
+        class="settings-v2-back"
+        :aria-label="t('common.back', 'Back')"
+        @click="emit('back')"
+      >
+        <ArrowLeft :size="14" aria-hidden="true" />
+        <span>{{ t('common.back', 'Back') }}</span>
+      </button>
+      <button
         v-for="(tab, i) in tabs"
         :key="tab.key"
         type="button"
@@ -317,23 +354,40 @@ defineExpose({
         />
 
         <div v-else key="subpage-root" class="settings-v2-body-root">
-          <SnapshotsView
-            v-if="activeTab === 'snapshots' && installation"
-            :installation-id="installation.id"
-            @run-action="handleSnapshotAction"
-            @refresh-all="handleSnapshotsRefresh"
-          />
-
-          <template v-else>
-            <SettingsSectionList
-              :sections="visibleSections"
-              :readonly="activeTab === 'status'"
-              :installation-id="installation?.id"
-              @update-field="updateField"
-              @run-action="runAction"
-              @open-args-page="openArgsPage"
-            />
-          </template>
+          <!-- Inner tab-swap transition. The two child components both
+               need to be wrapped in a single-root `<div>` because
+               `<Transition>` requires a single root child — and
+               `SettingsSectionList` actually renders as a `v-for`
+               fragment of `<article>` siblings, which would silently
+               disable the animation AND prevent any tab content from
+               rendering at all. -->
+          <Transition :name="tabTransition" mode="out-in">
+            <div
+              v-if="activeTab === 'snapshots' && installation"
+              key="tab-snapshots"
+              class="settings-v2-tab-pane"
+            >
+              <SnapshotsView
+                :installation-id="installation.id"
+                @run-action="handleSnapshotAction"
+                @refresh-all="handleSnapshotsRefresh"
+              />
+            </div>
+            <div
+              v-else
+              :key="`tab-${activeTab}`"
+              class="settings-v2-tab-pane"
+            >
+              <SettingsSectionList
+                :sections="visibleSections"
+                :readonly="activeTab === 'status'"
+                :installation-id="installation?.id"
+                @update-field="updateField"
+                @run-action="runAction"
+                @open-args-page="openArgsPage"
+              />
+            </div>
+          </Transition>
         </div>
       </Transition>
     </section>
@@ -361,7 +415,7 @@ defineExpose({
           @click="toggleMoreMenu"
         >
           {{ t('comfyUISettings.more', 'More') }}
-          <ChevronDown :size="14" />
+          <ChevronUp :size="14" />
         </button>
         <MoreMenu
           :open="moreMenuOpen"
@@ -385,9 +439,53 @@ defineExpose({
 .settings-v2-tabs {
   flex-shrink: 0;
   display: flex;
+  align-items: center;
   gap: 6px;
   padding: 12px 12px 12px;
   border-bottom: 1px solid var(--chooser-surface-border);
+}
+
+/* Leading "← Back" affordance (picker expanded mode only — opt-in
+ * via the `showBack` prop). Lives inside the tab strip so it sits at
+ * the same baseline as the tabs and doesn't fight the tab nav for
+ * vertical space. A short vertical rule separates it from the first
+ * tab so the click target reads as distinct from the tab list. */
+.settings-v2-back {
+  -webkit-app-region: no-drag;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px 6px 8px;
+  margin-right: 4px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--neutral-100);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 16px;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+  position: relative;
+}
+
+.settings-v2-back::after {
+  content: '';
+  position: absolute;
+  right: -4px;
+  top: 6px;
+  bottom: 6px;
+  width: 1px;
+  background: var(--chooser-surface-border);
+}
+
+.settings-v2-back:hover,
+.settings-v2-back:focus-visible {
+  background: var(--brand-surface-bg-hover);
+  color: var(--text);
+  outline: none;
 }
 
 .settings-v2-tab {
@@ -447,6 +545,17 @@ defineExpose({
   gap: inherit;
 }
 
+/* Inner tab-swap wrapper. Mirrors `.settings-v2-body-root`'s flex
+ * column so the wrapped `SettingsSectionList` fragment renders as
+ * stacked sections exactly as it did before. Width: 100% so the
+ * leaving pane's translateX doesn't squeeze. */
+.settings-v2-tab-pane {
+  display: flex;
+  flex-direction: column;
+  gap: inherit;
+  width: 100%;
+}
+
 .empty {
   color: var(--text-muted);
   font-size: var(--takeover-fs-body);
@@ -496,11 +605,25 @@ defineExpose({
   font-size: 12px;
   font-weight: 500;
   line-height: 16px;
+  /* Matches the picker's "+ New Instance" left-footer button so the
+   * two footer affordances read as a pair. Tokenised — the 10% white
+   * overlay lives in `--chooser-surface-border-hover` (yes, the name
+   * is "border" but the value is the canonical 10% white we want
+   * here too; no new token needed). */
+  background: var(--chooser-surface-border-hover);
+  border: none;
+  color: var(--neutral-100);
+}
+
+.settings-v2-more:hover,
+.settings-v2-more:focus-visible {
+  background: var(--brand-surface-border-hover);
+  color: var(--text);
+  outline: none;
 }
 
 .settings-v2-more.is-active {
-  background: color-mix(in srgb, var(--accent-primary) 14%, var(--surface));
-  border-color: var(--accent-primary);
-  color: var(--accent-primary);
+  background: var(--brand-surface-border-hover);
+  color: var(--text);
 }
 </style>
