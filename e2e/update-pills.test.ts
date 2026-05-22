@@ -137,7 +137,10 @@ async function isSystemModalVisible(app: ElectronApplication): Promise<boolean> 
 /** Cancel any open system-modal popup so a previous test's leftover
  *  prompt doesn't haunt the next assertion. The popup's renderer
  *  treats Escape as a `cancel` ack, so dispatching the keydown is
- *  enough — main runs the cancel path and hides the view. */
+ *  enough — main runs the cancel path and hides the view. Dispatched
+ *  on `document` because BaseAlert's overlay binds the ESC listener
+ *  there (via `useModalOverlay`), and `window.dispatchEvent` does not
+ *  propagate to document. */
 async function closeSystemModalIfOpen(app: ElectronApplication): Promise<void> {
   const id = await findWebContentsId(app, 'comfySystemModal.html')
   if (id === null) return
@@ -147,7 +150,7 @@ async function closeSystemModalIfOpen(app: ElectronApplication): Promise<void> {
     if (!wc) return
     return wc.executeJavaScript(`(() => {
       const ev = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
-      window.dispatchEvent(ev)
+      document.dispatchEvent(ev)
     })()`).catch(() => {})
   })
   await expect.poll(() => isSystemModalVisible(app), { timeout: 3_000, intervals: [100, 200] }).toBe(false)
