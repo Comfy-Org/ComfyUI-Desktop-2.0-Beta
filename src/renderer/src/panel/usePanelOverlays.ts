@@ -156,20 +156,32 @@ export function usePanelOverlays(opts: UsePanelOverlaysOpts): UsePanelOverlaysAp
    * when it leaves. FirstUseTakeover.vue owns its own consent / post-
    * consent pushes, so we no-op while a first-use takeover is on
    * screen.
+   *
+   * `immediate: true` also covers the chooser → install-host handoff:
+   * the title-bar WebContentsView persists across attach/detach but
+   * the panel renderer reloads, so the module-level overlay singleton
+   * resets to `null` while main's entry can still hold a stale
+   * `'loading-lockdown'`. The initial fire on mount clears that drift
+   * — unless a first-use takeover is up, in which case
+   * FirstUseTakeover.vue's own step watcher is the source of truth.
    */
-  const isProgressTakeover = (o: Overlay | null): boolean =>
+  const isProgressTakeover = (o: Overlay | null | undefined): boolean =>
     o?.kind === 'takeover' && o.component === 'update'
-  const isFirstUseTakeover = (o: Overlay | null): boolean =>
+  const isFirstUseTakeover = (o: Overlay | null | undefined): boolean =>
     o?.kind === 'takeover' && o.component === 'first-use'
 
-  watch(currentOverlay, (next, prev) => {
-    if (isProgressTakeover(next) && !isProgressTakeover(prev)) {
-      window.api.setFirstUseMode('loading-lockdown')
-    }
-    else if (isProgressTakeover(prev) && !isFirstUseTakeover(next)) {
-      window.api.setFirstUseMode('none')
-    }
-  })
+  watch(
+    currentOverlay,
+    (next, prev) => {
+      if (isProgressTakeover(next) && !isProgressTakeover(prev)) {
+        window.api.setFirstUseMode('loading-lockdown')
+      }
+      else if (!isProgressTakeover(next) && !isFirstUseTakeover(next)) {
+        window.api.setFirstUseMode('none')
+      }
+    },
+    { immediate: true },
+  )
 
   const defaultBodyPanel = (): PanelKey => (installationId ? 'comfy-lifecycle' : 'chooser')
 
