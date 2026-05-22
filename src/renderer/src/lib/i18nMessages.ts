@@ -16,6 +16,29 @@ export const en = {
     close: 'Close',
     cancel: 'Cancel',
     back: 'Back',
+    browse: 'Browse…',
+  },
+  /** Global Settings view (rendered inside the title-popup process via
+   *  `comfyTitlePopup/GlobalSettingsView.vue`). The corresponding keys
+   *  live in `locales/en.json` for the main panel renderer; mirror the
+   *  subset used by the popup's DirCard / SettingField / SettingsSections
+   *  here because this catalog is the only source the popup webContents
+   *  can resolve against. */
+  settings: {
+    open: 'Open',
+  },
+  models: {
+    addDir: 'Add Directory',
+    removeDir: 'Remove',
+    primary: 'primary',
+    default: 'default',
+    makePrimary: 'Make Primary',
+  },
+  tooltips: {
+    modelsPrimary:
+      'The primary directory is where ComfyUI saves newly downloaded models by default.',
+    modelsDefault:
+      'The system default directory. This path is created automatically and cannot be removed.',
   },
   /** Top-level so the dotted keys returned by `installTypeMetaFor`
    *  (`installType.standalone`, …) map directly without a prefix. */
