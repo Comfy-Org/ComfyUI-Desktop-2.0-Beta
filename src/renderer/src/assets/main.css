@@ -142,12 +142,12 @@
   --chooser-surface-border: rgba(255, 255, 255, 0.05);
   --chooser-surface-border-hover: rgba(255, 255, 255, 0.1);
 
-  /* Modal / alert surface — sits one notch lighter than --neutral-800
-   * (#211927) so inputs/fields rendered inside the modal read as
-   * inset against the surrounding chrome. Border reuses
-   * --chooser-surface-border for visual parity with the picker card. */
+  /* Modal / alert surface */
   --modal-surface-bg: #27202d;
   --modal-surface-border: var(--chooser-surface-border);
+  --modal-surface-shadow:
+    0 20px 24px -4px rgba(10, 13, 18, 0.4), 0 8px 8px -4px rgba(10, 13, 18, 0.25),
+    0 3px 3px -1.5px rgba(10, 13, 18, 0.2);
 
   /* Takeover fluid type + spacing — Utopia clamp, anchored 1024px → 1920px. */
   --takeover-fs-caption: clamp(0.75rem, 0.6071rem + 0.2232vw, 0.875rem); /* 12→14px */
@@ -3032,41 +3032,48 @@ input[type='checkbox']:checked::after {
   justify-self: end;
 }
 
-/* Context menu */
 .context-menu {
   position: fixed;
   z-index: 10000;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 4px 0;
-  min-width: 180px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  background: var(--modal-surface-bg);
+  border: 1px solid var(--chooser-surface-border);
+  border-radius: 10px;
+  padding: 6px;
+  min-width: 200px;
+  box-shadow: var(--modal-surface-shadow);
 }
 .context-menu-item {
   display: block;
   width: 100%;
-  padding: 8px 16px;
+  padding: 8px 14px;
   font-size: 13px;
-  color: var(--text);
+  color: var(--neutral-100);
   background: none;
   border: none;
+  border-radius: 6px;
   text-align: left;
   cursor: pointer;
-  border-radius: 0;
+  white-space: nowrap;
+  transition:
+    background-color 100ms ease,
+    opacity 100ms ease;
 }
-.context-menu-item:hover:not(:disabled) {
-  background: var(--border);
+.context-menu-item:hover:not(:disabled),
+.context-menu-item:focus-visible:not(:disabled) {
+  background: var(--brand-surface-bg-hover);
+  outline: none;
+  color: var(--text);
 }
 .context-menu-item:disabled,
 .context-menu-item.disabled {
   color: var(--text-muted);
   cursor: default;
+  opacity: 0.5;
 }
 .context-menu-separator {
   height: 1px;
-  background: var(--border);
-  margin: 4px 8px;
+  background: color-mix(in oklab, var(--neutral-100) 8%, transparent);
+  margin: 4px 6px;
 }
 
 /* Shared arg-row styles — used by ArgRow, ArgRadioGroup */
