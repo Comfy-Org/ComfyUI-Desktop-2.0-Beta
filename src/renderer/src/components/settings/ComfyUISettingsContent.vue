@@ -8,6 +8,7 @@ import MoreMenu from '../../views/comfyUISettings/MoreMenu.vue'
 import ArgsBuilderPage from '../../views/comfyUISettings/ArgsBuilderPage.vue'
 import SnapshotsView from '../../views/comfyUISettings/SnapshotsView.vue'
 import SettingsSectionList from '../../views/comfyUISettings/SettingsSectionList.vue'
+import type { PickerTab } from '../../lib/pickerTabs'
 import type {
   ActionDef,
   DetailField,
@@ -24,7 +25,7 @@ import type {
  * backdrop dismissal; this component is the pure inner UI.
  */
 
-export type ComfyUISettingsTab = 'config' | 'status' | 'update' | 'snapshots'
+export type ComfyUISettingsTab = PickerTab
 
 interface Props {
   installation: Installation | null

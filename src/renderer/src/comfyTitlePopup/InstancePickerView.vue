@@ -9,6 +9,7 @@ import { useSessionStore } from '../stores/sessionStore'
 import ComfyUISettingsContent from '../components/settings/ComfyUISettingsContent.vue'
 import InstanceRow from './instancePicker/InstanceRow.vue'
 import PickerRow from './instancePicker/PickerRow.vue'
+import { resolvePickerTab, type PickerTab } from '../lib/pickerTabs'
 import { mergePanelLocaleIntoPopup } from './pickerSettingsApiShim'
 import type {
   DetailSection,
@@ -333,11 +334,9 @@ const snapshotMode = computed<'compact' | 'expanded'>(
 
 /** Initial tab to seed `ComfyUISettingsContent` with on the expanded
  *  branch's first mount. */
-const initialExpandedTab = computed<'config' | 'status' | 'update' | 'snapshots'>(() => {
-  const raw = props.snapshot.initialTab
-  if (raw === 'status' || raw === 'update' || raw === 'snapshots') return raw
-  return 'config'
-})
+const initialExpandedTab = computed<PickerTab>(() =>
+  resolvePickerTab(props.snapshot.initialTab, 'config'),
+)
 
 function handleCollapseToCompact(): void {
   bridge?.setPickerMode('compact')

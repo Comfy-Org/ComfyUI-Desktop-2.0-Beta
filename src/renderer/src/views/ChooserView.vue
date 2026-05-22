@@ -11,6 +11,7 @@ import BrandBackground from '../components/BrandBackground.vue'
 import BaseInput from '../components/ui/BaseInput.vue'
 import ComfyWordmark from '../components/icons/ComfyWordmark.vue'
 import ChooserInstallTile from './chooser/ChooserInstallTile.vue'
+import { resolvePickerTab } from '../lib/pickerTabs'
 import type { Installation, ShowProgressOpts } from '../types/ipc'
 
 /**
@@ -112,17 +113,10 @@ function openManage(
     window.api.openInstancePicker({ installationId: installation.id })
     return
   }
-  const mappedTab =
-    opts.initialTab === 'config' ||
-    opts.initialTab === 'status' ||
-    opts.initialTab === 'update' ||
-    opts.initialTab === 'snapshots'
-      ? opts.initialTab
-      : 'status'
   window.api.openInstancePicker({
     installationId: installation.id,
     mode: 'expanded',
-    initialTab: mappedTab,
+    initialTab: resolvePickerTab(opts.initialTab, 'status'),
     autoAction: opts.autoAction ?? null
   })
 }

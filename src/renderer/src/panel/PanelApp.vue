@@ -27,6 +27,7 @@ import { registerMigrateTakeover } from '../composables/useMigrateAction'
 import { isFlowPanel, isValidPanel, usePanelOverlays } from './usePanelOverlays'
 import { useChooserHandoff } from './useChooserHandoff'
 import { useFirstUseChain } from './useFirstUseChain'
+import { resolvePickerTab } from '../lib/pickerTabs'
 import type { Installation } from '../types/ipc'
 
 const { mergeLocaleMessage, locale, t } = useI18n()
@@ -183,11 +184,6 @@ let unsubCloseRequest: (() => void) | null = null
 let unsubReturnToDashboardRequest: (() => void) | null = null
 let unsubAppUpdatePromptRestart: (() => void) | null = null
 let unsubAppUpdateUserActionFailed: (() => void) | null = null
-type PickerTab = 'config' | 'status' | 'update' | 'snapshots'
-const PICKER_TABS: ReadonlySet<PickerTab> = new Set(['config', 'status', 'update', 'snapshots'])
-const isPickerTab = (t: string | undefined): t is PickerTab =>
-  t !== undefined && PICKER_TABS.has(t as PickerTab)
-
 const { confirmReturnToDashboard } = useReturnToDashboardConfirm()
 
 // All Manage routes go through `window.api.openInstancePicker` — the picker's
@@ -205,7 +201,7 @@ const { triggerAction: triggerInstallAction } = useInstallContextMenu({
     window.api.openInstancePicker({
       installationId: inst.id,
       mode: 'expanded',
-      initialTab: isPickerTab(initialTab) ? initialTab : 'config',
+      initialTab: resolvePickerTab(initialTab, 'config'),
       autoAction,
     })
   },
