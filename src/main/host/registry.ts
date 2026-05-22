@@ -1,5 +1,6 @@
 import type { BrowserWindow, WebContents, WebContentsView } from 'electron'
 import { _runningSessions } from '../lib/ipc/shared'
+import type { FirstUseMode } from '../../shared/firstUseMode'
 
 /**
  * Title-bar pill key — one of the three user-visible navigation tabs.
@@ -135,19 +136,12 @@ export interface ComfyWindowEntry {
    * user opens the file menu (the menu builder runs on click, after
    * the popup config has already been chosen).
    *
-   *   - `'none'`              — no first-use takeover mounted (default).
-   *   - `'consent-lockdown'`  — consent step is on screen; the title bar
-   *                             is fully locked down.
-   *   - `'post-consent'`      — consent accepted; later steps are on
-   *                             screen. The waffle menu surfaces a
-   *                             `Skip Onboarding` entry but stays
-   *                             otherwise normal.
-   *
-   * Cached here because `buildTitlePopupMenuItems` (file-menu popup config
-   * builder) reads it synchronously when the user clicks the waffle —
-   * see the IPC handler comment.
+   * See `FirstUseMode` in `src/shared/firstUseMode.ts` for the full
+   * union. Cached here because `buildTitlePopupMenuItems` (file-menu
+   * popup config builder) reads it synchronously when the user clicks
+   * the waffle — see the IPC handler comment.
    */
-  firstUseMode: 'none' | 'consent-lockdown' | 'post-consent'
+  firstUseMode: FirstUseMode
   /**
    * Current title-bar pill label. Install-backed windows mirror the
    * install name (and re-push on rename); install-less hosts hold

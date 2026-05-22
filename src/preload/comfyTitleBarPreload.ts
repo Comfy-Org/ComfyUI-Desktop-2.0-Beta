@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { IpcRendererEvent } from 'electron'
 import { buildElectronApi } from './api'
+import { normaliseFirstUseMode, type FirstUseMode } from '../shared/firstUseMode'
 
 export type ComfyPanelKey =
   | 'comfy'
@@ -98,13 +99,10 @@ export interface ComfyTitleBarBridge {
     cb: (info: { menu: 'menu' | 'downloads' | 'instance-picker' }) => void,
   ): () => void
   /** Subscribe to first-use takeover step changes. Mode mirrors
-   *  `firstUseMode` on the entry — `'none'` for no takeover mounted,
-   *  `'consent-lockdown'` while the T&C consent step is on screen,
-   *  `'post-consent'` for any later step. The title bar locks down
-   *  during `'consent-lockdown'`. */
-  onFirstUseModeChanged(
-    cb: (mode: 'none' | 'consent-lockdown' | 'post-consent') => void,
-  ): () => void
+   *  `firstUseMode` on the entry — see `FirstUseMode` in
+   *  `src/shared/firstUseMode.ts` for the full union. The title bar
+   *  locks chrome down for any non-`'none'` value. */
+  onFirstUseModeChanged(cb: (mode: FirstUseMode) => void): () => void
   /** Subscribe to preview-mode pushes from main. `true` while an
    *  in-progress install identity preview is active on a chooser
    *  host (an op was claimed and the install's title + source icon
@@ -297,8 +295,7 @@ const bridge: ComfyTitleBarBridge = {
   },
   onFirstUseModeChanged: (cb) => {
     const handler = (_event: IpcRendererEvent, mode: unknown): void => {
-      const normalised = mode === 'consent-lockdown' || mode === 'post-consent' ? mode : 'none'
-      cb(normalised)
+      cb(normaliseFirstUseMode(mode))
     }
     ipcRenderer.on('comfy-titlebar:first-use-mode-changed', handler)
     return () => ipcRenderer.removeListener('comfy-titlebar:first-use-mode-changed', handler)

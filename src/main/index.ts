@@ -3,6 +3,7 @@ import type { BrowserWindow, WebContentsView } from 'electron'
 import type { Tray } from 'electron'
 import path from 'path'
 import fs from 'fs'
+import { normaliseFirstUseMode } from '../shared/firstUseMode'
 import { execFile } from 'child_process'
 import type { ChildProcess } from 'child_process'
 import todesktop from '@todesktop/runtime'
@@ -480,10 +481,8 @@ ipcMain.handle('reset-zoom', () => {
  */
 ipcMain.on(
   'comfy-window:set-first-use-mode',
-  (event, payload: { mode: 'none' | 'consent-lockdown' | 'post-consent' }) => {
-    const mode = payload?.mode === 'consent-lockdown' || payload?.mode === 'post-consent'
-      ? payload.mode
-      : 'none'
+  (event, payload: { mode: unknown }) => {
+    const mode = normaliseFirstUseMode(payload?.mode)
     for (const entry of comfyWindows.values()) {
       if (entry.panelView?.webContents === event.sender) {
         entry.firstUseMode = mode

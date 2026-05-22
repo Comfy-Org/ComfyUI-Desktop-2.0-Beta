@@ -1,6 +1,9 @@
 // Canonical IPC types shared across main, preload, and renderer.
 // This file is the single source of truth — do not duplicate these types elsewhere.
 
+import type { FirstUseMode } from '../shared/firstUseMode'
+export type { FirstUseMode }
+
 // Unsubscribe function returned by event listeners
 export type Unsubscribe = () => void
 
@@ -886,7 +889,7 @@ export interface ElectronApi {
    *  forward to the title-bar webContents. Fire-and-forget;
    *  FirstUseTakeover.vue calls this on every step change and on
    *  unmount with `'none'`. */
-  setFirstUseMode(mode: 'none' | 'consent-lockdown' | 'post-consent'): void
+  setFirstUseMode(mode: FirstUseMode): void
   /** Main routes the file-menu Skip Onboarding click here. Handler
    *  runs the same `markFirstUseCompleted` + dismiss-takeover
    *  sequence the Cloud pick path uses. Returns an unsubscribe. */
