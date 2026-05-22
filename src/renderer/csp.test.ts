@@ -50,6 +50,10 @@ describe('Content-Security-Policy: panel.html', () => {
   it('restricts default-src to self only', () => {
     expect(csp['default-src']).toBe("'self'")
   })
+
+  it('allows the typeform feedback origin in frame-src (Send Beta Feedback modal)', () => {
+    expect(csp['frame-src']).toBe('https://form.typeform.com')
+  })
 })
 
 describe.each(TELEMETRY_RENDERER_HTMLS)(

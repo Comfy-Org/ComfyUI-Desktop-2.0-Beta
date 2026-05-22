@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import ProgressModal from '../views/ProgressModal.vue'
 import ModalDialog from '../components/ModalDialog.vue'
 import DownloadsModal from '../components/DownloadsModal.vue'
+import FeedbackModal from '../components/FeedbackModal.vue'
 import ComfyLifecycleView from './ComfyLifecycleView.vue'
 import ChooserView from '../views/ChooserView.vue'
 import InstallWizardModal from '../views/InstallWizardModal.vue'
@@ -55,7 +56,7 @@ const { loaded: launcherPrefsLoaded, firstUseCompleted } = launcherPrefs
 
 const modal = useModal()
 const { showAppUpdateRestartPrompt, showAppUpdateDownloadPrompt } = useAppUpdatePrompts()
-useSendFeedback()
+const { feedbackOpen, feedbackUrl, closeFeedback } = useSendFeedback()
 
 // installationStore.fetchInstallations() is wired to onInstallationsChanged
 // inside the store itself, so the panel just needs to read from it.
@@ -260,12 +261,15 @@ function closeDownloadsV2(): void {
 }
 
 // Toggles transparency rules in the non-scoped <style> block so the
-// live ComfyUI canvas composites through while the downloads-v2 overlay
-// panel is open.
+// live ComfyUI canvas composites through while an overlay panel
+// (downloads-v2 / feedback) is mounted.
 watch(
   activePanel,
   (next) => {
-    document.body.classList.toggle('panel-overlay-mode', next === 'downloads-v2')
+    document.body.classList.toggle(
+      'panel-overlay-mode',
+      next === 'downloads-v2' || next === 'feedback',
+    )
   },
   { immediate: true },
 )
@@ -559,6 +563,8 @@ onUnmounted(() => {
       open
       @close="closeDownloadsV2"
     />
+
+    <FeedbackModal :open="feedbackOpen" :url="feedbackUrl" @close="closeFeedback" />
 
     <ModalDialog />
     <MigrateConfirmTakeover ref="migrateTakeoverRef" />

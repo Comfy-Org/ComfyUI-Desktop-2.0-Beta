@@ -682,8 +682,13 @@ it('opens the new-install takeover above the chooser body when show-new-install 
       (e) => e.actionName === 'desktop2.feedback.opened',
     )
     expect(feedbackTelemetry.map((e) => e.context?.source)).toEqual(['titlebar', 'menu'])
-    expect(mockState.openExternal).toHaveBeenCalledTimes(2)
-    const url = (mockState.openExternal.mock.calls[0]?.[0] ?? '') as string
+    // FeedbackModal teleports its iframe to <body>, so query the
+    // document directly rather than the wrapper subtree. The iframe
+    // src is the resolved support URL — same payload we used to send
+    // through `openFeedback`.
+    const frame = document.body.querySelector<HTMLIFrameElement>('iframe.feedback-modal-frame')
+    expect(frame).not.toBeNull()
+    const url = frame?.getAttribute('src') ?? ''
     expect(url).toContain('form.typeform.com/to/VhOXmuaL')
     expect(url).toContain('ver=0.5.0')
     expect(url).toMatch(/[?&]platform=/)
