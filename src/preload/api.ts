@@ -95,7 +95,7 @@ export function buildElectronApi(): ElectronApi {
         initialTab: opts?.initialTab ?? null,
         autoAction: opts?.autoAction ?? null,
       }),
-    setFirstUseMode: (mode: 'none' | 'consent-lockdown' | 'post-consent') =>
+    setFirstUseMode: (mode) =>
       ipcRenderer.send('comfy-window:set-first-use-mode', { mode }),
     onFirstUseSkip: (callback) => {
       const handler = (): void => callback()

@@ -1,10 +1,10 @@
 <script setup lang="ts">
 /**
  * Phase 3 §19 — shared grand title + subtitle for the Tier 3
- * takeover modals (NewInstallModal, TrackModal, LoadSnapshotModal,
+ * takeover modals (InstallWizardModal, TrackModal, LoadSnapshotModal,
  * QuickInstallModal, FirstUseTakeover). Sits at the top of each
  * takeover's `.view-modal-header` and survives across internal steps
- * (e.g. NewInstallModal's per-step `stepTitle` reads as a sub-section
+ * (e.g. InstallWizardModal's per-step `stepTitle` reads as a sub-section
  * heading inside the body now, not the page heading).
  *
  * The component owns title + subtitle markup only — the close button

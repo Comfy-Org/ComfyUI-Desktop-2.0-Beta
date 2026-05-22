@@ -105,6 +105,7 @@ interface GlobalSettingsSnapshot {
   activeInstallationId: string | null
   hasActiveInstall: boolean
   githubUrl: string
+  githubStars: number | null
   i18n: {
     overview: string
     updates: string
@@ -153,7 +154,9 @@ interface Bridge {
   /** Per-open notification — fires on every show including the fast
    *  path that skips `set-config`. Used to bump `openSeq` so popup
    *  views can reset transient per-open state. */
-  onWillShow(cb: (info: { kind: 'menu' | 'downloads' | 'instance-picker' | 'global-settings' }) => void): () => void
+  onWillShow(
+    cb: (info: { kind: 'menu' | 'downloads' | 'instance-picker' | 'global-settings' }) => void
+  ): () => void
 }
 
 const bridge = (window as unknown as { __comfyTitlePopup?: Bridge }).__comfyTitlePopup
@@ -189,20 +192,21 @@ const globalSettingsSnapshot = ref<GlobalSettingsSnapshot>({
     capabilities: { systemManaged: false, canSelfUpdate: true },
     installedVersion: '',
     platform: 'darwin',
-    lastCheckedAt: null,
+    lastCheckedAt: null
   },
   channelPickerField: null,
   activeInstallationId: null,
   hasActiveInstall: false,
   githubUrl: '',
+  githubStars: null,
   i18n: {
     overview: 'Overview',
     updates: 'Updates',
     cache: 'Cache',
     models: 'Models',
     advanced: 'Advanced',
-    sharedDirectories: 'Shared Directories',
-  },
+    sharedDirectories: 'Shared Directories'
+  }
 })
 /** Owned at the app level — the listener stays registered for the
  *  popup's entire lifetime so the initial state push from main on a
@@ -416,7 +420,7 @@ onUnmounted(() => {
       'is-light': isLight,
       'is-menu': kind === 'menu',
       'is-picker': kind === 'instance-picker',
-      'is-global-settings': kind === 'global-settings',
+      'is-global-settings': kind === 'global-settings'
     }"
     :style="{ background: themeBg, color: themeText }"
   >
@@ -477,9 +481,6 @@ onUnmounted(() => {
   background: var(--modal-surface-bg) !important;
   border: 1px solid var(--modal-surface-border);
   border-radius: 14px;
-  box-shadow:
-    0 20px 24px -4px rgba(10, 13, 18, 0.08),
-    0 8px 8px -4px rgba(10, 13, 18, 0.03),
-    0 3px 3px -1.5px rgba(10, 13, 18, 0.04);
+  box-shadow: var(--modal-surface-shadow);
 }
 </style>

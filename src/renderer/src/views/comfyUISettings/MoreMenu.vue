@@ -137,43 +137,52 @@ const visibleActions = computed(() => props.actions)
 </template>
 
 <style scoped>
+/* Container chrome mirrors the dashboard's `.context-menu` (defined in
+ * `main.css`) so the kebab and the More menu read as one visual family.
+ * Same modal-surface bg + chooser border + modal shadow + 10px radius.
+ * The only delta is `padding: 6px` (vs `.context-menu`'s 6px) for the
+ * inner item rhythm. */
 .more-menu {
   position: absolute;
   right: 0;
   bottom: calc(100% + 6px);
   margin: 0;
-  padding: 4px;
+  padding: 6px;
   list-style: none;
   min-width: 200px;
-  background: var(--titlebar-bg);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  background: var(--modal-surface-bg);
+  border: 1px solid var(--chooser-surface-border);
+  border-radius: 10px;
+  box-shadow: var(--modal-surface-shadow);
   z-index: 62;
 }
 
 /* Menu items override the global `button` chrome — they're transparent
- * full-row items in a popover, not freestanding buttons. */
+ * full-row items in a popover, not freestanding buttons. Item paint
+ * matches `.context-menu-item` so both menus tap the same hover
+ * token. */
 .more-menu-item {
   width: 100%;
   display: block;
-  padding: 8px 12px;
+  padding: 8px 14px;
   background: transparent;
   border: none;
-  border-radius: 4px;
-  color: var(--text);
-  font-size: var(--takeover-fs-body);
+  border-radius: 6px;
+  color: var(--neutral-100);
+  font-size: 13px;
   text-align: left;
-  transition: background-color 120ms ease, color 120ms ease;
+  transition: background-color 100ms ease, color 100ms ease;
 }
 
 .more-menu-item:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--text) 8%, transparent);
+  background: var(--brand-surface-bg-hover);
+  color: var(--text);
 }
 
 .more-menu-item:focus-visible {
-  outline: 2px solid var(--accent-primary);
-  outline-offset: -2px;
+  outline: none;
+  background: var(--brand-surface-bg-hover);
+  color: var(--text);
 }
 
 .more-menu-item.is-danger {

@@ -21,7 +21,7 @@ import { forwardDatadogError } from '../lib/processErrorHandlers'
 import * as updater from '../lib/updater'
 import { getSavedBounds, getWindowOptions, saveWindowBounds } from '../lib/windowState'
 import { ensureSystemModal } from '../popups/systemModal'
-import { prewarmTitlePopup } from '../popups/titlePopup'
+import { hideTitlePopupForParent, prewarmTitlePopup } from '../popups/titlePopup'
 import { destroyPanelView, ensurePanelView } from './panelView'
 import {
   bringToFront,
@@ -398,13 +398,13 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
     // hosts, so the install-backed visibility branch handles both.
     const mode = entry ? computeBodyMode(entry) : 'comfy'
     const showPanel = mode !== 'comfy'
-    // `'downloads-v2'` is an overlay mode — the downloads modal mounts over
-    // the live ComfyUI canvas, so unlike other panel modes we keep
-    // `comfyView` visible underneath at full bodyRect. The panel renderer
-    // paints itself transparent (see `PanelApp.vue`'s `panel-overlay-mode`
-    // body class) except for the modal + dim backdrop, so the canvas
-    // composites through on macOS CALayers.
-    const isOverlayMode = mode === 'downloads-v2'
+    // `'downloads-v2'` and `'feedback'` are overlay modes — their modal
+    // mounts over the live ComfyUI canvas, so unlike other panel modes
+    // we keep `comfyView` visible underneath at full bodyRect. The
+    // panel renderer paints itself transparent (see `PanelApp.vue`'s
+    // `panel-overlay-mode` body class) except for the modal + dim
+    // backdrop, so the canvas composites through on macOS CALayers.
+    const isOverlayMode = mode === 'downloads-v2' || mode === 'feedback'
     if (showPanel && entry?.panelView) {
       entry.panelView.setBounds(bodyRect)
       entry.panelView.setVisible(true)
@@ -554,6 +554,12 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
       try {
         const entry = comfyWindows.get(windowKey)
         const skipConsult = fx.preClearedClose.has(comfyWindow)
+        // Hide any open title-bar popup before the panel-side
+        // quit-confirm fires. The popup is a sibling WebContentsView
+        // stacked above the panel view in the same BrowserWindow, so
+        // a panel-rendered `modal.confirm()` would otherwise sit
+        // behind the (visually opaque) popup and be unreachable.
+        if (!skipConsult) hideTitlePopupForParent(comfyWindow)
         const cleared = skipConsult ? true : await fx.consultPanelRendererClose(entry?.panelView)
         if (!cleared) return
         fx.preClearedClose.delete(comfyWindow)

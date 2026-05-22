@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { ref, computed, toRaw } from 'vue'
+import { ref, computed, watch, onBeforeUnmount, nextTick, toRaw } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { HardDrive } from 'lucide-vue-next'
 import { useModal } from '../composables/useModal'
-import TakeoverHeader from '../components/TakeoverHeader.vue'
+import BrandTakeoverLayout from '../components/BrandTakeoverLayout.vue'
 import TakeoverBack from '../components/TakeoverBack.vue'
-import ModalShell from '../components/ModalShell.vue'
+import { BaseSelect, type BaseSelectOption } from '../components/ui'
 
 import type { ProbeResult } from '../types/ipc'
 import { emitTelemetryAction, toCountBucket } from '../lib/telemetry'
@@ -17,15 +18,45 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const modal = useModal()
 
+const isOpen = ref(false)
 const trackPath = ref('')
 const trackName = ref('')
+const suggestedName = ref('')
 const probeResults = ref<ProbeResult[]>([])
 const selectedProbe = ref<ProbeResult | null>(null)
 const venvOverride = ref<string | null>(null)
 const probing = ref(false)
 
+const cardRef = ref<HTMLElement | null>(null)
+let returnFocusTo: HTMLElement | null = null
 
 const saveDisabled = computed(() => !trackPath.value || !selectedProbe.value)
+
+function onKeydown(e: KeyboardEvent): void {
+  if (e.key === 'Escape' && isOpen.value) emit('close')
+}
+
+watch(isOpen, async (open) => {
+  if (open) {
+    document.addEventListener('keydown', onKeydown)
+    returnFocusTo = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    await nextTick()
+    const target = cardRef.value?.querySelector<HTMLElement>(
+      'input, button, select, [tabindex]:not([tabindex="-1"])'
+    )
+    target?.focus()
+  } else {
+    document.removeEventListener('keydown', onKeydown)
+    returnFocusTo?.focus()
+    returnFocusTo = null
+  }
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('keydown', onKeydown)
+  if (returnFocusTo && document.contains(returnFocusTo)) returnFocusTo.focus()
+  returnFocusTo = null
+})
 
 function open(): void {
   trackPath.value = ''
@@ -33,6 +64,14 @@ function open(): void {
   probeResults.value = []
   selectedProbe.value = null
   venvOverride.value = null
+  suggestedName.value = ''
+  isOpen.value = true
+  void window.api
+    .getUniqueName('ComfyUI')
+    .then((name) => {
+      suggestedName.value = name
+    })
+    .catch(() => {})
 }
 
 async function handleBrowse(): Promise<void> {
@@ -59,11 +98,27 @@ async function probe(dirPath: string): Promise<void> {
   }
 }
 
-function handleSourceChange(event: Event): void {
-  const idx = parseInt((event.target as HTMLSelectElement).value, 10)
+function onProbeSelect(value: string): void {
+  const idx = parseInt(value, 10)
   selectedProbe.value = probeResults.value[idx] ?? null
   venvOverride.value = null
 }
+
+const probeOptions = computed<BaseSelectOption[]>(() =>
+  probeResults.value.map((r, i) => ({ value: String(i), label: r.sourceLabel }))
+)
+
+const selectedProbeValue = computed(() => {
+  if (!selectedProbe.value) return ''
+  const idx = probeResults.value.indexOf(selectedProbe.value)
+  return idx >= 0 ? String(idx) : ''
+})
+
+const selectPlaceholder = computed(() => {
+  if (probing.value) return t('track.detecting')
+  if (probeResults.value.length > 0) return ''
+  return trackPath.value ? t('track.noDetected') : t('track.browseDirFirst')
+})
 
 interface DetailFieldEntry {
   label: string
@@ -141,6 +196,7 @@ async function handleSave(): Promise<void> {
     probe_count_bucket: toCountBucket(probeResults.value.length),
     custom_name_used: trackName.value.trim().length > 0,
   })
+  isOpen.value = false
   emit('close')
   emit('navigate-list')
 }
@@ -149,102 +205,164 @@ defineExpose({ open })
 </script>
 
 <template>
-  <ModalShell binding @close="emit('close')">
-      <template #header>
-        <div class="takeover-stacked-header">
-          <TakeoverBack
-            :label="$t('common.backToDashboard')"
-            @back="emit('close')"
-          />
-          <TakeoverHeader :title="$t('track.grandTitle')" :subtitle="$t('track.grandSubtitle')" />
-        </div>
-      </template>
-        <div class="view-scroll">
-          <!-- Track path -->
-          <div class="field">
-            <label for="track-path">{{ $t('track.installDir') }}</label>
-            <div class="path-input">
-              <input
-                id="track-path"
-                v-model="trackPath"
-                type="text"
-                :placeholder="$t('track.selectDir')"
-              />
-              <button @click="handleBrowse">{{ $t('common.browse') }}</button>
+  <BrandTakeoverLayout v-if="isOpen">
+    <div class="track-shell" data-testid="track-modal">
+      <h1 class="brand-title">{{ $t('track.grandTitle') }}</h1>
+      <p class="brand-lead">{{ $t('track.grandSubtitle') }}</p>
+      <div
+        ref="cardRef"
+        class="brand-card"
+        role="dialog"
+        aria-modal="true"
+        :aria-label="$t('track.grandTitle')"
+      >
+        <div class="brand-card__body">
+          <div class="track-field">
+            <label class="track-label" for="track-path">{{ $t('track.installDir') }}</label>
+            <div class="track-path-row">
+              <div class="brand-input track-path-input">
+                <HardDrive :size="14" aria-hidden="true" />
+                <input
+                  id="track-path"
+                  v-model="trackPath"
+                  type="text"
+                  :placeholder="$t('track.selectDir')"
+                />
+              </div>
+              <button class="brand-tertiary" type="button" @click="handleBrowse">
+                {{ $t('common.browse') }}
+              </button>
             </div>
           </div>
 
-          <!-- Installation name -->
-          <div class="field">
-            <label for="track-name">{{ $t('common.name') }}</label>
-            <input
-              id="track-name"
-              v-model="trackName"
-              type="text"
-              :placeholder="$t('common.namePlaceholder')"
+          <div class="track-field">
+            <label class="track-label" for="track-name">{{ $t('common.name') }}</label>
+            <div class="brand-input">
+              <input
+                id="track-name"
+                v-model="trackName"
+                type="text"
+                :placeholder="suggestedName || $t('common.namePlaceholder')"
+              />
+            </div>
+          </div>
+
+          <div class="track-field">
+            <label class="track-label">{{ $t('track.detectedType') }}</label>
+            <BaseSelect
+              variant="brand"
+              :model-value="selectedProbeValue"
+              :options="probeOptions"
+              :placeholder="selectPlaceholder"
+              :disabled="probing || probeResults.length <= 1"
+              :aria-label="$t('track.detectedType')"
+              @update:model-value="onProbeSelect"
             />
           </div>
 
-          <!-- Detected type -->
-          <div class="field">
-            <label for="track-source">{{ $t('track.detectedType') }}</label>
-            <div v-if="probing" class="track-probing with-spinner">{{ $t('track.detecting') }}</div>
-            <select
-              v-else
-              id="track-source"
-              :disabled="probeResults.length <= 1"
-              @change="handleSourceChange"
-            >
-              <option v-if="probeResults.length === 0">
-                {{
-                  trackPath
-                    ? $t('track.noDetected')
-                    : $t('track.browseDirFirst')
-                }}
-              </option>
-              <template v-else>
-                <option
-                  v-for="(r, i) in probeResults"
-                  :key="i"
-                  :value="i"
-                >
-                  {{ r.sourceLabel }}
-                </option>
-              </template>
-            </select>
-          </div>
-
-          <!-- Probe detail fields -->
-          <div v-if="detailFields.length > 0" class="detail-fields">
-            <div v-for="field in detailFields" :key="field.label">
-              <div class="detail-field-label">{{ field.label }}</div>
-              <div class="detail-field-value">{{ field.value }}</div>
+          <div v-if="detailFields.length > 0" class="brand-summary">
+            <div v-for="field in detailFields" :key="field.label" class="brand-summary__row">
+              <span class="brand-summary__label">{{ field.label }}</span>
+              <span class="brand-summary__value">{{ field.value }}</span>
             </div>
           </div>
 
-          <!-- Virtual environment selector (git source) -->
-          <div v-if="showVenvField" class="field">
-            <label>{{ $t('git.venv') }}</label>
-            <div class="path-input">
-              <input
-                type="text"
-                :value="effectiveVenvName || $t('git.venvNotFound')"
-                disabled
-              />
-              <button @click="handleBrowseVenv">{{ $t('common.browse') }}</button>
+          <div v-if="showVenvField" class="track-field">
+            <label class="track-label">{{ $t('git.venv') }}</label>
+            <div class="track-path-row">
+              <div class="brand-input track-path-input">
+                <HardDrive :size="14" aria-hidden="true" />
+                <input
+                  type="text"
+                  :value="effectiveVenvName || $t('git.venvNotFound')"
+                  disabled
+                />
+              </div>
+              <button class="brand-tertiary" type="button" @click="handleBrowseVenv">
+                {{ $t('common.browse') }}
+              </button>
             </div>
           </div>
         </div>
 
-        <!-- Save button -->
-        <div class="view-bottom">
+        <div class="brand-card__footer">
           <button
-            class="primary"
+            class="brand-primary track-save"
             :disabled="saveDisabled"
             @click="handleSave"
           >
             {{ $t('track.trackInstallation') }}
           </button>
         </div>
-  </ModalShell>
+      </div>
+    </div>
+    <template #footer-left>
+      <TakeoverBack
+        class="track-back-to-dashboard"
+        :label="$t('common.backToDashboard')"
+        @back="emit('close')"
+      />
+    </template>
+  </BrandTakeoverLayout>
 </template>
+
+<style scoped>
+.track-shell {
+  align-self: stretch;
+  height: 100%;
+  max-height: 100%;
+  width: 100%;
+  max-width: 640px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding-block: clamp(1.5rem, 4vh, 3rem);
+  min-height: 0;
+}
+
+.track-back-to-dashboard {
+  position: absolute;
+  left: clamp(1.25rem, 2vw, 2rem);
+  bottom: clamp(1.25rem, 2vw, 2rem);
+  z-index: 2;
+}
+
+.track-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.track-label {
+  font-size: 13px;
+  color: var(--neutral-200);
+}
+
+.track-path-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+.track-path-row > .track-path-input,
+.track-path-row > button.brand-tertiary {
+  height: 40px;
+  padding-block: 0;
+  display: flex;
+  align-items: center;
+}
+.track-path-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding-inline: 12px;
+}
+.track-path-row > button.brand-tertiary {
+  padding-inline: 14px;
+  font-size: 13px;
+}
+
+.track-save {
+  min-width: 120px;
+}
+</style>

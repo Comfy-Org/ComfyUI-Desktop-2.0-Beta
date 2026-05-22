@@ -82,6 +82,7 @@
   --selected: rgba(255, 255, 255, 0.85);
   --surface: #29252c;
   --titlebar-bg: var(--neutral-800);
+  --titlebar-icon: var(--color-text-muted);
   --border: #494a50;
   --border-hover: #3c3d42;
   --danger: #b33a3a;
@@ -133,20 +134,21 @@
   --brand-surface-border-hover: rgba(255, 255, 255, 0.18);
   --brand-surface-blur: 75px;
 
-  /* Chooser-surface — denser glass than --brand-surface-*, tuned for
-   * the chooser dashboard tiles + search input where the lighter brand
-   * recipe washed out against the plum background. Same shape (bg /
-   * bg-hover / border) so swap sites mirror brand-surface usage. */
-  --chooser-surface-bg: rgba(53, 49, 57, 0.5);
-  --chooser-surface-bg-hover: rgba(53, 49, 57, 0.7);
-  --chooser-surface-border: rgba(255, 255, 255, 0.1);
+  /* Chooser-surface — neutral white-glass recipe used by the chooser
+   * dashboard tiles + search input. Hover lifts both bg and border one
+   * step so the tile reads as interactive without leaving the white-
+   * glass family. Transition is declared on .chooser-tile. */
+  --chooser-surface-bg: rgba(255, 255, 255, 0.04);
+  --chooser-surface-bg-hover: rgba(255, 255, 255, 0.07);
+  --chooser-surface-border: rgba(255, 255, 255, 0.05);
+  --chooser-surface-border-hover: rgba(255, 255, 255, 0.1);
 
-  /* Modal / alert surface — sits one notch lighter than --neutral-800
-   * (#211927) so inputs/fields rendered inside the modal read as
-   * inset against the surrounding chrome. Border reuses
-   * --chooser-surface-border for visual parity with the picker card. */
+  /* Modal / alert surface */
   --modal-surface-bg: #27202d;
   --modal-surface-border: var(--chooser-surface-border);
+  --modal-surface-shadow:
+    0 20px 24px -4px rgba(10, 13, 18, 0.4), 0 8px 8px -4px rgba(10, 13, 18, 0.25),
+    0 3px 3px -1.5px rgba(10, 13, 18, 0.2);
 
   /* Takeover fluid type + spacing — Utopia clamp, anchored 1024px → 1920px. */
   --takeover-fs-caption: clamp(0.75rem, 0.6071rem + 0.2232vw, 0.875rem); /* 12→14px */
@@ -173,6 +175,7 @@
   --selected: rgba(0, 0, 0, 0.7);
   --surface: #e9e9e9;
   --titlebar-bg: #171718;
+  --titlebar-icon: var(--color-text-muted);
   --border: #b4b4b4;
   --border-hover: #d9d9d9;
   --danger: #f75951;
@@ -216,9 +219,10 @@
 
   /* Chooser-surface — mirror of dark-theme block. Light-mode chooser
    * chrome isn't shipping yet; placeholder until light brand parity. */
-  --chooser-surface-bg: rgba(53, 49, 57, 0.5);
-  --chooser-surface-bg-hover: rgba(53, 49, 57, 0.7);
-  --chooser-surface-border: rgba(255, 255, 255, 0.1);
+  --chooser-surface-bg: rgba(255, 255, 255, 0.04);
+  --chooser-surface-bg-hover: rgba(255, 255, 255, 0.07);
+  --chooser-surface-border: rgba(255, 255, 255, 0.05);
+  --chooser-surface-border-hover: rgba(255, 255, 255, 0.1);
 
   /* Modal / alert surface — light-theme placeholder mirrors dark-theme
    * value until light brand parity ships. */
@@ -538,6 +542,86 @@ button.looks-disabled {
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--neutral-400);
+}
+
+/* Brand card — frosted-glass content container used by takeover screens
+ * to host fields + a pinned-footer action bar. Mirrors the macOS sheet
+ * pattern: body scrolls, footer stays. Consumers own the outer shell
+ * sizing (max-width, padding-block) so different takeovers can pick
+ * their own column width without the card changing. */
+.brand-card {
+  width: 100%;
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--brand-surface-border);
+  border-radius: 8px;
+  background: var(--brand-surface-bg);
+  backdrop-filter: blur(var(--brand-surface-blur));
+  overflow: hidden;
+  text-align: left;
+}
+.brand-card__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  /* Hide scrollbar — overflow only shows when disclosures expand past
+   * viewport. Brand chrome stays clean, scroll affordance lives in the
+   * interaction itself. */
+  scrollbar-width: none;
+}
+.brand-card__body::-webkit-scrollbar {
+  display: none;
+}
+.brand-card__footer {
+  flex: 0 0 auto;
+  padding: 14px 20px;
+  border-top: 1px solid var(--brand-surface-border);
+  background: var(--brand-surface-bg);
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 12px;
+}
+
+/* Brand summary — flat key/value rows for read-only confirmation panels
+ * (snapshot preview, install probe details, migration summary). Sits
+ * inside .brand-card__body as a self-contained recessed group. */
+.brand-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 14px 16px;
+  border: 1px solid var(--brand-surface-border);
+  border-radius: 8px;
+  background: var(--brand-surface-bg);
+}
+.brand-summary__row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 6px 0;
+  gap: 12px;
+  font-size: var(--takeover-fs-body);
+}
+.brand-summary__row + .brand-summary__row {
+  border-top: 1px solid color-mix(in oklab, var(--neutral-100) 6%, transparent);
+}
+.brand-summary__label {
+  color: var(--neutral-300);
+  flex: 0 0 auto;
+}
+.brand-summary__value {
+  color: var(--neutral-100);
+  font-weight: 500;
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Canonical brand button system. Four classes cover every CTA in the
@@ -3030,41 +3114,48 @@ input[type='checkbox']:checked::after {
   justify-self: end;
 }
 
-/* Context menu */
 .context-menu {
   position: fixed;
   z-index: 10000;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 4px 0;
-  min-width: 180px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  background: var(--modal-surface-bg);
+  border: 1px solid var(--chooser-surface-border);
+  border-radius: 10px;
+  padding: 6px;
+  min-width: 200px;
+  box-shadow: var(--modal-surface-shadow);
 }
 .context-menu-item {
   display: block;
   width: 100%;
-  padding: 8px 16px;
+  padding: 8px 14px;
   font-size: 13px;
-  color: var(--text);
+  color: var(--neutral-100);
   background: none;
   border: none;
+  border-radius: 6px;
   text-align: left;
   cursor: pointer;
-  border-radius: 0;
+  white-space: nowrap;
+  transition:
+    background-color 100ms ease,
+    opacity 100ms ease;
 }
-.context-menu-item:hover:not(:disabled) {
-  background: var(--border);
+.context-menu-item:hover:not(:disabled),
+.context-menu-item:focus-visible:not(:disabled) {
+  background: var(--brand-surface-bg-hover);
+  outline: none;
+  color: var(--text);
 }
 .context-menu-item:disabled,
 .context-menu-item.disabled {
   color: var(--text-muted);
   cursor: default;
+  opacity: 0.5;
 }
 .context-menu-separator {
   height: 1px;
-  background: var(--border);
-  margin: 4px 8px;
+  background: color-mix(in oklab, var(--neutral-100) 8%, transparent);
+  margin: 4px 6px;
 }
 
 /* Shared arg-row styles — used by ArgRow, ArgRadioGroup */

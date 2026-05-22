@@ -223,29 +223,6 @@ describe('comfyTitlePopup/DownloadsView', () => {
     ])
   })
 
-  it('forwards Clear Finished from the header chip when there are terminal entries', async () => {
-    const { default: DownloadsView } = await import('./DownloadsView.vue')
-    const state: MockDownloadsState = {
-      active: [],
-      recent: [
-        {
-          url: 'https://example.com/done.bin',
-          filename: 'done.bin',
-          progress: 1,
-          status: 'completed',
-          savePath: '/tmp/done.bin',
-        },
-      ],
-    }
-    const wrapper = mount(DownloadsView, { props: { state } })
-    await flushPromises()
-    const chip = wrapper.find('.downloads-clear')
-    expect(chip.exists()).toBe(true)
-    expect(chip.text()).toContain('Clear Finished')
-    await chip.trigger('click')
-    expect(bridgeState.downloadsActions).toEqual([{ action: 'clear-finished' }])
-  })
-
   it('clicking a completed row body opens the file location via the bridge', async () => {
     const { default: DownloadsView } = await import('./DownloadsView.vue')
     const state: MockDownloadsState = {

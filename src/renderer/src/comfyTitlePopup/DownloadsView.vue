@@ -4,7 +4,6 @@ import { useI18n } from 'vue-i18n'
 import {
   CircleAlert,
   CircleCheck,
-  Eraser,
   LoaderCircle,
   PauseCircle,
   // TODO(brand-cleanup): PlayCircle was the Resume action icon — redesign skips it; restore if Pause/Resume comes back.
@@ -99,8 +98,6 @@ const orderedEntries = computed<DownloadEntry[]>(() =>
   )
 )
 
-const finishedCount = computed(() => props.state.recent.length)
-
 function cancel(url: string): void {
   bridge?.downloadsAction({ action: 'cancel', url })
 }
@@ -116,9 +113,6 @@ function showInFolder(url: string, savePath: string): void {
 }
 function dismiss(url: string): void {
   bridge?.downloadsAction({ action: 'dismiss', url })
-}
-function clearFinished(): void {
-  bridge?.downloadsAction({ action: 'clear-finished' })
 }
 function viewAllDownloads(): void {
   // Opens the brand-redesigned `DownloadsModal` on the host's panel
@@ -202,16 +196,6 @@ function progressStyle(d: DownloadEntry): Record<string, string> | undefined {
   <div class="downloads">
     <header class="downloads-head">
       <h2 class="downloads-title">{{ t('downloadsPopup.title') }}</h2>
-      <button
-        v-if="finishedCount > 0"
-        type="button"
-        class="downloads-clear"
-        :title="t('downloadsPopup.clearFinishedTooltip')"
-        @click="clearFinished"
-      >
-        <Eraser :size="14" />
-        {{ t('downloadsPopup.clearFinished') }}
-      </button>
     </header>
 
     <div v-if="orderedEntries.length === 0" class="downloads-empty">
@@ -316,30 +300,6 @@ function progressStyle(d: DownloadEntry): Record<string, string> | undefined {
   font-size: 14px;
   font-weight: 700;
   color: var(--neutral-100);
-}
-
-.downloads-clear {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 32px;
-  padding: 8px 16px 8px 8px;
-  color: var(--downloads-text);
-  border: none;
-  border-radius: 8px;
-  background: var(--downloads-card);
-  font-size: 12px;
-  cursor: pointer;
-  transition:
-    background-color 120ms ease,
-    color 120ms ease;
-}
-.downloads-clear:hover {
-  background: color-mix(in srgb, var(--downloads-card) 80%, var(--neutral-500));
-}
-.downloads-clear:focus-visible {
-  outline: 2px solid var(--neutral-50);
-  outline-offset: 2px;
 }
 
 .downloads-empty {

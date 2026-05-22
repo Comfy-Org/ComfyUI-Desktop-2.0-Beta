@@ -1,11 +1,11 @@
-import { nextTick, ref, type Ref } from 'vue'
+import { nextTick, ref, watch, type Ref } from 'vue'
 import type ProgressModal from '../views/ProgressModal.vue'
-import type NewInstallModal from '../views/NewInstallModal.vue'
+import type InstallWizardModal from '../views/InstallWizardModal.vue'
 import type TrackModal from '../views/TrackModal.vue'
 import type LoadSnapshotModal from '../views/LoadSnapshotModal.vue'
 import type QuickInstallModal from '../views/QuickInstallModal.vue'
 import type FirstUseTakeover from '../views/FirstUseTakeover.vue'
-import { useOverlay, type FlowComponent } from '../composables/useOverlay'
+import { useOverlay, type FlowComponent, type Overlay } from '../composables/useOverlay'
 import { useProgressStore } from '../stores/progressStore'
 import { emitTelemetryAction } from '../lib/telemetry'
 import type { ActionResult, ShowProgressOpts } from '../types/ipc'
@@ -18,6 +18,7 @@ export type PanelKey =
   | 'comfy-lifecycle'
   | 'chooser'
   | 'downloads-v2'
+  | 'feedback'
   | 'new-install'
   | 'track'
   | 'load-snapshot'
@@ -28,6 +29,7 @@ const VALID_PANELS: ReadonlySet<PanelKey> = new Set([
   'comfy-lifecycle',
   'chooser',
   'downloads-v2',
+  'feedback',
   'new-install',
   'track',
   'load-snapshot',
@@ -99,7 +101,7 @@ export interface UsePanelOverlaysOpts {
   // template (destructuring out of the composable hides the binding
   // and trips `noUnusedLocals`).
   progressRef: Ref<InstanceType<typeof ProgressModal> | null>
-  newInstallRef: Ref<InstanceType<typeof NewInstallModal> | null>
+  newInstallRef: Ref<InstanceType<typeof InstallWizardModal> | null>
   trackRef: Ref<InstanceType<typeof TrackModal> | null>
   loadSnapshotRef: Ref<InstanceType<typeof LoadSnapshotModal> | null>
   quickInstallRef: Ref<InstanceType<typeof QuickInstallModal> | null>
@@ -147,6 +149,39 @@ export function usePanelOverlays(opts: UsePanelOverlaysOpts): UsePanelOverlaysAp
   } = opts
   const progressStore = useProgressStore()
   const { current: currentOverlay, openOverlay, closeOverlay } = useOverlay()
+
+  /**
+   * Title-bar chrome lockdown for the ProgressModal takeover. Push
+   * `'loading-lockdown'` when ProgressModal mounts, restore `'none'`
+   * when it leaves. FirstUseTakeover.vue owns its own consent / post-
+   * consent pushes, so we no-op while a first-use takeover is on
+   * screen.
+   *
+   * `immediate: true` also covers the chooser → install-host handoff:
+   * the title-bar WebContentsView persists across attach/detach but
+   * the panel renderer reloads, so the module-level overlay singleton
+   * resets to `null` while main's entry can still hold a stale
+   * `'loading-lockdown'`. The initial fire on mount clears that drift
+   * — unless a first-use takeover is up, in which case
+   * FirstUseTakeover.vue's own step watcher is the source of truth.
+   */
+  const isProgressTakeover = (o: Overlay | null | undefined): boolean =>
+    o?.kind === 'takeover' && o.component === 'update'
+  const isFirstUseTakeover = (o: Overlay | null | undefined): boolean =>
+    o?.kind === 'takeover' && o.component === 'first-use'
+
+  watch(
+    currentOverlay,
+    (next, prev) => {
+      if (isProgressTakeover(next) && !isProgressTakeover(prev)) {
+        window.api.setFirstUseMode('loading-lockdown')
+      }
+      else if (!isProgressTakeover(next) && !isFirstUseTakeover(next)) {
+        window.api.setFirstUseMode('none')
+      }
+    },
+    { immediate: true },
+  )
 
   const defaultBodyPanel = (): PanelKey => (installationId ? 'comfy-lifecycle' : 'chooser')
 

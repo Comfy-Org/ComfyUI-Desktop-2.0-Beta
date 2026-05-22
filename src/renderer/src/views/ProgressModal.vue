@@ -829,7 +829,7 @@ defineExpose({ startOperation, showOperation })
     <!-- Footer band — sibling to the centered hero stack so the action
          row pins to the takeover's bottom edge without crowding the
          caption / banner area above. Same geometry as
-         NewInstallModal's Configure footer.
+         InstallWizardModal's Configure footer.
          • In-flight → Return to Dashboard (shared confirm gates
            local installs because returning cancels the running op /
            ComfyUI). Cancels the op then flips the host back to

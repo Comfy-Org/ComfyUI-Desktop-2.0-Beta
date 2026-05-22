@@ -2,13 +2,14 @@
 import { computed, onMounted, onUnmounted, ref, toRef, useTemplateRef, watch } from 'vue'
 import { useTitlePopupAutoResize } from '../composables/useTitlePopupAutoResize'
 import { useI18n } from 'vue-i18n'
-import { ChevronLeft, Plus, Search } from 'lucide-vue-next'
+import { Plus, Search } from 'lucide-vue-next'
 import BaseInput from '../components/ui/BaseInput.vue'
 import { FILTER_CHIPS, useInstallList } from '../composables/useInstallList'
 import { useSessionStore } from '../stores/sessionStore'
 import ComfyUISettingsContent from '../components/settings/ComfyUISettingsContent.vue'
 import InstanceRow from './instancePicker/InstanceRow.vue'
 import PickerRow from './instancePicker/PickerRow.vue'
+import { resolvePickerTab, type PickerTab } from '../lib/pickerTabs'
 import { mergePanelLocaleIntoPopup } from './pickerSettingsApiShim'
 import type {
   DetailSection,
@@ -272,12 +273,19 @@ function handleRowOpen(inst: Installation): void {
 
 /** Per-row Manage CTA. Seeds the picker's selection to this install
  *  before flipping into expanded mode so the expanded view's left
- *  list lands on the row the user clicked. Pre-merges the panel
- *  locale catalog so the settings UI never paints with dotted-key
- *  placeholders during the morph. */
-async function handleRowManage(inst: Installation): Promise<void> {
+ *  list lands on the row the user clicked.
+ *
+ *  Locale merge is kicked off in parallel with the mode dispatch
+ *  (NOT awaited) — the previous `await ensurePanelLocaleMerged()`
+ *  blocked the bounds-tween dispatch behind a main-side IPC round-
+ *  trip, which is exactly the "first flip feels janky" beat. The
+ *  settings UI is hidden under the 160ms cross-fade anyway, and the
+ *  `snapshotMode === 'expanded'` watcher below also calls
+ *  `ensurePanelLocaleMerged()` (cached after first use), so the
+ *  catalog still lands before any settings text needs to render. */
+function handleRowManage(inst: Installation): void {
   selectedId.value = inst.id
-  await ensurePanelLocaleMerged()
+  void ensurePanelLocaleMerged()
   bridge?.setPickerMode('expanded', { initialTab: 'config' })
 }
 
@@ -315,6 +323,11 @@ watch(
 const pickerRootRef = useTemplateRef<HTMLDivElement>('pickerRootRef')
 const detailRef = useTemplateRef<HTMLDivElement>('detailRef')
 
+/** Mode the popup is currently in, from the most recent snapshot. */
+const snapshotMode = computed<'compact' | 'expanded'>(
+  () => props.snapshot.mode ?? 'compact',
+)
+
 useTitlePopupAutoResize(
   detailRef,
   () => {
@@ -324,20 +337,19 @@ useTitlePopupAutoResize(
     return root.offsetHeight + 2
   },
   bridge?.requestSize ? bridge.requestSize.bind(bridge) : undefined,
-)
-
-/** Mode the popup is currently in, from the most recent snapshot. */
-const snapshotMode = computed<'compact' | 'expanded'>(
-  () => props.snapshot.mode ?? 'compact',
+  // Expanded mode is sized main-side from host content bounds — the
+  // renderer's offsetHeight is meaningless there (and main's
+  // `requestSize` handler already early-returns in expanded mode). Gate
+  // the observer so we don't even compute the height while the mode-flip
+  // cross-fade is running.
+  { enabled: () => snapshotMode.value !== 'expanded' },
 )
 
 /** Initial tab to seed `ComfyUISettingsContent` with on the expanded
  *  branch's first mount. */
-const initialExpandedTab = computed<'config' | 'status' | 'update' | 'snapshots'>(() => {
-  const raw = props.snapshot.initialTab
-  if (raw === 'status' || raw === 'update' || raw === 'snapshots') return raw
-  return 'config'
-})
+const initialExpandedTab = computed<PickerTab>(() =>
+  resolvePickerTab(props.snapshot.initialTab, 'config'),
+)
 
 function handleCollapseToCompact(): void {
   bridge?.setPickerMode('compact')
@@ -451,14 +463,20 @@ function handleExpandedPrimaryAction(running: boolean): void {
       </button>
     </div>
 
+    <!-- Mode flip cross-fade. `mode="out-in"` ensures the old subtree
+         is gone before the new one mounts so the ResizeObserver doesn't
+         double-measure mid-transition. The 160ms fade lands a hair
+         before the main-side 200ms bounds tween so contents settle
+         before the shell does. -->
+    <Transition name="picker-mode" mode="out-in">
     <!-- Compact mode: single-column list of rich PickerRow cards. No
          left/right split — each row is self-contained with its own
          Open + Manage. Comfy Cloud renders as the same PickerRow shape
          so the visual rhythm holds. The "+ New Instance" affordance is
          pinned in a sticky footer so it stays visible while the list
          scrolls. -->
-    <div v-if="snapshotMode !== 'expanded'" ref="detailRef" class="picker-rows-wrap">
-      <div class="picker-rows" role="list">
+    <div v-if="snapshotMode !== 'expanded'" key="compact" ref="detailRef" class="picker-rows-wrap">
+      <TransitionGroup name="picker-row" tag="div" class="picker-rows" role="list">
         <PickerRow
           v-if="showCloudCard && cloudInstall"
           :key="cloudInstall.id"
@@ -485,10 +503,10 @@ function handleExpandedPrimaryAction(running: boolean): void {
           @manage="handleRowManage"
         />
 
-        <div v-if="showEmptyHint" class="picker-rows-empty">
+        <div v-if="showEmptyHint" key="empty" class="picker-rows-empty">
           {{ t('chooser.noMatches') }}
         </div>
-      </div>
+      </TransitionGroup>
 
       <footer class="picker-rows-footer">
         <button type="button" class="picker-new-install-row" @click="handleNewInstall">
@@ -501,7 +519,7 @@ function handleExpandedPrimaryAction(running: boolean): void {
     <!-- Expanded mode: list-left + settings-right. Unchanged from
          the previous design — the per-install settings UI mounts in
          the right pane and the popup bounds grow to fill inner area. -->
-    <div v-else class="picker-body">
+    <div v-else key="expanded" class="picker-body">
       <div class="picker-left">
         <div class="picker-list-section">
           <div class="picker-list-section-title">{{ t('instancePicker.instances') }}</div>
@@ -544,27 +562,19 @@ function handleExpandedPrimaryAction(running: boolean): void {
       <div class="picker-detail-wrap is-expanded">
         <div class="picker-detail">
           <template v-if="selectedInstall">
-            <!-- Floating close ✕ sits at the top-right corner of the
-                 expanded pane, overlaid on the tab strip. Returns to the
-                 compact (rows) view. ESC also handles this. The previous
-                 back-arrow + title + close header row was redundant
-                 (back and close both collapsed to compact). -->
-            <button
-              type="button"
-              class="picker-expanded-close"
-              :aria-label="t('common.back')"
-              @click="handleCollapseToCompact"
-            >
-              <ChevronLeft :size="16" aria-hidden="true" />
-            </button>
-
+            <!-- Back affordance is rendered inside the settings tab
+                 strip via `showBack` so it sits at the tab baseline
+                 instead of floating over the tab nav. ESC still
+                 collapses (see handleEsc above). -->
             <ComfyUISettingsContent
               :installation="selectedInstall"
               :initial-tab="initialExpandedTab"
+              :show-back="true"
               class="picker-expanded-body"
               @show-progress="handleSettingsShowProgress"
               @navigate-list="handleSettingsNavigateList"
               @primary-action="handleExpandedPrimaryAction"
+              @back="handleCollapseToCompact"
             />
           </template>
           <div v-else class="picker-detail-empty">
@@ -573,6 +583,7 @@ function handleExpandedPrimaryAction(running: boolean): void {
         </div>
       </div>
     </div>
+    </Transition>
   </div>
 </template>
 
@@ -720,17 +731,25 @@ function handleExpandedPrimaryAction(running: boolean): void {
   border-radius: 8px;
   width: fit-content;
   border: none;
-  background: var(--chooser-surface-border);
-  color: var(--text);
+  /* Pairs visually with the right-footer "More" button — both sit in
+   * the same expanded-mode footer band, so they share the same 10%
+   * white overlay (lives in `--chooser-surface-border-hover` — see
+   * note on `.settings-v2-more`) and the same muted-on-text-default
+   * resting state. */
+  background: var(--chooser-surface-border-hover);
+  color: var(--neutral-100);
   font-size: 12px;
   font-weight: 500;
   line-height: 16px;
   cursor: pointer;
-  transition: background-color 120ms ease;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
 }
 .picker-new-install:hover,
 .picker-new-install:focus-visible {
-  background: var(--brand-surface-bg-hover);
+  background: var(--brand-surface-border-hover);
+  color: var(--text);
   outline: none;
 }
 
@@ -749,6 +768,7 @@ function handleExpandedPrimaryAction(running: boolean): void {
   overflow: hidden;
 }
 .picker-rows {
+  position: relative;
   flex: 1 1 auto;
   min-height: 0;
   width: 100%;
@@ -840,41 +860,6 @@ function handleExpandedPrimaryAction(running: boolean): void {
   gap: 0;
 }
 
-/* Floating "back" chevron for the expanded view — pinned to the
- * right pane's top-right corner, overlaid on the tab strip. Returns
- * to the compact row list. ESC also handles this. Replaces the
- * previous back + title + close header row (back and close both did
- * the same thing, so the row was redundant). z-index keeps it above
- * the tab strip. Muted resting color matches body-text caption tone;
- * hover brings it to full neutral-100 without adding a heavy chip
- * background so the affordance reads as inline chrome, not a button. */
-.picker-expanded-close {
-  -webkit-app-region: no-drag;
-  position: absolute;
-  top: 12px;
-  right: 12px;
-  z-index: 2;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-  border: none;
-  border-radius: 6px;
-  color: var(--text-muted);
-  cursor: pointer;
-  transition:
-    color 120ms ease,
-    background-color 120ms ease;
-}
-.picker-expanded-close:hover,
-.picker-expanded-close:focus-visible {
-  color: var(--neutral-100);
-  background: var(--brand-surface-bg-hover);
-  outline: none;
-}
 .picker-expanded-body {
   flex: 1 1 auto;
   min-height: 0;
@@ -883,5 +868,59 @@ function handleExpandedPrimaryAction(running: boolean): void {
    * resolve via `var(--text-muted)`; overriding the token at this
    * scope cascades the bump without touching the shared token. */
   --text-muted: var(--neutral-100);
+}
+
+/* ---- Mode-flip cross-fade ----
+ * Lands a hair before the main-side 200ms bounds tween so contents
+ * settle before the shell does. `mode="out-in"` on the wrapping
+ * Transition ensures no overlap → no double-measurement on the
+ * ResizeObserver. `will-change` is scoped to the active transition
+ * phase so the browser promotes the subtree to its own GPU layer for
+ * the fade (avoids per-frame repaints on a heavy `ComfyUISettings-
+ * Content` subtree) and then releases the layer once the animation
+ * settles — no permanent compositor pressure. */
+.picker-mode-enter-active,
+.picker-mode-leave-active {
+  transition: opacity 160ms ease;
+  will-change: opacity;
+}
+.picker-mode-enter-from,
+.picker-mode-leave-to {
+  opacity: 0;
+}
+
+/* ---- Row enter/leave + FLIP for search/filter changes ----
+ * Surviving rows slide via Vue's auto-FLIP; departing rows fade-up,
+ * arriving rows fade-down. Keeps the outer popup-height tween from
+ * looking teleported when row counts change. */
+.picker-row-enter-active,
+.picker-row-leave-active {
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+.picker-row-enter-from {
+  opacity: 0;
+  transform: translateY(-2px);
+}
+.picker-row-leave-to {
+  opacity: 0;
+  transform: translateY(-2px);
+}
+.picker-row-move {
+  transition: transform 160ms ease;
+}
+/* Leaving rows are taken out of flow so the surrounding FLIP feels
+ * snappy instead of waiting for the leave animation to finish. */
+.picker-row-leave-active {
+  position: absolute;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .picker-mode-enter-active,
+  .picker-mode-leave-active,
+  .picker-row-enter-active,
+  .picker-row-leave-active,
+  .picker-row-move {
+    transition: none;
+  }
 }
 </style>

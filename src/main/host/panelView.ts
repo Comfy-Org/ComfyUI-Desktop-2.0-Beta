@@ -134,6 +134,19 @@ export function destroyPanelView(entry: ComfyWindowEntry): void {
   if (!entry.window.isDestroyed()) {
     try { entry.window.contentView.removeChildView(oldPanel) } catch {}
   }
+  // The reloaded panel renderer starts with no overlay mounted, so any
+  // `firstUseMode` the old renderer pushed (commonly `'loading-lockdown'`
+  // from a ProgressModal that triggered the chooser→install attach) is
+  // stale. Reset to `'none'` and broadcast so the persistent title-bar
+  // WebContentsView paints the full chrome immediately — the new panel
+  // renderer's own initial mount will re-push if onboarding is still
+  // active.
+  if (entry.firstUseMode !== 'none') {
+    entry.firstUseMode = 'none'
+    if (!entry.titleBarView.webContents.isDestroyed()) {
+      entry.titleBarView.webContents.send('comfy-titlebar:first-use-mode-changed', 'none')
+    }
+  }
 }
 
 /** Move OS focus to whichever body view is now active so keyboard input lands in the right place. */

@@ -1,16 +1,17 @@
 <script setup lang="ts">
-import { ref, computed, watch, toRaw, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, toRaw, onMounted, onBeforeUnmount, onUnmounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { ChevronRight, Upload } from 'lucide-vue-next'
 import { useModal } from '../composables/useModal'
 
 import type { SnapshotFilePreview, FieldOption, GPUInfo, ShowProgressOpts } from '../types/ipc'
 import { getVariantGpuLabel, sortedCardOptions, findBestVariant } from '../lib/variants'
-import VariantCardGrid from '../components/VariantCardGrid.vue'
-import { emitTelemetryAction, toVariantBucket } from '../lib/telemetry'
-import SnapshotFilePreviewContent from '../components/SnapshotFilePreviewContent.vue'
-import TakeoverHeader from '../components/TakeoverHeader.vue'
+import { triggerLabel as _triggerLabel, formatDate, formatNodeVersion } from '../lib/snapshots'
+import BrandVariantList from '../components/BrandVariantList.vue'
+import BrandTakeoverLayout from '../components/BrandTakeoverLayout.vue'
 import TakeoverBack from '../components/TakeoverBack.vue'
-import ModalShell from '../components/ModalShell.vue'
+import { BaseSelect, type BaseSelectOption } from '../components/ui'
+import { emitTelemetryAction, toVariantBucket } from '../lib/telemetry'
 
 const emit = defineEmits<{
   close: []
@@ -20,13 +21,13 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const modal = useModal()
 
+const isOpen = ref(false)
 const preview = ref<SnapshotFilePreview | null>(null)
 const installName = ref('')
 const loading = ref(false)
 const creating = ref(false)
 const dragging = ref(false)
 
-// Release & variant selection
 const releaseOptions = ref<FieldOption[]>([])
 const selectedRelease = ref<FieldOption | null>(null)
 const releaseLoading = ref(false)
@@ -36,15 +37,20 @@ const variantLoading = ref(false)
 const detectedGpu = ref<GPUInfo | null>(null)
 let optionsGeneration = 0
 
+const nodesExpanded = ref(true)
+const pipExpanded = ref(false)
+const timelineExpanded = ref(false)
+
+const cardRef = ref<HTMLElement | null>(null)
+let returnFocusTo: HTMLElement | null = null
+
 const sortedVariants = computed(() => sortedCardOptions(variantOptions.value))
 
 const snapshotGpuLabel = computed(() => {
   if (!preview.value) return null
   return getVariantGpuLabel(preview.value.newestSnapshot.comfyui.variant || '')
 })
-
 const detectedGpuLabel = computed(() => detectedGpu.value?.label || null)
-
 const hardwareMismatch = computed(() => {
   if (!snapshotGpuLabel.value || !detectedGpuLabel.value) return false
   return snapshotGpuLabel.value !== detectedGpuLabel.value
@@ -53,6 +59,41 @@ const hardwareMismatch = computed(() => {
 const INVALID_NAME_CHARS = /[<>:"/\\|?*]/
 const nameHasInvalidChars = computed(() => INVALID_NAME_CHARS.test(installName.value))
 
+const releaseSelectOptions = computed<BaseSelectOption[]>(() =>
+  releaseOptions.value.map((opt) => ({
+    value: opt.value,
+    label: opt.recommended ? `${opt.label} (${t('newInstall.recommended')})` : opt.label,
+    description: opt.description
+  }))
+)
+const releasePlaceholder = computed(() => {
+  if (releaseLoading.value) return t('newInstall.loading')
+  if (releaseOptions.value.length === 0) return t('newInstall.noOptions')
+  return ''
+})
+
+function onReleaseChange(value: string): void {
+  selectedRelease.value = releaseOptions.value.find((o) => o.value === value) ?? null
+}
+
+interface SummaryEntry { label: string; value: string }
+const summaryEntries = computed<SummaryEntry[]>(() => {
+  if (!preview.value) return []
+  const p = preview.value
+  const n = p.newestSnapshot
+  return [
+    { label: t('list.snapshotSourceName'), value: p.installationName || '—' },
+    { label: t('list.snapshotCount'), value: String(p.snapshotCount) },
+    { label: t('snapshots.comfyuiVersion'), value: n.comfyuiVersion || '—' },
+    { label: t('snapshots.variant'), value: n.comfyui.variant || '—' },
+    { label: t('snapshots.pythonVersion'), value: n.pythonVersion || '—' },
+    { label: t('snapshots.capturedAt'), value: formatDate(n.createdAt) },
+  ]
+})
+
+function triggerCopy(trigger: string): string {
+  return _triggerLabel(trigger, t)
+}
 
 function open(): void {
   preview.value = null
@@ -66,7 +107,11 @@ function open(): void {
   selectedVariant.value = null
   releaseLoading.value = false
   variantLoading.value = false
+  nodesExpanded.value = true
+  pipExpanded.value = false
+  timelineExpanded.value = false
   optionsGeneration++
+  isOpen.value = true
 }
 
 async function loadReleaseOptions(): Promise<void> {
@@ -85,7 +130,6 @@ async function loadReleaseOptions(): Promise<void> {
     if (gen !== optionsGeneration) return
     releaseOptions.value = options
 
-    // Preselect the release matching the snapshot's releaseTag, or fall back to latest
     const snapshotTag = preview.value?.newestSnapshot.comfyui.releaseTag
     const match = snapshotTag ? options.find((o) => o.value === snapshotTag) : null
     selectedRelease.value = match || options[0] || null
@@ -110,7 +154,6 @@ async function loadVariantOptions(): Promise<void> {
     if (gen !== optionsGeneration) return
     variantOptions.value = options
 
-    // Default to the variant matching the snapshot's device, then recommended (detected GPU), then first
     const snapshotVariantId = preview.value?.newestSnapshot.comfyui.variant || ''
     selectedVariant.value = findBestVariant(options, snapshotVariantId)
   } finally {
@@ -157,15 +200,13 @@ async function handleBrowse(): Promise<void> {
   }
 }
 
-const contentRef = ref<HTMLElement | null>(null)
-
 function handleDragOver(event: DragEvent): void {
   event.preventDefault()
   dragging.value = true
 }
 
 function handleDragLeave(event: DragEvent): void {
-  if (contentRef.value && !contentRef.value.contains(event.relatedTarget as Node)) {
+  if (cardRef.value && !cardRef.value.contains(event.relatedTarget as Node)) {
     dragging.value = false
   }
 }
@@ -219,6 +260,7 @@ async function handleCreate(): Promise<void> {
     }
     if (result.entry) {
       creating.value = false
+      isOpen.value = false
       emit('close')
       emit('show-progress', {
         installationId: result.entry.id,
@@ -235,10 +277,29 @@ async function handleCreate(): Promise<void> {
   }
 }
 
-// Prevent Electron from navigating to dropped files
 function preventNav(event: Event): void {
   event.preventDefault()
 }
+
+function onKeydown(e: KeyboardEvent): void {
+  if (e.key === 'Escape' && isOpen.value) emit('close')
+}
+
+watch(isOpen, async (open) => {
+  if (open) {
+    document.addEventListener('keydown', onKeydown)
+    returnFocusTo = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    await nextTick()
+    const target = cardRef.value?.querySelector<HTMLElement>(
+      'input, button, select, [tabindex]:not([tabindex="-1"])'
+    )
+    target?.focus()
+  } else {
+    document.removeEventListener('keydown', onKeydown)
+    returnFocusTo?.focus()
+    returnFocusTo = null
+  }
+})
 
 onMounted(() => {
   document.addEventListener('dragover', preventNav)
@@ -248,245 +309,334 @@ onUnmounted(() => {
   document.removeEventListener('dragover', preventNav)
   document.removeEventListener('drop', preventNav)
 })
+onBeforeUnmount(() => {
+  document.removeEventListener('keydown', onKeydown)
+  if (returnFocusTo && document.contains(returnFocusTo)) returnFocusTo.focus()
+  returnFocusTo = null
+})
 
 defineExpose({ open })
 </script>
 
 <template>
-  <ModalShell binding @close="emit('close')">
-      <template #header>
-        <div class="takeover-stacked-header">
-          <TakeoverBack
-            :label="$t('common.backToDashboard')"
-            @back="emit('close')"
-          />
-          <TakeoverHeader
-            :title="$t('loadSnapshot.grandTitle')"
-            :subtitle="$t('loadSnapshot.grandSubtitle')"
-          />
-        </div>
-      </template>
+  <BrandTakeoverLayout v-if="isOpen">
+    <div class="ls-shell" data-testid="load-snapshot-modal">
+      <h1 class="brand-title">{{ $t('loadSnapshot.grandTitle') }}</h1>
+      <p class="brand-lead">{{ $t('loadSnapshot.grandSubtitle') }}</p>
       <div
-        ref="contentRef"
-        class="ls-drop-target"
+        ref="cardRef"
+        class="brand-card"
+        role="dialog"
+        aria-modal="true"
+        :aria-label="$t('loadSnapshot.grandTitle')"
         @dragover="!preview && handleDragOver($event)"
         @dragleave="!preview && handleDragLeave($event)"
         @drop="!preview && handleDrop($event)"
       >
-        <div class="view-scroll">
-          <!-- Drop zone / file picker (shown when no preview loaded) -->
-          <div v-if="!preview" class="ls-drop-zone-wrap">
-            <div
-              class="ls-drop-zone"
-              :class="{ 'ls-drop-zone-active': dragging, 'ls-drop-zone-loading': loading }"
-            >
-              <div v-if="loading" class="ls-drop-loading with-spinner">{{ $t('newInstall.loading') }}</div>
-              <template v-else>
-                <div class="ls-drop-text">{{ $t('list.snapshotDropHint') }}</div>
-                <div class="ls-drop-or">{{ $t('common.or') }}</div>
-                <button class="ls-browse-btn" @click="handleBrowse">{{ $t('common.browse') }}</button>
-              </template>
+        <div class="brand-card__body">
+          <div
+            v-if="!preview"
+            class="ls-dropzone"
+            :class="{ 'ls-dropzone--active': dragging, 'ls-dropzone--loading': loading }"
+          >
+            <div v-if="loading" class="ls-dropzone__loading with-spinner">
+              {{ $t('newInstall.loading') }}
             </div>
+            <template v-else>
+              <Upload :size="32" class="ls-dropzone__icon" aria-hidden="true" />
+              <div class="ls-dropzone__hint">{{ $t('list.snapshotDropHint') }}</div>
+              <div class="ls-dropzone__or">{{ $t('common.or') }}</div>
+              <button class="brand-tertiary" type="button" @click="handleBrowse">
+                {{ $t('common.browse') }}
+              </button>
+            </template>
           </div>
 
-          <!-- Preview content -->
-          <template v-if="preview">
-            <!-- Install name -->
-            <div class="ls-section">
-              <div class="ls-field">
-                <span class="ls-label">{{ $t('common.name') }}</span>
+          <template v-else>
+            <div class="ls-field">
+              <label class="ls-label" for="ls-name">{{ $t('common.name') }}</label>
+              <div class="brand-input">
                 <input
+                  id="ls-name"
                   v-model="installName"
-                  class="ls-name-input"
                   type="text"
                   :placeholder="$t('common.namePlaceholder')"
-                >
-                <span v-if="nameHasInvalidChars" class="ls-name-hint">{{ $t('list.snapshotNameHint') }}</span>
-              </div>
-            </div>
-
-            <!-- Release selection -->
-            <div class="ls-section">
-              <div class="ls-field">
-                <span class="ls-label">{{ $t('list.snapshotRelease') }}</span>
-                <select
-                  v-if="!releaseLoading && releaseOptions.length > 0"
-                  class="ls-select"
-                  :value="releaseOptions.indexOf(selectedRelease!)"
-                  @change="selectedRelease = releaseOptions[Number(($event.target as HTMLSelectElement).value)] ?? null"
-                >
-                  <option
-                    v-for="(opt, i) in releaseOptions"
-                    :key="opt.value"
-                    :value="i"
-                  >
-                    {{ opt.label }}{{ opt.recommended ? ` (${$t('newInstall.recommended')})` : '' }}
-                  </option>
-                </select>
-                <span v-else-if="releaseLoading" class="ls-value ls-value-loading with-spinner">{{ $t('newInstall.loading') }}</span>
-                <span v-else class="ls-value">{{ $t('newInstall.noOptions') }}</span>
-                <span v-if="preview.newestSnapshot.comfyui.releaseTag" class="ls-release-hint">
-                  {{ $t('list.snapshotOriginalRelease', { tag: preview.newestSnapshot.comfyui.releaseTag }) }}
-                </span>
-              </div>
-            </div>
-
-            <!-- Device / variant selection -->
-            <div class="ls-section">
-              <div class="ls-field">
-                <span class="ls-label">{{ $t('list.snapshotDevice') }}</span>
-                <div v-if="variantLoading" class="ls-value ls-value-loading with-spinner">{{ $t('newInstall.loading') }}</div>
-                <VariantCardGrid
-                  v-else-if="variantOptions.length > 0"
-                  :options="sortedVariants"
-                  :selected-value="selectedVariant?.value"
-                  @select="selectVariant"
                 />
-                <span v-else class="ls-value">{{ $t('newInstall.noOptions') }}</span>
               </div>
+              <div v-if="nameHasInvalidChars" class="ls-hint ls-hint--warn">
+                {{ $t('list.snapshotNameHint') }}
+              </div>
+            </div>
 
-              <!-- Hardware mismatch warning -->
+            <div class="ls-field">
+              <label class="ls-label">{{ $t('list.snapshotRelease') }}</label>
+              <BaseSelect
+                variant="brand"
+                :model-value="selectedRelease?.value ?? ''"
+                :options="releaseSelectOptions"
+                :placeholder="releasePlaceholder"
+                :disabled="releaseLoading || releaseOptions.length === 0"
+                :aria-label="$t('list.snapshotRelease')"
+                @update:model-value="onReleaseChange"
+              />
+              <div
+                v-if="preview.newestSnapshot.comfyui.releaseTag"
+                class="ls-hint"
+              >
+                {{ $t('list.snapshotOriginalRelease', { tag: preview.newestSnapshot.comfyui.releaseTag }) }}
+              </div>
+            </div>
+
+            <div class="ls-field">
+              <label class="ls-label">{{ $t('list.snapshotDevice') }}</label>
+              <div v-if="variantLoading" class="ls-loading with-spinner">
+                {{ $t('newInstall.loading') }}
+              </div>
+              <BrandVariantList
+                v-else-if="variantOptions.length > 0"
+                :options="sortedVariants"
+                :selected-value="selectedVariant?.value"
+                :aria-label="$t('list.snapshotDevice')"
+                @select="selectVariant"
+              />
+              <div v-else class="ls-loading">{{ $t('newInstall.noOptions') }}</div>
               <div v-if="hardwareMismatch" class="ls-hw-warning">
                 {{ $t('list.snapshotHardwareMismatch', { snapshotDevice: snapshotGpuLabel, detectedDevice: detectedGpuLabel }) }}
               </div>
             </div>
 
-            <SnapshotFilePreviewContent :preview="preview" />
+            <div class="ls-divider" aria-hidden="true" />
+
+            <div class="brand-summary">
+              <div
+                v-for="entry in summaryEntries"
+                :key="entry.label"
+                class="brand-summary__row"
+              >
+                <span class="brand-summary__label">{{ entry.label }}</span>
+                <span class="brand-summary__value">{{ entry.value }}</span>
+              </div>
+            </div>
+
+            <div class="ls-disclosure" :class="{ 'is-open': nodesExpanded }">
+              <button
+                type="button"
+                class="ls-disclosure__summary"
+                :aria-expanded="nodesExpanded"
+                @click="nodesExpanded = !nodesExpanded"
+              >
+                <ChevronRight :size="14" class="ls-disclosure__chevron" aria-hidden="true" />
+                <span>{{ $t('snapshots.customNodes') }} ({{ preview.newestSnapshot.customNodes.length }})</span>
+              </button>
+              <div class="ls-disclosure__wrap">
+                <div class="ls-disclosure__body">
+                  <div
+                    v-if="preview.newestSnapshot.customNodes.length > 0"
+                    class="recessed-list"
+                  >
+                    <div
+                      v-for="node in preview.newestSnapshot.customNodes"
+                      :key="node.id"
+                      class="ls-node-row"
+                    >
+                      <span
+                        class="ls-node-status"
+                        :class="node.enabled ? 'ls-node-enabled' : 'ls-node-disabled'"
+                      />
+                      <span class="ls-node-name">{{ node.id }}</span>
+                      <span class="ls-node-type">{{ node.type }}</span>
+                      <span class="ls-node-version" :title="formatNodeVersion(node)">
+                        {{ formatNodeVersion(node) }}
+                      </span>
+                    </div>
+                  </div>
+                  <div v-else class="ls-empty">—</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="ls-disclosure" :class="{ 'is-open': pipExpanded }">
+              <button
+                type="button"
+                class="ls-disclosure__summary"
+                :aria-expanded="pipExpanded"
+                @click="pipExpanded = !pipExpanded"
+              >
+                <ChevronRight :size="14" class="ls-disclosure__chevron" aria-hidden="true" />
+                <span>{{ $t('snapshots.pipPackages') }} ({{ preview.newestSnapshot.pipPackageCount }})</span>
+              </button>
+              <div class="ls-disclosure__wrap">
+                <div class="ls-disclosure__body">
+                  <div
+                    v-if="preview.newestSnapshot.pipPackageCount > 0"
+                    class="recessed-list"
+                  >
+                    <div
+                      v-for="(version, name) in preview.newestSnapshot.pipPackages"
+                      :key="name"
+                      class="ls-pip-row"
+                    >
+                      <span class="ls-pip-name">{{ name }}</span>
+                      <span class="ls-pip-version" :title="version">{{ version }}</span>
+                    </div>
+                  </div>
+                  <div v-else class="ls-empty">—</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="ls-disclosure" :class="{ 'is-open': timelineExpanded }">
+              <button
+                type="button"
+                class="ls-disclosure__summary"
+                :aria-expanded="timelineExpanded"
+                @click="timelineExpanded = !timelineExpanded"
+              >
+                <ChevronRight :size="14" class="ls-disclosure__chevron" aria-hidden="true" />
+                <span>{{ $t('list.snapshotTimeline') }} ({{ preview.snapshotCount }})</span>
+              </button>
+              <div class="ls-disclosure__wrap">
+                <div class="ls-disclosure__body">
+                  <div class="ls-timeline">
+                    <div
+                      v-for="(snap, i) in preview.snapshots"
+                      :key="snap.filename"
+                      class="ls-timeline-item"
+                    >
+                      <span class="ls-trigger" :class="'ls-trigger-' + snap.trigger">
+                        {{ triggerCopy(snap.trigger) }}
+                      </span>
+                      <span v-if="i === 0" class="ls-current-tag">{{ $t('snapshots.current') }}</span>
+                      <span class="ls-meta">
+                        {{ snap.comfyuiVersion }} ·
+                        {{ $t('snapshots.nodesCount', { count: snap.nodeCount }) }} ·
+                        {{ $t('snapshots.packagesCount', { count: snap.pipPackageCount }) }}
+                      </span>
+                      <span class="ls-time">{{ formatDate(snap.createdAt) }}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
           </template>
         </div>
 
-        <!-- Bottom actions -->
-        <div class="view-bottom">
-          <button v-if="preview" @click="handleClearPreview">{{ $t('common.back') }}</button>
+        <div v-if="preview" class="brand-card__footer">
+          <button class="brand-ghost ls-back" type="button" @click="handleClearPreview">
+            {{ $t('common.back') }}
+          </button>
           <button
-            class="primary"
-            :disabled="!preview || creating || !selectedVariant"
+            class="brand-primary ls-create"
+            :disabled="creating || !selectedVariant"
             @click="handleCreate"
           >
-            {{ creating ? $t('newInstall.loading') : $t('list.snapshotCreateInstall') }}
+            {{ creating ? `${$t('newInstall.installing')}…` : $t('list.snapshotCreateInstall') }}
           </button>
         </div>
       </div>
-  </ModalShell>
+    </div>
+    <template #footer-left>
+      <TakeoverBack
+        class="ls-back-to-dashboard"
+        :label="$t('common.backToDashboard')"
+        @back="emit('close')"
+      />
+    </template>
+  </BrandTakeoverLayout>
 </template>
 
 <style scoped>
-/* Wraps the body so drag-leave detection (contains check) can target the
-   whole drop area and view-scroll still fills it. */
-.ls-drop-target {
-  flex: 1; min-height: 0;
-  display: flex; flex-direction: column;
-}
-
-/* Ensure view-scroll stretches the drop zone when no preview is loaded */
-.view-scroll:has(.ls-drop-zone-wrap) {
+.ls-shell {
+  align-self: stretch;
+  height: 100%;
+  max-height: 100%;
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
   display: flex;
   flex-direction: column;
-}
-
-/* Drop zone */
-.ls-drop-zone-wrap {
-  display: flex;
   align-items: center;
   justify-content: center;
-  flex: 1;
+  text-align: center;
+  padding-block: clamp(1.5rem, 4vh, 3rem);
+  min-height: 0;
 }
 
-.ls-drop-zone {
+.ls-back {
+  margin-right: auto;
+}
+
+.ls-back-to-dashboard {
+  position: absolute;
+  left: clamp(1.25rem, 2vw, 2rem);
+  bottom: clamp(1.25rem, 2vw, 2rem);
+  z-index: 2;
+}
+
+/* Empty state — drop zone fills the body */
+.ls-dropzone {
+  flex: 1 1 auto;
+  min-height: 220px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 10px;
-  width: 100%;
-  height: 100%;
-  border: 2px dashed var(--border);
+  border: 2px dashed var(--brand-surface-border);
   border-radius: 8px;
   padding: 32px;
-  transition: border-color 0.15s, background 0.15s;
+  transition: border-color 160ms ease, background 160ms ease;
+  color: var(--neutral-200);
 }
-.ls-drop-zone-active {
+.ls-dropzone--active {
   border-color: var(--accent);
   background: color-mix(in srgb, var(--accent) 8%, transparent);
 }
-.ls-drop-zone-loading {
+.ls-dropzone--loading {
   opacity: 0.6;
   pointer-events: none;
 }
-
-.ls-drop-loading {
-  flex-direction: column;
-  justify-content: center;
-  font-size: 14px;
-  color: var(--text-muted);
+.ls-dropzone__icon {
+  color: var(--neutral-300);
+  margin-bottom: 4px;
 }
-
-.ls-drop-text {
-  font-size: 14px;
-  color: var(--text-muted);
+.ls-dropzone__hint {
+  font-size: var(--takeover-fs-body);
+  color: var(--neutral-200);
   text-align: center;
 }
-.ls-drop-or {
+.ls-dropzone__or {
+  font-size: var(--takeover-fs-caption);
+  color: var(--neutral-300);
+}
+.ls-dropzone__loading {
+  font-size: var(--takeover-fs-body);
+  color: var(--neutral-300);
+}
+
+/* Field rows */
+.ls-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ls-label {
   font-size: 13px;
-  color: var(--text-muted);
+  color: var(--neutral-200);
 }
-.ls-browse-btn {
-  padding: 6px 20px;
-  font-size: 14px;
-  border-radius: 6px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  color: var(--text);
-  cursor: pointer;
+.ls-hint {
+  font-size: var(--takeover-fs-caption);
+  color: var(--neutral-300);
 }
-.ls-browse-btn:hover {
-  border-color: var(--border-hover);
-}
-
-.ls-name-input {
-  font-size: 14px;
-  padding: 6px 10px;
-  border-radius: 5px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  color: var(--text);
-  box-sizing: border-box;
-  width: 100%;
-}
-.ls-name-input:focus {
-  outline: none;
-  border-color: var(--accent);
-}
-
-.ls-name-hint {
-  font-size: 11px;
+.ls-hint--warn {
   color: var(--warning);
-  margin-top: 2px;
+}
+.ls-loading {
+  font-size: var(--takeover-fs-body);
+  color: var(--neutral-300);
+  padding: 8px 0;
 }
 
-.ls-release-hint {
-  font-size: 12px;
-  color: var(--text-muted);
-  margin-top: 2px;
-}
-
-/* Release select */
-.ls-select {
-  font-size: 14px;
-  padding: 6px 10px;
-  border-radius: 5px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  color: var(--text);
-  box-sizing: border-box;
-  width: 100%;
-}
-.ls-select:focus {
-  outline: none;
-  border-color: var(--accent);
-}
-
-/* Hardware mismatch warning */
 .ls-hw-warning {
   font-size: 13px;
   color: var(--warning);
@@ -494,6 +644,75 @@ defineExpose({ open })
   border: 1px solid color-mix(in srgb, var(--warning) 30%, transparent);
   border-radius: 6px;
   padding: 8px 12px;
-  margin-top: 8px;
+}
+
+.ls-divider {
+  height: 1px;
+  background: var(--brand-surface-border);
+  margin-block: 4px;
+}
+
+/* Disclosures — grid-rows animation, same recipe as InstallWizardModal's .config-advanced */
+.ls-disclosure {
+  border-top: 1px solid var(--brand-surface-border);
+  padding-top: var(--takeover-gap-md);
+}
+.ls-disclosure__summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0;
+  cursor: pointer;
+  background: transparent;
+  border: none;
+  color: var(--neutral-200);
+  font: inherit;
+  font-size: var(--takeover-fs-body);
+}
+.ls-disclosure__summary:hover {
+  color: var(--neutral-100);
+  transition: color 120ms ease;
+}
+.ls-disclosure__summary:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+.ls-disclosure__chevron {
+  transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.ls-disclosure.is-open .ls-disclosure__chevron {
+  transform: rotate(90deg);
+}
+.ls-disclosure__wrap {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 280ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.ls-disclosure.is-open .ls-disclosure__wrap {
+  grid-template-rows: 1fr;
+}
+.ls-disclosure__body {
+  min-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  transform: translateY(-4px);
+  transition:
+    opacity 220ms ease 60ms,
+    transform 260ms cubic-bezier(0.22, 1, 0.36, 1) 40ms;
+}
+.ls-disclosure.is-open .ls-disclosure__body {
+  margin-top: 10px;
+  opacity: 1;
+  transform: translateY(0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ls-disclosure__chevron,
+  .ls-disclosure__wrap,
+  .ls-disclosure__body,
+  .ls-dropzone {
+    transition: none;
+  }
 }
 </style>

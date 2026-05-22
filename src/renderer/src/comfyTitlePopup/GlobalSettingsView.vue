@@ -8,6 +8,7 @@ import {
   RefreshCcw,
   Settings2,
   SlidersHorizontal,
+  Star,
   X
 } from 'lucide-vue-next'
 import UpdatesSection from './globalSettings/UpdatesSection.vue'
@@ -60,6 +61,7 @@ interface Snapshot {
   activeInstallationId: string | null
   hasActiveInstall: boolean
   githubUrl: string
+  githubStars: number | null
   i18n: {
     overview: string
     updates: string
@@ -153,6 +155,15 @@ function handleOpenExternal(url: string): void {
   if (!url) return
   bridge?.globalSettingsOpenExternal(url)
 }
+
+const starCountLabel = computed(() => {
+  const n = props.snapshot.githubStars
+  if (n == null) return ''
+  return new Intl.NumberFormat(undefined, {
+    notation: 'compact',
+    maximumFractionDigits: 1
+  }).format(n)
+})
 
 async function handleAddModelsDir(): Promise<void> {
   const picked = await bridge?.globalSettingsBrowseFolder()
@@ -248,7 +259,7 @@ onMounted(() => {
 <template>
   <div class="global-settings">
     <header class="gs-header">
-      <h2 class="gs-title">{{ t('settingsModal.tabGlobal', 'Settings') }}</h2>
+      <h2 class="gs-title">{{ t('settingsModal.tabGlobal', 'Desktop Settings') }}</h2>
       <button
         type="button"
         class="gs-close"
@@ -287,10 +298,22 @@ onMounted(() => {
       >
         <template v-if="activeTab === 'general'">
           <SettingsSectionList :sections="overviewSections" @update-field="handleUpdateField" />
-          <button type="button" class="gs-github" @click="handleOpenExternal(snapshot.githubUrl)">
-            <Github :size="14" aria-hidden="true" />
-            <span>GitHub</span>
-          </button>
+          <div class="gs-github-row">
+            <button type="button" class="gs-github" @click="handleOpenExternal(snapshot.githubUrl)">
+              <Github :size="14" aria-hidden="true" />
+              <span>GitHub</span>
+            </button>
+            <button
+              v-if="snapshot.githubStars != null"
+              type="button"
+              class="gs-github-stars"
+              :aria-label="`${snapshot.githubStars} GitHub stars`"
+              @click="handleOpenExternal(snapshot.githubUrl)"
+            >
+              <Star :size="12" class="gs-github-stars-icon" aria-hidden="true" />
+              <span>{{ starCountLabel }}</span>
+            </button>
+          </div>
         </template>
 
         <template v-else-if="activeTab === 'updates'">
@@ -464,18 +487,24 @@ onMounted(() => {
   gap: 12px;
 }
 
+.gs-github-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 4px;
+}
+
 .gs-github {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 0 0 0;
+  padding: 0;
   border: none;
   background: transparent;
   color: var(--neutral-100);
   opacity: 0.67;
   font-size: 12px;
   cursor: pointer;
-  align-self: flex-start;
   transition: opacity 100ms ease;
 }
 
@@ -483,6 +512,34 @@ onMounted(() => {
 .gs-github:focus-visible {
   opacity: 1;
   outline: none;
+}
+
+.gs-github-stars {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border: 1px solid color-mix(in oklab, var(--neutral-100) 14%, transparent);
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--neutral-100) 4%, transparent);
+  color: var(--neutral-100);
+  opacity: 0.78;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: opacity 100ms ease, background 100ms ease;
+}
+
+.gs-github-stars:hover,
+.gs-github-stars:focus-visible {
+  opacity: 1;
+  background: color-mix(in oklab, var(--neutral-100) 8%, transparent);
+  outline: none;
+}
+
+.gs-github-stars-icon {
+  color: var(--warning, #e3b341);
+  fill: currentColor;
 }
 
 .gs-subgroup {

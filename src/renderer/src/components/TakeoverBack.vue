@@ -14,7 +14,7 @@
  * to the chooser body underneath).
  *
  * Per-flow choices captured in the plan doc:
- *  - NewInstallModal / TrackModal / LoadSnapshotModal / QuickInstallModal:
+ *  - InstallWizardModal / TrackModal / LoadSnapshotModal / QuickInstallModal:
  *    chevron + "Back to Dashboard" label (mounted on the chooser
  *    host window — close emit returns to chooser).
  *  - FirstUseTakeover: NO back affordance — the bootstrap flow has

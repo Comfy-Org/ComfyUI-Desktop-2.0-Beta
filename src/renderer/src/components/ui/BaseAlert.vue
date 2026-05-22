@@ -215,10 +215,7 @@ onBeforeUnmount(() => {
    * settings windows: a soft white-tinted hairline plus a layered
    * shadow that reads as elevation rather than a hard drop. */
   border: 1px solid var(--chooser-surface-border);
-  box-shadow:
-    0 20px 24px -4px rgba(10, 13, 18, 0.4),
-    0 8px 8px -4px rgba(10, 13, 18, 0.25),
-    0 3px 3px -1.5px rgba(10, 13, 18, 0.2);
+  box-shadow: var(--modal-surface-shadow);
   color: var(--neutral-100);
   padding: 16px 24px;
 }

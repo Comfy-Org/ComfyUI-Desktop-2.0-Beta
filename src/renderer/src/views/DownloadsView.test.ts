@@ -166,7 +166,7 @@ describe('views/DownloadsView (Settings → Downloads tab)', () => {
 
     const chips = wrapper.findAll('.downloads-filter-chip')
     const labels = chips.map((c) => c.text())
-    expect(labels).toEqual(['All', 'Active', 'Completed', 'Errored'])
+    expect(labels).toEqual(['All', 'Active', 'Completed', 'Failed'])
 
     await chips[1]!.trigger('click') // Active
     await flushPromises()
@@ -178,7 +178,7 @@ describe('views/DownloadsView (Settings → Downloads tab)', () => {
     expect(wrapper.findAll('.downloads-tab-item').length).toBe(1)
     expect(wrapper.find('.downloads-tab-name').text()).toBe('b.bin')
 
-    await chips[3]!.trigger('click') // Errored
+    await chips[3]!.trigger('click') // Failed
     await flushPromises()
     expect(wrapper.findAll('.downloads-tab-item').length).toBe(1)
     expect(wrapper.find('.downloads-tab-name').text()).toBe('c.bin')
@@ -235,57 +235,6 @@ describe('views/DownloadsView (Settings → Downloads tab)', () => {
     const showBtn = completedButtons.find((b) => b.text().includes('Show in Finder'))!
     await showBtn.trigger('click')
     expect(apiCalls.showInFolderCalls).toEqual(['/tmp/ok.bin'])
-  })
-
-  it('Clear finished removes every terminal entry from the store', async () => {
-    const store = useDownloadStore()
-    store.upsert(
-      makeProgress({
-        url: 'https://example.com/active',
-        filename: 'a.bin',
-        progress: 0.5,
-        status: 'downloading',
-      }),
-    )
-    store.upsert(
-      makeProgress({
-        url: 'https://example.com/done',
-        filename: 'b.bin',
-        progress: 1,
-        status: 'completed',
-      }),
-    )
-    store.upsert(
-      makeProgress({
-        url: 'https://example.com/oops',
-        filename: 'c.bin',
-        progress: 0,
-        status: 'error',
-      }),
-    )
-    const wrapper = mount(DownloadsView)
-    await flushPromises()
-    await wrapper.find('.downloads-clear').trigger('click')
-    await flushPromises()
-    expect(store.downloads.size).toBe(1)
-    expect(store.downloads.has('https://example.com/active')).toBe(true)
-  })
-
-  it('disables Clear finished when there are no terminal entries', async () => {
-    const store = useDownloadStore()
-    store.upsert(
-      makeProgress({
-        url: 'https://example.com/active',
-        filename: 'a.bin',
-        progress: 0.5,
-        status: 'downloading',
-      }),
-    )
-    const wrapper = mount(DownloadsView)
-    await flushPromises()
-    expect(
-      (wrapper.find('.downloads-clear').element as HTMLButtonElement).disabled,
-    ).toBe(true)
   })
 
   it('per-row Remove dismisses a single terminal entry from the store', async () => {

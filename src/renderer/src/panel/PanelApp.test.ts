@@ -80,9 +80,9 @@ vi.mock('../views/ChooserView.vue', () => ({
       '<div data-testid="chooser-view"><button data-testid="chooser-new-install" @click="$emit(\'show-new-install\')">New</button></div>',
   },
 }))
-vi.mock('../views/NewInstallModal.vue', () => ({
+vi.mock('../views/InstallWizardModal.vue', () => ({
   default: {
-    name: 'NewInstallModal',
+    name: 'InstallWizardModal',
     emits: ['close', 'navigate-list', 'show-progress'],
     template: '<div data-testid="new-install-modal" />',
     methods: { open: vi.fn() },
@@ -206,6 +206,9 @@ interface MockApiState {
    *  entry; tests can simulate the click by invoking each callback
    *  with the originating `source`. */
   openFeedbackCallbacks: ((data: { source: 'titlebar' | 'menu' }) => void)[]
+  /** Window-close consult callbacks. Main fires `comfy-window:request-close`
+   *  when the user clicks the ✕; tests fire each callback to simulate that. */
+  closeRequestCallbacks: ((data: { requestId: string }) => void)[]
   installations: InstallationLike[]
   getInstallations: ReturnType<typeof vi.fn>
   openExternal: ReturnType<typeof vi.fn>
@@ -231,6 +234,7 @@ function installMockApi(initial?: {
     installationsChangedCallbacks: [],
     firstUseSkipCallbacks: [],
     openFeedbackCallbacks: [],
+    closeRequestCallbacks: [],
     installations,
     getInstallations: vi.fn(async () => state.installations),
     openExternal: vi.fn(async () => {}),
@@ -275,9 +279,12 @@ function installMockApi(initial?: {
     getAppVersion: state.getAppVersion,
     onSettingsChanged: vi.fn(() => () => {}),
     // Main consults the panel renderer before tearing down the host
-    // window. PanelApp subscribes on mount; the test suite never
-    // fires the consult so the mock is a no-op pair.
-    onCloseRequest: vi.fn(() => () => {}),
+    // window. PanelApp subscribes on mount; tests can fire the consult
+    // by invoking each captured callback with a `requestId`.
+    onCloseRequest: vi.fn((cb: (d: { requestId: string }) => void) => {
+      state.closeRequestCallbacks.push(cb)
+      return () => {}
+    }),
     respondCloseRequest: vi.fn(),
     ackCloseRequest: vi.fn(),
     // Symmetric mock pair for the File menu's Return to Dashboard consult.
@@ -440,7 +447,7 @@ it('opens the new-install takeover above the chooser body when show-new-install 
     // body (chooser, since there's no installationId).
     expect(wrapper.find('[data-testid="new-install-modal"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="chooser-view"]').exists()).toBe(true)
-    await wrapper.findComponent({ name: 'NewInstallModal' }).vm.$emit('close')
+    await wrapper.findComponent({ name: 'InstallWizardModal' }).vm.$emit('close')
     await flushPromises()
     expect(wrapper.find('[data-testid="new-install-modal"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="chooser-view"]').exists()).toBe(true)
@@ -471,7 +478,7 @@ it('opens the new-install takeover above the chooser body when show-new-install 
     { panel: 'track', selector: '[data-testid="track-modal"]', name: 'TrackModal' },
     { panel: 'load-snapshot', selector: '[data-testid="load-snapshot-modal"]', name: 'LoadSnapshotModal' },
     { panel: 'quick-install', selector: '[data-testid="quick-install-modal"]', name: 'QuickInstallModal' },
-    { panel: 'new-install', selector: '[data-testid="new-install-modal"]', name: 'NewInstallModal' },
+    { panel: 'new-install', selector: '[data-testid="new-install-modal"]', name: 'InstallWizardModal' },
   ])('IPCs closeCurrentPanel when the $panel takeover dismisses, so main\'s activePanel resets and the file menu can re-open it', async ({ panel, selector, name }) => {
     // Without this IPC, main's `entry.activePanel` stays stuck on the
     // wizard key after the renderer-side dismiss; the next file-menu
@@ -604,7 +611,7 @@ it('opens the new-install takeover above the chooser body when show-new-install 
     expect(setSetting).not.toHaveBeenCalledWith('firstUseCompleted', true)
 
     // New-install close (success or cancel) flips the persisted gate.
-    await wrapper.findComponent({ name: 'NewInstallModal' }).vm.$emit('close')
+    await wrapper.findComponent({ name: 'InstallWizardModal' }).vm.$emit('close')
     await flushPromises()
     expect(setSetting).toHaveBeenCalledWith('firstUseCompleted', true)
   })
@@ -675,8 +682,13 @@ it('opens the new-install takeover above the chooser body when show-new-install 
       (e) => e.actionName === 'desktop2.feedback.opened',
     )
     expect(feedbackTelemetry.map((e) => e.context?.source)).toEqual(['titlebar', 'menu'])
-    expect(mockState.openExternal).toHaveBeenCalledTimes(2)
-    const url = (mockState.openExternal.mock.calls[0]?.[0] ?? '') as string
+    // FeedbackModal teleports its iframe to <body>, so query the
+    // document directly rather than the wrapper subtree. The iframe
+    // src is the resolved support URL — same payload we used to send
+    // through `openFeedback`.
+    const frame = document.body.querySelector<HTMLIFrameElement>('iframe.feedback-modal-frame')
+    expect(frame).not.toBeNull()
+    const url = frame?.getAttribute('src') ?? ''
     expect(url).toContain('form.typeform.com/to/VhOXmuaL')
     expect(url).toContain('ver=0.5.0')
     expect(url).toMatch(/[?&]platform=/)
@@ -978,6 +990,50 @@ it('does NOT fire desktop2.view.opened when a panel-switch IPC re-confirms the a
       mockState.panelSwitchCallbacks.forEach((cb) => cb({ panel: 'new-install' }))
       await flushPromises()
       expect(events.filter((e) => e.actionName === 'desktop2.install.flow.opened')).toHaveLength(0)
+    })
+  })
+
+  describe('chooser host close consult', () => {
+    it('shows the Quit Desktop confirm on the chooser ✕ and clears when confirmed', async () => {
+      window.history.replaceState({}, '', '/?panel=chooser&firstUseCompleted=true')
+      mockModal.confirm.mockResolvedValueOnce(true)
+      mountPanel()
+      await flushPromises()
+
+      mockState.closeRequestCallbacks.forEach((cb) => cb({ requestId: 'req-1' }))
+      await flushPromises()
+
+      expect(mockModal.confirm).toHaveBeenCalledWith(
+        expect.objectContaining({ title: 'dashboard.confirmQuit.title' }),
+      )
+      const api = (window as unknown as { api: { respondCloseRequest: ReturnType<typeof vi.fn> } }).api
+      expect(api.respondCloseRequest).toHaveBeenCalledWith({ requestId: 'req-1', cleared: true })
+    })
+
+    it('keeps the window open when the user cancels the Quit Desktop confirm', async () => {
+      window.history.replaceState({}, '', '/?panel=chooser&firstUseCompleted=true')
+      mockModal.confirm.mockResolvedValueOnce(false)
+      mountPanel()
+      await flushPromises()
+
+      mockState.closeRequestCallbacks.forEach((cb) => cb({ requestId: 'req-2' }))
+      await flushPromises()
+
+      const api = (window as unknown as { api: { respondCloseRequest: ReturnType<typeof vi.fn> } }).api
+      expect(api.respondCloseRequest).toHaveBeenCalledWith({ requestId: 'req-2', cleared: false })
+    })
+
+    it('clears silently on install-backed host ✕ with no overlay (no Quit confirm)', async () => {
+      // Default URL already set in beforeEach: installationId=test-id
+      mountPanel()
+      await flushPromises()
+
+      mockState.closeRequestCallbacks.forEach((cb) => cb({ requestId: 'req-3' }))
+      await flushPromises()
+
+      expect(mockModal.confirm).not.toHaveBeenCalled()
+      const api = (window as unknown as { api: { respondCloseRequest: ReturnType<typeof vi.fn> } }).api
+      expect(api.respondCloseRequest).toHaveBeenCalledWith({ requestId: 'req-3', cleared: true })
     })
   })
 })
