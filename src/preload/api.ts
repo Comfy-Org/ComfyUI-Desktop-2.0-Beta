@@ -365,6 +365,20 @@ export function buildElectronApi(): ElectronApi {
         // ignore
       }
     },
+    telemetryBindUserId: (payload) => {
+      try {
+        ipcRenderer.send('telemetry:bindUserId', payload)
+      } catch {
+        // ignore
+      }
+    },
+    telemetryUnbindUserId: () => {
+      try {
+        ipcRenderer.send('telemetry:unbindUserId')
+      } catch {
+        // ignore
+      }
+    },
     onDatadogError: (callback) => {
       const handler = (_event: IpcRendererEvent, data: unknown) => callback(data as Parameters<typeof callback>[0])
       ipcRenderer.on('dd-error', handler)

@@ -44,13 +44,34 @@ interface CapturedCall {
 }
 const captured: CapturedCall[] = []
 
+interface AliasCall {
+  distinctId: string
+  alias: string
+}
+const aliases: AliasCall[] = []
+
+interface IdentifyCall {
+  distinctId: string
+  properties?: { $set?: Record<string, unknown> }
+}
+const identifies: IdentifyCall[] = []
+
 vi.mock('posthog-node', () => ({
   PostHog: class {
     capture(call: CapturedCall): void {
       captured.push(call)
     }
-    identify(): void {}
+    identify(call: IdentifyCall): void {
+      identifies.push(call)
+    }
     captureException(): void {}
+    alias(call: AliasCall): void {
+      aliases.push(call)
+    }
+    aliasImmediate(call: AliasCall): Promise<void> {
+      aliases.push(call)
+      return Promise.resolve()
+    }
     flush(): Promise<void> { return Promise.resolve() }
     shutdown(): Promise<void> { return Promise.resolve() }
     getFeatureFlag(): Promise<undefined> { return Promise.resolve(undefined) }
@@ -223,6 +244,70 @@ describe('telemetry consent state (3-state)', () => {
     // We don't have a mock that tracks captureException calls, but the call
     // should be a no-op (no throw).
     expect(() => telemetry.captureException(new Error('boom'), {})).not.toThrow()
+  })
+})
+
+describe('telemetry identity lifecycle (bindUserId / unbindUserId)', () => {
+  beforeEach(() => {
+    captured.length = 0
+    aliases.length = 0
+    identifies.length = 0
+    process.env['POSTHOG_API_KEY'] = 'test-key'
+    process.env['POSTHOG_ENABLED'] = '1'
+    telemetry._resetForTest()
+    telemetry.initTelemetry({ appVersion: '0.0.0', appEnv: 'test', isPackaged: false })
+    telemetry.setConsentState('granted')
+    telemetry.identify('installation-id-fake')
+  })
+
+  afterEach(() => {
+    delete process.env['POSTHOG_API_KEY']
+    delete process.env['POSTHOG_ENABLED']
+  })
+
+  it('bindUserId aliases the installation_id into the user_id and fires app:user_logged_in', () => {
+    aliases.length = 0
+    identifies.length = 0
+    captured.length = 0
+
+    telemetry.bindUserId('user-123', { email_domain: 'example.com' })
+
+    expect(aliases).toEqual([{ distinctId: 'user-123', alias: 'installation-id-fake' }])
+    const last = identifies.at(-1)!
+    expect(last.distinctId).toBe('user-123')
+    expect(last.properties?.$set).toMatchObject({ is_authenticated: true, email_domain: 'example.com' })
+    expect(captured.find((c) => c.event === 'app:user_logged_in')?.distinctId).toBe('user-123')
+  })
+
+  it('unbindUserId switches distinct_id back to the installation_id (NOT a reset)', () => {
+    telemetry.bindUserId('user-123')
+    aliases.length = 0
+    identifies.length = 0
+    captured.length = 0
+
+    telemetry.unbindUserId()
+
+    // No new alias call on logout (we're not merging anything).
+    expect(aliases).toHaveLength(0)
+    // is_authenticated flipped to false on the anonymous identity.
+    const last = identifies.at(-1)!
+    expect(last.distinctId).toBe('installation-id-fake')
+    expect(last.properties?.$set).toEqual({ is_authenticated: false })
+
+    // Subsequent events ride under the installation id again.
+    telemetry.capture('any.event', { foo: 1 })
+    expect(captured.at(-1)?.distinctId).toBe('installation-id-fake')
+  })
+
+  it('bindUserId is suppressed outside consent granted', () => {
+    telemetry.setConsentState('denied')
+    aliases.length = 0
+    identifies.length = 0
+    captured.length = 0
+    telemetry.bindUserId('user-456')
+    expect(aliases).toHaveLength(0)
+    expect(identifies).toHaveLength(0)
+    expect(captured).toHaveLength(0)
   })
 })
 

@@ -65,4 +65,30 @@ export function registerTelemetryHandlers(): void {
     // beyond caching props for deferred flush — acceptable.
     mainTelemetry.registerPersonProperties(props)
   })
+
+  /**
+   * Identity lifecycle (auth landing). The renderer's auth UI calls this
+   * when a login succeeds; main aliases the anonymous installation_id into
+   * the new user_id, sets `is_authenticated: true`, and fires
+   * `app:user_logged_in`. See `03-measurement-plan.md` §1.5.
+   *
+   * Renderer is still responsible for `datadogRum.setUser({ id })` on its
+   * own SDK side — Datadog is browser-only.
+   */
+  ipcMain.on('telemetry:bindUserId', (_event, payload: unknown) => {
+    if (!payload || typeof payload !== 'object') return
+    const userId = asString((payload as Record<string, unknown>).userId)
+    if (!userId) return
+    const properties = asProps((payload as Record<string, unknown>).properties)
+    mainTelemetry.bindUserId(userId, properties)
+  })
+
+  /**
+   * Logout: switch distinct_id back to the anonymous installation_id.
+   * NOT `posthog.reset()` (which would clobber installation_id and
+   * download_token). See `03-measurement-plan.md` §1.5 corrected.
+   */
+  ipcMain.on('telemetry:unbindUserId', () => {
+    mainTelemetry.unbindUserId()
+  })
 }

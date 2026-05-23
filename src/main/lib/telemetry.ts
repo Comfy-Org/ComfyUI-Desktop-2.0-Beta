@@ -70,6 +70,7 @@ export function _resetTelemetryRelayTargets(): void {
 export function _resetForTest(): void {
   client = null
   distinctId = null
+  installationDeviceId = null
   consentState = 'undecided'
   pendingSessionStart = null
   pendingIdentifyProperties = null
@@ -206,6 +207,19 @@ export function initTelemetry(opts: InitOptions): void {
 let pendingSessionStart: Record<string, TelemetryValue> | null = null
 let pendingIdentifyProperties: Record<string, TelemetryValue> | null = null
 
+/**
+ * The anonymous device identity bound at boot (typically `installation_id =
+ * SHA-256(machine_id + salt)`). Kept separately from `distinctId` so the
+ * logout path can switch the active distinct id back to this baseline
+ * without re-deriving anything.
+ *
+ * On logout we explicitly do NOT call `posthog.reset()` (which would
+ * generate a fresh anonymous id and clobber the deterministic
+ * `installation_id` plus the acquisition `download_token`). Instead, we
+ * switch `distinctId` back to this remembered baseline.
+ */
+let installationDeviceId: string | null = null
+
 function tryFlushDeferred(): void {
   if (!client || !distinctId) return
   if (consentState !== 'granted') return
@@ -235,9 +249,82 @@ export function identify(
   properties: Record<string, TelemetryValue> = {},
 ): void {
   distinctId = id
+  installationDeviceId = id
   pendingIdentifyProperties = properties
   if (!client) return
   tryFlushDeferred()
+}
+
+/**
+ * Bind a `user_id` after a successful login.
+ *
+ * Implementation of `03-measurement-plan.md` §1.5 identity lifecycle.
+ * Aliases the current anonymous `installation_id` into the new `user_id`
+ * (PostHog merges histories), switches the active `distinct_id` to the
+ * user id, sets `is_authenticated: true` as a person property, and emits
+ * the canonical `app:user_logged_in` event.
+ *
+ * Suppressed unless consent is `'granted'` — auth signals are
+ * identifying data and must not ship pre-consent.
+ *
+ * Caller responsibility (renderer): also call
+ * `datadogRum.setUser({ id: userId })` so RUM tags subsequent events
+ * with the user identity. (Datadog is browser-only; main cannot do
+ * this from here.)
+ */
+export function bindUserId(
+  userId: string,
+  properties: Record<string, TelemetryValue> = {},
+): void {
+  if (!client || !installationDeviceId) return
+  if (consentState !== 'granted') return
+  const anonymousId = installationDeviceId
+  distinctId = userId
+  try {
+    client.alias({ distinctId: userId, alias: anonymousId })
+  } catch {
+    // ignore
+  }
+  try {
+    client.identify({
+      distinctId: userId,
+      properties: { $set: { ...properties, is_authenticated: true } },
+    })
+  } catch {
+    // ignore
+  }
+  capture('app:user_logged_in', { user_id: userId })
+}
+
+/**
+ * Switch back to the anonymous `installation_id` after a logout.
+ *
+ * **Not** `posthog.reset()`: that would generate a brand-new anonymous
+ * device id and clobber the deterministic `installation_id` plus the
+ * acquisition `download_token`. Instead, we restore `distinct_id` to
+ * the remembered baseline so subsequent events ride under the device
+ * identity (not the prior user).
+ *
+ * Person-property `is_authenticated` is flipped back to `false` on the
+ * anonymous identity so cohort filters reading it stay consistent.
+ *
+ * Caller responsibility (renderer): also clear Datadog
+ * (`datadogRum.setUser({})` / `clearUser`) so RUM stops tagging events
+ * with the prior user.
+ */
+export function unbindUserId(): void {
+  if (!installationDeviceId) return
+  distinctId = installationDeviceId
+  if (client && consentState === 'granted') {
+    try {
+      client.identify({
+        distinctId: installationDeviceId,
+        properties: { $set: { is_authenticated: false } },
+      })
+    } catch {
+      // ignore
+    }
+  }
 }
 
 export function capture(event: string, properties: TelemetryContext = {}): void {
