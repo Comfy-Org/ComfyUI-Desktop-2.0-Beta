@@ -12,6 +12,7 @@ import {
 } from './shared'
 import type { ComfyVersion, ComfyArgDef, InstallationRecord } from './shared'
 import { restoreSnapshotIntoInstallation } from '../standaloneMigration'
+import * as mainTelemetry from '../telemetry'
 
 /**
  * Apply the migration-source filter + per-install source enrichment
@@ -174,6 +175,15 @@ export function registerInstallationHandlers(): void {
       }
     }
 
+    // Capture the prior comfyVersion BEFORE the install runs so we can fire
+    // desktop2.comfyui.update.applied at the end. An install on a record that
+    // already has a comfyVersion is a *version update*, not a fresh install
+    // (per 04 cross-cutting Add #5). Fresh installs have no prior version
+    // populated; this handler runs the same source.install() for both, so
+    // pre-vs-post comfyVersion is the cleanest signal.
+    const priorComfyVersion = inst.comfyVersion as ComfyVersion | undefined
+    const isComfyUpdate = priorComfyVersion != null
+
     if (source.install) {
       fs.mkdirSync(inst.installPath, { recursive: true })
       fs.writeFileSync(path.join(inst.installPath, MARKER_FILE), installationId)
@@ -221,6 +231,14 @@ export function registerInstallationHandlers(): void {
       } catch (err) {
         _operationAborts.delete(installationId)
         if (abort.signal.aborted) {
+          if (isComfyUpdate) {
+            mainTelemetry.emit('desktop2.comfyui.update.applied', {
+              installation_id: installationId,
+              from_version: formatComfyVersion(priorComfyVersion, 'short'),
+              to_version: null,
+              result: 'cancelled',
+            })
+          }
           let cleaned = !fs.existsSync(inst.installPath)
           if (!cleaned) {
             try {
@@ -259,11 +277,31 @@ export function registerInstallationHandlers(): void {
           return { ok: true, navigate: 'list' }
         }
         await installations.update(installationId, { status: 'failed' })
+        if (isComfyUpdate) {
+          mainTelemetry.emit('desktop2.comfyui.update.applied', {
+            installation_id: installationId,
+            from_version: formatComfyVersion(priorComfyVersion, 'short'),
+            to_version: null,
+            result: 'error',
+            error_bucket: mainTelemetry.bucketError(err),
+            error_message: (err as Error).message.slice(0, 500),
+          })
+        }
         return { ok: false, message: (err as Error).message }
       }
       _operationAborts.delete(installationId)
       await installations.update(installationId, { status: 'installed' })
       await syncOemSeedBestEffort()
+      if (isComfyUpdate) {
+        const freshInst = await installations.get(installationId)
+        const newComfyVersion = freshInst?.comfyVersion as ComfyVersion | undefined
+        mainTelemetry.emit('desktop2.comfyui.update.applied', {
+          installation_id: installationId,
+          from_version: formatComfyVersion(priorComfyVersion, 'short'),
+          to_version: newComfyVersion ? formatComfyVersion(newComfyVersion, 'short') : null,
+          result: 'success',
+        })
+      }
       return { ok: true }
     }
 
