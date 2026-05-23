@@ -1052,6 +1052,15 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
             'The current instance will be stopped and replaced in this window. Any unsaved work in the workflow will be lost.',
         })
         if (result.response !== 0) return
+        // Multi-instance validation signal (PRD goal — see
+        // docs/telemetry/04-tracking-plan.md row #1). Fired once per
+        // user-confirmed instance swap from the title-bar picker; other
+        // paths (fresh chooser pick, new-window launch) are NOT swaps.
+        mainTelemetry.emit('desktop2.instance.switched', {
+          from_installation_id: parentEntry.installationId,
+          to_installation_id: installationId,
+          method: 'picker',
+        })
         // `entry.detachInstall()` runs the full symmetric undo of
         // `attachInstall`: stops the running session, releases the
         // comfyView URL, re-navigates the title-bar back to chooser

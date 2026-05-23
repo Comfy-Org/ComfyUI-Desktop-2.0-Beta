@@ -17,9 +17,27 @@ export const useDownloadStore = defineStore('downloads', () => {
    *  `init()` guard has something to check. */
   const unsubs: Unsubscribe[] = []
 
-  function upsert(progress: ModelDownloadProgress): void {
+  function upsert(progress: ModelDownloadProgress, opts: { isSeed?: boolean } = {}): void {
     const previous = downloads.get(progress.url)
     downloads.set(progress.url, { ...progress })
+
+    // `isSeed` suppresses telemetry on the initial replay from
+    // `listModelDownloads` — those downloads already fired their start /
+    // result events in the session they actually happened in. Replaying
+    // them here would double-count.
+    if (opts.isSeed) return
+
+    // Phase 2.2 #4 — emit `model_download.started` on the FIRST live
+    // sighting of a non-terminal download. Today only `.result` exists,
+    // so attempt-vs-success rate is unknowable.
+    if (!previous && !isTerminalModelDownloadStatus(progress.status)) {
+      emitTelemetryAction('desktop2.model_download.started', {
+        directory_bucket: toModelDirectoryBucket(progress.directory),
+        file_ext: toFileExtension(progress.filename),
+        size_bucket: toSizeBucket(progress.totalBytes),
+      })
+    }
+
     if (
       isTerminalModelDownloadStatus(progress.status)
       && (!previous || previous.status !== progress.status)
@@ -39,8 +57,10 @@ export const useDownloadStore = defineStore('downloads', () => {
     // Seed with any in-flight + recently-finished downloads. Backed by
     // main's `getAllDownloads()` so the Settings tab + popup history
     // are non-empty on first paint after a window opens mid-flow.
+    // `isSeed: true` suppresses telemetry (start/result events fired
+    // in the original session, not this one).
     window.api.listModelDownloads().then((list) => {
-      for (const p of list) upsert(p)
+      for (const p of list) upsert(p, { isSeed: true })
     })
 
     // Subscribe to live progress + main-driven removals. Single-source

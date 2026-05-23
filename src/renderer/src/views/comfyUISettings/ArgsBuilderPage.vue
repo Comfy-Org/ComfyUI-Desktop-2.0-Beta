@@ -6,6 +6,7 @@ import BaseInput from '../../components/ui/BaseInput.vue'
 import BaseSelect, { type BaseSelectOption } from '../../components/ui/BaseSelect.vue'
 import type { ComfyArgDef } from '../../types/ipc'
 import { parseArgs, serialize, tokenize } from '../../lib/argsParser'
+import { emitTelemetryAction } from '../../lib/telemetry'
 import { scoreName } from '../../utils/fuzzyMatch'
 
 /**
@@ -79,7 +80,22 @@ async function fetchSchema(): Promise<void> {
   }
 }
 
+// ArgsBuilder usage validation — Layer 2 row #9 in
+// docs/telemetry/04-tracking-plan.md. The previous one-coarse-
+// settings.changed event hid ArgsBuilder usage entirely; this event
+// makes "did anyone edit launch args" answerable.
+function emitArgsChanged(argKey: string, valueKind: ComfyArgDef['type']): void {
+  emitTelemetryAction('desktop2.args.changed', {
+    installation_id: props.installationId,
+    arg_key: argKey,
+    value_kind: valueKind,
+  })
+}
+
 onMounted(() => {
+  emitTelemetryAction('desktop2.args.builder.opened', {
+    installation_id: props.installationId,
+  })
   void fetchSchema()
 })
 
@@ -121,6 +137,7 @@ function toggleBoolean(def: ComfyArgDef): void {
     next.set(def.name, '')
   }
   commit(next)
+  emitArgsChanged(def.name, def.type)
 }
 
 function toggleValue(def: ComfyArgDef): void {
@@ -138,12 +155,14 @@ function toggleValue(def: ComfyArgDef): void {
     next.set(def.name, '')
   }
   commit(next)
+  emitArgsChanged(def.name, def.type)
 }
 
 function setValue(def: ComfyArgDef, value: string): void {
   const next = new Map(parsed.value.known)
   next.set(def.name, value)
   commit(next)
+  emitArgsChanged(def.name, def.type)
 }
 
 function selectExclusive(group: string, name: string): void {
@@ -155,6 +174,8 @@ function selectExclusive(group: string, name: string): void {
   }
   next.set(name, '')
   commit(next)
+  const chosen = schema.value.find((a) => a.name === name)
+  if (chosen) emitArgsChanged(chosen.name, chosen.type)
 }
 
 // Clearing an exclusive group is the affordance the native-radio version
