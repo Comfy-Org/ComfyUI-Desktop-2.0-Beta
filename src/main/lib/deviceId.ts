@@ -35,8 +35,7 @@ import { configDir } from './paths'
  * rotates every user's id, so swap only as a deliberate one-shot
  * coordinated across surfaces.
  *
- * Current value is a placeholder pending Robin's confirmation. See
- * `agent-office/.../docs/telemetry/07-decision-log.md` D-001.
+ * Current value is a placeholder pending cross-surface coordination.
  */
 const INSTALLATION_ID_SALT = 'comfy-installation-id-v1'
 

@@ -5,6 +5,14 @@ import path from 'path'
 
 let testUserData = ''
 
+// Per-test temp dir. `configDir()` resolves via paths.ts which on Linux
+// bypasses Electron and reads XDG_CONFIG_HOME directly — that broke CI
+// when we only mocked `electron.app.getPath`. Mock paths.ts directly so
+// the test path is consistent across platforms.
+vi.mock('./paths', () => ({
+  configDir: () => testUserData,
+}))
+
 vi.mock('electron', () => ({
   app: {
     getPath: () => testUserData,

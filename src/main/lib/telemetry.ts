@@ -3,14 +3,14 @@
  *
  * Co-exists with the renderer-side Datadog RUM + PostHog JS pipelines.
  * Responsibilities:
- *   - PostHog Node SDK lifecycle (init, identify, shutdown flush on quit)
- *   - Capture of events that occur outside the renderer's reach:
- *       * app lifecycle (start/quit) with uptime
- *       * pre-install / installation pipeline sub-steps
- *       * migration pipeline sub-steps
- *       * execution events parsed from ComfyUI's stdout
- *   - A `trackedStep()` helper mirroring legacy desktop's `@trackEvent` decorator
- *     pattern (`<step>.start` / `<step>.end` / `<step>.error`)
+ * - PostHog Node SDK lifecycle (init, identify, shutdown flush on quit)
+ * - Capture of events that occur outside the renderer's reach:
+ * * app lifecycle (start/quit) with uptime
+ * * pre-install / installation pipeline sub-steps
+ * * migration pipeline sub-steps
+ * * execution events parsed from ComfyUI's stdout
+ * - A `trackedStep()` helper mirroring legacy desktop's `@trackEvent` decorator
+ * pattern (`<step>.start` / `<step>.end` / `<step>.error`)
  *
  * The renderer continues to be the primary telemetry funnel for UI events;
  * this module exists for the things the renderer cannot see.
@@ -54,17 +54,17 @@ export type TelemetryContext = Record<string, TelemetryValue | TelemetryValue[]>
 const _telemetryRelayTargets = new Set<Electron.WebContents>()
 
 export function registerTelemetryRelayTarget(wc: Electron.WebContents): void {
-  _telemetryRelayTargets.add(wc)
-  wc.once('destroyed', () => _telemetryRelayTargets.delete(wc))
+ _telemetryRelayTargets.add(wc)
+ wc.once('destroyed', () => _telemetryRelayTargets.delete(wc))
 }
 
 export function unregisterTelemetryRelayTarget(wc: Electron.WebContents): void {
-  _telemetryRelayTargets.delete(wc)
+ _telemetryRelayTargets.delete(wc)
 }
 
 /** @internal — exposed for tests. */
 export function _resetTelemetryRelayTargets(): void {
-  _telemetryRelayTargets.clear()
+ _telemetryRelayTargets.clear()
 }
 
 /**
@@ -73,33 +73,33 @@ export function _resetTelemetryRelayTargets(): void {
  * close an in-flight PostHog client — tests bring their own mocked one.
  */
 export function _resetForTest(): void {
-  client = null
-  distinctId = null
-  installationDeviceId = null
-  consentState = 'undecided'
-  pendingSessionStart = null
-  pendingIdentifyProperties = null
-  initialized = false
-  drainingForQuit = false
+ client = null
+ distinctId = null
+ installationDeviceId = null
+ consentState = 'undecided'
+ pendingSessionStart = null
+ pendingIdentifyProperties = null
+ initialized = false
+ drainingForQuit = false
 }
 
 /** @internal — exposed for tests. */
 export function _telemetryRelayTargetCount(): number {
-  return _telemetryRelayTargets.size
+ return _telemetryRelayTargets.size
 }
 
 interface PostHogConfig {
-  apiKey: string
-  host: string
-  enabled: boolean
+ apiKey: string
+ host: string
+ enabled: boolean
 }
 
 
 function readPostHogConfig(): PostHogConfig {
-  const apiKey = (process.env['POSTHOG_API_KEY'] || DEFAULT_POSTHOG_API_KEY).trim()
-  const host = (process.env['POSTHOG_HOST'] || DEFAULT_POSTHOG_HOST).trim()
-  const enabled = !isFlagDisabled(process.env['POSTHOG_ENABLED']) && apiKey.length > 0
-  return { apiKey, host, enabled }
+ const apiKey = (process.env['POSTHOG_API_KEY'] || DEFAULT_POSTHOG_API_KEY).trim()
+ const host = (process.env['POSTHOG_HOST'] || DEFAULT_POSTHOG_HOST).trim()
+ const enabled = !isFlagDisabled(process.env['POSTHOG_ENABLED']) && apiKey.length > 0
+ return { apiKey, host, enabled }
 }
 
 let client: PostHog | null = null
@@ -110,13 +110,13 @@ let initialized = false
 /**
  * Three-state consent.
  *
- * - `'granted'`   — user opted in. Everything ships.
- * - `'denied'`    — user opted out. Nothing ships.
+ * - `'granted'` — user opted in. Everything ships.
+ * - `'denied'` — user opted out. Nothing ships.
  * - `'undecided'` — user has not chosen yet (fresh install OR a Desktop-1
- *                   migrator whose `telemetryEnabled` setting was never set).
- *                   Only events in `PRE_CONSENT_ALLOWED_EVENTS` ship; everything
- *                   else is suppressed until the user makes a choice. Mirrors
- *                   the renderer's pre-consent gate in `rendererBootstrap.ts`.
+ * migrator whose `telemetryEnabled` setting was never set).
+ * Only events in `PRE_CONSENT_ALLOWED_EVENTS` ship; everything
+ * else is suppressed until the user makes a choice. Mirrors
+ * the renderer's pre-consent gate in `rendererBootstrap.ts`.
  *
  * Default at module load is `'undecided'`: if `setConsentState` is never
  * called (test paths, mis-wired boot), we fail closed.
@@ -126,13 +126,13 @@ export type ConsentState = 'granted' | 'denied' | 'undecided'
 let consentState: ConsentState = 'undecided'
 
 const PRE_CONSENT_ALLOWED_EVENTS: ReadonlySet<string> = new Set([
-  'desktop2.first_use.consent_decision',
+ 'desktop2.first_use.consent_decision',
 ])
 
 function isAllowedToFire(event: string): boolean {
-  if (consentState === 'granted') return true
-  if (consentState === 'denied') return false
-  return PRE_CONSENT_ALLOWED_EVENTS.has(event)
+ if (consentState === 'granted') return true
+ if (consentState === 'denied') return false
+ return PRE_CONSENT_ALLOWED_EVENTS.has(event)
 }
 
 /**
@@ -141,18 +141,18 @@ function isAllowedToFire(event: string): boolean {
  * as state transitions to `'granted'`.
  */
 export function setConsentState(state: ConsentState): void {
-  const previous = consentState
-  consentState = state
-  if (state !== 'granted') {
-    // Best-effort flush so already-queued events still go out before we
-    // start suppressing.
-    void client?.flush().catch(() => {})
-    return
-  }
-  // Transitioned to granted. Ship anything we held back.
-  if (previous !== 'granted') {
-    tryFlushDeferred()
-  }
+ const previous = consentState
+ consentState = state
+ if (state !== 'granted') {
+ // Best-effort flush so already-queued events still go out before we
+ // start suppressing.
+ void client?.flush().catch(() => {})
+ return
+ }
+ // Transitioned to granted. Ship anything we held back.
+ if (previous !== 'granted') {
+ tryFlushDeferred()
+ }
 }
 
 /**
@@ -162,17 +162,17 @@ export function setConsentState(state: ConsentState): void {
  * explicitly via `setConsentState` for the first-use case.
  */
 export function setConsent(enabled: boolean): void {
-  setConsentState(enabled ? 'granted' : 'denied')
+ setConsentState(enabled ? 'granted' : 'denied')
 }
 
 export function isInitialized(): boolean {
-  return initialized && client !== null
+ return initialized && client !== null
 }
 
 export interface InitOptions {
-  appVersion: string
-  appEnv: string
-  isPackaged: boolean
+ appVersion: string
+ appEnv: string
+ isPackaged: boolean
 }
 
 /**
@@ -184,29 +184,29 @@ export interface InitOptions {
  * the session-start event once the device id is bound.
  */
 export function initTelemetry(opts: InitOptions): void {
-  if (initialized) return
-  initialized = true
-  bootstrapTimeMs = Date.now()
+ if (initialized) return
+ initialized = true
+ bootstrapTimeMs = Date.now()
 
-  const cfg = readPostHogConfig()
-  if (!cfg.enabled) return
+ const cfg = readPostHogConfig()
+ if (!cfg.enabled) return
 
-  try {
-    client = new PostHog(cfg.apiKey, {
-      host: cfg.host,
-      flushAt: 20,
-      flushInterval: 10_000,
-    })
-  } catch {
-    client = null
-  }
+ try {
+ client = new PostHog(cfg.apiKey, {
+ host: cfg.host,
+ flushAt: 20,
+ flushInterval: 10_000,
+ })
+ } catch {
+ client = null
+ }
 
-  // Stash session-start parameters until identify() can attribute them.
-  pendingSessionStart = {
-    app_env: opts.appEnv,
-    app_version: opts.appVersion,
-    is_packaged: opts.isPackaged,
-  }
+ // Stash session-start parameters until identify() can attribute them.
+ pendingSessionStart = {
+ app_env: opts.appEnv,
+ app_version: opts.appVersion,
+ is_packaged: opts.isPackaged,
+ }
 }
 
 let pendingSessionStart: Record<string, TelemetryValue> | null = null
@@ -226,20 +226,20 @@ let pendingIdentifyProperties: Record<string, TelemetryValue> | null = null
 let installationDeviceId: string | null = null
 
 function tryFlushDeferred(): void {
-  if (!client || !distinctId) return
-  if (consentState !== 'granted') return
-  if (pendingIdentifyProperties) {
-    try {
-      client.identify({ distinctId, properties: { $set: pendingIdentifyProperties } })
-    } catch {
-      // ignore
-    }
-    pendingIdentifyProperties = null
-  }
-  if (pendingSessionStart) {
-    capture('desktop2.session.started', pendingSessionStart)
-    pendingSessionStart = null
-  }
+ if (!client || !distinctId) return
+ if (consentState !== 'granted') return
+ if (pendingIdentifyProperties) {
+ try {
+ client.identify({ distinctId, properties: { $set: pendingIdentifyProperties } })
+ } catch {
+ // ignore
+ }
+ pendingIdentifyProperties = null
+ }
+ if (pendingSessionStart) {
+ capture('desktop2.session.started', pendingSessionStart)
+ pendingSessionStart = null
+ }
 }
 
 /**
@@ -250,20 +250,20 @@ function tryFlushDeferred(): void {
  * calls are made until `setConsentState('granted')` is called.
  */
 export function identify(
-  id: string,
-  properties: Record<string, TelemetryValue> = {},
+ id: string,
+ properties: Record<string, TelemetryValue> = {},
 ): void {
-  distinctId = id
-  installationDeviceId = id
-  pendingIdentifyProperties = properties
-  if (!client) return
-  tryFlushDeferred()
+ distinctId = id
+ installationDeviceId = id
+ pendingIdentifyProperties = properties
+ if (!client) return
+ tryFlushDeferred()
 }
 
 /**
  * Bind a `user_id` after a successful login.
  *
- * Implementation of `03-measurement-plan.md` §1.5 identity lifecycle.
+ * identity lifecycle.
  * Aliases the current anonymous `installation_id` into the new `user_id`
  * (PostHog merges histories), switches the active `distinct_id` to the
  * user id, sets `is_authenticated: true` as a person property, and emits
@@ -278,27 +278,27 @@ export function identify(
  * this from here.)
  */
 export function bindUserId(
-  userId: string,
-  properties: Record<string, TelemetryValue> = {},
+ userId: string,
+ properties: Record<string, TelemetryValue> = {},
 ): void {
-  if (!client || !installationDeviceId) return
-  if (consentState !== 'granted') return
-  const anonymousId = installationDeviceId
-  distinctId = userId
-  try {
-    client.alias({ distinctId: userId, alias: anonymousId })
-  } catch {
-    // ignore
-  }
-  try {
-    client.identify({
-      distinctId: userId,
-      properties: { $set: { ...properties, is_authenticated: true } },
-    })
-  } catch {
-    // ignore
-  }
-  capture('app:user_logged_in', { user_id: userId })
+ if (!client || !installationDeviceId) return
+ if (consentState !== 'granted') return
+ const anonymousId = installationDeviceId
+ distinctId = userId
+ try {
+ client.alias({ distinctId: userId, alias: anonymousId })
+ } catch {
+ // ignore
+ }
+ try {
+ client.identify({
+ distinctId: userId,
+ properties: { $set: { ...properties, is_authenticated: true } },
+ })
+ } catch {
+ // ignore
+ }
+ capture('app:user_logged_in', { user_id: userId })
 }
 
 /**
@@ -318,28 +318,28 @@ export function bindUserId(
  * with the prior user.
  */
 export function unbindUserId(): void {
-  if (!installationDeviceId) return
-  distinctId = installationDeviceId
-  if (client && consentState === 'granted') {
-    try {
-      client.identify({
-        distinctId: installationDeviceId,
-        properties: { $set: { is_authenticated: false } },
-      })
-    } catch {
-      // ignore
-    }
-  }
+ if (!installationDeviceId) return
+ distinctId = installationDeviceId
+ if (client && consentState === 'granted') {
+ try {
+ client.identify({
+ distinctId: installationDeviceId,
+ properties: { $set: { is_authenticated: false } },
+ })
+ } catch {
+ // ignore
+ }
+ }
 }
 
 export function capture(event: string, properties: TelemetryContext = {}): void {
-  if (!client || !distinctId) return
-  if (!isAllowedToFire(event)) return
-  try {
-    client.capture({ distinctId, event, properties })
-  } catch {
-    // ignore – telemetry must never break the app
-  }
+ if (!client || !distinctId) return
+ if (!isAllowedToFire(event)) return
+ try {
+ client.capture({ distinctId, event, properties })
+ } catch {
+ // ignore – telemetry must never break the app
+ }
 }
 
 /**
@@ -354,27 +354,27 @@ export function capture(event: string, properties: TelemetryContext = {}): void 
  * Repeated calls in the queued state merge (latest write wins per key).
  */
 export function registerPersonProperties(properties: Record<string, TelemetryValue>): void {
-  if (!client) return
-  if (consentState !== 'granted' || !distinctId) {
-    pendingIdentifyProperties = { ...(pendingIdentifyProperties || {}), ...properties }
-    return
-  }
-  try {
-    client.identify({ distinctId, properties: { $set: properties } })
-  } catch {
-    // ignore – telemetry must never break the app
-  }
+ if (!client) return
+ if (consentState !== 'granted' || !distinctId) {
+ pendingIdentifyProperties = { ...(pendingIdentifyProperties || {}), ...properties }
+ return
+ }
+ try {
+ client.identify({ distinctId, properties: { $set: properties } })
+ } catch {
+ // ignore – telemetry must never break the app
+ }
 }
 
 export function captureException(error: unknown, properties: TelemetryContext = {}): void {
-  if (!client || !distinctId) return
-  // Exceptions are reliability data; suppress them outside `'granted'`.
-  if (consentState !== 'granted') return
-  try {
-    client.captureException(error, distinctId, properties)
-  } catch {
-    // ignore
-  }
+ if (!client || !distinctId) return
+ // Exceptions are reliability data; suppress them outside `'granted'`.
+ if (consentState !== 'granted') return
+ try {
+ client.captureException(error, distinctId, properties)
+ } catch {
+ // ignore
+ }
 }
 
 /**
@@ -390,13 +390,13 @@ export function captureException(error: unknown, properties: TelemetryContext = 
  * is `'denied'` or `'undecided'`.
  */
 export async function aliasImmediate(distinctId: string, alias: string): Promise<void> {
-  if (!client) return
-  if (consentState !== 'granted') return
-  try {
-    await client.aliasImmediate({ distinctId, alias })
-  } catch {
-    // ignore – telemetry must never break the app
-  }
+ if (!client) return
+ if (consentState !== 'granted') return
+ try {
+ await client.aliasImmediate({ distinctId, alias })
+ } catch {
+ // ignore – telemetry must never break the app
+ }
 }
 
 /**
@@ -413,21 +413,21 @@ export async function aliasImmediate(distinctId: string, alias: string): Promise
  * single-flag). See `src/main/lib/experiments.ts` for the cache wrapper.
  */
 export async function loadFeatureFlagsImmediate(
-  distinctId: string,
-  personProperties: Record<string, string>,
-  timeoutMs: number,
+ distinctId: string,
+ personProperties: Record<string, string>,
+ timeoutMs: number,
 ): Promise<Record<string, FeatureFlagValue>> {
-  if (!client) return {}
-  if (consentState !== 'granted') return {}
-  try {
-    const flagsPromise = client.getAllFlags(distinctId, { personProperties })
-    const timeoutPromise = new Promise<Record<string, FeatureFlagValue>>((resolve) =>
-      setTimeout(() => resolve({}), timeoutMs),
-    )
-    return await Promise.race([flagsPromise, timeoutPromise])
-  } catch {
-    return {}
-  }
+ if (!client) return {}
+ if (consentState !== 'granted') return {}
+ try {
+ const flagsPromise = client.getAllFlags(distinctId, { personProperties })
+ const timeoutPromise = new Promise<Record<string, FeatureFlagValue>>((resolve) =>
+ setTimeout(() => resolve({}), timeoutMs),
+ )
+ return await Promise.race([flagsPromise, timeoutPromise])
+ } catch {
+ return {}
+ }
 }
 
 /**
@@ -436,31 +436,31 @@ export async function loadFeatureFlagsImmediate(
  * continue normal control flow.
  */
 export async function trackedStep<T>(
-  step: string,
-  context: TelemetryContext,
-  fn: () => Promise<T>,
+ step: string,
+ context: TelemetryContext,
+ fn: () => Promise<T>,
 ): Promise<T> {
-  capture(`${step}.start`, context)
-  const t0 = Date.now()
-  try {
-    const result = await fn()
-    capture(`${step}.end`, { ...context, duration_ms: Date.now() - t0 })
-    return result
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    capture(`${step}.error`, {
-      ...context,
-      duration_ms: Date.now() - t0,
-      error_bucket: bucketError(message),
-      error_message: message.slice(0, 500),
-    })
-    throw err
-  }
+ capture(`${step}.start`, context)
+ const t0 = Date.now()
+ try {
+ const result = await fn()
+ capture(`${step}.end`, { ...context, duration_ms: Date.now() - t0 })
+ return result
+ } catch (err) {
+ const message = err instanceof Error ? err.message : String(err)
+ capture(`${step}.error`, {
+ ...context,
+ duration_ms: Date.now() - t0,
+ error_bucket: bucketError(message),
+ error_message: message.slice(0, 500),
+ })
+ throw err
+ }
 }
 
 /**
  * Coarse error categorisation. Re-exported from `src/shared/errorBucket.ts`
- * so main and renderer classify identically (Phase 2.3 dedup).
+ * so main and renderer classify identically (dedup).
  */
 export const bucketError = sharedBucketError
 
@@ -479,55 +479,55 @@ export const bucketError = sharedBucketError
  * host window opens.
  */
 export function forwardToRenderer(event: string, context: TelemetryContext = {}): void {
-  if (!isAllowedToFire(event)) return
-  // Phase 1.4 provider split: only mirror events on the Datadog allow-list.
-  // Product / funnel events are PostHog-only; main already captured them via
-  // `capture()` and forwarding them to the renderer for Datadog mirror is
-  // pure overhead.
-  if (!isDatadogMirroredEvent(event)) return
-  const payload = { event, context, mainAlreadyCaptured: true }
-  for (const wc of _telemetryRelayTargets) {
-    if (!wc.isDestroyed()) {
-      try {
-        wc.send('telemetry-action-from-main', payload)
-      } catch {
-        // ignore – telemetry must never break the app
-      }
-    }
-  }
+ if (!isAllowedToFire(event)) return
+ // only mirror events on the Datadog allow-list.
+ // Product / funnel events are PostHog-only; main already captured them via
+ // `capture()` and forwarding them to the renderer for Datadog mirror is
+ // pure overhead.
+ if (!isDatadogMirroredEvent(event)) return
+ const payload = { event, context, mainAlreadyCaptured: true }
+ for (const wc of _telemetryRelayTargets) {
+ if (!wc.isDestroyed()) {
+ try {
+ wc.send('telemetry-action-from-main', payload)
+ } catch {
+ // ignore – telemetry must never break the app
+ }
+ }
+ }
 }
 
 /**
  * Capture an event and forward it to the renderer in one call.
  */
 export function emit(event: string, context: TelemetryContext = {}): void {
-  capture(event, context)
-  forwardToRenderer(event, context)
+ capture(event, context)
+ forwardToRenderer(event, context)
 }
 
 /**
  * Drain queued events. Safe to await during `app.before-quit`.
  */
 export async function shutdown(reason: string): Promise<void> {
-  if (!client) return
-  const uptimeMs = Date.now() - bootstrapTimeMs
-  try {
-    capture('desktop2.session.ended', {
-      reason,
-      uptime_ms: uptimeMs,
-      uptime_seconds: Math.round(uptimeMs / 1000),
-    })
-  } catch {
-    // ignore
-  }
-  try {
-    await client.shutdown()
-  } catch {
-    // ignore
-  } finally {
-    client = null
-    initialized = false
-  }
+ if (!client) return
+ const uptimeMs = Date.now() - bootstrapTimeMs
+ try {
+ capture('desktop2.session.ended', {
+ reason,
+ uptime_ms: uptimeMs,
+ uptime_seconds: Math.round(uptimeMs / 1000),
+ })
+ } catch {
+ // ignore
+ }
+ try {
+ await client.shutdown()
+ } catch {
+ // ignore
+ } finally {
+ client = null
+ initialized = false
+ }
 }
 
 let beforeQuitHooked = false
@@ -550,19 +550,19 @@ const SHUTDOWN_DRAIN_TIMEOUT_MS = 1500
  * Safe to call multiple times – the hook only attaches once.
  */
 export function installAppHooks(): void {
-  if (beforeQuitHooked) return
-  beforeQuitHooked = true
+ if (beforeQuitHooked) return
+ beforeQuitHooked = true
 
-  app.on('before-quit', (event) => {
-    if (drainingForQuit || !client) return
-    drainingForQuit = true
-    event.preventDefault()
-    const drainPromise = shutdown('quit').catch(() => {})
-    const timeoutPromise = new Promise<void>((resolve) =>
-      setTimeout(resolve, SHUTDOWN_DRAIN_TIMEOUT_MS),
-    )
-    void Promise.race([drainPromise, timeoutPromise]).finally(() => {
-      app.exit(0)
-    })
-  })
+ app.on('before-quit', (event) => {
+ if (drainingForQuit || !client) return
+ drainingForQuit = true
+ event.preventDefault()
+ const drainPromise = shutdown('quit').catch(() => {})
+ const timeoutPromise = new Promise<void>((resolve) =>
+ setTimeout(resolve, SHUTDOWN_DRAIN_TIMEOUT_MS),
+ )
+ void Promise.race([drainPromise, timeoutPromise]).finally(() => {
+ app.exit(0)
+ })
+ })
 }

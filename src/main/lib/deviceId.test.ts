@@ -4,8 +4,15 @@ import os from 'os'
 import path from 'path'
 import { createHash } from 'crypto'
 
-// Mock electron `app.getPath('userData')` to a per-test temp dir we control.
+// Per-test temp dir. `configDir()` resolves via paths.ts which on Linux
+// bypasses Electron and reads XDG_CONFIG_HOME directly — that broke CI
+// when we only mocked `electron.app.getPath`. Mock paths.ts directly so
+// the test path is consistent across platforms.
 let testUserData = ''
+
+vi.mock('./paths', () => ({
+  configDir: () => testUserData,
+}))
 
 vi.mock('electron', () => ({
   app: {
