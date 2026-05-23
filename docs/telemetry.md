@@ -1,5 +1,18 @@
 # Telemetry
 
+> ⚠️ **This document is drifted from the code.** The authoritative
+> design and event spec live in
+> [`agent-office/.worktrees/desktop-telemetry/docs/telemetry/`](https://github.com/Comfy-Org/agent-office/tree/main/docs/telemetry).
+> Start with the README there. The numbered docs (`01`-`07`) cover the
+> audit, product surface, measurement plan, tracking plan, remediation,
+> follow-up, and autonomous-decision log.
+>
+> The architecture below is broadly accurate but specific event names,
+> properties, and file paths are stale. The catalogue, in particular,
+> is incomplete and contains events that no longer exist. Do not rely
+> on this doc until the in-flight telemetry rework lands in production
+> and a follow-up pass copies the locked specs back into this repo.
+
 ComfyUI Desktop 2 emits telemetry through **two providers** that share a
 single event bus:
 
