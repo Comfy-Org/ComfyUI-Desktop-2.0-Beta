@@ -249,12 +249,12 @@ describe('telemetry.forwardToRenderer + telemetry-relay registry', () => {
     telemetry.registerTelemetryRelayTarget(a.wc)
     telemetry.registerTelemetryRelayTarget(b.wc)
 
-    telemetry.forwardToRenderer('foo.event', { foo: 'bar' })
+    telemetry.forwardToRenderer('desktop2.execution.error', { foo: 'bar' })
 
     expect(a.sends).toHaveLength(1)
     expect(a.sends[0]).toMatchObject({
       channel: 'telemetry-action-from-main',
-      data: { event: 'foo.event', context: { foo: 'bar' }, mainAlreadyCaptured: true },
+      data: { event: 'desktop2.execution.error', context: { foo: 'bar' }, mainAlreadyCaptured: true },
     })
     expect(b.sends).toHaveLength(1)
     expect(b.sends[0]).toMatchObject({
@@ -266,17 +266,18 @@ describe('telemetry.forwardToRenderer + telemetry-relay registry', () => {
     const a = makeStubWebContents()
     telemetry.registerTelemetryRelayTarget(a.wc)
 
-    telemetry.emit('install.flow.opened', { variant: 'standalone' })
+    // Use a name that is in the Datadog allow-list so the forward path runs.
+    telemetry.emit('desktop2.execution.error', { variant: 'standalone' })
 
     // PostHog Node side
-    expect(captured.map((c) => c.event)).toEqual(['install.flow.opened'])
+    expect(captured.map((c) => c.event)).toEqual(['desktop2.execution.error'])
     expect(captured[0]!.properties).toEqual({ variant: 'standalone' })
     // Relay side — exactly one IPC send to the registered target
     expect(a.sends).toHaveLength(1)
     expect(a.sends[0]).toMatchObject({
       channel: 'telemetry-action-from-main',
       data: {
-        event: 'install.flow.opened',
+        event: 'desktop2.execution.error',
         context: { variant: 'standalone' },
         mainAlreadyCaptured: true,
       },
@@ -285,17 +286,31 @@ describe('telemetry.forwardToRenderer + telemetry-relay registry', () => {
 
   it('forwards with no relay targets is a no-op (event still captured by PostHog Node)', () => {
     expect(telemetry._telemetryRelayTargetCount()).toBe(0)
-    telemetry.emit('boot.event', {})
+    // Use a name in the Datadog allow-list so the forward path actually fires.
+    telemetry.emit('desktop2.execution.error', {})
     // Event still captured by PostHog Node even with no renderer alive yet —
     // the architectural guarantee that "telemetry works no matter what".
-    expect(captured.map((c) => c.event)).toEqual(['boot.event'])
+    expect(captured.map((c) => c.event)).toEqual(['desktop2.execution.error'])
+  })
+
+  it('skips forwarding for events NOT in the Datadog mirror allow-list (provider split)', () => {
+    const a = makeStubWebContents()
+    telemetry.registerTelemetryRelayTarget(a.wc)
+
+    // Product / funnel events stay PostHog-only and do not ride the relay.
+    telemetry.emit('desktop2.install.flow.opened', { variant: 'standalone' })
+
+    // PostHog Node still captured it.
+    expect(captured.map((c) => c.event)).toEqual(['desktop2.install.flow.opened'])
+    // But the renderer never sees it — no Datadog mirror needed for a product event.
+    expect(a.sends).toHaveLength(0)
   })
 
   it('respects consent on forwardToRenderer: relay is skipped when revoked', () => {
     const a = makeStubWebContents()
     telemetry.registerTelemetryRelayTarget(a.wc)
     telemetry.setConsent(false)
-    telemetry.forwardToRenderer('foo.event', {})
+    telemetry.forwardToRenderer('desktop2.execution.error', {})
     expect(a.sends).toHaveLength(0)
     telemetry.setConsent(true)
   })
@@ -307,7 +322,7 @@ describe('telemetry.forwardToRenderer + telemetry-relay registry', () => {
     telemetry.registerTelemetryRelayTarget(b.wc)
     a.destroy()
 
-    telemetry.forwardToRenderer('foo.event', {})
+    telemetry.forwardToRenderer('desktop2.execution.error', {})
 
     expect(a.sends).toHaveLength(0)
     expect(b.sends).toHaveLength(1)
@@ -330,7 +345,7 @@ describe('telemetry.forwardToRenderer + telemetry-relay registry', () => {
     telemetry.unregisterTelemetryRelayTarget(a.wc)
     expect(telemetry._telemetryRelayTargetCount()).toBe(0)
 
-    telemetry.forwardToRenderer('foo.event', {})
+    telemetry.forwardToRenderer('desktop2.execution.error', {})
     expect(a.sends).toHaveLength(0)
   })
 })

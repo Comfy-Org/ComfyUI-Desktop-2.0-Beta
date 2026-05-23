@@ -39,6 +39,7 @@ import {
 // D-003 for the rollout plan (file deletion deferred pending the user's
 // explicit second go-ahead).
 import { scrubAll } from '../../../shared/piiScrub'
+import { isDatadogMirroredEvent } from '../../../shared/datadogMirroredEvents'
 
 function serializeUnknownError(error: unknown): { message: string; stack?: string } {
   if (error instanceof Error) {
@@ -192,7 +193,10 @@ function trackTelemetryAction(
 ): void {
   if (!isTelemetryEmitAllowed(actionName)) return
   const scrubbed = scrubTelemetryContext(context)
-  if (isDatadogInitialized) {
+  // Provider split (Phase 1.4): Datadog only mirrors the failure-event
+  // allow-list. Product / funnel events are PostHog-only — Datadog is for
+  // alerting, not analysis.
+  if (isDatadogInitialized && isDatadogMirroredEvent(actionName)) {
     try { datadogRum.addAction(actionName, scrubbed) } catch {}
   }
   // Renderer routes capture through main's posthog-node via IPC. The

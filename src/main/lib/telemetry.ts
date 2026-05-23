@@ -23,6 +23,7 @@
 import { app } from 'electron'
 import { PostHog } from 'posthog-node'
 import { DEFAULT_POSTHOG_API_KEY, DEFAULT_POSTHOG_HOST, isPostHogFlagDisabled as isFlagDisabled } from '../../shared/posthogConfig'
+import { isDatadogMirroredEvent } from '../../shared/datadogMirroredEvents'
 
 export type TelemetryValue = boolean | number | string | null | undefined
 export type TelemetryContext = Record<string, TelemetryValue | TelemetryValue[]>
@@ -368,6 +369,11 @@ export function bucketError(input: unknown): string {
  */
 export function forwardToRenderer(event: string, context: TelemetryContext = {}): void {
   if (!isAllowedToFire(event)) return
+  // Phase 1.4 provider split: only mirror events on the Datadog allow-list.
+  // Product / funnel events are PostHog-only; main already captured them via
+  // `capture()` and forwarding them to the renderer for Datadog mirror is
+  // pure overhead.
+  if (!isDatadogMirroredEvent(event)) return
   const payload = { event, context, mainAlreadyCaptured: true }
   for (const wc of _telemetryRelayTargets) {
     if (!wc.isDestroyed()) {
