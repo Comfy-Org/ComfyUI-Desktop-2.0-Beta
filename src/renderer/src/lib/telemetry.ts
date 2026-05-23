@@ -88,3 +88,41 @@ export function toModelDirectoryBucket(directory: string | undefined): string {
 export function isTerminalModelDownloadStatus(status: ModelDownloadStatus): boolean {
   return status === 'completed' || status === 'error' || status === 'cancelled'
 }
+
+/**
+ * Coarse hardware tier classification for cohort filtering.
+ *
+ * The exact thresholds live in `docs/telemetry/04-tracking-plan.md` §2.7
+ * and are deliberately heuristic — the raw `gpu_model` and `gpu_vram_gb`
+ * are also sent to PostHog, so finer slicing is always available. The
+ * tier exists so dashboards can rank "high-end vs low-end rigs" without
+ * re-deriving classification per query.
+ *
+ * Rules:
+ *   - `apple`    — vendor is Apple (M1 / M2 / M3 unified memory; perf curve
+ *                  differs from discrete cards enough to warrant a tier).
+ *   - `high`     — NVIDIA / AMD with VRAM ≥ 24 GB.
+ *   - `mid`      — NVIDIA / AMD with VRAM 12-23 GB.
+ *   - `low`      — NVIDIA / AMD with VRAM 6-11 GB.
+ *   - `sub_low`  — NVIDIA / AMD with VRAM < 6 GB, OR any non-NVIDIA-AMD
+ *                  discrete card (Intel Arc, etc. — most desktop ML
+ *                  workloads struggle on these).
+ *   - `cpu_only` — no GPU vendor reported, or VRAM is zero / unknown.
+ */
+export type GpuTier = 'high' | 'mid' | 'low' | 'sub_low' | 'apple' | 'cpu_only'
+
+export function deriveGpuTier(opts: {
+  vendor: string | null | undefined
+  vramGb: number | null | undefined
+}): GpuTier {
+  const vendor = (opts.vendor ?? '').toLowerCase()
+  if (vendor === 'apple') return 'apple'
+  const vram = opts.vramGb ?? 0
+  if (!vendor) return 'cpu_only'
+  if (vendor !== 'nvidia' && vendor !== 'amd') return 'sub_low'
+  if (vram <= 0) return 'cpu_only'
+  if (vram >= 24) return 'high'
+  if (vram >= 12) return 'mid'
+  if (vram >= 6) return 'low'
+  return 'sub_low'
+}

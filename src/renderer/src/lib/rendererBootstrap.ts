@@ -26,6 +26,7 @@
 import { datadogRum, type RumBeforeSend } from '@datadog/browser-rum'
 import { normalizeRumErrorEvent } from './datadogPathNormalization'
 import {
+  deriveGpuTier,
   TELEMETRY_ACTION_EVENT_NAME,
   type TelemetryActionEventDetail,
   type TelemetryContext,
@@ -392,23 +393,55 @@ async function initializeProviders(): Promise<void> {
   // per-renderer SDK needs its own configuration; PostHog person-property
   // upserts are idempotent and dedupe naturally main-side.
   window.api.getSystemInfo().then((info) => {
-    const ctx = info as unknown as Record<string, string | number | boolean | null | undefined>
-    if (rendererRole === 'panel') {
-      trackTelemetryAction('desktop2.session.system_info', ctx)
+    // Hardware enrichment (Phase 2.1). getSystemInfo already collects:
+    //   - gpus[] with vendor / model / vram_mb / driver_version
+    //   - nvidia_driver_version / nvidia_driver_supported
+    //   - cpu_manufacturer / cpu_physical_cores / cpu_speed_ghz
+    //   - os_arch
+    // The previous system_info event only forwarded the basic fields.
+    // We now forward the full payload and derive `gpu_tier` / `gpu_vram_gb`
+    // / `gpu_count` / `gpu_driver_version` for cohort filtering.
+    const primaryGpu = info.gpus[0] ?? null
+    const gpuVramMb = primaryGpu?.vram_mb ?? null
+    const gpuVramGb = gpuVramMb != null ? Math.round(gpuVramMb / 1024) : null
+    const gpuDriverVersion = info.nvidia_driver_version ?? primaryGpu?.driver_version ?? null
+    const gpuTier = deriveGpuTier({ vendor: info.gpu_vendor, vramGb: gpuVramGb })
+    const enriched: Record<string, string | number | boolean | null | undefined> = {
+      ...(info as unknown as Record<string, string | number | boolean | null | undefined>),
+      gpu_vram_mb: gpuVramMb,
+      gpu_vram_gb: gpuVramGb,
+      gpu_count: info.gpus.length,
+      gpu_driver_version: gpuDriverVersion,
+      gpu_tier: gpuTier,
     }
-    // Promote system info to PostHog person-profile properties so it's
-    // queryable across sessions without joining against a per-session event.
+    if (rendererRole === 'panel') {
+      trackTelemetryAction('desktop2.session.system_info', enriched)
+    }
+    // Promote durable hardware traits to PostHog person-profile properties
+    // so cohort filters work across sessions without joining against the
+    // per-session event. Idempotent — safe to fire from every renderer.
     try {
       window.api.registerTelemetryProperties({
-        platform: ctx['platform'],
-        arch: ctx['arch'],
-        os_distro: ctx['os_distro'],
-        os_release: ctx['os_release'],
-        gpu_vendor: ctx['gpu_vendor'],
-        gpu_model: ctx['gpu_model'],
-        total_memory_gb: ctx['total_memory_gb'],
-        cpu_cores: ctx['cpu_cores'],
-        electron_version: ctx['electron_version'],
+        platform: info.platform,
+        arch: info.arch,
+        os_distro: info.os_distro,
+        os_release: info.os_release,
+        os_arch: info.os_arch,
+        gpu_vendor: info.gpu_vendor,
+        gpu_model: info.gpu_model,
+        gpu_vram_gb: gpuVramGb,
+        gpu_count: info.gpus.length,
+        gpu_driver_version: gpuDriverVersion,
+        gpu_tier: gpuTier,
+        nvidia_driver_supported: info.nvidia_driver_supported,
+        total_memory_gb: info.total_memory_gb,
+        cpu_model: info.cpu_model,
+        cpu_cores: info.cpu_cores,
+        cpu_physical_cores: info.cpu_physical_cores,
+        cpu_speed_ghz: info.cpu_speed_ghz,
+        cpu_manufacturer: info.cpu_manufacturer,
+        electron_version: info.electron_version,
+        chrome_version: info.chrome_version,
         app_version: appVersion,
       })
     } catch {
