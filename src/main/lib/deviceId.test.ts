@@ -24,7 +24,7 @@ vi.mock('systeminformation', () => ({
   },
 }))
 
-const SALT = 'comfy-org-installation-id-v1'
+const SALT = 'comfy-installation-id-v1'
 
 function expectedIdFor(machineId: string): string {
   return createHash('sha256').update(`${machineId}:${SALT}`).digest('hex')

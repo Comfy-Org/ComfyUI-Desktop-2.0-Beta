@@ -26,17 +26,19 @@ import si from 'systeminformation'
 import { configDir } from './paths'
 
 /**
- * Cross-surface salt for installation_id derivation. Coordinated with the
- * cloud / CLI / local-python implementations per PRD task B1.3 (Robin).
+ * Cross-surface salt for installation_id derivation. Must match the value
+ * used by cloud / CLI / local-python so the same machine yields the same
+ * `installation_id` everywhere (PRD §6, task B1.3 owned by Robin).
  *
- * The salt's job is to prevent rainbow-table inversion of `machine_id →
- * installation_id`; it is NOT a secret. Rotating the salt rotates every
- * installation_id (users appear as new). Do not change without coordination.
+ * The salt's only job is rainbow-table defense for the
+ * `machine_id → installation_id` mapping. It is NOT a secret. Rotating it
+ * rotates every user's id, so swap only as a deliberate one-shot
+ * coordinated across surfaces.
  *
- * Placeholder value until coordinated with PRD owners. See
+ * Current value is a placeholder pending Robin's confirmation. See
  * `agent-office/.../docs/telemetry/07-decision-log.md` D-001.
  */
-const INSTALLATION_ID_SALT = 'comfy-org-installation-id-v1'
+const INSTALLATION_ID_SALT = 'comfy-installation-id-v1'
 
 export type IdClass = 'machine_derived' | 'random_fallback'
 
