@@ -1,12 +1,21 @@
 /**
- * Renderer-side PostHog provider.
+ * @deprecated Phase 1.3 of the telemetry rework (2026-05) consolidated all
+ * PostHog capture into the main process via `posthog-node`. The renderer no
+ * longer initialises `posthog-js`; every product / exception / person-property
+ * event flows through `window.api.captureTelemetry` /
+ * `captureExceptionTelemetry` / `registerTelemetryProperties` IPC bridges,
+ * routed in `src/main/lib/ipc/registerTelemetryHandlers.ts`.
  *
- * Used alongside Datadog RUM. Both providers consume events from the same
- * `TELEMETRY_ACTION_EVENT_NAME` CustomEvent bridge, so Vue components don't
- * need to know either SDK exists.
+ * This file (and the `posthog-js` dependency in `package.json`) are kept in
+ * the tree pending an explicit second go-ahead to delete. See
+ * `agent-office/.../docs/telemetry/07-decision-log.md` D-003 and
+ * `06-follow-up.md`.
  *
- * Mirrors the shape of `datadogRum.init` / `setUser` / `setTrackingConsent`
- * so callers in `renderer/src/main.ts` stay symmetric.
+ * Original docstring:
+ *
+ * Renderer-side PostHog provider. Used alongside Datadog RUM. Both providers
+ * consume events from the same `TELEMETRY_ACTION_EVENT_NAME` CustomEvent
+ * bridge, so Vue components don't need to know either SDK exists.
  */
 import posthog, { type PostHog } from 'posthog-js'
 import type { TelemetryContext } from './telemetry'

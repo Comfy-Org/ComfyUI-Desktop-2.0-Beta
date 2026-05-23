@@ -17,6 +17,7 @@ import { registerSnapshotHandlers } from './registerSnapshotHandlers'
 import { registerSettingsHandlers } from './registerSettingsHandlers'
 import { registerSessionHandlers } from './registerSessionHandlers'
 import { registerCrashHandlers } from './registerCrashHandlers'
+import { registerTelemetryHandlers } from './registerTelemetryHandlers'
 
 // Re-export public API from shared
 export { getAppVersion, stopRunning, hasRunningSessions, getSessionProcess, hasActiveOperations, getActiveDetails, cancelAll } from './shared'
@@ -172,4 +173,5 @@ export function register(callbacks: RegisterCallbacks = {}): void {
   registerSettingsHandlers()
   registerSessionHandlers()
   registerCrashHandlers()
+  registerTelemetryHandlers()
 }

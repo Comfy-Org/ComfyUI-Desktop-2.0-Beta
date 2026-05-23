@@ -30,16 +30,14 @@ import {
   type TelemetryActionEventDetail,
   type TelemetryContext,
 } from './telemetry'
-import {
-  capturePostHog,
-  captureExceptionPostHog,
-  identifyPostHog,
-  initPostHog,
-  isInitialized as isPostHogInitialized,
-  isPostHogConfigured,
-  registerPostHog,
-  setPostHogConsent,
-} from './posthogProvider'
+// PostHog Browser SDK (`posthog-js`) is intentionally NOT imported here.
+// Phase 1.3 of the telemetry rework consolidates all PostHog capture into
+// the main process via `posthog-node`. The renderer now forwards every
+// product / exception / person-property event through `window.api.*`
+// IPC bridges; main resolves the distinct id, consent state, and dedup
+// in one place. See `agent-office/.../docs/telemetry/07-decision-log.md`
+// D-003 for the rollout plan (file deletion deferred pending the user's
+// explicit second go-ahead).
 import { scrubAll } from '../../../shared/piiScrub'
 
 function serializeUnknownError(error: unknown): { message: string; stack?: string } {
@@ -197,10 +195,16 @@ function trackTelemetryAction(
   if (isDatadogInitialized) {
     try { datadogRum.addAction(actionName, scrubbed) } catch {}
   }
-  // `mainAlreadyCaptured` events come from the main-process PostHog Node
-  // SDK and would be duplicates if we recaptured them in the browser SDK.
-  if (!options.skipPostHog && isPostHogInitialized()) {
-    capturePostHog(actionName, scrubbed)
+  // Renderer routes capture through main's posthog-node via IPC. The
+  // skipPostHog gate stays for events that originated in main (via
+  // `telemetry-action-from-main`): main already captured those and a
+  // round-trip IPC re-capture would double-count.
+  if (!options.skipPostHog) {
+    try {
+      window.api.captureTelemetry(actionName, scrubbed)
+    } catch {
+      // ignore — telemetry must never break the renderer
+    }
   }
 }
 
@@ -282,8 +286,12 @@ async function registerCohortContext(opts: {
       }
     } catch {}
   }
-  if (isPostHogInitialized()) {
-    registerPostHog(cohort)
+  // Person-property upsert through main's posthog-node. Idempotent; safe
+  // to fire from every renderer surface independently.
+  try {
+    window.api.registerTelemetryProperties(cohort)
+  } catch {
+    // ignore
   }
 }
 
@@ -322,97 +330,87 @@ async function initializeProviders(): Promise<void> {
     } catch {}
   }
 
-  if (isPostHogConfigured()) {
-    initPostHog({
-      appVersion,
-      appEnv: datadogEnv,
-      isPackaged: !import.meta.env.DEV,
-      consent,
-      rendererRole,
-    })
+  // PostHog Browser SDK init removed (Phase 1.3). Main process owns
+  // PostHog capture via `posthog-node`; renderer forwards every event
+  // through `window.api.captureTelemetry` / `captureExceptionTelemetry` /
+  // `registerTelemetryProperties` IPC bridges. The `desktop2.session.started`
+  // event is still owned by main's `identify()` and fires on consent grant.
+
+  // Cohort context + device-id binding fire regardless of Datadog state —
+  // main's posthog-node handles the IPC capture even if Datadog is
+  // configured off.
+  void registerCohortContext({ appVersion, telemetryEnabled: consent })
+  window.api.getDeviceId().then((id) => {
+    if (isDatadogInitialized) {
+      try { datadogRum.setUser({ id }) } catch {}
+    }
+    // PostHog identify happens in main's boot block — no renderer call
+    // needed. Person-property upserts ride through registerTelemetryProperties.
+  }).catch(() => {})
+
+  // Per-session boot census of every persisted install. Gated to
+  // `'panel'` so it fires exactly once per session: the chooser host
+  // owns the `'panel'` renderer; every other host window has only the
+  // always-on `'title-bar'` renderer. Without this gate the inventory
+  // would fire N times per session — once per host window's title-bar
+  // bootstrap. Payload is metadata + diff counts only (no per-node /
+  // per-package contents) and is capped to ~200 KB main-side; arrays
+  // of objects bypass the typed bridge the same way `snapshot_history`
+  // does below.
+  if (rendererRole === 'panel') {
+    window.api.getInstallsInventory().then((inventory) => {
+      if (!inventory) return
+      // Honor the pre-consent gate even on the bypass path.
+      if (!isTelemetryEmitAllowed('desktop2.session.installs_inventory')) return
+      if (isDatadogInitialized) {
+        try {
+          datadogRum.addAction(
+            'desktop2.session.installs_inventory',
+            inventory as unknown as Record<string, unknown>,
+          )
+        } catch {}
+      }
+      try {
+        window.api.captureTelemetry(
+          'desktop2.session.installs_inventory',
+          inventory as unknown as Record<string, unknown>,
+        )
+      } catch {
+        // ignore
+      }
+    }).catch(() => {})
   }
 
-  if (isDatadogInitialized || isPostHogInitialized()) {
-    // `desktop2.session.started` is owned by main (`identify()` in
-    // `src/main/lib/telemetry.ts`) because it has to ride the deferred-
-    // identify pattern that binds `distinctId` first. Firing it again
-    // here would double-count every session.
-    void registerCohortContext({ appVersion, telemetryEnabled: consent })
-    window.api.getDeviceId().then((id) => {
-      if (isDatadogInitialized) {
-        try { datadogRum.setUser({ id }) } catch {}
-      }
-      // For PostHog we'll merge in the system_info profile properties below.
-      identifyPostHog(id)
-    }).catch(() => {})
-    // Per-session boot census of every persisted install. Gated to
-    // `'panel'` (same pattern as `installation_started` /
-    // `snapshot_history` below) so it fires exactly once per session:
-    // the chooser host owns the `'panel'` renderer, every other host
-    // window has only the always-on `'title-bar'` renderer. Without
-    // this gate the inventory would fire N times per session — once
-    // per host window's title-bar bootstrap. Payload is metadata +
-    // diff counts only (no per-node / per-package contents) and is
-    // capped to ~200 KB main-side; arrays of objects bypass the typed
-    // bridge the same way `snapshot_history` does below.
+  // Convention: session-wide events (one per session regardless of how
+  // many host windows the user opens) are gated to `panel`. Per-renderer
+  // wiring (`registerCohortContext`, Datadog `setUser`,
+  // `registerTelemetryProperties`) is intentionally un-gated — Datadog's
+  // per-renderer SDK needs its own configuration; PostHog person-property
+  // upserts are idempotent and dedupe naturally main-side.
+  window.api.getSystemInfo().then((info) => {
+    const ctx = info as unknown as Record<string, string | number | boolean | null | undefined>
     if (rendererRole === 'panel') {
-      window.api.getInstallsInventory().then((inventory) => {
-        if (!inventory) return
-        // Honor the pre-consent gate even on the bypass path. The
-        // typed-bridge `trackTelemetryAction` route already does this;
-        // we replicate the check inline here because direct
-        // `addAction` / `capturePostHog` calls skip that wrapper.
-        if (!isTelemetryEmitAllowed('desktop2.session.installs_inventory')) return
-        if (isDatadogInitialized) {
-          try {
-            datadogRum.addAction(
-              'desktop2.session.installs_inventory',
-              inventory as unknown as Record<string, unknown>,
-            )
-          } catch {}
-        }
-        if (isPostHogInitialized()) {
-          capturePostHog(
-            'desktop2.session.installs_inventory',
-            inventory as unknown as TelemetryContext,
-          )
-        }
-      }).catch(() => {})
+      trackTelemetryAction('desktop2.session.system_info', ctx)
     }
-    // Convention: session-wide events (one per session regardless of
-    // how many host windows the user opens) are gated to `panel`
-    // because the chooser host is the singleton owner of the panel
-    // renderer. Per-renderer SDK setup (`registerCohortContext`,
-    // `setUser`, `identifyPostHog`) is intentionally un-gated — each
-    // renderer's local SDK instance needs its own configuration.
-    // `installs_inventory` above follows the same rule.
-    window.api.getSystemInfo().then(async (info) => {
-      const ctx = info as unknown as Record<string, string | number | boolean | null | undefined>
-      if (rendererRole === 'panel') {
-        trackTelemetryAction('desktop2.session.system_info', ctx)
-      }
-      // Promote system info to PostHog profile properties so it's queryable
-      // across sessions without joining against a per-session event.
-      // Stays un-gated: it's an idempotent person-property upsert, not
-      // an event emit, so each renderer's SDK setting the same keys
-      // produces no duplication.
-      try {
-        const id = await window.api.getDeviceId()
-        identifyPostHog(id, {
-          platform: ctx['platform'],
-          arch: ctx['arch'],
-          os_distro: ctx['os_distro'],
-          os_release: ctx['os_release'],
-          gpu_vendor: ctx['gpu_vendor'],
-          gpu_model: ctx['gpu_model'],
-          total_memory_gb: ctx['total_memory_gb'],
-          cpu_cores: ctx['cpu_cores'],
-          electron_version: ctx['electron_version'],
-          app_version: appVersion,
-        })
-      } catch {}
-    }).catch(() => {})
-  }
+    // Promote system info to PostHog person-profile properties so it's
+    // queryable across sessions without joining against a per-session event.
+    try {
+      window.api.registerTelemetryProperties({
+        platform: ctx['platform'],
+        arch: ctx['arch'],
+        os_distro: ctx['os_distro'],
+        os_release: ctx['os_release'],
+        gpu_vendor: ctx['gpu_vendor'],
+        gpu_model: ctx['gpu_model'],
+        total_memory_gb: ctx['total_memory_gb'],
+        cpu_cores: ctx['cpu_cores'],
+        electron_version: ctx['electron_version'],
+        app_version: appVersion,
+      })
+    } catch {
+      // ignore
+    }
+  }).catch(() => {})
 }
 
 function reportRendererError(payload: {
@@ -443,12 +441,20 @@ function reportRendererError(payload: {
       })
     } catch {}
   }
-  if (!payload.skipPostHog && isPostHogInitialized()) {
-    captureExceptionPostHog(error, {
-      origin: 'renderer',
-      forwarded_source: payload.source,
-      ...(payload.context || {}),
-    })
+  if (!payload.skipPostHog) {
+    try {
+      window.api.captureExceptionTelemetry({
+        message: error.message,
+        stack: error.stack,
+        properties: {
+          origin: 'renderer',
+          forwarded_source: payload.source,
+          ...(payload.context || {}),
+        },
+      })
+    } catch {
+      // ignore — telemetry must never break the renderer
+    }
   }
 }
 
@@ -476,7 +482,9 @@ export function initializeRendererBootstrap(role: RendererRole = 'panel'): void 
     // consent state set just below decides whether they actually ship).
     resolvedTelemetryEnabled = enabled
     if (isDatadogConfigured) setDatadogTrackingConsent(toDatadogTrackingConsent(enabled))
-    setPostHogConsent(enabled !== false)
+    // PostHog consent is owned by main: `registerSettingsHandlers` calls
+    // `mainTelemetry.setConsentState` on every persisted change to
+    // `telemetryEnabled`. No renderer-side action needed.
   })
 
   window.addEventListener(TELEMETRY_ACTION_EVENT_NAME, handleTelemetryActionBridgeEvent)
@@ -575,8 +583,13 @@ export function initializeRendererBootstrap(role: RendererRole = 'panel'): void 
           if (isDatadogInitialized) {
             try { datadogRum.addAction('desktop2.session.snapshot_history', { installation_id: ctx.installation_id, snapshot_diffs }) } catch {}
           }
-          if (isPostHogInitialized()) {
-            capturePostHog('desktop2.session.snapshot_history', { installation_id: ctx.installation_id, snapshot_diffs } as unknown as TelemetryContext)
+          try {
+            window.api.captureTelemetry('desktop2.session.snapshot_history', {
+              installation_id: ctx.installation_id,
+              snapshot_diffs,
+            } as unknown as Record<string, unknown>)
+          } catch {
+            // ignore
           }
         }
       }).catch(() => {})

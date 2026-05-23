@@ -249,6 +249,30 @@ export function capture(event: string, properties: TelemetryContext = {}): void 
   }
 }
 
+/**
+ * Update PostHog person properties for the current distinct id (`$set`).
+ *
+ * Used by the renderer's cohort-context register pass and any other
+ * caller that wants to attach durable user-level properties without
+ * firing an event. Honors three-state consent: queued in
+ * `pendingIdentifyProperties` until consent grants, at which point
+ * `tryFlushDeferred()` ships the merged set in one identify call.
+ *
+ * Repeated calls in the queued state merge (latest write wins per key).
+ */
+export function registerPersonProperties(properties: Record<string, TelemetryValue>): void {
+  if (!client) return
+  if (consentState !== 'granted' || !distinctId) {
+    pendingIdentifyProperties = { ...(pendingIdentifyProperties || {}), ...properties }
+    return
+  }
+  try {
+    client.identify({ distinctId, properties: { $set: properties } })
+  } catch {
+    // ignore – telemetry must never break the app
+  }
+}
+
 export function captureException(error: unknown, properties: TelemetryContext = {}): void {
   if (!client || !distinctId) return
   // Exceptions are reliability data; suppress them outside `'granted'`.

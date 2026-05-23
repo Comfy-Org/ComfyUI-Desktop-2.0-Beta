@@ -343,6 +343,28 @@ export function buildElectronApi(): ElectronApi {
       ipcRenderer.on('telemetry-setting-changed', handler)
       return () => ipcRenderer.removeListener('telemetry-setting-changed', handler)
     },
+    captureTelemetry: (event, properties) => {
+      // ipcRenderer.send is fire-and-forget; main handles the PostHog Node capture.
+      try {
+        ipcRenderer.send('telemetry:capture', { event, properties })
+      } catch {
+        // ignore — telemetry must never break the renderer
+      }
+    },
+    captureExceptionTelemetry: (payload) => {
+      try {
+        ipcRenderer.send('telemetry:captureException', payload)
+      } catch {
+        // ignore
+      }
+    },
+    registerTelemetryProperties: (properties) => {
+      try {
+        ipcRenderer.send('telemetry:registerProperties', properties)
+      } catch {
+        // ignore
+      }
+    },
     onDatadogError: (callback) => {
       const handler = (_event: IpcRendererEvent, data: unknown) => callback(data as Parameters<typeof callback>[0])
       ipcRenderer.on('dd-error', handler)

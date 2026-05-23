@@ -1101,6 +1101,31 @@ export interface ElectronApi {
    *  carries the URLs that were removed so listeners can drop them in
    *  one pass instead of re-listing. */
   onModelDownloadsClearedFinished(callback: (data: { urls: string[] }) => void): Unsubscribe
+  /**
+   * Forward a renderer-originated telemetry event to main, which captures it
+   * via PostHog Node under the current distinct_id and consent state.
+   *
+   * Replaces the renderer's direct `posthog-js` capture path. Fire-and-forget:
+   * the renderer does not await delivery. Main is the single PostHog capture
+   * point so identity, consent, and dedup all live in one place.
+   */
+  captureTelemetry(event: string, properties: Record<string, unknown>): void
+  /**
+   * Forward a renderer-originated exception to main's PostHog Node
+   * `captureException` path. Used by `window.error` / `unhandledrejection`
+   * handlers and any explicit `try/catch` reporter. Fire-and-forget.
+   */
+  captureExceptionTelemetry(payload: {
+    message: string
+    stack?: string
+    properties?: Record<string, unknown>
+  }): void
+  /**
+   * Update person-level cohort properties on the current PostHog person.
+   * Replaces the renderer's previous `registerPostHog(properties)` calls.
+   * Main routes this to `posthog.identify({ distinctId, properties: { $set: ... } })`.
+   */
+  registerTelemetryProperties(properties: Record<string, unknown>): void
   onTelemetrySettingChanged(callback: (enabled: boolean | undefined) => void): Unsubscribe
   onDatadogError(callback: (payload: DatadogForwardedError) => void): Unsubscribe
   onTelemetryActionFromMain(callback: (data: { event: string; context: Record<string, unknown>; mainAlreadyCaptured?: boolean }) => void): Unsubscribe
