@@ -21,23 +21,9 @@ export function toVariantBucket(variantId: string | undefined): string {
   return variantId.replace(/^(win|mac|linux)-/, '')
 }
 
-export function toErrorBucket(error: unknown): string {
-  const message = (
-    error instanceof Error
-      ? error.message
-      : typeof error === 'string'
-        ? error
-        : ''
-  ).toLowerCase()
-  if (!message) return 'unknown'
-  if (message.includes('cancel')) return 'cancelled'
-  if (message.includes('timeout')) return 'timeout'
-  if (message.includes('network') || message.includes('fetch')) return 'network'
-  if (message.includes('disk') || message.includes('space')) return 'disk'
-  if (message.includes('permission') || message.includes('access')) return 'permissions'
-  if (message.includes('path')) return 'path'
-  return 'other'
-}
+// Re-exported from `src/shared/errorBucket.ts` so renderer and main classify
+// identically. Kept as `toErrorBucket` for the renderer's existing callers.
+export { bucketError as toErrorBucket } from '../../../shared/errorBucket'
 
 export function toCountBucket(count: number): string {
   if (count <= 0) return '0'

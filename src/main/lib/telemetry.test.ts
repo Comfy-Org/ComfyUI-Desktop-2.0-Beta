@@ -105,6 +105,31 @@ describe('telemetry.bucketError', () => {
   it('accepts Error instances', () => {
     expect(telemetry.bucketError(new Error('connection timeout'))).toBe('timeout')
   })
+  // Phase 2.3 extended vocabulary
+  it('classifies CUDA / system / Linux OOM-killer as oom', () => {
+    expect(telemetry.bucketError('CUDA out of memory')).toBe('oom')
+    expect(telemetry.bucketError('torch.cuda.OutOfMemoryError: blah')).toBe('oom')
+    expect(telemetry.bucketError('Killed: process exceeded memory')).toBe('oom')
+  })
+  it('classifies CUDA init failures', () => {
+    expect(telemetry.bucketError('CUDA not available')).toBe('cuda_init')
+    expect(telemetry.bucketError('no CUDA-capable device is detected')).toBe('cuda_init')
+  })
+  it('classifies ImportError / ModuleNotFoundError', () => {
+    expect(telemetry.bucketError('ImportError: cannot import name xformers')).toBe('import_error')
+    expect(telemetry.bucketError('ModuleNotFoundError: No module named foo')).toBe('import_error')
+  })
+  it('classifies custom-node-missing', () => {
+    expect(telemetry.bucketError('node not found: SomeCustomNode')).toBe('node_missing')
+    expect(telemetry.bucketError('Unknown node type FooNode')).toBe('node_missing')
+  })
+  it('falls back to "python" for generic <Class>Error messages', () => {
+    expect(telemetry.bucketError('RuntimeError: something broke')).toBe('python')
+    expect(telemetry.bucketError('ValueError: bad input')).toBe('python')
+  })
+  it('keeps "other" for messages with no known signal', () => {
+    expect(telemetry.bucketError('this is just a sentence')).toBe('other')
+  })
 })
 
 describe('telemetry.trackedStep', () => {

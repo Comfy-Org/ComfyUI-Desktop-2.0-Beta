@@ -24,6 +24,7 @@ import { app } from 'electron'
 import { PostHog } from 'posthog-node'
 import { DEFAULT_POSTHOG_API_KEY, DEFAULT_POSTHOG_HOST, isPostHogFlagDisabled as isFlagDisabled } from '../../shared/posthogConfig'
 import { isDatadogMirroredEvent } from '../../shared/datadogMirroredEvents'
+import { bucketError as sharedBucketError } from '../../shared/errorBucket'
 
 export type TelemetryValue = boolean | number | string | null | undefined
 export type TelemetryContext = Record<string, TelemetryValue | TelemetryValue[]>
@@ -423,22 +424,10 @@ export async function trackedStep<T>(
 }
 
 /**
- * Coarse error categorisation that matches the renderer-side `toErrorBucket`.
- * Kept in sync manually – when adding categories, update both.
+ * Coarse error categorisation. Re-exported from `src/shared/errorBucket.ts`
+ * so main and renderer classify identically (Phase 2.3 dedup).
  */
-export function bucketError(input: unknown): string {
-  const message = (
-    input instanceof Error ? input.message : typeof input === 'string' ? input : ''
-  ).toLowerCase()
-  if (!message) return 'unknown'
-  if (message.includes('cancel')) return 'cancelled'
-  if (message.includes('timeout')) return 'timeout'
-  if (message.includes('network') || message.includes('fetch')) return 'network'
-  if (message.includes('disk') || message.includes('space')) return 'disk'
-  if (message.includes('permission') || message.includes('access')) return 'permissions'
-  if (message.includes('path')) return 'path'
-  return 'other'
-}
+export const bucketError = sharedBucketError
 
 /**
  * Forward an event to renderer-side Datadog RUM via the registered
