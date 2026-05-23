@@ -17,6 +17,7 @@
  */
 import { ipcMain } from 'electron'
 import * as mainTelemetry from '../telemetry'
+import { getFlag as getExperimentFlag, recordExposure, type ExperimentExposureSource } from '../experiments'
 
 interface CapturePayload {
   event?: unknown
@@ -90,5 +91,36 @@ export function registerTelemetryHandlers(): void {
    */
   ipcMain.on('telemetry:unbindUserId', () => {
     mainTelemetry.unbindUserId()
+  })
+
+  /**
+   * Cache-first synchronous flag lookup for renderer A/B branches.
+   * Returns the cached value or `null` if the flag is not present (caller
+   * defaults to the control branch on `null`). See `experiments.ts` for
+   * the cache lifecycle.
+   */
+  ipcMain.handle('telemetry:getExperimentFlag', (_event, key: unknown) => {
+    const flagKey = asString(key)
+    if (!flagKey) return null
+    const value = getExperimentFlag(flagKey)
+    return value === undefined ? null : value
+  })
+
+  /**
+   * Renderer-driven exposure event. Per-session dedup is enforced
+   * main-side so multiple renderer subscribers can call this safely.
+   */
+  ipcMain.on('telemetry:recordExposure', (_event, payload: unknown) => {
+    if (!payload || typeof payload !== 'object') return
+    const p = payload as Record<string, unknown>
+    const experimentKey = asString(p.experimentKey)
+    const variant = asString(p.variant)
+    const sourceStr = asString(p.source)
+    if (!experimentKey || !variant) return
+    const source: ExperimentExposureSource =
+      sourceStr === 'remote' ? 'remote'
+        : sourceStr === 'fallback' ? 'fallback'
+          : 'cache'
+    recordExposure(experimentKey, variant, source)
   })
 }

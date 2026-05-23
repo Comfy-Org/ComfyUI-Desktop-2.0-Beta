@@ -1139,6 +1139,25 @@ export interface ElectronApi {
    * and download_token). Renderer also clears Datadog setUser.
    */
   telemetryUnbindUserId(): void
+  /**
+   * Look up an A/B experiment / feature-flag variant for this user.
+   * Returns the cached value (string for multivariate, boolean for a
+   * single-flag rollout) or `null` if the flag is not present in the
+   * cache. Callers MUST default to the control branch on `null`.
+   * Backed by `posthog.getAllFlags` via the boot-time experiments
+   * refresh; see `src/main/lib/experiments.ts`.
+   */
+  telemetryGetExperimentFlag(key: string): Promise<string | boolean | null>
+  /**
+   * Record an A/B experiment exposure. Per-session dedup is enforced
+   * main-side, so it's safe to call this on every render of an
+   * experiment surface (a re-render won't double-count).
+   */
+  telemetryRecordExposure(payload: {
+    experimentKey: string
+    variant: string
+    source?: 'cache' | 'remote' | 'fallback'
+  }): void
   onTelemetrySettingChanged(callback: (enabled: boolean | undefined) => void): Unsubscribe
   onDatadogError(callback: (payload: DatadogForwardedError) => void): Unsubscribe
   onTelemetryActionFromMain(callback: (data: { event: string; context: Record<string, unknown>; mainAlreadyCaptured?: boolean }) => void): Unsubscribe

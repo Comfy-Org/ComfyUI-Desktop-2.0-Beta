@@ -22,6 +22,10 @@
  */
 import { app } from 'electron'
 import { PostHog } from 'posthog-node'
+
+// PostHog's `FeatureFlagValue` lives in `@posthog/core` and is not
+// re-exported by `posthog-node`. Inlining the shape we actually use.
+export type FeatureFlagValue = string | boolean
 import { DEFAULT_POSTHOG_API_KEY, DEFAULT_POSTHOG_HOST, isPostHogFlagDisabled as isFlagDisabled } from '../../shared/posthogConfig'
 import { isDatadogMirroredEvent } from '../../shared/datadogMirroredEvents'
 import { bucketError as sharedBucketError } from '../../shared/errorBucket'
@@ -392,6 +396,37 @@ export async function aliasImmediate(distinctId: string, alias: string): Promise
     await client.aliasImmediate({ distinctId, alias })
   } catch {
     // ignore – telemetry must never break the app
+  }
+}
+
+/**
+ * Fetch every feature flag for the current user with a hard timeout.
+ *
+ * Used by the experiments module's boot-time refresh. Returns `{}` on
+ * timeout / failure so the caller can fall back to its cached values
+ * without distinguishing failure modes. Suppressed unless consent is
+ * `'granted'` — flag evaluation requests carry the distinct id and
+ * person properties to PostHog, so they must not ship pre-consent.
+ *
+ * The returned record's keys are PostHog flag/experiment names; values
+ * are the assigned variant (string for multivariate, boolean for
+ * single-flag). See `src/main/lib/experiments.ts` for the cache wrapper.
+ */
+export async function loadFeatureFlagsImmediate(
+  distinctId: string,
+  personProperties: Record<string, string>,
+  timeoutMs: number,
+): Promise<Record<string, FeatureFlagValue>> {
+  if (!client) return {}
+  if (consentState !== 'granted') return {}
+  try {
+    const flagsPromise = client.getAllFlags(distinctId, { personProperties })
+    const timeoutPromise = new Promise<Record<string, FeatureFlagValue>>((resolve) =>
+      setTimeout(() => resolve({}), timeoutMs),
+    )
+    return await Promise.race([flagsPromise, timeoutPromise])
+  } catch {
+    return {}
   }
 }
 

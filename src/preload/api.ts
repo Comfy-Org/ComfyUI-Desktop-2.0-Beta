@@ -379,6 +379,14 @@ export function buildElectronApi(): ElectronApi {
         // ignore
       }
     },
+    telemetryGetExperimentFlag: (key) => ipcRenderer.invoke('telemetry:getExperimentFlag', key),
+    telemetryRecordExposure: (payload) => {
+      try {
+        ipcRenderer.send('telemetry:recordExposure', payload)
+      } catch {
+        // ignore
+      }
+    },
     onDatadogError: (callback) => {
       const handler = (_event: IpcRendererEvent, data: unknown) => callback(data as Parameters<typeof callback>[0])
       ipcRenderer.on('dd-error', handler)

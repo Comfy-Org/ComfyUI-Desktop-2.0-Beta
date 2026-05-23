@@ -45,6 +45,7 @@ import { update as updateInstallation } from './installations'
 import { lookupInstallUpdateOverride } from './lib/e2eOverrides'
 import * as mainTelemetry from './lib/telemetry'
 import { getDeviceId, getIdClass, initDeviceId, markIdentityMigrationCompleted } from './lib/deviceId'
+import { initExperiments } from './lib/experiments'
 
 import {
   claimAttachHost,
@@ -981,6 +982,19 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
       platform: process.platform,
       arch: process.arch,
       id_class: getIdClass(),
+    })
+
+    // Boot the experiments cache. Synchronously loads the on-disk flag
+    // values for `getFlag()`, then kicks off a background refresh whose
+    // result lands on disk for the NEXT boot. Does not block boot.
+    void initExperiments({
+      distinctId: installationId,
+      personProperties: {
+        platform: process.platform,
+        arch: process.arch,
+        app_version: APP_VERSION,
+        id_class: getIdClass(),
+      },
     })
 
     const locale = (settings.get('language') as string | undefined) || app.getLocale().split('-')[0]
