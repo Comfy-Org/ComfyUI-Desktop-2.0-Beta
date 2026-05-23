@@ -1,62 +1,208 @@
 /**
- * Persistent per-installation device identifier.
+ * Per-installation device identifier.
  *
- * Read or create exactly once per process; both the IPC handler exposed to
- * the renderer (`get-device-id`) and the main-process telemetry init must
- * call this so they always agree.
+ * `installation_id` is computed as `SHA-256(machine_id + ':' + salt)`, matching
+ * the cross-surface identity model in the Unified Analytics PRD §6. It is
+ * deterministic per machine (same OS-user account, same hardware), survives
+ * a clean reinstall, and matches what cloud / CLI compute for the same
+ * machine.
  *
- * Uses exclusive-create (`wx`) to avoid TOCTOU races when two startup paths
- * race to create the file on first run.
+ * On first boot post-upgrade for a user whose `device-id.txt` still holds the
+ * legacy random UUID, `initDeviceId()` returns that legacy id so the caller
+ * can fire a one-shot `posthog.aliasImmediate({ distinctId: new, alias: old })`
+ * to merge histories. The boot path is also responsible for marking the
+ * migration completed (`markIdentityMigrationCompleted()`) so the alias does
+ * not re-fire on subsequent launches.
+ *
+ * Synchronous `getDeviceId()` is preserved for backward compatibility with
+ * the existing IPC handler and main-process call sites. It must only be
+ * called after `initDeviceId()` has resolved; if called earlier it falls back
+ * to a random UUID flagged as `'random_fallback'` so dashboards can spot it.
  */
-import { randomUUID } from 'crypto'
+import { randomUUID, createHash } from 'crypto'
 import path from 'path'
 import fs from 'fs'
+import si from 'systeminformation'
 import { configDir } from './paths'
 
-let cached: string | null = null
+/**
+ * Cross-surface salt for installation_id derivation. Coordinated with the
+ * cloud / CLI / local-python implementations per PRD task B1.3 (Robin).
+ *
+ * The salt's job is to prevent rainbow-table inversion of `machine_id →
+ * installation_id`; it is NOT a secret. Rotating the salt rotates every
+ * installation_id (users appear as new). Do not change without coordination.
+ *
+ * Placeholder value until coordinated with PRD owners. See
+ * `agent-office/.../docs/telemetry/07-decision-log.md` D-001.
+ */
+const INSTALLATION_ID_SALT = 'comfy-org-installation-id-v1'
+
+export type IdClass = 'machine_derived' | 'random_fallback'
+
+interface CachedId {
+  installationId: string
+  idClass: IdClass
+}
+
+let cached: CachedId | null = null
+let initPromise: Promise<{ legacyId: string | null }> | null = null
 
 function deviceIdPath(): string {
   return path.join(configDir(), 'device-id.txt')
 }
 
-export function getDeviceId(): string {
-  if (cached) return cached
+function migrationGuardPath(): string {
+  return path.join(configDir(), 'identity-migration-completed')
+}
 
-  const filePath = deviceIdPath()
+const LEGACY_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+function isLegacyUuid(value: string): boolean {
+  return LEGACY_UUID_RE.test(value)
+}
+
+async function deriveMachineId(): Promise<{ machineId: string; idClass: IdClass }> {
   try {
-    const existing = fs.readFileSync(filePath, 'utf-8').trim()
-    if (existing) {
-      cached = existing
-      return existing
+    const sys = await si.system()
+    const uuid = (sys.uuid || '').trim()
+    // Reject placeholder-style UUIDs that some firmware reports.
+    if (uuid && uuid !== '-' && uuid !== '00000000-0000-0000-0000-000000000000') {
+      return { machineId: uuid, idClass: 'machine_derived' }
     }
   } catch {
-    // file doesn't exist yet; fall through and create it
+    // fall through to fallback
   }
+  // Fallback: random UUID, flagged so dashboards can quarantine.
+  // (A MAC-address fallback could go here in a future iteration.)
+  return { machineId: randomUUID(), idClass: 'random_fallback' }
+}
 
-  const id = randomUUID()
+function computeInstallationId(machineId: string): string {
+  return createHash('sha256').update(`${machineId}:${INSTALLATION_ID_SALT}`).digest('hex')
+}
+
+function isMigrationCompleted(): boolean {
+  try {
+    return fs.existsSync(migrationGuardPath())
+  } catch {
+    return false
+  }
+}
+
+function writeIdFile(installationId: string): void {
+  const filePath = deviceIdPath()
   try {
     fs.mkdirSync(path.dirname(filePath), { recursive: true })
-    fs.writeFileSync(filePath, id, { flag: 'wx' })
-    cached = id
-    return id
-  } catch (err) {
-    // Either the directory wasn't writable, or another process won the
-    // exclusive-create race. Re-read; the winning value is canonical.
-    if ((err as NodeJS.ErrnoException).code === 'EEXIST') {
-      try {
-        const existing = fs.readFileSync(filePath, 'utf-8').trim()
-        if (existing) {
-          cached = existing
-          return existing
-        }
-      } catch {
-        // ignore
-      }
-    }
-    // As a last resort, use the in-memory id without persisting it. The
-    // caller will end up with a session-scoped id, which is degraded but
-    // still functional for telemetry.
-    cached = id
-    return id
+    fs.writeFileSync(filePath, installationId)
+  } catch {
+    // best-effort persist; in-memory cache serves the rest of the session
   }
+}
+
+/**
+ * Initialize the device identity. Idempotent within a process — repeated
+ * calls return the same promise.
+ *
+ * Returns the legacy id ONLY if a one-shot migration just happened from a
+ * pre-v1 random-UUID `device-id.txt`. The caller is expected to fire
+ * `posthog.aliasImmediate({ distinctId: installation_id, alias: legacyId })`
+ * and a `desktop2.identity.migrated` event, then call
+ * `markIdentityMigrationCompleted()` so the alias does not re-fire on
+ * subsequent launches.
+ *
+ * Must be called once at app startup, before any synchronous
+ * `getDeviceId()` consumer runs.
+ */
+export function initDeviceId(): Promise<{ legacyId: string | null }> {
+  if (initPromise) return initPromise
+  initPromise = (async () => {
+    const filePath = deviceIdPath()
+    const { machineId, idClass } = await deriveMachineId()
+    const newId = computeInstallationId(machineId)
+
+    let existing: string | null = null
+    try {
+      const raw = fs.readFileSync(filePath, 'utf-8').trim()
+      if (raw.length > 0) existing = raw
+    } catch {
+      // file does not exist yet
+    }
+
+    if (existing === newId) {
+      cached = { installationId: newId, idClass }
+      return { legacyId: null }
+    }
+
+    // Existing differs from what we'd compute. Three cases:
+    //   (a) existing is a legacy UUID -> first migration, alias it.
+    //   (b) existing is a 64-char hex (different hash) -> salt rotated or
+    //       cross-machine copy. Update silently, no alias.
+    //   (c) existing is garbage -> overwrite, no alias.
+    const shouldAlias = existing != null
+      && isLegacyUuid(existing)
+      && !isMigrationCompleted()
+
+    writeIdFile(newId)
+    cached = { installationId: newId, idClass }
+    return { legacyId: shouldAlias ? existing : null }
+  })()
+  return initPromise
+}
+
+/**
+ * Synchronous accessor for the bound installation id.
+ *
+ * Must only be called after `initDeviceId()` has resolved. If called earlier,
+ * falls back to a random UUID flagged as `'random_fallback'` so a misordered
+ * call never throws and the data is still distinguishable from machine-derived
+ * ids in PostHog.
+ */
+export function getDeviceId(): string {
+  if (cached) return cached.installationId
+
+  // Degraded path — getDeviceId() was called before initDeviceId() resolved.
+  // Try the on-disk value first; if it's a previously-computed id, use it.
+  // Otherwise produce a random UUID (flagged) and persist it best-effort.
+  try {
+    const raw = fs.readFileSync(deviceIdPath(), 'utf-8').trim()
+    if (raw.length > 0) {
+      cached = { installationId: raw, idClass: 'random_fallback' }
+      return raw
+    }
+  } catch {
+    // fall through
+  }
+  const id = randomUUID()
+  cached = { installationId: id, idClass: 'random_fallback' }
+  writeIdFile(id)
+  return id
+}
+
+export function getIdClass(): IdClass {
+  return cached?.idClass ?? 'random_fallback'
+}
+
+/**
+ * Records that the one-shot legacy-id alias has been issued, so subsequent
+ * boots do not re-fire it. Idempotent.
+ *
+ * Note: if the alias network call ultimately fails to deliver (offline user),
+ * we still mark complete so we don't retry on every boot indefinitely. The
+ * cost is one legacy-id person not merged in PostHog for that user; PostHog
+ * dashboards quarantine `id_class: 'random_fallback'` to mitigate.
+ */
+export function markIdentityMigrationCompleted(): void {
+  try {
+    fs.mkdirSync(path.dirname(migrationGuardPath()), { recursive: true })
+    fs.writeFileSync(migrationGuardPath(), new Date().toISOString())
+  } catch {
+    // best effort
+  }
+}
+
+/** @internal — exposed for tests. */
+export function _resetForTest(): void {
+  cached = null
+  initPromise = null
 }

@@ -44,7 +44,7 @@ import { getSnapshotListData } from './lib/snapshots'
 import { update as updateInstallation } from './installations'
 import { lookupInstallUpdateOverride } from './lib/e2eOverrides'
 import * as mainTelemetry from './lib/telemetry'
-import { getDeviceId } from './lib/deviceId'
+import { getDeviceId, getIdClass, initDeviceId, markIdentityMigrationCompleted } from './lib/deviceId'
 
 import {
   claimAttachHost,
@@ -946,10 +946,32 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
       isPackaged: app.isPackaged,
     })
     mainTelemetry.installAppHooks()
-    mainTelemetry.identify(getDeviceId(), {
+
+    // Initialize the deterministic device identity. Replaces the legacy
+    // random-UUID device-id.txt with SHA-256(machine_id + salt) per the
+    // Unified Analytics PRD §6 identity model. On a one-shot migration from
+    // a legacy random-UUID id, alias it into the new id so PostHog merges
+    // histories. The migration guard file ensures the alias never re-fires.
+    const { legacyId } = await initDeviceId()
+    const installationId = getDeviceId()
+    if (legacyId) {
+      await mainTelemetry.aliasImmediate(installationId, legacyId)
+      mainTelemetry.capture('desktop2.identity.migrated', {
+        from_id: legacyId,
+        to_id: installationId,
+        id_class: getIdClass(),
+      })
+      // Mark complete unconditionally so we don't retry the alias every boot
+      // even if the network call failed to deliver. The cost of a failed
+      // alias is one legacy person left unmerged for that user.
+      markIdentityMigrationCompleted()
+    }
+
+    mainTelemetry.identify(installationId, {
       app_version: APP_VERSION,
       platform: process.platform,
       arch: process.arch,
+      id_class: getIdClass(),
     })
 
     const locale = (settings.get('language') as string | undefined) || app.getLocale().split('-')[0]

@@ -182,6 +182,27 @@ export function captureException(error: unknown, properties: TelemetryContext = 
 }
 
 /**
+ * Issue a one-shot alias to merge a legacy distinct id into the current one.
+ *
+ * Used by the boot-time identity migration (random-UUID `device-id.txt` ->
+ * SHA-256(machine_id + salt)) so PostHog reconciles historical events under
+ * the new identity. Uses `aliasImmediate` so the promise resolves once
+ * PostHog has accepted the call; failures are swallowed.
+ *
+ * Skipped when consent has not been granted so a `'denied'` / `'undecided'`
+ * user does not ship a network call that names their legacy id.
+ */
+export async function aliasImmediate(distinctId: string, alias: string): Promise<void> {
+  if (!client) return
+  if (!consentEnabled) return
+  try {
+    await client.aliasImmediate({ distinctId, alias })
+  } catch {
+    // ignore – telemetry must never break the app
+  }
+}
+
+/**
  * Wrap an async step with start/end/error telemetry events that mirror legacy
  * desktop's `@trackEvent` decorator. Errors are re-thrown so callers can
  * continue normal control flow.
