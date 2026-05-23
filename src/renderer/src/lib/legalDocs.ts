@@ -605,7 +605,6 @@ export const THIRD_PARTY_NOTICES: LegalDoc = {
       items: [
         '**electron-updater** — MIT — github.com/electron-userland/electron-builder',
         '**Datadog Browser RUM** — Apache License 2.0 — github.com/DataDog/browser-sdk',
-        '**PostHog (JS)** — MIT — github.com/PostHog/posthog-js',
         '**PostHog (Node)** — MIT — github.com/PostHog/posthog-js-lite',
       ],
     },
