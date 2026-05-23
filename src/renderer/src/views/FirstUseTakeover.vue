@@ -93,10 +93,17 @@ let completedFired = false
 function emitCompleted(exitPath: 'cloud' | 'local-new' | 'local-migrate' | 'skipped'): void {
   if (completedFired) return
   completedFired = true
+  const durationMs = Date.now() - mountedAt
+  // Phase 2.4 sharpening (04 cross-cutting Sharpen #7). Adds the
+  // "was this a fresh user vs returning vs a Desktop-1 migrator" split
+  // so the onboarding dashboard's drop-off analysis can cohort by it.
   emitTelemetryAction('desktop2.first_use.completed', {
     exit_path: exitPath,
     steps_seen: stepsSeen.size,
-    duration_ms: Date.now() - mountedAt
+    duration_ms: durationMs,
+    duration_seconds: Math.round(durationMs / 1000),
+    had_legacy: hasLegacyDesktop.value,
+    had_existing_install: skipPick.value,
   })
 }
 /** When the host detects prior usage of the launcher (any
