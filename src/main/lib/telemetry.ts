@@ -61,6 +61,21 @@ export function _resetTelemetryRelayTargets(): void {
   _telemetryRelayTargets.clear()
 }
 
+/**
+ * @internal — exposed for tests. Resets module-level identity / consent /
+ * pending state so consecutive test suites don't share state. Does not
+ * close an in-flight PostHog client — tests bring their own mocked one.
+ */
+export function _resetForTest(): void {
+  client = null
+  distinctId = null
+  consentState = 'undecided'
+  pendingSessionStart = null
+  pendingIdentifyProperties = null
+  initialized = false
+  drainingForQuit = false
+}
+
 /** @internal — exposed for tests. */
 export function _telemetryRelayTargetCount(): number {
   return _telemetryRelayTargets.size
@@ -82,16 +97,65 @@ function readPostHogConfig(): PostHogConfig {
 
 let client: PostHog | null = null
 let distinctId: string | null = null
-let consentEnabled = true
 let bootstrapTimeMs: number = Date.now()
 let initialized = false
 
-export function setConsent(enabled: boolean): void {
-  consentEnabled = enabled
-  if (!enabled) {
-    // Best-effort flush so already-queued events still go out
+/**
+ * Three-state consent.
+ *
+ * - `'granted'`   — user opted in. Everything ships.
+ * - `'denied'`    — user opted out. Nothing ships.
+ * - `'undecided'` — user has not chosen yet (fresh install OR a Desktop-1
+ *                   migrator whose `telemetryEnabled` setting was never set).
+ *                   Only events in `PRE_CONSENT_ALLOWED_EVENTS` ship; everything
+ *                   else is suppressed until the user makes a choice. Mirrors
+ *                   the renderer's pre-consent gate in `rendererBootstrap.ts`.
+ *
+ * Default at module load is `'undecided'`: if `setConsentState` is never
+ * called (test paths, mis-wired boot), we fail closed.
+ */
+export type ConsentState = 'granted' | 'denied' | 'undecided'
+
+let consentState: ConsentState = 'undecided'
+
+const PRE_CONSENT_ALLOWED_EVENTS: ReadonlySet<string> = new Set([
+  'desktop2.first_use.consent_decision',
+])
+
+function isAllowedToFire(event: string): boolean {
+  if (consentState === 'granted') return true
+  if (consentState === 'denied') return false
+  return PRE_CONSENT_ALLOWED_EVENTS.has(event)
+}
+
+/**
+ * Set the current consent state. The deferred `desktop2.session.started`
+ * event (and the deferred `identify` person-property update) fire as soon
+ * as state transitions to `'granted'`.
+ */
+export function setConsentState(state: ConsentState): void {
+  const previous = consentState
+  consentState = state
+  if (state !== 'granted') {
+    // Best-effort flush so already-queued events still go out before we
+    // start suppressing.
     void client?.flush().catch(() => {})
+    return
   }
+  // Transitioned to granted. Ship anything we held back.
+  if (previous !== 'granted') {
+    tryFlushDeferred()
+  }
+}
+
+/**
+ * Legacy two-state adapter. Existing callers can keep using `setConsent(bool)`
+ * during the Phase-1 transition; new code calls `setConsentState` directly.
+ * Note: this maps `false → 'denied'` (NOT `'undecided'`). Pass `'undecided'`
+ * explicitly via `setConsentState` for the first-use case.
+ */
+export function setConsent(enabled: boolean): void {
+  setConsentState(enabled ? 'granted' : 'denied')
 }
 
 export function isInitialized(): boolean {
@@ -139,21 +203,18 @@ export function initTelemetry(opts: InitOptions): void {
 }
 
 let pendingSessionStart: Record<string, TelemetryValue> | null = null
+let pendingIdentifyProperties: Record<string, TelemetryValue> | null = null
 
-/**
- * Bind the persistent device id once it is known. Emits the deferred
- * session-start event with the now-known distinctId.
- */
-export function identify(
-  id: string,
-  properties: Record<string, TelemetryValue> = {},
-): void {
-  distinctId = id
-  if (!client) return
-  try {
-    client.identify({ distinctId: id, properties: { $set: properties } })
-  } catch {
-    // ignore
+function tryFlushDeferred(): void {
+  if (!client || !distinctId) return
+  if (consentState !== 'granted') return
+  if (pendingIdentifyProperties) {
+    try {
+      client.identify({ distinctId, properties: { $set: pendingIdentifyProperties } })
+    } catch {
+      // ignore
+    }
+    pendingIdentifyProperties = null
   }
   if (pendingSessionStart) {
     capture('desktop2.session.started', pendingSessionStart)
@@ -161,9 +222,26 @@ export function identify(
   }
 }
 
+/**
+ * Bind the persistent device id once it is known. If consent is granted,
+ * fires the deferred session-start event and ships person-property updates.
+ * If consent is `'denied'` or `'undecided'`, the binding happens in module
+ * state (so `capture` works once consent flips to granted) but no network
+ * calls are made until `setConsentState('granted')` is called.
+ */
+export function identify(
+  id: string,
+  properties: Record<string, TelemetryValue> = {},
+): void {
+  distinctId = id
+  pendingIdentifyProperties = properties
+  if (!client) return
+  tryFlushDeferred()
+}
+
 export function capture(event: string, properties: TelemetryContext = {}): void {
   if (!client || !distinctId) return
-  if (!consentEnabled) return
+  if (!isAllowedToFire(event)) return
   try {
     client.capture({ distinctId, event, properties })
   } catch {
@@ -173,7 +251,8 @@ export function capture(event: string, properties: TelemetryContext = {}): void 
 
 export function captureException(error: unknown, properties: TelemetryContext = {}): void {
   if (!client || !distinctId) return
-  if (!consentEnabled) return
+  // Exceptions are reliability data; suppress them outside `'granted'`.
+  if (consentState !== 'granted') return
   try {
     client.captureException(error, distinctId, properties)
   } catch {
@@ -189,12 +268,13 @@ export function captureException(error: unknown, properties: TelemetryContext = 
  * the new identity. Uses `aliasImmediate` so the promise resolves once
  * PostHog has accepted the call; failures are swallowed.
  *
- * Skipped when consent has not been granted so a `'denied'` / `'undecided'`
- * user does not ship a network call that names their legacy id.
+ * Suppressed unless consent is `'granted'`. Aliases ship identifying data
+ * (the legacy id), so we never even attempt the network call when consent
+ * is `'denied'` or `'undecided'`.
  */
 export async function aliasImmediate(distinctId: string, alias: string): Promise<void> {
   if (!client) return
-  if (!consentEnabled) return
+  if (consentState !== 'granted') return
   try {
     await client.aliasImmediate({ distinctId, alias })
   } catch {
@@ -263,7 +343,7 @@ export function bucketError(input: unknown): string {
  * host window opens.
  */
 export function forwardToRenderer(event: string, context: TelemetryContext = {}): void {
-  if (!consentEnabled) return
+  if (!isAllowedToFire(event)) return
   const payload = { event, context, mainAlreadyCaptured: true }
   for (const wc of _telemetryRelayTargets) {
     if (!wc.isDestroyed()) {

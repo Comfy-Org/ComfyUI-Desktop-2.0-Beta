@@ -143,7 +143,15 @@ export function applySettingSet(key: string, value: unknown): void {
   }
   if (key === 'telemetryEnabled') {
     _broadcastToRenderer('telemetry-setting-changed', value)
-    mainTelemetry.setConsent(value !== false)
+    // Three-state: explicit true => granted, explicit false => denied,
+    // anything else (null / undefined) => undecided. Keeps `null != false`
+    // so a Desktop-1 migrator who has not been prompted yet stays
+    // suppressed instead of being collapsed into "opted in."
+    const state: mainTelemetry.ConsentState =
+      value === true ? 'granted'
+        : value === false ? 'denied'
+          : 'undecided'
+    mainTelemetry.setConsentState(state)
   }
   if (key === 'autoInstallUpdates' || key === 'autoUpdate') {
     // Re-broadcast the cached app-update state so a pending 'ready'

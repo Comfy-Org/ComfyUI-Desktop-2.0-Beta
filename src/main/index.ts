@@ -938,8 +938,17 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
 
     // Bring up main-process telemetry as early as possible so install/migrate
     // sub-step events can fire even before the renderer mounts.
-    const telemetryEnabled = settings.get('telemetryEnabled') !== false
-    mainTelemetry.setConsent(telemetryEnabled)
+    //
+    // Three-state consent: `undefined` means "user has not chosen yet"
+    // (fresh install OR a Desktop-1 migrator whose `telemetryEnabled` was
+    // never written). Mirrors the renderer's pre-consent gate so nothing
+    // ships before the user makes a deliberate choice.
+    const telemetrySetting = settings.get('telemetryEnabled') as boolean | undefined
+    const initialConsent: mainTelemetry.ConsentState =
+      telemetrySetting === true ? 'granted'
+        : telemetrySetting === false ? 'denied'
+          : 'undecided'
+    mainTelemetry.setConsentState(initialConsent)
     mainTelemetry.initTelemetry({
       appVersion: APP_VERSION,
       appEnv: app.isPackaged ? 'prod-v2' : 'dev',

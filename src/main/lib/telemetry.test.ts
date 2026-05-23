@@ -139,6 +139,93 @@ describe('telemetry.trackedStep', () => {
   })
 })
 
+describe('telemetry consent state (3-state)', () => {
+  beforeEach(async () => {
+    captured.length = 0
+    process.env['POSTHOG_API_KEY'] = 'test-key'
+    process.env['POSTHOG_ENABLED'] = '1'
+    // Reset module state so each test starts with fresh pendingSessionStart etc.
+    telemetry._resetForTest()
+    telemetry.initTelemetry({ appVersion: '0.0.0', appEnv: 'test', isPackaged: false })
+    // identify *after* state changes per test so the deferral path is exercised.
+  })
+
+  afterEach(() => {
+    delete process.env['POSTHOG_API_KEY']
+    delete process.env['POSTHOG_ENABLED']
+    // Reset to granted so other test blocks behave like the legacy default.
+    telemetry.setConsentState('granted')
+  })
+
+  it('undecided suppresses regular events but allows the consent_decision event', async () => {
+    telemetry.setConsentState('undecided')
+    telemetry.identify('test-distinct-id')
+    captured.length = 0
+
+    telemetry.capture('desktop2.execution.started', { foo: 'bar' })
+    telemetry.capture('desktop2.first_use.consent_decision', { accepted: false })
+
+    const events = captured.map((c) => c.event)
+    expect(events).toEqual(['desktop2.first_use.consent_decision'])
+  })
+
+  it('denied suppresses every event including the consent_decision one', async () => {
+    telemetry.setConsentState('denied')
+    telemetry.identify('test-distinct-id')
+    captured.length = 0
+
+    telemetry.capture('desktop2.execution.started', {})
+    telemetry.capture('desktop2.first_use.consent_decision', { accepted: false })
+
+    expect(captured).toHaveLength(0)
+  })
+
+  it('defers session.started + identify person properties until consent flips to granted', async () => {
+    telemetry.setConsentState('undecided')
+    telemetry.identify('deferred-id', { app_version: '1.2.3' })
+
+    // Nothing should have shipped yet — neither the identify nor session.started.
+    expect(captured).toHaveLength(0)
+
+    telemetry.setConsentState('granted')
+
+    const events = captured.map((c) => c.event)
+    expect(events).toContain('desktop2.session.started')
+    expect(captured.find((c) => c.event === 'desktop2.session.started')?.distinctId).toBe('deferred-id')
+  })
+
+  it('legacy setConsent(true) maps to granted; setConsent(false) maps to denied', () => {
+    telemetry.setConsent(true)
+    telemetry.identify('legacy-id')
+    captured.length = 0
+    telemetry.capture('any.event', {})
+    expect(captured).toHaveLength(1)
+
+    telemetry.setConsent(false)
+    captured.length = 0
+    telemetry.capture('any.event', {})
+    expect(captured).toHaveLength(0)
+  })
+
+  it('aliasImmediate is suppressed outside granted', async () => {
+    // We can't assert PostHog.aliasImmediate was NOT called (the mock doesn't
+    // track it), but we can confirm it doesn't throw and returns undefined.
+    telemetry.setConsentState('undecided')
+    telemetry.identify('any')
+    await expect(
+      telemetry.aliasImmediate('new', 'legacy'),
+    ).resolves.toBeUndefined()
+  })
+
+  it('captureException is suppressed outside granted', () => {
+    telemetry.setConsentState('denied')
+    telemetry.identify('any')
+    // We don't have a mock that tracks captureException calls, but the call
+    // should be a no-op (no throw).
+    expect(() => telemetry.captureException(new Error('boom'), {})).not.toThrow()
+  })
+})
+
 describe('telemetry.forwardToRenderer + telemetry-relay registry', () => {
   beforeEach(async () => {
     telemetry._resetTelemetryRelayTargets()

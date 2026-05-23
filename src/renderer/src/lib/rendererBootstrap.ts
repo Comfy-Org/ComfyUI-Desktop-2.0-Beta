@@ -107,7 +107,11 @@ const datadogBeforeSend: RumBeforeSend = (event) => {
 }
 
 function toDatadogTrackingConsent(enabled: boolean | undefined): DatadogTrackingConsent {
-  return enabled === false ? 'not-granted' : 'granted'
+  // Three-state: only explicit `true` grants. `false` AND `undefined` (user
+  // has not made a choice yet) both produce `'not-granted'` so Datadog RUM's
+  // autocapture streams (views, resources, long tasks, user interactions)
+  // do not collect pre-consent.
+  return enabled === true ? 'granted' : 'not-granted'
 }
 
 async function getTelemetryEnabledSetting(): Promise<boolean | undefined> {
