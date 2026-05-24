@@ -14,13 +14,13 @@ const props = withDefaults(
     side?: TooltipSide
     delayMs?: number
   }>(),
-  { side: 'top', delayMs: 100 },
+  { side: 'top', delayMs: 100 }
 )
 </script>
 
 <template>
   <Tooltip :text="props.text" :side="props.side" :delay-ms="props.delayMs">
-    <span class="info-tooltip-trigger" tabindex="0">
+    <span class="info-tooltip-trigger" tabindex="0" role="button" :aria-label="props.text">
       <CircleHelp :size="14" class="info-tooltip-icon" />
     </span>
   </Tooltip>
