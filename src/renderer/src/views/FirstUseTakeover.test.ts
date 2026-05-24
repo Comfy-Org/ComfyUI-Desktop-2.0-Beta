@@ -1,8 +1,9 @@
 /**
- * Consent-screen behaviour tests for FirstUseTakeover.
+ * Start-screen behaviour tests for FirstUseTakeover (merged T&C +
+ * Cloud-vs-Local picker).
  *
  * Scope:
- *   - Get Started button stays disabled until the Terms checkbox is
+ *   - Continue button stays disabled until the Terms checkbox is
  *     checked (legally required affirmative-assent gate).
  *   - The two inline links on the Terms row route to the right docs
  *     (`'eula'` and `'tos'`), and the telemetry Learn-more routes to
@@ -11,7 +12,7 @@
  *
  * Heavy children (BrandTakeoverLayout, ModalShell, TermsModal,
  * WhyTryCloudModal, etc.) are stubbed so the test can focus on the
- * consent-step DOM without dragging in their dependencies.
+ * start-step DOM without dragging in their dependencies.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
@@ -28,10 +29,21 @@ vi.mock('../components/ModalShell.vue', () => ({
   default: { template: '<div data-testid="stub-modal-shell"><slot /></div>' },
 }))
 vi.mock('../components/ChoiceCard.vue', () => ({
-  default: { template: '<div data-testid="stub-choice-card" />' },
+  default: {
+    template:
+      '<div data-testid="stub-choice-card"><slot name="label-trailing" /><slot /></div>',
+  },
 }))
 vi.mock('../components/WhyTryCloudModal.vue', () => ({
   default: { template: '<div data-testid="stub-why-cloud" />' },
+}))
+vi.mock('../components/TooltipWrap.vue', () => ({
+  default: {
+    name: 'TooltipWrap',
+    props: ['text'],
+    template:
+      '<span data-testid="stub-tooltip-wrap" :data-text="text"><slot /></span>',
+  },
 }))
 vi.mock('../components/TermsModal.vue', () => ({
   default: {
@@ -74,10 +86,10 @@ function mountTakeover() {
   })
 }
 
-describe('FirstUseTakeover consent step', () => {
-  it('Get Started is disabled until the Terms checkbox is checked', async () => {
+describe('FirstUseTakeover start step', () => {
+  it('Continue is disabled until the Terms checkbox is checked', async () => {
     const wrapper = mountTakeover()
-    const accept = wrapper.find('[data-testid="first-use-accept-consent"]')
+    const accept = wrapper.find('[data-testid="first-use-continue"]')
     expect(accept.exists()).toBe(true)
     // Initial state: terms unchecked → button disabled.
     expect(accept.attributes('disabled')).toBeDefined()
@@ -110,6 +122,17 @@ describe('FirstUseTakeover consent step', () => {
     await wrapper.find('[data-testid="first-use-telemetry-learn-more"]').trigger('click')
     const modal = wrapper.find('[data-testid="stub-terms-modal"]')
     expect(modal.attributes('data-doc')).toBe('privacy')
+  })
+
+  it('Cloud (i) icon is wrapped in TooltipWrap carrying the whyTryCloud copy', () => {
+    const wrapper = mountTakeover()
+    const infoBtn = wrapper.find('[data-testid="first-use-why-cloud"]')
+    expect(infoBtn.exists()).toBe(true)
+    const tooltip = infoBtn.element.closest(
+      '[data-testid="stub-tooltip-wrap"]',
+    ) as HTMLElement | null
+    expect(tooltip).not.toBeNull()
+    expect(tooltip?.getAttribute('data-text')).toBe('firstUse.whyTryCloud')
   })
 
   it('closing the terms modal clears termsDoc (modal unmounts)', async () => {
