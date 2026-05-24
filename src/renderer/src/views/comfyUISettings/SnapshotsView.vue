@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Download, RotateCcw, Trash2 } from 'lucide-vue-next'
+import { Download, RotateCcw, Trash2, Upload } from 'lucide-vue-next'
 import { useModal } from '../../composables/useModal'
 import { emitTelemetryAction, toCountBucket } from '../../lib/telemetry'
 import {
@@ -115,21 +115,39 @@ async function load(): Promise<void> {
     console.error('SnapshotsView.load failed', err)
   } finally {
     loading.value = false
+    if (expandedFilenames.value.size === 0) {
+      const firstSnapshot = timeline.value.find(
+        (item): item is Extract<TimelineItem, { kind: 'snapshot' }> => item.kind === 'snapshot',
+      )
+      if (firstSnapshot) {
+        expandedFilenames.value = new Set([firstSnapshot.snapshot.filename])
+      }
+    }
   }
 }
 
 // --- Per-row expansion (change summary) ---
 
-const expanded = ref<string | null>(null)
+const expandedFilenames = ref<Set<string>>(new Set())
+
+function isExpanded(filename: string): boolean {
+  return expandedFilenames.value.has(filename)
+}
 
 function toggleExpand(filename: string): void {
-  expanded.value = expanded.value === filename ? null : filename
+  const next = new Set(expandedFilenames.value)
+  if (next.has(filename)) {
+    next.delete(filename)
+  } else {
+    next.add(filename)
+  }
+  expandedFilenames.value = next
 }
 
 watch(
   () => props.installationId,
   () => {
-    expanded.value = null
+    expandedFilenames.value = new Set()
     void load()
   },
   { immediate: true }
@@ -165,7 +183,7 @@ async function handleSave(): Promise<void> {
     action: 'save',
     snapshot_count_bucket: toCountBucket(snapshots.value.length)
   })
-  expanded.value = null
+  expandedFilenames.value = new Set()
   await load()
   emit('refresh-all')
 }
@@ -237,7 +255,11 @@ async function handleDelete(filename: string): Promise<void> {
     action: 'delete',
     snapshot_count_bucket: toCountBucket(snapshots.value.length)
   })
-  if (expanded.value === filename) expanded.value = null
+  if (expandedFilenames.value.has(filename)) {
+    const next = new Set(expandedFilenames.value)
+    next.delete(filename)
+    expandedFilenames.value = next
+  }
   await load()
   emit('refresh-all')
 }
@@ -357,6 +379,7 @@ async function handleImport(): Promise<void> {
           :aria-label="t('snapshots.importSnapshots', 'Import')"
           @click="handleImport"
         >
+          <Upload :size="14" aria-hidden="true" />
           <span>{{ t('snapshots.importSnapshots', 'Import') }}</span>
         </button>
         <button
@@ -366,6 +389,7 @@ async function handleImport(): Promise<void> {
           :aria-label="t('snapshots.exportAll', 'Export All')"
           @click="handleExportAll"
         >
+          <Download :size="14" aria-hidden="true" />
           <span>{{ t('snapshots.exportAll', 'Export All') }}</span>
         </button>
       </div>
@@ -398,7 +422,7 @@ async function handleImport(): Promise<void> {
           <div class="snapshots-rail-save-box">
             <button
               type="button"
-              class="snapshots-rail-cta primary"
+              class="snapshots-rail-cta"
               :aria-label="t('snapshots.saveSnapshot', 'Save Snapshot')"
               @click="handleSave"
             >
@@ -432,8 +456,8 @@ async function handleImport(): Promise<void> {
           <template v-if="item.kind === 'snapshot'">
             <SnapshotRow
               :snapshot="item.snapshot"
-              :expanded="expanded === item.snapshot.filename"
-              :is-current="i === 0"
+              :expanded="isExpanded(item.snapshot.filename)"
+              :is-latest="i === 0"
               @toggle="toggleExpand(item.snapshot.filename)"
             >
               <template #expanded>
@@ -456,7 +480,7 @@ async function handleImport(): Promise<void> {
                 <div class="snapshots-view-detail-actions">
                   <button
                     type="button"
-                    class="snapshots-view-detail-btn primary"
+                    class="snapshots-view-detail-btn"
                     :aria-label="t('snapshots.restore', 'Restore')"
                     @click="handleRestore(item.snapshot.filename)"
                   >
@@ -506,41 +530,53 @@ async function handleImport(): Promise<void> {
 .snapshots-view {
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 16px;
 }
 
-/* Header row: "Latest: 8d ago" left, Import / Export All right. */
 .snapshots-view-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  border-bottom: 1px solid var(--secondary-background);
-  padding-bottom: 16px;
+  gap: 12px;
 }
 
 .snapshots-view-latest {
-  font-size: 14px;
-  color: var(--neutral-100);
-}
-
-.snapshots-view-latest strong {
-  color: var(--text);
-  font-weight: 500;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--text-muted);
 }
 
 .snapshots-view-toolbar {
   display: inline-flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
 }
 
 .snapshots-view-toolbtn {
   display: inline-flex;
   align-items: center;
+  gap: 5px;
+  min-height: 28px;
+  padding: 6px 12px;
   font-size: 12px;
+  font-weight: 500;
   color: var(--neutral-100);
-  gap: 4px;
+  border-radius: 8px;
+  border: 1px solid var(--chooser-surface-border);
+  background: var(--brand-surface-bg);
+  cursor: pointer;
+  transition: background-color 100ms ease;
+}
+
+.snapshots-view-toolbtn:hover:not(:disabled),
+.snapshots-view-toolbtn:focus-visible:not(:disabled) {
+  background: var(--brand-surface-bg-hover);
+  outline: none;
+}
+
+.snapshots-view-toolbtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .snapshots-view-status {
@@ -649,7 +685,7 @@ async function handleImport(): Promise<void> {
   display: flex;
   flex-direction: column;
   padding: 12px;
-  border: 1px dashed var(--secondary-background);
+  border: 1px dashed var(--chooser-surface-border);
   border-radius: 8px;
 }
 
@@ -662,6 +698,18 @@ async function handleImport(): Promise<void> {
   font-size: var(--takeover-fs-body);
   padding: 10px 14px;
   border-radius: 8px;
+  border: 1px solid var(--chooser-surface-border);
+  background: var(--brand-surface-bg);
+  color: var(--neutral-100);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 100ms ease;
+}
+
+.snapshots-rail-cta:hover,
+.snapshots-rail-cta:focus-visible {
+  background: var(--brand-surface-bg-hover);
+  outline: none;
 }
 
 .snapshots-rail-node.is-save .snapshots-rail-label {
@@ -684,20 +732,41 @@ async function handleImport(): Promise<void> {
 .snapshots-view-detail-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 2px;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-hover);
 }
 
 .snapshots-view-detail-btn {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  padding: 6px 10px;
+  min-height: 32px;
+  padding: 8px 16px;
   font-size: 12px;
-  border-radius: 6px;
+  font-weight: 500;
+  border-radius: 8px;
+  border: 1px solid var(--chooser-surface-border);
+  background: var(--brand-surface-bg);
+  color: var(--neutral-100);
+  cursor: pointer;
+  transition: background-color 100ms ease, border-color 100ms ease;
 }
 
-.snapshots-view-detail-btn-danger:hover {
+.snapshots-view-detail-btn:hover,
+.snapshots-view-detail-btn:focus-visible {
+  background: var(--brand-surface-bg-hover);
+  outline: none;
+}
+
+.snapshots-view-detail-btn-danger {
+  color: var(--danger);
+}
+
+.snapshots-view-detail-btn-danger:hover,
+.snapshots-view-detail-btn-danger:focus-visible {
   color: var(--danger);
   border-color: var(--danger);
 }
@@ -710,14 +779,18 @@ async function handleImport(): Promise<void> {
 }
 
 .snapshots-view-changes {
-  list-style: disc;
+  list-style: none;
   margin: 0;
-  padding-left: 18px;
+  padding: 0;
   font-size: var(--takeover-fs-caption);
   color: var(--text-muted);
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
+}
+
+.snapshots-view-changes li {
+  line-height: 16px;
 }
 
 .snapshots-view-no-changes {

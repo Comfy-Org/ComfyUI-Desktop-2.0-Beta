@@ -10,7 +10,6 @@ import {
   REQUIRES_STOPPED,
   type ActionDef,
   type DetailField,
-  type DetailItem,
   type DetailSection,
   type DiskSpaceInfo,
   type FieldOption,
@@ -89,7 +88,7 @@ export interface UseComfyUISettingsApi {
   /** Synthetic Status-tab row carrying the disk-usage reading. The
    *  status section payload doesn't include this — it lives on its own
    *  IPC — so the component renders it alongside the regular items. */
-  diskUsageItem: ComputedRef<DetailItem | null>
+  diskUsageItem: ComputedRef<{ label: string; value: string } | null>
 
   /** Install-level actions (`pinBottom` section from main). */
   pinBottomSection: ComputedRef<DetailSection | null>
@@ -497,35 +496,21 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
   // (`launch`); `runAction` picks the synthetic `'restart'` id up and
   // routes through stopComfyUI → wait → launch.
   const pinBottomActions = computed<ActionDef[]>(() => {
-    const acts = pinBottomSection.value?.actions ?? []
+    const acts = (pinBottomSection.value?.actions ?? []).filter(
+      (a) => a.id !== 'launch' && a.id !== 'restart',
+    )
     const inst = toValue(opts.installation)
     if (!inst) return acts
-    if (!sessionStore.isRunning(inst.id)) return acts
-    return acts.map((a) => {
-      if (a.id !== 'launch') return a
-      return {
-        ...a,
-        id: 'restart',
-        label: t('actions.restart'),
-        style: 'accent',
-        progressTitle: t('actions.restartProgressTitle'),
-        confirm: {
-          title: t('actions.restartConfirmTitle'),
-          message: t('actions.restartConfirmMessage'),
-          confirmLabel: t('actions.restartConfirm'),
-        },
-      }
-    })
+    return acts
   })
 
-  const diskUsageItem = computed<DetailItem | null>(() => {
+  const diskUsageItem = computed<{ label: string; value: string } | null>(() => {
     const ds = diskSpace.value
     if (!ds) return null
-    // `get-disk-space` returns total + free for the volume — used =
-    // total − free. Same arithmetic the legacy DetailModal uses.
     const used = Math.max(0, ds.total - ds.free)
     return {
-      label: `${t('comfyUISettings.diskUsage', 'Disk Usage')}: ${formatBytes(used)}`,
+      label: t('comfyUISettings.diskUsage', 'Disk Usage'),
+      value: formatBytes(used),
     }
   })
 

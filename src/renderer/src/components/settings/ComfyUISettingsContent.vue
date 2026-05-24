@@ -1,18 +1,18 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, toRef, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ChevronUp, ArrowLeft } from 'lucide-vue-next'
+import { ChevronUp, SlidersHorizontal, Info, RefreshCw, History } from 'lucide-vue-next'
 import { useComfyUISettings } from '../../composables/useComfyUISettings'
 import { useSessionStore } from '../../stores/sessionStore'
 import MoreMenu from '../../views/comfyUISettings/MoreMenu.vue'
 import ArgsBuilderPage from '../../views/comfyUISettings/ArgsBuilderPage.vue'
 import SnapshotsView from '../../views/comfyUISettings/SnapshotsView.vue'
+import StatusFactPanel from '../../views/comfyUISettings/StatusFactPanel.vue'
 import SettingsSectionList from '../../views/comfyUISettings/SettingsSectionList.vue'
 import type { PickerTab } from '../../lib/pickerTabs'
 import type {
   ActionDef,
   DetailField,
-  DetailSection,
   Installation,
   ShowProgressOpts
 } from '../../types/ipc'
@@ -30,15 +30,10 @@ export type ComfyUISettingsTab = PickerTab
 interface Props {
   installation: Installation | null
   initialTab?: ComfyUISettingsTab
-  /** Render a leading "← Back" affordance in the tab strip. Opt-in
-   *  because the drawer host owns its own back-chrome; only the
-   *  picker's expanded right pane needs an in-content back. */
-  showBack?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  initialTab: 'config',
-  showBack: false
+  initialTab: 'config'
 })
 
 const emit = defineEmits<{
@@ -56,10 +51,6 @@ const emit = defineEmits<{
    *  expanded view's footer. Payload carries the running flag so the
    *  host doesn't have to re-derive it. */
   'primary-action': [running: boolean]
-  /** Leading back affordance click (only rendered when
-   *  `showBack === true`). Host decides what "back" means — for the
-   *  picker it collapses the expanded mode. */
-  back: []
 }>()
 
 const { t } = useI18n()
@@ -93,30 +84,30 @@ const {
 
 interface TabDef {
   key: ComfyUISettingsTab
-  /** The `DetailSection.tab` literal we filter for. The Figma's "Config"
-   *  is sourced from sections tagged `'settings'` (launch-settings
-   *  fields built by `buildLaunchSettingsFields` in main). */
   sectionTab: 'settings' | 'status' | 'update' | 'snapshots'
   label: string
+  icon: typeof SlidersHorizontal
 }
 
-// Tab visibility is data-driven: a tab is shown iff main emitted at
-// least one section for it. Cloud sources don't emit `update` or
-// `snapshots` sections (see urlSource.ts), so cloud opens with only
-// Config + Status — matching the picker's right-pane visibility rule.
 const ALL_TABS: TabDef[] = [
-  { key: 'config', sectionTab: 'settings', label: t('comfyUISettings.tabConfig', 'Config') },
-  { key: 'status', sectionTab: 'status', label: t('comfyUISettings.tabStatus', 'Status') },
-  { key: 'update', sectionTab: 'update', label: t('comfyUISettings.tabUpdate', 'Update') },
+  { key: 'config', sectionTab: 'settings', label: t('comfyUISettings.tabConfig', 'Config'), icon: SlidersHorizontal },
+  { key: 'status', sectionTab: 'status', label: t('comfyUISettings.tabStatus', 'Status'), icon: Info },
+  { key: 'update', sectionTab: 'update', label: t('comfyUISettings.tabUpdate', 'Update'), icon: RefreshCw },
   {
     key: 'snapshots',
     sectionTab: 'snapshots',
-    label: t('comfyUISettings.tabSnapshots', 'Snapshots')
-  }
+    label: t('comfyUISettings.tabSnapshots', 'Snapshots'),
+    icon: History,
+  },
 ]
 const tabs = computed<TabDef[]>(() =>
   ALL_TABS.filter((tab) => sectionsForTab(tab.sectionTab).value.length > 0)
 )
+
+const showUpdateBadge = computed(() => {
+  const inst = installation.value
+  return inst?.statusTag?.style === 'update' || inst?.status === 'update-available'
+})
 
 // If the currently selected tab disappeared (e.g. swapping a local
 // install for a cloud one while open), fall back to the requested
@@ -136,29 +127,10 @@ watch(tabs, (next) => {
 
 const visibleSections = computed(() => {
   const tab = tabs.value.find((tt) => tt.key === activeTab.value)?.sectionTab ?? 'settings'
-  const base = sectionsForTab(tab).value
-  // Status tab synthesizes one extra readonly row for total disk usage
-  // (driven off the same loader the rest of the tab uses). Append it
-  // through the shared section list so styling, collapse handling, and
-  // readonly chrome stay consistent with every other status row.
-  if (activeTab.value === 'status' && diskUsageItem.value) {
-    return [
-      ...base,
-      {
-        tab: 'status',
-        fields: [
-          {
-            id: '__disk-usage',
-            label: t('comfyUISettings.diskUsage', 'Disk Usage'),
-            value: diskUsageItem.value.label,
-            editable: false
-          }
-        ]
-      } as DetailSection
-    ]
-  }
-  return base
+  return sectionsForTab(tab).value
 })
+
+const statusSections = computed(() => sectionsForTab('status').value)
 
 const rootRef = useTemplateRef<HTMLElement>('root')
 
@@ -301,19 +273,11 @@ defineExpose({
   <div ref="root" class="settings-v2-content">
     <nav
       class="settings-v2-tabs"
+      :class="{ 'is-subpage-active': subPage !== null }"
       role="tablist"
       :aria-label="t('comfyUISettings.title', 'Settings')"
+      :aria-hidden="subPage !== null"
     >
-      <button
-        v-if="showBack"
-        type="button"
-        class="settings-v2-back"
-        :aria-label="t('common.back', 'Back')"
-        @click="emit('back')"
-      >
-        <ArrowLeft :size="14" aria-hidden="true" />
-        <span>{{ t('common.back', 'Back') }}</span>
-      </button>
       <button
         v-for="(tab, i) in tabs"
         :key="tab.key"
@@ -326,7 +290,13 @@ defineExpose({
         @click="selectTab(tab.key)"
         @keydown="handleTabKeydown($event, i)"
       >
-        {{ tab.label }}
+        <component :is="tab.icon" :size="14" aria-hidden="true" class="settings-v2-tab-icon" />
+        <span>{{ tab.label }}</span>
+        <span
+          v-if="tab.key === 'update' && showUpdateBadge"
+          class="settings-v2-tab-badge"
+          aria-hidden="true"
+        ></span>
       </button>
     </nav>
 
@@ -364,10 +334,20 @@ defineExpose({
                 @refresh-all="handleSnapshotsRefresh"
               />
             </div>
+            <div
+              v-else-if="activeTab === 'status' && installation"
+              key="tab-status"
+              class="settings-v2-tab-pane"
+            >
+              <StatusFactPanel
+                :installation="installation"
+                :sections="statusSections"
+                :disk-usage="diskUsageItem"
+              />
+            </div>
             <div v-else :key="`tab-${activeTab}`" class="settings-v2-tab-pane">
               <SettingsSectionList
                 :sections="visibleSections"
-                :readonly="activeTab === 'status'"
                 :installation-id="installation?.id"
                 @update-field="updateField"
                 @run-action="runAction"
@@ -432,51 +412,16 @@ defineExpose({
   border-bottom: 1px solid var(--chooser-surface-border);
 }
 
-/* Leading "← Back" affordance (picker expanded mode only — opt-in
- * via the `showBack` prop). Lives inside the tab strip so it sits at
- * the same baseline as the tabs and doesn't fight the tab nav for
- * vertical space. A short vertical rule separates it from the first
- * tab so the click target reads as distinct from the tab list. */
-.settings-v2-back {
-  -webkit-app-region: no-drag;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 6px 10px 6px 8px;
-  margin-right: 4px;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--neutral-100);
-  font-size: 13px;
-  font-weight: 400;
-  line-height: 16px;
-  cursor: pointer;
-  transition:
-    background-color 120ms ease,
-    color 120ms ease;
-  position: relative;
-}
-
-.settings-v2-back::after {
-  content: '';
-  position: absolute;
-  right: -4px;
-  top: 6px;
-  bottom: 6px;
-  width: 1px;
-  background: var(--chooser-surface-border);
-}
-
-.settings-v2-back:hover,
-.settings-v2-back:focus-visible {
-  background: var(--brand-surface-bg-hover);
-  color: var(--text);
-  outline: none;
+.settings-v2-tabs.is-subpage-active {
+  opacity: 0.35;
+  pointer-events: none;
 }
 
 .settings-v2-tab {
   -webkit-app-region: no-drag;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   padding: 6px 12px;
   background: transparent;
   border: none;
@@ -506,6 +451,19 @@ defineExpose({
   opacity: 1;
   color: var(--neutral-100);
   background: var(--neutral-800);
+}
+
+.settings-v2-tab-icon {
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+
+.settings-v2-tab-badge {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--warning);
+  flex-shrink: 0;
 }
 
 .settings-v2-body {

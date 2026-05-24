@@ -1,20 +1,13 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Plus, ShieldAlert, X } from 'lucide-vue-next'
+import { Plus, X } from 'lucide-vue-next'
 import BaseInput from '../../components/ui/BaseInput.vue'
 import type { DetailField } from '../../types/ipc'
 
 /**
- * Environment variables field for the brand-redesigned Settings drawer
- * (v2). Mirrors `EnvVarsEditor.vue`'s data model exactly — local KEY /
- * VALUE rows, duplicate-key highlight, single emit when any cell
- * changes — but in the drawer's design language.
- *
- * The parent (`ComfyUISettingsPanel`) listens for `update` and runs the
- * value through the composable's `updateField` → `update-installation`
- * IPC. Same path the legacy modal uses; main applies `sanitizeEnvVars`
- * server-side.
+ * Environment variables key/value editor. The field header and security
+ * callout live in SettingsSectionList — this component is body only.
  */
 
 interface Props {
@@ -36,8 +29,6 @@ interface Row {
 
 const rows = ref<Row[]>([])
 
-// Sync from prop to local state. Avoid resetting if the structural
-// contents haven't changed — would interrupt mid-edit typing on a key.
 watch(
   () => props.field.value,
   (val) => {
@@ -105,11 +96,6 @@ function onValueChange(i: number, val: string): void {
 
 <template>
   <div class="env-vars-field">
-    <div class="env-vars-notice">
-      <ShieldAlert :size="14" class="env-vars-notice-icon" aria-hidden="true" />
-      <span>{{ t('envVars.securityWarning') }}</span>
-    </div>
-
     <div v-if="rows.length > 0" class="env-vars-rows">
       <div class="env-vars-head" aria-hidden="true">
         <span>{{ t('envVars.name') }}</span>
@@ -125,8 +111,12 @@ function onValueChange(i: number, val: string): void {
             :placeholder="t('envVars.namePlaceholder')"
             :aria-label="t('envVars.name')"
             :invalid="isDuplicate(i)"
+            :aria-invalid="isDuplicate(i)"
             @change="onKeyChange(i, $event)"
           />
+          <p v-if="isDuplicate(i)" class="env-var-error" role="alert">
+            {{ t('envVars.duplicateKey', 'Duplicate key') }}
+          </p>
         </div>
         <div class="env-var-cell">
           <BaseInput
@@ -162,25 +152,6 @@ function onValueChange(i: number, val: string): void {
   gap: 10px;
 }
 
-.env-vars-notice {
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  border: 1px solid var(--chooser-surface-border);
-  background: rgba(255, 255, 255, 0.04);
-  font-size: 10.5px;
-  line-height: 16px;
-  color: var(--text-muted);
-}
-
-.env-vars-notice-icon {
-  flex-shrink: 0;
-  margin-top: 1px;
-  color: var(--neutral-100);
-}
-
 .env-vars-rows {
   display: flex;
   flex-direction: column;
@@ -211,6 +182,13 @@ function onValueChange(i: number, val: string): void {
   min-width: 0;
 }
 
+.env-var-error {
+  margin: 4px 0 0;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--danger);
+}
+
 .env-var-remove {
   flex-shrink: 0;
   width: 32px;
@@ -238,7 +216,6 @@ function onValueChange(i: number, val: string): void {
   outline: none;
 }
 
-/* Matches expanded picker left-bar "+ New Instance" affordance. */
 .env-var-add {
   align-self: flex-start;
   display: inline-flex;

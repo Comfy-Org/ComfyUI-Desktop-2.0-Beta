@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ChevronRight } from 'lucide-vue-next'
+import { ChevronRight, ShieldAlert } from 'lucide-vue-next'
 import BaseInput from '../../components/ui/BaseInput.vue'
 import BaseSelect, { type BaseSelectOption } from '../../components/ui/BaseSelect.vue'
 import BooleanToggle from './BooleanToggle.vue'
@@ -10,6 +10,7 @@ import EnvVarsField from './EnvVarsField.vue'
 import ChannelPicker from './ChannelPicker.vue'
 import ArgsBuilderField from './ArgsBuilderField.vue'
 import InfoTooltip from '../../components/InfoTooltip.vue'
+import BaseCopyButton from '../../components/ui/BaseCopyButton.vue'
 import TooltipWrap from '../../components/TooltipWrap.vue'
 import type { ActionDef, DetailField, DetailSection } from '../../types/ipc'
 
@@ -44,7 +45,7 @@ interface Props {
 
 const props = withDefaults(defineProps<Props>(), {
   readonly: false,
-  installationId: undefined,
+  installationId: undefined
 })
 
 const emit = defineEmits<{
@@ -74,7 +75,7 @@ watch(
       }
     }
   },
-  { immediate: true },
+  { immediate: true }
 )
 
 function isCollapsible(section: { title?: string; collapsed?: boolean }): boolean {
@@ -95,176 +96,269 @@ function toggleCollapsed(section: { title?: string }): void {
 }
 
 const visibleSections = computed(() => props.sections)
+
+const NESTED_FIELD_IDS = new Set(['useSharedOutputDir', 'outputDir'])
+
+function isNestedField(field: DetailField): boolean {
+  return NESTED_FIELD_IDS.has(field.id ?? '')
+}
+
+function hasChannelPicker(section: DetailSection): boolean {
+  return (section.fields ?? []).some((f) => f.editType === 'channel-cards')
+}
+
+function isPathLikeValue(value: unknown): boolean {
+  if (typeof value !== 'string') return false
+  const v = value.trim()
+  if (!v || v === '—') return false
+  return v.includes('/') || v.includes('\\') || v.startsWith('~')
+}
+
+function readonlyDisplayValue(field: DetailField): string {
+  return asString(field.value)
+}
+
+const envNoticeExpanded = ref(new Set<string>())
+
+function envNoticeKey(field: DetailField): string {
+  return field.id ?? 'env-vars'
+}
+
+function toggleEnvNotice(field: DetailField): void {
+  const key = envNoticeKey(field)
+  if (envNoticeExpanded.value.has(key)) {
+    envNoticeExpanded.value.delete(key)
+  } else {
+    envNoticeExpanded.value.add(key)
+  }
+}
+
+function isEnvNoticeExpanded(field: DetailField): boolean {
+  return envNoticeExpanded.value.has(envNoticeKey(field))
+}
+
+function fieldOwnsLabel(field: DetailField): boolean {
+  return field.editType === 'env-vars' || field.editType === 'channel-cards'
+}
 </script>
 
 <template>
   <div class="settings-v2-sections">
-  <article
-    v-for="(section, si) in visibleSections"
-    :key="`s-${si}`"
-    class="settings-v2-section"
-    :class="{
-      'is-readonly-list': readonly,
-      'is-collapsible': isCollapsible(section),
-      'is-collapsed': isCollapsible(section) && isCollapsed(section),
-    }"
-  >
-    <button
-      v-if="isCollapsible(section)"
-      type="button"
-      class="settings-v2-section-title is-toggle"
-      :aria-expanded="!isCollapsed(section)"
-      @click="toggleCollapsed(section)"
+    <article
+      v-for="(section, si) in visibleSections"
+      :key="`s-${si}`"
+      class="settings-v2-section"
+      :class="{
+        'is-readonly-list': readonly,
+        'is-collapsible': isCollapsible(section),
+        'is-collapsed': isCollapsible(section) && isCollapsed(section)
+      }"
     >
-      <ChevronRight
-        :size="14"
-        class="settings-v2-section-chevron"
-        :class="{ 'is-open': !isCollapsed(section) }"
-      />
-      {{ section.title }}
-    </button>
+      <button
+        v-if="isCollapsible(section)"
+        type="button"
+        class="settings-v2-section-title is-toggle"
+        :aria-expanded="!isCollapsed(section)"
+        @click="toggleCollapsed(section)"
+      >
+        <ChevronRight
+          :size="14"
+          class="settings-v2-section-chevron"
+          :class="{ 'is-open': !isCollapsed(section) }"
+        />
+        {{ section.title }}
+      </button>
 
-    <p
-      v-if="section.description && !isCollapsed(section)"
-      class="settings-v2-section-desc"
-    >
-      {{ section.description }}
-    </p>
+      <p
+        v-else-if="section.title && readonly"
+        class="settings-v2-section-title settings-v2-section-title--readonly"
+      >
+        {{ section.title }}
+      </p>
 
-    <div v-for="(item, i) in section.items" :key="`i-${i}`" class="settings-v2-item">
-      <span class="settings-v2-item-label">
-        {{ item.label }}{{ item.active ? ` (${t('common.active', 'active')})` : '' }}
-        <span v-if="item.tag" class="settings-v2-item-tag">{{ item.tag }}</span>
-      </span>
-      <span
-        v-if="item.actions && item.actions.length"
-        class="settings-v2-item-actions"
+      <p v-if="section.description && !isCollapsed(section)" class="settings-v2-section-desc">
+        {{ section.description }}
+      </p>
+
+      <div v-for="(item, i) in section.items" :key="`i-${i}`" class="settings-v2-item">
+        <span class="settings-v2-item-label">
+          {{ item.label }}{{ item.active ? ` (${t('common.active', 'active')})` : '' }}
+          <span v-if="item.tag" class="settings-v2-item-tag">{{ item.tag }}</span>
+        </span>
+        <span v-if="item.actions && item.actions.length" class="settings-v2-item-actions">
+          <TooltipWrap
+            v-for="a in item.actions"
+            :key="a.id"
+            :text="a.enabled === false && a.disabledMessage ? a.disabledMessage : a.tooltip"
+          >
+            <button
+              type="button"
+              :class="[
+                'settings-v2-action',
+                a.style,
+                { 'looks-disabled': a.enabled === false && a.disabledMessage }
+              ]"
+              :disabled="a.enabled === false && !a.disabledMessage"
+              @click="emit('run-action', a)"
+            >
+              {{ a.label }}
+            </button>
+          </TooltipWrap>
+        </span>
+      </div>
+
+      <div
+        v-for="field in section.fields"
+        :key="field.id"
+        class="settings-v2-field"
+        :class="{
+          'is-boolean-row': field.editType === 'boolean',
+          'is-nested': isNestedField(field),
+          'is-env-vars': field.editType === 'env-vars',
+          'is-channel-picker': field.editType === 'channel-cards'
+        }"
+      >
+        <template v-if="field.editType === 'env-vars'">
+          <div class="settings-v2-env-header">
+            <label class="settings-v2-field-label">
+              <span class="settings-v2-field-label-text">{{ field.label }}</span>
+              <InfoTooltip v-if="field.tooltip" :text="field.tooltip" />
+            </label>
+            <button
+              type="button"
+              class="settings-v2-env-notice"
+              :aria-pressed="isEnvNoticeExpanded(field)"
+              :aria-label="t('envVars.securityWarning')"
+              @click="toggleEnvNotice(field)"
+            >
+              <ShieldAlert :size="14" class="settings-v2-env-notice-icon" aria-hidden="true" />
+              <span class="settings-v2-env-notice-text">
+                {{
+                  isEnvNoticeExpanded(field)
+                    ? t('envVars.securityWarning')
+                    : t('envVars.securityWarningShort', 'Environment variables may contain secrets')
+                }}
+              </span>
+            </button>
+          </div>
+          <EnvVarsField :field="field" @update="(f, v) => emit('update-field', f, v)" />
+        </template>
+
+        <div v-else-if="field.editType === 'boolean'" class="settings-v2-boolean-row">
+          <label class="settings-v2-field-label">
+            <span class="settings-v2-field-label-text">{{ field.label }}</span>
+            <InfoTooltip v-if="field.tooltip" :text="field.tooltip" />
+          </label>
+          <BooleanToggle :field="field" @update="(v) => emit('update-field', field, v)" />
+        </div>
+
+        <template v-else>
+          <label v-if="!fieldOwnsLabel(field)" class="settings-v2-field-label">
+            <span class="settings-v2-field-label-text">{{ field.label }}</span>
+            <InfoTooltip v-if="field.tooltip" :text="field.tooltip" />
+          </label>
+
+          <PathField
+            v-if="field.editType === 'path' && !readonly"
+            :field="field"
+            @update="(f, v) => emit('update-field', f, v)"
+          />
+
+          <div
+            v-else-if="readonly && (field.editType === 'path' || isPathLikeValue(field.value))"
+            class="settings-v2-readonly-path"
+          >
+            <span class="settings-v2-field-readonly settings-v2-field-readonly-path">{{
+              readonlyDisplayValue(field)
+            }}</span>
+            <BaseCopyButton :value="readonlyDisplayValue(field)" />
+          </div>
+
+          <BaseSelect
+            v-else-if="field.editType === 'select'"
+            :model-value="asString(field.value)"
+            :options="
+              (field.options ?? []).map(
+                (opt): BaseSelectOption => ({
+                  value: opt.value,
+                  label: opt.label,
+                  description: opt.description
+                })
+              )
+            "
+            :aria-label="field.label"
+            @update:model-value="(v: string) => emit('update-field', field, v)"
+          />
+
+          <ArgsBuilderField
+            v-else-if="field.editType === 'args-builder'"
+            :field="field"
+            :installation-id="props.installationId"
+            @open="emit('open-args-page', field)"
+            @update="(f, v) => emit('update-field', f, v)"
+          />
+
+          <ChannelPicker
+            v-else-if="field.editType === 'channel-cards'"
+            :field="field"
+            :section-actions="section.actions ?? []"
+            @action="(a) => emit('run-action', a)"
+          />
+
+          <BaseInput
+            v-else-if="field.editType === 'text'"
+            :model-value="asString(field.value)"
+            :aria-label="field.label"
+            :placeholder="field.placeholder"
+            @change="(v: string) => emit('update-field', field, v)"
+          />
+
+          <BaseInput
+            v-else-if="field.editType === 'number'"
+            :model-value="asString(field.value)"
+            :aria-label="field.label"
+            type="number"
+            :min="field.min"
+            :max="field.max"
+            @change="(v: string) => emit('update-field', field, v === '' ? null : Number(v))"
+          />
+
+          <span v-else class="settings-v2-field-readonly">{{ asString(field.value) }}</span>
+        </template>
+      </div>
+
+      <div
+        v-if="section.actions && section.actions.length && !hasChannelPicker(section)"
+        class="settings-v2-actions"
       >
         <TooltipWrap
-          v-for="a in item.actions"
-          :key="a.id"
-          :text="a.enabled === false && a.disabledMessage ? a.disabledMessage : a.tooltip"
+          v-for="action in section.actions"
+          :key="action.id"
+          class="settings-v2-action-tooltip"
+          :text="
+            action.enabled === false && action.disabledMessage
+              ? action.disabledMessage
+              : action.tooltip
+          "
         >
           <button
             type="button"
             :class="[
               'settings-v2-action',
-              a.style,
-              { 'looks-disabled': a.enabled === false && a.disabledMessage },
+              {
+                primary: action.style === 'primary',
+                danger: action.style === 'danger',
+                'looks-disabled': action.enabled === false && action.disabledMessage
+              }
             ]"
-            :disabled="a.enabled === false && !a.disabledMessage"
-            @click="emit('run-action', a)"
+            :disabled="action.enabled === false && !action.disabledMessage"
+            @click="emit('run-action', action)"
           >
-            {{ a.label }}
+            {{ action.label }}
           </button>
         </TooltipWrap>
-      </span>
-    </div>
-
-    <div v-for="field in section.fields" :key="field.id" class="settings-v2-field">
-      <label class="settings-v2-field-label">
-        {{ field.label }}
-        <InfoTooltip v-if="field.tooltip" :text="field.tooltip" />
-      </label>
-
-      <BooleanToggle
-        v-if="field.editType === 'boolean'"
-        :field="field"
-        @update="(v) => emit('update-field', field, v)"
-      />
-
-      <BaseSelect
-        v-else-if="field.editType === 'select'"
-        :model-value="asString(field.value)"
-        :options="
-          (field.options ?? []).map(
-            (opt): BaseSelectOption => ({
-              value: opt.value,
-              label: opt.label,
-              description: opt.description,
-            }),
-          )
-        "
-        :aria-label="field.label"
-        @update:model-value="(v: string) => emit('update-field', field, v)"
-      />
-
-      <PathField
-        v-else-if="field.editType === 'path'"
-        :field="field"
-        @update="(f, v) => emit('update-field', f, v)"
-      />
-
-      <ArgsBuilderField
-        v-else-if="field.editType === 'args-builder'"
-        :field="field"
-        :installation-id="props.installationId"
-        @open="emit('open-args-page', field)"
-        @update="(f, v) => emit('update-field', f, v)"
-      />
-
-      <EnvVarsField
-        v-else-if="field.editType === 'env-vars'"
-        :field="field"
-        @update="(f, v) => emit('update-field', f, v)"
-      />
-
-      <ChannelPicker
-        v-else-if="field.editType === 'channel-cards'"
-        :field="field"
-        @action="(a) => emit('run-action', a)"
-      />
-
-      <BaseInput
-        v-else-if="field.editType === 'text'"
-        :model-value="asString(field.value)"
-        :aria-label="field.label"
-        :placeholder="field.placeholder"
-        @change="(v: string) => emit('update-field', field, v)"
-      />
-
-      <BaseInput
-        v-else-if="field.editType === 'number'"
-        :model-value="asString(field.value)"
-        :aria-label="field.label"
-        type="number"
-        :min="field.min"
-        :max="field.max"
-        @change="(v: string) => emit('update-field', field, v === '' ? null : Number(v))"
-      />
-
-      <span v-else class="settings-v2-field-readonly">{{ asString(field.value) }}</span>
-    </div>
-
-    <div v-if="section.actions && section.actions.length" class="settings-v2-actions">
-      <TooltipWrap
-        v-for="action in section.actions"
-        :key="action.id"
-        class="settings-v2-action-tooltip"
-        :text="
-          action.enabled === false && action.disabledMessage
-            ? action.disabledMessage
-            : action.tooltip
-        "
-      >
-        <button
-          type="button"
-          :class="[
-            'settings-v2-action',
-            {
-              primary: action.style === 'primary',
-              danger: action.style === 'danger',
-              'looks-disabled': action.enabled === false && action.disabledMessage,
-            },
-          ]"
-          :disabled="action.enabled === false && !action.disabledMessage"
-          @click="emit('run-action', action)"
-        >
-          {{ action.label }}
-        </button>
-      </TooltipWrap>
-    </div>
-  </article>
+      </div>
+    </article>
   </div>
 </template>
 
@@ -277,13 +371,13 @@ const visibleSections = computed(() => props.sections)
 .settings-v2-sections {
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 32px;
 }
 
 .settings-v2-section {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 16px;
 }
 
 .settings-v2-section-title {
@@ -307,6 +401,17 @@ const visibleSections = computed(() => props.sections)
 .settings-v2-section-title.is-toggle:hover {
   background: transparent;
   color: var(--text);
+}
+
+.settings-v2-section-title--micro {
+  padding: 0 0 4px;
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  opacity: 0.55;
 }
 
 .settings-v2-section-chevron {
@@ -370,17 +475,114 @@ const visibleSections = computed(() => props.sections)
 .settings-v2-field {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
+}
+
+.settings-v2-section .settings-v2-field + .settings-v2-field {
+  margin-top: 4px;
 }
 
 .settings-v2-field-label {
   display: inline-flex;
-  justify-content: space-between;
   align-items: center;
+  width: fit-content;
+  max-width: 100%;
+  gap: 2px;
   font-size: 12px;
   font-weight: 400;
   color: var(--text-muted);
   line-height: 16px;
+}
+
+.settings-v2-field-label-text {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.settings-v2-boolean-row .settings-v2-field-label {
+  flex: 0 1 auto;
+  max-width: calc(100% - 48px);
+}
+
+.settings-v2-field.is-env-vars,
+.settings-v2-field.is-channel-picker {
+  gap: 10px;
+}
+
+.settings-v2-env-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.settings-v2-env-header .settings-v2-field-label {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.settings-v2-env-notice {
+  flex: 0 0 auto;
+  width: fit-content;
+  max-width: min(100%, 320px);
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 6px 8px;
+  margin: -6px 0 -6px auto;
+  border: 1px solid var(--chooser-surface-border);
+  border-radius: 8px;
+  background: var(--chooser-surface-bg);
+  font-size: 10.5px;
+  line-height: 16px;
+  color: var(--text-muted);
+  text-align: left;
+  cursor: pointer;
+}
+
+.settings-v2-env-notice:hover,
+.settings-v2-env-notice:focus-visible {
+  color: var(--text);
+  outline: none;
+}
+
+.settings-v2-env-notice-icon {
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: var(--neutral-100);
+}
+
+.settings-v2-env-notice-text {
+  min-width: 0;
+}
+
+.settings-v2-boolean-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 44px;
+  padding: 4px 0;
+}
+
+.settings-v2-field.is-nested {
+  padding-left: 16px;
+  border-left: 2px solid var(--chooser-surface-border);
+}
+
+.settings-v2-readonly-path {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.settings-v2-field-readonly-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .settings-v2-field-readonly {
@@ -413,16 +615,48 @@ const visibleSections = computed(() => props.sections)
  * label-over-value layout instead of input-style field chrome. */
 .settings-v2-section.is-readonly-list {
   gap: 0;
+  padding: 4px 12px;
+  border-radius: 10px;
+  background: var(--secondary-background);
+  border: 1px solid var(--chooser-surface-border);
+}
+
+.settings-v2-section.is-readonly-list .settings-v2-section-title {
+  padding: 8px 0 4px;
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.55;
 }
 
 .settings-v2-section.is-readonly-list .settings-v2-field {
-  padding: 12px 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+  align-items: start;
+  gap: 8px 16px;
+  padding: 10px 0;
   border-bottom: 1px solid var(--chooser-surface-border);
-  gap: 4px;
+}
+
+.settings-v2-section.is-readonly-list .settings-v2-field:last-child {
+  border-bottom: none;
 }
 
 .settings-v2-section.is-readonly-list .settings-v2-field-label {
   color: var(--text-muted);
   font-weight: 400;
+}
+
+.settings-v2-section.is-readonly-list .settings-v2-field-readonly,
+.settings-v2-section.is-readonly-list .settings-v2-readonly-path {
+  justify-self: end;
+  text-align: right;
+  width: 100%;
+}
+
+.settings-v2-section.is-readonly-list .settings-v2-readonly-path {
+  justify-self: stretch;
 }
 </style>

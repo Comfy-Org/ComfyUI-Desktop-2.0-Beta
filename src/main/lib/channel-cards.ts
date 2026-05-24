@@ -14,6 +14,7 @@ export interface ChannelCardData {
   installedVersion: string
   latestVersion: string
   lastChecked: string
+  lastCheckedAt?: number
   updateAvailable: boolean
   actions?: Record<string, unknown>[]
 }
@@ -48,6 +49,7 @@ export function buildChannelCards(
         installedVersion: cv ? formatComfyVersion(cv, 'detail') : (info.installedTag || 'unknown'),
         latestVersion: latestCv ? formatComfyVersion(latestCv, 'detail') : (info.releaseName || info.latestTag || '—'),
         lastChecked: info.checkedAt ? new Date(info.checkedAt).toLocaleString() : '—',
+        lastCheckedAt: info.checkedAt ?? undefined,
         updateAvailable: releaseCache.isUpdateAvailable(installation, def.value, info),
       } : undefined,
     }
