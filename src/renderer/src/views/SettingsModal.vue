@@ -130,7 +130,7 @@ const tabs = computed<TabDef[]>(() => [
     // only as an emergency rollback path.
     key: 'global',
     icon: SettingsIcon,
-    label: t('settingsModal.tabGlobal', 'Global Settings'),
+    label: t('settingsModal.tabGlobal', 'Desktop Settings'),
     available: false,
   },
 ])

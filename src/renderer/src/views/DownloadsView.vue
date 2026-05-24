@@ -4,7 +4,6 @@ import { useI18n } from 'vue-i18n'
 import {
   ArrowDownToLine,
   CheckCircle2,
-  Eraser,
   FolderOpen,
   PauseCircle,
   PlayCircle,
@@ -71,8 +70,6 @@ const filtered = computed<ModelDownloadProgress[]>(() => {
   }
 })
 
-const finishedCount = computed(() => store.finishedDownloads.length)
-
 /** The Settings tab adds the total size to the `'completed'` status
  *  line — opt into the variant in the shared formatter rather than
  *  re-implementing the switch. */
@@ -96,10 +93,6 @@ function showInFolder(savePath: string | undefined): void {
 function clearOne(url: string): void {
   store.dismiss(url)
 }
-function clearCompleted(): void {
-  store.clearFinished()
-}
-
 /** Filter chips. Labels resolve through i18n at render time so they
  *  re-render if the locale ever changes; the underlying `key` is the
  *  stable identifier that drives `filter` state. */
@@ -138,16 +131,6 @@ function isTerminal(status: ModelDownloadStatus): boolean {
             {{ f.label }}
           </button>
         </div>
-        <button
-          type="button"
-          class="downloads-clear"
-          :disabled="finishedCount === 0"
-          :title="t('downloadsPopup.clearFinishedTooltip')"
-          @click="clearCompleted"
-        >
-          <Eraser :size="13" />
-          {{ t('downloadsPopup.clearFinished') }}
-        </button>
       </div>
     </header>
 
@@ -283,27 +266,6 @@ function isTerminal(status: ModelDownloadStatus): boolean {
  * shared `.filter-pill` / `.filter-pill-group` classes (also used by
  * ChooserView). The local `.downloads-filter-chip` class is kept only
  * as a test selector hook. */
-
-.downloads-clear {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  background: transparent;
-  border: 1px solid var(--border, rgba(127, 127, 127, 0.3));
-  border-radius: 6px;
-  padding: 4px 10px;
-  font: inherit;
-  font-size: 12px;
-  color: inherit;
-  cursor: pointer;
-}
-.downloads-clear:hover:not(:disabled) {
-  background: var(--bg-elev-2, rgba(127, 127, 127, 0.12));
-}
-.downloads-clear:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
 
 .downloads-tab-empty {
   display: flex;

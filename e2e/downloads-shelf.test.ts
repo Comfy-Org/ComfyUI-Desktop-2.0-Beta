@@ -175,34 +175,6 @@ test('per-status row close button maps to the right action @windows @macos @linu
 })
 
 // ---------------------------------------------------------------------------
-// Header affordance — only render `Clear finished` when there's something
-// to clear.
-// ---------------------------------------------------------------------------
-
-test('"Clear finished" button only renders when there is at least one terminal entry @windows @macos @linux', async () => {
-  // Active-only state: no terminal entries → no clear button.
-  await seedDownloads(ctx.app, {
-    active: [makeEntry({ url: 'u-dl', filename: 'dl.safetensors', status: 'downloading', progress: 0.5 })],
-    recent: [],
-  })
-  await openDownloadsTray(ctx.titleBar)
-  await waitForPopupVisible(ctx.app)
-  await waitForStableBounds(ctx.app)
-  expect(await popup.exists('.downloads-clear')).toBe(false)
-
-  // Reload state to include a terminal entry; the live broadcast
-  // updates the open popup in place.
-  await seedDownloads(ctx.app, {
-    active: [makeEntry({ url: 'u-dl', filename: 'dl.safetensors', status: 'downloading', progress: 0.5 })],
-    recent: [makeEntry({ url: 'u-co', filename: 'co.safetensors', status: 'completed', progress: 1 })],
-  })
-  await expect.poll(() => popup.exists('.downloads-clear'), {
-    timeout: 5_000,
-    intervals: [100, 200, 400],
-  }).toBe(true)
-})
-
-// ---------------------------------------------------------------------------
 // Live repaint — the open popup must redraw when the tray-state-changed
 // broadcast fires (this is what `comfy-titlepopup:downloads-changed`
 // owes the user when a download starts mid-shelf-open).

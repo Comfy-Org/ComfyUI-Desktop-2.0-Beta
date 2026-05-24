@@ -12,6 +12,7 @@ import BaseInput from '../components/ui/BaseInput.vue'
 import ComfyWordmark from '../components/icons/ComfyWordmark.vue'
 import ChooserInstallTile from './chooser/ChooserInstallTile.vue'
 import AccountBanner from './chooser/AccountBanner.vue'
+import { resolvePickerTab } from '../lib/pickerTabs'
 import type { Installation, ShowProgressOpts } from '../types/ipc'
 
 /**
@@ -113,17 +114,10 @@ function openManage(
     window.api.openInstancePicker({ installationId: installation.id })
     return
   }
-  const mappedTab =
-    opts.initialTab === 'config' ||
-    opts.initialTab === 'status' ||
-    opts.initialTab === 'update' ||
-    opts.initialTab === 'snapshots'
-      ? opts.initialTab
-      : 'status'
   window.api.openInstancePicker({
     installationId: installation.id,
     mode: 'expanded',
-    initialTab: mappedTab,
+    initialTab: resolvePickerTab(opts.initialTab, 'status'),
     autoAction: opts.autoAction ?? null
   })
 }
@@ -227,7 +221,10 @@ function handleNewInstallClick(): void {
             {{ cloudInstall ? cloudInstall.name : t('cloud.label') }}
           </div>
           <div class="chooser-tile-meta">
-            <span class="chooser-tile-pill">
+            <span
+              class="chooser-tile-pill"
+              :title="cloudInstall ? cloudInstall.sourceLabel : t('cloud.desc')"
+            >
               {{ cloudInstall ? cloudInstall.sourceLabel : t('cloud.desc') }}
             </span>
           </div>
@@ -264,7 +261,8 @@ function handleNewInstallClick(): void {
 @import './chooser/chooser-tiles.css';
 
 .chooser-bg :deep(.brand-inner-frame) {
-  justify-content: flex-start;
+  /* Inherit the default justify-content: center from BrandBackground;
+   * chooser-view fills the frame and handles its own centering. */
   padding: 0;
 }
 
@@ -274,25 +272,43 @@ function handleNewInstallClick(): void {
 }
 
 .chooser-view {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
+  /* Fluid centering pattern with a top-spacer floor:
+   *   - Short grid → both spacers grow toward 1fr → cluster centered
+   *   - Tall grid → spacers shrink, but top spacer stops at the clamp
+   *     minimum (~18vh) so the logo/search anchor at a stable upper
+   *     position instead of sliding into the brand-beam at the top
+   *   - Very tall grid → grid still scrolls internally (max-height
+   *     100%) so the cluster + viewport bounds are never breached
+   *
+   * Row layout: [top spacer] [wordmark] [search] [grid] [bottom spacer] */
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-rows:
+    minmax(clamp(72px, 18vh, 180px), 1fr)
+    auto
+    auto
+    minmax(0, auto)
+    minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: center;
   width: 100%;
   max-width: 1080px;
-  height: 100%;
-  padding: clamp(64px, 31vh, 200px) 24px 24px;
-  gap: var(--takeover-gap-lg);
+  padding: 24px;
+  row-gap: 32px;
 }
 
 .chooser-wordmark {
+  grid-row: 2;
   width: clamp(120px, 8vw, 180px);
   height: auto;
   color: var(--comfy-yellow);
   flex-shrink: 0;
-  margin-bottom: var(--takeover-gap-sm);
+  anchor-name: --brand-beam-target;
 }
 
 .chooser-search {
+  grid-row: 3;
   display: flex;
   justify-content: center;
   width: 100%;
@@ -314,6 +330,7 @@ function handleNewInstallClick(): void {
 
 .chooser-loading,
 .chooser-empty {
+  grid-row: 4;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -322,24 +339,40 @@ function handleNewInstallClick(): void {
 }
 
 .chooser-grid {
+  grid-row: 4;
   width: 100%;
-  flex: 1 1 0;
+  max-width: 920px;
+  /* When the row collapses (tall grid in a short viewport), the grid
+   * stops growing and scrolls internally. `min-height: 0` + an
+   * explicit `max-height: 100%` are required so the grid can't push
+   * its row past the viewport. */
   min-height: 0;
+  max-height: 100%;
   overflow-y: auto;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  /* Fixed-width tracks instead of `auto-fill` `minmax(...)`: with
+   * `auto-fill` the grid reserves blank tracks across the full
+   * width, leaving 1-3 cards stuck at the left edge. Fixed-width
+   * tracks + `justify-content: center` center the whole row as a
+   * group while still wrapping to a new row when room runs out. */
+  grid-template-columns: repeat(auto-fit, 280px);
+  justify-content: center;
   gap: 16px;
   align-content: start;
-  padding: 16px 0 8px 0;
+  /* Vertical padding pushes the first/last rows into the mask fade
+   * so they appear to glide under it rather than clip abruptly. */
+  padding: 24px 0;
 }
 
+/* Soft top + bottom fade on the scroll viewport so the edge of the
+ * grid feels like a smooth dissolve instead of a hard cut. */
 @supports (mask-image: linear-gradient(black, black)) {
   .chooser-grid {
     mask-image: linear-gradient(
       to bottom,
       transparent 0,
-      black 24px,
-      black calc(100% - 24px),
+      black 32px,
+      black calc(100% - 32px),
       transparent 100%
     );
   }

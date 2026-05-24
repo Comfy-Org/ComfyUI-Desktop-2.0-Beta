@@ -10,7 +10,11 @@ interface Props {
   installation: Installation
   /** True when REQUIRES_STOPPED actions (update / migrate / restore / delete) are gated. */
   isStoppedActionGated: boolean
-  /** Pre-formatted last-launched label (parent owns the time-ago formatter). */
+  /** Pre-formatted last-launched label (parent owns the time-ago formatter).
+   *  TODO(brand-cleanup): the launched pill is currently soft-disabled in
+   *  the template; the prop stays wired so we can flip it back on without
+   *  re-threading the parent. */
+  // eslint-disable-next-line vue/no-unused-properties
   lastLaunchedLabel: string
   /** Whether this install's last session crashed or its last action errored. */
   hasError: boolean
@@ -46,6 +50,18 @@ const hasMigratePrompt = computed(
 )
 
 const typeMeta = computed(() => installTypeMetaFor(inst.value.sourceCategory))
+
+/* Desktop (legacy) source returns the bare installPath as its
+ * listPreview, which isn't useful in a small pill — fall back to
+ * sourceLabel for it and keep listPreview for everyone else (e.g.
+ * standalone's "Stable" / "Latest", git's "repo (branch)"). We gate
+ * on `sourceId` because `sourceCategory` for desktop reports `local`
+ * in production. */
+const sourcePillLabel = computed(() =>
+  inst.value.sourceId === 'desktop'
+    ? inst.value.sourceLabel
+    : inst.value.listPreview || inst.value.sourceLabel,
+)
 
 function handleClick(): void {
   if (isStopping.value) return
@@ -94,26 +110,18 @@ function handleClick(): void {
     </div>
     <div class="chooser-tile-meta">
       <!--
-        Source/channel pill prefers `listPreview` (e.g. "Stable" /
-        "Latest" from the standalone source) so the channel reads
-        instead of the bare source label.
+        Single pill row, no wrap. Order: source/channel → one optional
+        action pill (update > migrate > version) → launched pill.
+        The source pill is the shrink target — everything else stays
+        at content width via `flex-shrink: 0` so action + launched
+        chips remain fully legible.
       -->
-      <span class="chooser-tile-pill">
-        {{ inst.listPreview || inst.sourceLabel }}
-      </span>
-      <!-- Channel and version are independent: channel = stream, version = point on it. -->
       <span
-        v-if="inst.version"
-        class="chooser-tile-pill chooser-tile-pill-version"
+        class="chooser-tile-pill"
+        :title="sourcePillLabel"
       >
-        {{ inst.version }}
+        {{ sourcePillLabel }}
       </span>
-      <!--
-        Update / migrate pills wrap REQUIRES_STOPPED actions, so they
-        render disabled (and click handlers no-op) whenever the
-        install is running / stopping / has a long-running op in flight.
-        Same predicate gates the matching kebab-menu items.
-      -->
       <span
         v-if="hasUpdate"
         class="chooser-tile-pill chooser-tile-pill-update"
@@ -130,7 +138,7 @@ function handleClick(): void {
         {{ t('chooser.updatePill') }}
       </span>
       <span
-        v-if="hasMigratePrompt"
+        v-else-if="hasMigratePrompt"
         class="chooser-tile-pill chooser-tile-pill-migrate"
         :class="{ 'chooser-tile-pill-disabled': isStoppedActionGated }"
         role="button"
@@ -144,9 +152,23 @@ function handleClick(): void {
         <ArrowRightLeft :size="11" />
         {{ t('chooser.migratePill') }}
       </span>
-      <span class="chooser-tile-pill">
+      <span
+        v-else-if="inst.version"
+        class="chooser-tile-pill chooser-tile-pill-version"
+        :title="inst.version"
+      >
+        {{ inst.version }}
+      </span>
+      <!-- TODO(brand-cleanup): launched pill disabled per redesign. Keep
+           commented (not deleted) so we can restore it when the
+           secondary-info treatment for tiles is finalized.
+      <span
+        class="chooser-tile-pill chooser-tile-pill-launched"
+        :title="lastLaunchedLabel"
+      >
         {{ lastLaunchedLabel }}
       </span>
+      -->
     </div>
     <!--
       CTA: a single Close-instance button rendered only while running

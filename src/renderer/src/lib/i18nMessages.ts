@@ -16,6 +16,29 @@ export const en = {
     close: 'Close',
     cancel: 'Cancel',
     back: 'Back',
+    browse: 'Browse…',
+  },
+  /** Global Settings view (rendered inside the title-popup process via
+   *  `comfyTitlePopup/GlobalSettingsView.vue`). The corresponding keys
+   *  live in `locales/en.json` for the main panel renderer; mirror the
+   *  subset used by the popup's DirCard / SettingField / SettingsSections
+   *  here because this catalog is the only source the popup webContents
+   *  can resolve against. */
+  settings: {
+    open: 'Open',
+  },
+  models: {
+    addDir: 'Add Directory',
+    removeDir: 'Remove',
+    primary: 'primary',
+    default: 'default',
+    makePrimary: 'Make Primary',
+  },
+  tooltips: {
+    modelsPrimary:
+      'The primary directory is where ComfyUI saves newly downloaded models by default.',
+    modelsDefault:
+      'The system default directory. This path is created automatically and cannot be removed.',
   },
   /** Top-level so the dotted keys returned by `installTypeMetaFor`
    *  (`installType.standalone`, …) map directly without a prefix. */
@@ -51,7 +74,7 @@ export const en = {
     newInstall: 'New Install',
     addExistingInstall: 'Add Existing Install',
     loadSnapshot: 'Load Snapshot',
-    globalSettings: 'Global Settings',
+    globalSettings: 'Desktop Settings',
     sendFeedback: 'Send Beta Feedback',
     returnToDashboard: 'Return to Dashboard',
     closeAllWindows: 'Close All Windows',
@@ -62,9 +85,6 @@ export const en = {
   },
   downloadsPopup: {
     title: 'Downloads',
-    clearFinished: 'Clear Finished',
-    clearFinishedTooltip:
-      'Remove every completed, errored, or cancelled entry from the list',
     empty: 'No downloads yet',
     pause: 'Pause',
     resume: 'Resume',
@@ -84,7 +104,7 @@ export const en = {
     filterAll: 'All',
     filterActive: 'Active',
     filterCompleted: 'Completed',
-    filterErrored: 'Errored',
+    filterErrored: 'Failed',
     filterAriaLabel: 'Status filter',
   },
   settingsModal: {
@@ -92,7 +112,7 @@ export const en = {
     tabComfy: 'ComfyUI Settings',
     tabDirectories: 'Directories',
     tabDownloads: 'Downloads',
-    tabGlobal: 'Global Settings',
+    tabGlobal: 'Desktop Settings',
   },
   /** Strings shared by every install-listing surface (the dashboard
    *  grid in `ChooserView.vue` and the title-bar instance-picker

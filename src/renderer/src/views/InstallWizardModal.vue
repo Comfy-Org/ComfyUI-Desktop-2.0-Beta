@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick, toRaw } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Check, ChevronRight, HardDrive } from 'lucide-vue-next'
+import { ChevronRight, HardDrive } from 'lucide-vue-next'
 import { useModal } from '../composables/useModal'
 
 import type {
@@ -11,7 +11,7 @@ import type {
   HardwareValidation,
   ShowProgressOpts
 } from '../types/ipc'
-import { stripVariantPrefix, sortedCardOptions, getVariantImage } from '../lib/variants'
+import { stripVariantPrefix, sortedCardOptions } from '../lib/variants'
 import { emitTelemetryAction, toVariantBucket } from '../lib/telemetry'
 import {
   trackGuardrailBlocked,
@@ -22,6 +22,7 @@ import {
 } from '../lib/installHelpers'
 import TakeoverBack from '../components/TakeoverBack.vue'
 import BrandTakeoverLayout from '../components/BrandTakeoverLayout.vue'
+import BrandVariantList from '../components/BrandVariantList.vue'
 import PathDiskInfo from '../components/PathDiskInfo.vue'
 import TooltipWrap from '../components/TooltipWrap.vue'
 import { BaseSelect, type BaseSelectOption } from '../components/ui'
@@ -802,62 +803,16 @@ defineExpose({ open })
                       <div v-if="fieldLoading.get(field.id)" class="wizard-loading with-spinner">
                         {{ $t('newInstall.loading') }}
                       </div>
-                      <!-- Horizontal-row variant list dense enough to fit
-                           inside the Advanced disclosure without the full
-                           VariantCardGrid layout. -->
-
-                      <div
+                      <BrandVariantList
                         v-else-if="
                           fieldOptions.has(field.id) &&
                           (fieldOptions.get(field.id)?.length ?? 0) > 0
                         "
-                        class="config-variant-list"
-                        role="radiogroup"
+                        :options="sortedCardOptions(fieldOptions.get(field.id)!)"
+                        :selected-value="selections[field.id]?.value ?? null"
                         :aria-label="field.label"
-                      >
-                        <button
-                          v-for="opt in sortedCardOptions(fieldOptions.get(field.id)!)"
-                          :key="opt.value"
-                          type="button"
-                          role="radio"
-                          :aria-checked="selections[field.id]?.value === opt.value"
-                          :class="[
-                            'config-variant-row',
-                            {
-                              'config-variant-row--selected':
-                                selections[field.id]?.value === opt.value
-                            }
-                          ]"
-                          @click="selectCardOption(field, fieldIndex, opt)"
-                        >
-                          <span class="config-variant-row__icon" aria-hidden="true">
-                            <img
-                              v-if="getVariantImage(opt)"
-                              :src="getVariantImage(opt)!"
-                              :alt="opt.label"
-                              draggable="false"
-                            />
-                          </span>
-                          <span class="config-variant-row__text">
-                            <span class="config-variant-row__label">
-                              {{ opt.label }}
-                              <span v-if="opt.recommended" class="brand-tag-recommended">
-                                {{ $t('newInstall.recommended') }}
-                              </span>
-                            </span>
-                            <span v-if="opt.description" class="config-variant-row__meta">
-                              {{ opt.description }}
-                            </span>
-                          </span>
-                          <Check
-                            v-if="selections[field.id]?.value === opt.value"
-                            class="config-variant-row__check"
-                            :size="16"
-                            :stroke-width="2"
-                            aria-hidden="true"
-                          />
-                        </button>
-                      </div>
+                        @select="(opt) => selectCardOption(field, fieldIndex, opt)"
+                      />
                       <div v-else-if="fieldOptions.has(field.id)" class="wizard-loading">
                         {{
                           fieldErrors.get(field.id)
@@ -1162,84 +1117,6 @@ defineExpose({ open })
 .config-method--selected {
   border-color: var(--accent);
   background: color-mix(in srgb, var(--accent) 14%, transparent);
-  color: var(--neutral-100);
-}
-
-.config-variant-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: 4px;
-}
-.config-variant-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  width: 100%;
-  padding: 12px;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  background: var(--brand-surface-bg);
-  color: var(--neutral-200);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition:
-    background 120ms ease,
-    border-color 120ms ease,
-    color 120ms ease;
-}
-.config-variant-row:hover {
-  background: var(--brand-surface-bg-hover);
-  border-color: var(--brand-surface-border);
-  color: var(--neutral-100);
-}
-.config-variant-row:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
-}
-.config-variant-row--selected {
-  background: var(--brand-surface-bg-hover);
-  border-color: var(--brand-surface-border-hover);
-  box-shadow: 0 1px 0 0 rgba(255, 255, 255, 0.08) inset;
-  color: var(--neutral-100);
-}
-.config-variant-row__icon {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 40px;
-  height: 40px;
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.04);
-  overflow: hidden;
-}
-.config-variant-row__icon img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-.config-variant-row__text {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-  flex: 1 1 auto;
-}
-.config-variant-row__label {
-  display: inline-flex;
-  align-items: center;
-  font-size: var(--takeover-fs-body);
-  font-weight: 600;
-  color: var(--neutral-100);
-}
-.config-variant-row__meta {
-  font-size: var(--takeover-fs-caption);
-  color: var(--neutral-300);
-}
-.config-variant-row__check {
-  flex: 0 0 auto;
   color: var(--neutral-100);
 }
 

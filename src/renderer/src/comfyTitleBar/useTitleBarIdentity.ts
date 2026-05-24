@@ -1,8 +1,7 @@
 import { computed, onMounted, onUnmounted, ref, type ComputedRef, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { installTypeMetaFor } from '../lib/installTypeIcon'
-
-type FirstUseMode = 'none' | 'consent-lockdown' | 'post-consent'
+import { isChromeLockedMode, type FirstUseMode } from '../../../shared/firstUseMode'
 
 interface InstallTypeMeta {
   icon: ReturnType<typeof installTypeMetaFor>['icon']
@@ -35,6 +34,11 @@ interface TitleBarIdentityApi {
   firstUseMode: Ref<FirstUseMode>
   isPreviewMode: Ref<boolean>
   isConsentLockdown: ComputedRef<boolean>
+  /** True for every mode that should collapse the title bar to just the
+   *  static centre pill — consent / post-consent (first-use) and
+   *  loading-lockdown (ProgressModal takeover). Single derived flag so
+   *  every gate in TitleBarApp.vue reads the same source. */
+  isChromeLocked: ComputedRef<boolean>
   installTypeMeta: ComputedRef<InstallTypeMeta>
   installTypeLabel: ComputedRef<string>
   showInstallTypeIcon: ComputedRef<boolean>
@@ -74,6 +78,7 @@ export function useTitleBarIdentity(opts: UseTitleBarIdentityOpts): TitleBarIden
   const isPreviewMode = ref(false)
 
   const isConsentLockdown = computed(() => firstUseMode.value === 'consent-lockdown')
+  const isChromeLocked = computed(() => isChromeLockedMode(firstUseMode.value))
 
   const installTypeMeta = computed<InstallTypeMeta>(() => installTypeMetaFor(sourceCategory.value))
 
@@ -161,6 +166,7 @@ export function useTitleBarIdentity(opts: UseTitleBarIdentityOpts): TitleBarIden
     firstUseMode,
     isPreviewMode,
     isConsentLockdown,
+    isChromeLocked,
     installTypeMeta,
     installTypeLabel,
     showInstallTypeIcon,

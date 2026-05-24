@@ -35,7 +35,7 @@ export interface FirstUseChainApi {
   /** Hooks the parent passes back into
    *  `usePanelOverlays({ firstUseChain: … })`. */
   hooks: FirstUseChainHooks
-  /** Bound on `<NewInstallModal :hide-back-to-dashboard>` so the
+  /** Bound on `<InstallWizardModal :hide-back-to-dashboard>` so the
    *  back-to-dashboard button hides during a chain. */
   chainingFirstUseToNewInstall: Ref<boolean>
   /** FirstUseTakeover `complete-skip` emit + file-menu Skip Onboarding. */
@@ -50,10 +50,10 @@ export interface FirstUseChainApi {
   ) => Promise<void>
   /** FirstUseTakeover `chain-migrate` emit. */
   handleFirstUseChainMigrate: () => Promise<void>
-  /** NewInstallModal `close` / `navigate-list` emit when mounted as a
+  /** InstallWizardModal `close` / `navigate-list` emit when mounted as a
    *  takeover. */
   handleNewInstallTakeoverClose: () => Promise<void>
-  /** NewInstallModal `back-to-local-branch` emit. Silent Tier 3 → Tier 3
+  /** InstallWizardModal `back-to-local-branch` emit. Silent Tier 3 → Tier 3
    *  swap back to the FirstUseTakeover localBranch step. */
   handleNewInstallBackToLocalBranch: () => Promise<void>
 }
@@ -113,7 +113,7 @@ export function useFirstUseChain(opts: FirstUseChainOpts): FirstUseChainApi {
 
   /** Set by `handleFirstUseChainLocal` when the chain arrives via
    *  Local → Start Fresh. Read + cleared by usePanelOverlays via the
-   *  `consumeCameFromLocalBranch` hook so NewInstallModal opens with a
+   *  `consumeCameFromLocalBranch` hook so InstallWizardModal opens with a
    *  Back link in its Configure footer. */
   const pendingCameFromLocalBranch = ref(false)
 
@@ -136,7 +136,7 @@ export function useFirstUseChain(opts: FirstUseChainOpts): FirstUseChainApi {
         pendingFirstUseAutoLaunchId.value = showOpts.installationId
         // Flip the persisted gate now so the takeover doesn't re-run
         // on the next launch — the overlay handoff doesn't go through
-        // NewInstallModal's close emit.
+        // InstallWizardModal's close emit.
         void launcherPrefs.markFirstUseCompleted()
         return
       }
@@ -247,7 +247,7 @@ export function useFirstUseChain(opts: FirstUseChainOpts): FirstUseChainApi {
     window.api.setFirstUseMode('post-consent')
   }
 
-  /** NewInstallModal `back-to-local-branch` emit. Silent Tier 3 → Tier 3
+  /** InstallWizardModal `back-to-local-branch` emit. Silent Tier 3 → Tier 3
    *  swap that re-opens the FirstUseTakeover on its localBranch
    *  sub-step (the step the user came from). Drops chain bookkeeping so
    *  the close handler doesn't mistake the swap for first-use
@@ -331,7 +331,7 @@ export function useFirstUseChain(opts: FirstUseChainOpts): FirstUseChainApi {
       // decide whether to fire. The watcher clears both after launch.
     }
     // Only dismiss when the new-install takeover is still in the slot.
-    // The happy-path install handoff in NewInstallModal swaps the
+    // The happy-path install handoff in InstallWizardModal swaps the
     // overlay to a progress takeover via @show-progress without first
     // emitting `close`, but `@navigate-list` still routes here for the
     // skipInstall branch — and dismissing then would clear an unrelated

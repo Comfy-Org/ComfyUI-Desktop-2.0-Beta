@@ -4,9 +4,10 @@ import { useI18n } from 'vue-i18n'
 import ProgressModal from '../views/ProgressModal.vue'
 import ModalDialog from '../components/ModalDialog.vue'
 import DownloadsModal from '../components/DownloadsModal.vue'
+import FeedbackModal from '../components/FeedbackModal.vue'
 import ComfyLifecycleView from './ComfyLifecycleView.vue'
 import ChooserView from '../views/ChooserView.vue'
-import NewInstallModal from '../views/NewInstallModal.vue'
+import InstallWizardModal from '../views/InstallWizardModal.vue'
 import TrackModal from '../views/TrackModal.vue'
 import LoadSnapshotModal from '../views/LoadSnapshotModal.vue'
 import QuickInstallModal from '../views/QuickInstallModal.vue'
@@ -19,6 +20,7 @@ import { seedLauncherPrefsFromUrl, useLauncherPrefs } from '../composables/useLa
 import { useModal } from '../composables/useModal'
 import { useAppUpdatePrompts } from '../composables/useAppUpdatePrompts'
 import { useReturnToDashboardConfirm } from '../composables/useReturnToDashboardConfirm'
+import { useQuitDesktopConfirm } from '../composables/useQuitDesktopConfirm'
 import { useSendFeedback } from '../composables/useSendFeedback'
 import { emitTelemetryAction } from '../lib/telemetry'
 import { useDeepLinkRouter } from '../composables/useDeepLinkRouter'
@@ -27,6 +29,7 @@ import { registerMigrateTakeover } from '../composables/useMigrateAction'
 import { isFlowPanel, isValidPanel, usePanelOverlays } from './usePanelOverlays'
 import { useChooserHandoff } from './useChooserHandoff'
 import { useFirstUseChain } from './useFirstUseChain'
+import { resolvePickerTab } from '../lib/pickerTabs'
 import type { Installation } from '../types/ipc'
 
 const { mergeLocaleMessage, locale, t } = useI18n()
@@ -53,7 +56,7 @@ const { loaded: launcherPrefsLoaded, firstUseCompleted } = launcherPrefs
 
 const modal = useModal()
 const { showAppUpdateRestartPrompt, showAppUpdateDownloadPrompt } = useAppUpdatePrompts()
-useSendFeedback()
+const { feedbackOpen, feedbackUrl, closeFeedback } = useSendFeedback()
 
 // installationStore.fetchInstallations() is wired to onInstallationsChanged
 // inside the store itself, so the panel just needs to read from it.
@@ -79,7 +82,7 @@ const bootstrapReady: Promise<void> = new Promise<void>((resolve) => {
 // composable consumes these but doesn't own them so vue-tsc can see
 // the bindings as used by the template's `ref="…"` props.
 const progressRef = ref<InstanceType<typeof ProgressModal> | null>(null)
-const newInstallRef = ref<InstanceType<typeof NewInstallModal> | null>(null)
+const newInstallRef = ref<InstanceType<typeof InstallWizardModal> | null>(null)
 const trackRef = ref<InstanceType<typeof TrackModal> | null>(null)
 const loadSnapshotRef = ref<InstanceType<typeof LoadSnapshotModal> | null>(null)
 const quickInstallRef = ref<InstanceType<typeof QuickInstallModal> | null>(null)
@@ -183,12 +186,8 @@ let unsubCloseRequest: (() => void) | null = null
 let unsubReturnToDashboardRequest: (() => void) | null = null
 let unsubAppUpdatePromptRestart: (() => void) | null = null
 let unsubAppUpdateUserActionFailed: (() => void) | null = null
-type PickerTab = 'config' | 'status' | 'update' | 'snapshots'
-const PICKER_TABS: ReadonlySet<PickerTab> = new Set(['config', 'status', 'update', 'snapshots'])
-const isPickerTab = (t: string | undefined): t is PickerTab =>
-  t !== undefined && PICKER_TABS.has(t as PickerTab)
-
 const { confirmReturnToDashboard } = useReturnToDashboardConfirm()
+const { confirmQuitDesktop } = useQuitDesktopConfirm()
 
 // All Manage routes go through `window.api.openInstancePicker` — the picker's
 // expanded mode is the single per-install settings surface. Delete keeps its
@@ -205,7 +204,7 @@ const { triggerAction: triggerInstallAction } = useInstallContextMenu({
     window.api.openInstancePicker({
       installationId: inst.id,
       mode: 'expanded',
-      initialTab: isPickerTab(initialTab) ? initialTab : 'config',
+      initialTab: resolvePickerTab(initialTab, 'config'),
       autoAction,
     })
   },
@@ -262,12 +261,15 @@ function closeDownloadsV2(): void {
 }
 
 // Toggles transparency rules in the non-scoped <style> block so the
-// live ComfyUI canvas composites through while the downloads-v2 overlay
-// panel is open.
+// live ComfyUI canvas composites through while an overlay panel
+// (downloads-v2 / feedback) is mounted.
 watch(
   activePanel,
   (next) => {
-    document.body.classList.toggle('panel-overlay-mode', next === 'downloads-v2')
+    document.body.classList.toggle(
+      'panel-overlay-mode',
+      next === 'downloads-v2' || next === 'feedback',
+    )
   },
   { immediate: true },
 )
@@ -309,6 +311,11 @@ onMounted(async () => {
   // the user dismissed the prompt. We echo the boolean back to main
   // along with the original `requestId` so main can pair it with the
   // request that fired it.
+  //
+  // Chooser host (install-less) idle close pops a "Quit Desktop?"
+  // confirm instead of clearing silently. Install-backed hosts still
+  // clear silently when no overlay is in flight — only the dashboard
+  // ✕ is gated.
   unsubCloseRequest = window.api.onCloseRequest(({ requestId }) => {
     // Ack synchronously so main extends its hung-renderer timeout —
     // the actual response can take arbitrary time when the user is
@@ -317,7 +324,14 @@ onMounted(async () => {
     // closing the window.
     window.api.ackCloseRequest({ requestId })
     void (async () => {
-      const cleared = currentOverlay.value === null ? true : await closeOverlay()
+      let cleared: boolean
+      if (currentOverlay.value !== null) {
+        cleared = await closeOverlay()
+      } else if (!installationId) {
+        cleared = await confirmQuitDesktop()
+      } else {
+        cleared = true
+      }
       window.api.respondCloseRequest({ requestId, cleared })
     })()
   })
@@ -501,7 +515,7 @@ onUnmounted(() => {
         :installation-id="currentOverlay.installationId ?? ''"
         @close="handleProgressClose"
       />
-      <NewInstallModal
+      <InstallWizardModal
         v-else-if="currentOverlay.component === 'new-install'"
         ref="newInstallRef"
         :hide-back-to-dashboard="chainingFirstUseToNewInstall"
@@ -549,6 +563,8 @@ onUnmounted(() => {
       open
       @close="closeDownloadsV2"
     />
+
+    <FeedbackModal :open="feedbackOpen" :url="feedbackUrl" @close="closeFeedback" />
 
     <ModalDialog />
     <MigrateConfirmTakeover ref="migrateTakeoverRef" />

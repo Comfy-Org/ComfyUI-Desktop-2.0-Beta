@@ -208,10 +208,7 @@ const sizeClass = computed(() => `is-size-${props.size}`)
   overflow: hidden;
   background: var(--modal-surface-bg);
   border: 1px solid var(--modal-surface-border);
-  box-shadow:
-    0 20px 24px -4px rgba(10, 13, 18, 0.08),
-    0 8px 8px -4px rgba(10, 13, 18, 0.03),
-    0 3px 3px -1.5px rgba(10, 13, 18, 0.04);
+  box-shadow: var(--modal-surface-shadow);
   color: var(--neutral-100);
 }
 .base-modal-panel.is-size-sm {

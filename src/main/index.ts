@@ -3,6 +3,7 @@ import type { BrowserWindow, WebContentsView } from 'electron'
 import type { Tray } from 'electron'
 import path from 'path'
 import fs from 'fs'
+import { normaliseFirstUseMode } from '../shared/firstUseMode'
 import { execFile } from 'child_process'
 import type { ChildProcess } from 'child_process'
 import todesktop from '@todesktop/runtime'
@@ -506,11 +507,8 @@ ipcMain.handle('reset-zoom', () => {
  */
 ipcMain.on(
   'comfy-window:set-first-use-mode',
-  (event, payload: { mode: 'none' | 'consent-lockdown' | 'post-consent' }) => {
-    const mode =
-      payload?.mode === 'consent-lockdown' || payload?.mode === 'post-consent'
-        ? payload.mode
-        : 'none'
+  (event, payload: { mode: unknown }) => {
+    const mode = normaliseFirstUseMode(payload?.mode)
     for (const entry of comfyWindows.values()) {
       if (entry.panelView?.webContents === event.sender) {
         entry.firstUseMode = mode
@@ -721,8 +719,13 @@ function _broadcastDownloadsToTitleBars(): void {
 function triggerOpenFeedback(entryId: number, source: 'titlebar' | 'menu'): void {
   const parentEntry = comfyWindows.get(entryId)
   if (!parentEntry || parentEntry.window.isDestroyed()) return
-  const panelView =
-    parentEntry.panelView ?? ensurePanelView(entryId, parentEntry, computeBodyMode(parentEntry))
+  // Flip into the 'feedback' overlay panel — same pattern as
+  // 'downloads-v2'. setActivePanel lazily ensures the panel view,
+  // makes it visible over comfyView, and broadcasts `panel-switch` to
+  // the renderer. The IPC below carries the click `source` so the
+  // renderer's telemetry payload can distinguish titlebar vs. menu.
+  const panelView = parentEntry.panelView ?? ensurePanelView(entryId, parentEntry, 'feedback')
+  setActivePanel(entryId, 'feedback')
   sendToPanelDeferred(panelView, 'comfy-panel:open-feedback', { source })
 }
 
