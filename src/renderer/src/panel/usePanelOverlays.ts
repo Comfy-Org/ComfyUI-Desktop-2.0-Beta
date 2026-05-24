@@ -222,6 +222,27 @@ export function usePanelOverlays(opts: UsePanelOverlaysOpts): UsePanelOverlaysAp
     const onCancel = (): void => {
       progressStore.cancelOperation(showOpts.installationId)
     }
+    // Pre-seed the operation in the progress store BEFORE swapping the
+    // overlay so `ProgressModal` paints fully populated on its first
+    // frame (op title, "Starting…" status, brand loader). Without this
+    // the modal mounts on a still-empty operation map and renders a
+    // blank/placeholder frame for one tick — the visible flicker users
+    // saw between Continue and the loader. The IPC `apiCall` fires
+    // synchronously from `progressStore.startOperation`, so the install
+    // begins a tick earlier than before; that's fine since the loader
+    // appears in the same swap.
+    const existing = progressStore.operations.get(showOpts.installationId)
+    if (!existing || existing.finished) {
+      progressStore.startOperation({
+        installationId: showOpts.installationId,
+        title: showOpts.title,
+        apiCall: showOpts.apiCall as () => Promise<ActionResult>,
+        cancellable: showOpts.cancellable,
+        returnTo: showOpts.returnTo,
+        opKind: showOpts.opKind,
+        destroysInstance: showOpts.destroysInstance,
+      })
+    }
     // Every show-progress op renders as a Tier 3 brand takeover now —
     // delete, copy, migrate, install, update, launch, and snapshot ops
     // share the same loader chrome (BrandTakeoverLayout + glyph +
@@ -256,21 +277,10 @@ export function usePanelOverlays(opts: UsePanelOverlaysOpts): UsePanelOverlaysAp
       )
     }
     await nextTick()
-    // If an in-progress operation already exists for this ID, just show it.
-    const existing = progressStore.operations.get(showOpts.installationId)
-    if (existing && !existing.finished) {
-      progressRef.value?.showOperation(showOpts.installationId)
-      return
-    }
-    progressRef.value?.startOperation({
-      installationId: showOpts.installationId,
-      title: showOpts.title,
-      apiCall: showOpts.apiCall as () => Promise<ActionResult>,
-      cancellable: showOpts.cancellable,
-      returnTo: showOpts.returnTo,
-      opKind: showOpts.opKind,
-      destroysInstance: showOpts.destroysInstance,
-    })
+    // After the overlay swap, ProgressModal exists — point it at the
+    // (already running) operation so its internal `currentId` ref tracks
+    // it for showOperation/auto-close logic.
+    progressRef.value?.showOperation(showOpts.installationId)
   }
 
   function handleProgressClose(): void {
