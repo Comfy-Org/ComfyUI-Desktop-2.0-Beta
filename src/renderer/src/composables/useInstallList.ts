@@ -57,6 +57,8 @@ export interface UseInstallListApi {
   showEmptyHint: ComputedRef<boolean>
   matchesQuery: (name: string) => boolean
   lastLaunchedLabel: (inst: Installation) => string
+  /** Compact recency for tight picker rows — `3h ago`, not `Launched 3h ago`. */
+  lastLaunchedShortLabel: (inst: Installation) => string
 }
 
 /**
@@ -179,6 +181,12 @@ export function useInstallList(opts: UseInstallListOpts): UseInstallListApi {
       : t('dashboard.neverLaunched')
   }
 
+  function lastLaunchedShortLabel(inst: Installation): string {
+    return typeof inst.lastLaunchedAt === 'number'
+      ? timeAgo(inst.lastLaunchedAt)
+      : ''
+  }
+
   return {
     searchQuery,
     activeFilter,
@@ -189,5 +197,6 @@ export function useInstallList(opts: UseInstallListOpts): UseInstallListApi {
     showEmptyHint,
     matchesQuery,
     lastLaunchedLabel,
+    lastLaunchedShortLabel,
   }
 }

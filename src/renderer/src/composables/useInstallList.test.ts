@@ -301,6 +301,26 @@ describe('useInstallList', () => {
     })
   })
 
+  describe('lastLaunchedShortLabel', () => {
+    it('returns an empty string when lastLaunchedAt is undefined', () => {
+      const installations = ref<Installation[]>([])
+      const list = withI18nScope(i18n, () => useInstallList({ installations }))
+
+      const inst = makeInstall({ id: 'a' })
+      expect(list.lastLaunchedShortLabel(inst)).toBe('')
+    })
+
+    it('returns only the relative time without the Launched prefix', () => {
+      vi.useFakeTimers()
+      vi.setSystemTime(new Date('2026-05-18T12:00:00Z'))
+      const installations = ref<Installation[]>([])
+      const list = withI18nScope(i18n, () => useInstallList({ installations }))
+
+      const inst = makeInstall({ id: 'a', lastLaunchedAt: Date.now() - 3 * 3_600_000 })
+      expect(list.lastLaunchedShortLabel(inst)).toBe('3h ago')
+    })
+  })
+
   describe('reactivity', () => {
     it('updates visibleInstalls when the input installations ref changes', () => {
       const installations = ref<Installation[]>([

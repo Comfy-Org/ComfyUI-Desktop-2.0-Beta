@@ -19,9 +19,8 @@ interface Props {
   /** Install is currently running in some other window — drives the
    *  small running dot on the row. */
   running?: boolean
-  /** Pre-formatted "Launched 17m ago" — hidden when the install has never
-   *  launched; the picker view owns the formatter. */
-  lastLaunchedLabel: string
+  /** Compact recency (`3h ago`) for single-line picker rows. */
+  lastLaunchedShortLabel: string
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -57,13 +56,10 @@ function handleClick(): void {
         <span v-if="running" class="picker-row-running-dot" aria-hidden="true"></span>
       </div>
       <div class="picker-row-body">
-        <div class="picker-row-name">{{ installation.name }}</div>
-        <div
-          v-if="installation.lastLaunchedAt != null"
-          class="picker-row-sub"
-        >
-          {{ lastLaunchedLabel }}
-        </div>
+        <span class="picker-row-name">{{ installation.name }}</span>
+        <span v-if="lastLaunchedShortLabel" class="picker-row-recency">
+          {{ lastLaunchedShortLabel }}
+        </span>
       </div>
     </div>
   </div>
@@ -77,7 +73,7 @@ function handleClick(): void {
 }
 .picker-row {
   display: grid;
-  grid-template-columns: 24px 1fr auto;
+  grid-template-columns: 24px minmax(0, 1fr);
   align-items: center;
   gap: 8px;
   padding: 8px 8px 8px 10px;
@@ -109,7 +105,7 @@ function handleClick(): void {
   transition: color 120ms ease;
 }
 /* Active row → icon goes full white (and gets a green status dot
- * overlaid on top-right when also running). Inactive running rows
+ * overlaid on bottom-right when also running). Inactive running rows
  * still get the green dot so the user sees "running in another
  * window" status, but the icon stays its resting neutral colour. */
 .picker-row.is-active .picker-row-icon {
@@ -118,11 +114,13 @@ function handleClick(): void {
 .picker-row-body {
   min-width: 0;
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  align-items: center;
+  gap: 8px;
   overflow: hidden;
 }
 .picker-row-name {
+  flex: 1 1 auto;
+  min-width: 0;
   font-size: 14px;
   font-weight: 500;
   line-height: 20px;
@@ -134,23 +132,23 @@ function handleClick(): void {
 .picker-row.is-active .picker-row-name {
   color: var(--text);
 }
-.picker-row-sub {
+.picker-row-recency {
+  flex: 0 0 auto;
   font-size: 12px;
   line-height: 16px;
   color: var(--text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* Green running indicator pinned to the top-right of the icon. Uses
- * the existing `--success` token. */
+/* Green running indicator pinned to the bottom-right of the icon. */
 .picker-row-running-dot {
   position: absolute;
-  top: -1px;
+  bottom: -1px;
   right: -1px;
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
-  background: var(--success, #00cd72);
+  background: #38c149;
+  border: 2px solid #38303d;
+  box-sizing: content-box;
 }
 </style>

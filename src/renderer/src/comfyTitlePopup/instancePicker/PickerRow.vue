@@ -4,35 +4,26 @@ import { installTypeMetaFor } from '../../lib/installTypeIcon'
 import type { Installation } from '../../types/ipc'
 
 /**
- * Compact-mode row card: identity (icon + name + running pill + meta pills)
- * on the left, Open + Manage CTA stack on the right. Power actions
- * (reveal/copy/untrack/delete) live in expanded mode, not here.
+ * Compact-mode list row: icon + name + meta pills, with Manage + Open
+ * actions always visible on the right.
  */
 
 interface Props {
   installation: Installation
-  /** Marks this row as the host's currently-active install — paints
-   *  a 2px accent marker on the left edge so the user can spot
-   *  "where am I" without reading. */
   active?: boolean
-  /** Install is currently running — flips the primary CTA from
-   *  "Open" → "Restart" and renders a running pill in the name row. */
   running?: boolean
-  /** Pre-formatted "Launched 17m ago" string. Empty for never-launched
-   *  installs (the picker view owns the formatter). */
   lastLaunchedLabel: string
-  /** Localised primary CTA label ("Open" / "Restart"). */
   openLabel: string
-  /** Localised secondary CTA label ("Manage"). */
   manageLabel: string
 }
 
 const props = withDefaults(defineProps<Props>(), {
   active: false,
-  running: false,
+  running: false
 })
 
 const emit = defineEmits<{
+  select: [installation: Installation]
   open: [installation: Installation]
   manage: [installation: Installation]
 }>()
@@ -45,6 +36,9 @@ const versionLabel = computed(() => {
   return raw.startsWith('v') || raw.startsWith('V') ? raw : `v${raw}`
 })
 
+function handleSelect(): void {
+  emit('select', props.installation)
+}
 function handleOpen(): void {
   emit('open', props.installation)
 }
@@ -54,120 +48,114 @@ function handleManage(): void {
 </script>
 
 <template>
-  <article
-    class="picker-row-card"
-    :class="{ 'is-active': active, 'is-running': running }"
-  >
-    <div class="picker-row-card-identity">
-      <span class="picker-row-card-icon-wrap">
-        <component
-          :is="typeMeta.icon"
-          :size="22"
-          class="picker-row-card-icon"
-          :title="$t(typeMeta.labelKey)"
-          aria-hidden="true"
-        />
-        <span v-if="running" class="picker-row-card-running-dot" aria-hidden="true" />
-      </span>
-      <div class="picker-row-card-text">
-        <div class="picker-row-card-name-row">
-          <h3 class="picker-row-card-name">{{ installation.name }}</h3>
-        </div>
-        <div class="picker-row-card-pills">
-          <span class="picker-row-card-pill">{{ installation.sourceLabel }}</span>
-          <span
-            v-if="versionLabel"
-            class="picker-row-card-pill picker-row-card-pill-version"
-          >
-            {{ versionLabel }}
-          </span>
-          <span v-if="lastLaunchedLabel" class="picker-row-card-pill">
-            {{ lastLaunchedLabel }}
-          </span>
-        </div>
+  <div class="picker-compact-row-wrap">
+    <div
+      role="option"
+      :aria-selected="active"
+      tabindex="0"
+      class="picker-compact-row"
+      :class="{ 'is-active': active, 'is-running': running }"
+      @click="handleSelect"
+      @keydown.enter="handleSelect"
+      @keydown.space.prevent="handleSelect"
+    >
+      <div class="picker-compact-row-icon" :title="$t(typeMeta.labelKey)">
+        <component :is="typeMeta.icon" :size="20" aria-hidden="true" />
+        <span v-if="running" class="picker-compact-row-running-dot" aria-hidden="true" />
+      </div>
+
+      <div class="picker-compact-row-main">
+        <span class="picker-compact-row-name">{{ installation.name }}</span>
+        <span v-if="versionLabel" class="picker-compact-row-pill picker-compact-row-pill-version">
+          {{ versionLabel }}
+        </span>
+        <span
+          v-if="lastLaunchedLabel"
+          class="picker-compact-row-pill picker-compact-row-pill-launched"
+        >
+          {{ lastLaunchedLabel }}
+        </span>
+      </div>
+
+      <div class="picker-compact-row-actions">
+        <button type="button" class="picker-compact-row-manage" @click.stop="handleManage">
+          {{ manageLabel }}
+        </button>
+        <button type="button" class="picker-compact-row-open" @click.stop="handleOpen">
+          {{ openLabel }}
+        </button>
       </div>
     </div>
-
-    <div class="picker-row-card-cta">
-      <button type="button" class="picker-row-card-open" @click="handleOpen">
-        {{ openLabel }}
-      </button>
-      <button type="button" class="picker-row-card-manage" @click="handleManage">
-        {{ manageLabel }}
-      </button>
-    </div>
-  </article>
+  </div>
 </template>
 
 <style scoped>
-.picker-row-card {
-  position: relative;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+.picker-compact-row-wrap {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.picker-compact-row {
+  display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 12px 14px;
-  border-radius: 10px;
-  border: 1px solid var(--chooser-surface-border);
-  background: var(--neutral-800);
-  transition:
-    background-color 120ms ease,
-    border-color 120ms ease;
+  gap: 10px;
+  min-height: 36px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  transition: background-color 120ms ease;
 }
 
-.picker-row-card:hover {
-  background: var(--brand-surface-bg-hover);
+.picker-compact-row:hover,
+.picker-compact-row:focus-visible,
+.picker-compact-row.is-active {
+  background: rgba(255, 255, 255, 0.04);
+  outline: none;
 }
 
-/* Active state — no blue accent bar. Border lifts to the brighter
- * hairline so the selected card reads as "picked" without competing
- * with the running-dot status indicator. */
-.picker-row-card.is-active {
-  border-color: var(--brand-surface-border-hover, var(--chooser-surface-border));
-}
-
-.picker-row-card-identity {
-  display: grid;
-  grid-template-columns: 22px minmax(0, 1fr);
-  gap: 12px;
-  align-items: center;
-  min-width: 0;
-}
-
-.picker-row-card-icon-wrap {
+.picker-compact-row-icon {
   position: relative;
-  width: 22px;
-  height: 22px;
-  display: inline-flex;
+  display: flex;
   align-items: center;
   justify-content: center;
+  width: 20px;
+  height: 20px;
   flex: 0 0 auto;
-}
-
-.picker-row-card-icon {
   color: var(--neutral-100);
   transition: color 120ms ease;
 }
-.picker-row-card.is-active .picker-row-card-icon {
+
+.picker-compact-row.is-active .picker-compact-row-icon,
+.picker-compact-row:hover .picker-compact-row-icon {
   color: var(--text);
 }
 
-.picker-row-card-text {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+.picker-compact-row-running-dot {
+  position: absolute;
+  bottom: -1px;
+  right: -5px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #38c149;
+  border: 2px solid #38303d;
+  box-sizing: content-box;
 }
 
-.picker-row-card-name-row {
+.picker-compact-row-main {
+  flex: 1 1 auto;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 8px;
-  min-width: 0;
+  overflow: hidden;
 }
 
-.picker-row-card-name {
-  margin: 0;
+.picker-compact-row-name {
   font-size: 14px;
   font-weight: 500;
   line-height: 20px;
@@ -177,31 +165,15 @@ function handleManage(): void {
   text-overflow: ellipsis;
 }
 
-/* Green status dot pinned to the icon's top-right when the install
- * is currently running. Replaces the previous "Running" text pill —
- * status is communicated by the dot alone. */
-.picker-row-card-running-dot {
-  position: absolute;
-  top: -1px;
-  right: -1px;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--success, #00cd72);
+.picker-compact-row.is-active .picker-compact-row-name,
+.picker-compact-row:hover .picker-compact-row-name {
+  color: var(--text);
 }
 
-.picker-row-card-pills {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px;
-}
-
-.picker-row-card-pill {
+.picker-compact-row-pill {
   display: inline-flex;
   align-items: center;
   height: 20px;
-  max-width: 18ch;
   padding: 0 8px;
   border-radius: 9999px;
   background: var(--chooser-surface-border);
@@ -210,58 +182,62 @@ function handleManage(): void {
   line-height: 16px;
   color: var(--neutral-100);
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  flex: 0 0 auto;
 }
 
-.picker-row-card-pill-version {
+.picker-compact-row-pill-version {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
-.picker-row-card-cta {
+.picker-compact-row-actions {
   display: flex;
-  flex-direction: column;
-  align-items: stretch;
+  align-items: center;
   gap: 6px;
   flex: 0 0 auto;
 }
 
-.picker-row-card-open,
-.picker-row-card-manage {
-  min-width: 96px;
+.picker-compact-row-manage,
+.picker-compact-row-open {
   min-height: 28px;
-  padding: 4px 14px;
+  padding: 4px 12px;
   border-radius: 7px;
   font-size: 12px;
   font-weight: 500;
   line-height: 18px;
   cursor: pointer;
+  white-space: nowrap;
   transition:
     filter 100ms ease,
     background-color 120ms ease,
     border-color 120ms ease;
 }
 
-.picker-row-card-open {
+.picker-compact-row-open {
+  min-width: 76px;
+  text-align: center;
   border: 1px solid var(--accent-primary);
   background: var(--accent-primary);
   color: var(--text);
 }
-.picker-row-card-open:hover,
-.picker-row-card-open:focus-visible {
+
+.picker-compact-row-open:hover,
+.picker-compact-row-open:focus-visible {
   filter: brightness(1.08);
   outline: none;
 }
 
-.picker-row-card-manage {
+.picker-compact-row-manage {
+  min-width: 76px;
+  text-align: center;
   border: 1px solid var(--chooser-surface-border);
   background: transparent;
   color: var(--neutral-100);
 }
-.picker-row-card-manage:hover,
-.picker-row-card-manage:focus-visible {
+
+.picker-compact-row-manage:hover,
+.picker-compact-row-manage:focus-visible {
   background: var(--brand-surface-bg-hover);
-  color: var(--neutral-100);
+  color: var(--text);
   outline: none;
 }
 </style>

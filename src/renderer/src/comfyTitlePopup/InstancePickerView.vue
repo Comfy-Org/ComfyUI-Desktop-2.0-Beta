@@ -16,7 +16,7 @@ import type {
   Installation,
   RunningInstance,
   ShowProgressOpts,
-  SnapshotListData,
+  SnapshotListData
 } from '../types/ipc'
 
 /**
@@ -96,7 +96,7 @@ function hydrateSessionStoreFromSnapshot(): void {
       const placeholder: RunningInstance = {
         installationId: id,
         installationName: '',
-        mode: '',
+        mode: ''
       }
       sessionStore.runningInstances.set(id, placeholder)
     }
@@ -144,7 +144,7 @@ interface PickerBridge {
    *  the popup bounds (compact → 95dvw × 95dvh centred). */
   setPickerMode: (
     mode: 'compact' | 'expanded',
-    opts?: { initialTab?: string; autoAction?: string | null },
+    opts?: { initialTab?: string; autoAction?: string | null }
   ) => void
   /** Picker → forward a `show-progress` request to the panel renderer. */
   pickerForwardShowProgress: (payload: {
@@ -177,7 +177,8 @@ const {
   visibleInstalls,
   showCloudCard,
   showEmptyHint,
-  lastLaunchedLabel
+  lastLaunchedLabel,
+  lastLaunchedShortLabel,
 } = useInstallList({ installations: installationsRef })
 
 // Chips come from the shared `FILTER_CHIPS` constant in
@@ -199,7 +200,6 @@ const visibleChips = computed(() => {
   })
 })
 
-
 // --- selection state ---
 //
 // Pre-select the install the snapshot points at. `selectedInstallationId`
@@ -216,7 +216,7 @@ watch(
   () => props.snapshot.selectedInstallationId,
   (next) => {
     if (next) selectedId.value = next
-  },
+  }
 )
 watch(
   () => props.snapshot.activeInstallationId,
@@ -224,7 +224,7 @@ watch(
     if (!props.snapshot.selectedInstallationId) {
       selectedId.value = next
     }
-  },
+  }
 )
 
 // Fall back to the first visible install when the active one isn't in
@@ -290,9 +290,7 @@ function handleRowManage(inst: Installation): void {
 }
 
 function openCtaLabelFor(inst: Installation): string {
-  return runningSet.value.has(inst.id)
-    ? t('instancePicker.restart')
-    : t('instancePicker.open')
+  return runningSet.value.has(inst.id) ? t('instancePicker.restart') : t('instancePicker.open')
 }
 
 function handleNewInstall(): void {
@@ -313,7 +311,7 @@ watch(
   () => selectedInstall.value?.id ?? null,
   (next) => {
     bridge?.setPickerSelectedInstall(next)
-  },
+  }
 )
 
 // Resize plumbing for the natural-height popup. The right-pane
@@ -324,9 +322,7 @@ const pickerRootRef = useTemplateRef<HTMLDivElement>('pickerRootRef')
 const detailRef = useTemplateRef<HTMLDivElement>('detailRef')
 
 /** Mode the popup is currently in, from the most recent snapshot. */
-const snapshotMode = computed<'compact' | 'expanded'>(
-  () => props.snapshot.mode ?? 'compact',
-)
+const snapshotMode = computed<'compact' | 'expanded'>(() => props.snapshot.mode ?? 'compact')
 
 useTitlePopupAutoResize(
   detailRef,
@@ -342,13 +338,13 @@ useTitlePopupAutoResize(
   // `requestSize` handler already early-returns in expanded mode). Gate
   // the observer so we don't even compute the height while the mode-flip
   // cross-fade is running.
-  { enabled: () => snapshotMode.value !== 'expanded' },
+  { enabled: () => snapshotMode.value !== 'expanded' }
 )
 
 /** Initial tab to seed `ComfyUISettingsContent` with on the expanded
  *  branch's first mount. */
 const initialExpandedTab = computed<PickerTab>(() =>
-  resolvePickerTab(props.snapshot.initialTab, 'config'),
+  resolvePickerTab(props.snapshot.initialTab, 'config')
 )
 
 function handleCollapseToCompact(): void {
@@ -361,7 +357,7 @@ function handleCollapseToCompact(): void {
 watch(
   () => props.snapshot.runningInstallationIds.join(','),
   () => hydrateSessionStoreFromSnapshot(),
-  { immediate: true },
+  { immediate: true }
 )
 
 // If main opens the picker directly in expanded mode (chooser-card
@@ -375,7 +371,7 @@ watch(
       void ensurePanelLocaleMerged()
     }
   },
-  { immediate: true },
+  { immediate: true }
 )
 
 // ESC: collapse to compact when expanded, otherwise let the popup's
@@ -411,7 +407,7 @@ function handleSettingsShowProgress(opts: ShowProgressOpts): void {
     cancellable: opts.cancellable,
     triggersInstanceStart: opts.triggersInstanceStart,
     opKind: opts.opKind,
-    isRestart: opts.actionId === 'restart',
+    isRestart: opts.actionId === 'restart'
   })
 }
 function handleSettingsNavigateList(): void {
@@ -469,69 +465,74 @@ function handleExpandedPrimaryAction(running: boolean): void {
          before the main-side 200ms bounds tween so contents settle
          before the shell does. -->
     <Transition name="picker-mode" mode="out-in">
-    <!-- Compact mode: single-column list of rich PickerRow cards. No
-         left/right split — each row is self-contained with its own
-         Open + Manage. Comfy Cloud renders as the same PickerRow shape
-         so the visual rhythm holds. The "+ New Instance" affordance is
-         pinned in a sticky footer so it stays visible while the list
-         scrolls. -->
-    <div v-if="snapshotMode !== 'expanded'" key="compact" ref="detailRef" class="picker-rows-wrap">
-      <TransitionGroup name="picker-row" tag="div" class="picker-rows" role="list">
-        <PickerRow
-          v-if="showCloudCard && cloudInstall"
-          :key="cloudInstall.id"
-          :installation="cloudInstall"
-          :active="selectedId === cloudInstall.id"
-          :running="isRowRunning(cloudInstall)"
-          :last-launched-label="lastLaunchedLabel(cloudInstall)"
-          :open-label="openCtaLabelFor(cloudInstall)"
-          :manage-label="t('instancePicker.manage')"
-          @open="handleRowOpen"
-          @manage="handleRowManage"
-        />
-
-        <PickerRow
-          v-for="inst in visibleInstalls"
-          :key="inst.id"
-          :installation="inst"
-          :active="selectedId === inst.id"
-          :running="isRowRunning(inst)"
-          :last-launched-label="lastLaunchedLabel(inst)"
-          :open-label="openCtaLabelFor(inst)"
-          :manage-label="t('instancePicker.manage')"
-          @open="handleRowOpen"
-          @manage="handleRowManage"
-        />
-
-        <div v-if="showEmptyHint" key="empty" class="picker-rows-empty">
-          {{ t('chooser.noMatches') }}
+      <!-- Compact mode: searchable instance list with inline rows. -->
+      <div
+        v-if="snapshotMode !== 'expanded'"
+        key="compact"
+        ref="detailRef"
+        class="picker-rows-wrap"
+      >
+        <div class="picker-list-section-title picker-list-section-title--compact">
+          {{ t('instancePicker.instances') }}
         </div>
-      </TransitionGroup>
+        <TransitionGroup name="picker-row" tag="div" class="picker-rows" role="listbox">
+          <PickerRow
+            v-if="showCloudCard && cloudInstall"
+            :key="cloudInstall.id"
+            :installation="cloudInstall"
+            :active="selectedId === cloudInstall.id"
+            :running="isRowRunning(cloudInstall)"
+            :last-launched-label="lastLaunchedLabel(cloudInstall)"
+            :open-label="openCtaLabelFor(cloudInstall)"
+            :manage-label="t('instancePicker.manage')"
+            @select="handleSelect"
+            @open="handleRowOpen"
+            @manage="handleRowManage"
+          />
 
-      <footer class="picker-rows-footer">
-        <button type="button" class="picker-new-install-row" @click="handleNewInstall">
-          <Plus :size="16" aria-hidden="true" />
-          <span>{{ t('instancePicker.newInstance') }}</span>
-        </button>
-      </footer>
-    </div>
+          <PickerRow
+            v-for="inst in visibleInstalls"
+            :key="inst.id"
+            :installation="inst"
+            :active="selectedId === inst.id"
+            :running="isRowRunning(inst)"
+            :last-launched-label="lastLaunchedLabel(inst)"
+            :open-label="openCtaLabelFor(inst)"
+            :manage-label="t('instancePicker.manage')"
+            @select="handleSelect"
+            @open="handleRowOpen"
+            @manage="handleRowManage"
+          />
 
-    <!-- Expanded mode: list-left + settings-right. Unchanged from
+          <div v-if="showEmptyHint" key="empty" class="picker-rows-empty">
+            {{ t('chooser.noMatches') }}
+          </div>
+        </TransitionGroup>
+
+        <footer class="picker-rows-footer">
+          <button type="button" class="picker-new-install-row" @click="handleNewInstall">
+            <Plus :size="16" aria-hidden="true" />
+            <span>{{ t('instancePicker.newInstance') }}</span>
+          </button>
+        </footer>
+      </div>
+
+      <!-- Expanded mode: list-left + settings-right. Unchanged from
          the previous design — the per-install settings UI mounts in
          the right pane and the popup bounds grow to fill inner area. -->
-    <div v-else key="expanded" class="picker-body">
-      <div class="picker-left">
-        <div class="picker-list-section">
-          <div class="picker-list-section-title">{{ t('instancePicker.instances') }}</div>
+      <div v-else key="expanded" class="picker-body">
+        <div class="picker-left">
+          <div class="picker-list-section">
+            <div class="picker-list-section-title">{{ t('instancePicker.instances') }}</div>
 
-          <div class="picker-list" role="listbox">
+            <div class="picker-list" role="listbox">
             <InstanceRow
               v-if="showCloudCard && cloudInstall"
               :key="cloudInstall.id"
               :installation="cloudInstall"
               :active="selectedId === cloudInstall.id"
               :running="isRowRunning(cloudInstall)"
-              :last-launched-label="lastLaunchedLabel(cloudInstall)"
+              :last-launched-short-label="lastLaunchedShortLabel(cloudInstall)"
               @select="handleSelect"
             />
 
@@ -541,48 +542,48 @@ function handleExpandedPrimaryAction(running: boolean): void {
               :installation="inst"
               :active="selectedId === inst.id"
               :running="isRowRunning(inst)"
-              :last-launched-label="lastLaunchedLabel(inst)"
+              :last-launched-short-label="lastLaunchedShortLabel(inst)"
               @select="handleSelect"
             />
 
-            <div v-if="showEmptyHint" class="picker-list-empty">
-              {{ t('chooser.noMatches') }}
+              <div v-if="showEmptyHint" class="picker-list-empty">
+                {{ t('chooser.noMatches') }}
+              </div>
             </div>
           </div>
+
+          <footer class="picker-left-footer">
+            <button type="button" class="picker-new-install" @click="handleNewInstall">
+              <Plus :size="16" />
+              <span>{{ t('instancePicker.newInstance') }}</span>
+            </button>
+          </footer>
         </div>
 
-        <footer class="picker-left-footer">
-          <button type="button" class="picker-new-install" @click="handleNewInstall">
-            <Plus :size="16" />
-            <span>{{ t('instancePicker.newInstance') }}</span>
-          </button>
-        </footer>
-      </div>
-
-      <div class="picker-detail-wrap is-expanded">
-        <div class="picker-detail">
-          <template v-if="selectedInstall">
-            <!-- Back affordance is rendered inside the settings tab
+        <div class="picker-detail-wrap is-expanded">
+          <div class="picker-detail">
+            <template v-if="selectedInstall">
+              <!-- Back affordance is rendered inside the settings tab
                  strip via `showBack` so it sits at the tab baseline
                  instead of floating over the tab nav. ESC still
                  collapses (see handleEsc above). -->
-            <ComfyUISettingsContent
-              :installation="selectedInstall"
-              :initial-tab="initialExpandedTab"
-              :show-back="true"
-              class="picker-expanded-body"
-              @show-progress="handleSettingsShowProgress"
-              @navigate-list="handleSettingsNavigateList"
-              @primary-action="handleExpandedPrimaryAction"
-              @back="handleCollapseToCompact"
-            />
-          </template>
-          <div v-else class="picker-detail-empty">
-            {{ t('instancePicker.empty') }}
+              <ComfyUISettingsContent
+                :installation="selectedInstall"
+                :initial-tab="initialExpandedTab"
+                :show-back="true"
+                class="picker-expanded-body"
+                @show-progress="handleSettingsShowProgress"
+                @navigate-list="handleSettingsNavigateList"
+                @primary-action="handleExpandedPrimaryAction"
+                @back="handleCollapseToCompact"
+              />
+            </template>
+            <div v-else class="picker-detail-empty">
+              {{ t('instancePicker.empty') }}
+            </div>
           </div>
         </div>
       </div>
-    </div>
     </Transition>
   </div>
 </template>
@@ -678,7 +679,7 @@ function handleExpandedPrimaryAction(running: boolean): void {
   display: flex;
   flex-direction: column;
   border-right: 1px solid var(--chooser-surface-border);
-  background: var(--neutral-800);
+  background: var(--modal-surface-bg);
 }
 /* Footer band — mirrors the right pane's `.settings-v2-footer` shape
  * (full-bleed bordered band, same padding + bg) so the two footers
@@ -689,7 +690,7 @@ function handleExpandedPrimaryAction(running: boolean): void {
   align-items: center;
   padding: 12px 16px;
   border-top: 1px solid var(--chooser-surface-border);
-  background: var(--neutral-800);
+  background: var(--modal-surface-bg);
 }
 .picker-list-section {
   flex: 1 1 auto;
@@ -703,8 +704,10 @@ function handleExpandedPrimaryAction(running: boolean): void {
   font-size: 14px;
   font-weight: 500;
   line-height: 20px;
-  color: var(--text);
-  padding: 8px 18px 0 16px;
+  color: var(--neutral-100);
+  opacity: 0.7;
+  padding: 12px 18px 0 16px;
+  margin-bottom: 14px;
 }
 .picker-list {
   flex: 1 1 auto;
@@ -753,19 +756,19 @@ function handleExpandedPrimaryAction(running: boolean): void {
   outline: none;
 }
 
-/* ---- Compact mode: single-column rows ----
- * Two-section flex column: scrollable rows list on top, sticky footer
- * with the "+ New Instance" affordance below. The outer envelope is
- * capped at 720px by `computePickerBounds`; rows fill that envelope
- * edge-to-edge (minus the wrap's 16px gutter) so they don't read as
- * undersized inside a too-wide popup. */
+.picker-list-section-title--compact {
+  flex: 0 0 auto;
+  padding: 8px 16px 4px 16px;
+}
+
+/* ---- Compact mode: single-column list rows ---- */
 .picker-rows-wrap {
   flex: 1 1 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  padding: 12px 16px 0 16px;
   overflow: hidden;
+  padding-top: 8px;
 }
 .picker-rows {
   position: relative;
@@ -775,7 +778,8 @@ function handleExpandedPrimaryAction(running: boolean): void {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 2px;
+  padding: 0 8px;
   /* Hide the native scrollbar — popup is a focused glance affordance,
    * a visible scrollbar would compete with the row chrome. */
   scrollbar-width: none;
@@ -794,7 +798,7 @@ function handleExpandedPrimaryAction(running: boolean): void {
 .picker-rows-footer {
   flex: 0 0 auto;
   display: flex;
-  padding: 12px 0 16px 0;
+  padding: 12px 16px 16px 16px;
 }
 .picker-new-install-row {
   flex: 1 1 auto;
@@ -863,10 +867,7 @@ function handleExpandedPrimaryAction(running: boolean): void {
 .picker-expanded-body {
   flex: 1 1 auto;
   min-height: 0;
-  /* Brighten dim text inside the embedded settings UI. Most labels +
-   * meta strings inside `ComfyUISettingsContent` and its children
-   * resolve via `var(--text-muted)`; overriding the token at this
-   * scope cascades the bump without touching the shared token. */
+
   --text-muted: var(--neutral-100);
 }
 
@@ -895,7 +896,9 @@ function handleExpandedPrimaryAction(running: boolean): void {
  * looking teleported when row counts change. */
 .picker-row-enter-active,
 .picker-row-leave-active {
-  transition: opacity 140ms ease, transform 140ms ease;
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease;
 }
 .picker-row-enter-from {
   opacity: 0;

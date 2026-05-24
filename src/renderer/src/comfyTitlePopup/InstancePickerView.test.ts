@@ -34,11 +34,8 @@ const emptySnapshotListPayload: SnapshotListData = {
 
 /**
  * Component tests for the instance-picker popover view. Compact mode
- * is a single-column list of self-contained PickerRow cards; expanded
- * mode mounts ComfyUISettingsContent in a list-left + settings-right
- * split. Tests below cover the compact-mode contract — each row is
- * its own affordance with Open + Manage CTAs and the picker dispatches
- * the right bridge IPC for each click.
+ * is a searchable list with inline rows; expanded mode mounts
+ * ComfyUISettingsContent in a list-left + settings-right split.
  */
 
 interface MockInstall {
@@ -193,7 +190,7 @@ describe('comfyTitlePopup/InstancePickerView', () => {
         runningInstallationIds: [],
       })
       const namesInOrder = wrapper
-        .findAll('.picker-row-card-name')
+        .findAll('.picker-compact-row-name')
         .map((n) => n.text())
       expect(namesInOrder).toEqual(['New', 'Old', 'Never'])
     })
@@ -207,9 +204,9 @@ describe('comfyTitlePopup/InstancePickerView', () => {
         activeInstallationId: null,
         runningInstallationIds: ['a'],
       })
-      const cards = wrapper.findAll('.picker-row-card')
-      const alphaCard = cards.find((c) => c.text().includes('Alpha'))
-      expect(alphaCard!.classes()).toContain('is-running')
+      const rows = wrapper.findAll('.picker-compact-row')
+      const alphaRow = rows.find((c) => c.text().includes('Alpha'))
+      expect(alphaRow!.classes()).toContain('is-running')
     })
 
     it('renders Open + Manage CTAs on every row', async () => {
@@ -218,16 +215,14 @@ describe('comfyTitlePopup/InstancePickerView', () => {
           makeInstall({ id: 'a', name: 'Alpha' }),
           makeInstall({ id: 'b', name: 'Bravo' }),
         ],
-        activeInstallationId: null,
+        activeInstallationId: 'a',
         runningInstallationIds: [],
       })
-      const opens = wrapper.findAll('.picker-row-card-open')
-      const manages = wrapper.findAll('.picker-row-card-manage')
-      expect(opens.length).toBe(2)
-      expect(manages.length).toBe(2)
+      expect(wrapper.findAll('.picker-compact-row-open').length).toBe(2)
+      expect(wrapper.findAll('.picker-compact-row-manage').length).toBe(2)
     })
 
-    it('shows the source-label and version pills on each row', async () => {
+    it('shows the version pill on each row', async () => {
       const wrapper = await mountPicker({
         installs: [
           makeInstall({
@@ -240,11 +235,11 @@ describe('comfyTitlePopup/InstancePickerView', () => {
         activeInstallationId: null,
         runningInstallationIds: [],
       })
-      const card = wrapper.find('.picker-row-card')
-      expect(card.text()).toContain('Alpha')
-      expect(card.text()).toContain('GitHub')
-      expect(card.text()).toContain('v0.20.2+57')
-      expect(card.text()).not.toContain('vv0.20.2+57')
+      const row = wrapper.find('.picker-compact-row')
+      expect(row.text()).toContain('Alpha')
+      expect(row.text()).toContain('v0.20.2+57')
+      expect(row.text()).not.toContain('vv0.20.2+57')
+      expect(row.text()).not.toContain('GitHub')
     })
 
     it('does not double-prefix the version pill when version already starts with v', async () => {
@@ -255,9 +250,9 @@ describe('comfyTitlePopup/InstancePickerView', () => {
         activeInstallationId: null,
         runningInstallationIds: [],
       })
-      const card = wrapper.find('.picker-row-card')
-      expect(card.text()).toContain('v0.21.1')
-      expect(card.text()).not.toContain('vv0.21.1')
+      const row = wrapper.find('.picker-compact-row')
+      expect(row.text()).toContain('v0.21.1')
+      expect(row.text()).not.toContain('vv0.21.1')
     })
   })
 
@@ -279,7 +274,7 @@ describe('comfyTitlePopup/InstancePickerView', () => {
         activeInstallationId: 'a',
         runningInstallationIds: [],
       })
-      const openButton = wrapper.find('.picker-row-card-open')
+      const openButton = wrapper.find('.picker-compact-row.is-active .picker-compact-row-open')
       expect(openButton.exists()).toBe(true)
       await openButton.trigger('click')
       expect(bridge.picks).toEqual(['a'])
@@ -295,7 +290,7 @@ describe('comfyTitlePopup/InstancePickerView', () => {
         activeInstallationId: 'a',
         runningInstallationIds: ['a'],
       })
-      const openButton = wrapper.find('.picker-row-card-open')
+      const openButton = wrapper.find('.picker-compact-row.is-active .picker-compact-row-open')
       expect(openButton.text()).toBe('Restart')
       await openButton.trigger('click')
       expect(bridge.restarts).toEqual(['a'])
@@ -312,9 +307,9 @@ describe('comfyTitlePopup/InstancePickerView', () => {
         runningInstallationIds: ['b'],
       })
       // Alpha is not running — its Open button should read "Open".
-      const cards = wrapper.findAll('.picker-row-card')
-      const alphaCard = cards.find((c) => c.text().includes('Alpha'))
-      expect(alphaCard!.find('.picker-row-card-open').text()).toBe('Open')
+      const rows = wrapper.findAll('.picker-compact-row')
+      const alphaRow = rows.find((c) => c.text().includes('Alpha'))
+      expect(alphaRow!.find('.picker-compact-row-open').text()).toBe('Open')
     })
 
     it('dispatches setPickerMode("expanded") with config tab when Manage is clicked', async () => {
@@ -323,7 +318,7 @@ describe('comfyTitlePopup/InstancePickerView', () => {
         activeInstallationId: 'a',
         runningInstallationIds: [],
       })
-      const manageButton = wrapper.find('.picker-row-card-manage')
+      const manageButton = wrapper.find('.picker-compact-row.is-active .picker-compact-row-manage')
       await manageButton.trigger('click')
       await flushPromises()
       expect(bridge.setPickerModeCalls.length).toBe(1)
@@ -345,9 +340,9 @@ describe('comfyTitlePopup/InstancePickerView', () => {
       const input = wrapper.find('.picker-search input')
       await input.setValue('alph')
       await flushPromises()
-      const cards = wrapper.findAll('.picker-row-card')
-      expect(cards.length).toBe(1)
-      expect(cards[0]!.text()).toContain('Alpha')
+      const rows = wrapper.findAll('.picker-compact-row')
+      expect(rows.length).toBe(1)
+      expect(rows[0]!.text()).toContain('Alpha')
     })
 
     it('switches visible rows when a non-all filter chip is activated', async () => {
@@ -363,9 +358,9 @@ describe('comfyTitlePopup/InstancePickerView', () => {
       const remoteChip = chips.find((c) => c.text() === 'Remote')
       expect(remoteChip).toBeTruthy()
       await remoteChip!.trigger('click')
-      const cards = wrapper.findAll('.picker-row-card')
-      expect(cards.length).toBe(1)
-      expect(cards[0]!.text()).toContain('RemoteThing')
+      const rows = wrapper.findAll('.picker-compact-row')
+      expect(rows.length).toBe(1)
+      expect(rows[0]!.text()).toContain('RemoteThing')
     })
 
     it('shows the empty-state hint when no rows match', async () => {
