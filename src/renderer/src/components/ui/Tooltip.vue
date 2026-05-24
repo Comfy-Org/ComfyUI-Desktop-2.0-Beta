@@ -1,26 +1,6 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref, useId } from 'vue'
 import { useTooltip, type TooltipAlign, type TooltipSide } from '../../composables/useTooltip'
-
-/**
- * Position-aware tooltip primitive (shadcn-style).
- *
- * Wraps a trigger slot, teleports the bubble to body, and lets
- * `useTooltip` own placement: requested side honoured when there's
- * room, flipped to the opposite side on collision, `left`/`top`
- * clamped inside a viewport edge band so the bubble never sits flush
- * against the screen edge. The arrow is offset back toward the trigger
- * regardless of how clamping shifts the bubble.
- *
- * The trigger slot must accept hover + focus events on its root — the
- * wrapper is a contents-only `<span>` so it doesn't introduce a stacking
- * box, but bubbles `mouseenter` / `focusin` upward from whatever the
- * consumer renders inside.
- *
- * TODO(tooltip-tokens): tooltip surface colours hard-coded per spec
- * (#211927 fill, #38303D border); promote to `--tooltip-*` tokens in
- * main.css and reference them here once the design system PR lands.
- */
 
 interface Props {
   text?: string
@@ -40,6 +20,7 @@ const props = withDefaults(defineProps<Props>(), {
 
 const triggerRef = ref<HTMLElement | null>(null)
 const bubbleRef = ref<HTMLElement | null>(null)
+const bubbleId = `tooltip-${useId()}`
 
 const { visible, show, hide, bubbleStyle, resolvedSide, arrowStyle } = useTooltip(
   triggerRef,
@@ -50,6 +31,8 @@ const { visible, show, hide, bubbleStyle, resolvedSide, arrowStyle } = useToolti
     canShow: () => !props.disabled && !!props.text,
   },
 )
+
+const describedBy = computed(() => (visible.value ? bubbleId : undefined))
 
 let openTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -72,21 +55,31 @@ function onLeave(): void {
   }
   hide()
 }
+
+function onKeydown(e: KeyboardEvent): void {
+  if (e.key === 'Escape' && visible.value) {
+    e.stopPropagation()
+    hide()
+  }
+}
 </script>
 
 <template>
   <span
     ref="triggerRef"
     class="tooltip-wrap"
+    :aria-describedby="describedBy"
     @mouseenter="onEnter"
     @mouseleave="onLeave"
     @focusin="onEnter"
     @focusout="onLeave"
+    @keydown="onKeydown"
   >
     <slot />
     <Teleport to="body">
       <span
         v-if="visible"
+        :id="bubbleId"
         ref="bubbleRef"
         class="tooltip-bubble"
         :data-side="resolvedSide"
@@ -111,12 +104,12 @@ function onLeave(): void {
 <style>
 .tooltip-bubble {
   position: fixed;
-  z-index: 10001;
+  z-index: var(--z-tooltip);
   padding: 8px 16px;
   border-radius: var(--primitive-border-radius-rounded-lg, 8px);
-  border: 1px solid #38303d;
-  background: #211927;
-  color: #ffffff;
+  border: 1px solid var(--tooltip-border);
+  background: var(--tooltip-bg);
+  color: var(--tooltip-fg);
   font-size: 12px;
   line-height: 1.4;
   font-weight: 400;
@@ -127,21 +120,13 @@ function onLeave(): void {
   text-align: left;
 }
 
-/* Arrow is a CSS triangle stacked over a same-shape fill so the bubble
- * border reads continuously through the arrow's outer edge. */
 .tooltip-arrow {
   position: absolute;
   width: 12px;
   height: 6px;
-  /* Inline `left` / `top` from `arrowStyle` positions the arrow back at
-   * the trigger center even when clamping pushed the bubble off-axis. */
   transform: translateX(-50%);
   pointer-events: none;
 }
-/* Pull the arrow 1px back into the bubble so the fill triangle overlaps
- * the bubble's 1px border at the join and the arrow reads as one
- * continuous shape with the bubble — no seam, no visible border line
- * across the top of the triangle. */
 .tooltip-bubble[data-side='top'] .tooltip-arrow {
   bottom: -5px;
 }
@@ -168,11 +153,7 @@ function onLeave(): void {
   inset: 0;
 }
 .tooltip-arrow::before {
-  /* Border-coloured triangle painted under the fill — its tip + sides
-   * become the arrow's outline. The fill overlaps the bubble border so
-   * the only visible #38303d edge is the two sloped sides of the
-   * triangle, not the flat top. */
-  background: #38303d;
+  background: var(--tooltip-border);
   clip-path: polygon(50% 100%, 0 0, 100% 0);
 }
 .tooltip-bubble[data-side='bottom'] .tooltip-arrow::before {
@@ -186,10 +167,7 @@ function onLeave(): void {
 }
 
 .tooltip-arrow__fill {
-  background: #211927;
-  /* Pull the fill 1px upward so it covers the bubble's bottom border
-   * where the triangle meets the bubble — the only visible border is
-   * the two sloped sides. */
+  background: var(--tooltip-bg);
   inset: -1px 0 0 0;
   clip-path: polygon(50% 100%, 0 0, 100% 0);
 }
