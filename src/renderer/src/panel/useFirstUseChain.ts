@@ -28,7 +28,7 @@ export interface FirstUseChainOpts {
   /** Re-opens the FirstUseTakeover from the Configure → Back chain.
    *  Owned by usePanelOverlays. Pass `{ initialStep: 'localBranch' }`
    *  so the user lands on the sub-step they came from. */
-  openFirstUseTakeover: (opts?: { initialStep?: 'consent' | 'pick' | 'localBranch' }) => Promise<void>
+  openFirstUseTakeover: (opts?: { initialStep?: 'start' | 'localBranch' }) => Promise<void>
 }
 
 export interface FirstUseChainApi {
