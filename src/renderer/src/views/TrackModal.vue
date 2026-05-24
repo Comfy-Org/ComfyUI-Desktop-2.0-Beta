@@ -250,7 +250,6 @@ defineExpose({ open })
           <div class="track-field">
             <label class="track-label">{{ $t('track.detectedType') }}</label>
             <BaseSelect
-              variant="brand"
               :model-value="selectedProbeValue"
               :options="probeOptions"
               :placeholder="selectPlaceholder"
