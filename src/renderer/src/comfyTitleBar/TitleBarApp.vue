@@ -465,7 +465,7 @@ onUnmounted(() => {
            ComfyCLogo icon = ComfyUI core; CloudDownload icon = Desktop
            app. Same chrome (brand-yellow tint), different icons. -->
       <button
-        v-if="showInstallUpdatePill"
+        v-if="!isChromeLocked && showInstallUpdatePill"
         type="button"
         class="title-update-pill is-install-update"
         v-bind="tooltipAttrs(installUpdatePillLabel)"
@@ -475,7 +475,7 @@ onUnmounted(() => {
         <span class="title-update-pill-label">{{ installUpdatePillLabel }}</span>
       </button>
       <button
-        v-if="showAppUpdatePill"
+        v-if="!isChromeLocked && showAppUpdatePill"
         type="button"
         class="title-update-pill is-app-update"
         :class="{
