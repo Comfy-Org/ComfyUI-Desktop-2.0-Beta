@@ -14,7 +14,7 @@ import type {
   DetailField,
   DetailSection,
   Installation,
-  ShowProgressOpts,
+  ShowProgressOpts
 } from '../../types/ipc'
 
 /**
@@ -38,7 +38,7 @@ interface Props {
 
 const props = withDefaults(defineProps<Props>(), {
   initialTab: 'config',
-  showBack: false,
+  showBack: false
 })
 
 const emit = defineEmits<{
@@ -70,7 +70,7 @@ watch(
   () => props.initialTab,
   (next) => {
     activeTab.value = next
-  },
+  }
 )
 
 const installation = toRef(props, 'installation')
@@ -83,12 +83,12 @@ const {
   sectionsForTab,
   diskUsageItem,
   pinBottomActions,
-  reload,
+  reload
 } = useComfyUISettings({
   installation,
   onShowProgress: (opts) => emit('show-progress', opts),
   onNavigateList: () => emit('navigate-list'),
-  onClose: () => emit('request-close'),
+  onClose: () => emit('request-close')
 })
 
 interface TabDef {
@@ -111,11 +111,11 @@ const ALL_TABS: TabDef[] = [
   {
     key: 'snapshots',
     sectionTab: 'snapshots',
-    label: t('comfyUISettings.tabSnapshots', 'Snapshots'),
-  },
+    label: t('comfyUISettings.tabSnapshots', 'Snapshots')
+  }
 ]
 const tabs = computed<TabDef[]>(() =>
-  ALL_TABS.filter((tab) => sectionsForTab(tab.sectionTab).value.length > 0),
+  ALL_TABS.filter((tab) => sectionsForTab(tab.sectionTab).value.length > 0)
 )
 
 // If the currently selected tab disappeared (e.g. swapping a local
@@ -151,10 +151,10 @@ const visibleSections = computed(() => {
             id: '__disk-usage',
             label: t('comfyUISettings.diskUsage', 'Disk Usage'),
             value: diskUsageItem.value.label,
-            editable: false,
-          },
-        ],
-      } as DetailSection,
+            editable: false
+          }
+        ]
+      } as DetailSection
     ]
   }
   return base
@@ -237,7 +237,7 @@ watch(
   () => {
     subPage.value = null
     moreMenuOpen.value = false
-  },
+  }
 )
 
 const argsField = computed<DetailField | null>(() => {
@@ -279,9 +279,7 @@ const isInstallRunning = computed(() => {
 })
 
 const primaryActionLabel = computed(() =>
-  isInstallRunning.value
-    ? t('instancePicker.restart', 'Restart')
-    : t('instancePicker.open', 'Open'),
+  isInstallRunning.value ? t('instancePicker.restart', 'Restart') : t('instancePicker.open', 'Open')
 )
 
 function handlePrimaryAction(): void {
@@ -293,11 +291,9 @@ defineExpose({
   /** Host can force-focus the active tab — drawer uses this when it
    *  opens so initial focus lands inside the body. */
   focusActiveTab(): void {
-    const firstTab = rootRef.value?.querySelector<HTMLButtonElement>(
-      '.settings-v2-tab.is-active',
-    )
+    const firstTab = rootRef.value?.querySelector<HTMLButtonElement>('.settings-v2-tab.is-active')
     firstTab?.focus()
-  },
+  }
 })
 </script>
 
@@ -354,13 +350,8 @@ defineExpose({
         />
 
         <div v-else key="subpage-root" class="settings-v2-body-root">
-          <!-- Inner tab-swap transition. The two child components both
-               need to be wrapped in a single-root `<div>` because
-               `<Transition>` requires a single root child — and
-               `SettingsSectionList` actually renders as a `v-for`
-               fragment of `<article>` siblings, which would silently
-               disable the animation AND prevent any tab content from
-               rendering at all. -->
+          <!-- Inner tab-swap transition. Wrapped in a single-root
+               `<div>` because `<Transition>` requires one child. -->
           <Transition :name="tabTransition" mode="out-in">
             <div
               v-if="activeTab === 'snapshots' && installation"
@@ -373,11 +364,7 @@ defineExpose({
                 @refresh-all="handleSnapshotsRefresh"
               />
             </div>
-            <div
-              v-else
-              :key="`tab-${activeTab}`"
-              class="settings-v2-tab-pane"
-            >
+            <div v-else :key="`tab-${activeTab}`" class="settings-v2-tab-pane">
               <SettingsSectionList
                 :sections="visibleSections"
                 :readonly="activeTab === 'status'"
@@ -574,7 +561,7 @@ defineExpose({
   gap: 8px;
   padding: 12px 16px;
   border-top: 1px solid var(--chooser-surface-border);
-  background: var(--neutral-800);
+  background: var(--modal-surface-bg);
 }
 
 /* Pin both footer buttons to the same 32px height as the left

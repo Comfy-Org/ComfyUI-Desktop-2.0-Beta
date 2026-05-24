@@ -8,7 +8,7 @@ import {
   Loader2,
   Menu as MenuIcon,
   MessageSquarePlus,
-  RefreshCw,
+  RefreshCw
 } from 'lucide-vue-next'
 import { useTitleBarTooltip } from './useTitleBarTooltip'
 import { useTitleBarMenus } from './useTitleBarMenus'
@@ -23,12 +23,7 @@ const { t } = useI18n()
 // file isn't visible to tsconfig.web (only its .d.ts would be). Kept in
 // sync with the literal union in src/preload/comfyTitleBarPreload.ts and
 // the ComfyPanelKey export in src/main/index.ts.
-type ComfyPanelKey =
-  | 'comfy'
-  | 'new-install'
-  | 'track'
-  | 'load-snapshot'
-  | 'quick-install'
+type ComfyPanelKey = 'comfy' | 'new-install' | 'track' | 'load-snapshot' | 'quick-install'
 
 /** Position passed to main so the native menu pops below the anchor button.
  *  Coordinates are in title-bar-local pixels — main translates to window
@@ -436,10 +431,7 @@ onUnmounted(() => {
           <ChevronDown :size="12" class="title-install-caret" aria-hidden="true" />
         </div>
       </button>
-      <div
-        v-else
-        class="title-install-pill"
-      >
+      <div v-else class="title-install-pill">
         <div class="title-install-slot title-install-slot--leading">
           <ComfyCLogo class="title-install-brand-mark" :size="16" />
         </div>
@@ -524,16 +516,15 @@ onUnmounted(() => {
         @click="handleDownloadsTray"
       >
         <ArrowDownToLine :size="16" />
-        <span
-          v-if="downloadsActiveCount > 0"
-          class="title-downloads-badge"
-          aria-hidden="true"
-        >{{ downloadsActiveCount }}</span>
+        <span v-if="downloadsActiveCount > 0" class="title-downloads-badge" aria-hidden="true">{{
+          downloadsActiveCount
+        }}</span>
         <span
           v-else-if="unseenFinishedCount > 0"
           class="title-downloads-badge is-unseen"
           aria-hidden="true"
-        >{{ unseenFinishedCount }}</span>
+          >{{ unseenFinishedCount }}</span
+        >
       </button>
     </div>
   </header>
@@ -679,8 +670,7 @@ onUnmounted(() => {
   height: 28px;
   padding: 5px 8px;
   border-radius: 999px;
-  background: var(--brand-surface-bg);
-  border: 1px solid var(--neutral-100);
+  background: var(--chooser-surface-bg);
   color: var(--neutral-100);
   font: inherit;
   font-size: 12px;

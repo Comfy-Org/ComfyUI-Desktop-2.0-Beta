@@ -283,7 +283,7 @@ function onStartCardsKeydown(e: KeyboardEvent): void {
   pickedChoice.value = nextChoice
   void nextTick(() => {
     const radios = (e.currentTarget as HTMLElement | null)?.querySelectorAll<HTMLElement>(
-      '[role="radio"]',
+      '[role="radio"]'
     )
     radios?.[next]?.focus()
   })
@@ -491,8 +491,15 @@ defineExpose({ open })
           :aria-busy="isContinuing"
           @click="onContinue"
         >
-          <Loader2 v-if="isContinuing" :size="16" class="start-continue__spinner" aria-hidden="true" />
-          <span>{{ isContinuing ? $t('firstUse.startContinueBusy') : $t('firstUse.startContinue') }}</span>
+          <Loader2
+            v-if="isContinuing"
+            :size="16"
+            class="start-continue__spinner"
+            aria-hidden="true"
+          />
+          <span>{{
+            isContinuing ? $t('firstUse.startContinueBusy') : $t('firstUse.startContinue')
+          }}</span>
         </button>
       </div>
     </div>
@@ -830,7 +837,7 @@ defineExpose({ open })
   width: 32px;
   height: 32px;
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--chooser-surface-bg);
   color: var(--text);
 }
 .lb-card__text {
