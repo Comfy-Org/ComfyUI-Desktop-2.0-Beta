@@ -7,13 +7,18 @@ import { LEGAL_DOCS, type LegalDocId } from '../lib/legalDocs'
 
 const props = withDefaults(
   defineProps<{
+    /** Parent-controlled visibility. Bound through to BaseModal so its
+     *  focus capture / restore lifecycle fires on the open→close edge —
+     *  hardcoding `:open="true"` here would freeze that watcher and
+     *  keyboard focus would never return to the trigger. */
+    open?: boolean
     /** Which legal document to render. The consent screen passes
      *  'eula' for the EULA-and-ToS checkbox link and 'privacy' for
      *  the analytics-consent link. Defaults to privacy so existing
      *  call sites keep working. */
     doc?: LegalDocId
   }>(),
-  { doc: 'privacy' },
+  { open: true, doc: 'privacy' },
 )
 
 const emit = defineEmits<{
@@ -41,8 +46,9 @@ const titleKey = computed(() => {
 
 <template>
   <BaseModal
-    :open="true"
+    :open="open"
     size="lg"
+    blur-overlay
     :aria-label="t(titleKey)"
     content-class="terms-content"
     @close="emit('close')"
