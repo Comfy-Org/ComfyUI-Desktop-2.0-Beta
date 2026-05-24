@@ -14,9 +14,9 @@ import { useModalOverlay } from '../../composables/useModalOverlay'
  * accessible name. We warn loudly in dev rather than throwing so a
  * mis-wired modal still renders in prod.
  *
- * Sits at z-index 60 to match `TermsModal` / `WhyTryCloudModal` (below
- * context menus, above the settings drawer). Migration of those modals
- * onto this primitive is a follow-up (TODO(modal-migration)).
+ * Sits at z-index 60 to match `WhyTryCloudModal` (below context menus,
+ * above the settings drawer). Migration of `WhyTryCloudModal` onto
+ * this primitive is a follow-up (TODO(modal-migration)).
  */
 
 type Size = 'sm' | 'md' | 'lg' | 'xl'
@@ -189,6 +189,8 @@ const sizeClass = computed(() => `is-size-${props.size}`)
   place-items: center;
   padding: clamp(32px, 6vh, 72px) clamp(16px, 4vw, 48px);
   background: color-mix(in oklab, var(--neutral-800) 70%, transparent);
+  backdrop-filter: blur(12px) saturate(120%);
+  -webkit-backdrop-filter: blur(12px) saturate(120%);
 }
 
 .base-modal-panel {
