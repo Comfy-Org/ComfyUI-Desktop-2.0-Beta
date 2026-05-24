@@ -29,63 +29,60 @@
  */
 
 export type ErrorBucket =
- | 'cancelled'
- | 'timeout'
- | 'network'
- | 'disk'
- | 'permissions'
- | 'path'
- | 'oom'
- | 'node_missing'
- | 'import_error'
- | 'cuda_init'
- | 'python'
- | 'other'
- | 'unknown'
+  | 'cancelled'
+  | 'timeout'
+  | 'network'
+  | 'disk'
+  | 'permissions'
+  | 'path'
+  | 'oom'
+  | 'node_missing'
+  | 'import_error'
+  | 'cuda_init'
+  | 'python'
+  | 'other'
+  | 'unknown'
 
 export function bucketError(input: unknown): ErrorBucket {
- const raw =
- input instanceof Error
- ? input.message
- : typeof input === 'string'
- ? input
- : ''
- if (!raw) return 'unknown'
- const message = raw.toLowerCase()
- // User cancellation should win even if the message also mentions other
- // failures triggered by the cancel.
- if (message.includes('cancel')) return 'cancelled'
- if (message.includes('timeout')) return 'timeout'
- if (
- message.includes('out of memory')
- || message.includes('outofmemoryerror')
- || /\bkilled\b/.test(message)
- ) {
- return 'oom'
- }
- if (
- message.includes('cuda not available')
- || message.includes('no cuda-capable device')
- || message.includes('cuda runtime error')
- ) {
- return 'cuda_init'
- }
- if (message.includes('importerror') || message.includes('modulenotfounderror')) {
- return 'import_error'
- }
- if (
- /\bnode (not found|missing)\b/.test(message)
- || message.includes('unknown node type')
- || message.includes('nodenotfound')
- ) {
- return 'node_missing'
- }
- if (message.includes('network') || message.includes('fetch')) return 'network'
- if (message.includes('disk') || message.includes('space') || message.includes('enospc')) return 'disk'
- if (message.includes('permission') || message.includes('access') || message.includes('eacces')) return 'permissions'
- if (message.includes('path') || message.includes('enoent')) return 'path'
- // Final catch-all for a known Python exception class shape ("FooError" /
- // "FooException" at message start) that doesn't match any specific bucket.
- if (/^[a-z][a-z0-9_.]*(error|exception)\b/.test(message)) return 'python'
- return 'other'
+  const raw = input instanceof Error ? input.message : typeof input === 'string' ? input : ''
+  if (!raw) return 'unknown'
+  const message = raw.toLowerCase()
+  // User cancellation should win even if the message also mentions other
+  // failures triggered by the cancel.
+  if (message.includes('cancel')) return 'cancelled'
+  if (message.includes('timeout')) return 'timeout'
+  if (
+    message.includes('out of memory') ||
+    message.includes('outofmemoryerror') ||
+    /\bkilled\b/.test(message)
+  ) {
+    return 'oom'
+  }
+  if (
+    message.includes('cuda not available') ||
+    message.includes('no cuda-capable device') ||
+    message.includes('cuda runtime error')
+  ) {
+    return 'cuda_init'
+  }
+  if (message.includes('importerror') || message.includes('modulenotfounderror')) {
+    return 'import_error'
+  }
+  if (
+    /\bnode (not found|missing)\b/.test(message) ||
+    message.includes('unknown node type') ||
+    message.includes('nodenotfound')
+  ) {
+    return 'node_missing'
+  }
+  if (message.includes('network') || message.includes('fetch')) return 'network'
+  if (message.includes('disk') || message.includes('space') || message.includes('enospc'))
+    return 'disk'
+  if (message.includes('permission') || message.includes('access') || message.includes('eacces'))
+    return 'permissions'
+  if (message.includes('path') || message.includes('enoent')) return 'path'
+  // Final catch-all for a known Python exception class shape ("FooError" /
+  // "FooException" at message start) that doesn't match any specific bucket.
+  if (/^[a-z][a-z0-9_.]*(error|exception)\b/.test(message)) return 'python'
+  return 'other'
 }

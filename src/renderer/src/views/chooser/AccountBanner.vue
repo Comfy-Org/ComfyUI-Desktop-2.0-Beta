@@ -28,14 +28,15 @@ const dismissed = ref(false)
 onMounted(async () => {
   try {
     const variant = await window.api.telemetryGetExperimentFlag(EXPERIMENT_KEY)
-    const variantStr = typeof variant === 'string' ? variant : variant === true ? 'treatment' : 'control'
+    const variantStr =
+      typeof variant === 'string' ? variant : variant === true ? 'treatment' : 'control'
     // Record exposure for BOTH variants so the experiment's exposure
     // numerator counts every user the flag was evaluated for, not just
     // the ones who saw the banner.
     window.api.telemetryRecordExposure({
       experimentKey: EXPERIMENT_KEY,
       variant: variantStr,
-      source: 'cache',
+      source: 'cache'
     })
     if (variantStr === 'treatment') showBanner.value = true
   } catch {
@@ -50,22 +51,10 @@ function dismiss(): void {
 </script>
 
 <template>
-  <div
-    v-if="showBanner && !dismissed"
-    class="account-banner"
-    role="status"
-    aria-live="polite"
-  >
+  <div v-if="showBanner && !dismissed" class="account-banner" role="status" aria-live="polite">
     <Sparkles :size="16" class="account-banner-icon" />
-    <span class="account-banner-text">
-      Congrats — you're on a Comfy account.
-    </span>
-    <button
-      type="button"
-      class="account-banner-dismiss"
-      aria-label="Dismiss"
-      @click="dismiss"
-    >
+    <span class="account-banner-text"> Congrats — you're on a Comfy account. </span>
+    <button type="button" class="account-banner-dismiss" aria-label="Dismiss" @click="dismiss">
       <X :size="14" />
     </button>
   </div>
@@ -109,7 +98,9 @@ function dismiss(): void {
   color: inherit;
   opacity: 0.6;
   cursor: pointer;
-  transition: opacity 120ms ease, background 120ms ease;
+  transition:
+    opacity 120ms ease,
+    background 120ms ease;
 }
 
 .account-banner-dismiss:hover {

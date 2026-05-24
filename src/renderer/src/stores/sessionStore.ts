@@ -141,9 +141,11 @@ export const useSessionStore = defineStore('session', () => {
     }
 
     cleanups.push(
-      window.api.onInstanceLaunching((data: { installationId: string; installationName: string }) => {
-        launchingInstances.set(data.installationId, { installationName: data.installationName })
-      }),
+      window.api.onInstanceLaunching(
+        (data: { installationId: string; installationName: string }) => {
+          launchingInstances.set(data.installationId, { installationName: data.installationName })
+        }
+      ),
       window.api.onInstanceLaunchFailed((data: { installationId: string }) => {
         launchingInstances.delete(data.installationId)
       }),
@@ -179,7 +181,7 @@ export const useSessionStore = defineStore('session', () => {
             installationName: data.installationName,
             exitCode: data.exitCode,
             lastStderr: data.lastStderr,
-            crashedAtMs: Date.now(),
+            crashedAtMs: Date.now()
           })
         }
       })
@@ -218,6 +220,6 @@ export const useSessionStore = defineStore('session', () => {
     clearSession,
     appendOutput,
     init,
-    dispose,
+    dispose
   }
 })

@@ -140,9 +140,7 @@ export function initDeviceId(): Promise<{ legacyId: string | null }> {
     //   (b) existing is a 64-char hex (different hash) -> salt rotated or
     //       cross-machine copy. Update silently, no alias.
     //   (c) existing is garbage -> overwrite, no alias.
-    const shouldAlias = existing != null
-      && isLegacyUuid(existing)
-      && !isMigrationCompleted()
+    const shouldAlias = existing != null && isLegacyUuid(existing) && !isMigrationCompleted()
 
     writeIdFile(newId)
     cached = { installationId: newId, idClass }

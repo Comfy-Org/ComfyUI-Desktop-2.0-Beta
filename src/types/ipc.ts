@@ -113,7 +113,15 @@ export interface DetailField {
   label: string
   value: string | boolean | number | Record<string, string> | null
   editable?: boolean
-  editType?: 'select' | 'boolean' | 'text' | 'number' | 'path' | 'channel-cards' | 'args-builder' | 'env-vars'
+  editType?:
+    | 'select'
+    | 'boolean'
+    | 'text'
+    | 'number'
+    | 'path'
+    | 'channel-cards'
+    | 'args-builder'
+    | 'env-vars'
   options?: DetailFieldOption[]
   refreshSection?: boolean
   browseOnly?: boolean
@@ -485,8 +493,22 @@ export interface SnapshotDiffEntry {
   createdAt: string
   trigger: string
   label: string | null
-  nodesAdded: Array<{ id: string; type: string; dirName: string; enabled: boolean; version?: string; commit?: string }>
-  nodesRemoved: Array<{ id: string; type: string; dirName: string; enabled: boolean; version?: string; commit?: string }>
+  nodesAdded: Array<{
+    id: string
+    type: string
+    dirName: string
+    enabled: boolean
+    version?: string
+    commit?: string
+  }>
+  nodesRemoved: Array<{
+    id: string
+    type: string
+    dirName: string
+    enabled: boolean
+    version?: string
+    commit?: string
+  }>
   nodesChanged: Array<{
     id: string
     from: { version?: string; commit?: string; enabled: boolean }
@@ -979,17 +1001,51 @@ export interface ElectronApi {
   // Snapshots
   getSnapshots(installationId: string): Promise<SnapshotListData>
   getSnapshotDetail(installationId: string, filename: string): Promise<SnapshotDetailData>
-  getSnapshotDiff(installationId: string, filename: string, mode: 'previous' | 'current'): Promise<SnapshotDiffData>
-  exportSnapshot(installationId: string, filename: string): Promise<{ ok: boolean; message?: string }>
+  getSnapshotDiff(
+    installationId: string,
+    filename: string,
+    mode: 'previous' | 'current'
+  ): Promise<SnapshotDiffData>
+  exportSnapshot(
+    installationId: string,
+    filename: string
+  ): Promise<{ ok: boolean; message?: string }>
   exportAllSnapshots(installationId: string): Promise<{ ok: boolean; message?: string }>
-  importSnapshotsPreview(): Promise<{ ok: boolean; preview?: SnapshotFilePreview; message?: string }>
-  importSnapshotsDiff(installationId: string): Promise<{ ok: boolean; diff?: SnapshotDiffData; message?: string }>
-  importSnapshotsConfirm(installationId: string): Promise<{ ok: boolean; imported?: number; restoreFile?: string; message?: string }>
+  importSnapshotsPreview(): Promise<{
+    ok: boolean
+    preview?: SnapshotFilePreview
+    message?: string
+  }>
+  importSnapshotsDiff(
+    installationId: string
+  ): Promise<{ ok: boolean; diff?: SnapshotDiffData; message?: string }>
+  importSnapshotsConfirm(
+    installationId: string
+  ): Promise<{ ok: boolean; imported?: number; restoreFile?: string; message?: string }>
   previewSnapshotFile(): Promise<{ ok: boolean; preview?: SnapshotFilePreview; message?: string }>
-  previewDesktopMigration(): Promise<{ ok: boolean; message?: string; preview?: SnapshotFilePreview; snapshotPath?: string }>
-  previewLocalMigration(installationId: string): Promise<{ ok: boolean; message?: string; preview?: SnapshotFilePreview; snapshotPath?: string }>
-  previewSnapshotPath(filePath: string): Promise<{ ok: boolean; preview?: SnapshotFilePreview; message?: string }>
-  createFromSnapshot(filePath: string, name?: string, releaseTag?: string, variantId?: string): Promise<{ ok: boolean; entry?: { id: string; name: string }; message?: string }>
+  previewDesktopMigration(): Promise<{
+    ok: boolean
+    message?: string
+    preview?: SnapshotFilePreview
+    snapshotPath?: string
+  }>
+  previewLocalMigration(
+    installationId: string
+  ): Promise<{
+    ok: boolean
+    message?: string
+    preview?: SnapshotFilePreview
+    snapshotPath?: string
+  }>
+  previewSnapshotPath(
+    filePath: string
+  ): Promise<{ ok: boolean; preview?: SnapshotFilePreview; message?: string }>
+  createFromSnapshot(
+    filePath: string,
+    name?: string,
+    releaseTag?: string,
+    variantId?: string
+  ): Promise<{ ok: boolean; entry?: { id: string; name: string }; message?: string }>
   getPathForFile(file: File): string
 
   // Settings
@@ -1052,7 +1108,9 @@ export interface ElectronApi {
   onComfyOutput(callback: (data: ComfyOutputData) => void): Unsubscribe
   onComfyExited(callback: (data: ComfyExitedData) => void): Unsubscribe
   onComfyBootLog(callback: (data: ComfyBootLogData) => void): Unsubscribe
-  onInstanceLaunching(callback: (data: { installationId: string; installationName: string }) => void): Unsubscribe
+  onInstanceLaunching(
+    callback: (data: { installationId: string; installationName: string }) => void
+  ): Unsubscribe
   onInstanceLaunchFailed(callback: (data: { installationId: string }) => void): Unsubscribe
   onInstanceStarted(callback: (data: RunningInstance) => void): Unsubscribe
   onInstanceStopping(callback: (data: { installationId: string }) => void): Unsubscribe
@@ -1061,7 +1119,9 @@ export interface ElectronApi {
   onLocaleChanged(callback: (messages: Record<string, unknown>) => void): Unsubscribe
   onConfirmQuit(callback: (details: QuitActiveItem[]) => void): Unsubscribe
   onInstallationsChanged(callback: () => void): Unsubscribe
-  onInstallationsVersionsUpdated(callback: (updates: { id: string; version: string }[]) => void): Unsubscribe
+  onInstallationsVersionsUpdated(
+    callback: (updates: { id: string; version: string }[]) => void
+  ): Unsubscribe
   /**
    * Fires when an auto-off "Desktop Update Available" download completes
    * (i.e. user explicitly opted in via the pill confirm-modal). The
@@ -1083,9 +1143,7 @@ export interface ElectronApi {
    * Settings update panel. Any field may be null if the auto-updater
    * didn't supply it for that tick.
    */
-  onAppUpdateDownloadProgress(
-    callback: (progress: AppUpdateDownloadProgress) => void,
-  ): Unsubscribe
+  onAppUpdateDownloadProgress(callback: (progress: AppUpdateDownloadProgress) => void): Unsubscribe
   /**
    * Fires when a user-initiated update action (download / install) fails.
    * Background auto-on download errors are NOT broadcast — only failures
@@ -1160,7 +1218,13 @@ export interface ElectronApi {
   }): void
   onTelemetrySettingChanged(callback: (enabled: boolean | undefined) => void): Unsubscribe
   onDatadogError(callback: (payload: DatadogForwardedError) => void): Unsubscribe
-  onTelemetryActionFromMain(callback: (data: { event: string; context: Record<string, unknown>; mainAlreadyCaptured?: boolean }) => void): Unsubscribe
+  onTelemetryActionFromMain(
+    callback: (data: {
+      event: string
+      context: Record<string, unknown>
+      mainAlreadyCaptured?: boolean
+    }) => void
+  ): Unsubscribe
   onErrorDetail(callback: (data: ErrorDetailData) => void): Unsubscribe
   onSuggestChineseMirrors(callback: () => void): Unsubscribe
   onSettingsChanged(callback: (data: { key: string }) => void): Unsubscribe
@@ -1217,7 +1281,7 @@ export interface ElectronApi {
       triggersInstanceStart?: boolean
       opKind?: 'launch' | 'install' | 'update' | 'destructive' | 'snapshot' | 'generic'
       isRestart?: boolean
-    }) => void,
+    }) => void
   ): Unsubscribe
 }
 
@@ -1231,7 +1295,7 @@ export const REQUIRES_STOPPED = new Set([
   'migrate-to-standalone',
   'snapshot-restore',
   'update-comfyui',
-  'migrate-from',
+  'migrate-from'
 ])
 
 /** Picker popup's settings-passthrough IPC channels — main registers them,
@@ -1260,5 +1324,5 @@ export const PICKER_SETTINGS_CHANNELS = {
   previewDesktopMigration: 'comfy-titlepopup:picker-settings-preview-desktop-migration',
   previewLocalMigration: 'comfy-titlepopup:picker-settings-preview-local-migration',
   relaunchApp: 'comfy-titlepopup:picker-settings-relaunch-app',
-  getLocaleMessages: 'comfy-titlepopup:picker-settings-get-locale-messages',
+  getLocaleMessages: 'comfy-titlepopup:picker-settings-get-locale-messages'
 } as const

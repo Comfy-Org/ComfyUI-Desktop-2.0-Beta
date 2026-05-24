@@ -6,7 +6,7 @@ import {
   toFileExtension,
   toModelDirectoryBucket,
   toSizeBucket,
-  toVariantBucket,
+  toVariantBucket
 } from './telemetry'
 
 describe('toErrorBucket', () => {

@@ -10,15 +10,15 @@ let testUserData = ''
 // when we only mocked `electron.app.getPath`. Mock paths.ts directly so
 // the test path is consistent across platforms.
 vi.mock('./paths', () => ({
-  configDir: () => testUserData,
+  configDir: () => testUserData
 }))
 
 vi.mock('electron', () => ({
   app: {
     getPath: () => testUserData,
     isPackaged: false,
-    on: () => {},
-  },
+    on: () => {}
+  }
 }))
 
 // Captured PostHog calls per the existing telemetry.test.ts pattern.
@@ -39,18 +39,28 @@ vi.mock('posthog-node', () => ({
     }
     identify(): void {}
     alias(): void {}
-    aliasImmediate(): Promise<void> { return Promise.resolve() }
+    aliasImmediate(): Promise<void> {
+      return Promise.resolve()
+    }
     captureException(): void {}
-    flush(): Promise<void> { return Promise.resolve() }
-    shutdown(): Promise<void> { return Promise.resolve() }
-    getFeatureFlag(): Promise<undefined> { return Promise.resolve(undefined) }
+    flush(): Promise<void> {
+      return Promise.resolve()
+    }
+    shutdown(): Promise<void> {
+      return Promise.resolve()
+    }
+    getFeatureFlag(): Promise<undefined> {
+      return Promise.resolve(undefined)
+    }
     getAllFlags(_distinctId: string, _opts: unknown): Promise<Record<string, string | boolean>> {
       if (mockFlagsDelayMs > 0) {
-        return new Promise((resolve) => setTimeout(() => resolve({ ...mockFlags }), mockFlagsDelayMs))
+        return new Promise((resolve) =>
+          setTimeout(() => resolve({ ...mockFlags }), mockFlagsDelayMs)
+        )
       }
       return Promise.resolve({ ...mockFlags })
     }
-  },
+  }
 }))
 
 import type * as ExperimentsModule from './experiments'
@@ -81,7 +91,11 @@ describe('experiments', () => {
   afterEach(() => {
     delete process.env['POSTHOG_API_KEY']
     delete process.env['POSTHOG_ENABLED']
-    try { fs.rmSync(testUserData, { recursive: true, force: true }) } catch { /* ignore */ }
+    try {
+      fs.rmSync(testUserData, { recursive: true, force: true })
+    } catch {
+      /* ignore */
+    }
   })
 
   describe('initExperiments', () => {
@@ -89,13 +103,13 @@ describe('experiments', () => {
       // Pre-seed an on-disk cache.
       fs.writeFileSync(
         path.join(testUserData, 'experiment-flags.json'),
-        JSON.stringify({ 'flag.a': 'treatment', 'flag.b': true }),
+        JSON.stringify({ 'flag.a': 'treatment', 'flag.b': true })
       )
 
       mockFlagsDelayMs = 100 // ensure the network fetch is in-flight when we check getFlag
       const refresh = experiments.initExperiments({
         distinctId: 'test-distinct-id',
-        personProperties: {},
+        personProperties: {}
       })
       // Cache is available synchronously.
       expect(experiments.getFlag('flag.a')).toBe('treatment')
@@ -106,7 +120,7 @@ describe('experiments', () => {
     it('returns undefined for unknown flags', async () => {
       await experiments.initExperiments({
         distinctId: 'test-distinct-id',
-        personProperties: {},
+        personProperties: {}
       })
       expect(experiments.getFlag('nope.flag')).toBeUndefined()
     })
@@ -115,13 +129,13 @@ describe('experiments', () => {
       mockFlags = { 'flag.x': 'variant_a', 'flag.y': false }
       await experiments.initExperiments({
         distinctId: 'test-distinct-id',
-        personProperties: {},
+        personProperties: {}
       })
       expect(experiments.getFlag('flag.x')).toBe('variant_a')
       expect(experiments.getFlag('flag.y')).toBe(false)
       // The new cache should be persisted.
       const onDisk = JSON.parse(
-        fs.readFileSync(path.join(testUserData, 'experiment-flags.json'), 'utf-8'),
+        fs.readFileSync(path.join(testUserData, 'experiment-flags.json'), 'utf-8')
       )
       expect(onDisk).toEqual({ 'flag.x': 'variant_a', 'flag.y': false })
     })
@@ -129,12 +143,12 @@ describe('experiments', () => {
     it('keeps the previous cache when the refresh returns an empty map (treats empty as ambiguous)', async () => {
       fs.writeFileSync(
         path.join(testUserData, 'experiment-flags.json'),
-        JSON.stringify({ 'flag.a': 'treatment' }),
+        JSON.stringify({ 'flag.a': 'treatment' })
       )
       mockFlags = {} // simulate timeout/empty response
       await experiments.initExperiments({
         distinctId: 'test-distinct-id',
-        personProperties: {},
+        personProperties: {}
       })
       expect(experiments.getFlag('flag.a')).toBe('treatment')
     })
@@ -143,11 +157,11 @@ describe('experiments', () => {
       mockFlags = { 'flag.a': 'treatment' }
       const first = experiments.initExperiments({
         distinctId: 'test-distinct-id',
-        personProperties: {},
+        personProperties: {}
       })
       const second = experiments.initExperiments({
         distinctId: 'whatever-else',
-        personProperties: {},
+        personProperties: {}
       })
       await Promise.all([first, second])
       // Second call shouldn't have replaced the distinctId or refetched.
@@ -166,7 +180,7 @@ describe('experiments', () => {
       expect(events[0]?.properties).toEqual({
         experiment_key: 'auth_banner_smoketest_v1',
         variant: 'treatment',
-        source: 'cache',
+        source: 'cache'
       })
     })
 

@@ -35,7 +35,7 @@ const DEFAULT_TIMEOUT_MS = 1500
 export type ExperimentExposureSource = 'cache' | 'remote' | 'fallback'
 
 function cacheFilePath(): string {
- return path.join(configDir(), 'experiment-flags.json')
+  return path.join(configDir(), 'experiment-flags.json')
 }
 
 let cached: Record<string, FeatureFlagValue> | null = null
@@ -43,25 +43,25 @@ let initStarted = false
 const exposedThisSession = new Set<string>()
 
 function readCacheSync(): Record<string, FeatureFlagValue> | null {
- try {
- const raw = fs.readFileSync(cacheFilePath(), 'utf-8')
- const parsed: unknown = JSON.parse(raw)
- if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
- return parsed as Record<string, FeatureFlagValue>
- }
- } catch {
- // file missing or unreadable; treat as no cache
- }
- return null
+  try {
+    const raw = fs.readFileSync(cacheFilePath(), 'utf-8')
+    const parsed: unknown = JSON.parse(raw)
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed as Record<string, FeatureFlagValue>
+    }
+  } catch {
+    // file missing or unreadable; treat as no cache
+  }
+  return null
 }
 
 function writeCache(flags: Record<string, FeatureFlagValue>): void {
- try {
- fs.mkdirSync(path.dirname(cacheFilePath()), { recursive: true })
- fs.writeFileSync(cacheFilePath(), JSON.stringify(flags))
- } catch {
- // best effort — cache is a perf optimization, not correctness
- }
+  try {
+    fs.mkdirSync(path.dirname(cacheFilePath()), { recursive: true })
+    fs.writeFileSync(cacheFilePath(), JSON.stringify(flags))
+  } catch {
+    // best effort — cache is a perf optimization, not correctness
+  }
 }
 
 /**
@@ -76,33 +76,33 @@ function writeCache(flags: Record<string, FeatureFlagValue>): void {
  * Idempotent within a process.
  */
 export function initExperiments(opts: {
- distinctId: string
- personProperties: Record<string, string>
- timeoutMs?: number
+  distinctId: string
+  personProperties: Record<string, string>
+  timeoutMs?: number
 }): Promise<void> {
- if (initStarted) return Promise.resolve()
- initStarted = true
- cached = readCacheSync() ?? {}
- return mainTelemetry
- .loadFeatureFlagsImmediate(
- opts.distinctId,
- opts.personProperties,
- opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
- )
- .then((flags) => {
- // Only overwrite cache on a non-empty response. An empty result is
- // ambiguous (could be timeout, could be "no flags configured"); the
- // safer move is to keep the previously-cached values so a user who
- // has been assigned a variant doesn't flip back to control on a
- // single bad fetch.
- if (flags && Object.keys(flags).length > 0) {
- cached = flags
- writeCache(flags)
- }
- })
- .catch(() => {
- /* fail closed: keep current cache */
- })
+  if (initStarted) return Promise.resolve()
+  initStarted = true
+  cached = readCacheSync() ?? {}
+  return mainTelemetry
+    .loadFeatureFlagsImmediate(
+      opts.distinctId,
+      opts.personProperties,
+      opts.timeoutMs ?? DEFAULT_TIMEOUT_MS
+    )
+    .then((flags) => {
+      // Only overwrite cache on a non-empty response. An empty result is
+      // ambiguous (could be timeout, could be "no flags configured"); the
+      // safer move is to keep the previously-cached values so a user who
+      // has been assigned a variant doesn't flip back to control on a
+      // single bad fetch.
+      if (flags && Object.keys(flags).length > 0) {
+        cached = flags
+        writeCache(flags)
+      }
+    })
+    .catch(() => {
+      /* fail closed: keep current cache */
+    })
 }
 
 /**
@@ -115,7 +115,7 @@ export function initExperiments(opts: {
  * synchronously-loaded cache values, which is intended).
  */
 export function getFlag(key: string): FeatureFlagValue | undefined {
- return cached?.[key]
+  return cached?.[key]
 }
 
 /**
@@ -134,23 +134,23 @@ export function getFlag(key: string): FeatureFlagValue | undefined {
  * with no network)
  */
 export function recordExposure(
- experimentKey: string,
- variant: string,
- source: ExperimentExposureSource,
+  experimentKey: string,
+  variant: string,
+  source: ExperimentExposureSource
 ): void {
- const dedupKey = `${experimentKey}:${variant}`
- if (exposedThisSession.has(dedupKey)) return
- exposedThisSession.add(dedupKey)
- mainTelemetry.capture('desktop2.experiment.exposed', {
- experiment_key: experimentKey,
- variant,
- source,
- })
+  const dedupKey = `${experimentKey}:${variant}`
+  if (exposedThisSession.has(dedupKey)) return
+  exposedThisSession.add(dedupKey)
+  mainTelemetry.capture('desktop2.experiment.exposed', {
+    experiment_key: experimentKey,
+    variant,
+    source
+  })
 }
 
 /** @internal — exposed for tests. */
 export function _resetForTest(): void {
- cached = null
- initStarted = false
- exposedThisSession.clear()
+  cached = null
+  initStarted = false
+  exposedThisSession.clear()
 }

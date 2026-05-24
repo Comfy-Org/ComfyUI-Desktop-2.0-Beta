@@ -11,15 +11,15 @@ import { createHash } from 'crypto'
 let testUserData = ''
 
 vi.mock('./paths', () => ({
-  configDir: () => testUserData,
+  configDir: () => testUserData
 }))
 
 vi.mock('electron', () => ({
   app: {
     getPath: () => testUserData,
     isPackaged: false,
-    on: () => {},
-  },
+    on: () => {}
+  }
 }))
 
 // Mock systeminformation `si.system()` so we can drive the machine_id branch.
@@ -27,8 +27,8 @@ let mockSystemUuid: string | undefined = 'aabbccdd-eeff-0011-2233-445566778899'
 
 vi.mock('systeminformation', () => ({
   default: {
-    system: () => Promise.resolve({ uuid: mockSystemUuid }),
-  },
+    system: () => Promise.resolve({ uuid: mockSystemUuid })
+  }
 }))
 
 const SALT = 'comfy-installation-id-v1'
@@ -104,7 +104,10 @@ describe('deviceId', () => {
       const legacyUuid = 'f47ac10b-58cc-4372-a567-0e02b2c3d479'
       fs.writeFileSync(path.join(testUserData, 'device-id.txt'), legacyUuid)
       // Pretend a prior boot already issued the alias.
-      fs.writeFileSync(path.join(testUserData, 'identity-migration-completed'), new Date().toISOString())
+      fs.writeFileSync(
+        path.join(testUserData, 'identity-migration-completed'),
+        new Date().toISOString()
+      )
 
       const { legacyId } = await mod.initDeviceId()
       expect(legacyId).toBeNull()

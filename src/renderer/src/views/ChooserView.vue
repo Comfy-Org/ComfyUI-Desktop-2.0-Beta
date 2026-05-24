@@ -114,15 +114,17 @@ function openManage(
     return
   }
   const mappedTab =
-    opts.initialTab === 'config' || opts.initialTab === 'status'
-      || opts.initialTab === 'update' || opts.initialTab === 'snapshots'
+    opts.initialTab === 'config' ||
+    opts.initialTab === 'status' ||
+    opts.initialTab === 'update' ||
+    opts.initialTab === 'snapshots'
       ? opts.initialTab
       : 'status'
   window.api.openInstancePicker({
     installationId: installation.id,
     mode: 'expanded',
     initialTab: mappedTab,
-    autoAction: opts.autoAction ?? null,
+    autoAction: opts.autoAction ?? null
   })
 }
 
