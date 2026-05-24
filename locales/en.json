@@ -461,6 +461,7 @@
     "consentTelemetryHint": "Help improve Comfy by sharing anonymous usage data.",
     "consentGetStarted": "Get Started",
     "startContinue": "Continue",
+    "startContinueBusy": "Preparing your install…",
     "expressInstallLabel": "Express Install",
     "expressInstallHint": "Use recommended settings — skip optional setup steps.",
     "expressInstallLine": "Express Install with recommended settings",

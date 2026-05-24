@@ -331,6 +331,7 @@
     "consentTelemetryHint": "分享匿名使用数据，帮助改进 Comfy。",
     "consentGetStarted": "开始使用",
     "startContinue": "继续",
+    "startContinueBusy": "正在准备安装…",
     "expressInstallLabel": "快捷安装",
     "expressInstallHint": "使用推荐设置——跳过可选的安装步骤。",
     "expressInstallLine": "快捷安装——使用推荐设置",
