@@ -66,12 +66,11 @@ export function useDeepLinkRouter(opts: DeepLinkRouterOpts): void {
           await opts.bootstrapReady
           const inst = installationStore.getById(id)
           if (!inst) return
-          // `comfy://install-update/<id>` opens the picker directly
-          // in expanded mode on the Update tab — same surface the
-          // chooser-card kebab Update entry routes to.
+          // `comfy://install-update/<id>` opens the picker on the
+          // Update tab — same surface the chooser-card kebab Update
+          // entry routes to.
           window.api.openInstancePicker({
             installationId: inst.id,
-            mode: 'expanded',
             initialTab: 'update',
           })
           return
@@ -88,14 +87,12 @@ export function useDeepLinkRouter(opts: DeepLinkRouterOpts): void {
             return
           }
           // Per-install deep links (`comfy://open-settings?tab=comfy`)
-          // open the picker in expanded mode on the Config tab. If we
-          // don't have an install context (chooser host, no active
-          // install), fall back to compact so the user picks an install
-          // first.
+          // open the picker on the Config tab. If we don't have an
+          // install context (chooser host, no active install), open
+          // without a tab so the user picks an install first.
           if (inst) {
             window.api.openInstancePicker({
               installationId: inst.id,
-              mode: 'expanded',
               initialTab: 'config',
             })
           } else {

@@ -113,7 +113,7 @@ function handleManage(): void {
 .picker-compact-row:hover,
 .picker-compact-row:focus-visible,
 .picker-compact-row.is-active {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--chooser-surface-bg);
   outline: none;
 }
 

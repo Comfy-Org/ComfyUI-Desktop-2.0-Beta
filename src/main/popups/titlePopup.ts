@@ -101,18 +101,12 @@ export interface InstancePickerSnapshot {
   selectedInstallationId: string | null
   selectedSettings: Record<string, unknown>[] | null
   selectedSnapshots: Record<string, unknown> | null
-  /** Compact = default identity-card right pane; expanded = full
-   *  per-install settings UI (`ComfyUISettingsContent`) in the right
-   *  pane. Driven by `comfy-titlepopup:set-picker-mode` IPC; main
-   *  animates the popup bounds when this flips. */
-  mode: 'compact' | 'expanded'
-  /** When `mode === 'expanded'`, the tab the settings UI opens on
-   *  ('config' | 'status' | 'update' | 'snapshots'). Ignored in
-   *  compact mode. */
+  /** Tab the settings UI opens on ('config' | 'status' | 'update' |
+   *  'snapshots'). Null = let the picker view choose its default. */
   initialTab: string | null
-  /** When `mode === 'expanded'`, an action id to fire automatically
-   *  after the settings UI mounts (e.g. `'update-comfyui'` for the
-   *  kebab Update entry). Cleared after consumption. */
+  /** Action id to fire automatically after the settings UI mounts
+   *  (e.g. `'update-comfyui'` for the kebab Update entry). Cleared
+   *  after consumption. */
   autoAction: string | null
 }
 
@@ -170,7 +164,6 @@ interface BuildInstancePickerSnapshotArgs {
   selectedInstallationId?: string | null
   selectedSettings?: Record<string, unknown>[] | null
   selectedSnapshots?: Record<string, unknown> | null
-  mode?: 'compact' | 'expanded'
   initialTab?: string | null
   autoAction?: string | null
 }
@@ -190,7 +183,6 @@ export function buildInstancePickerSnapshot(
     selectedInstallationId: args.selectedInstallationId ?? null,
     selectedSettings: args.selectedSettings ?? null,
     selectedSnapshots: args.selectedSnapshots ?? null,
-    mode: args.mode ?? 'compact',
     initialTab: args.initialTab ?? null,
     autoAction: args.autoAction ?? null,
   }
@@ -269,21 +261,12 @@ interface TitlePopupEntry {
    *  scope `selectedSettings` + `selectedSnapshots` in subsequent
    *  snapshot pushes. Defaults to the host's active install on open. */
   pickerSelectedInstallationId: string | null
-  /** Picker's right-pane mode. `'compact'` = identity card + Open/Manage
-   *  CTAs (the original popup size). `'expanded'` = the full per-install
-   *  settings UI mounts in the right pane and main animates the popup
-   *  bounds to ~95dvw × 95dvh. Driven by `comfy-titlepopup:set-picker-mode`
-   *  IPC; main rebroadcasts a snapshot with the new value so the picker
-   *  view re-renders the right pane. */
-  pickerMode: 'compact' | 'expanded'
-  /** When `pickerMode === 'expanded'`, the tab id the settings UI opens
-   *  on. Forwarded into the snapshot for the picker view to consume on
-   *  first render. */
+  /** Tab id the settings UI opens on. Forwarded into the snapshot for
+   *  the picker view to consume on first render. */
   pickerInitialTab: string | null
-  /** When `pickerMode === 'expanded'`, an action id the settings UI
-   *  fires automatically after mounting (kebab Update / Migrate /
-   *  Restore-Snapshot / Delete entry points). Cleared after the picker
-   *  view consumes it. */
+  /** Action id the settings UI fires automatically after mounting
+   *  (kebab Update / Migrate / Restore-Snapshot / Delete entry
+   *  points). Cleared after the picker view consumes it. */
   pickerAutoAction: string | null
   /** JSON of the most recent `installs-changed` snapshot sent to this
    *  popup. Used by `broadcastInstancePickerSnapshotToTitlePopups` to
@@ -296,14 +279,6 @@ interface TitlePopupEntry {
   /** JSON of the most recent `global-settings-changed` snapshot pushed
    *  to this popup. Same dedup role as `lastPickerBroadcastJson`. */
   lastGlobalSettingsBroadcastJson: string | null
-  /** Most recent natural-content height the picker renderer reported
-   *  via `comfy-titlepopup:request-size`. The compact-mode bounds
-   *  computation reads this so the popup tracks the renderer's
-   *  measured height even after a host-window resize — without it the
-   *  resize listener would have to ask the renderer again, racing the
-   *  observer. `null` until the first `request-size` lands; only
-   *  populated for the instance-picker kind. */
-  lastReportedNaturalHeight: number | null
   /** Wall-clock time of the most recent `showTitlePopupNow()` for this
    *  entry. The backdrop's `mousedown` listener can fire during the
    *  same tick as the trigger click (the backdrop covers the body, and
@@ -649,7 +624,6 @@ async function broadcastInstancePickerSnapshotToTitlePopups(
       selectedInstallationId: selectedId,
       selectedSettings: details.settings,
       selectedSnapshots: details.snapshots,
-      mode: entry.pickerMode,
       initialTab: entry.pickerInitialTab,
       autoAction: entry.pickerAutoAction,
     })
@@ -774,13 +748,11 @@ function ensureTitlePopup(parent: BrowserWindow): TitlePopupEntry {
     lastConfigJson: null,
     lastSyncedConfigJson: null,
     pickerSelectedInstallationId: null,
-    pickerMode: 'compact',
     pickerInitialTab: null,
     pickerAutoAction: null,
     openedAt: 0,
     lastPickerBroadcastJson: null,
     lastGlobalSettingsBroadcastJson: null,
-    lastReportedNaturalHeight: null,
   }
   titlePopupsByParent.set(view.parentWindowId, entry)
   titlePopupsByWebContents.set(view.popupWebContentsId, entry)
@@ -898,63 +870,31 @@ const DOWNLOADS_POPUP_WIDTH = 405
 const DOWNLOADS_POPUP_MAX_HEIGHT_PX = 396
 const DOWNLOADS_POPUP_MAX_HEIGHT_RATIO = 0.6
 
-/** Instance-picker popup geometry. The picker has two modes (compact
- *  list of rows + expanded settings UI) and historically had a stack of
- *  per-mode pixel constants — wide, min height, max height, ratio —
- *  layered to keep the popup inside the host window. That worked but
- *  meant a different math path for every site that needed bounds
- *  (open, mode-flip morph, parent-resize refit, request-size handler).
- *  The four sites drifted from each other (the morph forgot the title-
- *  bar inset; the resize handler used a different ratio than the open
- *  path) and the popup would visibly slip past the title chrome.
- *
- *  Replaced with a single `computePickerBounds()` function and three
- *  inset constants. The function is the only place that decides where
- *  the picker sits inside the host window — every call site (open,
- *  morph target, parent-resize refit, request-size clamp) reads from it
- *  so they can't drift.
+/** Instance-picker popup geometry. Single `computePickerBounds()`
+ *  function is the only place that decides where the picker sits inside
+ *  the host window — every call site (open, parent-resize refit,
+ *  request-size clamp) reads from it so they can't drift.
  *
  *  - `PICKER_SIDE_GUTTER` / `PICKER_BOTTOM_GUTTER`: breathing room
  *    between the popup card and the host window's right + bottom
- *    edges. Top edge is handled by `TITLEBAR_HEIGHT`.
- *  - `PICKER_COMPACT_MAX_WIDTH`: the natural cap on the compact
- *    single-column list. On wide monitors the row list would otherwise
- *    stretch to absurd line lengths; capping at 720px keeps it
- *    legible. Expanded mode ignores this and fills the available
- *    inner width. */
+ *    edges. Top edge is handled by `TITLEBAR_HEIGHT`. */
 const PICKER_SIDE_GUTTER = 24
 const PICKER_BOTTOM_GUTTER = 24
 /** Extra breathing room between the title bar and the popup card.
  *  `TITLEBAR_HEIGHT` is the title-bar's measured height; without this
  *  gutter the popup kisses the chrome and reads as glued-on. */
 const PICKER_TOP_GUTTER = 8
-const PICKER_COMPACT_MAX_WIDTH = 720
-/** Expanded mode width ceiling. The settings UI inside the right pane
- *  is form-shaped — inputs at full width just look stretched, not
- *  more useful. Cap at 960px so on big screens the box sits centred
- *  with side gutters and the form fields read at a comfortable line
- *  length. */
+/** Width ceiling. The settings UI inside the right pane is form-shaped
+ *  — inputs at full width just look stretched, not more useful. Cap at
+ *  960px so on big screens the box sits centred with side gutters and
+ *  the form fields read at a comfortable line length. */
 const PICKER_EXPANDED_MAX_WIDTH = 960
-/** Hard ceiling for the compact tray on tall windows. Previously
- *  paired with a 60% × window ratio cap, but on a *short* host
- *  window the ratio choked the tray even when `naturalHeight` fit
- *  comfortably in the available `innerHeight` (e.g. a 700px-tall
- *  window: 60% = 420px, clipping a 500px natural-height tray for no
- *  good reason). The hard 560px cap alone holds the anti-takeover
- *  intent on tall windows, and `innerHeight` already caps growth on
- *  short ones.
- *  much vertical real-estate for two installs. Cap so the tray reads
- *  as a tray. */
-const PICKER_COMPACT_MAX_HEIGHT = 560
-/** Expanded mode height ceiling as a fraction of the host window's
- *  content height. Mirrors the compact-mode ratio reasoning — the
- *  per-install settings UI is form-shaped, so filling a 4K window
- *  top-to-bottom just leaves the form fields adrift in negative
- *  space. */
+/** Height ceiling as a fraction of host window content height. The
+ *  per-install settings UI is form-shaped, so filling a 4K window top-
+ *  to-bottom just leaves the form fields adrift in negative space. */
 const PICKER_EXPANDED_MAX_HEIGHT_RATIO = 0.85
-/** Hard ceiling for expanded mode on tall windows. 720px fits the
- *  settings UI's longest tab (Snapshots) without internal scroll on
- *  typical install counts. */
+/** Hard ceiling on tall windows. 720px fits the settings UI's longest
+ *  tab (Snapshots) without internal scroll on typical install counts. */
 const PICKER_EXPANDED_MAX_HEIGHT = 720
 
 interface PickerBounds {
@@ -967,70 +907,37 @@ interface PickerBounds {
 /**
  * Single source of truth for picker popup bounds.
  *
- * Every site that needs to place the picker (open, mode-flip morph,
- * parent-resize refit, renderer-driven natural-height request) calls
+ * Every site that places the picker (open, parent-resize refit) calls
  * this — so the popup can't end up at one set of bounds at open and a
  * different set after a resize.
  *
- * Geometry:
- *  - Top edge always sits at `TITLEBAR_HEIGHT` so the popup never
- *    paints over the host's title chrome.
- *  - Side gutters keep the card from kissing the host window's edges.
- *  - Compact mode caps at `PICKER_COMPACT_MAX_WIDTH` so the row list
- *    doesn't stretch into illegible line lengths on wide monitors; the
- *    renderer's natural-height request decides compact height (passed
- *    in as `naturalHeight`).
- *  - Expanded mode fills the full inner area (max width minus gutters,
- *    height from title bar to bottom gutter). `naturalHeight` is
- *    ignored — the per-install settings UI fills whatever it gets.
+ * Geometry: top edge at `TITLEBAR_HEIGHT` so the popup never paints
+ * over the host's title chrome; side gutters keep the card from kissing
+ * the host window's edges; width clamped to `PICKER_EXPANDED_MAX_WIDTH`
+ * so form fields read at a comfortable line length on wide monitors;
+ * height clamped to a host-content ratio + hard pixel ceiling so the
+ * settings UI doesn't drift in negative space on a 4K window.
  *
- * The popup is horizontally centred on the host window's content. In
- * compact mode (where height < innerHeight) the popup is vertically
- * pinned to the top inset so it reads as a "tray under the title bar";
- * expanded mode fills top-to-bottom so vertical centring doesn't
- * apply.
+ * Horizontally centred on the host window's content. On tall windows
+ * the card drops by a third of the available slack so it sits slightly
+ * above centre — title bar still anchors it visually, but it doesn't
+ * kiss the bottom gutter on a 1440px-tall window.
  */
-function computePickerBounds(
-  parent: BrowserWindow,
-  mode: 'compact' | 'expanded',
-  naturalHeight?: number | null,
-): PickerBounds {
+function computePickerBounds(parent: BrowserWindow): PickerBounds {
   const content = parent.getContentBounds()
   const innerTop = TITLEBAR_HEIGHT + PICKER_TOP_GUTTER
   const innerHeight = Math.max(0, content.height - innerTop - PICKER_BOTTOM_GUTTER)
   const innerWidth = Math.max(0, content.width - 2 * PICKER_SIDE_GUTTER)
 
-  let width: number
-  let height: number
-  if (mode === 'expanded') {
-    width = Math.min(PICKER_EXPANDED_MAX_WIDTH, innerWidth)
-    height = Math.min(
-      innerHeight,
-      Math.round(content.height * PICKER_EXPANDED_MAX_HEIGHT_RATIO),
-      PICKER_EXPANDED_MAX_HEIGHT,
-    )
-  } else {
-    width = Math.min(PICKER_COMPACT_MAX_WIDTH, innerWidth)
-    // `innerHeight` caps growth against the host window (anti-overflow);
-    // the hard 560px cap holds the anti-takeover intent on tall windows.
-    // No window-ratio cap — that previously choked the tray on *short*
-    // windows where the natural height would otherwise have fit fine.
-    const compactCeiling = Math.min(innerHeight, PICKER_COMPACT_MAX_HEIGHT)
-    const requested = typeof naturalHeight === 'number' && naturalHeight > 0
-      ? Math.ceil(naturalHeight)
-      : compactCeiling
-    height = Math.max(1, Math.min(requested, compactCeiling))
-  }
+  const width = Math.min(PICKER_EXPANDED_MAX_WIDTH, innerWidth)
+  const height = Math.min(
+    innerHeight,
+    Math.round(content.height * PICKER_EXPANDED_MAX_HEIGHT_RATIO),
+    PICKER_EXPANDED_MAX_HEIGHT,
+  )
   const x = Math.max(PICKER_SIDE_GUTTER, Math.round((content.width - width) / 2))
-  // Compact: pin to top inset so the tray reads as anchored to the
-  // title bar. Expanded: drop down by a third of the slack so on a
-  // tall window the card sits slightly above centre — title bar still
-  // anchors it visually, but it doesn't kiss the bottom gutter on a
-  // 1440px-tall window.
   const slack = Math.max(0, innerHeight - height)
-  const y = mode === 'expanded' && slack > 0
-    ? innerTop + Math.round(slack / 3)
-    : innerTop
+  const y = slack > 0 ? innerTop + Math.round(slack / 3) : innerTop
   return { x, y, width, height }
 }
 
@@ -1104,16 +1011,12 @@ function refitPopupForParent(entry: TitlePopupEntry): void {
   const cur = entry.view.popup.getBounds()
   const parent = entry.view.parentWindow
 
-  // Instance picker has its own geometry function (compact + expanded
-  // modes both clamped to the inner area below the title bar). Route
-  // through it so a parent resize lands on the same bounds the open /
-  // mode-flip paths would compute — single source of truth.
+  // Instance picker has its own geometry function (clamped to the inner
+  // area below the title bar). Route through it so a parent resize lands
+  // on the same bounds the open path would compute — single source of
+  // truth.
   if (entry.kind === 'instance-picker') {
-    const target = computePickerBounds(
-      parent,
-      entry.pickerMode,
-      entry.lastReportedNaturalHeight,
-    )
+    const target = computePickerBounds(parent)
     if (
       target.x === cur.x
       && target.y === cur.y
@@ -1233,15 +1136,10 @@ function openTitlePopup(opts: OpenTitlePopupOpts): void {
     x = clampPopupX(rawX, width, opts.parent)
   } else if (opts.kind === 'instance-picker') {
     // instance-picker geometry is delegated to `computePickerBounds`
-    // — single source of truth shared with the mode-flip morph, the
-    // parent-resize refit, and the renderer's natural-height request
-    // handler so all four paths produce consistent bounds. The initial
-    // open passes `null` for naturalHeight; the renderer measures once
-    // it mounts and pushes the real height via
-    // `comfy-titlepopup:request-size`, which stores it on the entry
-    // and re-applies bounds. Geometry function also owns the title-bar
-    // inset, so the popup never paints over the title chrome.
-    const bounds = computePickerBounds(opts.parent, entry.pickerMode, null)
+    // — single source of truth shared with the parent-resize refit so
+    // both paths produce consistent bounds. Geometry function owns the
+    // title-bar inset, so the popup never paints over the title chrome.
+    const bounds = computePickerBounds(opts.parent)
     width = bounds.width
     height = bounds.height
     x = bounds.x
@@ -1253,7 +1151,7 @@ function openTitlePopup(opts: OpenTitlePopupOpts): void {
     // below the title bar. Anchor coords are title-bar-local so `y=0`
     // sits at the title-bar top; the centred-y formula recentres
     // inside the `contentHeight - TITLEBAR_HEIGHT` band beneath it.
-    ;({ width, height } = computeGlobalSettingsBounds(opts.parent))
+    ; ({ width, height } = computeGlobalSettingsBounds(opts.parent))
     const { width: contentWidth, height: contentHeight } = opts.parent.getContentBounds()
     x = Math.max(0, Math.round((contentWidth - width) / 2))
     y = Math.max(
@@ -1493,7 +1391,6 @@ function openInstancePickerForHost(
   titleBarSender: Electron.WebContents,
   anchor: { x: number; y: number },
   selectedInstallationId?: string | null,
-  initialMode?: 'compact' | 'expanded',
   initialTab?: string | null,
   autoAction?: string | null,
 ): void {
@@ -1504,11 +1401,6 @@ function openInstancePickerForHost(
   const popupEntry = titlePopupsByParent.get(parentEntry.window.id)
   if (popupEntry) {
     popupEntry.pickerSelectedInstallationId = initialSelectedId
-    // Seed the mode + auto-action on the entry so the next snapshot
-    // broadcast picks them up. The chooser-card kebab path passes
-    // `'expanded'` + a specific tab; the title-bar pill path leaves
-    // these unset and the popup opens compact.
-    popupEntry.pickerMode = initialMode ?? 'compact'
     popupEntry.pickerInitialTab = initialTab ?? null
     popupEntry.pickerAutoAction = autoAction ?? null
   }
@@ -1519,7 +1411,6 @@ function openInstancePickerForHost(
     selectedInstallationId: initialSelectedId,
     selectedSettings: null,
     selectedSnapshots: null,
-    mode: initialMode ?? 'compact',
     initialTab: initialTab ?? null,
     autoAction: autoAction ?? null,
   })
@@ -1917,40 +1808,16 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
     (event, payload: { height?: unknown }) => {
       const entry = titlePopupsByWebContents.get(event.sender.id)
       if (!entry) return
-      // Menu popups are sized deterministically by `computePopupHeight`
-      // — ignore renderer requests to avoid fighting the source of truth.
-      if (entry.kind !== 'downloads' && entry.kind !== 'instance-picker') return
+      // Menu / instance-picker / global-settings popups are sized
+      // deterministically from host bounds — only the downloads tray
+      // adapts to renderer-reported natural height. Ignore everything
+      // else to avoid fighting the source of truth.
+      if (entry.kind !== 'downloads') return
       const requested = payload?.height
       if (typeof requested !== 'number' || !Number.isFinite(requested)) return
       const parent = comfyWindows.get(entry.parentEntryId)?.window
       if (!parent || parent.isDestroyed()) return
 
-      // Instance picker routes through `computePickerBounds` — same
-      // function used at open, on parent resize, and on mode flip.
-      // We also stash the reported height on the entry so a subsequent
-      // parent resize can re-derive bounds without needing the renderer
-      // to re-measure. Skipped in expanded mode (the settings UI fills
-      // available height; we don't want a measured natural height to
-      // override the full-fit layout).
-      if (entry.kind === 'instance-picker') {
-        entry.lastReportedNaturalHeight = Math.ceil(requested)
-        if (entry.pickerMode === 'expanded') return
-        const target = computePickerBounds(parent, 'compact', entry.lastReportedNaturalHeight)
-        const cur = entry.view.popup.getBounds()
-        if (
-          target.x === cur.x
-          && target.y === cur.y
-          && target.width === cur.width
-          && target.height === cur.height
-        ) return
-        entry.view.popup.setBounds(target)
-        return
-      }
-
-      // Only `'downloads'` reaches this point — `'instance-picker'`
-      // returns above and `'global-settings'` is filtered out at the top
-      // of the handler (it sizes itself from host bounds, no renderer
-      // measurement).
       const contentHeight = parent.getContentBounds().height
       const ceiling = Math.min(
         DOWNLOADS_POPUP_MAX_HEIGHT_PX,
@@ -2200,8 +2067,6 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
       const requestedId = payload?.installationId
       const selectedInstallationId =
         typeof requestedId === 'string' && requestedId.length > 0 ? requestedId : null
-      const mode: 'compact' | 'expanded' =
-        payload?.mode === 'expanded' ? 'expanded' : 'compact'
       const initialTab =
         typeof payload?.initialTab === 'string' ? payload.initialTab : null
       const autoAction =
@@ -2213,7 +2078,6 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
         parentEntry.titleBarView.webContents,
         { x: 0, y: TITLEBAR_HEIGHT },
         selectedInstallationId,
-        mode,
         initialTab,
         autoAction,
       )
@@ -2234,119 +2098,6 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
       const nextId = typeof id === 'string' && id.length > 0 ? id : null
       if (popupEntry.pickerSelectedInstallationId === nextId) return
       popupEntry.pickerSelectedInstallationId = nextId
-      await broadcastInstancePickerSnapshotToTitlePopups(bindings)
-    },
-  )
-
-  // Picker → flip between compact and expanded modes. Main animates the
-  // popup bounds (compact card → 95dvw × 95dvh centred), then
-  // rebroadcasts a snapshot so the picker view re-renders the right
-  // pane (identity card → full per-install settings UI).
-  //
-  // Animation: 240ms cubic-bezier(0.32, 0.72, 0, 1) tween via repeated
-  // `popup.setBounds()` at ~60fps. Same curve the global-settings
-  // popup uses for its resize. Reduced-motion users get a snap (the
-  // renderer-side `prefers-reduced-motion` query co-handles the inner
-  // chrome cross-fade).
-  ipcMain.on(
-    'comfy-titlepopup:set-picker-mode',
-    async (
-      event,
-      payload: { mode?: unknown; initialTab?: unknown; autoAction?: unknown },
-    ) => {
-      const popupEntry = titlePopupsByWebContents.get(event.sender.id)
-      if (!popupEntry || popupEntry.kind !== 'instance-picker') return
-      if (popupEntry.view.popup.webContents.isDestroyed()) return
-      const mode: 'compact' | 'expanded' =
-        payload?.mode === 'expanded' ? 'expanded' : 'compact'
-      const initialTab =
-        typeof payload?.initialTab === 'string' ? payload.initialTab : null
-      const autoAction =
-        typeof payload?.autoAction === 'string' ? payload.autoAction : null
-      if (popupEntry.pickerMode === mode) {
-        // No-op flip — still refresh the seeded tab/auto-action so a
-        // second Manage click against the same install can target a
-        // different tab without closing first.
-        popupEntry.pickerInitialTab = initialTab
-        popupEntry.pickerAutoAction = autoAction
-        return
-      }
-      popupEntry.pickerMode = mode
-      popupEntry.pickerInitialTab = initialTab
-      popupEntry.pickerAutoAction = autoAction
-
-      // Target bounds come from the same `computePickerBounds`
-      // function the open / parent-resize / natural-height paths use.
-      // Single source of truth — the morph end-state always matches
-      // what a freshly-opened or freshly-resized picker would land on.
-      const parent = popupEntry.view.parentWindow
-      if (parent.isDestroyed()) return
-      const fromBounds = popupEntry.view.popup.getBounds()
-      const toBounds = computePickerBounds(
-        parent,
-        mode,
-        popupEntry.lastReportedNaturalHeight,
-      )
-      const toX = toBounds.x
-      const toY = toBounds.y
-      const toWidth = toBounds.width
-      const toHeight = toBounds.height
-
-      const fromX = fromBounds.x
-      const fromY = fromBounds.y
-      const fromW = fromBounds.width
-      const fromH = fromBounds.height
-
-      // 200ms reads as "decisive" — closer to Linear / Raycast snap feel.
-      // 240ms drifted into "soft" territory; the renderer-side 160ms
-      // cross-fade finishes just before the shell does so contents land
-      // settled, not mid-tween.
-      const DURATION_MS = 200
-      const FRAME_MS = 16
-      // cubic-bezier(0.32, 0.72, 0, 1) — approximated via the standard
-      // easeOutCubic curve. The full bezier eval is ~10 lines of code
-      // for a barely-visible refinement; easeOutCubic is the canonical
-      // shorthand and is what existing global-settings resize uses.
-      const easeOutCubic = (t: number): number => 1 - Math.pow(1 - t, 3)
-
-      const start = Date.now()
-      const lerp = (a: number, b: number, t: number): number => a + (b - a) * t
-
-      // Per-frame dedupe: every 16ms `setBounds` call hits an IPC
-      // boundary + a native paint, even when the eased value rounds to
-      // the same integer on all four axes (common on short tweens or
-      // small deltas). Skip those no-op frames.
-      let prevX = fromX
-      let prevY = fromY
-      let prevW = fromW
-      let prevH = fromH
-
-      const tick = (): void => {
-        if (popupEntry.view.popup.webContents.isDestroyed()) return
-        if (popupEntry.view.parentWindow.isDestroyed()) return
-        const elapsed = Date.now() - start
-        const t = Math.min(1, elapsed / DURATION_MS)
-        const e = easeOutCubic(t)
-        const nextX = Math.round(lerp(fromX, toX, e))
-        const nextY = Math.round(lerp(fromY, toY, e))
-        const nextW = Math.round(lerp(fromW, toWidth, e))
-        const nextH = Math.round(lerp(fromH, toHeight, e))
-        if (nextX !== prevX || nextY !== prevY || nextW !== prevW || nextH !== prevH) {
-          popupEntry.view.popup.setBounds({
-            x: nextX,
-            y: nextY,
-            width: nextW,
-            height: nextH,
-          })
-          prevX = nextX
-          prevY = nextY
-          prevW = nextW
-          prevH = nextH
-        }
-        if (t < 1) setTimeout(tick, FRAME_MS)
-      }
-      tick()
-
       await broadcastInstancePickerSnapshotToTitlePopups(bindings)
     },
   )

@@ -24,10 +24,7 @@ document.documentElement.setAttribute('data-theme', 'dark')
 // Install the picker-settings `window.api` shim BEFORE Vue mounts so
 // any module that captures `window.api` at import time (e.g. the
 // shared `useComfyUISettings` composable inside `ComfyUISettingsContent`)
-// sees the shim populated. Compact mode doesn't need this, but the
-// expanded Manage state mounts the settings UI synchronously after a
-// `setPickerMode` round-trip — having the shim ready up front avoids a
-// race between the mode flip and the first IPC call.
+// sees the shim populated.
 installPickerSettingsApiShim()
 
 // Pinia — the per-install settings UI's `useComfyUISettings` reads

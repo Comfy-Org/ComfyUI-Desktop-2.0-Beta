@@ -870,16 +870,13 @@ export interface ElectronApi {
    *  centre pill opens. Omitting `installationId` falls back to the
    *  host's active install — matches the pill-click behaviour.
    *
-   *  `mode: 'expanded'` opens the picker directly in the full
-   *  per-install settings UI (mounted in the right pane), with
-   *  `initialTab` seeding the active tab and `autoAction` firing an
-   *  action on mount. Used by the chooser kebab's specialised entries
+   *  `initialTab` seeds the active tab and `autoAction` fires an action
+   *  on mount. Used by the chooser kebab's specialised entries
    *  (Update / Migrate / Restore-Snapshot / Delete) and by the
    *  per-install deep links (`comfy://install-update/<id>`,
    *  `comfy://open-settings?tab=comfy`). */
   openInstancePicker(opts?: {
     installationId?: string | null
-    mode?: 'compact' | 'expanded'
     initialTab?: 'config' | 'status' | 'update' | 'snapshots'
     autoAction?: string | null
   }): void

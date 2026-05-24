@@ -739,7 +739,6 @@ it('opens the new-install takeover above the chooser body when show-new-install 
     expect(api.openInstancePicker).toHaveBeenCalledTimes(1)
     expect(api.openInstancePicker).toHaveBeenCalledWith({
       installationId: 'test-id',
-      mode: 'expanded',
       initialTab: 'update',
     })
   })

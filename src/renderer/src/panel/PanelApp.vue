@@ -203,7 +203,6 @@ const { triggerAction: triggerInstallAction } = useInstallContextMenu({
     }
     window.api.openInstancePicker({
       installationId: inst.id,
-      mode: 'expanded',
       initialTab: resolvePickerTab(initialTab, 'config'),
       autoAction,
     })

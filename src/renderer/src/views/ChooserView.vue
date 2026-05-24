@@ -115,7 +115,6 @@ function openManage(
   }
   window.api.openInstancePicker({
     installationId: installation.id,
-    mode: 'expanded',
     initialTab: resolvePickerTab(opts.initialTab, 'status'),
     autoAction: opts.autoAction ?? null
   })

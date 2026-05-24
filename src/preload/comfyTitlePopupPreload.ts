@@ -69,17 +69,11 @@ export interface PopupInstancePickerSnapshot {
    *  `get-snapshots` returns. `null` when no selection or no install
    *  path. */
   selectedSnapshots: Record<string, unknown> | null
-  /** Compact = default identity-card right pane. Expanded = full
-   *  per-install settings UI in the right pane + 95dvw×95dvh popup
-   *  bounds. Flipped by `setPickerMode` IPC. */
-  mode: 'compact' | 'expanded'
-  /** When `mode === 'expanded'`, the tab the settings UI opens on
-   *  ('config' | 'status' | 'update' | 'snapshots'). `null` in
-   *  compact mode. */
+  /** Tab the settings UI opens on ('config' | 'status' | 'update' |
+   *  'snapshots'). `null` lets the picker view choose its default. */
   initialTab: string | null
-  /** When `mode === 'expanded'`, an action id to fire automatically
-   *  after the settings UI mounts (kebab Update / Migrate / etc.).
-   *  `null` once consumed. */
+  /** Action id to fire automatically after the settings UI mounts
+   *  (kebab Update / Migrate / etc.). `null` once consumed. */
   autoAction: string | null
 }
 
@@ -425,20 +419,10 @@ export interface ComfyTitlePopupBridge {
    *  `diskSpace.*`, etc.). The popup merges this payload on top of its
    *  static catalog once the expanded mode opens. */
   pickerSettingsGetLocaleMessages(): Promise<Record<string, unknown>>
-  /** Flip the picker between its compact and expanded states. Main
-   *  animates the popup bounds (compact ~720×natural → expanded
-   *  ~95dvw×95dvh) and rebroadcasts a snapshot with `mode` set so the
-   *  picker view re-renders the right pane (compact identity card vs.
-   *  expanded `ComfyUISettingsContent`). */
-  setPickerMode(
-    mode: 'compact' | 'expanded',
-    opts?: { initialTab?: string; autoAction?: string | null },
-  ): void
   /** Forward a `show-progress` request from the picker's settings UI to
    *  the parent host's panel renderer. The panel rebuilds the apiCall
    *  closure from `actionId`/`actionData` and routes through its existing
-   *  ProgressModal pipeline. Picker collapses to compact so the modal is
-   *  not occluded. */
+   *  ProgressModal pipeline. */
   pickerForwardShowProgress(payload: {
     installationId: string
     actionId: string
@@ -526,10 +510,6 @@ function isInstancePickerSnapshot(value: unknown): value is PopupInstancePickerS
     && v.selectedSnapshots !== null
     && typeof v.selectedSnapshots !== 'object'
   ) return false
-  // Mode fields are also optional on the wire — old main builds that
-  // don't yet emit them still validate. Default to compact in the
-  // consumer when missing.
-  if (v.mode !== undefined && v.mode !== 'compact' && v.mode !== 'expanded') return false
   if (
     v.initialTab !== undefined
     && v.initialTab !== null
@@ -718,13 +698,6 @@ const bridge: ComfyTitlePopupBridge = {
     ipcRenderer.send(CH.relaunchApp)
   },
   pickerSettingsGetLocaleMessages: () => ipcRenderer.invoke(CH.getLocaleMessages),
-  setPickerMode: (mode, opts) => {
-    ipcRenderer.send('comfy-titlepopup:set-picker-mode', {
-      mode,
-      initialTab: opts?.initialTab,
-      autoAction: opts?.autoAction ?? null,
-    })
-  },
   pickerForwardShowProgress: (payload) => {
     ipcRenderer.send('comfy-titlepopup:forward-show-progress', payload)
   },
