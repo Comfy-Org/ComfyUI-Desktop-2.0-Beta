@@ -958,6 +958,7 @@
     "name": "Name",
     "value": "Value",
     "add": "Add Variable",
+    "remove": "Remove variable",
     "namePlaceholder": "VARIABLE_NAME",
     "valuePlaceholder": "value",
     "securityWarning": "Environment variable values are stored unencrypted on disk. Do not add API keys, tokens, passwords, or other secrets."

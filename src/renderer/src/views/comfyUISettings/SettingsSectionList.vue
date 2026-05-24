@@ -98,6 +98,7 @@ const visibleSections = computed(() => props.sections)
 </script>
 
 <template>
+  <div class="settings-v2-sections">
   <article
     v-for="(section, si) in visibleSections"
     :key="`s-${si}`"
@@ -264,6 +265,7 @@ const visibleSections = computed(() => props.sections)
       </TooltipWrap>
     </div>
   </article>
+  </div>
 </template>
 
 <style scoped>
@@ -272,10 +274,16 @@ const visibleSections = computed(() => props.sections)
  * identical visuals without either having to re-declare these rules
  * — Vue scoped styles only reach their own DOM, and these classes
  * live in this template. */
+.settings-v2-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
 .settings-v2-section {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
 }
 
 .settings-v2-section-title {
@@ -362,7 +370,7 @@ const visibleSections = computed(() => props.sections)
 .settings-v2-field {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
 
 .settings-v2-field-label {
@@ -408,9 +416,9 @@ const visibleSections = computed(() => props.sections)
 }
 
 .settings-v2-section.is-readonly-list .settings-v2-field {
-  padding: 10px 0;
+  padding: 12px 0;
   border-bottom: 1px solid var(--chooser-surface-border);
-  gap: 2px;
+  gap: 4px;
 }
 
 .settings-v2-section.is-readonly-list .settings-v2-field-label {

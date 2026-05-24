@@ -105,44 +105,52 @@ function onValueChange(i: number, val: string): void {
 
 <template>
   <div class="env-vars-field">
-    <div v-if="rows.length > 0" class="env-vars-list">
-      <div class="env-vars-notice">
-        <ShieldAlert :size="13" />
-        <span>{{ t('envVars.securityWarning') }}</span>
+    <div class="env-vars-notice">
+      <ShieldAlert :size="14" class="env-vars-notice-icon" aria-hidden="true" />
+      <span>{{ t('envVars.securityWarning') }}</span>
+    </div>
+
+    <div v-if="rows.length > 0" class="env-vars-rows">
+      <div class="env-vars-head" aria-hidden="true">
+        <span>{{ t('envVars.name') }}</span>
+        <span>{{ t('envVars.value') }}</span>
+        <span class="env-vars-head-action"></span>
       </div>
+
       <div v-for="(row, i) in rows" :key="i" class="env-var-row">
-        <div class="env-var-cell env-var-key">
+        <div class="env-var-cell">
           <BaseInput
             mono
             :model-value="row.key"
-            :placeholder="t('envVars.namePlaceholder', 'NAME')"
-            :aria-label="t('envVars.namePlaceholder', 'NAME')"
+            :placeholder="t('envVars.namePlaceholder')"
+            :aria-label="t('envVars.name')"
             :invalid="isDuplicate(i)"
             @change="onKeyChange(i, $event)"
           />
         </div>
-        <div class="env-var-cell env-var-value">
+        <div class="env-var-cell">
           <BaseInput
             mono
             :model-value="row.value"
-            :placeholder="t('envVars.valuePlaceholder', 'value')"
-            :aria-label="t('envVars.valuePlaceholder', 'value')"
+            :placeholder="t('envVars.valuePlaceholder')"
+            :aria-label="t('envVars.value')"
             @change="onValueChange(i, $event)"
           />
         </div>
         <button
           type="button"
           class="env-var-remove"
-          :aria-label="t('common.cancel', 'Remove')"
+          :aria-label="t('envVars.remove', 'Remove variable')"
           @click="removeRow(i)"
         >
-          <X :size="13" />
+          <X :size="14" />
         </button>
       </div>
     </div>
+
     <button type="button" class="env-var-add" @click="addRow">
-      <Plus :size="13" />
-      <span>{{ t('envVars.add', 'Add Variable') }}</span>
+      <Plus :size="16" aria-hidden="true" />
+      <span>{{ t('envVars.add') }}</span>
     </button>
   </div>
 </template>
@@ -151,46 +159,58 @@ function onValueChange(i: number, val: string): void {
 .env-vars-field {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
 }
 
 .env-vars-notice {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: var(--takeover-fs-caption);
-  color: var(--info);
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--chooser-surface-border);
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 10.5px;
+  line-height: 16px;
+  color: var(--text-muted);
 }
 
-.env-vars-list {
+.env-vars-notice-icon {
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: var(--neutral-100);
+}
+
+.env-vars-rows {
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 
+.env-vars-head,
 .env-var-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.8fr) 32px;
+  gap: 8px;
   align-items: center;
-  gap: 6px;
 }
 
-/* Cell wrappers around BaseInput — only own the flex sizing.
- * Input chrome (bg, border, focus, invalid) is delegated to the
- * shared primitive in components/ui/. */
+.env-vars-head {
+  padding: 0 2px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
+  color: var(--text-muted);
+}
+
+.env-vars-head-action {
+  width: 32px;
+}
+
 .env-var-cell {
   min-width: 0;
 }
 
-.env-var-key {
-  flex: 2;
-}
-
-.env-var-value {
-  flex: 3;
-}
-
-/* Remove (X) button — square override on top of the global button
- * chrome. The hover color flips to danger only on this button. */
 .env-var-remove {
   flex-shrink: 0;
   width: 32px;
@@ -199,35 +219,51 @@ function onValueChange(i: number, val: string): void {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
   color: var(--text-muted);
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
 }
 
-.env-var-remove:hover {
+.env-var-remove:hover,
+.env-var-remove:focus-visible {
   color: var(--danger);
-  border-color: var(--danger);
-  background: var(--surface);
+  border-color: var(--chooser-surface-border);
+  background: var(--brand-surface-bg-hover);
+  outline: none;
 }
 
+/* Matches expanded picker left-bar "+ New Instance" affordance. */
 .env-var-add {
   align-self: flex-start;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 4px;
-  padding: 8px 16px 8px 8px;
-  background: rgba(255, 255, 255, 0.1);
+  height: 32px;
+  padding: 8px 14px;
+  border: none;
   border-radius: 8px;
+  background: var(--chooser-surface-border-hover);
   color: var(--neutral-100);
+  font-size: 12px;
   font-weight: 500;
-  font-size: 14px;
+  line-height: 16px;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
 }
 
-.env-var-add:hover {
-  color: var(--text);
-  background: rgba(255, 255, 255, 0.15);
-}
-
+.env-var-add:hover,
 .env-var-add:focus-visible {
-  outline: 2px solid var(--accent-primary);
-  outline-offset: 2px;
+  background: var(--brand-surface-border-hover);
+  color: var(--text);
+  outline: none;
 }
 </style>
