@@ -177,7 +177,6 @@ export const gitSource: SourcePlugin = {
           { label: t('git.repository'), value: (installation.repo as string) || '—' },
           { label: t('git.branch'), value: (installation.branch as string) || '—' },
           { label: t('git.commit'), value: (installation.commit as string) || '—' },
-          { id: 'venvPath', label: t('git.venv'), value: venvPath || '', editable: true, editType: 'path' },
           { label: t('common.location'), value: installation.installPath || '—' },
           { label: t('common.installed'), value: new Date(installation.createdAt).toLocaleDateString() },
         ],
