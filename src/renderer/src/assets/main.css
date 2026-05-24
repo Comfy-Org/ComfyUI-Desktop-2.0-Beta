@@ -150,6 +150,12 @@
     0 20px 24px -4px rgba(10, 13, 18, 0.4), 0 8px 8px -4px rgba(10, 13, 18, 0.25),
     0 3px 3px -1.5px rgba(10, 13, 18, 0.2);
 
+  /* Tooltip primitive */
+  --tooltip-bg: #211927;
+  --tooltip-border: #38303d;
+  --tooltip-fg: #ffffff;
+  --z-tooltip: 10001;
+
   /* Takeover fluid type + spacing — Utopia clamp, anchored 1024px → 1920px. */
   --takeover-fs-caption: clamp(0.75rem, 0.6071rem + 0.2232vw, 0.875rem); /* 12→14px */
   --takeover-fs-body: clamp(0.875rem, 0.7321rem + 0.2232vw, 1rem); /* 14→16px */
@@ -228,6 +234,12 @@
    * value until light brand parity ships. */
   --modal-surface-bg: #27202d;
   --modal-surface-border: var(--chooser-surface-border);
+
+  /* Tooltip primitive — mirror of dark-theme block until light parity. */
+  --tooltip-bg: #211927;
+  --tooltip-border: #38303d;
+  --tooltip-fg: #ffffff;
+  --z-tooltip: 10001;
 
   /* Takeover fluid type + spacing — mirror of dark-theme block. */
   --takeover-fs-caption: clamp(0.75rem, 0.6071rem + 0.2232vw, 0.875rem);
