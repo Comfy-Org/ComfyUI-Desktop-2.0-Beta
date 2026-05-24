@@ -9,23 +9,29 @@
  * `openFirstUseTakeover` for the host-side wiring.
  *
  * Step ordering:
- *   1. `consent` — T&C acknowledgement + telemetry consent toggle on a
- *                  single page. Accept-T&C button advances.
+ *   1. `start`   — Merged T&C + Cloud-vs-Local picker on a single page.
+ *                  T&C + telemetry checkboxes, an Express-Install
+ *                  opt-out modifier, and two radio cards (Cloud
+ *                  pre-selected). A single Continue commit persists
+ *                  telemetry, fires fork_chosen, and routes to the
+ *                  next step. Cancel closes the host window.
  *   2. `mirrors` — Only inserted when the resolved locale starts with
  *                  'zh'. Reuses the existing `chineseMirrorsSuggest*`
  *                  copy in en/zh + the `useChineseMirrors` setting; we
  *                  flip the global flag through `setSetting`, no new
  *                  per-source override surface yet.
  *                  `chineseMirrorsPrompted` is also set so the
- *                  prompt machinery doesn't re-fire later.
- *   3. `pick`    — Cloud-vs-Local card picker. Cloud emits `complete`
- *                  immediately (the chooser body underneath is what the
- *                  user lands on, where they can pick the cloud install
- *                  to launch). Local emits `chain-local` so the host
- *                  swaps this takeover for the new-install Tier 3
- *                  takeover (Tier 3 → Tier 3 swap is silent in
- *                  `useOverlay`); the host then marks completion when
- *                  new-install ends successfully.
+ *                  prompt machinery doesn't re-fire later. After the
+ *                  user picks, `routePostStart` resumes the fork
+ *                  routing from step 1.
+ *   3. (routing) — From step 1 (or post-mirrors): Cloud emits
+ *                  `complete-cloud` immediately. Local emits
+ *                  `chain-local` so the host swaps this takeover for
+ *                  the new-install Tier 3 takeover (Tier 3 → Tier 3
+ *                  swap is silent in `useOverlay`); the host marks
+ *                  completion when new-install ends successfully.
+ *                  Local + Legacy Desktop detected routes to the
+ *                  `localBranch` sub-step first.
  *
  * The takeover stays a pure stepper — it does NOT call `setSetting`
  * for `firstUseCompleted` itself; the host owns that flip so the
@@ -43,11 +49,11 @@ import ModalShell from '../components/ModalShell.vue'
 import ChoiceCard from '../components/ChoiceCard.vue'
 import WhyTryCloudModal from '../components/WhyTryCloudModal.vue'
 import TermsModal from '../components/TermsModal.vue'
+import TooltipWrap from '../components/TooltipWrap.vue'
 import BrandTakeoverLayout from '../components/BrandTakeoverLayout.vue'
-import ComfyWordmark from '../components/icons/ComfyWordmark.vue'
 import { emitTelemetryAction } from '../lib/telemetry'
 
-type Step = 'consent' | 'mirrors' | 'pick' | 'localBranch'
+type Step = 'start' | 'mirrors' | 'localBranch'
 
 const emit = defineEmits<{
   /** Cloud branch explicitly picked at the cloud-vs-local fork. Host
@@ -78,9 +84,17 @@ const emit = defineEmits<{
   'chain-migrate': []
 }>()
 
-const step = ref<Step>('consent')
+const step = ref<Step>('start')
 const telemetryEnabled = ref(true)
 const locale = ref('en')
+/** Cloud-vs-Local selection picked on the merged start screen.
+ *  Cloud is the brand-anchor card (glow + beam target) so it ships
+ *  pre-selected — users can flip to Local before pressing Continue. */
+const pickedChoice = ref<'cloud' | 'local'>('cloud')
+/** Express-install opt-out modifier on the start screen. Pre-ticked.
+ *  Functional wiring (skipping optional setup steps) lands separately;
+ *  for now the value is captured for telemetry only. */
+const expressInstall = ref(true)
 /** Funnel-completion bookkeeping for `desktop2.first_use.completed`.
  *  `mountedAt` is reset in `open()` so a takeover replay measures
  *  duration from the replay, not from the original mount.
@@ -133,57 +147,66 @@ const isChinese = computed(() => locale.value.startsWith('zh'))
  *  entrance animation plays once on overlay open, not on every internal
  *  step swap. Mirrors still ships as `ModalShell` until it gets the
  *  brand treatment too. */
-const isBrandStep = computed(
-  () =>
-    step.value === 'consent' ||
-    step.value === 'pick' ||
-    step.value === 'localBranch'
-)
+const isBrandStep = computed(() => step.value === 'start' || step.value === 'localBranch')
 
-/** Cancel on the consent step closes the host window. The figma's
- *  Cancel affordance maps to the standard desktop-app "Decline"
- *  pattern — user opted out of T&Cs, so we don't persist anything
- *  (telemetry pref stays at its prior value; `firstUseCompleted`
- *  stays false so the consent step re-surfaces on next launch). */
-function cancelConsent(): void {
-  emitTelemetryAction('desktop2.first_use.consent_decision', {
-    decision: 'cancel',
-    telemetry_enabled: telemetryEnabled.value,
-    locale: locale.value
-  })
-  void window.api.closeHostWindow()
-}
+/** Single Continue commit for the merged start screen: T&C acceptance,
+ *  telemetry pref, fork choice, and the Express-install modifier all
+ *  resolve in one click. Telemetry persists immediately so a mid-flow
+ *  cancel still respects the user's choice (the `firstUseCompleted`
+ *  gate is separate — re-running the takeover surfaces the toggle in
+ *  its current persisted state, not as a freshly-defaulted opt-in).
+ *  China-mirror sub-step still runs first when the locale calls for
+ *  it; the post-mirror branch reuses the same routing logic. */
+async function onContinue(): Promise<void> {
+  if (!acceptedTos.value) return
 
-/** Step 1 → next: telemetry persists immediately so a mid-flow cancel
- *  still respects the user's choice (the `firstUseCompleted` gate is
- *  separate — re-running the takeover surfaces the toggle in its
- *  current persisted state, not as a freshly-defaulted opt-in). */
-async function acceptConsent(): Promise<void> {
   await window.api.setSetting('telemetryEnabled', telemetryEnabled.value)
-  // `consent_decision` (not `consent_accepted`) because this fires for
-  // both opt-in and opt-out — the `decision` prop says which one.
+  // TODO(express-install): persist `expressInstall` pref + skip optional
+  // setup steps when the functional wiring lands.
+
   emitTelemetryAction('desktop2.first_use.consent_decision', {
     decision: telemetryEnabled.value ? 'accept' : 'decline',
     telemetry_enabled: telemetryEnabled.value,
     locale: locale.value
   })
-  // skipPick suppresses the pick step entirely. China-mirror sub-step
-  // still runs first when the locale calls for it, then the takeover
-  // emits `complete-skip` (returning user — no implicit cloud launch)
-  // instead of advancing to `pick`.
+  emitTelemetryAction('desktop2.first_use.fork_chosen', {
+    choice: pickedChoice.value,
+    has_legacy_desktop: hasLegacyDesktop.value,
+    express_install: expressInstall.value
+  })
+
   if (isChinese.value) {
     step.value = 'mirrors'
-  } else if (skipPick.value) {
+    return
+  }
+
+  routePostStart()
+}
+
+/** Post-start routing — shared by `onContinue` (non-China path) and
+ *  `chooseMirrors` (China path, after mirrors prompt). Honours
+ *  `skipPick` for returning users by short-circuiting to `complete-skip`
+ *  regardless of which card was selected. */
+function routePostStart(): void {
+  if (skipPick.value) {
     emitCompleted('skipped')
     emit('complete-skip')
+    return
+  }
+  if (pickedChoice.value === 'cloud') {
+    emitCompleted('cloud')
+    emit('complete-cloud')
+  } else if (hasLegacyDesktop.value) {
+    step.value = 'localBranch'
   } else {
-    step.value = 'pick'
+    emitCompleted('local-new')
+    emit('chain-local')
   }
 }
 
-/** Step 2 — the China-mirror prompt always advances regardless of
- *  the user's pick; only the persisted `useChineseMirrors` flag
- *  differs. `chineseMirrorsPrompted` is set in both branches so the
+/** China-mirror prompt always advances regardless of the user's pick;
+ *  only the persisted `useChineseMirrors` flag differs.
+ *  `chineseMirrorsPrompted` is set in both branches so the
  *  `suggest-chinese-mirrors` listener won't re-fire later. */
 async function chooseMirrors(useMirrors: boolean): Promise<void> {
   await Promise.all([
@@ -191,39 +214,7 @@ async function chooseMirrors(useMirrors: boolean): Promise<void> {
     window.api.setSetting('chineseMirrorsPrompted', true)
   ])
   emitTelemetryAction('desktop2.first_use.mirrors_chosen', { use_mirrors: useMirrors })
-  if (skipPick.value) {
-    emitCompleted('skipped')
-    emit('complete-skip')
-  } else {
-    step.value = 'pick'
-  }
-}
-
-function pickCloud(): void {
-  emitTelemetryAction('desktop2.first_use.fork_chosen', {
-    choice: 'cloud',
-    has_legacy_desktop: hasLegacyDesktop.value
-  })
-  emitCompleted('cloud')
-  emit('complete-cloud')
-}
-
-/** Local branch — when a Legacy Desktop install is on the machine
- *  the user gets a Migrate-vs-Install-new sub-step before the chain
- *  fires; otherwise we go straight to the new-install chain.
- *  Detection (`hasLegacyDesktop`) is computed by main and plumbed in
- *  via `open()`. */
-function pickLocal(): void {
-  emitTelemetryAction('desktop2.first_use.fork_chosen', {
-    choice: 'local',
-    has_legacy_desktop: hasLegacyDesktop.value
-  })
-  if (hasLegacyDesktop.value) {
-    step.value = 'localBranch'
-  } else {
-    emitCompleted('local-new')
-    emit('chain-local')
-  }
+  routePostStart()
 }
 
 function openWhyCloud(): void {
@@ -239,7 +230,11 @@ function dismissWhyCloud(action: 'maybe_later' | 'dismiss'): void {
 function onWhyCloudTryCloud(): void {
   whyCloudOpen.value = false
   emitTelemetryAction('desktop2.first_use.why_cloud_action', { action: 'try_cloud' })
-  pickCloud()
+  // "Try Cloud" inside the explainer modal flips the start-screen
+  // selection to Cloud but leaves the user on the screen so they can
+  // accept T&C and press Continue. The legal gate is non-negotiable —
+  // we can't auto-commit on the user's behalf.
+  pickedChoice.value = 'cloud'
 }
 
 function chooseMigrate(): void {
@@ -267,17 +262,19 @@ interface OpenOpts {
   hasLegacyDesktop?: boolean
   /** Skip ahead to a specific brand step on open. Used by the
    *  Configure → Back chain to land the user back on the localBranch
-   *  sub-step instead of restarting at consent. Defaults to 'consent'. */
-  initialStep?: 'consent' | 'pick' | 'localBranch'
+   *  sub-step instead of restarting at start. Defaults to 'start'. */
+  initialStep?: 'start' | 'localBranch'
 }
 
 async function open(opts: OpenOpts = {}): Promise<void> {
-  step.value = opts.initialStep ?? 'consent'
+  step.value = opts.initialStep ?? 'start'
   skipPick.value = opts.skipPick === true
   hasLegacyDesktop.value = opts.hasLegacyDesktop === true
   whyCloudOpen.value = false
   termsDoc.value = null
   acceptedTos.value = false
+  pickedChoice.value = 'cloud'
+  expressInstall.value = true
   // Reset funnel-completion bookkeeping so a takeover replay measures
   // duration / steps from the replay, not from the original mount.
   mountedAt = Date.now()
@@ -307,19 +304,19 @@ onMounted(() => {
 /**
  * Push the current step to main as the host's `firstUseMode` so:
  *   - `buildTitlePopupMenuItems` can surface the Skip Onboarding entry
- *     once we're past consent (`'post-consent'`).
+ *     once we're past start (`'post-consent'`).
  *   - The title bar can lock down during `'consent-lockdown'`.
  *
  * `immediate: true` makes the very first mount fire the watcher so the
- * initial step (`'consent'`) lands on the host without waiting for a
- * step transition. The `localBranch` sub-step counts as `post-consent`
- * — the user has already accepted T&Cs and the menu's escape hatch
- * stays available there.
+ * initial step (`'start'`) lands on the host without waiting for a
+ * step transition. The merged `start` screen still gates T&C, so
+ * lockdown applies until the user presses Continue and the takeover
+ * advances to mirrors / localBranch / completion.
  */
 watch(
   step,
   (current) => {
-    const mode = current === 'consent' ? 'consent-lockdown' : 'post-consent'
+    const mode = current === 'start' ? 'consent-lockdown' : 'post-consent'
     window.api.setFirstUseMode(mode)
     stepsSeen.add(current)
     emitTelemetryAction('desktop2.first_use.step_viewed', {
@@ -347,94 +344,103 @@ defineExpose({ open })
 </script>
 
 <template>
-  <BrandTakeoverLayout v-if="isBrandStep" :vignette="step === 'pick'">
-    <!-- Step 1: T&C + telemetry consent. Brand-wrapped: wordmark
-         centered, two square brand checkboxes (T&C + telemetry), then
-         the Get Started / Cancel action row. Full policy text moves
-         into TermsModal opened by either Learn more link. -->
-    <div v-if="step === 'consent'" class="brand-hero consent-hero">
-      <ComfyWordmark class="consent-wordmark" aria-hidden="true" />
-      <div class="consent-checkboxes">
-        <label class="brand-checkbox" data-testid="first-use-consent-tos">
+  <BrandTakeoverLayout v-if="isBrandStep" :vignette="step === 'start'">
+    <!-- Step 1: Merged start screen. Wordmark on top, Cloud-vs-Local
+         radio cards in the middle, Express-Install opt-out modifier,
+         then the legal/telemetry checkboxes and the Continue / Cancel
+         action row. T&C must be accepted before Continue activates. -->
+    <div v-if="step === 'start'" class="start-screen">
+      <div class="brand-hero start-hero">
+        <h1 class="brand-title">{{ $t('firstUse.pickTitle') }}</h1>
+        <p class="brand-lead">{{ $t('firstUse.pickLead') }}</p>
+        <div class="start-cards" role="radiogroup" :aria-label="$t('firstUse.pickTitle')">
+          <ChoiceCard
+            class="start-card-cloud"
+            selectable
+            :selected="pickedChoice === 'cloud'"
+            glow
+            :label="$t('cloud.label')"
+            :tagline="$t('firstUse.cloudTagline')"
+            :description="$t('firstUse.cloudDesc')"
+            data-testid="first-use-pick-cloud"
+            @click="pickedChoice = 'cloud'"
+          >
+            <template #label-trailing>
+              <TooltipWrap :text="$t('firstUse.whyTryCloud')">
+                <button
+                  type="button"
+                  class="start-cloud-info"
+                  :aria-label="$t('firstUse.whyTryCloud')"
+                  data-testid="first-use-why-cloud"
+                  @click.stop="openWhyCloud"
+                >
+                  <Info :size="14" />
+                </button>
+              </TooltipWrap>
+            </template>
+          </ChoiceCard>
+          <ChoiceCard
+            selectable
+            :selected="pickedChoice === 'local'"
+            :label="$t('firstUse.localLabel')"
+            :tagline="$t('firstUse.localTagline')"
+            :description="$t('firstUse.localDesc')"
+            data-testid="first-use-pick-local"
+            @click="pickedChoice = 'local'"
+          />
+        </div>
+        <label class="brand-checkbox start-express" data-testid="first-use-express-install">
+          <input v-model="expressInstall" type="checkbox" />
+          <span class="start-express__label">{{ $t('firstUse.expressInstallLine') }}</span>
+        </label>
+      </div>
+      <div class="start-bottom">
+        <label class="brand-checkbox start-consent-row" data-testid="first-use-consent-tos">
           <input v-model="acceptedTos" type="checkbox" />
-          <span class="brand-checkbox__text">
-            <span class="brand-checkbox__title">{{ $t('firstUse.consentTosTitle') }}</span>
-            <span class="brand-checkbox__hint">
-              {{ $t('firstUse.consentTosHintPrefix') }}
-              <button
-                type="button"
-                class="brand-checkbox__link"
-                data-testid="first-use-eula-link"
-                @click.prevent="termsDoc = 'eula'"
-              >{{ $t('firstUse.eulaLinkLabel') }}</button>
-              {{ $t('firstUse.consentTosHintSep') }}
-              <button
-                type="button"
-                class="brand-checkbox__link"
-                data-testid="first-use-tos-link"
-                @click.prevent="termsDoc = 'tos'"
-              >{{ $t('firstUse.tosLinkLabel') }}</button>{{ $t('firstUse.consentTosHintSuffix') }}
-            </span>
+          <span class="start-consent-row__text">
+            {{ $t('firstUse.consentTosHintPrefix') }}
+            <button
+              type="button"
+              class="brand-checkbox__link"
+              data-testid="first-use-eula-link"
+              @click.prevent="termsDoc = 'eula'"
+            >
+              {{ $t('firstUse.eulaLinkLabel') }}
+            </button>
+            {{ $t('firstUse.consentTosHintSep') }}
+            <button
+              type="button"
+              class="brand-checkbox__link"
+              data-testid="first-use-tos-link"
+              @click.prevent="termsDoc = 'tos'"
+            >
+              {{ $t('firstUse.tosLinkLabel') }}</button
+            >{{ $t('firstUse.consentTosHintSuffix') }}
           </span>
         </label>
-        <label class="brand-checkbox" data-testid="first-use-consent-telemetry">
+        <label class="brand-checkbox start-consent-row" data-testid="first-use-consent-telemetry">
           <input v-model="telemetryEnabled" type="checkbox" />
-          <span class="brand-checkbox__text">
-            <span class="brand-checkbox__title">{{ $t('firstUse.consentTelemetryTitle') }}</span>
-            <span class="brand-checkbox__hint">
-              {{ $t('firstUse.consentTelemetryHint') }}
-              <button
-                type="button"
-                class="brand-checkbox__link"
-                data-testid="first-use-telemetry-learn-more"
-                @click.prevent="termsDoc = 'privacy'"
-              >{{ $t('common.learnMore') }}</button>
-            </span>
+          <span class="start-consent-row__text">
+            {{ $t('firstUse.consentTelemetryHint') }}
+            <button
+              type="button"
+              class="brand-checkbox__link"
+              data-testid="first-use-telemetry-learn-more"
+              @click.prevent="termsDoc = 'privacy'"
+            >
+              {{ $t('common.learnMore') }}
+            </button>
           </span>
         </label>
-      </div>
-      <div class="consent-actions">
         <button
-          class="brand-primary consent-get-started"
+          class="brand-primary start-continue"
           type="button"
-          data-testid="first-use-accept-consent"
+          data-testid="first-use-continue"
           :disabled="!acceptedTos"
-          @click="acceptConsent"
+          @click="onContinue"
         >
-          {{ $t('firstUse.consentGetStarted') }}
+          {{ $t('firstUse.startContinue') }}
         </button>
-        <button
-          class="brand-ghost consent-cancel"
-          type="button"
-          data-testid="first-use-cancel-consent"
-          @click="cancelConsent"
-        >
-          {{ $t('common.cancel') }}
-        </button>
-      </div>
-    </div>
-
-    <!-- Step 3: Cloud-vs-Local pick. -->
-    <div v-else-if="step === 'pick'" class="brand-hero">
-      <h1 class="brand-title">{{ $t('firstUse.pickTitle') }}</h1>
-      <p class="brand-lead">{{ $t('firstUse.pickLead') }}</p>
-      <div class="pick-grid">
-        <ChoiceCard
-          class="pick-card-cloud"
-          :label="$t('cloud.label')"
-          :tagline="$t('firstUse.cloudTagline')"
-          :description="$t('firstUse.cloudDesc')"
-          glow
-          data-testid="first-use-pick-cloud"
-          @click="pickCloud"
-        />
-        <ChoiceCard
-          :label="$t('firstUse.localLabel')"
-          :tagline="$t('firstUse.localTagline')"
-          :description="$t('firstUse.localDesc')"
-          data-testid="first-use-pick-local"
-          @click="pickLocal"
-        />
       </div>
     </div>
 
@@ -485,21 +491,11 @@ defineExpose({ open })
 
     <template #footer-left>
       <button
-        v-if="step === 'pick'"
-        class="pick-why-cloud"
-        type="button"
-        data-testid="first-use-why-cloud"
-        @click="openWhyCloud"
-      >
-        <Info :size="14" />
-        <span>{{ $t('firstUse.whyTryCloud') }}</span>
-      </button>
-      <button
-        v-else-if="step === 'localBranch'"
+        v-if="step === 'localBranch'"
         class="pick-why-cloud"
         data-testid="first-use-local-branch-back"
         type="button"
-        @click="step = 'pick'"
+        @click="step = 'start'"
       >
         ← {{ $t('common.back') }}
       </button>
@@ -574,55 +570,116 @@ defineExpose({ open })
   color: var(--text);
 }
 
-/* Consent step: brand-wrapped. Hero column is centred by `.brand-hero`;
- * we just stack wordmark → checkboxes → action row inside it. */
-.consent-hero {
-  max-width: 560px;
-  gap: var(--takeover-gap-md);
-}
-.consent-wordmark {
-  width: clamp(140px, 9.7vw, 240px);
-  height: auto;
-  color: #f0ff41;
-  margin-bottom: var(--takeover-gap-md);
-  isolation: isolate;
-  anchor-name: --brand-beam-target;
-}
-.consent-checkboxes {
+/* Merged start step.
+ *
+ * Layout: `.start-screen` fills the inner-frame as a vertical flex
+ * column. `.start-hero` (title + lead + cards + express) flexes to
+ * fill the available space and centres its content vertically so the
+ * cards still land on the original `pick`-step beam target.
+ * `.start-bottom` (consent rows + Continue) is the natural bottom of
+ * the column — no `position: absolute`, so window resizing keeps the
+ * two sections from overlapping. */
+.start-screen {
   display: flex;
   flex-direction: column;
-  gap: var(--takeover-gap-sm);
-  width: 100%;
-  text-align: left;
-}
-.consent-actions {
-  display: flex;
   align-items: center;
-  gap: 12px;
-  margin-top: var(--takeover-gap-lg);
+  width: 100%;
+  height: 100%;
+  max-width: 760px;
+  gap: var(--takeover-gap-md);
 }
-
-/* Pick step. Hero/title/lead live as the global `.brand-*` classes
- * (main.css) so the Configure screen can reuse the same primitives.
- * `.pick-why-cloud` is rendered via the layout's #footer-left slot
- * and stays here because its absolute positioning resolves against the
- * outer frame, which the layout preserves as its positioning context. */
-.pick-grid {
+.start-hero {
+  flex: 1 1 auto;
+  justify-content: center;
+  gap: var(--takeover-gap-md);
+  max-width: 760px;
+}
+.start-cards {
   display: grid;
   width: 100%;
-  /* Constrain the grid below the hero's 960px max so the cards sit
-   * narrower under the centred light beam (the Cloud card is the
-   * `--brand-beam-target` anchor). Without this cap the cards stretch
-   * to the full hero width and the spotlight no longer lands on the
-   * card's centre line. */
-  max-width: 760px;
-  margin-inline: auto;
   grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr));
-  gap: 24px;
+  gap: 32px;
+}
+/* Cloud card anchors the brand beam — keep the spotlight on the
+ * Cloud card the same way the original pick step did. */
+.start-card-cloud {
+  anchor-name: --brand-beam-target;
+}
+.start-cloud-info {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: color-mix(in oklab, var(--neutral-100) 65%, transparent);
+  cursor: pointer;
+  transition:
+    color 120ms ease,
+    background 120ms ease;
+}
+.start-cloud-info:hover {
+  color: var(--neutral-100);
+  background: color-mix(in oklab, var(--neutral-100) 10%, transparent);
+}
+.start-cloud-info:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
 }
 
-.pick-card-cloud {
-  anchor-name: --brand-beam-target;
+/* Express Install — intentionally low-weight: single centred line
+ * with the standard brand-checkbox box, smaller font + muted text
+ * colour so it reads as an opt-out modifier, not a primary decision.
+ * Inline-flex so it shrink-wraps and the parent flex column centres
+ * it horizontally. */
+.start-express {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  font-size: 13px;
+  color: var(--neutral-300);
+}
+.start-express__label {
+  line-height: 1.4;
+}
+
+/* Bottom block: condensed consent + Continue. Each row uses the
+ * shared `.brand-checkbox` box for the input visuals (custom
+ * appearance + SVG checkmark) but overrides alignment to single-line
+ * + shrink-wrap so the rows can centre as a group inside the
+ * column. No `position: absolute` — pure flex flow so the section
+ * never overlaps the hero when the window shrinks. */
+.start-bottom {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+}
+.start-consent-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--neutral-200);
+  line-height: 1.5;
+}
+
+.start-consent-row input[type='checkbox'],
+.start-express input[type='checkbox'] {
+  margin-top: 0;
+}
+.start-consent-row__text {
+  white-space: normal;
+}
+.start-continue {
+  margin-top: 4px;
+  min-width: 200px;
 }
 
 .pick-why-cloud {
