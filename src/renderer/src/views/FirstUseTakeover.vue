@@ -42,7 +42,7 @@
  * locale; the host calls it post-mount the same way the flow modals
  * are reset.
  */
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, nextTick, onMounted, onUnmounted, watch } from 'vue'
 import { Check, Copy, FolderInput, Info, Loader2 } from 'lucide-vue-next'
 import TakeoverHeader from '../components/TakeoverHeader.vue'
 import ModalShell from '../components/ModalShell.vue'
@@ -117,12 +117,12 @@ function emitCompleted(exitPath: 'cloud' | 'local-new' | 'local-migrate' | 'skip
   })
 }
 /** When the host detects prior usage of the launcher (any
- *  non-cloud, non-legacy-desktop install present), the
- *  cloud-vs-local pick step is suppressed: the user's already made
- *  the choice, no need to re-litigate. The takeover stops at consent
- *  (and the optional China-mirror sub-step) and emits `complete`
- *  instead of advancing to `pick`. Detection lives in main —
- *  `window.api.getFirstUseState()` — and is plumbed in via `open()`. */
+ *  non-cloud, non-legacy-desktop install present), the cloud-vs-local
+ *  pick is suppressed and Continue routes straight to `complete-skip`
+ *  via `routePostStart`. T&C still resets on every `open()` — explicit
+ *  re-consent is required on every takeover replay regardless of
+ *  `skipPick`. Detection lives in main (`getFirstUseState()`) and is
+ *  plumbed in via `open()`. */
 const skipPick = ref(false)
 /** When a Legacy Desktop install is detected on the machine
  *  (auto-tracked at startup as `sourceId === 'desktop'`),
@@ -260,6 +260,35 @@ function chooseMigrate(): void {
   emit('chain-migrate')
 }
 
+/** Radiogroup arrow-key handler for the Cloud/Local cards. WAI-ARIA
+ *  APG §3.15: arrow keys cycle the checked radio and move DOM focus
+ *  along with it. Without this, keyboard-only users can't switch
+ *  between the two cards. */
+function onStartCardsKeydown(e: KeyboardEvent): void {
+  const target = e.target as HTMLElement | null
+  if (!target?.closest('[role="radio"]')) return
+  const order = ['cloud', 'local'] as const
+  const currentIndex = order.indexOf(pickedChoice.value)
+  let next: number
+  if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+    next = (currentIndex + 1) % order.length
+  } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+    next = (currentIndex - 1 + order.length) % order.length
+  } else {
+    return
+  }
+  const nextChoice = order[next]
+  if (!nextChoice) return
+  e.preventDefault()
+  pickedChoice.value = nextChoice
+  void nextTick(() => {
+    const radios = (e.currentTarget as HTMLElement | null)?.querySelectorAll<HTMLElement>(
+      '[role="radio"]',
+    )
+    radios?.[next]?.focus()
+  })
+}
+
 function chooseInstallNew(): void {
   emitTelemetryAction('desktop2.first_use.local_branch_chosen', { choice: 'install_new' })
   // Skip the dedicated name screen — naming now happens inline on the
@@ -321,12 +350,12 @@ onMounted(() => {
 /**
  * Push the current step to main as the host's `firstUseMode` so:
  *   - `buildTitlePopupMenuItems` can surface the Skip Onboarding entry
- *     once we're past start (`'post-consent'`).
+ *     once we're past the merged start step (`'post-consent'`).
  *   - The title bar can lock down during `'consent-lockdown'`.
  *
  * `immediate: true` makes the very first mount fire the watcher so the
  * initial step (`'start'`) lands on the host without waiting for a
- * step transition. The merged `start` screen still gates T&C, so
+ * step transition. The merged start screen still gates T&C, so
  * lockdown applies until the user presses Continue and the takeover
  * advances to mirrors / localBranch / completion.
  */
@@ -370,7 +399,12 @@ defineExpose({ open })
       <div class="brand-hero start-hero">
         <h1 class="brand-title">{{ $t('firstUse.pickTitle') }}</h1>
         <p class="brand-lead">{{ $t('firstUse.pickLead') }}</p>
-        <div class="start-cards" role="radiogroup" :aria-label="$t('firstUse.pickTitle')">
+        <div
+          class="start-cards"
+          role="radiogroup"
+          :aria-label="$t('firstUse.pickTitle')"
+          @keydown="onStartCardsKeydown"
+        >
           <ChoiceCard
             class="start-card-cloud"
             selectable
@@ -525,7 +559,12 @@ defineExpose({ open })
       @close="dismissWhyCloud('dismiss')"
       @try-cloud="onWhyCloudTryCloud"
     />
-    <TermsModal v-if="termsDoc" :doc="termsDoc" @close="termsDoc = null" />
+    <TermsModal
+      v-if="termsDoc"
+      :open="termsDoc !== null"
+      :doc="termsDoc"
+      @close="termsDoc = null"
+    />
   </BrandTakeoverLayout>
   <ModalShell v-else binding hide-close content-class="first-use-takeover">
     <!-- Mirrors step retains the legacy ModalShell chrome until it gets
