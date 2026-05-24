@@ -56,9 +56,6 @@ vi.mock('../components/BrandTakeoverLayout.vue', () => ({
     template: '<div data-testid="stub-brand-layout"><slot /></div>',
   },
 }))
-vi.mock('../components/icons/ComfyWordmark.vue', () => ({
-  default: { template: '<svg data-testid="stub-wordmark" />' },
-}))
 
 import FirstUseTakeover from './FirstUseTakeover.vue'
 
