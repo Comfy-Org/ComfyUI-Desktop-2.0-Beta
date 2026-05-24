@@ -269,6 +269,10 @@ function handleNewInstallClick(): void {
   background: transparent;
 }
 
+.chooser-bg :deep(.brand-beam--2) {
+  left: anchor(center, clamp(39%, calc(52.5vw - 135px), 44%));
+}
+
 .chooser-view {
   /* Fluid centering pattern with a top-spacer floor:
    *   - Short grid → both spacers grow toward 1fr → cluster centered
