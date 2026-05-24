@@ -43,13 +43,13 @@
  * are reset.
  */
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
-import { Check, Copy, FolderInput, Info } from 'lucide-vue-next'
+import { Check, Copy, FolderInput, Info, Loader2 } from 'lucide-vue-next'
 import TakeoverHeader from '../components/TakeoverHeader.vue'
 import ModalShell from '../components/ModalShell.vue'
 import ChoiceCard from '../components/ChoiceCard.vue'
 import WhyTryCloudModal from '../components/WhyTryCloudModal.vue'
 import TermsModal from '../components/TermsModal.vue'
-import TooltipWrap from '../components/TooltipWrap.vue'
+import Tooltip from '../components/ui/Tooltip.vue'
 import BrandTakeoverLayout from '../components/BrandTakeoverLayout.vue'
 import { emitTelemetryAction } from '../lib/telemetry'
 
@@ -72,8 +72,11 @@ const emit = defineEmits<{
    *  happens inline on the Configure screen now. The optional payload
    *  flags whether the chain was reached via the Local → Start Fresh
    *  sub-step (vs. the direct no-legacy path) so the Configure screen
-   *  can surface a Back link to return the user to localBranch. */
-  'chain-local': [payload?: { cameFromLocalBranch?: boolean }]
+   *  can surface a Back link to return the user to localBranch, and
+   *  whether the user opted into Express Install (skip Configure and
+   *  run Standalone + recommended defaults straight through to the
+   *  install-progress takeover). */
+  'chain-local': [payload?: { cameFromLocalBranch?: boolean; express?: boolean }]
   /** Local-branch follow-up: a Legacy Desktop install was detected
    *  and the user chose to migrate it instead of installing fresh.
    *  Host runs the migration flow (`useMigrateAction.confirmMigration`
@@ -139,6 +142,11 @@ const termsDoc = ref<'eula' | 'tos' | 'privacy' | 'notices' | null>(null)
  *  telemetry checkbox is a separate, optional opt-in (see
  *  `telemetryEnabled`). */
 const acceptedTos = ref(false)
+/** True while Continue's downstream work (telemetry persist + Express
+ *  prep IPC chain) is in flight. Drives the button's spinner + disabled
+ *  state so the user gets feedback instead of staring at an unchanged
+ *  screen during the multi-IPC express-install pre-roll. */
+const isContinuing = ref(false)
 
 const isChinese = computed(() => locale.value.startsWith('zh'))
 
@@ -158,11 +166,15 @@ const isBrandStep = computed(() => step.value === 'start' || step.value === 'loc
  *  China-mirror sub-step still runs first when the locale calls for
  *  it; the post-mirror branch reuses the same routing logic. */
 async function onContinue(): Promise<void> {
-  if (!acceptedTos.value) return
+  if (!acceptedTos.value || isContinuing.value) return
+  // Keep `isContinuing` true past `routePostStart()` because the chain
+  // handlers (express prep, cloud auto-launch, new-install swap) all
+  // either unmount this takeover or swap to a sub-step within ms. The
+  // China-mirrors branch is the only path that lingers on this component
+  // post-Continue, so it explicitly clears the flag on its return.
+  isContinuing.value = true
 
   await window.api.setSetting('telemetryEnabled', telemetryEnabled.value)
-  // TODO(express-install): persist `expressInstall` pref + skip optional
-  // setup steps when the functional wiring lands.
 
   emitTelemetryAction('desktop2.first_use.consent_decision', {
     decision: telemetryEnabled.value ? 'accept' : 'decline',
@@ -177,6 +189,7 @@ async function onContinue(): Promise<void> {
 
   if (isChinese.value) {
     step.value = 'mirrors'
+    isContinuing.value = false
     return
   }
 
@@ -196,11 +209,15 @@ function routePostStart(): void {
   if (pickedChoice.value === 'cloud') {
     emitCompleted('cloud')
     emit('complete-cloud')
-  } else if (hasLegacyDesktop.value) {
+  } else if (hasLegacyDesktop.value && !expressInstall.value) {
+    // Express takes precedence: when checked, skip the migrate-vs-fresh
+    // sub-step and head straight to the express Standalone install. Only
+    // surface the localBranch fork when Express is unticked.
     step.value = 'localBranch'
+    isContinuing.value = false
   } else {
     emitCompleted('local-new')
-    emit('chain-local')
+    emit('chain-local', { express: expressInstall.value })
   }
 }
 
@@ -366,7 +383,7 @@ defineExpose({ open })
             @click="pickedChoice = 'cloud'"
           >
             <template #label-trailing>
-              <TooltipWrap :text="$t('firstUse.whyTryCloud')">
+              <Tooltip :text="$t('firstUse.whyTryCloud')">
                 <button
                   type="button"
                   class="start-cloud-info"
@@ -376,7 +393,7 @@ defineExpose({ open })
                 >
                   <Info :size="14" />
                 </button>
-              </TooltipWrap>
+              </Tooltip>
             </template>
           </ChoiceCard>
           <ChoiceCard
@@ -436,10 +453,12 @@ defineExpose({ open })
           class="brand-primary start-continue"
           type="button"
           data-testid="first-use-continue"
-          :disabled="!acceptedTos"
+          :disabled="!acceptedTos || isContinuing"
+          :aria-busy="isContinuing"
           @click="onContinue"
         >
-          {{ $t('firstUse.startContinue') }}
+          <Loader2 v-if="isContinuing" :size="16" class="start-continue__spinner" aria-hidden="true" />
+          <span>{{ isContinuing ? $t('firstUse.startContinueBusy') : $t('firstUse.startContinue') }}</span>
         </button>
       </div>
     </div>
@@ -679,7 +698,20 @@ defineExpose({ open })
 }
 .start-continue {
   margin-top: 4px;
-  min-width: 200px;
+  min-width: 220px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.start-continue__spinner {
+  animation: start-continue-spin 750ms linear infinite;
+  flex-shrink: 0;
+}
+@keyframes start-continue-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .pick-why-cloud {
