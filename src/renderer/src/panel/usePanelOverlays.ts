@@ -122,7 +122,7 @@ export interface UsePanelOverlaysApi {
   handleProgressClose: () => void
   openFlowTakeover: (component: FlowComponent, entrypoint: string) => Promise<void>
   openFirstUseTakeover: (opts?: {
-    initialStep?: 'consent' | 'pick' | 'localBranch'
+    initialStep?: 'start' | 'localBranch'
   }) => Promise<void>
   dismissTakeoverDirect: () => void
   switchPanel: (panel: PanelKey, entrypoint?: string) => Promise<void>
@@ -329,7 +329,7 @@ export function usePanelOverlays(opts: UsePanelOverlaysOpts): UsePanelOverlaysAp
    * fetch runs in parallel with the overlay mount.
    */
   async function openFirstUseTakeover(
-    firstUseOpts?: { initialStep?: 'consent' | 'pick' | 'localBranch' },
+    firstUseOpts?: { initialStep?: 'start' | 'localBranch' },
   ): Promise<void> {
     const statePromise = window.api
       .getFirstUseState()
