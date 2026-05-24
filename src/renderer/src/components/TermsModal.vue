@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
-import { X } from 'lucide-vue-next'
+import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
+import BaseModal from './ui/BaseModal.vue'
 import InlineRichText from './InlineRichText.vue'
 import { LEGAL_DOCS, type LegalDocId } from '../lib/legalDocs'
 
@@ -19,6 +20,8 @@ const emit = defineEmits<{
   close: []
 }>()
 
+const { t } = useI18n()
+
 const policy = computed(() => LEGAL_DOCS[props.doc] ?? LEGAL_DOCS.privacy)
 /** i18n key for the modal title, picked per doc so screen readers and
  *  the visible heading both reflect what the user is actually viewing. */
@@ -34,152 +37,60 @@ const titleKey = computed(() => {
       return 'firstUse.privacyModalTitle'
   }
 })
-
-const overlayRef = ref<HTMLDivElement | null>(null)
-const closeBtnRef = ref<HTMLButtonElement | null>(null)
-const mouseDownOnOverlay = ref(false)
-/** Element that owned focus before the modal opened. Captured on mount
- *  so close (any path: ESC, ✕, overlay click) can restore focus to the
- *  original trigger. */
-let returnFocusTo: HTMLElement | null = null
-
-function onOverlayMouseDown(e: MouseEvent) {
-  mouseDownOnOverlay.value = e.target === overlayRef.value
-}
-function onOverlayClick(e: MouseEvent) {
-  if (e.target === overlayRef.value && mouseDownOnOverlay.value) emit('close')
-  mouseDownOnOverlay.value = false
-}
-function onKeydown(e: KeyboardEvent) {
-  if (e.key === 'Escape') emit('close')
-}
-
-onMounted(() => {
-  document.addEventListener('keydown', onKeydown)
-  returnFocusTo = document.activeElement instanceof HTMLElement ? document.activeElement : null
-  void nextTick(() => closeBtnRef.value?.focus())
-})
-onUnmounted(() => {
-  document.removeEventListener('keydown', onKeydown)
-  returnFocusTo?.focus()
-})
 </script>
 
 <template>
-  <Teleport to="body">
-    <Transition name="modal-fade" appear>
-      <div
-        ref="overlayRef"
-        class="terms-overlay"
-        role="dialog"
-        aria-modal="true"
-        :aria-label="$t(titleKey)"
-        @mousedown="onOverlayMouseDown"
-        @click="onOverlayClick"
-      >
-        <div class="terms-content modal-fade-panel">
-          <button
-            ref="closeBtnRef"
-            class="terms-close"
-            type="button"
-            :aria-label="$t('common.close')"
-            data-testid="terms-modal-close"
-            @click="emit('close')"
-          >
-            <X :size="18" />
-          </button>
-          <header class="terms-header">
-            <h2 class="terms-title">{{ $t(titleKey) }}</h2>
-            <div class="terms-meta">
-              <span
-                ><strong>{{ $t('firstUse.legalDocEffective') }}:</strong>
-                {{ policy.effectiveDate }}</span
-              >
-              <span
-                ><strong>{{ $t('firstUse.legalDocAppliesTo') }}:</strong>
-                {{ policy.appliesTo }}</span
-              >
-            </div>
-          </header>
-          <div class="terms-body" tabindex="0">
-            <template v-for="(block, i) in policy.blocks" :key="`${doc}-${i}`">
-              <h2 v-if="block.kind === 'h2'" class="terms-h2">{{ block.text }}</h2>
-              <h3 v-else-if="block.kind === 'h3'" class="terms-h3">{{ block.text }}</h3>
-              <p v-else-if="block.kind === 'p' && block.text" class="terms-p">
-                <InlineRichText :text="block.text" />
-              </p>
-              <ul v-else-if="block.kind === 'ul' && block.items" class="terms-ul">
-                <li v-for="(item, k) in block.items" :key="k">
-                  <InlineRichText :text="item" />
-                </li>
-              </ul>
-            </template>
-          </div>
-        </div>
+  <BaseModal
+    :open="true"
+    size="lg"
+    :aria-label="t(titleKey)"
+    content-class="terms-content"
+    @close="emit('close')"
+  >
+    <template #header>
+      <h2 class="terms-title">{{ t(titleKey) }}</h2>
+      <div class="terms-meta">
+        <span
+          ><strong>{{ t('firstUse.legalDocEffective') }}:</strong>
+          {{ policy.effectiveDate }}</span
+        >
+        <span
+          ><strong>{{ t('firstUse.legalDocAppliesTo') }}:</strong>
+          {{ policy.appliesTo }}</span
+        >
       </div>
-    </Transition>
-  </Teleport>
+    </template>
+    <div class="terms-body" tabindex="0">
+      <template v-for="(block, i) in policy.blocks" :key="`${doc}-${i}`">
+        <h2 v-if="block.kind === 'h2'" class="terms-h2">{{ block.text }}</h2>
+        <h3 v-else-if="block.kind === 'h3'" class="terms-h3">{{ block.text }}</h3>
+        <p v-else-if="block.kind === 'p' && block.text" class="terms-p">
+          <InlineRichText :text="block.text" />
+        </p>
+        <ul v-else-if="block.kind === 'ul' && block.items" class="terms-ul">
+          <li v-for="(item, k) in block.items" :key="k">
+            <InlineRichText :text="item" />
+          </li>
+        </ul>
+      </template>
+    </div>
+  </BaseModal>
 </template>
 
 <style scoped>
-.terms-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 60;
-  display: grid;
-  place-items: center;
-  padding: clamp(48px, 8vh, 96px) clamp(24px, 5vw, 64px);
-}
-
-.terms-content {
-  position: relative;
-  display: flex;
-  flex-direction: column;
+/* Pin the panel to the bespoke 720px width (between BaseModal's md/lg
+ * defaults of 640/800) and let the header's title + meta strip drive
+ * its own padding instead of BaseModal's narrower defaults. */
+:deep(.base-modal-panel.terms-content) {
   width: min(100%, 720px);
-  max-height: 100%;
-  border-radius: 14px;
-  overflow: hidden;
-  background: var(--neutral-900);
-  border: 1px solid color-mix(in oklab, var(--neutral-100) 6%, transparent);
-  box-shadow: 0 24px 64px 0 rgba(0, 0, 0, 0.35);
 }
-
-.terms-close {
-  position: absolute;
-  top: 16px;
-  right: 16px;
-  z-index: 2;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  padding: 0;
-  border-radius: 8px;
-  background: color-mix(in oklab, var(--text) 4%, transparent);
-  border: 1px solid transparent;
-  opacity: 0.7;
-  color: var(--neutral-100);
-  cursor: pointer;
-  transition:
-    background 120ms ease,
-    border-color 120ms ease,
-    opacity 120ms ease;
-}
-.terms-close:hover {
-  opacity: 1;
-  background: color-mix(in oklab, var(--neutral-950) 85%, transparent);
-  border-color: color-mix(in oklab, var(--neutral-100) 44%, transparent);
-}
-.terms-close:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
-}
-
-.terms-header {
+:deep(.base-modal-panel.terms-content) .base-modal-header {
   padding: clamp(1.25rem, 2.5vw, 2rem) clamp(1.5rem, 3vw, 2.25rem) 1rem;
-  border-bottom: 1px solid color-mix(in oklab, var(--neutral-100) 8%, transparent);
 }
+:deep(.base-modal-panel.terms-content) .base-modal-body {
+  padding: 1.25rem clamp(1.5rem, 3vw, 2.25rem) clamp(1.5rem, 3vw, 2.25rem);
+}
+
 .terms-title {
   margin: 0 0 8px 0;
   font-family: var(--font-display);
@@ -201,9 +112,6 @@ onUnmounted(() => {
 }
 
 .terms-body {
-  flex: 1 1 auto;
-  overflow-y: auto;
-  padding: 1.25rem clamp(1.5rem, 3vw, 2.25rem) clamp(1.5rem, 3vw, 2.25rem);
   user-select: text;
   font-size: var(--takeover-fs-body);
   line-height: 1.6;
