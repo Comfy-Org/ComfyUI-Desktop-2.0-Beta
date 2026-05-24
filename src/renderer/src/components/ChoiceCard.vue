@@ -37,6 +37,7 @@ defineEmits<{ click: [] }>()
     :class="['choice-card', { 'choice-card--glow': glow, 'choice-card--selected': selectable && selected }]"
     :role="selectable ? 'radio' : undefined"
     :aria-checked="selectable ? selected : undefined"
+    :tabindex="selectable ? (selected ? 0 : -1) : undefined"
     :disabled="disabled"
     @click="$emit('click')"
   >
