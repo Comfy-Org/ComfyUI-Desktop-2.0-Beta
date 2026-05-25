@@ -1155,45 +1155,6 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
           return { ok: false, message: err instanceof Error ? err.message : 'Action failed.' }
         }
       },
-      getChannelPickerFieldForInstall: async (installationId) => {
-        if (!installationId) return null
-        const inst = await getInstallation(installationId)
-        if (!inst) return null
-        const source = sourceMap[inst.sourceId]
-        if (!source) return null
-        const sections = source.getDetailSections(inst) as Array<{ tab?: string; fields?: Array<Record<string, unknown>> }>
-        for (const sec of sections) {
-          if (sec.tab && sec.tab !== 'update') continue
-          const f = sec.fields?.find((ff) => ff.editType === 'channel-cards')
-          if (f) return f
-        }
-        return null
-      },
-      runChannelPickerAction: async (installationId, actionId, actionData) => {
-        // Same dispatch as `pickerRunAction`. The IPC handler enforces
-        // the action allowlist (copy-update / release-update /
-        // switch-channel / update); this binding is a generic
-        // source-action runner.
-        try {
-          const inst = await getInstallation(installationId)
-          if (!inst) return { ok: false, message: 'Installation not found.' }
-          const source = sourceMap[inst.sourceId]
-          if (!source) return { ok: false, message: 'Unknown source.' }
-          const abort = new AbortController()
-          const result = await source.handleAction(actionId, inst, actionData, {
-            update: (data) => updateInstallation(installationId, data).then(() => { }),
-            sendProgress: () => { },
-            sendOutput: () => { },
-            signal: abort.signal,
-          })
-          return {
-            ok: result.ok !== false,
-            message: typeof result.message === 'string' ? result.message : undefined,
-          }
-        } catch (err) {
-          return { ok: false, message: err instanceof Error ? err.message : 'Action failed.' }
-        }
-      },
       pickInstallFromPicker,
       restartInstallFromPicker: async (installationId, parentEntryId) => {
         // Restart: same install, same window. The session is stopped

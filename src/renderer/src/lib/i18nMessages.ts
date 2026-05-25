@@ -26,13 +26,26 @@ export const en = {
    *  can resolve against. */
   settings: {
     open: 'Open',
+    general: 'General',
+    preferences: 'Preferences',
+    privacy: 'Privacy',
+    community: 'Community',
+    cache: 'Cache',
+    advanced: 'Advanced',
+    platform: 'Platform',
+    storageTab: 'Storage',
+    sharedDirectories: 'Shared Directories',
+    updatesTab: 'Updates',
+    checkForUpdates: 'Check for updates',
+    checkingForUpdates: 'Checking…',
   },
   models: {
-    addDir: 'Add Directory',
+    addDir: 'Add directory',
     removeDir: 'Remove',
-    primary: 'primary',
-    default: 'default',
-    makePrimary: 'Make Primary',
+    primary: 'Primary',
+    default: 'Default',
+    makePrimary: 'Make primary',
+    moreActions: 'More actions',
   },
   tooltips: {
     modelsPrimary:
@@ -211,6 +224,32 @@ export const en = {
     added: 'Added',
     removed: 'Removed',
     changed: 'Changed',
+  },
+  channelCards: {
+    lastChecked: 'Last checked',
+    latestVersion: 'Latest',
+    updateAvailable: 'Update available',
+    upToDate: 'Up to date',
+  },
+  appUpdate: {
+    download: 'Download',
+    downloading: 'Downloading…',
+    restartNow: 'Restart & update',
+    readyBadge: 'Ready to restart',
+    sectionTitle: 'Desktop updates',
+    fallbackVersion: 'this update',
+    panelIdleTitle: 'ComfyUI Desktop is up to date',
+    panelAvailableTitle: 'Update {version} available',
+    panelReadyTitle: 'Update {version} ready to install',
+    panelDownloadingTitle: 'Downloading update {version}…',
+    installedLabel: 'Installed {version}',
+    lastCheckedLabel: 'Last checked {time}',
+    latestLabel: 'Latest {version}',
+    systemManagedNote:
+      'Updates for this install are delivered through your system package manager.',
+  },
+  update: {
+    debManagedShort: 'System-managed updates',
   },
 }
 

@@ -390,7 +390,13 @@
     "about": "About",
     "version": "Version",
     "platform": "Platform",
-    "language": "Language"
+    "language": "Language",
+    "preferences": "Preferences",
+    "privacy": "Privacy",
+    "community": "Community",
+    "storageTab": "Storage",
+    "sharedDirectories": "Shared Directories",
+    "updatesTab": "Updates"
   },
 
   "zoom": {
@@ -421,7 +427,12 @@
     "panelAvailableTitle": "Update {version} available",
     "panelReadyTitle": "Update {version} ready to install",
     "panelDownloadingTitle": "Downloading update {version}…",
-    "downloading": "Downloading…"
+    "downloading": "Downloading…",
+    "readyBadge": "Ready to restart",
+    "installedLabel": "Installed {version}",
+    "lastCheckedLabel": "Last checked {time}",
+    "latestLabel": "Latest {version}",
+    "systemManagedNote": "Updates for this install are delivered through your system package manager."
   },
 
   "modal": {

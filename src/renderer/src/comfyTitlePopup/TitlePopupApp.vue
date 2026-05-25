@@ -86,7 +86,9 @@ interface GlobalSettingsModelsDir {
 }
 
 interface GlobalSettingsSnapshot {
-  overviewFields: Record<string, unknown>[]
+  generalFields: Record<string, unknown>[]
+  telemetryFields: Record<string, unknown>[]
+  desktopUpdateFields: Record<string, unknown>[]
   cacheFields: Record<string, unknown>[]
   advancedFields: Record<string, unknown>[]
   sharedDirectoriesFields: Record<string, unknown>[]
@@ -101,15 +103,12 @@ interface GlobalSettingsSnapshot {
     platform: string
     lastCheckedAt: number | null
   }
-  channelPickerField: Record<string, unknown> | null
-  activeInstallationId: string | null
-  hasActiveInstall: boolean
   githubUrl: string
   githubStars: number | null
   i18n: {
     overview: string
     updates: string
-    cache: string
+    storage: string
     models: string
     advanced: string
     sharedDirectories: string
@@ -179,7 +178,9 @@ const pickerSnapshot = ref<PickerSnapshot>({
 })
 /** Latest global-settings snapshot — same lifecycle as `pickerSnapshot`. */
 const globalSettingsSnapshot = ref<GlobalSettingsSnapshot>({
-  overviewFields: [],
+  generalFields: [],
+  telemetryFields: [],
+  desktopUpdateFields: [],
   cacheFields: [],
   advancedFields: [],
   sharedDirectoriesFields: [],
@@ -194,15 +195,12 @@ const globalSettingsSnapshot = ref<GlobalSettingsSnapshot>({
     platform: 'darwin',
     lastCheckedAt: null
   },
-  channelPickerField: null,
-  activeInstallationId: null,
-  hasActiveInstall: false,
   githubUrl: '',
   githubStars: null,
   i18n: {
-    overview: 'Overview',
+    overview: 'General',
     updates: 'Updates',
-    cache: 'Cache',
+    storage: 'Storage',
     models: 'Models',
     advanced: 'Advanced',
     sharedDirectories: 'Shared Directories'

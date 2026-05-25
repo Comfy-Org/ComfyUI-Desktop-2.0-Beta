@@ -273,7 +273,13 @@
     "about": "关于",
     "version": "版本",
     "platform": "平台",
-    "language": "语言"
+    "language": "语言",
+    "preferences": "偏好设置",
+    "privacy": "隐私",
+    "community": "社区",
+    "storageTab": "存储",
+    "sharedDirectories": "共享目录",
+    "updatesTab": "更新"
   },
 
   "update": {
@@ -291,7 +297,19 @@
     "availableTitle": "桌面端更新可用",
     "availableMessage": "有可用的桌面端更新（{version}）。是否立即下载？下载完成后将提示您重启。",
     "download": "下载",
-    "errorTitle": "桌面端更新错误"
+    "later": "稍后",
+    "errorTitle": "桌面端更新错误",
+    "sectionTitle": "桌面端更新",
+    "panelIdleTitle": "ComfyUI Desktop 已是最新版本",
+    "panelAvailableTitle": "更新 {version} 可用",
+    "panelReadyTitle": "更新 {version} 可安装",
+    "panelDownloadingTitle": "正在下载更新 {version}…",
+    "downloading": "下载中…",
+    "readyBadge": "准备重启",
+    "installedLabel": "已安装 {version}",
+    "lastCheckedLabel": "最后检查于 {time}",
+    "latestLabel": "最新 {version}",
+    "systemManagedNote": "此安装的更新通过您的系统包管理器提供。"
   },
 
   "modal": {
