@@ -248,6 +248,14 @@ export interface ShowProgressOpts {
    *  model libraries…") which read as wrong copy. Falls back to
    *  `'generic'` when omitted so legacy callers keep working. */
   opKind?: 'launch' | 'install' | 'update' | 'destructive' | 'snapshot' | 'generic'
+  /** Tags this op as one leg of an install→launch chain so ProgressModal
+   *  can render a unified 0→100% bar across both ops instead of letting
+   *  the install fill 0→100 then stalling the launch at 100. `'install'`
+   *  maps the bar to 0→70%; `'launch'` maps to 70→100%. Stamped by
+   *  `useFirstUseChain` when capturing the install op and again when its
+   *  auto-launch watcher fires the chained launch. Standalone ops leave
+   *  this unset and keep their existing 0→100 behaviour. */
+  chainSpan?: 'install' | 'launch'
   /** Set on ops that remove the install from the registry as a
    *  successful side-effect (today: the install-level delete action).
    *  Drives three carve-outs on top of the standard takeover flow:
