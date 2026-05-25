@@ -270,33 +270,31 @@ export function useInstallContextMenu(opts: {
         // Source action surfaces its own error path.
       }
     } else if (id === 'delete') {
-      // Fast path (preferred): build the confirm + showProgress payload
-      // entirely renderer-side. The old code called fetchActionDef →
-      // `window.api.getDetailSections(inst.id)` which rebuilds the whole
-      // Status/Update/Snapshots/Settings/Actions tree (cold release-cache
-      // read, ~50 t() lookups, full structured-clone over IPC) JUST to
-      // pluck the 12-line `deleteAction()` constant — easily ~2s on
-      // Windows when main is busy with the periodic update probe.
-      // Regression for #582.
-      //
-      // Every value `deleteAction()` produces is reproducible in the
-      // renderer: install name + installPath come off the `Installation`
-      // prop, the strings live under `actions.*` in the renderer's
-      // merged `locales/en.json`, and the apiCall is the same
-      // `runAction(inst.id, 'delete')` either way. Cloud installs hit
-      // an earlier menu-item gate (`isLocalLikeInstall` + `isInstalled`
-      // in `ctxMenuItems`) so we never see them here.
+      // Build the confirm + showProgress payload renderer-side instead
+      // of round-tripping through `getDetailSections` to look up the
+      // source-side `deleteAction()` shape — the full payload rebuild
+      // was the ~2s confirm-modal stall on Windows. Cloud installs are
+      // already filtered out of the menu via `isLocalLikeInstall` +
+      // `isInstalled` gates in `ctxMenuItems`, so this path only sees
+      // local installs whose delete behaviour matches `actions.ts`.
       if (opts.onShowProgress) {
+        // English fallbacks: PanelApp merges `locales/en.json`
+        // asynchronously after mount, so a very fast first click could
+        // otherwise render raw dotted keys.
+        const deleteLabel = t('actions.delete', 'Delete')
         const confirmed = await modal.confirm({
-          title: t('actions.deleteConfirmTitle'),
-          message: `${t('actions.deleteConfirmMessage')}\n${inst.installPath ?? ''}`,
-          confirmLabel: t('actions.delete'),
+          title: t('actions.deleteConfirmTitle', 'Delete Install'),
+          message: `${t(
+            'actions.deleteConfirmMessage',
+            'This will permanently delete the install and all its files. This cannot be undone.',
+          )}\n${inst.installPath ?? ''}`,
+          confirmLabel: deleteLabel,
           confirmStyle: 'danger',
         })
         if (!confirmed) return
         opts.onShowProgress({
           installationId: inst.id,
-          title: `${t('actions.delete')} — ${inst.name}`,
+          title: `${deleteLabel} — ${inst.name}`,
           apiCall: () => window.api.runAction(inst.id, 'delete'),
           cancellable: true,
           returnTo: 'list',

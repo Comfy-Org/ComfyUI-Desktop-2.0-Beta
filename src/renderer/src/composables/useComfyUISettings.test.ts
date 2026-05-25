@@ -165,4 +165,92 @@ describe('useComfyUISettings — staleness clearing (regression for #582)', () =
     expect(composable.diskSpace.value).toBeNull()
     scope.stop()
   })
+
+  it('does NOT clear sections on a same-install reload (only on install switches)', async () => {
+    // Same-install reloads happen after `updateField` / action completion.
+    // Blanking the pane in that case would be a regression — the user
+    // would see Loading… flash for an edit they didn't expect to clear
+    // the view. Switching installs is the only trigger for the clear.
+    let getCallCount = 0
+    installMockApi({
+      getDetailSections: vi.fn(() => {
+        getCallCount++
+        return Promise.resolve([makeSection(`A-call-${getCallCount}`)])
+      }),
+    })
+    const installation = ref<Installation | null>(makeInstall('a', 'A'))
+    const onShowProgress = vi.fn()
+
+    const scope = effectScope()
+    let composable!: ReturnType<typeof useComfyUISettings>
+    scope.run(() => {
+      composable = useComfyUISettings({ installation, onShowProgress })
+    })
+
+    await nextTick()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(composable.sections.value.map((s) => s.title)).toEqual(['Sections for A-call-1'])
+
+    // Second reload for the SAME install. Should NOT blank the pane
+    // mid-flight; sections.value stays at the previous payload until
+    // the new one arrives.
+    await composable.reload()
+    expect(composable.sections.value.length).toBeGreaterThan(0)
+    expect(composable.sections.value.map((s) => s.title)).toEqual(['Sections for A-call-2'])
+
+    scope.stop()
+  })
+
+  it('discards an out-of-order older response (A → B → A returning B late)', async () => {
+    // Three resolvers — A1 resolves immediately, then we switch to B
+    // (resolveB held open), then back to A2 (immediate). When B finally
+    // resolves AFTER A2, its sections must NOT overwrite A2's payload.
+    let resolveB: ((value: DetailSection[]) => void) | null = null
+    const sectionsB = new Promise<DetailSection[]>((resolve) => {
+      resolveB = resolve
+    })
+    const api = installMockApi({
+      getDetailSections: vi.fn((id: string) => {
+        if (id === 'a') return Promise.resolve([makeSection('A')])
+        if (id === 'b') return sectionsB
+        return Promise.resolve([])
+      }),
+    })
+
+    const installation = ref<Installation | null>(makeInstall('a', 'A'))
+    const scope = effectScope()
+    let composable!: ReturnType<typeof useComfyUISettings>
+    scope.run(() => {
+      composable = useComfyUISettings({ installation, onShowProgress: vi.fn() })
+    })
+
+    await nextTick()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    // Switch to B — fetch held open.
+    installation.value = makeInstall('b', 'B')
+    await nextTick()
+
+    // Switch back to A — A's IPC resolves immediately, sections=A.
+    installation.value = makeInstall('a', 'A')
+    await nextTick()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(composable.sections.value.map((s) => s.title)).toEqual(['Sections for A'])
+    expect(composable.loading.value).toBe(false)
+
+    // Now resolve B late. The request-sequence guard must drop the
+    // result so it never overwrites A's payload or flips loading.
+    resolveB!([makeSection('B')])
+    await Promise.resolve()
+    await Promise.resolve()
+    await nextTick()
+
+    expect(composable.sections.value.map((s) => s.title)).toEqual(['Sections for A'])
+    expect(composable.loading.value).toBe(false)
+    expect(api.getDetailSections).toHaveBeenCalledTimes(3)
+    scope.stop()
+  })
 })

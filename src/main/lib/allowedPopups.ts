@@ -41,6 +41,7 @@ const DOWNLOAD_FILE_EXTENSIONS = [
   '.rpm',
   '.appimage',
   '.safetensors',
+  '.sft',
   '.ckpt',
   '.bin',
   '.gguf',

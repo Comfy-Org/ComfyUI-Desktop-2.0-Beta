@@ -124,30 +124,45 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
   const diskSpace = ref<DiskSpaceInfo | null>(null)
   const loading = ref(false)
   const error = ref<string | null>(null)
+  /** Last install id `loadAll` was called with — drives the
+   *  clear-before-await decision so same-install reloads (field edits,
+   *  action completions) don't blank the pane, only row switches do. */
+  let lastLoadedId: string | null = null
+  /** Monotonically increasing request id. Each `loadAll` /
+   *  `refreshSection` call captures the next value and only writes
+   *  results back into the refs if it is still the latest in-flight
+   *  request. Prevents A→B→A clicks from letting B's late response
+   *  overwrite A's pane. */
+  let requestSeq = 0
 
   async function loadAll(installationId: string, installPath: string): Promise<void> {
-    // Clear the previous install's data BEFORE awaiting so a switch to a
-    // different install row in the title-popup picker doesn't briefly
-    // render the prior install's sections / disk reading while the new
-    // IPC is in flight (visible as "right pane is frozen" — regression
-    // for #582). `loading` flips to true alongside, so
-    // `ComfyUISettingsContent` shows its Loading… placeholder instead of
-    // stale rows.
-    sections.value = []
-    diskSpace.value = null
+    // Only clear the visible state on an actual install switch so a
+    // same-install reload (after `updateField` / action completion)
+    // doesn't flash "Loading…" — that flicker would be a regression on
+    // its own. Row switches inside the picker DO clear, which is the
+    // bug we wanted to fix (#582).
+    const isInstallSwitch = installationId !== lastLoadedId
+    if (isInstallSwitch) {
+      sections.value = []
+      diskSpace.value = null
+    }
+    lastLoadedId = installationId
     loading.value = true
     error.value = null
+    const seq = ++requestSeq
     try {
       const [secs, disk] = await Promise.all([
         window.api.getDetailSections(installationId),
         installPath ? window.api.getDiskSpace(installPath).catch(() => null) : Promise.resolve(null),
       ])
+      if (seq !== requestSeq) return
       sections.value = secs
       diskSpace.value = disk
     } catch (e) {
+      if (seq !== requestSeq) return
       error.value = e instanceof Error ? e.message : String(e)
     } finally {
-      loading.value = false
+      if (seq === requestSeq) loading.value = false
     }
   }
 
@@ -156,6 +171,10 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
     if (!inst) {
       sections.value = []
       diskSpace.value = null
+      lastLoadedId = null
+      // Bump the sequence so any in-flight loadAll for a previous
+      // install can't write into our now-cleared refs.
+      requestSeq++
       return
     }
     await loadAll(inst.id, inst.installPath ?? '')
@@ -172,8 +191,14 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
     }
     const inst = toValue(opts.installation)
     if (!inst) return
+    const targetId = inst.id
+    const seq = ++requestSeq
     try {
-      const fresh = await window.api.getDetailSections(inst.id)
+      const fresh = await window.api.getDetailSections(targetId)
+      // Drop the result if the install changed or a newer request
+      // beat us in flight — prevents A→B→A from letting B's late
+      // response splice into A's pane.
+      if (seq !== requestSeq || lastLoadedId !== targetId) return
       const updated = fresh.find((s) => s.title === sectionTitle)
       if (!updated) {
         // Title disappeared from the new payload — main mutated the
@@ -188,6 +213,7 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
         sections.value = fresh
       }
     } catch (e) {
+      if (seq !== requestSeq) return
       error.value = e instanceof Error ? e.message : String(e)
     }
   }
@@ -216,10 +242,10 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
         })
       }
     }
-    // Parity with legacy DetailSection (PARITY-G): when a field opts
-    // into `refreshSection`, splice only that section instead of
-    // replacing the whole array — preserves Vue subtrees and collapse
-    // state for sections the user wasn't touching.
+    // When a field opts into `refreshSection`, splice only that
+    // section instead of replacing the whole array — preserves Vue
+    // subtrees and collapse state for sections the user wasn't
+    // touching.
     if (field.refreshSection) {
       const owningSection = sections.value.find(
         (s) => s.fields?.some((f) => f.id === field.id),
