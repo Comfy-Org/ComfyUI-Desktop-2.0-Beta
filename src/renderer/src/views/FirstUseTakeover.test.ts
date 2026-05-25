@@ -132,6 +132,20 @@ describe('FirstUseTakeover start step', () => {
     expect(tooltip?.getAttribute('data-text')).toBe('firstUse.whyTryCloud')
   })
 
+  it('Express-install checkbox is hidden on the default Cloud pick and revealed only after Local is picked', async () => {
+    const wrapper = mountTakeover()
+    // Default pick is Cloud — Express opt-out is irrelevant there and
+    // must not render.
+    expect(wrapper.find('[data-testid="first-use-express-install"]').exists()).toBe(false)
+
+    await wrapper.find('[data-testid="first-use-pick-local"]').trigger('click')
+    expect(wrapper.find('[data-testid="first-use-express-install"]').exists()).toBe(true)
+
+    // Switching back to Cloud hides it again.
+    await wrapper.find('[data-testid="first-use-pick-cloud"]').trigger('click')
+    expect(wrapper.find('[data-testid="first-use-express-install"]').exists()).toBe(false)
+  })
+
   it('emits `chain-local` with `express: true` when Local is picked with Express on (no legacy desktop)', async () => {
     const wrapper = mountTakeover()
     // Accept T&C (Continue is gated on it), pick Local, leave Express
@@ -152,10 +166,10 @@ describe('FirstUseTakeover start step', () => {
     await wrapper
       .find('[data-testid="first-use-consent-tos"] input[type="checkbox"]')
       .setValue(true)
+    await wrapper.find('[data-testid="first-use-pick-local"]').trigger('click')
     await wrapper
       .find('[data-testid="first-use-express-install"] input[type="checkbox"]')
       .setValue(false)
-    await wrapper.find('[data-testid="first-use-pick-local"]').trigger('click')
     await wrapper.find('[data-testid="first-use-continue"]').trigger('click')
 
     const emitted = wrapper.emitted('chain-local')
@@ -189,10 +203,10 @@ describe('FirstUseTakeover start step', () => {
     await wrapper
       .find('[data-testid="first-use-consent-tos"] input[type="checkbox"]')
       .setValue(true)
+    await wrapper.find('[data-testid="first-use-pick-local"]').trigger('click')
     await wrapper
       .find('[data-testid="first-use-express-install"] input[type="checkbox"]')
       .setValue(false)
-    await wrapper.find('[data-testid="first-use-pick-local"]').trigger('click')
     await wrapper.find('[data-testid="first-use-continue"]').trigger('click')
 
     // No chain-local fires — the user lands on the localBranch sub-step

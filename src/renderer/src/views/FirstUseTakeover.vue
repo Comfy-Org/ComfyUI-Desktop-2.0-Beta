@@ -440,7 +440,11 @@ defineExpose({ open })
             @click="pickedChoice = 'local'"
           />
         </div>
-        <label class="brand-checkbox start-express" data-testid="first-use-express-install">
+        <label
+          v-if="pickedChoice === 'local'"
+          class="brand-checkbox start-express"
+          data-testid="first-use-express-install"
+        >
           <input v-model="expressInstall" type="checkbox" />
           <span class="start-express__label">{{ $t('firstUse.expressInstallLine') }}</span>
         </label>
