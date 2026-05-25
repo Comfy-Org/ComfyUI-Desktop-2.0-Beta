@@ -29,6 +29,7 @@ import { registerMigrateTakeover } from '../composables/useMigrateAction'
 import { isFlowPanel, isValidPanel, usePanelOverlays } from './usePanelOverlays'
 import { useChooserHandoff } from './useChooserHandoff'
 import { useFirstUseChain } from './useFirstUseChain'
+import { bindE2EPanelHooks } from './e2eRendererHooks'
 import { resolvePickerTab } from '../lib/pickerTabs'
 import type { Installation } from '../types/ipc'
 
@@ -144,6 +145,12 @@ const {
   dismissTakeoverDirect,
   switchPanel,
 } = overlays
+
+// E2E surface: tests drive UI-level flows (e.g. inject a finished
+// failed op to render ProgressModal's error state) by calling into
+// `handleShowProgress` from outside the Vue tree. Production code
+// never reads `__e2eRenderer`.
+bindE2EPanelHooks({ showProgress: handleShowProgress })
 
 const firstUseTakeoverActive = computed(
   () =>

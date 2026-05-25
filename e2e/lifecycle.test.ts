@@ -143,9 +143,9 @@ test('accept consent + pick local opens New Install takeover with form pre-fille
     // row works even without expanding — but expand anyway to mirror
     // the real user gesture.
     expect(await ctx.panel.click('.config-advanced__summary')).toBe(true)
-    await ctx.panel.waitForSelector('.config-variant-row', { timeout: 5_000 })
+    await ctx.panel.waitForSelector('.brand-variant-row', { timeout: 5_000 })
     expect(
-      await ctx.panel.clickByText('.config-variant-row', 'CPU'),
+      await ctx.panel.clickByText('.brand-variant-row', 'CPU'),
       'CPU variant row clicked',
     ).toBe(true)
     // Confirm the CPU row is the selected one before continuing —
@@ -154,7 +154,7 @@ test('accept consent + pick local opens New Install takeover with form pre-fille
     await ctx.panel.waitFor(
       async () => ctx.panel.evaluate<boolean>(
         `(() => {
-          const sel = document.querySelector('.config-variant-row--selected .config-variant-row__label')
+          const sel = document.querySelector('.brand-variant-row--selected .brand-variant-row__label')
           return !!sel && /CPU/i.test(sel.textContent || '')
         })()`,
       ),
