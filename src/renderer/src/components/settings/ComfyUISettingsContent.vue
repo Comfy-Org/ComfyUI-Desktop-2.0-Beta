@@ -35,11 +35,17 @@ interface Props {
    *  because the drawer host owns its own back-chrome; only the
    *  picker's expanded right pane needs an in-content back. */
   showBack?: boolean
+  /** Forward to `useComfyUISettings.deferStoppedGuardToHost`. The
+   *  picker's expanded pane sets this so the REQUIRES_STOPPED
+   *  stop-confirm runs in the panel (which owns ProgressModal) rather
+   *  than in the popup webContents that auto-dismisses on blur. */
+  deferStoppedGuardToHost?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   initialTab: 'config',
   showBack: false,
+  deferStoppedGuardToHost: false,
 })
 
 const emit = defineEmits<{
@@ -90,6 +96,7 @@ const {
   onShowProgress: (opts) => emit('show-progress', opts),
   onNavigateList: () => emit('navigate-list'),
   onClose: () => emit('request-close'),
+  deferStoppedGuardToHost: props.deferStoppedGuardToHost,
 })
 
 interface TabDef {

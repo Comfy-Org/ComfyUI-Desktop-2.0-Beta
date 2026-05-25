@@ -2497,6 +2497,7 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
         triggersInstanceStart: payload?.triggersInstanceStart,
         opKind: payload?.opKind,
         isRestart: payload?.isRestart,
+        requiresStopped: payload?.requiresStopped,
       })
     },
   )

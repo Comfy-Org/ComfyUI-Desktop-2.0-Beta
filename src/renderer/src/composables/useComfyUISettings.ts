@@ -58,6 +58,14 @@ export interface UseComfyUISettingsOpts {
    *  own dismissal before the host completes the navigation — mirrors
    *  DetailModal's `emit('close')`. */
   onClose?: () => void
+  /** Skip the inline `actionGuard.checkBeforeAction` for REQUIRES_STOPPED
+   *  actions and tag the emitted `show-progress` payload with
+   *  `requiresStopped: true` so the host runs the stop-confirm instead.
+   *  Set by hosts whose surface tears down when `show-progress` fires
+   *  (the picker popup auto-dismisses on blur and the modal would die
+   *  with it); the panel surface owns a stable BaseAlert that handles
+   *  the stop-confirm without the popup-teardown race. */
+  deferStoppedGuardToHost?: boolean
 }
 
 export interface UseComfyUISettingsApi {
@@ -265,7 +273,18 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
     // 1. REQUIRES_STOPPED guard — actions that need ComfyUI stopped
     //    first (snapshot restore, release-update, …). migrate-to-
     //    standalone manages its own guard via useMigrateAction below.
-    if (action.id !== 'migrate-to-standalone' && REQUIRES_STOPPED.has(action.id)) {
+    //    Hosts that defer to a downstream surface (the picker popup
+    //    forwards to the panel) skip the inline confirm and tag the
+    //    showProgress payload with `requiresStopped` so the host runs
+    //    the guard against its own BaseAlert.
+    const deferStoppedGuard = !!opts.deferStoppedGuardToHost
+      && action.id !== 'migrate-to-standalone'
+      && REQUIRES_STOPPED.has(action.id)
+    if (
+      !deferStoppedGuard
+      && action.id !== 'migrate-to-standalone'
+      && REQUIRES_STOPPED.has(action.id)
+    ) {
       const proceed = await actionGuard.checkBeforeAction(inst.id, action.label)
       if (!proceed) return
     }
@@ -478,6 +497,7 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
         destroysInstance: destroysInstanceForActionId(mutableAction.id),
         actionId: mutableAction.id,
         actionData: mutableAction.data,
+        requiresStopped: deferStoppedGuard,
       })
       return
     }

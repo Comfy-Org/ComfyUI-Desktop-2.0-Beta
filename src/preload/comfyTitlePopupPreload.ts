@@ -448,6 +448,10 @@ export interface ComfyTitlePopupBridge {
     triggersInstanceStart?: boolean
     opKind?: 'launch' | 'install' | 'update' | 'destructive' | 'snapshot' | 'generic'
     isRestart?: boolean
+    /** Tags REQUIRES_STOPPED actions whose stop-confirm the panel must
+     *  run before invoking the action — the picker popup defers the
+     *  guard to the host so the BaseAlert survives popup teardown. */
+    requiresStopped?: boolean
   }): void
 }
 

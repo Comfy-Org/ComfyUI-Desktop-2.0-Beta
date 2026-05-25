@@ -3,6 +3,7 @@ import { computed, reactive, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseSelect, { type BaseSelectOption } from '../../components/ui/BaseSelect.vue'
 import type { ActionDef, DetailField, DetailFieldOption } from '../../types/ipc'
+import { TID } from '../../../../shared/testIds'
 
 /**
  * Update Channel picker for the brand-redesigned Settings drawer (v2).
@@ -166,6 +167,7 @@ const selectOptions = computed<BaseSelectOption[]>(() =>
             ]"
             :disabled="action.enabled === false"
             :title="action.tooltip"
+            :data-testid="TID.updateActionButton(action.id)"
             @click="emit('action', action)"
           >
             {{ action.label }}
@@ -198,6 +200,7 @@ const selectOptions = computed<BaseSelectOption[]>(() =>
           ]"
           :disabled="action.enabled === false"
           :title="action.tooltip"
+          :data-testid="TID.updateActionButton(action.id)"
           @click="emit('action', action)"
         >
           {{ action.label }}

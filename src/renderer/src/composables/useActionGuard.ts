@@ -1,6 +1,7 @@
 import { useI18n } from 'vue-i18n'
 import { useSessionStore } from '../stores/sessionStore'
 import { useModal } from './useModal'
+import { TID } from '../../../shared/testIds'
 
 /**
  * Guard that checks whether an installation is busy (launching, in-progress operation)
@@ -39,6 +40,10 @@ export function useActionGuard() {
         message: t('errors.stopRequiredConfirm'),
         confirmLabel: t('errors.stopRunning'),
         confirmStyle: 'primary',
+        testIds: {
+          root: TID.stopInstanceConfirmModal,
+          action: TID.stopInstanceConfirmButton,
+        },
       })
       if (!confirmed) return false
       await window.api.stopComfyUI(installationId)

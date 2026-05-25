@@ -1,5 +1,6 @@
 import { onMounted, onUnmounted } from 'vue'
 import { useInstallationStore } from '../stores/installationStore'
+import { useActionGuard } from './useActionGuard'
 import type { Installation, ShowProgressOpts } from '../types/ipc'
 
 import type { Overlay } from './useOverlay'
@@ -45,6 +46,7 @@ interface DeepLinkRouterOpts {
  */
 export function useDeepLinkRouter(opts: DeepLinkRouterOpts): void {
   const installationStore = useInstallationStore()
+  const actionGuard = useActionGuard()
   let unsubPanelTriggerOverlay: (() => void) | null = null
 
   onMounted(() => {
@@ -130,6 +132,16 @@ export function useDeepLinkRouter(opts: DeepLinkRouterOpts): void {
           if (!id || !actionId || !title) return
           const inst = installationStore.getById(id)
           if (!inst) return
+          // Picker deferred the REQUIRES_STOPPED guard to us so the
+          // stop-confirm runs in the panel's stable BaseAlert rather
+          // than the popup webContents that auto-dismisses on blur and
+          // gets visually obscured by the popup's own geometry. Cancel
+          // aborts the whole chain — the picker has already hidden, so
+          // no progress modal appears.
+          if (payload.requiresStopped) {
+            const proceed = await actionGuard.checkBeforeAction(id, title)
+            if (!proceed) return
+          }
           const isRestart = !!payload.isRestart
           const actionData = (payload.actionData ?? undefined) as
             | Record<string, unknown>

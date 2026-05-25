@@ -37,6 +37,16 @@ interface Props {
   dismissOnOutside?: boolean
   /** Lock body scroll while open. Default true. */
   preventScroll?: boolean
+  /** Optional `data-testid` for the overlay root. Lets singleton hosts
+   *  (ModalDialog) tag a specific dialog (e.g. stop-instance confirm)
+   *  without renaming the default selectors. */
+  testIdRoot?: string
+  /** Optional `data-testid` override for the primary action button.
+   *  Defaults to `'base-alert-action'`. */
+  testIdAction?: string
+  /** Optional `data-testid` override for the cancel button.
+   *  Defaults to `'base-alert-cancel'`. */
+  testIdCancel?: string
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -49,7 +59,10 @@ const props = withDefaults(defineProps<Props>(), {
   ariaLabelledby: undefined,
   dismissOnEscape: true,
   dismissOnOutside: true,
-  preventScroll: true
+  preventScroll: true,
+  testIdRoot: undefined,
+  testIdAction: undefined,
+  testIdCancel: undefined
 })
 
 const emit = defineEmits<{ close: []; cancel: [] }>()
@@ -148,6 +161,7 @@ onBeforeUnmount(() => {
         aria-modal="true"
         :aria-label="dialogAriaLabel"
         :aria-labelledby="dialogAriaLabelledby"
+        :data-testid="testIdRoot"
         @mousedown="onOverlayMouseDown"
         @click="onOverlayClick"
       >
@@ -161,7 +175,7 @@ onBeforeUnmount(() => {
               <button
                 v-if="showCancel"
                 type="button"
-                data-testid="base-alert-cancel"
+                :data-testid="testIdCancel ?? 'base-alert-cancel'"
                 @click="onCancelClick"
               >
                 {{ cancelLabel ?? $t('common.cancel') }}
@@ -170,7 +184,7 @@ onBeforeUnmount(() => {
                 ref="actionBtnRef"
                 type="button"
                 :class="tone === 'danger' ? 'danger-solid' : 'primary'"
-                data-testid="base-alert-action"
+                :data-testid="testIdAction ?? 'base-alert-action'"
                 @click="onActionClick"
               >
                 {{ buttonLabel ?? $t('modal.ok') }}
