@@ -64,12 +64,21 @@ export async function handleAction(
 
     if (signal?.aborted) return { ok: false, message: 'Cancelled' }
 
-    sendOutput('\n── Restore Packages ──\n')
-    const pipResult = await snapshots.restorePipPackages(
-      installation.installPath, installation, targetSnapshot,
-      (phase, data) => sendProgress(phase === 'restore' ? 'restore-pip' : phase, data),
-      sendOutput, signal, settings.getMirrorConfig()
-    )
+    let pipResult: snapshots.RestoreResult = {
+      installed: [], removed: [], changed: [],
+      protectedSkipped: [], failed: [], errors: [],
+    }
+    if (targetSnapshot.skipPipSync) {
+      sendOutput('\n── Restore Packages (skipped: snapshot has skipPipSync) ──\n')
+      sendProgress('restore-pip', { percent: 100, status: 'Skipped' })
+    } else {
+      sendOutput('\n── Restore Packages ──\n')
+      pipResult = await snapshots.restorePipPackages(
+        installation.installPath, installation, targetSnapshot,
+        (phase, data) => sendProgress(phase === 'restore' ? 'restore-pip' : phase, data),
+        sendOutput, signal, settings.getMirrorConfig()
+      )
+    }
 
     // Build combined summary
     const summary: string[] = []

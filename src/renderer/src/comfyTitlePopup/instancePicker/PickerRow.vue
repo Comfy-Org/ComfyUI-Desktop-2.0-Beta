@@ -39,11 +39,11 @@ const emit = defineEmits<{
 
 const typeMeta = computed(() => installTypeMetaFor(props.installation.sourceCategory))
 
-const versionLabel = computed(() => {
-  const raw = props.installation.version
-  if (!raw) return ''
-  return raw.startsWith('v') || raw.startsWith('V') ? raw : `v${raw}`
-})
+/** Backend pre-formats `installation.version` via `formatComfyVersion` —
+ *  the string already carries its own `v` prefix when one belongs (tag
+ *  forms) and intentionally omits it for SHA-only / `unknown` fallbacks.
+ *  Render verbatim; do not re-prefix. */
+const versionLabel = computed(() => props.installation.version ?? '')
 
 function handleOpen(): void {
   emit('open', props.installation)

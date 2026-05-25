@@ -30,12 +30,13 @@
  *   transforms in place into the install host (issue #449 path).
  */
 
-import { readFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { existsSync, readFileSync } from 'node:fs'
+import path from 'node:path'
 import { resolve } from 'node:path'
 import { test, expect } from '@playwright/test'
 import { launchApp, type AppContext } from './launchApp'
 import {
-  clickNewInstallTile,
   clickInstallTile,
   expectChooserVisible,
   expectTakeoverOpen,
@@ -58,6 +59,11 @@ test.beforeAll(async () => {
       } catch { /* try next depth */ }
     }
   }
+  // True cold start: no `firstUseCompleted` seed, so the host opens on
+  // the first-use takeover. The first test below drives through consent
+  // + pick-local, which chains directly into the new-install takeover
+  // (Tier 3 → Tier 3 silent swap) — the same surface the user reaches
+  // on the no-existing-installs cold-start path.
   ctx = await launchApp()
 })
 
@@ -75,16 +81,37 @@ async function comfyFrontendIsLoaded(): Promise<boolean> {
 }
 
 // ---------------------------------------------------------------------------
-// Install via the New Install takeover
+// First-use takeover → New Install takeover
 // ---------------------------------------------------------------------------
 
-test('chooser shows New Install tile on cold start @lifecycle', async () => {
-  await expectChooserVisible(ctx.panel)
-  expect(await ctx.panel.exists('.chooser-tile-new')).toBe(true)
+test('cold start lands on first-use consent screen @lifecycle', async () => {
+  // The first-use takeover gates the chooser body until consent +
+  // cloud/local pick are completed. On a fresh profile the consent
+  // step is what the user lands on.
+  await ctx.panel.waitForVisible('.consent-hero', { timeout: 15_000 })
+  await ctx.panel.waitForVisible('[data-testid="first-use-accept-consent"]')
 })
 
-test('opens New Install takeover with form pre-filled @lifecycle', async () => {
-  await clickNewInstallTile(ctx.panel)
+test('accept consent + pick local opens New Install takeover with form pre-filled @lifecycle', async () => {
+  // Tick the required ToS checkbox (telemetry stays at its default
+  // opt-in; the test settings already disable telemetry network egress
+  // separately, so the actual value doesn't matter here).
+  expect(await ctx.panel.click('[data-testid="first-use-consent-tos"]')).toBe(true)
+  await ctx.panel.waitFor(
+    async () => ctx.panel.evaluate<boolean>(
+      `!document.querySelector('[data-testid="first-use-accept-consent"]').disabled`,
+    ),
+    { timeout: 5_000, message: 'Get Started never became enabled after ticking ToS' },
+  )
+
+  // Accept consent → advance to the cloud-vs-local pick step.
+  expect(await ctx.panel.click('[data-testid="first-use-accept-consent"]')).toBe(true)
+  await ctx.panel.waitForVisible('[data-testid="first-use-pick-local"]', { timeout: 10_000 })
+
+  // Pick Local — with no legacy desktop install detected, this emits
+  // `chain-local`, which the host swaps for the new-install Tier 3
+  // takeover (silent Tier 3 → Tier 3 swap inside `useOverlay`).
+  expect(await ctx.panel.click('[data-testid="first-use-pick-local"]')).toBe(true)
   await expectTakeoverOpen(ctx.panel)
 
   // Standalone is pre-selected on open. The release + variant fields
@@ -92,8 +119,7 @@ test('opens New Install takeover with form pre-filled @lifecycle', async () => {
   // `loadFieldOptions('release')` → recursive `loadFieldOptions('variant')`.
   // `.brand-primary.config-continue` is bound to `:disabled="!canContinue"`,
   // so once it goes enabled the form is fully pre-filled (release picked,
-  // variant picked, no path issues). That's the single signal we need
-  // before clicking Continue.
+  // variant picked, no path issues).
   await ctx.panel.waitFor(
     async () => ctx.app.evaluate(({ webContents }) => {
       const wc = webContents.getAllWebContents().find((w) => w.getURL().includes('panel.html'))
@@ -105,6 +131,36 @@ test('opens New Install takeover with form pre-filled @lifecycle', async () => {
     }),
     { timeout: 60_000, message: 'Continue button never became enabled (form did not pre-fill)' },
   )
+
+  // On Windows, force the CPU variant so the test is deterministic
+  // across runners (NVIDIA hosts would otherwise download a multi-GB
+  // GPU payload). macOS only publishes `mac-mps` and Linux publishes
+  // no `linux-cpu` variant, so on those platforms we trust the
+  // recommended pick the form already made.
+  if (process.platform === 'win32') {
+    // Variant rows live inside the Advanced disclosure; the body is
+    // always rendered (CSS-hidden when collapsed), so clicking the
+    // row works even without expanding — but expand anyway to mirror
+    // the real user gesture.
+    expect(await ctx.panel.click('.config-advanced__summary')).toBe(true)
+    await ctx.panel.waitForSelector('.config-variant-row', { timeout: 5_000 })
+    expect(
+      await ctx.panel.clickByText('.config-variant-row', 'CPU'),
+      'CPU variant row clicked',
+    ).toBe(true)
+    // Confirm the CPU row is the selected one before continuing —
+    // otherwise a label-substring miss (e.g. an i18n change) would
+    // silently fall back to the recommended GPU variant.
+    await ctx.panel.waitFor(
+      async () => ctx.panel.evaluate<boolean>(
+        `(() => {
+          const sel = document.querySelector('.config-variant-row--selected .config-variant-row__label')
+          return !!sel && /CPU/i.test(sel.textContent || '')
+        })()`,
+      ),
+      { timeout: 5_000, message: 'CPU variant did not become the selected variant row' },
+    )
+  }
 })
 
 test('completes install (auto-launches via brand chrome) @lifecycle', async () => {
@@ -250,42 +306,165 @@ test('return-to-dashboard flips install host in place (same window id) @lifecycl
 })
 
 // ---------------------------------------------------------------------------
-// Stop
+// Real update — exercise runComfyUIUpdate end-to-end against GitHub.
+//
+// The install above lands on the latest stable tag. To prove the update
+// path *actually does something*, force ComfyUI's working tree backwards
+// a few commits via real `git reset --hard`, then drive the in-place
+// `update-comfyui` action and assert the working-tree HEAD moves forward
+// again. This exercises:
+//   - the bundled `update_comfyui.py` script (real Python subprocess)
+//   - real `git fetch` from github.com/comfyanonymous/ComfyUI
+//   - real `git checkout` of the latest stable tag
+//   - filtered `uv pip install -r requirements.txt` if requirements
+//     changed across the rolled-back range
 // ---------------------------------------------------------------------------
 
-test('stops running ComfyUI by closing its host window @lifecycle', async () => {
-  // After launch, the chooser host transforms in place to host the install
-  // (the original `panel.html` body is detached). Drive the stop through the
-  // BrowserWindow `close()` call instead — the window's close handler tears
-  // the comfy process down via the same path the chooser-tile close button
-  // would use. Closing the last host window also quits the Electron app,
-  // which is why the subsequent poll treats an evaluate failure (app gone)
-  // as the terminal "stopped" state.
-  const closed = await ctx.app.evaluate(({ BrowserWindow, WebContentsView }) => {
-    for (const win of BrowserWindow.getAllWindows()) {
-      const hasComfy = win.contentView.children.some((v) =>
-        v instanceof WebContentsView &&
-        /^http:\/\/(127\.0\.0\.1|localhost):/.test(v.webContents.getURL()),
-      )
-      if (hasComfy) {
-        win.close()
-        return true
-      }
-    }
-    return false
-  })
-  expect(closed, 'ComfyUI host window not found among open windows').toBe(true)
+interface InstallationLite {
+  id: string
+  installPath: string
+}
 
-  await expect.poll(
-    async () => {
-      try {
-        return await comfyFrontendIsLoaded()
-      } catch {
-        // App was torn down by the close — that's a stronger "stopped" signal
-        // than the comfy webContents going away on its own.
-        return false
-      }
-    },
-    { timeout: 60_000, intervals: [500] },
-  ).toBe(false)
+interface UpdateActionResult {
+  ok: boolean
+  message?: string
+  navigate?: string
+}
+
+let _updateInstallId = ''
+let _updateInstallPath = ''
+let _comfyUIDir = ''
+let _rolledBackCommit = ''
+
+test('stop ComfyUI again so update-comfyui (requires stopped) can run @lifecycle', async () => {
+  // `update-comfyui` is in REQUIRES_STOPPED; the prior test re-launched.
+  // Detach in place rather than closing the window so the chooser host
+  // stays alive for the subsequent re-launch.
+  await returnFirstInstallHostToDashboard(ctx.app)
+  await expect.poll(comfyFrontendIsLoaded, { timeout: 30_000, intervals: [500] }).toBe(false)
+  await waitForWebContents(ctx.app, 'panel.html')
+  await expectChooserVisible(ctx.panel)
+})
+
+test('roll ComfyUI HEAD back so the update has work to do @lifecycle', async () => {
+  const installs = await ctx.panel.evaluate<InstallationLite[]>(
+    `window.api.getInstallations()`,
+  )
+  expect(installs.length, 'no tracked installation after install').toBeGreaterThan(0)
+  const inst = installs[0]!
+  _updateInstallId = inst.id
+  _updateInstallPath = inst.installPath
+  _comfyUIDir = path.join(_updateInstallPath, 'ComfyUI')
+
+  const headBefore = execFileSync('git', ['rev-parse', 'HEAD'], {
+    cwd: _comfyUIDir, encoding: 'utf-8', windowsHide: true,
+  }).trim()
+  expect(headBefore).toMatch(/^[a-f0-9]{40}$/)
+
+  // Roll back 3 commits. Small enough to (usually) avoid a requirements
+  // change crossing it — if it does, the update still runs, just slower.
+  execFileSync('git', ['reset', '--hard', 'HEAD~3'], {
+    cwd: _comfyUIDir, stdio: 'pipe', windowsHide: true,
+  })
+
+  const headAfter = execFileSync('git', ['rev-parse', 'HEAD'], {
+    cwd: _comfyUIDir, encoding: 'utf-8', windowsHide: true,
+  }).trim()
+  expect(headAfter, 'git reset --hard did not move HEAD').not.toBe(headBefore)
+  _rolledBackCommit = headAfter
+})
+
+test('update-comfyui drives the real updater and moves HEAD forward @lifecycle', async () => {
+  // Real update can run pip-install if requirements.txt crossed our 3-commit
+  // rollback. Stretch the per-test timeout to cover that worst case.
+  test.setTimeout(600_000)
+  expect(_rolledBackCommit, 'rolled-back commit not captured').toBeTruthy()
+
+  const result = await ctx.panel.evaluate<UpdateActionResult>(
+    `window.api.runAction(${JSON.stringify(_updateInstallId)}, 'update-comfyui', { channel: 'stable' })`,
+  )
+  expect(result.ok, `update-comfyui failed: ${result.message ?? ''}`).toBe(true)
+
+  const headAfter = execFileSync('git', ['rev-parse', 'HEAD'], {
+    cwd: _comfyUIDir, encoding: 'utf-8', windowsHide: true,
+  }).trim()
+  expect(headAfter, 'update did not move HEAD off the rolled-back commit').not.toBe(_rolledBackCommit)
+
+  // The update should land on a commit reachable from origin/master that is
+  // strictly newer than (or equal to) the rolled-back one — never older.
+  const aheadCount = execFileSync('git', ['rev-list', '--count', `${_rolledBackCommit}..${headAfter}`], {
+    cwd: _comfyUIDir, encoding: 'utf-8', windowsHide: true,
+  }).trim()
+  expect(parseInt(aheadCount, 10), `post-update HEAD ${headAfter} is not ahead of rolled-back commit ${_rolledBackCommit}`).toBeGreaterThan(0)
+})
+
+test('re-launch ComfyUI after update validates the updated install runs @lifecycle', async () => {
+  await clickInstallTile(ctx.panel, 'ComfyUI')
+  await expect.poll(comfyFrontendIsLoaded, { timeout: 180_000, intervals: [1_000] }).toBe(true)
+})
+
+// ---------------------------------------------------------------------------
+// Stop + Delete — real fs cleanup of a fully-installed standalone tree
+// (~500MB on disk: ComfyUI/.git + standalone-env/ + ComfyUI/.venv).
+//
+// Validates the delete handler's marker-file safety check + recursive
+// `fs.rm` against an install that actually has the contents users care
+// about losing — including the Windows .venv where in-use file locks can
+// make recursive deletion fight back.
+//
+// Note on the missing "close-window stops comfy" test: that path is now
+// covered implicitly by the return-to-dashboard stop test above (same
+// `detachInstall` teardown). We drop the explicit `win.close()` variant
+// here because it always quits the app (closes the only host window),
+// which would prevent the delete IPC below from running.
+// ---------------------------------------------------------------------------
+
+let _deleteInstallId = ''
+let _deleteInstallPath = ''
+
+test('stops comfy and captures the installed dir state before driving delete @lifecycle', async () => {
+  // delete is in REQUIRES_STOPPED — stop comfy via return-to-dashboard so
+  // the IPC handler doesn't bail on us. rtd preserves the chooser host so
+  // we still have an IPC target for delete + getInstallations.
+  await returnFirstInstallHostToDashboard(ctx.app)
+  await expect.poll(comfyFrontendIsLoaded, { timeout: 30_000, intervals: [500] }).toBe(false)
+  await waitForWebContents(ctx.app, 'panel.html')
+  await expectChooserVisible(ctx.panel)
+
+  const installs = await ctx.panel.evaluate<InstallationLite[]>(`window.api.getInstallations()`)
+  expect(installs.length, 'no tracked installation after install').toBeGreaterThan(0)
+  const inst = installs[0]!
+  _deleteInstallId = inst.id
+  _deleteInstallPath = inst.installPath
+
+  // Sanity: this should be a fully-installed standalone tree, not the
+  // empty placeholder dirs the lifecycle-delete-untrack test uses. The
+  // install dir is on the same filesystem the test runs on (the harness
+  // home temp dir), so we can stat it directly from the test process.
+  expect(existsSync(path.join(_deleteInstallPath, 'ComfyUI', '.git')), 'installed dir missing ComfyUI/.git').toBe(true)
+  expect(existsSync(path.join(_deleteInstallPath, 'standalone-env')), 'installed dir missing standalone-env/').toBe(true)
+  expect(existsSync(path.join(_deleteInstallPath, '.comfyui-desktop-2')), 'installed dir missing .comfyui-desktop-2 marker').toBe(true)
+})
+
+test('real delete wipes the fully-installed ~500MB tree off disk @lifecycle', async () => {
+  // Recursive delete of a full standalone install can take a while on
+  // Windows when files are large (the .venv ships thousands of small
+  // files plus a few hundred-MB torch wheels). Stretch the timeout.
+  test.setTimeout(300_000)
+  expect(_deleteInstallPath, 'install path not captured').toBeTruthy()
+
+  const result = await ctx.panel.evaluate<UpdateActionResult>(
+    `window.api.runAction(${JSON.stringify(_deleteInstallId)}, 'delete')`,
+  )
+  expect(result.ok, `runAction('delete') failed: ${result.message ?? ''}`).toBe(true)
+
+  // Disk verification — the entire install tree must be gone, not just
+  // a few top-level entries. Probes both the root + a deep file the
+  // standalone install always materializes (ComfyUI/main.py).
+  expect(existsSync(_deleteInstallPath), `install dir ${_deleteInstallPath} still exists after delete`).toBe(false)
+  expect(existsSync(path.join(_deleteInstallPath, 'ComfyUI', 'main.py')), 'ComfyUI/main.py still on disk after delete').toBe(false)
+
+  // The installation record must also be gone.
+  const remaining = await ctx.panel.evaluate<InstallationLite[]>(`window.api.getInstallations()`)
+  expect(remaining.find((i) => i.id === _deleteInstallId), 'install record not removed after delete').toBeUndefined()
 })

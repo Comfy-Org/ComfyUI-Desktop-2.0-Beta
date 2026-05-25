@@ -233,7 +233,7 @@ describe('comfyTitlePopup/InstancePickerView', () => {
           makeInstall({
             id: 'a',
             name: 'Alpha',
-            version: '0.20.2+57',
+            version: 'v0.20.2+57',
             sourceLabel: 'GitHub',
           }),
         ],
@@ -247,7 +247,7 @@ describe('comfyTitlePopup/InstancePickerView', () => {
       expect(card.text()).not.toContain('vv0.20.2+57')
     })
 
-    it('does not double-prefix the version pill when version already starts with v', async () => {
+    it('renders the backend version payload verbatim without re-prefixing', async () => {
       const wrapper = await mountPicker({
         installs: [
           makeInstall({ id: 'a', name: 'Alpha', version: 'v0.21.1' }),
