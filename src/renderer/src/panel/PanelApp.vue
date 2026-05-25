@@ -148,9 +148,13 @@ const {
 
 // E2E surface: tests drive UI-level flows (e.g. inject a finished
 // failed op to render ProgressModal's error state) by calling into
-// `handleShowProgress` from outside the Vue tree. Production code
-// never reads `__e2eRenderer`.
-bindE2EPanelHooks({ showProgress: handleShowProgress })
+// `handleShowProgress` from outside the Vue tree. Gated on the
+// `e2e=1` URL flag main propagates only when `process.env.E2E === '1'`,
+// matching the registration gate in `panel/main.ts`; `__e2eRenderer`
+// is never present in production.
+if (params.get('e2e') === '1') {
+  bindE2EPanelHooks({ showProgress: handleShowProgress })
+}
 
 const firstUseTakeoverActive = computed(
   () =>
@@ -471,6 +475,9 @@ onUnmounted(() => {
   // while the drawer is open doesn't leak transparency past unmount.
   document.body.classList.remove('panel-overlay-mode')
   sessionStore.dispose()
+  // Release the E2E binding so a stale closure can't keep driving the
+  // progress chain on a detached PanelApp instance after a panel swap.
+  if (params.get('e2e') === '1') bindE2EPanelHooks(null)
 })
 </script>
 

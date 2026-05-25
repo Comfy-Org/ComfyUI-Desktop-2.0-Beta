@@ -89,13 +89,22 @@ test('update-comfyui survives the Global Settings allowlist gate @lifecycle', as
     `window.__comfyTitlePopup.globalSettingsRunInstallAction(${JSON.stringify(INSTALL_ID)}, 'update-comfyui', {})`,
   )
 
-  // The bug we're guarding against would have produced
-  //   { ok: false, message: "Action 'update-comfyui' is not available." }
-  // exactly. The allowlist fix replaces that with whatever the action
-  // dispatcher returns — typically still `ok: false` for a non-git
-  // seeded install, but with a different message describing the real
-  // failure. Either an ok: true or any non-allowlist error proves the
-  // gate is no longer rejecting the call.
-  const allowlistRejection = `Action 'update-comfyui' is not available.`
-  expect(result.message ?? '', 'allowlist must not reject update-comfyui').not.toBe(allowlistRejection)
+  // The bug we're guarding against produced
+  //   { ok: false, message: "Action '<id>' is not available." }
+  // verbatim from the GLOBAL_SETTINGS_ALLOWED_ACTIONS gate. The
+  // allowlist fix routes `update-comfyui` past the gate into the
+  // action dispatcher; for this non-git seeded install the dispatcher
+  // typically still resolves to `ok: false`, but the message describes
+  // the underlying failure (e.g. "not a git repo", "no remote", ...),
+  // not an allowlist rejection.
+  //
+  // Match the full sentinel shape rather than the literal id so a
+  // typo elsewhere in the chain (e.g. if the action id ever flips
+  // again) doesn't silently pass: the regression we're guarding
+  // against is the gate-level reject for ANY action id, and a
+  // "not available" message at any case is the same class of bug.
+  expect(result, 'IPC must produce a structured action result').toMatchObject({
+    ok: expect.any(Boolean),
+  })
+  expect(result.message ?? '', 'allowlist must not reject the action id').not.toMatch(/not available/i)
 })

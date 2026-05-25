@@ -48,9 +48,11 @@ function ensureBound(): PanelBindings {
 /**
  * Called from `PanelApp.vue` once `handleShowProgress` is in scope.
  * Re-binding (e.g. PanelApp re-mount after panel switch) replaces the
- * previous reference.
+ * previous reference; passing `null` clears it so a stale closure
+ * captured by a detached component instance can't keep driving the
+ * progress chain after unmount.
  */
-export function bindE2EPanelHooks(next: PanelBindings): void {
+export function bindE2EPanelHooks(next: PanelBindings | null): void {
   bindings = next
 }
 
