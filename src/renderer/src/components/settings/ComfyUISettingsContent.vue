@@ -72,6 +72,7 @@ const {
   error,
   updateField,
   runAction,
+  runningActionIds,
   sectionsForTab,
   diskUsageItem,
   pinBottomActions,
@@ -356,6 +357,7 @@ defineExpose({
               <SettingsSectionList
                 :sections="visibleSections"
                 :installation-id="installation?.id"
+                :running-action-ids="runningActionIds"
                 @update-field="updateField"
                 @run-action="runAction"
                 @open-args-page="openArgsPage"

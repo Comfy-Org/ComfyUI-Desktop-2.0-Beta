@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ChevronRight, ShieldAlert } from 'lucide-vue-next'
+import { ChevronRight, Loader2, ShieldAlert } from 'lucide-vue-next'
 import BaseInput from '../../components/ui/BaseInput.vue'
 import BaseSelect, { type BaseSelectOption } from '../../components/ui/BaseSelect.vue'
 import BooleanToggle from './BooleanToggle.vue'
@@ -41,12 +41,25 @@ interface Props {
    *  `getComfyArgs(id)`). Optional so call sites without a current
    *  install degrade gracefully. */
   installationId?: string
+  /** Inline-action busy set from the host's `useComfyUISettings` —
+   *  drives the per-button spinner + disabled state so quick
+   *  actions like Check-for-Update feel acknowledged. */
+  runningActionIds?: Set<string>
 }
 
 const props = withDefaults(defineProps<Props>(), {
   readonly: false,
-  installationId: undefined
+  installationId: undefined,
+  runningActionIds: () => new Set<string>()
 })
+
+// Wrap the Set in a computed so each `.has()` call tracks a reactive
+// dep on the prop — bare-function access on a destructured prop inside
+// a template attribute binding can miss the dep otherwise.
+const runningIdsSet = computed(() => props.runningActionIds ?? new Set<string>())
+function isActionRunning(actionId: string): boolean {
+  return runningIdsSet.value.has(actionId)
+}
 
 const emit = defineEmits<{
   'update-field': [field: DetailField, value: unknown]
@@ -302,6 +315,7 @@ function fieldOwnsLabel(field: DetailField): boolean {
             v-else-if="field.editType === 'channel-cards'"
             :field="field"
             :section-actions="section.actions ?? []"
+            :running-action-ids="runningIdsSet"
             @action="(a) => emit('run-action', a)"
           />
 
@@ -348,12 +362,21 @@ function fieldOwnsLabel(field: DetailField): boolean {
               {
                 primary: action.style === 'primary',
                 danger: action.style === 'danger',
-                'looks-disabled': action.enabled === false && action.disabledMessage
+                'looks-disabled': action.enabled === false && action.disabledMessage,
+                'is-running': isActionRunning(action.id)
               }
             ]"
-            :disabled="action.enabled === false && !action.disabledMessage"
+            :disabled="
+              (action.enabled === false && !action.disabledMessage) ||
+              isActionRunning(action.id)
+            "
             @click="emit('run-action', action)"
           >
+            <Loader2
+              v-if="isActionRunning(action.id)"
+              :size="14"
+              class="settings-v2-action-spinner"
+            />
             {{ action.label }}
           </button>
         </TooltipWrap>
@@ -590,6 +613,24 @@ function fieldOwnsLabel(field: DetailField): boolean {
 .settings-v2-action {
   border: none;
   width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.settings-v2-action.is-running {
+  cursor: progress;
+  opacity: 0.85;
+}
+
+.settings-v2-action-spinner {
+  flex: 0 0 auto;
+  animation: settings-v2-action-spin 0.9s linear infinite;
+}
+
+@keyframes settings-v2-action-spin {
+  to { transform: rotate(360deg); }
 }
 
 .settings-v2-action-tooltip {

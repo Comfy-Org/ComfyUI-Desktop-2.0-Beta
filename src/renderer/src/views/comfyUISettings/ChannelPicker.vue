@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, reactive, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { Loader2 } from 'lucide-vue-next'
 import BaseSelect, { type BaseSelectOption } from '../../components/ui/BaseSelect.vue'
 import InfoTooltip from '../../components/InfoTooltip.vue'
 import { formatRelativeFromMs } from '../../lib/datetime'
@@ -15,11 +16,21 @@ import { TID } from '../../../../shared/testIds'
 interface Props {
   field: DetailField
   sectionActions?: ActionDef[]
+  /** Inline-action busy set — drives the per-button spinner +
+   *  disabled state so quick actions like Check-for-Update feel
+   *  acknowledged. Passed through from SettingsSectionList. */
+  runningActionIds?: Set<string>
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  sectionActions: () => []
+  sectionActions: () => [],
+  runningActionIds: () => new Set<string>()
 })
+
+const runningIdsSet = computed(() => props.runningActionIds ?? new Set<string>())
+function isActionRunning(actionId: string): boolean {
+  return runningIdsSet.value.has(actionId)
+}
 
 const emit = defineEmits<{
   action: [action: ActionDef]
@@ -208,11 +219,21 @@ const showCheckInHeader = computed(
     otherSecondaryActions.value.length === 0
 )
 
+// When an update is already detected, the user can see the new version
+// + Update Now / Copy & Update right above — re-checking is redundant.
+// Only surface the manual check when no update is currently visible.
+const showCheckUpdateInFooter = computed(
+  () =>
+    checkUpdateAction.value != null &&
+    !showCheckInHeader.value &&
+    preview.value?.updateAvailable !== true
+)
+
 const showFooterActions = computed(
   () =>
     promotedPrimaryActions.value.length > 0 ||
     otherSecondaryActions.value.length > 0 ||
-    (checkUpdateAction.value != null && !showCheckInHeader.value)
+    showCheckUpdateInFooter.value
 )
 
 const footerActions = computed<
@@ -220,7 +241,7 @@ const footerActions = computed<
 >(() => {
   const out: Array<{ action: ActionDef; variant: 'accent' | 'default' | 'danger' }> = []
 
-  if (checkUpdateAction.value && !showCheckInHeader.value) {
+  if (checkUpdateAction.value && showCheckUpdateInFooter.value) {
     out.push({ action: checkUpdateAction.value, variant: 'default' })
   }
 
@@ -279,32 +300,6 @@ const selectOptions = computed<BaseSelectOption[]>(() =>
         </span>
       </div>
 
-      <div v-if="selectedActions.length > 0" class="channel-picker-card-actions">
-        <p v-if="!draftIsCurrent" class="channel-picker-switch-hint">
-          {{ t('channelCards.switchTo', { channel: selectedOption?.label ?? '' }) }}
-        </p>
-        <div class="channel-picker-action-row">
-          <button
-            v-for="action in selectedActions"
-            :key="action.id"
-            type="button"
-            :class="[
-              'channel-picker-action',
-              {
-                primary: action.style === 'primary',
-                accent: action.style === 'accent',
-                danger: action.style === 'danger'
-              }
-            ]"
-            :disabled="action.enabled === false"
-            :title="action.tooltip"
-            :data-testid="TID.updateActionButton(action.id)"
-            @click="emit('action', action)"
-          >
-            {{ action.label }}
-          </button>
-        </div>
-      </div>
     </div>
 
     <dl v-if="statRows.length > 0" class="channel-picker-stats">
@@ -329,10 +324,16 @@ const selectOptions = computed<BaseSelectOption[]>(() =>
           v-if="showCheckInHeader && checkUpdateAction"
           type="button"
           class="channel-picker-action compact"
-          :disabled="checkUpdateAction.enabled === false"
+          :class="{ 'is-running': isActionRunning(checkUpdateAction.id) }"
+          :disabled="checkUpdateAction.enabled === false || isActionRunning(checkUpdateAction.id)"
           :title="checkUpdateAction.tooltip"
           @click="emit('action', checkUpdateAction)"
         >
+          <Loader2
+            v-if="isActionRunning(checkUpdateAction.id)"
+            :size="14"
+            class="channel-picker-action-spinner"
+          />
           {{ checkUpdateAction.label }}
         </button>
       </div>
@@ -362,12 +363,17 @@ const selectOptions = computed<BaseSelectOption[]>(() =>
           :key="action.id"
           type="button"
           class="channel-picker-action"
-          :class="variant"
-          :disabled="action.enabled === false"
+          :class="[variant, { 'is-running': isActionRunning(action.id) }]"
+          :disabled="action.enabled === false || isActionRunning(action.id)"
           :title="action.tooltip"
           :data-testid="TID.updateActionButton(action.id)"
           @click="emit('action', action)"
         >
+          <Loader2
+            v-if="isActionRunning(action.id)"
+            :size="14"
+            class="channel-picker-action-spinner"
+          />
           {{ action.label }}
         </button>
       </div>
@@ -532,6 +538,7 @@ const selectOptions = computed<BaseSelectOption[]>(() =>
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 6px;
   flex: 0 0 auto;
   height: 32px;
   min-height: 32px;
@@ -549,6 +556,22 @@ const selectOptions = computed<BaseSelectOption[]>(() =>
   transition:
     background-color 100ms ease,
     filter 100ms ease;
+}
+
+.channel-picker-action.is-running {
+  cursor: progress;
+  opacity: 0.85;
+}
+
+.channel-picker-action-spinner {
+  flex: 0 0 auto;
+  animation: channel-picker-action-spin 0.9s linear infinite;
+}
+
+@keyframes channel-picker-action-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .channel-picker-action.compact {

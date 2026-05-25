@@ -87,6 +87,11 @@ export interface UseComfyUISettingsApi {
   /** Run an action coming off a `DetailSection.actions[]` entry. */
   runAction: (action: ActionDef) => Promise<void>
 
+  /** Action ids currently in-flight on the inline path (no
+   *  `showProgress` — those route to ProgressModal instead). Drives the
+   *  per-button spinner + disabled state so clicks feel acknowledged. */
+  runningActionIds: Ref<Set<string>>
+
   /** Visible sections for a given tab (filtered by `section.tab`). */
   sectionsForTab: (tab: 'settings' | 'status' | 'update' | 'snapshots') => ComputedRef<DetailSection[]>
 
@@ -128,6 +133,9 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
   const diskSpace = ref<DiskSpaceInfo | null>(null)
   const loading = ref(false)
   const error = ref<string | null>(null)
+  // Inline-action busy state. Replaced (not mutated) on each add/delete
+  // so Vue's shallow reactivity on Set tracks the change.
+  const runningActionIds = ref<Set<string>>(new Set())
   /** Last install id `loadAll` was called with — drives the
    *  clear-before-await decision so same-install reloads (field edits,
    *  action completions) don't blank the pane, only row switches do. */
@@ -516,6 +524,7 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
     // 10. Inline invoke + result navigation. Self-stop wrap mirrors the
     //     showProgress path so inline REQUIRES_STOPPED actions don't
     //     race the backend's running-check on a running install.
+    runningActionIds.value = new Set(runningActionIds.value).add(mutableAction.id)
     try {
       emitTelemetryAction('desktop2.action.invoked', telemetryContext)
       if (wasRunning && requiresStoppedGuard) {
@@ -551,6 +560,10 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
         title: mutableAction.label,
         message: err instanceof Error ? err.message : String(err),
       })
+    } finally {
+      const next = new Set(runningActionIds.value)
+      next.delete(mutableAction.id)
+      runningActionIds.value = next
     }
   }
 
@@ -604,6 +617,7 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
     refreshSection,
     updateField,
     runAction,
+    runningActionIds,
     sectionsForTab,
     diskUsageItem,
     pinBottomSection,
