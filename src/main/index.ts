@@ -505,21 +505,18 @@ ipcMain.handle('reset-zoom', () => {
  * synchronously when the user clicks the waffle, so the cached
  * value has to be ground-truth.
  */
-ipcMain.on(
-  'comfy-window:set-first-use-mode',
-  (event, payload: { mode: unknown }) => {
-    const mode = normaliseFirstUseMode(payload?.mode)
-    for (const entry of comfyWindows.values()) {
-      if (entry.panelView?.webContents === event.sender) {
-        entry.firstUseMode = mode
-        if (!entry.titleBarView.webContents.isDestroyed()) {
-          entry.titleBarView.webContents.send('comfy-titlebar:first-use-mode-changed', mode)
-        }
-        return
+ipcMain.on('comfy-window:set-first-use-mode', (event, payload: { mode: unknown }) => {
+  const mode = normaliseFirstUseMode(payload?.mode)
+  for (const entry of comfyWindows.values()) {
+    if (entry.panelView?.webContents === event.sender) {
+      entry.firstUseMode = mode
+      if (!entry.titleBarView.webContents.isDestroyed()) {
+        entry.titleBarView.webContents.send('comfy-titlebar:first-use-mode-changed', mode)
       }
+      return
     }
   }
-)
+})
 
 /**
  * Install-update pill state. Reads the install record via
@@ -982,10 +979,12 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
     mainTelemetry.installAppHooks()
 
     // Initialize the deterministic device identity. Replaces the legacy
-    // random-UUID device-id.txt with SHA-256(machine_id + salt) per the
-    // Unified Analytics PRD §6 identity model. On a one-shot migration from
-    // a legacy random-UUID id, alias it into the new id so PostHog merges
-    // histories. The migration guard file ensures the alias never re-fires.
+    // random-UUID device-id.txt with SHA-256(machine_id + salt) so the id
+    // survives a clean reinstall and can be matched against the same hash
+    // computed by other Comfy products on the same machine. On a one-shot
+    // migration from a legacy random-UUID id, alias it into the new id so
+    // PostHog merges histories. The migration guard file ensures the alias
+    // never re-fires.
     const { legacyId } = await initDeviceId()
     const installationId = getDeviceId()
     if (legacyId) {

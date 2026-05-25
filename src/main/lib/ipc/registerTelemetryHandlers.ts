@@ -38,11 +38,40 @@ function asString(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null
 }
 
+function isTelemetryValue(v: unknown): v is mainTelemetry.TelemetryValue {
+  return (
+    v === null ||
+    v === undefined ||
+    typeof v === 'boolean' ||
+    typeof v === 'number' ||
+    typeof v === 'string'
+  )
+}
+
+/**
+ * Filter an IPC payload down to the TelemetryValue contract. Renderer
+ * payloads cross a trust boundary — a buggy or compromised renderer
+ * could send nested objects, functions, Symbols, etc. We drop anything
+ * that doesn't fit the primitive shape rather than ship a lying cast
+ * and hope PostHog Node copes downstream.
+ *
+ * Per-key filter (not whole-payload reject) so one bad value doesn't
+ * lose the whole event's metadata. Arrays are dropped — IPC telemetry
+ * call sites construct scalar property bags only, and `bindUserId` /
+ * `registerPersonProperties` (which share this helper) expect scalar
+ * person-property values.
+ */
 function asProps(value: unknown): Record<string, mainTelemetry.TelemetryValue> {
-  if (!value || typeof value !== 'object') return {}
-  // Trust the renderer's `TelemetryContext` shape; main's `capture` does the
-  // PostHog Node validation downstream.
-  return value as Record<string, mainTelemetry.TelemetryValue>
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  const out: Record<string, mainTelemetry.TelemetryValue> = {}
+  for (const [key, raw] of Object.entries(value)) {
+    if (typeof key !== 'string') continue
+    if (isTelemetryValue(raw)) {
+      out[key] = raw
+    }
+    // Drop anything else (objects, arrays, functions, symbols, etc.) silently.
+  }
+  return out
 }
 
 export function registerTelemetryHandlers(): void {

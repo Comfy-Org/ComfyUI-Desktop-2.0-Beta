@@ -1,11 +1,11 @@
 /**
  * Per-installation device identifier.
  *
- * `installation_id` is computed as `SHA-256(machine_id + ':' + salt)`, matching
- * the cross-surface identity model in the Unified Analytics PRD §6. It is
- * deterministic per machine (same OS-user account, same hardware), survives
- * a clean reinstall, and matches what cloud / CLI compute for the same
- * machine.
+ * `installation_id` is computed as `SHA-256(machine_id + ':' + salt)`. It is
+ * deterministic per machine (same OS-user account, same hardware) and
+ * survives a clean reinstall — another Comfy product running on the same
+ * machine with the same salt would compute the same hash, which is the
+ * mechanism that would let us see one user across products.
  *
  * On first boot post-upgrade for a user whose `device-id.txt` still holds the
  * legacy random UUID, `initDeviceId()` returns that legacy id so the caller
@@ -26,16 +26,22 @@ import si from 'systeminformation'
 import { configDir } from './paths'
 
 /**
- * Cross-surface salt for installation_id derivation. Must match the value
- * used by cloud / CLI / local-python so the same machine yields the same
- * `installation_id` everywhere (PRD §6, task B1.3 owned by Robin).
+ * Public namespacing salt for installation_id derivation. Two real jobs:
  *
- * The salt's only job is rainbow-table defense for the
- * `machine_id → installation_id` mapping. It is NOT a secret. Rotating it
- * rotates every user's id, so swap only as a deliberate one-shot
- * coordinated across surfaces.
+ *   1. Rotation lever — bumping the version suffix (`-v1` → `-v2`)
+ *      invalidates every previously-issued installation_id at once.
+ *      Useful as a nuclear option (post-incident, or for a hard reset
+ *      of the person graph).
+ *   2. Future namespace alignment — if another Comfy product later
+ *      ships telemetry and uses this same constant, the two products
+ *      will compute the same hash on the same machine, so the analytics
+ *      backend can see one person across both.
  *
- * Current value is a placeholder pending cross-surface coordination.
+ * Cryptographically this is friction, not privacy: the salt is in every
+ * shipped binary, so an attacker with the binary can extract it. Real
+ * privacy comes from consent gating, PII scrubbing, retention limits,
+ * and the discipline of never sending `machine_id` off the device — only
+ * the hash digest leaves.
  */
 const INSTALLATION_ID_SALT = 'comfy-installation-id-v1'
 

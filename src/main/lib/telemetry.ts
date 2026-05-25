@@ -36,11 +36,12 @@
  *      that don't end up on a dashboard or in a saved query — that's how
  *      telemetry rots into noise.
  *
- * ## Identity model (PRD §6)
+ * ## Identity model
  *
  *   - `installation_id` = `SHA-256(machine_id + salt)`, computed in
- *     `deviceId.ts`. Deterministic per machine; matches cloud / CLI for
- *     the same machine. Bound at boot via `identify(installation_id)`.
+ *     `deviceId.ts`. Deterministic per machine; can be matched against
+ *     the same hash computed by other Comfy products on the same machine.
+ *     Bound at boot via `identify(installation_id)`.
  *   - `download_token` (TODO): web-session → desktop bridge for acquisition
  *     attribution. Set as a person property on first launch from a
  *     tokenised installer download.
@@ -547,14 +548,19 @@ export async function loadFeatureFlagsImmediate(
 ): Promise<Record<string, FeatureFlagValue>> {
   if (!client) return {}
   if (consentState !== 'granted') return {}
+  let timer: ReturnType<typeof setTimeout> | undefined
   try {
     const flagsPromise = client.getAllFlags(distinctId, { personProperties })
-    const timeoutPromise = new Promise<Record<string, FeatureFlagValue>>((resolve) =>
-      setTimeout(() => resolve({}), timeoutMs)
-    )
+    const timeoutPromise = new Promise<Record<string, FeatureFlagValue>>((resolve) => {
+      timer = setTimeout(() => resolve({}), timeoutMs)
+    })
     return await Promise.race([flagsPromise, timeoutPromise])
   } catch {
     return {}
+  } finally {
+    // Clear the timer when the flags promise wins the race so we don't
+    // keep the event loop alive for the remainder of `timeoutMs`.
+    if (timer !== undefined) clearTimeout(timer)
   }
 }
 

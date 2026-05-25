@@ -26,23 +26,28 @@ const showBanner = ref(false)
 const dismissed = ref(false)
 
 onMounted(async () => {
+  // Default branch + source if the fetch throws. We still record
+  // exposure on the failure path — otherwise users whose fetch errors
+  // are silently absent from the experiment's exposure denominator and
+  // the control arm looks structurally smaller / biased.
+  let variantStr = 'control'
+  let source: 'cache' | 'fallback' = 'cache'
   try {
     const variant = await window.api.telemetryGetExperimentFlag(EXPERIMENT_KEY)
-    const variantStr =
-      typeof variant === 'string' ? variant : variant === true ? 'treatment' : 'control'
-    // Record exposure for BOTH variants so the experiment's exposure
-    // numerator counts every user the flag was evaluated for, not just
-    // the ones who saw the banner.
+    variantStr = typeof variant === 'string' ? variant : variant === true ? 'treatment' : 'control'
+  } catch {
+    source = 'fallback'
+  }
+  try {
     window.api.telemetryRecordExposure({
       experimentKey: EXPERIMENT_KEY,
       variant: variantStr,
-      source: 'cache'
+      source
     })
-    if (variantStr === 'treatment') showBanner.value = true
   } catch {
-    // Flag fetch failed; default to control (no banner). Telemetry
-    // failure must never break the chooser.
+    // Telemetry must never break the chooser.
   }
+  if (variantStr === 'treatment') showBanner.value = true
 })
 
 function dismiss(): void {
