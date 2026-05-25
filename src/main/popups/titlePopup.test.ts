@@ -23,6 +23,7 @@ vi.mock('electron', () => ({
 // without subscribing to anything.
 import {
   buildInstancePickerSnapshot,
+  resolvePickerSelectedInstallId,
   buildTitlePopupMenuItems,
   computePopupHeight,
   type InstancePickerInstall,
@@ -174,6 +175,37 @@ it('exposes Reset Zoom only when comfy zoom is non-zero, with the percent in the
     expect(items[newWindowIdx + 1]?.kind).toBe('separator')
     const newInstallIdx = items.findIndex((i) => i.id === 'new-install')
     expect(newInstallIdx).toBeGreaterThan(newWindowIdx + 1)
+  })
+})
+
+describe('resolvePickerSelectedInstallId', () => {
+  function makeInstall(overrides: Partial<InstancePickerInstall>): InstancePickerInstall {
+    return {
+      id: 'x',
+      name: 'X',
+      sourceLabel: 'Standalone',
+      sourceCategory: 'local',
+      ...overrides,
+    } as InstancePickerInstall
+  }
+
+  it('prefers an explicit selection over the host install', () => {
+    const installs = [makeInstall({ id: 'a' }), makeInstall({ id: 'b' })]
+    expect(resolvePickerSelectedInstallId('b', 'a', installs)).toBe('b')
+  })
+
+  it('falls back to the host install when no explicit selection', () => {
+    const installs = [makeInstall({ id: 'a' }), makeInstall({ id: 'b' })]
+    expect(resolvePickerSelectedInstallId(null, 'b', installs)).toBe('b')
+  })
+
+  it('defaults to the first install on an install-less host', () => {
+    const installs = [makeInstall({ id: 'a' }), makeInstall({ id: 'b' })]
+    expect(resolvePickerSelectedInstallId(null, null, installs)).toBe('a')
+  })
+
+  it('returns null when there are no installs to select', () => {
+    expect(resolvePickerSelectedInstallId(null, null, [])).toBeNull()
   })
 })
 

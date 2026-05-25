@@ -269,6 +269,21 @@ describe('comfyTitlePopup/InstancePickerView', () => {
   })
 
   describe('settings pane', () => {
+    it('auto-selects the first install on an install-less host', async () => {
+      const wrapper = await mountPicker({
+        installs: [
+          makeInstall({ id: 'a', name: 'Alpha' }),
+          makeInstall({ id: 'b', name: 'Beta' }),
+        ],
+        activeInstallationId: null,
+        runningInstallationIds: [],
+        selectedInstallationId: null,
+      })
+      await flushPromises()
+      expect(wrapper.find('.settings-v2-content').exists()).toBe(true)
+      expect(bridge.selectedInstallSets).toContain('a')
+    })
+
     it('mounts ComfyUISettingsContent when an install is selected', async () => {
       const wrapper = await mountPicker({
         installs: [makeInstall({ id: 'a', name: 'Alpha' })],

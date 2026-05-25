@@ -136,7 +136,9 @@ const visibleChips = computed(() => {
 })
 
 function resolveInitialSelection(snapshot: PickerSnapshot): string | null {
-  return snapshot.selectedInstallationId ?? snapshot.activeInstallationId
+  const explicit = snapshot.selectedInstallationId ?? snapshot.activeInstallationId
+  if (explicit) return explicit
+  return snapshot.installs[0]?.id ?? null
 }
 const selectedId = ref<string | null>(resolveInitialSelection(props.snapshot))
 watch(
@@ -149,9 +151,20 @@ watch(
   () => props.snapshot.activeInstallationId,
   (next) => {
     if (!props.snapshot.selectedInstallationId) {
-      selectedId.value = next
+      selectedId.value = next ?? props.snapshot.installs[0]?.id ?? null
     }
   }
+)
+watch(
+  () => props.snapshot.installs,
+  (installs) => {
+    if (props.snapshot.selectedInstallationId || props.snapshot.activeInstallationId) return
+    if (selectedId.value) return
+    const first = installs[0]
+    if (first) {
+      selectedId.value = first.id
+    }
+  },
 )
 
 const selectedInstall = computed<Installation | null>(() => {
@@ -183,6 +196,19 @@ watch(
     bridge?.setPickerSelectedInstall(next)
   }
 )
+
+// Install-less host (chooser/dashboard): when the picker opens with
+// no explicit user pick and no host install, `resolveInitialSelection`
+// falls back to `installs[0]`. The reactive watcher above only fires
+// on *change*, so the initial fallback never reaches main. Persist
+// once on mount so main owns the selection from the first frame.
+if (
+  selectedId.value
+  && !props.snapshot.selectedInstallationId
+  && !props.snapshot.activeInstallationId
+) {
+  bridge?.setPickerSelectedInstall(selectedId.value)
+}
 
 const initialExpandedTab = computed<PickerTab>(() =>
   resolvePickerTab(props.snapshot.initialTab, 'config')

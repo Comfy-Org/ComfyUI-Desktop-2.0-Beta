@@ -127,7 +127,9 @@ export interface GlobalSettingsModelsDir {
  *  `Record<string, unknown>` to keep the preload boundary type-safe
  *  without dragging renderer types into main. */
 export interface GlobalSettingsSnapshot {
-  overviewFields: Record<string, unknown>[]
+  generalFields: Record<string, unknown>[]
+  telemetryFields: Record<string, unknown>[]
+  desktopUpdateFields: Record<string, unknown>[]
   cacheFields: Record<string, unknown>[]
   advancedFields: Record<string, unknown>[]
   sharedDirectoriesFields: Record<string, unknown>[]
@@ -142,15 +144,12 @@ export interface GlobalSettingsSnapshot {
     platform: NodeJS.Platform
     lastCheckedAt: number | null
   }
-  channelPickerField: Record<string, unknown> | null
-  activeInstallationId: string | null
-  hasActiveInstall: boolean
   githubUrl: string
   githubStars: number | null
   i18n: {
     overview: string
     updates: string
-    cache: string
+    storage: string
     models: string
     advanced: string
     sharedDirectories: string
@@ -166,6 +165,21 @@ interface BuildInstancePickerSnapshotArgs {
   selectedSnapshots?: Record<string, unknown> | null
   initialTab?: string | null
   autoAction?: string | null
+}
+
+/**
+ * Resolves which install the picker should show in its detail pane.
+ * Install-less hosts (dashboard) have no active install; default to the
+ * first row so the pane is not empty on open.
+ */
+export function resolvePickerSelectedInstallId(
+  explicitSelection: string | null | undefined,
+  hostInstallationId: string | null | undefined,
+  installs: InstancePickerInstall[],
+): string | null {
+  const resolved = explicitSelection ?? hostInstallationId ?? null
+  if (resolved) return resolved
+  return installs[0]?.id ?? null
 }
 
 /**
@@ -610,7 +624,14 @@ async function broadcastInstancePickerSnapshotToTitlePopups(
     if (!entry.view.isOpen && entry.view.pendingShowTimer === null) continue
     if (entry.view.popup.webContents.isDestroyed()) continue
     const parentEntry = comfyWindows.get(entry.parentEntryId)
-    const selectedId = entry.pickerSelectedInstallationId ?? parentEntry?.installationId ?? null
+    const selectedId = resolvePickerSelectedInstallId(
+      entry.pickerSelectedInstallationId,
+      parentEntry?.installationId,
+      installs,
+    )
+    if (!entry.pickerSelectedInstallationId && selectedId) {
+      entry.pickerSelectedInstallationId = selectedId
+    }
     const details = selectedId
       ? await bindings.getPickerDetailsForInstall(selectedId).catch(() => ({
         settings: null,
@@ -1307,30 +1328,13 @@ export interface TitlePopupHostBindings {
     actionId: string,
     actionData?: Record<string, unknown>,
   ) => Promise<{ ok: boolean; message?: string }>
-  /** Resolve the `channel-cards` field from the active install's
-   *  Update tab. Returns `null` for chooser hosts (no install) or for
-   *  sources that emit no channel-picker payload (e.g. cloud installs).
-   *  Drives the Update Channel select inside the global-settings popup. */
-  getChannelPickerFieldForInstall: (
-    installationId: string | null,
-  ) => Promise<Record<string, unknown> | null>
-  /** Dispatch an arbitrary install action — used by the global-settings
-   *  popup's Update accordion for `'copy-update' | 'release-update' |
-   *  'switch-channel' | 'update'`. The IPC handler enforces the
-   *  allowlist before calling this. Mirrors `pickerRunAction` but
-   *  doesn't constrain the action surface itself. */
-  runChannelPickerAction: (
-    installationId: string,
-    actionId: string,
-    actionData?: Record<string, unknown>,
-  ) => Promise<{ ok: boolean; message?: string }>
 }
 
 /** Open the Global Settings popup for a specific host window. Shared
  *  by the hamburger menu's `id === 'settings'` handler and the panel
  *  renderer's `comfy-titlepopup:open-global-settings` IPC — both end up
- *  doing the same thing: build a snapshot for the host's active
- *  install (null on chooser hosts) and open the centred popup.
+ *  doing the same thing: build a desktop-only snapshot and open the
+ *  centred popup.
  *
  *  `parentEntry` is the host window's `ComfyWindowEntry`. Bail if the
  *  window is destroyed.
@@ -1342,15 +1346,12 @@ export interface TitlePopupHostBindings {
 function openGlobalSettingsForHost(
   parentEntry: ComfyWindowEntry,
   parentEntryId: number,
-  bindings: TitlePopupHostBindings,
+  _bindings: TitlePopupHostBindings,
   titleBarSender: Electron.WebContents,
 ): void {
   if (parentEntry.window.isDestroyed()) return
   void (async () => {
-    const snapshot = await buildGlobalSettingsSnapshot(
-      bindings,
-      parentEntry.installationId,
-    )
+    const snapshot = await buildGlobalSettingsSnapshot()
     if (parentEntry.window.isDestroyed()) return
     openTitlePopup({
       parent: parentEntry.window,
@@ -1397,7 +1398,11 @@ function openInstancePickerForHost(
   if (parentEntry.window.isDestroyed()) return
   const installs: InstancePickerInstall[] = cachedInstallsForPicker.slice()
   const runningInstallationIds = bindings.getRunningInstallationIds()
-  const initialSelectedId = selectedInstallationId ?? parentEntry.installationId
+  const initialSelectedId = resolvePickerSelectedInstallId(
+    selectedInstallationId,
+    parentEntry.installationId,
+    installs,
+  )
   const popupEntry = titlePopupsByParent.get(parentEntry.window.id)
   if (popupEntry) {
     popupEntry.pickerSelectedInstallationId = initialSelectedId
@@ -1561,13 +1566,6 @@ function activateTitlePopupMenuItem(
 const GLOBAL_SETTINGS_GITHUB_URL =
   'https://github.com/Comfy-Org/ComfyUI-Desktop-2.0-Beta'
 
-const GLOBAL_SETTINGS_ALLOWED_ACTIONS = new Set([
-  'copy-update',
-  'release-update',
-  'switch-channel',
-  'update',
-])
-
 /** Last seen `app-update:download-progress` payload, cached so a fresh
  *  popup open (or a snapshot rebroadcast that doesn't carry progress
  *  alongside it) can include it. Cleared whenever the update state
@@ -1624,28 +1622,27 @@ function findSettingsFields(
   return src.map(toDetailField)
 }
 
-async function buildGlobalSettingsSnapshot(
-  bindings: TitlePopupHostBindings,
-  hostInstallationId: string | null,
-): Promise<GlobalSettingsSnapshot> {
+async function buildGlobalSettingsSnapshot(): Promise<GlobalSettingsSnapshot> {
   const settingsSections = buildSettingsSections()
   const mediaSections = buildMediaSections()
   const modelsPayload = buildModelsPayload()
-  const general = findSettingsFields(settingsSections, 'settings.general', 0)
-  const telemetry = findSettingsFields(settingsSections, 'settings.telemetry', 1)
+  const generalRaw = findSettingsFields(settingsSections, 'settings.general', 0)
+  const desktopUpdateFields = generalRaw.filter((f) => f.id === 'autoInstallUpdates')
+  const generalFields = generalRaw.filter((f) => f.id !== 'autoInstallUpdates')
+  const telemetryFields = findSettingsFields(settingsSections, 'settings.telemetry', 1)
   const cache = findSettingsFields(settingsSections, 'settings.cache', 2)
   const advanced = findSettingsFields(settingsSections, 'settings.advanced', 3)
   const shared = (mediaSections[0]?.fields ?? []).map(toDetailField)
   const modelsDirsRaw = (modelsPayload.sections[0]?.fields[0]?.value as string[] | undefined) ?? []
   const modelsDefault = modelsPayload.systemDefault
-  const channelPickerField =
-    hostInstallationId ? await bindings.getChannelPickerFieldForInstall(hostInstallationId).catch(() => null) : null
   const appUpdateState = updater.getCurrentUpdateState() as unknown as Record<string, unknown>
   const isDownloading = (appUpdateState['kind'] === 'downloading')
   if (!isDownloading) lastAppUpdateProgress = null
   const githubStars = await getGithubStarCount('comfy-org/ComfyUI').catch(() => null)
   return {
-    overviewFields: [...general, ...telemetry],
+    generalFields,
+    telemetryFields,
+    desktopUpdateFields,
     cacheFields: cache,
     advancedFields: advanced,
     sharedDirectoriesFields: shared,
@@ -1667,32 +1664,21 @@ async function buildGlobalSettingsSnapshot(
       platform: process.platform,
       lastCheckedAt: globalSettingsLastCheckedAt,
     },
-    channelPickerField,
-    activeInstallationId: hostInstallationId,
-    hasActiveInstall: !!hostInstallationId,
     githubUrl: GLOBAL_SETTINGS_GITHUB_URL,
     githubStars,
-    // Section titles. Section count is intentionally trimmed from six
-    // (Overview / Updates / Cache / Models / Advanced / Shared Dirs)
-    // to four — Cache + Models + Shared Dirs collapse into one
-    // "Storage" bucket per UX feedback, and Overview becomes
-    // "General" so its tone matches its contents (preferences, not
-    // a catch-all). Labels render English directly to avoid the
-    // raw-key flash that `i18n.t()` returns when no catalog entry
-    // exists.
     i18n: {
-      overview: 'General',
-      updates: 'Updates',
-      cache: 'Storage',
-      models: 'Models',
-      advanced: 'Advanced',
-      sharedDirectories: 'Shared Directories',
+      overview: i18n.t('settings.general'),
+      updates: i18n.t('settings.updatesTab'),
+      storage: i18n.t('settings.storageTab'),
+      models: i18n.t('settings.models'),
+      advanced: i18n.t('settings.advanced'),
+      sharedDirectories: i18n.t('settings.sharedDirectories'),
     },
   }
 }
 
 async function broadcastGlobalSettingsSnapshotToTitlePopups(
-  bindings: TitlePopupHostBindings,
+  _bindings: TitlePopupHostBindings,
 ): Promise<void> {
   const hasOpen = Array.from(titlePopupsByParent.values()).some(
     (e) => e.kind === 'global-settings'
@@ -1703,9 +1689,7 @@ async function broadcastGlobalSettingsSnapshotToTitlePopups(
     if (entry.kind !== 'global-settings') continue
     if (!entry.view.isOpen && entry.view.pendingShowTimer === null) continue
     if (entry.view.popup.webContents.isDestroyed()) continue
-    const parentEntry = comfyWindows.get(entry.parentEntryId)
-    const hostInstallationId = parentEntry?.installationId ?? null
-    const snapshot = await buildGlobalSettingsSnapshot(bindings, hostInstallationId)
+    const snapshot = await buildGlobalSettingsSnapshot()
     const snapshotJson = JSON.stringify(snapshot)
     if (entry.lastGlobalSettingsBroadcastJson === snapshotJson) continue
     entry.lastGlobalSettingsBroadcastJson = snapshotJson
@@ -2429,34 +2413,6 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
       if (typeof value !== 'number' || !Number.isFinite(value)) return
       globalSettingsLastCheckedAt = value
       void broadcastGlobalSettingsSnapshotToTitlePopups(bindings)
-    },
-  )
-
-  // Install-scoped action (Update Channel cards emit these). Allowlist
-  // enforced here so the popup can't fire arbitrary install actions.
-  ipcMain.handle(
-    'comfy-titlepopup:global-settings-run-install-action',
-    async (event, payload: { installationId?: unknown; actionId?: unknown; actionData?: unknown }) => {
-      const popupEntry = titlePopupsByWebContents.get(event.sender.id)
-      if (!popupEntry || popupEntry.kind !== 'global-settings') {
-        return { ok: false, message: 'Global Settings popup not active.' }
-      }
-      const installationId = payload?.installationId
-      const actionId = payload?.actionId
-      if (typeof installationId !== 'string' || typeof actionId !== 'string') {
-        return { ok: false, message: 'Invalid payload.' }
-      }
-      if (!GLOBAL_SETTINGS_ALLOWED_ACTIONS.has(actionId)) {
-        return { ok: false, message: `Action '${actionId}' is not available.` }
-      }
-      const actionData = (payload.actionData && typeof payload.actionData === 'object')
-        ? payload.actionData as Record<string, unknown>
-        : undefined
-      const result = await bindings.runChannelPickerAction(installationId, actionId, actionData)
-      if (result.ok) {
-        await broadcastGlobalSettingsSnapshotToTitlePopups(bindings)
-      }
-      return result
     },
   )
 
