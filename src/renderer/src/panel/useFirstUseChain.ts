@@ -120,6 +120,13 @@ export function useFirstUseChain(opts: FirstUseChainOpts): FirstUseChainApi {
    *  Back link in its Configure footer. */
   const pendingCameFromLocalBranch = ref(false)
 
+  /** One-shot flag raised in the auto-launch watcher just before the
+   *  chained `performChooserLaunch` call. The launch action runs with
+   *  `showProgress: true`, so the resulting `show-progress` comes back
+   *  through `onShowProgress`; reading + clearing this flag there is
+   *  what stamps the launch op as the second leg of the chain. */
+  const pendingChainedLaunch = ref(false)
+
   const hooks: FirstUseChainHooks = {
     shouldForceTakeover: () => chainingFirstUseToNewInstall.value,
     consumeCameFromLocalBranch: () => {
@@ -137,6 +144,9 @@ export function useFirstUseChain(opts: FirstUseChainOpts): FirstUseChainApi {
       // calls leave it untouched.
       if (chainingFirstUseToNewInstall.value && pendingFirstUseAutoLaunchId.value === null) {
         pendingFirstUseAutoLaunchId.value = showOpts.installationId
+        // Stamp the install op as the first leg of a chain so ProgressModal
+        // maps its 0→100% to the unified bar's 0→70% slot.
+        showOpts.chainSpan = 'install'
         // Flip the persisted gate now so the takeover doesn't re-run
         // on the next launch — the overlay handoff doesn't go through
         // InstallWizardModal's close emit.
@@ -150,6 +160,16 @@ export function useFirstUseChain(opts: FirstUseChainOpts): FirstUseChainApi {
       // first-use-only.
       if (showOpts.autoLaunchOnFinish === true && pendingAutoLaunchId.value === null) {
         pendingAutoLaunchId.value = showOpts.installationId
+        showOpts.chainSpan = 'install'
+        return
+      }
+      // Launch leg of the install→launch chain. The watcher set
+      // `pendingChainedLaunch` just before kicking the launch action;
+      // consume it here so ProgressModal maps this op to the unified
+      // bar's 70→100% slot.
+      if (pendingChainedLaunch.value) {
+        pendingChainedLaunch.value = false
+        showOpts.chainSpan = 'launch'
       }
     },
   }
@@ -509,7 +529,15 @@ export function useFirstUseChain(opts: FirstUseChainOpts): FirstUseChainApi {
           ?? null
       }
       if (inst) {
-        void opts.performChooserLaunch(inst)
+        // Mark the upcoming `show-progress` as the launch leg of the
+        // chain. `onShowProgress` consumes the flag and stamps the op.
+        pendingChainedLaunch.value = true
+        void opts.performChooserLaunch(inst).finally(() => {
+          // Defensive: if the launch never reached `handleShowProgress`
+          // (missing-action / focused-running outcomes) clear the flag
+          // so it can't leak into an unrelated future op.
+          pendingChainedLaunch.value = false
+        })
       }
     },
     { deep: false },
