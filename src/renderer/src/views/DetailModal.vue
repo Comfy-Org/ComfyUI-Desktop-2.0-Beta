@@ -18,6 +18,7 @@ import { useInstallationStore } from '../stores/installationStore'
 import { useSessionStore } from '../stores/sessionStore'
 import { emitTelemetryAction, toErrorBucket } from '../lib/telemetry'
 import { formatBytes } from '../lib/formatting'
+import { findActionById } from '../lib/findAction'
 import { progressOpKindForActionId, destroysInstanceForActionId } from '../lib/progressOpKind'
 import { useMigrateAction } from '../composables/useMigrateAction'
 import { REQUIRES_STOPPED } from '../types/ipc'
@@ -225,17 +226,26 @@ watch(
         window.api.cancelInstallationSize()
       }
 
-      // Auto-trigger an action if requested (e.g. from migrate pill click)
+      // Auto-trigger an action if requested (e.g. from migrate pill or
+      // title-bar install-update pill click). Walks both
+      // `section.actions[]` AND nested `field.options[].data.actions[]`
+      // — the latter is where channel-card actions (`update-comfyui`,
+      // `copy-update`, `switch-channel`) live, so a search of only
+      // `section.actions` would silently no-op the install-update pill
+      // (regression for #582). Prefers the action on the install's
+      // currently-selected channel when present.
       if (props.autoAction && !autoActionRun.value) {
         autoActionRun.value = true
         const actionId = props.autoAction
-        for (const section of sections.value) {
-          const action = section.actions?.find((a: ActionDef) => a.id === actionId)
-          if (action) {
-            await nextTick()
-            runAction(action, null)
-            break
-          }
+        const channelField = sections.value
+          .flatMap((s) => s.fields ?? [])
+          .find((f) => f.editType === 'channel-cards')
+        const currentChannel =
+          typeof channelField?.value === 'string' ? channelField.value : null
+        const action = findActionById(sections.value, actionId, currentChannel)
+        if (action) {
+          await nextTick()
+          runAction(action, null)
         }
       }
     }

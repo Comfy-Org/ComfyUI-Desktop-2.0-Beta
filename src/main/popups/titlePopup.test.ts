@@ -25,6 +25,7 @@ import {
   buildInstancePickerSnapshot,
   buildTitlePopupMenuItems,
   computePopupHeight,
+  GLOBAL_SETTINGS_ALLOWED_ACTIONS,
   type InstancePickerInstall,
 } from './titlePopup'
 import { nextWindowKey, type ComfyWindowEntry } from '../host/registry'
@@ -235,5 +236,36 @@ describe('buildInstancePickerSnapshot', () => {
       runningInstallationIds: [],
     })
     expect(snap.runningInstallationIds).toEqual([])
+  })
+})
+
+describe('GLOBAL_SETTINGS_ALLOWED_ACTIONS', () => {
+  // Drift between the allowlist and the actual action ids emitted by the
+  // sources surfaces as silent no-ops in the title-popup Global Settings
+  // drawer (clicks return { ok: false, message: "Action 'X' is not
+  // available." } and the popup swallows the result). This test fails
+  // loudly when an id is renamed without updating the allowlist.
+
+  it('includes every channel-card action emitted by standalone/portable sources', () => {
+    // Channel-card action ids — must stay aligned with
+    // standalone/updateSections.ts and sources/portable.ts.
+    const channelCardActionIds = ['update-comfyui', 'copy-update', 'switch-channel']
+    for (const id of channelCardActionIds) {
+      expect(GLOBAL_SETTINGS_ALLOWED_ACTIONS.has(id)).toBe(true)
+    }
+  })
+
+  it('includes the session-level release-update action', () => {
+    // `release-update` is dispatched from `sessionActions/copy.ts` as the
+    // continuation of a copy-then-update flow. It is allowed through the
+    // popup so the Global Settings drawer can drive the full chain.
+    expect(GLOBAL_SETTINGS_ALLOWED_ACTIONS.has('release-update')).toBe(true)
+  })
+
+  it('does not contain the legacy "update" id (regression for #582)', () => {
+    // The bare `update` id had no producer; clicks against it returned
+    // "Action 'update' is not available." and the user saw nothing
+    // happen. This guard keeps it from sneaking back in.
+    expect(GLOBAL_SETTINGS_ALLOWED_ACTIONS.has('update')).toBe(false)
   })
 })

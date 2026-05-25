@@ -126,6 +126,15 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
   const error = ref<string | null>(null)
 
   async function loadAll(installationId: string, installPath: string): Promise<void> {
+    // Clear the previous install's data BEFORE awaiting so a switch to a
+    // different install row in the title-popup picker doesn't briefly
+    // render the prior install's sections / disk reading while the new
+    // IPC is in flight (visible as "right pane is frozen" — regression
+    // for #582). `loading` flips to true alongside, so
+    // `ComfyUISettingsContent` shows its Loading… placeholder instead of
+    // stale rows.
+    sections.value = []
+    diskSpace.value = null
     loading.value = true
     error.value = null
     try {
