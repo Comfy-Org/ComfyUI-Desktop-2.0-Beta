@@ -8,7 +8,7 @@ import type {
   AppUpdateDownloadProgress,
   AppUpdateState,
   DetailField,
-  DetailSection,
+  DetailSection
 } from '../../types/ipc'
 
 /**
@@ -30,7 +30,7 @@ interface Props {
 
 const props = withDefaults(defineProps<Props>(), {
   systemManaged: false,
-  preferenceFields: () => [],
+  preferenceFields: () => []
 })
 
 const emit = defineEmits<{
@@ -60,19 +60,31 @@ const targetVersionLabel = computed(() => {
 
 const statusSentence = computed(() => {
   if (props.isDownloading || props.state.kind === 'downloading') {
-    return t('appUpdate.panelDownloadingTitle', {
-      version: targetVersionLabel.value,
-    }, 'Downloading update…')
+    return t(
+      'appUpdate.panelDownloadingTitle',
+      {
+        version: targetVersionLabel.value
+      },
+      'Downloading update…'
+    )
   }
   switch (props.state.kind) {
     case 'ready':
-      return t('appUpdate.panelReadyTitle', {
-        version: targetVersionLabel.value,
-      }, 'Update ready to install')
+      return t(
+        'appUpdate.panelReadyTitle',
+        {
+          version: targetVersionLabel.value
+        },
+        'Update ready to install'
+      )
     case 'available':
-      return t('appUpdate.panelAvailableTitle', {
-        version: targetVersionLabel.value,
-      }, 'Update available')
+      return t(
+        'appUpdate.panelAvailableTitle',
+        {
+          version: targetVersionLabel.value
+        },
+        'Update available'
+      )
     default:
       return t('appUpdate.panelIdleTitle', 'ComfyUI Desktop is up to date')
   }
@@ -89,7 +101,7 @@ const installedDetail = computed(() => {
   return t(
     'appUpdate.installedLabel',
     { version: formatVersionLabel(props.installedVersion) },
-    `Installed ${formatVersionLabel(props.installedVersion)}`,
+    `Installed ${formatVersionLabel(props.installedVersion)}`
   )
 })
 
@@ -103,12 +115,8 @@ const lastCheckedDetail = computed(() => {
   }
   const time = formatRelativeFromMs(props.lastCheckedAt, t)
   return {
-    text: t(
-      'appUpdate.lastCheckedLabel',
-      { time },
-      `Last checked ${time}`,
-    ),
-    title,
+    text: t('appUpdate.lastCheckedLabel', { time }, `Last checked ${time}`),
+    title
   }
 })
 
@@ -120,12 +128,12 @@ const latestDetail = computed(() => {
   return t(
     'appUpdate.latestLabel',
     { version: formatVersionLabel(props.state.version) },
-    `Latest ${formatVersionLabel(props.state.version)}`,
+    `Latest ${formatVersionLabel(props.state.version)}`
   )
 })
 
 const preferenceSections = computed<DetailSection[]>(() =>
-  props.preferenceFields.length > 0 ? [{ fields: props.preferenceFields }] : [],
+  props.preferenceFields.length > 0 ? [{ fields: props.preferenceFields }] : []
 )
 
 const primaryActionLabel = computed(() => {
@@ -142,7 +150,7 @@ const primaryActionLabel = computed(() => {
 })
 
 const showSecondaryCheck = computed(
-  () => props.state.kind === 'available' || props.state.kind === 'ready',
+  () => props.state.kind === 'available' || props.state.kind === 'ready'
 )
 
 const actionsDisabled = computed(() => props.checking || props.isDownloading)
@@ -177,16 +185,19 @@ const progressDetail = computed<string | null>(() => {
 
         <div v-if="installedDetail || lastCheckedDetail || latestDetail" class="updates-details">
           <span v-if="installedDetail" class="updates-detail">{{ installedDetail }}</span>
-          <span
-            v-if="lastCheckedDetail"
-            class="updates-detail"
-            :title="lastCheckedDetail.title"
-          >{{ lastCheckedDetail.text }}</span>
+          <span v-if="lastCheckedDetail" class="updates-detail" :title="lastCheckedDetail.title">{{
+            lastCheckedDetail.text
+          }}</span>
           <span v-if="latestDetail" class="updates-detail is-highlight">{{ latestDetail }}</span>
         </div>
 
         <p v-if="systemManaged" class="updates-note">
-          {{ t('appUpdate.systemManagedNote', 'Updates for this install are delivered through your system package manager.') }}
+          {{
+            t(
+              'appUpdate.systemManagedNote',
+              'Updates for this install are delivered through your system package manager.'
+            )
+          }}
         </p>
 
         <div v-if="isDownloading" class="updates-progress">
@@ -339,10 +350,13 @@ const progressDetail = computed<string | null>(() => {
 }
 
 .updates-action:disabled {
-  opacity: 0.5;
   cursor: not-allowed;
+  opacity: 0.5;
 }
 
+.updates-action.accent:disabled:hover {
+  background: var(--brand-surface-bg-hover);
+}
 .updates-progress {
   display: flex;
   flex-direction: column;

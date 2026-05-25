@@ -7,6 +7,7 @@ import GlobalSettingsMicroSection from './globalSettings/GlobalSettingsMicroSect
 import GitHubLinkCard from './globalSettings/GitHubLinkCard.vue'
 import ModelsDirList from './globalSettings/ModelsDirList.vue'
 import SettingsSectionList from '../views/comfyUISettings/SettingsSectionList.vue'
+import { withMinDuration } from '../lib/uiTiming'
 import type {
   AppUpdateDownloadProgress,
   AppUpdateState,
@@ -163,9 +164,17 @@ async function handleUpdateNow(): Promise<void> {
   await handleCheckForUpdate()
 }
 
+const isChecking = ref(false)
+
 async function handleCheckForUpdate(): Promise<void> {
+  isChecking.value = true
   try {
-    await bridge?.globalSettingsCheckForUpdate()
+    // `withMinDuration` floors the busy state so a sub-frame backend
+    // response (e.g. dev-mode no-op, up-to-date short-circuit) still
+    // flashes the "Checking…" label long enough to feel acknowledged.
+    await withMinDuration(async () => {
+      await bridge?.globalSettingsCheckForUpdate()
+    })
   } finally {
     const now = Date.now()
     try {
@@ -174,6 +183,7 @@ async function handleCheckForUpdate(): Promise<void> {
       /* noop */
     }
     bridge?.globalSettingsSetLastCheckedAt(now)
+    isChecking.value = false
   }
 }
 
@@ -265,7 +275,7 @@ onMounted(() => {
             :state="appUpdateState"
             :progress="appUpdateProgress"
             :is-downloading="snapshot.appUpdate.isDownloading"
-            :checking="false"
+            :checking="isChecking"
             :last-checked-at="snapshot.appUpdate.lastCheckedAt"
             :installed-version="snapshot.appUpdate.installedVersion"
             :system-managed="snapshot.appUpdate.capabilities.systemManaged"

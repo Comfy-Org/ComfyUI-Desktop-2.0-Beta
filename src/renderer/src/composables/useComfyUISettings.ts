@@ -17,6 +17,7 @@ import {
   type ShowProgressOpts,
 } from '../types/ipc'
 import { IN_PLACE_RELAUNCH, augmentActionWithStopWarning, stopAndWaitForExit } from '../lib/stopWarning'
+import { sleepRemainder } from '../lib/uiTiming'
 
 /**
  * Backing state + IPC plumbing for the brand-redesigned Settings drawer
@@ -525,6 +526,12 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
     //     showProgress path so inline REQUIRES_STOPPED actions don't
     //     race the backend's running-check on a running install.
     runningActionIds.value = new Set(runningActionIds.value).add(mutableAction.id)
+    // Track when the spinner went up so we can floor its lifetime in
+    // the finally. Sub-frame backend responses (rate-limit cache hits,
+    // already-up-to-date short-circuits, dev-mode no-ops) would
+    // otherwise hide the spinner inside one frame and the click would
+    // read as a no-op. See `MIN_BUSY_FEEDBACK_MS` in `lib/uiTiming.ts`.
+    const busyStartedAt = Date.now()
     try {
       emitTelemetryAction('desktop2.action.invoked', telemetryContext)
       if (wasRunning && requiresStoppedGuard) {
@@ -561,6 +568,7 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
         message: err instanceof Error ? err.message : String(err),
       })
     } finally {
+      await sleepRemainder(busyStartedAt)
       const next = new Set(runningActionIds.value)
       next.delete(mutableAction.id)
       runningActionIds.value = next
