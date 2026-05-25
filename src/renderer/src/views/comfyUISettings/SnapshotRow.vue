@@ -26,9 +26,15 @@ interface Props {
   expanded: boolean
   /** First (newest) snapshot in the timeline carries a "Current" badge. */
   isCurrent?: boolean
+  /** Optional `data-testid` for the header toggle — lets the parent
+   *  scope tests to a specific snapshot by filename. */
+  toggleTestId?: string
 }
 
-const props = withDefaults(defineProps<Props>(), { isCurrent: false })
+const props = withDefaults(defineProps<Props>(), {
+  isCurrent: false,
+  toggleTestId: undefined,
+})
 
 const emit = defineEmits<{
   toggle: []
@@ -103,6 +109,7 @@ const chips = computed<Chip[]>(() => {
       type="button"
       class="snapshot-row-head"
       :aria-expanded="expanded"
+      :data-testid="toggleTestId"
       @click="emit('toggle')"
     >
       <div class="snapshot-row-head-left">

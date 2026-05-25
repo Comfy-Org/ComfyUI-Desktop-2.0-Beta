@@ -20,10 +20,16 @@ import BaseAlert from '../components/ui/BaseAlert.vue'
 
 type SystemModalConfirmStyle = 'primary' | 'danger'
 
+interface SystemModalDetailGroup {
+  label: string
+  items: string[]
+}
+
 interface SystemModalSpec {
   id: string
   title: string
   message: string
+  details?: SystemModalDetailGroup[]
   confirmLabel: string
   cancelLabel: string
   confirmStyle?: SystemModalConfirmStyle
@@ -87,7 +93,24 @@ onUnmounted(() => {
     show-cancel
     @close="ack('confirm')"
     @cancel="ack('cancel')"
-  />
+  >
+    <!-- Default slot replaces the bare message rendering when the spec
+         carries structured `details` — we render `message` first, then
+         each detail group as a labelled bulleted list. -->
+    <template v-if="spec?.details && spec.details.length > 0" #default>
+      <p v-if="spec.message" class="system-modal-message">{{ spec.message }}</p>
+      <div
+        v-for="(group, gi) in spec.details"
+        :key="`detail-${gi}`"
+        class="system-modal-detail-group"
+      >
+        <p class="system-modal-detail-label">{{ group.label }}</p>
+        <ul class="system-modal-detail-items">
+          <li v-for="(item, ii) in group.items" :key="`item-${ii}`">{{ item }}</li>
+        </ul>
+      </div>
+    </template>
+  </BaseAlert>
 </template>
 
 <style>
@@ -100,5 +123,33 @@ body,
   width: 100%;
   height: 100%;
   background: transparent !important;
+}
+
+.system-modal-message {
+  margin: 0 0 12px;
+}
+
+.system-modal-detail-group + .system-modal-detail-group {
+  margin-top: 10px;
+}
+
+.system-modal-detail-label {
+  margin: 0 0 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.system-modal-detail-items {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+  color: var(--neutral-100);
+}
+
+.system-modal-detail-items li {
+  line-height: 1.5;
 }
 </style>

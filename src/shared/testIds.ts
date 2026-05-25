@@ -41,10 +41,15 @@ export const TID = {
   contextMenuItem: (id: string) => `context-menu-item-${id}`,
 
   // ---------- Confirm modals ----------
-  /** Generic confirm modal confirm button. */
+  /** Generic confirm modal confirm button. Used by the rich-confirm
+   *  (`messageDetails`, snapshot preview, etc.) variant of `ModalDialog`
+   *  AND its prompt mode (e.g. Copy Installation new-name prompt). */
   modalConfirm: 'modal-confirm-button',
   /** Generic confirm modal cancel button. */
   modalCancel: 'modal-cancel-button',
+  /** The text input inside the prompt modal (Copy Installation,
+   *  Copy & Update, snapshot save label, etc.). */
+  modalPromptInput: 'modal-prompt-input',
   /** The primary action button of a `BaseAlert` (alert OK / simple
    *  confirm primary). Hard-coded in `BaseAlert.vue` — kept here so
    *  tests reference a single source of truth. */
@@ -61,6 +66,21 @@ export const TID = {
   updateChannelCard: (channel: string) => `update-channel-card-${channel}`,
   /** The "Update Now" / "Copy & Update" CTA inside a channel card. */
   updateActionButton: (actionId: string) => `update-action-${actionId}`,
+
+  // ---------- Settings drawer / picker — pin-bottom MoreMenu ----------
+  /** An action item inside the Settings drawer / picker's footer "More"
+   *  menu. `actionId` matches the `ActionDef.id` shipped in the source's
+   *  `pinBottom: true` section (e.g. `copy`, `delete`, `open-folder`),
+   *  with the Launch→Restart swap surfacing as `restart` when the
+   *  install is running. */
+  pinBottomAction: (actionId: string) => `pin-bottom-action-${actionId}`,
+
+  // ---------- Snapshots tab ----------
+  /** A snapshot timeline row's expand toggle (header strip). `filename`
+   *  is the snapshot's on-disk filename — stable across reloads. */
+  snapshotRow: (filename: string) => `snapshot-row-${filename}`,
+  /** The Restore CTA inside an expanded snapshot row's detail panel. */
+  snapshotRowRestore: (filename: string) => `snapshot-row-restore-${filename}`,
 
   // ---------- Progress takeover ----------
   /** The red error message block in the brand progress takeover. */
