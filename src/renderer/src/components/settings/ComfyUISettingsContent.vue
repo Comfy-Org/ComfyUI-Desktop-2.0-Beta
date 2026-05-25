@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { ChevronUp, ArrowLeft } from 'lucide-vue-next'
 import { useComfyUISettings } from '../../composables/useComfyUISettings'
 import { useSessionStore } from '../../stores/sessionStore'
+import { findActionById } from '../../lib/findAction'
 import MoreMenu from '../../views/comfyUISettings/MoreMenu.vue'
 import ArgsBuilderPage from '../../views/comfyUISettings/ArgsBuilderPage.vue'
 import SnapshotsView from '../../views/comfyUISettings/SnapshotsView.vue'
@@ -35,11 +36,19 @@ interface Props {
    *  because the drawer host owns its own back-chrome; only the
    *  picker's expanded right pane needs an in-content back. */
   showBack?: boolean
+  /** Optional action id to fire automatically once `sections` are
+   *  loaded — mirrors `DetailModal`'s `autoAction` prop. Used by the
+   *  picker's expanded mode when opened via dashboard kebab
+   *  `Copy Installation` / `Untrack` / `Delete` / `Migrate to
+   *  Standalone`. Consumed exactly once per prop value transition;
+   *  later section reloads or selection changes do not re-fire. */
+  autoAction?: string | null
 }
 
 const props = withDefaults(defineProps<Props>(), {
   initialTab: 'config',
   showBack: false,
+  autoAction: null,
 })
 
 const emit = defineEmits<{
@@ -77,6 +86,7 @@ watch(
 const installation = toRef(props, 'installation')
 const sessionStore = useSessionStore()
 const {
+  sections,
   loading,
   error,
   updateField,
@@ -91,6 +101,67 @@ const {
   onNavigateList: () => emit('navigate-list'),
   onClose: () => emit('request-close'),
 })
+
+// `autoAction` consumption — fires the named action once per prop
+// transition, after sections have loaded for the current install.
+// Used by dashboard kebab `Copy Installation` / `Untrack` (and the
+// existing `Migrate to Standalone` / `Delete` routes) which open the
+// picker in expanded mode with an `autoAction` seed so the source-
+// action def's confirm/prompt/disk-check chain actually fires —
+// otherwise the picker would just open with the user staring at a
+// settings tab.
+//
+// Guards:
+//   - keyed on the prop value itself (not the install id) so re-mounts
+//     on the same `autoAction` don't double-fire, and so picking a
+//     different install while the prop sticks around can't accidentally
+//     auto-run a destructive op on the new install
+//   - reset to `null` when the prop transitions to a NEW value (or back
+//     to null), so a second Manage click against the same install with
+//     a different autoAction can fire
+const consumedAutoAction = ref<string | null>(null)
+watch(
+  () => props.autoAction,
+  (next, prev) => {
+    if (next !== prev) consumedAutoAction.value = null
+  },
+)
+watch(
+  [
+    () => props.autoAction,
+    () => props.installation?.id ?? null,
+    () => loading.value,
+    () => sections.value.length,
+  ],
+  async ([autoAction, installId, isLoading, sectionsLen]) => {
+    if (!installId || !autoAction || isLoading || sectionsLen === 0) return
+    if (consumedAutoAction.value === autoAction) return
+
+    // Mirror `DetailModal`'s channel-card-aware resolution so that
+    // nested per-channel actions (`update-comfyui`, `copy-update`,
+    // `switch-channel`) target the install's currently-selected
+    // channel rather than an arbitrary other channel's same-id action.
+    const channelField = sections.value
+      .flatMap((s) => s.fields ?? [])
+      .find((f) => f.editType === 'channel-cards')
+    const currentChannel = typeof channelField?.value === 'string' ? channelField.value : null
+    const action = findActionById(sections.value, autoAction, currentChannel)
+    if (!action) return
+
+    consumedAutoAction.value = autoAction
+    await nextTick()
+
+    // Re-check the install after the tick — selection can change in
+    // the meantime (the popup is one mount across install switches),
+    // and `runAction` reads the current installation at call time. A
+    // stale invocation would auto-fire a destructive op against the
+    // wrong install.
+    if (props.installation?.id !== installId) return
+
+    void runAction(action)
+  },
+  { immediate: true },
+)
 
 interface TabDef {
   key: ComfyUISettingsTab

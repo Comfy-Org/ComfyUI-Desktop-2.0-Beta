@@ -288,3 +288,62 @@ describe('useInstallContextMenu — delete fast path (regression for #582)', () 
     expect(apiMock.getDetailSections).not.toHaveBeenCalled()
   })
 })
+
+// --- Copy / Untrack routing (regression for #592 audit Bug #2) ---
+//
+// Both kebab items used to call `window.api.runAction(id, 'copy' | 'remove')`
+// directly. The source-action defs declare `prompt` / `confirm` for the
+// renderer, so main saw `actionData = undefined` and bailed silently
+// (copy returned `{ ok: false, message: 'No name provided.' }`, untrack
+// fired with no confirm at all). The fix routes both through `onManage`
+// with the appropriate `autoAction` so the source-side action machinery
+// (confirms, prompts, disk-check, showProgress) is reused.
+
+function mountHarnessWithManage(
+  onManage: (inst: Installation, options?: { initialTab?: string; autoAction?: string | null }) => void,
+): { menu: ReturnType<typeof useInstallContextMenu> } {
+  const pinia = createPinia()
+  setActivePinia(pinia)
+  const i18n = createI18n({ legacy: false, locale: 'en', messages })
+  let menu!: ReturnType<typeof useInstallContextMenu>
+  _harnessSetup = () => {
+    menu = useInstallContextMenu({ onManage })
+  }
+  mount(HarnessComponent, { global: { plugins: [pinia, i18n] } })
+  _harnessSetup = null
+  return { menu }
+}
+
+describe('useInstallContextMenu — copy-install / untrack routing (regression for #592 audit Bug #2)', () => {
+  beforeEach(() => {
+    apiMock.runAction.mockClear()
+  })
+
+  it('copy-install routes through onManage with autoAction "copy" and does not call runAction directly', async () => {
+    const onManage = vi.fn<(inst: Installation, options?: { autoAction?: string | null }) => void>()
+    const inst = makeInstall()
+    const { menu } = mountHarnessWithManage(onManage)
+
+    await menu.triggerAction('copy-install', inst)
+
+    expect(onManage).toHaveBeenCalledTimes(1)
+    expect(onManage.mock.calls[0][0]).toBe(inst)
+    expect(onManage.mock.calls[0][1]).toEqual({ autoAction: 'copy' })
+    // Critical: the direct runAction call is the bug we are fixing —
+    // main can't supply `name` so it returns `{ ok: false }` silently.
+    expect(apiMock.runAction).not.toHaveBeenCalled()
+  })
+
+  it('untrack routes through onManage with autoAction "remove" and does not call runAction directly', async () => {
+    const onManage = vi.fn<(inst: Installation, options?: { autoAction?: string | null }) => void>()
+    const inst = makeInstall()
+    const { menu } = mountHarnessWithManage(onManage)
+
+    await menu.triggerAction('untrack', inst)
+
+    expect(onManage).toHaveBeenCalledTimes(1)
+    expect(onManage.mock.calls[0][0]).toBe(inst)
+    expect(onManage.mock.calls[0][1]).toEqual({ autoAction: 'remove' })
+    expect(apiMock.runAction).not.toHaveBeenCalled()
+  })
+})

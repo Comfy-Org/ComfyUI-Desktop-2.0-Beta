@@ -573,10 +573,12 @@ function handleExpandedPrimaryAction(running: boolean): void {
             <ComfyUISettingsContent
               :installation="selectedInstall"
               :initial-tab="initialExpandedTab"
+              :auto-action="snapshot.autoAction ?? null"
               :show-back="true"
               class="picker-expanded-body"
               @show-progress="handleSettingsShowProgress"
               @navigate-list="handleSettingsNavigateList"
+              @request-close="handleSettingsNavigateList"
               @primary-action="handleExpandedPrimaryAction"
               @back="handleCollapseToCompact"
             />
