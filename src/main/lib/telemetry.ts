@@ -385,9 +385,15 @@ function tryFlushDeferred(): void {
     pendingMigrationAlias = null
     void (async () => {
       await aliasImmediate(m.installationId, m.legacyId)
+      // Intentionally NOT publishing `from_id` (the legacy random UUID)
+      // as an event property. The `alias` call above already merges
+      // the legacy person record into the new one in PostHog, so the
+      // legacy id is already linked where it needs to be. Shipping it
+      // again on a regular event would scatter it across the event
+      // properties column where it shows up in every export and
+      // ad-hoc query — unnecessary proliferation of an identifier.
       capture('desktop2.identity.migrated', {
-        from_id: m.legacyId,
-        to_id: m.installationId,
+        installation_id: m.installationId,
         id_class: m.idClass
       })
       try {

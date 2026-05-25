@@ -42,13 +42,28 @@ let cached: Record<string, FeatureFlagValue> | null = null
 let initStarted = false
 const exposedThisSession = new Set<string>()
 
+function isFeatureFlagValue(v: unknown): v is FeatureFlagValue {
+  return typeof v === 'string' || typeof v === 'boolean'
+}
+
+/**
+ * Filter a parsed cache object to only `FeatureFlagValue` entries.
+ * The cache file is user-writable JSON on disk — a corrupted entry like
+ * `{ "flag.a": 42 }` would otherwise flow through `getFlag()` → exposure
+ * events with `variant: 42` and renderer code that branches on
+ * `value === 'treatment'` silently picks control. Per-key filter drops
+ * the bad entries rather than rejecting the whole cache.
+ */
 function readCacheSync(): Record<string, FeatureFlagValue> | null {
   try {
     const raw = fs.readFileSync(cacheFilePath(), 'utf-8')
     const parsed: unknown = JSON.parse(raw)
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      return parsed as Record<string, FeatureFlagValue>
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+    const sanitised: Record<string, FeatureFlagValue> = {}
+    for (const [key, value] of Object.entries(parsed)) {
+      if (isFeatureFlagValue(value)) sanitised[key] = value
     }
+    return sanitised
   } catch {
     // file missing or unreadable; treat as no cache
   }
@@ -80,6 +95,13 @@ export function initExperiments(opts: {
   personProperties: Record<string, string>
   timeoutMs?: number
 }): Promise<void> {
+  // Idempotent within a process: repeated calls return without re-running
+  // the cache load or the background fetch. The `opts.distinctId` and
+  // `opts.personProperties` of subsequent calls are intentionally ignored
+  // — identity changes mid-session (e.g. after `bindUserId`) do not
+  // re-evaluate experiments. Variant stability for an installation is a
+  // property we want; rotating variants when a user logs in would
+  // contaminate the experiment population.
   if (initStarted) return Promise.resolve()
   initStarted = true
   cached = readCacheSync() ?? {}
@@ -94,8 +116,9 @@ export function initExperiments(opts: {
       // ambiguous (could be timeout, could be "no flags configured"); the
       // safer move is to keep the previously-cached values so a user who
       // has been assigned a variant doesn't flip back to control on a
-      // single bad fetch.
-      if (flags && Object.keys(flags).length > 0) {
+      // single bad fetch. (loadFeatureFlagsImmediate never resolves to
+      // null/undefined — always a Record — so no nullish guard needed.)
+      if (Object.keys(flags).length > 0) {
         cached = flags
         writeCache(flags)
       }

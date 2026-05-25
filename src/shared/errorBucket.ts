@@ -122,10 +122,12 @@ export function bucketError(input: unknown): ErrorBucket {
   if (message.includes('permission') || message.includes('access') || message.includes('eacces'))
     return 'permissions'
   if (message.includes('path') || message.includes('enoent')) return 'path'
-  // Python exception class shape ("FooError" / "FooException"). Matches
-  // anywhere in the message (not just `^`) — scrubAll can strip a path
-  // prefix and shift the class name off the start of the line; multi-line
-  // tracebacks may also wrap the class name mid-message.
-  if (/\b[a-z][a-z0-9_.]*(error|exception)\b/.test(message)) return 'python'
+  // Python exception class shape ("FooError" / "FooException"). Match
+  // against the ORIGINAL (case-sensitive) `raw` — requires an uppercase
+  // first letter — so we don't false-positive on lowercase noise like
+  // "module.error", "user.exception", "see foo.error.somefile". scrubAll
+  // can still strip a path prefix and leave the class name mid-message,
+  // which is fine — no `^` anchor.
+  if (/\b[A-Z][A-Za-z0-9_.]*(?:Error|Exception)\b/.test(raw)) return 'python'
   return 'other'
 }

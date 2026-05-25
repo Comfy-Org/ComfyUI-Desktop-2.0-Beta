@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useDebounceFn } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { AlertCircle, ArrowLeft, Loader2, Search, SearchX, X } from 'lucide-vue-next'
 import BaseInput from '../../components/ui/BaseInput.vue'
@@ -86,13 +87,20 @@ async function fetchSchema(): Promise<void> {
 // ArgsBuilder usage validation. The previous one-coarse-
 // settings.changed event hid ArgsBuilder usage entirely; this event
 // makes "did anyone edit launch args" answerable, with per-arg detail.
-function emitArgsChanged(argKey: string, valueKind: ComfyArgDef['type']): void {
+//
+// Debounced 500ms: text-input args (`--listen 0.0.0.0`, `--port 8188`)
+// otherwise emit one event per keystroke, which would make `args.changed`
+// the loudest event in the dataset for no analytical gain — we only care
+// that the user edited a given arg, not the per-character intermediate
+// states. The (arg_key, value_kind) pair stays unique enough that the
+// trailing-edge debounce keeps the signal honest.
+const emitArgsChanged = useDebounceFn((argKey: string, valueKind: ComfyArgDef['type']) => {
   emitTelemetryAction('desktop2.args.changed', {
     installation_id: props.installationId,
     arg_key: argKey,
     value_kind: valueKind
   })
-}
+}, 500)
 
 onMounted(() => {
   emitTelemetryAction('desktop2.args.builder.opened', {

@@ -31,10 +31,20 @@ onMounted(async () => {
   // are silently absent from the experiment's exposure denominator and
   // the control arm looks structurally smaller / biased.
   let variantStr = 'control'
+  // `null` from the IPC handler means "flag not present in the on-disk
+  // cache" (first boot before the background fetch settles, or a flag
+  // that hasn't been pushed). That's a fallback assignment, not a
+  // cache hit — tagging it as `'fallback'` lets dashboards split
+  // first-boot users from steady-state users.
   let source: 'cache' | 'fallback' = 'cache'
   try {
     const variant = await window.api.telemetryGetExperimentFlag(EXPERIMENT_KEY)
-    variantStr = typeof variant === 'string' ? variant : variant === true ? 'treatment' : 'control'
+    if (variant === null) {
+      source = 'fallback'
+    } else {
+      variantStr =
+        typeof variant === 'string' ? variant : variant === true ? 'treatment' : 'control'
+    }
   } catch {
     source = 'fallback'
   }
@@ -73,15 +83,15 @@ function dismiss(): void {
   padding: 6px 10px 6px 12px;
   margin: 0 auto 12px;
   border-radius: 999px;
-  background: var(--color-surface-2, rgba(255, 255, 255, 0.06));
-  border: 1px solid var(--color-border-subtle, rgba(255, 255, 255, 0.08));
+  background: var(--bg-elev-2, rgba(127, 127, 127, 0.14));
+  border: 1px solid var(--border-subtle, rgba(127, 127, 127, 0.18));
   font-size: 12px;
-  color: var(--color-text-secondary, rgba(255, 255, 255, 0.72));
+  color: var(--text-muted, rgba(255, 255, 255, 0.72));
   max-width: max-content;
 }
 
 .account-banner-icon {
-  color: var(--color-accent, #a5b4fc);
+  color: var(--accent-soft, rgba(74, 144, 226, 0.9));
   flex-shrink: 0;
 }
 
@@ -110,11 +120,11 @@ function dismiss(): void {
 
 .account-banner-dismiss:hover {
   opacity: 1;
-  background: var(--color-surface-3, rgba(255, 255, 255, 0.06));
+  background: var(--bg-elev-2, rgba(127, 127, 127, 0.18));
 }
 
 .account-banner-dismiss:focus-visible {
-  outline: 2px solid var(--color-focus-ring, #6366f1);
+  outline: 2px solid var(--accent-soft, rgba(74, 144, 226, 0.9));
   outline-offset: 2px;
   opacity: 1;
 }

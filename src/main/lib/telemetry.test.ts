@@ -61,6 +61,13 @@ interface IdentifyCall {
 }
 const identifies: IdentifyCall[] = []
 
+interface ExceptionCall {
+  error: unknown
+  distinctId: string
+  properties?: Record<string, unknown>
+}
+const exceptions: ExceptionCall[] = []
+
 vi.mock('posthog-node', () => ({
   PostHog: class {
     capture(call: CapturedCall): void {
@@ -69,7 +76,13 @@ vi.mock('posthog-node', () => ({
     identify(call: IdentifyCall): void {
       identifies.push(call)
     }
-    captureException(): void {}
+    captureException(
+      error: unknown,
+      distinctId: string,
+      properties?: Record<string, unknown>
+    ): void {
+      exceptions.push({ error, distinctId, properties })
+    }
     alias(call: AliasCall): void {
       aliases.push(call)
     }
@@ -144,6 +157,13 @@ describe('telemetry.bucketError', () => {
     // event landed in `other`.
     expect(telemetry.bucketError('execution failed -> RuntimeError: bad input')).toBe('python')
     expect(telemetry.bucketError('Got AttributeError while computing')).toBe('python')
+  })
+  it('does NOT false-positive on lowercase noise like "module.error"', () => {
+    // The python regex requires an uppercase first letter on the class
+    // name — without that, "user.error: oops" or "config.exception in foo"
+    // would slide into the python bucket and pollute the dashboard.
+    expect(telemetry.bucketError('see module.error somewhere in foo.py')).toBe('other')
+    expect(telemetry.bucketError('the user.exception field is set')).toBe('other')
   })
   it('classifies tensor / shape mismatches', () => {
     expect(telemetry.bucketError('size mismatch for transformer.h.0.weight')).toBe('shape_mismatch')
@@ -377,9 +397,62 @@ describe('telemetry consent state (3-state)', () => {
   it('captureException is suppressed outside granted', () => {
     telemetry.setConsentState('denied')
     telemetry.identify('any')
-    // We don't have a mock that tracks captureException calls, but the call
-    // should be a no-op (no throw).
-    expect(() => telemetry.captureException(new Error('boom'), {})).not.toThrow()
+    exceptions.length = 0
+    telemetry.captureException(new Error('boom'), {})
+    expect(exceptions).toHaveLength(0)
+
+    telemetry.setConsentState('undecided')
+    exceptions.length = 0
+    telemetry.captureException(new Error('boom'), {})
+    expect(exceptions).toHaveLength(0)
+
+    // Sanity: granted DOES capture.
+    telemetry.setConsentState('granted')
+    exceptions.length = 0
+    telemetry.captureException(new Error('boom'), {})
+    expect(exceptions).toHaveLength(1)
+  })
+})
+
+describe('telemetry.registerPersonProperties pre-consent merge', () => {
+  beforeEach(() => {
+    captured.length = 0
+    identifies.length = 0
+    process.env['POSTHOG_API_KEY'] = 'test-key'
+    process.env['POSTHOG_ENABLED'] = '1'
+    telemetry._resetForTest()
+    telemetry.initTelemetry({ appVersion: '0.0.0', appEnv: 'test', isPackaged: false })
+  })
+
+  afterEach(() => {
+    delete process.env['POSTHOG_API_KEY']
+    delete process.env['POSTHOG_ENABLED']
+    telemetry.setConsentState('granted')
+  })
+
+  it('merges multiple pre-consent property writes into one identify on grant (latest-wins per key)', () => {
+    telemetry.setConsentState('undecided')
+    telemetry.identify('id', { app_version: '1.0.0' })
+    identifies.length = 0
+
+    telemetry.registerPersonProperties({ gpu_tier: 'low', locale: 'en' })
+    telemetry.registerPersonProperties({ gpu_tier: 'mid', theme: 'dark' })
+    // Nothing should have shipped yet.
+    expect(identifies).toHaveLength(0)
+
+    telemetry.setConsentState('granted')
+
+    // Exactly one identify call carrying the merged $set, with the
+    // second gpu_tier value winning over the first.
+    const merged = identifies.find(
+      (i) => i.properties?.$set && 'gpu_tier' in (i.properties.$set as Record<string, unknown>)
+    )
+    expect(merged?.properties?.$set).toMatchObject({
+      app_version: '1.0.0',
+      gpu_tier: 'mid',
+      locale: 'en',
+      theme: 'dark'
+    })
   })
 })
 
@@ -420,10 +493,14 @@ describe('telemetry deferMigrationAlias', () => {
     expect(aliases).toContainEqual({ distinctId: 'new-id', alias: 'legacy-uuid-abc' })
     const migrated = captured.find((c) => c.event === 'desktop2.identity.migrated')
     expect(migrated?.properties).toMatchObject({
-      from_id: 'legacy-uuid-abc',
-      to_id: 'new-id',
+      installation_id: 'new-id',
       id_class: 'machine_derived'
     })
+    // Privacy hygiene: the legacy id is intentionally NOT shipped as an
+    // event property — the alias call above already merges the person
+    // records, so re-publishing the legacy id would scatter it across
+    // the events column for no analytical benefit.
+    expect(migrated?.properties).not.toHaveProperty('from_id')
     expect(onAliased).toHaveBeenCalledTimes(1)
   })
 
