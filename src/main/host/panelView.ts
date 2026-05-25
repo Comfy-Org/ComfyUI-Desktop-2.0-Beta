@@ -89,10 +89,18 @@ export function ensurePanelView(
   // numeric windowKey that PanelApp.vue must not see.
   const panelInstallationId = entry.installationId ?? ''
   const firstUseCompleted = getSetting('firstUseCompleted') === true
-  const panelQuery = {
+  const panelQuery: Record<string, string> = {
     installationId: panelInstallationId,
     panel: initialPanel,
     firstUseCompleted: String(firstUseCompleted),
+  }
+  // Propagate the E2E env flag to the renderer via the URL query so the
+  // panel's renderer-side test hooks (`__e2eRenderer`) only register
+  // when the runner explicitly opted in. Mirrors the main-side `E2E === '1'`
+  // gating used by `registerE2EHooks()` and the `e2eOverrides.ts`
+  // counters; the renderer can't see `process.env` directly.
+  if (process.env['E2E'] === '1') {
+    panelQuery['e2e'] = '1'
   }
   const isDev = !!process.env['ELECTRON_RENDERER_URL']
   const loadPromise = isDev

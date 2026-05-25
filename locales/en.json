@@ -707,7 +707,7 @@
     "updateNoGit": "No .git directory found in ComfyUI/. Commit-based updating requires a git repository.",
     "copyAndUpdate": "Copy & Update",
     "copyAndUpdateTitle": "Copy & Update",
-    "copyAndUpdateMessage": "Create a copy of this install and update the copy from {installed} to {latest}.\n\nThe original install will not be modified.",
+    "copyAndUpdateMessage": "Create a copy of this install and update the copy from {installed} to {latest}.\n\nThe original install will be preserved.",
     "copyAndUpdatePlaceholder": "Enter a name for the copy",
     "copyAndUpdateConfirm": "Copy & Update",
     "releaseNotesLabel": "Release Notes",
@@ -920,8 +920,7 @@
     "operationInProgressGeneric": "Another operation is currently in progress for this installation. Would you like to cancel it?",
     "cancelOperation": "Cancel Operation",
     "stopRequired": "This installation is currently running and must be stopped first.",
-    "stopRequiredConfirm": "This installation is currently running. Would you like to stop it to continue?",
-    "stopRunning": "Stop Running",
+    "willStopRunning": "ComfyUI is currently running and will be stopped to proceed.",
     "folderPermissionDenied": "macOS denied access to \"{path}\". Please open System Settings → Privacy & Security → Files and Folders, grant access to ComfyUI Desktop 2.0, then retry."
   },
 
@@ -945,7 +944,7 @@
     "customNodes": "Third-party extensions that add new node types and functionality to ComfyUI.",
     "pipPackages": "Python packages installed in the environment. Custom nodes often install their own pip dependencies.",
     "updateNow": "Update this installation in-place.",
-    "copyAndUpdate": "Create a copy of this installation and update the copy. The original will not be modified.",
+    "copyAndUpdate": "Create a copy of this installation and update the copy. The original will be preserved.",
     "envVars": "Custom environment variables passed to ComfyUI when it starts. Warning: values are stored unencrypted in the configuration file — do not add API keys, tokens, or other sensitive information."
   },
 

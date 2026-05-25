@@ -29,10 +29,10 @@ export async function handleCopy({ event, installationId, inst, actionData }: Ac
   _operationAborts.set(installationId, abort)
 
   try {
-    await performCopy(inst, name, sendProgress, abort.signal)
+    const { entry } = await performCopy(inst, name, sendProgress, abort.signal)
     _operationAborts.delete(installationId)
     sendProgress('done', { percent: 100, status: 'Complete' })
-    return { ok: true, navigate: 'list' }
+    return { ok: true, navigate: 'list', newInstallationId: entry.id }
   } catch (err) {
     _operationAborts.delete(installationId)
     if (abort.signal.aborted) return { ok: true, navigate: 'detail' }
@@ -97,7 +97,7 @@ export async function handleCopyUpdate({ event, installationId, inst, actionData
     }
 
     _operationAborts.delete(installationId)
-    return { ok: true, navigate: 'list' }
+    return { ok: true, navigate: 'list', newInstallationId: entry.id }
   } catch (err) {
     _operationAborts.delete(installationId)
     if (abort.signal.aborted) return { ok: true, navigate: 'detail' }
@@ -221,7 +221,7 @@ export async function handleReleaseUpdate({ event, installationId, inst, actionD
       return { ok: false, message: migrateError }
     }
     sendProgress('done', { percent: 100, status: 'Complete' })
-    return { ok: true, navigate: 'list' }
+    return { ok: true, navigate: 'list', newInstallationId: entry.id }
   } catch (err) {
     _operationAborts.delete(installationId)
     if (!installComplete) {

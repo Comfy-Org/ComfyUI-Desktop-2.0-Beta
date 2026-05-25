@@ -11,6 +11,7 @@ import InstanceRow from './instancePicker/InstanceRow.vue'
 import PickerRow from './instancePicker/PickerRow.vue'
 import { resolvePickerTab, type PickerTab } from '../lib/pickerTabs'
 import { mergePanelLocaleIntoPopup } from './pickerSettingsApiShim'
+import { useModal } from '../composables/useModal'
 import type {
   DetailSection,
   Installation,
@@ -381,9 +382,12 @@ watch(
 // ESC: collapse to compact when expanded, otherwise let the popup's
 // existing close-on-ESC behaviour close the popup. Capture-phase
 // listener so we win against any nested handlers inside the settings
-// UI.
+// UI — but defer to ModalDialog when a confirm/alert is open so ESC
+// resolves the dialog instead of tearing down the surface that owns it.
+const { state: pickerModalState } = useModal()
 function handleEsc(event: KeyboardEvent): void {
   if (event.key !== 'Escape') return
+  if (pickerModalState.visible) return
   if (snapshotMode.value === 'expanded') {
     event.preventDefault()
     event.stopPropagation()

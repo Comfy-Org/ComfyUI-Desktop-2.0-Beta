@@ -1,6 +1,8 @@
 import { onMounted, onUnmounted } from 'vue'
 import { useInstallationStore } from '../stores/installationStore'
-import type { Installation, ShowProgressOpts } from '../types/ipc'
+import { useSessionStore } from '../stores/sessionStore'
+import { IN_PLACE_RELAUNCH, stopAndWaitForExit } from '../lib/stopWarning'
+import { REQUIRES_STOPPED, type Installation, type ShowProgressOpts } from '../types/ipc'
 
 import type { Overlay } from './useOverlay'
 
@@ -45,6 +47,7 @@ interface DeepLinkRouterOpts {
  */
 export function useDeepLinkRouter(opts: DeepLinkRouterOpts): void {
   const installationStore = useInstallationStore()
+  const sessionStore = useSessionStore()
   let unsubPanelTriggerOverlay: (() => void) | null = null
 
   onMounted(() => {
@@ -130,34 +133,44 @@ export function useDeepLinkRouter(opts: DeepLinkRouterOpts): void {
           if (!id || !actionId || !title) return
           const inst = installationStore.getById(id)
           if (!inst) return
+          // Picker-driven apiCall: rebuild from actionId/actionData on
+          // this side because closures don't cross IPC. Mirrors
+          // `useComfyUISettings.runAction`'s showProgress branch —
+          // self-stops on a running install for REQUIRES_STOPPED and
+          // appends a relaunch for IN_PLACE_RELAUNCH ops.
           const isRestart = !!payload.isRestart
           const actionData = (payload.actionData ?? undefined) as
             | Record<string, unknown>
             | undefined
+          const wasRunning = sessionStore.isRunning(id)
+          const requiresStoppedGuard = !isRestart
+            && actionId !== 'migrate-to-standalone'
+            && REQUIRES_STOPPED.has(actionId)
+          const needsSelfStop = wasRunning && requiresStoppedGuard
+          const wantsRelaunch = needsSelfStop && IN_PLACE_RELAUNCH.has(actionId)
+          const isRunning = (): boolean => sessionStore.isRunning(id)
           const apiCall = isRestart
             ? async () => {
-              await window.api.stopComfyUI(id)
-              const deadline = Date.now() + 10_000
-              while (Date.now() < deadline) {
-                try {
-                  const installs = await window.api.getInstallations()
-                  const stillRunning = installs.find((i) => i.id === id)?.status === 'running'
-                  if (!stillRunning) break
-                } catch {
-                  break
-                }
-                await new Promise((r) => setTimeout(r, 100))
-              }
+              await stopAndWaitForExit(id, isRunning)
               return window.api.runAction(id, 'launch')
             }
-            : () => window.api.runAction(id, actionId, actionData)
+            : needsSelfStop
+              ? async () => {
+                await stopAndWaitForExit(id, isRunning)
+                const result = await window.api.runAction(id, actionId, actionData)
+                if (wantsRelaunch && result?.ok !== false) {
+                  await window.api.runAction(id, 'launch')
+                }
+                return result
+              }
+              : () => window.api.runAction(id, actionId, actionData)
           opts.showProgressFromPicker?.({
             installationId: id,
             title,
             apiCall,
             cancellable: !!payload.cancellable,
             returnTo: 'detail',
-            triggersInstanceStart: !!payload.triggersInstanceStart,
+            triggersInstanceStart: !!payload.triggersInstanceStart || wantsRelaunch,
             opKind: payload.opKind,
             actionId,
             actionData,

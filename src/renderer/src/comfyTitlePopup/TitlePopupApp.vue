@@ -5,6 +5,7 @@ import DownloadsView from './DownloadsView.vue'
 import InstancePickerView from './InstancePickerView.vue'
 import GlobalSettingsView from './GlobalSettingsView.vue'
 import ModalDialog from '../components/ModalDialog.vue'
+import { useModal } from '../composables/useModal'
 import type { DetailSection, SnapshotListData } from '../types/ipc'
 
 /**
@@ -233,11 +234,16 @@ function handleActivate(id: string): void {
   bridge?.activate(id)
 }
 
+const { state: modalState } = useModal()
+
 function handleKeydown(event: KeyboardEvent): void {
-  if (event.key === 'Escape') {
-    event.preventDefault()
-    bridge?.close()
-  }
+  if (event.key !== 'Escape') return
+  // Defer to the popup's own ModalDialog when a confirm/alert is open —
+  // otherwise ESC would close the popup and tear the modal down with it,
+  // dropping the in-flight action promise without a user-visible cancel.
+  if (modalState.visible) return
+  event.preventDefault()
+  bridge?.close()
 }
 
 let unsubConfig: (() => void) | undefined

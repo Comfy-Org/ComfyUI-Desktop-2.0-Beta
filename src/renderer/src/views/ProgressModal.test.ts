@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import { createPinia, setActivePinia } from 'pinia'
+import { readFileSync } from 'node:fs'
+import path from 'node:path'
 
 import ProgressModal from './ProgressModal.vue'
 import { useProgressStore } from '../stores/progressStore'
@@ -307,6 +309,10 @@ describe('ProgressModal — brand branch state transitions', () => {
     expect(body.selectorText('.brand-progress__error-message')).toContain(
       'Disk write failed: ENOSPC',
     )
+    // Test-id exposes the element for e2e selectors that need to assert
+    // overflow / scrollability against the real layout (jsdom can't
+    // compute scroll height).
+    expect(body.exists('[data-testid="progress-error-message"]')).toBe(true)
 
     // Inline Copy button rides alongside the message body.
     expect(body.exists('.brand-progress__error-copy')).toBe(true)
@@ -495,5 +501,42 @@ describe('ProgressModal — brand branch state transitions', () => {
     expect(subText).toContain('1050 / 2100 MB')
     expect(subText).toContain('22 MB/s')
     expect(subText).toContain('~1m remaining')
+  })
+})
+
+describe('ProgressModal — error message styling (regression for #582)', () => {
+  // jsdom doesn't compute layout, so we can't assert via
+  // `getComputedStyle().maxHeight` against the rendered element. Instead
+  // we parse the .vue file's `<style>` block directly and assert the
+  // `.brand-progress__error-message` rule still carries the `max-height`
+  // + `overflow-y` declarations introduced to stop long tracebacks from
+  // stretching the takeover.
+  //
+  // Without this guard the only signal a future refactor would have is a
+  // visual e2e diff — too easy to miss in a CSS-only PR.
+
+  // Resolved against the workspace root (cwd at test time) so this
+  // doesn't depend on import.meta.url (vitest jsdom mode can hand back
+  // a non-file URL there).
+  const vueSource = readFileSync(
+    path.resolve('src/renderer/src/views/ProgressModal.vue'),
+    'utf8',
+  )
+
+  function extractRule(selector: string): string {
+    // Anchor on a line start so we match the base rule rather than a
+    // descendant override (e.g. `.foo .bar { ... }` would otherwise win
+    // over `.bar { ... }` because it appears first in the file).
+    const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const re = new RegExp(`(?:^|\\n)${escaped}\\s*\\{([^}]*)\\}`)
+    const match = vueSource.match(re)
+    if (!match) throw new Error(`CSS rule for "${selector}" not found in ProgressModal.vue`)
+    return match[1]
+  }
+
+  it('bounds .brand-progress__error-message height so long errors do not stretch the takeover', () => {
+    const body = extractRule('.brand-progress__error-message')
+    expect(body).toMatch(/max-height:/)
+    expect(body).toMatch(/overflow-y:\s*auto/)
   })
 })

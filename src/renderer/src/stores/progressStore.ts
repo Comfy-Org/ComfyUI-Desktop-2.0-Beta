@@ -218,6 +218,11 @@ export const useProgressStore = defineStore('progress', () => {
   function cancelOperation(installationId: string): void {
     const op = operations.get(installationId)
     if (!op) return
+    // A finished op has nothing to cancel: the silent takeover→takeover
+    // overlay swap fires `onCancel` indiscriminately, but stopping
+    // ComfyUI here would punish the next op (or a relaunched session)
+    // for the previous one having completed.
+    if (op.finished) return
     op.cancelRequested = true
     op.flatStatus = t('progress.cancelling')
     window.api.cancelOperation(installationId)

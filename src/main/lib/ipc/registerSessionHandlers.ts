@@ -18,9 +18,11 @@ import {
   handleLaunch,
   handleDelegateToSource,
 } from './sessionActions'
+import { recordIpcInvocation } from '../e2eOverrides'
 
 export function registerSessionHandlers(): void {
   ipcMain.handle('stop-comfyui', async (_event, installationId?: string) => {
+    recordIpcInvocation('stop-comfyui', installationId)
     if (installationId) {
       await stopRunning(installationId)
     } else {
@@ -55,6 +57,7 @@ export function registerSessionHandlers(): void {
   })
 
   ipcMain.handle('run-action', async (_event, installationId: string, actionId: string, actionData?: Record<string, unknown>) => {
+    recordIpcInvocation('run-action', { installationId, actionId })
     const maybeInst = await installations.get(installationId)
     if (!maybeInst) return { ok: false, message: 'Installation not found.' }
     const inst = maybeInst

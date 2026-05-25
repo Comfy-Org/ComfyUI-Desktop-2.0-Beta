@@ -241,6 +241,9 @@ onUnmounted(() => {
     :show-cancel="isSimpleConfirm"
     :button-label="baseAlertButtonLabel"
     :tone="baseAlertTone"
+    :test-id-root="state.testIds.root"
+    :test-id-action="state.testIds.action"
+    :test-id-cancel="state.testIds.cancel"
     @close="onBaseAlertClose"
     @cancel="onBaseAlertCancel"
   />

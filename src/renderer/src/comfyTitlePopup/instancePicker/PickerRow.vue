@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { installTypeMetaFor } from '../../lib/installTypeIcon'
+import { TID } from '../../../../shared/testIds'
 import type { Installation } from '../../types/ipc'
 
 /**
@@ -39,11 +40,11 @@ const emit = defineEmits<{
 
 const typeMeta = computed(() => installTypeMetaFor(props.installation.sourceCategory))
 
-const versionLabel = computed(() => {
-  const raw = props.installation.version
-  if (!raw) return ''
-  return raw.startsWith('v') || raw.startsWith('V') ? raw : `v${raw}`
-})
+/** Backend pre-formats `installation.version` via `formatComfyVersion` —
+ *  the string already carries its own `v` prefix when one belongs (tag
+ *  forms) and intentionally omits it for SHA-only / `unknown` fallbacks.
+ *  Render verbatim; do not re-prefix. */
+const versionLabel = computed(() => props.installation.version ?? '')
 
 function handleOpen(): void {
   emit('open', props.installation)
@@ -57,6 +58,7 @@ function handleManage(): void {
   <article
     class="picker-row-card"
     :class="{ 'is-active': active, 'is-running': running }"
+    :data-testid="TID.pickerRow(installation.id)"
   >
     <div class="picker-row-card-identity">
       <span class="picker-row-card-icon-wrap">
@@ -89,10 +91,20 @@ function handleManage(): void {
     </div>
 
     <div class="picker-row-card-cta">
-      <button type="button" class="picker-row-card-open" @click="handleOpen">
+      <button
+        type="button"
+        class="picker-row-card-open"
+        :data-testid="TID.pickerRowOpen(installation.id)"
+        @click="handleOpen"
+      >
         {{ openLabel }}
       </button>
-      <button type="button" class="picker-row-card-manage" @click="handleManage">
+      <button
+        type="button"
+        class="picker-row-card-manage"
+        :data-testid="TID.pickerRowManage(installation.id)"
+        @click="handleManage"
+      >
         {{ manageLabel }}
       </button>
     </div>

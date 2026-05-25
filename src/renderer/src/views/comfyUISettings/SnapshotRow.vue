@@ -40,15 +40,6 @@ const triggerCopy = computed(() => _triggerLabel(props.snapshot.trigger, t))
 const relativeCopy = computed(() => _formatRelative(props.snapshot.createdAt, t))
 const absoluteCopy = computed(() => formatDate(props.snapshot.createdAt))
 
-/** Some snapshot payloads carry `comfyuiVersion` already prefixed with
- *  "v" (e.g. "v0.21.1"), others don't ("0.21.1"). Normalise so we never
- *  render "vv0.21.1" while still leading with "v" for clarity. */
-const versionLabel = computed(() => {
-  const raw = props.snapshot.comfyuiVersion ?? ''
-  if (!raw) return ''
-  return raw.startsWith('v') || raw.startsWith('V') ? raw : `v${raw}`
-})
-
 /** Trigger tone — `state` (post-update / post-restore) is highlighted
  *  because it marks an actual state transition; everything else stays
  *  neutral so the eye is drawn to meaningful changes first. */
@@ -143,7 +134,7 @@ const chips = computed<Chip[]>(() => {
       </div>
 
       <div class="snapshot-row-meta">
-        <span v-if="snapshot.comfyuiVersion">{{ versionLabel }}</span>
+        <span v-if="snapshot.comfyuiVersion">{{ snapshot.comfyuiVersion }}</span>
         <span v-if="snapshot.comfyuiVersion" class="snapshot-row-meta-dot">·</span>
         <span>{{ t('snapshots.nodesCount', { count: snapshot.nodeCount }) }}</span>
         <span class="snapshot-row-meta-dot">·</span>

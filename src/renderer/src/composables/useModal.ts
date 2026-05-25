@@ -24,6 +24,16 @@ export interface ModalCheckbox {
   checked: boolean
 }
 
+/** Optional per-modal test-id overrides forwarded to ModalDialog →
+ *  BaseAlert. Lets call sites tag a specific dialog (e.g. the
+ *  stop-instance confirm) without changing the singleton modal
+ *  primitive's default selectors. */
+export interface ModalTestIds {
+  root?: string
+  action?: string
+  cancel?: string
+}
+
 export interface ModalState {
   visible: boolean
   type: ModalType
@@ -44,6 +54,7 @@ export interface ModalState {
   required: boolean | string
   items: ModalSelectItem[]
   options: ModalOption[]
+  testIds: ModalTestIds
   resolve: ((value: unknown) => void) | null
 }
 
@@ -67,6 +78,7 @@ const state = reactive<ModalState>({
   required: false,
   items: [],
   options: [],
+  testIds: {},
   resolve: null,
 })
 
@@ -90,6 +102,7 @@ function reset(): void {
   state.required = false
   state.items = []
   state.options = []
+  state.testIds = {}
   state.resolve = null
 }
 
@@ -132,6 +145,7 @@ export function useModal() {
     checkboxes?: ModalCheckbox[]
     confirmLabel?: string
     confirmStyle?: string
+    testIds?: ModalTestIds
   }): Promise<boolean> {
     return new Promise((resolve) => {
       reset()
@@ -145,6 +159,7 @@ export function useModal() {
       state.checkboxes = (opts.checkboxes ?? []).map((c) => ({ ...c }))
       state.confirmLabel = opts.confirmLabel ?? i18n.global.t('modal.confirm')
       state.confirmStyle = opts.confirmStyle ?? 'danger'
+      state.testIds = opts.testIds ? { ...opts.testIds } : {}
       state.resolve = resolve as (value: unknown) => void
     })
   }

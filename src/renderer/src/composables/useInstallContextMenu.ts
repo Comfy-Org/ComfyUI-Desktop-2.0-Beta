@@ -6,7 +6,7 @@ import { useModal } from './useModal'
 import { revealInFolderLabel } from './usePlatform'
 import { progressOpKindForActionId, destroysInstanceForActionId } from '../lib/progressOpKind'
 import type { ContextMenuItem } from '../types/context-menu'
-import type { ActionDef, Installation, ShowProgressOpts } from '../types/ipc'
+import type { Installation, ShowProgressOpts } from '../types/ipc'
 
 /**
  * Action / context menu for chooser tiles. Powers two surfaces:
@@ -91,71 +91,6 @@ export function useInstallContextMenu(opts: {
   const modal = useModal()
   const sessionStore = useSessionStore()
   const progressStore = useProgressStore()
-
-  /** Fetch a single ActionDef from main by walking the install's detail
-   *  sections. Used by the fast-path branches in `triggerAction` so we
-   *  can run the action's confirm + showProgress without mounting
-   *  ManageInstallModal first. Returns `null` when the source has no
-   *  matching action (e.g. cloud install + delete). */
-  async function fetchActionDef(inst: Installation, actionId: string): Promise<ActionDef | null> {
-    try {
-      const sections = await window.api.getDetailSections(inst.id)
-      for (const section of sections) {
-        const match = section.actions?.find((a) => a.id === actionId)
-        if (match) return match
-      }
-    } catch {
-      // Falls through to caller's old onManage path.
-    }
-    return null
-  }
-
-  /** Run an action that only needs confirm + showProgress (no
-   *  fieldSelects / select / prompt / disk-space prelude). Today: the
-   *  Delete action def shape. Kept narrow on purpose — the full action
-   *  chain lives in useComfyUISettings / DetailModal and we don't want
-   *  to duplicate that machinery here. Returns true when the show-
-   *  progress branch fired, false otherwise (declined, no def, or the
-   *  action wasn't a confirm+showProgress shape). */
-  async function tryRunSimpleProgressAction(inst: Installation, actionId: string): Promise<boolean> {
-    if (!opts.onShowProgress) return false
-    const action = await fetchActionDef(inst, actionId)
-    if (!action || !action.showProgress) return false
-
-    if (action.confirm) {
-      // Mirror useComfyUISettings step 6: confirmWithOptions when the
-      // action def carries checkbox options, plain confirm otherwise.
-      if (action.confirm.options) {
-        // Confirm-with-options carries data the apiCall needs, so route
-        // through the legacy modal path until we generalise the fast-
-        // path. Caller will hit the onManage fallback below.
-        return false
-      }
-      const confirmed = await modal.confirm({
-        title: action.confirm.title || 'Confirm',
-        message: action.confirm.message || 'Are you sure?',
-        messageDetails: action.confirm.messageDetails,
-        confirmLabel: action.label,
-        confirmStyle: action.style || 'danger',
-      })
-      if (!confirmed) return true
-    }
-
-    const rawTitle = (action.progressTitle || action.label).replace(
-      /\{(\w+)\}/g,
-      (_, k: string) => String((action.data as Record<string, unknown>)?.[k] ?? k),
-    )
-    opts.onShowProgress({
-      installationId: inst.id,
-      title: `${rawTitle} — ${inst.name}`,
-      apiCall: () => window.api.runAction(inst.id, action.id, action.data),
-      cancellable: !!action.cancellable,
-      returnTo: 'list',
-      opKind: progressOpKindForActionId(action.id),
-      destroysInstance: destroysInstanceForActionId(action.id),
-    })
-    return true
-  }
 
   const ctxMenu = ref({
     open: false,
@@ -335,16 +270,39 @@ export function useInstallContextMenu(opts: {
         // Source action surfaces its own error path.
       }
     } else if (id === 'delete') {
-      // Fast path (preferred): when the caller provided `onShowProgress`,
-      // fetch the source-side `delete` action def, run its confirm
-      // directly via the global modal, and emit `show-progress` so
-      // ProgressModal takes over. This avoids the brief ManageInstallModal
-      // mount + sectionsLoading spinner flash that the old `onManage`
-      // path produced. Returns `false` when the source has no matching
-      // delete action (e.g. cloud install) or the action shape is
-      // unexpectedly complex — then we fall through to the legacy paths.
-      const ran = await tryRunSimpleProgressAction(inst, 'delete')
-      if (ran) return
+      // Build the confirm + showProgress payload renderer-side instead
+      // of round-tripping through `getDetailSections` to look up the
+      // source-side `deleteAction()` shape — the full payload rebuild
+      // was the ~2s confirm-modal stall on Windows. Cloud installs are
+      // already filtered out of the menu via `isLocalLikeInstall` +
+      // `isInstalled` gates in `ctxMenuItems`, so this path only sees
+      // local installs whose delete behaviour matches `actions.ts`.
+      if (opts.onShowProgress) {
+        // English fallbacks: PanelApp merges `locales/en.json`
+        // asynchronously after mount, so a very fast first click could
+        // otherwise render raw dotted keys.
+        const deleteLabel = t('actions.delete', 'Delete')
+        const confirmed = await modal.confirm({
+          title: t('actions.deleteConfirmTitle', 'Delete Install'),
+          message: `${t(
+            'actions.deleteConfirmMessage',
+            'This will permanently delete the install and all its files. This cannot be undone.',
+          )}\n${inst.installPath ?? ''}`,
+          confirmLabel: deleteLabel,
+          confirmStyle: 'danger',
+        })
+        if (!confirmed) return
+        opts.onShowProgress({
+          installationId: inst.id,
+          title: `${deleteLabel} — ${inst.name}`,
+          apiCall: () => window.api.runAction(inst.id, 'delete'),
+          cancellable: true,
+          returnTo: 'list',
+          opKind: progressOpKindForActionId('delete'),
+          destroysInstance: destroysInstanceForActionId('delete'),
+        })
+        return
+      }
       if (opts.onManage) {
         // Legacy path — DetailModal autoAction chain. Used when the
         // host doesn't expose `onShowProgress` (rare; picker forwards

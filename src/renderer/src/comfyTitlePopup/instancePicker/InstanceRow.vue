@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { installTypeMetaFor } from '../../lib/installTypeIcon'
+import { TID } from '../../../../shared/testIds'
 import type { Installation } from '../../types/ipc'
 
 /**
@@ -48,6 +49,7 @@ function handleClick(): void {
       tabindex="0"
       class="picker-row"
       :class="{ 'is-active': active, 'is-running': running }"
+      :data-testid="TID.pickerRow(installation.id)"
       @click="handleClick"
       @keydown.enter="handleClick"
       @keydown.space.prevent="handleClick"

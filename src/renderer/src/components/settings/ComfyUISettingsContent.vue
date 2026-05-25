@@ -16,6 +16,7 @@ import type {
   Installation,
   ShowProgressOpts,
 } from '../../types/ipc'
+import { TID } from '../../../../shared/testIds'
 
 /**
  * Per-install settings body (tab strip + scrollable body + footer).
@@ -338,7 +339,11 @@ defineExpose({
       <p v-if="!installation" class="empty">
         {{ t('comfyUISettings.emptyInstallLess', 'Open a ComfyUI install to view its settings.') }}
       </p>
-      <p v-else-if="loading && !visibleSections.length" class="empty">
+      <p
+        v-else-if="loading && !visibleSections.length"
+        class="empty"
+        :data-testid="TID.pickerSettingsLoading"
+      >
         {{ t('common.loading', 'Loading…') }}
       </p>
       <p v-else-if="error" class="empty error">{{ error }}</p>
@@ -377,6 +382,8 @@ defineExpose({
               v-else
               :key="`tab-${activeTab}`"
               class="settings-v2-tab-pane"
+              :data-testid="TID.pickerSettingsSections"
+              :data-install-id="installation?.id"
             >
               <SettingsSectionList
                 :sections="visibleSections"
