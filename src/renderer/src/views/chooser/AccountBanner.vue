@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { Sparkles, X } from 'lucide-vue-next'
+import { emitTelemetryAction } from '../../lib/telemetry'
 
 /**
  * Foundation-validation A/B banner.
@@ -62,6 +63,13 @@ onMounted(async () => {
 
 function dismiss(): void {
   dismissed.value = true
+  // Outcome metric for the smoke-test experiment. Low dismiss rate =
+  // banner is welcome / unobtrusive. High dismiss rate = banner is
+  // annoying enough to swat at on every chooser load. Either signal
+  // is informative for the real product banner that replaces this one.
+  emitTelemetryAction('desktop2.account_banner.dismissed', {
+    experiment_key: EXPERIMENT_KEY
+  })
 }
 </script>
 
