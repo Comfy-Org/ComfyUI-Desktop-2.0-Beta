@@ -363,11 +363,6 @@ function fieldOwnsLabel(field: DetailField): boolean {
 </template>
 
 <style scoped>
-/* Section + field styling lives WITH the component (not in the
- * consuming surface) so both the drawer and the instance-picker get
- * identical visuals without either having to re-declare these rules
- * — Vue scoped styles only reach their own DOM, and these classes
- * live in this template. */
 .settings-v2-sections {
   display: flex;
   flex-direction: column;
@@ -564,12 +559,6 @@ function fieldOwnsLabel(field: DetailField): boolean {
   min-height: 44px;
   padding: 4px 0;
 }
-
-.settings-v2-field.is-nested {
-  padding-left: 16px;
-  border-left: 2px solid var(--chooser-surface-border);
-}
-
 .settings-v2-readonly-path {
   display: flex;
   align-items: center;
