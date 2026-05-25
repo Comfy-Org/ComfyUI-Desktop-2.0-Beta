@@ -274,19 +274,20 @@ function handleNewInstallClick(): void {
 
 .chooser-view {
   /* Fluid centering pattern with a top-spacer floor:
-   *   - Short grid → both spacers grow toward 1fr → cluster centered
-   *   - Tall grid → spacers shrink, but top spacer stops at the clamp
-   *     minimum (~18vh) so the logo/search anchor at a stable upper
-   *     position instead of sliding into the brand-beam at the top
-   *   - Very tall grid → grid still scrolls internally (max-height
-   *     100%) so the cluster + viewport bounds are never breached
+   *   - Short grid (initial state, few tiles) → both spacers grow
+   *     toward 1fr → cluster centered, as before
+   *   - More tiles → spacers shrink symmetrically; top spacer floors
+   *     at ~4vh / 24-56px so the wordmark+search keep getting pushed
+   *     toward the top of the frame and the grid gains rows in-view
+   *   - Very tall grid → grid scrolls internally (max-height 100%)
+   *     so the cluster + viewport bounds are never breached
    *
    * Row layout: [top spacer] [wordmark] [search] [grid] [bottom spacer] */
   flex: 1 1 auto;
   min-height: 0;
   display: grid;
   grid-template-rows:
-    minmax(clamp(72px, 18vh, 180px), 1fr)
+    minmax(clamp(24px, 4vh, 56px), 1fr)
     auto
     auto
     minmax(0, auto)
@@ -294,7 +295,7 @@ function handleNewInstallClick(): void {
   grid-template-columns: minmax(0, 1fr);
   justify-items: center;
   width: 100%;
-  max-width: 1080px;
+  max-width: 1280px;
   padding: 24px;
   row-gap: 32px;
 }
@@ -342,7 +343,10 @@ function handleNewInstallClick(): void {
 .chooser-grid {
   grid-row: 4;
   width: 100%;
-  max-width: 920px;
+  /* 4 fixed tracks @ 280px + 3 × 16px gaps = 1168px. Keeps the 280px
+   * fixed-track contract from the comment below intact while letting
+   * wide viewports surface a 4-up row instead of capping at 3. */
+  max-width: 1168px;
   /* When the row collapses (tall grid in a short viewport), the grid
    * stops growing and scrolls internally. `min-height: 0` + an
    * explicit `max-height: 100%` are required so the grid can't push
