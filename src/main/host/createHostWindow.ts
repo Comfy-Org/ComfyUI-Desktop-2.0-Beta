@@ -3,8 +3,12 @@ import path from 'path'
 import type { InstallationRecord } from '../installations'
 import { getAppVersion } from '../lib/ipc'
 import { attachContextMenu } from '../lib/contextMenu'
-import { detachWindowDownloads, getDownloadsTrayState } from '../lib/comfyDownloadManager'
-import { shouldOpenInPopup } from '../lib/allowedPopups'
+import {
+  attachSessionDownloadHandler,
+  detachWindowDownloads,
+  getDownloadsTrayState,
+} from '../lib/comfyDownloadManager'
+import { isLikelyDownloadUrl, shouldOpenInPopup } from '../lib/allowedPopups'
 import { COMFY_BG, TITLEBAR_BG } from '../lib/theme'
 import {
   TITLEBAR_HEIGHT,
@@ -748,6 +752,13 @@ export function buildComfyView(
   comfyView.setBackgroundColor(COMFY_BG)
 
   const comfyContents = comfyView.webContents
+  // Eagerly attach the will-download handler to the comfy view's
+  // session so any `session.downloadURL(...)` call below — or a server-
+  // initiated `Content-Disposition: attachment` response — flows
+  // through the launcher's downloads tray instead of falling back to
+  // the browser. `attachSessionDownloadHandler` is idempotent.
+  attachSessionDownloadHandler(comfyContents.session)
+
   comfyContents.on('did-create-window', (childWindow) => {
     childWindow.setIcon(APP_ICON)
     if (process.platform !== 'darwin') childWindow.removeMenu()
@@ -758,6 +769,20 @@ export function buildComfyView(
       // preload: undefined strips our title-bar bridge so OAuth/cloud-login
       // popups can't reach the file menu IPCs.
       return { action: 'allow', overrideBrowserWindowOptions: { webPreferences: { preload: undefined } } }
+    }
+    // Capture downloads that the previous unconditional
+    // `shell.openExternal` branch was leaking to the system browser.
+    // The cloud "Download zip" button renders as a `window.open(zipUrl)`
+    // (no `<a download>` attribute), so Electron reports disposition
+    // `'foreground-tab'` — indistinguishable from a normal external
+    // link by disposition alone. We match on the URL's pathname
+    // extension via `isLikelyDownloadUrl` (archive / installer / model
+    // weights) and route the request through `session.downloadURL`,
+    // which fires the `will-download` listener attached above and
+    // surfaces the download in the launcher's downloads tray.
+    if (isLikelyDownloadUrl(childUrl)) {
+      comfyContents.session.downloadURL(childUrl)
+      return { action: 'deny' }
     }
     shell.openExternal(childUrl)
     return { action: 'deny' }
