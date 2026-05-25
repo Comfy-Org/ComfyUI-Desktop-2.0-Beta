@@ -17,6 +17,7 @@ import {
   type Installation,
   type ShowProgressOpts,
 } from '../types/ipc'
+import { IN_PLACE_RELAUNCH, augmentActionWithStopWarning, stopAndWaitForExit } from '../lib/stopWarning'
 
 /**
  * Backing state + IPC plumbing for the brand-redesigned Settings drawer
@@ -30,15 +31,19 @@ import {
  * into the Status tab as a synthetic row.
  *
  * Action handling mirrors `DetailModal.runAction` exactly:
- *   1. REQUIRES_STOPPED guard via useActionGuard
+ *   1. Busy-only guard via useActionGuard (in-progress op cancel-confirm)
  *   2. `migrate-to-standalone` special case → useMigrateAction
- *   3. fieldSelects chain → modal.select per fieldSelect
- *   4. select chain → modal.select (e.g. installations)
- *   5. prompt chain → modal.prompt
- *   6. confirm chain → modal.confirm or modal.confirmWithOptions
- *   7. disk-space check for copy / copy-update / release-update
- *   8. showProgress → opts.onShowProgress with synthetic-restart support
- *   9. inline → window.api.runAction with result navigation
+ *   3. willStopRunning augment for REQUIRES_STOPPED while running —
+ *      prepends the stop-warning sentence to confirm / prompt messages
+ *      so the user knows the running ComfyUI will be stopped to proceed
+ *   4. fieldSelects chain → modal.select per fieldSelect
+ *   5. select chain → modal.select (e.g. installations)
+ *   6. prompt chain → modal.prompt
+ *   7. confirm chain → modal.confirm or modal.confirmWithOptions
+ *   8. disk-space check for copy / copy-update / release-update
+ *   9. showProgress → opts.onShowProgress with self-stopping apiCall +
+ *      in-place relaunch for update-comfyui / snapshot-restore
+ *  10. inline → window.api.runAction (also self-stops when needed)
  */
 
 export interface UseComfyUISettingsOpts {
@@ -58,14 +63,6 @@ export interface UseComfyUISettingsOpts {
    *  own dismissal before the host completes the navigation — mirrors
    *  DetailModal's `emit('close')`. */
   onClose?: () => void
-  /** Skip the inline `actionGuard.checkBeforeAction` for REQUIRES_STOPPED
-   *  actions and tag the emitted `show-progress` payload with
-   *  `requiresStopped: true` so the host runs the stop-confirm instead.
-   *  Set by hosts whose surface tears down when `show-progress` fires
-   *  (the picker popup auto-dismisses on blur and the modal would die
-   *  with it); the panel surface owns a stable BaseAlert that handles
-   *  the stop-confirm without the popup-teardown race. */
-  deferStoppedGuardToHost?: boolean
 }
 
 export interface UseComfyUISettingsApi {
@@ -270,17 +267,16 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
 
     const telemetryContext = { action_id: action.id }
 
-    // 1. REQUIRES_STOPPED guard — actions that need ComfyUI stopped
-    //    first (snapshot restore, release-update, …). migrate-to-
-    //    standalone manages its own guard via useMigrateAction below.
-    //    Hosts that defer to a downstream surface (the picker popup
-    //    forwards to the panel) skip the inline confirm and tag the
-    //    showProgress payload with `requiresStopped` so the host runs
-    //    the guard against its own BaseAlert.
-    const requiresStoppedGuard = action.id !== 'migrate-to-standalone'
-      && REQUIRES_STOPPED.has(action.id)
-    const deferStoppedGuard = !!opts.deferStoppedGuardToHost && requiresStoppedGuard
-    if (requiresStoppedGuard && !deferStoppedGuard) {
+    // 1. Busy-only guard. migrate-to-standalone manages its own busy
+    //    check + UI via useMigrateAction below, so skip both this
+    //    pre-flight and the step-3 message augment for it. The apiCall
+    //    self-stop still applies — migrate is REQUIRES_STOPPED and the
+    //    source session must be torn down before the backend handler
+    //    runs.
+    const ownsPreflight = action.id === 'migrate-to-standalone'
+    const requiresStoppedGuard = REQUIRES_STOPPED.has(action.id)
+    const wasRunning = sessionStore.isRunning(inst.id)
+    if (requiresStoppedGuard && !ownsPreflight) {
       const proceed = await actionGuard.checkBeforeAction(inst.id, action.label)
       if (!proceed) return
     }
@@ -299,7 +295,17 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
       }
     }
 
-    // 3. fieldSelects chain — each step prompts the user to pick from a
+    // 3. Stop-warning augment. No per-action confirm/prompt copy
+    //    mentions the stop today, and the standalone stop-confirm modal
+    //    was removed, so prepend the sentence to whatever the action
+    //    already says (or use it standalone if the action has neither).
+    //    Skipped for migrate-to-standalone — useMigrateAction handles
+    //    its own confirm surface (modal OR brand takeover).
+    if (requiresStoppedGuard && wasRunning && !ownsPreflight) {
+      mutableAction = augmentActionWithStopWarning(mutableAction, t('errors.willStopRunning'))
+    }
+
+    // 4. fieldSelects chain — each step prompts the user to pick from a
     //    main-side source via `getFieldOptions`. Selections feed the
     //    next step + accumulate on `mutableAction.data`.
     if (mutableAction.fieldSelects) {
@@ -342,7 +348,7 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
       }
     }
 
-    // 4. select chain — single-shot select against a named source
+    // 5. select chain — single-shot select against a named source
     //    (e.g. `'installations'` for "copy from which install").
     if (mutableAction.select) {
       let items: { value: string; label: string; description?: string }[] | undefined
@@ -377,7 +383,7 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
       }
     }
 
-    // 5. prompt chain — free-form text input (e.g. Copy Installation
+    // 6. prompt chain — free-form text input (e.g. Copy Installation
     //    new-name prompt).
     if (mutableAction.prompt) {
       const value = await modal.prompt({
@@ -396,7 +402,7 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
       }
     }
 
-    // 6. confirm chain — skip for migrate-to-standalone (handled in #2).
+    // 7. confirm chain — skip for migrate-to-standalone (handled in #2).
     //    `confirm.options` flips us to `confirmWithOptions` (checkbox
     //    confirm — e.g. Delete Installation's "Also delete files" toggle).
     if (mutableAction.confirm && mutableAction.id !== 'migrate-to-standalone') {
@@ -422,7 +428,7 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
       }
     }
 
-    // 7. Disk-space sanity check for actions that write significant
+    // 8. Disk-space sanity check for actions that write significant
     //    data. Estimate via `getInstallationSize` for copy / copy-update;
     //    fall back to a generic 1 GiB threshold otherwise.
     const diskCheckActions = new Set(['copy', 'copy-update', 'release-update'])
@@ -457,9 +463,12 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
       }
     }
 
-    // 8. showProgress — emit show-progress for the host's ProgressModal.
+    // 9. showProgress — emit show-progress for the host's ProgressModal.
     //    The synthetic `restart` id maps to stop → wait → launch so the
     //    user sees one continuous "Restarting ComfyUI" progress view.
+    //    REQUIRES_STOPPED ops against a running install wrap the
+    //    apiCall to stop ComfyUI → wait → run the op, and append a
+    //    relaunch when the action is in IN_PLACE_RELAUNCH.
     if (mutableAction.showProgress) {
       const rawTitle = (mutableAction.progressTitle || mutableAction.label).replace(
         /\{(\w+)\}/g,
@@ -467,17 +476,25 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
       )
       const title = `${rawTitle} — ${inst.name}`
       const isRestart = mutableAction.id === 'restart'
+      const needsSelfStop = wasRunning && requiresStoppedGuard && !isRestart
+      const wantsRelaunch = needsSelfStop && IN_PLACE_RELAUNCH.has(mutableAction.id)
+      const isRunning = (): boolean => sessionStore.isRunning(inst.id)
       const apiCall = isRestart
         ? async (): Promise<ReturnType<typeof window.api.runAction>> => {
-          await window.api.stopComfyUI(inst.id)
-          const deadline = Date.now() + 10_000
-          while (sessionStore.isRunning(inst.id) && Date.now() < deadline) {
-            await new Promise((r) => setTimeout(r, 100))
-          }
+          await stopAndWaitForExit(inst.id, isRunning)
           return window.api.runAction(inst.id, 'launch')
         }
-        : (): ReturnType<typeof window.api.runAction> =>
-          window.api.runAction(inst.id, mutableAction.id, mutableAction.data)
+        : needsSelfStop
+          ? async (): Promise<ReturnType<typeof window.api.runAction>> => {
+            await stopAndWaitForExit(inst.id, isRunning)
+            const result = await window.api.runAction(inst.id, mutableAction.id, mutableAction.data)
+            if (wantsRelaunch && result?.ok !== false) {
+              await window.api.runAction(inst.id, 'launch')
+            }
+            return result
+          }
+          : (): ReturnType<typeof window.api.runAction> =>
+            window.api.runAction(inst.id, mutableAction.id, mutableAction.data)
       emitTelemetryAction('desktop2.action.invoked', telemetryContext)
       opts.onShowProgress({
         installationId: inst.id,
@@ -485,7 +502,7 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
         apiCall,
         cancellable: !!mutableAction.cancellable,
         returnTo: 'detail',
-        triggersInstanceStart: mutableAction.id === 'launch' || isRestart,
+        triggersInstanceStart: mutableAction.id === 'launch' || isRestart || wantsRelaunch,
         // Synthetic `restart` id (stop → wait → launch) reads as a launch
         // op to the brand caption pipeline, mirroring its
         // triggersInstanceStart flag.
@@ -493,18 +510,23 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
         destroysInstance: destroysInstanceForActionId(mutableAction.id),
         actionId: mutableAction.id,
         actionData: mutableAction.data,
-        requiresStopped: deferStoppedGuard,
       })
       return
     }
 
-    // 9. Inline invoke + result navigation.
+    // 10. Inline invoke + result navigation. Self-stop wrap mirrors the
+    //     showProgress path so inline REQUIRES_STOPPED actions don't
+    //     race the backend's running-check on a running install.
     try {
       emitTelemetryAction('desktop2.action.invoked', telemetryContext)
+      if (wasRunning && requiresStoppedGuard) {
+        await stopAndWaitForExit(inst.id, () => sessionStore.isRunning(inst.id))
+      }
       const result = await window.api.runAction(inst.id, mutableAction.id, mutableAction.data)
       if (result.running) {
-        // Backend detected a race — surface the action guard so the
-        // user can stop ComfyUI and retry.
+        // Backend race — apiCall self-stop should have prevented this,
+        // but if a launch slipped in between the stop and the action
+        // invocation, surface the busy guard so the user can retry.
         await actionGuard.checkBeforeAction(inst.id, mutableAction.label)
         return
       }

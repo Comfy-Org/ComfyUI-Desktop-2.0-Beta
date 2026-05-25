@@ -157,7 +157,6 @@ interface PickerBridge {
     triggersInstanceStart?: boolean
     opKind?: 'launch' | 'install' | 'update' | 'destructive' | 'snapshot' | 'generic'
     isRestart?: boolean
-    requiresStopped?: boolean
   }) => void
 }
 const bridge = (window as unknown as { __comfyTitlePopup?: PickerBridge }).__comfyTitlePopup
@@ -417,7 +416,6 @@ function handleSettingsShowProgress(opts: ShowProgressOpts): void {
     triggersInstanceStart: opts.triggersInstanceStart,
     opKind: opts.opKind,
     isRestart: opts.actionId === 'restart',
-    requiresStopped: opts.requiresStopped,
   })
 }
 function handleSettingsNavigateList(): void {
@@ -576,7 +574,6 @@ function handleExpandedPrimaryAction(running: boolean): void {
               :installation="selectedInstall"
               :initial-tab="initialExpandedTab"
               :show-back="true"
-              :defer-stopped-guard-to-host="true"
               class="picker-expanded-body"
               @show-progress="handleSettingsShowProgress"
               @navigate-list="handleSettingsNavigateList"

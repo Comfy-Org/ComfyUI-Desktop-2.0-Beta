@@ -55,10 +55,6 @@ export const TID = {
   deleteConfirmModal: 'delete-confirm-modal',
   /** Delete-install confirmation confirm button. */
   deleteConfirmButton: 'delete-confirm-button',
-  /** Stop-running-instance confirm modal (shown before destructive actions when the install is running). */
-  stopInstanceConfirmModal: 'stop-instance-confirm-modal',
-  /** Stop-running-instance confirm button. */
-  stopInstanceConfirmButton: 'stop-instance-confirm-button',
 
   // ---------- Update flow ----------
   /** A single channel card inside the Update tab (one per release channel). */

@@ -261,15 +261,6 @@ export interface ShowProgressOpts {
    *  ignore these and use `apiCall` directly. */
   actionId?: string
   actionData?: Record<string, unknown>
-  /** REQUIRES_STOPPED action whose stop-instance guard was deferred to
-   *  the host. Set by the picker's `useComfyUISettings` when it skipped
-   *  the inline `actionGuard.checkBeforeAction` so the host (panel) can
-   *  run it instead — the picker popup is a separate WebContentsView
-   *  that auto-dismisses on blur, so a stop-confirm modal mounted there
-   *  vanishes whenever the popup loses focus. The panel surface owns a
-   *  stable BaseAlert that survives popup teardown and isn't obscured
-   *  by the popup's own geometry. */
-  requiresStopped?: boolean
 }
 
 // --- Action results ---
@@ -1172,9 +1163,6 @@ export interface ElectronApi {
       triggersInstanceStart?: boolean
       opKind?: 'launch' | 'install' | 'update' | 'destructive' | 'snapshot' | 'generic'
       isRestart?: boolean
-      /** Picker's REQUIRES_STOPPED action whose stop-confirm was
-       *  deferred to the panel. See `ShowProgressOpts.requiresStopped`. */
-      requiresStopped?: boolean
     }) => void,
   ): Unsubscribe
 }

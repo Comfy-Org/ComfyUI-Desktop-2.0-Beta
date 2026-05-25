@@ -920,8 +920,6 @@
     "operationInProgressGeneric": "Another operation is currently in progress for this installation. Would you like to cancel it?",
     "cancelOperation": "Cancel Operation",
     "stopRequired": "This installation is currently running and must be stopped first.",
-    "stopRequiredConfirm": "This installation is currently running. Would you like to stop it to continue?",
-    "stopRunning": "Stop Running",
     "willStopRunning": "ComfyUI is currently running and will be stopped to proceed.",
     "folderPermissionDenied": "macOS denied access to \"{path}\". Please open System Settings → Privacy & Security → Files and Folders, grant access to ComfyUI Desktop 2.0, then retry."
   },
