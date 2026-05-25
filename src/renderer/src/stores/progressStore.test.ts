@@ -329,6 +329,31 @@ describe('useProgressStore', () => {
     it('is safe to cancel a nonexistent operation', () => {
       expect(() => store.cancelOperation('nonexistent')).not.toThrow()
     })
+
+    it('does NOT stop ComfyUI when the op has already finished', async () => {
+      // Silent takeover→takeover overlay swaps fire `onCancel`
+      // indiscriminately. Stopping ComfyUI for a finished op would tear
+      // down the relaunched session (or the next op's session).
+      let resolve: ((value: ActionResult) => void) | null = null
+      store.startOperation({
+        installationId: 'inst-1',
+        title: 'Install',
+        apiCall: () => new Promise<ActionResult>((r) => { resolve = r }),
+      })
+      resolve!({ ok: true })
+      await Promise.resolve()
+      await Promise.resolve()
+      const op = store.operations.get('inst-1')!
+      expect(op.finished).toBe(true)
+
+      vi.mocked(window.api.stopComfyUI).mockClear()
+      vi.mocked(window.api.cancelOperation).mockClear()
+      store.cancelOperation('inst-1')
+
+      expect(window.api.stopComfyUI).not.toHaveBeenCalled()
+      expect(window.api.cancelOperation).not.toHaveBeenCalled()
+      expect(op.cancelRequested).toBe(false)
+    })
   })
 
   describe('cleanupOperation', () => {

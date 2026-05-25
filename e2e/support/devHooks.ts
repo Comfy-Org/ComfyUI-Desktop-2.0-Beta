@@ -103,3 +103,74 @@ export async function returnFirstInstallHostToDashboard(
     return helpers.returnFirstInstallHostToDashboard()
   }))
 }
+
+/** Recorded arguments for an instrumented IPC channel since the last
+ *  reset. Lets tests assert that a fast-path code path skipped a
+ *  costly handler invocation. */
+export async function getIpcInvocations(
+  app: ElectronApplication,
+  channel: string,
+): Promise<unknown[]> {
+  return await evalWithRetry(() => app.evaluate((_electron, c) => {
+    const helpers = (globalThis as unknown as { __e2e?: { getIpcInvocations: (c: string) => unknown[] } }).__e2e
+    if (!helpers) throw new Error('E2E helpers not registered (process.env.E2E !== "1"?)')
+    return helpers.getIpcInvocations(c)
+  }, channel))
+}
+
+export async function resetIpcInvocations(
+  app: ElectronApplication,
+  channel?: string,
+): Promise<void> {
+  await evalWithRetry(() => app.evaluate((_electron, c) => {
+    const helpers = (globalThis as unknown as { __e2e?: { resetIpcInvocations: (c?: string) => void } }).__e2e
+    if (!helpers) throw new Error('E2E helpers not registered (process.env.E2E !== "1"?)')
+    helpers.resetIpcInvocations(c)
+  }, channel))
+}
+
+/** URLs captured by the launcher's `shell.openExternal` wrapper while
+ *  E2E mode is active. Used by the cloud-zip test to assert a download
+ *  was captured locally instead of bouncing out to the OS browser. */
+export async function getShellOpenExternalCalls(
+  app: ElectronApplication,
+): Promise<string[]> {
+  return await evalWithRetry(() => app.evaluate(() => {
+    const helpers = (globalThis as unknown as { __e2e?: { getShellOpenExternalCalls: () => string[] } }).__e2e
+    if (!helpers) throw new Error('E2E helpers not registered (process.env.E2E !== "1"?)')
+    return helpers.getShellOpenExternalCalls()
+  }))
+}
+
+export async function resetShellOpenExternalCalls(app: ElectronApplication): Promise<void> {
+  await evalWithRetry(() => app.evaluate(() => {
+    const helpers = (globalThis as unknown as { __e2e?: { resetShellOpenExternalCalls: () => void } }).__e2e
+    if (!helpers) throw new Error('E2E helpers not registered (process.env.E2E !== "1"?)')
+    helpers.resetShellOpenExternalCalls()
+  }))
+}
+
+/** Register a synthetic running session against `installationId` so the
+ *  REQUIRES_STOPPED guard fires (main side) and `sessionStore.isRunning`
+ *  flips true (renderer side) without spawning a real ComfyUI process. */
+export async function seedRunningSession(
+  app: ElectronApplication,
+  opts: { installationId: string; installationName: string },
+): Promise<void> {
+  await evalWithRetry(() => app.evaluate((_electron, o) => {
+    const helpers = (globalThis as unknown as {
+      __e2e?: { seedRunningSession: (o: unknown) => void }
+    }).__e2e
+    if (!helpers) throw new Error('E2E helpers not registered (process.env.E2E !== "1"?)')
+    helpers.seedRunningSession(o)
+  }, opts))
+}
+
+/** Drop every synthetic session seeded via `seedRunningSession`. */
+export async function clearRunningSessions(app: ElectronApplication): Promise<void> {
+  await evalWithRetry(() => app.evaluate(() => {
+    const helpers = (globalThis as unknown as { __e2e?: { clearRunningSessions: () => void } }).__e2e
+    if (!helpers) throw new Error('E2E helpers not registered (process.env.E2E !== "1"?)')
+    helpers.clearRunningSessions()
+  }))
+}

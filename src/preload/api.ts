@@ -78,6 +78,8 @@ export function buildElectronApi(): ElectronApi {
     stopComfyUI: (installationId) => ipcRenderer.invoke('stop-comfyui', installationId),
     focusComfyWindow: (installationId) =>
       ipcRenderer.invoke('focus-comfy-window', installationId),
+    openInstallWindow: (installationId) =>
+      ipcRenderer.invoke('open-install-window', installationId),
     closeComfyWindow: (installationId) =>
       ipcRenderer.invoke('close-comfy-window', installationId),
     closeHostWindow: () =>

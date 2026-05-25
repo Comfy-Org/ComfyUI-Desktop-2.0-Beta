@@ -5,6 +5,7 @@ import BaseSelect, { type BaseSelectOption } from '../../components/ui/BaseSelec
 import InfoTooltip from '../../components/InfoTooltip.vue'
 import { formatRelativeFromMs } from '../../lib/datetime'
 import type { ActionDef, DetailField, DetailFieldOption } from '../../types/ipc'
+import { TID } from '../../../../shared/testIds'
 
 /**
  * Unified update surface: headline status, inset channel card, and
@@ -17,7 +18,7 @@ interface Props {
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  sectionActions: () => [],
+  sectionActions: () => []
 })
 
 const emit = defineEmits<{
@@ -116,7 +117,7 @@ const statusBadge = computed(() => {
 })
 
 const statusBadgeTone = computed<'current' | 'update'>(() =>
-  preview.value?.updateAvailable ? 'update' : 'current',
+  preview.value?.updateAvailable ? 'update' : 'current'
 )
 
 interface StatRow {
@@ -154,7 +155,7 @@ const statRows = computed<StatRow[]>(() => {
     rows.push({
       id: 'installed',
       label: t('channelCards.installedVersion', 'Installed'),
-      value: formatVersionLabel(preview.value.installedVersion),
+      value: formatVersionLabel(preview.value.installedVersion)
     })
   }
   if (updateAvailable && preview.value.latestVersion && !versionsMatch.value) {
@@ -162,7 +163,7 @@ const statRows = computed<StatRow[]>(() => {
       id: 'latest',
       label: t('channelCards.latestVersion', 'Latest'),
       value: formatVersionLabel(preview.value.latestVersion),
-      highlight: true,
+      highlight: true
     })
   }
 
@@ -172,26 +173,21 @@ const statRows = computed<StatRow[]>(() => {
       id: 'last-checked',
       label: t('channelCards.lastChecked', 'Last checked'),
       value: lastChecked.value,
-      title: lastChecked.title,
+      title: lastChecked.title
     })
   }
 
   return rows
 })
 
-const allActions = computed<ActionDef[]>(() => [
-  ...selectedActions.value,
-  ...props.sectionActions,
-])
+const allActions = computed<ActionDef[]>(() => [...selectedActions.value, ...props.sectionActions])
 
 const checkUpdateAction = computed<ActionDef | undefined>(() =>
-  allActions.value.find((a) => a.id === 'check-update'),
+  allActions.value.find((a) => a.id === 'check-update')
 )
 
 const promotedPrimaryActions = computed<ActionDef[]>(() =>
-  selectedActions.value.filter(
-    (a) => a.id === 'update-comfyui' || a.id === 'copy-update',
-  ),
+  selectedActions.value.filter((a) => a.id === 'update-comfyui' || a.id === 'copy-update')
 )
 
 const otherSecondaryActions = computed<ActionDef[]>(() =>
@@ -201,53 +197,53 @@ const otherSecondaryActions = computed<ActionDef[]>(() =>
       a.id !== 'update-comfyui' &&
       a.id !== 'copy-update' &&
       a.style !== 'primary' &&
-      a.style !== 'accent',
-  ),
+      a.style !== 'accent'
+  )
 )
 
 const showCheckInHeader = computed(
   () =>
     checkUpdateAction.value != null &&
     promotedPrimaryActions.value.length === 0 &&
-    otherSecondaryActions.value.length === 0,
+    otherSecondaryActions.value.length === 0
 )
 
 const showFooterActions = computed(
   () =>
     promotedPrimaryActions.value.length > 0 ||
     otherSecondaryActions.value.length > 0 ||
-    (checkUpdateAction.value != null && !showCheckInHeader.value),
+    (checkUpdateAction.value != null && !showCheckInHeader.value)
 )
 
-const footerActions = computed<Array<{ action: ActionDef; variant: 'accent' | 'default' | 'danger' }>>(
-  () => {
-    const out: Array<{ action: ActionDef; variant: 'accent' | 'default' | 'danger' }> = []
+const footerActions = computed<
+  Array<{ action: ActionDef; variant: 'accent' | 'default' | 'danger' }>
+>(() => {
+  const out: Array<{ action: ActionDef; variant: 'accent' | 'default' | 'danger' }> = []
 
-    if (checkUpdateAction.value && !showCheckInHeader.value) {
-      out.push({ action: checkUpdateAction.value, variant: 'default' })
+  if (checkUpdateAction.value && !showCheckInHeader.value) {
+    out.push({ action: checkUpdateAction.value, variant: 'default' })
+  }
+
+  for (const action of otherSecondaryActions.value) {
+    out.push({
+      action,
+      variant: action.style === 'danger' ? 'danger' : 'default'
+    })
+  }
+
+  for (const action of promotedPrimaryActions.value) {
+    if (action.id === 'copy-update') {
+      out.push({ action, variant: 'default' })
     }
+  }
 
-    for (const action of otherSecondaryActions.value) {
-      out.push({
-        action,
-        variant: action.style === 'danger' ? 'danger' : 'default',
-      })
-    }
+  const updateNow = promotedPrimaryActions.value.find((a) => a.id === 'update-comfyui')
+  if (updateNow) {
+    out.push({ action: updateNow, variant: 'accent' })
+  }
 
-    for (const action of promotedPrimaryActions.value) {
-      if (action.id === 'copy-update') {
-        out.push({ action, variant: 'default' })
-      }
-    }
-
-    const updateNow = promotedPrimaryActions.value.find((a) => a.id === 'update-comfyui')
-    if (updateNow) {
-      out.push({ action: updateNow, variant: 'accent' })
-    }
-
-    return out
-  },
-)
+  return out
+})
 
 function optionLabel(opt: DetailFieldOption): string {
   if (opt.value === currentValue.value) {
@@ -278,13 +274,36 @@ const selectOptions = computed<BaseSelectOption[]>(() =>
         >
           {{ headline }}
         </p>
-        <span
-          v-if="statusBadge && preview"
-          class="channel-picker-badge"
-          :class="statusBadgeTone"
-        >
+        <span v-if="statusBadge && preview" class="channel-picker-badge" :class="statusBadgeTone">
           {{ statusBadge }}
         </span>
+      </div>
+
+      <div v-if="selectedActions.length > 0" class="channel-picker-card-actions">
+        <p v-if="!draftIsCurrent" class="channel-picker-switch-hint">
+          {{ t('channelCards.switchTo', { channel: selectedOption?.label ?? '' }) }}
+        </p>
+        <div class="channel-picker-action-row">
+          <button
+            v-for="action in selectedActions"
+            :key="action.id"
+            type="button"
+            :class="[
+              'channel-picker-action',
+              {
+                primary: action.style === 'primary',
+                accent: action.style === 'accent',
+                danger: action.style === 'danger'
+              }
+            ]"
+            :disabled="action.enabled === false"
+            :title="action.tooltip"
+            :data-testid="TID.updateActionButton(action.id)"
+            @click="emit('action', action)"
+          >
+            {{ action.label }}
+          </button>
+        </div>
       </div>
     </div>
 
@@ -346,6 +365,7 @@ const selectOptions = computed<BaseSelectOption[]>(() =>
           :class="variant"
           :disabled="action.enabled === false"
           :title="action.tooltip"
+          :data-testid="TID.updateActionButton(action.id)"
           @click="emit('action', action)"
         >
           {{ action.label }}
@@ -526,7 +546,9 @@ const selectOptions = computed<BaseSelectOption[]>(() =>
   white-space: nowrap;
   cursor: pointer;
   box-sizing: border-box;
-  transition: background-color 100ms ease, filter 100ms ease;
+  transition:
+    background-color 100ms ease,
+    filter 100ms ease;
 }
 
 .channel-picker-action.compact {

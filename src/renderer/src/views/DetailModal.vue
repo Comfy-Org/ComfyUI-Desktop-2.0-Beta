@@ -18,7 +18,9 @@ import { useInstallationStore } from '../stores/installationStore'
 import { useSessionStore } from '../stores/sessionStore'
 import { emitTelemetryAction, toErrorBucket } from '../lib/telemetry'
 import { formatBytes } from '../lib/formatting'
+import { findActionById } from '../lib/findAction'
 import { progressOpKindForActionId, destroysInstanceForActionId } from '../lib/progressOpKind'
+import { IN_PLACE_RELAUNCH, augmentActionWithStopWarning, stopAndWaitForExit } from '../lib/stopWarning'
 import { useMigrateAction } from '../composables/useMigrateAction'
 import { REQUIRES_STOPPED } from '../types/ipc'
 import { Pencil } from 'lucide-vue-next'
@@ -225,17 +227,26 @@ watch(
         window.api.cancelInstallationSize()
       }
 
-      // Auto-trigger an action if requested (e.g. from migrate pill click)
+      // Auto-trigger an action if requested (e.g. from migrate pill or
+      // title-bar install-update pill click). Walks both
+      // `section.actions[]` AND nested `field.options[].data.actions[]`
+      // — the latter is where channel-card actions (`update-comfyui`,
+      // `copy-update`, `switch-channel`) live, so a search of only
+      // `section.actions` would silently no-op the install-update pill
+      // (regression for #582). Prefers the action on the install's
+      // currently-selected channel when present.
       if (props.autoAction && !autoActionRun.value) {
         autoActionRun.value = true
         const actionId = props.autoAction
-        for (const section of sections.value) {
-          const action = section.actions?.find((a: ActionDef) => a.id === actionId)
-          if (action) {
-            await nextTick()
-            runAction(action, null)
-            break
-          }
+        const channelField = sections.value
+          .flatMap((s) => s.fields ?? [])
+          .find((f) => f.editType === 'channel-cards')
+        const currentChannel =
+          typeof channelField?.value === 'string' ? channelField.value : null
+        const action = findActionById(sections.value, actionId, currentChannel)
+        if (action) {
+          await nextTick()
+          runAction(action, null)
         }
       }
     }
@@ -319,18 +330,30 @@ function handleActionClick(action: ActionDef, event: MouseEvent): void {
 
 async function runAction(action: ActionDef, btn: HTMLButtonElement | null): Promise<void> {
   if (!props.installation) return
+  const instId = props.installation.id
   const telemetryContext = {
     source_category: props.installation.sourceCategory || 'unknown',
     ui_surface: 'detail',
   }
 
-  // Pre-flight: check if the installation is busy or running
-  // Skip for migrate-to-standalone — the useMigrateAction composable handles its own guard
-  if (action.id !== 'migrate-to-standalone' && REQUIRES_STOPPED.has(action.id)) {
-    if (!await actionGuard.checkBeforeAction(props.installation.id, action.label)) return
+  // Busy-only guard. migrate-to-standalone manages its own busy check
+  // + confirm UI via useMigrateAction below, so skip both pre-flights
+  // for it. The apiCall self-stop still applies — migrate is
+  // REQUIRES_STOPPED and the session must be torn down before the
+  // backend handler runs.
+  const ownsPreflight = action.id === 'migrate-to-standalone'
+  const requiresStoppedGuard = REQUIRES_STOPPED.has(action.id)
+  const wasRunning = sessionStore.isRunning(instId)
+  if (requiresStoppedGuard && !ownsPreflight) {
+    if (!await actionGuard.checkBeforeAction(instId, action.label)) return
   }
 
   let mutableAction = { ...action }
+
+  // Stop-warning augment for REQUIRES_STOPPED while running.
+  if (requiresStoppedGuard && wasRunning && !ownsPreflight) {
+    mutableAction = augmentActionWithStopWarning(mutableAction, t('errors.willStopRunning'))
+  }
 
   // fieldSelects chain
   if (mutableAction.fieldSelects) {
@@ -506,7 +529,6 @@ async function runAction(action: ActionDef, btn: HTMLButtonElement | null): Prom
 
   // showProgress
   if (mutableAction.showProgress) {
-    const instId = props.installation.id
     const instName = props.installation.name
     const rawTitle = (mutableAction.progressTitle || mutableAction.label).replace(
       /\{(\w+)\}/g,
@@ -515,29 +537,33 @@ async function runAction(action: ActionDef, btn: HTMLButtonElement | null): Prom
     )
     const title = `${rawTitle} — ${instName}`
     emitTelemetryAction('desktop2.action.invoked', { action_id: mutableAction.id, ...telemetryContext })
-    // Phase 3 §9 — synthetic 'restart' action: chain stopComfyUI →
-    // launch in a single ProgressModal so the user sees one
-    // continuous "Restarting ComfyUI" view rather than two flashes.
-    // The action's confirm dialog has already run above.
+    // Synthetic 'restart' action: chain stopComfyUI → launch in a
+    // single ProgressModal so the user sees one continuous
+    // "Restarting ComfyUI" view rather than two flashes.
     const isRestart = mutableAction.id === 'restart'
+    const needsSelfStop = wasRunning && requiresStoppedGuard && !isRestart
+    const wantsRelaunch = needsSelfStop && IN_PLACE_RELAUNCH.has(mutableAction.id)
+    const isRunning = (): boolean => sessionStore.isRunning(instId)
     const apiCall = isRestart
       ? async () => {
-          await window.api.stopComfyUI(instId)
-          // Wait for the session to actually leave the running state
-          // before kicking off the new launch. The session store is
-          // updated by main via 'session-status' broadcasts.
-          const deadline = Date.now() + 10_000
-          while (sessionStore.isRunning(instId) && Date.now() < deadline) {
-            await new Promise((r) => setTimeout(r, 100))
-          }
+          await stopAndWaitForExit(instId, isRunning)
           return window.api.runAction(instId, 'launch')
         }
-      : () => window.api.runAction(instId, mutableAction.id, mutableAction.data ? toRaw(mutableAction.data) : undefined)
+      : needsSelfStop
+        ? async () => {
+            await stopAndWaitForExit(instId, isRunning)
+            const result = await window.api.runAction(instId, mutableAction.id, mutableAction.data ? toRaw(mutableAction.data) : undefined)
+            if (wantsRelaunch && result?.ok !== false) {
+              await window.api.runAction(instId, 'launch')
+            }
+            return result
+          }
+        : () => window.api.runAction(instId, mutableAction.id, mutableAction.data ? toRaw(mutableAction.data) : undefined)
     // Tag launch / restart so PanelApp's handleShowProgress installs
     // the chooser-host close-on-instance-started subscription. Without
     // this, launches kicked off from this Tier-1 modal would leave the
     // dashboard window open next to the new comfy window.
-    const triggersInstanceStart = mutableAction.id === 'launch' || isRestart
+    const triggersInstanceStart = mutableAction.id === 'launch' || isRestart || wantsRelaunch
     emit('show-progress', {
       installationId: instId,
       title,
@@ -560,15 +586,21 @@ async function runAction(action: ActionDef, btn: HTMLButtonElement | null): Prom
   }
   try {
     emitTelemetryAction('desktop2.action.invoked', { action_id: mutableAction.id, ...telemetryContext })
+    if (wasRunning && requiresStoppedGuard) {
+      await stopAndWaitForExit(instId, () => sessionStore.isRunning(instId))
+    }
     const result = await window.api.runAction(
-      props.installation.id,
+      instId,
       mutableAction.id,
       mutableAction.data ? toRaw(mutableAction.data) : undefined
     )
     // Fallback: backend detected running instance (race condition)
     if (result.running && props.installation) {
-      await actionGuard.checkBeforeAction(props.installation.id, mutableAction.label)
+      await actionGuard.checkBeforeAction(instId, mutableAction.label)
       return
+    }
+    if (wasRunning && requiresStoppedGuard && IN_PLACE_RELAUNCH.has(mutableAction.id) && result?.ok !== false) {
+      await window.api.runAction(instId, 'launch')
     }
     const resultValue = result.cancelled ? 'cancelled' : (result.ok === false ? 'failed' : 'ok')
     emitTelemetryAction('desktop2.action.result', { action_id: mutableAction.id, result: resultValue, ...telemetryContext })

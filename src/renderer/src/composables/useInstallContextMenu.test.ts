@@ -4,19 +4,38 @@ import { createI18n } from 'vue-i18n'
 import { defineComponent, h } from 'vue'
 import { mount } from '@vue/test-utils'
 
+// `useModal` is a singleton with module-level state. The composable
+// awaits `modal.confirm(...)` which never resolves on its own — mock
+// the composable so tests can drive the confirm response synchronously.
+const modalMock = {
+  confirm: vi.fn(),
+  alert: vi.fn(),
+  prompt: vi.fn(),
+  select: vi.fn(),
+  confirmWithOptions: vi.fn(),
+}
+vi.mock('./useModal', () => ({
+  useModal: () => modalMock,
+}))
+
 import { useInstallContextMenu } from './useInstallContextMenu'
 import { useSessionStore } from '../stores/sessionStore'
 import { useProgressStore } from '../stores/progressStore'
-import type { Installation } from '../types/ipc'
+import type { Installation, ShowProgressOpts } from '../types/ipc'
 import type { ContextMenuItem } from '../types/context-menu'
 
+// Mock api on `window`. `getDetailSections` is spied so tests can
+// assert it is NOT called by the delete fast path (regression for the
+// ~2s confirm-modal latency on the dashboard kebab → Delete click).
+const apiMock = {
+  platform: 'darwin',
+  runAction: vi.fn().mockResolvedValue({ ok: true }),
+  getDetailSections: vi.fn().mockResolvedValue([]),
+  onErrorDetail: vi.fn(() => () => {}),
+}
 vi.stubGlobal('window', {
   ...window,
-  api: {
-    platform: 'darwin',
-    runAction: vi.fn().mockResolvedValue({ ok: true }),
-    onErrorDetail: vi.fn(() => () => {}),
-  },
+  api: apiMock,
 })
 
 const messages = {
@@ -32,6 +51,10 @@ const messages = {
     actions: {
       copyInstallation: 'Copy Install',
       untrack: 'Untrack',
+      delete: 'Delete',
+      deleteConfirmTitle: 'Delete Install',
+      deleteConfirmMessage:
+        'This will permanently delete the install and all its files. This cannot be undone.',
     },
     progress: { working: 'Working…' },
     running: { dismiss: 'Dismiss' },
@@ -58,33 +81,41 @@ interface HarnessHandles {
 }
 
 /**
- * `useInstallContextMenu` calls Pinia stores + `useI18n()` so the
- * composable (and the stores it depends on) can only be invoked from
- * inside a real component setup scope. Build a tiny harness component
- * that exposes the composable's computed `ctxMenuItems` for assertion,
- * along with the store handles so individual tests can pre-seed
- * running / stopping / in-progress state.
+ * Common harness component used by every spec. `useInstallContextMenu`
+ * calls Pinia stores + `useI18n()` so the composable can only run from
+ * inside a real component setup scope; this single `defineComponent`
+ * is reused across all `mountHarness*` factories so the file stays
+ * compliant with `vue/one-component-per-file`.
+ *
+ * The factory hands `setup` a closure that runs once per mount and
+ * captures handles back into the caller-supplied refs.
  */
+let _harnessSetup: (() => void) | null = null
+const HarnessComponent = defineComponent({
+  setup() {
+    _harnessSetup?.()
+    return () => h('div')
+  },
+})
+
 function mountHarness(inst: Installation, mutate?: (h: HarnessHandles) => void) {
   const pinia = createPinia()
   setActivePinia(pinia)
   const i18n = createI18n({ legacy: false, locale: 'en', messages })
   let handles!: HarnessHandles
-  const Harness = defineComponent({
-    setup() {
-      const menu = useInstallContextMenu({ onManage: () => {} })
-      const session = useSessionStore()
-      const progress = useProgressStore()
-      handles = { menu, session, progress }
-      mutate?.(handles)
-      menu.openCardMenu(
-        new MouseEvent('contextmenu', { clientX: 0, clientY: 0 }),
-        inst
-      )
-      return () => h('div')
-    },
-  })
-  const wrapper = mount(Harness, { global: { plugins: [pinia, i18n] } })
+  _harnessSetup = () => {
+    const menu = useInstallContextMenu({ onManage: () => {} })
+    const session = useSessionStore()
+    const progress = useProgressStore()
+    handles = { menu, session, progress }
+    mutate?.(handles)
+    menu.openCardMenu(
+      new MouseEvent('contextmenu', { clientX: 0, clientY: 0 }),
+      inst,
+    )
+  }
+  const wrapper = mount(HarnessComponent, { global: { plugins: [pinia, i18n] } })
+  _harnessSetup = null
   return { wrapper, ...handles }
 }
 
@@ -166,5 +197,94 @@ describe('useInstallContextMenu — gated REQUIRES_STOPPED items', () => {
     })
     expect(menu.isStoppedActionGated(inst)).toBe(true)
     expect(findItem(menu.ctxMenuItems.value, 'delete')?.disabled).toBe(true)
+  })
+})
+
+// --- Delete fast path (regression for #582) ---
+//
+// Old delete branch called `fetchActionDef` → `getDetailSections` →
+// rebuilds the entire detail tree just to pluck the 12-line
+// `deleteAction()` constant; on Windows this stalled the confirm modal
+// by ~2s. The fast path builds the confirm + showProgress payload
+// entirely renderer-side.
+
+function mountHarnessWithProgress(
+  _inst: Installation,
+  onShowProgress: (opts: ShowProgressOpts) => void,
+): { menu: ReturnType<typeof useInstallContextMenu> } {
+  // Reuses the shared `HarnessComponent` defined above; tests drive
+  // `menu.triggerAction(...)` directly so the inst arg is just a
+  // documented call-site hint.
+  const pinia = createPinia()
+  setActivePinia(pinia)
+  const i18n = createI18n({ legacy: false, locale: 'en', messages })
+  let menu!: ReturnType<typeof useInstallContextMenu>
+  _harnessSetup = () => {
+    menu = useInstallContextMenu({
+      onManage: () => {},
+      onShowProgress,
+    })
+  }
+  mount(HarnessComponent, { global: { plugins: [pinia, i18n] } })
+  _harnessSetup = null
+  return { menu }
+}
+
+describe('useInstallContextMenu — delete fast path (regression for #582)', () => {
+  beforeEach(() => {
+    apiMock.getDetailSections.mockClear()
+    apiMock.runAction.mockClear()
+    modalMock.confirm.mockReset()
+  })
+
+  it('shows the confirm modal without calling getDetailSections', async () => {
+    modalMock.confirm.mockResolvedValue(true)
+    const onShowProgress = vi.fn<(opts: ShowProgressOpts) => void>()
+    const inst = makeInstall({ name: 'My Install', installPath: '/tmp/my' })
+    const { menu } = mountHarnessWithProgress(inst, onShowProgress)
+
+    await menu.triggerAction('delete', inst)
+
+    expect(apiMock.getDetailSections).not.toHaveBeenCalled()
+    expect(modalMock.confirm).toHaveBeenCalledTimes(1)
+    const confirmArgs = modalMock.confirm.mock.calls[0][0]
+    expect(confirmArgs.title).toBe('Delete Install')
+    expect(confirmArgs.message).toContain('permanently delete')
+    expect(confirmArgs.message).toContain('/tmp/my')
+    expect(confirmArgs.confirmLabel).toBe('Delete')
+    expect(confirmArgs.confirmStyle).toBe('danger')
+  })
+
+  it('on confirm true, emits showProgress with the correct shape and does not pre-run the action', async () => {
+    modalMock.confirm.mockResolvedValue(true)
+    const onShowProgress = vi.fn<(opts: ShowProgressOpts) => void>()
+    const inst = makeInstall({ name: 'My Install', installPath: '/tmp/my' })
+    const { menu } = mountHarnessWithProgress(inst, onShowProgress)
+
+    await menu.triggerAction('delete', inst)
+
+    expect(onShowProgress).toHaveBeenCalledTimes(1)
+    const opts = onShowProgress.mock.calls[0][0]
+    expect(opts.installationId).toBe(inst.id)
+    expect(opts.title).toBe('Delete — My Install')
+    expect(opts.cancellable).toBe(true)
+    expect(opts.returnTo).toBe('list')
+    expect(opts.destroysInstance).toBe(true)
+
+    // The actual destructive call runs inside ProgressModal, not here.
+    expect(apiMock.runAction).not.toHaveBeenCalled()
+  })
+
+  it('on confirm cancel, does not emit showProgress and does not call runAction', async () => {
+    modalMock.confirm.mockResolvedValue(false)
+    const onShowProgress = vi.fn<(opts: ShowProgressOpts) => void>()
+    const inst = makeInstall()
+    const { menu } = mountHarnessWithProgress(inst, onShowProgress)
+
+    await menu.triggerAction('delete', inst)
+
+    expect(onShowProgress).not.toHaveBeenCalled()
+    expect(apiMock.runAction).not.toHaveBeenCalled()
+    expect(apiMock.getDetailSections).not.toHaveBeenCalled()
   })
 })

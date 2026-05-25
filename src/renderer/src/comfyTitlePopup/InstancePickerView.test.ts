@@ -98,7 +98,7 @@ function installMockBridge(): BridgeState {
     ),
     pickerSettingsGetLocaleMessages: vi.fn(async () => ({})),
   }
-  ;(window as unknown as { __comfyTitlePopup: typeof bridge }).__comfyTitlePopup = bridge
+    ; (window as unknown as { __comfyTitlePopup: typeof bridge }).__comfyTitlePopup = bridge
   return state
 }
 

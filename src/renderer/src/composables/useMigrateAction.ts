@@ -2,6 +2,8 @@ import { toRaw } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useModal } from './useModal'
 import { useActionGuard } from './useActionGuard'
+import { useSessionStore } from '../stores/sessionStore'
+import { augmentMessageWithStopWarning } from '../lib/stopWarning'
 import { findBestVariant } from '../lib/variants'
 import type { Installation, FieldOption, SnapshotDetailData } from '../types/ipc'
 
@@ -55,6 +57,7 @@ export function useMigrateAction() {
   const { t } = useI18n()
   const modal = useModal()
   const actionGuard = useActionGuard()
+  const sessionStore = useSessionStore()
 
   /**
    * Run the migration confirmation flow for an installation.
@@ -65,13 +68,14 @@ export function useMigrateAction() {
     confirm?: MigrateConfirmOptions,
     opts?: { surface?: 'modal' | 'takeover' },
   ): Promise<MigrateActionResult | null> {
-    // Pre-flight: check if the installation is busy or running
+    // Pre-flight busy check.
     if (!await actionGuard.checkBeforeAction(installation.id, t('migrate.migrateToStandalone'))) {
       return null
     }
 
     const useTakeover = opts?.surface === 'takeover' && registeredTakeover !== null
     const takeover = useTakeover ? registeredTakeover! : null
+    const wasRunning = sessionStore.isRunning(installation.id)
 
     const isDesktop = installation.sourceId === 'desktop'
     const migrateItems = isDesktop
@@ -90,6 +94,9 @@ export function useMigrateAction() {
 
     const dialogTitle = confirm?.title || t('migrate.migrateToStandaloneConfirmTitle')
     const dialogConfirmLabel = confirm?.confirmLabel || t('migrate.migrateToStandaloneConfirm')
+    const dialogMessage = wasRunning
+      ? augmentMessageWithStopWarning(confirm?.message, t('errors.willStopRunning'))
+      : confirm?.message || ''
 
     // Show the surface (Modal OR brand takeover) with a loading state.
     // Both paths return the same { confirmed, checkboxValues } shape so
@@ -100,7 +107,7 @@ export function useMigrateAction() {
     } else {
       const modalConfirmPromise = modal.confirm({
         title: dialogTitle,
-        message: confirm?.message || '',
+        message: dialogMessage,
         loading: true,
         confirmLabel: dialogConfirmLabel,
         confirmStyle: 'primary',
@@ -135,7 +142,11 @@ export function useMigrateAction() {
       return null
     }
 
-    const detailsPayload = [{ label: t('migrate.migrationWill'), items: migrateItems }]
+    const detailsPayload = wasRunning
+      ? [
+        { label: t('migrate.migrationWill'), items: [t('errors.willStopRunning'), ...migrateItems] },
+      ]
+      : [{ label: t('migrate.migrationWill'), items: migrateItems }]
     const checkboxesPayload = isDesktop
       ? []
       : [{ id: 'enablePipSync', label: t('migrate.enablePipSync'), checked: false }]

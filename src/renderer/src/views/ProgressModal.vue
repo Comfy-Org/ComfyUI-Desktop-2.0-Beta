@@ -15,6 +15,7 @@ import ComfyWordmark from '../components/icons/ComfyWordmark.vue'
 import BrandProgressGlyph from '../components/icons/BrandProgressGlyph.vue'
 import BaseAccordion from '../components/ui/BaseAccordion.vue'
 import BaseCopyButton from '../components/ui/BaseCopyButton.vue'
+import { TID } from '../../../shared/testIds'
 
 interface Props {
   installationId: string | null
@@ -479,6 +480,14 @@ function handleDone(): void {
     void window.api.returnToDashboard()
   }
   emit('close')
+  // Copy / copy-update / release-update produced a new install — open
+  // it in its own window. The source host stays where it is so the
+  // user keeps the running session / panel state they had.
+  const newInstallationId = op.result.newInstallationId
+  if (newInstallationId) {
+    void window.api.openInstallWindow(newInstallationId)
+    return
+  }
   // Guard show-detail against a stale install id — destroy ops (or any
   // op whose success removes the install from the registry) would
   // otherwise route to a now-missing detail view.
@@ -775,7 +784,10 @@ defineExpose({ startOperation, showOperation })
           v-if="finishedErrorMessage"
           class="brand-progress__error-row"
         >
-          <div class="brand-progress__error-message">
+          <div
+            class="brand-progress__error-message"
+            :data-testid="TID.progressErrorMessage"
+          >
             {{ finishedErrorMessage }}
           </div>
           <BaseCopyButton
@@ -817,6 +829,7 @@ defineExpose({ startOperation, showOperation })
               id="brand-progress-logs"
               ref="brandTerminalRef"
               class="brand-progress__logs"
+              :data-testid="TID.progressLogs"
               @scroll="handleBrandTerminalScroll"
             >
               {{ displayedTerminalOutput }}
@@ -1161,10 +1174,17 @@ defineExpose({ startOperation, showOperation })
 }
 
 /* Error detail line beneath the banner. Selectable so users can copy
-   manually (Copy-button affordance lands in Phase 2.5). */
+   manually. Bounded so a long Python traceback / `uv pip` failure
+   doesn't stretch the takeover past the viewport — chosen slightly
+   shorter than the sibling `.brand-progress__logs` panel so the error
+   reads as visually subordinate to the (more verbose) logs when both
+   are open. */
 .brand-progress__error-message {
   width: 100%;
   max-width: 640px;
+  max-height: clamp(120px, 22vh, 240px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   margin-top: -4px;
   padding: 12px 14px;
   border-radius: 8px;

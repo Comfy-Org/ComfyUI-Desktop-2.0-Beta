@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, watch, onBeforeUnmount, nextTick } from 'vue'
+import { TID } from '../../../shared/testIds'
 import type { ContextMenuItem } from '../types/context-menu'
 
 const props = defineProps<{
@@ -79,6 +80,7 @@ function handleClick(item: ContextMenuItem): void {
           class="context-menu-item"
           :class="{ disabled: item.disabled }"
           :disabled="item.disabled"
+          :data-testid="TID.contextMenuItem(item.id)"
           @click="handleClick(item)"
         >
           {{ item.label }}
