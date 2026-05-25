@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { AlertCircle, ArrowDownToLine, ArrowRightLeft, MoreVertical, X } from 'lucide-vue-next'
 import { useSessionStore } from '../../stores/sessionStore'
 import { installTypeMetaFor } from '../../lib/installTypeIcon'
+import { TID } from '../../../../shared/testIds'
 import type { Installation } from '../../types/ipc'
 
 interface Props {
@@ -75,6 +76,7 @@ function handleClick(): void {
     tabindex="0"
     class="chooser-tile"
     :class="statusClasses"
+    :data-testid="TID.dashboardTile(inst.id)"
     @click="handleClick"
     @keydown.enter="handleClick"
     @keydown.space.prevent="handleClick"
@@ -99,6 +101,7 @@ function handleClick(): void {
         class="chooser-tile-kebab"
         :title="t('chooser.moreActions')"
         :aria-label="t('chooser.moreActions')"
+        :data-testid="TID.dashboardTileKebab(inst.id)"
         @click.stop="emit('open-kebab-menu', $event, inst)"
         @contextmenu.stop="emit('open-kebab-menu', $event, inst)"
       >

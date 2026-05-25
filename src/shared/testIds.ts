@@ -33,11 +33,24 @@ export const TID = {
   /** The kebab / more-actions button on a dashboard tile. */
   dashboardTileKebab: (installId: string) => `dashboard-tile-kebab-${installId}`,
 
+  // ---------- Context menu ----------
+  /** A single item in the shared `ContextMenu` (the kebab + right-click
+   *  menu). `id` matches the `ContextMenuItem.id` the composable emits
+   *  — see `InstallMenuActionId` in `useInstallContextMenu.ts` for the
+   *  install-menu variants. */
+  contextMenuItem: (id: string) => `context-menu-item-${id}`,
+
   // ---------- Confirm modals ----------
   /** Generic confirm modal confirm button. */
   modalConfirm: 'modal-confirm-button',
   /** Generic confirm modal cancel button. */
   modalCancel: 'modal-cancel-button',
+  /** The primary action button of a `BaseAlert` (alert OK / simple
+   *  confirm primary). Hard-coded in `BaseAlert.vue` — kept here so
+   *  tests reference a single source of truth. */
+  baseAlertAction: 'base-alert-action',
+  /** The cancel button of a simple-confirm `BaseAlert`. */
+  baseAlertCancel: 'base-alert-cancel',
   /** Delete-install confirmation modal (the whole modal, for visibility waits). */
   deleteConfirmModal: 'delete-confirm-modal',
   /** Delete-install confirmation confirm button. */

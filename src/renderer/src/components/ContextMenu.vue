@@ -79,6 +79,7 @@ function handleClick(item: ContextMenuItem): void {
           class="context-menu-item"
           :class="{ disabled: item.disabled }"
           :disabled="item.disabled"
+          :data-testid="`context-menu-item-${item.id}`"
           @click="handleClick(item)"
         >
           {{ item.label }}

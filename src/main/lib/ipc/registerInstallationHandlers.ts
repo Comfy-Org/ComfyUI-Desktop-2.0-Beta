@@ -15,6 +15,7 @@ import type { ComfyVersion, ComfyArgDef, InstallationRecord } from './shared'
 import * as releaseCache from '../release-cache'
 import { hasGitDir } from '../git'
 import { restoreSnapshotIntoInstallation } from '../standaloneMigration'
+import { recordIpcInvocation } from '../e2eOverrides'
 
 /**
  * Apply the migration-source filter + per-install source enrichment
@@ -317,6 +318,7 @@ export function registerInstallationHandlers(): void {
   })
 
   ipcMain.handle('get-detail-sections', async (_event, installationId: string) => {
+    recordIpcInvocation('get-detail-sections', installationId)
     const inst = await installations.get(installationId)
     if (!inst) return []
     const source = sourceMap[inst.sourceId]

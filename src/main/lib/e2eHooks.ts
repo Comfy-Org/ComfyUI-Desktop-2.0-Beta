@@ -24,6 +24,10 @@ import { comfyWindows, isInstallHost } from '../host/registry'
 import {
   installUpdateOverrides,
   INSTALL_UPDATE_GLOBAL_KEY,
+  getIpcInvocations,
+  resetIpcInvocations,
+  getShellOpenExternalCalls,
+  resetShellOpenExternalCalls,
 } from './e2eOverrides'
 
 interface SetInstallUpdateOpts {
@@ -48,6 +52,21 @@ export interface E2EHelpers {
    *  mode without going through the popup. Resolves to the BrowserWindow
    *  id that was flipped (or null if no install-backed host exists). */
   returnFirstInstallHostToDashboard(): Promise<number | null>
+  /** Read the list of recorded invocations for an instrumented IPC
+   *  channel (e.g. `'get-detail-sections'`). Each entry is the first
+   *  argument the handler received. */
+  getIpcInvocations(channel: string): unknown[]
+  /** Clear the recorded invocations for one channel, or all channels
+   *  when called with no argument. Tests call this in `beforeAll` /
+   *  `beforeEach` to assert against deltas rather than cumulative
+   *  state across suites. */
+  resetIpcInvocations(channel?: string): void
+  /** URLs Electron's `shell.openExternal(...)` was called with via
+   *  the launcher's wrapper. Empty unless the production code recorded
+   *  an external open while `E2E === '1'`. */
+  getShellOpenExternalCalls(): string[]
+  /** Reset the captured `shell.openExternal` URL list. */
+  resetShellOpenExternalCalls(): void
 }
 
 export function registerE2EHooks(): void {
@@ -72,6 +91,10 @@ export function registerE2EHooks(): void {
       }
       return null
     },
+    getIpcInvocations,
+    resetIpcInvocations,
+    getShellOpenExternalCalls,
+    resetShellOpenExternalCalls,
   }
   ;(globalThis as unknown as { __e2e: E2EHelpers }).__e2e = helpers
 }
