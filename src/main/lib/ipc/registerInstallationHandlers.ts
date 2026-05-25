@@ -12,6 +12,7 @@ import {
 } from './shared'
 import type { ComfyVersion, ComfyArgDef, InstallationRecord } from './shared'
 import { restoreSnapshotIntoInstallation } from '../standaloneMigration'
+import { encryptEnvVars } from '../envVarsCrypto'
 
 /**
  * Apply the migration-source filter + per-install source enrichment
@@ -300,7 +301,7 @@ export function registerInstallationHandlers(): void {
     const filtered: Record<string, unknown> = {}
     for (const key of Object.keys(data)) {
       if (allowedIds.has(key)) {
-        filtered[key] = key === 'envVars' ? sanitizeEnvVars(data[key]) : data[key]
+        filtered[key] = key === 'envVars' ? encryptEnvVars(sanitizeEnvVars(data[key])) : data[key]
       }
     }
     if (filtered.name && filtered.name !== inst.name) {

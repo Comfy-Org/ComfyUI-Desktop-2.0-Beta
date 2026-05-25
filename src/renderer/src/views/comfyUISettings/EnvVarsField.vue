@@ -1,9 +1,15 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Plus, X } from 'lucide-vue-next'
+import { Eye, EyeOff, Plus, X } from 'lucide-vue-next'
 import BaseInput from '../../components/ui/BaseInput.vue'
 import type { DetailField } from '../../types/ipc'
+
+const SENSITIVE_KEY = /TOKEN|KEY|SECRET|PASSWORD|PASS(?!_)|AUTH|CREDENTIAL|API/i
+
+function looksSensitive(key: string): boolean {
+  return SENSITIVE_KEY.test(key)
+}
 
 /**
  * Environment variables key/value editor. The field header and security
@@ -28,6 +34,25 @@ interface Row {
 }
 
 const rows = ref<Row[]>([])
+const revealed = ref<Set<number>>(new Set())
+
+function isRevealed(i: number): boolean {
+  return revealed.value.has(i)
+}
+
+function toggleReveal(i: number): void {
+  const next = new Set(revealed.value)
+  if (next.has(i)) next.delete(i)
+  else next.add(i)
+  revealed.value = next
+}
+
+function isMasked(i: number): boolean {
+  const row = rows.value[i]
+  if (!row) return false
+  if (isRevealed(i)) return false
+  return looksSensitive(row.key)
+}
 
 watch(
   () => props.field.value,
@@ -118,14 +143,30 @@ function onValueChange(i: number, val: string): void {
             {{ t('envVars.duplicateKey', 'Duplicate key') }}
           </p>
         </div>
-        <div class="env-var-cell">
+        <div class="env-var-cell env-var-value-cell">
           <BaseInput
             mono
+            :type="isMasked(i) ? 'password' : 'text'"
             :model-value="row.value"
             :placeholder="t('envVars.valuePlaceholder')"
             :aria-label="t('envVars.value')"
             @change="onValueChange(i, $event)"
           />
+          <button
+            v-if="looksSensitive(row.key)"
+            type="button"
+            class="env-var-reveal"
+            :aria-label="
+              isRevealed(i)
+                ? t('envVars.hideValue', 'Hide value')
+                : t('envVars.revealValue', 'Reveal value')
+            "
+            :aria-pressed="isRevealed(i)"
+            @click="toggleReveal(i)"
+          >
+            <EyeOff v-if="isRevealed(i)" :size="14" />
+            <Eye v-else :size="14" />
+          </button>
         </div>
         <button
           type="button"
@@ -180,6 +221,43 @@ function onValueChange(i: number, val: string): void {
 
 .env-var-cell {
   min-width: 0;
+}
+
+.env-var-value-cell {
+  position: relative;
+}
+
+.env-var-value-cell:has(.env-var-reveal) :deep(.ui-input-control) {
+  padding-right: 36px;
+  padding-top: 5px;
+}
+
+.env-var-reveal {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--neutral-100);
+  cursor: pointer;
+  transition:
+    color 120ms ease,
+    background-color 120ms ease;
+}
+
+.env-var-reveal:hover,
+.env-var-reveal:focus-visible {
+  color: var(--text);
+  background: var(--border-hover);
+  outline: none;
 }
 
 .env-var-error {
