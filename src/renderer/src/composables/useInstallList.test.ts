@@ -267,7 +267,7 @@ describe('useInstallList', () => {
       const list = withI18nScope(i18n, () => useInstallList({ installations }))
 
       const inst = makeInstall({ id: 'a', lastLaunchedAt: Date.now() - 30_000 })
-      expect(list.lastLaunchedLabel(inst)).toBe('Launched just now')
+      expect(list.lastLaunchedLabel(inst)).toBe('Launched Just now')
     })
 
     it('formats sub-hour timestamps as "Nm ago"', () => {

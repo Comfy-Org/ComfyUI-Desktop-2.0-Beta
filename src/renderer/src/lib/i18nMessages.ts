@@ -210,7 +210,7 @@ export const en = {
     triggerPostUpdate: 'Updated',
     triggerPostRestore: 'Restored',
     // Relative-time strings — `formatRelative(iso, t)` resolves these.
-    timeJustNow: 'just now',
+    timeJustNow: 'Just now',
     timeMinutesAgo: '{count}m ago',
     timeHoursAgo: '{count}h ago',
     timeDaysAgo: '{count}d ago',
