@@ -123,6 +123,7 @@ function snapOp(installationId: string, patch: Partial<Operation> = {}): Operati
     returnTo: 'list',
     opKind: 'destructive',
     destroysInstance: false,
+    chainSpan: null,
     steps: null,
     activePhase: null,
     activePercent: -1,
@@ -268,8 +269,10 @@ describe('ProgressModal — brand branch state transitions', () => {
     expect(body.classList('.brand-progress__banner')).toContain('brand-progress__banner--success')
     expect(body.selectorText('.brand-progress__banner')).toContain('Completed successfully')
 
-    // No buttons during the auto-close window — success self-dismisses.
-    expect(body.exists('.brand-progress__footer')).toBe(false)
+    // No action buttons during the auto-close window — success self-dismisses.
+    // The footer band itself stays mounted (it also hosts the logs accordion
+    // after the redesign), so assert on the buttons specifically.
+    expect(body.exists('.brand-progress__footer-btn')).toBe(false)
 
     // The auto-close watcher fires after ~700ms; advancing timers should
     // emit a `close` event so the host can tear down the takeover.
@@ -288,7 +291,7 @@ describe('ProgressModal — brand branch state transitions', () => {
     expect(body.exists('.brand-progress__banner')).toBe(true)
     expect(body.classList('.brand-progress__banner')).toContain('brand-progress__banner--cancelled')
     expect(body.selectorText('.brand-progress__banner')).toContain('Operation was cancelled')
-    expect(body.exists('.brand-progress__footer')).toBe(false)
+    expect(body.exists('.brand-progress__footer-btn')).toBe(false)
 
     vi.advanceTimersByTime(800)
     await flushPromises()
@@ -495,12 +498,153 @@ describe('ProgressModal — brand branch state transitions', () => {
 
     // Headline (curated label).
     expect(body.text()).toContain('Downloading ComfyUI…')
-    // Substatus (raw main-side detail with bytes/speed/ETA).
+    // Substatus (rich main-side detail with bytes/speed/ETA). The view
+    // runs `formattedSubStatus` over the raw string so byte counts >= 4
+    // digits get locale grouping (`2100 MB` → `2,100 MB`) for readability.
+    // `1050` stays as-is because it's followed by `/`, not a byte unit.
     expect(body.exists('.brand-progress__substatus')).toBe(true)
     const subText = body.selectorText('.brand-progress__substatus')
-    expect(subText).toContain('1050 / 2100 MB')
+    expect(subText).toContain('1050 / 2,100 MB')
     expect(subText).toContain('22 MB/s')
     expect(subText).toContain('~1m remaining')
+  })
+})
+
+describe('ProgressModal — unified bar + launch stepper', () => {
+  beforeEach(() => {
+    // Match the helpers the rest of this file's specs already use —
+    // `createPinia` + `installMockApi` are what `beforeEach` at the top
+    // of the brand-branch describe block runs.
+    setActivePinia(createPinia())
+    installMockApi()
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  function barWidth(): string {
+    const el = document.body.querySelector(
+      '.brand-progress__bar-fill',
+    ) as HTMLElement | null
+    return el?.style.width ?? ''
+  }
+  function barPercent(): number {
+    const m = barWidth().match(/^([\d.]+)%$/)
+    return m ? Number(m[1]) : NaN
+  }
+
+  it('caps unifiedPercent at 70% for a chainSpan=install op even at 100% real progress', async () => {
+    await mountWithOp('inst-chain-install', {
+      opKind: 'install',
+      chainSpan: 'install',
+      steps: [{ phase: 'download', label: 'Download' }],
+      activePhase: 'download',
+      activePercent: 100,
+      _globalFloor: 100,
+    })
+    expect(barPercent()).toBeCloseTo(70, 1)
+  })
+
+  it('hides the unified bar for launch ops (stepper carries the progress visual)', async () => {
+    // Launch ops render only the horizontal stepper — the single
+    // `.brand-progress__bar` fill is gated off because each stepper
+    // cell already shows its own fill via `::before`. The percent
+    // readout below the stepper still reflects `unifiedPercent`.
+    const { body } = await mountWithOp('inst-chain-launch', {
+      opKind: 'launch',
+      chainSpan: 'launch',
+    })
+    expect(body.exists('.brand-progress__bar')).toBe(false)
+    expect(body.exists('.brand-progress__stepper')).toBe(true)
+  })
+
+  it('advances the stepper one row per timer tick (load-bearing 900ms clamp)', async () => {
+    // Standalone launch: no stdout signals, no chainSpan. Each 900ms
+    // tick of the caption timer bumps `captionFloor` by 1, which is
+    // what guarantees rows 0–1 each get airtime even if stdout races
+    // ahead later. The clamp logic lives in `launchActiveIndex`.
+    await mountWithOp('inst-launch-tick', { opKind: 'launch' })
+
+    function activeIdx(): number {
+      const rows = Array.from(
+        document.body.querySelectorAll('.brand-progress__stepper .brand-progress__step'),
+      )
+      return rows.findIndex((r) => r.classList.contains('is-active'))
+    }
+
+    expect(activeIdx()).toBe(0)
+    vi.advanceTimersByTime(900 + 50)
+    await flushPromises()
+    expect(activeIdx()).toBe(1)
+    vi.advanceTimersByTime(900 + 50)
+    await flushPromises()
+    expect(activeIdx()).toBe(2)
+  })
+
+  it('throttles stdout-driven jumps to one row ahead of the caption floor', async () => {
+    // Seed an empty op (the stdout watcher in ProgressModal has no
+    // `{ immediate: true }`, so it only fires on *changes* — production
+    // sees IPC chunks; tests have to mutate after mount).
+    await mountWithOp('inst-launch-clamp', {
+      opKind: 'launch',
+      chainSpan: 'launch',
+      terminalOutput: '',
+    })
+    const store = useProgressStore()
+    const op = store.operations.get('inst-launch-clamp')!
+    op.terminalOutput =
+      'Total VRAM 24576 MB\n' +
+      'Loading custom node ComfyUI-Manager\n' +
+      'Uvicorn running on http://127.0.0.1:8188\n'
+    await flushPromises()
+    vi.advanceTimersByTime(900 + 50)
+    await flushPromises()
+
+    // captionFloor=1 (one tick), stdoutStep=4 — but the clamp caps the
+    // visible active index at captionFloor+1=2. This is the guarantee
+    // that rows 0 and 1 get airtime even when stdout immediately races
+    // to "Uvicorn running on" right at boot.
+    const rows = Array.from(
+      document.body.querySelectorAll('.brand-progress__stepper .brand-progress__step'),
+    )
+    const activeIdx = rows.findIndex((r) => r.classList.contains('is-active'))
+    expect(activeIdx).toBeLessThanOrEqual(2)
+    expect(activeIdx).toBeGreaterThanOrEqual(1)
+  })
+
+  it('renders five stepper rows reflecting the current launchActiveIndex', async () => {
+    await mountWithOp('inst-launch-stepper', {
+      opKind: 'launch',
+      // No chainSpan → standalone launch path. launchActiveIndex starts
+      // at 0 (securityScan). One timer tick → 1, two ticks → 2.
+    })
+    // Advance to launchActiveIndex=2 (gpu) via the 900ms timer.
+    vi.advanceTimersByTime(900 * 2 + 50)
+    await flushPromises()
+    const rows = Array.from(
+      document.body.querySelectorAll('.brand-progress__stepper .brand-progress__step'),
+    ) as HTMLElement[]
+    expect(rows).toHaveLength(5)
+    expect(Array.from(rows[0]!.classList)).toContain('is-done')
+    expect(Array.from(rows[1]!.classList)).toContain('is-done')
+    expect(Array.from(rows[2]!.classList)).toContain('is-active')
+    expect(Array.from(rows[3]!.classList)).toContain('is-pending')
+    expect(Array.from(rows[4]!.classList)).toContain('is-pending')
+  })
+
+  it('does NOT render the launch stepper for non-launch ops (delete / install)', async () => {
+    const { body } = await mountWithOp('inst-install-only', {
+      opKind: 'install',
+      steps: [{ phase: 'download', label: 'Download' }],
+      activePhase: 'download',
+      activePercent: 40,
+    })
+    // Stepper container present? Must be absent for non-launch ops; the
+    // friendlyCaption div is what carries the single-line phase headline.
+    expect(body.exists('.brand-progress__stepper')).toBe(false)
+    expect(body.exists('.brand-progress__caption')).toBe(true)
   })
 })
 
