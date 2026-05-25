@@ -1,9 +1,20 @@
 <script setup lang="ts">
 import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Check, X, TriangleAlert, ChevronDown, ArrowLeft, RefreshCcw } from 'lucide-vue-next'
+import {
+  Check,
+  X,
+  TriangleAlert,
+  ChevronDown,
+  ArrowLeft,
+  RefreshCcw,
+  Loader2
+} from 'lucide-vue-next'
 import { useModal } from '../composables/useModal'
-import { useReturnToDashboardConfirm, type ReturnToDashboardReason } from '../composables/useReturnToDashboardConfirm'
+import {
+  useReturnToDashboardConfirm,
+  type ReturnToDashboardReason
+} from '../composables/useReturnToDashboardConfirm'
 import { useInstallationStore } from '../stores/installationStore'
 import { emitTelemetryAction } from '../lib/telemetry'
 
@@ -95,6 +106,25 @@ const globalProgress = computed<{ percent: number; indeterminate: boolean }>(() 
 })
 
 /**
+ * Per-step weight slots for the launch 0→100% bar. Each entry is the
+ * end-of-slot percent; the active step interpolates between the
+ * previous slot's end and its own end as elapsed-time-in-step grows.
+ * Calibrated so gpu + customNodes — the two long ones — own the middle
+ * of the bar, and startingServer holds the final 25% for the port-wait.
+ *
+ * Indexed by `LAUNCH_STEP_ORDER`:
+ *   [securityScan, mountLibraries, gpu, customNodes, startingServer]
+ */
+const LAUNCH_SLOT_ENDS = [10, 25, 45, 70, 95] as const
+const LAUNCH_SLOT_STARTS = [0, 10, 25, 45, 70] as const
+/** Soft estimate (ms) for how long the active step takes when no
+ *  stdout signal arrives — used purely to interpolate the bar fill
+ *  inside its slot. Steps still advance only on the 900ms timer +
+ *  stdout regexes; this constant just keeps the bar from looking
+ *  frozen between transitions. */
+const LAUNCH_STEP_BUDGET_MS = 4_000
+
+/**
  * User-facing caption that swaps as phases advance.
  *
  * Stepped ops: maps `activePhase` to `progress.phaseLabel.<phase>` —
@@ -103,8 +133,10 @@ const globalProgress = computed<{ percent: number; indeterminate: boolean }>(() 
  * phase not in the i18n table (e.g. a new main-side phase shipped before
  * the table is updated) so we never go blank.
  *
- * Flat ops: pass through `flatStatus` — chooser-launch overrides this
- * anyway via the existing `launchCaption` branch.
+ * Flat ops: pass through `flatStatus`. Chooser-launch ops short-circuit
+ * this entirely — `isBrandLaunch` swaps the caption for the 5-row
+ * launch stepper (`launchSteps`) so the rolling text is irrelevant for
+ * that branch.
  */
 const friendlyCaption = computed<string>(() => {
   const op = currentOp.value
@@ -151,6 +183,31 @@ const subStatus = computed<string | null>(() => {
 })
 
 /**
+ * Polish the rich substatus string main produces (e.g. `"250 / 1000 MB ·
+ * 12.3 MB/s · 1m30s elapsed · 45s remaining"`). Three passes:
+ *   1. Group 4+ digit byte counts (`1000 MB` → `1,000 MB`). Lookahead is
+ *      scoped to a byte-unit suffix so unrelated numerics (port, PID,
+ *      timestamp) elsewhere in the string can't be mangled into
+ *      `12,345`.
+ *   2. Drop the "· 0s remaining" / "· — remaining" tail at the very end
+ *      of the elapsed window — it's noise once the ETA has collapsed.
+ *   3. Collapse the doubled separator left behind and trim a trailing
+ *      one so we never render `"… elapsed  ·  "`.
+ */
+const formattedSubStatus = computed<string | null>(() => {
+  const raw = subStatus.value
+  if (!raw) return null
+  return (
+    raw
+      .replace(/(\d{4,})(?=\s*(?:GB|MB|KB|B)\b)/gi, (_, n) => Number(n).toLocaleString())
+      .replace(/\s*·\s*(?:0s?|—)\s*remaining/gi, '')
+      .replace(/\s*·\s*·\s*/g, '  ·  ')
+      .replace(/\s*·\s*$/, '')
+      .trim() || null
+  )
+})
+
+/**
  * Brand-loader launch step list — chooser-tile launch path only.
  *
  * Active ONLY when `brandChrome && currentOp && currentOp.steps === null`.
@@ -179,33 +236,26 @@ const subStatus = computed<string | null>(() => {
  * in main later (sendProgress in launch.ts), drop the narrative timer
  * and key off `op.lastStatus.launch` instead.
  */
-type LaunchStepKey =
-  | 'securityScan'
-  | 'mountLibraries'
-  | 'gpu'
-  | 'customNodes'
-  | 'startingServer'
+type LaunchStepKey = 'securityScan' | 'mountLibraries' | 'gpu' | 'customNodes' | 'startingServer'
 
 const LAUNCH_STEP_ORDER: readonly LaunchStepKey[] = [
   'securityScan',
   'mountLibraries',
   'gpu',
   'customNodes',
-  'startingServer',
+  'startingServer'
 ]
 
-// True only for launch-class ops in the brand layout. Drives the
-// rolling 5-step launchCaption pipeline ("security scan → mount
-// libraries → GPU → custom nodes → starting server") + the GPU stdout
-// scanner. Non-launch ops (delete / update / install / snapshot / generic)
-// fall through to `friendlyCaption`, which maps `progress.phaseLabel.<phase>`
-// or `flatStatus` to a user-facing string — so a delete op now reads
-// "Deleting installation…" instead of "Mounting model libraries…".
+// True only for launch-class ops in the brand layout. Drives the 5-step
+// launch stepper ("security scan → mount libraries → GPU → custom nodes
+// → starting server") + the GPU stdout scanner + the `launchPercent`
+// bar interpolation. Non-launch ops (delete / update / install /
+// snapshot / generic) fall through to `friendlyCaption`, which maps
+// `progress.phaseLabel.<phase>` or `flatStatus` to a user-facing string
+// — so a delete op now reads "Deleting installation…" instead of
+// "Mounting model libraries…".
 const isBrandLaunch = computed(
-  () =>
-    !!currentOp.value &&
-    currentOp.value.opKind === 'launch' &&
-    currentOp.value.steps === null,
+  () => !!currentOp.value && currentOp.value.opKind === 'launch' && currentOp.value.steps === null
 )
 
 /**
@@ -269,7 +319,7 @@ function startCaptionTimer(): void {
 }
 
 // Reset + (re)arm the caption timer when the brand-launch op changes.
-// Keyed on `displayId` so each launch starts the rolling caption fresh.
+// Keyed on `displayId` so each launch starts the stepper fresh at row 0.
 watch(
   () => (isBrandLaunch.value ? displayId.value : null),
   (id) => {
@@ -282,7 +332,7 @@ watch(
       startCaptionTimer()
     }
   },
-  { immediate: true },
+  { immediate: true }
 )
 
 // Snap to the terminal caption the moment the op finishes (success or
@@ -295,7 +345,7 @@ watch(
       clearCaptionTimer()
       captionFloor.value = LAUNCH_STEP_ORDER.length - 1
     }
-  },
+  }
 )
 
 onBeforeUnmount(clearCaptionTimer)
@@ -334,7 +384,7 @@ watch(
     ) {
       stdoutStep.value = 4
     }
-  },
+  }
 )
 
 const launchActiveIndex = computed(() => {
@@ -349,19 +399,154 @@ const launchActiveIndex = computed(() => {
   return Math.max(captionFloor.value, stdoutClamped)
 })
 
-/** Single rolling caption — picks the label for the current active step
- *  (or the last one once the op has finished). The bar shows progress
- *  visually; this just swaps the text as phases advance. */
-const launchCaption = computed<string>(() => {
-  if (!isBrandLaunch.value) return ''
-  const idx = Math.min(launchActiveIndex.value, LAUNCH_STEP_ORDER.length - 1)
-  const key = LAUNCH_STEP_ORDER[idx]
-  if (key === 'gpu') {
-    return vramGb.value !== null
-      ? t('launch.steps.gpu', { vram: vramGb.value })
-      : t('launch.steps.gpuFallback')
+const launchSteps = computed(() => {
+  const activeIdx = launchActiveIndex.value
+  return LAUNCH_STEP_ORDER.map((key, idx) => {
+    const status: 'done' | 'active' | 'pending' =
+      idx < activeIdx ? 'done' : idx === activeIdx ? 'active' : 'pending'
+    let label: string
+    if (key === 'gpu' && vramGb.value != null) {
+      label = t('launch.steps.gpu', { vram: vramGb.value })
+    } else if (key === 'gpu') {
+      label = t('launch.steps.gpuFallback')
+    } else {
+      label = t(`launch.steps.${key}`)
+    }
+    return { key, status, label }
+  })
+})
+
+/**
+ * Wall-clock timestamp the current launch step became active. Used by
+ * `launchPercent` to interpolate the bar's fill within its slot so the
+ * user sees forward motion between step transitions even though the
+ * step itself only advances on the 900ms timer / stdout regex match.
+ *
+ * `launchStepNow` is a low-frequency reactive clock that re-evaluates
+ * `launchPercent` every ~250ms. It only ticks during an in-flight
+ * launch op (gated below); other ops bypass `launchPercent` entirely.
+ */
+const launchStepStartMs = ref(0)
+const launchStepNow = ref(0)
+let launchTickTimer: ReturnType<typeof setInterval> | null = null
+const LAUNCH_TICK_MS = 250
+
+function clearLaunchTick(): void {
+  if (launchTickTimer) {
+    clearInterval(launchTickTimer)
+    launchTickTimer = null
   }
-  return t(`launch.steps.${key}`)
+}
+
+function startLaunchTick(): void {
+  clearLaunchTick()
+  launchStepNow.value = Date.now()
+  launchTickTimer = setInterval(() => {
+    if (currentOp.value?.finished || !isBrandLaunch.value) {
+      clearLaunchTick()
+      return
+    }
+    launchStepNow.value = Date.now()
+  }, LAUNCH_TICK_MS)
+}
+
+// Reset the step-elapsed clock whenever the launch op changes or the
+// active step advances. Anchoring on `launchActiveIndex` is what makes
+// the bar's slot-internal interpolation snap forward at each transition
+// instead of carrying stale elapsed-time from the previous step.
+watch(
+  () => (isBrandLaunch.value ? `${displayId.value}:${launchActiveIndex.value}` : null),
+  (key) => {
+    if (!key) {
+      clearLaunchTick()
+      return
+    }
+    launchStepStartMs.value = Date.now()
+    launchStepNow.value = launchStepStartMs.value
+    if (!currentOp.value?.finished) startLaunchTick()
+  },
+  { immediate: true }
+)
+
+onBeforeUnmount(clearLaunchTick)
+
+/**
+ * Launch progress as a 0→100 percent for the unified bar. Maps the
+ * 5-step state machine onto `LAUNCH_SLOT_ENDS`:
+ *   - Completed steps contribute their full slot.
+ *   - Active step interpolates `[slotStart, slotEnd)` by elapsed time
+ *     against `LAUNCH_STEP_BUDGET_MS`, capped so we never reach the next
+ *     slot before the step itself advances.
+ *   - When the final step has fired AND stdout has matched the "server
+ *     ready" regex (encoded as `stdoutStep >= 4`), snap to 100.
+ *
+ * Standalone-launch flows feed this into `unifiedPercent` directly
+ * (the launch op carries the whole 0→100 by itself); chained-launch
+ * flows feed it through the 70→100 mapping so install+launch read as
+ * one journey.
+ */
+const launchPercent = computed<number>(() => {
+  if (!isBrandLaunch.value) return 0
+  const op = currentOp.value
+  if (!op) return 0
+  if (op.finished && op.result?.ok) return 100
+  const idx = launchActiveIndex.value
+  // Final step reached AND server-ready regex fired → snap to 100. The
+  // regex matching is what set `stdoutStep` to 4 in the first place, so
+  // checking either side is equivalent; we check `stdoutStep` directly
+  // so the bar doesn't sit at 95% while the user waits for the comfy
+  // window to appear.
+  if (idx >= LAUNCH_STEP_ORDER.length - 1 && stdoutStep.value >= LAUNCH_STEP_ORDER.length - 1) {
+    return 100
+  }
+  const slotStart = LAUNCH_SLOT_STARTS[idx] ?? 0
+  const slotEnd = LAUNCH_SLOT_ENDS[idx] ?? 100
+  const elapsed = Math.max(0, launchStepNow.value - launchStepStartMs.value)
+  const ratio = Math.min(1, elapsed / LAUNCH_STEP_BUDGET_MS)
+  return slotStart + (slotEnd - slotStart) * ratio
+})
+
+/**
+ * Unified 0→100 percent for the bar across an install→launch chain.
+ *
+ * - `chainSpan === 'install'`: install op's `globalProgress` mapped to
+ *   0→70% so the install never visually saturates before the launch
+ *   leg begins. The remaining 30% is reserved for the launch.
+ * - `chainSpan === 'launch'`: launch op's `launchPercent` mapped to
+ *   70→100% so the bar picks up where the install left off.
+ * - Standalone launch (`opKind === 'launch'`, no chainSpan): launch
+ *   op's `launchPercent` mapped 0→100. Bar moves through all five slots
+ *   on its own.
+ * - Anything else: pass-through `globalProgress.percent`.
+ *
+ * Monotonic by construction — install caps at 70 and launch starts at
+ * 70, so the seam between the two ops is invisible.
+ */
+const unifiedPercent = computed<number>(() => {
+  const op = currentOp.value
+  if (!op) return 0
+  if (op.chainSpan === 'install') {
+    return Math.min(70, globalProgress.value.percent * 0.7)
+  }
+  if (op.chainSpan === 'launch') {
+    return 70 + launchPercent.value * 0.3
+  }
+  if (isBrandLaunch.value) {
+    return launchPercent.value
+  }
+  return globalProgress.value.percent
+})
+
+/** Whether the bar should render with the indeterminate slide animation
+ *  rather than a determinate fill. Launch ops always render determinate
+ *  now (the 5-step state machine + `launchPercent` give us a number);
+ *  non-launch ops fall back to the existing `globalProgress.indeterminate`
+ *  signal. */
+const unifiedIndeterminate = computed<boolean>(() => {
+  if (isBrandLaunch.value) return false
+  const op = currentOp.value
+  if (op?.chainSpan === 'install') return false
+  return globalProgress.value.indeterminate
 })
 
 // Independent of the modal-branch terminal toggle (`terminalExpanded`)
@@ -374,12 +559,10 @@ const brandTerminalRef = ref<HTMLDivElement | null>(null)
 // this surface (brand + modal terminal), every stdout chunk would wake
 // both watchers and post a `nextTick → scrollToBottom` on a `null` ref.
 // Gating the getter elides that fan-out until the disclosure is open.
-const {
-  isAtBottom: brandIsAtBottom,
-  handleTerminalScroll: handleBrandTerminalScroll,
-} = useTerminalScroll(brandTerminalRef, () =>
-  brandLogsExpanded.value ? currentOp.value?.terminalOutput : undefined,
-)
+const { isAtBottom: brandIsAtBottom, handleTerminalScroll: handleBrandTerminalScroll } =
+  useTerminalScroll(brandTerminalRef, () =>
+    brandLogsExpanded.value ? currentOp.value?.terminalOutput : undefined
+  )
 
 function toggleBrandLogs(): void {
   brandLogsExpanded.value = !brandLogsExpanded.value
@@ -441,6 +624,11 @@ function startOperation(opts: {
   returnTo?: string
   opKind?: ShowProgressOpts['opKind']
   destroysInstance?: boolean
+  /** Forwarded straight to the store so a host that drives the modal
+   *  via the exposed handle (instead of `handleShowProgress`) can still
+   *  set up an install→launch chain. Without this widening the field
+   *  would be silently dropped — bar resets at the seam. */
+  chainSpan?: ShowProgressOpts['chainSpan']
 }): void {
   currentId.value = opts.installationId
   resolvingConflict.value = false
@@ -492,10 +680,7 @@ function handleDone(): void {
   // op whose success removes the install from the registry) would
   // otherwise route to a now-missing detail view.
   const installStillExists = !!installationStore.getById(id)
-  if (
-    installStillExists &&
-    (op.returnTo === 'detail' || op.result.navigate === 'detail')
-  ) {
+  if (installStillExists && (op.returnTo === 'detail' || op.result.navigate === 'detail')) {
     emit('show-detail', id)
   } else if (op.result.mode === 'console') {
     emit('show-console', id)
@@ -542,7 +727,7 @@ function handleReboot(): void {
     apiCall: op.apiCall || (() => window.api.runAction(id, 'launch')),
     returnTo: op.returnTo,
     opKind: op.opKind,
-    destroysInstance: op.destroysInstance,
+    destroysInstance: op.destroysInstance
   })
 }
 
@@ -562,7 +747,7 @@ async function cancelDestructiveOp(): Promise<void> {
   if (!ok) return
   emitTelemetryAction('desktop2.instance.return_to_dashboard', {
     from: 'progress',
-    reason: 'in_flight',
+    reason: 'in_flight'
   })
   progressStore.cancelOperation(id)
   emit('close')
@@ -597,7 +782,7 @@ watch(
       autoCloseTimer = null
       if (displayId.value === id) handleDone()
     }, AUTO_CLOSE_DELAY_MS)
-  },
+  }
 )
 onBeforeUnmount(clearAutoCloseTimer)
 
@@ -655,23 +840,14 @@ defineExpose({ startOperation, showOperation })
         <ComfyWordmark class="brand-progress__wordmark" />
 
         <!-- Progress bar — hidden once the op finishes so the
-             finished-state banner owns the visual focus. -->
-        <template v-if="!currentOp.finished">
-          <div
-            class="brand-progress__bar"
-            :class="{ 'is-indeterminate': globalProgress.indeterminate }"
-          >
-            <div
-              class="brand-progress__bar-fill"
-              :style="{ width: `${globalProgress.percent}%` }"
-            />
+             finished-state banner owns the visual focus.
+             Launch ops use the horizontal stepper below instead. -->
+        <template v-if="!currentOp.finished && !isBrandLaunch">
+          <div class="brand-progress__bar" :class="{ 'is-indeterminate': unifiedIndeterminate }">
+            <div class="brand-progress__bar-fill" :style="{ width: `${unifiedPercent}%` }" />
           </div>
-          <div
-            v-if="!isBrandLaunch && !globalProgress.indeterminate"
-            class="brand-progress__percent"
-            aria-hidden="true"
-          >
-            {{ Math.round(globalProgress.percent) }}%
+          <div v-if="!unifiedIndeterminate" class="brand-progress__percent" aria-hidden="true">
+            {{ Math.round(unifiedPercent) }}%
           </div>
         </template>
 
@@ -700,18 +876,12 @@ defineExpose({ startOperation, showOperation })
           <div
             v-else-if="currentOp.finished"
             :key="`finished-${
-              currentOp.cancelRequested
-                ? 'cancelled'
-                : currentOp.error
-                  ? 'error'
-                  : 'success'
+              currentOp.cancelRequested ? 'cancelled' : currentOp.error ? 'error' : 'success'
             }`"
             class="brand-progress__banner"
             :class="{
-              'brand-progress__banner--success':
-                !currentOp.cancelRequested && currentOp.result?.ok,
-              'brand-progress__banner--error':
-                !currentOp.cancelRequested && !!currentOp.error,
+              'brand-progress__banner--success': !currentOp.cancelRequested && currentOp.result?.ok,
+              'brand-progress__banner--error': !currentOp.cancelRequested && !!currentOp.error,
               'brand-progress__banner--cancelled': currentOp.cancelRequested
             }"
             aria-live="polite"
@@ -730,45 +900,60 @@ defineExpose({ startOperation, showOperation })
             </span>
           </div>
 
-          <!-- Running caption. For chooser-tile launches the caption
-               cycles through `launchCaption` (5 narrative + stdout-driven
-               phases). Every other op kind (delete, update, install,
-               snapshot, generic) maps through `friendlyCaption` which
-               resolves `progress.phaseLabel.<phase>` or `flatStatus` —
-               so a delete reads "Deleting installation…" instead of the
-               launch-flow "Mounting model libraries…". The `:key` swap
-               drives a tiny crossfade on text change.
-
-               ⚠️ The key embeds `vramGb` because that's the only
-               *intra-step* dynamic var we want to crossfade on (null → 24).
-               Don't add more parametric vars to this key without thinking —
-               every value change forces a remount + crossfade, which looks
-               like a stutter when the underlying text is identical. -->
+          <div
+            v-else-if="isBrandLaunch"
+            key="launch-stepper"
+            class="brand-progress__stepper"
+            aria-live="polite"
+          >
+            <div
+              v-for="step in launchSteps"
+              :key="step.key"
+              class="brand-progress__step"
+              :class="`is-${step.status}`"
+            >
+              <span class="brand-progress__step-icon">
+                <Check v-if="step.status === 'done'" :size="12" :stroke-width="2.5" />
+                <Loader2
+                  v-else-if="step.status === 'active'"
+                  :size="12"
+                  :stroke-width="2"
+                  class="brand-progress__step-spinner"
+                />
+              </span>
+              <span class="brand-progress__step-label">{{ step.label }}</span>
+            </div>
+          </div>
           <div
             v-else
-            :key="
-              isBrandLaunch
-                ? `launch-${launchActiveIndex}-${vramGb ?? 'na'}`
-                : (currentOp.activePhase ?? 'caption')
-            "
+            :key="currentOp.activePhase ?? 'caption'"
             class="brand-progress__caption"
             aria-live="polite"
           >
-            {{ isBrandLaunch ? launchCaption : friendlyCaption }}
+            {{ friendlyCaption }}
           </div>
         </Transition>
+
+        <!-- Progress percent for launch ops (shown below stepper) -->
+        <div
+          v-if="!currentOp.finished && isBrandLaunch"
+          class="brand-progress__percent"
+          aria-hidden="true"
+        >
+          {{ Math.round(unifiedPercent) }}%
+        </div>
 
         <!-- Substatus line — the rich main-side detail string (bytes
              received / total, MB/s, elapsed, ETA) for stepped phases
              whose curated label hides those numbers. Launch ops keep
-             it hidden because their rolling launchCaption already
-             cycles through narrative phases. -->
+             it hidden because the 5-row launch stepper already shows
+             which narrative phase is active. -->
         <div
-          v-if="!currentOp.finished && !isBrandLaunch && subStatus"
+          v-if="!currentOp.finished && !isBrandLaunch && formattedSubStatus"
           class="brand-progress__substatus"
           aria-live="polite"
         >
-          {{ subStatus }}
+          {{ formattedSubStatus }}
         </div>
 
         <!-- Error / port-conflict detail line beneath the banner.
@@ -780,14 +965,8 @@ defineExpose({ startOperation, showOperation })
              the same string the user could grab manually so the
              share-to-Google / paste-into-issue-thread flow doesn't
              require keyboard chording. -->
-        <div
-          v-if="finishedErrorMessage"
-          class="brand-progress__error-row"
-        >
-          <div
-            class="brand-progress__error-message"
-            :data-testid="TID.progressErrorMessage"
-          >
+        <div v-if="finishedErrorMessage" class="brand-progress__error-row">
+          <div class="brand-progress__error-message" :data-testid="TID.progressErrorMessage">
             {{ finishedErrorMessage }}
           </div>
           <BaseCopyButton
@@ -796,47 +975,6 @@ defineExpose({ startOperation, showOperation })
             class="brand-progress__error-copy"
           />
         </div>
-
-        <!-- View logs disclosure — any op with stdout (launch, delete,
-             update, install, snapshot…) can expand the log tail. State
-             is independent from the legacy modal-branch terminal toggle
-             so re-mounts on swap don't leak open/closed state. -->
-        <template v-if="currentOp.terminalOutput">
-          <div class="brand-progress__logs-header">
-            <button
-              type="button"
-              class="brand-progress__logs-toggle"
-              :aria-expanded="brandLogsExpanded"
-              aria-controls="brand-progress-logs"
-              @click="toggleBrandLogs"
-            >
-              <ChevronDown
-                :size="14"
-                class="brand-progress__logs-chevron"
-                :class="{ 'is-open': brandLogsExpanded }"
-              />
-              <span>{{ $t('launch.viewLogs') }}</span>
-            </button>
-            <BaseCopyButton
-              v-if="brandLogsExpanded"
-              :get-value="getTerminalLogText"
-              :aria-label="$t('common.copy')"
-              class="brand-progress__logs-copy"
-            />
-          </div>
-          <BaseAccordion :open="brandLogsExpanded" class="brand-progress__logs-wrap">
-            <div
-              id="brand-progress-logs"
-              ref="brandTerminalRef"
-              class="brand-progress__logs"
-              :data-testid="TID.progressLogs"
-              @scroll="handleBrandTerminalScroll"
-            >
-              {{ displayedTerminalOutput }}
-            </div>
-          </BaseAccordion>
-        </template>
-
       </div>
     </div>
     <!-- Footer band — sibling to the centered hero stack so the action
@@ -858,81 +996,122 @@ defineExpose({ startOperation, showOperation })
          Success / cancelled auto-close after a short delay so no
          buttons render then — the band collapses to zero height. -->
     <template #footer>
-      <div
-        v-if="
-          currentOp &&
-            (!currentOp.finished ||
-              isPortConflictOpen ||
-              (!!currentOp.error && !currentOp.cancelRequested))
-        "
-        class="brand-progress__footer"
-      >
-        <template v-if="!currentOp.finished">
-          <button
-            v-if="currentOp.destroysInstance"
-            type="button"
-            class="brand-ghost brand-progress__footer-btn"
-            @click="cancelDestructiveOp"
+      <div v-if="currentOp" class="brand-progress__footer">
+        <!-- Log panel (opens above the footer bar) -->
+        <BaseAccordion
+          v-if="currentOp.terminalOutput"
+          :open="brandLogsExpanded"
+          class="brand-progress__logs-wrap"
+          :class="{ 'is-expanded': brandLogsExpanded }"
+        >
+          <div class="brand-progress__logs-panel-header">
+            <span class="brand-progress__logs-panel-title">{{ $t('launch.viewLogs') }}</span>
+            <BaseCopyButton
+              :get-value="getTerminalLogText"
+              :aria-label="$t('common.copy')"
+              class="brand-progress__logs-copy"
+            />
+          </div>
+          <div
+            id="brand-progress-logs"
+            ref="brandTerminalRef"
+            class="brand-progress__logs"
+            :data-testid="TID.progressLogs"
+            @scroll="handleBrandTerminalScroll"
           >
-            <X :size="16" />
-            {{ $t('common.cancel') }}
-          </button>
+            {{ displayedTerminalOutput }}
+          </div>
+        </BaseAccordion>
+        <div
+          class="brand-progress__footer-bar"
+          :class="{ 'is-centered': !currentOp.terminalOutput }"
+        >
+          <div class="brand-progress__footer-left">
+            <template v-if="!currentOp.finished">
+              <button
+                v-if="currentOp.destroysInstance"
+                type="button"
+                class="brand-ghost brand-progress__footer-btn"
+                @click="cancelDestructiveOp"
+              >
+                <X :size="14" />
+                {{ $t('common.cancel') }}
+              </button>
+              <button
+                v-else
+                type="button"
+                class="brand-ghost brand-progress__footer-btn"
+                @click="returnToDashboard('in_flight')"
+              >
+                <ArrowLeft :size="14" />
+                {{ $t('progress.returnToDashboard') }}
+              </button>
+            </template>
+            <template v-else-if="isPortConflictOpen && currentOp.result?.portConflict">
+              <button
+                v-if="currentOp.result.portConflict.nextPort"
+                type="button"
+                class="brand-primary brand-progress__footer-btn"
+                @click="handleUseNextPort(currentOp.result.portConflict.nextPort!)"
+              >
+                {{
+                  $t('errors.portConflictUsePort', {
+                    port: currentOp.result.portConflict.nextPort
+                  })
+                }}
+              </button>
+              <button
+                v-if="currentOp.result.portConflict.isComfy"
+                type="button"
+                class="brand-ghost brand-progress__footer-btn brand-progress__footer-btn--danger"
+                @click="handleKillProcess(currentOp.result.portConflict.port)"
+              >
+                {{ $t('errors.portConflictKill') }}
+              </button>
+            </template>
+            <template
+              v-else-if="currentOp.finished && !!currentOp.error && !currentOp.cancelRequested"
+            >
+              <button
+                v-if="!currentOp.destroysInstance"
+                type="button"
+                class="brand-primary brand-progress__footer-btn"
+                :data-testid="TID.progressReboot"
+                @click="handleReboot"
+              >
+                <RefreshCcw :size="14" />
+                {{ $t('progress.reboot') }}
+              </button>
+              <button
+                type="button"
+                :class="
+                  currentOp.destroysInstance
+                    ? 'brand-primary brand-progress__footer-btn'
+                    : 'brand-ghost brand-progress__footer-btn'
+                "
+                @click="returnToDashboard('crashed')"
+              >
+                <ArrowLeft :size="14" />
+                {{ $t('progress.returnToDashboard') }}
+              </button>
+            </template>
+          </div>
           <button
-            v-else
+            v-if="currentOp.terminalOutput"
             type="button"
-            class="brand-ghost brand-progress__footer-btn"
-            @click="returnToDashboard('in_flight')"
+            class="brand-ghost brand-progress__footer-btn brand-progress__logs-toggle"
+            :aria-expanded="brandLogsExpanded"
+            aria-controls="brand-progress-logs"
+            @click="toggleBrandLogs"
           >
-            <ArrowLeft :size="16" />
-            {{ $t('progress.returnToDashboard') }}
+            <ChevronDown
+              :size="14"
+              class="brand-progress__logs-chevron"
+              :class="{ 'is-open': brandLogsExpanded }"
+            />
+            {{ $t('launch.viewLogs') }}
           </button>
-        </template>
-        <template v-else-if="isPortConflictOpen && currentOp.result?.portConflict">
-          <button
-            v-if="currentOp.result.portConflict.nextPort"
-            type="button"
-            class="brand-primary brand-progress__footer-btn"
-            @click="handleUseNextPort(currentOp.result.portConflict.nextPort!)"
-          >
-            {{
-              $t('errors.portConflictUsePort', {
-                port: currentOp.result.portConflict.nextPort
-              })
-            }}
-          </button>
-          <button
-            v-if="currentOp.result.portConflict.isComfy"
-            type="button"
-            class="brand-ghost brand-progress__footer-btn brand-progress__footer-btn--danger"
-            @click="handleKillProcess(currentOp.result.portConflict.port)"
-          >
-            {{ $t('errors.portConflictKill') }}
-          </button>
-        </template>
-        <template v-else>
-          <button
-            v-if="!currentOp.destroysInstance"
-            type="button"
-            class="brand-primary brand-progress__footer-btn"
-            :data-testid="TID.progressReboot"
-            @click="handleReboot"
-          >
-            <RefreshCcw :size="16" />
-            {{ $t('progress.reboot') }}
-          </button>
-          <button
-            type="button"
-            :class="
-              currentOp.destroysInstance
-                ? 'brand-primary brand-progress__footer-btn'
-                : 'brand-ghost brand-progress__footer-btn'
-            "
-            @click="returnToDashboard('crashed')"
-          >
-            <ArrowLeft :size="16" />
-            {{ $t('progress.returnToDashboard') }}
-          </button>
-        </template>
+        </div>
       </div>
     </template>
   </BrandTakeoverLayout>
@@ -964,11 +1143,31 @@ defineExpose({ startOperation, showOperation })
   position: relative;
   z-index: 2;
   width: min(85%, 880px);
+  max-width: calc(100vw - 48px);
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: clamp(1rem, 3vh, 2rem);
   text-align: center;
+  overflow: hidden;
+}
+.brand-progress__stack::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 130%;
+  height: 160%;
+  border-radius: 50%;
+  background: radial-gradient(
+    ellipse at center,
+    color-mix(in srgb, var(--neutral-800) 60%, transparent) 0%,
+    color-mix(in srgb, var(--neutral-800) 40%, transparent) 35%,
+    transparent 60%
+  );
+  pointer-events: none;
+  z-index: -1;
 }
 .brand-progress__wordmark {
   width: clamp(140px, 9.7vw, 240px);
@@ -986,7 +1185,7 @@ defineExpose({ startOperation, showOperation })
 }
 .brand-progress__bar-fill {
   height: 100%;
-  background: var(--neutral-50);
+  background: var(--comfy-yellow);
   border-radius: inherit;
   transition: width 200ms cubic-bezier(0.22, 1, 0.36, 1);
 }
@@ -1002,15 +1201,112 @@ defineExpose({ startOperation, showOperation })
     transform: translateX(330%);
   }
 }
+
+/* Horizontal stepper beneath the segmented bar */
+.brand-progress__stepper {
+  width: 100%;
+  max-width: 100%;
+  display: flex;
+  gap: 3px;
+  align-items: flex-start;
+  overflow: hidden;
+}
+.brand-progress__step {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  transition: opacity 180ms ease;
+}
+.brand-progress__step::before {
+  content: '';
+  width: 100%;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--brand-surface-bg);
+  border: 1px solid var(--brand-surface-border);
+  transition:
+    background 200ms ease,
+    border-color 200ms ease;
+}
+.brand-progress__step.is-done::before {
+  background: var(--comfy-yellow);
+  border-color: var(--comfy-yellow);
+}
+.brand-progress__step.is-active::before {
+  background: linear-gradient(
+    90deg,
+    var(--comfy-yellow) 0%,
+    var(--comfy-yellow) 60%,
+    var(--brand-surface-bg) 100%
+  );
+  border-color: color-mix(in srgb, var(--comfy-yellow) 50%, var(--brand-surface-border));
+}
+.brand-progress__step.is-pending {
+  opacity: 0.5;
+}
+.brand-progress__step-icon {
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.brand-progress__step.is-done .brand-progress__step-icon {
+  background: var(--semantic-success, #00cd72);
+  color: #fff;
+}
+.brand-progress__step.is-active .brand-progress__step-icon {
+  color: var(--comfy-yellow);
+}
+.brand-progress__step.is-pending .brand-progress__step-icon {
+  color: var(--neutral-500);
+}
+.brand-progress__step-spinner {
+  animation: brand-step-spin 1s linear infinite;
+}
+@keyframes brand-step-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.brand-progress__step-label {
+  font-size: clamp(9px, 1.2vw, 11px);
+  color: var(--neutral-100);
+  text-align: center;
+  line-height: 1.3;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 720px) {
+  .brand-progress__step-label {
+    white-space: normal;
+    word-break: break-word;
+  }
+}
+.brand-progress__step.is-active .brand-progress__step-label {
+  color: var(--neutral-100);
+}
+.brand-progress__step.is-done .brand-progress__step-label {
+  color: var(--neutral-300);
+}
+@media (prefers-reduced-motion: reduce) {
+  .brand-progress__step-spinner {
+    animation: none;
+  }
+}
 .brand-progress__caption {
   font-size: var(--takeover-fs-body);
-  color: var(--neutral-300);
+  color: var(--neutral-100);
   text-align: center;
   min-height: 1.5em;
-  /* Selectable so users can copy the running phase label (e.g.
-     "Counting files…") into bug reports without waiting for the op
-     to finish. Same allowance now applies to the finished-state
-     banner via `.brand-progress__banner span`. */
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.5);
   user-select: text;
   -webkit-user-select: text;
 }
@@ -1022,11 +1318,12 @@ defineExpose({ startOperation, showOperation })
 .brand-progress__substatus {
   margin-top: -8px;
   font-size: var(--takeover-fs-caption, 12px);
-  color: var(--neutral-400);
+  color: var(--neutral-200);
   text-align: center;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.01em;
   min-height: 1.4em;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.5);
   user-select: text;
   -webkit-user-select: text;
 }
@@ -1041,7 +1338,9 @@ defineExpose({ startOperation, showOperation })
 
 .brand-caption-fade-enter-active,
 .brand-caption-fade-leave-active {
-  transition: opacity 180ms ease, transform 180ms ease;
+  transition:
+    opacity 180ms ease,
+    transform 180ms ease;
 }
 .brand-caption-fade-enter-from {
   opacity: 0;
@@ -1062,44 +1361,53 @@ defineExpose({ startOperation, showOperation })
   }
 }
 
+/* View Logs toggle (lives in the footer bar) */
 .brand-progress__logs-toggle {
-  appearance: none;
-  background: transparent;
-  border: none;
-  color: var(--neutral-400);
-  font-size: var(--takeover-fs-caption, 12px);
-  display: inline-flex;
-  align-items: center;
   gap: 6px;
-  padding: 6px 8px;
-  cursor: pointer;
   border-radius: 6px;
-  transition: color 160ms ease, background-color 160ms ease;
-}
-.brand-progress__logs-toggle:hover,
-.brand-progress__logs-toggle:focus-visible {
-  color: var(--neutral-200);
-  background: var(--brand-surface-bg);
-  outline: none;
+  border: 1px solid rgba(194, 191, 185, 0.09);
+  background: rgba(138, 134, 136, 0.1);
+  box-shadow: 0 1px 0 0 rgba(255, 255, 255, 0.1) inset;
+  backdrop-filter: blur(75px);
+  color: var(--text);
 }
 .brand-progress__logs-chevron {
+  transform: rotate(180deg);
   transition: transform 200ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 .brand-progress__logs-chevron.is-open {
-  transform: rotate(180deg);
+  transform: rotate(0deg);
 }
+/* Log panel that opens above the footer bar */
 .brand-progress__logs-wrap {
-  width: 100%;
+  border-radius: 10px;
+  overflow: hidden;
+}
+.brand-progress__logs-wrap.is-expanded {
+  border: 1px solid var(--brand-surface-border);
+  background: var(--brand-surface-bg);
+  backdrop-filter: blur(8px);
+}
+.brand-progress__logs-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--brand-surface-border);
+}
+.brand-progress__logs-panel-title {
+  font-size: var(--takeover-fs-caption, 12px);
+  color: var(--neutral-200);
+  font-weight: 500;
+}
+.brand-progress__logs-copy {
+  flex: none;
 }
 .brand-progress__logs {
   width: 100%;
-  height: clamp(160px, 28vh, 320px);
+  height: clamp(140px, 25vh, 260px);
   overflow-y: auto;
-  margin-top: 8px;
   padding: 12px 14px;
-  border-radius: 10px;
-  border: 1px solid var(--brand-surface-border);
-  background: var(--brand-surface-bg);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 11px;
   line-height: 1.55;
@@ -1107,26 +1415,8 @@ defineExpose({ startOperation, showOperation })
   text-align: left;
   white-space: pre-wrap;
   word-break: break-word;
-  backdrop-filter: blur(4px);
-  /* Selectable so users can copy the visible log tail manually even
-     before clicking the BaseCopyButton (which writes the FULL
-     unbounded buffer — see `getTerminalLogText`). */
   user-select: text;
   -webkit-user-select: text;
-}
-
-/* Header row hosting the "View logs" disclosure + a Copy button on
-   the right. Copy is only visible while the accordion is open so a
-   collapsed log doesn't suggest there's anything to copy yet. */
-.brand-progress__logs-header {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-}
-.brand-progress__logs-copy {
-  margin-left: 4px;
 }
 
 /* Row hosting the error / port-conflict detail line + its inline
@@ -1201,21 +1491,50 @@ defineExpose({ startOperation, showOperation })
   white-space: pre-wrap;
 }
 
-/* Pinned footer band — slotted into BrandTakeoverLayout's `#footer`
-   so the buttons hug the takeover's bottom edge instead of crowding
-   the centered hero stack above. */
+/* Footer — positioned container for the bar + the logs panel above it */
 .brand-progress__footer {
   position: absolute;
-  bottom: clamp(24px, 4vh, 48px);
-  left: 50%;
-  transform: translateX(-50%);
+  bottom: clamp(16px, 2.5vh, 32px);
+  left: clamp(16px, 2.5vw, 32px);
+  right: clamp(16px, 2.5vw, 32px);
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.brand-progress__footer-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.brand-progress__footer-bar.is-centered {
+  justify-content: center;
+}
+.brand-progress__footer-left {
   display: inline-flex;
   align-items: center;
-  gap: 12px;
-  z-index: 3;
+  gap: 10px;
 }
 .brand-progress__footer-btn {
-  min-width: 160px;
+  min-width: auto;
+  padding: 7px 14px;
+  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.brand-progress__footer-btn.brand-ghost {
+  border-color: var(--neutral-500);
+  color: var(--neutral-100);
+}
+@media (max-width: 720px) {
+  .brand-progress__footer-btn {
+    padding: 6px 10px;
+    font-size: 12px;
+  }
 }
 /* Destructive variant for the port-conflict Kill Process button.
    Pairs with `.brand-ghost` to keep the chrome consistent — same
