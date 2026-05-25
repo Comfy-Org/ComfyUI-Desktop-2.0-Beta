@@ -161,6 +161,7 @@ export function _resetForTest(): void {
   consentState = 'undecided'
   pendingSessionStart = null
   pendingIdentifyProperties = null
+  defaultEventProperties = {}
   initialized = false
   drainingForQuit = false
 }
@@ -187,6 +188,37 @@ let client: PostHog | null = null
 let distinctId: string | null = null
 let bootstrapTimeMs: number = Date.now()
 let initialized = false
+
+/**
+ * Default properties merged into every `capture()` payload. Set once at
+ * `initTelemetry()` time from `InitOptions`. Holds `app_version`,
+ * `app_channel`, `app_env`, `platform`, `arch`, and `is_packaged` so
+ * per-event filters / breakdowns work without a join against the person
+ * profile (PostHog person properties are joined at query time and are
+ * point-in-time as of write — releasing a new app version while the user
+ * still has events from the old one would mis-attribute without this).
+ *
+ * Per-call properties take precedence on key collision.
+ */
+let defaultEventProperties: Record<string, TelemetryValue> = {}
+
+/**
+ * Coarse release-channel classification derived from a semver-ish
+ * `appVersion`. `-beta` / `-canary` / `-alpha` markers map to their
+ * channel; a missing suffix is `stable`; an unrecognised suffix is
+ * `unknown` (kept coarse so future `-rc` / `-dev` builds fall into
+ * `unknown` rather than silently being misclassified). Mirrors the
+ * renderer's `deriveAppChannel` so both surfaces agree.
+ */
+function deriveAppChannel(appVersion: string): string {
+  if (!appVersion) return 'unknown'
+  const v = appVersion.toLowerCase()
+  if (v.includes('-beta')) return 'beta'
+  if (v.includes('-canary')) return 'canary'
+  if (v.includes('-alpha')) return 'alpha'
+  if (/[a-z]/.test(v.split('+')[0]?.split('-').slice(1).join('-') || '')) return 'unknown'
+  return 'stable'
+}
 
 /**
  * Three-state consent.
@@ -269,6 +301,18 @@ export function initTelemetry(opts: InitOptions): void {
   initialized = true
   bootstrapTimeMs = Date.now()
 
+  // Set the per-event defaults BEFORE the early-return so disabled
+  // telemetry still gets a coherent snapshot (useful when tests stub
+  // the client out but still inspect `defaultEventProperties`).
+  defaultEventProperties = {
+    app_version: opts.appVersion,
+    app_channel: deriveAppChannel(opts.appVersion),
+    app_env: opts.appEnv,
+    is_packaged: opts.isPackaged,
+    platform: process.platform,
+    arch: process.arch
+  }
+
   const cfg = readPostHogConfig()
   if (!cfg.enabled) return
 
@@ -283,6 +327,8 @@ export function initTelemetry(opts: InitOptions): void {
   }
 
   // Stash session-start parameters until identify() can attribute them.
+  // The session-start payload duplicates the defaults so an event-only
+  // reader (no defaults yet) still sees them on the first event.
   pendingSessionStart = {
     app_env: opts.appEnv,
     app_version: opts.appVersion,
@@ -411,7 +457,14 @@ export function capture(event: string, properties: TelemetryContext = {}): void 
   if (!client || !distinctId) return
   if (!isAllowedToFire(event)) return
   try {
-    client.capture({ distinctId, event, properties })
+    // Per-call properties override defaults on key collision — callers
+    // that explicitly pass `app_version` (e.g. session-start payload,
+    // legacy event re-emitters) win.
+    client.capture({
+      distinctId,
+      event,
+      properties: { ...defaultEventProperties, ...properties }
+    })
   } catch {
     // ignore – telemetry must never break the app
   }

@@ -177,7 +177,7 @@ describe('experiments', () => {
 
       const events = captured.filter((c) => c.event === 'desktop2.experiment.exposed')
       expect(events).toHaveLength(1)
-      expect(events[0]?.properties).toEqual({
+      expect(events[0]?.properties).toMatchObject({
         experiment_key: 'auth_banner_smoketest_v1',
         variant: 'treatment',
         source: 'cache'

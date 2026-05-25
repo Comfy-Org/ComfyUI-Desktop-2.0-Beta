@@ -138,8 +138,97 @@ describe('telemetry.bucketError', () => {
     expect(telemetry.bucketError('RuntimeError: something broke')).toBe('python')
     expect(telemetry.bucketError('ValueError: bad input')).toBe('python')
   })
+  it('falls back to "python" even when the class is mid-message (no ^ anchor)', () => {
+    // scrubAll can strip a leading path and leave the class name in the
+    // middle; previously the `^`-anchored regex would miss this and the
+    // event landed in `other`.
+    expect(telemetry.bucketError('execution failed -> RuntimeError: bad input')).toBe('python')
+    expect(telemetry.bucketError('Got AttributeError while computing')).toBe('python')
+  })
+  it('classifies tensor / shape mismatches', () => {
+    expect(telemetry.bucketError('size mismatch for transformer.h.0.weight')).toBe('shape_mismatch')
+    expect(telemetry.bucketError("shape '[1, 4, 64, 64]' is invalid for input of size 16384")).toBe(
+      'shape_mismatch'
+    )
+    expect(telemetry.bucketError('expected 4 dimensions but got 3')).toBe('shape_mismatch')
+  })
+  it('classifies model-load failures', () => {
+    expect(telemetry.bucketError('Error while deserializing header: invalid byte 0x12')).toBe(
+      'model_load'
+    )
+    expect(telemetry.bucketError('Missing key(s) in state_dict: "transformer.h.0.weight"')).toBe(
+      'model_load'
+    )
+    expect(telemetry.bucketError('safetensors_rust.SafetensorError: corrupted')).toBe('model_load')
+  })
+  it('classifies workflow-validation failures', () => {
+    expect(telemetry.bucketError('Prompt outputs failed validation')).toBe('validation')
+    expect(telemetry.bucketError('validation_failed for node 5')).toBe('validation')
+  })
   it('keeps "other" for messages with no known signal', () => {
     expect(telemetry.bucketError('this is just a sentence')).toBe('other')
+  })
+})
+
+describe('telemetry default event properties', () => {
+  beforeEach(() => {
+    captured.length = 0
+    process.env['POSTHOG_API_KEY'] = 'test-key'
+    process.env['POSTHOG_ENABLED'] = '1'
+    telemetry._resetForTest()
+  })
+
+  afterEach(() => {
+    delete process.env['POSTHOG_API_KEY']
+    delete process.env['POSTHOG_ENABLED']
+    telemetry._resetForTest()
+  })
+
+  it('injects app_version, app_channel, app_env, platform, arch on every capture', () => {
+    telemetry.initTelemetry({ appVersion: '0.7.0-beta.3', appEnv: 'prod', isPackaged: true })
+    telemetry.identify('id')
+    telemetry.setConsentState('granted')
+    captured.length = 0
+
+    telemetry.capture('desktop2.test.event', { foo: 'bar' })
+
+    expect(captured).toHaveLength(1)
+    expect(captured[0]!.properties).toMatchObject({
+      foo: 'bar',
+      app_version: '0.7.0-beta.3',
+      app_channel: 'beta',
+      app_env: 'prod',
+      is_packaged: true,
+      platform: process.platform,
+      arch: process.arch
+    })
+  })
+
+  it('derives stable channel for a clean semver and unknown for an unfamiliar suffix', () => {
+    telemetry.initTelemetry({ appVersion: '1.0.0', appEnv: 'prod', isPackaged: true })
+    telemetry.identify('id')
+    telemetry.setConsentState('granted')
+    captured.length = 0
+    telemetry.capture('any.event')
+    expect(captured[0]!.properties).toMatchObject({ app_channel: 'stable' })
+
+    telemetry._resetForTest()
+    telemetry.initTelemetry({ appVersion: '1.0.0-rc.1', appEnv: 'prod', isPackaged: true })
+    telemetry.identify('id')
+    telemetry.setConsentState('granted')
+    captured.length = 0
+    telemetry.capture('any.event')
+    expect(captured[0]!.properties).toMatchObject({ app_channel: 'unknown' })
+  })
+
+  it('per-call properties override defaults on key collision', () => {
+    telemetry.initTelemetry({ appVersion: '1.0.0', appEnv: 'prod', isPackaged: true })
+    telemetry.identify('id')
+    telemetry.setConsentState('granted')
+    captured.length = 0
+
+    telemetry.capture('any.event', { app_version: 'override-value' })
+    expect(captured[0]!.properties).toMatchObject({ app_version: 'override-value' })
   })
 })
 
@@ -165,7 +254,7 @@ describe('telemetry.trackedStep', () => {
     expect(result).toBe(42)
     const events = captured.map((c) => c.event)
     expect(events).toEqual(['test.step.start', 'test.step.end'])
-    expect(captured[0]!.properties).toEqual({ foo: 'bar' })
+    expect(captured[0]!.properties).toMatchObject({ foo: 'bar' })
     expect(typeof captured[1]!.properties?.duration_ms).toBe('number')
     expect(captured[1]!.properties?.foo).toBe('bar')
   })
@@ -399,7 +488,7 @@ describe('telemetry.forwardToRenderer + telemetry-relay registry', () => {
 
     // PostHog Node side
     expect(captured.map((c) => c.event)).toEqual(['desktop2.execution.error'])
-    expect(captured[0]!.properties).toEqual({ variant: 'standalone' })
+    expect(captured[0]!.properties).toMatchObject({ variant: 'standalone' })
     // Relay side — exactly one IPC send to the registered target
     expect(a.sends).toHaveLength(1)
     expect(a.sends[0]).toMatchObject({

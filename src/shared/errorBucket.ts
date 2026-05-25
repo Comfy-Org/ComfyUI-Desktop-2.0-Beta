@@ -16,15 +16,20 @@
  * cardinality. Raw `error_class` / `error_message` are still sent
  * alongside the bucket for drill-down.
  *
- * Expansion (was 7 buckets, now 12):
+ * Bucket vocabulary:
  * - oom — CUDA / system / Linux OOM-killer signals
- * - python — generic Python exceptions not in a more specific bucket
- * - node_missing — ComfyUI custom-node not found
- * - import_error — ImportError / ModuleNotFoundError
+ * - shape_mismatch — torch tensor / dimension errors (dominant ML
+ * failure mode after OOM)
+ * - model_load — corrupt or wrong-format checkpoints, missing keys
  * - cuda_init — CUDA not available / no CUDA-capable device
+ * - import_error — ImportError / ModuleNotFoundError
+ * - node_missing — ComfyUI custom-node not found
+ * - validation — ComfyUI prompt validator rejected the workflow
+ * - python — Python exception class shape not in a more specific bucket
  *
  * Order matters in `bucketError`: more-specific patterns are checked
  * first so e.g. `'ImportError: ...'` lands in `import_error`, not
+ * `python`, and `'shape mismatch'` lands in `shape_mismatch`, not
  * `python`.
  */
 
@@ -39,6 +44,9 @@ export type ErrorBucket =
   | 'node_missing'
   | 'import_error'
   | 'cuda_init'
+  | 'shape_mismatch'
+  | 'model_load'
+  | 'validation'
   | 'python'
   | 'other'
   | 'unknown'
@@ -75,14 +83,49 @@ export function bucketError(input: unknown): ErrorBucket {
   ) {
     return 'node_missing'
   }
+  // Tensor / shape mismatch — dominant non-OOM failure mode in ComfyUI
+  // workflows where nodes don't compose. Catches torch's "size mismatch
+  // for ...", "shape '[1, 4, 64]' is invalid for input of size ...",
+  // and "expected ... got ..." phrasings.
+  if (
+    message.includes('size mismatch') ||
+    message.includes('shape mismatch') ||
+    /shape '?\[.+\]'? is invalid/.test(message) ||
+    /expected .+ (got|but got|to be) /.test(message) ||
+    /\bdimensions?\b.*\b(mismatch|must match|do not match)\b/.test(message)
+  ) {
+    return 'shape_mismatch'
+  }
+  // Model load — corrupt / wrong-format / missing-key checkpoints &
+  // safetensors. ComfyUI surfaces these as "Error while deserializing",
+  // "missing key(s)", "unexpected key(s)", "no such file or directory:
+  // *.safetensors", etc.
+  if (
+    message.includes('safetensors') ||
+    message.includes('error while deserializing') ||
+    /\b(missing|unexpected) key\(s\)/.test(message) ||
+    /\b(checkpoint|state_?dict)\b.*\b(load|loading|corrupt)/.test(message)
+  ) {
+    return 'model_load'
+  }
+  // Workflow validation rejected by ComfyUI's prompt validator. The
+  // executionTap emits these with `error_class: 'validation_failed'`.
+  if (
+    message.includes('validation_failed') ||
+    message.includes('prompt outputs failed validation')
+  ) {
+    return 'validation'
+  }
   if (message.includes('network') || message.includes('fetch')) return 'network'
   if (message.includes('disk') || message.includes('space') || message.includes('enospc'))
     return 'disk'
   if (message.includes('permission') || message.includes('access') || message.includes('eacces'))
     return 'permissions'
   if (message.includes('path') || message.includes('enoent')) return 'path'
-  // Final catch-all for a known Python exception class shape ("FooError" /
-  // "FooException" at message start) that doesn't match any specific bucket.
-  if (/^[a-z][a-z0-9_.]*(error|exception)\b/.test(message)) return 'python'
+  // Python exception class shape ("FooError" / "FooException"). Matches
+  // anywhere in the message (not just `^`) — scrubAll can strip a path
+  // prefix and shift the class name off the start of the line; multi-line
+  // tracebacks may also wrap the class name mid-message.
+  if (/\b[a-z][a-z0-9_.]*(error|exception)\b/.test(message)) return 'python'
   return 'other'
 }
