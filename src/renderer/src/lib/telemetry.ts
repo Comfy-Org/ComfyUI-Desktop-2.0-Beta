@@ -104,7 +104,11 @@ export function deriveGpuTier(opts: {
   vramGb: number | null | undefined
 }): GpuTier {
   const vendor = (opts.vendor ?? '').toLowerCase()
-  if (vendor === 'apple') return 'apple'
+  // Main reports `gpu_vendor: 'mps'` for Apple Silicon (via gpu.ts's
+  // canonical GpuId enum — see GPU_LABELS where 'mps' → "Apple Silicon").
+  // Also accept the literal 'apple' for any future code path that uses
+  // the vendor-name string directly instead of the canonical id.
+  if (vendor === 'apple' || vendor === 'mps') return 'apple'
   const vram = opts.vramGb ?? 0
   if (!vendor) return 'cpu_only'
   if (vendor !== 'nvidia' && vendor !== 'amd') return 'sub_low'
