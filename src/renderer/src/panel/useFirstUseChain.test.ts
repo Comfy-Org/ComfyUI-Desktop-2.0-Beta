@@ -1,9 +1,10 @@
 import { createTestingPinia } from '@pinia/testing'
 import { setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { defineComponent, h, ref, type Ref } from 'vue'
+import { defineComponent, h, nextTick, ref, type Ref } from 'vue'
 import { mount } from '@vue/test-utils'
-import type { FieldOption, Source } from '../types/ipc'
+import type { ActionResult, FieldOption, ShowProgressOpts, Source } from '../types/ipc'
+import { useProgressStore } from '../stores/progressStore'
 import { useFirstUseChain, type FirstUseChainApi } from './useFirstUseChain'
 
 /**
@@ -223,5 +224,157 @@ describe('useFirstUseChain — Express Install', () => {
 
     expect(chain.switchPanel).toHaveBeenCalledWith('new-install', 'first_use')
     expect(testApi.buildInstallation).not.toHaveBeenCalled()
+  })
+})
+
+describe('useFirstUseChain — chainSpan stamping', () => {
+  let testApi: TestApi
+
+  beforeEach(() => {
+    setActivePinia(createTestingPinia({ stubActions: false }))
+    testApi = buildApi()
+    vi.stubGlobal('window', { ...window, api: testApi })
+    vi.clearAllMocks()
+  })
+
+  function progressOpts(installationId: string, extra: Partial<ShowProgressOpts> = {}): ShowProgressOpts {
+    return {
+      installationId,
+      title: `Installing — ${installationId}`,
+      apiCall: () => Promise.resolve({ ok: true } as ActionResult) as Promise<unknown>,
+      ...extra
+    }
+  }
+
+  it('stamps chainSpan=install when the first-use chain captures an install op', async () => {
+    const chain = mountChain()
+    // Kick off the chain — sets `chainingFirstUseToNewInstall=true` so
+    // the next show-progress qualifies as the chained install leg.
+    await chain.api!.handleFirstUseChainLocal({ express: true })
+
+    // Inspect what handleShowProgress received from `runExpressInstall`.
+    // `onShowProgress` mutated the opts object IN PLACE before the call
+    // (it's how usePanelOverlays-style hosts forward chainSpan into the
+    // store), so we can assert directly on the mock call's argument.
+    const showOpts = chain.handleShowProgress.mock.calls[0]?.[0] as ShowProgressOpts | undefined
+    expect(showOpts).toBeDefined()
+    // Express install runs onShowProgress synchronously inside the chain
+    // composable's hook — the test mock for handleShowProgress doesn't
+    // call onShowProgress itself, so simulate the host's job here:
+    chain.api!.hooks.onShowProgress(showOpts!)
+    expect(showOpts!.chainSpan).toBe('install')
+  })
+
+  it('stamps chainSpan=install when an autoLaunchOnFinish op begins (non-first-use entry point)', () => {
+    const chain = mountChain()
+    const opts = progressOpts('inst-auto-1', { autoLaunchOnFinish: true })
+    chain.api!.hooks.onShowProgress(opts)
+    expect(opts.chainSpan).toBe('install')
+  })
+
+  it('does not stamp chainSpan on a plain standalone op', () => {
+    const chain = mountChain()
+    const opts = progressOpts('inst-plain-1')
+    chain.api!.hooks.onShowProgress(opts)
+    expect(opts.chainSpan).toBeUndefined()
+  })
+
+  it('stamps chainSpan=launch when the auto-launch watcher fires the chained launch leg', async () => {
+    const chain = mountChain()
+    // Hold `performChooserLaunch` open: the production flow stamps the
+    // launch op's `show-progress` BEFORE the launch action resolves
+    // (main emits the IPC mid-flight). Returning an unresolved promise
+    // mirrors that — `.finally()` won't clear `pendingChainedLaunch`
+    // until we explicitly resolve.
+    let resolveLaunch: (v: unknown) => void = () => {}
+    chain.performChooserLaunch.mockReturnValue(
+      new Promise((res) => {
+        resolveLaunch = res
+      })
+    )
+
+    const progressStore = useProgressStore()
+    const installationStore = (await import('../stores/installationStore')).useInstallationStore()
+    installationStore.installations = [
+      {
+        id: 'inst-chained-1',
+        name: 'ComfyUI',
+        sourceCategory: 'local',
+        sourceId: 'standalone',
+        createdAt: new Date().toISOString()
+      } as never
+    ]
+
+    // First leg: install op enters the chain → onShowProgress stamps it.
+    const installOpts = progressOpts('inst-chained-1', { autoLaunchOnFinish: true })
+    chain.api!.hooks.onShowProgress(installOpts)
+    expect(installOpts.chainSpan).toBe('install')
+
+    // Seed a finished+ok op so the watcher's predicate sees it and
+    // calls performChooserLaunch (which we've held open above).
+    progressStore.startOperation({
+      installationId: 'inst-chained-1',
+      title: 'Installing',
+      apiCall: () => Promise.resolve({ ok: true } as ActionResult)
+    })
+    const op = progressStore.operations.get('inst-chained-1')!
+    op.finished = true
+    op.result = { ok: true }
+    await vi.waitFor(() => expect(chain.performChooserLaunch).toHaveBeenCalledTimes(1))
+
+    // Second leg: while performChooserLaunch is still pending, the
+    // launch action's `show-progress` arrives. `pendingChainedLaunch`
+    // is still true so the hook stamps the launch span.
+    const launchOpts = progressOpts('inst-chained-1', { triggersInstanceStart: true })
+    chain.api!.hooks.onShowProgress(launchOpts)
+    expect(launchOpts.chainSpan).toBe('launch')
+
+    // After we let the launch promise settle, the .finally() clears
+    // the flag — a subsequent unrelated op must NOT be stamped.
+    resolveLaunch('launched')
+    await Promise.resolve()
+    await Promise.resolve()
+    const unrelated = progressOpts('inst-other')
+    chain.api!.hooks.onShowProgress(unrelated)
+    expect(unrelated.chainSpan).toBeUndefined()
+  })
+
+  it('clears pendingChainedLaunch via the watcher .finally() when performChooserLaunch resolves', async () => {
+    // performChooserLaunch returning 'missing-action' means the launch
+    // never reached handleShowProgress. The .finally() in the watcher
+    // must reset the flag so a later unrelated op isn't mis-stamped.
+    const chain = mountChain()
+    chain.performChooserLaunch.mockResolvedValue('missing-action')
+
+    const progressStore = useProgressStore()
+    const installationStore = (await import('../stores/installationStore')).useInstallationStore()
+    installationStore.installations = [
+      {
+        id: 'inst-noop-1',
+        name: 'ComfyUI',
+        sourceCategory: 'local',
+        sourceId: 'standalone',
+        createdAt: new Date().toISOString()
+      } as never
+    ]
+
+    chain.api!.hooks.onShowProgress(progressOpts('inst-noop-1', { autoLaunchOnFinish: true }))
+    progressStore.startOperation({
+      installationId: 'inst-noop-1',
+      title: 'Installing',
+      apiCall: () => Promise.resolve({ ok: true } as ActionResult)
+    })
+    const op = progressStore.operations.get('inst-noop-1')!
+    op.finished = true
+    op.result = { ok: true }
+    await nextTick()
+    // Let the watcher's .finally() flush.
+    await vi.waitFor(() => expect(chain.performChooserLaunch).toHaveBeenCalled())
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const after = progressOpts('inst-after-missing')
+    chain.api!.hooks.onShowProgress(after)
+    expect(after.chainSpan).toBeUndefined()
   })
 })

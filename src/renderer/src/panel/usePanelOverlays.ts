@@ -241,6 +241,7 @@ export function usePanelOverlays(opts: UsePanelOverlaysOpts): UsePanelOverlaysAp
         returnTo: showOpts.returnTo,
         opKind: showOpts.opKind,
         destroysInstance: showOpts.destroysInstance,
+        chainSpan: showOpts.chainSpan,
       })
     }
     // Every show-progress op renders as a Tier 3 brand takeover now —

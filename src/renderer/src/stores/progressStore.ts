@@ -25,6 +25,12 @@ export interface Operation {
    *  ProgressModal's footer can swap Reboot for a no-Reboot finished
    *  state and the success path can auto-detach the host. */
   destroysInstance: boolean
+  /** Mirrors `ShowProgressOpts.chainSpan`. When set, ProgressModal's
+   *  unified bar maps the install leg to 0–70% and the launch leg to
+   *  70–100% so the user sees one continuous 0→100% journey instead of
+   *  the bar hitting 100 mid-install and stalling through the launch
+   *  tail. Standalone ops leave this unset. */
+  chainSpan: 'install' | 'launch' | null
   steps: ProgressStep[] | null
   activePhase: string | null
   activePercent: number
@@ -92,8 +98,9 @@ export const useProgressStore = defineStore('progress', () => {
     returnTo?: string
     opKind?: ShowProgressOpts['opKind']
     destroysInstance?: boolean
+    chainSpan?: ShowProgressOpts['chainSpan']
   }): void {
-    const { installationId, title, apiCall, returnTo, opKind, destroysInstance } = opts
+    const { installationId, title, apiCall, returnTo, opKind, destroysInstance, chainSpan } = opts
 
     cleanupOperation(installationId)
 
@@ -106,6 +113,7 @@ export const useProgressStore = defineStore('progress', () => {
       returnTo,
       opKind: opKind ?? 'generic',
       destroysInstance: !!destroysInstance,
+      chainSpan: chainSpan ?? null,
       steps: null,
       activePhase: null,
       activePercent: -1,
