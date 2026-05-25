@@ -169,18 +169,18 @@ function onKeydown(e: KeyboardEvent): void {
 .tooltip-arrow__fill {
   background: var(--tooltip-bg);
   inset: -1px 0 0 0;
-  clip-path: polygon(50% 100%, 0 0, 100% 0);
+  clip-path: polygon(50% 85%, 8% 0, 92% 0);
 }
 .tooltip-bubble[data-side='bottom'] .tooltip-arrow__fill {
   inset: 0 0 -1px 0;
-  clip-path: polygon(50% 0, 0 100%, 100% 100%);
+  clip-path: polygon(50% 15%, 8% 100%, 92% 100%);
 }
 .tooltip-bubble[data-side='left'] .tooltip-arrow__fill {
   inset: 0 0 0 -1px;
-  clip-path: polygon(100% 50%, 0 0, 0 100%);
+  clip-path: polygon(85% 50%, 0 8%, 0 92%);
 }
 .tooltip-bubble[data-side='right'] .tooltip-arrow__fill {
   inset: 0 -1px 0 0;
-  clip-path: polygon(0 50%, 100% 0, 100% 100%);
+  clip-path: polygon(15% 50%, 100% 8%, 100% 92%);
 }
 </style>
