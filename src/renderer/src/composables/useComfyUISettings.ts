@@ -277,14 +277,10 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
     //    forwards to the panel) skip the inline confirm and tag the
     //    showProgress payload with `requiresStopped` so the host runs
     //    the guard against its own BaseAlert.
-    const deferStoppedGuard = !!opts.deferStoppedGuardToHost
-      && action.id !== 'migrate-to-standalone'
+    const requiresStoppedGuard = action.id !== 'migrate-to-standalone'
       && REQUIRES_STOPPED.has(action.id)
-    if (
-      !deferStoppedGuard
-      && action.id !== 'migrate-to-standalone'
-      && REQUIRES_STOPPED.has(action.id)
-    ) {
+    const deferStoppedGuard = !!opts.deferStoppedGuardToHost && requiresStoppedGuard
+    if (requiresStoppedGuard && !deferStoppedGuard) {
       const proceed = await actionGuard.checkBeforeAction(inst.id, action.label)
       if (!proceed) return
     }
