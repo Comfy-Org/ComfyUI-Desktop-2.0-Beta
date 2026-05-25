@@ -43,7 +43,7 @@ import { sourceMap, _broadcastToRenderer, _runningSessions } from './lib/ipc/sha
 import { enrichInstallationsForRenderer } from './lib/ipc/registerInstallationHandlers'
 import { getSnapshotListData } from './lib/snapshots'
 import { update as updateInstallation } from './installations'
-import { lookupInstallUpdateOverride } from './lib/e2eOverrides'
+import { lookupInstallUpdateOverride, recordIpcInvocation } from './lib/e2eOverrides'
 import * as mainTelemetry from './lib/telemetry'
 import { getDeviceId } from './lib/deviceId'
 
@@ -741,6 +741,30 @@ ipcMain.handle('focus-comfy-window', (_event, installationId: string) => {
   }
 
   return false
+})
+
+/**
+ * Open a new window showing the install backing `installationId`.
+ * Used by ProgressModal after copy / copy-update / release-update so
+ * the newly-created destination install gets focus without swapping
+ * the source host out from under the user.
+ *
+ * If a window already backs the install (e.g. previous launch),
+ * focuses it. Otherwise opens a fresh chooser host — A' renders in
+ * the dashboard alongside other installs and the user picks it from
+ * there. Future enhancement: auto-pick A' via a URL param on the
+ * fresh chooser host so launch fires on its own.
+ */
+ipcMain.handle('open-install-window', (_event, installationId: string) => {
+  recordIpcInvocation('open-install-window', { installationId })
+  const existing = getEntryByInstallationId(installationId)
+  if (existing && !existing.window.isDestroyed()) {
+    existing.window.show()
+    existing.window.focus()
+    return true
+  }
+  openChooserHostWindow()
+  return true
 })
 
 ipcMain.handle('close-comfy-window', (_event, installationId: string) => {

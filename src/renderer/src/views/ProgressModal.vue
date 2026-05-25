@@ -480,6 +480,14 @@ function handleDone(): void {
     void window.api.returnToDashboard()
   }
   emit('close')
+  // Copy / copy-update / release-update produced a new install — open
+  // it in its own window. The source host stays where it is so the
+  // user keeps the running session / panel state they had.
+  const newInstallationId = op.result.newInstallationId
+  if (newInstallationId) {
+    void window.api.openInstallWindow(newInstallationId)
+    return
+  }
   // Guard show-detail against a stale install id — destroy ops (or any
   // op whose success removes the install from the registry) would
   // otherwise route to a now-missing detail view.

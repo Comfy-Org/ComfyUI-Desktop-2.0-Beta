@@ -22,6 +22,18 @@ export interface InjectProgressErrorOpts {
   errorMessage: string
 }
 
+export interface InjectProgressSuccessOpts {
+  /** Install id the operation runs against (the source of a copy /
+   *  copy-update / release-update). */
+  installationId: string
+  title?: string
+  /** Drives ProgressModal's handleDone — when set, the modal calls
+   *  `window.api.openInstallWindow(newInstallationId)` after the op
+   *  finishes. Used by the FLOW 2 e2e to exercise the destination-open
+   *  path without running a real copy. */
+  newInstallationId?: string
+}
+
 interface PanelBindings {
   showProgress: (opts: ShowProgressOpts) => Promise<void> | void
 }
@@ -36,6 +48,11 @@ export interface E2ERendererHelpers {
    *  reliably reaches the DOM without provoking a real failing
    *  install. */
   injectProgressError(opts: InjectProgressErrorOpts): Promise<void>
+  /** Drive the PanelApp's show-progress chain with a synthetic
+   *  successful copy-style result. Used by the FLOW 2 e2e to verify
+   *  `ProgressModal.handleDone` calls `openInstallWindow` with
+   *  `newInstallationId` without running an actual copy. */
+  injectProgressSuccess(opts: InjectProgressSuccessOpts): Promise<void>
 }
 
 function ensureBound(): PanelBindings {
@@ -68,6 +85,19 @@ export function registerE2ERendererHooks(): void {
         // error message. The store routes that through the same code
         // path a real action failure takes.
         apiCall: () => Promise.resolve({ ok: false, message: errorMessage }),
+      })
+    },
+    async injectProgressSuccess({ installationId, title, newInstallationId }) {
+      const b = ensureBound()
+      await b.showProgress({
+        installationId,
+        title: title ?? `Copy — ${installationId}`,
+        opKind: 'generic',
+        apiCall: () => Promise.resolve({
+          ok: true,
+          navigate: 'list',
+          newInstallationId,
+        }),
       })
     },
   }

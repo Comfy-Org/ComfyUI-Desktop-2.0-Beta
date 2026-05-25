@@ -272,6 +272,10 @@ export interface ActionResult {
   portConflict?: PortConflictInfo
   cancelled?: boolean
   running?: boolean
+  /** Set by actions that produce a new install record (copy /
+   *  copy-update / release-update). ProgressModal.handleDone opens
+   *  the new install in its own window — the source host stays put. */
+  newInstallationId?: string
 }
 
 export interface PortConflictInfo {
@@ -834,6 +838,13 @@ export interface ElectronApi {
   // Running
   stopComfyUI(installationId: string): Promise<void>
   focusComfyWindow(installationId: string): Promise<void>
+  /** Open a window for the install backing `installationId`. Focuses
+   *  any existing install-backed window; otherwise opens a fresh
+   *  chooser host so the user can pick the install from the dashboard.
+   *  Used by ProgressModal's `handleDone` after copy / copy-update /
+   *  release-update so the newly-created destination install gets
+   *  focus without swapping the source host. */
+  openInstallWindow(installationId: string): Promise<boolean>
   /** Close the BrowserWindow that hosts the given installation's ComfyUI
    *  view (and its title-bar / panel WebContentsViews). Returns true if a
    *  window was found and closed. Used by the embedded install-settings
