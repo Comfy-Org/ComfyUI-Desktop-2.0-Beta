@@ -32,6 +32,13 @@ export function recordCrash(data: ComfyExitedData): void {
   if (trimmed.lastStderr && trimmed.lastStderr.length > MAX_BUFFER_BYTES) {
     trimmed.lastStderr = trimmed.lastStderr.slice(-MAX_BUFFER_BYTES)
   }
+  // Stamp the recording time so a later hydration (panel WebContents
+  // recreated, etc.) can compute crash-to-relaunch latency. Honour an
+  // already-set value if the caller pre-stamped — fold the live-event
+  // timestamp through if present.
+  if (trimmed.crashedAtMs === undefined) {
+    trimmed.crashedAtMs = Date.now()
+  }
   _crashes.set(data.installationId, trimmed)
 }
 

@@ -162,6 +162,7 @@ export function _resetForTest(): void {
   consentState = 'undecided'
   pendingSessionStart = null
   pendingIdentifyProperties = null
+  pendingMigrationAlias = null
   defaultEventProperties = {}
   initialized = false
   drainingForQuit = false
@@ -341,6 +342,20 @@ let pendingSessionStart: Record<string, TelemetryValue> | null = null
 let pendingIdentifyProperties: Record<string, TelemetryValue> | null = null
 
 /**
+ * Deferred legacy-id alias. Set by `deferMigrationAlias()` at boot if
+ * there's a pending migration; fired by `tryFlushDeferred()` once
+ * consent transitions to granted. The `onAliased` callback clears the
+ * persisted pending state in `deviceId.ts` so we never re-fire the
+ * alias on subsequent boots once it has shipped.
+ */
+let pendingMigrationAlias: {
+  legacyId: string
+  installationId: string
+  idClass: string
+  onAliased: () => void
+} | null = null
+
+/**
  * The anonymous device identity bound at boot (typically `installation_id =
  * SHA-256(machine_id + salt)`). Kept separately from `distinctId` so the
  * logout path can switch the active distinct id back to this baseline
@@ -364,10 +379,51 @@ function tryFlushDeferred(): void {
     }
     pendingIdentifyProperties = null
   }
+  if (pendingMigrationAlias) {
+    // Snapshot + clear before await so a re-entrant flush doesn't double-fire.
+    const m = pendingMigrationAlias
+    pendingMigrationAlias = null
+    void (async () => {
+      await aliasImmediate(m.installationId, m.legacyId)
+      capture('desktop2.identity.migrated', {
+        from_id: m.legacyId,
+        to_id: m.installationId,
+        id_class: m.idClass
+      })
+      try {
+        m.onAliased()
+      } catch {
+        // onAliased is the on-disk pending-alias / migration-guard cleanup
+        // — best-effort; a failure leaves the alias to re-fire next boot.
+      }
+    })()
+  }
   if (pendingSessionStart) {
     capture('desktop2.session.started', pendingSessionStart)
     pendingSessionStart = null
   }
+}
+
+/**
+ * Queue a legacy-id alias to fire as soon as consent is granted. If
+ * consent is already granted, fires synchronously via `tryFlushDeferred`.
+ * If denied or undecided, the alias sits in module state and ships on
+ * the next `setConsentState('granted')` transition.
+ *
+ * `onAliased` runs after the alias call resolves — the caller passes a
+ * one-shot cleanup (clear the persisted pending-alias file + mark the
+ * migration guard) so the alias does not re-fire on subsequent boots.
+ * It is the caller's job to make `onAliased` idempotent — `tryFlushDeferred`
+ * may run multiple times across a session.
+ */
+export function deferMigrationAlias(opts: {
+  legacyId: string
+  installationId: string
+  idClass: string
+  onAliased: () => void
+}): void {
+  pendingMigrationAlias = opts
+  tryFlushDeferred()
 }
 
 /**

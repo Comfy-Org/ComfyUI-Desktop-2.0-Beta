@@ -45,6 +45,7 @@ import { update as updateInstallation } from './installations'
 import { lookupInstallUpdateOverride } from './lib/e2eOverrides'
 import * as mainTelemetry from './lib/telemetry'
 import {
+  clearPendingAlias,
   getDeviceId,
   getIdClass,
   initDeviceId,
@@ -970,42 +971,54 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
     const telemetrySetting = settings.get('telemetryEnabled') as boolean | undefined
     const initialConsent: mainTelemetry.ConsentState =
       telemetrySetting === true ? 'granted' : telemetrySetting === false ? 'denied' : 'undecided'
-    mainTelemetry.setConsentState(initialConsent)
+    // initTelemetry first so the client exists before setConsentState's
+    // grant-transition flush has a chance to run.
     mainTelemetry.initTelemetry({
       appVersion: APP_VERSION,
       appEnv: app.isPackaged ? 'prod-v2' : 'dev',
       isPackaged: app.isPackaged
     })
+    mainTelemetry.setConsentState(initialConsent)
     mainTelemetry.installAppHooks()
 
     // Initialize the deterministic device identity. Replaces the legacy
     // random-UUID device-id.txt with SHA-256(machine_id + salt) so the id
     // survives a clean reinstall and can be matched against the same hash
-    // computed by other Comfy products on the same machine. On a one-shot
-    // migration from a legacy random-UUID id, alias it into the new id so
-    // PostHog merges histories. The migration guard file ensures the alias
-    // never re-fires.
+    // computed by other Comfy products on the same machine. The legacy id,
+    // if any, is persisted in pending-identity-alias.txt by initDeviceId
+    // so a denied / undecided consent state at first boot does not lose
+    // the migration — it ships on the next consent-grant transition.
     const { legacyId } = await initDeviceId()
     const installationId = getDeviceId()
-    if (legacyId) {
-      await mainTelemetry.aliasImmediate(installationId, legacyId)
-      mainTelemetry.capture('desktop2.identity.migrated', {
-        from_id: legacyId,
-        to_id: installationId,
-        id_class: getIdClass()
-      })
-      // Mark complete unconditionally so we don't retry the alias every boot
-      // even if the network call failed to deliver. The cost of a failed
-      // alias is one legacy person left unmerged for that user.
-      markIdentityMigrationCompleted()
-    }
 
+    // identify() FIRST so distinctId is bound before any capture path
+    // runs (incl. the deferred migration alias's capture below). Without
+    // this the migrated event silently dropped on the !distinctId guard.
     mainTelemetry.identify(installationId, {
       app_version: APP_VERSION,
       platform: process.platform,
       arch: process.arch,
       id_class: getIdClass()
     })
+
+    if (legacyId) {
+      // Queue the alias instead of awaiting it on the boot critical path.
+      // - Fires as soon as consent is granted (synchronously if already so,
+      //   on the next setConsentState('granted') transition otherwise).
+      // - Persisted pending-alias file (in deviceId.ts) is the source of
+      //   truth across boots — clear it AND mark migration complete only
+      //   inside the onAliased callback so a denied user does not skip the
+      //   alias permanently.
+      mainTelemetry.deferMigrationAlias({
+        legacyId,
+        installationId,
+        idClass: getIdClass(),
+        onAliased: () => {
+          clearPendingAlias()
+          markIdentityMigrationCompleted()
+        }
+      })
+    }
 
     // Boot the experiments cache. Synchronously loads the on-disk flag
     // values for `getFlag()`, then kicks off a background refresh whose

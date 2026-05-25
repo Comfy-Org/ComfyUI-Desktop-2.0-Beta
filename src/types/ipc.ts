@@ -386,6 +386,16 @@ export interface ComfyExitedData {
   crashed?: boolean
   exitCode?: number
   lastStderr?: string
+  /**
+   * Wall-clock timestamp (epoch ms) when the crash was recorded main-side.
+   * Set by `recordCrash()` so a renderer that hydrates the crash *after*
+   * the live `comfy-exited` IPC (panel WebContents recreated, second
+   * window opened on the same install, etc.) still has a real value to
+   * compute crash-to-relaunch latency from. Live-path subscribers also
+   * stamp this on their own copy with `Date.now()`; the main-side value
+   * takes precedence on hydration so the two paths agree.
+   */
+  crashedAtMs?: number
 }
 
 export interface ComfyBootLogData {
@@ -1032,9 +1042,7 @@ export interface ElectronApi {
     preview?: SnapshotFilePreview
     snapshotPath?: string
   }>
-  previewLocalMigration(
-    installationId: string
-  ): Promise<{
+  previewLocalMigration(installationId: string): Promise<{
     ok: boolean
     message?: string
     preview?: SnapshotFilePreview

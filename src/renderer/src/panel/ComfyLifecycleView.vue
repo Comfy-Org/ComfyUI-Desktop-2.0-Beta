@@ -117,7 +117,12 @@ async function hydrateLastCrashError(installationId: string): Promise<void> {
     sessionStore.errorInstances.set(installationId, {
       installationName: data.installationName,
       exitCode: data.exitCode,
-      lastStderr: data.lastStderr
+      lastStderr: data.lastStderr,
+      // Carry the main-side crash timestamp so
+      // `desktop2.instance.relaunched_after_crash` can compute a real
+      // `crash_to_relaunch_seconds` even when this view hydrated AFTER
+      // the live `comfy-exited` event (panel recreated, etc.).
+      crashedAtMs: data.crashedAtMs
     })
   } catch {
     // Best-effort — a missing handler / IPC failure shouldn't break the view.

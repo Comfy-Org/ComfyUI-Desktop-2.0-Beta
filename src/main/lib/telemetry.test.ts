@@ -356,11 +356,22 @@ describe('telemetry consent state (3-state)', () => {
   })
 
   it('aliasImmediate is suppressed outside granted', async () => {
-    // We can't assert PostHog.aliasImmediate was NOT called (the mock doesn't
-    // track it), but we can confirm it doesn't throw and returns undefined.
     telemetry.setConsentState('undecided')
     telemetry.identify('any')
-    await expect(telemetry.aliasImmediate('new', 'legacy')).resolves.toBeUndefined()
+    aliases.length = 0
+    await telemetry.aliasImmediate('new', 'legacy')
+    expect(aliases).toHaveLength(0)
+
+    telemetry.setConsentState('denied')
+    aliases.length = 0
+    await telemetry.aliasImmediate('new', 'legacy')
+    expect(aliases).toHaveLength(0)
+
+    // Sanity: granted DOES alias.
+    telemetry.setConsentState('granted')
+    aliases.length = 0
+    await telemetry.aliasImmediate('new', 'legacy')
+    expect(aliases).toHaveLength(1)
   })
 
   it('captureException is suppressed outside granted', () => {
@@ -369,6 +380,126 @@ describe('telemetry consent state (3-state)', () => {
     // We don't have a mock that tracks captureException calls, but the call
     // should be a no-op (no throw).
     expect(() => telemetry.captureException(new Error('boom'), {})).not.toThrow()
+  })
+})
+
+describe('telemetry deferMigrationAlias', () => {
+  beforeEach(() => {
+    captured.length = 0
+    aliases.length = 0
+    identifies.length = 0
+    process.env['POSTHOG_API_KEY'] = 'test-key'
+    process.env['POSTHOG_ENABLED'] = '1'
+    telemetry._resetForTest()
+    telemetry.initTelemetry({ appVersion: '0.0.0', appEnv: 'test', isPackaged: false })
+  })
+
+  afterEach(() => {
+    delete process.env['POSTHOG_API_KEY']
+    delete process.env['POSTHOG_ENABLED']
+    telemetry.setConsentState('granted')
+  })
+
+  it('fires alias + identity.migrated immediately when consent already granted', async () => {
+    telemetry.setConsentState('granted')
+    telemetry.identify('new-id')
+    aliases.length = 0
+    captured.length = 0
+
+    const onAliased = vi.fn()
+    telemetry.deferMigrationAlias({
+      legacyId: 'legacy-uuid-abc',
+      installationId: 'new-id',
+      idClass: 'machine_derived',
+      onAliased
+    })
+
+    // Async microtask + the aliasImmediate await chain.
+    await new Promise((r) => setTimeout(r, 0))
+
+    expect(aliases).toContainEqual({ distinctId: 'new-id', alias: 'legacy-uuid-abc' })
+    const migrated = captured.find((c) => c.event === 'desktop2.identity.migrated')
+    expect(migrated?.properties).toMatchObject({
+      from_id: 'legacy-uuid-abc',
+      to_id: 'new-id',
+      id_class: 'machine_derived'
+    })
+    expect(onAliased).toHaveBeenCalledTimes(1)
+  })
+
+  it('defers until consent flips to granted (undecided → granted)', async () => {
+    telemetry.setConsentState('undecided')
+    telemetry.identify('new-id')
+    aliases.length = 0
+    captured.length = 0
+
+    const onAliased = vi.fn()
+    telemetry.deferMigrationAlias({
+      legacyId: 'legacy-uuid-abc',
+      installationId: 'new-id',
+      idClass: 'machine_derived',
+      onAliased
+    })
+
+    // Nothing should have shipped while undecided.
+    await new Promise((r) => setTimeout(r, 0))
+    expect(aliases).toHaveLength(0)
+    expect(captured.find((c) => c.event === 'desktop2.identity.migrated')).toBeUndefined()
+    expect(onAliased).not.toHaveBeenCalled()
+
+    telemetry.setConsentState('granted')
+    await new Promise((r) => setTimeout(r, 0))
+
+    expect(aliases).toContainEqual({ distinctId: 'new-id', alias: 'legacy-uuid-abc' })
+    expect(captured.find((c) => c.event === 'desktop2.identity.migrated')).toBeDefined()
+    expect(onAliased).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not fire onAliased while denied; fires on subsequent grant', async () => {
+    telemetry.setConsentState('denied')
+    telemetry.identify('new-id')
+    aliases.length = 0
+    captured.length = 0
+
+    const onAliased = vi.fn()
+    telemetry.deferMigrationAlias({
+      legacyId: 'legacy-uuid-abc',
+      installationId: 'new-id',
+      idClass: 'machine_derived',
+      onAliased
+    })
+
+    await new Promise((r) => setTimeout(r, 0))
+    expect(aliases).toHaveLength(0)
+    expect(onAliased).not.toHaveBeenCalled()
+
+    telemetry.setConsentState('granted')
+    await new Promise((r) => setTimeout(r, 0))
+
+    expect(aliases).toHaveLength(1)
+    expect(onAliased).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not double-fire on repeated grant transitions', async () => {
+    telemetry.setConsentState('undecided')
+    telemetry.identify('new-id')
+    aliases.length = 0
+    const onAliased = vi.fn()
+    telemetry.deferMigrationAlias({
+      legacyId: 'legacy-uuid-abc',
+      installationId: 'new-id',
+      idClass: 'machine_derived',
+      onAliased
+    })
+
+    telemetry.setConsentState('granted')
+    await new Promise((r) => setTimeout(r, 0))
+    telemetry.setConsentState('denied')
+    telemetry.setConsentState('granted')
+    await new Promise((r) => setTimeout(r, 0))
+
+    expect(aliases).toHaveLength(1)
+    expect(onAliased).toHaveBeenCalledTimes(1)
   })
 })
 

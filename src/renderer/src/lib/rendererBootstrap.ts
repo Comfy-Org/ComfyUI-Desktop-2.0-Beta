@@ -162,7 +162,14 @@ const PRE_CONSENT_ALLOWED_EVENTS: ReadonlySet<string> = new Set([
 ])
 
 function isTelemetryEmitAllowed(actionName: string): boolean {
-  if (resolvedTelemetryEnabled !== undefined) return true
+  // Three-state: only `true` grants. `false` (explicit deny) AND
+  // `undefined` (user has not chosen yet) both gate down to the
+  // pre-consent allow-list. Previous "!== undefined → return true"
+  // shape let denied users through the renderer gate, relying on
+  // main's gate + Datadog's tracking-consent setting to silently drop
+  // — one regression in either downstream gate would have become a
+  // privacy leak.
+  if (resolvedTelemetryEnabled === true) return true
   return PRE_CONSENT_ALLOWED_EVENTS.has(actionName)
 }
 

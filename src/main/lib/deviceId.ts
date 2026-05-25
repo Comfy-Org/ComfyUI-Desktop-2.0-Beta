@@ -63,25 +63,59 @@ function migrationGuardPath(): string {
   return path.join(configDir(), 'identity-migration-completed')
 }
 
+/**
+ * Persisted legacy-id awaiting a successful alias to the new
+ * `installation_id`. Written when we first detect a legacy random UUID
+ * during `initDeviceId()`, read on subsequent boots, and cleared by
+ * `clearPendingAlias()` once the alias actually ships. Decouples the
+ * "we have a legacy id to migrate" signal from the "consent is granted
+ * and PostHog is reachable" signal so a user who is on `'undecided'` at
+ * first boot still gets their history merged once they consent on a
+ * later launch.
+ */
+function pendingAliasPath(): string {
+  return path.join(configDir(), 'pending-identity-alias.txt')
+}
+
 const LEGACY_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 function isLegacyUuid(value: string): boolean {
   return LEGACY_UUID_RE.test(value)
 }
 
+/**
+ * Hard cap on how long we block boot waiting for `systeminformation`'s
+ * platform-specific lookups (SMBIOS / WMI / `/sys/class/dmi/id/...`).
+ * On VMs and certain firmwares this call can stall for several seconds;
+ * past this budget we fall through to `random_fallback` so the splash
+ * screen does not freeze on a slow `dmidecode` shell-out.
+ */
+const MACHINE_ID_TIMEOUT_MS = 2000
+
 async function deriveMachineId(): Promise<{ machineId: string; idClass: IdClass }> {
+  let timer: ReturnType<typeof setTimeout> | undefined
   try {
-    const sys = await si.system()
-    const uuid = (sys.uuid || '').trim()
-    // Reject placeholder-style UUIDs that some firmware reports.
-    if (uuid && uuid !== '-' && uuid !== '00000000-0000-0000-0000-000000000000') {
-      return { machineId: uuid, idClass: 'machine_derived' }
+    const sysPromise = si.system()
+    const timeoutPromise = new Promise<null>((resolve) => {
+      timer = setTimeout(() => resolve(null), MACHINE_ID_TIMEOUT_MS)
+    })
+    const sys = await Promise.race([sysPromise, timeoutPromise])
+    if (sys) {
+      const uuid = (sys.uuid || '').trim()
+      // Reject placeholder-style UUIDs that some firmware reports, plus
+      // anything that isn't the full 36-char UUID shape (covers empty
+      // strings on restricted Linux reads, OEM sentinels like "Default
+      // string" / "To Be Filled By O.E.M.", etc.).
+      if (uuid.length === 36 && uuid !== '-' && uuid !== '00000000-0000-0000-0000-000000000000') {
+        return { machineId: uuid, idClass: 'machine_derived' }
+      }
     }
   } catch {
     // fall through to fallback
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
   }
   // Fallback: random UUID, flagged so dashboards can quarantine.
-  // (A MAC-address fallback could go here in a future iteration.)
   return { machineId: randomUUID(), idClass: 'random_fallback' }
 }
 
@@ -104,6 +138,38 @@ function writeIdFile(installationId: string): void {
     fs.writeFileSync(filePath, installationId)
   } catch {
     // best-effort persist; in-memory cache serves the rest of the session
+  }
+}
+
+function readPendingAlias(): string | null {
+  try {
+    const raw = fs.readFileSync(pendingAliasPath(), 'utf-8').trim()
+    return raw.length > 0 ? raw : null
+  } catch {
+    return null
+  }
+}
+
+function writePendingAlias(legacyId: string): void {
+  try {
+    fs.mkdirSync(path.dirname(pendingAliasPath()), { recursive: true })
+    fs.writeFileSync(pendingAliasPath(), legacyId)
+  } catch {
+    // best-effort persist; if write fails the alias will not retry, which
+    // is the same failure mode as a missing PostHog network call.
+  }
+}
+
+/**
+ * Clear the persisted legacy id once the alias has shipped. Idempotent.
+ * Called by the boot path's `onAliased` callback so an alias that never
+ * shipped (consent denied, network down) gets a fresh attempt next boot.
+ */
+export function clearPendingAlias(): void {
+  try {
+    fs.unlinkSync(pendingAliasPath())
+  } catch {
+    // best effort — already gone is fine.
   }
 }
 
@@ -136,8 +202,24 @@ export function initDeviceId(): Promise<{ legacyId: string | null }> {
       // file does not exist yet
     }
 
+    cached = { installationId: newId, idClass }
+
+    // If a previous boot recorded a legacy id but the alias never
+    // shipped (consent denied / undecided / network down), retry it
+    // this boot. Takes precedence over a fresh detection because by
+    // the time we get here the `device-id.txt` was already rewritten
+    // on that earlier boot, so `existing` no longer reveals it.
+    const persistedLegacy = !isMigrationCompleted() ? readPendingAlias() : null
+    if (persistedLegacy) {
+      // Keep the on-disk hash in sync with the freshly-computed value
+      // (no-op when they already match) but do NOT clear the pending
+      // alias — that only happens via `clearPendingAlias()` once the
+      // alias actually ships.
+      if (existing !== newId) writeIdFile(newId)
+      return { legacyId: persistedLegacy }
+    }
+
     if (existing === newId) {
-      cached = { installationId: newId, idClass }
       return { legacyId: null }
     }
 
@@ -148,8 +230,13 @@ export function initDeviceId(): Promise<{ legacyId: string | null }> {
     //   (c) existing is garbage -> overwrite, no alias.
     const shouldAlias = existing != null && isLegacyUuid(existing) && !isMigrationCompleted()
 
+    if (shouldAlias && existing) {
+      // Persist BEFORE overwriting `device-id.txt` so a process crash
+      // between here and a successful alias doesn't lose the legacy id.
+      writePendingAlias(existing)
+    }
+
     writeIdFile(newId)
-    cached = { installationId: newId, idClass }
     return { legacyId: shouldAlias ? existing : null }
   })()
   return initPromise
