@@ -147,6 +147,11 @@ const acceptedTos = ref(false)
  *  state so the user gets feedback instead of staring at an unchanged
  *  screen during the multi-IPC express-install pre-roll. */
 const isContinuing = ref(false)
+/** Briefly true when the user clicks Continue without accepting ToS —
+ *  drives a shake animation on the consent row so the required checkbox
+ *  is impossible to miss even on tall viewports. */
+const tosNudge = ref(false)
+let nudgeTimer: ReturnType<typeof setTimeout> | undefined
 
 const isChinese = computed(() => locale.value.startsWith('zh'))
 
@@ -165,8 +170,21 @@ const isBrandStep = computed(() => step.value === 'start' || step.value === 'loc
  *  its current persisted state, not as a freshly-defaulted opt-in).
  *  China-mirror sub-step still runs first when the locale calls for
  *  it; the post-mirror branch reuses the same routing logic. */
+function nudgeTos(): void {
+  if (acceptedTos.value) return
+  tosNudge.value = true
+  clearTimeout(nudgeTimer)
+  nudgeTimer = setTimeout(() => {
+    tosNudge.value = false
+  }, 600)
+}
+
 async function onContinue(): Promise<void> {
-  if (!acceptedTos.value || isContinuing.value) return
+  if (isContinuing.value) return
+  if (!acceptedTos.value) {
+    nudgeTos()
+    return
+  }
   // Keep `isContinuing` true past `routePostStart()` because the chain
   // handlers (express prep, cloud auto-launch, new-install swap) all
   // either unmount this takeover or swap to a sub-step within ms. The
@@ -375,6 +393,7 @@ watch(
 )
 
 onUnmounted(() => {
+  clearTimeout(nudgeTimer)
   // Clear the host's `firstUseMode` whenever the takeover unmounts,
   // regardless of why (Cloud-branch
   // completion, Local-branch chain swap, file-menu Skip Onboarding,
@@ -441,70 +460,86 @@ defineExpose({ open })
           />
         </div>
         <label
-          v-if="pickedChoice === 'local'"
           class="brand-checkbox start-express"
+          :class="{ 'start-express--hidden': pickedChoice !== 'local' }"
+          :aria-hidden="pickedChoice !== 'local'"
           data-testid="first-use-express-install"
         >
-          <input v-model="expressInstall" type="checkbox" />
+          <input
+            v-model="expressInstall"
+            type="checkbox"
+            :tabindex="pickedChoice === 'local' ? 0 : -1"
+          />
           <span class="start-express__label">{{ $t('firstUse.expressInstallLine') }}</span>
         </label>
       </div>
       <div class="start-bottom">
-        <label class="brand-checkbox start-consent-row" data-testid="first-use-consent-tos">
-          <input v-model="acceptedTos" type="checkbox" />
-          <span class="start-consent-row__text">
-            {{ $t('firstUse.consentTosHintPrefix') }}
-            <button
-              type="button"
-              class="brand-checkbox__link"
-              data-testid="first-use-eula-link"
-              @click.prevent="termsDoc = 'eula'"
+        <div class="start-consent-strip">
+          <div class="start-consent-rows">
+            <label
+              class="brand-checkbox start-consent-row"
+              :class="{ 'start-consent-row--nudge': tosNudge }"
+              data-testid="first-use-consent-tos"
             >
-              {{ $t('firstUse.eulaLinkLabel') }}
-            </button>
-            {{ $t('firstUse.consentTosHintSep') }}
-            <button
-              type="button"
-              class="brand-checkbox__link"
-              data-testid="first-use-tos-link"
-              @click.prevent="termsDoc = 'tos'"
+              <input v-model="acceptedTos" type="checkbox" />
+              <span class="start-consent-row__text">
+                {{ $t('firstUse.consentTosHintPrefix') }}
+                <button
+                  type="button"
+                  class="brand-checkbox__link"
+                  data-testid="first-use-eula-link"
+                  @click.prevent="termsDoc = 'eula'"
+                >
+                  {{ $t('firstUse.eulaLinkLabel') }}
+                </button>
+                {{ $t('firstUse.consentTosHintSep') }}
+                <button
+                  type="button"
+                  class="brand-checkbox__link"
+                  data-testid="first-use-tos-link"
+                  @click.prevent="termsDoc = 'tos'"
+                >
+                  {{ $t('firstUse.tosLinkLabel') }}</button
+                >{{ $t('firstUse.consentTosHintSuffix') }}
+              </span>
+            </label>
+            <label
+              class="brand-checkbox start-consent-row"
+              data-testid="first-use-consent-telemetry"
             >
-              {{ $t('firstUse.tosLinkLabel') }}</button
-            >{{ $t('firstUse.consentTosHintSuffix') }}
-          </span>
-        </label>
-        <label class="brand-checkbox start-consent-row" data-testid="first-use-consent-telemetry">
-          <input v-model="telemetryEnabled" type="checkbox" />
-          <span class="start-consent-row__text">
-            {{ $t('firstUse.consentTelemetryHint') }}
-            <button
-              type="button"
-              class="brand-checkbox__link"
-              data-testid="first-use-telemetry-learn-more"
-              @click.prevent="termsDoc = 'privacy'"
-            >
-              {{ $t('common.learnMore') }}
-            </button>
-          </span>
-        </label>
-        <button
-          class="brand-primary start-continue"
-          type="button"
-          data-testid="first-use-continue"
-          :disabled="!acceptedTos || isContinuing"
-          :aria-busy="isContinuing"
-          @click="onContinue"
-        >
-          <Loader2
-            v-if="isContinuing"
-            :size="16"
-            class="start-continue__spinner"
-            aria-hidden="true"
-          />
-          <span>{{
-            isContinuing ? $t('firstUse.startContinueBusy') : $t('firstUse.startContinue')
-          }}</span>
-        </button>
+              <input v-model="telemetryEnabled" type="checkbox" />
+              <span class="start-consent-row__text">
+                {{ $t('firstUse.consentTelemetryHint') }}
+                <button
+                  type="button"
+                  class="brand-checkbox__link"
+                  data-testid="first-use-telemetry-learn-more"
+                  @click.prevent="termsDoc = 'privacy'"
+                >
+                  {{ $t('common.learnMore') }}
+                </button>
+              </span>
+            </label>
+          </div>
+          <button
+            class="brand-primary start-continue"
+            type="button"
+            data-testid="first-use-continue"
+            :disabled="isContinuing"
+            :aria-busy="isContinuing"
+            @click="onContinue"
+          >
+            <Loader2
+              v-if="isContinuing"
+              :size="16"
+              class="start-continue__spinner"
+              aria-hidden="true"
+            />
+            <span>{{
+              isContinuing ? $t('firstUse.startContinueBusy') : $t('firstUse.startContinue')
+            }}</span>
+          </button>
+        </div>
       </div>
     </div>
 
@@ -655,7 +690,7 @@ defineExpose({ open })
   width: 100%;
   height: 100%;
   max-width: 760px;
-  gap: var(--takeover-gap-md);
+  gap: 8px;
 }
 .start-hero {
   flex: 1 1 auto;
@@ -699,39 +734,68 @@ defineExpose({ open })
   outline-offset: 2px;
 }
 
-/* Express Install — intentionally low-weight: single centred line
- * with the standard brand-checkbox box, smaller font + muted text
- * colour so it reads as an opt-out modifier, not a primary decision.
- * Inline-flex so it shrink-wraps and the parent flex column centres
- * it horizontally. */
+/* Express Install — intentionally low-weight: left-aligned single
+ * line with the standard brand-checkbox box, smaller font + muted
+ * text colour so it reads as an opt-out modifier, not a primary
+ * decision. */
 .start-express {
   display: inline-flex;
+  align-self: flex-end;
   align-items: center;
   gap: 8px;
   margin-top: 4px;
   font-size: 13px;
   color: var(--neutral-300);
+  opacity: 1;
+  transform: translateY(0);
+  transition:
+    opacity 180ms ease-out,
+    transform 180ms ease-out;
+}
+/* Cloud pick: reserve the row's space (no layout shift on swap) but
+ * fade + nudge the content out and disable pointer/keyboard access. */
+.start-express--hidden {
+  opacity: 0;
+  transform: translateY(-4px);
+  pointer-events: none;
 }
 .start-express__label {
   line-height: 1.4;
 }
+@media (prefers-reduced-motion: reduce) {
+  .start-express {
+    transition: none;
+  }
+}
 
-/* Bottom block: condensed consent + Continue. Each row uses the
- * shared `.brand-checkbox` box for the input visuals (custom
- * appearance + SVG checkmark) but overrides alignment to single-line
- * + shrink-wrap so the rows can centre as a group inside the
- * column. No `position: absolute` — pure flex flow so the section
- * never overlaps the hero when the window shrinks. */
+/* Bottom strip: consent checkboxes + Continue grouped into a single
+ * glass panel so they read as one cohesive action block instead of
+ * scattered centre-aligned lines. Left-aligned text (checkboxes
+ * should never centre-align) with the CTA docked to the right. */
 .start-bottom {
   flex: 0 0 auto;
+  width: 95%;
+}
+.start-consent-strip {
   display: flex;
-  flex-direction: column;
   align-items: center;
+  justify-content: space-between;
   gap: 12px;
   width: 100%;
+  padding: 16px 20px;
+  border-radius: 10px;
+  background: rgba(138, 134, 136, 0.06);
+  backdrop-filter: blur(40px);
+  border: 1px solid rgba(194, 191, 185, 0.08);
+}
+.start-consent-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
 }
 .start-consent-row {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 10px;
   font-size: 13px;
@@ -746,9 +810,46 @@ defineExpose({ open })
 .start-consent-row__text {
   white-space: normal;
 }
+
+/* Shake nudge when the user clicks Continue without accepting ToS. */
+.start-consent-row--nudge {
+  animation: consent-shake 400ms cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+}
+.start-consent-row--nudge input[type='checkbox'] {
+  border-color: var(--comfy-yellow) !important;
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--comfy-yellow) 30%, transparent);
+  transition:
+    border-color 150ms ease,
+    box-shadow 150ms ease;
+}
+@keyframes consent-shake {
+  10%,
+  90% {
+    transform: translateX(-1px);
+  }
+  20%,
+  80% {
+    transform: translateX(2px);
+  }
+  30%,
+  50%,
+  70% {
+    transform: translateX(-3px);
+  }
+  40%,
+  60% {
+    transform: translateX(3px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .start-consent-row--nudge {
+    animation: none;
+  }
+}
+
 .start-continue {
-  margin-top: 4px;
-  min-width: 220px;
+  flex-shrink: 0;
+  min-width: 160px;
   display: inline-flex;
   align-items: center;
   justify-content: center;

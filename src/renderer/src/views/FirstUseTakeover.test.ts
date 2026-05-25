@@ -84,19 +84,17 @@ function mountTakeover() {
 }
 
 describe('FirstUseTakeover start step', () => {
-  it('Continue is disabled until the Terms checkbox is checked', async () => {
+  it('Continue triggers a nudge shake on the ToS row when terms are not accepted', async () => {
     const wrapper = mountTakeover()
-    const accept = wrapper.find('[data-testid="first-use-continue"]')
-    expect(accept.exists()).toBe(true)
-    // Initial state: terms unchecked → button disabled.
-    expect(accept.attributes('disabled')).toBeDefined()
+    const tosRow = wrapper.find('[data-testid="first-use-consent-tos"]')
+    expect(tosRow.classes()).not.toContain('start-consent-row--nudge')
 
-    // Tick the Terms checkbox.
-    const tosCheckbox = wrapper.find(
-      '[data-testid="first-use-consent-tos"] input[type="checkbox"]',
-    )
-    await tosCheckbox.setValue(true)
-    expect(accept.attributes('disabled')).toBeUndefined()
+    await wrapper.find('[data-testid="first-use-continue"]').trigger('click')
+    expect(tosRow.classes()).toContain('start-consent-row--nudge')
+
+    // No emit should fire — the click was blocked by the ToS gate.
+    expect(wrapper.emitted('complete-cloud')).toBeFalsy()
+    expect(wrapper.emitted('chain-local')).toBeFalsy()
   })
 
   it('clicking the EULA inline link opens the modal with doc="eula"', async () => {
@@ -134,16 +132,20 @@ describe('FirstUseTakeover start step', () => {
 
   it('Express-install checkbox is hidden on the default Cloud pick and revealed only after Local is picked', async () => {
     const wrapper = mountTakeover()
-    // Default pick is Cloud — Express opt-out is irrelevant there and
-    // must not render.
-    expect(wrapper.find('[data-testid="first-use-express-install"]').exists()).toBe(false)
+    // The row stays mounted (reserved layout space, no jump on swap)
+    // but is visually + a11y hidden until Local is picked.
+    const express = () => wrapper.find('[data-testid="first-use-express-install"]')
+    expect(express().exists()).toBe(true)
+    expect(express().classes()).toContain('start-express--hidden')
+    expect(express().attributes('aria-hidden')).toBe('true')
 
     await wrapper.find('[data-testid="first-use-pick-local"]').trigger('click')
-    expect(wrapper.find('[data-testid="first-use-express-install"]').exists()).toBe(true)
+    expect(express().classes()).not.toContain('start-express--hidden')
+    expect(express().attributes('aria-hidden')).toBe('false')
 
-    // Switching back to Cloud hides it again.
     await wrapper.find('[data-testid="first-use-pick-cloud"]').trigger('click')
-    expect(wrapper.find('[data-testid="first-use-express-install"]').exists()).toBe(false)
+    expect(express().classes()).toContain('start-express--hidden')
+    expect(express().attributes('aria-hidden')).toBe('true')
   })
 
   it('emits `chain-local` with `express: true` when Local is picked with Express on (no legacy desktop)', async () => {
