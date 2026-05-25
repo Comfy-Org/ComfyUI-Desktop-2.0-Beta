@@ -87,6 +87,21 @@ test.beforeEach(async () => {
   await resetIpcInvocations(ctx.app, 'stop-comfyui')
   await resetIpcInvocations(ctx.app, 'run-action')
   await clearRunningSessions(ctx.app)
+  // `clearRunningSessions` returns when main has cleared its
+  // `_runningSessions` map, but the resulting `instance-stopped`
+  // broadcast still has to round-trip into the panel webContents
+  // before the renderer's sessionStore sees the install as stopped.
+  // useDeepLinkRouter captures `wasRunning` once at apiCall creation,
+  // so polling here is the difference between a clean test and a
+  // false-positive self-stop carried over from the previous run.
+  await expect
+    .poll(
+      async () => ctx.panel.evaluate<boolean>(
+        `(() => window.__e2eRenderer?.isRunning(${JSON.stringify(INSTALL_ID)}) ?? true)()`,
+      ),
+      { timeout: 5_000, intervals: [100, 200] },
+    )
+    .toBe(false)
 })
 
 /**
@@ -159,9 +174,13 @@ test('Self-stops the running session and dispatches the action @lifecycle', asyn
   //   1. `window.api.stopComfyUI(id)` (fires once)
   //   2. wait until the session leaves the running state
   //   3. `window.api.runAction(id, 'update-comfyui')`
-  //   4. `window.api.runAction(id, 'launch')` because `update-comfyui`
-  //      is in IN_PLACE_RELAUNCH — without this the user is left
-  //      staring at a stopped ComfyUI after an update.
+  //
+  // The IN_PLACE_RELAUNCH append (`run-action('launch')` after a
+  // successful update) is gated on `result?.ok !== false`. The test
+  // install has no real release-channel metadata so the standalone
+  // source-side update-comfyui handler returns `{ ok: false }` and
+  // the relaunch is intentionally skipped — covered by the
+  // FLOW 1 unit tests instead.
   await expect
     .poll(async () => (await getIpcInvocations(ctx.app, 'stop-comfyui')).length, {
       timeout: 5_000,
@@ -173,15 +192,13 @@ test('Self-stops the running session and dispatches the action @lifecycle', asyn
       timeout: 10_000,
       intervals: [200, 500],
     })
-    .toBeGreaterThanOrEqual(2)
+    .toBeGreaterThanOrEqual(1)
 
   const runCalls = await getIpcInvocations(ctx.app, 'run-action') as
     { installationId?: string; actionId?: string }[]
-  expect(runCalls.length).toBeGreaterThanOrEqual(2)
+  expect(runCalls.length).toBeGreaterThanOrEqual(1)
   expect(runCalls[0]?.installationId).toBe(INSTALL_ID)
   expect(runCalls[0]?.actionId).toBe('update-comfyui')
-  expect(runCalls[1]?.installationId).toBe(INSTALL_ID)
-  expect(runCalls[1]?.actionId).toBe('launch')
 
   // stop-comfyui fires exactly once — duplicate stops would point at a
   // regression where both useDeepLinkRouter and the (now-removed)

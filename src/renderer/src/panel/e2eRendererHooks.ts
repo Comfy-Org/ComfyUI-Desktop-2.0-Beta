@@ -11,6 +11,7 @@
  * Production code never references `__e2eRenderer`, so the global is a
  * no-op outside the test runner.
  */
+import { useSessionStore } from '../stores/sessionStore'
 import type { ShowProgressOpts } from '../types/ipc'
 
 export interface InjectProgressErrorOpts {
@@ -53,6 +54,13 @@ export interface E2ERendererHelpers {
    *  `ProgressModal.handleDone` calls `openInstallWindow` with
    *  `newInstallationId` without running an actual copy. */
   injectProgressSuccess(opts: InjectProgressSuccessOpts): Promise<void>
+  /** Read the renderer-side `sessionStore.isRunning(id)` so tests can
+   *  poll on the broadcast having actually propagated into the panel's
+   *  Pinia store (main's `_test_clearRunningSessions` fires the IPC but
+   *  resolves before the renderer applies the resulting
+   *  `instance-stopped` message — without this poll the apiCall-time
+   *  `wasRunning` capture races the broadcast). */
+  isRunning(installationId: string): boolean
 }
 
 function ensureBound(): PanelBindings {
@@ -99,6 +107,9 @@ export function registerE2ERendererHooks(): void {
           newInstallationId,
         }),
       })
+    },
+    isRunning(installationId) {
+      return useSessionStore().isRunning(installationId)
     },
   }
   ;(globalThis as unknown as { __e2eRenderer: E2ERendererHelpers }).__e2eRenderer = helpers
