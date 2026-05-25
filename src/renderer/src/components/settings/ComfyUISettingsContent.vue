@@ -163,6 +163,72 @@ watch(
   { immediate: true },
 )
 
+// Auto-refresh stale channel-cards when the Update tab opens. The
+// release cache persists to disk forever and only refreshes on
+// explicit "Check for Update" clicks, post-update-comfyui, or install
+// creation — without this watcher, a user who opens the picker days
+// or weeks after install sees a snapshot of release data from the
+// last manual check. Fires `check-update` (cheap GitHub tag fetch,
+// deduped main-side by `MIN_RECHECK_INTERVAL = 10s` inside the release
+// cache) whenever:
+//
+//   - the active tab is `'update'`,
+//   - the sections payload has a channel-cards field,
+//   - and the currently-selected option's `data.checkedAt` is missing
+//     or older than `STALE_CHANNEL_CARD_MS`.
+//
+// Per-(install, channel) dedupe via `refreshedChannelKeys` so tab
+// flips don't spam IPCs. Main's `getOrFetch(..., force=true)` short-
+// circuits on the 10s window so even a stuck renderer can't push more
+// than 6 fetches/minute/channel.
+const STALE_CHANNEL_CARD_MS = 15 * 60 * 1000
+const refreshedChannelKeys = new Set<string>()
+watch(
+  [
+    () => activeTab.value,
+    () => props.installation?.id ?? null,
+    () => sections.value.length,
+  ],
+  ([tab, installId, sectionsLen]) => {
+    if (tab !== 'update' || !installId || sectionsLen === 0) return
+
+    const channelField = sections.value
+      .flatMap((s) => s.fields ?? [])
+      .find((f) => f.editType === 'channel-cards')
+    if (!channelField) return
+
+    const currentChannel = typeof channelField.value === 'string' ? channelField.value : null
+    if (!currentChannel) return
+
+    const selectedOption = channelField.options?.find((o) => o.value === currentChannel)
+    const data = selectedOption?.data as { checkedAt?: number } | undefined
+    const checkedAt = typeof data?.checkedAt === 'number' ? data.checkedAt : null
+    const stale = checkedAt === null || Date.now() - checkedAt > STALE_CHANNEL_CARD_MS
+    if (!stale) return
+
+    // Look up the canonical action def from sections so we inherit
+    // whatever `enabled` / disabledMessage / future fields main attaches
+    // (today: `enabled: installed`). Bail if main isn't exposing the
+    // action for this install (e.g. uninstalled / cloud).
+    const checkAction = sections.value
+      .flatMap((s) => s.actions ?? [])
+      .find((a) => a.id === 'check-update')
+    if (!checkAction || checkAction.enabled === false) return
+
+    const dedupeKey = `${installId}:${currentChannel}`
+    if (refreshedChannelKeys.has(dedupeKey)) return
+    refreshedChannelKeys.add(dedupeKey)
+
+    // `check-update` has no `showProgress` / confirm / prompt; it runs
+    // inline via `useComfyUISettings.runAction` step 10. A successful
+    // result returns `navigate: 'detail'` → section reload → fresh
+    // `checkedAt` bubbles through this watcher (dedupe set prevents
+    // re-fire on the same install+channel).
+    void runAction(checkAction)
+  },
+  { immediate: true },
+)
+
 interface TabDef {
   key: ComfyUISettingsTab
   /** The `DetailSection.tab` literal we filter for. The Figma's "Config"

@@ -59,6 +59,20 @@ function _persist(): void {
 }
 
 /**
+ * Test-only: force every cached entry's `checkedAt` to `maxCheckedAt` so the
+ * renderer-side stale-cache watcher fires on next picker open. Only invoked
+ * via `__e2e.ageReleaseCache` when `process.env['E2E'] === '1'`.
+ */
+export function _test_ageEntries(maxCheckedAt: number): void {
+  _ensureLoaded()
+  for (const key of Object.keys(_entries)) {
+    const entry = _entries[key]
+    if (entry) entry.checkedAt = maxCheckedAt
+  }
+  _persist()
+}
+
+/**
  * Build a cache key from a remote identity.
  * Today: "github:Comfy-Org/ComfyUI:stable"
  * Future: could include branch/ref overrides per installation.

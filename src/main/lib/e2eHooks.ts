@@ -18,7 +18,10 @@ import {
   type DownloadsTrayState,
 } from './comfyDownloadManager'
 import { _test_setUpdateState, type AppUpdateState } from './updater'
-import { get as _releaseCacheGet } from './release-cache'
+import {
+  get as _releaseCacheGet,
+  _test_ageEntries as _test_ageReleaseCacheEntries,
+} from './release-cache'
 import { _test_getOpenTitlePopupBounds } from '../popups/titlePopup'
 import { returnToDashboard } from '../host/detach'
 import { comfyWindows, isInstallHost } from '../host/registry'
@@ -81,6 +84,11 @@ export interface E2EHelpers {
    *  yet. Used by the periodic-poll lifecycle test to observe that the
    *  background timer ran a real second fetch. */
   getReleaseCacheCheckedAt(repo: string, channel: string): number | null
+  /** Force every entry in the shared release cache to the given
+   *  `checkedAt` timestamp so the renderer-side stale-cache watcher
+   *  in `ComfyUISettingsContent` treats the data as stale and auto-
+   *  fires `check-update` on the next picker open. */
+  ageReleaseCache(maxCheckedAt: number): void
 }
 
 export function registerE2EHooks(): void {
@@ -116,6 +124,7 @@ export function registerE2EHooks(): void {
     getReleaseCacheCheckedAt(repo, channel) {
       return _releaseCacheGet(repo, channel)?.checkedAt ?? null
     },
+    ageReleaseCache: _test_ageReleaseCacheEntries,
   }
   ;(globalThis as unknown as { __e2e: E2EHelpers }).__e2e = helpers
 }

@@ -166,6 +166,20 @@ export async function seedRunningSession(
   }, opts))
 }
 
+/** Force every release-cache entry's `checkedAt` to `maxCheckedAt`
+ *  (ms-since-epoch). Used to drive the renderer's stale-data
+ *  auto-refresh watcher without waiting wall-clock minutes. */
+export async function ageReleaseCache(
+  app: ElectronApplication,
+  maxCheckedAt: number,
+): Promise<void> {
+  await evalWithRetry(() => app.evaluate((_electron, ts) => {
+    const helpers = (globalThis as unknown as { __e2e?: { ageReleaseCache: (ts: number) => void } }).__e2e
+    if (!helpers) throw new Error('E2E helpers not registered (process.env.E2E !== "1"?)')
+    helpers.ageReleaseCache(ts)
+  }, maxCheckedAt))
+}
+
 /** Drop every synthetic session seeded via `seedRunningSession`. */
 export async function clearRunningSessions(app: ElectronApplication): Promise<void> {
   await evalWithRetry(() => app.evaluate(() => {
