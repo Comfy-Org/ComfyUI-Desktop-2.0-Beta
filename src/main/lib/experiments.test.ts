@@ -125,19 +125,54 @@ describe('experiments', () => {
       expect(experiments.getFlag('nope.flag')).toBeUndefined()
     })
 
-    it('writes refreshed values to disk for the next boot', async () => {
+    it('writes refreshed values to disk for the next boot WITHOUT changing this session', async () => {
+      // Pre-seed disk with the "old" assignments this session should keep.
+      fs.writeFileSync(
+        path.join(testUserData, 'experiment-flags.json'),
+        JSON.stringify({ 'flag.x': 'control', 'flag.y': true })
+      )
+      // Refresh returns DIFFERENT values — the new shape PostHog wants.
       mockFlags = { 'flag.x': 'variant_a', 'flag.y': false }
+
       await experiments.initExperiments({
         distinctId: 'test-distinct-id',
         personProperties: {}
       })
-      expect(experiments.getFlag('flag.x')).toBe('variant_a')
-      expect(experiments.getFlag('flag.y')).toBe(false)
-      // The new cache should be persisted.
+
+      // In-memory cache is LOCKED to what loaded synchronously at boot.
+      // The session keeps serving the pre-seeded values; a banner that
+      // checks the flag mid-session sees the same variant as one that
+      // checks at boot. No mid-session flips.
+      expect(experiments.getFlag('flag.x')).toBe('control')
+      expect(experiments.getFlag('flag.y')).toBe(true)
+
+      // Disk reflects the refreshed values — next boot picks them up.
       const onDisk = JSON.parse(
         fs.readFileSync(path.join(testUserData, 'experiment-flags.json'), 'utf-8')
       )
       expect(onDisk).toEqual({ 'flag.x': 'variant_a', 'flag.y': false })
+    })
+
+    it('first-boot users (no on-disk cache) stay in fallback for the session even after refresh resolves', async () => {
+      // No pre-seeded cache file. mockFlags will assign treatment.
+      mockFlags = { 'flag.x': 'treatment' }
+
+      await experiments.initExperiments({
+        distinctId: 'test-distinct-id',
+        personProperties: {}
+      })
+
+      // Even though the fetch returned 'treatment' and wrote it to disk,
+      // the in-memory cache for THIS session stays empty — first-boot
+      // users always land in fallback control for their first session
+      // and pick up their real assignment on the next launch.
+      expect(experiments.getFlag('flag.x')).toBeUndefined()
+
+      // Disk is primed for the next boot.
+      const onDisk = JSON.parse(
+        fs.readFileSync(path.join(testUserData, 'experiment-flags.json'), 'utf-8')
+      )
+      expect(onDisk).toEqual({ 'flag.x': 'treatment' })
     })
 
     it('keeps the previous cache when the refresh returns an empty map (treats empty as ambiguous)', async () => {
@@ -154,7 +189,12 @@ describe('experiments', () => {
     })
 
     it('is idempotent within a process — repeated init is a no-op', async () => {
-      mockFlags = { 'flag.a': 'treatment' }
+      // Pre-seed disk so this session's in-memory cache is non-empty.
+      fs.writeFileSync(
+        path.join(testUserData, 'experiment-flags.json'),
+        JSON.stringify({ 'flag.a': 'treatment' })
+      )
+      mockFlags = { 'flag.a': 'control' } // distinct from the seed
       const first = experiments.initExperiments({
         distinctId: 'test-distinct-id',
         personProperties: {}
@@ -164,7 +204,9 @@ describe('experiments', () => {
         personProperties: {}
       })
       await Promise.all([first, second])
-      // Second call shouldn't have replaced the distinctId or refetched.
+      // The second init is a no-op — distinctId is intentionally ignored
+      // (variant stability), and the session keeps its boot-loaded
+      // value, NOT the mockFlags refresh value.
       expect(experiments.getFlag('flag.a')).toBe('treatment')
     })
   })

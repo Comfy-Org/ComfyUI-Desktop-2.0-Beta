@@ -112,19 +112,23 @@ export function initExperiments(opts: {
       opts.timeoutMs ?? DEFAULT_TIMEOUT_MS
     )
     .then((flags) => {
-      // Only overwrite cache on a non-empty response. An empty result is
-      // ambiguous (could be timeout, could be "no flags configured"); the
-      // safer move is to keep the previously-cached values so a user who
-      // has been assigned a variant doesn't flip back to control on a
-      // single bad fetch. (loadFeatureFlagsImmediate never resolves to
-      // null/undefined — always a Record — so no nullish guard needed.)
+      // Refresh ONLY the on-disk cache — do not overwrite the in-memory
+      // `cached` for the running session. Variant assignment for this
+      // process is locked to what loaded synchronously at boot, so a
+      // background fetch that settles mid-session can't flip a banner
+      // out from under the user or change which arm of an experiment
+      // a given action belongs to. New values land on disk and take
+      // effect on the NEXT boot.
+      //
+      // Empty result is also ignored on disk: ambiguous (timeout vs
+      // legitimately no flags configured), and overwriting with empty
+      // would roll every cached variant back to fallback on next boot.
       if (Object.keys(flags).length > 0) {
-        cached = flags
         writeCache(flags)
       }
     })
     .catch(() => {
-      /* fail closed: keep current cache */
+      /* fail closed: keep current cache on disk and in memory */
     })
 }
 
