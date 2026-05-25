@@ -689,6 +689,46 @@ export async function getActiveDetails(): Promise<QuitActiveItem[]> {
   return items
 }
 
+/** Test-only: register a synthetic running session for an install
+ *  without spawning a real ComfyUI process. Mirrors the side effects
+ *  of `_addSession` (renderer `instance-started` broadcast →
+ *  `sessionStore.isRunning(id)` flips true; main `_runningSessions`
+ *  populated so the REQUIRES_STOPPED guard in `registerSessionHandlers`
+ *  fires). `stopRunning` handles the null `proc` case cleanly so the
+ *  panel's stop-confirm chain resolves end-to-end. Only called via
+ *  `__e2e.seedRunningSession` and gated behind `process.env.E2E === '1'`. */
+export function _test_addRunningSession(
+  installationId: string,
+  installationName: string,
+): void {
+  _runningSessions.set(installationId, {
+    proc: null,
+    port: 0,
+    url: undefined,
+    mode: 'window',
+    installationName,
+    startedAt: Date.now(),
+  })
+  _broadcastToRenderer('instance-started', {
+    installationId,
+    port: 0,
+    url: undefined,
+    mode: 'window',
+    installationName,
+  })
+}
+
+/** Test-only: drop every synthetic session registered via
+ *  `_test_addRunningSession`. Broadcasts `instance-stopped` per entry
+ *  so renderer sessionStore mirrors main. */
+export function _test_clearRunningSessions(): void {
+  const ids = Array.from(_runningSessions.keys())
+  _runningSessions.clear()
+  for (const id of ids) {
+    _broadcastToRenderer('instance-stopped', { installationId: id })
+  }
+}
+
 export function cancelAll(): void {
   for (const [_id, abort] of _operationAborts) {
     abort.abort()

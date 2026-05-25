@@ -149,3 +149,28 @@ export async function resetShellOpenExternalCalls(app: ElectronApplication): Pro
     helpers.resetShellOpenExternalCalls()
   }))
 }
+
+/** Register a synthetic running session against `installationId` so the
+ *  REQUIRES_STOPPED guard fires (main side) and `sessionStore.isRunning`
+ *  flips true (renderer side) without spawning a real ComfyUI process. */
+export async function seedRunningSession(
+  app: ElectronApplication,
+  opts: { installationId: string; installationName: string },
+): Promise<void> {
+  await evalWithRetry(() => app.evaluate((_electron, o) => {
+    const helpers = (globalThis as unknown as {
+      __e2e?: { seedRunningSession: (o: unknown) => void }
+    }).__e2e
+    if (!helpers) throw new Error('E2E helpers not registered (process.env.E2E !== "1"?)')
+    helpers.seedRunningSession(o)
+  }, opts))
+}
+
+/** Drop every synthetic session seeded via `seedRunningSession`. */
+export async function clearRunningSessions(app: ElectronApplication): Promise<void> {
+  await evalWithRetry(() => app.evaluate(() => {
+    const helpers = (globalThis as unknown as { __e2e?: { clearRunningSessions: () => void } }).__e2e
+    if (!helpers) throw new Error('E2E helpers not registered (process.env.E2E !== "1"?)')
+    helpers.clearRunningSessions()
+  }))
+}

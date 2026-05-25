@@ -29,6 +29,7 @@ import {
   getShellOpenExternalCalls,
   resetShellOpenExternalCalls,
 } from './e2eOverrides'
+import { _test_addRunningSession, _test_clearRunningSessions } from './ipc/shared'
 
 interface SetInstallUpdateOpts {
   /** Omit to apply the override globally (matches every installationId). */
@@ -67,6 +68,13 @@ export interface E2EHelpers {
   getShellOpenExternalCalls(): string[]
   /** Reset the captured `shell.openExternal` URL list. */
   resetShellOpenExternalCalls(): void
+  /** Register a synthetic running session against `installationId`
+   *  without spawning a real ComfyUI process. Main's REQUIRES_STOPPED
+   *  guard sees the install as running; renderer `sessionStore.isRunning`
+   *  flips true via the `instance-started` broadcast. */
+  seedRunningSession(opts: { installationId: string; installationName: string }): void
+  /** Drop every synthetic session registered via `seedRunningSession`. */
+  clearRunningSessions(): void
 }
 
 export function registerE2EHooks(): void {
@@ -95,6 +103,10 @@ export function registerE2EHooks(): void {
     resetIpcInvocations,
     getShellOpenExternalCalls,
     resetShellOpenExternalCalls,
+    seedRunningSession(opts) {
+      _test_addRunningSession(opts.installationId, opts.installationName)
+    },
+    clearRunningSessions: _test_clearRunningSessions,
   }
   ;(globalThis as unknown as { __e2e: E2EHelpers }).__e2e = helpers
 }
