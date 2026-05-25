@@ -382,6 +382,8 @@ defineExpose({
               v-else
               :key="`tab-${activeTab}`"
               class="settings-v2-tab-pane"
+              :data-testid="TID.pickerSettingsSections"
+              :data-install-id="installation?.id"
             >
               <SettingsSectionList
                 :sections="visibleSections"
