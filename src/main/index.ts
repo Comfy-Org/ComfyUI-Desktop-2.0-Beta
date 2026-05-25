@@ -1146,6 +1146,23 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
         }
         try {
           await updateInstallation(installationId, { [fieldId]: value })
+          // Channel switch must kick a check-update; otherwise the new
+          // channel's available-update tag never appears until the user
+          // manually clicks "Check for updates".
+          if (fieldId === 'updateChannel') {
+            const next = await getInstallation(installationId)
+            if (next) {
+              const abort = new AbortController()
+              source.handleAction('check-update', next, undefined, {
+                update: (data) => updateInstallation(installationId, data).then(() => { }),
+                sendProgress: () => { },
+                sendOutput: () => { },
+                signal: abort.signal,
+              }).catch((err) => {
+                console.error(`Picker: check-update after channel switch failed for ${installationId}:`, err)
+              })
+            }
+          }
           return { ok: true }
         } catch (err) {
           return { ok: false, message: err instanceof Error ? err.message : 'Update failed.' }
