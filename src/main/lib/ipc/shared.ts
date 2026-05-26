@@ -37,7 +37,6 @@ import { formatTime } from '../util'
 import { getActiveDownloads } from '../comfyDownloadManager'
 import * as releaseCache from '../release-cache'
 import * as i18n from '../i18n'
-import { decryptEnvVars } from '../envVarsCrypto'
 import { syncCustomModelFolders, discoverExtraModelFolders } from '../models'
 import { copyDirWithProgress } from '../copy'
 import { fetchJSON } from '../fetch'
@@ -349,7 +348,7 @@ export function sanitizeEnvVars(raw: unknown): Record<string, string> {
 }
 
 export function buildLaunchEnv(inst: InstallationRecord, sessionPath?: string): Record<string, string | undefined> {
-  const userEnvVars = sanitizeEnvVars(decryptEnvVars(inst.envVars))
+  const userEnvVars = sanitizeEnvVars(inst.envVars)
   return {
     ...process.env,
     ...userEnvVars,

@@ -1,5 +1,4 @@
 import { t } from '../../lib/i18n'
-import { decryptEnvVars } from '../../lib/envVarsCrypto'
 import type { InstallationRecord } from '../../installations'
 
 export interface LaunchSettingsOptions {
@@ -58,7 +57,7 @@ export function buildLaunchSettingsFields(
         { value: 'auto', label: t('common.portConflictAuto') },
       ] },
     { id: 'envVars', label: t('common.envVars'),
-      value: decryptEnvVars(installation.envVars),
+      value: (installation.envVars as Record<string, string> | undefined) ?? {},
       editable: true, editType: 'env-vars', tooltip: t('tooltips.envVars') },
   )
 

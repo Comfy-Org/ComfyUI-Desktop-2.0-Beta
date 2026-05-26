@@ -15,7 +15,6 @@ import type { ComfyVersion, ComfyArgDef, InstallationRecord } from './shared'
 import * as releaseCache from '../release-cache'
 import { hasGitDir } from '../git'
 import { restoreSnapshotIntoInstallation } from '../standaloneMigration'
-import { encryptEnvVars } from '../envVarsCrypto'
 import { recordIpcInvocation } from '../e2eOverrides'
 
 /**
@@ -305,7 +304,7 @@ export function registerInstallationHandlers(): void {
     const filtered: Record<string, unknown> = {}
     for (const key of Object.keys(data)) {
       if (allowedIds.has(key)) {
-        filtered[key] = key === 'envVars' ? encryptEnvVars(sanitizeEnvVars(data[key])) : data[key]
+        filtered[key] = key === 'envVars' ? sanitizeEnvVars(data[key]) : data[key]
       }
     }
     if (filtered.name && filtered.name !== inst.name) {
