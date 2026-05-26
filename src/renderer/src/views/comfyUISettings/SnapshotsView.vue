@@ -188,31 +188,33 @@ async function handleRestore(filename: string): Promise<void> {
       ? [{ label: t('snapshots.willChange', 'Changes when restoring'), items: summaryLines }]
       : undefined
 
-  const ok = await modal.confirm({
-    title: t('standalone.snapshotRestore', 'Restore Snapshot'),
-    message: t(
-      'snapshots.restoreConfirm',
-      'Are you sure you want to restore this snapshot? Your current install state will be replaced.'
-    ),
-    messageDetails,
-    confirmLabel: t('standalone.snapshotRestore', 'Restore'),
-    confirmStyle: 'primary'
-  })
-  if (!ok) return
-
   emitTelemetryAction('desktop2.snapshot.flow', {
     action: 'restore_complete',
     snapshot_count_bucket: toCountBucket(snapshots.value.length),
     has_diff: hasChanges
   })
 
+  // Pass the diff-preview confirm through the emit so
+  // `useComfyUISettings.runAction` step 3 augments this existing
+  // confirm with the `willStopRunning` warning instead of synthesizing
+  // a second one. Single modal whether the install is running or not.
   emit('run-action', {
     id: 'snapshot-restore',
     label: t('standalone.snapshotRestore', 'Restore'),
     data: { file: filename },
     showProgress: true,
     progressTitle: t('standalone.snapshotRestoringTitle', 'Restoring snapshot'),
-    cancellable: true
+    cancellable: true,
+    style: 'primary',
+    confirm: {
+      title: t('standalone.snapshotRestore', 'Restore Snapshot'),
+      message: t(
+        'snapshots.restoreConfirm',
+        'Are you sure you want to restore this snapshot? Your current install state will be replaced.'
+      ),
+      messageDetails,
+      confirmLabel: t('standalone.snapshotRestore', 'Restore')
+    }
   })
 }
 
