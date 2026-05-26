@@ -4,14 +4,20 @@
 // cards, items, fields, args/env editors, IPC writes) and is marked
 // `TODO(stale-old-modal)` for deletion. Coupling the new global-
 // settings UI to it would block that removal.
+import InfoTooltip from '../../components/InfoTooltip.vue'
+
 defineProps<{
   title: string
+  tooltip?: string
 }>()
 </script>
 
 <template>
   <section class="gs-micro-section">
-    <h3 class="gs-micro-title">{{ title }}</h3>
+    <h3 class="gs-micro-title">
+      <span>{{ title }}</span>
+      <InfoTooltip v-if="tooltip" :text="tooltip" />
+    </h3>
     <div class="gs-micro-body">
       <slot />
     </div>
@@ -26,6 +32,8 @@ defineProps<{
 }
 
 .gs-micro-title {
+  display: inline-flex;
+  align-items: center;
   margin: 0;
   padding: 0 0 4px;
   font-size: 11px;
@@ -33,6 +41,14 @@ defineProps<{
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--text-muted);
+}
+
+/* The title text alone is dimmed (matches the muted section-header
+ * treatment), but the optional InfoTooltip stays at full opacity so
+ * the `?` reads at the same visibility as other help icons in the
+ * panel — otherwise we'd compound the title's dim with InfoTooltip's
+ * own 0.6 baseline and the icon would nearly vanish. */
+.gs-micro-title > span {
   opacity: 0.55;
 }
 

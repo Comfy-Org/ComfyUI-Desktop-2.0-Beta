@@ -7,6 +7,7 @@ import GlobalSettingsMicroSection from './globalSettings/GlobalSettingsMicroSect
 import GitHubLinkCard from './globalSettings/GitHubLinkCard.vue'
 import ModelsDirList from './globalSettings/ModelsDirList.vue'
 import SettingsSectionList from '../views/comfyUISettings/SettingsSectionList.vue'
+import { useModal } from '../composables/useModal'
 import { withMinDuration } from '../lib/uiTiming'
 import type {
   AppUpdateDownloadProgress,
@@ -77,6 +78,7 @@ interface GlobalSettingsBridge {
 
 const props = defineProps<{ snapshot: Snapshot }>()
 const { t } = useI18n()
+const modal = useModal()
 const bridge = (window as unknown as { __comfyTitlePopup?: GlobalSettingsBridge }).__comfyTitlePopup
 
 const LAST_CHECKED_KEY = 'globalSettings.lastCheckedAt'
@@ -88,32 +90,32 @@ const tabs = computed(() => [
   { id: 'general' as const, label: props.snapshot.i18n.overview, icon: Settings2 },
   { id: 'updates' as const, label: props.snapshot.i18n.updates, icon: RefreshCcw },
   { id: 'storage' as const, label: props.snapshot.i18n.storage, icon: HardDrive },
-  { id: 'advanced' as const, label: props.snapshot.i18n.advanced, icon: SlidersHorizontal },
+  { id: 'advanced' as const, label: props.snapshot.i18n.advanced, icon: SlidersHorizontal }
 ])
 
 const generalSections = computed<DetailSection[]>(() => [
-  { fields: props.snapshot.generalFields as unknown as DetailField[] },
+  { fields: props.snapshot.generalFields as unknown as DetailField[] }
 ])
 const telemetrySections = computed<DetailSection[]>(() => [
-  { fields: props.snapshot.telemetryFields as unknown as DetailField[] },
+  { fields: props.snapshot.telemetryFields as unknown as DetailField[] }
 ])
 const desktopUpdatePreferenceFields = computed<DetailField[]>(
-  () => props.snapshot.desktopUpdateFields as unknown as DetailField[],
+  () => props.snapshot.desktopUpdateFields as unknown as DetailField[]
 )
 const cacheSections = computed<DetailSection[]>(() => [
-  { fields: props.snapshot.cacheFields as unknown as DetailField[] },
+  { fields: props.snapshot.cacheFields as unknown as DetailField[] }
 ])
 const advancedSections = computed<DetailSection[]>(() => [
-  { fields: props.snapshot.advancedFields as unknown as DetailField[] },
+  { fields: props.snapshot.advancedFields as unknown as DetailField[] }
 ])
 const sharedDirsSections = computed<DetailSection[]>(() => [
-  { fields: props.snapshot.sharedDirectoriesFields as unknown as DetailField[] },
+  { fields: props.snapshot.sharedDirectoriesFields as unknown as DetailField[] }
 ])
 const appUpdateState = computed<AppUpdateState>(
-  () => props.snapshot.appUpdate.state as unknown as AppUpdateState,
+  () => props.snapshot.appUpdate.state as unknown as AppUpdateState
 )
 const appUpdateProgress = computed<AppUpdateDownloadProgress | null>(
-  () => props.snapshot.appUpdate.progress as unknown as AppUpdateDownloadProgress | null,
+  () => props.snapshot.appUpdate.progress as unknown as AppUpdateDownloadProgress | null
 )
 
 async function handleUpdateField(field: DetailField, value: unknown): Promise<void> {
@@ -134,6 +136,17 @@ async function handleAddModelsDir(): Promise<void> {
 }
 
 async function handleRemoveModelsDir(index: number): Promise<void> {
+  const dir = props.snapshot.modelsDirs[index]
+  if (!dir) return
+  const ok = await modal.confirm({
+    title: t('models.removeDirTitle', 'Remove shared models directory?'),
+    message: t(
+      'models.removeDirConfirm',
+      "This won't delete any files. You can re-add the directory later from this list."
+    ),
+    confirmLabel: t('models.removeDir', 'Remove')
+  })
+  if (!ok) return
   const dirs = props.snapshot.modelsDirs.map((d) => d.path)
   dirs.splice(index, 1)
   await bridge?.globalSettingsSetModelsDirs(dirs)
@@ -287,7 +300,10 @@ onMounted(() => {
         </template>
 
         <template v-else-if="activeTab === 'storage'">
-          <GlobalSettingsMicroSection :title="snapshot.i18n.models">
+          <GlobalSettingsMicroSection
+            :title="snapshot.i18n.models"
+            :tooltip="t('tooltips.sharedModels')"
+          >
             <ModelsDirList
               :dirs="snapshot.modelsDirs"
               @open="handleOpenModelsDir"

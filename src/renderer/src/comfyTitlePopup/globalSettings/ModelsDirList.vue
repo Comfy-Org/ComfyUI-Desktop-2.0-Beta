@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Folder, FolderOpen, MoreHorizontal, Plus } from 'lucide-vue-next'
+import { Folder, FolderLock, FolderOpen, MoreHorizontal, Plus } from 'lucide-vue-next'
 import InfoTooltip from '../../components/InfoTooltip.vue'
 
 interface ModelsDir {
@@ -38,14 +38,10 @@ function setMenuRef(index: number, el: Element | null): void {
   else menuRefs.delete(index)
 }
 
-function basename(path: string): string {
-  const normalized = path.replace(/[\\/]+$/, '')
-  const parts = normalized.split(/[/\\]/)
-  return parts[parts.length - 1] || normalized
-}
-
 function hasMenuActions(dir: ModelsDir): boolean {
-  return !dir.isPrimary || !dir.isDefault
+  const canMakePrimary = !dir.isPrimary
+  const canRemove = !dir.isDefault && !dir.isPrimary
+  return canMakePrimary || canRemove
 }
 
 async function toggleMenu(index: number): Promise<void> {
@@ -101,31 +97,29 @@ const rows = computed(() =>
   props.dirs.map((dir, index) => ({
     ...dir,
     index,
-    label: basename(dir.path),
-    showMenu: hasMenuActions(dir),
-  })),
+    showMenu: hasMenuActions(dir)
+  }))
 )
 </script>
 
 <template>
   <div class="models-dir-list" @click="closeMenu()">
-    <div
-      v-for="row in rows"
-      :key="row.path"
-      class="models-dir-row"
-    >
-      <Folder :size="14" class="models-dir-icon" aria-hidden="true" />
+    <div v-for="row in rows" :key="row.path" class="models-dir-row">
+      <component
+        :is="row.isDefault ? FolderLock : Folder"
+        :size="14"
+        class="models-dir-icon"
+        :class="{ 'is-default': row.isDefault }"
+        :aria-label="row.isDefault ? t('tooltips.modelsDefault') : undefined"
+        :title="row.isDefault ? t('tooltips.modelsDefault') : undefined"
+      />
       <div class="models-dir-main">
-        <span class="models-dir-name" :title="row.path">{{ row.label }}</span>
-        <span v-if="row.isPrimary" class="models-dir-tag tag-primary">
-          {{ t('models.primary', 'Primary') }}
-          <InfoTooltip :text="t('tooltips.modelsPrimary')" />
-        </span>
-        <span v-if="row.isDefault" class="models-dir-tag tag-default">
-          {{ t('models.default', 'Default') }}
-          <InfoTooltip :text="t('tooltips.modelsDefault')" />
-        </span>
+        <span class="models-dir-name" :title="row.path">{{ row.path }}</span>
       </div>
+      <span v-if="row.isPrimary" class="models-dir-tag tag-primary">
+        {{ t('models.primary', 'Primary') }}
+        <InfoTooltip :text="t('tooltips.modelsPrimary')" />
+      </span>
       <div class="models-dir-actions">
         <button
           type="button"
@@ -168,7 +162,7 @@ const rows = computed(() =>
               {{ t('models.makePrimary', 'Make primary') }}
             </button>
             <button
-              v-if="!row.isDefault"
+              v-if="!row.isDefault && !row.isPrimary"
               type="button"
               role="menuitem"
               class="danger"
@@ -215,11 +209,13 @@ const rows = computed(() =>
   color: var(--text-muted);
 }
 
+.models-dir-icon.is-default {
+  color: color-mix(in oklab, var(--neutral-100) 60%, transparent);
+}
+
 .models-dir-main {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
   min-width: 0;
   flex: 1 1 auto;
 }
@@ -232,6 +228,7 @@ const rows = computed(() =>
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
+  max-width: 100%;
 }
 
 .models-dir-tag {
@@ -254,12 +251,6 @@ const rows = computed(() =>
   background: color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
-.models-dir-tag.tag-default {
-  color: var(--text-muted);
-  border: 1px solid var(--chooser-surface-border);
-  background: color-mix(in oklab, var(--neutral-100) 4%, transparent);
-}
-
 .models-dir-actions {
   display: inline-flex;
   align-items: center;
@@ -279,7 +270,9 @@ const rows = computed(() =>
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
-  transition: background-color 100ms ease, color 100ms ease;
+  transition:
+    background-color 100ms ease,
+    color 100ms ease;
 }
 
 .models-dir-action:hover,
@@ -336,15 +329,17 @@ const rows = computed(() =>
   gap: 6px;
   width: 100%;
   min-height: 36px;
-  padding: 8px 12px;
+  padding: 8px 10px;
   border: none;
-  border-top: 1px dashed var(--chooser-surface-border);
+  border-top: 1px solid var(--border-hover);
   background: transparent;
   color: var(--text-muted);
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
-  transition: background-color 100ms ease, color 100ms ease;
+  transition:
+    background-color 100ms ease,
+    color 100ms ease;
 }
 
 .models-dir-add:hover,

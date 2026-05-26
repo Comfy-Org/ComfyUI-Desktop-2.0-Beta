@@ -954,6 +954,7 @@
     "startupArgs": "Command-line arguments passed to ComfyUI when it starts, such as --port or --lowvram.",
     "browserPartition": "Controls whether this install shares browser cache (cookies, local storage) with other installs or keeps its own separate cache.",
     "sharedDirs": "Directories shared across all installations for inputs and outputs.",
+    "sharedModels": "Folders shared across all installations so models aren't downloaded twice. Newly downloaded models go to the primary folder. The system default folder is always kept and can't be removed, and the primary folder can't be removed while it's in use — pick a different primary first.",
     "modelsPrimary": "The primary directory is where ComfyUI saves newly downloaded models by default.",
     "modelsDefault": "The system default directory. This path is created automatically and cannot be removed.",
     "useSharedPaths": "When enabled, this install can access models, inputs, and outputs from the shared directories. Disable to use only this install's own local paths.",
