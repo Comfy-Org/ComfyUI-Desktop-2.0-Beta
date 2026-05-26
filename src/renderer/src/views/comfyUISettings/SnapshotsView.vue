@@ -856,11 +856,20 @@ async function handleImport(): Promise<void> {
 }
 
 .snapshots-view-diff {
+  /* Match the surrounding expanded-row surface — no second tint, no
+   * box-in-a-box. The 1px hairline + radius are enough to delimit the
+   * panel; tinted background made it the only filled block in the
+   * expanded card and felt foreign. */
   padding: 10px 12px;
   margin-top: 8px;
-  border: 1px solid var(--border);
+  /* Cap at ~14 diff lines (12px/16px line-height) before the inner
+   * pane starts scrolling — long diffs (100+ pip changes) otherwise
+   * push the action row off-screen and force whole-drawer scroll. */
+  max-height: 280px;
+  overflow-y: auto;
+  border: 1px solid var(--border-hover);
   border-radius: 8px;
-  background: color-mix(in srgb, var(--surface) 60%, var(--titlebar-bg));
+  background: transparent;
 }
 
 .snapshots-view-diff-empty {
