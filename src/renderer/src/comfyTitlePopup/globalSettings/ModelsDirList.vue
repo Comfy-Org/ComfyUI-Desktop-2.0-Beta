@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Folder, FolderLock, FolderOpen, MoreHorizontal, Plus } from 'lucide-vue-next'
 import InfoTooltip from '../../components/InfoTooltip.vue'
@@ -88,10 +88,35 @@ function handleRemove(index: number): void {
   emit('remove', index)
 }
 
+/** Path of the row that was most recently promoted to primary. Drives
+ *  a brief highlight pulse on the row so the user can't miss that
+ *  their click landed — without it, the only signal is the `PRIMARY`
+ *  pill swapping rows, which is easy to overlook when the paths look
+ *  similar. Cleared by a timer; the row is keyed by `path` so the
+ *  same DOM node moves with the data and the class stays attached. */
+const justPromotedPath = ref<string | null>(null)
+const justPromotedTimer = ref<ReturnType<typeof setTimeout> | null>(null)
+
 function handleMakePrimary(index: number): void {
   closeMenu()
+  const promoted = props.dirs[index]?.path ?? null
   emit('make-primary', index)
+  if (promoted) {
+    justPromotedPath.value = promoted
+    if (justPromotedTimer.value) clearTimeout(justPromotedTimer.value)
+    justPromotedTimer.value = setTimeout(() => {
+      justPromotedPath.value = null
+      justPromotedTimer.value = null
+    }, 1200)
+  }
 }
+
+onBeforeUnmount(() => {
+  if (justPromotedTimer.value) {
+    clearTimeout(justPromotedTimer.value)
+    justPromotedTimer.value = null
+  }
+})
 
 const rows = computed(() =>
   props.dirs.map((dir, index) => ({
@@ -104,7 +129,12 @@ const rows = computed(() =>
 
 <template>
   <div class="models-dir-list" @click="closeMenu()">
-    <div v-for="row in rows" :key="row.path" class="models-dir-row">
+    <div
+      v-for="row in rows"
+      :key="row.path"
+      class="models-dir-row"
+      :class="{ 'is-just-promoted': row.path === justPromotedPath }"
+    >
       <component
         :is="row.isDefault ? FolderLock : Folder"
         :size="14"
@@ -202,6 +232,31 @@ const rows = computed(() =>
 
 .models-dir-row:first-child {
   border-top: none;
+}
+
+/* Make-primary feedback: brief yellow pulse on the row that just
+ * moved to position 0. Keyed by `path` so the highlight rides the
+ * same DOM node when Vue reorders the list. Ramp-in is fast (~10%)
+ * to feel responsive, hold for ~20%, then ease back to transparent —
+ * standard "flash to confirm" pattern from Material list-item
+ * activation. Token-driven; `--neutral-50` is the brand yellow. */
+.models-dir-row.is-just-promoted {
+  animation: models-dir-promote 1200ms ease-out;
+}
+
+@keyframes models-dir-promote {
+  0% {
+    background: transparent;
+  }
+  10% {
+    background: color-mix(in srgb, var(--neutral-50) 22%, transparent);
+  }
+  30% {
+    background: color-mix(in srgb, var(--neutral-50) 22%, transparent);
+  }
+  100% {
+    background: transparent;
+  }
 }
 
 .models-dir-icon {
