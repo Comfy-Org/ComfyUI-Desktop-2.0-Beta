@@ -273,6 +273,17 @@ export interface ShowProgressOpts {
    *  ignore these and use `apiCall` directly. */
   actionId?: string
   actionData?: Record<string, unknown>
+  /** When set, ProgressModal skips its 700ms auto-close on success and
+   *  renders a terminal choice screen with the supplied actions. Picker-
+   *  driven mutating-non-launch ops opt in via `resolveProgressRouting`
+   *  to surface a `[Go to Dashboard | Open Instance]` follow-up. Generic
+   *  shape — new flows mint new presets without touching ProgressModal.
+   *  Imported lazily as a structural type so this declaration stays in
+   *  the shared types layer. */
+  successTerminal?: {
+    title?: string
+    actions: Array<{ id: string; label: string; variant: 'primary' | 'ghost' }>
+  }
 }
 
 // --- Action results ---
@@ -1183,6 +1194,12 @@ export interface ElectronApi {
       triggersInstanceStart?: boolean
       opKind?: 'launch' | 'install' | 'update' | 'destructive' | 'snapshot' | 'generic'
       isRestart?: boolean
+      /** Picker-only: when `true`, ProgressModal should render a
+       *  terminal choice screen on success rather than auto-closing.
+       *  The panel-side handler maps this flag to a
+       *  `successTerminal` preset before handing off to
+       *  `progressStore.startOperation`. */
+      successChoice?: boolean
     }) => void,
   ): Unsubscribe
 }
