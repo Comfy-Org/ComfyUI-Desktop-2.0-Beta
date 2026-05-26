@@ -11,7 +11,7 @@ import { t } from '../lib/i18n'
 import { fetchLatestRelease, truncateNotes } from '../lib/comfyui-releases'
 import { buildChannelCards, buildChannelLabelMap } from '../lib/channel-cards'
 import type { ChannelDef } from '../lib/channel-cards'
-import { buildLaunchSettingsFields } from './common/launchSettingsFields'
+import { buildLaunchSettingsFields, buildSharedPathsField } from './common/launchSettingsFields'
 import type { InstallationRecord } from '../installations'
 import type {
   SourcePlugin,
@@ -206,6 +206,10 @@ export const portable: SourcePlugin = {
         tab: 'settings',
         title: t('common.launchSettings'),
         fields: buildLaunchSettingsFields(installation, { defaultLaunchArgs: DEFAULT_LAUNCH_ARGS, defaultBrowserPartition: 'unique' }),
+      },
+      {
+        tab: 'storage',
+        fields: [buildSharedPathsField(installation)],
       },
       {
         title: 'Actions',

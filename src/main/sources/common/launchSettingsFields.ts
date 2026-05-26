@@ -6,8 +6,20 @@ export interface LaunchSettingsOptions {
   defaultLaunchMode?: string
   defaultBrowserPartition?: string
   defaultPortConflict?: string
-  includeUseSharedPaths?: boolean
   extraFields?: Record<string, unknown>[]
+}
+
+/** Per-install `useSharedPaths` toggle. Rendered in the picker's
+ *  Storage tab next to the global model-directory UI. Emitted by
+ *  sources that participate in shared-model storage (desktop /
+ *  portable); git-source installs omit this section entirely. */
+export function buildSharedPathsField(installation: InstallationRecord): Record<string, unknown> {
+  return {
+    id: 'useSharedPaths', label: t('common.useSharedPaths'),
+    value: (installation.useSharedPaths as boolean | undefined) !== false,
+    editable: true, editType: 'boolean', tooltip: t('tooltips.useSharedPaths'),
+    requiresRestart: true,
+  }
 }
 
 export function buildLaunchSettingsFields(
@@ -19,20 +31,10 @@ export function buildLaunchSettingsFields(
     defaultLaunchMode = 'window',
     defaultBrowserPartition = 'shared',
     defaultPortConflict = 'ask',
-    includeUseSharedPaths = true,
     extraFields = [],
   } = options
 
   const fields: Record<string, unknown>[] = []
-
-  if (includeUseSharedPaths) {
-    fields.push({
-      id: 'useSharedPaths', label: t('common.useSharedPaths'),
-      value: (installation.useSharedPaths as boolean | undefined) !== false,
-      editable: true, editType: 'boolean', tooltip: t('tooltips.useSharedPaths'),
-      requiresRestart: true,
-    })
-  }
 
   fields.push(
     ...extraFields,
