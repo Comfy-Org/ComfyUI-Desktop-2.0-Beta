@@ -2501,6 +2501,14 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
     },
   )
 
+  // Actions whose downstream handler has no modal / progress chain —
+  // they fire-and-forget against the OS (Reveal in Finder / Explorer)
+  // and return the user straight to whatever they were doing. Keep the
+  // popup open so the user's mouse anchor and the picker context aren't
+  // discarded just to spawn an OS folder. The id space matches the
+  // panel-side composable's menu-item ids — see
+  // `useInstallContextMenu.InstallMenuActionId`.
+  const PICKER_NON_MODAL_ACTIONS = new Set(['reveal-in-folder'])
   ipcMain.on(
     'comfy-titlepopup:open-install-action',
     (event, payload: { installationId?: unknown; actionId?: unknown }) => {
@@ -2512,7 +2520,9 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
       if (typeof actionId !== 'string' || actionId.length === 0) return
       const parentEntry = comfyWindows.get(popupEntry.parentEntryId)
       if (!parentEntry) return
-      hideTitlePopup(popupEntry, { releaseFocusToParent: false })
+      if (!PICKER_NON_MODAL_ACTIONS.has(actionId)) {
+        hideTitlePopup(popupEntry, { releaseFocusToParent: false })
+      }
       const panelView = parentEntry.panelView
       if (!panelView || panelView.webContents.isDestroyed()) return
       bindings.sendToPanelDeferred(panelView, 'panel-trigger-overlay', {
