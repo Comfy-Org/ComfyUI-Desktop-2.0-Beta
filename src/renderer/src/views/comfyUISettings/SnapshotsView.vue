@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { Download, RotateCcw, Trash2 } from 'lucide-vue-next'
 import { TID } from '../../../../shared/testIds'
 import { useModal } from '../../composables/useModal'
+import { useActionGuard } from '../../composables/useActionGuard'
 import { emitTelemetryAction, toCountBucket } from '../../lib/telemetry'
 import {
   changeSummary as _changeSummary,
@@ -59,6 +60,7 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const modal = useModal()
+const actionGuard = useActionGuard()
 
 const listData = ref<SnapshotListData | null>(null)
 const loading = ref(true)
@@ -305,7 +307,15 @@ async function handleImport(): Promise<void> {
     return
   }
 
-  // Step 3: confirm restore on the imported snapshot
+  // Step 3: confirm restore on the imported snapshot. Gate behind the
+  // busy guard — confirm writes the staged snapshots into the install
+  // and immediately auto-restores from the newest one, so racing an
+  // in-flight op (copy / release-update / migrate / running launch)
+  // would clobber both surfaces.
+  if (!await actionGuard.checkBeforeAction(
+    props.installationId,
+    t('snapshots.importSnapshots', 'Import Snapshots'),
+  )) return
   const result = await window.api.importSnapshotsConfirm(props.installationId)
   if (!result.ok) {
     if (result.message) {

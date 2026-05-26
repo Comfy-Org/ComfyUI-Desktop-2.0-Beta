@@ -36,10 +36,10 @@ export function useListAction(uiSurface: string, callbacks: ListActionCallbacks)
       && action.id !== 'migrate-to-standalone'
     const wasRunning = sessionStore.isRunning(inst.id)
 
-    // Busy guard fires for every action so non-REQUIRES_STOPPED runners
-    // (snapshot-save, snapshot-export, snapshot-import, open-folder, …)
-    // can't race an in-flight op on the same install. The guard no-ops
-    // when nothing is running.
+    // Busy guard fires for every list-action runner so non-REQUIRES_STOPPED
+    // entries (e.g. `launch`, `restart`, source-delegated actions) can't
+    // race an in-flight op on the same install. The guard no-ops when
+    // nothing is running.
     if (!await actionGuard.checkBeforeAction(inst.id, action.label)) return
 
     if (action.confirm || (requiresStoppedGuard && wasRunning)) {
