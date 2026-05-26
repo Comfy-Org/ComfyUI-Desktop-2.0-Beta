@@ -692,6 +692,7 @@ defineExpose({ startOperation, showOperation })
             v-if="currentOp.finished && isPortConflictOpen"
             key="finished-port-conflict"
             class="brand-progress__banner brand-progress__banner--error"
+            :data-testid="TID.progressPortConflictBanner"
             aria-live="polite"
           >
             <X :size="20" />
@@ -892,6 +893,7 @@ defineExpose({ startOperation, showOperation })
             v-if="currentOp.result.portConflict.nextPort"
             type="button"
             class="brand-primary brand-progress__footer-btn"
+            :data-testid="TID.progressPortConflictUsePort"
             @click="handleUseNextPort(currentOp.result.portConflict.nextPort!)"
           >
             {{
@@ -904,6 +906,7 @@ defineExpose({ startOperation, showOperation })
             v-if="currentOp.result.portConflict.isComfy"
             type="button"
             class="brand-ghost brand-progress__footer-btn brand-progress__footer-btn--danger"
+            :data-testid="TID.progressPortConflictKill"
             @click="handleKillProcess(currentOp.result.portConflict.port)"
           >
             {{ $t('errors.portConflictKill') }}

@@ -91,6 +91,18 @@ export const TID = {
    *  Drives `handleReboot` (re-runs `op.apiCall` or falls back to a
    *  fresh `launch` action). */
   progressReboot: 'progress-reboot',
+  /** The port-conflict banner in the brand progress takeover, rendered
+   *  in place of the generic error banner when the failing op returned
+   *  `result.portConflict`. */
+  progressPortConflictBanner: 'progress-port-conflict-banner',
+  /** The "Use port N instead" CTA in the port-conflict footer. Visible
+   *  only when `portConflict.nextPort` is set. Drives `handleUseNextPort`
+   *  which fires `runAction('launch', { portOverride: nextPort })`. */
+  progressPortConflictUsePort: 'progress-port-conflict-use-port',
+  /** The "Stop process and retry" CTA in the port-conflict footer.
+   *  Visible only when `portConflict.isComfy` is true. Drives
+   *  `handleKillProcess` (confirm → `killPortProcess` → re-run apiCall). */
+  progressPortConflictKill: 'progress-port-conflict-kill',
 } as const
 
 export type TestIdKey = keyof typeof TID
