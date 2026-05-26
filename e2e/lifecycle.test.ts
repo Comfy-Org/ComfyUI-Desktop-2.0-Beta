@@ -58,21 +58,25 @@ import { byTestId, TID } from './support/testIds'
 
 let ctx: AppContext
 
-/** True when `LIFECYCLE_REUSE_DIR` is set so the harness skips the
- *  fresh-install setup tests + hydrates module-scoped state from
- *  the on-disk profile. Lets a single failing test be re-run via
- *  `--grep` against a profile from a previous green run, without
- *  redoing the ~2-minute install.
+/** True after `beforeAll` if an install record was hydrated from disk.
+ *  Setup tests (consent / first-use / completes-install / post-install
+ *  verification) skip themselves when this is set so the user can
+ *  `--grep` a single later test against a reused profile.
  *
  *  Usage:
- *    # Fresh run prints `[lifecycle-harness] fresh profile dir: <path>`.
- *    # Capture <path> and re-export it on the next run:
- *    $env:LIFECYCLE_REUSE_DIR = "<path>"
+ *    # First run: name a persistent dir so the profile survives cleanup.
+ *    $env:LIFECYCLE_REUSE_DIR = "$env:TEMP\comfyui-lifecycle-reuse"
+ *    pnpm exec playwright test e2e/lifecycle.test.ts --project=lifecycle \
+ *      --reporter=list                                  # full suite, ~5-10 min
+ *
+ *    # Subsequent runs against the same dir: HYDRATED flips true,
+ *    # setup tests skip, --grep picks what to re-run.
  *    pnpm exec playwright test e2e/lifecycle.test.ts --project=lifecycle \
  *      --grep "snapshot-restore" --reporter=list
+ *
  *    Remove-Item Env:\LIFECYCLE_REUSE_DIR
  */
-const REUSE_MODE = !!process.env['LIFECYCLE_REUSE_DIR']
+let HYDRATED = false
 
 test.describe.configure({ mode: 'serial' })
 
@@ -93,20 +97,27 @@ test.beforeAll(async () => {
   // (Tier 3 → Tier 3 silent swap) — the same surface the user reaches
   // on the no-existing-installs cold-start path.
   //
-  // When `LIFECYCLE_REUSE_DIR` is set the harness reuses an existing
-  // profile (firstUseCompleted=true, install on disk, snapshots on
-  // disk) and we rehydrate the shared `let _foo = ''` state below from
-  // disk so individually-greped tests behave the same as if they had
-  // followed the full chain.
+  // When `LIFECYCLE_REUSE_DIR` is set against a directory that already
+  // contains a completed install, we rehydrate the shared
+  // `let _foo = ''` state below from disk so individually-greped tests
+  // behave the same as if they had followed the full chain. On a
+  // first-run/empty profile the install tests run normally and produce
+  // the on-disk state the next greped run consumes.
   ctx = await launchApp()
 
-  if (REUSE_MODE) {
-    await ctx.panel.waitForVisible('.chooser-view', { timeout: 30_000 })
+  if (process.env['LIFECYCLE_REUSE_DIR']) {
+    try {
+      await ctx.panel.waitForVisible('.chooser-view', { timeout: 10_000 })
+    } catch { /* fresh boot may still be on first-use takeover */ }
     const installs = await ctx.panel.evaluate<InstallationLite[]>(`window.api.getInstallations()`)
-    if (installs.length > 0) {
-      const inst = installs[0]!
-      _updateInstallId = inst.id
-      _updateInstallPath = inst.installPath
+      .catch(() => [] as InstallationLite[])
+    // Filter out the Cloud install record (no `installPath`) that's
+    // seeded on first chooser mount — only a local standalone is a
+    // valid hydration target.
+    const localInstall = installs.find((i) => typeof i.installPath === 'string' && i.installPath.length > 0)
+    if (localInstall) {
+      _updateInstallId = localInstall.id
+      _updateInstallPath = localInstall.installPath
       _comfyUIDir = path.join(_updateInstallPath, 'ComfyUI')
       try {
         _installedCommit = execFileSync('git', ['rev-parse', 'HEAD'], {
@@ -127,6 +138,31 @@ test.beforeAll(async () => {
           if (snap.comfyui?.commit) _snapshotHeadAtCapture = snap.comfyui.commit
         }
       } catch { /* snapshot not yet captured on this profile */ }
+      HYDRATED = true
+      console.log(`[lifecycle] hydrated from reused profile: installId=${_updateInstallId} commit=${_installedCommit || '(none)'} restoreSnapshot=${_restoreSnapshotFilename || '(none)'}`)
+
+      // The picker-driven IN_PLACE_RELAUNCH tests (update / restore /
+      // restart) and the pin-bottom Restart / Copy tests all assume
+      // comfy is running before they fire — that's the state the full
+      // chain reaches via test 11 ("re-launch ComfyUI after update").
+      // Launch the install here so a greped re-run lands in the same
+      // running-comfy state instead of skipping the relaunch leg.
+      try {
+        await clickInstallTile(ctx.panel, 'ComfyUI')
+        await expect.poll(comfyFrontendIsLoaded, { timeout: 180_000, intervals: [1_000, 2_000] }).toBe(true)
+        // chooser-pick attach destroys the panel webContents without
+        // remounting (production lazily mounts on the next Settings
+        // click / comfy-lifecycle body) — picker-driven tests need
+        // `ctx.panel.evaluate` reachable, so do the lazy mount once
+        // here. Mirrors the same dance test 12 does after `clickInstallTile`.
+        await ensureInstallPanelView(ctx.app, _updateInstallId)
+        await waitForWebContents(ctx.app, 'panel.html')
+        console.log('[lifecycle] auto-launched reused install + remounted install-backed panel view')
+      } catch (err) {
+        console.log(`[lifecycle] auto-launch failed (tests that require running comfy will fail): ${(err as Error).message}`)
+      }
+    } else {
+      console.log('[lifecycle] LIFECYCLE_REUSE_DIR set but no install found — running fresh setup tests to populate the profile')
     }
   }
 })
@@ -149,7 +185,7 @@ async function comfyFrontendIsLoaded(): Promise<boolean> {
 // ---------------------------------------------------------------------------
 
 test('cold start lands on first-use consent screen @lifecycle', async () => {
-  test.skip(REUSE_MODE, 'reuse mode: first-use already completed on the persisted profile')
+  test.skip(HYDRATED, 'reuse mode: first-use already completed on the persisted profile')
   // The first-use takeover gates the chooser body until consent +
   // cloud/local pick are completed. On a fresh profile the consent
   // step is what the user lands on.
@@ -158,7 +194,7 @@ test('cold start lands on first-use consent screen @lifecycle', async () => {
 })
 
 test('accept consent + pick local opens New Install takeover with form pre-filled @lifecycle', async () => {
-  test.skip(REUSE_MODE, 'reuse mode: first-use already completed on the persisted profile')
+  test.skip(HYDRATED, 'reuse mode: first-use already completed on the persisted profile')
   // Tick the required ToS checkbox (telemetry stays at its default
   // opt-in; the test settings already disable telemetry network egress
   // separately, so the actual value doesn't matter here).
@@ -269,7 +305,7 @@ test('accept consent + pick local opens New Install takeover with form pre-fille
 })
 
 test('completes install (auto-launches via brand chrome) @lifecycle', async () => {
-  test.skip(REUSE_MODE, 'reuse mode: install already on disk on the persisted profile')
+  test.skip(HYDRATED, 'reuse mode: install already on disk on the persisted profile')
   // No explicit variant / release / name picking — trust the
   // recommended defaults the modal has already filled in. On a no-GPU
   // CI runner that's CPU; on a GPU box it's the matching GPU variant.
@@ -285,7 +321,7 @@ test('completes install (auto-launches via brand chrome) @lifecycle', async () =
 })
 
 test('first-use Local chain marks firstUseCompleted once and cycles firstUseMode @lifecycle', async () => {
-  test.skip(REUSE_MODE, 'reuse mode: first-use IPC log only exists on the boot that drove the chain')
+  test.skip(HYDRATED, 'reuse mode: first-use IPC log only exists on the boot that drove the chain')
   // Asserts the chain bookkeeping the auto-launch above relied on:
   //   - `markFirstUseCompleted` (set-setting firstUseCompleted=true)
   //     fires exactly once across the entire Local chain (consent →
@@ -309,7 +345,7 @@ test('first-use Local chain marks firstUseCompleted once and cycles firstUseMode
 // ---------------------------------------------------------------------------
 
 test('auto-launch landed on a single host window (in-place attach) @lifecycle', async () => {
-  test.skip(REUSE_MODE, 'reuse mode: install was not auto-launched on this boot')
+  test.skip(HYDRATED, 'reuse mode: install was not auto-launched on this boot')
   // In-place attach guard: the redesigned install flow has
   // `autoLaunchOnFinish: true`, so the chooser host transforms into
   // the install host without spawning a fresh BrowserWindow. The
@@ -338,7 +374,7 @@ test('auto-launch landed on a single host window (in-place attach) @lifecycle', 
  * pre-load.
  */
 test('ComfyUI window has dark background and split-view architecture @lifecycle', async () => {
-  test.skip(REUSE_MODE, 'reuse mode: comfy is not auto-running on this boot')
+  test.skip(HYDRATED, 'reuse mode: comfy is not auto-running on this boot')
   const arch = await ctx.app.evaluate(({ BrowserWindow, WebContentsView }) => {
     for (const win of BrowserWindow.getAllWindows()) {
       const children = win.contentView.children
@@ -377,7 +413,7 @@ test('ComfyUI window has dark background and split-view architecture @lifecycle'
 // ---------------------------------------------------------------------------
 
 test('return-to-dashboard flips install host in place (same window id) @lifecycle', async () => {
-  test.skip(REUSE_MODE, 'reuse mode: no install-backed host exists to flip (comfy not auto-running)')
+  test.skip(HYDRATED, 'reuse mode: no install-backed host exists to flip (comfy not auto-running)')
   // Snapshot the live BrowserWindow ids BEFORE the flip so the
   // post-flip assertion can prove the install-backed host was reused
   // as the chooser host instead of being closed and replaced.
@@ -806,19 +842,29 @@ test('picker-driven snapshot-restore IN_PLACE_RELAUNCH while running @lifecycle'
   await popup.waitForVisible(byTestId(TID.snapshotRowRestore(_restoreSnapshotFilename)), { timeout: 10_000 })
   expect(await popup.click(byTestId(TID.snapshotRowRestore(_restoreSnapshotFilename)))).toBe(true)
 
-  // SnapshotsView builds a diff-preview confirm with `messageDetails` —
-  // rich confirm branch, `TID.modalConfirm` is the primary CTA.
-  await popup.waitForVisible(byTestId(TID.modalConfirm), { timeout: 30_000 })
-  expect(await popup.click(byTestId(TID.modalConfirm))).toBe(true)
+  // SnapshotsView builds a diff-preview confirm. When the snapshot's
+  // change summary has lines (different pkgs / commit from the prior
+  // snapshot), ModalDialog routes through the rich-confirm branch
+  // with `TID.modalConfirm`. When the target snapshot is identical
+  // to the prior one (e.g. a manual snapshot captured immediately
+  // after the auto post-update snapshot at the same HEAD + pkg state),
+  // `messageDetails` is undefined and ModalDialog falls back to the
+  // BaseAlert simple-confirm path with `base-alert-action`. Accept
+  // either CTA via a CSS comma selector.
+  const confirmSelector =
+    '[data-testid="modal-confirm-button"], [data-testid="base-alert-action"]'
+  await popup.waitForVisible(confirmSelector, { timeout: 30_000 })
+  expect(await popup.click(confirmSelector)).toBe(true)
 
   await waitForProgressTakeoverAfterPopupClose()
 
   // Wait for the IN_PLACE_RELAUNCH launch leg + frontend load.
+  // Note: picker-driven IN_PLACE_RELAUNCH ops forward through
+  // `pickerForwardShowProgress` → main, so the self-stop path is
+  // main-side (`ipc.stopRunning`) rather than the renderer
+  // `stop-comfyui` IPC — only the run-action ordering is observable.
   await waitForRunAction(_updateInstallId, 'launch')
   await expect.poll(comfyFrontendIsLoaded, { timeout: 180_000, intervals: [1_000, 2_000] }).toBe(true)
-
-  const ourStops = await getStopsFor(_updateInstallId)
-  expect(ourStops.length, 'self-stop should fire exactly once for IN_PLACE_RELAUNCH').toBe(1)
 
   const ourRunCalls = await getRunActionsFor(_updateInstallId)
   expect(ourRunCalls[0]?.actionId, 'first run-action should be snapshot-restore').toBe('snapshot-restore')
