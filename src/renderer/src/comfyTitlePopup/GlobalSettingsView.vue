@@ -221,11 +221,16 @@ async function handleCheckForUpdate(): Promise<void> {
 async function handleRunInstallAction(action: ActionDef): Promise<void> {
   const id = props.snapshot.activeInstallationId
   if (!id) return
-  await bridge?.globalSettingsRunInstallAction(
-    id,
-    action.id,
-    action.data as Record<string, unknown> | undefined
-  )
+  // `action.data` is a Vue reactive proxy when the action comes off a
+  // ChannelPicker option (cross-channel update / copy-update carries
+  // `{ channel }`). Reactive proxies can't cross the contextBridge
+  // structured-clone boundary; deep-clone to a plain object first or
+  // ipcRenderer.invoke throws "An object could not be cloned" and the
+  // user is silently stuck with no error feedback.
+  const rawActionData = action.data
+    ? (JSON.parse(JSON.stringify(action.data)) as Record<string, unknown>)
+    : undefined
+  await bridge?.globalSettingsRunInstallAction(id, action.id, rawActionData)
 }
 
 function handleTabKey(event: KeyboardEvent): void {

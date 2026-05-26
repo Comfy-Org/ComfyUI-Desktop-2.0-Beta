@@ -42,6 +42,7 @@ import {
   expectTakeoverOpen,
 } from './support/chooserHelpers'
 import {
+  ensureInstallPanelView,
   getIpcInvocations,
   getRunningSessionSnapshot,
   resetIpcInvocations,
@@ -510,6 +511,15 @@ test('captures a snapshot for the picker-driven restore test @lifecycle', async 
   // snapshot just records the current state. Captured label gives us a
   // stable filename to grab in the restore test below.
   expect(_updateInstallId, 'update install id not captured').toBeTruthy()
+  // `clickInstallTile` in test 11 triggers `onLaunch`'s chooser-pick
+  // attach which calls `destroyPanelView(claimed)` (index.ts) without
+  // remounting — production lazily mounts a fresh install-backed
+  // panel on the next Settings click / comfy-lifecycle body, so
+  // `panel.html` doesn't exist while ComfyUI is the active body.
+  // The remaining picker-driven tests in this file all need
+  // `ctx.panel` reachable; do the lazy mount ourselves once here.
+  expect(await ensureInstallPanelView(ctx.app, _updateInstallId)).toBe(true)
+  await waitForWebContents(ctx.app, 'panel.html')
   await ctx.panel.evaluate<unknown>(
     `window.api.runAction(${JSON.stringify(_updateInstallId)}, 'snapshot-save', { label: 'lifecycle-restore-target' })`,
   )
@@ -523,6 +533,136 @@ test('captures a snapshot for the picker-driven restore test @lifecycle', async 
     cwd: _comfyUIDir, encoding: 'utf-8', windowsHide: true,
   }).trim()
   expect(_snapshotHeadAtCapture).toMatch(/^[a-f0-9]{40}$/)
+})
+
+// ---------------------------------------------------------------------------
+// Cross-channel update — driven through the picker's ChannelPicker.
+// Drafts a non-current channel ('latest') in the BaseSelect, clicks the
+// per-channel Update Now button, and waits for the IN_PLACE_RELAUNCH
+// chain to complete. Pins the bug where `actionData.channel` on the
+// drafted action came off the sections payload as a Vue reactive proxy
+// and threw `"An object could not be cloned"` synchronously inside the
+// popup's `bridge.pickerForwardShowProgress` → `ipcRenderer.send` —
+// silently swallowing the show-progress hand-off so the user got stuck
+// on the picker with no feedback (fix in `InstancePickerView.vue`
+// `handleSettingsShowProgress` deep-clones `actionData` first).
+//
+// Runs before the same-channel picker tests below because (a) it leaves
+// the install on `latest`, where `update-comfyui` always reports an
+// update available (master is ahead of every stable tag), giving the
+// same-channel picker test below a reliable "Update Now" button —
+// the stable channel only shows one across a release boundary, which
+// rolling HEAD~3 doesn't guarantee; and (b) the channel-flip side
+// effect doesn't disturb snapshot-restore / restart / copy / delete.
+// ---------------------------------------------------------------------------
+
+test('picker-driven cross-channel update-comfyui (stable → latest) IN_PLACE_RELAUNCH while running @lifecycle', async () => {
+  // Real cross-channel update: switches the install's `updateChannel`
+  // from `stable` to `latest`, runs the master-branch update, then
+  // relaunches in place. Stretch the timeout to cover a possible
+  // `uv pip install -r requirements.txt` if requirements changed
+  // between the stable release and master.
+  test.setTimeout(600_000)
+
+  // Sanity: install is on stable before drafting latest.
+  const installsBefore = await ctx.panel.evaluate<Array<{ id: string; updateChannel?: string }>>(
+    `window.api.getInstallations()`,
+  )
+  const before = installsBefore.find((i) => i.id === _updateInstallId)
+  expect(before?.updateChannel, 'install must be on stable before the cross-channel switch').toBe('stable')
+
+  const headBefore = execFileSync('git', ['rev-parse', 'HEAD'], {
+    cwd: _comfyUIDir, encoding: 'utf-8', windowsHide: true,
+  }).trim()
+
+  await resetIpcInvocations(ctx.app, 'stop-comfyui')
+  await resetIpcInvocations(ctx.app, 'run-action')
+
+  // Open the picker in expanded mode on the Update tab. Channel
+  // metadata loads via real `check-update` against github.com for both
+  // stable and latest — `latest` reports an update against the master
+  // tip, so its cross-channel Update Now button comes alive.
+  await ctx.panel.evaluate<boolean>(
+    `(() => {
+      window.api.openInstancePicker({
+        installationId: ${JSON.stringify(_updateInstallId)},
+        mode: 'expanded',
+        initialTab: 'update',
+      })
+      return true
+    })()`,
+  )
+  await waitForWebContents(ctx.app, 'comfyTitlePopup.html')
+  const popup = titlePopupPage(ctx.app)
+
+  // ChannelPicker renders a BaseSelect (`role="combobox"`); the
+  // dropdown's options are `role="option"` with the channel label.
+  // Drafting a non-current channel mutates `state.draft` but does not
+  // commit — the per-channel `selectedActions` switch to the drafted
+  // channel's `{ update-comfyui, copy-update, switch-channel }` set.
+  await popup.waitForSelector('button[role="combobox"]', { timeout: 60_000 })
+  expect(await popup.click('button[role="combobox"]')).toBe(true)
+  await popup.waitForVisible('[role="listbox"] [role="option"]', { timeout: 10_000 })
+  expect(
+    await popup.clickByText('[role="listbox"] [role="option"]', 'Latest on GitHub'),
+    '"Latest on GitHub" option missing from BaseSelect listbox',
+  ).toBe(true)
+
+  // The cross-channel Update Now button appears once `updateAvailable`
+  // resolves true for `latest` (true whenever master is ahead of the
+  // installed commit — usually always against a stable release).
+  await popup.waitForSelector(byTestId(TID.updateActionButton('update-comfyui')), { timeout: 60_000 })
+  expect(await popup.click(byTestId(TID.updateActionButton('update-comfyui')))).toBe(true)
+
+  // `latest` is master-tip — no GitHub release object → empty
+  // `releaseNotes` → `confirm.messageDetails` undefined → ModalDialog
+  // routes the confirm through its BaseAlert primitive (no rich
+  // message-details UI), whose primary button defaults to
+  // `data-testid="base-alert-action"`. (Same-channel stable picks up
+  // release notes and stays on the legacy `TID.modalConfirm` path.)
+  const confirmSelector = '[data-testid="base-alert-action"]'
+  await popup.waitForVisible(confirmSelector, { timeout: 15_000 })
+  expect(await popup.click(confirmSelector)).toBe(true)
+
+  await waitForProgressTakeoverAfterPopupClose()
+
+  // IN_PLACE_RELAUNCH: panel-side `useDeepLinkRouter` appends a
+  // `launch` action after a successful cross-channel update, same as
+  // the same-channel path.
+  await waitForRunAction(_updateInstallId, 'launch')
+  await expect.poll(comfyFrontendIsLoaded, { timeout: 180_000, intervals: [1_000, 2_000] }).toBe(true)
+
+  // `update-comfyui` actionData.channel persisted the drafted value
+  // into the run-action IPC. This is the pinned bug — before the
+  // Vue-reactive-proxy → contextBridge fix in
+  // `InstancePickerView.handleSettingsShowProgress`, the `actionData`
+  // payload threw "An object could not be cloned" synchronously inside
+  // `bridge.pickerForwardShowProgress` and never reached main, so the
+  // run-action either never fired or fired without the `channel` key.
+  const ourRunCalls = await getRunActionsFor(_updateInstallId)
+  const updateCall = ourRunCalls.find((c) => c.actionId === 'update-comfyui')
+  expect(updateCall, 'cross-channel update-comfyui not recorded').toBeDefined()
+  expect(
+    (updateCall as { actionData?: { channel?: string } }).actionData?.channel,
+    'cross-channel update-comfyui must carry actionData.channel=latest',
+  ).toBe('latest')
+
+  // Channel actually switched on the InstallationRecord.
+  const installsAfter = await ctx.panel.evaluate<Array<{ id: string; updateChannel?: string }>>(
+    `window.api.getInstallations()`,
+  )
+  const after = installsAfter.find((i) => i.id === _updateInstallId)
+  expect(
+    after?.updateChannel,
+    'updateChannel must flip to latest after a cross-channel update',
+  ).toBe('latest')
+
+  // HEAD moved to a real master commit (latest is master-tip).
+  const headAfter = execFileSync('git', ['rev-parse', 'HEAD'], {
+    cwd: _comfyUIDir, encoding: 'utf-8', windowsHide: true,
+  }).trim()
+  expect(headAfter, 'cross-channel update did not move HEAD').not.toBe(headBefore)
+  expect(headAfter).toMatch(/^[a-f0-9]{40}$/)
 })
 
 test('picker-driven update-comfyui IN_PLACE_RELAUNCH while running @lifecycle', async () => {
@@ -568,11 +708,19 @@ test('picker-driven update-comfyui IN_PLACE_RELAUNCH while running @lifecycle', 
   await popup.waitForSelector(byTestId(TID.updateActionButton('update-comfyui')), { timeout: 60_000 })
   expect(await popup.click(byTestId(TID.updateActionButton('update-comfyui')))).toBe(true)
 
-  // The update action carries `confirm.messageDetails` (truncated
-  // release notes), so it lands in `ModalDialog`'s rich-confirm
-  // branch — `TID.modalConfirm` is the primary CTA there.
-  await popup.waitForVisible(byTestId(TID.modalConfirm), { timeout: 15_000 })
-  expect(await popup.click(byTestId(TID.modalConfirm))).toBe(true)
+  // Confirm modal CTA — `TID.modalConfirm` when the action carries
+  // `confirm.messageDetails` (rich-confirm branch of ModalDialog,
+  // typical for the stable channel which has release notes);
+  // `base-alert-action` when there are no details (BaseAlert simple
+  // confirm, typical for the latest/master channel since master
+  // commits have no GitHub release notes). The cross-channel test
+  // above flips the install to `latest`, so this test runs against
+  // that channel and lands on the BaseAlert path; accept either so
+  // the assertion stays robust across channels.
+  const confirmSelector =
+    '[data-testid="modal-confirm-button"], [data-testid="base-alert-action"]'
+  await popup.waitForVisible(confirmSelector, { timeout: 15_000 })
+  expect(await popup.click(confirmSelector)).toBe(true)
 
   // Popup hides; the panel's ProgressModal owns the long-running op.
   await waitForProgressTakeoverAfterPopupClose()
