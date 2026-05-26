@@ -1,6 +1,4 @@
 <script setup lang="ts">
-// TODO(stale-old-modal): delete after Settings drawer (v2,
-// ComfyUISettingsPanel) reaches functional parity and ships everywhere.
 import { useI18n } from 'vue-i18n'
 import type { SnapshotDiffResult } from '../types/ipc'
 import { formatNodeVersion } from '../lib/snapshots'
@@ -14,7 +12,6 @@ const { t } = useI18n()
 function formatVersion(v: { formattedVersion: string }): string {
   return v.formattedVersion
 }
-
 </script>
 
 <template>
@@ -35,7 +32,12 @@ function formatVersion(v: { formattedVersion: string }): string {
   </div>
 
   <!-- Node changes -->
-  <div v-if="diff.nodesAdded.length > 0 || diff.nodesRemoved.length > 0 || diff.nodesChanged.length > 0" class="diff-section">
+  <div
+    v-if="
+      diff.nodesAdded.length > 0 || diff.nodesRemoved.length > 0 || diff.nodesChanged.length > 0
+    "
+    class="diff-section"
+  >
     <div class="diff-section-title">{{ t('snapshots.customNodes') }}</div>
     <div v-for="n in diff.nodesAdded" :key="'add-' + n.id" class="diff-line diff-added">
       + {{ n.id }} {{ formatNodeVersion(n) }}
@@ -44,13 +46,20 @@ function formatVersion(v: { formattedVersion: string }): string {
       − {{ n.id }} {{ formatNodeVersion(n) }}
     </div>
     <div v-for="n in diff.nodesChanged" :key="'chg-' + n.id" class="diff-line diff-changed">
-      ~ {{ n.id }}: {{ n.from.version || (n.from.commit ? n.from.commit.slice(0, 7) : '?') }} → {{ n.to.version || (n.to.commit ? n.to.commit.slice(0, 7) : '?') }}
-      <template v-if="n.from.enabled !== n.to.enabled">, {{ n.from.enabled ? 'enabled' : 'disabled' }} → {{ n.to.enabled ? 'enabled' : 'disabled' }}</template>
+      ~ {{ n.id }}: {{ n.from.version || (n.from.commit ? n.from.commit.slice(0, 7) : '?') }} →
+      {{ n.to.version || (n.to.commit ? n.to.commit.slice(0, 7) : '?') }}
+      <template v-if="n.from.enabled !== n.to.enabled"
+        >, {{ n.from.enabled ? 'enabled' : 'disabled' }} →
+        {{ n.to.enabled ? 'enabled' : 'disabled' }}</template
+      >
     </div>
   </div>
 
   <!-- Pip changes -->
-  <div v-if="diff.pipsAdded.length > 0 || diff.pipsRemoved.length > 0 || diff.pipsChanged.length > 0" class="diff-section">
+  <div
+    v-if="diff.pipsAdded.length > 0 || diff.pipsRemoved.length > 0 || diff.pipsChanged.length > 0"
+    class="diff-section"
+  >
     <div class="diff-section-title">
       {{ t('snapshots.pipPackages') }}
       ({{ diff.pipsAdded.length + diff.pipsRemoved.length + diff.pipsChanged.length }})
@@ -76,24 +85,36 @@ function formatVersion(v: { formattedVersion: string }): string {
 }
 
 .diff-section-title {
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 11px;
+  font-weight: 500;
   color: var(--text-muted);
   text-transform: uppercase;
-  letter-spacing: 0.3px;
+  letter-spacing: 0.04em;
   margin-bottom: 4px;
 }
 
 .diff-line {
-  font-size: 13px;
-  font-family: monospace;
+  font-size: 12px;
+  font-family: var(--font-mono, ui-monospace, monospace);
   padding: 1px 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   user-select: text;
+  color: var(--text);
 }
-.diff-added { color: var(--success); }
-.diff-removed { color: var(--danger); }
-.diff-changed { color: var(--warning); }
+
+/* +/−/~ prefixes already encode add/remove/change — color is just a
+ * second-order hint, so keep it muted. `changed` stays neutral on
+ * purpose: it's by far the most common line and shouldn't out-shout
+ * the actual additions/removals. */
+.diff-added {
+  color: color-mix(in oklab, var(--success) 60%, var(--text));
+}
+.diff-removed {
+  color: color-mix(in oklab, var(--danger) 60%, var(--text));
+}
+.diff-changed {
+  color: var(--text-muted);
+}
 </style>

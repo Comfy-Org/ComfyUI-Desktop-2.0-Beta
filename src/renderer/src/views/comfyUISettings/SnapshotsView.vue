@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Download, RotateCcw, Trash2, Upload } from 'lucide-vue-next'
+import { Download, GitCompare, RotateCcw, Trash2, Upload } from 'lucide-vue-next'
 import { useModal } from '../../composables/useModal'
 import { emitTelemetryAction, toCountBucket } from '../../lib/telemetry'
 import {
@@ -18,6 +18,7 @@ import type {
   SnapshotSummary
 } from '../../types/ipc'
 import SnapshotRow from './SnapshotRow.vue'
+import SnapshotDiffView from '../../components/SnapshotDiffView.vue'
 
 /**
  * Snapshots tab body for the brand-redesigned Settings drawer (v2).
@@ -117,7 +118,7 @@ async function load(): Promise<void> {
     loading.value = false
     if (expandedFilenames.value.size === 0) {
       const firstSnapshot = timeline.value.find(
-        (item): item is Extract<TimelineItem, { kind: 'snapshot' }> => item.kind === 'snapshot',
+        (item): item is Extract<TimelineItem, { kind: 'snapshot' }> => item.kind === 'snapshot'
       )
       if (firstSnapshot) {
         expandedFilenames.value = new Set([firstSnapshot.snapshot.filename])
@@ -129,6 +130,10 @@ async function load(): Promise<void> {
 // --- Per-row expansion (change summary) ---
 
 const expandedFilenames = ref<Set<string>>(new Set())
+// Loaded "Changes from previous" diffs, keyed by snapshot filename.
+// Presence in the map = panel is open; null = loaded with no diff returned.
+const diffByFilename = ref<Map<string, SnapshotDiffData | null>>(new Map())
+const diffLoadingFilename = ref<string | null>(null)
 
 function isExpanded(filename: string): boolean {
   return expandedFilenames.value.has(filename)
@@ -144,10 +149,38 @@ function toggleExpand(filename: string): void {
   expandedFilenames.value = next
 }
 
+function isDiffOpen(filename: string): boolean {
+  return diffByFilename.value.has(filename)
+}
+
+async function toggleDiff(filename: string): Promise<void> {
+  if (diffByFilename.value.has(filename)) {
+    const next = new Map(diffByFilename.value)
+    next.delete(filename)
+    diffByFilename.value = next
+    return
+  }
+  diffLoadingFilename.value = filename
+  try {
+    const d = await window.api.getSnapshotDiff(props.installationId, filename, 'previous')
+    const next = new Map(diffByFilename.value)
+    next.set(filename, d)
+    diffByFilename.value = next
+    emitTelemetryAction('desktop2.snapshot.flow', {
+      action: 'view_diff',
+      snapshot_count_bucket: toCountBucket(snapshots.value.length),
+      has_diff: d ? diffHasChanges(d.diff) : undefined
+    })
+  } finally {
+    diffLoadingFilename.value = null
+  }
+}
+
 watch(
   () => props.installationId,
   () => {
     expandedFilenames.value = new Set()
+    diffByFilename.value = new Map()
     void load()
   },
   { immediate: true }
@@ -473,11 +506,50 @@ async function handleImport(): Promise<void> {
                 <p v-else class="snapshots-view-no-changes">
                   {{ t('snapshots.noChangesSinceLast', 'No changes since the previous snapshot.') }}
                 </p>
+                <!-- Inline diff panel (parity with legacy SnapshotInspector
+                     "Changes from previous" toggle). Reuses SnapshotDiffView
+                     verbatim — no design changes from the per-install legacy. -->
+                <div v-if="isDiffOpen(item.snapshot.filename)" class="snapshots-view-diff">
+                  <template v-if="diffByFilename.get(item.snapshot.filename)">
+                    <div
+                      v-if="!diffHasChanges(diffByFilename.get(item.snapshot.filename)!.diff)"
+                      class="snapshots-view-diff-empty"
+                    >
+                      {{ t('snapshots.diffNoChanges', 'No changes') }}
+                    </div>
+                    <SnapshotDiffView
+                      v-else
+                      :diff="diffByFilename.get(item.snapshot.filename)!.diff"
+                    />
+                  </template>
+                </div>
+                <div
+                  v-else-if="diffLoadingFilename === item.snapshot.filename"
+                  class="snapshots-view-diff-loading"
+                >
+                  {{ t('common.loading', 'Loading…') }}
+                </div>
                 <!-- Actions live in the expanded detail (per Figma): the
                      collapsed row stays a clean tap target, and the
                      destructive / mutating ops only surface once the
                      user has expressed intent by expanding the row. -->
                 <div class="snapshots-view-detail-actions">
+                  <button
+                    type="button"
+                    class="snapshots-view-detail-btn"
+                    :class="{ 'is-active': isDiffOpen(item.snapshot.filename) }"
+                    :disabled="item.snapshotIndex === snapshots.length - 1"
+                    :aria-label="t('snapshots.diffPrevious', 'Changes from previous')"
+                    :title="
+                      item.snapshotIndex === snapshots.length - 1
+                        ? t('snapshots.noPrevious', 'First snapshot — no previous to compare')
+                        : t('snapshots.diffPrevious', 'Changes from previous')
+                    "
+                    @click="toggleDiff(item.snapshot.filename)"
+                  >
+                    <GitCompare :size="13" />
+                    <span>{{ t('snapshots.diffPrevious', 'Changes from previous') }}</span>
+                  </button>
                   <button
                     type="button"
                     class="snapshots-view-detail-btn"
@@ -752,13 +824,25 @@ async function handleImport(): Promise<void> {
   background: var(--brand-surface-bg);
   color: var(--neutral-100);
   cursor: pointer;
-  transition: background-color 100ms ease, border-color 100ms ease;
+  transition:
+    background-color 100ms ease,
+    border-color 100ms ease;
 }
 
 .snapshots-view-detail-btn:hover,
 .snapshots-view-detail-btn:focus-visible {
   background: var(--brand-surface-bg-hover);
   outline: none;
+}
+
+.snapshots-view-detail-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.snapshots-view-detail-btn.is-active {
+  background: var(--brand-surface-bg-hover);
+  border-color: color-mix(in oklab, var(--neutral-100) 28%, transparent);
 }
 
 .snapshots-view-detail-btn-danger {
@@ -769,6 +853,27 @@ async function handleImport(): Promise<void> {
 .snapshots-view-detail-btn-danger:focus-visible {
   color: var(--danger);
   border-color: var(--danger);
+}
+
+.snapshots-view-diff {
+  padding: 10px 12px;
+  margin-top: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface) 60%, var(--titlebar-bg));
+}
+
+.snapshots-view-diff-empty {
+  font-size: var(--takeover-fs-caption);
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.snapshots-view-diff-loading {
+  padding: 8px 12px;
+  margin-top: 8px;
+  font-size: var(--takeover-fs-caption);
+  color: var(--text-muted);
 }
 
 .snapshots-view-label {
