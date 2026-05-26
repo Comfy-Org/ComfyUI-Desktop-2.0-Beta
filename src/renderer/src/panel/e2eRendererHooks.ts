@@ -61,6 +61,13 @@ export interface E2ERendererHelpers {
    *  `instance-stopped` message — without this poll the apiCall-time
    *  `wasRunning` capture races the broadcast). */
   isRunning(installationId: string): boolean
+  /** Seed an entry into `sessionStore.errorInstances` so the chooser
+   *  tile flips into its has-error state and the kebab grows a
+   *  `Dismiss error` item, without having to drive a real failing op
+   *  through `showProgress` first. */
+  seedErrorInstance(opts: { installationId: string; installationName: string; message?: string }): void
+  /** True iff `sessionStore.errorInstances` has an entry for the id. */
+  hasErrorInstance(installationId: string): boolean
 }
 
 function ensureBound(): PanelBindings {
@@ -110,6 +117,15 @@ export function registerE2ERendererHooks(): void {
     },
     isRunning(installationId) {
       return useSessionStore().isRunning(installationId)
+    },
+    seedErrorInstance({ installationId, installationName, message }) {
+      useSessionStore().errorInstances.set(installationId, {
+        installationName,
+        message,
+      })
+    },
+    hasErrorInstance(installationId) {
+      return useSessionStore().errorInstances.has(installationId)
     },
   }
   ;(globalThis as unknown as { __e2eRenderer: E2ERendererHelpers }).__e2eRenderer = helpers
