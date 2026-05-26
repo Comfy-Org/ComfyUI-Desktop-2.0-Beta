@@ -569,7 +569,6 @@ function navigateToInstallation(installationId: string): void {
               :actions="section.actions"
               @run-action="runAction"
               @refresh="refreshSection"
-              @refresh-all="refreshAllSections"
             />
             <div v-if="activeTab === 'status' && (installationSizeLoading || installationSize !== null)" class="detail-section">
               <div class="detail-section-body">
@@ -662,7 +661,6 @@ function navigateToInstallation(installationId: string): void {
           :actions="section.actions"
           @run-action="runAction"
           @refresh="refreshSection"
-          @refresh-all="refreshAllSections"
         />
         <div v-if="activeTab === 'status' && (installationSizeLoading || installationSize !== null)" class="detail-section">
           <div class="detail-section-body">

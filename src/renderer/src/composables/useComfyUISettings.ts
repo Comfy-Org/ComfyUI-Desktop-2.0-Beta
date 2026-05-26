@@ -238,21 +238,6 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
       value_kind: field.editType || 'text',
       bool_value: typeof value === 'boolean' ? value : undefined,
     })
-    // Parity with legacy DetailSection: a field can declare an
-    // `onChangeAction` to fire automatically after its value changes
-    // (e.g. switching update channel triggers `check-update` so the
-    // preview metadata refreshes without an extra click). Surface
-    // failures via modal so the user can react.
-    if (field.onChangeAction) {
-      try {
-        await window.api.runAction(inst.id, field.onChangeAction)
-      } catch (err: unknown) {
-        await modal.alert({
-          title: t('common.error', 'Error'),
-          message: err instanceof Error ? err.message : String(err),
-        })
-      }
-    }
     // When a field opts into `refreshSection`, splice only that
     // section instead of replacing the whole array — preserves Vue
     // subtrees and collapse state for sections the user wasn't

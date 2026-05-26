@@ -120,7 +120,6 @@ export interface DetailField {
   options?: DetailFieldOption[]
   refreshSection?: boolean
   browseOnly?: boolean
-  onChangeAction?: string
   tooltip?: string
   // text / number support — surfaced from SettingsField when DetailField
   // is built from a global SettingsSection (Global Settings panel).
