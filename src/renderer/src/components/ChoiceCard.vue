@@ -34,7 +34,10 @@ defineEmits<{ click: [] }>()
 <template>
   <button
     type="button"
-    :class="['choice-card', { 'choice-card--glow': glow, 'choice-card--selected': selectable && selected }]"
+    :class="[
+      'choice-card',
+      { 'choice-card--glow': glow, 'choice-card--selected': selectable && selected }
+    ]"
     :role="selectable ? 'radio' : undefined"
     :aria-checked="selectable ? selected : undefined"
     :tabindex="selectable ? (selected ? 0 : -1) : undefined"
@@ -48,11 +51,16 @@ defineEmits<{ click: [] }>()
       </span>
       <div class="choice-card__text">
         <div class="choice-card__label">
-          <span>{{ label }}</span>
-          <slot name="label-trailing" />
+          <span class="choice-card__label-text">{{ label }}</span>
+          <span v-if="$slots['label-trailing']" class="choice-card__label-trailing">
+            <slot name="label-trailing" />
+          </span>
         </div>
         <div class="choice-card__desc">
           <InlineRichText :text="description" />
+          <div v-if="$slots['desc-trailing']" class="choice-card__desc-trailing">
+            <slot name="desc-trailing" />
+          </div>
         </div>
       </div>
       <ArrowRight v-if="!selectable" :size="18" class="choice-card__arrow" aria-hidden="true" />
@@ -174,19 +182,33 @@ defineEmits<{ click: [] }>()
   flex: 1 1 auto;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
 }
 .choice-card__label {
-  display: inline-flex;
+  display: flex;
   align-items: center;
+  justify-content: flex-start;
+  flex-wrap: wrap;
   gap: 8px;
+  width: 100%;
   font-family: var(--font-sans);
   font-size: var(--takeover-fs-lead);
   font-weight: 700;
   line-height: normal;
   color: var(--neutral-100);
   transition: color 120ms ease;
+}
+.choice-card__label-text {
+  flex: 0 0 auto;
+}
+.choice-card__label-trailing {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+.choice-card__desc-trailing {
+  margin-top: 6px;
 }
 .choice-card__desc {
   font-family: var(--font-sans);
