@@ -189,6 +189,28 @@ export async function clearRunningSessions(app: ElectronApplication): Promise<vo
   }))
 }
 
+export interface RunningSessionSnapshotLike {
+  pid: number | null
+  startedAt: number
+  port: number
+  url: string | undefined
+}
+
+/** Snapshot the live running-session entry for `installationId` (real
+ *  or synthetic). Returns `null` when no session is registered. */
+export async function getRunningSessionSnapshot(
+  app: ElectronApplication,
+  installationId: string,
+): Promise<RunningSessionSnapshotLike | null> {
+  return await evalWithRetry(() => app.evaluate((_electron, id) => {
+    const helpers = (globalThis as unknown as {
+      __e2e?: { getRunningSessionSnapshot: (id: string) => unknown }
+    }).__e2e
+    if (!helpers) throw new Error('E2E helpers not registered (process.env.E2E !== "1"?)')
+    return helpers.getRunningSessionSnapshot(id) as RunningSessionSnapshotLike | null
+  }, installationId))
+}
+
 /** Read the `checkedAt` ms timestamp of the shared release-cache entry
  *  for `(repo, channel)`. Returns `null` when no entry exists yet. */
 export async function getReleaseCacheCheckedAt(

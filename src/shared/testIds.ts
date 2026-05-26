@@ -87,6 +87,10 @@ export const TID = {
   progressErrorMessage: 'progress-error-message',
   /** The logs panel in the brand progress takeover. */
   progressLogs: 'progress-logs',
+  /** The Reboot button in the brand progress takeover's error footer.
+   *  Drives `handleReboot` (re-runs `op.apiCall` or falls back to a
+   *  fresh `launch` action). */
+  progressReboot: 'progress-reboot',
 } as const
 
 export type TestIdKey = keyof typeof TID

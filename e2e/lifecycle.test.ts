@@ -43,6 +43,7 @@ import {
 } from './support/chooserHelpers'
 import {
   getIpcInvocations,
+  getRunningSessionSnapshot,
   resetIpcInvocations,
   returnFirstInstallHostToDashboard,
 } from './support/devHooks'
@@ -697,6 +698,100 @@ test('picker compact-row Restart drives system-modal confirm + re-launch @lifecy
   const launchCalls = (await getRunActionsFor(_updateInstallId))
     .filter((c) => c.actionId === 'launch')
   expect(launchCalls.length, 'exactly one launch run-action for the restart').toBeGreaterThanOrEqual(1)
+})
+
+// ---------------------------------------------------------------------------
+// Synthetic `restart` id (stop → wait → launch) — driven through the
+// picker's pin-bottom Launch→Restart swap that fires when the install
+// is running. This is the `useComfyUISettings.runAction` path, distinct
+// from the picker compact-row Restart above which routes through main's
+// `restartInstallFromPicker` and bypasses the renderer `stop-comfyui`
+// IPC. The synthetic id wraps `stopAndWaitForExit → runAction('launch')`
+// behind a single "Restarting ComfyUI" progress title so the user sees
+// one continuous op instead of stop→idle→launch flashes.
+// ---------------------------------------------------------------------------
+
+test('picker pin-bottom Restart drives stop+launch under one "Restarting ComfyUI" progress title @lifecycle', async () => {
+  test.setTimeout(300_000)
+
+  // Sanity: prior compact-row Restart test left ComfyUI running.
+  await expect.poll(comfyFrontendIsLoaded, { timeout: 30_000, intervals: [500] }).toBe(true)
+  const beforeSnapshot = await getRunningSessionSnapshot(ctx.app, _updateInstallId)
+  expect(beforeSnapshot, 'expected a running session before pin-bottom Restart').not.toBeNull()
+
+  await resetIpcInvocations(ctx.app, 'stop-comfyui')
+  await resetIpcInvocations(ctx.app, 'run-action')
+
+  // Open the picker in expanded mode on the Settings/Config tab so the
+  // pin-bottom MoreMenu is visible. `initialTab: 'config'` matches the
+  // pin-bottom Copy test above.
+  await ctx.panel.evaluate<boolean>(
+    `(() => {
+      window.api.openInstancePicker({
+        installationId: ${JSON.stringify(_updateInstallId)},
+        mode: 'expanded',
+        initialTab: 'config',
+      })
+      return true
+    })()`,
+  )
+  await waitForWebContents(ctx.app, 'comfyTitlePopup.html')
+  const popup = titlePopupPage(ctx.app)
+
+  // Open the footer "More" overflow menu → the swap surfaces the
+  // primary Launch item as `pin-bottom-action-restart` because the
+  // install is currently running.
+  await popup.waitForVisible('[data-more-trigger]', { timeout: 15_000 })
+  expect(await popup.click('[data-more-trigger]')).toBe(true)
+  await popup.waitForVisible(byTestId(TID.pinBottomAction('restart')), { timeout: 10_000 })
+  // Cross-check: the bare `launch` item must NOT be present when the
+  // install is running — the swap to `restart` is what we're testing.
+  const launchVisible = await popup.exists(byTestId(TID.pinBottomAction('launch')))
+  expect(launchVisible, 'pin-bottom Launch must NOT render while running (Restart swap)').toBe(false)
+  expect(await popup.click(byTestId(TID.pinBottomAction('restart')))).toBe(true)
+
+  // Restart confirm renders in the popup's own ModalDialog → BaseAlert
+  // simple confirm (title + message + confirmLabel only).
+  await popup.waitForVisible(byTestId(TID.baseAlertAction), { timeout: 10_000 })
+  expect(await popup.click(byTestId(TID.baseAlertAction))).toBe(true)
+
+  // ProgressModal mounts on the panel host with the single continuous
+  // "Restarting ComfyUI" title from `actions.restartProgressTitle`.
+  await waitForProgressTakeoverAfterPopupClose()
+  await expect
+    .poll(async () => {
+      const title = await ctx.panel.textOf('.brand-progress')
+      return title?.includes('Restarting ComfyUI') ?? false
+    }, { timeout: 10_000, intervals: [200, 500] })
+    .toBe(true)
+
+  // Wait for the launch leg + the new session to register, then for
+  // the comfy frontend to come back up.
+  await waitForRunAction(_updateInstallId, 'launch', { timeout: 180_000, intervals: [1_000, 2_000] })
+  await expect
+    .poll(async () => {
+      const after = await getRunningSessionSnapshot(ctx.app, _updateInstallId)
+      if (!after) return false
+      return after.startedAt > (beforeSnapshot?.startedAt ?? 0)
+    }, { timeout: 180_000, intervals: [1_000, 2_000] })
+    .toBe(true)
+  await expect.poll(comfyFrontendIsLoaded, { timeout: 180_000, intervals: [1_000] }).toBe(true)
+
+  // The pin-bottom Restart MUST fire the renderer-side `stop-comfyui`
+  // IPC (via `stopAndWaitForExit`) — the audit's key distinction from
+  // the compact-row Restart path tested above.
+  const stopCalls = await getStopsFor(_updateInstallId)
+  expect(stopCalls.length, 'pin-bottom Restart must fire stop-comfyui via stopAndWaitForExit').toBeGreaterThanOrEqual(1)
+
+  const launchCalls = (await getRunActionsFor(_updateInstallId))
+    .filter((c) => c.actionId === 'launch')
+  expect(launchCalls.length, 'exactly one launch run-action for the synthetic restart').toBeGreaterThanOrEqual(1)
+
+  // No bare `restart` action ever reaches main — the synthetic id is
+  // renderer-only. Main only ever sees `launch` for the restart leg.
+  const restartCalls = (await getRunActionsFor(_updateInstallId))
+    .filter((c) => c.actionId === 'restart')
+  expect(restartCalls.length, 'synthetic restart id must not leak to main as a run-action').toBe(0)
 })
 
 // ---------------------------------------------------------------------------
