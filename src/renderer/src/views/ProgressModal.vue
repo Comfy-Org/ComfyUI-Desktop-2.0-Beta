@@ -1,15 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
-import {
-  Check,
-  X,
-  TriangleAlert,
-  ChevronDown,
-  ArrowLeft,
-  RefreshCcw,
-  Loader2
-} from 'lucide-vue-next'
+import { Check, X, TriangleAlert, ChevronDown, ArrowLeft, RefreshCcw } from 'lucide-vue-next'
 import { useModal } from '../composables/useModal'
 import {
   useReturnToDashboardConfirm,
@@ -133,10 +125,8 @@ const LAUNCH_STEP_BUDGET_MS = 4_000
  * phase not in the i18n table (e.g. a new main-side phase shipped before
  * the table is updated) so we never go blank.
  *
- * Flat ops: pass through `flatStatus`. Chooser-launch ops short-circuit
- * this entirely — `isBrandLaunch` swaps the caption for the 5-row
- * launch stepper (`launchSteps`) so the rolling text is irrelevant for
- * that branch.
+ * Flat ops: pass through `flatStatus` — chooser-launch overrides this
+ * anyway via the existing `launchCaption` branch.
  */
 const friendlyCaption = computed<string>(() => {
   const op = currentOp.value
@@ -246,14 +236,14 @@ const LAUNCH_STEP_ORDER: readonly LaunchStepKey[] = [
   'startingServer'
 ]
 
-// True only for launch-class ops in the brand layout. Drives the 5-step
-// launch stepper ("security scan → mount libraries → GPU → custom nodes
-// → starting server") + the GPU stdout scanner + the `launchPercent`
-// bar interpolation. Non-launch ops (delete / update / install /
-// snapshot / generic) fall through to `friendlyCaption`, which maps
-// `progress.phaseLabel.<phase>` or `flatStatus` to a user-facing string
-// — so a delete op now reads "Deleting installation…" instead of
-// "Mounting model libraries…".
+// True only for launch-class ops in the brand layout. Drives the
+// rolling 5-step launchCaption pipeline ("security scan → mount
+// libraries → GPU → custom nodes → starting server") + the GPU stdout
+// scanner + the `launchPercent` bar interpolation. Non-launch ops
+// (delete / update / install / snapshot / generic) fall through to
+// `friendlyCaption`, which maps `progress.phaseLabel.<phase>` or
+// `flatStatus` to a user-facing string — so a delete op now reads
+// "Deleting installation…" instead of "Mounting model libraries…".
 const isBrandLaunch = computed(
   () => !!currentOp.value && currentOp.value.opKind === 'launch' && currentOp.value.steps === null
 )
@@ -319,7 +309,7 @@ function startCaptionTimer(): void {
 }
 
 // Reset + (re)arm the caption timer when the brand-launch op changes.
-// Keyed on `displayId` so each launch starts the stepper fresh at row 0.
+// Keyed on `displayId` so each launch starts the rolling caption fresh.
 watch(
   () => (isBrandLaunch.value ? displayId.value : null),
   (id) => {
@@ -399,21 +389,21 @@ const launchActiveIndex = computed(() => {
   return Math.max(captionFloor.value, stdoutClamped)
 })
 
-const launchSteps = computed(() => {
-  const activeIdx = launchActiveIndex.value
-  return LAUNCH_STEP_ORDER.map((key, idx) => {
-    const status: 'done' | 'active' | 'pending' =
-      idx < activeIdx ? 'done' : idx === activeIdx ? 'active' : 'pending'
-    let label: string
-    if (key === 'gpu' && vramGb.value != null) {
-      label = t('launch.steps.gpu', { vram: vramGb.value })
-    } else if (key === 'gpu') {
-      label = t('launch.steps.gpuFallback')
-    } else {
-      label = t(`launch.steps.${key}`)
-    }
-    return { key, status, label }
-  })
+/** Single rolling caption — picks the label for the current active step
+ *  (or the last one once the op has finished). The unified bar carries
+ *  the % story; this just swaps the text as launch phases advance.
+ *  Mirrors `friendlyCaption` for non-launch ops; the template picks
+ *  one or the other based on `isBrandLaunch`. */
+const launchCaption = computed<string>(() => {
+  if (!isBrandLaunch.value) return ''
+  const idx = Math.min(launchActiveIndex.value, LAUNCH_STEP_ORDER.length - 1)
+  const key = LAUNCH_STEP_ORDER[idx]
+  if (key === 'gpu') {
+    return vramGb.value !== null
+      ? t('launch.steps.gpu', { vram: vramGb.value })
+      : t('launch.steps.gpuFallback')
+  }
+  return t(`launch.steps.${key}`)
 })
 
 /**
@@ -839,10 +829,12 @@ defineExpose({ startOperation, showOperation })
       <div class="brand-progress__stack">
         <ComfyWordmark class="brand-progress__wordmark" />
 
-        <!-- Progress bar — hidden once the op finishes so the
-             finished-state banner owns the visual focus.
-             Launch ops use the horizontal stepper below instead. -->
-        <template v-if="!currentOp.finished && !isBrandLaunch">
+        <!-- Progress bar — single 0→100% fill that spans the full
+             install→launch journey. `unifiedPercent` maps the install
+             leg into 0–70% and the launch leg into 70–100%; standalone
+             ops just run 0→100 directly. Bar hides once the op finishes
+             so the finished-state banner owns the visual focus. -->
+        <template v-if="!currentOp.finished">
           <div class="brand-progress__bar" :class="{ 'is-indeterminate': unifiedIndeterminate }">
             <div class="brand-progress__bar-fill" :style="{ width: `${unifiedPercent}%` }" />
           </div>
@@ -900,54 +892,37 @@ defineExpose({ startOperation, showOperation })
             </span>
           </div>
 
-          <div
-            v-else-if="isBrandLaunch"
-            key="launch-stepper"
-            class="brand-progress__stepper"
-            aria-live="polite"
-          >
-            <div
-              v-for="step in launchSteps"
-              :key="step.key"
-              class="brand-progress__step"
-              :class="`is-${step.status}`"
-            >
-              <span class="brand-progress__step-icon">
-                <Check v-if="step.status === 'done'" :size="12" :stroke-width="2.5" />
-                <Loader2
-                  v-else-if="step.status === 'active'"
-                  :size="12"
-                  :stroke-width="2"
-                  class="brand-progress__step-spinner"
-                />
-              </span>
-              <span class="brand-progress__step-label">{{ step.label }}</span>
-            </div>
-          </div>
+          <!-- Running caption. Launch ops cycle through `launchCaption`
+               (5 narrative + stdout-driven phases). Every other op kind
+               (delete, update, install, snapshot, generic) maps through
+               `friendlyCaption`. The `:key` swap drives a tiny crossfade
+               on text change.
+
+               ⚠️ The key embeds `vramGb` because that's the only
+               *intra-step* dynamic var we want to crossfade on
+               (null → 24). Don't add more parametric vars without
+               thinking — every value change forces a remount + crossfade,
+               which looks like a stutter when the underlying text is
+               identical. -->
           <div
             v-else
-            :key="currentOp.activePhase ?? 'caption'"
+            :key="
+              isBrandLaunch
+                ? `launch-${launchActiveIndex}-${vramGb ?? 'na'}`
+                : (currentOp.activePhase ?? 'caption')
+            "
             class="brand-progress__caption"
             aria-live="polite"
           >
-            {{ friendlyCaption }}
+            {{ isBrandLaunch ? launchCaption : friendlyCaption }}
           </div>
         </Transition>
-
-        <!-- Progress percent for launch ops (shown below stepper) -->
-        <div
-          v-if="!currentOp.finished && isBrandLaunch"
-          class="brand-progress__percent"
-          aria-hidden="true"
-        >
-          {{ Math.round(unifiedPercent) }}%
-        </div>
 
         <!-- Substatus line — the rich main-side detail string (bytes
              received / total, MB/s, elapsed, ETA) for stepped phases
              whose curated label hides those numbers. Launch ops keep
-             it hidden because the 5-row launch stepper already shows
-             which narrative phase is active. -->
+             it hidden because their rolling launchCaption already
+             cycles through narrative phases. -->
         <div
           v-if="!currentOp.finished && !isBrandLaunch && formattedSubStatus"
           class="brand-progress__substatus"
@@ -1202,105 +1177,6 @@ defineExpose({ startOperation, showOperation })
   }
 }
 
-/* Horizontal stepper beneath the segmented bar */
-.brand-progress__stepper {
-  width: 100%;
-  max-width: 100%;
-  display: flex;
-  gap: 3px;
-  align-items: flex-start;
-  overflow: hidden;
-}
-.brand-progress__step {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  transition: opacity 180ms ease;
-}
-.brand-progress__step::before {
-  content: '';
-  width: 100%;
-  height: 5px;
-  border-radius: 3px;
-  background: var(--brand-surface-bg);
-  border: 1px solid var(--brand-surface-border);
-  transition:
-    background 200ms ease,
-    border-color 200ms ease;
-}
-.brand-progress__step.is-done::before {
-  background: var(--comfy-yellow);
-  border-color: var(--comfy-yellow);
-}
-.brand-progress__step.is-active::before {
-  background: linear-gradient(
-    90deg,
-    var(--comfy-yellow) 0%,
-    var(--comfy-yellow) 60%,
-    var(--brand-surface-bg) 100%
-  );
-  border-color: color-mix(in srgb, var(--comfy-yellow) 50%, var(--brand-surface-border));
-}
-.brand-progress__step.is-pending {
-  opacity: 0.5;
-}
-.brand-progress__step-icon {
-  width: 18px;
-  height: 18px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-.brand-progress__step.is-done .brand-progress__step-icon {
-  background: var(--semantic-success, #00cd72);
-  color: #fff;
-}
-.brand-progress__step.is-active .brand-progress__step-icon {
-  color: var(--comfy-yellow);
-}
-.brand-progress__step.is-pending .brand-progress__step-icon {
-  color: var(--neutral-500);
-}
-.brand-progress__step-spinner {
-  animation: brand-step-spin 1s linear infinite;
-}
-@keyframes brand-step-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-.brand-progress__step-label {
-  font-size: clamp(9px, 1.2vw, 11px);
-  color: var(--neutral-100);
-  text-align: center;
-  line-height: 1.3;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-@media (max-width: 720px) {
-  .brand-progress__step-label {
-    white-space: normal;
-    word-break: break-word;
-  }
-}
-.brand-progress__step.is-active .brand-progress__step-label {
-  color: var(--neutral-100);
-}
-.brand-progress__step.is-done .brand-progress__step-label {
-  color: var(--neutral-300);
-}
-@media (prefers-reduced-motion: reduce) {
-  .brand-progress__step-spinner {
-    animation: none;
-  }
-}
 .brand-progress__caption {
   font-size: var(--takeover-fs-body);
   color: var(--neutral-100);

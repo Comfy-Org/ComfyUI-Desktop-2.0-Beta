@@ -510,7 +510,7 @@ describe('ProgressModal — brand branch state transitions', () => {
   })
 })
 
-describe('ProgressModal — unified bar + launch stepper', () => {
+describe('ProgressModal — unified bar (install→launch chained 0→100)', () => {
   beforeEach(() => {
     // Match the helpers the rest of this file's specs already use —
     // `createPinia` + `installMockApi` are what `beforeEach` at the top
@@ -525,9 +525,7 @@ describe('ProgressModal — unified bar + launch stepper', () => {
   })
 
   function barWidth(): string {
-    const el = document.body.querySelector(
-      '.brand-progress__bar-fill',
-    ) as HTMLElement | null
+    const el = document.body.querySelector('.brand-progress__bar-fill') as HTMLElement | null
     return el?.style.width ?? ''
   }
   function barPercent(): number {
@@ -536,6 +534,10 @@ describe('ProgressModal — unified bar + launch stepper', () => {
   }
 
   it('caps unifiedPercent at 70% for a chainSpan=install op even at 100% real progress', async () => {
+    // The install leg of an install→launch chain maps its full 0→100%
+    // into the unified bar's 0–70% slot, leaving the remaining 30% for
+    // the launch leg. This is what stops the bar from saturating at 100
+    // mid-install and then stalling there through the launch tail.
     await mountWithOp('inst-chain-install', {
       opKind: 'install',
       chainSpan: 'install',
@@ -547,104 +549,95 @@ describe('ProgressModal — unified bar + launch stepper', () => {
     expect(barPercent()).toBeCloseTo(70, 1)
   })
 
-  it('hides the unified bar for launch ops (stepper carries the progress visual)', async () => {
-    // Launch ops render only the horizontal stepper — the single
-    // `.brand-progress__bar` fill is gated off because each stepper
-    // cell already shows its own fill via `::before`. The percent
-    // readout below the stepper still reflects `unifiedPercent`.
-    const { body } = await mountWithOp('inst-chain-launch', {
+  it('renders the unified bar for launch ops (no separate stepper)', async () => {
+    // The single 0→100% bar spans the whole install→launch journey.
+    // Launch ops render the SAME bar element as install ops — only the
+    // caption underneath swaps to the rolling launchCaption.
+    const { body } = await mountWithOp('inst-launch-bar', {
       opKind: 'launch',
       chainSpan: 'launch',
     })
-    expect(body.exists('.brand-progress__bar')).toBe(false)
-    expect(body.exists('.brand-progress__stepper')).toBe(true)
+    expect(body.exists('.brand-progress__bar')).toBe(true)
+    expect(body.exists('.brand-progress__bar-fill')).toBe(true)
   })
 
-  it('advances the stepper one row per timer tick (load-bearing 900ms clamp)', async () => {
-    // Standalone launch: no stdout signals, no chainSpan. Each 900ms
-    // tick of the caption timer bumps `captionFloor` by 1, which is
-    // what guarantees rows 0–1 each get airtime even if stdout races
-    // ahead later. The clamp logic lives in `launchActiveIndex`.
-    await mountWithOp('inst-launch-tick', { opKind: 'launch' })
-
-    function activeIdx(): number {
-      const rows = Array.from(
-        document.body.querySelectorAll('.brand-progress__stepper .brand-progress__step'),
-      )
-      return rows.findIndex((r) => r.classList.contains('is-active'))
-    }
-
-    expect(activeIdx()).toBe(0)
-    vi.advanceTimersByTime(900 + 50)
-    await flushPromises()
-    expect(activeIdx()).toBe(1)
-    vi.advanceTimersByTime(900 + 50)
-    await flushPromises()
-    expect(activeIdx()).toBe(2)
+  it('starts a chainSpan=launch op in the 70% region', async () => {
+    // Launch leg of the chain → 70 + launchPercent*0.3. At
+    // launchActiveIndex=0 and zero elapsed, launchPercent ~= 0, so the
+    // bar reads ~70%. No discontinuity from where install left off.
+    await mountWithOp('inst-chain-launch', {
+      opKind: 'launch',
+      chainSpan: 'launch',
+    })
+    expect(barPercent()).toBeGreaterThanOrEqual(70)
+    expect(barPercent()).toBeLessThan(75)
   })
 
-  it('throttles stdout-driven jumps to one row ahead of the caption floor', async () => {
-    // Seed an empty op (the stdout watcher in ProgressModal has no
-    // `{ immediate: true }`, so it only fires on *changes* — production
-    // sees IPC chunks; tests have to mutate after mount).
-    await mountWithOp('inst-launch-clamp', {
+  it('rolls launchCaption through phases on the 900ms caption timer', async () => {
+    // Standalone launch: each 900ms tick bumps captionFloor by 1, which
+    // is what guarantees the narrative phases ("security scan", "mount
+    // libraries") each get airtime even on fast machines where stdout
+    // races ahead. The clamp logic lives in `launchActiveIndex`.
+    const { body } = await mountWithOp('inst-launch-roll', { opKind: 'launch' })
+
+    // Tick 0: securityScan.
+    expect(body.selectorText('.brand-progress__caption')).toContain('security')
+    vi.advanceTimersByTime(900 + 50)
+    await flushPromises()
+    // Tick 1: mountLibraries.
+    expect(body.selectorText('.brand-progress__caption')).toMatch(/mount|librar/i)
+  })
+
+  it('snaps unifiedPercent toward 100 for chainSpan=launch when stdout signals server-ready', async () => {
+    // Production sequence: launch starts → narrative phases tick along
+    // on the 900ms timer → eventually "Uvicorn running on" arrives in
+    // stdout. The snap-to-100 fires when BOTH `launchActiveIndex === 4`
+    // AND `stdoutStep === 4`.
+    //
+    // The 1-per-tick clamp in `launchActiveIndex` means stdout alone
+    // can't fast-forward to row 4 — captionFloor has to catch up.
+    // So we let the timer advance the floor first, then inject the
+    // stdout signal that fires the snap.
+    //
+    // (Watcher has no `{ immediate: true }`, so seeding `terminalOutput`
+    // at mount-time wouldn't fire the regex. Mutating after mount is
+    // what production's IPC chunks do.)
+    await mountWithOp('inst-launch-ready', {
       opKind: 'launch',
       chainSpan: 'launch',
       terminalOutput: '',
     })
+    // Five timer ticks → captionFloor reaches 4 (startingServer).
+    vi.advanceTimersByTime(900 * 5 + 100)
+    await flushPromises()
+    // Now feed the server-ready signal — stdoutStep flips to 4. Combined
+    // with captionFloor=4 the active index lands at 4 and launchPercent
+    // shortcuts to 100 → unifiedPercent = 70 + 30 = 100.
     const store = useProgressStore()
-    const op = store.operations.get('inst-launch-clamp')!
-    op.terminalOutput =
-      'Total VRAM 24576 MB\n' +
-      'Loading custom node ComfyUI-Manager\n' +
-      'Uvicorn running on http://127.0.0.1:8188\n'
+    const op = store.operations.get('inst-launch-ready')!
+    op.terminalOutput = 'Uvicorn running on http://127.0.0.1:8188\n'
     await flushPromises()
-    vi.advanceTimersByTime(900 + 50)
+    // One extra tick of the 250ms launch-percent ticker so the bar's
+    // reactive readout catches the new active index.
+    vi.advanceTimersByTime(300)
     await flushPromises()
-
-    // captionFloor=1 (one tick), stdoutStep=4 — but the clamp caps the
-    // visible active index at captionFloor+1=2. This is the guarantee
-    // that rows 0 and 1 get airtime even when stdout immediately races
-    // to "Uvicorn running on" right at boot.
-    const rows = Array.from(
-      document.body.querySelectorAll('.brand-progress__stepper .brand-progress__step'),
-    )
-    const activeIdx = rows.findIndex((r) => r.classList.contains('is-active'))
-    expect(activeIdx).toBeLessThanOrEqual(2)
-    expect(activeIdx).toBeGreaterThanOrEqual(1)
+    expect(barPercent()).toBeCloseTo(100, 1)
   })
 
-  it('renders five stepper rows reflecting the current launchActiveIndex', async () => {
-    await mountWithOp('inst-launch-stepper', {
-      opKind: 'launch',
-      // No chainSpan → standalone launch path. launchActiveIndex starts
-      // at 0 (securityScan). One timer tick → 1, two ticks → 2.
-    })
-    // Advance to launchActiveIndex=2 (gpu) via the 900ms timer.
-    vi.advanceTimersByTime(900 * 2 + 50)
-    await flushPromises()
-    const rows = Array.from(
-      document.body.querySelectorAll('.brand-progress__stepper .brand-progress__step'),
-    ) as HTMLElement[]
-    expect(rows).toHaveLength(5)
-    expect(Array.from(rows[0]!.classList)).toContain('is-done')
-    expect(Array.from(rows[1]!.classList)).toContain('is-done')
-    expect(Array.from(rows[2]!.classList)).toContain('is-active')
-    expect(Array.from(rows[3]!.classList)).toContain('is-pending')
-    expect(Array.from(rows[4]!.classList)).toContain('is-pending')
-  })
-
-  it('does NOT render the launch stepper for non-launch ops (delete / install)', async () => {
+  it('uses friendlyCaption (not launchCaption) for non-launch ops', async () => {
     const { body } = await mountWithOp('inst-install-only', {
       opKind: 'install',
       steps: [{ phase: 'download', label: 'Download' }],
       activePhase: 'download',
       activePercent: 40,
     })
-    // Stepper container present? Must be absent for non-launch ops; the
-    // friendlyCaption div is what carries the single-line phase headline.
-    expect(body.exists('.brand-progress__stepper')).toBe(false)
-    expect(body.exists('.brand-progress__caption')).toBe(true)
+    // The caption row is shared between launch and non-launch ops; the
+    // content is what differs. For an install op with `activePhase=download`
+    // we expect the curated `progress.phaseLabel.download` ("Downloading
+    // ComfyUI…"), NOT the launch rolling caption.
+    const caption = body.selectorText('.brand-progress__caption')
+    expect(caption).toContain('Downloading')
+    expect(caption).not.toMatch(/security scan|mount.*librar/i)
   })
 })
 
