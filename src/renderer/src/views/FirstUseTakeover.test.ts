@@ -15,7 +15,7 @@
  * start-step DOM without dragging in their dependencies.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 
 vi.mock('../lib/telemetry', () => ({
@@ -30,8 +30,10 @@ vi.mock('../components/ModalShell.vue', () => ({
 }))
 vi.mock('../components/ChoiceCard.vue', () => ({
   default: {
+    inheritAttrs: false,
+    props: { description: { type: String, default: '' } },
     template:
-      '<div data-testid="stub-choice-card"><slot name="label-trailing" /><slot /></div>',
+      '<div v-bind="$attrs"><span data-testid="choice-description">{{ description }}</span><slot name="label-trailing" /><slot /></div>',
   },
 }))
 vi.mock('../components/WhyTryCloudModal.vue', () => ({
@@ -62,7 +64,15 @@ import FirstUseTakeover from './FirstUseTakeover.vue'
 const i18n = createI18n({
   legacy: false,
   locale: 'en',
-  messages: { en: {} },
+  messages: {
+    en: {
+      firstUse: {
+        localDesc: 'Configure path description',
+        localDescRecommended: 'Recommended path description',
+        localDescRecommendedGpu: 'Recommended for {gpu}',
+      },
+    },
+  },
   missingWarn: false,
   fallbackWarn: false,
 })
@@ -74,6 +84,7 @@ beforeEach(() => {
     getLocale: vi.fn().mockResolvedValue('en'),
     setFirstUseMode: vi.fn(),
     closeHostWindow: vi.fn().mockResolvedValue(undefined),
+    detectGPU: vi.fn().mockResolvedValue({ label: 'Apple Silicon' }),
   } as unknown as typeof window.api
 })
 
@@ -130,22 +141,37 @@ describe('FirstUseTakeover start step', () => {
     expect(tooltip?.getAttribute('data-text')).toBe('firstUse.whyTryCloud')
   })
 
-  it('Express-install checkbox is hidden on the default Cloud pick and revealed only after Local is picked', async () => {
+  it('local install mode tabs appear only when Local is selected', async () => {
     const wrapper = mountTakeover()
-    // The row stays mounted (reserved layout space, no jump on swap)
-    // but is visually + a11y hidden until Local is picked.
-    const express = () => wrapper.find('[data-testid="first-use-express-install"]')
-    expect(express().exists()).toBe(true)
-    expect(express().classes()).toContain('start-express--hidden')
-    expect(express().attributes('aria-hidden')).toBe('true')
+    await wrapper.vm.$nextTick()
+
+    const tabs = () => wrapper.find('.local-mode-tabs')
+    expect(tabs().exists()).toBe(false)
 
     await wrapper.find('[data-testid="first-use-pick-local"]').trigger('click')
-    expect(express().classes()).not.toContain('start-express--hidden')
-    expect(express().attributes('aria-hidden')).toBe('false')
+    expect(tabs().exists()).toBe(true)
 
     await wrapper.find('[data-testid="first-use-pick-cloud"]').trigger('click')
-    expect(express().classes()).toContain('start-express--hidden')
-    expect(express().attributes('aria-hidden')).toBe('true')
+    expect(tabs().exists()).toBe(false)
+  })
+
+  it('weaves detected GPU into the local description when Quick mode is active', async () => {
+    const wrapper = mountTakeover()
+    await flushPromises()
+
+    await wrapper.find('[data-testid="first-use-pick-local"]').trigger('click')
+    const desc = wrapper.find('[data-testid="first-use-pick-local"] [data-testid="choice-description"]')
+    expect(desc.text()).toBe('Recommended for Apple Silicon')
+  })
+
+  it('shows generic Quick description when GPU detection returns nothing', async () => {
+    window.api.detectGPU = vi.fn().mockResolvedValue(null)
+    const wrapper = mountTakeover()
+    await flushPromises()
+
+    await wrapper.find('[data-testid="first-use-pick-local"]').trigger('click')
+    const desc = wrapper.find('[data-testid="first-use-pick-local"] [data-testid="choice-description"]')
+    expect(desc.text()).toBe('Recommended path description')
   })
 
   it('emits `chain-local` with `express: true` when Local is picked with Express on (no legacy desktop)', async () => {
@@ -163,15 +189,13 @@ describe('FirstUseTakeover start step', () => {
     expect(emitted![0]).toEqual([{ express: true }])
   })
 
-  it('emits `chain-local` with `express: false` when Express is unticked', async () => {
+  it('emits `chain-local` with `express: false` when Configure is picked', async () => {
     const wrapper = mountTakeover()
     await wrapper
       .find('[data-testid="first-use-consent-tos"] input[type="checkbox"]')
       .setValue(true)
     await wrapper.find('[data-testid="first-use-pick-local"]').trigger('click')
-    await wrapper
-      .find('[data-testid="first-use-express-install"] input[type="checkbox"]')
-      .setValue(false)
+    await wrapper.find('[data-testid="first-use-configure-manually"]').trigger('click')
     await wrapper.find('[data-testid="first-use-continue"]').trigger('click')
 
     const emitted = wrapper.emitted('chain-local')
@@ -206,9 +230,7 @@ describe('FirstUseTakeover start step', () => {
       .find('[data-testid="first-use-consent-tos"] input[type="checkbox"]')
       .setValue(true)
     await wrapper.find('[data-testid="first-use-pick-local"]').trigger('click')
-    await wrapper
-      .find('[data-testid="first-use-express-install"] input[type="checkbox"]')
-      .setValue(false)
+    await wrapper.find('[data-testid="first-use-configure-manually"]').trigger('click')
     await wrapper.find('[data-testid="first-use-continue"]').trigger('click')
 
     // No chain-local fires — the user lands on the localBranch sub-step

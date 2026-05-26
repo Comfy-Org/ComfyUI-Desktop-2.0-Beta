@@ -43,6 +43,7 @@
  * are reset.
  */
 import { ref, computed, nextTick, onMounted, onUnmounted, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { Check, Copy, FolderInput, Info, Loader2 } from 'lucide-vue-next'
 import TakeoverHeader from '../components/TakeoverHeader.vue'
 import ModalShell from '../components/ModalShell.vue'
@@ -87,6 +88,8 @@ const emit = defineEmits<{
   'chain-migrate': []
 }>()
 
+const { t } = useI18n()
+
 const step = ref<Step>('start')
 const telemetryEnabled = ref(true)
 const locale = ref('en')
@@ -94,10 +97,10 @@ const locale = ref('en')
  *  Cloud is the brand-anchor card (glow + beam target) so it ships
  *  pre-selected — users can flip to Local before pressing Continue. */
 const pickedChoice = ref<'cloud' | 'local'>('cloud')
-/** Express-install opt-out modifier on the start screen. Pre-ticked.
- *  Functional wiring (skipping optional setup steps) lands separately;
- *  for now the value is captured for telemetry only. */
-const expressInstall = ref(true)
+/** Local install path when the Local card is picked. Express is the
+ *  default — it skips optional Configure steps. */
+const localMode = ref<'express' | 'configure'>('express')
+const expressInstall = computed(() => localMode.value === 'express')
 /** Detected GPU vendor — populated by `window.api.detectGPU()` on
  *  `open()`. Surfaces as an inline confirmation line under the Express
  *  checkbox so users on the wrong hardware can untick Express before
@@ -105,9 +108,21 @@ const expressInstall = ref(true)
  *  supported GPU; in that case the hint is suppressed and Express
  *  behaves as before (recommended-first picks downstream). */
 const detectedGpuLabel = ref<string | null>(null)
-const showGpuHint = computed(
-  () => pickedChoice.value === 'local' && expressInstall.value && detectedGpuLabel.value !== null
-)
+/** Local card body copy — swaps to the Quick-setup pitch when that tab is active. */
+const localCardDescription = computed(() => {
+  if (pickedChoice.value !== 'local' || localMode.value === 'configure') {
+    return t('firstUse.localDesc')
+  }
+  if (detectedGpuLabel.value) {
+    return t('firstUse.localDescRecommendedGpu', { gpu: detectedGpuLabel.value })
+  }
+  return t('firstUse.localDescRecommended')
+})
+
+function pickLocalMode(mode: 'express' | 'configure'): void {
+  pickedChoice.value = 'local'
+  localMode.value = mode
+}
 /** Funnel-completion bookkeeping for `desktop2.first_use.completed`.
  *  `mountedAt` is reset in `open()` so a takeover replay measures
  *  duration from the replay, not from the original mount.
@@ -348,7 +363,7 @@ async function open(opts: OpenOpts = {}): Promise<void> {
   termsDoc.value = null
   acceptedTos.value = false
   pickedChoice.value = 'cloud'
-  expressInstall.value = true
+  localMode.value = 'express'
   // Reset funnel-completion bookkeeping so a takeover replay measures
   // duration / steps from the replay, not from the original mount.
   mountedAt = Date.now()
@@ -468,39 +483,44 @@ defineExpose({ open })
             :selected="pickedChoice === 'local'"
             :label="$t('firstUse.localLabel')"
             :tagline="$t('firstUse.localTagline')"
-            :description="$t('firstUse.localDesc')"
+            :description="localCardDescription"
             data-testid="first-use-pick-local"
             @click="pickedChoice = 'local'"
-          />
+          >
+            <template #label-trailing>
+              <div
+                v-if="pickedChoice === 'local'"
+                class="local-mode-tabs"
+                role="radiogroup"
+                :aria-label="$t('firstUse.localModeLabel')"
+                @click.stop
+              >
+                <button
+                  type="button"
+                  role="radio"
+                  class="local-mode-tabs__btn"
+                  :class="{ 'local-mode-tabs__btn--selected': localMode === 'express' }"
+                  :aria-checked="localMode === 'express'"
+                  data-testid="first-use-express-install"
+                  @click="pickLocalMode('express')"
+                >
+                  {{ $t('firstUse.localModeExpressLabel') }}
+                </button>
+                <button
+                  type="button"
+                  role="radio"
+                  class="local-mode-tabs__btn"
+                  :class="{ 'local-mode-tabs__btn--selected': localMode === 'configure' }"
+                  :aria-checked="localMode === 'configure'"
+                  data-testid="first-use-configure-manually"
+                  @click="pickLocalMode('configure')"
+                >
+                  {{ $t('firstUse.localModeConfigureLabel') }}
+                </button>
+              </div>
+            </template>
+          </ChoiceCard>
         </div>
-        <label
-          class="brand-checkbox start-express"
-          :class="{ 'start-express--hidden': pickedChoice !== 'local' }"
-          :aria-hidden="pickedChoice !== 'local'"
-          data-testid="first-use-express-install"
-        >
-          <input
-            v-model="expressInstall"
-            type="checkbox"
-            :tabindex="pickedChoice === 'local' ? 0 : -1"
-          />
-          <span class="start-express__body">
-            <span class="start-express__label">{{ $t('firstUse.expressInstallLine') }}</span>
-            <span
-              class="start-express__gpu-hint"
-              :class="{ 'start-express__gpu-hint--hidden': !showGpuHint }"
-              :aria-hidden="!showGpuHint"
-              data-testid="first-use-express-gpu-hint"
-            >
-              <template v-if="detectedGpuLabel">
-                {{ $t('firstUse.expressGpuHintPrefix')
-                }}<span class="start-express__gpu-vendor">{{ detectedGpuLabel }}</span
-                >{{ $t('firstUse.expressGpuHintSuffix') }}
-              </template>
-              <template v-else>&nbsp;</template>
-            </span>
-          </span>
-        </label>
       </div>
       <div class="start-bottom">
         <div class="start-consent-strip">
@@ -763,60 +783,50 @@ defineExpose({ open })
   outline-offset: 2px;
 }
 
-/* Express Install — intentionally low-weight: left-aligned single
- * line with the standard brand-checkbox box, smaller font + muted
- * text colour so it reads as an opt-out modifier, not a primary
- * decision. */
-.start-express {
+/* Compact Quick / Configure tabs inline with the Local card label. */
+.local-mode-tabs {
   display: inline-flex;
-  align-self: flex-start;
-  align-items: flex-start;
-  gap: 8px;
-  margin-top: 4px;
-  font-size: 13px;
-  color: var(--neutral-300);
-  opacity: 1;
-  transform: translateY(0);
-  transition:
-    opacity 180ms ease-out,
-    transform 180ms ease-out;
+  flex-shrink: 0;
+  align-items: stretch;
+  padding: 2px;
+  border-radius: 6px;
+  border: 1px solid var(--chooser-surface-bg-hover);
+  background: var(--neutral-600);
+  gap: 1px;
 }
-.start-express__body {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  min-width: 0;
-}
-.start-express__gpu-hint {
-  font-size: 12px;
-  line-height: 1.4;
+.local-mode-tabs__btn {
+  appearance: none;
+  border: none;
+  border-radius: 4px;
+  padding: 3px 9px;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: 0.01em;
   color: var(--neutral-400);
-  min-height: 1.4em;
-  transition: opacity 180ms ease-out;
+  background: transparent;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    color 120ms ease,
+    background 120ms ease;
 }
-.start-express__gpu-hint--hidden {
-  opacity: 0;
-  pointer-events: none;
-}
-.start-express__gpu-vendor {
-  font-weight: 500;
+.local-mode-tabs__btn:hover:not(.local-mode-tabs__btn--selected) {
   color: var(--neutral-100);
+  background: color-mix(in oklab, var(--neutral-100) 8%, transparent);
 }
-/* Cloud pick: reserve the row's space (no layout shift on swap) but
- * fade + nudge the content out and disable pointer/keyboard access. */
-.start-express--hidden {
-  opacity: 0;
-  transform: translateY(-4px);
-  pointer-events: none;
+.local-mode-tabs__btn:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
 }
-.start-express__label {
-  line-height: 1.4;
+.local-mode-tabs__btn--selected {
+  color: var(--neutral-900);
+  background: var(--neutral-50);
 }
-@media (prefers-reduced-motion: reduce) {
-  .start-express {
-    transition: none;
-  }
+.local-mode-tabs__btn--selected:hover {
+  color: var(--neutral-900);
+  background: color-mix(in oklab, var(--neutral-50) 92%, white);
 }
 
 /* Bottom strip: consent checkboxes + Continue grouped into a single
