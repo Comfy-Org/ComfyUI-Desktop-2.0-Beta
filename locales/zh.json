@@ -353,6 +353,8 @@
     "expressInstallLabel": "快捷安装",
     "expressInstallHint": "使用推荐设置——跳过可选的安装步骤。",
     "expressInstallLine": "快捷安装——使用推荐设置",
+    "expressGpuHintPrefix": "已检测到：",
+    "expressGpuHintSuffix": "- 如果不是你的硬件，请取消勾选快捷安装",
     "termsModalTitle": "ComfyUI Desktop 条款",
     "eulaModalTitle": "最终用户许可协议",
     "tosModalTitle": "服务条款",

@@ -98,6 +98,16 @@ const pickedChoice = ref<'cloud' | 'local'>('cloud')
  *  Functional wiring (skipping optional setup steps) lands separately;
  *  for now the value is captured for telemetry only. */
 const expressInstall = ref(true)
+/** Detected GPU vendor — populated by `window.api.detectGPU()` on
+ *  `open()`. Surfaces as an inline confirmation line under the Express
+ *  checkbox so users on the wrong hardware can untick Express before
+ *  the install kicks off. `null` when detection fails or returns no
+ *  supported GPU; in that case the hint is suppressed and Express
+ *  behaves as before (recommended-first picks downstream). */
+const detectedGpuLabel = ref<string | null>(null)
+const showGpuHint = computed(
+  () => pickedChoice.value === 'local' && expressInstall.value && detectedGpuLabel.value !== null
+)
 /** Funnel-completion bookkeeping for `desktop2.first_use.completed`.
  *  `mountedAt` is reset in `open()` so a takeover replay measures
  *  duration from the replay, not from the original mount.
@@ -355,6 +365,10 @@ async function open(opts: OpenOpts = {}): Promise<void> {
   const existing = (await window.api.getSetting('telemetryEnabled')) as boolean | undefined
   telemetryEnabled.value = existing !== false
   locale.value = await window.api.getLocale().catch(() => 'en')
+  detectedGpuLabel.value = await window.api
+    .detectGPU()
+    .then((g) => g?.label ?? null)
+    .catch(() => null)
 }
 
 onMounted(() => {
@@ -470,7 +484,22 @@ defineExpose({ open })
             type="checkbox"
             :tabindex="pickedChoice === 'local' ? 0 : -1"
           />
-          <span class="start-express__label">{{ $t('firstUse.expressInstallLine') }}</span>
+          <span class="start-express__body">
+            <span class="start-express__label">{{ $t('firstUse.expressInstallLine') }}</span>
+            <span
+              class="start-express__gpu-hint"
+              :class="{ 'start-express__gpu-hint--hidden': !showGpuHint }"
+              :aria-hidden="!showGpuHint"
+              data-testid="first-use-express-gpu-hint"
+            >
+              <template v-if="detectedGpuLabel">
+                {{ $t('firstUse.expressGpuHintPrefix')
+                }}<span class="start-express__gpu-vendor">{{ detectedGpuLabel }}</span
+                >{{ $t('firstUse.expressGpuHintSuffix') }}
+              </template>
+              <template v-else>&nbsp;</template>
+            </span>
+          </span>
         </label>
       </div>
       <div class="start-bottom">
@@ -740,8 +769,8 @@ defineExpose({ open })
  * decision. */
 .start-express {
   display: inline-flex;
-  align-self: flex-end;
-  align-items: center;
+  align-self: flex-start;
+  align-items: flex-start;
   gap: 8px;
   margin-top: 4px;
   font-size: 13px;
@@ -751,6 +780,28 @@ defineExpose({ open })
   transition:
     opacity 180ms ease-out,
     transform 180ms ease-out;
+}
+.start-express__body {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+}
+.start-express__gpu-hint {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--neutral-400);
+  min-height: 1.4em;
+  transition: opacity 180ms ease-out;
+}
+.start-express__gpu-hint--hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+.start-express__gpu-vendor {
+  font-weight: 500;
+  color: var(--neutral-100);
 }
 /* Cloud pick: reserve the row's space (no layout shift on swap) but
  * fade + nudge the content out and disable pointer/keyboard access. */
@@ -803,8 +854,7 @@ defineExpose({ open })
   line-height: 1.5;
 }
 
-.start-consent-row input[type='checkbox'],
-.start-express input[type='checkbox'] {
+.start-consent-row input[type='checkbox'] {
   margin-top: 0;
 }
 .start-consent-row__text {
