@@ -11,12 +11,7 @@ import SnapshotsView from '../../views/comfyUISettings/SnapshotsView.vue'
 import StatusFactPanel from '../../views/comfyUISettings/StatusFactPanel.vue'
 import SettingsSectionList from '../../views/comfyUISettings/SettingsSectionList.vue'
 import type { PickerTab } from '../../lib/pickerTabs'
-import type {
-  ActionDef,
-  DetailField,
-  Installation,
-  ShowProgressOpts
-} from '../../types/ipc'
+import type { ActionDef, DetailField, Installation, ShowProgressOpts } from '../../types/ipc'
 import { TID } from '../../../../shared/testIds'
 
 /**
@@ -32,10 +27,6 @@ export type ComfyUISettingsTab = PickerTab
 interface Props {
   installation: Installation | null
   initialTab?: ComfyUISettingsTab
-  /** Render a leading "← Back" affordance in the tab strip. Opt-in
-   *  because the drawer host owns its own back-chrome; only the
-   *  picker's expanded right pane needs an in-content back. */
-  showBack?: boolean
   /** Optional action id to fire automatically once `sections` are
    *  loaded — mirrors `DetailModal`'s `autoAction` prop. Used by the
    *  picker's expanded mode when opened via dashboard kebab
@@ -48,7 +39,7 @@ interface Props {
 const props = withDefaults(defineProps<Props>(), {
   initialTab: 'config',
   showBack: false,
-  autoAction: null,
+  autoAction: null
 })
 
 const emit = defineEmits<{
@@ -121,14 +112,14 @@ watch(
   () => props.autoAction,
   (next, prev) => {
     if (next !== prev) consumedAutoAction.value = null
-  },
+  }
 )
 watch(
   [
     () => props.autoAction,
     () => props.installation?.id ?? null,
     () => loading.value,
-    () => sections.value.length,
+    () => sections.value.length
   ],
   async ([autoAction, installId, isLoading, sectionsLen]) => {
     if (!installId || !autoAction || isLoading || sectionsLen === 0) return
@@ -157,7 +148,7 @@ watch(
 
     void runAction(action)
   },
-  { immediate: true },
+  { immediate: true }
 )
 
 // Auto-refresh stale channel-cards when the Update tab opens. The
@@ -181,11 +172,7 @@ watch(
 const STALE_CHANNEL_CARD_MS = 15 * 60 * 1000
 const refreshedChannelKeys = new Set<string>()
 watch(
-  [
-    () => activeTab.value,
-    () => props.installation?.id ?? null,
-    () => sections.value.length,
-  ],
+  [() => activeTab.value, () => props.installation?.id ?? null, () => sections.value.length],
   ([tab, installId, sectionsLen]) => {
     if (tab !== 'update' || !installId || sectionsLen === 0) return
 
@@ -223,7 +210,7 @@ watch(
     // re-fire on the same install+channel).
     void runAction(checkAction)
   },
-  { immediate: true },
+  { immediate: true }
 )
 
 interface TabDef {
@@ -234,15 +221,30 @@ interface TabDef {
 }
 
 const ALL_TABS: TabDef[] = [
-  { key: 'config', sectionTab: 'settings', label: t('comfyUISettings.tabConfig', 'Config'), icon: SlidersHorizontal },
-  { key: 'status', sectionTab: 'status', label: t('comfyUISettings.tabStatus', 'Status'), icon: Info },
-  { key: 'update', sectionTab: 'update', label: t('comfyUISettings.tabUpdate', 'Update'), icon: RefreshCw },
+  {
+    key: 'config',
+    sectionTab: 'settings',
+    label: t('comfyUISettings.tabConfig', 'Config'),
+    icon: SlidersHorizontal
+  },
+  {
+    key: 'status',
+    sectionTab: 'status',
+    label: t('comfyUISettings.tabStatus', 'Status'),
+    icon: Info
+  },
+  {
+    key: 'update',
+    sectionTab: 'update',
+    label: t('comfyUISettings.tabUpdate', 'Update'),
+    icon: RefreshCw
+  },
   {
     key: 'snapshots',
     sectionTab: 'snapshots',
     label: t('comfyUISettings.tabSnapshots', 'Snapshots'),
-    icon: History,
-  },
+    icon: History
+  }
 ]
 const tabs = computed<TabDef[]>(() =>
   ALL_TABS.filter((tab) => sectionsForTab(tab.sectionTab).value.length > 0)
