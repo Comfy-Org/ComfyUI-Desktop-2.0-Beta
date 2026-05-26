@@ -17,6 +17,14 @@ export type ComfyPanelKey =
   | 'track'
   | 'load-snapshot'
   | 'quick-install'
+  /** Forces "panel visible, comfy hidden" layout while a Tier-3
+   *  takeover (currently picker-driven ProgressModal) is mounted.
+   *  Survives `_runningSessions` flips during update→relaunch so the
+   *  terminal-state screen stays visible when the install comes back
+   *  up. Not a title-bar pill — set programmatically from the picker
+   *  forward-show-progress IPC, restored to `'comfy'` when the modal
+   *  closes. */
+  | 'progress'
 
 export const VALID_PANELS: ReadonlySet<ComfyPanelKey> = new Set([
   'comfy',
@@ -26,6 +34,7 @@ export const VALID_PANELS: ReadonlySet<ComfyPanelKey> = new Set([
   'track',
   'load-snapshot',
   'quick-install',
+  'progress',
 ])
 
 /**
@@ -47,6 +56,11 @@ export type BodyMode =
   | 'downloads-v2'
   | 'feedback'
   | 'chooser'
+  /** Mirror of the `'progress'` ComfyPanelKey. Forces showPanel=true
+   *  (mode !== 'comfy') and stays out of `isOverlayMode` (which keeps
+   *  comfyView visible) so the panel covers the canvas fully while a
+   *  picker-driven ProgressModal is mounted. */
+  | 'progress'
   | 'new-install'
   | 'track'
   | 'load-snapshot'

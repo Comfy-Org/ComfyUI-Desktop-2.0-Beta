@@ -337,7 +337,18 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
     // `activePanel !== 'comfy'`. The trailing `refreshComfyTabBody`
     // still handles the comfy-lifecycle → comfy body-mode swap when the
     // entry was already on `'comfy'` (setActivePanel early-returns there).
-    setActivePanel(existing.windowKey, 'comfy')
+    //
+    // EXCEPTION: the `'progress'` panel mode is reserved for picker-
+    // driven ProgressModal takeovers that explicitly own the panel
+    // until the user picks a terminal-state CTA. A relaunch fired
+    // mid-update (the wantsRelaunch step in `useComfyUISettings`) must
+    // NOT yank the panel out from under the running modal — the user
+    // would lose the success screen and be dumped into Comfy with no
+    // sense of what just happened. The renderer's `handleProgressClose`
+    // restores `'comfy'` once the modal dismisses.
+    if (existing.activePanel !== 'progress') {
+      setActivePanel(existing.windowKey, 'comfy')
+    }
     refreshComfyTabBody(installationId)
     if (proc) {
       proc.on('exit', () => {
@@ -1108,6 +1119,21 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
       setActivePanel,
       triggerOpenFeedback,
       sendToPanelDeferred,
+      ensurePanelViewForEntry: (entry) =>
+        entry.panelView ?? ensurePanelView(entry.windowKey, entry, computeBodyMode(entry)),
+      spawnProgressHostForTarget: () => {
+        // Open a fresh chooser host whose sole job is to render the
+        // ProgressModal for a cross-instance Update. The picker's
+        // parent window stays untouched. After the op finishes and the
+        // user picks "Open Instance", `handleChooserPick` attaches the
+        // target install in-place — this same window becomes the
+        // target's window, no extra chooser hop.
+        const win = openChooserHostWindow()
+        for (const entry of comfyWindows.values()) {
+          if (entry.window === win) return entry
+        }
+        return null
+      },
       getInstancePickerInstalls: async () => {
         // Same shape `get-installations` returns to the renderer-side
         // `installationStore` — sharing the enrichment helper means the
