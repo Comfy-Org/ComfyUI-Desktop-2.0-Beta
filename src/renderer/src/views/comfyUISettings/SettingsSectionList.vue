@@ -45,12 +45,22 @@ interface Props {
    *  drives the per-button spinner + disabled state so quick
    *  actions like Check-for-Update feel acknowledged. */
   runningActionIds?: Set<string>
+  /** Field ids edited while the install is running that need a
+   *  process restart to take effect. Renders a small tag next to the
+   *  field label so users can spot which specific edits are pending. */
+  pendingRestartFieldIds?: Set<string>
+  /** Per-field transient error messages from failed
+   *  `updateInstallation` IPCs. Renders a red inline pill next to
+   *  the field label so the user knows the change didn't land. */
+  fieldErrorMessages?: Map<string, string>
 }
 
 const props = withDefaults(defineProps<Props>(), {
   readonly: false,
   installationId: undefined,
-  runningActionIds: () => new Set<string>()
+  runningActionIds: () => new Set<string>(),
+  pendingRestartFieldIds: () => new Set<string>(),
+  fieldErrorMessages: () => new Map<string, string>()
 })
 
 // Wrap the Set in a computed so each `.has()` call tracks a reactive
@@ -59,6 +69,16 @@ const props = withDefaults(defineProps<Props>(), {
 const runningIdsSet = computed(() => props.runningActionIds ?? new Set<string>())
 function isActionRunning(actionId: string): boolean {
   return runningIdsSet.value.has(actionId)
+}
+
+const pendingRestartSet = computed(() => props.pendingRestartFieldIds ?? new Set<string>())
+function needsRestartTag(field: DetailField): boolean {
+  return !!field.requiresRestart && pendingRestartSet.value.has(field.id)
+}
+
+const errorMessagesMap = computed(() => props.fieldErrorMessages ?? new Map<string, string>())
+function fieldErrorMessage(field: DetailField): string | null {
+  return errorMessagesMap.value.get(field.id) ?? null
 }
 
 const emit = defineEmits<{
@@ -217,6 +237,17 @@ function fieldOwnsLabel(field: DetailField): boolean {
             <label class="settings-v2-field-label">
               <span class="settings-v2-field-label-text">{{ field.label }}</span>
               <InfoTooltip v-if="field.tooltip" :text="field.tooltip" />
+              <span v-if="needsRestartTag(field)" class="settings-v2-restart-tag" role="status">
+                {{ t('comfyUISettings.restartRequired', 'Restart to apply') }}
+              </span>
+              <span
+                v-if="fieldErrorMessage(field)"
+                class="settings-v2-field-error-tag"
+                role="alert"
+                :title="fieldErrorMessage(field) ?? ''"
+              >
+                {{ fieldErrorMessage(field) }}
+              </span>
             </label>
             <div class="settings-v2-env-notice" role="note">
               <ShieldAlert :size="14" class="settings-v2-env-notice-icon" aria-hidden="true" />
@@ -232,6 +263,9 @@ function fieldOwnsLabel(field: DetailField): boolean {
           <label class="settings-v2-field-label">
             <span class="settings-v2-field-label-text">{{ field.label }}</span>
             <InfoTooltip v-if="field.tooltip" :text="field.tooltip" />
+            <span v-if="needsRestartTag(field)" class="settings-v2-restart-tag" role="status">
+              {{ t('comfyUISettings.restartRequired', 'Restart to apply') }}
+            </span>
           </label>
           <BooleanToggle :field="field" @update="(v) => emit('update-field', field, v)" />
         </div>
@@ -240,6 +274,9 @@ function fieldOwnsLabel(field: DetailField): boolean {
           <label v-if="!fieldOwnsLabel(field)" class="settings-v2-field-label">
             <span class="settings-v2-field-label-text">{{ field.label }}</span>
             <InfoTooltip v-if="field.tooltip" :text="field.tooltip" />
+            <span v-if="needsRestartTag(field)" class="settings-v2-restart-tag" role="status">
+              {{ t('comfyUISettings.restartRequired', 'Restart to apply') }}
+            </span>
           </label>
 
           <PathField
@@ -486,6 +523,45 @@ function fieldOwnsLabel(field: DetailField): boolean {
 .settings-v2-field-label-text {
   flex: 0 1 auto;
   min-width: 0;
+}
+
+.settings-v2-restart-tag {
+  flex: 0 0 auto;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 9999px;
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 14px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warning) 36%, transparent);
+  white-space: nowrap;
+}
+
+/* Failed-write inline pill. Same shape as the restart tag (so the
+ * label row stays calm when one swaps in for the other) but in the
+ * danger ramp so the user immediately reads "rejected" not "pending".
+ * Clamped to a max-width with ellipsis — IPC errors can be long; the
+ * full message lives in the `title` tooltip. */
+.settings-v2-field-error-tag {
+  flex: 0 0 auto;
+  margin-left: 6px;
+  max-width: 240px;
+  padding: 1px 6px;
+  border-radius: 9999px;
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 14px;
+  letter-spacing: 0.02em;
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 36%, transparent);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .settings-v2-boolean-row .settings-v2-field-label {

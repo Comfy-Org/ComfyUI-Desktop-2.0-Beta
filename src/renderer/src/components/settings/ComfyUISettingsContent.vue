@@ -77,6 +77,8 @@ const {
   loading,
   error,
   updateField,
+  pendingRestartFieldIds,
+  fieldErrorMessages,
   runAction,
   runningActionIds,
   sectionsForTab,
@@ -396,9 +398,18 @@ const isInstallRunning = computed(() => {
   return inst ? sessionStore.isRunning(inst.id) : false
 })
 
-const primaryActionLabel = computed(() =>
-  isInstallRunning.value ? t('instancePicker.restart', 'Restart') : t('instancePicker.open', 'Open')
+const hasPendingRestart = computed(
+  () => isInstallRunning.value && pendingRestartFieldIds.value.size > 0
 )
+
+const primaryActionLabel = computed(() => {
+  if (hasPendingRestart.value) {
+    return t('instancePicker.restartToApply', 'Restart to apply changes')
+  }
+  return isInstallRunning.value
+    ? t('instancePicker.restart', 'Restart')
+    : t('instancePicker.open', 'Open')
+})
 
 function handlePrimaryAction(): void {
   if (!installation.value) return
@@ -502,6 +513,8 @@ defineExpose({
                 :sections="visibleSections"
                 :installation-id="installation?.id"
                 :running-action-ids="runningActionIds"
+                :pending-restart-field-ids="pendingRestartFieldIds"
+                :field-error-messages="fieldErrorMessages"
                 @update-field="updateField"
                 @run-action="runAction"
                 @open-args-page="openArgsPage"
@@ -516,6 +529,7 @@ defineExpose({
       <button
         type="button"
         class="primary settings-v2-relaunch"
+        :class="{ 'is-pending-restart': hasPendingRestart }"
         :disabled="!installation"
         @click="handlePrimaryAction"
       >
@@ -687,6 +701,22 @@ defineExpose({
   font-size: 12px;
   font-weight: 500;
   line-height: 16px;
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease;
+}
+
+/* Pending-restart promotion. Brand yellow takes over the button so
+ * the resolution point lights up against the dark modal surface —
+ * no extra chrome, no ring, just a hard semantic swap. Same action
+ * (still routes through Restart), the colour just says "now is the
+ * moment". Dark text required: yellow is too light for white. */
+.settings-v2-relaunch.is-pending-restart,
+.settings-v2-relaunch.is-pending-restart:hover {
+  background: var(--neutral-50);
+  border-color: var(--neutral-50);
+  color: var(--neutral-950);
 }
 
 .settings-v2-more-wrap {

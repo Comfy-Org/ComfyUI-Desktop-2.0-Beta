@@ -86,6 +86,21 @@ export interface UseComfyUISettingsApi {
    *  reload sections so the UI tracks main-side defaults / clamping. */
   updateField: (field: DetailField, value: unknown) => Promise<void>
 
+  /** Field ids edited while the install is running that carry
+   *  `requiresRestart` AND whose current value differs from the
+   *  value the running process was launched with. Drives the
+   *  per-field "Restart to apply" pill and the footer button's
+   *  yellow promotion. State is held per-install internally so
+   *  switching the picker selection doesn't drop the marker. */
+  pendingRestartFieldIds: ComputedRef<Set<string>>
+
+  /** Transient error messages for the currently-selected install,
+   *  keyed by field id. Populated when `updateField`'s IPC rejects
+   *  or times out — the field's display is rolled back and a red
+   *  inline pill surfaces the message. Auto-clears after a short
+   *  timer or on the next edit of the same field. */
+  fieldErrorMessages: ComputedRef<Map<string, string>>
+
   /** Run an action coming off a `DetailSection.actions[]` entry. */
   runAction: (action: ActionDef) => Promise<void>
 
@@ -145,6 +160,28 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
   // Inline-action busy state. Replaced (not mutated) on each add/delete
   // so Vue's shallow reactivity on Set tracks the change.
   const runningActionIds = ref<Set<string>>(new Set())
+  // Restart-required dirty tracking — per install, keyed by field id,
+  // value is the "running baseline" (the value the running process was
+  // launched with). A field is dirty iff its current value differs
+  // from this baseline; reverting to the baseline drops the entry.
+  // Keyed by install id (not the picker's current selection) so
+  // toggling the picker row doesn't lose state for the install the
+  // user actually edited.
+  const restartBaselines = ref<Map<string, Map<string, unknown>>>(new Map())
+  // Transient error messages for failed `updateInstallation` IPCs.
+  // Same per-install keying as restartBaselines so each install's
+  // surface state is independent.
+  const errorMessages = ref<Map<string, Map<string, string>>>(new Map())
+  // 4-second auto-clear timers for inline error pills, keyed by
+  // `installId:fieldId`. Cleared on re-edit or on watcher teardown.
+  const errorClearTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  // Optimistic-update timeout: roll back if main hasn't responded
+  // within 5s. Settings writes are local IPC + a JSON merge — if
+  // they take this long, something is genuinely wrong.
+  const UPDATE_TIMEOUT_MS = 5000
+  // Inline error pill auto-clear window. Long enough to read, short
+  // enough not to nag.
+  const ERROR_TAG_TTL_MS = 4000
   /** Last install id `loadAll` was called with — drives the
    *  clear-before-await decision so same-install reloads (field edits,
    *  action completions) don't blank the pane, only row switches do. */
@@ -253,10 +290,160 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
     }
   }
 
+  /** Field-value equality for the restart-required set. Primitives
+   *  compare by `===`; `envVars` is a flat `Record<string, string>` so
+   *  a key-count + key-by-key walk is enough (no nested objects exist
+   *  in the schema today). Falls back to JSON for any other object
+   *  shape that might appear later. */
+  function restartFieldsEqual(a: unknown, b: unknown): boolean {
+    if (a === b) return true
+    if (a == null || b == null) return false
+    if (typeof a !== 'object' || typeof b !== 'object') return false
+    const ao = a as Record<string, unknown>
+    const bo = b as Record<string, unknown>
+    const aKeys = Object.keys(ao)
+    const bKeys = Object.keys(bo)
+    if (aKeys.length !== bKeys.length) return false
+    for (const k of aKeys) {
+      if (ao[k] !== bo[k]) return false
+    }
+    return true
+  }
+
+  /** Race a promise against a wall-clock deadline. Resolves with the
+   *  promise's value on success; throws an Error tagged with
+   *  `isTimeout = true` on deadline. The losing branch's eventual
+   *  settlement is ignored — callers have already rolled back. */
+  function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const timeout = new Promise<T>((_, reject) => {
+      timer = setTimeout(() => {
+        const err = new Error('timeout') as Error & { isTimeout?: boolean }
+        err.isTimeout = true
+        reject(err)
+      }, ms)
+    })
+    return Promise.race([p, timeout]).finally(() => {
+      if (timer) clearTimeout(timer)
+    })
+  }
+
+  /** Locate a field by id inside the current sections, mutating
+   *  helpers operate via this. Returns the field reference so callers
+   *  can write `field.value` in place — Vue's deep reactivity picks
+   *  up the nested write because `sections` is a `ref` over an array
+   *  of plain objects. */
+  function findFieldInSections(fieldId: string): DetailField | null {
+    for (const s of sections.value) {
+      const f = s.fields?.find((x) => x.id === fieldId)
+      if (f) return f as DetailField
+    }
+    return null
+  }
+
+  function setRestartDirty(installId: string, fieldId: string, baseline: unknown): void {
+    const next = new Map(restartBaselines.value)
+    const inner = new Map(next.get(installId) ?? new Map())
+    if (!inner.has(fieldId)) inner.set(fieldId, baseline)
+    next.set(installId, inner)
+    restartBaselines.value = next
+  }
+
+  function clearRestartDirty(installId: string, fieldId: string): void {
+    const inner = restartBaselines.value.get(installId)
+    if (!inner || !inner.has(fieldId)) return
+    const next = new Map(restartBaselines.value)
+    const nextInner = new Map(inner)
+    nextInner.delete(fieldId)
+    if (nextInner.size === 0) next.delete(installId)
+    else next.set(installId, nextInner)
+    restartBaselines.value = next
+  }
+
+  function setFieldError(installId: string, fieldId: string, message: string): void {
+    const next = new Map(errorMessages.value)
+    const inner = new Map(next.get(installId) ?? new Map())
+    inner.set(fieldId, message)
+    next.set(installId, inner)
+    errorMessages.value = next
+    const timerKey = `${installId}:${fieldId}`
+    const existing = errorClearTimers.get(timerKey)
+    if (existing) clearTimeout(existing)
+    errorClearTimers.set(
+      timerKey,
+      setTimeout(() => {
+        clearFieldError(installId, fieldId)
+      }, ERROR_TAG_TTL_MS),
+    )
+  }
+
+  function clearFieldError(installId: string, fieldId: string): void {
+    const timerKey = `${installId}:${fieldId}`
+    const existing = errorClearTimers.get(timerKey)
+    if (existing) {
+      clearTimeout(existing)
+      errorClearTimers.delete(timerKey)
+    }
+    const inner = errorMessages.value.get(installId)
+    if (!inner || !inner.has(fieldId)) return
+    const next = new Map(errorMessages.value)
+    const nextInner = new Map(inner)
+    nextInner.delete(fieldId)
+    if (nextInner.size === 0) next.delete(installId)
+    else next.set(installId, nextInner)
+    errorMessages.value = next
+  }
+
   async function updateField(field: DetailField, value: unknown): Promise<void> {
     const inst = toValue(opts.installation)
     if (!inst) return
-    await window.api.updateInstallation(inst.id, { [field.id]: value })
+    const installId = inst.id
+
+    // Capture the value the running process currently has — this is
+    // both the baseline for dirty-tracking and the rollback target.
+    const liveField = findFieldInSections(field.id)
+    const priorValue = liveField ? liveField.value : (field.value as unknown)
+    // Optimistic write — splice the new value into sections in place
+    // so the dropdown / toggle re-renders on the same frame as the
+    // click. `reload()` or `refreshSection()` below reconciles with
+    // any main-side normalization.
+    if (liveField) liveField.value = value as DetailField['value']
+
+    // Re-edit clears any prior error pill for this field — the user
+    // moved on, the stale message would be noise.
+    clearFieldError(installId, field.id)
+
+    try {
+      await withTimeout(
+        window.api.updateInstallation(installId, { [field.id]: value }),
+        UPDATE_TIMEOUT_MS,
+      )
+    } catch (err: unknown) {
+      // Roll back the optimistic write.
+      const live = findFieldInSections(field.id)
+      if (live) live.value = priorValue as DetailField['value']
+      // Failed writes never engage the restart-required state — main
+      // didn't accept the value, so there's nothing to apply.
+      clearRestartDirty(installId, field.id)
+      const isTimeout = (err as { isTimeout?: boolean })?.isTimeout === true
+      const message = isTimeout
+        ? t('comfyUISettings.updateFieldTimeout', "Couldn't reach app — try again")
+        : err instanceof Error
+          ? err.message
+          : String(err)
+      setFieldError(installId, field.id, message)
+      return
+    }
+    // Restart-required dirty tracking — only after the IPC succeeded.
+    // Reverting to the running baseline drops the entry.
+    if (field.requiresRestart && sessionStore.isRunning(installId)) {
+      const baseline = restartBaselines.value.get(installId)?.get(field.id) ?? priorValue
+      if (restartFieldsEqual(value, baseline)) {
+        clearRestartDirty(installId, field.id)
+      } else {
+        setRestartDirty(installId, field.id, baseline)
+      }
+    }
     emitTelemetryAction('desktop2.settings.changed', {
       setting_key: field.id,
       value_kind: field.editType || 'text',
@@ -644,12 +831,55 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
     }
   })
 
+  // Pending restart fields surfaced to the host — derived from the
+  // per-install baseline map for the currently-selected install. State
+  // for OTHER installs stays in the map untouched, so toggling the
+  // picker row never wipes the user's work-in-progress.
+  const pendingRestartFieldIds = computed<Set<string>>(() => {
+    const inst = toValue(opts.installation)
+    if (!inst) return new Set()
+    const inner = restartBaselines.value.get(inst.id)
+    return inner ? new Set(inner.keys()) : new Set()
+  })
+
+  const fieldErrorMessages = computed<Map<string, string>>(() => {
+    const inst = toValue(opts.installation)
+    if (!inst) return new Map()
+    return errorMessages.value.get(inst.id) ?? new Map()
+  })
+
   watch(
     () => toValue(opts.installation)?.id ?? null,
     () => {
       void reload()
     },
     { immediate: true },
+  )
+
+  // Drop the per-install dirty + error entries the moment that install
+  // stops — a stopped install picks up new values on next launch, so
+  // there is nothing left to apply or surface.
+  watch(
+    () => {
+      const inst = toValue(opts.installation)
+      return inst ? sessionStore.isRunning(inst.id) : false
+    },
+    (running, wasRunning) => {
+      const inst = toValue(opts.installation)
+      if (!inst) return
+      if (wasRunning && !running) {
+        if (restartBaselines.value.has(inst.id)) {
+          const next = new Map(restartBaselines.value)
+          next.delete(inst.id)
+          restartBaselines.value = next
+        }
+        if (errorMessages.value.has(inst.id)) {
+          const next = new Map(errorMessages.value)
+          next.delete(inst.id)
+          errorMessages.value = next
+        }
+      }
+    },
   )
 
   return {
@@ -660,6 +890,8 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
     reload,
     refreshSection,
     updateField,
+    pendingRestartFieldIds,
+    fieldErrorMessages,
     runAction,
     runningActionIds,
     sectionsForTab,
