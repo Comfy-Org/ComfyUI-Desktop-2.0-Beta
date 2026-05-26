@@ -131,25 +131,6 @@ function readonlyDisplayValue(field: DetailField): string {
   return asString(field.value)
 }
 
-const envNoticeExpanded = ref(new Set<string>())
-
-function envNoticeKey(field: DetailField): string {
-  return field.id ?? 'env-vars'
-}
-
-function toggleEnvNotice(field: DetailField): void {
-  const key = envNoticeKey(field)
-  if (envNoticeExpanded.value.has(key)) {
-    envNoticeExpanded.value.delete(key)
-  } else {
-    envNoticeExpanded.value.add(key)
-  }
-}
-
-function isEnvNoticeExpanded(field: DetailField): boolean {
-  return envNoticeExpanded.value.has(envNoticeKey(field))
-}
-
 function fieldOwnsLabel(field: DetailField): boolean {
   return field.editType === 'env-vars' || field.editType === 'channel-cards'
 }
@@ -237,22 +218,12 @@ function fieldOwnsLabel(field: DetailField): boolean {
               <span class="settings-v2-field-label-text">{{ field.label }}</span>
               <InfoTooltip v-if="field.tooltip" :text="field.tooltip" />
             </label>
-            <button
-              type="button"
-              class="settings-v2-env-notice"
-              :aria-pressed="isEnvNoticeExpanded(field)"
-              :aria-label="t('envVars.securityWarning')"
-              @click="toggleEnvNotice(field)"
-            >
+            <div class="settings-v2-env-notice" role="note">
               <ShieldAlert :size="14" class="settings-v2-env-notice-icon" aria-hidden="true" />
               <span class="settings-v2-env-notice-text">
-                {{
-                  isEnvNoticeExpanded(field)
-                    ? t('envVars.securityWarning')
-                    : t('envVars.securityWarningShort', 'Environment variables may contain secrets')
-                }}
+                {{ t('envVars.securityWarningShort', 'Environment variables may contain secrets') }}
               </span>
-            </button>
+            </div>
           </div>
           <EnvVarsField :field="field" @update="(f, v) => emit('update-field', f, v)" />
         </template>
@@ -555,13 +526,6 @@ function fieldOwnsLabel(field: DetailField): boolean {
   line-height: 16px;
   color: var(--text-muted);
   text-align: left;
-  cursor: pointer;
-}
-
-.settings-v2-env-notice:hover,
-.settings-v2-env-notice:focus-visible {
-  color: var(--text);
-  outline: none;
 }
 
 .settings-v2-env-notice-icon {

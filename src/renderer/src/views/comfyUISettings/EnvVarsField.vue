@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Eye, EyeOff, Plus, X } from 'lucide-vue-next'
 import BaseInput from '../../components/ui/BaseInput.vue'
@@ -35,6 +35,11 @@ interface Row {
 
 const rows = ref<Row[]>([])
 const revealed = ref<Set<number>>(new Set())
+const rowRefs = ref<(HTMLElement | null)[]>([])
+
+function setRowRef(i: number, el: Element | null): void {
+  rowRefs.value[i] = el as HTMLElement | null
+}
 
 function isRevealed(i: number): boolean {
   return revealed.value.has(i)
@@ -59,11 +64,14 @@ watch(
   (val) => {
     const dict =
       val && typeof val === 'object' && !Array.isArray(val) ? (val as Record<string, string>) : {}
-    const incoming: Row[] = Object.entries(dict).map(([key, value]) => ({ key, value }))
-    const currentNonEmpty = rows.value.filter((r) => r.key || r.value)
-    if (JSON.stringify(incoming) !== JSON.stringify(currentNonEmpty)) {
-      rows.value = incoming
-    }
+    const serverRows: Row[] = Object.entries(dict).map(([key, value]) => ({ key, value }))
+    // Preserve any in-progress rows whose key is still empty — the
+    // server can't have seen them yet (emitUpdate filters out keyless
+    // rows), so an incoming snapshot that "doesn't mention them" must
+    // not evict them. Previously, typing a value before a key would
+    // round-trip an empty dict and the watch would wipe the row.
+    const localPartial = rows.value.filter((r) => !r.key.trim())
+    rows.value = [...serverRows, ...localPartial]
   },
   { immediate: true }
 )
@@ -95,8 +103,12 @@ function emitUpdate(): void {
   emit('update', props.field, out)
 }
 
-function addRow(): void {
+async function addRow(): Promise<void> {
   rows.value.push({ key: '', value: '' })
+  await nextTick()
+  const last = rowRefs.value[rowRefs.value.length - 1]
+  last?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  last?.querySelector<HTMLInputElement>('input')?.focus()
 }
 
 function removeRow(i: number): void {
@@ -128,7 +140,12 @@ function onValueChange(i: number, val: string): void {
         <span class="env-vars-head-action"></span>
       </div>
 
-      <div v-for="(row, i) in rows" :key="i" class="env-var-row">
+      <div
+        v-for="(row, i) in rows"
+        :key="i"
+        :ref="(el) => setRowRef(i, el as Element | null)"
+        class="env-var-row"
+      >
         <div class="env-var-cell">
           <BaseInput
             mono
