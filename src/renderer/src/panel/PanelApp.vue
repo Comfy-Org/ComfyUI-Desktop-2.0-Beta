@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import ProgressModal from '../views/ProgressModal.vue'
 import ModalDialog from '../components/ModalDialog.vue'
+import DialogHost from '../components/DialogHost.vue'
 import DownloadsModal from '../components/DownloadsModal.vue'
 import FeedbackModal from '../components/FeedbackModal.vue'
 import ComfyLifecycleView from './ComfyLifecycleView.vue'
@@ -580,6 +581,7 @@ onUnmounted(() => {
     <FeedbackModal :open="feedbackOpen" :url="feedbackUrl" @close="closeFeedback" />
 
     <ModalDialog />
+    <DialogHost />
     <MigrateConfirmTakeover ref="migrateTakeoverRef" />
   </div>
 </template>

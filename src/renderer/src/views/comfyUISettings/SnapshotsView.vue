@@ -3,7 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Download, GitCompare, RotateCcw, Trash2, Upload } from 'lucide-vue-next'
 import { TID } from '../../../../shared/testIds'
-import { useModal } from '../../composables/useModal'
+import { useDialogs } from '../../composables/useDialogs'
 import { emitTelemetryAction, toCountBucket } from '../../lib/telemetry'
 import {
   changeSummary as _changeSummary,
@@ -59,7 +59,7 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
-const modal = useModal()
+const dialogs = useDialogs()
 
 const listData = ref<SnapshotListData | null>(null)
 const loading = ref(true)
@@ -194,7 +194,7 @@ function changeSummaryFor(s: SnapshotSummary): string[] {
 // --- Save ---
 
 async function handleSave(): Promise<void> {
-  const label = await modal.prompt({
+  const label = await dialogs.prompt({
     title: t('standalone.snapshotSaveTitle'),
     message: t('standalone.snapshotSaveMessage'),
     placeholder: t('standalone.snapshotLabelPlaceholder'),
@@ -207,9 +207,10 @@ async function handleSave(): Promise<void> {
       label: label || undefined
     })
   } catch (err: unknown) {
-    await modal.alert({
-      title: t('snapshots.saveSnapshot'),
-      message: (err as Error).message || String(err)
+    await dialogs.alert({
+      title: t('snapshots.saveErrorTitle'),
+      message: (err as Error).message || String(err),
+      tone: 'danger'
     })
     return
   }
@@ -239,17 +240,14 @@ async function handleRestore(filename: string): Promise<void> {
       ? [{ label: t('snapshots.willChange', 'Changes when restoring'), items: summaryLines }]
       : undefined
 
-  const ok = await modal.confirm({
-    title: t('standalone.snapshotRestore', 'Restore Snapshot'),
-    message: t(
-      'snapshots.restoreConfirm',
-      'Are you sure you want to restore this snapshot? Your current install state will be replaced.'
-    ),
+  const result = await dialogs.confirm({
+    title: t('snapshots.restoreConfirmTitle'),
+    message: t('snapshots.restoreConfirmMessage'),
     messageDetails,
     confirmLabel: t('standalone.snapshotRestore', 'Restore'),
-    confirmStyle: 'primary'
+    tone: 'primary'
   })
-  if (!ok) return
+  if (result !== 'primary') return
 
   emitTelemetryAction('desktop2.snapshot.flow', {
     action: 'restore_complete',
@@ -270,18 +268,28 @@ async function handleRestore(filename: string): Promise<void> {
 // --- Delete ---
 
 async function handleDelete(filename: string): Promise<void> {
-  const ok = await modal.confirm({
-    title: t('standalone.snapshotDelete'),
-    message: t('snapshots.deleteConfirm'),
-    confirmStyle: 'danger'
+  const target = snapshots.value.find((s) => s.filename === filename)
+  const displayName = target?.label || target?.filename || ''
+  // Title carries the snapshot name (HIG-style: "Delete X?") so the
+  // user can scan the destructive scope at a glance. Message
+  // explains the consequence in one sentence — no recessed "what
+  // happens" block; that was over-engineered for a one-line confirm.
+  const result = await dialogs.confirm({
+    title: displayName
+      ? t('snapshots.deleteConfirmNamed', { name: displayName })
+      : t('snapshots.deleteConfirm'),
+    message: t('snapshots.deleteConfirmMessage'),
+    confirmLabel: t('snapshots.delete'),
+    tone: 'danger'
   })
-  if (!ok) return
+  if (result !== 'primary') return
   try {
     await window.api.runAction(props.installationId, 'snapshot-delete', { file: filename })
   } catch (err: unknown) {
-    await modal.alert({
-      title: t('snapshots.delete', 'Delete Snapshot'),
-      message: (err as Error).message || String(err)
+    await dialogs.alert({
+      title: t('snapshots.deleteErrorTitle'),
+      message: (err as Error).message || String(err),
+      tone: 'danger'
     })
     return
   }
@@ -323,9 +331,10 @@ async function handleImport(): Promise<void> {
   const preview = await window.api.importSnapshotsPreview()
   if (!preview.ok) {
     if (preview.message) {
-      await modal.alert({
-        title: t('snapshots.importSnapshots', 'Import Snapshots'),
-        message: preview.message
+      await dialogs.alert({
+        title: t('snapshots.importErrorTitle'),
+        message: preview.message,
+        tone: 'danger'
       })
     }
     return
@@ -334,37 +343,39 @@ async function handleImport(): Promise<void> {
   const previewLines = previewItems.map(
     (p) => `${p.label || p.filename} (${formatDate(p.createdAt)})`
   )
-  const ok = await modal.confirm({
-    title: t('snapshots.importSnapshots', 'Import Snapshots'),
-    message: t('snapshots.importPreviewMessage', 'Review the snapshots to import.'),
+  const importChoice = await dialogs.confirm({
+    title: t('snapshots.importConfirmTitle'),
+    message: t('snapshots.importConfirmMessage'),
     messageDetails:
       previewLines.length > 0
         ? [{ label: t('snapshots.importPreviewLabel', 'Snapshots'), items: previewLines }]
         : undefined,
-    confirmLabel: t('snapshots.importContinue', 'Continue'),
-    confirmStyle: 'primary'
+    confirmLabel: t('snapshots.importConfirmLabel'),
+    tone: 'primary'
   })
-  if (!ok) return
+  if (importChoice !== 'primary') return
 
   // Step 2: diff
   const diff = await window.api.importSnapshotsDiff(props.installationId)
   if (!diff.ok) {
     if (diff.message) {
-      await modal.alert({
-        title: t('snapshots.importSnapshots', 'Import Snapshots'),
-        message: diff.message
+      await dialogs.alert({
+        title: t('snapshots.importErrorTitle'),
+        message: diff.message,
+        tone: 'danger'
       })
     }
     return
   }
 
   // Step 3: confirm restore on the imported snapshot
-  const result = await window.api.importSnapshotsConfirm(props.installationId)
-  if (!result.ok) {
-    if (result.message) {
-      await modal.alert({
-        title: t('snapshots.importSnapshots', 'Import Snapshots'),
-        message: result.message
+  const importResult = await window.api.importSnapshotsConfirm(props.installationId)
+  if (!importResult.ok) {
+    if (importResult.message) {
+      await dialogs.alert({
+        title: t('snapshots.importErrorTitle'),
+        message: importResult.message,
+        tone: 'danger'
       })
     }
     return
@@ -372,17 +383,17 @@ async function handleImport(): Promise<void> {
   emitTelemetryAction('desktop2.snapshot.flow', {
     action: 'import',
     snapshot_count_bucket: toCountBucket(snapshots.value.length),
-    imported_bucket: toCountBucket(result.imported ?? 0)
+    imported_bucket: toCountBucket(importResult.imported ?? 0)
   })
 
   await load()
   emit('refresh-all')
 
-  if (result.restoreFile) {
+  if (importResult.restoreFile) {
     emit('run-action', {
       id: 'snapshot-restore',
       label: t('standalone.snapshotRestore', 'Restore'),
-      data: { file: result.restoreFile },
+      data: { file: importResult.restoreFile },
       showProgress: true,
       progressTitle: t('standalone.snapshotRestoringTitle', 'Restoring snapshot'),
       cancellable: true

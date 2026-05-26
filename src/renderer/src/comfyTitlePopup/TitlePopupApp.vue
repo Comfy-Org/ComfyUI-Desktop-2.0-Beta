@@ -5,6 +5,7 @@ import DownloadsView from './DownloadsView.vue'
 import InstancePickerView from './InstancePickerView.vue'
 import GlobalSettingsView from './GlobalSettingsView.vue'
 import ModalDialog from '../components/ModalDialog.vue'
+import DialogHost from '../components/DialogHost.vue'
 import { useModal } from '../composables/useModal'
 import type { DetailSection, SnapshotListData } from '../types/ipc'
 
@@ -438,6 +439,10 @@ onUnmounted(() => {
          its own copy; this one keeps `useModal` working inside the
          popup's separate WebContentsView. -->
     <ModalDialog />
+    <!-- Sibling host for the new `useDialogs` API (BasePrompt /
+         BaseActionSheet rendered via BaseModal). Lives alongside
+         `<ModalDialog />` until all useModal types migrate. -->
+    <DialogHost />
   </div>
 </template>
 

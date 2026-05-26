@@ -1,6 +1,7 @@
 import { computed, ref, toValue, watch, type ComputedRef, type MaybeRefOrGetter, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useModal } from './useModal'
+import { useDialogs } from './useDialogs'
 import { useActionGuard } from './useActionGuard'
 import { useMigrateAction } from './useMigrateAction'
 import { useSessionStore } from '../stores/sessionStore'
@@ -126,6 +127,7 @@ function formatBytes(bytes: number): string {
 export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISettingsApi {
   const { t } = useI18n()
   const modal = useModal()
+  const dialogs = useDialogs()
   const actionGuard = useActionGuard()
   const { confirmMigration } = useMigrateAction()
   const sessionStore = useSessionStore()
@@ -249,7 +251,7 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
       try {
         await window.api.runAction(inst.id, field.onChangeAction)
       } catch (err: unknown) {
-        await modal.alert({
+        await dialogs.alert({
           title: t('common.error', 'Error'),
           message: err instanceof Error ? err.message : String(err),
         })
@@ -323,14 +325,14 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
         try {
           items = await window.api.getFieldOptions(fs.sourceId, fs.fieldId, selections)
         } catch (err: unknown) {
-          await modal.alert({
+          await dialogs.alert({
             title: mutableAction.label,
             message: (err as Error).message || String(err),
           })
           return
         }
         if (!items || items.length === 0) {
-          await modal.alert({
+          await dialogs.alert({
             title: mutableAction.label,
             message: fs.emptyMessage || t('common.noItems'),
           })
@@ -341,7 +343,7 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
           label: (item.recommended ? '★ ' : '') + item.label,
           description: item.description,
         }))
-        const selected = await modal.select({
+        const selected = await dialogs.actionSheet({
           title: fs.title || mutableAction.label,
           message: fs.message || '',
           items: selectItems,
@@ -373,13 +375,13 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
         items = all.map((i) => ({ value: i.id, label: i.name, description: i.sourceLabel }))
       }
       if (!items || items.length === 0) {
-        await modal.alert({
+        await dialogs.alert({
           title: mutableAction.label,
           message: mutableAction.select.emptyMessage || t('common.noItems'),
         })
         return
       }
-      const selected = await modal.select({
+      const selected = await dialogs.actionSheet({
         title: mutableAction.select.title || mutableAction.label,
         message: mutableAction.select.message || '',
         items,
@@ -392,9 +394,11 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
     }
 
     // 6. prompt chain — free-form text input (e.g. Copy Installation
-    //    new-name prompt).
+    //    new-name prompt). Routes through `useDialogs.prompt` →
+    //    `BasePrompt` (BaseModal shell) rather than the legacy
+    //    `useModal.prompt` renderer.
     if (mutableAction.prompt) {
-      const value = await modal.prompt({
+      const value = await dialogs.prompt({
         title: mutableAction.prompt.title || mutableAction.label,
         message: mutableAction.prompt.message || '',
         placeholder: mutableAction.prompt.placeholder,
@@ -553,7 +557,7 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
       } else if (result.navigate === 'detail') {
         await reload()
       } else if (result.message) {
-        await modal.alert({ title: mutableAction.label, message: result.message })
+        await dialogs.alert({ title: mutableAction.label, message: result.message })
       } else {
         await reload()
       }
@@ -563,7 +567,7 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
         error_bucket: toErrorBucket(err),
         ...telemetryContext,
       })
-      await modal.alert({
+      await dialogs.alert({
         title: mutableAction.label,
         message: err instanceof Error ? err.message : String(err),
       })
