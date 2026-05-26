@@ -2218,12 +2218,6 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
         typeof payload?.initialTab === 'string' ? payload.initialTab : null
       const autoAction =
         typeof payload?.autoAction === 'string' ? payload.autoAction : null
-      recordIpcInvocation('open-instance-picker', {
-        installationId: selectedInstallationId,
-        mode,
-        initialTab,
-        autoAction,
-      })
       openInstancePickerForHost(
         parentEntry,
         parentEntryId,
@@ -2565,7 +2559,6 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
       }
     }
     if (parentEntryId === undefined || !parentEntry) return
-    recordIpcInvocation('open-global-settings', { windowId: win.id })
     openGlobalSettingsForHost(
       parentEntry,
       parentEntryId,
