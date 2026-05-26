@@ -174,3 +174,19 @@ export async function clearRunningSessions(app: ElectronApplication): Promise<vo
     helpers.clearRunningSessions()
   }))
 }
+
+/** Read the `checkedAt` ms timestamp of the shared release-cache entry
+ *  for `(repo, channel)`. Returns `null` when no entry exists yet. */
+export async function getReleaseCacheCheckedAt(
+  app: ElectronApplication,
+  repo: string,
+  channel: string,
+): Promise<number | null> {
+  return await evalWithRetry(() => app.evaluate((_electron, args) => {
+    const helpers = (globalThis as unknown as {
+      __e2e?: { getReleaseCacheCheckedAt: (r: string, c: string) => number | null }
+    }).__e2e
+    if (!helpers) throw new Error('E2E helpers not registered (process.env.E2E !== "1"?)')
+    return helpers.getReleaseCacheCheckedAt(args.repo, args.channel)
+  }, { repo, channel }))
+}

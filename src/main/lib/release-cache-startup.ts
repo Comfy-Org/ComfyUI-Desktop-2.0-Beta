@@ -62,7 +62,16 @@ function _channelOf(inst: InstallationRecord): string {
  */
 export async function runStartupReleaseChecks(
   installations: InstallationRecord[],
-  options: { onRefreshed?: () => void; now?: () => number } = {},
+  options: {
+    onRefreshed?: () => void
+    now?: () => number
+    /** When true, ignore the 1h `STARTUP_RECHECK_MS` floor and always
+     *  attempt to fetch. Used by the periodic background poll so the
+     *  cache refreshes on its interval cadence; the 10s
+     *  `MIN_RECHECK_INTERVAL` inside `releaseCache.getOrFetch` remains
+     *  the final safety net against accidental hot-loops. */
+    bypassFloor?: boolean
+  } = {},
 ): Promise<void> {
   const now = options.now ?? (() => Date.now())
 
@@ -75,8 +84,10 @@ export async function runStartupReleaseChecks(
 
   const tasks: Promise<unknown>[] = []
   for (const channel of channels) {
-    const existing = releaseCache.get(COMFYUI_REPO, channel)
-    if (existing?.checkedAt && now() - existing.checkedAt < STARTUP_RECHECK_MS) continue
+    if (!options.bypassFloor) {
+      const existing = releaseCache.get(COMFYUI_REPO, channel)
+      if (existing?.checkedAt && now() - existing.checkedAt < STARTUP_RECHECK_MS) continue
+    }
 
     tasks.push(
       releaseCache.getOrFetch(
@@ -95,4 +106,48 @@ export async function runStartupReleaseChecks(
 
   await Promise.allSettled(tasks)
   options.onRefreshed?.()
+}
+
+/**
+ * 15-minute periodic poll cadence for the background timer below.
+ *
+ * Picked to match the picker's stale-cache watcher threshold (from the
+ * sibling auto-refresh PR) — at this interval the dashboard / title-bar
+ * update pills are guaranteed to reflect upstream state within 15
+ * minutes of an upstream release, even for users who never open the
+ * picker or click "Check for Update" manually.
+ */
+const PERIODIC_RECHECK_INTERVAL_MS = 15 * 60 * 1000
+
+/**
+ * Start the background timer that re-runs `runStartupReleaseChecks`
+ * every `PERIODIC_RECHECK_INTERVAL_MS`. Returns a stop function the
+ * caller can run on app quit to clear the interval cleanly.
+ *
+ * The timer is registered with `unref()` so it never keeps the
+ * process alive on its own — if every window closes, the app still
+ * quits. The first tick fires after one interval has elapsed; the
+ * initial cache pre-warm is handled separately by the IPC-hook path
+ * in `registerInstallationHandlers`.
+ */
+export function startPeriodicReleaseChecks(
+  getInstallations: () => Promise<InstallationRecord[]>,
+  options: { onRefreshed?: () => void; intervalMs?: number } = {},
+): () => void {
+  const intervalMs = options.intervalMs ?? PERIODIC_RECHECK_INTERVAL_MS
+  const timer = setInterval(() => {
+    void (async () => {
+      try {
+        const installs = await getInstallations()
+        await runStartupReleaseChecks(installs, {
+          onRefreshed: options.onRefreshed,
+          bypassFloor: true,
+        })
+      } catch {
+        // never let the periodic poll crash the timer
+      }
+    })()
+  }, intervalMs)
+  timer.unref()
+  return () => clearInterval(timer)
 }
