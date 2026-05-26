@@ -12,7 +12,7 @@
  * no-op outside the test runner.
  */
 import { useSessionStore } from '../stores/sessionStore'
-import type { ShowProgressOpts } from '../types/ipc'
+import type { ActionResult, ShowProgressOpts } from '../types/ipc'
 
 export interface InjectProgressErrorOpts {
   installationId: string
@@ -35,11 +35,33 @@ export interface InjectProgressSuccessOpts {
   newInstallationId?: string
 }
 
+export interface StartInFlightOpOpts {
+  installationId: string
+  title?: string
+  opKind?: ShowProgressOpts['opKind']
+  /** Marks the op as non-destroying (default) so ProgressModal renders
+   *  the Return-to-Dashboard footer button rather than Cancel. */
+  destroysInstance?: boolean
+  triggersInstanceStart?: boolean
+}
+
+export interface SettleInFlightOpOpts {
+  installationId: string
+  result: ActionResult
+}
+
 interface PanelBindings {
   showProgress: (opts: ShowProgressOpts) => Promise<void> | void
+  actionGuard: { checkBeforeAction: (id: string, label: string) => Promise<boolean> }
 }
 
 let bindings: PanelBindings | null = null
+
+/** Deferred apiCall promises for ops seeded via `startInFlightOp`,
+ *  keyed by installationId so `settleInFlightOp` can resolve the right
+ *  one. Module-level so the renderer's progressStore captures the same
+ *  promise reference its `then` chain awaits. */
+const inFlightSettlers = new Map<string, (result: ActionResult) => void>()
 
 export interface E2ERendererHelpers {
   /** Drive the PanelApp's normal show-progress chain with an `apiCall`
@@ -68,6 +90,20 @@ export interface E2ERendererHelpers {
   seedErrorInstance(opts: { installationId: string; installationName: string; message?: string }): void
   /** True iff `sessionStore.errorInstances` has an entry for the id. */
   hasErrorInstance(installationId: string): boolean
+  /** Seed an in-flight op whose `apiCall` is a controllable Promise so
+   *  the op stays pending until `settleInFlightOp` resolves it. Lets
+   *  tests exercise the busy-guard / Return-to-Dashboard / cancel-flow
+   *  branches without driving a real long-running action. */
+  startInFlightOp(opts: StartInFlightOpOpts): Promise<void>
+  /** Resolve the deferred `apiCall` for a pending in-flight op. Returns
+   *  `false` if no settler exists (op was never seeded, or already
+   *  resolved). */
+  settleInFlightOp(opts: SettleInFlightOpOpts): boolean
+  /** Run `useActionGuard.checkBeforeAction(installationId, label)`
+   *  directly so the test can drive the busy-guard surface without
+   *  going through a real action runner. Returns the guard's verdict
+   *  (true = proceed, false = user cancelled the confirm). */
+  runActionGuard(opts: { installationId: string; actionLabel: string }): Promise<boolean>
 }
 
 function ensureBound(): PanelBindings {
@@ -126,6 +162,33 @@ export function registerE2ERendererHooks(): void {
     },
     hasErrorInstance(installationId) {
       return useSessionStore().errorInstances.has(installationId)
+    },
+    async startInFlightOp({ installationId, title, opKind, destroysInstance, triggersInstanceStart }) {
+      const b = ensureBound()
+      // Replace any prior settler for the same id so a leaked op from a
+      // previous test can't intercept this one's resolve.
+      inFlightSettlers.get(installationId)?.({ ok: false, cancelled: true })
+      const pending = new Promise<ActionResult>((resolve) => {
+        inFlightSettlers.set(installationId, resolve)
+      })
+      await b.showProgress({
+        installationId,
+        title: title ?? `In-flight — ${installationId}`,
+        opKind: opKind ?? 'generic',
+        destroysInstance: destroysInstance ?? false,
+        triggersInstanceStart: triggersInstanceStart ?? false,
+        apiCall: () => pending,
+      })
+    },
+    settleInFlightOp({ installationId, result }) {
+      const settle = inFlightSettlers.get(installationId)
+      if (!settle) return false
+      inFlightSettlers.delete(installationId)
+      settle(result)
+      return true
+    },
+    runActionGuard({ installationId, actionLabel }) {
+      return ensureBound().actionGuard.checkBeforeAction(installationId, actionLabel)
     },
   }
   ;(globalThis as unknown as { __e2eRenderer: E2ERendererHelpers }).__e2eRenderer = helpers

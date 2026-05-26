@@ -41,6 +41,7 @@ export function registerSessionHandlers(): void {
   })
 
   ipcMain.handle('cancel-operation', (_event, installationId: string) => {
+    recordIpcInvocation('cancel-operation', installationId)
     const abort = _operationAborts.get(installationId)
     if (abort) {
       abort.abort()
