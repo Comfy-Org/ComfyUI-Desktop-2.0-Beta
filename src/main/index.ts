@@ -37,6 +37,7 @@ import {
 import { registerAssetDownloadHandlers } from './lib/ipc/registerAssetDownloadHandlers'
 import { registerDownloadHandlers } from './lib/ipc/registerDownloadHandlers'
 import { get as getInstallation, installationEvents, list as listInstallations } from './installations'
+import { startPeriodicReleaseChecks } from './lib/release-cache-startup'
 import { showModelFolderRelaunchPage } from './lib/relaunchPage'
 import { COMFY_BG, SPLASH_DARK, TITLEBAR_BG, type SplashTheme } from './lib/theme'
 import { comfyTitleBarOverlay } from './lib/titleBarOverlay'
@@ -97,6 +98,11 @@ const APP_VERSION = getAppVersion()
 // The chooser host window plus per-install ComfyUI windows are the
 // only top-level surfaces.
 let tray: Tray | null = null
+
+/** Stop handle for the periodic release-cache poll registered in
+ *  `whenReady`. Cleared in `before-quit` so the interval doesn't
+ *  linger across `app.relaunch()`. */
+let _stopPeriodicReleaseChecks: (() => void) | null = null
 
 function focusExternalProcessWindow(pid: number): void {
   if (process.platform === 'win32') {
@@ -1363,6 +1369,25 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
         detachOrphanedInstallHosts(liveIds)
       })()
     })
+
+    // Background poll: keep the shared ComfyUI release cache fresh so
+    // dashboard / title-bar update pills surface upstream releases
+    // within 15 minutes even when the user never opens the picker or
+    // clicks "Check for Update". The timer is `unref()`-ed inside the
+    // helper so it never blocks app quit; we still tear it down
+    // explicitly in `before-quit` for cleanliness across `app.relaunch`.
+    // Tests override the cadence via `E2E_PERIODIC_RECHECK_MS` so the
+    // periodic-poll lifecycle assertion doesn't have to wait 15 wall-
+    // clock minutes per run.
+    const _periodicIntervalMs = process.env['E2E_PERIODIC_RECHECK_MS']
+      ? Number(process.env['E2E_PERIODIC_RECHECK_MS'])
+      : undefined
+    _stopPeriodicReleaseChecks = startPeriodicReleaseChecks(listInstallations, {
+      onRefreshed: () => _broadcastToRenderer('installations-changed', {}),
+      ...(typeof _periodicIntervalMs === 'number' && Number.isFinite(_periodicIntervalMs)
+        ? { intervalMs: _periodicIntervalMs }
+        : {}),
+    })
   })
 
   app.on('activate', () => {
@@ -1383,6 +1408,10 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
         tray.destroy()
         tray = null
       }
+    }
+    if (_stopPeriodicReleaseChecks) {
+      _stopPeriodicReleaseChecks()
+      _stopPeriodicReleaseChecks = null
     }
     cleanupTempDownloads()
   })

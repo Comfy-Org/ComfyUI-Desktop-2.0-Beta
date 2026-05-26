@@ -18,6 +18,7 @@ import {
   type DownloadsTrayState,
 } from './comfyDownloadManager'
 import { _test_setUpdateState, type AppUpdateState } from './updater'
+import { get as _releaseCacheGet } from './release-cache'
 import { _test_getOpenTitlePopupBounds } from '../popups/titlePopup'
 import { returnToDashboard } from '../host/detach'
 import { comfyWindows, isInstallHost } from '../host/registry'
@@ -75,6 +76,11 @@ export interface E2EHelpers {
   seedRunningSession(opts: { installationId: string; installationName: string }): void
   /** Drop every synthetic session registered via `seedRunningSession`. */
   clearRunningSessions(): void
+  /** Read the `checkedAt` ms timestamp from the shared release cache
+   *  entry for `(repo, channel)`. Returns `null` when no entry exists
+   *  yet. Used by the periodic-poll lifecycle test to observe that the
+   *  background timer ran a real second fetch. */
+  getReleaseCacheCheckedAt(repo: string, channel: string): number | null
 }
 
 export function registerE2EHooks(): void {
@@ -107,6 +113,9 @@ export function registerE2EHooks(): void {
       _test_addRunningSession(opts.installationId, opts.installationName)
     },
     clearRunningSessions: _test_clearRunningSessions,
+    getReleaseCacheCheckedAt(repo, channel) {
+      return _releaseCacheGet(repo, channel)?.checkedAt ?? null
+    },
   }
   ;(globalThis as unknown as { __e2e: E2EHelpers }).__e2e = helpers
 }
