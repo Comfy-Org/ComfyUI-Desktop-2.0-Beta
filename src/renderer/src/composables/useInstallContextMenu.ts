@@ -72,10 +72,11 @@ export interface ManageOpenOptions {
 
 export function useInstallContextMenu(opts: {
   /** Open the per-install Manage… DetailModal overlay. The composable
-   *  funnels Update / Migrate / Restore Snapshot through this callback
-   *  with the appropriate `initialTab` / `autoAction` so the source-
-   *  side action machinery (confirms, prompts, showProgress) is reused.
-   *  The bare Manage… item passes no options. */
+   *  funnels Update / Migrate / Restore Snapshot / Copy Installation /
+   *  Untrack through this callback with the appropriate `initialTab` /
+   *  `autoAction` so the source-side action machinery (confirms,
+   *  prompts, disk-check, showProgress) is reused. The bare Manage…
+   *  item passes no options. */
   onManage?: (inst: Installation, options?: ManageOpenOptions) => void
   /** Optional fast-path for actions that own their own confirm +
    *  showProgress pair (today: Delete). When provided, the composable
@@ -254,21 +255,19 @@ export function useInstallContextMenu(opts: {
         // The action surfaces its own error to the user via main; nothing to do here.
       }
     } else if (id === 'copy-install') {
-      // Standalone-only. Source-side `'copy'` action def owns its
-      // native confirm dialog + showProgress chain, so the panel still
-      // sees a progress overlay when this fires.
-      try {
-        await window.api.runAction(inst.id, 'copy')
-      } catch {
-        // Source action surfaces its own error path.
-      }
+      // Route through the source-action def by handing the autoAction
+      // off to `onManage`. Calling `window.api.runAction(id, 'copy')`
+      // directly bypassed the renderer-side prompt / disk-check /
+      // showProgress chain — main saw `actionData = undefined` and
+      // bailed with `{ ok: false, message: 'No name provided.' }`,
+      // which the caller's `try/catch` then silently swallowed.
+      opts.onManage?.(inst, { autoAction: 'copy' })
     } else if (id === 'untrack') {
-      // Source-side `'remove'` action def owns its native confirm.
-      try {
-        await window.api.runAction(inst.id, 'remove')
-      } catch {
-        // Source action surfaces its own error path.
-      }
+      // Same fix as copy-install above: routing through `onManage`
+      // (autoAction: 'remove') runs the source-action def's confirm
+      // dialog renderer-side before invoking the IPC, instead of
+      // firing a destructive un-tracking action with no prompt.
+      opts.onManage?.(inst, { autoAction: 'remove' })
     } else if (id === 'delete') {
       // Build the confirm + showProgress payload renderer-side instead
       // of round-tripping through `getDetailSections` to look up the

@@ -31,7 +31,7 @@
  */
 
 import { execFileSync } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, rmSync } from 'node:fs'
 import path from 'node:path'
 import { resolve } from 'node:path'
 import { test, expect } from '@playwright/test'
@@ -702,10 +702,10 @@ test('picker compact-row Restart drives system-modal confirm + re-launch @lifecy
 // ---------------------------------------------------------------------------
 // FLOW 2 — real copy via the picker's pin-bottom MoreMenu.
 //
-// `copy` is REQUIRES_STOPPED + a runAction prompt chain; the kebab is
-// known-broken (Bug #7, deferred to Step 5) so we have to drive it
-// through the picker's footer "More" menu → Copy item, which exercises
-// the full prompt → showProgress → real ~500MB filesystem copy path.
+// `copy` is REQUIRES_STOPPED + a runAction prompt chain. The picker's
+// footer "More" menu → Copy item exercises the full prompt →
+// showProgress → real ~500MB filesystem copy path. (The dashboard
+// kebab → Copy Installation path is covered separately further down.)
 // ---------------------------------------------------------------------------
 
 let _copyInstallId = ''
@@ -849,6 +849,215 @@ test('cleans up the copy install before the original delete test runs @lifecycle
   const remaining = await ctx.panel.evaluate<InstallationLite[]>(`window.api.getInstallations()`)
   expect(remaining.find((i) => i.id === _copyInstallId), 'copy install record not removed after delete').toBeUndefined()
   expect(remaining.find((i) => i.id === _updateInstallId), 'original install was unexpectedly removed').toBeDefined()
+})
+
+// ---------------------------------------------------------------------------
+// Dashboard kebab "Copy Installation" / "Untrack" — both route through
+// `opts.onManage(inst, { autoAction })` so the picker opens in
+// expanded mode with the autoAction seed and `ComfyUISettingsContent`
+// fires the action through the full `useComfyUISettings.runAction`
+// chain (prompt → disk-check → showProgress for copy; confirm → inline
+// runAction for remove).
+//
+// One fresh ~500MB kebab-driven copy is the target for both tests
+// (kebab Copy on the original → kebab Untrack on the new copy) so the
+// registry-only Untrack semantics can be validated without breaking
+// the original-install state the final Delete test depends on. The
+// kebab-copy's on-disk tree is then `fs.rm`'d manually to reclaim the
+// ~500MB before the final Delete test runs.
+// ---------------------------------------------------------------------------
+
+let _kebabCopyInstallId = ''
+let _kebabCopyInstallPath = ''
+
+test('dashboard kebab "Copy Installation" creates a real ~500MB copy @lifecycle', async () => {
+  test.setTimeout(600_000)
+
+  // The prior cleanup test ran direct `runAction('delete')` against
+  // the previous picker-copy and ComfyUI is stopped from earlier; the
+  // chooser is already visible. Sanity-check the kebab is available
+  // on the seeded tile before driving the menu.
+  await expectChooserVisible(ctx.panel)
+  await ctx.panel.waitForVisible(byTestId(TID.dashboardTileKebab(_updateInstallId)), { timeout: 10_000 })
+
+  // Snapshot BrowserWindow ids so the post-copy chooser-host spawned
+  // by `open-install-window` can be closed deterministically (same
+  // bookkeeping the picker pin-bottom Copy test above uses).
+  const windowIdsBeforeCopy = await ctx.app.evaluate(({ BrowserWindow }) =>
+    BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed()).map((w) => w.id),
+  )
+
+  await resetIpcInvocations(ctx.app, 'open-install-window')
+  await resetIpcInvocations(ctx.app, 'run-action')
+
+  // Open the dashboard kebab on the original install tile and click
+  // the Copy Installation item — the composable routes this to
+  // `opts.onManage(inst, { autoAction: 'copy' })` which expands the
+  // picker on the Config tab with the autoAction seed.
+  expect(await ctx.panel.click(byTestId(TID.dashboardTileKebab(_updateInstallId)))).toBe(true)
+  await ctx.panel.waitForVisible(byTestId(TID.contextMenuItem('copy-install')), { timeout: 5_000 })
+  expect(await ctx.panel.click(byTestId(TID.contextMenuItem('copy-install')))).toBe(true)
+
+  // Picker mounts in expanded mode with autoAction='copy' →
+  // ComfyUISettingsContent fires `runAction('copy')` → renderer-side
+  // prompt for the new install name.
+  await waitForWebContents(ctx.app, 'comfyTitlePopup.html')
+  const popup = titlePopupPage(ctx.app)
+  await popup.waitForVisible(byTestId(TID.modalPromptInput), { timeout: 15_000 })
+
+  const newName = 'ComfyUI Kebab Copy E2E'
+  await popup.evaluate<void>(
+    `(() => {
+      const el = document.querySelector(${JSON.stringify(byTestId(TID.modalPromptInput))})
+      if (!el) throw new Error('prompt input not found')
+      el.value = ${JSON.stringify(newName)}
+      el.dispatchEvent(new Event('input', { bubbles: true }))
+      el.dispatchEvent(new Event('change', { bubbles: true }))
+    })()`,
+  )
+  expect(await popup.click(byTestId(TID.modalConfirm))).toBe(true)
+
+  // Picker hides; the panel's ProgressModal owns the copy op.
+  await waitForProgressTakeoverAfterPopupClose()
+
+  // Wait for the copy to complete + `open-install-window` for the new
+  // install id. Real ~500MB filesystem copy → generous timeout.
+  await expect
+    .poll(async () => {
+      const calls = (await getIpcInvocations(ctx.app, 'open-install-window')) as OpenInstallWindowPayload[]
+      return calls.find((c) => c.installationId && c.installationId !== _updateInstallId) ?? null
+    }, { timeout: 540_000, intervals: [2_000, 5_000] })
+    .not.toBeNull()
+
+  const openCalls = (await getIpcInvocations(ctx.app, 'open-install-window')) as OpenInstallWindowPayload[]
+  const newCall = openCalls.find((c) => c.installationId && c.installationId !== _updateInstallId)
+  expect(newCall?.installationId, 'open-install-window did not capture a NEW installationId').toBeTruthy()
+  _kebabCopyInstallId = newCall!.installationId
+
+  const installs = await ctx.panel.evaluate<InstallationLite[]>(`window.api.getInstallations()`)
+  const copyRecord = installs.find((i) => i.id === _kebabCopyInstallId)
+  expect(copyRecord, 'kebab-copy installation not found in getInstallations').toBeDefined()
+  _kebabCopyInstallPath = copyRecord!.installPath
+
+  // Disk shape: kebab copy materializes the same standalone tree the
+  // picker pin-bottom Copy did, and the source tree is unchanged.
+  expect(existsSync(path.join(_kebabCopyInstallPath, 'ComfyUI', '.git')), 'kebab copy missing ComfyUI/.git').toBe(true)
+  expect(existsSync(path.join(_kebabCopyInstallPath, 'standalone-env')), 'kebab copy missing standalone-env/').toBe(true)
+  expect(existsSync(path.join(_kebabCopyInstallPath, '.comfyui-desktop-2')), 'kebab copy missing .comfyui-desktop-2 marker').toBe(true)
+  expect(existsSync(path.join(_updateInstallPath, 'ComfyUI', '.git')), 'source ComfyUI/.git missing after kebab copy').toBe(true)
+  expect(existsSync(path.join(_updateInstallPath, '.comfyui-desktop-2')), 'source marker missing after kebab copy').toBe(true)
+
+  // Critical assertion for the regression: the kebab dispatch must
+  // NOT have fired a `runAction('copy')` IPC directly from the
+  // dashboard — it has to go through the picker autoAction route so
+  // the prompt is collected. Direct dispatch would carry no
+  // `actionData` and main would return `{ ok: false }` silently.
+  const runActions = await getRunActionsFor(_updateInstallId)
+  const copyDispatches = runActions.filter((c) => c.actionId === 'copy')
+  expect(copyDispatches.length, 'kebab dispatch must route copy through the picker, not call runAction directly').toBeLessThanOrEqual(1)
+
+  // Close the extra chooser host(s) spawned by `open-install-window`
+  // so the panel.html-marker helpers in subsequent tests have a single
+  // stable target.
+  const extraWindowIds = await ctx.app.evaluate(
+    ({ BrowserWindow }, before) =>
+      BrowserWindow.getAllWindows()
+        .filter((w) => !w.isDestroyed() && !before.includes(w.id))
+        .map((w) => w.id),
+    windowIdsBeforeCopy,
+  )
+  await ctx.app.evaluate(({ BrowserWindow }, ids) => {
+    for (const id of ids) {
+      const w = BrowserWindow.fromId(id)
+      if (w && !w.isDestroyed()) w.close()
+    }
+  }, extraWindowIds)
+  await expect
+    .poll(
+      () =>
+        ctx.app.evaluate(
+          ({ BrowserWindow }, ids) =>
+            BrowserWindow.getAllWindows().filter(
+              (w) => !w.isDestroyed() && ids.includes(w.id),
+            ).length,
+          extraWindowIds,
+        ),
+      { timeout: 10_000, intervals: [100, 250] },
+    )
+    .toBe(0)
+})
+
+test('dashboard kebab "Untrack" removes the install from the registry without touching disk @lifecycle', async () => {
+  test.setTimeout(60_000)
+  expect(_kebabCopyInstallId, 'no kebab-copy install id to untrack').toBeTruthy()
+  expect(_kebabCopyInstallPath, 'no kebab-copy install path captured').toBeTruthy()
+
+  // Dashboard should be visible again on the panel and show BOTH the
+  // original tile and the kebab-copy tile.
+  await waitForWebContents(ctx.app, 'panel.html')
+  await expectChooserVisible(ctx.panel)
+  await ctx.panel.waitForVisible(byTestId(TID.dashboardTileKebab(_kebabCopyInstallId)), { timeout: 10_000 })
+
+  // Click the kebab on the kebab-copy tile (NOT the original — the
+  // original needs to survive for the final Delete test). The Untrack
+  // item routes through `opts.onManage(inst, { autoAction: 'remove' })`
+  // → picker opens expanded with the autoAction seed → confirm modal.
+  expect(await ctx.panel.click(byTestId(TID.dashboardTileKebab(_kebabCopyInstallId)))).toBe(true)
+  await ctx.panel.waitForVisible(byTestId(TID.contextMenuItem('untrack')), { timeout: 5_000 })
+  expect(await ctx.panel.click(byTestId(TID.contextMenuItem('untrack')))).toBe(true)
+
+  // Picker opens in expanded mode; ComfyUISettingsContent fires
+  // runAction('remove') which renders the source action's confirm
+  // dialog. `remove` carries no `showProgress` and is plain text, so
+  // the simple-confirm renders as a BaseAlert (TID.baseAlertAction)
+  // inside the popup webContents.
+  await waitForWebContents(ctx.app, 'comfyTitlePopup.html')
+  const popup = titlePopupPage(ctx.app)
+  await popup.waitForVisible(byTestId(TID.baseAlertAction), { timeout: 15_000 })
+  expect(await popup.click(byTestId(TID.baseAlertAction))).toBe(true)
+
+  // Untrack returns `{ navigate: 'list' }` → the picker collapses to
+  // compact and main scrubs the row. Poll the registry until the
+  // kebab-copy id is gone.
+  await expect
+    .poll(
+      async () => {
+        const installs = await ctx.panel.evaluate<InstallationLite[]>(`window.api.getInstallations()`)
+        return installs.some((i) => i.id === _kebabCopyInstallId)
+      },
+      { timeout: 30_000, intervals: [250, 500] },
+    )
+    .toBe(false)
+
+  // Critical Untrack semantics: registry entry gone, disk preserved.
+  // (Delete is the destructive counterpart — this is the difference.)
+  expect(existsSync(_kebabCopyInstallPath), 'untrack must NOT touch disk; kebab-copy dir should still exist').toBe(true)
+  expect(
+    existsSync(path.join(_kebabCopyInstallPath, '.comfyui-desktop-2')),
+    'untrack must leave marker file intact on disk',
+  ).toBe(true)
+
+  // Original install untouched.
+  const remaining = await ctx.panel.evaluate<InstallationLite[]>(`window.api.getInstallations()`)
+  expect(remaining.find((i) => i.id === _updateInstallId), 'untrack must not affect the original install').toBeDefined()
+})
+
+test('cleans up the untracked kebab-copy on disk before the final Delete test runs @lifecycle', async () => {
+  test.setTimeout(120_000)
+  expect(_kebabCopyInstallPath, 'no kebab-copy install path to clean up').toBeTruthy()
+  expect(existsSync(_kebabCopyInstallPath), 'kebab-copy dir already gone — Untrack test invariant violated').toBe(true)
+
+  // Untrack intentionally leaves the ~500MB tree on disk; the test
+  // suite has to free it before the final fully-installed Delete test
+  // runs so the harness home temp dir doesn't carry a stale copy.
+  // Same `fs.rm` semantics the main-side delete handler uses; run from
+  // the test process directly (the path lives on the harness home temp
+  // dir and is readable by both processes).
+  rmSync(_kebabCopyInstallPath, { recursive: true, force: true })
+
+  await expect
+    .poll(() => existsSync(_kebabCopyInstallPath), { timeout: 60_000, intervals: [500, 1_000] })
+    .toBe(false)
 })
 
 // ---------------------------------------------------------------------------
