@@ -235,6 +235,24 @@ export function useInstallContextMenu(opts: {
     return getMenuItems(inst)
   })
 
+  /** Run a fire-and-forget action (no overlay / prompt) and surface a
+   *  failure via `modal.alert` instead of swallowing it. Main returns
+   *  `{ ok: false, message }` on action-level failures (e.g. open-folder
+   *  against a missing path); the bare `try { ... } catch {}` pattern
+   *  it replaces only caught true rejections, leaving the user staring
+   *  at a no-op kebab item with no feedback. */
+  async function runInstantActionWithAlert(inst: Installation, actionId: string, actionLabel: string): Promise<void> {
+    try {
+      const result = await window.api.runAction(inst.id, actionId)
+      if (result.ok === false && result.message) {
+        await modal.alert({ title: actionLabel, message: result.message })
+      }
+    } catch (err) {
+      const message = (err as Error)?.message || String(err)
+      await modal.alert({ title: actionLabel, message })
+    }
+  }
+
   /** Single dispatch path for both the kebab/right-click menu and the
    *  chooser tile's visual pills. Pill clicks (`triggerAction('update',
    *  inst)` / `triggerAction('migrate', inst)`) and menu selections
@@ -249,11 +267,7 @@ export function useInstallContextMenu(opts: {
     } else if (id === 'restore-snapshot') {
       opts.onManage?.(inst, { initialTab: 'snapshots' })
     } else if (id === 'reveal-in-folder') {
-      try {
-        await window.api.runAction(inst.id, 'open-folder')
-      } catch {
-        // The action surfaces its own error to the user via main; nothing to do here.
-      }
+      await runInstantActionWithAlert(inst, 'open-folder', revealInFolderLabel(window.api?.platform))
     } else if (id === 'copy-install') {
       // Route through the source-action def by handing the autoAction
       // off to `onManage`. Calling `window.api.runAction(id, 'copy')`
@@ -308,11 +322,7 @@ export function useInstallContextMenu(opts: {
         // strings to the panel router which has both callbacks).
         opts.onManage(inst, { autoAction: 'delete' })
       } else {
-        try {
-          await window.api.runAction(inst.id, 'delete')
-        } catch {
-          // Source action surfaces its own error path.
-        }
+        await runInstantActionWithAlert(inst, 'delete', t('chooser.menuDelete'))
       }
     } else if (id === 'dismiss-error') {
       sessionStore.clearErrorInstance(inst.id)
