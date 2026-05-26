@@ -65,12 +65,7 @@ test.beforeEach(async () => {
   await clearRunningSessions(ctx.app)
   // Drop any pending in-flight op left over from a previous test so its
   // settler can't intercept this test's seed.
-  await ctx.panel.evaluate<boolean>(
-    `window.__e2eRenderer.settleInFlightOp({
-      installationId: ${JSON.stringify(INSTALL_ID)},
-      result: { ok: false, cancelled: true },
-    })`,
-  )
+  await settleInFlightOp({ ok: false, cancelled: true })
 })
 
 /** Seed an in-flight op whose apiCall stays pending until the test
@@ -99,21 +94,27 @@ async function settleInFlightOp(result: { ok: boolean; cancelled?: boolean }): P
   )
 }
 
-test('useActionGuard fires cancel-operation when the user confirms cancelling the busy op @lifecycle', async () => {
-  // Active session + in-flight op makes the guard's busy check fire.
-  await startInFlightOp()
-
-  // Run the guard in the background; the confirm modal appears and the
-  // poll waits on the op to clear. Captured on a window-scoped promise
-  // so we can await the verdict after settling.
+/** Kick off `runActionGuard` and stash the verdict promise on `window`
+ *  so the test can await it later (after driving the confirm modal). */
+async function runGuardInBackground(actionLabel: string): Promise<void> {
   await ctx.panel.evaluate<void>(
     `(() => {
       window.__guardPromise = window.__e2eRenderer.runActionGuard({
         installationId: ${JSON.stringify(INSTALL_ID)},
-        actionLabel: 'Restart ComfyUI',
+        actionLabel: ${JSON.stringify(actionLabel)},
       })
     })()`,
   )
+}
+
+function readGuardVerdict(): Promise<boolean> {
+  return ctx.panel.evaluate<boolean>('window.__guardPromise')
+}
+
+test('useActionGuard fires cancel-operation when the user confirms cancelling the busy op @lifecycle', async () => {
+  // Active session + in-flight op makes the guard's busy check fire.
+  await startInFlightOp()
+  await runGuardInBackground('Restart ComfyUI')
 
   // useActionGuard fires a plain confirm (no details / checkboxes), so
   // ModalDialog routes it through `BaseAlert` — its action button uses
@@ -136,26 +137,16 @@ test('useActionGuard fires cancel-operation when the user confirms cancelling th
   // getProgressInfo flips to null and the guard's poll exits, returning
   // true so the action would proceed.
   await settleInFlightOp({ ok: false, cancelled: true })
-  const verdict = await ctx.panel.evaluate<boolean>('window.__guardPromise')
-  expect(verdict).toBe(true)
+  expect(await readGuardVerdict()).toBe(true)
 })
 
 test('useActionGuard returns false without cancelling when the user dismisses the confirm @lifecycle', async () => {
   await startInFlightOp()
-  await ctx.panel.evaluate<void>(
-    `(() => {
-      window.__guardPromise = window.__e2eRenderer.runActionGuard({
-        installationId: ${JSON.stringify(INSTALL_ID)},
-        actionLabel: 'Restart ComfyUI',
-      })
-    })()`,
-  )
+  await runGuardInBackground('Restart ComfyUI')
 
   await ctx.panel.waitForVisible(byTestId(TID.baseAlertCancel), { timeout: 10_000 })
   expect(await ctx.panel.click(byTestId(TID.baseAlertCancel))).toBe(true)
-
-  const verdict = await ctx.panel.evaluate<boolean>('window.__guardPromise')
-  expect(verdict).toBe(false)
+  expect(await readGuardVerdict()).toBe(false)
 
   // Cancel-operation must NOT fire when the user backs out of the
   // confirm — that would punish them for accidentally hitting an
