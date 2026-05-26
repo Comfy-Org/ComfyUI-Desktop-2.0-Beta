@@ -122,6 +122,10 @@ export interface DetailField {
   browseOnly?: boolean
   onChangeAction?: string
   tooltip?: string
+  /** Marks fields that only take effect on next process start.
+   *  Renderer shows a per-field tag + promotes the footer Restart
+   *  button when one of these is edited while the install is running. */
+  requiresRestart?: boolean
   // text / number support — surfaced from SettingsField when DetailField
   // is built from a global SettingsSection (Global Settings panel).
   placeholder?: string
