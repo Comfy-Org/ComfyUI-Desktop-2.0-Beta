@@ -211,6 +211,39 @@ export async function getRunningSessionSnapshot(
   }, installationId))
 }
 
+/** Replace the shared release-cache entry for `(repo, channel)` so the
+ *  channel-cards builder reports a deterministic `latestTag` /
+ *  `updateAvailable` without spending a real `git ls-remote` round-trip.
+ *  Mirror of `__e2e.seedReleaseCache`. */
+export interface ReleaseCacheEntryLike {
+  checkedAt?: number
+  latestTag?: string
+  releaseName?: string
+  releaseNotes?: string
+  releaseUrl?: string
+  publishedAt?: string
+  installedTag?: string
+  commitSha?: string
+  baseTag?: string
+  commitsAhead?: number
+  [key: string]: unknown
+}
+
+export async function seedReleaseCache(
+  app: ElectronApplication,
+  repo: string,
+  channel: string,
+  entry: ReleaseCacheEntryLike,
+): Promise<void> {
+  await evalWithRetry(() => app.evaluate((_electron, args) => {
+    const helpers = (globalThis as unknown as {
+      __e2e?: { seedReleaseCache: (r: string, c: string, e: unknown) => void }
+    }).__e2e
+    if (!helpers) throw new Error('E2E helpers not registered (process.env.E2E !== "1"?)')
+    helpers.seedReleaseCache(args.repo, args.channel, args.entry)
+  }, { repo, channel, entry }))
+}
+
 /** Read the `checkedAt` ms timestamp of the shared release-cache entry
  *  for `(repo, channel)`. Returns `null` when no entry exists yet. */
 export async function getReleaseCacheCheckedAt(

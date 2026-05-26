@@ -20,7 +20,9 @@ import {
 import { _test_setUpdateState, type AppUpdateState } from './updater'
 import {
   get as _releaseCacheGet,
+  set as _releaseCacheSet,
   _test_ageEntries as _test_ageReleaseCacheEntries,
+  type ReleaseCacheEntry,
 } from './release-cache'
 import { _test_getOpenTitlePopupBounds } from '../popups/titlePopup'
 import { returnToDashboard } from '../host/detach'
@@ -109,6 +111,12 @@ export interface E2EHelpers {
    *  in `ComfyUISettingsContent` treats the data as stale and auto-
    *  fires `check-update` on the next picker open. */
   ageReleaseCache(maxCheckedAt: number): void
+  /** Replace the shared release-cache entry for `(repo, channel)` so
+   *  the channel-cards builder reports a deterministic latestTag /
+   *  updateAvailable without spending a real `git ls-remote` round-
+   *  trip. Tests that need a specific update offered on a specific
+   *  channel call this in `beforeAll`. */
+  seedReleaseCache(repo: string, channel: string, entry: ReleaseCacheEntry): void
 }
 
 export function registerE2EHooks(): void {
@@ -155,6 +163,7 @@ export function registerE2EHooks(): void {
       return _releaseCacheGet(repo, channel)?.checkedAt ?? null
     },
     ageReleaseCache: _test_ageReleaseCacheEntries,
+    seedReleaseCache: _releaseCacheSet,
   }
   ;(globalThis as unknown as { __e2e: E2EHelpers }).__e2e = helpers
 }
