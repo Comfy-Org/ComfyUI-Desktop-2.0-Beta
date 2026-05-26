@@ -81,6 +81,15 @@ export const TID = {
   snapshotRow: (filename: string) => `snapshot-row-${filename}`,
   /** The Restore CTA inside an expanded snapshot row's detail panel. */
   snapshotRowRestore: (filename: string) => `snapshot-row-restore-${filename}`,
+  /** The Export CTA inside an expanded snapshot row's detail panel.
+   *  Drives `window.api.exportSnapshot(installationId, filename)`. */
+  snapshotRowExport: (filename: string) => `snapshot-row-export-${filename}`,
+  /** The Snapshots tab toolbar's Import CTA. Drives the import preview
+   *  → diff → confirm chain through `window.api.importSnapshots*`. */
+  snapshotsImport: 'snapshots-import',
+  /** The Snapshots tab toolbar's Export All CTA. Drives
+   *  `window.api.exportAllSnapshots(installationId)`. */
+  snapshotsExportAll: 'snapshots-export-all',
 
   // ---------- Progress takeover ----------
   /** The red error message block in the brand progress takeover. */

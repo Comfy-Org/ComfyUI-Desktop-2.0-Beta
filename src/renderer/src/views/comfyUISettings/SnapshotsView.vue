@@ -358,6 +358,7 @@ async function handleImport(): Promise<void> {
           type="button"
           class="snapshots-view-toolbtn"
           :aria-label="t('snapshots.importSnapshots', 'Import')"
+          :data-testid="TID.snapshotsImport"
           @click="handleImport"
         >
           <span>{{ t('snapshots.importSnapshots', 'Import') }}</span>
@@ -367,6 +368,7 @@ async function handleImport(): Promise<void> {
           class="snapshots-view-toolbtn"
           :disabled="snapshots.length === 0"
           :aria-label="t('snapshots.exportAll', 'Export All')"
+          :data-testid="TID.snapshotsExportAll"
           @click="handleExportAll"
         >
           <span>{{ t('snapshots.exportAll', 'Export All') }}</span>
@@ -472,6 +474,7 @@ async function handleImport(): Promise<void> {
                     type="button"
                     class="snapshots-view-detail-btn"
                     :aria-label="t('snapshots.exportSnapshot', 'Export')"
+                    :data-testid="TID.snapshotRowExport(item.snapshot.filename)"
                     @click="handleExport(item.snapshot.filename)"
                   >
                     <Download :size="13" />
