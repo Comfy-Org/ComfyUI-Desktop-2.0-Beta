@@ -118,21 +118,15 @@ test('ProgressModal Reboot re-runs the same apiCall to recover an errored instal
   // resolves with `{ ok: true }` and the auto-close watcher tears the
   // takeover down — `.brand-progress` leaves the DOM.
   await expect
-    .poll(
-      () =>
-        ctx.panel.evaluate<boolean>(
-          `(() => !!document.querySelector('${byTestId(TID.progressErrorMessage)}'))()`,
-        ),
-      { timeout: 10_000, intervals: [100, 200] },
-    )
+    .poll(() => ctx.panel.exists(byTestId(TID.progressErrorMessage)), {
+      timeout: 10_000,
+      intervals: [100, 200],
+    })
     .toBe(false)
   await expect
-    .poll(
-      () =>
-        ctx.panel.evaluate<boolean>(
-          `(() => !!document.querySelector('.brand-progress'))()`,
-        ),
-      { timeout: 10_000, intervals: [200, 500] },
-    )
+    .poll(() => ctx.panel.exists('.brand-progress'), {
+      timeout: 10_000,
+      intervals: [200, 500],
+    })
     .toBe(false)
 })

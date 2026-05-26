@@ -746,9 +746,7 @@ test('picker pin-bottom Restart drives stop+launch under one "Restarting ComfyUI
   await popup.waitForVisible(byTestId(TID.pinBottomAction('restart')), { timeout: 10_000 })
   // Cross-check: the bare `launch` item must NOT be present when the
   // install is running — the swap to `restart` is what we're testing.
-  const launchVisible = await popup.evaluate<boolean>(
-    `(() => !!document.querySelector(${JSON.stringify(byTestId(TID.pinBottomAction('launch')))}))()`,
-  )
+  const launchVisible = await popup.exists(byTestId(TID.pinBottomAction('launch')))
   expect(launchVisible, 'pin-bottom Launch must NOT render while running (Restart swap)').toBe(false)
   expect(await popup.click(byTestId(TID.pinBottomAction('restart')))).toBe(true)
 
@@ -762,9 +760,7 @@ test('picker pin-bottom Restart drives stop+launch under one "Restarting ComfyUI
   await waitForProgressTakeoverAfterPopupClose()
   await expect
     .poll(async () => {
-      const title = await ctx.panel.evaluate<string | null>(
-        `(() => { const el = document.querySelector('.brand-progress'); return el ? el.textContent : null })()`,
-      )
+      const title = await ctx.panel.textOf('.brand-progress')
       return title?.includes('Restarting ComfyUI') ?? false
     }, { timeout: 10_000, intervals: [200, 500] })
     .toBe(true)
