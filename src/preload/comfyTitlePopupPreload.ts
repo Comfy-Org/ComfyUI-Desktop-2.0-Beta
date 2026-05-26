@@ -423,6 +423,17 @@ export interface ComfyTitlePopupBridge {
     triggersInstanceStart?: boolean
     opKind?: 'launch' | 'install' | 'update' | 'destructive' | 'snapshot' | 'generic'
     isRestart?: boolean
+    /** Where the ProgressModal should mount. `'same-host'` keeps it in
+     *  the picker's parent panel (today's behaviour); `'target-host'`
+     *  opens-or-focuses the install's own window and mounts there so
+     *  cross-instance actions render where the user expects. Resolved
+     *  by `resolveProgressRouting` in `lib/pickerProgressRouting.ts`. */
+    routing?: 'same-host' | 'target-host'
+    /** When `true`, ProgressModal renders a terminal choice screen
+     *  (e.g. `[Go to Dashboard | Open Instance]`) on success instead of
+     *  auto-closing. Picker-side policy lives in
+     *  `resolveProgressRouting`. */
+    successChoice?: boolean
   }): void
 }
 

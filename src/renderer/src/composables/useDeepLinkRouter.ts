@@ -1,7 +1,9 @@
 import { onMounted, onUnmounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useInstallationStore } from '../stores/installationStore'
 import { useSessionStore } from '../stores/sessionStore'
 import { IN_PLACE_RELAUNCH, stopAndWaitForExit } from '../lib/stopWarning'
+import { successTerminalGoDashboardOrOpen } from '../lib/progressTerminalPresets'
 import { REQUIRES_STOPPED, type Installation, type ShowProgressOpts } from '../types/ipc'
 
 import type { Overlay } from './useOverlay'
@@ -48,6 +50,7 @@ interface DeepLinkRouterOpts {
 export function useDeepLinkRouter(opts: DeepLinkRouterOpts): void {
   const installationStore = useInstallationStore()
   const sessionStore = useSessionStore()
+  const { t } = useI18n()
   let unsubPanelTriggerOverlay: (() => void) | null = null
 
   onMounted(() => {
@@ -161,6 +164,16 @@ export function useDeepLinkRouter(opts: DeepLinkRouterOpts): void {
                 return result
               }
               : () => window.api.runAction(id, actionId, actionData)
+          // Picker forwarded `successChoice: true` for mutating non-launch
+          // ops where the user might NOT want to enter the app right
+          // away. Build the preset here — this side owns the i18n
+          // catalog the popup process doesn't.
+          const successTerminal = payload.successChoice
+            ? successTerminalGoDashboardOrOpen({
+              dashboardLabel: t('progress.successChoiceGoDashboard', 'Go to Dashboard'),
+              openLabel: t('progress.successChoiceOpen', 'Open Instance'),
+            })
+            : undefined
           opts.showProgressFromPicker?.({
             installationId: id,
             title,
@@ -171,6 +184,7 @@ export function useDeepLinkRouter(opts: DeepLinkRouterOpts): void {
             opKind: payload.opKind,
             actionId,
             actionData,
+            successTerminal,
           })
         }
       })()

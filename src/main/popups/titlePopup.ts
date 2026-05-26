@@ -26,6 +26,7 @@ import { getGithubStarCount } from '../lib/githubStars'
 import {
   comfyWindows,
   findEntryByTitleBarSender,
+  getEntryByInstallationId,
   isChooserHost,
 } from '../host/registry'
 import type { ComfyPanelKey, ComfyWindowEntry } from '../host/registry'
@@ -1318,6 +1319,20 @@ export interface TitlePopupHostBindings {
   /** Send an IPC to the host's panel webContents, deferring until
    *  `did-finish-load` if the bundle is still loading. */
   sendToPanelDeferred: (panelView: WebContentsView, channel: string, payload: unknown) => void
+  /** Return the entry's live panelView, lazily rebuilding it in the
+   *  body mode that matches the entry's current state if it was torn
+   *  down (post-attach, etc.). Mirrors the
+   *  `entry.panelView ?? ensurePanelView(...)` recipe in `main/index.ts`
+   *  so picker IPCs that dispatch `panel-trigger-overlay` don't silently
+   *  drop when the host is mid-attach or just finished switching modes. */
+  ensurePanelViewForEntry: (entry: ComfyWindowEntry) => WebContentsView
+  /** Spawn a fresh chooser host window for a cross-instance picker
+   *  Update whose target install has no live window. The new chooser
+   *  takes the ProgressModal — the picker's parent window stays
+   *  completely untouched (no panel takeover, no comfy hide). Returns
+   *  the new entry so the caller can dispatch the overlay to its
+   *  panelView. */
+  spawnProgressHostForTarget: () => ComfyWindowEntry | null
   /** Build the same enriched installation list `get-installations`
    *  returns to renderer-side `installationStore`. Powers the instance-
    *  picker popup's list + detail pane. Async because the underlying
@@ -2287,11 +2302,58 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
       const actionId = payload?.actionId
       if (typeof installationId !== 'string' || installationId.length === 0) return
       if (typeof actionId !== 'string' || actionId.length === 0) return
-      const parentEntry = comfyWindows.get(popupEntry.parentEntryId)
-      if (!parentEntry) return
       hideTitlePopup(popupEntry, { releaseFocusToParent: false })
-      const panelView = parentEntry.panelView
-      if (!panelView || panelView.webContents.isDestroyed()) return
+
+      // Routing: `'target-host'` (cross-instance) dispatches into the
+      // install's own window so the ProgressModal renders where the
+      // user expects. `'same-host'` (or missing for back-compat) keeps
+      // the dispatch on the picker's parent panel. Resolved picker-
+      // side by `resolveProgressRouting`.
+      const routing = payload?.routing === 'target-host' ? 'target-host' : 'same-host'
+      const targetByInstall = routing === 'target-host'
+        ? getEntryByInstallationId(installationId)
+        : undefined
+
+      // Cold cross-instance (target install has no live window): spawn
+      // a fresh chooser host so the picker's parent window stays
+      // untouched. The new chooser owns the ProgressModal and becomes
+      // the target's window when the user picks "Open Instance" on the
+      // terminal screen (`handleChooserPick` attaches in place). Falls
+      // through to parent-panel behaviour on the rare window-factory
+      // failure rather than dropping the IPC silently.
+      let coldSpawn: ComfyWindowEntry | null = null
+      if (routing === 'target-host' && !targetByInstall) {
+        coldSpawn = bindings.spawnProgressHostForTarget()
+      }
+      const targetEntry = targetByInstall ?? coldSpawn ?? comfyWindows.get(popupEntry.parentEntryId)
+      if (!targetEntry) return
+
+      // Lazy-rebuild the panelView when an install host has dropped it
+      // (post-attach, etc.). Without this, picker-driven progress IPCs
+      // silently no-op on any install whose chooser PanelApp was torn
+      // down by `destroyPanelView` after the install pick.
+      const panelView = bindings.ensurePanelViewForEntry(targetEntry)
+      if (panelView.webContents.isDestroyed()) return
+
+      // Bring the target window forward for any cross-instance route
+      // (existing target or fresh chooser). Skip for same-host — the
+      // parent is already focused.
+      const shouldFocusTarget =
+        routing === 'target-host' && (targetByInstall || coldSpawn) && !targetEntry.window.isDestroyed()
+      if (shouldFocusTarget) {
+        targetEntry.window.show()
+        targetEntry.window.focus()
+      }
+
+      // Flip the target host into 'progress' panel mode BEFORE
+      // dispatching so the layout function brings panelView forward
+      // (panel full, comfy hidden). Without this, hosts running
+      // ComfyUI keep comfyView at full bodyRect and the ProgressModal
+      // renders on a 0x0 invisible panel. Restored to 'comfy' by the
+      // renderer when the modal closes (see `handleProgressClose` in
+      // `usePanelOverlays.ts`).
+      bindings.setActivePanel(targetEntry.windowKey, 'progress')
+
       bindings.sendToPanelDeferred(panelView, 'panel-trigger-overlay', {
         kind: 'picker-show-progress',
         installationId,
@@ -2302,6 +2364,7 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
         triggersInstanceStart: payload?.triggersInstanceStart,
         opKind: payload?.opKind,
         isRestart: payload?.isRestart,
+        successChoice: payload?.successChoice,
       })
     },
   )
@@ -2328,8 +2391,11 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
       if (!PICKER_NON_MODAL_ACTIONS.has(actionId)) {
         hideTitlePopup(popupEntry, { releaseFocusToParent: false })
       }
-      const panelView = parentEntry.panelView
-      if (!panelView || panelView.webContents.isDestroyed()) return
+      // Lazy-rebuild the panelView when the host has dropped it (post-
+      // attach, etc.) — same recipe as `forward-show-progress`. Without
+      // this, kebab actions silently no-op on a freshly-attached install.
+      const panelView = bindings.ensurePanelViewForEntry(parentEntry)
+      if (panelView.webContents.isDestroyed()) return
       bindings.sendToPanelDeferred(panelView, 'panel-trigger-overlay', {
         kind: 'picker-install-action',
         installationId,

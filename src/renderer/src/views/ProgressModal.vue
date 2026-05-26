@@ -30,6 +30,10 @@ const emit = defineEmits<{
   close: []
   'show-detail': [installationId: string]
   'show-console': [installationId: string]
+  /** Picker-driven mutating ops that opted into a `successTerminal`
+   *  resolve here instead of auto-closing. The host maps the action id
+   *  (`go-dashboard`, `open-instance`, future presets) to behaviour. */
+  'success-choice': [actionId: string, installationId: string]
 }>()
 
 const { t } = useI18n()
@@ -619,10 +623,30 @@ function startOperation(opts: {
    *  set up an install→launch chain. Without this widening the field
    *  would be silently dropped — bar resets at the seam. */
   chainSpan?: ShowProgressOpts['chainSpan']
+  successTerminal?: ShowProgressOpts['successTerminal']
 }): void {
   currentId.value = opts.installationId
   resolvingConflict.value = false
   progressStore.startOperation(opts)
+}
+
+/** True when a successful op is parked on its terminal-choice screen
+ *  instead of auto-closing. Drives the footer template swap and the
+ *  auto-close gate. */
+const successTerminalActive = computed<boolean>(() => {
+  const op = currentOp.value
+  if (!op?.finished) return false
+  if (!op.result?.ok) return false
+  if (op.error) return false
+  if (op.cancelRequested) return false
+  return !!op.successTerminal
+})
+
+function handleSuccessChoice(actionId: string): void {
+  const id = displayId.value
+  if (!id) return
+  emit('success-choice', actionId, id)
+  emit('close')
 }
 
 // Auto-close modal on window-mode launch success. Other op kinds are
@@ -763,6 +787,10 @@ watch(
     if (!op?.finished) return null
     if (op.error) return null
     if (op.result?.portConflict) return null
+    // successTerminal opt-in parks the modal on a choice screen so the
+    // user explicitly picks the next step. Auto-close would race the
+    // first frame of that screen and dismiss it before it's readable.
+    if (successTerminalActive.value) return null
     return displayId.value
   },
   (id) => {
@@ -1042,6 +1070,22 @@ defineExpose({ startOperation, showOperation })
                 @click="handleKillProcess(currentOp.result.portConflict.port)"
               >
                 {{ $t('errors.portConflictKill') }}
+              </button>
+            </template>
+            <template
+              v-else-if="successTerminalActive && currentOp.successTerminal"
+            >
+              <button
+                v-for="action in currentOp.successTerminal.actions"
+                :key="action.id"
+                type="button"
+                :class="[
+                  action.variant === 'primary' ? 'brand-primary' : 'brand-ghost',
+                  'brand-progress__footer-btn'
+                ]"
+                @click="handleSuccessChoice(action.id)"
+              >
+                {{ action.label }}
               </button>
             </template>
             <template

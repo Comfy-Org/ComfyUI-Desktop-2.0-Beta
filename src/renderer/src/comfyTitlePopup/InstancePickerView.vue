@@ -8,6 +8,7 @@ import { useSessionStore } from '../stores/sessionStore'
 import ComfyUISettingsContent from '../components/settings/ComfyUISettingsContent.vue'
 import InstanceRow from './instancePicker/InstanceRow.vue'
 import { resolvePickerTab, type PickerTab } from '../lib/pickerTabs'
+import { resolveProgressRouting } from '../lib/pickerProgressRouting'
 import { mergePanelLocaleIntoPopup } from './pickerSettingsApiShim'
 import type {
   DetailSection,
@@ -125,6 +126,8 @@ interface PickerBridge {
     triggersInstanceStart?: boolean
     opKind?: 'launch' | 'install' | 'update' | 'destructive' | 'snapshot' | 'generic'
     isRestart?: boolean
+    routing?: 'same-host' | 'target-host'
+    successChoice?: boolean
   }) => void
 }
 const bridge = (window as unknown as { __comfyTitlePopup?: PickerBridge }).__comfyTitlePopup
@@ -268,6 +271,13 @@ onMounted(() => {
 
 function handleSettingsShowProgress(opts: ShowProgressOpts): void {
   if (!opts.actionId) return
+  // All routing/successChoice policy lives in `resolveProgressRouting`
+  // so this handler stays a thin forwarder. New mutating actions plug
+  // in automatically via the resolver's flag-derived logic.
+  const { routing, successChoice } = resolveProgressRouting(
+    opts,
+    props.snapshot.activeInstallationId
+  )
   bridge?.pickerForwardShowProgress({
     installationId: opts.installationId,
     actionId: opts.actionId,
@@ -276,7 +286,9 @@ function handleSettingsShowProgress(opts: ShowProgressOpts): void {
     cancellable: opts.cancellable,
     triggersInstanceStart: opts.triggersInstanceStart,
     opKind: opts.opKind,
-    isRestart: opts.actionId === 'restart'
+    isRestart: opts.actionId === 'restart',
+    routing,
+    successChoice
   })
 }
 
