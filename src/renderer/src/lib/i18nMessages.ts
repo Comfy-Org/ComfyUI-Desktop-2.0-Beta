@@ -97,6 +97,8 @@ export const en = {
     sendFeedback: 'Send Beta Feedback',
     returnToDashboard: 'Return to Dashboard',
     closeAllWindows: 'Close All Windows',
+    exitWindow: 'Exit Window',
+    exitAllWindows: 'Exit All Windows',
     skipOnboarding: 'Skip Onboarding'
     /* Reset Zoom carries a dynamic percentage in the label and is
      * built main-side without going through this catalog — kept as a

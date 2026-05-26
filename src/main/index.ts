@@ -75,6 +75,7 @@ import { applyAttachHostPreview, clearAttachHostPreview } from './host/attachHos
 import {
   _detachInstallImpl,
   confirmAndCloseAllHostWindows,
+  confirmAndCloseHostWindow,
   consultPanelRendererClose,
   detachOrphanedInstallHosts,
   preClearedClose,
@@ -1103,6 +1104,7 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
       openChooserHostWindow,
       returnToDashboard,
       confirmAndCloseAllHostWindows,
+      confirmAndCloseHostWindow,
       setActivePanel,
       triggerOpenFeedback,
       sendToPanelDeferred,

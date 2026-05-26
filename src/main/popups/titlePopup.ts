@@ -27,7 +27,6 @@ import {
   comfyWindows,
   findEntryByTitleBarSender,
   isChooserHost,
-  isInstallHost,
 } from '../host/registry'
 import type { ComfyPanelKey, ComfyWindowEntry } from '../host/registry'
 import {
@@ -547,44 +546,39 @@ export function buildTitlePopupMenuItems(entry: ComfyWindowEntry): TitlePopupMen
       },
       { id: 'load-snapshot', label: 'Load Snapshot', labelKey: 'fileMenu.loadSnapshot' },
       { kind: 'separator' },
+      {
+        id: 'settings',
+        label: 'Desktop Settings',
+        labelKey: 'fileMenu.globalSettings',
+      },
+      // Send Feedback (#493). The renderer-side handler resolves the
+      // support URL and emits the `desktop2.feedback.opened`
+      // telemetry action with `source: 'menu'`.
+      { id: 'feedback', label: 'Send Beta Feedback', labelKey: 'fileMenu.sendFeedback' },
+      { kind: 'separator' },
+      {
+        id: 'close-all-windows',
+        label: 'Exit All Windows',
+        labelKey: 'fileMenu.exitAllWindows',
+      },
     )
+    return items
   }
+  // Install-host menu: trimmed to the four essentials. Desktop Settings,
+  // Return to Dashboard, and Reset Zoom are intentionally absent —
+  // Settings lives in the picker's Startup Args tab, the dashboard
+  // escape is the Home icon in the picker chips row, and Reset Zoom
+  // remains reachable via Ctrl/Cmd + 0.
   items.push(
-    {
-      id: 'settings',
-      label: 'Desktop Settings',
-      labelKey: 'fileMenu.globalSettings',
-    },
-    // Send Feedback (#493). The renderer-side handler resolves the
-    // support URL and emits the `desktop2.feedback.opened`
-    // telemetry action with `source: 'menu'`.
     { id: 'feedback', label: 'Send Beta Feedback', labelKey: 'fileMenu.sendFeedback' },
     { kind: 'separator' },
+    { id: 'exit-window', label: 'Exit Window', labelKey: 'fileMenu.exitWindow' },
+    {
+      id: 'close-all-windows',
+      label: 'Exit All Windows',
+      labelKey: 'fileMenu.exitAllWindows',
+    },
   )
-  if (isInstallHost(entry)) {
-    items.push({
-      id: 'return-to-dashboard',
-      label: 'Return to Dashboard',
-      labelKey: 'fileMenu.returnToDashboard',
-    })
-  }
-  // Reset Zoom — discoverable recovery path for users who zoom the Comfy
-  // view too far to read. Only surfaced when zoom is actually non-default,
-  // and the label includes the current percent so the menu also doubles
-  // as a status indicator. The Ctrl/Cmd + 0 shortcut wired in `onLaunch`
-  // does the same thing for users who know it.
-  if (!entry.comfyView.webContents.isDestroyed()) {
-    const level = entry.comfyView.webContents.getZoomLevel()
-    if (level !== 0) {
-      const percent = Math.round(Math.pow(1.2, level) * 100)
-      items.push({ id: 'reset-zoom', label: `Reset Zoom (${percent}%)` })
-    }
-  }
-  items.push({
-    id: 'close-all-windows',
-    label: 'Close All Windows',
-    labelKey: 'fileMenu.closeAllWindows',
-  })
   return items
 }
 
@@ -1259,6 +1253,11 @@ export interface TitlePopupHostBindings {
   /** Confirm + close all host windows. The parent window is the popup's
    *  host so the confirm dialog can be parented to it. */
   confirmAndCloseAllHostWindows: (parentWindow: BrowserWindow | null) => Promise<void> | void
+  /** Confirm + close a single host window. Same primitive the
+   *  bulk-close uses, scoped to one window. Powers the install-host
+   *  menu's `Exit Window` entry so the user gets a prompt instead of
+   *  the silent-close the native OS button gives. */
+  confirmAndCloseHostWindow: (parentWindow: BrowserWindow) => Promise<void> | void
   /** Switch the host's body to the named panel (settings, new-install, ...). */
   setActivePanel: (windowKey: number, panel: ComfyPanelKey) => void
   /** Forward a Send Feedback request to the host's panel renderer. */
@@ -1473,6 +1472,14 @@ function activateTitlePopupMenuItem(
     // parented to it so it stays valid through the in-place body
     // swap (no popup teardown).
     void bindings.returnToDashboard(entry.parentEntryId)
+  } else if (id === 'exit-window') {
+    // Single-window close with a confirm — mirrors the bulk-close
+    // primitive so the user sees what they're about to abandon
+    // (running ComfyUI, in-progress installs, downloads) instead of
+    // the silent close the OS button gives.
+    if (parentEntry && !parentEntry.window.isDestroyed()) {
+      void bindings.confirmAndCloseHostWindow(parentEntry.window)
+    }
   } else if (id === 'close-all-windows') {
     // For two or more open windows we confirm via a native dialog
     // that lists the open windows + any active operations that
