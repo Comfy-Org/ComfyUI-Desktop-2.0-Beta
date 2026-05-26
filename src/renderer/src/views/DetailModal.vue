@@ -22,6 +22,13 @@ import { findActionById } from '../lib/findAction'
 import { progressOpKindForActionId, destroysInstanceForActionId } from '../lib/progressOpKind'
 import { IN_PLACE_RELAUNCH, augmentActionWithStopWarning, stopAndWaitForExit } from '../lib/stopWarning'
 import { useMigrateAction } from '../composables/useMigrateAction'
+import {
+  runConfirmChain,
+  runDiskSpaceCheck,
+  runFieldSelectsChain,
+  runPromptChain,
+  runSelectChain,
+} from '../composables/actionShoppingList'
 import { REQUIRES_STOPPED } from '../types/ipc'
 import { Pencil } from 'lucide-vue-next'
 import TooltipWrap from '../components/TooltipWrap.vue'
@@ -29,9 +36,7 @@ import type {
   Installation,
   ActionDef,
   DetailSection,
-  FieldOption,
   ActionResult,
-  DiskSpaceInfo,
   ShowProgressOpts
 } from '../types/ipc'
 
@@ -355,177 +360,47 @@ async function runAction(action: ActionDef, btn: HTMLButtonElement | null): Prom
     mutableAction = augmentActionWithStopWarning(mutableAction, t('errors.willStopRunning'))
   }
 
-  // fieldSelects chain
-  if (mutableAction.fieldSelects) {
-    const selections: Record<string, FieldOption> = {}
-    for (const fs of mutableAction.fieldSelects) {
-      let items: FieldOption[]
-      try {
-        items = await window.api.getFieldOptions(fs.sourceId, fs.fieldId, selections)
-      } catch (err: unknown) {
-        await modal.alert({
-          title: mutableAction.label,
-          message: (err as Error).message || String(err)
-        })
-        return
-      }
-      if (!items || items.length === 0) {
-        await modal.alert({
-          title: mutableAction.label,
-          message: fs.emptyMessage || t('common.noItems')
-        })
-        return
-      }
-      const selectItems = items.map((item) => ({
-        value: item.value,
-        label: (item.recommended ? '★ ' : '') + item.label,
-        description: item.description
-      }))
-      const selected = await modal.select({
-        title: fs.title || mutableAction.label,
-        message: fs.message || '',
-        items: selectItems
-      })
-      if (!selected) return
-      const selectedItem = items.find((i) => i.value === selected)
-      if (selectedItem) selections[fs.fieldId] = selectedItem
-      mutableAction = {
-        ...mutableAction,
-        data: { ...mutableAction.data, [fs.field]: selectedItem }
-      }
-    }
-  }
+  // Shopping-list chain steps — fieldSelects → select → prompt →
+  // (migrate-to-standalone takeover) → confirm → disk-check. Each
+  // helper short-circuits the runAction when the user cancels.
+  const afterFieldSelects = await runFieldSelectsChain(mutableAction, modal, t)
+  if (!afterFieldSelects) return
+  mutableAction = afterFieldSelects
 
-  // select chain
-  if (mutableAction.select) {
-    let items: { value: string; label: string; description?: string }[] | undefined
-    if (mutableAction.select.source === 'installations') {
-      let all = await window.api.getInstallations()
-      if (mutableAction.select.excludeSelf && props.installation) {
-        all = all.filter((i) => i.id !== props.installation!.id)
-      }
-      if (mutableAction.select.filters) {
-        for (const [key, value] of Object.entries(mutableAction.select.filters)) {
-          all = all.filter(
-            (i) => (i as Record<string, unknown>)[key] === value
-          )
-        }
-      }
-      items = all.map((i) => ({ value: i.id, label: i.name, description: i.sourceLabel }))
-    }
-    if (!items || items.length === 0) {
-      await modal.alert({
-        title: mutableAction.label,
-        message: mutableAction.select.emptyMessage || t('common.noItems')
-      })
-      return
-    }
-    const selected = await modal.select({
-      title: mutableAction.select.title || mutableAction.label,
-      message: mutableAction.select.message || '',
-      items
-    })
-    if (!selected) return
-    mutableAction = {
-      ...mutableAction,
-      data: { ...mutableAction.data, [mutableAction.select.field]: selected }
-    }
-  }
+  const afterSelect = await runSelectChain(mutableAction, props.installation!.id, modal, t)
+  if (!afterSelect) return
+  mutableAction = afterSelect
 
-  // prompt chain
-  if (mutableAction.prompt) {
-    const value = await modal.prompt({
-      title: mutableAction.prompt.title || mutableAction.label,
-      message: mutableAction.prompt.message || '',
-      placeholder: mutableAction.prompt.placeholder,
-      defaultValue: mutableAction.prompt.defaultValue,
-      confirmLabel: mutableAction.prompt.confirmLabel || mutableAction.label,
-      required: mutableAction.prompt.required,
-      messageDetails: mutableAction.prompt.messageDetails,
-    })
-    if (!value) return
-    mutableAction = {
-      ...mutableAction,
-      data: { ...mutableAction.data, [mutableAction.prompt.field]: value }
-    }
-  }
+  const afterPrompt = await runPromptChain(mutableAction, modal)
+  if (!afterPrompt) return
+  mutableAction = afterPrompt
 
-  // Migration preview — delegates to useMigrateAction composable
+  // Migration preview — delegates to useMigrateAction composable.
+  // Lives between prompt and confirm so the takeover surface owns the
+  // confirm UX for migrate-to-standalone (the helper short-circuits
+  // the confirm chain below for that action id).
   if (mutableAction.id === 'migrate-to-standalone') {
     const migrateResult = await confirmMigration(props.installation, mutableAction.confirm)
     if (!migrateResult) return
-
     mutableAction = {
       ...mutableAction,
-      data: {
-        ...mutableAction.data,
-        ...migrateResult,
-      },
+      data: { ...mutableAction.data, ...migrateResult },
     }
   }
 
-  // confirm chain — skip for migrate-to-standalone since it handles its own confirmation above
-  if (mutableAction.confirm && mutableAction.id !== 'migrate-to-standalone') {
-    if (mutableAction.confirm.options) {
-      const result = await modal.confirmWithOptions({
-        title: mutableAction.confirm.title || 'Confirm',
-        message: mutableAction.confirm.message || 'Are you sure?',
-        options: mutableAction.confirm.options,
-        confirmLabel: mutableAction.confirm.confirmLabel || mutableAction.label,
-        confirmStyle: mutableAction.style || 'danger'
-      })
-      if (!result) return
-      mutableAction = { ...mutableAction, data: { ...mutableAction.data, ...result } }
-    } else {
-      const confirmed = await modal.confirm({
-        title: mutableAction.confirm.title || 'Confirm',
-        message: mutableAction.confirm.message || 'Are you sure?',
-        messageDetails: mutableAction.confirm.messageDetails,
-        confirmLabel: mutableAction.label,
-        confirmStyle: mutableAction.style || 'danger'
-      })
-      if (!confirmed) return
-    }
+  if (mutableAction.id !== 'migrate-to-standalone') {
+    const afterConfirm = await runConfirmChain(mutableAction, modal)
+    if (!afterConfirm) return
+    mutableAction = afterConfirm
   }
 
-  // Disk space check for actions that write significant data
-  const diskCheckActions = new Set(['copy', 'copy-update', 'release-update'])
-  if (diskCheckActions.has(mutableAction.id) && props.installation?.installPath) {
-    try {
-      const space: DiskSpaceInfo = await window.api.getDiskSpace(props.installation.installPath)
-      let estimatedRequired = 0
-      if (mutableAction.id === 'copy' || mutableAction.id === 'copy-update') {
-        if (installationSizeLoading.value) {
-          // Size still calculating — fetch it now before proceeding
-          try {
-            const result = await window.api.getInstallationSize(props.installation.id)
-            estimatedRequired = result.sizeBytes
-          } catch {
-            // Fall through to generic check
-          }
-        } else {
-          estimatedRequired = installationSize.value ?? 0
-        }
-      }
-      // Add 10% buffer for filesystem overhead (block alignment, journal, etc.)
-      const threshold = estimatedRequired > 0 ? Math.ceil(estimatedRequired * 1.1) : 1073741824
-      if (space.free < threshold) {
-        const freeStr = formatBytes(space.free)
-        const message = estimatedRequired > 0
-          ? t('diskSpace.warningMessage', { free: freeStr, required: formatBytes(estimatedRequired) })
-          : t('diskSpace.warningMessageGeneric', { free: freeStr })
-        const ok = await modal.confirm({
-          title: t('diskSpace.warningTitle'),
-          message,
-          confirmLabel: t('diskSpace.continueAnyway'),
-          confirmStyle: 'primary',
-        })
-        if (!ok) return
-      }
-    } catch {
-      // If disk space check fails, proceed anyway
-    }
-  }
+  // Disk-space sanity check. DetailModal pre-loads `installationSize`
+  // via watcher so the chain helper can skip the IPC round-trip when
+  // the cached value is fresh; pass `null` to signal "use the cache"
+  // when the loader is still running so the helper falls back to a
+  // synchronous re-fetch.
+  const cachedSize = installationSizeLoading.value ? null : installationSize.value
+  if (!await runDiskSpaceCheck(mutableAction, props.installation, modal, t, cachedSize)) return
 
   // showProgress
   if (mutableAction.showProgress) {
