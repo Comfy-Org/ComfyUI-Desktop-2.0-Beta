@@ -13,6 +13,7 @@ export interface ChannelDef {
 export interface ChannelCardData {
   installedVersion: string
   latestVersion: string
+  /** Localized human string for display (e.g. "11/24/2025, 4:32 PM"). */
   lastChecked: string
   lastCheckedAt?: number
   updateAvailable: boolean

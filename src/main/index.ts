@@ -1,4 +1,4 @@
-import { app, Menu, ipcMain, net, dialog } from 'electron'
+import { app, Menu, ipcMain, net } from 'electron'
 import type { BrowserWindow, WebContentsView } from 'electron'
 import type { Tray } from 'electron'
 import path from 'path'
@@ -21,6 +21,7 @@ import {
 } from './popups/titleTooltip'
 import {
   openSystemModal,
+  openSystemModalAsync,
   registerSystemModalIpc,
 } from './popups/systemModal'
 import { registerTitlePopupIpc, type InstancePickerInstall } from './popups/titlePopup'
@@ -36,6 +37,7 @@ import {
 import { registerAssetDownloadHandlers } from './lib/ipc/registerAssetDownloadHandlers'
 import { registerDownloadHandlers } from './lib/ipc/registerDownloadHandlers'
 import { get as getInstallation, installationEvents, list as listInstallations } from './installations'
+import { startPeriodicReleaseChecks } from './lib/release-cache-startup'
 import { showModelFolderRelaunchPage } from './lib/relaunchPage'
 import { COMFY_BG, SPLASH_DARK, TITLEBAR_BG, type SplashTheme } from './lib/theme'
 import { comfyTitleBarOverlay } from './lib/titleBarOverlay'
@@ -96,6 +98,11 @@ const APP_VERSION = getAppVersion()
 // The chooser host window plus per-install ComfyUI windows are the
 // only top-level surfaces.
 let tray: Tray | null = null
+
+/** Stop handle for the periodic release-cache poll registered in
+ *  `whenReady`. Cleared in `before-quit` so the interval doesn't
+ *  linger across `app.relaunch()`. */
+let _stopPeriodicReleaseChecks: (() => void) | null = null
 
 function focusExternalProcessWindow(pid: number): void {
   if (process.platform === 'win32') {
@@ -1039,17 +1046,27 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
         } catch {
           // Name lookup is cosmetic — fall through with the id as the label.
         }
-        const result = await dialog.showMessageBox(parentEntry.window, {
-          type: 'question',
-          buttons: ['Switch', 'Cancel'],
-          defaultId: 0,
-          cancelId: 1,
-          title: 'Switch instance?',
-          message: `Switch to ${targetName}?`,
-          detail:
-            'The current instance will be stopped and replaced in this window. Any unsaved work in the workflow will be lost.',
+        const confirmed = await openSystemModalAsync({
+          parent: parentEntry.window,
+          spec: {
+            title: 'Switch instance?',
+            message: `Switch to ${targetName}?`,
+            details: [
+              {
+                label: 'Heads up',
+                items: [
+                  'The current instance will be stopped and replaced in this window.',
+                  'Any unsaved work in the workflow will be lost.',
+                ],
+              },
+            ],
+            confirmLabel: 'Switch',
+            cancelLabel: 'Cancel',
+            confirmStyle: 'primary',
+            theme: parentEntry.lastTheme,
+          },
         })
-        if (result.response !== 0) return
+        if (!confirmed) return
         // `entry.detachInstall()` runs the full symmetric undo of
         // `attachInstall`: stops the running session, releases the
         // comfyView URL, re-navigates the title-bar back to chooser
@@ -1203,28 +1220,34 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
         // window short-circuit reloads the comfyView URL in place
         // without re-creating the BrowserWindow or the entry.
         //
-        // Confirm with a native dialog parented to the host so the
-        // prompt visually belongs to the window that initiated the
-        // restart. Reuses the same dialog idiom as
-        // `confirmAndCloseAllHostWindows` for visual consistency.
+        // Confirm via the shell-level system-modal overlay parented to
+        // the host so the prompt visually belongs to the window that
+        // initiated the restart. Same primitive `confirmAndCloseAllHostWindows`
+        // uses, so the launcher's confirm surface is consistent across
+        // shell-level prompts (and Playwright-driveable end to end).
         const parentEntry = comfyWindows.get(parentEntryId)
-        const parentWindow = parentEntry && !parentEntry.window.isDestroyed()
-          ? parentEntry.window
-          : null
-        const opts: Electron.MessageBoxOptions = {
-          type: 'question',
-          buttons: ['Restart', 'Cancel'],
-          defaultId: 1,
-          cancelId: 1,
-          title: 'Restart instance?',
-          message: 'Restart this instance?',
-          detail:
-            'Restarting will stop the running session. Any unsaved work in the workflow will be lost.',
-        }
-        const result = parentWindow
-          ? await dialog.showMessageBox(parentWindow, opts)
-          : await dialog.showMessageBox(opts)
-        if (result.response !== 0) return
+        if (!parentEntry || parentEntry.window.isDestroyed()) return
+        const confirmed = await openSystemModalAsync({
+          parent: parentEntry.window,
+          spec: {
+            title: 'Restart instance?',
+            message: 'Restart this instance?',
+            details: [
+              {
+                label: 'Heads up',
+                items: [
+                  'Restarting will stop the running session.',
+                  'Any unsaved work in the workflow will be lost.',
+                ],
+              },
+            ],
+            confirmLabel: 'Restart',
+            cancelLabel: 'Cancel',
+            confirmStyle: 'primary',
+            theme: parentEntry.lastTheme,
+          },
+        })
+        if (!confirmed) return
         // Stop is idempotent — awaiting ensures the process is fully
         // gone before the re-launch so the new session doesn't race a
         // port that's still bound.
@@ -1324,6 +1347,25 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
         detachOrphanedInstallHosts(liveIds)
       })()
     })
+
+    // Background poll: keep the shared ComfyUI release cache fresh so
+    // dashboard / title-bar update pills surface upstream releases
+    // within 15 minutes even when the user never opens the picker or
+    // clicks "Check for Update". The timer is `unref()`-ed inside the
+    // helper so it never blocks app quit; we still tear it down
+    // explicitly in `before-quit` for cleanliness across `app.relaunch`.
+    // Tests override the cadence via `E2E_PERIODIC_RECHECK_MS` so the
+    // periodic-poll lifecycle assertion doesn't have to wait 15 wall-
+    // clock minutes per run.
+    const _periodicIntervalMs = process.env['E2E_PERIODIC_RECHECK_MS']
+      ? Number(process.env['E2E_PERIODIC_RECHECK_MS'])
+      : undefined
+    _stopPeriodicReleaseChecks = startPeriodicReleaseChecks(listInstallations, {
+      onRefreshed: () => _broadcastToRenderer('installations-changed', {}),
+      ...(typeof _periodicIntervalMs === 'number' && Number.isFinite(_periodicIntervalMs)
+        ? { intervalMs: _periodicIntervalMs }
+        : {}),
+    })
   })
 
   app.on('activate', () => {
@@ -1344,6 +1386,10 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
         tray.destroy()
         tray = null
       }
+    }
+    if (_stopPeriodicReleaseChecks) {
+      _stopPeriodicReleaseChecks()
+      _stopPeriodicReleaseChecks = null
     }
     cleanupTempDownloads()
   })

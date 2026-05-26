@@ -26,9 +26,15 @@ interface Props {
   expanded: boolean
   /** First (newest) snapshot in the timeline carries a "Latest" badge. */
   isLatest?: boolean
+  /** Optional `data-testid` for the header toggle — lets the parent
+   *  scope tests to a specific snapshot by filename. */
+  toggleTestId?: string
 }
 
-const props = withDefaults(defineProps<Props>(), { isLatest: false })
+const props = withDefaults(defineProps<Props>(), {
+  isLatest: false,
+  toggleTestId: undefined,
+})
 
 const emit = defineEmits<{
   toggle: []
@@ -63,6 +69,7 @@ const triggerTone = computed<'state' | 'neutral'>(() => {
       type="button"
       class="snapshot-row-head"
       :aria-expanded="expanded"
+      :data-testid="toggleTestId"
       @click="emit('toggle')"
     >
       <div class="snapshot-row-head-left">

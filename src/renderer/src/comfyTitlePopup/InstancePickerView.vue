@@ -119,7 +119,7 @@ const {
   visibleInstalls,
   showCloudCard,
   showEmptyHint,
-  lastLaunchedShortLabel,
+  lastLaunchedShortLabel
 } = useInstallList({ installations: installationsRef })
 
 const visibleChips = computed(() => {
@@ -164,7 +164,7 @@ watch(
     if (first) {
       selectedId.value = first.id
     }
-  },
+  }
 )
 
 const selectedInstall = computed<Installation | null>(() => {
@@ -203,9 +203,9 @@ watch(
 // on *change*, so the initial fallback never reaches main. Persist
 // once on mount so main owns the selection from the first frame.
 if (
-  selectedId.value
-  && !props.snapshot.selectedInstallationId
-  && !props.snapshot.activeInstallationId
+  selectedId.value &&
+  !props.snapshot.selectedInstallationId &&
+  !props.snapshot.activeInstallationId
 ) {
   bridge?.setPickerSelectedInstall(selectedId.value)
 }
@@ -265,7 +265,11 @@ function handleExpandedPrimaryAction(running: boolean): void {
       </BaseInput>
     </div>
 
-    <div class="picker-chips" role="tablist" :aria-label="$t('chooser.filterLabel', 'Source filter')">
+    <div
+      class="picker-chips"
+      role="tablist"
+      :aria-label="$t('chooser.filterLabel', 'Source filter')"
+    >
       <button
         v-for="chip in visibleChips"
         :key="chip.key"
@@ -326,9 +330,12 @@ function handleExpandedPrimaryAction(running: boolean): void {
             <ComfyUISettingsContent
               :installation="selectedInstall"
               :initial-tab="initialExpandedTab"
+              :auto-action="snapshot.autoAction ?? null"
+              :show-back="true"
               class="picker-expanded-body"
               @show-progress="handleSettingsShowProgress"
               @navigate-list="handleSettingsNavigateList"
+              @request-close="handleSettingsNavigateList"
               @primary-action="handleExpandedPrimaryAction"
             />
           </template>

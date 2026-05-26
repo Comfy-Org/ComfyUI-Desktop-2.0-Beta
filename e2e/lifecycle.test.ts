@@ -31,7 +31,7 @@
  */
 
 import { execFileSync } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, rmSync } from 'node:fs'
 import path from 'node:path'
 import { resolve } from 'node:path'
 import { test, expect } from '@playwright/test'
@@ -41,8 +41,18 @@ import {
   expectChooserVisible,
   expectTakeoverOpen,
 } from './support/chooserHelpers'
-import { returnFirstInstallHostToDashboard } from './support/devHooks'
-import { waitForWebContents } from './support/cdpPages'
+import {
+  getIpcInvocations,
+  resetIpcInvocations,
+  returnFirstInstallHostToDashboard,
+} from './support/devHooks'
+import {
+  isPopupVisible,
+  systemModalPage,
+  titlePopupPage,
+  waitForWebContents,
+} from './support/cdpPages'
+import { byTestId, TID } from './support/testIds'
 
 let ctx: AppContext
 
@@ -401,6 +411,653 @@ test('update-comfyui drives the real updater and moves HEAD forward @lifecycle',
 test('re-launch ComfyUI after update validates the updated install runs @lifecycle', async () => {
   await clickInstallTile(ctx.panel, 'ComfyUI')
   await expect.poll(comfyFrontendIsLoaded, { timeout: 180_000, intervals: [1_000] }).toBe(true)
+})
+
+// ---------------------------------------------------------------------------
+// FLOW 1 — IN_PLACE_RELAUNCH coverage via the real picker UI.
+//
+// The existing direct-runAction update test above covers the stopped-install
+// code path. These tests cover the running-install path: the user opens the
+// picker against a live ComfyUI, clicks Update Now (or Restore Snapshot),
+// confirms in the popup's own dialog, and the panel-side apiCall wrapper
+// self-stops + runs the op + relaunches in place. Each test re-uses the
+// real ~500MB install the lifecycle suite already built and drives the
+// actions through real DOM gestures.
+// ---------------------------------------------------------------------------
+
+interface SnapshotSummaryLite {
+  filename: string
+  label: string | null
+}
+interface SnapshotListLite { snapshots: SnapshotSummaryLite[] }
+
+interface OpenInstallWindowPayload {
+  installationId: string
+}
+interface RunActionInvocation {
+  installationId?: string
+  actionId?: string
+}
+interface StopComfyInvocation {
+  installationId?: string
+}
+
+/** Polls until the title-popup webContents reports hidden (the picker
+ *  closes itself once main routes the action), then waits for the
+ *  panel-side `.brand-progress` takeover to mount. Used by every
+ *  picker-driven action whose op lands in the ProgressModal. */
+async function waitForProgressTakeoverAfterPopupClose(): Promise<void> {
+  await expect
+    .poll(() => isPopupVisible(ctx.app, 'comfyTitlePopup.html'), {
+      timeout: 10_000, intervals: [100, 200],
+    })
+    .toBe(false)
+  await ctx.panel.waitForVisible('.brand-progress', { timeout: 30_000 })
+}
+
+/** Polls until a `run-action` IPC for `installationId` with `actionId`
+ *  has been recorded. Wraps the long-budget poll the picker-driven
+ *  update / restore / restart tests need to wait for the IN_PLACE_RELAUNCH
+ *  launch leg. */
+async function waitForRunAction(
+  installationId: string, actionId: string,
+  opts: { timeout?: number; intervals?: number[] } = {},
+): Promise<void> {
+  await expect
+    .poll(async () => {
+      const calls = (await getIpcInvocations(ctx.app, 'run-action')) as RunActionInvocation[]
+      return calls.some((c) => c.installationId === installationId && c.actionId === actionId)
+    }, { timeout: opts.timeout ?? 540_000, intervals: opts.intervals ?? [2_000, 5_000] })
+    .toBe(true)
+}
+
+async function getRunActionsFor(installationId: string): Promise<RunActionInvocation[]> {
+  const calls = (await getIpcInvocations(ctx.app, 'run-action')) as RunActionInvocation[]
+  return calls.filter((c) => c.installationId === installationId)
+}
+
+async function getStopsFor(installationId: string): Promise<StopComfyInvocation[]> {
+  const calls = (await getIpcInvocations(ctx.app, 'stop-comfyui')) as StopComfyInvocation[]
+  return calls.filter((c) => c.installationId === installationId)
+}
+
+let _restoreSnapshotFilename = ''
+let _snapshotHeadAtCapture = ''
+
+test('captures a snapshot for the picker-driven restore test @lifecycle', async () => {
+  // ComfyUI is running from the prior re-launch test. `snapshot-save`
+  // is NOT in REQUIRES_STOPPED so it runs against a live install — the
+  // snapshot just records the current state. Captured label gives us a
+  // stable filename to grab in the restore test below.
+  expect(_updateInstallId, 'update install id not captured').toBeTruthy()
+  await ctx.panel.evaluate<unknown>(
+    `window.api.runAction(${JSON.stringify(_updateInstallId)}, 'snapshot-save', { label: 'lifecycle-restore-target' })`,
+  )
+  const list = await ctx.panel.evaluate<SnapshotListLite>(
+    `window.api.getSnapshots(${JSON.stringify(_updateInstallId)})`,
+  )
+  const target = list.snapshots.find((s) => s.label === 'lifecycle-restore-target')
+  expect(target, 'lifecycle-restore-target snapshot missing from getSnapshots').toBeDefined()
+  _restoreSnapshotFilename = target!.filename
+  _snapshotHeadAtCapture = execFileSync('git', ['rev-parse', 'HEAD'], {
+    cwd: _comfyUIDir, encoding: 'utf-8', windowsHide: true,
+  }).trim()
+  expect(_snapshotHeadAtCapture).toMatch(/^[a-f0-9]{40}$/)
+})
+
+test('picker-driven update-comfyui IN_PLACE_RELAUNCH while running @lifecycle', async () => {
+  // Real `update-comfyui` against github.com can spend minutes inside
+  // `uv pip install -r requirements.txt` if the rolled-back range
+  // crosses a requirements change. Mirror the stopped-install
+  // update test's 10-minute budget.
+  test.setTimeout(600_000)
+
+  // Roll HEAD back so the update has work — the prior update test
+  // already moved HEAD forward to the latest stable, so we have to
+  // un-do that for the picker click to show "Update available".
+  const headBefore = execFileSync('git', ['rev-parse', 'HEAD'], {
+    cwd: _comfyUIDir, encoding: 'utf-8', windowsHide: true,
+  }).trim()
+  execFileSync('git', ['reset', '--hard', 'HEAD~3'], {
+    cwd: _comfyUIDir, stdio: 'pipe', windowsHide: true,
+  })
+  const rolledBack = execFileSync('git', ['rev-parse', 'HEAD'], {
+    cwd: _comfyUIDir, encoding: 'utf-8', windowsHide: true,
+  }).trim()
+  expect(rolledBack, 'git reset --hard did not move HEAD').not.toBe(headBefore)
+
+  await resetIpcInvocations(ctx.app, 'stop-comfyui')
+  await resetIpcInvocations(ctx.app, 'run-action')
+
+  // Open the picker in expanded mode on the Update tab. Channel
+  // metadata loads via real `check-update` against github.com — the
+  // Update Now button appears once the stable channel reports an
+  // update available.
+  await ctx.panel.evaluate<boolean>(
+    `(() => {
+      window.api.openInstancePicker({
+        installationId: ${JSON.stringify(_updateInstallId)},
+        mode: 'expanded',
+        initialTab: 'update',
+      })
+      return true
+    })()`,
+  )
+  await waitForWebContents(ctx.app, 'comfyTitlePopup.html')
+  const popup = titlePopupPage(ctx.app)
+  await popup.waitForSelector(byTestId(TID.updateActionButton('update-comfyui')), { timeout: 60_000 })
+  expect(await popup.click(byTestId(TID.updateActionButton('update-comfyui')))).toBe(true)
+
+  // The update action carries `confirm.messageDetails` (truncated
+  // release notes), so it lands in `ModalDialog`'s rich-confirm
+  // branch — `TID.modalConfirm` is the primary CTA there.
+  await popup.waitForVisible(byTestId(TID.modalConfirm), { timeout: 15_000 })
+  expect(await popup.click(byTestId(TID.modalConfirm))).toBe(true)
+
+  // Popup hides; the panel's ProgressModal owns the long-running op.
+  await waitForProgressTakeoverAfterPopupClose()
+
+  // Wait for the relaunch leg of IN_PLACE_RELAUNCH to fire (panel-side
+  // `useDeepLinkRouter` appends `runAction('launch')` after a successful
+  // update). Then wait for the comfy frontend to be loaded again.
+  await waitForRunAction(_updateInstallId, 'launch')
+  await expect.poll(comfyFrontendIsLoaded, { timeout: 180_000, intervals: [1_000, 2_000] }).toBe(true)
+
+  // IPC chain: exactly one self-stop, then update-comfyui then launch
+  // (both scoped to our installation id).
+  const ourStops = await getStopsFor(_updateInstallId)
+  expect(ourStops.length, 'self-stop should fire exactly once for IN_PLACE_RELAUNCH').toBe(1)
+
+  const ourRunCalls = await getRunActionsFor(_updateInstallId)
+  expect(ourRunCalls.length, 'update + launch run-action calls').toBeGreaterThanOrEqual(2)
+  expect(ourRunCalls[0]?.actionId, 'first run-action should be update-comfyui').toBe('update-comfyui')
+  const launchIdx = ourRunCalls.findIndex((c) => c.actionId === 'launch')
+  expect(launchIdx, 'launch run-action should follow update-comfyui').toBeGreaterThan(0)
+
+  // HEAD moved forward off the rolled-back commit.
+  const headAfter = execFileSync('git', ['rev-parse', 'HEAD'], {
+    cwd: _comfyUIDir, encoding: 'utf-8', windowsHide: true,
+  }).trim()
+  expect(headAfter, 'update did not move HEAD').not.toBe(rolledBack)
+})
+
+test('picker-driven snapshot-restore IN_PLACE_RELAUNCH while running @lifecycle', async () => {
+  test.setTimeout(600_000)
+  expect(_restoreSnapshotFilename, 'restore-target snapshot not captured').toBeTruthy()
+
+  // Move HEAD off the snapshot commit so the restore has work to do.
+  // Use a parent of the snapshot commit so restore lands somewhere
+  // different from the current working tree.
+  execFileSync('git', ['reset', '--hard', `${_snapshotHeadAtCapture}~5`], {
+    cwd: _comfyUIDir, stdio: 'pipe', windowsHide: true,
+  })
+  const rolledBack = execFileSync('git', ['rev-parse', 'HEAD'], {
+    cwd: _comfyUIDir, encoding: 'utf-8', windowsHide: true,
+  }).trim()
+  expect(rolledBack, 'rollback did not change HEAD off the snapshot commit').not.toBe(_snapshotHeadAtCapture)
+
+  await resetIpcInvocations(ctx.app, 'stop-comfyui')
+  await resetIpcInvocations(ctx.app, 'run-action')
+
+  await ctx.panel.evaluate<boolean>(
+    `(() => {
+      window.api.openInstancePicker({
+        installationId: ${JSON.stringify(_updateInstallId)},
+        mode: 'expanded',
+        initialTab: 'snapshots',
+      })
+      return true
+    })()`,
+  )
+  await waitForWebContents(ctx.app, 'comfyTitlePopup.html')
+  const popup = titlePopupPage(ctx.app)
+  // Expand the snapshot row to reveal Restore.
+  await popup.waitForSelector(byTestId(TID.snapshotRow(_restoreSnapshotFilename)), { timeout: 30_000 })
+  expect(await popup.click(byTestId(TID.snapshotRow(_restoreSnapshotFilename)))).toBe(true)
+  await popup.waitForVisible(byTestId(TID.snapshotRowRestore(_restoreSnapshotFilename)), { timeout: 10_000 })
+  expect(await popup.click(byTestId(TID.snapshotRowRestore(_restoreSnapshotFilename)))).toBe(true)
+
+  // SnapshotsView builds a diff-preview confirm with `messageDetails` —
+  // rich confirm branch, `TID.modalConfirm` is the primary CTA.
+  await popup.waitForVisible(byTestId(TID.modalConfirm), { timeout: 30_000 })
+  expect(await popup.click(byTestId(TID.modalConfirm))).toBe(true)
+
+  await waitForProgressTakeoverAfterPopupClose()
+
+  // Wait for the IN_PLACE_RELAUNCH launch leg + frontend load.
+  await waitForRunAction(_updateInstallId, 'launch')
+  await expect.poll(comfyFrontendIsLoaded, { timeout: 180_000, intervals: [1_000, 2_000] }).toBe(true)
+
+  const ourStops = await getStopsFor(_updateInstallId)
+  expect(ourStops.length, 'self-stop should fire exactly once for IN_PLACE_RELAUNCH').toBe(1)
+
+  const ourRunCalls = await getRunActionsFor(_updateInstallId)
+  expect(ourRunCalls[0]?.actionId, 'first run-action should be snapshot-restore').toBe('snapshot-restore')
+  expect(ourRunCalls.some((c) => c.actionId === 'launch'), 'launch run-action must follow restore').toBe(true)
+
+  // Snapshot restore moves ComfyUI's HEAD to the snapshot's commit.
+  const headAfter = execFileSync('git', ['rev-parse', 'HEAD'], {
+    cwd: _comfyUIDir, encoding: 'utf-8', windowsHide: true,
+  }).trim()
+  expect(headAfter, 'snapshot-restore did not land HEAD on the snapshot commit').toBe(_snapshotHeadAtCapture)
+})
+
+// ---------------------------------------------------------------------------
+// Restart synthetic action — driven through the compact-picker row's
+// "Restart" CTA. The CTA fires `restartInstall` over the picker bridge,
+// which lives in `main/index.ts` as `restartInstallFromPicker` — confirm
+// via the shell-level system modal (migrated off `dialog.showMessageBox`),
+// then main runs `ipc.stopRunning` and routes a `picker-pick-install`
+// payload back to the panel for the re-launch.
+//
+// Note: this path intentionally bypasses the `stop-comfyui` IPC channel
+// (it goes through `ipc.stopRunning` directly), so the per-channel
+// invocation count for `stop-comfyui` stays at zero.
+// ---------------------------------------------------------------------------
+
+test('picker compact-row Restart drives system-modal confirm + re-launch @lifecycle', async () => {
+  test.setTimeout(300_000)
+
+  await resetIpcInvocations(ctx.app, 'stop-comfyui')
+  await resetIpcInvocations(ctx.app, 'run-action')
+
+  await ctx.panel.evaluate<boolean>(`(() => { window.api.openInstancePicker(); return true })()`)
+  await waitForWebContents(ctx.app, 'comfyTitlePopup.html')
+  const popup = titlePopupPage(ctx.app)
+  // PickerRow renders its primary CTA as "Restart" when the install is
+  // currently running — same test id either way.
+  await popup.waitForSelector(byTestId(TID.pickerRowOpen(_updateInstallId)), { timeout: 15_000 })
+  expect(await popup.click(byTestId(TID.pickerRowOpen(_updateInstallId)))).toBe(true)
+
+  // Popup hides as soon as main routes the restart-install IPC; the
+  // system-modal overlay mounts on the host window in its place.
+  await expect
+    .poll(() => isPopupVisible(ctx.app, 'comfyTitlePopup.html'), {
+      timeout: 10_000, intervals: [100, 200],
+    })
+    .toBe(false)
+  await waitForWebContents(ctx.app, 'comfySystemModal.html')
+  const sysModal = systemModalPage(ctx.app)
+  await sysModal.waitForVisible(byTestId(TID.baseAlertAction), { timeout: 15_000 })
+  expect(await sysModal.click(byTestId(TID.baseAlertAction))).toBe(true)
+
+  // The restart path tears down + re-launches comfy in place. Wait
+  // for the launch leg to fire on the panel side (panel handles the
+  // `picker-pick-install` overlay → `performPickerLaunch` →
+  // `runAction(id, 'launch')`), then for the frontend to be live.
+  await waitForRunAction(_updateInstallId, 'launch', { timeout: 180_000, intervals: [1_000, 2_000] })
+  await expect.poll(comfyFrontendIsLoaded, { timeout: 180_000, intervals: [1_000] }).toBe(true)
+
+  // The picker compact Restart deliberately bypasses the `stop-comfyui`
+  // renderer IPC (main uses `ipc.stopRunning` directly), so no
+  // invocations should land on that channel.
+  const stopCalls = await getStopsFor(_updateInstallId)
+  expect(stopCalls.length, 'compact picker Restart should bypass the stop-comfyui renderer IPC').toBe(0)
+
+  const launchCalls = (await getRunActionsFor(_updateInstallId))
+    .filter((c) => c.actionId === 'launch')
+  expect(launchCalls.length, 'exactly one launch run-action for the restart').toBeGreaterThanOrEqual(1)
+})
+
+// ---------------------------------------------------------------------------
+// FLOW 2 — real copy via the picker's pin-bottom MoreMenu.
+//
+// `copy` is REQUIRES_STOPPED + a runAction prompt chain. The picker's
+// footer "More" menu → Copy item exercises the full prompt →
+// showProgress → real ~500MB filesystem copy path. (The dashboard
+// kebab → Copy Installation path is covered separately further down.)
+// ---------------------------------------------------------------------------
+
+let _copyInstallId = ''
+let _copyInstallPath = ''
+
+test('picker pin-bottom Copy creates a real ~500MB copy of the install @lifecycle', async () => {
+  test.setTimeout(600_000)
+
+  // Copy is REQUIRES_STOPPED — stop comfy via return-to-dashboard so
+  // the IPC handler doesn't bail and the picker dispatches without a
+  // self-stop preamble.
+  await returnFirstInstallHostToDashboard(ctx.app)
+  await expect.poll(comfyFrontendIsLoaded, { timeout: 30_000, intervals: [500] }).toBe(false)
+  await waitForWebContents(ctx.app, 'panel.html')
+  await expectChooserVisible(ctx.panel)
+
+  // Snapshot BrowserWindow ids before the copy fires. The copy emits
+  // `open-install-window` for the NEW install, which (because no window
+  // backs it yet) spawns a fresh chooser host. Subsequent tests use
+  // URL-marker-based helpers (`panel.html`) which would non-deterministically
+  // bind to either chooser host, so we close the extra below.
+  const windowIdsBeforeCopy = await ctx.app.evaluate(({ BrowserWindow }) =>
+    BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed()).map((w) => w.id),
+  )
+
+  await resetIpcInvocations(ctx.app, 'open-install-window')
+  await resetIpcInvocations(ctx.app, 'run-action')
+
+  await ctx.panel.evaluate<boolean>(
+    `(() => {
+      window.api.openInstancePicker({
+        installationId: ${JSON.stringify(_updateInstallId)},
+        mode: 'expanded',
+        initialTab: 'config',
+      })
+      return true
+    })()`,
+  )
+  await waitForWebContents(ctx.app, 'comfyTitlePopup.html')
+  const popup = titlePopupPage(ctx.app)
+
+  // Open the footer "More" overflow menu → click Copy.
+  await popup.waitForVisible('[data-more-trigger]', { timeout: 15_000 })
+  expect(await popup.click('[data-more-trigger]')).toBe(true)
+  await popup.waitForVisible(byTestId(TID.pinBottomAction('copy')), { timeout: 10_000 })
+  expect(await popup.click(byTestId(TID.pinBottomAction('copy')))).toBe(true)
+
+  // Prompt for the copy's new name (rendered by ModalDialog's prompt
+  // branch inside the popup webContents).
+  await popup.waitForVisible(byTestId(TID.modalPromptInput), { timeout: 10_000 })
+  const newName = 'ComfyUI Copy E2E'
+  await popup.evaluate<void>(
+    `(() => {
+      const el = document.querySelector(${JSON.stringify(byTestId(TID.modalPromptInput))})
+      if (!el) throw new Error('prompt input not found')
+      el.value = ${JSON.stringify(newName)}
+      el.dispatchEvent(new Event('input', { bubbles: true }))
+      el.dispatchEvent(new Event('change', { bubbles: true }))
+    })()`,
+  )
+  expect(await popup.click(byTestId(TID.modalConfirm))).toBe(true)
+
+  await waitForProgressTakeoverAfterPopupClose()
+
+  // Wait for the copy to complete + `open-install-window` to fire for
+  // the new install. Real ~500MB filesystem copy → generous timeout.
+  await expect
+    .poll(async () => {
+      const calls = (await getIpcInvocations(ctx.app, 'open-install-window')) as OpenInstallWindowPayload[]
+      return calls.find((c) => c.installationId && c.installationId !== _updateInstallId) ?? null
+    }, { timeout: 540_000, intervals: [2_000, 5_000] })
+    .not.toBeNull()
+
+  const openCalls = (await getIpcInvocations(ctx.app, 'open-install-window')) as OpenInstallWindowPayload[]
+  const newCall = openCalls.find((c) => c.installationId && c.installationId !== _updateInstallId)
+  expect(newCall?.installationId, 'open-install-window did not capture a NEW installationId').toBeTruthy()
+  _copyInstallId = newCall!.installationId
+
+  const installs = await ctx.panel.evaluate<InstallationLite[]>(`window.api.getInstallations()`)
+  const copyRecord = installs.find((i) => i.id === _copyInstallId)
+  expect(copyRecord, 'copy installation not found in getInstallations').toBeDefined()
+  _copyInstallPath = copyRecord!.installPath
+
+  // Disk shape: copy is a full standalone tree (ComfyUI/.git +
+  // standalone-env + marker), and the source dir is untouched.
+  expect(existsSync(path.join(_copyInstallPath, 'ComfyUI', '.git')), 'copy missing ComfyUI/.git').toBe(true)
+  expect(existsSync(path.join(_copyInstallPath, 'standalone-env')), 'copy missing standalone-env/').toBe(true)
+  expect(existsSync(path.join(_copyInstallPath, '.comfyui-desktop-2')), 'copy missing .comfyui-desktop-2 marker').toBe(true)
+  expect(existsSync(path.join(_updateInstallPath, 'ComfyUI', '.git')), 'source ComfyUI/.git missing after copy').toBe(true)
+  expect(existsSync(path.join(_updateInstallPath, '.comfyui-desktop-2')), 'source marker missing after copy').toBe(true)
+
+  // Close the extra chooser host spawned by `open-install-window` so
+  // panel.html-marker helpers in subsequent tests have a single, stable
+  // target.
+  const extraWindowIds = await ctx.app.evaluate(
+    ({ BrowserWindow }, before) =>
+      BrowserWindow.getAllWindows()
+        .filter((w) => !w.isDestroyed() && !before.includes(w.id))
+        .map((w) => w.id),
+    windowIdsBeforeCopy,
+  )
+  expect(
+    extraWindowIds.length,
+    'open-install-window should have spawned a new chooser host',
+  ).toBeGreaterThan(0)
+  await ctx.app.evaluate(({ BrowserWindow }, ids) => {
+    for (const id of ids) {
+      const w = BrowserWindow.fromId(id)
+      if (w && !w.isDestroyed()) w.close()
+    }
+  }, extraWindowIds)
+  await expect
+    .poll(
+      () =>
+        ctx.app.evaluate(
+          ({ BrowserWindow }, ids) =>
+            BrowserWindow.getAllWindows().filter(
+              (w) => !w.isDestroyed() && ids.includes(w.id),
+            ).length,
+          extraWindowIds,
+        ),
+      { timeout: 10_000, intervals: [100, 250] },
+    )
+    .toBe(0)
+})
+
+test('cleans up the copy install before the original delete test runs @lifecycle', async () => {
+  test.setTimeout(300_000)
+  expect(_copyInstallId, 'no copy install id captured to clean up').toBeTruthy()
+
+  // Direct runAction('delete') bypasses the confirm chain — the copy
+  // is stopped (never launched), so no `stop-comfyui` preamble is
+  // needed. Frees disk before the existing final delete test runs
+  // against the original.
+  const result = await ctx.panel.evaluate<UpdateActionResult>(
+    `window.api.runAction(${JSON.stringify(_copyInstallId)}, 'delete')`,
+  )
+  expect(result.ok, `delete copy failed: ${result.message ?? ''}`).toBe(true)
+
+  expect(existsSync(_copyInstallPath), `copy install dir ${_copyInstallPath} still on disk after delete`).toBe(false)
+  const remaining = await ctx.panel.evaluate<InstallationLite[]>(`window.api.getInstallations()`)
+  expect(remaining.find((i) => i.id === _copyInstallId), 'copy install record not removed after delete').toBeUndefined()
+  expect(remaining.find((i) => i.id === _updateInstallId), 'original install was unexpectedly removed').toBeDefined()
+})
+
+// ---------------------------------------------------------------------------
+// Dashboard kebab "Copy Installation" / "Untrack" — both route through
+// `opts.onManage(inst, { autoAction })` so the picker opens in
+// expanded mode with the autoAction seed and `ComfyUISettingsContent`
+// fires the action through the full `useComfyUISettings.runAction`
+// chain (prompt → disk-check → showProgress for copy; confirm → inline
+// runAction for remove).
+//
+// One fresh ~500MB kebab-driven copy is the target for both tests
+// (kebab Copy on the original → kebab Untrack on the new copy) so the
+// registry-only Untrack semantics can be validated without breaking
+// the original-install state the final Delete test depends on. The
+// kebab-copy's on-disk tree is then `fs.rm`'d manually to reclaim the
+// ~500MB before the final Delete test runs.
+// ---------------------------------------------------------------------------
+
+let _kebabCopyInstallId = ''
+let _kebabCopyInstallPath = ''
+
+test('dashboard kebab "Copy Installation" creates a real ~500MB copy @lifecycle', async () => {
+  test.setTimeout(600_000)
+
+  // The prior cleanup test ran direct `runAction('delete')` against
+  // the previous picker-copy and ComfyUI is stopped from earlier; the
+  // chooser is already visible. Sanity-check the kebab is available
+  // on the seeded tile before driving the menu.
+  await expectChooserVisible(ctx.panel)
+  await ctx.panel.waitForVisible(byTestId(TID.dashboardTileKebab(_updateInstallId)), { timeout: 10_000 })
+
+  // Snapshot BrowserWindow ids so the post-copy chooser-host spawned
+  // by `open-install-window` can be closed deterministically (same
+  // bookkeeping the picker pin-bottom Copy test above uses).
+  const windowIdsBeforeCopy = await ctx.app.evaluate(({ BrowserWindow }) =>
+    BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed()).map((w) => w.id),
+  )
+
+  await resetIpcInvocations(ctx.app, 'open-install-window')
+  await resetIpcInvocations(ctx.app, 'run-action')
+
+  // Open the dashboard kebab on the original install tile and click
+  // the Copy Installation item — the composable routes this to
+  // `opts.onManage(inst, { autoAction: 'copy' })` which expands the
+  // picker on the Config tab with the autoAction seed.
+  expect(await ctx.panel.click(byTestId(TID.dashboardTileKebab(_updateInstallId)))).toBe(true)
+  await ctx.panel.waitForVisible(byTestId(TID.contextMenuItem('copy-install')), { timeout: 5_000 })
+  expect(await ctx.panel.click(byTestId(TID.contextMenuItem('copy-install')))).toBe(true)
+
+  // Picker mounts in expanded mode with autoAction='copy' →
+  // ComfyUISettingsContent fires `runAction('copy')` → renderer-side
+  // prompt for the new install name.
+  await waitForWebContents(ctx.app, 'comfyTitlePopup.html')
+  const popup = titlePopupPage(ctx.app)
+  await popup.waitForVisible(byTestId(TID.modalPromptInput), { timeout: 15_000 })
+
+  const newName = 'ComfyUI Kebab Copy E2E'
+  await popup.evaluate<void>(
+    `(() => {
+      const el = document.querySelector(${JSON.stringify(byTestId(TID.modalPromptInput))})
+      if (!el) throw new Error('prompt input not found')
+      el.value = ${JSON.stringify(newName)}
+      el.dispatchEvent(new Event('input', { bubbles: true }))
+      el.dispatchEvent(new Event('change', { bubbles: true }))
+    })()`,
+  )
+  expect(await popup.click(byTestId(TID.modalConfirm))).toBe(true)
+
+  // Picker hides; the panel's ProgressModal owns the copy op.
+  await waitForProgressTakeoverAfterPopupClose()
+
+  // Wait for the copy to complete + `open-install-window` for the new
+  // install id. Real ~500MB filesystem copy → generous timeout.
+  await expect
+    .poll(async () => {
+      const calls = (await getIpcInvocations(ctx.app, 'open-install-window')) as OpenInstallWindowPayload[]
+      return calls.find((c) => c.installationId && c.installationId !== _updateInstallId) ?? null
+    }, { timeout: 540_000, intervals: [2_000, 5_000] })
+    .not.toBeNull()
+
+  const openCalls = (await getIpcInvocations(ctx.app, 'open-install-window')) as OpenInstallWindowPayload[]
+  const newCall = openCalls.find((c) => c.installationId && c.installationId !== _updateInstallId)
+  expect(newCall?.installationId, 'open-install-window did not capture a NEW installationId').toBeTruthy()
+  _kebabCopyInstallId = newCall!.installationId
+
+  const installs = await ctx.panel.evaluate<InstallationLite[]>(`window.api.getInstallations()`)
+  const copyRecord = installs.find((i) => i.id === _kebabCopyInstallId)
+  expect(copyRecord, 'kebab-copy installation not found in getInstallations').toBeDefined()
+  _kebabCopyInstallPath = copyRecord!.installPath
+
+  // Disk shape: kebab copy materializes the same standalone tree the
+  // picker pin-bottom Copy did, and the source tree is unchanged.
+  expect(existsSync(path.join(_kebabCopyInstallPath, 'ComfyUI', '.git')), 'kebab copy missing ComfyUI/.git').toBe(true)
+  expect(existsSync(path.join(_kebabCopyInstallPath, 'standalone-env')), 'kebab copy missing standalone-env/').toBe(true)
+  expect(existsSync(path.join(_kebabCopyInstallPath, '.comfyui-desktop-2')), 'kebab copy missing .comfyui-desktop-2 marker').toBe(true)
+  expect(existsSync(path.join(_updateInstallPath, 'ComfyUI', '.git')), 'source ComfyUI/.git missing after kebab copy').toBe(true)
+  expect(existsSync(path.join(_updateInstallPath, '.comfyui-desktop-2')), 'source marker missing after kebab copy').toBe(true)
+
+  // Critical assertion for the regression: the kebab dispatch must
+  // NOT have fired a `runAction('copy')` IPC directly from the
+  // dashboard — it has to go through the picker autoAction route so
+  // the prompt is collected. Direct dispatch would carry no
+  // `actionData` and main would return `{ ok: false }` silently.
+  const runActions = await getRunActionsFor(_updateInstallId)
+  const copyDispatches = runActions.filter((c) => c.actionId === 'copy')
+  expect(copyDispatches.length, 'kebab dispatch must route copy through the picker, not call runAction directly').toBeLessThanOrEqual(1)
+
+  // Close the extra chooser host(s) spawned by `open-install-window`
+  // so the panel.html-marker helpers in subsequent tests have a single
+  // stable target.
+  const extraWindowIds = await ctx.app.evaluate(
+    ({ BrowserWindow }, before) =>
+      BrowserWindow.getAllWindows()
+        .filter((w) => !w.isDestroyed() && !before.includes(w.id))
+        .map((w) => w.id),
+    windowIdsBeforeCopy,
+  )
+  await ctx.app.evaluate(({ BrowserWindow }, ids) => {
+    for (const id of ids) {
+      const w = BrowserWindow.fromId(id)
+      if (w && !w.isDestroyed()) w.close()
+    }
+  }, extraWindowIds)
+  await expect
+    .poll(
+      () =>
+        ctx.app.evaluate(
+          ({ BrowserWindow }, ids) =>
+            BrowserWindow.getAllWindows().filter(
+              (w) => !w.isDestroyed() && ids.includes(w.id),
+            ).length,
+          extraWindowIds,
+        ),
+      { timeout: 10_000, intervals: [100, 250] },
+    )
+    .toBe(0)
+})
+
+test('dashboard kebab "Untrack" removes the install from the registry without touching disk @lifecycle', async () => {
+  test.setTimeout(60_000)
+  expect(_kebabCopyInstallId, 'no kebab-copy install id to untrack').toBeTruthy()
+  expect(_kebabCopyInstallPath, 'no kebab-copy install path captured').toBeTruthy()
+
+  // Dashboard should be visible again on the panel and show BOTH the
+  // original tile and the kebab-copy tile.
+  await waitForWebContents(ctx.app, 'panel.html')
+  await expectChooserVisible(ctx.panel)
+  await ctx.panel.waitForVisible(byTestId(TID.dashboardTileKebab(_kebabCopyInstallId)), { timeout: 10_000 })
+
+  // Click the kebab on the kebab-copy tile (NOT the original — the
+  // original needs to survive for the final Delete test). The Untrack
+  // item routes through `opts.onManage(inst, { autoAction: 'remove' })`
+  // → picker opens expanded with the autoAction seed → confirm modal.
+  expect(await ctx.panel.click(byTestId(TID.dashboardTileKebab(_kebabCopyInstallId)))).toBe(true)
+  await ctx.panel.waitForVisible(byTestId(TID.contextMenuItem('untrack')), { timeout: 5_000 })
+  expect(await ctx.panel.click(byTestId(TID.contextMenuItem('untrack')))).toBe(true)
+
+  // Picker opens in expanded mode; ComfyUISettingsContent fires
+  // runAction('remove') which renders the source action's confirm
+  // dialog. `remove` carries no `showProgress` and is plain text, so
+  // the simple-confirm renders as a BaseAlert (TID.baseAlertAction)
+  // inside the popup webContents.
+  await waitForWebContents(ctx.app, 'comfyTitlePopup.html')
+  const popup = titlePopupPage(ctx.app)
+  await popup.waitForVisible(byTestId(TID.baseAlertAction), { timeout: 15_000 })
+  expect(await popup.click(byTestId(TID.baseAlertAction))).toBe(true)
+
+  // Untrack returns `{ navigate: 'list' }` → the picker collapses to
+  // compact and main scrubs the row. Poll the registry until the
+  // kebab-copy id is gone.
+  await expect
+    .poll(
+      async () => {
+        const installs = await ctx.panel.evaluate<InstallationLite[]>(`window.api.getInstallations()`)
+        return installs.some((i) => i.id === _kebabCopyInstallId)
+      },
+      { timeout: 30_000, intervals: [250, 500] },
+    )
+    .toBe(false)
+
+  // Critical Untrack semantics: registry entry gone, disk preserved.
+  // (Delete is the destructive counterpart — this is the difference.)
+  expect(existsSync(_kebabCopyInstallPath), 'untrack must NOT touch disk; kebab-copy dir should still exist').toBe(true)
+  expect(
+    existsSync(path.join(_kebabCopyInstallPath, '.comfyui-desktop-2')),
+    'untrack must leave marker file intact on disk',
+  ).toBe(true)
+
+  // Original install untouched.
+  const remaining = await ctx.panel.evaluate<InstallationLite[]>(`window.api.getInstallations()`)
+  expect(remaining.find((i) => i.id === _updateInstallId), 'untrack must not affect the original install').toBeDefined()
+})
+
+test('cleans up the untracked kebab-copy on disk before the final Delete test runs @lifecycle', async () => {
+  test.setTimeout(120_000)
+  expect(_kebabCopyInstallPath, 'no kebab-copy install path to clean up').toBeTruthy()
+  expect(existsSync(_kebabCopyInstallPath), 'kebab-copy dir already gone — Untrack test invariant violated').toBe(true)
+
+  // Untrack intentionally leaves the ~500MB tree on disk; the test
+  // suite has to free it before the final fully-installed Delete test
+  // runs so the harness home temp dir doesn't carry a stale copy.
+  // Same `fs.rm` semantics the main-side delete handler uses; run from
+  // the test process directly (the path lives on the harness home temp
+  // dir and is readable by both processes).
+  rmSync(_kebabCopyInstallPath, { recursive: true, force: true })
+
+  await expect
+    .poll(() => existsSync(_kebabCopyInstallPath), { timeout: 60_000, intervals: [500, 1_000] })
+    .toBe(false)
 })
 
 // ---------------------------------------------------------------------------

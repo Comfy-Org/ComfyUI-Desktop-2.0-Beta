@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { ChevronUp, SlidersHorizontal, Info, RefreshCw, History } from 'lucide-vue-next'
 import { useComfyUISettings } from '../../composables/useComfyUISettings'
 import { useSessionStore } from '../../stores/sessionStore'
+import { findActionById } from '../../lib/findAction'
 import MoreMenu from '../../views/comfyUISettings/MoreMenu.vue'
 import ArgsBuilderPage from '../../views/comfyUISettings/ArgsBuilderPage.vue'
 import SnapshotsView from '../../views/comfyUISettings/SnapshotsView.vue'
@@ -31,10 +32,23 @@ export type ComfyUISettingsTab = PickerTab
 interface Props {
   installation: Installation | null
   initialTab?: ComfyUISettingsTab
+  /** Render a leading "← Back" affordance in the tab strip. Opt-in
+   *  because the drawer host owns its own back-chrome; only the
+   *  picker's expanded right pane needs an in-content back. */
+  showBack?: boolean
+  /** Optional action id to fire automatically once `sections` are
+   *  loaded — mirrors `DetailModal`'s `autoAction` prop. Used by the
+   *  picker's expanded mode when opened via dashboard kebab
+   *  `Copy Installation` / `Untrack` / `Delete` / `Migrate to
+   *  Standalone`. Consumed exactly once per prop value transition;
+   *  later section reloads or selection changes do not re-fire. */
+  autoAction?: string | null
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  initialTab: 'config'
+  initialTab: 'config',
+  showBack: false,
+  autoAction: null,
 })
 
 const emit = defineEmits<{
@@ -68,6 +82,7 @@ watch(
 const installation = toRef(props, 'installation')
 const sessionStore = useSessionStore()
 const {
+  sections,
   loading,
   error,
   updateField,
@@ -83,6 +98,133 @@ const {
   onNavigateList: () => emit('navigate-list'),
   onClose: () => emit('request-close')
 })
+
+// `autoAction` consumption — fires the named action once per prop
+// transition, after sections have loaded for the current install.
+// Used by dashboard kebab `Copy Installation` / `Untrack` (and the
+// existing `Migrate to Standalone` / `Delete` routes) which open the
+// picker in expanded mode with an `autoAction` seed so the source-
+// action def's confirm/prompt/disk-check chain actually fires —
+// otherwise the picker would just open with the user staring at a
+// settings tab.
+//
+// Guards:
+//   - keyed on the prop value itself (not the install id) so re-mounts
+//     on the same `autoAction` don't double-fire, and so picking a
+//     different install while the prop sticks around can't accidentally
+//     auto-run a destructive op on the new install
+//   - reset to `null` when the prop transitions to a NEW value (or back
+//     to null), so a second Manage click against the same install with
+//     a different autoAction can fire
+const consumedAutoAction = ref<string | null>(null)
+watch(
+  () => props.autoAction,
+  (next, prev) => {
+    if (next !== prev) consumedAutoAction.value = null
+  },
+)
+watch(
+  [
+    () => props.autoAction,
+    () => props.installation?.id ?? null,
+    () => loading.value,
+    () => sections.value.length,
+  ],
+  async ([autoAction, installId, isLoading, sectionsLen]) => {
+    if (!installId || !autoAction || isLoading || sectionsLen === 0) return
+    if (consumedAutoAction.value === autoAction) return
+
+    // Mirror `DetailModal`'s channel-card-aware resolution so that
+    // nested per-channel actions (`update-comfyui`, `copy-update`,
+    // `switch-channel`) target the install's currently-selected
+    // channel rather than an arbitrary other channel's same-id action.
+    const channelField = sections.value
+      .flatMap((s) => s.fields ?? [])
+      .find((f) => f.editType === 'channel-cards')
+    const currentChannel = typeof channelField?.value === 'string' ? channelField.value : null
+    const action = findActionById(sections.value, autoAction, currentChannel)
+    if (!action) return
+
+    consumedAutoAction.value = autoAction
+    await nextTick()
+
+    // Re-check the install after the tick — selection can change in
+    // the meantime (the popup is one mount across install switches),
+    // and `runAction` reads the current installation at call time. A
+    // stale invocation would auto-fire a destructive op against the
+    // wrong install.
+    if (props.installation?.id !== installId) return
+
+    void runAction(action)
+  },
+  { immediate: true },
+)
+
+// Auto-refresh stale channel-cards when the Update tab opens. The
+// release cache persists to disk forever and only refreshes on
+// explicit "Check for Update" clicks, post-update-comfyui, or install
+// creation — without this watcher, a user who opens the picker days
+// or weeks after install sees a snapshot of release data from the
+// last manual check. Fires `check-update` (cheap GitHub tag fetch,
+// deduped main-side by `MIN_RECHECK_INTERVAL = 10s` inside the release
+// cache) whenever:
+//
+//   - the active tab is `'update'`,
+//   - the sections payload has a channel-cards field,
+//   - and the currently-selected option's `data.checkedAt` is missing
+//     or older than `STALE_CHANNEL_CARD_MS`.
+//
+// Per-(install, channel) dedupe via `refreshedChannelKeys` so tab
+// flips don't spam IPCs. Main's `getOrFetch(..., force=true)` short-
+// circuits on the 10s window so even a stuck renderer can't push more
+// than 6 fetches/minute/channel.
+const STALE_CHANNEL_CARD_MS = 15 * 60 * 1000
+const refreshedChannelKeys = new Set<string>()
+watch(
+  [
+    () => activeTab.value,
+    () => props.installation?.id ?? null,
+    () => sections.value.length,
+  ],
+  ([tab, installId, sectionsLen]) => {
+    if (tab !== 'update' || !installId || sectionsLen === 0) return
+
+    const channelField = sections.value
+      .flatMap((s) => s.fields ?? [])
+      .find((f) => f.editType === 'channel-cards')
+    if (!channelField) return
+
+    const currentChannel = typeof channelField.value === 'string' ? channelField.value : null
+    if (!currentChannel) return
+
+    const selectedOption = channelField.options?.find((o) => o.value === currentChannel)
+    const data = selectedOption?.data as { checkedAt?: number } | undefined
+    const checkedAt = typeof data?.checkedAt === 'number' ? data.checkedAt : null
+    const stale = checkedAt === null || Date.now() - checkedAt > STALE_CHANNEL_CARD_MS
+    if (!stale) return
+
+    // Look up the canonical action def from sections so we inherit
+    // whatever `enabled` / disabledMessage / future fields main attaches
+    // (today: `enabled: installed`). Bail if main isn't exposing the
+    // action for this install (e.g. uninstalled / cloud).
+    const checkAction = sections.value
+      .flatMap((s) => s.actions ?? [])
+      .find((a) => a.id === 'check-update')
+    if (!checkAction || checkAction.enabled === false) return
+
+    const dedupeKey = `${installId}:${currentChannel}`
+    if (refreshedChannelKeys.has(dedupeKey)) return
+    refreshedChannelKeys.add(dedupeKey)
+
+    // `check-update` has no `showProgress` / confirm / prompt; it runs
+    // inline via `useComfyUISettings.runAction` step 10. A successful
+    // result returns `navigate: 'detail'` → section reload → fresh
+    // `checkedAt` bubbles through this watcher (dedupe set prevents
+    // re-fire on the same install+channel).
+    void runAction(checkAction)
+  },
+  { immediate: true },
+)
 
 interface TabDef {
   key: ComfyUISettingsTab

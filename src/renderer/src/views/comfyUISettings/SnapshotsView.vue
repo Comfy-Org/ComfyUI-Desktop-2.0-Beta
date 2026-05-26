@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Download, GitCompare, RotateCcw, Trash2, Upload } from 'lucide-vue-next'
+import { TID } from '../../../../shared/testIds'
 import { useModal } from '../../composables/useModal'
 import { emitTelemetryAction, toCountBucket } from '../../lib/telemetry'
 import {
@@ -491,6 +492,7 @@ async function handleImport(): Promise<void> {
               :snapshot="item.snapshot"
               :expanded="isExpanded(item.snapshot.filename)"
               :is-latest="i === 0"
+              :toggle-test-id="TID.snapshotRow(item.snapshot.filename)"
               @toggle="toggleExpand(item.snapshot.filename)"
             >
               <template #expanded>
@@ -554,6 +556,7 @@ async function handleImport(): Promise<void> {
                     type="button"
                     class="snapshots-view-detail-btn"
                     :aria-label="t('snapshots.restore', 'Restore')"
+                    :data-testid="TID.snapshotRowRestore(item.snapshot.filename)"
                     @click="handleRestore(item.snapshot.filename)"
                   >
                     <RotateCcw :size="13" />

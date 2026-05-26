@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, useTemplateRef, watch } from 'vue'
+import { TID } from '../../../../shared/testIds'
 import type { ActionDef } from '../../types/ipc'
 
 /**
@@ -127,6 +128,7 @@ const visibleActions = computed(() => props.actions)
           }"
           :disabled="action.enabled === false"
           :tabindex="focusedIndex === i ? 0 : -1"
+          :data-testid="TID.pinBottomAction(action.id)"
           @click="handlePick(action)"
         >
           {{ action.label }}

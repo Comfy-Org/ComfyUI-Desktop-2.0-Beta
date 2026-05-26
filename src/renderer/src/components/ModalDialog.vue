@@ -2,6 +2,7 @@
 import { ref, computed, watch, nextTick, onMounted, onUnmounted, reactive } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useModal, type ModalOption } from '../composables/useModal'
+import { TID } from '../../../shared/testIds'
 import InfoTooltip from './InfoTooltip.vue'
 import MigrateConfirmBody from './MigrateConfirmBody.vue'
 import BaseAlert from './ui/BaseAlert.vue'
@@ -408,7 +409,7 @@ onUnmounted(() => {
           </template>
         </div>
         <div class="modal-actions">
-          <button @click="close(false)">{{ $t('common.cancel') }}</button>
+          <button :data-testid="TID.modalCancel" @click="close(false)">{{ $t('common.cancel') }}</button>
           <button
             :class="confirmClass"
             :disabled="
@@ -416,6 +417,7 @@ onUnmounted(() => {
               state.variantLoading ||
               (state.variantCards.length > 0 && !state.selectedVariant)
             "
+            :data-testid="TID.modalConfirm"
             @click="close(true)"
           >
             {{ state.confirmLabel }}
@@ -470,6 +472,7 @@ onUnmounted(() => {
               v-model="inputValue"
               type="text"
               class="modal-input"
+              :data-testid="TID.modalPromptInput"
               :placeholder="state.placeholder"
               @keydown.enter="submitPrompt"
             />
@@ -477,8 +480,8 @@ onUnmounted(() => {
           <div v-if="error" class="modal-error">{{ error }}</div>
         </div>
         <div class="modal-actions">
-          <button @click="close(null)">{{ $t('common.cancel') }}</button>
-          <button class="primary" @click="submitPrompt">{{ state.confirmLabel }}</button>
+          <button :data-testid="TID.modalCancel" @click="close(null)">{{ $t('common.cancel') }}</button>
+          <button class="primary" :data-testid="TID.modalConfirm" @click="submitPrompt">{{ state.confirmLabel }}</button>
         </div>
       </div>
 

@@ -1,8 +1,10 @@
-import { dialog, ipcMain } from 'electron'
+import { ipcMain } from 'electron'
 import type { BrowserWindow, WebContentsView } from 'electron'
 import * as ipc from '../lib/ipc'
 import { COMFY_BG } from '../lib/theme'
 import { destroyPanelView, ensurePanelView } from './panelView'
+import { openSystemModalAsync } from '../popups/systemModal'
+import type { SystemModalDetailGroup } from '../popups/systemModal'
 import { comfyWindows, isChooserHost, isInstallHost } from './registry'
 import type { ComfyWindowEntry } from './registry'
 import {
@@ -189,41 +191,48 @@ export async function confirmAndCloseAllHostWindows(
     return
   }
   const titles = entries.map((e) => e.window.getTitle() || 'Untitled window')
-  const detailLines: string[] = ['Open windows:', ...titles.map((t) => `  • ${t}`)]
+  const details: SystemModalDetailGroup[] = [
+    { label: 'Open windows', items: titles },
+  ]
   if (ipc.hasActiveOperations()) {
     try {
       const items = await ipc.getActiveDetails()
       const sessions = items.filter((i) => i.type === 'session').map((i) => i.name)
       const operations = items.filter((i) => i.type === 'operation').map((i) => i.name)
       const downloads = items.filter((i) => i.type === 'download').map((i) => i.name)
-      if (sessions.length > 0) {
-        detailLines.push('', 'Running ComfyUI:', ...sessions.map((n) => `  • ${n}`))
-      }
-      if (operations.length > 0) {
-        detailLines.push('', 'In-progress operations:', ...operations.map((n) => `  • ${n}`))
-      }
-      if (downloads.length > 0) {
-        detailLines.push('', 'Active downloads:', ...downloads.map((n) => `  • ${n}`))
-      }
+      if (sessions.length > 0) details.push({ label: 'Running ComfyUI', items: sessions })
+      if (operations.length > 0) details.push({ label: 'In-progress operations', items: operations })
+      if (downloads.length > 0) details.push({ label: 'Active downloads', items: downloads })
     } catch {
       // If active-detail collection ever throws, fall back to just the
       // window list — the user still sees what's about to close.
     }
   }
-  const opts: Electron.MessageBoxOptions = {
-    type: 'question',
-    buttons: ['Close All', 'Cancel'],
-    defaultId: 1,
-    cancelId: 1,
-    title: 'Close All Windows',
-    message: `Close ${entries.length} open windows?`,
-    detail: detailLines.join('\n'),
+  // Pick the parent for the overlay. Prefer the caller's hint (the
+  // window the user clicked Close All from); fall back to any live
+  // host so we don't drop the confirm entirely when the popup's
+  // parent has gone away mid-flight.
+  const overlayParentEntry = parentWindow && !parentWindow.isDestroyed()
+    ? entries.find((e) => e.window === parentWindow)
+    : entries[0]
+  if (!overlayParentEntry) {
+    closeAllHostWindows()
+    return
   }
-  const result = parentWindow && !parentWindow.isDestroyed()
-    ? await dialog.showMessageBox(parentWindow, opts)
-    : await dialog.showMessageBox(opts)
-  if (result.response === 0) {
-    // The global dialog already lists in-progress ops / sessions /
+  const confirmed = await openSystemModalAsync({
+    parent: overlayParentEntry.window,
+    spec: {
+      title: 'Close All Windows',
+      message: `Close ${entries.length} open windows?`,
+      details,
+      confirmLabel: 'Close All',
+      cancelLabel: 'Cancel',
+      confirmStyle: 'danger',
+      theme: overlayParentEntry.lastTheme,
+    },
+  })
+  if (confirmed) {
+    // The global confirm already lists in-progress ops / sessions /
     // downloads, so the per-window tier-aware prompt would be
     // redundant after the user confirmed the bulk close. Pre-clear
     // every entry so each window's `close` handler skips its own
