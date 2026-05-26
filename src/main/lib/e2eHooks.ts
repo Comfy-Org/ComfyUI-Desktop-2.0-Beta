@@ -33,7 +33,22 @@ import {
   getShellOpenExternalCalls,
   resetShellOpenExternalCalls,
 } from './e2eOverrides'
-import { _test_addRunningSession, _test_clearRunningSessions } from './ipc/shared'
+import {
+  _runningSessions,
+  _test_addRunningSession,
+  _test_clearRunningSessions,
+} from './ipc/shared'
+
+export interface RunningSessionSnapshot {
+  /** Process pid (null for synthetic seeded sessions with no real proc). */
+  pid: number | null
+  /** Wall-clock ms when the session was registered — lets the restart
+   *  cluster assert a `_runningSessions.set(...)` happened between two
+   *  snapshots without needing a real pid delta. */
+  startedAt: number
+  port: number
+  url: string | undefined
+}
 
 interface SetInstallUpdateOpts {
   /** Omit to apply the override globally (matches every installationId). */
@@ -79,6 +94,11 @@ export interface E2EHelpers {
   seedRunningSession(opts: { installationId: string; installationName: string }): void
   /** Drop every synthetic session registered via `seedRunningSession`. */
   clearRunningSessions(): void
+  /** Snapshot the live `_runningSessions` entry for `installationId`
+   *  (real or seeded). Returns `null` when no session is registered.
+   *  Used by the restart cluster to assert a stop→launch chain produced
+   *  a fresh registration (new `startedAt`, new pid). */
+  getRunningSessionSnapshot(installationId: string): RunningSessionSnapshot | null
   /** Read the `checkedAt` ms timestamp from the shared release cache
    *  entry for `(repo, channel)`. Returns `null` when no entry exists
    *  yet. Used by the periodic-poll lifecycle test to observe that the
@@ -121,6 +141,16 @@ export function registerE2EHooks(): void {
       _test_addRunningSession(opts.installationId, opts.installationName)
     },
     clearRunningSessions: _test_clearRunningSessions,
+    getRunningSessionSnapshot(installationId) {
+      const session = _runningSessions.get(installationId)
+      if (!session) return null
+      return {
+        pid: session.proc?.pid ?? null,
+        startedAt: session.startedAt,
+        port: session.port,
+        url: session.url,
+      }
+    },
     getReleaseCacheCheckedAt(repo, channel) {
       return _releaseCacheGet(repo, channel)?.checkedAt ?? null
     },

@@ -35,6 +35,22 @@ export interface InjectProgressSuccessOpts {
   newInstallationId?: string
 }
 
+export interface InjectRetryableProgressErrorOpts {
+  installationId: string
+  title?: string
+  errorMessage: string
+  /** Number of consecutive failures before the apiCall flips to
+   *  resolving with `{ ok: true }`. Defaults to 1 — i.e. fail once,
+   *  succeed on the first Reboot. */
+  failuresBeforeSuccess?: number
+}
+
+export interface SeedErrorInstanceOpts {
+  installationId: string
+  installationName: string
+  message?: string
+}
+
 export interface StartInFlightOpOpts {
   installationId: string
   title?: string
@@ -56,6 +72,12 @@ interface PanelBindings {
 }
 
 let bindings: PanelBindings | null = null
+
+/** Per-installation invocation counter for the apiCall seeded by
+ *  `injectRetryableProgressError`. Module-scoped so the closure that
+ *  the progressStore captures and the test-side
+ *  `getInjectedApiCallCount` reader observe the same Map. */
+const injectedApiCallCounts = new Map<string, number>()
 
 /** Deferred apiCall promises for ops seeded via `startInFlightOp`,
  *  keyed by installationId so `settleInFlightOp` can resolve the right
@@ -83,13 +105,26 @@ export interface E2ERendererHelpers {
    *  `instance-stopped` message — without this poll the apiCall-time
    *  `wasRunning` capture races the broadcast). */
   isRunning(installationId: string): boolean
-  /** Seed an entry into `sessionStore.errorInstances` so the chooser
-   *  tile flips into its has-error state and the kebab grows a
-   *  `Dismiss error` item, without having to drive a real failing op
-   *  through `showProgress` first. */
-  seedErrorInstance(opts: { installationId: string; installationName: string; message?: string }): void
+  /** Drive the show-progress chain with an apiCall that fails the
+   *  first `failuresBeforeSuccess` times and then resolves with
+   *  `{ ok: true }`. Used by the ProgressModal Reboot cluster to
+   *  prove `handleReboot` re-runs the same `op.apiCall` (instead of
+   *  the legacy fresh-launch fallback) and that recovery clears the
+   *  error UI in place. */
+  injectRetryableProgressError(opts: InjectRetryableProgressErrorOpts): Promise<void>
+  /** Seed `sessionStore.errorInstances` directly so the renderer
+   *  treats an install as pre-existing errored without having to fail
+   *  a real op first. Mirrors the broadcast path the launcher uses
+   *  when a crash arrives before any UI took an action on the
+   *  install. */
+  seedErrorInstance(opts: SeedErrorInstanceOpts): void
   /** True iff `sessionStore.errorInstances` has an entry for the id. */
   hasErrorInstance(installationId: string): boolean
+  /** Read the recorded invocation count for the apiCall most recently
+   *  seeded via `injectRetryableProgressError`. Lets the test prove
+   *  `handleReboot` re-invoked the same closure (count went from 1 → 2)
+   *  rather than the fresh-launch fallback. */
+  getInjectedApiCallCount(installationId: string): number
   /** Seed an in-flight op whose `apiCall` is a controllable Promise so
    *  the op stays pending until `settleInFlightOp` resolves it. Lets
    *  tests exercise the busy-guard / Return-to-Dashboard / cancel-flow
@@ -154,14 +189,36 @@ export function registerE2ERendererHooks(): void {
     isRunning(installationId) {
       return useSessionStore().isRunning(installationId)
     },
+    async injectRetryableProgressError({ installationId, title, errorMessage, failuresBeforeSuccess }) {
+      const b = ensureBound()
+      const failsRequired = failuresBeforeSuccess ?? 1
+      // Reset any prior counter for the same id so a leaked op from a
+      // previous test can't intercept this one's call-count assertions.
+      injectedApiCallCounts.set(installationId, 0)
+      await b.showProgress({
+        installationId,
+        title: title ?? `Retryable failed op — ${installationId}`,
+        opKind: 'generic',
+        apiCall: () => {
+          const next = (injectedApiCallCounts.get(installationId) ?? 0) + 1
+          injectedApiCallCounts.set(installationId, next)
+          return next <= failsRequired
+            ? Promise.resolve({ ok: false, message: errorMessage })
+            : Promise.resolve({ ok: true })
+        },
+      })
+    },
     seedErrorInstance({ installationId, installationName, message }) {
       useSessionStore().errorInstances.set(installationId, {
         installationName,
-        message,
+        message: message ?? `Seeded error for ${installationId}`,
       })
     },
     hasErrorInstance(installationId) {
       return useSessionStore().errorInstances.has(installationId)
+    },
+    getInjectedApiCallCount(installationId) {
+      return injectedApiCallCounts.get(installationId) ?? 0
     },
     async startInFlightOp({ installationId, title, opKind, destroysInstance, triggersInstanceStart }) {
       const b = ensureBound()
