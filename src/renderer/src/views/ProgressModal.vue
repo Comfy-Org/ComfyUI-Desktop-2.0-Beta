@@ -914,6 +914,7 @@ defineExpose({ startOperation, showOperation })
             v-if="!currentOp.destroysInstance"
             type="button"
             class="brand-primary brand-progress__footer-btn"
+            :data-testid="TID.progressReboot"
             @click="handleReboot"
           >
             <RefreshCcw :size="16" />
