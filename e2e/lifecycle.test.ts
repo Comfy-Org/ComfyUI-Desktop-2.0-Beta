@@ -58,6 +58,22 @@ import { byTestId, TID } from './support/testIds'
 
 let ctx: AppContext
 
+/** True when `LIFECYCLE_REUSE_DIR` is set so the harness skips the
+ *  fresh-install setup tests + hydrates module-scoped state from
+ *  the on-disk profile. Lets a single failing test be re-run via
+ *  `--grep` against a profile from a previous green run, without
+ *  redoing the ~2-minute install.
+ *
+ *  Usage:
+ *    # Fresh run prints `[lifecycle-harness] fresh profile dir: <path>`.
+ *    # Capture <path> and re-export it on the next run:
+ *    $env:LIFECYCLE_REUSE_DIR = "<path>"
+ *    pnpm exec playwright test e2e/lifecycle.test.ts --project=lifecycle \
+ *      --grep "snapshot-restore" --reporter=list
+ *    Remove-Item Env:\LIFECYCLE_REUSE_DIR
+ */
+const REUSE_MODE = !!process.env['LIFECYCLE_REUSE_DIR']
+
 test.describe.configure({ mode: 'serial' })
 
 test.beforeAll(async () => {
@@ -76,7 +92,43 @@ test.beforeAll(async () => {
   // + pick-local, which chains directly into the new-install takeover
   // (Tier 3 → Tier 3 silent swap) — the same surface the user reaches
   // on the no-existing-installs cold-start path.
+  //
+  // When `LIFECYCLE_REUSE_DIR` is set the harness reuses an existing
+  // profile (firstUseCompleted=true, install on disk, snapshots on
+  // disk) and we rehydrate the shared `let _foo = ''` state below from
+  // disk so individually-greped tests behave the same as if they had
+  // followed the full chain.
   ctx = await launchApp()
+
+  if (REUSE_MODE) {
+    await ctx.panel.waitForVisible('.chooser-view', { timeout: 30_000 })
+    const installs = await ctx.panel.evaluate<InstallationLite[]>(`window.api.getInstallations()`)
+    if (installs.length > 0) {
+      const inst = installs[0]!
+      _updateInstallId = inst.id
+      _updateInstallPath = inst.installPath
+      _comfyUIDir = path.join(_updateInstallPath, 'ComfyUI')
+      try {
+        _installedCommit = execFileSync('git', ['rev-parse', 'HEAD'], {
+          cwd: _comfyUIDir, encoding: 'utf-8', windowsHide: true,
+        }).trim()
+      } catch { /* partial hydration — git dir may not exist on a half-built profile */ }
+      try {
+        const list = await ctx.panel.evaluate<SnapshotListLite>(
+          `window.api.getSnapshots(${JSON.stringify(_updateInstallId)})`,
+        )
+        const target = list.snapshots.find((s) => s.label === 'lifecycle-restore-target')
+        if (target) {
+          _restoreSnapshotFilename = target.filename
+          const snapPath = path.join(_updateInstallPath, '.launcher', 'snapshots', target.filename)
+          const snap = JSON.parse(readFileSync(snapPath, 'utf-8')) as {
+            comfyui?: { commit?: string | null }
+          }
+          if (snap.comfyui?.commit) _snapshotHeadAtCapture = snap.comfyui.commit
+        }
+      } catch { /* snapshot not yet captured on this profile */ }
+    }
+  }
 })
 
 test.afterAll(async () => {
@@ -97,6 +149,7 @@ async function comfyFrontendIsLoaded(): Promise<boolean> {
 // ---------------------------------------------------------------------------
 
 test('cold start lands on first-use consent screen @lifecycle', async () => {
+  test.skip(REUSE_MODE, 'reuse mode: first-use already completed on the persisted profile')
   // The first-use takeover gates the chooser body until consent +
   // cloud/local pick are completed. On a fresh profile the consent
   // step is what the user lands on.
@@ -105,6 +158,7 @@ test('cold start lands on first-use consent screen @lifecycle', async () => {
 })
 
 test('accept consent + pick local opens New Install takeover with form pre-filled @lifecycle', async () => {
+  test.skip(REUSE_MODE, 'reuse mode: first-use already completed on the persisted profile')
   // Tick the required ToS checkbox (telemetry stays at its default
   // opt-in; the test settings already disable telemetry network egress
   // separately, so the actual value doesn't matter here).
@@ -144,17 +198,56 @@ test('accept consent + pick local opens New Install takeover with form pre-fille
     { timeout: 60_000, message: 'Continue button never became enabled (form did not pre-fill)' },
   )
 
+  // Open Advanced so the release BaseSelect + variant rows are
+  // interactive. The body is CSS-hidden when collapsed; the BaseSelect
+  // trigger does not register clicks while hidden.
+  expect(await ctx.panel.click('.config-advanced__summary')).toBe(true)
+  await ctx.panel.waitForSelector('#source-fields button[role="combobox"]', {
+    timeout: 5_000,
+  })
+
+  // Override the recommended "Latest Stable" pre-fill with the OLDEST
+  // standalone release so post-install the picker / direct runAction
+  // both naturally see "Update available" on the Stable channel
+  // (no `git reset --hard` workaround needed in the update tests
+  // further down). The release options are sorted newest-first by
+  // date, so the LAST option in the listbox is the oldest.
+  expect(await ctx.panel.click('#source-fields button[role="combobox"]')).toBe(true)
+  await ctx.panel.waitForVisible('[role="listbox"] [role="option"]', { timeout: 10_000 })
+  expect(
+    await ctx.panel.evaluate<boolean>(
+      `(() => {
+        const opts = document.querySelectorAll('[role="listbox"] [role="option"]')
+        if (opts.length === 0) return false
+        opts[opts.length - 1].click()
+        return true
+      })()`,
+    ),
+    'failed to click oldest release option in BaseSelect listbox',
+  ).toBe(true)
+
+  // Picking a new release re-fires `loadFieldOptions('variant')`,
+  // which flips `saveDisabled` true until the variant options resolve
+  // and the recommended variant is re-picked. Wait for Continue to
+  // come back enabled before moving on.
+  await ctx.panel.waitFor(
+    async () => ctx.app.evaluate(({ webContents }) => {
+      const wc = webContents.getAllWebContents().find((w) => w.getURL().includes('panel.html'))
+      if (!wc) return false
+      return wc.executeJavaScript(`(() => {
+        const btn = document.querySelector('.brand-primary.config-continue')
+        return !!btn && !btn.disabled
+      })()`) as Promise<boolean>
+    }),
+    { timeout: 60_000, message: 'Continue button never re-enabled after picking oldest release' },
+  )
+
   // On Windows, force the CPU variant so the test is deterministic
   // across runners (NVIDIA hosts would otherwise download a multi-GB
   // GPU payload). macOS only publishes `mac-mps` and Linux publishes
   // no `linux-cpu` variant, so on those platforms we trust the
   // recommended pick the form already made.
   if (process.platform === 'win32') {
-    // Variant rows live inside the Advanced disclosure; the body is
-    // always rendered (CSS-hidden when collapsed), so clicking the
-    // row works even without expanding — but expand anyway to mirror
-    // the real user gesture.
-    expect(await ctx.panel.click('.config-advanced__summary')).toBe(true)
     await ctx.panel.waitForSelector('.brand-variant-row', { timeout: 5_000 })
     expect(
       await ctx.panel.clickByText('.brand-variant-row', 'CPU'),
@@ -176,6 +269,7 @@ test('accept consent + pick local opens New Install takeover with form pre-fille
 })
 
 test('completes install (auto-launches via brand chrome) @lifecycle', async () => {
+  test.skip(REUSE_MODE, 'reuse mode: install already on disk on the persisted profile')
   // No explicit variant / release / name picking — trust the
   // recommended defaults the modal has already filled in. On a no-GPU
   // CI runner that's CPU; on a GPU box it's the matching GPU variant.
@@ -191,6 +285,7 @@ test('completes install (auto-launches via brand chrome) @lifecycle', async () =
 })
 
 test('first-use Local chain marks firstUseCompleted once and cycles firstUseMode @lifecycle', async () => {
+  test.skip(REUSE_MODE, 'reuse mode: first-use IPC log only exists on the boot that drove the chain')
   // Asserts the chain bookkeeping the auto-launch above relied on:
   //   - `markFirstUseCompleted` (set-setting firstUseCompleted=true)
   //     fires exactly once across the entire Local chain (consent →
@@ -214,6 +309,7 @@ test('first-use Local chain marks firstUseCompleted once and cycles firstUseMode
 // ---------------------------------------------------------------------------
 
 test('auto-launch landed on a single host window (in-place attach) @lifecycle', async () => {
+  test.skip(REUSE_MODE, 'reuse mode: install was not auto-launched on this boot')
   // In-place attach guard: the redesigned install flow has
   // `autoLaunchOnFinish: true`, so the chooser host transforms into
   // the install host without spawning a fresh BrowserWindow. The
@@ -242,6 +338,7 @@ test('auto-launch landed on a single host window (in-place attach) @lifecycle', 
  * pre-load.
  */
 test('ComfyUI window has dark background and split-view architecture @lifecycle', async () => {
+  test.skip(REUSE_MODE, 'reuse mode: comfy is not auto-running on this boot')
   const arch = await ctx.app.evaluate(({ BrowserWindow, WebContentsView }) => {
     for (const win of BrowserWindow.getAllWindows()) {
       const children = win.contentView.children
@@ -280,6 +377,7 @@ test('ComfyUI window has dark background and split-view architecture @lifecycle'
 // ---------------------------------------------------------------------------
 
 test('return-to-dashboard flips install host in place (same window id) @lifecycle', async () => {
+  test.skip(REUSE_MODE, 'reuse mode: no install-backed host exists to flip (comfy not auto-running)')
   // Snapshot the live BrowserWindow ids BEFORE the flip so the
   // post-flip assertion can prove the install-backed host was reused
   // as the chooser host instead of being closed and replaced.
@@ -365,7 +463,7 @@ interface UpdateActionResult {
 let _updateInstallId = ''
 let _updateInstallPath = ''
 let _comfyUIDir = ''
-let _rolledBackCommit = ''
+let _installedCommit = ''
 
 test('stop ComfyUI again so update-comfyui (requires stopped) can run @lifecycle', async () => {
   // `update-comfyui` is in REQUIRES_STOPPED; the prior test re-launched.
@@ -377,7 +475,7 @@ test('stop ComfyUI again so update-comfyui (requires stopped) can run @lifecycle
   await expectChooserVisible(ctx.panel)
 })
 
-test('roll ComfyUI HEAD back so the update has work to do @lifecycle', async () => {
+test('captures install metadata for the update tests @lifecycle', async () => {
   const installs = await ctx.panel.evaluate<InstallationLite[]>(
     `window.api.getInstallations()`,
   )
@@ -387,29 +485,22 @@ test('roll ComfyUI HEAD back so the update has work to do @lifecycle', async () 
   _updateInstallPath = inst.installPath
   _comfyUIDir = path.join(_updateInstallPath, 'ComfyUI')
 
-  const headBefore = execFileSync('git', ['rev-parse', 'HEAD'], {
+  // The install setup in test 2 picks the OLDEST standalone release,
+  // so HEAD already sits on a stale stable tag — every downstream
+  // update test naturally has work to do without any `git reset --hard`
+  // hack against the live working tree.
+  _installedCommit = execFileSync('git', ['rev-parse', 'HEAD'], {
     cwd: _comfyUIDir, encoding: 'utf-8', windowsHide: true,
   }).trim()
-  expect(headBefore).toMatch(/^[a-f0-9]{40}$/)
-
-  // Roll back 3 commits. Small enough to (usually) avoid a requirements
-  // change crossing it — if it does, the update still runs, just slower.
-  execFileSync('git', ['reset', '--hard', 'HEAD~3'], {
-    cwd: _comfyUIDir, stdio: 'pipe', windowsHide: true,
-  })
-
-  const headAfter = execFileSync('git', ['rev-parse', 'HEAD'], {
-    cwd: _comfyUIDir, encoding: 'utf-8', windowsHide: true,
-  }).trim()
-  expect(headAfter, 'git reset --hard did not move HEAD').not.toBe(headBefore)
-  _rolledBackCommit = headAfter
+  expect(_installedCommit).toMatch(/^[a-f0-9]{40}$/)
 })
 
 test('update-comfyui drives the real updater and moves HEAD forward @lifecycle', async () => {
-  // Real update can run pip-install if requirements.txt crossed our 3-commit
-  // rollback. Stretch the per-test timeout to cover that worst case.
+  // Real update can run pip-install if requirements.txt changed
+  // between the oldest standalone release we installed on and the
+  // latest stable tag. Stretch the per-test timeout to cover that.
   test.setTimeout(600_000)
-  expect(_rolledBackCommit, 'rolled-back commit not captured').toBeTruthy()
+  expect(_installedCommit, 'installed commit not captured').toBeTruthy()
 
   const result = await ctx.panel.evaluate<UpdateActionResult>(
     `window.api.runAction(${JSON.stringify(_updateInstallId)}, 'update-comfyui', { channel: 'stable' })`,
@@ -419,14 +510,14 @@ test('update-comfyui drives the real updater and moves HEAD forward @lifecycle',
   const headAfter = execFileSync('git', ['rev-parse', 'HEAD'], {
     cwd: _comfyUIDir, encoding: 'utf-8', windowsHide: true,
   }).trim()
-  expect(headAfter, 'update did not move HEAD off the rolled-back commit').not.toBe(_rolledBackCommit)
+  expect(headAfter, 'update did not move HEAD off the installed (oldest stable) commit').not.toBe(_installedCommit)
 
   // The update should land on a commit reachable from origin/master that is
-  // strictly newer than (or equal to) the rolled-back one — never older.
-  const aheadCount = execFileSync('git', ['rev-list', '--count', `${_rolledBackCommit}..${headAfter}`], {
+  // strictly newer than the installed (oldest stable) one — never older.
+  const aheadCount = execFileSync('git', ['rev-list', '--count', `${_installedCommit}..${headAfter}`], {
     cwd: _comfyUIDir, encoding: 'utf-8', windowsHide: true,
   }).trim()
-  expect(parseInt(aheadCount, 10), `post-update HEAD ${headAfter} is not ahead of rolled-back commit ${_rolledBackCommit}`).toBeGreaterThan(0)
+  expect(parseInt(aheadCount, 10), `post-update HEAD ${headAfter} is not ahead of installed commit ${_installedCommit}`).toBeGreaterThan(0)
 })
 
 test('re-launch ComfyUI after update validates the updated install runs @lifecycle', async () => {
@@ -536,7 +627,7 @@ test('captures a snapshot for the picker-driven restore test @lifecycle', async 
 })
 
 // ---------------------------------------------------------------------------
-// Cross-channel update — driven through the picker's ChannelPicker.
+// Picker-driven update — driven through the picker's ChannelPicker.
 // Drafts a non-current channel ('latest') in the BaseSelect, clicks the
 // per-channel Update Now button, and waits for the IN_PLACE_RELAUNCH
 // chain to complete. Pins the bug where `actionData.channel` on the
@@ -547,13 +638,16 @@ test('captures a snapshot for the picker-driven restore test @lifecycle', async 
 // on the picker with no feedback (fix in `InstancePickerView.vue`
 // `handleSettingsShowProgress` deep-clones `actionData` first).
 //
-// Runs before the same-channel picker tests below because (a) it leaves
-// the install on `latest`, where `update-comfyui` always reports an
-// update available (master is ahead of every stable tag), giving the
-// same-channel picker test below a reliable "Update Now" button —
-// the stable channel only shows one across a release boundary, which
-// rolling HEAD~3 doesn't guarantee; and (b) the channel-flip side
-// effect doesn't disturb snapshot-restore / restart / copy / delete.
+// This is the single picker-driven update test in the suite. A
+// same-channel sibling used to exist but was deleted: the install
+// already updated to the latest stable in the direct-runAction test
+// above, so a same-channel stable picker click would have no
+// `updateAvailable` (the Update Now button wouldn't render). The
+// cross-channel path exercises the same `InstancePickerView` →
+// `pickerForwardShowProgress` → main → runAction IPC chain plus the
+// drafted-channel payload, which is the bug class that was
+// regressing — the same-channel variant added no unique coverage
+// beyond what's asserted below.
 // ---------------------------------------------------------------------------
 
 test('picker-driven cross-channel update-comfyui (stable → latest) IN_PLACE_RELAUNCH while running @lifecycle', async () => {
@@ -663,90 +757,17 @@ test('picker-driven cross-channel update-comfyui (stable → latest) IN_PLACE_RE
   }).trim()
   expect(headAfter, 'cross-channel update did not move HEAD').not.toBe(headBefore)
   expect(headAfter).toMatch(/^[a-f0-9]{40}$/)
-})
 
-test('picker-driven update-comfyui IN_PLACE_RELAUNCH while running @lifecycle', async () => {
-  // Real `update-comfyui` against github.com can spend minutes inside
-  // `uv pip install -r requirements.txt` if the rolled-back range
-  // crosses a requirements change. Mirror the stopped-install
-  // update test's 10-minute budget.
-  test.setTimeout(600_000)
-
-  // Roll HEAD back so the update has work — the prior update test
-  // already moved HEAD forward to the latest stable, so we have to
-  // un-do that for the picker click to show "Update available".
-  const headBefore = execFileSync('git', ['rev-parse', 'HEAD'], {
-    cwd: _comfyUIDir, encoding: 'utf-8', windowsHide: true,
-  }).trim()
-  execFileSync('git', ['reset', '--hard', 'HEAD~3'], {
-    cwd: _comfyUIDir, stdio: 'pipe', windowsHide: true,
-  })
-  const rolledBack = execFileSync('git', ['rev-parse', 'HEAD'], {
-    cwd: _comfyUIDir, encoding: 'utf-8', windowsHide: true,
-  }).trim()
-  expect(rolledBack, 'git reset --hard did not move HEAD').not.toBe(headBefore)
-
-  await resetIpcInvocations(ctx.app, 'stop-comfyui')
-  await resetIpcInvocations(ctx.app, 'run-action')
-
-  // Open the picker in expanded mode on the Update tab. Channel
-  // metadata loads via real `check-update` against github.com — the
-  // Update Now button appears once the stable channel reports an
-  // update available.
-  await ctx.panel.evaluate<boolean>(
-    `(() => {
-      window.api.openInstancePicker({
-        installationId: ${JSON.stringify(_updateInstallId)},
-        mode: 'expanded',
-        initialTab: 'update',
-      })
-      return true
-    })()`,
-  )
-  await waitForWebContents(ctx.app, 'comfyTitlePopup.html')
-  const popup = titlePopupPage(ctx.app)
-  await popup.waitForSelector(byTestId(TID.updateActionButton('update-comfyui')), { timeout: 60_000 })
-  expect(await popup.click(byTestId(TID.updateActionButton('update-comfyui')))).toBe(true)
-
-  // Confirm modal CTA — `TID.modalConfirm` when the action carries
-  // `confirm.messageDetails` (rich-confirm branch of ModalDialog,
-  // typical for the stable channel which has release notes);
-  // `base-alert-action` when there are no details (BaseAlert simple
-  // confirm, typical for the latest/master channel since master
-  // commits have no GitHub release notes). The cross-channel test
-  // above flips the install to `latest`, so this test runs against
-  // that channel and lands on the BaseAlert path; accept either so
-  // the assertion stays robust across channels.
-  const confirmSelector =
-    '[data-testid="modal-confirm-button"], [data-testid="base-alert-action"]'
-  await popup.waitForVisible(confirmSelector, { timeout: 15_000 })
-  expect(await popup.click(confirmSelector)).toBe(true)
-
-  // Popup hides; the panel's ProgressModal owns the long-running op.
-  await waitForProgressTakeoverAfterPopupClose()
-
-  // Wait for the relaunch leg of IN_PLACE_RELAUNCH to fire (panel-side
-  // `useDeepLinkRouter` appends `runAction('launch')` after a successful
-  // update). Then wait for the comfy frontend to be loaded again.
-  await waitForRunAction(_updateInstallId, 'launch')
-  await expect.poll(comfyFrontendIsLoaded, { timeout: 180_000, intervals: [1_000, 2_000] }).toBe(true)
-
-  // IPC chain: exactly one self-stop, then update-comfyui then launch
-  // (both scoped to our installation id).
-  const ourStops = await getStopsFor(_updateInstallId)
-  expect(ourStops.length, 'self-stop should fire exactly once for IN_PLACE_RELAUNCH').toBe(1)
-
-  const ourRunCalls = await getRunActionsFor(_updateInstallId)
+  // IN_PLACE_RELAUNCH run-action chain: update-comfyui then launch
+  // (scoped to our installation id). Note: cross-channel forwards
+  // through `pickerForwardShowProgress` → main, so the self-stop
+  // path is main-side (`ipc.stopRunning`) rather than the renderer
+  // `stop-comfyui` IPC — only the run-action ordering is observable
+  // here.
   expect(ourRunCalls.length, 'update + launch run-action calls').toBeGreaterThanOrEqual(2)
   expect(ourRunCalls[0]?.actionId, 'first run-action should be update-comfyui').toBe('update-comfyui')
   const launchIdx = ourRunCalls.findIndex((c) => c.actionId === 'launch')
   expect(launchIdx, 'launch run-action should follow update-comfyui').toBeGreaterThan(0)
-
-  // HEAD moved forward off the rolled-back commit.
-  const headAfter = execFileSync('git', ['rev-parse', 'HEAD'], {
-    cwd: _comfyUIDir, encoding: 'utf-8', windowsHide: true,
-  }).trim()
-  expect(headAfter, 'update did not move HEAD').not.toBe(rolledBack)
 })
 
 test('picker-driven snapshot-restore IN_PLACE_RELAUNCH while running @lifecycle', async () => {
