@@ -25,6 +25,7 @@ import { useSendFeedback } from '../composables/useSendFeedback'
 import { emitTelemetryAction } from '../lib/telemetry'
 import { useDeepLinkRouter } from '../composables/useDeepLinkRouter'
 import { useInstallContextMenu } from '../composables/useInstallContextMenu'
+import { useActionGuard } from '../composables/useActionGuard'
 import { registerMigrateTakeover } from '../composables/useMigrateAction'
 import { isFlowPanel, isValidPanel, usePanelOverlays } from './usePanelOverlays'
 import { useChooserHandoff } from './useChooserHandoff'
@@ -153,7 +154,10 @@ const {
 // matching the registration gate in `panel/main.ts`; `__e2eRenderer`
 // is never present in production.
 if (params.get('e2e') === '1') {
-  bindE2EPanelHooks({ showProgress: handleShowProgress })
+  bindE2EPanelHooks({
+    showProgress: handleShowProgress,
+    actionGuard: useActionGuard(),
+  })
 }
 
 const firstUseTakeoverActive = computed(

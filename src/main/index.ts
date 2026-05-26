@@ -733,6 +733,7 @@ ipcMain.on('comfy-window:new-chooser-window', () => {
 })
 
 ipcMain.handle('focus-comfy-window', (_event, installationId: string) => {
+  recordIpcInvocation('focus-comfy-window', { installationId })
   const entry = getEntryByInstallationId(installationId)
   if (entry && !entry.window.isDestroyed()) {
     entry.window.show()
