@@ -355,6 +355,7 @@ function handleExpandedPrimaryAction(running: boolean): void {
   height: 100%;
   width: 100%;
   box-sizing: border-box;
+  background: var(--modal-surface-bg);
 }
 
 .picker-search {

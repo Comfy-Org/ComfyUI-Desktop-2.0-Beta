@@ -743,10 +743,10 @@ it('opens the new-install takeover above the chooser body when show-new-install 
     })
   })
 
-  it('opens the instance picker (expanded, Config tab) when a panel-trigger-overlay open-settings event arrives with tab=comfy', async () => {
+  it('opens the instance picker on the Config tab when a panel-trigger-overlay open-settings event arrives with tab=comfy', async () => {
     // `comfy://open-settings?tab=comfy` on an install-backed host
-    // opens the picker in expanded mode on the Config tab — the same
-    // surface the title-bar Settings entry routes to.
+    // opens the picker on the Config tab — the same surface the
+    // title-bar Settings entry routes to.
     mountPanel()
     await flushPromises()
     const api = (
@@ -764,7 +764,6 @@ it('opens the new-install takeover above the chooser body when show-new-install 
     expect(api.openInstancePicker).toHaveBeenCalledTimes(1)
     expect(api.openInstancePicker).toHaveBeenCalledWith({
       installationId: 'test-id',
-      mode: 'expanded',
       initialTab: 'config',
     })
     expect(api.openGlobalSettings).not.toHaveBeenCalled()
