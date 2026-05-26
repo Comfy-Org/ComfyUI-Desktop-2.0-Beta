@@ -27,6 +27,24 @@
  * The IPC assertions (run-action with portOverride; kill-port-process
  * with the conflict port; op.apiCall re-invocation counter) prove the
  * UI buttons drive the production paths end-to-end.
+ *
+ * FOLLOWUP: add a sibling lifecycle test that drives a REAL port
+ * conflict against the live `lifecycle.test.ts` standalone install
+ * (which already pays the ~500MB download cost). A real test would:
+ *   1. bind the install's launch port via `net.createServer` so the
+ *      handler in `launch.ts` actually observes `isPortListening` true,
+ *   2. drive `runAction('launch')` from the picker / dashboard and
+ *      assert the port-conflict footer mounts from a real backend
+ *      result (not an injected one),
+ *   3. for "Use Next Port" — pre-stub `findAvailablePort` (or scope
+ *      the net.createServer to a fixed busy port + assert the second
+ *      launch attempt succeeds on `nextPort`),
+ *   4. for "Kill Process" — scope `killByPort` to only kill PIDs the
+ *      test owns (the bound server) so taskkill / SIGKILL cannot
+ *      escape onto the Playwright runner itself.
+ * The synthetic test here pins the UI contract; a real-conflict test
+ * pins that the main-side detection path still wires through to the
+ * same ProgressModal surface.
  */
 
 import os from 'node:os'
