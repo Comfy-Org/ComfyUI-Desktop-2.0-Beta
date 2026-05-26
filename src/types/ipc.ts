@@ -892,7 +892,7 @@ export interface ElectronApi {
    *  `comfy://open-settings?tab=comfy`). */
   openInstancePicker(opts?: {
     installationId?: string | null
-    initialTab?: 'config' | 'status' | 'update' | 'snapshots'
+    initialTab?: 'config' | 'status' | 'update' | 'snapshots' | 'storage'
     autoAction?: string | null
   }): void
   /** Push the first-use takeover's current step to main so it can

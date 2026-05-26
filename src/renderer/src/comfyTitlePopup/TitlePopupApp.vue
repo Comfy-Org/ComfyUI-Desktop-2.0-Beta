@@ -66,6 +66,20 @@ interface PickerInstall {
   statusTag?: { style: string; label: string }
 }
 
+interface PickerStorageDir {
+  path: string
+  isPrimary: boolean
+  isDefault: boolean
+}
+
+/** Storage-tab slice main piggy-backs on the picker snapshot. Same
+ *  shape as `PickerStorageSlice` in `src/main/popups/titlePopup.ts`. */
+interface PickerStorageSlice {
+  sharedDirectoriesFields: Record<string, unknown>[]
+  modelsDirs: PickerStorageDir[]
+  modelsSystemDefault: string
+}
+
 interface PickerSnapshot {
   installs: PickerInstall[]
   activeInstallationId: string | null
@@ -79,6 +93,7 @@ interface PickerSnapshot {
   selectedInstallationId: string | null
   selectedSettings: DetailSection[] | null
   selectedSnapshots: SnapshotListData | null
+  storage: PickerStorageSlice
 }
 
 interface GlobalSettingsModelsDir {
@@ -176,7 +191,8 @@ const pickerSnapshot = ref<PickerSnapshot>({
   runningInstallationIds: [],
   selectedInstallationId: null,
   selectedSettings: null,
-  selectedSnapshots: null
+  selectedSnapshots: null,
+  storage: { sharedDirectoriesFields: [], modelsDirs: [], modelsSystemDefault: '' }
 })
 /** Latest global-settings snapshot — same lifecycle as `pickerSnapshot`. */
 const globalSettingsSnapshot = ref<GlobalSettingsSnapshot>({

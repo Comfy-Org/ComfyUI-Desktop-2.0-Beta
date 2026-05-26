@@ -236,6 +236,12 @@ describe('buildInstancePickerSnapshot', () => {
     } as InstancePickerInstall
   }
 
+  const EMPTY_STORAGE = {
+    sharedDirectoriesFields: [],
+    modelsDirs: [],
+    modelsSystemDefault: '',
+  }
+
   it('forwards the install array verbatim under `installs`', () => {
     const installs = [
       makeInstall({ id: 'a', name: 'A' }),
@@ -245,6 +251,7 @@ describe('buildInstancePickerSnapshot', () => {
       installs,
       hostInstallationId: null,
       runningInstallationIds: [],
+      storage: EMPTY_STORAGE,
     })
     expect(snap.installs).toEqual(installs)
   })
@@ -254,6 +261,7 @@ describe('buildInstancePickerSnapshot', () => {
       installs: [makeInstall({ id: 'a' })],
       hostInstallationId: 'a',
       runningInstallationIds: [],
+      storage: EMPTY_STORAGE,
     })
     expect(snap.activeInstallationId).toBe('a')
   })
@@ -263,6 +271,7 @@ describe('buildInstancePickerSnapshot', () => {
       installs: [],
       hostInstallationId: null,
       runningInstallationIds: [],
+      storage: EMPTY_STORAGE,
     })
     expect(snap.activeInstallationId).toBeNull()
   })
@@ -272,6 +281,7 @@ describe('buildInstancePickerSnapshot', () => {
       installs: [],
       hostInstallationId: null,
       runningInstallationIds: ['b', 'a', 'c'],
+      storage: EMPTY_STORAGE,
     })
     expect(snap.runningInstallationIds).toEqual(['b', 'a', 'c'])
   })
@@ -281,6 +291,7 @@ describe('buildInstancePickerSnapshot', () => {
       installs: [makeInstall({ id: 'a' })],
       hostInstallationId: null,
       runningInstallationIds: [],
+      storage: EMPTY_STORAGE,
     })
     expect(snap.runningInstallationIds).toEqual([])
   })

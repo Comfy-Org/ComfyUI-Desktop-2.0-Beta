@@ -19,6 +19,7 @@ import {
 } from '../types/ipc'
 import { IN_PLACE_RELAUNCH, augmentActionWithStopWarning, stopAndWaitForExit } from '../lib/stopWarning'
 import { sleepRemainder } from '../lib/uiTiming'
+import type { SectionTab } from '../lib/pickerTabs'
 
 /**
  * Backing state + IPC plumbing for the brand-redesigned Settings drawer
@@ -110,7 +111,7 @@ export interface UseComfyUISettingsApi {
   runningActionIds: Ref<Set<string>>
 
   /** Visible sections for a given tab (filtered by `section.tab`). */
-  sectionsForTab: (tab: 'settings' | 'status' | 'update' | 'snapshots') => ComputedRef<DetailSection[]>
+  sectionsForTab: (tab: SectionTab) => ComputedRef<DetailSection[]>
 
   /** Synthetic Status-tab row carrying the disk-usage reading. The
    *  status section payload doesn't include this — it lives on its own
@@ -786,7 +787,7 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
     }
   }
 
-  function sectionsForTab(tab: 'settings' | 'status' | 'update' | 'snapshots'): ComputedRef<DetailSection[]> {
+  function sectionsForTab(tab: SectionTab): ComputedRef<DetailSection[]> {
     // `pinBottom` sections live in the drawer footer, not the tab body —
     // mirror DetailModal.vue's split (`mainSections` vs `bottomSection`).
     return computed(() => sections.value.filter((s) => s.tab === tab && !s.pinBottom))

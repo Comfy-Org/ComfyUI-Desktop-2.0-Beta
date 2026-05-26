@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, toRef, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ChevronUp, SlidersHorizontal, Info, RefreshCw, History } from 'lucide-vue-next'
+import { ChevronUp, HardDrive, SlidersHorizontal, Info, RefreshCw, History } from 'lucide-vue-next'
 import { useComfyUISettings } from '../../composables/useComfyUISettings'
 import { useSessionStore } from '../../stores/sessionStore'
 import { findActionById } from '../../lib/findAction'
@@ -10,7 +10,8 @@ import ArgsBuilderPage from '../../views/comfyUISettings/ArgsBuilderPage.vue'
 import SnapshotsView from '../../views/comfyUISettings/SnapshotsView.vue'
 import StatusFactPanel from '../../views/comfyUISettings/StatusFactPanel.vue'
 import SettingsSectionList from '../../views/comfyUISettings/SettingsSectionList.vue'
-import type { PickerTab } from '../../lib/pickerTabs'
+import StoragePane, { type StorageSnapshot } from '../../views/comfyUISettings/StoragePane.vue'
+import type { PickerTab, SectionTab } from '../../lib/pickerTabs'
 import type { ActionDef, DetailField, Installation, ShowProgressOpts } from '../../types/ipc'
 import { TID } from '../../../../shared/testIds'
 
@@ -34,12 +35,22 @@ interface Props {
    *  Standalone`. Consumed exactly once per prop value transition;
    *  later section reloads or selection changes do not re-fire. */
   autoAction?: string | null
+  /** Slice of the popup's global-settings snapshot consumed by the
+   *  Storage tab. Optional so non-popup hosts (e.g. drawer chrome)
+   *  can omit it and the Storage tab silently empties out — they
+   *  don't have a way to mutate global settings anyway. */
+  globalSettingsSnapshot?: StorageSnapshot
 }
 
 const props = withDefaults(defineProps<Props>(), {
   initialTab: 'config',
   showBack: false,
-  autoAction: null
+  autoAction: null,
+  globalSettingsSnapshot: () => ({
+    sharedDirectoriesFields: [],
+    modelsDirs: [],
+    modelsSystemDefault: '',
+  }),
 })
 
 const emit = defineEmits<{
@@ -217,7 +228,7 @@ watch(
 
 interface TabDef {
   key: ComfyUISettingsTab
-  sectionTab: 'settings' | 'status' | 'update' | 'snapshots'
+  sectionTab: SectionTab
   label: string
   icon: typeof SlidersHorizontal
 }
@@ -240,6 +251,12 @@ const ALL_TABS: TabDef[] = [
     sectionTab: 'snapshots',
     label: t('comfyUISettings.tabSnapshots', 'Snapshots'),
     icon: History
+  },
+  {
+    key: 'storage',
+    sectionTab: 'storage',
+    label: t('comfyUISettings.tabStorage', 'Storage'),
+    icon: HardDrive
   },
   {
     key: 'status',
@@ -279,6 +296,8 @@ const visibleSections = computed(() => {
 })
 
 const statusSections = computed(() => sectionsForTab('status').value)
+
+const storageSections = computed(() => sectionsForTab('storage').value)
 
 const rootRef = useTemplateRef<HTMLElement>('root')
 
@@ -506,6 +525,25 @@ defineExpose({
                 :installation="installation"
                 :sections="statusSections"
                 :disk-usage="diskUsageItem"
+              />
+            </div>
+            <div
+              v-else-if="activeTab === 'storage'"
+              key="tab-storage"
+              class="settings-v2-tab-pane"
+            >
+              <!-- Lazy-mounted via `v-else-if` so picker opens that
+                   never visit Storage don't render the global model-
+                   dir UI. Snapshot is owned by the popup root and
+                   threaded through here as a prop. -->
+              <StoragePane
+                :installation="installation"
+                :snapshot="globalSettingsSnapshot"
+                :sections="storageSections"
+                :pending-restart-field-ids="pendingRestartFieldIds"
+                :field-error-messages="fieldErrorMessages"
+                :running-action-ids="runningActionIds"
+                @update-field="updateField"
               />
             </div>
             <div v-else :key="`tab-${activeTab}`" class="settings-v2-tab-pane">

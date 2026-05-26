@@ -73,11 +73,14 @@
     "tabStatus": "About",
     "tabUpdate": "Update",
     "tabSnapshots": "Snapshots",
+    "tabStorage": "Storage",
     "relaunch": "Relaunch",
     "more": "More",
     "diskUsage": "Disk Usage",
     "envVarsCount": "{n} defined",
-    "emptyInstallLess": "Open a ComfyUI install to view its settings."
+    "emptyInstallLess": "Open a ComfyUI install to view its settings.",
+    "storageGlobalNote": "Changes here apply to all of your ComfyUI instances.",
+    "storageRestartNote": "Restart the application (or close and reopen) for these changes to take effect."
   },
 
   "comfyLifecycle": {

@@ -1,13 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { HardDrive, RefreshCcw, Settings2, SlidersHorizontal, X } from 'lucide-vue-next'
+import { RefreshCcw, Settings2, SlidersHorizontal, X } from 'lucide-vue-next'
 import UpdatesSection from './globalSettings/UpdatesSection.vue'
 import GlobalSettingsMicroSection from './globalSettings/GlobalSettingsMicroSection.vue'
 import GitHubLinkCard from './globalSettings/GitHubLinkCard.vue'
-import ModelsDirList from './globalSettings/ModelsDirList.vue'
 import SettingsSectionList from '../views/comfyUISettings/SettingsSectionList.vue'
-import { useModal } from '../composables/useModal'
 import { withMinDuration } from '../lib/uiTiming'
 import type {
   AppUpdateDownloadProgress,
@@ -36,6 +34,9 @@ interface Snapshot {
   desktopUpdateFields: Record<string, unknown>[]
   cacheFields: Record<string, unknown>[]
   advancedFields: Record<string, unknown>[]
+  // TODO(brand-cleanup): Storage tab moved to instance-picker (see
+  // StoragePane.vue). Main still emits these for back-compat; remove
+  // once the snapshot builder in titlePopup.ts drops them.
   sharedDirectoriesFields: Record<string, unknown>[]
   modelsDirs: ModelsDir[]
   modelsSystemDefault: string
@@ -53,6 +54,8 @@ interface Snapshot {
   i18n: {
     overview: string
     updates: string
+    // TODO(brand-cleanup): consumed by StoragePane via useI18n now;
+    // keep here until main-side snapshot stops emitting them.
     storage: string
     models: string
     advanced: string
@@ -78,18 +81,16 @@ interface GlobalSettingsBridge {
 
 const props = defineProps<{ snapshot: Snapshot }>()
 const { t } = useI18n()
-const modal = useModal()
 const bridge = (window as unknown as { __comfyTitlePopup?: GlobalSettingsBridge }).__comfyTitlePopup
 
 const LAST_CHECKED_KEY = 'globalSettings.lastCheckedAt'
 
-type TabId = 'general' | 'updates' | 'storage' | 'advanced'
+type TabId = 'general' | 'updates' | 'advanced'
 const activeTab = ref<TabId>('general')
 
 const tabs = computed(() => [
   { id: 'general' as const, label: props.snapshot.i18n.overview, icon: Settings2 },
   { id: 'updates' as const, label: props.snapshot.i18n.updates, icon: RefreshCcw },
-  { id: 'storage' as const, label: props.snapshot.i18n.storage, icon: HardDrive },
   { id: 'advanced' as const, label: props.snapshot.i18n.advanced, icon: SlidersHorizontal }
 ])
 
@@ -108,9 +109,6 @@ const cacheSections = computed<DetailSection[]>(() => [
 const advancedSections = computed<DetailSection[]>(() => [
   { fields: props.snapshot.advancedFields as unknown as DetailField[] }
 ])
-const sharedDirsSections = computed<DetailSection[]>(() => [
-  { fields: props.snapshot.sharedDirectoriesFields as unknown as DetailField[] }
-])
 const appUpdateState = computed<AppUpdateState>(
   () => props.snapshot.appUpdate.state as unknown as AppUpdateState
 )
@@ -125,43 +123,6 @@ async function handleUpdateField(field: DetailField, value: unknown): Promise<vo
 function handleOpenExternal(url: string): void {
   if (!url) return
   bridge?.globalSettingsOpenExternal(url)
-}
-
-async function handleAddModelsDir(): Promise<void> {
-  const picked = await bridge?.globalSettingsBrowseFolder()
-  if (!picked) return
-  const dirs = props.snapshot.modelsDirs.map((d) => d.path)
-  dirs.push(picked)
-  await bridge?.globalSettingsSetModelsDirs(dirs)
-}
-
-async function handleRemoveModelsDir(index: number): Promise<void> {
-  const dir = props.snapshot.modelsDirs[index]
-  if (!dir) return
-  const ok = await modal.confirm({
-    title: t('models.removeDirTitle', 'Remove shared models directory?'),
-    message: t(
-      'models.removeDirConfirm',
-      "This won't delete any files. You can re-add the directory later from this list."
-    ),
-    confirmLabel: t('models.removeDir', 'Remove')
-  })
-  if (!ok) return
-  const dirs = props.snapshot.modelsDirs.map((d) => d.path)
-  dirs.splice(index, 1)
-  await bridge?.globalSettingsSetModelsDirs(dirs)
-}
-
-async function handleMakePrimary(index: number): Promise<void> {
-  const dirs = props.snapshot.modelsDirs.map((d) => d.path)
-  const moved = dirs.splice(index, 1)[0]
-  if (typeof moved !== 'string') return
-  dirs.unshift(moved)
-  await bridge?.globalSettingsSetModelsDirs(dirs)
-}
-
-function handleOpenModelsDir(path: string): void {
-  bridge?.globalSettingsOpenPath(path)
 }
 
 async function handleUpdateNow(): Promise<void> {
@@ -297,25 +258,6 @@ onMounted(() => {
             @check-for-update="handleCheckForUpdate"
             @update-field="handleUpdateField"
           />
-        </template>
-
-        <template v-else-if="activeTab === 'storage'">
-          <GlobalSettingsMicroSection
-            :title="snapshot.i18n.models"
-            :tooltip="t('tooltips.sharedModels')"
-          >
-            <ModelsDirList
-              :dirs="snapshot.modelsDirs"
-              @open="handleOpenModelsDir"
-              @remove="handleRemoveModelsDir"
-              @make-primary="handleMakePrimary"
-              @add="handleAddModelsDir"
-            />
-          </GlobalSettingsMicroSection>
-
-          <GlobalSettingsMicroSection :title="snapshot.i18n.sharedDirectories">
-            <SettingsSectionList :sections="sharedDirsSections" @update-field="handleUpdateField" />
-          </GlobalSettingsMicroSection>
         </template>
 
         <template v-else>

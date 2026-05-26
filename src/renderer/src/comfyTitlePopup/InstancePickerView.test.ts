@@ -126,7 +126,14 @@ async function mountPicker(snapshot: MockSnapshot) {
     ...snapshot,
   }
   return mount(InstancePickerView, {
-    props: { snapshot: enriched },
+    props: {
+      snapshot: enriched,
+      globalSettingsSnapshot: {
+        sharedDirectoriesFields: [],
+        modelsDirs: [],
+        modelsSystemDefault: '',
+      },
+    },
     global: { plugins: [i18n, pinia] },
   })
 }

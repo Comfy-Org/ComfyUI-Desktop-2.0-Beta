@@ -37,6 +37,20 @@ interface PickerInstall {
   statusTag?: { style: string; label: string }
 }
 
+interface PickerStorageDir {
+  path: string
+  isPrimary: boolean
+  isDefault: boolean
+}
+
+/** Storage-tab slice main piggy-backs on the picker snapshot. Matches
+ *  `PickerStorageSlice` in `src/main/popups/titlePopup.ts`. */
+interface PickerStorageSlice {
+  sharedDirectoriesFields: Record<string, unknown>[]
+  modelsDirs: PickerStorageDir[]
+  modelsSystemDefault: string
+}
+
 interface PickerSnapshot {
   installs: PickerInstall[]
   activeInstallationId: string | null
@@ -46,6 +60,7 @@ interface PickerSnapshot {
   selectedSnapshots: SnapshotListData | null
   initialTab?: string | null
   autoAction?: string | null
+  storage: PickerStorageSlice
 }
 
 const props = defineProps<{
@@ -377,6 +392,7 @@ function handleExpandedPrimaryAction(running: boolean): void {
               :initial-tab="initialExpandedTab"
               :auto-action="snapshot.autoAction ?? null"
               :show-back="true"
+              :global-settings-snapshot="snapshot.storage"
               class="picker-expanded-body"
               @show-progress="handleSettingsShowProgress"
               @navigate-list="handleSettingsNavigateList"

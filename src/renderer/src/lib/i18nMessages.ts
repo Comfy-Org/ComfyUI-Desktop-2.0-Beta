@@ -36,9 +36,20 @@ export const en = {
     platform: 'Platform',
     storageTab: 'Storage',
     sharedDirectories: 'Shared Directories',
+    models: 'Shared Models',
     updatesTab: 'Updates',
     checkForUpdates: 'Check for updates',
     checkingForUpdates: 'Checking…'
+  },
+  /** Keys consumed by the picker-side Storage tab (StoragePane.vue),
+   *  duplicated here so the popup-scoped i18n catalog used in tests
+   *  resolves them too. Source of truth for the live app is
+   *  `locales/en.json`. */
+  comfyUISettings: {
+    tabStorage: 'Storage',
+    storageGlobalNote: 'Changes here apply to all of your ComfyUI instances.',
+    storageRestartNote:
+      'Restart the application (or close and reopen) for these changes to take effect.'
   },
   models: {
     addDir: 'Add directory',

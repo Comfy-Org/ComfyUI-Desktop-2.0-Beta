@@ -114,11 +114,11 @@ describe('GlobalSettingsView', () => {
     document.body.innerHTML = ''
   })
 
-  it('renders the four tabs and the general tab is active by default', () => {
+  it('renders the three tabs and the general tab is active by default', () => {
     installMockBridge()
     const wrapper = mountView()
     const tabLabels = wrapper.findAll('.gs-tab').map((t) => t.text())
-    expect(tabLabels).toEqual(['General', 'Updates', 'Storage', 'Advanced'])
+    expect(tabLabels).toEqual(['General', 'Updates', 'Advanced'])
   })
 
   it('GitHub link card click routes through the bridge', async () => {
@@ -130,60 +130,8 @@ describe('GlobalSettingsView', () => {
     expect(bridge.openExternalCalls).toEqual(['https://github.com/comfyanonymous/ComfyUI'])
   })
 
-  it('switches to Storage tab and renders the models-dir list', async () => {
-    installMockBridge()
-    const wrapper = mountView()
-    const storageTab = wrapper.findAll('.gs-tab').find((t) => t.text() === 'Storage')!
-    await storageTab.trigger('click')
-    await nextTick()
-    const rows = wrapper.findAll('.models-dir-row')
-    expect(rows).toHaveLength(2)
-    expect(rows[0]!.find('.tag-primary').exists()).toBe(true)
-    expect(rows[1]!.find('.tag-primary').exists()).toBe(false)
-  })
-
-  it('emits make-primary through the bridge with reordered dirs', async () => {
-    const bridge = installMockBridge()
-    const wrapper = mountView()
-    await wrapper.findAll('.gs-tab').find((t) => t.text() === 'Storage')!.trigger('click')
-    await nextTick()
-    const toggles = wrapper.findAll('.models-dir-menu-wrap > button')
-    expect(toggles).toHaveLength(1)
-    await toggles[0]!.trigger('click')
-    await nextTick()
-    await flushPromises()
-    const makePrimary = wrapper.find('.models-dir-menu button[role="menuitem"]')
-    await makePrimary.trigger('click')
-    expect(bridge.setModelsDirsCalls).toEqual([[
-      '/mnt/extra/models',
-      '/home/u/ComfyUI/models',
-    ]])
-  })
-
-  it('ModelsDirList menu closes on Escape and restores focus to the toggle', async () => {
-    installMockBridge()
-    const wrapper = mountView()
-    await wrapper.findAll('.gs-tab').find((t) => t.text() === 'Storage')!.trigger('click')
-    await nextTick()
-    const toggle = wrapper.find<HTMLButtonElement>('.models-dir-menu-wrap > button')
-    await toggle.trigger('click')
-    await nextTick()
-    await flushPromises()
-    expect(wrapper.find('.models-dir-menu').exists()).toBe(true)
-    await wrapper.find('.models-dir-menu').trigger('keydown', { key: 'Escape' })
-    expect(wrapper.find('.models-dir-menu').exists()).toBe(false)
-    expect(document.activeElement).toBe(toggle.element)
-  })
-
-  it('opens a models dir through the bridge when the open icon is clicked', async () => {
-    const bridge = installMockBridge()
-    const wrapper = mountView()
-    await wrapper.findAll('.gs-tab').find((t) => t.text() === 'Storage')!.trigger('click')
-    await nextTick()
-    const openBtns = wrapper.findAll('.models-dir-row .models-dir-action')
-    await openBtns[0]!.trigger('click')
-    expect(bridge.openPathCalls).toEqual(['/home/u/ComfyUI/models'])
-  })
+  // Storage-tab coverage migrated to StoragePane.test.ts when the
+  // Storage tab moved from this popup into the Instance Picker.
 
   it('close button routes to bridge.close', async () => {
     const bridge = installMockBridge()

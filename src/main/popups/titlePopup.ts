@@ -94,6 +94,18 @@ export interface InstancePickerInstall {
  *  picker's right pane (changes whenever the user clicks a different
  *  row — picker tells main via `set-picker-selected-install` IPC and
  *  main re-broadcasts a fresh snapshot). */
+/** Storage-tab slice piggy-backed on the picker snapshot. Same shape
+ *  as the storage fields in `GlobalSettingsSnapshot` — main builds it
+ *  off the same `buildMediaSections` / `buildModelsPayload` plumbing.
+ *  Used by `StoragePane.vue` to render shared-model dirs and the
+ *  Shared Directories fields without subscribing to the
+ *  global-settings broadcast (which doesn't target picker popups). */
+export interface PickerStorageSlice {
+  sharedDirectoriesFields: Record<string, unknown>[]
+  modelsDirs: GlobalSettingsModelsDir[]
+  modelsSystemDefault: string
+}
+
 export interface InstancePickerSnapshot {
   installs: InstancePickerInstall[]
   activeInstallationId: string | null
@@ -102,12 +114,14 @@ export interface InstancePickerSnapshot {
   selectedSettings: Record<string, unknown>[] | null
   selectedSnapshots: Record<string, unknown> | null
   /** Tab the settings UI opens on ('config' | 'status' | 'update' |
-   *  'snapshots'). Null = let the picker view choose its default. */
+   *  'snapshots' | 'storage'). Null = let the picker view choose its
+   *  default. */
   initialTab: string | null
   /** Action id to fire automatically after the settings UI mounts
    *  (e.g. `'update-comfyui'` for the kebab Update entry). Cleared
    *  after consumption. */
   autoAction: string | null
+  storage: PickerStorageSlice
 }
 
 /** Single Models-directory row pushed to the global-settings popup.
@@ -165,6 +179,7 @@ interface BuildInstancePickerSnapshotArgs {
   selectedSnapshots?: Record<string, unknown> | null
   initialTab?: string | null
   autoAction?: string | null
+  storage: PickerStorageSlice
 }
 
 /**
@@ -199,6 +214,30 @@ export function buildInstancePickerSnapshot(
     selectedSnapshots: args.selectedSnapshots ?? null,
     initialTab: args.initialTab ?? null,
     autoAction: args.autoAction ?? null,
+    storage: args.storage,
+  }
+}
+
+/** Build the storage-tab slice piggy-backed on the picker snapshot.
+ *  Same `buildMediaSections` / `buildModelsPayload` plumbing the
+ *  global-settings snapshot uses — kept in one place so both
+ *  surfaces stay in lockstep. */
+function buildPickerStorageSlice(): PickerStorageSlice {
+  const mediaSections = buildMediaSections()
+  const modelsPayload = buildModelsPayload()
+  const sharedDirectoriesFields =
+    (mediaSections[0]?.fields ?? []).map(toDetailField) as unknown as Record<string, unknown>[]
+  const modelsDirsRaw =
+    (modelsPayload.sections[0]?.fields[0]?.value as string[] | undefined) ?? []
+  const modelsDefault = modelsPayload.systemDefault
+  return {
+    sharedDirectoriesFields,
+    modelsDirs: modelsDirsRaw.map((p, i) => ({
+      path: p,
+      isPrimary: i === 0,
+      isDefault: p === modelsDefault,
+    })),
+    modelsSystemDefault: modelsDefault,
   }
 }
 
@@ -655,6 +694,7 @@ async function broadcastInstancePickerSnapshotToTitlePopups(
       selectedSnapshots: details.snapshots,
       initialTab: entry.pickerInitialTab,
       autoAction: entry.pickerAutoAction,
+      storage: buildPickerStorageSlice(),
     })
     // Dedupe: every snapshot broadcast triggers a `pickerSnapshot`
     // prop change in the renderer, which schedules a measure-and-
@@ -1431,6 +1471,7 @@ function openInstancePickerForHost(
     selectedSnapshots: null,
     initialTab: initialTab ?? null,
     autoAction: autoAction ?? null,
+    storage: buildPickerStorageSlice(),
   })
   openTitlePopup({
     parent: parentEntry.window,
@@ -2347,7 +2388,10 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
     'comfy-titlepopup:global-settings-update-field',
     (event, payload: { fieldId?: unknown; value?: unknown }) => {
       const popupEntry = titlePopupsByWebContents.get(event.sender.id)
-      if (!popupEntry || popupEntry.kind !== 'global-settings') {
+      if (
+        !popupEntry
+        || (popupEntry.kind !== 'global-settings' && popupEntry.kind !== 'instance-picker')
+      ) {
         return { ok: false, message: 'Global Settings popup not active.' }
       }
       const fieldId = payload?.fieldId
@@ -2368,7 +2412,10 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
     'comfy-titlepopup:global-settings-set-models-dirs',
     (event, payload: { dirs?: unknown }) => {
       const popupEntry = titlePopupsByWebContents.get(event.sender.id)
-      if (!popupEntry || popupEntry.kind !== 'global-settings') {
+      if (
+        !popupEntry
+        || (popupEntry.kind !== 'global-settings' && popupEntry.kind !== 'instance-picker')
+      ) {
         return { ok: false }
       }
       const dirs = payload?.dirs
@@ -2387,7 +2434,12 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
     'comfy-titlepopup:global-settings-browse-folder',
     async (event, payload: { defaultPath?: unknown } | undefined) => {
       const popupEntry = titlePopupsByWebContents.get(event.sender.id)
-      if (!popupEntry || popupEntry.kind !== 'global-settings') return null
+      if (
+        !popupEntry
+        || (popupEntry.kind !== 'global-settings' && popupEntry.kind !== 'instance-picker')
+      ) {
+        return null
+      }
       const parentEntry = comfyWindows.get(popupEntry.parentEntryId)
       if (!parentEntry || parentEntry.window.isDestroyed()) return null
       const defaultPath = typeof payload?.defaultPath === 'string' && payload.defaultPath.length > 0
@@ -2407,7 +2459,12 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
     'comfy-titlepopup:global-settings-open-path',
     (event, payload: { path?: unknown }) => {
       const popupEntry = titlePopupsByWebContents.get(event.sender.id)
-      if (!popupEntry || popupEntry.kind !== 'global-settings') return
+      if (
+        !popupEntry
+        || (popupEntry.kind !== 'global-settings' && popupEntry.kind !== 'instance-picker')
+      ) {
+        return
+      }
       const targetPath = payload?.path
       if (typeof targetPath !== 'string' || targetPath.length === 0) return
       void openPathHelper(targetPath)
@@ -2480,8 +2537,11 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
   })
   // Settings writes (applySettingSet) emit 'changed' — rebroadcast so
   // the popup sees Language / Theme / Cache / Models / etc. flip live.
+  // The picker piggy-backs `modelsDirs` + `sharedDirectoriesFields` on
+  // its own snapshot, so it gets re-broadcast on the same event.
   globalSettingsEvents.on('changed', () => {
     void broadcastGlobalSettingsSnapshotToTitlePopups(bindings)
+    void broadcastInstancePickerSnapshotToTitlePopups(bindings)
   })
   // Updater state transitions repaint the Updates accordion.
   updater.onUpdateStateChanged(() => {
