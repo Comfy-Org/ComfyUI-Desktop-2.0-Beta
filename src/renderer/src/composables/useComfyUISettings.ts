@@ -134,6 +134,12 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
 
   const sections = ref<DetailSection[]>([])
   const diskSpace = ref<DiskSpaceInfo | null>(null)
+  /** Install's own on-disk footprint in bytes. Fetched via
+   *  `getInstallationSize` which walks the directory tree, so it
+   *  lands after the initial render and is `null` until then. Drives
+   *  the Status tab's Disk Usage row — `total - free` would be the
+   *  whole volume's used space, which is not what users want here. */
+  const installSize = ref<number | null>(null)
   const loading = ref(false)
   const error = ref<string | null>(null)
   // Inline-action busy state. Replaced (not mutated) on each add/delete
@@ -160,6 +166,7 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
     if (isInstallSwitch) {
       sections.value = []
       diskSpace.value = null
+      installSize.value = null
     }
     lastLoadedId = installationId
     loading.value = true
@@ -179,6 +186,18 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
     } finally {
       if (seq === requestSeq) loading.value = false
     }
+    // Install-footprint scan runs after the main load so it can't
+    // block the initial render. Drops in once it lands.
+    void window.api
+      .getInstallationSize(installationId)
+      .then((r) => {
+        if (seq !== requestSeq) return
+        installSize.value = typeof r?.sizeBytes === 'number' ? r.sizeBytes : null
+      })
+      .catch(() => {
+        if (seq !== requestSeq) return
+        installSize.value = null
+      })
   }
 
   async function reload(): Promise<void> {
@@ -186,6 +205,7 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
     if (!inst) {
       sections.value = []
       diskSpace.value = null
+      installSize.value = null
       lastLoadedId = null
       // Bump the sequence so any in-flight loadAll for a previous
       // install can't write into our now-cleared refs.
@@ -603,12 +623,24 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
   })
 
   const diskUsageItem = computed<{ label: string; value: string } | null>(() => {
-    const ds = diskSpace.value
-    if (!ds) return null
-    const used = Math.max(0, ds.total - ds.free)
+    // Prefer the install's own footprint (`getInstallationSize` walks
+    // the install directory). The whole-volume `total - free` calc the
+    // old version used was the disk's used space, not the install's,
+    // which made the row read as "free space" semantics on a near-full
+    // drive.
+    if (installSize.value !== null) {
+      return {
+        label: t('comfyUISettings.diskUsage', 'Disk Usage'),
+        value: formatBytes(installSize.value),
+      }
+    }
+    // While the directory scan is still in flight, fall back to a
+    // "—" placeholder so the row is present (otherwise it pops in
+    // mid-render). `diskSpace` being null also gets us here.
+    if (!diskSpace.value) return null
     return {
       label: t('comfyUISettings.diskUsage', 'Disk Usage'),
-      value: formatBytes(used),
+      value: '—',
     }
   })
 

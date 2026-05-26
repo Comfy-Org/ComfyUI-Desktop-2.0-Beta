@@ -24,6 +24,10 @@ interface FactRow {
   label: string
   value: string
   copyable?: boolean
+  /** `'start'` truncates with a leading ellipsis so the tail (last
+   *  path segment) stays visible. Paths use it; everything else
+   *  defaults to end-truncation. */
+  truncate?: 'start' | 'end'
 }
 
 interface FactGroup {
@@ -117,7 +121,9 @@ const locationRows = computed<FactRow[]>(() => {
   const rows: FactRow[] = []
   for (const field of allFields.value) {
     if (matchLabel(field, ['location', 'path', 'install path'])) {
-      rows.push(toRow(field))
+      const row = toRow(field)
+      if (isPathLike(row.value)) row.truncate = 'start'
+      rows.push(row)
     }
   }
   if (props.diskUsage) {
@@ -184,7 +190,14 @@ const groups = computed<FactGroup[]>(() => {
         <div v-for="row in group.rows" :key="row.id" class="status-fact-row">
           <dt>{{ row.label }}</dt>
           <dd>
-            <span class="status-fact-value" :title="row.value">{{ row.value }}</span>
+            <span
+              class="status-fact-value"
+              :class="{ 'is-truncate-start': row.truncate === 'start' }"
+              :title="row.value"
+            >
+              <bdi v-if="row.truncate === 'start'" dir="ltr">{{ row.value }}</bdi>
+              <template v-else>{{ row.value }}</template>
+            </span>
             <BaseCopyButton v-if="row.copyable" :value="row.value" />
           </dd>
         </div>
@@ -303,5 +316,14 @@ const groups = computed<FactGroup[]>(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Path rows truncate from the START so the trailing folder name
+ * (the useful bit) stays readable. `direction: rtl` makes the
+ * ellipsis fall on the left; the inner <bdi dir="ltr"> keeps the
+ * character order rendering left-to-right. */
+.status-fact-value.is-truncate-start {
+  direction: rtl;
+  text-align: left;
 }
 </style>

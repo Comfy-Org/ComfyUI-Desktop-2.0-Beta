@@ -71,6 +71,7 @@ function makeSection(installName: string): DetailSection {
 interface MockApi {
   getDetailSections: ReturnType<typeof vi.fn>
   getDiskSpace: ReturnType<typeof vi.fn>
+  getInstallationSize: ReturnType<typeof vi.fn>
   stopComfyUI: ReturnType<typeof vi.fn>
   runAction: ReturnType<typeof vi.fn>
 }
@@ -79,6 +80,7 @@ function installMockApi(overrides: Partial<MockApi> = {}): MockApi {
   const api: MockApi = {
     getDetailSections: vi.fn().mockResolvedValue([]),
     getDiskSpace: vi.fn().mockResolvedValue(null),
+    getInstallationSize: vi.fn().mockResolvedValue({ sizeBytes: 0 }),
     stopComfyUI: vi.fn().mockResolvedValue(undefined),
     runAction: vi.fn().mockResolvedValue({ ok: true }),
     ...overrides,
