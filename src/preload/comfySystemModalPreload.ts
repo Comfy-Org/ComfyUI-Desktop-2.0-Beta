@@ -19,12 +19,20 @@ import type { IpcRendererEvent } from 'electron'
 
 export type SystemModalConfirmStyle = 'primary' | 'danger'
 
+export interface SystemModalDetailGroup {
+  label: string
+  items: string[]
+}
+
 export interface SystemModalSpec {
   /** Unique identifier per open. Echoed back on action ack so main
    *  can route the result to the right callback. */
   id: string
   title: string
   message: string
+  /** Optional structured detail groups rendered beneath the message
+   *  (label + bulleted items). Mirrors `BaseAlert`'s `messageDetails`. */
+  details?: SystemModalDetailGroup[]
   confirmLabel: string
   cancelLabel: string
   confirmStyle?: SystemModalConfirmStyle
@@ -55,12 +63,21 @@ export interface ComfySystemModalBridge {
   onModal(cb: (spec: SystemModalSpec) => void): () => void
 }
 
+function isDetailGroup(value: unknown): value is SystemModalDetailGroup {
+  if (!value || typeof value !== 'object') return false
+  const g = value as { label?: unknown; items?: unknown }
+  if (typeof g.label !== 'string') return false
+  if (!Array.isArray(g.items)) return false
+  return g.items.every((it) => typeof it === 'string')
+}
+
 function isModalSpec(value: unknown): value is SystemModalSpec {
   if (!value || typeof value !== 'object') return false
   const v = value as {
     id?: unknown
     title?: unknown
     message?: unknown
+    details?: unknown
     confirmLabel?: unknown
     cancelLabel?: unknown
     theme?: unknown
@@ -70,6 +87,10 @@ function isModalSpec(value: unknown): value is SystemModalSpec {
   if (typeof v.message !== 'string') return false
   if (typeof v.confirmLabel !== 'string') return false
   if (typeof v.cancelLabel !== 'string') return false
+  if (v.details !== undefined) {
+    if (!Array.isArray(v.details)) return false
+    if (!v.details.every(isDetailGroup)) return false
+  }
   if (!v.theme || typeof v.theme !== 'object') return false
   const theme = v.theme as { bg?: unknown; text?: unknown }
   if (typeof theme.bg !== 'string' || typeof theme.text !== 'string') return false

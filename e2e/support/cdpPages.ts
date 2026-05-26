@@ -199,6 +199,13 @@ export function titlePopupPage(app: ElectronApplication): WebContentsPage {
   return new WebContentsPage(app, 'comfyTitlePopup.html')
 }
 
+/** WebContentsPage for the shell-level system-modal popup. Hosts the
+ *  app-update Download/Restart confirm, the picker Restart confirm,
+ *  the switch-instance confirm, and the Close All Windows confirm. */
+export function systemModalPage(app: ElectronApplication): WebContentsPage {
+  return new WebContentsPage(app, 'comfySystemModal.html')
+}
+
 /**
  * True iff the WebContentsView whose URL contains `marker` is currently
  * `setVisible(true)` AND has non-zero bounds — the EmbeddedPopupView
