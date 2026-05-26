@@ -189,6 +189,25 @@ test('completes install (auto-launches via brand chrome) @lifecycle', async () =
   await expect.poll(comfyFrontendIsLoaded, { timeout: 480_000, intervals: [1_000, 2_000] }).toBe(true)
 })
 
+test('first-use Local chain marks firstUseCompleted once and cycles firstUseMode @lifecycle', async () => {
+  // Asserts the chain bookkeeping the auto-launch above relied on:
+  //   - `markFirstUseCompleted` (set-setting firstUseCompleted=true)
+  //     fires exactly once across the entire Local chain (consent →
+  //     pick-local → new-install takeover → install → auto-launch).
+  //   - `setFirstUseMode` advances through 'post-consent' and lands
+  //     at 'none' once the new-install takeover closes.
+  // Reads from the cumulative IPC invocation log captured since boot —
+  // no reset, so the assertions cover the full chain end-to-end.
+  const setSettingCalls = await getIpcInvocations(ctx.app, 'set-setting') as Array<{ key: string; value: unknown }>
+  const firstUseFlips = setSettingCalls.filter((c) => c.key === 'firstUseCompleted' && c.value === true)
+  expect(firstUseFlips.length, 'markFirstUseCompleted should run exactly once across the chain').toBe(1)
+
+  const modeCalls = await getIpcInvocations(ctx.app, 'comfy-window:set-first-use-mode') as Array<{ mode: string }>
+  const modes = modeCalls.map((c) => c.mode)
+  expect(modes, 'first-use mode sequence missing post-consent').toContain('post-consent')
+  expect(modes[modes.length - 1], 'first-use mode should end at none after chain completes').toBe('none')
+})
+
 // ---------------------------------------------------------------------------
 // Launch & verify split-view + dark background
 // ---------------------------------------------------------------------------
