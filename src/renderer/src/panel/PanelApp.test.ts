@@ -744,6 +744,54 @@ it('opens the new-install takeover above the chooser body when show-new-install 
     })
   })
 
+  it('opens the instance picker (expanded, Config tab) when a panel-trigger-overlay open-settings event arrives with tab=comfy', async () => {
+    // `comfy://open-settings?tab=comfy` on an install-backed host
+    // opens the picker in expanded mode on the Config tab — the same
+    // surface the title-bar Settings entry routes to.
+    mountPanel()
+    await flushPromises()
+    const api = (
+      window as unknown as { api: {
+        openInstancePicker: ReturnType<typeof vi.fn>
+        openGlobalSettings: ReturnType<typeof vi.fn>
+      } }
+    ).api
+
+    mockState.panelTriggerOverlayCallbacks.forEach((cb) =>
+      cb({ kind: 'open-settings', settingsTab: 'comfy' }),
+    )
+    await flushPromises()
+
+    expect(api.openInstancePicker).toHaveBeenCalledTimes(1)
+    expect(api.openInstancePicker).toHaveBeenCalledWith({
+      installationId: 'test-id',
+      mode: 'expanded',
+      initialTab: 'config',
+    })
+    expect(api.openGlobalSettings).not.toHaveBeenCalled()
+  })
+
+  it('opens global settings when a panel-trigger-overlay open-settings event arrives with tab=global', async () => {
+    // `comfy://open-settings?tab=global` routes to the dedicated
+    // Global Settings popup regardless of which host received it.
+    mountPanel()
+    await flushPromises()
+    const api = (
+      window as unknown as { api: {
+        openInstancePicker: ReturnType<typeof vi.fn>
+        openGlobalSettings: ReturnType<typeof vi.fn>
+      } }
+    ).api
+
+    mockState.panelTriggerOverlayCallbacks.forEach((cb) =>
+      cb({ kind: 'open-settings', settingsTab: 'global' }),
+    )
+    await flushPromises()
+
+    expect(api.openGlobalSettings).toHaveBeenCalledTimes(1)
+    expect(api.openInstancePicker).not.toHaveBeenCalled()
+  })
+
   it('shows the "Desktop Update Ready" confirm modal when a restart-prompt event arrives, and installs on confirm', async () => {
     // Issue #488 — auto-on click on the 'ready' pill (or the auto
     // restart-prompt that fires on user-initiated download
