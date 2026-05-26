@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { installTypeMetaFor } from '../../lib/installTypeIcon'
 import { TID } from '../../../../shared/testIds'
 import type { Installation } from '../../types/ipc'
@@ -20,6 +21,12 @@ interface Props {
   /** Install is currently running in some other window — drives the
    *  small running dot on the row. */
   running?: boolean
+  /** This install is the one whose host window opened the picker —
+   *  drives the "Current" pill that replaces the recency label. */
+  isCurrent?: boolean
+  /** An update is available for this install — drives the orange
+   *  status dot. Orange takes precedence over the green running dot. */
+  updateAvailable?: boolean
   /** Compact recency (`3h ago`) for single-line picker rows. */
   lastLaunchedShortLabel: string
 }
@@ -27,7 +34,11 @@ interface Props {
 const props = withDefaults(defineProps<Props>(), {
   active: false,
   running: false,
+  isCurrent: false,
+  updateAvailable: false,
 })
+
+const { t } = useI18n()
 
 const emit = defineEmits<{
   select: [installation: Installation]
@@ -55,11 +66,23 @@ function handleClick(): void {
     >
       <div class="picker-row-icon" :title="$t(typeMeta.labelKey)">
         <component :is="typeMeta.icon" :size="20" />
-        <span v-if="running" class="picker-row-running-dot" aria-hidden="true"></span>
+        <span
+          v-if="updateAvailable"
+          class="picker-row-update-dot"
+          aria-hidden="true"
+        ></span>
+        <span
+          v-else-if="running"
+          class="picker-row-running-dot"
+          aria-hidden="true"
+        ></span>
       </div>
       <div class="picker-row-body">
         <span class="picker-row-name">{{ installation.name }}</span>
-        <span v-if="lastLaunchedShortLabel" class="picker-row-recency">
+        <span v-if="isCurrent" class="picker-row-current-pill">
+          {{ t('snapshots.current') }}
+        </span>
+        <span v-else-if="lastLaunchedShortLabel" class="picker-row-recency">
           {{ lastLaunchedShortLabel }}
         </span>
       </div>
@@ -152,5 +175,37 @@ function handleClick(): void {
   background: #38c149;
   border: 2px solid #38303d;
   box-sizing: content-box;
+}
+/* Orange update-available indicator. Same anchor + chrome as the
+ * running dot — the orange takes precedence in the template so we
+ * render exactly one dot at a time. */
+.picker-row-update-dot {
+  position: absolute;
+  bottom: -1px;
+  right: -1px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--status-update, #f59e0b);
+  border: 2px solid #38303d;
+  box-sizing: content-box;
+}
+/* "Current" pill — flags the install whose host window opened the
+ * picker. Replaces the recency label on that one row so the user can
+ * scan-find their own context at a glance. */
+.picker-row-current-pill {
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--text) 10%, transparent);
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.picker-row.is-active .picker-row-current-pill {
+  color: var(--text);
+  background: color-mix(in srgb, var(--text) 14%, transparent);
 }
 </style>

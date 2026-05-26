@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, toRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Plus, Search } from 'lucide-vue-next'
+import { Home, Plus, Search } from 'lucide-vue-next'
 import BaseInput from '../components/ui/BaseInput.vue'
 import { FILTER_CHIPS, useInstallList } from '../composables/useInstallList'
 import { useSessionStore } from '../stores/sessionStore'
@@ -80,6 +80,12 @@ function ensurePanelLocaleMerged(): Promise<void> {
 
 interface PickerBridge {
   platform?: string
+  /** Dispatch a menu-item id through the existing
+   *  `comfy-titlepopup:item-activated` → `activateTitlePopupMenuItem`
+   *  path. The picker's Home button reuses this with
+   *  `'return-to-dashboard'` so we don't add a parallel IPC for the
+   *  same action. */
+  activate?: (id: string) => void
   pickInstall: (installationId: string) => void
   openNewInstall: () => void
   restartInstall: (installationId: string) => void
@@ -182,12 +188,33 @@ function isRowRunning(inst: Installation): boolean {
   return runningSet.value.has(inst.id)
 }
 
+function isRowCurrent(inst: Installation): boolean {
+  return !!props.snapshot.activeInstallationId && inst.id === props.snapshot.activeInstallationId
+}
+
+/** Update available — mirrors the `showUpdateBadge` check in
+ *  `ComfyUISettingsContent.vue` so the picker row dot and the Update
+ *  tab badge share one source of truth. */
+function isRowUpdateAvailable(inst: Installation): boolean {
+  const tagged = inst as Installation & { statusTag?: { style?: string }; status?: string }
+  return tagged.statusTag?.style === 'update' || tagged.status === 'update-available'
+}
+
 function handleSelect(inst: Installation): void {
   selectedId.value = inst.id
 }
 
 function handleNewInstall(): void {
   bridge?.openNewInstall()
+}
+
+/** Picker hosted by an install (vs the chooser/dashboard itself).
+ *  Drives whether the Home → dashboard escape is offered — pointless
+ *  to surface on a picker already shown from the dashboard. */
+const isInstallHost = computed(() => !!props.snapshot.activeInstallationId)
+
+function handleReturnToDashboard(): void {
+  bridge?.activate?.('return-to-dashboard')
 }
 
 watch(
@@ -265,23 +292,37 @@ function handleExpandedPrimaryAction(running: boolean): void {
       </BaseInput>
     </div>
 
-    <div
-      class="picker-chips"
-      role="tablist"
-      :aria-label="$t('chooser.filterLabel', 'Source filter')"
-    >
-      <button
-        v-for="chip in visibleChips"
-        :key="chip.key"
-        type="button"
-        role="tab"
-        class="picker-chip"
-        :class="{ 'is-active': activeFilter === chip.key }"
-        :aria-selected="activeFilter === chip.key"
-        @click="activeFilter = chip.key"
+    <div class="picker-chips-row">
+      <template v-if="isInstallHost">
+        <button
+          type="button"
+          class="picker-home"
+          :aria-label="$t('fileMenu.returnToDashboard')"
+          :title="$t('fileMenu.returnToDashboard')"
+          @click="handleReturnToDashboard"
+        >
+          <Home :size="14" />
+        </button>
+        <span class="picker-chips-divider" aria-hidden="true"></span>
+      </template>
+      <div
+        class="picker-chips"
+        role="tablist"
+        :aria-label="$t('chooser.filterLabel', 'Source filter')"
       >
-        {{ $t(chip.labelKey) }}
-      </button>
+        <button
+          v-for="chip in visibleChips"
+          :key="chip.key"
+          type="button"
+          role="tab"
+          class="picker-chip"
+          :class="{ 'is-active': activeFilter === chip.key }"
+          :aria-selected="activeFilter === chip.key"
+          @click="activeFilter = chip.key"
+        >
+          {{ $t(chip.labelKey) }}
+        </button>
+      </div>
     </div>
 
     <div class="picker-body">
@@ -296,6 +337,8 @@ function handleExpandedPrimaryAction(running: boolean): void {
               :installation="cloudInstall"
               :active="selectedId === cloudInstall.id"
               :running="isRowRunning(cloudInstall)"
+              :is-current="isRowCurrent(cloudInstall)"
+              :update-available="isRowUpdateAvailable(cloudInstall)"
               :last-launched-short-label="lastLaunchedShortLabel(cloudInstall)"
               @select="handleSelect"
             />
@@ -306,6 +349,8 @@ function handleExpandedPrimaryAction(running: boolean): void {
               :installation="inst"
               :active="selectedId === inst.id"
               :running="isRowRunning(inst)"
+              :is-current="isRowCurrent(inst)"
+              :update-available="isRowUpdateAvailable(inst)"
               :last-launched-short-label="lastLaunchedShortLabel(inst)"
               @select="handleSelect"
             />
@@ -390,13 +435,53 @@ function handleExpandedPrimaryAction(running: boolean): void {
   color: var(--accent-label);
   margin-top: 2px;
 }
+.picker-chips-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px 10px 16px;
+  border-bottom: 1px solid var(--brand-surface-border-hover, var(--chooser-surface-border));
+}
 .picker-chips {
   display: flex;
   align-items: center;
   gap: 6px;
   flex-wrap: wrap;
-  padding: 8px 16px 10px 16px;
-  border-bottom: 1px solid var(--brand-surface-border-hover, var(--chooser-surface-border));
+  min-width: 0;
+}
+/* Home — naked icon button. The vertical divider that follows it
+ * does the visual separation work; a pill border around the icon
+ * would compete with the chip pills and read as another filter.
+ * Hover lifts the icon to full text colour without painting a
+ * background. */
+.picker-home {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--neutral-100);
+  cursor: pointer;
+  transition: color 100ms ease;
+}
+.picker-home:hover,
+.picker-home:focus-visible {
+  color: var(--text);
+  outline: none;
+}
+/* Vertical hairline between Home and the filter chips so the eye
+ * groups them as "navigation | filters". Matches the chip border
+ * token so all the dividers in the row pull from the same well. */
+.picker-chips-divider {
+  flex: 0 0 auto;
+  display: inline-block;
+  width: 1px;
+  height: 16px;
+  background: var(--brand-surface-border-hover, var(--chooser-surface-border));
 }
 .picker-chip {
   height: 22px;

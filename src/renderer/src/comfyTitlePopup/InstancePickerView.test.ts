@@ -24,6 +24,9 @@ const emptySnapshotListPayload: SnapshotListData = {
     onInstanceStopped: vi.fn(() => () => { }),
     onInstanceProgress: vi.fn(() => () => { }),
     onSessionStateChanged: vi.fn(() => () => { }),
+    getDetailSections: vi.fn().mockResolvedValue([]),
+    getDiskSpace: vi.fn().mockResolvedValue(null),
+    getInstallationSize: vi.fn().mockResolvedValue({ sizeBytes: 0 }),
   }
 
 /**
@@ -205,6 +208,93 @@ describe('comfyTitlePopup/InstancePickerView', () => {
       await flushPromises()
       expect(bridge.picks).toEqual([])
       expect(bridge.selectedInstallSets.at(-1)).toBe('b')
+    })
+
+    // Spec item 2 — "Xh ago" recency is replaced by a "Current" pill on
+    // the install whose host window opened the picker (NOT just the
+    // selected row). Other rows keep their recency labels.
+    it('renders the Current pill on the active-host install and only there', async () => {
+      const wrapper = await mountPicker({
+        installs: [
+          makeInstall({ id: 'a', name: 'Alpha', lastLaunchedAt: Date.now() - 60_000 }),
+          makeInstall({ id: 'b', name: 'Bravo', lastLaunchedAt: Date.now() - 3_600_000 }),
+        ],
+        activeInstallationId: 'a',
+        runningInstallationIds: [],
+      })
+      const rows = wrapper.findAll('.picker-row')
+      const alphaRow = rows.find((c) => c.text().includes('Alpha'))!
+      const bravoRow = rows.find((c) => c.text().includes('Bravo'))!
+      expect(alphaRow.find('.picker-row-current-pill').exists()).toBe(true)
+      expect(alphaRow.find('.picker-row-recency').exists()).toBe(false)
+      expect(bravoRow.find('.picker-row-current-pill').exists()).toBe(false)
+      expect(bravoRow.find('.picker-row-recency').exists()).toBe(true)
+    })
+
+    // Spec item 6 — update-available paints the dot orange (overrides
+    // the green running dot when both apply, since update is the more
+    // actionable signal).
+    it('paints the row dot orange when update available, including when also running', async () => {
+      const wrapper = await mountPicker({
+        installs: [
+          makeInstall({
+            id: 'a',
+            name: 'Alpha',
+            statusTag: { style: 'update', label: 'Update' },
+          }),
+          makeInstall({ id: 'b', name: 'Bravo' }),
+        ],
+        activeInstallationId: null,
+        runningInstallationIds: ['a'],
+      })
+      const rows = wrapper.findAll('.picker-row')
+      const alphaRow = rows.find((c) => c.text().includes('Alpha'))!
+      // Orange takes precedence: orange present, green absent on the
+      // same row even though it's also running.
+      expect(alphaRow.find('.picker-row-update-dot').exists()).toBe(true)
+      expect(alphaRow.find('.picker-row-running-dot').exists()).toBe(false)
+      const bravoRow = rows.find((c) => c.text().includes('Bravo'))!
+      expect(bravoRow.find('.picker-row-update-dot').exists()).toBe(false)
+      expect(bravoRow.find('.picker-row-running-dot').exists()).toBe(false)
+    })
+  })
+
+  // Spec item 10 — Home icon in the chips row dispatches the existing
+  // `return-to-dashboard` menu-item activation through the popup
+  // bridge. Only surfaces on install-hosted pickers, not on the
+  // dashboard chooser's own picker.
+  describe('home icon', () => {
+    it('renders Home only when the picker is hosted by an install', async () => {
+      const installHost = await mountPicker({
+        installs: [makeInstall({ id: 'a', name: 'Alpha' })],
+        activeInstallationId: 'a',
+        runningInstallationIds: [],
+      })
+      expect(installHost.find('.picker-home').exists()).toBe(true)
+
+      const chooserHost = await mountPicker({
+        installs: [makeInstall({ id: 'a', name: 'Alpha' })],
+        activeInstallationId: null,
+        runningInstallationIds: [],
+      })
+      expect(chooserHost.find('.picker-home').exists()).toBe(false)
+    })
+
+    it('routes Home clicks through bridge.activate("return-to-dashboard")', async () => {
+      const activate = vi.fn()
+      const existing = (window as unknown as { __comfyTitlePopup: Record<string, unknown> })
+        .__comfyTitlePopup
+      ;(window as unknown as { __comfyTitlePopup: Record<string, unknown> }).__comfyTitlePopup = {
+        ...existing,
+        activate,
+      }
+      const wrapper = await mountPicker({
+        installs: [makeInstall({ id: 'a', name: 'Alpha' })],
+        activeInstallationId: 'a',
+        runningInstallationIds: [],
+      })
+      await wrapper.find('.picker-home').trigger('click')
+      expect(activate).toHaveBeenCalledWith('return-to-dashboard')
     })
   })
 
