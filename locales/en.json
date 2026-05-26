@@ -53,7 +53,7 @@
     "menuMigrate": "Migrate to Standalone…",
     "menuRestoreSnapshot": "Restore Snapshot…",
     "menuRevealInFolder": "Open Folder",
-    "menuDelete": "Delete…"
+    "menuDelete": "Uninstall…"
   },
 
   "titleBar": {
@@ -544,11 +544,11 @@
     "copyInstallationConfirm": "Copy",
     "copyingInstallation": "Copying Install",
     "copyingFiles": "Copying files…",
-    "delete": "Delete Install",
-    "deleteConfirmTitle": "Delete Install",
-    "deleteConfirmMessage": "This will permanently delete the install and all its files. This cannot be undone.",
-    "untrack": "Untrack",
-    "untrackConfirmTitle": "Untrack Install",
+    "delete": "Uninstall",
+    "deleteConfirmTitle": "Uninstall",
+    "deleteConfirmMessage": "This will permanently uninstall ComfyUI and delete all its files. This cannot be undone.",
+    "untrack": "Forget",
+    "untrackConfirmTitle": "Forget Install",
     "untrackConfirmMessage": "This will remove the install from the app. The files will not be deleted."
   },
 

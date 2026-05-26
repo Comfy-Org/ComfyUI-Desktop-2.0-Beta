@@ -214,8 +214,8 @@ export const portable: SourcePlugin = {
           launchAction(installed, !installed ? t('errors.installNotReady') : undefined),
           openFolderAction(installation.installPath),
           migrateToStandaloneAction(installed),
-          deleteAction(installation),
           untrackAction(),
+          deleteAction(installation),
         ],
       },
     )

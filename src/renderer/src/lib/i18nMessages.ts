@@ -148,7 +148,7 @@ export const en = {
     newInstall: 'New Install',
     moreActions: 'More actions',
     menuRevealInFolder: 'Open Folder',
-    menuDelete: 'Delete…'
+    menuDelete: 'Uninstall…'
   },
   /** Picker-only install-action menu labels. The corresponding keys
    *  live under `actions.*` in `locales/en.json` for the panel
@@ -156,7 +156,7 @@ export const en = {
    *  the keys are mirrored here. */
   actions: {
     copyInstallation: 'Copy Install',
-    untrack: 'Untrack'
+    untrack: 'Forget'
   },
   /** Cloud-card copy used by ChooserView's empty cloud CTA AND the
    *  instance-picker popover's empty cloud row. Mirrored from the

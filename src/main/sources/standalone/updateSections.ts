@@ -198,8 +198,8 @@ export function getDetailSections(installation: InstallationRecord): Record<stri
             field: 'name',
           } },
         openFolderAction(installation.installPath),
-        deleteAction(installation),
         untrackAction(),
+        deleteAction(installation),
       ],
     },
   )
