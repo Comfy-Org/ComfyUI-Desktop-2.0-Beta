@@ -69,8 +69,8 @@
 
   "comfyUISettings": {
     "title": "Settings",
-    "tabConfig": "Config",
-    "tabStatus": "Status",
+    "tabConfig": "Startup Args",
+    "tabStatus": "About",
     "tabUpdate": "Update",
     "tabSnapshots": "Snapshots",
     "relaunch": "Relaunch",
