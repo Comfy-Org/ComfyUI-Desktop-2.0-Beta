@@ -253,7 +253,7 @@ if (
 }
 
 const initialExpandedTab = computed<PickerTab>(() =>
-  resolvePickerTab(props.snapshot.initialTab, 'config')
+  resolvePickerTab(props.snapshot.initialTab, 'update')
 )
 
 watch(

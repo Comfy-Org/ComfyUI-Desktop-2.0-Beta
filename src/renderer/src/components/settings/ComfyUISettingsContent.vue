@@ -43,7 +43,7 @@ interface Props {
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  initialTab: 'config',
+  initialTab: 'update',
   showBack: false,
   autoAction: null,
   globalSettingsSnapshot: () => ({
