@@ -555,6 +555,19 @@ export function buildTitlePopupMenuItems(entry: ComfyWindowEntry): TitlePopupMen
       // support URL and emits the `desktop2.feedback.opened`
       // telemetry action with `source: 'menu'`.
       { id: 'feedback', label: 'Send Beta Feedback', labelKey: 'fileMenu.sendFeedback' },
+    )
+    // Reset Zoom — discoverable recovery path for users who zoom the
+    // comfyView too far to read. Only on the chooser host (the dummy
+    // comfyView there can still be zoomed via Ctrl/Cmd+scroll); the
+    // install host trims it out per the simplified menu spec.
+    if (!entry.comfyView.webContents.isDestroyed()) {
+      const level = entry.comfyView.webContents.getZoomLevel()
+      if (level !== 0) {
+        const percent = Math.round(Math.pow(1.2, level) * 100)
+        items.push({ id: 'reset-zoom', label: `Reset Zoom (${percent}%)` })
+      }
+    }
+    items.push(
       { kind: 'separator' },
       {
         id: 'close-all-windows',

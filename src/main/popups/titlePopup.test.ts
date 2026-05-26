@@ -160,6 +160,24 @@ describe('buildTitlePopupMenuItems', () => {
     expect(ids).not.toContain('settings')
   })
 
+  it('exposes Reset Zoom on chooser host only when comfy zoom is non-zero, with the percent in the label', () => {
+    const noZoom = buildTitlePopupMenuItems(makeEntry({ installationId: null, zoomLevel: 0 }))
+    expect(noZoom.find((i) => i.id === 'reset-zoom')).toBeUndefined()
+
+    // 1.2^2 ≈ 1.44 → 144 %
+    const zoomed = buildTitlePopupMenuItems(makeEntry({ installationId: null, zoomLevel: 2 }))
+    const resetZoom = zoomed.find((i) => i.id === 'reset-zoom')
+    expect(resetZoom).toBeDefined()
+    expect(resetZoom?.label).toBe('Reset Zoom (144%)')
+  })
+
+  it('omits Reset Zoom from the chooser host menu when the comfy webContents has been destroyed', () => {
+    const items = buildTitlePopupMenuItems(
+      makeEntry({ installationId: null, comfyDestroyed: true, zoomLevel: 2 }),
+    )
+    expect(items.find((i) => i.id === 'reset-zoom')).toBeUndefined()
+  })
+
   it('places New Window first and Close All Windows last on a chooser host', () => {
     const items = buildTitlePopupMenuItems(makeEntry({ installationId: null }))
     const ids = items.map((i) => i.id ?? null)
