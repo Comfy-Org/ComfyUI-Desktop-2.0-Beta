@@ -206,9 +206,12 @@ function handleDelete(snapshot: SnapshotSummary): void {
 .picker-snapshot-action.is-primary {
   color: var(--accent-primary, #60a5fa);
 }
+.picker-snapshot-action.is-danger {
+  color: var(--danger);
+}
 .picker-snapshot-action.is-danger:hover,
 .picker-snapshot-action.is-danger:focus-visible {
-  background: rgba(239, 68, 68, 0.15);
-  color: #fca5a5;
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  color: var(--danger-hover);
 }
 </style>

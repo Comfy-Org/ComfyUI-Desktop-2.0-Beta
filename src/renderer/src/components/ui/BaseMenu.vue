@@ -396,6 +396,10 @@ defineExpose({ open: openPanel, close: closePanel, toggle })
 .ui-menu-item[data-danger] {
   color: var(--danger);
 }
+.ui-menu-item[data-danger][data-active] {
+  color: var(--danger-hover);
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+}
 
 .ui-menu-item[aria-disabled='true'] {
   color: var(--text-muted);

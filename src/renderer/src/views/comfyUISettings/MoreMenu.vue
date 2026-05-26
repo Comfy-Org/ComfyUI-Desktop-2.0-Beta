@@ -190,6 +190,10 @@ const visibleActions = computed(() => props.actions)
 .more-menu-item.is-danger {
   color: var(--danger);
 }
+.more-menu-item.is-danger:hover:not(:disabled),
+.more-menu-item.is-danger:focus-visible {
+  color: var(--danger-hover);
+}
 
 .more-menu-item.is-accent {
   color: var(--accent-primary);

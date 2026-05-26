@@ -46,7 +46,8 @@
   --color-surface: #262729;
   --color-border: #494a50;
   --color-border-hover: #3c3d42;
-  --color-danger: #b33a3a;
+  --color-danger: #e05858;
+  --color-danger-hover: #ef6b6b;
   --color-terminal-bg: #111112;
 
   /* Comfy brand neutral ramp — single canonical scale. Yellow at 50,
@@ -85,7 +86,8 @@
   --titlebar-icon: var(--color-text-muted);
   --border: #494a50;
   --border-hover: #3c3d42;
-  --danger: #b33a3a;
+  --danger: #e05858;
+  --danger-hover: #ef6b6b;
   --warning: #fd9903;
   --success: #00cd72;
   --info: #58a6ff;
@@ -185,6 +187,7 @@
   --border: #b4b4b4;
   --border-hover: #d9d9d9;
   --danger: #f75951;
+  --danger-hover: #ff7a73;
   --warning: #fcbf64;
   --success: #00cd72;
   --info: #2563eb;
