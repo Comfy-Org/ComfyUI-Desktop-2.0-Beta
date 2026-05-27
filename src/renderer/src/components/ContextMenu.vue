@@ -78,7 +78,7 @@ function handleClick(item: ContextMenuItem): void {
         <div v-if="item.separator && i > 0" class="context-menu-separator" />
         <button
           class="context-menu-item"
-          :class="{ disabled: item.disabled }"
+          :class="{ disabled: item.disabled, 'is-danger': item.style === 'danger' }"
           :disabled="item.disabled"
           :data-testid="TID.contextMenuItem(item.id)"
           @click="handleClick(item)"
