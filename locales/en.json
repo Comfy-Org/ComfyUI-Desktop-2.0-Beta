@@ -812,6 +812,7 @@
     "pipPackages": "Pip Packages",
     "diffPrevious": "Changes from previous",
     "diffCurrent": "Differences vs. current",
+    "seeWhatChanges": "See what changes",
     "diffNoChanges": "No changes",
     "nodesCount": "{count} nodes",
     "packagesCount": "{count} packages",
