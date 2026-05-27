@@ -551,12 +551,12 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
     mutableAction = afterPrompt
 
     if (mutableAction.id !== 'migrate-to-standalone') {
-      const afterConfirm = await runConfirmChain(mutableAction, modal)
+      const afterConfirm = await runConfirmChain(mutableAction, modal, dialogs)
       if (!afterConfirm) return
       mutableAction = afterConfirm
     }
 
-    if (!await runDiskSpaceCheck(mutableAction, inst, modal, t)) return
+    if (!await runDiskSpaceCheck(mutableAction, inst, modal, t, null, dialogs)) return
 
     // 9. showProgress — emit show-progress for the host's ProgressModal.
     //    The synthetic `restart` id maps to stop → wait → launch so the

@@ -20,12 +20,28 @@ const modalSpies = vi.hoisted(() => ({
   confirmWithOptions: vi.fn(),
   alert: vi.fn(),
 }))
+// Dialogs spies cover the BaseModal-shell primitives (`runConfirmChain`
+// routes the plain confirm path through `dialogs.confirm` when a
+// dialogs driver is supplied; the chain steps for fieldSelects /
+// select / prompt also go through `dialogs.*`). Tests that assert on
+// the action confirm should set `dialogsSpies.confirm.mockResolvedValue`
+// — return `'primary'` to proceed, `false` to cancel.
+const dialogsSpies = vi.hoisted(() => ({
+  confirm: vi.fn(),
+  prompt: vi.fn(),
+  actionSheet: vi.fn(),
+  alert: vi.fn(),
+}))
 const actionGuardSpies = vi.hoisted(() => ({
   checkBeforeAction: vi.fn(),
 }))
 
 vi.mock('./useModal', () => ({
   useModal: () => modalSpies,
+}))
+
+vi.mock('./useDialogs', () => ({
+  useDialogs: () => dialogsSpies,
 }))
 
 vi.mock('./useActionGuard', () => ({
@@ -279,6 +295,10 @@ describe('useComfyUISettings.runAction — stop-warning augment + self-stopping 
     modalSpies.select.mockReset()
     modalSpies.confirmWithOptions.mockReset()
     modalSpies.alert.mockReset()
+    dialogsSpies.confirm.mockReset()
+    dialogsSpies.prompt.mockReset()
+    dialogsSpies.actionSheet.mockReset()
+    dialogsSpies.alert.mockReset()
     actionGuardSpies.checkBeforeAction.mockReset()
     actionGuardSpies.checkBeforeAction.mockResolvedValue('proceed')
   })
@@ -313,7 +333,7 @@ describe('useComfyUISettings.runAction — stop-warning augment + self-stopping 
   it('prepends the willStopRunning warning to the action confirm message when the install is running', async () => {
     installMockApi()
     markRunning('a', 'A')
-    modalSpies.confirm.mockResolvedValue(false) // user cancels — composable returns early
+    dialogsSpies.confirm.mockResolvedValue(false) // user cancels — composable returns early
     const { composable, scope } = mountComposable(makeInstall('a', 'A'))
 
     await composable.runAction({
@@ -322,8 +342,8 @@ describe('useComfyUISettings.runAction — stop-warning augment + self-stopping 
       confirm: { title: 'Update?', message: 'This will pull the latest ComfyUI.' },
     } as ActionDef)
 
-    expect(modalSpies.confirm).toHaveBeenCalledTimes(1)
-    const callArg = modalSpies.confirm.mock.calls[0][0] as { message: string }
+    expect(dialogsSpies.confirm).toHaveBeenCalledTimes(1)
+    const callArg = dialogsSpies.confirm.mock.calls[0]![0] as { message: string }
     // The shared `augmentMessageWithStopWarning` helper joins with `\n\n`
     // so the warning visually owns its own paragraph above the action's
     // own copy.
@@ -334,7 +354,7 @@ describe('useComfyUISettings.runAction — stop-warning augment + self-stopping 
   it('synthesizes a confirm dialog carrying just the warning when the action has neither confirm nor prompt', async () => {
     installMockApi()
     markRunning('a', 'A')
-    modalSpies.confirm.mockResolvedValue(false)
+    dialogsSpies.confirm.mockResolvedValue(false)
     const { composable, scope } = mountComposable(makeInstall('a', 'A'))
 
     await composable.runAction({
@@ -342,8 +362,8 @@ describe('useComfyUISettings.runAction — stop-warning augment + self-stopping 
       label: 'Restore Snapshot',
     } as ActionDef)
 
-    expect(modalSpies.confirm).toHaveBeenCalledTimes(1)
-    const callArg = modalSpies.confirm.mock.calls[0][0] as { message: string; title: string }
+    expect(dialogsSpies.confirm).toHaveBeenCalledTimes(1)
+    const callArg = dialogsSpies.confirm.mock.calls[0]![0] as { message: string; title: string }
     expect(callArg.message).toBe('errors.willStopRunning')
     expect(callArg.title).toBe('Restore Snapshot')
     scope.stop()
@@ -352,7 +372,7 @@ describe('useComfyUISettings.runAction — stop-warning augment + self-stopping 
   it('does NOT prepend the warning when the install is not running', async () => {
     installMockApi()
     // No markRunning — sessionStore.isRunning('a') === false.
-    modalSpies.confirm.mockResolvedValue(false)
+    dialogsSpies.confirm.mockResolvedValue(false)
     const { composable, scope } = mountComposable(makeInstall('a', 'A'))
 
     await composable.runAction({
@@ -361,8 +381,8 @@ describe('useComfyUISettings.runAction — stop-warning augment + self-stopping 
       confirm: { title: 'Update?', message: 'This will pull the latest ComfyUI.' },
     } as ActionDef)
 
-    expect(modalSpies.confirm).toHaveBeenCalledTimes(1)
-    const callArg = modalSpies.confirm.mock.calls[0][0] as { message: string }
+    expect(dialogsSpies.confirm).toHaveBeenCalledTimes(1)
+    const callArg = dialogsSpies.confirm.mock.calls[0]![0] as { message: string }
     expect(callArg.message).toBe('This will pull the latest ComfyUI.')
     scope.stop()
   })
@@ -377,7 +397,7 @@ describe('useComfyUISettings.runAction — stop-warning augment + self-stopping 
       runAction: vi.fn().mockResolvedValue({ ok: true }),
     })
     markRunning('a', 'A')
-    modalSpies.confirm.mockResolvedValue(true)
+    dialogsSpies.confirm.mockResolvedValue('primary')
 
     const onShowProgress = vi.fn()
     const { composable, scope } = mountComposable(makeInstall('a', 'A'), onShowProgress)
@@ -420,7 +440,7 @@ describe('useComfyUISettings.runAction — stop-warning augment + self-stopping 
       runAction: vi.fn().mockResolvedValue({ ok: false, message: 'no update available' }),
     })
     markRunning('a', 'A')
-    modalSpies.confirm.mockResolvedValue(true)
+    dialogsSpies.confirm.mockResolvedValue('primary')
     const onShowProgress = vi.fn()
     const { composable, scope } = mountComposable(makeInstall('a', 'A'), onShowProgress)
 
@@ -451,7 +471,7 @@ describe('useComfyUISettings.runAction — stop-warning augment + self-stopping 
       runAction: vi.fn().mockResolvedValue({ ok: true, newInstallationId: 'a-prime' }),
     })
     markRunning('a', 'A')
-    modalSpies.confirm.mockResolvedValue(true)
+    dialogsSpies.confirm.mockResolvedValue('primary')
     const onShowProgress = vi.fn()
     const { composable, scope } = mountComposable(makeInstall('a', 'A'), onShowProgress)
 
@@ -480,7 +500,7 @@ describe('useComfyUISettings.runAction — stop-warning augment + self-stopping 
     const api = installMockApi({
       runAction: vi.fn().mockResolvedValue({ ok: true }),
     })
-    modalSpies.confirm.mockResolvedValue(true)
+    dialogsSpies.confirm.mockResolvedValue('primary')
     const onShowProgress = vi.fn()
     const { composable, scope } = mountComposable(makeInstall('a', 'A'), onShowProgress)
 
@@ -511,7 +531,7 @@ describe('useComfyUISettings.runAction — stop-warning augment + self-stopping 
       runAction: vi.fn().mockResolvedValue({ ok: true }),
     })
     markRunning('a', 'A')
-    modalSpies.confirm.mockResolvedValue(true)
+    dialogsSpies.confirm.mockResolvedValue('primary')
     const { composable, scope } = mountComposable(makeInstall('a', 'A'))
 
     await composable.runAction({

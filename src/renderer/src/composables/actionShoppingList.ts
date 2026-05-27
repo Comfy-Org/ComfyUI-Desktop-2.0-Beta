@@ -168,13 +168,16 @@ export async function runPromptChain(
   return { ...action, data: { ...action.data, [action.prompt.field]: value } }
 }
 
-/** Drive `action.confirm` — modal.confirm OR modal.confirmWithOptions
- *  (when `confirm.options` is set, e.g. Delete Installation's
- *  "Also delete files" toggle). The caller is responsible for skipping
- *  migrate-to-standalone (which owns its own confirm surface). */
+/** Drive `action.confirm`. Routes the plain-confirm path through
+ *  `dialogs.confirm` (BaseModal-shell) when a dialogs driver is
+ *  supplied; falls back to `modal.confirm` otherwise. The
+ *  checkbox-confirm path (`confirm.options`) always uses
+ *  `modal.confirmWithOptions` — `useDialogs` has no equivalent yet.
+ *  The caller is responsible for skipping migrate-to-standalone. */
 export async function runConfirmChain(
   action: ActionDef,
   modal: Modal,
+  dialogs?: Dialogs,
 ): Promise<ActionDef | null> {
   if (!action.confirm) return action
   if (action.confirm.options) {
@@ -187,6 +190,16 @@ export async function runConfirmChain(
     })
     if (!result) return null
     return { ...action, data: { ...action.data, ...result } }
+  }
+  if (dialogs) {
+    const result = await dialogs.confirm({
+      title: action.confirm.title || 'Confirm',
+      message: action.confirm.message || 'Are you sure?',
+      messageDetails: action.confirm.messageDetails,
+      confirmLabel: action.confirm.confirmLabel || action.label,
+      tone: action.style === 'primary' || action.style === 'accent' ? 'primary' : 'danger',
+    })
+    return result === 'primary' ? action : null
   }
   const confirmed = await modal.confirm({
     title: action.confirm.title || 'Confirm',
@@ -209,6 +222,7 @@ export async function runDiskSpaceCheck(
   modal: Modal,
   t: Translate,
   installationSizeBytes?: number | null,
+  dialogs?: Dialogs,
 ): Promise<boolean> {
   const diskCheckActions = new Set(['copy', 'copy-update', 'release-update'])
   if (!diskCheckActions.has(action.id) || !installation.installPath) return true
@@ -233,13 +247,23 @@ export async function runDiskSpaceCheck(
       const message = estimatedRequired > 0
         ? t('diskSpace.warningMessage', { free: freeStr, required: formatBytes(estimatedRequired) })
         : t('diskSpace.warningMessageGeneric', { free: freeStr })
-      const ok = await modal.confirm({
-        title: t('diskSpace.warningTitle'),
-        message,
-        confirmLabel: t('diskSpace.continueAnyway'),
-        confirmStyle: 'primary',
-      })
-      if (!ok) return false
+      if (dialogs) {
+        const result = await dialogs.confirm({
+          title: t('diskSpace.warningTitle'),
+          message,
+          confirmLabel: t('diskSpace.continueAnyway'),
+          tone: 'primary',
+        })
+        if (result !== 'primary') return false
+      } else {
+        const ok = await modal.confirm({
+          title: t('diskSpace.warningTitle'),
+          message,
+          confirmLabel: t('diskSpace.continueAnyway'),
+          confirmStyle: 'primary',
+        })
+        if (!ok) return false
+      }
     }
   } catch {
     // If the disk check itself fails, proceed.
