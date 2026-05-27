@@ -22,6 +22,8 @@ import { execFileSync } from 'node:child_process'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { test, expect } from '@playwright/test'
 import { launchApp, type AppContext } from './launchApp'
+import { titlePopupPage, waitForWebContents } from './support/cdpPages'
+import { byTestId, TID } from './support/testIds'
 
 let ctx: AppContext
 let stagedInstallPath = ''
@@ -252,4 +254,98 @@ test('restore captures a post-restore snapshot @lifecycle', async () => {
         expect.objectContaining({ trigger: 'post-restore' }),
       ]) as unknown,
     })
+})
+
+/**
+ * Picker-driven restore: drives the same snapshot-restore action through
+ * the instance-picker UI and asserts the inline top-card UX — restoring
+ * state visible immediately, success state appears, save CTA returns
+ * once the op auto-dismisses.
+ *
+ * Distinct from the test above which calls `window.api.runAction` directly:
+ * this exercises the picker-bridge → `pickerStartBackgroundOp` →
+ * `_activeOperationStatus` broadcast → SnapshotsView render loop end-to-end.
+ *
+ * The install is NOT running here (no ComfyUI process) so we don't hit the
+ * IN_PLACE_RELAUNCH leg — the op completes in place and we observe just
+ * the op-card terminal states. The actual git-checkout work is identical
+ * to the earlier test; we don't re-assert HEAD movement (that's covered).
+ */
+test('picker-driven restore surfaces inline op-card + auto-dismisses on success @lifecycle', async () => {
+  test.setTimeout(120_000)
+
+  // The earlier `snapshot-restore moves … back to commit A` test already
+  // performed a restore via runAction. A `post-restore` snapshot is on
+  // disk now; pick that as the target so we have a row to expand.
+  const list = await ctx.panel.evaluate<SnapshotListResult>(
+    `window.api.getSnapshots(${JSON.stringify(INSTALL_ID)})`,
+  )
+  const target = list.snapshots.find((s) => s.trigger === 'post-restore')
+    ?? list.snapshots[0]
+  expect(target, 'no snapshot to restore in picker test').toBeDefined()
+
+  await ctx.panel.evaluate<boolean>(
+    `(() => {
+      window.api.openInstancePicker({
+        installationId: ${JSON.stringify(INSTALL_ID)},
+        initialTab: 'snapshots',
+      })
+      return true
+    })()`,
+  )
+  await waitForWebContents(ctx.app, 'comfyTitlePopup.html')
+  const popup = titlePopupPage(ctx.app)
+
+  // Expand the target row, click Restore, accept the confirm modal.
+  await popup.waitForSelector(byTestId(TID.snapshotRow(target!.filename)), { timeout: 30_000 })
+  expect(await popup.click(byTestId(TID.snapshotRow(target!.filename)))).toBe(true)
+  await popup.waitForVisible(byTestId(TID.snapshotRowRestore(target!.filename)), { timeout: 10_000 })
+  expect(await popup.click(byTestId(TID.snapshotRowRestore(target!.filename)))).toBe(true)
+
+  // SnapshotsView's confirm path: rich-confirm when the snapshot has a
+  // change summary, BaseAlert when not — accept either.
+  const confirmSelector = '[data-testid="modal-confirm-button"], [data-testid="base-alert-action"]'
+  await popup.waitForVisible(confirmSelector, { timeout: 15_000 })
+  expect(await popup.click(confirmSelector)).toBe(true)
+
+  // The inline op-card replaces the dashed "Save New Snapshot" slot at
+  // the top of the rail. Wait for it to appear (in-flight state is the
+  // first variant rendered).
+  await popup.waitForVisible(byTestId(TID.snapshotsOpCard), { timeout: 15_000 })
+
+  // The header label switches to "Restoring snapshot" while the op is in flight.
+  const labelText = await popup.evaluate<string>(
+    `document.querySelector('.snapshots-rail-node.is-save .snapshots-rail-label')?.textContent ?? ''`,
+  )
+  expect(labelText.trim()).toMatch(/Restoring snapshot/i)
+
+  // Poll until the success state lands (the card grows the
+  // `.is-op-success` border + the header reads "Snapshot restored").
+  await expect
+    .poll(
+      async () =>
+        popup.evaluate<boolean>(
+          `!!document.querySelector('.snapshots-rail-save-box.is-op-success')`,
+        ),
+      { timeout: 60_000, intervals: [500, 1_000] },
+    )
+    .toBe(true)
+
+  // After the 1.8s success latch, the card clears and the Save CTA returns.
+  await expect
+    .poll(
+      async () =>
+        popup.evaluate<boolean>(
+          `!!document.querySelector('.snapshots-rail-cta')`,
+        ),
+      { timeout: 8_000, intervals: [200, 400] },
+    )
+    .toBe(true)
+
+  // The op card is gone after the auto-dismiss.
+  expect(
+    await popup.evaluate<boolean>(
+      `!!document.querySelector('${byTestId(TID.snapshotsOpCard)}')`,
+    ),
+  ).toBe(false)
 })

@@ -2394,6 +2394,7 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
       const title = typeof payload?.title === 'string' ? payload.title : actionId
       const cancellable = payload?.cancellable === true
       const actionData = payload?.actionData as Record<string, unknown> | undefined
+      recordIpcInvocation('comfy-titlepopup:start-background-op', { installationId, actionId, actionData })
       // Fire-and-forget — progress flows back via snapshot broadcasts.
       bindings.pickerRunBackgroundOp({ installationId, actionId, actionData, title, cancellable })
     },

@@ -655,6 +655,7 @@ async function handleImport(): Promise<void> {
               class="snapshots-op-card"
               role="status"
               aria-live="polite"
+              :data-testid="TID.snapshotsOpCard"
             >
               <p v-if="restoreFromLabel" class="snapshots-op-card-target">
                 {{ t('snapshots.restoringFrom', { label: restoreFromLabel }) }}
@@ -684,6 +685,7 @@ async function handleImport(): Promise<void> {
                 v-if="restoreCancellable"
                 type="button"
                 class="snapshots-op-ghost-btn"
+                :data-testid="TID.snapshotsOpCardCancel"
                 @click="cancelRestore"
               >
                 {{ t('common.cancel', 'Cancel') }}
@@ -695,6 +697,7 @@ async function handleImport(): Promise<void> {
               v-else-if="restoreTerminal === 'ok'"
               class="snapshots-op-card is-success"
               role="status"
+              :data-testid="TID.snapshotsOpCard"
             >
               <p v-if="restoreFromLabel" class="snapshots-op-card-target">
                 {{ t('snapshots.restoredFrom', { label: restoreFromLabel }) }}
@@ -706,6 +709,7 @@ async function handleImport(): Promise<void> {
               v-else-if="restoreTerminal === 'error'"
               class="snapshots-op-card is-error"
               role="alert"
+              :data-testid="TID.snapshotsOpCard"
             >
               <p v-if="restoreErrorMessage" class="snapshots-op-card-error-msg">
                 {{ restoreErrorMessage }}
@@ -714,6 +718,7 @@ async function handleImport(): Promise<void> {
                 <button
                   type="button"
                   class="snapshots-op-primary-btn"
+                  :data-testid="TID.snapshotsOpCardRetry"
                   @click="retryRestore"
                 >
                   {{ t('snapshots.tryAgain', 'Try again') }}
@@ -721,6 +726,7 @@ async function handleImport(): Promise<void> {
                 <button
                   type="button"
                   class="snapshots-op-ghost-btn"
+                  :data-testid="TID.snapshotsOpCardDismiss"
                   @click="dismissRestoreCard"
                 >
                   {{ t('common.dismiss', 'Dismiss') }}

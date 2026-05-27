@@ -90,6 +90,17 @@ export const TID = {
   /** The Snapshots tab toolbar's Export All CTA. Drives
    *  `window.api.exportAllSnapshots(installationId)`. */
   snapshotsExportAll: 'snapshots-export-all',
+  /** The inline op-card that swaps into the dashed "Save New Snapshot"
+   *  slot at the top of the rail while a snapshot-restore is in flight
+   *  or in a terminal state (success/error). Single TID for the card
+   *  itself; granular per-button TIDs follow. */
+  snapshotsOpCard: 'snapshots-op-card',
+  /** Cancel button on the in-flight op card. */
+  snapshotsOpCardCancel: 'snapshots-op-card-cancel',
+  /** Try-again button on the error op card. */
+  snapshotsOpCardRetry: 'snapshots-op-card-retry',
+  /** Dismiss button on the error op card. */
+  snapshotsOpCardDismiss: 'snapshots-op-card-dismiss',
 
   // ---------- Progress takeover ----------
   /** The red error message block in the brand progress takeover. */
