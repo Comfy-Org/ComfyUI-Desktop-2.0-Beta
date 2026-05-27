@@ -27,6 +27,10 @@ interface Props {
   /** An update is available for this install — drives the orange
    *  status dot. Orange takes precedence over the green running dot. */
   updateAvailable?: boolean
+  /** A background op (update / restore / …) is in flight or recently
+   *  completed for this install. Spinner dot takes precedence over both
+   *  the green running dot and the orange update dot. */
+  operating?: boolean
   /** Compact recency (`3h ago`) for single-line picker rows. */
   lastLaunchedShortLabel: string
 }
@@ -36,6 +40,7 @@ const props = withDefaults(defineProps<Props>(), {
   running: false,
   isCurrent: false,
   updateAvailable: false,
+  operating: false,
 })
 
 const { t } = useI18n()
@@ -67,7 +72,12 @@ function handleClick(): void {
       <div class="picker-row-icon" :title="$t(typeMeta.labelKey)">
         <component :is="typeMeta.icon" :size="20" />
         <span
-          v-if="updateAvailable"
+          v-if="operating"
+          class="picker-row-op-dot"
+          aria-hidden="true"
+        ></span>
+        <span
+          v-else-if="updateAvailable"
           class="picker-row-update-dot"
           aria-hidden="true"
         ></span>
@@ -190,6 +200,25 @@ function handleClick(): void {
   border: 2px solid #38303d;
   box-sizing: content-box;
 }
+/* Spinner dot for in-flight background ops. Same anchor + chrome as the
+ * other dots. The rotating ring is drawn with a conic-gradient clip so
+ * it stays in pure CSS — no SVG asset needed. */
+.picker-row-op-dot {
+  position: absolute;
+  bottom: -1px;
+  right: -1px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: conic-gradient(var(--brand-accent, #f5c518) 270deg, transparent 270deg);
+  border: 2px solid #38303d;
+  box-sizing: content-box;
+  animation: op-dot-spin 0.8s linear infinite;
+}
+@keyframes op-dot-spin {
+  to { transform: rotate(360deg); }
+}
+
 /* "Current" pill — flags the install whose host window opened the
  * picker. Replaces the recency label on that one row so the user can
  * scan-find their own context at a glance. */

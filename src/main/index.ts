@@ -24,7 +24,7 @@ import {
   openSystemModalAsync,
   registerSystemModalIpc,
 } from './popups/systemModal'
-import { registerTitlePopupIpc, type InstancePickerInstall } from './popups/titlePopup'
+import { registerTitlePopupIpc, triggerPickerSnapshotBroadcast, type InstancePickerInstall } from './popups/titlePopup'
 import { registerPickerSettingsIpc } from './popups/pickerSettingsHandlers'
 import { waitForPort, COMFY_BOOT_TIMEOUT_MS } from './lib/process'
 import { isQuitInProgress, setQuitReason } from './lib/quit-state'
@@ -41,7 +41,11 @@ import { startPeriodicReleaseChecks } from './lib/release-cache-startup'
 import { showModelFolderRelaunchPage } from './lib/relaunchPage'
 import { COMFY_BG, SPLASH_DARK, TITLEBAR_BG, type SplashTheme } from './lib/theme'
 import { comfyTitleBarOverlay } from './lib/titleBarOverlay'
-import { sourceMap, _broadcastToRenderer, _runningSessions } from './lib/ipc/shared'
+import {
+  sourceMap, _broadcastToRenderer, _runningSessions,
+  _operationAborts, _activeOperationStatus, stopRunning,
+  type PickerOperationStatus,
+} from './lib/ipc/shared'
 import { enrichInstallationsForRenderer } from './lib/ipc/registerInstallationHandlers'
 import { getSnapshotListData } from './lib/snapshots'
 import { update as updateInstallation } from './installations'
@@ -71,6 +75,8 @@ import {
   setHostWindowFactories,
 } from './host/createHostWindow'
 import { attachInstall, setAttachFactories } from './host/attach'
+import { IN_PLACE_RELAUNCH, REQUIRES_STOPPED } from '../types/ipc'
+import { handleDelegateToSource, handleLaunch } from './lib/ipc/sessionActions'
 import { applyAttachHostPreview, clearAttachHostPreview } from './host/attachHostPreview'
 import {
   _detachInstallImpl,
@@ -337,7 +343,18 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
     // `activePanel !== 'comfy'`. The trailing `refreshComfyTabBody`
     // still handles the comfy-lifecycle → comfy body-mode swap when the
     // entry was already on `'comfy'` (setActivePanel early-returns there).
-    setActivePanel(existing.windowKey, 'comfy')
+    //
+    // EXCEPTION: the `'progress'` panel mode is reserved for picker-
+    // driven ProgressModal takeovers that explicitly own the panel
+    // until the user picks a terminal-state CTA. A relaunch fired
+    // mid-update (the wantsRelaunch step in `useComfyUISettings`) must
+    // NOT yank the panel out from under the running modal — the user
+    // would lose the success screen and be dumped into Comfy with no
+    // sense of what just happened. The renderer's `handleProgressClose`
+    // restores `'comfy'` once the modal dismisses.
+    if (existing.activePanel !== 'progress') {
+      setActivePanel(existing.windowKey, 'comfy')
+    }
     refreshComfyTabBody(installationId)
     if (proc) {
       proc.on('exit', () => {
@@ -1109,6 +1126,116 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
       setActivePanel,
       triggerOpenFeedback,
       sendToPanelDeferred,
+      ensurePanelViewForEntry: (entry) =>
+        entry.panelView ?? ensurePanelView(entry.windowKey, entry, computeBodyMode(entry)),
+      pickerRunBackgroundOp: ({ installationId, actionId, actionData, title, cancellable }) => {
+        // Fire-and-forget: runs the action on main with a custom sendProgress
+        // that feeds _activeOperationStatus so the picker snapshot loop
+        // delivers live status to the inline progress view.
+        void (async () => {
+          const inst = await getInstallation(installationId)
+          if (!inst) {
+            _activeOperationStatus.set(installationId, {
+              status: '', percent: -1, done: true, ok: false,
+              error: 'Installation not found.', cancellable, title, actionId, actionData,
+            })
+            triggerPickerSnapshotBroadcast()
+            return
+          }
+
+          // Guard: another op already running for this install.
+          if (_operationAborts.has(installationId)) {
+            _activeOperationStatus.set(installationId, {
+              status: '', percent: -1, done: true, ok: false,
+              error: 'Another operation is already running.', cancellable, title, actionId, actionData,
+            })
+            triggerPickerSnapshotBroadcast()
+            return
+          }
+
+          // Stop the session if needed (REQUIRES_STOPPED).
+          const wasRunning = _runningSessions.has(installationId)
+          if (REQUIRES_STOPPED.has(actionId) && wasRunning) {
+            _activeOperationStatus.set(installationId, {
+              status: 'Stopping…', percent: -1, done: false, ok: null,
+              error: null, cancellable, title, actionId, actionData,
+            })
+            triggerPickerSnapshotBroadcast()
+            try {
+              await stopRunning(installationId)
+            } catch (err) {
+              _activeOperationStatus.set(installationId, {
+                status: '', percent: -1, done: true, ok: false,
+                error: (err as Error).message ?? 'Stop failed.', cancellable, title, actionId, actionData,
+              })
+              triggerPickerSnapshotBroadcast()
+              return
+            }
+          }
+
+          // Seed the in-flight status.
+          _activeOperationStatus.set(installationId, {
+            status: '', percent: -1, done: false, ok: null,
+            error: null, cancellable, title, actionId, actionData,
+          })
+          triggerPickerSnapshotBroadcast()
+
+          // Build a stub event whose sender feeds _activeOperationStatus.
+          const sendProgressFn = (phase: string, detail: Record<string, unknown>): void => {
+            const cur = _activeOperationStatus.get(installationId)
+            if (!cur || cur.done) return
+            const status = typeof detail.status === 'string' ? detail.status : phase
+            const percent = typeof detail.percent === 'number' ? detail.percent : cur.percent
+            const speedBytesPerSec = typeof detail.speedBytesPerSec === 'number' ? detail.speedBytesPerSec : cur.speedBytesPerSec
+            _activeOperationStatus.set(installationId, { ...cur, status, percent, speedBytesPerSec })
+            triggerPickerSnapshotBroadcast()
+          }
+          const stubSender = {
+            isDestroyed: () => false,
+            send: sendProgressFn as unknown as Electron.WebContents['send'],
+          } as unknown as Electron.WebContents
+          const stubEvent = { sender: stubSender } as unknown as Electron.IpcMainInvokeEvent
+
+          let result: PickerOperationStatus
+          try {
+            const actionResult = await handleDelegateToSource(
+              { event: stubEvent, installationId, inst, actionData },
+              actionId,
+            )
+            const wantsRelaunch = wasRunning && IN_PLACE_RELAUNCH.has(actionId)
+            if (actionResult.ok && wantsRelaunch) {
+              // Re-fetch inst (may have changed version after update).
+              const freshInst = await getInstallation(installationId) ?? inst
+              await handleLaunch({ event: stubEvent, installationId, inst: freshInst, actionData: undefined })
+            }
+            result = {
+              status: '', percent: 100, done: true,
+              ok: actionResult.ok !== false,
+              error: actionResult.ok === false ? (actionResult.message ?? 'Failed.') : null,
+              cancellable, title, actionId, actionData,
+            }
+          } catch (err) {
+            const abort = _operationAborts.get(installationId)
+            result = {
+              status: '', percent: -1, done: true, ok: false,
+              error: abort?.signal.aborted ? 'Cancelled.' : ((err as Error).message ?? 'Failed.'),
+              cancellable, title, actionId, actionData,
+            }
+          }
+          _activeOperationStatus.set(installationId, result)
+          triggerPickerSnapshotBroadcast()
+          // Auto-purge the done entry after 15s so a picker re-opened
+          // after the op completes shows the normal settings view again.
+          setTimeout(() => {
+            const cur = _activeOperationStatus.get(installationId)
+            if (cur?.done) {
+              _activeOperationStatus.delete(installationId)
+              triggerPickerSnapshotBroadcast()
+            }
+          }, 15_000)
+        })()
+      },
+      broadcastPickerSnapshot: () => triggerPickerSnapshotBroadcast(),
       getInstancePickerInstalls: async () => {
         // Same shape `get-installations` returns to the renderer-side
         // `installationStore` — sharing the enrichment helper means the

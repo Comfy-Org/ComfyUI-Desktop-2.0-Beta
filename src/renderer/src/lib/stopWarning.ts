@@ -1,12 +1,4 @@
-/** REQUIRES_STOPPED actions whose self-stopping apiCall wrapper should
- *  auto-launch the same install after the op succeeds — picks up an
- *  in-place update / restore so the user isn't left staring at a stopped
- *  ComfyUI. Copy / copy-update / release-update intentionally excluded:
- *  focus moves to the newly-created destination install
- *  (`ActionResult.newInstallationId` opens A' in a new window). Delete
- *  excluded: nothing to relaunch. Migrate-to-standalone excluded: same
- *  reason as copy. */
-export const IN_PLACE_RELAUNCH = new Set(['update-comfyui', 'snapshot-restore'])
+export { IN_PLACE_RELAUNCH } from '../../../types/ipc'
 
 /** Prepend the `errors.willStopRunning` sentence to an existing message
  *  body. Used by every renderer surface that runs a REQUIRES_STOPPED

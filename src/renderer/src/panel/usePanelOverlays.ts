@@ -23,6 +23,14 @@ export type PanelKey =
   | 'track'
   | 'load-snapshot'
   | 'quick-install'
+  /** Mirror of main's `'progress'` ComfyPanelKey. Forwarded to the
+   *  renderer so `onPanelSwitch` doesn't silently drop the IPC when
+   *  the picker-driven ProgressModal flips main into progress-takeover
+   *  layout (panel visible, comfy hidden). Renderer-side has no body
+   *  branch for this key — the takeover is driven by `currentOverlay`
+   *  separately — but accepting it keeps `isValidPanel` from
+   *  swallowing the event. */
+  | 'progress'
 
 const VALID_PANELS: ReadonlySet<PanelKey> = new Set([
   'comfy',
@@ -34,6 +42,7 @@ const VALID_PANELS: ReadonlySet<PanelKey> = new Set([
   'track',
   'load-snapshot',
   'quick-install',
+  'progress',
 ])
 
 /**
@@ -242,6 +251,7 @@ export function usePanelOverlays(opts: UsePanelOverlaysOpts): UsePanelOverlaysAp
         opKind: showOpts.opKind,
         destroysInstance: showOpts.destroysInstance,
         chainSpan: showOpts.chainSpan,
+        successTerminal: showOpts.successTerminal,
       })
     }
     // Every show-progress op renders as a Tier 3 brand takeover now —
@@ -290,6 +300,14 @@ export function usePanelOverlays(opts: UsePanelOverlaysOpts): UsePanelOverlaysAp
     // prompt because the op has already finished. Cancellation of an
     // in-flight op flows through `progressStore.cancelOperation`.
     currentOverlay.value = null
+    // Restore the host's body to the comfy view. Picker-driven progress
+    // ops main-side flip activePanel to 'progress' so the panel can
+    // render the takeover on top of the running comfy canvas; closing
+    // the modal must return the layout to 'comfy' or the user is
+    // stranded on an empty panel after dismissing. No-op on hosts where
+    // 'progress' was never set (main's setActivePanel short-circuits on
+    // same-key writes).
+    window.api.closeCurrentPanel()
   }
 
   /**

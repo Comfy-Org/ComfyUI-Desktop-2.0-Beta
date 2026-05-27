@@ -230,8 +230,8 @@ export async function checkForUpdate(
   const prevChannelInfo = existing[channel]
   const cv = installation.comfyVersion as ComfyVersion | undefined
   const installedTag =
-    (prevChannelInfo?.installedTag as string | undefined) ??
     (cv ? formatComfyVersion(cv, 'short') : undefined) ??
+    (prevChannelInfo?.installedTag as string | undefined) ??
     (installation.version as string | undefined) ??
     'unknown'
   await update({
@@ -315,7 +315,6 @@ export function isUpdateAvailable(
   info: ReleaseCacheEntry | null
 ): boolean {
   if (!info || !info.latestTag) return false
-
   // Structural check: if we have comfyVersion and are viewing stable,
   // any commits ahead means the installed version is newer than stable.
   // When commitsAhead is undefined (API failure), we know the commit differs

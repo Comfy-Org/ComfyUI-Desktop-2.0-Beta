@@ -321,6 +321,18 @@ async function handleUpdateComfyUI(
     return { ok: false, message: result.message }
   }
 
+  // Reconcile installedTag in the release cache against the new comfyVersion
+  // so getDetailSections returns the correct "up to date" badge immediately
+  // without waiting for a renderer-triggered check-update.
+  try {
+    const freshInst = result.installation as unknown as Record<string, unknown>
+    await releaseCache.checkForUpdate(COMFYUI_REPO, channel, freshInst, async (data) => {
+      await update(data)
+    })
+  } catch {
+    // best-effort — UI will still correct itself on the next check-update
+  }
+
   sendProgress('done', { percent: 100, status: 'Complete' })
   return { ok: true, navigate: 'detail' }
 }

@@ -75,6 +75,23 @@ export interface PopupInstancePickerSnapshot {
   /** Action id to fire automatically after the settings UI mounts
    *  (kebab Update / Migrate / etc.). `null` once consumed. */
   autoAction: string | null
+  /** Installs that currently have an inline background op in flight or
+   *  recently completed. Drives the spinner dot on InstanceRow. */
+  operatingInstallationIds: string[]
+  /** Per-install live status for background (cross-instance) ops.
+   *  Keyed by installationId. Delivered via the snapshot broadcast loop
+   *  so no extra IPC channel is needed. */
+  installOperationStatus: Record<string, {
+    status: string
+    percent: number
+    done: boolean
+    ok: boolean | null
+    error: string | null
+    cancellable: boolean
+    title: string
+    actionId: string
+    actionData?: Record<string, unknown>
+  }>
 }
 
 /** One models-directory row pushed in the global-settings snapshot.
@@ -432,7 +449,24 @@ export interface ComfyTitlePopupBridge {
     triggersInstanceStart?: boolean
     opKind?: 'launch' | 'install' | 'update' | 'destructive' | 'snapshot' | 'generic'
     isRestart?: boolean
+    routing?: 'same-host' | 'target-host' | 'inline-picker'
+    successChoice?: boolean
   }): void
+  /** Start a long-running action as an inline background op. The picker
+   *  stays open and receives live progress via snapshot broadcasts. Used
+   *  for cross-instance mutating ops (update, snapshot-restore, etc.). */
+  pickerStartBackgroundOp(payload: {
+    installationId: string
+    actionId: string
+    actionData?: Record<string, unknown>
+    title: string
+    cancellable: boolean
+  }): void
+  /** Cancel an in-flight background op for the given install. */
+  pickerCancelBackgroundOp(installationId: string): void
+  /** Dismiss a completed (success/error/cancelled) background op so the
+   *  right pane returns to the settings view. */
+  pickerDismissBackgroundOp(installationId: string): void
 }
 
 function isPopupConfig(value: unknown): value is TitlePopupConfig {
@@ -702,6 +736,15 @@ const bridge: ComfyTitlePopupBridge = {
   },
   pickerForwardShowProgress: (payload) => {
     ipcRenderer.send('comfy-titlepopup:forward-show-progress', payload)
+  },
+  pickerStartBackgroundOp: (payload) => {
+    ipcRenderer.send('comfy-titlepopup:start-background-op', payload)
+  },
+  pickerCancelBackgroundOp: (installationId) => {
+    ipcRenderer.send('comfy-titlepopup:cancel-background-op', { installationId })
+  },
+  pickerDismissBackgroundOp: (installationId) => {
+    ipcRenderer.send('comfy-titlepopup:dismiss-background-op', { installationId })
   },
 }
 

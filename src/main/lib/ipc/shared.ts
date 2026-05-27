@@ -173,6 +173,33 @@ export const _operationAborts = new Map<string, AbortController>()
 export const _runningSessions = new Map<string, SessionInfo>()
 export const _pendingPorts = new Map<number, string>()
 
+export interface PickerOperationStatus {
+  /** Current phase label. Empty string while not yet started. */
+  status: string
+  /** 0–100, or -1 for indeterminate. */
+  percent: number
+  /** Download/transfer speed in bytes per second, if known. */
+  speedBytesPerSec?: number | null
+  /** True once the operation resolved (success, error, or cancel). */
+  done: boolean
+  /** null while in-flight; true/false after done. */
+  ok: boolean | null
+  /** Error message when done && !ok. */
+  error: string | null
+  /** Whether the operation can be cancelled. */
+  cancellable: boolean
+  /** Friendly title (e.g. "Update ComfyUI — My Install"). */
+  title: string
+  /** The action id — preserved so the picker can retry on error. */
+  actionId: string
+  actionData?: Record<string, unknown>
+}
+
+/** Per-install operation state driven by background (cross-instance) picker ops.
+ *  Pushed into `InstancePickerSnapshot.installOperationStatus` on every update
+ *  so the picker renderer gets live progress without needing its own IPC listener. */
+export const _activeOperationStatus = new Map<string, PickerOperationStatus>()
+
 export function setCallbacks(callbacks: RegisterCallbacks): void {
   _onLaunch = callbacks.onLaunch ?? null
   _onStop = callbacks.onStop ?? null

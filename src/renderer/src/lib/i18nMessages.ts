@@ -213,7 +213,23 @@ export const en = {
     snapshots: 'Snapshots',
     manage: 'Manage',
     running: 'Running',
-    empty: 'Select an instance'
+    empty: 'Select an instance',
+    /** Inline background-op progress strings (cross-instance Update etc.) */
+    progressCancel: 'Cancel',
+    progressDone: 'Done',
+    progressOpenInstance: 'Open Instance',
+    progressRetry: 'Try Again',
+    progressDismiss: 'Dismiss',
+    progressSuccessRunning: 'Updated & relaunched',
+    progressSuccessStopped: 'Update complete',
+    progressSuccessSubtext: 'is ready to launch.',
+    progressSuccessCountdown: 'Returning to settings in {n}…',
+    progressUpdating: 'Updating…',
+    progressDowngrading: 'Downgrading…',
+    progressDowngraded: 'Downgrade complete',
+    progressWorking: 'Working…',
+    progressError: 'Something went wrong',
+    progressCancelled: 'Cancelled',
   },
   /** Snapshot strings consumed by `SnapshotRow` + `formatRelative` +
    *  `triggerLabel` + `changeSummary` in the popup process. Mirrors

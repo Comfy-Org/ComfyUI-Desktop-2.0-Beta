@@ -128,8 +128,14 @@ export function getDetailSections(installation: InstallationRecord): Record<stri
       actions.push({
         id: 'update-comfyui', label: t('standalone.updateNow'), style: 'primary', enabled: installed,
         tooltip: t('tooltips.updateNow'),
-        showProgress: true, progressTitle: t('standalone.updatingTitle', { version: latestDisplay }),
-        data: isSwitching ? { channel: card.value } : undefined,
+        showProgress: true,
+        progressTitle: isDowngrade
+          ? t('standalone.downgradingTitle', { version: latestDisplay })
+          : t('standalone.updatingTitle', { version: latestDisplay }),
+        data: {
+          ...(isSwitching ? { channel: card.value } : {}),
+          isDowngrade,
+        },
         confirm: {
           title: t('standalone.updateConfirmTitle'),
           message: switchPrefix + confirmMessage,

@@ -8,6 +8,7 @@ import { useSessionStore } from '../stores/sessionStore'
 import ComfyUISettingsContent from '../components/settings/ComfyUISettingsContent.vue'
 import InstanceRow from './instancePicker/InstanceRow.vue'
 import { resolvePickerTab, type PickerTab } from '../lib/pickerTabs'
+import { resolveProgressRouting } from '../lib/pickerProgressRouting'
 import { mergePanelLocaleIntoPopup } from './pickerSettingsApiShim'
 import type {
   DetailSection,
@@ -51,6 +52,19 @@ interface PickerStorageSlice {
   modelsSystemDefault: string
 }
 
+interface PickerOperationStatus {
+  percent: number
+  status: string
+  speedBytesPerSec?: number | null
+  done: boolean
+  ok: boolean | null
+  error: string | null
+  cancellable: boolean
+  title: string
+  actionId: string
+  actionData?: Record<string, unknown>
+}
+
 interface PickerSnapshot {
   installs: PickerInstall[]
   activeInstallationId: string | null
@@ -61,6 +75,8 @@ interface PickerSnapshot {
   initialTab?: string | null
   autoAction?: string | null
   storage: PickerStorageSlice
+  operatingInstallationIds?: string[]
+  installOperationStatus?: Record<string, PickerOperationStatus>
 }
 
 const props = defineProps<{
@@ -125,7 +141,19 @@ interface PickerBridge {
     triggersInstanceStart?: boolean
     opKind?: 'launch' | 'install' | 'update' | 'destructive' | 'snapshot' | 'generic'
     isRestart?: boolean
+    routing?: 'same-host' | 'target-host' | 'inline-picker'
+    successChoice?: boolean
   }) => void
+  pickerStartBackgroundOp: (payload: {
+    installationId: string
+    actionId: string
+    actionData?: Record<string, unknown>
+    title: string
+    cancellable?: boolean
+    opKind?: string
+  }) => void
+  pickerCancelBackgroundOp: (installationId: string) => void
+  pickerDismissBackgroundOp: (installationId: string) => void
 }
 const bridge = (window as unknown as { __comfyTitlePopup?: PickerBridge }).__comfyTitlePopup
 
@@ -198,6 +226,40 @@ const selectedInstall = computed<Installation | null>(() => {
 })
 
 const runningSet = computed(() => new Set(props.snapshot.runningInstallationIds))
+// Optimistic local state — set synchronously on click so the progress view
+// appears instantly, before the IPC round-trip + snapshot broadcast lands.
+// Once the snapshot confirms the op (installOperationStatus has the entry),
+// that takes precedence and the local ref is cleared on the next tick.
+const localOperationStatus = ref<Map<string, PickerOperationStatus>>(new Map())
+
+watch(
+  () => props.snapshot.installOperationStatus,
+  (snapshotOps) => {
+    // When the snapshot starts carrying an op we seeded locally, drop the
+    // local copy so the snapshot's live updates drive the view.
+    for (const id of localOperationStatus.value.keys()) {
+      if (snapshotOps?.[id]) {
+        localOperationStatus.value.delete(id)
+      }
+    }
+  },
+  { deep: true }
+)
+
+const activeOperation = computed<PickerOperationStatus | null>(() => {
+  const id = selectedId.value
+  if (!id) return null
+  // Prefer the live snapshot; fall back to the optimistic local seed.
+  return props.snapshot.installOperationStatus?.[id] ?? localOperationStatus.value.get(id) ?? null
+})
+
+// operatingSet also needs to include locally-seeded ops so the spinner dot
+// appears on the row immediately.
+const effectiveOperatingSet = computed(() => {
+  const s = new Set(props.snapshot.operatingInstallationIds ?? [])
+  for (const id of localOperationStatus.value.keys()) s.add(id)
+  return s
+})
 
 function isRowRunning(inst: Installation): boolean {
   return runningSet.value.has(inst.id)
@@ -277,6 +339,40 @@ function handleSettingsShowProgress(opts: ShowProgressOpts): void {
   const rawActionData = opts.actionData
     ? JSON.parse(JSON.stringify(opts.actionData)) as Record<string, unknown>
     : undefined
+  const { routing, successChoice } = resolveProgressRouting(
+    opts,
+    props.snapshot.activeInstallationId
+  )
+  if (routing === 'inline-picker') {
+    // Seed optimistic local state immediately so the progress view appears
+    // before the IPC round-trip + snapshot broadcast lands. For snapshot
+    // restore, seed the same first-tick status string that main emits
+    // (`Loading snapshot…`) so the inline status line doesn't briefly
+    // flash the "Working…" fallback.
+    localOperationStatus.value.set(opts.installationId, {
+      percent: -1,
+      status: opts.actionId === 'snapshot-restore' ? 'Loading snapshot…' : '',
+      done: false,
+      ok: null,
+      error: null,
+      cancellable: opts.cancellable ?? false,
+      title: opts.title,
+      actionId: opts.actionId,
+      actionData: rawActionData,
+    })
+    // Select the target row so the right pane switches immediately.
+    selectedId.value = opts.installationId
+    // Fire the actual op — main will start feeding the snapshot loop.
+    bridge?.pickerStartBackgroundOp({
+      installationId: opts.installationId,
+      actionId: opts.actionId,
+      actionData: rawActionData,
+      title: opts.title,
+      cancellable: opts.cancellable,
+      opKind: opts.opKind,
+    })
+    return
+  }
   bridge?.pickerForwardShowProgress({
     installationId: opts.installationId,
     actionId: opts.actionId,
@@ -285,8 +381,35 @@ function handleSettingsShowProgress(opts: ShowProgressOpts): void {
     cancellable: opts.cancellable,
     triggersInstanceStart: opts.triggersInstanceStart,
     opKind: opts.opKind,
-    isRestart: opts.actionId === 'restart'
+    isRestart: opts.actionId === 'restart',
+    routing,
+    successChoice
   })
+}
+
+function handleInlineProgressCancel(): void {
+  const id = selectedId.value
+  if (!id) return
+  bridge?.pickerCancelBackgroundOp(id)
+}
+
+function handleInlineProgressRetry(): void {
+  const id = selectedId.value
+  if (!id || !activeOperation.value) return
+  const op = activeOperation.value
+  bridge?.pickerStartBackgroundOp({
+    installationId: id,
+    actionId: op.actionId,
+    actionData: op.actionData,
+    title: op.title,
+    cancellable: op.cancellable,
+  })
+}
+
+function handleInlineProgressDismiss(): void {
+  const id = selectedId.value
+  if (!id) return
+  bridge?.pickerDismissBackgroundOp(id)
 }
 
 function handleSettingsNavigateList(): void {
@@ -363,6 +486,7 @@ function handleExpandedPrimaryAction(running: boolean): void {
               :running="isRowRunning(cloudInstall)"
               :is-current="isRowCurrent(cloudInstall)"
               :update-available="isRowUpdateAvailable(cloudInstall)"
+              :operating="effectiveOperatingSet.has(cloudInstall.id)"
               :last-launched-short-label="lastLaunchedShortLabel(cloudInstall)"
               @select="handleSelect"
             />
@@ -375,6 +499,7 @@ function handleExpandedPrimaryAction(running: boolean): void {
               :running="isRowRunning(inst)"
               :is-current="isRowCurrent(inst)"
               :update-available="isRowUpdateAvailable(inst)"
+              :operating="effectiveOperatingSet.has(inst.id)"
               :last-launched-short-label="lastLaunchedShortLabel(inst)"
               @select="handleSelect"
             />
@@ -401,11 +526,15 @@ function handleExpandedPrimaryAction(running: boolean): void {
               :initial-tab="initialExpandedTab"
               :auto-action="snapshot.autoAction ?? null"
               :global-settings-snapshot="snapshot.storage"
+              :active-operation="activeOperation"
               class="picker-expanded-body"
               @show-progress="handleSettingsShowProgress"
               @navigate-list="handleSettingsNavigateList"
               @request-close="handleSettingsNavigateList"
               @primary-action="handleExpandedPrimaryAction"
+              @op-cancel="handleInlineProgressCancel"
+              @op-retry="handleInlineProgressRetry"
+              @op-dismiss="handleInlineProgressDismiss"
             />
           </template>
           <div v-else class="picker-detail-empty">

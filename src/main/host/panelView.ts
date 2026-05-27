@@ -7,6 +7,7 @@ import { TITLEBAR_HEIGHT, titleBarOverlayForTheme } from '../lib/titleBarOverlay
 import {
   _registerExtraBroadcastTarget,
   _unregisterExtraBroadcastTarget,
+  _activeOperationStatus,
 } from '../lib/ipc/shared'
 import {
   bringToFront,
@@ -203,6 +204,10 @@ export function refreshComfyTabBody(installationId: string): void {
   const entry = getEntryByInstallationId(installationId)
   if (!entry || entry.window.isDestroyed()) return
   if (entry.activePanel !== 'comfy') return
+  // A background op (inline picker update/restore) is managing this install's
+  // lifecycle — don't flash the "not running" screen while it's in-flight.
+  const bgOp = _activeOperationStatus.get(installationId)
+  if (bgOp && !bgOp.done) return
 
   const mode = computeBodyMode(entry)
   if (mode === 'comfy-lifecycle') {

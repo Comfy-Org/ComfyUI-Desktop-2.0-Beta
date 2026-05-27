@@ -14,7 +14,12 @@ import * as mainTelemetry from '../lib/telemetry'
 import * as updater from '../lib/updater'
 import * as i18n from '../lib/i18n'
 import { defaultInstallDir } from '../lib/paths'
-import { openPath as openPathHelper, getAppVersion } from '../lib/ipc/shared'
+import {
+  openPath as openPathHelper,
+  getAppVersion,
+  _activeOperationStatus,
+  type PickerOperationStatus,
+} from '../lib/ipc/shared'
 import {
   applySettingSet,
   buildSettingsSections,
@@ -26,6 +31,7 @@ import { getGithubStarCount } from '../lib/githubStars'
 import {
   comfyWindows,
   findEntryByTitleBarSender,
+  getEntryByInstallationId,
   isChooserHost,
 } from '../host/registry'
 import type { ComfyPanelKey, ComfyWindowEntry } from '../host/registry'
@@ -122,6 +128,15 @@ export interface InstancePickerSnapshot {
    *  after consumption. */
   autoAction: string | null
   storage: PickerStorageSlice
+  /** Installs that currently have an inline background op in flight (or
+   *  recently completed). Drives the spinner dot on InstanceRow. */
+  operatingInstallationIds: string[]
+  /** Per-install operation status for background (cross-instance) picker
+   *  ops. Keyed by installationId. Populated by the
+   *  `comfy-titlepopup:start-background-op` handler; delivered to the
+   *  picker renderer via the normal snapshot broadcast loop so no extra
+   *  IPC channel is needed. */
+  installOperationStatus: Record<string, PickerOperationStatus>
 }
 
 /** Single Models-directory row pushed to the global-settings popup.
@@ -180,6 +195,8 @@ interface BuildInstancePickerSnapshotArgs {
   initialTab?: string | null
   autoAction?: string | null
   storage: PickerStorageSlice
+  operatingInstallationIds?: string[]
+  installOperationStatus?: InstancePickerSnapshot['installOperationStatus']
 }
 
 /**
@@ -215,6 +232,8 @@ export function buildInstancePickerSnapshot(
     initialTab: args.initialTab ?? null,
     autoAction: args.autoAction ?? null,
     storage: args.storage,
+    operatingInstallationIds: args.operatingInstallationIds ?? [],
+    installOperationStatus: args.installOperationStatus ?? {},
   }
 }
 
@@ -373,6 +392,15 @@ let cachedInstallsResolved = false
  *  installs fetcher without re-threading the bindings through every
  *  host-construction site. */
 let activeBindings: TitlePopupHostBindings | null = null
+
+/** Trigger a fresh instance-picker snapshot broadcast to all open pickers.
+ *  Called by main-side code that mutates `_activeOperationStatus` so the
+ *  inline progress view refreshes without waiting for the next
+ *  installations-changed event. No-op when no picker is open. */
+export function triggerPickerSnapshotBroadcast(): void {
+  if (!activeBindings) return
+  void broadcastInstancePickerSnapshotToTitlePopups(activeBindings)
+}
 
 async function refreshCachedInstallsForPicker(): Promise<void> {
   if (!activeBindings) return
@@ -695,6 +723,8 @@ async function broadcastInstancePickerSnapshotToTitlePopups(
       initialTab: entry.pickerInitialTab,
       autoAction: entry.pickerAutoAction,
       storage: buildPickerStorageSlice(),
+      operatingInstallationIds: [..._activeOperationStatus.entries()].filter(([, v]) => !v.done).map(([k]) => k),
+      installOperationStatus: Object.fromEntries(_activeOperationStatus),
     })
     // Dedupe: every snapshot broadcast triggers a `pickerSnapshot`
     // prop change in the renderer, which schedules a measure-and-
@@ -1318,6 +1348,13 @@ export interface TitlePopupHostBindings {
   /** Send an IPC to the host's panel webContents, deferring until
    *  `did-finish-load` if the bundle is still loading. */
   sendToPanelDeferred: (panelView: WebContentsView, channel: string, payload: unknown) => void
+  /** Return the entry's live panelView, lazily rebuilding it in the
+   *  body mode that matches the entry's current state if it was torn
+   *  down (post-attach, etc.). Mirrors the
+   *  `entry.panelView ?? ensurePanelView(...)` recipe in `main/index.ts`
+   *  so picker IPCs that dispatch `panel-trigger-overlay` don't silently
+   *  drop when the host is mid-attach or just finished switching modes. */
+  ensurePanelViewForEntry: (entry: ComfyWindowEntry) => WebContentsView
   /** Build the same enriched installation list `get-installations`
    *  returns to renderer-side `installationStore`. Powers the instance-
    *  picker popup's list + detail pane. Async because the underlying
@@ -1381,6 +1418,24 @@ export interface TitlePopupHostBindings {
     actionId: string,
     actionData?: Record<string, unknown>,
   ) => Promise<{ ok: boolean; message?: string }>
+  /** Picker → run a long-running (streaming) action as a background op.
+   *  Unlike `pickerRunAction` this feeds live progress into
+   *  `_activeOperationStatus` so the picker's inline progress view
+   *  updates in real time via the snapshot broadcast loop.
+   *  Handles the stop→action→relaunch chain for IN_PLACE_RELAUNCH
+   *  actions on main's side (no renderer apiCall wrapper needed). */
+  pickerRunBackgroundOp: (payload: {
+    installationId: string
+    actionId: string
+    actionData?: Record<string, unknown>
+    title: string
+    cancellable: boolean
+  }) => void
+  /** Trigger a fresh instance-picker snapshot broadcast to all open
+   *  pickers. Used after background op state changes so the inline
+   *  progress view refreshes without waiting for the next
+   *  installations-changed event. */
+  broadcastPickerSnapshot: () => void
 }
 
 /** Open the Global Settings popup for a specific host window. Shared
@@ -1472,6 +1527,8 @@ function openInstancePickerForHost(
     initialTab: initialTab ?? null,
     autoAction: autoAction ?? null,
     storage: buildPickerStorageSlice(),
+    operatingInstallationIds: [..._activeOperationStatus.keys()],
+    installOperationStatus: Object.fromEntries(_activeOperationStatus),
   })
   openTitlePopup({
     parent: parentEntry.window,
@@ -2269,11 +2326,42 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
       const actionId = payload?.actionId
       if (typeof installationId !== 'string' || installationId.length === 0) return
       if (typeof actionId !== 'string' || actionId.length === 0) return
-      const parentEntry = comfyWindows.get(popupEntry.parentEntryId)
-      if (!parentEntry) return
+
+      // `'inline-picker'` — cross-instance mutating op: keep the picker
+      // open and stream progress inline via _activeOperationStatus.
+      // The picker renderer receives updates via the snapshot broadcast loop.
+      if (payload?.routing === 'inline-picker') {
+        const title = typeof payload?.title === 'string' ? payload.title : actionId
+        const cancellable = payload?.cancellable === true
+        const actionData = payload?.actionData as Record<string, unknown> | undefined
+        bindings.pickerRunBackgroundOp({ installationId, actionId, actionData, title, cancellable })
+        return
+      }
+
+      // `'same-host'` (default) or `'target-host'` (launch/restart cross-instance):
+      // hide the popup and dispatch a panel-takeover overlay.
       hideTitlePopup(popupEntry, { releaseFocusToParent: false })
-      const panelView = parentEntry.panelView
-      if (!panelView || panelView.webContents.isDestroyed()) return
+
+      const routing = payload?.routing === 'target-host' ? 'target-host' : 'same-host'
+      const targetEntry = routing === 'target-host'
+        ? (getEntryByInstallationId(installationId) ?? comfyWindows.get(popupEntry.parentEntryId))
+        : comfyWindows.get(popupEntry.parentEntryId)
+      if (!targetEntry) return
+
+      // Focus the target window for cross-instance routing (e.g. launch).
+      if (routing === 'target-host' && !targetEntry.window.isDestroyed()) {
+        targetEntry.window.show()
+        targetEntry.window.focus()
+      }
+
+      // Lazy-rebuild panelView if it was torn down post-attach.
+      const panelView = bindings.ensurePanelViewForEntry(targetEntry)
+      if (panelView.webContents.isDestroyed()) return
+
+      // Flip the target host into 'progress' panel mode so the layout
+      // brings panelView forward (panel full, comfy hidden).
+      bindings.setActivePanel(targetEntry.windowKey, 'progress')
+
       bindings.sendToPanelDeferred(panelView, 'panel-trigger-overlay', {
         kind: 'picker-show-progress',
         installationId,
@@ -2284,7 +2372,62 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
         triggersInstanceStart: payload?.triggersInstanceStart,
         opKind: payload?.opKind,
         isRestart: payload?.isRestart,
+        successChoice: payload?.successChoice,
       })
+    },
+  )
+
+  // Picker → run a long-running action as a background op with inline
+  // progress in the picker's right pane. Used for cross-instance mutating
+  // ops (update, snapshot-restore, copy-update, migrate). The picker stays
+  // open; progress is fed into _activeOperationStatus and delivered back
+  // via the normal snapshot broadcast loop.
+  ipcMain.on(
+    'comfy-titlepopup:start-background-op',
+    (event, payload: Record<string, unknown>) => {
+      const popupEntry = titlePopupsByWebContents.get(event.sender.id)
+      if (!popupEntry || popupEntry.kind !== 'instance-picker') return
+      const installationId = payload?.installationId
+      const actionId = payload?.actionId
+      if (typeof installationId !== 'string' || installationId.length === 0) return
+      if (typeof actionId !== 'string' || actionId.length === 0) return
+      const title = typeof payload?.title === 'string' ? payload.title : actionId
+      const cancellable = payload?.cancellable === true
+      const actionData = payload?.actionData as Record<string, unknown> | undefined
+      // Fire-and-forget — progress flows back via snapshot broadcasts.
+      bindings.pickerRunBackgroundOp({ installationId, actionId, actionData, title, cancellable })
+    },
+  )
+
+  // Picker → cancel an in-flight background op.
+  ipcMain.on(
+    'comfy-titlepopup:cancel-background-op',
+    (event, payload: { installationId?: unknown }) => {
+      const popupEntry = titlePopupsByWebContents.get(event.sender.id)
+      if (!popupEntry || popupEntry.kind !== 'instance-picker') return
+      const installationId = payload?.installationId
+      if (typeof installationId !== 'string' || installationId.length === 0) return
+      const abort = _activeOperationStatus.get(installationId)
+      if (!abort) return
+      // The abort controller lives in _operationAborts; cancel via the
+      // existing mechanism shared.ts sets up.
+      import('../lib/ipc/shared').then(({ _operationAborts }) => {
+        _operationAborts.get(installationId)?.abort()
+      }).catch(() => {})
+    },
+  )
+
+  // Picker → dismiss a done (success/error/cancelled) background op
+  // so the right pane returns to the settings view.
+  ipcMain.on(
+    'comfy-titlepopup:dismiss-background-op',
+    (event, payload: { installationId?: unknown }) => {
+      const popupEntry = titlePopupsByWebContents.get(event.sender.id)
+      if (!popupEntry || popupEntry.kind !== 'instance-picker') return
+      const installationId = payload?.installationId
+      if (typeof installationId !== 'string' || installationId.length === 0) return
+      _activeOperationStatus.delete(installationId)
+      bindings.broadcastPickerSnapshot()
     },
   )
 
@@ -2310,8 +2453,11 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
       if (!PICKER_NON_MODAL_ACTIONS.has(actionId)) {
         hideTitlePopup(popupEntry, { releaseFocusToParent: false })
       }
-      const panelView = parentEntry.panelView
-      if (!panelView || panelView.webContents.isDestroyed()) return
+      // Lazy-rebuild the panelView when the host has dropped it (post-
+      // attach, etc.) — same recipe as `forward-show-progress`. Without
+      // this, kebab actions silently no-op on a freshly-attached install.
+      const panelView = bindings.ensurePanelViewForEntry(parentEntry)
+      if (panelView.webContents.isDestroyed()) return
       bindings.sendToPanelDeferred(panelView, 'panel-trigger-overlay', {
         kind: 'picker-install-action',
         installationId,

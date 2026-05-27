@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Download, GitCompare, RotateCcw, Trash2, Upload } from 'lucide-vue-next'
 import { TID } from '../../../../shared/testIds'
@@ -10,7 +10,8 @@ import {
   changeSummary as _changeSummary,
   diffHasChanges,
   formatDate,
-  formatRelative as _formatRelative
+  formatRelative as _formatRelative,
+  triggerLabel
 } from '../../lib/snapshots'
 import type {
   ActionDef,
@@ -21,6 +22,17 @@ import type {
 } from '../../types/ipc'
 import SnapshotRow from './SnapshotRow.vue'
 import SnapshotDiffView from '../../components/SnapshotDiffView.vue'
+import { humanizeOpStatus } from '../../lib/progressStatusLabel'
+
+interface ActiveOperation {
+  percent: number
+  status: string
+  done: boolean
+  ok: boolean | null
+  error: string | null
+  actionId: string
+  actionData?: Record<string, unknown>
+}
 
 /**
  * Snapshots tab body for the brand-redesigned Settings drawer (v2).
@@ -45,9 +57,14 @@ import SnapshotDiffView from '../../components/SnapshotDiffView.vue'
 
 interface Props {
   installationId: string
+  /** Live background-op status for this install — surfaced by the
+   *  picker's inline-progress path. Used to mark the restoring row in
+   *  the timeline with a spinner + status string, show a brief "Restored"
+   *  chip on success, and lock out row actions on the other rows. */
+  activeOperation?: ActiveOperation | null
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), { activeOperation: null })
 
 const emit = defineEmits<{
   /** Fires when restore commits — parent (drawer) routes through
@@ -57,6 +74,12 @@ const emit = defineEmits<{
   /** Lets the drawer host re-load sections after a snapshot op (e.g.
    *  restore navigates back to install detail with refreshed state). */
   'refresh-all': []
+  /** Cancel / retry / dismiss for the inline top-card restore op.
+   *  Bubbles up to `ComfyUISettingsContent` which already relays these
+   *  to the picker's bridge methods. */
+  'op-cancel': []
+  'op-retry': []
+  'op-dismiss': []
 }>()
 
 const { t } = useI18n()
@@ -69,6 +92,127 @@ const loadError = ref<string | null>(null)
 
 const snapshots = computed<SnapshotSummary[]>(() => listData.value?.snapshots ?? [])
 const copyEvents = computed<CopyEvent[]>(() => listData.value?.copyEvents ?? [])
+
+// --- Restore feedback (driven by the picker's inline-progress path) ---
+// Surfaces as a single prominent card in the dashed "Save New Snapshot"
+// slot at the top of the rail, in front of the user's eyes. Three
+// terminal-state branches:
+//   - ok        → "Snapshot restored" success card, auto-dismisses after
+//                 a beat and reloads the list (the post-restore snapshot
+//                 lands as the new newest entry below).
+//   - error     → red card with the message + Retry / Dismiss actions.
+//   - cancelled → card disappears (op snapshot keeps the entry around
+//                 for 15s but we treat cancelled as user-driven dismissal).
+const restoreOp = computed<ActiveOperation | null>(() => {
+  const op = props.activeOperation
+  return op && op.actionId === 'snapshot-restore' ? op : null
+})
+const restoreOpFile = computed<string | null>(
+  () => (restoreOp.value?.actionData as { file?: string } | undefined)?.file ?? null
+)
+const restoreInFlight = computed<boolean>(
+  () => !!restoreOp.value && !restoreOp.value.done
+)
+const restorePhase = computed<string>(() => {
+  const op = restoreOp.value
+  if (!op || op.done) return ''
+  return humanizeOpStatus(op.status, t)
+})
+const restorePercent = computed<number | null>(() => {
+  const p = restoreOp.value?.percent ?? -1
+  return p < 0 ? null : Math.max(0, Math.min(100, p))
+})
+const restoreCancellable = computed<boolean>(
+  () => !!restoreOp.value && !restoreOp.value.done
+       && ((restoreOp.value as ActiveOperation & { cancellable?: boolean }).cancellable ?? false)
+)
+
+/** "Updated · 1h ago"-style label for the snapshot being restored *to* —
+ *  echoes how rows render below so the user sees the exact target. Falls
+ *  back to the user-provided label or the filename if we don't have the
+ *  row locally (e.g. picker fired the action before sections loaded). */
+const restoreFromLabel = computed<string>(() => {
+  const file = restoreOpFile.value
+  if (!file) return ''
+  const target = snapshots.value.find((s) => s.filename === file)
+  if (target) {
+    const trigger = triggerLabel(target.trigger, t)
+    const when = _formatRelative(target.createdAt, t)
+    return target.label ? `${target.label} · ${when}` : `${trigger} · ${when}`
+  }
+  return file
+})
+
+// Latched terminal-state for the top card. `null` means the card sits
+// in-flight; on done we capture the outcome here so the card stays
+// rendered with the right copy until the user dismisses (or the success
+// timer fires).
+const restoreTerminal = ref<'ok' | 'error' | null>(null)
+const restoreErrorMessage = ref<string>('')
+let restoreOkTimer: ReturnType<typeof setTimeout> | null = null
+function clearRestoreTerminal(): void {
+  if (restoreOkTimer !== null) {
+    clearTimeout(restoreOkTimer)
+    restoreOkTimer = null
+  }
+  restoreTerminal.value = null
+  restoreErrorMessage.value = ''
+}
+function dismissRestoreCard(): void {
+  clearRestoreTerminal()
+  emit('op-dismiss')
+}
+function cancelRestore(): void {
+  emit('op-cancel')
+}
+function retryRestore(): void {
+  clearRestoreTerminal()
+  emit('op-retry')
+}
+watch(restoreOp, (op, prev) => {
+  if (!op) return
+  // In-flight → done transition only.
+  if (!op.done || (prev && prev.done)) return
+  if (op.ok) {
+    clearRestoreTerminal()
+    restoreTerminal.value = 'ok'
+    restoreOkTimer = setTimeout(() => {
+      restoreTerminal.value = null
+      restoreOkTimer = null
+      // Reload so the new "post-restore" snapshot (written by the
+      // restore pipeline) lands as the newest entry; emit `op-dismiss`
+      // so main clears `_activeOperationStatus` and the picker's
+      // local seed.
+      void load()
+      emit('refresh-all')
+      emit('op-dismiss')
+    }, 1800)
+  } else if (op.error === 'Cancelled.') {
+    // User dismissed it themselves — drop the card without fanfare.
+    clearRestoreTerminal()
+  } else {
+    clearRestoreTerminal()
+    restoreTerminal.value = 'error'
+    restoreErrorMessage.value = op.error ?? ''
+  }
+})
+onUnmounted(clearRestoreTerminal)
+
+const showRestoreCard = computed<boolean>(
+  () => restoreInFlight.value || restoreTerminal.value !== null
+)
+
+// Pull the user up to the top card when an op begins, so a user scrolled
+// deep in the timeline sees the card without hunting for it. Uses
+// `block: 'start'` because the card is the top item and we want the
+// header just below the chrome.
+const topCardRef = ref<HTMLElement | null>(null)
+watch(restoreInFlight, (yes) => {
+  if (!yes) return
+  void nextTick(() => {
+    topCardRef.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  })
+})
 
 // Merged timeline (snapshots + copy events), newest first.
 type TimelineItem =
@@ -470,17 +614,124 @@ async function handleImport(): Promise<void> {
          pseudo-element on the <ul> so it spans the full list height
          without per-item border tricks. -->
     <ul class="snapshots-rail" :class="{ 'is-empty': timeline.length === 0 }">
-      <li class="snapshots-rail-node is-save">
-        <span class="snapshots-rail-dot is-pending" :aria-hidden="true"></span>
+      <li
+        ref="topCardRef"
+        class="snapshots-rail-node is-save"
+        :class="{
+          'is-op-inflight':  restoreInFlight,
+          'is-op-success':   restoreTerminal === 'ok',
+          'is-op-error':     restoreTerminal === 'error'
+        }"
+      >
+        <span
+          class="snapshots-rail-dot"
+          :class="{
+            'is-pending':  !showRestoreCard,
+            'is-spinning': restoreInFlight,
+            'is-restored': restoreTerminal === 'ok',
+            'is-error':    restoreTerminal === 'error'
+          }"
+          :aria-hidden="true"
+        ></span>
         <div class="snapshots-rail-content">
-          <!-- "Save Snapshot" label is on the rail (next to the dashed
-               dot), matching the trigger label position on snapshot
-               rows below. The dashed box wraps only the CTA. -->
           <span class="snapshots-rail-label">
-            {{ t('snapshots.saveLabel', 'Save Snapshot') }}
+            <template v-if="restoreInFlight">{{ t('snapshots.restoringStatus', 'Restoring snapshot') }}</template>
+            <template v-else-if="restoreTerminal === 'ok'">{{ t('snapshots.restored', 'Snapshot restored') }}</template>
+            <template v-else-if="restoreTerminal === 'error'">{{ t('snapshots.restoreFailed', 'Restore failed') }}</template>
+            <template v-else>{{ t('snapshots.saveLabel', 'Save Snapshot') }}</template>
           </span>
-          <div class="snapshots-rail-save-box">
+          <div
+            class="snapshots-rail-save-box"
+            :class="{
+              'is-op-inflight':  restoreInFlight,
+              'is-op-success':   restoreTerminal === 'ok',
+              'is-op-error':     restoreTerminal === 'error'
+            }"
+          >
+            <!-- In-flight: prominent card with target label, phase text,
+                 percent bar, and (when supported) a Cancel action. -->
+            <div
+              v-if="restoreInFlight"
+              class="snapshots-op-card"
+              role="status"
+              aria-live="polite"
+            >
+              <p v-if="restoreFromLabel" class="snapshots-op-card-target">
+                {{ t('snapshots.restoringFrom', { label: restoreFromLabel }) }}
+              </p>
+              <div
+                class="snapshots-op-bar-wrap"
+                role="progressbar"
+                :aria-valuenow="restorePercent ?? undefined"
+                aria-valuemin="0"
+                aria-valuemax="100"
+              >
+                <div class="snapshots-op-bar-header">
+                  <span class="snapshots-op-bar-status">{{ restorePhase }}</span>
+                  <span v-if="restorePercent !== null" class="snapshots-op-bar-pct">
+                    {{ restorePercent }}%
+                  </span>
+                </div>
+                <div class="snapshots-op-bar-track">
+                  <div
+                    class="snapshots-op-bar-fill"
+                    :class="{ 'is-indeterminate': restorePercent === null }"
+                    :style="restorePercent === null ? {} : { width: `${restorePercent}%` }"
+                  />
+                </div>
+              </div>
+              <button
+                v-if="restoreCancellable"
+                type="button"
+                class="snapshots-op-ghost-btn"
+                @click="cancelRestore"
+              >
+                {{ t('common.cancel', 'Cancel') }}
+              </button>
+            </div>
+
+            <!-- Success: stays for ~1.8s before auto-dismissing. -->
+            <div
+              v-else-if="restoreTerminal === 'ok'"
+              class="snapshots-op-card is-success"
+              role="status"
+            >
+              <p v-if="restoreFromLabel" class="snapshots-op-card-target">
+                {{ t('snapshots.restoredFrom', { label: restoreFromLabel }) }}
+              </p>
+            </div>
+
+            <!-- Error: persistent until user dismisses. -->
+            <div
+              v-else-if="restoreTerminal === 'error'"
+              class="snapshots-op-card is-error"
+              role="alert"
+            >
+              <p v-if="restoreErrorMessage" class="snapshots-op-card-error-msg">
+                {{ restoreErrorMessage }}
+              </p>
+              <div class="snapshots-op-actions">
+                <button
+                  type="button"
+                  class="snapshots-op-primary-btn"
+                  @click="retryRestore"
+                >
+                  {{ t('snapshots.tryAgain', 'Try again') }}
+                </button>
+                <button
+                  type="button"
+                  class="snapshots-op-ghost-btn"
+                  @click="dismissRestoreCard"
+                >
+                  {{ t('common.dismiss', 'Dismiss') }}
+                </button>
+              </div>
+            </div>
+
+            <!-- Idle: the original Save CTA returns when there is no op
+                 in flight or terminal state pending dismissal. -->
             <button
+              v-else
               type="button"
               class="snapshots-rail-cta"
               :aria-label="t('snapshots.saveSnapshot', 'Save Snapshot')"
@@ -583,6 +834,7 @@ async function handleImport(): Promise<void> {
                     class="snapshots-view-detail-btn"
                     :aria-label="t('snapshots.restore', 'Restore')"
                     :data-testid="TID.snapshotRowRestore(item.snapshot.filename)"
+                    :disabled="restoreInFlight"
                     @click="handleRestore(item.snapshot.filename)"
                   >
                     <RotateCcw :size="13" />
@@ -593,6 +845,7 @@ async function handleImport(): Promise<void> {
                     class="snapshots-view-detail-btn"
                     :aria-label="t('snapshots.exportSnapshot', 'Export')"
                     :data-testid="TID.snapshotRowExport(item.snapshot.filename)"
+                    :disabled="restoreInFlight"
                     @click="handleExport(item.snapshot.filename)"
                   >
                     <Download :size="13" />
@@ -602,6 +855,7 @@ async function handleImport(): Promise<void> {
                     type="button"
                     class="snapshots-view-detail-btn snapshots-view-detail-btn-danger"
                     :aria-label="t('snapshots.delete', 'Delete')"
+                    :disabled="restoreInFlight"
                     @click="handleDelete(item.snapshot.filename)"
                   >
                     <Trash2 :size="13" />
@@ -769,6 +1023,26 @@ async function handleImport(): Promise<void> {
 
 .snapshots-rail-dot.is-muted {
   background: color-mix(in srgb, var(--text-muted) 55%, transparent);
+}
+
+/* Restore in-flight — rotating conic ring on the dot. Matches the
+ * picker row's `op-dot-spin` treatment so the same visual vocabulary
+ * means "this thing is being worked on" across the app. */
+.snapshots-rail-dot.is-spinning {
+  background: conic-gradient(var(--brand-accent, #f5c518) 270deg, transparent 270deg);
+  border: 2px solid var(--color-surface);
+  animation: snapshots-rail-dot-spin 0.8s linear infinite;
+}
+.snapshots-rail-dot.is-restored {
+  background: var(--success, #34c759);
+  border: 2px solid var(--color-surface);
+}
+.snapshots-rail-dot.is-error {
+  background: var(--danger, #ef4444);
+  border: 2px solid var(--color-surface);
+}
+@keyframes snapshots-rail-dot-spin {
+  to { transform: rotate(360deg); }
 }
 
 .snapshots-rail-dot.is-pending {
@@ -942,6 +1216,119 @@ async function handleImport(): Promise<void> {
   font-size: var(--takeover-fs-caption);
   color: var(--text-muted);
   font-style: italic;
+}
+
+/* Top-card restore feedback. Lives in the dashed "Save New Snapshot"
+ * slot at the top of the timeline so the user sees the operation at
+ * the top of their attention rather than buried mid-list. Three
+ * outcomes: in-flight (default border, percent bar), success (green
+ * tint, auto-dismiss), error (red tint, retry/dismiss actions). */
+.snapshots-rail-save-box.is-op-inflight,
+.snapshots-rail-save-box.is-op-success,
+.snapshots-rail-save-box.is-op-error {
+  border-style: solid;
+  padding: 14px;
+}
+.snapshots-rail-save-box.is-op-success {
+  border-color: var(--success, #34c759);
+  background: color-mix(in srgb, var(--success, #34c759) 8%, transparent);
+}
+.snapshots-rail-save-box.is-op-error {
+  border-color: var(--danger, #ef4444);
+  background: color-mix(in srgb, var(--danger, #ef4444) 8%, transparent);
+}
+
+.snapshots-op-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.snapshots-op-card-target {
+  margin: 0;
+  font-size: var(--takeover-fs-caption);
+  color: var(--text-muted);
+}
+.snapshots-op-bar-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.snapshots-op-bar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: var(--takeover-fs-caption);
+}
+.snapshots-op-bar-status {
+  color: var(--neutral-100);
+}
+.snapshots-op-bar-pct {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.snapshots-op-bar-track {
+  position: relative;
+  height: 4px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--neutral-100) 8%, transparent);
+  overflow: hidden;
+}
+.snapshots-op-bar-fill {
+  height: 100%;
+  background: var(--brand-accent, #f5c518);
+  transition: width 120ms ease;
+}
+.snapshots-op-bar-fill.is-indeterminate {
+  width: 40%;
+  animation: snapshots-op-bar-indet 1.2s ease-in-out infinite;
+}
+@keyframes snapshots-op-bar-indet {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(250%); }
+}
+
+.snapshots-op-card-error-msg {
+  margin: 0;
+  font-size: var(--takeover-fs-caption);
+  color: var(--danger, #ef4444);
+  word-break: break-word;
+}
+.snapshots-op-actions {
+  display: flex;
+  gap: 8px;
+}
+.snapshots-op-primary-btn,
+.snapshots-op-ghost-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background-color 100ms ease;
+}
+.snapshots-op-primary-btn {
+  background: var(--brand-accent, #f5c518);
+  color: #1a1a1a;
+  border: 1px solid var(--brand-accent, #f5c518);
+}
+.snapshots-op-primary-btn:hover,
+.snapshots-op-primary-btn:focus-visible {
+  background: color-mix(in srgb, var(--brand-accent, #f5c518) 88%, white);
+  outline: none;
+}
+.snapshots-op-ghost-btn {
+  background: transparent;
+  color: var(--neutral-100);
+  border: 1px solid var(--chooser-surface-border);
+}
+.snapshots-op-ghost-btn:hover,
+.snapshots-op-ghost-btn:focus-visible {
+  background: var(--brand-surface-bg-hover);
+  outline: none;
 }
 
 .snapshots-view-copy-event {
