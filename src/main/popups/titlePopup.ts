@@ -368,6 +368,16 @@ interface TitlePopupEntry {
 const titlePopupsByParent = new Map<number, TitlePopupEntry>()
 const titlePopupsByWebContents = new Map<number, TitlePopupEntry>()
 
+/** Timestamp of the most recent downloads-popup dismiss per parent
+ *  window. The downloads tray relies on blur-dismiss (no backdrop),
+ *  so a click on the tray button blurs and hides the popup BEFORE the
+ *  click IPC arrives at main — without this guard, main would see an
+ *  empty `titlePopupsByParent` slot and re-open. Any click within
+ *  `DOWNLOADS_REOPEN_SUPPRESS_MS` of the last hide is treated as the
+ *  toggle-close completion and dropped. */
+const downloadsHiddenAtByParent = new Map<number, number>()
+const DOWNLOADS_REOPEN_SUPPRESS_MS = 250
+
 /** Cached install list used to open the picker SYNCHRONOUSLY on click
  *  (no `await` on the click path → instant first frame, same as the
  *  file menu). Kept fresh by:
@@ -826,6 +836,11 @@ function ensureTitlePopup(parent: BrowserWindow): TitlePopupEntry {
       // on the trigger button is suppressed by the reopen guard.
       if (!entry.titleBarSender.isDestroyed()) {
         entry.titleBarSender.send('comfy-titlebar:menu-closed', { menu: entry.kind })
+      }
+      /** Stamp the per-parent downloads-hide time so the click IPC that
+       *  blur-dismissed us can't immediately reopen the popup. */
+      if (entry.kind === 'downloads' && !view.parentWindow.isDestroyed()) {
+        downloadsHiddenAtByParent.set(view.parentWindow.id, Date.now())
       }
       // Hide the popup backdrop on every dismiss path so the dim
       // never outlives the popup. Cheap no-op for kinds that don't
@@ -2025,6 +2040,26 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
       if (!found) return
       const { id: windowKey, entry } = found
       if (entry.window.isDestroyed()) return
+
+      /** Toggle: if the downloads popup is already open, close it.
+       *  Otherwise, if a downloads popup was just blur-dismissed by this
+       *  same gesture, treat the click as the close completion. */
+      const parentId = entry.window.id
+      const existingPopup = titlePopupsByParent.get(parentId)
+      if (
+        existingPopup
+        && existingPopup.kind === 'downloads'
+        && (existingPopup.view.isOpen || existingPopup.view.pendingShowTimer !== null)
+      ) {
+        hideTitlePopup(existingPopup, { releaseFocusToParent: true })
+        return
+      }
+      const hiddenAt = downloadsHiddenAtByParent.get(parentId)
+      if (hiddenAt !== undefined && Date.now() - hiddenAt < DOWNLOADS_REOPEN_SUPPRESS_MS) {
+        downloadsHiddenAtByParent.delete(parentId)
+        return
+      }
+
       const x = Math.max(0, Math.round(payload?.anchor?.x ?? 0))
       const y = Math.max(0, Math.round(payload?.anchor?.y ?? TITLEBAR_HEIGHT))
       openTitlePopup({
