@@ -261,11 +261,8 @@ async function handleRestore(filename: string): Promise<void> {
     cancellable: true,
     style: 'primary',
     confirm: {
-      title: t('standalone.snapshotRestore', 'Restore Snapshot'),
-      message: t(
-        'snapshots.restoreConfirm',
-        'Are you sure you want to restore this snapshot? Your current install state will be replaced.'
-      ),
+      title: t('snapshots.restoreConfirmTitle'),
+      message: t('snapshots.restoreConfirmMessage'),
       messageDetails,
       confirmLabel: t('standalone.snapshotRestore', 'Restore')
     }
@@ -411,7 +408,8 @@ async function handleImport(): Promise<void> {
       data: { file: importResult.restoreFile },
       showProgress: true,
       progressTitle: t('standalone.snapshotRestoringTitle', 'Restoring snapshot'),
-      cancellable: true
+      cancellable: true,
+      style: 'primary'
     })
   }
 }
