@@ -45,6 +45,21 @@ export interface InjectRetryableProgressErrorOpts {
   failuresBeforeSuccess?: number
 }
 
+export interface InjectPortConflictResultOpts {
+  installationId: string
+  title?: string
+  /** The occupied port reported in `result.portConflict.port`. */
+  port: number
+  /** The fallback port reported in `result.portConflict.nextPort`.
+   *  When set, ProgressModal renders the "Use port N" CTA. */
+  nextPort?: number
+  /** Drives the visibility of the "Stop process and retry" CTA. */
+  isComfy?: boolean
+  /** PIDs reported in `result.portConflict.pids` (cosmetic for the test
+   *  — currently unused by the renderer). */
+  pids?: number[]
+}
+
 export interface SeedErrorInstanceOpts {
   installationId: string
   installationName: string
@@ -112,6 +127,12 @@ export interface E2ERendererHelpers {
    *  the legacy fresh-launch fallback) and that recovery clears the
    *  error UI in place. */
   injectRetryableProgressError(opts: InjectRetryableProgressErrorOpts): Promise<void>
+  /** Drive the show-progress chain with an apiCall that resolves to a
+   *  port-conflict `{ ok: false, portConflict: {...} }` result. The
+   *  apiCall increments the same `injectedApiCallCounts` map the
+   *  retryable helper uses, so the "Kill Process" path's re-invocation
+   *  of `op.apiCall` can be observed via `getInjectedApiCallCount`. */
+  injectPortConflictResult(opts: InjectPortConflictResultOpts): Promise<void>
   /** Seed `sessionStore.errorInstances` directly so the renderer
    *  treats an install as pre-existing errored without having to fail
    *  a real op first. Mirrors the broadcast path the launcher uses
@@ -205,6 +226,29 @@ export function registerE2ERendererHooks(): void {
           return next <= failsRequired
             ? Promise.resolve({ ok: false, message: errorMessage })
             : Promise.resolve({ ok: true })
+        },
+      })
+    },
+    async injectPortConflictResult({ installationId, title, port, nextPort, isComfy, pids }) {
+      const b = ensureBound()
+      injectedApiCallCounts.set(installationId, 0)
+      await b.showProgress({
+        installationId,
+        title: title ?? `Launching ComfyUI`,
+        opKind: 'generic',
+        triggersInstanceStart: true,
+        apiCall: () => {
+          const next = (injectedApiCallCounts.get(installationId) ?? 0) + 1
+          injectedApiCallCounts.set(installationId, next)
+          return Promise.resolve({
+            ok: false,
+            portConflict: {
+              port,
+              ...(pids !== undefined ? { pids } : {}),
+              ...(nextPort !== undefined ? { nextPort } : {}),
+              ...(isComfy !== undefined ? { isComfy } : {}),
+            },
+          })
         },
       })
     },

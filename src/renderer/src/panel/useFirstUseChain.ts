@@ -83,7 +83,10 @@ export function useFirstUseChain(opts: FirstUseChainOpts): FirstUseChainApi {
   const installationStore = useInstallationStore()
   const progressStore = useProgressStore()
   const launcherPrefs = useLauncherPrefs()
-  const { confirmMigration } = useMigrateAction()
+  // First-use is the sole takeover-surface caller; pinning the surface
+  // at the composable scope keeps the per-call API uniform across
+  // MigrationBanner / DetailModal / useComfyUISettings.
+  const { confirmMigration } = useMigrateAction({ surface: 'takeover' })
   // Module singleton — same slot the overlay composable owns.
   const { current: currentOverlay } = useOverlay()
 
@@ -286,11 +289,11 @@ export function useFirstUseChain(opts: FirstUseChainOpts): FirstUseChainApi {
       return
     }
     // First-use chain renders the migrate confirm as a brand takeover
-    // (registered by PanelApp via `registerMigrateTakeover`). Other
-    // callsites (MigrationBanner, DetailModal) default to the legacy
-    // Modal surface. `null` return means user cancelled; leave the
-    // takeover mounted on the localBranch step (no state change).
-    const result = await confirmMigration(legacy, undefined, { surface: 'takeover' })
+    // (registered by PanelApp via `registerMigrateTakeover` and pinned
+    // at `useMigrateAction({ surface: 'takeover' })` above). `null`
+    // return means user cancelled; leave the takeover mounted on the
+    // localBranch step (no state change).
+    const result = await confirmMigration(legacy)
     if (!result) return
 
     // Pre-mark the chain so the new install kicked off by migration

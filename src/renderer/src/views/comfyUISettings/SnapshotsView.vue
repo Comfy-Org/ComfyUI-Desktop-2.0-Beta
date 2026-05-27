@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { Download, RotateCcw, Trash2 } from 'lucide-vue-next'
 import { TID } from '../../../../shared/testIds'
 import { useModal } from '../../composables/useModal'
+import { useActionGuard } from '../../composables/useActionGuard'
 import { emitTelemetryAction, toCountBucket } from '../../lib/telemetry'
 import {
   changeSummary as _changeSummary,
@@ -59,6 +60,7 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const modal = useModal()
+const actionGuard = useActionGuard()
 
 const listData = ref<SnapshotListData | null>(null)
 const loading = ref(true)
@@ -188,31 +190,33 @@ async function handleRestore(filename: string): Promise<void> {
       ? [{ label: t('snapshots.willChange', 'Changes when restoring'), items: summaryLines }]
       : undefined
 
-  const ok = await modal.confirm({
-    title: t('standalone.snapshotRestore', 'Restore Snapshot'),
-    message: t(
-      'snapshots.restoreConfirm',
-      'Are you sure you want to restore this snapshot? Your current install state will be replaced.'
-    ),
-    messageDetails,
-    confirmLabel: t('standalone.snapshotRestore', 'Restore'),
-    confirmStyle: 'primary'
-  })
-  if (!ok) return
-
   emitTelemetryAction('desktop2.snapshot.flow', {
     action: 'restore_complete',
     snapshot_count_bucket: toCountBucket(snapshots.value.length),
     has_diff: hasChanges
   })
 
+  // Pass the diff-preview confirm through the emit so
+  // `useComfyUISettings.runAction` step 3 augments this existing
+  // confirm with the `willStopRunning` warning instead of synthesizing
+  // a second one. Single modal whether the install is running or not.
   emit('run-action', {
     id: 'snapshot-restore',
     label: t('standalone.snapshotRestore', 'Restore'),
     data: { file: filename },
     showProgress: true,
     progressTitle: t('standalone.snapshotRestoringTitle', 'Restoring snapshot'),
-    cancellable: true
+    cancellable: true,
+    style: 'primary',
+    confirm: {
+      title: t('standalone.snapshotRestore', 'Restore Snapshot'),
+      message: t(
+        'snapshots.restoreConfirm',
+        'Are you sure you want to restore this snapshot? Your current install state will be replaced.'
+      ),
+      messageDetails,
+      confirmLabel: t('standalone.snapshotRestore', 'Restore')
+    }
   })
 }
 
@@ -303,7 +307,15 @@ async function handleImport(): Promise<void> {
     return
   }
 
-  // Step 3: confirm restore on the imported snapshot
+  // Step 3: confirm restore on the imported snapshot. Gate behind the
+  // busy guard — confirm writes the staged snapshots into the install
+  // and immediately auto-restores from the newest one, so racing an
+  // in-flight op (copy / release-update / migrate / running launch)
+  // would clobber both surfaces.
+  if (!await actionGuard.checkBeforeAction(
+    props.installationId,
+    t('snapshots.importSnapshots', 'Import Snapshots'),
+  )) return
   const result = await window.api.importSnapshotsConfirm(props.installationId)
   if (!result.ok) {
     if (result.message) {
@@ -356,6 +368,7 @@ async function handleImport(): Promise<void> {
           type="button"
           class="snapshots-view-toolbtn"
           :aria-label="t('snapshots.importSnapshots', 'Import')"
+          :data-testid="TID.snapshotsImport"
           @click="handleImport"
         >
           <span>{{ t('snapshots.importSnapshots', 'Import') }}</span>
@@ -365,6 +378,7 @@ async function handleImport(): Promise<void> {
           class="snapshots-view-toolbtn"
           :disabled="snapshots.length === 0"
           :aria-label="t('snapshots.exportAll', 'Export All')"
+          :data-testid="TID.snapshotsExportAll"
           @click="handleExportAll"
         >
           <span>{{ t('snapshots.exportAll', 'Export All') }}</span>
@@ -470,6 +484,7 @@ async function handleImport(): Promise<void> {
                     type="button"
                     class="snapshots-view-detail-btn"
                     :aria-label="t('snapshots.exportSnapshot', 'Export')"
+                    :data-testid="TID.snapshotRowExport(item.snapshot.filename)"
                     @click="handleExport(item.snapshot.filename)"
                   >
                     <Download :size="13" />
