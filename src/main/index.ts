@@ -75,6 +75,7 @@ import { applyAttachHostPreview, clearAttachHostPreview } from './host/attachHos
 import {
   _detachInstallImpl,
   confirmAndCloseAllHostWindows,
+  confirmAndCloseHostWindow,
   consultPanelRendererClose,
   detachOrphanedInstallHosts,
   preClearedClose,
@@ -336,7 +337,18 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
     // `activePanel !== 'comfy'`. The trailing `refreshComfyTabBody`
     // still handles the comfy-lifecycle → comfy body-mode swap when the
     // entry was already on `'comfy'` (setActivePanel early-returns there).
-    setActivePanel(existing.windowKey, 'comfy')
+    //
+    // EXCEPTION: the `'progress'` panel mode is reserved for picker-
+    // driven ProgressModal takeovers that explicitly own the panel
+    // until the user picks a terminal-state CTA. A relaunch fired
+    // mid-update (the wantsRelaunch step in `useComfyUISettings`) must
+    // NOT yank the panel out from under the running modal — the user
+    // would lose the success screen and be dumped into Comfy with no
+    // sense of what just happened. The renderer's `handleProgressClose`
+    // restores `'comfy'` once the modal dismisses.
+    if (existing.activePanel !== 'progress') {
+      setActivePanel(existing.windowKey, 'comfy')
+    }
     refreshComfyTabBody(installationId)
     if (proc) {
       proc.on('exit', () => {
@@ -1103,9 +1115,25 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
       openChooserHostWindow,
       returnToDashboard,
       confirmAndCloseAllHostWindows,
+      confirmAndCloseHostWindow,
       setActivePanel,
       triggerOpenFeedback,
       sendToPanelDeferred,
+      ensurePanelViewForEntry: (entry) =>
+        entry.panelView ?? ensurePanelView(entry.windowKey, entry, computeBodyMode(entry)),
+      spawnProgressHostForTarget: () => {
+        // Open a fresh chooser host whose sole job is to render the
+        // ProgressModal for a cross-instance Update. The picker's
+        // parent window stays untouched. After the op finishes and the
+        // user picks "Open Instance", `handleChooserPick` attaches the
+        // target install in-place — this same window becomes the
+        // target's window, no extra chooser hop.
+        const win = openChooserHostWindow()
+        for (const entry of comfyWindows.values()) {
+          if (entry.window === win) return entry
+        }
+        return null
+      },
       getInstancePickerInstalls: async () => {
         // Same shape `get-installations` returns to the renderer-side
         // `installationStore` — sharing the enrichment helper means the
@@ -1164,6 +1192,23 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
         }
         try {
           await updateInstallation(installationId, { [fieldId]: value })
+          // Channel switch must kick a check-update; otherwise the new
+          // channel's available-update tag never appears until the user
+          // manually clicks "Check for updates".
+          if (fieldId === 'updateChannel') {
+            const next = await getInstallation(installationId)
+            if (next) {
+              const abort = new AbortController()
+              source.handleAction('check-update', next, undefined, {
+                update: (data) => updateInstallation(installationId, data).then(() => { }),
+                sendProgress: () => { },
+                sendOutput: () => { },
+                signal: abort.signal,
+              }).catch((err) => {
+                console.error(`Picker: check-update after channel switch failed for ${installationId}:`, err)
+              })
+            }
+          }
           return { ok: true }
         } catch (err) {
           return { ok: false, message: err instanceof Error ? err.message : 'Update failed.' }
@@ -1177,45 +1222,6 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
         // streaming progress UI, so we pass stub progress callbacks
         // rather than wiring a sender — the picker handles
         // success/failure via the awaited return.
-        try {
-          const inst = await getInstallation(installationId)
-          if (!inst) return { ok: false, message: 'Installation not found.' }
-          const source = sourceMap[inst.sourceId]
-          if (!source) return { ok: false, message: 'Unknown source.' }
-          const abort = new AbortController()
-          const result = await source.handleAction(actionId, inst, actionData, {
-            update: (data) => updateInstallation(installationId, data).then(() => { }),
-            sendProgress: () => { },
-            sendOutput: () => { },
-            signal: abort.signal,
-          })
-          return {
-            ok: result.ok !== false,
-            message: typeof result.message === 'string' ? result.message : undefined,
-          }
-        } catch (err) {
-          return { ok: false, message: err instanceof Error ? err.message : 'Action failed.' }
-        }
-      },
-      getChannelPickerFieldForInstall: async (installationId) => {
-        if (!installationId) return null
-        const inst = await getInstallation(installationId)
-        if (!inst) return null
-        const source = sourceMap[inst.sourceId]
-        if (!source) return null
-        const sections = source.getDetailSections(inst) as Array<{ tab?: string; fields?: Array<Record<string, unknown>> }>
-        for (const sec of sections) {
-          if (sec.tab && sec.tab !== 'update') continue
-          const f = sec.fields?.find((ff) => ff.editType === 'channel-cards')
-          if (f) return f
-        }
-        return null
-      },
-      runChannelPickerAction: async (installationId, actionId, actionData) => {
-        // Same dispatch as `pickerRunAction`. The IPC handler enforces
-        // the action allowlist (copy-update / release-update /
-        // switch-channel / update); this binding is a generic
-        // source-action runner.
         try {
           const inst = await getInstallation(installationId)
           if (!inst) return { ok: false, message: 'Installation not found.' }

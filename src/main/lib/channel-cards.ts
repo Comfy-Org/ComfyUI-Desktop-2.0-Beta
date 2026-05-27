@@ -15,10 +15,7 @@ export interface ChannelCardData {
   latestVersion: string
   /** Localized human string for display (e.g. "11/24/2025, 4:32 PM"). */
   lastChecked: string
-  /** Raw ms-since-epoch timestamp the release cache was populated. Used
-   *  renderer-side to gate auto-refresh of stale channel data when the
-   *  Update tab opens. `undefined` ⇒ no cache entry yet → treat as stale. */
-  checkedAt?: number
+  lastCheckedAt?: number
   updateAvailable: boolean
   actions?: Record<string, unknown>[]
 }
@@ -53,7 +50,7 @@ export function buildChannelCards(
         installedVersion: cv ? formatComfyVersion(cv, 'detail') : (info.installedTag || 'unknown'),
         latestVersion: latestCv ? formatComfyVersion(latestCv, 'detail') : (info.releaseName || info.latestTag || '—'),
         lastChecked: info.checkedAt ? new Date(info.checkedAt).toLocaleString() : '—',
-        checkedAt: info.checkedAt,
+        lastCheckedAt: info.checkedAt ?? undefined,
         updateAvailable: releaseCache.isUpdateAvailable(installation, def.value, info),
       } : undefined,
     }

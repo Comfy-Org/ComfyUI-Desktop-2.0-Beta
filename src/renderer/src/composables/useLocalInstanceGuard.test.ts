@@ -8,10 +8,10 @@ vi.mock('vue-i18n', () => ({
   })
 }))
 
-const mockSelect = vi.fn()
-vi.mock('./useModal', () => ({
-  useModal: () => ({
-    select: mockSelect
+const mockConfirm = vi.fn()
+vi.mock('./useDialogs', () => ({
+  useDialogs: () => ({
+    confirm: mockConfirm
   })
 }))
 
@@ -72,7 +72,7 @@ describe('useLocalInstanceGuard', () => {
     const result = await guard.checkBeforeLaunch('cloud-1')
 
     expect(result).toBe(true)
-    expect(mockSelect).not.toHaveBeenCalled()
+    expect(mockConfirm).not.toHaveBeenCalled()
   })
 
   it('prompts when another local instance is running', async () => {
@@ -85,12 +85,12 @@ describe('useLocalInstanceGuard', () => {
       installationName: 'Running Install',
       mode: 'window',
     })
-    mockSelect.mockResolvedValue('proceed')
+    mockConfirm.mockResolvedValue('primary')
     const guard = useLocalInstanceGuard()
 
     const result = await guard.checkBeforeLaunch('target')
 
-    expect(mockSelect).toHaveBeenCalled()
+    expect(mockConfirm).toHaveBeenCalled()
     expect(result).toBe(true)
   })
 
@@ -102,12 +102,12 @@ describe('useLocalInstanceGuard', () => {
     sessionStore.launchingInstances.set('launching-1', {
       installationName: 'Launching Install',
     })
-    mockSelect.mockResolvedValue('proceed')
+    mockConfirm.mockResolvedValue('primary')
     const guard = useLocalInstanceGuard()
 
     const result = await guard.checkBeforeLaunch('target')
 
-    expect(mockSelect).toHaveBeenCalled()
+    expect(mockConfirm).toHaveBeenCalled()
     expect(result).toBe(true)
   })
 
@@ -121,7 +121,7 @@ describe('useLocalInstanceGuard', () => {
     const result = await guard.checkBeforeLaunch('target')
 
     expect(result).toBe(true)
-    expect(mockSelect).not.toHaveBeenCalled()
+    expect(mockConfirm).not.toHaveBeenCalled()
   })
 
   it('returns false when user cancels the prompt', async () => {
@@ -134,7 +134,7 @@ describe('useLocalInstanceGuard', () => {
       installationName: 'Other',
       mode: 'window',
     })
-    mockSelect.mockResolvedValue(null)
+    mockConfirm.mockResolvedValue(false)
     const guard = useLocalInstanceGuard()
 
     const result = await guard.checkBeforeLaunch('target')
@@ -152,7 +152,7 @@ describe('useLocalInstanceGuard', () => {
       installationName: 'Other',
       mode: 'window',
     })
-    mockSelect.mockResolvedValue('replace')
+    mockConfirm.mockResolvedValue('secondary')
     const guard = useLocalInstanceGuard()
 
     const result = await guard.checkBeforeLaunch('target')

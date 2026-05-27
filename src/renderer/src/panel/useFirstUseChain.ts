@@ -4,7 +4,7 @@ import { useProgressStore } from '../stores/progressStore'
 import { useLauncherPrefs } from '../composables/useLauncherPrefs'
 import { useMigrateAction } from '../composables/useMigrateAction'
 import { useOverlay } from '../composables/useOverlay'
-import type { Installation, ShowProgressOpts } from '../types/ipc'
+import type { FieldOption, Installation, ShowProgressOpts, Source } from '../types/ipc'
 import type { ChooserLaunchOutcome } from './useChooserHandoff'
 import type { FirstUseChainHooks, PanelKey } from './usePanelOverlays'
 
@@ -28,7 +28,7 @@ export interface FirstUseChainOpts {
   /** Re-opens the FirstUseTakeover from the Configure → Back chain.
    *  Owned by usePanelOverlays. Pass `{ initialStep: 'localBranch' }`
    *  so the user lands on the sub-step they came from. */
-  openFirstUseTakeover: (opts?: { initialStep?: 'consent' | 'pick' | 'localBranch' }) => Promise<void>
+  openFirstUseTakeover: (opts?: { initialStep?: 'start' | 'localBranch' }) => Promise<void>
 }
 
 export interface FirstUseChainApi {
@@ -44,9 +44,12 @@ export interface FirstUseChainApi {
   handleFirstUseComplete: () => Promise<void>
   /** FirstUseTakeover `chain-local` emit. Optional payload flags
    *  whether the chain reached us via the Local → Start Fresh
-   *  sub-step (vs the direct no-legacy path). */
+   *  sub-step (vs the direct no-legacy path), and whether the user
+   *  asked for an Express install (skip the Configure screen and run
+   *  Standalone + recommended defaults straight through to the
+   *  install-progress takeover). */
   handleFirstUseChainLocal: (
-    payload?: { cameFromLocalBranch?: boolean }
+    payload?: { cameFromLocalBranch?: boolean; express?: boolean }
   ) => Promise<void>
   /** FirstUseTakeover `chain-migrate` emit. */
   handleFirstUseChainMigrate: () => Promise<void>
@@ -117,6 +120,13 @@ export function useFirstUseChain(opts: FirstUseChainOpts): FirstUseChainApi {
    *  Back link in its Configure footer. */
   const pendingCameFromLocalBranch = ref(false)
 
+  /** One-shot flag raised in the auto-launch watcher just before the
+   *  chained `performChooserLaunch` call. The launch action runs with
+   *  `showProgress: true`, so the resulting `show-progress` comes back
+   *  through `onShowProgress`; reading + clearing this flag there is
+   *  what stamps the launch op as the second leg of the chain. */
+  const pendingChainedLaunch = ref(false)
+
   const hooks: FirstUseChainHooks = {
     shouldForceTakeover: () => chainingFirstUseToNewInstall.value,
     consumeCameFromLocalBranch: () => {
@@ -134,6 +144,9 @@ export function useFirstUseChain(opts: FirstUseChainOpts): FirstUseChainApi {
       // calls leave it untouched.
       if (chainingFirstUseToNewInstall.value && pendingFirstUseAutoLaunchId.value === null) {
         pendingFirstUseAutoLaunchId.value = showOpts.installationId
+        // Stamp the install op as the first leg of a chain so ProgressModal
+        // maps its 0→100% to the unified bar's 0→70% slot.
+        showOpts.chainSpan = 'install'
         // Flip the persisted gate now so the takeover doesn't re-run
         // on the next launch — the overlay handoff doesn't go through
         // InstallWizardModal's close emit.
@@ -147,6 +160,16 @@ export function useFirstUseChain(opts: FirstUseChainOpts): FirstUseChainApi {
       // first-use-only.
       if (showOpts.autoLaunchOnFinish === true && pendingAutoLaunchId.value === null) {
         pendingAutoLaunchId.value = showOpts.installationId
+        showOpts.chainSpan = 'install'
+        return
+      }
+      // Launch leg of the install→launch chain. The watcher set
+      // `pendingChainedLaunch` just before kicking the launch action;
+      // consume it here so ProgressModal maps this op to the unified
+      // bar's 70→100% slot.
+      if (pendingChainedLaunch.value) {
+        pendingChainedLaunch.value = false
+        showOpts.chainSpan = 'launch'
       }
     },
   }
@@ -232,19 +255,123 @@ export function useFirstUseChain(opts: FirstUseChainOpts): FirstUseChainApi {
    *  Tier 3 takeover. The Tier 3 → Tier 3 swap is silent in
    *  `useOverlay`, so the first-use takeover unmounts as the new-install
    *  takeover mounts. The completion flip is deferred to the new-install
-   *  close path (see `handleNewInstallTakeoverClose`). */
+   *  close path (see `handleNewInstallTakeoverClose`).
+   *
+   *  When `payload.express === true`, skip the Configure screen entirely
+   *  and run the same `buildInstallation → addInstallation → show-progress`
+   *  sequence Configure's `handleSave` runs, using the recommended option
+   *  for every non-text field on the Standalone source (the same defaults
+   *  Configure pre-selects). If any step fails, fall back to opening
+   *  Configure so the user sees the actual error rather than a silent
+   *  dead end. */
   async function handleFirstUseChainLocal(
-    payload?: { cameFromLocalBranch?: boolean },
+    payload?: { cameFromLocalBranch?: boolean; express?: boolean },
   ): Promise<void> {
     chainingFirstUseToNewInstall.value = true
     pendingFirstUseAutoLaunchId.value = null
     pendingCameFromLocalBranch.value = payload?.cameFromLocalBranch === true
+
+    if (payload?.express === true) {
+      const expressOk = await runExpressInstall()
+      if (expressOk) return
+      // Fall through to the Configure screen — runExpressInstall already
+      // reset chain bookkeeping on failure.
+      chainingFirstUseToNewInstall.value = true
+      pendingFirstUseAutoLaunchId.value = null
+    }
+
     await opts.switchPanel('new-install', 'first_use')
     // FirstUseTakeover.onUnmounted just pushed `'none'` as the chain
     // swap unmounted it. Re-assert `'post-consent'` so the file-menu
     // builder keeps the chain locked down to Skip Onboarding while
     // the new-install / install-progress takeover is up.
     window.api.setFirstUseMode('post-consent')
+  }
+
+  /** Express install — the "skip Configure" path. Runs the Standalone
+   *  source with the `recommended` option for every non-text field
+   *  (mirroring Configure's `loadFieldOptions` default-selection logic),
+   *  then hands off to the install-progress takeover via
+   *  `handleShowProgress`. Returns `true` on success so the caller
+   *  knows the chain handoff is complete; `false` if any precondition
+   *  failed and the caller should fall back to opening Configure. */
+  async function runExpressInstall(): Promise<boolean> {
+    try {
+      const hardware = await window.api.validateHardware()
+      if (!hardware.supported) {
+        console.warn('[firstUseChain] express: hardware unsupported', hardware)
+        return false
+      }
+
+      const [installDir, sources] = await Promise.all([
+        window.api.getDefaultInstallDir().catch(() => ''),
+        window.api.getSources(),
+      ])
+      const standalone = sources.find((s: Source) => s.id === 'standalone')
+      if (!standalone) {
+        console.warn('[firstUseChain] express: standalone source missing', { sources })
+        return false
+      }
+
+      const selections: Record<string, FieldOption> = {}
+      for (const field of standalone.fields) {
+        if (field.type === 'text') {
+          if (field.defaultValue !== undefined) {
+            selections[field.id] = { value: field.defaultValue, label: field.defaultValue }
+          }
+          continue
+        }
+        const options = await window.api.getFieldOptions(
+          standalone.id,
+          field.id,
+          selections,
+          field.id === 'release' ? { includeLatestStable: true } : undefined,
+        )
+        if (!options || options.length === 0) {
+          console.warn('[firstUseChain] express: no options for field', field.id)
+          return false
+        }
+        const pick = options.find((o) => o.recommended) ?? options[0]
+        if (!pick) return false
+        selections[field.id] = pick
+      }
+
+      const instData = await window.api.buildInstallation(standalone.id, selections)
+      const name = await window.api.getUniqueName('ComfyUI')
+      const installPath = installDir ?? ''
+
+      const result = await window.api.addInstallation({
+        name,
+        installPath,
+        ...instData,
+      })
+      if (!result.ok || !result.entry) {
+        console.warn('[firstUseChain] express: addInstallation failed', result)
+        return false
+      }
+
+      // `onShowProgress` captures `pendingFirstUseAutoLaunchId` from this
+      // call because `chainingFirstUseToNewInstall` is already true — the
+      // auto-launch watcher takes the install through to a running ComfyUI
+      // window the same way the Configure handoff does.
+      await opts.handleShowProgress({
+        installationId: result.entry.id,
+        title: `Installing — ${name}`,
+        apiCall: () => window.api.installInstance(result.entry!.id),
+        autoLaunchOnFinish: true,
+        opKind: 'install',
+      })
+      // `handleShowProgress` swaps the first-use takeover for the
+      // install-progress takeover. Push `'post-consent'` so the file-menu
+      // builder stays locked down for the duration of the install.
+      window.api.setFirstUseMode('post-consent')
+      return true
+    } catch (err) {
+      console.warn('[firstUseChain] express install failed; falling back to Configure', err)
+      chainingFirstUseToNewInstall.value = false
+      pendingFirstUseAutoLaunchId.value = null
+      return false
+    }
   }
 
   /** InstallWizardModal `back-to-local-branch` emit. Silent Tier 3 → Tier 3
@@ -402,7 +529,15 @@ export function useFirstUseChain(opts: FirstUseChainOpts): FirstUseChainApi {
           ?? null
       }
       if (inst) {
-        void opts.performChooserLaunch(inst)
+        // Mark the upcoming `show-progress` as the launch leg of the
+        // chain. `onShowProgress` consumes the flag and stamps the op.
+        pendingChainedLaunch.value = true
+        void opts.performChooserLaunch(inst).finally(() => {
+          // Defensive: if the launch never reached `handleShowProgress`
+          // (missing-action / focused-running outcomes) clear the flag
+          // so it can't leak into an unrelated future op.
+          pendingChainedLaunch.value = false
+        })
       }
     },
     { deep: false },

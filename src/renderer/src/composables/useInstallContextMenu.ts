@@ -173,21 +173,20 @@ export function useInstallContextMenu(opts: {
       })
     }
 
-    // Untrack Installation — drops the install from the app's registry
-    // without touching disk. Available for any local-like installed
-    // install (matches the existing `untrackAction()` source-side gating).
+    // Destructive bucket — Untrack + Delete share one separator group
+    // because both remove the install from the picker. Untrack drops
+    // the registry entry only; Delete also wipes disk. Keeping them
+    // adjacent under a single divider scans as "remove this install,
+    // pick how" instead of two unrelated leaf items.
     if (isInstalled(inst) && isLocalLikeInstall(inst)) {
       items.push({
         id: 'untrack',
         label: t('actions.untrack'),
+        separator: items.length > 0,
       })
-    }
-
-    if (isInstalled(inst) && isLocalLikeInstall(inst)) {
       items.push({
         id: 'delete',
         label: t('chooser.menuDelete'),
-        separator: items.length > 0,
         disabled: stoppedActionGated,
       })
     }

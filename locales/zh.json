@@ -273,7 +273,13 @@
     "about": "关于",
     "version": "版本",
     "platform": "平台",
-    "language": "语言"
+    "language": "语言",
+    "preferences": "偏好设置",
+    "privacy": "隐私",
+    "community": "社区",
+    "storageTab": "存储",
+    "sharedDirectories": "共享目录",
+    "updatesTab": "更新"
   },
 
   "update": {
@@ -291,7 +297,19 @@
     "availableTitle": "桌面端更新可用",
     "availableMessage": "有可用的桌面端更新（{version}）。是否立即下载？下载完成后将提示您重启。",
     "download": "下载",
-    "errorTitle": "桌面端更新错误"
+    "later": "稍后",
+    "errorTitle": "桌面端更新错误",
+    "sectionTitle": "桌面端更新",
+    "panelIdleTitle": "ComfyUI Desktop 已是最新版本",
+    "panelAvailableTitle": "更新 {version} 可用",
+    "panelReadyTitle": "更新 {version} 可安装",
+    "panelDownloadingTitle": "正在下载更新 {version}…",
+    "downloading": "下载中…",
+    "readyBadge": "准备重启",
+    "installedLabel": "已安装 {version}",
+    "lastCheckedLabel": "最后检查于 {time}",
+    "latestLabel": "最新 {version}",
+    "systemManagedNote": "此安装的更新通过您的系统包管理器提供。"
   },
 
   "modal": {
@@ -324,12 +342,19 @@
     "telemetryHint": "遥测数据帮助我们改进启动器。我们绝不收集工作流内容、提示词、生成的媒体或个人信息。",
     "acceptTos": "接受并继续",
     "consentTosTitle": "接受条款",
-    "consentTosHintPrefix": "继续即表示您同意",
+    "consentTosHintPrefix": "我同意",
     "consentTosHintSep": "和",
     "consentTosHintSuffix": "。",
     "consentTelemetryTitle": "帮助改进 Comfy",
-    "consentTelemetryHint": "发送使用数据，帮助我们修复缺陷并确定功能优先级。",
+    "consentTelemetryHint": "分享匿名使用数据，帮助改进 Comfy。",
     "consentGetStarted": "开始使用",
+    "startContinue": "继续",
+    "startContinueBusy": "正在准备安装…",
+    "expressInstallLabel": "快捷安装",
+    "expressInstallHint": "使用推荐设置——跳过可选的安装步骤。",
+    "expressInstallLine": "快捷安装——使用推荐设置",
+    "expressGpuHintPrefix": "已检测到：",
+    "expressGpuHintSuffix": "- 如果不是你的硬件，请取消勾选快捷安装",
     "termsModalTitle": "ComfyUI Desktop 条款",
     "eulaModalTitle": "最终用户许可协议",
     "tosModalTitle": "服务条款",

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   ArrowDownToLine,
@@ -63,6 +63,17 @@ const ordered = computed<ModelDownloadProgress[]>(() =>
   ),
 )
 
+const activeCount = computed(() => store.activeDownloads.length)
+const completedCount = computed(
+  () => store.finishedDownloads.filter((d) => d.status === 'completed').length,
+)
+const errorCount = computed(
+  () =>
+    store.finishedDownloads.filter(
+      (d) => d.status === 'error' || d.status === 'cancelled',
+    ).length,
+)
+
 const filtered = computed<ModelDownloadProgress[]>(() => {
   switch (filter.value) {
     case 'active':
@@ -112,12 +123,32 @@ function showInFolder(savePath: string | undefined): void {
 function dismissOne(url: string): void {
   store.dismiss(url)
 }
-const filters = computed<{ key: StatusFilter; label: string }[]>(() => [
-  { key: 'all', label: t('downloadsTab.filterAll') },
-  { key: 'active', label: t('downloadsTab.filterActive') },
-  { key: 'completed', label: t('downloadsTab.filterCompleted') },
-  { key: 'error', label: t('downloadsTab.filterErrored') },
-])
+/**
+ * Smart filter visibility: only render pills for buckets that have data,
+ * and only render the bar at all when ≥ 2 buckets are non-empty (a lone
+ * bucket *is* the list — no filtering needed).
+ */
+const visibleFilters = computed<{ key: StatusFilter; label: string }[]>(() => {
+  const present: { key: StatusFilter; label: string }[] = []
+  if (activeCount.value > 0) {
+    present.push({ key: 'active', label: t('downloadsTab.filterActive') })
+  }
+  if (completedCount.value > 0) {
+    present.push({ key: 'completed', label: t('downloadsTab.filterCompleted') })
+  }
+  if (errorCount.value > 0) {
+    present.push({ key: 'error', label: t('downloadsTab.filterErrored') })
+  }
+  if (present.length < 2) return []
+  return [{ key: 'all', label: t('downloadsTab.filterAll') }, ...present]
+})
+
+watch(visibleFilters, (next) => {
+  if (filter.value === 'all') return
+  if (!next.some((f) => f.key === filter.value)) {
+    filter.value = 'all'
+  }
+})
 
 function isTerminal(status: ModelDownloadStatus): boolean {
   return isTerminalModelDownloadStatus(status)
@@ -128,34 +159,35 @@ function isTerminal(status: ModelDownloadStatus): boolean {
   <BaseModal
     :open="props.open"
     size="lg"
+    blur-overlay
     :aria-label="t('downloadsTab.title')"
     @close="emit('close')"
   >
     <template #header>
       <div class="dlm-header">
         <h2 class="dlm-title">{{ t('downloadsTab.title') }}</h2>
-        <div class="dlm-actions">
-          <div
-            class="filter-pill-group"
-            role="tablist"
-            :aria-label="t('downloadsTab.filterAriaLabel')"
-          >
-            <button
-              v-for="f in filters"
-              :key="f.key"
-              type="button"
-              class="filter-pill dlm-filter-chip"
-              :class="{ active: filter === f.key }"
-              role="tab"
-              :aria-selected="filter === f.key"
-              @click="filter = f.key"
-            >
-              {{ f.label }}
-            </button>
-          </div>
-        </div>
       </div>
     </template>
+
+    <div
+      v-if="visibleFilters.length > 0"
+      class="dlm-filterbar filter-pill-group"
+      role="tablist"
+      :aria-label="t('downloadsTab.filterAriaLabel')"
+    >
+      <button
+        v-for="f in visibleFilters"
+        :key="f.key"
+        type="button"
+        class="filter-pill dlm-filter-chip"
+        :class="{ active: filter === f.key }"
+        role="tab"
+        :aria-selected="filter === f.key"
+        @click="filter = f.key"
+      >
+        {{ f.label }}
+      </button>
+    </div>
 
     <div v-if="filtered.length === 0" class="dlm-empty">
       <ArrowDownToLine :size="18" />
@@ -256,9 +288,7 @@ function isTerminal(status: ModelDownloadStatus): boolean {
 .dlm-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 12px;
-  flex-wrap: wrap;
 }
 
 .dlm-title {
@@ -269,16 +299,18 @@ function isTerminal(status: ModelDownloadStatus): boolean {
   color: var(--neutral-100);
 }
 
-.dlm-actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
 /* `.filter-pill` / `.filter-pill-group` are global (assets/main.css)
  * and shared with ChooserView + the Settings tab. The local
  * `.dlm-filter-chip` class is a test-selector hook only. */
+.dlm-filterbar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin: -16px -24px 12px;
+  padding: 12px 24px;
+  background: var(--modal-surface-bg);
+  border-bottom: 1px solid color-mix(in oklab, var(--neutral-100) 8%, transparent);
+}
 
 .dlm-empty {
   display: flex;
@@ -435,5 +467,16 @@ function isTerminal(status: ModelDownloadStatus): boolean {
 }
 .dlm-item-actions button:hover {
   filter: brightness(1.1);
+}
+</style>
+
+<!-- Non-scoped: while the host is in overlay-panel mode the page behind
+     the modal is the live ComfyUI canvas (PanelApp toggles
+     `body.panel-overlay-mode` with a transparent background). The
+     default BaseModal scrim (70% neutral-800) crushes that canvas
+     visually; soften it to a light tint and lean on the blur prop. -->
+<style>
+body.panel-overlay-mode .base-modal-overlay {
+  background: color-mix(in oklab, var(--neutral-900) 28%, transparent);
 }
 </style>

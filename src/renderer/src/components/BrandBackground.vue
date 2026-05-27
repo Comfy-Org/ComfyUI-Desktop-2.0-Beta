@@ -17,7 +17,7 @@ withDefaults(
   defineProps<{
     vignette?: boolean
   }>(),
-  { vignette: false },
+  { vignette: false }
 )
 </script>
 

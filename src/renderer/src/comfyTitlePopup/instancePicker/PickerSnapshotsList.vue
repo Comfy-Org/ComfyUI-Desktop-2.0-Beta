@@ -57,8 +57,8 @@ function handleRestore(snapshot: SnapshotSummary): void {
   const ok = window.confirm(
     t(
       'snapshots.restoreConfirm',
-      'Are you sure you want to restore this snapshot? Your current install state will be replaced.',
-    ),
+      'Are you sure you want to restore this snapshot? Your current install state will be replaced.'
+    )
   )
   if (!ok) return
   emit('restore', snapshot.filename)
@@ -123,7 +123,7 @@ function handleDelete(snapshot: SnapshotSummary): void {
       {{
         t(
           'snapshots.empty',
-          'No snapshots yet. Snapshots are captured automatically when ComfyUI starts.',
+          'No snapshots yet. Snapshots are captured automatically when ComfyUI starts.'
         )
       }}
     </div>
@@ -144,7 +144,7 @@ function handleDelete(snapshot: SnapshotSummary): void {
   padding: 6px 10px;
   border-radius: 6px;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--chooser-surface-bg);
   color: var(--neutral-100);
   font-size: 12px;
   line-height: 16px;
@@ -191,7 +191,7 @@ function handleDelete(snapshot: SnapshotSummary): void {
   padding: 5px 10px;
   border-radius: 6px;
   border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--chooser-surface-bg);
   color: var(--neutral-100);
   font-size: 12px;
   line-height: 16px;
@@ -206,9 +206,12 @@ function handleDelete(snapshot: SnapshotSummary): void {
 .picker-snapshot-action.is-primary {
   color: var(--accent-primary, #60a5fa);
 }
+.picker-snapshot-action.is-danger {
+  color: var(--danger);
+}
 .picker-snapshot-action.is-danger:hover,
 .picker-snapshot-action.is-danger:focus-visible {
-  background: rgba(239, 68, 68, 0.15);
-  color: #fca5a5;
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  color: var(--danger-hover);
 }
 </style>

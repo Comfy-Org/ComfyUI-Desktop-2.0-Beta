@@ -267,7 +267,7 @@ describe('useInstallList', () => {
       const list = withI18nScope(i18n, () => useInstallList({ installations }))
 
       const inst = makeInstall({ id: 'a', lastLaunchedAt: Date.now() - 30_000 })
-      expect(list.lastLaunchedLabel(inst)).toBe('Launched just now')
+      expect(list.lastLaunchedLabel(inst)).toBe('Launched Just now')
     })
 
     it('formats sub-hour timestamps as "Nm ago"', () => {
@@ -298,6 +298,26 @@ describe('useInstallList', () => {
 
       const inst = makeInstall({ id: 'a', lastLaunchedAt: Date.now() - 5 * 86_400_000 })
       expect(list.lastLaunchedLabel(inst)).toBe('Launched 5d ago')
+    })
+  })
+
+  describe('lastLaunchedShortLabel', () => {
+    it('returns an empty string when lastLaunchedAt is undefined', () => {
+      const installations = ref<Installation[]>([])
+      const list = withI18nScope(i18n, () => useInstallList({ installations }))
+
+      const inst = makeInstall({ id: 'a' })
+      expect(list.lastLaunchedShortLabel(inst)).toBe('')
+    })
+
+    it('returns only the relative time without the Launched prefix', () => {
+      vi.useFakeTimers()
+      vi.setSystemTime(new Date('2026-05-18T12:00:00Z'))
+      const installations = ref<Installation[]>([])
+      const list = withI18nScope(i18n, () => useInstallList({ installations }))
+
+      const inst = makeInstall({ id: 'a', lastLaunchedAt: Date.now() - 3 * 3_600_000 })
+      expect(list.lastLaunchedShortLabel(inst)).toBe('3h ago')
     })
   })
 

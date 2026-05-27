@@ -69,7 +69,7 @@ afterEach(() => {
 describe('ArgsBuilderField — inline autocomplete', () => {
   it('does not render the popover when the input is empty', async () => {
     const wrapper = await mountField()
-    expect(wrapper.find('.args-field-ac').exists()).toBe(false)
+    expect(wrapper.find('.args-raw-input-ac').exists()).toBe(false)
   })
 
   it('renders matching suggestions while the user types a partial flag', async () => {
@@ -79,9 +79,9 @@ describe('ArgsBuilderField — inline autocomplete', () => {
     await input.setValue('--lo')
     await flushPromises()
 
-    const popover = wrapper.find('.args-field-ac')
+    const popover = wrapper.find('.args-raw-input-ac')
     expect(popover.exists()).toBe(true)
-    const names = popover.findAll('.args-field-ac-flag').map((n) => n.text())
+    const names = popover.findAll('.args-raw-input-ac-flag').map((n) => n.text())
     expect(names).toContain('--lowvram')
     // `--cpu` doesn't match "lo" so it shouldn't surface.
     expect(names).not.toContain('--cpu')
@@ -93,7 +93,7 @@ describe('ArgsBuilderField — inline autocomplete', () => {
     await input.trigger('focusin')
     await input.setValue('--lo')
     await flushPromises()
-    expect(wrapper.find('.args-field-ac').text()).toContain('Reduce VRAM')
+    expect(wrapper.find('.args-raw-input-ac').text()).toContain('Reduce VRAM')
   })
 
   it("emits `update` with the spliced flag when a suggestion is clicked", async () => {
@@ -104,7 +104,7 @@ describe('ArgsBuilderField — inline autocomplete', () => {
     await flushPromises()
 
     const lowvramOption = wrapper
-      .findAll('.args-field-ac-item')
+      .findAll('.args-raw-input-ac-item')
       .find((o) => o.text().includes('--lowvram'))
     await lowvramOption?.trigger('mousedown')
     await flushPromises()
@@ -121,15 +121,15 @@ describe('ArgsBuilderField — inline autocomplete', () => {
     await input.trigger('focusin')
     await input.setValue('--lo')
     await flushPromises()
-    expect(wrapper.find('.args-field-ac').exists()).toBe(true)
+    expect(wrapper.find('.args-raw-input-ac').exists()).toBe(true)
 
     await input.trigger('keydown', { key: 'Escape' })
     await flushPromises()
-    expect(wrapper.find('.args-field-ac').exists()).toBe(false)
+    expect(wrapper.find('.args-raw-input-ac').exists()).toBe(false)
 
     await input.setValue('--low')
     await flushPromises()
-    expect(wrapper.find('.args-field-ac').exists()).toBe(true)
+    expect(wrapper.find('.args-raw-input-ac').exists()).toBe(true)
   })
 
   it('suppresses suggestions while filling a value-typed flag', async () => {
@@ -140,13 +140,13 @@ describe('ArgsBuilderField — inline autocomplete', () => {
     // typing the PORT value, not a flag name, so no dropdown.
     await input.setValue('--port 81')
     await flushPromises()
-    expect(wrapper.find('.args-field-ac').exists()).toBe(false)
+    expect(wrapper.find('.args-raw-input-ac').exists()).toBe(false)
   })
 
   it('still works as a plain text input when no installationId is provided', async () => {
     const wrapper = await mountField({ installationId: null })
     expect(wrapper.find('input').exists()).toBe(true)
     expect((window as unknown as { api: { getComfyArgs: ReturnType<typeof vi.fn> } }).api.getComfyArgs).not.toHaveBeenCalled()
-    expect(wrapper.find('.args-field-ac').exists()).toBe(false)
+    expect(wrapper.find('.args-raw-input-ac').exists()).toBe(false)
   })
 })

@@ -1,45 +1,31 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { useTooltip } from '../composables/useTooltip'
+import Tooltip from './ui/Tooltip.vue'
+import type { TooltipAlign, TooltipSide } from '../composables/useTooltip'
 
-const props = withDefaults(
+/**
+ * Backwards-compat shim that forwards to the position-aware `Tooltip`
+ * primitive in `/ui`. Pre-existing call sites (DetailSection,
+ * InstallWizardModal, SettingsSectionList, DetailModal) keep importing
+ * `TooltipWrap` so the migration didn't have to mass-rename in the
+ * same PR as the primitive landing.
+ *
+ * TODO(tooltip-cleanup): replace `import TooltipWrap from
+ * '@/components/TooltipWrap.vue'` at call sites with `import Tooltip
+ * from '@/components/ui/Tooltip.vue'`, then delete this shim.
+ */
+
+withDefaults(
   defineProps<{
     text?: string
-    side?: 'top' | 'bottom'
+    side?: TooltipSide
+    align?: TooltipAlign
   }>(),
-  { text: undefined, side: 'top' }
-)
-
-const wrapRef = ref<HTMLElement | null>(null)
-const { bubbleStyle, visible, show, hide } = useTooltip(
-  wrapRef,
-  () => props.side,
-  () => !!props.text,
+  { text: undefined, side: 'top', align: 'center' },
 )
 </script>
 
 <template>
-  <span
-    ref="wrapRef"
-    class="tooltip-wrap"
-    @mouseenter="show"
-    @mouseleave="hide"
-    @focusin="show"
-    @focusout="hide"
-  >
+  <Tooltip :text="text" :side="side" :align="align">
     <slot />
-    <Teleport to="body">
-      <span
-        v-if="visible"
-        class="info-tooltip-bubble"
-        :style="bubbleStyle"
-      >{{ text }}</span>
-    </Teleport>
-  </span>
+  </Tooltip>
 </template>
-
-<style scoped>
-.tooltip-wrap {
-  display: inline-flex;
-}
-</style>

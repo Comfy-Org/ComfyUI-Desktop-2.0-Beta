@@ -69,17 +69,11 @@ export interface PopupInstancePickerSnapshot {
    *  `get-snapshots` returns. `null` when no selection or no install
    *  path. */
   selectedSnapshots: Record<string, unknown> | null
-  /** Compact = default identity-card right pane. Expanded = full
-   *  per-install settings UI in the right pane + 95dvw×95dvh popup
-   *  bounds. Flipped by `setPickerMode` IPC. */
-  mode: 'compact' | 'expanded'
-  /** When `mode === 'expanded'`, the tab the settings UI opens on
-   *  ('config' | 'status' | 'update' | 'snapshots'). `null` in
-   *  compact mode. */
+  /** Tab the settings UI opens on ('config' | 'status' | 'update' |
+   *  'snapshots'). `null` lets the picker view choose its default. */
   initialTab: string | null
-  /** When `mode === 'expanded'`, an action id to fire automatically
-   *  after the settings UI mounts (kebab Update / Migrate / etc.).
-   *  `null` once consumed. */
+  /** Action id to fire automatically after the settings UI mounts
+   *  (kebab Update / Migrate / etc.). `null` once consumed. */
   autoAction: string | null
 }
 
@@ -91,12 +85,13 @@ export interface PopupGlobalSettingsModelsDir {
   isDefault: boolean
 }
 
-/** Snapshot pushed to the global-settings popup. Field arrays + the
- *  `channelPickerField` are loose-typed (renderer casts to `DetailField`
- *  on receipt) because the preload tsconfig slice can't see the
- *  renderer's view types. */
+/** Snapshot pushed to the global-settings popup. Field arrays are
+ *  loose-typed (renderer casts to `DetailField` on receipt) because
+ *  the preload tsconfig slice can't see the renderer's view types. */
 export interface PopupGlobalSettingsSnapshot {
-  overviewFields: Record<string, unknown>[]
+  generalFields: Record<string, unknown>[]
+  telemetryFields: Record<string, unknown>[]
+  desktopUpdateFields: Record<string, unknown>[]
   cacheFields: Record<string, unknown>[]
   advancedFields: Record<string, unknown>[]
   sharedDirectoriesFields: Record<string, unknown>[]
@@ -111,14 +106,12 @@ export interface PopupGlobalSettingsSnapshot {
     platform: NodeJS.Platform
     lastCheckedAt: number | null
   }
-  channelPickerField: Record<string, unknown> | null
-  activeInstallationId: string | null
-  hasActiveInstall: boolean
   githubUrl: string
+  githubStars: number | null
   i18n: {
     overview: string
     updates: string
-    cache: string
+    storage: string
     models: string
     advanced: string
     sharedDirectories: string
@@ -324,14 +317,6 @@ export interface ComfyTitlePopupBridge {
   /** Renderer mirrors `localStorage.lastCheckedAt` back to main so the
    *  next snapshot rebroadcast shows the freshest timestamp. */
   globalSettingsSetLastCheckedAt(value: number): void
-  /** ChannelPicker `@action` route. The IPC handler enforces the
-   *  allowlist (`copy-update | release-update | switch-channel |
-   *  update`); the popup just forwards whatever the picker emits. */
-  globalSettingsRunInstallAction(
-    installationId: string,
-    actionId: string,
-    actionData?: Record<string, unknown>,
-  ): Promise<{ ok: boolean; message?: string }>
 
   // ----- Per-install (ComfyUI) settings bridge -----
   //
@@ -425,20 +410,10 @@ export interface ComfyTitlePopupBridge {
    *  `diskSpace.*`, etc.). The popup merges this payload on top of its
    *  static catalog once the expanded mode opens. */
   pickerSettingsGetLocaleMessages(): Promise<Record<string, unknown>>
-  /** Flip the picker between its compact and expanded states. Main
-   *  animates the popup bounds (compact ~720×natural → expanded
-   *  ~95dvw×95dvh) and rebroadcasts a snapshot with `mode` set so the
-   *  picker view re-renders the right pane (compact identity card vs.
-   *  expanded `ComfyUISettingsContent`). */
-  setPickerMode(
-    mode: 'compact' | 'expanded',
-    opts?: { initialTab?: string; autoAction?: string | null },
-  ): void
   /** Forward a `show-progress` request from the picker's settings UI to
    *  the parent host's panel renderer. The panel rebuilds the apiCall
    *  closure from `actionId`/`actionData` and routes through its existing
-   *  ProgressModal pipeline. Picker collapses to compact so the modal is
-   *  not occluded. */
+   *  ProgressModal pipeline. */
   pickerForwardShowProgress(payload: {
     installationId: string
     actionId: string
@@ -448,6 +423,17 @@ export interface ComfyTitlePopupBridge {
     triggersInstanceStart?: boolean
     opKind?: 'launch' | 'install' | 'update' | 'destructive' | 'snapshot' | 'generic'
     isRestart?: boolean
+    /** Where the ProgressModal should mount. `'same-host'` keeps it in
+     *  the picker's parent panel (today's behaviour); `'target-host'`
+     *  opens-or-focuses the install's own window and mounts there so
+     *  cross-instance actions render where the user expects. Resolved
+     *  by `resolveProgressRouting` in `lib/pickerProgressRouting.ts`. */
+    routing?: 'same-host' | 'target-host'
+    /** When `true`, ProgressModal renders a terminal choice screen
+     *  (e.g. `[Go to Dashboard | Open Instance]`) on success instead of
+     *  auto-closing. Picker-side policy lives in
+     *  `resolveProgressRouting`. */
+    successChoice?: boolean
   }): void
 }
 
@@ -477,7 +463,9 @@ function isPopupConfig(value: unknown): value is TitlePopupConfig {
 function isGlobalSettingsSnapshot(value: unknown): value is PopupGlobalSettingsSnapshot {
   if (!value || typeof value !== 'object') return false
   const v = value as Record<string, unknown>
-  if (!Array.isArray(v['overviewFields'])) return false
+  if (!Array.isArray(v['generalFields'])) return false
+  if (!Array.isArray(v['telemetryFields'])) return false
+  if (!Array.isArray(v['desktopUpdateFields'])) return false
   if (!Array.isArray(v['cacheFields'])) return false
   if (!Array.isArray(v['advancedFields'])) return false
   if (!Array.isArray(v['sharedDirectoriesFields'])) return false
@@ -526,10 +514,6 @@ function isInstancePickerSnapshot(value: unknown): value is PopupInstancePickerS
     && v.selectedSnapshots !== null
     && typeof v.selectedSnapshots !== 'object'
   ) return false
-  // Mode fields are also optional on the wire — old main builds that
-  // don't yet emit them still validate. Default to compact in the
-  // consumer when missing.
-  if (v.mode !== undefined && v.mode !== 'compact' && v.mode !== 'expanded') return false
   if (
     v.initialTab !== undefined
     && v.initialTab !== null
@@ -665,12 +649,6 @@ const bridge: ComfyTitlePopupBridge = {
   globalSettingsSetLastCheckedAt: (value) => {
     ipcRenderer.send('comfy-titlepopup:global-settings-set-last-checked', { value })
   },
-  globalSettingsRunInstallAction: (installationId, actionId, actionData) =>
-    ipcRenderer.invoke('comfy-titlepopup:global-settings-run-install-action', {
-      installationId,
-      actionId,
-      actionData,
-    }),
   // Per-install settings (picker expanded Manage). Each handler is a 1:1
   // pass-through to the main-side IPC. Channels namespaced `comfy-titlepopup:*`
   // so they don't collide with the panel's `window.api` IPCs.
@@ -718,13 +696,6 @@ const bridge: ComfyTitlePopupBridge = {
     ipcRenderer.send(CH.relaunchApp)
   },
   pickerSettingsGetLocaleMessages: () => ipcRenderer.invoke(CH.getLocaleMessages),
-  setPickerMode: (mode, opts) => {
-    ipcRenderer.send('comfy-titlepopup:set-picker-mode', {
-      mode,
-      initialTab: opts?.initialTab,
-      autoAction: opts?.autoAction ?? null,
-    })
-  },
   pickerForwardShowProgress: (payload) => {
     ipcRenderer.send('comfy-titlepopup:forward-show-progress', payload)
   },

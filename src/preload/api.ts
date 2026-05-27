@@ -93,7 +93,6 @@ export function buildElectronApi(): ElectronApi {
     openInstancePicker: (opts) =>
       ipcRenderer.send('comfy-window:open-instance-picker-for-install', {
         installationId: opts?.installationId ?? null,
-        mode: opts?.mode ?? 'compact',
         initialTab: opts?.initialTab ?? null,
         autoAction: opts?.autoAction ?? null,
       }),

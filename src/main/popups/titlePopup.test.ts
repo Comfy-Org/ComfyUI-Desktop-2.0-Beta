@@ -23,6 +23,7 @@ vi.mock('electron', () => ({
 // without subscribing to anything.
 import {
   buildInstancePickerSnapshot,
+  resolvePickerSelectedInstallId,
   buildTitlePopupMenuItems,
   computePopupHeight,
   GLOBAL_SETTINGS_ALLOWED_ACTIONS,
@@ -123,33 +124,57 @@ describe('buildTitlePopupMenuItems', () => {
     expect(ids).not.toContain('new-install')
     expect(ids).not.toContain('track')
     expect(ids).not.toContain('load-snapshot')
-    expect(ids).toContain('return-to-dashboard')
   })
 
-  it('always includes New Window, Settings, Send Feedback, and Close All Windows', () => {
-    for (const installationId of [null, 'inst-1']) {
-      const ids = buildTitlePopupMenuItems(makeEntry({ installationId }))
-        .map((i) => i.id ?? null)
-      expect(ids).toContain('new-window')
-      expect(ids).toContain('settings')
-      expect(ids).toContain('feedback')
-      expect(ids).toContain('close-all-windows')
-    }
+  it('chooser host includes New Window, Settings, Send Feedback, and Close All Windows', () => {
+    const ids = buildTitlePopupMenuItems(makeEntry({ installationId: null }))
+      .map((i) => i.id ?? null)
+    expect(ids).toContain('new-window')
+    expect(ids).toContain('settings')
+    expect(ids).toContain('feedback')
+    expect(ids).toContain('close-all-windows')
   })
 
-it('exposes Reset Zoom only when comfy zoom is non-zero, with the percent in the label', () => {
-    const noZoom = buildTitlePopupMenuItems(makeEntry({ zoomLevel: 0 }))
+  // Install-host menu was deliberately trimmed (spec item 1): no
+  // Desktop Settings, no Return to Dashboard (replaced by the Home
+  // icon in the picker, spec item 10), no Reset Zoom (Ctrl/Cmd+0
+  // shortcut still works). The remaining four are New Window, Send
+  // Beta Feedback, Exit Window, Exit All Windows.
+  it('install-host menu is trimmed to four essentials in the canonical order', () => {
+    const items = buildTitlePopupMenuItems(makeEntry({ installationId: 'inst-1' }))
+    const ids = items.map((i) => i.id ?? null).filter((id) => id !== null)
+    expect(ids).toEqual(['new-window', 'feedback', 'exit-window', 'close-all-windows'])
+    const closeAll = items.find((i) => i.id === 'close-all-windows')
+    expect(closeAll?.label).toBe('Exit All Windows')
+    const exitWindow = items.find((i) => i.id === 'exit-window')
+    expect(exitWindow?.label).toBe('Exit Window')
+  })
+
+  it('install-host menu has neither Reset Zoom nor Return to Dashboard', () => {
+    const items = buildTitlePopupMenuItems(
+      makeEntry({ installationId: 'inst-1', zoomLevel: 2 }),
+    )
+    const ids = items.map((i) => i.id ?? null)
+    expect(ids).not.toContain('reset-zoom')
+    expect(ids).not.toContain('return-to-dashboard')
+    expect(ids).not.toContain('settings')
+  })
+
+  it('exposes Reset Zoom on chooser host only when comfy zoom is non-zero, with the percent in the label', () => {
+    const noZoom = buildTitlePopupMenuItems(makeEntry({ installationId: null, zoomLevel: 0 }))
     expect(noZoom.find((i) => i.id === 'reset-zoom')).toBeUndefined()
 
     // 1.2^2 ≈ 1.44 → 144 %
-    const zoomed = buildTitlePopupMenuItems(makeEntry({ zoomLevel: 2 }))
+    const zoomed = buildTitlePopupMenuItems(makeEntry({ installationId: null, zoomLevel: 2 }))
     const resetZoom = zoomed.find((i) => i.id === 'reset-zoom')
     expect(resetZoom).toBeDefined()
     expect(resetZoom?.label).toBe('Reset Zoom (144%)')
   })
 
-  it('omits Reset Zoom when the comfy webContents has been destroyed', () => {
-    const items = buildTitlePopupMenuItems(makeEntry({ comfyDestroyed: true, zoomLevel: 2 }))
+  it('omits Reset Zoom from the chooser host menu when the comfy webContents has been destroyed', () => {
+    const items = buildTitlePopupMenuItems(
+      makeEntry({ installationId: null, comfyDestroyed: true, zoomLevel: 2 }),
+    )
     expect(items.find((i) => i.id === 'reset-zoom')).toBeUndefined()
   })
 
@@ -160,21 +185,43 @@ it('exposes Reset Zoom only when comfy zoom is non-zero, with the percent in the
     expect(ids[ids.length - 1]).toBe('close-all-windows')
   })
 
-  it('places Return to Dashboard before Close All Windows on an install-backed host', () => {
-    const items = buildTitlePopupMenuItems(makeEntry({ installationId: 'inst-1' }))
-    const ids = items.map((i) => i.id ?? null)
-    const returnIdx = ids.indexOf('return-to-dashboard')
-    const closeAllIdx = ids.indexOf('close-all-windows')
-    expect(returnIdx).toBeGreaterThanOrEqual(0)
-    expect(closeAllIdx).toBeGreaterThan(returnIdx)
-  })
-
   it('separators bracket the optional install-creation block on chooser', () => {
     const items = buildTitlePopupMenuItems(makeEntry({ installationId: null }))
     const newWindowIdx = items.findIndex((i) => i.id === 'new-window')
     expect(items[newWindowIdx + 1]?.kind).toBe('separator')
     const newInstallIdx = items.findIndex((i) => i.id === 'new-install')
     expect(newInstallIdx).toBeGreaterThan(newWindowIdx + 1)
+  })
+})
+
+describe('resolvePickerSelectedInstallId', () => {
+  function makeInstall(overrides: Partial<InstancePickerInstall>): InstancePickerInstall {
+    return {
+      id: 'x',
+      name: 'X',
+      sourceLabel: 'Standalone',
+      sourceCategory: 'local',
+      ...overrides,
+    } as InstancePickerInstall
+  }
+
+  it('prefers an explicit selection over the host install', () => {
+    const installs = [makeInstall({ id: 'a' }), makeInstall({ id: 'b' })]
+    expect(resolvePickerSelectedInstallId('b', 'a', installs)).toBe('b')
+  })
+
+  it('falls back to the host install when no explicit selection', () => {
+    const installs = [makeInstall({ id: 'a' }), makeInstall({ id: 'b' })]
+    expect(resolvePickerSelectedInstallId(null, 'b', installs)).toBe('b')
+  })
+
+  it('defaults to the first install on an install-less host', () => {
+    const installs = [makeInstall({ id: 'a' }), makeInstall({ id: 'b' })]
+    expect(resolvePickerSelectedInstallId(null, null, installs)).toBe('a')
+  })
+
+  it('returns null when there are no installs to select', () => {
+    expect(resolvePickerSelectedInstallId(null, null, [])).toBeNull()
   })
 })
 
@@ -189,6 +236,12 @@ describe('buildInstancePickerSnapshot', () => {
     } as InstancePickerInstall
   }
 
+  const EMPTY_STORAGE = {
+    sharedDirectoriesFields: [],
+    modelsDirs: [],
+    modelsSystemDefault: '',
+  }
+
   it('forwards the install array verbatim under `installs`', () => {
     const installs = [
       makeInstall({ id: 'a', name: 'A' }),
@@ -198,6 +251,7 @@ describe('buildInstancePickerSnapshot', () => {
       installs,
       hostInstallationId: null,
       runningInstallationIds: [],
+      storage: EMPTY_STORAGE,
     })
     expect(snap.installs).toEqual(installs)
   })
@@ -207,6 +261,7 @@ describe('buildInstancePickerSnapshot', () => {
       installs: [makeInstall({ id: 'a' })],
       hostInstallationId: 'a',
       runningInstallationIds: [],
+      storage: EMPTY_STORAGE,
     })
     expect(snap.activeInstallationId).toBe('a')
   })
@@ -216,6 +271,7 @@ describe('buildInstancePickerSnapshot', () => {
       installs: [],
       hostInstallationId: null,
       runningInstallationIds: [],
+      storage: EMPTY_STORAGE,
     })
     expect(snap.activeInstallationId).toBeNull()
   })
@@ -225,6 +281,7 @@ describe('buildInstancePickerSnapshot', () => {
       installs: [],
       hostInstallationId: null,
       runningInstallationIds: ['b', 'a', 'c'],
+      storage: EMPTY_STORAGE,
     })
     expect(snap.runningInstallationIds).toEqual(['b', 'a', 'c'])
   })
@@ -234,6 +291,7 @@ describe('buildInstancePickerSnapshot', () => {
       installs: [makeInstall({ id: 'a' })],
       hostInstallationId: null,
       runningInstallationIds: [],
+      storage: EMPTY_STORAGE,
     })
     expect(snap.runningInstallationIds).toEqual([])
   })

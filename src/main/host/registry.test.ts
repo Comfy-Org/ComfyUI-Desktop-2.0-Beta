@@ -139,6 +139,24 @@ describe('computeBodyMode', () => {
     const entry = makeEntry({ installationId: 'inst-A', activePanel: 'new-install' })
     expect(computeBodyMode(entry)).toBe('new-install')
   })
+
+  // The picker-driven `'progress'` panel mode was added to keep
+  // ProgressModal visible on top of a running ComfyUI canvas during
+  // cross-host Updates. Layout depends on `computeBodyMode` returning
+  // `'progress'` so `showPanel = mode !== 'comfy'` flips true. Without
+  // this branch the panel would sit at 0x0 invisible behind comfyView
+  // and the modal would be unreachable — the exact silent-close /
+  // freeze symptom the layered fixes were chasing.
+  it('returns `progress` for install-backed hosts in progress mode, even while the session is running', () => {
+    const entry = makeEntry({ installationId: 'inst-A', activePanel: 'progress' })
+    _runningSessions.set('inst-A', {} as never)
+    expect(computeBodyMode(entry)).toBe('progress')
+  })
+
+  it('returns `progress` for install-less hosts in progress mode (cold-spawn chooser case)', () => {
+    const entry = makeEntry({ installationId: null, activePanel: 'progress' })
+    expect(computeBodyMode(entry)).toBe('progress')
+  })
 })
 
 describe('attach-claim helpers', () => {
