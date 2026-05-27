@@ -293,7 +293,8 @@
     "current": "Current",
     "switchTo": "Switch to {channel}:",
     "switchChannelOnly": "Switch Channel",
-    "switchChannelPrefix": "This will switch the update channel from {from} to {to}.\n\n"
+    "switchChannelPrefix": "This will switch the update channel from {from} to {to}.\n\n",
+    "computingCommitsAhead": "Computing commits ahead…"
   },
 
   "track": {

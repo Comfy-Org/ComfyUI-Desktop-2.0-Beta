@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, watch } from 'vue'
+import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Loader2 } from 'lucide-vue-next'
 import BaseSelect, { type BaseSelectOption } from '../../components/ui/BaseSelect.vue'
@@ -69,6 +69,12 @@ interface PreviewData {
   lastChecked?: string
   lastCheckedAt?: number
   updateAvailable?: boolean
+  /** True while we know the upstream commit but haven't yet computed
+   *  `commitsAhead` for this install's checkout. Drives the muted
+   *  "Computing commits ahead…" hint so the eventual label swap
+   *  doesn't look like a silent glitch. See `ChannelCardData` in
+   *  `src/main/lib/channel-cards.ts` for derivation. */
+  enriching?: boolean
 }
 
 const preview = computed<PreviewData | null>(() => {
@@ -79,9 +85,52 @@ const preview = computed<PreviewData | null>(() => {
     latestVersion: data.latestVersion,
     lastChecked: data.lastChecked,
     lastCheckedAt: data.lastCheckedAt,
-    updateAvailable: data.updateAvailable
+    updateAvailable: data.updateAvailable,
+    enriching: data.enriching
   }
 })
+
+// Safety net for the `enriching` hint. `commitsAhead` is computed by a
+// background git fan-out (`enrichCommitsAhead`) — on failure (offline,
+// timeout, repo state edge case) the flag stays true forever as far as
+// this component knows. The expected enrichment window is sub-second on
+// a fast link; 10s comfortably covers a slow link and still hides the
+// hint long before the user starts wondering whether something is
+// stuck. Once hidden, the value either upgrades silently (the goal) or
+// stays at the documented `tag (sha)` fallback (acceptable).
+const ENRICHING_HINT_MAX_MS = 10_000
+const enrichingTimedOut = ref(false)
+let enrichingTimer: ReturnType<typeof setTimeout> | null = null
+
+function clearEnrichingTimer(): void {
+  if (enrichingTimer !== null) {
+    clearTimeout(enrichingTimer)
+    enrichingTimer = null
+  }
+}
+
+watch(
+  () => preview.value?.enriching === true,
+  (isEnriching) => {
+    clearEnrichingTimer()
+    if (!isEnriching) {
+      enrichingTimedOut.value = false
+      return
+    }
+    enrichingTimedOut.value = false
+    enrichingTimer = setTimeout(() => {
+      enrichingTimedOut.value = true
+      enrichingTimer = null
+    }, ENRICHING_HINT_MAX_MS)
+  },
+  { immediate: true }
+)
+
+onBeforeUnmount(clearEnrichingTimer)
+
+const showEnrichingHint = computed(
+  () => preview.value?.enriching === true && !enrichingTimedOut.value
+)
 
 function formatVersionLabel(raw: string | undefined): string {
   if (!raw || raw === '—') return '—'
@@ -314,6 +363,22 @@ const selectOptions = computed<BaseSelectOption[]>(() =>
       </div>
     </dl>
 
+    <!-- Background-enrichment hint: visible while `commitsAhead` is still
+         being computed against the install's local `.git` checkout. The
+         "Latest" value above briefly reads as `tag (sha)` and upgrades
+         to `tag + N commits (sha)` once enrichment lands. The hint is
+         polite (announced once via aria-live) and self-hides after the
+         max display window if enrichment never completes. -->
+    <p
+      v-if="showEnrichingHint"
+      class="channel-picker-enriching"
+      role="status"
+      aria-live="polite"
+    >
+      <Loader2 :size="12" class="channel-picker-enriching-spinner" aria-hidden="true" />
+      {{ t('channelCards.computingCommitsAhead', 'Computing commits ahead…') }}
+    </p>
+
     <div class="channel-picker-card">
       <div class="channel-picker-channel-header">
         <span class="channel-picker-field-label">
@@ -515,6 +580,28 @@ const selectOptions = computed<BaseSelectOption[]>(() =>
   font-size: 12px;
   line-height: 16px;
   color: var(--text-muted);
+}
+
+.channel-picker-enriching {
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.channel-picker-enriching-spinner {
+  flex: 0 0 auto;
+  animation: channel-picker-action-spin 0.9s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .channel-picker-enriching-spinner {
+    animation: none;
+  }
 }
 
 .channel-picker-empty {

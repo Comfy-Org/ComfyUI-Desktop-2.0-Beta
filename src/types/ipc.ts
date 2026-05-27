@@ -1088,6 +1088,15 @@ export interface ElectronApi {
   onInstallationsChanged(callback: () => void): Unsubscribe
   onInstallationsVersionsUpdated(callback: (updates: { id: string; version: string }[]) => void): Unsubscribe
   /**
+   * Fires when `release-cache.enrichCommitsAhead` actually writes a new
+   * `commitsAhead` value (not on no-op short-circuits). Open settings
+   * panels can refresh their channel-card section so the "Latest from
+   * GitHub" label upgrades from `tag (sha)` to `tag + N commits (sha)`
+   * in place, without holding the section IPC hostage during the
+   * background `git fetch`/`rev-list` calls.
+   */
+  onReleaseCacheEnriched(callback: (data: { repo: string }) => void): Unsubscribe
+  /**
    * Fires when an auto-off "Desktop Update Available" download completes
    * (i.e. user explicitly opted in via the pill confirm-modal). The
    * panel renderer pops the "Restart now?" follow-up modal automatically

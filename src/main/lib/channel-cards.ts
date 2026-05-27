@@ -1,6 +1,8 @@
+import path from 'path'
 import * as releaseCache from './release-cache'
 import { formatComfyVersion } from './version'
 import type { ComfyVersion } from './version'
+import { hasGitDir } from './git'
 import type { InstallationRecord } from '../installations'
 
 export interface ChannelDef {
@@ -18,6 +20,15 @@ export interface ChannelCardData {
   lastCheckedAt?: number
   updateAvailable: boolean
   actions?: Record<string, unknown>[]
+  /** True while we know the upstream commit (`commitSha` cached) but
+   *  haven't yet computed `commitsAhead` against the install's local
+   *  `.git` checkout — `enrichCommitsAhead` runs in the background and
+   *  fills this in. The renderer surfaces a muted "Computing commits
+   *  ahead…" hint under the Latest row so the eventual `tag (sha)` →
+   *  `tag + N commits (sha)` label upgrade doesn't look like a silent
+   *  glitch. False on cloud / no-git installs (they have no
+   *  enrichment to wait for) and on already-enriched entries. */
+  enriching?: boolean
 }
 
 export interface ChannelCard extends ChannelDef {
@@ -34,6 +45,12 @@ export function buildChannelCards(
   installation: InstallationRecord,
 ): ChannelCard[] {
   const cv = installation.comfyVersion as ComfyVersion | undefined
+  // `enrichCommitsAhead` reads from the install's own ComfyUI checkout.
+  // Without a `.git` dir there's no enrichment in flight, so the fallback
+  // `tag (sha)` is the final state — surface the hint only when a real
+  // enrichment is possible.
+  const installHasGit = !!installation.installPath
+    && hasGitDir(path.join(installation.installPath, 'ComfyUI'))
   return channelDefs.map((def) => {
     const info = releaseCache.getEffectiveInfo(repo, def.value, installation)
     // When the latest release commit matches the installed commit, reuse
@@ -44,6 +61,9 @@ export function buildChannelCards(
         ? cv
         : { commit: info.commitSha, baseTag: info.baseTag, commitsAhead: info.commitsAhead } as ComfyVersion)
       : undefined
+    const enriching = !!info?.commitSha
+      && info.commitsAhead === undefined
+      && installHasGit
     return {
       ...def,
       data: info ? {
@@ -52,6 +72,7 @@ export function buildChannelCards(
         lastChecked: info.checkedAt ? new Date(info.checkedAt).toLocaleString() : '—',
         lastCheckedAt: info.checkedAt ?? undefined,
         updateAvailable: releaseCache.isUpdateAvailable(installation, def.value, info),
+        ...(enriching ? { enriching: true } : {}),
       } : undefined,
     }
   })

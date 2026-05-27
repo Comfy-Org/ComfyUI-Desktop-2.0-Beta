@@ -1,4 +1,4 @@
-import { computed, ref, toValue, watch, type ComputedRef, type MaybeRefOrGetter, type Ref } from 'vue'
+import { computed, onScopeDispose, ref, toValue, watch, type ComputedRef, type MaybeRefOrGetter, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useModal } from './useModal'
 import { useDialogs } from './useDialogs'
@@ -731,6 +731,23 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
     },
     { immediate: true },
   )
+
+  // Background enrichment in the main process (release-cache.enrichCommitsAhead)
+  // fires this event when it actually writes a new `commitsAhead` value, so the
+  // open settings pane can upgrade the "Latest from GitHub" card from
+  // `tag (sha)` to `tag + N commits (sha)` in place — without the section IPC
+  // having to await git fetches.
+  //
+  // We use `reload()` instead of `refreshSection('update')` because
+  // `refreshSection` keys on the section's (locale-dependent) title rather
+  // than a stable identifier. `reload()` is race-safe via `requestSeq`, and
+  // its only added cost over a targeted refresh is the warm-cache disk-space
+  // call (sub-ms after the first open) — sections themselves are an in-memory
+  // build on the main side.
+  const offReleaseEnriched = window.api.onReleaseCacheEnriched?.(() => {
+    if (toValue(opts.installation)) void reload()
+  })
+  onScopeDispose(() => offReleaseEnriched?.())
 
   // Drop the per-install dirty + error entries the moment that install
   // stops — a stopped install picks up new values on next launch, so
