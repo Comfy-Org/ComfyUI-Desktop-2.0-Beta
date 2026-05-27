@@ -89,7 +89,11 @@ vi.mock('../../composables/useComfyUISettings', () => ({
 
 // Stub heavy children — we only care about their host wiring.
 vi.mock('../../views/comfyUISettings/SnapshotsView.vue', () => ({
-  default: { template: '<div data-testid="snapshots-view-stub"></div>' },
+  default: {
+    name: 'SnapshotsView',
+    emits: ['op-cancel', 'op-retry', 'op-dismiss', 'run-action', 'refresh-all'],
+    template: '<div data-testid="snapshots-view-stub"></div>',
+  },
 }))
 vi.mock('../../views/comfyUISettings/SettingsSectionList.vue', () => ({
   default: { template: '<div data-testid="settings-section-list-stub"></div>' },

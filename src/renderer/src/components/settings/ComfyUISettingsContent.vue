@@ -11,6 +11,7 @@ import SnapshotsView from '../../views/comfyUISettings/SnapshotsView.vue'
 import StatusFactPanel from '../../views/comfyUISettings/StatusFactPanel.vue'
 import SettingsSectionList from '../../views/comfyUISettings/SettingsSectionList.vue'
 import StoragePane, { type StorageSnapshot } from '../../views/comfyUISettings/StoragePane.vue'
+import Tooltip from '../ui/Tooltip.vue'
 import type { PickerTab, SectionTab } from '../../lib/pickerTabs'
 import { humanizeOpStatus } from '../../lib/progressStatusLabel'
 import type { ActionDef, DetailField, Installation, ShowProgressOpts } from '../../types/ipc'
@@ -578,26 +579,31 @@ defineExpose({
       :aria-label="t('comfyUISettings.title', 'Settings')"
       :aria-hidden="subPage !== null"
     >
-      <button
+      <Tooltip
         v-for="(tab, i) in tabs"
         :key="tab.key"
-        type="button"
-        role="tab"
-        :aria-selected="activeTab === tab.key"
-        :tabindex="activeTab === tab.key ? 0 : -1"
-        class="settings-v2-tab"
-        :class="{ 'is-active': activeTab === tab.key }"
-        @click="selectTab(tab.key)"
-        @keydown="handleTabKeydown($event, i)"
+        :text="tab.label"
+        side="bottom"
       >
-        <component :is="tab.icon" :size="14" aria-hidden="true" class="settings-v2-tab-icon" />
-        <span>{{ tab.label }}</span>
-        <span
-          v-if="tab.key === 'update' && showUpdateBadge"
-          class="settings-v2-tab-badge"
-          aria-hidden="true"
-        ></span>
-      </button>
+        <button
+          type="button"
+          role="tab"
+          :aria-selected="activeTab === tab.key"
+          :tabindex="activeTab === tab.key ? 0 : -1"
+          class="settings-v2-tab"
+          :class="{ 'is-active': activeTab === tab.key }"
+          @click="selectTab(tab.key)"
+          @keydown="handleTabKeydown($event, i)"
+        >
+          <component :is="tab.icon" :size="14" aria-hidden="true" class="settings-v2-tab-icon" />
+          <span>{{ tab.label }}</span>
+          <span
+            v-if="tab.key === 'update' && showUpdateBadge"
+            class="settings-v2-tab-badge"
+            aria-hidden="true"
+          ></span>
+        </button>
+      </Tooltip>
     </nav>
 
     <section class="settings-v2-body">
@@ -834,6 +840,27 @@ defineExpose({
   gap: 6px;
   padding: 12px 12px 12px;
   border-bottom: 1px solid var(--chooser-surface-border);
+  container-type: inline-size;
+  container-name: settings-tabs;
+}
+
+/* Narrow right-pane: inactive tabs collapse to icon-only, active tab
+   keeps its label so "you are here" stays obvious. Tooltip exposes the
+   label on hover/focus for the collapsed tabs. */
+@container settings-tabs (max-width: 520px) {
+  .settings-v2-tab:not(.is-active) {
+    position: relative;
+    padding: 6px 8px;
+    gap: 0;
+  }
+  .settings-v2-tab:not(.is-active) > span:not(.settings-v2-tab-badge) {
+    display: none;
+  }
+  .settings-v2-tab:not(.is-active) .settings-v2-tab-badge {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+  }
 }
 
 .settings-v2-tabs.is-subpage-active {
