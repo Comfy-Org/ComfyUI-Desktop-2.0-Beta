@@ -198,6 +198,54 @@ describe('useOverlay — onCancel firing', () => {
     expect(current.value?.kind).toBe('takeover')
   })
 
+  it('does NOT fire onCancel on a Tier 3 → Tier 3 swap when both overlays target the same installationId (re-present, not abandon)', async () => {
+    // Picker forward / window handoff re-presents the same in-flight
+    // update takeover for the same install. Firing the prior
+    // takeover's onCancel here would cancel the very op the new
+    // overlay is about to show — guard caller from a self-inflicted
+    // cancel.
+    const onCancel = vi.fn()
+    const { openOverlay, current } = useOverlay()
+    await openOverlay({
+      kind: 'takeover',
+      component: 'update',
+      installationId: 'inst-1',
+      operationName: 'Updating ComfyUI',
+      onCancel,
+    })
+    await openOverlay({
+      kind: 'takeover',
+      component: 'update',
+      installationId: 'inst-1',
+      operationName: 'Updating ComfyUI',
+    })
+    expect(onCancel).not.toHaveBeenCalled()
+    expect(current.value?.kind).toBe('takeover')
+  })
+
+  it('fires onCancel on a Tier 3 → Tier 3 swap when the install differs (chain-local / cross-install handoff)', async () => {
+    // Different installationId means the prior takeover is being
+    // abandoned, not re-presented — its onCancel must fire so the
+    // underlying op (if any) is told to roll back.
+    const onCancel = vi.fn()
+    const { openOverlay, current } = useOverlay()
+    await openOverlay({
+      kind: 'takeover',
+      component: 'update',
+      installationId: 'inst-1',
+      operationName: 'Updating ComfyUI',
+      onCancel,
+    })
+    await openOverlay({
+      kind: 'takeover',
+      component: 'update',
+      installationId: 'inst-2',
+      operationName: 'Updating ComfyUI',
+    })
+    expect(onCancel).toHaveBeenCalledTimes(1)
+    expect(current.value?.kind).toBe('takeover')
+  })
+
   it('does not require onCancel — closing without it still clears the slot on confirm', async () => {
     // Wizard takeovers (install flows / first-use) carry no
     // onCancel; the cancel-prompt for those just dismisses the

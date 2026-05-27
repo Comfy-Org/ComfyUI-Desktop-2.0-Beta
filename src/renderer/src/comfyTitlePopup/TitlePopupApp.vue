@@ -5,6 +5,7 @@ import DownloadsView from './DownloadsView.vue'
 import InstancePickerView from './InstancePickerView.vue'
 import GlobalSettingsView from './GlobalSettingsView.vue'
 import ModalDialog from '../components/ModalDialog.vue'
+import DialogHost from '../components/DialogHost.vue'
 import { useModal } from '../composables/useModal'
 import type { DetailSection, SnapshotListData } from '../types/ipc'
 
@@ -65,6 +66,20 @@ interface PickerInstall {
   statusTag?: { style: string; label: string }
 }
 
+interface PickerStorageDir {
+  path: string
+  isPrimary: boolean
+  isDefault: boolean
+}
+
+/** Storage-tab slice main piggy-backs on the picker snapshot. Same
+ *  shape as `PickerStorageSlice` in `src/main/popups/titlePopup.ts`. */
+interface PickerStorageSlice {
+  sharedDirectoriesFields: Record<string, unknown>[]
+  modelsDirs: PickerStorageDir[]
+  modelsSystemDefault: string
+}
+
 interface PickerSnapshot {
   installs: PickerInstall[]
   activeInstallationId: string | null
@@ -78,6 +93,7 @@ interface PickerSnapshot {
   selectedInstallationId: string | null
   selectedSettings: DetailSection[] | null
   selectedSnapshots: SnapshotListData | null
+  storage: PickerStorageSlice
 }
 
 interface GlobalSettingsModelsDir {
@@ -87,7 +103,9 @@ interface GlobalSettingsModelsDir {
 }
 
 interface GlobalSettingsSnapshot {
-  overviewFields: Record<string, unknown>[]
+  generalFields: Record<string, unknown>[]
+  telemetryFields: Record<string, unknown>[]
+  desktopUpdateFields: Record<string, unknown>[]
   cacheFields: Record<string, unknown>[]
   advancedFields: Record<string, unknown>[]
   sharedDirectoriesFields: Record<string, unknown>[]
@@ -102,15 +120,12 @@ interface GlobalSettingsSnapshot {
     platform: string
     lastCheckedAt: number | null
   }
-  channelPickerField: Record<string, unknown> | null
-  activeInstallationId: string | null
-  hasActiveInstall: boolean
   githubUrl: string
   githubStars: number | null
   i18n: {
     overview: string
     updates: string
-    cache: string
+    storage: string
     models: string
     advanced: string
     sharedDirectories: string
@@ -176,11 +191,14 @@ const pickerSnapshot = ref<PickerSnapshot>({
   runningInstallationIds: [],
   selectedInstallationId: null,
   selectedSettings: null,
-  selectedSnapshots: null
+  selectedSnapshots: null,
+  storage: { sharedDirectoriesFields: [], modelsDirs: [], modelsSystemDefault: '' }
 })
 /** Latest global-settings snapshot — same lifecycle as `pickerSnapshot`. */
 const globalSettingsSnapshot = ref<GlobalSettingsSnapshot>({
-  overviewFields: [],
+  generalFields: [],
+  telemetryFields: [],
+  desktopUpdateFields: [],
   cacheFields: [],
   advancedFields: [],
   sharedDirectoriesFields: [],
@@ -195,15 +213,12 @@ const globalSettingsSnapshot = ref<GlobalSettingsSnapshot>({
     platform: 'darwin',
     lastCheckedAt: null
   },
-  channelPickerField: null,
-  activeInstallationId: null,
-  hasActiveInstall: false,
   githubUrl: '',
   githubStars: null,
   i18n: {
-    overview: 'Overview',
+    overview: 'General',
     updates: 'Updates',
-    cache: 'Cache',
+    storage: 'Storage',
     models: 'Models',
     advanced: 'Advanced',
     sharedDirectories: 'Shared Directories'
@@ -440,6 +455,10 @@ onUnmounted(() => {
          its own copy; this one keeps `useModal` working inside the
          popup's separate WebContentsView. -->
     <ModalDialog />
+    <!-- Sibling host for the new `useDialogs` API (BasePrompt /
+         BaseActionSheet rendered via BaseModal). Lives alongside
+         `<ModalDialog />` until all useModal types migrate. -->
+    <DialogHost />
   </div>
 </template>
 

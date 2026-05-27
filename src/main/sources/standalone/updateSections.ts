@@ -8,7 +8,7 @@ import type { ComfyVersion } from '../../lib/version'
 import { truncateNotes } from '../../lib/comfyui-releases'
 import { deleteAction, untrackAction, launchAction, openFolderAction } from '../../lib/actions'
 import { t } from '../../lib/i18n'
-import { buildLaunchSettingsFields } from '../common/launchSettingsFields'
+import { buildLaunchSettingsFields, buildSharedPathsField } from '../common/launchSettingsFields'
 import { getVariantLabel, DEFAULT_LAUNCH_ARGS } from './envPaths'
 import type { InstallationRecord } from '../../installations'
 import type { StatusTag } from '../../types/sources'
@@ -128,8 +128,14 @@ export function getDetailSections(installation: InstallationRecord): Record<stri
       actions.push({
         id: 'update-comfyui', label: t('standalone.updateNow'), style: 'primary', enabled: installed,
         tooltip: t('tooltips.updateNow'),
-        showProgress: true, progressTitle: t('standalone.updatingTitle', { version: latestDisplay }),
-        data: isSwitching ? { channel: card.value } : undefined,
+        showProgress: true,
+        progressTitle: isDowngrade
+          ? t('standalone.downgradingTitle', { version: latestDisplay })
+          : t('standalone.updatingTitle', { version: latestDisplay }),
+        data: {
+          ...(isSwitching ? { channel: card.value } : {}),
+          isDowngrade,
+        },
         confirm: {
           title: t('standalone.updateConfirmTitle'),
           message: switchPrefix + confirmMessage,
@@ -183,6 +189,10 @@ export function getDetailSections(installation: InstallationRecord): Record<stri
       fields: buildLaunchSettingsFields(installation, { defaultLaunchArgs: DEFAULT_LAUNCH_ARGS }),
     },
     {
+      tab: 'storage',
+      fields: [buildSharedPathsField(installation)],
+    },
+    {
       title: 'Actions',
       pinBottom: true,
       actions: [
@@ -198,8 +208,8 @@ export function getDetailSections(installation: InstallationRecord): Record<stri
             field: 'name',
           } },
         openFolderAction(installation.installPath),
-        deleteAction(installation),
         untrackAction(),
+        deleteAction(installation),
       ],
     },
   )

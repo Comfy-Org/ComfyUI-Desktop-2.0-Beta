@@ -81,7 +81,6 @@ test('seeded snapshot row renders the backend-formatted version @lifecycle', asy
     `(() => {
       window.api.openInstancePicker({
         installationId: ${JSON.stringify(INSTALL_ID)},
-        mode: 'expanded',
         initialTab: 'snapshots',
       })
       return true

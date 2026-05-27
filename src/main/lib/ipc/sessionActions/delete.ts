@@ -21,10 +21,10 @@ export async function handleDelete({ event, installationId, inst }: ActionContex
   let markerContent: string | null
   try { markerContent = fs.readFileSync(markerPath, 'utf-8').trim() } catch { markerContent = null }
   if (!markerContent) {
-    return { ok: false, message: 'Safety check failed: this directory was not created by ComfyUI Desktop 2.0. Use Untrack to remove it from the list, then delete the files manually.' }
+    return { ok: false, message: 'Safety check failed: this directory was not created by ComfyUI Desktop 2.0. Use Forget to remove it from the list, then delete the files manually.' }
   }
   if (markerContent !== inst.id && markerContent !== 'tracked') {
-    return { ok: false, message: 'Safety check failed: the marker file does not match this installation. Use Untrack instead.' }
+    return { ok: false, message: 'Safety check failed: the marker file does not match this installation. Use Forget instead.' }
   }
   const sender = event.sender
   const sendProgress = makeSendProgress(sender, installationId)

@@ -11,11 +11,20 @@ withDefaults(
     /** Adds a soft plum glow behind the card content. Opt-in for the
      *  Cloud option on the first-use pick step — Local stays plain. */
     glow?: boolean
+    /** Renders the card as a radio option: indicator on the left, no
+     *  trailing arrow. The card click becomes "select", not "commit" —
+     *  the parent owns the commit step via a separate Continue button. */
+    selectable?: boolean
+    /** Whether this radio card is the currently-picked option. Only
+     *  meaningful when `selectable` is true. */
+    selected?: boolean
   }>(),
   {
     tagline: '',
     disabled: false,
-    glow: false
+    glow: false,
+    selectable: false,
+    selected: false
   }
 )
 
@@ -25,19 +34,36 @@ defineEmits<{ click: [] }>()
 <template>
   <button
     type="button"
-    :class="['choice-card', { 'choice-card--glow': glow }]"
+    :class="[
+      'choice-card',
+      { 'choice-card--glow': glow, 'choice-card--selected': selectable && selected }
+    ]"
+    :role="selectable ? 'radio' : undefined"
+    :aria-checked="selectable ? selected : undefined"
+    :tabindex="selectable ? (selected ? 0 : -1) : undefined"
     :disabled="disabled"
     @click="$emit('click')"
   >
     <div v-if="tagline" class="choice-card__tagline">{{ tagline }}</div>
     <div class="choice-card__body">
+      <span v-if="selectable" class="choice-card__radio" aria-hidden="true">
+        <span v-if="selected" class="choice-card__radio-dot" />
+      </span>
       <div class="choice-card__text">
-        <div class="choice-card__label">{{ label }}</div>
+        <div class="choice-card__label">
+          <span class="choice-card__label-text">{{ label }}</span>
+          <span v-if="$slots['label-trailing']" class="choice-card__label-trailing">
+            <slot name="label-trailing" />
+          </span>
+        </div>
         <div class="choice-card__desc">
           <InlineRichText :text="description" />
+          <div v-if="$slots['desc-trailing']" class="choice-card__desc-trailing">
+            <slot name="desc-trailing" />
+          </div>
         </div>
       </div>
-      <ArrowRight :size="18" class="choice-card__arrow" aria-hidden="true" />
+      <ArrowRight v-if="!selectable" :size="18" class="choice-card__arrow" aria-hidden="true" />
     </div>
   </button>
 </template>
@@ -90,6 +116,43 @@ defineEmits<{ click: [] }>()
   opacity: 0.5;
   cursor: not-allowed;
 }
+/* Selectable variant: card acts as a radio option. Selected state
+ * lifts the border to the brand blue (--accent-primary) — yellow is
+ * reserved for the CTA so the radio doesn't compete with the
+ * Continue button for primary attention. */
+.choice-card--selected {
+  border-color: color-mix(in oklab, var(--accent-primary) 60%, transparent);
+  background: color-mix(in oklab, var(--accent-primary) 6%, var(--brand-surface-bg-hover));
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--accent-primary) 40%, transparent) inset;
+}
+.choice-card--selected:hover:not(:disabled) {
+  border-color: color-mix(in oklab, var(--accent-primary) 75%, transparent);
+  background: color-mix(in oklab, var(--accent-primary) 9%, rgba(137, 137, 137, 0.13));
+}
+.choice-card__radio {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  border: 1.5px solid var(--brand-surface-border-hover);
+  background: rgba(0, 0, 0, 0.1);
+  transition:
+    border-color 120ms ease,
+    background 120ms ease;
+}
+.choice-card--selected .choice-card__radio {
+  border-color: var(--accent-primary);
+  background: transparent;
+}
+.choice-card__radio-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--accent-primary);
+}
 
 .choice-card__tagline {
   position: relative;
@@ -119,16 +182,33 @@ defineEmits<{ click: [] }>()
   flex: 1 1 auto;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
 }
 .choice-card__label {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  gap: 8px;
+  width: 100%;
   font-family: var(--font-sans);
   font-size: var(--takeover-fs-lead);
   font-weight: 700;
   line-height: normal;
   color: var(--neutral-100);
   transition: color 120ms ease;
+}
+.choice-card__label-text {
+  flex: 0 0 auto;
+}
+.choice-card__label-trailing {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+.choice-card__desc-trailing {
+  margin-top: 6px;
 }
 .choice-card__desc {
   font-family: var(--font-sans);

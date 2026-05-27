@@ -1,19 +1,10 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
-import { useI18n } from 'vue-i18n'
 import type { DetailField } from '../../types/ipc'
 
 /**
- * Boolean toggle for the ComfyUI Settings drawer. Modeled on shadcn's
- * Switch: `data-state` attribute drives all visual state, thumb is a
- * real child element transitioned via `translate-x`.
- *
- * Owns a local `visualOn` ref so the click is optimistic — `updateField`
- * in the parent awaits an IPC roundtrip + section reload, so without
- * this the visible state would snap to its destination only after the
- * roundtrip and the CSS transition would never have a chance to play.
- * The watcher reconciles back to `field.value` (no-op on success, snap
- * on failure / external change).
+ * macOS Settings-style boolean switch. The parent field row owns the
+ * label; this component renders only the switch control on the right.
  */
 
 interface Props {
@@ -25,8 +16,6 @@ const props = defineProps<Props>()
 const emit = defineEmits<{
   update: [value: boolean]
 }>()
-
-const { t } = useI18n()
 
 const visualOn = ref(props.field.value === true)
 
@@ -57,28 +46,21 @@ function handleClick(): void {
     <span class="bt-track" :aria-hidden="true">
       <span class="bt-thumb"></span>
     </span>
-    <span class="bt-label">{{ t('comfyUISettings.toggleOn', 'Enabled') }}</span>
   </button>
 </template>
 
 <style scoped>
 .bt-switch {
+  flex-shrink: 0;
   display: inline-flex;
   align-items: center;
-  gap: 10px;
-  width: 100%;
-  padding: 8px 12px;
-  background: var(--neutral-800);
-  border: 1px solid var(--chooser-surface-border);
-  border-radius: 8px;
-  color: var(--neutral-100);
-  font-size: 13px;
-  text-align: left;
+  padding: 0;
+  background: transparent;
+  border: none;
   cursor: pointer;
 }
 
 .bt-track {
-  flex-shrink: 0;
   position: relative;
   display: inline-block;
   width: 36px;

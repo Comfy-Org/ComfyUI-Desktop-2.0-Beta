@@ -824,7 +824,6 @@ defineExpose({ open })
 
                     <template v-else>
                       <BaseSelect
-                        variant="brand"
                         :model-value="selections[field.id]?.value ?? ''"
                         :options="getSelectOptions(field)"
                         :placeholder="getSelectPlaceholder(field)"

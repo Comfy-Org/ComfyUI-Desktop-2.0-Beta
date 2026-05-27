@@ -58,6 +58,7 @@ test.beforeAll(async () => {
           {
             trigger: 'manual',
             label: 'first-seeded',
+            createdAt: '2026-01-01T00:00:00.000Z',
             comfyui: {
               ref: COMMIT_A,
               commit: COMMIT_A,
@@ -70,6 +71,7 @@ test.beforeAll(async () => {
           {
             trigger: 'manual',
             label: 'second-seeded',
+            createdAt: '2026-01-02T00:00:00.000Z',
             comfyui: {
               ref: COMMIT_B,
               commit: COMMIT_B,
@@ -115,7 +117,6 @@ async function openSnapshotsTab(): Promise<ReturnType<typeof titlePopupPage>> {
     `(() => {
       window.api.openInstancePicker({
         installationId: ${JSON.stringify(INSTALL_ID)},
-        mode: 'expanded',
         initialTab: 'snapshots',
       })
       return true
@@ -144,12 +145,10 @@ test('per-row Export writes a valid envelope JSON to disk @lifecycle', async () 
   expect(filenames.length).toBe(2)
   const firstFilename = filenames[0]!
 
-  // Expand the first row so its Export button is in the active part
-  // of the accordion. BaseAccordion keeps the slot mounted, but
-  // collapses its parent's height to 0 — so we click first then
-  // wait for the .snapshot-row.is-expanded class to flip on the
-  // matching row before driving the Export button.
-  expect(await popup.click(byTestId(TID.snapshotRow(firstFilename)))).toBe(true)
+  // SnapshotsView auto-expands the first (newest) row on load, so the
+  // Export button is already in the active part of the accordion — no
+  // click on the header needed. Just wait for the per-row Export action
+  // to render before driving it.
   await popup.waitForSelector('.snapshot-row.is-expanded', { timeout: 5_000 })
   await popup.waitForSelector(byTestId(TID.snapshotRowExport(firstFilename)), { timeout: 5_000 })
 

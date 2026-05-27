@@ -147,7 +147,15 @@ vi.mock('electron', () => {
     setBounds(b: Electron.Rectangle): void { this.bounds = b }
     getBounds(): Electron.Rectangle { return this.bounds }
   }
-  return { WebContentsView: Ctor }
+  // `embeddedPopupView.ts` now imports `_registerExtraBroadcastTarget` from
+  // `../lib/ipc/broadcast`, which itself imports `BrowserWindow` from
+  // electron at module scope. Provide a minimal stub so module evaluation
+  // doesn't fault; the broadcast helper itself isn't exercised in these
+  // tests (no call path triggers a broadcast).
+  return {
+    WebContentsView: Ctor,
+    BrowserWindow: { getAllWindows: () => [] },
+  }
 })
 
 import { EmbeddedPopupView } from './embeddedPopupView'

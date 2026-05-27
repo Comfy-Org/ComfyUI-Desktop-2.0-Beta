@@ -184,36 +184,52 @@ async function comfyFrontendIsLoaded(): Promise<boolean> {
 // First-use takeover → New Install takeover
 // ---------------------------------------------------------------------------
 
-test('cold start lands on first-use consent screen @lifecycle', async () => {
+test('cold start lands on first-use start screen @lifecycle', async () => {
   test.skip(HYDRATED, 'reuse mode: first-use already completed on the persisted profile')
   // The first-use takeover gates the chooser body until consent +
-  // cloud/local pick are completed. On a fresh profile the consent
-  // step is what the user lands on.
-  await ctx.panel.waitForVisible('.consent-hero', { timeout: 15_000 })
-  await ctx.panel.waitForVisible('[data-testid="first-use-accept-consent"]')
+  // cloud/local pick + Continue are completed on the merged start
+  // screen (commit 5619823 clubbed the legacy two-step flow into one).
+  await ctx.panel.waitForVisible('.start-hero', { timeout: 15_000 })
+  await ctx.panel.waitForVisible('[data-testid="first-use-pick-cloud"]')
+  await ctx.panel.waitForVisible('[data-testid="first-use-pick-local"]')
+  await ctx.panel.waitForVisible('[data-testid="first-use-continue"]')
 })
 
-test('accept consent + pick local opens New Install takeover with form pre-filled @lifecycle', async () => {
+test('accept ToS + pick local (non-express) opens New Install takeover with form pre-filled @lifecycle', async () => {
   test.skip(HYDRATED, 'reuse mode: first-use already completed on the persisted profile')
+
+  // Pick Local — reveals the Express-Install modifier. We want the
+  // normal (non-express) local path so the New Install Tier 3 takeover
+  // opens; the express path silently routes through standalone install
+  // and is covered by FirstUseTakeover.test.ts unit specs.
+  expect(await ctx.panel.click('[data-testid="first-use-pick-local"]')).toBe(true)
+  await ctx.panel.waitForVisible('[data-testid="first-use-express-install"]', { timeout: 5_000 })
+
+  // Express defaults to checked on Local pick — uncheck it to force
+  // the New Install takeover path.
+  await ctx.panel.evaluate<void>(
+    `(() => {
+      const wrap = document.querySelector('[data-testid="first-use-express-install"]')
+      const cb = wrap && wrap.querySelector('input[type="checkbox"]')
+      if (cb && cb.checked) cb.click()
+    })()`,
+  )
+
   // Tick the required ToS checkbox (telemetry stays at its default
   // opt-in; the test settings already disable telemetry network egress
   // separately, so the actual value doesn't matter here).
   expect(await ctx.panel.click('[data-testid="first-use-consent-tos"]')).toBe(true)
   await ctx.panel.waitFor(
     async () => ctx.panel.evaluate<boolean>(
-      `!document.querySelector('[data-testid="first-use-accept-consent"]').disabled`,
+      `!document.querySelector('[data-testid="first-use-continue"]').disabled`,
     ),
-    { timeout: 5_000, message: 'Get Started never became enabled after ticking ToS' },
+    { timeout: 5_000, message: 'Continue never became enabled after ticking ToS' },
   )
 
-  // Accept consent → advance to the cloud-vs-local pick step.
-  expect(await ctx.panel.click('[data-testid="first-use-accept-consent"]')).toBe(true)
-  await ctx.panel.waitForVisible('[data-testid="first-use-pick-local"]', { timeout: 10_000 })
-
-  // Pick Local — with no legacy desktop install detected, this emits
-  // `chain-local`, which the host swaps for the new-install Tier 3
-  // takeover (silent Tier 3 → Tier 3 swap inside `useOverlay`).
-  expect(await ctx.panel.click('[data-testid="first-use-pick-local"]')).toBe(true)
+  // Continue with Local + non-express + no legacy desktop install:
+  // emits `chain-local`, which the host swaps for the New Install
+  // Tier 3 takeover (silent Tier 3 → Tier 3 swap inside `useOverlay`).
+  expect(await ctx.panel.click('[data-testid="first-use-continue"]')).toBe(true)
   await expectTakeoverOpen(ctx.panel)
 
   // Standalone is pre-selected on open. The release + variant fields
@@ -716,7 +732,6 @@ test('picker-driven cross-channel update-comfyui (stable → latest) IN_PLACE_RE
     `(() => {
       window.api.openInstancePicker({
         installationId: ${JSON.stringify(_updateInstallId)},
-        mode: 'expanded',
         initialTab: 'update',
       })
       return true
@@ -828,7 +843,6 @@ test('picker-driven snapshot-restore IN_PLACE_RELAUNCH while running @lifecycle'
     `(() => {
       window.api.openInstancePicker({
         installationId: ${JSON.stringify(_updateInstallId)},
-        mode: 'expanded',
         initialTab: 'snapshots',
       })
       return true
@@ -963,7 +977,6 @@ test('picker pin-bottom Restart drives stop+launch under one "Restarting ComfyUI
     `(() => {
       window.api.openInstancePicker({
         installationId: ${JSON.stringify(_updateInstallId)},
-        mode: 'expanded',
         initialTab: 'config',
       })
       return true
@@ -1067,7 +1080,6 @@ test('picker pin-bottom Copy creates a real ~500MB copy of the install @lifecycl
     `(() => {
       window.api.openInstancePicker({
         installationId: ${JSON.stringify(_updateInstallId)},
-        mode: 'expanded',
         initialTab: 'config',
       })
       return true

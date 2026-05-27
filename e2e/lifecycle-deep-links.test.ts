@@ -31,7 +31,6 @@ const MARKER_FILENAME = '.comfyui-desktop-2'
 
 interface OpenInstancePickerCall {
   installationId: string | null
-  mode: 'compact' | 'expanded'
   initialTab: string | null
   autoAction: string | null
 }
@@ -115,12 +114,12 @@ test('comfy://open-settings?tab=comfy on chooser host opens the picker (compact 
     .toBe(1)
 
   const calls = await getIpcInvocations(ctx.app, PICKER_CHANNEL) as OpenInstancePickerCall[]
-  // Chooser fallback fires `openInstancePicker()` with no args; the
-  // preload bridge normalises that into a payload with `installationId`
-  // null and `mode: 'compact'` so the picker opens unanchored to any install.
+  // Chooser fallback fires `openInstancePicker()` with no args; the preload
+  // bridge normalises that into a payload with `installationId` null so the
+  // picker opens unanchored to any install. (The compact/expanded mode split
+  // was removed — the picker has a single view now.)
   expect(calls[0]).toMatchObject({
     installationId: null,
-    mode: 'compact',
     initialTab: null,
   })
 

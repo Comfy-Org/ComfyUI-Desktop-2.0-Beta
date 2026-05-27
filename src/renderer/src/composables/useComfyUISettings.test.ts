@@ -20,12 +20,28 @@ const modalSpies = vi.hoisted(() => ({
   confirmWithOptions: vi.fn(),
   alert: vi.fn(),
 }))
+// Dialogs spies cover the BaseModal-shell primitives (`runConfirmChain`
+// routes the plain confirm path through `dialogs.confirm` when a
+// dialogs driver is supplied; the chain steps for fieldSelects /
+// select / prompt also go through `dialogs.*`). Tests that assert on
+// the action confirm should set `dialogsSpies.confirm.mockResolvedValue`
+// — return `'primary'` to proceed, `false` to cancel.
+const dialogsSpies = vi.hoisted(() => ({
+  confirm: vi.fn(),
+  prompt: vi.fn(),
+  actionSheet: vi.fn(),
+  alert: vi.fn(),
+}))
 const actionGuardSpies = vi.hoisted(() => ({
   checkBeforeAction: vi.fn(),
 }))
 
 vi.mock('./useModal', () => ({
   useModal: () => modalSpies,
+}))
+
+vi.mock('./useDialogs', () => ({
+  useDialogs: () => dialogsSpies,
 }))
 
 vi.mock('./useActionGuard', () => ({
@@ -45,7 +61,7 @@ vi.mock('../lib/telemetry', () => ({
 
 import { useComfyUISettings } from './useComfyUISettings'
 import { useSessionStore } from '../stores/sessionStore'
-import type { ActionDef, ActionResult, DetailSection, Installation, ShowProgressOpts } from '../types/ipc'
+import type { ActionDef, ActionResult, DetailField, DetailSection, Installation, ShowProgressOpts } from '../types/ipc'
 
 function makeInstall(id: string, name: string): Installation {
   return {
@@ -71,16 +87,20 @@ function makeSection(installName: string): DetailSection {
 interface MockApi {
   getDetailSections: ReturnType<typeof vi.fn>
   getDiskSpace: ReturnType<typeof vi.fn>
+  getInstallationSize: ReturnType<typeof vi.fn>
   stopComfyUI: ReturnType<typeof vi.fn>
   runAction: ReturnType<typeof vi.fn>
+  updateInstallation: ReturnType<typeof vi.fn>
 }
 
 function installMockApi(overrides: Partial<MockApi> = {}): MockApi {
   const api: MockApi = {
     getDetailSections: vi.fn().mockResolvedValue([]),
     getDiskSpace: vi.fn().mockResolvedValue(null),
+    getInstallationSize: vi.fn().mockResolvedValue({ sizeBytes: 0 }),
     stopComfyUI: vi.fn().mockResolvedValue(undefined),
     runAction: vi.fn().mockResolvedValue({ ok: true }),
+    updateInstallation: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   }
   ;(window as unknown as { api: MockApi }).api = api
@@ -275,6 +295,10 @@ describe('useComfyUISettings.runAction — stop-warning augment + self-stopping 
     modalSpies.select.mockReset()
     modalSpies.confirmWithOptions.mockReset()
     modalSpies.alert.mockReset()
+    dialogsSpies.confirm.mockReset()
+    dialogsSpies.prompt.mockReset()
+    dialogsSpies.actionSheet.mockReset()
+    dialogsSpies.alert.mockReset()
     actionGuardSpies.checkBeforeAction.mockReset()
     actionGuardSpies.checkBeforeAction.mockResolvedValue('proceed')
   })
@@ -309,7 +333,7 @@ describe('useComfyUISettings.runAction — stop-warning augment + self-stopping 
   it('prepends the willStopRunning warning to the action confirm message when the install is running', async () => {
     installMockApi()
     markRunning('a', 'A')
-    modalSpies.confirm.mockResolvedValue(false) // user cancels — composable returns early
+    dialogsSpies.confirm.mockResolvedValue(false) // user cancels — composable returns early
     const { composable, scope } = mountComposable(makeInstall('a', 'A'))
 
     await composable.runAction({
@@ -318,8 +342,8 @@ describe('useComfyUISettings.runAction — stop-warning augment + self-stopping 
       confirm: { title: 'Update?', message: 'This will pull the latest ComfyUI.' },
     } as ActionDef)
 
-    expect(modalSpies.confirm).toHaveBeenCalledTimes(1)
-    const callArg = modalSpies.confirm.mock.calls[0][0] as { message: string }
+    expect(dialogsSpies.confirm).toHaveBeenCalledTimes(1)
+    const callArg = dialogsSpies.confirm.mock.calls[0]![0] as { message: string }
     // The shared `augmentMessageWithStopWarning` helper joins with `\n\n`
     // so the warning visually owns its own paragraph above the action's
     // own copy.
@@ -330,7 +354,7 @@ describe('useComfyUISettings.runAction — stop-warning augment + self-stopping 
   it('synthesizes a confirm dialog carrying just the warning when the action has neither confirm nor prompt', async () => {
     installMockApi()
     markRunning('a', 'A')
-    modalSpies.confirm.mockResolvedValue(false)
+    dialogsSpies.confirm.mockResolvedValue(false)
     const { composable, scope } = mountComposable(makeInstall('a', 'A'))
 
     await composable.runAction({
@@ -338,8 +362,8 @@ describe('useComfyUISettings.runAction — stop-warning augment + self-stopping 
       label: 'Restore Snapshot',
     } as ActionDef)
 
-    expect(modalSpies.confirm).toHaveBeenCalledTimes(1)
-    const callArg = modalSpies.confirm.mock.calls[0][0] as { message: string; title: string }
+    expect(dialogsSpies.confirm).toHaveBeenCalledTimes(1)
+    const callArg = dialogsSpies.confirm.mock.calls[0]![0] as { message: string; title: string }
     expect(callArg.message).toBe('errors.willStopRunning')
     expect(callArg.title).toBe('Restore Snapshot')
     scope.stop()
@@ -348,7 +372,7 @@ describe('useComfyUISettings.runAction — stop-warning augment + self-stopping 
   it('does NOT prepend the warning when the install is not running', async () => {
     installMockApi()
     // No markRunning — sessionStore.isRunning('a') === false.
-    modalSpies.confirm.mockResolvedValue(false)
+    dialogsSpies.confirm.mockResolvedValue(false)
     const { composable, scope } = mountComposable(makeInstall('a', 'A'))
 
     await composable.runAction({
@@ -357,8 +381,8 @@ describe('useComfyUISettings.runAction — stop-warning augment + self-stopping 
       confirm: { title: 'Update?', message: 'This will pull the latest ComfyUI.' },
     } as ActionDef)
 
-    expect(modalSpies.confirm).toHaveBeenCalledTimes(1)
-    const callArg = modalSpies.confirm.mock.calls[0][0] as { message: string }
+    expect(dialogsSpies.confirm).toHaveBeenCalledTimes(1)
+    const callArg = dialogsSpies.confirm.mock.calls[0]![0] as { message: string }
     expect(callArg.message).toBe('This will pull the latest ComfyUI.')
     scope.stop()
   })
@@ -373,7 +397,7 @@ describe('useComfyUISettings.runAction — stop-warning augment + self-stopping 
       runAction: vi.fn().mockResolvedValue({ ok: true }),
     })
     markRunning('a', 'A')
-    modalSpies.confirm.mockResolvedValue(true)
+    dialogsSpies.confirm.mockResolvedValue('primary')
 
     const onShowProgress = vi.fn()
     const { composable, scope } = mountComposable(makeInstall('a', 'A'), onShowProgress)
@@ -416,7 +440,7 @@ describe('useComfyUISettings.runAction — stop-warning augment + self-stopping 
       runAction: vi.fn().mockResolvedValue({ ok: false, message: 'no update available' }),
     })
     markRunning('a', 'A')
-    modalSpies.confirm.mockResolvedValue(true)
+    dialogsSpies.confirm.mockResolvedValue('primary')
     const onShowProgress = vi.fn()
     const { composable, scope } = mountComposable(makeInstall('a', 'A'), onShowProgress)
 
@@ -447,7 +471,7 @@ describe('useComfyUISettings.runAction — stop-warning augment + self-stopping 
       runAction: vi.fn().mockResolvedValue({ ok: true, newInstallationId: 'a-prime' }),
     })
     markRunning('a', 'A')
-    modalSpies.confirm.mockResolvedValue(true)
+    dialogsSpies.confirm.mockResolvedValue('primary')
     const onShowProgress = vi.fn()
     const { composable, scope } = mountComposable(makeInstall('a', 'A'), onShowProgress)
 
@@ -476,7 +500,7 @@ describe('useComfyUISettings.runAction — stop-warning augment + self-stopping 
     const api = installMockApi({
       runAction: vi.fn().mockResolvedValue({ ok: true }),
     })
-    modalSpies.confirm.mockResolvedValue(true)
+    dialogsSpies.confirm.mockResolvedValue('primary')
     const onShowProgress = vi.fn()
     const { composable, scope } = mountComposable(makeInstall('a', 'A'), onShowProgress)
 
@@ -507,7 +531,7 @@ describe('useComfyUISettings.runAction — stop-warning augment + self-stopping 
       runAction: vi.fn().mockResolvedValue({ ok: true }),
     })
     markRunning('a', 'A')
-    modalSpies.confirm.mockResolvedValue(true)
+    dialogsSpies.confirm.mockResolvedValue('primary')
     const { composable, scope } = mountComposable(makeInstall('a', 'A'))
 
     await composable.runAction({
@@ -518,6 +542,265 @@ describe('useComfyUISettings.runAction — stop-warning augment + self-stopping 
 
     expect(api.stopComfyUI).toHaveBeenCalledTimes(1)
     expect(api.runAction).toHaveBeenCalledWith('a', 'update-comfyui', undefined)
+    scope.stop()
+  })
+})
+
+describe('useComfyUISettings.updateField — optimistic write + restart-required tracking', () => {
+  beforeEach(() => {
+    setActivePinia(createTestingPinia({ stubActions: false }))
+  })
+
+  function makeRestartField(id: string, value: unknown): DetailField {
+    return {
+      id,
+      label: id,
+      value: value as DetailField['value'],
+      editable: true,
+      editType: 'select',
+      requiresRestart: true,
+    }
+  }
+
+  function makeSectionWithField(field: DetailField): DetailSection {
+    return { tab: 'settings', title: 'Launch', fields: [field] } as DetailSection
+  }
+
+  /** Bring the composable up with a single restart-required field
+   *  already in `sections`. Tests can then call `updateField` and
+   *  assert on `sections.value`, `pendingRestartFieldIds`,
+   *  `fieldErrorMessages` without re-running the initial load every
+   *  time. */
+  async function mountWithField(
+    installId: string,
+    initialValue: unknown,
+    apiOverrides: Partial<MockApi> = {},
+  ) {
+    const initialField = makeRestartField('launchMode', initialValue)
+    const api = installMockApi({
+      getDetailSections: vi.fn().mockResolvedValue([makeSectionWithField(initialField)]),
+      ...apiOverrides,
+    })
+    const installation = ref<Installation | null>(makeInstall(installId, installId.toUpperCase()))
+    const scope = effectScope()
+    let composable!: ReturnType<typeof useComfyUISettings>
+    scope.run(() => {
+      composable = useComfyUISettings({ installation, onShowProgress: vi.fn() })
+    })
+    await nextTick()
+    await Promise.resolve()
+    await Promise.resolve()
+    return { composable, api, installation, scope }
+  }
+
+  function markRunning(id: string): void {
+    useSessionStore().runningInstances.set(id, {
+      installationId: id,
+      installationName: id.toUpperCase(),
+      mode: 'standalone',
+    })
+  }
+
+  it('writes the new value into sections optimistically before the IPC resolves', async () => {
+    // Hold the updateInstallation IPC open until we explicitly resolve.
+    // The optimistic write must land on `sections.value` synchronously
+    // (next microtask), regardless of when main responds.
+    let resolveIpc: (() => void) | null = null
+    const ipcPromise = new Promise<void>((r) => {
+      resolveIpc = r
+    })
+    const updateInstallation = vi.fn().mockReturnValue(ipcPromise)
+    const { composable, scope } = await mountWithField('a', 'window', { updateInstallation })
+
+    markRunning('a')
+    const updatePromise = composable.updateField(
+      makeRestartField('launchMode', 'window'),
+      'console',
+    )
+
+    // Microtask flush — but IPC is still pending.
+    await nextTick()
+    const field = composable.sections.value[0]!.fields![0]!
+    expect(field.value).toBe('console')
+    expect(updateInstallation).toHaveBeenCalledWith('a', { launchMode: 'console' })
+
+    resolveIpc!()
+    await updatePromise
+    scope.stop()
+  })
+
+  it('marks the field dirty when running, clears it when reverted to baseline', async () => {
+    const { composable, scope } = await mountWithField('a', 'window')
+    markRunning('a')
+
+    await composable.updateField(makeRestartField('launchMode', 'window'), 'console')
+    expect(composable.pendingRestartFieldIds.value.has('launchMode')).toBe(true)
+
+    // Revert — baseline is the original 'window', so this should drop
+    // the dirty entry.
+    await composable.updateField(makeRestartField('launchMode', 'console'), 'window')
+    expect(composable.pendingRestartFieldIds.value.has('launchMode')).toBe(false)
+    expect(composable.pendingRestartFieldIds.value.size).toBe(0)
+    scope.stop()
+  })
+
+  it('does NOT mark dirty when the install is not running', async () => {
+    const { composable, scope } = await mountWithField('a', 'window')
+    // No markRunning — stopped install picks up new values on next
+    // launch, so there is nothing pending.
+    await composable.updateField(makeRestartField('launchMode', 'window'), 'console')
+    expect(composable.pendingRestartFieldIds.value.size).toBe(0)
+    scope.stop()
+  })
+
+  it('keeps the dirty state when the picker selection swaps to another install and back', async () => {
+    // Critical regression for "switching instance and back resets the
+    // dirty set". The Map<installId, ...> shape isolates state per
+    // install so toggling the picker row preserves install A's edits.
+    const initialField = makeRestartField('launchMode', 'window')
+    const installation = ref<Installation | null>(makeInstall('a', 'A'))
+    const api = installMockApi({
+      getDetailSections: vi.fn((id: string) => {
+        if (id === 'a') return Promise.resolve([makeSectionWithField(initialField)])
+        if (id === 'b') return Promise.resolve([
+          makeSectionWithField(makeRestartField('launchMode', 'window')),
+        ])
+        return Promise.resolve([])
+      }),
+    })
+    const scope = effectScope()
+    let composable!: ReturnType<typeof useComfyUISettings>
+    scope.run(() => {
+      composable = useComfyUISettings({ installation, onShowProgress: vi.fn() })
+    })
+    await nextTick()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    markRunning('a')
+    await composable.updateField(makeRestartField('launchMode', 'window'), 'console')
+    expect(composable.pendingRestartFieldIds.value.has('launchMode')).toBe(true)
+
+    // Switch picker selection to B — different install, no edits, no
+    // tag should surface for B.
+    installation.value = makeInstall('b', 'B')
+    await nextTick()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(composable.pendingRestartFieldIds.value.has('launchMode')).toBe(false)
+
+    // Switch back to A — dirty marker for A's launchMode is still there.
+    installation.value = makeInstall('a', 'A')
+    await nextTick()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(composable.pendingRestartFieldIds.value.has('launchMode')).toBe(true)
+    expect(api.getDetailSections).toHaveBeenCalled()
+    scope.stop()
+  })
+
+  it('rolls back the optimistic write and surfaces an error pill when the IPC rejects', async () => {
+    const updateInstallation = vi.fn().mockRejectedValue(new Error('boom'))
+    const { composable, scope } = await mountWithField('a', 'window', { updateInstallation })
+    markRunning('a')
+
+    await composable.updateField(makeRestartField('launchMode', 'window'), 'console')
+
+    const field = composable.sections.value[0]!.fields![0]!
+    // Rolled back to the prior value — UI doesn't lie about state.
+    expect(field.value).toBe('window')
+    // Failed writes never engage the dirty/yellow state.
+    expect(composable.pendingRestartFieldIds.value.size).toBe(0)
+    // Inline error pill surfaces the IPC message.
+    expect(composable.fieldErrorMessages.value.get('launchMode')).toBe('boom')
+    scope.stop()
+  })
+
+  it('treats a 5s+ IPC stall as a timeout and rolls back with a timeout-flavoured message', async () => {
+    // updateInstallation never settles — the 5s race against
+    // withTimeout's setTimeout should win and trigger rollback.
+    vi.useFakeTimers()
+    try {
+      const updateInstallation = vi.fn().mockReturnValue(new Promise<void>(() => {}))
+      const { composable, scope } = await mountWithField('a', 'window', { updateInstallation })
+      markRunning('a')
+
+      const updatePromise = composable.updateField(
+        makeRestartField('launchMode', 'window'),
+        'console',
+      )
+      // Advance past the 5s deadline. The race rejects via the timeout
+      // branch; the rest of updateField runs on real microtasks.
+      await vi.advanceTimersByTimeAsync(5_001)
+      await updatePromise
+
+      const timeoutField = composable.sections.value[0]!.fields![0]!
+      expect(timeoutField.value).toBe('window')
+      expect(composable.pendingRestartFieldIds.value.size).toBe(0)
+      expect(composable.fieldErrorMessages.value.get('launchMode')).toBe(
+        "Couldn't reach app — try again",
+      )
+      scope.stop()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('clears the per-install dirty + error entries when the install transitions to not-running', async () => {
+    const updateInstallation = vi.fn().mockRejectedValueOnce(new Error('boom'))
+      .mockResolvedValue(undefined)
+    const { composable, scope } = await mountWithField('a', 'window', { updateInstallation })
+    markRunning('a')
+
+    // First call fails → error pill present.
+    await composable.updateField(makeRestartField('launchMode', 'window'), 'console')
+    expect(composable.fieldErrorMessages.value.get('launchMode')).toBe('boom')
+
+    // Second call succeeds → dirty engaged.
+    await composable.updateField(makeRestartField('launchMode', 'window'), 'console')
+    expect(composable.pendingRestartFieldIds.value.has('launchMode')).toBe(true)
+
+    // Stop the install — both per-install entries should drop because
+    // the next launch will pick up the new value.
+    useSessionStore().runningInstances.delete('a')
+    await nextTick()
+    expect(composable.pendingRestartFieldIds.value.size).toBe(0)
+    expect(composable.fieldErrorMessages.value.size).toBe(0)
+    scope.stop()
+  })
+
+  it('considers envVars equal when keys and values match (revert clears dirty)', async () => {
+    const initialField: DetailField = {
+      id: 'envVars',
+      label: 'envVars',
+      value: { FOO: 'bar' } as DetailField['value'],
+      editable: true,
+      editType: 'env-vars',
+      requiresRestart: true,
+    }
+    const installation = ref<Installation | null>(makeInstall('a', 'A'))
+    installMockApi({
+      getDetailSections: vi.fn().mockResolvedValue([makeSectionWithField(initialField)]),
+    })
+    const scope = effectScope()
+    let composable!: ReturnType<typeof useComfyUISettings>
+    scope.run(() => {
+      composable = useComfyUISettings({ installation, onShowProgress: vi.fn() })
+    })
+    await nextTick()
+    await Promise.resolve()
+    await Promise.resolve()
+    markRunning('a')
+
+    await composable.updateField(initialField, { FOO: 'bar', BAZ: 'qux' })
+    expect(composable.pendingRestartFieldIds.value.has('envVars')).toBe(true)
+
+    // Revert to the baseline object — equality is by keys+values, not
+    // by reference, so a fresh `{ FOO: 'bar' }` object still matches.
+    await composable.updateField({ ...initialField, value: { FOO: 'bar', BAZ: 'qux' } } as DetailField, {
+      FOO: 'bar',
+    })
+    expect(composable.pendingRestartFieldIds.value.has('envVars')).toBe(false)
     scope.stop()
   })
 })

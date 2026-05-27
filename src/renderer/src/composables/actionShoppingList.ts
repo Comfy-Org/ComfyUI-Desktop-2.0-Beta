@@ -19,9 +19,11 @@
  */
 
 import type { useModal } from './useModal'
+import type { useDialogs } from './useDialogs'
 import type { ActionDef, DiskSpaceInfo, FieldOption, Installation } from '../types/ipc'
 
 type Modal = ReturnType<typeof useModal>
+type Dialogs = ReturnType<typeof useDialogs>
 /** Subset of `vue-i18n`'s `t` that the chain helpers need — keeping it
  *  loose-typed avoids pulling the full I18n type just to translate a
  *  handful of error / disk-space strings. */
@@ -44,10 +46,12 @@ function formatBytes(bytes: number): string {
  *  pick feeds the next step AND lands on `action.data[fs.field]`. */
 export async function runFieldSelectsChain(
   action: ActionDef,
-  modal: Modal,
+  driver: Modal | Dialogs,
   t: Translate,
 ): Promise<ActionDef | null> {
   if (!action.fieldSelects) return action
+  const showAlert = pickAlert(driver)
+  const showPick = pickPicker(driver)
   let next = action
   const selections: Record<string, FieldOption> = {}
   for (const fs of action.fieldSelects) {
@@ -55,11 +59,11 @@ export async function runFieldSelectsChain(
     try {
       items = await window.api.getFieldOptions(fs.sourceId, fs.fieldId, selections)
     } catch (err: unknown) {
-      await modal.alert({ title: next.label, message: (err as Error).message || String(err) })
+      await showAlert({ title: next.label, message: (err as Error).message || String(err) })
       return null
     }
     if (!items || items.length === 0) {
-      await modal.alert({
+      await showAlert({
         title: next.label,
         message: fs.emptyMessage || t('common.noItems'),
       })
@@ -70,7 +74,7 @@ export async function runFieldSelectsChain(
       label: (item.recommended ? '★ ' : '') + item.label,
       description: item.description,
     }))
-    const selected = await modal.select({
+    const selected = await showPick({
       title: fs.title || next.label,
       message: fs.message || '',
       items: selectItems,
@@ -83,16 +87,37 @@ export async function runFieldSelectsChain(
   return next
 }
 
+/** `useDialogs` exposes `actionSheet`; the legacy `useModal` exposes
+ *  `select`. Both resolve to `string | null` for the picked value. The
+ *  helpers below normalise around whichever driver the caller passed,
+ *  so `useComfyUISettings` (BaseModal-shell dialogs) and `DetailModal`
+ *  (legacy modal host) can share the chain code unchanged. */
+function isDialogs(driver: Modal | Dialogs): driver is Dialogs {
+  return typeof (driver as Dialogs).actionSheet === 'function'
+}
+function pickAlert(driver: Modal | Dialogs) {
+  return (opts: { title: string; message: string }): Promise<unknown> => driver.alert(opts)
+}
+function pickPicker(driver: Modal | Dialogs) {
+  return (opts: { title: string; message: string; items: { value: string; label: string; description?: string }[] }): Promise<string | null> =>
+    isDialogs(driver) ? driver.actionSheet(opts) : driver.select(opts)
+}
+function pickPrompt(driver: Modal | Dialogs) {
+  return (opts: Parameters<Modal['prompt']>[0]): Promise<string | null> => driver.prompt(opts)
+}
+
 /** Drive `action.select` — a single named-source pick (currently only
  *  `'installations'` is wired; expandable later). Lands the selected id
  *  on `action.data[action.select.field]`. */
 export async function runSelectChain(
   action: ActionDef,
   ownerInstallationId: string,
-  modal: Modal,
+  driver: Modal | Dialogs,
   t: Translate,
 ): Promise<ActionDef | null> {
   if (!action.select) return action
+  const showAlert = pickAlert(driver)
+  const showPick = pickPicker(driver)
   let items: { value: string; label: string; description?: string }[] | undefined
   if (action.select.source === 'installations') {
     let all = await window.api.getInstallations()
@@ -107,13 +132,13 @@ export async function runSelectChain(
     items = all.map((i) => ({ value: i.id, label: i.name, description: i.sourceLabel }))
   }
   if (!items || items.length === 0) {
-    await modal.alert({
+    await showAlert({
       title: action.label,
       message: action.select.emptyMessage || t('common.noItems'),
     })
     return null
   }
-  const selected = await modal.select({
+  const selected = await showPick({
     title: action.select.title || action.label,
     message: action.select.message || '',
     items,
@@ -126,10 +151,11 @@ export async function runSelectChain(
  *  install name"). Lands the value on `action.data[action.prompt.field]`. */
 export async function runPromptChain(
   action: ActionDef,
-  modal: Modal,
+  driver: Modal | Dialogs,
 ): Promise<ActionDef | null> {
   if (!action.prompt) return action
-  const value = await modal.prompt({
+  const showPrompt = pickPrompt(driver)
+  const value = await showPrompt({
     title: action.prompt.title || action.label,
     message: action.prompt.message || '',
     placeholder: action.prompt.placeholder,
@@ -142,13 +168,16 @@ export async function runPromptChain(
   return { ...action, data: { ...action.data, [action.prompt.field]: value } }
 }
 
-/** Drive `action.confirm` — modal.confirm OR modal.confirmWithOptions
- *  (when `confirm.options` is set, e.g. Delete Installation's
- *  "Also delete files" toggle). The caller is responsible for skipping
- *  migrate-to-standalone (which owns its own confirm surface). */
+/** Drive `action.confirm`. Routes the plain-confirm path through
+ *  `dialogs.confirm` (BaseModal-shell) when a dialogs driver is
+ *  supplied; falls back to `modal.confirm` otherwise. The
+ *  checkbox-confirm path (`confirm.options`) always uses
+ *  `modal.confirmWithOptions` — `useDialogs` has no equivalent yet.
+ *  The caller is responsible for skipping migrate-to-standalone. */
 export async function runConfirmChain(
   action: ActionDef,
   modal: Modal,
+  dialogs?: Dialogs,
 ): Promise<ActionDef | null> {
   if (!action.confirm) return action
   if (action.confirm.options) {
@@ -161,6 +190,16 @@ export async function runConfirmChain(
     })
     if (!result) return null
     return { ...action, data: { ...action.data, ...result } }
+  }
+  if (dialogs) {
+    const result = await dialogs.confirm({
+      title: action.confirm.title || 'Confirm',
+      message: action.confirm.message || 'Are you sure?',
+      messageDetails: action.confirm.messageDetails,
+      confirmLabel: action.confirm.confirmLabel || action.label,
+      tone: action.style === 'primary' || action.style === 'accent' ? 'primary' : 'danger',
+    })
+    return result === 'primary' ? action : null
   }
   const confirmed = await modal.confirm({
     title: action.confirm.title || 'Confirm',
@@ -183,6 +222,7 @@ export async function runDiskSpaceCheck(
   modal: Modal,
   t: Translate,
   installationSizeBytes?: number | null,
+  dialogs?: Dialogs,
 ): Promise<boolean> {
   const diskCheckActions = new Set(['copy', 'copy-update', 'release-update'])
   if (!diskCheckActions.has(action.id) || !installation.installPath) return true
@@ -207,13 +247,23 @@ export async function runDiskSpaceCheck(
       const message = estimatedRequired > 0
         ? t('diskSpace.warningMessage', { free: freeStr, required: formatBytes(estimatedRequired) })
         : t('diskSpace.warningMessageGeneric', { free: freeStr })
-      const ok = await modal.confirm({
-        title: t('diskSpace.warningTitle'),
-        message,
-        confirmLabel: t('diskSpace.continueAnyway'),
-        confirmStyle: 'primary',
-      })
-      if (!ok) return false
+      if (dialogs) {
+        const result = await dialogs.confirm({
+          title: t('diskSpace.warningTitle'),
+          message,
+          confirmLabel: t('diskSpace.continueAnyway'),
+          tone: 'primary',
+        })
+        if (result !== 'primary') return false
+      } else {
+        const ok = await modal.confirm({
+          title: t('diskSpace.warningTitle'),
+          message,
+          confirmLabel: t('diskSpace.continueAnyway'),
+          confirmStyle: 'primary',
+        })
+        if (!ok) return false
+      }
     }
   } catch {
     // If the disk check itself fails, proceed.

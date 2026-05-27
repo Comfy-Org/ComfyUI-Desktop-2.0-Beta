@@ -17,6 +17,7 @@ export const en = {
     cancel: 'Cancel',
     back: 'Back',
     browse: 'Browse…',
+    learnMore: 'Learn more'
   },
   /** Global Settings view (rendered inside the title-popup process via
    *  `comfyTitlePopup/GlobalSettingsView.vue`). The corresponding keys
@@ -26,19 +27,48 @@ export const en = {
    *  can resolve against. */
   settings: {
     open: 'Open',
+    general: 'General',
+    preferences: 'Preferences',
+    privacy: 'Privacy',
+    community: 'Community',
+    cache: 'Cache',
+    advanced: 'Advanced',
+    platform: 'Platform',
+    storageTab: 'Storage',
+    sharedDirectories: 'Shared Directories',
+    models: 'Shared Models',
+    updatesTab: 'Updates',
+    checkForUpdates: 'Check for updates',
+    checkingForUpdates: 'Checking…'
+  },
+  /** Keys consumed by the picker-side Storage tab (StoragePane.vue),
+   *  duplicated here so the popup-scoped i18n catalog used in tests
+   *  resolves them too. Source of truth for the live app is
+   *  `locales/en.json`. */
+  comfyUISettings: {
+    tabStorage: 'Storage',
+    storageGlobalNote: 'Changes here apply to all of your ComfyUI instances.',
+    storageRestartNote:
+      'Restart the application (or close and reopen) for these changes to take effect.'
   },
   models: {
-    addDir: 'Add Directory',
+    addDir: 'Add directory',
     removeDir: 'Remove',
-    primary: 'primary',
-    default: 'default',
-    makePrimary: 'Make Primary',
+    removeDirTitle: 'Remove shared models directory?',
+    removeDirConfirm:
+      "This won't delete any files. You can re-add the directory later from this list.",
+    primary: 'Primary',
+    default: 'Default',
+    makePrimary: 'Make primary',
+    moreActions: 'More actions'
   },
   tooltips: {
+    sharedModels:
+      "Folders shared across all installations so models aren't downloaded twice. Newly downloaded models go to the primary folder. The system default folder is always kept and can't be removed, and the primary folder can't be removed while it's in use — pick a different primary first.",
     modelsPrimary:
       'The primary directory is where ComfyUI saves newly downloaded models by default.',
     modelsDefault:
-      'The system default directory. This path is created automatically and cannot be removed.',
+      'The system default directory. This path is created automatically and cannot be removed.'
   },
   /** Top-level so the dotted keys returned by `installTypeMetaFor`
    *  (`installType.standalone`, …) map directly without a prefix. */
@@ -47,7 +77,7 @@ export const en = {
     cloud: 'Cloud',
     legacyDesktop: 'Legacy Desktop',
     remote: 'Remote',
-    unknown: 'Unknown',
+    unknown: 'Unknown'
   },
   titleBar: {
     menu: 'Menu',
@@ -67,7 +97,7 @@ export const en = {
     desktopUpdateReady: 'Desktop Update Ready',
     desktopUpdateWithVersion: '{label} (v{version})',
     installUpdateAvailable: 'ComfyUI Update',
-    installUpdateVersion: 'ComfyUI {version}',
+    installUpdateVersion: 'ComfyUI {version}'
   },
   fileMenu: {
     newWindow: 'New Window',
@@ -78,7 +108,9 @@ export const en = {
     sendFeedback: 'Send Beta Feedback',
     returnToDashboard: 'Return to Dashboard',
     closeAllWindows: 'Close All Windows',
-    skipOnboarding: 'Skip Onboarding',
+    exitWindow: 'Exit Window',
+    exitAllWindows: 'Exit All Windows',
+    skipOnboarding: 'Skip Onboarding'
     /* Reset Zoom carries a dynamic percentage in the label and is
      * built main-side without going through this catalog — kept as a
      * raw `label` on the menu item rather than `labelKey`. */
@@ -92,7 +124,7 @@ export const en = {
     showInFolder: 'Show in Finder',
     remove: 'Remove from list',
     viewAllInSettings: 'View All Downloads',
-    completed: 'Completed',
+    completed: 'Completed'
   },
   /** Settings → Downloads tab — superset of the popup view with a
    *  status filter and a different empty placeholder. Action labels
@@ -105,14 +137,14 @@ export const en = {
     filterActive: 'Active',
     filterCompleted: 'Completed',
     filterErrored: 'Failed',
-    filterAriaLabel: 'Status filter',
+    filterAriaLabel: 'Status filter'
   },
   settingsModal: {
     title: 'Settings',
     tabComfy: 'ComfyUI Settings',
     tabDirectories: 'Directories',
     tabDownloads: 'Downloads',
-    tabGlobal: 'Desktop Settings',
+    tabGlobal: 'Desktop Settings'
   },
   /** Strings shared by every install-listing surface (the dashboard
    *  grid in `ChooserView.vue` and the title-bar instance-picker
@@ -129,7 +161,7 @@ export const en = {
     newInstall: 'New Install',
     moreActions: 'More actions',
     menuRevealInFolder: 'Open Folder',
-    menuDelete: 'Delete…',
+    menuDelete: 'Uninstall…'
   },
   /** Picker-only install-action menu labels. The corresponding keys
    *  live under `actions.*` in `locales/en.json` for the panel
@@ -137,7 +169,7 @@ export const en = {
    *  the keys are mirrored here. */
   actions: {
     copyInstallation: 'Copy Install',
-    untrack: 'Untrack',
+    untrack: 'Forget'
   },
   /** Cloud-card copy used by ChooserView's empty cloud CTA AND the
    *  instance-picker popover's empty cloud row. Mirrored from the
@@ -145,7 +177,16 @@ export const en = {
    *  process (which doesn't merge from there) can resolve them. */
   cloud: {
     label: 'Cloud',
-    desc: 'Connect to Comfy Cloud for remote GPU-powered workflows.',
+    desc: 'Connect to Comfy Cloud for remote GPU-powered workflows.'
+  },
+  firstUse: {
+    localModeLabel: 'Local install mode',
+    localModeExpressLabel: 'Quick',
+    localModeConfigureLabel: 'Configure',
+    localDescRecommended:
+      'Fast install with **recommended settings** — skips optional setup steps.',
+    localDescRecommendedGpu:
+      "Fast install tuned for **{gpu}** with recommended settings. Pick **Configure** if that's not your hardware."
   },
   /** Shared relative-time labels used by both ChooserView (via the
    *  panel renderer's merged `locales/en.json`) and the title-bar
@@ -153,7 +194,7 @@ export const en = {
    *  no main-side locale merge, so the keys must be available here. */
   dashboard: {
     launchedAgo: 'Launched {time}',
-    neverLaunched: 'Not launched yet',
+    neverLaunched: 'Not launched yet'
   },
   /** Picker-only strings (right pane + section titles + a11y labels).
    *  Strings used by BOTH surfaces live under `chooser.*` above. */
@@ -173,6 +214,22 @@ export const en = {
     manage: 'Manage',
     running: 'Running',
     empty: 'Select an instance',
+    /** Inline background-op progress strings (cross-instance Update etc.) */
+    progressCancel: 'Cancel',
+    progressDone: 'Done',
+    progressOpenInstance: 'Open Instance',
+    progressRetry: 'Try Again',
+    progressDismiss: 'Dismiss',
+    progressSuccessRunning: 'Updated & relaunched',
+    progressSuccessStopped: 'Update complete',
+    progressSuccessSubtext: 'is ready to launch.',
+    progressSuccessCountdown: 'Returning to settings in {n}…',
+    progressUpdating: 'Updating…',
+    progressDowngrading: 'Downgrading…',
+    progressDowngraded: 'Downgrade complete',
+    progressWorking: 'Working…',
+    progressError: 'Something went wrong',
+    progressCancelled: 'Cancelled',
   },
   /** Snapshot strings consumed by `SnapshotRow` + `formatRelative` +
    *  `triggerLabel` + `changeSummary` in the popup process. Mirrors
@@ -197,7 +254,7 @@ export const en = {
     triggerPostUpdate: 'Updated',
     triggerPostRestore: 'Restored',
     // Relative-time strings — `formatRelative(iso, t)` resolves these.
-    timeJustNow: 'just now',
+    timeJustNow: 'Just now',
     timeMinutesAgo: '{count}m ago',
     timeHoursAgo: '{count}h ago',
     timeDaysAgo: '{count}d ago',
@@ -210,8 +267,33 @@ export const en = {
     channelChanged: 'Channel changed',
     added: 'Added',
     removed: 'Removed',
-    changed: 'Changed',
+    changed: 'Changed'
   },
+  channelCards: {
+    lastChecked: 'Last checked',
+    latestVersion: 'Latest',
+    updateAvailable: 'Update available',
+    upToDate: 'Up to date'
+  },
+  appUpdate: {
+    download: 'Download',
+    downloading: 'Downloading…',
+    restartNow: 'Restart & update',
+    readyBadge: 'Ready to restart',
+    sectionTitle: 'Desktop updates',
+    fallbackVersion: 'this update',
+    panelIdleTitle: 'ComfyUI Desktop is up to date',
+    panelAvailableTitle: 'Update {version} available',
+    panelReadyTitle: 'Update {version} ready to install',
+    panelDownloadingTitle: 'Downloading update {version}…',
+    installedLabel: 'Installed {version}',
+    lastCheckedLabel: 'Last checked {time}',
+    latestLabel: 'Latest {version}',
+    systemManagedNote: 'Updates for this install are delivered through your system package manager.'
+  },
+  update: {
+    debManagedShort: 'System-managed updates'
+  }
 }
 
 export type AppLocale = typeof en

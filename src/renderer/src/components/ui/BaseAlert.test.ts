@@ -6,7 +6,9 @@ import BaseAlert from './BaseAlert.vue'
 const i18n = createI18n({
   legacy: false,
   locale: 'en',
-  messages: { en: { modal: { ok: 'OK' }, common: { cancel: 'Cancel' } } },
+  messages: {
+    en: { modal: { ok: 'OK' }, common: { cancel: 'Cancel', close: 'Close' } }
+  },
   missingWarn: false,
   fallbackWarn: false
 })
@@ -132,5 +134,87 @@ describe('BaseAlert', () => {
     const action = wrapper.find('[data-testid="base-alert-action"]')
     expect(action.classes()).toContain('danger-solid')
     expect(action.classes()).not.toContain('primary')
+  })
+
+  it('renders a secondary button between Cancel and Primary when secondaryLabel is set', () => {
+    const wrapper = mountAlert({
+      showCancel: true,
+      secondaryLabel: 'Close & Launch',
+      buttonLabel: 'Launch'
+    })
+    const cancel = wrapper.find('[data-testid="base-alert-cancel"]')
+    const secondary = wrapper.find('[data-testid="base-alert-secondary"]')
+    const primary = wrapper.find('[data-testid="base-alert-action"]')
+    expect(cancel.exists()).toBe(true)
+    expect(secondary.text()).toBe('Close & Launch')
+    expect(primary.text()).toBe('Launch')
+  })
+
+  it('emits `secondary` when the secondary button is clicked', async () => {
+    const wrapper = mountAlert({
+      secondaryLabel: 'Close & Launch',
+      showCancel: false
+    })
+    await wrapper.find('[data-testid="base-alert-secondary"]').trigger('click')
+    expect(wrapper.emitted('secondary')).toHaveLength(1)
+    expect(wrapper.emitted('close')).toBeUndefined()
+    expect(wrapper.emitted('cancel')).toBeUndefined()
+  })
+
+  it('applies danger tone to the secondary button when secondaryTone="danger"', () => {
+    const wrapper = mountAlert({
+      secondaryLabel: 'Close & Launch',
+      secondaryTone: 'danger',
+      showCancel: false
+    })
+    const secondary = wrapper.find('[data-testid="base-alert-secondary"]')
+    expect(secondary.classes()).toContain('danger-solid')
+  })
+
+  it('renders the header close icon when showCloseIcon is true', () => {
+    const wrapper = mountAlert({ showCloseIcon: true, showCancel: false })
+    expect(wrapper.find('[data-testid="base-alert-close-icon"]').exists()).toBe(true)
+  })
+
+  it('emits `cancel` when the header close icon is clicked', async () => {
+    const wrapper = mountAlert({ showCloseIcon: true, showCancel: false })
+    await wrapper.find('[data-testid="base-alert-close-icon"]').trigger('click')
+    expect(wrapper.emitted('cancel')).toHaveLength(1)
+  })
+
+  it('does NOT render the header close icon by default', () => {
+    const wrapper = mountAlert()
+    expect(wrapper.find('[data-testid="base-alert-close-icon"]').exists()).toBe(false)
+  })
+
+  it('emits `cancel` on ESC when showCloseIcon is true (close icon is a cancel affordance)', async () => {
+    const wrapper = mountAlert({ showCloseIcon: true, showCancel: false })
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    await flushPromises()
+    expect(wrapper.emitted('cancel')).toHaveLength(1)
+    expect(wrapper.emitted('close')).toBeUndefined()
+  })
+
+  it('renders messageDetails groups in recessed sub-blocks', () => {
+    const wrapper = mountAlert({
+      messageDetails: [{ label: 'Changes when restoring', items: ['+1 custom node', '-2 pip pkgs'] }]
+    })
+    expect(wrapper.find('.base-alert-detail-label').text()).toBe('Changes when restoring')
+    const items = wrapper.findAll('.base-alert-detail-item')
+    expect(items).toHaveLength(2)
+    expect(items.at(0)?.text()).toBe('+1 custom node')
+    expect(items.at(1)?.text()).toBe('-2 pip pkgs')
+  })
+
+  it('applies the rich-variant panel modifier when messageDetails is non-empty', () => {
+    const wrapper = mountAlert({
+      messageDetails: [{ label: 'Notes', items: ['x'] }]
+    })
+    expect(wrapper.find('.base-alert-panel--rich').exists()).toBe(true)
+  })
+
+  it('keeps the panel narrow when messageDetails is empty', () => {
+    const wrapper = mountAlert()
+    expect(wrapper.find('.base-alert-panel--rich').exists()).toBe(false)
   })
 })

@@ -53,7 +53,7 @@
     "menuMigrate": "Migrate to Standalone…",
     "menuRestoreSnapshot": "Restore Snapshot…",
     "menuRevealInFolder": "Open Folder",
-    "menuDelete": "Delete…"
+    "menuDelete": "Uninstall…"
   },
 
   "titleBar": {
@@ -69,15 +69,18 @@
 
   "comfyUISettings": {
     "title": "Settings",
-    "tabConfig": "Config",
-    "tabStatus": "Status",
+    "tabConfig": "Startup Args",
+    "tabStatus": "About",
     "tabUpdate": "Update",
     "tabSnapshots": "Snapshots",
+    "tabStorage": "Storage",
     "relaunch": "Relaunch",
     "more": "More",
     "diskUsage": "Disk Usage",
     "envVarsCount": "{n} defined",
-    "emptyInstallLess": "Open a ComfyUI install to view its settings."
+    "emptyInstallLess": "Open a ComfyUI install to view its settings.",
+    "storageGlobalNote": "Changes here apply to all of your ComfyUI instances.",
+    "storageRestartNote": "Restart the application (or close and reopen) for these changes to take effect."
   },
 
   "comfyLifecycle": {
@@ -150,6 +153,7 @@
     "resetDefault": "Reset",
     "or": "or",
     "cancel": "Cancel",
+    "dismiss": "Dismiss",
     "name": "Name",
     "namePlaceholder": "e.g. ComfyUI Main",
     "installInfo": "Install Info",
@@ -290,7 +294,8 @@
     "current": "Current",
     "switchTo": "Switch to {channel}:",
     "switchChannelOnly": "Switch Channel",
-    "switchChannelPrefix": "This will switch the update channel from {from} to {to}.\n\n"
+    "switchChannelPrefix": "This will switch the update channel from {from} to {to}.\n\n",
+    "computingCommitsAhead": "Computing commits ahead…"
   },
 
   "track": {
@@ -317,10 +322,13 @@
     "error": "Error: {message}",
     "unknownError": "An unknown error occurred",
     "completedSuccess": "Completed successfully",
+    "updatedSuccess": "Updated successfully",
     "completedError": "Operation failed",
     "completedCancelled": "Operation was cancelled",
     "returnToDashboard": "Return to Dashboard",
     "reboot": "Reboot",
+    "successChoiceGoDashboard": "Go to Dashboard",
+    "successChoiceOpen": "Open Instance",
     "phaseLabel": {
       "download": "Downloading ComfyUI…",
       "extract": "Unpacking the install…",
@@ -390,7 +398,13 @@
     "about": "About",
     "version": "Version",
     "platform": "Platform",
-    "language": "Language"
+    "language": "Language",
+    "preferences": "Preferences",
+    "privacy": "Privacy",
+    "community": "Community",
+    "storageTab": "Storage",
+    "sharedDirectories": "Shared Directories",
+    "updatesTab": "Updates"
   },
 
   "zoom": {
@@ -421,7 +435,12 @@
     "panelAvailableTitle": "Update {version} available",
     "panelReadyTitle": "Update {version} ready to install",
     "panelDownloadingTitle": "Downloading update {version}…",
-    "downloading": "Downloading…"
+    "downloading": "Downloading…",
+    "readyBadge": "Ready to restart",
+    "installedLabel": "Installed {version}",
+    "lastCheckedLabel": "Last checked {time}",
+    "latestLabel": "Latest {version}",
+    "systemManagedNote": "Updates for this install are delivered through your system package manager."
   },
 
   "modal": {
@@ -454,12 +473,19 @@
     "telemetryHint": "Telemetry helps us improve the launcher. We never collect workflow contents, prompts, generated media, or personal information.",
     "acceptTos": "Accept and continue",
     "consentTosTitle": "Accept the terms",
-    "consentTosHintPrefix": "By continuing you agree to the",
+    "consentTosHintPrefix": "I agree to the",
     "consentTosHintSep": "and",
     "consentTosHintSuffix": ".",
     "consentTelemetryTitle": "Help improve Comfy",
-    "consentTelemetryHint": "Send usage data to help us fix bugs and prioritize features.",
+    "consentTelemetryHint": "Help improve Comfy by sharing anonymous usage data.",
     "consentGetStarted": "Get Started",
+    "startContinue": "Continue",
+    "startContinueBusy": "Preparing your install…",
+    "expressInstallLabel": "Express Install",
+    "expressInstallHint": "Use recommended settings — skip optional setup steps.",
+    "expressInstallLine": "Express Install with recommended settings",
+    "expressGpuHintPrefix": "Detected: ",
+    "expressGpuHintSuffix": " - if that's not your hardware, uncheck Express",
     "termsModalTitle": "ComfyUI Desktop Terms",
     "eulaModalTitle": "End-User License Agreement",
     "tosModalTitle": "Terms of Service",
@@ -523,11 +549,11 @@
     "copyInstallationConfirm": "Copy",
     "copyingInstallation": "Copying Install",
     "copyingFiles": "Copying files…",
-    "delete": "Delete Install",
-    "deleteConfirmTitle": "Delete Install",
-    "deleteConfirmMessage": "This will permanently delete the install and all its files. This cannot be undone.",
-    "untrack": "Untrack",
-    "untrackConfirmTitle": "Untrack Install",
+    "delete": "Uninstall",
+    "deleteConfirmTitle": "Uninstall",
+    "deleteConfirmMessage": "This will permanently uninstall ComfyUI and delete all its files. This cannot be undone.",
+    "untrack": "Forget",
+    "untrackConfirmTitle": "Forget Install",
     "untrackConfirmMessage": "This will remove the install from the app. The files will not be deleted."
   },
 
@@ -694,6 +720,7 @@
     "updateConfirmMessageLatest": "Update from {installed} to latest on master ({latest})?\n\nThis will pull the newest commits from the master branch. Local changes will be stashed and a backup branch created.",
     "updateConfirmMessageDowngrade": "Roll back from {installed} to stable release {latest}?\n\nYour install is currently ahead of the latest stable release. This will check out the stable tag, removing any newer commits. Local changes will be stashed and a backup branch created.",
     "updatingTitle": "Updating to {version}",
+    "downgradingTitle": "Downgrading to {version}",
     "updatePrepare": "Prepare",
     "updatePrepareSnapshot": "Saving snapshot of current state…",
     "updateRun": "Update",
@@ -802,11 +829,22 @@
     "added": "Added",
     "removed": "Removed",
     "changed": "Changed",
-    "timeJustNow": "just now",
+    "timeJustNow": "Just now",
     "timeMinutesAgo": "{count}m ago",
     "timeHoursAgo": "{count}h ago",
     "timeDaysAgo": "{count}d ago",
     "deleteConfirm": "Delete this snapshot?",
+    "deleteConfirmNamed": "Delete snapshot \"{name}\"?",
+    "deleteConfirmMessage": "This snapshot file will be permanently removed. Your installation and other snapshots stay as-is. This can't be undone.",
+    "delete": "Delete",
+    "saveErrorTitle": "Couldn't save snapshot",
+    "deleteErrorTitle": "Couldn't delete snapshot",
+    "restoreConfirmTitle": "Restore this snapshot?",
+    "restoreConfirmMessage": "Your current install state will be replaced with the contents of this snapshot. Make sure ComfyUI isn't running before you continue.",
+    "importConfirmTitle": "Import these snapshots?",
+    "importConfirmMessage": "These snapshots will be added to this installation. The newest one will replace your current state.",
+    "importConfirmLabel": "Import",
+    "importErrorTitle": "Couldn't import snapshots",
     "copiedAs": "Copied as",
     "copyUpdatedAs": "Copy & Updated as",
     "releaseUpdatedAs": "Release Updated as",
@@ -816,6 +854,12 @@
     "restoreNoChanges": "No changes needed — environment already matches this snapshot.",
     "restoreConfirm": "Confirm Restore",
     "restoreCancel": "Cancel",
+    "restoringStatus": "Restoring snapshot",
+    "restoringFrom": "from {label}",
+    "restored": "Snapshot restored",
+    "restoredFrom": "Rolled back to {label}",
+    "restoreFailed": "Restore failed",
+    "tryAgain": "Try again",
     "nodesLabel": "nodes",
     "pkgsLabel": "pkgs",
     "exportSnapshot": "Export",
@@ -848,6 +892,7 @@
     "updateConfirmMessageLatest": "Update from {installed} to latest on master ({latest})?\n\nThis will pull the newest commits from the master branch. Local changes will be stashed and a backup branch created.",
     "releaseNotesLabel": "Release Notes",
     "updatingTitle": "Updating to {version}",
+    "downgradingTitle": "Downgrading to {version}",
     "updatePrepare": "Prepare",
     "updateRun": "Update",
     "updateDeps": "Dependencies",
@@ -871,10 +916,10 @@
     "waiting": "Waiting for ComfyUI to be ready…",
     "waitingTime": "Waiting for ComfyUI to be ready… ({secs}s)",
     "portBusyUsing": "Port {old} is busy — using port {new} instead…",
-    "instanceRunningTitle": "Instance Already Running",
-    "instanceRunningMessage": "\"{name}\" is currently running. Running multiple local installs simultaneously may use significant system resources.",
-    "instanceRunningProceed": "Launch Alongside",
-    "instanceRunningReplace": "Close Running & Launch",
+    "instanceRunningTitle": "An instance is already running",
+    "instanceRunningMessage": "\"{name}\" is running. What would you like to do?",
+    "instanceRunningProceed": "Launch Anyway",
+    "instanceRunningReplace": "Close & Launch New",
     "modelFolderRelaunchTitle": "Restarting ComfyUI",
     "modelFolderRelaunchDesc": "New model folders were detected from custom nodes. Restarting so ComfyUI can use them right away.",
     "steps": {
@@ -933,6 +978,7 @@
     "startupArgs": "Command-line arguments passed to ComfyUI when it starts, such as --port or --lowvram.",
     "browserPartition": "Controls whether this install shares browser cache (cookies, local storage) with other installs or keeps its own separate cache.",
     "sharedDirs": "Directories shared across all installations for inputs and outputs.",
+    "sharedModels": "Folders shared across all installations so models aren't downloaded twice. Newly downloaded models go to the primary folder. The system default folder is always kept and can't be removed, and the primary folder can't be removed while it's in use — pick a different primary first.",
     "modelsPrimary": "The primary directory is where ComfyUI saves newly downloaded models by default.",
     "modelsDefault": "The system default directory. This path is created automatically and cannot be removed.",
     "useSharedPaths": "When enabled, this install can access models, inputs, and outputs from the shared directories. Disable to use only this install's own local paths.",
@@ -952,6 +998,7 @@
     "name": "Name",
     "value": "Value",
     "add": "Add Variable",
+    "remove": "Remove variable",
     "namePlaceholder": "VARIABLE_NAME",
     "valuePlaceholder": "value",
     "securityWarning": "Environment variable values are stored unencrypted on disk. Do not add API keys, tokens, passwords, or other secrets."

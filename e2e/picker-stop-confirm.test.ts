@@ -116,7 +116,6 @@ async function openExpandedPicker(): Promise<void> {
     `(() => {
       window.api.openInstancePicker({
         installationId: ${JSON.stringify(INSTALL_ID)},
-        mode: 'expanded',
         initialTab: 'update',
       })
       return true
@@ -160,6 +159,10 @@ test('Self-stops the running session and dispatches the action @lifecycle', asyn
     installationName: INSTALL_NAME,
   })
   await openExpandedPicker()
+  // The picker mounts on the Update tab and auto-fires a `check-update`
+  // run-action against stale release-cache data. Reset the tracker so
+  // the test asserts cleanly on the forwarded `update-comfyui` dispatch.
+  await resetIpcInvocations(ctx.app, 'run-action')
   await forwardUpdateActionFromPicker()
 
   // The popup hides as soon as main routes the forward IPC.
@@ -194,11 +197,16 @@ test('Self-stops the running session and dispatches the action @lifecycle', asyn
     })
     .toBeGreaterThanOrEqual(1)
 
+  // Find the forwarded `update-comfyui` dispatch among the run-action
+  // invocations. The picker's auto-`check-update` watcher can also fire
+  // a run-action against the freshly-mounted Update tab depending on
+  // release-cache freshness — index-based lookup would flake on that
+  // race, so we filter by actionId instead.
   const runCalls = await getIpcInvocations(ctx.app, 'run-action') as
     { installationId?: string; actionId?: string }[]
-  expect(runCalls.length).toBeGreaterThanOrEqual(1)
-  expect(runCalls[0]?.installationId).toBe(INSTALL_ID)
-  expect(runCalls[0]?.actionId).toBe('update-comfyui')
+  const updateCall = runCalls.find((c) => c.actionId === 'update-comfyui')
+  expect(updateCall).toBeDefined()
+  expect(updateCall?.installationId).toBe(INSTALL_ID)
 
   // stop-comfyui fires exactly once — duplicate stops would point at a
   // regression where both useDeepLinkRouter and the (now-removed)
@@ -213,6 +221,9 @@ test('Skips self-stop when the install is NOT running @lifecycle', async () => {
   // session was open to begin with — the user wouldn't expect a
   // ComfyUI launch off a stopped install just because they updated it).
   await openExpandedPicker()
+  // Drop the picker's auto-`check-update` so the run-action assertions
+  // below count only the forwarded `update-comfyui` dispatch.
+  await resetIpcInvocations(ctx.app, 'run-action')
   await forwardUpdateActionFromPicker()
 
   await expect
@@ -232,8 +243,11 @@ test('Skips self-stop when the install is NOT running @lifecycle', async () => {
   const stopCalls = await getIpcInvocations(ctx.app, 'stop-comfyui')
   expect(stopCalls.length).toBe(0)
 
+  // Same race tolerance as the running-session variant — assert the
+  // forwarded `update-comfyui` shows up, not that it's the only call
+  // (the auto-`check-update` watcher may have fired against the
+  // freshly-mounted Update tab).
   const runCalls = await getIpcInvocations(ctx.app, 'run-action') as
     { installationId?: string; actionId?: string }[]
-  expect(runCalls.length).toBe(1)
-  expect(runCalls[0]?.actionId).toBe('update-comfyui')
+  expect(runCalls.find((c) => c.actionId === 'update-comfyui')).toBeDefined()
 })

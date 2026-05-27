@@ -146,7 +146,6 @@ async function openSnapshotsTab(installId: string): Promise<ReturnType<typeof ti
     `(() => {
       window.api.openInstancePicker({
         installationId: ${JSON.stringify(installId)},
-        mode: 'expanded',
         initialTab: 'snapshots',
       })
       return true
@@ -206,9 +205,12 @@ test('Import into B consumes the envelope and writes both snapshots @lifecycle',
 
   expect(await popup.click(byTestId(TID.snapshotsImport))).toBe(true)
 
-  // BaseAlert / ModalDialog Continue button uses TID.modalConfirm.
-  await popup.waitForVisible(byTestId(TID.modalConfirm), { timeout: 10_000 })
-  expect(await popup.click(byTestId(TID.modalConfirm))).toBe(true)
+  // Simple confirms route through BaseAlert (`base-alert-action`);
+  // rich confirms keep the legacy ModalDialog path (`modal-confirm-button`).
+  const confirmSelector =
+    `${byTestId(TID.modalConfirm)}, ${byTestId(TID.baseAlertAction)}`
+  await popup.waitForVisible(confirmSelector, { timeout: 10_000 })
+  expect(await popup.click(confirmSelector)).toBe(true)
 
   // importSnapshots writes one file per envelope entry, so the count
   // must advance from 0 to 2. The follow-on snapshot-restore op fires

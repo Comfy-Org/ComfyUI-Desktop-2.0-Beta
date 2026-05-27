@@ -66,8 +66,8 @@ export function enrichInstallationsForRenderer(
     const statusTag = inst.status === 'partial-delete'
       ? { label: i18n.t('errors.deleteInterrupted'), style: 'danger' }
       : inst.status === 'failed'
-      ? { label: i18n.t('errors.installFailed'), style: 'danger' }
-      : (source.getStatusTag ? source.getStatusTag(inst) : undefined)
+        ? { label: i18n.t('errors.installFailed'), style: 'danger' }
+        : (source.getStatusTag ? source.getStatusTag(inst) : undefined)
     const cv = inst.comfyVersion as ComfyVersion | undefined
     const rawVersion = cv ? formatComfyVersion(cv, 'short') : (inst.version as string | undefined)
     const version = rawVersion === inst.sourceId ? undefined : rawVersion
@@ -91,7 +91,7 @@ export function registerInstallationHandlers(): void {
     const { visible, enriched } = enrichInstallationsForRenderer(allInstalls)
 
     // Resolve versions from git state in the background.
-    _resolveAndBroadcastVersions(visible).catch(() => {})
+    _resolveAndBroadcastVersions(visible).catch(() => { })
 
     // Pre-warm the shared ComfyUI release cache so the dashboard /
     // title-bar update pills reflect upstream state without requiring
@@ -221,7 +221,7 @@ export function registerInstallationHandlers(): void {
         await source.install(inst, { sendProgress, download, cache, extract, signal: abort.signal })
         if (source.postInstall) {
           const update = (data: Record<string, unknown>): Promise<void> =>
-            installations.update(installationId, data).then(() => {})
+            installations.update(installationId, data).then(() => { })
           await source.postInstall(inst, { sendProgress, update, signal: abort.signal })
         }
 
@@ -230,10 +230,10 @@ export function registerInstallationHandlers(): void {
         const pendingFile = freshInst?.pendingSnapshotRestore as string | undefined
         if (freshInst && pendingFile && fs.existsSync(pendingFile)) {
           const sendOutput = (text: string): void => {
-            try { if (!sender.isDestroyed()) sender.send('comfy-output', { installationId, text }) } catch {}
+            try { if (!sender.isDestroyed()) sender.send('comfy-output', { installationId, text }) } catch { }
           }
           const update = (data: Record<string, unknown>): Promise<void> =>
-            installations.update(installationId, data).then(() => {})
+            installations.update(installationId, data).then(() => { })
           await restoreSnapshotIntoInstallation(
             freshInst, pendingFile, true,
             { sendProgress, sendOutput, signal: abort.signal },
@@ -250,14 +250,14 @@ export function registerInstallationHandlers(): void {
             try {
               fs.rmSync(inst.installPath, { recursive: true, force: true })
               cleaned = true
-            } catch {}
+            } catch { }
           }
           if (cleaned) {
             await installations.remove(installationId)
             return { ok: true, navigate: 'list' }
           }
           const markerPath = path.join(inst.installPath, MARKER_FILE)
-          try { fs.writeFileSync(markerPath, installationId) } catch {}
+          try { fs.writeFileSync(markerPath, installationId) } catch { }
           await installations.update(installationId, { status: 'partial-delete' })
           const deleteAbort = new AbortController()
           _operationAborts.set(installationId, deleteAbort)
@@ -272,10 +272,10 @@ export function registerInstallationHandlers(): void {
             _operationAborts.delete(installationId)
             if (deleteAbort.signal.aborted) {
               if (isEffectivelyEmptyInstallDir(inst.installPath)) {
-                try { fs.rmSync(inst.installPath, { recursive: true, force: true }) } catch {}
+                try { fs.rmSync(inst.installPath, { recursive: true, force: true }) } catch { }
                 await installations.remove(installationId)
               } else {
-                try { fs.writeFileSync(markerPath, installationId) } catch {}
+                try { fs.writeFileSync(markerPath, installationId) } catch { }
                 await installations.update(installationId, { status: 'partial-delete' })
               }
             }
@@ -365,17 +365,23 @@ export function registerInstallationHandlers(): void {
       ]
     }
     // Resolve commitsAhead for the `latest` channel against the install's
-    // own git checkout before building the channel cards — otherwise the
-    // "Latest from GitHub" preview falls back to `tag (sha)` instead of
-    // `tag+N (sha)`. The enrich helper short-circuits when commitsAhead
-    // is already populated or the install has no git dir, so this is a
-    // no-op for cloud installs and on repeat opens.
+    // own git checkout. Fire-and-forget — enrichment spawns up to three
+    // git child processes (fetch tags, fetch sha, rev-list) which can
+    // take seconds on a slow link and must not block the section render.
+    // When enrichment actually writes a new value, release-cache emits
+    // `release-cache-enriched` so the renderer can refresh in place.
+    // The helper short-circuits on already-enriched / no-git-dir, so
+    // repeat opens and cloud installs cost nothing.
     if (inst.installPath) {
       const comfyuiDir = path.join(inst.installPath, 'ComfyUI')
       if (hasGitDir(comfyuiDir)) {
-        try {
-          await releaseCache.enrichCommitsAhead(COMFYUI_REPO, comfyuiDir)
-        } catch { /* enrichment is best-effort; never block the section render */ }
+        void releaseCache.enrichCommitsAhead(COMFYUI_REPO, comfyuiDir).catch((err) => {
+          // Enrichment is best-effort; the channel card falls back to
+          // `tag (sha)` (a documented supported render path) when
+          // commitsAhead is unavailable. Log so the next bug report has
+          // a breadcrumb instead of silent failure.
+          console.warn('[get-detail-sections] enrichCommitsAhead failed:', err)
+        })
       }
     }
     return source.getDetailSections(inst)

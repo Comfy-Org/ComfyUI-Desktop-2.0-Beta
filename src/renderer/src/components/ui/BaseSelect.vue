@@ -24,14 +24,12 @@ interface Props {
   options: BaseSelectOption[]
   ariaLabel?: string
   placeholder?: string
-  variant?: 'default' | 'brand'
   disabled?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   ariaLabel: undefined,
   placeholder: '',
-  variant: 'default',
   disabled: false
 })
 
@@ -217,7 +215,6 @@ onBeforeUnmount(() => {
     aria-haspopup="listbox"
     :aria-label="ariaLabel"
     :data-placeholder="!selectedOption ? '' : undefined"
-    :data-variant="variant"
     :disabled="disabled"
     @click="toggle"
     @keydown="onTriggerKeydown"
@@ -237,7 +234,6 @@ onBeforeUnmount(() => {
         tabindex="-1"
         :style="popoverStyle"
         :aria-label="ariaLabel"
-        :data-variant="variant"
         @keydown="onListboxKeydown"
       >
         <li
@@ -271,6 +267,7 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   gap: 8px;
   width: 100%;
+  box-sizing: border-box;
   padding: 8px 10px;
   background: var(--neutral-800);
   border: 1px solid var(--chooser-surface-border);
@@ -280,7 +277,14 @@ onBeforeUnmount(() => {
   font-size: 14px;
   text-align: left;
   cursor: pointer;
-  transition: border-color 150ms ease;
+  transition:
+    border-color 150ms ease,
+    background-color 150ms ease;
+}
+
+.ui-select-trigger:hover:not(:disabled) {
+  border-color: var(--border-hover);
+  background: color-mix(in srgb, var(--neutral-100) 4%, var(--neutral-800));
 }
 
 .ui-select-trigger:focus-visible {
@@ -317,36 +321,6 @@ onBeforeUnmount(() => {
 .ui-select-trigger:disabled {
   cursor: not-allowed;
   opacity: 0.6;
-}
-
-/* Brand-variant trigger — mirrors .brand-input exactly so it sits
- * flush in the same field stack without looking foreign. */
-.ui-select-trigger[data-variant='brand'] {
-  background: var(--brand-surface-bg);
-  border: 1px solid var(--brand-surface-border);
-  border-radius: 6px;
-  color: var(--neutral-100);
-  backdrop-filter: blur(var(--brand-surface-blur));
-  padding: 10px 14px;
-  font-size: var(--takeover-fs-body);
-  transition:
-    border-color 120ms ease,
-    background 120ms ease;
-}
-.ui-select-trigger[data-variant='brand']:hover:not(:disabled) {
-  border-color: var(--brand-surface-border-hover);
-  background: var(--brand-surface-bg-hover);
-}
-.ui-select-trigger[data-variant='brand']:focus-visible {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent);
-  outline: none;
-}
-.ui-select-trigger[data-variant='brand'][aria-expanded='true'] {
-  border-color: var(--brand-surface-border-hover);
-}
-.ui-select-trigger[data-variant='brand'] .ui-select-chevron {
-  color: var(--neutral-400);
 }
 </style>
 
@@ -437,40 +411,5 @@ onBeforeUnmount(() => {
   .ui-select-pop-leave-active {
     transition-duration: 0ms;
   }
-}
-
-/* Brand-variant listbox — color-matched to the resolved visual of
- * the frosted-glass fields (trigger, GPU field, path field). */
-.ui-select-listbox[data-variant='brand'] {
-  padding: 4px;
-  background: rgba(56, 48, 64, 0.92);
-  border: 1px solid var(--brand-surface-border);
-  border-radius: 6px;
-  backdrop-filter: blur(40px);
-  -webkit-backdrop-filter: blur(40px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
-}
-.ui-select-listbox[data-variant='brand'] .ui-select-option {
-  padding: 10px 14px;
-  border-radius: 4px;
-  color: var(--neutral-200);
-  transition: background 100ms ease;
-}
-.ui-select-listbox[data-variant='brand'] .ui-select-option[data-selected] {
-  color: var(--neutral-100);
-}
-.ui-select-listbox[data-variant='brand'] .ui-select-option[data-active] {
-  background: rgba(255, 255, 255, 0.05);
-  color: var(--neutral-100);
-}
-.ui-select-listbox[data-variant='brand']
-  .ui-select-option[data-active][data-selected] {
-  background: rgba(255, 255, 255, 0.07);
-}
-.ui-select-listbox[data-variant='brand'] .ui-select-option-desc {
-  color: var(--neutral-400);
-}
-.ui-select-listbox[data-variant='brand'] .ui-select-option-check {
-  color: var(--comfy-yellow);
 }
 </style>

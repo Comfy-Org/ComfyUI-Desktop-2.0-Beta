@@ -46,7 +46,8 @@
   --color-surface: #262729;
   --color-border: #494a50;
   --color-border-hover: #3c3d42;
-  --color-danger: #b33a3a;
+  --color-danger: #e05858;
+  --color-danger-hover: #ef6b6b;
   --color-terminal-bg: #111112;
 
   /* Comfy brand neutral ramp — single canonical scale. Yellow at 50,
@@ -85,7 +86,8 @@
   --titlebar-icon: var(--color-text-muted);
   --border: #494a50;
   --border-hover: #3c3d42;
-  --danger: #b33a3a;
+  --danger: #e05858;
+  --danger-hover: #ef6b6b;
   --warning: #fd9903;
   --success: #00cd72;
   --info: #58a6ff;
@@ -150,6 +152,12 @@
     0 20px 24px -4px rgba(10, 13, 18, 0.4), 0 8px 8px -4px rgba(10, 13, 18, 0.25),
     0 3px 3px -1.5px rgba(10, 13, 18, 0.2);
 
+  /* Tooltip primitive */
+  --tooltip-bg: #211927;
+  --tooltip-border: #38303d;
+  --tooltip-fg: #ffffff;
+  --z-tooltip: 10001;
+
   /* Takeover fluid type + spacing — Utopia clamp, anchored 1024px → 1920px. */
   --takeover-fs-caption: clamp(0.75rem, 0.6071rem + 0.2232vw, 0.875rem); /* 12→14px */
   --takeover-fs-body: clamp(0.875rem, 0.7321rem + 0.2232vw, 1rem); /* 14→16px */
@@ -179,6 +187,7 @@
   --border: #b4b4b4;
   --border-hover: #d9d9d9;
   --danger: #f75951;
+  --danger-hover: #ff7a73;
   --warning: #fcbf64;
   --success: #00cd72;
   --info: #2563eb;
@@ -228,6 +237,12 @@
    * value until light brand parity ships. */
   --modal-surface-bg: #27202d;
   --modal-surface-border: var(--chooser-surface-border);
+
+  /* Tooltip primitive — mirror of dark-theme block until light parity. */
+  --tooltip-bg: #211927;
+  --tooltip-border: #38303d;
+  --tooltip-fg: #ffffff;
+  --z-tooltip: 10001;
 
   /* Takeover fluid type + spacing — mirror of dark-theme block. */
   --takeover-fs-caption: clamp(0.75rem, 0.6071rem + 0.2232vw, 0.875rem);
@@ -727,8 +742,8 @@ button.brand-ghost:hover:not([disabled]) {
 .brand-checkbox input[type='checkbox'] {
   appearance: none;
   flex: 0 0 auto;
-  width: 18px;
-  height: 18px;
+  width: 14px;
+  height: 14px;
   margin: 4px 0 0 0;
   border: 1px solid var(--brand-surface-border-hover);
   border-radius: 4px;

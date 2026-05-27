@@ -70,7 +70,8 @@ describe('TermsModal', () => {
 
   it('emits `close` when the ✕ button is clicked', async () => {
     const wrapper = mountModal('eula')
-    await wrapper.find('[data-testid="terms-modal-close"]').trigger('click')
+    // ✕ now lives on the BaseModal primitive.
+    await wrapper.find('[data-testid="base-modal-close"]').trigger('click')
     expect(wrapper.emitted('close')).toHaveLength(1)
   })
 

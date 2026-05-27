@@ -1,16 +1,17 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Download, RotateCcw, Trash2 } from 'lucide-vue-next'
+import { Download, GitCompare, RotateCcw, Trash2, Upload } from 'lucide-vue-next'
 import { TID } from '../../../../shared/testIds'
-import { useModal } from '../../composables/useModal'
+import { useDialogs } from '../../composables/useDialogs'
 import { useActionGuard } from '../../composables/useActionGuard'
 import { emitTelemetryAction, toCountBucket } from '../../lib/telemetry'
 import {
   changeSummary as _changeSummary,
   diffHasChanges,
   formatDate,
-  formatRelative as _formatRelative
+  formatRelative as _formatRelative,
+  triggerLabel
 } from '../../lib/snapshots'
 import type {
   ActionDef,
@@ -20,6 +21,18 @@ import type {
   SnapshotSummary
 } from '../../types/ipc'
 import SnapshotRow from './SnapshotRow.vue'
+import SnapshotDiffView from '../../components/SnapshotDiffView.vue'
+import { humanizeOpStatus } from '../../lib/progressStatusLabel'
+
+interface ActiveOperation {
+  percent: number
+  status: string
+  done: boolean
+  ok: boolean | null
+  error: string | null
+  actionId: string
+  actionData?: Record<string, unknown>
+}
 
 /**
  * Snapshots tab body for the brand-redesigned Settings drawer (v2).
@@ -44,9 +57,14 @@ import SnapshotRow from './SnapshotRow.vue'
 
 interface Props {
   installationId: string
+  /** Live background-op status for this install — surfaced by the
+   *  picker's inline-progress path. Used to mark the restoring row in
+   *  the timeline with a spinner + status string, show a brief "Restored"
+   *  chip on success, and lock out row actions on the other rows. */
+  activeOperation?: ActiveOperation | null
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), { activeOperation: null })
 
 const emit = defineEmits<{
   /** Fires when restore commits — parent (drawer) routes through
@@ -56,10 +74,16 @@ const emit = defineEmits<{
   /** Lets the drawer host re-load sections after a snapshot op (e.g.
    *  restore navigates back to install detail with refreshed state). */
   'refresh-all': []
+  /** Cancel / retry / dismiss for the inline top-card restore op.
+   *  Bubbles up to `ComfyUISettingsContent` which already relays these
+   *  to the picker's bridge methods. */
+  'op-cancel': []
+  'op-retry': []
+  'op-dismiss': []
 }>()
 
 const { t } = useI18n()
-const modal = useModal()
+const dialogs = useDialogs()
 const actionGuard = useActionGuard()
 
 const listData = ref<SnapshotListData | null>(null)
@@ -68,6 +92,127 @@ const loadError = ref<string | null>(null)
 
 const snapshots = computed<SnapshotSummary[]>(() => listData.value?.snapshots ?? [])
 const copyEvents = computed<CopyEvent[]>(() => listData.value?.copyEvents ?? [])
+
+// --- Restore feedback (driven by the picker's inline-progress path) ---
+// Surfaces as a single prominent card in the dashed "Save New Snapshot"
+// slot at the top of the rail, in front of the user's eyes. Three
+// terminal-state branches:
+//   - ok        → "Snapshot restored" success card, auto-dismisses after
+//                 a beat and reloads the list (the post-restore snapshot
+//                 lands as the new newest entry below).
+//   - error     → red card with the message + Retry / Dismiss actions.
+//   - cancelled → card disappears (op snapshot keeps the entry around
+//                 for 15s but we treat cancelled as user-driven dismissal).
+const restoreOp = computed<ActiveOperation | null>(() => {
+  const op = props.activeOperation
+  return op && op.actionId === 'snapshot-restore' ? op : null
+})
+const restoreOpFile = computed<string | null>(
+  () => (restoreOp.value?.actionData as { file?: string } | undefined)?.file ?? null
+)
+const restoreInFlight = computed<boolean>(
+  () => !!restoreOp.value && !restoreOp.value.done
+)
+const restorePhase = computed<string>(() => {
+  const op = restoreOp.value
+  if (!op || op.done) return ''
+  return humanizeOpStatus(op.status, t)
+})
+const restorePercent = computed<number | null>(() => {
+  const p = restoreOp.value?.percent ?? -1
+  return p < 0 ? null : Math.max(0, Math.min(100, p))
+})
+const restoreCancellable = computed<boolean>(
+  () => !!restoreOp.value && !restoreOp.value.done
+       && ((restoreOp.value as ActiveOperation & { cancellable?: boolean }).cancellable ?? false)
+)
+
+/** "Updated · 1h ago"-style label for the snapshot being restored *to* —
+ *  echoes how rows render below so the user sees the exact target. Falls
+ *  back to the user-provided label or the filename if we don't have the
+ *  row locally (e.g. picker fired the action before sections loaded). */
+const restoreFromLabel = computed<string>(() => {
+  const file = restoreOpFile.value
+  if (!file) return ''
+  const target = snapshots.value.find((s) => s.filename === file)
+  if (target) {
+    const trigger = triggerLabel(target.trigger, t)
+    const when = _formatRelative(target.createdAt, t)
+    return target.label ? `${target.label} · ${when}` : `${trigger} · ${when}`
+  }
+  return file
+})
+
+// Latched terminal-state for the top card. `null` means the card sits
+// in-flight; on done we capture the outcome here so the card stays
+// rendered with the right copy until the user dismisses (or the success
+// timer fires).
+const restoreTerminal = ref<'ok' | 'error' | null>(null)
+const restoreErrorMessage = ref<string>('')
+let restoreOkTimer: ReturnType<typeof setTimeout> | null = null
+function clearRestoreTerminal(): void {
+  if (restoreOkTimer !== null) {
+    clearTimeout(restoreOkTimer)
+    restoreOkTimer = null
+  }
+  restoreTerminal.value = null
+  restoreErrorMessage.value = ''
+}
+function dismissRestoreCard(): void {
+  clearRestoreTerminal()
+  emit('op-dismiss')
+}
+function cancelRestore(): void {
+  emit('op-cancel')
+}
+function retryRestore(): void {
+  clearRestoreTerminal()
+  emit('op-retry')
+}
+watch(restoreOp, (op, prev) => {
+  if (!op) return
+  // In-flight → done transition only.
+  if (!op.done || (prev && prev.done)) return
+  if (op.ok) {
+    clearRestoreTerminal()
+    restoreTerminal.value = 'ok'
+    restoreOkTimer = setTimeout(() => {
+      restoreTerminal.value = null
+      restoreOkTimer = null
+      // Reload so the new "post-restore" snapshot (written by the
+      // restore pipeline) lands as the newest entry; emit `op-dismiss`
+      // so main clears `_activeOperationStatus` and the picker's
+      // local seed.
+      void load()
+      emit('refresh-all')
+      emit('op-dismiss')
+    }, 1800)
+  } else if (op.error === 'Cancelled.') {
+    // User dismissed it themselves — drop the card without fanfare.
+    clearRestoreTerminal()
+  } else {
+    clearRestoreTerminal()
+    restoreTerminal.value = 'error'
+    restoreErrorMessage.value = op.error ?? ''
+  }
+})
+onUnmounted(clearRestoreTerminal)
+
+const showRestoreCard = computed<boolean>(
+  () => restoreInFlight.value || restoreTerminal.value !== null
+)
+
+// Pull the user up to the top card when an op begins, so a user scrolled
+// deep in the timeline sees the card without hunting for it. Uses
+// `block: 'start'` because the card is the top item and we want the
+// header just below the chrome.
+const topCardRef = ref<HTMLElement | null>(null)
+watch(restoreInFlight, (yes) => {
+  if (!yes) return
+  void nextTick(() => {
+    topCardRef.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  })
+})
 
 // Merged timeline (snapshots + copy events), newest first.
 type TimelineItem =
@@ -118,21 +263,71 @@ async function load(): Promise<void> {
     console.error('SnapshotsView.load failed', err)
   } finally {
     loading.value = false
+    if (expandedFilenames.value.size === 0) {
+      const firstSnapshot = timeline.value.find(
+        (item): item is Extract<TimelineItem, { kind: 'snapshot' }> => item.kind === 'snapshot'
+      )
+      if (firstSnapshot) {
+        expandedFilenames.value = new Set([firstSnapshot.snapshot.filename])
+      }
+    }
   }
 }
 
 // --- Per-row expansion (change summary) ---
 
-const expanded = ref<string | null>(null)
+const expandedFilenames = ref<Set<string>>(new Set())
+// Loaded "Changes from previous" diffs, keyed by snapshot filename.
+// Presence in the map = panel is open; null = loaded with no diff returned.
+const diffByFilename = ref<Map<string, SnapshotDiffData | null>>(new Map())
+const diffLoadingFilename = ref<string | null>(null)
+
+function isExpanded(filename: string): boolean {
+  return expandedFilenames.value.has(filename)
+}
 
 function toggleExpand(filename: string): void {
-  expanded.value = expanded.value === filename ? null : filename
+  const next = new Set(expandedFilenames.value)
+  if (next.has(filename)) {
+    next.delete(filename)
+  } else {
+    next.add(filename)
+  }
+  expandedFilenames.value = next
+}
+
+function isDiffOpen(filename: string): boolean {
+  return diffByFilename.value.has(filename)
+}
+
+async function toggleDiff(filename: string): Promise<void> {
+  if (diffByFilename.value.has(filename)) {
+    const next = new Map(diffByFilename.value)
+    next.delete(filename)
+    diffByFilename.value = next
+    return
+  }
+  diffLoadingFilename.value = filename
+  try {
+    const d = await window.api.getSnapshotDiff(props.installationId, filename, 'previous')
+    const next = new Map(diffByFilename.value)
+    next.set(filename, d)
+    diffByFilename.value = next
+    emitTelemetryAction('desktop2.snapshot.flow', {
+      action: 'view_diff',
+      snapshot_count_bucket: toCountBucket(snapshots.value.length),
+      has_diff: d ? diffHasChanges(d.diff) : undefined
+    })
+  } finally {
+    diffLoadingFilename.value = null
+  }
 }
 
 watch(
   () => props.installationId,
   () => {
-    expanded.value = null
+    expandedFilenames.value = new Set()
+    diffByFilename.value = new Map()
     void load()
   },
   { immediate: true }
@@ -145,7 +340,7 @@ function changeSummaryFor(s: SnapshotSummary): string[] {
 // --- Save ---
 
 async function handleSave(): Promise<void> {
-  const label = await modal.prompt({
+  const label = await dialogs.prompt({
     title: t('standalone.snapshotSaveTitle'),
     message: t('standalone.snapshotSaveMessage'),
     placeholder: t('standalone.snapshotLabelPlaceholder'),
@@ -158,9 +353,10 @@ async function handleSave(): Promise<void> {
       label: label || undefined
     })
   } catch (err: unknown) {
-    await modal.alert({
-      title: t('snapshots.saveSnapshot'),
-      message: (err as Error).message || String(err)
+    await dialogs.alert({
+      title: t('snapshots.saveErrorTitle'),
+      message: (err as Error).message || String(err),
+      tone: 'danger'
     })
     return
   }
@@ -168,7 +364,7 @@ async function handleSave(): Promise<void> {
     action: 'save',
     snapshot_count_bucket: toCountBucket(snapshots.value.length)
   })
-  expanded.value = null
+  expandedFilenames.value = new Set()
   await load()
   emit('refresh-all')
 }
@@ -209,11 +405,8 @@ async function handleRestore(filename: string): Promise<void> {
     cancellable: true,
     style: 'primary',
     confirm: {
-      title: t('standalone.snapshotRestore', 'Restore Snapshot'),
-      message: t(
-        'snapshots.restoreConfirm',
-        'Are you sure you want to restore this snapshot? Your current install state will be replaced.'
-      ),
+      title: t('snapshots.restoreConfirmTitle'),
+      message: t('snapshots.restoreConfirmMessage'),
       messageDetails,
       confirmLabel: t('standalone.snapshotRestore', 'Restore')
     }
@@ -223,18 +416,28 @@ async function handleRestore(filename: string): Promise<void> {
 // --- Delete ---
 
 async function handleDelete(filename: string): Promise<void> {
-  const ok = await modal.confirm({
-    title: t('standalone.snapshotDelete'),
-    message: t('snapshots.deleteConfirm'),
-    confirmStyle: 'danger'
+  const target = snapshots.value.find((s) => s.filename === filename)
+  const displayName = target?.label || target?.filename || ''
+  // Title carries the snapshot name (HIG-style: "Delete X?") so the
+  // user can scan the destructive scope at a glance. Message
+  // explains the consequence in one sentence — no recessed "what
+  // happens" block; that was over-engineered for a one-line confirm.
+  const result = await dialogs.confirm({
+    title: displayName
+      ? t('snapshots.deleteConfirmNamed', { name: displayName })
+      : t('snapshots.deleteConfirm'),
+    message: t('snapshots.deleteConfirmMessage'),
+    confirmLabel: t('snapshots.delete'),
+    tone: 'danger'
   })
-  if (!ok) return
+  if (result !== 'primary') return
   try {
     await window.api.runAction(props.installationId, 'snapshot-delete', { file: filename })
   } catch (err: unknown) {
-    await modal.alert({
-      title: t('snapshots.delete', 'Delete Snapshot'),
-      message: (err as Error).message || String(err)
+    await dialogs.alert({
+      title: t('snapshots.deleteErrorTitle'),
+      message: (err as Error).message || String(err),
+      tone: 'danger'
     })
     return
   }
@@ -242,7 +445,11 @@ async function handleDelete(filename: string): Promise<void> {
     action: 'delete',
     snapshot_count_bucket: toCountBucket(snapshots.value.length)
   })
-  if (expanded.value === filename) expanded.value = null
+  if (expandedFilenames.value.has(filename)) {
+    const next = new Set(expandedFilenames.value)
+    next.delete(filename)
+    expandedFilenames.value = next
+  }
   await load()
   emit('refresh-all')
 }
@@ -272,9 +479,10 @@ async function handleImport(): Promise<void> {
   const preview = await window.api.importSnapshotsPreview()
   if (!preview.ok) {
     if (preview.message) {
-      await modal.alert({
-        title: t('snapshots.importSnapshots', 'Import Snapshots'),
-        message: preview.message
+      await dialogs.alert({
+        title: t('snapshots.importErrorTitle'),
+        message: preview.message,
+        tone: 'danger'
       })
     }
     return
@@ -283,25 +491,26 @@ async function handleImport(): Promise<void> {
   const previewLines = previewItems.map(
     (p) => `${p.label || p.filename} (${formatDate(p.createdAt)})`
   )
-  const ok = await modal.confirm({
-    title: t('snapshots.importSnapshots', 'Import Snapshots'),
-    message: t('snapshots.importPreviewMessage', 'Review the snapshots to import.'),
+  const importChoice = await dialogs.confirm({
+    title: t('snapshots.importConfirmTitle'),
+    message: t('snapshots.importConfirmMessage'),
     messageDetails:
       previewLines.length > 0
         ? [{ label: t('snapshots.importPreviewLabel', 'Snapshots'), items: previewLines }]
         : undefined,
-    confirmLabel: t('snapshots.importContinue', 'Continue'),
-    confirmStyle: 'primary'
+    confirmLabel: t('snapshots.importConfirmLabel'),
+    tone: 'primary'
   })
-  if (!ok) return
+  if (importChoice !== 'primary') return
 
   // Step 2: diff
   const diff = await window.api.importSnapshotsDiff(props.installationId)
   if (!diff.ok) {
     if (diff.message) {
-      await modal.alert({
-        title: t('snapshots.importSnapshots', 'Import Snapshots'),
-        message: diff.message
+      await dialogs.alert({
+        title: t('snapshots.importErrorTitle'),
+        message: diff.message,
+        tone: 'danger'
       })
     }
     return
@@ -316,12 +525,13 @@ async function handleImport(): Promise<void> {
     props.installationId,
     t('snapshots.importSnapshots', 'Import Snapshots'),
   )) return
-  const result = await window.api.importSnapshotsConfirm(props.installationId)
-  if (!result.ok) {
-    if (result.message) {
-      await modal.alert({
-        title: t('snapshots.importSnapshots', 'Import Snapshots'),
-        message: result.message
+  const importResult = await window.api.importSnapshotsConfirm(props.installationId)
+  if (!importResult.ok) {
+    if (importResult.message) {
+      await dialogs.alert({
+        title: t('snapshots.importErrorTitle'),
+        message: importResult.message,
+        tone: 'danger'
       })
     }
     return
@@ -329,20 +539,21 @@ async function handleImport(): Promise<void> {
   emitTelemetryAction('desktop2.snapshot.flow', {
     action: 'import',
     snapshot_count_bucket: toCountBucket(snapshots.value.length),
-    imported_bucket: toCountBucket(result.imported ?? 0)
+    imported_bucket: toCountBucket(importResult.imported ?? 0)
   })
 
   await load()
   emit('refresh-all')
 
-  if (result.restoreFile) {
+  if (importResult.restoreFile) {
     emit('run-action', {
       id: 'snapshot-restore',
       label: t('standalone.snapshotRestore', 'Restore'),
-      data: { file: result.restoreFile },
+      data: { file: importResult.restoreFile },
       showProgress: true,
       progressTitle: t('standalone.snapshotRestoringTitle', 'Restoring snapshot'),
-      cancellable: true
+      cancellable: true,
+      style: 'primary'
     })
   }
 }
@@ -371,6 +582,7 @@ async function handleImport(): Promise<void> {
           :data-testid="TID.snapshotsImport"
           @click="handleImport"
         >
+          <Upload :size="14" aria-hidden="true" />
           <span>{{ t('snapshots.importSnapshots', 'Import') }}</span>
         </button>
         <button
@@ -381,6 +593,7 @@ async function handleImport(): Promise<void> {
           :data-testid="TID.snapshotsExportAll"
           @click="handleExportAll"
         >
+          <Download :size="14" aria-hidden="true" />
           <span>{{ t('snapshots.exportAll', 'Export All') }}</span>
         </button>
       </div>
@@ -401,19 +614,132 @@ async function handleImport(): Promise<void> {
          pseudo-element on the <ul> so it spans the full list height
          without per-item border tricks. -->
     <ul class="snapshots-rail" :class="{ 'is-empty': timeline.length === 0 }">
-      <li class="snapshots-rail-node is-save">
-        <span class="snapshots-rail-dot is-pending" :aria-hidden="true"></span>
+      <li
+        ref="topCardRef"
+        class="snapshots-rail-node is-save"
+        :class="{
+          'is-op-inflight':  restoreInFlight,
+          'is-op-success':   restoreTerminal === 'ok',
+          'is-op-error':     restoreTerminal === 'error'
+        }"
+      >
+        <span
+          class="snapshots-rail-dot"
+          :class="{
+            'is-pending':  !showRestoreCard,
+            'is-spinning': restoreInFlight,
+            'is-restored': restoreTerminal === 'ok',
+            'is-error':    restoreTerminal === 'error'
+          }"
+          :aria-hidden="true"
+        ></span>
         <div class="snapshots-rail-content">
-          <!-- "Save Snapshot" label is on the rail (next to the dashed
-               dot), matching the trigger label position on snapshot
-               rows below. The dashed box wraps only the CTA. -->
           <span class="snapshots-rail-label">
-            {{ t('snapshots.saveLabel', 'Save Snapshot') }}
+            <template v-if="restoreInFlight">{{ t('snapshots.restoringStatus', 'Restoring snapshot') }}</template>
+            <template v-else-if="restoreTerminal === 'ok'">{{ t('snapshots.restored', 'Snapshot restored') }}</template>
+            <template v-else-if="restoreTerminal === 'error'">{{ t('snapshots.restoreFailed', 'Restore failed') }}</template>
+            <template v-else>{{ t('snapshots.saveLabel', 'Save Snapshot') }}</template>
           </span>
-          <div class="snapshots-rail-save-box">
+          <div
+            class="snapshots-rail-save-box"
+            :class="{
+              'is-op-inflight':  restoreInFlight,
+              'is-op-success':   restoreTerminal === 'ok',
+              'is-op-error':     restoreTerminal === 'error'
+            }"
+          >
+            <!-- In-flight: prominent card with target label, phase text,
+                 percent bar, and (when supported) a Cancel action. -->
+            <div
+              v-if="restoreInFlight"
+              class="snapshots-op-card"
+              role="status"
+              aria-live="polite"
+              :data-testid="TID.snapshotsOpCard"
+            >
+              <p v-if="restoreFromLabel" class="snapshots-op-card-target">
+                {{ t('snapshots.restoringFrom', { label: restoreFromLabel }) }}
+              </p>
+              <div
+                class="snapshots-op-bar-wrap"
+                role="progressbar"
+                :aria-valuenow="restorePercent ?? undefined"
+                aria-valuemin="0"
+                aria-valuemax="100"
+              >
+                <div class="snapshots-op-bar-header">
+                  <span class="snapshots-op-bar-status">{{ restorePhase }}</span>
+                  <span v-if="restorePercent !== null" class="snapshots-op-bar-pct">
+                    {{ restorePercent }}%
+                  </span>
+                </div>
+                <div class="snapshots-op-bar-track">
+                  <div
+                    class="snapshots-op-bar-fill"
+                    :class="{ 'is-indeterminate': restorePercent === null }"
+                    :style="restorePercent === null ? {} : { width: `${restorePercent}%` }"
+                  />
+                </div>
+              </div>
+              <button
+                v-if="restoreCancellable"
+                type="button"
+                class="snapshots-op-ghost-btn"
+                :data-testid="TID.snapshotsOpCardCancel"
+                @click="cancelRestore"
+              >
+                {{ t('common.cancel', 'Cancel') }}
+              </button>
+            </div>
+
+            <!-- Success: stays for ~1.8s before auto-dismissing. -->
+            <div
+              v-else-if="restoreTerminal === 'ok'"
+              class="snapshots-op-card is-success"
+              role="status"
+              :data-testid="TID.snapshotsOpCard"
+            >
+              <p v-if="restoreFromLabel" class="snapshots-op-card-target">
+                {{ t('snapshots.restoredFrom', { label: restoreFromLabel }) }}
+              </p>
+            </div>
+
+            <!-- Error: persistent until user dismisses. -->
+            <div
+              v-else-if="restoreTerminal === 'error'"
+              class="snapshots-op-card is-error"
+              role="alert"
+              :data-testid="TID.snapshotsOpCard"
+            >
+              <p v-if="restoreErrorMessage" class="snapshots-op-card-error-msg">
+                {{ restoreErrorMessage }}
+              </p>
+              <div class="snapshots-op-actions">
+                <button
+                  type="button"
+                  class="snapshots-op-primary-btn"
+                  :data-testid="TID.snapshotsOpCardRetry"
+                  @click="retryRestore"
+                >
+                  {{ t('snapshots.tryAgain', 'Try again') }}
+                </button>
+                <button
+                  type="button"
+                  class="snapshots-op-ghost-btn"
+                  :data-testid="TID.snapshotsOpCardDismiss"
+                  @click="dismissRestoreCard"
+                >
+                  {{ t('common.dismiss', 'Dismiss') }}
+                </button>
+              </div>
+            </div>
+
+            <!-- Idle: the original Save CTA returns when there is no op
+                 in flight or terminal state pending dismissal. -->
             <button
+              v-else
               type="button"
-              class="snapshots-rail-cta primary"
+              class="snapshots-rail-cta"
               :aria-label="t('snapshots.saveSnapshot', 'Save Snapshot')"
               @click="handleSave"
             >
@@ -447,8 +773,8 @@ async function handleImport(): Promise<void> {
           <template v-if="item.kind === 'snapshot'">
             <SnapshotRow
               :snapshot="item.snapshot"
-              :expanded="expanded === item.snapshot.filename"
-              :is-current="i === 0"
+              :expanded="isExpanded(item.snapshot.filename)"
+              :is-latest="i === 0"
               :toggle-test-id="TID.snapshotRow(item.snapshot.filename)"
               @toggle="toggleExpand(item.snapshot.filename)"
             >
@@ -465,6 +791,29 @@ async function handleImport(): Promise<void> {
                 <p v-else class="snapshots-view-no-changes">
                   {{ t('snapshots.noChangesSinceLast', 'No changes since the previous snapshot.') }}
                 </p>
+                <!-- Inline diff panel (parity with legacy SnapshotInspector
+                     "Changes from previous" toggle). Reuses SnapshotDiffView
+                     verbatim — no design changes from the per-install legacy. -->
+                <div v-if="isDiffOpen(item.snapshot.filename)" class="snapshots-view-diff">
+                  <template v-if="diffByFilename.get(item.snapshot.filename)">
+                    <div
+                      v-if="!diffHasChanges(diffByFilename.get(item.snapshot.filename)!.diff)"
+                      class="snapshots-view-diff-empty"
+                    >
+                      {{ t('snapshots.diffNoChanges', 'No changes') }}
+                    </div>
+                    <SnapshotDiffView
+                      v-else
+                      :diff="diffByFilename.get(item.snapshot.filename)!.diff"
+                    />
+                  </template>
+                </div>
+                <div
+                  v-else-if="diffLoadingFilename === item.snapshot.filename"
+                  class="snapshots-view-diff-loading"
+                >
+                  {{ t('common.loading', 'Loading…') }}
+                </div>
                 <!-- Actions live in the expanded detail (per Figma): the
                      collapsed row stays a clean tap target, and the
                      destructive / mutating ops only surface once the
@@ -472,9 +821,26 @@ async function handleImport(): Promise<void> {
                 <div class="snapshots-view-detail-actions">
                   <button
                     type="button"
-                    class="snapshots-view-detail-btn primary"
+                    class="snapshots-view-detail-btn"
+                    :class="{ 'is-active': isDiffOpen(item.snapshot.filename) }"
+                    :disabled="item.snapshotIndex === snapshots.length - 1"
+                    :aria-label="t('snapshots.diffPrevious', 'Changes from previous')"
+                    :title="
+                      item.snapshotIndex === snapshots.length - 1
+                        ? t('snapshots.noPrevious', 'First snapshot — no previous to compare')
+                        : t('snapshots.diffPrevious', 'Changes from previous')
+                    "
+                    @click="toggleDiff(item.snapshot.filename)"
+                  >
+                    <GitCompare :size="13" />
+                    <span>{{ t('snapshots.diffPrevious', 'Changes from previous') }}</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="snapshots-view-detail-btn"
                     :aria-label="t('snapshots.restore', 'Restore')"
                     :data-testid="TID.snapshotRowRestore(item.snapshot.filename)"
+                    :disabled="restoreInFlight"
                     @click="handleRestore(item.snapshot.filename)"
                   >
                     <RotateCcw :size="13" />
@@ -485,6 +851,7 @@ async function handleImport(): Promise<void> {
                     class="snapshots-view-detail-btn"
                     :aria-label="t('snapshots.exportSnapshot', 'Export')"
                     :data-testid="TID.snapshotRowExport(item.snapshot.filename)"
+                    :disabled="restoreInFlight"
                     @click="handleExport(item.snapshot.filename)"
                   >
                     <Download :size="13" />
@@ -494,6 +861,7 @@ async function handleImport(): Promise<void> {
                     type="button"
                     class="snapshots-view-detail-btn snapshots-view-detail-btn-danger"
                     :aria-label="t('snapshots.delete', 'Delete')"
+                    :disabled="restoreInFlight"
                     @click="handleDelete(item.snapshot.filename)"
                   >
                     <Trash2 :size="13" />
@@ -524,41 +892,53 @@ async function handleImport(): Promise<void> {
 .snapshots-view {
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 16px;
 }
 
-/* Header row: "Latest: 8d ago" left, Import / Export All right. */
 .snapshots-view-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  border-bottom: 1px solid var(--secondary-background);
-  padding-bottom: 16px;
+  gap: 12px;
 }
 
 .snapshots-view-latest {
-  font-size: 14px;
-  color: var(--neutral-100);
-}
-
-.snapshots-view-latest strong {
-  color: var(--text);
-  font-weight: 500;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--text-muted);
 }
 
 .snapshots-view-toolbar {
   display: inline-flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
 }
 
 .snapshots-view-toolbtn {
   display: inline-flex;
   align-items: center;
+  gap: 5px;
+  min-height: 28px;
+  padding: 6px 12px;
   font-size: 12px;
+  font-weight: 500;
   color: var(--neutral-100);
-  gap: 4px;
+  border-radius: 8px;
+  border: 1px solid var(--chooser-surface-border);
+  background: var(--brand-surface-bg);
+  cursor: pointer;
+  transition: background-color 100ms ease;
+}
+
+.snapshots-view-toolbtn:hover:not(:disabled),
+.snapshots-view-toolbtn:focus-visible:not(:disabled) {
+  background: var(--brand-surface-bg-hover);
+  outline: none;
+}
+
+.snapshots-view-toolbtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .snapshots-view-status {
@@ -651,6 +1031,26 @@ async function handleImport(): Promise<void> {
   background: color-mix(in srgb, var(--text-muted) 55%, transparent);
 }
 
+/* Restore in-flight — rotating conic ring on the dot. Matches the
+ * picker row's `op-dot-spin` treatment so the same visual vocabulary
+ * means "this thing is being worked on" across the app. */
+.snapshots-rail-dot.is-spinning {
+  background: conic-gradient(var(--brand-accent, #f5c518) 270deg, transparent 270deg);
+  border: 2px solid var(--color-surface);
+  animation: snapshots-rail-dot-spin 0.8s linear infinite;
+}
+.snapshots-rail-dot.is-restored {
+  background: var(--success, #34c759);
+  border: 2px solid var(--color-surface);
+}
+.snapshots-rail-dot.is-error {
+  background: var(--danger, #ef4444);
+  border: 2px solid var(--color-surface);
+}
+@keyframes snapshots-rail-dot-spin {
+  to { transform: rotate(360deg); }
+}
+
 .snapshots-rail-dot.is-pending {
   border-radius: 7px;
   border: 2px dashed var(--neutral-400);
@@ -667,7 +1067,7 @@ async function handleImport(): Promise<void> {
   display: flex;
   flex-direction: column;
   padding: 12px;
-  border: 1px dashed var(--secondary-background);
+  border: 1px dashed var(--chooser-surface-border);
   border-radius: 8px;
 }
 
@@ -680,6 +1080,18 @@ async function handleImport(): Promise<void> {
   font-size: var(--takeover-fs-body);
   padding: 10px 14px;
   border-radius: 8px;
+  border: 1px solid var(--chooser-surface-border);
+  background: var(--brand-surface-bg);
+  color: var(--neutral-100);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 100ms ease;
+}
+
+.snapshots-rail-cta:hover,
+.snapshots-rail-cta:focus-visible {
+  background: var(--brand-surface-bg-hover);
+  outline: none;
 }
 
 .snapshots-rail-node.is-save .snapshots-rail-label {
@@ -702,22 +1114,85 @@ async function handleImport(): Promise<void> {
 .snapshots-view-detail-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 2px;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-hover);
 }
 
 .snapshots-view-detail-btn {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  padding: 6px 10px;
+  min-height: 32px;
+  padding: 8px 16px;
   font-size: 12px;
-  border-radius: 6px;
+  font-weight: 500;
+  border-radius: 8px;
+  border: 1px solid var(--chooser-surface-border);
+  background: var(--brand-surface-bg);
+  color: var(--neutral-100);
+  cursor: pointer;
+  transition:
+    background-color 100ms ease,
+    border-color 100ms ease;
 }
 
-.snapshots-view-detail-btn-danger:hover {
+.snapshots-view-detail-btn:hover,
+.snapshots-view-detail-btn:focus-visible {
+  background: var(--brand-surface-bg-hover);
+  outline: none;
+}
+
+.snapshots-view-detail-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.snapshots-view-detail-btn.is-active {
+  background: var(--brand-surface-bg-hover);
+  border-color: color-mix(in oklab, var(--neutral-100) 28%, transparent);
+}
+
+.snapshots-view-detail-btn-danger {
+  color: var(--danger);
+}
+
+.snapshots-view-detail-btn-danger:hover,
+.snapshots-view-detail-btn-danger:focus-visible {
   color: var(--danger);
   border-color: var(--danger);
+}
+
+.snapshots-view-diff {
+  /* Match the surrounding expanded-row surface — no second tint, no
+   * box-in-a-box. The 1px hairline + radius are enough to delimit the
+   * panel; tinted background made it the only filled block in the
+   * expanded card and felt foreign. */
+  padding: 10px 12px;
+  margin-top: 8px;
+  /* Cap at ~14 diff lines (12px/16px line-height) before the inner
+   * pane starts scrolling — long diffs (100+ pip changes) otherwise
+   * push the action row off-screen and force whole-drawer scroll. */
+  max-height: 280px;
+  overflow-y: auto;
+  border: 1px solid var(--border-hover);
+  border-radius: 8px;
+  background: transparent;
+}
+
+.snapshots-view-diff-empty {
+  font-size: var(--takeover-fs-caption);
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.snapshots-view-diff-loading {
+  padding: 8px 12px;
+  margin-top: 8px;
+  font-size: var(--takeover-fs-caption);
+  color: var(--text-muted);
 }
 
 .snapshots-view-label {
@@ -728,14 +1203,18 @@ async function handleImport(): Promise<void> {
 }
 
 .snapshots-view-changes {
-  list-style: disc;
+  list-style: none;
   margin: 0;
-  padding-left: 18px;
+  padding: 0;
   font-size: var(--takeover-fs-caption);
   color: var(--text-muted);
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
+}
+
+.snapshots-view-changes li {
+  line-height: 16px;
 }
 
 .snapshots-view-no-changes {
@@ -743,6 +1222,119 @@ async function handleImport(): Promise<void> {
   font-size: var(--takeover-fs-caption);
   color: var(--text-muted);
   font-style: italic;
+}
+
+/* Top-card restore feedback. Lives in the dashed "Save New Snapshot"
+ * slot at the top of the timeline so the user sees the operation at
+ * the top of their attention rather than buried mid-list. Three
+ * outcomes: in-flight (default border, percent bar), success (green
+ * tint, auto-dismiss), error (red tint, retry/dismiss actions). */
+.snapshots-rail-save-box.is-op-inflight,
+.snapshots-rail-save-box.is-op-success,
+.snapshots-rail-save-box.is-op-error {
+  border-style: solid;
+  padding: 14px;
+}
+.snapshots-rail-save-box.is-op-success {
+  border-color: var(--success, #34c759);
+  background: color-mix(in srgb, var(--success, #34c759) 8%, transparent);
+}
+.snapshots-rail-save-box.is-op-error {
+  border-color: var(--danger, #ef4444);
+  background: color-mix(in srgb, var(--danger, #ef4444) 8%, transparent);
+}
+
+.snapshots-op-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.snapshots-op-card-target {
+  margin: 0;
+  font-size: var(--takeover-fs-caption);
+  color: var(--text-muted);
+}
+.snapshots-op-bar-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.snapshots-op-bar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: var(--takeover-fs-caption);
+}
+.snapshots-op-bar-status {
+  color: var(--neutral-100);
+}
+.snapshots-op-bar-pct {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.snapshots-op-bar-track {
+  position: relative;
+  height: 4px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--neutral-100) 8%, transparent);
+  overflow: hidden;
+}
+.snapshots-op-bar-fill {
+  height: 100%;
+  background: var(--brand-accent, #f5c518);
+  transition: width 120ms ease;
+}
+.snapshots-op-bar-fill.is-indeterminate {
+  width: 40%;
+  animation: snapshots-op-bar-indet 1.2s ease-in-out infinite;
+}
+@keyframes snapshots-op-bar-indet {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(250%); }
+}
+
+.snapshots-op-card-error-msg {
+  margin: 0;
+  font-size: var(--takeover-fs-caption);
+  color: var(--danger, #ef4444);
+  word-break: break-word;
+}
+.snapshots-op-actions {
+  display: flex;
+  gap: 8px;
+}
+.snapshots-op-primary-btn,
+.snapshots-op-ghost-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background-color 100ms ease;
+}
+.snapshots-op-primary-btn {
+  background: var(--brand-accent, #f5c518);
+  color: #1a1a1a;
+  border: 1px solid var(--brand-accent, #f5c518);
+}
+.snapshots-op-primary-btn:hover,
+.snapshots-op-primary-btn:focus-visible {
+  background: color-mix(in srgb, var(--brand-accent, #f5c518) 88%, white);
+  outline: none;
+}
+.snapshots-op-ghost-btn {
+  background: transparent;
+  color: var(--neutral-100);
+  border: 1px solid var(--chooser-surface-border);
+}
+.snapshots-op-ghost-btn:hover,
+.snapshots-op-ghost-btn:focus-visible {
+  background: var(--brand-surface-bg-hover);
+  outline: none;
 }
 
 .snapshots-view-copy-event {

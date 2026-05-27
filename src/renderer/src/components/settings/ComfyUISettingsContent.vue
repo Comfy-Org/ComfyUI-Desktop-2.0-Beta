@@ -1,22 +1,20 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, toRef, useTemplateRef, watch } from 'vue'
+import { computed, nextTick, onUnmounted, ref, toRef, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ChevronUp, ArrowLeft } from 'lucide-vue-next'
+import { CheckCircle, XCircle, ChevronUp, HardDrive, SlidersHorizontal, Info, RefreshCw, History } from 'lucide-vue-next'
 import { useComfyUISettings } from '../../composables/useComfyUISettings'
 import { useSessionStore } from '../../stores/sessionStore'
 import { findActionById } from '../../lib/findAction'
 import MoreMenu from '../../views/comfyUISettings/MoreMenu.vue'
 import ArgsBuilderPage from '../../views/comfyUISettings/ArgsBuilderPage.vue'
 import SnapshotsView from '../../views/comfyUISettings/SnapshotsView.vue'
+import StatusFactPanel from '../../views/comfyUISettings/StatusFactPanel.vue'
 import SettingsSectionList from '../../views/comfyUISettings/SettingsSectionList.vue'
-import type { PickerTab } from '../../lib/pickerTabs'
-import type {
-  ActionDef,
-  DetailField,
-  DetailSection,
-  Installation,
-  ShowProgressOpts,
-} from '../../types/ipc'
+import StoragePane, { type StorageSnapshot } from '../../views/comfyUISettings/StoragePane.vue'
+import Tooltip from '../ui/Tooltip.vue'
+import type { PickerTab, SectionTab } from '../../lib/pickerTabs'
+import { humanizeOpStatus } from '../../lib/progressStatusLabel'
+import type { ActionDef, DetailField, Installation, ShowProgressOpts } from '../../types/ipc'
 import { TID } from '../../../../shared/testIds'
 
 /**
@@ -29,13 +27,22 @@ import { TID } from '../../../../shared/testIds'
 
 export type ComfyUISettingsTab = PickerTab
 
+interface ActiveOperation {
+  percent: number
+  status: string
+  speedBytesPerSec?: number | null
+  done: boolean
+  ok: boolean | null
+  error: string | null
+  cancellable: boolean
+  title: string
+  actionId: string
+  actionData?: Record<string, unknown>
+}
+
 interface Props {
   installation: Installation | null
   initialTab?: ComfyUISettingsTab
-  /** Render a leading "← Back" affordance in the tab strip. Opt-in
-   *  because the drawer host owns its own back-chrome; only the
-   *  picker's expanded right pane needs an in-content back. */
-  showBack?: boolean
   /** Optional action id to fire automatically once `sections` are
    *  loaded — mirrors `DetailModal`'s `autoAction` prop. Used by the
    *  picker's expanded mode when opened via dashboard kebab
@@ -43,12 +50,28 @@ interface Props {
    *  Standalone`. Consumed exactly once per prop value transition;
    *  later section reloads or selection changes do not re-fire. */
   autoAction?: string | null
+  /** Slice of the popup's global-settings snapshot consumed by the
+   *  Storage tab. Optional so non-popup hosts (e.g. drawer chrome)
+   *  can omit it and the Storage tab silently empties out — they
+   *  don't have a way to mutate global settings anyway. */
+  globalSettingsSnapshot?: StorageSnapshot
+  /** Live operation status for an in-flight or recently-completed
+   *  background op on this install (cross-instance update etc.).
+   *  When set and the active tab is `'update'`, the Update tab body
+   *  is replaced with an inline progress / result view. */
+  activeOperation?: ActiveOperation | null
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  initialTab: 'config',
+  initialTab: 'update',
   showBack: false,
   autoAction: null,
+  activeOperation: null,
+  globalSettingsSnapshot: () => ({
+    sharedDirectoriesFields: [],
+    modelsDirs: [],
+    modelsSystemDefault: '',
+  }),
 })
 
 const emit = defineEmits<{
@@ -66,10 +89,11 @@ const emit = defineEmits<{
    *  expanded view's footer. Payload carries the running flag so the
    *  host doesn't have to re-derive it. */
   'primary-action': [running: boolean]
-  /** Leading back affordance click (only rendered when
-   *  `showBack === true`). Host decides what "back" means — for the
-   *  picker it collapses the expanded mode. */
-  back: []
+  /** Inline progress CTA events — forwarded up to the host which owns
+   *  the bridge methods for cancel / retry / dismiss. */
+  'op-cancel': []
+  'op-retry': []
+  'op-dismiss': []
 }>()
 
 const { t } = useI18n()
@@ -80,7 +104,14 @@ watch(
   () => props.initialTab,
   (next) => {
     activeTab.value = next
-  },
+  }
+)
+
+watch(
+  () => props.installation?.id ?? null,
+  (next, prev) => {
+    if (next !== prev) activeTab.value = props.initialTab
+  }
 )
 
 const installation = toRef(props, 'installation')
@@ -90,16 +121,19 @@ const {
   loading,
   error,
   updateField,
+  pendingRestartFieldIds,
+  fieldErrorMessages,
   runAction,
+  runningActionIds,
   sectionsForTab,
   diskUsageItem,
   pinBottomActions,
-  reload,
+  reload
 } = useComfyUISettings({
   installation,
   onShowProgress: (opts) => emit('show-progress', opts),
   onNavigateList: () => emit('navigate-list'),
-  onClose: () => emit('request-close'),
+  onClose: () => emit('request-close')
 })
 
 // `autoAction` consumption — fires the named action once per prop
@@ -124,14 +158,14 @@ watch(
   () => props.autoAction,
   (next, prev) => {
     if (next !== prev) consumedAutoAction.value = null
-  },
+  }
 )
 watch(
   [
     () => props.autoAction,
     () => props.installation?.id ?? null,
     () => loading.value,
-    () => sections.value.length,
+    () => sections.value.length
   ],
   async ([autoAction, installId, isLoading, sectionsLen]) => {
     if (!installId || !autoAction || isLoading || sectionsLen === 0) return
@@ -160,7 +194,7 @@ watch(
 
     void runAction(action)
   },
-  { immediate: true },
+  { immediate: true }
 )
 
 // Auto-refresh stale channel-cards when the Update tab opens. The
@@ -181,14 +215,9 @@ watch(
 // flips don't spam IPCs. Main's `getOrFetch(..., force=true)` short-
 // circuits on the 10s window so even a stuck renderer can't push more
 // than 6 fetches/minute/channel.
-const STALE_CHANNEL_CARD_MS = 15 * 60 * 1000
 const refreshedChannelKeys = new Set<string>()
 watch(
-  [
-    () => activeTab.value,
-    () => props.installation?.id ?? null,
-    () => sections.value.length,
-  ],
+  [() => activeTab.value, () => props.installation?.id ?? null, () => sections.value.length],
   ([tab, installId, sectionsLen]) => {
     if (tab !== 'update' || !installId || sectionsLen === 0) return
 
@@ -199,12 +228,6 @@ watch(
 
     const currentChannel = typeof channelField.value === 'string' ? channelField.value : null
     if (!currentChannel) return
-
-    const selectedOption = channelField.options?.find((o) => o.value === currentChannel)
-    const data = selectedOption?.data as { checkedAt?: number } | undefined
-    const checkedAt = typeof data?.checkedAt === 'number' ? data.checkedAt : null
-    const stale = checkedAt === null || Date.now() - checkedAt > STALE_CHANNEL_CARD_MS
-    if (!stale) return
 
     // Look up the canonical action def from sections so we inherit
     // whatever `enabled` / disabledMessage / future fields main attaches
@@ -226,35 +249,56 @@ watch(
     // re-fire on the same install+channel).
     void runAction(checkAction)
   },
-  { immediate: true },
+  { immediate: true }
 )
 
 interface TabDef {
   key: ComfyUISettingsTab
-  /** The `DetailSection.tab` literal we filter for. The Figma's "Config"
-   *  is sourced from sections tagged `'settings'` (launch-settings
-   *  fields built by `buildLaunchSettingsFields` in main). */
-  sectionTab: 'settings' | 'status' | 'update' | 'snapshots'
+  sectionTab: SectionTab
   label: string
+  icon: typeof SlidersHorizontal
 }
 
-// Tab visibility is data-driven: a tab is shown iff main emitted at
-// least one section for it. Cloud sources don't emit `update` or
-// `snapshots` sections (see urlSource.ts), so cloud opens with only
-// Config + Status — matching the picker's right-pane visibility rule.
 const ALL_TABS: TabDef[] = [
-  { key: 'config', sectionTab: 'settings', label: t('comfyUISettings.tabConfig', 'Config') },
-  { key: 'status', sectionTab: 'status', label: t('comfyUISettings.tabStatus', 'Status') },
-  { key: 'update', sectionTab: 'update', label: t('comfyUISettings.tabUpdate', 'Update') },
+  {
+    key: 'update',
+    sectionTab: 'update',
+    label: t('comfyUISettings.tabUpdate', 'Update'),
+    icon: RefreshCw
+  },
+  {
+    key: 'config',
+    sectionTab: 'settings',
+    label: t('comfyUISettings.tabConfig', 'Startup Args'),
+    icon: SlidersHorizontal
+  },
   {
     key: 'snapshots',
     sectionTab: 'snapshots',
     label: t('comfyUISettings.tabSnapshots', 'Snapshots'),
+    icon: History
   },
+  {
+    key: 'storage',
+    sectionTab: 'storage',
+    label: t('comfyUISettings.tabStorage', 'Storage'),
+    icon: HardDrive
+  },
+  {
+    key: 'status',
+    sectionTab: 'status',
+    label: t('comfyUISettings.tabStatus', 'About'),
+    icon: Info
+  }
 ]
 const tabs = computed<TabDef[]>(() =>
-  ALL_TABS.filter((tab) => sectionsForTab(tab.sectionTab).value.length > 0),
+  ALL_TABS.filter((tab) => sectionsForTab(tab.sectionTab).value.length > 0)
 )
+
+const showUpdateBadge = computed(() => {
+  const inst = installation.value
+  return inst?.statusTag?.style === 'update' || inst?.status === 'update-available'
+})
 
 // If the currently selected tab disappeared (e.g. swapping a local
 // install for a cloud one while open), fall back to the requested
@@ -274,29 +318,12 @@ watch(tabs, (next) => {
 
 const visibleSections = computed(() => {
   const tab = tabs.value.find((tt) => tt.key === activeTab.value)?.sectionTab ?? 'settings'
-  const base = sectionsForTab(tab).value
-  // Status tab synthesizes one extra readonly row for total disk usage
-  // (driven off the same loader the rest of the tab uses). Append it
-  // through the shared section list so styling, collapse handling, and
-  // readonly chrome stay consistent with every other status row.
-  if (activeTab.value === 'status' && diskUsageItem.value) {
-    return [
-      ...base,
-      {
-        tab: 'status',
-        fields: [
-          {
-            id: '__disk-usage',
-            label: t('comfyUISettings.diskUsage', 'Disk Usage'),
-            value: diskUsageItem.value.label,
-            editable: false,
-          },
-        ],
-      } as DetailSection,
-    ]
-  }
-  return base
+  return sectionsForTab(tab).value
 })
+
+const statusSections = computed(() => sectionsForTab('status').value)
+
+const storageSections = computed(() => sectionsForTab('storage').value)
 
 const rootRef = useTemplateRef<HTMLElement>('root')
 
@@ -375,7 +402,7 @@ watch(
   () => {
     subPage.value = null
     moreMenuOpen.value = false
-  },
+  }
 )
 
 const argsField = computed<DetailField | null>(() => {
@@ -416,26 +443,130 @@ const isInstallRunning = computed(() => {
   return inst ? sessionStore.isRunning(inst.id) : false
 })
 
-const primaryActionLabel = computed(() =>
-  isInstallRunning.value
-    ? t('instancePicker.restart', 'Restart')
-    : t('instancePicker.open', 'Open'),
+const hasPendingRestart = computed(
+  () => isInstallRunning.value && pendingRestartFieldIds.value.size > 0
 )
+
+const primaryActionLabel = computed(() => {
+  if (hasPendingRestart.value) {
+    return t('instancePicker.restartToApply', 'Restart to apply changes')
+  }
+  return isInstallRunning.value
+    ? t('instancePicker.restart', 'Restart')
+    : t('instancePicker.open', 'Open')
+})
 
 function handlePrimaryAction(): void {
   if (!installation.value) return
   emit('primary-action', isInstallRunning.value)
 }
 
+// Inline-progress state derived from the `activeOperation` prop.
+const opInflight  = computed(() => props.activeOperation != null && !props.activeOperation.done)
+const opSuccess   = computed(() => props.activeOperation?.done === true && props.activeOperation.ok === true)
+const opError     = computed(() => props.activeOperation?.done === true && props.activeOperation.ok === false && props.activeOperation.error !== 'Cancelled.')
+const opCancelled = computed(() => props.activeOperation?.done === true && props.activeOperation.error === 'Cancelled.')
+
+const opProgressPct     = computed(() => Math.min(100, Math.max(0, props.activeOperation?.percent ?? 0)))
+const opIsIndeterminate = computed(() => (props.activeOperation?.percent ?? -1) < 0 && !props.activeOperation?.done)
+
+const opStatusLabel = computed(() => {
+  const op = props.activeOperation
+  if (!op) return ''
+  if (opCancelled.value) return t('instancePicker.progressCancelled')
+  if (opError.value)     return op.error ?? t('instancePicker.progressError')
+  if (opSuccess.value)   return opSuccessLabel.value
+  return humanizeOpStatus(op.status, t)
+})
+
+const opIsDowngrade = computed(
+  () => props.activeOperation?.actionId === 'update-comfyui'
+    && (props.activeOperation.actionData as { isDowngrade?: boolean } | undefined)?.isDowngrade === true
+)
+
+const opTitleLabel = computed(() => {
+  if (!props.activeOperation) return ''
+  return opIsDowngrade.value
+    ? t('instancePicker.progressDowngrading')
+    : t('instancePicker.progressUpdating')
+})
+
+const opSuccessLabel = computed(() =>
+  opIsDowngrade.value
+    ? t('instancePicker.progressDowngraded')
+    : t('instancePicker.progressSuccessStopped')
+)
+
+// Network speed label — only shown when a real speed value exists.
+function formatSpeed(bps: number): string {
+  if (bps >= 1_000_000) return `${(bps / 1_000_000).toFixed(1)} MB/s`
+  if (bps >= 1_000)     return `${Math.round(bps / 1_000)} KB/s`
+  return `${Math.round(bps)} B/s`
+}
+const opSpeedLabel = computed(() => {
+  const spd = props.activeOperation?.speedBytesPerSec
+  return (spd != null && spd > 0) ? formatSpeed(spd) : null
+})
+
+// Show overlay when Update tab is active AND op is present.
+const showOpOverlay = computed(
+  () => activeTab.value === 'update' && props.activeOperation != null
+)
+
+// Block footer while in-flight.
+const opBlocksFooter = computed(() => opInflight.value)
+
+// Auto-dismiss countdown on success (3 → 2 → 1 → dismiss).
+const successCountdown = ref(0)
+let countdownTimer: ReturnType<typeof setInterval> | null = null
+
+function clearCountdown(): void {
+  if (countdownTimer !== null) {
+    clearInterval(countdownTimer)
+    countdownTimer = null
+  }
+  successCountdown.value = 0
+}
+
+watch(opSuccess, (yes) => {
+  if (!yes) { clearCountdown(); return }
+  // Reload sections immediately so installed version + update badge
+  // reflect the new state as soon as the overlay dismisses.
+  void reload()
+  // Clear the channel-check dedup key so the auto-refresh watcher
+  // can re-fire check-update after the overlay goes away.
+  const installId = props.installation?.id
+  if (installId) {
+    for (const key of Array.from(refreshedChannelKeys)) {
+      if (key.startsWith(`${installId}:`)) refreshedChannelKeys.delete(key)
+    }
+  }
+  successCountdown.value = 3
+  countdownTimer = setInterval(() => {
+    successCountdown.value -= 1
+    if (successCountdown.value <= 0) {
+      clearCountdown()
+      emit('op-dismiss')
+    }
+  }, 1000)
+})
+
+// Close the More menu if it's open when an op begins — otherwise it
+// becomes an island of clickable rows on a footer button that's about
+// to gray out.
+watch(opInflight, (yes) => {
+  if (yes && moreMenuOpen.value) closeMoreMenu()
+})
+
+onUnmounted(clearCountdown)
+
 defineExpose({
   /** Host can force-focus the active tab — drawer uses this when it
    *  opens so initial focus lands inside the body. */
   focusActiveTab(): void {
-    const firstTab = rootRef.value?.querySelector<HTMLButtonElement>(
-      '.settings-v2-tab.is-active',
-    )
+    const firstTab = rootRef.value?.querySelector<HTMLButtonElement>('.settings-v2-tab.is-active')
     firstTab?.focus()
-  },
+  }
 })
 </script>
 
@@ -443,33 +574,36 @@ defineExpose({
   <div ref="root" class="settings-v2-content">
     <nav
       class="settings-v2-tabs"
+      :class="{ 'is-subpage-active': subPage !== null }"
       role="tablist"
       :aria-label="t('comfyUISettings.title', 'Settings')"
+      :aria-hidden="subPage !== null"
     >
-      <button
-        v-if="showBack"
-        type="button"
-        class="settings-v2-back"
-        :aria-label="t('common.back', 'Back')"
-        @click="emit('back')"
-      >
-        <ArrowLeft :size="14" aria-hidden="true" />
-        <span>{{ t('common.back', 'Back') }}</span>
-      </button>
-      <button
+      <Tooltip
         v-for="(tab, i) in tabs"
         :key="tab.key"
-        type="button"
-        role="tab"
-        :aria-selected="activeTab === tab.key"
-        :tabindex="activeTab === tab.key ? 0 : -1"
-        class="settings-v2-tab"
-        :class="{ 'is-active': activeTab === tab.key }"
-        @click="selectTab(tab.key)"
-        @keydown="handleTabKeydown($event, i)"
+        :text="tab.label"
+        side="bottom"
       >
-        {{ tab.label }}
-      </button>
+        <button
+          type="button"
+          role="tab"
+          :aria-selected="activeTab === tab.key"
+          :tabindex="activeTab === tab.key ? 0 : -1"
+          class="settings-v2-tab"
+          :class="{ 'is-active': activeTab === tab.key }"
+          @click="selectTab(tab.key)"
+          @keydown="handleTabKeydown($event, i)"
+        >
+          <component :is="tab.icon" :size="14" aria-hidden="true" class="settings-v2-tab-icon" />
+          <span>{{ tab.label }}</span>
+          <span
+            v-if="tab.key === 'update' && showUpdateBadge"
+            class="settings-v2-tab-badge"
+            aria-hidden="true"
+          ></span>
+        </button>
+      </Tooltip>
     </nav>
 
     <section class="settings-v2-body">
@@ -495,14 +629,15 @@ defineExpose({
           @update="handleArgsUpdate"
         />
 
-        <div v-else key="subpage-root" class="settings-v2-body-root">
-          <!-- Inner tab-swap transition. The two child components both
-               need to be wrapped in a single-root `<div>` because
-               `<Transition>` requires a single root child — and
-               `SettingsSectionList` actually renders as a `v-for`
-               fragment of `<article>` siblings, which would silently
-               disable the animation AND prevent any tab content from
-               rendering at all. -->
+        <div
+          v-else
+          key="subpage-root"
+          class="settings-v2-body-root"
+          :data-testid="TID.pickerSettingsSections"
+          :data-install-id="installation?.id"
+        >
+          <!-- Inner tab-swap transition. Wrapped in a single-root
+               `<div>` because `<Transition>` requires one child. -->
           <Transition :name="tabTransition" mode="out-in">
             <div
               v-if="activeTab === 'snapshots' && installation"
@@ -511,25 +646,142 @@ defineExpose({
             >
               <SnapshotsView
                 :installation-id="installation.id"
+                :active-operation="activeOperation"
                 @run-action="handleSnapshotAction"
                 @refresh-all="handleSnapshotsRefresh"
+                @op-cancel="emit('op-cancel')"
+                @op-retry="emit('op-retry')"
+                @op-dismiss="emit('op-dismiss')"
               />
             </div>
             <div
-              v-else
-              :key="`tab-${activeTab}`"
+              v-else-if="activeTab === 'status' && installation"
+              key="tab-status"
               class="settings-v2-tab-pane"
-              :data-testid="TID.pickerSettingsSections"
-              :data-install-id="installation?.id"
             >
-              <SettingsSectionList
-                :sections="visibleSections"
-                :readonly="activeTab === 'status'"
-                :installation-id="installation?.id"
-                @update-field="updateField"
-                @run-action="runAction"
-                @open-args-page="openArgsPage"
+              <StatusFactPanel
+                :installation="installation"
+                :sections="statusSections"
+                :disk-usage="diskUsageItem"
               />
+            </div>
+            <div
+              v-else-if="activeTab === 'storage'"
+              key="tab-storage"
+              class="settings-v2-tab-pane"
+            >
+              <!-- Lazy-mounted via `v-else-if` so picker opens that
+                   never visit Storage don't render the global model-
+                   dir UI. Snapshot is owned by the popup root and
+                   threaded through here as a prop. -->
+              <StoragePane
+                :installation="installation"
+                :snapshot="globalSettingsSnapshot"
+                :sections="storageSections"
+                :pending-restart-field-ids="pendingRestartFieldIds"
+                :field-error-messages="fieldErrorMessages"
+                :running-action-ids="runningActionIds"
+                @update-field="updateField"
+              />
+            </div>
+            <div v-else :key="`tab-${activeTab}`" class="settings-v2-tab-pane">
+              <!-- Inline progress overlay: shown when an active operation
+                   is tracked for this install and the Update tab is open.
+                   The SettingsSectionList fades out; the progress view
+                   fades in within the same content area. -->
+              <Transition name="op-overlay" mode="out-in">
+                <div v-if="showOpOverlay" key="op-overlay" class="op-overlay">
+
+                  <!-- In-flight -->
+                  <template v-if="opInflight">
+                    <p class="op-title">{{ opTitleLabel }}</p>
+                    <p class="op-name">{{ installation?.name }}</p>
+
+                    <div
+                      class="op-bar-wrap"
+                      role="progressbar"
+                      :aria-valuenow="opIsIndeterminate ? undefined : opProgressPct"
+                      aria-valuemin="0"
+                      aria-valuemax="100"
+                    >
+                      <div class="op-bar-header">
+                        <span class="op-bar-status">{{ opStatusLabel }}</span>
+                        <span class="op-bar-right">
+                          <span v-if="opSpeedLabel" class="op-speed">{{ opSpeedLabel }}</span>
+                          <span v-if="!opIsIndeterminate" class="op-pct">{{ opProgressPct }}%</span>
+                        </span>
+                      </div>
+                      <div class="op-bar-track">
+                        <div
+                          class="op-bar-fill"
+                          :class="{ 'is-indeterminate': opIsIndeterminate }"
+                          :style="opIsIndeterminate ? {} : { width: `${opProgressPct}%` }"
+                        />
+                      </div>
+                    </div>
+
+                    <button
+                      v-if="activeOperation?.cancellable"
+                      type="button"
+                      class="op-ghost-btn"
+                      @click="emit('op-cancel')"
+                    >
+                      {{ t('instancePicker.progressCancel') }}
+                    </button>
+                  </template>
+
+                  <!-- Success -->
+                  <template v-else-if="opSuccess">
+                    <div class="op-icon op-icon--success">
+                      <CheckCircle :size="32" />
+                    </div>
+                    <p class="op-title">{{ opSuccessLabel }}</p>
+                    <p class="op-name">{{ installation?.name }}</p>
+                    <p v-if="successCountdown > 0" class="op-countdown">
+                      {{ t('instancePicker.progressSuccessCountdown', { n: successCountdown }) }}
+                    </p>
+                  </template>
+
+                  <!-- Error -->
+                  <template v-else-if="opError">
+                    <div class="op-icon op-icon--error">
+                      <XCircle :size="32" />
+                    </div>
+                    <p class="op-title op-title--error">{{ t('instancePicker.progressError') }}</p>
+                    <p class="op-name op-name--error">{{ activeOperation?.error }}</p>
+                    <div class="op-actions">
+                      <button type="button" class="op-primary-btn" @click="emit('op-retry')">
+                        {{ t('instancePicker.progressRetry') }}
+                      </button>
+                      <button type="button" class="op-ghost-btn" @click="emit('op-dismiss')">
+                        {{ t('instancePicker.progressDismiss') }}
+                      </button>
+                    </div>
+                  </template>
+
+                  <!-- Cancelled -->
+                  <template v-else-if="opCancelled">
+                    <p class="op-title op-title--muted">{{ t('instancePicker.progressCancelled') }}</p>
+                    <button type="button" class="op-ghost-btn" @click="emit('op-dismiss')">
+                      {{ t('instancePicker.progressDismiss') }}
+                    </button>
+                  </template>
+
+                </div>
+
+                <div v-else key="sections" class="settings-v2-tab-pane">
+                  <SettingsSectionList
+                    :sections="visibleSections"
+                    :installation-id="installation?.id"
+                    :running-action-ids="runningActionIds"
+                    :pending-restart-field-ids="pendingRestartFieldIds"
+                    :field-error-messages="fieldErrorMessages"
+                    @update-field="updateField"
+                    @run-action="runAction"
+                    @open-args-page="openArgsPage"
+                  />
+                </div>
+              </Transition>
             </div>
           </Transition>
         </div>
@@ -540,7 +792,8 @@ defineExpose({
       <button
         type="button"
         class="primary settings-v2-relaunch"
-        :disabled="!installation"
+        :class="{ 'is-pending-restart': hasPendingRestart }"
+        :disabled="!installation || opBlocksFooter"
         @click="handlePrimaryAction"
       >
         {{ primaryActionLabel }}
@@ -555,7 +808,7 @@ defineExpose({
           aria-haspopup="menu"
           :aria-expanded="moreMenuOpen"
           :aria-label="t('comfyUISettings.more', 'More')"
-          :disabled="!installation || pinBottomActions.length === 0"
+          :disabled="!installation || pinBottomActions.length === 0 || opInflight"
           @click="toggleMoreMenu"
         >
           {{ t('comfyUISettings.more', 'More') }}
@@ -587,53 +840,39 @@ defineExpose({
   gap: 6px;
   padding: 12px 12px 12px;
   border-bottom: 1px solid var(--chooser-surface-border);
+  container-type: inline-size;
+  container-name: settings-tabs;
 }
 
-/* Leading "← Back" affordance (picker expanded mode only — opt-in
- * via the `showBack` prop). Lives inside the tab strip so it sits at
- * the same baseline as the tabs and doesn't fight the tab nav for
- * vertical space. A short vertical rule separates it from the first
- * tab so the click target reads as distinct from the tab list. */
-.settings-v2-back {
-  -webkit-app-region: no-drag;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 6px 10px 6px 8px;
-  margin-right: 4px;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--neutral-100);
-  font-size: 13px;
-  font-weight: 400;
-  line-height: 16px;
-  cursor: pointer;
-  transition:
-    background-color 120ms ease,
-    color 120ms ease;
-  position: relative;
+/* Narrow right-pane: inactive tabs collapse to icon-only, active tab
+   keeps its label so "you are here" stays obvious. Tooltip exposes the
+   label on hover/focus for the collapsed tabs. */
+@container settings-tabs (max-width: 520px) {
+  .settings-v2-tab:not(.is-active) {
+    position: relative;
+    padding: 6px 8px;
+    gap: 0;
+  }
+  .settings-v2-tab:not(.is-active) > span:not(.settings-v2-tab-badge) {
+    display: none;
+  }
+  .settings-v2-tab:not(.is-active) .settings-v2-tab-badge {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+  }
 }
 
-.settings-v2-back::after {
-  content: '';
-  position: absolute;
-  right: -4px;
-  top: 6px;
-  bottom: 6px;
-  width: 1px;
-  background: var(--chooser-surface-border);
-}
-
-.settings-v2-back:hover,
-.settings-v2-back:focus-visible {
-  background: var(--brand-surface-bg-hover);
-  color: var(--text);
-  outline: none;
+.settings-v2-tabs.is-subpage-active {
+  opacity: 0.35;
+  pointer-events: none;
 }
 
 .settings-v2-tab {
   -webkit-app-region: no-drag;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   padding: 6px 12px;
   background: transparent;
   border: none;
@@ -665,6 +904,19 @@ defineExpose({
   background: var(--neutral-800);
 }
 
+.settings-v2-tab-icon {
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+
+.settings-v2-tab-badge {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--warning);
+  flex-shrink: 0;
+}
+
 .settings-v2-body {
   flex: 1;
   min-height: 0;
@@ -687,17 +939,20 @@ defineExpose({
   display: flex;
   flex-direction: column;
   gap: inherit;
+  flex: 1 1 auto;
 }
 
 /* Inner tab-swap wrapper. Mirrors `.settings-v2-body-root`'s flex
  * column so the wrapped `SettingsSectionList` fragment renders as
  * stacked sections exactly as it did before. Width: 100% so the
- * leaving pane's translateX doesn't squeeze. */
+ * leaving pane's translateX doesn't squeeze. `flex: 1` propagates
+ * the body height down to the op-overlay so it can center. */
 .settings-v2-tab-pane {
   display: flex;
   flex-direction: column;
   gap: inherit;
   width: 100%;
+  flex: 1 1 auto;
 }
 
 .empty {
@@ -710,6 +965,181 @@ defineExpose({
   color: var(--danger);
 }
 
+/* ── Inline operation overlay ──────────────────────────────────── */
+/* The overlay lives inside .settings-v2-tab-pane which is a flex
+ * column child of .settings-v2-body-root → .settings-v2-body.
+ * `flex: 1 1 auto` makes it stretch to consume all leftover height
+ * in the scroll container so `justify-content: center` actually
+ * centers — without this the pane is only as tall as its content. */
+.op-overlay {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  flex: 1 1 auto;
+  min-height: 200px;
+  padding: 24px;
+  text-align: center;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* Status icon */
+.op-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 2px;
+}
+.op-icon--success { color: var(--brand-success, #27ae60); }
+.op-icon--error   { color: var(--brand-error,   #e74c3c); }
+
+/* Title — big, clear action label */
+.op-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  margin: 0;
+  line-height: 1.25;
+}
+.op-title--error { color: var(--brand-error, #e74c3c); }
+.op-title--muted { color: var(--text-muted, var(--neutral-100)); }
+
+/* Install name — secondary line under the title */
+.op-name {
+  font-size: 12px;
+  color: var(--text-muted, var(--neutral-100));
+  margin: 0;
+  line-height: 1.4;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.op-name--error { color: var(--brand-error, #e74c3c); opacity: 0.8; }
+
+/* Progress bar */
+.op-bar-wrap {
+  width: 100%;
+  max-width: 260px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 4px;
+}
+.op-bar-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+.op-bar-status {
+  font-size: 11px;
+  color: var(--text-muted, var(--neutral-100));
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+.op-bar-right {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.op-speed {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted, var(--neutral-100));
+  opacity: 0.65;
+}
+.op-pct {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--text);
+}
+.op-bar-track {
+  height: 3px;
+  background: var(--chooser-surface-border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.op-bar-fill {
+  height: 100%;
+  background: var(--brand-accent, #f5c518);
+  border-radius: 2px;
+  transition: width 300ms ease;
+}
+.op-bar-fill.is-indeterminate {
+  width: 40%;
+  animation: op-bar-slide 1.5s ease-in-out infinite;
+}
+@keyframes op-bar-slide {
+  0%   { transform: translateX(-130%); }
+  100% { transform: translateX(280%); }
+}
+
+/* Countdown under success title */
+.op-countdown {
+  font-size: 11px;
+  color: var(--text-muted, var(--neutral-100));
+  opacity: 0.55;
+  margin: 0;
+}
+
+/* Error / cancelled action row */
+.op-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+/* Buttons */
+.op-primary-btn {
+  height: 32px;
+  padding: 0 18px;
+  border-radius: 8px;
+  border: none;
+  background: var(--brand-accent, #f5c518);
+  color: #000;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 120ms ease;
+}
+.op-primary-btn:hover  { opacity: 0.85; }
+.op-primary-btn:active { opacity: 0.7; }
+
+.op-ghost-btn {
+  height: 28px;
+  padding: 0 14px;
+  border-radius: 8px;
+  border: 1px solid var(--chooser-surface-border);
+  background: transparent;
+  color: var(--text-muted, var(--neutral-100));
+  font-size: 11px;
+  cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease;
+}
+.op-ghost-btn:hover { color: var(--text); border-color: var(--text-muted); }
+
+/* Fade transition between sections ↔ progress overlay */
+.op-overlay-enter-active,
+.op-overlay-leave-active {
+  transition: opacity 200ms ease, transform 200ms ease;
+}
+.op-overlay-enter-from,
+.op-overlay-leave-to {
+  opacity: 0;
+  transform: translateY(5px);
+}
+
 .settings-v2-footer {
   flex-shrink: 0;
   display: flex;
@@ -718,7 +1148,7 @@ defineExpose({
   gap: 8px;
   padding: 12px 16px;
   border-top: 1px solid var(--chooser-surface-border);
-  background: var(--neutral-800);
+  background: var(--modal-surface-bg);
 }
 
 /* Pin both footer buttons to the same 32px height as the left
@@ -733,6 +1163,22 @@ defineExpose({
   font-size: 12px;
   font-weight: 500;
   line-height: 16px;
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease;
+}
+
+/* Pending-restart promotion. Brand yellow takes over the button so
+ * the resolution point lights up against the dark modal surface —
+ * no extra chrome, no ring, just a hard semantic swap. Same action
+ * (still routes through Restart), the colour just says "now is the
+ * moment". Dark text required: yellow is too light for white. */
+.settings-v2-relaunch.is-pending-restart,
+.settings-v2-relaunch.is-pending-restart:hover {
+  background: var(--neutral-50);
+  border-color: var(--neutral-50);
+  color: var(--neutral-950);
 }
 
 .settings-v2-more-wrap {

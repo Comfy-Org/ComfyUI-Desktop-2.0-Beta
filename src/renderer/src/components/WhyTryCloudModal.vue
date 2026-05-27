@@ -118,6 +118,9 @@ onUnmounted(() => {
   display: grid;
   place-items: center;
   padding: clamp(72px, 10vh, 132px) clamp(32px, 5vw, 80px) clamp(80px, 11vh, 140px);
+  background: color-mix(in oklab, var(--neutral-800) 70%, transparent);
+  backdrop-filter: blur(8px) saturate(115%);
+  -webkit-backdrop-filter: blur(8px) saturate(115%);
 }
 
 .why-cloud-content {

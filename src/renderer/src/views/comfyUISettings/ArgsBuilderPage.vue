@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { AlertCircle, ArrowLeft, Loader2, Search, SearchX, X } from 'lucide-vue-next'
 import BaseInput from '../../components/ui/BaseInput.vue'
 import BaseSelect, { type BaseSelectOption } from '../../components/ui/BaseSelect.vue'
+import ArgsRawInput from './ArgsRawInput.vue'
 import type { ComfyArgDef } from '../../types/ipc'
 import { parseArgs, serialize, tokenize } from '../../lib/argsParser'
 import { scoreName } from '../../utils/fuzzyMatch'
@@ -314,10 +315,10 @@ const structuredGroups = computed(() => {
 
 const hasResults = computed(() => Array.from(structuredGroups.value.values()).some((items) => items.length > 0))
 
-// Free-text mirror — lets the user paste raw args directly. The
-// outer ArgsBuilderField on the main settings panel owns the inline
-// autocomplete affordance; this sub-page is for categorized browsing
-// + the search box below, so the raw row stays a plain text input.
+function onRawInput(value: string): void {
+  localValue.value = value
+}
+
 function onRawChange(value: string): void {
   localValue.value = value
   emit('update', value)
@@ -368,10 +369,12 @@ const unknownFlagsMessage = computed(() => {
 
     <div class="args-page-raw">
       <label class="args-page-raw-label">{{ t('comfyUISettings.argsRawLabel', 'Raw arguments') }}</label>
-      <BaseInput
-        mono
+      <ArgsRawInput
         :model-value="localValue"
+        :schema="schema"
         :placeholder="t('comfyUISettings.argsPlaceholder', 'No arguments set')"
+        :aria-label="t('comfyUISettings.argsRawLabel', 'Raw arguments')"
+        @update:model-value="onRawInput"
         @change="onRawChange"
       />
       <p class="args-page-raw-hint">
@@ -448,7 +451,6 @@ const unknownFlagsMessage = computed(() => {
                carry the layout class. -->
           <div class="args-page-exclusive-select">
             <BaseSelect
-              variant="brand"
               :model-value="activeInGroup(item.group)"
               :options="optionsForGroup(item.args)"
               :aria-label="t('comfyUISettings.argsExclusiveLabel', 'Choose one')"
@@ -698,6 +700,7 @@ const unknownFlagsMessage = computed(() => {
 .args-page-item {
   display: flex;
   flex-direction: column;
+  min-width: 0;
 }
 
 .args-page-item + .args-page-item {
@@ -807,8 +810,8 @@ const unknownFlagsMessage = computed(() => {
 
 /* Exclusive ("choose one") cluster — the faint inline label sits above
  * a BaseSelect picker so the group can be cleared via a synthetic "None"
- * option (native radios couldn't deselect). The brand-variant trigger
- * tints when a member is active and dims to the placeholder when not. */
+ * option (native radios couldn't deselect). Uses the shared BaseSelect
+ * chrome — same as Global Settings language and other select fields. */
 .args-page-row-cluster-label {
   padding: 0 2px;
   margin: 2px 0 4px;
@@ -823,10 +826,7 @@ const unknownFlagsMessage = computed(() => {
 }
 
 .args-page-exclusive-select {
-  /* Align the trigger with sibling .args-page-arg-row, which uses the
-   * same -10px negative margin to extend its hover background to the
-   * page edges. */
-  margin: 0 -10px;
+  min-width: 0;
 }
 
 /* TODO(brand-cleanup): the radio cluster styles below are no longer

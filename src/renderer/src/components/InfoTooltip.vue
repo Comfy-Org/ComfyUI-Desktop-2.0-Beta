@@ -1,36 +1,29 @@
 <script setup lang="ts">
-import { ref } from 'vue'
 import { CircleHelp } from 'lucide-vue-next'
-import { useTooltip } from '../composables/useTooltip'
+import Tooltip from './ui/Tooltip.vue'
+import type { TooltipSide } from '../composables/useTooltip'
 
+/**
+ * Inline help-icon trigger that composes the shared `Tooltip` primitive.
+ * Owns the icon + hover affordance; defers placement, teleport, arrow,
+ * and viewport collision handling to the primitive in `/ui`.
+ */
 const props = withDefaults(
   defineProps<{
     text: string
-    side?: 'top' | 'bottom'
+    side?: TooltipSide
+    delayMs?: number
   }>(),
-  { side: 'top' }
+  { side: 'top', delayMs: 100 }
 )
-
-const iconRef = ref<HTMLElement | null>(null)
-const { bubbleStyle, visible, show, hide } = useTooltip(iconRef, () => props.side)
 </script>
 
 <template>
-  <span
-    ref="iconRef"
-    class="info-tooltip-trigger"
-    @mouseenter="show"
-    @mouseleave="hide"
-  >
-    <CircleHelp :size="14" class="info-tooltip-icon" />
-    <Teleport to="body">
-      <span
-        v-if="visible"
-        class="info-tooltip-bubble"
-        :style="bubbleStyle"
-      >{{ text }}</span>
-    </Teleport>
-  </span>
+  <Tooltip :text="props.text" :side="props.side" :delay-ms="props.delayMs">
+    <span class="info-tooltip-trigger" tabindex="0" role="button" :aria-label="props.text">
+      <CircleHelp :size="14" class="info-tooltip-icon" />
+    </span>
+  </Tooltip>
 </template>
 
 <style scoped>
@@ -45,35 +38,15 @@ const { bubbleStyle, visible, show, hide } = useTooltip(iconRef, () => props.sid
 .info-tooltip-icon {
   color: var(--text-muted);
   opacity: 0.6;
-  transition: opacity 0.15s, color 0.15s;
+  transition:
+    opacity 0.15s,
+    color 0.15s;
   flex-shrink: 0;
 }
 
-.info-tooltip-trigger:hover .info-tooltip-icon {
+.info-tooltip-trigger:hover .info-tooltip-icon,
+.info-tooltip-trigger:focus-visible .info-tooltip-icon {
   opacity: 1;
   color: var(--accent);
-}
-</style>
-
-<style>
-.info-tooltip-bubble {
-  position: fixed;
-  transform: translateX(-50%);
-  width: max-content;
-  max-width: 260px;
-  padding: 6px 10px;
-  border-radius: 6px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  color: var(--text);
-  font-size: 12px;
-  font-weight: 400;
-  line-height: 1.4;
-  text-transform: none;
-  letter-spacing: 0;
-  white-space: normal;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
-  z-index: 10001;
-  pointer-events: none;
 }
 </style>

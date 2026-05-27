@@ -230,8 +230,8 @@ export async function checkForUpdate(
   const prevChannelInfo = existing[channel]
   const cv = installation.comfyVersion as ComfyVersion | undefined
   const installedTag =
-    (prevChannelInfo?.installedTag as string | undefined) ??
     (cv ? formatComfyVersion(cv, 'short') : undefined) ??
+    (prevChannelInfo?.installedTag as string | undefined) ??
     (installation.version as string | undefined) ??
     'unknown'
   await update({
@@ -244,26 +244,65 @@ export async function checkForUpdate(
 }
 
 /**
+ * Inflight dedupe for `enrichCommitsAhead`. Keyed by `repo::comfyuiDir` so
+ * rapid install switches in the picker can't fan out N parallel `git fetch`
+ * processes against the same checkout — concurrent callers share the same
+ * promise. Cleared on settle.
+ */
+const _enrichInflight = new Map<string, Promise<void>>()
+
+/** Listeners notified when `enrichCommitsAhead` actually writes a new
+ *  `commitsAhead` value into the cache (not on no-op short-circuits). The
+ *  IPC layer wires a broadcast here so renderers can refresh affected
+ *  sections in place — see `wireReleaseCacheBroadcast` callers. */
+const _enrichedListeners = new Set<(repo: string) => void>()
+
+export function onEnriched(cb: (repo: string) => void): () => void {
+  _enrichedListeners.add(cb)
+  return () => _enrichedListeners.delete(cb)
+}
+
+/**
  * Enrich the "latest" channel cache entry with locally-computed commitsAhead.
  * ls-remote cannot compute this, so we resolve it from a local git repo.
  * No-op if commitsAhead is already set or the entry lacks the required fields.
+ * Concurrent calls for the same `(repo, comfyuiDir)` share one in-flight promise.
  */
 export async function enrichCommitsAhead(repo: string, comfyuiDir: string): Promise<void> {
-  const entry = get(repo, 'latest')
-  if (!entry?.commitSha || !entry.baseTag || entry.commitsAhead !== undefined) return
-  if (!fs.existsSync(path.join(comfyuiDir, '.git'))) return
+  const key = `${repo}::${comfyuiDir}`
+  const existing = _enrichInflight.get(key)
+  if (existing) return existing
 
-  await fetchTags(comfyuiDir)
-  // The commit SHA may not exist locally (e.g. Stable install on a tag).
-  // Fetch it explicitly so rev-list can resolve the range.
-  await fetchCommitSha(comfyuiDir, entry.commitSha)
-  const ahead = await countCommitsAhead(comfyuiDir, entry.baseTag, entry.commitSha)
-  if (ahead === undefined) return
+  const run = (async () => {
+    const entry = get(repo, 'latest')
+    if (!entry?.commitSha || !entry.baseTag || entry.commitsAhead !== undefined) return
+    if (!fs.existsSync(path.join(comfyuiDir, '.git'))) return
 
-  const current = get(repo, 'latest')
-  if (!current || current.commitSha !== entry.commitSha) return
-  const releaseName = formatComfyVersion({ commit: current.commitSha!, baseTag: current.baseTag, commitsAhead: ahead }, 'short')
-  set(repo, 'latest', { ...current, commitsAhead: ahead, releaseName })
+    await fetchTags(comfyuiDir)
+    // The commit SHA may not exist locally (e.g. Stable install on a tag).
+    // Fetch it explicitly so rev-list can resolve the range.
+    await fetchCommitSha(comfyuiDir, entry.commitSha)
+    const ahead = await countCommitsAhead(comfyuiDir, entry.baseTag, entry.commitSha)
+    if (ahead === undefined) return
+
+    const current = get(repo, 'latest')
+    if (!current || current.commitSha !== entry.commitSha) return
+    const releaseName = formatComfyVersion({ commit: current.commitSha!, baseTag: current.baseTag, commitsAhead: ahead }, 'short')
+    set(repo, 'latest', { ...current, commitsAhead: ahead, releaseName })
+    for (const cb of _enrichedListeners) {
+      try {
+        cb(repo)
+      } catch (err) {
+        // Listener errors must not break enrichment (the cache is already
+        // updated at this point), but log so a misbehaving subscriber is
+        // visible during development.
+        console.warn('[release-cache] onEnriched listener threw:', err)
+      }
+    }
+  })().finally(() => _enrichInflight.delete(key))
+
+  _enrichInflight.set(key, run)
+  return run
 }
 
 /**
@@ -276,7 +315,6 @@ export function isUpdateAvailable(
   info: ReleaseCacheEntry | null
 ): boolean {
   if (!info || !info.latestTag) return false
-
   // Structural check: if we have comfyVersion and are viewing stable,
   // any commits ahead means the installed version is newer than stable.
   // When commitsAhead is undefined (API failure), we know the commit differs

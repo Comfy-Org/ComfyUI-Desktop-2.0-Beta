@@ -1,21 +1,13 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, type Component } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import {
-  Github,
-  HardDrive,
-  Plus,
-  RefreshCcw,
-  Settings2,
-  SlidersHorizontal,
-  Star,
-  X
-} from 'lucide-vue-next'
+import { RefreshCcw, Settings2, SlidersHorizontal, X } from 'lucide-vue-next'
 import UpdatesSection from './globalSettings/UpdatesSection.vue'
+import GlobalSettingsMicroSection from './globalSettings/GlobalSettingsMicroSection.vue'
+import GitHubLinkCard from './globalSettings/GitHubLinkCard.vue'
 import SettingsSectionList from '../views/comfyUISettings/SettingsSectionList.vue'
-import DirCard from '../components/DirCard.vue'
+import { withMinDuration } from '../lib/uiTiming'
 import type {
-  ActionDef,
   AppUpdateDownloadProgress,
   AppUpdateState,
   DetailField,
@@ -23,16 +15,11 @@ import type {
 } from '../types/ipc'
 
 /**
- * Global Settings popup view — two-pane tabbed card.
+ * Global Settings popup view — two-pane tabbed card (desktop-only).
  *
  * Receives a `snapshot` prop built main-side by `buildGlobalSettingsSnapshot`
  * in `src/main/popups/titlePopup.ts` and dispatches mutations through
- * `window.__comfyTitlePopup`. The popup renderer does NOT have
- * `window.api` — every mutation is a bridge method.
- *
- * The popup itself is sized once main-side from host content bounds
- * (fluid clamp on width + height); the right pane scrolls when its
- * content overflows so switching tabs never resizes the popup.
+ * `window.__comfyTitlePopup`.
  */
 
 interface ModelsDir {
@@ -42,9 +29,14 @@ interface ModelsDir {
 }
 
 interface Snapshot {
-  overviewFields: Record<string, unknown>[]
+  generalFields: Record<string, unknown>[]
+  telemetryFields: Record<string, unknown>[]
+  desktopUpdateFields: Record<string, unknown>[]
   cacheFields: Record<string, unknown>[]
   advancedFields: Record<string, unknown>[]
+  // TODO(brand-cleanup): Storage tab moved to instance-picker (see
+  // StoragePane.vue). Main still emits these for back-compat; remove
+  // once the snapshot builder in titlePopup.ts drops them.
   sharedDirectoriesFields: Record<string, unknown>[]
   modelsDirs: ModelsDir[]
   modelsSystemDefault: string
@@ -57,15 +49,14 @@ interface Snapshot {
     platform: string
     lastCheckedAt: number | null
   }
-  channelPickerField: Record<string, unknown> | null
-  activeInstallationId: string | null
-  hasActiveInstall: boolean
   githubUrl: string
   githubStars: number | null
   i18n: {
     overview: string
     updates: string
-    cache: string
+    // TODO(brand-cleanup): consumed by StoragePane via useI18n now;
+    // keep here until main-side snapshot stops emitting them.
+    storage: string
     models: string
     advanced: string
     sharedDirectories: string
@@ -86,11 +77,6 @@ interface GlobalSettingsBridge {
   globalSettingsDownloadUpdate(): Promise<void>
   globalSettingsInstallUpdate(): void
   globalSettingsSetLastCheckedAt(value: number): void
-  globalSettingsRunInstallAction(
-    installationId: string,
-    actionId: string,
-    actionData?: Record<string, unknown>
-  ): Promise<{ ok: boolean; message?: string }>
 }
 
 const props = defineProps<{ snapshot: Snapshot }>()
@@ -99,53 +85,36 @@ const bridge = (window as unknown as { __comfyTitlePopup?: GlobalSettingsBridge 
 
 const LAST_CHECKED_KEY = 'globalSettings.lastCheckedAt'
 
-type TabId = 'general' | 'updates' | 'cache' | 'storage' | 'advanced'
+type TabId = 'general' | 'updates' | 'advanced'
 const activeTab = ref<TabId>('general')
 
-const tabs = computed<{ id: TabId; label: string; icon: Component }[]>(() => [
-  { id: 'general', label: props.snapshot.i18n.overview, icon: Settings2 },
-  { id: 'updates', label: props.snapshot.i18n.updates, icon: RefreshCcw },
-  { id: 'cache', label: props.snapshot.i18n.cache, icon: HardDrive },
-  { id: 'storage', label: props.snapshot.i18n.models, icon: HardDrive },
-  { id: 'advanced', label: props.snapshot.i18n.advanced, icon: SlidersHorizontal }
+const tabs = computed(() => [
+  { id: 'general' as const, label: props.snapshot.i18n.overview, icon: Settings2 },
+  { id: 'updates' as const, label: props.snapshot.i18n.updates, icon: RefreshCcw },
+  { id: 'advanced' as const, label: props.snapshot.i18n.advanced, icon: SlidersHorizontal }
 ])
 
-const overviewSections = computed<DetailSection[]>(() => [
-  {
-    fields: props.snapshot.overviewFields as unknown as DetailField[]
-  }
+const generalSections = computed<DetailSection[]>(() => [
+  { fields: props.snapshot.generalFields as unknown as DetailField[] }
 ])
+const telemetrySections = computed<DetailSection[]>(() => [
+  { fields: props.snapshot.telemetryFields as unknown as DetailField[] }
+])
+const desktopUpdatePreferenceFields = computed<DetailField[]>(
+  () => props.snapshot.desktopUpdateFields as unknown as DetailField[]
+)
 const cacheSections = computed<DetailSection[]>(() => [
-  {
-    fields: props.snapshot.cacheFields as unknown as DetailField[]
-  }
+  { fields: props.snapshot.cacheFields as unknown as DetailField[] }
 ])
 const advancedSections = computed<DetailSection[]>(() => [
-  {
-    fields: props.snapshot.advancedFields as unknown as DetailField[]
-  }
+  { fields: props.snapshot.advancedFields as unknown as DetailField[] }
 ])
-const sharedDirsSections = computed<DetailSection[]>(() => [
-  {
-    fields: props.snapshot.sharedDirectoriesFields as unknown as DetailField[]
-  }
-])
-const channelPickerField = computed<DetailField | null>(
-  () => props.snapshot.channelPickerField as unknown as DetailField | null
-)
 const appUpdateState = computed<AppUpdateState>(
   () => props.snapshot.appUpdate.state as unknown as AppUpdateState
 )
 const appUpdateProgress = computed<AppUpdateDownloadProgress | null>(
   () => props.snapshot.appUpdate.progress as unknown as AppUpdateDownloadProgress | null
 )
-const platformLabel = computed(() => {
-  const p = props.snapshot.appUpdate.platform
-  if (p === 'darwin') return 'macOS'
-  if (p === 'win32') return 'Windows'
-  if (p === 'linux') return 'Linux'
-  return p
-})
 
 async function handleUpdateField(field: DetailField, value: unknown): Promise<void> {
   await bridge?.globalSettingsUpdateField(field.id, value)
@@ -154,41 +123,6 @@ async function handleUpdateField(field: DetailField, value: unknown): Promise<vo
 function handleOpenExternal(url: string): void {
   if (!url) return
   bridge?.globalSettingsOpenExternal(url)
-}
-
-const starCountLabel = computed(() => {
-  const n = props.snapshot.githubStars
-  if (n == null) return ''
-  return new Intl.NumberFormat(undefined, {
-    notation: 'compact',
-    maximumFractionDigits: 1
-  }).format(n)
-})
-
-async function handleAddModelsDir(): Promise<void> {
-  const picked = await bridge?.globalSettingsBrowseFolder()
-  if (!picked) return
-  const dirs = props.snapshot.modelsDirs.map((d) => d.path)
-  dirs.push(picked)
-  await bridge?.globalSettingsSetModelsDirs(dirs)
-}
-
-async function handleRemoveModelsDir(index: number): Promise<void> {
-  const dirs = props.snapshot.modelsDirs.map((d) => d.path)
-  dirs.splice(index, 1)
-  await bridge?.globalSettingsSetModelsDirs(dirs)
-}
-
-async function handleMakePrimary(index: number): Promise<void> {
-  const dirs = props.snapshot.modelsDirs.map((d) => d.path)
-  const moved = dirs.splice(index, 1)[0]
-  if (typeof moved !== 'string') return
-  dirs.unshift(moved)
-  await bridge?.globalSettingsSetModelsDirs(dirs)
-}
-
-function handleOpenModelsDir(path: string): void {
-  bridge?.globalSettingsOpenPath(path)
 }
 
 async function handleUpdateNow(): Promise<void> {
@@ -204,9 +138,17 @@ async function handleUpdateNow(): Promise<void> {
   await handleCheckForUpdate()
 }
 
+const isChecking = ref(false)
+
 async function handleCheckForUpdate(): Promise<void> {
+  isChecking.value = true
   try {
-    await bridge?.globalSettingsCheckForUpdate()
+    // `withMinDuration` floors the busy state so a sub-frame backend
+    // response (e.g. dev-mode no-op, up-to-date short-circuit) still
+    // flashes the "Checking…" label long enough to feel acknowledged.
+    await withMinDuration(async () => {
+      await bridge?.globalSettingsCheckForUpdate()
+    })
   } finally {
     const now = Date.now()
     try {
@@ -215,28 +157,14 @@ async function handleCheckForUpdate(): Promise<void> {
       /* noop */
     }
     bridge?.globalSettingsSetLastCheckedAt(now)
+    isChecking.value = false
   }
-}
-
-async function handleRunInstallAction(action: ActionDef): Promise<void> {
-  const id = props.snapshot.activeInstallationId
-  if (!id) return
-  // `action.data` is a Vue reactive proxy when the action comes off a
-  // ChannelPicker option (cross-channel update / copy-update carries
-  // `{ channel }`). Reactive proxies can't cross the contextBridge
-  // structured-clone boundary; deep-clone to a plain object first or
-  // ipcRenderer.invoke throws "An object could not be cloned" and the
-  // user is silently stuck with no error feedback.
-  const rawActionData = action.data
-    ? (JSON.parse(JSON.stringify(action.data)) as Record<string, unknown>)
-    : undefined
-  await bridge?.globalSettingsRunInstallAction(id, action.id, rawActionData)
 }
 
 function handleTabKey(event: KeyboardEvent): void {
   if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return
   event.preventDefault()
-  const ids = tabs.value.map((t) => t.id)
+  const ids = tabs.value.map((tab) => tab.id)
   const idx = ids.indexOf(activeTab.value)
   const next =
     event.key === 'ArrowDown' ? (idx + 1) % ids.length : (idx - 1 + ids.length) % ids.length
@@ -244,9 +172,6 @@ function handleTabKey(event: KeyboardEvent): void {
 }
 
 onMounted(() => {
-  // Last-checked back-fill: if main's snapshot has no lastCheckedAt but
-  // localStorage does, push the localStorage value to main so the next
-  // snapshot rebroadcast shows the correct timestamp.
   if (!props.snapshot.appUpdate.lastCheckedAt) {
     try {
       const raw = window.localStorage.getItem(LAST_CHECKED_KEY)
@@ -302,23 +227,21 @@ onMounted(() => {
         :aria-labelledby="`gs-tab-${activeTab}`"
       >
         <template v-if="activeTab === 'general'">
-          <SettingsSectionList :sections="overviewSections" @update-field="handleUpdateField" />
-          <div class="gs-github-row">
-            <button type="button" class="gs-github" @click="handleOpenExternal(snapshot.githubUrl)">
-              <Github :size="14" aria-hidden="true" />
-              <span>GitHub</span>
-            </button>
-            <button
-              v-if="snapshot.githubStars != null"
-              type="button"
-              class="gs-github-stars"
-              :aria-label="`${snapshot.githubStars} GitHub stars`"
-              @click="handleOpenExternal(snapshot.githubUrl)"
-            >
-              <Star :size="12" class="gs-github-stars-icon" aria-hidden="true" />
-              <span>{{ starCountLabel }}</span>
-            </button>
-          </div>
+          <GlobalSettingsMicroSection :title="t('settings.preferences', 'Preferences')">
+            <SettingsSectionList :sections="generalSections" @update-field="handleUpdateField" />
+          </GlobalSettingsMicroSection>
+
+          <GlobalSettingsMicroSection :title="t('settings.privacy', 'Privacy')">
+            <SettingsSectionList :sections="telemetrySections" @update-field="handleUpdateField" />
+          </GlobalSettingsMicroSection>
+
+          <GlobalSettingsMicroSection :title="t('settings.community', 'Community')">
+            <GitHubLinkCard
+              :url="snapshot.githubUrl"
+              :stars="snapshot.githubStars"
+              @open="handleOpenExternal"
+            />
+          </GlobalSettingsMicroSection>
         </template>
 
         <template v-else-if="activeTab === 'updates'">
@@ -326,49 +249,25 @@ onMounted(() => {
             :state="appUpdateState"
             :progress="appUpdateProgress"
             :is-downloading="snapshot.appUpdate.isDownloading"
-            :checking="false"
+            :checking="isChecking"
             :last-checked-at="snapshot.appUpdate.lastCheckedAt"
             :installed-version="snapshot.appUpdate.installedVersion"
-            :platform-label="platformLabel"
-            :channel-picker-field="channelPickerField"
+            :system-managed="snapshot.appUpdate.capabilities.systemManaged"
+            :preference-fields="desktopUpdatePreferenceFields"
             @update-now="handleUpdateNow"
             @check-for-update="handleCheckForUpdate"
-            @install-action="handleRunInstallAction"
+            @update-field="handleUpdateField"
           />
         </template>
 
-        <template v-else-if="activeTab === 'cache'">
-          <SettingsSectionList :sections="cacheSections" @update-field="handleUpdateField" />
-        </template>
-
-        <template v-else-if="activeTab === 'storage'">
-          <div class="gs-subgroup">
-            <div class="gs-subgroup-title">{{ snapshot.i18n.models }}</div>
-            <div class="gs-models">
-              <DirCard
-                v-for="(d, i) in snapshot.modelsDirs"
-                :key="d.path"
-                :path="d.path"
-                :is-primary="d.isPrimary"
-                :is-default="d.isDefault"
-                @open="handleOpenModelsDir(d.path)"
-                @remove="handleRemoveModelsDir(i)"
-                @make-primary="handleMakePrimary(i)"
-              />
-              <button type="button" class="gs-add-dir" @click="handleAddModelsDir">
-                <Plus :size="14" aria-hidden="true" />
-                <span>{{ t('models.addDir', 'Add directory') }}</span>
-              </button>
-            </div>
-          </div>
-          <div class="gs-subgroup">
-            <div class="gs-subgroup-title">{{ snapshot.i18n.sharedDirectories }}</div>
-            <SettingsSectionList :sections="sharedDirsSections" @update-field="handleUpdateField" />
-          </div>
-        </template>
-
         <template v-else>
-          <SettingsSectionList :sections="advancedSections" @update-field="handleUpdateField" />
+          <GlobalSettingsMicroSection :title="snapshot.i18n.advanced">
+            <SettingsSectionList :sections="advancedSections" @update-field="handleUpdateField" />
+          </GlobalSettingsMicroSection>
+
+          <GlobalSettingsMicroSection :title="t('settings.cache', 'Cache')">
+            <SettingsSectionList :sections="cacheSections" @update-field="handleUpdateField" />
+          </GlobalSettingsMicroSection>
         </template>
       </section>
     </div>
@@ -489,115 +388,9 @@ onMounted(() => {
   padding: 16px 20px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 20px;
 }
 
-.gs-github-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding-top: 4px;
-}
-
-.gs-github {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 0;
-  border: none;
-  background: transparent;
-  color: var(--neutral-100);
-  opacity: 0.67;
-  font-size: 12px;
-  cursor: pointer;
-  transition: opacity 100ms ease;
-}
-
-.gs-github:hover,
-.gs-github:focus-visible {
-  opacity: 1;
-  outline: none;
-}
-
-.gs-github-stars {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 8px;
-  border: 1px solid color-mix(in oklab, var(--neutral-100) 14%, transparent);
-  border-radius: 999px;
-  background: color-mix(in oklab, var(--neutral-100) 4%, transparent);
-  color: var(--neutral-100);
-  opacity: 0.78;
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-  cursor: pointer;
-  transition: opacity 100ms ease, background 100ms ease;
-}
-
-.gs-github-stars:hover,
-.gs-github-stars:focus-visible {
-  opacity: 1;
-  background: color-mix(in oklab, var(--neutral-100) 8%, transparent);
-  outline: none;
-}
-
-.gs-github-stars-icon {
-  color: var(--warning, #e3b341);
-  fill: currentColor;
-}
-
-.gs-subgroup {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.gs-subgroup + .gs-subgroup {
-  padding-top: 12px;
-  border-top: 1px solid color-mix(in oklab, var(--neutral-100) 8%, transparent);
-}
-
-.gs-subgroup-title {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: rgba(194, 191, 185, 0.75);
-}
-
-.gs-models {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.gs-add-dir {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
-  border: 1px dashed color-mix(in oklab, var(--neutral-100) 18%, transparent);
-  background: transparent;
-  border-radius: 8px;
-  color: var(--neutral-100);
-  cursor: pointer;
-  align-self: flex-start;
-  transition: background-color 100ms ease;
-}
-
-.gs-add-dir:hover,
-.gs-add-dir:focus-visible {
-  background: var(--brand-surface-bg-hover);
-  outline: none;
-}
-
-.global-settings :deep(.settings-v2-field) {
-  gap: 4px;
-}
-
-/* Density bump for the popup — slightly tighter input chrome than the
- * default `BaseInput` / `BaseSelect` so the two-pane card stays
- * compact. Label + field text colors come from the base components. */
 .global-settings :deep(.ui-input),
 .global-settings :deep(.ui-select-trigger) {
   min-height: 28px;

@@ -186,7 +186,7 @@ export async function confirmAndCloseAllHostWindows(
   parentWindow: BrowserWindow | null,
 ): Promise<void> {
   const entries = Array.from(comfyWindows.values()).filter((e) => !e.window.isDestroyed())
-  if (entries.length <= 1) {
+  if (entries.length < 1) {
     closeAllHostWindows()
     return
   }
@@ -219,13 +219,16 @@ export async function confirmAndCloseAllHostWindows(
     closeAllHostWindows()
     return
   }
+  const isSingle = entries.length === 1
   const confirmed = await openSystemModalAsync({
     parent: overlayParentEntry.window,
     spec: {
-      title: 'Close All Windows',
-      message: `Close ${entries.length} open windows?`,
+      title: 'Exit All Windows',
+      message: isSingle
+        ? 'Exit the open window?'
+        : `Exit ${entries.length} open windows?`,
       details,
-      confirmLabel: 'Close All',
+      confirmLabel: isSingle ? 'Exit' : 'Exit All',
       cancelLabel: 'Cancel',
       confirmStyle: 'danger',
       theme: overlayParentEntry.lastTheme,
@@ -239,6 +242,54 @@ export async function confirmAndCloseAllHostWindows(
     // consult and tears down immediately.
     for (const entry of entries) preClearedClose.add(entry.window)
     closeAllHostWindows()
+  }
+}
+
+/**
+ * Confirm + close a single host window. Mirrors
+ * `confirmAndCloseAllHostWindows` for the install-host menu's
+ * `Exit Window` entry — same `openSystemModalAsync` primitive, same
+ * pre-cleared close path so the per-window close handler doesn't
+ * double-prompt after the user already confirmed.
+ */
+export async function confirmAndCloseHostWindow(parentWindow: BrowserWindow): Promise<void> {
+  if (parentWindow.isDestroyed()) return
+  const entry = Array.from(comfyWindows.values()).find((e) => e.window === parentWindow)
+  if (!entry) {
+    parentWindow.close()
+    return
+  }
+  const details: SystemModalDetailGroup[] = []
+  if (ipc.hasActiveOperations()) {
+    try {
+      const items = await ipc.getActiveDetails()
+      const sessions = items.filter((i) => i.type === 'session').map((i) => i.name)
+      const operations = items.filter((i) => i.type === 'operation').map((i) => i.name)
+      const downloads = items.filter((i) => i.type === 'download').map((i) => i.name)
+      if (sessions.length > 0) details.push({ label: 'Running ComfyUI', items: sessions })
+      if (operations.length > 0) details.push({ label: 'In-progress operations', items: operations })
+      if (downloads.length > 0) details.push({ label: 'Active downloads', items: downloads })
+    } catch {
+      // Active-detail collection failure shouldn't block the prompt.
+    }
+  }
+  const confirmed = await openSystemModalAsync({
+    parent: entry.window,
+    spec: {
+      title: 'Exit Window',
+      message: 'Exit this window?',
+      details: details.length > 0 ? details : undefined,
+      confirmLabel: 'Exit',
+      cancelLabel: 'Cancel',
+      confirmStyle: 'danger',
+      theme: entry.lastTheme,
+    },
+  })
+  if (confirmed) {
+    // Skip the panel-renderer consult on the close handler — the user
+    // already confirmed via this prompt.
+    preClearedClose.add(entry.window)
+    entry.window.close()
   }
 }
 

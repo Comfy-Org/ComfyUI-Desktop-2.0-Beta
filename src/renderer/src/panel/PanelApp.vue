@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import ProgressModal from '../views/ProgressModal.vue'
 import ModalDialog from '../components/ModalDialog.vue'
+import DialogHost from '../components/DialogHost.vue'
 import DownloadsModal from '../components/DownloadsModal.vue'
 import FeedbackModal from '../components/FeedbackModal.vue'
 import ComfyLifecycleView from './ComfyLifecycleView.vue'
@@ -32,6 +33,10 @@ import { useChooserHandoff } from './useChooserHandoff'
 import { useFirstUseChain } from './useFirstUseChain'
 import { bindE2EPanelHooks } from './e2eRendererHooks'
 import { resolvePickerTab } from '../lib/pickerTabs'
+import {
+  SUCCESS_ACTION_GO_DASHBOARD,
+  SUCCESS_ACTION_OPEN_INSTANCE,
+} from '../lib/progressTerminalPresets'
 import type { Installation } from '../types/ipc'
 
 const { mergeLocaleMessage, locale, t } = useI18n()
@@ -218,7 +223,6 @@ const { triggerAction: triggerInstallAction } = useInstallContextMenu({
     }
     window.api.openInstancePicker({
       installationId: inst.id,
-      mode: 'expanded',
       initialTab: resolvePickerTab(initialTab, 'config'),
       autoAction,
     })
@@ -256,6 +260,33 @@ useDeepLinkRouter({
   },
   showProgressFromPicker: (showOpts) => handleShowProgress(showOpts),
 })
+
+// Picker-driven mutating ops resolve here when the user picks a CTA on
+// the ProgressModal's success-terminal screen. New presets land as
+// extra branches; the underlying ProgressModal stays preset-agnostic.
+function handleProgressSuccessChoice(actionId: string, targetInstallationId: string): void {
+  if (actionId === SUCCESS_ACTION_OPEN_INSTANCE) {
+    // Cold-spawn chooser host (cross-instance Update that opened a
+    // fresh window for the target): `handleChooserPick` attaches the
+    // install in-place, so this same window becomes the target's
+    // window — no extra chooser hop, no orphan chooser left behind.
+    // Install-backed host: fall back to `openInstallWindow`, which
+    // focuses an existing window or opens a fresh chooser.
+    if (!installationId) {
+      const inst = installationStore.getById(targetInstallationId)
+      if (inst) {
+        void handleChooserPick(inst)
+        return
+      }
+    }
+    void window.api.openInstallWindow(targetInstallationId)
+    return
+  }
+  if (actionId === SUCCESS_ACTION_GO_DASHBOARD) {
+    // No-op on chooser hosts; flips an install-backed host back in place.
+    void window.api.returnToDashboard()
+  }
+}
 
 async function loadLocale(): Promise<void> {
   const messages = await window.api.getLocaleMessages()
@@ -532,6 +563,7 @@ onUnmounted(() => {
         ref="progressRef"
         :installation-id="currentOverlay.installationId ?? ''"
         @close="handleProgressClose"
+        @success-choice="handleProgressSuccessChoice"
       />
       <InstallWizardModal
         v-else-if="currentOverlay.component === 'new-install'"
@@ -585,6 +617,7 @@ onUnmounted(() => {
     <FeedbackModal :open="feedbackOpen" :url="feedbackUrl" @close="closeFeedback" />
 
     <ModalDialog />
+    <DialogHost />
     <MigrateConfirmTakeover ref="migrateTakeoverRef" />
   </div>
 </template>
