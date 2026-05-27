@@ -365,17 +365,23 @@ export function registerInstallationHandlers(): void {
       ]
     }
     // Resolve commitsAhead for the `latest` channel against the install's
-    // own git checkout before building the channel cards — otherwise the
-    // "Latest from GitHub" preview falls back to `tag (sha)` instead of
-    // `tag+N (sha)`. The enrich helper short-circuits when commitsAhead
-    // is already populated or the install has no git dir, so this is a
-    // no-op for cloud installs and on repeat opens.
+    // own git checkout. Fire-and-forget — enrichment spawns up to three
+    // git child processes (fetch tags, fetch sha, rev-list) which can
+    // take seconds on a slow link and must not block the section render.
+    // When enrichment actually writes a new value, release-cache emits
+    // `release-cache-enriched` so the renderer can refresh in place.
+    // The helper short-circuits on already-enriched / no-git-dir, so
+    // repeat opens and cloud installs cost nothing.
     if (inst.installPath) {
       const comfyuiDir = path.join(inst.installPath, 'ComfyUI')
       if (hasGitDir(comfyuiDir)) {
-        try {
-          await releaseCache.enrichCommitsAhead(COMFYUI_REPO, comfyuiDir)
-        } catch { /* enrichment is best-effort; never block the section render */ }
+        void releaseCache.enrichCommitsAhead(COMFYUI_REPO, comfyuiDir).catch((err) => {
+          // Enrichment is best-effort; the channel card falls back to
+          // `tag (sha)` (a documented supported render path) when
+          // commitsAhead is unavailable. Log so the next bug report has
+          // a breadcrumb instead of silent failure.
+          console.warn('[get-detail-sections] enrichCommitsAhead failed:', err)
+        })
       }
     }
     return source.getDetailSections(inst)

@@ -35,6 +35,7 @@ const API_MAP = {
   getComfyArgs: 'pickerSettingsGetComfyArgs',
   previewDesktopMigration: 'pickerSettingsPreviewDesktopMigration',
   previewLocalMigration: 'pickerSettingsPreviewLocalMigration',
+  onReleaseCacheEnriched: 'pickerSettingsOnReleaseCacheEnriched',
 } as const satisfies Record<string, keyof ComfyTitlePopupBridge>
 
 type ShimApi = {

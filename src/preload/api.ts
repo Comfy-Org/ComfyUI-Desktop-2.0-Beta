@@ -287,6 +287,12 @@ export function buildElectronApi(): ElectronApi {
       ipcRenderer.on('installations-changed', handler)
       return () => ipcRenderer.removeListener('installations-changed', handler)
     },
+    onReleaseCacheEnriched: (callback) => {
+      const handler = (_event: IpcRendererEvent, data: unknown) =>
+        callback(data as { repo: string })
+      ipcRenderer.on('release-cache-enriched', handler)
+      return () => ipcRenderer.removeListener('release-cache-enriched', handler)
+    },
     onInstallationsVersionsUpdated: (callback) => {
       const handler = (_event: IpcRendererEvent, data: unknown) => {
         const updates = (data as Record<string, unknown>).updates as { id: string; version: string }[]

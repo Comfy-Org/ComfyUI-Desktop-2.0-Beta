@@ -10,6 +10,7 @@ import {
   isEffectivelyEmptyInstallDir,
   UPDATE_CHECK_INTERVAL,
 } from './shared'
+import * as releaseCache from '../release-cache'
 import type { RegisterCallbacks } from './shared'
 import { registerAppHandlers } from './registerAppHandlers'
 import { registerInstallationHandlers } from './registerInstallationHandlers'
@@ -22,8 +23,28 @@ import { registerCrashHandlers } from './registerCrashHandlers'
 export { getAppVersion, stopRunning, hasRunningSessions, getSessionProcess, hasActiveOperations, getActiveDetails, cancelAll } from './shared'
 export type { RegisterCallbacks } from './shared'
 
+/** Idempotent bridge between `releaseCache.onEnriched` (a module-level
+ *  event) and `_broadcastToRenderer`. `register()` is called once per
+ *  app boot in production, but tests and hot-reload paths can invoke it
+ *  again — without this guard we'd subscribe twice and every enrichment
+ *  would broadcast twice. */
+let _releaseCacheBridgeWired = false
+function wireReleaseCacheBroadcast(): void {
+  if (_releaseCacheBridgeWired) return
+  _releaseCacheBridgeWired = true
+  // Fires only when `enrichCommitsAhead` actually writes a new
+  // `commitsAhead` value, so open panels can refresh affected sections
+  // in place (e.g. the Update tab's "Latest from GitHub" card switches
+  // from `tag (sha)` to `tag + N commits (sha)` once enrichment lands
+  // in the background).
+  releaseCache.onEnriched((repo) => {
+    _broadcastToRenderer('release-cache-enriched', { repo })
+  })
+}
+
 export function register(callbacks: RegisterCallbacks = {}): void {
   setCallbacks(callbacks)
+  wireReleaseCacheBroadcast()
 
   installations.seedDefaults([
     {

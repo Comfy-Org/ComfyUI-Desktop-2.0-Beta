@@ -410,6 +410,15 @@ export interface ComfyTitlePopupBridge {
    *  `diskSpace.*`, etc.). The popup merges this payload on top of its
    *  static catalog once the expanded mode opens. */
   pickerSettingsGetLocaleMessages(): Promise<Record<string, unknown>>
+  /** Fires when `release-cache.enrichCommitsAhead` finishes writing a
+   *  new `commitsAhead` value into main's release cache. The open
+   *  settings pane uses this to upgrade the "Latest from GitHub" card
+   *  from `tag (sha)` to `tag + N commits (sha)` in place — the section
+   *  IPC returns immediately and is no longer blocked on `git fetch`.
+   *  Returns an unsubscribe function. */
+  pickerSettingsOnReleaseCacheEnriched(
+    callback: (data: { repo: string }) => void,
+  ): () => void
   /** Forward a `show-progress` request from the picker's settings UI to
    *  the parent host's panel renderer. The panel rebuilds the apiCall
    *  closure from `actionId`/`actionData` and routes through its existing
@@ -685,6 +694,12 @@ const bridge: ComfyTitlePopupBridge = {
     ipcRenderer.send(CH.relaunchApp)
   },
   pickerSettingsGetLocaleMessages: () => ipcRenderer.invoke(CH.getLocaleMessages),
+  pickerSettingsOnReleaseCacheEnriched: (callback) => {
+    const handler = (_event: IpcRendererEvent, data: unknown) =>
+      callback(data as { repo: string })
+    ipcRenderer.on('release-cache-enriched', handler)
+    return () => ipcRenderer.removeListener('release-cache-enriched', handler)
+  },
   pickerForwardShowProgress: (payload) => {
     ipcRenderer.send('comfy-titlepopup:forward-show-progress', payload)
   },
