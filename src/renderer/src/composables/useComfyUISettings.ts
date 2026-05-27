@@ -13,13 +13,19 @@ import {
   type DetailField,
   type DetailSection,
   type DiskSpaceInfo,
-  type FieldOption,
   type Installation,
   type ShowProgressOpts,
 } from '../types/ipc'
 import { IN_PLACE_RELAUNCH, augmentActionWithStopWarning, stopAndWaitForExit } from '../lib/stopWarning'
 import { sleepRemainder } from '../lib/uiTiming'
 import type { SectionTab } from '../lib/pickerTabs'
+import {
+  runConfirmChain,
+  runDiskSpaceCheck,
+  runFieldSelectsChain,
+  runPromptChain,
+  runSelectChain,
+} from './actionShoppingList'
 
 /**
  * Backing state + IPC plumbing for the brand-redesigned Settings drawer
@@ -523,165 +529,34 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
       mutableAction = augmentActionWithStopWarning(mutableAction, t('errors.willStopRunning'))
     }
 
-    // 4. fieldSelects chain — each step prompts the user to pick from a
-    //    main-side source via `getFieldOptions`. Selections feed the
-    //    next step + accumulate on `mutableAction.data`.
-    if (mutableAction.fieldSelects) {
-      const selections: Record<string, FieldOption> = {}
-      for (const fs of mutableAction.fieldSelects) {
-        let items: FieldOption[]
-        try {
-          items = await window.api.getFieldOptions(fs.sourceId, fs.fieldId, selections)
-        } catch (err: unknown) {
-          await dialogs.alert({
-            title: mutableAction.label,
-            message: (err as Error).message || String(err),
-          })
-          return
-        }
-        if (!items || items.length === 0) {
-          await dialogs.alert({
-            title: mutableAction.label,
-            message: fs.emptyMessage || t('common.noItems'),
-          })
-          return
-        }
-        const selectItems = items.map((item) => ({
-          value: item.value,
-          label: (item.recommended ? '★ ' : '') + item.label,
-          description: item.description,
-        }))
-        const selected = await dialogs.actionSheet({
-          title: fs.title || mutableAction.label,
-          message: fs.message || '',
-          items: selectItems,
-        })
-        if (!selected) return
-        const selectedItem = items.find((i) => i.value === selected)
-        if (selectedItem) selections[fs.fieldId] = selectedItem
-        mutableAction = {
-          ...mutableAction,
-          data: { ...mutableAction.data, [fs.field]: selectedItem },
-        }
-      }
+    // 4-8. Shopping-list chain steps — fieldSelects → select → prompt
+    //      → confirm → disk-check. Each helper drives a modal when the
+    //      action carries the corresponding chain, returns the merged
+    //      action on success, or null on cancel / failure. The confirm
+    //      step skips migrate-to-standalone, which owns its confirm
+    //      surface (modal OR brand takeover) up in step #2.
+    //      fieldSelects / select / prompt route through `dialogs.*`
+    //      (BaseModal-shell primitives); confirm + disk-check stay on
+    //      `useModal` for `confirmWithOptions` parity.
+    const afterFieldSelects = await runFieldSelectsChain(mutableAction, dialogs, t)
+    if (!afterFieldSelects) return
+    mutableAction = afterFieldSelects
+
+    const afterSelect = await runSelectChain(mutableAction, inst.id, dialogs, t)
+    if (!afterSelect) return
+    mutableAction = afterSelect
+
+    const afterPrompt = await runPromptChain(mutableAction, dialogs)
+    if (!afterPrompt) return
+    mutableAction = afterPrompt
+
+    if (mutableAction.id !== 'migrate-to-standalone') {
+      const afterConfirm = await runConfirmChain(mutableAction, modal)
+      if (!afterConfirm) return
+      mutableAction = afterConfirm
     }
 
-    // 5. select chain — single-shot select against a named source
-    //    (e.g. `'installations'` for "copy from which install").
-    if (mutableAction.select) {
-      let items: { value: string; label: string; description?: string }[] | undefined
-      if (mutableAction.select.source === 'installations') {
-        let all = await window.api.getInstallations()
-        if (mutableAction.select.excludeSelf) {
-          all = all.filter((i) => i.id !== inst.id)
-        }
-        if (mutableAction.select.filters) {
-          for (const [key, value] of Object.entries(mutableAction.select.filters)) {
-            all = all.filter((i) => (i as Record<string, unknown>)[key] === value)
-          }
-        }
-        items = all.map((i) => ({ value: i.id, label: i.name, description: i.sourceLabel }))
-      }
-      if (!items || items.length === 0) {
-        await dialogs.alert({
-          title: mutableAction.label,
-          message: mutableAction.select.emptyMessage || t('common.noItems'),
-        })
-        return
-      }
-      const selected = await dialogs.actionSheet({
-        title: mutableAction.select.title || mutableAction.label,
-        message: mutableAction.select.message || '',
-        items,
-      })
-      if (!selected) return
-      mutableAction = {
-        ...mutableAction,
-        data: { ...mutableAction.data, [mutableAction.select.field]: selected },
-      }
-    }
-
-    // 6. prompt chain — free-form text input (e.g. Copy Installation
-    //    new-name prompt). Routes through `useDialogs.prompt` →
-    //    `BasePrompt` (BaseModal shell) rather than the legacy
-    //    `useModal.prompt` renderer.
-    if (mutableAction.prompt) {
-      const value = await dialogs.prompt({
-        title: mutableAction.prompt.title || mutableAction.label,
-        message: mutableAction.prompt.message || '',
-        placeholder: mutableAction.prompt.placeholder,
-        defaultValue: mutableAction.prompt.defaultValue,
-        confirmLabel: mutableAction.prompt.confirmLabel || mutableAction.label,
-        required: mutableAction.prompt.required,
-        messageDetails: mutableAction.prompt.messageDetails,
-      })
-      if (!value) return
-      mutableAction = {
-        ...mutableAction,
-        data: { ...mutableAction.data, [mutableAction.prompt.field]: value },
-      }
-    }
-
-    // 7. confirm chain — skip for migrate-to-standalone (handled in #2).
-    //    `confirm.options` flips us to `confirmWithOptions` (checkbox
-    //    confirm — e.g. Delete Installation's "Also delete files" toggle).
-    if (mutableAction.confirm && mutableAction.id !== 'migrate-to-standalone') {
-      if (mutableAction.confirm.options) {
-        const result = await modal.confirmWithOptions({
-          title: mutableAction.confirm.title || 'Confirm',
-          message: mutableAction.confirm.message || 'Are you sure?',
-          options: mutableAction.confirm.options,
-          confirmLabel: mutableAction.confirm.confirmLabel || mutableAction.label,
-          confirmStyle: mutableAction.style || 'danger',
-        })
-        if (!result) return
-        mutableAction = { ...mutableAction, data: { ...mutableAction.data, ...result } }
-      } else {
-        const confirmed = await modal.confirm({
-          title: mutableAction.confirm.title || 'Confirm',
-          message: mutableAction.confirm.message || 'Are you sure?',
-          messageDetails: mutableAction.confirm.messageDetails,
-          confirmLabel: mutableAction.label,
-          confirmStyle: mutableAction.style || 'danger',
-        })
-        if (!confirmed) return
-      }
-    }
-
-    // 8. Disk-space sanity check for actions that write significant
-    //    data. Estimate via `getInstallationSize` for copy / copy-update;
-    //    fall back to a generic 1 GiB threshold otherwise.
-    const diskCheckActions = new Set(['copy', 'copy-update', 'release-update'])
-    if (diskCheckActions.has(mutableAction.id) && inst.installPath) {
-      try {
-        const space: DiskSpaceInfo = await window.api.getDiskSpace(inst.installPath)
-        let estimatedRequired = 0
-        if (mutableAction.id === 'copy' || mutableAction.id === 'copy-update') {
-          try {
-            const r = await window.api.getInstallationSize(inst.id)
-            estimatedRequired = r.sizeBytes
-          } catch {
-            // ignore — fall through to generic threshold
-          }
-        }
-        const threshold = estimatedRequired > 0 ? Math.ceil(estimatedRequired * 1.1) : 1073741824
-        if (space.free < threshold) {
-          const freeStr = formatBytes(space.free)
-          const message = estimatedRequired > 0
-            ? t('diskSpace.warningMessage', { free: freeStr, required: formatBytes(estimatedRequired) })
-            : t('diskSpace.warningMessageGeneric', { free: freeStr })
-          const ok = await modal.confirm({
-            title: t('diskSpace.warningTitle'),
-            message,
-            confirmLabel: t('diskSpace.continueAnyway'),
-            confirmStyle: 'primary',
-          })
-          if (!ok) return
-        }
-      } catch {
-        // If the disk check itself fails, proceed.
-      }
-    }
+    if (!await runDiskSpaceCheck(mutableAction, inst, modal, t)) return
 
     // 9. showProgress — emit show-progress for the host's ProgressModal.
     //    The synthetic `restart` id maps to stop → wait → launch so the

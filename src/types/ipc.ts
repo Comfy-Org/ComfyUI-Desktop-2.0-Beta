@@ -120,7 +120,6 @@ export interface DetailField {
   options?: DetailFieldOption[]
   refreshSection?: boolean
   browseOnly?: boolean
-  onChangeAction?: string
   tooltip?: string
   /** Marks fields that only take effect on next process start.
    *  Renderer shows a per-field tag + promotes the footer Restart

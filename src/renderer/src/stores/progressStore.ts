@@ -59,8 +59,11 @@ export const useProgressStore = defineStore('progress', () => {
 
   const operations = reactive(new Map<string, Operation>())
 
-  // Listen for async error detail updates (e.g. locking process names resolved after the initial error)
-  window.api.onErrorDetail((data: ErrorDetailData) => {
+  // Listen for async error detail updates (e.g. locking process names resolved after the initial error).
+  // Guarded — the picker popup's `window.api` shim does not forward
+  // `onErrorDetail`, and a hard call would throw at store construction
+  // and silently blank the entire ComfyUISettingsContent right pane.
+  window.api.onErrorDetail?.((data: ErrorDetailData) => {
     const op = operations.get(data.installationId)
     if (op?.error) {
       op.error = data.message

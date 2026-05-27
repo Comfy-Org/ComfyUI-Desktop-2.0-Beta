@@ -7,9 +7,12 @@
  *
  *   1. `comfy-titlepopup:pick-install`        — pick a row → focus the
  *      running install (or, for stopped, run `runAction('launch')`).
- *      Tested here with `seedRunningSession` so the focused-running
- *      short-circuit fires `focus-comfy-window` and the test doesn't
- *      need a real ComfyUI process. (audit lifecycle #11)
+ *      Covered here twice: once with `seedRunningSession` so the
+ *      focused-running short-circuit fires `focus-comfy-window`, and
+ *      once without it so the chooser-backed launch path actually
+ *      dispatches `runAction('launch')`. Neither variant needs a real
+ *      ComfyUI process — the fake standalone install returns ok:false
+ *      from `handleLaunch` immediately. (audit lifecycle #11)
  *
  *   2. `comfy-titlepopup:open-new-install`    — More-menu's `+ New
  *      Install` row → mounts the new-install Tier 3 takeover on the
@@ -151,6 +154,51 @@ test('pick-install for a running install dismisses the popup and focuses the exi
   const focusCalls = await getIpcInvocations(ctx.app, 'focus-comfy-window') as
     { installationId?: string }[]
   expect(focusCalls[0]?.installationId).toBe(INSTALL_ID)
+})
+
+test('pick-install for a stopped install dismisses the popup and fires runAction(launch) @lifecycle', async () => {
+  // No seedRunningSession — the chain hits
+  // `performChooserLaunch.launched`: looks up the launch action,
+  // claims the chooser host, and dispatches `runAction('launch')`
+  // through useListAction's showProgress branch. handleLaunch in main
+  // returns ok:false fast (the fake standalone install has no real
+  // env), so no real ComfyUI process spawns.
+  await openExpandedPicker()
+
+  const popup = titlePopupPage(ctx.app)
+  await popup.evaluate<void>(
+    `window.__comfyTitlePopup.pickInstall(${JSON.stringify(INSTALL_ID)})`,
+  )
+
+  await expect
+    .poll(() => isPopupVisible(ctx.app, 'comfyTitlePopup.html'), {
+      timeout: 5_000,
+      intervals: [100, 200],
+    })
+    .toBe(false)
+
+  // The full pick-install → main → panel-trigger-overlay →
+  // useDeepLinkRouter → handleChooserPick → performChooserLaunch
+  // chain ends in `runAction('launch')` for the picked install. A
+  // regression anywhere along the chain drops this IPC.
+  await expect
+    .poll(async () => {
+      const calls = (await getIpcInvocations(ctx.app, 'run-action')) as
+        { installationId?: string; actionId?: string }[]
+      return calls.some((c) => c.installationId === INSTALL_ID && c.actionId === 'launch')
+    }, { timeout: 10_000, intervals: [200, 500] })
+    .toBe(true)
+
+  // Stopped-pick must NOT issue stop-comfyui — there's nothing to
+  // stop. Pins the symmetry with picker-stop-confirm's
+  // "Skips self-stop when the install is NOT running" guard.
+  const stopCalls = await getIpcInvocations(ctx.app, 'stop-comfyui')
+  expect(stopCalls.length).toBe(0)
+
+  // focus-comfy-window is the focused-running short-circuit path;
+  // confirm it did NOT fire (we want the launch path, not focus).
+  const focusCalls = await getIpcInvocations(ctx.app, 'focus-comfy-window')
+  expect(focusCalls.length).toBe(0)
 })
 
 test('open-new-install dismisses the popup and mounts the new-install takeover @lifecycle', async () => {

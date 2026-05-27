@@ -9,6 +9,7 @@ import * as mainTelemetry from '../telemetry'
 import { detectFirstUseState } from '../firstUseDetection'
 import * as updater from '../updater'
 import { globalSettingsEvents } from '../globalSettingsEvents'
+import { recordIpcInvocation } from '../e2eOverrides'
 import type { SettingsSection } from '../../../types/ipc'
 
 /** Assemble the App + sources + About sections (Language / Theme /
@@ -170,6 +171,7 @@ export function registerSettingsHandlers(): void {
   ipcMain.handle('get-media-sections', () => buildMediaSections())
 
   ipcMain.handle('set-setting', (_event, key: string, value: unknown) => {
+    recordIpcInvocation('set-setting', { key, value })
     applySettingSet(key, value)
   })
 
