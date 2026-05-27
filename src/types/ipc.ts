@@ -119,6 +119,9 @@ export interface DetailField {
   editType?: 'select' | 'boolean' | 'text' | 'number' | 'path' | 'channel-cards' | 'args-builder' | 'env-vars'
   options?: DetailFieldOption[]
   refreshSection?: boolean
+  /** Action id to fire automatically when this field's value changes
+   *  (e.g. switching update channel triggers `check-update`). */
+  onChangeAction?: string
   browseOnly?: boolean
   tooltip?: string
   /** Marks fields that only take effect on next process start.
