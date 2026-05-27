@@ -278,10 +278,19 @@ function handleSettingsShowProgress(opts: ShowProgressOpts): void {
     opts,
     props.snapshot.activeInstallationId
   )
+  // `opts.actionData` originates as a Vue reactive proxy when the action
+  // came off a sections payload (e.g. ChannelPicker's per-channel
+  // `update-comfyui` / `copy-update` carrying `{ channel }`). Reactive
+  // proxies can't cross the contextBridge structured-clone boundary —
+  // `ipcRenderer.send` would throw synchronously, silently swallowing
+  // the show-progress hand-off. Deep-clone to a plain object first.
+  const rawActionData = opts.actionData
+    ? JSON.parse(JSON.stringify(opts.actionData)) as Record<string, unknown>
+    : undefined
   bridge?.pickerForwardShowProgress({
     installationId: opts.installationId,
     actionId: opts.actionId,
-    actionData: opts.actionData,
+    actionData: rawActionData,
     title: opts.title,
     cancellable: opts.cancellable,
     triggersInstanceStart: opts.triggersInstanceStart,

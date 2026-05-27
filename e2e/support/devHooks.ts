@@ -166,6 +166,25 @@ export async function seedRunningSession(
   }, opts))
 }
 
+/** Mount the install-backed panelView for `installationId` if it
+ *  doesn't already exist. The chooser-pick attach in main `onLaunch`
+ *  drops the chooser PanelApp without remounting a fresh install-backed
+ *  one (production lazily mounts on Settings click / comfy-lifecycle
+ *  body). Tests that need `panel.html` reachable immediately after a
+ *  launch call this to skip the lazy step. */
+export async function ensureInstallPanelView(
+  app: ElectronApplication,
+  installationId: string,
+): Promise<boolean> {
+  return await evalWithRetry(() => app.evaluate((_electron, id) => {
+    const helpers = (globalThis as unknown as {
+      __e2e?: { ensureInstallPanelView: (id: string) => boolean }
+    }).__e2e
+    if (!helpers) throw new Error('E2E helpers not registered (process.env.E2E !== "1"?)')
+    return helpers.ensureInstallPanelView(id)
+  }, installationId))
+}
+
 /** Force every release-cache entry's `checkedAt` to `maxCheckedAt`
  *  (ms-since-epoch). Used to drive the renderer's stale-data
  *  auto-refresh watcher without waiting wall-clock minutes. */

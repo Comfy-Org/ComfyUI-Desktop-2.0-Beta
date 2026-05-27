@@ -57,7 +57,7 @@ export async function launchApp(options?: SeedOptions): Promise<AppContext> {
   // consent screen as proof the panel renderer reached an interactive
   // state — tests that need the chooser explicitly seed the gate.
   await panel.waitForSelector('.panel-shell', { timeout: 30_000 })
-  await panel.waitForSelector('.chooser-view, .panel-chooser, .consent-hero', { timeout: 15_000 })
+  await panel.waitForSelector('.chooser-view, .panel-chooser, .start-screen, .consent-hero', { timeout: 15_000 })
   await titleBar.waitForSelector('.title-bar', { timeout: 15_000 })
 
   return {

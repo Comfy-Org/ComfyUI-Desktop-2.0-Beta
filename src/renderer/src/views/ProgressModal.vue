@@ -888,6 +888,7 @@ defineExpose({ startOperation, showOperation })
             v-if="currentOp.finished && isPortConflictOpen"
             key="finished-port-conflict"
             class="brand-progress__banner brand-progress__banner--error"
+            :data-testid="TID.progressPortConflictBanner"
             aria-live="polite"
           >
             <X :size="20" />

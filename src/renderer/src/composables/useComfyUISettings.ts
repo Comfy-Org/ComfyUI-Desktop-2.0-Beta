@@ -683,6 +683,7 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
       }
     }
 
+
     // 9. showProgress — emit show-progress for the host's ProgressModal.
     //    The synthetic `restart` id maps to stop → wait → launch so the
     //    user sees one continuous "Restarting ComfyUI" progress view.
