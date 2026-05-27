@@ -197,12 +197,25 @@ test('cold start lands on first-use start screen @lifecycle', async () => {
 
 test('accept consent + pick local opens New Install takeover with form pre-filled @lifecycle', async () => {
   test.skip(HYDRATED, 'reuse mode: first-use already completed on the persisted profile')
-  // Pick Local first — pr604's merged start screen needs both a source
+  // Pick Local — pr604's merged start screen needs both a source
   // choice AND ticked ToS before Continue lights up. The Local card is
   // a radiogroup ChoiceCard; clicking it also reveals the Express
-  // install opt-in (which we leave at its default = unchecked, so the
-  // chain lands in the Configure new-install takeover, not Express).
+  // install opt-in.
   expect(await ctx.panel.click('[data-testid="first-use-pick-local"]')).toBe(true)
+
+  // Express install defaults to checked (`expressInstall = ref(true)`).
+  // Express skips the Configure takeover and runs the recommended
+  // Standalone install immediately — the lifecycle suite needs the
+  // Configure path so it can override the release pre-fill to the
+  // OLDEST stable tag (so post-install update tests naturally have
+  // work to do). Toggle Express OFF before continuing.
+  expect(await ctx.panel.click('[data-testid="first-use-express-install"]')).toBe(true)
+  await ctx.panel.waitFor(
+    async () => ctx.panel.evaluate<boolean>(
+      `!document.querySelector('[data-testid="first-use-express-install"] input').checked`,
+    ),
+    { timeout: 5_000, message: 'Express install checkbox did not become unchecked' },
+  )
 
   // Tick the required ToS checkbox (telemetry stays at its default
   // opt-in; the test settings already disable telemetry network egress
@@ -215,9 +228,10 @@ test('accept consent + pick local opens New Install takeover with form pre-fille
     { timeout: 5_000, message: 'Continue never became enabled after picking Local + ticking ToS' },
   )
 
-  // Continue → with no legacy desktop install detected, this emits
-  // `chain-local`, which the host swaps for the new-install Tier 3
-  // takeover (silent Tier 3 → Tier 3 swap inside `useOverlay`).
+  // Continue → with Express unchecked + no legacy desktop install
+  // detected, this emits `chain-local` with `{ express: false }`, which
+  // the host swaps for the new-install Tier 3 takeover (silent Tier 3
+  // → Tier 3 swap inside `useOverlay`).
   expect(await ctx.panel.click('[data-testid="first-use-continue"]')).toBe(true)
   await expectTakeoverOpen(ctx.panel)
 
