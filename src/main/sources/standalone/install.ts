@@ -9,7 +9,6 @@ import { formatTime } from '../../lib/util'
 import { t } from '../../lib/i18n'
 import * as snapshots from '../../lib/snapshots'
 import { fetchLatestRelease } from '../../lib/comfyui-releases'
-import { formatComfyVersion } from '../../lib/version'
 import { repairMacBinaries, codesignBinaries } from './macRepair'
 import { runComfyUIUpdate } from './updateOrchestrator'
 import {
@@ -148,11 +147,14 @@ export async function postInstall(installation: InstallationRecord, { sendProgre
     try {
       const latestRelease = await fetchLatestRelease('stable')
       const latestTag = latestRelease?.tag_name as string | undefined
-      const currentTag = (installation.comfyVersion as ComfyVersion | undefined)
-        ? formatComfyVersion(installation.comfyVersion as ComfyVersion, 'short')
-        : (installation.version as string | undefined)
+      const current = installation.comfyVersion as ComfyVersion | undefined
+      const onLatestTag = !!latestTag && current?.baseTag === latestTag && current?.commitsAhead === 0
 
-      if (!latestTag || latestTag === currentTag) {
+      if (!latestTag) {
+        // Don't lie. A network flake here previously masqueraded as "Already up to date,"
+        // which is how first installs were stranding on the bundled v0.20.x.
+        sendProgress('update', { percent: 100, status: 'Skipped — could not verify latest version' })
+      } else if (onLatestTag) {
         sendProgress('update', { percent: 100, status: 'Already up to date' })
       } else {
         const result = await runComfyUIUpdate({
