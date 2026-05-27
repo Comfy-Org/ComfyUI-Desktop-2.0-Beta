@@ -164,7 +164,7 @@ export function getDetailSections(installation: InstallationRecord): Record<stri
 
   const updateFields: Record<string, unknown>[] = [
     { id: 'updateChannel', label: t('standalone.updateChannel'), value: channel, editable: true,
-      refreshSection: true, onChangeAction: 'check-update', editType: 'channel-cards', options: channelOptions, tooltip: t('tooltips.updateChannel') },
+      refreshSection: true, editType: 'channel-cards', options: channelOptions, tooltip: t('tooltips.updateChannel') },
   ]
   const updateActions: Record<string, unknown>[] = [
     { id: 'check-update', label: t('actions.checkForUpdate'), style: 'default', enabled: installed },

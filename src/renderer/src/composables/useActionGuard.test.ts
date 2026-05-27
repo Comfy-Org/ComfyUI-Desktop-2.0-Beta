@@ -74,6 +74,20 @@ describe('useActionGuard.checkBeforeAction', () => {
     expect(mockCancelOperation).not.toHaveBeenCalled()
   })
 
+  it('treats a progressStore-only in-flight op (no active session) as busy', async () => {
+    // copy / release-update / migrate-from register progress without
+    // ever populating a sessionStore entry, so the busy guard must
+    // consult progressStore directly or those ops can be raced by any
+    // non-REQUIRES_STOPPED action runner.
+    progressState.info.set(INSTALL_ID, { status: 'Copying…', percent: 42 })
+    mockConfirm.mockResolvedValue(false)
+
+    const ok = await useActionGuard().checkBeforeAction(INSTALL_ID, 'Open Folder')
+
+    expect(ok).toBe(false)
+    expect(mockConfirm).toHaveBeenCalledOnce()
+  })
+
   it('cancels then polls until the in-flight op clears', async () => {
     sessionState.activeSessions.set(INSTALL_ID, { label: 'Updating ComfyUI' })
     progressState.info.set(INSTALL_ID, { status: 's', percent: -1 })

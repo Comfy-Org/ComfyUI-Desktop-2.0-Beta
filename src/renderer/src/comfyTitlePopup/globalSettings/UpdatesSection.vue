@@ -5,6 +5,7 @@ import SettingsSectionList from '../../views/comfyUISettings/SettingsSectionList
 import { formatRelativeFromMs } from '../../lib/datetime'
 import { formatBytes, formatSpeed } from '../../lib/downloadFormatters'
 import type {
+  ActionDef,
   AppUpdateDownloadProgress,
   AppUpdateState,
   DetailField,
@@ -37,6 +38,7 @@ const emit = defineEmits<{
   'update-now': []
   'check-for-update': []
   'update-field': [field: DetailField, value: unknown]
+  'run-action': [action: ActionDef]
 }>()
 
 const { t, d } = useI18n()
@@ -240,6 +242,7 @@ const progressDetail = computed<string | null>(() => {
       v-if="preferenceSections.length > 0"
       :sections="preferenceSections"
       @update-field="(field, value) => emit('update-field', field, value)"
+      @run-action="(action) => emit('run-action', action)"
     />
   </div>
 </template>

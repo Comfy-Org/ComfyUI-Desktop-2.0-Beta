@@ -24,7 +24,8 @@ import {
 } from './release-cache'
 import { _test_getOpenTitlePopupBounds } from '../popups/titlePopup'
 import { returnToDashboard } from '../host/detach'
-import { comfyWindows, isInstallHost } from '../host/registry'
+import { comfyWindows, getEntryByInstallationId, isInstallHost } from '../host/registry'
+import { ensurePanelView } from '../host/panelView'
 import {
   installUpdateOverrides,
   INSTALL_UPDATE_GLOBAL_KEY,
@@ -109,6 +110,14 @@ export interface E2EHelpers {
    *  in `ComfyUISettingsContent` treats the data as stale and auto-
    *  fires `check-update` on the next picker open. */
   ageReleaseCache(maxCheckedAt: number): void
+  /** Mount the install-backed panelView for `installationId` if it
+   *  doesn't already exist. The chooser-pick attach in `onLaunch`
+   *  drops the chooser PanelApp without remounting a fresh
+   *  install-backed one (production lazily mounts on Settings click /
+   *  comfy-lifecycle body). Tests that need `panel.html` reachable
+   *  immediately after a launch call this to skip the lazy step.
+   *  Returns `true` if the entry exists, `false` otherwise. */
+  ensureInstallPanelView(installationId: string): boolean
 }
 
 export function registerE2EHooks(): void {
@@ -155,6 +164,12 @@ export function registerE2EHooks(): void {
       return _releaseCacheGet(repo, channel)?.checkedAt ?? null
     },
     ageReleaseCache: _test_ageReleaseCacheEntries,
+    ensureInstallPanelView(installationId) {
+      const entry = getEntryByInstallationId(installationId)
+      if (!entry || entry.window.isDestroyed()) return false
+      ensurePanelView(entry.windowKey, entry, 'comfy-lifecycle')
+      return true
+    },
   }
   ;(globalThis as unknown as { __e2e: E2EHelpers }).__e2e = helpers
 }

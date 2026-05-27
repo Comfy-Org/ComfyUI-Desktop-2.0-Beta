@@ -120,6 +120,9 @@ export interface DetailField {
   options?: DetailFieldOption[]
   refreshSection?: boolean
   browseOnly?: boolean
+  /** Auto-fire this action after the field value changes (e.g.
+   *  switching update channel triggers `check-update` so the preview
+   *  metadata refreshes without an extra click). */
   onChangeAction?: string
   tooltip?: string
   /** Marks fields that only take effect on next process start.

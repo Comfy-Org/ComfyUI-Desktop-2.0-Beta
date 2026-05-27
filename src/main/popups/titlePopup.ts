@@ -159,6 +159,10 @@ export interface GlobalSettingsSnapshot {
     platform: NodeJS.Platform
     lastCheckedAt: number | null
   }
+  // Host-window install id, forwarded so the renderer can target the
+  // `globalSettingsRunInstallAction` IPC at the right install when a
+  // ChannelPicker action fires from a settings section.
+  activeInstallationId: string | null
   githubUrl: string
   githubStars: number | null
   i18n: {
@@ -1419,7 +1423,7 @@ function openGlobalSettingsForHost(
 ): void {
   if (parentEntry.window.isDestroyed()) return
   void (async () => {
-    const snapshot = await buildGlobalSettingsSnapshot()
+    const snapshot = await buildGlobalSettingsSnapshot(parentEntry.installationId)
     if (parentEntry.window.isDestroyed()) return
     openTitlePopup({
       parent: parentEntry.window,
@@ -1716,7 +1720,9 @@ function findSettingsFields(
   return src.map(toDetailField)
 }
 
-async function buildGlobalSettingsSnapshot(): Promise<GlobalSettingsSnapshot> {
+async function buildGlobalSettingsSnapshot(
+  hostInstallationId: string | null,
+): Promise<GlobalSettingsSnapshot> {
   const settingsSections = buildSettingsSections()
   const mediaSections = buildMediaSections()
   const modelsPayload = buildModelsPayload()
@@ -1758,6 +1764,7 @@ async function buildGlobalSettingsSnapshot(): Promise<GlobalSettingsSnapshot> {
       platform: process.platform,
       lastCheckedAt: globalSettingsLastCheckedAt,
     },
+    activeInstallationId: hostInstallationId,
     githubUrl: GLOBAL_SETTINGS_GITHUB_URL,
     githubStars,
     i18n: {
@@ -1783,7 +1790,8 @@ async function broadcastGlobalSettingsSnapshotToTitlePopups(
     if (entry.kind !== 'global-settings') continue
     if (!entry.view.isOpen && entry.view.pendingShowTimer === null) continue
     if (entry.view.popup.webContents.isDestroyed()) continue
-    const snapshot = await buildGlobalSettingsSnapshot()
+    const parentEntry = comfyWindows.get(entry.parentEntryId)
+    const snapshot = await buildGlobalSettingsSnapshot(parentEntry?.installationId ?? null)
     const snapshotJson = JSON.stringify(snapshot)
     if (entry.lastGlobalSettingsBroadcastJson === snapshotJson) continue
     entry.lastGlobalSettingsBroadcastJson = snapshotJson

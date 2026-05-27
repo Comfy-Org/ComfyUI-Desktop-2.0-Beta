@@ -8,6 +8,7 @@ import GitHubLinkCard from './globalSettings/GitHubLinkCard.vue'
 import SettingsSectionList from '../views/comfyUISettings/SettingsSectionList.vue'
 import { withMinDuration } from '../lib/uiTiming'
 import type {
+  ActionDef,
   AppUpdateDownloadProgress,
   AppUpdateState,
   DetailField,
@@ -161,6 +162,21 @@ async function handleCheckForUpdate(): Promise<void> {
   }
 }
 
+async function handleRunInstallAction(action: ActionDef): Promise<void> {
+  const id = props.snapshot.activeInstallationId
+  if (!id) return
+  // `action.data` is a Vue reactive proxy when the action comes off a
+  // ChannelPicker option (cross-channel update / copy-update carries
+  // `{ channel }`). Reactive proxies can't cross the contextBridge
+  // structured-clone boundary; deep-clone to a plain object first or
+  // ipcRenderer.invoke throws "An object could not be cloned" and the
+  // user is silently stuck with no error feedback.
+  const rawActionData = action.data
+    ? (JSON.parse(JSON.stringify(action.data)) as Record<string, unknown>)
+    : undefined
+  await bridge?.globalSettingsRunInstallAction(id, action.id, rawActionData)
+}
+
 function handleTabKey(event: KeyboardEvent): void {
   if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return
   event.preventDefault()
@@ -228,11 +244,19 @@ onMounted(() => {
       >
         <template v-if="activeTab === 'general'">
           <GlobalSettingsMicroSection :title="t('settings.preferences', 'Preferences')">
-            <SettingsSectionList :sections="generalSections" @update-field="handleUpdateField" />
+            <SettingsSectionList
+              :sections="generalSections"
+              @update-field="handleUpdateField"
+              @run-action="handleRunInstallAction"
+            />
           </GlobalSettingsMicroSection>
 
           <GlobalSettingsMicroSection :title="t('settings.privacy', 'Privacy')">
-            <SettingsSectionList :sections="telemetrySections" @update-field="handleUpdateField" />
+            <SettingsSectionList
+              :sections="telemetrySections"
+              @update-field="handleUpdateField"
+              @run-action="handleRunInstallAction"
+            />
           </GlobalSettingsMicroSection>
 
           <GlobalSettingsMicroSection :title="t('settings.community', 'Community')">
@@ -257,16 +281,25 @@ onMounted(() => {
             @update-now="handleUpdateNow"
             @check-for-update="handleCheckForUpdate"
             @update-field="handleUpdateField"
+            @run-action="handleRunInstallAction"
           />
         </template>
 
         <template v-else>
           <GlobalSettingsMicroSection :title="snapshot.i18n.advanced">
-            <SettingsSectionList :sections="advancedSections" @update-field="handleUpdateField" />
+            <SettingsSectionList
+              :sections="advancedSections"
+              @update-field="handleUpdateField"
+              @run-action="handleRunInstallAction"
+            />
           </GlobalSettingsMicroSection>
 
           <GlobalSettingsMicroSection :title="t('settings.cache', 'Cache')">
-            <SettingsSectionList :sections="cacheSections" @update-field="handleUpdateField" />
+            <SettingsSectionList
+              :sections="cacheSections"
+              @update-field="handleUpdateField"
+              @run-action="handleRunInstallAction"
+            />
           </GlobalSettingsMicroSection>
         </template>
       </section>

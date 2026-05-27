@@ -13,7 +13,6 @@ import {
   type DetailField,
   type DetailSection,
   type DiskSpaceInfo,
-  type FieldOption,
   type Installation,
   type ShowProgressOpts,
 } from '../types/ipc'

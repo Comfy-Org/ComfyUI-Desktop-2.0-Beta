@@ -120,6 +120,7 @@ interface GlobalSettingsSnapshot {
     platform: string
     lastCheckedAt: number | null
   }
+  activeInstallationId: string | null
   githubUrl: string
   githubStars: number | null
   i18n: {
@@ -213,6 +214,7 @@ const globalSettingsSnapshot = ref<GlobalSettingsSnapshot>({
     platform: 'darwin',
     lastCheckedAt: null
   },
+  activeInstallationId: null,
   githubUrl: '',
   githubStars: null,
   i18n: {

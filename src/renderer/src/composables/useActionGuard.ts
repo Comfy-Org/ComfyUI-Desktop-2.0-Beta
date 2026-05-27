@@ -18,7 +18,9 @@ export function useActionGuard() {
 
   async function checkBeforeAction(installationId: string, actionLabel: string): Promise<boolean> {
     const activeSession = sessionStore.activeSessions.get(installationId)
-    const isBusy = sessionStore.isLaunching(installationId) || (activeSession && !sessionStore.isRunning(installationId))
+    const isBusy = sessionStore.isLaunching(installationId)
+      || (activeSession && !sessionStore.isRunning(installationId))
+      || progressStore.getProgressInfo(installationId) !== null
     if (isBusy) {
       const operation = activeSession?.label || t('running.title')
       const confirmed = await modal.confirm({

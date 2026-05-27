@@ -356,6 +356,25 @@ describe('useProgressStore', () => {
     })
   })
 
+  describe('onErrorDetail subscription', () => {
+    it('does not throw at construction when window.api.onErrorDetail is undefined', () => {
+      // The picker popup's `window.api` shim does not forward
+      // `onErrorDetail` (it's a panel-side IPC subscription, not a
+      // shim-routed call). A hard call would throw at store
+      // construction and silently blank the entire
+      // ComfyUISettingsContent right pane.
+      const orig = window.api.onErrorDetail
+      // @ts-expect-error — testing the missing-method case the shim hits.
+      window.api.onErrorDetail = undefined
+      try {
+        setActivePinia(createTestingPinia({ stubActions: false }))
+        expect(() => useProgressStore()).not.toThrow()
+      } finally {
+        window.api.onErrorDetail = orig
+      }
+    })
+  })
+
   describe('cleanupOperation', () => {
     it('calls unsubscribe functions', () => {
       const unsubProgress = vi.fn()

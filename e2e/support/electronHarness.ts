@@ -111,7 +111,22 @@ function buildIsolatedEnv(homeDir: string, settingsSeed?: Record<string, unknown
 }
 
 export async function launchLauncherApp(options?: SeedOptions): Promise<LauncherAppHandle> {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'comfyui-launcher-e2e-'))
+  // Honor `LIFECYCLE_REUSE_DIR` to reuse a previous run's profile dir.
+  // Pre-baked first-use + install state survives across runs, so a
+  // post-failure rerun via `--grep` (e.g. just the snapshot-restore
+  // test) doesn't have to redo the ~2-minute install. The reused dir
+  // is preserved on cleanup (`rm` is skipped). On a fresh run the
+  // dir we just mkdtemp'd is always printed so the operator can
+  // capture it and re-export `LIFECYCLE_REUSE_DIR=<path>` to chain
+  // follow-up runs.
+  const reuseDir = process.env['LIFECYCLE_REUSE_DIR']
+  const homeDir = reuseDir ?? await mkdtemp(path.join(os.tmpdir(), 'comfyui-launcher-e2e-'))
+  if (reuseDir) {
+    console.log(`[lifecycle-harness] reusing profile dir: ${homeDir}`)
+  } else {
+    console.log(`[lifecycle-harness] fresh profile dir: ${homeDir}`)
+    console.log(`[lifecycle-harness] re-export as LIFECYCLE_REUSE_DIR=${homeDir} to rerun individual tests against this profile`)
+  }
 
   // Pre-create the platform-specific config dir Electron's `userData`
   // (or our XDG override on Linux) resolves to. macOS Application Support
@@ -236,7 +251,11 @@ export async function launchLauncherApp(options?: SeedOptions): Promise<Launcher
     } catch {
       // Application already closed / disconnected — nothing to clean up.
     }
-    await rm(homeDir, { recursive: true, force: true })
+    // Preserve the reuse dir so the next `LIFECYCLE_REUSE_DIR=<path>`
+    // invocation can pick it up. Only wipe dirs we created ourselves.
+    if (!reuseDir) {
+      await rm(homeDir, { recursive: true, force: true })
+    }
   }
 
   return { application, homeDir, cdpPort, cleanup }

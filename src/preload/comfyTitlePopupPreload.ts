@@ -317,6 +317,15 @@ export interface ComfyTitlePopupBridge {
   /** Renderer mirrors `localStorage.lastCheckedAt` back to main so the
    *  next snapshot rebroadcast shows the freshest timestamp. */
   globalSettingsSetLastCheckedAt(value: number): void
+  /** Forward a ChannelPicker action (e.g. `update-comfyui`, `copy-update`,
+   *  `switch-channel`, `release-update`) emitted from a SettingsSectionList
+   *  inside the Global Settings popup to the host's runAction path.
+   *  Main-side gates `actionId` via `GLOBAL_SETTINGS_ALLOWED_ACTIONS`. */
+  globalSettingsRunInstallAction(
+    installationId: string,
+    actionId: string,
+    actionData?: Record<string, unknown>,
+  ): Promise<{ ok: boolean; message?: string }>
 
   // ----- Per-install (ComfyUI) settings bridge -----
   //
@@ -649,6 +658,12 @@ const bridge: ComfyTitlePopupBridge = {
   globalSettingsSetLastCheckedAt: (value) => {
     ipcRenderer.send('comfy-titlepopup:global-settings-set-last-checked', { value })
   },
+  globalSettingsRunInstallAction: (installationId, actionId, actionData) =>
+    ipcRenderer.invoke('comfy-titlepopup:global-settings-run-install-action', {
+      installationId,
+      actionId,
+      actionData,
+    }),
   // Per-install settings (picker expanded Manage). Each handler is a 1:1
   // pass-through to the main-side IPC. Channels namespaced `comfy-titlepopup:*`
   // so they don't collide with the panel's `window.api` IPCs.
