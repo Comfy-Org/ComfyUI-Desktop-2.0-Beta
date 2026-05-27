@@ -1628,23 +1628,6 @@ function activateTitlePopupMenuItem(
 const GLOBAL_SETTINGS_GITHUB_URL =
   'https://github.com/Comfy-Org/ComfyUI-Desktop-2.0-Beta'
 
-/**
- * Action ids the title-popup Global Settings drawer may invoke
- * against an install. MUST stay in sync with what the standalone +
- * portable sources actually emit from their channel-card action rows
- * (`update-comfyui`, `copy-update`, `switch-channel`) plus the
- * session-level `release-update` chain. Drift here = silent no-op
- * because [runChannelPickerAction] returns `{ ok: false, message:
- * "Action 'X' is not available." }` and the popup swallows the
- * result. Parity is enforced by [titlePopup.test.ts].
- */
-export const GLOBAL_SETTINGS_ALLOWED_ACTIONS = new Set([
-  'copy-update',
-  'release-update',
-  'switch-channel',
-  'update-comfyui',
-])
-
 /** Last seen `app-update:download-progress` payload, cached so a fresh
  *  popup open (or a snapshot rebroadcast that doesn't carry progress
  *  alongside it) can include it. Cleared whenever the update state
@@ -2109,7 +2092,6 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
       payload:
         | {
           installationId?: unknown
-          mode?: unknown
           initialTab?: unknown
           autoAction?: unknown
         }

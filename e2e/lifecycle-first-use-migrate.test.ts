@@ -61,27 +61,39 @@ test.afterAll(async () => {
   if (legacyBasePath) await rm(legacyBasePath, { recursive: true, force: true })
 })
 
-test('cold start with legacy desktop lands on consent and surfaces migrate sub-step @lifecycle', async () => {
-  await ctx.panel.waitForVisible('.consent-hero', { timeout: 15_000 })
+test('cold start with legacy desktop lands on start screen and surfaces migrate sub-step @lifecycle', async () => {
+  // Merged start screen — consent + cloud/local + ToS all share one
+  // page (commit 5619823). The hasLegacyDesktop branch fires after the
+  // user picks Local and clicks Continue.
+  await ctx.panel.waitForVisible('.start-hero', { timeout: 15_000 })
 
-  // Tick ToS and accept consent → step advances to the cloud-vs-local
-  // pick. The hasLegacyDesktop branch only fires after the user picks
-  // Local from that step.
+  // Pick Local first to reveal the Express-Install checkbox, then opt
+  // out of express so we follow the standard local flow into the
+  // legacy-branch sub-step. Tick ToS so Continue enables.
+  expect(await ctx.panel.click('[data-testid="first-use-pick-local"]')).toBe(true)
+  await ctx.panel.waitForVisible('[data-testid="first-use-express-install"]', { timeout: 5_000 })
+  // Express defaults to checked on Local pick — toggle it off to force
+  // the non-express path that lands on the legacy-branch sub-step.
+  await ctx.panel.evaluate<void>(
+    `(() => {
+      const wrap = document.querySelector('[data-testid="first-use-express-install"]')
+      const cb = wrap && wrap.querySelector('input[type="checkbox"]')
+      if (cb && cb.checked) cb.click()
+    })()`,
+  )
   expect(await ctx.panel.click('[data-testid="first-use-consent-tos"]')).toBe(true)
   await ctx.panel.waitFor(
     async () => ctx.panel.evaluate<boolean>(
-      `!document.querySelector('[data-testid="first-use-accept-consent"]').disabled`,
+      `!document.querySelector('[data-testid="first-use-continue"]').disabled`,
     ),
-    { timeout: 5_000, message: 'Get Started never became enabled after ticking ToS' },
+    { timeout: 5_000, message: 'Continue never became enabled after ticking ToS' },
   )
-  expect(await ctx.panel.click('[data-testid="first-use-accept-consent"]')).toBe(true)
-  await ctx.panel.waitForVisible('[data-testid="first-use-pick-local"]', { timeout: 10_000 })
+  expect(await ctx.panel.click('[data-testid="first-use-continue"]')).toBe(true)
 
-  // Pick Local — `pickLocal` sees `hasLegacyDesktop=true` (auto-tracker
-  // registered the desktop install via the seeded config.json) so the
-  // takeover advances to the localBranch sub-step rather than firing
+  // `pickLocal` sees `hasLegacyDesktop=true` (auto-tracker registered
+  // the desktop install via the seeded config.json) so the takeover
+  // advances to the localBranch sub-step rather than firing
   // `chain-local` directly. Confirms detection plumbed through.
-  expect(await ctx.panel.click('[data-testid="first-use-pick-local"]')).toBe(true)
   await ctx.panel.waitForVisible('[data-testid="first-use-local-migrate"]', { timeout: 10_000 })
 })
 

@@ -364,11 +364,22 @@ async function open(opts: OpenOpts = {}): Promise<void> {
   // a destructive default).
   const existing = (await window.api.getSetting('telemetryEnabled')) as boolean | undefined
   telemetryEnabled.value = existing !== false
-  locale.value = await window.api.getLocale().catch(() => 'en')
-  detectedGpuLabel.value = await window.api
+  // Locale + GPU detection run non-blocking so the start hero paints on
+  // the first frame even if main is slow to resolve (e.g. cold IPC, no
+  // GPU on CI). Sensible defaults (`'en'`, `null`) are already in place;
+  // the reactive updates surface the real values when they arrive.
+  void window.api
+    .getLocale()
+    .then((next) => {
+      locale.value = next
+    })
+    .catch(() => {})
+  void window.api
     .detectGPU()
-    .then((g) => g?.label ?? null)
-    .catch(() => null)
+    .then((g) => {
+      detectedGpuLabel.value = g?.label ?? null
+    })
+    .catch(() => {})
 }
 
 onMounted(() => {

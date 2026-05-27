@@ -196,7 +196,6 @@ async function openPickerOnUpdateTab(installationId: string): Promise<void> {
     `(() => {
       window.api.openInstancePicker({
         installationId: ${JSON.stringify(installationId)},
-        mode: 'expanded',
         initialTab: 'update',
       })
       return true

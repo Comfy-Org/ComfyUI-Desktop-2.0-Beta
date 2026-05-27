@@ -101,11 +101,18 @@ function buildIsolatedEnv(homeDir: string, settingsSeed?: Record<string, unknown
   }
 
   // Settings seed read by main `settings.maybeSeedFromEnv()` before first
-  // load. Bypasses platform-specific userData path resolution (notably
-  // macOS Application Support, which ignores HOME).
-  if (settingsSeed && Object.keys(settingsSeed).length > 0) {
-    env['E2E_SETTINGS_SEED'] = JSON.stringify(settingsSeed)
+  // load. Bypasses platform-specific userData path resolution — most
+  // critically macOS, where Application Support is rooted at the real
+  // pw_dir and ignores our HOME override, so a prior dev session's
+  // `firstUseCompleted: true` would otherwise persist and wedge
+  // cold-start tests. Always send a seed so the harness starts from a
+  // known-clean state on every OS; caller overrides win on merge.
+  const effectiveSeed: Record<string, unknown> = {
+    firstUseCompleted: false,
+    telemetryEnabled: false,
+    ...(settingsSeed ?? {}),
   }
+  env['E2E_SETTINGS_SEED'] = JSON.stringify(effectiveSeed)
 
   return env
 }

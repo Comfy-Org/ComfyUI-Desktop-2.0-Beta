@@ -400,7 +400,6 @@ function handleExpandedPrimaryAction(running: boolean): void {
               :installation="selectedInstall"
               :initial-tab="initialExpandedTab"
               :auto-action="snapshot.autoAction ?? null"
-              :show-back="true"
               :global-settings-snapshot="snapshot.storage"
               class="picker-expanded-body"
               @show-progress="handleSettingsShowProgress"

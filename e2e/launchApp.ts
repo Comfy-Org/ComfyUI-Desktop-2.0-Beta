@@ -53,11 +53,12 @@ export async function launchApp(options?: SeedOptions): Promise<AppContext> {
 
   // Wait for the Vue trees to mount inside each surface. On true cold
   // start (no `firstUseCompleted` seed) the chooser body is gated by
-  // the first-use takeover, so accept either the chooser or the
-  // consent screen as proof the panel renderer reached an interactive
-  // state — tests that need the chooser explicitly seed the gate.
+  // the first-use takeover (merged start screen — `.start-hero` is its
+  // top-of-hero anchor), so accept either the chooser or the start
+  // hero as proof the panel renderer reached an interactive state.
+  // Tests that need the chooser explicitly seed the gate.
   await panel.waitForSelector('.panel-shell', { timeout: 30_000 })
-  await panel.waitForSelector('.chooser-view, .panel-chooser, .consent-hero', { timeout: 15_000 })
+  await panel.waitForSelector('.chooser-view, .panel-chooser, .start-hero', { timeout: 15_000 })
   await titleBar.waitForSelector('.title-bar', { timeout: 15_000 })
 
   return {

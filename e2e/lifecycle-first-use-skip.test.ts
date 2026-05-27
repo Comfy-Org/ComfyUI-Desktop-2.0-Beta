@@ -1,7 +1,7 @@
 /**
  * Lifecycle E2E: file-menu Skip Onboarding entry point.
  *
- * Cold-start drops the user on the first-use consent screen. The
+ * Cold-start drops the user on the merged first-use start screen. The
  * title-bar file menu surfaces a Skip Onboarding entry once we're
  * past the locked-down `'consent-lockdown'` mode; here we replay the
  * `comfy-panel:first-use-skip` IPC main fires for that menu item
@@ -32,9 +32,13 @@ test.afterAll(async () => {
   await ctx?.cleanup()
 })
 
-test('cold start lands on first-use consent screen @lifecycle', async () => {
-  await ctx.panel.waitForVisible('.consent-hero', { timeout: 15_000 })
-  await ctx.panel.waitForVisible('[data-testid="first-use-accept-consent"]')
+test('cold start lands on first-use start screen @lifecycle', async () => {
+  // Consent + cloud/local pick share a single merged start screen
+  // (commit 5619823). The hero + Continue CTA prove we've reached the
+  // takeover; the Continue button is still disabled because ToS isn't
+  // ticked yet, but the skip-onboarding IPC bypasses that path anyway.
+  await ctx.panel.waitForVisible('.start-hero', { timeout: 15_000 })
+  await ctx.panel.waitForVisible('[data-testid="first-use-continue"]')
 })
 
 test('Skip Onboarding IPC clears bookkeeping and reveals the chooser @lifecycle', async () => {

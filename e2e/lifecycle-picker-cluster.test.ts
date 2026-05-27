@@ -97,7 +97,6 @@ async function openExpandedPicker(): Promise<void> {
     `(() => {
       window.api.openInstancePicker({
         installationId: ${JSON.stringify(INSTALL_ID)},
-        mode: 'expanded',
       })
       return true
     })()`,

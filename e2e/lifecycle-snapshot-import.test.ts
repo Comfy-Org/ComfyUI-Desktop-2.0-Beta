@@ -123,7 +123,6 @@ test('Import preview → Continue writes the envelope snapshot into the install 
     `(() => {
       window.api.openInstancePicker({
         installationId: ${JSON.stringify(INSTALL_ID)},
-        mode: 'expanded',
         initialTab: 'snapshots',
       })
       return true
@@ -134,10 +133,14 @@ test('Import preview → Continue writes the envelope snapshot into the install 
 
   expect(await popup.click(byTestId(TID.snapshotsImport))).toBe(true)
 
-  // The preview confirm modal mounts in the popup webContents. The
-  // BaseAlert / ModalDialog Continue button uses TID.modalConfirm.
-  await popup.waitForVisible(byTestId(TID.modalConfirm), { timeout: 10_000 })
-  expect(await popup.click(byTestId(TID.modalConfirm))).toBe(true)
+  // The preview confirm modal mounts in the popup webContents. Simple
+  // confirms route through BaseAlert (test-id `base-alert-action`);
+  // rich confirms keep the legacy ModalDialog path (`modal-confirm-button`).
+  // Accept either so the test stays stable across the dialog refactors.
+  const confirmSelector =
+    `${byTestId(TID.modalConfirm)}, ${byTestId(TID.baseAlertAction)}`
+  await popup.waitForVisible(confirmSelector, { timeout: 10_000 })
+  expect(await popup.click(confirmSelector)).toBe(true)
 
   // Poll for the snapshot to land on disk + the registry refresh.
   // The import path writes the JSON synchronously then calls

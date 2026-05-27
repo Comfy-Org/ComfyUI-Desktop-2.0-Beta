@@ -200,8 +200,12 @@ watch(
     const selectedOption = channelField.options?.find((o) => o.value === currentChannel)
     const data = selectedOption?.data as { checkedAt?: number } | undefined
     const checkedAt = typeof data?.checkedAt === 'number' ? data.checkedAt : null
-    const stale = checkedAt === null || Date.now() - checkedAt > STALE_CHANNEL_CARD_MS
-    if (!stale) return
+    // Missing `checkedAt` means sections haven't fully hydrated yet — defer
+    // rather than firing a fetch on partial data. A subsequent section reload
+    // (post manual check-update, post install, post channel switch) will
+    // surface a positive timestamp and the staleness check below decides.
+    if (checkedAt === null) return
+    if (Date.now() - checkedAt <= STALE_CHANNEL_CARD_MS) return
 
     // Look up the canonical action def from sections so we inherit
     // whatever `enabled` / disabledMessage / future fields main attaches
@@ -499,7 +503,13 @@ defineExpose({
           @update="handleArgsUpdate"
         />
 
-        <div v-else key="subpage-root" class="settings-v2-body-root">
+        <div
+          v-else
+          key="subpage-root"
+          class="settings-v2-body-root"
+          :data-testid="TID.pickerSettingsSections"
+          :data-install-id="installation?.id"
+        >
           <!-- Inner tab-swap transition. Wrapped in a single-root
                `<div>` because `<Transition>` requires one child. -->
           <Transition :name="tabTransition" mode="out-in">
@@ -518,8 +528,6 @@ defineExpose({
               v-else-if="activeTab === 'status' && installation"
               key="tab-status"
               class="settings-v2-tab-pane"
-              :data-testid="TID.pickerSettingsSections"
-              :data-install-id="installation?.id"
             >
               <StatusFactPanel
                 :installation="installation"
