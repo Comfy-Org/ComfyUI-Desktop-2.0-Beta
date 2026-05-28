@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type * as FsModule from 'fs'
 
@@ -22,6 +23,14 @@ vi.mock('fs', async () => {
   const actual = await vi.importActual<typeof FsModule>('fs')
   return { ...actual, default: { ...actual, existsSync: vi.fn(() => true) } }
 })
+
+// `set()` flushes the in-memory cache to disk via `writeFileSafe`. Under
+// the mocked Electron app `dataDir()` resolves to '' so the write would
+// land in the test's cwd as `./release-cache.json` and dirty the repo.
+// Stub it out — disk persistence is not under test.
+vi.mock('./safe-file', () => ({
+  writeFileSafe: vi.fn(() => {}),
+}))
 
 import { isUpdateAvailable, set, enrichCommitsAhead, onEnriched, get } from './release-cache'
 import type { ReleaseCacheEntry } from './release-cache'
