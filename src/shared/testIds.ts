@@ -56,6 +56,15 @@ export const TID = {
   baseAlertAction: 'base-alert-action',
   /** The cancel button of a simple-confirm `BaseAlert`. */
   baseAlertCancel: 'base-alert-cancel',
+  /** The text input inside a `BasePrompt` (the `useDialogs().prompt()`
+   *  surface — used by the picker's per-action prompts: Copy Installation
+   *  name, Copy & Update name, etc.). Distinct from `modalPromptInput`
+   *  which is the legacy `useModal().prompt()` `ModalDialog` surface. */
+  basePromptInput: 'base-prompt-input',
+  /** The primary action button of a `BasePrompt`. */
+  basePromptAction: 'base-prompt-action',
+  /** The cancel button of a `BasePrompt`. */
+  basePromptCancel: 'base-prompt-cancel',
   /** Delete-install confirmation modal (the whole modal, for visibility waits). */
   deleteConfirmModal: 'delete-confirm-modal',
   /** Delete-install confirmation confirm button. */
