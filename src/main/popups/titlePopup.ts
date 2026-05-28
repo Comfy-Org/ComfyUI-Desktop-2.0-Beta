@@ -18,6 +18,7 @@ import {
   openPath as openPathHelper,
   getAppVersion,
   _activeOperationStatus,
+  _operationAborts,
   type PickerOperationStatus,
 } from '../lib/ipc/shared'
 import {
@@ -2490,7 +2491,11 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
     },
   )
 
-  // Picker → cancel an in-flight background op.
+  // Picker → cancel an in-flight background op. Fires the same
+  // AbortController the handler stored in `_operationAborts`; the
+  // handler's own catch path is what clears the map entry and updates
+  // `_activeOperationStatus` to the cancelled state. We delete here
+  // anyway so a second click can't double-abort a stale controller.
   ipcMain.on(
     'comfy-titlepopup:cancel-background-op',
     (event, payload: { installationId?: unknown }) => {
@@ -2498,13 +2503,11 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
       if (!popupEntry || popupEntry.kind !== 'instance-picker') return
       const installationId = payload?.installationId
       if (typeof installationId !== 'string' || installationId.length === 0) return
-      const abort = _activeOperationStatus.get(installationId)
+      recordIpcInvocation('comfy-titlepopup:cancel-background-op', { installationId })
+      const abort = _operationAborts.get(installationId)
       if (!abort) return
-      // The abort controller lives in _operationAborts; cancel via the
-      // existing mechanism shared.ts sets up.
-      import('../lib/ipc/shared').then(({ _operationAborts }) => {
-        _operationAborts.get(installationId)?.abort()
-      }).catch(() => {})
+      abort.abort()
+      _operationAborts.delete(installationId)
     },
   )
 
