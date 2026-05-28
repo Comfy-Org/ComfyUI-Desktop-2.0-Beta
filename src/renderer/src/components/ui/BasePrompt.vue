@@ -153,7 +153,7 @@ watch(
           class="base-prompt-input"
           :placeholder="placeholder"
           :data-testid="testIdInput ?? 'base-prompt-input'"
-          @keydown.enter="submit"
+          @keydown.enter.prevent.stop="submit"
         />
         <div v-if="error" class="base-prompt-error">{{ error }}</div>
       </div>

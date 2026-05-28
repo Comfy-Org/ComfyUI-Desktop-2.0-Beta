@@ -196,6 +196,7 @@ export async function runConfirmChain(
       title: action.confirm.title || 'Confirm',
       message: action.confirm.message || 'Are you sure?',
       messageDetails: action.confirm.messageDetails,
+      restoreDiff: action.confirm.restoreDiff,
       confirmLabel: action.confirm.confirmLabel || action.label,
       tone: action.style === 'primary' || action.style === 'accent' ? 'primary' : 'danger',
     })

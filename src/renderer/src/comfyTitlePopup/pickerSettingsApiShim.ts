@@ -45,6 +45,11 @@ type ShimApi = {
     ComfyTitlePopupBridge['pickerSettingsBrowseFolder']
   >
   relaunchApp: () => void
+  /** Live-refresh hook for settings views (e.g. SnapshotsView). The popup
+   *  has no `installations-changed` IPC, so map it onto the picker's snapshot
+   *  rebroadcast — which fires whenever the selected install's data (snapshot
+   *  set included) changes — so the Snapshots tab reloads in place. */
+  onInstallationsChanged: (cb: () => void) => () => void
 }
 
 export function installPickerSettingsApiShim(): void {
@@ -67,6 +72,7 @@ export function installPickerSettingsApiShim(): void {
   api.browseFolder = (defaultPath?: string) =>
     bridge.pickerSettingsBrowseFolder(defaultPath ? { defaultPath } : undefined)
   api.relaunchApp = () => bridge.pickerSettingsRelaunchApp()
+  api.onInstallationsChanged = (cb: () => void) => bridge.onInstancePickerSnapshot(() => cb())
 
     ; (window as unknown as { api: ShimApi }).api = api
 }

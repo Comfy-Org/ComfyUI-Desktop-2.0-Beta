@@ -75,7 +75,7 @@ function handleDelete(snapshot: SnapshotSummary): void {
   <div class="picker-snapshots">
     <button type="button" class="picker-snapshots-save" @click="emit('save')">
       <Camera :size="14" aria-hidden="true" />
-      <span>{{ t('snapshots.saveSnapshot', 'Save snapshot') }}</span>
+      <span>{{ t('snapshots.createSnapshot', 'Create Snapshot') }}</span>
     </button>
 
     <div v-if="hasSnapshots" class="picker-snapshots-list">
