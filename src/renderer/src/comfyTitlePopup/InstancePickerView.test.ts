@@ -352,6 +352,43 @@ describe('comfyTitlePopup/InstancePickerView', () => {
       expect(rows[0]!.text()).toContain('RemoteThing')
     })
 
+    // Regression (#723): a category chip only renders while an install
+    // backs it, so when the active category empties (e.g. the cloud /
+    // remote install drops out of a snapshot refresh) its chip vanishes.
+    // `activeFilter` must fall back to 'all' instead of staying pinned to
+    // the now-hidden key — otherwise the list is stuck showing nothing and
+    // the surviving installs (locals) never reappear.
+    it('resets the filter to All when the active chip disappears so installs reappear', async () => {
+      const wrapper = await mountPicker({
+        installs: [
+          makeInstall({ id: 'l', name: 'LocalThing', sourceCategory: 'local' }),
+          makeInstall({ id: 'r', name: 'RemoteThing', sourceCategory: 'remote' }),
+        ],
+        activeInstallationId: null,
+        runningInstallationIds: [],
+      })
+      const remoteChip = wrapper.findAll('.picker-chip').find((c) => c.text() === 'Remote')
+      await remoteChip!.trigger('click')
+      await flushPromises()
+      expect(wrapper.findAll('.picker-row').map((r) => r.text())).toEqual(['RemoteThing'])
+
+      // The remote install is removed (snapshot refresh) — its chip goes away.
+      await wrapper.setProps({
+        snapshot: {
+          ...wrapper.props('snapshot'),
+          installs: [makeInstall({ id: 'l', name: 'LocalThing', sourceCategory: 'local' })],
+        },
+      })
+      await flushPromises()
+
+      const chips = wrapper.findAll('.picker-chip')
+      expect(chips.some((c) => c.text() === 'Remote')).toBe(false)
+      // All is active again and the surviving local install is visible.
+      const allChip = chips.find((c) => c.text() === 'All')
+      expect(allChip!.classes()).toContain('is-active')
+      expect(wrapper.findAll('.picker-row').some((r) => r.text().includes('LocalThing'))).toBe(true)
+    })
+
     it('shows the empty-state hint when no rows match', async () => {
       const wrapper = await mountPicker({
         installs: [makeInstall({ id: 'a', name: 'Alpha' })],

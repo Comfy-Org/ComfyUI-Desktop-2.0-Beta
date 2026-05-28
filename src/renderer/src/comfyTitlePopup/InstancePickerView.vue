@@ -211,6 +211,19 @@ const visibleChips = computed(() => {
   })
 })
 
+// A category chip only renders while at least one install backs it. When
+// the active category empties (e.g. the cloud / remote install drops out of
+// a snapshot refresh) its chip vanishes — but `activeFilter` would otherwise
+// stay pinned to the now-hidden key, leaving the list stuck on an empty
+// filter with no highlighted chip and no obvious way back. Fall back to
+// 'all' so every install reappears. ('all' is always present, so it never
+// triggers this.) Mirrors the same guard in `DownloadsModal.vue`.
+watch(visibleChips, (chips) => {
+  if (!chips.some((chip) => chip.key === activeFilter.value)) {
+    activeFilter.value = 'all'
+  }
+})
+
 /** The install the user most recently launched — the sensible default
  *  selection when the popup opens with no active or explicitly-selected
  *  install.
