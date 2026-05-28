@@ -43,7 +43,7 @@ export function useListAction(uiSurface: string, callbacks: ListActionCallbacks)
     if (!await actionGuard.checkBeforeAction(inst.id, action.label)) return
 
     if (action.confirm || (requiresStoppedGuard && wasRunning)) {
-      const willStopMsg = requiresStoppedGuard && wasRunning ? t('errors.willStopRunning') : ''
+      const willStopMsg = requiresStoppedGuard && wasRunning ? t('errors.willStopRunning', { name: inst.name || 'ComfyUI' }) : ''
       const baseMessage = action.confirm?.message
       const message = willStopMsg
         ? augmentMessageWithStopWarning(baseMessage, willStopMsg)

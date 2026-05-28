@@ -231,25 +231,54 @@ describe('enrichCommitsAhead', () => {
       commitSha: 'deadbeef00000000',
       baseTag: 'v1.0.0',
     })
-    // Stall the first git call so both `enrichCommitsAhead` invocations
-    // can pile up while it's still pending — that's the window where
-    // the dedupe Map has to suppress the second.
+    // Stall the first git call (the local commits-ahead count) so both
+    // `enrichCommitsAhead` invocations pile up while it's still pending —
+    // that's the window where the dedupe Map has to suppress the second.
     let releaseStall!: () => void
     const stall = new Promise<void>((resolve) => { releaseStall = resolve })
-    vi.mocked(gitMock.fetchTags).mockImplementation(async () => {
+    vi.mocked(gitMock.countCommitsAhead).mockImplementation(async () => {
       await stall
-      return true
+      return 2
     })
-    vi.mocked(gitMock.countCommitsAhead).mockResolvedValue(2)
 
     const p1 = enrichCommitsAhead(repo, '/tmp/fake-repo')
     const p2 = enrichCommitsAhead(repo, '/tmp/fake-repo')
     releaseStall()
     await Promise.all([p1, p2])
 
+    // One shared execution: the local count ran once, and because it
+    // resolved a value the network fetch was never reached.
+    expect(gitMock.countCommitsAhead).toHaveBeenCalledTimes(1)
+    expect(gitMock.fetchTags).not.toHaveBeenCalled()
+    expect(gitMock.fetchCommitSha).not.toHaveBeenCalled()
+  })
+
+  it('skips the network fetch when the local commits-ahead count succeeds', async () => {
+    const repo = newRepo()
+    set(repo, 'latest', { commitSha: 'deadbeef00000000', baseTag: 'v1.0.0' })
+    vi.mocked(gitMock.countCommitsAhead).mockResolvedValue(5)
+
+    await enrichCommitsAhead(repo, '/tmp/fake-repo')
+
+    expect(gitMock.fetchTags).not.toHaveBeenCalled()
+    expect(gitMock.fetchCommitSha).not.toHaveBeenCalled()
+    expect(get(repo, 'latest')?.commitsAhead).toBe(5)
+  })
+
+  it('falls back to a network fetch + retry when the commit is missing locally', async () => {
+    const repo = newRepo()
+    set(repo, 'latest', { commitSha: 'deadbeef00000000', baseTag: 'v1.0.0' })
+    // First (local) count fails — objects aren't present — then succeeds
+    // after the fetch pulls them in.
+    vi.mocked(gitMock.countCommitsAhead)
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce(9)
+
+    await enrichCommitsAhead(repo, '/tmp/fake-repo')
+
     expect(gitMock.fetchTags).toHaveBeenCalledTimes(1)
     expect(gitMock.fetchCommitSha).toHaveBeenCalledTimes(1)
-    expect(gitMock.countCommitsAhead).toHaveBeenCalledTimes(1)
+    expect(get(repo, 'latest')?.commitsAhead).toBe(9)
   })
 
   it('clears the inflight slot on settle so a follow-up call after completion runs fresh', async () => {

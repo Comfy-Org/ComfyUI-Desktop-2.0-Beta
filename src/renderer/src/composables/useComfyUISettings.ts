@@ -79,6 +79,11 @@ export interface UseComfyUISettingsApi {
   loading: Ref<boolean>
   error: Ref<string | null>
 
+  /** Transient, non-blocking status line (e.g. a manual "Check for
+   *  update" that found nothing). Set with an auto-clear timer; the host
+   *  renders it inline and fades it out rather than blocking on a modal. */
+  notice: Ref<string | null>
+
   /** Refresh sections + disk usage for the current installation. */
   reload: () => Promise<void>
 
@@ -164,6 +169,20 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
   const installSize = ref<number | null>(null)
   const loading = ref(false)
   const error = ref<string | null>(null)
+  // Transient, non-blocking status line (e.g. a manual "Check for update"
+  // that found nothing). Rendered inline by the host and auto-cleared, so
+  // it never interrupts the user the way a modal alert would.
+  const notice = ref<string | null>(null)
+  let noticeTimer: ReturnType<typeof setTimeout> | null = null
+  const NOTICE_TTL_MS = 4000
+  function flashNotice(message: string): void {
+    if (noticeTimer) clearTimeout(noticeTimer)
+    notice.value = message
+    noticeTimer = setTimeout(() => {
+      notice.value = null
+      noticeTimer = null
+    }, NOTICE_TTL_MS)
+  }
   // Inline-action busy state. Replaced (not mutated) on each add/delete
   // so Vue's shallow reactivity on Set tracks the change.
   const runningActionIds = ref<Set<string>>(new Set())
@@ -526,7 +545,10 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
     //    Skipped for migrate-to-standalone — useMigrateAction handles
     //    its own confirm surface (modal OR brand takeover).
     if (requiresStoppedGuard && wasRunning && !ownsPreflight) {
-      mutableAction = augmentActionWithStopWarning(mutableAction, t('errors.willStopRunning'))
+      mutableAction = augmentActionWithStopWarning(
+        mutableAction,
+        t('errors.willStopRunning', { name: inst?.name || 'ComfyUI' }),
+      )
     }
 
     // 4-8. Shopping-list chain steps — fieldSelects → select → prompt
@@ -639,6 +661,14 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
         opts.onNavigateList?.()
       } else if (result.navigate === 'detail') {
         await reload()
+        // An action can both reload the detail view AND carry a message
+        // (e.g. a manual "Check for update" that found nothing — it
+        // refreshes the "last checked" stamp and reports being up to
+        // date). Surface it as a transient inline notice, not a modal:
+        // it's confirmation of a no-op, not something to interrupt for.
+        if (result.message) {
+          flashNotice(result.message)
+        }
       } else if (result.message) {
         await dialogs.alert({ title: mutableAction.label, message: result.message })
       } else {
@@ -747,7 +777,10 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
   const offReleaseEnriched = window.api.onReleaseCacheEnriched?.(() => {
     if (toValue(opts.installation)) void reload()
   })
-  onScopeDispose(() => offReleaseEnriched?.())
+  onScopeDispose(() => {
+    offReleaseEnriched?.()
+    if (noticeTimer) clearTimeout(noticeTimer)
+  })
 
   // Drop the per-install dirty + error entries the moment that install
   // stops — a stopped install picks up new values on next launch, so
@@ -780,6 +813,7 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
     diskSpace,
     loading,
     error,
+    notice,
     reload,
     refreshSection,
     updateField,

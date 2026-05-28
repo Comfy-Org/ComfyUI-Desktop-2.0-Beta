@@ -120,6 +120,7 @@ const {
   sections,
   loading,
   error,
+  notice,
   updateField,
   pendingRestartFieldIds,
   fieldErrorMessages,
@@ -247,7 +248,11 @@ watch(
     // result returns `navigate: 'detail'` → section reload → fresh
     // `checkedAt` bubbles through this watcher (dedupe set prevents
     // re-fire on the same install+channel).
-    void runAction(checkAction)
+    //
+    // `silent: true` — this is the automatic on-tab-open refresh, not a
+    // user click, so it must not pop the "you're up to date" alert that a
+    // manual check does.
+    void runAction({ ...checkAction, data: { ...checkAction.data, silent: true } })
   },
   { immediate: true }
 )
@@ -789,6 +794,12 @@ defineExpose({
     </section>
 
     <footer class="settings-v2-footer">
+      <Transition name="settings-v2-notice-fade">
+        <span v-if="notice" class="settings-v2-notice" role="status" aria-live="polite">
+          {{ notice }}
+        </span>
+      </Transition>
+
       <button
         type="button"
         class="primary settings-v2-relaunch"
@@ -1149,6 +1160,23 @@ defineExpose({
   padding: 12px 16px;
   border-top: 1px solid var(--chooser-surface-border);
   background: var(--modal-surface-bg);
+}
+
+/* Transient inline status (e.g. "you're up to date"). Sits on the left
+   of the footer and fades in/out instead of interrupting with a modal. */
+.settings-v2-notice {
+  margin-right: auto;
+  font-size: 13px;
+  line-height: 1.3;
+  color: var(--text-muted);
+}
+.settings-v2-notice-fade-enter-active,
+.settings-v2-notice-fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+.settings-v2-notice-fade-enter-from,
+.settings-v2-notice-fade-leave-to {
+  opacity: 0;
 }
 
 /* Pin both footer buttons to the same 32px height as the left
