@@ -498,7 +498,7 @@
     "label": "Standalone",
     "desc": "预构建环境，包含托管的 Python 和依赖项。",
     "comfyui": "ComfyUI",
-    "variant": "环境变体",
+    "variant": "环境与硬件",
     "python": "Python",
     "pythonEnvs": "Python 环境",
     "activeEnv": "当前：{env}",
@@ -638,6 +638,7 @@
   },
 
   "tooltips": {
+    "launchMode": "选择 ComfyUI 的运行方式：在独立的应用窗口中运行，或作为仅控制台进程运行。",
     "updateNow": "就地更新此安装。",
     "copyAndUpdate": "复制此安装并更新副本。原始安装保持不变。"
   }
