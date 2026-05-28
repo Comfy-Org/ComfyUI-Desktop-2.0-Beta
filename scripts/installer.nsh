@@ -104,7 +104,12 @@
       # instead of looping forever.
       BringToFront
       MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "ComfyUI Desktop requires the Microsoft Visual C++ Redistributable, but the Windows permission prompt was declined.$\n$\nClick Retry to allow it, or Cancel to stop the installation." /SD IDCANCEL IDRETRY vcRedistAttempt
-      Abort
+      # Cancel on a hard prerequisite: exit setup with a non-zero error level.
+      # Use Quit, NOT Abort — electron-builder sets `ShowInstDetails nevershow`,
+      # so a bare Abort just leaves a frozen progress bar with no visible
+      # message (looks hung). Quit closes the installer cleanly.
+      SetErrorLevel 2
+      Quit
     ${EndIf}
   ${Else}
     SetDetailsPrint textonly
