@@ -106,11 +106,19 @@ test('clicking the ready desktop-update pill opens the embedded system-modal res
 // Install-update pill — install-less suppression.
 // ---------------------------------------------------------------------------
 
-test('install-update pill stays hidden on the install-less chooser host even with an override @windows @macos @linux', async () => {
+test('install-update chip stays hidden on the install-less chooser host even with an override @windows @macos @linux', async () => {
   await setInstallUpdate(ctx.app, { available: true, version: '99.0.0' })
-  // Wait a beat to make sure no background re-broadcast snuck the pill on.
+  // Wait a beat to make sure no background re-broadcast snuck the chip on.
   await new Promise((r) => setTimeout(r, 250))
-  expect(await ctx.titleBar.exists('.title-update-pill.is-install-update')).toBe(false)
+  // The instance update affordance now lives inside the center pill as
+  // `.title-install-update-chip` (the standalone trailing pill was
+  // removed). Poll rather than a one-shot evaluate so a transient
+  // title-bar re-render on the slow Windows runner can't destroy the
+  // execution context mid-check — matches the app-update checks above.
+  await expect.poll(() => ctx.titleBar.exists('.title-install-update-chip'), {
+    timeout: 3_000,
+    intervals: [100, 200],
+  }).toBe(false)
 })
 
 // ---------------------------------------------------------------------------

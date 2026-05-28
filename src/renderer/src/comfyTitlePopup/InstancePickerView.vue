@@ -184,10 +184,22 @@ const visibleChips = computed(() => {
   })
 })
 
+/** The install the user most recently launched — the sensible default
+ *  selection when the popup opens with no active or explicitly-selected
+ *  install. Falls back to list order when nothing has ever been launched. */
+function mostRecentInstallId(installs: PickerInstall[]): string | null {
+  const first = installs[0]
+  if (!first) return null
+  return installs.reduce(
+    (best, i) => ((i.lastLaunchedAt ?? 0) > (best.lastLaunchedAt ?? 0) ? i : best),
+    first
+  ).id
+}
+
 function resolveInitialSelection(snapshot: PickerSnapshot): string | null {
   const explicit = snapshot.selectedInstallationId ?? snapshot.activeInstallationId
   if (explicit) return explicit
-  return snapshot.installs[0]?.id ?? null
+  return mostRecentInstallId(snapshot.installs)
 }
 const selectedId = ref<string | null>(resolveInitialSelection(props.snapshot))
 watch(
@@ -200,7 +212,7 @@ watch(
   () => props.snapshot.activeInstallationId,
   (next) => {
     if (!props.snapshot.selectedInstallationId) {
-      selectedId.value = next ?? props.snapshot.installs[0]?.id ?? null
+      selectedId.value = next ?? mostRecentInstallId(props.snapshot.installs)
     }
   }
 )
@@ -209,9 +221,9 @@ watch(
   (installs) => {
     if (props.snapshot.selectedInstallationId || props.snapshot.activeInstallationId) return
     if (selectedId.value) return
-    const first = installs[0]
-    if (first) {
-      selectedId.value = first.id
+    const id = mostRecentInstallId(installs)
+    if (id) {
+      selectedId.value = id
     }
   }
 )

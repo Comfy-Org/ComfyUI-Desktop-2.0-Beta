@@ -295,10 +295,16 @@ const footerActions = computed<
   }
 
   for (const action of otherSecondaryActions.value) {
-    out.push({
-      action,
-      variant: action.style === 'danger' ? 'danger' : 'default'
-    })
+    // Switch Channel is the primary intent once the user has picked a
+    // different channel card, so style it accent (blue) like Update Now
+    // rather than a muted secondary button.
+    const variant =
+      action.id === 'switch-channel'
+        ? 'accent'
+        : action.style === 'danger'
+          ? 'danger'
+          : 'default'
+    out.push({ action, variant })
   }
 
   for (const action of promotedPrimaryActions.value) {

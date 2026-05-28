@@ -5,7 +5,11 @@ import { effectScope, nextTick, ref } from 'vue'
 
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({
-    t: (key: string, fallback?: string) => fallback ?? key,
+    // Mirrors vue-i18n's two call shapes: t(key, fallbackString) returns the
+    // fallback; t(key, namedParamsObject) returns the bare key (params are
+    // interpolated by real i18n, so tests assert on the key, not the params).
+    t: (key: string, arg?: string | Record<string, unknown>) =>
+      typeof arg === 'string' ? arg : key,
   }),
 }))
 
