@@ -29,6 +29,13 @@ vi.mock('../lib/telemetry', () => ({
 
 vi.mock('../lib/progressOpKind', () => ({
   progressOpKindForActionId: vi.fn(() => 'misc'),
+  destroysInstanceForActionId: vi.fn(() => false),
+}))
+
+vi.mock('../lib/stopWarning', () => ({
+  IN_PLACE_RELAUNCH: new Set<string>(),
+  augmentMessageWithStopWarning: vi.fn((base: string | undefined, warn: string) => `${base ?? ''}\n${warn}`),
+  stopAndWaitForExit: vi.fn(async () => {}),
 }))
 
 const mockRunAction = vi.fn()
@@ -67,6 +74,7 @@ describe('useListAction — desktop launch interceptor', () => {
     mockCheckBeforeAction.mockReset()
     mockCheckBeforeLaunch.mockReset()
     mockRunAction.mockReset()
+    mockCheckBeforeAction.mockResolvedValue(true)
     mockCheckBeforeLaunch.mockResolvedValue(true)
   })
 
