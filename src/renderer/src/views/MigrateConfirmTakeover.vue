@@ -97,7 +97,7 @@ defineExpose({ open, update, commit })
     <div class="brand-hero migrate-takeover" role="dialog" aria-modal="true" :aria-label="title">
       <h1 class="brand-title">{{ title }}</h1>
       <div class="migrate-takeover__card">
-        <div v-if="loading || !preview" class="migrate-takeover__loading">
+        <div v-if="loading" class="migrate-takeover__loading">
           {{ $t('common.loading') }}
         </div>
         <MigrateConfirmBody
@@ -122,7 +122,7 @@ defineExpose({ open, update, commit })
           type="button"
           class="brand-primary"
           data-testid="migrate-takeover-confirm"
-          :disabled="loading || !preview"
+          :disabled="loading"
           @click="commit(true)"
         >
           {{ confirmLabel }}
