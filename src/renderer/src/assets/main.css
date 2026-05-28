@@ -18,15 +18,16 @@
 }
 
 /* PP Formula — display face for brand-refreshed takeover headings.
- * Single weight (Extrabold 800); body/lead text stays Inter. Loading
- * more weights would bloat the renderer bundle for one usage site. */
-@font-face {
-  font-family: 'PP Formula';
-  src: url('./fonts/PPFormula-Extrabold.otf') format('opentype');
-  font-weight: 800;
-  font-style: normal;
-  font-display: block;
-}
+ * Single weight (Extrabold 800); body/lead text stays Inter.
+ *
+ * PP Formula is a proprietary, license-restricted font (Pangram Pangram) and
+ * must NOT be committed to this public repo, so it is NOT declared with a CSS
+ * @font-face here. Instead it is registered at runtime by
+ * src/renderer/src/assets/proprietaryFonts.ts via the FontFace API. That keeps
+ * the binary out of the bundle (the build never depends on the file existing,
+ * which would break OSS/CI builds), and a relative URL resolves under file://.
+ * When the font is absent the --font-display stack falls back to Inter. The
+ * file is fetched at build time from a private bucket (scripts/fetch-font.mjs). */
 
 /*
  * Design tokens from renderer/styles.css — extracted into CSS custom properties

@@ -3,6 +3,7 @@
 // is visually consistent with the rest of Desktop 2.0 instead of falling
 // back to system fonts and ad-hoc hex values.
 import '../assets/main.css'
+import { loadProprietaryFonts } from '../assets/proprietaryFonts'
 
 import { createApp } from 'vue'
 import TitleBarApp from './TitleBarApp.vue'
@@ -32,4 +33,6 @@ document.documentElement.setAttribute('data-theme', 'dark')
 // so the launcher's i18n instance can't be reused here. The shared
 // factory (`lib/i18nFactory.ts`) ensures every renderer resolves keys
 // from the same en-locale catalog.
+loadProprietaryFonts()
+
 createApp(TitleBarApp).use(createAppI18n()).mount('#app')
