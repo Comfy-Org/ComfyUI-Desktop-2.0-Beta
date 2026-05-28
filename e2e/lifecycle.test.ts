@@ -700,6 +700,204 @@ test('captures a snapshot for the picker-driven restore test @real', async () =>
 })
 
 // ---------------------------------------------------------------------------
+// Picker-driven copy-update — same ChannelPicker surface as the
+// cross-channel update-comfyui test below, but invoked on the
+// `copy-update` per-channel sibling action. Copies the source install
+// to a new directory THEN runs the update on the copy, leaving the
+// source completely untouched. copy-update is REQUIRES_STOPPED but
+// NOT IN_PLACE_RELAUNCH — comfy stops to run the op and stays stopped
+// (no auto-relaunch).
+//
+// Sequenced before the cross-channel update-comfyui test so the source
+// is still on `stable` here; cross-channel `copy-update stable → latest`
+// guarantees an actual git update happens on the copy (same-channel
+// would resolve to "already up to date" since the prior update-comfyui
+// test already pushed the source to the latest stable tag).
+// ---------------------------------------------------------------------------
+
+let _copyUpdateInstallId = ''
+let _copyUpdateInstallPath = ''
+
+test('picker-driven cross-channel copy-update (stable → latest) creates a copy + applies the update to the copy @real', async () => {
+  test.setTimeout(600_000)
+
+  // copy-update is REQUIRES_STOPPED. Stop comfy via the picker Home
+  // icon so the action dispatches without the picker's self-stop
+  // preamble (see picker-stop-confirm.test.ts).
+  if (await comfyFrontendIsLoaded()) {
+    await returnToDashboardViaPickerHome(ctx)
+  }
+
+  // Sanity: source install on stable so the cross-channel pick has
+  // somewhere to go.
+  const installsBefore = await ctx.panel.evaluate<Array<{ id: string; updateChannel?: string }>>(
+    `window.api.getInstallations()`,
+  )
+  const before = installsBefore.find((i) => i.id === _updateInstallId)
+  expect(before?.updateChannel, 'source must be on stable before cross-channel copy-update').toBe('stable')
+
+  const sourceHeadBefore = execFileSync('git', ['rev-parse', 'HEAD'], {
+    cwd: _comfyUIDir, encoding: 'utf-8', windowsHide: true,
+  }).trim()
+
+  // Snapshot BrowserWindow ids — copy-update emits open-install-window
+  // for the new install which spawns a fresh chooser host. Close it at
+  // the end so subsequent panel.html-marker helpers stay deterministic.
+  const windowIdsBeforeCopy = await ctx.app.evaluate(({ BrowserWindow }) =>
+    BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed()).map((w) => w.id),
+  )
+
+  await resetIpcInvocations(ctx.app, 'open-install-window')
+  await resetIpcInvocations(ctx.app, 'run-action')
+
+  await ensureInstallPanelMounted(ctx, _updateInstallId)
+  const popup = await openPickerByClickingTitlePill(ctx, {
+    installationId: _updateInstallId, initialTab: 'update',
+  })
+
+  // Draft `latest` via the ChannelPicker BaseSelect so the per-channel
+  // copy-update button comes alive against master tip. Drafting flips
+  // selectedActions to the drafted channel's
+  // `{ update-comfyui, copy-update, switch-channel }` set without
+  // mutating the install's persisted `updateChannel`.
+  await popup.waitForSelector('button[role="combobox"]', { timeout: 60_000 })
+  expect(await popup.click('button[role="combobox"]')).toBe(true)
+  await popup.waitForVisible('[role="listbox"] [role="option"]', { timeout: 10_000 })
+  expect(
+    await popup.clickByText('[role="listbox"] [role="option"]', 'Latest on GitHub'),
+    '"Latest on GitHub" option missing from BaseSelect listbox',
+  ).toBe(true)
+
+  await popup.waitForSelector(byTestId(TID.updateActionButton('copy-update')), { timeout: 60_000 })
+  expect(await popup.click(byTestId(TID.updateActionButton('copy-update')))).toBe(true)
+
+  // copy-update's only modal is the new-install-name prompt (no
+  // separate confirm step on this action — `notesDetails` rides on
+  // the prompt's `messageDetails`).
+  await popup.waitForVisible(byTestId(TID.modalPromptInput), { timeout: 10_000 })
+  const newName = 'ComfyUI Copy-Update E2E'
+  await popup.evaluate<void>(
+    `(() => {
+      const el = document.querySelector(${JSON.stringify(byTestId(TID.modalPromptInput))})
+      if (!el) throw new Error('prompt input not found')
+      el.value = ${JSON.stringify(newName)}
+      el.dispatchEvent(new Event('input', { bubbles: true }))
+      el.dispatchEvent(new Event('change', { bubbles: true }))
+    })()`,
+  )
+  expect(await popup.click(byTestId(TID.modalConfirm))).toBe(true)
+
+  await waitForProgressTakeoverAfterPopupClose()
+
+  // Wait for the copy + update + open-install-window for the new
+  // install. Real ~500MB copy followed by a real git update on the
+  // copy → generous outer timeout.
+  await expect
+    .poll(async () => {
+      const calls = (await getIpcInvocations(ctx.app, 'open-install-window')) as OpenInstallWindowPayload[]
+      return calls.find((c) => c.installationId && c.installationId !== _updateInstallId) ?? null
+    }, { timeout: 540_000, intervals: [2_000, 5_000] })
+    .not.toBeNull()
+
+  const openCalls = (await getIpcInvocations(ctx.app, 'open-install-window')) as OpenInstallWindowPayload[]
+  const newCall = openCalls.find((c) => c.installationId && c.installationId !== _updateInstallId)
+  expect(newCall?.installationId, 'open-install-window did not capture a NEW installationId').toBeTruthy()
+  _copyUpdateInstallId = newCall!.installationId
+
+  const installs = await ctx.panel.evaluate<Array<{ id: string; installPath: string; updateChannel?: string }>>(
+    `window.api.getInstallations()`,
+  )
+  const newRecord = installs.find((i) => i.id === _copyUpdateInstallId)
+  expect(newRecord, 'copy-update installation not found in getInstallations').toBeDefined()
+  _copyUpdateInstallPath = newRecord!.installPath
+
+  // Disk shape: copy is a full standalone tree (same shape as the
+  // picker pin-bottom Copy test asserts) — ComfyUI/.git +
+  // standalone-env + marker. Source dir is untouched.
+  expect(existsSync(path.join(_copyUpdateInstallPath, 'ComfyUI', '.git')), 'copy missing ComfyUI/.git').toBe(true)
+  expect(existsSync(path.join(_copyUpdateInstallPath, 'standalone-env')), 'copy missing standalone-env/').toBe(true)
+  expect(existsSync(path.join(_copyUpdateInstallPath, '.comfyui-desktop-2')), 'copy missing .comfyui-desktop-2 marker').toBe(true)
+  expect(existsSync(path.join(_updateInstallPath, 'ComfyUI', '.git')), 'source ComfyUI/.git missing after copy-update').toBe(true)
+
+  // Cross-channel copy-update moves the COPY's HEAD past the source
+  // (master tip is always ahead of any stable tag on this branch);
+  // the SOURCE's HEAD must NOT move — copy-update writes only to the
+  // new install.
+  const copyComfyUIDir = path.join(_copyUpdateInstallPath, 'ComfyUI')
+  const copyHeadAfter = execFileSync('git', ['rev-parse', 'HEAD'], {
+    cwd: copyComfyUIDir, encoding: 'utf-8', windowsHide: true,
+  }).trim()
+  expect(copyHeadAfter).toMatch(/^[a-f0-9]{40}$/)
+  expect(copyHeadAfter, 'cross-channel copy-update did not move the copy HEAD past the source').not.toBe(sourceHeadBefore)
+
+  const sourceHeadAfter = execFileSync('git', ['rev-parse', 'HEAD'], {
+    cwd: _comfyUIDir, encoding: 'utf-8', windowsHide: true,
+  }).trim()
+  expect(sourceHeadAfter, 'source HEAD must NOT change when copy-update runs').toBe(sourceHeadBefore)
+
+  // copy-update carried actionData.channel=latest on the run-action
+  // IPC (same Vue-reactive-proxy deep-clone bug class the
+  // cross-channel update-comfyui test below pins).
+  const ourRunCalls = await getRunActionsFor(_updateInstallId)
+  const copyUpdateCall = ourRunCalls.find((c) => c.actionId === 'copy-update')
+  expect(copyUpdateCall, 'cross-channel copy-update not recorded').toBeDefined()
+  expect(
+    (copyUpdateCall as { actionData?: { channel?: string; name?: string } }).actionData?.channel,
+    'cross-channel copy-update must carry actionData.channel=latest',
+  ).toBe('latest')
+
+  // The new install record's updateChannel reflects the cross-channel
+  // pick (created on `latest`); source channel unchanged.
+  expect(newRecord?.updateChannel, 'new install must be on latest after cross-channel copy-update').toBe('latest')
+  const sourceAfter = installs.find((i) => i.id === _updateInstallId)
+  expect(sourceAfter?.updateChannel, 'source updateChannel must stay on stable').toBe('stable')
+
+  // Close the extra chooser host spawned by `open-install-window` so
+  // panel.html-marker helpers in subsequent tests bind deterministically.
+  const extraWindowIds = await ctx.app.evaluate(
+    ({ BrowserWindow }, before) =>
+      BrowserWindow.getAllWindows()
+        .filter((w) => !w.isDestroyed() && !before.includes(w.id))
+        .map((w) => w.id),
+    windowIdsBeforeCopy,
+  )
+  await ctx.app.evaluate(({ BrowserWindow }, ids) => {
+    for (const id of ids) {
+      const w = BrowserWindow.fromId(id)
+      if (w && !w.isDestroyed()) w.close()
+    }
+  }, extraWindowIds)
+  await expect
+    .poll(
+      () =>
+        ctx.app.evaluate(
+          ({ BrowserWindow }, ids) =>
+            BrowserWindow.getAllWindows().filter(
+              (w) => !w.isDestroyed() && ids.includes(w.id),
+            ).length,
+          extraWindowIds,
+        ),
+      { timeout: 10_000, intervals: [100, 250] },
+    )
+    .toBe(0)
+})
+
+test('cleans up the copy-update install before the cross-channel update test runs @real', async () => {
+  test.setTimeout(300_000)
+  expect(_copyUpdateInstallId, 'no copy-update install id captured to clean up').toBeTruthy()
+
+  // Frees the ~500MB tree before the cross-channel update-comfyui
+  // test below flips the SOURCE install to latest. Same dashboard
+  // kebab → Delete path the picker-pin-bottom Copy cleanup uses.
+  await deleteInstallViaDashboardKebab(ctx, _copyUpdateInstallId)
+
+  expect(existsSync(_copyUpdateInstallPath), `copy-update install dir ${_copyUpdateInstallPath} still on disk after delete`).toBe(false)
+  const remaining = await ctx.panel.evaluate<InstallationLite[]>(`window.api.getInstallations()`)
+  expect(remaining.find((i) => i.id === _copyUpdateInstallId), 'copy-update install record not removed after delete').toBeUndefined()
+  expect(remaining.find((i) => i.id === _updateInstallId), 'original install was unexpectedly removed').toBeDefined()
+})
+
+// ---------------------------------------------------------------------------
 // Picker-driven update — driven through the picker's ChannelPicker.
 // Drafts a non-current channel ('latest') in the BaseSelect, clicks the
 // per-channel Update Now button, and waits for the IN_PLACE_RELAUNCH
