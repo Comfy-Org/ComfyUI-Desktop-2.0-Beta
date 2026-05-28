@@ -6,11 +6,7 @@
 // earlier release with this hook) shipped without bootstrap-python.
 const PLATFORM_MAP = {
   'windows-x64': 'win-x64',
-  // todesktop invokes the hook separately for the arm64 slice of the
-  // universal Windows installer, and todesktop.json's windows extraResources
-  // still requires bootstrap-python/win-x64 for that arch. Windows-on-ARM
-  // runs x64 binaries via emulation, so reuse the x64 bundle.
-  'windows-arm64': 'win-x64',
+  'windows-arm64': 'win-x64', // Windows-on-ARM runs x64 under emulation
   'mac-arm64': 'mac-arm64',
   'linux-x64': 'linux-x64',
 }
