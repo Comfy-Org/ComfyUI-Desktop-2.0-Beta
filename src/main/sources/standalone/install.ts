@@ -115,7 +115,7 @@ export async function postInstall(installation: InstallationRecord, { sendProgre
   // On machines without a global git binary, configure pygit2 using the
   // just-installed standalone Python so tag resolution works correctly.
   if (!isPygit2Configured() && !await isGitAvailable()) {
-    tryConfigurePygit2Fallback(installation.installPath)
+    await tryConfigurePygit2Fallback(installation.installPath)
   }
   const comfyuiDir = path.join(installation.installPath, 'ComfyUI')
   await writeComfyEnvironment(comfyuiDir)
