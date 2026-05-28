@@ -60,8 +60,24 @@ export function useLocalInstanceGuard() {
     })
 
     // Primary → close the running instance(s), then launch.
+    // `stopComfyUI` awaits the actual process kill so the port is free
+    // before the new launch starts; `closeComfyWindow({ skipConfirm })`
+    // then retires the host window so the user doesn't get left on
+    // ComfyLifecycleView's stopped surface for an instance they didn't
+    // choose to revisit. The close call is fire-and-forget — its
+    // teardown can't gate the launch because a concurrent OS-X close
+    // handler with a pending user prompt could otherwise block it.
+    // The `.catch` keeps an IPC reject (e.g. context-bridge disconnect)
+    // from surfacing as an unhandled promise rejection in the renderer.
     if (choice === 'primary') {
-      await Promise.all(runningLocal.map((r) => window.api.stopComfyUI(r.id)))
+      await Promise.all(
+        runningLocal.map(async (r) => {
+          await window.api.stopComfyUI(r.id)
+          window.api.closeComfyWindow(r.id, { skipConfirm: true }).catch((err) => {
+            console.warn('useLocalInstanceGuard: closeComfyWindow failed', err)
+          })
+        }),
+      )
       return true
     }
 
