@@ -79,6 +79,7 @@ import {
   isInstallHost,
   openOrFocusAnyHostWindow,
   openOrFocusChooserHostWindow,
+  raiseAllHostWindows,
   setHostFactories
 } from './host/registry'
 import {
@@ -1748,9 +1749,17 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
   })
 
   app.on('activate', () => {
-    // macOS dock click — focus an existing host window before
-    // spawning a fresh chooser host.
-    openOrFocusAnyHostWindow()
+    // macOS dock click — raise ALL open host windows to the front
+    // (standard macOS behaviour: clicking the dock icon brings every
+    // window of the app forward, not just one). The preferred host is
+    // left frontmost. Falls back to spawning a fresh chooser host when
+    // none are open. The single-window `openOrFocusAnyHostWindow` path
+    // remains for non-darwin platforms / the `second-instance` hook.
+    if (process.platform === 'darwin') {
+      raiseAllHostWindows()
+    } else {
+      openOrFocusAnyHostWindow()
+    }
   })
 
   app.on('before-quit', () => {
