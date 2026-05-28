@@ -4,6 +4,32 @@ import { detectFirebaseEnv } from './config'
 import { buildIndexedDbInjectScript } from './inject'
 import { extractProviderId, type SupportedProvider } from './intercept'
 import { startBridgeServer } from './server'
+import * as mainTelemetry from '../../lib/telemetry'
+
+/**
+ * Tie the anonymous `installation_id` to the signed-in user so PostHog
+ * merges the two identities. Both auth paths (Google server-side,
+ * GitHub popup) converge on the resolved Firebase `user` record, so this
+ * is the single hook that covers every sign-in.
+ *
+ * Only the email DOMAIN is sent (never the raw address) — enough to
+ * power internal cohort filters (e.g. the comfy.org A/B targeting)
+ * without shipping PII. `bindUserId` is consent-gated downstream, so a
+ * user who declined telemetry binds nothing. Wrapped so a telemetry
+ * failure can never break the auth flow.
+ */
+function bindSignedInUser(user: Record<string, unknown>): void {
+  try {
+    const uid = typeof user.uid === 'string' && user.uid.length > 0 ? user.uid : null
+    if (!uid) return
+    const email = typeof user.email === 'string' ? user.email : null
+    const at = email ? email.lastIndexOf('@') : -1
+    const emailDomain = at >= 0 ? email!.slice(at + 1).toLowerCase() : null
+    mainTelemetry.bindUserId(uid, emailDomain ? { email_domain: emailDomain } : {})
+  } catch {
+    // telemetry must never break the auth flow
+  }
+}
 
 export { extractProviderId, isFirebaseAuthHandlerUrl } from './intercept'
 
@@ -63,7 +89,7 @@ const POST_SIGNIN_HOLD_MS = 3000
 export async function handleFirebasePopup(
   url: string,
   comfyContents: WebContents,
-  opts: HandleFirebasePopupOpts = {},
+  opts: HandleFirebasePopupOpts = {}
 ): Promise<void> {
   const providerId = extractProviderId(url)
   if (!providerId) {
@@ -98,6 +124,10 @@ export async function handleFirebasePopup(
     // bridge page when they intended to start a new Google flow.
     void shell.openExternal(`${handle.url}?n=${Date.now().toString(36)}`)
     const { user, apiKey } = await handle.signInPromise
+    // Bind PostHog identity as soon as we have the user — independent of
+    // the embedded-view reload below, so the merge happens even if the
+    // window is torn down before the reload completes.
+    bindSignedInUser(user)
     if (comfyContents.isDestroyed()) return
     // Hold for a beat so the user actually sees the "You're signed in"
     // page (with its synchronised countdown) before we yank focus back
