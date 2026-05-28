@@ -23,6 +23,7 @@ import {
   expectedPartitionFor,
   shouldBailAfterCloseConfirm,
   shouldBailAfterConsult,
+  shouldDetachLastInstallWindowToDashboard,
   shouldShowInstallCloseConfirm,
 } from './createHostWindow'
 
@@ -159,5 +160,30 @@ describe('shouldBailAfterCloseConfirm', () => {
     // Mirrors the consult re-check: a caller-side force-close that
     // arrives while the modal is open must override the user's cancel.
     expect(shouldBailAfterCloseConfirm(false, true)).toBe(false)
+  })
+})
+
+describe('shouldDetachLastInstallWindowToDashboard', () => {
+  it('detaches an install host with a live entry when it is the last window', () => {
+    // OS ✕ on the last install window → flip to dashboard in place.
+    expect(shouldDetachLastInstallWindowToDashboard(true, true, true, false)).toBe(true)
+  })
+
+  it('does not detach on a force-close even if it is the last install window', () => {
+    // Launch-guard swap / bulk Exit-All want the window gone, not a
+    // stray dashboard window left behind.
+    expect(shouldDetachLastInstallWindowToDashboard(true, true, true, true)).toBe(false)
+  })
+
+  it('does not detach when other host windows are still open', () => {
+    expect(shouldDetachLastInstallWindowToDashboard(true, true, false, false)).toBe(false)
+  })
+
+  it('does not detach a chooser/dashboard host (no install backing)', () => {
+    expect(shouldDetachLastInstallWindowToDashboard(false, true, true, false)).toBe(false)
+  })
+
+  it('does not detach when the entry has already been dropped from the registry', () => {
+    expect(shouldDetachLastInstallWindowToDashboard(true, false, true, false)).toBe(false)
   })
 })

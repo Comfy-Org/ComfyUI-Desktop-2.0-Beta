@@ -84,6 +84,25 @@ export function shouldBailAfterCloseConfirm(confirmed: boolean, forceClose: bool
   return !confirmed && !forceClose
 }
 
+/** Should the close handler detach the last install-backed window to
+ *  the dashboard instead of tearing it down?
+ *
+ *  The OS ✕ on the last install window flips the host to chooser mode
+ *  in place so the app stays alive on the dashboard — that's why
+ *  `isLastWindow` exists. A force-close (launch-guard eviction, bulk
+ *  Exit-All) is a different intent: the caller already wants the
+ *  window gone, and leaving a stray dashboard window behind after a
+ *  swap-installs flow is noise. Force-close therefore skips the
+ *  detach branch and falls through to the normal teardown. */
+export function shouldDetachLastInstallWindowToDashboard(
+  isInstallHostWindow: boolean,
+  hasEntry: boolean,
+  isLastWindow: boolean,
+  forceClose: boolean,
+): boolean {
+  return isInstallHostWindow && hasEntry && isLastWindow && !forceClose
+}
+
 /** Constants reused by both host modes. Defined here because they only
  *  matter in the context of host-window construction. */
 const APP_ICON = path.join(__dirname, '..', '..', 'assets', 'Comfy_Logo_x256.png')
@@ -659,13 +678,29 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
           )
           if (shouldBailAfterCloseConfirm(confirmed, fx.preClearedClose.has(comfyWindow))) return
         }
+        // Capture the force-close intent before we drain the flag.
+        // Either the initial snapshot (`skipConsult`) or a late-arriving
+        // pre-clear (force-close that landed mid-consult/mid-modal) is
+        // enough to mark this as caller-driven.
+        const forceClose = skipConsult || fx.preClearedClose.has(comfyWindow)
         fx.preClearedClose.delete(comfyWindow)
         if (comfyWindow.isDestroyed()) return
         // Last install-backed window → return to the dashboard rather
         // than tear down + quit. `detachInstall` runs the same
         // `_installCleanup` (stopRunning, listeners off) the teardown
         // below would, then flips the window to chooser mode in place.
-        if (isInstallHostWindow && entryForClose && isLastWindow) {
+        // Force-close skips this — the caller wants the window gone
+        // (e.g. launch-guard swapping installs shouldn't leave a stray
+        // dashboard window behind).
+        if (
+          shouldDetachLastInstallWindowToDashboard(
+            isInstallHostWindow,
+            !!entryForClose,
+            isLastWindow,
+            forceClose,
+          )
+          && entryForClose
+        ) {
           entryForClose.detachInstall()
           return
         }
