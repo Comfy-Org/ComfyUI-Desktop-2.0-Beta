@@ -4,13 +4,11 @@
  * Drives the same kebab → menu-item → confirm flow a user performs
  * manually:
  *
- *   - **Untrack** routes through `onManage({ autoAction: 'remove' })`,
- *     which opens the instance-picker popup in expanded mode with the
- *     autoAction seed. The popup's `ComfyUISettingsContent` then loads
- *     section data, locates the `'remove'` source-action def, and fires
- *     its `confirm` payload as a BaseAlert inside the popup webContents.
- *     Confirming drops the installation from the registry but leaves the
- *     install directory on disk.
+ *   - **Untrack** is a renderer-built confirm + instant `remove` IPC.
+ *     The BaseAlert mounts in the panel webContents (no picker popup
+ *     hop, no `get-detail-sections` round-trip). Confirming drops the
+ *     installation from the registry but leaves the install directory
+ *     on disk.
  *   - **Delete** routes through the kebab fast-path (`onShowProgress`
  *     builds the confirm renderer-side, no popup mount). The BaseAlert
  *     appears in the panel webContents. Confirming drops both the
@@ -29,7 +27,6 @@ import { test, expect } from '@playwright/test'
 import { launchApp, type AppContext } from './launchApp'
 import { expectChooserVisible } from './support/chooserHelpers'
 import { byTestId, TID } from './support/testIds'
-import { titlePopupPage, waitForWebContents } from './support/cdpPages'
 
 let ctx: AppContext
 let untrackPath: string
@@ -110,23 +107,16 @@ test('chooser lists both seeded installs @ci', async () => {
   await ctx.panel.waitForSelector(byTestId(TID.dashboardTile(DELETE_ID)), { timeout: 10_000 })
 })
 
-// TODO(#621): `baseAlertAction` confirm never appears in the picker popup.
-// Kebab routing changed in #594 (Untrack via picker autoAction) and #607
-// (context-menu untrack snapshots). Likely testid/path drift — investigate
-// useInstallContextMenu 'untrack' branch + picker autoAction flow.
-test.skip('kebab Untrack drops the record but preserves the install directory @ci', async () => {
+test('kebab Untrack drops the record but preserves the install directory @ci', async () => {
   await openKebabAndClick(UNTRACK_ID, 'untrack')
 
-  // useInstallContextMenu's 'untrack' branch calls
-  // `onManage({ autoAction: 'remove' })`, which in ChooserView opens
-  // the picker popup in expanded mode with autoAction seeded. The
-  // popup's ComfyUISettingsContent loads sections, finds the 'remove'
-  // source-action def, and fires its `confirm` payload as a BaseAlert
-  // in the popup webContents.
-  await waitForWebContents(ctx.app, 'comfyTitlePopup.html')
-  const popup = titlePopupPage(ctx.app)
-  await popup.waitForVisible(byTestId(TID.baseAlertAction), { timeout: 15_000 })
-  const confirmed = await popup.click(byTestId(TID.baseAlertAction))
+  // useInstallContextMenu's 'untrack' branch builds the confirm modal
+  // renderer-side via `modal.confirm({ title: 'Forget Install', … })`
+  // and only then fires `runAction(id, 'remove')` — no picker popup
+  // hop, the BaseAlert mounts in the same panel webContents as the
+  // dashboard chooser (parity with the Delete fast-path below).
+  await ctx.panel.waitForVisible(byTestId(TID.baseAlertAction), { timeout: 15_000 })
+  const confirmed = await ctx.panel.click(byTestId(TID.baseAlertAction))
   expect(confirmed, 'untrack confirm click dispatched').toBe(true)
 
   await ctx.panel.waitFor(
