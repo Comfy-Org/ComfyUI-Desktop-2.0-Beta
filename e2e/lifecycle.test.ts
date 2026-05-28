@@ -41,15 +41,18 @@ import {
   expectTakeoverOpen,
 } from './support/chooserHelpers'
 import {
-  ensureInstallPanelView,
   getIpcInvocations,
   getRunningSessionSnapshot,
   resetIpcInvocations,
 } from './support/devHooks'
 import {
+  deleteInstallViaDashboardKebab,
   ensureInstalledAndLaunched,
+  ensureInstallPanelMountedViaFileMenu,
   launchComfyByClickingTile,
+  openPickerByClickingTitlePill,
   returnToDashboardViaFileMenu,
+  saveSnapshotViaPicker,
 } from './support/realPrereqs'
 import {
   isPopupVisible,
@@ -497,12 +500,6 @@ interface InstallationLite {
   installPath: string
 }
 
-interface UpdateActionResult {
-  ok: boolean
-  message?: string
-  navigate?: string
-}
-
 let _updateInstallId = ''
 let _updateInstallPath = ''
 let _comfyUIDir = ''
@@ -547,18 +544,40 @@ test('update-comfyui drives the real updater and moves HEAD forward @real', asyn
   test.setTimeout(600_000)
   expect(_installedCommit, 'installed commit not captured').toBeTruthy()
 
-  // TODO(#621-phase3): drive via picker UI (cross-channel update test
-  // below already exercises the picker path — collapse this into a
-  // picker-driven same-channel update once the action button is
-  // available without the prior cross-channel switch.)
-  const result = await ctx.panel.evaluate<UpdateActionResult>(
-    `window.api.runAction(${JSON.stringify(_updateInstallId)}, 'update-comfyui', { channel: 'stable' })`,
-  )
-  expect(result.ok, `update-comfyui failed: ${result.message ?? ''}`).toBe(true)
+  // Drive the same-channel update via the picker: open on the Update
+  // tab, click Update Now on the current (stable) channel card,
+  // confirm. The install is currently stopped (REQUIRES_STOPPED), so
+  // no IN_PLACE_RELAUNCH chain follows — we just wait for HEAD to
+  // move off the installed commit.
+  await ensureInstallPanelMountedViaFileMenu(ctx)
+  await resetIpcInvocations(ctx.app, 'run-action')
+  const popup = await openPickerByClickingTitlePill(ctx, {
+    installationId: _updateInstallId, initialTab: 'update',
+  })
+  await popup.waitForSelector(byTestId(TID.updateActionButton('update-comfyui')), { timeout: 60_000 })
+  expect(await popup.click(byTestId(TID.updateActionButton('update-comfyui')))).toBe(true)
 
-  const headAfter = execFileSync('git', ['rev-parse', 'HEAD'], {
-    cwd: _comfyUIDir, encoding: 'utf-8', windowsHide: true,
-  }).trim()
+  // Stable release has release notes → ModalDialog rich-confirm
+  // (`modal-confirm-button`); fall back to BaseAlert if the upstream
+  // release happens to have no body.
+  const confirmSelector =
+    '[data-testid="modal-confirm-button"], [data-testid="base-alert-action"]'
+  await popup.waitForVisible(confirmSelector, { timeout: 15_000 })
+  expect(await popup.click(confirmSelector)).toBe(true)
+
+  // Poll git HEAD instead of the runAction return value — the picker
+  // path forwards through pickerForwardShowProgress and does not
+  // resolve a result to the test process.
+  let headAfter = _installedCommit
+  await expect
+    .poll(() => {
+      headAfter = execFileSync('git', ['rev-parse', 'HEAD'], {
+        cwd: _comfyUIDir, encoding: 'utf-8', windowsHide: true,
+      }).trim()
+      return headAfter
+    }, { timeout: 540_000, intervals: [2_000, 5_000] })
+    .not.toBe(_installedCommit)
+
   expect(headAfter, 'update did not move HEAD off the installed (oldest stable) commit').not.toBe(_installedCommit)
 
   // The update should land on a commit reachable from origin/master that is
@@ -664,16 +683,10 @@ test('captures a snapshot for the picker-driven restore test @real', async () =>
   // production lazily mounts a fresh install-backed panel on the next
   // Settings click / comfy-lifecycle body, so `panel.html` doesn't
   // exist while ComfyUI is the active body. The remaining picker-driven
-  // tests in this file all need `ctx.panel` reachable; do the lazy
-  // mount ourselves once here.
-  // TODO(#621-phase3): replace `ensureInstallPanelView` (an `__e2e`
-  // mutation) with a real-click panel mount via the title-bar menu.
-  expect(await ensureInstallPanelView(ctx.app, _updateInstallId)).toBe(true)
-  await waitForWebContents(ctx.app, 'panel.html')
-  // TODO(#621-phase3): drive via picker UI (snapshot-save action button).
-  await ctx.panel.evaluate<unknown>(
-    `window.api.runAction(${JSON.stringify(_updateInstallId)}, 'snapshot-save', { label: 'lifecycle-restore-target' })`,
-  )
+  // tests in this file all need `ctx.panel` reachable; mount the panel
+  // ourselves via the title-bar file menu (real-click path), then drive
+  // the snapshot save through the picker's Snapshots tab.
+  await saveSnapshotViaPicker(ctx, _updateInstallId, 'lifecycle-restore-target')
   const list = await ctx.panel.evaluate<SnapshotListLite>(
     `window.api.getSnapshots(${JSON.stringify(_updateInstallId)})`,
   )
@@ -738,22 +751,14 @@ test('picker-driven cross-channel update-comfyui (stable → latest) IN_PLACE_RE
   await resetIpcInvocations(ctx.app, 'stop-comfyui')
   await resetIpcInvocations(ctx.app, 'run-action')
 
-  // Open the picker in expanded mode on the Update tab. Channel
-  // metadata loads via real `check-update` against github.com for both
-  // stable and latest — `latest` reports an update against the master
-  // tip, so its cross-channel Update Now button comes alive.
-  // TODO(#621-phase3): drive via picker UI (title-bar instance pill click).
-  await ctx.panel.evaluate<boolean>(
-    `(() => {
-      window.api.openInstancePicker({
-        installationId: ${JSON.stringify(_updateInstallId)},
-        initialTab: 'update',
-      })
-      return true
-    })()`,
-  )
-  await waitForWebContents(ctx.app, 'comfyTitlePopup.html')
-  const popup = titlePopupPage(ctx.app)
+  // Open the picker on the Update tab via a real title-pill click +
+  // picker-row expand + tab click. Channel metadata loads via real
+  // `check-update` against github.com for both stable and latest —
+  // `latest` reports an update against the master tip, so its
+  // cross-channel Update Now button comes alive.
+  const popup = await openPickerByClickingTitlePill(ctx, {
+    installationId: _updateInstallId, initialTab: 'update',
+  })
 
   // ChannelPicker renders a BaseSelect (`role="combobox"`); the
   // dropdown's options are `role="option"` with the channel label.
@@ -860,18 +865,9 @@ test('picker-driven snapshot-restore IN_PLACE_RELAUNCH while running @real', asy
   await resetIpcInvocations(ctx.app, 'stop-comfyui')
   await resetIpcInvocations(ctx.app, 'run-action')
 
-  // TODO(#621-phase3): drive via picker UI (title-bar instance pill click).
-  await ctx.panel.evaluate<boolean>(
-    `(() => {
-      window.api.openInstancePicker({
-        installationId: ${JSON.stringify(_updateInstallId)},
-        initialTab: 'snapshots',
-      })
-      return true
-    })()`,
-  )
-  await waitForWebContents(ctx.app, 'comfyTitlePopup.html')
-  const popup = titlePopupPage(ctx.app)
+  const popup = await openPickerByClickingTitlePill(ctx, {
+    installationId: _updateInstallId, initialTab: 'snapshots',
+  })
   // Expand the snapshot row to reveal Restore.
   await popup.waitForSelector(byTestId(TID.snapshotRow(_restoreSnapshotFilename)), { timeout: 30_000 })
   expect(await popup.click(byTestId(TID.snapshotRow(_restoreSnapshotFilename)))).toBe(true)
@@ -938,10 +934,10 @@ test('picker compact-row Restart drives system-modal confirm + re-launch @real',
   await resetIpcInvocations(ctx.app, 'stop-comfyui')
   await resetIpcInvocations(ctx.app, 'run-action')
 
-  // TODO(#621-phase3): drive via picker UI (title-bar instance pill click).
-  await ctx.panel.evaluate<boolean>(`(() => { window.api.openInstancePicker(); return true })()`)
-  await waitForWebContents(ctx.app, 'comfyTitlePopup.html')
-  const popup = titlePopupPage(ctx.app)
+  // Open the picker in compact mode (no row expand) via a real
+  // title-pill click — the per-row Restart CTA lives directly on the
+  // collapsed row.
+  const popup = await openPickerByClickingTitlePill(ctx)
   // PickerRow renders its primary CTA as "Restart" when the install is
   // currently running — same test id either way.
   await popup.waitForSelector(byTestId(TID.pickerRowOpen(_updateInstallId)), { timeout: 15_000 })
@@ -1002,21 +998,12 @@ test('picker pin-bottom Restart drives stop+launch under one "Restarting ComfyUI
   await resetIpcInvocations(ctx.app, 'stop-comfyui')
   await resetIpcInvocations(ctx.app, 'run-action')
 
-  // Open the picker in expanded mode on the Settings/Config tab so the
-  // pin-bottom MoreMenu is visible. `initialTab: 'config'` matches the
-  // pin-bottom Copy test above.
-  // TODO(#621-phase3): drive via picker UI (title-bar instance pill click).
-  await ctx.panel.evaluate<boolean>(
-    `(() => {
-      window.api.openInstancePicker({
-        installationId: ${JSON.stringify(_updateInstallId)},
-        initialTab: 'config',
-      })
-      return true
-    })()`,
-  )
-  await waitForWebContents(ctx.app, 'comfyTitlePopup.html')
-  const popup = titlePopupPage(ctx.app)
+  // Open the picker on the Settings/Config tab via a real title-pill
+  // click + picker-row expand + tab click. The pin-bottom MoreMenu
+  // only renders inside the expanded-row layout.
+  const popup = await openPickerByClickingTitlePill(ctx, {
+    installationId: _updateInstallId, initialTab: 'config',
+  })
 
   // Open the footer "More" overflow menu → the swap surfaces the
   // primary Launch item as `pin-bottom-action-restart` because the
@@ -1112,18 +1099,15 @@ test('picker pin-bottom Copy creates a real ~500MB copy of the install @real', a
   await resetIpcInvocations(ctx.app, 'open-install-window')
   await resetIpcInvocations(ctx.app, 'run-action')
 
-  // TODO(#621-phase3): drive via picker UI (title-bar instance pill click).
-  await ctx.panel.evaluate<boolean>(
-    `(() => {
-      window.api.openInstancePicker({
-        installationId: ${JSON.stringify(_updateInstallId)},
-        initialTab: 'config',
-      })
-      return true
-    })()`,
-  )
-  await waitForWebContents(ctx.app, 'comfyTitlePopup.html')
-  const popup = titlePopupPage(ctx.app)
+  // Drive the picker open via a real title-pill click — the chooser
+  // host's title bar still renders an interactive pill (with the
+  // `is-install-less` class), so this works from the dashboard too.
+  // Mount the panel via the file menu first so the chooser body is
+  // available as an IPC target throughout the rest of the test.
+  await ensureInstallPanelMountedViaFileMenu(ctx)
+  const popup = await openPickerByClickingTitlePill(ctx, {
+    installationId: _updateInstallId, initialTab: 'config',
+  })
 
   // Open the footer "More" overflow menu → click Copy.
   await popup.waitForVisible('[data-more-trigger]', { timeout: 15_000 })
@@ -1214,15 +1198,11 @@ test('cleans up the copy install before the original delete test runs @real', as
   test.setTimeout(300_000)
   expect(_copyInstallId, 'no copy install id captured to clean up').toBeTruthy()
 
-  // Direct runAction('delete') bypasses the confirm chain — the copy
-  // is stopped (never launched), so no `stop-comfyui` preamble is
-  // needed. Frees disk before the existing final delete test runs
-  // against the original.
-  // TODO(#621-phase3): drive via picker UI (dashboard kebab → Delete).
-  const result = await ctx.panel.evaluate<UpdateActionResult>(
-    `window.api.runAction(${JSON.stringify(_copyInstallId)}, 'delete')`,
-  )
-  expect(result.ok, `delete copy failed: ${result.message ?? ''}`).toBe(true)
+  // Delete via the dashboard kebab → Delete menu item → BaseAlert
+  // confirm → ProgressModal. The copy is stopped (never launched), so
+  // no `stop-comfyui` preamble is needed. Frees disk before the final
+  // delete test runs against the original.
+  await deleteInstallViaDashboardKebab(ctx, _copyInstallId)
 
   expect(existsSync(_copyInstallPath), `copy install dir ${_copyInstallPath} still on disk after delete`).toBe(false)
   const remaining = await ctx.panel.evaluate<InstallationLite[]>(`window.api.getInstallations()`)
@@ -1491,11 +1471,10 @@ test('real delete wipes the fully-installed ~500MB tree off disk @real', async (
   test.setTimeout(300_000)
   expect(_deleteInstallPath, 'install path not captured').toBeTruthy()
 
-  // TODO(#621-phase3): drive via picker UI (dashboard kebab → Delete).
-  const result = await ctx.panel.evaluate<UpdateActionResult>(
-    `window.api.runAction(${JSON.stringify(_deleteInstallId)}, 'delete')`,
-  )
-  expect(result.ok, `runAction('delete') failed: ${result.message ?? ''}`).toBe(true)
+  // Delete via the dashboard kebab → Delete menu item → BaseAlert
+  // confirm → ProgressModal. The recursive fs.rm of the .venv (~thousands
+  // of small files plus the torch wheels) is the slow part.
+  await deleteInstallViaDashboardKebab(ctx, _deleteInstallId)
 
   // Disk verification — the entire install tree must be gone, not just
   // a few top-level entries. Probes both the root + a deep file the

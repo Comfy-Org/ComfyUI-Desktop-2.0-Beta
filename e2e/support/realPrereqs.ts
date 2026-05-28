@@ -21,7 +21,23 @@ import path from 'node:path'
 import { expect } from '@playwright/test'
 import type { AppContext } from '../launchApp'
 import { clickInstallTile, expectChooserVisible, openTitleMenu } from './chooserHelpers'
-import { waitForWebContents } from './cdpPages'
+import { titlePopupPage, waitForWebContents, type WebContentsPage } from './cdpPages'
+import { byTestId, TID } from './testIds'
+
+/** Picker tabs that can be opened via the title pill helpers. The
+ *  literal keys here mirror `ComfyUISettingsTab` in
+ *  `src/renderer/src/components/settings/ComfyUISettingsContent.vue`. */
+export type PickerTabKey = 'update' | 'snapshots' | 'config'
+
+/** Tab label fallbacks for `.settings-v2-tab` text matching. The Vue
+ *  source uses i18n keys with these English fallbacks; locales merge in
+ *  asynchronously so the English text is what the picker renders during
+ *  the e2e harness boot. */
+const PICKER_TAB_LABEL: Record<PickerTabKey, string> = {
+  update: 'Update',
+  snapshots: 'Snapshots',
+  config: 'Startup Args',
+}
 
 /** Fully-installed standalone ComfyUI install state. Populated by
  *  `freshInstallStandaloneCpu` (real flow) or `hydrateInstallFromDisk`
@@ -268,7 +284,7 @@ export async function ensureInstalledAndLaunched(
       // Hydrated profile: launch the existing install via real click
       // and let the test proceed from a "ComfyUI running" surface.
       await launchComfyByClickingTile(ctx, 'ComfyUI')
-      await ensureInstallPanelView(ctx, hydrated.id)
+      await ensureInstallPanelMountedViaFileMenu(ctx)
       // Re-capture so installedCommit reflects the post-launch HEAD
       // (no-op on stable installs, useful when the previous run left
       // the working tree at a different commit).
@@ -282,24 +298,20 @@ export async function ensureInstalledAndLaunched(
   // Auto-launch dropped the panel.html (chooser-pick attach destroys
   // it). Remount via the title bar so subsequent ctx.panel.evaluate
   // calls have a target.
-  await ensureInstallPanelView(ctx, installed.id)
+  await ensureInstallPanelMountedViaFileMenu(ctx)
   return installed
 }
 
-/** Open the install-backed panel view by clicking the title-bar menu's
- *  Settings entry (forces a panel mount via the production path).
- *  After a chooser-pick attach the install-backed PanelApp isn't
- *  mounted until the user touches Settings or the comfy-lifecycle
- *  body — drive that here so subsequent `ctx.panel.evaluate` calls
- *  reach a live webContents.
+/** Force-mount the install-backed `panel.html` by opening + immediately
+ *  dismissing the title-bar file menu. After a chooser-pick attach the
+ *  install-backed PanelApp is destroyed and production only re-mounts
+ *  it on the user's next title-bar / comfy-lifecycle interaction —
+ *  drive that interaction with real clicks here so subsequent
+ *  `ctx.panel.evaluate` reads (`window.api.getInstallations`, etc.)
+ *  hit a live webContents.
  *
- *  Falls back to a no-op when the panel is already mounted. */
-async function ensureInstallPanelView(ctx: AppContext, _installationId: string): Promise<void> {
-  // The cheapest mount trigger is just waiting — production lazy-mounts
-  // on first body activation, which happens shortly after ComfyUI loads.
-  // If panel.html doesn't appear within a short window, open the file
-  // menu and dismiss it — the popup mount path runs the same lazy code
-  // that materializes panel.html.
+ *  No-op when the panel is already mounted. */
+export async function ensureInstallPanelMountedViaFileMenu(ctx: AppContext): Promise<void> {
   try {
     await waitForWebContents(ctx.app, 'panel.html', 5_000)
     return
@@ -308,7 +320,140 @@ async function ensureInstallPanelView(ctx: AppContext, _installationId: string):
   await openTitleMenu(ctx.titleBar)
   await waitForWebContents(ctx.app, 'comfyTitlePopup.html', 5_000)
   // Dismiss the popup via Escape inside the popup webContents.
-  const popup = (await import('./cdpPages')).titlePopupPage(ctx.app)
+  const popup = titlePopupPage(ctx.app)
   await popup.pressKey('Escape')
   await waitForWebContents(ctx.app, 'panel.html', 10_000)
+}
+
+/** Click the title-bar `.title-install-pill` to open the InstancePicker
+ *  popup. The pill renders on both install-backed and install-less
+ *  (chooser) hosts as an interactive `<button>` so this works regardless
+ *  of which body is currently active.
+ *
+ *  When `opts.installationId` is set, also expand that install's
+ *  picker row to enter the per-install settings panel. When
+ *  `opts.initialTab` is set, click that tab once the settings panel is
+ *  expanded.
+ *
+ *  Returns the popup webContents page handle so callers can keep
+ *  driving clicks against the picker without re-resolving the marker. */
+export async function openPickerByClickingTitlePill(
+  ctx: AppContext,
+  opts: { installationId?: string; initialTab?: PickerTabKey } = {},
+): Promise<WebContentsPage> {
+  await ctx.titleBar.waitForVisible('.title-install-pill', { timeout: 15_000 })
+  expect(await ctx.titleBar.click('.title-install-pill'), 'title-install-pill click dispatched').toBe(true)
+  await waitForWebContents(ctx.app, 'comfyTitlePopup.html')
+  const popup = titlePopupPage(ctx.app)
+
+  if (opts.installationId) {
+    const rowSel = byTestId(TID.pickerRow(opts.installationId))
+    await popup.waitForVisible(rowSel, { timeout: 15_000 })
+    expect(await popup.click(rowSel), `picker-row click for ${opts.installationId}`).toBe(true)
+  }
+
+  if (opts.initialTab) {
+    const label = PICKER_TAB_LABEL[opts.initialTab]
+    await popup.waitFor(
+      async () => {
+        const texts = await popup.allText('.settings-v2-tab')
+        return texts.some((t) => t.includes(label))
+      },
+      { timeout: 15_000, message: `picker tab "${label}" never appeared` },
+    )
+    expect(
+      await popup.clickByText('.settings-v2-tab', label),
+      `picker tab "${label}" clicked`,
+    ).toBe(true)
+  }
+
+  return popup
+}
+
+/** Save a snapshot via the picker: open the picker, switch to the
+ *  Snapshots tab, click the dashed "Save Snapshot" rail box, fill the
+ *  prompt with `label`, confirm.
+ *
+ *  Internally ensures `panel.html` is mounted first (the picker's
+ *  IPC reads of installations / snapshots flow through the panel
+ *  webContents — callers expect it alive after this returns). Polls
+ *  `getSnapshots` until the new label appears so the caller can read
+ *  metadata immediately after.
+ *
+ *  `label` must be non-empty — `dialogs.prompt` allows blank but the
+ *  callers in this suite always identify their target by label. */
+export async function saveSnapshotViaPicker(
+  ctx: AppContext,
+  installId: string,
+  label: string,
+): Promise<void> {
+  await ensureInstallPanelMountedViaFileMenu(ctx)
+  const popup = await openPickerByClickingTitlePill(ctx, {
+    installationId: installId,
+    initialTab: 'snapshots',
+  })
+
+  await popup.waitForVisible('.snapshots-rail-save-box', { timeout: 30_000 })
+  expect(await popup.click('.snapshots-rail-save-box'), 'snapshots-rail-save-box click').toBe(true)
+
+  // `handleSave` opens a `dialogs.prompt` — modal-prompt-input +
+  // modal-confirm-button rendered inside the popup webContents.
+  await popup.waitForVisible(byTestId(TID.modalPromptInput), { timeout: 10_000 })
+  await popup.evaluate<void>(
+    `(() => {
+      const el = document.querySelector(${JSON.stringify(byTestId(TID.modalPromptInput))})
+      if (!el) throw new Error('snapshot label prompt input missing')
+      el.value = ${JSON.stringify(label)}
+      el.dispatchEvent(new Event('input', { bubbles: true }))
+      el.dispatchEvent(new Event('change', { bubbles: true }))
+    })()`,
+  )
+  expect(await popup.click(byTestId(TID.modalConfirm)), 'snapshot save confirm clicked').toBe(true)
+
+  interface SnapshotListLite { snapshots: { label?: string; filename: string }[] }
+  await expect
+    .poll(async () => {
+      const list = await ctx.panel.evaluate<SnapshotListLite>(
+        `window.api.getSnapshots(${JSON.stringify(installId)})`,
+      )
+      return list.snapshots.some((s) => s.label === label)
+    }, { timeout: 60_000, intervals: [500, 1_000] })
+    .toBe(true)
+}
+
+/** Delete an install via the dashboard kebab → Delete menu item →
+ *  confirm. Routes through `useInstallContextMenu`'s `id === 'delete'`
+ *  branch which mounts `modal.confirm` (BaseAlert simple-confirm,
+ *  `confirmStyle: 'danger'`) and then `onShowProgress` (ProgressModal
+ *  takes over the panel body).
+ *
+ *  Polls `getInstallations` until `installId` is gone. Real `fs.rm`
+ *  of a fully-installed ~500MB standalone tree (esp. Windows `.venv`)
+ *  takes a while; the timeout is generous. */
+export async function deleteInstallViaDashboardKebab(
+  ctx: AppContext,
+  installId: string,
+): Promise<void> {
+  await expectChooserVisible(ctx.panel)
+  const kebabSel = byTestId(TID.dashboardTileKebab(installId))
+  await ctx.panel.waitForVisible(kebabSel, { timeout: 15_000 })
+  expect(await ctx.panel.click(kebabSel), `dashboard-tile-kebab click for ${installId}`).toBe(true)
+
+  const deleteItemSel = byTestId(TID.contextMenuItem('delete'))
+  await ctx.panel.waitForVisible(deleteItemSel, { timeout: 5_000 })
+  expect(await ctx.panel.click(deleteItemSel), 'context-menu Delete click').toBe(true)
+
+  // Simple BaseAlert confirm — no `messageDetails`, danger style.
+  await ctx.panel.waitForVisible(byTestId(TID.baseAlertAction), { timeout: 10_000 })
+  expect(await ctx.panel.click(byTestId(TID.baseAlertAction)), 'delete confirm clicked').toBe(true)
+
+  interface InstallationLite { id: string }
+  await expect
+    .poll(async () => {
+      const installs = await ctx.panel.evaluate<InstallationLite[]>(
+        `window.api.getInstallations()`,
+      )
+      return installs.some((i) => i.id === installId)
+    }, { timeout: 300_000, intervals: [1_000, 2_000] })
+    .toBe(false)
 }
