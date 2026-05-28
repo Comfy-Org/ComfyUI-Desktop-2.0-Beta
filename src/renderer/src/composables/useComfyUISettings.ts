@@ -16,6 +16,7 @@ import {
   type Installation,
   type ShowProgressOpts,
 } from '../types/ipc'
+import { shareLatestSnapshot } from '../lib/snapshots'
 import { IN_PLACE_RELAUNCH, augmentActionWithStopWarning, stopAndWaitForExit } from '../lib/stopWarning'
 import { sleepRemainder } from '../lib/uiTiming'
 import type { SectionTab } from '../lib/pickerTabs'
@@ -507,6 +508,24 @@ export function useComfyUISettings(opts: UseComfyUISettingsOpts): UseComfyUISett
   async function runAction(action: ActionDef): Promise<void> {
     const inst = toValue(opts.installation)
     if (!inst) return
+
+    // Share — export the latest snapshot via the OS save dialog. It's a
+    // renderer-side IPC (export + native dialog), not a source action, so
+    // intercept it before the source-action dispatch chain below. A cancel
+    // is a silent no-op; only the genuine failures get an alert.
+    if (action.id === 'share') {
+      const result = await shareLatestSnapshot(inst.id)
+      if (!result.ok) {
+        await dialogs.alert({
+          title: action.label,
+          message:
+            result.reason === 'none'
+              ? t('snapshots.noSnapshotsToShare', 'There are no snapshots to share yet.')
+              : result.message ?? t('snapshots.shareFailed', 'Could not share the snapshot.'),
+        })
+      }
+      return
+    }
 
     const telemetryContext = { action_id: action.id }
 

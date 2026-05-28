@@ -30,7 +30,7 @@ const messages = {
       filterCloud: 'Cloud',
       filterRemote: 'Remote',
       moreActions: 'More actions',
-      manageInstall: 'Manage…',
+      manageInstall: 'Manage',
       searchPlaceholder: 'Search for and open an instance',
       noMatches: 'No instances match',
     },

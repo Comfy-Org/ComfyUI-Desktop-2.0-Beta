@@ -22,6 +22,33 @@ export function setCachedSnapshotList(installationId: string, data: SnapshotList
   _snapshotListCache.set(installationId, data)
 }
 
+/**
+ * "Share" a snapshot = export the install's latest (newest) snapshot via the
+ * OS save dialog. This is the same operation as the per-row Export button,
+ * promoted to a top-level install action so it's reachable from the dashboard
+ * context menu and the IPP "More" menu without opening the Snapshots tab.
+ *
+ * Snapshots come back newest-first, so `[0]` is the current state. Returns a
+ * discriminated result so each caller can surface the right feedback in its
+ * own dialog system:
+ *  - `none`  — the install has no snapshots yet (menu items are gated to
+ *              installed local installs, but handle it defensively here too).
+ *  - `error` — the export failed with a message (e.g. a write error).
+ * A user cancelling the save dialog returns `{ ok: false }` with no message
+ * from the IPC, which we treat as a successful no-op (nothing to report).
+ */
+export async function shareLatestSnapshot(
+  installationId: string
+): Promise<{ ok: true } | { ok: false; reason: 'none' | 'error'; message?: string }> {
+  const list = await window.api.getSnapshots(installationId)
+  const latest = list?.snapshots?.[0]?.filename
+  if (!latest) return { ok: false, reason: 'none' }
+  const result = await window.api.exportSnapshot(installationId, latest)
+  if (result.ok) return { ok: true }
+  if (result.message) return { ok: false, reason: 'error', message: result.message }
+  return { ok: true }
+}
+
 /** Localised trigger label (requires the `t` function from `useI18n`). */
 export function triggerLabel(trigger: string, t: (key: string) => string): string {
   switch (trigger) {

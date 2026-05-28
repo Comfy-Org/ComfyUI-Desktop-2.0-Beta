@@ -228,6 +228,7 @@ export function getDetailSections(installation: InstallationRecord): Record<stri
             field: 'name',
           } },
         openFolderAction(installation.installPath),
+        { id: 'share', label: t('actions.share'), style: 'default', enabled: installed },
         untrackAction(),
         deleteAction(installation),
       ],

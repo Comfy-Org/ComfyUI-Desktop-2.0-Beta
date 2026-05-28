@@ -47,13 +47,13 @@
     "updatePill": "Update",
     "migratePill": "Migrate",
     "openInstall": "Open",
-    "manageInstall": "Manage…",
+    "manageInstall": "Manage",
     "moreActions": "More actions",
-    "menuUpdate": "Update…",
-    "menuMigrate": "Migrate to Standalone…",
-    "menuRestoreSnapshot": "Restore Snapshot…",
+    "menuUpdate": "Update",
+    "menuMigrate": "Migrate to Standalone",
+    "menuRestoreSnapshot": "Restore Snapshot",
     "menuRevealInFolder": "Open Folder",
-    "menuDelete": "Uninstall…"
+    "menuDelete": "Uninstall"
   },
 
   "titleBar": {
@@ -555,7 +555,8 @@
     "deleteConfirmMessage": "This will permanently uninstall ComfyUI and delete all its files. This cannot be undone.",
     "untrack": "Forget",
     "untrackConfirmTitle": "Forget Install",
-    "untrackConfirmMessage": "This will remove the install from the app. The files will not be deleted."
+    "untrackConfirmMessage": "This will remove the install from the app. The files will not be deleted.",
+    "share": "Share"
   },
 
   "migrate": {
@@ -799,6 +800,8 @@
     "createLabel": "Create Snapshot",
     "changesInSnapshot": "What changed in this snapshot",
     "ifYouRestore": "What restoring this would change",
+    "noSnapshotsToShare": "There are no snapshots to share yet.",
+    "shareFailed": "Could not share the snapshot.",
     "current": "Current",
     "triggerBoot": "Boot",
     "triggerRestart": "Manager",

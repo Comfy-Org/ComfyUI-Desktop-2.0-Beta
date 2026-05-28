@@ -32,6 +32,8 @@ const apiMock = {
   runAction: vi.fn().mockResolvedValue({ ok: true }),
   getDetailSections: vi.fn().mockResolvedValue([]),
   onErrorDetail: vi.fn(() => () => {}),
+  getSnapshots: vi.fn().mockResolvedValue({ snapshots: [] }),
+  exportSnapshot: vi.fn().mockResolvedValue({ ok: true }),
 }
 vi.stubGlobal('window', {
   ...window,
@@ -41,12 +43,12 @@ vi.stubGlobal('window', {
 const messages = {
   en: {
     chooser: {
-      manageInstall: 'Manage…',
-      menuUpdate: 'Update…',
-      menuMigrate: 'Migrate to Standalone…',
-      menuRestoreSnapshot: 'Restore Snapshot…',
+      manageInstall: 'Manage',
+      menuUpdate: 'Update',
+      menuMigrate: 'Migrate to Standalone',
+      menuRestoreSnapshot: 'Restore Snapshot',
       menuRevealInFolder: 'Open Folder',
-      menuDelete: 'Delete…',
+      menuDelete: 'Uninstall',
     },
     actions: {
       copyInstallation: 'Copy Install',
@@ -58,6 +60,11 @@ const messages = {
       deleteConfirmTitle: 'Delete Install',
       deleteConfirmMessage:
         'This will permanently delete the install and all its files. This cannot be undone.',
+      share: 'Share',
+    },
+    snapshots: {
+      noSnapshotsToShare: 'There are no snapshots to share yet.',
+      shareFailed: 'Could not share the snapshot.',
     },
     progress: { working: 'Working…' },
     running: { dismiss: 'Dismiss' },
@@ -367,5 +374,66 @@ describe('useInstallContextMenu — untrack confirm-then-remove', () => {
     await menu.triggerAction('untrack', inst)
 
     expect(apiMock.runAction).not.toHaveBeenCalled()
+  })
+})
+
+describe('useInstallContextMenu — share (export latest snapshot)', () => {
+  beforeEach(() => {
+    apiMock.getSnapshots.mockReset()
+    apiMock.exportSnapshot.mockReset()
+    modalMock.alert.mockReset()
+  })
+
+  it('shows the Share item for an installed local install', () => {
+    const { menu } = mountHarness(makeInstall({ sourceCategory: 'local' }))
+    expect(findItem(menu.ctxMenuItems.value, 'share')).toBeTruthy()
+  })
+
+  it('hides the Share item for cloud installs (snapshots are local-only)', () => {
+    const { menu } = mountHarness(makeInstall({ sourceCategory: 'cloud' }))
+    expect(findItem(menu.ctxMenuItems.value, 'share')).toBeUndefined()
+  })
+
+  it('exports the newest snapshot and shows no alert on success', async () => {
+    apiMock.getSnapshots.mockResolvedValue({
+      snapshots: [{ filename: 'snap-newest.json' }, { filename: 'snap-older.json' }],
+    })
+    apiMock.exportSnapshot.mockResolvedValue({ ok: true })
+    const inst = makeInstall()
+    const { menu } = mountHarnessWithManage(() => {})
+
+    await menu.triggerAction('share', inst)
+
+    expect(apiMock.exportSnapshot).toHaveBeenCalledWith(inst.id, 'snap-newest.json')
+    expect(modalMock.alert).not.toHaveBeenCalled()
+  })
+
+  it('alerts and skips export when there are no snapshots', async () => {
+    apiMock.getSnapshots.mockResolvedValue({ snapshots: [] })
+    const inst = makeInstall()
+    const { menu } = mountHarnessWithManage(() => {})
+
+    await menu.triggerAction('share', inst)
+
+    expect(apiMock.exportSnapshot).not.toHaveBeenCalled()
+    expect(modalMock.alert).toHaveBeenCalledTimes(1)
+    expect(modalMock.alert.mock.calls[0]![0].message).toBe('There are no snapshots to share yet.')
+  })
+
+  it('surfaces a real export error but stays silent on a dialog cancel', async () => {
+    apiMock.getSnapshots.mockResolvedValue({ snapshots: [{ filename: 'snap.json' }] })
+    const inst = makeInstall()
+    const { menu } = mountHarnessWithManage(() => {})
+
+    // Cancel — export IPC returns { ok: false } with no message.
+    apiMock.exportSnapshot.mockResolvedValueOnce({ ok: false })
+    await menu.triggerAction('share', inst)
+    expect(modalMock.alert).not.toHaveBeenCalled()
+
+    // Real failure — a message is present, so it surfaces.
+    apiMock.exportSnapshot.mockResolvedValueOnce({ ok: false, message: 'Disk full' })
+    await menu.triggerAction('share', inst)
+    expect(modalMock.alert).toHaveBeenCalledTimes(1)
+    expect(modalMock.alert.mock.calls[0]![0].message).toBe('Disk full')
   })
 })
