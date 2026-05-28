@@ -479,7 +479,7 @@ const primaryActionLabel = computed(() => {
   }
   return isInstallRunning.value
     ? t('instancePicker.restart', 'Restart')
-    : t('instancePicker.open', 'Open')
+    : t('instancePicker.open', 'Start')
 })
 
 function handlePrimaryAction(): void {

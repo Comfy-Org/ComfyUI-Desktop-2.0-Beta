@@ -203,7 +203,7 @@ export const en = {
     instances: 'Instances',
     newInstance: 'New Instance',
     latestOnGithub: 'Latest on GitHub',
-    open: 'Open',
+    open: 'Start',
     restart: 'Restart',
     restartConfirmTitle: 'Restart this instance?',
     restartConfirmDetail:

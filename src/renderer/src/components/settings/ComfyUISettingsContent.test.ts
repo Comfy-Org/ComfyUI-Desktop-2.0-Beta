@@ -35,7 +35,7 @@ const messages = {
       more: 'More',
     },
     instancePicker: {
-      open: 'Open',
+      open: 'Start',
       restart: 'Restart',
       progressUpdating: 'Updating…',
       progressDowngrading: 'Downgrading…',
