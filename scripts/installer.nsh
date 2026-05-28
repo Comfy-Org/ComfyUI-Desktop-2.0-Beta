@@ -17,10 +17,14 @@
 ; so suppress just that one. $(^Name) resolves to the product name at runtime.
 !macro customHeader
   !pragma warning disable 6030
-  LangString perUserInstallExists 1033 "$(^Name) is already installed for your account."
-  LangString perUserInstall 1033 "$(^Name) is installed for your account."
-  LangString perMachineInstallExists 1033 "$(^Name) is already installed for all users."
-  LangString perMachineInstall 1033 "$(^Name) is installed for all users."
+  ; The install-mode page composes these as "<message>(<install path>)\r\n
+  ; <reinstallUpgrade>" (electron-builder's multiUserUi.nsh). The trailing
+  ; $\r$\n drops the (path) onto its own line instead of jamming it after the
+  ; sentence.
+  LangString perUserInstallExists 1033 "$(^Name) is already installed for your account.$\r$\n"
+  LangString perUserInstall 1033 "$(^Name) is installed for your account.$\r$\n"
+  LangString perMachineInstallExists 1033 "$(^Name) is already installed for all users.$\r$\n"
+  LangString perMachineInstall 1033 "$(^Name) is installed for all users.$\r$\n"
   LangString reinstallUpgrade 1033 "Setup will update your existing installation."
   !pragma warning enable 6030
 !macroend
