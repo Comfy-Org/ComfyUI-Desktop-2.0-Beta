@@ -77,7 +77,7 @@ import {
 } from './host/createHostWindow'
 import { attachInstall, setAttachFactories } from './host/attach'
 import { IN_PLACE_RELAUNCH, REQUIRES_STOPPED } from '../types/ipc'
-import { handleDelegateToSource, handleLaunch } from './lib/ipc/sessionActions'
+import { dispatchSessionAction, handleLaunch } from './lib/ipc/sessionActions'
 import { applyAttachHostPreview, clearAttachHostPreview } from './host/attachHostPreview'
 import {
   _detachInstallImpl,
@@ -1217,7 +1217,7 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
 
           let result: PickerOperationStatus
           try {
-            const actionResult = await handleDelegateToSource(
+            const actionResult = await dispatchSessionAction(
               { event: stubEvent, installationId, inst, actionData },
               actionId,
             )
