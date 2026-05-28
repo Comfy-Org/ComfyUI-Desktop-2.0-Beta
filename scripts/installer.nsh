@@ -34,9 +34,17 @@
   SetDetailsPrint none
 
   File /oname=$PLUGINSDIR\vc_redist.x64.exe "${BUILD_RESOURCES_DIR}\vc_redist.x64.exe"
+  # consent.exe inherits foreground state from the spawning process. Bring
+  # the installer window to front first so Windows is willing to show the
+  # UAC prompt in the foreground rather than letting it land in the taskbar.
+  BringToFront
   # /quiet keeps the redistributable's own UI hidden so the user only sees
   # our installer's status text and progress bar.
   ExecWait '"$PLUGINSDIR\vc_redist.x64.exe" /install /quiet /norestart' $0
+  # The elevated child closed without a visible window, so focus may now
+  # belong to whatever was behind us. Reclaim it for the remainder of the
+  # install flow.
+  BringToFront
 
   ${If} $0 = 0
   ${OrIf} $0 = 1638
