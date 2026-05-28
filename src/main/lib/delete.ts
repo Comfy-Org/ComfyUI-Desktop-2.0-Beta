@@ -18,13 +18,20 @@ function isTransientDeleteError(err: NodeJS.ErrnoException | null): boolean {
 function retryFsOp(
   op: (cb: (err: NodeJS.ErrnoException | null) => void) => void,
   cb: (err: NodeJS.ErrnoException | null) => void,
+  signal?: AbortSignal,
   attempt = 0,
 ): void {
   op((err) => {
     if (!err || attempt >= DELETE_RETRY_DELAYS_MS.length || !isTransientDeleteError(err)) {
       return cb(err)
     }
-    setTimeout(() => retryFsOp(op, cb, attempt + 1), DELETE_RETRY_DELAYS_MS[attempt])
+    // Honour cancel between retries — a single hot file could otherwise
+    // keep the retry loop alive for ~1.55s after the user cancels.
+    if (signal?.aborted) return cb(new Error('Delete cancelled'))
+    setTimeout(() => {
+      if (signal?.aborted) return cb(new Error('Delete cancelled'))
+      retryFsOp(op, cb, signal, attempt + 1)
+    }, DELETE_RETRY_DELAYS_MS[attempt])
   })
 }
 
@@ -158,7 +165,7 @@ export async function deleteDir(
                 } else {
                   next()
                 }
-              })
+              }, signal)
             })
           } else {
             retryFsOp((cb) => fs.unlink(fullPath, cb), (e) => {
@@ -172,7 +179,7 @@ export async function deleteDir(
               } else {
                 next()
               }
-            })
+            }, signal)
           }
         }
         next()
@@ -184,7 +191,7 @@ export async function deleteDir(
       retryFsOp((cb) => fs.rmdir(dir, cb), (e) => {
         if (e) return reject(e)
         resolve()
-      })
+      }, signal)
     })
   })
 }

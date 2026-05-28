@@ -44,7 +44,7 @@ import { titleBarOverlayForTheme } from './lib/titleBarOverlay'
 import {
   sourceMap, _broadcastToRenderer, _runningSessions,
   _operationAborts, _activeOperationStatus, stopRunning,
-  resolveTheme,
+  resolveTheme, MSG_CANCELLED,
   type PickerOperationStatus,
 } from './lib/ipc/shared'
 import { enrichInstallationsForRenderer } from './lib/ipc/registerInstallationHandlers'
@@ -1228,17 +1228,17 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
               await handleLaunch({ event: stubEvent, installationId, inst: freshInst, actionData: undefined })
             }
             // `actionResult.cancelled === true` is the user-cancel
-            // signal from handlers that swallow the abort internally
-            // (copy / copy-update / release-update). Map it to the
-            // 'Cancelled.' error string the renderer's inline-picker
-            // progress card matches on so the user sees a "Cancelled"
-            // banner instead of a misleading success state.
+            // signal from handlers that route through
+            // `withAbortableSessionAction`. Map it to `MSG_CANCELLED`
+            // (the single string the renderer's inline-picker progress
+            // card matches on) so the user sees a "Cancelled" banner
+            // instead of a misleading success state.
             const wasCancelled = actionResult.cancelled === true
             result = {
               status: '', percent: wasCancelled ? -1 : 100, done: true,
               ok: !wasCancelled && actionResult.ok !== false,
               error: wasCancelled
-                ? 'Cancelled.'
+                ? MSG_CANCELLED
                 : (actionResult.ok === false ? (actionResult.message ?? 'Failed.') : null),
               cancellable, title, actionId, actionData,
             }
@@ -1246,7 +1246,7 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
             const abort = _operationAborts.get(installationId)
             result = {
               status: '', percent: -1, done: true, ok: false,
-              error: abort?.signal.aborted ? 'Cancelled.' : ((err as Error).message ?? 'Failed.'),
+              error: abort?.signal.aborted ? MSG_CANCELLED : ((err as Error).message ?? 'Failed.'),
               cancellable, title, actionId, actionData,
             }
           }

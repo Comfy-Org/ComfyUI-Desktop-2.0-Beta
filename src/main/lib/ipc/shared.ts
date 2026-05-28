@@ -92,6 +92,11 @@ export type {
 
 // ── Constants ──
 
+// Re-export the cross-process cancel string so main-side handlers can
+// pull it from this barrel alongside the other constants. See
+// `src/shared/operationStatus.ts` for the canonical definition.
+export { MSG_CANCELLED } from '../../../shared/operationStatus'
+
 export const MARKER_FILE = '.comfyui-desktop-2'
 export const COMFYUI_REPO = 'Comfy-Org/ComfyUI'
 export const UPDATE_CHECK_INTERVAL = 10 * 60 * 1000

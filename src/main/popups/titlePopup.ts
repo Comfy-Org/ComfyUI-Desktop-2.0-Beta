@@ -2491,11 +2491,15 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
     },
   )
 
-  // Picker → cancel an in-flight background op. Fires the same
+  // Picker → cancel an in-flight background op. Fires the
   // AbortController the handler stored in `_operationAborts`; the
-  // handler's own catch path is what clears the map entry and updates
-  // `_activeOperationStatus` to the cancelled state. We delete here
-  // anyway so a second click can't double-abort a stale controller.
+  // handler's own finally path is what clears the map entry and
+  // `pickerRunBackgroundOp`'s outer catch maps the abort to
+  // `MSG_CANCELLED`. `abort()` is idempotent against a second click,
+  // so we do NOT delete the map entry here — that would race the
+  // handler's catch, which still needs to see the controller to
+  // recognise the cancel and surface 'Cancelled.' instead of a raw
+  // error string.
   ipcMain.on(
     'comfy-titlepopup:cancel-background-op',
     (event, payload: { installationId?: unknown }) => {
@@ -2504,10 +2508,7 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
       const installationId = payload?.installationId
       if (typeof installationId !== 'string' || installationId.length === 0) return
       recordIpcInvocation('comfy-titlepopup:cancel-background-op', { installationId })
-      const abort = _operationAborts.get(installationId)
-      if (!abort) return
-      abort.abort()
-      _operationAborts.delete(installationId)
+      _operationAborts.get(installationId)?.abort()
     },
   )
 
