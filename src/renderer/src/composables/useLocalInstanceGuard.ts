@@ -67,11 +67,15 @@ export function useLocalInstanceGuard() {
     // choose to revisit. The close call is fire-and-forget — its
     // teardown can't gate the launch because a concurrent OS-X close
     // handler with a pending user prompt could otherwise block it.
+    // The `.catch` keeps an IPC reject (e.g. context-bridge disconnect)
+    // from surfacing as an unhandled promise rejection in the renderer.
     if (choice === 'primary') {
       await Promise.all(
         runningLocal.map(async (r) => {
           await window.api.stopComfyUI(r.id)
-          void window.api.closeComfyWindow(r.id, { skipConfirm: true })
+          window.api.closeComfyWindow(r.id, { skipConfirm: true }).catch((err) => {
+            console.warn('useLocalInstanceGuard: closeComfyWindow failed', err)
+          })
         }),
       )
       return true

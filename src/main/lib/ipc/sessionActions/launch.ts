@@ -36,6 +36,24 @@ const DESKTOP_FEATURE_FLAGS: Record<string, string> = {
   show_signin_button: 'true',
 }
 
+/**
+ * Classify a child-process exit as a crash for the launcher's session
+ * lifecycle. Node's `child_process` `exit` event hands back
+ * `(code: number | null, signal: NodeJS.Signals | null)`:
+ *  - Clean exit  → `code === 0, signal === null` (not a crash).
+ *  - Non-zero    → `code !== 0, signal === null` (crash).
+ *  - POSIX kill  → `code === null, signal !== null` (crash — `null !== 0`
+ *                  satisfies the first clause, but the explicit
+ *                  `signal !== null` arm makes the intent legible).
+ *  - Windows TerminateProcess (e.g. Task Manager force-kill) reports a
+ *    numeric code with `signal === null`, falling into the non-zero
+ *    branch — surfaced as a crash because the user didn't go through
+ *    our Stop path.
+ */
+export function isCrashedExit(code: number | null, signal: NodeJS.Signals | null): boolean {
+  return code !== 0 || signal !== null
+}
+
 async function openLogStream(installPath: string): Promise<WriteStream> {
   const logDir = getLogDir(installPath)
   fs.mkdirSync(logDir, { recursive: true })
@@ -214,7 +232,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
 
     proc.on('exit', (code, signal) => {
       logStream.end()
-      const crashed = _runningSessions.has(installationId) && (code !== 0 || signal !== null)
+      const crashed = _runningSessions.has(installationId) && isCrashedExit(code, signal)
       const lastStderr = scrubStderr(lastNLines(stderrBuf, 100))
       execTap.flushSummary()
       _removeSession(installationId)

@@ -187,6 +187,19 @@ describe('ComfyLifecycleView', () => {
     expect(wrapper.text()).not.toContain('exit code')
   })
 
+  it('falls back to the generic crashed copy when neither exit code nor signal is recorded', async () => {
+    const wrapper = mountView()
+    const sessionStore = useSessionStore()
+    sessionStore.errorInstances.set('inst-1', {
+      installationName: 'My Local Install',
+    })
+    await flushPromises()
+    expect(wrapper.text()).toContain('The ComfyUI process exited.')
+    // Generic fallback must not invent a code or signal.
+    expect(wrapper.text()).not.toContain('exit code')
+    expect(wrapper.text()).not.toContain('terminated by')
+  })
+
   it('renders both signal and exit code in the crashed message when both are present', async () => {
     const wrapper = mountView()
     const sessionStore = useSessionStore()

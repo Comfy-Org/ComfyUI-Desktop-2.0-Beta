@@ -315,7 +315,12 @@ function getLogText(): string {
    their action buttons in via `<slot name="actions" />`. Without it,
    Vue 3 scoped styles only reach the local logs-toggle button and the
    slotted buttons end up un-styled — icons crashing into their labels
-   was the visible symptom. Keep the two selector groups in sync. */
+   was the visible symptom. Keep the two selector groups in sync.
+   Scope is intentionally one level deep: only the slotted button
+   itself is styled, not its children. Consumers needing inner-element
+   styling (custom icon sizing, etc.) own that in their own scope —
+   `:slotted()` would otherwise have to spell every descendant out and
+   the surface would silently constrain the consumer's markup. */
 .brand-progress__footer-btn,
 :slotted(.brand-progress__footer-btn) {
   min-width: auto;
