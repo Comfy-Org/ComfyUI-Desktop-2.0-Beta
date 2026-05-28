@@ -655,9 +655,14 @@ ipcMain.on('comfy-window:click-app-update-pill', (event) => {
  *
  * Forwards `panel-trigger-overlay { kind: 'install-update' }` to the panel
  * renderer; `useDeepLinkRouter` handles it by opening the instance picker
- * in expanded mode on the Update tab. `sendToPanelDeferred` waits for
- * `did-finish-load` so the IPC isn't dropped if the panelView was just
- * lazily constructed.
+ * in expanded mode on the Update tab.
+ *
+ * When the user is on the ComfyUI body the panelView is lazily not-yet-
+ * constructed, so we ensure it for the current body mode (without flipping
+ * the visible body — the picker is a separate popup) and let
+ * `sendToPanelDeferred` hold the IPC until `did-finish-load`. Mirrors the
+ * Send Feedback handler; without this the click was a silent no-op whenever
+ * the panel hadn't been built yet.
  */
 ipcMain.on('comfy-window:click-install-update-pill', (event) => {
   const found = findEntryByTitleBarSender(event.sender)
@@ -665,8 +670,8 @@ ipcMain.on('comfy-window:click-install-update-pill', (event) => {
   const { entry } = found
   const installationId = entry.installationId
   if (!installationId) return
-  const panelView = entry.panelView
-  if (!panelView) return
+  const panelView =
+    entry.panelView ?? ensurePanelView(entry.windowKey, entry, computeBodyMode(entry))
   sendToPanelDeferred(panelView, 'panel-trigger-overlay', {
     kind: 'install-update',
     installationId,
