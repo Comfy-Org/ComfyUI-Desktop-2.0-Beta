@@ -14,6 +14,7 @@ import {
   setLastFocusedInstallationId,
 } from './registry'
 import type { ComfyWindowEntry } from './registry'
+import { nextZoomLevel } from './zoom'
 
 const APP_VERSION = getAppVersion()
 
@@ -306,6 +307,14 @@ export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts):
     if (!isLocal) {
       comfyContents.executeJavaScript(COMFY_CLOUD_PATCHES_JS).catch(() => {})
     }
+    // Reconcile zoom: Electron re-applies the persisted per-partition
+    // zoom level on navigation, which can leave the view stranded at a
+    // stuck (zoomed-out) level across reload / restart. Re-assert the
+    // desktop-tracked level so it stays the single source of truth and
+    // the user can always recover to 1x. See #698.
+    if (!comfyContents.isDestroyed() && comfyContents.getZoomLevel() !== zoomLevel) {
+      comfyContents.setZoomLevel(zoomLevel)
+    }
   }
   comfyContents.on('dom-ready', onDomReady)
 
@@ -320,6 +329,20 @@ export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts):
     if (fx.relaunchStates.has(id)) return
     comfyContents.stop()
     comfyContents.loadURL(currentComfyUrl())
+  }
+  // Desktop-tracked zoom level — the single source of truth for the
+  // comfy view's zoom, seeded from whatever Electron restored for this
+  // session partition. Electron persists zoom per `persist:` partition,
+  // so a stuck (zoomed-out) level survives restart; `getZoomLevel()` can
+  // also drift out of sync with the visually-applied level after a
+  // navigation. Tracking the level here (and re-applying it on
+  // `dom-ready`) keeps zoom-in / zoom-out symmetric and always
+  // recoverable to 1x. See #698.
+  let zoomLevel = comfyContents.isDestroyed() ? 0 : comfyContents.getZoomLevel()
+  const applyZoomLevel = (next: number): void => {
+    if (comfyContents.isDestroyed()) return
+    zoomLevel = next
+    comfyContents.setZoomLevel(next)
   }
   const onBeforeInputEvent = (e: Electron.Event, input: Electron.Input): void => {
     if (input.type !== 'keyDown') return
@@ -351,8 +374,8 @@ export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts):
       e.preventDefault()
       if (comfyContents.isDestroyed()) return
       if (input.key === '0') {
-        const previousLevel = comfyContents.getZoomLevel()
-        comfyContents.setZoomLevel(0)
+        const previousLevel = zoomLevel
+        applyZoomLevel(0)
         // Only emit when this was a real reset (skip no-op presses at 1x)
         // so the event count tracks actual recovery actions, not key-spam.
         if (previousLevel !== 0) {
@@ -366,8 +389,7 @@ export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts):
         }
         return
       }
-      const step = input.key === '-' ? -0.5 : 0.5
-      comfyContents.setZoomLevel(comfyContents.getZoomLevel() + step)
+      applyZoomLevel(nextZoomLevel(input.key, zoomLevel))
     }
   }
   comfyContents.on('before-input-event', onBeforeInputEvent)
