@@ -1127,7 +1127,8 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
     registerTitlePopupIpc({
       openChooserHostWindow,
       returnToDashboard,
-      confirmAndCloseAllHostWindows,
+      confirmAndCloseAllHostWindows: (parentWindow) =>
+        confirmAndCloseAllHostWindows(parentWindow, quitApp),
       confirmAndCloseHostWindow,
       setActivePanel,
       triggerOpenFeedback,

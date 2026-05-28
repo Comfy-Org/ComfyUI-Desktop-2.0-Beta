@@ -665,24 +665,26 @@ export function buildTitlePopupMenuItems(entry: ComfyWindowEntry): TitlePopupMen
       { kind: 'separator' },
       {
         id: 'close-all-windows',
-        label: 'Exit All Windows',
+        label: 'Quit ComfyUI',
         labelKey: 'fileMenu.exitAllWindows',
       },
     )
     return items
   }
-  // Install-host menu: trimmed to the four essentials. Desktop Settings,
+  // Install-host menu: trimmed to the essentials. Desktop Settings,
   // Return to Dashboard, and Reset Zoom are intentionally absent —
   // Settings lives in the picker's Startup Args tab, the dashboard
   // escape is the Home icon in the picker chips row, and Reset Zoom
-  // remains reachable via Ctrl/Cmd + 0.
+  // remains reachable via Ctrl/Cmd + 0. "Quit ComfyUI" stays available
+  // from every window; only "Close Window" is dashboard-exclusive (the
+  // dashboard has nothing to close to).
   items.push(
     { id: 'feedback', label: 'Send Beta Feedback', labelKey: 'fileMenu.sendFeedback' },
     { kind: 'separator' },
-    { id: 'exit-window', label: 'Exit Window', labelKey: 'fileMenu.exitWindow' },
+    { id: 'exit-window', label: 'Close Window', labelKey: 'fileMenu.exitWindow' },
     {
       id: 'close-all-windows',
-      label: 'Exit All Windows',
+      label: 'Quit ComfyUI',
       labelKey: 'fileMenu.exitAllWindows',
     },
   )

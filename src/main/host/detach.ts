@@ -184,73 +184,81 @@ export async function returnToDashboard(parentEntryId: number): Promise<void> {
  */
 export async function confirmAndCloseAllHostWindows(
   parentWindow: BrowserWindow | null,
+  performQuit: () => void,
 ): Promise<void> {
   const entries = Array.from(comfyWindows.values()).filter((e) => !e.window.isDestroyed())
-  if (entries.length < 1) {
-    closeAllHostWindows()
+  // "Instances" = install-backed host windows. The dashboard (chooser
+  // host) is never listed and never blocks the quit — quitting from the
+  // dashboard with nothing else running should just exit.
+  const instanceWindows = entries.filter((e) => isInstallHost(e))
+  if (instanceWindows.length === 0) {
+    performQuit()
     return
   }
-  const titles = entries.map((e) => e.window.getTitle() || 'Untitled window')
+  // One clean line per open instance — the title-bar pill name, not the
+  // verbose OS window title ("… — *Unsaved Workflow — Desktop 2.0 v…").
+  const titles = instanceWindows.map((e) => e.titleBarText || 'Untitled instance')
   const details: SystemModalDetailGroup[] = [
-    { label: 'Open windows', items: titles },
+    { label: 'Open instances', items: titles },
   ]
+  // Surface the *extra* things a full quit tears down — in-progress
+  // operations and active downloads. Running ComfyUI sessions are
+  // deliberately NOT re-listed: a running instance already appears in
+  // "Open instances", and listing it twice made one instance look like
+  // two.
   if (ipc.hasActiveOperations()) {
     try {
       const items = await ipc.getActiveDetails()
-      const sessions = items.filter((i) => i.type === 'session').map((i) => i.name)
       const operations = items.filter((i) => i.type === 'operation').map((i) => i.name)
       const downloads = items.filter((i) => i.type === 'download').map((i) => i.name)
-      if (sessions.length > 0) details.push({ label: 'Running ComfyUI', items: sessions })
       if (operations.length > 0) details.push({ label: 'In-progress operations', items: operations })
       if (downloads.length > 0) details.push({ label: 'Active downloads', items: downloads })
     } catch {
       // If active-detail collection ever throws, fall back to just the
-      // window list — the user still sees what's about to close.
+      // instance list — the user still sees what's about to close.
     }
   }
   // Pick the parent for the overlay. Prefer the caller's hint (the
-  // window the user clicked Close All from); fall back to any live
-  // host so we don't drop the confirm entirely when the popup's
-  // parent has gone away mid-flight.
+  // window the user clicked Quit from); fall back to any live host so we
+  // don't drop the confirm entirely when the popup's parent has gone
+  // away mid-flight.
   const overlayParentEntry = parentWindow && !parentWindow.isDestroyed()
     ? entries.find((e) => e.window === parentWindow)
     : entries[0]
   if (!overlayParentEntry) {
-    closeAllHostWindows()
+    performQuit()
     return
   }
-  const isSingle = entries.length === 1
+  const count = instanceWindows.length
   const confirmed = await openSystemModalAsync({
     parent: overlayParentEntry.window,
     spec: {
-      title: 'Exit All Windows',
-      message: isSingle
-        ? 'Exit the open window?'
-        : `Exit ${entries.length} open windows?`,
+      title: 'Quit ComfyUI',
+      message: count === 1
+        ? 'Quit ComfyUI? This will close the running instance.'
+        : `Quit ComfyUI? This will close ${count} running instances.`,
       details,
-      confirmLabel: isSingle ? 'Exit' : 'Exit All',
+      confirmLabel: 'Quit',
       cancelLabel: 'Cancel',
       confirmStyle: 'danger',
       theme: overlayParentEntry.lastTheme,
     },
   })
-  if (confirmed) {
-    // The global confirm already lists in-progress ops / sessions /
-    // downloads, so the per-window tier-aware prompt would be
-    // redundant after the user confirmed the bulk close. Pre-clear
-    // every entry so each window's `close` handler skips its own
-    // consult and tears down immediately.
-    for (const entry of entries) preClearedClose.add(entry.window)
-    closeAllHostWindows()
-  }
+  if (confirmed) performQuit()
 }
 
 /**
- * Confirm + close a single host window. Mirrors
- * `confirmAndCloseAllHostWindows` for the install-host menu's
- * `Exit Window` entry — same `openSystemModalAsync` primitive, same
- * pre-cleared close path so the per-window close handler doesn't
- * double-prompt after the user already confirmed.
+ * Confirm + close a single install-backed host window. Bound to the
+ * instance menu's `Close Window` entry. Closing always confirms, because
+ * it *stops* the running ComfyUI instance (not just hides the window).
+ * Model downloads are owned by the desktop app, not the instance, so
+ * they keep running after a close — hence no active-download list here
+ * (that warning belongs to `Quit ComfyUI`).
+ *
+ * If this is the only live host window, closing it would quit the app,
+ * so instead we stop the instance and flip the window in place to the
+ * dashboard (`detachInstall`). With other windows open, we close this
+ * one outright; its `close` handler runs the per-window teardown.
  */
 export async function confirmAndCloseHostWindow(parentWindow: BrowserWindow): Promise<void> {
   if (parentWindow.isDestroyed()) return
@@ -259,33 +267,29 @@ export async function confirmAndCloseHostWindow(parentWindow: BrowserWindow): Pr
     parentWindow.close()
     return
   }
-  const details: SystemModalDetailGroup[] = []
-  if (ipc.hasActiveOperations()) {
-    try {
-      const items = await ipc.getActiveDetails()
-      const sessions = items.filter((i) => i.type === 'session').map((i) => i.name)
-      const operations = items.filter((i) => i.type === 'operation').map((i) => i.name)
-      const downloads = items.filter((i) => i.type === 'download').map((i) => i.name)
-      if (sessions.length > 0) details.push({ label: 'Running ComfyUI', items: sessions })
-      if (operations.length > 0) details.push({ label: 'In-progress operations', items: operations })
-      if (downloads.length > 0) details.push({ label: 'Active downloads', items: downloads })
-    } catch {
-      // Active-detail collection failure shouldn't block the prompt.
-    }
-  }
+  const liveWindowCount = Array.from(comfyWindows.values()).filter(
+    (e) => !e.window.isDestroyed(),
+  ).length
+  const isLastWindow = liveWindowCount <= 1
   const confirmed = await openSystemModalAsync({
     parent: entry.window,
     spec: {
-      title: 'Exit Window',
-      message: 'Exit this window?',
-      details: details.length > 0 ? details : undefined,
-      confirmLabel: 'Exit',
+      title: 'Close Window',
+      message: isLastWindow
+        ? 'Close this window? This stops ComfyUI and returns you to the dashboard.'
+        : 'Close this window? This stops the running ComfyUI instance.',
+      confirmLabel: isLastWindow ? 'Close & Return to Dashboard' : 'Close Window',
       cancelLabel: 'Cancel',
       confirmStyle: 'danger',
       theme: entry.lastTheme,
     },
   })
-  if (confirmed) {
+  if (!confirmed) return
+  if (isLastWindow) {
+    // Stop the instance and flip this window to the dashboard rather than
+    // closing it (closing the last window would quit the app).
+    entry.detachInstall()
+  } else {
     // Skip the panel-renderer consult on the close handler — the user
     // already confirmed via this prompt.
     preClearedClose.add(entry.window)

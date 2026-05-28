@@ -125,28 +125,32 @@ describe('buildTitlePopupMenuItems', () => {
     expect(ids).not.toContain('load-snapshot')
   })
 
-  it('chooser host includes New Window, Settings, Send Feedback, and Close All Windows', () => {
-    const ids = buildTitlePopupMenuItems(makeEntry({ installationId: null }))
-      .map((i) => i.id ?? null)
+  it('chooser host includes New Window, Settings, Send Feedback, and Quit ComfyUI', () => {
+    const items = buildTitlePopupMenuItems(makeEntry({ installationId: null }))
+    const ids = items.map((i) => i.id ?? null)
     expect(ids).toContain('new-window')
     expect(ids).toContain('settings')
     expect(ids).toContain('feedback')
     expect(ids).toContain('close-all-windows')
+    // The app-wide quit lives only on the dashboard host.
+    const quit = items.find((i) => i.id === 'close-all-windows')
+    expect(quit?.label).toBe('Quit ComfyUI')
   })
 
   // Install-host menu was deliberately trimmed (spec item 1): no
   // Desktop Settings, no Return to Dashboard (replaced by the Home
   // icon in the picker, spec item 10), no Reset Zoom (Ctrl/Cmd+0
-  // shortcut still works). The remaining four are New Window, Send
-  // Beta Feedback, Exit Window, Exit All Windows.
+  // shortcut still works). "Quit ComfyUI" stays available from every
+  // window; "Close Window" is the instance-only counterpart. The four
+  // entries are New Window, Send Beta Feedback, Close Window, Quit ComfyUI.
   it('install-host menu is trimmed to four essentials in the canonical order', () => {
     const items = buildTitlePopupMenuItems(makeEntry({ installationId: 'inst-1' }))
     const ids = items.map((i) => i.id ?? null).filter((id) => id !== null)
     expect(ids).toEqual(['new-window', 'feedback', 'exit-window', 'close-all-windows'])
-    const closeAll = items.find((i) => i.id === 'close-all-windows')
-    expect(closeAll?.label).toBe('Exit All Windows')
-    const exitWindow = items.find((i) => i.id === 'exit-window')
-    expect(exitWindow?.label).toBe('Exit Window')
+    const closeWindow = items.find((i) => i.id === 'exit-window')
+    expect(closeWindow?.label).toBe('Close Window')
+    const quit = items.find((i) => i.id === 'close-all-windows')
+    expect(quit?.label).toBe('Quit ComfyUI')
   })
 
   it('install-host menu has neither Reset Zoom nor Return to Dashboard', () => {
