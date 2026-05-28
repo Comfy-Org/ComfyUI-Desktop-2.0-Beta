@@ -20,8 +20,15 @@
  *                bootstrap-python, stranding new installs on the bundled
  *                ComfyUI version.
  *
- * Uses GITHUB_TOKEN env var for authenticated downloads if set.
- * Skips platforms whose directory already exists.
+ * Downloads go through GitHub's public release CDN
+ * (https://github.com/<repo>/releases/download/<tag>/<asset>) so they
+ * require no authentication and are not subject to REST API rate limits.
+ * This is what makes the script work on todesktop's build servers, which
+ * have no GITHUB_TOKEN and would otherwise hit the 60 req/hour anonymous
+ * API quota.
+ *
+ * Skips platforms whose directory already exists (after verifying their
+ * Python binary is present).
  */
 
 import fs from 'node:fs'
@@ -67,41 +74,17 @@ function parseArgs() {
   return { tag, platform, outputDir, softFail }
 }
 
-async function fetchReleaseAssets(tag) {
-  const token = process.env.GITHUB_TOKEN
-  const headers = { Accept: 'application/vnd.github+json' }
-  if (token) headers.Authorization = `Bearer ${token}`
-
-  // Try the tags endpoint first (works for published releases)
-  const tagUrl = `https://api.github.com/repos/${REPO}/releases/tags/${tag}`
-  const tagResponse = await fetch(tagUrl, { headers })
-  if (tagResponse.ok) {
-    const release = await tagResponse.json()
-    return release.assets || []
-  }
-
-  // Fall back to listing all releases (includes drafts, requires auth)
-  const listUrl = `https://api.github.com/repos/${REPO}/releases?per_page=50`
-  const listResponse = await fetch(listUrl, { headers })
-  if (!listResponse.ok) {
-    throw new Error(`Failed to list releases: ${listResponse.status} ${listResponse.statusText}`)
-  }
-  const releases = await listResponse.json()
-  const release = releases.find((r) => r.tag_name === tag)
-  if (!release) {
-    throw new Error(`Release ${tag} not found (checked ${releases.length} releases)`)
-  }
-  return release.assets || []
+function assetUrl(tag, platform) {
+  // Public release CDN URL — no API quota, no auth needed.
+  return `https://github.com/${REPO}/releases/download/${tag}/bootstrap-python-${platform}.tar.gz`
 }
 
 async function downloadAndExtract(url, destDir) {
-  const token = process.env.GITHUB_TOKEN
-  const headers = { Accept: 'application/octet-stream' }
-  if (token) headers.Authorization = `Bearer ${token}`
-
-  const response = await fetch(url, { headers })
+  // No Authorization header: this endpoint serves a 302 to a pre-signed S3
+  // URL, and sending Bearer auth makes S3 reject the redirected request.
+  const response = await fetch(url, { headers: { Accept: 'application/octet-stream' } })
   if (!response.ok || !response.body) {
-    throw new Error(`Download failed: ${response.status} ${response.statusText}`)
+    throw new Error(`Download failed: ${response.status} ${response.statusText} (${url})`)
   }
 
   // Save to temp file first, then extract with the Node `tar` package.
@@ -152,21 +135,6 @@ async function main() {
     console.error(`  ${platform}: FAILED — ${err instanceof Error ? err.message : err}`)
   }
 
-  let assets
-  try {
-    assets = await fetchReleaseAssets(tag)
-  } catch (err) {
-    // Previously this just warned and returned 0. That meant any CI flake on
-    // the GitHub API (rate limit, 5xx, missing GITHUB_TOKEN on a private repo)
-    // produced an installer with no bootstrap-python, with no visible signal.
-    // Surface the failure now and treat every requested platform as failed.
-    const message = err instanceof Error ? err.message : String(err)
-    console.error(`Could not fetch release assets for tag "${tag}": ${message}`)
-    for (const platform of platforms) recordFailure(platform, new Error(`release fetch failed: ${message}`))
-    exitWithFailures(failures, softFail)
-    return
-  }
-
   for (const platform of platforms) {
     const destDir = path.join(outBase, platform)
 
@@ -184,18 +152,10 @@ async function main() {
       }
     }
 
-    const assetName = `bootstrap-python-${platform}.tar.gz`
-    const asset = assets.find((a) => a.name === assetName)
-    if (!asset) {
-      recordFailure(platform, new Error(`asset ${assetName} not found in release ${tag}`))
-      continue
-    }
-
-    console.log(`  ${platform}: downloading ${assetName} (${(asset.size / 1048576).toFixed(1)} MB)`)
+    const url = assetUrl(tag, platform)
+    console.log(`  ${platform}: downloading ${url}`)
     try {
-      // Use asset.url (REST API endpoint) not browser_download_url to
-      // support private repos and avoid auth-header issues with S3 redirects.
-      await downloadAndExtract(asset.url, destDir)
+      await downloadAndExtract(url, destDir)
       verifyPlatform(outBase, platform)
       console.log(`  ${platform}: OK`)
     } catch (err) {
