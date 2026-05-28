@@ -593,10 +593,20 @@ onUnmounted(() => {
   gap: 4px;
   /* Mirror the trailing cluster's measured width (set by the
      ResizeObserver in <script>) so the left + trailing grid tracks
-     stay equal-width. This keeps the centre 1fr track perfectly
-     window-centred regardless of which side has more content — the
-     install pill anchors to true window centre at every width. */
+     stay equal-width. With symmetric OS-chrome padding (macOS, where
+     the left traffic-light inset is handled below) this centres the
+     1fr track at true window centre. */
   min-width: var(--title-trailing-width, 0px);
+}
+/* Win/Linux: the native window controls reserve 140px on the RIGHT, vs the
+   12px base padding on the left. Mirroring only the trailing width centres
+   the pill in the *content box*, which the asymmetric reservation shifts
+   64px left of true window centre — this is the off-centre pill on Windows.
+   Claim the 128px delta (140px controls − 12px base padding) as extra left
+   min-width so the 1fr centre track is pushed back to true window centre.
+   Keep this value in sync with the `padding-right` above. */
+.title-bar:not(.is-mac) .title-cluster {
+  min-width: calc(var(--title-trailing-width, 0px) + 128px);
 }
 
 .title-center {
