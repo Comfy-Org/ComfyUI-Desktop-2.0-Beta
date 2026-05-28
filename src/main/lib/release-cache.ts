@@ -278,11 +278,19 @@ export async function enrichCommitsAhead(repo: string, comfyuiDir: string): Prom
     if (!entry?.commitSha || !entry.baseTag || entry.commitsAhead !== undefined) return
     if (!fs.existsSync(path.join(comfyuiDir, '.git'))) return
 
-    await fetchTags(comfyuiDir)
-    // The commit SHA may not exist locally (e.g. Stable install on a tag).
-    // Fetch it explicitly so rev-list can resolve the range.
-    await fetchCommitSha(comfyuiDir, entry.commitSha)
-    const ahead = await countCommitsAhead(comfyuiDir, entry.baseTag, entry.commitSha)
+    // Fast path: when the base tag and target commit are already in the
+    // local clone (the common case for an up-to-date install), count
+    // locally and skip the network entirely. Only fall back to the slow
+    // `git fetch --unshallow` + single-commit fetch when the objects are
+    // missing (shallow clone, or master has advanced past what we have).
+    let ahead = await countCommitsAhead(comfyuiDir, entry.baseTag, entry.commitSha)
+    if (ahead === undefined) {
+      await fetchTags(comfyuiDir)
+      // The commit SHA may not exist locally (e.g. Stable install on a tag).
+      // Fetch it explicitly so rev-list can resolve the range.
+      await fetchCommitSha(comfyuiDir, entry.commitSha)
+      ahead = await countCommitsAhead(comfyuiDir, entry.baseTag, entry.commitSha)
+    }
     if (ahead === undefined) return
 
     const current = get(repo, 'latest')

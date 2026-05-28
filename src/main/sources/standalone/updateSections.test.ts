@@ -35,7 +35,7 @@ vi.mock('../../lib/git', () => ({
 }))
 
 import * as releaseCache from '../../lib/release-cache'
-import { getDetailSections } from './updateSections'
+import { getDetailSections, getEffectiveChannel } from './updateSections'
 
 interface UpdateAction {
   id: string
@@ -145,10 +145,55 @@ describe('updateSections — update-comfyui action payload', () => {
     expect(action!.data?.isDowngrade).toBe(false)
   })
 
-  it('omits actionData.channel when target equals current channel (same-channel update)', () => {
+  it('always carries actionData.channel, even on a same-channel update', () => {
+    // The action must carry the explicit target channel so the handler never
+    // falls back to the stored `updateChannel` (which can be stale and would
+    // pass `--stable` for a checkout that is really on latest).
     const action = getUpdateAction(baseInstall({ updateChannel: 'stable' }), 'stable')
-    expect(action!.data?.channel).toBeUndefined()
-    // isDowngrade is still always present even on same-channel:
+    expect(action!.data?.channel).toBe('stable')
     expect(action!.data?.isDowngrade).toBeDefined()
+  })
+})
+
+describe('getEffectiveChannel — de-facto channel from git state', () => {
+  it('returns the stored channel when the install sits exactly on its base tag', () => {
+    expect(getEffectiveChannel(baseInstall({
+      updateChannel: 'stable',
+      comfyVersion: { commit: 'abc1234', baseTag: 'v0.3.20', commitsAhead: 0 },
+    } as Partial<InstallationRecord>))).toBe('stable')
+  })
+
+  it('reports `latest` for a stored-`stable` install whose checkout is ahead of its base tag', () => {
+    // The bug: user pulled master outside the app, leaving updateChannel
+    // stuck on `stable` while the working tree ran 59 commits ahead.
+    expect(getEffectiveChannel(baseInstall({
+      updateChannel: 'stable',
+      comfyVersion: { commit: 'abc1234', baseTag: 'v0.22.3', commitsAhead: 59 },
+    } as Partial<InstallationRecord>))).toBe('latest')
+  })
+
+  it('does not infer when commitsAhead is unknown (avoids flicker before enrichment)', () => {
+    expect(getEffectiveChannel(baseInstall({
+      updateChannel: 'stable',
+      comfyVersion: { commit: 'abc1234', baseTag: 'v0.22.3', commitsAhead: undefined },
+    } as Partial<InstallationRecord>))).toBe('stable')
+  })
+
+  it('never overrides an explicit non-stable stored channel', () => {
+    expect(getEffectiveChannel(baseInstall({
+      updateChannel: 'latest',
+      comfyVersion: { commit: 'abc1234', baseTag: 'v0.22.3', commitsAhead: 0 },
+    } as Partial<InstallationRecord>))).toBe('latest')
+  })
+})
+
+describe('updateSections — channel picker reflects de-facto channel', () => {
+  it('marks the latest card current when a stored-stable install is ahead of its base tag', () => {
+    const sections = getDetailSections(baseInstall({
+      updateChannel: 'stable',
+      comfyVersion: { commit: 'abc1234', baseTag: 'v0.22.3', commitsAhead: 59 },
+    } as Partial<InstallationRecord>)) as unknown as UpdateSection[]
+    const field = sections.find((s) => s.tab === 'update')?.fields?.find((f) => f.id === 'updateChannel')
+    expect((field as unknown as { value: string }).value).toBe('latest')
   })
 })

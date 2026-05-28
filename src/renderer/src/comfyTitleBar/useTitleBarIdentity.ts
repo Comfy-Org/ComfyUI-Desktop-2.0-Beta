@@ -42,6 +42,12 @@ interface TitleBarIdentityApi {
   installTypeMeta: ComputedRef<InstallTypeMeta>
   installTypeLabel: ComputedRef<string>
   showInstallTypeIcon: ComputedRef<boolean>
+  /** True only on the bare dashboard (install-less host, not previewing
+   *  an install) — the one place the pill leads with the Comfy brand
+   *  mark. On an actual instance the pill leads with that install's
+   *  source/type icon instead, so the Comfy logo isn't repeated on
+   *  every window. */
+  showBrandMark: ComputedRef<boolean>
   isLight: ComputedRef<boolean>
 }
 
@@ -95,6 +101,8 @@ export function useTitleBarIdentity(opts: UseTitleBarIdentityOpts): TitleBarIden
     () =>
       (!opts.isInstallLess.value || isPreviewMode.value) && sourceCategory.value !== null,
   )
+
+  const showBrandMark = computed(() => opts.isInstallLess.value && !isPreviewMode.value)
 
   /** Body luminance test — drives is-light styling (lighter hover state).
    *  Locked to `false` for now: the title bar surface is hard-coded to the
@@ -170,6 +178,7 @@ export function useTitleBarIdentity(opts: UseTitleBarIdentityOpts): TitleBarIden
     installTypeMeta,
     installTypeLabel,
     showInstallTypeIcon,
+    showBrandMark,
     isLight,
   }
 }

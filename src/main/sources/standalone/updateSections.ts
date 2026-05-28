@@ -29,13 +29,29 @@ export function getChannelLabel(channel: string): string {
   return map[channel] || channel
 }
 
+/**
+ * The channel to surface for an install. `installation.updateChannel` is a
+ * *declared* preference, written only on in-app update / channel-switch /
+ * snapshot-restore — it can drift from the real checkout (e.g. a user runs
+ * `git pull` on master outside the app, leaving a `stable` record sitting
+ * many commits past its base tag). When the working tree is ahead of its
+ * base stable tag the de-facto channel is `latest`, so prefer that for
+ * display and picker logic. This never mutates the stored record; the next
+ * explicit in-app update reconciles it.
+ */
+export function getEffectiveChannel(installation: InstallationRecord): string {
+  const stored = (installation.updateChannel as string | undefined) || 'stable'
+  if (stored !== 'stable') return stored
+  const cv = installation.comfyVersion as ComfyVersion | undefined
+  return typeof cv?.commitsAhead === 'number' && cv.commitsAhead > 0 ? 'latest' : stored
+}
+
 export function getListPreview(installation: InstallationRecord): string | null {
-  const channel = (installation.updateChannel as string | undefined) || 'stable'
-  return getChannelLabel(channel)
+  return getChannelLabel(getEffectiveChannel(installation))
 }
 
 export function getStatusTag(installation: InstallationRecord): StatusTag | undefined {
-  const channel = (installation.updateChannel as string | undefined) || 'stable'
+  const channel = getEffectiveChannel(installation)
   const info = releaseCache.getEffectiveInfo(COMFYUI_REPO, channel, installation)
   if (info && releaseCache.isUpdateAvailable(installation, channel, info)) {
     const version = info.releaseName || info.latestTag || ''
@@ -93,7 +109,7 @@ export function getDetailSections(installation: InstallationRecord): Record<stri
 
   // Updates section
   const hasGit = installed && installation.installPath && fs.existsSync(path.join(installation.installPath, 'ComfyUI', '.git'))
-  const channel = (installation.updateChannel as string | undefined) || 'stable'
+  const channel = getEffectiveChannel(installation)
 
   // Build per-channel preview info and actions for cards
   const channelDefs = getChannelDefs()
@@ -132,8 +148,12 @@ export function getDetailSections(installation: InstallationRecord): Record<stri
         progressTitle: isDowngrade
           ? t('standalone.downgradingTitle', { version: latestDisplay })
           : t('standalone.updatingTitle', { version: latestDisplay }),
+        // Always carry the explicit target channel. The stored
+        // `updateChannel` can be stale (see getEffectiveChannel), so relying
+        // on the action handler's fallback to it would pass `--stable` for a
+        // checkout that is really on latest, silently downgrading it.
         data: {
-          ...(isSwitching ? { channel: card.value } : {}),
+          channel: card.value,
           isDowngrade,
         },
         confirm: {
@@ -147,7 +167,7 @@ export function getDetailSections(installation: InstallationRecord): Record<stri
         tooltip: t('tooltips.copyAndUpdate'),
         showProgress: true, progressTitle: t('standalone.copyUpdatingTitle', { version: latestDisplay }),
         cancellable: true,
-        data: isSwitching ? { channel: card.value } : undefined,
+        data: { channel: card.value },
         prompt: {
           title: t('standalone.copyAndUpdateTitle'),
           message: (isSwitching ? switchPrefix : '') + t('standalone.copyAndUpdateMessage', { installed: boldInstalled, latest: boldLatest }),

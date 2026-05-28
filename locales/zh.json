@@ -46,6 +46,7 @@
     "appUpdateAvailable": "更新 {version}",
     "appUpdateReady": "重启以更新",
     "installUpdateAvailable": "有可用更新",
+    "installUpdateShort": "更新",
     "settings": "设置",
     "settingsTooltip": "设置"
   },
@@ -196,8 +197,8 @@
     "upToDate": "已是最新",
     "noInfo": "选择此通道并检查更新以查看版本信息。",
     "current": "当前",
-    "switchTo": "切换到 {channel}：",
-    "switchChannelPrefix": "这将把更新通道从 {from} 切换到 {to}。\n\n"
+    "switchTo": "切换到 {channel}",
+    "switchChannelPrefix": "正在将更新通道从 {from} 切换到 {to}。\n\n"
   },
 
   "track": {
@@ -522,11 +523,12 @@
     "channelLatest": "GitHub 最新版",
     "channelLatestDesc": "master 分支的最新提交",
     "updateAvailableTag": "有可用更新：{version}",
+    "upToDateMessage": "没有可用更新，您已是最新版本。",
     "updateNow": "立即更新",
     "updateConfirmTitle": "更新 ComfyUI",
-    "updateConfirmMessage": "从 {installed} 更新到 {latest}？\n\n本地更改将被暂存，并创建备份分支。",
-    "updateConfirmMessageLatest": "从 {installed} 更新到 master 最新版（{latest}）？\n\n这将拉取 master 分支的最新提交。本地更改将被暂存，并创建备份分支。",
-    "updateConfirmMessageDowngrade": "从 {installed} 回退到稳定版 {latest}？\n\n当前安装版本超前于最新稳定版。此操作将检出稳定标签，移除更新的提交。本地更改将被暂存，并创建备份分支。",
+    "updateConfirmMessage": "从 {installed} 更新到 {latest}？",
+    "updateConfirmMessageLatest": "将 {installed} 更新到 master 上的最新提交（{latest}）？",
+    "updateConfirmMessageDowngrade": "从 {installed} 回滚到稳定版 {latest}？较新的提交将被移除。",
     "updatingTitle": "正在更新到 {version}",
     "updatePrepare": "准备",
     "updateRun": "更新",
@@ -539,7 +541,7 @@
     "updateNoGit": "ComfyUI/ 中未找到 .git 目录。基于提交的更新需要 git 仓库。",
     "copyAndUpdate": "复制并更新",
     "copyAndUpdateTitle": "复制并更新",
-    "copyAndUpdateMessage": "创建此安装的副本，并将副本从 {installed} 更新到 {latest}。\n\n原始安装不会被修改。",
+    "copyAndUpdateMessage": "复制此安装，然后将副本从 {installed} 更新到 {latest}。原始安装保持不变。",
     "copyAndUpdatePlaceholder": "输入副本名称",
     "copyAndUpdateConfirm": "复制并更新",
     "releaseNotesLabel": "发行说明",
@@ -571,8 +573,8 @@
     "updateAvailableTag": "有可用更新：{version}",
     "updateNow": "立即更新",
     "updateConfirmTitle": "更新 ComfyUI",
-    "updateConfirmMessage": "从 {installed} 更新到 {latest}？\n\n本地更改将被暂存，并创建备份分支。",
-    "updateConfirmMessageLatest": "从 {installed} 更新到 master 最新版（{latest}）？\n\n这将拉取 master 分支的最新提交。本地更改将被暂存，并创建备份分支。",
+    "updateConfirmMessage": "从 {installed} 更新到 {latest}？",
+    "updateConfirmMessageLatest": "将 {installed} 更新到 master 上的最新提交（{latest}）？",
     "releaseNotesLabel": "发行说明",
     "updatingTitle": "正在更新到 {version}",
     "updatePrepare": "准备",
@@ -634,6 +636,6 @@
 
   "tooltips": {
     "updateNow": "就地更新此安装。",
-    "copyAndUpdate": "创建此安装的副本并更新副本。原始安装不会被修改。"
+    "copyAndUpdate": "复制此安装并更新副本。原始安装保持不变。"
   }
 }
