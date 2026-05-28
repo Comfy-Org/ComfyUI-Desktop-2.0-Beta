@@ -242,12 +242,70 @@ export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts):
       `read();` +
     `})()`
 
+  /**
+   * Two cloud-only patches injected on every dom-ready of the comfy view:
+   *
+   *   1. popup-blocked toast suppressor — observes new toast DOM nodes
+   *      and removes any that mention `auth/popup-blocked`. That error
+   *      is fired by the cloud frontend's Firebase SDK every time our
+   *      `setWindowOpenHandler` denies the auth popup (so the bridge
+   *      can take over), and the user has no way to dismiss the toast
+   *      in time before the bridge completes the sign-in.
+   *
+   *   2. post-signin flicker hide — when the bridge's IndexedDB inject
+   *      flips a sessionStorage flag before `location.reload()`, this
+   *      script hides documentElement for ~1s on the next load so the
+   *      user doesn't see the cloud login page flash before the
+   *      Firebase rehydrate redirects to the workspace.
+   */
+  const COMFY_CLOUD_PATCHES_JS =
+    `(function(){` +
+      `try{` +
+        `if(sessionStorage.getItem('__comfyDesktopPostSignin')==='1'){` +
+          `sessionStorage.removeItem('__comfyDesktopPostSignin');` +
+          `var de=document.documentElement;` +
+          `de.style.visibility='hidden';` +
+          `setTimeout(function(){de.style.visibility=''},1000);` +
+        `}` +
+      `}catch(_){}` +
+      `function looksBlocked(n){` +
+        `if(!n||n.nodeType!==1)return false;` +
+        `var t=(n.textContent||'').toLowerCase();` +
+        `return t.indexOf('auth/popup-blocked')>=0;` +
+      `}` +
+      `function nukeToast(n){` +
+        `var root=(n.closest&&n.closest('.p-toast-message,.p-toast-item,[role=alert]'))||n;` +
+        `try{root.remove()}catch(_){}` +
+      `}` +
+      `new MutationObserver(function(muts){` +
+        `for(var i=0;i<muts.length;i++){` +
+          `var added=muts[i].addedNodes;` +
+          `for(var j=0;j<added.length;j++){` +
+            `var n=added[j];` +
+            `if(looksBlocked(n)){nukeToast(n);continue;}` +
+            `if(n.querySelectorAll){` +
+              `var hits=n.querySelectorAll('*');` +
+              `for(var k=0;k<hits.length;k++){` +
+                `if(looksBlocked(hits[k])){nukeToast(hits[k]);break;}` +
+              `}` +
+            `}` +
+          `}` +
+        `}` +
+      `}).observe(document.documentElement,{childList:true,subtree:true});` +
+    `})()`
+
   const onDomReady = (): void => {
     comfyContents.executeJavaScript(COMFY_THEME_OBSERVER_JS).catch(() => {})
     const preamble = isLocal ? '' : 'window.__comfyDesktop2Remote = true;\n'
     comfyContents
       .executeJavaScript(preamble + getModelDownloadContentScript())
       .catch(() => {})
+    // Cloud-only patches (popup-blocked toast suppression + post-signin
+    // flicker hide). Skipped for local installs — they don't load cloud
+    // frontend, never see the toast or the redirect flash.
+    if (!isLocal) {
+      comfyContents.executeJavaScript(COMFY_CLOUD_PATCHES_JS).catch(() => {})
+    }
   }
   comfyContents.on('dom-ready', onDomReady)
 
