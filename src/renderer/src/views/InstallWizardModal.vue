@@ -647,7 +647,11 @@ defineExpose({ open })
               :class="{ 'config-field--disabled': currentSource?.skipInstall }"
             >
               <label class="config-label">{{ $t('newInstall.detectedGpuLabel') }}</label>
-              <div class="brand-input config-select" role="textbox" aria-readonly="true">
+              <div
+                class="brand-input config-select config-select--readonly"
+                role="textbox"
+                aria-readonly="true"
+              >
                 <span class="config-select__value">{{ detectedGpu }}</span>
               </div>
             </div>
@@ -961,6 +965,18 @@ defineExpose({ open })
 .config-select {
   padding: 8px 12px;
   cursor: default;
+}
+/* The detected GPU is fixed to the host hardware and cannot be changed, so
+ * present it as a static read-only value: strip the .brand-input hover
+ * affordance (border/background shift) that otherwise implies it's editable
+ * like the surrounding name/path inputs. Mirrors the muted read-only
+ * treatment used for the same value in QuickInstallModal (.detected-hardware). */
+.config-select--readonly:hover {
+  border-color: var(--brand-surface-border);
+  background: var(--brand-surface-bg);
+}
+.config-select--readonly .config-select__value {
+  color: var(--text-muted);
 }
 .config-select__value {
   flex: 1 1 auto;
