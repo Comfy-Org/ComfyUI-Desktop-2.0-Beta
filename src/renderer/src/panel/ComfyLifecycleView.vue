@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Play, RefreshCcw, Loader2, ArrowLeft } from 'lucide-vue-next'
+import { RefreshCcw, Loader2, ArrowLeft } from 'lucide-vue-next'
 import { useSessionStore } from '../stores/sessionStore'
 import { useReturnToDashboardConfirm } from '../composables/useReturnToDashboardConfirm'
 import { emitTelemetryAction } from '../lib/telemetry'
@@ -9,26 +9,26 @@ import BrandFinishedSurface from '../components/BrandFinishedSurface.vue'
 import type { Installation, ShowProgressOpts } from '../types/ipc'
 
 /**
- * Body view for the Comfy tab when no ComfyUI process is currently running
- * inside the host window. Driven entirely by sessionStore so the user sees
- * the right transient state when:
- *   - the install is starting up after a re-launch
- *   - the launcher is shutting it down (e.g. a REQUIRES_STOPPED action is
- *     in flight)
- *   - the process crashed and main left the window alive
- *   - it's plain stopped (initial state, or user chose Stop)
+ * Body view for the Comfy tab when no ComfyUI process is currently
+ * running inside the host window. Exists to keep the host window alive
+ * after a crash so the user has somewhere to view the failure context,
+ * return to the dashboard, or restart ComfyUI.
  *
- * The stopped + crashed states render the same brand-finished takeover
- * chrome that ProgressModal uses for completed operations, so a launch
- * that completed → stopped → reopened flows as one continuous visual
- * surface instead of dropping the user onto a plain card. Launching /
- * stopping defer to ProgressModal (which is mounted whenever a launch
- * or stop op is in flight); the small spinner placeholder only shows
- * if the session is mid-transition and no ProgressModal happens to be
- * up (e.g. an externally triggered stop in a race window).
+ * Driven entirely by sessionStore:
+ *   - `crashed` → renders the shared brand-error takeover via
+ *     BrandFinishedSurface (mirrors ProgressModal's error finished
+ *     state so the surface reads identically whether the user is
+ *     still looking at the in-flight modal or has reopened the panel
+ *     afterwards).
+ *   - `launching` / `stopping` → renders the small spinner placeholder
+ *     as a safety net for the narrow race window where the in-flight
+ *     ProgressModal hasn't mounted yet.
+ *   - `unknown` → hidden behind a brief grace window so a fast
+ *     `sessionStore.init()` doesn't flash anything.
+ *   - everything else (`running`, fallback) → renders nothing; the
+ *     host's ComfyUI view covers the panel.
  *
- * Re-launching is the panel's own responsibility — clicking the start
- * button surfaces the standard ProgressModal flow via the parent
+ * Restart surfaces the standard ProgressModal flow via the parent
  * PanelApp's `show-progress` emit, mirroring how DashboardCard /
  * DetailModal kick off the same action.
  */
@@ -199,10 +199,11 @@ const { confirmReturnToDashboard } = useReturnToDashboardConfirm()
 
 async function returnToDashboard(): Promise<void> {
   const id = props.installationId
-  // confirmReturnToDashboard is a no-op for stopped / crashed states; only the
-  // brief running-but-lifecycle-mounted window actually triggers the prompt.
+  // confirmReturnToDashboard is a no-op for the crashed surface; only the
+  // brief running-but-lifecycle-mounted race window actually triggers the
+  // prompt.
   const isRunning = id ? sessionStore.isRunning(id) : false
-  const reason = isRunning ? 'running' : state.value === 'crashed' ? 'crashed' : 'stopped'
+  const reason = isRunning ? 'running' : 'crashed'
   const ok = await confirmReturnToDashboard(props.installation, reason)
   if (!ok) return
   emitTelemetryAction('desktop2.instance.return_to_dashboard', { from: 'lifecycle', reason })
@@ -228,51 +229,19 @@ const placeholderTitle = computed<string>(() => {
 
 <template>
   <div class="lifecycle-view">
-    <!-- Stopped → brand-cancelled banner. Same visual language as the
-         "operation cancelled" finished state in ProgressModal so the
-         user can't tell the seam between "your last launch wrapped up"
-         and "your install is parked, start it again". -->
+    <!-- Crashed → keep the host window alive after ComfyUI exits
+         unexpectedly so the user has somewhere to view logs, return to
+         the dashboard, or restart. Matches ProgressModal's error
+         finished state visually — see BrandFinishedSurface for the
+         shared chrome. -->
     <BrandFinishedSurface
-      v-if="state === 'stopped'"
-      variant="cancelled"
-      :title="$t('comfyLifecycle.stoppedTitle')"
-      :message="$t('comfyLifecycle.stoppedDesc')"
-      :aria-label="$t('comfyLifecycle.stoppedTitle')"
-    >
-      <template #actions>
-        <button class="brand-primary brand-progress__footer-btn" type="button" @click="startLaunch">
-          <Play :size="14" />
-          {{ $t('comfyLifecycle.start') }}
-        </button>
-        <button
-          class="brand-ghost brand-progress__footer-btn"
-          type="button"
-          @click="returnToDashboard"
-        >
-          <ArrowLeft :size="14" />
-          {{ $t('comfyLifecycle.returnToDashboard') }}
-        </button>
-      </template>
-    </BrandFinishedSurface>
-
-    <!-- Crashed → brand-error banner + crash-detail message + stderr
-         tail in the logs accordion. Mirrors ProgressModal's error
-         finished state so a launch that crashed reads identically
-         whether the user is still looking at the progress modal or
-         has reopened the panel afterwards. -->
-    <BrandFinishedSurface
-      v-else-if="state === 'crashed'"
-      variant="error"
+      v-if="state === 'crashed'"
       :title="$t('comfyLifecycle.crashedTitle')"
       :message="crashedMessage ?? undefined"
       :logs="crashedLogs ?? undefined"
       :aria-label="$t('comfyLifecycle.crashedTitle')"
     >
-      <!-- Crashed actions render in the hero stack as a Back/Restart
-           equal-width pair, matching ProgressModal's error finished
-           state. Back is ghost on the left, Restart is primary on the
-           right — same ordering, copy, and styling as Back/Reboot. -->
-      <template #errorActions>
+      <template #actions>
         <button
           class="brand-ghost brand-progress__footer-btn"
           type="button"

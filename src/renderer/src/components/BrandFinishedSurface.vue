@@ -1,36 +1,24 @@
 <script setup lang="ts">
 /**
- * Shared brand-finished takeover primitive.
+ * Crash/error takeover surface for the lifecycle view.
  *
- * Owns the chrome of the "operation completed" takeover that ProgressModal
- * shows when a launch / install / delete / update reaches a terminal
- * state — glyph background, wordmark, banner, optional secondary
- * message with inline Copy, optional logs accordion, and a slotted
- * footer button row.
+ * Renders the same chrome ProgressModal uses for a finished-error
+ * operation — glyph background, wordmark, red X banner, optional
+ * crash-detail message with inline Copy, optional logs accordion, and
+ * a centered equal-width action pair (Back / Restart) under the
+ * message. Used by ComfyLifecycleView to keep the host window alive
+ * after ComfyUI exits unexpectedly so the user has somewhere to view
+ * logs, return to the dashboard, or restart.
  *
- * Used today by ComfyLifecycleView to render the stopped / crashed
- * states in the same visual language users just saw when their launch
- * finished. Designed so ProgressModal's own finished branch can migrate
- * to it in a follow-up without changing the rendered pixels — the class
- * names and structure mirror ProgressModal's brand-progress subtree
- * intentionally.
- *
- * Variants:
- *  - `success`  — green check + success banner color.
- *  - `error`    — red X + danger banner color, intended for crashes
- *                 / failed ops. Pair with `message` for the human-
- *                 readable detail and `logs` for the raw output.
- *  - `cancelled`— neutral triangle + muted banner, intended for stopped
- *                 / user-cancelled states.
- *
- * Slots:
- *  - `actions` — footer button row. Use `brand-primary` /
- *                `brand-ghost` + `brand-progress__footer-btn` classes
- *                to match the ProgressModal finished-state buttons.
+ * Class names mirror ProgressModal's `brand-progress__*` subtree
+ * intentionally — visual continuity matters because users can see
+ * either surface for the same crash depending on whether they're
+ * still looking at the in-flight ProgressModal or have reopened the
+ * panel afterwards.
  */
 import { ref, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Check, X, TriangleAlert, ChevronDown } from 'lucide-vue-next'
+import { X, ChevronDown } from 'lucide-vue-next'
 import BrandTakeoverLayout from './BrandTakeoverLayout.vue'
 import BrandProgressGlyph from './icons/BrandProgressGlyph.vue'
 import ComfyWordmark from './icons/ComfyWordmark.vue'
@@ -38,7 +26,6 @@ import BaseAccordion from './ui/BaseAccordion.vue'
 import BaseCopyButton from './ui/BaseCopyButton.vue'
 
 interface Props {
-  variant: 'success' | 'error' | 'cancelled'
   /** Banner headline. Short — a single line. */
   title: string
   /** Optional secondary message under the banner (e.g. crash detail
@@ -64,9 +51,8 @@ const props = withDefaults(defineProps<Props>(), {
 
 const { t } = useI18n()
 const logsExpanded = ref(false)
-// Per-instance unique id so multiple BrandFinishedSurface instances
-// mounted simultaneously (e.g. lifecycle view + a future migrated
-// ProgressModal finished branch) don't collide on `aria-controls`.
+// Per-instance unique id so multiple surfaces mounted simultaneously
+// don't collide on `aria-controls`.
 const logsId = useId()
 
 function toggleLogs(): void {
@@ -74,8 +60,8 @@ function toggleLogs(): void {
 }
 
 // Closure so the BaseCopyButton resolves the full logs string at click
-// time. Matches the ProgressModal pattern where the terminal buffer
-// could grow between mount and click.
+// time — matches the ProgressModal pattern where the terminal buffer
+// can grow between mount and click.
 function getLogText(): string {
   return props.logs ?? ''
 }
@@ -88,17 +74,10 @@ function getLogText(): string {
       <div class="brand-progress__stack">
         <ComfyWordmark class="brand-progress__wordmark" />
         <div
-          class="brand-progress__banner"
-          :class="{
-            'brand-progress__banner--success': variant === 'success',
-            'brand-progress__banner--error': variant === 'error',
-            'brand-progress__banner--cancelled': variant === 'cancelled',
-          }"
+          class="brand-progress__banner brand-progress__banner--error"
           aria-live="polite"
         >
-          <Check v-if="variant === 'success'" :size="20" />
-          <X v-else-if="variant === 'error'" :size="20" />
-          <TriangleAlert v-else :size="20" />
+          <X :size="20" />
           <span>{{ title }}</span>
         </div>
         <div v-if="message" class="brand-progress__error-row">
@@ -109,20 +88,18 @@ function getLogText(): string {
             class="brand-progress__error-copy"
           />
         </div>
-        <!-- Error-context actions live in the hero stack (under the
-             message) instead of the footer bar, matching ProgressModal's
-             error finished state: the primary action sits with the
-             failure context the user is reading instead of being
-             stranded bottom-left. -->
-        <div v-if="$slots.errorActions" class="brand-progress__error-actions">
-          <slot name="errorActions" />
+        <!-- Actions live in the hero stack (under the message) instead
+             of the footer bar, matching ProgressModal's error finished
+             state: the CTAs sit with the failure context the user is
+             reading instead of being stranded bottom-left. -->
+        <div v-if="$slots.actions" class="brand-progress__error-actions">
+          <slot name="actions" />
         </div>
       </div>
     </div>
-    <template #footer>
+    <template v-if="logs" #footer>
       <div class="brand-progress__footer">
         <BaseAccordion
-          v-if="logs"
           :open="logsExpanded"
           class="brand-progress__logs-wrap"
           :class="{ 'is-expanded': logsExpanded }"
@@ -141,17 +118,8 @@ function getLogText(): string {
             {{ logs }}
           </div>
         </BaseAccordion>
-        <div
-          class="brand-progress__footer-bar"
-          :class="{ 'is-centered': !logs && !$slots.actions }"
-        >
-          <!-- Footer-bar bands stay empty for error-only variants: the
-               error-actions slot renders in the hero stack instead. -->
-          <div class="brand-progress__footer-left">
-            <slot name="actions" />
-          </div>
+        <div class="brand-progress__footer-bar">
           <button
-            v-if="logs"
             type="button"
             class="brand-ghost brand-progress__footer-btn brand-progress__logs-toggle"
             :aria-expanded="logsExpanded"
@@ -172,11 +140,9 @@ function getLogText(): string {
 </template>
 
 <style scoped>
-/* Mirrors ProgressModal's brand-progress finished-state subtree.
- * Keeping the class names and rules in sync is what makes the two
- * surfaces visually indistinguishable. If you change one, change
- * both — until ProgressModal migrates to consume this component
- * (planned follow-up). */
+/* Mirrors ProgressModal's brand-progress error-state subtree.
+ * Keep the class names and rules in sync — that's what makes the two
+ * surfaces visually indistinguishable for the same crash. */
 .brand-progress {
   position: relative;
   align-self: stretch;
@@ -242,22 +208,13 @@ function getLogText(): string {
   font-size: var(--takeover-fs-body);
   letter-spacing: 0.01em;
   min-height: 1.5em;
-  color: var(--neutral-200);
+  color: var(--semantic-danger, #ff7a7a);
 }
 .brand-progress__banner :deep(svg) {
   flex: none;
 }
-.brand-progress__banner--success {
-  color: var(--semantic-success, var(--neutral-50));
-}
-.brand-progress__banner--error {
-  color: var(--semantic-danger, #ff7a7a);
-}
-.brand-progress__banner--cancelled {
-  color: var(--neutral-300);
-}
 
-/* Error / message detail row beneath the banner. */
+/* Crash-detail row beneath the banner. */
 .brand-progress__error-row {
   width: 100%;
   max-width: 640px;
@@ -295,11 +252,10 @@ function getLogText(): string {
   white-space: pre-wrap;
 }
 
-/* Error CTAs — centered in the hero stack under the error message.
- * Back (ghost) sits left, primary CTA right; both flex to equal
- * width within a bounded row so the pair reads as a balanced unit.
- * Mirrors ProgressModal's `.brand-progress__error-actions` rule —
- * keep the two in sync until ProgressModal consumes this component. */
+/* CTAs — centered in the hero stack under the error message.
+ * Back (ghost) sits left, primary (Restart) right; both flex to equal
+ * width within a bounded row. Mirrors ProgressModal's
+ * `.brand-progress__error-actions` rule — keep the two in sync. */
 .brand-progress__error-actions {
   display: flex;
   flex-direction: row;
@@ -308,13 +264,13 @@ function getLogText(): string {
   width: 100%;
   max-width: 420px;
 }
-.brand-progress__error-actions > .brand-progress__footer-btn,
 .brand-progress__error-actions > :slotted(.brand-progress__footer-btn) {
   flex: 1 1 0;
   justify-content: center;
 }
 
-/* Footer — positioned container for the bar + the logs panel above it */
+/* Footer — only the logs accordion + its toggle live here when logs
+ * are present. The action row is in the hero stack above. */
 .brand-progress__footer {
   position: absolute;
   bottom: clamp(16px, 2.5vh, 32px);
@@ -328,30 +284,11 @@ function getLogText(): string {
 .brand-progress__footer-bar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 12px;
   flex-wrap: wrap;
 }
-.brand-progress__footer-bar.is-centered {
-  justify-content: center;
-}
-.brand-progress__footer-left {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-}
-/* `:slotted()` mirrors plain selectors here because consumers pass
-   their action buttons in via `<slot name="actions" />`. Without it,
-   Vue 3 scoped styles only reach the local logs-toggle button and the
-   slotted buttons end up un-styled — icons crashing into their labels
-   was the visible symptom. Keep the two selector groups in sync.
-   Scope is intentionally one level deep: only the slotted button
-   itself is styled, not its children. Consumers needing inner-element
-   styling (custom icon sizing, etc.) own that in their own scope —
-   `:slotted()` would otherwise have to spell every descendant out and
-   the surface would silently constrain the consumer's markup. */
-.brand-progress__footer-btn,
-:slotted(.brand-progress__footer-btn) {
+.brand-progress__footer-btn {
   min-width: auto;
   padding: 7px 14px;
   font-size: 13px;
@@ -360,20 +297,18 @@ function getLogText(): string {
   gap: 6px;
   white-space: nowrap;
 }
-.brand-progress__footer-btn.brand-ghost,
-:slotted(.brand-progress__footer-btn.brand-ghost) {
+.brand-progress__footer-btn.brand-ghost {
   border-color: var(--neutral-500);
   color: var(--neutral-100);
 }
 @media (max-width: 720px) {
-  .brand-progress__footer-btn,
-  :slotted(.brand-progress__footer-btn) {
+  .brand-progress__footer-btn {
     padding: 6px 10px;
     font-size: 12px;
   }
 }
 
-/* View Logs toggle (lives in the footer bar) */
+/* View Logs toggle */
 .brand-progress__logs-toggle {
   gap: 6px;
   border-radius: 6px;

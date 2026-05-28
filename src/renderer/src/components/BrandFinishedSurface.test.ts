@@ -17,9 +17,8 @@ function createTestI18n() {
 }
 
 // Stub BrandTakeoverLayout's Teleport + focus-trap so assertions can
-// query the rendered tree inline. Declares its props so test assertions
-// can read `props('ariaLabel')` off the stub via `findComponent`.
-// Mirrors the pattern used in ComfyLifecycleView.test.ts.
+// query the rendered tree inline. Mirrors the pattern used in
+// ComfyLifecycleView.test.ts.
 const brandTakeoverStub = {
   name: 'BrandTakeoverLayout',
   props: ['theme', 'vignette', 'ariaLabel'],
@@ -38,95 +37,61 @@ function mountSurface(props: Record<string, unknown>, slots: Record<string, unkn
 }
 
 describe('BrandFinishedSurface', () => {
-  describe('variants', () => {
-    it('renders the success banner with the success modifier class', () => {
-      const wrapper = mountSurface({ variant: 'success', title: 'Operation complete' })
-      const banner = wrapper.find('.brand-progress__banner')
-      expect(banner.exists()).toBe(true)
-      expect(banner.classes()).toContain('brand-progress__banner--success')
-      expect(banner.text()).toContain('Operation complete')
-    })
-
-    it('renders the error banner with the error modifier class', () => {
-      const wrapper = mountSurface({ variant: 'error', title: 'It blew up' })
-      const banner = wrapper.find('.brand-progress__banner')
-      expect(banner.classes()).toContain('brand-progress__banner--error')
-      expect(banner.text()).toContain('It blew up')
-    })
-
-    it('renders the cancelled banner with the cancelled modifier class', () => {
-      const wrapper = mountSurface({ variant: 'cancelled', title: 'Stopped' })
-      const banner = wrapper.find('.brand-progress__banner')
-      expect(banner.classes()).toContain('brand-progress__banner--cancelled')
-      expect(banner.text()).toContain('Stopped')
-    })
+  it('renders the title in the error banner', () => {
+    const wrapper = mountSurface({ title: 'It blew up' })
+    const banner = wrapper.find('.brand-progress__banner')
+    expect(banner.exists()).toBe(true)
+    expect(banner.classes()).toContain('brand-progress__banner--error')
+    expect(banner.text()).toContain('It blew up')
   })
 
   describe('message row', () => {
     it('renders the message + copy button when message is provided', () => {
-      const wrapper = mountSurface({
-        variant: 'error',
-        title: 'Crashed',
-        message: 'Exit code 137',
-      })
+      const wrapper = mountSurface({ title: 'Crashed', message: 'Exit code 137' })
       const row = wrapper.find('.brand-progress__error-row')
       expect(row.exists()).toBe(true)
       expect(row.text()).toContain('Exit code 137')
-      // The inline Copy button is the only `.brand-progress__error-copy`
-      // node on the surface — its presence proves the BaseCopyButton
-      // was wired with the message value.
       expect(wrapper.find('.brand-progress__error-copy').exists()).toBe(true)
     })
 
     it('omits the message row entirely when no message is provided', () => {
-      const wrapper = mountSurface({ variant: 'cancelled', title: 'Stopped' })
+      const wrapper = mountSurface({ title: 'Crashed' })
       expect(wrapper.find('.brand-progress__error-row').exists()).toBe(false)
     })
   })
 
   describe('logs accordion', () => {
     it('omits the accordion + toggle when no logs prop is set', () => {
-      const wrapper = mountSurface({ variant: 'cancelled', title: 'Stopped' })
+      const wrapper = mountSurface({ title: 'Crashed' })
       expect(wrapper.find('.brand-progress__logs').exists()).toBe(false)
       expect(wrapper.find('.brand-progress__logs-toggle').exists()).toBe(false)
     })
 
     it('renders the logs content when the logs prop is set', () => {
       const wrapper = mountSurface({
-        variant: 'error',
         title: 'Crashed',
         logs: 'Traceback (most recent call last):\n  File "...", line 42',
       })
       const logs = wrapper.find('.brand-progress__logs')
       expect(logs.exists()).toBe(true)
       expect(logs.text()).toContain('Traceback')
+      expect(logs.text()).toContain('line 42')
     })
 
-    it('toggles the logs panel open + flips aria-expanded when the toggle is clicked', async () => {
-      const wrapper = mountSurface({
-        variant: 'error',
-        title: 'Crashed',
-        logs: 'stderr output',
-      })
+    it('toggles the logs panel via the accordion button', async () => {
+      const wrapper = mountSurface({ title: 'Crashed', logs: 'stderr' })
       const toggle = wrapper.find('.brand-progress__logs-toggle')
       expect(toggle.attributes('aria-expanded')).toBe('false')
-      // The chevron rotates via the `is-open` class — start closed.
-      expect(wrapper.find('.brand-progress__logs-chevron').classes()).not.toContain('is-open')
 
       await toggle.trigger('click')
       expect(toggle.attributes('aria-expanded')).toBe('true')
-      expect(wrapper.find('.brand-progress__logs-chevron').classes()).toContain('is-open')
 
       await toggle.trigger('click')
       expect(toggle.attributes('aria-expanded')).toBe('false')
     })
 
     it('wires aria-controls to the same unique id the logs panel uses', () => {
-      const wrapper = mountSurface({
-        variant: 'error',
-        title: 'Crashed',
-        logs: 'stderr',
-      })
+      const wrapper = mountSurface({ title: 'Crashed', logs: 'stderr' })
       const toggle = wrapper.find('.brand-progress__logs-toggle')
       const logs = wrapper.find('.brand-progress__logs')
       const id = toggle.attributes('aria-controls')
@@ -143,8 +108,8 @@ describe('BrandFinishedSurface', () => {
         components: { BrandFinishedSurface },
         template: `
           <div>
-            <BrandFinishedSurface variant="error" title="A" logs="a-stderr" />
-            <BrandFinishedSurface variant="error" title="B" logs="b-stderr" />
+            <BrandFinishedSurface title="A" logs="a-stderr" />
+            <BrandFinishedSurface title="B" logs="b-stderr" />
           </div>
         `,
       }
@@ -158,74 +123,26 @@ describe('BrandFinishedSurface', () => {
       expect(toggles).toHaveLength(2)
       const idA = toggles[0]!.attributes('aria-controls')
       const idB = toggles[1]!.attributes('aria-controls')
-      expect(idA).toBeTruthy()
-      expect(idB).toBeTruthy()
       expect(idA).not.toBe(idB)
     })
 
     it('honours a custom logsLabel for the accordion title + toggle button', () => {
       const wrapper = mountSurface({
-        variant: 'error',
         title: 'Crashed',
         logs: 'stderr',
         logsLabel: 'Show stderr',
       })
-      // Both the accordion panel header and the toggle button use the
-      // override; bare-string `.text()` on the surface catches both.
       expect(wrapper.text()).toContain('Show stderr')
       expect(wrapper.text()).not.toContain('View logs')
     })
   })
 
   describe('actions slot', () => {
-    it('renders content passed via the actions slot inside the footer-left band', () => {
+    it('renders actions inside the hero-stack error-actions row, not the footer bar', () => {
       const wrapper = mountSurface(
-        { variant: 'cancelled', title: 'Stopped' },
+        { title: 'Crashed', message: 'Exit code 137' },
         {
-          actions: () =>
-            h(
-              'button',
-              { class: 'brand-primary brand-progress__footer-btn', type: 'button' },
-              'Start',
-            ),
-        },
-      )
-      const footerLeft = wrapper.find('.brand-progress__footer-left')
-      expect(footerLeft.exists()).toBe(true)
-      const action = footerLeft.find('button.brand-primary')
-      expect(action.exists()).toBe(true)
-      expect(action.text()).toBe('Start')
-    })
-
-    it('centers the footer bar when no logs and no actions are provided', () => {
-      const wrapper = mountSurface({ variant: 'cancelled', title: 'Stopped' })
-      const bar = wrapper.find('.brand-progress__footer-bar')
-      expect(bar.exists()).toBe(true)
-      // Empty footer collapses to centered layout via the `is-centered`
-      // modifier — same convention ProgressModal's finished branch uses
-      // when there are no terminal actions to render.
-      expect(bar.classes()).toContain('is-centered')
-    })
-
-    it('does not center the footer bar when actions are provided', () => {
-      const wrapper = mountSurface(
-        { variant: 'cancelled', title: 'Stopped' },
-        { actions: () => h('button', { type: 'button' }, 'Start') },
-      )
-      const bar = wrapper.find('.brand-progress__footer-bar')
-      expect(bar.classes()).not.toContain('is-centered')
-    })
-  })
-
-  describe('errorActions slot', () => {
-    it('renders error-context actions inside the hero stack, not the footer bar', () => {
-      // Matches ProgressModal's redesigned error finished state: the
-      // Back / primary-CTA pair sits with the failure context the user
-      // is reading, not stranded bottom-left.
-      const wrapper = mountSurface(
-        { variant: 'error', title: 'Crashed', message: 'Exit code 137' },
-        {
-          errorActions: () => [
+          actions: () => [
             h(
               'button',
               { class: 'brand-ghost brand-progress__footer-btn', type: 'button' },
@@ -234,7 +151,7 @@ describe('BrandFinishedSurface', () => {
             h(
               'button',
               { class: 'brand-primary brand-progress__footer-btn', type: 'button' },
-              'Reboot',
+              'Restart',
             ),
           ],
         },
@@ -244,24 +161,17 @@ describe('BrandFinishedSurface', () => {
       const buttons = row.findAll('button')
       expect(buttons).toHaveLength(2)
       expect(buttons[0]!.text()).toBe('Back')
-      expect(buttons[1]!.text()).toBe('Reboot')
-      // Footer-left band stays empty when only errorActions are passed.
-      const footerLeft = wrapper.find('.brand-progress__footer-left')
-      expect(footerLeft.findAll('button')).toHaveLength(0)
+      expect(buttons[1]!.text()).toBe('Restart')
     })
 
-    it('omits the error-actions container entirely when no errorActions slot is provided', () => {
-      const wrapper = mountSurface({ variant: 'error', title: 'Crashed' })
+    it('omits the actions row entirely when no actions slot is provided', () => {
+      const wrapper = mountSurface({ title: 'Crashed' })
       expect(wrapper.find('.brand-progress__error-actions').exists()).toBe(false)
     })
   })
 
   it('forwards ariaLabel to the BrandTakeoverLayout chrome', () => {
-    const wrapper = mountSurface({
-      variant: 'error',
-      title: 'Crashed',
-      ariaLabel: 'ComfyUI crashed',
-    })
+    const wrapper = mountSurface({ title: 'Crashed', ariaLabel: 'ComfyUI crashed' })
     const layout = wrapper.findComponent({ name: 'BrandTakeoverLayout' })
     expect(layout.exists()).toBe(true)
     expect(layout.props('ariaLabel')).toBe('ComfyUI crashed')

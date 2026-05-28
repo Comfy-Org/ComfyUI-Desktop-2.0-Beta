@@ -18,12 +18,8 @@ const messages = {
     },
     comfyLifecycle: {
       preparingTitle: 'Preparing…',
-      stoppedTitle: 'ComfyUI is not running',
-      stoppedDesc: 'Start ComfyUI to use this installation.',
       launchingTitle: 'Starting ComfyUI…',
-      launchingDesc: 'Waiting for the server to come online.',
       stoppingTitle: 'Stopping ComfyUI…',
-      stoppingDesc: 'Waiting for the process to shut down cleanly.',
       crashedTitle: 'ComfyUI exited unexpectedly',
       crashedDesc: 'The ComfyUI process exited. You can restart it below.',
       crashedDescWithCode:
@@ -33,10 +29,7 @@ const messages = {
       crashedDescWithCodeAndSignal:
         'The ComfyUI process was terminated by {signal} (exit code {code}). You can restart it below.',
       crashedDescLogsHint: 'View the logs below for details.',
-      crashedDetailsToggle: 'Show error log',
-      start: 'Start ComfyUI',
       restart: 'Restart ComfyUI',
-      returnToDashboard: 'Return to Dashboard',
       launchProgressTitle: 'Starting ComfyUI',
     },
     dashboard: {
@@ -126,16 +119,14 @@ describe('ComfyLifecycleView', () => {
     useSessionStore().ready = true
   })
 
-  it('renders the stopped state by default with a Start button in brand-finished chrome', async () => {
+  it('renders nothing in the default (no-error, not-running) state — the host ComfyUI view covers the panel', async () => {
     const wrapper = mountView()
     await flushPromises()
-    expect(wrapper.text()).toContain('ComfyUI is not running')
-    // brand-cancelled banner variant is what makes the stopped state
-    // read as "operation cancelled" continuity from ProgressModal.
-    expect(wrapper.find('.brand-progress__banner--cancelled').exists()).toBe(true)
-    const button = wrapper.find('button.brand-primary')
-    expect(button.exists()).toBe(true)
-    expect(button.text()).toContain('Start ComfyUI')
+    // No error, no in-flight op, hydrated — the view stays out of the
+    // way. The crashed surface only shows when sessionStore actually
+    // has an error recorded for this install.
+    expect(wrapper.find('.brand-progress__banner').exists()).toBe(false)
+    expect(wrapper.find('.lifecycle-placeholder').exists()).toBe(false)
   })
 
   it('shows the in-flight placeholder while sessionStore reports the install as launching', async () => {
@@ -342,8 +333,13 @@ describe('ComfyLifecycleView', () => {
     expect(api.getLastCrashError).not.toHaveBeenCalled()
   })
 
-  it('emits show-progress with a launch apiCall when Start is clicked', async () => {
+  it('emits show-progress with a launch apiCall when Restart is clicked from the crashed surface', async () => {
     const wrapper = mountView()
+    const sessionStore = useSessionStore()
+    sessionStore.errorInstances.set('inst-1', {
+      installationName: 'My Local Install',
+      exitCode: 1,
+    })
     await flushPromises()
     await wrapper.find('button.brand-primary').trigger('click')
     const events = wrapper.emitted('show-progress')
@@ -364,18 +360,6 @@ describe('ComfyLifecycleView', () => {
     await payload.apiCall()
     const api = (window as unknown as { api: MockApi }).api
     expect(api.runAction).toHaveBeenCalledWith('inst-1', 'launch')
-  })
-
-  it('renders a Return to Dashboard ghost button in the stopped state and calls returnToDashboard without confirm', async () => {
-    const wrapper = mountView()
-    await flushPromises()
-    const buttons = wrapper.findAll('button.brand-ghost')
-    const ret = buttons.find((b) => b.text().includes('Return to Dashboard'))
-    expect(ret?.exists()).toBe(true)
-    await ret!.trigger('click')
-    await flushPromises()
-    const api = (window as unknown as { api: MockApi }).api
-    expect(api.returnToDashboard).toHaveBeenCalled()
   })
 
   it('renders a Back ghost button in the crashed-state error-actions row and calls returnToDashboard without confirm', async () => {
