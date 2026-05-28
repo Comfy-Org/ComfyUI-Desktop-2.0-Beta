@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 
@@ -1209,6 +1211,34 @@ describe('TitleBarApp', () => {
       expect(titleBar.style.getPropertyValue('--title-trailing-width')).toBe('0px')
       expect(wrapper.find('.title-install-pill').exists()).toBe(true)
       wrapper.unmount()
+    })
+  })
+
+  // Narrow-width padding guard. JSDOM can't compute the grid layout, so
+  // we assert on the scoped CSS contract directly: `.title-center` keeps
+  // a symmetric inline-padding floor so the install pill never ends up
+  // flush against the adjacent chrome when the centre 1fr track is
+  // squeezed at narrow widths. Symmetric padding leaves the
+  // `justify-self: center` true-window-centre anchor intact.
+  describe('narrow-width title padding (regression: pill flush against chrome)', () => {
+    it('reserves a symmetric horizontal padding floor on `.title-center`', () => {
+      const source = readFileSync(
+        resolve(process.cwd(), 'src/renderer/src/comfyTitleBar/TitleBarApp.vue'),
+        'utf8',
+      )
+      const centerBlock = source.slice(
+        source.indexOf('.title-center {'),
+        source.indexOf('.title-trailing {'),
+      )
+      // Symmetric inline padding keeps a gap on both sides at every
+      // width — and being symmetric it does not shift the centre.
+      expect(centerBlock).toMatch(/padding-inline:\s*8px/)
+      // border-box keeps the padding inside the declared `max-width:
+      // 100%` so the track never overflows.
+      expect(centerBlock).toMatch(/box-sizing:\s*border-box/)
+      // The centre anchor that holds the true-window-centre layout must
+      // remain in place.
+      expect(centerBlock).toMatch(/justify-self:\s*center/)
     })
   })
 })

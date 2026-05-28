@@ -634,6 +634,18 @@ onUnmounted(() => {
   gap: 4px;
   min-width: 0;
   max-width: 100%;
+  /* Guarantee a minimum horizontal breathing room around the title
+     pill at every width. When the window narrows, the left + trailing
+     clusters squeeze the centre 1fr track toward zero and the pill
+     ends up flush against the adjacent chrome with no gap. This
+     symmetric inline padding reserves a floor of horizontal space on
+     both sides — symmetric, so the `justify-self: center` anchor (and
+     the true-window-centre mirror) is untouched; only the slack the
+     pill can grow into shrinks equally on each side. `box-sizing`
+     keeps the declared `max-width: 100%` accounting for the padding so
+     the track never overflows. */
+  box-sizing: border-box;
+  padding-inline: 8px;
 }
 
 .title-trailing {
