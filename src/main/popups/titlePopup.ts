@@ -205,10 +205,24 @@ interface BuildInstancePickerSnapshotArgs {
   installOperationStatus?: InstancePickerSnapshot['installOperationStatus']
 }
 
+/** The most-recently-launched install in the list (largest `lastLaunchedAt`),
+ *  or the first row when none carry a timestamp. Mirrors the renderer's
+ *  `mostRecentInstallId` so main and the picker agree on "most recent". */
+function mostRecentlyLaunchedInstallId(installs: InstancePickerInstall[]): string | null {
+  let best: InstancePickerInstall | undefined
+  for (const inst of installs) {
+    if (!best || (inst.lastLaunchedAt ?? 0) > (best.lastLaunchedAt ?? 0)) {
+      best = inst
+    }
+  }
+  return best?.id ?? null
+}
+
 /**
  * Resolves which install the picker should show in its detail pane.
  * Install-less hosts (dashboard) have no active install; default to the
- * first row so the pane is not empty on open.
+ * most-recently-launched install so the picker opens on what the user last
+ * used, not whatever happens to sort first in the registry list.
  */
 export function resolvePickerSelectedInstallId(
   explicitSelection: string | null | undefined,
@@ -217,7 +231,7 @@ export function resolvePickerSelectedInstallId(
 ): string | null {
   const resolved = explicitSelection ?? hostInstallationId ?? null
   if (resolved) return resolved
-  return installs[0]?.id ?? null
+  return mostRecentlyLaunchedInstallId(installs)
 }
 
 /**

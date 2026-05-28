@@ -212,7 +212,7 @@ export function useInstallContextMenu(opts: {
     if (sessionStore.errorInstances.has(inst.id)) {
       items.push({
         id: 'dismiss-error',
-        label: t('running.dismiss'),
+        label: t('chooser.menuDismissError'),
         separator: items.length > 0,
       })
     }
@@ -278,7 +278,11 @@ export function useInstallContextMenu(opts: {
     if (id === 'manage') {
       opts.onManage?.(inst)
     } else if (id === 'update') {
-      opts.onManage?.(inst, { initialTab: 'update' })
+      // Match the title-bar install-update pill: open the picker on the
+      // Update tab AND auto-fire the update so the update modal runs,
+      // instead of just landing the user on the Update tab page. Same
+      // autoAction the deep-link / pill path uses (useDeepLinkRouter).
+      opts.onManage?.(inst, { initialTab: 'update', autoAction: 'update-comfyui' })
     } else if (id === 'migrate') {
       opts.onManage?.(inst, { autoAction: 'migrate-to-standalone' })
     } else if (id === 'restore-snapshot') {

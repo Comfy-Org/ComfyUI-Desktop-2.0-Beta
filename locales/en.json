@@ -49,7 +49,8 @@
     "menuRestoreSnapshot": "Restore Snapshot",
     "menuRevealInFolder": "Open Folder",
     "menuDelete": "Uninstall",
-    "stoppedActionGatedReason": "Stop the running instance first."
+    "stoppedActionGatedReason": "Stop the running instance first.",
+    "menuDismissError": "Dismiss Error"
   },
 
   "titleBar": {

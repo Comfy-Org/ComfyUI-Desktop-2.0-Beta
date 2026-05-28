@@ -37,6 +37,7 @@ const messages = {
     common: {
       copy: 'Copy',
       cancel: 'Cancel',
+      back: 'Back',
     },
     dashboard: {
       confirmStopLocal: {
@@ -298,7 +299,7 @@ describe('ProgressModal — brand branch state transitions', () => {
     expect(wrapper.emitted('close')?.length).toBeGreaterThan(0)
   })
 
-  it('renders the error banner + error message + Reboot + Return-to-Dashboard, and does NOT auto-close', async () => {
+  it('renders the error banner + error message + Back + Reboot, and does NOT auto-close', async () => {
     const { wrapper, body } = await mountWithOp('inst-1', {
       finished: true,
       error: 'Disk write failed: ENOSPC',
@@ -320,10 +321,13 @@ describe('ProgressModal — brand branch state transitions', () => {
     // Inline Copy button rides alongside the message body.
     expect(body.exists('.brand-progress__error-copy')).toBe(true)
 
-    expect(body.exists('.brand-progress__footer')).toBe(true)
-    expect(body.selectorText('.brand-progress__footer')).toContain('Reboot')
-    expect(body.selectorText('.brand-progress__footer')).toContain('Return to Dashboard')
-    expect(body.selectorText('.brand-progress__footer')).not.toContain('Minimize')
+    // Error CTAs now live in the centered hero stack (directly under the
+    // error message), not the bottom-left footer — Back (ghost) on the
+    // left, Reboot (primary) on the right.
+    expect(body.exists('.brand-progress__error-actions')).toBe(true)
+    expect(body.selectorText('.brand-progress__error-actions')).toContain('Reboot')
+    expect(body.selectorText('.brand-progress__error-actions')).toContain('Back')
+    expect(body.selectorText('.brand-progress__footer')).not.toContain('Reboot')
 
     // Errors stay mounted so the user can read / copy. Verify no close
     // emit fires even after we advance well past the grace window.
@@ -404,15 +408,17 @@ describe('ProgressModal — brand branch state transitions', () => {
     expect(body.selectorText('.brand-progress__footer')).not.toContain('Return to Dashboard')
   })
 
-  it('renders Return to Dashboard (no Reboot) on a destroy op error', async () => {
+  it('renders Back (no Reboot) on a destroy op error', async () => {
     const { body } = await mountWithOp('inst-1', {
       destroysInstance: true,
       finished: true,
       error: 'Partial delete failed',
     })
-    expect(body.exists('.brand-progress__footer')).toBe(true)
-    expect(body.selectorText('.brand-progress__footer')).toContain('Return to Dashboard')
-    expect(body.selectorText('.brand-progress__footer')).not.toContain('Reboot')
+    // Destroy ops can't be rebooted, so only Back renders (as primary)
+    // in the centered error-actions row.
+    expect(body.exists('.brand-progress__error-actions')).toBe(true)
+    expect(body.selectorText('.brand-progress__error-actions')).toContain('Back')
+    expect(body.selectorText('.brand-progress__error-actions')).not.toContain('Reboot')
   })
 
   it('cancels the in-flight destroy op and emits close when Cancel is clicked', async () => {
