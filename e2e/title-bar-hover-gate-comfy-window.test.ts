@@ -59,16 +59,16 @@ test.beforeEach(async () => {
   await waitForHoverActive(titleBar, false)
 })
 
-test('hover gate is inert after mount on the comfy-window title bar @windows @macos @linux', async () => {
+test('hover gate is inert after mount on the comfy-window title bar @ci', async () => {
   expect(await isHoverActive(titleBar)).toBe(false)
 })
 
-test('pointermove enables the comfy-window hover gate @windows @macos @linux', async () => {
+test('pointermove enables the comfy-window hover gate @ci', async () => {
   await dispatchPointerMove(titleBar)
   await waitForHoverActive(titleBar, true)
 })
 
-test('window.blur drops the comfy-window hover gate @windows @macos @linux', async () => {
+test('window.blur drops the comfy-window hover gate @ci', async () => {
   await dispatchPointerMove(titleBar)
   await waitForHoverActive(titleBar, true)
 
@@ -76,7 +76,7 @@ test('window.blur drops the comfy-window hover gate @windows @macos @linux', asy
   await waitForHoverActive(titleBar, false)
 })
 
-test('window.focus alone does NOT re-enable the comfy-window hover gate — only pointermove does @windows @macos @linux', async () => {
+test('window.focus alone does NOT re-enable the comfy-window hover gate — only pointermove does @ci', async () => {
   await dispatchPointerMove(titleBar)
   await waitForHoverActive(titleBar, true)
   await dispatchWindowBlur(titleBar)
@@ -90,7 +90,7 @@ test('window.focus alone does NOT re-enable the comfy-window hover gate — only
   await waitForHoverActive(titleBar, true)
 })
 
-test('pointerleave drops the comfy-window hover gate @windows @macos @linux', async () => {
+test('pointerleave drops the comfy-window hover gate @ci', async () => {
   await dispatchPointerMove(titleBar)
   await waitForHoverActive(titleBar, true)
 

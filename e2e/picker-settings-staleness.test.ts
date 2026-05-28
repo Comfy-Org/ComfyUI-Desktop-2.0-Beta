@@ -82,7 +82,7 @@ test.afterAll(async () => {
   if (installBPath) await rm(installBPath, { recursive: true, force: true })
 })
 
-test('right pane clears stale sections when switching install A → B @lifecycle', async () => {
+test('right pane clears stale sections when switching install A → B @ci', async () => {
   // Open the picker directly in expanded mode, pre-selected on A.
   // `openInstancePicker` is the same renderer-facing bridge the title
   // bar uses; we drive it from the panel so we don't have to chase

@@ -84,7 +84,7 @@ test.afterAll(async () => {
   if (sourcePath) await rm(sourcePath, { recursive: true, force: true })
 })
 
-test('copy-update keeps the new install when the chained update fails @lifecycle', async () => {
+test('copy-update keeps the new install when the chained update fails @ci', async () => {
   // Start capturing comfy-output BEFORE firing the action — the handler
   // emits the failure + retry hint via sendOutput during the update
   // step, and we need to assert both lines reached the renderer.

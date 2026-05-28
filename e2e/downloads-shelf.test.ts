@@ -59,7 +59,7 @@ test.beforeEach(async () => {
 // flex-allocated-height regression without manual smoke testing.
 // ---------------------------------------------------------------------------
 
-test('empty drawer fits content (popup height < 260px) @windows @macos @linux', async () => {
+test('empty drawer fits content (popup height < 260px) @ci', async () => {
   await openDownloadsTray(ctx.titleBar)
   await waitForPopupVisible(ctx.app)
   await waitForStableBounds(ctx.app)
@@ -74,7 +74,7 @@ test('empty drawer fits content (popup height < 260px) @windows @macos @linux', 
   expect(bounds!.bounds.height).toBeGreaterThan(40)
 })
 
-test('one downloading entry fits content (NOT clipped at 396 ceiling) @windows @macos @linux', async () => {
+test('one downloading entry fits content (NOT clipped at 396 ceiling) @ci', async () => {
   await seedDownloads(ctx.app, {
     active: [makeEntry({ url: 'https://example.test/m1.safetensors', filename: 'm1.safetensors', status: 'downloading', progress: 0.5 })],
     recent: [],
@@ -91,7 +91,7 @@ test('one downloading entry fits content (NOT clipped at 396 ceiling) @windows @
   expect(bounds!.bounds.height).toBeLessThan(260)
 })
 
-test('many entries cap at the ceiling and the list scrolls @windows @macos @linux', async () => {
+test('many entries cap at the ceiling and the list scrolls @ci', async () => {
   const active: DownloadProgressLike[] = []
   for (let i = 0; i < 12; i++) {
     active.push(
@@ -130,7 +130,7 @@ test('many entries cap at the ceiling and the list scrolls @windows @macos @linu
 // active rows, remove for terminal rows).
 // ---------------------------------------------------------------------------
 
-test('per-status row close button maps to the right action @windows @macos @linux', async () => {
+test('per-status row close button maps to the right action @ci', async () => {
   await seedDownloads(ctx.app, {
     active: [
       makeEntry({ url: 'u-dl', filename: 'dl.safetensors', status: 'downloading', progress: 0.5 }),
@@ -180,7 +180,7 @@ test('per-status row close button maps to the right action @windows @macos @linu
 // owes the user when a download starts mid-shelf-open).
 // ---------------------------------------------------------------------------
 
-test('the open popup repaints live when tray state changes @windows @macos @linux', async () => {
+test('the open popup repaints live when tray state changes @ci', async () => {
   await openDownloadsTray(ctx.titleBar)
   await waitForPopupVisible(ctx.app)
   await waitForStableBounds(ctx.app)

@@ -55,7 +55,7 @@ test.afterAll(async () => {
   if (installPath) await rm(installPath, { recursive: true, force: true })
 })
 
-test('ProgressModal Reboot re-runs the same apiCall to recover an errored install @lifecycle', async () => {
+test('ProgressModal Reboot re-runs the same apiCall to recover an errored install @ci', async () => {
   // Seed a pre-existing errorInstance to mimic the audit's #24 setup —
   // the install was already errored before the user took any action
   // against it (distinct from #7, where the error originates inside the

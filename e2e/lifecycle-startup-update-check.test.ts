@@ -82,7 +82,7 @@ test.afterAll(async () => {
   if (stagedInstallPath) await rm(stagedInstallPath, { recursive: true, force: true })
 })
 
-test('startup pre-warm fills the release cache without any UI gesture @lifecycle', async () => {
+test('startup pre-warm fills the release cache without any UI gesture @ci', async () => {
   test.setTimeout(60_000)
 
   // Poll the detail-sections payload — same pipeline the dashboard

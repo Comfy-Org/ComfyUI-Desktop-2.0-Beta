@@ -47,11 +47,11 @@ const IDLE_APP_UPDATE: AppUpdateStateLike = { kind: null, version: null, autoUpd
 // App-update pill — visibility per state.
 // ---------------------------------------------------------------------------
 
-test('desktop-update pill is hidden when state is idle @windows @macos @linux', async () => {
+test('desktop-update pill is hidden when state is idle @ci', async () => {
   expect(await ctx.titleBar.exists('.title-update-pill.is-app-update')).toBe(false)
 })
 
-test('desktop-update pill renders for state=available @windows @macos @linux', async () => {
+test('desktop-update pill renders for state=available @ci', async () => {
   await setAppUpdateState(ctx.app, { kind: 'available', version: '1.2.3', autoUpdate: false })
   await expect.poll(() => ctx.titleBar.exists('.title-update-pill.is-app-update'), {
     timeout: 5_000,
@@ -64,7 +64,7 @@ test('desktop-update pill renders for state=available @windows @macos @linux', a
   expect(await ctx.titleBar.exists('.title-update-pill.is-app-update.is-downloading')).toBe(false)
 })
 
-test('desktop-update pill renders for state=downloading @windows @macos @linux', async () => {
+test('desktop-update pill renders for state=downloading @ci', async () => {
   await setAppUpdateState(ctx.app, { kind: 'downloading', version: '1.2.3', autoUpdate: true })
   await expect.poll(
     () => ctx.titleBar.exists('.title-update-pill.is-app-update.is-downloading'),
@@ -72,7 +72,7 @@ test('desktop-update pill renders for state=downloading @windows @macos @linux',
   ).toBe(true)
 })
 
-test('desktop-update pill renders for state=ready @windows @macos @linux', async () => {
+test('desktop-update pill renders for state=ready @ci', async () => {
   await setAppUpdateState(ctx.app, { kind: 'ready', version: '1.2.3', autoUpdate: true })
   await expect.poll(
     () => ctx.titleBar.exists('.title-update-pill.is-app-update.is-ready'),
@@ -84,7 +84,7 @@ test('desktop-update pill renders for state=ready @windows @macos @linux', async
 // App-update pill — click flow.
 // ---------------------------------------------------------------------------
 
-test('clicking the ready desktop-update pill opens the embedded system-modal restart prompt @windows @macos @linux', async () => {
+test('clicking the ready desktop-update pill opens the embedded system-modal restart prompt @ci', async () => {
   await setAppUpdateState(ctx.app, { kind: 'ready', version: '1.2.3', autoUpdate: true })
   await expect.poll(
     () => ctx.titleBar.exists('.title-update-pill.is-app-update.is-ready'),
@@ -106,7 +106,7 @@ test('clicking the ready desktop-update pill opens the embedded system-modal res
 // Install-update pill — install-less suppression.
 // ---------------------------------------------------------------------------
 
-test('install-update pill stays hidden on the install-less chooser host even with an override @windows @macos @linux', async () => {
+test('install-update pill stays hidden on the install-less chooser host even with an override @ci', async () => {
   await setInstallUpdate(ctx.app, { available: true, version: '99.0.0' })
   // Wait a beat to make sure no background re-broadcast snuck the pill on.
   await new Promise((r) => setTimeout(r, 250))

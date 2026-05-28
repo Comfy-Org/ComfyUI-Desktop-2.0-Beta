@@ -115,7 +115,7 @@ async function injectConflict(): Promise<void> {
   })()`)
 }
 
-test('port-conflict banner + dual-action footer render when result.portConflict is set @lifecycle', async () => {
+test('port-conflict banner + dual-action footer render when result.portConflict is set @ci', async () => {
   await injectConflict()
 
   await ctx.panel.waitForVisible(byTestId(TID.progressPortConflictBanner), { timeout: 10_000 })
@@ -128,7 +128,7 @@ test('port-conflict banner + dual-action footer render when result.portConflict 
   expect(await ctx.panel.exists(byTestId(TID.progressReboot))).toBe(false)
 })
 
-test('Use Next Port fires runAction(launch) with portOverride @lifecycle', async () => {
+test('Use Next Port fires runAction(launch) with portOverride @ci', async () => {
   await injectConflict()
   await ctx.panel.waitForVisible(byTestId(TID.progressPortConflictUsePort), { timeout: 10_000 })
 
@@ -149,7 +149,7 @@ test('Use Next Port fires runAction(launch) with portOverride @lifecycle', async
   expect(launchCall!.actionData).toEqual({ portOverride: NEXT_PORT })
 })
 
-test('Kill Process confirms, hits killPortProcess, then re-invokes op.apiCall @lifecycle', async () => {
+test('Kill Process confirms, hits killPortProcess, then re-invokes op.apiCall @ci', async () => {
   await injectConflict()
   await ctx.panel.waitForVisible(byTestId(TID.progressPortConflictKill), { timeout: 10_000 })
 

@@ -1,0 +1,61 @@
+name: CI (real lifecycle)
+
+# Real-user lifecycle suite. Runs on a single OS (windows) because each
+# test downloads ~500 MB of standalone payload and the wall-clock for
+# the full chain is ~45-60 min. Scheduled nightly + manual dispatch.
+#
+# See e2e/AGENTS.md for the @real contract.
+on:
+  workflow_dispatch:
+  schedule:
+    # 09:00 UTC daily (02:00 PT) — after the typical US workday wraps,
+    # so a failure surfaces by morning standup.
+    - cron: '0 9 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-real-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  real:
+    name: Real lifecycle (windows)
+    runs-on: windows-latest
+    timeout-minutes: 90
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build app
+        run: pnpm run build
+
+      - name: Run real lifecycle suite
+        run: pnpm run test:e2e:real
+
+      - name: Upload Playwright failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-real-failure
+          path: |
+            test-results/
+            playwright-report/
+          retention-days: 14
+          if-no-files-found: ignore

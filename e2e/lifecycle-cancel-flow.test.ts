@@ -111,7 +111,7 @@ function readGuardVerdict(): Promise<boolean> {
   return ctx.panel.evaluate<boolean>('window.__guardPromise')
 }
 
-test('useActionGuard fires cancel-operation when the user confirms cancelling the busy op @lifecycle', async () => {
+test('useActionGuard fires cancel-operation when the user confirms cancelling the busy op @ci', async () => {
   // Active session + in-flight op makes the guard's busy check fire.
   await startInFlightOp()
   await runGuardInBackground('Restart ComfyUI')
@@ -140,7 +140,7 @@ test('useActionGuard fires cancel-operation when the user confirms cancelling th
   expect(await readGuardVerdict()).toBe(true)
 })
 
-test('useActionGuard returns false without cancelling when the user dismisses the confirm @lifecycle', async () => {
+test('useActionGuard returns false without cancelling when the user dismisses the confirm @ci', async () => {
   await startInFlightOp()
   await runGuardInBackground('Restart ComfyUI')
 
@@ -158,7 +158,7 @@ test('useActionGuard returns false without cancelling when the user dismisses th
   await settleInFlightOp({ ok: false, cancelled: true })
 })
 
-test('Return-to-Dashboard from in-flight op cancels and closes the takeover @lifecycle', async () => {
+test('Return-to-Dashboard from in-flight op cancels and closes the takeover @ci', async () => {
   // Seed a real running session so the local-install confirm prompt
   // appears (cloud / remote skip the prompt).
   await seedRunningSession(ctx.app, {

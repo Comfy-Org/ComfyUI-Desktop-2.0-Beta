@@ -111,7 +111,7 @@ async function openExpandedPicker(): Promise<void> {
   )
 }
 
-test('pick-install for a running install dismisses the popup and focuses the existing host @lifecycle', async () => {
+test('pick-install for a running install dismisses the popup and focuses the existing host @ci', async () => {
   // Seed a running session so the chain hits the
   // `performPickerLaunch.focused-running` branch. Without this the
   // panel would attempt a real `runAction('launch')` against a fake
@@ -155,7 +155,7 @@ test('pick-install for a running install dismisses the popup and focuses the exi
   expect(focusCalls[0]?.installationId).toBe(INSTALL_ID)
 })
 
-test('pick-install for a stopped install dismisses the popup and fires runAction(launch) @lifecycle', async () => {
+test('pick-install for a stopped install dismisses the popup and fires runAction(launch) @ci', async () => {
   // No seedRunningSession — the chain hits
   // `performChooserLaunch.launched`: looks up the launch action,
   // claims the chooser host, and dispatches `runAction('launch')`
@@ -200,7 +200,7 @@ test('pick-install for a stopped install dismisses the popup and fires runAction
   expect(focusCalls.length).toBe(0)
 })
 
-test('open-new-install dismisses the popup and mounts the new-install takeover @lifecycle', async () => {
+test('open-new-install dismisses the popup and mounts the new-install takeover @ci', async () => {
   await openExpandedPicker()
 
   const popup = titlePopupPage(ctx.app)
@@ -223,7 +223,7 @@ test('open-new-install dismisses the popup and mounts the new-install takeover @
   await ctx.panel.waitForVisible('.config-shell', { timeout: 10_000 })
 })
 
-test('open-install-action with reveal-in-folder keeps the popup open and fires the action @lifecycle', async () => {
+test('open-install-action with reveal-in-folder keeps the popup open and fires the action @ci', async () => {
   await openExpandedPicker()
 
   const popup = titlePopupPage(ctx.app)

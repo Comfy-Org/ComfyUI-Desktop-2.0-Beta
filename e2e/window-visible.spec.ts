@@ -3,7 +3,7 @@ import { launchLauncherApp } from './support/electronHarness'
 import { panelPage, waitForWebContents } from './support/cdpPages'
 
 test.describe('Main window visibility (#283)', () => {
-  test('main window becomes visible after launch @macos @windows @linux', async () => {
+  test('main window becomes visible after launch @ci', async () => {
     const { application, cleanup } = await launchLauncherApp()
     try {
       // The host window starts with show:false and transitions via ready-to-show.

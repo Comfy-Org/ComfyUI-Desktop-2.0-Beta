@@ -81,7 +81,7 @@ async function fireDeepLink(payload: Record<string, unknown>): Promise<void> {
   }, payload)
 }
 
-test('comfy://open-settings?tab=global opens Global Settings @lifecycle', async () => {
+test('comfy://open-settings?tab=global opens Global Settings @ci', async () => {
   await fireDeepLink({ kind: 'open-settings', settingsTab: 'global' })
 
   await expect
@@ -98,7 +98,7 @@ test('comfy://open-settings?tab=global opens Global Settings @lifecycle', async 
   expect(pickerCalls.length).toBe(0)
 })
 
-test('comfy://open-settings?tab=comfy on chooser host opens the picker (compact fallback) @lifecycle', async () => {
+test('comfy://open-settings?tab=comfy on chooser host opens the picker (compact fallback) @ci', async () => {
   // Chooser host has no install backing it, so `useDeepLinkRouter`
   // falls through to the compact picker so the user can pick an
   // install before landing on its Config tab. Install-backed hosts
@@ -127,7 +127,7 @@ test('comfy://open-settings?tab=comfy on chooser host opens the picker (compact 
   expect(globalCalls.length).toBe(0)
 })
 
-test('comfy://install-update with a non-matching installationId is ignored on chooser host @lifecycle', async () => {
+test('comfy://install-update with a non-matching installationId is ignored on chooser host @ci', async () => {
   // The chooser host's `opts.installationId` is the empty string. The
   // `install-update` branch guards on `!id || id !== opts.installationId`
   // so a payload for an unrelated install must NOT open any popup

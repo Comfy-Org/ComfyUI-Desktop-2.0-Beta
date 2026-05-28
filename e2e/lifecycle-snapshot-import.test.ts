@@ -112,7 +112,7 @@ test.afterAll(async () => {
   if (envelopeDir) await rm(envelopeDir, { recursive: true, force: true })
 })
 
-test('Import preview → Continue writes the envelope snapshot into the install @lifecycle', async () => {
+test('Import preview → Continue writes the envelope snapshot into the install @ci', async () => {
   // Sanity: empty install starts with zero snapshots.
   const initialCount = await ctx.panel.evaluate<number>(
     `window.api.getSnapshots(${JSON.stringify(INSTALL_ID)}).then(d => d.snapshots.length)`,

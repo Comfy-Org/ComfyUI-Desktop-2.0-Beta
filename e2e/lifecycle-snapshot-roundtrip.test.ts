@@ -163,7 +163,7 @@ async function findExportedFile(prefix: string): Promise<string | null> {
   return match ? path.join(exportDir, match) : null
 }
 
-test('Export All from A writes an envelope containing both seeded snapshots @lifecycle', async () => {
+test('Export All from A writes an envelope containing both seeded snapshots @ci', async () => {
   const popup = await openSnapshotsTab(INSTALL_ID_A)
 
   await popup.waitForVisible(byTestId(TID.snapshotsExportAll), { timeout: 5_000 })
@@ -195,7 +195,7 @@ test('Export All from A writes an envelope containing both seeded snapshots @lif
   expect(labels).toContain(LABEL_SECOND)
 })
 
-test('Import into B consumes the envelope and writes both snapshots @lifecycle', async () => {
+test('Import into B consumes the envelope and writes both snapshots @ci', async () => {
   const initialCount = await ctx.panel.evaluate<number>(
     `window.api.getSnapshots(${JSON.stringify(INSTALL_ID_B)}).then(d => d.snapshots.length)`,
   )

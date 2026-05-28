@@ -32,7 +32,7 @@ test.afterAll(async () => {
   await ctx?.cleanup()
 })
 
-test('cold start lands on first-use start screen @lifecycle', async () => {
+test('cold start lands on first-use start screen @ci', async () => {
   // Consent + cloud/local pick share a single merged start screen
   // (commit 5619823). The hero + Continue CTA prove we've reached the
   // takeover; the Continue button is still disabled because ToS isn't
@@ -41,7 +41,7 @@ test('cold start lands on first-use start screen @lifecycle', async () => {
   await ctx.panel.waitForVisible('[data-testid="first-use-continue"]')
 })
 
-test('Skip Onboarding IPC clears bookkeeping and reveals the chooser @lifecycle', async () => {
+test('Skip Onboarding IPC clears bookkeeping and reveals the chooser @ci', async () => {
   // Reset so the assertions below count only the calls produced by
   // the skip-onboarding IPC (boot already exercised consent-step
   // mounting which pushed `'consent-lockdown'`).

@@ -61,7 +61,7 @@ test.afterAll(async () => {
   if (legacyBasePath) await rm(legacyBasePath, { recursive: true, force: true })
 })
 
-test('cold start with legacy desktop lands on start screen and surfaces migrate sub-step @lifecycle', async () => {
+test('cold start with legacy desktop lands on start screen and surfaces migrate sub-step @ci', async () => {
   // Merged start screen — consent + cloud/local + ToS all share one
   // page (commit 5619823). The hasLegacyDesktop branch fires after the
   // user picks Local and clicks Continue.
@@ -97,7 +97,7 @@ test('cold start with legacy desktop lands on start screen and surfaces migrate 
   await ctx.panel.waitForVisible('[data-testid="first-use-local-migrate"]', { timeout: 10_000 })
 })
 
-test('migrate sub-step opens MigrateConfirmTakeover (takeover surface) @lifecycle', async () => {
+test('migrate sub-step opens MigrateConfirmTakeover (takeover surface) @ci', async () => {
   // Reset run-action invocations so the confirm assertion below counts
   // only the migrate-to-standalone dispatch this test produces.
   await resetIpcInvocations(ctx.app, 'run-action')

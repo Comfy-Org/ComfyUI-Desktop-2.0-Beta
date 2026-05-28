@@ -3,7 +3,7 @@
  * GPU, latest stable release) → ComfyUI auto-launches via brand chrome →
  * dashboard return → relaunch → stop.
  *
- * Downloads ~500 MB of standalone payload. Tagged @lifecycle and runs under
+ * Downloads ~500 MB of standalone payload. Tagged @real and runs under
  * the dedicated Playwright project (10-minute per-test timeout).
  *
  * Run:
@@ -184,7 +184,7 @@ async function comfyFrontendIsLoaded(): Promise<boolean> {
 // First-use takeover → New Install takeover
 // ---------------------------------------------------------------------------
 
-test('cold start lands on first-use start screen @lifecycle', async () => {
+test('cold start lands on first-use start screen @real', async () => {
   test.skip(HYDRATED, 'reuse mode: first-use already completed on the persisted profile')
   // The first-use takeover gates the chooser body until consent +
   // cloud/local pick + Continue are completed on the merged start
@@ -195,7 +195,7 @@ test('cold start lands on first-use start screen @lifecycle', async () => {
   await ctx.panel.waitForVisible('[data-testid="first-use-continue"]')
 })
 
-test('accept ToS + pick local (non-express) opens New Install takeover with form pre-filled @lifecycle', async () => {
+test('accept ToS + pick local (non-express) opens New Install takeover with form pre-filled @real', async () => {
   test.skip(HYDRATED, 'reuse mode: first-use already completed on the persisted profile')
 
   // Pick Local — reveals the Express-Install modifier. We want the
@@ -320,7 +320,7 @@ test('accept ToS + pick local (non-express) opens New Install takeover with form
   }
 })
 
-test('completes install (auto-launches via brand chrome) @lifecycle', async () => {
+test('completes install (auto-launches via brand chrome) @real', async () => {
   test.skip(HYDRATED, 'reuse mode: install already on disk on the persisted profile')
   // No explicit variant / release / name picking — trust the
   // recommended defaults the modal has already filled in. On a no-GPU
@@ -336,7 +336,7 @@ test('completes install (auto-launches via brand chrome) @lifecycle', async () =
   await expect.poll(comfyFrontendIsLoaded, { timeout: 480_000, intervals: [1_000, 2_000] }).toBe(true)
 })
 
-test('first-use Local chain marks firstUseCompleted once and cycles firstUseMode @lifecycle', async () => {
+test('first-use Local chain marks firstUseCompleted once and cycles firstUseMode @real', async () => {
   test.skip(HYDRATED, 'reuse mode: first-use IPC log only exists on the boot that drove the chain')
   // Asserts the chain bookkeeping the auto-launch above relied on:
   //   - `markFirstUseCompleted` (set-setting firstUseCompleted=true)
@@ -360,7 +360,7 @@ test('first-use Local chain marks firstUseCompleted once and cycles firstUseMode
 // Launch & verify split-view + dark background
 // ---------------------------------------------------------------------------
 
-test('auto-launch landed on a single host window (in-place attach) @lifecycle', async () => {
+test('auto-launch landed on a single host window (in-place attach) @real', async () => {
   test.skip(HYDRATED, 'reuse mode: install was not auto-launched on this boot')
   // In-place attach guard: the redesigned install flow has
   // `autoLaunchOnFinish: true`, so the chooser host transforms into
@@ -389,7 +389,7 @@ test('auto-launch landed on a single host window (in-place attach) @lifecycle', 
  * BrowserWindow background is dark (#171717) so no white frame flashes
  * pre-load.
  */
-test('ComfyUI window has dark background and split-view architecture @lifecycle', async () => {
+test('ComfyUI window has dark background and split-view architecture @real', async () => {
   test.skip(HYDRATED, 'reuse mode: comfy is not auto-running on this boot')
   const arch = await ctx.app.evaluate(({ BrowserWindow, WebContentsView }) => {
     for (const win of BrowserWindow.getAllWindows()) {
@@ -428,7 +428,7 @@ test('ComfyUI window has dark background and split-view architecture @lifecycle'
 // Return to Dashboard — symmetric undo of in-place attach
 // ---------------------------------------------------------------------------
 
-test('return-to-dashboard flips install host in place (same window id) @lifecycle', async () => {
+test('return-to-dashboard flips install host in place (same window id) @real', async () => {
   test.skip(HYDRATED, 'reuse mode: no install-backed host exists to flip (comfy not auto-running)')
   // Snapshot the live BrowserWindow ids BEFORE the flip so the
   // post-flip assertion can prove the install-backed host was reused
@@ -517,7 +517,7 @@ let _updateInstallPath = ''
 let _comfyUIDir = ''
 let _installedCommit = ''
 
-test('stop ComfyUI again so update-comfyui (requires stopped) can run @lifecycle', async () => {
+test('stop ComfyUI again so update-comfyui (requires stopped) can run @real', async () => {
   // `update-comfyui` is in REQUIRES_STOPPED; the prior test re-launched.
   // Detach in place rather than closing the window so the chooser host
   // stays alive for the subsequent re-launch.
@@ -527,7 +527,7 @@ test('stop ComfyUI again so update-comfyui (requires stopped) can run @lifecycle
   await expectChooserVisible(ctx.panel)
 })
 
-test('captures install metadata for the update tests @lifecycle', async () => {
+test('captures install metadata for the update tests @real', async () => {
   const installs = await ctx.panel.evaluate<InstallationLite[]>(
     `window.api.getInstallations()`,
   )
@@ -547,7 +547,7 @@ test('captures install metadata for the update tests @lifecycle', async () => {
   expect(_installedCommit).toMatch(/^[a-f0-9]{40}$/)
 })
 
-test('update-comfyui drives the real updater and moves HEAD forward @lifecycle', async () => {
+test('update-comfyui drives the real updater and moves HEAD forward @real', async () => {
   // Real update can run pip-install if requirements.txt changed
   // between the oldest standalone release we installed on and the
   // latest stable tag. Stretch the per-test timeout to cover that.
@@ -572,7 +572,7 @@ test('update-comfyui drives the real updater and moves HEAD forward @lifecycle',
   expect(parseInt(aheadCount, 10), `post-update HEAD ${headAfter} is not ahead of installed commit ${_installedCommit}`).toBeGreaterThan(0)
 })
 
-test('re-launch ComfyUI after update validates the updated install runs @lifecycle', async () => {
+test('re-launch ComfyUI after update validates the updated install runs @real', async () => {
   await clickInstallTile(ctx.panel, 'ComfyUI')
   await expect.poll(comfyFrontendIsLoaded, { timeout: 180_000, intervals: [1_000] }).toBe(true)
 })
@@ -648,7 +648,7 @@ async function getStopsFor(installationId: string): Promise<StopComfyInvocation[
 let _restoreSnapshotFilename = ''
 let _snapshotHeadAtCapture = ''
 
-test('captures a snapshot for the picker-driven restore test @lifecycle', async () => {
+test('captures a snapshot for the picker-driven restore test @real', async () => {
   // ComfyUI is running from the prior re-launch test. `snapshot-save`
   // is NOT in REQUIRES_STOPPED so it runs against a live install — the
   // snapshot just records the current state. Captured label gives us a
@@ -702,7 +702,7 @@ test('captures a snapshot for the picker-driven restore test @lifecycle', async 
 // beyond what's asserted below.
 // ---------------------------------------------------------------------------
 
-test('picker-driven cross-channel update-comfyui (stable → latest) IN_PLACE_RELAUNCH while running @lifecycle', async () => {
+test('picker-driven cross-channel update-comfyui (stable → latest) IN_PLACE_RELAUNCH while running @real', async () => {
   // Real cross-channel update: switches the install's `updateChannel`
   // from `stable` to `latest`, runs the master-branch update, then
   // relaunches in place. Stretch the timeout to cover a possible
@@ -821,7 +821,7 @@ test('picker-driven cross-channel update-comfyui (stable → latest) IN_PLACE_RE
   expect(launchIdx, 'launch run-action should follow update-comfyui').toBeGreaterThan(0)
 })
 
-test('picker-driven snapshot-restore IN_PLACE_RELAUNCH while running @lifecycle', async () => {
+test('picker-driven snapshot-restore IN_PLACE_RELAUNCH while running @real', async () => {
   test.setTimeout(600_000)
   expect(_restoreSnapshotFilename, 'restore-target snapshot not captured').toBeTruthy()
 
@@ -904,7 +904,7 @@ test('picker-driven snapshot-restore IN_PLACE_RELAUNCH while running @lifecycle'
 // invocation count for `stop-comfyui` stays at zero.
 // ---------------------------------------------------------------------------
 
-test('picker compact-row Restart drives system-modal confirm + re-launch @lifecycle', async () => {
+test('picker compact-row Restart drives system-modal confirm + re-launch @real', async () => {
   test.setTimeout(300_000)
 
   await resetIpcInvocations(ctx.app, 'stop-comfyui')
@@ -959,7 +959,7 @@ test('picker compact-row Restart drives system-modal confirm + re-launch @lifecy
 // one continuous op instead of stop→idle→launch flashes.
 // ---------------------------------------------------------------------------
 
-test('picker pin-bottom Restart drives stop+launch under one "Restarting ComfyUI" progress title @lifecycle', async () => {
+test('picker pin-bottom Restart drives stop+launch under one "Restarting ComfyUI" progress title @real', async () => {
   test.setTimeout(300_000)
 
   // Sanity: prior compact-row Restart test left ComfyUI running.
@@ -1053,7 +1053,7 @@ test('picker pin-bottom Restart drives stop+launch under one "Restarting ComfyUI
 let _copyInstallId = ''
 let _copyInstallPath = ''
 
-test('picker pin-bottom Copy creates a real ~500MB copy of the install @lifecycle', async () => {
+test('picker pin-bottom Copy creates a real ~500MB copy of the install @real', async () => {
   test.setTimeout(600_000)
 
   // Copy is REQUIRES_STOPPED — stop comfy via return-to-dashboard so
@@ -1173,7 +1173,7 @@ test('picker pin-bottom Copy creates a real ~500MB copy of the install @lifecycl
     .toBe(0)
 })
 
-test('cleans up the copy install before the original delete test runs @lifecycle', async () => {
+test('cleans up the copy install before the original delete test runs @real', async () => {
   test.setTimeout(300_000)
   expect(_copyInstallId, 'no copy install id captured to clean up').toBeTruthy()
 
@@ -1211,7 +1211,7 @@ test('cleans up the copy install before the original delete test runs @lifecycle
 let _kebabCopyInstallId = ''
 let _kebabCopyInstallPath = ''
 
-test('dashboard kebab "Copy Installation" creates a real ~500MB copy @lifecycle', async () => {
+test('dashboard kebab "Copy Installation" creates a real ~500MB copy @real', async () => {
   test.setTimeout(600_000)
 
   // The prior cleanup test ran direct `runAction('delete')` against
@@ -1328,7 +1328,7 @@ test('dashboard kebab "Copy Installation" creates a real ~500MB copy @lifecycle'
     .toBe(0)
 })
 
-test('dashboard kebab "Untrack" removes the install from the registry without touching disk @lifecycle', async () => {
+test('dashboard kebab "Untrack" removes the install from the registry without touching disk @real', async () => {
   test.setTimeout(60_000)
   expect(_kebabCopyInstallId, 'no kebab-copy install id to untrack').toBeTruthy()
   expect(_kebabCopyInstallPath, 'no kebab-copy install path captured').toBeTruthy()
@@ -1383,7 +1383,7 @@ test('dashboard kebab "Untrack" removes the install from the registry without to
   expect(remaining.find((i) => i.id === _updateInstallId), 'untrack must not affect the original install').toBeDefined()
 })
 
-test('cleans up the untracked kebab-copy on disk before the final Delete test runs @lifecycle', async () => {
+test('cleans up the untracked kebab-copy on disk before the final Delete test runs @real', async () => {
   test.setTimeout(120_000)
   expect(_kebabCopyInstallPath, 'no kebab-copy install path to clean up').toBeTruthy()
   expect(existsSync(_kebabCopyInstallPath), 'kebab-copy dir already gone — Untrack test invariant violated').toBe(true)
@@ -1420,7 +1420,7 @@ test('cleans up the untracked kebab-copy on disk before the final Delete test ru
 let _deleteInstallId = ''
 let _deleteInstallPath = ''
 
-test('stops comfy and captures the installed dir state before driving delete @lifecycle', async () => {
+test('stops comfy and captures the installed dir state before driving delete @real', async () => {
   // delete is in REQUIRES_STOPPED — stop comfy via return-to-dashboard so
   // the IPC handler doesn't bail on us. rtd preserves the chooser host so
   // we still have an IPC target for delete + getInstallations.
@@ -1444,7 +1444,7 @@ test('stops comfy and captures the installed dir state before driving delete @li
   expect(existsSync(path.join(_deleteInstallPath, '.comfyui-desktop-2')), 'installed dir missing .comfyui-desktop-2 marker').toBe(true)
 })
 
-test('real delete wipes the fully-installed ~500MB tree off disk @lifecycle', async () => {
+test('real delete wipes the fully-installed ~500MB tree off disk @real', async () => {
   // Recursive delete of a full standalone install can take a while on
   // Windows when files are large (the .venv ships thousands of small
   // files plus a few hundred-MB torch wheels). Stretch the timeout.

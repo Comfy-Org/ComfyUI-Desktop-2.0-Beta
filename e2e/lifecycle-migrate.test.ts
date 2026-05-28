@@ -100,7 +100,7 @@ test.afterAll(async () => {
   if (stagedSnapshotPath) await rm(stagedSnapshotPath, { force: true })
 })
 
-test('auto-tracker registers Legacy Desktop install on boot @lifecycle', async () => {
+test('auto-tracker registers Legacy Desktop install on boot @ci', async () => {
   await ctx.panel.waitFor(
     async () => {
       const names = await ctx.panel.allText(
@@ -120,7 +120,7 @@ test('auto-tracker registers Legacy Desktop install on boot @lifecycle', async (
   legacyInstallId = desktop!.id
 })
 
-test('preview-desktop-migration stages a snapshot envelope from the legacy install @lifecycle', async () => {
+test('preview-desktop-migration stages a snapshot envelope from the legacy install @ci', async () => {
   expect(legacyInstallId, 'legacyInstallId not captured by the prior test').toBeTruthy()
   const result = await ctx.panel.evaluate<{
     ok: boolean
@@ -139,7 +139,7 @@ test('preview-desktop-migration stages a snapshot envelope from the legacy insta
   stagedSnapshotPath = result.snapshotPath!
 })
 
-test('standalone source exposes a CPU variant the migration target picker can pin @lifecycle', async () => {
+test('standalone source exposes a CPU variant the migration target picker can pin @ci', async () => {
   // The renderer-side migration target picker calls these same field-option
   // IPCs to build its release / variant rows. The CI lifecycle suite pins
   // CPU on Windows; without that pick we'd download a GPU payload that
