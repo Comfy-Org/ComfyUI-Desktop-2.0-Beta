@@ -46,18 +46,18 @@ test.beforeEach(async () => {
   await waitForHoverActive(ctx.titleBar, false)
 })
 
-test('hover gate is inert immediately after mount @windows @macos @linux', async () => {
+test('hover gate is inert immediately after mount @ci', async () => {
   // `onMounted` flips `isHoverActive` off so the user only "earns"
   // hover styles after actually moving the mouse over the bar.
   expect(await isHoverActive(ctx.titleBar)).toBe(false)
 })
 
-test('pointermove inside the title bar enables the hover gate @windows @macos @linux', async () => {
+test('pointermove inside the title bar enables the hover gate @ci', async () => {
   await dispatchPointerMove(ctx.titleBar)
   await waitForHoverActive(ctx.titleBar, true)
 })
 
-test('window.blur drops the hover gate @windows @macos @linux', async () => {
+test('window.blur drops the hover gate @ci', async () => {
   // Prime the gate as enabled.
   await dispatchPointerMove(ctx.titleBar)
   await waitForHoverActive(ctx.titleBar, true)
@@ -66,7 +66,7 @@ test('window.blur drops the hover gate @windows @macos @linux', async () => {
   await waitForHoverActive(ctx.titleBar, false)
 })
 
-test('window.focus alone does NOT re-enable the hover gate — only pointermove does @windows @macos @linux', async () => {
+test('window.focus alone does NOT re-enable the hover gate — only pointermove does @ci', async () => {
   // Prime then drop the gate, then dispatch a bare focus event. The
   // gate must remain off because focus can return without the cursor
   // having moved (clicking back into the title bar to dismiss a
@@ -87,7 +87,7 @@ test('window.focus alone does NOT re-enable the hover gate — only pointermove 
   await waitForHoverActive(ctx.titleBar, true)
 })
 
-test('pointerleave on the document drops the hover gate @windows @macos @linux', async () => {
+test('pointerleave on the document drops the hover gate @ci', async () => {
   await dispatchPointerMove(ctx.titleBar)
   await waitForHoverActive(ctx.titleBar, true)
 

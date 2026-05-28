@@ -39,17 +39,17 @@ test.afterAll(async () => {
   await ctx.cleanup()
 })
 
-test('chooser body renders on cold start @windows @macos @linux', async () => {
+test('chooser body renders on cold start @ci', async () => {
   await expectChooserVisible(ctx.panel)
   expect(await ctx.panel.exists('.chooser-tile-new')).toBe(true)
 })
 
-test('title bar shows install-less pill on chooser host @windows @macos @linux', async () => {
+test('title bar shows install-less pill on chooser host @ci', async () => {
   expect(await ctx.titleBar.exists('.title-install-pill.is-install-less')).toBe(true)
   expect(await ctx.titleBar.textOf('.title-install-name')).toMatch(/Desktop 2\.0/i)
 })
 
-test('clicking New Install tile opens the new-install takeover @windows @macos @linux', async () => {
+test('clicking New Install tile opens the new-install takeover @ci', async () => {
   await clickNewInstallTile(ctx.panel)
   await expectTakeoverOpen(ctx.panel)
   await dismissOverlay(ctx.panel)
@@ -64,7 +64,7 @@ test('clicking New Install tile opens the new-install takeover @windows @macos @
 // after the dedup path runs.
 // ---------------------------------------------------------------------------
 
-test('activate hook focuses the existing chooser host instead of spawning a duplicate @windows @macos @linux', async () => {
+test('activate hook focuses the existing chooser host instead of spawning a duplicate @ci', async () => {
   // Baseline: exactly one host BrowserWindow is open from `beforeAll`.
   const before = await ctx.app.evaluate(({ BrowserWindow }) =>
     BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed()).length,
@@ -92,14 +92,14 @@ test('activate hook focuses the existing chooser host instead of spawning a dupl
 // preserve.
 // ---------------------------------------------------------------------------
 
-test('title popup + system modal webContents are pre-warmed on the chooser host @windows @macos @linux', async () => {
+test('title popup + system modal webContents are pre-warmed on the chooser host @ci', async () => {
   // Both popups are pre-warmed in `comfy-window:title-bar-ready` so the
   // first user trigger doesn't pay the load cost.
   await waitForWebContents(ctx.app, 'comfyTitlePopup.html', 10_000)
   await waitForWebContents(ctx.app, 'comfySystemModal.html', 10_000)
 })
 
-test('title popup opens, renders menu items, and closes via bridge @windows @macos @linux', async () => {
+test('title popup opens, renders menu items, and closes via bridge @ci', async () => {
   // Click the waffle menu — main pushes a config to the cached title popup
   // and flips it visible. We assert the popup is no longer marked hidden
   // by the EmbeddedPopupView contract (the WebContentsView's bounds become
@@ -128,7 +128,7 @@ test('title popup opens, renders menu items, and closes via bridge @windows @mac
   ).toBe(false)
 })
 
-test('title popup reopens after a blur dismiss (menu-closed IPC clears the reopen guard) @windows @macos @linux', async () => {
+test('title popup reopens after a blur dismiss (menu-closed IPC clears the reopen guard) @ci', async () => {
   // The previous test dismissed the popup via the close bridge — that
   // stamps the title-bar's `menuClosedAt.menu` so a click within 100ms
   // is suppressed by the time-based reopen guard. Wait past that
@@ -173,7 +173,7 @@ test('title popup reopens after a blur dismiss (menu-closed IPC clears the reope
   ).toBe(true)
 })
 
-test('title-bar tooltip popup is created on demand and hides cleanly @windows @macos @linux', async () => {
+test('title-bar tooltip popup is created on demand and hides cleanly @ci', async () => {
   // No webContents for the tooltip popup exists before the first show —
   // unlike titlePopup / systemModal, the tooltip is NOT pre-warmed.
   expect(await findWebContentsId(ctx.app, 'comfyTitleTooltip.html')).toBeNull()

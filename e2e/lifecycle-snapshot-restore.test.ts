@@ -198,7 +198,7 @@ test.afterAll(async () => {
   if (workTmpPath) await rm(workTmpPath, { recursive: true, force: true })
 })
 
-test('seeded HEADs start at commit B (sanity) @lifecycle', async () => {
+test('seeded HEADs start at commit B (sanity) @ci', async () => {
   const comfyHead = gitIn(path.join(stagedInstallPath, 'ComfyUI'), ['rev-parse', 'HEAD'])
   const nodeHead = gitIn(
     path.join(stagedInstallPath, 'ComfyUI', 'custom_nodes', NODE_DIRNAME),
@@ -208,7 +208,7 @@ test('seeded HEADs start at commit B (sanity) @lifecycle', async () => {
   expect(nodeHead).toBe(nodeCommitB)
 })
 
-test('snapshot-restore moves ComfyUI + node HEAD back to commit A @lifecycle', async () => {
+test('snapshot-restore moves ComfyUI + node HEAD back to commit A @ci', async () => {
   const list = await ctx.panel.evaluate<SnapshotListResult>(
     `window.api.getSnapshots(${JSON.stringify(INSTALL_ID)})`,
   )
@@ -236,7 +236,7 @@ test('snapshot-restore moves ComfyUI + node HEAD back to commit A @lifecycle', a
   expect(nodeHead, 'custom node HEAD did not move to commit A after restore').toBe(nodeCommitA)
 })
 
-test('restore captures a post-restore snapshot @lifecycle', async () => {
+test('restore captures a post-restore snapshot @ci', async () => {
   // After a successful restore, `actions.ts` calls `saveSnapshot(... 'post-restore')`.
   // Poll because the post-restore save runs after `update(restoreState)` returns
   // — the runAction call already awaited the action result, but the snapshot
@@ -271,18 +271,20 @@ test('restore captures a post-restore snapshot @lifecycle', async () => {
  * the op-card terminal states. The actual git-checkout work is identical
  * to the earlier test; we don't re-assert HEAD movement (that's covered).
  */
-test('picker-driven restore surfaces inline op-card + auto-dismisses on success @lifecycle', async () => {
+test('picker-driven restore surfaces inline op-card + auto-dismisses on success @ci', async () => {
   test.setTimeout(120_000)
 
   // The earlier `snapshot-restore moves … back to commit A` test already
-  // performed a restore via runAction. A `post-restore` snapshot is on
-  // disk now; pick that as the target so we have a row to expand.
+  // performed a restore via runAction. The list now reads (newest first):
+  // `post-restore` then the seeded `manual` row. The newest snapshot is
+  // the install's current state — SnapshotsView intentionally suppresses
+  // its Restore button (`v-if="i !== 0"`) since there's nothing to roll
+  // back to. Pick the older `manual` row so a real Restore CTA renders.
   const list = await ctx.panel.evaluate<SnapshotListResult>(
     `window.api.getSnapshots(${JSON.stringify(INSTALL_ID)})`,
   )
-  const target = list.snapshots.find((s) => s.trigger === 'post-restore')
-    ?? list.snapshots[0]
-  expect(target, 'no snapshot to restore in picker test').toBeDefined()
+  const target = list.snapshots.find((s) => s.trigger === 'manual')
+  expect(target, 'seeded manual snapshot missing from list').toBeDefined()
 
   await ctx.panel.evaluate<boolean>(
     `(() => {

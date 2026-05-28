@@ -1,6 +1,7 @@
 import { ipcMain } from 'electron'
 import type { BrowserWindow, WebContentsView } from 'electron'
 import * as ipc from '../lib/ipc'
+import { _runningSessions } from '../lib/ipc/shared'
 import { COMFY_BG } from '../lib/theme'
 import { destroyPanelView, ensurePanelView } from './panelView'
 import { openSystemModalAsync } from '../popups/systemModal'
@@ -179,18 +180,56 @@ export function closeAllHostWindows(): void {
  * about:blank, panelView remounted in chooser mode) and the title
  * bar repaints to the chooser-host identity.
  *
- * Funnels through `consultPanelRendererReturnToDashboard` so the
- * renderer can layer the in-flight cancel-prompt (Tier 2/3 overlays)
- * AND the local-install "Stop ComfyUI?" confirm on top of one another;
- * cloud / remote installs clear silently.
+ * Two confirm surfaces, picked on the panelView state:
+ *   - Panel alive → `consultPanelRendererReturnToDashboard` lets the
+ *     renderer layer the in-flight cancel-prompt (Tier 2/3 overlays)
+ *     AND the local-install "Stop ComfyUI?" confirm on top of one
+ *     another.
+ *   - Panel destroyed (chooser-pick attach drops the panelView and
+ *     it stays gone until the user opens Settings / the lifecycle
+ *     body) → no overlay can be in flight, so we fall back to a
+ *     shell system modal with the same "Stop & Return" copy.
+ * Cloud / remote installs and stopped sessions clear silently in
+ * both paths.
  */
 export async function returnToDashboard(parentEntryId: number): Promise<void> {
   const entry = comfyWindows.get(parentEntryId)
   if (!entry || isChooserHost(entry) || entry.window.isDestroyed()) return
-  const cleared = await consultPanelRendererReturnToDashboard(entry.panelView)
+  const panelAlive = !!entry.panelView && !entry.panelView.webContents.isDestroyed()
+  const cleared = panelAlive
+    ? await consultPanelRendererReturnToDashboard(entry.panelView)
+    : await confirmReturnToDashboardViaSystemModal(entry)
   if (!cleared) return
   if (entry.window.isDestroyed()) return
   entry.detachInstall()
+}
+
+/**
+ * "Stop & Return" confirm rendered as a shell system modal when the
+ * install-backed panelView has been destroyed (chooser-pick attach
+ * drops it, only rebuilt lazily on Settings / lifecycle access).
+ * Mirrors `useReturnToDashboardConfirm` semantics — skips the prompt
+ * for non-local installs and for already-stopped sessions, so the
+ * user can back out of a quiet install without a redundant tap.
+ */
+async function confirmReturnToDashboardViaSystemModal(
+  entry: ComfyWindowEntry,
+): Promise<boolean> {
+  if (entry.sourceCategory !== 'local') return true
+  if (entry.installationId === null) return true
+  if (!_runningSessions.has(entry.installationId)) return true
+  if (entry.window.isDestroyed()) return true
+  return openSystemModalAsync({
+    parent: entry.window,
+    spec: {
+      title: 'Return to Dashboard?',
+      message: 'ComfyUI for this installation will be stopped.',
+      confirmLabel: 'Stop & Return',
+      cancelLabel: 'Cancel',
+      confirmStyle: 'danger',
+      theme: entry.lastTheme,
+    },
+  })
 }
 
 /**

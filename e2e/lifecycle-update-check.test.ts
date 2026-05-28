@@ -127,7 +127,7 @@ test.afterAll(async () => {
   if (stagedInstallPathB) await rm(stagedInstallPathB, { recursive: true, force: true })
 })
 
-test('check-update hits the real Comfy-Org/ComfyUI remote and finds a newer release @lifecycle', async () => {
+test('check-update hits the real Comfy-Org/ComfyUI remote and finds a newer release @ci', async () => {
   const result = await ctx.panel.evaluate<RunActionResult>(
     `window.api.runAction(${JSON.stringify(INSTALL_ID)}, 'check-update')`,
   )
@@ -159,7 +159,7 @@ test('check-update hits the real Comfy-Org/ComfyUI remote and finds a newer rele
   ).toBe(true)
 })
 
-test('cross-channel fetch populates the latest channel card too @lifecycle', async () => {
+test('cross-channel fetch populates the latest channel card too @ci', async () => {
   // The check-update action prefetches the "other" channel(s) in parallel
   // (Promise.allSettled over `['stable', 'latest']`). The previous test
   // already ran check-update — now verify both cards have data, not just
@@ -210,7 +210,7 @@ function countAutoCheckUpdateCalls(calls: unknown[], installationId: string): nu
     .length
 }
 
-test('Update tab does NOT auto-refresh when the channel data is fresh @lifecycle', async () => {
+test('Update tab does NOT auto-refresh when the channel data is fresh @ci', async () => {
   // The previous tests just ran check-update — both cache entries are
   // seconds old, well inside the 15min freshness window. Opening the
   // picker on the Update tab must NOT fire an extra check-update IPC.
@@ -235,7 +235,7 @@ test('Update tab does NOT auto-refresh when the channel data is fresh @lifecycle
   await closeTitlePopupIfOpen(ctx.app)
 })
 
-test('Update tab auto-refreshes when channel data is stale @lifecycle', async () => {
+test('Update tab auto-refreshes when channel data is stale @ci', async () => {
   test.setTimeout(120_000)
 
   // Age every in-memory release-cache entry past the 15min staleness
@@ -250,7 +250,8 @@ test('Update tab auto-refreshes when channel data is stale @lifecycle', async ()
   // picker for): the sections pipeline now reports the stale timestamp,
   // proving the hook reached the same map `getEffectiveInfo` reads.
   // The release cache is shared per-repo, so install A and B see the
-  // same staled entries.
+  // same staled entries. The channel-card surface uses `lastCheckedAt`
+  // (number) — `lastChecked` is the localized string sibling.
   const staleSections = await ctx.panel.evaluate<DetailSection[]>(
     `window.api.getDetailSections(${JSON.stringify(INSTALL_ID_B)})`,
   )
@@ -258,7 +259,7 @@ test('Update tab auto-refreshes when channel data is stale @lifecycle', async ()
   const staleChannelField = staleUpdateSection.fields!.find((f) => f.id === 'updateChannel')!
   const staleCard = staleChannelField.options!.find((o) => o.value === staleChannelField.value)
   expect(
-    (staleCard?.data as { checkedAt?: number } | undefined)?.checkedAt,
+    (staleCard?.data as { lastCheckedAt?: number } | undefined)?.lastCheckedAt,
     'ageReleaseCache hook did not mutate the in-memory map main reads from',
   ).toBe(stalenessTs)
 
@@ -285,7 +286,7 @@ test('Update tab auto-refreshes when channel data is stale @lifecycle', async ()
     .toBeGreaterThanOrEqual(1)
 
   // After the auto-refresh completes, the selected channel card's
-  // `checkedAt` should advance past `stalenessTs` — proves the
+  // `lastCheckedAt` should advance past `stalenessTs` — proves the
   // staleness was actually cleared, not just an IPC fire.
   await expect
     .poll(async () => {
@@ -295,8 +296,8 @@ test('Update tab auto-refreshes when channel data is stale @lifecycle', async ()
       const updateSection = sections.find((s) => s.tab === 'update')!
       const channelField = updateSection.fields!.find((f) => f.id === 'updateChannel')!
       const card = channelField.options!.find((o) => o.value === channelField.value)
-      const checkedAt = (card?.data as { checkedAt?: number } | undefined)?.checkedAt
-      return typeof checkedAt === 'number' && checkedAt > stalenessTs
+      const lastCheckedAt = (card?.data as { lastCheckedAt?: number } | undefined)?.lastCheckedAt
+      return typeof lastCheckedAt === 'number' && lastCheckedAt > stalenessTs
     }, { timeout: 15_000, intervals: [250, 500, 1_000] })
     .toBe(true)
 

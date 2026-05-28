@@ -30,7 +30,7 @@ test.afterAll(async () => {
   await ctx.cleanup()
 })
 
-test('dev hooks bridge: seedDownloads, setInstallUpdate, setAppUpdateState all run @windows @macos @linux', async () => {
+test('dev hooks bridge: seedDownloads, setInstallUpdate, setAppUpdateState all run @ci', async () => {
   await seedDownloads(ctx.app, {
     active: [
       {
@@ -57,7 +57,7 @@ test('dev hooks bridge: seedDownloads, setInstallUpdate, setAppUpdateState all r
   await setAppUpdateState(ctx.app, { kind: null, version: null, autoUpdate: true })
 })
 
-test('dev hooks bridge: getTitlePopupBounds returns null when no popup is open @windows @macos @linux', async () => {
+test('dev hooks bridge: getTitlePopupBounds returns null when no popup is open @ci', async () => {
   const bounds = await getTitlePopupBounds(ctx.app)
   expect(bounds).toBeNull()
 })

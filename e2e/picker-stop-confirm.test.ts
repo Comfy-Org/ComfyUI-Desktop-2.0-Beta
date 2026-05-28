@@ -153,7 +153,7 @@ async function forwardUpdateActionFromPicker(): Promise<void> {
   )
 }
 
-test('Self-stops the running session and dispatches the action @lifecycle', async () => {
+test('Self-stops the running session and dispatches the action @ci', async () => {
   await seedRunningSession(ctx.app, {
     installationId: INSTALL_ID,
     installationName: INSTALL_NAME,
@@ -190,22 +190,22 @@ test('Self-stops the running session and dispatches the action @lifecycle', asyn
       intervals: [100, 250],
     })
     .toBeGreaterThanOrEqual(1)
+  // Poll for the forwarded `update-comfyui` dispatch among the run-action
+  // invocations rather than the raw call count: the picker's auto-
+  // `check-update` watcher can land its run-action first against a
+  // freshly-mounted Update tab, and `stopAndWaitForExit` introduces
+  // a delay between stop-comfyui and the user-driven update dispatch.
+  // Filtering by actionId keeps this immune to both races.
   await expect
-    .poll(async () => (await getIpcInvocations(ctx.app, 'run-action')).length, {
-      timeout: 10_000,
-      intervals: [200, 500],
-    })
-    .toBeGreaterThanOrEqual(1)
-
-  // Find the forwarded `update-comfyui` dispatch among the run-action
-  // invocations. The picker's auto-`check-update` watcher can also fire
-  // a run-action against the freshly-mounted Update tab depending on
-  // release-cache freshness — index-based lookup would flake on that
-  // race, so we filter by actionId instead.
+    .poll(async () => {
+      const calls = await getIpcInvocations(ctx.app, 'run-action') as
+        { installationId?: string; actionId?: string }[]
+      return calls.some((c) => c.actionId === 'update-comfyui')
+    }, { timeout: 15_000, intervals: [200, 500] })
+    .toBe(true)
   const runCalls = await getIpcInvocations(ctx.app, 'run-action') as
     { installationId?: string; actionId?: string }[]
   const updateCall = runCalls.find((c) => c.actionId === 'update-comfyui')
-  expect(updateCall).toBeDefined()
   expect(updateCall?.installationId).toBe(INSTALL_ID)
 
   // stop-comfyui fires exactly once — duplicate stops would point at a
@@ -215,7 +215,7 @@ test('Self-stops the running session and dispatches the action @lifecycle', asyn
   expect(stopCalls.length).toBe(1)
 })
 
-test('Skips self-stop when the install is NOT running @lifecycle', async () => {
+test('Skips self-stop when the install is NOT running @ci', async () => {
   // Same forward, but no seeded running session. The panel must skip
   // the stop-comfyui step (nothing to stop) AND skip the relaunch (no
   // session was open to begin with — the user wouldn't expect a

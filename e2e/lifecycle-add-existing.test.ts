@@ -103,7 +103,7 @@ test.afterAll(async () => {
   if (stagedPath) await rm(stagedPath, { recursive: true, force: true })
 })
 
-test('probe detects the staged standalone-shaped directory @lifecycle', async () => {
+test('probe detects the staged standalone-shaped directory @ci', async () => {
   const results = await ctx.panel.evaluate<ProbeResult[]>(
     `window.api.probeInstallation(${JSON.stringify(stagedPath)})`,
   )
@@ -115,7 +115,7 @@ test('probe detects the staged standalone-shaped directory @lifecycle', async ()
   expect(standalone!.comfyVersion?.commit).toMatch(/^[0-9a-f]{40}$/)
 })
 
-test('track-installation registers the directory and chooser shows the tile @lifecycle', async () => {
+test('track-installation registers the directory and chooser shows the tile @ci', async () => {
   const probeResults = await ctx.panel.evaluate<ProbeResult[]>(
     `window.api.probeInstallation(${JSON.stringify(stagedPath)})`,
   )

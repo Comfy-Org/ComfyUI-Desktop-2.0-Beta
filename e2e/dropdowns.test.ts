@@ -47,7 +47,7 @@ test.beforeEach(async () => {
 // `Reset Zoom` menu-item gating.
 // ---------------------------------------------------------------------------
 
-test('Reset Zoom menu item is absent at zoom level 0 @windows @macos @linux', async () => {
+test('Reset Zoom menu item is absent at zoom level 0 @ci', async () => {
   await setComfyViewZoomLevel(ctx.app, 0)
   await openTitleMenu(ctx.titleBar)
   await popup.waitForSelector('[role="menuitem"]', { timeout: 5_000 })
@@ -56,7 +56,7 @@ test('Reset Zoom menu item is absent at zoom level 0 @windows @macos @linux', as
   expect(labels.some((l) => /reset zoom/i.test(l))).toBe(false)
 })
 
-test('Reset Zoom menu item appears with the current percent label when zoom is non-zero @windows @macos @linux', async () => {
+test('Reset Zoom menu item appears with the current percent label when zoom is non-zero @ci', async () => {
   await setComfyViewZoomLevel(ctx.app, 1)
   await openTitleMenu(ctx.titleBar)
   await popup.waitForSelector('[role="menuitem"]', { timeout: 5_000 })
@@ -77,7 +77,7 @@ test('Reset Zoom menu item appears with the current percent label when zoom is n
 // would leak event handlers (and `tray-state-changed` callbacks etc).
 // ---------------------------------------------------------------------------
 
-test('title-popup webContents listener counts are stable across repeated opens @windows @macos @linux', async () => {
+test('title-popup webContents listener counts are stable across repeated opens @ci', async () => {
   // Prime the popup once so the renderer has loaded and any first-run
   // wiring is in place.
   await openTitleMenu(ctx.titleBar)
@@ -107,7 +107,7 @@ test('title-popup webContents listener counts are stable across repeated opens @
 // tooltip; otherwise both popups overlap and the user reads garbage.
 // ---------------------------------------------------------------------------
 
-test('opening the title menu hides the title-bar tooltip @windows @macos @linux', async () => {
+test('opening the title menu hides the title-bar tooltip @ci', async () => {
   // Drive the tooltip directly via the title-bar bridge, mirroring the
   // existing tooltip-on-demand test in chooser.test.ts.
   await ctx.app.evaluate(({ webContents }) => {

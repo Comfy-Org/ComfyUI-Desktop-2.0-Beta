@@ -51,6 +51,7 @@
     "test:e2e:macos": "playwright test --project=macos",
     "test:e2e:windows": "playwright test --project=windows",
     "test:e2e:linux": "playwright test --project=linux",
+    "test:e2e:real": "playwright test --project=real",
     "test:watch": "vitest",
     "prepare": "node ./scripts/prepare.mjs"
   },

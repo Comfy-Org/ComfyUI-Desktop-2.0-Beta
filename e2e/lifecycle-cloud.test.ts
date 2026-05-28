@@ -13,7 +13,7 @@
  * response (status code agnostic), so a reachable endpoint is
  * sufficient — no auth, no specific status required.
  *
- * Tagged @lifecycle to share the dedicated Playwright project's
+ * Tagged @real to share the dedicated Playwright project's
  * 180-second per-test timeout. No 500 MB download (cloud install is
  * pure remote URL routing), so the suite runs in well under a minute.
  */
@@ -36,7 +36,7 @@ test.afterAll(async () => {
   await ctx.cleanup()
 })
 
-test('cold start lands on first-use start screen @lifecycle', async () => {
+test('cold start lands on first-use start screen @real', async () => {
   // Consent + cloud/local pick + ToS now share a single merged start
   // screen (commit 5619823). Continue stays disabled until ToS is
   // ticked, so seeing both the hero and the disabled CTA is the
@@ -46,7 +46,7 @@ test('cold start lands on first-use start screen @lifecycle', async () => {
   await ctx.panel.waitForVisible('[data-testid="first-use-continue"]')
 })
 
-test('accept ToS + pick cloud auto-launches the seeded Cloud install @lifecycle', async () => {
+test('accept ToS + pick cloud auto-launches the seeded Cloud install @real', async () => {
   // Pick Cloud first — the merged start screen lets the user choose
   // their path before accepting terms; the order doesn't matter for
   // the underlying `pickedChoice` reactive.

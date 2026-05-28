@@ -64,7 +64,7 @@ test.afterAll(async () => {
   if (installPath) await rm(installPath, { recursive: true, force: true })
 })
 
-test('ProgressModal error block caps its height and scrolls @lifecycle', async () => {
+test('ProgressModal error block caps its height and scrolls @ci', async () => {
   // Drive the renderer-side dev hook: opens the ProgressModal overlay
   // for the seeded install and resolves the apiCall immediately with
   // `{ ok: false, message: LONG_ERROR }` so the store writes the long

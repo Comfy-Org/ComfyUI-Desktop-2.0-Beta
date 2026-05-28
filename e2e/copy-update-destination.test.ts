@@ -68,7 +68,7 @@ test.beforeEach(async () => {
   await resetIpcInvocations(ctx.app, 'open-install-window')
 })
 
-test('Copy success opens the destination install in a new window @lifecycle', async () => {
+test('Copy success opens the destination install in a new window @ci', async () => {
   // Drive ProgressModal with a synthetic copy result carrying the
   // destination install id. The renderer's `handleDone` consumes
   // `op.result.newInstallationId` and calls `openInstallWindow`.
@@ -95,7 +95,7 @@ test('Copy success opens the destination install in a new window @lifecycle', as
   expect(calls[0]?.installationId).toBe(DEST_ID)
 })
 
-test('No newInstallationId → no open-install-window call @lifecycle', async () => {
+test('No newInstallationId → no open-install-window call @ci', async () => {
   // Same shape but no newInstallationId — should NOT trigger
   // openInstallWindow. Guards the conditional branch in handleDone
   // against accidentally firing for non-copy success paths.

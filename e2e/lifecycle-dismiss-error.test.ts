@@ -70,7 +70,7 @@ test.afterAll(async () => {
   if (installPath) await rm(installPath, { recursive: true, force: true })
 })
 
-test('Dismiss error from the kebab clears the error instance @lifecycle', async () => {
+test('Dismiss error from the kebab clears the error instance @ci', async () => {
   // Seed an error directly into the renderer-side sessionStore so the
   // kebab grows its Dismiss-error item without needing to drive a real
   // failing op first. The kebab item visibility tracks
@@ -96,7 +96,7 @@ test('Dismiss error from the kebab clears the error instance @lifecycle', async 
     .toBe(false)
 })
 
-test('Dismiss-error item is gone from the kebab after clearing @lifecycle', async () => {
+test('Dismiss-error item is gone from the kebab after clearing @ci', async () => {
   // The menu items are rebuilt on every open via `getMenuItems(inst)`;
   // re-opening proves the item really disappears (not just hidden in
   // a stale prior menu instance) once the store no longer carries an

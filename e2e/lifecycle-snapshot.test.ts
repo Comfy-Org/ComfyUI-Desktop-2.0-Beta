@@ -76,7 +76,7 @@ test.afterAll(async () => {
   if (stagedInstallPath) await rm(stagedInstallPath, { recursive: true, force: true })
 })
 
-test('seeded snapshot row renders the backend-formatted version @lifecycle', async () => {
+test('seeded snapshot row renders the backend-formatted version @ci', async () => {
   const opened = await ctx.panel.evaluate<boolean>(
     `(() => {
       window.api.openInstancePicker({
@@ -96,7 +96,7 @@ test('seeded snapshot row renders the backend-formatted version @lifecycle', asy
   expect(metaText!).toContain(EXPECTED_VERSION)
 })
 
-test('captures a new snapshot via runAction and shows it at the top @lifecycle', async () => {
+test('captures a new snapshot via runAction and shows it at the top @ci', async () => {
   const before = await ctx.panel.evaluate<number>(
     `window.api.getSnapshots(${JSON.stringify(INSTALL_ID)}).then(d => d.snapshots.length)`,
   )

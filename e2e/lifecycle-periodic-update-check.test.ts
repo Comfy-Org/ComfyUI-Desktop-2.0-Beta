@@ -100,7 +100,7 @@ test.afterAll(async () => {
   if (stagedInstallPath) await rm(stagedInstallPath, { recursive: true, force: true })
 })
 
-test('background timer re-fetches the release cache on its interval @lifecycle', async () => {
+test('background timer re-fetches the release cache on its interval @ci', async () => {
   test.setTimeout(60_000)
 
   // Wait for the initial IPC-hook pre-warm to populate the cache.

@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
@@ -155,6 +155,27 @@ export async function launchLauncherApp(options?: SeedOptions): Promise<Launcher
     await options.onSetup({ homeDir, appDataDir })
   }
 
+  // Reuse mode: read the persisted settings.json from a prior run and
+  // merge it INTO the seed so first-use / consent / telemetry flags
+  // survive across runs. Without this, `maybeSeedFromEnv` would
+  // overwrite the prior `firstUseCompleted: true` with the harness's
+  // default `firstUseCompleted: false`, dropping the rehydrated profile
+  // back into the first-use takeover on every greped re-run.
+  let persistedSettings: Record<string, unknown> | undefined
+  if (reuseDir) {
+    try {
+      const raw = await readFile(path.join(appDataDir, 'settings.json'), 'utf-8')
+      const parsed: unknown = JSON.parse(raw)
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        persistedSettings = parsed as Record<string, unknown>
+      }
+    } catch { /* no persisted settings yet (empty reuse dir) */ }
+  }
+  const mergedSettings: Record<string, unknown> | undefined =
+    persistedSettings || options?.settings
+      ? { ...(options?.settings ?? {}), ...(persistedSettings ?? {}) }
+      : undefined
+
   // Expose a CDP remote-debugging port so tests can connect to non-BrowserWindow
   // webContents (e.g. the ComfyUI WebContentsView) via chromium.connectOverCDP().
   // Derive port from Playwright worker index to avoid collisions in parallel runs.
@@ -169,7 +190,7 @@ export async function launchLauncherApp(options?: SeedOptions): Promise<Launcher
 
   const application = await electron.launch({
     args,
-    env: buildIsolatedEnv(homeDir, options?.settings),
+    env: buildIsolatedEnv(homeDir, mergedSettings),
   })
 
   // The main window starts with show:false and transitions via ready-to-show.

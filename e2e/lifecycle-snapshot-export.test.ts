@@ -134,7 +134,7 @@ async function findExportedFile(prefix: string): Promise<string | null> {
   return match ? path.join(exportDir, match) : null
 }
 
-test('per-row Export writes a valid envelope JSON to disk @lifecycle', async () => {
+test('per-row Export writes a valid envelope JSON to disk @ci', async () => {
   const popup = await openSnapshotsTab()
 
   // Read the seeded snapshot filenames off the registry so the test
@@ -183,7 +183,7 @@ test('per-row Export writes a valid envelope JSON to disk @lifecycle', async () 
   expect(envelope.snapshots?.[0]?.comfyui?.commit).toBe(COMMIT_B)
 })
 
-test('Export All writes an envelope containing every seeded snapshot @lifecycle', async () => {
+test('Export All writes an envelope containing every seeded snapshot @ci', async () => {
   const popup = await openSnapshotsTab()
 
   await popup.waitForVisible(byTestId(TID.snapshotsExportAll), { timeout: 5_000 })
