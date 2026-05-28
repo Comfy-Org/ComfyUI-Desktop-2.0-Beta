@@ -1364,7 +1364,7 @@ function openTitlePopup(opts: OpenTitlePopupOpts): void {
 
 export interface TitlePopupHostBindings {
   /** Open a fresh chooser host window. */
-  openChooserHostWindow: () => void
+  openChooserHostWindow: (initialPanel?: ComfyPanelKey) => void
   /** Flip an install-backed host window in place to chooser-host mode. */
   returnToDashboard: (parentEntryId: number) => Promise<void> | void
   /** Confirm + close all host windows. The parent window is the popup's
@@ -2538,7 +2538,15 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
     const parentEntry = comfyWindows.get(entry.parentEntryId)
     if (!parentEntry) return
     hideTitlePopup(entry, { releaseFocusToParent: false })
-    bindings.setActivePanel(entry.parentEntryId, 'new-install')
+    // Reuse the current window only when it's the bare dashboard (no
+    // install attached). An install-backed host opens a NEW window booted
+    // straight into the new-install flow, so the running instance in this
+    // window keeps running undisturbed (issue #629).
+    if (parentEntry.installationId === null) {
+      bindings.setActivePanel(entry.parentEntryId, 'new-install')
+    } else {
+      bindings.openChooserHostWindow('new-install')
+    }
   })
 
 

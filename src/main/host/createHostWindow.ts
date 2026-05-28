@@ -40,7 +40,7 @@ import {
   setLastFocusedInstallationId,
   unregisterHostEntry,
 } from './registry'
-import type { ComfyWindowEntry } from './registry'
+import type { ComfyWindowEntry, ComfyPanelKey } from './registry'
 
 /** Default size for a freshly-spawned host window when an existing
  *  host of the same identity is already open. Matches the
@@ -909,7 +909,7 @@ export function applyChooserHostThemeToAll(): void {
  *  The comfyView still exists so `layoutViews` doesn't have to
  *  special-case its absence, but is sized to zero and never made
  *  visible. */
-export function openChooserHostWindow(): BrowserWindow {
+export function openChooserHostWindow(initialPanel: ComfyPanelKey = 'comfy'): BrowserWindow {
   // Install-less wrapper. The shared `createHostWindow()` builds
   // the BrowserWindow + 2 views skeleton, layoutViews, macOS
   // fullscreen, bounds-save listeners, close / closed handlers,
@@ -971,7 +971,11 @@ export function openChooserHostWindow(): BrowserWindow {
 
   entry.coldStartPendingReveal = true
 
-  ensurePanelView(entry.windowKey, entry, 'chooser')
+  // Seed the requested initial panel (default 'comfy' → chooser body for
+  // an install-less host). "+ New Instance" passes 'new-install' so the
+  // fresh window boots straight into the wizard with no dashboard flash.
+  entry.activePanel = initialPanel
+  ensurePanelView(entry.windowKey, entry, computeBodyMode(entry))
 
   entry.layoutViews()
 
