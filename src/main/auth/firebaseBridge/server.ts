@@ -1,7 +1,12 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
 
-import { renderDoneHtml, renderErrorHtml, renderPopupBridgeHtml } from './bridgeHtml'
+import {
+  friendlyAuthErrorMessage,
+  renderDoneHtml,
+  renderErrorHtml,
+  renderPopupBridgeHtml,
+} from './bridgeHtml'
 import { getFirebaseConfig, type FirebaseEnv } from './config'
 import type { SupportedProvider } from './intercept'
 import {
@@ -11,6 +16,17 @@ import {
 } from './oauth'
 
 const MAX_BODY_BYTES = 64 * 1024
+
+/**
+ * Pull a Firebase-style `auth/...` error code out of a raw error string,
+ * if one is present, so it can be mapped to friendly copy. Returns null
+ * when no recognisable code is found (caller falls back to generic copy).
+ * Display-only helper — does not affect control flow.
+ */
+function extractAuthCode(raw: string): string | null {
+  const match = /\bauth\/[a-z0-9-]+\b/i.exec(raw)
+  return match ? match[0].toLowerCase() : null
+}
 
 async function readJsonBody(req: IncomingMessage): Promise<unknown> {
   return new Promise((resolve, reject) => {
@@ -163,7 +179,10 @@ export function startBridgeServer(opts: StartBridgeOpts): Promise<BridgeHandle> 
         if (!res.headersSent) {
           res.statusCode = 500
           res.setHeader('Content-Type', 'text/html; charset=utf-8')
-          res.end(renderErrorHtml(msg))
+          // Show friendly copy only — never the raw exception string (it
+          // may carry provider error codes, URLs, or token fragments).
+          // The raw `err` still flows to telemetry/Datadog below unchanged.
+          res.end(renderErrorHtml(friendlyAuthErrorMessage(extractAuthCode(msg))))
         }
         finishWithError(err instanceof Error ? err : new Error(msg))
       })

@@ -23,6 +23,55 @@ const PROVIDER_LABEL: Record<SupportedProvider, string> = {
   'github.com': 'GitHub',
 }
 
+/**
+ * Friendly, human-readable copy for the Firebase auth error codes a user
+ * can realistically hit during the bridge sign-in. Keyed by the raw
+ * Firebase `error.code` (the `auth/*` strings the JS SDK throws). Anything
+ * not in this map falls back to a generic retry message — we never surface
+ * the raw code or the word "Firebase" to the user.
+ *
+ * Display-only: this maps error CODES to user copy. It does not change
+ * which errors are thrown, the sign-in flow, token handling, or redirects.
+ */
+const GENERIC_AUTH_ERROR = 'Sign-in failed. Please try again.'
+
+const FIREBASE_AUTH_ERROR_MESSAGES: Record<string, string> = {
+  'auth/account-exists-with-different-credential':
+    'An account already exists with this email address using a different sign-in method. Please sign in with the method you used originally.',
+  'auth/email-already-in-use':
+    'An account already exists with this email address. Please sign in with the method you used originally.',
+  'auth/credential-already-in-use':
+    'This account is already linked to another sign-in. Please sign in with the method you used originally.',
+  'auth/popup-closed-by-user': 'Sign-in was cancelled before it finished. Please try again.',
+  'auth/cancelled-popup-request': 'Sign-in was cancelled before it finished. Please try again.',
+  'auth/popup-blocked':
+    'Your browser blocked the sign-in window. Allow pop-ups for this page, then try again.',
+  'auth/user-cancelled': 'Sign-in was cancelled. Please try again.',
+  'auth/network-request-failed':
+    'We couldn’t reach the sign-in service. Check your internet connection and try again.',
+  'auth/timeout': 'Sign-in timed out. Please try again.',
+  'auth/too-many-requests': 'Too many sign-in attempts. Please wait a moment and try again.',
+  'auth/user-disabled': 'This account has been disabled. Please contact support.',
+  'auth/operation-not-allowed':
+    'This sign-in method isn’t available right now. Please try a different method.',
+  'auth/web-storage-unsupported':
+    'Your browser is blocking the storage needed to sign in. Enable cookies/site data and try again.',
+  'auth/internal-error': 'Something went wrong during sign-in. Please try again.',
+}
+
+/**
+ * Map a raw Firebase auth error code to friendly copy, falling back to a
+ * generic retry message for unknown codes. Exported for unit tests.
+ */
+export function friendlyAuthErrorMessage(code: string | null | undefined): string {
+  if (!code) return GENERIC_AUTH_ERROR
+  return FIREBASE_AUTH_ERROR_MESSAGES[code] ?? GENERIC_AUTH_ERROR
+}
+
+/** Inlined into the bridge page so the client script can map codes too. */
+const CLIENT_AUTH_ERROR_MESSAGES_JSON = JSON.stringify(FIREBASE_AUTH_ERROR_MESSAGES)
+const CLIENT_GENERIC_AUTH_ERROR_JSON = JSON.stringify(GENERIC_AUTH_ERROR)
+
 const PROVIDER_ICON: Record<SupportedProvider, string> = {
   'google.com': `<svg viewBox="0 0 18 18" width="18" height="18" aria-hidden="true">
     <path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.71v2.26h2.92a8.78 8.78 0 0 0 2.68-6.6z"/>
@@ -115,16 +164,15 @@ p { color: var(--muted); margin: 0; line-height: 1.55; font-size: 14px; }
   color: var(--muted);
   line-height: 1.5;
 }
-.error-block {
+.error-note {
   margin-top: 18px;
   padding: 12px 14px;
   background: var(--error-bg);
   color: var(--error);
   border-radius: 8px;
   font-size: 13px;
+  line-height: 1.5;
   text-align: left;
-  word-break: break-word;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 .btn {
   display: inline-flex;
@@ -235,17 +283,22 @@ export function renderDoneHtml(): string {
 }
 
 /**
- * Terminal error page for IdP-denied or Firebase-exchange failures.
- * The user can retry by returning to ComfyUI Desktop and clicking
- * Sign in again.
+ * Terminal error page for IdP-denied or exchange failures. The user can
+ * retry by returning to ComfyUI Desktop and clicking Sign in again.
+ *
+ * `message` is the user-facing reason. Callers must pass friendly copy
+ * (e.g. from `friendlyAuthErrorMessage`) — never a raw exception string
+ * or provider error code. It's rendered as plain body text, not a
+ * monospace technical block.
  */
 export function renderErrorHtml(message: string): string {
+  const reason = message && message.trim().length > 0 ? message : GENERIC_AUTH_ERROR
   return shell(
     'Sign-in failed — ComfyUI Desktop',
     `<div class="status-icon error">${ERROR_ICON}</div>
     <h1>Sign-in failed</h1>
-    <p>We weren't able to complete sign-in. Return to ComfyUI Desktop and click Sign in again to retry.</p>
-    <div class="error-block">${escapeHtml(message)}</div>`,
+    <p>${escapeHtml(reason)}</p>
+    <p class="hint">Return to ComfyUI Desktop and click Sign in again to retry.</p>`,
   )
 }
 
@@ -299,6 +352,8 @@ export function renderPopupBridgeHtml(
     const providerId = ${providerJson}
     const providerLabel = ${providerLabelJson}
     const providerIcon = ${providerIconJson}
+    const AUTH_ERROR_MESSAGES = ${CLIENT_AUTH_ERROR_MESSAGES_JSON}
+    const GENERIC_AUTH_ERROR = ${CLIENT_GENERIC_AUTH_ERROR_JSON}
 
     const contentEl = document.getElementById('content')
 
@@ -311,8 +366,20 @@ export function renderPopupBridgeHtml(
         .replaceAll("'", '&#39;')
     }
 
+    // Display-only: turn a raw Firebase auth error into friendly copy.
+    // Never surfaces the raw code or the word "Firebase" to the user.
+    function friendlyError(err) {
+      const code = err && err.code
+      if (code && Object.prototype.hasOwnProperty.call(AUTH_ERROR_MESSAGES, code)) {
+        return AUTH_ERROR_MESSAGES[code]
+      }
+      return GENERIC_AUTH_ERROR
+    }
+
     function renderIdle(errorMessage) {
-      const err = errorMessage ? '<div class="error-block">' + escapeHtml(errorMessage) + '</div>' : ''
+      // errorMessage is already friendly human copy (see friendlyError) —
+      // render as a plain notice, not a monospace technical block.
+      const err = errorMessage ? '<div class="error-note">' + escapeHtml(errorMessage) + '</div>' : ''
       contentEl.innerHTML = \`
         <h1>\${errorMessage ? 'Try sign-in again' : 'Sign in to continue'}</h1>
         <p>Your browser keeps the passkeys, saved passwords, and provider sessions that the embedded popup can't.</p>
@@ -377,7 +444,7 @@ export function renderPopupBridgeHtml(
       const app = initializeApp(firebaseConfig)
       auth = getAuth(app)
     } catch (err) {
-      contentEl.innerHTML = '<h1>Sign-in unavailable</h1><p>The Firebase SDK failed to load. Please reopen sign-in from ComfyUI Desktop.</p>'
+      contentEl.innerHTML = '<h1>Sign-in unavailable</h1><p>We couldn’t start sign-in. Please reopen sign-in from ComfyUI Desktop and try again.</p>'
       throw err
     }
 
@@ -398,7 +465,7 @@ export function renderPopupBridgeHtml(
         await runSignIn()
         renderDone()
       } catch (err) {
-        renderIdle((err && err.message) || String(err))
+        renderIdle(friendlyError(err))
       }
     }
 
@@ -431,10 +498,13 @@ export function renderPopupBridgeHtml(
         renderDone()
       } catch (err) {
         const code = err && err.code
+        // popup-blocked / cancelled on the silent auto-attempt is expected
+        // (browser declined the no-gesture popup) — show the plain idle
+        // prompt so the user can click the button, with no error noise.
         if (code === 'auth/popup-blocked' || code === 'auth/cancelled-popup-request') {
           renderIdle(null)
         } else {
-          renderIdle((err && err.message) || String(err))
+          renderIdle(friendlyError(err))
         }
       }
     }
