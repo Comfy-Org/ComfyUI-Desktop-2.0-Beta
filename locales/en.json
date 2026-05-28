@@ -53,7 +53,8 @@
     "menuMigrate": "Migrate to Standalone",
     "menuRestoreSnapshot": "Restore Snapshot",
     "menuRevealInFolder": "Open Folder",
-    "menuDelete": "Uninstall"
+    "menuDelete": "Uninstall",
+    "stoppedActionGatedReason": "Stop the running instance first."
   },
 
   "titleBar": {

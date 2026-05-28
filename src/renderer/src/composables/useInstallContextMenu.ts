@@ -139,6 +139,10 @@ export function useInstallContextMenu(opts: {
   function getMenuItems(inst: Installation): ContextMenuItem[] {
     const items: ContextMenuItem[] = []
     const stoppedActionGated = isStoppedActionGated(inst)
+    // Tooltip explaining why the REQUIRES_STOPPED items are greyed out
+    // (Update / Migrate / Restore / Copy / Uninstall need the instance
+    // stopped). Undefined when not gated so enabled items get no tooltip.
+    const gatedTitle = stoppedActionGated ? t('chooser.stoppedActionGatedReason') : undefined
 
     if (opts.onManage) {
       items.push({
@@ -147,13 +151,13 @@ export function useInstallContextMenu(opts: {
       })
 
       if (isInstalled(inst) && hasUpdateTag(inst)) {
-        items.push({ id: 'update', label: t('chooser.menuUpdate'), disabled: stoppedActionGated })
+        items.push({ id: 'update', label: t('chooser.menuUpdate'), disabled: stoppedActionGated, title: gatedTitle })
       }
       if (hasMigratePrompt(inst)) {
-        items.push({ id: 'migrate', label: t('chooser.menuMigrate'), disabled: stoppedActionGated })
+        items.push({ id: 'migrate', label: t('chooser.menuMigrate'), disabled: stoppedActionGated, title: gatedTitle })
       }
       if (isInstalled(inst) && hasInstallPath(inst) && isLocalLikeInstall(inst)) {
-        items.push({ id: 'restore-snapshot', label: t('chooser.menuRestoreSnapshot'), disabled: stoppedActionGated })
+        items.push({ id: 'restore-snapshot', label: t('chooser.menuRestoreSnapshot'), disabled: stoppedActionGated, title: gatedTitle })
       }
     }
 
@@ -180,6 +184,7 @@ export function useInstallContextMenu(opts: {
         id: 'copy-install',
         label: t('actions.copyInstallation'),
         disabled: stoppedActionGated,
+        title: gatedTitle,
       })
     }
 
@@ -199,6 +204,7 @@ export function useInstallContextMenu(opts: {
         id: 'delete',
         label: t('chooser.menuDelete'),
         disabled: stoppedActionGated,
+        title: gatedTitle,
         style: 'danger',
       })
     }

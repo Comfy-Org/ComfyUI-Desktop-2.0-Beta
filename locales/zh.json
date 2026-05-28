@@ -39,7 +39,8 @@
     "menuMigrate": "迁移到独立版…",
     "menuRestoreSnapshot": "恢复快照…",
     "menuRevealInFolder": "打开文件夹",
-    "menuDelete": "删除…"
+    "menuDelete": "删除…",
+    "stoppedActionGatedReason": "请先停止正在运行的实例。"
   },
 
   "titleBar": {
