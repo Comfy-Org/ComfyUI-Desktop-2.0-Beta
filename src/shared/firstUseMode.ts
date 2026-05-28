@@ -41,5 +41,5 @@ export function normaliseFirstUseMode(raw: unknown): FirstUseMode {
 
 /** True when any mode that should lock the title-bar chrome is active. */
 export function isChromeLockedMode(mode: FirstUseMode): boolean {
-  return mode !== 'none'
+  return mode === 'consent-lockdown' || mode === 'post-consent'
 }

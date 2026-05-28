@@ -16,6 +16,7 @@ export const en = {
     close: 'Close',
     cancel: 'Cancel',
     back: 'Back',
+    initialEnvironment: 'Initial Environment',
     browse: 'Browse…',
     learnMore: 'Learn more'
   },

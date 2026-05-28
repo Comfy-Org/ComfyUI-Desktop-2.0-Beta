@@ -726,6 +726,14 @@ async function returnToDashboard(reason: ReturnToDashboardReason): Promise<void>
   await window.api.returnToDashboard()
 }
 
+function cancelInFlightOperation(): void {
+  const id = displayId.value
+  if (!id) return
+  const op = progressStore.operations.get(id)
+  if (!op || op.finished) return
+  progressStore.cancelOperation(id)
+}
+
 /** Re-run the same op that just errored. Mirrors the port-conflict
  *  retry pattern: feed the stored `apiCall` (or, for legacy launch
  *  ops without one, fall back to a fresh `runAction('launch')`) back
@@ -1065,11 +1073,11 @@ defineExpose({ startOperation, showOperation })
               <button
                 v-else
                 type="button"
-                class="brand-ghost brand-progress__footer-btn"
-                @click="returnToDashboard('in_flight')"
+                class="brand-ghost brand-progress__footer-btn brand-progress__footer-btn--danger"
+                @click="cancelInFlightOperation"
               >
-                <ArrowLeft :size="14" />
-                {{ $t('progress.returnToDashboard') }}
+                <X :size="14" />
+                {{ $t('common.cancel') }}
               </button>
             </template>
             <template v-else-if="isPortConflictOpen && currentOp.result?.portConflict">

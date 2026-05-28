@@ -146,7 +146,7 @@ describe('buildTitlePopupMenuItems', () => {
     const closeAll = items.find((i) => i.id === 'close-all-windows')
     expect(closeAll?.label).toBe('Exit All Windows')
     const exitWindow = items.find((i) => i.id === 'exit-window')
-    expect(exitWindow?.label).toBe('Exit Window')
+    expect(exitWindow?.label).toBe('Close Window')
   })
 
   it('install-host menu has neither Reset Zoom nor Return to Dashboard', () => {
@@ -295,4 +295,3 @@ describe('buildInstancePickerSnapshot', () => {
     expect(snap.runningInstallationIds).toEqual([])
   })
 })
-

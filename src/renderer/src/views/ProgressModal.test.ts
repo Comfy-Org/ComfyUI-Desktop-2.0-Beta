@@ -243,7 +243,7 @@ describe('ProgressModal — brand branch state transitions', () => {
     vi.useRealTimers()
   })
 
-  it('renders in-flight state with a Return to Dashboard button and no banner', async () => {
+  it('renders in-flight state with a Cancel button and no banner', async () => {
     const { body } = await mountWithOp('inst-1', {
       flatStatus: 'Deleting installation…',
       flatPercent: 42,
@@ -254,7 +254,7 @@ describe('ProgressModal — brand branch state transitions', () => {
     expect(body.exists('.brand-progress__bar')).toBe(true)
 
     expect(body.exists('.brand-progress__footer')).toBe(true)
-    expect(body.selectorText('.brand-progress__footer')).toContain('Return to Dashboard')
+    expect(body.selectorText('.brand-progress__footer')).toContain('Cancel')
     expect(body.selectorText('.brand-progress__footer')).not.toContain('Minimize')
     expect(body.selectorText('.brand-progress__footer')).not.toContain('Reboot')
   })
@@ -444,25 +444,23 @@ describe('ProgressModal — brand branch state transitions', () => {
     expect(api.returnToDashboard).toHaveBeenCalled()
   })
 
-  it('emits close, cancels the in-flight op, and calls returnToDashboard when the in-flight Return button is clicked', async () => {
+  it('cancels the in-flight op without detaching when the in-flight Cancel button is clicked', async () => {
     const { wrapper, body } = await mountWithOp('inst-1', {
       flatStatus: 'Deleting installation…',
       flatPercent: 42,
     })
 
-    const returnBtn = body.buttonByText('Return to Dashboard')
-    expect(returnBtn).not.toBeNull()
-    returnBtn!.click()
+    const cancelBtn = body.buttonByText('Cancel')
+    expect(cancelBtn).not.toBeNull()
+    cancelBtn!.click()
     await flushPromises()
 
-    expect(wrapper.emitted('close')?.length).toBeGreaterThan(0)
-    // No installation in the store for inst-1 so the confirm is skipped
-    // and the in-flight op is cancelled.
+    expect(wrapper.emitted('close')).toBeUndefined()
     const store = useProgressStore()
     const op = store.operations.get('inst-1')
     expect(op?.cancelRequested).toBe(true)
     const api = (window as unknown as { api: MockApi }).api
-    expect(api.returnToDashboard).toHaveBeenCalled()
+    expect(api.returnToDashboard).not.toHaveBeenCalled()
   })
 
   it('uses friendlyCaption (not launchCaption) for non-launch ops', async () => {

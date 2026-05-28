@@ -47,17 +47,12 @@ describe('findLockingProcesses', { timeout: 30_000 }, () => {
     const tmpFile = path.join(os.tmpdir(), `file-lock-held-test-${Date.now()}.txt`)
     fs.writeFileSync(tmpFile, 'test')
 
-    // Spawn a child process that opens the file and holds it open
-    const child = fork(
-      '-e',
-      [
-        `const fs = require('fs');` +
-        `const fd = fs.openSync(${JSON.stringify(tmpFile)}, 'r+');` +
-        `process.send('ready');` +
-        `process.on('message', () => { fs.closeSync(fd); process.exit(); });`,
-      ],
-      { stdio: ['pipe', 'pipe', 'pipe', 'ipc'] }
+    const helper = path.join(os.tmpdir(), `file-lock-holder-${Date.now()}.cjs`)
+    fs.writeFileSync(
+      helper,
+      `const fs=require('fs');const fd=fs.openSync(${JSON.stringify(tmpFile)},'r+');process.send?.('ready');process.on('message',()=>{try{fs.closeSync(fd)}catch{}process.exit(0)});`,
     )
+    const child = fork(helper, [], { stdio: ['pipe', 'pipe', 'pipe', 'ipc'] })
 
     // Wait for the child to signal it has the file open
     await new Promise<void>((resolve) => { child.on('message', () => resolve()) })
@@ -75,6 +70,7 @@ describe('findLockingProcesses', { timeout: 30_000 }, () => {
     } finally {
       child.send('close')
       await new Promise<void>((resolve) => { child.on('exit', () => resolve()) })
+      try { fs.unlinkSync(helper) } catch {}
       try { fs.unlinkSync(tmpFile) } catch {}
     }
   })

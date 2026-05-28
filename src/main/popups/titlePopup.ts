@@ -652,7 +652,7 @@ export function buildTitlePopupMenuItems(entry: ComfyWindowEntry): TitlePopupMen
   items.push(
     { id: 'feedback', label: 'Send Beta Feedback', labelKey: 'fileMenu.sendFeedback' },
     { kind: 'separator' },
-    { id: 'exit-window', label: 'Exit Window', labelKey: 'fileMenu.exitWindow' },
+    { id: 'exit-window', label: 'Close Window', labelKey: 'fileMenu.exitWindow' },
     {
       id: 'close-all-windows',
       label: 'Exit All Windows',

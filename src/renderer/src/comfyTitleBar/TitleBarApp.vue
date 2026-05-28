@@ -191,7 +191,6 @@ const isInstallLess = ref((bridge?.getInstallationId() ?? '') === '')
 const {
   installLabel,
   sourceCategory,
-  themeText,
   isFullscreen,
   firstUseMode,
   isConsentLockdown,
@@ -356,10 +355,7 @@ onUnmounted(() => {
       'is-hover-active': isHoverActive,
       'is-consent-lockdown': isConsentLockdown
     }"
-    :style="{
-      color: themeText ?? undefined,
-      '--title-trailing-width': `${trailingWidthPx}px`
-    }"
+    :style="{ '--title-trailing-width': `${trailingWidthPx}px` }"
   >
     <!-- Left: app menu (hamburger). Anchors a native OS menu in main —
          HTML popups would be clipped by the title bar's WebContentsView
@@ -690,6 +686,8 @@ button.title-install-pill {
 button.title-install-pill:hover,
 button.title-install-pill:focus-visible {
   background: var(--brand-surface-bg-hover);
+  border-color: rgba(255, 255, 255, 0.32);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12) inset;
   outline: none;
 }
 button.title-install-pill.is-open {

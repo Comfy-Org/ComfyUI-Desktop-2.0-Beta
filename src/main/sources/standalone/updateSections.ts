@@ -50,7 +50,7 @@ export function getDetailSections(installation: InstallationRecord): Record<stri
   const infoFields: Record<string, unknown>[] = [
     { label: t('common.installMethod'), value: installation.sourceLabel as string },
     { key: 'comfyui-version', label: t('standalone.comfyui'), value: installation.comfyVersion ? formatComfyVersion(installation.comfyVersion as ComfyVersion, 'detail') : (installation.version as string | undefined) || 'unknown' },
-    { label: t('common.release'), value: (installation.releaseTag as string | undefined) || '—' },
+    { label: t('common.initialEnvironment'), value: (installation.releaseTag as string | undefined) || '—' },
     { label: t('standalone.variant'), value: (installation.variant as string | undefined) ? getVariantLabel(installation.variant as string) : '—' },
     { label: t('standalone.python'), value: (installation.pythonVersion as string | undefined) || '—' },
     { label: t('common.location'), value: installation.installPath || '—' },
