@@ -165,6 +165,39 @@ describe('fetchLatestRelease', () => {
       expect(result!.tag_name).toBe('v1.19.5')
       expect(mockedLsRemoteLatestTag).toHaveBeenCalledTimes(1)
     })
+
+    it('a null tag uses the short failure TTL, not the long success TTL', async () => {
+      // A null result (e.g. no git backend configured) used to be cached
+      // for SUCCESS_TTL_MS = 10 min, indistinguishable from a confirmed
+      // empty repo. The post-install update step then read that poisoned
+      // null on every subsequent call within 10 minutes and falsely showed
+      // "Already up to date", stranding new installs on the bundled
+      // ComfyUI version. Pin behavior: a null result must expire on the
+      // failure cadence so the next caller refetches.
+      vi.useFakeTimers()
+      try {
+        mockedLsRemoteLatestTag.mockResolvedValueOnce(undefined).mockResolvedValueOnce('v1.19.5')
+        const a = await getLatestStableTag()
+        // Advance past the failure TTL (30 s) but well within the success
+        // TTL (10 min) so we can tell the two apart.
+        vi.setSystemTime(Date.now() + 60_000)
+        const b = await getLatestStableTag()
+        expect(a).toBeNull()
+        expect(b).toBe('v1.19.5')
+        expect(mockedLsRemoteLatestTag).toHaveBeenCalledTimes(2)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('fetchLatestRelease forwards refresh through to the tag lookup', async () => {
+      mockedLsRemoteLatestTag.mockResolvedValueOnce('v1.19.5').mockResolvedValueOnce('v1.19.6')
+      const a = await fetchLatestRelease('stable')
+      const b = await fetchLatestRelease('stable', { refresh: true })
+      expect(a!.tag_name).toBe('v1.19.5')
+      expect(b!.tag_name).toBe('v1.19.6')
+      expect(mockedLsRemoteLatestTag).toHaveBeenCalledTimes(2)
+    })
   })
 
   describe('mirror setting', () => {

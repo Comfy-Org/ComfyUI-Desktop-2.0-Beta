@@ -145,7 +145,13 @@ export async function postInstall(installation: InstallationRecord, { sendProgre
     sendProgress('update', { percent: -1, status: 'Fetching latest stable version' })
 
     try {
-      const latestRelease = await fetchLatestRelease('stable')
+      // Bypass the in-memory tag cache: it can be poisoned with `null` at
+      // app startup when no git backend is configured (installer ships no
+      // bootstrap-python, no prior installs to lend pygit2, no system git
+      // on PATH). By the time post-install runs, `tryConfigurePygit2Fallback`
+      // above has configured pygit2 against the just-extracted env, so the
+      // refreshed lookup succeeds and the update step actually fires.
+      const latestRelease = await fetchLatestRelease('stable', { refresh: true })
       const latestTag = latestRelease?.tag_name as string | undefined
       const current = installation.comfyVersion as ComfyVersion | undefined
       const onLatestTag = !!latestTag && current?.baseTag === latestTag && current?.commitsAhead === 0
