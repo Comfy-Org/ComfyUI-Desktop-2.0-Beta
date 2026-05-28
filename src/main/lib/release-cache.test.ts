@@ -1,3 +1,9 @@
+// @vitest-environment node
+// release-cache.ts pulls in Node's `fs` module (main-process code). The
+// repo-wide default test environment is happy-dom, where `fs` resolves
+// to `__vite-browser-external` and the `vi.importActual('fs')` inside
+// the mock factory below throws. Force Node here so the real module is
+// available for the wrapper.
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type * as FsModule from 'fs'
 
