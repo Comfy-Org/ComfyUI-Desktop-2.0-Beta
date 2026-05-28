@@ -56,7 +56,7 @@ const APP_ICON = path.join(__dirname, '..', '..', 'assets', 'Comfy_Logo_x256.png
 const APP_VERSION = getAppVersion()
 
 /** Center pill text for install-less host windows (chooser/dashboard). */
-export const CHOOSER_HOST_TITLE_TEXT = 'ComfyUI Desktop Beta'
+export const CHOOSER_HOST_TITLE_TEXT = 'ComfyUI Desktop'
 /** OS-level window title for install-less host windows. */
 export const CHOOSER_HOST_WINDOW_TITLE = `${CHOOSER_HOST_TITLE_TEXT} — v${APP_VERSION}`
 
@@ -181,7 +181,7 @@ export interface CreateHostWindowOpts {
   titleBarInstallationIdParam: string
   /**
    * Initial title-bar pill label. Install-backed wrappers pass the
-   * install name; chooser hosts pass `'ComfyUI Desktop Beta'`. Stored on
+   * install name; chooser hosts pass `'ComfyUI Desktop'`. Stored on
    * `entry.titleBarText` so the unified `title-bar-ready` handshake
    * can re-push it without a per-mode callback.
    */

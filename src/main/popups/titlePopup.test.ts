@@ -138,7 +138,7 @@ describe('buildTitlePopupMenuItems', () => {
   // Desktop Settings, no Return to Dashboard (replaced by the Home
   // icon in the picker, spec item 10), no Reset Zoom (Ctrl/Cmd+0
   // shortcut still works). The remaining four are New Window, Send
-  // Beta Feedback, Exit Window, Exit All Windows.
+  // Feedback, Exit Window, Exit All Windows.
   it('install-host menu is trimmed to four essentials in the canonical order', () => {
     const items = buildTitlePopupMenuItems(makeEntry({ installationId: 'inst-1' }))
     const ids = items.map((i) => i.id ?? null).filter((id) => id !== null)

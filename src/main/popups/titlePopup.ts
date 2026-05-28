@@ -631,7 +631,7 @@ export function buildTitlePopupMenuItems(entry: ComfyWindowEntry): TitlePopupMen
       // Send Feedback (#493). The renderer-side handler resolves the
       // support URL and emits the `desktop2.feedback.opened`
       // telemetry action with `source: 'menu'`.
-      { id: 'feedback', label: 'Send Beta Feedback', labelKey: 'fileMenu.sendFeedback' },
+      { id: 'feedback', label: 'Send Feedback', labelKey: 'fileMenu.sendFeedback' },
     )
     // Reset Zoom — discoverable recovery path for users who zoom the
     // comfyView too far to read. Only on the chooser host (the dummy
@@ -660,7 +660,7 @@ export function buildTitlePopupMenuItems(entry: ComfyWindowEntry): TitlePopupMen
   // escape is the Home icon in the picker chips row, and Reset Zoom
   // remains reachable via Ctrl/Cmd + 0.
   items.push(
-    { id: 'feedback', label: 'Send Beta Feedback', labelKey: 'fileMenu.sendFeedback' },
+    { id: 'feedback', label: 'Send Feedback', labelKey: 'fileMenu.sendFeedback' },
     { kind: 'separator' },
     { id: 'exit-window', label: 'Exit Window', labelKey: 'fileMenu.exitWindow' },
     {

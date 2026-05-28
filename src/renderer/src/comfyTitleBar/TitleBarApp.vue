@@ -765,7 +765,7 @@ onUnmounted(() => {
   opacity: 0.7;
   flex-shrink: 0;
 }
-/* Install-less host windows: identity-only `ComfyUI Desktop Beta` label. */
+/* Install-less host windows: identity-only `ComfyUI Desktop` label. */
 .title-install-pill.is-install-less {
   opacity: 0.85;
 }
