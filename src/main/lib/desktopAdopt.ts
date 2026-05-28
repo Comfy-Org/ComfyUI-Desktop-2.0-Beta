@@ -118,7 +118,10 @@ export async function copyStagedSourceDefault(src: string, dest: string): Promis
 }
 
 /**
- * Shallow-clone the upstream ComfyUI repo into `dest`. We don't try to
+ * Full-clone the upstream ComfyUI repo into `dest`. The standalone source
+ * also ends up with a full clone after `postInstall` runs `fetchTags
+ * --unshallow`, so an adopted install needs the same complete history for
+ * release-tag resolution and updates to work consistently. We don't try to
  * match the legacy bundled snapshot's exact commit — adopted installs
  * roll forward to the current stable on their first ComfyUI update
  * anyway, so cloning `main` (or the mirror's default branch) is fine.
@@ -571,7 +574,15 @@ async function runAdoption(
     const entry = await installations.add(recordData)
     // Marker is written only after the record exists so a crash in between
     // doesn't poison the next adoption attempt with a dangling marker.
-    await fs.promises.writeFile(path.join(info.basePath, MARKER_FILE), entry.id)
+    // If the marker write itself fails (disk full, permissions, …) we
+    // must roll the DB entry back — otherwise the next re-run sees no
+    // marker and creates a duplicate installation record.
+    try {
+      await fs.promises.writeFile(path.join(info.basePath, MARKER_FILE), entry.id)
+    } catch (err) {
+      try { await installations.remove(entry.id) } catch {}
+      throw err
+    }
     return entry
   })
 

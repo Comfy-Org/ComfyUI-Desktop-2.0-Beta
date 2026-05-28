@@ -43,6 +43,10 @@ vi.mock('../installations', () => {
     list: vi.fn(async () => records.slice()),
     get: vi.fn(async (id: string) => records.find((r) => r.id === id) ?? null),
     update: vi.fn(),
+    remove: vi.fn(async (id: string) => {
+      const idx = records.findIndex((r) => r.id === id)
+      if (idx >= 0) records.splice(idx, 1)
+    }),
     __records: records,
     __reset: () => { records.length = 0; nextSeq = 0 },
   }
@@ -470,6 +474,34 @@ describe('adoptDesktopInstall', () => {
       expect(backupDirs).toHaveLength(1)
       const files = fs.readdirSync(path.join(legacy.configDir, 'legacy-backup', backupDirs[0]!))
       expect(files.sort()).toEqual(['comfy.settings.json', 'config.json', 'extra_models_config.yaml', 'window.json'])
+    } finally { legacy.cleanup() }
+  })
+
+  it('rolls back the installation record when the marker writeFile fails', async () => {
+    const legacy = buildFakeLegacy({ configFiles: { 'comfy.settings.json': '{}' } })
+    try {
+      // Targeted spy: fail only the marker write; let every other writeFile
+      // (snapshot, backup, etc.) succeed via the real impl.
+      const realWriteFile = fs.promises.writeFile.bind(fs.promises) as (...args: unknown[]) => Promise<void>
+      const markerPath = path.join(legacy.basePath, '.comfyui-desktop-2')
+      const spy = vi.spyOn(fs.promises, 'writeFile').mockImplementation(((...args: unknown[]) => {
+        const [file] = args
+        if (typeof file === 'string' && file === markerPath) {
+          return Promise.reject(Object.assign(new Error('disk full'), { code: 'ENOSPC' }))
+        }
+        return realWriteFile(...args)
+      }) as typeof fs.promises.writeFile)
+      try {
+        const tools = buildSilentTools()
+        await expect(adoptDesktopInstall({
+          tools,
+          deps: buildDeps({}, legacy.info),
+        })).rejects.toThrow(/disk full/)
+        // DB rolled back — no orphaned record.
+        expect(installationsMock.__records).toHaveLength(0)
+      } finally {
+        spy.mockRestore()
+      }
     } finally { legacy.cleanup() }
   })
 })
