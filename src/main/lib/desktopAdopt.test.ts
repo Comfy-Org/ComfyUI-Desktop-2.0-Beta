@@ -4,6 +4,7 @@ import fs from 'fs'
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 
 import type * as pathsModule from './paths'
+import type * as pipModule from './pip'
 
 vi.mock('electron', () => ({
   app: { getPath: (name: string) => name === 'home' ? os.tmpdir() : os.tmpdir() },
@@ -27,7 +28,21 @@ vi.mock('../settings', () => {
       else store[key] = value
     }),
     getAll: vi.fn(() => ({ ...store })),
+    getMirrorConfig: vi.fn(() => ({ pypiMirror: undefined, useChineseMirrors: false })),
     __store: store,
+  }
+})
+
+// Stub the pip helper so adoption tests don't need a real uv binary on disk.
+const { installFilteredRequirementsMock } = vi.hoisted(() => ({
+  installFilteredRequirementsMock: vi.fn<(...args: unknown[]) => Promise<number>>(),
+}))
+
+vi.mock('./pip', async (importOriginal) => {
+  const actual = await importOriginal<typeof pipModule>()
+  return {
+    ...actual,
+    installFilteredRequirements: installFilteredRequirementsMock,
   }
 })
 
@@ -67,6 +82,7 @@ import {
   parseExtraModelsYaml,
   deriveLaunchArgs,
   computeModelsDirsToCarry,
+  getLegacyVenvUvPath,
   type AdoptTools,
   type AdoptDeps,
   type UserChoice,
@@ -191,6 +207,7 @@ beforeEach(() => {
   installationsMock.__reset()
   for (const key of Object.keys(settingsMock.__store)) delete settingsMock.__store[key]
   vi.clearAllMocks()
+  installFilteredRequirementsMock.mockResolvedValue(0)
 })
 
 afterEach(() => {
@@ -474,6 +491,52 @@ describe('adoptDesktopInstall', () => {
       expect(backupDirs).toHaveLength(1)
       const files = fs.readdirSync(path.join(legacy.configDir, 'legacy-backup', backupDirs[0]!))
       expect(files.sort()).toEqual(['comfy.settings.json', 'config.json', 'extra_models_config.yaml', 'window.json'])
+    } finally { legacy.cleanup() }
+  })
+
+  it('installs ComfyUI requirements via the legacy venv uv when present', async () => {
+    const legacy = buildFakeLegacy({ configFiles: { 'comfy.settings.json': '{}' } })
+    try {
+      // Drop a fake uv binary into the legacy venv so getLegacyVenvUvPath resolves.
+      const uvPath = getLegacyVenvUvPath(legacy.basePath)
+      fs.mkdirSync(path.dirname(uvPath), { recursive: true })
+      fs.writeFileSync(uvPath, '')
+      // Have the git-clone dep populate a real requirements.txt.
+      const cloneFn = vi.fn(async (_url: string, dest: string) => {
+        fs.mkdirSync(dest, { recursive: true })
+        fs.writeFileSync(path.join(dest, 'main.py'), '# clone')
+        fs.writeFileSync(path.join(dest, 'requirements.txt'), 'comfy_aimdo>=1.2.0\ntorch>=2.0\n')
+        fs.writeFileSync(path.join(dest, 'manager_requirements.txt'), 'pyyaml>=6\n')
+        return { ok: true as const }
+      })
+      const tools = buildSilentTools()
+      const record = await adoptDesktopInstall({
+        tools,
+        deps: buildDeps({ cloneSourceFromGit: cloneFn }, legacy.info),
+      })
+      // Both requirements files routed through installFilteredRequirements
+      // with the legacy uv + adopted python.
+      expect(installFilteredRequirementsMock).toHaveBeenCalledTimes(2)
+      const coreCall = installFilteredRequirementsMock.mock.calls[0]!
+      expect(coreCall[0]).toBe(path.join(record.installPath, 'ComfyUI', 'requirements.txt'))
+      expect(coreCall[1]).toBe(uvPath)
+      // pythonPath is the legacy venv python derived from basePath
+      expect(typeof coreCall[2]).toBe('string')
+      const mgrCall = installFilteredRequirementsMock.mock.calls[1]!
+      expect(mgrCall[0]).toBe(path.join(record.installPath, 'ComfyUI', 'manager_requirements.txt'))
+    } finally { legacy.cleanup() }
+  })
+
+  it('skips requirements install when the legacy venv uv is missing', async () => {
+    const legacy = buildFakeLegacy({ configFiles: { 'comfy.settings.json': '{}' } })
+    try {
+      // No uv binary written under .venv — should skip cleanly.
+      const tools = buildSilentTools()
+      await adoptDesktopInstall({
+        tools,
+        deps: buildDeps({}, legacy.info),
+      })
+      expect(installFilteredRequirementsMock).not.toHaveBeenCalled()
     } finally { legacy.cleanup() }
   })
 

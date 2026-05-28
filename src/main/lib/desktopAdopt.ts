@@ -6,6 +6,7 @@ import { detectDesktopInstall, captureDesktopSnapshot, type DesktopInstallInfo }
 import { defaultInstallDir, allocateUniqueDir, sanitizeDirName } from './paths'
 import { gitClone } from './git'
 import { getComfyUIRemoteUrl } from './github-mirror'
+import { installFilteredRequirements } from './pip'
 import * as installations from '../installations'
 import type { InstallationRecord } from '../installations'
 import * as settings from '../settings'
@@ -318,6 +319,89 @@ function isStagedSourceValid(stagingDir: string): boolean {
 }
 
 /**
+ * Path to the uv binary that Legacy Desktop pip-installs into its venv as
+ * a Python package. Adopted installs reuse this in-venv uv so we don't
+ * need to bundle a separate uv with the launcher or depend on the legacy
+ * app bundle (which the user may have uninstalled post-cutover).
+ */
+export function getLegacyVenvUvPath(basePath: string): string {
+  return process.platform === 'win32'
+    ? path.join(basePath, '.venv', 'Scripts', 'uv.exe')
+    : path.join(basePath, '.venv', 'bin', 'uv')
+}
+
+interface RequirementsInstallReport {
+  uvAvailable: boolean
+  coreExitCode: number | null
+  managerExitCode: number | null
+}
+
+/**
+ * Install ComfyUI's `requirements.txt` (and `manager_requirements.txt`
+ * when present) into the legacy venv via its bundled uv. Best-effort:
+ * surfaces warnings on failure rather than aborting adoption — the
+ * adopted install is still usable, just with potentially stale deps the
+ * user can re-sync from the Manager UI later. PyTorch packages are
+ * filtered out via `installFilteredRequirements` so we never clobber the
+ * legacy CUDA build.
+ */
+async function installAdoptedRequirements(
+  destSource: string,
+  installPath: string,
+  pythonPath: string,
+  basePath: string,
+  tools: AdoptTools,
+): Promise<RequirementsInstallReport> {
+  const uvPath = getLegacyVenvUvPath(basePath)
+  if (!fs.existsSync(uvPath)) {
+    tools.sendOutput(
+      `Warning: legacy venv uv not found at ${uvPath} — skipping ComfyUI requirements install. ` +
+      `You may need to manually run \`pip install -r requirements.txt\` later if launches fail.\n`,
+    )
+    return { uvAvailable: false, coreExitCode: null, managerExitCode: null }
+  }
+
+  const mirrors = settings.getMirrorConfig()
+  const report: RequirementsInstallReport = {
+    uvAvailable: true,
+    coreExitCode: null,
+    managerExitCode: null,
+  }
+
+  const coreReqs = path.join(destSource, 'requirements.txt')
+  if (fs.existsSync(coreReqs)) {
+    tools.sendOutput('Installing ComfyUI requirements into legacy venv via uv…\n')
+    const code = await installFilteredRequirements(
+      coreReqs, uvPath, pythonPath, installPath,
+      '.adopt-core-reqs.txt',
+      tools.sendOutput, tools.signal, mirrors,
+    )
+    report.coreExitCode = code
+    if (code !== 0) {
+      tools.sendOutput(`Warning: ComfyUI requirements install exited with code ${code}.\n`)
+    }
+  } else {
+    tools.sendOutput(`Warning: ${coreReqs} missing — ComfyUI source may be incomplete.\n`)
+  }
+
+  const mgrReqs = path.join(destSource, 'manager_requirements.txt')
+  if (fs.existsSync(mgrReqs)) {
+    tools.sendOutput('Installing ComfyUI-Manager requirements…\n')
+    const code = await installFilteredRequirements(
+      mgrReqs, uvPath, pythonPath, installPath,
+      '.adopt-mgr-reqs.txt',
+      tools.sendOutput, tools.signal, mirrors,
+    )
+    report.managerExitCode = code
+    if (code !== 0) {
+      tools.sendOutput(`Warning: manager requirements install exited with code ${code}.\n`)
+    }
+  }
+
+  return report
+}
+
+/**
  * Return any existing adopted installation whose marker matches the install
  * found at `basePath`, so re-runs are no-ops.
  */
@@ -531,6 +615,16 @@ async function runAdoption(
     // 'retry' loops.
   }
 
+  sendProgress('requirements', { percent: 0 })
+  const reqReport = await telemetry.trackedStep('desktop2.adopt.requirements', {}, async () => {
+    try {
+      return await installAdoptedRequirements(destSource, installPath, pythonPath, info.basePath, tools)
+    } catch (err) {
+      sendOutput(`Warning: requirements install threw: ${(err as Error).message}\n`)
+      return { uvAvailable: false, coreExitCode: null, managerExitCode: null }
+    }
+  })
+
   const rawComfySettings = readLegacyComfySettings(info.configDir)
   const consent = readLegacyConsent(rawComfySettings)
   const launchArgs = deriveLaunchArgs(rawComfySettings)
@@ -593,6 +687,9 @@ async function runAdoption(
     has_venv: info.hasVenv,
     has_extra_models_yaml: fs.existsSync(path.join(info.configDir, EXTRA_MODELS_YAML)),
     models_dir_count: carry.addedModelsDirs.length,
+    requirements_uv_available: reqReport.uvAvailable,
+    requirements_core_exit: reqReport.coreExitCode,
+    requirements_manager_exit: reqReport.managerExitCode,
     gpu: typeof legacyDesktopConfig['detectedGpu'] === 'string' ? legacyDesktopConfig['detectedGpu'] as string : null,
     selected_device: typeof legacyDesktopConfig['selectedDevice'] === 'string' ? legacyDesktopConfig['selectedDevice'] as string : null,
   })
