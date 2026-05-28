@@ -38,12 +38,16 @@ module.exports = async ({ appDir, platform, arch }) => {
 
   console.log(`[todesktop:beforeBuild] Fetching bootstrap python for ${bootstrapPlatform}`)
   const script = path.join(appDir, 'scripts', 'fetch-bootstrap-python.mjs')
-  // todesktop resolves extraResources.from against `<appDir>/extraResources/`,
-  // not against the project source root — confirmed by the build log
-  // ("file source doesn't exist  from=<appDir>\extraResources\bootstrap-python\win-x64").
-  // Writing to <appDir>/bootstrap-python (the previous behaviour) put the
-  // archive in the wrong place and todesktop's packager skipped it silently.
-  const outDir = path.join(appDir, 'extraResources', 'bootstrap-python')
+  // todesktop layout:
+  //   <workingDir>/app-wrapper/app/         <- this is `appDir` (electron-builder appDirectory)
+  //   <workingDir>/app-wrapper/extraResources/  <- where extraResources.from is staged from
+  // extraResources.from in todesktop.json resolves against `app-wrapper/extraResources/`,
+  // NOT against the project root. The v0.6.6 mac build log proved this: the hook
+  // verified the binary inside `app-wrapper/app/extraResources/...` (correct relative
+  // to `appDir`) but electron-builder still warned `file source doesn't exist
+  // from=app-wrapper/extraResources/...` — and the dmg shipped without bootstrap-python.
+  // Going up one level from `appDir` puts the archive where todesktop actually reads it.
+  const outDir = path.join(appDir, '..', 'extraResources', 'bootstrap-python')
   // fetch-bootstrap-python.mjs now exits non-zero on failure, which bubbles
   // up here via execSync. Don't wrap in try/catch — a failed fetch must fail
   // the build (see 0.6.4 post-mortem: a swallowed fetch error shipped an
