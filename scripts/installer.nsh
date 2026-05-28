@@ -12,11 +12,16 @@
 ; upgrade."). This file is included after electron-builder's message lang file,
 ; so re-declaring these LangStrings (numeric LCID 1033 = English) overrides
 ; them — last definition wins. $(^Name) resolves to the product name at runtime.
+; electron-builder compiles with -WX (warnings as errors), and re-declaring a
+; LangString emits warning 6030 ("set multiple times"); disable just that
+; warning around these overrides so the build doesn't fail.
+!pragma warning disable 6030
 LangString perUserInstallExists 1033 "$(^Name) is already installed for your account."
 LangString perUserInstall 1033 "$(^Name) is installed for your account."
 LangString perMachineInstallExists 1033 "$(^Name) is already installed for all users."
 LangString perMachineInstall 1033 "$(^Name) is installed for all users."
 LangString reinstallUpgrade 1033 "Setup will update your existing installation."
+!pragma warning enable 6030
 
 ; Optional installer command-line overrides:
 ;   /ALLUSERS    force a per-machine install
