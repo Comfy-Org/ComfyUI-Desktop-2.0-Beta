@@ -1041,8 +1041,15 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
     // OAuth / cloud-login popups (and every other window) can't reach
     // destructive items like "Close All Windows" that bypass our
     // managed shutdown. See `installAppMenu` for the per-platform
-    // template.
-    installAppMenu()
+    // template. The macOS app menu also exposes "Check for Updates…"
+    // (issue #693), wired to the existing `updater.runCheck` entry point
+    // — the result flows through the normal broadcast pipeline (title-bar
+    // pill / Global Settings panel), so no new update logic is added.
+    installAppMenu(process.platform, undefined, {
+      onCheckForUpdates: () => {
+        void updater.runCheck('app-menu').catch(() => {})
+      },
+    })
 
     // Bring up main-process telemetry as early as possible so install/migrate
     // sub-step events can fire even before the renderer mounts.
