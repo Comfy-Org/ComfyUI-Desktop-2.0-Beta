@@ -288,7 +288,13 @@ function getLogText(): string {
   gap: 12px;
   flex-wrap: wrap;
 }
-.brand-progress__footer-btn {
+/* `:slotted()` mirrors the plain selector so the gap/padding rules
+ * reach the consumer's Back / Restart buttons too — Vue 3 scoped
+ * styles don't cross slot boundaries by default, and without
+ * `:slotted()` the icons crash into the labels in the slotted
+ * buttons. Keep the two selector groups in sync. */
+.brand-progress__footer-btn,
+:slotted(.brand-progress__footer-btn) {
   min-width: auto;
   padding: 7px 14px;
   font-size: 13px;
@@ -297,12 +303,14 @@ function getLogText(): string {
   gap: 6px;
   white-space: nowrap;
 }
-.brand-progress__footer-btn.brand-ghost {
+.brand-progress__footer-btn.brand-ghost,
+:slotted(.brand-progress__footer-btn.brand-ghost) {
   border-color: var(--neutral-500);
   color: var(--neutral-100);
 }
 @media (max-width: 720px) {
-  .brand-progress__footer-btn {
+  .brand-progress__footer-btn,
+  :slotted(.brand-progress__footer-btn) {
     padding: 6px 10px;
     font-size: 12px;
   }

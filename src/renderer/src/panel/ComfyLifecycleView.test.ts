@@ -21,14 +21,9 @@ const messages = {
       launchingTitle: 'Starting ComfyUI…',
       stoppingTitle: 'Stopping ComfyUI…',
       crashedTitle: 'ComfyUI exited unexpectedly',
-      crashedDesc: 'The ComfyUI process exited. You can restart it below.',
-      crashedDescWithCode:
-        'The ComfyUI process exited (exit code {code}). You can restart it below.',
-      crashedDescWithSignal:
-        'The ComfyUI process was terminated by {signal}. You can restart it below.',
-      crashedDescWithCodeAndSignal:
-        'The ComfyUI process was terminated by {signal} (exit code {code}). You can restart it below.',
-      crashedDescLogsHint: 'View the logs below for details.',
+      crashedDescWithCode: 'Exit code {code}.',
+      crashedDescWithSignal: 'Terminated by {signal}.',
+      crashedDescWithCodeAndSignal: 'Terminated by {signal} (exit code {code}).',
       restart: 'Restart ComfyUI',
       launchProgressTitle: 'Starting ComfyUI',
     },
@@ -160,7 +155,7 @@ describe('ComfyLifecycleView', () => {
     })
     await flushPromises()
     expect(wrapper.text()).toContain('ComfyUI exited unexpectedly')
-    expect(wrapper.text()).toContain('exit code 137')
+    expect(wrapper.text()).toContain('Exit code 137')
     expect(wrapper.find('.brand-progress__banner--error').exists()).toBe(true)
     const button = wrapper.find('button.brand-primary')
     expect(button.exists()).toBe(true)
@@ -175,21 +170,24 @@ describe('ComfyLifecycleView', () => {
       signal: 'SIGKILL',
     })
     await flushPromises()
-    expect(wrapper.text()).toContain('terminated by SIGKILL')
+    expect(wrapper.text()).toContain('Terminated by SIGKILL')
     expect(wrapper.text()).not.toContain('exit code')
   })
 
-  it('falls back to the generic crashed copy when neither exit code nor signal is recorded', async () => {
+  it('omits the message row entirely when neither exit code nor signal is recorded', async () => {
     const wrapper = mountView()
     const sessionStore = useSessionStore()
     sessionStore.errorInstances.set('inst-1', {
       installationName: 'My Local Install',
     })
     await flushPromises()
-    expect(wrapper.text()).toContain('The ComfyUI process exited.')
-    // Generic fallback must not invent a code or signal.
+    // Title alone ("ComfyUI exited unexpectedly") covers the no-detail
+    // case; the detail row stays out of the DOM rather than rendering
+    // a generic placeholder string.
+    expect(wrapper.text()).toContain('ComfyUI exited unexpectedly')
+    expect(wrapper.find('.brand-progress__error-row').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('exit code')
-    expect(wrapper.text()).not.toContain('terminated by')
+    expect(wrapper.text()).not.toContain('Terminated by')
   })
 
   it('renders both signal and exit code in the crashed message when both are present', async () => {
@@ -201,7 +199,7 @@ describe('ComfyLifecycleView', () => {
       signal: 'SIGKILL',
     })
     await flushPromises()
-    expect(wrapper.text()).toContain('terminated by SIGKILL')
+    expect(wrapper.text()).toContain('Terminated by SIGKILL')
     expect(wrapper.text()).toContain('exit code 137')
   })
 
@@ -232,22 +230,6 @@ describe('ComfyLifecycleView', () => {
     await flushPromises()
     expect(wrapper.find('.brand-progress__logs').exists()).toBe(false)
     expect(wrapper.find('.brand-progress__logs-toggle').exists()).toBe(false)
-    // The "view the logs" hint would otherwise point at an accordion
-    // that isn't even mounted — keep the message clean.
-    expect(wrapper.text()).not.toContain('View the logs')
-  })
-
-  it('appends the logs hint to the crashed message when stderr is captured', async () => {
-    const wrapper = mountView()
-    const sessionStore = useSessionStore()
-    sessionStore.errorInstances.set('inst-1', {
-      installationName: 'My Local Install',
-      exitCode: 1,
-      lastStderr: "ImportError: No module named 'torch'",
-    })
-    await flushPromises()
-    expect(wrapper.text()).toContain('exit code 1')
-    expect(wrapper.text()).toContain('View the logs below for details.')
   })
 
   it('hydrates the crashed state from getLastCrashError on mount when no live event has fired', async () => {
@@ -265,7 +247,7 @@ describe('ComfyLifecycleView', () => {
 
     expect(api.getLastCrashError).toHaveBeenCalledWith('inst-1')
     expect(wrapper.text()).toContain('ComfyUI exited unexpectedly')
-    expect(wrapper.text()).toContain('exit code 9')
+    expect(wrapper.text()).toContain('Exit code 9')
     expect(wrapper.find('.brand-progress__logs').text()).toContain('Killed by signal 9')
 
     const sessionStore = useSessionStore()

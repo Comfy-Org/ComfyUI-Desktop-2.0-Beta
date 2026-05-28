@@ -71,29 +71,23 @@ const crashedLogs = computed<string | null>(() => {
 
 const crashedMessage = computed<string | null>(() => {
   if (state.value !== 'crashed') return null
-  // Pick the most specific phrasing for whatever main captured. Signal +
-  // code (POSIX kill paths) is the richest; signal alone covers exits
-  // where Node reported only the signal; code alone is the Windows /
-  // non-zero-exit path; falling all the way through means we got neither
-  // and only have "something exited".
+  // Pick the most specific phrasing for whatever main captured. With
+  // neither code nor signal, return null so the message row doesn't
+  // render — the title alone ("ComfyUI exited unexpectedly") tells the
+  // user what happened, and the Restart / Back / View Logs UI is
+  // already visible so no further hint is needed.
   const code = errorInfo.value?.exitCode
   const signal = errorInfo.value?.signal
-  let base: string
   if (signal && code != null) {
-    base = t('comfyLifecycle.crashedDescWithCodeAndSignal', { code, signal })
-  } else if (signal) {
-    base = t('comfyLifecycle.crashedDescWithSignal', { signal })
-  } else if (code != null) {
-    base = t('comfyLifecycle.crashedDescWithCode', { code })
-  } else {
-    base = t('comfyLifecycle.crashedDesc')
+    return t('comfyLifecycle.crashedDescWithCodeAndSignal', { code, signal })
   }
-  // Append the logs hint only when we actually have stderr to show — the
-  // hint would otherwise point at a logs accordion that isn't rendered.
-  if (crashedLogs.value) {
-    return `${base} ${t('comfyLifecycle.crashedDescLogsHint')}`
+  if (signal) {
+    return t('comfyLifecycle.crashedDescWithSignal', { signal })
   }
-  return base
+  if (code != null) {
+    return t('comfyLifecycle.crashedDescWithCode', { code })
+  }
+  return null
 })
 
 /**
