@@ -67,7 +67,7 @@
   ${If} $2 == 2
     # electron-builder calls SetDetailsPrint none for interactive installs,
     # which silences DetailPrint output. Switch to textonly so users see what
-    # is happening in the installer's status bar while ExecWait blocks; this
+    # is happening in the installer's status bar while the redist runs; this
     # message stays on screen for the full duration of the VC++ install.
     SetDetailsPrint textonly
     DetailPrint "Installing Microsoft Visual C++ Redistributable (this may take several minutes)..."
