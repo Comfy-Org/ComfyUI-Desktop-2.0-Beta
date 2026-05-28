@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, toRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Home, Plus, Search, X } from 'lucide-vue-next'
+import { LayoutGrid, Plus, Search, X } from 'lucide-vue-next'
 import BaseInput from '../components/ui/BaseInput.vue'
 import { FILTER_CHIPS, useInstallList } from '../composables/useInstallList'
 import { useSessionStore } from '../stores/sessionStore'
@@ -114,9 +114,8 @@ interface PickerBridge {
   platform?: string
   /** Dispatch a menu-item id through the existing
    *  `comfy-titlepopup:item-activated` → `activateTitlePopupMenuItem`
-   *  path. The picker's Home button reuses this with
-   *  `'return-to-dashboard'` so we don't add a parallel IPC for the
-   *  same action. */
+   *  path. The picker's dashboard button reuses this with `'new-window'`
+   *  so we don't add a parallel IPC for the same action. */
   activate?: (id: string) => void
   /** Dismiss the popup (same as ESC / click-outside). Wired to the
    *  top-right close button. */
@@ -306,12 +305,16 @@ function handleClose(): void {
 }
 
 /** Picker hosted by an install (vs the chooser/dashboard itself).
- *  Drives whether the Home → dashboard escape is offered — pointless
- *  to surface on a picker already shown from the dashboard. */
+ *  Drives whether the dashboard button is offered — pointless to
+ *  surface on a picker already shown from the dashboard. */
 const isInstallHost = computed(() => !!props.snapshot.activeInstallationId)
 
-function handleReturnToDashboard(): void {
-  bridge?.activate?.('return-to-dashboard')
+/** Open the dashboard. Routes through `new-window` (a fresh chooser
+ *  host) rather than `return-to-dashboard` — the latter detaches the
+ *  install, which STOPS the running instance. The user wants to view the
+ *  dashboard without killing what's running, so we open it alongside. */
+function handleOpenDashboard(): void {
+  bridge?.activate?.('new-window')
 }
 
 watch(
@@ -479,9 +482,9 @@ function handleExpandedPrimaryAction(running: boolean): void {
           class="picker-home"
           :aria-label="$t('fileMenu.returnToDashboard')"
           :title="$t('fileMenu.returnToDashboard')"
-          @click="handleReturnToDashboard"
+          @click="handleOpenDashboard"
         >
-          <Home :size="14" />
+          <LayoutGrid :size="14" />
         </button>
         <span class="picker-chips-divider" aria-hidden="true"></span>
       </template>
