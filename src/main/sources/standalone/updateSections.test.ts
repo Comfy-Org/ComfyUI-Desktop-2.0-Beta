@@ -91,14 +91,19 @@ describe('updateSections — update-comfyui action payload', () => {
     }))
   })
 
-  it('flags isDowngrade=true for stable target when install is ahead of baseTag (commitsAhead > 0)', () => {
+  it('frames a stable target as a channel switch (not a downgrade) when the install is effectively on latest', () => {
+    // commitsAhead > 0 on a stored-stable install => getEffectiveChannel
+    // reports `latest`, so picking the `stable` card is a channel switch.
     const action = getUpdateAction(
       baseInstall({ comfyVersion: { commit: 'abc1234', baseTag: 'v0.3.20', commitsAhead: 5 } } as Partial<InstallationRecord>),
       'stable'
     )
     expect(action).toBeDefined()
+    // The backend still rolls back (flag preserved)...
     expect(action!.data?.isDowngrade).toBe(true)
-    expect(action!.progressTitle).toBe('standalone.downgradingTitle')
+    // ...but the user-facing copy is "Switching to", not "Downgrading" —
+    // changing channels shouldn't surface up/down direction.
+    expect(action!.progressTitle).toBe('channelCards.switchingToTitle')
   })
 
   it('flags isDowngrade=true when commitsAhead is undefined but baseTag exists (older snapshot/install)', () => {

@@ -297,6 +297,8 @@
     "switchTo": "Switch to {channel}",
     "switchChannelOnly": "Switch Channel",
     "switchChannelPrefix": "Switching channel from {from} to {to}.\n\n",
+    "movingTo": "Moving to {channel}.",
+    "switchingToTitle": "Switching to {channel}",
     "computingCommitsAhead": "Computing commits ahead…"
   },
 

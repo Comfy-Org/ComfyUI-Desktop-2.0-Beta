@@ -199,7 +199,9 @@
     "noInfo": "选择此通道并检查更新以查看版本信息。",
     "current": "当前",
     "switchTo": "切换到 {channel}",
-    "switchChannelPrefix": "正在将更新通道从 {from} 切换到 {to}。\n\n"
+    "switchChannelPrefix": "正在将更新通道从 {from} 切换到 {to}。\n\n",
+    "movingTo": "正在切换到 {channel}。",
+    "switchingToTitle": "正在切换到 {channel}"
   },
 
   "track": {
