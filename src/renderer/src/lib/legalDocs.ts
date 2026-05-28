@@ -544,7 +544,7 @@ export const PRIVACY_POLICY: LegalDoc = {
     {
       kind: 'p',
       text:
-        "We'll update this document as the product evolves. The **Effective** date at the top changes when we revise. During the beta, we may iterate without re-prompting you to re-accept; at GA, we'll prompt for a fresh acceptance of the final policy.",
+        "We'll update this document as the product evolves. The **Effective** date at the top changes when we revise. If we make material changes, we'll prompt you to review and accept the updated policy before you continue using the app.",
     },
 
     { kind: 'h2', text: 'Contact' },
@@ -567,7 +567,7 @@ export const THIRD_PARTY_NOTICES: LegalDoc = {
     {
       kind: 'p',
       text:
-        'ComfyUI Desktop is built on top of, and bundles, third-party open-source software. This document lists the major components, their licenses, and the required attribution notices. A complete auto-generated list (including transitive dependencies) is produced as part of the build pipeline before GA.',
+        'ComfyUI Desktop is built on top of, and bundles, third-party open-source software. This document lists the major components, their licenses, and the required attribution notices. A complete auto-generated list (including transitive dependencies) is produced as part of the release build pipeline.',
     },
     {
       kind: 'p',
