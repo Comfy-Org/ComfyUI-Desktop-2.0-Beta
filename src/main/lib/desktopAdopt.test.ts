@@ -527,6 +527,41 @@ describe('adoptDesktopInstall', () => {
     } finally { legacy.cleanup() }
   })
 
+  it('reconciles requirements on re-run against an already-adopted install', async () => {
+    const legacy = buildFakeLegacy({ configFiles: { 'comfy.settings.json': '{}' } })
+    try {
+      const uvPath = getLegacyVenvUvPath(legacy.basePath)
+      fs.mkdirSync(path.dirname(uvPath), { recursive: true })
+      fs.writeFileSync(uvPath, '')
+      const cloneFn = vi.fn(async (_url: string, dest: string) => {
+        fs.mkdirSync(dest, { recursive: true })
+        fs.writeFileSync(path.join(dest, 'main.py'), '# clone')
+        fs.writeFileSync(path.join(dest, 'requirements.txt'), 'comfy_aimdo>=1.2.0\n')
+        return { ok: true as const }
+      })
+      // First run: full adoption, installs requirements once.
+      const first = await adoptDesktopInstall({
+        tools: buildSilentTools(),
+        deps: buildDeps({ cloneSourceFromGit: cloneFn }, legacy.info),
+      })
+      expect(installFilteredRequirementsMock).toHaveBeenCalledTimes(1)
+      installFilteredRequirementsMock.mockClear()
+      // Second run: marker present → reconcile requirements without
+      // re-cloning / re-registering.
+      const second = await adoptDesktopInstall({
+        tools: buildSilentTools(),
+        deps: buildDeps({ cloneSourceFromGit: cloneFn }, legacy.info),
+      })
+      expect(second.id).toBe(first.id)
+      expect(cloneFn).toHaveBeenCalledTimes(1) // not re-cloned
+      // Requirements re-checked against the existing install's destSource.
+      expect(installFilteredRequirementsMock).toHaveBeenCalledTimes(1)
+      const reconcileCall = installFilteredRequirementsMock.mock.calls[0]!
+      expect(reconcileCall[0]).toBe(path.join(first.installPath, 'ComfyUI', 'requirements.txt'))
+      expect(reconcileCall[1]).toBe(uvPath)
+    } finally { legacy.cleanup() }
+  })
+
   it('skips requirements install when the legacy venv uv is missing', async () => {
     const legacy = buildFakeLegacy({ configFiles: { 'comfy.settings.json': '{}' } })
     try {

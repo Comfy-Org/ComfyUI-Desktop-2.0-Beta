@@ -480,9 +480,38 @@ function carryLegacySettings(
 }
 
 /**
+ * Idempotent reconciliation pass for an already-adopted install. Re-runs
+ * the requirements install against the legacy venv so older adoptions
+ * (pre-requirements-step) and installs whose deps drifted after a manual
+ * ComfyUI source update can self-heal by re-running migrate-to-standalone.
+ * Best-effort: any failure is logged and swallowed so the caller still
+ * sees the original adopted record (the re-run never destroys a working
+ * adoption).
+ */
+async function reconcileAdoptedRequirements(
+  existing: InstallationRecord,
+  info: DesktopInstallInfo,
+  tools: AdoptTools,
+): Promise<void> {
+  const destSource = path.join(existing.installPath, 'ComfyUI')
+  const pythonPath = (existing.adoptedPythonPath as string | undefined)
+    ?? (process.platform === 'win32'
+      ? path.join(info.basePath, '.venv', 'Scripts', 'python.exe')
+      : path.join(info.basePath, '.venv', 'bin', 'python3'))
+  const basePath = (existing.adoptedBaseDir as string | undefined) ?? info.basePath
+  try {
+    await telemetry.trackedStep('desktop2.adopt.requirements_reconcile', { installation_id: existing.id }, async () => {
+      await installAdoptedRequirements(destSource, existing.installPath, pythonPath, basePath, tools)
+    })
+  } catch (err) {
+    tools.sendOutput(`Warning: requirements reconcile threw: ${(err as Error).message}\n`)
+  }
+}
+
+/**
  * Orchestrate adoption of a Legacy Desktop install into a Desktop 2.0
- * installation record. Idempotent: re-runs detect the marker and return the
- * existing record without touching disk.
+ * installation record. Idempotent: re-runs detect the marker, return the
+ * existing record, and reconcile requirements against the legacy venv.
  *
  * @param opts - Progress/prompt tools and (test-only) dependency overrides.
  * @returns The adopted installation record.
@@ -504,10 +533,16 @@ export async function adoptDesktopInstall(opts: AdoptOptions): Promise<Installat
     throw new Error('no-legacy-install')
   }
 
-  // Idempotent no-op when the marker already names a recorded installation.
+  // Idempotent re-run when the marker already names a recorded installation.
+  // We still reconcile ComfyUI's requirements.txt against the legacy venv so
+  // older adoptions (created before the requirements step shipped) and
+  // installs whose deps drifted after a manual ComfyUI source update can
+  // self-heal by re-running migrate-to-standalone. installFilteredRequirements
+  // is idempotent — repeating it on an up-to-date venv is a uv no-op.
   const existing = await findExistingAdoption(info.basePath)
   if (existing) {
-    tools.sendOutput(`Already adopted as installation ${existing.id}\n`)
+    tools.sendOutput(`Already adopted as installation ${existing.id}; reconciling requirements…\n`)
+    await reconcileAdoptedRequirements(existing, info, tools)
     return existing
   }
 
