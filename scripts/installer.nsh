@@ -83,6 +83,10 @@
     # "runas" with $HWNDPARENT as the owner window attaches the consent dialog
     # to the installer window, so it comes to the foreground (and dims via the
     # secure desktop) as expected. /quiet keeps the redist's own UI hidden.
+    #
+    # The label below is a deliberate retry loop. installVcRedist is inserted
+    # exactly once (via customInstall), so the label cannot collide.
+    vcRedistAttempt:
     BringToFront
     ClearErrors
     ExecShellWait "runas" "$PLUGINSDIR\vc_redist.x64.exe" "/install /quiet /norestart"
@@ -90,11 +94,16 @@
 
     ${If} ${Errors}
       # ShellExecuteEx couldn't launch the elevated redist — overwhelmingly
-      # because the user dismissed the UAC prompt. (Once it launches, any exit
-      # code — including 1638 "already installed" and 3010 "reboot required" —
-      # is a successful run; ExecShellWait only flags a launch/elevation
-      # failure, which is exactly the case we must not silently ignore.)
-      MessageBox MB_ICONSTOP|MB_OK "Microsoft Visual C++ Redistributable installation did not complete (the permission prompt may have been declined). ComfyUI Desktop requires it to run."
+      # because the user declined or dismissed the UAC prompt. (Once it
+      # launches, any exit code — including 1638 "already installed" and 3010
+      # "reboot required" — is a successful run; ExecShellWait only flags a
+      # launch/elevation failure.) The redist is a hard prerequisite, so offer
+      # Retry (re-show the UAC prompt) or Cancel (abort). Bring the installer
+      # to the front first so this dialog isn't hidden behind other windows
+      # after the elevation prompt closed; /SD IDCANCEL aborts in silent mode
+      # instead of looping forever.
+      BringToFront
+      MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "ComfyUI Desktop requires the Microsoft Visual C++ Redistributable, but the Windows permission prompt was declined.$\n$\nClick Retry to allow it, or Cancel to stop the installation." /SD IDCANCEL IDRETRY vcRedistAttempt
       Abort
     ${EndIf}
   ${Else}
