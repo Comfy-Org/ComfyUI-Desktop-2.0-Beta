@@ -96,6 +96,10 @@ export async function handleFirebasePopup(
     opts.onError?.(new Error(`Firebase popup URL missing providerId: ${url}`))
     return
   }
+  // Sign-in funnel: started -> (app:user_logged_in | auth.sign_in_failed).
+  // `provider` splits Google vs GitHub conversion + failure rates. The
+  // success leg is emitted by bindSignedInUser's app:user_logged_in.
+  mainTelemetry.capture('desktop2.auth.sign_in_started', { provider: providerId })
   const env = detectFirebaseEnv(url)
 
   // Kill any stale bridge from a prior sign-in attempt the user
@@ -148,7 +152,15 @@ export async function handleFirebasePopup(
       parentWindow.focus()
     }
   } catch (err) {
-    opts.onError?.(err instanceof Error ? err : new Error(String(err)))
+    const error = err instanceof Error ? err : new Error(String(err))
+    // Mirrored to Datadog (allow-list) so ops can alert if sign-in
+    // breaks for a provider. error_bucket keeps the dashboard low-
+    // cardinality; the raw message stays out (may carry tokens / URLs).
+    mainTelemetry.emit('desktop2.auth.sign_in_failed', {
+      provider: providerId,
+      error_bucket: mainTelemetry.bucketError(error.message)
+    })
+    opts.onError?.(error)
   } finally {
     handle?.close()
     if (activeBridge === handle) activeBridge = null

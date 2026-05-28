@@ -50,7 +50,10 @@ export const DATADOG_MIRRORED_EVENT_NAMES: ReadonlySet<string> = new Set([
   'desktop2.snapshot.restore_custom_nodes.error',
   'desktop2.snapshot.restore_pip_packages.error',
   // Operational signal for the identity migration rollout.
-  'desktop2.identity.migrated'
+  'desktop2.identity.migrated',
+  // Sign-in failures — alert if a provider's auth bridge breaks (OAuth
+  // config drift, IdP outage, loopback-port contention).
+  'desktop2.auth.sign_in_failed'
 ])
 
 export function isDatadogMirroredEvent(eventName: string): boolean {
