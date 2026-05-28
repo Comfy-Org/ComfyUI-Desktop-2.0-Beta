@@ -52,8 +52,19 @@ function fieldValue(field: DetailField): string {
   return String(v)
 }
 
+/** Localised dates (e.g. the "Installed" field) come through as
+ *  `toLocaleDateString()` output — `5/28/2026` etc. — whose `/`
+ *  separators would otherwise trip the slash-based path heuristic and
+ *  sprout a copy button that makes no sense for a date (#712). A path
+ *  always carries a letter (drive/segment name), a backslash, or a
+ *  leading `~`; a date is only digits and date separators. */
+function looksLikeDate(value: string): boolean {
+  return /^[\d/.\-: ]+$/.test(value)
+}
+
 function isPathLike(value: string): boolean {
   if (!value || value === '—') return false
+  if (looksLikeDate(value)) return false
   return value.includes('/') || value.includes('\\') || value.startsWith('~')
 }
 
