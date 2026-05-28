@@ -174,6 +174,30 @@ const {
   lastLaunchedShortLabel
 } = useInstallList({ installations: installationsRef })
 
+/** Rows for the picker list. Unlike the dashboard (which pins the Cloud
+ *  card on top), the IPP folds cloud into the recency-sorted list so it
+ *  sorts by its own `lastLaunchedAt` — a local that was opened more
+ *  recently sits above it, so cloud no longer "sticks" on top.
+ *
+ *  Tie-break: when recency is equal (e.g. nothing launched yet), cloud
+ *  takes priority and is ordered first. Note this is ordering only — the
+ *  auto-*selected* default still favours a real install on a tie (see
+ *  `resolvePickerSelectedInstallId` in main), so cloud can lead the list
+ *  without being pre-selected for users who never open it.
+ *  `showCloudCard` still gates cloud per the active filter / search query. */
+const pickerRows = computed<Installation[]>(() => {
+  const rows = [...visibleInstalls.value]
+  if (showCloudCard.value && cloudInstall.value) {
+    rows.push(cloudInstall.value)
+  }
+  return rows.sort((a, b) => {
+    const ta = a.lastLaunchedAt ?? -Infinity
+    const tb = b.lastLaunchedAt ?? -Infinity
+    if (tb !== ta) return tb - ta
+    return (b.sourceCategory === 'cloud' ? 1 : 0) - (a.sourceCategory === 'cloud' ? 1 : 0)
+  })
+})
+
 const visibleChips = computed(() => {
   return FILTER_CHIPS.filter((chip) => {
     if (chip.key === 'all') return true
@@ -189,14 +213,29 @@ const visibleChips = computed(() => {
 
 /** The install the user most recently launched — the sensible default
  *  selection when the popup opens with no active or explicitly-selected
- *  install. Falls back to list order when nothing has ever been launched. */
+ *  install.
+ *
+ *  Tie-break mirrors main's `mostRecentlyLaunchedInstallId`: the always-
+ *  seeded "Comfy Cloud" entry must not win the default just by sorting
+ *  first. Cloud is the default only when genuinely launched most-recently
+ *  (strictly higher `lastLaunchedAt`); on a tie a real install wins, so the
+ *  default stays fair for users who never open cloud. */
 function mostRecentInstallId(installs: PickerInstall[]): string | null {
-  const first = installs[0]
-  if (!first) return null
-  return installs.reduce(
-    (best, i) => ((i.lastLaunchedAt ?? 0) > (best.lastLaunchedAt ?? 0) ? i : best),
-    first
-  ).id
+  let best: PickerInstall | undefined
+  for (const inst of installs) {
+    if (!best) {
+      best = inst
+      continue
+    }
+    const ts = inst.lastLaunchedAt ?? 0
+    const bestTs = best.lastLaunchedAt ?? 0
+    if (ts > bestTs) {
+      best = inst
+    } else if (ts === bestTs && best.sourceCategory === 'cloud' && inst.sourceCategory !== 'cloud') {
+      best = inst
+    }
+  }
+  return best?.id ?? null
 }
 
 function resolveInitialSelection(snapshot: PickerSnapshot): string | null {
@@ -515,20 +554,7 @@ function handleExpandedPrimaryAction(running: boolean): void {
 
           <div class="picker-list" role="listbox">
             <InstanceRow
-              v-if="showCloudCard && cloudInstall"
-              :key="cloudInstall.id"
-              :installation="cloudInstall"
-              :active="selectedId === cloudInstall.id"
-              :running="isRowRunning(cloudInstall)"
-              :is-current="isRowCurrent(cloudInstall)"
-              :update-available="isRowUpdateAvailable(cloudInstall)"
-              :operating="effectiveOperatingSet.has(cloudInstall.id)"
-              :last-launched-short-label="lastLaunchedShortLabel(cloudInstall)"
-              @select="handleSelect"
-            />
-
-            <InstanceRow
-              v-for="inst in visibleInstalls"
+              v-for="inst in pickerRows"
               :key="inst.id"
               :installation="inst"
               :active="selectedId === inst.id"

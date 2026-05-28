@@ -234,6 +234,31 @@ describe('resolvePickerSelectedInstallId', () => {
     expect(resolvePickerSelectedInstallId(null, null, installs)).toBe('a')
   })
 
+  it('does not default to the seeded cloud entry just because it sorts first', () => {
+    // The auto-seeded "Comfy Cloud" install is first in the registry but has
+    // no launch history — a real install must win the default so it stays
+    // fair for users who never open cloud.
+    const installs = [
+      makeInstall({ id: 'cloud', sourceCategory: 'cloud' }),
+      makeInstall({ id: 'local-a', sourceCategory: 'local' }),
+      makeInstall({ id: 'local-b', sourceCategory: 'local' }),
+    ]
+    expect(resolvePickerSelectedInstallId(null, null, installs)).toBe('local-a')
+  })
+
+  it('still defaults to cloud when it was genuinely launched most-recently', () => {
+    const installs = [
+      makeInstall({ id: 'local-a', sourceCategory: 'local', lastLaunchedAt: 1000 }),
+      makeInstall({ id: 'cloud', sourceCategory: 'cloud', lastLaunchedAt: 5000 }),
+    ]
+    expect(resolvePickerSelectedInstallId(null, null, installs)).toBe('cloud')
+  })
+
+  it('falls back to cloud when it is the only install', () => {
+    const installs = [makeInstall({ id: 'cloud', sourceCategory: 'cloud' })]
+    expect(resolvePickerSelectedInstallId(null, null, installs)).toBe('cloud')
+  })
+
   it('returns null when there are no installs to select', () => {
     expect(resolvePickerSelectedInstallId(null, null, [])).toBeNull()
   })
