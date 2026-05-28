@@ -96,6 +96,36 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: pnpm run bootstrap:fetch
 
+      - name: Verify bootstrap-python is populated for every platform
+        # Belt-and-braces check: even though fetch-bootstrap-python.mjs now
+        # exits non-zero on failure, surface the directory state in the build
+        # log and explicitly fail if any platform's Python binary is missing.
+        # The 0.6.4 installer shipped without bootstrap-python because a fetch
+        # error was swallowed and the directory was empty going into the
+        # packaging step. That class of failure must never be quiet again.
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "bootstrap-python tree:"
+          ls -la bootstrap-python/ || true
+          missing=0
+          for f in \
+            bootstrap-python/win-x64/python.exe \
+            bootstrap-python/mac-arm64/bin/python3 \
+            bootstrap-python/linux-x64/bin/python3
+          do
+            if [ ! -f "$f" ]; then
+              echo "::error::bootstrap-python verification failed: $f is missing"
+              missing=$((missing + 1))
+            else
+              echo "  OK: $f"
+            fi
+          done
+          if [ "$missing" -gt 0 ]; then
+            echo "::error::$missing bootstrap-python binar(ies) missing — refusing to build a broken installer"
+            exit 1
+          fi
+
       - name: Build with ToDesktop
         shell: bash
         run: |

@@ -40,10 +40,11 @@ import { get as getInstallation, installationEvents, list as listInstallations }
 import { startPeriodicReleaseChecks } from './lib/release-cache-startup'
 import { showModelFolderRelaunchPage } from './lib/relaunchPage'
 import { COMFY_BG, SPLASH_DARK, TITLEBAR_BG, type SplashTheme } from './lib/theme'
-import { comfyTitleBarOverlay } from './lib/titleBarOverlay'
+import { titleBarOverlayForTheme } from './lib/titleBarOverlay'
 import {
   sourceMap, _broadcastToRenderer, _runningSessions,
   _operationAborts, _activeOperationStatus, stopRunning,
+  resolveTheme,
   type PickerOperationStatus,
 } from './lib/ipc/shared'
 import { enrichInstallationsForRenderer } from './lib/ipc/registerInstallationHandlers'
@@ -426,7 +427,7 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
     windowTitle: `${installation.name} — Desktop 2.0 v${APP_VERSION}`,
     boundsKey: installationId,
     initialTheme: { bg: COMFY_BG, text: '#dddddd' },
-    titleBarOverlay: process.platform === 'darwin' ? undefined : comfyTitleBarOverlay(),
+    titleBarOverlay: process.platform === 'darwin' ? undefined : titleBarOverlayForTheme(resolveTheme() === 'dark'),
     comfyWebPreferences: {
       nodeIntegration: false,
       contextIsolation: true,

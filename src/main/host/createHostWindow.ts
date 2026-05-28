@@ -934,10 +934,10 @@ export function openChooserHostWindow(): BrowserWindow {
     initialTheme: initialChooserTheme,
     titleBarOverlay: process.platform === 'darwin'
       ? undefined
-      // Install-less hosts use the launcher renderer's --surface
-      // for the OS overlay so the close/min/max region matches the
-      // Vue title bar above it. Install-backed windows still use
-      // `comfyTitleBarOverlay()` (ComfyUI brand --comfy-menu-bg).
+      // Every host — install-less chooser AND install-backed instance —
+      // uses the same `titleBarOverlayForTheme` (TITLEBAR_BG) for the OS
+      // overlay so the close/min/max region matches the Vue title bar
+      // above it. The overlay never adapts to ComfyUI's in-page theme.
       : titleBarOverlayForTheme(resolveTheme() === 'dark'),
     // Dummy comfyView. Kept so layoutViews doesn't have to special-
     // case the install-less branch — its body always resolves to
