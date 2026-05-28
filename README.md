@@ -262,8 +262,6 @@ On **Windows** and **macOS**, all app data lives under the standard Electron `us
 > |---|---|---|---|
 > | **Dev** | `%APPDATA%\comfyui-desktop-2` | `~/Library/Application Support/comfyui-desktop-2` | `~/.config/comfyui-desktop-2` |
 > | **Production** | `%APPDATA%\ComfyUI Desktop` | `~/Library/Application Support/ComfyUI Desktop` | `~/.config/ComfyUI Desktop` |
->
-> **Migration note (post-rename):** earlier beta builds shipped as `productName: ComfyUI Desktop 2.0`, so production data lived under a `ComfyUI Desktop 2.0` directory. After the rename there is **no automated migration yet** — existing beta users will see a fresh first-run until that is built. See the TODOs in this PR for the open design question (auto-move on first run vs. user prompt vs. symlink). The `reset-*` support scripts wipe both the old and new directory names.
 
 On **Linux**, the app follows the [XDG Base Directory Specification](https://wiki.archlinux.org/title/XDG_Base_Directory):
 
