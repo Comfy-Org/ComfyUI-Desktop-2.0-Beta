@@ -1227,10 +1227,19 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
               const freshInst = await getInstallation(installationId) ?? inst
               await handleLaunch({ event: stubEvent, installationId, inst: freshInst, actionData: undefined })
             }
+            // `actionResult.cancelled === true` is the user-cancel
+            // signal from handlers that swallow the abort internally
+            // (copy / copy-update / release-update). Map it to the
+            // 'Cancelled.' error string the renderer's inline-picker
+            // progress card matches on so the user sees a "Cancelled"
+            // banner instead of a misleading success state.
+            const wasCancelled = actionResult.cancelled === true
             result = {
-              status: '', percent: 100, done: true,
-              ok: actionResult.ok !== false,
-              error: actionResult.ok === false ? (actionResult.message ?? 'Failed.') : null,
+              status: '', percent: wasCancelled ? -1 : 100, done: true,
+              ok: !wasCancelled && actionResult.ok !== false,
+              error: wasCancelled
+                ? 'Cancelled.'
+                : (actionResult.ok === false ? (actionResult.message ?? 'Failed.') : null),
               cancellable, title, actionId, actionData,
             }
           } catch (err) {

@@ -35,7 +35,7 @@ export async function handleCopy({ event, installationId, inst, actionData }: Ac
     return { ok: true, navigate: 'list', newInstallationId: entry.id }
   } catch (err) {
     _operationAborts.delete(installationId)
-    if (abort.signal.aborted) return { ok: true, navigate: 'detail' }
+    if (abort.signal.aborted) return { ok: false, cancelled: true, message: 'Cancelled' }
     return { ok: false, message: (err as Error).message }
   }
 }
@@ -110,7 +110,7 @@ export async function handleCopyUpdate({ event, installationId, inst, actionData
       : { ok: true, navigate: 'list', newInstallationId: entry.id }
   } catch (err) {
     _operationAborts.delete(installationId)
-    if (abort.signal.aborted) return { ok: true, navigate: 'detail' }
+    if (abort.signal.aborted) return { ok: false, cancelled: true, message: 'Cancelled' }
     return { ok: false, message: (err as Error).message }
   }
 }
@@ -238,7 +238,7 @@ export async function handleReleaseUpdate({ event, installationId, inst, actionD
       if (entry) try { await installations.remove(entry.id) } catch {}
       try { await fs.promises.rm(destPath, { recursive: true, force: true }) } catch {}
     }
-    if (abort.signal.aborted) return { ok: true, navigate: installComplete ? 'list' : 'detail' }
+    if (abort.signal.aborted) return { ok: false, cancelled: true, message: 'Cancelled' }
     return { ok: false, message: (err as Error).message }
   }
 }
