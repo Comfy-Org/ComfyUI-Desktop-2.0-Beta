@@ -23,7 +23,7 @@ vi.mock('./telemetry', () => ({
   capture: vi.fn(),
 }))
 
-import { buildExportEnvelope, validateExportEnvelope, importSnapshots, diffSnapshots, listSnapshots, restoreComfyUIVersion, buildPostRestoreState, restorePipPackages, formatSnapshotVersion } from './snapshots'
+import { buildExportEnvelope, validateExportEnvelope, importSnapshots, diffSnapshots, listSnapshots, restoreComfyUIVersion, buildPostRestoreState, restorePipPackages, formatSnapshotVersion, extractPipFailureReason } from './snapshots'
 import type { Snapshot, SnapshotEntry, SnapshotExportEnvelope } from './snapshots'
 import type { ScannedNode } from './nodes'
 import type { InstallationRecord } from '../installations'
@@ -787,6 +787,65 @@ describe('restorePipPackages', () => {
     expect(uninstallCall).toBeDefined()
     expect(uninstallCall).toContain('new-pkg-a')
     expect(uninstallCall).toContain('new-pkg-b')
+  })
+
+  it('captures the pip failure reason in result.errors (issue #633)', async () => {
+    mockedPipFreeze.mockResolvedValue({})
+
+    // Bulk install fails → one-by-one fallback; the single install emits a
+    // real pip error to its output stream and fails.
+    mockedRunUvPip.mockImplementation(
+      async (_uvPath, args, _cwd, sendOutput, _signal?) => {
+        if (args.includes('install')) {
+          if (args.includes('--no-deps')) {
+            sendOutput('Resolving dependencies…\n')
+            sendOutput('ERROR: No matching distribution found for bad-pkg==9.9.9\n')
+            return 1
+          }
+          return 1 // bulk install fails → fall through to one-by-one
+        }
+        return 0 // uninstall calls during revert succeed
+      }
+    )
+
+    const snapshot = makeSnapshot({ pipPackages: { 'bad-pkg': '9.9.9' } })
+    const noop = () => {}
+
+    const result = await restorePipPackages(
+      tmpDir, installation, snapshot, noop as never, noop, undefined
+    )
+
+    const installError = result.errors.find((e) => e.startsWith('Failed to install'))
+    expect(installError).toBeDefined()
+    // The actual reason — not just "Failed to install bad-pkg==9.9.9".
+    expect(installError).toContain('No matching distribution found for bad-pkg==9.9.9')
+  })
+})
+
+describe('extractPipFailureReason', () => {
+  it('prefers error-looking lines over surrounding noise', () => {
+    const out = [
+      'Resolving dependencies…',
+      'Downloading numpy…',
+      'ERROR: Could not find a version that satisfies the requirement foo==1',
+    ].join('\n')
+    expect(extractPipFailureReason(out)).toContain('Could not find a version')
+  })
+
+  it('falls back to the last non-empty lines when nothing looks like an error', () => {
+    expect(extractPipFailureReason('step one\nstep two\n')).toBe('step one step two')
+    expect(extractPipFailureReason('only line\n', 1)).toBe('only line')
+  })
+
+  it('returns an empty string for empty output', () => {
+    expect(extractPipFailureReason('')).toBe('')
+  })
+
+  it('caps very long output', () => {
+    const long = 'error: ' + 'x'.repeat(500)
+    const reason = extractPipFailureReason(long)
+    expect(reason.length).toBeLessThanOrEqual(300)
+    expect(reason.endsWith('…')).toBe(true)
   })
 })
 

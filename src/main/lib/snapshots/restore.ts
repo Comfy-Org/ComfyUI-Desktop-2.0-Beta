@@ -264,6 +264,28 @@ export function buildPostRestoreState(
 }
 
 /**
+ * Pull the most useful line(s) out of a failed uv/pip command's captured
+ * output so a restore failure can explain WHY (issue #633) instead of a
+ * bare "Failed to install X". Prefers lines that look like an error;
+ * falls back to the last few non-empty lines. Capped so the surfaced
+ * message stays readable.
+ */
+export function extractPipFailureReason(output: string, maxLines = 2): string {
+  const lines = output.split('\n').map((l) => l.trim()).filter(Boolean)
+  const errorLines = lines.filter((l) =>
+    /\b(error|failed|no matching distribution|could not find|not found|conflict|incompatible|cannot|unable)\b/i.test(
+      l,
+    ),
+  )
+  const reason = (errorLines.length > 0 ? errorLines : lines)
+    .slice(-maxLines)
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return reason.length > 300 ? `${reason.slice(0, 299)}…` : reason
+}
+
+/**
  * Restore pip packages to match a target snapshot.
  * Creates a targeted backup of affected packages before making changes.
  * On failure, reverts from backup.
@@ -399,13 +421,21 @@ export async function restorePipPackages(
           const percent = 20 + Math.round((i / totalOps) * 50)
           sendProgress('restore', { percent, status: `Installing ${name}…` })
 
+          // Capture this command's output so a failure can report WHY,
+          // not just that it failed (issue #633). Still streamed live.
+          let captured = ''
+          const captureOut = (text: string): void => {
+            captured += text
+            sendOutput(text)
+          }
           const singleResult = await runUvPip(
-            uvPath, ['pip', 'install', spec, '--no-deps', '--python', pythonPath, ...indexArgs], installPath, sendOutput, signal
+            uvPath, ['pip', 'install', spec, '--no-deps', '--python', pythonPath, ...indexArgs], installPath, captureOut, signal
           )
 
           if (singleResult !== 0) {
             result.failed.push(name)
-            result.errors.push(`Failed to install ${spec}`)
+            const reason = extractPipFailureReason(captured)
+            result.errors.push(reason ? `Failed to install ${spec}: ${reason}` : `Failed to install ${spec}`)
           } else if (!result.changed.some((c) => c.name === name)) {
             result.installed.push(name)
           }
@@ -432,14 +462,20 @@ export async function restorePipPackages(
         result.removed.push(...toRemove)
       } else {
         for (const name of toRemove) {
+          let captured = ''
+          const captureOut = (text: string): void => {
+            captured += text
+            sendOutput(text)
+          }
           const singleResult = await runUvPip(
-            uvPath, ['pip', 'uninstall', name, '--python', pythonPath], installPath, sendOutput, signal
+            uvPath, ['pip', 'uninstall', name, '--python', pythonPath], installPath, captureOut, signal
           )
           if (singleResult === 0) {
             result.removed.push(name)
           } else {
             result.failed.push(name)
-            result.errors.push(`Failed to remove ${name}`)
+            const reason = extractPipFailureReason(captured)
+            result.errors.push(reason ? `Failed to remove ${name}: ${reason}` : `Failed to remove ${name}`)
           }
         }
       }

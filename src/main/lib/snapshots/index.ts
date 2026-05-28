@@ -32,7 +32,7 @@ export {
 export { buildExportEnvelope, validateExportEnvelope, importSnapshots } from './exportImport'
 
 // Restore
-export { restoreComfyUIVersion, buildPostRestoreState, restorePipPackages, restoreCustomNodes } from './restore'
+export { restoreComfyUIVersion, buildPostRestoreState, restorePipPackages, restoreCustomNodes, extractPipFailureReason } from './restore'
 
 // Tab Data
 export { getSnapshotListData, getSnapshotDetailData, getSnapshotDiffVsPrevious } from './tabData'
