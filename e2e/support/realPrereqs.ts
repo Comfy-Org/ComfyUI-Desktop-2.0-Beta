@@ -21,7 +21,7 @@ import path from 'node:path'
 import { expect } from '@playwright/test'
 import type { AppContext } from '../launchApp'
 import { clickInstallTile, expectChooserVisible } from './chooserHelpers'
-import { titlePopupPage, waitForWebContents, type WebContentsPage } from './cdpPages'
+import { systemModalPage, titlePopupPage, waitForWebContents, type WebContentsPage } from './cdpPages'
 import { ensureInstallPanelView as e2eEnsureInstallPanelView } from './devHooks'
 import { byTestId, TID } from './testIds'
 
@@ -248,12 +248,26 @@ export async function returnToDashboardViaPickerHome(ctx: AppContext): Promise<v
   await popup.waitForVisible('.picker-home', { timeout: 10_000 })
   expect(await popup.click('.picker-home'), '.picker-home click').toBe(true)
 
-  // `returnToDashboard` consults the panel renderer
-  // (`useReturnToDashboardConfirm`) — for a running local install it
-  // pops a "Stop ComfyUI?" BaseAlert confirm on the panel webContents
-  // that has to be clicked before the detach proceeds.
-  await ctx.panel.waitForVisible(byTestId(TID.baseAlertAction), { timeout: 10_000 })
-  expect(await ctx.panel.click(byTestId(TID.baseAlertAction)), 'return-to-dashboard confirm clicked').toBe(true)
+  // `returnToDashboard` confirms the "Stop & Return" prompt on one
+  // of two surfaces for a running local install — the install-backed
+  // panel webContents when it is still alive (Settings / lifecycle
+  // visited since launch), otherwise a shell system modal because
+  // the chooser-pick attach destroyed the panelView. Both render a
+  // BaseAlert with the same TID; poll either surface. Either page's
+  // `exists` throws while its webContents doesn't exist yet, so wrap
+  // each probe in a swallow-on-throw.
+  const sysModal = systemModalPage(ctx.app)
+  const probe = async (page: WebContentsPage): Promise<boolean> => {
+    try { return await page.exists(byTestId(TID.baseAlertAction)) }
+    catch { return false }
+  }
+  let confirmSurface: WebContentsPage | null = null
+  await expect.poll(async () => {
+    if (await probe(ctx.panel)) { confirmSurface = ctx.panel; return true }
+    if (await probe(sysModal)) { confirmSurface = sysModal; return true }
+    return false
+  }, { timeout: 10_000, intervals: [200, 400, 800], message: 'return-to-dashboard confirm did not appear on panel or system modal' }).toBe(true)
+  expect(await confirmSurface!.click(byTestId(TID.baseAlertAction)), 'return-to-dashboard confirm clicked').toBe(true)
 
   // After the flip the comfyView no longer loads a localhost URL and
   // panel.html is rebuilt as the chooser body.
