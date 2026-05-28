@@ -74,32 +74,27 @@
     SetDetailsPrint none
 
     File /oname=$PLUGINSDIR\vc_redist.x64.exe "${BUILD_RESOURCES_DIR}\vc_redist.x64.exe"
-    # The UAC consent prompt only comes to the foreground if the process that
-    # requests elevation is itself the foreground window. By this point we have
-    # just finished a multi-second app extraction, during which focus may have
-    # drifted off the installer — and Windows then silently blocks
-    # SetForegroundWindow/BringToFront via the foreground-lock timeout. So zero
-    # that timeout first (SPI_SETFOREGROUNDLOCKTIMEOUT = 0x2001), then force
-    # ourselves foreground, so the consent dialog inherits it instead of
-    # landing in the taskbar.
-    System::Call "user32::SystemParametersInfo(i 0x2001, i 0, i 0, i 0)"
-    System::Call "user32::SetForegroundWindow(p $HWNDPARENT)"
+    # Launch the redist *elevated* via ShellExecuteEx's "runas" verb (NOT
+    # ExecWait/CreateProcess). This is the crux of getting the UAC prompt to the
+    # foreground: a non-elevated installer can only elevate vc_redist through
+    # Windows' AppCompat installer-detection shim, which brokers the consent
+    # prompt via the AppInfo service WITHOUT attaching it to our window — so it
+    # only flashes in the taskbar no matter how we foreground ourselves.
+    # "runas" with $HWNDPARENT as the owner window attaches the consent dialog
+    # to the installer window, so it comes to the foreground (and dims via the
+    # secure desktop) as expected. /quiet keeps the redist's own UI hidden.
     BringToFront
-    # /quiet keeps the redistributable's own UI hidden so the user only sees
-    # our installer's status text and progress bar.
-    ExecWait '"$PLUGINSDIR\vc_redist.x64.exe" /install /quiet /norestart' $0
-    # The elevated child closed without a visible window, so focus may now
-    # belong to whatever was behind us. Reclaim it for the remainder of the
-    # install flow.
-    System::Call "user32::SetForegroundWindow(p $HWNDPARENT)"
+    ClearErrors
+    ExecShellWait "runas" "$PLUGINSDIR\vc_redist.x64.exe" "/install /quiet /norestart"
     BringToFront
 
-    ${If} $0 = 0
-    ${OrIf} $0 = 1638
-    ${OrIf} $0 = 3010
-      # Success (or already-installed / reboot-required, both treated as success).
-    ${Else}
-      MessageBox MB_ICONSTOP|MB_OK "Microsoft Visual C++ Redistributable installation failed (exit code $0). ComfyUI Desktop requires it to run."
+    ${If} ${Errors}
+      # ShellExecuteEx couldn't launch the elevated redist — overwhelmingly
+      # because the user dismissed the UAC prompt. (Once it launches, any exit
+      # code — including 1638 "already installed" and 3010 "reboot required" —
+      # is a successful run; ExecShellWait only flags a launch/elevation
+      # failure, which is exactly the case we must not silently ignore.)
+      MessageBox MB_ICONSTOP|MB_OK "Microsoft Visual C++ Redistributable installation did not complete (the permission prompt may have been declined). ComfyUI Desktop requires it to run."
       Abort
     ${EndIf}
   ${Else}
