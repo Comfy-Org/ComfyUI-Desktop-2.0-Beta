@@ -29,12 +29,31 @@
   ${EndIf}
 !macroend
 
+# TEMPORARY debug logging for the VC++/UAC flow — appends a line to
+# %TEMP%\comfyui-desktop-vcredist.log. Uses $R9 locally so it disturbs neither
+# the caller's registers nor the error flag the macro relies on. Remove before
+# merging to production.
+!macro VcLog _text
+  Push $R9
+  ClearErrors
+  FileOpen $R9 "$TEMP\comfyui-desktop-vcredist.log" a
+  ${IfNot} ${Errors}
+    FileWrite $R9 "${_text}$\r$\n"
+    FileClose $R9
+  ${EndIf}
+  Pop $R9
+!macroend
+
 !macro installVcRedist
   # Push/Pop preserves caller registers — defensive in case electron-builder's
-  # generated wrapper relies on $0/$1/$2 across our customInstall hook.
+  # generated wrapper relies on these across our customInstall hook.
   Push $0
   Push $1
   Push $2
+  Push $R8
+
+  Delete "$TEMP\comfyui-desktop-vcredist.log"
+  !insertmacro VcLog "=== installVcRedist start ==="
 
   # Discover whether a same-or-newer v14 redist is already installed and skip
   # the multi-minute install in that case. Microsoft documents this exact
@@ -63,6 +82,7 @@
   ${Else}
     ${VersionCompare} "$1" "${VC_REDIST_VERSION}" $2
   ${EndIf}
+  !insertmacro VcLog "detect: installedVersion='$1' bundled='${VC_REDIST_VERSION}' compare=$2 (2 => needs install)"
 
   ${If} $2 == 2
     # electron-builder calls SetDetailsPrint none for interactive installs,
@@ -74,61 +94,61 @@
     SetDetailsPrint none
 
     File /oname=$PLUGINSDIR\vc_redist.x64.exe "${BUILD_RESOURCES_DIR}\vc_redist.x64.exe"
-    # Launch the redist *elevated* via ShellExecuteEx's "runas" verb (NOT
-    # ExecWait/CreateProcess). This is the crux of getting the UAC prompt to the
-    # foreground: a non-elevated installer can only elevate vc_redist through
-    # Windows' AppCompat installer-detection shim, which brokers the consent
-    # prompt via the AppInfo service WITHOUT attaching it to our window — so it
-    # only flashes in the taskbar no matter how we foreground ourselves.
-    # "runas" with $HWNDPARENT as the owner window attaches the consent dialog
-    # to the installer window, so it comes to the foreground (and dims via the
-    # secure desktop) as expected. /quiet keeps the redist's own UI hidden.
-    #
-    # The label below is a deliberate retry loop. installVcRedist is inserted
-    # exactly once (via customInstall), so the label cannot collide.
+    # Launch the redist elevated via ShellExecuteEx's "runas" verb (NOT
+    # ExecWait/CreateProcess): "runas" with $HWNDPARENT as owner attaches the
+    # UAC consent dialog to our window so it foregrounds instead of only
+    # flashing in the taskbar. installVcRedist is inserted exactly once, so the
+    # labels below cannot collide.
+    StrCpy $0 0
+
     vcRedistAttempt:
+    IntOp $0 $0 + 1
+    !insertmacro VcLog "attempt $0: launching vc_redist.x64.exe (ShellExecuteEx runas)"
     BringToFront
     ClearErrors
     ExecShellWait "runas" "$PLUGINSDIR\vc_redist.x64.exe" "/install /quiet /norestart"
-    BringToFront
-
+    # Capture the error flag into $R8 immediately — before any file/log op can
+    # clobber it. ERR = ShellExecuteEx failed to launch/elevate (e.g. the user
+    # declined the UAC prompt). A redist that launches and exits with any code
+    # (incl. 1638 already-installed / 3010 reboot-required) leaves no error.
+    StrCpy $R8 "ok"
     ${If} ${Errors}
-      # ShellExecuteEx couldn't launch the elevated redist — overwhelmingly
-      # because the user declined or dismissed the UAC prompt. (Once it
-      # launches, any exit code — including 1638 "already installed" and 3010
-      # "reboot required" — is a successful run; ExecShellWait only flags a
-      # launch/elevation failure.) The redist is a hard prerequisite. We can't
-      # reliably hand off to a MUI "Installation failed" finish page from here
-      # (electron-builder hides the install details with `ShowInstDetails
-      # nevershow`, so a section Abort just freezes on the last status line),
-      # so use the standard Abort / Retry / Ignore failure dialog (the only
-      # built-in MessageBox set with an "Abort" button — Windows has no 2-button
-      # Retry|Abort). Update the status line first so it no longer reads
-      # "Installing…".
-      #   Abort  -> stop and exit Setup (SetErrorLevel + Quit)
-      #   Retry  -> re-show the UAC prompt (loop back to vcRedistAttempt)
-      #   Ignore -> install anyway without the redist (app may not start)
+      StrCpy $R8 "ERR"
+    ${EndIf}
+    BringToFront
+    !insertmacro VcLog "attempt $0: ExecShellWait result=$R8"
+
+    ${If} $R8 == "ERR"
       SetDetailsPrint textonly
-      DetailPrint "Installation failed: Microsoft Visual C++ Redistributable was not installed."
+      DetailPrint "Microsoft Visual C++ Redistributable was not installed."
       SetDetailsPrint none
       BringToFront
-      MessageBox MB_ABORTRETRYIGNORE|MB_ICONSTOP "Installation failed.$\n$\nComfyUI Desktop requires the Microsoft Visual C++ Redistributable, but the Windows permission prompt was declined.$\n$\nAbort — stop and exit Setup$\nRetry — show the permission prompt again$\nIgnore — install anyway (ComfyUI may not start until you install it)" /SD IDABORT IDRETRY vcRedistAttempt IDIGNORE vcRedistIgnore
-      # Abort button (and the silent-install default): stop and exit Setup.
+      # Abort / Retry / Ignore is the only built-in MessageBox set with an
+      # "Abort" button (Windows has no 2-button Retry|Abort).
+      #   Retry  -> loop back to vcRedistAttempt (re-show the UAC prompt)
+      #   Ignore -> jump past, install without the redist
+      #   Abort  -> fall through to Quit (also the silent-install default)
+      MessageBox MB_ABORTRETRYIGNORE|MB_ICONEXCLAMATION "ComfyUI Desktop needs the Microsoft Visual C++ Redistributable. Installing it requires Windows permission, and that prompt was declined.$\n$\nRetry — show the permission prompt again (recommended)$\nIgnore — install ComfyUI anyway (it may not start until the Redistributable is installed)$\nAbort — stop and exit Setup" /SD IDABORT IDRETRY vcRedistAttempt IDIGNORE vcRedistIgnore
+      !insertmacro VcLog "attempt $0: user chose ABORT — exiting Setup"
       SetErrorLevel 2
       Quit
-      vcRedistIgnore:
-      # Ignore: proceed without the redist. The app files are already in place;
-      # just note it and let the section finish.
-      SetDetailsPrint textonly
-      DetailPrint "Skipping Microsoft Visual C++ Redistributable — ComfyUI may not start until it is installed."
-      SetDetailsPrint none
     ${EndIf}
+
+    !insertmacro VcLog "attempt $0: VC++ install step succeeded"
+    Goto vcRedistDone
+    vcRedistIgnore:
+    !insertmacro VcLog "attempt $0: user chose IGNORE — continuing without VC++"
+    SetDetailsPrint textonly
+    DetailPrint "Skipping Microsoft Visual C++ Redistributable — ComfyUI may not start until it is installed."
+    SetDetailsPrint none
+    vcRedistDone:
   ${Else}
     SetDetailsPrint textonly
     DetailPrint "Microsoft Visual C++ Redistributable $1 already installed (>= bundled ${VC_REDIST_VERSION}); skipping."
     SetDetailsPrint none
   ${EndIf}
 
+  Pop $R8
   Pop $2
   Pop $1
   Pop $0
