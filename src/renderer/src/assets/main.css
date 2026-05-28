@@ -18,15 +18,16 @@
 }
 
 /* PP Formula — display face for brand-refreshed takeover headings.
- * Single weight (Extrabold 800); body/lead text stays Inter. Loading
- * more weights would bloat the renderer bundle for one usage site. */
-@font-face {
-  font-family: 'PP Formula';
-  src: url('./fonts/PPFormula-Extrabold.otf') format('opentype');
-  font-weight: 800;
-  font-style: normal;
-  font-display: block;
-}
+ * Single weight (Extrabold 800); body/lead text stays Inter.
+ *
+ * PP Formula is a proprietary, license-restricted font (Pangram Pangram) and
+ * must NOT be committed to this public repo, so it is NOT declared with a CSS
+ * @font-face here. Instead it is registered at runtime by
+ * src/renderer/src/assets/proprietaryFonts.ts via the FontFace API. That keeps
+ * the binary out of the bundle (the build never depends on the file existing,
+ * which would break OSS/CI builds), and a relative URL resolves under file://.
+ * When the font is absent the --font-display stack falls back to Inter. The
+ * file is fetched at build time from a private bucket (scripts/fetch-font.mjs). */
 
 /*
  * Design tokens from renderer/styles.css — extracted into CSS custom properties
@@ -3155,13 +3156,15 @@ input[type='checkbox']:checked::after {
     background-color 100ms ease,
     opacity 100ms ease;
 }
-.context-menu-item:hover:not(:disabled),
-.context-menu-item:focus-visible:not(:disabled) {
+.context-menu-item:hover:not(.disabled),
+.context-menu-item:focus-visible:not(.disabled) {
   background: var(--brand-surface-bg-hover);
   outline: none;
   color: var(--text);
 }
-.context-menu-item:disabled,
+/* Disabled via the `.disabled` class + `aria-disabled` (not the native
+   `disabled` attribute) so the hover title tooltip — which Chromium
+   suppresses on natively-disabled buttons — still surfaces the reason. */
 .context-menu-item.disabled {
   color: var(--text-muted);
   cursor: default;
@@ -3170,8 +3173,8 @@ input[type='checkbox']:checked::after {
 .context-menu-item.is-danger {
   color: var(--danger);
 }
-.context-menu-item.is-danger:hover:not(:disabled),
-.context-menu-item.is-danger:focus-visible:not(:disabled) {
+.context-menu-item.is-danger:hover:not(.disabled),
+.context-menu-item.is-danger:focus-visible:not(.disabled) {
   color: var(--danger-hover);
 }
 .context-menu-separator {

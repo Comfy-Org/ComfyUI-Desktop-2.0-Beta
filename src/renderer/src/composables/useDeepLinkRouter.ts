@@ -73,11 +73,16 @@ export function useDeepLinkRouter(opts: DeepLinkRouterOpts): void {
           const inst = installationStore.getById(id)
           if (!inst) return
           // `comfy://install-update/<id>` opens the picker on the
-          // Update tab — same surface the chooser-card kebab Update
-          // entry routes to.
+          // Update tab and auto-fires the `update-comfyui` action so the
+          // user lands directly on its confirm modal (the "Update from…"
+          // / "Roll back…" + will-stop-running prompt) rather than just
+          // staring at the Update tab. `autoAction` resolves to the
+          // install's currently-selected channel via the same path the
+          // chooser-card kebab Update entry uses.
           window.api.openInstancePicker({
             installationId: inst.id,
             initialTab: 'update',
+            autoAction: 'update-comfyui',
           })
           return
         }

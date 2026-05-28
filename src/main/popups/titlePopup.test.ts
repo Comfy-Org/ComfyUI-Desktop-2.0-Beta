@@ -125,28 +125,32 @@ describe('buildTitlePopupMenuItems', () => {
     expect(ids).not.toContain('load-snapshot')
   })
 
-  it('chooser host includes New Window, Settings, Send Feedback, and Close All Windows', () => {
-    const ids = buildTitlePopupMenuItems(makeEntry({ installationId: null }))
-      .map((i) => i.id ?? null)
+  it('chooser host includes New Window, Settings, Send Feedback, and Quit ComfyUI', () => {
+    const items = buildTitlePopupMenuItems(makeEntry({ installationId: null }))
+    const ids = items.map((i) => i.id ?? null)
     expect(ids).toContain('new-window')
     expect(ids).toContain('settings')
     expect(ids).toContain('feedback')
     expect(ids).toContain('close-all-windows')
+    // The app-wide quit lives only on the dashboard host.
+    const quit = items.find((i) => i.id === 'close-all-windows')
+    expect(quit?.label).toBe('Quit ComfyUI')
   })
 
   // Install-host menu was deliberately trimmed (spec item 1): no
   // Desktop Settings, no Return to Dashboard (replaced by the Home
   // icon in the picker, spec item 10), no Reset Zoom (Ctrl/Cmd+0
-  // shortcut still works). The remaining four are New Window, Send
-  // Beta Feedback, Exit Window, Exit All Windows.
+  // shortcut still works). "Quit ComfyUI" stays available from every
+  // window; "Close Window" is the instance-only counterpart. The four
+  // entries are New Window, Send Beta Feedback, Close Window, Quit ComfyUI.
   it('install-host menu is trimmed to four essentials in the canonical order', () => {
     const items = buildTitlePopupMenuItems(makeEntry({ installationId: 'inst-1' }))
     const ids = items.map((i) => i.id ?? null).filter((id) => id !== null)
     expect(ids).toEqual(['new-window', 'feedback', 'exit-window', 'close-all-windows'])
-    const closeAll = items.find((i) => i.id === 'close-all-windows')
-    expect(closeAll?.label).toBe('Exit All Windows')
-    const exitWindow = items.find((i) => i.id === 'exit-window')
-    expect(exitWindow?.label).toBe('Exit Window')
+    const closeWindow = items.find((i) => i.id === 'exit-window')
+    expect(closeWindow?.label).toBe('Close Window')
+    const quit = items.find((i) => i.id === 'close-all-windows')
+    expect(quit?.label).toBe('Quit ComfyUI')
   })
 
   it('install-host menu has neither Reset Zoom nor Return to Dashboard', () => {
@@ -214,9 +218,45 @@ describe('resolvePickerSelectedInstallId', () => {
     expect(resolvePickerSelectedInstallId(null, 'b', installs)).toBe('b')
   })
 
-  it('defaults to the first install on an install-less host', () => {
+  it('defaults to the most-recently-launched install on an install-less host', () => {
+    // Order in the list must NOT decide the default — recency does. Put the
+    // most-recently-launched install ('b') second to prove list order loses.
+    const installs = [
+      makeInstall({ id: 'a', lastLaunchedAt: 1000 }),
+      makeInstall({ id: 'b', lastLaunchedAt: 5000 }),
+      makeInstall({ id: 'c', lastLaunchedAt: 2000 }),
+    ]
+    expect(resolvePickerSelectedInstallId(null, null, installs)).toBe('b')
+  })
+
+  it('falls back to the first install on an install-less host when none have been launched', () => {
     const installs = [makeInstall({ id: 'a' }), makeInstall({ id: 'b' })]
     expect(resolvePickerSelectedInstallId(null, null, installs)).toBe('a')
+  })
+
+  it('does not default to the seeded cloud entry just because it sorts first', () => {
+    // The auto-seeded "Comfy Cloud" install is first in the registry but has
+    // no launch history — a real install must win the default so it stays
+    // fair for users who never open cloud.
+    const installs = [
+      makeInstall({ id: 'cloud', sourceCategory: 'cloud' }),
+      makeInstall({ id: 'local-a', sourceCategory: 'local' }),
+      makeInstall({ id: 'local-b', sourceCategory: 'local' }),
+    ]
+    expect(resolvePickerSelectedInstallId(null, null, installs)).toBe('local-a')
+  })
+
+  it('still defaults to cloud when it was genuinely launched most-recently', () => {
+    const installs = [
+      makeInstall({ id: 'local-a', sourceCategory: 'local', lastLaunchedAt: 1000 }),
+      makeInstall({ id: 'cloud', sourceCategory: 'cloud', lastLaunchedAt: 5000 }),
+    ]
+    expect(resolvePickerSelectedInstallId(null, null, installs)).toBe('cloud')
+  })
+
+  it('falls back to cloud when it is the only install', () => {
+    const installs = [makeInstall({ id: 'cloud', sourceCategory: 'cloud' })]
+    expect(resolvePickerSelectedInstallId(null, null, installs)).toBe('cloud')
   })
 
   it('returns null when there are no installs to select', () => {

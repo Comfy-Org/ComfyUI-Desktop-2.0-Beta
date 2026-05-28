@@ -1,4 +1,5 @@
 import '../assets/main.css'
+import { loadProprietaryFonts } from '../assets/proprietaryFonts'
 
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
@@ -14,6 +15,8 @@ import { registerE2ERendererHooks } from './e2eRendererHooks'
 if (new URLSearchParams(window.location.search).get('e2e') === '1') {
   registerE2ERendererHooks()
 }
+
+loadProprietaryFonts()
 
 const app = createApp(PanelApp)
 app.use(createPinia())

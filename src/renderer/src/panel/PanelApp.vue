@@ -21,7 +21,6 @@ import { seedLauncherPrefsFromUrl, useLauncherPrefs } from '../composables/useLa
 import { useModal } from '../composables/useModal'
 import { useAppUpdatePrompts } from '../composables/useAppUpdatePrompts'
 import { useReturnToDashboardConfirm } from '../composables/useReturnToDashboardConfirm'
-import { useQuitDesktopConfirm } from '../composables/useQuitDesktopConfirm'
 import { useSendFeedback } from '../composables/useSendFeedback'
 import { emitTelemetryAction } from '../lib/telemetry'
 import { useDeepLinkRouter } from '../composables/useDeepLinkRouter'
@@ -207,7 +206,6 @@ let unsubReturnToDashboardRequest: (() => void) | null = null
 let unsubAppUpdatePromptRestart: (() => void) | null = null
 let unsubAppUpdateUserActionFailed: (() => void) | null = null
 const { confirmReturnToDashboard } = useReturnToDashboardConfirm()
-const { confirmQuitDesktop } = useQuitDesktopConfirm()
 
 // All Manage routes go through `window.api.openInstancePicker` — the picker's
 // expanded mode is the single per-install settings surface. Delete keeps its
@@ -358,10 +356,13 @@ onMounted(async () => {
   // along with the original `requestId` so main can pair it with the
   // request that fired it.
   //
-  // Chooser host (install-less) idle close pops a "Quit Desktop?"
-  // confirm instead of clearing silently. Install-backed hosts still
-  // clear silently when no overlay is in flight — only the dashboard
-  // ✕ is gated.
+  // OS ✕ consult. This renderer only resolves an in-flight Tier 2/3
+  // operation (its cancel-prompt). With no overlay it DEFERS: the
+  // close-window confirm is main's job. The panel renderer can't own that
+  // confirm because for a running instance it's hidden behind the ComfyUI
+  // view and may never answer — main would time out and close silently
+  // (the bug this fixes). Main decides dashboard-vs-instance and last-
+  // window-vs-not from its own authoritative state.
   unsubCloseRequest = window.api.onCloseRequest(({ requestId }) => {
     // Ack synchronously so main extends its hung-renderer timeout —
     // the actual response can take arbitrary time when the user is
@@ -370,15 +371,11 @@ onMounted(async () => {
     // closing the window.
     window.api.ackCloseRequest({ requestId })
     void (async () => {
-      let cleared: boolean
       if (currentOverlay.value !== null) {
-        cleared = await closeOverlay()
-      } else if (!installationId) {
-        cleared = await confirmQuitDesktop()
+        window.api.respondCloseRequest({ requestId, cleared: await closeOverlay() })
       } else {
-        cleared = true
+        window.api.respondCloseRequest({ requestId, defer: true })
       }
-      window.api.respondCloseRequest({ requestId, cleared })
     })()
   })
 

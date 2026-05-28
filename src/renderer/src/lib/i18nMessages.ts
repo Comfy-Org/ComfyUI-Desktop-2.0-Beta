@@ -97,7 +97,8 @@ export const en = {
     desktopUpdateReady: 'Desktop Update Ready',
     desktopUpdateWithVersion: '{label} (v{version})',
     installUpdateAvailable: 'ComfyUI Update',
-    installUpdateVersion: 'ComfyUI {version}'
+    installUpdateVersion: 'ComfyUI {version}',
+    installUpdateShort: 'Update'
   },
   fileMenu: {
     newWindow: 'New Window',
@@ -108,8 +109,8 @@ export const en = {
     sendFeedback: 'Send Beta Feedback',
     returnToDashboard: 'Return to Dashboard',
     closeAllWindows: 'Close All Windows',
-    exitWindow: 'Exit Window',
-    exitAllWindows: 'Exit All Windows',
+    exitWindow: 'Close Window',
+    exitAllWindows: 'Quit ComfyUI',
     skipOnboarding: 'Skip Onboarding'
     /* Reset Zoom carries a dynamic percentage in the label and is
      * built main-side without going through this catalog — kept as a
@@ -238,7 +239,7 @@ export const en = {
    *  can only see THIS catalog so missing keys here render as raw
    *  dotted strings ("snapshots.timeHoursAgo" appearing in the UI). */
   snapshots: {
-    saveSnapshot: 'Save snapshot',
+    createSnapshot: 'Create Snapshot',
     restore: 'Restore',
     delete: 'Delete',
     empty: 'No snapshots yet. Snapshots are captured automatically when ComfyUI starts.',

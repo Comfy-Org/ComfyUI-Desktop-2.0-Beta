@@ -357,7 +357,10 @@ async function runAction(action: ActionDef, btn: HTMLButtonElement | null): Prom
 
   // Stop-warning augment for REQUIRES_STOPPED while running.
   if (requiresStoppedGuard && wasRunning && !ownsPreflight) {
-    mutableAction = augmentActionWithStopWarning(mutableAction, t('errors.willStopRunning'))
+    mutableAction = augmentActionWithStopWarning(
+      mutableAction,
+      t('errors.willStopRunning', { name: props.installation?.name || 'ComfyUI' }),
+    )
   }
 
   // Shopping-list chain steps — fieldSelects → select → prompt →

@@ -127,6 +127,11 @@ export interface InstancePickerSnapshot {
    *  (e.g. `'update-comfyui'` for the kebab Update entry). Cleared
    *  after consumption. */
   autoAction: string | null
+  /** Bumped on each explicit (re)open that seeds an `autoAction`. The
+   *  picker popup is cached, so a repeat pill click re-sends the same
+   *  `autoAction` value with no transition — the renderer keys its
+   *  "already fired" guard on this nonce so a second click re-fires. */
+  autoActionNonce: number
   storage: PickerStorageSlice
   /** Installs that currently have an inline background op in flight (or
    *  recently completed). Drives the spinner dot on InstanceRow. */
@@ -194,15 +199,45 @@ interface BuildInstancePickerSnapshotArgs {
   selectedSnapshots?: Record<string, unknown> | null
   initialTab?: string | null
   autoAction?: string | null
+  autoActionNonce?: number
   storage: PickerStorageSlice
   operatingInstallationIds?: string[]
   installOperationStatus?: InstancePickerSnapshot['installOperationStatus']
 }
 
+/** The most-recently-launched install in the list (largest `lastLaunchedAt`).
+ *  Mirrors the renderer's `mostRecentInstallId` so main and the picker agree
+ *  on "most recent".
+ *
+ *  Tie-break: the always-seeded "Comfy Cloud" entry must NOT win the default
+ *  just by sorting first in the registry. Cloud is only the default when it
+ *  was genuinely launched most-recently (strictly higher `lastLaunchedAt`);
+ *  on a tie (e.g. nothing launched yet, or equal timestamps) a real install
+ *  wins. This keeps the "default = last opened" behaviour fair for users who
+ *  never open cloud. Cloud is still chosen when it's the only install. */
+function mostRecentlyLaunchedInstallId(installs: InstancePickerInstall[]): string | null {
+  let best: InstancePickerInstall | undefined
+  for (const inst of installs) {
+    if (!best) {
+      best = inst
+      continue
+    }
+    const ts = inst.lastLaunchedAt ?? 0
+    const bestTs = best.lastLaunchedAt ?? 0
+    if (ts > bestTs) {
+      best = inst
+    } else if (ts === bestTs && best.sourceCategory === 'cloud' && inst.sourceCategory !== 'cloud') {
+      best = inst
+    }
+  }
+  return best?.id ?? null
+}
+
 /**
  * Resolves which install the picker should show in its detail pane.
  * Install-less hosts (dashboard) have no active install; default to the
- * first row so the pane is not empty on open.
+ * most-recently-launched install so the picker opens on what the user last
+ * used, not whatever happens to sort first in the registry list.
  */
 export function resolvePickerSelectedInstallId(
   explicitSelection: string | null | undefined,
@@ -211,7 +246,7 @@ export function resolvePickerSelectedInstallId(
 ): string | null {
   const resolved = explicitSelection ?? hostInstallationId ?? null
   if (resolved) return resolved
-  return installs[0]?.id ?? null
+  return mostRecentlyLaunchedInstallId(installs)
 }
 
 /**
@@ -231,6 +266,7 @@ export function buildInstancePickerSnapshot(
     selectedSnapshots: args.selectedSnapshots ?? null,
     initialTab: args.initialTab ?? null,
     autoAction: args.autoAction ?? null,
+    autoActionNonce: args.autoActionNonce ?? 0,
     storage: args.storage,
     operatingInstallationIds: args.operatingInstallationIds ?? [],
     installOperationStatus: args.installOperationStatus ?? {},
@@ -340,6 +376,9 @@ interface TitlePopupEntry {
    *  (kebab Update / Migrate / Restore-Snapshot / Delete entry
    *  points). Cleared after the picker view consumes it. */
   pickerAutoAction: string | null
+  /** Monotonic nonce stamped alongside `pickerAutoAction` so a repeat
+   *  open with the same action id still reads as a fresh trigger. */
+  pickerAutoActionNonce: number
   /** JSON of the most recent `installs-changed` snapshot sent to this
    *  popup. Used by `broadcastInstancePickerSnapshotToTitlePopups` to
    *  skip pushes that would re-render identical data — important
@@ -396,6 +435,13 @@ const DOWNLOADS_REOPEN_SUPPRESS_MS = 250
  *  laggy" symptom. */
 const cachedInstallsForPicker: InstancePickerInstall[] = []
 let cachedInstallsResolved = false
+
+/** Monotonic sequence for picker `autoAction` triggers. Bumped on every
+ *  open that seeds an `autoAction` so a repeat trigger (e.g. clicking the
+ *  title-bar Update chip again after dismissing the confirm modal) reads
+ *  as a fresh nonce in the snapshot, letting the cached picker renderer
+ *  re-fire the action even though the action id is unchanged. */
+let _pickerAutoActionNonce = 0
 
 /** Module-level binding stash. Populated by `registerTitlePopupIpc`
  *  (called once at `whenReady`) so `prewarmTitlePopup` can call the
@@ -648,24 +694,26 @@ export function buildTitlePopupMenuItems(entry: ComfyWindowEntry): TitlePopupMen
       { kind: 'separator' },
       {
         id: 'close-all-windows',
-        label: 'Exit All Windows',
+        label: 'Quit ComfyUI',
         labelKey: 'fileMenu.exitAllWindows',
       },
     )
     return items
   }
-  // Install-host menu: trimmed to the four essentials. Desktop Settings,
+  // Install-host menu: trimmed to the essentials. Desktop Settings,
   // Return to Dashboard, and Reset Zoom are intentionally absent —
   // Settings lives in the picker's Startup Args tab, the dashboard
   // escape is the Home icon in the picker chips row, and Reset Zoom
-  // remains reachable via Ctrl/Cmd + 0.
+  // remains reachable via Ctrl/Cmd + 0. "Quit ComfyUI" stays available
+  // from every window; "Close Window" is instance-only — the dashboard
+  // omits it (there's nothing to close back to).
   items.push(
     { id: 'feedback', label: 'Send Beta Feedback', labelKey: 'fileMenu.sendFeedback' },
     { kind: 'separator' },
-    { id: 'exit-window', label: 'Exit Window', labelKey: 'fileMenu.exitWindow' },
+    { id: 'exit-window', label: 'Close Window', labelKey: 'fileMenu.exitWindow' },
     {
       id: 'close-all-windows',
-      label: 'Exit All Windows',
+      label: 'Quit ComfyUI',
       labelKey: 'fileMenu.exitAllWindows',
     },
   )
@@ -732,6 +780,7 @@ async function broadcastInstancePickerSnapshotToTitlePopups(
       selectedSnapshots: details.snapshots,
       initialTab: entry.pickerInitialTab,
       autoAction: entry.pickerAutoAction,
+      autoActionNonce: entry.pickerAutoActionNonce,
       storage: buildPickerStorageSlice(),
       operatingInstallationIds: [..._activeOperationStatus.entries()].filter(([, v]) => !v.done).map(([k]) => k),
       installOperationStatus: Object.fromEntries(_activeOperationStatus),
@@ -864,6 +913,7 @@ function ensureTitlePopup(parent: BrowserWindow): TitlePopupEntry {
     pickerSelectedInstallationId: null,
     pickerInitialTab: null,
     pickerAutoAction: null,
+    pickerAutoActionNonce: 0,
     openedAt: 0,
     lastPickerBroadcastJson: null,
     lastGlobalSettingsBroadcastJson: null,
@@ -1345,7 +1395,7 @@ function openTitlePopup(opts: OpenTitlePopupOpts): void {
 
 export interface TitlePopupHostBindings {
   /** Open a fresh chooser host window. */
-  openChooserHostWindow: () => void
+  openChooserHostWindow: (initialPanel?: ComfyPanelKey) => void
   /** Flip an install-backed host window in place to chooser-host mode. */
   returnToDashboard: (parentEntryId: number) => Promise<void> | void
   /** Confirm + close all host windows. The parent window is the popup's
@@ -1526,11 +1576,15 @@ function openInstancePickerForHost(
     parentEntry.installationId,
     installs,
   )
+  // Bump the nonce whenever this open carries an autoAction so a repeat
+  // trigger re-fires in the cached renderer (see `_pickerAutoActionNonce`).
+  const autoActionNonce = autoAction ? (_pickerAutoActionNonce += 1) : _pickerAutoActionNonce
   const popupEntry = titlePopupsByParent.get(parentEntry.window.id)
   if (popupEntry) {
     popupEntry.pickerSelectedInstallationId = initialSelectedId
     popupEntry.pickerInitialTab = initialTab ?? null
     popupEntry.pickerAutoAction = autoAction ?? null
+    popupEntry.pickerAutoActionNonce = autoActionNonce
   }
   const snapshot = buildInstancePickerSnapshot({
     installs,
@@ -1541,6 +1595,7 @@ function openInstancePickerForHost(
     selectedSnapshots: null,
     initialTab: initialTab ?? null,
     autoAction: autoAction ?? null,
+    autoActionNonce,
     storage: buildPickerStorageSlice(),
     operatingInstallationIds: [..._activeOperationStatus.keys()],
     installOperationStatus: Object.fromEntries(_activeOperationStatus),
@@ -2514,7 +2569,15 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
     const parentEntry = comfyWindows.get(entry.parentEntryId)
     if (!parentEntry) return
     hideTitlePopup(entry, { releaseFocusToParent: false })
-    bindings.setActivePanel(entry.parentEntryId, 'new-install')
+    // Reuse the current window only when it's the bare dashboard (no
+    // install attached). An install-backed host opens a NEW window booted
+    // straight into the new-install flow, so the running instance in this
+    // window keeps running undisturbed (issue #629).
+    if (parentEntry.installationId === null) {
+      bindings.setActivePanel(entry.parentEntryId, 'new-install')
+    } else {
+      bindings.openChooserHostWindow('new-install')
+    }
   })
 
 

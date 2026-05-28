@@ -8,6 +8,7 @@ import {
   detachWindowDownloads,
   getDownloadsTrayState,
 } from '../lib/comfyDownloadManager'
+import { handleFirebasePopup, isFirebaseAuthHandlerUrl } from '../auth/firebaseBridge'
 import { isLikelyDownloadUrl, shouldOpenInPopup } from '../lib/allowedPopups'
 import { COMFY_BG, TITLEBAR_BG } from '../lib/theme'
 import {
@@ -39,7 +40,7 @@ import {
   setLastFocusedInstallationId,
   unregisterHostEntry,
 } from './registry'
-import type { ComfyWindowEntry } from './registry'
+import type { ComfyWindowEntry, ComfyPanelKey } from './registry'
 
 /** Default size for a freshly-spawned host window when an existing
  *  host of the same identity is already open. Matches the
@@ -69,8 +70,22 @@ const CHOOSER_HOST_BOUNDS_KEY = 'chooser'
  *  `index.ts` (or other modules pending later extractions). Set once
  *  at the top of `whenReady` via `setHostWindowFactories(...)`. */
 export interface HostWindowFactories {
-  /** Async beforeunload-style consult through the panel renderer. */
-  consultPanelRendererClose: (panelView: WebContentsView | null | undefined) => Promise<boolean>
+  /** Async beforeunload-style consult through the panel renderer. Only
+   *  resolves the in-flight Tier 2/3 overlay cancel-prompt:
+   *    - `cleared`  — no overlay / user confirmed cancelling one → proceed
+   *    - `aborted`  — user dismissed the cancel-prompt → keep window open
+   *    - `defer`    — no overlay; main owns the close-window confirm
+   *  Falls back to `defer` when the renderer is unreachable. */
+  consultPanelRendererClose: (
+    panelView: WebContentsView | null | undefined,
+  ) => Promise<'cleared' | 'aborted' | 'defer'>
+  /** Shell-level "Close Window" confirm, owned by main so a hidden panel
+   *  renderer can't swallow it. Shared with the Close Window menu entry. */
+  confirmCloseInstanceWindow: (
+    window: BrowserWindow,
+    isLastWindow: boolean,
+    theme: { bg: string; text: string },
+  ) => Promise<boolean>
   /** Detach the install currently bound to a host entry (in-place flip). */
   detachInstallImpl: (entry: ComfyWindowEntry) => void
   /** WeakSet of host windows whose close was pre-cleared by the
@@ -558,16 +573,52 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
       try {
         const entry = comfyWindows.get(windowKey)
         const skipConsult = fx.preClearedClose.has(comfyWindow)
-        // Hide any open title-bar popup before the panel-side
-        // quit-confirm fires. The popup is a sibling WebContentsView
-        // stacked above the panel view in the same BrowserWindow, so
-        // a panel-rendered `modal.confirm()` would otherwise sit
-        // behind the (visually opaque) popup and be unreachable.
+        // The OS ✕ must never quit the app. When this is the only live
+        // host window, an install-backed host returns to the dashboard
+        // (stop the instance, flip in place) instead of being destroyed;
+        // a chooser host is destroyed and the app quits via
+        // `window-all-closed`, which is the one sanctioned exit. The
+        // renderer also uses `isLastWindow` to tailor its close-confirm
+        // copy.
+        const isLastWindow =
+          Array.from(comfyWindows.values()).filter((e) => !e.window.isDestroyed()).length <= 1
+        // Hide any open title-bar popup before any confirm fires. The
+        // popup is a sibling WebContentsView stacked above the panel view
+        // in the same BrowserWindow, so a modal would otherwise sit behind
+        // the (visually opaque) popup and be unreachable.
         if (!skipConsult) hideTitlePopupForParent(comfyWindow)
-        const cleared = skipConsult ? true : await fx.consultPanelRendererClose(entry?.panelView)
-        if (!cleared) return
+        // Step 1 — let the renderer handle any in-flight Tier 2/3 overlay
+        // (its cancel-prompt). With no overlay it returns `defer`: the
+        // close-window confirm is main's job, because a running instance's
+        // panel view is hidden behind the ComfyUI view and can't be relied
+        // on to surface a prompt (the ✕ was closing silently for exactly
+        // that reason). `skipConsult` (the menu pre-cleared this close) and
+        // chooser hosts skip straight through.
+        const consult = skipConsult ? 'cleared' : await fx.consultPanelRendererClose(entry?.panelView)
+        if (consult === 'aborted') return
+        // Step 2 — for an install-backed host with no overlay, main shows
+        // the same Close Window confirm as the menu item. The dashboard
+        // closes with no prompt.
+        const entryForClose = comfyWindows.get(windowKey)
+        const isInstallHost = !!entryForClose && !isChooserHost(entryForClose)
+        if (consult === 'defer' && isInstallHost && entryForClose) {
+          const confirmed = await fx.confirmCloseInstanceWindow(
+            comfyWindow,
+            isLastWindow,
+            entryForClose.lastTheme,
+          )
+          if (!confirmed) return
+        }
         fx.preClearedClose.delete(comfyWindow)
         if (comfyWindow.isDestroyed()) return
+        // Last install-backed window → return to the dashboard rather
+        // than tear down + quit. `detachInstall` runs the same
+        // `_installCleanup` (stopRunning, listeners off) the teardown
+        // below would, then flips the window to chooser mode in place.
+        if (isInstallHost && entryForClose && isLastWindow) {
+          entryForClose.detachInstall()
+          return
+        }
         // Each cleanup step is wrapped via `safeTeardown` so a single
         // throw can't skip the BrowserWindow.destroy() at the end.
         // Without this, an exception in (e.g.) the comfy webContents
@@ -765,6 +816,26 @@ export function buildComfyView(
     injectMacPasskeyWarning(childWindow)
   })
   comfyContents.setWindowOpenHandler(({ url: childUrl }) => {
+    // Intercept Firebase auth popups (`<authDomain>/__/auth/handler?...`)
+    // and reroute sign-in through the user's system browser so passkeys
+    // and saved-password autofill work. The bridge picks a per-provider
+    // flow: Google takes a server-side raw-OAuth path (zero clicks),
+    // GitHub takes a client-side popup-bridge path (1-2 clicks) because
+    // its OAuth App allows only a single Authorization Callback URL.
+    if (isFirebaseAuthHandlerUrl(childUrl)) {
+      void handleFirebasePopup(childUrl, comfyContents, {
+        parentWindow: comfyWindow,
+        onError: (err) => {
+          forwardDatadogError({
+            source: 'firebase-bridge-failed',
+            message: 'Firebase loopback bridge sign-in failed',
+            level: 'warn',
+            context: { origin: 'main-process', error: err.message },
+          })
+        },
+      })
+      return { action: 'deny' }
+    }
     if (shouldOpenInPopup(childUrl)) {
       // preload: undefined strips our title-bar bridge so OAuth/cloud-login
       // popups can't reach the file menu IPCs.
@@ -888,7 +959,7 @@ export function applyChooserHostThemeToAll(): void {
  *  The comfyView still exists so `layoutViews` doesn't have to
  *  special-case its absence, but is sized to zero and never made
  *  visible. */
-export function openChooserHostWindow(): BrowserWindow {
+export function openChooserHostWindow(initialPanel: ComfyPanelKey = 'comfy'): BrowserWindow {
   // Install-less wrapper. The shared `createHostWindow()` builds
   // the BrowserWindow + 2 views skeleton, layoutViews, macOS
   // fullscreen, bounds-save listeners, close / closed handlers,
@@ -913,10 +984,10 @@ export function openChooserHostWindow(): BrowserWindow {
     initialTheme: initialChooserTheme,
     titleBarOverlay: process.platform === 'darwin'
       ? undefined
-      // Install-less hosts use the launcher renderer's --surface
-      // for the OS overlay so the close/min/max region matches the
-      // Vue title bar above it. Install-backed windows still use
-      // `comfyTitleBarOverlay()` (ComfyUI brand --comfy-menu-bg).
+      // Every host — install-less chooser AND install-backed instance —
+      // uses the same `titleBarOverlayForTheme` (TITLEBAR_BG) for the OS
+      // overlay so the close/min/max region matches the Vue title bar
+      // above it. The overlay never adapts to ComfyUI's in-page theme.
       : titleBarOverlayForTheme(resolveTheme() === 'dark'),
     // Dummy comfyView. Kept so layoutViews doesn't have to special-
     // case the install-less branch — its body always resolves to
@@ -950,7 +1021,11 @@ export function openChooserHostWindow(): BrowserWindow {
 
   entry.coldStartPendingReveal = true
 
-  ensurePanelView(entry.windowKey, entry, 'chooser')
+  // Seed the requested initial panel (default 'comfy' → chooser body for
+  // an install-less host). "+ New Instance" passes 'new-install' so the
+  // fresh window boots straight into the wizard with no dashboard flash.
+  entry.activePanel = initialPanel
+  ensurePanelView(entry.windowKey, entry, computeBodyMode(entry))
 
   entry.layoutViews()
 

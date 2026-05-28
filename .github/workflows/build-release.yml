@@ -8,6 +8,9 @@ on:
 
 permissions:
   contents: write
+  # Required for Workload Identity Federation (keyless GCP auth) used to fetch
+  # the proprietary PP Formula font from gs://comfy-org-fonts before building.
+  id-token: write
 
 concurrency:
   group: build-release-${{ github.ref_name }}
@@ -61,6 +64,23 @@ jobs:
         run: |
           echo "release_version=$(node ./scripts/datadog-release-version.cjs)" >> "$GITHUB_OUTPUT"
 
+      # Fetch the proprietary PP Formula font into the renderer public dir
+      # before the build. It is gitignored (never committed to this public
+      # repo) and pulled from a private bucket via keyless Workload Identity
+      # Federation. Release builds must ship the licensed display face, so the
+      # fetch fails loudly (no --soft-fail); a missing font would otherwise
+      # silently fall back to Inter.
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: 'projects/525069664901/locations/global/workloadIdentityPools/github-actions-pool/providers/github-oidc'
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Fetch proprietary fonts
+        run: pnpm run font:fetch
+
       - name: Build app
         env:
           VITE_DATADOG_RUM_VERSION: ${{ steps.datadog.outputs.release_version }}
@@ -95,6 +115,36 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: pnpm run bootstrap:fetch
+
+      - name: Verify bootstrap-python is populated for every platform
+        # Belt-and-braces check: even though fetch-bootstrap-python.mjs now
+        # exits non-zero on failure, surface the directory state in the build
+        # log and explicitly fail if any platform's Python binary is missing.
+        # The 0.6.4 installer shipped without bootstrap-python because a fetch
+        # error was swallowed and the directory was empty going into the
+        # packaging step. That class of failure must never be quiet again.
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "bootstrap-python tree:"
+          ls -la bootstrap-python/ || true
+          missing=0
+          for f in \
+            bootstrap-python/win-x64/python.exe \
+            bootstrap-python/mac-arm64/bin/python3 \
+            bootstrap-python/linux-x64/bin/python3
+          do
+            if [ ! -f "$f" ]; then
+              echo "::error::bootstrap-python verification failed: $f is missing"
+              missing=$((missing + 1))
+            else
+              echo "  OK: $f"
+            fi
+          done
+          if [ "$missing" -gt 0 ]; then
+            echo "::error::$missing bootstrap-python binar(ies) missing — refusing to build a broken installer"
+            exit 1
+          fi
 
       - name: Build with ToDesktop
         shell: bash

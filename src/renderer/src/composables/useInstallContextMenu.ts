@@ -5,6 +5,7 @@ import { useProgressStore } from '../stores/progressStore'
 import { useModal } from './useModal'
 import { revealInFolderLabel } from './usePlatform'
 import { progressOpKindForActionId, destroysInstanceForActionId } from '../lib/progressOpKind'
+import { shareLatestSnapshot } from '../lib/snapshots'
 import type { ContextMenuItem } from '../types/context-menu'
 import type { Installation, ShowProgressOpts } from '../types/ipc'
 
@@ -60,6 +61,7 @@ export type InstallMenuActionId =
   | 'migrate'
   | 'restore-snapshot'
   | 'reveal-in-folder'
+  | 'share'
   | 'copy-install'
   | 'untrack'
   | 'delete'
@@ -137,6 +139,10 @@ export function useInstallContextMenu(opts: {
   function getMenuItems(inst: Installation): ContextMenuItem[] {
     const items: ContextMenuItem[] = []
     const stoppedActionGated = isStoppedActionGated(inst)
+    // Tooltip explaining why the REQUIRES_STOPPED items are greyed out
+    // (Update / Migrate / Restore / Copy / Uninstall need the instance
+    // stopped). Undefined when not gated so enabled items get no tooltip.
+    const gatedTitle = stoppedActionGated ? t('chooser.stoppedActionGatedReason') : undefined
 
     if (opts.onManage) {
       items.push({
@@ -145,13 +151,13 @@ export function useInstallContextMenu(opts: {
       })
 
       if (isInstalled(inst) && hasUpdateTag(inst)) {
-        items.push({ id: 'update', label: t('chooser.menuUpdate'), disabled: stoppedActionGated })
+        items.push({ id: 'update', label: t('chooser.menuUpdate'), disabled: stoppedActionGated, title: gatedTitle })
       }
       if (hasMigratePrompt(inst)) {
-        items.push({ id: 'migrate', label: t('chooser.menuMigrate'), disabled: stoppedActionGated })
+        items.push({ id: 'migrate', label: t('chooser.menuMigrate'), disabled: stoppedActionGated, title: gatedTitle })
       }
       if (isInstalled(inst) && hasInstallPath(inst) && isLocalLikeInstall(inst)) {
-        items.push({ id: 'restore-snapshot', label: t('chooser.menuRestoreSnapshot'), disabled: stoppedActionGated })
+        items.push({ id: 'restore-snapshot', label: t('chooser.menuRestoreSnapshot'), disabled: stoppedActionGated, title: gatedTitle })
       }
     }
 
@@ -163,6 +169,14 @@ export function useInstallContextMenu(opts: {
       })
     }
 
+    // Share — export the latest snapshot via the OS save dialog. Snapshots
+    // are local-only and captured once the install has booted, so gate on
+    // installed + local. Promotes the per-row Snapshots-tab export to a
+    // top-level action.
+    if (isInstalled(inst) && hasInstallPath(inst) && isLocalLikeInstall(inst)) {
+      items.push({ id: 'share', label: t('actions.share', 'Share') })
+    }
+
     // Copy Installation — standalone source only (the `'copy'` action
     // def lives in standalone/updateSections.ts). REQUIRES_STOPPED.
     if (isInstalled(inst) && inst.sourceCategory === 'local') {
@@ -170,6 +184,7 @@ export function useInstallContextMenu(opts: {
         id: 'copy-install',
         label: t('actions.copyInstallation'),
         disabled: stoppedActionGated,
+        title: gatedTitle,
       })
     }
 
@@ -189,6 +204,7 @@ export function useInstallContextMenu(opts: {
         id: 'delete',
         label: t('chooser.menuDelete'),
         disabled: stoppedActionGated,
+        title: gatedTitle,
         style: 'danger',
       })
     }
@@ -196,7 +212,7 @@ export function useInstallContextMenu(opts: {
     if (sessionStore.errorInstances.has(inst.id)) {
       items.push({
         id: 'dismiss-error',
-        label: t('running.dismiss'),
+        label: t('chooser.menuDismissError'),
         separator: items.length > 0,
       })
     }
@@ -262,13 +278,36 @@ export function useInstallContextMenu(opts: {
     if (id === 'manage') {
       opts.onManage?.(inst)
     } else if (id === 'update') {
-      opts.onManage?.(inst, { initialTab: 'update' })
+      // Match the title-bar install-update pill: open the picker on the
+      // Update tab AND auto-fire the update so the update modal runs,
+      // instead of just landing the user on the Update tab page. Same
+      // autoAction the deep-link / pill path uses (useDeepLinkRouter).
+      opts.onManage?.(inst, { initialTab: 'update', autoAction: 'update-comfyui' })
     } else if (id === 'migrate') {
       opts.onManage?.(inst, { autoAction: 'migrate-to-standalone' })
     } else if (id === 'restore-snapshot') {
       opts.onManage?.(inst, { initialTab: 'snapshots' })
     } else if (id === 'reveal-in-folder') {
       await runInstantActionWithAlert(inst, 'open-folder', revealInFolderLabel(window.api?.platform))
+    } else if (id === 'share') {
+      // Share = export the latest snapshot. The export IPC owns its own OS
+      // save dialog; a cancel is a silent no-op. Only surface the genuine
+      // failure cases (no snapshots yet, or a write error).
+      const label = t('actions.share', 'Share')
+      try {
+        const result = await shareLatestSnapshot(inst.id)
+        if (!result.ok) {
+          await modal.alert({
+            title: label,
+            message:
+              result.reason === 'none'
+                ? t('snapshots.noSnapshotsToShare', 'There are no snapshots to share yet.')
+                : result.message ?? t('snapshots.shareFailed', 'Could not share the snapshot.'),
+          })
+        }
+      } catch (err) {
+        await modal.alert({ title: label, message: (err as Error)?.message || String(err) })
+      }
     } else if (id === 'copy-install') {
       // Route through the source-action def by handing the autoAction
       // off to `onManage`. Calling `window.api.runAction(id, 'copy')`

@@ -108,12 +108,6 @@ const estimatedInstallSize = computed(() => {
  * other entries).
  */
 
-/** Mirrored from the consent step so the user can re-affirm or flip
- *  telemetry on the Configure screen. Same setting key — no new state.
- *  `telemetryHydrated` gates the persist-on-change watch so an in-flight
- *  hydration can't clobber an early user toggle. */
-const telemetryEnabled = ref(true)
-const telemetryHydrated = ref(false)
 const advancedOpen = ref(false)
 const advancedRef = ref<HTMLElement | null>(null)
 
@@ -135,15 +129,6 @@ watch(instPath, (newPath) => {
   diskSpace.value = null
   pathIssues.value = []
   fetchDiskSpace(newPath)
-})
-
-/** Persist telemetry flips immediately (mirrors the consent step) so
- *  a cancel-out still respects the user's choice. Skip until hydration
- *  finishes — otherwise the initial `ref(true)` value writes back over
- *  whatever the user already persisted on the consent step. */
-watch(telemetryEnabled, (v) => {
-  if (!telemetryHydrated.value) return
-  void window.api.setSetting('telemetryEnabled', v)
 })
 
 /** Generation counter — incremented on each open/source change to discard stale responses */
@@ -201,19 +186,6 @@ onMounted(() => {
 
   installDirPromise = window.api.getDefaultInstallDir().catch(() => '')
   sourcesPromise = window.api.getSources()
-
-  // Brand-config re-affirms the consent-step telemetry choice. Hydrate
-  // from the persisted setting so the toggle reflects what the user
-  // already picked minutes ago.
-  void window.api
-    .getSetting('telemetryEnabled')
-    .then((v) => {
-      telemetryEnabled.value = v !== false
-    })
-    .catch(() => {})
-    .finally(() => {
-      telemetryHydrated.value = true
-    })
 })
 
 onBeforeUnmount(() => {

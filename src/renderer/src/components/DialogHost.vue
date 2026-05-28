@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import BasePrompt from './ui/BasePrompt.vue'
 import BaseActionSheet from './ui/BaseActionSheet.vue'
 import BaseAlert from './ui/BaseAlert.vue'
+import SnapshotDiffView from './SnapshotDiffView.vue'
 import { useDialogs } from '../composables/useDialogs'
 
 /**
@@ -91,5 +92,13 @@ const showConfirm = computed(() => state.open && state.kind === 'confirm')
     @close="confirmPrimary"
     @secondary="confirmSecondary"
     @cancel="cancel"
-  />
+  >
+    <!-- Restore-confirm preview: reuse the Snapshots-tab diff component as a
+         collapsible accordion (node / pip sections collapse so a large diff
+         doesn't overflow the modal). Only provided when a diff is attached so
+         other confirms don't render an empty block. -->
+    <template v-if="state.confirm.restoreDiff" #extra>
+      <SnapshotDiffView :diff="state.confirm.restoreDiff" collapsible />
+    </template>
+  </BaseAlert>
 </template>

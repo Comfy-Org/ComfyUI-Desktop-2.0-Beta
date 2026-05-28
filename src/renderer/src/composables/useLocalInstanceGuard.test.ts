@@ -142,7 +142,26 @@ describe('useLocalInstanceGuard', () => {
     expect(result).toBe(false)
   })
 
-  it('stops running instances when user chooses replace', async () => {
+  it('stops running instances when user chooses Close & Launch New (primary)', async () => {
+    installationStore.installations.push(
+      makeInstallation({ id: 'target' }),
+      makeInstallation({ id: 'other' }),
+    )
+    sessionStore.runningInstances.set('other', {
+      installationId: 'other',
+      installationName: 'Other',
+      mode: 'window',
+    })
+    mockConfirm.mockResolvedValue('primary')
+    const guard = useLocalInstanceGuard()
+
+    const result = await guard.checkBeforeLaunch('target')
+
+    expect(window.api.stopComfyUI).toHaveBeenCalledWith('other')
+    expect(result).toBe(true)
+  })
+
+  it('launches alongside without stopping when user chooses Launch Anyway (secondary)', async () => {
     installationStore.installations.push(
       makeInstallation({ id: 'target' }),
       makeInstallation({ id: 'other' }),
@@ -157,7 +176,7 @@ describe('useLocalInstanceGuard', () => {
 
     const result = await guard.checkBeforeLaunch('target')
 
-    expect(window.api.stopComfyUI).toHaveBeenCalledWith('other')
+    expect(window.api.stopComfyUI).not.toHaveBeenCalled()
     expect(result).toBe(true)
   })
 })

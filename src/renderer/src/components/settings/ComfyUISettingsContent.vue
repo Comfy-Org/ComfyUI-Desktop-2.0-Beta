@@ -47,9 +47,16 @@ interface Props {
    *  loaded — mirrors `DetailModal`'s `autoAction` prop. Used by the
    *  picker's expanded mode when opened via dashboard kebab
    *  `Copy Installation` / `Untrack` / `Delete` / `Migrate to
-   *  Standalone`. Consumed exactly once per prop value transition;
-   *  later section reloads or selection changes do not re-fire. */
+   *  Standalone`. Consumed exactly once per (autoAction, autoActionNonce)
+   *  transition; later section reloads or selection changes do not
+   *  re-fire. */
   autoAction?: string | null
+  /** Bumped by the picker on each explicit (re)open that seeds an
+   *  `autoAction`. The picker popup is cached, so a repeat trigger
+   *  re-sends the same `autoAction` value — keying the consumed-guard on
+   *  this nonce lets a second click re-fire. Absent (drawer host) → the
+   *  guard falls back to value-only keying. */
+  autoActionNonce?: number
   /** Slice of the popup's global-settings snapshot consumed by the
    *  Storage tab. Optional so non-popup hosts (e.g. drawer chrome)
    *  can omit it and the Storage tab silently empties out — they
@@ -66,6 +73,7 @@ const props = withDefaults(defineProps<Props>(), {
   initialTab: 'update',
   showBack: false,
   autoAction: null,
+  autoActionNonce: 0,
   activeOperation: null,
   globalSettingsSnapshot: () => ({
     sharedDirectoriesFields: [],
@@ -120,6 +128,7 @@ const {
   sections,
   loading,
   error,
+  notice,
   updateField,
   pendingRestartFieldIds,
   fieldErrorMessages,
@@ -146,30 +155,33 @@ const {
 // settings tab.
 //
 // Guards:
-//   - keyed on the prop value itself (not the install id) so re-mounts
-//     on the same `autoAction` don't double-fire, and so picking a
-//     different install while the prop sticks around can't accidentally
-//     auto-run a destructive op on the new install
-//   - reset to `null` when the prop transitions to a NEW value (or back
-//     to null), so a second Manage click against the same install with
-//     a different autoAction can fire
-const consumedAutoAction = ref<string | null>(null)
-watch(
-  () => props.autoAction,
-  (next, prev) => {
-    if (next !== prev) consumedAutoAction.value = null
-  }
+//   - keyed on `autoAction` + the picker's `autoActionNonce` (not the
+//     install id) so re-mounts / section reloads on the same trigger
+//     don't double-fire, AND a repeat trigger of the SAME action still
+//     re-fires (the picker popup is cached, so the value alone doesn't
+//     transition — the nonce bumps on each explicit re-open). Picking a
+//     different install while the key sticks around can't auto-run a
+//     destructive op on the new install (re-checked after the tick).
+//   - reset when the key transitions, so the next trigger can fire.
+const autoActionKey = computed<string | null>(() =>
+  props.autoAction ? `${props.autoAction}#${props.autoActionNonce ?? 0}` : null
 )
+const consumedAutoActionKey = ref<string | null>(null)
+watch(autoActionKey, (next, prev) => {
+  if (next !== prev) consumedAutoActionKey.value = null
+})
 watch(
   [
-    () => props.autoAction,
+    () => autoActionKey.value,
     () => props.installation?.id ?? null,
     () => loading.value,
     () => sections.value.length
   ],
-  async ([autoAction, installId, isLoading, sectionsLen]) => {
-    if (!installId || !autoAction || isLoading || sectionsLen === 0) return
-    if (consumedAutoAction.value === autoAction) return
+  async ([key, installId, isLoading, sectionsLen]) => {
+    if (!installId || !key || isLoading || sectionsLen === 0) return
+    if (consumedAutoActionKey.value === key) return
+    const autoAction = props.autoAction
+    if (!autoAction) return
 
     // Mirror `DetailModal`'s channel-card-aware resolution so that
     // nested per-channel actions (`update-comfyui`, `copy-update`,
@@ -182,7 +194,7 @@ watch(
     const action = findActionById(sections.value, autoAction, currentChannel)
     if (!action) return
 
-    consumedAutoAction.value = autoAction
+    consumedAutoActionKey.value = key
     await nextTick()
 
     // Re-check the install after the tick — selection can change in
@@ -260,7 +272,11 @@ watch(
     // result returns `navigate: 'detail'` → section reload → fresh
     // `lastCheckedAt` bubbles through this watcher (dedupe set prevents
     // re-fire on the same install+channel).
-    void runAction(checkAction)
+    //
+    // `silent: true` — this is the automatic on-tab-open refresh, not a
+    // user click, so it must not pop the "you're up to date" alert that a
+    // manual check does.
+    void runAction({ ...checkAction, data: { ...checkAction.data, silent: true } })
   },
   { immediate: true }
 )
@@ -304,9 +320,19 @@ const ALL_TABS: TabDef[] = [
     icon: Info
   }
 ]
-const tabs = computed<TabDef[]>(() =>
-  ALL_TABS.filter((tab) => sectionsForTab(tab.sectionTab).value.length > 0)
-)
+const tabs = computed<TabDef[]>(() => {
+  // Cloud (and other url-backed remotes) run no local process, so the
+  // `config` tab carries no real startup args — just output/storage +
+  // browser-cache settings. Relabel it "Storage" there so the tab name
+  // matches its contents. Cloud emits no separate `storage` section, so
+  // this can't collide with a real Storage tab.
+  const isCloud = installation.value?.sourceCategory === 'cloud'
+  return ALL_TABS.filter((tab) => sectionsForTab(tab.sectionTab).value.length > 0).map((tab) =>
+    isCloud && tab.key === 'config'
+      ? { ...tab, label: t('comfyUISettings.tabStorage', 'Storage'), icon: HardDrive }
+      : tab
+  )
+})
 
 const showUpdateBadge = computed(() => {
   const inst = installation.value
@@ -608,13 +634,15 @@ defineExpose({
           @click="selectTab(tab.key)"
           @keydown="handleTabKeydown($event, i)"
         >
-          <component :is="tab.icon" :size="14" aria-hidden="true" class="settings-v2-tab-icon" />
+          <span class="settings-v2-tab-icon-wrap">
+            <component :is="tab.icon" :size="14" aria-hidden="true" class="settings-v2-tab-icon" />
+            <span
+              v-if="tab.key === 'update' && showUpdateBadge"
+              class="settings-v2-tab-badge"
+              aria-hidden="true"
+            ></span>
+          </span>
           <span>{{ tab.label }}</span>
-          <span
-            v-if="tab.key === 'update' && showUpdateBadge"
-            class="settings-v2-tab-badge"
-            aria-hidden="true"
-          ></span>
         </button>
       </Tooltip>
     </nav>
@@ -802,6 +830,12 @@ defineExpose({
     </section>
 
     <footer class="settings-v2-footer">
+      <Transition name="settings-v2-notice-fade">
+        <span v-if="notice" class="settings-v2-notice" role="status" aria-live="polite">
+          {{ notice }}
+        </span>
+      </Transition>
+
       <button
         type="button"
         class="primary settings-v2-relaunch"
@@ -862,17 +896,13 @@ defineExpose({
    label on hover/focus for the collapsed tabs. */
 @container settings-tabs (max-width: 520px) {
   .settings-v2-tab:not(.is-active) {
-    position: relative;
     padding: 6px 8px;
     gap: 0;
   }
-  .settings-v2-tab:not(.is-active) > span:not(.settings-v2-tab-badge) {
+  /* Collapse to icon-only: hide the label but keep the icon wrap (which
+     carries the overlapped update dot). */
+  .settings-v2-tab:not(.is-active) > span:not(.settings-v2-tab-icon-wrap) {
     display: none;
-  }
-  .settings-v2-tab:not(.is-active) .settings-v2-tab-badge {
-    position: absolute;
-    top: 4px;
-    right: 4px;
   }
 }
 
@@ -917,17 +947,36 @@ defineExpose({
   background: var(--neutral-800);
 }
 
+.settings-v2-tab-icon-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
 .settings-v2-tab-icon {
   flex-shrink: 0;
   opacity: 0.85;
 }
 
+/* Update-available dot, overlapped on the bottom-right of the Update tab
+   icon — same corner + chrome as the IPP instance-row dots (running /
+   update / op): a small orange dot with a ring in the surface colour so
+   it reads as a badge on the icon rather than floating text after the
+   label. */
 .settings-v2-tab-badge {
+  position: absolute;
+  bottom: -1px;
+  right: -1px;
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--warning);
-  flex-shrink: 0;
+  background: var(--status-update, #f59e0b);
+  border: 2px solid var(--modal-surface-bg);
+  box-sizing: content-box;
+}
+.settings-v2-tab.is-active .settings-v2-tab-badge {
+  border-color: var(--neutral-800);
 }
 
 .settings-v2-body {
@@ -1162,6 +1211,23 @@ defineExpose({
   padding: 12px 16px;
   border-top: 1px solid var(--chooser-surface-border);
   background: var(--modal-surface-bg);
+}
+
+/* Transient inline status (e.g. "you're up to date"). Sits on the left
+   of the footer and fades in/out instead of interrupting with a modal. */
+.settings-v2-notice {
+  margin-right: auto;
+  font-size: 13px;
+  line-height: 1.3;
+  color: var(--text-muted);
+}
+.settings-v2-notice-fade-enter-active,
+.settings-v2-notice-fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+.settings-v2-notice-fade-enter-from,
+.settings-v2-notice-fade-leave-to {
+  opacity: 0;
 }
 
 /* Pin both footer buttons to the same 32px height as the left

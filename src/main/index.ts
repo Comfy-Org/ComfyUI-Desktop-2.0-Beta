@@ -40,10 +40,11 @@ import { get as getInstallation, installationEvents, list as listInstallations }
 import { startPeriodicReleaseChecks } from './lib/release-cache-startup'
 import { showModelFolderRelaunchPage } from './lib/relaunchPage'
 import { COMFY_BG, SPLASH_DARK, TITLEBAR_BG, type SplashTheme } from './lib/theme'
-import { comfyTitleBarOverlay } from './lib/titleBarOverlay'
+import { titleBarOverlayForTheme } from './lib/titleBarOverlay'
 import {
   sourceMap, _broadcastToRenderer, _runningSessions,
   _operationAborts, _activeOperationStatus, stopRunning,
+  resolveTheme,
   type PickerOperationStatus,
 } from './lib/ipc/shared'
 import { enrichInstallationsForRenderer } from './lib/ipc/registerInstallationHandlers'
@@ -82,6 +83,7 @@ import {
   _detachInstallImpl,
   confirmAndCloseAllHostWindows,
   confirmAndCloseHostWindow,
+  confirmCloseInstanceWindow,
   consultPanelRendererClose,
   detachOrphanedInstallHosts,
   preClearedClose,
@@ -426,7 +428,7 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
     windowTitle: `${installation.name} — Desktop 2.0 v${APP_VERSION}`,
     boundsKey: installationId,
     initialTheme: { bg: COMFY_BG, text: '#dddddd' },
-    titleBarOverlay: process.platform === 'darwin' ? undefined : comfyTitleBarOverlay(),
+    titleBarOverlay: process.platform === 'darwin' ? undefined : titleBarOverlayForTheme(resolveTheme() === 'dark'),
     comfyWebPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -655,9 +657,14 @@ ipcMain.on('comfy-window:click-app-update-pill', (event) => {
  *
  * Forwards `panel-trigger-overlay { kind: 'install-update' }` to the panel
  * renderer; `useDeepLinkRouter` handles it by opening the instance picker
- * in expanded mode on the Update tab. `sendToPanelDeferred` waits for
- * `did-finish-load` so the IPC isn't dropped if the panelView was just
- * lazily constructed.
+ * in expanded mode on the Update tab.
+ *
+ * When the user is on the ComfyUI body the panelView is lazily not-yet-
+ * constructed, so we ensure it for the current body mode (without flipping
+ * the visible body — the picker is a separate popup) and let
+ * `sendToPanelDeferred` hold the IPC until `did-finish-load`. Mirrors the
+ * Send Feedback handler; without this the click was a silent no-op whenever
+ * the panel hadn't been built yet.
  */
 ipcMain.on('comfy-window:click-install-update-pill', (event) => {
   const found = findEntryByTitleBarSender(event.sender)
@@ -665,8 +672,8 @@ ipcMain.on('comfy-window:click-install-update-pill', (event) => {
   const { entry } = found
   const installationId = entry.installationId
   if (!installationId) return
-  const panelView = entry.panelView
-  if (!panelView) return
+  const panelView =
+    entry.panelView ?? ensurePanelView(entry.windowKey, entry, computeBodyMode(entry))
   sendToPanelDeferred(panelView, 'panel-trigger-overlay', {
     kind: 'install-update',
     installationId,
@@ -970,6 +977,7 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
     // picker all flow through the registry).
     setHostWindowFactories({
       consultPanelRendererClose,
+      confirmCloseInstanceWindow,
       detachInstallImpl: _detachInstallImpl,
       preClearedClose,
       computeInstallUpdateAvailable,
@@ -1121,7 +1129,8 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
     registerTitlePopupIpc({
       openChooserHostWindow,
       returnToDashboard,
-      confirmAndCloseAllHostWindows,
+      confirmAndCloseAllHostWindows: (parentWindow) =>
+        confirmAndCloseAllHostWindows(parentWindow, quitApp),
       confirmAndCloseHostWindow,
       setActivePanel,
       triggerOpenFeedback,
@@ -1181,18 +1190,28 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
           triggerPickerSnapshotBroadcast()
 
           // Build a stub event whose sender feeds _activeOperationStatus.
-          const sendProgressFn = (phase: string, detail: Record<string, unknown>): void => {
+          // The action handlers route BOTH `install-progress` and raw
+          // `comfy-output` chunks through this one sender. Only progress
+          // drives the inline status line — output chunks are ignored, or
+          // the channel name itself leaks in as the status text (the
+          // literal "comfy-output" shown during a background update). The
+          // real phase lives in the `install-progress` payload, not the
+          // channel arg.
+          const feedStatus = (channel: string, payload: Record<string, unknown>): void => {
+            if (channel !== 'install-progress') return
             const cur = _activeOperationStatus.get(installationId)
             if (!cur || cur.done) return
-            const status = typeof detail.status === 'string' ? detail.status : phase
-            const percent = typeof detail.percent === 'number' ? detail.percent : cur.percent
-            const speedBytesPerSec = typeof detail.speedBytesPerSec === 'number' ? detail.speedBytesPerSec : cur.speedBytesPerSec
+            const status = typeof payload.status === 'string'
+              ? payload.status
+              : (typeof payload.phase === 'string' ? payload.phase : cur.status)
+            const percent = typeof payload.percent === 'number' ? payload.percent : cur.percent
+            const speedBytesPerSec = typeof payload.speedBytesPerSec === 'number' ? payload.speedBytesPerSec : cur.speedBytesPerSec
             _activeOperationStatus.set(installationId, { ...cur, status, percent, speedBytesPerSec })
             triggerPickerSnapshotBroadcast()
           }
           const stubSender = {
             isDestroyed: () => false,
-            send: sendProgressFn as unknown as Electron.WebContents['send'],
+            send: feedStatus as unknown as Electron.WebContents['send'],
           } as unknown as Electron.WebContents
           const stubEvent = { sender: stubSender } as unknown as Electron.IpcMainInvokeEvent
 
