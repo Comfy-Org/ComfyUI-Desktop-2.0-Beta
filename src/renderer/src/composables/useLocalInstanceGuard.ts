@@ -58,7 +58,17 @@ export function useLocalInstanceGuard() {
     })
 
     if (choice === 'secondary') {
-      await Promise.all(runningLocal.map((r) => window.api.stopComfyUI(r.id)))
+      // The user explicitly chose to evict the running instance(s), so
+      // close their host windows rather than just stopping the ComfyUI
+      // process — otherwise the old window would be left parked on
+      // ComfyLifecycleView's stopped surface. `skipConfirm` bypasses the
+      // window's quit-confirm consult since this dialog already covered
+      // it. The close handler runs `_installCleanup`, which stops the
+      // ComfyUI process; awaiting completion guarantees the port is
+      // free before the new launch starts.
+      await Promise.all(
+        runningLocal.map((r) => window.api.closeComfyWindow(r.id, { skipConfirm: true })),
+      )
       return true
     }
 
