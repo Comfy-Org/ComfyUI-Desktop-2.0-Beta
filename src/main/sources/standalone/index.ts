@@ -116,19 +116,36 @@ export const standalone: SourcePlugin = {
   },
 
   getLaunchCommand(installation: InstallationRecord): LaunchCommand | null {
-    const pythonPath = getActivePythonPath(installation)
+    const adopted = installation.adopted === true
+    // Adopted installs from Legacy Desktop reuse the legacy uv-managed `.venv`
+    // verbatim instead of the standalone-env tarball.
+    const pythonPath = adopted
+      ? ((installation.adoptedPythonPath as string | undefined) ?? null)
+      : getActivePythonPath(installation)
     if (!pythonPath || !fs.existsSync(pythonPath)) return null
     const mainPy = path.join(installation.installPath, 'ComfyUI', 'main.py')
     if (!fs.existsSync(mainPy)) return null
     const userArgs = ((installation.launchArgs as string | undefined) ?? DEFAULT_LAUNCH_ARGS).trim()
     const parsed = userArgs.length > 0 ? parseArgs(userArgs) : []
     const port = extractPort(parsed)
+    // Adopted installs keep their data (models, user, input, output,
+    // custom_nodes) at the legacy basePath; pin ComfyUI to it via CLI args
+    // here so the user-editable launchArgs stays free of these structural
+    // paths. Adopted records set `useSharedPaths: false`, so launch.ts also
+    // skips its own --input-directory / --output-directory injection.
+    const adoptedBaseDir = adopted ? (installation.adoptedBaseDir as string | undefined) : undefined
+    const adoptArgs = adoptedBaseDir ? [
+      '--base-directory', adoptedBaseDir,
+      '--user-directory', path.join(adoptedBaseDir, 'user'),
+      '--input-directory', path.join(adoptedBaseDir, 'input'),
+      '--output-directory', path.join(adoptedBaseDir, 'output'),
+    ] : []
     // Desktop-managed feature flags (e.g. show_signin_button) are injected in
     // handleLaunch after we discover the running ComfyUI's feature-flag registry,
     // so we only set keys the install actually knows about.
     return {
       cmd: pythonPath,
-      args: ['-s', path.join('ComfyUI', 'main.py'), ...parsed],
+      args: ['-s', path.join('ComfyUI', 'main.py'), ...adoptArgs, ...parsed],
       cwd: installation.installPath,
       port,
     }
