@@ -79,13 +79,13 @@ export interface HostWindowFactories {
   consultPanelRendererClose: (
     panelView: WebContentsView | null | undefined,
   ) => Promise<'cleared' | 'aborted' | 'defer'>
-  /** Shell-level "Close Window" confirm, owned by main so a hidden panel
-   *  renderer can't swallow it. Shared with the Close Window menu entry. */
-  confirmCloseInstanceWindow: (
-    window: BrowserWindow,
-    isLastWindow: boolean,
-    theme: { bg: string; text: string },
-  ) => Promise<boolean>
+  /** The instance menu's "Close Window" handler. The OS ✕ hands off to it
+   *  (on a fresh tick) for the no-overlay confirm so the modal is shown
+   *  the same way the menu does — from outside the `'close'` event, which
+   *  Windows requires (a modal shown from within a preventDefault'd close
+   *  continuation never surfaces there). It confirms, then detaches the
+   *  last window or re-closes (with the window pre-cleared) to tear down. */
+  confirmAndCloseHostWindow: (window: BrowserWindow) => Promise<void> | void
   /** Detach the install currently bound to a host entry (in-place flip). */
   detachInstallImpl: (entry: ComfyWindowEntry) => void
   /** WeakSet of host windows whose close was pre-cleared by the
@@ -596,18 +596,20 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
         // chooser hosts skip straight through.
         const consult = skipConsult ? 'cleared' : await fx.consultPanelRendererClose(entry?.panelView)
         if (consult === 'aborted') return
-        // Step 2 — for an install-backed host with no overlay, main shows
-        // the same Close Window confirm as the menu item. The dashboard
-        // closes with no prompt.
+        // Step 2 — for an install-backed host with no overlay, the close
+        // needs the same confirm the menu's Close Window shows. Hand off to
+        // that exact handler on a FRESH TICK and return: the confirm modal
+        // must be shown from OUTSIDE this `'close'` event or it never
+        // surfaces on Windows (the window sits in a closing limbo until the
+        // handler returns; the menu works precisely because it runs from an
+        // IPC handler). `confirmAndCloseHostWindow` shows the confirm, then
+        // detaches the last window or re-closes with `preClearedClose` set —
+        // which re-enters here (skipConsult → cleared) to tear down.
         const entryForClose = comfyWindows.get(windowKey)
         const isInstallHost = !!entryForClose && !isChooserHost(entryForClose)
         if (consult === 'defer' && isInstallHost && entryForClose) {
-          const confirmed = await fx.confirmCloseInstanceWindow(
-            comfyWindow,
-            isLastWindow,
-            entryForClose.lastTheme,
-          )
-          if (!confirmed) return
+          setImmediate(() => void fx.confirmAndCloseHostWindow(comfyWindow))
+          return
         }
         fx.preClearedClose.delete(comfyWindow)
         if (comfyWindow.isDestroyed()) return
