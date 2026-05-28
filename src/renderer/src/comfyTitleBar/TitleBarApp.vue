@@ -672,17 +672,15 @@ onUnmounted(() => {
   -webkit-app-region: no-drag;
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  /* Even spacing between the leading icon, name, update chip, and caret. */
-  gap: 8px;
-  /* Hug the content rather than reserving a fixed wide pill — a fixed
-     width spread the icon / name / caret apart with big empty gaps. The
-     pill now grows with its content up to a cap, past which the name
-     ellipsizes, so short names read tight and clean. */
-  width: auto;
-  max-width: clamp(180px, 30cqi, 420px);
+  justify-content: space-between;
+  /* Fluid width: floor at 220px, preferred ~22% of the title-bar inline
+     size, ceiling at 360px. Acts as a min size so the pill never collapses
+     for a short instance name; `space-between` then pins the logo to the
+     left edge and the caret to the right, with the slack (and the inline
+     Update chip + name) sitting between them — same as the dashboard pill. */
+  width: clamp(220px, 22cqi, 360px);
   height: 28px;
-  padding: 5px 10px;
+  padding: 5px 8px;
   border-radius: 999px;
   background: var(--chooser-surface-bg);
   color: var(--neutral-100);
@@ -721,6 +719,9 @@ onUnmounted(() => {
 .title-install-update-chip {
   -webkit-app-region: no-drag;
   flex-shrink: 0;
+  /* A little extra breathing room from the name (on top of the slot's
+     6px gap) so the chip doesn't read as crammed against it. */
+  margin-left: 4px;
   display: inline-flex;
   align-items: center;
   padding: 1px 8px;
@@ -762,14 +763,10 @@ onUnmounted(() => {
 .title-install-slot {
   display: inline-flex;
   align-items: center;
-  /* Hug the icon / caret instead of reserving a fixed 18px track, so the
-     pill doesn't carry dead space when it sizes to its content. */
-  flex: 0 0 auto;
+  flex: 0 0 18px;
 }
 .title-install-slot--center {
-  /* Shrink (for ellipsis) but don't grow — the pill hugs content now, so
-     a growing center slot would re-introduce the old spread-out gaps. */
-  flex: 0 1 auto;
+  flex: 1 1 auto;
   justify-content: center;
   gap: 6px;
   min-width: 0;
