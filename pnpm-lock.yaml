@@ -32,6 +32,9 @@ importers:
       systeminformation:
         specifier: ^5.31.5
         version: 5.31.5
+      tar:
+        specifier: ^7.5.11
+        version: 7.5.11
     devDependencies:
       '@datadog/datadog-ci':
         specifier: ^5.9.0
@@ -108,9 +111,6 @@ importers:
       tailwindcss:
         specifier: ^4.1.8
         version: 4.2.1
-      tar:
-        specifier: ^7.5.11
-        version: 7.5.11
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
