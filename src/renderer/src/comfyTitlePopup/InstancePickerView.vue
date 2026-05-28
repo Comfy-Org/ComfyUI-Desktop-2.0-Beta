@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, toRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Home, Plus, Search } from 'lucide-vue-next'
+import { Home, Plus, Search, X } from 'lucide-vue-next'
 import BaseInput from '../components/ui/BaseInput.vue'
 import { FILTER_CHIPS, useInstallList } from '../composables/useInstallList'
 import { useSessionStore } from '../stores/sessionStore'
@@ -118,6 +118,9 @@ interface PickerBridge {
    *  `'return-to-dashboard'` so we don't add a parallel IPC for the
    *  same action. */
   activate?: (id: string) => void
+  /** Dismiss the popup (same as ESC / click-outside). Wired to the
+   *  top-right close button. */
+  close?: () => void
   pickInstall: (installationId: string) => void
   openNewInstall: () => void
   restartInstall: (installationId: string) => void
@@ -298,6 +301,10 @@ function handleNewInstall(): void {
   bridge?.openNewInstall()
 }
 
+function handleClose(): void {
+  bridge?.close?.()
+}
+
 /** Picker hosted by an install (vs the chooser/dashboard itself).
  *  Drives whether the Home → dashboard escape is offered — pointless
  *  to surface on a picker already shown from the dashboard. */
@@ -445,11 +452,24 @@ function handleExpandedPrimaryAction(running: boolean): void {
     <div class="picker-search">
       <BaseInput
         v-model="searchQuery"
+        class="picker-search-input"
         :placeholder="$t('chooser.searchPlaceholder')"
         :aria-label="$t('chooser.searchPlaceholder')"
       >
         <template #leading><Search :size="20" class="picker-search-icon" /></template>
       </BaseInput>
+      <!-- Explicit close affordance — users couldn't tell how to dismiss
+           the popup (ESC / click-outside weren't discoverable). The search
+           field shrinks to make room. -->
+      <button
+        type="button"
+        class="picker-close"
+        :aria-label="$t('common.close')"
+        :title="$t('common.close')"
+        @click="handleClose"
+      >
+        <X :size="18" />
+      </button>
     </div>
 
     <div class="picker-chips-row">
@@ -571,8 +591,15 @@ function handleExpandedPrimaryAction(running: boolean): void {
 }
 
 .picker-search {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   border-bottom: 1px solid var(--brand-surface-border-hover, var(--chooser-surface-border));
-  padding: 6px 12px 8px 12px;
+  padding: 6px 8px 8px 12px;
+}
+.picker-search-input {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 .picker-search :deep(.ui-input) {
   background: transparent;
@@ -580,6 +607,32 @@ function handleExpandedPrimaryAction(running: boolean): void {
   border-radius: 0;
   padding: 0;
   gap: 8px;
+}
+/* Top-right close button. Flush to the search row so the field shrinks to
+   make room. Accessibility-first: an explicit, obvious way to dismiss. */
+.picker-close {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition:
+    background-color 100ms ease,
+    color 100ms ease,
+    border-color 100ms ease;
+}
+.picker-close:hover,
+.picker-close:focus-visible {
+  background: var(--brand-surface-bg-hover);
+  color: var(--neutral-100);
+  outline: none;
 }
 .picker-search :deep(.ui-input):focus-within {
   border-color: transparent;
