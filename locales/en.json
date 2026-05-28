@@ -49,7 +49,8 @@
     "menuRestoreSnapshot": "Restore Snapshot",
     "menuRevealInFolder": "Open Folder",
     "menuDelete": "Uninstall",
-    "stoppedActionGatedReason": "Stop the running instance first."
+    "stoppedActionGatedReason": "Stop the running instance first.",
+    "menuDismissError": "Dismiss Error"
   },
 
   "titleBar": {
@@ -82,19 +83,15 @@
 
   "comfyLifecycle": {
     "preparingTitle": "Preparing…",
-    "stoppedTitle": "ComfyUI is not running",
-    "stoppedDesc": "Start ComfyUI to use this installation.",
     "launchingTitle": "Starting ComfyUI…",
-    "launchingDesc": "Waiting for the server to come online.",
     "stoppingTitle": "Stopping ComfyUI…",
-    "stoppingDesc": "Waiting for the process to shut down cleanly.",
     "crashedTitle": "ComfyUI exited unexpectedly",
     "crashedDesc": "The ComfyUI process exited. You can restart it below.",
     "crashedDescWithCode": "The ComfyUI process exited (exit code {code}). You can restart it below.",
-    "crashedDetailsToggle": "Show error log",
-    "start": "Start ComfyUI",
+    "crashedDescWithSignal": "The ComfyUI process was terminated by {signal}. You can restart it below.",
+    "crashedDescWithCodeAndSignal": "The ComfyUI process was terminated by {signal} (exit code {code}). You can restart it below.",
+    "crashedDescLogsHint": "See the logs for details.",
     "restart": "Restart ComfyUI",
-    "returnToDashboard": "Return to Dashboard",
     "launchProgressTitle": "Starting ComfyUI"
   },
 

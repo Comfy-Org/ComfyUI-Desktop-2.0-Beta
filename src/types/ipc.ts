@@ -417,6 +417,12 @@ export interface ComfyExitedData {
   installationName: string
   crashed?: boolean
   exitCode?: number
+  /** POSIX signal name when the process was killed by signal (e.g.
+   *  `'SIGKILL'`, `'SIGTERM'`). `null` / absent on a normal exit and on
+   *  Windows TerminateProcess paths (Windows reports an exit code only).
+   *  Surfacing this lets the lifecycle view differentiate "killed by
+   *  signal" from "crashed with non-zero exit". */
+  signal?: string
   lastStderr?: string
   /**
    * Wall-clock timestamp (epoch ms) when the crash was recorded main-side.
@@ -909,8 +915,13 @@ export interface ElectronApi {
    *  view (and its title-bar / panel WebContentsViews). Returns true if a
    *  window was found and closed. Used by the embedded install-settings
    *  panel after a navigate-list emit (e.g. delete) so the parent window
-   *  doesn't linger with no install backing it. */
-  closeComfyWindow(installationId: string): Promise<boolean>
+   *  doesn't linger with no install backing it.
+   *
+   *  `skipConfirm` pre-clears the close so the panel-renderer quit-confirm
+   *  consult is bypassed. Callers should only set it when the user has
+   *  already explicitly consented (e.g. the launch guard's
+   *  "Close Running & Launch" choice). */
+  closeComfyWindow(installationId: string, opts?: { skipConfirm?: boolean }): Promise<boolean>
   /** Close the BrowserWindow that contains the calling panel
    *  WebContents. Used by the chooser to retire its install-less
    *  host window after a successful pick → launch hand-off.

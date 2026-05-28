@@ -78,7 +78,8 @@ export function buildElectronApi(): ElectronApi {
     focusComfyWindow: (installationId) => ipcRenderer.invoke('focus-comfy-window', installationId),
     openInstallWindow: (installationId) =>
       ipcRenderer.invoke('open-install-window', installationId),
-    closeComfyWindow: (installationId) => ipcRenderer.invoke('close-comfy-window', installationId),
+    closeComfyWindow: (installationId, opts) =>
+      ipcRenderer.invoke('close-comfy-window', installationId, opts),
     closeHostWindow: () => ipcRenderer.invoke('close-host-window'),
     returnToDashboard: () => ipcRenderer.invoke('return-to-dashboard'),
     closeCurrentPanel: () => ipcRenderer.send('comfy-window:close-current-panel'),

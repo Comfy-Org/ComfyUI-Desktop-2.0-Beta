@@ -14,6 +14,10 @@ interface ActiveSession {
 interface ErrorInstance {
   installationName: string
   exitCode?: number | string
+  /** POSIX signal name (e.g. `'SIGKILL'`) when the ComfyUI child process
+   *  was killed by signal. Absent on a normal crash with a non-zero exit
+   *  code and on Windows TerminateProcess paths. */
+  signal?: string
   message?: string
   /** Scrubbed tail of the failed process's stderr, if main captured one
    *  (only set on `crashed=true` exits — operation failures stay
@@ -180,6 +184,7 @@ export const useSessionStore = defineStore('session', () => {
           errorInstances.set(data.installationId, {
             installationName: data.installationName,
             exitCode: data.exitCode,
+            signal: data.signal,
             lastStderr: data.lastStderr,
             crashedAtMs: Date.now()
           })

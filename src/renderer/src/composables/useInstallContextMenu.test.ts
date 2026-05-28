@@ -331,6 +331,20 @@ describe('useInstallContextMenu — copy-install routing', () => {
     expect(onManage.mock.calls[0][1]).toEqual({ autoAction: 'copy' })
     expect(apiMock.runAction).not.toHaveBeenCalled()
   })
+
+  it('update opens the Update tab AND auto-fires the update (matches the title-bar pill)', async () => {
+    // Parity with the title-bar install-update pill (useDeepLinkRouter):
+    // open the picker on the Update tab with `autoAction: 'update-comfyui'`
+    // so the update modal runs, instead of just landing on the tab page.
+    const onManage = vi.fn<(inst: Installation, options?: { initialTab?: string; autoAction?: string | null }) => void>()
+    const inst = makeInstall()
+    const { menu } = mountHarnessWithManage(onManage)
+
+    await menu.triggerAction('update', inst)
+
+    expect(onManage).toHaveBeenCalledTimes(1)
+    expect(onManage.mock.calls[0][1]).toEqual({ initialTab: 'update', autoAction: 'update-comfyui' })
+  })
 })
 
 describe('useInstallContextMenu — untrack confirm-then-remove', () => {

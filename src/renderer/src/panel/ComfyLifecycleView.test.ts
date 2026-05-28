@@ -9,20 +9,27 @@ import type { Installation } from '../types/ipc'
 
 const messages = {
   en: {
+    common: {
+      copy: 'Copy',
+      back: 'Back',
+    },
+    launch: {
+      viewLogs: 'View logs',
+    },
     comfyLifecycle: {
-      stoppedTitle: 'ComfyUI is not running',
-      stoppedDesc: 'Start ComfyUI to use this installation.',
+      preparingTitle: 'Preparing…',
       launchingTitle: 'Starting ComfyUI…',
-      launchingDesc: 'Waiting for the server to come online.',
       stoppingTitle: 'Stopping ComfyUI…',
-      stoppingDesc: 'Waiting for the process to shut down cleanly.',
       crashedTitle: 'ComfyUI exited unexpectedly',
       crashedDesc: 'The ComfyUI process exited. You can restart it below.',
-      crashedDescWithCode: 'The ComfyUI process exited (exit code {code}). You can restart it below.',
-      crashedDetailsToggle: 'Show error log',
-      start: 'Start ComfyUI',
+      crashedDescWithCode:
+        'The ComfyUI process exited (exit code {code}). You can restart it below.',
+      crashedDescWithSignal:
+        'The ComfyUI process was terminated by {signal}. You can restart it below.',
+      crashedDescWithCodeAndSignal:
+        'The ComfyUI process was terminated by {signal} (exit code {code}). You can restart it below.',
+      crashedDescLogsHint: 'See the logs for details.',
       restart: 'Restart ComfyUI',
-      returnToDashboard: 'Return to Dashboard',
       launchProgressTitle: 'Starting ComfyUI',
     },
     dashboard: {
@@ -81,13 +88,24 @@ function installMockApi(overrides: Partial<MockApi> = {}): MockApi {
   return api
 }
 
+// Stub BrandTakeoverLayout to skip its Teleport-to-body + focus-trap so
+// the BrandFinishedSurface tree renders inline and assertions against it
+// don't have to chase the teleported root.
+const brandTakeoverStub = {
+  name: 'BrandTakeoverLayout',
+  template: '<div class="brand-takeover-stub"><slot /><slot name="footer" /></div>',
+}
+
 function mountView(installationId = 'inst-1', installation: Installation | null = SAMPLE_INSTALL) {
   return mount(ComfyLifecycleView, {
     props: { installationId, installation },
     // No createPinia() here — beforeEach installs the active pinia via
     // setActivePinia so beforeEach mutations (e.g. ready = true) land on
     // the same instance the component sees via useSessionStore().
-    global: { plugins: [createTestI18n()] },
+    global: {
+      plugins: [createTestI18n()],
+      stubs: { BrandTakeoverLayout: brandTakeoverStub },
+    },
   })
 }
 
@@ -96,41 +114,44 @@ describe('ComfyLifecycleView', () => {
     setActivePinia(createPinia())
     installMockApi()
     // The view gates on sessionStore.ready to avoid flashing the stopped
-    // card before hydration. Production flips it after init() — tests
+    // surface before hydration. Production flips it after init() — tests
     // bypass init() so flip it manually to opt into rendering.
     useSessionStore().ready = true
   })
 
-  it('renders the stopped state by default with a Start button', async () => {
+  it('renders nothing in the default (no-error, not-running) state — the host ComfyUI view covers the panel', async () => {
     const wrapper = mountView()
     await flushPromises()
-    expect(wrapper.text()).toContain('ComfyUI is not running')
-    const button = wrapper.find('button.primary')
-    expect(button.exists()).toBe(true)
-    expect(button.text()).toContain('Start ComfyUI')
+    // No error, no in-flight op, hydrated — the view stays out of the
+    // way. The crashed surface only shows when sessionStore actually
+    // has an error recorded for this install.
+    expect(wrapper.find('.brand-progress__banner').exists()).toBe(false)
+    expect(wrapper.find('.lifecycle-placeholder').exists()).toBe(false)
   })
 
-  it('renders the launching state when sessionStore reports the install as launching', async () => {
+  it('shows the in-flight placeholder while sessionStore reports the install as launching', async () => {
     const wrapper = mountView()
     const sessionStore = useSessionStore()
     sessionStore.launchingInstances.set('inst-1', { installationName: 'My Local Install' })
     await flushPromises()
+    // ProgressModal owns the full launching takeover; the lifecycle
+    // view renders only the small inline placeholder as a safety-net.
     expect(wrapper.text()).toContain('Starting ComfyUI')
-    // No Start / Restart button while a launch is in flight — the user
-    // shouldn't be able to double-trigger from here.
-    expect(wrapper.find('button.primary').exists()).toBe(false)
+    expect(wrapper.find('.lifecycle-placeholder').exists()).toBe(true)
+    expect(wrapper.find('button.brand-primary').exists()).toBe(false)
   })
 
-  it('renders the stopping state when sessionStore reports the install as stopping', async () => {
+  it('shows the in-flight placeholder while sessionStore reports the install as stopping', async () => {
     const wrapper = mountView()
     const sessionStore = useSessionStore()
     sessionStore.stoppingInstances.add('inst-1')
     await flushPromises()
     expect(wrapper.text()).toContain('Stopping ComfyUI')
-    expect(wrapper.find('button.primary').exists()).toBe(false)
+    expect(wrapper.find('.lifecycle-placeholder').exists()).toBe(true)
+    expect(wrapper.find('button.brand-primary').exists()).toBe(false)
   })
 
-  it('renders the crashed state with exit code when an error instance is recorded', async () => {
+  it('renders the crashed state in brand-error chrome with exit code', async () => {
     const wrapper = mountView()
     const sessionStore = useSessionStore()
     sessionStore.errorInstances.set('inst-1', {
@@ -140,28 +161,68 @@ describe('ComfyLifecycleView', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('ComfyUI exited unexpectedly')
     expect(wrapper.text()).toContain('exit code 137')
-    const button = wrapper.find('button.primary')
+    expect(wrapper.find('.brand-progress__banner--error').exists()).toBe(true)
+    const button = wrapper.find('button.brand-primary')
     expect(button.exists()).toBe(true)
     expect(button.text()).toContain('Restart ComfyUI')
   })
 
-  it('renders the stderr tail inside the crashed state when present', async () => {
+  it('renders the POSIX signal in the crashed message when signal alone is present', async () => {
     const wrapper = mountView()
     const sessionStore = useSessionStore()
     sessionStore.errorInstances.set('inst-1', {
       installationName: 'My Local Install',
-      exitCode: 1,
-      lastStderr: 'ImportError: No module named \'torch\'\n  at /path/to/main.py:42',
+      signal: 'SIGKILL',
     })
     await flushPromises()
-    const detail = wrapper.find('.lifecycle-error-detail')
-    expect(detail.exists()).toBe(true)
-    expect(wrapper.find('.lifecycle-error-output').text()).toContain('ImportError: No module named')
-    expect(wrapper.find('.lifecycle-error-output').text()).toContain('main.py:42')
-    expect(wrapper.text()).toContain('Show error log')
+    expect(wrapper.text()).toContain('terminated by SIGKILL')
+    expect(wrapper.text()).not.toContain('exit code')
   })
 
-  it('omits the stderr details block when no lastStderr is recorded', async () => {
+  it('falls back to the generic crashed copy when neither exit code nor signal is recorded', async () => {
+    const wrapper = mountView()
+    const sessionStore = useSessionStore()
+    sessionStore.errorInstances.set('inst-1', {
+      installationName: 'My Local Install',
+    })
+    await flushPromises()
+    expect(wrapper.text()).toContain('The ComfyUI process exited.')
+    // Generic fallback must not invent a code or signal.
+    expect(wrapper.text()).not.toContain('exit code')
+    expect(wrapper.text()).not.toContain('terminated by')
+  })
+
+  it('renders both signal and exit code in the crashed message when both are present', async () => {
+    const wrapper = mountView()
+    const sessionStore = useSessionStore()
+    sessionStore.errorInstances.set('inst-1', {
+      installationName: 'My Local Install',
+      exitCode: 137,
+      signal: 'SIGKILL',
+    })
+    await flushPromises()
+    expect(wrapper.text()).toContain('terminated by SIGKILL')
+    expect(wrapper.text()).toContain('exit code 137')
+  })
+
+  it('renders the stderr tail in the brand logs accordion when present', async () => {
+    const wrapper = mountView()
+    const sessionStore = useSessionStore()
+    sessionStore.errorInstances.set('inst-1', {
+      installationName: 'My Local Install',
+      exitCode: 1,
+      lastStderr: "ImportError: No module named 'torch'\n  at /path/to/main.py:42",
+    })
+    await flushPromises()
+    const logs = wrapper.find('.brand-progress__logs')
+    expect(logs.exists()).toBe(true)
+    expect(logs.text()).toContain('ImportError: No module named')
+    expect(logs.text()).toContain('main.py:42')
+    // The accordion toggle button uses the shared "View logs" label.
+    expect(wrapper.text()).toContain('View logs')
+  })
+
+  it('omits the logs accordion when no lastStderr is recorded', async () => {
     const wrapper = mountView()
     const sessionStore = useSessionStore()
     sessionStore.errorInstances.set('inst-1', {
@@ -169,7 +230,24 @@ describe('ComfyLifecycleView', () => {
       exitCode: 1,
     })
     await flushPromises()
-    expect(wrapper.find('.lifecycle-error-detail').exists()).toBe(false)
+    expect(wrapper.find('.brand-progress__logs').exists()).toBe(false)
+    expect(wrapper.find('.brand-progress__logs-toggle').exists()).toBe(false)
+    // The logs hint would otherwise point at an accordion that isn't
+    // even mounted — keep the message clean.
+    expect(wrapper.text()).not.toContain('See the logs for details.')
+  })
+
+  it('appends the logs hint to the crashed message when stderr is captured', async () => {
+    const wrapper = mountView()
+    const sessionStore = useSessionStore()
+    sessionStore.errorInstances.set('inst-1', {
+      installationName: 'My Local Install',
+      exitCode: 1,
+      lastStderr: "ImportError: No module named 'torch'",
+    })
+    await flushPromises()
+    expect(wrapper.text()).toContain('exit code 1')
+    expect(wrapper.text()).toContain('See the logs for details.')
   })
 
   it('hydrates the crashed state from getLastCrashError on mount when no live event has fired', async () => {
@@ -188,7 +266,7 @@ describe('ComfyLifecycleView', () => {
     expect(api.getLastCrashError).toHaveBeenCalledWith('inst-1')
     expect(wrapper.text()).toContain('ComfyUI exited unexpectedly')
     expect(wrapper.text()).toContain('exit code 9')
-    expect(wrapper.find('.lifecycle-error-output').text()).toContain('Killed by signal 9')
+    expect(wrapper.find('.brand-progress__logs').text()).toContain('Killed by signal 9')
 
     const sessionStore = useSessionStore()
     const stored = sessionStore.errorInstances.get('inst-1')
@@ -200,9 +278,10 @@ describe('ComfyLifecycleView', () => {
     let resolveCrash: ((data: unknown) => void) | undefined
     const api = installMockApi({
       getLastCrashError: vi.fn(
-        () => new Promise((resolve) => {
-          resolveCrash = resolve as (data: unknown) => void
-        }),
+        () =>
+          new Promise((resolve) => {
+            resolveCrash = resolve as (data: unknown) => void
+          }),
       ),
     })
 
@@ -230,7 +309,7 @@ describe('ComfyLifecycleView', () => {
     // best-effort backfill and must not clobber a populated entry.
     expect(stored?.lastStderr).toBe('live event stderr')
     expect(stored?.exitCode).toBe(137)
-    expect(wrapper.find('.lifecycle-error-output').text()).toContain('live event stderr')
+    expect(wrapper.find('.brand-progress__logs').text()).toContain('live event stderr')
   })
 
   it('skips the IPC fetch when an error is already in the session store', async () => {
@@ -245,16 +324,24 @@ describe('ComfyLifecycleView', () => {
     })
     mount(ComfyLifecycleView, {
       props: { installationId: 'inst-1', installation: SAMPLE_INSTALL },
-      global: { plugins: [createTestI18n(), pinia] },
+      global: {
+        plugins: [createTestI18n(), pinia],
+        stubs: { BrandTakeoverLayout: brandTakeoverStub },
+      },
     })
     await flushPromises()
     expect(api.getLastCrashError).not.toHaveBeenCalled()
   })
 
-  it('emits show-progress with a launch apiCall when Start is clicked', async () => {
+  it('emits show-progress with a launch apiCall when Restart is clicked from the crashed surface', async () => {
     const wrapper = mountView()
+    const sessionStore = useSessionStore()
+    sessionStore.errorInstances.set('inst-1', {
+      installationName: 'My Local Install',
+      exitCode: 1,
+    })
     await flushPromises()
-    await wrapper.find('button.primary').trigger('click')
+    await wrapper.find('button.brand-primary').trigger('click')
     const events = wrapper.emitted('show-progress')
     expect(events).toBeDefined()
     expect(events!.length).toBe(1)
@@ -275,19 +362,7 @@ describe('ComfyLifecycleView', () => {
     expect(api.runAction).toHaveBeenCalledWith('inst-1', 'launch')
   })
 
-  it('renders a Return to Dashboard button in the stopped state and calls returnToDashboard without confirm', async () => {
-    const wrapper = mountView()
-    await flushPromises()
-    const buttons = wrapper.findAll('button.secondary')
-    const ret = buttons.find((b) => b.text().includes('Return to Dashboard'))
-    expect(ret?.exists()).toBe(true)
-    await ret!.trigger('click')
-    await flushPromises()
-    const api = (window as unknown as { api: MockApi }).api
-    expect(api.returnToDashboard).toHaveBeenCalled()
-  })
-
-  it('renders a Return to Dashboard button in the crashed state and calls returnToDashboard without confirm', async () => {
+  it('renders a Back ghost button in the crashed-state error-actions row and calls returnToDashboard without confirm', async () => {
     const wrapper = mountView()
     const sessionStore = useSessionStore()
     sessionStore.errorInstances.set('inst-1', {
@@ -295,10 +370,19 @@ describe('ComfyLifecycleView', () => {
       exitCode: 1,
     })
     await flushPromises()
-    const buttons = wrapper.findAll('button.secondary')
-    const ret = buttons.find((b) => b.text().includes('Return to Dashboard'))
-    expect(ret?.exists()).toBe(true)
-    await ret!.trigger('click')
+    // Crashed-state actions live in the hero-stack error-actions row,
+    // not the footer-bar — matches ProgressModal's error finished state.
+    const errorActions = wrapper.find('.brand-progress__error-actions')
+    expect(errorActions.exists()).toBe(true)
+    const buttons = errorActions.findAll('button')
+    const back = buttons.find((b) => b.text().includes('Back'))
+    expect(back?.exists()).toBe(true)
+    expect(back!.classes()).toContain('brand-ghost')
+    // Back sits on the left, Restart on the right — same pairing as
+    // ProgressModal's Back / Reboot CTAs.
+    expect(buttons[0]!.text()).toContain('Back')
+    expect(buttons[1]!.text()).toContain('Restart')
+    await back!.trigger('click')
     await flushPromises()
     const api = (window as unknown as { api: MockApi }).api
     expect(api.returnToDashboard).toHaveBeenCalled()

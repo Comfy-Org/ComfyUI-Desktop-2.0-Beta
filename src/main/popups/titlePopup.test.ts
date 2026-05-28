@@ -218,9 +218,45 @@ describe('resolvePickerSelectedInstallId', () => {
     expect(resolvePickerSelectedInstallId(null, 'b', installs)).toBe('b')
   })
 
-  it('defaults to the first install on an install-less host', () => {
+  it('defaults to the most-recently-launched install on an install-less host', () => {
+    // Order in the list must NOT decide the default — recency does. Put the
+    // most-recently-launched install ('b') second to prove list order loses.
+    const installs = [
+      makeInstall({ id: 'a', lastLaunchedAt: 1000 }),
+      makeInstall({ id: 'b', lastLaunchedAt: 5000 }),
+      makeInstall({ id: 'c', lastLaunchedAt: 2000 }),
+    ]
+    expect(resolvePickerSelectedInstallId(null, null, installs)).toBe('b')
+  })
+
+  it('falls back to the first install on an install-less host when none have been launched', () => {
     const installs = [makeInstall({ id: 'a' }), makeInstall({ id: 'b' })]
     expect(resolvePickerSelectedInstallId(null, null, installs)).toBe('a')
+  })
+
+  it('does not default to the seeded cloud entry just because it sorts first', () => {
+    // The auto-seeded "Comfy Cloud" install is first in the registry but has
+    // no launch history — a real install must win the default so it stays
+    // fair for users who never open cloud.
+    const installs = [
+      makeInstall({ id: 'cloud', sourceCategory: 'cloud' }),
+      makeInstall({ id: 'local-a', sourceCategory: 'local' }),
+      makeInstall({ id: 'local-b', sourceCategory: 'local' }),
+    ]
+    expect(resolvePickerSelectedInstallId(null, null, installs)).toBe('local-a')
+  })
+
+  it('still defaults to cloud when it was genuinely launched most-recently', () => {
+    const installs = [
+      makeInstall({ id: 'local-a', sourceCategory: 'local', lastLaunchedAt: 1000 }),
+      makeInstall({ id: 'cloud', sourceCategory: 'cloud', lastLaunchedAt: 5000 }),
+    ]
+    expect(resolvePickerSelectedInstallId(null, null, installs)).toBe('cloud')
+  })
+
+  it('falls back to cloud when it is the only install', () => {
+    const installs = [makeInstall({ id: 'cloud', sourceCategory: 'cloud' })]
+    expect(resolvePickerSelectedInstallId(null, null, installs)).toBe('cloud')
   })
 
   it('returns null when there are no installs to select', () => {

@@ -205,10 +205,39 @@ interface BuildInstancePickerSnapshotArgs {
   installOperationStatus?: InstancePickerSnapshot['installOperationStatus']
 }
 
+/** The most-recently-launched install in the list (largest `lastLaunchedAt`).
+ *  Mirrors the renderer's `mostRecentInstallId` so main and the picker agree
+ *  on "most recent".
+ *
+ *  Tie-break: the always-seeded "Comfy Cloud" entry must NOT win the default
+ *  just by sorting first in the registry. Cloud is only the default when it
+ *  was genuinely launched most-recently (strictly higher `lastLaunchedAt`);
+ *  on a tie (e.g. nothing launched yet, or equal timestamps) a real install
+ *  wins. This keeps the "default = last opened" behaviour fair for users who
+ *  never open cloud. Cloud is still chosen when it's the only install. */
+function mostRecentlyLaunchedInstallId(installs: InstancePickerInstall[]): string | null {
+  let best: InstancePickerInstall | undefined
+  for (const inst of installs) {
+    if (!best) {
+      best = inst
+      continue
+    }
+    const ts = inst.lastLaunchedAt ?? 0
+    const bestTs = best.lastLaunchedAt ?? 0
+    if (ts > bestTs) {
+      best = inst
+    } else if (ts === bestTs && best.sourceCategory === 'cloud' && inst.sourceCategory !== 'cloud') {
+      best = inst
+    }
+  }
+  return best?.id ?? null
+}
+
 /**
  * Resolves which install the picker should show in its detail pane.
  * Install-less hosts (dashboard) have no active install; default to the
- * first row so the pane is not empty on open.
+ * most-recently-launched install so the picker opens on what the user last
+ * used, not whatever happens to sort first in the registry list.
  */
 export function resolvePickerSelectedInstallId(
   explicitSelection: string | null | undefined,
@@ -217,7 +246,7 @@ export function resolvePickerSelectedInstallId(
 ): string | null {
   const resolved = explicitSelection ?? hostInstallationId ?? null
   if (resolved) return resolved
-  return installs[0]?.id ?? null
+  return mostRecentlyLaunchedInstallId(installs)
 }
 
 /**
