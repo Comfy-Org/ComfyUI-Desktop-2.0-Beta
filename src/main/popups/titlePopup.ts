@@ -676,8 +676,8 @@ export function buildTitlePopupMenuItems(entry: ComfyWindowEntry): TitlePopupMen
   // Settings lives in the picker's Startup Args tab, the dashboard
   // escape is the Home icon in the picker chips row, and Reset Zoom
   // remains reachable via Ctrl/Cmd + 0. "Quit ComfyUI" stays available
-  // from every window; only "Close Window" is dashboard-exclusive (the
-  // dashboard has nothing to close to).
+  // from every window; "Close Window" is instance-only — the dashboard
+  // omits it (there's nothing to close back to).
   items.push(
     { id: 'feedback', label: 'Send Beta Feedback', labelKey: 'fileMenu.sendFeedback' },
     { kind: 'separator' },

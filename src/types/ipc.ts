@@ -943,9 +943,11 @@ export interface ElectronApi {
    *  `requestId` it must echo back via `respondCloseRequest` so main
    *  can pair the response with the request that fired it. */
   onCloseRequest(callback: (data: { requestId: string }) => void): Unsubscribe
-  /** Reply to a `comfy-window:request-close` consult — `cleared: true`
-   *  lets main proceed with destruction, `cleared: false` aborts. */
-  respondCloseRequest(payload: { requestId: string; cleared: boolean }): void
+  /** Reply to a `comfy-window:request-close` consult. `cleared: true`
+   *  lets main proceed, `cleared: false` aborts (overlay cancel-prompt
+   *  dismissed). `defer: true` means no overlay was in flight, so main
+   *  owns the close-window confirm itself. */
+  respondCloseRequest(payload: { requestId: string; cleared?: boolean; defer?: boolean }): void
   /** Send immediately on receiving a `comfy-window:request-close` so
    *  main knows the renderer picked it up and is processing. Main's
    *  hung-renderer safety timeout only fires until the ack lands; once

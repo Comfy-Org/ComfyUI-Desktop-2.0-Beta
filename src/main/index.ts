@@ -83,6 +83,7 @@ import {
   _detachInstallImpl,
   confirmAndCloseAllHostWindows,
   confirmAndCloseHostWindow,
+  confirmCloseInstanceWindow,
   consultPanelRendererClose,
   detachOrphanedInstallHosts,
   preClearedClose,
@@ -976,6 +977,7 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
     // picker all flow through the registry).
     setHostWindowFactories({
       consultPanelRendererClose,
+      confirmCloseInstanceWindow,
       detachInstallImpl: _detachInstallImpl,
       preClearedClose,
       computeInstallUpdateAvailable,
