@@ -3,6 +3,7 @@ import { reactive } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useSessionStore } from './sessionStore'
 import { getPhaseWeights } from '../lib/progressWeights'
+import { emitTelemetryAction, toErrorBucket } from '../lib/telemetry'
 import type {
   ActionResult,
   ErrorDetailData,
@@ -10,7 +11,7 @@ import type {
   ProgressStep,
   ComfyOutputData,
   ShowProgressOpts,
-  Unsubscribe,
+  Unsubscribe
 } from '../types/ipc'
 
 export interface Operation {
@@ -49,6 +50,17 @@ export interface Operation {
   finished: boolean
   cancelRequested: boolean
   result: ActionResult | null
+  /** Action id that kicked off this op (`copy-install`, `copy-update`,
+   *  `update`, `restore-snapshot`, …). Carried so the op-outcome event
+   *  can split the funnel by the exact path the user took — opKind
+   *  alone collapses copy-update / release-update / update into
+   *  `'update'` and copy-install into `'generic'`. */
+  actionId?: string
+  /** Wall-clock start, for the op-outcome event's duration_ms. */
+  _startedAtMs: number
+  /** One-shot guard so `desktop2.op.result` fires exactly once per op
+   *  (a terminal transition AND a later cleanup must not double-count). */
+  _resultEmitted: boolean
   unsubProgress: Unsubscribe | null
   unsubOutput: Unsubscribe | null
   apiCall: (() => Promise<ActionResult>) | null
@@ -78,18 +90,56 @@ export const useProgressStore = defineStore('progress', () => {
     }
   })
 
+  /**
+   * Fire `desktop2.op.result` exactly once per operation. This is the
+   * outcome half of the multi-instance funnel: `desktop2.action.invoked`
+   * (with `action_id`) marks the click; this marks how it ended.
+   *
+   * `result`:
+   *   - `success`          — apiCall resolved ok
+   *   - `failed`           — sync throw, rejected promise, or ok:false
+   *                          (carries `error_bucket`)
+   *   - `cancelled_user`   — user clicked Cancel (apiCall resolved
+   *                          `cancelled` after `cancelOperation`)
+   *   - `cancelled_abrupt` — op torn down before any terminal state
+   *                          (window closed / replaced mid-flight)
+   *
+   * `portConflict` is deliberately NOT terminal — the op stays alive
+   * pending resolution, so we don't emit for it.
+   */
+  function emitOpResult(
+    op: Operation,
+    installationId: string,
+    result: 'success' | 'failed' | 'cancelled_user' | 'cancelled_abrupt'
+  ): void {
+    if (op._resultEmitted) return
+    op._resultEmitted = true
+    emitTelemetryAction('desktop2.op.result', {
+      installation_id: installationId,
+      action_id: op.actionId ?? null,
+      op_kind: op.opKind,
+      result,
+      duration_ms: Date.now() - op._startedAtMs,
+      ...(result === 'failed' && op.error ? { error_bucket: toErrorBucket(op.error) } : {})
+    })
+  }
+
   function cleanupOperation(installationId: string): void {
     const op = operations.get(installationId)
     if (!op) return
+    // An op torn down before reaching a terminal state = the user left
+    // mid-way (window closed, or a new op replaced this one). Distinct
+    // from a deliberate Cancel click, which resolves `cancelled` below.
+    if (!op.finished && !op._resultEmitted) {
+      emitOpResult(op, installationId, 'cancelled_abrupt')
+    }
     if (op.unsubProgress) op.unsubProgress()
     if (op.unsubOutput) op.unsubOutput()
     op.unsubProgress = null
     op.unsubOutput = null
   }
 
-  function getProgressInfo(
-    installationId: string
-  ): { status: string; percent: number } | null {
+  function getProgressInfo(installationId: string): { status: string; percent: number } | null {
     const op = operations.get(installationId)
     if (!op || op.finished) return null
     if (op.steps && op.activePhase) {
@@ -109,6 +159,7 @@ export const useProgressStore = defineStore('progress', () => {
     destroysInstance?: boolean
     chainSpan?: ShowProgressOpts['chainSpan']
     successTerminal?: ShowProgressOpts['successTerminal']
+    actionId?: string
   }): void {
     const {
       installationId,
@@ -119,6 +170,7 @@ export const useProgressStore = defineStore('progress', () => {
       destroysInstance,
       chainSpan,
       successTerminal,
+      actionId
     } = opts
 
     cleanupOperation(installationId)
@@ -146,10 +198,13 @@ export const useProgressStore = defineStore('progress', () => {
       finished: false,
       cancelRequested: false,
       result: null,
+      actionId,
+      _startedAtMs: Date.now(),
+      _resultEmitted: false,
       unsubProgress: null,
       unsubOutput: null,
       apiCall,
-      _globalFloor: 0,
+      _globalFloor: 0
     }
     operations.set(installationId, op)
     const rop = operations.get(installationId)!
@@ -208,39 +263,46 @@ export const useProgressStore = defineStore('progress', () => {
       sessionStore.clearActiveSession(installationId)
       sessionStore.errorInstances.set(installationId, {
         installationName: rop.title,
-        message: rop.error,
+        message: rop.error
       })
+      emitOpResult(rop, installationId, 'failed')
       return
     }
 
-    p
-      .then((result) => {
-        rop.finished = true
-        if (result.ok || result.cancelled || result.portConflict) rop.result = result
-        cleanupRop()
+    p.then((result) => {
+      rop.finished = true
+      if (result.ok || result.cancelled || result.portConflict) rop.result = result
+      cleanupRop()
 
-        sessionStore.clearActiveSession(installationId)
+      sessionStore.clearActiveSession(installationId)
 
-        if (result.ok) {
-          if (rop.steps) rop.done = true
-        } else if (!result.cancelled && !result.portConflict) {
-          rop.error = result.message || t('progress.unknownError')
-          sessionStore.errorInstances.set(installationId, {
-            installationName: rop.title,
-            message: rop.error,
-          })
-        }
-      })
-      .catch((err: Error) => {
-        rop.error = err.message
-        rop.finished = true
-        cleanupRop()
-        sessionStore.clearActiveSession(installationId)
+      if (result.ok) {
+        if (rop.steps) rop.done = true
+        emitOpResult(rop, installationId, 'success')
+      } else if (result.cancelled) {
+        emitOpResult(rop, installationId, 'cancelled_user')
+      } else if (result.portConflict) {
+        // Not terminal — the user resolves the conflict and a fresh op
+        // (with its own outcome) supersedes this one. No op.result here.
+      } else {
+        rop.error = result.message || t('progress.unknownError')
         sessionStore.errorInstances.set(installationId, {
           installationName: rop.title,
-          message: rop.error,
+          message: rop.error
         })
+        emitOpResult(rop, installationId, 'failed')
+      }
+    }).catch((err: Error) => {
+      rop.error = err.message
+      rop.finished = true
+      cleanupRop()
+      sessionStore.clearActiveSession(installationId)
+      sessionStore.errorInstances.set(installationId, {
+        installationName: rop.title,
+        message: rop.error
       })
+      emitOpResult(rop, installationId, 'failed')
+    })
   }
 
   function cancelOperation(installationId: string): void {
@@ -308,9 +370,7 @@ export const useProgressStore = defineStore('progress', () => {
 
     // Stepped path.
     const weights = getPhaseWeights(op.steps)
-    const activeIdx = op.activePhase
-      ? op.steps.findIndex((s) => s.phase === op.activePhase)
-      : -1
+    const activeIdx = op.activePhase ? op.steps.findIndex((s) => s.phase === op.activePhase) : -1
 
     if (activeIdx < 0 || !op.activePhase) {
       // Steps payload landed but no per-phase update yet. Hold the floor.
@@ -332,9 +392,10 @@ export const useProgressStore = defineStore('progress', () => {
     // we transition from a determinate phase to an indeterminate one
     // (e.g. download → cleanup). Once the next phase starts, the
     // baseline absorbs that slot fully and the bar stays where it is.
-    const total = op.activePercent < 0
-      ? baseline + activeWeight
-      : baseline + activeWeight * (op.activePercent / 100)
+    const total =
+      op.activePercent < 0
+        ? baseline + activeWeight
+        : baseline + activeWeight * (op.activePercent / 100)
 
     const next = Math.max(op._globalFloor, total)
     op._globalFloor = next
@@ -352,6 +413,6 @@ export const useProgressStore = defineStore('progress', () => {
     globalProgressFor,
     startOperation,
     cleanupOperation,
-    cancelOperation,
+    cancelOperation
   }
 })

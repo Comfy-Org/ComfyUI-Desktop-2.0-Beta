@@ -42,7 +42,7 @@ const VALID_PANELS: ReadonlySet<PanelKey> = new Set([
   'track',
   'load-snapshot',
   'quick-install',
-  'progress',
+  'progress'
 ])
 
 /**
@@ -58,7 +58,7 @@ const FLOW_PANELS: ReadonlySet<PanelKey> = new Set([
   'new-install',
   'track',
   'load-snapshot',
-  'quick-install',
+  'quick-install'
 ])
 
 /** Stable `flow:` strings for `desktop2.install.flow.opened`. */
@@ -66,7 +66,7 @@ const FLOW_TELEMETRY_NAMES: Record<FlowComponent, string> = {
   'new-install': 'new_install',
   'quick-install': 'quick_install',
   track: 'track_existing',
-  'load-snapshot': 'load_snapshot',
+  'load-snapshot': 'load_snapshot'
 }
 
 export function isValidPanel(raw: string | null | undefined): raw is PanelKey {
@@ -101,7 +101,7 @@ export interface UsePanelOverlaysOpts {
    *  `instance-started`. Optional: install-backed hosts pass nothing. */
   prepareChooserHostHandoff?: (
     installationId: string,
-    triggersInstanceStart?: boolean,
+    triggersInstanceStart?: boolean
   ) => Promise<void>
   /** Optional first-use chain integration — see `FirstUseChainHooks`. */
   firstUseChain?: FirstUseChainHooks
@@ -130,9 +130,7 @@ export interface UsePanelOverlaysApi {
   handleShowProgress: (opts: ShowProgressOpts) => Promise<void>
   handleProgressClose: () => void
   openFlowTakeover: (component: FlowComponent, entrypoint: string) => Promise<void>
-  openFirstUseTakeover: (opts?: {
-    initialStep?: 'start' | 'localBranch'
-  }) => Promise<void>
+  openFirstUseTakeover: (opts?: { initialStep?: 'start' | 'localBranch' }) => Promise<void>
   dismissTakeoverDirect: () => void
   switchPanel: (panel: PanelKey, entrypoint?: string) => Promise<void>
 }
@@ -154,7 +152,7 @@ export function usePanelOverlays(opts: UsePanelOverlaysOpts): UsePanelOverlaysAp
     trackRef,
     loadSnapshotRef,
     quickInstallRef,
-    firstUseRef,
+    firstUseRef
   } = opts
   const progressStore = useProgressStore()
   const { current: currentOverlay, openOverlay, closeOverlay } = useOverlay()
@@ -184,12 +182,11 @@ export function usePanelOverlays(opts: UsePanelOverlaysOpts): UsePanelOverlaysAp
     (next, prev) => {
       if (isProgressTakeover(next) && !isProgressTakeover(prev)) {
         window.api.setFirstUseMode('loading-lockdown')
-      }
-      else if (!isProgressTakeover(next) && !isFirstUseTakeover(next)) {
+      } else if (!isProgressTakeover(next) && !isFirstUseTakeover(next)) {
         window.api.setFirstUseMode('none')
       }
     },
-    { immediate: true },
+    { immediate: true }
   )
 
   const defaultBodyPanel = (): PanelKey => (installationId ? 'comfy-lifecycle' : 'chooser')
@@ -202,7 +199,7 @@ export function usePanelOverlays(opts: UsePanelOverlaysOpts): UsePanelOverlaysAp
   })()
 
   const activePanel = ref<PanelKey>(
-    FLOW_PANELS.has(initialPanel) ? defaultBodyPanel() : initialPanel,
+    FLOW_PANELS.has(initialPanel) ? defaultBodyPanel() : initialPanel
   )
 
   /**
@@ -252,6 +249,7 @@ export function usePanelOverlays(opts: UsePanelOverlaysOpts): UsePanelOverlaysAp
         destroysInstance: showOpts.destroysInstance,
         chainSpan: showOpts.chainSpan,
         successTerminal: showOpts.successTerminal,
+        actionId: showOpts.actionId
       })
     }
     // Every show-progress op renders as a Tier 3 brand takeover now —
@@ -265,7 +263,7 @@ export function usePanelOverlays(opts: UsePanelOverlaysOpts): UsePanelOverlaysAp
       component: 'update',
       installationId: showOpts.installationId,
       operationName,
-      onCancel,
+      onCancel
     })
     if (!ok) return
     // Install-less host: claim the chooser host for any op that doesn't
@@ -277,14 +275,10 @@ export function usePanelOverlays(opts: UsePanelOverlaysOpts): UsePanelOverlaysAp
     // the initiating window — there's nothing to attach. The
     // `triggersInstanceStart` flag drives the fallback close-on-instance-
     // started subscription (launch-class only) when the claim is rejected.
-    if (
-      !installationId &&
-      opts.prepareChooserHostHandoff &&
-      !showOpts.destroysInstance
-    ) {
+    if (!installationId && opts.prepareChooserHostHandoff && !showOpts.destroysInstance) {
       await opts.prepareChooserHostHandoff(
         showOpts.installationId,
-        !!showOpts.triggersInstanceStart,
+        !!showOpts.triggersInstanceStart
       )
     }
     await nextTick()
@@ -326,7 +320,7 @@ export function usePanelOverlays(opts: UsePanelOverlaysOpts): UsePanelOverlaysAp
     if (!ok) return
     emitTelemetryAction('desktop2.install.flow.opened', {
       flow: FLOW_TELEMETRY_NAMES[component],
-      entrypoint,
+      entrypoint
     })
     // Wait for the v-if branch in the takeover slot to mount the
     // component before reaching for its ref.
@@ -338,11 +332,8 @@ export function usePanelOverlays(opts: UsePanelOverlaysOpts): UsePanelOverlaysAp
       const cameFromLocalBranch = opts.firstUseChain
         ? opts.firstUseChain.consumeCameFromLocalBranch() === true
         : false
-      await newInstallRef.value?.open(
-        cameFromLocalBranch ? { cameFromLocalBranch } : undefined,
-      )
-    }
-    else if (component === 'track') trackRef.value?.open()
+      await newInstallRef.value?.open(cameFromLocalBranch ? { cameFromLocalBranch } : undefined)
+    } else if (component === 'track') trackRef.value?.open()
     else if (component === 'load-snapshot') loadSnapshotRef.value?.open()
     else if (component === 'quick-install') await quickInstallRef.value?.open()
   }
@@ -357,9 +348,9 @@ export function usePanelOverlays(opts: UsePanelOverlaysOpts): UsePanelOverlaysAp
    * can suppress the cloud-vs-local pick step for returning users. The
    * fetch runs in parallel with the overlay mount.
    */
-  async function openFirstUseTakeover(
-    firstUseOpts?: { initialStep?: 'start' | 'localBranch' },
-  ): Promise<void> {
+  async function openFirstUseTakeover(firstUseOpts?: {
+    initialStep?: 'start' | 'localBranch'
+  }): Promise<void> {
     const statePromise = window.api
       .getFirstUseState()
       .catch(() => ({ skipPick: false, hasLegacyDesktop: false }))
@@ -369,7 +360,7 @@ export function usePanelOverlays(opts: UsePanelOverlaysOpts): UsePanelOverlaysAp
     const ok = await openOverlay({
       kind: 'takeover',
       component: 'first-use',
-      cancelCopyKey: 'quit-setup',
+      cancelCopyKey: 'quit-setup'
     })
     if (!ok) return
     await nextTick()
@@ -377,7 +368,7 @@ export function usePanelOverlays(opts: UsePanelOverlaysOpts): UsePanelOverlaysAp
     await firstUseRef.value?.open({
       skipPick: state.skipPick,
       hasLegacyDesktop: state.hasLegacyDesktop,
-      ...(firstUseOpts?.initialStep ? { initialStep: firstUseOpts.initialStep } : {}),
+      ...(firstUseOpts?.initialStep ? { initialStep: firstUseOpts.initialStep } : {})
     })
   }
 
@@ -398,7 +389,10 @@ export function usePanelOverlays(opts: UsePanelOverlaysOpts): UsePanelOverlaysAp
     // transitions; the renderer-internal dismiss is the only path
     // that can take the host from a non-'none' mode to 'none'
     // without a step change inside the takeover.
-    if (currentOverlay.value?.kind === 'takeover' && currentOverlay.value.component === 'first-use') {
+    if (
+      currentOverlay.value?.kind === 'takeover' &&
+      currentOverlay.value.component === 'first-use'
+    ) {
       window.api.setFirstUseMode('none')
     }
     // Any overlay opened via `setActivePanel` in main (the unified
@@ -453,6 +447,6 @@ export function usePanelOverlays(opts: UsePanelOverlaysOpts): UsePanelOverlaysAp
     openFlowTakeover,
     openFirstUseTakeover,
     dismissTakeoverDirect,
-    switchPanel,
+    switchPanel
   }
 }
