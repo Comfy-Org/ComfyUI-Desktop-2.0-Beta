@@ -130,10 +130,8 @@ function toggleCollapsed(section: { title?: string }): void {
 
 const visibleSections = computed(() => props.sections)
 
-const NESTED_FIELD_IDS = new Set(['useSharedOutputDir', 'outputDir'])
-
 function isNestedField(field: DetailField): boolean {
-  return NESTED_FIELD_IDS.has(field.id ?? '')
+  return field.nested === true
 }
 
 function hasChannelPicker(section: DetailSection): boolean {
