@@ -1,6 +1,12 @@
+// Keys are todesktop's normalized `${platform}-${arch}` strings (matches
+// electron-builder's Platform enum: windows / mac / linux), NOT Node's
+// process.platform values (win32 / darwin / linux). Until this was fixed,
+// every Windows and Mac build silently hit the "skipping" branch below —
+// the fetch on todesktop's server never ran, which is why 0.6.4 (and every
+// earlier release with this hook) shipped without bootstrap-python.
 const PLATFORM_MAP = {
-  'win32-x64': 'win-x64',
-  'darwin-arm64': 'mac-arm64',
+  'windows-x64': 'win-x64',
+  'mac-arm64': 'mac-arm64',
   'linux-x64': 'linux-x64',
 }
 
@@ -9,10 +15,12 @@ const PLATFORM_MAP = {
 // in src/main/lib/git.ts:tryConfigureBootstrapPygit2. Kept here so a fetch
 // script that returns 0 but produces a directory without the binary still
 // fails the build instead of silently shipping a broken installer.
+// Forward slashes are fine on every platform — these strings are passed to
+// path.join() below, which normalizes separators per-OS.
 const PYTHON_BINARY = {
   'win-x64': 'python.exe',
-  'mac-arm64': require('node:path').join('bin', 'python3'),
-  'linux-x64': require('node:path').join('bin', 'python3'),
+  'mac-arm64': 'bin/python3',
+  'linux-x64': 'bin/python3',
 }
 
 module.exports = async ({ appDir, platform, arch }) => {
@@ -29,7 +37,12 @@ module.exports = async ({ appDir, platform, arch }) => {
 
   console.log(`[todesktop:beforeBuild] Fetching bootstrap python for ${bootstrapPlatform}`)
   const script = path.join(appDir, 'scripts', 'fetch-bootstrap-python.mjs')
-  const outDir = path.join(appDir, 'bootstrap-python')
+  // todesktop resolves extraResources.from against `<appDir>/extraResources/`,
+  // not against the project source root — confirmed by the build log
+  // ("file source doesn't exist  from=<appDir>\extraResources\bootstrap-python\win-x64").
+  // Writing to <appDir>/bootstrap-python (the previous behaviour) put the
+  // archive in the wrong place and todesktop's packager skipped it silently.
+  const outDir = path.join(appDir, 'extraResources', 'bootstrap-python')
   // fetch-bootstrap-python.mjs now exits non-zero on failure, which bubbles
   // up here via execSync. Don't wrap in try/catch — a failed fetch must fail
   // the build (see 0.6.4 post-mortem: a swallowed fetch error shipped an
