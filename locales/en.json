@@ -95,6 +95,8 @@
     "crashedTitle": "ComfyUI exited unexpectedly",
     "crashedDesc": "The ComfyUI process exited. You can restart it below.",
     "crashedDescWithCode": "The ComfyUI process exited (exit code {code}). You can restart it below.",
+    "crashedDescWithSignal": "The ComfyUI process was terminated by {signal}. You can restart it below.",
+    "crashedDescWithCodeAndSignal": "The ComfyUI process was terminated by {signal} (exit code {code}). You can restart it below.",
     "crashedDetailsToggle": "Show error log",
     "start": "Start ComfyUI",
     "restart": "Restart ComfyUI",

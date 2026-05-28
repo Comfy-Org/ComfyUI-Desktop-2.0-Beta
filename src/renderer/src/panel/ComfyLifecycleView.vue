@@ -66,10 +66,19 @@ const errorInfo = computed(() => sessionStore.errorInstances.get(props.installat
 
 const crashedMessage = computed<string | null>(() => {
   if (state.value !== 'crashed') return null
+  // Pick the most specific phrasing for whatever main captured. Signal +
+  // code (POSIX kill paths) is the richest; signal alone covers exits
+  // where Node reported only the signal; code alone is the Windows /
+  // non-zero-exit path; falling all the way through means we got neither
+  // and only have "something exited".
   const code = errorInfo.value?.exitCode
-  return code != null
-    ? t('comfyLifecycle.crashedDescWithCode', { code })
-    : t('comfyLifecycle.crashedDesc')
+  const signal = errorInfo.value?.signal
+  if (signal && code != null) {
+    return t('comfyLifecycle.crashedDescWithCodeAndSignal', { code, signal })
+  }
+  if (signal) return t('comfyLifecycle.crashedDescWithSignal', { signal })
+  if (code != null) return t('comfyLifecycle.crashedDescWithCode', { code })
+  return t('comfyLifecycle.crashedDesc')
 })
 
 const crashedLogs = computed<string | null>(() => {
@@ -139,6 +148,7 @@ async function hydrateLastCrashError(installationId: string): Promise<void> {
     sessionStore.errorInstances.set(installationId, {
       installationName: data.installationName,
       exitCode: data.exitCode,
+      signal: data.signal,
       lastStderr: data.lastStderr,
     })
   } catch {

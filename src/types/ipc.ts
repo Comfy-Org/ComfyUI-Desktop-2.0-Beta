@@ -409,6 +409,12 @@ export interface ComfyExitedData {
   installationName: string
   crashed?: boolean
   exitCode?: number
+  /** POSIX signal name when the process was killed by signal (e.g.
+   *  `'SIGKILL'`, `'SIGTERM'`). `null` / absent on a normal exit and on
+   *  Windows TerminateProcess paths (Windows reports an exit code only).
+   *  Surfacing this lets the lifecycle view differentiate "killed by
+   *  signal" from "crashed with non-zero exit". */
+  signal?: string
   lastStderr?: string
 }
 

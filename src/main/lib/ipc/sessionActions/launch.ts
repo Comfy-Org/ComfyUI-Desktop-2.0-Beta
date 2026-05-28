@@ -212,13 +212,20 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
     const mode = (inst.launchMode as string | undefined) || 'window'
     _addSession(installationId, { proc, port: 0, mode, installationName: inst.name }, Date.now() - launchStartedAt)
 
-    proc.on('exit', (code) => {
+    proc.on('exit', (code, signal) => {
       logStream.end()
-      const crashed = _runningSessions.has(installationId) && code !== 0
+      const crashed = _runningSessions.has(installationId) && (code !== 0 || signal !== null)
       const lastStderr = scrubStderr(lastNLines(stderrBuf, 100))
       execTap.flushSummary()
       _removeSession(installationId)
-      const exitedPayload = { installationId, crashed, exitCode: code ?? undefined, installationName: inst.name, lastStderr }
+      const exitedPayload = {
+        installationId,
+        crashed,
+        exitCode: code ?? undefined,
+        signal: signal ?? undefined,
+        installationName: inst.name,
+        lastStderr,
+      }
       if (crashed) recordCrash(exitedPayload)
       if (!sender.isDestroyed()) {
         sender.send('comfy-exited', exitedPayload)
@@ -513,7 +520,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
   let currentGetStderr = launchResult.getStderr
 
   function attachExitHandler(p: ChildProcess): void {
-    p.on('exit', (code) => {
+    p.on('exit', (code, signal) => {
       if (rebootModelCheckAbort) {
         rebootModelCheckAbort.abort()
         rebootModelCheckAbort = null
@@ -594,7 +601,14 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
       const lastStderr = scrubStderr(lastNLines(currentGetStderr(), 100))
       execTap.flushSummary()
       _removeSession(installationId)
-      const exitedPayload = { installationId, crashed, exitCode: code ?? undefined, installationName: inst.name, lastStderr }
+      const exitedPayload = {
+        installationId,
+        crashed,
+        exitCode: code ?? undefined,
+        signal: signal ?? undefined,
+        installationName: inst.name,
+        lastStderr,
+      }
       if (crashed) recordCrash(exitedPayload)
       if (!sender.isDestroyed()) {
         sender.send('comfy-exited', exitedPayload)

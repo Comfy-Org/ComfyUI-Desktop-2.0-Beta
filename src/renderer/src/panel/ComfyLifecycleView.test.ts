@@ -27,6 +27,10 @@ const messages = {
       crashedDesc: 'The ComfyUI process exited. You can restart it below.',
       crashedDescWithCode:
         'The ComfyUI process exited (exit code {code}). You can restart it below.',
+      crashedDescWithSignal:
+        'The ComfyUI process was terminated by {signal}. You can restart it below.',
+      crashedDescWithCodeAndSignal:
+        'The ComfyUI process was terminated by {signal} (exit code {code}). You can restart it below.',
       crashedDetailsToggle: 'Show error log',
       start: 'Start ComfyUI',
       restart: 'Restart ComfyUI',
@@ -168,6 +172,31 @@ describe('ComfyLifecycleView', () => {
     const button = wrapper.find('button.brand-primary')
     expect(button.exists()).toBe(true)
     expect(button.text()).toContain('Restart ComfyUI')
+  })
+
+  it('renders the POSIX signal in the crashed message when signal alone is present', async () => {
+    const wrapper = mountView()
+    const sessionStore = useSessionStore()
+    sessionStore.errorInstances.set('inst-1', {
+      installationName: 'My Local Install',
+      signal: 'SIGKILL',
+    })
+    await flushPromises()
+    expect(wrapper.text()).toContain('terminated by SIGKILL')
+    expect(wrapper.text()).not.toContain('exit code')
+  })
+
+  it('renders both signal and exit code in the crashed message when both are present', async () => {
+    const wrapper = mountView()
+    const sessionStore = useSessionStore()
+    sessionStore.errorInstances.set('inst-1', {
+      installationName: 'My Local Install',
+      exitCode: 137,
+      signal: 'SIGKILL',
+    })
+    await flushPromises()
+    expect(wrapper.text()).toContain('terminated by SIGKILL')
+    expect(wrapper.text()).toContain('exit code 137')
   })
 
   it('renders the stderr tail in the brand logs accordion when present', async () => {
