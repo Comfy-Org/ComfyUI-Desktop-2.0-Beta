@@ -18,7 +18,8 @@ export interface ActionResult {
   url?: string
   portConflict?: Record<string, unknown>
   /** Set by actions that produce a new install record (copy /
-   *  copy-update / release-update) so the renderer can open A' in its
-   *  own window. The source install's host stays put — never swapped. */
+   *  copy-update / release-update / migrate-to-standalone on a desktop
+   *  source) so the renderer can open A' in its own window. The source
+   *  install's host stays put — never swapped. */
   newInstallationId?: string
 }

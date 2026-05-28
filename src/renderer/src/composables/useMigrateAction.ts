@@ -82,25 +82,51 @@ export function useMigrateAction(opts?: { surface?: 'modal' | 'takeover' }) {
     const wasRunning = sessionStore.isRunning(installation.id)
 
     const isDesktop = installation.sourceId === 'desktop'
-    const migrateItems = isDesktop
-      ? [
-        t('desktop.copyUserData'),
-        t('desktop.copyInput'),
-        t('desktop.copyOutput'),
-        t('desktop.addModels'),
-      ]
-      : [
-        t('migrate.mergeUserData'),
-        t('migrate.mergeInput'),
-        t('migrate.mergeOutput'),
-        t('migrate.addModels'),
-      ]
 
     const dialogTitle = confirm?.title || t('migrate.migrateToStandaloneConfirmTitle')
     const dialogConfirmLabel = confirm?.confirmLabel || t('migrate.migrateToStandaloneConfirm')
     const dialogMessage = wasRunning
       ? augmentMessageWithStopWarning(confirm?.message, t('errors.willStopRunning', { name: installation.name || 'ComfyUI' }))
       : confirm?.message || ''
+
+    // Desktop adoption reuses the legacy data folder, Python env, and
+    // models in place — no snapshot to preview, no variant to pick. A
+    // plain confirm is the whole UI; main returns the freshly-adopted
+    // installation id.
+    if (isDesktop) {
+      const desktopItems = [
+        t('desktop.copyUserData'),
+        t('desktop.copyInput'),
+        t('desktop.copyOutput'),
+        t('desktop.addModels'),
+      ]
+      const desktopDetails = wasRunning
+        ? [{ label: t('migrate.migrationWill'), items: [t('errors.willStopRunning', { name: installation.name || 'ComfyUI' }), ...desktopItems] }]
+        : [{ label: t('migrate.migrationWill'), items: desktopItems }]
+      let confirmed: boolean
+      if (takeover) {
+        const surfacePromise = takeover.open(dialogTitle, dialogConfirmLabel)
+        takeover.update({ loading: false, details: desktopDetails, checkboxes: [] })
+        confirmed = (await surfacePromise).confirmed
+      } else {
+        confirmed = await modal.confirm({
+          title: dialogTitle,
+          message: dialogMessage,
+          messageDetails: desktopDetails,
+          confirmLabel: dialogConfirmLabel,
+          confirmStyle: 'primary',
+        })
+      }
+      if (!confirmed) return null
+      return { enablePipSync: false }
+    }
+
+    const migrateItems = [
+      t('migrate.mergeUserData'),
+      t('migrate.mergeInput'),
+      t('migrate.mergeOutput'),
+      t('migrate.addModels'),
+    ]
 
     // Show the surface (Modal OR brand takeover) with a loading state.
     // Both paths return the same { confirmed, checkboxValues } shape so
@@ -123,11 +149,9 @@ export function useMigrateAction(opts?: { surface?: 'modal' | 'takeover' }) {
     }
 
     // Fetch the preview in the background
-    let previewResult: Awaited<ReturnType<typeof window.api.previewDesktopMigration>>
+    let previewResult: Awaited<ReturnType<typeof window.api.previewLocalMigration>>
     try {
-      previewResult = isDesktop
-        ? await window.api.previewDesktopMigration()
-        : await window.api.previewLocalMigration(installation.id)
+      previewResult = await window.api.previewLocalMigration(installation.id)
     } catch (err) {
       if (takeover) takeover.update({ loading: false })
       else modal.close(false)
@@ -151,9 +175,7 @@ export function useMigrateAction(opts?: { surface?: 'modal' | 'takeover' }) {
         { label: t('migrate.migrationWill'), items: [t('errors.willStopRunning', { name: installation.name || 'ComfyUI' }), ...migrateItems] },
       ]
       : [{ label: t('migrate.migrationWill'), items: migrateItems }]
-    const checkboxesPayload = isDesktop
-      ? []
-      : [{ id: 'enablePipSync', label: t('migrate.enablePipSync'), checked: false }]
+    const checkboxesPayload = [{ id: 'enablePipSync', label: t('migrate.enablePipSync'), checked: false }]
 
     if (takeover) {
       takeover.update({

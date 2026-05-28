@@ -29,7 +29,6 @@ import {
 } from '../process'
 import { detectGPU, validateHardware, checkNvidiaDriver } from '../gpu'
 import { detectDesktopInstall, stageDesktopSnapshot } from '../desktopDetect'
-import { performDesktopMigration } from '../desktopMigration'
 import { performLocalMigration, stageLocalSnapshot } from '../localMigration'
 import { getDiskSpace, getDirectorySize, validateInstallPath } from '../disk'
 import { syncOemSeed } from '../oem'
@@ -70,7 +69,7 @@ export {
   COMFY_BOOT_TIMEOUT_MS,
   detectGPU, validateHardware, checkNvidiaDriver,
   detectDesktopInstall, stageDesktopSnapshot,
-  performDesktopMigration, performLocalMigration, stageLocalSnapshot,
+  performLocalMigration, stageLocalSnapshot,
   getDiskSpace, getDirectorySize, validateInstallPath,
   syncOemSeed, formatTime, getActiveDownloads,
   syncCustomModelFolders, discoverExtraModelFolders,

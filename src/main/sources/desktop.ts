@@ -8,7 +8,7 @@
  * can be created through it.
  *
  * Once the v1 user-base has fully migrated to standalone, this file can
- * be removed along with `desktopDetect.ts` and `desktopMigration.ts`.
+ * be removed along with `desktopDetect.ts` and `desktopAdopt.ts`.
  */
 import fs from 'fs'
 import path from 'path'
