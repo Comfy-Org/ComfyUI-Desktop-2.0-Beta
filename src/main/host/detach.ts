@@ -223,7 +223,7 @@ async function confirmReturnToDashboardViaSystemModal(
     parent: entry.window,
     spec: {
       title: 'Return to Dashboard?',
-      message: 'ComfyUI for this installation will be stopped.',
+      message: 'This will stop ComfyUI for this installation.',
       confirmLabel: 'Stop & Return',
       cancelLabel: 'Cancel',
       confirmStyle: 'danger',

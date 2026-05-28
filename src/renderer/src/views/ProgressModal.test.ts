@@ -42,7 +42,7 @@ const messages = {
     dashboard: {
       confirmStopLocal: {
         title: 'Return to Dashboard?',
-        message: 'ComfyUI for this installation will be stopped.',
+        message: 'This will stop ComfyUI for this installation.',
         confirmLabel: 'Stop & Return',
       },
     },
