@@ -114,6 +114,16 @@ export async function handleAction(
 
     const totalFailures = nodeResult.failed.length + pipResult.failed.length + (comfyResult.error ? 1 : 0)
 
+    // Collect the SPECIFIC failures so the error surface can explain WHY a
+    // restore failed (issue #609) instead of a bare "N operation(s) failed".
+    // restore.ts already captures these — they were being discarded here.
+    const failureDetails: string[] = []
+    if (comfyResult.error) failureDetails.push(`ComfyUI: ${comfyResult.error}`)
+    for (const f of nodeResult.failed) failureDetails.push(`Node ${f.id}: ${f.error}`)
+    for (const e of pipResult.errors) failureDetails.push(e)
+    const failMessage = (headline: string): string =>
+      failureDetails.length > 0 ? `${headline}\n\n${failureDetails.join('\n')}` : headline
+
     if (summary.length === 0) {
       sendOutput(`\n✓ ${t('standalone.snapshotRestoreNothingToDo')}\n`)
       sendProgress('done', { percent: 100, status: t('standalone.snapshotRestoreNothingToDo') })
@@ -123,7 +133,7 @@ export async function handleAction(
     sendOutput(`\n${totalFailures > 0 ? '⚠' : '✓'} ${t('standalone.snapshotRestoreComplete')}: ${summary.join('; ')}\n`)
 
     if (pipResult.failed.length > 0) {
-      return { ok: false, message: t('standalone.snapshotRestoreReverted') }
+      return { ok: false, message: failMessage(t('standalone.snapshotRestoreReverted')) }
     }
 
     // Restore update channel and version/lastRollback state so the
@@ -161,7 +171,7 @@ export async function handleAction(
 
     sendProgress('done', { percent: 100, status: t('standalone.snapshotRestoreComplete') })
     return { ok: totalFailures === 0, navigate: 'detail',
-      ...(totalFailures > 0 ? { message: `${totalFailures} operation(s) failed` } : {}) }
+      ...(totalFailures > 0 ? { message: failMessage(`${totalFailures} operation(s) failed`) } : {}) }
   }
 
   // Handler kept for potential future use (e.g., context menu). Button removed from UI since

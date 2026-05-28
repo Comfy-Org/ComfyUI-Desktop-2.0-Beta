@@ -163,6 +163,9 @@ export interface ConfirmDef {
   confirmLabel?: string
   options?: ConfirmOption[]
   messageDetails?: ModalDetailGroup[]
+  /** Optional snapshot diff rendered as a collapsible SnapshotDiffView in the
+   *  confirm modal (restore flow). Reuses the Snapshots-tab diff component. */
+  restoreDiff?: SnapshotDiffResult | null
 }
 
 export interface ConfirmOption {

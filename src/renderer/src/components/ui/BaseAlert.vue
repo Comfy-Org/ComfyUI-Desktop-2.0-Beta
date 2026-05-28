@@ -252,7 +252,10 @@ onBeforeUnmount(() => {
               <X :size="16" />
             </button>
           </header>
-          <div v-if="message || hasDetails || $slots.default" class="base-alert-message">
+          <div
+            v-if="message || hasDetails || $slots.default || $slots.extra"
+            class="base-alert-message"
+          >
             <slot>
               <div
                 v-if="message"
@@ -278,6 +281,12 @@ onBeforeUnmount(() => {
                 </div>
               </div>
             </slot>
+            <!-- Appended rich content (e.g. a snapshot diff accordion) that
+                 should sit BELOW the message + details without replacing them
+                 the way the default slot would. -->
+            <div v-if="$slots.extra" class="base-alert-extra">
+              <slot name="extra" />
+            </div>
           </div>
           <footer class="base-alert-footer">
             <slot name="footer">
@@ -444,6 +453,10 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  margin-top: 12px;
+}
+
+.base-alert-extra {
   margin-top: 12px;
 }
 

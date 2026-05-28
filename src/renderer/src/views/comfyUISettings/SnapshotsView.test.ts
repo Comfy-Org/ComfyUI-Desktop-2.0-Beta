@@ -29,9 +29,9 @@ const messages = {
       loading: 'Loading…',
     },
     snapshots: {
-      saveLabel: 'Save Snapshot',
-      saveNew: 'Save New Snapshot',
-      saveSnapshot: 'Save Snapshot',
+      createLabel: 'Create Snapshot',
+      createNew: 'Create Snapshot',
+      createSnapshot: 'Create Snapshot',
       restoringStatus: 'Restoring snapshot',
       restoringFrom: 'from {label}',
       restored: 'Snapshot restored',
@@ -67,8 +67,8 @@ const messages = {
     },
     standalone: {
       snapshotRestore: 'Restore',
-      snapshotSaveTitle: 'Save snapshot',
-      snapshotSaveMessage: '',
+      snapshotCreateTitle: 'Create Snapshot',
+      snapshotCreateMessage: '',
       snapshotLabelPlaceholder: '',
     },
   },
@@ -153,7 +153,7 @@ describe('comfyUISettings/SnapshotsView', () => {
     const w = await mountView()
     expect(w.find(`[data-testid="${TID.snapshotsOpCard}"]`).exists()).toBe(false)
     expect(w.find('.snapshots-rail-cta').exists()).toBe(true)
-    expect(w.find('.snapshots-rail-cta').text()).toContain('Save New Snapshot')
+    expect(w.find('.snapshots-rail-cta').text()).toContain('Create Snapshot')
   })
 
   it('in-flight: morphs the slot into the op-card with target label + percent + spinner dot', async () => {
