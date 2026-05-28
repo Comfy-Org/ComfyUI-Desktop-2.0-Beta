@@ -50,7 +50,10 @@ const messages = {
     },
     actions: {
       copyInstallation: 'Copy Install',
-      untrack: 'Untrack',
+      untrack: 'Forget',
+      untrackConfirmTitle: 'Forget Install',
+      untrackConfirmMessage:
+        'This will remove the install from the app. The files will not be deleted.',
       delete: 'Delete',
       deleteConfirmTitle: 'Delete Install',
       deleteConfirmMessage:
@@ -289,16 +292,6 @@ describe('useInstallContextMenu — delete fast path (regression for #582)', () 
   })
 })
 
-// --- Copy / Untrack routing (regression for #592 audit Bug #2) ---
-//
-// Both kebab items used to call `window.api.runAction(id, 'copy' | 'remove')`
-// directly. The source-action defs declare `prompt` / `confirm` for the
-// renderer, so main saw `actionData = undefined` and bailed silently
-// (copy returned `{ ok: false, message: 'No name provided.' }`, untrack
-// fired with no confirm at all). The fix routes both through `onManage`
-// with the appropriate `autoAction` so the source-side action machinery
-// (confirms, prompts, disk-check, showProgress) is reused.
-
 function mountHarnessWithManage(
   onManage: (inst: Installation, options?: { initialTab?: string; autoAction?: string | null }) => void,
 ): { menu: ReturnType<typeof useInstallContextMenu> } {
@@ -314,7 +307,7 @@ function mountHarnessWithManage(
   return { menu }
 }
 
-describe('useInstallContextMenu — copy-install / untrack routing (regression for #592 audit Bug #2)', () => {
+describe('useInstallContextMenu — copy-install routing', () => {
   beforeEach(() => {
     apiMock.runAction.mockClear()
   })
@@ -329,21 +322,50 @@ describe('useInstallContextMenu — copy-install / untrack routing (regression f
     expect(onManage).toHaveBeenCalledTimes(1)
     expect(onManage.mock.calls[0][0]).toBe(inst)
     expect(onManage.mock.calls[0][1]).toEqual({ autoAction: 'copy' })
-    // Critical: the direct runAction call is the bug we are fixing —
-    // main can't supply `name` so it returns `{ ok: false }` silently.
     expect(apiMock.runAction).not.toHaveBeenCalled()
   })
+})
 
-  it('untrack routes through onManage with autoAction "remove" and does not call runAction directly', async () => {
-    const onManage = vi.fn<(inst: Installation, options?: { autoAction?: string | null }) => void>()
+describe('useInstallContextMenu — untrack confirm-then-remove', () => {
+  beforeEach(() => {
+    apiMock.runAction.mockClear()
+    modalMock.confirm.mockReset()
+  })
+
+  it('shows a danger confirm and never opens the picker', async () => {
+    modalMock.confirm.mockResolvedValue(true)
+    const onManage = vi.fn()
     const inst = makeInstall()
     const { menu } = mountHarnessWithManage(onManage)
 
     await menu.triggerAction('untrack', inst)
 
-    expect(onManage).toHaveBeenCalledTimes(1)
-    expect(onManage.mock.calls[0][0]).toBe(inst)
-    expect(onManage.mock.calls[0][1]).toEqual({ autoAction: 'remove' })
+    expect(modalMock.confirm).toHaveBeenCalledTimes(1)
+    const args = modalMock.confirm.mock.calls[0]![0]
+    expect(args.title).toBe('Forget Install')
+    expect(args.confirmLabel).toBe('Forget')
+    expect(args.confirmStyle).toBe('danger')
+    expect(onManage).not.toHaveBeenCalled()
+  })
+
+  it('on confirm true, dispatches the `remove` action once', async () => {
+    modalMock.confirm.mockResolvedValue(true)
+    const inst = makeInstall()
+    const { menu } = mountHarnessWithManage(() => {})
+
+    await menu.triggerAction('untrack', inst)
+
+    expect(apiMock.runAction).toHaveBeenCalledTimes(1)
+    expect(apiMock.runAction).toHaveBeenCalledWith(inst.id, 'remove')
+  })
+
+  it('on confirm cancel, does not dispatch the action', async () => {
+    modalMock.confirm.mockResolvedValue(false)
+    const inst = makeInstall()
+    const { menu } = mountHarnessWithManage(() => {})
+
+    await menu.triggerAction('untrack', inst)
+
     expect(apiMock.runAction).not.toHaveBeenCalled()
   })
 })

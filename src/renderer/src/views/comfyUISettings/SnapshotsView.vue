@@ -277,8 +277,9 @@ async function load(): Promise<void> {
 // --- Per-row expansion (change summary) ---
 
 const expandedFilenames = ref<Set<string>>(new Set())
-// Loaded "Changes from previous" diffs, keyed by snapshot filename.
-// Presence in the map = panel is open; null = loaded with no diff returned.
+/** Loaded "what changes if I restore this" diffs (current state →
+ *  target snapshot), keyed by filename. Presence in the map = panel
+ *  is open; null = loaded with no diff returned. */
 const diffByFilename = ref<Map<string, SnapshotDiffData | null>>(new Map())
 const diffLoadingFilename = ref<string | null>(null)
 
@@ -309,7 +310,7 @@ async function toggleDiff(filename: string): Promise<void> {
   }
   diffLoadingFilename.value = filename
   try {
-    const d = await window.api.getSnapshotDiff(props.installationId, filename, 'previous')
+    const d = await window.api.getSnapshotDiff(props.installationId, filename, 'current')
     const next = new Map(diffByFilename.value)
     next.set(filename, d)
     diffByFilename.value = next
@@ -820,22 +821,18 @@ async function handleImport(): Promise<void> {
                      user has expressed intent by expanding the row. -->
                 <div class="snapshots-view-detail-actions">
                   <button
+                    v-if="i !== 0"
                     type="button"
                     class="snapshots-view-detail-btn"
                     :class="{ 'is-active': isDiffOpen(item.snapshot.filename) }"
-                    :disabled="item.snapshotIndex === snapshots.length - 1"
-                    :aria-label="t('snapshots.diffPrevious', 'Changes from previous')"
-                    :title="
-                      item.snapshotIndex === snapshots.length - 1
-                        ? t('snapshots.noPrevious', 'First snapshot — no previous to compare')
-                        : t('snapshots.diffPrevious', 'Changes from previous')
-                    "
+                    :aria-label="t('snapshots.seeWhatChanges', 'See what changes')"
                     @click="toggleDiff(item.snapshot.filename)"
                   >
                     <GitCompare :size="13" />
-                    <span>{{ t('snapshots.diffPrevious', 'Changes from previous') }}</span>
+                    <span>{{ t('snapshots.seeWhatChanges', 'See what changes') }}</span>
                   </button>
                   <button
+                    v-if="i !== 0"
                     type="button"
                     class="snapshots-view-detail-btn"
                     :aria-label="t('snapshots.restore', 'Restore')"

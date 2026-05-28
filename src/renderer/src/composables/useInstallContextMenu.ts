@@ -183,11 +183,13 @@ export function useInstallContextMenu(opts: {
         id: 'untrack',
         label: t('actions.untrack'),
         separator: items.length > 0,
+        style: 'danger',
       })
       items.push({
         id: 'delete',
         label: t('chooser.menuDelete'),
         disabled: stoppedActionGated,
+        style: 'danger',
       })
     }
 
@@ -276,11 +278,20 @@ export function useInstallContextMenu(opts: {
       // which the caller's `try/catch` then silently swallowed.
       opts.onManage?.(inst, { autoAction: 'copy' })
     } else if (id === 'untrack') {
-      // Same fix as copy-install above: routing through `onManage`
-      // (autoAction: 'remove') runs the source-action def's confirm
-      // dialog renderer-side before invoking the IPC, instead of
-      // firing a destructive un-tracking action with no prompt.
-      opts.onManage?.(inst, { autoAction: 'remove' })
+      /** Confirm + instant `remove` IPC. No picker, no progress bar —
+       *  untrack is a registry-only op. */
+      const untrackLabel = t('actions.untrack', 'Forget')
+      const confirmed = await modal.confirm({
+        title: t('actions.untrackConfirmTitle', 'Forget Install'),
+        message: t(
+          'actions.untrackConfirmMessage',
+          'This will remove the install from the app. The files will not be deleted.',
+        ),
+        confirmLabel: untrackLabel,
+        confirmStyle: 'danger',
+      })
+      if (!confirmed) return
+      await runInstantActionWithAlert(inst, 'remove', untrackLabel)
     } else if (id === 'delete') {
       // Build the confirm + showProgress payload renderer-side instead
       // of round-tripping through `getDetailSections` to look up the

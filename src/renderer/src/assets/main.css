@@ -3167,6 +3167,13 @@ input[type='checkbox']:checked::after {
   cursor: default;
   opacity: 0.5;
 }
+.context-menu-item.is-danger {
+  color: var(--danger);
+}
+.context-menu-item.is-danger:hover:not(:disabled),
+.context-menu-item.is-danger:focus-visible:not(:disabled) {
+  color: var(--danger-hover);
+}
 .context-menu-separator {
   height: 1px;
   background: color-mix(in oklab, var(--neutral-100) 8%, transparent);
