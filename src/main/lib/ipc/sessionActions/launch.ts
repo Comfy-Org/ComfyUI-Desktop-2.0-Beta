@@ -615,7 +615,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
         return
       }
       logStream.end()
-      const crashed = _runningSessions.has(installationId)
+      const crashed = _runningSessions.has(installationId) && isCrashedExit(code, signal)
       const lastStderr = scrubStderr(lastNLines(currentGetStderr(), 100))
       execTap.flushSummary()
       _removeSession(installationId)
