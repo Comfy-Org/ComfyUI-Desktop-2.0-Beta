@@ -140,9 +140,13 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
   const useSharedPaths = !launchCmd.skipSharedPaths && (inst.useSharedPaths as boolean | undefined) !== false && !!launchCmd.args
   let preLaunchExtras: string[] = []
   let sharedModelsDirs: string[] | undefined
+  // Issue #699 — when the user has a custom primary models path, don't
+  // recreate the deleted default `~/ComfyUI-Shared/models` tree on launch.
+  let modelsDirsToNotRecreate: string[] = []
   if (useSharedPaths) {
     sharedModelsDirs = settings.get('modelsDirs') as string[] | undefined
-    const { config } = syncCustomModelFolders(inst.installPath, sharedModelsDirs)
+    modelsDirsToNotRecreate = settings.getModelDirsToNotRecreate()
+    const { config } = syncCustomModelFolders(inst.installPath, sharedModelsDirs, [], modelsDirsToNotRecreate)
     if (config) {
       launchCmd.args!.push('--extra-model-paths-config', config.yamlPath)
     }
@@ -490,7 +494,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
   // Check if custom nodes created new model folders during startup
   let site1Relaunched = false
   if (useSharedPaths) {
-    const { newFolders } = syncCustomModelFolders(inst.installPath, sharedModelsDirs, preLaunchExtras)
+    const { newFolders } = syncCustomModelFolders(inst.installPath, sharedModelsDirs, preLaunchExtras, modelsDirsToNotRecreate)
     if (newFolders.length > 0) {
       sendOutput(`\n--- Restarting: new model folders detected (${newFolders.join(', ')}) ---\n\n`)
       if (_onModelFolderRelaunch) {
@@ -551,7 +555,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
           sendOutput('\n--- ComfyUI restarting ---\n\n')
         }
         if (useSharedPaths) {
-          const { config } = syncCustomModelFolders(inst.installPath, sharedModelsDirs)
+          const { config } = syncCustomModelFolders(inst.installPath, sharedModelsDirs, [], modelsDirsToNotRecreate)
           if (config) {
             for (const f of config.extraFolders) knownExtras.add(f)
           }
@@ -583,7 +587,7 @@ export async function handleLaunch({ event, installationId, inst: instArg, actio
               const currentExtras = discoverExtraModelFolders(inst.installPath)
               const newFolders = currentExtras.filter((f) => !knownExtras.has(f))
               if (newFolders.length > 0) {
-                const { config } = syncCustomModelFolders(inst.installPath, sharedModelsDirs)
+                const { config } = syncCustomModelFolders(inst.installPath, sharedModelsDirs, [], modelsDirsToNotRecreate)
                 if (config) {
                   for (const f of config.extraFolders) knownExtras.add(f)
                 }

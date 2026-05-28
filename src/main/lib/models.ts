@@ -189,15 +189,28 @@ export function syncCustomModelFolders(
   installPath: string,
   modelsDirs: string[] | null | undefined,
   previousExtras: string[] = [],
+  /**
+   * Issue #699 — shared dirs whose folders must NOT be created on disk when
+   * they don't already exist. The default `ComfyUI-Shared/models` dir is
+   * always kept in `modelsDirs` (and the YAML) as a fallback, but once the
+   * user configures a custom models path we must stop recreating the empty
+   * default tree on every launch so they can delete it. Resolved absolute
+   * paths. An entry here that already exists on disk is still synced.
+   */
+  doNotCreateIfAbsent: string[] = [],
 ): SyncResult {
   if (!modelsDirs || !Array.isArray(modelsDirs) || modelsDirs.length === 0) {
     return { newFolders: [], config: null }
   }
 
+  const skipIfAbsent = new Set(doNotCreateIfAbsent.map((d) => path.resolve(d)))
+
   // Sync ALL model folders (including canonical ones) to shared roots so
   // users can place models in the shared directory for any folder type.
   const allFolders = allInstallModelFolders(installPath)
   for (const dir of modelsDirs) {
+    // Skip recreating a guarded default root that the user has deleted.
+    if (skipIfAbsent.has(path.resolve(dir)) && !fs.existsSync(dir)) continue
     for (const folder of allFolders) {
       const target = path.join(dir, folder)
       try {

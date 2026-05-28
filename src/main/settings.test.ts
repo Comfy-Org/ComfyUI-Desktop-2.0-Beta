@@ -26,7 +26,8 @@ fs.mkdirSync(xdgCacheHome, { recursive: true })
 let settings: {
   set: (key: string, value: unknown) => void
   get: (key: string) => unknown
-  defaults: { onAppClose: 'tray' | 'quit' }
+  getModelDirsToNotRecreate: () => string[]
+  defaults: { onAppClose: 'tray' | 'quit'; inputDir: string; outputDir: string }
 }
 
 const settingsPath = process.platform === 'linux'
@@ -234,5 +235,50 @@ describe('modelsDirs user ordering', () => {
     const dirs = settings.get('modelsDirs') as string[]
     expect(dirs.length).toBe(1)
     expect(path.resolve(dirs[0]!)).toBe(path.join(homePath, 'ComfyUI-Shared', 'models'))
+  })
+})
+
+describe('default shared dir recreation guard (issue #699)', () => {
+  const defaultModelsDir = path.join(homePath, 'ComfyUI-Shared', 'models')
+
+  beforeEach(async () => {
+    // The shared default tree lives under homePath (outside the settings dir
+    // wiped by the top-level beforeEach), so clear it to isolate each case —
+    // mirrors a user who has deleted ~/ComfyUI-Shared.
+    fs.rmSync(path.join(homePath, 'ComfyUI-Shared'), { recursive: true, force: true })
+    vi.resetModules()
+    vi.doMock('electron', () => ({
+      app: {
+        getPath: (name: string) => (name === 'home' ? homePath : userDataPath),
+      },
+    }))
+    settings = await import('./settings')
+  })
+
+  it('creates the default ComfyUI-Shared models tree when no custom path is set', () => {
+    // First read materializes defaults on disk.
+    settings.get('modelsDirs')
+    expect(fs.existsSync(defaultModelsDir)).toBe(true)
+    expect(fs.existsSync(path.join(defaultModelsDir, 'checkpoints'))).toBe(true)
+    expect(settings.getModelDirsToNotRecreate()).toEqual([])
+  })
+
+  it('does not recreate the default models tree when a custom primary path is set', () => {
+    const customModels = path.join(tmpRoot, 'guard-custom-models')
+    fs.mkdirSync(path.dirname(settingsPath), { recursive: true })
+    fs.writeFileSync(
+      settingsPath,
+      JSON.stringify({ modelsDirs: [customModels] }, null, 2),
+      'utf-8'
+    )
+
+    const dirs = settings.get('modelsDirs') as string[]
+    // System default is still appended to the list as a fallback...
+    expect(path.resolve(dirs[0]!)).toBe(path.resolve(customModels))
+    expect(dirs.some((d) => path.resolve(d) === path.resolve(defaultModelsDir))).toBe(true)
+    // ...but it must NOT be materialized on disk so the user can delete it.
+    expect(fs.existsSync(defaultModelsDir)).toBe(false)
+    // And launch-time sync is told to skip recreating it.
+    expect(settings.getModelDirsToNotRecreate()).toEqual([defaultModelsDir])
   })
 })

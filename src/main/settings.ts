@@ -111,6 +111,37 @@ export const defaults: SettingsDefaults = {
 const systemDefault = defaults.modelsDirs[0]!
 const shouldSanitizeCopiedUserDefaults = process.platform === 'win32'
 
+/**
+ * Issue #699 — the default `ComfyUI-Shared` model/input/output folders are
+ * always kept in `modelsDirs` as a fallback, but they should only be
+ * *materialized on disk* when the user is actually relying on them. A user
+ * who points models/input/output at custom directories wants to be able to
+ * delete the empty `~/ComfyUI-Shared` tree without it reappearing on the next
+ * launch. These helpers decide, per shared path, whether the user has opted
+ * into a custom location (so we can skip recreating the default on disk).
+ */
+function isCustomPath(value: string | undefined, defaultPath: string): boolean {
+  if (typeof value !== 'string' || value.trim() === '') return false
+  return path.resolve(value) !== path.resolve(defaultPath)
+}
+
+function hasCustomModelsDir(modelsDirs: unknown): boolean {
+  if (!Array.isArray(modelsDirs)) return false
+  const primary = modelsDirs.find((d): d is string => typeof d === 'string' && d.trim() !== '')
+  return isCustomPath(primary, systemDefault)
+}
+
+/**
+ * Issue #699 — the shared dirs whose contents should NOT be recreated on disk
+ * when they've been deleted, because the user has configured a custom primary
+ * models path. The default stays in `modelsDirs` as a fallback, but callers
+ * (e.g. launch-time `syncCustomModelFolders`) pass these to avoid recreating
+ * the empty `~/ComfyUI-Shared/models` tree on every launch.
+ */
+export function getModelDirsToNotRecreate(): string[] {
+  return hasCustomModelsDir(get('modelsDirs')) ? [systemDefault] : []
+}
+
 function resolveIfNonEmpty(value: unknown): string | null {
   return typeof value === 'string' && value.trim() !== '' ? path.resolve(value) : null
 }
@@ -290,14 +321,27 @@ function load(): Settings {
     result.modelsDirs.push(systemDefault)
     changed = true
   }
+  // Issue #699 — the system default models dir always stays in `modelsDirs`
+  // as a fallback, but it is only *materialized on disk* when the user hasn't
+  // pointed their primary models path at a custom location. A user with custom
+  // paths can then delete the empty default `~/ComfyUI-Shared/models` tree
+  // without it being recreated on every launch. We inspect the *persisted*
+  // user value (not `result`, whose `modelsDirs` has the default appended back).
+  const userModelsCustomized = hasCustomModelsDir(parsed?.['modelsDirs'])
+
   // Create the system default directory and model subdirectories on disk
-  try {
-    fs.mkdirSync(systemDefault, { recursive: true })
-    for (const folder of MODEL_FOLDER_TYPES) {
-      fs.mkdirSync(path.join(systemDefault, folder), { recursive: true })
-    }
-  } catch {}
-  // Create shared input/output directories
+  if (!userModelsCustomized) {
+    try {
+      fs.mkdirSync(systemDefault, { recursive: true })
+      for (const folder of MODEL_FOLDER_TYPES) {
+        fs.mkdirSync(path.join(systemDefault, folder), { recursive: true })
+      }
+    } catch {}
+  }
+  // Create shared input/output directories. `result.inputDir`/`outputDir` are
+  // single values that already resolve to the user's custom path when set, so
+  // the default `ComfyUI-Shared` input/output is never created once the user
+  // customizes those — no extra guard needed here.
   try {
     for (const key of ["inputDir", "outputDir"] as const) {
       const dir = (result[key] as string | undefined) || defaults[key]
