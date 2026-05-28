@@ -64,6 +64,11 @@ const state = computed<LifecycleState>(() => {
 
 const errorInfo = computed(() => sessionStore.errorInstances.get(props.installationId) ?? null)
 
+const crashedLogs = computed<string | null>(() => {
+  if (state.value !== 'crashed') return null
+  return errorInfo.value?.lastStderr ?? null
+})
+
 const crashedMessage = computed<string | null>(() => {
   if (state.value !== 'crashed') return null
   // Pick the most specific phrasing for whatever main captured. Signal +
@@ -73,17 +78,22 @@ const crashedMessage = computed<string | null>(() => {
   // and only have "something exited".
   const code = errorInfo.value?.exitCode
   const signal = errorInfo.value?.signal
+  let base: string
   if (signal && code != null) {
-    return t('comfyLifecycle.crashedDescWithCodeAndSignal', { code, signal })
+    base = t('comfyLifecycle.crashedDescWithCodeAndSignal', { code, signal })
+  } else if (signal) {
+    base = t('comfyLifecycle.crashedDescWithSignal', { signal })
+  } else if (code != null) {
+    base = t('comfyLifecycle.crashedDescWithCode', { code })
+  } else {
+    base = t('comfyLifecycle.crashedDesc')
   }
-  if (signal) return t('comfyLifecycle.crashedDescWithSignal', { signal })
-  if (code != null) return t('comfyLifecycle.crashedDescWithCode', { code })
-  return t('comfyLifecycle.crashedDesc')
-})
-
-const crashedLogs = computed<string | null>(() => {
-  if (state.value !== 'crashed') return null
-  return errorInfo.value?.lastStderr ?? null
+  // Append the logs hint only when we actually have stderr to show — the
+  // hint would otherwise point at a logs accordion that isn't rendered.
+  if (crashedLogs.value) {
+    return `${base} ${t('comfyLifecycle.crashedDescLogsHint')}`
+  }
+  return base
 })
 
 /**

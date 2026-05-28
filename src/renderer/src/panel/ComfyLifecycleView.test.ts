@@ -31,6 +31,7 @@ const messages = {
         'The ComfyUI process was terminated by {signal}. You can restart it below.',
       crashedDescWithCodeAndSignal:
         'The ComfyUI process was terminated by {signal} (exit code {code}). You can restart it below.',
+      crashedDescLogsHint: 'View the logs below for details.',
       crashedDetailsToggle: 'Show error log',
       start: 'Start ComfyUI',
       restart: 'Restart ComfyUI',
@@ -226,6 +227,22 @@ describe('ComfyLifecycleView', () => {
     await flushPromises()
     expect(wrapper.find('.brand-progress__logs').exists()).toBe(false)
     expect(wrapper.find('.brand-progress__logs-toggle').exists()).toBe(false)
+    // The "view the logs" hint would otherwise point at an accordion
+    // that isn't even mounted — keep the message clean.
+    expect(wrapper.text()).not.toContain('View the logs')
+  })
+
+  it('appends the logs hint to the crashed message when stderr is captured', async () => {
+    const wrapper = mountView()
+    const sessionStore = useSessionStore()
+    sessionStore.errorInstances.set('inst-1', {
+      installationName: 'My Local Install',
+      exitCode: 1,
+      lastStderr: "ImportError: No module named 'torch'",
+    })
+    await flushPromises()
+    expect(wrapper.text()).toContain('exit code 1')
+    expect(wrapper.text()).toContain('View the logs below for details.')
   })
 
   it('hydrates the crashed state from getLastCrashError on mount when no live event has fired', async () => {
