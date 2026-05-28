@@ -307,9 +307,19 @@ const ALL_TABS: TabDef[] = [
     icon: Info
   }
 ]
-const tabs = computed<TabDef[]>(() =>
-  ALL_TABS.filter((tab) => sectionsForTab(tab.sectionTab).value.length > 0)
-)
+const tabs = computed<TabDef[]>(() => {
+  // Cloud (and other url-backed remotes) run no local process, so the
+  // `config` tab carries no real startup args — just output/storage +
+  // browser-cache settings. Relabel it "Storage" there so the tab name
+  // matches its contents. Cloud emits no separate `storage` section, so
+  // this can't collide with a real Storage tab.
+  const isCloud = installation.value?.sourceCategory === 'cloud'
+  return ALL_TABS.filter((tab) => sectionsForTab(tab.sectionTab).value.length > 0).map((tab) =>
+    isCloud && tab.key === 'config'
+      ? { ...tab, label: t('comfyUISettings.tabStorage', 'Storage'), icon: HardDrive }
+      : tab
+  )
+})
 
 const showUpdateBadge = computed(() => {
   const inst = installation.value

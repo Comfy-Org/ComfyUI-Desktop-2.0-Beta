@@ -1000,6 +1000,38 @@ defineExpose({ startOperation, showOperation })
             class="brand-progress__error-copy"
           />
         </div>
+
+        <!-- Error actions — centered in the hero stack, directly below the
+             error message, mirroring the success-terminal action row. Keeps
+             the primary Reboot CTA with the failure context instead of
+             stranding it bottom-left in the footer. -->
+        <div
+          v-if="currentOp.finished && !!currentOp.error && !currentOp.cancelRequested && !isPortConflictOpen"
+          class="brand-progress__error-actions"
+        >
+          <button
+            type="button"
+            :class="
+              currentOp.destroysInstance
+                ? 'brand-primary brand-progress__footer-btn'
+                : 'brand-ghost brand-progress__footer-btn'
+            "
+            @click="returnToDashboard('crashed')"
+          >
+            <ArrowLeft :size="14" />
+            {{ $t('common.back') }}
+          </button>
+          <button
+            v-if="!currentOp.destroysInstance"
+            type="button"
+            class="brand-primary brand-progress__footer-btn"
+            :data-testid="TID.progressReboot"
+            @click="handleReboot"
+          >
+            <RefreshCcw :size="14" />
+            {{ $t('progress.reboot') }}
+          </button>
+        </div>
       </div>
     </div>
     <!-- Footer band — sibling to the centered hero stack so the action
@@ -1094,32 +1126,6 @@ defineExpose({ startOperation, showOperation })
                 @click="handleKillProcess(currentOp.result.portConflict.port)"
               >
                 {{ $t('errors.portConflictKill') }}
-              </button>
-            </template>
-            <template
-              v-else-if="currentOp.finished && !!currentOp.error && !currentOp.cancelRequested"
-            >
-              <button
-                v-if="!currentOp.destroysInstance"
-                type="button"
-                class="brand-primary brand-progress__footer-btn"
-                :data-testid="TID.progressReboot"
-                @click="handleReboot"
-              >
-                <RefreshCcw :size="14" />
-                {{ $t('progress.reboot') }}
-              </button>
-              <button
-                type="button"
-                :class="
-                  currentOp.destroysInstance
-                    ? 'brand-primary brand-progress__footer-btn'
-                    : 'brand-ghost brand-progress__footer-btn'
-                "
-                @click="returnToDashboard('crashed')"
-              >
-                <ArrowLeft :size="14" />
-                {{ $t('progress.returnToDashboard') }}
               </button>
             </template>
           </div>
@@ -1401,6 +1407,23 @@ defineExpose({ startOperation, showOperation })
   justify-content: center;
   gap: 12px;
   flex-wrap: wrap;
+}
+
+/* Error CTAs — centered in the hero stack under the error message.
+   Back (ghost) sits left, Reboot (primary) right; both flex to equal
+   width within a bounded row so the pair reads as a balanced unit
+   rather than two differently-sized chips. */
+.brand-progress__error-actions {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 12px;
+  width: 100%;
+  max-width: 420px;
+}
+.brand-progress__error-actions > .brand-progress__footer-btn {
+  flex: 1 1 0;
+  justify-content: center;
 }
 
 /* Error detail line beneath the banner. Selectable so users can copy

@@ -504,8 +504,16 @@ function fieldOwnsLabel(field: DetailField): boolean {
   gap: 10px;
 }
 
-.settings-v2-section .settings-v2-field + .settings-v2-field {
-  margin-top: 4px;
+/* Dependent (nested) fields are revealed by the toggle directly above
+ * them — e.g. "Use shared output directory" only appears once
+ * "Auto-download outputs" is on, and the output-path picker only once
+ * that's off. Pull them up tight to their parent (cancelling most of the
+ * section's 16px row gap) and indent behind a hairline rail so the chain
+ * reads as one dependent group instead of equally-weighted rows. */
+.settings-v2-field.is-nested {
+  margin-top: -8px;
+  padding-left: 14px;
+  border-left: 1px solid color-mix(in srgb, var(--chooser-surface-border) 70%, transparent);
 }
 
 .settings-v2-field-label {
