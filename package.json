@@ -3,8 +3,8 @@
   "version": "0.6.9",
   "description": "ComfyUI Desktop",
   "author": {
-    "name": "Jedrzej Kosinski",
-    "email": "kosinkadink@users.noreply.github.com"
+    "name": "Comfy Org",
+    "url": "https://www.comfy.org"
   },
   "repository": "github:Comfy-Org/ComfyUI-Desktop-2.0-Beta",
   "license": "MIT",
