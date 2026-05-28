@@ -409,8 +409,7 @@ onUnmounted(() => {
         class="title-install-pill is-interactive"
         :class="{
           'is-open': isInstancePickerOpen,
-          'is-install-less': isInstallLess,
-          'has-update': showInstallUpdatePill
+          'is-install-less': isInstallLess
         }"
         role="button"
         tabindex="0"
@@ -673,16 +672,17 @@ onUnmounted(() => {
   -webkit-app-region: no-drag;
   display: inline-flex;
   align-items: center;
-  justify-content: space-between;
-  /* Fluid width: floor at 220px (enough for brand mark + install-type
-     icon + caret + ~14 chars of name before ellipsis), preferred
-     ~22% of title-bar inline size, ceiling at 360px. Tuned to coexist
-     with the adjacent install-update pill in the center cluster +
-     leave the right cluster room for the desktop-update pill and
-     trailing buttons without overlap. */
-  width: clamp(220px, 22cqi, 360px);
+  justify-content: center;
+  /* Even spacing between the leading icon, name, update chip, and caret. */
+  gap: 8px;
+  /* Hug the content rather than reserving a fixed wide pill — a fixed
+     width spread the icon / name / caret apart with big empty gaps. The
+     pill now grows with its content up to a cap, past which the name
+     ellipsizes, so short names read tight and clean. */
+  width: auto;
+  max-width: clamp(180px, 30cqi, 420px);
   height: 28px;
-  padding: 5px 8px;
+  padding: 5px 10px;
   border-radius: 999px;
   background: var(--chooser-surface-bg);
   color: var(--neutral-100);
@@ -713,11 +713,6 @@ onUnmounted(() => {
    * this lift automatically — one source of truth for the open tint. */
   border-color: var(--neutral-50);
   color: var(--neutral-50);
-}
-/* Update available: give the name a little more room so the inline
- * "Update" chip doesn't crowd it. Width still capped (name ellipsizes). */
-.title-install-pill.has-update {
-  width: clamp(260px, 26cqi, 400px);
 }
 
 /* Inline instance-update CTA, sitting just after the install name inside
@@ -767,10 +762,14 @@ onUnmounted(() => {
 .title-install-slot {
   display: inline-flex;
   align-items: center;
-  flex: 0 0 18px;
+  /* Hug the icon / caret instead of reserving a fixed 18px track, so the
+     pill doesn't carry dead space when it sizes to its content. */
+  flex: 0 0 auto;
 }
 .title-install-slot--center {
-  flex: 1 1 auto;
+  /* Shrink (for ellipsis) but don't grow — the pill hugs content now, so
+     a growing center slot would re-introduce the old spread-out gaps. */
+  flex: 0 1 auto;
   justify-content: center;
   gap: 6px;
   min-width: 0;
