@@ -127,9 +127,15 @@ export interface DetailField {
     | 'env-vars'
   options?: DetailFieldOption[]
   refreshSection?: boolean
-  browseOnly?: boolean
+  /** Action id to fire automatically when this field's value changes
+   *  (e.g. switching update channel triggers `check-update`). */
   onChangeAction?: string
+  browseOnly?: boolean
   tooltip?: string
+  /** Marks fields that only take effect on next process start.
+   *  Renderer shows a per-field tag + promotes the footer Restart
+   *  button when one of these is edited while the install is running. */
+  requiresRestart?: boolean
   // text / number support — surfaced from SettingsField when DetailField
   // is built from a global SettingsSection (Global Settings panel).
   placeholder?: string
@@ -165,6 +171,9 @@ export interface ConfirmDef {
   confirmLabel?: string
   options?: ConfirmOption[]
   messageDetails?: ModalDetailGroup[]
+  /** Optional snapshot diff rendered as a collapsible SnapshotDiffView in the
+   *  confirm modal (restore flow). Reuses the Snapshots-tab diff component. */
+  restoreDiff?: SnapshotDiffResult | null
 }
 
 export interface ConfirmOption {
@@ -252,6 +261,14 @@ export interface ShowProgressOpts {
    *  model libraries…") which read as wrong copy. Falls back to
    *  `'generic'` when omitted so legacy callers keep working. */
   opKind?: 'launch' | 'install' | 'update' | 'destructive' | 'snapshot' | 'generic'
+  /** Tags this op as one leg of an install→launch chain so ProgressModal
+   *  can render a unified 0→100% bar across both ops instead of letting
+   *  the install fill 0→100 then stalling the launch at 100. `'install'`
+   *  maps the bar to 0→70%; `'launch'` maps to 70→100%. Stamped by
+   *  `useFirstUseChain` when capturing the install op and again when its
+   *  auto-launch watcher fires the chained launch. Standalone ops leave
+   *  this unset and keep their existing 0→100 behaviour. */
+  chainSpan?: 'install' | 'launch'
   /** Set on ops that remove the install from the registry as a
    *  successful side-effect (today: the install-level delete action).
    *  Drives three carve-outs on top of the standard takeover flow:
@@ -269,6 +286,17 @@ export interface ShowProgressOpts {
    *  ignore these and use `apiCall` directly. */
   actionId?: string
   actionData?: Record<string, unknown>
+  /** When set, ProgressModal skips its 700ms auto-close on success and
+   *  renders a terminal choice screen with the supplied actions. Picker-
+   *  driven mutating-non-launch ops opt in via `resolveProgressRouting`
+   *  to surface a `[Go to Dashboard | Open Instance]` follow-up. Generic
+   *  shape — new flows mint new presets without touching ProgressModal.
+   *  Imported lazily as a structural type so this declaration stays in
+   *  the shared types layer. */
+  successTerminal?: {
+    title?: string
+    actions: Array<{ id: string; label: string; variant: 'primary' | 'ghost' }>
+  }
 }
 
 // --- Action results ---
@@ -913,17 +941,14 @@ export interface ElectronApi {
    *  centre pill opens. Omitting `installationId` falls back to the
    *  host's active install — matches the pill-click behaviour.
    *
-   *  `mode: 'expanded'` opens the picker directly in the full
-   *  per-install settings UI (mounted in the right pane), with
-   *  `initialTab` seeding the active tab and `autoAction` firing an
-   *  action on mount. Used by the chooser kebab's specialised entries
+   *  `initialTab` seeds the active tab and `autoAction` fires an action
+   *  on mount. Used by the chooser kebab's specialised entries
    *  (Update / Migrate / Restore-Snapshot / Delete) and by the
    *  per-install deep links (`comfy://install-update/<id>`,
    *  `comfy://open-settings?tab=comfy`). */
   openInstancePicker(opts?: {
     installationId?: string | null
-    mode?: 'compact' | 'expanded'
-    initialTab?: 'config' | 'status' | 'update' | 'snapshots'
+    initialTab?: 'config' | 'status' | 'update' | 'snapshots' | 'storage'
     autoAction?: string | null
   }): void
   /** Push the first-use takeover's current step to main so it can
@@ -950,9 +975,11 @@ export interface ElectronApi {
    *  `requestId` it must echo back via `respondCloseRequest` so main
    *  can pair the response with the request that fired it. */
   onCloseRequest(callback: (data: { requestId: string }) => void): Unsubscribe
-  /** Reply to a `comfy-window:request-close` consult — `cleared: true`
-   *  lets main proceed with destruction, `cleared: false` aborts. */
-  respondCloseRequest(payload: { requestId: string; cleared: boolean }): void
+  /** Reply to a `comfy-window:request-close` consult. `cleared: true`
+   *  lets main proceed, `cleared: false` aborts (overlay cancel-prompt
+   *  dismissed). `defer: true` means no overlay was in flight, so main
+   *  owns the close-window confirm itself. */
+  respondCloseRequest(payload: { requestId: string; cleared?: boolean; defer?: boolean }): void
   /** Send immediately on receiving a `comfy-window:request-close` so
    *  main knows the renderer picked it up and is processing. Main's
    *  hung-renderer safety timeout only fires until the ack lands; once
@@ -1145,6 +1172,15 @@ export interface ElectronApi {
     callback: (updates: { id: string; version: string }[]) => void
   ): Unsubscribe
   /**
+   * Fires when `release-cache.enrichCommitsAhead` actually writes a new
+   * `commitsAhead` value (not on no-op short-circuits). Open settings
+   * panels can refresh their channel-card section so the "Latest from
+   * GitHub" label upgrades from `tag (sha)` to `tag + N commits (sha)`
+   * in place, without holding the section IPC hostage during the
+   * background `git fetch`/`rev-list` calls.
+   */
+  onReleaseCacheEnriched(callback: (data: { repo: string }) => void): Unsubscribe
+  /**
    * Fires when an auto-off "Desktop Update Available" download completes
    * (i.e. user explicitly opted in via the pill confirm-modal). The
    * panel renderer pops the "Restart now?" follow-up modal automatically
@@ -1303,9 +1339,19 @@ export interface ElectronApi {
       triggersInstanceStart?: boolean
       opKind?: 'launch' | 'install' | 'update' | 'destructive' | 'snapshot' | 'generic'
       isRestart?: boolean
+      /** Picker-only: when `true`, ProgressModal should render a
+       *  terminal choice screen on success rather than auto-closing.
+       *  The panel-side handler maps this flag to a
+       *  `successTerminal` preset before handing off to
+       *  `progressStore.startOperation`. */
+      successChoice?: boolean
     }) => void
   ): Unsubscribe
 }
+
+/** Action IDs that auto-relaunch ComfyUI after completing (stop→op→launch).
+ *  Shared between main and renderer so both sides agree on the relaunch contract. */
+export const IN_PLACE_RELAUNCH = new Set(['update-comfyui', 'snapshot-restore'])
 
 /** Action IDs that require the installation to be stopped before running.
  *  Shared between main and renderer processes. */

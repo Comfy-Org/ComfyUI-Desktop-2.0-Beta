@@ -39,13 +39,15 @@
     "menuMigrate": "迁移到独立版…",
     "menuRestoreSnapshot": "恢复快照…",
     "menuRevealInFolder": "打开文件夹",
-    "menuDelete": "删除…"
+    "menuDelete": "删除…",
+    "stoppedActionGatedReason": "请先停止正在运行的实例。"
   },
 
   "titleBar": {
     "appUpdateAvailable": "更新 {version}",
     "appUpdateReady": "重启以更新",
     "installUpdateAvailable": "有可用更新",
+    "installUpdateShort": "更新",
     "settings": "设置",
     "settingsTooltip": "设置"
   },
@@ -196,8 +198,10 @@
     "upToDate": "已是最新",
     "noInfo": "选择此通道并检查更新以查看版本信息。",
     "current": "当前",
-    "switchTo": "切换到 {channel}：",
-    "switchChannelPrefix": "这将把更新通道从 {from} 切换到 {to}。\n\n"
+    "switchTo": "切换到 {channel}",
+    "switchChannelPrefix": "正在将更新通道从 {from} 切换到 {to}。\n\n",
+    "movingTo": "正在切换到 {channel}。",
+    "switchingToTitle": "正在切换到 {channel}"
   },
 
   "track": {
@@ -273,7 +277,13 @@
     "about": "关于",
     "version": "版本",
     "platform": "平台",
-    "language": "语言"
+    "language": "语言",
+    "preferences": "偏好设置",
+    "privacy": "隐私",
+    "community": "社区",
+    "storageTab": "存储",
+    "sharedDirectories": "共享目录",
+    "updatesTab": "更新"
   },
 
   "update": {
@@ -291,7 +301,19 @@
     "availableTitle": "桌面端更新可用",
     "availableMessage": "有可用的桌面端更新（{version}）。是否立即下载？下载完成后将提示您重启。",
     "download": "下载",
-    "errorTitle": "桌面端更新错误"
+    "later": "稍后",
+    "errorTitle": "桌面端更新错误",
+    "sectionTitle": "桌面端更新",
+    "panelIdleTitle": "ComfyUI Desktop 已是最新版本",
+    "panelAvailableTitle": "更新 {version} 可用",
+    "panelReadyTitle": "更新 {version} 可安装",
+    "panelDownloadingTitle": "正在下载更新 {version}…",
+    "downloading": "下载中…",
+    "readyBadge": "准备重启",
+    "installedLabel": "已安装 {version}",
+    "lastCheckedLabel": "最后检查于 {time}",
+    "latestLabel": "最新 {version}",
+    "systemManagedNote": "此安装的更新通过您的系统包管理器提供。"
   },
 
   "modal": {
@@ -324,12 +346,19 @@
     "telemetryHint": "遥测数据帮助我们改进启动器。我们绝不收集工作流内容、提示词、生成的媒体或个人信息。",
     "acceptTos": "接受并继续",
     "consentTosTitle": "接受条款",
-    "consentTosHintPrefix": "继续即表示您同意",
+    "consentTosHintPrefix": "我同意",
     "consentTosHintSep": "和",
     "consentTosHintSuffix": "。",
     "consentTelemetryTitle": "帮助改进 Comfy",
-    "consentTelemetryHint": "发送使用数据，帮助我们修复缺陷并确定功能优先级。",
+    "consentTelemetryHint": "分享匿名使用数据，帮助改进 Comfy。",
     "consentGetStarted": "开始使用",
+    "startContinue": "继续",
+    "startContinueBusy": "正在准备安装…",
+    "expressInstallLabel": "快捷安装",
+    "expressInstallHint": "使用推荐设置——跳过可选的安装步骤。",
+    "expressInstallLine": "快捷安装——使用推荐设置",
+    "expressGpuHintPrefix": "已检测到：",
+    "expressGpuHintSuffix": "- 如果不是你的硬件，请取消勾选快捷安装",
     "termsModalTitle": "ComfyUI Desktop 条款",
     "eulaModalTitle": "最终用户许可协议",
     "tosModalTitle": "服务条款",
@@ -497,11 +526,12 @@
     "channelLatest": "GitHub 最新版",
     "channelLatestDesc": "master 分支的最新提交",
     "updateAvailableTag": "有可用更新：{version}",
+    "upToDateMessage": "没有可用更新，您已是最新版本。",
     "updateNow": "立即更新",
     "updateConfirmTitle": "更新 ComfyUI",
-    "updateConfirmMessage": "从 {installed} 更新到 {latest}？\n\n本地更改将被暂存，并创建备份分支。",
-    "updateConfirmMessageLatest": "从 {installed} 更新到 master 最新版（{latest}）？\n\n这将拉取 master 分支的最新提交。本地更改将被暂存，并创建备份分支。",
-    "updateConfirmMessageDowngrade": "从 {installed} 回退到稳定版 {latest}？\n\n当前安装版本超前于最新稳定版。此操作将检出稳定标签，移除更新的提交。本地更改将被暂存，并创建备份分支。",
+    "updateConfirmMessage": "从 {installed} 更新到 {latest}？",
+    "updateConfirmMessageLatest": "将 {installed} 更新到 master 上的最新提交（{latest}）？",
+    "updateConfirmMessageDowngrade": "从 {installed} 回滚到稳定版 {latest}？较新的提交将被移除。",
     "updatingTitle": "正在更新到 {version}",
     "updatePrepare": "准备",
     "updateRun": "更新",
@@ -514,7 +544,7 @@
     "updateNoGit": "ComfyUI/ 中未找到 .git 目录。基于提交的更新需要 git 仓库。",
     "copyAndUpdate": "复制并更新",
     "copyAndUpdateTitle": "复制并更新",
-    "copyAndUpdateMessage": "创建此安装的副本，并将副本从 {installed} 更新到 {latest}。\n\n原始安装不会被修改。",
+    "copyAndUpdateMessage": "复制此安装，然后将副本从 {installed} 更新到 {latest}。原始安装保持不变。",
     "copyAndUpdatePlaceholder": "输入副本名称",
     "copyAndUpdateConfirm": "复制并更新",
     "releaseNotesLabel": "发行说明",
@@ -546,8 +576,8 @@
     "updateAvailableTag": "有可用更新：{version}",
     "updateNow": "立即更新",
     "updateConfirmTitle": "更新 ComfyUI",
-    "updateConfirmMessage": "从 {installed} 更新到 {latest}？\n\n本地更改将被暂存，并创建备份分支。",
-    "updateConfirmMessageLatest": "从 {installed} 更新到 master 最新版（{latest}）？\n\n这将拉取 master 分支的最新提交。本地更改将被暂存，并创建备份分支。",
+    "updateConfirmMessage": "从 {installed} 更新到 {latest}？",
+    "updateConfirmMessageLatest": "将 {installed} 更新到 master 上的最新提交（{latest}）？",
     "releaseNotesLabel": "发行说明",
     "updatingTitle": "正在更新到 {version}",
     "updatePrepare": "准备",
@@ -574,9 +604,9 @@
     "waitingTime": "等待 ComfyUI 就绪…（{secs}秒）",
     "portBusyUsing": "端口 {old} 被占用——改用端口 {new}…",
     "instanceRunningTitle": "实例正在运行",
-    "instanceRunningMessage": "\"{name}\" 正在运行。同时运行多个本地安装可能会消耗大量系统资源。",
-    "instanceRunningProceed": "同时启动",
-    "instanceRunningReplace": "关闭运行中的实例并启动",
+    "instanceRunningMessage": "关闭 \"{name}\" 并改为启动此实例，或同时运行两者。",
+    "instanceRunningProceed": "同时运行",
+    "instanceRunningReplace": "关闭并启动此实例",
     "modelFolderRelaunchTitle": "正在重启 ComfyUI",
     "modelFolderRelaunchDesc": "检测到自定义节点创建了新的模型文件夹。正在重启以便 ComfyUI 立即使用这些文件夹。"
   },
@@ -609,6 +639,6 @@
 
   "tooltips": {
     "updateNow": "就地更新此安装。",
-    "copyAndUpdate": "创建此安装的副本并更新副本。原始安装不会被修改。"
+    "copyAndUpdate": "复制此安装并更新副本。原始安装保持不变。"
   }
 }

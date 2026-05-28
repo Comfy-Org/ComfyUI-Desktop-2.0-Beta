@@ -1,6 +1,7 @@
 import { WebContentsView } from 'electron'
 import type { BrowserWindow } from 'electron'
 import path from 'path'
+import { _registerExtraBroadcastTarget } from '../lib/ipc/broadcast'
 
 /**
  * Lifecycle primitive shared by every "transparent popup attached to
@@ -115,6 +116,12 @@ export class EmbeddedPopupView {
     parent.contentView.addChildView(popup)
     this.popup = popup
     this.popupWebContentsId = popup.webContents.id
+
+    // Subscribe the popup's webContents to main's broadcast fan-out.
+    // `BrowserWindow.getAllWindows()` only reaches top-level windows, but
+    // popups are `WebContentsView`s embedded in the host BrowserWindow,
+    // so we have to opt in. Auto-cleans on `webContents.destroyed`.
+    _registerExtraBroadcastTarget(popup.webContents)
 
     const isDev = !!process.env['ELECTRON_RENDERER_URL']
     const loadPromise = isDev

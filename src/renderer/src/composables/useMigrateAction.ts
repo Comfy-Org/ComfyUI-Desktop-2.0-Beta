@@ -50,14 +50,19 @@ export function registerMigrateTakeover(surface: MigrateTakeoverSurface | null):
  * Composable that encapsulates the full migration confirmation flow:
  * action guard → preview → confirm with variant/device selection → return data.
  *
- * Used by both MigrationBanner (Dashboard) and DetailModal (Installs → Manage)
- * to ensure a single code path for all migration entry points.
+ * Used by MigrationBanner (Dashboard), DetailModal (Installs → Manage),
+ * useComfyUISettings (Settings drawer), and useFirstUseChain (first-use
+ * takeover) to ensure a single code path for all migration entry points.
+ * The render surface (`modal` vs the brand `takeover`) is fixed when the
+ * composable is set up — passing it per-call risked drift across the
+ * three modal callsites if the takeover variant ever grew extra fields.
  */
-export function useMigrateAction() {
+export function useMigrateAction(opts?: { surface?: 'modal' | 'takeover' }) {
   const { t } = useI18n()
   const modal = useModal()
   const actionGuard = useActionGuard()
   const sessionStore = useSessionStore()
+  const surface: 'modal' | 'takeover' = opts?.surface ?? 'modal'
 
   /**
    * Run the migration confirmation flow for an installation.
@@ -66,14 +71,13 @@ export function useMigrateAction() {
   async function confirmMigration(
     installation: Installation,
     confirm?: MigrateConfirmOptions,
-    opts?: { surface?: 'modal' | 'takeover' },
   ): Promise<MigrateActionResult | null> {
     // Pre-flight busy check.
     if (!await actionGuard.checkBeforeAction(installation.id, t('migrate.migrateToStandalone'))) {
       return null
     }
 
-    const useTakeover = opts?.surface === 'takeover' && registeredTakeover !== null
+    const useTakeover = surface === 'takeover' && registeredTakeover !== null
     const takeover = useTakeover ? registeredTakeover! : null
     const wasRunning = sessionStore.isRunning(installation.id)
 
@@ -95,7 +99,7 @@ export function useMigrateAction() {
     const dialogTitle = confirm?.title || t('migrate.migrateToStandaloneConfirmTitle')
     const dialogConfirmLabel = confirm?.confirmLabel || t('migrate.migrateToStandaloneConfirm')
     const dialogMessage = wasRunning
-      ? augmentMessageWithStopWarning(confirm?.message, t('errors.willStopRunning'))
+      ? augmentMessageWithStopWarning(confirm?.message, t('errors.willStopRunning', { name: installation.name || 'ComfyUI' }))
       : confirm?.message || ''
 
     // Show the surface (Modal OR brand takeover) with a loading state.
@@ -144,7 +148,7 @@ export function useMigrateAction() {
 
     const detailsPayload = wasRunning
       ? [
-        { label: t('migrate.migrationWill'), items: [t('errors.willStopRunning'), ...migrateItems] },
+        { label: t('migrate.migrationWill'), items: [t('errors.willStopRunning', { name: installation.name || 'ComfyUI' }), ...migrateItems] },
       ]
       : [{ label: t('migrate.migrationWill'), items: migrateItems }]
     const checkboxesPayload = isDesktop

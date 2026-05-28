@@ -86,12 +86,10 @@ export function buildElectronApi(): ElectronApi {
     openInstancePicker: (opts) =>
       ipcRenderer.send('comfy-window:open-instance-picker-for-install', {
         installationId: opts?.installationId ?? null,
-        mode: opts?.mode ?? 'compact',
         initialTab: opts?.initialTab ?? null,
         autoAction: opts?.autoAction ?? null
       }),
-    setFirstUseMode: (mode) =>
-      ipcRenderer.send('comfy-window:set-first-use-mode', { mode }),
+    setFirstUseMode: (mode) => ipcRenderer.send('comfy-window:set-first-use-mode', { mode }),
     onFirstUseSkip: (callback) => {
       const handler = (): void => callback()
       ipcRenderer.on('comfy-panel:first-use-skip', handler)
@@ -286,6 +284,12 @@ export function buildElectronApi(): ElectronApi {
       const handler = () => callback()
       ipcRenderer.on('installations-changed', handler)
       return () => ipcRenderer.removeListener('installations-changed', handler)
+    },
+    onReleaseCacheEnriched: (callback) => {
+      const handler = (_event: IpcRendererEvent, data: unknown) =>
+        callback(data as { repo: string })
+      ipcRenderer.on('release-cache-enriched', handler)
+      return () => ipcRenderer.removeListener('release-cache-enriched', handler)
     },
     onInstallationsVersionsUpdated: (callback) => {
       const handler = (_event: IpcRendererEvent, data: unknown) => {

@@ -8,7 +8,7 @@ import type { ComfyVersion } from '../../lib/version'
 import { truncateNotes } from '../../lib/comfyui-releases'
 import { deleteAction, untrackAction, launchAction, openFolderAction } from '../../lib/actions'
 import { t } from '../../lib/i18n'
-import { buildLaunchSettingsFields } from '../common/launchSettingsFields'
+import { buildLaunchSettingsFields, buildSharedPathsField } from '../common/launchSettingsFields'
 import { getVariantLabel, DEFAULT_LAUNCH_ARGS } from './envPaths'
 import type { InstallationRecord } from '../../installations'
 import type { StatusTag } from '../../types/sources'
@@ -29,13 +29,29 @@ export function getChannelLabel(channel: string): string {
   return map[channel] || channel
 }
 
+/**
+ * The channel to surface for an install. `installation.updateChannel` is a
+ * *declared* preference, written only on in-app update / channel-switch /
+ * snapshot-restore — it can drift from the real checkout (e.g. a user runs
+ * `git pull` on master outside the app, leaving a `stable` record sitting
+ * many commits past its base tag). When the working tree is ahead of its
+ * base stable tag the de-facto channel is `latest`, so prefer that for
+ * display and picker logic. This never mutates the stored record; the next
+ * explicit in-app update reconciles it.
+ */
+export function getEffectiveChannel(installation: InstallationRecord): string {
+  const stored = (installation.updateChannel as string | undefined) || 'stable'
+  if (stored !== 'stable') return stored
+  const cv = installation.comfyVersion as ComfyVersion | undefined
+  return typeof cv?.commitsAhead === 'number' && cv.commitsAhead > 0 ? 'latest' : stored
+}
+
 export function getListPreview(installation: InstallationRecord): string | null {
-  const channel = (installation.updateChannel as string | undefined) || 'stable'
-  return getChannelLabel(channel)
+  return getChannelLabel(getEffectiveChannel(installation))
 }
 
 export function getStatusTag(installation: InstallationRecord): StatusTag | undefined {
-  const channel = (installation.updateChannel as string | undefined) || 'stable'
+  const channel = getEffectiveChannel(installation)
   const info = releaseCache.getEffectiveInfo(COMFYUI_REPO, channel, installation)
   if (info && releaseCache.isUpdateAvailable(installation, channel, info)) {
     const version = info.releaseName || info.latestTag || ''
@@ -93,7 +109,7 @@ export function getDetailSections(installation: InstallationRecord): Record<stri
 
   // Updates section
   const hasGit = installed && installation.installPath && fs.existsSync(path.join(installation.installPath, 'ComfyUI', '.git'))
-  const channel = (installation.updateChannel as string | undefined) || 'stable'
+  const channel = getEffectiveChannel(installation)
 
   // Build per-channel preview info and actions for cards
   const channelDefs = getChannelDefs()
@@ -121,18 +137,34 @@ export function getDetailSections(installation: InstallationRecord): Record<stri
         : ''
       const boldInstalled = `**${installedDisplay}**`
       const boldLatest = `**${latestDisplay}**`
-      const confirmMessage = t(msgKey, {
-        installed: boldInstalled,
-        latest: boldLatest,
-      })
+      // A channel switch reads as "Moving to <channel>" rather than the
+      // upgrade/downgrade version diff — when you change channels the
+      // up/down direction is incidental and frames it confusingly (e.g.
+      // "Roll back…" for a stable switch). Same-channel updates keep the
+      // version-diff / rollback copy.
+      const confirmMessage = isSwitching
+        ? t('channelCards.movingTo', { channel: `**${card.label}**` })
+        : t(msgKey, { installed: boldInstalled, latest: boldLatest })
       actions.push({
         id: 'update-comfyui', label: t('standalone.updateNow'), style: 'primary', enabled: installed,
         tooltip: t('tooltips.updateNow'),
-        showProgress: true, progressTitle: t('standalone.updatingTitle', { version: latestDisplay }),
-        data: isSwitching ? { channel: card.value } : undefined,
+        showProgress: true,
+        progressTitle: isSwitching
+          ? t('channelCards.switchingToTitle', { channel: card.label })
+          : isDowngrade
+            ? t('standalone.downgradingTitle', { version: latestDisplay })
+            : t('standalone.updatingTitle', { version: latestDisplay }),
+        // Always carry the explicit target channel. The stored
+        // `updateChannel` can be stale (see getEffectiveChannel), so relying
+        // on the action handler's fallback to it would pass `--stable` for a
+        // checkout that is really on latest, silently downgrading it.
+        data: {
+          channel: card.value,
+          isDowngrade,
+        },
         confirm: {
           title: t('standalone.updateConfirmTitle'),
-          message: switchPrefix + confirmMessage,
+          message: confirmMessage,
           messageDetails: notesDetails,
         },
       })
@@ -141,7 +173,7 @@ export function getDetailSections(installation: InstallationRecord): Record<stri
         tooltip: t('tooltips.copyAndUpdate'),
         showProgress: true, progressTitle: t('standalone.copyUpdatingTitle', { version: latestDisplay }),
         cancellable: true,
-        data: isSwitching ? { channel: card.value } : undefined,
+        data: { channel: card.value },
         prompt: {
           title: t('standalone.copyAndUpdateTitle'),
           message: (isSwitching ? switchPrefix : '') + t('standalone.copyAndUpdateMessage', { installed: boldInstalled, latest: boldLatest }),
@@ -164,7 +196,7 @@ export function getDetailSections(installation: InstallationRecord): Record<stri
 
   const updateFields: Record<string, unknown>[] = [
     { id: 'updateChannel', label: t('standalone.updateChannel'), value: channel, editable: true,
-      refreshSection: true, onChangeAction: 'check-update', editType: 'channel-cards', options: channelOptions, tooltip: t('tooltips.updateChannel') },
+      refreshSection: true, editType: 'channel-cards', options: channelOptions, tooltip: t('tooltips.updateChannel') },
   ]
   const updateActions: Record<string, unknown>[] = [
     { id: 'check-update', label: t('actions.checkForUpdate'), style: 'default', enabled: installed },
@@ -183,6 +215,10 @@ export function getDetailSections(installation: InstallationRecord): Record<stri
       fields: buildLaunchSettingsFields(installation, { defaultLaunchArgs: DEFAULT_LAUNCH_ARGS }),
     },
     {
+      tab: 'storage',
+      fields: [buildSharedPathsField(installation)],
+    },
+    {
       title: 'Actions',
       pinBottom: true,
       actions: [
@@ -198,8 +234,9 @@ export function getDetailSections(installation: InstallationRecord): Record<stri
             field: 'name',
           } },
         openFolderAction(installation.installPath),
-        deleteAction(installation),
+        { id: 'share', label: t('actions.share'), style: 'default', enabled: installed },
         untrackAction(),
+        deleteAction(installation),
       ],
     },
   )

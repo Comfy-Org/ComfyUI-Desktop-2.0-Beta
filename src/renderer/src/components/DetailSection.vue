@@ -2,8 +2,6 @@
 // TODO(stale-old-modal): delete after Settings drawer (v2,
 // ComfyUISettingsPanel) reaches functional parity and ships everywhere.
 import { ref, reactive, watch, nextTick } from 'vue'
-import { useI18n } from 'vue-i18n'
-import { useModal } from '../composables/useModal'
 import type { DetailItem, DetailField, DetailFieldOption, ActionDef } from '../types/ipc'
 import InfoTooltip from './InfoTooltip.vue'
 import TooltipWrap from './TooltipWrap.vue'
@@ -32,11 +30,7 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<{
   'run-action': [action: ActionDef, button: HTMLButtonElement | null]
   'refresh': [sectionTitle: string]
-  'refresh-all': []
 }>()
-
-const { t } = useI18n()
-const modal = useModal()
 
 const isCollapsed = ref(props.collapsed === true)
 const sectionRef = ref<HTMLDivElement | null>(null)
@@ -84,19 +78,6 @@ async function handleFieldChange(field: DetailField, value: string | boolean | R
   await window.api.updateInstallation(props.installationId, { [field.id]: value })
   if (field.refreshSection && props.title) {
     emit('refresh', props.title)
-  }
-  if (field.onChangeAction) {
-    try {
-      const result = await window.api.runAction(props.installationId, field.onChangeAction)
-      if (result.navigate === 'detail') {
-        emit('refresh-all')
-      }
-    } catch (err) {
-      await modal.alert({
-        title: t('common.error', 'Error'),
-        message: err instanceof Error ? err.message : String(err),
-      })
-    }
   }
 }
 

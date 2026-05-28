@@ -2,6 +2,7 @@
 // --text-muted, etc.) as the launcher / panel / title-bar renderers so
 // the popup is visually consistent with the rest of Desktop 2.0.
 import '../assets/main.css'
+import { loadProprietaryFonts } from '../assets/proprietaryFonts'
 
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
@@ -24,10 +25,7 @@ document.documentElement.setAttribute('data-theme', 'dark')
 // Install the picker-settings `window.api` shim BEFORE Vue mounts so
 // any module that captures `window.api` at import time (e.g. the
 // shared `useComfyUISettings` composable inside `ComfyUISettingsContent`)
-// sees the shim populated. Compact mode doesn't need this, but the
-// expanded Manage state mounts the settings UI synchronously after a
-// `setPickerMode` round-trip — having the shim ready up front avoids a
-// race between the mode flip and the first IPC call.
+// sees the shim populated.
 installPickerSettingsApiShim()
 
 // Pinia — the per-install settings UI's `useComfyUISettings` reads
@@ -41,4 +39,6 @@ const pinia = createPinia()
 // Per-renderer vue-i18n instance — every webContents needs its own.
 // The shared factory (`lib/i18nFactory.ts`) keeps the keyset identical
 // across the launcher / panel / title-bar / title-popup renderers.
+loadProprietaryFonts()
+
 createApp(TitlePopupApp).use(pinia).use(createAppI18n()).mount('#app')

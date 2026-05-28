@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ChevronDown } from 'lucide-vue-next'
+import { ChevronDown, Tag, Boxes } from 'lucide-vue-next'
 import type { SnapshotSummary } from '../../types/ipc'
 import {
   triggerLabel as _triggerLabel,
@@ -24,11 +24,22 @@ import BaseAccordion from '../../components/ui/BaseAccordion.vue'
 interface Props {
   snapshot: SnapshotSummary
   expanded: boolean
-  /** First (newest) snapshot in the timeline carries a "Current" badge. */
-  isCurrent?: boolean
+  /** First (newest) snapshot in the timeline carries a "Latest" badge. */
+  isLatest?: boolean
+  /** Resulting ComfyUI version of the PREVIOUS snapshot. When this snapshot
+   *  changed the ComfyUI version, the title pill shows the transition
+   *  (`prev → this`) instead of just the resulting version. */
+  previousComfyuiVersion?: string
+  /** Optional `data-testid` for the header toggle — lets the parent
+   *  scope tests to a specific snapshot by filename. */
+  toggleTestId?: string
 }
 
-const props = withDefaults(defineProps<Props>(), { isCurrent: false })
+const props = withDefaults(defineProps<Props>(), {
+  isLatest: false,
+  previousComfyuiVersion: undefined,
+  toggleTestId: undefined,
+})
 
 const emit = defineEmits<{
   toggle: []
@@ -53,45 +64,41 @@ const triggerTone = computed<'state' | 'neutral'>(() => {
   }
 })
 
-/** Diff chips derived from `diffVsPrevious`. We surface up to three
- *  high-signal facts: ComfyUI version change, package change count,
- *  node change count. The full summary list still renders in the
- *  expanded detail; these are the at-a-glance summary. */
-interface Chip {
-  key: string
-  label: string
-  tone: 'state' | 'neutral'
-}
-
-const chips = computed<Chip[]>(() => {
-  const diff = props.snapshot.diffVsPrevious
-  if (!diff) return []
-  const out: Chip[] = []
-  if (diff.comfyuiChanged) {
-    out.push({
-      key: 'comfy',
-      label: t('snapshots.comfyuiUpdated', 'ComfyUI updated'),
-      tone: 'state'
-    })
+/** Node-change deltas vs the previous snapshot — drives the collapsed-header
+ *  pills so a snapshot's at-a-glance summary is visible without expanding.
+ *  The version pill (resulting ComfyUI version) shows always; node deltas
+ *  only when something changed. */
+const nodeDelta = computed(() => {
+  const d = props.snapshot.diffVsPrevious
+  return {
+    added: d?.nodesAdded ?? 0,
+    removed: d?.nodesRemoved ?? 0,
+    changed: d?.nodesChanged ?? 0,
   }
-  const pipDelta = diff.pipsAdded + diff.pipsRemoved + diff.pipsChanged
-  if (pipDelta > 0) {
-    out.push({
-      key: 'pip',
-      label: t('snapshots.pipChanges', { count: pipDelta }),
-      tone: 'neutral'
-    })
-  }
-  const nodeDelta = diff.nodesAdded + diff.nodesRemoved + diff.nodesChanged
-  if (nodeDelta > 0) {
-    out.push({
-      key: 'nodes',
-      label: t('snapshots.nodeChanges', { count: nodeDelta }),
-      tone: 'neutral'
-    })
-  }
-  return out
 })
+const hasNodeChanges = computed(
+  () => nodeDelta.value.added + nodeDelta.value.removed + nodeDelta.value.changed > 0
+)
+
+/**
+ * The pill shown next to the trigger title. One pill, content by context:
+ *  - manual snapshots with a label → the label (e.g. "Manual (before-fix)")
+ *  - a ComfyUI version change      → the transition "prev → this"
+ *  - everything else               → the resulting ComfyUI version
+ * Reuses the version-pill chrome in all cases.
+ */
+const isManualWithLabel = computed(
+  () => props.snapshot.trigger === 'manual' && !!props.snapshot.label
+)
+const comfyuiChanged = computed(
+  () => !!props.snapshot.diffVsPrevious?.comfyuiChanged && !!props.previousComfyuiVersion
+)
+const titlePillText = computed(() => {
+  if (isManualWithLabel.value) return props.snapshot.label as string
+  if (comfyuiChanged.value) return `${props.previousComfyuiVersion} → ${props.snapshot.comfyuiVersion}`
+  return props.snapshot.comfyuiVersion
+})
+const hasTitlePill = computed(() => !!titlePillText.value)
 </script>
 
 <template>
@@ -103,53 +110,62 @@ const chips = computed<Chip[]>(() => {
       type="button"
       class="snapshot-row-head"
       :aria-expanded="expanded"
+      :data-testid="toggleTestId"
       @click="emit('toggle')"
     >
-      <div class="snapshot-row-head-left">
-        <span class="snapshot-row-trigger" :data-tone="triggerTone">{{ triggerCopy }}</span>
-        <span v-if="isCurrent" class="snapshot-row-current">
-          {{ t('snapshots.current', 'Current') }}
-        </span>
+      <div class="snapshot-row-head-top">
+        <div class="snapshot-row-head-left">
+          <span class="snapshot-row-trigger" :data-tone="triggerTone">{{ triggerCopy }}</span>
+          <span v-if="isLatest" class="snapshot-row-latest">
+            {{ t('snapshots.latestBadge', 'Latest') }}
+          </span>
+        </div>
+        <div class="snapshot-row-head-right">
+          <span class="snapshot-row-time" :title="absoluteCopy">{{ relativeCopy }}</span>
+          <ChevronDown :size="14" class="snapshot-row-chevron" />
+        </div>
       </div>
-      <div class="snapshot-row-head-right">
-        <span class="snapshot-row-time" :title="absoluteCopy">{{ relativeCopy }}</span>
-        <ChevronDown :size="14" class="snapshot-row-chevron" />
+      <!-- Second row — at-a-glance pills:
+           • version / name pill: ComfyUI version transition
+             ("v0.21.0 → v0.22.3") when it changed, the snapshot's name for
+             manual snapshots, else the resulting version.
+           • node deltas vs the previous snapshot (when any changed). -->
+      <div v-if="hasTitlePill || hasNodeChanges" class="snapshot-row-pills">
+        <span
+          v-if="hasTitlePill"
+          class="snap-pill snap-pill--version"
+          :class="{ 'is-change': comfyuiChanged }"
+          :title="titlePillText"
+        >
+          <Tag :size="11" aria-hidden="true" />
+          <span>{{ titlePillText }}</span>
+        </span>
+        <span v-if="hasNodeChanges" class="snap-pill snap-pill--nodes">
+          <Boxes :size="11" aria-hidden="true" />
+          <span v-if="nodeDelta.added" class="snap-delta is-add">+{{ nodeDelta.added }}</span>
+          <span v-if="nodeDelta.removed" class="snap-delta is-remove">−{{ nodeDelta.removed }}</span>
+          <span v-if="nodeDelta.changed" class="snap-delta is-change">~{{ nodeDelta.changed }}</span>
+          <span class="snap-pill-label">{{ t('snapshots.nodesLabel', 'nodes') }}</span>
+        </span>
       </div>
     </button>
 
-    <!-- Bordered card holds the body content only. Sits below the
-         header so the dot on the rail aligns with the header text, not
-         with this card's edge. When expanded, the parent's <expanded>
-         slot renders inside the card so the change summary + actions
-         look visually fused with the row body. -->
-    <div class="snapshot-row-card">
-      <div v-if="chips.length > 0" class="snapshot-row-chips">
-        <span
-          v-for="chip in chips"
-          :key="chip.key"
-          class="snapshot-row-chip"
-          :data-tone="chip.tone"
-          >{{ chip.label }}</span
-        >
-      </div>
-
-      <div class="snapshot-row-meta">
-        <span v-if="snapshot.comfyuiVersion">{{ snapshot.comfyuiVersion }}</span>
-        <span v-if="snapshot.comfyuiVersion" class="snapshot-row-meta-dot">·</span>
-        <span>{{ t('snapshots.nodesCount', { count: snapshot.nodeCount }) }}</span>
-        <span class="snapshot-row-meta-dot">·</span>
-        <span>{{ t('snapshots.packagesCount', { count: snapshot.pipPackageCount }) }}</span>
-      </div>
-
-      <!-- Smooth height-animated accordion. Keeps the slot mounted so
-           layout is measured for the open transition; the wrapping
-           BaseAccordion clips and fades during the height change. -->
-      <BaseAccordion :open="expanded">
+    <!-- Body card animates open/closed via BaseAccordion. -->
+    <BaseAccordion :open="expanded">
+      <div class="snapshot-row-card">
+        <!-- Composition totals. Version is intentionally omitted — it's
+             already shown in the collapsed-header version pill, so repeating
+             it here read as redundant. -->
+        <div class="snapshot-row-meta">
+          <span>{{ t('snapshots.nodesCount', { count: snapshot.nodeCount }) }}</span>
+          <span class="snapshot-row-meta-dot">·</span>
+          <span>{{ t('snapshots.packagesCount', { count: snapshot.pipPackageCount }) }}</span>
+        </div>
         <div class="snapshot-row-expanded">
           <slot name="expanded" />
         </div>
-      </BaseAccordion>
-    </div>
+      </div>
+    </BaseAccordion>
   </div>
 </template>
 
@@ -165,9 +181,8 @@ const chips = computed<Chip[]>(() => {
  * click target that resets global button chrome. */
 .snapshot-row-head {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
+  flex-direction: column;
+  gap: 6px;
   padding: 0;
   background: transparent;
   border: none;
@@ -176,6 +191,13 @@ const chips = computed<Chip[]>(() => {
   font: inherit;
   cursor: pointer;
   width: 100%;
+}
+
+.snapshot-row-head-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
 }
 
 .snapshot-row-head:hover .snapshot-row-trigger {
@@ -205,15 +227,76 @@ const chips = computed<Chip[]>(() => {
   color: var(--warning);
 }
 
-.snapshot-row-current {
+.snapshot-row-latest {
   flex-shrink: 0;
   padding: 1px 6px;
   font-size: 11px;
-  font-weight: 600;
-  color: var(--color-accent);
-  background: rgba(96, 165, 250, 0.15);
-  border-radius: 3px;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  border-radius: 999px;
   line-height: 16.5px;
+}
+
+/* Collapsed-state summary pills (version + node deltas). */
+.snapshot-row-pills {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.snap-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 16px;
+  background: var(--color-bg);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.snap-pill > svg {
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+.snap-pill--version {
+  color: var(--neutral-100);
+  background: var(--brand-surface-bg);
+  border: 1px solid var(--chooser-surface-border);
+  font-variant-numeric: tabular-nums;
+  /* On the wrapping pills row a wide transition ("v0.21.0 → v0.22.3") or a
+     long manual name wraps to its own line; cap at the row width and ellipsis
+     only in the extreme so it never overflows the popover. */
+  min-width: 0;
+  max-width: 100%;
+}
+.snap-pill--version > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+/* Version change → subtle brand-tinted border to flag it's a transition. */
+.snap-pill--version.is-change {
+  border-color: color-mix(in srgb, var(--comfy-yellow, #f0ff41) 45%, var(--chooser-surface-border));
+}
+.snap-delta {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+.snap-delta.is-add {
+  color: #22c55e;
+}
+.snap-delta.is-remove {
+  color: var(--danger);
+}
+.snap-delta.is-change {
+  color: var(--warning);
+}
+.snap-pill-label {
+  opacity: 0.7;
 }
 
 .snapshot-row-time {
@@ -235,23 +318,10 @@ const chips = computed<Chip[]>(() => {
 .snapshot-row-card {
   display: flex;
   flex-direction: column;
-  padding: 8px;
-  background: var(--secondary-background);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 10px;
-  transition: border-color 120ms ease;
-}
-
-.snapshot-row-card > * + * {
-  margin-top: 8px;
-}
-
-.snapshot-row-card > [data-state='closed'] {
-  margin-top: 0;
-}
-
-.snapshot-row.is-expanded .snapshot-row-card {
-  border-color: color-mix(in srgb, var(--accent-primary) 60%, var(--border));
+  padding: 10px 12px;
+  background: var(--brand-surface-bg);
+  border: 1px solid var(--chooser-surface-border);
+  border-radius: 8px;
 }
 
 .snapshot-row-chips {

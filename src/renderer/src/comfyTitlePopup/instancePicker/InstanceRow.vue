@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { installTypeMetaFor } from '../../lib/installTypeIcon'
 import { TID } from '../../../../shared/testIds'
 import type { Installation } from '../../types/ipc'
@@ -20,15 +21,29 @@ interface Props {
   /** Install is currently running in some other window — drives the
    *  small running dot on the row. */
   running?: boolean
-  /** Pre-formatted "Launched 17m ago" — hidden when the install has never
-   *  launched; the picker view owns the formatter. */
-  lastLaunchedLabel: string
+  /** This install is the one whose host window opened the picker —
+   *  drives the "Current" pill that replaces the recency label. */
+  isCurrent?: boolean
+  /** An update is available for this install — drives the orange
+   *  status dot. Orange takes precedence over the green running dot. */
+  updateAvailable?: boolean
+  /** A background op (update / restore / …) is in flight or recently
+   *  completed for this install. Spinner dot takes precedence over both
+   *  the green running dot and the orange update dot. */
+  operating?: boolean
+  /** Compact recency (`3h ago`) for single-line picker rows. */
+  lastLaunchedShortLabel: string
 }
 
 const props = withDefaults(defineProps<Props>(), {
   active: false,
   running: false,
+  isCurrent: false,
+  updateAvailable: false,
+  operating: false,
 })
+
+const { t } = useI18n()
 
 const emit = defineEmits<{
   select: [installation: Installation]
@@ -56,16 +71,30 @@ function handleClick(): void {
     >
       <div class="picker-row-icon" :title="$t(typeMeta.labelKey)">
         <component :is="typeMeta.icon" :size="20" />
-        <span v-if="running" class="picker-row-running-dot" aria-hidden="true"></span>
+        <span
+          v-if="operating"
+          class="picker-row-op-dot"
+          aria-hidden="true"
+        ></span>
+        <span
+          v-else-if="updateAvailable"
+          class="picker-row-update-dot"
+          aria-hidden="true"
+        ></span>
+        <span
+          v-else-if="running"
+          class="picker-row-running-dot"
+          aria-hidden="true"
+        ></span>
       </div>
       <div class="picker-row-body">
-        <div class="picker-row-name">{{ installation.name }}</div>
-        <div
-          v-if="installation.lastLaunchedAt != null"
-          class="picker-row-sub"
-        >
-          {{ lastLaunchedLabel }}
-        </div>
+        <span class="picker-row-name">{{ installation.name }}</span>
+        <span v-if="isCurrent" class="picker-row-current-pill">
+          {{ t('snapshots.current') }}
+        </span>
+        <span v-else-if="lastLaunchedShortLabel" class="picker-row-recency">
+          {{ lastLaunchedShortLabel }}
+        </span>
       </div>
     </div>
   </div>
@@ -79,7 +108,7 @@ function handleClick(): void {
 }
 .picker-row {
   display: grid;
-  grid-template-columns: 24px 1fr auto;
+  grid-template-columns: 24px minmax(0, 1fr);
   align-items: center;
   gap: 8px;
   padding: 8px 8px 8px 10px;
@@ -111,7 +140,7 @@ function handleClick(): void {
   transition: color 120ms ease;
 }
 /* Active row → icon goes full white (and gets a green status dot
- * overlaid on top-right when also running). Inactive running rows
+ * overlaid on bottom-right when also running). Inactive running rows
  * still get the green dot so the user sees "running in another
  * window" status, but the icon stays its resting neutral colour. */
 .picker-row.is-active .picker-row-icon {
@@ -120,11 +149,13 @@ function handleClick(): void {
 .picker-row-body {
   min-width: 0;
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  align-items: center;
+  gap: 8px;
   overflow: hidden;
 }
 .picker-row-name {
+  flex: 1 1 auto;
+  min-width: 0;
   font-size: 14px;
   font-weight: 500;
   line-height: 20px;
@@ -136,23 +167,74 @@ function handleClick(): void {
 .picker-row.is-active .picker-row-name {
   color: var(--text);
 }
-.picker-row-sub {
+.picker-row-recency {
+  flex: 0 0 auto;
   font-size: 12px;
   line-height: 16px;
   color: var(--text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* Green running indicator pinned to the top-right of the icon. Uses
- * the existing `--success` token. */
+/* Green running indicator pinned to the bottom-right of the icon. */
 .picker-row-running-dot {
   position: absolute;
-  top: -1px;
+  bottom: -1px;
   right: -1px;
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
-  background: var(--success, #00cd72);
+  background: #38c149;
+  border: 2px solid #38303d;
+  box-sizing: content-box;
+}
+/* Orange update-available indicator. Same anchor + chrome as the
+ * running dot — the orange takes precedence in the template so we
+ * render exactly one dot at a time. */
+.picker-row-update-dot {
+  position: absolute;
+  bottom: -1px;
+  right: -1px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--status-update, #f59e0b);
+  border: 2px solid #38303d;
+  box-sizing: content-box;
+}
+/* Spinner dot for in-flight background ops. Same anchor + chrome as the
+ * other dots. The rotating ring is drawn with a conic-gradient clip so
+ * it stays in pure CSS — no SVG asset needed. */
+.picker-row-op-dot {
+  position: absolute;
+  bottom: -1px;
+  right: -1px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: conic-gradient(var(--brand-accent, #f5c518) 270deg, transparent 270deg);
+  border: 2px solid #38303d;
+  box-sizing: content-box;
+  animation: op-dot-spin 0.8s linear infinite;
+}
+@keyframes op-dot-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* "Current" pill — flags the install whose host window opened the
+ * picker. Replaces the recency label on that one row so the user can
+ * scan-find their own context at a glance. */
+.picker-row-current-pill {
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--text) 10%, transparent);
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.picker-row.is-active .picker-row-current-pill {
+  color: var(--text);
+  background: color-mix(in srgb, var(--text) 14%, transparent);
 }
 </style>

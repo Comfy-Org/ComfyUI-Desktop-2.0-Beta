@@ -371,7 +371,6 @@ defineExpose({ open })
             <div class="ls-field">
               <label class="ls-label">{{ $t('list.snapshotRelease') }}</label>
               <BaseSelect
-                variant="brand"
                 :model-value="selectedRelease?.value ?? ''"
                 :options="releaseSelectOptions"
                 :placeholder="releasePlaceholder"

@@ -187,7 +187,6 @@ export const gitSource: SourcePlugin = {
         title: t('common.launchSettings'),
         fields: buildLaunchSettingsFields(installation, {
           defaultLaunchArgs: DEFAULT_LAUNCH_ARGS,
-          includeUseSharedPaths: false,
           extraFields: [
             { id: 'venvPath', label: t('git.venv'), value: venvPath || '', editable: true, editType: 'path' },
           ],

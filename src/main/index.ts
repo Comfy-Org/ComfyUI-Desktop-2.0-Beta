@@ -1,4 +1,4 @@
-import { app, Menu, ipcMain, net, dialog } from 'electron'
+import { app, Menu, ipcMain, net } from 'electron'
 import type { BrowserWindow, WebContentsView } from 'electron'
 import type { Tray } from 'electron'
 import path from 'path'
@@ -17,8 +17,12 @@ import { migrateXdgPaths } from './lib/paths'
 import { saveWindowBounds } from './lib/windowState'
 import { registerProcessErrorHandlers } from './lib/processErrorHandlers'
 import { registerTitleTooltipIpc } from './popups/titleTooltip'
-import { openSystemModal, registerSystemModalIpc } from './popups/systemModal'
-import { registerTitlePopupIpc, type InstancePickerInstall } from './popups/titlePopup'
+import { openSystemModal, openSystemModalAsync, registerSystemModalIpc } from './popups/systemModal'
+import {
+  registerTitlePopupIpc,
+  triggerPickerSnapshotBroadcast,
+  type InstancePickerInstall
+} from './popups/titlePopup'
 import { registerPickerSettingsIpc } from './popups/pickerSettingsHandlers'
 import { waitForPort, COMFY_BOOT_TIMEOUT_MS } from './lib/process'
 import { isQuitInProgress, setQuitReason } from './lib/quit-state'
@@ -35,10 +39,20 @@ import {
   installationEvents,
   list as listInstallations
 } from './installations'
+import { startPeriodicReleaseChecks } from './lib/release-cache-startup'
 import { showModelFolderRelaunchPage } from './lib/relaunchPage'
 import { COMFY_BG, SPLASH_DARK, TITLEBAR_BG, type SplashTheme } from './lib/theme'
-import { comfyTitleBarOverlay } from './lib/titleBarOverlay'
-import { sourceMap, _broadcastToRenderer, _runningSessions } from './lib/ipc/shared'
+import { titleBarOverlayForTheme } from './lib/titleBarOverlay'
+import {
+  sourceMap,
+  _broadcastToRenderer,
+  _runningSessions,
+  _operationAborts,
+  _activeOperationStatus,
+  stopRunning,
+  resolveTheme,
+  type PickerOperationStatus
+} from './lib/ipc/shared'
 import { enrichInstallationsForRenderer } from './lib/ipc/registerInstallationHandlers'
 import { getSnapshotListData } from './lib/snapshots'
 import { update as updateInstallation } from './installations'
@@ -75,10 +89,14 @@ import {
   setHostWindowFactories
 } from './host/createHostWindow'
 import { attachInstall, setAttachFactories } from './host/attach'
+import { IN_PLACE_RELAUNCH, REQUIRES_STOPPED } from '../types/ipc'
+import { handleDelegateToSource, handleLaunch } from './lib/ipc/sessionActions'
 import { applyAttachHostPreview, clearAttachHostPreview } from './host/attachHostPreview'
 import {
   _detachInstallImpl,
   confirmAndCloseAllHostWindows,
+  confirmAndCloseHostWindow,
+  confirmCloseInstanceWindow,
   consultPanelRendererClose,
   detachOrphanedInstallHosts,
   preClearedClose,
@@ -102,6 +120,11 @@ const APP_VERSION = getAppVersion()
 // The chooser host window plus per-install ComfyUI windows are the
 // only top-level surfaces.
 let tray: Tray | null = null
+
+/** Stop handle for the periodic release-cache poll registered in
+ *  `whenReady`. Cleared in `before-quit` so the interval doesn't
+ *  linger across `app.relaunch()`. */
+let _stopPeriodicReleaseChecks: (() => void) | null = null
 
 function focusExternalProcessWindow(pid: number): void {
   if (process.platform === 'win32') {
@@ -361,7 +384,18 @@ function onLaunch({
     // `activePanel !== 'comfy'`. The trailing `refreshComfyTabBody`
     // still handles the comfy-lifecycle → comfy body-mode swap when the
     // entry was already on `'comfy'` (setActivePanel early-returns there).
-    setActivePanel(existing.windowKey, 'comfy')
+    //
+    // EXCEPTION: the `'progress'` panel mode is reserved for picker-
+    // driven ProgressModal takeovers that explicitly own the panel
+    // until the user picks a terminal-state CTA. A relaunch fired
+    // mid-update (the wantsRelaunch step in `useComfyUISettings`) must
+    // NOT yank the panel out from under the running modal — the user
+    // would lose the success screen and be dumped into Comfy with no
+    // sense of what just happened. The renderer's `handleProgressClose`
+    // restores `'comfy'` once the modal dismisses.
+    if (existing.activePanel !== 'progress') {
+      setActivePanel(existing.windowKey, 'comfy')
+    }
     refreshComfyTabBody(installationId)
     if (proc) {
       proc.on('exit', () => {
@@ -429,7 +463,10 @@ function onLaunch({
     windowTitle: `${installation.name} — Desktop 2.0 v${APP_VERSION}`,
     boundsKey: installationId,
     initialTheme: { bg: COMFY_BG, text: '#dddddd' },
-    titleBarOverlay: process.platform === 'darwin' ? undefined : comfyTitleBarOverlay(),
+    titleBarOverlay:
+      process.platform === 'darwin'
+        ? undefined
+        : titleBarOverlayForTheme(resolveTheme() === 'dark'),
     comfyWebPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -508,6 +545,7 @@ ipcMain.handle('reset-zoom', () => {
  */
 ipcMain.on('comfy-window:set-first-use-mode', (event, payload: { mode: unknown }) => {
   const mode = normaliseFirstUseMode(payload?.mode)
+  recordIpcInvocation('comfy-window:set-first-use-mode', { mode })
   for (const entry of comfyWindows.values()) {
     if (entry.panelView?.webContents === event.sender) {
       entry.firstUseMode = mode
@@ -516,6 +554,7 @@ ipcMain.on('comfy-window:set-first-use-mode', (event, payload: { mode: unknown }
       }
       return
     }
+    return
   }
 })
 
@@ -649,9 +688,14 @@ ipcMain.on('comfy-window:click-app-update-pill', (event) => {
  *
  * Forwards `panel-trigger-overlay { kind: 'install-update' }` to the panel
  * renderer; `useDeepLinkRouter` handles it by opening the instance picker
- * in expanded mode on the Update tab. `sendToPanelDeferred` waits for
- * `did-finish-load` so the IPC isn't dropped if the panelView was just
- * lazily constructed.
+ * in expanded mode on the Update tab.
+ *
+ * When the user is on the ComfyUI body the panelView is lazily not-yet-
+ * constructed, so we ensure it for the current body mode (without flipping
+ * the visible body — the picker is a separate popup) and let
+ * `sendToPanelDeferred` hold the IPC until `did-finish-load`. Mirrors the
+ * Send Feedback handler; without this the click was a silent no-op whenever
+ * the panel hadn't been built yet.
  */
 ipcMain.on('comfy-window:click-install-update-pill', (event) => {
   const found = findEntryByTitleBarSender(event.sender)
@@ -659,8 +703,8 @@ ipcMain.on('comfy-window:click-install-update-pill', (event) => {
   const { entry } = found
   const installationId = entry.installationId
   if (!installationId) return
-  const panelView = entry.panelView
-  if (!panelView) return
+  const panelView =
+    entry.panelView ?? ensurePanelView(entry.windowKey, entry, computeBodyMode(entry))
   sendToPanelDeferred(panelView, 'panel-trigger-overlay', {
     kind: 'install-update',
     installationId
@@ -746,6 +790,7 @@ ipcMain.on('comfy-window:new-chooser-window', () => {
 })
 
 ipcMain.handle('focus-comfy-window', (_event, installationId: string) => {
+  recordIpcInvocation('focus-comfy-window', { installationId })
   const entry = getEntryByInstallationId(installationId)
   if (entry && !entry.window.isDestroyed()) {
     entry.window.show()
@@ -963,6 +1008,7 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
     // picker all flow through the registry).
     setHostWindowFactories({
       consultPanelRendererClose,
+      confirmCloseInstanceWindow,
       detachInstallImpl: _detachInstallImpl,
       preClearedClose,
       computeInstallUpdateAvailable
@@ -1115,17 +1161,27 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
         } catch {
           // Name lookup is cosmetic — fall through with the id as the label.
         }
-        const result = await dialog.showMessageBox(parentEntry.window, {
-          type: 'question',
-          buttons: ['Switch', 'Cancel'],
-          defaultId: 0,
-          cancelId: 1,
-          title: 'Switch instance?',
-          message: `Switch to ${targetName}?`,
-          detail:
-            'The current instance will be stopped and replaced in this window. Any unsaved work in the workflow will be lost.'
+        const confirmed = await openSystemModalAsync({
+          parent: parentEntry.window,
+          spec: {
+            title: 'Switch instance?',
+            message: `Switch to ${targetName}?`,
+            details: [
+              {
+                label: 'Heads up',
+                items: [
+                  'The current instance will be stopped and replaced in this window.',
+                  'Any unsaved work in the workflow will be lost.'
+                ]
+              }
+            ],
+            confirmLabel: 'Switch',
+            cancelLabel: 'Cancel',
+            confirmStyle: 'primary',
+            theme: parentEntry.lastTheme
+          }
         })
-        if (result.response !== 0) return
+        if (!confirmed) return
         // Multi-instance validation signal. Fired once per user-confirmed
         // instance swap from the title-bar picker; other paths (fresh
         // chooser pick, new-window launch) are NOT swaps.
@@ -1169,10 +1225,194 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
     registerTitlePopupIpc({
       openChooserHostWindow,
       returnToDashboard,
-      confirmAndCloseAllHostWindows,
+      confirmAndCloseAllHostWindows: (parentWindow) =>
+        confirmAndCloseAllHostWindows(parentWindow, quitApp),
+      confirmAndCloseHostWindow,
       setActivePanel,
       triggerOpenFeedback,
       sendToPanelDeferred,
+      ensurePanelViewForEntry: (entry) =>
+        entry.panelView ?? ensurePanelView(entry.windowKey, entry, computeBodyMode(entry)),
+      pickerRunBackgroundOp: ({ installationId, actionId, actionData, title, cancellable }) => {
+        // Fire-and-forget: runs the action on main with a custom sendProgress
+        // that feeds _activeOperationStatus so the picker snapshot loop
+        // delivers live status to the inline progress view.
+        void (async () => {
+          const inst = await getInstallation(installationId)
+          if (!inst) {
+            _activeOperationStatus.set(installationId, {
+              status: '',
+              percent: -1,
+              done: true,
+              ok: false,
+              error: 'Installation not found.',
+              cancellable,
+              title,
+              actionId,
+              actionData
+            })
+            triggerPickerSnapshotBroadcast()
+            return
+          }
+
+          // Guard: another op already running for this install.
+          if (_operationAborts.has(installationId)) {
+            _activeOperationStatus.set(installationId, {
+              status: '',
+              percent: -1,
+              done: true,
+              ok: false,
+              error: 'Another operation is already running.',
+              cancellable,
+              title,
+              actionId,
+              actionData
+            })
+            triggerPickerSnapshotBroadcast()
+            return
+          }
+
+          // Stop the session if needed (REQUIRES_STOPPED).
+          const wasRunning = _runningSessions.has(installationId)
+          if (REQUIRES_STOPPED.has(actionId) && wasRunning) {
+            _activeOperationStatus.set(installationId, {
+              status: 'Stopping…',
+              percent: -1,
+              done: false,
+              ok: null,
+              error: null,
+              cancellable,
+              title,
+              actionId,
+              actionData
+            })
+            triggerPickerSnapshotBroadcast()
+            try {
+              await stopRunning(installationId)
+            } catch (err) {
+              _activeOperationStatus.set(installationId, {
+                status: '',
+                percent: -1,
+                done: true,
+                ok: false,
+                error: (err as Error).message ?? 'Stop failed.',
+                cancellable,
+                title,
+                actionId,
+                actionData
+              })
+              triggerPickerSnapshotBroadcast()
+              return
+            }
+          }
+
+          // Seed the in-flight status.
+          _activeOperationStatus.set(installationId, {
+            status: '',
+            percent: -1,
+            done: false,
+            ok: null,
+            error: null,
+            cancellable,
+            title,
+            actionId,
+            actionData
+          })
+          triggerPickerSnapshotBroadcast()
+
+          // Build a stub event whose sender feeds _activeOperationStatus.
+          // The action handlers route BOTH `install-progress` and raw
+          // `comfy-output` chunks through this one sender. Only progress
+          // drives the inline status line — output chunks are ignored, or
+          // the channel name itself leaks in as the status text (the
+          // literal "comfy-output" shown during a background update). The
+          // real phase lives in the `install-progress` payload, not the
+          // channel arg.
+          const feedStatus = (channel: string, payload: Record<string, unknown>): void => {
+            if (channel !== 'install-progress') return
+            const cur = _activeOperationStatus.get(installationId)
+            if (!cur || cur.done) return
+            const status =
+              typeof payload.status === 'string'
+                ? payload.status
+                : typeof payload.phase === 'string'
+                  ? payload.phase
+                  : cur.status
+            const percent = typeof payload.percent === 'number' ? payload.percent : cur.percent
+            const speedBytesPerSec =
+              typeof payload.speedBytesPerSec === 'number'
+                ? payload.speedBytesPerSec
+                : cur.speedBytesPerSec
+            _activeOperationStatus.set(installationId, {
+              ...cur,
+              status,
+              percent,
+              speedBytesPerSec
+            })
+            triggerPickerSnapshotBroadcast()
+          }
+          const stubSender = {
+            isDestroyed: () => false,
+            send: feedStatus as unknown as Electron.WebContents['send']
+          } as unknown as Electron.WebContents
+          const stubEvent = { sender: stubSender } as unknown as Electron.IpcMainInvokeEvent
+
+          let result: PickerOperationStatus
+          try {
+            const actionResult = await handleDelegateToSource(
+              { event: stubEvent, installationId, inst, actionData },
+              actionId
+            )
+            const wantsRelaunch = wasRunning && IN_PLACE_RELAUNCH.has(actionId)
+            if (actionResult.ok && wantsRelaunch) {
+              // Re-fetch inst (may have changed version after update).
+              const freshInst = (await getInstallation(installationId)) ?? inst
+              await handleLaunch({
+                event: stubEvent,
+                installationId,
+                inst: freshInst,
+                actionData: undefined
+              })
+            }
+            result = {
+              status: '',
+              percent: 100,
+              done: true,
+              ok: actionResult.ok !== false,
+              error: actionResult.ok === false ? (actionResult.message ?? 'Failed.') : null,
+              cancellable,
+              title,
+              actionId,
+              actionData
+            }
+          } catch (err) {
+            const abort = _operationAborts.get(installationId)
+            result = {
+              status: '',
+              percent: -1,
+              done: true,
+              ok: false,
+              error: abort?.signal.aborted ? 'Cancelled.' : ((err as Error).message ?? 'Failed.'),
+              cancellable,
+              title,
+              actionId,
+              actionData
+            }
+          }
+          _activeOperationStatus.set(installationId, result)
+          triggerPickerSnapshotBroadcast()
+          // Auto-purge the done entry after 15s so a picker re-opened
+          // after the op completes shows the normal settings view again.
+          setTimeout(() => {
+            const cur = _activeOperationStatus.get(installationId)
+            if (cur?.done) {
+              _activeOperationStatus.delete(installationId)
+              triggerPickerSnapshotBroadcast()
+            }
+          }, 15_000)
+        })()
+      },
+      broadcastPickerSnapshot: () => triggerPickerSnapshotBroadcast(),
       getInstancePickerInstalls: async () => {
         // Same shape `get-installations` returns to the renderer-side
         // `installationStore` — sharing the enrichment helper means the
@@ -1231,6 +1471,28 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
         }
         try {
           await updateInstallation(installationId, { [fieldId]: value })
+          // Channel switch must kick a check-update; otherwise the new
+          // channel's available-update tag never appears until the user
+          // manually clicks "Check for updates".
+          if (fieldId === 'updateChannel') {
+            const next = await getInstallation(installationId)
+            if (next) {
+              const abort = new AbortController()
+              source
+                .handleAction('check-update', next, undefined, {
+                  update: (data) => updateInstallation(installationId, data).then(() => {}),
+                  sendProgress: () => {},
+                  sendOutput: () => {},
+                  signal: abort.signal
+                })
+                .catch((err) => {
+                  console.error(
+                    `Picker: check-update after channel switch failed for ${installationId}:`,
+                    err
+                  )
+                })
+            }
+          }
           return { ok: true }
         } catch (err) {
           return { ok: false, message: err instanceof Error ? err.message : 'Update failed.' }
@@ -1264,48 +1526,6 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
           return { ok: false, message: err instanceof Error ? err.message : 'Action failed.' }
         }
       },
-      getChannelPickerFieldForInstall: async (installationId) => {
-        if (!installationId) return null
-        const inst = await getInstallation(installationId)
-        if (!inst) return null
-        const source = sourceMap[inst.sourceId]
-        if (!source) return null
-        const sections = source.getDetailSections(inst) as Array<{
-          tab?: string
-          fields?: Array<Record<string, unknown>>
-        }>
-        for (const sec of sections) {
-          if (sec.tab && sec.tab !== 'update') continue
-          const f = sec.fields?.find((ff) => ff.editType === 'channel-cards')
-          if (f) return f
-        }
-        return null
-      },
-      runChannelPickerAction: async (installationId, actionId, actionData) => {
-        // Same dispatch as `pickerRunAction`. The IPC handler enforces
-        // the action allowlist (copy-update / release-update /
-        // switch-channel / update); this binding is a generic
-        // source-action runner.
-        try {
-          const inst = await getInstallation(installationId)
-          if (!inst) return { ok: false, message: 'Installation not found.' }
-          const source = sourceMap[inst.sourceId]
-          if (!source) return { ok: false, message: 'Unknown source.' }
-          const abort = new AbortController()
-          const result = await source.handleAction(actionId, inst, actionData, {
-            update: (data) => updateInstallation(installationId, data).then(() => {}),
-            sendProgress: () => {},
-            sendOutput: () => {},
-            signal: abort.signal
-          })
-          return {
-            ok: result.ok !== false,
-            message: typeof result.message === 'string' ? result.message : undefined
-          }
-        } catch (err) {
-          return { ok: false, message: err instanceof Error ? err.message : 'Action failed.' }
-        }
-      },
       pickInstallFromPicker,
       restartInstallFromPicker: async (installationId, parentEntryId) => {
         // Restart: same install, same window. The session is stopped
@@ -1313,27 +1533,34 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
         // window short-circuit reloads the comfyView URL in place
         // without re-creating the BrowserWindow or the entry.
         //
-        // Confirm with a native dialog parented to the host so the
-        // prompt visually belongs to the window that initiated the
-        // restart. Reuses the same dialog idiom as
-        // `confirmAndCloseAllHostWindows` for visual consistency.
+        // Confirm via the shell-level system-modal overlay parented to
+        // the host so the prompt visually belongs to the window that
+        // initiated the restart. Same primitive `confirmAndCloseAllHostWindows`
+        // uses, so the launcher's confirm surface is consistent across
+        // shell-level prompts (and Playwright-driveable end to end).
         const parentEntry = comfyWindows.get(parentEntryId)
-        const parentWindow =
-          parentEntry && !parentEntry.window.isDestroyed() ? parentEntry.window : null
-        const opts: Electron.MessageBoxOptions = {
-          type: 'question',
-          buttons: ['Restart', 'Cancel'],
-          defaultId: 1,
-          cancelId: 1,
-          title: 'Restart instance?',
-          message: 'Restart this instance?',
-          detail:
-            'Restarting will stop the running session. Any unsaved work in the workflow will be lost.'
-        }
-        const result = parentWindow
-          ? await dialog.showMessageBox(parentWindow, opts)
-          : await dialog.showMessageBox(opts)
-        if (result.response !== 0) return
+        if (!parentEntry || parentEntry.window.isDestroyed()) return
+        const confirmed = await openSystemModalAsync({
+          parent: parentEntry.window,
+          spec: {
+            title: 'Restart instance?',
+            message: 'Restart this instance?',
+            details: [
+              {
+                label: 'Heads up',
+                items: [
+                  'Restarting will stop the running session.',
+                  'Any unsaved work in the workflow will be lost.'
+                ]
+              }
+            ],
+            confirmLabel: 'Restart',
+            cancelLabel: 'Cancel',
+            confirmStyle: 'primary',
+            theme: parentEntry.lastTheme
+          }
+        })
+        if (!confirmed) return
         // Stop is idempotent — awaiting ensures the process is fully
         // gone before the re-launch so the new session doesn't race a
         // port that's still bound.
@@ -1434,6 +1661,25 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
         detachOrphanedInstallHosts(liveIds)
       })()
     })
+
+    // Background poll: keep the shared ComfyUI release cache fresh so
+    // dashboard / title-bar update pills surface upstream releases
+    // within 15 minutes even when the user never opens the picker or
+    // clicks "Check for Update". The timer is `unref()`-ed inside the
+    // helper so it never blocks app quit; we still tear it down
+    // explicitly in `before-quit` for cleanliness across `app.relaunch`.
+    // Tests override the cadence via `E2E_PERIODIC_RECHECK_MS` so the
+    // periodic-poll lifecycle assertion doesn't have to wait 15 wall-
+    // clock minutes per run.
+    const _periodicIntervalMs = process.env['E2E_PERIODIC_RECHECK_MS']
+      ? Number(process.env['E2E_PERIODIC_RECHECK_MS'])
+      : undefined
+    _stopPeriodicReleaseChecks = startPeriodicReleaseChecks(listInstallations, {
+      onRefreshed: () => _broadcastToRenderer('installations-changed', {}),
+      ...(typeof _periodicIntervalMs === 'number' && Number.isFinite(_periodicIntervalMs)
+        ? { intervalMs: _periodicIntervalMs }
+        : {})
+    })
   })
 
   app.on('activate', () => {
@@ -1454,6 +1700,10 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
         tray.destroy()
         tray = null
       }
+    }
+    if (_stopPeriodicReleaseChecks) {
+      _stopPeriodicReleaseChecks()
+      _stopPeriodicReleaseChecks = null
     }
     cleanupTempDownloads()
   })

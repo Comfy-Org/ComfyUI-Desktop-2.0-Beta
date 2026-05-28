@@ -36,31 +36,37 @@ test.afterAll(async () => {
   await ctx.cleanup()
 })
 
-test('cold start lands on first-use consent screen @lifecycle', async () => {
-  await ctx.panel.waitForVisible('.consent-hero', { timeout: 15_000 })
-  await ctx.panel.waitForVisible('[data-testid="first-use-accept-consent"]')
+test('cold start lands on first-use start screen @lifecycle', async () => {
+  // Consent + cloud/local pick + ToS now share a single merged start
+  // screen (commit 5619823). Continue stays disabled until ToS is
+  // ticked, so seeing both the hero and the disabled CTA is the
+  // landing signal.
+  await ctx.panel.waitForVisible('.start-hero', { timeout: 15_000 })
+  await ctx.panel.waitForVisible('[data-testid="first-use-pick-cloud"]')
+  await ctx.panel.waitForVisible('[data-testid="first-use-continue"]')
 })
 
-test('accept consent + pick cloud auto-launches the seeded Cloud install @lifecycle', async () => {
-  // Tick the required ToS checkbox; the Get Started CTA stays
-  // disabled until `acceptedTos` flips true.
+test('accept ToS + pick cloud auto-launches the seeded Cloud install @lifecycle', async () => {
+  // Pick Cloud first — the merged start screen lets the user choose
+  // their path before accepting terms; the order doesn't matter for
+  // the underlying `pickedChoice` reactive.
+  expect(await ctx.panel.click('[data-testid="first-use-pick-cloud"]')).toBe(true)
+
+  // Tick the required ToS checkbox; Continue stays disabled until
+  // `acceptedTos` flips true.
   expect(await ctx.panel.click('[data-testid="first-use-consent-tos"]')).toBe(true)
   await ctx.panel.waitFor(
     async () => ctx.panel.evaluate<boolean>(
-      `!document.querySelector('[data-testid="first-use-accept-consent"]').disabled`,
+      `!document.querySelector('[data-testid="first-use-continue"]').disabled`,
     ),
-    { timeout: 5_000, message: 'Get Started never became enabled after ticking ToS' },
+    { timeout: 5_000, message: 'Continue never became enabled after ticking ToS' },
   )
 
-  // Accept consent → advance to the cloud-vs-local pick step.
-  expect(await ctx.panel.click('[data-testid="first-use-accept-consent"]')).toBe(true)
-  await ctx.panel.waitForVisible('[data-testid="first-use-pick-cloud"]', { timeout: 10_000 })
-
-  // Pick Cloud — host marks `firstUseCompleted`, then chains directly
+  // Continue — host marks `firstUseCompleted`, then chains directly
   // into `performChooserLaunch` on the always-seeded Cloud install.
   // The launch action's `showProgress: true` swaps the first-use
   // takeover for the connect-progress takeover (Tier 3 → Tier 3).
-  expect(await ctx.panel.click('[data-testid="first-use-pick-cloud"]')).toBe(true)
+  expect(await ctx.panel.click('[data-testid="first-use-continue"]')).toBe(true)
 
   // Terminal signal: the title-bar identity flips out of install-less
   // mode once the cloud install attaches reactively over the

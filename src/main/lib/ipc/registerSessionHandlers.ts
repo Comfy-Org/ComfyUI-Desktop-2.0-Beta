@@ -41,6 +41,7 @@ export function registerSessionHandlers(): void {
   })
 
   ipcMain.handle('cancel-operation', (_event, installationId: string) => {
+    recordIpcInvocation('cancel-operation', installationId)
     const abort = _operationAborts.get(installationId)
     if (abort) {
       abort.abort()
@@ -49,6 +50,7 @@ export function registerSessionHandlers(): void {
   })
 
   ipcMain.handle('kill-port-process', async (_event, port: number) => {
+    recordIpcInvocation('kill-port-process', port)
     removePortLock(port)
     await killByPort(port)
     await new Promise((r) => setTimeout(r, 500))
@@ -57,7 +59,7 @@ export function registerSessionHandlers(): void {
   })
 
   ipcMain.handle('run-action', async (_event, installationId: string, actionId: string, actionData?: Record<string, unknown>) => {
-    recordIpcInvocation('run-action', { installationId, actionId })
+    recordIpcInvocation('run-action', { installationId, actionId, actionData })
     const maybeInst = await installations.get(installationId)
     if (!maybeInst) return { ok: false, message: 'Installation not found.' }
     const inst = maybeInst

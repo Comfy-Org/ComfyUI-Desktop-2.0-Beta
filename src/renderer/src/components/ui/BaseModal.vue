@@ -14,9 +14,9 @@ import { useModalOverlay } from '../../composables/useModalOverlay'
  * accessible name. We warn loudly in dev rather than throwing so a
  * mis-wired modal still renders in prod.
  *
- * Sits at z-index 60 to match `TermsModal` / `WhyTryCloudModal` (below
- * context menus, above the settings drawer). Migration of those modals
- * onto this primitive is a follow-up (TODO(modal-migration)).
+ * Sits at z-index 60 (below context menus, above the settings drawer).
+ * Overlay backdrop blur is opt-in via `blurOverlay` so unrelated modal
+ * consumers don't pay the GPU cost on every dialog.
  */
 
 type Size = 'sm' | 'md' | 'lg' | 'xl'
@@ -34,6 +34,10 @@ interface Props {
   showCloseButton?: boolean
   /** Lock body scroll while open. Default true. */
   preventScroll?: boolean
+  /** Apply a backdrop-filter blur to the overlay. Opt-in because
+   *  backdrop-filter is GPU-bound and noticeable on Electron + older
+   *  hardware — only enable on modals where the design calls for it. */
+  blurOverlay?: boolean
   /** Optional class hook on the inner panel for consumer-specific overrides. */
   contentClass?: string | string[] | Record<string, boolean>
 }
@@ -46,6 +50,7 @@ const props = withDefaults(defineProps<Props>(), {
   dismissOnOutside: true,
   showCloseButton: true,
   preventScroll: true,
+  blurOverlay: false,
   contentClass: undefined
 })
 
@@ -146,6 +151,7 @@ const sizeClass = computed(() => `is-size-${props.size}`)
       <div
         v-if="open"
         class="base-modal-overlay"
+        :class="{ 'base-modal-overlay--blur': blurOverlay }"
         role="dialog"
         aria-modal="true"
         :aria-label="ariaLabel"
@@ -190,6 +196,10 @@ const sizeClass = computed(() => `is-size-${props.size}`)
   padding: clamp(32px, 6vh, 72px) clamp(16px, 4vw, 48px);
   background: color-mix(in oklab, var(--neutral-800) 70%, transparent);
 }
+.base-modal-overlay--blur {
+  backdrop-filter: blur(8px) saturate(115%);
+  -webkit-backdrop-filter: blur(8px) saturate(115%);
+}
 
 .base-modal-panel {
   --base-modal-width-sm: 480px;
@@ -213,6 +223,10 @@ const sizeClass = computed(() => `is-size-${props.size}`)
 }
 .base-modal-panel.is-size-sm {
   --base-modal-width: var(--base-modal-width-sm);
+  /* Small dialogs (prompts, action sheets) hug their content — the tall
+     shared min-height is meant for large modals (diff, migrate, terms)
+     and would otherwise leave dead space below a short prompt. */
+  min-height: auto;
 }
 .base-modal-panel.is-size-md {
   --base-modal-width: var(--base-modal-width-md);

@@ -8,7 +8,7 @@ import {
   Loader2,
   Menu as MenuIcon,
   MessageSquarePlus,
-  RefreshCw,
+  RefreshCw
 } from 'lucide-vue-next'
 import { useTitleBarTooltip } from './useTitleBarTooltip'
 import { useTitleBarMenus } from './useTitleBarMenus'
@@ -23,12 +23,7 @@ const { t } = useI18n()
 // file isn't visible to tsconfig.web (only its .d.ts would be). Kept in
 // sync with the literal union in src/preload/comfyTitleBarPreload.ts and
 // the ComfyPanelKey export in src/main/index.ts.
-type ComfyPanelKey =
-  | 'comfy'
-  | 'new-install'
-  | 'track'
-  | 'load-snapshot'
-  | 'quick-install'
+type ComfyPanelKey = 'comfy' | 'new-install' | 'track' | 'load-snapshot' | 'quick-install'
 
 /** Position passed to main so the native menu pops below the anchor button.
  *  Coordinates are in title-bar-local pixels — main translates to window
@@ -204,6 +199,7 @@ const {
   installTypeMeta,
   installTypeLabel,
   showInstallTypeIcon,
+  showBrandMark,
   isLight
 } = useTitleBarIdentity({ bridge, isInstallLess })
 // Mark unused — sourceCategory feeds installTypeMeta inside the
@@ -247,7 +243,7 @@ function handleFeedback(): void {
 // Icon is ComfyUI-tab only; also visible while the drawer is open so
 const fileBtnRef = useTemplateRef<HTMLButtonElement>('fileBtn')
 const downloadsBtnRef = useTemplateRef<HTMLButtonElement>('downloadsBtn')
-const installPillRef = useTemplateRef<HTMLButtonElement>('installPill')
+const installPillRef = useTemplateRef<HTMLElement>('installPill')
 const titleTrailingRef = useTemplateRef<HTMLElement>('titleTrailing')
 
 /** Mirrors the trailing cluster's measured width onto the title bar as
@@ -407,50 +403,70 @@ onUnmounted(() => {
            from anywhere in the app. First-use takeover still renders the
            static label — the bootstrap UX locks down all chrome to keep
            the user inside the flow. -->
-      <button
+      <div
         v-if="!isChromeLocked"
         ref="installPill"
-        type="button"
-        class="title-install-pill"
-        :class="{ 'is-open': isInstancePickerOpen, 'is-install-less': isInstallLess }"
+        class="title-install-pill is-interactive"
+        :class="{
+          'is-open': isInstancePickerOpen,
+          'is-install-less': isInstallLess
+        }"
+        role="button"
+        tabindex="0"
         aria-haspopup="dialog"
         :aria-expanded="isInstancePickerOpen"
         @click="handleInstallPill"
+        @keydown.enter.prevent="handleInstallPill"
+        @keydown.space.prevent="handleInstallPill"
       >
+        <!-- Leading mark: the Comfy logo only on the bare dashboard; on an
+             actual instance the pill leads with that install's source/type
+             icon so the brand logo isn't repeated on every window. -->
         <div class="title-install-slot title-install-slot--leading">
-          <ComfyCLogo class="title-install-brand-mark" :size="16" />
-        </div>
-        <div class="title-install-slot title-install-slot--center">
+          <ComfyCLogo v-if="showBrandMark" class="title-install-brand-mark" :size="16" />
           <component
             :is="installTypeMeta.icon"
-            v-if="showInstallTypeIcon"
-            :size="14"
+            v-else-if="showInstallTypeIcon"
+            :size="16"
             class="title-install-type-icon"
             v-bind="tooltipAttrs(installTypeLabel)"
           />
+        </div>
+        <div class="title-install-slot title-install-slot--center">
           <span class="title-install-name">{{ installLabel }}</span>
+          <!-- Instance update CTA, inline after the name. Its own click
+               target — stops propagation so it updates without also
+               opening the picker; the rest of the pill still opens it. -->
+          <button
+            v-if="showInstallUpdatePill"
+            type="button"
+            class="title-install-update-chip"
+            v-bind="tooltipAttrs(installUpdatePillLabel)"
+            @click.stop="handleInstallUpdatePill"
+            @keydown.enter.stop
+            @keydown.space.stop
+          >
+            {{ t('titleBar.installUpdateShort') }}
+          </button>
         </div>
         <!-- Trailing slot: dropdown caret. Marks the pill as an
              interactive opener so the user reads it as actionable. -->
         <div class="title-install-slot title-install-slot--trailing">
           <ChevronDown :size="12" class="title-install-caret" aria-hidden="true" />
         </div>
-      </button>
-      <div
-        v-else
-        class="title-install-pill"
-      >
+      </div>
+      <div v-else class="title-install-pill">
         <div class="title-install-slot title-install-slot--leading">
-          <ComfyCLogo class="title-install-brand-mark" :size="16" />
-        </div>
-        <div class="title-install-slot title-install-slot--center">
+          <ComfyCLogo v-if="showBrandMark" class="title-install-brand-mark" :size="16" />
           <component
             :is="installTypeMeta.icon"
-            v-if="showInstallTypeIcon"
-            :size="14"
+            v-else-if="showInstallTypeIcon"
+            :size="16"
             class="title-install-type-icon"
             v-bind="tooltipAttrs(installTypeLabel)"
           />
+        </div>
+        <div class="title-install-slot title-install-slot--center">
           <span class="title-install-name">{{ installLabel }}</span>
         </div>
         <div class="title-install-slot title-install-slot--trailing"></div>
@@ -458,24 +474,13 @@ onUnmounted(() => {
     </div>
 
     <div ref="titleTrailing" class="title-trailing">
-      <!-- Install-update pill ("ComfyUI X.Y.Z") and app-update pill
-           ("Desktop Update") both live in the trailing cluster so the
-           center stays clean — only the install identity sits at true
-           window center. The two updates read as a paired CTA group:
-           ComfyCLogo icon = ComfyUI core; CloudDownload icon = Desktop
-           app. Same chrome (brand-yellow tint), different icons. -->
+      <!-- App-update pill ("Desktop Update") lives in the trailing
+           cluster. The instance-update CTA now lives inside the center
+           identity pill (next to the install name) so the two updates
+           stay visually distinct: install update = in the center pill;
+           Desktop app update = here. -->
       <button
-        v-if="showInstallUpdatePill"
-        type="button"
-        class="title-update-pill is-install-update"
-        v-bind="tooltipAttrs(installUpdatePillLabel)"
-        @click="handleInstallUpdatePill"
-      >
-        <ComfyCLogo :size="14" class="title-update-pill-glyph" />
-        <span class="title-update-pill-label">{{ installUpdatePillLabel }}</span>
-      </button>
-      <button
-        v-if="showAppUpdatePill"
+        v-if="!isChromeLocked && showAppUpdatePill"
         type="button"
         class="title-update-pill is-app-update"
         :class="{
@@ -524,16 +529,15 @@ onUnmounted(() => {
         @click="handleDownloadsTray"
       >
         <ArrowDownToLine :size="16" />
-        <span
-          v-if="downloadsActiveCount > 0"
-          class="title-downloads-badge"
-          aria-hidden="true"
-        >{{ downloadsActiveCount }}</span>
+        <span v-if="downloadsActiveCount > 0" class="title-downloads-badge" aria-hidden="true">{{
+          downloadsActiveCount
+        }}</span>
         <span
           v-else-if="unseenFinishedCount > 0"
           class="title-downloads-badge is-unseen"
           aria-hidden="true"
-        >{{ unseenFinishedCount }}</span>
+          >{{ unseenFinishedCount }}</span
+        >
       </button>
     </div>
   </header>
@@ -602,10 +606,20 @@ onUnmounted(() => {
   gap: 4px;
   /* Mirror the trailing cluster's measured width (set by the
      ResizeObserver in <script>) so the left + trailing grid tracks
-     stay equal-width. This keeps the centre 1fr track perfectly
-     window-centred regardless of which side has more content — the
-     install pill anchors to true window centre at every width. */
+     stay equal-width. With symmetric OS-chrome padding (macOS, where
+     the left traffic-light inset is handled below) this centres the
+     1fr track at true window centre. */
   min-width: var(--title-trailing-width, 0px);
+}
+/* Win/Linux: the native window controls reserve 140px on the RIGHT, vs the
+   12px base padding on the left. Mirroring only the trailing width centres
+   the pill in the *content box*, which the asymmetric reservation shifts
+   64px left of true window centre — this is the off-centre pill on Windows.
+   Claim the 128px delta (140px controls − 12px base padding) as extra left
+   min-width so the 1fr centre track is pushed back to true window centre.
+   Keep this value in sync with the `padding-right` above. */
+.title-bar:not(.is-mac) .title-cluster {
+  min-width: calc(var(--title-trailing-width, 0px) + 128px);
 }
 
 .title-center {
@@ -669,18 +683,16 @@ onUnmounted(() => {
   display: inline-flex;
   align-items: center;
   justify-content: space-between;
-  /* Fluid width: floor at 220px (enough for brand mark + install-type
-     icon + caret + ~14 chars of name before ellipsis), preferred
-     ~22% of title-bar inline size, ceiling at 360px. Tuned to coexist
-     with the adjacent install-update pill in the center cluster +
-     leave the right cluster room for the desktop-update pill and
-     trailing buttons without overlap. */
+  /* Fluid width: floor at 220px, preferred ~22% of the title-bar inline
+     size, ceiling at 360px. Acts as a min size so the pill never collapses
+     for a short instance name; `space-between` then pins the logo to the
+     left edge and the caret to the right, with the slack (and the inline
+     Update chip + name) sitting between them — same as the dashboard pill. */
   width: clamp(220px, 22cqi, 360px);
   height: 28px;
   padding: 5px 8px;
   border-radius: 999px;
-  background: var(--brand-surface-bg);
-  border: 1px solid var(--neutral-100);
+  background: var(--chooser-surface-bg);
   color: var(--neutral-100);
   font: inherit;
   font-size: 12px;
@@ -690,24 +702,63 @@ onUnmounted(() => {
     border-color 120ms ease,
     color 120ms ease;
 }
-/* Button variant — install-backed hosts. The pill is an actionable
- * picker opener: hover repaints to the brand-surface hover token,
- * open state lifts border/text/logo to brand yellow (--neutral-50)
- * so the pill reads as engaged. */
-button.title-install-pill {
+/* Interactive variant — install-backed hosts. The pill is an actionable
+ * picker opener (a div with role=button so it can hold the nested update
+ * chip): hover repaints to the brand-surface hover token, open state
+ * lifts border/text/logo to brand yellow (--neutral-50) so the pill
+ * reads as engaged. */
+.title-install-pill.is-interactive {
   cursor: pointer;
 }
-button.title-install-pill:hover,
-button.title-install-pill:focus-visible {
+.title-install-pill.is-interactive:hover,
+.title-install-pill.is-interactive:focus-visible {
   background: var(--brand-surface-bg-hover);
   outline: none;
 }
-button.title-install-pill.is-open {
+.title-install-pill.is-interactive.is-open {
   /* Lift border + text to brand yellow when the picker is showing.
    * The brand mark + caret both use `currentColor` so they inherit
    * this lift automatically — one source of truth for the open tint. */
   border-color: var(--neutral-50);
   color: var(--neutral-50);
+}
+
+/* Inline instance-update CTA, sitting just after the install name inside
+ * the identity pill. Brand-yellow chip so it reads as the actionable
+ * "there is an update" affordance without competing with the name. */
+.title-install-update-chip {
+  -webkit-app-region: no-drag;
+  flex-shrink: 0;
+  /* A little extra breathing room from the name (on top of the slot's
+     6px gap) so the chip doesn't read as crammed against it. */
+  margin-left: 4px;
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--comfy-yellow) 55%, transparent);
+  background: color-mix(in srgb, var(--comfy-yellow) 12%, transparent);
+  color: var(--comfy-yellow);
+  font: inherit;
+  font-size: 11px;
+  line-height: 16px;
+  cursor: pointer;
+  transition:
+    background-color 0.12s,
+    border-color 0.12s;
+}
+.title-bar.is-hover-active .title-install-update-chip:hover {
+  background: color-mix(in srgb, var(--comfy-yellow) 20%, transparent);
+  border-color: var(--comfy-yellow);
+}
+.title-install-update-chip:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+.title-bar.is-light .title-install-update-chip {
+  background: color-mix(in srgb, var(--comfy-yellow) 22%, transparent);
+  border-color: color-mix(in srgb, var(--comfy-yellow) 70%, var(--neutral-700));
+  color: var(--neutral-700);
 }
 .title-install-caret {
   color: currentColor;

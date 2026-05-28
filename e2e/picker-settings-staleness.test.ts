@@ -91,7 +91,6 @@ test('right pane clears stale sections when switching install A → B @lifecycle
     `(() => {
       window.api.openInstancePicker({
         installationId: ${JSON.stringify(INSTALL_A_ID)},
-        mode: 'expanded',
         initialTab: 'config',
       })
       return true

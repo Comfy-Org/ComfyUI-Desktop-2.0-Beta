@@ -1,6 +1,6 @@
 {
   "name": "comfyui-desktop-2",
-  "version": "0.6.4",
+  "version": "0.6.9",
   "description": "ComfyUI Desktop 2.0",
   "author": {
     "name": "Jedrzej Kosinski",
@@ -38,6 +38,7 @@
     "build:linux": "pnpm run build && electron-builder --linux",
     "bootstrap": "node scripts/build-bootstrap-python.mjs",
     "bootstrap:fetch": "node scripts/fetch-bootstrap-python.mjs",
+    "font:fetch": "node scripts/fetch-font.mjs",
     "sandbox:gen": "node scripts/generate-sandbox.mjs",
     "datadog:sourcemaps:upload": "node ./scripts/upload-datadog-sourcemaps.mjs",
     "lint": "eslint .",
@@ -60,7 +61,8 @@
     "electron-updater": "^6.7.3",
     "posthog-node": "^5.30.7",
     "smol-toml": "^1.6.1",
-    "systeminformation": "^5.31.5"
+    "systeminformation": "^5.31.5",
+    "tar": "^7.5.11"
   },
   "devDependencies": {
     "@datadog/datadog-ci": "^5.9.0",
@@ -88,7 +90,6 @@
     "playwright": "^1.58.2",
     "prettier": "^3.8.1",
     "tailwindcss": "^4.1.8",
-    "tar": "^7.5.11",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.56.0",
     "vite": "^7.3.1",

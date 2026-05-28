@@ -11,7 +11,7 @@ import { t } from '../lib/i18n'
 import { fetchLatestRelease, truncateNotes } from '../lib/comfyui-releases'
 import { buildChannelCards, buildChannelLabelMap } from '../lib/channel-cards'
 import type { ChannelDef } from '../lib/channel-cards'
-import { buildLaunchSettingsFields } from './common/launchSettingsFields'
+import { buildLaunchSettingsFields, buildSharedPathsField } from './common/launchSettingsFields'
 import type { InstallationRecord } from '../installations'
 import type {
   SourcePlugin,
@@ -189,7 +189,7 @@ export const portable: SourcePlugin = {
 
     const updateFields: Record<string, unknown>[] = [
       { id: 'updateChannel', label: t('portable.updateChannel'), value: channel, editable: true,
-        refreshSection: true, onChangeAction: 'check-update', editType: 'channel-cards', options: channelOptions, tooltip: t('tooltips.updateChannel') },
+        refreshSection: true, editType: 'channel-cards', options: channelOptions, tooltip: t('tooltips.updateChannel') },
     ]
     const updateActions: Record<string, unknown>[] = [
       { id: 'check-update', label: t('actions.checkForUpdate'), style: 'default', enabled: installed },
@@ -208,14 +208,18 @@ export const portable: SourcePlugin = {
         fields: buildLaunchSettingsFields(installation, { defaultLaunchArgs: DEFAULT_LAUNCH_ARGS, defaultBrowserPartition: 'unique' }),
       },
       {
+        tab: 'storage',
+        fields: [buildSharedPathsField(installation)],
+      },
+      {
         title: 'Actions',
         pinBottom: true,
         actions: [
           launchAction(installed, !installed ? t('errors.installNotReady') : undefined),
           openFolderAction(installation.installPath),
           migrateToStandaloneAction(installed),
-          deleteAction(installation),
           untrackAction(),
+          deleteAction(installation),
         ],
       },
     )

@@ -1,7 +1,7 @@
 import { useI18n } from 'vue-i18n'
 import { useSessionStore } from '../stores/sessionStore'
 import { useInstallationStore } from '../stores/installationStore'
-import { useModal } from './useModal'
+import { useDialogs } from './useDialogs'
 
 /**
  * Guard that checks whether another local ComfyUI instance is already running
@@ -11,7 +11,7 @@ export function useLocalInstanceGuard() {
   const { t } = useI18n()
   const sessionStore = useSessionStore()
   const installationStore = useInstallationStore()
-  const modal = useModal()
+  const dialogs = useDialogs()
 
   /**
    * Check if another local instance is running before launching.
@@ -42,27 +42,31 @@ export function useLocalInstanceGuard() {
 
     const names = runningLocal.map((r) => r.name).join(', ')
 
-    const choice = await modal.select({
+    // Two non-cancel actions in the footer. The primary (rightmost) is
+    // "Close & Launch New" — the expected path when the user wants to
+    // switch instances; the secondary is "Launch Anyway" (additive: runs
+    // both side by side). Header ✕ carries the dismiss affordance since
+    // the footer is full. Both use brand tones (no red) — closing the
+    // prior instance to launch a new one is normal, not destructive.
+    const choice = await dialogs.confirm({
       title: t('launch.instanceRunningTitle'),
       message: t('launch.instanceRunningMessage', { name: names }),
-      items: [
-        {
-          value: 'proceed',
-          label: t('launch.instanceRunningProceed'),
-        },
-        {
-          value: 'replace',
-          label: t('launch.instanceRunningReplace'),
-        },
-      ],
+      confirmLabel: t('launch.instanceRunningReplace'),
+      tone: 'primary',
+      secondaryLabel: t('launch.instanceRunningProceed'),
+      secondaryTone: 'default',
+      showCancel: false,
+      showCloseIcon: true,
     })
 
-    if (choice === 'replace') {
+    // Primary → close the running instance(s), then launch.
+    if (choice === 'primary') {
       await Promise.all(runningLocal.map((r) => window.api.stopComfyUI(r.id)))
       return true
     }
 
-    return choice === 'proceed'
+    // Secondary → launch alongside the running instance(s).
+    return choice === 'secondary'
   }
 
   return { checkBeforeLaunch }

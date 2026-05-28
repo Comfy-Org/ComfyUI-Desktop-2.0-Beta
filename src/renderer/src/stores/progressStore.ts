@@ -25,6 +25,18 @@ export interface Operation {
    *  ProgressModal's footer can swap Reboot for a no-Reboot finished
    *  state and the success path can auto-detach the host. */
   destroysInstance: boolean
+  /** Mirrors `ShowProgressOpts.chainSpan`. When set, ProgressModal's
+   *  unified bar maps the install leg to 0–70% and the launch leg to
+   *  70–100% so the user sees one continuous 0→100% journey instead of
+   *  the bar hitting 100 mid-install and stalling through the launch
+   *  tail. Standalone ops leave this unset. */
+  chainSpan: 'install' | 'launch' | null
+  /** Optional success-terminal screen rendered by ProgressModal in
+   *  place of the auto-close. Picker-driven mutating-non-launch ops opt
+   *  in to surface a follow-up choice (e.g. `[Go to Dashboard | Open
+   *  Instance]`) so the user can decide whether to enter the app after
+   *  the op completes. */
+  successTerminal: NonNullable<ShowProgressOpts['successTerminal']> | null
   steps: ProgressStep[] | null
   activePhase: string | null
   activePercent: number
@@ -53,8 +65,11 @@ export const useProgressStore = defineStore('progress', () => {
 
   const operations = reactive(new Map<string, Operation>())
 
-  // Listen for async error detail updates (e.g. locking process names resolved after the initial error)
-  window.api.onErrorDetail((data: ErrorDetailData) => {
+  // Listen for async error detail updates (e.g. locking process names resolved after the initial error).
+  // Guarded — the picker popup's `window.api` shim does not forward
+  // `onErrorDetail`, and a hard call would throw at store construction
+  // and silently blank the entire ComfyUISettingsContent right pane.
+  window.api.onErrorDetail?.((data: ErrorDetailData) => {
     const op = operations.get(data.installationId)
     if (op?.error) {
       op.error = data.message
@@ -92,8 +107,19 @@ export const useProgressStore = defineStore('progress', () => {
     returnTo?: string
     opKind?: ShowProgressOpts['opKind']
     destroysInstance?: boolean
+    chainSpan?: ShowProgressOpts['chainSpan']
+    successTerminal?: ShowProgressOpts['successTerminal']
   }): void {
-    const { installationId, title, apiCall, returnTo, opKind, destroysInstance } = opts
+    const {
+      installationId,
+      title,
+      apiCall,
+      returnTo,
+      opKind,
+      destroysInstance,
+      chainSpan,
+      successTerminal,
+    } = opts
 
     cleanupOperation(installationId)
 
@@ -106,6 +132,8 @@ export const useProgressStore = defineStore('progress', () => {
       returnTo,
       opKind: opKind ?? 'generic',
       destroysInstance: !!destroysInstance,
+      chainSpan: chainSpan ?? null,
+      successTerminal: successTerminal ?? null,
       steps: null,
       activePhase: null,
       activePercent: -1,

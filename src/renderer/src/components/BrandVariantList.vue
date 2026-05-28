@@ -18,21 +18,14 @@ const { t } = useI18n()
 </script>
 
 <template>
-  <div
-    class="brand-variant-list"
-    role="radiogroup"
-    :aria-label="ariaLabel"
-  >
+  <div class="brand-variant-list" role="radiogroup" :aria-label="ariaLabel">
     <button
       v-for="opt in options"
       :key="opt.value"
       type="button"
       role="radio"
       :aria-checked="selectedValue === opt.value"
-      :class="[
-        'brand-variant-row',
-        { 'brand-variant-row--selected': selectedValue === opt.value }
-      ]"
+      :class="['brand-variant-row', { 'brand-variant-row--selected': selectedValue === opt.value }]"
       @click="$emit('select', opt)"
     >
       <span class="brand-variant-row__icon" aria-hidden="true">
@@ -113,7 +106,7 @@ const { t } = useI18n()
   width: 40px;
   height: 40px;
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--chooser-surface-bg);
   overflow: hidden;
 }
 .brand-variant-row__icon img {

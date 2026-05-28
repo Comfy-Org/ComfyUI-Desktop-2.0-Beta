@@ -4,6 +4,7 @@
 import { ref, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useModal } from '../composables/useModal'
+import { useActionGuard } from '../composables/useActionGuard'
 import { ChevronDown } from 'lucide-vue-next'
 import { emitTelemetryAction, toCountBucket } from '../lib/telemetry'
 import SnapshotInspector from './SnapshotInspector.vue'
@@ -42,6 +43,7 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const modal = useModal()
+const actionGuard = useActionGuard()
 
 const listData = ref<SnapshotListData | null>(null)
 const loading = ref(true)
@@ -156,17 +158,17 @@ async function loadDiff(mode: 'previous' | 'current'): Promise<void> {
 
 async function saveSnapshot(): Promise<void> {
   const label = await modal.prompt({
-    title: t('standalone.snapshotSaveTitle'),
-    message: t('standalone.snapshotSaveMessage'),
+    title: t('standalone.snapshotCreateTitle'),
+    message: t('standalone.snapshotCreateMessage'),
     placeholder: t('standalone.snapshotLabelPlaceholder'),
-    confirmLabel: t('snapshots.saveSnapshot'),
+    confirmLabel: t('snapshots.createSnapshot'),
     required: false,
   })
   if (label === null) return
   try {
     await window.api.runAction(props.installationId, 'snapshot-save', { label: label || undefined })
   } catch (err: unknown) {
-    await modal.alert({ title: t('snapshots.saveSnapshot'), message: (err as Error).message || String(err) })
+    await modal.alert({ title: t('snapshots.createSnapshot'), message: (err as Error).message || String(err) })
     return
   }
   emitTelemetryAction('desktop2.snapshot.flow', {
@@ -216,6 +218,15 @@ async function confirmRestore(): Promise<void> {
     restorePreviewFilename.value = null
     restorePreviewDiff.value = null
 
+    // Gate the import-confirm step behind the busy guard — confirm
+    // writes the staged snapshots into the install and immediately
+    // auto-restores from the newest one, so racing an in-flight op
+    // (copy / release-update / migrate / running launch) would clobber
+    // both surfaces.
+    if (!await actionGuard.checkBeforeAction(
+      props.installationId,
+      t('snapshots.importSnapshots'),
+    )) return
     const result = await window.api.importSnapshotsConfirm(props.installationId)
     if (!result.ok) {
       if (result.message) {
@@ -338,7 +349,7 @@ async function confirmImportPreview(): Promise<void> {
 
     <div v-if="snapshots.length > 0 || !loading" class="snapshot-header">
       <button class="snapshot-save-btn" @click="saveSnapshot">
-        {{ t('snapshots.saveSnapshot') }}
+        {{ t('snapshots.createSnapshot') }}
       </button>
       <button class="snapshot-header-btn" @click="handleImport">
         {{ t('snapshots.importSnapshots') }}

@@ -30,10 +30,23 @@ import {
 } from './shared'
 import type { ComfyVersion, ComfyArgDef, InstallationRecord } from './shared'
 import * as releaseCache from '../release-cache'
+import { runStartupReleaseChecks } from '../release-cache-startup'
+import { _broadcastToRenderer } from './shared'
 import { hasGitDir } from '../git'
 import { restoreSnapshotIntoInstallation } from '../standaloneMigration'
 import * as mainTelemetry from '../telemetry'
 import { recordIpcInvocation } from '../e2eOverrides'
+
+/** Fire-and-forget: refresh the shared ComfyUI release cache for the
+ *  channels these installs use, then re-broadcast `installations-changed`
+ *  so renderers re-pull statusTag (which drives the dashboard's
+ *  per-install "Update" pill). Gated inside the helper by a 1h floor
+ *  so it never spams GitHub on dashboard refreshes. */
+function _kickReleaseCachePrewarm(allInstalls: InstallationRecord[]): void {
+  void runStartupReleaseChecks(allInstalls, {
+    onRefreshed: () => _broadcastToRenderer('installations-changed', {})
+  }).catch(() => {})
+}
 
 /**
  * Apply the migration-source filter + per-install source enrichment
@@ -102,6 +115,13 @@ export function registerInstallationHandlers(): void {
 
     // Resolve versions from git state in the background.
     _resolveAndBroadcastVersions(visible).catch(() => {})
+
+    // Pre-warm the shared ComfyUI release cache so the dashboard /
+    // title-bar update pills reflect upstream state without requiring
+    // the user to open the picker's Update tab. Fire-and-forget;
+    // gated inside the helper by a 1h floor so dashboard refreshes
+    // don't spam GitHub.
+    _kickReleaseCachePrewarm(visible)
 
     return enriched
   })
@@ -404,6 +424,12 @@ export function registerInstallationHandlers(): void {
     recordIpcInvocation('get-detail-sections', installationId)
     const inst = await installations.get(installationId)
     if (!inst) return []
+    // Same prewarm side-effect as `get-installations` — covers the
+    // case where the renderer asks for sections of an install whose
+    // channel was never warmed (e.g. picker opens for an install
+    // added since last dashboard mount, or a freshly switched channel).
+    // The helper's 1h floor dedupes against the dashboard's prewarm.
+    _kickReleaseCachePrewarm([inst])
     const source = sourceMap[inst.sourceId]
     if (!source) {
       const actions = [untrackAction()]
@@ -422,17 +448,23 @@ export function registerInstallationHandlers(): void {
       ]
     }
     // Resolve commitsAhead for the `latest` channel against the install's
-    // own git checkout before building the channel cards — otherwise the
-    // "Latest from GitHub" preview falls back to `tag (sha)` instead of
-    // `tag+N (sha)`. The enrich helper short-circuits when commitsAhead
-    // is already populated or the install has no git dir, so this is a
-    // no-op for cloud installs and on repeat opens.
+    // own git checkout. Fire-and-forget — enrichment spawns up to three
+    // git child processes (fetch tags, fetch sha, rev-list) which can
+    // take seconds on a slow link and must not block the section render.
+    // When enrichment actually writes a new value, release-cache emits
+    // `release-cache-enriched` so the renderer can refresh in place.
+    // The helper short-circuits on already-enriched / no-git-dir, so
+    // repeat opens and cloud installs cost nothing.
     if (inst.installPath) {
       const comfyuiDir = path.join(inst.installPath, 'ComfyUI')
       if (hasGitDir(comfyuiDir)) {
-        try {
-          await releaseCache.enrichCommitsAhead(COMFYUI_REPO, comfyuiDir)
-        } catch { /* enrichment is best-effort; never block the section render */ }
+        void releaseCache.enrichCommitsAhead(COMFYUI_REPO, comfyuiDir).catch((err) => {
+          // Enrichment is best-effort; the channel card falls back to
+          // `tag (sha)` (a documented supported render path) when
+          // commitsAhead is unavailable. Log so the next bug report has
+          // a breadcrumb instead of silent failure.
+          console.warn('[get-detail-sections] enrichCommitsAhead failed:', err)
+        })
       }
     }
     return source.getDetailSections(inst)

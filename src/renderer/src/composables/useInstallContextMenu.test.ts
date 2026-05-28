@@ -32,6 +32,8 @@ const apiMock = {
   runAction: vi.fn().mockResolvedValue({ ok: true }),
   getDetailSections: vi.fn().mockResolvedValue([]),
   onErrorDetail: vi.fn(() => () => {}),
+  getSnapshots: vi.fn().mockResolvedValue({ snapshots: [] }),
+  exportSnapshot: vi.fn().mockResolvedValue({ ok: true }),
 }
 vi.stubGlobal('window', {
   ...window,
@@ -41,20 +43,28 @@ vi.stubGlobal('window', {
 const messages = {
   en: {
     chooser: {
-      manageInstall: 'Manage…',
-      menuUpdate: 'Update…',
-      menuMigrate: 'Migrate to Standalone…',
-      menuRestoreSnapshot: 'Restore Snapshot…',
+      manageInstall: 'Manage',
+      menuUpdate: 'Update',
+      menuMigrate: 'Migrate to Standalone',
+      menuRestoreSnapshot: 'Restore Snapshot',
       menuRevealInFolder: 'Open Folder',
-      menuDelete: 'Delete…',
+      menuDelete: 'Uninstall',
     },
     actions: {
       copyInstallation: 'Copy Install',
-      untrack: 'Untrack',
+      untrack: 'Forget',
+      untrackConfirmTitle: 'Forget Install',
+      untrackConfirmMessage:
+        'This will remove the install from the app. The files will not be deleted.',
       delete: 'Delete',
       deleteConfirmTitle: 'Delete Install',
       deleteConfirmMessage:
         'This will permanently delete the install and all its files. This cannot be undone.',
+      share: 'Share',
+    },
+    snapshots: {
+      noSnapshotsToShare: 'There are no snapshots to share yet.',
+      shareFailed: 'Could not share the snapshot.',
     },
     progress: { working: 'Working…' },
     running: { dismiss: 'Dismiss' },
@@ -286,5 +296,144 @@ describe('useInstallContextMenu — delete fast path (regression for #582)', () 
     expect(onShowProgress).not.toHaveBeenCalled()
     expect(apiMock.runAction).not.toHaveBeenCalled()
     expect(apiMock.getDetailSections).not.toHaveBeenCalled()
+  })
+})
+
+function mountHarnessWithManage(
+  onManage: (inst: Installation, options?: { initialTab?: string; autoAction?: string | null }) => void,
+): { menu: ReturnType<typeof useInstallContextMenu> } {
+  const pinia = createPinia()
+  setActivePinia(pinia)
+  const i18n = createI18n({ legacy: false, locale: 'en', messages })
+  let menu!: ReturnType<typeof useInstallContextMenu>
+  _harnessSetup = () => {
+    menu = useInstallContextMenu({ onManage })
+  }
+  mount(HarnessComponent, { global: { plugins: [pinia, i18n] } })
+  _harnessSetup = null
+  return { menu }
+}
+
+describe('useInstallContextMenu — copy-install routing', () => {
+  beforeEach(() => {
+    apiMock.runAction.mockClear()
+  })
+
+  it('copy-install routes through onManage with autoAction "copy" and does not call runAction directly', async () => {
+    const onManage = vi.fn<(inst: Installation, options?: { autoAction?: string | null }) => void>()
+    const inst = makeInstall()
+    const { menu } = mountHarnessWithManage(onManage)
+
+    await menu.triggerAction('copy-install', inst)
+
+    expect(onManage).toHaveBeenCalledTimes(1)
+    expect(onManage.mock.calls[0][0]).toBe(inst)
+    expect(onManage.mock.calls[0][1]).toEqual({ autoAction: 'copy' })
+    expect(apiMock.runAction).not.toHaveBeenCalled()
+  })
+})
+
+describe('useInstallContextMenu — untrack confirm-then-remove', () => {
+  beforeEach(() => {
+    apiMock.runAction.mockClear()
+    modalMock.confirm.mockReset()
+  })
+
+  it('shows a danger confirm and never opens the picker', async () => {
+    modalMock.confirm.mockResolvedValue(true)
+    const onManage = vi.fn()
+    const inst = makeInstall()
+    const { menu } = mountHarnessWithManage(onManage)
+
+    await menu.triggerAction('untrack', inst)
+
+    expect(modalMock.confirm).toHaveBeenCalledTimes(1)
+    const args = modalMock.confirm.mock.calls[0]![0]
+    expect(args.title).toBe('Forget Install')
+    expect(args.confirmLabel).toBe('Forget')
+    expect(args.confirmStyle).toBe('danger')
+    expect(onManage).not.toHaveBeenCalled()
+  })
+
+  it('on confirm true, dispatches the `remove` action once', async () => {
+    modalMock.confirm.mockResolvedValue(true)
+    const inst = makeInstall()
+    const { menu } = mountHarnessWithManage(() => {})
+
+    await menu.triggerAction('untrack', inst)
+
+    expect(apiMock.runAction).toHaveBeenCalledTimes(1)
+    expect(apiMock.runAction).toHaveBeenCalledWith(inst.id, 'remove')
+  })
+
+  it('on confirm cancel, does not dispatch the action', async () => {
+    modalMock.confirm.mockResolvedValue(false)
+    const inst = makeInstall()
+    const { menu } = mountHarnessWithManage(() => {})
+
+    await menu.triggerAction('untrack', inst)
+
+    expect(apiMock.runAction).not.toHaveBeenCalled()
+  })
+})
+
+describe('useInstallContextMenu — share (export latest snapshot)', () => {
+  beforeEach(() => {
+    apiMock.getSnapshots.mockReset()
+    apiMock.exportSnapshot.mockReset()
+    modalMock.alert.mockReset()
+  })
+
+  it('shows the Share item for an installed local install', () => {
+    const { menu } = mountHarness(makeInstall({ sourceCategory: 'local' }))
+    expect(findItem(menu.ctxMenuItems.value, 'share')).toBeTruthy()
+  })
+
+  it('hides the Share item for cloud installs (snapshots are local-only)', () => {
+    const { menu } = mountHarness(makeInstall({ sourceCategory: 'cloud' }))
+    expect(findItem(menu.ctxMenuItems.value, 'share')).toBeUndefined()
+  })
+
+  it('exports the newest snapshot and shows no alert on success', async () => {
+    apiMock.getSnapshots.mockResolvedValue({
+      snapshots: [{ filename: 'snap-newest.json' }, { filename: 'snap-older.json' }],
+    })
+    apiMock.exportSnapshot.mockResolvedValue({ ok: true })
+    const inst = makeInstall()
+    const { menu } = mountHarnessWithManage(() => {})
+
+    await menu.triggerAction('share', inst)
+
+    expect(apiMock.exportSnapshot).toHaveBeenCalledWith(inst.id, 'snap-newest.json')
+    expect(modalMock.alert).not.toHaveBeenCalled()
+  })
+
+  it('alerts and skips export when there are no snapshots', async () => {
+    apiMock.getSnapshots.mockResolvedValue({ snapshots: [] })
+    const inst = makeInstall()
+    const { menu } = mountHarnessWithManage(() => {})
+
+    await menu.triggerAction('share', inst)
+
+    expect(apiMock.exportSnapshot).not.toHaveBeenCalled()
+    expect(modalMock.alert).toHaveBeenCalledTimes(1)
+    expect(modalMock.alert.mock.calls[0]![0].message).toBe('There are no snapshots to share yet.')
+  })
+
+  it('surfaces a real export error but stays silent on a dialog cancel', async () => {
+    apiMock.getSnapshots.mockResolvedValue({ snapshots: [{ filename: 'snap.json' }] })
+    const inst = makeInstall()
+    const { menu } = mountHarnessWithManage(() => {})
+
+    // Cancel — export IPC returns { ok: false } with no message.
+    apiMock.exportSnapshot.mockResolvedValueOnce({ ok: false })
+    await menu.triggerAction('share', inst)
+    expect(modalMock.alert).not.toHaveBeenCalled()
+
+    // Real failure — a message is present, so it surfaces.
+    apiMock.exportSnapshot.mockResolvedValueOnce({ ok: false, message: 'Disk full' })
+    await menu.triggerAction('share', inst)
+    expect(modalMock.alert).toHaveBeenCalledTimes(1)
+    expect(modalMock.alert.mock.calls[0]![0].message).toBe('Disk full')
   })
 })

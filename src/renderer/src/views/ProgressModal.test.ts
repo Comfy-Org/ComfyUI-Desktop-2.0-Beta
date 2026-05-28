@@ -123,6 +123,7 @@ function snapOp(installationId: string, patch: Partial<Operation> = {}): Operati
     returnTo: 'list',
     opKind: 'destructive',
     destroysInstance: false,
+    chainSpan: null,
     steps: null,
     activePhase: null,
     activePercent: -1,
@@ -268,8 +269,10 @@ describe('ProgressModal — brand branch state transitions', () => {
     expect(body.classList('.brand-progress__banner')).toContain('brand-progress__banner--success')
     expect(body.selectorText('.brand-progress__banner')).toContain('Completed successfully')
 
-    // No buttons during the auto-close window — success self-dismisses.
-    expect(body.exists('.brand-progress__footer')).toBe(false)
+    // No action buttons during the auto-close window — success self-dismisses.
+    // The footer band itself stays mounted (it also hosts the logs accordion
+    // after the redesign), so assert on the buttons specifically.
+    expect(body.exists('.brand-progress__footer-btn')).toBe(false)
 
     // The auto-close watcher fires after ~700ms; advancing timers should
     // emit a `close` event so the host can tear down the takeover.
@@ -288,7 +291,7 @@ describe('ProgressModal — brand branch state transitions', () => {
     expect(body.exists('.brand-progress__banner')).toBe(true)
     expect(body.classList('.brand-progress__banner')).toContain('brand-progress__banner--cancelled')
     expect(body.selectorText('.brand-progress__banner')).toContain('Operation was cancelled')
-    expect(body.exists('.brand-progress__footer')).toBe(false)
+    expect(body.exists('.brand-progress__footer-btn')).toBe(false)
 
     vi.advanceTimersByTime(800)
     await flushPromises()
@@ -495,12 +498,146 @@ describe('ProgressModal — brand branch state transitions', () => {
 
     // Headline (curated label).
     expect(body.text()).toContain('Downloading ComfyUI…')
-    // Substatus (raw main-side detail with bytes/speed/ETA).
+    // Substatus (rich main-side detail with bytes/speed/ETA). The view
+    // runs `formattedSubStatus` over the raw string so byte counts >= 4
+    // digits get locale grouping (`2100 MB` → `2,100 MB`) for readability.
+    // `1050` stays as-is because it's followed by `/`, not a byte unit.
     expect(body.exists('.brand-progress__substatus')).toBe(true)
     const subText = body.selectorText('.brand-progress__substatus')
-    expect(subText).toContain('1050 / 2100 MB')
+    expect(subText).toContain('1050 / 2,100 MB')
     expect(subText).toContain('22 MB/s')
     expect(subText).toContain('~1m remaining')
+  })
+})
+
+describe('ProgressModal — unified bar (install→launch chained 0→100)', () => {
+  beforeEach(() => {
+    // Match the helpers the rest of this file's specs already use —
+    // `createPinia` + `installMockApi` are what `beforeEach` at the top
+    // of the brand-branch describe block runs.
+    setActivePinia(createPinia())
+    installMockApi()
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  function barWidth(): string {
+    const el = document.body.querySelector('.brand-progress__bar-fill') as HTMLElement | null
+    return el?.style.width ?? ''
+  }
+  function barPercent(): number {
+    const m = barWidth().match(/^([\d.]+)%$/)
+    return m ? Number(m[1]) : NaN
+  }
+
+  it('caps unifiedPercent at 70% for a chainSpan=install op even at 100% real progress', async () => {
+    // The install leg of an install→launch chain maps its full 0→100%
+    // into the unified bar's 0–70% slot, leaving the remaining 30% for
+    // the launch leg. This is what stops the bar from saturating at 100
+    // mid-install and then stalling there through the launch tail.
+    await mountWithOp('inst-chain-install', {
+      opKind: 'install',
+      chainSpan: 'install',
+      steps: [{ phase: 'download', label: 'Download' }],
+      activePhase: 'download',
+      activePercent: 100,
+      _globalFloor: 100,
+    })
+    expect(barPercent()).toBeCloseTo(70, 1)
+  })
+
+  it('renders the unified bar for launch ops (no separate stepper)', async () => {
+    // The single 0→100% bar spans the whole install→launch journey.
+    // Launch ops render the SAME bar element as install ops — only the
+    // caption underneath swaps to the rolling launchCaption.
+    const { body } = await mountWithOp('inst-launch-bar', {
+      opKind: 'launch',
+      chainSpan: 'launch',
+    })
+    expect(body.exists('.brand-progress__bar')).toBe(true)
+    expect(body.exists('.brand-progress__bar-fill')).toBe(true)
+  })
+
+  it('starts a chainSpan=launch op in the 70% region', async () => {
+    // Launch leg of the chain → 70 + launchPercent*0.3. At
+    // launchActiveIndex=0 and zero elapsed, launchPercent ~= 0, so the
+    // bar reads ~70%. No discontinuity from where install left off.
+    await mountWithOp('inst-chain-launch', {
+      opKind: 'launch',
+      chainSpan: 'launch',
+    })
+    expect(barPercent()).toBeGreaterThanOrEqual(70)
+    expect(barPercent()).toBeLessThan(75)
+  })
+
+  it('rolls launchCaption through phases on the 900ms caption timer', async () => {
+    // Standalone launch: each 900ms tick bumps captionFloor by 1, which
+    // is what guarantees the narrative phases ("security scan", "mount
+    // libraries") each get airtime even on fast machines where stdout
+    // races ahead. The clamp logic lives in `launchActiveIndex`.
+    const { body } = await mountWithOp('inst-launch-roll', { opKind: 'launch' })
+
+    // Tick 0: securityScan.
+    expect(body.selectorText('.brand-progress__caption')).toContain('security')
+    vi.advanceTimersByTime(900 + 50)
+    await flushPromises()
+    // Tick 1: mountLibraries.
+    expect(body.selectorText('.brand-progress__caption')).toMatch(/mount|librar/i)
+  })
+
+  it('snaps unifiedPercent toward 100 for chainSpan=launch when stdout signals server-ready', async () => {
+    // Production sequence: launch starts → narrative phases tick along
+    // on the 900ms timer → eventually "Uvicorn running on" arrives in
+    // stdout. The snap-to-100 fires when BOTH `launchActiveIndex === 4`
+    // AND `stdoutStep === 4`.
+    //
+    // The 1-per-tick clamp in `launchActiveIndex` means stdout alone
+    // can't fast-forward to row 4 — captionFloor has to catch up.
+    // So we let the timer advance the floor first, then inject the
+    // stdout signal that fires the snap.
+    //
+    // (Watcher has no `{ immediate: true }`, so seeding `terminalOutput`
+    // at mount-time wouldn't fire the regex. Mutating after mount is
+    // what production's IPC chunks do.)
+    await mountWithOp('inst-launch-ready', {
+      opKind: 'launch',
+      chainSpan: 'launch',
+      terminalOutput: '',
+    })
+    // Five timer ticks → captionFloor reaches 4 (startingServer).
+    vi.advanceTimersByTime(900 * 5 + 100)
+    await flushPromises()
+    // Now feed the server-ready signal — stdoutStep flips to 4. Combined
+    // with captionFloor=4 the active index lands at 4 and launchPercent
+    // shortcuts to 100 → unifiedPercent = 70 + 30 = 100.
+    const store = useProgressStore()
+    const op = store.operations.get('inst-launch-ready')!
+    op.terminalOutput = 'Uvicorn running on http://127.0.0.1:8188\n'
+    await flushPromises()
+    // One extra tick of the 250ms launch-percent ticker so the bar's
+    // reactive readout catches the new active index.
+    vi.advanceTimersByTime(300)
+    await flushPromises()
+    expect(barPercent()).toBeCloseTo(100, 1)
+  })
+
+  it('uses friendlyCaption (not launchCaption) for non-launch ops', async () => {
+    const { body } = await mountWithOp('inst-install-only', {
+      opKind: 'install',
+      steps: [{ phase: 'download', label: 'Download' }],
+      activePhase: 'download',
+      activePercent: 40,
+    })
+    // The caption row is shared between launch and non-launch ops; the
+    // content is what differs. For an install op with `activePhase=download`
+    // we expect the curated `progress.phaseLabel.download` ("Downloading
+    // ComfyUI…"), NOT the launch rolling caption.
+    const caption = body.selectorText('.brand-progress__caption')
+    expect(caption).toContain('Downloading')
+    expect(caption).not.toMatch(/security scan|mount.*librar/i)
   })
 })
 

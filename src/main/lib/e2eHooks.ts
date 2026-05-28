@@ -18,9 +18,14 @@ import {
   type DownloadsTrayState,
 } from './comfyDownloadManager'
 import { _test_setUpdateState, type AppUpdateState } from './updater'
+import {
+  get as _releaseCacheGet,
+  _test_ageEntries as _test_ageReleaseCacheEntries,
+} from './release-cache'
 import { _test_getOpenTitlePopupBounds } from '../popups/titlePopup'
 import { returnToDashboard } from '../host/detach'
-import { comfyWindows, isInstallHost } from '../host/registry'
+import { comfyWindows, getEntryByInstallationId, isInstallHost } from '../host/registry'
+import { ensurePanelView } from '../host/panelView'
 import {
   installUpdateOverrides,
   INSTALL_UPDATE_GLOBAL_KEY,
@@ -29,7 +34,22 @@ import {
   getShellOpenExternalCalls,
   resetShellOpenExternalCalls,
 } from './e2eOverrides'
-import { _test_addRunningSession, _test_clearRunningSessions } from './ipc/shared'
+import {
+  _runningSessions,
+  _test_addRunningSession,
+  _test_clearRunningSessions,
+} from './ipc/shared'
+
+export interface RunningSessionSnapshot {
+  /** Process pid (null for synthetic seeded sessions with no real proc). */
+  pid: number | null
+  /** Wall-clock ms when the session was registered — lets the restart
+   *  cluster assert a `_runningSessions.set(...)` happened between two
+   *  snapshots without needing a real pid delta. */
+  startedAt: number
+  port: number
+  url: string | undefined
+}
 
 interface SetInstallUpdateOpts {
   /** Omit to apply the override globally (matches every installationId). */
@@ -75,6 +95,29 @@ export interface E2EHelpers {
   seedRunningSession(opts: { installationId: string; installationName: string }): void
   /** Drop every synthetic session registered via `seedRunningSession`. */
   clearRunningSessions(): void
+  /** Snapshot the live `_runningSessions` entry for `installationId`
+   *  (real or seeded). Returns `null` when no session is registered.
+   *  Used by the restart cluster to assert a stop→launch chain produced
+   *  a fresh registration (new `startedAt`, new pid). */
+  getRunningSessionSnapshot(installationId: string): RunningSessionSnapshot | null
+  /** Read the `checkedAt` ms timestamp from the shared release cache
+   *  entry for `(repo, channel)`. Returns `null` when no entry exists
+   *  yet. Used by the periodic-poll lifecycle test to observe that the
+   *  background timer ran a real second fetch. */
+  getReleaseCacheCheckedAt(repo: string, channel: string): number | null
+  /** Force every entry in the shared release cache to the given
+   *  `checkedAt` timestamp so the renderer-side stale-cache watcher
+   *  in `ComfyUISettingsContent` treats the data as stale and auto-
+   *  fires `check-update` on the next picker open. */
+  ageReleaseCache(maxCheckedAt: number): void
+  /** Mount the install-backed panelView for `installationId` if it
+   *  doesn't already exist. The chooser-pick attach in `onLaunch`
+   *  drops the chooser PanelApp without remounting a fresh
+   *  install-backed one (production lazily mounts on Settings click /
+   *  comfy-lifecycle body). Tests that need `panel.html` reachable
+   *  immediately after a launch call this to skip the lazy step.
+   *  Returns `true` if the entry exists, `false` otherwise. */
+  ensureInstallPanelView(installationId: string): boolean
 }
 
 export function registerE2EHooks(): void {
@@ -107,6 +150,26 @@ export function registerE2EHooks(): void {
       _test_addRunningSession(opts.installationId, opts.installationName)
     },
     clearRunningSessions: _test_clearRunningSessions,
+    getRunningSessionSnapshot(installationId) {
+      const session = _runningSessions.get(installationId)
+      if (!session) return null
+      return {
+        pid: session.proc?.pid ?? null,
+        startedAt: session.startedAt,
+        port: session.port,
+        url: session.url,
+      }
+    },
+    getReleaseCacheCheckedAt(repo, channel) {
+      return _releaseCacheGet(repo, channel)?.checkedAt ?? null
+    },
+    ageReleaseCache: _test_ageReleaseCacheEntries,
+    ensureInstallPanelView(installationId) {
+      const entry = getEntryByInstallationId(installationId)
+      if (!entry || entry.window.isDestroyed()) return false
+      ensurePanelView(entry.windowKey, entry, 'comfy-lifecycle')
+      return true
+    },
   }
   ;(globalThis as unknown as { __e2e: E2EHelpers }).__e2e = helpers
 }

@@ -177,11 +177,10 @@ export function useTitleBarMenus(opts: UseTitleBarMenusOpts): TitleBarMenusApi {
 
   function handleDownloadsTray(): void {
     opts.hideTip()
-    if (isMenuOpen.value) {
-      opts.bridge?.dismissFileMenu()
-      return
-    }
-    if (Date.now() - menuClosedAt.downloads < MENU_REOPEN_GUARD_MS) return
+    /** Toggle + reopen suppression live in main (see `click-downloads-
+     *  tray` handler in titlePopup.ts) — the renderer just dispatches.
+     *  Reading `isMenuOpen` here used to race the blur-driven close,
+     *  causing the "click closes, immediately reopens" symptom. */
     opts.bridge?.clickDownloadsTray(anchorDownloadsBelow(opts.downloadsBtnRef.value))
   }
 

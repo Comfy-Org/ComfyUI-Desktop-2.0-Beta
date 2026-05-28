@@ -18,15 +18,16 @@
 }
 
 /* PP Formula — display face for brand-refreshed takeover headings.
- * Single weight (Extrabold 800); body/lead text stays Inter. Loading
- * more weights would bloat the renderer bundle for one usage site. */
-@font-face {
-  font-family: 'PP Formula';
-  src: url('./fonts/PPFormula-Extrabold.otf') format('opentype');
-  font-weight: 800;
-  font-style: normal;
-  font-display: block;
-}
+ * Single weight (Extrabold 800); body/lead text stays Inter.
+ *
+ * PP Formula is a proprietary, license-restricted font (Pangram Pangram) and
+ * must NOT be committed to this public repo, so it is NOT declared with a CSS
+ * @font-face here. Instead it is registered at runtime by
+ * src/renderer/src/assets/proprietaryFonts.ts via the FontFace API. That keeps
+ * the binary out of the bundle (the build never depends on the file existing,
+ * which would break OSS/CI builds), and a relative URL resolves under file://.
+ * When the font is absent the --font-display stack falls back to Inter. The
+ * file is fetched at build time from a private bucket (scripts/fetch-font.mjs). */
 
 /*
  * Design tokens from renderer/styles.css — extracted into CSS custom properties
@@ -46,7 +47,8 @@
   --color-surface: #262729;
   --color-border: #494a50;
   --color-border-hover: #3c3d42;
-  --color-danger: #b33a3a;
+  --color-danger: #e05858;
+  --color-danger-hover: #ef6b6b;
   --color-terminal-bg: #111112;
 
   /* Comfy brand neutral ramp — single canonical scale. Yellow at 50,
@@ -85,7 +87,8 @@
   --titlebar-icon: var(--color-text-muted);
   --border: #494a50;
   --border-hover: #3c3d42;
-  --danger: #b33a3a;
+  --danger: #e05858;
+  --danger-hover: #ef6b6b;
   --warning: #fd9903;
   --success: #00cd72;
   --info: #58a6ff;
@@ -150,6 +153,12 @@
     0 20px 24px -4px rgba(10, 13, 18, 0.4), 0 8px 8px -4px rgba(10, 13, 18, 0.25),
     0 3px 3px -1.5px rgba(10, 13, 18, 0.2);
 
+  /* Tooltip primitive */
+  --tooltip-bg: #211927;
+  --tooltip-border: #38303d;
+  --tooltip-fg: #ffffff;
+  --z-tooltip: 10001;
+
   /* Takeover fluid type + spacing — Utopia clamp, anchored 1024px → 1920px. */
   --takeover-fs-caption: clamp(0.75rem, 0.6071rem + 0.2232vw, 0.875rem); /* 12→14px */
   --takeover-fs-body: clamp(0.875rem, 0.7321rem + 0.2232vw, 1rem); /* 14→16px */
@@ -179,6 +188,7 @@
   --border: #b4b4b4;
   --border-hover: #d9d9d9;
   --danger: #f75951;
+  --danger-hover: #ff7a73;
   --warning: #fcbf64;
   --success: #00cd72;
   --info: #2563eb;
@@ -228,6 +238,12 @@
    * value until light brand parity ships. */
   --modal-surface-bg: #27202d;
   --modal-surface-border: var(--chooser-surface-border);
+
+  /* Tooltip primitive — mirror of dark-theme block until light parity. */
+  --tooltip-bg: #211927;
+  --tooltip-border: #38303d;
+  --tooltip-fg: #ffffff;
+  --z-tooltip: 10001;
 
   /* Takeover fluid type + spacing — mirror of dark-theme block. */
   --takeover-fs-caption: clamp(0.75rem, 0.6071rem + 0.2232vw, 0.875rem);
@@ -727,8 +743,8 @@ button.brand-ghost:hover:not([disabled]) {
 .brand-checkbox input[type='checkbox'] {
   appearance: none;
   flex: 0 0 auto;
-  width: 18px;
-  height: 18px;
+  width: 14px;
+  height: 14px;
   margin: 4px 0 0 0;
   border: 1px solid var(--brand-surface-border-hover);
   border-radius: 4px;
@@ -3140,17 +3156,26 @@ input[type='checkbox']:checked::after {
     background-color 100ms ease,
     opacity 100ms ease;
 }
-.context-menu-item:hover:not(:disabled),
-.context-menu-item:focus-visible:not(:disabled) {
+.context-menu-item:hover:not(.disabled),
+.context-menu-item:focus-visible:not(.disabled) {
   background: var(--brand-surface-bg-hover);
   outline: none;
   color: var(--text);
 }
-.context-menu-item:disabled,
+/* Disabled via the `.disabled` class + `aria-disabled` (not the native
+   `disabled` attribute) so the hover title tooltip — which Chromium
+   suppresses on natively-disabled buttons — still surfaces the reason. */
 .context-menu-item.disabled {
   color: var(--text-muted);
   cursor: default;
   opacity: 0.5;
+}
+.context-menu-item.is-danger {
+  color: var(--danger);
+}
+.context-menu-item.is-danger:hover:not(.disabled),
+.context-menu-item.is-danger:focus-visible:not(.disabled) {
+  color: var(--danger-hover);
 }
 .context-menu-separator {
   height: 1px;

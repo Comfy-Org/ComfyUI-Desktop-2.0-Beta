@@ -1,5 +1,6 @@
 import { BrowserWindow } from 'electron'
 import { resolveTheme } from './ipc/shared'
+import { TITLEBAR_BG } from './theme'
 
 /** Height (px) of the custom title bar — must match the CSS `--titlebar-height`. */
 export const TITLEBAR_HEIGHT = 36
@@ -7,27 +8,26 @@ export const TITLEBAR_HEIGHT = 36
 /** Position of macOS traffic-light buttons, vertically centered within the title bar. */
 export const TRAFFIC_LIGHT_POSITION: Electron.Point = { x: 13, y: Math.round((TITLEBAR_HEIGHT - 16) / 2) }
 
-/** Colors must stay in sync with `--titlebar-bg` in `src/renderer/src/assets/main.css`.
+/** The single source of truth for the OS window-controls overlay color is
+ *  {@link TITLEBAR_BG}, which mirrors `--titlebar-bg` (dark `--neutral-800`)
+ *  in `src/renderer/src/assets/main.css`.
+ *
  *  The title bar is locked to the dark surface for now regardless of the
  *  app theme — light-theme support across every title-bar surface (Vue
  *  pills, dropdown popups, tooltips, OS overlay) hasn't been audited yet,
  *  and rendering the bar in two themes while half the chrome inside it
  *  isn't theme-aware looks broken. Once light theme is plumbed through
  *  every title-bar surface, restore the `isDark`-branched values below.
- *  TODO(titlebar-light-theme): re-enable `color: isDark ? '#211927' : '#e9e9e9'`
- *  and `symbolColor: isDark ? '#dddddd' : '#333333'`. */
+ *  TODO(titlebar-light-theme): re-enable `color: isDark ? TITLEBAR_BG : '#e9e9e9'`
+ *  and `symbolColor: isDark ? '#dddddd' : '#333333'`.
+ *
+ *  Used by EVERY window — launcher, install-less chooser hosts, and
+ *  install-backed ComfyUI instance windows — so the min/max/close region
+ *  is identical to the Vue bar above it everywhere. Instance windows must
+ *  NOT adapt this to ComfyUI's in-page theme (see issue #609). */
 export function titleBarOverlayForTheme(_isDark: boolean): Electron.TitleBarOverlayOptions {
   return {
-    color: '#211927',
-    symbolColor: '#dddddd',
-    height: TITLEBAR_HEIGHT,
-  }
-}
-
-/** Overlay colors for ComfyUI windows — matches `--comfy-menu-bg` from the frontend design system. */
-export function comfyTitleBarOverlay(): Electron.TitleBarOverlayOptions {
-  return {
-    color: '#353535',
+    color: TITLEBAR_BG,
     symbolColor: '#dddddd',
     height: TITLEBAR_HEIGHT,
   }
@@ -35,8 +35,8 @@ export function comfyTitleBarOverlay(): Electron.TitleBarOverlayOptions {
 
 /**
  * Update the title bar overlay on the main launcher window only.
- * ComfyUI instance windows use their own fixed overlay color
- * (matching the frontend's --comfy-menu-bg) and should not be updated.
+ * Other windows set their overlay at creation via `titleBarOverlayForTheme`;
+ * this is the live-repaint path for the launcher when the theme setting flips.
  */
 let _mainWindowId: number | null = null
 

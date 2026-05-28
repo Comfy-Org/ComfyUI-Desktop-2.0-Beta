@@ -5,6 +5,7 @@ import { useProgressStore } from '../stores/progressStore'
 import { useModal } from './useModal'
 import { revealInFolderLabel } from './usePlatform'
 import { progressOpKindForActionId, destroysInstanceForActionId } from '../lib/progressOpKind'
+import { shareLatestSnapshot } from '../lib/snapshots'
 import type { ContextMenuItem } from '../types/context-menu'
 import type { Installation, ShowProgressOpts } from '../types/ipc'
 
@@ -60,6 +61,7 @@ export type InstallMenuActionId =
   | 'migrate'
   | 'restore-snapshot'
   | 'reveal-in-folder'
+  | 'share'
   | 'copy-install'
   | 'untrack'
   | 'delete'
@@ -72,10 +74,11 @@ export interface ManageOpenOptions {
 
 export function useInstallContextMenu(opts: {
   /** Open the per-install Manage… DetailModal overlay. The composable
-   *  funnels Update / Migrate / Restore Snapshot through this callback
-   *  with the appropriate `initialTab` / `autoAction` so the source-
-   *  side action machinery (confirms, prompts, showProgress) is reused.
-   *  The bare Manage… item passes no options. */
+   *  funnels Update / Migrate / Restore Snapshot / Copy Installation /
+   *  Untrack through this callback with the appropriate `initialTab` /
+   *  `autoAction` so the source-side action machinery (confirms,
+   *  prompts, disk-check, showProgress) is reused. The bare Manage…
+   *  item passes no options. */
   onManage?: (inst: Installation, options?: ManageOpenOptions) => void
   /** Optional fast-path for actions that own their own confirm +
    *  showProgress pair (today: Delete). When provided, the composable
@@ -136,6 +139,10 @@ export function useInstallContextMenu(opts: {
   function getMenuItems(inst: Installation): ContextMenuItem[] {
     const items: ContextMenuItem[] = []
     const stoppedActionGated = isStoppedActionGated(inst)
+    // Tooltip explaining why the REQUIRES_STOPPED items are greyed out
+    // (Update / Migrate / Restore / Copy / Uninstall need the instance
+    // stopped). Undefined when not gated so enabled items get no tooltip.
+    const gatedTitle = stoppedActionGated ? t('chooser.stoppedActionGatedReason') : undefined
 
     if (opts.onManage) {
       items.push({
@@ -144,13 +151,13 @@ export function useInstallContextMenu(opts: {
       })
 
       if (isInstalled(inst) && hasUpdateTag(inst)) {
-        items.push({ id: 'update', label: t('chooser.menuUpdate'), disabled: stoppedActionGated })
+        items.push({ id: 'update', label: t('chooser.menuUpdate'), disabled: stoppedActionGated, title: gatedTitle })
       }
       if (hasMigratePrompt(inst)) {
-        items.push({ id: 'migrate', label: t('chooser.menuMigrate'), disabled: stoppedActionGated })
+        items.push({ id: 'migrate', label: t('chooser.menuMigrate'), disabled: stoppedActionGated, title: gatedTitle })
       }
       if (isInstalled(inst) && hasInstallPath(inst) && isLocalLikeInstall(inst)) {
-        items.push({ id: 'restore-snapshot', label: t('chooser.menuRestoreSnapshot'), disabled: stoppedActionGated })
+        items.push({ id: 'restore-snapshot', label: t('chooser.menuRestoreSnapshot'), disabled: stoppedActionGated, title: gatedTitle })
       }
     }
 
@@ -162,6 +169,14 @@ export function useInstallContextMenu(opts: {
       })
     }
 
+    // Share — export the latest snapshot via the OS save dialog. Snapshots
+    // are local-only and captured once the install has booted, so gate on
+    // installed + local. Promotes the per-row Snapshots-tab export to a
+    // top-level action.
+    if (isInstalled(inst) && hasInstallPath(inst) && isLocalLikeInstall(inst)) {
+      items.push({ id: 'share', label: t('actions.share', 'Share') })
+    }
+
     // Copy Installation — standalone source only (the `'copy'` action
     // def lives in standalone/updateSections.ts). REQUIRES_STOPPED.
     if (isInstalled(inst) && inst.sourceCategory === 'local') {
@@ -169,25 +184,28 @@ export function useInstallContextMenu(opts: {
         id: 'copy-install',
         label: t('actions.copyInstallation'),
         disabled: stoppedActionGated,
+        title: gatedTitle,
       })
     }
 
-    // Untrack Installation — drops the install from the app's registry
-    // without touching disk. Available for any local-like installed
-    // install (matches the existing `untrackAction()` source-side gating).
+    // Destructive bucket — Untrack + Delete share one separator group
+    // because both remove the install from the picker. Untrack drops
+    // the registry entry only; Delete also wipes disk. Keeping them
+    // adjacent under a single divider scans as "remove this install,
+    // pick how" instead of two unrelated leaf items.
     if (isInstalled(inst) && isLocalLikeInstall(inst)) {
       items.push({
         id: 'untrack',
         label: t('actions.untrack'),
+        separator: items.length > 0,
+        style: 'danger',
       })
-    }
-
-    if (isInstalled(inst) && isLocalLikeInstall(inst)) {
       items.push({
         id: 'delete',
         label: t('chooser.menuDelete'),
-        separator: items.length > 0,
         disabled: stoppedActionGated,
+        title: gatedTitle,
+        style: 'danger',
       })
     }
 
@@ -234,6 +252,24 @@ export function useInstallContextMenu(opts: {
     return getMenuItems(inst)
   })
 
+  /** Run a fire-and-forget action (no overlay / prompt) and surface a
+   *  failure via `modal.alert` instead of swallowing it. Main returns
+   *  `{ ok: false, message }` on action-level failures (e.g. open-folder
+   *  against a missing path); the bare `try { ... } catch {}` pattern
+   *  it replaces only caught true rejections, leaving the user staring
+   *  at a no-op kebab item with no feedback. */
+  async function runInstantActionWithAlert(inst: Installation, actionId: string, actionLabel: string): Promise<void> {
+    try {
+      const result = await window.api.runAction(inst.id, actionId)
+      if (result.ok === false && result.message) {
+        await modal.alert({ title: actionLabel, message: result.message })
+      }
+    } catch (err) {
+      const message = (err as Error)?.message || String(err)
+      await modal.alert({ title: actionLabel, message })
+    }
+  }
+
   /** Single dispatch path for both the kebab/right-click menu and the
    *  chooser tile's visual pills. Pill clicks (`triggerAction('update',
    *  inst)` / `triggerAction('migrate', inst)`) and menu selections
@@ -248,27 +284,49 @@ export function useInstallContextMenu(opts: {
     } else if (id === 'restore-snapshot') {
       opts.onManage?.(inst, { initialTab: 'snapshots' })
     } else if (id === 'reveal-in-folder') {
+      await runInstantActionWithAlert(inst, 'open-folder', revealInFolderLabel(window.api?.platform))
+    } else if (id === 'share') {
+      // Share = export the latest snapshot. The export IPC owns its own OS
+      // save dialog; a cancel is a silent no-op. Only surface the genuine
+      // failure cases (no snapshots yet, or a write error).
+      const label = t('actions.share', 'Share')
       try {
-        await window.api.runAction(inst.id, 'open-folder')
-      } catch {
-        // The action surfaces its own error to the user via main; nothing to do here.
+        const result = await shareLatestSnapshot(inst.id)
+        if (!result.ok) {
+          await modal.alert({
+            title: label,
+            message:
+              result.reason === 'none'
+                ? t('snapshots.noSnapshotsToShare', 'There are no snapshots to share yet.')
+                : result.message ?? t('snapshots.shareFailed', 'Could not share the snapshot.'),
+          })
+        }
+      } catch (err) {
+        await modal.alert({ title: label, message: (err as Error)?.message || String(err) })
       }
     } else if (id === 'copy-install') {
-      // Standalone-only. Source-side `'copy'` action def owns its
-      // native confirm dialog + showProgress chain, so the panel still
-      // sees a progress overlay when this fires.
-      try {
-        await window.api.runAction(inst.id, 'copy')
-      } catch {
-        // Source action surfaces its own error path.
-      }
+      // Route through the source-action def by handing the autoAction
+      // off to `onManage`. Calling `window.api.runAction(id, 'copy')`
+      // directly bypassed the renderer-side prompt / disk-check /
+      // showProgress chain — main saw `actionData = undefined` and
+      // bailed with `{ ok: false, message: 'No name provided.' }`,
+      // which the caller's `try/catch` then silently swallowed.
+      opts.onManage?.(inst, { autoAction: 'copy' })
     } else if (id === 'untrack') {
-      // Source-side `'remove'` action def owns its native confirm.
-      try {
-        await window.api.runAction(inst.id, 'remove')
-      } catch {
-        // Source action surfaces its own error path.
-      }
+      /** Confirm + instant `remove` IPC. No picker, no progress bar —
+       *  untrack is a registry-only op. */
+      const untrackLabel = t('actions.untrack', 'Forget')
+      const confirmed = await modal.confirm({
+        title: t('actions.untrackConfirmTitle', 'Forget Install'),
+        message: t(
+          'actions.untrackConfirmMessage',
+          'This will remove the install from the app. The files will not be deleted.',
+        ),
+        confirmLabel: untrackLabel,
+        confirmStyle: 'danger',
+      })
+      if (!confirmed) return
+      await runInstantActionWithAlert(inst, 'remove', untrackLabel)
     } else if (id === 'delete') {
       // Build the confirm + showProgress payload renderer-side instead
       // of round-tripping through `getDetailSections` to look up the
@@ -309,11 +367,7 @@ export function useInstallContextMenu(opts: {
         // strings to the panel router which has both callbacks).
         opts.onManage(inst, { autoAction: 'delete' })
       } else {
-        try {
-          await window.api.runAction(inst.id, 'delete')
-        } catch {
-          // Source action surfaces its own error path.
-        }
+        await runInstantActionWithAlert(inst, 'delete', t('chooser.menuDelete'))
       }
     } else if (id === 'dismiss-error') {
       sessionStore.clearErrorInstance(inst.id)

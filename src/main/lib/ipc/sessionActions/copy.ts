@@ -97,7 +97,17 @@ export async function handleCopyUpdate({ event, installationId, inst, actionData
     }
 
     _operationAborts.delete(installationId)
-    return { ok: true, navigate: 'list', newInstallationId: entry.id }
+    // Channel-switch invocations come from inside an install-backed
+    // host window (Settings → Updates ChannelPicker). Opening a new
+    // window for the destination would spawn an empty chooser host
+    // alongside the source's existing window — the user is mid-
+    // workflow inside the source and the new install can be picked
+    // from the dashboard later. Omit `newInstallationId` so
+    // `ProgressModal.handleDone` skips the `openInstallWindow` branch.
+    const isChannelSwitch = !!actionData?.channel
+    return isChannelSwitch
+      ? { ok: true, navigate: 'list' }
+      : { ok: true, navigate: 'list', newInstallationId: entry.id }
   } catch (err) {
     _operationAborts.delete(installationId)
     if (abort.signal.aborted) return { ok: true, navigate: 'detail' }

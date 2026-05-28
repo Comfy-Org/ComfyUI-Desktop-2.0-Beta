@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import ProgressModal from '../views/ProgressModal.vue'
 import ModalDialog from '../components/ModalDialog.vue'
+import DialogHost from '../components/DialogHost.vue'
 import DownloadsModal from '../components/DownloadsModal.vue'
 import FeedbackModal from '../components/FeedbackModal.vue'
 import ComfyLifecycleView from './ComfyLifecycleView.vue'
@@ -20,17 +21,21 @@ import { seedLauncherPrefsFromUrl, useLauncherPrefs } from '../composables/useLa
 import { useModal } from '../composables/useModal'
 import { useAppUpdatePrompts } from '../composables/useAppUpdatePrompts'
 import { useReturnToDashboardConfirm } from '../composables/useReturnToDashboardConfirm'
-import { useQuitDesktopConfirm } from '../composables/useQuitDesktopConfirm'
 import { useSendFeedback } from '../composables/useSendFeedback'
 import { emitTelemetryAction } from '../lib/telemetry'
 import { useDeepLinkRouter } from '../composables/useDeepLinkRouter'
 import { useInstallContextMenu } from '../composables/useInstallContextMenu'
+import { useActionGuard } from '../composables/useActionGuard'
 import { registerMigrateTakeover } from '../composables/useMigrateAction'
 import { isFlowPanel, isValidPanel, usePanelOverlays } from './usePanelOverlays'
 import { useChooserHandoff } from './useChooserHandoff'
 import { useFirstUseChain } from './useFirstUseChain'
 import { bindE2EPanelHooks } from './e2eRendererHooks'
 import { resolvePickerTab } from '../lib/pickerTabs'
+import {
+  SUCCESS_ACTION_GO_DASHBOARD,
+  SUCCESS_ACTION_OPEN_INSTANCE,
+} from '../lib/progressTerminalPresets'
 import type { Installation } from '../types/ipc'
 
 const { mergeLocaleMessage, locale, t } = useI18n()
@@ -153,7 +158,10 @@ const {
 // matching the registration gate in `panel/main.ts`; `__e2eRenderer`
 // is never present in production.
 if (params.get('e2e') === '1') {
-  bindE2EPanelHooks({ showProgress: handleShowProgress })
+  bindE2EPanelHooks({
+    showProgress: handleShowProgress,
+    actionGuard: useActionGuard(),
+  })
 }
 
 const firstUseTakeoverActive = computed(
@@ -198,7 +206,6 @@ let unsubReturnToDashboardRequest: (() => void) | null = null
 let unsubAppUpdatePromptRestart: (() => void) | null = null
 let unsubAppUpdateUserActionFailed: (() => void) | null = null
 const { confirmReturnToDashboard } = useReturnToDashboardConfirm()
-const { confirmQuitDesktop } = useQuitDesktopConfirm()
 
 // All Manage routes go through `window.api.openInstancePicker` — the picker's
 // expanded mode is the single per-install settings surface. Delete keeps its
@@ -214,7 +221,6 @@ const { triggerAction: triggerInstallAction } = useInstallContextMenu({
     }
     window.api.openInstancePicker({
       installationId: inst.id,
-      mode: 'expanded',
       initialTab: resolvePickerTab(initialTab, 'config'),
       autoAction,
     })
@@ -252,6 +258,33 @@ useDeepLinkRouter({
   },
   showProgressFromPicker: (showOpts) => handleShowProgress(showOpts),
 })
+
+// Picker-driven mutating ops resolve here when the user picks a CTA on
+// the ProgressModal's success-terminal screen. New presets land as
+// extra branches; the underlying ProgressModal stays preset-agnostic.
+function handleProgressSuccessChoice(actionId: string, targetInstallationId: string): void {
+  if (actionId === SUCCESS_ACTION_OPEN_INSTANCE) {
+    // Cold-spawn chooser host (cross-instance Update that opened a
+    // fresh window for the target): `handleChooserPick` attaches the
+    // install in-place, so this same window becomes the target's
+    // window — no extra chooser hop, no orphan chooser left behind.
+    // Install-backed host: fall back to `openInstallWindow`, which
+    // focuses an existing window or opens a fresh chooser.
+    if (!installationId) {
+      const inst = installationStore.getById(targetInstallationId)
+      if (inst) {
+        void handleChooserPick(inst)
+        return
+      }
+    }
+    void window.api.openInstallWindow(targetInstallationId)
+    return
+  }
+  if (actionId === SUCCESS_ACTION_GO_DASHBOARD) {
+    // No-op on chooser hosts; flips an install-backed host back in place.
+    void window.api.returnToDashboard()
+  }
+}
 
 async function loadLocale(): Promise<void> {
   const messages = await window.api.getLocaleMessages()
@@ -323,10 +356,13 @@ onMounted(async () => {
   // along with the original `requestId` so main can pair it with the
   // request that fired it.
   //
-  // Chooser host (install-less) idle close pops a "Quit Desktop?"
-  // confirm instead of clearing silently. Install-backed hosts still
-  // clear silently when no overlay is in flight — only the dashboard
-  // ✕ is gated.
+  // OS ✕ consult. This renderer only resolves an in-flight Tier 2/3
+  // operation (its cancel-prompt). With no overlay it DEFERS: the
+  // close-window confirm is main's job. The panel renderer can't own that
+  // confirm because for a running instance it's hidden behind the ComfyUI
+  // view and may never answer — main would time out and close silently
+  // (the bug this fixes). Main decides dashboard-vs-instance and last-
+  // window-vs-not from its own authoritative state.
   unsubCloseRequest = window.api.onCloseRequest(({ requestId }) => {
     // Ack synchronously so main extends its hung-renderer timeout —
     // the actual response can take arbitrary time when the user is
@@ -335,15 +371,11 @@ onMounted(async () => {
     // closing the window.
     window.api.ackCloseRequest({ requestId })
     void (async () => {
-      let cleared: boolean
       if (currentOverlay.value !== null) {
-        cleared = await closeOverlay()
-      } else if (!installationId) {
-        cleared = await confirmQuitDesktop()
+        window.api.respondCloseRequest({ requestId, cleared: await closeOverlay() })
       } else {
-        cleared = true
+        window.api.respondCloseRequest({ requestId, defer: true })
       }
-      window.api.respondCloseRequest({ requestId, cleared })
     })()
   })
 
@@ -528,6 +560,7 @@ onUnmounted(() => {
         ref="progressRef"
         :installation-id="currentOverlay.installationId ?? ''"
         @close="handleProgressClose"
+        @success-choice="handleProgressSuccessChoice"
       />
       <InstallWizardModal
         v-else-if="currentOverlay.component === 'new-install'"
@@ -581,6 +614,7 @@ onUnmounted(() => {
     <FeedbackModal :open="feedbackOpen" :url="feedbackUrl" @close="closeFeedback" />
 
     <ModalDialog />
+    <DialogHost />
     <MigrateConfirmTakeover ref="migrateTakeoverRef" />
   </div>
 </template>

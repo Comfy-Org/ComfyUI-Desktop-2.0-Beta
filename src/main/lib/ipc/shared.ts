@@ -20,6 +20,7 @@ import { createCache } from '../cache'
 import { extractNested as extract } from '../extract'
 import { deleteDir, formatDeleteStatus } from '../delete'
 import { deleteAction, untrackAction } from '../actions'
+import { _broadcastToRenderer } from './broadcast'
 import {
   spawnProcess, waitForPort, waitForUrl, killProcessTree, killByPort,
   findPidsByPort, getProcessInfo, looksLikeComfyUI, setPortArg,
@@ -171,6 +172,33 @@ let _gpuPromise: Promise<GpuInfo | null> | null = null
 export const _operationAborts = new Map<string, AbortController>()
 export const _runningSessions = new Map<string, SessionInfo>()
 export const _pendingPorts = new Map<number, string>()
+
+export interface PickerOperationStatus {
+  /** Current phase label. Empty string while not yet started. */
+  status: string
+  /** 0–100, or -1 for indeterminate. */
+  percent: number
+  /** Download/transfer speed in bytes per second, if known. */
+  speedBytesPerSec?: number | null
+  /** True once the operation resolved (success, error, or cancel). */
+  done: boolean
+  /** null while in-flight; true/false after done. */
+  ok: boolean | null
+  /** Error message when done && !ok. */
+  error: string | null
+  /** Whether the operation can be cancelled. */
+  cancellable: boolean
+  /** Friendly title (e.g. "Update ComfyUI — My Install"). */
+  title: string
+  /** The action id — preserved so the picker can retry on error. */
+  actionId: string
+  actionData?: Record<string, unknown>
+}
+
+/** Per-install operation state driven by background (cross-instance) picker ops.
+ *  Pushed into `InstancePickerSnapshot.installOperationStatus` on every update
+ *  so the picker renderer gets live progress without needing its own IPC listener. */
+export const _activeOperationStatus = new Map<string, PickerOperationStatus>()
 
 export function setCallbacks(callbacks: RegisterCallbacks): void {
   _onLaunch = callbacks.onLaunch ?? null
@@ -377,31 +405,12 @@ export function _releasePort(port: number): void {
   _pendingPorts.delete(port)
 }
 
-/**
- * Extra WebContents (e.g. WebContentsView-hosted panels and custom title bars)
- * that should also receive broadcasts. BrowserWindow.getAllWindows() only
- * surfaces top-level windows — child WebContentsViews must be registered here
- * to receive 'theme-changed', 'locale-changed', etc.
- */
-const _extraBroadcastTargets = new Set<Electron.WebContents>()
-
-export function _registerExtraBroadcastTarget(wc: Electron.WebContents): void {
-  _extraBroadcastTargets.add(wc)
-  wc.once('destroyed', () => _extraBroadcastTargets.delete(wc))
-}
-
-export function _unregisterExtraBroadcastTarget(wc: Electron.WebContents): void {
-  _extraBroadcastTargets.delete(wc)
-}
-
-export function _broadcastToRenderer(channel: string, data: unknown): void {
-  BrowserWindow.getAllWindows().forEach((win) => {
-    if (!win.isDestroyed()) win.webContents.send(channel, data)
-  })
-  for (const wc of _extraBroadcastTargets) {
-    if (!wc.isDestroyed()) wc.send(channel, data)
-  }
-}
+// Re-exported from ./broadcast so leaf modules (e.g. popup primitives) can
+// register without importing the rest of this file's IPC handler universe.
+// `_broadcastToRenderer` itself is also imported at the top of this file
+// for internal use; the named re-export keeps the long-standing
+// `from './shared'` consumers working.
+export { _registerExtraBroadcastTarget, _unregisterExtraBroadcastTarget, _broadcastToRenderer } from './broadcast'
 
 export function _addSession(installationId: string, { proc, port, url, mode, installationName }: Omit<SessionInfo, 'startedAt'>, bootTimeMs?: number): void {
   _runningSessions.set(installationId, { proc, port, url, mode, installationName, startedAt: Date.now() })

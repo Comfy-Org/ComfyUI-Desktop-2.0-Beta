@@ -67,12 +67,18 @@
 .chooser-tile-name {
   font-size: 16px;
   font-weight: 600;
-  display: flex;
-  align-items: center;
+  display: block;
   color: var(--neutral-100);
-  gap: 6px;
   /* Reserve space for the type icon at top-left so name doesn't collide. */
   margin-top: auto;
+  /* Single-line ellipsis: long install names (cloud workspace names,
+   * user-renamed installs) must not blow out the tile's fixed width
+   * or wrap into the pill row below. */
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .chooser-tile-meta {

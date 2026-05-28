@@ -1,5 +1,6 @@
 import { useI18n } from 'vue-i18n'
 import { useSessionStore } from '../stores/sessionStore'
+import { useProgressStore } from '../stores/progressStore'
 import { useModal } from './useModal'
 
 /**
@@ -12,11 +13,14 @@ import { useModal } from './useModal'
 export function useActionGuard() {
   const { t } = useI18n()
   const sessionStore = useSessionStore()
+  const progressStore = useProgressStore()
   const modal = useModal()
 
   async function checkBeforeAction(installationId: string, actionLabel: string): Promise<boolean> {
     const activeSession = sessionStore.activeSessions.get(installationId)
-    const isBusy = sessionStore.isLaunching(installationId) || (activeSession && !sessionStore.isRunning(installationId))
+    const isBusy = sessionStore.isLaunching(installationId)
+      || (activeSession && !sessionStore.isRunning(installationId))
+      || progressStore.getProgressInfo(installationId) !== null
     if (isBusy) {
       const operation = activeSession?.label || t('running.title')
       const confirmed = await modal.confirm({
@@ -27,7 +31,17 @@ export function useActionGuard() {
       })
       if (!confirmed) return false
       await window.api.cancelOperation(installationId)
-      await new Promise((r) => setTimeout(r, 500))
+      // Wait for the cancelled op to clear instead of guessing how long
+      // teardown takes — mirrors `stopAndWaitForExit`. The deadline is
+      // generous because Windows taskkill / Restart Manager can be slow;
+      // the next action would race the cancel without it.
+      const deadline = Date.now() + 10_000
+      while (
+        (progressStore.getProgressInfo(installationId) !== null || sessionStore.isStopping(installationId)) &&
+        Date.now() < deadline
+      ) {
+        await new Promise((r) => setTimeout(r, 100))
+      }
     }
 
     return true

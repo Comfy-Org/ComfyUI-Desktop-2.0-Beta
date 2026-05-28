@@ -356,6 +356,25 @@ describe('useProgressStore', () => {
     })
   })
 
+  describe('onErrorDetail subscription', () => {
+    it('does not throw at construction when window.api.onErrorDetail is undefined', () => {
+      // The picker popup's `window.api` shim does not forward
+      // `onErrorDetail` (it's a panel-side IPC subscription, not a
+      // shim-routed call). A hard call would throw at store
+      // construction and silently blank the entire
+      // ComfyUISettingsContent right pane.
+      const orig = window.api.onErrorDetail
+      // @ts-expect-error — testing the missing-method case the shim hits.
+      window.api.onErrorDetail = undefined
+      try {
+        setActivePinia(createTestingPinia({ stubActions: false }))
+        expect(() => useProgressStore()).not.toThrow()
+      } finally {
+        window.api.onErrorDetail = orig
+      }
+    })
+  })
+
   describe('cleanupOperation', () => {
     it('calls unsubscribe functions', () => {
       const unsubProgress = vi.fn()
@@ -377,6 +396,66 @@ describe('useProgressStore', () => {
 
     it('is safe to cleanup a nonexistent operation', () => {
       expect(() => store.cleanupOperation('nonexistent')).not.toThrow()
+    })
+  })
+
+  describe('Operation.chainSpan', () => {
+    it('persists chainSpan on the Operation when set', () => {
+      store.startOperation({
+        installationId: 'inst-1',
+        title: 'Installing — DevFixture',
+        apiCall: () => new Promise<ActionResult>(() => {}),
+        chainSpan: 'install'
+      })
+      expect(store.operations.get('inst-1')?.chainSpan).toBe('install')
+    })
+
+    it('persists chainSpan=launch for the launch leg of a chain', () => {
+      store.startOperation({
+        installationId: 'inst-2',
+        title: 'Launching — DevFixture',
+        apiCall: () => new Promise<ActionResult>(() => {}),
+        chainSpan: 'launch'
+      })
+      expect(store.operations.get('inst-2')?.chainSpan).toBe('launch')
+    })
+
+    it('defaults chainSpan to null when omitted', () => {
+      store.startOperation({
+        installationId: 'inst-3',
+        title: 'Standalone op',
+        apiCall: () => new Promise<ActionResult>(() => {})
+      })
+      // null (not undefined) so the Operation literal stays well-typed.
+      expect(store.operations.get('inst-3')?.chainSpan).toBeNull()
+    })
+
+    it('does not regress globalProgressFor when chainSpan is set', () => {
+      // chainSpan is consumed by ProgressModal.unifiedPercent, NOT by
+      // globalProgressFor. A stepped op with chainSpan='install' at
+      // download(50%) still returns its raw weighted percent — the
+      // 0–70 mapping is applied upstream in the view.
+      store.startOperation({
+        installationId: 'inst-4',
+        title: 'Installing',
+        apiCall: () => new Promise<ActionResult>(() => {}),
+        chainSpan: 'install'
+      })
+      const op = store.operations.get('inst-4')!
+      op.steps = [
+        { phase: 'download', label: 'Download' },
+        { phase: 'extract', label: 'Extract' }
+      ]
+      op.activePhase = 'download'
+      op.activePercent = 50
+
+      const result = store.globalProgressFor(op)
+      // Equal phase weights → download owns 0–50% slot, so 50% of that
+      // slot is ~25% on the bar. The exact figure depends on the weight
+      // table; assert it's mid-bar, not capped at 70.
+      expect(result.percent).toBeGreaterThan(0)
+      expect(result.percent).toBeLessThan(70)
+      expect(result.indeterminate).toBe(false)
     })
   })
 })

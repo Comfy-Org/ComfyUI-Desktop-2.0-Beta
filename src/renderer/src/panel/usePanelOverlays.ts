@@ -23,6 +23,14 @@ export type PanelKey =
   | 'track'
   | 'load-snapshot'
   | 'quick-install'
+  /** Mirror of main's `'progress'` ComfyPanelKey. Forwarded to the
+   *  renderer so `onPanelSwitch` doesn't silently drop the IPC when
+   *  the picker-driven ProgressModal flips main into progress-takeover
+   *  layout (panel visible, comfy hidden). Renderer-side has no body
+   *  branch for this key — the takeover is driven by `currentOverlay`
+   *  separately — but accepting it keeps `isValidPanel` from
+   *  swallowing the event. */
+  | 'progress'
 
 const VALID_PANELS: ReadonlySet<PanelKey> = new Set([
   'comfy',
@@ -34,6 +42,7 @@ const VALID_PANELS: ReadonlySet<PanelKey> = new Set([
   'track',
   'load-snapshot',
   'quick-install',
+  'progress',
 ])
 
 /**
@@ -122,7 +131,7 @@ export interface UsePanelOverlaysApi {
   handleProgressClose: () => void
   openFlowTakeover: (component: FlowComponent, entrypoint: string) => Promise<void>
   openFirstUseTakeover: (opts?: {
-    initialStep?: 'consent' | 'pick' | 'localBranch'
+    initialStep?: 'start' | 'localBranch'
   }) => Promise<void>
   dismissTakeoverDirect: () => void
   switchPanel: (panel: PanelKey, entrypoint?: string) => Promise<void>
@@ -222,6 +231,29 @@ export function usePanelOverlays(opts: UsePanelOverlaysOpts): UsePanelOverlaysAp
     const onCancel = (): void => {
       progressStore.cancelOperation(showOpts.installationId)
     }
+    // Pre-seed the operation in the progress store BEFORE swapping the
+    // overlay so `ProgressModal` paints fully populated on its first
+    // frame (op title, "Starting…" status, brand loader). Without this
+    // the modal mounts on a still-empty operation map and renders a
+    // blank/placeholder frame for one tick — the visible flicker users
+    // saw between Continue and the loader. The IPC `apiCall` fires
+    // synchronously from `progressStore.startOperation`, so the install
+    // begins a tick earlier than before; that's fine since the loader
+    // appears in the same swap.
+    const existing = progressStore.operations.get(showOpts.installationId)
+    if (!existing || existing.finished) {
+      progressStore.startOperation({
+        installationId: showOpts.installationId,
+        title: showOpts.title,
+        apiCall: showOpts.apiCall as () => Promise<ActionResult>,
+        cancellable: showOpts.cancellable,
+        returnTo: showOpts.returnTo,
+        opKind: showOpts.opKind,
+        destroysInstance: showOpts.destroysInstance,
+        chainSpan: showOpts.chainSpan,
+        successTerminal: showOpts.successTerminal,
+      })
+    }
     // Every show-progress op renders as a Tier 3 brand takeover now —
     // delete, copy, migrate, install, update, launch, and snapshot ops
     // share the same loader chrome (BrandTakeoverLayout + glyph +
@@ -256,21 +288,10 @@ export function usePanelOverlays(opts: UsePanelOverlaysOpts): UsePanelOverlaysAp
       )
     }
     await nextTick()
-    // If an in-progress operation already exists for this ID, just show it.
-    const existing = progressStore.operations.get(showOpts.installationId)
-    if (existing && !existing.finished) {
-      progressRef.value?.showOperation(showOpts.installationId)
-      return
-    }
-    progressRef.value?.startOperation({
-      installationId: showOpts.installationId,
-      title: showOpts.title,
-      apiCall: showOpts.apiCall as () => Promise<ActionResult>,
-      cancellable: showOpts.cancellable,
-      returnTo: showOpts.returnTo,
-      opKind: showOpts.opKind,
-      destroysInstance: showOpts.destroysInstance,
-    })
+    // After the overlay swap, ProgressModal exists — point it at the
+    // (already running) operation so its internal `currentId` ref tracks
+    // it for showOperation/auto-close logic.
+    progressRef.value?.showOperation(showOpts.installationId)
   }
 
   function handleProgressClose(): void {
@@ -279,6 +300,14 @@ export function usePanelOverlays(opts: UsePanelOverlaysOpts): UsePanelOverlaysAp
     // prompt because the op has already finished. Cancellation of an
     // in-flight op flows through `progressStore.cancelOperation`.
     currentOverlay.value = null
+    // Restore the host's body to the comfy view. Picker-driven progress
+    // ops main-side flip activePanel to 'progress' so the panel can
+    // render the takeover on top of the running comfy canvas; closing
+    // the modal must return the layout to 'comfy' or the user is
+    // stranded on an empty panel after dismissing. No-op on hosts where
+    // 'progress' was never set (main's setActivePanel short-circuits on
+    // same-key writes).
+    window.api.closeCurrentPanel()
   }
 
   /**
@@ -329,7 +358,7 @@ export function usePanelOverlays(opts: UsePanelOverlaysOpts): UsePanelOverlaysAp
    * fetch runs in parallel with the overlay mount.
    */
   async function openFirstUseTakeover(
-    firstUseOpts?: { initialStep?: 'consent' | 'pick' | 'localBranch' },
+    firstUseOpts?: { initialStep?: 'start' | 'localBranch' },
   ): Promise<void> {
     const statePromise = window.api
       .getFirstUseState()

@@ -5,7 +5,7 @@ import { useInstallationStore } from '../stores/installationStore'
 import { useSessionStore } from '../stores/sessionStore'
 import { useInstallContextMenu } from '../composables/useInstallContextMenu'
 import { useInstallList } from '../composables/useInstallList'
-import { Cloud, Plus, Search } from 'lucide-vue-next'
+import { Cloud, MoreVertical, Plus, Search } from 'lucide-vue-next'
 import ContextMenu from '../components/ContextMenu.vue'
 import BrandBackground from '../components/BrandBackground.vue'
 import BaseInput from '../components/ui/BaseInput.vue'
@@ -116,7 +116,6 @@ function openManage(
   }
   window.api.openInstancePicker({
     installationId: installation.id,
-    mode: 'expanded',
     initialTab: resolvePickerTab(opts.initialTab, 'status'),
     autoAction: opts.autoAction ?? null
   })
@@ -209,14 +208,33 @@ function handleNewInstallClick(): void {
           <div class="chooser-tile-meta">{{ t('chooser.newInstallDesc') }}</div>
         </button>
 
-        <button
+        <div
           v-if="showCloudCard"
-          type="button"
+          role="button"
+          tabindex="0"
           class="chooser-tile chooser-tile-cloud"
           @click="handleCloudClick"
+          @keydown.enter="handleCloudClick"
+          @keydown.space.prevent="handleCloudClick"
           @contextmenu.prevent="cloudInstall ? openCardMenu($event, cloudInstall) : null"
         >
           <div class="chooser-tile-icon"><Cloud :size="32" /></div>
+          <!-- Kebab options menu — only when a real cloud install exists to
+               manage (parity with the per-install tiles; the Try-Cloud CTA
+               has nothing to manage). Keeps the cloud tile consistent with
+               the rest of the dashboard pills instead of right-click only. -->
+          <div v-if="cloudInstall" class="chooser-tile-actions">
+            <button
+              type="button"
+              class="chooser-tile-kebab"
+              :title="t('chooser.moreActions')"
+              :aria-label="t('chooser.moreActions')"
+              @click.stop="openKebabMenu($event, cloudInstall)"
+              @contextmenu.stop="openKebabMenu($event, cloudInstall)"
+            >
+              <MoreVertical :size="16" />
+            </button>
+          </div>
           <div class="chooser-tile-name">
             {{ cloudInstall ? cloudInstall.name : t('cloud.label') }}
           </div>
@@ -228,7 +246,7 @@ function handleNewInstallClick(): void {
               {{ cloudInstall ? cloudInstall.sourceLabel : t('cloud.desc') }}
             </span>
           </div>
-        </button>
+        </div>
 
         <ChooserInstallTile
           v-for="inst in visibleInstalls"
@@ -271,21 +289,26 @@ function handleNewInstallClick(): void {
   background: transparent;
 }
 
+.chooser-bg :deep(.brand-beam--2) {
+  left: anchor(center, clamp(39%, calc(52.5vw - 135px), 44%));
+}
+
 .chooser-view {
   /* Fluid centering pattern with a top-spacer floor:
-   *   - Short grid → both spacers grow toward 1fr → cluster centered
-   *   - Tall grid → spacers shrink, but top spacer stops at the clamp
-   *     minimum (~18vh) so the logo/search anchor at a stable upper
-   *     position instead of sliding into the brand-beam at the top
-   *   - Very tall grid → grid still scrolls internally (max-height
-   *     100%) so the cluster + viewport bounds are never breached
+   *   - Short grid (initial state, few tiles) → both spacers grow
+   *     toward 1fr → cluster centered, as before
+   *   - More tiles → spacers shrink symmetrically; top spacer floors
+   *     at ~4vh / 24-56px so the wordmark+search keep getting pushed
+   *     toward the top of the frame and the grid gains rows in-view
+   *   - Very tall grid → grid scrolls internally (max-height 100%)
+   *     so the cluster + viewport bounds are never breached
    *
    * Row layout: [top spacer] [wordmark] [search] [grid] [bottom spacer] */
   flex: 1 1 auto;
   min-height: 0;
   display: grid;
   grid-template-rows:
-    minmax(clamp(72px, 18vh, 180px), 1fr)
+    minmax(clamp(24px, 4vh, 56px), 1fr)
     auto
     auto
     minmax(0, auto)
@@ -293,7 +316,7 @@ function handleNewInstallClick(): void {
   grid-template-columns: minmax(0, 1fr);
   justify-items: center;
   width: 100%;
-  max-width: 1080px;
+  max-width: 1280px;
   padding: 24px;
   row-gap: 32px;
 }
@@ -341,7 +364,10 @@ function handleNewInstallClick(): void {
 .chooser-grid {
   grid-row: 4;
   width: 100%;
-  max-width: 920px;
+  /* 4 fixed tracks @ 280px + 3 × 16px gaps = 1168px. Keeps the 280px
+   * fixed-track contract from the comment below intact while letting
+   * wide viewports surface a 4-up row instead of capping at 3. */
+  max-width: 1168px;
   /* When the row collapses (tall grid in a short viewport), the grid
    * stops growing and scrolls internally. `min-height: 0` + an
    * explicit `max-height: 100%` are required so the grid can't push

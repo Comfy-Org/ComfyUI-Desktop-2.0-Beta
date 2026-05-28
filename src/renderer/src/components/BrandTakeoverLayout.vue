@@ -9,6 +9,9 @@
  *   - Full-viewport fixed positioning over the launcher panel.
  *   - Fade-in animation on mount.
  *   - ComfyC logo pinned top-left.
+ *   - Dialog a11y baseline: role="dialog", aria-modal, focus capture on
+ *     mount + restore on unmount. Every takeover inherits this so we
+ *     never ship one without it.
  *
  * Background visuals (outer frame, inner frame, beams, optional vignette)
  * live in `BrandBackground.vue` so non-takeover surfaces (chooser
@@ -29,6 +32,7 @@
  * deferred. Same approach the inline implementation used before this
  * was extracted.
  */
+import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import ComfyCLogo from './icons/ComfyCLogo.vue'
 import BrandBackground from './BrandBackground.vue'
 
@@ -38,14 +42,55 @@ withDefaults(
      *  ships dark today. Pass 'light' once light-mode parity lands. */
     theme?: 'dark' | 'light'
     vignette?: boolean
+    /** Optional accessible name for the takeover. Falls back to a
+     *  generic label so screen readers always announce something. */
+    ariaLabel?: string
   }>(),
-  { theme: 'dark', vignette: false },
+  { theme: 'dark', vignette: false, ariaLabel: undefined },
 )
+
+const rootRef = ref<HTMLElement | null>(null)
+let returnFocusTo: HTMLElement | null = null
+
+function focusFirstInteractive(): void {
+  if (!rootRef.value) return
+  const explicit = rootRef.value.querySelector<HTMLElement>('[autofocus]')
+  if (explicit) {
+    explicit.focus()
+    return
+  }
+  const focusable = rootRef.value.querySelector<HTMLElement>(
+    'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+  )
+  focusable?.focus()
+}
+
+onMounted(() => {
+  returnFocusTo = document.activeElement instanceof HTMLElement ? document.activeElement : null
+  void nextTick(focusFirstInteractive)
+})
+
+onBeforeUnmount(() => {
+  try {
+    returnFocusTo?.focus()
+  } catch {
+    /* trigger element was removed while takeover was open */
+  }
+  returnFocusTo = null
+})
 </script>
 
 <template>
   <Teleport to="body">
-    <div class="brand-takeover-root" :data-theme="theme">
+    <div
+      ref="rootRef"
+      class="brand-takeover-root"
+      :data-theme="theme"
+      role="dialog"
+      aria-modal="true"
+      :aria-label="ariaLabel"
+      tabindex="-1"
+    >
       <BrandBackground :vignette="vignette">
         <div class="brand-logo-row">
           <ComfyCLogo class="brand-logo" />

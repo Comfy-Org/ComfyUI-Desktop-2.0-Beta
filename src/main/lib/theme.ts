@@ -17,8 +17,14 @@ export const COMFY_BG_LIGHT = '#f5f5f5'
 /** Default dark background for comfy windows (used at creation time before theme is known). */
 export const COMFY_BG = '#171717'
 
-/** Title bar background — matches the inline CSS in resources/comfyTitleBar.html. */
-export const TITLEBAR_BG = '#353535'
+/** Title bar background. Must stay in sync with `--titlebar-bg` (the dark
+ *  theme's `--neutral-800`) in `src/renderer/src/assets/main.css` — this is the
+ *  color the Vue `.title-bar` header paints, and the OS window-controls overlay
+ *  (min/max/close) must use the same value so that region is seamless with the
+ *  rest of the bar on every window, dashboard AND instance. Previously `#353535`
+ *  (the old ComfyUI menu color), which is why instance windows painted the
+ *  controls a different shade than the bar above them. */
+export const TITLEBAR_BG = '#211927'
 
 export interface SplashTheme {
   bg: string

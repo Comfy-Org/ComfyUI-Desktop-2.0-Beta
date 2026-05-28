@@ -718,13 +718,15 @@ it('opens the new-install takeover above the chooser body when show-new-install 
     expect(wrapper.find('[data-testid="comfy-lifecycle"]').exists()).toBe(true)
   })
 
-  it('opens the instance picker (expanded, Update tab) when a panel-trigger-overlay install-update event arrives', async () => {
+  it('opens the instance picker (expanded, Update tab) and auto-fires update when a panel-trigger-overlay install-update event arrives', async () => {
     // The title-bar install-update pill click is forwarded by main
     // as an `onPanelTriggerOverlay` event with
     // `kind: 'install-update'`. Post-redesign the panel renderer
     // routes that into the instance picker popup (expanded, Update
     // tab) instead of mounting a Tier 1 DetailModal — same surface
-    // the chooser-card kebab Update entry now opens.
+    // the chooser-card kebab Update entry now opens. It also seeds
+    // `autoAction: 'update-comfyui'` so the user lands directly on the
+    // update-confirm modal rather than just staring at the Update tab.
     mountPanel()
     await flushPromises()
     const api = (
@@ -739,9 +741,56 @@ it('opens the new-install takeover above the chooser body when show-new-install 
     expect(api.openInstancePicker).toHaveBeenCalledTimes(1)
     expect(api.openInstancePicker).toHaveBeenCalledWith({
       installationId: 'test-id',
-      mode: 'expanded',
       initialTab: 'update',
+      autoAction: 'update-comfyui',
     })
+  })
+
+  it('opens the instance picker on the Config tab when a panel-trigger-overlay open-settings event arrives with tab=comfy', async () => {
+    // `comfy://open-settings?tab=comfy` on an install-backed host
+    // opens the picker on the Config tab — the same surface the
+    // title-bar Settings entry routes to.
+    mountPanel()
+    await flushPromises()
+    const api = (
+      window as unknown as { api: {
+        openInstancePicker: ReturnType<typeof vi.fn>
+        openGlobalSettings: ReturnType<typeof vi.fn>
+      } }
+    ).api
+
+    mockState.panelTriggerOverlayCallbacks.forEach((cb) =>
+      cb({ kind: 'open-settings', settingsTab: 'comfy' }),
+    )
+    await flushPromises()
+
+    expect(api.openInstancePicker).toHaveBeenCalledTimes(1)
+    expect(api.openInstancePicker).toHaveBeenCalledWith({
+      installationId: 'test-id',
+      initialTab: 'config',
+    })
+    expect(api.openGlobalSettings).not.toHaveBeenCalled()
+  })
+
+  it('opens global settings when a panel-trigger-overlay open-settings event arrives with tab=global', async () => {
+    // `comfy://open-settings?tab=global` routes to the dedicated
+    // Global Settings popup regardless of which host received it.
+    mountPanel()
+    await flushPromises()
+    const api = (
+      window as unknown as { api: {
+        openInstancePicker: ReturnType<typeof vi.fn>
+        openGlobalSettings: ReturnType<typeof vi.fn>
+      } }
+    ).api
+
+    mockState.panelTriggerOverlayCallbacks.forEach((cb) =>
+      cb({ kind: 'open-settings', settingsTab: 'global' }),
+    )
+    await flushPromises()
+
+    expect(api.openGlobalSettings).toHaveBeenCalledTimes(1)
+    expect(api.openInstancePicker).not.toHaveBeenCalled()
   })
 
   it('shows the "Desktop Update Ready" confirm modal when a restart-prompt event arrives, and installs on confirm', async () => {
@@ -993,47 +1042,34 @@ it('does NOT fire desktop2.view.opened when a panel-switch IPC re-confirms the a
     })
   })
 
-  describe('chooser host close consult', () => {
-    it('shows the Quit Desktop confirm on the chooser ✕ and clears when confirmed', async () => {
-      window.history.replaceState({}, '', '/?panel=chooser&firstUseCompleted=true')
-      mockModal.confirm.mockResolvedValueOnce(true)
+  describe('window close consult', () => {
+    // With no Tier 2/3 overlay open, the renderer no longer confirms — it
+    // defers, and main owns the Close Window / dashboard / quit decision
+    // (the panel renderer is unreliable behind a running ComfyUI view).
+    it('defers an install-backed ✕ to main when no overlay is open (no renderer modal)', async () => {
+      // Default URL already set in beforeEach: installationId=test-id
       mountPanel()
       await flushPromises()
 
       mockState.closeRequestCallbacks.forEach((cb) => cb({ requestId: 'req-1' }))
       await flushPromises()
 
-      expect(mockModal.confirm).toHaveBeenCalledWith(
-        expect.objectContaining({ title: 'dashboard.confirmQuit.title' }),
-      )
+      expect(mockModal.confirm).not.toHaveBeenCalled()
       const api = (window as unknown as { api: { respondCloseRequest: ReturnType<typeof vi.fn> } }).api
-      expect(api.respondCloseRequest).toHaveBeenCalledWith({ requestId: 'req-1', cleared: true })
+      expect(api.respondCloseRequest).toHaveBeenCalledWith({ requestId: 'req-1', defer: true })
     })
 
-    it('keeps the window open when the user cancels the Quit Desktop confirm', async () => {
+    it('defers a dashboard ✕ to main as well (no renderer modal)', async () => {
       window.history.replaceState({}, '', '/?panel=chooser&firstUseCompleted=true')
-      mockModal.confirm.mockResolvedValueOnce(false)
       mountPanel()
       await flushPromises()
 
       mockState.closeRequestCallbacks.forEach((cb) => cb({ requestId: 'req-2' }))
       await flushPromises()
 
-      const api = (window as unknown as { api: { respondCloseRequest: ReturnType<typeof vi.fn> } }).api
-      expect(api.respondCloseRequest).toHaveBeenCalledWith({ requestId: 'req-2', cleared: false })
-    })
-
-    it('clears silently on install-backed host ✕ with no overlay (no Quit confirm)', async () => {
-      // Default URL already set in beforeEach: installationId=test-id
-      mountPanel()
-      await flushPromises()
-
-      mockState.closeRequestCallbacks.forEach((cb) => cb({ requestId: 'req-3' }))
-      await flushPromises()
-
       expect(mockModal.confirm).not.toHaveBeenCalled()
       const api = (window as unknown as { api: { respondCloseRequest: ReturnType<typeof vi.fn> } }).api
-      expect(api.respondCloseRequest).toHaveBeenCalledWith({ requestId: 'req-3', cleared: true })
+      expect(api.respondCloseRequest).toHaveBeenCalledWith({ requestId: 'req-2', defer: true })
     })
   })
 })
