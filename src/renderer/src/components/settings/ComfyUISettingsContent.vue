@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onUnmounted, ref, toRef, useTemplateRef, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, toRef, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { CheckCircle, XCircle, ChevronUp, HardDrive, SlidersHorizontal, Info, RefreshCw, History } from 'lucide-vue-next'
 import { useComfyUISettings } from '../../composables/useComfyUISettings'
@@ -352,6 +352,42 @@ const statusSections = computed(() => sectionsForTab('status').value)
 const storageSections = computed(() => sectionsForTab('storage').value)
 
 const rootRef = useTemplateRef<HTMLElement>('root')
+const tabsRef = useTemplateRef<HTMLElement>('tabs')
+
+// Tab tooltips echo the visible tab label, which adds nothing when the
+// label is on-screen — and the bottom-anchored popover overlaps the
+// content below (#713). The strip only ever hides labels in its narrow
+// container state: at `< 520px` inactive tabs collapse to icon-only
+// (see the `@container settings-tabs` rule below), where the tooltip is
+// the only thing exposing their label. So we mirror that breakpoint in
+// JS via a ResizeObserver and only keep the tooltip alive for a tab
+// whose label is actually hidden — the active tab always keeps its
+// label, so its tooltip stays suppressed in every state.
+const TAB_COLLAPSE_PX = 520
+const tabsCollapsed = ref(false)
+let tabsObserver: ResizeObserver | undefined
+
+onMounted(() => {
+  if (tabsRef.value && typeof ResizeObserver !== 'undefined') {
+    tabsObserver = new ResizeObserver((entries) => {
+      const entry = entries[0]
+      if (!entry) return
+      tabsCollapsed.value = entry.contentRect.width < TAB_COLLAPSE_PX
+    })
+    tabsObserver.observe(tabsRef.value)
+  }
+})
+
+onUnmounted(() => {
+  tabsObserver?.disconnect()
+  tabsObserver = undefined
+})
+
+/** A tab's label is hidden — so its tooltip carries real info — only
+ *  when the strip is collapsed and the tab isn't the active one. */
+function isTabLabelHidden(key: ComfyUISettingsTab): boolean {
+  return tabsCollapsed.value && activeTab.value !== key
+}
 
 function handleTabKeydown(event: KeyboardEvent, index: number): void {
   if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return
@@ -597,6 +633,7 @@ defineExpose({
 <template>
   <div ref="root" class="settings-v2-content">
     <nav
+      ref="tabs"
       class="settings-v2-tabs"
       :class="{ 'is-subpage-active': subPage !== null }"
       role="tablist"
@@ -608,6 +645,7 @@ defineExpose({
         :key="tab.key"
         :text="tab.label"
         side="bottom"
+        :disabled="!isTabLabelHidden(tab.key)"
       >
         <button
           type="button"
