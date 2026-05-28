@@ -740,15 +740,7 @@ test('picker-driven cross-channel copy-update (stable → latest) creates a copy
     cwd: _comfyUIDir, encoding: 'utf-8', windowsHide: true,
   }).trim()
 
-  // Snapshot BrowserWindow ids — copy-update emits open-install-window
-  // for the new install which spawns a fresh chooser host. Close it at
-  // the end so subsequent panel.html-marker helpers stay deterministic.
-  const windowIdsBeforeCopy = await ctx.app.evaluate(({ BrowserWindow }) =>
-    BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed()).map((w) => w.id),
-  )
-
-  await resetIpcInvocations(ctx.app, 'open-install-window')
-  await resetIpcInvocations(ctx.app, 'run-action')
+  await resetIpcInvocations(ctx.app, 'comfy-titlepopup:start-background-op')
 
   await ensureInstallPanelMounted(ctx, _updateInstallId)
   const popup = await openPickerByClickingTitlePill(ctx, {
@@ -773,42 +765,45 @@ test('picker-driven cross-channel copy-update (stable → latest) creates a copy
 
   // copy-update's only modal is the new-install-name prompt (no
   // separate confirm step on this action — `notesDetails` rides on
-  // the prompt's `messageDetails`).
-  await popup.waitForVisible(byTestId(TID.modalPromptInput), { timeout: 10_000 })
+  // the prompt's `messageDetails`). The picker drives prompts
+  // through `useDialogs().prompt` → BasePrompt, not the legacy
+  // ModalDialog, so the testids are the `basePrompt*` family.
+  await popup.waitForVisible(byTestId(TID.basePromptInput), { timeout: 10_000 })
   const newName = 'ComfyUI Copy-Update E2E'
   await popup.evaluate<void>(
     `(() => {
-      const el = document.querySelector(${JSON.stringify(byTestId(TID.modalPromptInput))})
+      const el = document.querySelector(${JSON.stringify(byTestId(TID.basePromptInput))})
       if (!el) throw new Error('prompt input not found')
       el.value = ${JSON.stringify(newName)}
       el.dispatchEvent(new Event('input', { bubbles: true }))
       el.dispatchEvent(new Event('change', { bubbles: true }))
     })()`,
   )
-  expect(await popup.click(byTestId(TID.modalConfirm))).toBe(true)
+  expect(await popup.click(byTestId(TID.basePromptAction))).toBe(true)
 
-  await waitForProgressTakeoverAfterPopupClose()
-
-  // Wait for the copy + update + open-install-window for the new
-  // install. Real ~500MB copy followed by a real git update on the
-  // copy → generous outer timeout.
+  // Cross-channel copy-update routes through the picker's inline-progress
+  // view (`resolveProgressRouting` → `'inline-picker'` for non-launch
+  // mutating ops). The popup stays open and streams progress in the right
+  // pane; `open-install-window` does NOT fire because handleCopyUpdate's
+  // `isChannelSwitch` branch omits `newInstallationId`. Poll
+  // `getInstallations` for the new record first (real ~500 MB copy →
+  // generous outer timeout).
+  const sourceIdsBefore = new Set(installsBefore.map((i) => i.id))
   await expect
     .poll(async () => {
-      const calls = (await getIpcInvocations(ctx.app, 'open-install-window')) as OpenInstallWindowPayload[]
-      return calls.find((c) => c.installationId && c.installationId !== _updateInstallId) ?? null
+      const all = await ctx.panel.evaluate<Array<{ id: string; installPath: string; updateChannel?: string }>>(
+        `window.api.getInstallations()`,
+      )
+      return all.find((i) => !sourceIdsBefore.has(i.id)) ?? null
     }, { timeout: 540_000, intervals: [2_000, 5_000] })
     .not.toBeNull()
-
-  const openCalls = (await getIpcInvocations(ctx.app, 'open-install-window')) as OpenInstallWindowPayload[]
-  const newCall = openCalls.find((c) => c.installationId && c.installationId !== _updateInstallId)
-  expect(newCall?.installationId, 'open-install-window did not capture a NEW installationId').toBeTruthy()
-  _copyUpdateInstallId = newCall!.installationId
 
   const installs = await ctx.panel.evaluate<Array<{ id: string; installPath: string; updateChannel?: string }>>(
     `window.api.getInstallations()`,
   )
-  const newRecord = installs.find((i) => i.id === _copyUpdateInstallId)
+  const newRecord = installs.find((i) => !sourceIdsBefore.has(i.id))
   expect(newRecord, 'copy-update installation not found in getInstallations').toBeDefined()
+  _copyUpdateInstallId = newRecord!.id
   _copyUpdateInstallPath = newRecord!.installPath
 
   // Disk shape: copy is a full standalone tree (same shape as the
@@ -819,30 +814,49 @@ test('picker-driven cross-channel copy-update (stable → latest) creates a copy
   expect(existsSync(path.join(_copyUpdateInstallPath, '.comfyui-desktop-2')), 'copy missing .comfyui-desktop-2 marker').toBe(true)
   expect(existsSync(path.join(_updateInstallPath, 'ComfyUI', '.git')), 'source ComfyUI/.git missing after copy-update').toBe(true)
 
-  // Cross-channel copy-update moves the COPY's HEAD past the source
-  // (master tip is always ahead of any stable tag on this branch);
-  // the SOURCE's HEAD must NOT move — copy-update writes only to the
-  // new install.
+  // The install record exists after the COPY phase but the update-comfyui
+  // leg runs sequentially after — wait for the copy's HEAD to move past
+  // the source (master tip on `latest` is always ahead of any stable tag
+  // on this branch). Polling git on disk is the cheapest completion
+  // signal that doesn't require reaching into picker snapshot state.
   const copyComfyUIDir = path.join(_copyUpdateInstallPath, 'ComfyUI')
-  const copyHeadAfter = execFileSync('git', ['rev-parse', 'HEAD'], {
-    cwd: copyComfyUIDir, encoding: 'utf-8', windowsHide: true,
-  }).trim()
+  let copyHeadAfter = sourceHeadBefore
+  await expect
+    .poll(() => {
+      copyHeadAfter = execFileSync('git', ['rev-parse', 'HEAD'], {
+        cwd: copyComfyUIDir, encoding: 'utf-8', windowsHide: true,
+      }).trim()
+      return copyHeadAfter
+    }, { timeout: 540_000, intervals: [2_000, 5_000] })
+    .not.toBe(sourceHeadBefore)
   expect(copyHeadAfter).toMatch(/^[a-f0-9]{40}$/)
   expect(copyHeadAfter, 'cross-channel copy-update did not move the copy HEAD past the source').not.toBe(sourceHeadBefore)
+
+  // The SOURCE's HEAD must NOT move — copy-update writes only to the new
+  // install.
 
   const sourceHeadAfter = execFileSync('git', ['rev-parse', 'HEAD'], {
     cwd: _comfyUIDir, encoding: 'utf-8', windowsHide: true,
   }).trim()
   expect(sourceHeadAfter, 'source HEAD must NOT change when copy-update runs').toBe(sourceHeadBefore)
 
-  // copy-update carried actionData.channel=latest on the run-action
-  // IPC (same Vue-reactive-proxy deep-clone bug class the
-  // cross-channel update-comfyui test below pins).
-  const ourRunCalls = await getRunActionsFor(_updateInstallId)
-  const copyUpdateCall = ourRunCalls.find((c) => c.actionId === 'copy-update')
+  // copy-update carried actionData.channel=latest on the picker
+  // background-op IPC (same Vue-reactive-proxy deep-clone bug class
+  // the cross-channel update-comfyui test below pins). Inline-picker
+  // routing dispatches via `pickerStartBackgroundOp`, recorded under
+  // `comfy-titlepopup:start-background-op` — not `run-action`.
+  interface BackgroundOpCall {
+    installationId?: string
+    actionId?: string
+    actionData?: { channel?: string; name?: string }
+  }
+  const bgCalls = (await getIpcInvocations(ctx.app, 'comfy-titlepopup:start-background-op')) as BackgroundOpCall[]
+  const copyUpdateCall = bgCalls.find(
+    (c) => c.installationId === _updateInstallId && c.actionId === 'copy-update',
+  )
   expect(copyUpdateCall, 'cross-channel copy-update not recorded').toBeDefined()
   expect(
-    (copyUpdateCall as { actionData?: { channel?: string; name?: string } }).actionData?.channel,
+    copyUpdateCall!.actionData?.channel,
     'cross-channel copy-update must carry actionData.channel=latest',
   ).toBe('latest')
 
@@ -852,39 +866,39 @@ test('picker-driven cross-channel copy-update (stable → latest) creates a copy
   const sourceAfter = installs.find((i) => i.id === _updateInstallId)
   expect(sourceAfter?.updateChannel, 'source updateChannel must stay on stable').toBe('stable')
 
-  // Close the extra chooser host spawned by `open-install-window` so
-  // panel.html-marker helpers in subsequent tests bind deterministically.
-  const extraWindowIds = await ctx.app.evaluate(
-    ({ BrowserWindow }, before) =>
-      BrowserWindow.getAllWindows()
-        .filter((w) => !w.isDestroyed() && !before.includes(w.id))
-        .map((w) => w.id),
-    windowIdsBeforeCopy,
-  )
-  await ctx.app.evaluate(({ BrowserWindow }, ids) => {
-    for (const id of ids) {
-      const w = BrowserWindow.fromId(id)
-      if (w && !w.isDestroyed()) w.close()
-    }
-  }, extraWindowIds)
-  await expect
-    .poll(
-      () =>
-        ctx.app.evaluate(
-          ({ BrowserWindow }, ids) =>
-            BrowserWindow.getAllWindows().filter(
-              (w) => !w.isDestroyed() && ids.includes(w.id),
-            ).length,
-          extraWindowIds,
-        ),
-      { timeout: 10_000, intervals: [100, 250] },
-    )
-    .toBe(0)
+  // Cross-channel copy-update is `isChannelSwitch`, so handleCopyUpdate
+  // omits `newInstallationId` from the result and ProgressModal never
+  // calls `openInstallWindow` — no extra chooser host to close.
 })
 
 test('cleans up the copy-update install before the cross-channel update test runs @real', async () => {
   test.setTimeout(300_000)
+
+  // Rehydrate from the registry when running this test in isolation
+  // (--grep) against a profile where the prior copy-update test
+  // already ran and the in-process shared state was lost. Find by
+  // the literal name the prior test used — name match is unambiguous
+  // even when both installs share a `local` source.
+  if (!_copyUpdateInstallId) {
+    const all = await ctx.panel.evaluate<Array<{ id: string; name: string; installPath: string }>>(
+      `window.api.getInstallations()`,
+    )
+    const stray = all.find((i) => i.name === 'ComfyUI Copy-Update E2E' && i.installPath)
+    if (stray) {
+      _copyUpdateInstallId = stray.id
+      _copyUpdateInstallPath = stray.installPath
+    }
+  }
   expect(_copyUpdateInstallId, 'no copy-update install id captured to clean up').toBeTruthy()
+
+  // The dashboard kebab Delete path needs the chooser body visible.
+  // The prior test left the source install in whatever state the
+  // beforeAll hydration produced; when greped in isolation comfy is
+  // running on the source install, so flip back to the chooser before
+  // driving the kebab.
+  if (await comfyFrontendIsLoaded()) {
+    await returnToDashboardViaPickerHome(ctx)
+  }
 
   // Frees the ~500MB tree before the cross-channel update-comfyui
   // test below flips the SOURCE install to latest. Same dashboard
@@ -1313,20 +1327,21 @@ test('picker pin-bottom Copy creates a real ~500MB copy of the install @real', a
   await popup.waitForVisible(byTestId(TID.pinBottomAction('copy')), { timeout: 10_000 })
   expect(await popup.click(byTestId(TID.pinBottomAction('copy')))).toBe(true)
 
-  // Prompt for the copy's new name (rendered by ModalDialog's prompt
-  // branch inside the popup webContents).
-  await popup.waitForVisible(byTestId(TID.modalPromptInput), { timeout: 10_000 })
+  // Prompt for the copy's new name (rendered by BasePrompt inside
+  // the popup webContents — the picker drives prompts through
+  // `useDialogs().prompt`, not the legacy `useModal().prompt`).
+  await popup.waitForVisible(byTestId(TID.basePromptInput), { timeout: 10_000 })
   const newName = 'ComfyUI Copy E2E'
   await popup.evaluate<void>(
     `(() => {
-      const el = document.querySelector(${JSON.stringify(byTestId(TID.modalPromptInput))})
+      const el = document.querySelector(${JSON.stringify(byTestId(TID.basePromptInput))})
       if (!el) throw new Error('prompt input not found')
       el.value = ${JSON.stringify(newName)}
       el.dispatchEvent(new Event('input', { bubbles: true }))
       el.dispatchEvent(new Event('change', { bubbles: true }))
     })()`,
   )
-  expect(await popup.click(byTestId(TID.modalConfirm))).toBe(true)
+  expect(await popup.click(byTestId(TID.basePromptAction))).toBe(true)
 
   await waitForProgressTakeoverAfterPopupClose()
 
@@ -1460,19 +1475,19 @@ test('dashboard kebab "Copy Installation" creates a real ~500MB copy @real', asy
   // prompt for the new install name.
   await waitForWebContents(ctx.app, 'comfyTitlePopup.html')
   const popup = titlePopupPage(ctx.app)
-  await popup.waitForVisible(byTestId(TID.modalPromptInput), { timeout: 15_000 })
+  await popup.waitForVisible(byTestId(TID.basePromptInput), { timeout: 15_000 })
 
   const newName = 'ComfyUI Kebab Copy E2E'
   await popup.evaluate<void>(
     `(() => {
-      const el = document.querySelector(${JSON.stringify(byTestId(TID.modalPromptInput))})
+      const el = document.querySelector(${JSON.stringify(byTestId(TID.basePromptInput))})
       if (!el) throw new Error('prompt input not found')
       el.value = ${JSON.stringify(newName)}
       el.dispatchEvent(new Event('input', { bubbles: true }))
       el.dispatchEvent(new Event('change', { bubbles: true }))
     })()`,
   )
-  expect(await popup.click(byTestId(TID.modalConfirm))).toBe(true)
+  expect(await popup.click(byTestId(TID.basePromptAction))).toBe(true)
 
   // Picker hides; the panel's ProgressModal owns the copy op.
   await waitForProgressTakeoverAfterPopupClose()

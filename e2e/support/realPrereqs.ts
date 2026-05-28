@@ -17,6 +17,7 @@
  */
 
 import { execFileSync } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import path from 'node:path'
 import { expect } from '@playwright/test'
 import type { AppContext } from '../launchApp'
@@ -189,15 +190,42 @@ export async function freshInstallStandaloneCpu(
   return await captureInstallStateFromDisk(ctx)
 }
 
+/** True iff the install on disk has the minimal pieces `handleLaunch`
+ *  needs: `ComfyUI/main.py` and either `ComfyUI/.venv/Scripts/python.exe`
+ *  (Windows) / `ComfyUI/.venv/bin/python3` (POSIX) — matches the layout
+ *  produced by `createEnv` in `src/main/sources/standalone/install.ts`.
+ *
+ *  A registry entry whose disk state is missing these pieces is
+ *  considered corrupt (typical cause: a prior run's terminal delete
+ *  test was interrupted partway through wiping the install tree) and
+ *  must not be silently hydrated — launching it would fail with the
+ *  "no Python environment found" error and the test would time out
+ *  blaming the launch, not the corrupt state. */
+function isLaunchableInstall(installPath: string): boolean {
+  const comfyMain = path.join(installPath, 'ComfyUI', 'main.py')
+  const venvPython = process.platform === 'win32'
+    ? path.join(installPath, 'ComfyUI', '.venv', 'Scripts', 'python.exe')
+    : path.join(installPath, 'ComfyUI', '.venv', 'bin', 'python3')
+  return existsSync(comfyMain) && existsSync(venvPython)
+}
+
 /** Read the live install state off disk (id + path from
  *  `getInstallations`, commit from `git rev-parse`). Used by both
  *  `freshInstallStandaloneCpu` (after a fresh install) and
  *  `hydrateInstallFromDisk` (reuse-mode). */
 async function captureInstallStateFromDisk(ctx: AppContext): Promise<HydratedInstall> {
-  const installs = await ctx.panel.evaluate<InstallationLite[]>(
+  const installs = await ctx.panel.evaluate<Array<InstallationLite & { copiedFromName?: string }>>(
     `window.api.getInstallations()`,
   )
-  const local = installs.find((i) => typeof i.installPath === 'string' && i.installPath.length > 0)
+  // Prefer the original install over any copies the lifecycle suite
+  // leaves behind. Copies carry `copiedFromName`; the source install
+  // does not. Within each group prefer entries whose disk state is
+  // actually launchable so a partially-deleted leftover from a prior
+  // run doesn't shadow a fresh source install that's still intact.
+  const locals = installs.filter((i) => typeof i.installPath === 'string' && i.installPath.length > 0)
+  const sources = locals.filter((i) => !i.copiedFromName)
+  const pickFrom = sources.length > 0 ? sources : locals
+  const local = pickFrom.find((i) => isLaunchableInstall(i.installPath)) ?? pickFrom[0]
   if (!local) throw new Error('no local install record found in getInstallations()')
 
   const comfyUIDir = path.join(local.installPath, 'ComfyUI')
@@ -302,6 +330,17 @@ export async function ensureInstalledAndLaunched(
     try {
       hydrated = await captureInstallStateFromDisk(ctx)
     } catch { /* no install yet — fall through */ }
+
+    // Skip hydration when the picked install isn't actually launchable
+    // on disk (typical cause: a prior suite run's terminal delete test
+    // was interrupted and left the install tree in a partial state).
+    // Clicking the tile would fail with the "no Python environment
+    // found" error and the test would time out blaming the launch.
+    // Fall through to a fresh install instead.
+    if (hydrated && !isLaunchableInstall(hydrated.installPath)) {
+      console.log(`[lifecycle-harness] hydration skipped — install at ${hydrated.installPath} is missing ComfyUI/main.py or .venv (likely partial-delete leftover from a prior run); running fresh install`)
+      hydrated = null
+    }
 
     if (hydrated) {
       // Hydrated profile: launch the existing install via real click
@@ -426,19 +465,19 @@ export async function saveSnapshotViaPicker(
   await popup.waitForVisible('.snapshots-rail-save-box', { timeout: 30_000 })
   expect(await popup.click('.snapshots-rail-save-box'), 'snapshots-rail-save-box click').toBe(true)
 
-  // `handleSave` opens a `dialogs.prompt` — modal-prompt-input +
-  // modal-confirm-button rendered inside the popup webContents.
-  await popup.waitForVisible(byTestId(TID.modalPromptInput), { timeout: 10_000 })
+  // `handleSave` opens a `dialogs.prompt` — BasePrompt rendered
+  // inside the popup webContents.
+  await popup.waitForVisible(byTestId(TID.basePromptInput), { timeout: 10_000 })
   await popup.evaluate<void>(
     `(() => {
-      const el = document.querySelector(${JSON.stringify(byTestId(TID.modalPromptInput))})
+      const el = document.querySelector(${JSON.stringify(byTestId(TID.basePromptInput))})
       if (!el) throw new Error('snapshot label prompt input missing')
       el.value = ${JSON.stringify(label)}
       el.dispatchEvent(new Event('input', { bubbles: true }))
       el.dispatchEvent(new Event('change', { bubbles: true }))
     })()`,
   )
-  expect(await popup.click(byTestId(TID.modalConfirm)), 'snapshot save confirm clicked').toBe(true)
+  expect(await popup.click(byTestId(TID.basePromptAction)), 'snapshot save confirm clicked').toBe(true)
 
   interface SnapshotListLite { snapshots: { label?: string; filename: string }[] }
   await expect
