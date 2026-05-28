@@ -611,13 +611,15 @@ defineExpose({
           @click="selectTab(tab.key)"
           @keydown="handleTabKeydown($event, i)"
         >
-          <component :is="tab.icon" :size="14" aria-hidden="true" class="settings-v2-tab-icon" />
+          <span class="settings-v2-tab-icon-wrap">
+            <component :is="tab.icon" :size="14" aria-hidden="true" class="settings-v2-tab-icon" />
+            <span
+              v-if="tab.key === 'update' && showUpdateBadge"
+              class="settings-v2-tab-badge"
+              aria-hidden="true"
+            ></span>
+          </span>
           <span>{{ tab.label }}</span>
-          <span
-            v-if="tab.key === 'update' && showUpdateBadge"
-            class="settings-v2-tab-badge"
-            aria-hidden="true"
-          ></span>
         </button>
       </Tooltip>
     </nav>
@@ -871,17 +873,13 @@ defineExpose({
    label on hover/focus for the collapsed tabs. */
 @container settings-tabs (max-width: 520px) {
   .settings-v2-tab:not(.is-active) {
-    position: relative;
     padding: 6px 8px;
     gap: 0;
   }
-  .settings-v2-tab:not(.is-active) > span:not(.settings-v2-tab-badge) {
+  /* Collapse to icon-only: hide the label but keep the icon wrap (which
+     carries the overlapped update dot). */
+  .settings-v2-tab:not(.is-active) > span:not(.settings-v2-tab-icon-wrap) {
     display: none;
-  }
-  .settings-v2-tab:not(.is-active) .settings-v2-tab-badge {
-    position: absolute;
-    top: 4px;
-    right: 4px;
   }
 }
 
@@ -926,17 +924,36 @@ defineExpose({
   background: var(--neutral-800);
 }
 
+.settings-v2-tab-icon-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
 .settings-v2-tab-icon {
   flex-shrink: 0;
   opacity: 0.85;
 }
 
+/* Update-available dot, overlapped on the bottom-right of the Update tab
+   icon — same corner + chrome as the IPP instance-row dots (running /
+   update / op): a small orange dot with a ring in the surface colour so
+   it reads as a badge on the icon rather than floating text after the
+   label. */
 .settings-v2-tab-badge {
+  position: absolute;
+  bottom: -1px;
+  right: -1px;
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--warning);
-  flex-shrink: 0;
+  background: var(--status-update, #f59e0b);
+  border: 2px solid var(--modal-surface-bg);
+  box-sizing: content-box;
+}
+.settings-v2-tab.is-active .settings-v2-tab-badge {
+  border-color: var(--neutral-800);
 }
 
 .settings-v2-body {
