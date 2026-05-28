@@ -25,6 +25,11 @@ describe('startBridgeServer', () => {
 
   it('serves the error page when the IdP redirects with ?error=...', async () => {
     const handle = await startBridgeServer({ env: 'prod', providerId: 'google.com', port: 0 })
+    // Attach the rejection handler BEFORE triggering the error fetch.
+    // The ?error= branch rejects signInPromise synchronously while
+    // handling the request; if no handler is attached yet, Vitest flags
+    // it as an unhandled rejection and fails the whole run.
+    const rejected = expect(handle.signInPromise).rejects.toThrow(/IdP error/)
     try {
       const res = await fetch(
         `${handle.url}?error=access_denied&error_description=user+cancelled`,
@@ -34,7 +39,7 @@ describe('startBridgeServer', () => {
       const body = await res.text()
       expect(body).toContain('Sign-in failed')
       expect(body).toContain('user cancelled')
-      await expect(handle.signInPromise).rejects.toThrow(/IdP error/)
+      await rejected
     } finally {
       handle.close()
     }
