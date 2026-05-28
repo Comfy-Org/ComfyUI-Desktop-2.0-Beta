@@ -130,20 +130,38 @@ export async function postInstall(installation: InstallationRecord, { sendProgre
     installation = { ...installation, comfyVersion } as InstallationRecord
   }
 
+  // A "Latest Stable" install auto-updates the just-extracted bundled
+  // ComfyUI to the newest release below, which writes its own `post-update`
+  // snapshot at the resolved version. Capturing a `boot` snapshot here first
+  // would record the bundled version (e.g. v0.20.x) and leave the snapshot
+  // history showing a phantom "upgrade" (bundled → latest) that the user
+  // never performed — it is all one uninterrupted fresh install. Defer to the
+  // post-update snapshot in that case so the baseline reflects what actually
+  // landed. When no auto-update runs (a pinned release, or no git), the boot
+  // snapshot is the only baseline and must be taken.
+  const willAutoUpdate = !!installation.autoUpdateComfyUI && fs.existsSync(path.join(comfyuiDir, '.git'))
+
   // Capture initial snapshot so the detail view shows "Current" immediately
-  try {
-    const filename = await snapshots.saveSnapshot(installation.installPath, installation, 'boot')
-    const snapshotCount = await snapshots.getSnapshotCount(installation.installPath)
-    await update({ lastSnapshot: filename, snapshotCount })
-  } catch (err) {
-    console.warn('Initial snapshot failed:', err)
+  if (!willAutoUpdate) {
+    try {
+      const filename = await snapshots.saveSnapshot(installation.installPath, installation, 'boot')
+      const snapshotCount = await snapshots.getSnapshotCount(installation.installPath)
+      await update({ lastSnapshot: filename, snapshotCount })
+    } catch (err) {
+      console.warn('Initial snapshot failed:', err)
+    }
   }
 
   // Auto-update to latest stable release if the user selected "Latest Stable"
-  if (installation.autoUpdateComfyUI && fs.existsSync(path.join(comfyuiDir, '.git'))) {
+  if (willAutoUpdate) {
     if (signal?.aborted) throw new Error('Cancelled')
     sendProgress('update', { percent: -1, status: 'Fetching latest stable version' })
 
+    // Whether the update path wrote its own snapshot (only the successful
+    // `runComfyUIUpdate` post-update path does). If it didn't — already on
+    // latest, network flake, or update failure — we still need a baseline
+    // boot snapshot below so the detail view has a "Current" entry.
+    let snapshotWritten = false
     try {
       // Bypass the in-memory tag cache: it can be poisoned with `null` at
       // app startup when no git backend is configured (installer ships no
@@ -173,6 +191,8 @@ export async function postInstall(installation: InstallationRecord, { sendProgre
         })
         installation = result.installation
         if (result.ok) {
+          // runComfyUIUpdate wrote a post-update snapshot at the resolved version.
+          snapshotWritten = true
           sendProgress('update', { percent: 100, status: 'Up to date' })
         } else {
           sendProgress('update', { percent: 100, status: 'Skipped (update failed)' })
@@ -182,6 +202,20 @@ export async function postInstall(installation: InstallationRecord, { sendProgre
       if ((err as Error).message === 'Cancelled') throw err
       console.warn('Auto-update to latest stable failed:', err)
       sendProgress('update', { percent: 100, status: 'Skipped' })
+    }
+
+    // Fallback baseline: if the update path didn't write a snapshot (already
+    // on latest, couldn't verify, or update failed), capture a boot snapshot
+    // now so the install still has a "Current" baseline. The deferred boot
+    // snapshot reflects the final installed state, so there's no phantom diff.
+    if (!snapshotWritten) {
+      try {
+        const filename = await snapshots.saveSnapshot(installation.installPath, installation, 'boot')
+        const snapshotCount = await snapshots.getSnapshotCount(installation.installPath)
+        await update({ lastSnapshot: filename, snapshotCount })
+      } catch (err) {
+        console.warn('Initial snapshot failed:', err)
+      }
     }
   }
 }
