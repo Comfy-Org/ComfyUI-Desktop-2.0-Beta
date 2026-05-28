@@ -97,7 +97,8 @@ export const en = {
     desktopUpdateReady: 'Desktop Update Ready',
     desktopUpdateWithVersion: '{label} (v{version})',
     installUpdateAvailable: 'ComfyUI Update',
-    installUpdateVersion: 'ComfyUI {version}'
+    installUpdateVersion: 'ComfyUI {version}',
+    installUpdateShort: 'Update'
   },
   fileMenu: {
     newWindow: 'New Window',

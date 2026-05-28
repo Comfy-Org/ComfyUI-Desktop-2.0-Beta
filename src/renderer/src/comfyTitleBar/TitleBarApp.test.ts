@@ -196,7 +196,10 @@ describe('TitleBarApp', () => {
     // the pill reads as actionable.
     const pill = wrapper.find('.title-install-pill')
     expect(pill.exists()).toBe(true)
-    expect(pill.element.tagName).toBe('BUTTON')
+    // A div with role=button (not a native <button>) so it can hold the
+    // nested, separately-clickable "Update" chip.
+    expect(pill.element.tagName).toBe('DIV')
+    expect(pill.attributes('role')).toBe('button')
     expect(pill.attributes('aria-haspopup')).toBe('dialog')
     expect(wrapper.find('.title-install-name').text()).toBe('ComfyUI')
     expect(wrapper.find('.title-install-caret').exists()).toBe(true)
@@ -255,7 +258,8 @@ describe('TitleBarApp', () => {
     await flushPromises()
     const pill = wrapper.find('.title-install-pill')
     expect(pill.exists()).toBe(true)
-    expect(pill.element.tagName).toBe('BUTTON')
+    expect(pill.element.tagName).toBe('DIV')
+    expect(pill.attributes('role')).toBe('button')
     expect(pill.classes()).toContain('is-install-less')
     expect(wrapper.find('.title-install-caret').exists()).toBe(true)
     wrapper.unmount()
@@ -538,23 +542,23 @@ describe('TitleBarApp', () => {
     expect(pill.text()).toContain('Desktop Update Ready')
   })
 
-  it('renders the install-update pill on install-backed hosts when onInstallUpdateAvailable=true', async () => {
+  it('renders the install-update chip inside the center pill when onInstallUpdateAvailable=true', async () => {
     const { default: TitleBarApp } = await import('./TitleBarApp.vue')
     const wrapper = mount(TitleBarApp)
     await flushPromises()
-    expect(wrapper.find('.title-update-pill.is-install-update').exists()).toBe(false)
+    expect(wrapper.find('.title-install-update-chip').exists()).toBe(false)
     bridgeState.installUpdateAvailableCallbacks.forEach((cb) => cb({ available: true, version: null }))
     await flushPromises()
-    const pill = wrapper.find('.title-update-pill.is-install-update')
-    expect(pill.exists()).toBe(true)
-    expect(pill.text()).toContain('ComfyUI Update')
+    const chip = wrapper.find('.title-install-update-chip')
+    expect(chip.exists()).toBe(true)
+    // The chip text is just "Update"; the fuller label lives in the tooltip.
+    expect(chip.text()).toBe('Update')
   })
 
-  it('renders the install-update pill with version label when main pushes a target version', async () => {
-    // Mirrors the app-update pill's "Desktop Update" copy pattern so
-    // the user reads the install-update pill the same way: the
-    // ComfyUI target release is right there in the label, not behind
-    // a popover, and visually distinct from the desktop-update pill.
+  it('keeps the chip label short and carries the version in its tooltip', async () => {
+    // The chip text stays "Update" (no version) so the center pill
+    // doesn't grow with the version string; the full "ComfyUI v1.2.3"
+    // label lives in the tooltip / aria-label instead.
     const { default: TitleBarApp } = await import('./TitleBarApp.vue')
     const wrapper = mount(TitleBarApp)
     await flushPromises()
@@ -562,12 +566,11 @@ describe('TitleBarApp', () => {
       cb({ available: true, version: 'v1.2.3' }),
     )
     await flushPromises()
-    const pill = wrapper.find('.title-update-pill.is-install-update')
-    expect(pill.exists()).toBe(true)
-    expect(pill.text()).toContain('ComfyUI v1.2.3')
-    // Tooltip + aria-label track the same copy.
-    expect(pill.attributes('title')).toBe('ComfyUI v1.2.3')
-    expect(pill.attributes('aria-label')).toBe('ComfyUI v1.2.3')
+    const chip = wrapper.find('.title-install-update-chip')
+    expect(chip.exists()).toBe(true)
+    expect(chip.text()).toBe('Update')
+    expect(chip.attributes('title')).toBe('ComfyUI v1.2.3')
+    expect(chip.attributes('aria-label')).toBe('ComfyUI v1.2.3')
   })
 
   it('suppresses the install-update pill on install-less host windows even when push fires', async () => {
@@ -578,7 +581,7 @@ describe('TitleBarApp', () => {
     await flushPromises()
     bridgeState.installUpdateAvailableCallbacks.forEach((cb) => cb({ available: true, version: null }))
     await flushPromises()
-    expect(wrapper.find('.title-update-pill.is-install-update').exists()).toBe(false)
+    expect(wrapper.find('.title-install-update-chip').exists()).toBe(false)
   })
 
   it('forwards app-update pill clicks through the bridge', async () => {
@@ -594,13 +597,13 @@ describe('TitleBarApp', () => {
     wrapper.unmount()
   })
 
-  it('forwards install-update pill clicks through the bridge', async () => {
+  it('forwards install-update chip clicks through the bridge', async () => {
     const { default: TitleBarApp } = await import('./TitleBarApp.vue')
     const wrapper = mount(TitleBarApp, { attachTo: document.body })
     await flushPromises()
     bridgeState.installUpdateAvailableCallbacks.forEach((cb) => cb({ available: true, version: null }))
     await flushPromises()
-    await wrapper.find('.title-update-pill.is-install-update').trigger('click')
+    await wrapper.find('.title-install-update-chip').trigger('click')
     expect(bridgeState.installUpdatePillClicks).toBe(1)
     wrapper.unmount()
   })
