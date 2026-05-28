@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest'
-import { humanizeOpStatus } from './progressStatusLabel'
+import {
+  humanizeOpStatus,
+  operationInflightLabel,
+  operationSuccessLabel,
+} from './progressStatusLabel'
 
 /**
  * `humanizeOpStatus` maps the raw status strings emitted by main during
@@ -35,4 +39,56 @@ describe('humanizeOpStatus', () => {
       expect(humanizeOpStatus(raw as string | null | undefined, t)).toBe('Working…')
     }
   )
+})
+
+/**
+ * Per-action title helpers — the picker's progress overlay used to
+ * hardcode "Updating…" / "Update complete" for every actionId. These
+ * tests lock the mapping so future actions get an explicit label or
+ * fall back through the documented chain (op.title → "Working…").
+ */
+describe('operationInflightLabel', () => {
+  it.each([
+    [{ actionId: 'update-comfyui',        actionData: {} },                       'Updating…'],
+    [{ actionId: 'update-comfyui',        actionData: { isDowngrade: true } },    'Downgrading…'],
+    [{ actionId: 'release-update' },                                              'Updating…'],
+    [{ actionId: 'copy' },                                                        'Copying…'],
+    [{ actionId: 'copy-update' },                                                 'Copying & updating…'],
+    [{ actionId: 'delete' },                                                      'Deleting…'],
+    [{ actionId: 'snapshot-restore' },                                            'Restoring snapshot…'],
+    [{ actionId: 'snapshot-save' },                                               'Saving snapshot…'],
+    [{ actionId: 'snapshot-delete' },                                             'Deleting snapshot…'],
+    [{ actionId: 'migrate-to-standalone' },                                       'Migrating…'],
+  ])('actionId=%j → %s', (op, expected) => {
+    expect(operationInflightLabel(op, t)).toBe(expected)
+  })
+
+  it('falls back to op.title for unknown actionIds', () => {
+    expect(operationInflightLabel({ actionId: 'mystery', title: 'Doing the thing…' }, t)).toBe('Doing the thing…')
+  })
+
+  it('falls back to Working… when op.title is also empty', () => {
+    expect(operationInflightLabel({ actionId: 'mystery' }, t)).toBe('Working…')
+  })
+})
+
+describe('operationSuccessLabel', () => {
+  it.each([
+    [{ actionId: 'update-comfyui',        actionData: {} },                       'Update complete'],
+    [{ actionId: 'update-comfyui',        actionData: { isDowngrade: true } },    'Downgrade complete'],
+    [{ actionId: 'release-update' },                                              'Update complete'],
+    [{ actionId: 'copy' },                                                        'Copy complete'],
+    [{ actionId: 'copy-update' },                                                 'Copy complete'],
+    [{ actionId: 'delete' },                                                      'Deleted'],
+    [{ actionId: 'snapshot-restore' },                                            'Snapshot restored'],
+    [{ actionId: 'snapshot-save' },                                               'Snapshot saved'],
+    [{ actionId: 'snapshot-delete' },                                             'Snapshot deleted'],
+    [{ actionId: 'migrate-to-standalone' },                                       'Migration complete'],
+  ])('actionId=%j → %s', (op, expected) => {
+    expect(operationSuccessLabel(op, t)).toBe(expected)
+  })
+
+  it('falls back to Done for unknown actionIds', () => {
+    expect(operationSuccessLabel({ actionId: 'mystery' }, t)).toBe('Done')
+  })
 })
