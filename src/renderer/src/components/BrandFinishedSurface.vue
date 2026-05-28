@@ -109,6 +109,14 @@ function getLogText(): string {
             class="brand-progress__error-copy"
           />
         </div>
+        <!-- Error-context actions live in the hero stack (under the
+             message) instead of the footer bar, matching ProgressModal's
+             error finished state: the primary action sits with the
+             failure context the user is reading instead of being
+             stranded bottom-left. -->
+        <div v-if="$slots.errorActions" class="brand-progress__error-actions">
+          <slot name="errorActions" />
+        </div>
       </div>
     </div>
     <template #footer>
@@ -137,6 +145,8 @@ function getLogText(): string {
           class="brand-progress__footer-bar"
           :class="{ 'is-centered': !logs && !$slots.actions }"
         >
+          <!-- Footer-bar bands stay empty for error-only variants: the
+               error-actions slot renders in the hero stack instead. -->
           <div class="brand-progress__footer-left">
             <slot name="actions" />
           </div>
@@ -283,6 +293,25 @@ function getLogText(): string {
   -webkit-user-select: text;
   word-break: break-word;
   white-space: pre-wrap;
+}
+
+/* Error CTAs — centered in the hero stack under the error message.
+ * Back (ghost) sits left, primary CTA right; both flex to equal
+ * width within a bounded row so the pair reads as a balanced unit.
+ * Mirrors ProgressModal's `.brand-progress__error-actions` rule —
+ * keep the two in sync until ProgressModal consumes this component. */
+.brand-progress__error-actions {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 12px;
+  width: 100%;
+  max-width: 420px;
+}
+.brand-progress__error-actions > .brand-progress__footer-btn,
+.brand-progress__error-actions > :slotted(.brand-progress__footer-btn) {
+  flex: 1 1 0;
+  justify-content: center;
 }
 
 /* Footer — positioned container for the bar + the logs panel above it */

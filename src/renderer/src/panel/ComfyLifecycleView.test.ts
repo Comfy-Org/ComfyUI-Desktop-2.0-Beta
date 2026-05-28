@@ -11,6 +11,7 @@ const messages = {
   en: {
     common: {
       copy: 'Copy',
+      back: 'Back',
     },
     launch: {
       viewLogs: 'View logs',
@@ -377,7 +378,7 @@ describe('ComfyLifecycleView', () => {
     expect(api.returnToDashboard).toHaveBeenCalled()
   })
 
-  it('renders a Return to Dashboard ghost button in the crashed state and calls returnToDashboard without confirm', async () => {
+  it('renders a Back ghost button in the crashed-state error-actions row and calls returnToDashboard without confirm', async () => {
     const wrapper = mountView()
     const sessionStore = useSessionStore()
     sessionStore.errorInstances.set('inst-1', {
@@ -385,10 +386,19 @@ describe('ComfyLifecycleView', () => {
       exitCode: 1,
     })
     await flushPromises()
-    const buttons = wrapper.findAll('button.brand-ghost')
-    const ret = buttons.find((b) => b.text().includes('Return to Dashboard'))
-    expect(ret?.exists()).toBe(true)
-    await ret!.trigger('click')
+    // Crashed-state actions live in the hero-stack error-actions row,
+    // not the footer-bar — matches ProgressModal's error finished state.
+    const errorActions = wrapper.find('.brand-progress__error-actions')
+    expect(errorActions.exists()).toBe(true)
+    const buttons = errorActions.findAll('button')
+    const back = buttons.find((b) => b.text().includes('Back'))
+    expect(back?.exists()).toBe(true)
+    expect(back!.classes()).toContain('brand-ghost')
+    // Back sits on the left, Restart on the right — same pairing as
+    // ProgressModal's Back / Reboot CTAs.
+    expect(buttons[0]!.text()).toContain('Back')
+    expect(buttons[1]!.text()).toContain('Restart')
+    await back!.trigger('click')
     await flushPromises()
     const api = (window as unknown as { api: MockApi }).api
     expect(api.returnToDashboard).toHaveBeenCalled()

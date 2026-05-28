@@ -268,18 +268,22 @@ const placeholderTitle = computed<string>(() => {
       :logs="crashedLogs ?? undefined"
       :aria-label="$t('comfyLifecycle.crashedTitle')"
     >
-      <template #actions>
-        <button class="brand-primary brand-progress__footer-btn" type="button" @click="startLaunch">
-          <RefreshCcw :size="14" />
-          {{ $t('comfyLifecycle.restart') }}
-        </button>
+      <!-- Crashed actions render in the hero stack as a Back/Restart
+           equal-width pair, matching ProgressModal's error finished
+           state. Back is ghost on the left, Restart is primary on the
+           right — same ordering, copy, and styling as Back/Reboot. -->
+      <template #errorActions>
         <button
           class="brand-ghost brand-progress__footer-btn"
           type="button"
           @click="returnToDashboard"
         >
           <ArrowLeft :size="14" />
-          {{ $t('comfyLifecycle.returnToDashboard') }}
+          {{ $t('common.back') }}
+        </button>
+        <button class="brand-primary brand-progress__footer-btn" type="button" @click="startLaunch">
+          <RefreshCcw :size="14" />
+          {{ $t('comfyLifecycle.restart') }}
         </button>
       </template>
     </BrandFinishedSurface>

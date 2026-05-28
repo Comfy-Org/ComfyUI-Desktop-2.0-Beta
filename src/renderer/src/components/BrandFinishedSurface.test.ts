@@ -217,6 +217,45 @@ describe('BrandFinishedSurface', () => {
     })
   })
 
+  describe('errorActions slot', () => {
+    it('renders error-context actions inside the hero stack, not the footer bar', () => {
+      // Matches ProgressModal's redesigned error finished state: the
+      // Back / primary-CTA pair sits with the failure context the user
+      // is reading, not stranded bottom-left.
+      const wrapper = mountSurface(
+        { variant: 'error', title: 'Crashed', message: 'Exit code 137' },
+        {
+          errorActions: () => [
+            h(
+              'button',
+              { class: 'brand-ghost brand-progress__footer-btn', type: 'button' },
+              'Back',
+            ),
+            h(
+              'button',
+              { class: 'brand-primary brand-progress__footer-btn', type: 'button' },
+              'Reboot',
+            ),
+          ],
+        },
+      )
+      const row = wrapper.find('.brand-progress__error-actions')
+      expect(row.exists()).toBe(true)
+      const buttons = row.findAll('button')
+      expect(buttons).toHaveLength(2)
+      expect(buttons[0]!.text()).toBe('Back')
+      expect(buttons[1]!.text()).toBe('Reboot')
+      // Footer-left band stays empty when only errorActions are passed.
+      const footerLeft = wrapper.find('.brand-progress__footer-left')
+      expect(footerLeft.findAll('button')).toHaveLength(0)
+    })
+
+    it('omits the error-actions container entirely when no errorActions slot is provided', () => {
+      const wrapper = mountSurface({ variant: 'error', title: 'Crashed' })
+      expect(wrapper.find('.brand-progress__error-actions').exists()).toBe(false)
+    })
+  })
+
   it('forwards ariaLabel to the BrandTakeoverLayout chrome', () => {
     const wrapper = mountSurface({
       variant: 'error',
