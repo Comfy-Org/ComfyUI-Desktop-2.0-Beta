@@ -131,7 +131,7 @@ watch(
       unknownGraceTimer = null
     }, UNKNOWN_PLACEHOLDER_GRACE_MS)
   },
-  { immediate: true },
+  { immediate: true }
 )
 
 onBeforeUnmount(clearUnknownGraceTimer)
@@ -160,6 +160,11 @@ async function hydrateLastCrashError(installationId: string): Promise<void> {
       exitCode: data.exitCode,
       signal: data.signal,
       lastStderr: data.lastStderr,
+      // Carry the main-side crash timestamp so
+      // `desktop2.instance.relaunched_after_crash` can compute a real
+      // `crash_to_relaunch_seconds` even when this view hydrated AFTER
+      // the live `comfy-exited` event (panel recreated, etc.).
+      crashedAtMs: data.crashedAtMs
     })
   } catch {
     // Best-effort — a missing handler / IPC failure shouldn't break the view.
@@ -174,13 +179,26 @@ watch(
   () => props.installationId,
   (id) => {
     void hydrateLastCrashError(id)
-  },
+  }
 )
 
 const installationName = computed(() => props.installation?.name ?? '')
 
 function startLaunch(): void {
   if (!props.installationId) return
+  // Capture the recovery half of the lifecycle-resilience question: the
+  // crash itself fires from main (`comfyui.exited` with crashed=true);
+  // this complements it with "did the user actually re-launch after the
+  // crash?" plus the crash-to-relaunch wall clock.
+  if (state.value === 'crashed') {
+    const errorInfoSnapshot = sessionStore.errorInstances.get(props.installationId)
+    const crashedAtMs = errorInfoSnapshot?.crashedAtMs
+    emitTelemetryAction('desktop2.instance.relaunched_after_crash', {
+      installation_id: props.installationId,
+      crash_to_relaunch_seconds:
+        crashedAtMs != null ? Math.round((Date.now() - crashedAtMs) / 1000) : null
+    })
+  }
   // The progress modal owns the launch lifecycle (start, status, port-conflict
   // resolution, cancel). Once the instance reaches 'started', main swaps the
   // body back to the live ComfyUI view automatically.
@@ -191,7 +209,7 @@ function startLaunch(): void {
       : t('comfyLifecycle.launchProgressTitle'),
     apiCall: () => window.api.runAction(props.installationId, 'launch'),
     cancellable: true,
-    opKind: 'launch',
+    opKind: 'launch'
   })
 }
 

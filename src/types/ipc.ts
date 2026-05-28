@@ -116,7 +116,15 @@ export interface DetailField {
   label: string
   value: string | boolean | number | Record<string, string> | null
   editable?: boolean
-  editType?: 'select' | 'boolean' | 'text' | 'number' | 'path' | 'channel-cards' | 'args-builder' | 'env-vars'
+  editType?:
+    | 'select'
+    | 'boolean'
+    | 'text'
+    | 'number'
+    | 'path'
+    | 'channel-cards'
+    | 'args-builder'
+    | 'env-vars'
   options?: DetailFieldOption[]
   refreshSection?: boolean
   /** Action id to fire automatically when this field's value changes
@@ -416,6 +424,16 @@ export interface ComfyExitedData {
    *  signal" from "crashed with non-zero exit". */
   signal?: string
   lastStderr?: string
+  /**
+   * Wall-clock timestamp (epoch ms) when the crash was recorded main-side.
+   * Set by `recordCrash()` so a renderer that hydrates the crash *after*
+   * the live `comfy-exited` IPC (panel WebContents recreated, second
+   * window opened on the same install, etc.) still has a real value to
+   * compute crash-to-relaunch latency from. Live-path subscribers also
+   * stamp this on their own copy with `Date.now()`; the main-side value
+   * takes precedence on hydration so the two paths agree.
+   */
+  crashedAtMs?: number
 }
 
 export interface ComfyBootLogData {
@@ -526,8 +544,22 @@ export interface SnapshotDiffEntry {
   createdAt: string
   trigger: string
   label: string | null
-  nodesAdded: Array<{ id: string; type: string; dirName: string; enabled: boolean; version?: string; commit?: string }>
-  nodesRemoved: Array<{ id: string; type: string; dirName: string; enabled: boolean; version?: string; commit?: string }>
+  nodesAdded: Array<{
+    id: string
+    type: string
+    dirName: string
+    enabled: boolean
+    version?: string
+    commit?: string
+  }>
+  nodesRemoved: Array<{
+    id: string
+    type: string
+    dirName: string
+    enabled: boolean
+    version?: string
+    commit?: string
+  }>
   nodesChanged: Array<{
     id: string
     from: { version?: string; commit?: string; enabled: boolean }
@@ -1031,17 +1063,49 @@ export interface ElectronApi {
   // Snapshots
   getSnapshots(installationId: string): Promise<SnapshotListData>
   getSnapshotDetail(installationId: string, filename: string): Promise<SnapshotDetailData>
-  getSnapshotDiff(installationId: string, filename: string, mode: 'previous' | 'current'): Promise<SnapshotDiffData>
-  exportSnapshot(installationId: string, filename: string): Promise<{ ok: boolean; message?: string }>
+  getSnapshotDiff(
+    installationId: string,
+    filename: string,
+    mode: 'previous' | 'current'
+  ): Promise<SnapshotDiffData>
+  exportSnapshot(
+    installationId: string,
+    filename: string
+  ): Promise<{ ok: boolean; message?: string }>
   exportAllSnapshots(installationId: string): Promise<{ ok: boolean; message?: string }>
-  importSnapshotsPreview(): Promise<{ ok: boolean; preview?: SnapshotFilePreview; message?: string }>
-  importSnapshotsDiff(installationId: string): Promise<{ ok: boolean; diff?: SnapshotDiffData; message?: string }>
-  importSnapshotsConfirm(installationId: string): Promise<{ ok: boolean; imported?: number; restoreFile?: string; message?: string }>
+  importSnapshotsPreview(): Promise<{
+    ok: boolean
+    preview?: SnapshotFilePreview
+    message?: string
+  }>
+  importSnapshotsDiff(
+    installationId: string
+  ): Promise<{ ok: boolean; diff?: SnapshotDiffData; message?: string }>
+  importSnapshotsConfirm(
+    installationId: string
+  ): Promise<{ ok: boolean; imported?: number; restoreFile?: string; message?: string }>
   previewSnapshotFile(): Promise<{ ok: boolean; preview?: SnapshotFilePreview; message?: string }>
-  previewDesktopMigration(): Promise<{ ok: boolean; message?: string; preview?: SnapshotFilePreview; snapshotPath?: string }>
-  previewLocalMigration(installationId: string): Promise<{ ok: boolean; message?: string; preview?: SnapshotFilePreview; snapshotPath?: string }>
-  previewSnapshotPath(filePath: string): Promise<{ ok: boolean; preview?: SnapshotFilePreview; message?: string }>
-  createFromSnapshot(filePath: string, name?: string, releaseTag?: string, variantId?: string): Promise<{ ok: boolean; entry?: { id: string; name: string }; message?: string }>
+  previewDesktopMigration(): Promise<{
+    ok: boolean
+    message?: string
+    preview?: SnapshotFilePreview
+    snapshotPath?: string
+  }>
+  previewLocalMigration(installationId: string): Promise<{
+    ok: boolean
+    message?: string
+    preview?: SnapshotFilePreview
+    snapshotPath?: string
+  }>
+  previewSnapshotPath(
+    filePath: string
+  ): Promise<{ ok: boolean; preview?: SnapshotFilePreview; message?: string }>
+  createFromSnapshot(
+    filePath: string,
+    name?: string,
+    releaseTag?: string,
+    variantId?: string
+  ): Promise<{ ok: boolean; entry?: { id: string; name: string }; message?: string }>
   getPathForFile(file: File): string
 
   // Settings
@@ -1104,7 +1168,9 @@ export interface ElectronApi {
   onComfyOutput(callback: (data: ComfyOutputData) => void): Unsubscribe
   onComfyExited(callback: (data: ComfyExitedData) => void): Unsubscribe
   onComfyBootLog(callback: (data: ComfyBootLogData) => void): Unsubscribe
-  onInstanceLaunching(callback: (data: { installationId: string; installationName: string }) => void): Unsubscribe
+  onInstanceLaunching(
+    callback: (data: { installationId: string; installationName: string }) => void
+  ): Unsubscribe
   onInstanceLaunchFailed(callback: (data: { installationId: string }) => void): Unsubscribe
   onInstanceStarted(callback: (data: RunningInstance) => void): Unsubscribe
   onInstanceStopping(callback: (data: { installationId: string }) => void): Unsubscribe
@@ -1113,7 +1179,9 @@ export interface ElectronApi {
   onLocaleChanged(callback: (messages: Record<string, unknown>) => void): Unsubscribe
   onConfirmQuit(callback: (details: QuitActiveItem[]) => void): Unsubscribe
   onInstallationsChanged(callback: () => void): Unsubscribe
-  onInstallationsVersionsUpdated(callback: (updates: { id: string; version: string }[]) => void): Unsubscribe
+  onInstallationsVersionsUpdated(
+    callback: (updates: { id: string; version: string }[]) => void
+  ): Unsubscribe
   /**
    * Fires when `release-cache.enrichCommitsAhead` actually writes a new
    * `commitsAhead` value (not on no-op short-circuits). Open settings
@@ -1144,9 +1212,7 @@ export interface ElectronApi {
    * Settings update panel. Any field may be null if the auto-updater
    * didn't supply it for that tick.
    */
-  onAppUpdateDownloadProgress(
-    callback: (progress: AppUpdateDownloadProgress) => void,
-  ): Unsubscribe
+  onAppUpdateDownloadProgress(callback: (progress: AppUpdateDownloadProgress) => void): Unsubscribe
   /**
    * Fires when a user-initiated update action (download / install) fails.
    * Background auto-on download errors are NOT broadcast — only failures
@@ -1162,9 +1228,72 @@ export interface ElectronApi {
    *  carries the URLs that were removed so listeners can drop them in
    *  one pass instead of re-listing. */
   onModelDownloadsClearedFinished(callback: (data: { urls: string[] }) => void): Unsubscribe
+  /**
+   * Forward a renderer-originated telemetry event to main, which captures it
+   * via PostHog Node under the current distinct_id and consent state.
+   *
+   * Replaces the renderer's direct `posthog-js` capture path. Fire-and-forget:
+   * the renderer does not await delivery. Main is the single PostHog capture
+   * point so identity, consent, and dedup all live in one place.
+   */
+  captureTelemetry(event: string, properties: Record<string, unknown>): void
+  /**
+   * Forward a renderer-originated exception to main's PostHog Node
+   * `captureException` path. Used by `window.error` / `unhandledrejection`
+   * handlers and any explicit `try/catch` reporter. Fire-and-forget.
+   */
+  captureExceptionTelemetry(payload: {
+    message: string
+    stack?: string
+    properties?: Record<string, unknown>
+  }): void
+  /**
+   * Update person-level cohort properties on the current PostHog person.
+   * Replaces the renderer's previous `registerPostHog(properties)` calls.
+   * Main routes this to `posthog.identify({ distinctId, properties: { $set: ... } })`.
+   */
+  registerTelemetryProperties(properties: Record<string, unknown>): void
+  /**
+   * Bind a user_id on the current PostHog identity after a successful login.
+   * Main aliases the anonymous installation_id into user_id (PostHog merges
+   * histories), sets `is_authenticated: true`, and fires `app:user_logged_in`.
+   * The renderer remains responsible for Datadog `setUser` on its own SDK.
+   */
+  telemetryBindUserId(payload: { userId: string; properties?: Record<string, unknown> }): void
+  /**
+   * Unbind user_id on logout. Switches distinct_id back to the anonymous
+   * installation_id (NOT posthog.reset, which would clobber installation_id
+   * and download_token). Renderer also clears Datadog setUser.
+   */
+  telemetryUnbindUserId(): void
+  /**
+   * Look up an A/B experiment / feature-flag variant for this user.
+   * Returns the cached value (string for multivariate, boolean for a
+   * single-flag rollout) or `null` if the flag is not present in the
+   * cache. Callers MUST default to the control branch on `null`.
+   * Backed by `posthog.getAllFlags` via the boot-time experiments
+   * refresh; see `src/main/lib/experiments.ts`.
+   */
+  telemetryGetExperimentFlag(key: string): Promise<string | boolean | null>
+  /**
+   * Record an A/B experiment exposure. Per-session dedup is enforced
+   * main-side, so it's safe to call this on every render of an
+   * experiment surface (a re-render won't double-count).
+   */
+  telemetryRecordExposure(payload: {
+    experimentKey: string
+    variant: string
+    source?: 'cache' | 'remote' | 'fallback'
+  }): void
   onTelemetrySettingChanged(callback: (enabled: boolean | undefined) => void): Unsubscribe
   onDatadogError(callback: (payload: DatadogForwardedError) => void): Unsubscribe
-  onTelemetryActionFromMain(callback: (data: { event: string; context: Record<string, unknown>; mainAlreadyCaptured?: boolean }) => void): Unsubscribe
+  onTelemetryActionFromMain(
+    callback: (data: {
+      event: string
+      context: Record<string, unknown>
+      mainAlreadyCaptured?: boolean
+    }) => void
+  ): Unsubscribe
   onErrorDetail(callback: (data: ErrorDetailData) => void): Unsubscribe
   onSuggestChineseMirrors(callback: () => void): Unsubscribe
   onSettingsChanged(callback: (data: { key: string }) => void): Unsubscribe
@@ -1227,7 +1356,7 @@ export interface ElectronApi {
        *  `successTerminal` preset before handing off to
        *  `progressStore.startOperation`. */
       successChoice?: boolean
-    }) => void,
+    }) => void
   ): Unsubscribe
 }
 
@@ -1245,7 +1374,7 @@ export const REQUIRES_STOPPED = new Set([
   'migrate-to-standalone',
   'snapshot-restore',
   'update-comfyui',
-  'migrate-from',
+  'migrate-from'
 ])
 
 /** Picker popup's settings-passthrough IPC channels — main registers them,
@@ -1274,5 +1403,5 @@ export const PICKER_SETTINGS_CHANNELS = {
   previewDesktopMigration: 'comfy-titlepopup:picker-settings-preview-desktop-migration',
   previewLocalMigration: 'comfy-titlepopup:picker-settings-preview-local-migration',
   relaunchApp: 'comfy-titlepopup:picker-settings-relaunch-app',
-  getLocaleMessages: 'comfy-titlepopup:picker-settings-get-locale-messages',
+  getLocaleMessages: 'comfy-titlepopup:picker-settings-get-locale-messages'
 } as const

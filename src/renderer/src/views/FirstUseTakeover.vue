@@ -120,10 +120,18 @@ let completedFired = false
 function emitCompleted(exitPath: 'cloud' | 'local-new' | 'local-migrate' | 'skipped'): void {
   if (completedFired) return
   completedFired = true
+  const durationMs = Date.now() - mountedAt
+  // Cohort the onboarding-completion dashboard into fresh-user,
+  // returning-user, and Desktop-1-migrator splits via had_legacy /
+  // had_existing_install. Without these, the funnel's drop-off
+  // analysis collapses all three audiences into one bucket.
   emitTelemetryAction('desktop2.first_use.completed', {
     exit_path: exitPath,
     steps_seen: stepsSeen.size,
-    duration_ms: Date.now() - mountedAt
+    duration_ms: durationMs,
+    duration_seconds: Math.round(durationMs / 1000),
+    had_legacy: hasLegacyDesktop.value,
+    had_existing_install: skipPick.value
   })
 }
 /** When the host detects prior usage of the launcher (any

@@ -204,6 +204,7 @@ export function createExecutionTap(opts: {
       telemetry.emit('desktop2.execution.error', {
         ...baseContext,
         error_class: 'validation_failed',
+        error_bucket: 'validation',
         error_count: state.errorCount,
         node_id: validationMatch.groups['nodeId'],
       })

@@ -24,6 +24,9 @@ interface ErrorInstance {
    *  message-only). The lifecycle view renders this inline so the user
    *  doesn't have to dig into the log file to see what blew up. */
   lastStderr?: string
+  /** Wall-clock ms when the crash was first recorded. Used to measure
+   *  crash-to-relaunch latency on `desktop2.instance.relaunched_after_crash`. */
+  crashedAtMs?: number
 }
 
 export const useSessionStore = defineStore('session', () => {
@@ -142,9 +145,11 @@ export const useSessionStore = defineStore('session', () => {
     }
 
     cleanups.push(
-      window.api.onInstanceLaunching((data: { installationId: string; installationName: string }) => {
-        launchingInstances.set(data.installationId, { installationName: data.installationName })
-      }),
+      window.api.onInstanceLaunching(
+        (data: { installationId: string; installationName: string }) => {
+          launchingInstances.set(data.installationId, { installationName: data.installationName })
+        }
+      ),
       window.api.onInstanceLaunchFailed((data: { installationId: string }) => {
         launchingInstances.delete(data.installationId)
       }),
@@ -181,6 +186,7 @@ export const useSessionStore = defineStore('session', () => {
             exitCode: data.exitCode,
             signal: data.signal,
             lastStderr: data.lastStderr,
+            crashedAtMs: Date.now()
           })
         }
       })
@@ -219,6 +225,6 @@ export const useSessionStore = defineStore('session', () => {
     clearSession,
     appendOutput,
     init,
-    dispose,
+    dispose
   }
 })

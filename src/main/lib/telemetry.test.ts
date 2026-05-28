@@ -7,9 +7,9 @@ vi.mock('electron', () => ({
   app: {
     getPath: () => path.join(os.tmpdir(), 'launcher-test'),
     isPackaged: false,
-    on: () => {},
+    on: () => {}
   },
-  BrowserWindow: { getAllWindows: () => [] },
+  BrowserWindow: { getAllWindows: () => [] }
 }))
 
 /**
@@ -28,12 +28,17 @@ function makeStubWebContents(): {
   const wc = {
     isDestroyed: () => destroyed,
     send: (channel: string, data: unknown) => sends.push({ channel, data }),
-    once: (event: string, cb: () => void) => { ee.once(event, cb) },
+    once: (event: string, cb: () => void) => {
+      ee.once(event, cb)
+    }
   } as unknown as Electron.WebContents
   return {
     wc,
     sends,
-    destroy: () => { destroyed = true; ee.emit('destroyed') },
+    destroy: () => {
+      destroyed = true
+      ee.emit('destroyed')
+    }
   }
 }
 
@@ -44,17 +49,57 @@ interface CapturedCall {
 }
 const captured: CapturedCall[] = []
 
+interface AliasCall {
+  distinctId: string
+  alias: string
+}
+const aliases: AliasCall[] = []
+
+interface IdentifyCall {
+  distinctId: string
+  properties?: { $set?: Record<string, unknown> }
+}
+const identifies: IdentifyCall[] = []
+
+interface ExceptionCall {
+  error: unknown
+  distinctId: string
+  properties?: Record<string, unknown>
+}
+const exceptions: ExceptionCall[] = []
+
 vi.mock('posthog-node', () => ({
   PostHog: class {
     capture(call: CapturedCall): void {
       captured.push(call)
     }
-    identify(): void {}
-    captureException(): void {}
-    flush(): Promise<void> { return Promise.resolve() }
-    shutdown(): Promise<void> { return Promise.resolve() }
-    getFeatureFlag(): Promise<undefined> { return Promise.resolve(undefined) }
-  },
+    identify(call: IdentifyCall): void {
+      identifies.push(call)
+    }
+    captureException(
+      error: unknown,
+      distinctId: string,
+      properties?: Record<string, unknown>
+    ): void {
+      exceptions.push({ error, distinctId, properties })
+    }
+    alias(call: AliasCall): void {
+      aliases.push(call)
+    }
+    aliasImmediate(call: AliasCall): Promise<void> {
+      aliases.push(call)
+      return Promise.resolve()
+    }
+    flush(): Promise<void> {
+      return Promise.resolve()
+    }
+    shutdown(): Promise<void> {
+      return Promise.resolve()
+    }
+    getFeatureFlag(): Promise<undefined> {
+      return Promise.resolve(undefined)
+    }
+  }
 }))
 
 const telemetry = await import('./telemetry')
@@ -84,6 +129,127 @@ describe('telemetry.bucketError', () => {
   it('accepts Error instances', () => {
     expect(telemetry.bucketError(new Error('connection timeout'))).toBe('timeout')
   })
+  // extended vocabulary
+  it('classifies CUDA / system / Linux OOM-killer as oom', () => {
+    expect(telemetry.bucketError('CUDA out of memory')).toBe('oom')
+    expect(telemetry.bucketError('torch.cuda.OutOfMemoryError: blah')).toBe('oom')
+    expect(telemetry.bucketError('Killed: process exceeded memory')).toBe('oom')
+  })
+  it('classifies CUDA init failures', () => {
+    expect(telemetry.bucketError('CUDA not available')).toBe('cuda_init')
+    expect(telemetry.bucketError('no CUDA-capable device is detected')).toBe('cuda_init')
+  })
+  it('classifies ImportError / ModuleNotFoundError', () => {
+    expect(telemetry.bucketError('ImportError: cannot import name xformers')).toBe('import_error')
+    expect(telemetry.bucketError('ModuleNotFoundError: No module named foo')).toBe('import_error')
+  })
+  it('classifies custom-node-missing', () => {
+    expect(telemetry.bucketError('node not found: SomeCustomNode')).toBe('node_missing')
+    expect(telemetry.bucketError('Unknown node type FooNode')).toBe('node_missing')
+  })
+  it('falls back to "python" for generic <Class>Error messages', () => {
+    expect(telemetry.bucketError('RuntimeError: something broke')).toBe('python')
+    expect(telemetry.bucketError('ValueError: bad input')).toBe('python')
+  })
+  it('falls back to "python" even when the class is mid-message (no ^ anchor)', () => {
+    // scrubAll can strip a leading path and leave the class name in the
+    // middle; previously the `^`-anchored regex would miss this and the
+    // event landed in `other`.
+    expect(telemetry.bucketError('execution failed -> RuntimeError: bad input')).toBe('python')
+    expect(telemetry.bucketError('Got AttributeError while computing')).toBe('python')
+  })
+  it('does NOT false-positive on lowercase noise like "module.error"', () => {
+    // The python regex requires an uppercase first letter on the class
+    // name — without that, "user.error: oops" or "config.exception in foo"
+    // would slide into the python bucket and pollute the dashboard.
+    expect(telemetry.bucketError('see module.error somewhere in foo.py')).toBe('other')
+    expect(telemetry.bucketError('the user.exception field is set')).toBe('other')
+  })
+  it('classifies tensor / shape mismatches', () => {
+    expect(telemetry.bucketError('size mismatch for transformer.h.0.weight')).toBe('shape_mismatch')
+    expect(telemetry.bucketError("shape '[1, 4, 64, 64]' is invalid for input of size 16384")).toBe(
+      'shape_mismatch'
+    )
+    expect(telemetry.bucketError('expected 4 dimensions but got 3')).toBe('shape_mismatch')
+  })
+  it('classifies model-load failures', () => {
+    expect(telemetry.bucketError('Error while deserializing header: invalid byte 0x12')).toBe(
+      'model_load'
+    )
+    expect(telemetry.bucketError('Missing key(s) in state_dict: "transformer.h.0.weight"')).toBe(
+      'model_load'
+    )
+    expect(telemetry.bucketError('safetensors_rust.SafetensorError: corrupted')).toBe('model_load')
+  })
+  it('classifies workflow-validation failures', () => {
+    expect(telemetry.bucketError('Prompt outputs failed validation')).toBe('validation')
+    expect(telemetry.bucketError('validation_failed for node 5')).toBe('validation')
+  })
+  it('keeps "other" for messages with no known signal', () => {
+    expect(telemetry.bucketError('this is just a sentence')).toBe('other')
+  })
+})
+
+describe('telemetry default event properties', () => {
+  beforeEach(() => {
+    captured.length = 0
+    process.env['POSTHOG_API_KEY'] = 'test-key'
+    process.env['POSTHOG_ENABLED'] = '1'
+    telemetry._resetForTest()
+  })
+
+  afterEach(() => {
+    delete process.env['POSTHOG_API_KEY']
+    delete process.env['POSTHOG_ENABLED']
+    telemetry._resetForTest()
+  })
+
+  it('injects app_version, app_channel, app_env, platform, arch on every capture', () => {
+    telemetry.initTelemetry({ appVersion: '0.7.0-beta.3', appEnv: 'prod', isPackaged: true })
+    telemetry.identify('id')
+    telemetry.setConsentState('granted')
+    captured.length = 0
+
+    telemetry.capture('desktop2.test.event', { foo: 'bar' })
+
+    expect(captured).toHaveLength(1)
+    expect(captured[0]!.properties).toMatchObject({
+      foo: 'bar',
+      app_version: '0.7.0-beta.3',
+      app_channel: 'beta',
+      app_env: 'prod',
+      is_packaged: true,
+      platform: process.platform,
+      arch: process.arch
+    })
+  })
+
+  it('derives stable channel for a clean semver and unknown for an unfamiliar suffix', () => {
+    telemetry.initTelemetry({ appVersion: '1.0.0', appEnv: 'prod', isPackaged: true })
+    telemetry.identify('id')
+    telemetry.setConsentState('granted')
+    captured.length = 0
+    telemetry.capture('any.event')
+    expect(captured[0]!.properties).toMatchObject({ app_channel: 'stable' })
+
+    telemetry._resetForTest()
+    telemetry.initTelemetry({ appVersion: '1.0.0-rc.1', appEnv: 'prod', isPackaged: true })
+    telemetry.identify('id')
+    telemetry.setConsentState('granted')
+    captured.length = 0
+    telemetry.capture('any.event')
+    expect(captured[0]!.properties).toMatchObject({ app_channel: 'unknown' })
+  })
+
+  it('per-call properties override defaults on key collision', () => {
+    telemetry.initTelemetry({ appVersion: '1.0.0', appEnv: 'prod', isPackaged: true })
+    telemetry.identify('id')
+    telemetry.setConsentState('granted')
+    captured.length = 0
+
+    telemetry.capture('any.event', { app_version: 'override-value' })
+    expect(captured[0]!.properties).toMatchObject({ app_version: 'override-value' })
+  })
 })
 
 describe('telemetry.trackedStep', () => {
@@ -108,7 +274,7 @@ describe('telemetry.trackedStep', () => {
     expect(result).toBe(42)
     const events = captured.map((c) => c.event)
     expect(events).toEqual(['test.step.start', 'test.step.end'])
-    expect(captured[0]!.properties).toEqual({ foo: 'bar' })
+    expect(captured[0]!.properties).toMatchObject({ foo: 'bar' })
     expect(typeof captured[1]!.properties?.duration_ms).toBe('number')
     expect(captured[1]!.properties?.foo).toBe('bar')
   })
@@ -118,14 +284,14 @@ describe('telemetry.trackedStep', () => {
     await expect(
       telemetry.trackedStep('install.step', { id: 'x' }, async () => {
         throw new Error('disk full')
-      }),
+      })
     ).rejects.toThrow('disk full')
     const events = captured.map((c) => c.event)
     expect(events).toEqual(['install.step.start', 'install.step.error'])
     expect(captured[1]!.properties).toMatchObject({
       id: 'x',
       error_bucket: 'disk',
-      error_message: 'disk full',
+      error_message: 'disk full'
     })
     expect(typeof captured[1]!.properties?.duration_ms).toBe('number')
   })
@@ -136,6 +302,348 @@ describe('telemetry.trackedStep', () => {
     await telemetry.trackedStep('test.step', {}, async () => 'ok')
     expect(captured).toHaveLength(0)
     telemetry.setConsent(true)
+  })
+})
+
+describe('telemetry consent state (3-state)', () => {
+  beforeEach(async () => {
+    captured.length = 0
+    process.env['POSTHOG_API_KEY'] = 'test-key'
+    process.env['POSTHOG_ENABLED'] = '1'
+    // Reset module state so each test starts with fresh pendingSessionStart etc.
+    telemetry._resetForTest()
+    telemetry.initTelemetry({ appVersion: '0.0.0', appEnv: 'test', isPackaged: false })
+    // identify *after* state changes per test so the deferral path is exercised.
+  })
+
+  afterEach(() => {
+    delete process.env['POSTHOG_API_KEY']
+    delete process.env['POSTHOG_ENABLED']
+    // Reset to granted so other test blocks behave like the legacy default.
+    telemetry.setConsentState('granted')
+  })
+
+  it('undecided suppresses regular events but allows the consent_decision event', async () => {
+    telemetry.setConsentState('undecided')
+    telemetry.identify('test-distinct-id')
+    captured.length = 0
+
+    telemetry.capture('desktop2.execution.started', { foo: 'bar' })
+    telemetry.capture('desktop2.first_use.consent_decision', { accepted: false })
+
+    const events = captured.map((c) => c.event)
+    expect(events).toEqual(['desktop2.first_use.consent_decision'])
+  })
+
+  it('denied suppresses every event including the consent_decision one', async () => {
+    telemetry.setConsentState('denied')
+    telemetry.identify('test-distinct-id')
+    captured.length = 0
+
+    telemetry.capture('desktop2.execution.started', {})
+    telemetry.capture('desktop2.first_use.consent_decision', { accepted: false })
+
+    expect(captured).toHaveLength(0)
+  })
+
+  it('defers session.started + identify person properties until consent flips to granted', async () => {
+    telemetry.setConsentState('undecided')
+    telemetry.identify('deferred-id', { app_version: '1.2.3' })
+
+    // Nothing should have shipped yet — neither the identify nor session.started.
+    expect(captured).toHaveLength(0)
+
+    telemetry.setConsentState('granted')
+
+    const events = captured.map((c) => c.event)
+    expect(events).toContain('desktop2.session.started')
+    expect(captured.find((c) => c.event === 'desktop2.session.started')?.distinctId).toBe(
+      'deferred-id'
+    )
+  })
+
+  it('legacy setConsent(true) maps to granted; setConsent(false) maps to denied', () => {
+    telemetry.setConsent(true)
+    telemetry.identify('legacy-id')
+    captured.length = 0
+    telemetry.capture('any.event', {})
+    expect(captured).toHaveLength(1)
+
+    telemetry.setConsent(false)
+    captured.length = 0
+    telemetry.capture('any.event', {})
+    expect(captured).toHaveLength(0)
+  })
+
+  it('aliasImmediate is suppressed outside granted', async () => {
+    telemetry.setConsentState('undecided')
+    telemetry.identify('any')
+    aliases.length = 0
+    await telemetry.aliasImmediate('new', 'legacy')
+    expect(aliases).toHaveLength(0)
+
+    telemetry.setConsentState('denied')
+    aliases.length = 0
+    await telemetry.aliasImmediate('new', 'legacy')
+    expect(aliases).toHaveLength(0)
+
+    // Sanity: granted DOES alias.
+    telemetry.setConsentState('granted')
+    aliases.length = 0
+    await telemetry.aliasImmediate('new', 'legacy')
+    expect(aliases).toHaveLength(1)
+  })
+
+  it('captureException is suppressed outside granted', () => {
+    telemetry.setConsentState('denied')
+    telemetry.identify('any')
+    exceptions.length = 0
+    telemetry.captureException(new Error('boom'), {})
+    expect(exceptions).toHaveLength(0)
+
+    telemetry.setConsentState('undecided')
+    exceptions.length = 0
+    telemetry.captureException(new Error('boom'), {})
+    expect(exceptions).toHaveLength(0)
+
+    // Sanity: granted DOES capture.
+    telemetry.setConsentState('granted')
+    exceptions.length = 0
+    telemetry.captureException(new Error('boom'), {})
+    expect(exceptions).toHaveLength(1)
+  })
+})
+
+describe('telemetry.registerPersonProperties pre-consent merge', () => {
+  beforeEach(() => {
+    captured.length = 0
+    identifies.length = 0
+    process.env['POSTHOG_API_KEY'] = 'test-key'
+    process.env['POSTHOG_ENABLED'] = '1'
+    telemetry._resetForTest()
+    telemetry.initTelemetry({ appVersion: '0.0.0', appEnv: 'test', isPackaged: false })
+  })
+
+  afterEach(() => {
+    delete process.env['POSTHOG_API_KEY']
+    delete process.env['POSTHOG_ENABLED']
+    telemetry.setConsentState('granted')
+  })
+
+  it('merges multiple pre-consent property writes into one identify on grant (latest-wins per key)', () => {
+    telemetry.setConsentState('undecided')
+    telemetry.identify('id', { app_version: '1.0.0' })
+    identifies.length = 0
+
+    telemetry.registerPersonProperties({ gpu_tier: 'low', locale: 'en' })
+    telemetry.registerPersonProperties({ gpu_tier: 'mid', theme: 'dark' })
+    // Nothing should have shipped yet.
+    expect(identifies).toHaveLength(0)
+
+    telemetry.setConsentState('granted')
+
+    // Exactly one identify call carrying the merged $set, with the
+    // second gpu_tier value winning over the first.
+    const merged = identifies.find(
+      (i) => i.properties?.$set && 'gpu_tier' in (i.properties.$set as Record<string, unknown>)
+    )
+    expect(merged?.properties?.$set).toMatchObject({
+      app_version: '1.0.0',
+      gpu_tier: 'mid',
+      locale: 'en',
+      theme: 'dark'
+    })
+  })
+})
+
+describe('telemetry deferMigrationAlias', () => {
+  beforeEach(() => {
+    captured.length = 0
+    aliases.length = 0
+    identifies.length = 0
+    process.env['POSTHOG_API_KEY'] = 'test-key'
+    process.env['POSTHOG_ENABLED'] = '1'
+    telemetry._resetForTest()
+    telemetry.initTelemetry({ appVersion: '0.0.0', appEnv: 'test', isPackaged: false })
+  })
+
+  afterEach(() => {
+    delete process.env['POSTHOG_API_KEY']
+    delete process.env['POSTHOG_ENABLED']
+    telemetry.setConsentState('granted')
+  })
+
+  it('fires alias + identity.migrated immediately when consent already granted', async () => {
+    telemetry.setConsentState('granted')
+    telemetry.identify('new-id')
+    aliases.length = 0
+    captured.length = 0
+
+    const onAliased = vi.fn()
+    telemetry.deferMigrationAlias({
+      legacyId: 'legacy-uuid-abc',
+      installationId: 'new-id',
+      idClass: 'machine_derived',
+      onAliased
+    })
+
+    // Async microtask + the aliasImmediate await chain.
+    await new Promise((r) => setTimeout(r, 0))
+
+    expect(aliases).toContainEqual({ distinctId: 'new-id', alias: 'legacy-uuid-abc' })
+    const migrated = captured.find((c) => c.event === 'desktop2.identity.migrated')
+    expect(migrated?.properties).toMatchObject({
+      installation_id: 'new-id',
+      id_class: 'machine_derived'
+    })
+    // Privacy hygiene: the legacy id is intentionally NOT shipped as an
+    // event property — the alias call above already merges the person
+    // records, so re-publishing the legacy id would scatter it across
+    // the events column for no analytical benefit.
+    expect(migrated?.properties).not.toHaveProperty('from_id')
+    expect(onAliased).toHaveBeenCalledTimes(1)
+  })
+
+  it('defers until consent flips to granted (undecided → granted)', async () => {
+    telemetry.setConsentState('undecided')
+    telemetry.identify('new-id')
+    aliases.length = 0
+    captured.length = 0
+
+    const onAliased = vi.fn()
+    telemetry.deferMigrationAlias({
+      legacyId: 'legacy-uuid-abc',
+      installationId: 'new-id',
+      idClass: 'machine_derived',
+      onAliased
+    })
+
+    // Nothing should have shipped while undecided.
+    await new Promise((r) => setTimeout(r, 0))
+    expect(aliases).toHaveLength(0)
+    expect(captured.find((c) => c.event === 'desktop2.identity.migrated')).toBeUndefined()
+    expect(onAliased).not.toHaveBeenCalled()
+
+    telemetry.setConsentState('granted')
+    await new Promise((r) => setTimeout(r, 0))
+
+    expect(aliases).toContainEqual({ distinctId: 'new-id', alias: 'legacy-uuid-abc' })
+    expect(captured.find((c) => c.event === 'desktop2.identity.migrated')).toBeDefined()
+    expect(onAliased).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not fire onAliased while denied; fires on subsequent grant', async () => {
+    telemetry.setConsentState('denied')
+    telemetry.identify('new-id')
+    aliases.length = 0
+    captured.length = 0
+
+    const onAliased = vi.fn()
+    telemetry.deferMigrationAlias({
+      legacyId: 'legacy-uuid-abc',
+      installationId: 'new-id',
+      idClass: 'machine_derived',
+      onAliased
+    })
+
+    await new Promise((r) => setTimeout(r, 0))
+    expect(aliases).toHaveLength(0)
+    expect(onAliased).not.toHaveBeenCalled()
+
+    telemetry.setConsentState('granted')
+    await new Promise((r) => setTimeout(r, 0))
+
+    expect(aliases).toHaveLength(1)
+    expect(onAliased).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not double-fire on repeated grant transitions', async () => {
+    telemetry.setConsentState('undecided')
+    telemetry.identify('new-id')
+    aliases.length = 0
+    const onAliased = vi.fn()
+    telemetry.deferMigrationAlias({
+      legacyId: 'legacy-uuid-abc',
+      installationId: 'new-id',
+      idClass: 'machine_derived',
+      onAliased
+    })
+
+    telemetry.setConsentState('granted')
+    await new Promise((r) => setTimeout(r, 0))
+    telemetry.setConsentState('denied')
+    telemetry.setConsentState('granted')
+    await new Promise((r) => setTimeout(r, 0))
+
+    expect(aliases).toHaveLength(1)
+    expect(onAliased).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('telemetry identity lifecycle (bindUserId / unbindUserId)', () => {
+  beforeEach(() => {
+    captured.length = 0
+    aliases.length = 0
+    identifies.length = 0
+    process.env['POSTHOG_API_KEY'] = 'test-key'
+    process.env['POSTHOG_ENABLED'] = '1'
+    telemetry._resetForTest()
+    telemetry.initTelemetry({ appVersion: '0.0.0', appEnv: 'test', isPackaged: false })
+    telemetry.setConsentState('granted')
+    telemetry.identify('installation-id-fake')
+  })
+
+  afterEach(() => {
+    delete process.env['POSTHOG_API_KEY']
+    delete process.env['POSTHOG_ENABLED']
+  })
+
+  it('bindUserId aliases the installation_id into the user_id and fires app:user_logged_in', () => {
+    aliases.length = 0
+    identifies.length = 0
+    captured.length = 0
+
+    telemetry.bindUserId('user-123', { email_domain: 'example.com' })
+
+    expect(aliases).toEqual([{ distinctId: 'user-123', alias: 'installation-id-fake' }])
+    const last = identifies.at(-1)!
+    expect(last.distinctId).toBe('user-123')
+    expect(last.properties?.$set).toMatchObject({
+      is_authenticated: true,
+      email_domain: 'example.com'
+    })
+    expect(captured.find((c) => c.event === 'app:user_logged_in')?.distinctId).toBe('user-123')
+  })
+
+  it('unbindUserId switches distinct_id back to the installation_id (NOT a reset)', () => {
+    telemetry.bindUserId('user-123')
+    aliases.length = 0
+    identifies.length = 0
+    captured.length = 0
+
+    telemetry.unbindUserId()
+
+    // No new alias call on logout (we're not merging anything).
+    expect(aliases).toHaveLength(0)
+    // is_authenticated flipped to false on the anonymous identity.
+    const last = identifies.at(-1)!
+    expect(last.distinctId).toBe('installation-id-fake')
+    expect(last.properties?.$set).toEqual({ is_authenticated: false })
+
+    // Subsequent events ride under the installation id again.
+    telemetry.capture('any.event', { foo: 1 })
+    expect(captured.at(-1)?.distinctId).toBe('installation-id-fake')
+  })
+
+  it('bindUserId is suppressed outside consent granted', () => {
+    telemetry.setConsentState('denied')
+    aliases.length = 0
+    identifies.length = 0
+    captured.length = 0
+    telemetry.bindUserId('user-456')
+    expect(aliases).toHaveLength(0)
+    expect(identifies).toHaveLength(0)
+    expect(captured).toHaveLength(0)
   })
 })
 
@@ -162,16 +670,20 @@ describe('telemetry.forwardToRenderer + telemetry-relay registry', () => {
     telemetry.registerTelemetryRelayTarget(a.wc)
     telemetry.registerTelemetryRelayTarget(b.wc)
 
-    telemetry.forwardToRenderer('foo.event', { foo: 'bar' })
+    telemetry.forwardToRenderer('desktop2.execution.error', { foo: 'bar' })
 
     expect(a.sends).toHaveLength(1)
     expect(a.sends[0]).toMatchObject({
       channel: 'telemetry-action-from-main',
-      data: { event: 'foo.event', context: { foo: 'bar' }, mainAlreadyCaptured: true },
+      data: {
+        event: 'desktop2.execution.error',
+        context: { foo: 'bar' },
+        mainAlreadyCaptured: true
+      }
     })
     expect(b.sends).toHaveLength(1)
     expect(b.sends[0]).toMatchObject({
-      data: { mainAlreadyCaptured: true },
+      data: { mainAlreadyCaptured: true }
     })
   })
 
@@ -179,36 +691,51 @@ describe('telemetry.forwardToRenderer + telemetry-relay registry', () => {
     const a = makeStubWebContents()
     telemetry.registerTelemetryRelayTarget(a.wc)
 
-    telemetry.emit('install.flow.opened', { variant: 'standalone' })
+    // Use a name that is in the Datadog allow-list so the forward path runs.
+    telemetry.emit('desktop2.execution.error', { variant: 'standalone' })
 
     // PostHog Node side
-    expect(captured.map((c) => c.event)).toEqual(['install.flow.opened'])
-    expect(captured[0]!.properties).toEqual({ variant: 'standalone' })
+    expect(captured.map((c) => c.event)).toEqual(['desktop2.execution.error'])
+    expect(captured[0]!.properties).toMatchObject({ variant: 'standalone' })
     // Relay side — exactly one IPC send to the registered target
     expect(a.sends).toHaveLength(1)
     expect(a.sends[0]).toMatchObject({
       channel: 'telemetry-action-from-main',
       data: {
-        event: 'install.flow.opened',
+        event: 'desktop2.execution.error',
         context: { variant: 'standalone' },
-        mainAlreadyCaptured: true,
-      },
+        mainAlreadyCaptured: true
+      }
     })
   })
 
   it('forwards with no relay targets is a no-op (event still captured by PostHog Node)', () => {
     expect(telemetry._telemetryRelayTargetCount()).toBe(0)
-    telemetry.emit('boot.event', {})
+    // Use a name in the Datadog allow-list so the forward path actually fires.
+    telemetry.emit('desktop2.execution.error', {})
     // Event still captured by PostHog Node even with no renderer alive yet —
     // the architectural guarantee that "telemetry works no matter what".
-    expect(captured.map((c) => c.event)).toEqual(['boot.event'])
+    expect(captured.map((c) => c.event)).toEqual(['desktop2.execution.error'])
+  })
+
+  it('skips forwarding for events NOT in the Datadog mirror allow-list (provider split)', () => {
+    const a = makeStubWebContents()
+    telemetry.registerTelemetryRelayTarget(a.wc)
+
+    // Product / funnel events stay PostHog-only and do not ride the relay.
+    telemetry.emit('desktop2.install.flow.opened', { variant: 'standalone' })
+
+    // PostHog Node still captured it.
+    expect(captured.map((c) => c.event)).toEqual(['desktop2.install.flow.opened'])
+    // But the renderer never sees it — no Datadog mirror needed for a product event.
+    expect(a.sends).toHaveLength(0)
   })
 
   it('respects consent on forwardToRenderer: relay is skipped when revoked', () => {
     const a = makeStubWebContents()
     telemetry.registerTelemetryRelayTarget(a.wc)
     telemetry.setConsent(false)
-    telemetry.forwardToRenderer('foo.event', {})
+    telemetry.forwardToRenderer('desktop2.execution.error', {})
     expect(a.sends).toHaveLength(0)
     telemetry.setConsent(true)
   })
@@ -220,7 +747,7 @@ describe('telemetry.forwardToRenderer + telemetry-relay registry', () => {
     telemetry.registerTelemetryRelayTarget(b.wc)
     a.destroy()
 
-    telemetry.forwardToRenderer('foo.event', {})
+    telemetry.forwardToRenderer('desktop2.execution.error', {})
 
     expect(a.sends).toHaveLength(0)
     expect(b.sends).toHaveLength(1)
@@ -243,7 +770,7 @@ describe('telemetry.forwardToRenderer + telemetry-relay registry', () => {
     telemetry.unregisterTelemetryRelayTarget(a.wc)
     expect(telemetry._telemetryRelayTargetCount()).toBe(0)
 
-    telemetry.forwardToRenderer('foo.event', {})
+    telemetry.forwardToRenderer('desktop2.execution.error', {})
     expect(a.sends).toHaveLength(0)
   })
 })
