@@ -223,6 +223,10 @@ const sizeClass = computed(() => `is-size-${props.size}`)
 }
 .base-modal-panel.is-size-sm {
   --base-modal-width: var(--base-modal-width-sm);
+  /* Small dialogs (prompts, action sheets) hug their content — the tall
+     shared min-height is meant for large modals (diff, migrate, terms)
+     and would otherwise leave dead space below a short prompt. */
+  min-height: auto;
 }
 .base-modal-panel.is-size-md {
   --base-modal-width: var(--base-modal-width-md);

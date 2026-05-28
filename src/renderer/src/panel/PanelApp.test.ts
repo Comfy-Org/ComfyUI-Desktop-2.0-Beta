@@ -718,13 +718,15 @@ it('opens the new-install takeover above the chooser body when show-new-install 
     expect(wrapper.find('[data-testid="comfy-lifecycle"]').exists()).toBe(true)
   })
 
-  it('opens the instance picker (expanded, Update tab) when a panel-trigger-overlay install-update event arrives', async () => {
+  it('opens the instance picker (expanded, Update tab) and auto-fires update when a panel-trigger-overlay install-update event arrives', async () => {
     // The title-bar install-update pill click is forwarded by main
     // as an `onPanelTriggerOverlay` event with
     // `kind: 'install-update'`. Post-redesign the panel renderer
     // routes that into the instance picker popup (expanded, Update
     // tab) instead of mounting a Tier 1 DetailModal — same surface
-    // the chooser-card kebab Update entry now opens.
+    // the chooser-card kebab Update entry now opens. It also seeds
+    // `autoAction: 'update-comfyui'` so the user lands directly on the
+    // update-confirm modal rather than just staring at the Update tab.
     mountPanel()
     await flushPromises()
     const api = (
@@ -740,6 +742,7 @@ it('opens the new-install takeover above the chooser body when show-new-install 
     expect(api.openInstancePicker).toHaveBeenCalledWith({
       installationId: 'test-id',
       initialTab: 'update',
+      autoAction: 'update-comfyui',
     })
   })
 

@@ -8,6 +8,7 @@ import {
   detachWindowDownloads,
   getDownloadsTrayState,
 } from '../lib/comfyDownloadManager'
+import { handleFirebasePopup, isFirebaseAuthHandlerUrl } from '../auth/firebaseBridge'
 import { isLikelyDownloadUrl, shouldOpenInPopup } from '../lib/allowedPopups'
 import { COMFY_BG, TITLEBAR_BG } from '../lib/theme'
 import {
@@ -765,6 +766,26 @@ export function buildComfyView(
     injectMacPasskeyWarning(childWindow)
   })
   comfyContents.setWindowOpenHandler(({ url: childUrl }) => {
+    // Intercept Firebase auth popups (`<authDomain>/__/auth/handler?...`)
+    // and reroute sign-in through the user's system browser so passkeys
+    // and saved-password autofill work. The bridge picks a per-provider
+    // flow: Google takes a server-side raw-OAuth path (zero clicks),
+    // GitHub takes a client-side popup-bridge path (1-2 clicks) because
+    // its OAuth App allows only a single Authorization Callback URL.
+    if (isFirebaseAuthHandlerUrl(childUrl)) {
+      void handleFirebasePopup(childUrl, comfyContents, {
+        parentWindow: comfyWindow,
+        onError: (err) => {
+          forwardDatadogError({
+            source: 'firebase-bridge-failed',
+            message: 'Firebase loopback bridge sign-in failed',
+            level: 'warn',
+            context: { origin: 'main-process', error: err.message },
+          })
+        },
+      })
+      return { action: 'deny' }
+    }
     if (shouldOpenInPopup(childUrl)) {
       // preload: undefined strips our title-bar bridge so OAuth/cloud-login
       // popups can't reach the file menu IPCs.
@@ -913,10 +934,10 @@ export function openChooserHostWindow(): BrowserWindow {
     initialTheme: initialChooserTheme,
     titleBarOverlay: process.platform === 'darwin'
       ? undefined
-      // Install-less hosts use the launcher renderer's --surface
-      // for the OS overlay so the close/min/max region matches the
-      // Vue title bar above it. Install-backed windows still use
-      // `comfyTitleBarOverlay()` (ComfyUI brand --comfy-menu-bg).
+      // Every host — install-less chooser AND install-backed instance —
+      // uses the same `titleBarOverlayForTheme` (TITLEBAR_BG) for the OS
+      // overlay so the close/min/max region matches the Vue title bar
+      // above it. The overlay never adapts to ComfyUI's in-page theme.
       : titleBarOverlayForTheme(resolveTheme() === 'dark'),
     // Dummy comfyView. Kept so layoutViews doesn't have to special-
     // case the install-less branch — its body always resolves to

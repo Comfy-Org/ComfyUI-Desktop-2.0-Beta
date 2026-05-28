@@ -99,7 +99,7 @@ export function useMigrateAction(opts?: { surface?: 'modal' | 'takeover' }) {
     const dialogTitle = confirm?.title || t('migrate.migrateToStandaloneConfirmTitle')
     const dialogConfirmLabel = confirm?.confirmLabel || t('migrate.migrateToStandaloneConfirm')
     const dialogMessage = wasRunning
-      ? augmentMessageWithStopWarning(confirm?.message, t('errors.willStopRunning'))
+      ? augmentMessageWithStopWarning(confirm?.message, t('errors.willStopRunning', { name: installation.name || 'ComfyUI' }))
       : confirm?.message || ''
 
     // Show the surface (Modal OR brand takeover) with a loading state.
@@ -148,7 +148,7 @@ export function useMigrateAction(opts?: { surface?: 'modal' | 'takeover' }) {
 
     const detailsPayload = wasRunning
       ? [
-        { label: t('migrate.migrationWill'), items: [t('errors.willStopRunning'), ...migrateItems] },
+        { label: t('migrate.migrationWill'), items: [t('errors.willStopRunning', { name: installation.name || 'ComfyUI' }), ...migrateItems] },
       ]
       : [{ label: t('migrate.migrationWill'), items: migrateItems }]
     const checkboxesPayload = isDesktop

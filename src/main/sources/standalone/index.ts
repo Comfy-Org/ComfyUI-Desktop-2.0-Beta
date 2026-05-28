@@ -183,15 +183,16 @@ export const standalone: SourcePlugin = {
       const prefix = PLATFORM_PREFIX[process.platform]
       if (!prefix) return []
 
-      // Fetch latest.json (tiny, pre-warmed on startup) to know which vendors exist
-      const latest = await fetchJSON(`${R2_BASE_URL}/latest.json`) as R2Latest
+      // Always revalidate R2 manifests when populating the install wizard —
+      // a stale persisted ETag can otherwise hide a freshly-shipped standalone
+      // release and strand new installs on whatever the previous run cached.
+      const latest = await fetchJSON(`${R2_BASE_URL}/latest.json`, { refresh: true }) as R2Latest
       const vendorIds = Object.keys(latest).filter((id) => id.startsWith(prefix))
       if (vendorIds.length === 0) return []
 
-      // Fetch per-vendor release history in parallel
       const vendorReleases = Object.fromEntries(
         await Promise.all(vendorIds.map(async (id) => {
-          const data = await fetchJSON(`${R2_BASE_URL}/${id}/releases.json`) as R2VendorReleases
+          const data = await fetchJSON(`${R2_BASE_URL}/${id}/releases.json`, { refresh: true }) as R2VendorReleases
           return [id, data.releases] as const
         }))
       )
