@@ -143,7 +143,30 @@ describe('useLocalInstanceGuard', () => {
     expect(result).toBe(false)
   })
 
-  it('stops and closes running instance windows when user chooses replace', async () => {
+  it('stops and closes running instance windows when user chooses Close & Launch New (primary)', async () => {
+    installationStore.installations.push(
+      makeInstallation({ id: 'target' }),
+      makeInstallation({ id: 'other' }),
+    )
+    sessionStore.runningInstances.set('other', {
+      installationId: 'other',
+      installationName: 'Other',
+      mode: 'window',
+    })
+    mockConfirm.mockResolvedValue('primary')
+    const guard = useLocalInstanceGuard()
+
+    const result = await guard.checkBeforeLaunch('target')
+
+    // stopComfyUI awaits the process kill (port free for the new launch);
+    // closeComfyWindow then retires the host window so the user isn't
+    // left on a stopped surface they didn't choose to revisit.
+    expect(window.api.stopComfyUI).toHaveBeenCalledWith('other')
+    expect(window.api.closeComfyWindow).toHaveBeenCalledWith('other', { skipConfirm: true })
+    expect(result).toBe(true)
+  })
+
+  it('launches alongside without stopping when user chooses Launch Anyway (secondary)', async () => {
     installationStore.installations.push(
       makeInstallation({ id: 'target' }),
       makeInstallation({ id: 'other' }),
@@ -158,11 +181,8 @@ describe('useLocalInstanceGuard', () => {
 
     const result = await guard.checkBeforeLaunch('target')
 
-    // stopComfyUI awaits the process kill (port free for the new launch);
-    // closeComfyWindow then retires the host window so the user isn't
-    // left on a stopped surface they didn't choose to revisit.
-    expect(window.api.stopComfyUI).toHaveBeenCalledWith('other')
-    expect(window.api.closeComfyWindow).toHaveBeenCalledWith('other', { skipConfirm: true })
+    expect(window.api.stopComfyUI).not.toHaveBeenCalled()
+    expect(window.api.closeComfyWindow).not.toHaveBeenCalled()
     expect(result).toBe(true)
   })
 })

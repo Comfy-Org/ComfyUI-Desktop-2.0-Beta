@@ -39,7 +39,8 @@
     "menuMigrate": "迁移到独立版…",
     "menuRestoreSnapshot": "恢复快照…",
     "menuRevealInFolder": "打开文件夹",
-    "menuDelete": "删除…"
+    "menuDelete": "删除…",
+    "stoppedActionGatedReason": "请先停止正在运行的实例。"
   },
 
   "titleBar": {
@@ -198,7 +199,9 @@
     "noInfo": "选择此通道并检查更新以查看版本信息。",
     "current": "当前",
     "switchTo": "切换到 {channel}",
-    "switchChannelPrefix": "正在将更新通道从 {from} 切换到 {to}。\n\n"
+    "switchChannelPrefix": "正在将更新通道从 {from} 切换到 {to}。\n\n",
+    "movingTo": "正在切换到 {channel}。",
+    "switchingToTitle": "正在切换到 {channel}"
   },
 
   "track": {
@@ -601,9 +604,9 @@
     "waitingTime": "等待 ComfyUI 就绪…（{secs}秒）",
     "portBusyUsing": "端口 {old} 被占用——改用端口 {new}…",
     "instanceRunningTitle": "实例正在运行",
-    "instanceRunningMessage": "\"{name}\" 正在运行。同时运行多个本地安装可能会消耗大量系统资源。",
-    "instanceRunningProceed": "同时启动",
-    "instanceRunningReplace": "关闭运行中的实例并启动",
+    "instanceRunningMessage": "关闭 \"{name}\" 并改为启动此实例，或同时运行两者。",
+    "instanceRunningProceed": "同时运行",
+    "instanceRunningReplace": "关闭并启动此实例",
     "modelFolderRelaunchTitle": "正在重启 ComfyUI",
     "modelFolderRelaunchDesc": "检测到自定义节点创建了新的模型文件夹。正在重启以便 ComfyUI 立即使用这些文件夹。"
   },

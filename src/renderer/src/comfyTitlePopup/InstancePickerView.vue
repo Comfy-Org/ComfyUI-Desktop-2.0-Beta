@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, toRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Home, Plus, Search } from 'lucide-vue-next'
+import { LayoutGrid, Plus, Search, X } from 'lucide-vue-next'
 import BaseInput from '../components/ui/BaseInput.vue'
 import { FILTER_CHIPS, useInstallList } from '../composables/useInstallList'
 import { useSessionStore } from '../stores/sessionStore'
@@ -74,6 +74,7 @@ interface PickerSnapshot {
   selectedSnapshots: SnapshotListData | null
   initialTab?: string | null
   autoAction?: string | null
+  autoActionNonce?: number
   storage: PickerStorageSlice
   operatingInstallationIds?: string[]
   installOperationStatus?: Record<string, PickerOperationStatus>
@@ -113,10 +114,12 @@ interface PickerBridge {
   platform?: string
   /** Dispatch a menu-item id through the existing
    *  `comfy-titlepopup:item-activated` → `activateTitlePopupMenuItem`
-   *  path. The picker's Home button reuses this with
-   *  `'return-to-dashboard'` so we don't add a parallel IPC for the
-   *  same action. */
+   *  path. The picker's dashboard button reuses this with `'new-window'`
+   *  so we don't add a parallel IPC for the same action. */
   activate?: (id: string) => void
+  /** Dismiss the popup (same as ESC / click-outside). Wired to the
+   *  top-right close button. */
+  close?: () => void
   pickInstall: (installationId: string) => void
   openNewInstall: () => void
   restartInstall: (installationId: string) => void
@@ -297,13 +300,21 @@ function handleNewInstall(): void {
   bridge?.openNewInstall()
 }
 
+function handleClose(): void {
+  bridge?.close?.()
+}
+
 /** Picker hosted by an install (vs the chooser/dashboard itself).
- *  Drives whether the Home → dashboard escape is offered — pointless
- *  to surface on a picker already shown from the dashboard. */
+ *  Drives whether the dashboard button is offered — pointless to
+ *  surface on a picker already shown from the dashboard. */
 const isInstallHost = computed(() => !!props.snapshot.activeInstallationId)
 
-function handleReturnToDashboard(): void {
-  bridge?.activate?.('return-to-dashboard')
+/** Open the dashboard. Routes through `new-window` (a fresh chooser
+ *  host) rather than `return-to-dashboard` — the latter detaches the
+ *  install, which STOPS the running instance. The user wants to view the
+ *  dashboard without killing what's running, so we open it alongside. */
+function handleOpenDashboard(): void {
+  bridge?.activate?.('new-window')
 }
 
 watch(
@@ -444,11 +455,24 @@ function handleExpandedPrimaryAction(running: boolean): void {
     <div class="picker-search">
       <BaseInput
         v-model="searchQuery"
+        class="picker-search-input"
         :placeholder="$t('chooser.searchPlaceholder')"
         :aria-label="$t('chooser.searchPlaceholder')"
       >
         <template #leading><Search :size="20" class="picker-search-icon" /></template>
       </BaseInput>
+      <!-- Explicit close affordance — users couldn't tell how to dismiss
+           the popup (ESC / click-outside weren't discoverable). The search
+           field shrinks to make room. -->
+      <button
+        type="button"
+        class="picker-close"
+        :aria-label="$t('common.close')"
+        :title="$t('common.close')"
+        @click="handleClose"
+      >
+        <X :size="18" />
+      </button>
     </div>
 
     <div class="picker-chips-row">
@@ -458,9 +482,9 @@ function handleExpandedPrimaryAction(running: boolean): void {
           class="picker-home"
           :aria-label="$t('fileMenu.returnToDashboard')"
           :title="$t('fileMenu.returnToDashboard')"
-          @click="handleReturnToDashboard"
+          @click="handleOpenDashboard"
         >
-          <Home :size="14" />
+          <LayoutGrid :size="14" />
         </button>
         <span class="picker-chips-divider" aria-hidden="true"></span>
       </template>
@@ -537,6 +561,7 @@ function handleExpandedPrimaryAction(running: boolean): void {
               :installation="selectedInstall"
               :initial-tab="initialExpandedTab"
               :auto-action="snapshot.autoAction ?? null"
+              :auto-action-nonce="snapshot.autoActionNonce ?? 0"
               :global-settings-snapshot="snapshot.storage"
               :active-operation="activeOperation"
               class="picker-expanded-body"
@@ -569,8 +594,15 @@ function handleExpandedPrimaryAction(running: boolean): void {
 }
 
 .picker-search {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   border-bottom: 1px solid var(--brand-surface-border-hover, var(--chooser-surface-border));
-  padding: 6px 12px 8px 12px;
+  padding: 6px 8px 8px 12px;
+}
+.picker-search-input {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 .picker-search :deep(.ui-input) {
   background: transparent;
@@ -578,6 +610,32 @@ function handleExpandedPrimaryAction(running: boolean): void {
   border-radius: 0;
   padding: 0;
   gap: 8px;
+}
+/* Top-right close button. Flush to the search row so the field shrinks to
+   make room. Accessibility-first: an explicit, obvious way to dismiss. */
+.picker-close {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition:
+    background-color 100ms ease,
+    color 100ms ease,
+    border-color 100ms ease;
+}
+.picker-close:hover,
+.picker-close:focus-visible {
+  background: var(--brand-surface-bg-hover);
+  color: var(--neutral-100);
+  outline: none;
 }
 .picker-search :deep(.ui-input):focus-within {
   border-color: transparent;

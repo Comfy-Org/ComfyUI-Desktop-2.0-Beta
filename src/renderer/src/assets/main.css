@@ -3156,13 +3156,15 @@ input[type='checkbox']:checked::after {
     background-color 100ms ease,
     opacity 100ms ease;
 }
-.context-menu-item:hover:not(:disabled),
-.context-menu-item:focus-visible:not(:disabled) {
+.context-menu-item:hover:not(.disabled),
+.context-menu-item:focus-visible:not(.disabled) {
   background: var(--brand-surface-bg-hover);
   outline: none;
   color: var(--text);
 }
-.context-menu-item:disabled,
+/* Disabled via the `.disabled` class + `aria-disabled` (not the native
+   `disabled` attribute) so the hover title tooltip — which Chromium
+   suppresses on natively-disabled buttons — still surfaces the reason. */
 .context-menu-item.disabled {
   color: var(--text-muted);
   cursor: default;
@@ -3171,8 +3173,8 @@ input[type='checkbox']:checked::after {
 .context-menu-item.is-danger {
   color: var(--danger);
 }
-.context-menu-item.is-danger:hover:not(:disabled),
-.context-menu-item.is-danger:focus-visible:not(:disabled) {
+.context-menu-item.is-danger:hover:not(.disabled),
+.context-menu-item.is-danger:focus-visible:not(.disabled) {
   color: var(--danger-hover);
 }
 .context-menu-separator {

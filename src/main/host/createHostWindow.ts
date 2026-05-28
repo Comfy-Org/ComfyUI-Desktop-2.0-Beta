@@ -40,7 +40,7 @@ import {
   setLastFocusedInstallationId,
   unregisterHostEntry,
 } from './registry'
-import type { ComfyWindowEntry } from './registry'
+import type { ComfyWindowEntry, ComfyPanelKey } from './registry'
 
 /** Default size for a freshly-spawned host window when an existing
  *  host of the same identity is already open. Matches the
@@ -70,8 +70,22 @@ const CHOOSER_HOST_BOUNDS_KEY = 'chooser'
  *  `index.ts` (or other modules pending later extractions). Set once
  *  at the top of `whenReady` via `setHostWindowFactories(...)`. */
 export interface HostWindowFactories {
-  /** Async beforeunload-style consult through the panel renderer. */
-  consultPanelRendererClose: (panelView: WebContentsView | null | undefined) => Promise<boolean>
+  /** Async beforeunload-style consult through the panel renderer. Only
+   *  resolves the in-flight Tier 2/3 overlay cancel-prompt:
+   *    - `cleared`  — no overlay / user confirmed cancelling one → proceed
+   *    - `aborted`  — user dismissed the cancel-prompt → keep window open
+   *    - `defer`    — no overlay; main owns the close-window confirm
+   *  Falls back to `defer` when the renderer is unreachable. */
+  consultPanelRendererClose: (
+    panelView: WebContentsView | null | undefined,
+  ) => Promise<'cleared' | 'aborted' | 'defer'>
+  /** Shell-level "Close Window" confirm, owned by main so a hidden panel
+   *  renderer can't swallow it. Shared with the Close Window menu entry. */
+  confirmCloseInstanceWindow: (
+    window: BrowserWindow,
+    isLastWindow: boolean,
+    theme: { bg: string; text: string },
+  ) => Promise<boolean>
   /** Detach the install currently bound to a host entry (in-place flip). */
   detachInstallImpl: (entry: ComfyWindowEntry) => void
   /** WeakSet of host windows whose close was pre-cleared by the
@@ -559,23 +573,63 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
       try {
         const entry = comfyWindows.get(windowKey)
         const skipConsult = fx.preClearedClose.has(comfyWindow)
-        // Hide any open title-bar popup before the panel-side
-        // quit-confirm fires. The popup is a sibling WebContentsView
-        // stacked above the panel view in the same BrowserWindow, so
-        // a panel-rendered `modal.confirm()` would otherwise sit
-        // behind the (visually opaque) popup and be unreachable.
+        // The OS ✕ must never quit the app. When this is the only live
+        // host window, an install-backed host returns to the dashboard
+        // (stop the instance, flip in place) instead of being destroyed;
+        // a chooser host is destroyed and the app quits via
+        // `window-all-closed`, which is the one sanctioned exit. The
+        // renderer also uses `isLastWindow` to tailor its close-confirm
+        // copy.
+        const isLastWindow =
+          Array.from(comfyWindows.values()).filter((e) => !e.window.isDestroyed()).length <= 1
+        // Hide any open title-bar popup before any confirm fires. The
+        // popup is a sibling WebContentsView stacked above the panel view
+        // in the same BrowserWindow, so a modal would otherwise sit behind
+        // the (visually opaque) popup and be unreachable.
         if (!skipConsult) hideTitlePopupForParent(comfyWindow)
-        // `cleared` falls back to the post-consult preClearedClose state:
-        // a force-close (launch-guard eviction, bulk Exit-All confirm)
-        // can land while the per-window prompt was pending, in which case
-        // the explicit caller-side consent overrides a per-window cancel.
-        const cleared = skipConsult
-          ? true
-          : (await fx.consultPanelRendererClose(entry?.panelView))
-            || fx.preClearedClose.has(comfyWindow)
-        if (!cleared) return
+        // Step 1 — let the renderer handle any in-flight Tier 2/3 overlay
+        // (its cancel-prompt). With no overlay it returns `defer`: the
+        // close-window confirm is main's job, because a running instance's
+        // panel view is hidden behind the ComfyUI view and can't be relied
+        // on to surface a prompt (the ✕ was closing silently for exactly
+        // that reason). `skipConsult` (the menu pre-cleared this close) and
+        // chooser hosts skip straight through.
+        //
+        // Every renderer-cancel path below re-checks `preClearedClose`
+        // before bailing — a force-close (launch-guard eviction, bulk
+        // Exit-All) can land mid-consult/mid-confirm, and the explicit
+        // caller-side consent must override a per-window cancel so the
+        // caller's awaiting flow can move on.
+        const consult = skipConsult ? 'cleared' : await fx.consultPanelRendererClose(entry?.panelView)
+        if (consult === 'aborted' && !fx.preClearedClose.has(comfyWindow)) return
+        // Step 2 — for an install-backed host with no overlay, main shows
+        // the same Close Window confirm as the menu item. The dashboard
+        // closes with no prompt.
+        const entryForClose = comfyWindows.get(windowKey)
+        const isInstallHost = !!entryForClose && !isChooserHost(entryForClose)
+        if (
+          consult === 'defer'
+          && isInstallHost
+          && entryForClose
+          && !fx.preClearedClose.has(comfyWindow)
+        ) {
+          const confirmed = await fx.confirmCloseInstanceWindow(
+            comfyWindow,
+            isLastWindow,
+            entryForClose.lastTheme,
+          )
+          if (!confirmed && !fx.preClearedClose.has(comfyWindow)) return
+        }
         fx.preClearedClose.delete(comfyWindow)
         if (comfyWindow.isDestroyed()) return
+        // Last install-backed window → return to the dashboard rather
+        // than tear down + quit. `detachInstall` runs the same
+        // `_installCleanup` (stopRunning, listeners off) the teardown
+        // below would, then flips the window to chooser mode in place.
+        if (isInstallHost && entryForClose && isLastWindow) {
+          entryForClose.detachInstall()
+          return
+        }
         // Each cleanup step is wrapped via `safeTeardown` so a single
         // throw can't skip the BrowserWindow.destroy() at the end.
         // Without this, an exception in (e.g.) the comfy webContents
@@ -916,7 +970,7 @@ export function applyChooserHostThemeToAll(): void {
  *  The comfyView still exists so `layoutViews` doesn't have to
  *  special-case its absence, but is sized to zero and never made
  *  visible. */
-export function openChooserHostWindow(): BrowserWindow {
+export function openChooserHostWindow(initialPanel: ComfyPanelKey = 'comfy'): BrowserWindow {
   // Install-less wrapper. The shared `createHostWindow()` builds
   // the BrowserWindow + 2 views skeleton, layoutViews, macOS
   // fullscreen, bounds-save listeners, close / closed handlers,
@@ -978,7 +1032,11 @@ export function openChooserHostWindow(): BrowserWindow {
 
   entry.coldStartPendingReveal = true
 
-  ensurePanelView(entry.windowKey, entry, 'chooser')
+  // Seed the requested initial panel (default 'comfy' → chooser body for
+  // an install-less host). "+ New Instance" passes 'new-install' so the
+  // fresh window boots straight into the wizard with no dashboard flash.
+  entry.activePanel = initialPanel
+  ensurePanelView(entry.windowKey, entry, computeBodyMode(entry))
 
   entry.layoutViews()
 

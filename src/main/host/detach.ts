@@ -25,12 +25,22 @@ import {
 export const preClearedClose = new WeakSet<BrowserWindow>()
 
 /**
+ * Outcome of a panel-renderer close/return consult:
+ *   - `cleared`  — proceed (no overlay, or the user confirmed cancelling one)
+ *   - `aborted`  — the user backed out of an overlay cancel-prompt; keep open
+ *   - `defer`    — no overlay in flight; the *caller* (main) owns the confirm.
+ *     The renderer can't be trusted to confirm a close on its own: while an
+ *     instance runs, its panel view is hidden behind the ComfyUI view and
+ *     may never answer, so the close-window confirm lives in main.
+ */
+type PanelConsultResult = 'cleared' | 'aborted' | 'defer'
+
+/**
  * Shared wire logic for both panel-renderer consult flows. Sends
  * `{requestPrefix}`, listens for `{requestPrefix}-ack` and
- * `{requestPrefix}-response`. Returns `cleared`. Falls back to
- * "cleared" when the panelView is missing, the webContents is
- * destroyed, the renderer doesn't ack within 2s, or the
- * webContents goes away mid-flight.
+ * `{requestPrefix}-response`. Falls back to `fallback` when the panelView
+ * is missing, the webContents is destroyed, the renderer doesn't ack
+ * within 2s, or the webContents goes away mid-flight.
  *
  * Once the renderer acks receipt we wait INDEFINITELY for the actual
  * response — the user may be staring at a confirm modal, and a fixed
@@ -41,9 +51,10 @@ async function consultPanelRenderer(
   requestPrefix:
     | 'comfy-window:request-close'
     | 'comfy-window:request-return-to-dashboard',
-): Promise<boolean> {
-  if (!panelView || panelView.webContents.isDestroyed()) return true
-  return new Promise<boolean>((resolve) => {
+  fallback: PanelConsultResult,
+): Promise<PanelConsultResult> {
+  if (!panelView || panelView.webContents.isDestroyed()) return fallback
+  return new Promise<PanelConsultResult>((resolve) => {
     const prefix = requestPrefix === 'comfy-window:request-close' ? 'close' : 'rtd'
     const requestId = `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`
     const ackChannel = `${requestPrefix}-ack`
@@ -68,20 +79,20 @@ async function consultPanelRenderer(
     }
     const onResponse = (
       event: Electron.IpcMainEvent,
-      payload: { requestId?: string; cleared?: boolean } | undefined,
+      payload: { requestId?: string; cleared?: boolean; defer?: boolean } | undefined,
     ): void => {
       if (event.sender !== panelView.webContents) return
       if (payload?.requestId !== requestId) return
       if (settled) return
       settled = true
       cleanup()
-      resolve(!!payload?.cleared)
+      resolve(payload?.defer ? 'defer' : payload?.cleared ? 'cleared' : 'aborted')
     }
     const onCrash = (): void => {
       if (settled) return
       settled = true
       cleanup()
-      resolve(true)
+      resolve(fallback)
     }
     ipcMain.on(ackChannel, onAck)
     ipcMain.on(responseChannel, onResponse)
@@ -92,30 +103,33 @@ async function consultPanelRenderer(
     } catch {
       settled = true
       cleanup()
-      resolve(true)
+      resolve(fallback)
       return
     }
     setTimeout(() => {
       if (settled || acked) return
       settled = true
       cleanup()
-      resolve(true)
+      resolve(fallback)
     }, 2000)
   })
 }
 
 /**
  * Main consults the panel renderer before tearing down a host
- * window so a Tier 2 progress / Tier 3 takeover overlay can
- * prompt the user to confirm cancellation via the standardised
- * cancel-prompt copy. Returns true when the renderer cleared the
- * close (no overlay open, or the user confirmed cancellation),
- * false when the renderer aborted (user dismissed the prompt).
+ * window so a Tier 2 progress / Tier 3 takeover overlay can prompt
+ * the user to confirm cancellation. Returns:
+ *   - `cleared`  — no overlay, or the user confirmed cancelling one
+ *   - `aborted`  — the user dismissed the cancel-prompt; keep open
+ *   - `defer`    — no overlay; the close-window confirm is main's job
+ * Falls back to `defer` if the renderer can't be reached (hidden behind
+ * a running ComfyUI view, crashed, or slow to ack) so the confirm still
+ * fires from main rather than being silently skipped.
  */
 export async function consultPanelRendererClose(
   panelView: WebContentsView | null | undefined,
-): Promise<boolean> {
-  return consultPanelRenderer(panelView, 'comfy-window:request-close')
+): Promise<PanelConsultResult> {
+  return consultPanelRenderer(panelView, 'comfy-window:request-close', 'defer')
 }
 
 /**
@@ -130,7 +144,13 @@ export async function consultPanelRendererClose(
 export async function consultPanelRendererReturnToDashboard(
   panelView: WebContentsView | null | undefined,
 ): Promise<boolean> {
-  return consultPanelRenderer(panelView, 'comfy-window:request-return-to-dashboard')
+  // Return-to-dashboard has no `defer` path — the renderer owns its prompt
+  // (and a missing renderer clears). Map the tri-state onto the boolean
+  // contract this caller expects.
+  return (
+    (await consultPanelRenderer(panelView, 'comfy-window:request-return-to-dashboard', 'cleared')) ===
+    'cleared'
+  )
 }
 
 /**
@@ -184,73 +204,109 @@ export async function returnToDashboard(parentEntryId: number): Promise<void> {
  */
 export async function confirmAndCloseAllHostWindows(
   parentWindow: BrowserWindow | null,
+  performQuit: () => void,
 ): Promise<void> {
   const entries = Array.from(comfyWindows.values()).filter((e) => !e.window.isDestroyed())
-  if (entries.length < 1) {
-    closeAllHostWindows()
+  // "Instances" = install-backed host windows. The dashboard (chooser
+  // host) is never listed and never blocks the quit — quitting from the
+  // dashboard with nothing else running should just exit.
+  const instanceWindows = entries.filter((e) => isInstallHost(e))
+  if (instanceWindows.length === 0) {
+    performQuit()
     return
   }
-  const titles = entries.map((e) => e.window.getTitle() || 'Untitled window')
+  // One clean line per open instance — the title-bar pill name, not the
+  // verbose OS window title ("… — *Unsaved Workflow — Desktop 2.0 v…").
+  const titles = instanceWindows.map((e) => e.titleBarText || 'Untitled instance')
   const details: SystemModalDetailGroup[] = [
-    { label: 'Open windows', items: titles },
+    { label: 'Open instances', items: titles },
   ]
+  // Surface the *extra* things a full quit tears down — in-progress
+  // operations and active downloads. Running ComfyUI sessions are
+  // deliberately NOT re-listed: a running instance already appears in
+  // "Open instances", and listing it twice made one instance look like
+  // two.
   if (ipc.hasActiveOperations()) {
     try {
       const items = await ipc.getActiveDetails()
-      const sessions = items.filter((i) => i.type === 'session').map((i) => i.name)
       const operations = items.filter((i) => i.type === 'operation').map((i) => i.name)
       const downloads = items.filter((i) => i.type === 'download').map((i) => i.name)
-      if (sessions.length > 0) details.push({ label: 'Running ComfyUI', items: sessions })
       if (operations.length > 0) details.push({ label: 'In-progress operations', items: operations })
       if (downloads.length > 0) details.push({ label: 'Active downloads', items: downloads })
     } catch {
       // If active-detail collection ever throws, fall back to just the
-      // window list — the user still sees what's about to close.
+      // instance list — the user still sees what's about to close.
     }
   }
   // Pick the parent for the overlay. Prefer the caller's hint (the
-  // window the user clicked Close All from); fall back to any live
-  // host so we don't drop the confirm entirely when the popup's
-  // parent has gone away mid-flight.
+  // window the user clicked Quit from); fall back to any live host so we
+  // don't drop the confirm entirely when the popup's parent has gone
+  // away mid-flight.
   const overlayParentEntry = parentWindow && !parentWindow.isDestroyed()
     ? entries.find((e) => e.window === parentWindow)
     : entries[0]
   if (!overlayParentEntry) {
-    closeAllHostWindows()
+    performQuit()
     return
   }
-  const isSingle = entries.length === 1
+  const count = instanceWindows.length
   const confirmed = await openSystemModalAsync({
     parent: overlayParentEntry.window,
     spec: {
-      title: 'Exit All Windows',
-      message: isSingle
-        ? 'Exit the open window?'
-        : `Exit ${entries.length} open windows?`,
+      title: 'Quit ComfyUI',
+      message: count === 1
+        ? 'Quit ComfyUI? This will close the running instance.'
+        : `Quit ComfyUI? This will close ${count} running instances.`,
       details,
-      confirmLabel: isSingle ? 'Exit' : 'Exit All',
+      confirmLabel: 'Quit',
       cancelLabel: 'Cancel',
       confirmStyle: 'danger',
       theme: overlayParentEntry.lastTheme,
     },
   })
-  if (confirmed) {
-    // The global confirm already lists in-progress ops / sessions /
-    // downloads, so the per-window tier-aware prompt would be
-    // redundant after the user confirmed the bulk close. Pre-clear
-    // every entry so each window's `close` handler skips its own
-    // consult and tears down immediately.
-    for (const entry of entries) preClearedClose.add(entry.window)
-    closeAllHostWindows()
-  }
+  if (confirmed) performQuit()
 }
 
 /**
- * Confirm + close a single host window. Mirrors
- * `confirmAndCloseAllHostWindows` for the install-host menu's
- * `Exit Window` entry — same `openSystemModalAsync` primitive, same
- * pre-cleared close path so the per-window close handler doesn't
- * double-prompt after the user already confirmed.
+ * The shared "Close Window" confirm. Used by BOTH the instance menu's
+ * Close Window entry and the OS ✕ handler (for an idle instance) so the
+ * two paths show the identical shell-level modal. It lives in main rather
+ * than the panel renderer because the renderer is hidden behind the
+ * ComfyUI view while an instance runs and can't be relied on to surface a
+ * prompt — the native ✕ was closing silently for exactly that reason.
+ */
+export async function confirmCloseInstanceWindow(
+  window: BrowserWindow,
+  isLastWindow: boolean,
+  theme: { bg: string; text: string },
+): Promise<boolean> {
+  return openSystemModalAsync({
+    parent: window,
+    spec: {
+      title: 'Close Window',
+      message: isLastWindow
+        ? 'Close this window? This stops ComfyUI and returns you to the dashboard.'
+        : 'Close this window? This stops the running ComfyUI instance.',
+      confirmLabel: isLastWindow ? 'Close & Return to Dashboard' : 'Close Window',
+      cancelLabel: 'Cancel',
+      confirmStyle: 'danger',
+      theme,
+    },
+  })
+}
+
+/**
+ * Confirm + close a single install-backed host window. Bound to the
+ * instance menu's `Close Window` entry. Closing always confirms, because
+ * it *stops* the running ComfyUI instance (not just hides the window).
+ * Model downloads are owned by the desktop app, not the instance, so
+ * they keep running after a close — hence no active-download list here
+ * (that warning belongs to `Quit ComfyUI`).
+ *
+ * If this is the only live host window, closing it would quit the app,
+ * so instead we stop the instance and flip the window in place to the
+ * dashboard (`detachInstall`). With other windows open, we close this
+ * one outright; its `close` handler runs the per-window teardown.
  */
 export async function confirmAndCloseHostWindow(parentWindow: BrowserWindow): Promise<void> {
   if (parentWindow.isDestroyed()) return
@@ -259,33 +315,17 @@ export async function confirmAndCloseHostWindow(parentWindow: BrowserWindow): Pr
     parentWindow.close()
     return
   }
-  const details: SystemModalDetailGroup[] = []
-  if (ipc.hasActiveOperations()) {
-    try {
-      const items = await ipc.getActiveDetails()
-      const sessions = items.filter((i) => i.type === 'session').map((i) => i.name)
-      const operations = items.filter((i) => i.type === 'operation').map((i) => i.name)
-      const downloads = items.filter((i) => i.type === 'download').map((i) => i.name)
-      if (sessions.length > 0) details.push({ label: 'Running ComfyUI', items: sessions })
-      if (operations.length > 0) details.push({ label: 'In-progress operations', items: operations })
-      if (downloads.length > 0) details.push({ label: 'Active downloads', items: downloads })
-    } catch {
-      // Active-detail collection failure shouldn't block the prompt.
-    }
-  }
-  const confirmed = await openSystemModalAsync({
-    parent: entry.window,
-    spec: {
-      title: 'Exit Window',
-      message: 'Exit this window?',
-      details: details.length > 0 ? details : undefined,
-      confirmLabel: 'Exit',
-      cancelLabel: 'Cancel',
-      confirmStyle: 'danger',
-      theme: entry.lastTheme,
-    },
-  })
-  if (confirmed) {
+  const liveWindowCount = Array.from(comfyWindows.values()).filter(
+    (e) => !e.window.isDestroyed(),
+  ).length
+  const isLastWindow = liveWindowCount <= 1
+  const confirmed = await confirmCloseInstanceWindow(entry.window, isLastWindow, entry.lastTheme)
+  if (!confirmed) return
+  if (isLastWindow) {
+    // Stop the instance and flip this window to the dashboard rather than
+    // closing it (closing the last window would quit the app).
+    entry.detachInstall()
+  } else {
     // Skip the panel-renderer consult on the close handler — the user
     // already confirmed via this prompt.
     preClearedClose.add(entry.window)

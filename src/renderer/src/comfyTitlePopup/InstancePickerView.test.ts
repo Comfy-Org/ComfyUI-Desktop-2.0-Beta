@@ -287,7 +287,7 @@ describe('comfyTitlePopup/InstancePickerView', () => {
       expect(chooserHost.find('.picker-home').exists()).toBe(false)
     })
 
-    it('routes Home clicks through bridge.activate("return-to-dashboard")', async () => {
+    it('routes dashboard-button clicks through bridge.activate("new-window") so the running instance is not stopped', async () => {
       const activate = vi.fn()
       const existing = (window as unknown as { __comfyTitlePopup: Record<string, unknown> })
         .__comfyTitlePopup
@@ -301,7 +301,7 @@ describe('comfyTitlePopup/InstancePickerView', () => {
         runningInstallationIds: [],
       })
       await wrapper.find('.picker-home').trigger('click')
-      expect(activate).toHaveBeenCalledWith('return-to-dashboard')
+      expect(activate).toHaveBeenCalledWith('new-window')
     })
   })
 

@@ -14,11 +14,6 @@
       "title": "Return to Dashboard?",
       "message": "ComfyUI for this installation will be stopped.",
       "confirmLabel": "Stop & Return"
-    },
-    "confirmQuit": {
-      "title": "Quit Desktop?",
-      "message": "ComfyUI Desktop will close.",
-      "confirmLabel": "Quit"
     }
   },
 
@@ -53,7 +48,8 @@
     "menuMigrate": "Migrate to Standalone",
     "menuRestoreSnapshot": "Restore Snapshot",
     "menuRevealInFolder": "Open Folder",
-    "menuDelete": "Uninstall"
+    "menuDelete": "Uninstall",
+    "stoppedActionGatedReason": "Stop the running instance first."
   },
 
   "titleBar": {
@@ -299,6 +295,8 @@
     "switchTo": "Switch to {channel}",
     "switchChannelOnly": "Switch Channel",
     "switchChannelPrefix": "Switching channel from {from} to {to}.\n\n",
+    "movingTo": "Moving to {channel}.",
+    "switchingToTitle": "Switching to {channel}",
     "computingCommitsAhead": "Computing commits ahead…"
   },
 
@@ -930,9 +928,9 @@
     "waitingTime": "Waiting for ComfyUI to be ready… ({secs}s)",
     "portBusyUsing": "Port {old} is busy — using port {new} instead…",
     "instanceRunningTitle": "An instance is already running",
-    "instanceRunningMessage": "\"{name}\" is running. What would you like to do?",
-    "instanceRunningProceed": "Launch Anyway",
-    "instanceRunningReplace": "Close & Launch New",
+    "instanceRunningMessage": "Close \"{name}\" and launch this instance instead, or run both at the same time.",
+    "instanceRunningProceed": "Run Both",
+    "instanceRunningReplace": "Close & Launch This",
     "modelFolderRelaunchTitle": "Restarting ComfyUI",
     "modelFolderRelaunchDesc": "New model folders were detected from custom nodes. Restarting so ComfyUI can use them right away.",
     "steps": {

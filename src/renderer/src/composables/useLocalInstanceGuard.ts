@@ -42,30 +42,32 @@ export function useLocalInstanceGuard() {
 
     const names = runningLocal.map((r) => r.name).join(', ')
 
-    // Two non-cancel actions in the footer — `secondary` is "Close
-    // Running & Launch" (destructive: stops the other instance),
-    // `primary` is "Launch Alongside" (additive). Header ✕ carries
-    // the dismiss affordance since the footer is full.
+    // Two non-cancel actions in the footer. The primary (rightmost) is
+    // "Close & Launch New" — the expected path when the user wants to
+    // switch instances; the secondary is "Launch Anyway" (additive: runs
+    // both side by side). Header ✕ carries the dismiss affordance since
+    // the footer is full. Both use brand tones (no red) — closing the
+    // prior instance to launch a new one is normal, not destructive.
     const choice = await dialogs.confirm({
       title: t('launch.instanceRunningTitle'),
       message: t('launch.instanceRunningMessage', { name: names }),
-      confirmLabel: t('launch.instanceRunningProceed'),
+      confirmLabel: t('launch.instanceRunningReplace'),
       tone: 'primary',
-      secondaryLabel: t('launch.instanceRunningReplace'),
-      secondaryTone: 'danger',
+      secondaryLabel: t('launch.instanceRunningProceed'),
+      secondaryTone: 'default',
       showCancel: false,
       showCloseIcon: true,
     })
 
-    if (choice === 'secondary') {
-      // The user explicitly chose to evict the running instance(s).
-      // `stopComfyUI` awaits the actual process kill so the port is free
-      // before the new launch starts; `closeComfyWindow({ skipConfirm })`
-      // then retires the host window so the user doesn't get left on
-      // ComfyLifecycleView's stopped surface for an instance they didn't
-      // choose to revisit. The close call is fire-and-forget — its
-      // teardown can't gate the launch because a concurrent OS-X close
-      // handler with a pending user prompt could otherwise block it.
+    // Primary → close the running instance(s), then launch.
+    // `stopComfyUI` awaits the actual process kill so the port is free
+    // before the new launch starts; `closeComfyWindow({ skipConfirm })`
+    // then retires the host window so the user doesn't get left on
+    // ComfyLifecycleView's stopped surface for an instance they didn't
+    // choose to revisit. The close call is fire-and-forget — its
+    // teardown can't gate the launch because a concurrent OS-X close
+    // handler with a pending user prompt could otherwise block it.
+    if (choice === 'primary') {
       await Promise.all(
         runningLocal.map(async (r) => {
           await window.api.stopComfyUI(r.id)
@@ -75,7 +77,8 @@ export function useLocalInstanceGuard() {
       return true
     }
 
-    return choice === 'primary'
+    // Secondary → launch alongside the running instance(s).
+    return choice === 'secondary'
   }
 
   return { checkBeforeLaunch }

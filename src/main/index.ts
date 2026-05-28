@@ -83,6 +83,7 @@ import {
   _detachInstallImpl,
   confirmAndCloseAllHostWindows,
   confirmAndCloseHostWindow,
+  confirmCloseInstanceWindow,
   consultPanelRendererClose,
   detachOrphanedInstallHosts,
   preClearedClose,
@@ -985,6 +986,7 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
     // picker all flow through the registry).
     setHostWindowFactories({
       consultPanelRendererClose,
+      confirmCloseInstanceWindow,
       detachInstallImpl: _detachInstallImpl,
       preClearedClose,
       computeInstallUpdateAvailable,
@@ -1136,7 +1138,8 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
     registerTitlePopupIpc({
       openChooserHostWindow,
       returnToDashboard,
-      confirmAndCloseAllHostWindows,
+      confirmAndCloseAllHostWindows: (parentWindow) =>
+        confirmAndCloseAllHostWindows(parentWindow, quitApp),
       confirmAndCloseHostWindow,
       setActivePanel,
       triggerOpenFeedback,
@@ -1196,18 +1199,28 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
           triggerPickerSnapshotBroadcast()
 
           // Build a stub event whose sender feeds _activeOperationStatus.
-          const sendProgressFn = (phase: string, detail: Record<string, unknown>): void => {
+          // The action handlers route BOTH `install-progress` and raw
+          // `comfy-output` chunks through this one sender. Only progress
+          // drives the inline status line — output chunks are ignored, or
+          // the channel name itself leaks in as the status text (the
+          // literal "comfy-output" shown during a background update). The
+          // real phase lives in the `install-progress` payload, not the
+          // channel arg.
+          const feedStatus = (channel: string, payload: Record<string, unknown>): void => {
+            if (channel !== 'install-progress') return
             const cur = _activeOperationStatus.get(installationId)
             if (!cur || cur.done) return
-            const status = typeof detail.status === 'string' ? detail.status : phase
-            const percent = typeof detail.percent === 'number' ? detail.percent : cur.percent
-            const speedBytesPerSec = typeof detail.speedBytesPerSec === 'number' ? detail.speedBytesPerSec : cur.speedBytesPerSec
+            const status = typeof payload.status === 'string'
+              ? payload.status
+              : (typeof payload.phase === 'string' ? payload.phase : cur.status)
+            const percent = typeof payload.percent === 'number' ? payload.percent : cur.percent
+            const speedBytesPerSec = typeof payload.speedBytesPerSec === 'number' ? payload.speedBytesPerSec : cur.speedBytesPerSec
             _activeOperationStatus.set(installationId, { ...cur, status, percent, speedBytesPerSec })
             triggerPickerSnapshotBroadcast()
           }
           const stubSender = {
             isDestroyed: () => false,
-            send: sendProgressFn as unknown as Electron.WebContents['send'],
+            send: feedStatus as unknown as Electron.WebContents['send'],
           } as unknown as Electron.WebContents
           const stubEvent = { sender: stubSender } as unknown as Electron.IpcMainInvokeEvent
 

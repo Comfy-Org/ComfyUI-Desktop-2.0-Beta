@@ -5,7 +5,7 @@ import { useInstallationStore } from '../stores/installationStore'
 import { useSessionStore } from '../stores/sessionStore'
 import { useInstallContextMenu } from '../composables/useInstallContextMenu'
 import { useInstallList } from '../composables/useInstallList'
-import { Cloud, Plus, Search } from 'lucide-vue-next'
+import { Cloud, MoreVertical, Plus, Search } from 'lucide-vue-next'
 import ContextMenu from '../components/ContextMenu.vue'
 import BrandBackground from '../components/BrandBackground.vue'
 import BaseInput from '../components/ui/BaseInput.vue'
@@ -206,14 +206,33 @@ function handleNewInstallClick(): void {
           <div class="chooser-tile-meta">{{ t('chooser.newInstallDesc') }}</div>
         </button>
 
-        <button
+        <div
           v-if="showCloudCard"
-          type="button"
+          role="button"
+          tabindex="0"
           class="chooser-tile chooser-tile-cloud"
           @click="handleCloudClick"
+          @keydown.enter="handleCloudClick"
+          @keydown.space.prevent="handleCloudClick"
           @contextmenu.prevent="cloudInstall ? openCardMenu($event, cloudInstall) : null"
         >
           <div class="chooser-tile-icon"><Cloud :size="32" /></div>
+          <!-- Kebab options menu — only when a real cloud install exists to
+               manage (parity with the per-install tiles; the Try-Cloud CTA
+               has nothing to manage). Keeps the cloud tile consistent with
+               the rest of the dashboard pills instead of right-click only. -->
+          <div v-if="cloudInstall" class="chooser-tile-actions">
+            <button
+              type="button"
+              class="chooser-tile-kebab"
+              :title="t('chooser.moreActions')"
+              :aria-label="t('chooser.moreActions')"
+              @click.stop="openKebabMenu($event, cloudInstall)"
+              @contextmenu.stop="openKebabMenu($event, cloudInstall)"
+            >
+              <MoreVertical :size="16" />
+            </button>
+          </div>
           <div class="chooser-tile-name">
             {{ cloudInstall ? cloudInstall.name : t('cloud.label') }}
           </div>
@@ -225,7 +244,7 @@ function handleNewInstallClick(): void {
               {{ cloudInstall ? cloudInstall.sourceLabel : t('cloud.desc') }}
             </span>
           </div>
-        </button>
+        </div>
 
         <ChooserInstallTile
           v-for="inst in visibleInstalls"

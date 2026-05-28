@@ -61,7 +61,13 @@ export function ensurePanelView(
     const overlay = titleBarOverlayForTheme(resolveTheme() === 'dark')
     return overlay.color ?? TITLEBAR_BG
   }
-  panelView.setBackgroundColor(initialPanel === 'chooser' ? chooserPanelBg() : '#00000000')
+  // `chooser` and `new-install` are full-screen launcher flows (not
+  // overlays over the comfy view), so paint them opaque during load to
+  // avoid a black flash. Overlay modes (settings-v2) stay transparent so
+  // the live comfy view composites through.
+  panelView.setBackgroundColor(
+    initialPanel === 'chooser' || initialPanel === 'new-install' ? chooserPanelBg() : '#00000000',
+  )
   entry.window.contentView.addChildView(panelView)
   // Insert at zero size, behind the comfy view; layoutViews handles positioning.
   panelView.setBounds({ x: 0, y: TITLEBAR_HEIGHT + 1, width: 0, height: 0 })
