@@ -208,13 +208,14 @@ watch(
 //
 //   - the active tab is `'update'`,
 //   - the sections payload has a channel-cards field,
-//   - and the currently-selected option's `data.checkedAt` is missing
-//     or older than `STALE_CHANNEL_CARD_MS`.
+//   - and the currently-selected option's `data.lastCheckedAt` is
+//     missing or older than `STALE_CHANNEL_CARD_MS`.
 //
 // Per-(install, channel) dedupe via `refreshedChannelKeys` so tab
 // flips don't spam IPCs. Main's `getOrFetch(..., force=true)` short-
 // circuits on the 10s window so even a stuck renderer can't push more
 // than 6 fetches/minute/channel.
+const STALE_CHANNEL_CARD_MS = 15 * 60 * 1000
 const refreshedChannelKeys = new Set<string>()
 watch(
   [() => activeTab.value, () => props.installation?.id ?? null, () => sections.value.length],
@@ -228,6 +229,18 @@ watch(
 
     const currentChannel = typeof channelField.value === 'string' ? channelField.value : null
     if (!currentChannel) return
+
+    // Skip when the currently-selected card's data is still fresh. Without
+    // this gate the watcher would auto-fire `check-update` every time the
+    // Update tab mounted, regardless of cache age — the dedupe set below
+    // only blocks repeat fires within the same component instance, not
+    // re-mounts (the picker rebuilds on every open).
+    const currentCard = (channelField.options as DetailField['options'] | undefined)
+      ?.find((o) => o.value === currentChannel)
+    const cardData = currentCard?.data as { lastCheckedAt?: number } | undefined
+    const lastCheckedAt = cardData?.lastCheckedAt
+    const isStale = !lastCheckedAt || Date.now() - lastCheckedAt > STALE_CHANNEL_CARD_MS
+    if (!isStale) return
 
     // Look up the canonical action def from sections so we inherit
     // whatever `enabled` / disabledMessage / future fields main attaches
@@ -245,7 +258,7 @@ watch(
     // `check-update` has no `showProgress` / confirm / prompt; it runs
     // inline via `useComfyUISettings.runAction` step 10. A successful
     // result returns `navigate: 'detail'` → section reload → fresh
-    // `checkedAt` bubbles through this watcher (dedupe set prevents
+    // `lastCheckedAt` bubbles through this watcher (dedupe set prevents
     // re-fire on the same install+channel).
     void runAction(checkAction)
   },

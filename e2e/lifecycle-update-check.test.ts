@@ -210,12 +210,7 @@ function countAutoCheckUpdateCalls(calls: unknown[], installationId: string): nu
     .length
 }
 
-// TODO(#621): PRODUCT BUG — auto-refresh fires once against a fresh cache
-// (expected 0). Introduced by #595 (`fix(picker): auto-refresh stale
-// channel-cards on Update tab open`). Marked `.fail` so the bug stays
-// visible in CI without breaking the build; remove `.fail` when the
-// dedupe regression is fixed.
-test.fail('Update tab does NOT auto-refresh when the channel data is fresh @ci', async () => {
+test('Update tab does NOT auto-refresh when the channel data is fresh @ci', async () => {
   // The previous tests just ran check-update — both cache entries are
   // seconds old, well inside the 15min freshness window. Opening the
   // picker on the Update tab must NOT fire an extra check-update IPC.
@@ -240,11 +235,7 @@ test.fail('Update tab does NOT auto-refresh when the channel data is fresh @ci',
   await closeTitlePopupIfOpen(ctx.app)
 })
 
-// TODO(#621): the `ageReleaseCache` e2e hook no longer mutates the
-// in-memory map main reads from (`getEffectiveInfo` sees undefined
-// instead of the staled timestamp). Either the hook drifted from the
-// real cache module or the cache layout changed underneath it.
-test.skip('Update tab auto-refreshes when channel data is stale @ci', async () => {
+test('Update tab auto-refreshes when channel data is stale @ci', async () => {
   test.setTimeout(120_000)
 
   // Age every in-memory release-cache entry past the 15min staleness
@@ -259,7 +250,8 @@ test.skip('Update tab auto-refreshes when channel data is stale @ci', async () =
   // picker for): the sections pipeline now reports the stale timestamp,
   // proving the hook reached the same map `getEffectiveInfo` reads.
   // The release cache is shared per-repo, so install A and B see the
-  // same staled entries.
+  // same staled entries. The channel-card surface uses `lastCheckedAt`
+  // (number) — `lastChecked` is the localized string sibling.
   const staleSections = await ctx.panel.evaluate<DetailSection[]>(
     `window.api.getDetailSections(${JSON.stringify(INSTALL_ID_B)})`,
   )
@@ -267,7 +259,7 @@ test.skip('Update tab auto-refreshes when channel data is stale @ci', async () =
   const staleChannelField = staleUpdateSection.fields!.find((f) => f.id === 'updateChannel')!
   const staleCard = staleChannelField.options!.find((o) => o.value === staleChannelField.value)
   expect(
-    (staleCard?.data as { checkedAt?: number } | undefined)?.checkedAt,
+    (staleCard?.data as { lastCheckedAt?: number } | undefined)?.lastCheckedAt,
     'ageReleaseCache hook did not mutate the in-memory map main reads from',
   ).toBe(stalenessTs)
 
@@ -294,7 +286,7 @@ test.skip('Update tab auto-refreshes when channel data is stale @ci', async () =
     .toBeGreaterThanOrEqual(1)
 
   // After the auto-refresh completes, the selected channel card's
-  // `checkedAt` should advance past `stalenessTs` — proves the
+  // `lastCheckedAt` should advance past `stalenessTs` — proves the
   // staleness was actually cleared, not just an IPC fire.
   await expect
     .poll(async () => {
@@ -304,8 +296,8 @@ test.skip('Update tab auto-refreshes when channel data is stale @ci', async () =
       const updateSection = sections.find((s) => s.tab === 'update')!
       const channelField = updateSection.fields!.find((f) => f.id === 'updateChannel')!
       const card = channelField.options!.find((o) => o.value === channelField.value)
-      const checkedAt = (card?.data as { checkedAt?: number } | undefined)?.checkedAt
-      return typeof checkedAt === 'number' && checkedAt > stalenessTs
+      const lastCheckedAt = (card?.data as { lastCheckedAt?: number } | undefined)?.lastCheckedAt
+      return typeof lastCheckedAt === 'number' && lastCheckedAt > stalenessTs
     }, { timeout: 15_000, intervals: [250, 500, 1_000] })
     .toBe(true)
 
