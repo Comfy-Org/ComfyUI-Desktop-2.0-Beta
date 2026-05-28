@@ -70,9 +70,13 @@ function _headerString(value: string | string[] | undefined): string | undefined
   return Array.isArray(value) ? value[0] : value
 }
 
-export function fetchJSON(url: string): Promise<unknown> {
+export function fetchJSON(url: string, opts?: { refresh?: boolean }): Promise<unknown> {
   _ensureLoaded()
-  const cached = _cache.get(url)
+  // When `refresh` is set, ignore the persisted ETag so the response is
+  // never served from cache. Used by the install wizard for R2 manifests
+  // that decide which standalone env release a user can pick — stale
+  // values there silently strand users on old versions.
+  const cached = opts?.refresh ? undefined : _cache.get(url)
 
   return new Promise((resolve, reject) => {
     // Use cache: "no-cache" so Chromium always revalidates with the server

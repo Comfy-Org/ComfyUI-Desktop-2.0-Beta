@@ -48,7 +48,15 @@ export async function getLatestStableTag(opts?: { refresh?: boolean }): Promise<
   const promise = (async () => {
     try {
       const tag = (await lsRemoteLatestTag(url)) ?? null
-      _latestTagCache.set(url, { tag, expiresAt: Date.now() + SUCCESS_TTL_MS })
+      // A `null` tag here means the lookup resolved without throwing but
+      // produced no value — almost always because no git backend was
+      // configured at the time of the call (no bootstrap-python in the
+      // installer + no prior installs + no system git). Treat it as a
+      // failure: caching it for SUCCESS_TTL_MS (10 min) silently stranded
+      // new standalone installs on the bundled ComfyUI version because the
+      // post-install update step would read the poisoned cache and skip.
+      const ttl = tag === null ? FAILURE_TTL_MS : SUCCESS_TTL_MS
+      _latestTagCache.set(url, { tag, expiresAt: Date.now() + ttl })
       return tag
     } catch {
       _latestTagCache.set(url, { tag: null, expiresAt: Date.now() + FAILURE_TTL_MS })
@@ -68,7 +76,8 @@ export function _clearLatestStableTagCache(): void {
 }
 
 export async function fetchLatestRelease(
-  channel: string
+  channel: string,
+  opts?: { refresh?: boolean },
 ): Promise<Record<string, unknown> | null> {
   const mirrorEnabled = settings.get('useChineseMirrors') === true
   const remoteUrl = getComfyUIRemoteUrl(mirrorEnabled)
@@ -76,7 +85,7 @@ export async function fetchLatestRelease(
   if (channel === 'latest') {
     const [headSha, latestTag] = await Promise.all([
       lsRemoteRef(remoteUrl, 'refs/heads/master'),
-      getLatestStableTag(),
+      getLatestStableTag(opts),
     ])
     if (!headSha) return null
     return {
@@ -91,7 +100,7 @@ export async function fetchLatestRelease(
   }
 
   // Stable channel: build synthetic release from latest tag
-  const latestTag = await getLatestStableTag()
+  const latestTag = await getLatestStableTag(opts)
   if (!latestTag) return null
   return {
     tag_name: latestTag,
