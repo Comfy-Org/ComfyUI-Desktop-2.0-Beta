@@ -74,9 +74,16 @@
     SetDetailsPrint none
 
     File /oname=$PLUGINSDIR\vc_redist.x64.exe "${BUILD_RESOURCES_DIR}\vc_redist.x64.exe"
-    # consent.exe inherits foreground state from the spawning process. Bring
-    # the installer window to front first so Windows is willing to show the
-    # UAC prompt in the foreground rather than letting it land in the taskbar.
+    # The UAC consent prompt only comes to the foreground if the process that
+    # requests elevation is itself the foreground window. By this point we have
+    # just finished a multi-second app extraction, during which focus may have
+    # drifted off the installer — and Windows then silently blocks
+    # SetForegroundWindow/BringToFront via the foreground-lock timeout. So zero
+    # that timeout first (SPI_SETFOREGROUNDLOCKTIMEOUT = 0x2001), then force
+    # ourselves foreground, so the consent dialog inherits it instead of
+    # landing in the taskbar.
+    System::Call "user32::SystemParametersInfo(i 0x2001, i 0, i 0, i 0)"
+    System::Call "user32::SetForegroundWindow(p $HWNDPARENT)"
     BringToFront
     # /quiet keeps the redistributable's own UI hidden so the user only sees
     # our installer's status text and progress bar.
@@ -84,6 +91,7 @@
     # The elevated child closed without a visible window, so focus may now
     # belong to whatever was behind us. Reclaim it for the remainder of the
     # install flow.
+    System::Call "user32::SetForegroundWindow(p $HWNDPARENT)"
     BringToFront
 
     ${If} $0 = 0
