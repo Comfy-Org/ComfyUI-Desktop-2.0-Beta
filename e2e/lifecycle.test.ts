@@ -48,10 +48,10 @@ import {
 import {
   deleteInstallViaDashboardKebab,
   ensureInstalledAndLaunched,
-  ensureInstallPanelMountedViaFileMenu,
+  ensureInstallPanelMounted,
   launchComfyByClickingTile,
   openPickerByClickingTitlePill,
-  returnToDashboardViaFileMenu,
+  returnToDashboardViaPickerHome,
   saveSnapshotViaPicker,
 } from './support/realPrereqs'
 import {
@@ -448,7 +448,7 @@ test('return-to-dashboard flips install host in place (same window id) @real', a
   // Drive the File menu's "Return to Dashboard" item via real popup
   // clicks. The helper polls `comfyFrontendIsLoaded`→false, waits for
   // `panel.html` to reappear, and asserts the chooser body is visible.
-  await returnToDashboardViaFileMenu(ctx)
+  await returnToDashboardViaPickerHome(ctx)
 
   const after = await ctx.app.evaluate(({ BrowserWindow }) => {
     const wins = BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed())
@@ -514,7 +514,7 @@ test('stop ComfyUI again so update-comfyui (requires stopped) can run @real', as
   if (!(await comfyFrontendIsLoaded())) {
     await launchComfyByClickingTile(ctx, 'ComfyUI')
   }
-  await returnToDashboardViaFileMenu(ctx)
+  await returnToDashboardViaPickerHome(ctx)
 })
 
 test('captures install metadata for the update tests @real', async () => {
@@ -549,7 +549,7 @@ test('update-comfyui drives the real updater and moves HEAD forward @real', asyn
   // confirm. The install is currently stopped (REQUIRES_STOPPED), so
   // no IN_PLACE_RELAUNCH chain follows — we just wait for HEAD to
   // move off the installed commit.
-  await ensureInstallPanelMountedViaFileMenu(ctx)
+  await ensureInstallPanelMounted(ctx, _updateInstallId)
   await resetIpcInvocations(ctx.app, 'run-action')
   const popup = await openPickerByClickingTitlePill(ctx, {
     installationId: _updateInstallId, initialTab: 'update',
@@ -1085,7 +1085,7 @@ test('picker pin-bottom Copy creates a real ~500MB copy of the install @real', a
   // Copy is REQUIRES_STOPPED — stop comfy via return-to-dashboard so
   // the IPC handler doesn't bail and the picker dispatches without a
   // self-stop preamble.
-  await returnToDashboardViaFileMenu(ctx)
+  await returnToDashboardViaPickerHome(ctx)
 
   // Snapshot BrowserWindow ids before the copy fires. The copy emits
   // `open-install-window` for the NEW install, which (because no window
@@ -1104,7 +1104,7 @@ test('picker pin-bottom Copy creates a real ~500MB copy of the install @real', a
   // `is-install-less` class), so this works from the dashboard too.
   // Mount the panel via the file menu first so the chooser body is
   // available as an IPC target throughout the rest of the test.
-  await ensureInstallPanelMountedViaFileMenu(ctx)
+  await ensureInstallPanelMounted(ctx, _updateInstallId)
   const popup = await openPickerByClickingTitlePill(ctx, {
     installationId: _updateInstallId, initialTab: 'config',
   })
@@ -1447,7 +1447,7 @@ test('stops comfy and captures the installed dir state before driving delete @re
   if (!(await comfyFrontendIsLoaded())) {
     await launchComfyByClickingTile(ctx, 'ComfyUI')
   }
-  await returnToDashboardViaFileMenu(ctx)
+  await returnToDashboardViaPickerHome(ctx)
 
   const installs = await ctx.panel.evaluate<InstallationLite[]>(`window.api.getInstallations()`)
   expect(installs.length, 'no tracked installation after install').toBeGreaterThan(0)
@@ -1486,3 +1486,4 @@ test('real delete wipes the fully-installed ~500MB tree off disk @real', async (
   const remaining = await ctx.panel.evaluate<InstallationLite[]>(`window.api.getInstallations()`)
   expect(remaining.find((i) => i.id === _deleteInstallId), 'install record not removed after delete').toBeUndefined()
 })
+

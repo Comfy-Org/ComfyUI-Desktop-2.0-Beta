@@ -20,8 +20,9 @@ import { execFileSync } from 'node:child_process'
 import path from 'node:path'
 import { expect } from '@playwright/test'
 import type { AppContext } from '../launchApp'
-import { clickInstallTile, expectChooserVisible, openTitleMenu } from './chooserHelpers'
+import { clickInstallTile, expectChooserVisible } from './chooserHelpers'
 import { titlePopupPage, waitForWebContents, type WebContentsPage } from './cdpPages'
+import { ensureInstallPanelView as e2eEnsureInstallPanelView } from './devHooks'
 import { byTestId, TID } from './testIds'
 
 /** Picker tabs that can be opened via the title pill helpers. The
@@ -226,25 +227,33 @@ export async function launchComfyByClickingTile(
     .toBe(true)
 }
 
-/** Click the title-bar file-menu (waffle icon) → "Return to Dashboard"
- *  item. Replaces the `__e2e.returnFirstInstallHostToDashboard` backdoor
- *  for @real tests.
+/** Click the title-bar instance pill → picker → `.picker-home` Home
+ *  icon to flip an install-backed host back to the chooser body. The
+ *  Home icon dispatches `bridge.activate('return-to-dashboard')` —
+ *  the production equivalent of the removed file-menu item (the
+ *  install-host file menu was trimmed in #497, with the Home icon in
+ *  the picker chips row as the sole escape hatch).
  *
  *  Waits for the chooser body to reappear (in-place flip — same window
  *  id, panel.html is rebuilt). */
-export async function returnToDashboardViaFileMenu(ctx: AppContext): Promise<void> {
-  await openTitleMenu(ctx.titleBar)
+export async function returnToDashboardViaPickerHome(ctx: AppContext): Promise<void> {
+  await ctx.titleBar.waitForVisible('.title-install-pill', { timeout: 15_000 })
+  expect(await ctx.titleBar.click('.title-install-pill'), 'title-install-pill click dispatched').toBe(true)
   await waitForWebContents(ctx.app, 'comfyTitlePopup.html')
 
-  // MenuView.vue renders items as `<li class="item"> … <span class="label">{text}</span></li>`.
-  // The label string is supplied by `buildTitlePopupMenuItems` in
-  // src/main/popups/titlePopup.ts (id: 'return-to-dashboard').
-  const popup = (await import('./cdpPages')).titlePopupPage(ctx.app)
-  await popup.waitForVisible('.menu .item', { timeout: 5_000 })
-  expect(
-    await popup.clickByText('.menu .item', 'Return to Dashboard'),
-    'Return to Dashboard menu item not found in file menu',
-  ).toBe(true)
+  const popup = titlePopupPage(ctx.app)
+  // `.picker-home` only renders on install-hosted pickers (the
+  // dashboard's own picker hides it — `isInstallHost` v-if). The
+  // test surface comfy is running, so the picker IS install-hosted.
+  await popup.waitForVisible('.picker-home', { timeout: 10_000 })
+  expect(await popup.click('.picker-home'), '.picker-home click').toBe(true)
+
+  // `returnToDashboard` consults the panel renderer
+  // (`useReturnToDashboardConfirm`) — for a running local install it
+  // pops a "Stop ComfyUI?" BaseAlert confirm on the panel webContents
+  // that has to be clicked before the detach proceeds.
+  await ctx.panel.waitForVisible(byTestId(TID.baseAlertAction), { timeout: 10_000 })
+  expect(await ctx.panel.click(byTestId(TID.baseAlertAction)), 'return-to-dashboard confirm clicked').toBe(true)
 
   // After the flip the comfyView no longer loads a localhost URL and
   // panel.html is rebuilt as the chooser body.
@@ -284,7 +293,7 @@ export async function ensureInstalledAndLaunched(
       // Hydrated profile: launch the existing install via real click
       // and let the test proceed from a "ComfyUI running" surface.
       await launchComfyByClickingTile(ctx, 'ComfyUI')
-      await ensureInstallPanelMountedViaFileMenu(ctx)
+      await ensureInstallPanelMounted(ctx, hydrated.id)
       // Re-capture so installedCommit reflects the post-launch HEAD
       // (no-op on stable installs, useful when the previous run left
       // the working tree at a different commit).
@@ -296,32 +305,39 @@ export async function ensureInstalledAndLaunched(
   // auto-launches into ComfyUI as its terminal step.
   const installed = await freshInstallStandaloneCpu(ctx)
   // Auto-launch dropped the panel.html (chooser-pick attach destroys
-  // it). Remount via the title bar so subsequent ctx.panel.evaluate
-  // calls have a target.
-  await ensureInstallPanelMountedViaFileMenu(ctx)
+  // it). Rebuild it so subsequent ctx.panel.evaluate calls land.
+  await ensureInstallPanelMounted(ctx, installed.id)
   return installed
 }
 
-/** Force-mount the install-backed `panel.html` by opening + immediately
- *  dismissing the title-bar file menu. After a chooser-pick attach the
- *  install-backed PanelApp is destroyed and production only re-mounts
- *  it on the user's next title-bar / comfy-lifecycle interaction —
- *  drive that interaction with real clicks here so subsequent
- *  `ctx.panel.evaluate` reads (`window.api.getInstallations`, etc.)
- *  hit a live webContents.
+/** Force-build the install-backed `panel.html` so subsequent
+ *  `ctx.panel.evaluate` reads (`window.api.getInstallations`,
+ *  `window.api.getSnapshots`, …) reach a live renderer.
  *
- *  No-op when the panel is already mounted. */
-export async function ensureInstallPanelMountedViaFileMenu(ctx: AppContext): Promise<void> {
+ *  After a chooser-pick attach the install-backed PanelApp is
+ *  destroyed (`destroyPanelView(claimed)` in `main/index.ts`) and only
+ *  re-built on demand — Settings, comfy-lifecycle progress, etc. The
+ *  install-host file menu was trimmed (#497) so there is no longer a
+ *  user-facing gesture whose sole job is "mount the panel", and the
+ *  picker popup is its own webContents (does NOT trigger panel mount).
+ *
+ *  Resolves the gap with `__e2e.ensureInstallPanelView(installationId)`,
+ *  which invokes the same idempotent `ensurePanelView(..., 'comfy-lifecycle')`
+ *  production code path the next user interaction would run. This is a
+ *  *read-trigger* primitive — no fake test data is seeded — and is
+ *  scoped to this support file so test bodies never reach for `__e2e.*`
+ *  directly. No-op when the panel is already mounted. */
+export async function ensureInstallPanelMounted(
+  ctx: AppContext, installationId: string,
+): Promise<void> {
   try {
-    await waitForWebContents(ctx.app, 'panel.html', 5_000)
+    await waitForWebContents(ctx.app, 'panel.html', 1_000)
     return
   } catch { /* fall through to the forced mount */ }
-
-  await openTitleMenu(ctx.titleBar)
-  await waitForWebContents(ctx.app, 'comfyTitlePopup.html', 5_000)
-  // Dismiss the popup via Escape inside the popup webContents.
-  const popup = titlePopupPage(ctx.app)
-  await popup.pressKey('Escape')
+  expect(
+    await e2eEnsureInstallPanelView(ctx.app, installationId),
+    'main rejected ensurePanelView — installation entry missing or window destroyed',
+  ).toBe(true)
   await waitForWebContents(ctx.app, 'panel.html', 10_000)
 }
 
@@ -387,7 +403,7 @@ export async function saveSnapshotViaPicker(
   installId: string,
   label: string,
 ): Promise<void> {
-  await ensureInstallPanelMountedViaFileMenu(ctx)
+  await ensureInstallPanelMounted(ctx, installId)
   const popup = await openPickerByClickingTitlePill(ctx, {
     installationId: installId,
     initialTab: 'snapshots',
