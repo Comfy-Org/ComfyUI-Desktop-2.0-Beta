@@ -9,19 +9,21 @@
 
 ; Friendlier install-mode page strings. electron-builder's defaults read like
 ; internals ("There is already a per-user installation." / "Will reinstall/
-; upgrade."). This file is included after electron-builder's message lang file,
-; so re-declaring these LangStrings (numeric LCID 1033 = English) overrides
-; them — last definition wins. $(^Name) resolves to the product name at runtime.
-; electron-builder compiles with -WX (warnings as errors), and re-declaring a
-; LangString emits warning 6030 ("set multiple times"); disable just that
-; warning around these overrides so the build doesn't fail.
-!pragma warning disable 6030
-LangString perUserInstallExists 1033 "$(^Name) is already installed for your account."
-LangString perUserInstall 1033 "$(^Name) is installed for your account."
-LangString perMachineInstallExists 1033 "$(^Name) is already installed for all users."
-LangString perMachineInstall 1033 "$(^Name) is installed for all users."
-LangString reinstallUpgrade 1033 "Setup will update your existing installation."
-!pragma warning enable 6030
+; upgrade."). electron-builder !includes its own message lang file AFTER this
+; script, so a *top-level* override here is overridden right back. The
+; customHeader hook, however, is inserted AFTER those message includes, so
+; re-declaring the LangStrings there wins (NSIS uses the last definition).
+; -WX treats the "LangString set multiple times" warning (6030) as an error,
+; so suppress just that one. $(^Name) resolves to the product name at runtime.
+!macro customHeader
+  !pragma warning disable 6030
+  LangString perUserInstallExists 1033 "$(^Name) is already installed for your account."
+  LangString perUserInstall 1033 "$(^Name) is installed for your account."
+  LangString perMachineInstallExists 1033 "$(^Name) is already installed for all users."
+  LangString perMachineInstall 1033 "$(^Name) is installed for all users."
+  LangString reinstallUpgrade 1033 "Setup will update your existing installation."
+  !pragma warning enable 6030
+!macroend
 
 ; Optional installer command-line overrides:
 ;   /ALLUSERS    force a per-machine install
