@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Play, RefreshCcw, TriangleAlert, Loader2, ArrowLeft } from 'lucide-vue-next'
+import { Play, RefreshCcw, Loader2, ArrowLeft } from 'lucide-vue-next'
 import { useSessionStore } from '../stores/sessionStore'
 import { useReturnToDashboardConfirm } from '../composables/useReturnToDashboardConfirm'
 import { emitTelemetryAction } from '../lib/telemetry'
-import BaseCopyButton from '../components/ui/BaseCopyButton.vue'
+import BrandFinishedSurface from '../components/BrandFinishedSurface.vue'
 import type { Installation, ShowProgressOpts } from '../types/ipc'
 
 /**
@@ -18,10 +18,19 @@ import type { Installation, ShowProgressOpts } from '../types/ipc'
  *   - the process crashed and main left the window alive
  *   - it's plain stopped (initial state, or user chose Stop)
  *
- * Re-launching is the panel's own responsibility — clicking the start button
- * surfaces the standard ProgressModal flow via the parent PanelApp's
- * `show-progress` emit, mirroring how DashboardCard / DetailModal kick off
- * the same action.
+ * The stopped + crashed states render the same brand-finished takeover
+ * chrome that ProgressModal uses for completed operations, so a launch
+ * that completed → stopped → reopened flows as one continuous visual
+ * surface instead of dropping the user onto a plain card. Launching /
+ * stopping defer to ProgressModal (which is mounted whenever a launch
+ * or stop op is in flight); the small spinner placeholder only shows
+ * if the session is mid-transition and no ProgressModal happens to be
+ * up (e.g. an externally triggered stop in a race window).
+ *
+ * Re-launching is the panel's own responsibility — clicking the start
+ * button surfaces the standard ProgressModal flow via the parent
+ * PanelApp's `show-progress` emit, mirroring how DashboardCard /
+ * DetailModal kick off the same action.
  */
 
 interface Props {
@@ -54,6 +63,19 @@ const state = computed<LifecycleState>(() => {
 })
 
 const errorInfo = computed(() => sessionStore.errorInstances.get(props.installationId) ?? null)
+
+const crashedMessage = computed<string | null>(() => {
+  if (state.value !== 'crashed') return null
+  const code = errorInfo.value?.exitCode
+  return code != null
+    ? t('comfyLifecycle.crashedDescWithCode', { code })
+    : t('comfyLifecycle.crashedDesc')
+})
+
+const crashedLogs = computed<string | null>(() => {
+  if (state.value !== 'crashed') return null
+  return errorInfo.value?.lastStderr ?? null
+})
 
 /**
  * Grey-window guard — the original `state === 'unknown'` branch
@@ -166,95 +188,94 @@ async function returnToDashboard(): Promise<void> {
   emitTelemetryAction('desktop2.instance.return_to_dashboard', { from: 'lifecycle', reason })
   await window.api.returnToDashboard()
 }
+
+// Show the small placeholder spinner for the in-flight (`launching` /
+// `stopping`) states too — ProgressModal owns those flows via its own
+// brand takeover, so this only renders during the brief race window
+// where the session-store flag is set but ProgressModal hasn't
+// mounted yet (e.g. externally-triggered stop).
+const showPlaceholder = computed<boolean>(() => {
+  if (state.value === 'unknown') return showUnknownPlaceholder.value
+  return state.value === 'launching' || state.value === 'stopping'
+})
+
+const placeholderTitle = computed<string>(() => {
+  if (state.value === 'launching') return t('comfyLifecycle.launchingTitle')
+  if (state.value === 'stopping') return t('comfyLifecycle.stoppingTitle')
+  return t('comfyLifecycle.preparingTitle')
+})
 </script>
 
 <template>
   <div class="lifecycle-view">
-    <!-- `unknown` = pre-hydration. The card is hidden for the first
-         `UNKNOWN_PLACEHOLDER_GRACE_MS` so a fast `sessionStore.init()`
-         (the common case) doesn't flash the stopped card before the
-         real state lands. If hydration drags past that grace window
-         we render a minimal spinning placeholder so the user never
-         stares at a bare grey panel — that was the "screen turns
-         into a grey window" regression. -->
-    <div
-      v-if="state === 'unknown' && showUnknownPlaceholder"
-      class="lifecycle-card"
-      data-state="unknown"
+    <!-- Stopped → brand-cancelled banner. Same visual language as the
+         "operation cancelled" finished state in ProgressModal so the
+         user can't tell the seam between "your last launch wrapped up"
+         and "your install is parked, start it again". -->
+    <BrandFinishedSurface
+      v-if="state === 'stopped'"
+      variant="cancelled"
+      :title="$t('comfyLifecycle.stoppedTitle')"
+      :message="$t('comfyLifecycle.stoppedDesc')"
+      :aria-label="$t('comfyLifecycle.stoppedTitle')"
     >
-      <div class="lifecycle-icon spin">
+      <template #actions>
+        <button class="brand-primary brand-progress__footer-btn" type="button" @click="startLaunch">
+          <Play :size="14" />
+          {{ $t('comfyLifecycle.start') }}
+        </button>
+        <button
+          class="brand-ghost brand-progress__footer-btn"
+          type="button"
+          @click="returnToDashboard"
+        >
+          <ArrowLeft :size="14" />
+          {{ $t('comfyLifecycle.returnToDashboard') }}
+        </button>
+      </template>
+    </BrandFinishedSurface>
+
+    <!-- Crashed → brand-error banner + crash-detail message + stderr
+         tail in the logs accordion. Mirrors ProgressModal's error
+         finished state so a launch that crashed reads identically
+         whether the user is still looking at the progress modal or
+         has reopened the panel afterwards. -->
+    <BrandFinishedSurface
+      v-else-if="state === 'crashed'"
+      variant="error"
+      :title="$t('comfyLifecycle.crashedTitle')"
+      :message="crashedMessage ?? undefined"
+      :logs="crashedLogs ?? undefined"
+      :aria-label="$t('comfyLifecycle.crashedTitle')"
+    >
+      <template #actions>
+        <button class="brand-primary brand-progress__footer-btn" type="button" @click="startLaunch">
+          <RefreshCcw :size="14" />
+          {{ $t('comfyLifecycle.restart') }}
+        </button>
+        <button
+          class="brand-ghost brand-progress__footer-btn"
+          type="button"
+          @click="returnToDashboard"
+        >
+          <ArrowLeft :size="14" />
+          {{ $t('comfyLifecycle.returnToDashboard') }}
+        </button>
+      </template>
+    </BrandFinishedSurface>
+
+    <!-- Pre-hydration + in-flight (launching / stopping) placeholder.
+         ProgressModal owns the launching / stopping takeover when its
+         op is live; this is only the safety-net spinner for the
+         narrow race window where the session-store flag is set but
+         no ProgressModal is mounted. Hidden until the unknown grace
+         window lapses so a fast `sessionStore.init()` (the common
+         case) doesn't flash anything. -->
+    <div v-else-if="showPlaceholder" class="lifecycle-placeholder" data-state="placeholder">
+      <div class="lifecycle-placeholder__icon">
         <Loader2 :size="32" />
       </div>
-      <h2>{{ $t('comfyLifecycle.preparingTitle') }}</h2>
-    </div>
-
-    <div v-else-if="state !== 'running' && state !== 'unknown'" class="lifecycle-card" :data-state="state">
-      <template v-if="state === 'launching'">
-        <div class="lifecycle-icon spin">
-          <Loader2 :size="32" />
-        </div>
-        <h2>{{ $t('comfyLifecycle.launchingTitle') }}</h2>
-        <p>{{ $t('comfyLifecycle.launchingDesc') }}</p>
-      </template>
-
-      <template v-else-if="state === 'stopping'">
-        <div class="lifecycle-icon spin">
-          <Loader2 :size="32" />
-        </div>
-        <h2>{{ $t('comfyLifecycle.stoppingTitle') }}</h2>
-        <p>{{ $t('comfyLifecycle.stoppingDesc') }}</p>
-      </template>
-
-      <template v-else-if="state === 'crashed'">
-        <div class="lifecycle-icon danger">
-          <TriangleAlert :size="32" />
-        </div>
-        <h2>{{ $t('comfyLifecycle.crashedTitle') }}</h2>
-        <p v-if="errorInfo?.exitCode != null">
-          {{ $t('comfyLifecycle.crashedDescWithCode', { code: errorInfo.exitCode }) }}
-        </p>
-        <p v-else>{{ $t('comfyLifecycle.crashedDesc') }}</p>
-        <details v-if="errorInfo?.lastStderr" class="lifecycle-error-detail">
-          <summary class="lifecycle-error-summary">
-            <span>{{ $t('comfyLifecycle.crashedDetailsToggle') }}</span>
-            <BaseCopyButton
-              :value="errorInfo.lastStderr"
-              :aria-label="$t('common.copy')"
-              class="lifecycle-error-copy"
-              @click.stop.prevent
-            />
-          </summary>
-          <pre class="lifecycle-error-output">{{ errorInfo.lastStderr }}</pre>
-        </details>
-        <div class="lifecycle-actions">
-          <button class="primary" type="button" @click="startLaunch">
-            <RefreshCcw :size="16" />
-            {{ $t('comfyLifecycle.restart') }}
-          </button>
-          <button class="secondary" type="button" @click="returnToDashboard">
-            <ArrowLeft :size="16" />
-            {{ $t('comfyLifecycle.returnToDashboard') }}
-          </button>
-        </div>
-      </template>
-
-      <template v-else>
-        <div class="lifecycle-icon">
-          <Play :size="32" />
-        </div>
-        <h2>{{ $t('comfyLifecycle.stoppedTitle') }}</h2>
-        <p>{{ $t('comfyLifecycle.stoppedDesc') }}</p>
-        <div class="lifecycle-actions">
-          <button class="primary" type="button" @click="startLaunch">
-            <Play :size="16" />
-            {{ $t('comfyLifecycle.start') }}
-          </button>
-          <button class="secondary" type="button" @click="returnToDashboard">
-            <ArrowLeft :size="16" />
-            {{ $t('comfyLifecycle.returnToDashboard') }}
-          </button>
-        </div>
-      </template>
+      <h2>{{ placeholderTitle }}</h2>
     </div>
   </div>
 </template>
@@ -271,7 +292,10 @@ async function returnToDashboard(): Promise<void> {
   color: var(--text);
 }
 
-.lifecycle-card {
+/* Pre-hydration / race-window placeholder. The brand-finished surface
+ * is teleported to body and covers the panel viewport; this is the
+ * only branch that stays inline. */
+.lifecycle-placeholder {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -280,21 +304,12 @@ async function returnToDashboard(): Promise<void> {
   max-width: 480px;
   padding: 28px 32px;
 }
-
-.lifecycle-card h2 {
+.lifecycle-placeholder h2 {
   margin: 0;
   font-size: 18px;
   font-weight: 600;
 }
-
-.lifecycle-card p {
-  margin: 0;
-  color: var(--text-muted);
-  font-size: 13px;
-  line-height: 1.5;
-}
-
-.lifecycle-icon {
+.lifecycle-placeholder__icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -303,91 +318,17 @@ async function returnToDashboard(): Promise<void> {
   border-radius: 999px;
   background: var(--surface);
   border: 1px solid var(--border);
-  color: var(--text);
-}
-
-.lifecycle-icon.danger {
-  color: var(--danger, #d97357);
-  border-color: var(--danger, #d97357);
-}
-
-.lifecycle-icon.spin {
   color: var(--accent, #4d8eff);
 }
-
-.lifecycle-icon.spin :deep(svg) {
+.lifecycle-placeholder__icon :deep(svg) {
   animation: lifecycle-spin 1s linear infinite;
 }
-
 @keyframes lifecycle-spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
-.lifecycle-actions {
-  display: flex;
-  gap: 8px;
-  margin-top: 8px;
-}
-
-.lifecycle-actions button {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.lifecycle-error-detail {
-  width: 100%;
-  max-width: 100%;
-  text-align: left;
-  margin-top: 4px;
-}
-
-.lifecycle-error-detail summary {
-  cursor: pointer;
-  font-size: 12px;
-  color: var(--text-muted);
-  padding: 4px 0;
-  user-select: none;
-  text-align: center;
-}
-
-.lifecycle-error-detail summary:hover {
-  color: var(--text);
-}
-
-/* Summary row hosting the label + an inline Copy button. Flex so the
-   copy affordance sits to the right without affecting the disclosure
-   triangle. The button stops click propagation so tapping it doesn't
-   toggle the <details> open/closed state. */
-.lifecycle-error-summary {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-.lifecycle-error-copy {
-  margin-left: 2px;
-}
-
-.lifecycle-error-output {
-  margin: 8px 0 0;
-  padding: 10px 12px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
-  font-size: 12px;
-  line-height: 1.45;
-  color: var(--text);
-  white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 240px;
-  overflow: auto;
-  text-align: left;
-  /* Selectable so users can copy the stderr tail manually as a
-     fallback to the inline Copy button — important for the
-     paste-into-issue-thread flow. */
-  user-select: text;
-  -webkit-user-select: text;
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 </style>
