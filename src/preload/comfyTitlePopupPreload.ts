@@ -75,6 +75,9 @@ export interface PopupInstancePickerSnapshot {
   /** Action id to fire automatically after the settings UI mounts
    *  (kebab Update / Migrate / etc.). `null` once consumed. */
   autoAction: string | null
+  /** Nonce bumped on each open that seeds `autoAction` so a repeat
+   *  trigger re-fires even when the action id is unchanged. */
+  autoActionNonce: number
   /** Installs that currently have an inline background op in flight or
    *  recently completed. Drives the spinner dot on InstanceRow. */
   operatingInstallationIds: string[]

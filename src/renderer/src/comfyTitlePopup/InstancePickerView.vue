@@ -74,6 +74,7 @@ interface PickerSnapshot {
   selectedSnapshots: SnapshotListData | null
   initialTab?: string | null
   autoAction?: string | null
+  autoActionNonce?: number
   storage: PickerStorageSlice
   operatingInstallationIds?: string[]
   installOperationStatus?: Record<string, PickerOperationStatus>
@@ -537,6 +538,7 @@ function handleExpandedPrimaryAction(running: boolean): void {
               :installation="selectedInstall"
               :initial-tab="initialExpandedTab"
               :auto-action="snapshot.autoAction ?? null"
+              :auto-action-nonce="snapshot.autoActionNonce ?? 0"
               :global-settings-snapshot="snapshot.storage"
               :active-operation="activeOperation"
               class="picker-expanded-body"

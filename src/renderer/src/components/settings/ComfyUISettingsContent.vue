@@ -47,9 +47,16 @@ interface Props {
    *  loaded — mirrors `DetailModal`'s `autoAction` prop. Used by the
    *  picker's expanded mode when opened via dashboard kebab
    *  `Copy Installation` / `Untrack` / `Delete` / `Migrate to
-   *  Standalone`. Consumed exactly once per prop value transition;
-   *  later section reloads or selection changes do not re-fire. */
+   *  Standalone`. Consumed exactly once per (autoAction, autoActionNonce)
+   *  transition; later section reloads or selection changes do not
+   *  re-fire. */
   autoAction?: string | null
+  /** Bumped by the picker on each explicit (re)open that seeds an
+   *  `autoAction`. The picker popup is cached, so a repeat trigger
+   *  re-sends the same `autoAction` value — keying the consumed-guard on
+   *  this nonce lets a second click re-fire. Absent (drawer host) → the
+   *  guard falls back to value-only keying. */
+  autoActionNonce?: number
   /** Slice of the popup's global-settings snapshot consumed by the
    *  Storage tab. Optional so non-popup hosts (e.g. drawer chrome)
    *  can omit it and the Storage tab silently empties out — they
@@ -66,6 +73,7 @@ const props = withDefaults(defineProps<Props>(), {
   initialTab: 'update',
   showBack: false,
   autoAction: null,
+  autoActionNonce: 0,
   activeOperation: null,
   globalSettingsSnapshot: () => ({
     sharedDirectoriesFields: [],
@@ -147,30 +155,33 @@ const {
 // settings tab.
 //
 // Guards:
-//   - keyed on the prop value itself (not the install id) so re-mounts
-//     on the same `autoAction` don't double-fire, and so picking a
-//     different install while the prop sticks around can't accidentally
-//     auto-run a destructive op on the new install
-//   - reset to `null` when the prop transitions to a NEW value (or back
-//     to null), so a second Manage click against the same install with
-//     a different autoAction can fire
-const consumedAutoAction = ref<string | null>(null)
-watch(
-  () => props.autoAction,
-  (next, prev) => {
-    if (next !== prev) consumedAutoAction.value = null
-  }
+//   - keyed on `autoAction` + the picker's `autoActionNonce` (not the
+//     install id) so re-mounts / section reloads on the same trigger
+//     don't double-fire, AND a repeat trigger of the SAME action still
+//     re-fires (the picker popup is cached, so the value alone doesn't
+//     transition — the nonce bumps on each explicit re-open). Picking a
+//     different install while the key sticks around can't auto-run a
+//     destructive op on the new install (re-checked after the tick).
+//   - reset when the key transitions, so the next trigger can fire.
+const autoActionKey = computed<string | null>(() =>
+  props.autoAction ? `${props.autoAction}#${props.autoActionNonce ?? 0}` : null
 )
+const consumedAutoActionKey = ref<string | null>(null)
+watch(autoActionKey, (next, prev) => {
+  if (next !== prev) consumedAutoActionKey.value = null
+})
 watch(
   [
-    () => props.autoAction,
+    () => autoActionKey.value,
     () => props.installation?.id ?? null,
     () => loading.value,
     () => sections.value.length
   ],
-  async ([autoAction, installId, isLoading, sectionsLen]) => {
-    if (!installId || !autoAction || isLoading || sectionsLen === 0) return
-    if (consumedAutoAction.value === autoAction) return
+  async ([key, installId, isLoading, sectionsLen]) => {
+    if (!installId || !key || isLoading || sectionsLen === 0) return
+    if (consumedAutoActionKey.value === key) return
+    const autoAction = props.autoAction
+    if (!autoAction) return
 
     // Mirror `DetailModal`'s channel-card-aware resolution so that
     // nested per-channel actions (`update-comfyui`, `copy-update`,
@@ -183,7 +194,7 @@ watch(
     const action = findActionById(sections.value, autoAction, currentChannel)
     if (!action) return
 
-    consumedAutoAction.value = autoAction
+    consumedAutoActionKey.value = key
     await nextTick()
 
     // Re-check the install after the tick — selection can change in
