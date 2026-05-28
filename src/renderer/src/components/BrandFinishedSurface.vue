@@ -28,7 +28,7 @@
  *                `brand-ghost` + `brand-progress__footer-btn` classes
  *                to match the ProgressModal finished-state buttons.
  */
-import { ref } from 'vue'
+import { ref, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Check, X, TriangleAlert, ChevronDown } from 'lucide-vue-next'
 import BrandTakeoverLayout from './BrandTakeoverLayout.vue'
@@ -64,6 +64,10 @@ const props = withDefaults(defineProps<Props>(), {
 
 const { t } = useI18n()
 const logsExpanded = ref(false)
+// Per-instance unique id so multiple BrandFinishedSurface instances
+// mounted simultaneously (e.g. lifecycle view + a future migrated
+// ProgressModal finished branch) don't collide on `aria-controls`.
+const logsId = useId()
 
 function toggleLogs(): void {
   logsExpanded.value = !logsExpanded.value
@@ -125,7 +129,7 @@ function getLogText(): string {
               class="brand-progress__logs-copy"
             />
           </div>
-          <div id="brand-finished-logs" class="brand-progress__logs">
+          <div :id="logsId" class="brand-progress__logs">
             {{ logs }}
           </div>
         </BaseAccordion>
@@ -141,7 +145,7 @@ function getLogText(): string {
             type="button"
             class="brand-ghost brand-progress__footer-btn brand-progress__logs-toggle"
             :aria-expanded="logsExpanded"
-            aria-controls="brand-finished-logs"
+            :aria-controls="logsId"
             @click="toggleLogs"
           >
             <ChevronDown
