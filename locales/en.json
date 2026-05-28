@@ -14,11 +14,6 @@
       "title": "Return to Dashboard?",
       "message": "ComfyUI for this installation will be stopped.",
       "confirmLabel": "Stop & Return"
-    },
-    "confirmQuit": {
-      "title": "Quit Desktop?",
-      "message": "ComfyUI Desktop will close.",
-      "confirmLabel": "Quit"
     }
   },
 
