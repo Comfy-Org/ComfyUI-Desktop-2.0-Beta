@@ -311,7 +311,13 @@ function getLogText(): string {
   align-items: center;
   gap: 10px;
 }
-.brand-progress__footer-btn {
+/* `:slotted()` mirrors plain selectors here because consumers pass
+   their action buttons in via `<slot name="actions" />`. Without it,
+   Vue 3 scoped styles only reach the local logs-toggle button and the
+   slotted buttons end up un-styled — icons crashing into their labels
+   was the visible symptom. Keep the two selector groups in sync. */
+.brand-progress__footer-btn,
+:slotted(.brand-progress__footer-btn) {
   min-width: auto;
   padding: 7px 14px;
   font-size: 13px;
@@ -320,12 +326,14 @@ function getLogText(): string {
   gap: 6px;
   white-space: nowrap;
 }
-.brand-progress__footer-btn.brand-ghost {
+.brand-progress__footer-btn.brand-ghost,
+:slotted(.brand-progress__footer-btn.brand-ghost) {
   border-color: var(--neutral-500);
   color: var(--neutral-100);
 }
 @media (max-width: 720px) {
-  .brand-progress__footer-btn {
+  .brand-progress__footer-btn,
+  :slotted(.brand-progress__footer-btn) {
     padding: 6px 10px;
     font-size: 12px;
   }
