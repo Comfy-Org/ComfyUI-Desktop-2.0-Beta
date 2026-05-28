@@ -322,7 +322,15 @@ export function initTelemetry(opts: InitOptions): void {
     client = new PostHog(cfg.apiKey, {
       host: cfg.host,
       flushAt: 20,
-      flushInterval: 10_000
+      flushInterval: 10_000,
+      // posthog-node defaults `disableGeoip: true` (it assumes a server
+      // whose IP isn't the user's). Here posthog-node runs in the
+      // desktop main process ON the user's machine, so the request IP is
+      // the real user IP — opt back into GeoIP so PostHog derives
+      // `$geoip_country_name` / region / city for geo cohorts. Only
+      // consented users emit at all (capture() is consent-gated), and we
+      // surface country/region for analytics, not the raw `$ip`.
+      disableGeoip: false
     })
   } catch {
     client = null
