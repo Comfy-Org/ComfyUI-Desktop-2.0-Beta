@@ -101,20 +101,27 @@
       # reliably hand off to a MUI "Installation failed" finish page from here
       # (electron-builder hides the install details with `ShowInstDetails
       # nevershow`, so a section Abort just freezes on the last status line),
-      # so do the robust thing: a clear, foregrounded failure dialog with
-      # Retry (re-show the UAC prompt) or Exit. Update the status line first so
-      # it no longer reads "Installing…", then either loop or Quit.
+      # so use the standard Abort / Retry / Ignore failure dialog (the only
+      # built-in MessageBox set with an "Abort" button — Windows has no 2-button
+      # Retry|Abort). Update the status line first so it no longer reads
+      # "Installing…".
+      #   Abort  -> stop and exit Setup (SetErrorLevel + Quit)
+      #   Retry  -> re-show the UAC prompt (loop back to vcRedistAttempt)
+      #   Ignore -> install anyway without the redist (app may not start)
       SetDetailsPrint textonly
       DetailPrint "Installation failed: Microsoft Visual C++ Redistributable was not installed."
       SetDetailsPrint none
       BringToFront
-      MessageBox MB_RETRYCANCEL|MB_ICONSTOP "Installation failed.$\n$\nComfyUI Desktop requires the Microsoft Visual C++ Redistributable, but the Windows permission prompt was declined.$\n$\nClick Retry to allow it, or Cancel to exit Setup — then re-run the installer and accept the prompt." /SD IDCANCEL IDRETRY vcRedistAttempt
-      # Cancel: exit Setup cleanly with a non-zero error level. Quit (not Abort)
-      # because Abort leaves the hidden-details Install page frozen on the last
-      # status; Quit closes the window, which is what the user just asked for by
-      # clicking "Cancel to exit Setup".
+      MessageBox MB_ABORTRETRYIGNORE|MB_ICONSTOP "Installation failed.$\n$\nComfyUI Desktop requires the Microsoft Visual C++ Redistributable, but the Windows permission prompt was declined.$\n$\nAbort — stop and exit Setup$\nRetry — show the permission prompt again$\nIgnore — install anyway (ComfyUI may not start until you install it)" /SD IDABORT IDRETRY vcRedistAttempt IDIGNORE vcRedistIgnore
+      # Abort button (and the silent-install default): stop and exit Setup.
       SetErrorLevel 2
       Quit
+      vcRedistIgnore:
+      # Ignore: proceed without the redist. The app files are already in place;
+      # just note it and let the section finish.
+      SetDetailsPrint textonly
+      DetailPrint "Skipping Microsoft Visual C++ Redistributable — ComfyUI may not start until it is installed."
+      SetDetailsPrint none
     ${EndIf}
   ${Else}
     SetDetailsPrint textonly
