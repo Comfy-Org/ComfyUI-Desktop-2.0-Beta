@@ -106,6 +106,17 @@ const sharedDirsSections = computed<DetailSection[]>(() => [
   { fields: props.snapshot.sharedDirectoriesFields as unknown as DetailField[] },
 ])
 
+/** Per-install `useSharedPaths` toggle value (defaults to on when the
+ *  field is absent). When off, this install uses only its own local
+ *  paths, so the shared Models / Directories config below is irrelevant
+ *  and gets hidden. */
+const useSharedPathsEnabled = computed<boolean>(() => {
+  const field = props.sections
+    .flatMap((s) => s.fields ?? [])
+    .find((f) => f.id === 'useSharedPaths')
+  return field ? field.value !== false : true
+})
+
 async function handleAddModelsDir(): Promise<void> {
   const picked = await bridge?.globalSettingsBrowseFolder()
   if (!picked) return
@@ -201,29 +212,34 @@ function handleUpdatePerInstallField(field: DetailField, value: unknown): void {
       @update-field="handleUpdatePerInstallField"
     />
 
-    <GlobalSettingsMicroSection
-      :title="t('settings.models', 'Shared Models')"
-      :tooltip="t('tooltips.sharedModels')"
-    >
-      <ModelsDirList
-        :dirs="snapshot.modelsDirs"
-        @open="handleOpenModelsDir"
-        @remove="handleRemoveModelsDir"
-        @make-primary="handleMakePrimary"
-        @add="handleAddModelsDir"
-      />
-    </GlobalSettingsMicroSection>
+    <!-- Shared Models + Shared Directories only apply when this install
+         opts into shared storage. Hide them when the toggle is off so
+         the user isn't configuring paths this install won't use. -->
+    <template v-if="useSharedPathsEnabled">
+      <GlobalSettingsMicroSection
+        :title="t('settings.models', 'Shared Models')"
+        :tooltip="t('tooltips.sharedModels')"
+      >
+        <ModelsDirList
+          :dirs="snapshot.modelsDirs"
+          @open="handleOpenModelsDir"
+          @remove="handleRemoveModelsDir"
+          @make-primary="handleMakePrimary"
+          @add="handleAddModelsDir"
+        />
+      </GlobalSettingsMicroSection>
 
-    <GlobalSettingsMicroSection :title="t('settings.sharedDirectories', 'Shared Directories')">
-      <SettingsSectionList
-        :sections="sharedDirsSections"
-        :installation-id="installation?.id"
-        :running-action-ids="runningActionIds"
-        :pending-restart-field-ids="pendingRestartFieldIds"
-        :field-error-messages="fieldErrorMessages"
-        @update-field="handleUpdateSharedDirField"
-      />
-    </GlobalSettingsMicroSection>
+      <GlobalSettingsMicroSection :title="t('settings.sharedDirectories', 'Shared Directories')">
+        <SettingsSectionList
+          :sections="sharedDirsSections"
+          :installation-id="installation?.id"
+          :running-action-ids="runningActionIds"
+          :pending-restart-field-ids="pendingRestartFieldIds"
+          :field-error-messages="fieldErrorMessages"
+          @update-field="handleUpdateSharedDirField"
+        />
+      </GlobalSettingsMicroSection>
+    </template>
   </div>
 </template>
 
