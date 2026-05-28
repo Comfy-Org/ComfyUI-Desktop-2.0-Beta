@@ -1,5 +1,5 @@
 """
-pygit2-based git operations for ComfyUI Desktop 2.0 Launcher.
+pygit2-based git operations for ComfyUI Desktop Launcher.
 
 Provides git subcommands for standalone installs where system git is not
 available.  Each subcommand prints structured output that the TypeScript

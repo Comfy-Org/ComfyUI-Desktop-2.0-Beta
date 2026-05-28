@@ -56,7 +56,7 @@ const APP_ICON = path.join(__dirname, '..', '..', 'assets', 'Comfy_Logo_x256.png
 const APP_VERSION = getAppVersion()
 
 /** Center pill text for install-less host windows (chooser/dashboard). */
-export const CHOOSER_HOST_TITLE_TEXT = 'Desktop 2.0 Beta'
+export const CHOOSER_HOST_TITLE_TEXT = 'ComfyUI Desktop Beta'
 /** OS-level window title for install-less host windows. */
 export const CHOOSER_HOST_WINDOW_TITLE = `${CHOOSER_HOST_TITLE_TEXT} — v${APP_VERSION}`
 
@@ -115,7 +115,7 @@ const PASSKEY_BANNER_JS =
   `(function(){` +
     `if(document.getElementById('comfy-passkey-banner'))return;` +
     `const b=document.createElement('div');b.id='comfy-passkey-banner';` +
-    `b.textContent='\\u24d8 Passkeys are not supported in Desktop 2.0 on macOS. Please use your password or verification code to sign in.';` +
+    `b.textContent='\\u24d8 Passkeys are not supported in ComfyUI Desktop on macOS. Please use your password or verification code to sign in.';` +
     `document.body.prepend(b);` +
     `document.body.style.paddingTop=(b.offsetHeight)+'px';` +
     `new MutationObserver(function(){` +
@@ -181,7 +181,7 @@ export interface CreateHostWindowOpts {
   titleBarInstallationIdParam: string
   /**
    * Initial title-bar pill label. Install-backed wrappers pass the
-   * install name; chooser hosts pass `'Desktop 2.0 Beta'`. Stored on
+   * install name; chooser hosts pass `'ComfyUI Desktop Beta'`. Stored on
    * `entry.titleBarText` so the unified `title-bar-ready` handshake
    * can re-push it without a per-mode callback.
    */

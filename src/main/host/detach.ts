@@ -312,7 +312,7 @@ export async function confirmAndCloseHostWindow(parentWindow: BrowserWindow): Pr
  *      comfyView is kept alive (not destroyed) so the host can be
  *      re-attached later without rebuilding.
  *   3. Resets the title-bar identity (`titleBarText` →
- *      `'Desktop 2.0 Beta'`, `sourceCategory` → `null`) and pushes
+ *      `'ComfyUI Desktop Beta'`, `sourceCategory` → `null`) and pushes
  *      to the live title-bar.
  *   4. Resets the OS-level window title.
  *   5. Re-paints the title bar to the launcher-theme surface

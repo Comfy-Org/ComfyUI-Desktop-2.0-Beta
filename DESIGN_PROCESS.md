@@ -1,4 +1,4 @@
-# ComfyUI Desktop 2.0 Design Process
+# ComfyUI Desktop Design Process
 
 ## Architecture
 

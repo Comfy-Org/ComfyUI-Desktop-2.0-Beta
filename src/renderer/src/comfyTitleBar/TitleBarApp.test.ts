@@ -325,16 +325,16 @@ describe('TitleBarApp', () => {
   })
 
   it('accepts the install-less fallback label pushed by main', async () => {
-    // Main now pushes `Desktop 2.0 Beta` for install-less host
+    // Main now pushes `ComfyUI Desktop Beta` for install-less host
     // windows in place of the previous `Choose an install` text.
     bridgeState = installMockBridge({ installationId: null })
     vi.resetModules()
     const { default: TitleBarApp } = await import('./TitleBarApp.vue')
     const wrapper = mount(TitleBarApp)
     await flushPromises()
-    bridgeState.titleChangedCallbacks.forEach((cb) => cb('Desktop 2.0 Beta'))
+    bridgeState.titleChangedCallbacks.forEach((cb) => cb('ComfyUI Desktop Beta'))
     await flushPromises()
-    expect(wrapper.find('.title-install-name').text()).toBe('Desktop 2.0 Beta')
+    expect(wrapper.find('.title-install-name').text()).toBe('ComfyUI Desktop Beta')
   })
 
   it('suppresses menu re-open immediately after a menu close (click-to-toggle dismiss)', async () => {

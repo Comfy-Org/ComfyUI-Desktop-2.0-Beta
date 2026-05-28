@@ -1,7 +1,7 @@
 {
   "name": "comfyui-desktop-2",
   "version": "0.6.9",
-  "description": "ComfyUI Desktop 2.0",
+  "description": "ComfyUI Desktop",
   "author": {
     "name": "Jedrzej Kosinski",
     "email": "kosinkadink@users.noreply.github.com"

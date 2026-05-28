@@ -1,5 +1,5 @@
 appId: org.comfy.comfyui-desktop-2
-productName: ComfyUI Desktop 2.0
+productName: ComfyUI Desktop
 directories:
   buildResources: resources
 files:

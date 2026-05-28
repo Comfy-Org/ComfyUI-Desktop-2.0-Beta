@@ -1,4 +1,4 @@
-# ComfyUI Desktop 2.0 -- Windows reset script
+# ComfyUI Desktop -- Windows reset script
 #
 # Wipes app settings, caches, and the Chromium profile for the current build
 # AND for the older beta names (ComfyUI Launcher / comfyui-launcher), in case
@@ -22,6 +22,7 @@ $ErrorActionPreference = 'Stop'
 
 # Refuse to run while the app is open
 $runningNames = @(
+  'ComfyUI Desktop',
   'ComfyUI Desktop 2.0',
   'ComfyUI Launcher',
   'comfyui-desktop-2',
@@ -29,7 +30,7 @@ $runningNames = @(
 )
 $running = Get-Process -Name $runningNames -ErrorAction SilentlyContinue
 if ($running) {
-  Write-Host "ComfyUI Desktop 2.0 / Launcher is running. Please quit it first,"
+  Write-Host "ComfyUI Desktop / Launcher is running. Please quit it first,"
   Write-Host "then re-run this script."
   exit 1
 }
@@ -37,6 +38,7 @@ if ($running) {
 # Every historical app/package name. The userData folder on Windows is named
 # after the productName (or package.json "name") field.
 $appNames = @(
+  'ComfyUI Desktop',
   'ComfyUI Desktop 2.0',
   'ComfyUI Launcher',
   'comfyui-desktop-2',
@@ -59,7 +61,7 @@ foreach ($root in $roots) {
 $existing = @($targets | Where-Object { Test-Path -LiteralPath $_ })
 
 if ($existing.Count -eq 0) {
-  Write-Host "Nothing to remove. No ComfyUI Desktop 2.0 / Launcher data found."
+  Write-Host "Nothing to remove. No ComfyUI Desktop / Launcher data found."
   exit 0
 }
 
@@ -87,6 +89,6 @@ foreach ($t in $existing) {
 }
 
 Write-Host ""
-Write-Host "Done. Reinstall ComfyUI Desktop 2.0 from the latest installer if you"
+Write-Host "Done. Reinstall ComfyUI Desktop from the latest installer if you"
 Write-Host "haven't already, then launch it. The app should come up with a clean"
 Write-Host "profile."
