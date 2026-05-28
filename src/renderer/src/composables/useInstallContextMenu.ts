@@ -5,6 +5,7 @@ import { useProgressStore } from '../stores/progressStore'
 import { useModal } from './useModal'
 import { revealInFolderLabel } from './usePlatform'
 import { progressOpKindForActionId, destroysInstanceForActionId } from '../lib/progressOpKind'
+import { shareLatestSnapshot } from '../lib/snapshots'
 import type { ContextMenuItem } from '../types/context-menu'
 import type { Installation, ShowProgressOpts } from '../types/ipc'
 
@@ -60,6 +61,7 @@ export type InstallMenuActionId =
   | 'migrate'
   | 'restore-snapshot'
   | 'reveal-in-folder'
+  | 'share'
   | 'copy-install'
   | 'untrack'
   | 'delete'
@@ -161,6 +163,14 @@ export function useInstallContextMenu(opts: {
         label: revealInFolderLabel(window.api?.platform),
         separator: items.length > 0,
       })
+    }
+
+    // Share — export the latest snapshot via the OS save dialog. Snapshots
+    // are local-only and captured once the install has booted, so gate on
+    // installed + local. Promotes the per-row Snapshots-tab export to a
+    // top-level action.
+    if (isInstalled(inst) && hasInstallPath(inst) && isLocalLikeInstall(inst)) {
+      items.push({ id: 'share', label: t('actions.share', 'Share') })
     }
 
     // Copy Installation — standalone source only (the `'copy'` action
@@ -269,6 +279,25 @@ export function useInstallContextMenu(opts: {
       opts.onManage?.(inst, { initialTab: 'snapshots' })
     } else if (id === 'reveal-in-folder') {
       await runInstantActionWithAlert(inst, 'open-folder', revealInFolderLabel(window.api?.platform))
+    } else if (id === 'share') {
+      // Share = export the latest snapshot. The export IPC owns its own OS
+      // save dialog; a cancel is a silent no-op. Only surface the genuine
+      // failure cases (no snapshots yet, or a write error).
+      const label = t('actions.share', 'Share')
+      try {
+        const result = await shareLatestSnapshot(inst.id)
+        if (!result.ok) {
+          await modal.alert({
+            title: label,
+            message:
+              result.reason === 'none'
+                ? t('snapshots.noSnapshotsToShare', 'There are no snapshots to share yet.')
+                : result.message ?? t('snapshots.shareFailed', 'Could not share the snapshot.'),
+          })
+        }
+      } catch (err) {
+        await modal.alert({ title: label, message: (err as Error)?.message || String(err) })
+      }
     } else if (id === 'copy-install') {
       // Route through the source-action def by handing the autoAction
       // off to `onManage`. Calling `window.api.runAction(id, 'copy')`

@@ -239,7 +239,7 @@ export const en = {
    *  can only see THIS catalog so missing keys here render as raw
    *  dotted strings ("snapshots.timeHoursAgo" appearing in the UI). */
   snapshots: {
-    saveSnapshot: 'Save snapshot',
+    createSnapshot: 'Create Snapshot',
     restore: 'Restore',
     delete: 'Delete',
     empty: 'No snapshots yet. Snapshots are captured automatically when ComfyUI starts.',

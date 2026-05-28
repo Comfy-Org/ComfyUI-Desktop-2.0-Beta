@@ -2,6 +2,7 @@
 // title-bar / title-popup renderers so the system-modal surface is
 // visually consistent with the rest of ComfyUI Desktop.
 import '../assets/main.css'
+import { loadProprietaryFonts } from '../assets/proprietaryFonts'
 
 import { createApp } from 'vue'
 import SystemModalApp from './SystemModalApp.vue'
@@ -20,4 +21,6 @@ document.documentElement.setAttribute('data-theme', 'dark')
 // No vue-i18n here — main composes localized strings (title / message /
 // button labels) and pushes them with the modal spec, so the renderer
 // stays a dumb display layer.
+loadProprietaryFonts()
+
 createApp(SystemModalApp).mount('#app')

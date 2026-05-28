@@ -1,16 +1,17 @@
 <script setup lang="ts">
-import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Download, GitCompare, RotateCcw, Trash2, Upload } from 'lucide-vue-next'
+import { ChevronDown, Download, RotateCcw, Trash2, Upload } from 'lucide-vue-next'
 import { TID } from '../../../../shared/testIds'
 import { useDialogs } from '../../composables/useDialogs'
 import { useActionGuard } from '../../composables/useActionGuard'
 import { emitTelemetryAction, toCountBucket } from '../../lib/telemetry'
 import {
-  changeSummary as _changeSummary,
   diffHasChanges,
   formatDate,
   formatRelative as _formatRelative,
+  getCachedSnapshotList,
+  setCachedSnapshotList,
   triggerLabel
 } from '../../lib/snapshots'
 import type {
@@ -22,6 +23,7 @@ import type {
 } from '../../types/ipc'
 import SnapshotRow from './SnapshotRow.vue'
 import SnapshotDiffView from '../../components/SnapshotDiffView.vue'
+import BaseAccordion from '../../components/ui/BaseAccordion.vue'
 import { humanizeOpStatus } from '../../lib/progressStatusLabel'
 
 interface ActiveOperation {
@@ -196,7 +198,11 @@ watch(restoreOp, (op, prev) => {
     restoreErrorMessage.value = op.error ?? ''
   }
 })
-onUnmounted(clearRestoreTerminal)
+onUnmounted(() => {
+  clearRestoreTerminal()
+  unsubChanges?.()
+  if (reloadTimer) clearTimeout(reloadTimer)
+})
 
 const showRestoreCard = computed<boolean>(
   () => restoreInFlight.value || restoreTerminal.value !== null
@@ -250,38 +256,83 @@ const latestRelative = computed<string | null>(() => {
   return _formatRelative(iso, t)
 })
 
-async function load(): Promise<void> {
-  loading.value = true
+function autoExpandFirst(): void {
+  if (expandedFilenames.value.size > 0) return
+  const firstSnapshot = timeline.value.find(
+    (item): item is Extract<TimelineItem, { kind: 'snapshot' }> => item.kind === 'snapshot'
+  )
+  if (firstSnapshot) {
+    expandedFilenames.value = new Set([firstSnapshot.snapshot.filename])
+  }
+}
+
+async function load(silent = false): Promise<void> {
+  // `silent` = background refresh (auto-refresh or post-cache-seed): keep the
+  // current list visible (no "Loading…" flash, no auto-expand) while we
+  // refetch in place.
+  if (!silent) loading.value = true
   loadError.value = null
   try {
-    listData.value = await window.api.getSnapshots(props.installationId)
+    const data = await window.api.getSnapshots(props.installationId)
+    listData.value = data
+    // Cache so the next remount of this tab paints instantly (no layout shift).
+    setCachedSnapshotList(props.installationId, data)
   } catch (err: unknown) {
     // Surface IPC rejections — the legacy SnapshotTab swallows these
     // silently and we can't tell "no snapshots" from "load failed".
-    loadError.value = (err as Error)?.message ?? String(err)
-    listData.value = null
+    if (!silent) {
+      loadError.value = (err as Error)?.message ?? String(err)
+      listData.value = null
+    }
     console.error('SnapshotsView.load failed', err)
   } finally {
-    loading.value = false
-    if (expandedFilenames.value.size === 0) {
-      const firstSnapshot = timeline.value.find(
-        (item): item is Extract<TimelineItem, { kind: 'snapshot' }> => item.kind === 'snapshot'
-      )
-      if (firstSnapshot) {
-        expandedFilenames.value = new Set([firstSnapshot.snapshot.filename])
-      }
-    }
+    if (!silent) loading.value = false
+    if (!silent) autoExpandFirst()
   }
 }
+
+// Live refresh: re-load when the snapshot set changes underneath us — e.g.
+// the user installs a custom node and ComfyUI writes a new snapshot while the
+// Snapshots tab is the last-open one. In the drawer this rides
+// `installations-changed`; in the IPP the picker shim maps the same hook onto
+// the picker's snapshot rebroadcast. Debounced so a burst of pushes (op
+// progress) collapses into a single silent reload.
+let unsubChanges: (() => void) | undefined
+let reloadTimer: ReturnType<typeof setTimeout> | null = null
+function scheduleReload(): void {
+  if (reloadTimer) clearTimeout(reloadTimer)
+  reloadTimer = setTimeout(() => {
+    reloadTimer = null
+    void load(true)
+  }, 250)
+}
+onMounted(() => {
+  const onChanged = (
+    window.api as { onInstallationsChanged?: (cb: () => void) => () => void }
+  ).onInstallationsChanged
+  if (typeof onChanged === 'function') {
+    unsubChanges = onChanged(() => scheduleReload())
+  }
+})
 
 // --- Per-row expansion (change summary) ---
 
 const expandedFilenames = ref<Set<string>>(new Set())
-/** Loaded "what changes if I restore this" diffs (current state →
- *  target snapshot), keyed by filename. Presence in the map = panel
- *  is open; null = loaded with no diff returned. */
-const diffByFilename = ref<Map<string, SnapshotDiffData | null>>(new Map())
-const diffLoadingFilename = ref<string | null>(null)
+
+/**
+ * Two diff accordions per expanded snapshot, keyed by `${filename}|${mode}`:
+ *   - `previous` — what changed FROM the previous snapshot TO this one
+ *     (a "release notes" view of the snapshot itself).
+ *   - `current`  — what would change if you RESTORE this snapshot from the
+ *     live install state (the restore preview).
+ * `diffCache` presence = loaded (value may be null/empty); `openDiffs` =
+ * accordion expanded; `diffLoading` = fetch in flight.
+ */
+type DiffMode = 'previous' | 'current'
+const diffCache = ref<Map<string, SnapshotDiffData | null>>(new Map())
+const openDiffs = ref<Set<string>>(new Set())
+const diffLoading = ref<Set<string>>(new Set())
+const dkey = (filename: string, mode: DiffMode): string => `${filename}|${mode}`
 
 function isExpanded(filename: string): boolean {
   return expandedFilenames.value.has(filename)
@@ -297,55 +348,75 @@ function toggleExpand(filename: string): void {
   expandedFilenames.value = next
 }
 
-function isDiffOpen(filename: string): boolean {
-  return diffByFilename.value.has(filename)
+function isDiffOpen(filename: string, mode: DiffMode): boolean {
+  return openDiffs.value.has(dkey(filename, mode))
+}
+function isDiffLoading(filename: string, mode: DiffMode): boolean {
+  return diffLoading.value.has(dkey(filename, mode))
+}
+function diffFor(filename: string, mode: DiffMode): SnapshotDiffData | null | undefined {
+  return diffCache.value.get(dkey(filename, mode))
 }
 
-async function toggleDiff(filename: string): Promise<void> {
-  if (diffByFilename.value.has(filename)) {
-    const next = new Map(diffByFilename.value)
-    next.delete(filename)
-    diffByFilename.value = next
+async function toggleDiff(filename: string, mode: DiffMode): Promise<void> {
+  const key = dkey(filename, mode)
+  if (openDiffs.value.has(key)) {
+    const next = new Set(openDiffs.value)
+    next.delete(key)
+    openDiffs.value = next
     return
   }
-  diffLoadingFilename.value = filename
+  const opened = new Set(openDiffs.value)
+  opened.add(key)
+  openDiffs.value = opened
+  if (diffCache.value.has(key)) return
+  diffLoading.value = new Set(diffLoading.value).add(key)
   try {
-    const d = await window.api.getSnapshotDiff(props.installationId, filename, 'current')
-    const next = new Map(diffByFilename.value)
-    next.set(filename, d)
-    diffByFilename.value = next
+    const d = await window.api.getSnapshotDiff(props.installationId, filename, mode)
+    diffCache.value = new Map(diffCache.value).set(key, d)
     emitTelemetryAction('desktop2.snapshot.flow', {
       action: 'view_diff',
       snapshot_count_bucket: toCountBucket(snapshots.value.length),
       has_diff: d ? diffHasChanges(d.diff) : undefined
     })
   } finally {
-    diffLoadingFilename.value = null
+    const next = new Set(diffLoading.value)
+    next.delete(key)
+    diffLoading.value = next
   }
 }
 
 watch(
   () => props.installationId,
-  () => {
+  (id) => {
     expandedFilenames.value = new Set()
-    diffByFilename.value = new Map()
-    void load()
+    diffCache.value = new Map()
+    openDiffs.value = new Set()
+    diffLoading.value = new Set()
+    const cached = getCachedSnapshotList(id)
+    if (cached) {
+      // Paint the last-known list instantly (no empty-state flash / layout
+      // shift on tab remount), then refresh silently in the background.
+      listData.value = cached
+      loading.value = false
+      loadError.value = null
+      autoExpandFirst()
+      void load(true)
+    } else {
+      void load()
+    }
   },
   { immediate: true }
 )
-
-function changeSummaryFor(s: SnapshotSummary): string[] {
-  return _changeSummary(s, t)
-}
 
 // --- Save ---
 
 async function handleSave(): Promise<void> {
   const label = await dialogs.prompt({
-    title: t('standalone.snapshotSaveTitle'),
-    message: t('standalone.snapshotSaveMessage'),
+    title: t('standalone.snapshotCreateTitle'),
+    message: t('standalone.snapshotCreateMessage'),
     placeholder: t('standalone.snapshotLabelPlaceholder'),
-    confirmLabel: t('snapshots.saveSnapshot'),
+    confirmLabel: t('snapshots.createSnapshot'),
     required: false
   })
   if (label === null) return
@@ -379,13 +450,7 @@ async function handleRestore(filename: string): Promise<void> {
   } catch {
     diff = null
   }
-  const target = snapshots.value.find((s) => s.filename === filename)
-  const summaryLines = target ? _changeSummary(target, t) : []
   const hasChanges = diff ? diffHasChanges(diff.diff) : undefined
-  const messageDetails =
-    summaryLines.length > 0
-      ? [{ label: t('snapshots.willChange', 'Changes when restoring'), items: summaryLines }]
-      : undefined
 
   emitTelemetryAction('desktop2.snapshot.flow', {
     action: 'restore_complete',
@@ -397,6 +462,9 @@ async function handleRestore(filename: string): Promise<void> {
   // `useComfyUISettings.runAction` step 3 augments this existing
   // confirm with the `willStopRunning` warning instead of synthesizing
   // a second one. Single modal whether the install is running or not.
+  // `restoreDiff` renders the same SnapshotDiffView the Snapshots tab uses,
+  // as a collapsible accordion in the confirm (node/pip sections collapse so
+  // a large diff doesn't overflow the modal).
   emit('run-action', {
     id: 'snapshot-restore',
     label: t('standalone.snapshotRestore', 'Restore'),
@@ -408,7 +476,7 @@ async function handleRestore(filename: string): Promise<void> {
     confirm: {
       title: t('snapshots.restoreConfirmTitle'),
       message: t('snapshots.restoreConfirmMessage'),
-      messageDetails,
+      restoreDiff: diff?.diff ?? null,
       confirmLabel: t('standalone.snapshotRestore', 'Restore')
     }
   })
@@ -603,7 +671,7 @@ async function handleImport(): Promise<void> {
     <p v-if="loading" class="snapshots-view-status">{{ t('common.loading', 'Loading…') }}</p>
     <div v-else-if="loadError" class="snapshots-view-status is-error">
       <p>{{ loadError }}</p>
-      <button type="button" class="snapshots-view-toolbtn" @click="load">
+      <button type="button" class="snapshots-view-toolbtn" @click="load()">
         {{ t('common.retry', 'Retry') }}
       </button>
     </div>
@@ -639,7 +707,7 @@ async function handleImport(): Promise<void> {
             <template v-if="restoreInFlight">{{ t('snapshots.restoringStatus', 'Restoring snapshot') }}</template>
             <template v-else-if="restoreTerminal === 'ok'">{{ t('snapshots.restored', 'Snapshot restored') }}</template>
             <template v-else-if="restoreTerminal === 'error'">{{ t('snapshots.restoreFailed', 'Restore failed') }}</template>
-            <template v-else>{{ t('snapshots.saveLabel', 'Save Snapshot') }}</template>
+            <template v-else>{{ t('snapshots.createLabel', 'Create Snapshot') }}</template>
           </span>
           <div
             class="snapshots-rail-save-box"
@@ -741,10 +809,10 @@ async function handleImport(): Promise<void> {
               v-else
               type="button"
               class="snapshots-rail-cta"
-              :aria-label="t('snapshots.saveSnapshot', 'Save Snapshot')"
+              :aria-label="t('snapshots.createSnapshot', 'Create Snapshot')"
               @click="handleSave"
             >
-              <span>{{ t('snapshots.saveNew', 'Save New Snapshot') }}</span>
+              <span>{{ t('snapshots.createNew', 'Create Snapshot') }}</span>
             </button>
           </div>
         </div>
@@ -776,6 +844,7 @@ async function handleImport(): Promise<void> {
               :snapshot="item.snapshot"
               :expanded="isExpanded(item.snapshot.filename)"
               :is-latest="i === 0"
+              :previous-comfyui-version="snapshots[item.snapshotIndex + 1]?.comfyuiVersion"
               :toggle-test-id="TID.snapshotRow(item.snapshot.filename)"
               @toggle="toggleExpand(item.snapshot.filename)"
             >
@@ -783,54 +852,90 @@ async function handleImport(): Promise<void> {
                 <p v-if="item.snapshot.label" class="snapshots-view-label">
                   {{ item.snapshot.label }}
                 </p>
-                <ul
-                  v-if="changeSummaryFor(item.snapshot).length > 0"
-                  class="snapshots-view-changes"
-                >
-                  <li v-for="line in changeSummaryFor(item.snapshot)" :key="line">{{ line }}</li>
-                </ul>
-                <p v-else class="snapshots-view-no-changes">
-                  {{ t('snapshots.noChangesSinceLast', 'No changes since the previous snapshot.') }}
-                </p>
-                <!-- Inline diff panel (parity with legacy SnapshotInspector
-                     "Changes from previous" toggle). Reuses SnapshotDiffView
-                     verbatim — no design changes from the per-install legacy. -->
-                <div v-if="isDiffOpen(item.snapshot.filename)" class="snapshots-view-diff">
-                  <template v-if="diffByFilename.get(item.snapshot.filename)">
-                    <div
-                      v-if="!diffHasChanges(diffByFilename.get(item.snapshot.filename)!.diff)"
-                      class="snapshots-view-diff-empty"
-                    >
-                      {{ t('snapshots.diffNoChanges', 'No changes') }}
+
+                <!-- Diff accordion A — "release notes": what changed FROM the
+                     previous snapshot TO this one. Lazy-loads the `previous`
+                     diff on first open. Hidden for the oldest snapshot (no
+                     predecessor to compare against). -->
+                <div v-if="i < timeline.length - 1" class="snap-diff-accordion">
+                  <button
+                    type="button"
+                    class="snap-diff-trigger"
+                    :class="{ 'is-open': isDiffOpen(item.snapshot.filename, 'previous') }"
+                    :aria-expanded="isDiffOpen(item.snapshot.filename, 'previous')"
+                    @click="toggleDiff(item.snapshot.filename, 'previous')"
+                  >
+                    <ChevronDown :size="13" class="snap-diff-chevron" />
+                    <span>{{ t('snapshots.changesInSnapshot', 'What changed in this snapshot') }}</span>
+                  </button>
+                  <BaseAccordion :open="isDiffOpen(item.snapshot.filename, 'previous')">
+                    <div class="snapshots-view-diff">
+                      <div
+                        v-if="isDiffLoading(item.snapshot.filename, 'previous')"
+                        class="snapshots-view-diff-loading"
+                      >
+                        {{ t('common.loading', 'Loading…') }}
+                      </div>
+                      <template v-else-if="diffFor(item.snapshot.filename, 'previous') !== undefined">
+                        <div
+                          v-if="!diffFor(item.snapshot.filename, 'previous') || !diffHasChanges(diffFor(item.snapshot.filename, 'previous')!.diff)"
+                          class="snapshots-view-diff-empty"
+                        >
+                          {{ t('snapshots.diffNoChanges', 'No changes from the previous snapshot.') }}
+                        </div>
+                        <SnapshotDiffView
+                          v-else
+                          :diff="diffFor(item.snapshot.filename, 'previous')!.diff"
+                        />
+                      </template>
                     </div>
-                    <SnapshotDiffView
-                      v-else
-                      :diff="diffByFilename.get(item.snapshot.filename)!.diff"
-                    />
-                  </template>
+                  </BaseAccordion>
                 </div>
-                <div
-                  v-else-if="diffLoadingFilename === item.snapshot.filename"
-                  class="snapshots-view-diff-loading"
-                >
-                  {{ t('common.loading', 'Loading…') }}
+
+                <!-- Diff accordion B — "restore preview": what would change if
+                     you restore THIS snapshot from the live install state.
+                     Lazy-loads the `current` diff. Hidden for the current
+                     (newest) snapshot — restoring it is a no-op. -->
+                <div v-if="i !== 0" class="snap-diff-accordion">
+                  <button
+                    type="button"
+                    class="snap-diff-trigger"
+                    :class="{ 'is-open': isDiffOpen(item.snapshot.filename, 'current') }"
+                    :aria-expanded="isDiffOpen(item.snapshot.filename, 'current')"
+                    @click="toggleDiff(item.snapshot.filename, 'current')"
+                  >
+                    <ChevronDown :size="13" class="snap-diff-chevron" />
+                    <span>{{ t('snapshots.ifYouRestore', 'What restoring this would change') }}</span>
+                  </button>
+                  <BaseAccordion :open="isDiffOpen(item.snapshot.filename, 'current')">
+                    <div class="snapshots-view-diff">
+                      <div
+                        v-if="isDiffLoading(item.snapshot.filename, 'current')"
+                        class="snapshots-view-diff-loading"
+                      >
+                        {{ t('common.loading', 'Loading…') }}
+                      </div>
+                      <template v-else-if="diffFor(item.snapshot.filename, 'current') !== undefined">
+                        <div
+                          v-if="!diffFor(item.snapshot.filename, 'current') || !diffHasChanges(diffFor(item.snapshot.filename, 'current')!.diff)"
+                          class="snapshots-view-diff-empty"
+                        >
+                          {{ t('snapshots.restoreNoChanges', 'Restoring this would make no changes — it matches your current state.') }}
+                        </div>
+                        <SnapshotDiffView
+                          v-else
+                          :diff="diffFor(item.snapshot.filename, 'current')!.diff"
+                        />
+                      </template>
+                    </div>
+                  </BaseAccordion>
                 </div>
+
                 <!-- Actions live in the expanded detail (per Figma): the
                      collapsed row stays a clean tap target, and the
                      destructive / mutating ops only surface once the
                      user has expressed intent by expanding the row. -->
                 <div class="snapshots-view-detail-actions">
-                  <button
-                    v-if="i !== 0"
-                    type="button"
-                    class="snapshots-view-detail-btn"
-                    :class="{ 'is-active': isDiffOpen(item.snapshot.filename) }"
-                    :aria-label="t('snapshots.seeWhatChanges', 'See what changes')"
-                    @click="toggleDiff(item.snapshot.filename)"
-                  >
-                    <GitCompare :size="13" />
-                    <span>{{ t('snapshots.seeWhatChanges', 'See what changes') }}</span>
-                  </button>
                   <button
                     v-if="i !== 0"
                     type="button"
@@ -1187,9 +1292,44 @@ async function handleImport(): Promise<void> {
 
 .snapshots-view-diff-loading {
   padding: 8px 12px;
-  margin-top: 8px;
   font-size: var(--takeover-fs-caption);
   color: var(--text-muted);
+}
+
+/* Diff accordions (release-notes + restore-preview). Trigger is a flat
+ * text+chevron row; the panel reuses `.snapshots-view-diff` chrome. */
+.snap-diff-accordion {
+  display: flex;
+  flex-direction: column;
+  margin-top: 8px;
+}
+.snap-diff-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  padding: 2px 4px 2px 0;
+  background: transparent;
+  border: none;
+  color: var(--neutral-100);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.snap-diff-trigger:hover,
+.snap-diff-trigger:focus-visible {
+  color: var(--text);
+  outline: none;
+}
+.snap-diff-chevron {
+  color: var(--text-muted);
+  transition: transform 180ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+.snap-diff-trigger.is-open .snap-diff-chevron {
+  transform: rotate(180deg);
+}
+.snap-diff-accordion .snapshots-view-diff {
+  margin-top: 6px;
 }
 
 .snapshots-view-label {
@@ -1294,7 +1434,17 @@ async function handleImport(): Promise<void> {
   margin: 0;
   font-size: var(--takeover-fs-caption);
   color: var(--danger, #ef4444);
+  /* Preserve the action's `headline\n\n<detail lines>` so a failed restore
+   * shows WHY it failed (which node / package / git error), not just a
+   * one-liner. Cap height + scroll so a long failure list doesn't push the
+   * Retry / Dismiss actions off-screen. */
+  white-space: pre-wrap;
   word-break: break-word;
+  max-height: 168px;
+  overflow-y: auto;
+  text-align: left;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  line-height: 1.45;
 }
 .snapshots-op-actions {
   display: flex;

@@ -2,6 +2,7 @@
 // --text-muted, etc.) as the launcher / panel / title-bar renderers so the
 // tooltip is visually consistent with the rest of ComfyUI Desktop.
 import '../assets/main.css'
+import { loadProprietaryFonts } from '../assets/proprietaryFonts'
 
 import { createApp } from 'vue'
 import TitleTooltipApp from './TitleTooltipApp.vue'
@@ -16,5 +17,7 @@ import TitleTooltipApp from './TitleTooltipApp.vue'
 // from the theme passed in by main, but `data-theme` still drives any
 // fallback CSS variables that haven't been overridden.
 document.documentElement.setAttribute('data-theme', 'dark')
+
+loadProprietaryFonts()
 
 createApp(TitleTooltipApp).mount('#app')
