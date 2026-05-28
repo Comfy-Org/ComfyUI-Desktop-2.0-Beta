@@ -29,31 +29,12 @@
   ${EndIf}
 !macroend
 
-# TEMPORARY debug logging for the VC++/UAC flow — appends a line to
-# %TEMP%\comfyui-desktop-vcredist.log. Uses $R9 locally so it disturbs neither
-# the caller's registers nor the error flag the macro relies on. Remove before
-# merging to production.
-!macro VcLog _text
-  Push $R9
-  ClearErrors
-  FileOpen $R9 "$TEMP\comfyui-desktop-vcredist.log" a
-  ${IfNot} ${Errors}
-    FileWrite $R9 "${_text}$\r$\n"
-    FileClose $R9
-  ${EndIf}
-  Pop $R9
-!macroend
-
 !macro installVcRedist
   # Push/Pop preserves caller registers — defensive in case electron-builder's
   # generated wrapper relies on these across our customInstall hook.
-  Push $0
   Push $1
   Push $2
   Push $R8
-
-  Delete "$TEMP\comfyui-desktop-vcredist.log"
-  !insertmacro VcLog "=== installVcRedist start ==="
 
   # Discover whether a same-or-newer v14 redist is already installed and skip
   # the multi-minute install in that case. Microsoft documents this exact
@@ -82,7 +63,6 @@
   ${Else}
     ${VersionCompare} "$1" "${VC_REDIST_VERSION}" $2
   ${EndIf}
-  !insertmacro VcLog "detect: installedVersion='$1' bundled='${VC_REDIST_VERSION}' compare=$2 (2 => needs install)"
 
   ${If} $2 == 2
     # electron-builder calls SetDetailsPrint none for interactive installs,
@@ -99,24 +79,19 @@
     # UAC consent dialog to our window so it foregrounds instead of only
     # flashing in the taskbar. installVcRedist is inserted exactly once, so the
     # labels below cannot collide.
-    StrCpy $0 0
-
     vcRedistAttempt:
-    IntOp $0 $0 + 1
-    !insertmacro VcLog "attempt $0: launching vc_redist.x64.exe (ShellExecuteEx runas)"
     BringToFront
     ClearErrors
     ExecShellWait "runas" "$PLUGINSDIR\vc_redist.x64.exe" "/install /quiet /norestart"
-    # Capture the error flag into $R8 immediately — before any file/log op can
-    # clobber it. ERR = ShellExecuteEx failed to launch/elevate (e.g. the user
-    # declined the UAC prompt). A redist that launches and exits with any code
-    # (incl. 1638 already-installed / 3010 reboot-required) leaves no error.
+    # Capture the error flag into $R8 immediately. ERR = ShellExecuteEx failed
+    # to launch/elevate (e.g. the user declined the UAC prompt). A redist that
+    # launches and exits with any code (incl. 1638 already-installed / 3010
+    # reboot-required) leaves no error.
     StrCpy $R8 "ok"
     ${If} ${Errors}
       StrCpy $R8 "ERR"
     ${EndIf}
     BringToFront
-    !insertmacro VcLog "attempt $0: ExecShellWait result=$R8"
 
     ${If} $R8 == "ERR"
       SetDetailsPrint textonly
@@ -129,15 +104,12 @@
       #   Ignore -> jump past, install without the redist
       #   Abort  -> fall through to Quit (also the silent-install default)
       MessageBox MB_ABORTRETRYIGNORE|MB_ICONEXCLAMATION "ComfyUI Desktop needs the Microsoft Visual C++ Redistributable. Installing it requires Windows permission, and that prompt was declined.$\n$\nRetry — show the permission prompt again (recommended)$\nIgnore — install ComfyUI anyway (it may not start until the Redistributable is installed)$\nAbort — stop and exit Setup" /SD IDABORT IDRETRY vcRedistAttempt IDIGNORE vcRedistIgnore
-      !insertmacro VcLog "attempt $0: user chose ABORT — exiting Setup"
       SetErrorLevel 2
       Quit
     ${EndIf}
 
-    !insertmacro VcLog "attempt $0: VC++ install step succeeded"
     Goto vcRedistDone
     vcRedistIgnore:
-    !insertmacro VcLog "attempt $0: user chose IGNORE — continuing without VC++"
     SetDetailsPrint textonly
     DetailPrint "Skipping Microsoft Visual C++ Redistributable — ComfyUI may not start until it is installed."
     SetDetailsPrint none
@@ -151,7 +123,6 @@
   Pop $R8
   Pop $2
   Pop $1
-  Pop $0
 !macroend
 
 !macro customInstall
