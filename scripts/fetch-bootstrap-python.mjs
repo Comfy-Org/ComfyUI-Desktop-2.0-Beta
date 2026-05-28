@@ -29,7 +29,7 @@ import { pipeline } from 'node:stream/promises'
 import { Readable } from 'node:stream'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { execSync } from 'node:child_process'
+import * as tar from 'tar'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const projectRoot = path.resolve(__dirname, '..')
@@ -104,12 +104,17 @@ async function downloadAndExtract(url, destDir) {
     throw new Error(`Download failed: ${response.status} ${response.statusText}`)
   }
 
-  // Save to temp file first, then extract with tar
+  // Save to temp file first, then extract with the Node `tar` package.
+  // The previous shell-out to `tar -xzf` broke on todesktop's Windows
+  // builder: its GNU tar parsed the tmpFile's "C:" drive letter as a
+  // remote SSH host ("Cannot connect to C: resolve failed"). Node `tar`
+  // handles Windows paths natively and removes the dependency on whatever
+  // tar binary happens to be in PATH on the build machine.
   fs.mkdirSync(path.dirname(destDir), { recursive: true })
   const tmpFile = `${destDir}.tar.gz`
   try {
     await pipeline(Readable.fromWeb(response.body), fs.createWriteStream(tmpFile))
-    execSync(`tar -xzf "${tmpFile}" -C "${path.dirname(destDir)}"`, { stdio: 'inherit' })
+    await tar.x({ file: tmpFile, cwd: path.dirname(destDir) })
   } finally {
     if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile)
   }
