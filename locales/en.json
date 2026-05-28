@@ -975,6 +975,8 @@
   },
 
   "tooltips": {
+    "instances": "A separate ComfyUI installation with its own version, models, and settings.",
+    "snapshots": "A saved point-in-time state of an installation (versions + custom nodes) you can restore later.",
     "standalone": "A self-contained install with its own bundled Python and dependencies. Easy to update and manage.",
     "portable": "The official portable Windows build with embedded Python. Runs from a single folder without a system-wide install.",
     "git": "A git-based install cloned from the ComfyUI repository. Requires git and Python to be installed on your system.",

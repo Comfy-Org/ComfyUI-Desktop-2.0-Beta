@@ -273,6 +273,10 @@ interface TabDef {
   sectionTab: SectionTab
   label: string
   icon: typeof SlidersHorizontal
+  /** Optional richer hover copy for the tab strip. Most tabs just echo
+   *  their label; concept-heavy tabs (e.g. Snapshots) explain the term
+   *  to new users instead. Falls back to `label` when unset. */
+  tooltip?: string
 }
 
 const ALL_TABS: TabDef[] = [
@@ -292,7 +296,8 @@ const ALL_TABS: TabDef[] = [
     key: 'snapshots',
     sectionTab: 'snapshots',
     label: t('comfyUISettings.tabSnapshots', 'Snapshots'),
-    icon: History
+    icon: History,
+    tooltip: t('tooltips.snapshots')
   },
   {
     key: 'storage',
@@ -606,7 +611,7 @@ defineExpose({
       <Tooltip
         v-for="(tab, i) in tabs"
         :key="tab.key"
-        :text="tab.label"
+        :text="tab.tooltip ?? tab.label"
         side="bottom"
       >
         <button

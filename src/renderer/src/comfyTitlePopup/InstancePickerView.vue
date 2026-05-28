@@ -6,6 +6,7 @@ import BaseInput from '../components/ui/BaseInput.vue'
 import { FILTER_CHIPS, useInstallList } from '../composables/useInstallList'
 import { useSessionStore } from '../stores/sessionStore'
 import ComfyUISettingsContent from '../components/settings/ComfyUISettingsContent.vue'
+import InfoTooltip from '../components/InfoTooltip.vue'
 import InstanceRow from './instancePicker/InstanceRow.vue'
 import { resolvePickerTab, type PickerTab } from '../lib/pickerTabs'
 import { resolveProgressRouting } from '../lib/pickerProgressRouting'
@@ -550,7 +551,7 @@ function handleExpandedPrimaryAction(running: boolean): void {
     <div class="picker-body">
       <div class="picker-left">
         <div class="picker-list-section">
-          <div class="picker-list-section-title">{{ $t('instancePicker.instances') }}</div>
+          <div class="picker-list-section-title">{{ $t('instancePicker.instances') }}<InfoTooltip :text="$t('tooltips.instances')" side="bottom" /></div>
 
           <div class="picker-list" role="listbox">
             <InstanceRow

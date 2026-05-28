@@ -638,6 +638,8 @@
   },
 
   "tooltips": {
+    "instances": "一个独立的 ComfyUI 安装，拥有各自的版本、模型和设置。",
+    "snapshots": "已保存的安装时间点状态（版本 + 自定义节点），可随时恢复。",
     "updateNow": "就地更新此安装。",
     "copyAndUpdate": "复制此安装并更新副本。原始安装保持不变。"
   }

@@ -63,6 +63,10 @@ export const en = {
     moreActions: 'More actions'
   },
   tooltips: {
+    instances:
+      'A separate ComfyUI installation with its own version, models, and settings.',
+    snapshots:
+      'A saved point-in-time state of an installation (versions + custom nodes) you can restore later.',
     sharedModels:
       "Folders shared across all installations so models aren't downloaded twice. Newly downloaded models go to the primary folder. The system default folder is always kept and can't be removed, and the primary folder can't be removed while it's in use — pick a different primary first.",
     modelsPrimary:

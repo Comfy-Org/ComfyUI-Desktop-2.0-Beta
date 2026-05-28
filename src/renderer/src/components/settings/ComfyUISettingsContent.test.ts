@@ -34,6 +34,10 @@ const messages = {
       relaunch: 'Relaunch',
       more: 'More',
     },
+    tooltips: {
+      snapshots:
+        'A saved point-in-time state of an installation (versions + custom nodes) you can restore later.',
+    },
     instancePicker: {
       open: 'Open',
       restart: 'Restart',
