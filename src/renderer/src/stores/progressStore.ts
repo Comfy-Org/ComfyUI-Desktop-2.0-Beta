@@ -118,6 +118,10 @@ export const useProgressStore = defineStore('progress', () => {
       installation_id: installationId,
       action_id: op.actionId ?? null,
       op_kind: op.opKind,
+      // Panel/drawer/dashboard ops route through this store; picker-
+      // initiated ops emit their own op.result main-side tagged
+      // `source: 'picker'`. Lets the dashboard split the two surfaces.
+      source: 'panel',
       result,
       duration_ms: Date.now() - op._startedAtMs,
       ...(result === 'failed' && op.error ? { error_bucket: toErrorBucket(op.error) } : {})

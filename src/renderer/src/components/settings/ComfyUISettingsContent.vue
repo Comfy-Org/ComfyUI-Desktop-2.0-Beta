@@ -13,7 +13,7 @@ import SettingsSectionList from '../../views/comfyUISettings/SettingsSectionList
 import StoragePane, { type StorageSnapshot } from '../../views/comfyUISettings/StoragePane.vue'
 import Tooltip from '../ui/Tooltip.vue'
 import type { PickerTab, SectionTab } from '../../lib/pickerTabs'
-import { humanizeOpStatus } from '../../lib/progressStatusLabel'
+import { humanizeOpStatus, operationInflightLabel, operationSuccessLabel } from '../../lib/progressStatusLabel'
 import type { ActionDef, DetailField, Installation, ShowProgressOpts } from '../../types/ipc'
 import { TID } from '../../../../shared/testIds'
 
@@ -505,23 +505,15 @@ const opStatusLabel = computed(() => {
   return humanizeOpStatus(op.status, t)
 })
 
-const opIsDowngrade = computed(
-  () => props.activeOperation?.actionId === 'update-comfyui'
-    && (props.activeOperation.actionData as { isDowngrade?: boolean } | undefined)?.isDowngrade === true
-)
-
 const opTitleLabel = computed(() => {
-  if (!props.activeOperation) return ''
-  return opIsDowngrade.value
-    ? t('instancePicker.progressDowngrading')
-    : t('instancePicker.progressUpdating')
+  const op = props.activeOperation
+  return op ? operationInflightLabel(op, t) : ''
 })
 
-const opSuccessLabel = computed(() =>
-  opIsDowngrade.value
-    ? t('instancePicker.progressDowngraded')
-    : t('instancePicker.progressSuccessStopped')
-)
+const opSuccessLabel = computed(() => {
+  const op = props.activeOperation
+  return op ? operationSuccessLabel(op, t) : ''
+})
 
 // Network speed label — only shown when a real speed value exists.
 function formatSpeed(bps: number): string {
@@ -534,10 +526,16 @@ const opSpeedLabel = computed(() => {
   return (spd != null && spd > 0) ? formatSpeed(spd) : null
 })
 
-// Show overlay when Update tab is active AND op is present.
-const showOpOverlay = computed(
-  () => activeTab.value === 'update' && props.activeOperation != null
-)
+// Show overlay whenever an op is present, except when the Snapshots
+// tab is active and the op is a snapshot-restore — that case has its
+// own richer timeline rail inside SnapshotsView, so the generic overlay
+// would double up.
+const showOpOverlay = computed(() => {
+  const op = props.activeOperation
+  if (!op) return false
+  if (op.actionId === 'snapshot-restore' && activeTab.value === 'snapshots') return false
+  return true
+})
 
 // Block footer while in-flight.
 const opBlocksFooter = computed(() => opInflight.value)

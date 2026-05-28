@@ -42,6 +42,17 @@ const messages = {
       progressSuccessStopped: 'Update complete',
       progressSuccessRunning: 'Updated & relaunched',
       progressDowngraded: 'Downgrade complete',
+      progressCopying: 'Copying…',
+      progressCopied: 'Copy complete',
+      progressCopyingUpdating: 'Copying & updating…',
+      progressCopiedUpdated: 'Copy complete',
+      progressDeleting: 'Deleting…',
+      progressDeleted: 'Deleted',
+      progressRestoring: 'Restoring snapshot…',
+      progressRestored: 'Snapshot restored',
+      progressMigrating: 'Migrating…',
+      progressMigrated: 'Migration complete',
+      progressDone: 'Done',
       progressCancel: 'Cancel',
       progressRetry: 'Try Again',
       progressDismiss: 'Dismiss',
@@ -208,7 +219,7 @@ describe('ComfyUISettingsContent', () => {
   })
 
   describe('overlay routing', () => {
-    it('does NOT render the update overlay for snapshot-restore on the snapshots tab', async () => {
+    it('does NOT render the overlay for snapshot-restore on the snapshots tab', async () => {
       const w = await mountContent({
         initialTab: 'snapshots',
         activeOperation: {
@@ -218,10 +229,69 @@ describe('ComfyUISettingsContent', () => {
           percent: 30, status: 'Loading snapshot…', cancellable: true, title: '',
         },
       })
-      // Update tab's `.op-overlay` is gated to activeTab='update'. On the
-      // snapshots tab, even a snapshot-restore op must NOT render it —
-      // the per-tab SnapshotsView owns its own card.
+      // Snapshot-restore on the snapshots tab is rendered by
+      // SnapshotsView's own timeline rail — the generic overlay must
+      // stay hidden to avoid double-rendering progress UI.
       expect(w.find('.op-overlay').exists()).toBe(false)
+    })
+
+    it('renders the overlay for snapshot-restore on a NON-snapshots tab', async () => {
+      const w = await mountContent({
+        initialTab: 'update',
+        activeOperation: {
+          actionId: 'snapshot-restore',
+          actionData: { file: 'snap-1.json' },
+          done: false, ok: null, error: null,
+          percent: 30, status: 'Loading snapshot…', cancellable: true, title: '',
+        },
+      })
+      expect(w.find('.op-overlay').exists()).toBe(true)
+      expect(w.find('.op-title').text()).toBe('Restoring snapshot…')
+    })
+
+    it('renders the overlay on the Update tab when a copy op is in flight', async () => {
+      // Copy is initiated from the picker's Update tab, so this is the
+      // common case. Pre-fix, only `update-comfyui` would have rendered
+      // a meaningful label here; we now show "Copying…".
+      const w = await mountContent({
+        initialTab: 'update',
+        activeOperation: {
+          actionId: 'copy', actionData: {},
+          done: false, ok: null, error: null,
+          percent: 30, status: '', cancellable: true, title: '',
+        },
+      })
+      expect(w.find('.op-overlay').exists()).toBe(true)
+      expect(w.find('.op-title').text()).toBe('Copying…')
+    })
+  })
+
+  describe('overlay title — per-action labels', () => {
+    it.each([
+      ['copy',                  { actionData: {} }, 'Copying…',           'Copy complete'],
+      ['copy-update',           { actionData: {} }, 'Copying & updating…', 'Copy complete'],
+      ['delete',                { actionData: {} }, 'Deleting…',          'Deleted'],
+      ['release-update',        { actionData: {} }, 'Updating…',          'Update complete'],
+      ['snapshot-restore',      { actionData: {} }, 'Restoring snapshot…', 'Snapshot restored'],
+      ['migrate-to-standalone', { actionData: {} }, 'Migrating…',         'Migration complete'],
+    ])('actionId=%s → in-flight %s / success %s', async (actionId, extras, inflight, success) => {
+      const wIn = await mountContent({
+        activeOperation: {
+          actionId, ...extras,
+          done: false, ok: null, error: null,
+          percent: 30, status: '', cancellable: false, title: '',
+        },
+      })
+      expect(wIn.find('.op-title').text()).toBe(inflight)
+
+      const wDone = await mountContent({
+        activeOperation: {
+          actionId, ...extras,
+          done: true, ok: true, error: null,
+          percent: 100, status: 'Complete', cancellable: false, title: '',
+        },
+      })
+      expect(wDone.find('.op-title').text()).toBe(success)
     })
   })
 

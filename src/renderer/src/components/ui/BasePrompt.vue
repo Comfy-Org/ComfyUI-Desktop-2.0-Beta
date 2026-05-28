@@ -2,6 +2,7 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import BaseModal from './BaseModal.vue'
 import { linkify, handleModalLinkClick } from '../../lib/modalLinkify'
+import { TID } from '../../../../shared/testIds'
 import type { ModalDetailGroup } from '../../types/ipc'
 
 /**
@@ -152,7 +153,7 @@ watch(
           type="text"
           class="base-prompt-input"
           :placeholder="placeholder"
-          :data-testid="testIdInput ?? 'base-prompt-input'"
+          :data-testid="testIdInput ?? TID.basePromptInput"
           @keydown.enter.prevent.stop="submit"
         />
         <div v-if="error" class="base-prompt-error">{{ error }}</div>
@@ -162,7 +163,7 @@ watch(
     <template #footer>
       <button
         type="button"
-        :data-testid="testIdCancel ?? 'base-prompt-cancel'"
+        :data-testid="testIdCancel ?? TID.basePromptCancel"
         @click="cancel"
       >
         {{ cancelLabel ?? $t('common.cancel') }}
@@ -170,7 +171,7 @@ watch(
       <button
         type="button"
         class="primary"
-        :data-testid="testIdAction ?? 'base-prompt-action'"
+        :data-testid="testIdAction ?? TID.basePromptAction"
         @click="submit"
       >
         {{ confirmLabel ?? $t('modal.ok') }}

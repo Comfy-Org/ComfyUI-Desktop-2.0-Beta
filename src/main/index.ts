@@ -51,6 +51,7 @@ import {
   _activeOperationStatus,
   stopRunning,
   resolveTheme,
+  MSG_CANCELLED,
   type PickerOperationStatus
 } from './lib/ipc/shared'
 import { enrichInstallationsForRenderer } from './lib/ipc/registerInstallationHandlers'
@@ -90,7 +91,7 @@ import {
 } from './host/createHostWindow'
 import { attachInstall, setAttachFactories } from './host/attach'
 import { IN_PLACE_RELAUNCH, REQUIRES_STOPPED } from '../types/ipc'
-import { handleDelegateToSource, handleLaunch } from './lib/ipc/sessionActions'
+import { dispatchSessionAction, handleLaunch } from './lib/ipc/sessionActions'
 import { applyAttachHostPreview, clearAttachHostPreview } from './host/attachHostPreview'
 import {
   _detachInstallImpl,
@@ -832,21 +833,24 @@ ipcMain.handle('open-install-window', (_event, installationId: string) => {
   return true
 })
 
-ipcMain.handle('close-comfy-window', (_event, installationId: string, opts?: { skipConfirm?: boolean }) => {
-  const entry = getEntryByInstallationId(installationId)
-  if (!entry || entry.window.isDestroyed()) return false
-  // Caller has already confirmed (e.g. launch-guard "Close Running & Launch")
-  // — skip the panel-renderer quit-confirm consult so the user isn't
-  // prompted twice. The IPC returns synchronously rather than waiting on
-  // 'closed': a concurrent close handler with an indefinitely-pending
-  // user prompt would otherwise block this call. Callers that need a
-  // port-free guarantee before relaunching should `stopComfyUI` first;
-  // the close handler's `_installCleanup` re-invokes `ipc.stopRunning`
-  // (idempotent) on top of that.
-  if (opts?.skipConfirm) preClearedClose.add(entry.window)
-  entry.window.close()
-  return true
-})
+ipcMain.handle(
+  'close-comfy-window',
+  (_event, installationId: string, opts?: { skipConfirm?: boolean }) => {
+    const entry = getEntryByInstallationId(installationId)
+    if (!entry || entry.window.isDestroyed()) return false
+    // Caller has already confirmed (e.g. launch-guard "Close Running & Launch")
+    // — skip the panel-renderer quit-confirm consult so the user isn't
+    // prompted twice. The IPC returns synchronously rather than waiting on
+    // 'closed': a concurrent close handler with an indefinitely-pending
+    // user prompt would otherwise block this call. Callers that need a
+    // port-free guarantee before relaunching should `stopComfyUI` first;
+    // the close handler's `_installCleanup` re-invokes `ipc.stopRunning`
+    // (idempotent) on top of that.
+    if (opts?.skipConfirm) preClearedClose.add(entry.window)
+    entry.window.close()
+    return true
+  }
+)
 
 /**
  * Close the host window that contains the calling panel WebContents.
@@ -1281,6 +1285,34 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
             return
           }
 
+          // Picker-initiated multi-instance op telemetry. The picker runs
+          // ops inline (PickerInlineProgress) rather than handing off to the
+          // panel ProgressModal, so neither `action.invoked` nor `op.result`
+          // fires from the renderer for this path. Emit both here, tagged
+          // `source: 'picker'`, symmetric with the panel path (which emits
+          // action.invoked from the drawer + op.result from progressStore).
+          const opStartMs = Date.now()
+          mainTelemetry.capture('desktop2.action.invoked', {
+            action_id: actionId,
+            installation_id: installationId,
+            source: 'picker'
+          })
+          const emitPickerOpResult = (
+            opResult: 'success' | 'failed' | 'cancelled_user',
+            errorMessage?: string | null
+          ): void => {
+            mainTelemetry.emit('desktop2.op.result', {
+              installation_id: installationId,
+              action_id: actionId,
+              source: 'picker',
+              result: opResult,
+              duration_ms: Date.now() - opStartMs,
+              ...(opResult === 'failed' && errorMessage
+                ? { error_bucket: mainTelemetry.bucketError(errorMessage) }
+                : {})
+            })
+          }
+
           // Stop the session if needed (REQUIRES_STOPPED).
           const wasRunning = _runningSessions.has(installationId)
           if (REQUIRES_STOPPED.has(actionId) && wasRunning) {
@@ -1311,6 +1343,7 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
                 actionData
               })
               triggerPickerSnapshotBroadcast()
+              emitPickerOpResult('failed', (err as Error).message ?? 'Stop failed.')
               return
             }
           }
@@ -1368,7 +1401,7 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
 
           let result: PickerOperationStatus
           try {
-            const actionResult = await handleDelegateToSource(
+            const actionResult = await dispatchSessionAction(
               { event: stubEvent, installationId, inst, actionData },
               actionId
             )
@@ -1383,16 +1416,34 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
                 actionData: undefined
               })
             }
+            // `actionResult.cancelled === true` is the user-cancel
+            // signal from handlers that route through
+            // `withAbortableSessionAction`. Map it to `MSG_CANCELLED`
+            // (the single string the renderer's inline-picker progress
+            // card matches on) so the user sees a "Cancelled" banner
+            // instead of a misleading success state.
+            const wasCancelled = actionResult.cancelled === true
             result = {
               status: '',
-              percent: 100,
+              percent: wasCancelled ? -1 : 100,
               done: true,
-              ok: actionResult.ok !== false,
-              error: actionResult.ok === false ? (actionResult.message ?? 'Failed.') : null,
+              ok: !wasCancelled && actionResult.ok !== false,
+              error: wasCancelled
+                ? MSG_CANCELLED
+                : actionResult.ok === false
+                  ? (actionResult.message ?? 'Failed.')
+                  : null,
               cancellable,
               title,
               actionId,
               actionData
+            }
+            if (wasCancelled) {
+              emitPickerOpResult('cancelled_user')
+            } else if (actionResult.ok !== false) {
+              emitPickerOpResult('success')
+            } else {
+              emitPickerOpResult('failed', actionResult.message ?? 'Failed.')
             }
           } catch (err) {
             const abort = _operationAborts.get(installationId)
@@ -1401,11 +1452,16 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
               percent: -1,
               done: true,
               ok: false,
-              error: abort?.signal.aborted ? 'Cancelled.' : ((err as Error).message ?? 'Failed.'),
+              error: abort?.signal.aborted ? MSG_CANCELLED : ((err as Error).message ?? 'Failed.'),
               cancellable,
               title,
               actionId,
               actionData
+            }
+            if (abort?.signal.aborted) {
+              emitPickerOpResult('cancelled_user')
+            } else {
+              emitPickerOpResult('failed', (err as Error).message ?? 'Failed.')
             }
           }
           _activeOperationStatus.set(installationId, result)
