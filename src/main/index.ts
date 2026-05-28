@@ -800,27 +800,19 @@ ipcMain.handle('open-install-window', (_event, installationId: string) => {
   return true
 })
 
-ipcMain.handle('close-comfy-window', async (_event, installationId: string, opts?: { skipConfirm?: boolean }) => {
+ipcMain.handle('close-comfy-window', (_event, installationId: string, opts?: { skipConfirm?: boolean }) => {
   const entry = getEntryByInstallationId(installationId)
   if (!entry || entry.window.isDestroyed()) return false
   // Caller has already confirmed (e.g. launch-guard "Close Running & Launch")
   // — skip the panel-renderer quit-confirm consult so the user isn't
-  // prompted twice, and await the actual teardown so callers know the
-  // underlying ComfyUI process has been stopped (via _installCleanup)
-  // before resolving. Without skipConfirm we return synchronously
-  // because the user can cancel the consult, in which case 'closed'
-  // never fires and awaiting it would hang.
-  const window = entry.window
-  if (opts?.skipConfirm) {
-    preClearedClose.add(window)
-    const closed = new Promise<void>((resolve) => {
-      window.once('closed', () => resolve())
-    })
-    window.close()
-    await closed
-  } else {
-    window.close()
-  }
+  // prompted twice. The IPC returns synchronously rather than waiting on
+  // 'closed': a concurrent close handler with an indefinitely-pending
+  // user prompt would otherwise block this call. Callers that need a
+  // port-free guarantee before relaunching should `stopComfyUI` first;
+  // the close handler's `_installCleanup` re-invokes `ipc.stopRunning`
+  // (idempotent) on top of that.
+  if (opts?.skipConfirm) preClearedClose.add(entry.window)
+  entry.window.close()
   return true
 })
 

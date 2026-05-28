@@ -565,7 +565,14 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
         // a panel-rendered `modal.confirm()` would otherwise sit
         // behind the (visually opaque) popup and be unreachable.
         if (!skipConsult) hideTitlePopupForParent(comfyWindow)
-        const cleared = skipConsult ? true : await fx.consultPanelRendererClose(entry?.panelView)
+        // `cleared` falls back to the post-consult preClearedClose state:
+        // a force-close (launch-guard eviction, bulk Exit-All confirm)
+        // can land while the per-window prompt was pending, in which case
+        // the explicit caller-side consent overrides a per-window cancel.
+        const cleared = skipConsult
+          ? true
+          : (await fx.consultPanelRendererClose(entry?.panelView))
+            || fx.preClearedClose.has(comfyWindow)
         if (!cleared) return
         fx.preClearedClose.delete(comfyWindow)
         if (comfyWindow.isDestroyed()) return
