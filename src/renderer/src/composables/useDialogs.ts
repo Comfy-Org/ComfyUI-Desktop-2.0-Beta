@@ -1,5 +1,5 @@
 import { reactive, readonly } from 'vue'
-import type { ModalDetailGroup } from '../types/ipc'
+import type { ModalDetailGroup, SnapshotDiffResult } from '../types/ipc'
 import type { ActionSheetItem } from '../components/ui/BaseActionSheet.vue'
 
 /**
@@ -83,6 +83,11 @@ export interface ConfirmOpts {
    *  rich confirms (e.g. Restore Snapshot) parity with the legacy
    *  `useModal.confirm` `messageDetails` field. */
   messageDetails?: ModalDetailGroup[]
+  /** Snapshot diff rendered as a collapsible SnapshotDiffView below the
+   *  message (restore-confirm flow). Reuses the same component the
+   *  Snapshots tab uses so the "what restoring changes" preview is
+   *  identical in both places. */
+  restoreDiff?: SnapshotDiffResult | null
 }
 
 export type ConfirmResult = 'primary' | 'secondary' | false
@@ -129,6 +134,7 @@ export interface ConfirmState {
   showCancel: boolean
   showCloseIcon: boolean
   messageDetails: ModalDetailGroup[]
+  restoreDiff: SnapshotDiffResult | null
 }
 
 export interface DialogState {
@@ -180,7 +186,8 @@ const state = reactive<DialogState>({
     secondaryTone: 'default',
     showCancel: true,
     showCloseIcon: false,
-    messageDetails: []
+    messageDetails: [],
+    restoreDiff: null
   },
   resolve: null
 })
@@ -290,7 +297,8 @@ export function useDialogs() {
         secondaryTone: opts.secondaryTone ?? 'default',
         showCancel: opts.showCancel ?? !hasSecondary,
         showCloseIcon: opts.showCloseIcon ?? hasSecondary,
-        messageDetails: cloneDetails(opts.messageDetails)
+        messageDetails: cloneDetails(opts.messageDetails),
+        restoreDiff: opts.restoreDiff ?? null
       }
       state.kind = 'confirm'
       state.open = true
