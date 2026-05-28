@@ -8,6 +8,9 @@ on:
 
 permissions:
   contents: write
+  # Required for Workload Identity Federation (keyless GCP auth) used to fetch
+  # the proprietary PP Formula font from gs://comfy-org-fonts before building.
+  id-token: write
 
 concurrency:
   group: build-release-${{ github.ref_name }}
@@ -60,6 +63,23 @@ jobs:
         shell: bash
         run: |
           echo "release_version=$(node ./scripts/datadog-release-version.cjs)" >> "$GITHUB_OUTPUT"
+
+      # Fetch the proprietary PP Formula font into the renderer public dir
+      # before the build. It is gitignored (never committed to this public
+      # repo) and pulled from a private bucket via keyless Workload Identity
+      # Federation. Release builds must ship the licensed display face, so the
+      # fetch fails loudly (no --soft-fail); a missing font would otherwise
+      # silently fall back to Inter.
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: 'projects/525069664901/locations/global/workloadIdentityPools/github-actions-pool/providers/github-oidc'
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Fetch proprietary fonts
+        run: pnpm run font:fetch
 
       - name: Build app
         env:

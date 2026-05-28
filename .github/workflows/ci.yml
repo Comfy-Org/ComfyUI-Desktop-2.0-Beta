@@ -14,6 +14,30 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  no-proprietary-fonts:
+    name: No proprietary fonts in source
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Ensure PP Formula is not committed
+        run: |
+          set -euo pipefail
+          # PP Formula (Pangram Pangram) is license-restricted and must never be
+          # committed to this public repo. It is fetched at build time from
+          # gs://comfy-org-fonts (see scripts/fetch-font.mjs). This guard fails
+          # the build if any PP Formula binary is tracked in git.
+          matches="$(git ls-files '*PPFormula*' '*ppformula*' '*pp-formula*' '*pp_formula*' || true)"
+          if [ -n "$matches" ]; then
+            echo "::error::Proprietary PP Formula font files are committed to the repo:"
+            echo "$matches"
+            echo "These are license-restricted and must not live in source."
+            echo "They are fetched at build time from gs://comfy-org-fonts (scripts/fetch-font.mjs)."
+            exit 1
+          fi
+          echo "OK: no proprietary PP Formula font files tracked in git."
+
   checks:
     name: ${{ matrix.name }}
     runs-on: ubuntu-latest
