@@ -108,6 +108,10 @@ for id in "${BUNDLE_IDS[@]}"; do
            "$HOME/Library/HTTPStorages/${id}.binarycookies"; do
     TARGETS+=("$p")
   done
+  # Native macOS cookies jar (separate from Chromium's Cookies file
+  # inside userData). NSURLSession-style native calls write here if the
+  # app ever makes them.
+  TARGETS+=("$HOME/Library/Cookies/${id}.binarycookies")
   # Per-host Preferences (Squirrel.Mac writes ShipIt state under
   # ~/Library/Preferences/ByHost/<id>.ShipIt.<HOST-UUID>.plist; the
   # host-UUID suffix varies per machine so we glob).
