@@ -8,7 +8,7 @@ import {
   i18n,
   sourceMap,
   formatComfyVersion,
-  _resolveAndBroadcastVersions,
+  scheduleResolveAndBroadcastVersions,
   findDuplicatePath,
   uniqueName,
   sanitizeDirName,
@@ -113,8 +113,11 @@ export function registerInstallationHandlers(): void {
     const allInstalls = await installations.list()
     const { visible, enriched } = enrichInstallationsForRenderer(allInstalls)
 
-    // Resolve versions from git state in the background.
-    _resolveAndBroadcastVersions(visible).catch(() => {})
+    // Resolve versions from git state in the background.  Coalesced +
+    // TTL-throttled so repeated renderer refreshes don't trigger
+    // pygit2 bursts (every get-installations used to fire a fresh
+    // background git pass — see scheduleResolveAndBroadcastVersions).
+    scheduleResolveAndBroadcastVersions(visible)
 
     // Pre-warm the shared ComfyUI release cache so the dashboard /
     // title-bar update pills reflect upstream state without requiring
