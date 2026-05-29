@@ -346,10 +346,13 @@ export function useInstallContextMenu(opts: {
         const deleteLabel = t('actions.delete', 'Delete')
         const confirmed = await modal.confirm({
           title: t('actions.deleteConfirmTitle', 'Delete Install'),
-          message: `${t(
+          message: `${inst.installPath ? inst.installPath + '\n\n' : ''}${t(
             'actions.deleteConfirmMessage',
-            'This will permanently delete the install and all its files. This cannot be undone.',
-          )}\n${inst.installPath ?? ''}`,
+            'This permanently removes this ComfyUI installation and all its files. This cannot be undone.',
+          )}\n\n${t(
+            'actions.deleteConfirmDetail',
+            'Other installs are not affected.',
+          )}`,
           confirmLabel: deleteLabel,
           confirmStyle: 'danger',
         })

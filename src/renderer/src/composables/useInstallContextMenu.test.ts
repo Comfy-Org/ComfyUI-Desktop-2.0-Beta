@@ -59,7 +59,7 @@ const messages = {
       delete: 'Delete',
       deleteConfirmTitle: 'Delete Install',
       deleteConfirmMessage:
-        'This will permanently delete the install and all its files. This cannot be undone.',
+        'This permanently removes this ComfyUI installation and all its files. Other installations and ComfyUI itself are unaffected. This cannot be undone.',
       share: 'Share',
     },
     snapshots: {
@@ -259,7 +259,7 @@ describe('useInstallContextMenu — delete fast path (regression for #582)', () 
     expect(modalMock.confirm).toHaveBeenCalledTimes(1)
     const confirmArgs = modalMock.confirm.mock.calls[0][0]
     expect(confirmArgs.title).toBe('Delete Install')
-    expect(confirmArgs.message).toContain('permanently delete')
+    expect(confirmArgs.message).toContain('permanently removes this ComfyUI installation')
     expect(confirmArgs.message).toContain('/tmp/my')
     expect(confirmArgs.confirmLabel).toBe('Delete')
     expect(confirmArgs.confirmStyle).toBe('danger')

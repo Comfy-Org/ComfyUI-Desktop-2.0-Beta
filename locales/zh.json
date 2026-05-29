@@ -424,7 +424,8 @@
     "copyingFiles": "正在复制文件…",
     "delete": "删除安装",
     "deleteConfirmTitle": "删除安装",
-    "deleteConfirmMessage": "这将永久删除该安装及其所有文件。此操作无法撤销。",
+    "deleteConfirmMessage": "这将永久删除此 ComfyUI 安装及其所有文件。此操作无法撤销。",
+    "deleteConfirmDetail": "其他安装不受影响。",
     "untrack": "取消跟踪",
     "untrackConfirmTitle": "取消跟踪安装",
     "untrackConfirmMessage": "这将从启动器中移除该安装。文件不会被删除。"
@@ -498,7 +499,7 @@
     "label": "Standalone",
     "desc": "预构建环境，包含托管的 Python 和依赖项。",
     "comfyui": "ComfyUI",
-    "variant": "环境变体",
+    "variant": "硬件",
     "python": "Python",
     "pythonEnvs": "Python 环境",
     "activeEnv": "当前：{env}",
@@ -638,6 +639,7 @@
   },
 
   "tooltips": {
+    "launchMode": "选择 ComfyUI 的运行方式：在独立的应用窗口中运行，或作为仅控制台进程运行。",
     "updateNow": "就地更新此安装。",
     "copyAndUpdate": "复制此安装并更新副本。原始安装保持不变。"
   }
