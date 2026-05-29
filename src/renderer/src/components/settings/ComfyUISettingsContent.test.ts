@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
-import { createPinia, setActivePinia } from 'pinia'
+import { createPinia, getActivePinia, setActivePinia } from 'pinia'
 import { computed, ref, nextTick } from 'vue'
 
 import type { Installation } from '../../types/ipc'
+import { useSessionStore } from '../../stores/sessionStore'
 
 /**
  * Component tests for the picker / drawer's per-install settings body.
@@ -37,6 +38,8 @@ const messages = {
     instancePicker: {
       open: 'Open',
       restart: 'Restart',
+      switch: 'Switch',
+      restartToApply: 'Restart to apply changes',
       progressUpdating: 'Updating…',
       progressDowngrading: 'Downgrading…',
       progressSuccessStopped: 'Update complete',
@@ -138,6 +141,10 @@ const SAMPLE_INSTALL: Installation = {
 
 async function mountContent(props: Record<string, unknown> = {}): Promise<VueWrapper> {
   const { default: ComfyUISettingsContent } = await import('./ComfyUISettingsContent.vue')
+  // Reuse the active pinia (set in beforeEach) so tests that seed the
+  // session store via `useSessionStore()` share the same instance the
+  // mounted component reads.
+  const pinia = getActivePinia() ?? createPinia()
   const wrapper = mount(ComfyUISettingsContent, {
     props: {
       installation: SAMPLE_INSTALL,
@@ -145,7 +152,7 @@ async function mountContent(props: Record<string, unknown> = {}): Promise<VueWra
       activeOperation: null,
       ...props,
     },
-    global: { plugins: [createTestI18n(), createPinia()] },
+    global: { plugins: [createTestI18n(), pinia] },
   }) as VueWrapper
   await flushPromises()
   return wrapper
@@ -332,6 +339,60 @@ describe('ComfyUISettingsContent', () => {
       })
       await flushPromises()
       expect(w.find('[data-testid="more-menu"]').exists()).toBe(false)
+    })
+  })
+
+  // Issue #749 — the footer primary CTA must distinguish an install
+  // running in THIS window (Restart, in place) from one running in a
+  // DIFFERENT window (Switch → focus that window) from one not running
+  // (Open → launch). Pre-fix the label was "Restart" whenever a session
+  // existed anywhere, so switching between an already-open Cloud and
+  // local window was mislabeled and broke (it restarted instead of
+  // focusing the other window).
+  describe('footer primary action — running scope (issue #749)', () => {
+    function markRunning(installId: string): void {
+      const store = useSessionStore()
+      store.runningInstances.set(installId, {
+        installationId: installId,
+        installationName: 'X',
+        mode: '',
+      })
+    }
+
+    it('labels "Open" and emits restartInPlace=false when not running', async () => {
+      const w = await mountContent({ activeInstallationId: 'inst-1' })
+      expect(w.find('.settings-v2-relaunch').text()).toBe('Open')
+      await w.find('.settings-v2-relaunch').trigger('click')
+      expect(w.emitted('primary-action')).toEqual([[false]])
+    })
+
+    it('labels "Restart" and emits restartInPlace=true when running in THIS window', async () => {
+      markRunning('inst-1')
+      const w = await mountContent({ activeInstallationId: 'inst-1' })
+      expect(w.find('.settings-v2-relaunch').text()).toBe('Restart')
+      await w.find('.settings-v2-relaunch').trigger('click')
+      expect(w.emitted('primary-action')).toEqual([[true]])
+    })
+
+    it('labels "Switch" and emits restartInPlace=false when running in ANOTHER window', async () => {
+      // The host window is attached to a different install ('other'),
+      // while the selected install ('inst-1') is running elsewhere.
+      markRunning('inst-1')
+      const w = await mountContent({ activeInstallationId: 'other' })
+      expect(w.find('.settings-v2-relaunch').text()).toBe('Switch')
+      await w.find('.settings-v2-relaunch').trigger('click')
+      // restartInPlace=false → host routes to pickInstall (focus existing).
+      expect(w.emitted('primary-action')).toEqual([[false]])
+    })
+
+    it('treats a running install as "Switch" on an install-less (dashboard) host', async () => {
+      // No activeInstallationId → there is no in-place session to restart,
+      // so a running install always reads as "switch to its window".
+      markRunning('inst-1')
+      const w = await mountContent({ activeInstallationId: null })
+      expect(w.find('.settings-v2-relaunch').text()).toBe('Switch')
+      await w.find('.settings-v2-relaunch').trigger('click')
+      expect(w.emitted('primary-action')).toEqual([[false]])
     })
   })
 
