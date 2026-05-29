@@ -3034,7 +3034,7 @@ input[type='checkbox']:checked::after {
 .variant-card-icon img {
   width: 100%;
   height: 100%;
-  object-fit: contain;
+  object-fit: cover;
 }
 .variant-card-icon-text {
   font-size: 13px;

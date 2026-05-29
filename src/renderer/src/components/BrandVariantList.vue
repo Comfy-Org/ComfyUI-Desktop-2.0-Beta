@@ -112,7 +112,7 @@ const { t } = useI18n()
 .brand-variant-row__icon img {
   width: 100%;
   height: 100%;
-  object-fit: contain;
+  object-fit: cover;
 }
 .brand-variant-row__text {
   display: flex;
