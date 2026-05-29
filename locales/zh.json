@@ -498,7 +498,7 @@
     "label": "Standalone",
     "desc": "预构建环境，包含托管的 Python 和依赖项。",
     "comfyui": "ComfyUI",
-    "variant": "环境与硬件",
+    "variant": "硬件",
     "python": "Python",
     "pythonEnvs": "Python 环境",
     "activeEnv": "当前：{env}",

@@ -679,7 +679,7 @@
     "label": "Standalone",
     "desc": "Pre-built environment with managed Python and dependencies.",
     "comfyui": "ComfyUI",
-    "variant": "Environment & Hardware",
+    "variant": "Hardware",
     "python": "Python",
     "pythonEnvs": "Python Environments",
     "activeEnv": "Active: {env}",
