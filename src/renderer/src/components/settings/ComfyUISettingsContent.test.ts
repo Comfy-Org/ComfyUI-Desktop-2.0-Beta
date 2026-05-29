@@ -339,6 +339,79 @@ describe('ComfyUISettingsContent', () => {
     })
   })
 
+  describe('tab tooltips (#713 — no redundant label echo)', () => {
+    type ResizeCb = (entries: ResizeObserverEntry[], obs: ResizeObserver) => void
+    interface RoHandle {
+      el: Element
+      fire(width: number): void
+    }
+    let roHandles: RoHandle[]
+    let originalRo: typeof globalThis.ResizeObserver | undefined
+
+    beforeEach(() => {
+      roHandles = []
+      class StubRo {
+        cb: ResizeCb
+        constructor(cb: ResizeCb) {
+          this.cb = cb
+        }
+        observe(el: Element): void {
+          roHandles.push({
+            el,
+            fire: (width: number) => {
+              this.cb(
+                [{ contentRect: { width, height: 44 } as DOMRectReadOnly } as ResizeObserverEntry],
+                this as unknown as ResizeObserver,
+              )
+            },
+          })
+        }
+        disconnect(): void {}
+        unobserve(): void {}
+      }
+      originalRo = (globalThis as { ResizeObserver?: typeof globalThis.ResizeObserver })
+        .ResizeObserver
+      ;(globalThis as { ResizeObserver?: unknown }).ResizeObserver =
+        StubRo as unknown as typeof globalThis.ResizeObserver
+    })
+    afterEach(() => {
+      if (originalRo) {
+        ;(globalThis as { ResizeObserver?: typeof globalThis.ResizeObserver }).ResizeObserver =
+          originalRo
+      } else {
+        delete (globalThis as { ResizeObserver?: typeof globalThis.ResizeObserver }).ResizeObserver
+      }
+    })
+
+    function tooltipDisabledFlags(w: VueWrapper): boolean[] {
+      return w
+        .findAllComponents({ name: 'Tooltip' })
+        .map((tt) => tt.props('disabled') as boolean)
+    }
+
+    it('disables every tab tooltip at full width (label is visible → pure echo)', async () => {
+      const w = await mountContent()
+      roHandles.forEach((h) => h.fire(900))
+      await nextTick()
+      const flags = tooltipDisabledFlags(w)
+      expect(flags.length).toBeGreaterThan(0)
+      expect(flags.every((d) => d === true)).toBe(true)
+    })
+
+    it('keeps the tooltip on collapsed icon-only tabs but not the active one', async () => {
+      const w = await mountContent({ initialTab: 'update' })
+      roHandles.forEach((h) => h.fire(300))
+      await nextTick()
+      const tooltips = w.findAllComponents({ name: 'Tooltip' })
+      // Active tab (Update) keeps its label → tooltip stays disabled.
+      const updateTip = tooltips.find((tt) => tt.props('text') === 'Update')
+      expect(updateTip?.props('disabled')).toBe(true)
+      // A collapsed, inactive tab hides its label → tooltip is live.
+      const statusTip = tooltips.find((tt) => tt.props('text') === 'About')
+      expect(statusTip?.props('disabled')).toBe(false)
+    })
+  })
+
   describe('op-event relay from SnapshotsView', () => {
     it('forwards op-cancel / op-retry / op-dismiss up to the host', async () => {
       const w = await mountContent({ initialTab: 'snapshots' })
