@@ -4,38 +4,200 @@ import path from 'path'
 import { app } from 'electron'
 import { killProcTree } from './process'
 import { getBundledScriptPath } from './bundledScript'
+import { removeQuarantine, codesignBinaries } from '../sources/standalone/macRepair'
 
-let _pygit2Python: string | null = null
-let _pygit2Script: string | null = null
+// ───────────────────────────────────────────────────────────────────────────
+// pygit2 fallback state + circuit breaker
+//
+// Background: on machines without a global `git` binary we fall back to a
+// bundled Python interpreter (shipped in `standalone-env/`) plus our
+// `git_operations.py` helper.  On macOS in particular the Python binary
+// can be in a broken state (quarantine flag still set, codesignature
+// invalidated by extraction/copy/migration) — in which case every spawn
+// either hangs on Gatekeeper or fails fast.  Because various boot-time
+// paths (update checks, version resolution, renderer polling) call into
+// git frequently, an unhealthy Python helper used to manifest as a flood
+// of Python processes on application boot.
+//
+// To prevent that we:
+//   1. Probe with a real `--healthcheck` call before configuring.
+//   2. On macOS, repair the standalone-env (remove quarantine + adhoc
+//      codesign) once if the first probe fails, then re-probe.
+//   3. Track consecutive launch/timeout failures and disable the
+//      fallback for the rest of the session once a threshold is hit.
+//   4. Always run long-lived pygit2 spawns under a hard timeout.
+// ───────────────────────────────────────────────────────────────────────────
+
+type Pygit2State =
+  | { status: 'unconfigured' }
+  | { status: 'healthy'; python: string; script: string; failures: number }
+  | { status: 'disabled'; reason: string }
+
+let _pygit2: Pygit2State = { status: 'unconfigured' }
+
+/** Consecutive launch/timeout failures before disabling the fallback. */
+const PYGIT2_MAX_FAILURES = 3
+
+/** Hard timeout for long-running pygit2 spawn operations (clone / checkout). */
+const PYGIT2_LONG_TIMEOUT_MS = 20 * 60 * 1000 // 20 minutes
+
+/** Timeout for the boot-time `--healthcheck` probe. */
+const PYGIT2_PROBE_TIMEOUT_MS = 5_000
+
+/** Tracks env directories we have already attempted to repair this session,
+ *  so we don't pay the codesign cost more than once per env. */
+const _pygit2RepairedDirs = new Set<string>()
 
 export function configurePygit2(pythonPath: string, scriptPath: string): void {
-  _pygit2Python = pythonPath
-  _pygit2Script = scriptPath
+  _pygit2 = { status: 'healthy', python: pythonPath, script: scriptPath, failures: 0 }
 }
 
 export function isPygit2Configured(): boolean {
-  return _pygit2Python !== null && _pygit2Script !== null
+  return _pygit2.status === 'healthy'
 }
 
 export function getPygit2Config(): { python: string | null; script: string | null } {
-  return { python: _pygit2Python, script: _pygit2Script }
+  if (_pygit2.status === 'healthy') {
+    return { python: _pygit2.python, script: _pygit2.script }
+  }
+  return { python: null, script: null }
+}
+
+export function getPygit2Status(): Pygit2State {
+  return _pygit2
+}
+
+/** Reset all pygit2 state.  Tests + recovery flows only. */
+export function resetPygit2State(): void {
+  _pygit2 = { status: 'unconfigured' }
+  _pygit2RepairedDirs.clear()
+}
+
+function disablePygit2(reason: string): void {
+  if (_pygit2.status === 'disabled') return
+  console.warn('[git] disabling pygit2 fallback:', reason)
+  _pygit2 = { status: 'disabled', reason }
+}
+
+function recordPygit2Failure(reason: string): void {
+  if (_pygit2.status !== 'healthy') return
+  const failures = _pygit2.failures + 1
+  _pygit2 = { ..._pygit2, failures }
+  if (failures >= PYGIT2_MAX_FAILURES) {
+    disablePygit2(`disabled after ${failures} consecutive launch failures: ${reason}`)
+  }
+}
+
+function recordPygit2Success(): void {
+  if (_pygit2.status !== 'healthy' || _pygit2.failures === 0) return
+  _pygit2 = { ..._pygit2, failures: 0 }
+}
+
+/** Classify an execFile error: launch failure (timeout, ENOENT, signal) vs
+ *  normal non-zero exit from the helper. */
+function isLaunchFailure(error: ExecFileException | null): boolean {
+  if (!error) return false
+  if (error.killed) return true // timeout
+  if (error.signal) return true
+  const code = error.code
+  if (typeof code === 'string') return true // ENOENT, EACCES, etc.
+  return false
+}
+
+/** Resolve the path to the standalone Python interpreter for an install. */
+function getStandalonePythonPath(installPath: string): string {
+  return process.platform === 'win32'
+    ? path.join(installPath, 'standalone-env', 'python.exe')
+    : path.join(installPath, 'standalone-env', 'bin', 'python3')
+}
+
+/**
+ * Probe a candidate Python + helper script by running `healthcheck`.
+ * Validates that Python launches, the helper script loads, and `pygit2`
+ * (imported at module top) is importable.
+ */
+export function probePygit2(
+  pythonPath: string,
+  scriptPath: string,
+  timeoutMs: number = PYGIT2_PROBE_TIMEOUT_MS,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  return new Promise((resolve) => {
+    execFile(pythonPath, ['-s', '-u', scriptPath, 'healthcheck'], {
+      encoding: 'utf-8',
+      windowsHide: true,
+      timeout: timeoutMs,
+    }, (error, stdout, stderr) => {
+      if (!error && (stdout ?? '').includes('ok pygit2')) {
+        resolve({ ok: true })
+        return
+      }
+      const reason = `${error?.message ?? ''}\n${(stderr ?? '').trim()}`.trim()
+        || 'pygit2 healthcheck failed'
+      resolve({ ok: false, reason })
+    })
+  })
+}
+
+/**
+ * Best-effort macOS repair for a Python env directory: remove quarantine
+ * flag and adhoc-sign Mach-O binaries.  Used for both the bundled
+ * bootstrap-python (whose codesignature gets invalidated when the .app is
+ * extracted from a zip) and standalone-env (copied/migrated installs).
+ *
+ * No-op on non-Darwin platforms or when already attempted for this dir
+ * in the current session.
+ */
+async function repairEnvForPygit2(envDir: string): Promise<void> {
+  if (process.platform !== 'darwin') return
+  if (_pygit2RepairedDirs.has(envDir)) return
+  _pygit2RepairedDirs.add(envDir)
+  if (!fs.existsSync(envDir)) return
+  const log = (msg: string): void => { console.log('[git] pygit2 repair:', msg.trim()) }
+  try {
+    log(`removing quarantine on ${envDir}`)
+    await removeQuarantine(envDir, log)
+    log(`adhoc codesigning ${envDir}`)
+    await codesignBinaries(envDir, log)
+  } catch (err) {
+    console.warn('[git] pygit2 repair failed:', err)
+  }
 }
 
 /**
  * Try to configure the pygit2 fallback using a standalone installation's
- * Python.  Validates that both the Python binary and the helper script
- * exist before calling {@link configurePygit2}.
+ * Python.  Verifies the binary actually works by running a healthcheck —
+ * and on macOS, transparently runs quarantine removal + adhoc codesigning
+ * once if the first probe fails, so the bundled Python is in a usable
+ * state before going live.
  *
- * @returns `true` if pygit2 was successfully configured.
+ * Refuses to configure when:
+ *   - the helper script or Python binary doesn't exist
+ *   - the healthcheck still fails after repair
+ *   - the fallback has already been disabled this session
+ *
+ * @returns `true` only if pygit2 is now healthy.
  */
-export function tryConfigurePygit2Fallback(installPath: string): boolean {
-  const pythonPath = process.platform === 'win32'
-    ? path.join(installPath, 'standalone-env', 'python.exe')
-    : path.join(installPath, 'standalone-env', 'bin', 'python3')
+export async function tryConfigurePygit2Fallback(installPath: string): Promise<boolean> {
+  if (_pygit2.status === 'disabled') return false
+  const pythonPath = getStandalonePythonPath(installPath)
   if (!fs.existsSync(pythonPath)) return false
   const scriptPath = getBundledScriptPath('git_operations.py')
   if (!fs.existsSync(scriptPath)) return false
+
+  let probe = await probePygit2(pythonPath, scriptPath)
+  if (!probe.ok && process.platform === 'darwin') {
+    console.warn(`[git] pygit2 probe failed; attempting macOS repair: ${probe.reason}`)
+    await repairEnvForPygit2(path.join(installPath, 'standalone-env'))
+    probe = await probePygit2(pythonPath, scriptPath)
+  }
+
+  if (!probe.ok) {
+    console.warn(`[git] pygit2 fallback rejected for ${installPath}: ${probe.reason}`)
+    return false
+  }
+
   configurePygit2(pythonPath, scriptPath)
+  console.log('[git] pygit2 fallback configured via', pythonPath)
   return true
 }
 
@@ -45,9 +207,16 @@ export function tryConfigurePygit2Fallback(installPath: string): boolean {
  * git operations to work from app launch, before any standalone
  * environment is downloaded.
  *
- * @returns `true` if pygit2 was successfully configured.
+ * Verifies the binary actually works by running a healthcheck — and on
+ * macOS, transparently runs quarantine removal + adhoc codesigning once
+ * if the first probe fails.  Without this guard, a broken bundled Python
+ * caused boot-time git callers to spawn an endless stream of Python
+ * processes on macOS.
+ *
+ * @returns `true` only if pygit2 is now healthy.
  */
-export function tryConfigureBootstrapPygit2(): boolean {
+export async function tryConfigureBootstrapPygit2(): Promise<boolean> {
+  if (_pygit2.status === 'disabled') return false
   const osName = process.platform === 'win32' ? 'win'
     : process.platform === 'darwin' ? 'mac'
     : 'linux'
@@ -61,21 +230,46 @@ export function tryConfigureBootstrapPygit2(): boolean {
   if (!fs.existsSync(pythonPath)) return false
   const scriptPath = getBundledScriptPath('git_operations.py')
   if (!fs.existsSync(scriptPath)) return false
+
+  let probe = await probePygit2(pythonPath, scriptPath)
+  if (!probe.ok && process.platform === 'darwin') {
+    console.warn(`[git] bootstrap pygit2 probe failed; attempting macOS repair: ${probe.reason}`)
+    await repairEnvForPygit2(bootstrapDir)
+    probe = await probePygit2(pythonPath, scriptPath)
+  }
+
+  if (!probe.ok) {
+    console.warn(`[git] bootstrap pygit2 rejected at ${pythonPath}: ${probe.reason}`)
+    return false
+  }
+
   configurePygit2(pythonPath, scriptPath)
+  console.log('[git] bootstrap pygit2 configured via', pythonPath)
   return true
 }
 
 function runPygit2(args: string[], timeout: number = 5000): Promise<{ exitCode: number; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
-    execFile(_pygit2Python!, ['-s', '-u', _pygit2Script!, ...args], {
+    if (_pygit2.status !== 'healthy') {
+      resolve({ exitCode: 1, stdout: '', stderr: 'pygit2 fallback is not available' })
+      return
+    }
+    const { python, script } = _pygit2
+    execFile(python, ['-s', '-u', script, ...args], {
       encoding: 'utf-8',
       windowsHide: true,
       timeout,
     }, (error, stdout, stderr) => {
+      const stderrStr = (stderr ?? '').toString()
+      if (isLaunchFailure(error)) {
+        recordPygit2Failure(error?.message ?? stderrStr ?? 'launch failure')
+      } else {
+        recordPygit2Success()
+      }
       resolve({
         exitCode: error ? (typeof (error as ExecFileException).code === 'number' ? ((error as ExecFileException).code as number) : 1) : 0,
         stdout: (stdout ?? '').toString(),
-        stderr: (stderr ?? '').toString(),
+        stderr: stderrStr,
       })
     })
   })
@@ -84,9 +278,65 @@ function runPygit2(args: string[], timeout: number = 5000): Promise<{ exitCode: 
 function makeRunPygit2(
   sendOutput: (text: string) => void,
   signal?: AbortSignal,
+  timeoutMs: number = PYGIT2_LONG_TIMEOUT_MS,
 ): (args: string[]) => Promise<ProcessResult> {
-  return (args: string[]): Promise<ProcessResult> =>
-    spawnStreamed(_pygit2Python!, ['-s', '-u', _pygit2Script!, ...args], sendOutput, { signal })
+  return (args: string[]): Promise<ProcessResult> => {
+    if (signal?.aborted) return Promise.resolve({ exitCode: 1, stderr: '', stdout: '' })
+    if (_pygit2.status !== 'healthy') {
+      return Promise.resolve({ exitCode: 1, stderr: 'pygit2 fallback is not available', stdout: '' })
+    }
+    const { python, script } = _pygit2
+    return new Promise((resolve) => {
+      const stdoutChunks: string[] = []
+      const stderrChunks: string[] = []
+      const proc = spawn(python, ['-s', '-u', script, ...args], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
+        detached: process.platform !== 'win32',
+      })
+      let settled = false
+      let timedOut = false
+      const finish = (result: ProcessResult): void => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        signal?.removeEventListener('abort', onAbort)
+        resolve(result)
+      }
+      const timer = setTimeout(() => {
+        timedOut = true
+        const msg = `\nTimed out running pygit2 helper after ${Math.round(timeoutMs / 1000)}s\n`
+        sendOutput(msg)
+        stderrChunks.push(msg)
+        killProcTree(proc)
+        recordPygit2Failure('timeout in long-running pygit2 spawn')
+        finish({ exitCode: 1, stderr: stderrChunks.join(''), stdout: stdoutChunks.join('') })
+      }, timeoutMs)
+      const onAbort = (): void => { killProcTree(proc) }
+      signal?.addEventListener('abort', onAbort, { once: true })
+      if (signal?.aborted) onAbort()
+      proc.stdout.on('data', (data: Buffer) => {
+        const text = data.toString()
+        stdoutChunks.push(text)
+        sendOutput(text)
+      })
+      proc.stderr.on('data', (data: Buffer) => {
+        const text = data.toString()
+        stderrChunks.push(text)
+        sendOutput(text)
+      })
+      proc.on('error', (err) => {
+        recordPygit2Failure(err.message)
+        sendOutput(err.message)
+        finish({ exitCode: 1, stderr: stderrChunks.join('') + err.message, stdout: stdoutChunks.join('') })
+      })
+      proc.on('close', (code) => {
+        if (timedOut) return
+        if (code === 0) recordPygit2Success()
+        finish({ exitCode: code ?? 1, stderr: stderrChunks.join(''), stdout: stdoutChunks.join('') })
+      })
+    })
+  }
 }
 
 export interface ProcessResult {

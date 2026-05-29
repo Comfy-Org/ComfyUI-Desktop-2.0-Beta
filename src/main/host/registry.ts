@@ -553,3 +553,32 @@ export function openOrFocusAnyHostWindow(): BrowserWindow {
   }
   return requireChooserFactory()()
 }
+
+/**
+ * macOS dock-icon `activate` behaviour: raise EVERY live host window to
+ * the front, matching the platform convention where clicking the dock
+ * icon brings all of an app's windows forward (not just one). The
+ * preferred host (same priority as `openOrFocusAnyHostWindow`) is shown
+ * last so it ends up frontmost / focused. When no live host exists, falls
+ * back to spawning a fresh chooser host.
+ *
+ * Returns the window left frontmost (or the freshly-spawned chooser).
+ *
+ * macOS-only by design — Windows / Linux re-launch keeps the single-window
+ * `openOrFocusAnyHostWindow` semantics, so the caller in `index.ts` guards
+ * this behind `process.platform === 'darwin'`.
+ */
+export function raiseAllHostWindows(): BrowserWindow {
+  const preferred =
+    findPreferredInstallHostWindow() ?? findPreferredChooserHostWindow()
+  if (!preferred) return requireChooserFactory()()
+
+  // Raise every other live host first so the whole app comes forward,
+  // then bring the preferred window up last so it lands frontmost.
+  for (const [, entry] of comfyWindows) {
+    if (entry.window.isDestroyed() || entry.window === preferred) continue
+    bringToFront(entry.window)
+  }
+  bringToFront(preferred)
+  return preferred
+}

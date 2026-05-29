@@ -27,7 +27,10 @@ import {
   getEntryByInstallationId,
   indexInstallationId,
   nextWindowKey,
+  raiseAllHostWindows,
   registerHostEntry,
+  setHostFactories,
+  setLastFocusedInstallationId,
   unregisterHostEntry,
   type ComfyWindowEntry,
 } from './registry'
@@ -37,6 +40,13 @@ interface FakeWindow {
   minimized: boolean
   isDestroyed: () => boolean
   isMinimized: () => boolean
+  /** show()/focus()/restore() calls, in order, so tests can assert
+   *  whether (and when) a window was raised. */
+  raised: string[]
+  show: () => void
+  focus: () => void
+  restore: () => void
+  setAlwaysOnTop: () => void
 }
 
 function makeWindow(opts: { destroyed?: boolean; minimized?: boolean } = {}): FakeWindow {
@@ -45,6 +55,16 @@ function makeWindow(opts: { destroyed?: boolean; minimized?: boolean } = {}): Fa
     minimized: opts.minimized ?? false,
     isDestroyed: () => win.destroyed,
     isMinimized: () => win.minimized,
+    raised: [],
+    show: () => win.raised.push('show'),
+    focus: () => win.raised.push('focus'),
+    restore: () => {
+      win.minimized = false
+      win.raised.push('restore')
+    },
+    // `bringToFront` uses this on Windows; no-op here so the helper is
+    // exercised regardless of the host platform running the suite.
+    setAlwaysOnTop: () => {},
   }
   return win
 }
@@ -91,6 +111,7 @@ afterEach(() => {
   comfyWindows.clear()
   _resetAttachClaimsForTest()
   _runningSessions.clear()
+  setLastFocusedInstallationId(null)
 })
 
 describe('nextWindowKey', () => {
@@ -264,5 +285,67 @@ describe('findPreferredHostByVisibility', () => {
     registerHostEntry(chooser)
     expect(findPreferredHostByVisibility((e) => e.installationId === null)).toBe(chooser)
     expect(findPreferredHostByVisibility((e) => e.installationId !== null)).toBe(install)
+  })
+})
+
+describe('raiseAllHostWindows', () => {
+  function fakeWin(entry: ComfyWindowEntry): FakeWindow {
+    return entry.window as unknown as FakeWindow
+  }
+
+  it('spawns a fresh chooser host when no live host exists', () => {
+    const spawned = makeWindow()
+    const createChooser = vi.fn(() => spawned as unknown as ComfyWindowEntry['window'])
+    setHostFactories({ createChooser })
+    const result = raiseAllHostWindows()
+    expect(createChooser).toHaveBeenCalledTimes(1)
+    expect(result).toBe(spawned as unknown as ComfyWindowEntry['window'])
+  })
+
+  it('raises every live host window to the front', () => {
+    const a = makeEntry({ installationId: null })
+    const b = makeEntry({ installationId: null })
+    const c = makeEntry({ installationId: null })
+    registerHostEntry(a)
+    registerHostEntry(b)
+    registerHostEntry(c)
+    raiseAllHostWindows()
+    expect(fakeWin(a).raised).toContain('focus')
+    expect(fakeWin(b).raised).toContain('focus')
+    expect(fakeWin(c).raised).toContain('focus')
+  })
+
+  it('skips destroyed entries', () => {
+    const live = makeEntry({ installationId: null })
+    const dead = makeEntry({ installationId: null, destroyed: true })
+    registerHostEntry(live)
+    registerHostEntry(dead)
+    raiseAllHostWindows()
+    expect(fakeWin(live).raised).toContain('focus')
+    expect(fakeWin(dead).raised).toEqual([])
+  })
+
+  it('leaves the preferred install host frontmost (raised last)', () => {
+    const order: string[] = []
+    const chooser = makeEntry({ installationId: null })
+    const install = makeEntry({ installationId: 'inst-A' })
+    // Tag focus calls so we can assert ordering across windows.
+    fakeWin(chooser).focus = () => order.push('chooser')
+    fakeWin(install).focus = () => order.push('install')
+    registerHostEntry(chooser)
+    registerHostEntry(install)
+    const result = raiseAllHostWindows()
+    // install-backed beats chooser, so it must be focused last (frontmost)
+    // and returned to the caller.
+    expect(order[order.length - 1]).toBe('install')
+    expect(result).toBe(install.window)
+  })
+
+  it('restores a minimised host before focusing it', () => {
+    const min = makeEntry({ installationId: null, minimized: true })
+    registerHostEntry(min)
+    raiseAllHostWindows()
+    expect(fakeWin(min).raised).toContain('restore')
+    expect(fakeWin(min).raised).toContain('focus')
   })
 })

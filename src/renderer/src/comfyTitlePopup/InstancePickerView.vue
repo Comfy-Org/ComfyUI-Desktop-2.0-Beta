@@ -479,10 +479,16 @@ function handleSettingsNavigateList(): void {
   selectedId.value = null
 }
 
-function handleExpandedPrimaryAction(running: boolean): void {
+/** Footer primary CTA dispatch. `restartInPlace` is true only when the
+ *  selected install is running in THIS host window — then we stop +
+ *  relaunch in place via `restartInstall`. Otherwise (not running, or
+ *  running in another window — issue #749) we route to `pickInstall`,
+ *  whose main-side focus-existing short-circuit raises the already-open
+ *  window rather than restarting it. */
+function handleExpandedPrimaryAction(restartInPlace: boolean): void {
   const inst = selectedInstall.value
   if (!inst) return
-  if (running) {
+  if (restartInPlace) {
     bridge?.restartInstall(inst.id)
   } else {
     bridge?.pickInstall(inst.id)
@@ -591,6 +597,7 @@ function handleExpandedPrimaryAction(running: boolean): void {
               :auto-action-nonce="snapshot.autoActionNonce ?? 0"
               :global-settings-snapshot="snapshot.storage"
               :active-operation="activeOperation"
+              :active-installation-id="snapshot.activeInstallationId"
               class="picker-expanded-body"
               @show-progress="handleSettingsShowProgress"
               @navigate-list="handleSettingsNavigateList"

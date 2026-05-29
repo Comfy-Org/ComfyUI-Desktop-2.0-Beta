@@ -15,12 +15,23 @@
  *
  * ============================================================================ */
 
-import { Menu } from 'electron'
+import { app, Menu } from 'electron'
 import type { BaseWindow, MenuItemConstructorOptions } from 'electron'
 
 export type AppMenuDevOverrides = {
   /** ⚠️ Dev-only — see file banner. */
   toggleEmbeddedDevTools?: (focusedWindow?: BaseWindow | null) => void
+}
+
+export type AppMenuHandlers = {
+  /**
+   * macOS-only: invoked by the "Check for Updates…" item added to the
+   * standard app menu (issue #693). Wired in `index.ts` to the existing
+   * `updater.runCheck(...)` entry point — the result flows through the
+   * normal broadcast pipeline (title-bar pill / Global Settings panel),
+   * so this is purely the OS-menu affordance and builds no update logic.
+   */
+  onCheckForUpdates?: () => void
 }
 
 /**
@@ -53,6 +64,7 @@ export type AppMenuDevOverrides = {
 export function installAppMenu(
   platform: NodeJS.Platform = process.platform,
   devOverrides?: AppMenuDevOverrides,
+  handlers?: AppMenuHandlers,
 ): void {
   const routedDevTools =
     typeof devOverrides?.toggleEmbeddedDevTools === 'function'
@@ -84,8 +96,39 @@ export function installAppMenu(
     )
     return
   }
+  const onCheckForUpdates =
+    typeof handlers?.onCheckForUpdates === 'function' ? handlers.onCheckForUpdates : undefined
+
+  // Mirror Electron's stock `appMenu` role, but inject a "Check for
+  // Updates…" item right after About — the conventional macOS placement
+  // (issue #693). When no handler is wired we fall back to the plain
+  // `appMenu` role so behavior is unchanged. The remaining items match
+  // the default macOS app submenu (Services / Hide / Quit).
+  const appMenu: MenuItemConstructorOptions = onCheckForUpdates
+    ? {
+        label: app.name,
+        submenu: [
+          { role: 'about' },
+          {
+            label: 'Check for Updates…',
+            click: () => {
+              onCheckForUpdates()
+            },
+          },
+          { type: 'separator' },
+          { role: 'services' },
+          { type: 'separator' },
+          { role: 'hide' },
+          { role: 'hideOthers' },
+          { role: 'unhide' },
+          { type: 'separator' },
+          { role: 'quit' },
+        ],
+      }
+    : { role: 'appMenu' }
+
   const template: MenuItemConstructorOptions[] = [
-    { role: 'appMenu' },
+    appMenu,
     { role: 'editMenu' },
     ...(routedDevTools
       ? ([

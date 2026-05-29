@@ -12,7 +12,7 @@
     "migrateBannerSkip": "New Install Without Migrating",
     "confirmStopLocal": {
       "title": "Return to Dashboard?",
-      "message": "ComfyUI for this installation will be stopped.",
+      "message": "This will stop the current ComfyUI.",
       "confirmLabel": "Stop & Return"
     }
   },
@@ -247,7 +247,9 @@
     "next": "Next",
     "recommended": "Recommended",
     "latest": "Latest",
-    "changeInstallType": "Change Install Type"
+    "changeInstallType": "Change Install Type",
+    "nameWhitespace": "Enter a name, or leave blank to use the suggested one.",
+    "urlInvalid": "Enter a valid URL (e.g. http://localhost:8188)."
   },
 
   "diskSpace": {
@@ -547,7 +549,8 @@
     "copyingFiles": "Copying files…",
     "delete": "Uninstall",
     "deleteConfirmTitle": "Uninstall",
-    "deleteConfirmMessage": "This will permanently uninstall ComfyUI and delete all its files. This cannot be undone.",
+    "deleteConfirmMessage": "This permanently removes this ComfyUI installation and all its files. This cannot be undone.",
+    "deleteConfirmDetail": "Other installs are not affected.",
     "untrack": "Forget",
     "untrackConfirmTitle": "Forget Install",
     "untrackConfirmMessage": "This will remove the install from the app. The files will not be deleted.",
@@ -679,7 +682,7 @@
     "label": "Standalone",
     "desc": "Pre-built environment with managed Python and dependencies.",
     "comfyui": "ComfyUI",
-    "variant": "Environment Variant",
+    "variant": "Hardware",
     "python": "Python",
     "pythonEnvs": "Python Environments",
     "activeEnv": "Active: {env}",
@@ -983,6 +986,7 @@
     "snapshot": "A saved record of your environment's state — ComfyUI version, custom nodes, and pip packages — that can be restored later.",
     "updateChannel": "Controls where updates come from. 'Stable' uses tested releases; 'Latest' pulls the newest commits directly from GitHub.",
     "startupArgs": "Command-line arguments passed to ComfyUI when it starts, such as --port or --lowvram.",
+    "launchMode": "Choose how ComfyUI runs: in its own app window, or as a console-only process.",
     "browserPartition": "Controls whether this install shares browser cache (cookies, local storage) with other installs or keeps its own separate cache.",
     "sharedDirs": "Directories shared across all installations for inputs and outputs.",
     "sharedModels": "Folders shared across all installations so models aren't downloaded twice. Newly downloaded models go to the primary folder. The system default folder is always kept and can't be removed, and the primary folder can't be removed while it's in use — pick a different primary first.",

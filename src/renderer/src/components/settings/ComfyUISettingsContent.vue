@@ -67,6 +67,14 @@ interface Props {
    *  When set and the active tab is `'update'`, the Update tab body
    *  is replaced with an inline progress / result view. */
   activeOperation?: ActiveOperation | null
+  /** Install attached to the host window that opened this picker (the
+   *  picker's `snapshot.activeInstallationId`). Used to decide whether
+   *  the footer primary action should restart in-place (running in THIS
+   *  window) or focus/switch to the install's already-open window
+   *  (running in ANOTHER window). Null on install-less (dashboard) hosts
+   *  — there's no in-place session to restart, so a running install is
+   *  always "switch to its window". */
+  activeInstallationId?: string | null
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -75,6 +83,7 @@ const props = withDefaults(defineProps<Props>(), {
   autoAction: null,
   autoActionNonce: 0,
   activeOperation: null,
+  activeInstallationId: null,
   globalSettingsSnapshot: () => ({
     sharedDirectoriesFields: [],
     modelsDirs: [],
@@ -91,12 +100,18 @@ const emit = defineEmits<{
    *  `navigate-list` so the host can animate out before navigation). */
   'request-close': []
   /** Footer primary CTA — host decides whether to call its bridge's
-   *  `pickInstall` (not-running case → Open) or `restartInstall`
-   *  (running case → Restart) so the same native-confirm flow runs
-   *  whether the affordance is clicked from the compact row or the
-   *  expanded view's footer. Payload carries the running flag so the
-   *  host doesn't have to re-derive it. */
-  'primary-action': [running: boolean]
+   *  `pickInstall` (Open / Switch case) or `restartInstall` (Restart
+   *  case) so the same native-confirm flow runs whether the affordance
+   *  is clicked from the compact row or the expanded view's footer.
+   *
+   *  The boolean is `restartInPlace`: true ONLY when the install is
+   *  running in the host window that owns this picker, where the action
+   *  genuinely stops + relaunches the session in place. When the install
+   *  is running in a DIFFERENT window (issue #749 — Cloud + local both
+   *  open), this is false so the host routes to `pickInstall`, whose
+   *  focus-existing short-circuit raises the already-open window instead
+   *  of restarting it. */
+  'primary-action': [restartInPlace: boolean]
   /** Inline progress CTA events — forwarded up to the host which owns
    *  the bridge methods for cancel / retry / dismiss. */
   'op-cancel': []
@@ -499,33 +514,59 @@ function handleSnapshotsRefresh(): void {
   void reload()
 }
 
-/** Footer primary CTA — host-agnostic. The host (picker / drawer)
- *  receives `primary-action` with the current running state and
- *  dispatches its own bridge call: `restartInstall` when running,
- *  `pickInstall` when not. This keeps the same native-confirm flow
- *  the compact PickerRow already uses for its Open/Restart button,
- *  so both surfaces share one underlying path. */
+/** Footer primary CTA — host-agnostic. The host (picker) receives
+ *  `primary-action` with `restartInPlace` and dispatches its own bridge
+ *  call: `restartInstall` when restarting in place, `pickInstall`
+ *  otherwise. This keeps the same native-confirm flow across surfaces.
+ *
+ *  `isInstallRunning` — a session exists for this install *somewhere*
+ *  (any window). Drives the row dot + the running-state copy. */
 const isInstallRunning = computed(() => {
   const inst = installation.value
   return inst ? sessionStore.isRunning(inst.id) : false
 })
 
+/** Running specifically in the host window that opened this picker.
+ *  Only here does "Restart" make sense: stop + relaunch the session in
+ *  place. When the install is running in a *different* window (issue
+ *  #749 — switching between an already-open Cloud and local), the right
+ *  action is to focus that window, not restart it. Install-less
+ *  (dashboard) hosts have no `activeInstallationId`, so this is always
+ *  false there and a running install reads as "switch to its window". */
+const isRunningInThisWindow = computed(() => {
+  const inst = installation.value
+  if (!inst || !isInstallRunning.value) return false
+  return props.activeInstallationId != null && inst.id === props.activeInstallationId
+})
+
+/** Running, but in another window — focus/switch instead of restart. */
+const isRunningElsewhere = computed(
+  () => isInstallRunning.value && !isRunningInThisWindow.value
+)
+
 const hasPendingRestart = computed(
-  () => isInstallRunning.value && pendingRestartFieldIds.value.size > 0
+  () => isRunningInThisWindow.value && pendingRestartFieldIds.value.size > 0
 )
 
 const primaryActionLabel = computed(() => {
   if (hasPendingRestart.value) {
     return t('instancePicker.restartToApply', 'Restart to apply changes')
   }
-  return isInstallRunning.value
-    ? t('instancePicker.restart', 'Restart')
-    : t('instancePicker.open', 'Open')
+  if (isRunningInThisWindow.value) {
+    return t('instancePicker.restart', 'Restart')
+  }
+  // Running in another window → focus/switch to it (issue #749).
+  if (isRunningElsewhere.value) {
+    return t('instancePicker.switch', 'Switch')
+  }
+  return t('instancePicker.open', 'Open')
 })
 
 function handlePrimaryAction(): void {
   if (!installation.value) return
-  emit('primary-action', isInstallRunning.value)
+  // Only restart in place when running in THIS window; running-elsewhere
+  // and not-running both route to pickInstall (focus existing / launch).
+  emit('primary-action', isRunningInThisWindow.value)
 }
 
 // Inline-progress state derived from the `activeOperation` prop.

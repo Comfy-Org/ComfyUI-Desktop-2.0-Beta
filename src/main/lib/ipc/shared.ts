@@ -479,6 +479,24 @@ export async function _fetchAndResolveLatestTags(
   return result
 }
 
+// Scheduling guard for the fire-and-forget background resolver invoked from
+// `get-installations`.  Renderer mounts / refreshes used to spawn a fresh
+// pygit2 burst on every call.  Now we coalesce overlapping invocations
+// (single-flight) and rate-limit subsequent runs (TTL) so repeated UI
+// fetches don't churn the bundled Python interpreter.
+let _resolveVersionsInFlight: Promise<void> | null = null
+let _lastResolveVersionsAt = 0
+const RESOLVE_VERSIONS_TTL_MS = 10 * 60 * 1000
+
+export function scheduleResolveAndBroadcastVersions(list: InstallationRecord[]): void {
+  if (_resolveVersionsInFlight) return
+  if (Date.now() - _lastResolveVersionsAt < RESOLVE_VERSIONS_TTL_MS) return
+  _lastResolveVersionsAt = Date.now()
+  _resolveVersionsInFlight = _resolveAndBroadcastVersions(list).catch(() => {}).finally(() => {
+    _resolveVersionsInFlight = null
+  })
+}
+
 export async function _resolveAndBroadcastVersions(list: InstallationRecord[]): Promise<void> {
   const candidates = list.flatMap((inst) => {
     const cv = inst.comfyVersion as ComfyVersion | undefined
@@ -594,20 +612,31 @@ export function resolveTheme(): ResolvedTheme {
   return theme === 'system' ? (nativeTheme.shouldUseDarkColors ? 'dark' : 'light') : theme
 }
 
-export async function checkInstallationUpdates(): Promise<void> {
-  try {
-    await Promise.allSettled(
-      ALL_UPDATE_CHANNELS.map((channel) =>
-        releaseCache.getOrFetch(COMFYUI_REPO, channel, async () => {
-          const release = await fetchLatestRelease(channel)
-          if (!release) return null
-          return releaseCache.buildCacheEntry(release)
-        }, true)
+// Single-flight guard: overlapping calls await the same in-flight run rather
+// than triggering parallel bursts of git / pygit2 work.  Boot + periodic
+// timer + manual refresh all share one execution.
+let _checkInstallationUpdatesInFlight: Promise<void> | null = null
+
+export function checkInstallationUpdates(): Promise<void> {
+  if (_checkInstallationUpdatesInFlight) return _checkInstallationUpdatesInFlight
+  _checkInstallationUpdatesInFlight = (async (): Promise<void> => {
+    try {
+      await Promise.allSettled(
+        ALL_UPDATE_CHANNELS.map((channel) =>
+          releaseCache.getOrFetch(COMFYUI_REPO, channel, async () => {
+            const release = await fetchLatestRelease(channel)
+            if (!release) return null
+            return releaseCache.buildCacheEntry(release)
+          }, true)
+        )
       )
-    )
-    await _enrichLatestCommitsAhead()
-    _broadcastToRenderer('installations-changed', {})
-  } catch {}
+      await _enrichLatestCommitsAhead()
+      _broadcastToRenderer('installations-changed', {})
+    } catch {}
+  })().finally(() => {
+    _checkInstallationUpdatesInFlight = null
+  })
+  return _checkInstallationUpdatesInFlight
 }
 
 async function _enrichLatestCommitsAhead(): Promise<void> {

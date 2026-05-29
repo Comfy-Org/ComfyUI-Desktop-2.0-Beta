@@ -300,3 +300,12 @@ powershell -ExecutionPolicy Bypass -File .\reset-windows.ps1
 ```
 
 Pass `--yes` (or `-Yes` on Windows) to skip the confirmation prompt. After cleanup, reinstall from the latest release and launch — the app should come up with a clean profile. You may need to re-add existing installations via **"Add existing installation"** since `installations.json` is wiped too.
+
+#### Additional macOS leftover paths
+
+For a full manual uninstall on macOS, the following additional paths may be left behind by the app and can be removed. The reset helper handles app settings/state, but these are worth checking when doing a true clean install:
+
+- `~/Library/Application Support/ComfyUI` — ComfyUI Desktop app data/cache
+- `~/Library/Application Support/ComfyUI Desktop 2.0` — app settings/state
+- `~/Library/Caches/org.comfy.comfyui-desktop-2.ShipIt` — Squirrel auto-updater cache (safe to delete)
+- `~/Library/Logs/ComfyUI` — log files (safe to delete)

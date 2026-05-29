@@ -441,5 +441,35 @@ describe('comfyTitlePopup/InstancePickerView', () => {
       expect(bridge.restarts).toEqual(['a'])
       expect(bridge.picks).toEqual([])
     })
+
+    // Issue #749 — Cloud + local both open. The footer CTA for an install
+    // running in ANOTHER window must route through pickInstall (whose
+    // main-side focus-existing short-circuit raises that window), NOT
+    // restartInstall. The settings content emits restartInPlace=false for
+    // the running-elsewhere case; verify the picker maps that to pick.
+    it('dispatches pickInstall (not restart) for an install running in another window', async () => {
+      const { default: ComfyUISettingsContent } = await import(
+        '../components/settings/ComfyUISettingsContent.vue'
+      )
+      const wrapper = await mountPicker({
+        installs: [
+          makeInstall({ id: 'a', name: 'Alpha' }),
+          makeInstall({ id: 'b', name: 'Bravo' }),
+        ],
+        // Host window is attached to 'a'; the user selected 'b', which is
+        // running in its own separate window.
+        activeInstallationId: 'a',
+        selectedInstallationId: 'b',
+        runningInstallationIds: ['b'],
+      })
+      const settings = wrapper.findComponent(ComfyUISettingsContent)
+      expect(settings.exists()).toBe(true)
+      // The component decides restartInPlace=false (running elsewhere) and
+      // emits accordingly; assert the picker dispatches pickInstall.
+      settings.vm.$emit('primary-action', false)
+      await flushPromises()
+      expect(bridge.picks).toEqual(['b'])
+      expect(bridge.restarts).toEqual([])
+    })
   })
 })
