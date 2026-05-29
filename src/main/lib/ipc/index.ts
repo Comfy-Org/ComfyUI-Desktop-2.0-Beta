@@ -130,7 +130,7 @@ export function register(callbacks: RegisterCallbacks = {}): void {
     const configureGitBackend = async (): Promise<void> => {
       const forceBootstrap = process.env.COMFY_FORCE_BOOTSTRAP_GIT === '1'
 
-      if (tryConfigureBootstrapPygit2()) {
+      if (await tryConfigureBootstrapPygit2()) {
         console.log('[ipc] Using bootstrap pygit2 for git operations (default)')
         return
       }
@@ -155,7 +155,7 @@ export function register(callbacks: RegisterCallbacks = {}): void {
         const all = await installations.list()
         for (const inst of all) {
           if (inst.sourceId !== 'standalone' || !inst.installPath) continue
-          if (tryConfigurePygit2Fallback(inst.installPath)) {
+          if (await tryConfigurePygit2Fallback(inst.installPath)) {
             console.log(
               '[ipc] Configured pygit2 fallback via standalone install at',
               inst.installPath
