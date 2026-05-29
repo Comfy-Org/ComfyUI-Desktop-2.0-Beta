@@ -247,7 +247,9 @@
     "next": "Next",
     "recommended": "Recommended",
     "latest": "Latest",
-    "changeInstallType": "Change Install Type"
+    "changeInstallType": "Change Install Type",
+    "nameWhitespace": "Enter a name, or leave blank to use the suggested one.",
+    "urlInvalid": "Enter a valid URL (e.g. http://localhost:8188)."
   },
 
   "diskSpace": {

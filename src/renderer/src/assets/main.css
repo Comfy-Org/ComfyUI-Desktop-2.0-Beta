@@ -549,6 +549,17 @@ button.looks-disabled {
 .brand-input input::placeholder {
   color: var(--neutral-400);
 }
+/* Invalid state — paired with an adjacent .field-error message.
+ * Overrides hover/focus border so the danger cue stays visible. */
+.brand-input--invalid,
+.brand-input--invalid:hover,
+.brand-input--invalid:focus-within {
+  border-color: var(--danger);
+}
+.brand-input--invalid:has(input:focus-visible) {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--danger) 35%, transparent);
+}
 
 .brand-tag-recommended {
   display: inline-block;
