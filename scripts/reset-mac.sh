@@ -91,6 +91,8 @@ for name in "${PACKAGE_NAMES[@]}"; do
   )
 done
 
+shopt -s nullglob
+
 for id in "${BUNDLE_IDS[@]}"; do
   TARGETS+=(
     "$HOME/Library/Preferences/${id}.plist"
@@ -106,7 +108,15 @@ for id in "${BUNDLE_IDS[@]}"; do
            "$HOME/Library/HTTPStorages/${id}.binarycookies"; do
     TARGETS+=("$p")
   done
+  # Per-host Preferences (Squirrel.Mac writes ShipIt state under
+  # ~/Library/Preferences/ByHost/<id>.ShipIt.<HOST-UUID>.plist; the
+  # host-UUID suffix varies per machine so we glob).
+  for p in "$HOME/Library/Preferences/ByHost/${id}".*.plist; do
+    TARGETS+=("$p")
+  done
 done
+
+shopt -u nullglob
 
 # Warn (don't auto-delete) about extra .app copies — multiple installs in
 # different locations are a common cause of "I reinstalled but it's still
