@@ -650,7 +650,7 @@ defineExpose({
         :key="tab.key"
         :text="tab.tooltip ?? tab.label"
         side="bottom"
-        :disabled="!isTabLabelHidden(tab.key)"
+        :disabled="tab.tooltip ? false : !isTabLabelHidden(tab.key)"
       >
         <button
           type="button"

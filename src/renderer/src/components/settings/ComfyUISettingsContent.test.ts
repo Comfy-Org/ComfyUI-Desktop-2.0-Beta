@@ -339,7 +339,7 @@ describe('ComfyUISettingsContent', () => {
     })
   })
 
-  describe('tab tooltips (#713 — no redundant label echo)', () => {
+  describe('tab tooltips (#702 concept tooltips + #713 — no redundant label echo)', () => {
     type ResizeCb = (entries: ResizeObserverEntry[], obs: ResizeObserver) => void
     interface RoHandle {
       el: Element
@@ -383,19 +383,44 @@ describe('ComfyUISettingsContent', () => {
       }
     })
 
-    function tooltipDisabledFlags(w: VueWrapper): boolean[] {
+    const SNAPSHOTS_TOOLTIP =
+      'A saved point-in-time state of an installation (versions + custom nodes) you can restore later.'
+
+    /** Tooltips for tabs that only echo their label (no explicit concept
+     *  copy). The Snapshots tab carries a real concept tooltip and is
+     *  exempt from the "disabled at full width" rule. */
+    function labelEchoDisabledFlags(w: VueWrapper): boolean[] {
       return w
         .findAllComponents({ name: 'Tooltip' })
+        .filter((tt) => tt.props('text') !== SNAPSHOTS_TOOLTIP)
         .map((tt) => tt.props('disabled') as boolean)
     }
 
-    it('disables every tab tooltip at full width (label is visible → pure echo)', async () => {
+    it('disables label-echo tab tooltips at full width (label is visible → pure echo)', async () => {
       const w = await mountContent()
       roHandles.forEach((h) => h.fire(900))
       await nextTick()
-      const flags = tooltipDisabledFlags(w)
+      const flags = labelEchoDisabledFlags(w)
       expect(flags.length).toBeGreaterThan(0)
       expect(flags.every((d) => d === true)).toBe(true)
+    })
+
+    it('always shows the Snapshots concept tooltip regardless of strip width', async () => {
+      const w = await mountContent({ initialTab: 'snapshots' })
+      const snapshotTip = () =>
+        w
+          .findAllComponents({ name: 'Tooltip' })
+          .find((tt) => tt.props('text') === SNAPSHOTS_TOOLTIP)
+      // Full width — an echo tab would be suppressed here, but the concept
+      // tooltip stays live because it adds info beyond the label.
+      roHandles.forEach((h) => h.fire(900))
+      await nextTick()
+      expect(snapshotTip()?.props('disabled')).toBe(false)
+      // Collapsed — still live (and it's the active tab, which would also
+      // suppress a pure echo).
+      roHandles.forEach((h) => h.fire(300))
+      await nextTick()
+      expect(snapshotTip()?.props('disabled')).toBe(false)
     })
 
     it('keeps the tooltip on collapsed icon-only tabs but not the active one', async () => {
