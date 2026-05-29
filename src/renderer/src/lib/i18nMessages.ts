@@ -205,6 +205,10 @@ export const en = {
     latestOnGithub: 'Latest on GitHub',
     open: 'Open',
     restart: 'Restart',
+    /** Primary CTA when the selected install is already running in
+     *  another window — focuses/switches to it instead of restarting
+     *  (issue #749). */
+    switch: 'Switch',
     restartConfirmTitle: 'Restart this instance?',
     restartConfirmDetail:
       'Restarting will stop the running session. Any unsaved work in the workflow will be lost.',
