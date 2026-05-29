@@ -547,7 +547,7 @@
     "copyingFiles": "Copying files…",
     "delete": "Uninstall",
     "deleteConfirmTitle": "Uninstall",
-    "deleteConfirmMessage": "This will permanently uninstall ComfyUI and delete all its files. This cannot be undone.",
+    "deleteConfirmMessage": "This permanently removes this ComfyUI installation and all its files. Other installations and ComfyUI itself are unaffected. This cannot be undone.",
     "untrack": "Forget",
     "untrackConfirmTitle": "Forget Install",
     "untrackConfirmMessage": "This will remove the install from the app. The files will not be deleted.",

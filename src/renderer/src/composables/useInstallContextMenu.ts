@@ -348,7 +348,7 @@ export function useInstallContextMenu(opts: {
           title: t('actions.deleteConfirmTitle', 'Delete Install'),
           message: `${t(
             'actions.deleteConfirmMessage',
-            'This will permanently delete the install and all its files. This cannot be undone.',
+            'This permanently removes this ComfyUI installation and all its files. Other installations and ComfyUI itself are unaffected. This cannot be undone.',
           )}\n${inst.installPath ?? ''}`,
           confirmLabel: deleteLabel,
           confirmStyle: 'danger',
