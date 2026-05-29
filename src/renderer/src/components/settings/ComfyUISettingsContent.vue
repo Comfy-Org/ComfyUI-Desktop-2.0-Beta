@@ -518,7 +518,9 @@ const primaryActionLabel = computed(() => {
   if (isRunningElsewhere.value) {
     return t('instancePicker.switch', 'Switch')
   }
-  return t('instancePicker.open', 'Open')
+  // Idle → "Start" (issue #694); the live string also resolves to 'Start'
+  // via i18nMessages, this fallback is kept in sync.
+  return t('instancePicker.open', 'Start')
 })
 
 function handlePrimaryAction(): void {

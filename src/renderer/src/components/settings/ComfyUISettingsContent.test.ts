@@ -36,7 +36,7 @@ const messages = {
       more: 'More',
     },
     instancePicker: {
-      open: 'Open',
+      open: 'Start',
       restart: 'Restart',
       switch: 'Switch',
       restartToApply: 'Restart to apply changes',
@@ -359,9 +359,9 @@ describe('ComfyUISettingsContent', () => {
       })
     }
 
-    it('labels "Open" and emits restartInPlace=false when not running', async () => {
+    it('labels "Start" and emits restartInPlace=false when not running', async () => {
       const w = await mountContent({ activeInstallationId: 'inst-1' })
-      expect(w.find('.settings-v2-relaunch').text()).toBe('Open')
+      expect(w.find('.settings-v2-relaunch').text()).toBe('Start')
       await w.find('.settings-v2-relaunch').trigger('click')
       expect(w.emitted('primary-action')).toEqual([[false]])
     })

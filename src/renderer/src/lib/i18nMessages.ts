@@ -203,7 +203,7 @@ export const en = {
     instances: 'Instances',
     newInstance: 'New Instance',
     latestOnGithub: 'Latest on GitHub',
-    open: 'Open',
+    open: 'Start',
     restart: 'Restart',
     /** Primary CTA when the selected install is already running in
      *  another window — focuses/switches to it instead of restarting
