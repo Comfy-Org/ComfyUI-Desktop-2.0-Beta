@@ -424,7 +424,8 @@
     "copyingFiles": "正在复制文件…",
     "delete": "删除安装",
     "deleteConfirmTitle": "删除安装",
-    "deleteConfirmMessage": "这将永久删除此 ComfyUI 安装及其所有文件。其他安装和 ComfyUI 本身不受影响。此操作无法撤销。",
+    "deleteConfirmMessage": "这将永久删除此 ComfyUI 安装及其所有文件。此操作无法撤销。",
+    "deleteConfirmDetail": "其他安装不受影响。",
     "untrack": "取消跟踪",
     "untrackConfirmTitle": "取消跟踪安装",
     "untrackConfirmMessage": "这将从启动器中移除该安装。文件不会被删除。"
