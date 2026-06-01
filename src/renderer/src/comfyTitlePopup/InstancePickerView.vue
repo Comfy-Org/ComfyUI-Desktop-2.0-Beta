@@ -585,6 +585,7 @@ async function handleExpandedPrimaryAction(restartInPlace: boolean): Promise<voi
               :update-available="isRowUpdateAvailable(inst)"
               :operating="effectiveOperatingSet.has(inst.id)"
               :last-launched-short-label="lastLaunchedShortLabel(inst)"
+              :capacity-status="cloudCapacity.status.value"
               @select="handleSelect"
             />
 

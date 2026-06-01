@@ -11,28 +11,30 @@ import type { CloudCapacityStatus } from '../types/ipc'
  *
  * Backed by the `desktop-cloud-capacity` PostHog flag, resolved in main
  * at boot via the OPS-flag fetch path (consent-bypassed by design — see
- * `main/lib/cloudCapacity.ts`). The status is loaded once per renderer
- * mount and held in a process-local ref; there is intentionally no
- * mid-session refresh.
+ * `main/lib/cloudCapacity.ts`). The status is loaded once per process
+ * (shared `loadPromise` across composable instances) and held in a
+ * process-local ref; there is intentionally no mid-session refresh.
  *
  * Always returns `'normal'` until the first IPC call resolves, and
  * fails-closed-to-normal on any error so a broken flag-fetch never
  * accidentally degrades or blocks the cloud entry points.
  */
 const status = ref<CloudCapacityStatus>('normal')
-let loaded = false
+let loadPromise: Promise<void> | null = null
 
-async function loadOnce(): Promise<void> {
-  if (loaded) return
-  loaded = true
-  try {
-    const next = await window.api.getCloudCapacity()
-    if (next === 'normal' || next === 'degraded' || next === 'disabled') {
-      status.value = next
+function ensureLoaded(): Promise<void> {
+  if (loadPromise) return loadPromise
+  loadPromise = (async () => {
+    try {
+      const next = await window.api.getCloudCapacity()
+      if (next === 'normal' || next === 'degraded' || next === 'disabled') {
+        status.value = next
+      }
+    } catch {
+      // fail-closed: stay on 'normal'
     }
-  } catch {
-    // fail-closed: stay on 'normal'
-  }
+  })()
+  return loadPromise
 }
 
 export function useCloudCapacity(): {
@@ -40,23 +42,26 @@ export function useCloudCapacity(): {
   isDegraded: () => boolean
   isDisabled: () => boolean
   isBlockingOrWarning: () => boolean
-  /** Gate every Cloud entry action through this. Returns `true` when
-   *  the caller may proceed:
-   *   - `normal`   → resolves `true` immediately, no UI.
+  /** Gate every Cloud entry action through this. Awaits the boot-time
+   *  fetch first, so an action fired before the IPC settles still sees
+   *  the resolved value (not the stale `'normal'` default). Returns:
+   *   - `normal`   → resolves `true` immediately (post-load), no UI.
    *   - `degraded` → shows a confirm modal explaining heavy usage;
    *                  resolves `true` only on the user's confirm.
-   *   - `disabled` → resolves `false` immediately (defense-in-depth;
-   *                  the UI also greys/blocks at the surface level). */
+   *   - `disabled` → resolves `false` (defense-in-depth; surface also
+   *                  greys/blocks at the click level). */
   confirmEntry: () => Promise<boolean>
 } {
   const dialogs = useDialogs()
   const { t } = useI18n()
 
   onMounted(() => {
-    void loadOnce()
+    void ensureLoaded()
   })
 
   async function confirmEntry(): Promise<boolean> {
+    // Wait for the boot fetch so we never gate on a stale 'normal'.
+    await ensureLoaded()
     if (status.value === 'disabled') return false
     if (status.value !== 'degraded') return true
     const result = await dialogs.confirm({
