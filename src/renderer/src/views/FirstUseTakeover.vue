@@ -52,6 +52,7 @@ import TermsModal from '../components/TermsModal.vue'
 import Tooltip from '../components/ui/Tooltip.vue'
 import BrandTakeoverLayout from '../components/BrandTakeoverLayout.vue'
 import { emitTelemetryAction } from '../lib/telemetry'
+import { useCloudCapacity } from '../composables/useCloudCapacity'
 
 type Step = 'start' | 'mirrors' | 'localBranch'
 
@@ -94,6 +95,27 @@ const locale = ref('en')
  *  Cloud is the brand-anchor card (glow + beam target) so it ships
  *  pre-selected — users can flip to Local before pressing Continue. */
 const pickedChoice = ref<'cloud' | 'local'>('cloud')
+
+// Capacity-protection switch for Cloud (PostHog flag
+// `desktop-cloud-capacity`). When `disabled`, we auto-flip the default
+// pick to Local so users land on a usable option during an outage; the
+// Cloud card stays visible but is non-selectable and the proceed
+// handler refuses to advance with `cloud` picked.
+const cloudCapacity = useCloudCapacity()
+watch(
+  cloudCapacity.status,
+  (status) => {
+    if (status === 'disabled' && pickedChoice.value === 'cloud') {
+      pickedChoice.value = 'local'
+    }
+  },
+  { immediate: true }
+)
+const cloudDescriptionKey = computed(() => {
+  if (cloudCapacity.isDisabled()) return 'cloud.capacityDisabledHint'
+  if (cloudCapacity.isDegraded()) return 'cloud.capacityDegradedHint'
+  return 'firstUse.cloudDesc'
+})
 /** Express-install opt-out modifier on the start screen. Pre-ticked.
  *  Functional wiring (skipping optional setup steps) lands separately;
  *  for now the value is captured for telemetry only. */
@@ -243,6 +265,10 @@ function routePostStart(): void {
     return
   }
   if (pickedChoice.value === 'cloud') {
+    // Cloud capacity kill-switch — refuse to advance into cloud when
+    // the flag has it disabled. The card is also non-selectable in this
+    // state; this is the defense-in-depth check.
+    if (cloudCapacity.isDisabled()) return
     emitCompleted('cloud')
     emit('complete-cloud')
   } else if (hasLegacyDesktop.value && !expressInstall.value) {
@@ -459,14 +485,16 @@ defineExpose({ open })
         >
           <ChoiceCard
             class="start-card-cloud"
+            :class="{ 'start-card-cloud--capacity-disabled': cloudCapacity.isDisabled() }"
             selectable
             :selected="pickedChoice === 'cloud'"
+            :aria-disabled="cloudCapacity.isDisabled() ? true : undefined"
             glow
             :label="$t('cloud.label')"
-            :tagline="$t('firstUse.cloudTagline')"
-            :description="$t('firstUse.cloudDesc')"
+            :tagline="cloudCapacity.isDisabled() ? $t('cloud.capacityDisabled') : (cloudCapacity.isDegraded() ? $t('cloud.capacityDegraded') : $t('firstUse.cloudTagline'))"
+            :description="$t(cloudDescriptionKey)"
             data-testid="first-use-pick-cloud"
-            @click="pickedChoice = 'cloud'"
+            @click="cloudCapacity.isDisabled() ? null : (pickedChoice = 'cloud')"
           >
             <template #label-trailing>
               <Tooltip :text="$t('firstUse.whyTryCloud')">
@@ -756,6 +784,15 @@ defineExpose({ open })
  * Cloud card the same way the original pick step did. */
 .start-card-cloud {
   anchor-name: --brand-beam-target;
+}
+/* Capacity-protection visual when cloud is currently disabled by the
+ * `desktop-cloud-capacity` flag: grey the card and block pointer
+ * interaction. The proceed handler also refuses to advance with cloud
+ * picked, so this is defense-in-depth + a clear signal to the user. */
+.start-card-cloud--capacity-disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  pointer-events: none;
 }
 .start-cloud-info {
   display: inline-flex;
