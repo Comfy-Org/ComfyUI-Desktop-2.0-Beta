@@ -62,9 +62,11 @@ const emit = defineEmits<{
 const typeMeta = computed(() => installTypeMetaFor(props.installation.sourceCategory))
 
 function handleClick(): void {
-  // Cloud capacity kill-switch: refuse to select a disabled cloud row.
-  // The footer primary action also gates; this is defense-in-depth.
-  if (isCloudDisabled.value) return
+  // Row click always selects — even for a disabled cloud install. The
+  // user should be able to navigate to the cloud tab to see the
+  // "Temporarily unavailable" chip + the disabled launch button rather
+  // than being silently bounced. The launch gate lives on the footer
+  // primary action (ComfyUISettingsContent), not on the row click.
   emit('select', props.installation)
 }
 </script>
@@ -74,14 +76,9 @@ function handleClick(): void {
     <div
       role="option"
       :aria-selected="active"
-      :aria-disabled="isCloudDisabled ? true : undefined"
-      :tabindex="isCloudDisabled ? -1 : 0"
+      tabindex="0"
       class="picker-row"
-      :class="{
-        'is-active': active,
-        'is-running': running,
-        'is-cloud-disabled': isCloudDisabled,
-      }"
+      :class="{ 'is-active': active, 'is-running': running }"
       :data-testid="TID.pickerRow(installation.id)"
       @click="handleClick"
       @keydown.enter="handleClick"
@@ -270,13 +267,11 @@ function handleClick(): void {
   background: color-mix(in srgb, var(--text) 14%, transparent);
 }
 
-/* Capacity-protection visual for the cloud row. Mirrors the chooser
- * tile chips so the dashboard and IPP read consistently. */
-.picker-row.is-cloud-disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-  pointer-events: none;
-}
+/* Capacity-protection chip on the cloud row. Mirrors the chooser tile
+ * chips so the dashboard and IPP read consistently. The row itself
+ * stays clickable even when cloud is disabled — selection works (user
+ * can navigate to the cloud tab to see the disabled state); the launch
+ * gate lives on the footer primary button. */
 .picker-row-capacity-pill {
   flex: 0 0 auto;
   padding: 1px 8px;
