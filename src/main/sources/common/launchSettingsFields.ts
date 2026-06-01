@@ -47,7 +47,7 @@ export function buildLaunchSettingsFields(
       editable: true, editType: 'select', options: [
         { value: 'window', label: t('common.launchModeWindow') },
         { value: 'console', label: t('common.launchModeConsole') },
-      ], requiresRestart: true },
+      ], tooltip: t('tooltips.launchMode'), requiresRestart: true },
     { id: 'browserPartition', label: t('common.browserPartition'),
       value: (installation.browserPartition as string | undefined) || defaultBrowserPartition,
       editable: true, editType: 'select', options: [

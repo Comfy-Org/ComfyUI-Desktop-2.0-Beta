@@ -6,6 +6,7 @@ const { setApplicationMenu, buildFromTemplate } = vi.hoisted(() => ({
 }))
 
 vi.mock('electron', () => ({
+  app: { name: 'ComfyUI' },
   Menu: {
     setApplicationMenu,
     buildFromTemplate,
@@ -96,6 +97,55 @@ describe('installAppMenu', () => {
     const allRoles = collectRoles(template as unknown as Array<{ role?: string; submenu?: unknown }>)
     expect(allRoles).not.toContain('close')
     expect(allRoles).not.toContain('closeAllWindows')
+  })
+
+  it('keeps the plain appMenu role on darwin when no check-for-updates handler is wired', () => {
+    installAppMenu('darwin')
+    const template = buildFromTemplate.mock.calls[0]?.[0] as Array<{
+      role?: string
+      label?: string
+    }>
+    expect(template[0]).toEqual({ role: 'appMenu' })
+  })
+
+  it('adds a click-wired "Check for Updates…" item to the darwin app menu', () => {
+    const onCheckForUpdates = vi.fn()
+    installAppMenu('darwin', undefined, { onCheckForUpdates })
+
+    const template = buildFromTemplate.mock.calls[0]?.[0] as Array<{
+      role?: string
+      label?: string
+      submenu?: Array<{ role?: string; label?: string; click?: () => void }>
+    }>
+    const appEntry = template[0]
+    expect(appEntry).toBeTruthy()
+    // Stock `appMenu` role is expanded into an explicit submenu so the
+    // item can sit right after About.
+    expect(appEntry?.role).toBeUndefined()
+    const items = appEntry?.submenu ?? []
+    const aboutIndex = items.findIndex((i) => i.role === 'about')
+    const checkIndex = items.findIndex((i) => i.label === 'Check for Updates…')
+    expect(aboutIndex).toBeGreaterThanOrEqual(0)
+    expect(checkIndex).toBe(aboutIndex + 1)
+
+    const check = items[checkIndex]
+    expect(typeof check?.click).toBe('function')
+    check?.click?.()
+    expect(onCheckForUpdates).toHaveBeenCalledTimes(1)
+
+    // Standard items are preserved.
+    const roles = items.map((i) => i.role)
+    expect(roles).toContain('services')
+    expect(roles).toContain('hide')
+    expect(roles).toContain('quit')
+  })
+
+  it('does not add the app menu item on non-darwin platforms', () => {
+    const onCheckForUpdates = vi.fn()
+    installAppMenu('win32', undefined, { onCheckForUpdates })
+    // win32 with no dev overrides strips the menu entirely.
+    expect(setApplicationMenu).toHaveBeenCalledWith(null)
+    expect(onCheckForUpdates).not.toHaveBeenCalled()
   })
 
   it('inserts a View submenu with click-based Toggle Developer Tools when dev overrides are passed', () => {

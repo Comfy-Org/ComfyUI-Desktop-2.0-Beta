@@ -8,7 +8,7 @@ vi.mock('child_process', async (importOriginal) => {
 
 import { execFile, spawn } from 'child_process'
 import { EventEmitter } from 'events'
-import { countCommitsAhead, findNearestTag, findLatestVersionTag, lsRemoteLatestTag, lsRemoteRef, isAncestorOf, findMergeBase, revParseRef, fetchTags, configurePygit2, isGitAvailable, resetGitAvailableCache, countUniqueCommits, gitClone, gitCheckoutCommit, gitFetchAndCheckout } from './git'
+import { countCommitsAhead, findNearestTag, findLatestVersionTag, lsRemoteLatestTag, lsRemoteRef, isAncestorOf, findMergeBase, revParseRef, fetchTags, configurePygit2, isGitAvailable, isPygit2Configured, getPygit2Status, resetPygit2State, probePygit2, resetGitAvailableCache, countUniqueCommits, gitClone, gitCheckoutCommit, gitFetchAndCheckout } from './git'
 
 const mockedExecFile = vi.mocked(execFile)
 const mockedSpawn = vi.mocked(spawn)
@@ -632,5 +632,116 @@ describe('pygit2 fallback', () => {
       expect(result.exitCode).toBe(1)
       expect(mockedSpawn).not.toHaveBeenCalled()
     })
+  })
+})
+
+// ===================================================================
+// pygit2 healthcheck probe + circuit-breaker tests
+// ===================================================================
+
+describe('probePygit2', () => {
+  beforeEach(() => { vi.resetAllMocks(); resetPygit2State() })
+
+  it('returns ok when healthcheck prints the success marker', async () => {
+    mockExecFile((_cmd, _args, _opts, cb) => { cb(null, 'ok pygit2 1.18.0\n', '') })
+    expect(await probePygit2('/usr/bin/python3', '/path/script.py')).toEqual({ ok: true })
+  })
+
+  it('runs the healthcheck subcommand against the bundled Python', async () => {
+    mockExecFile((_cmd, _args, _opts, cb) => { cb(null, 'ok pygit2 1.18.0\n', '') })
+    await probePygit2('/usr/bin/python3', '/path/script.py')
+    expect(mockedExecFile).toHaveBeenCalled()
+    const call = mockedExecFile.mock.calls[0]!
+    expect(call[0]).toBe('/usr/bin/python3')
+    expect(call[1]).toEqual(['-s', '-u', '/path/script.py', 'healthcheck'])
+  })
+
+  it('returns failure with stderr when the helper exits non-zero', async () => {
+    const err = new Error('non-zero exit') as Error & { code: number }
+    err.code = 1
+    mockExecFile((_cmd, _args, _opts, cb) => { cb(err, '', 'ImportError: pygit2 missing\n') })
+    const result = await probePygit2('/usr/bin/python3', '/path/script.py')
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.reason).toContain('ImportError')
+  })
+
+  it('returns failure when the marker is missing from stdout', async () => {
+    mockExecFile((_cmd, _args, _opts, cb) => { cb(null, 'something else\n', '') })
+    const result = await probePygit2('/usr/bin/python3', '/path/script.py')
+    expect(result.ok).toBe(false)
+  })
+})
+
+describe('pygit2 circuit breaker', () => {
+  beforeEach(() => {
+    vi.resetAllMocks()
+    resetPygit2State()
+    configurePygit2('/usr/bin/python3', '/path/to/git_operations.py')
+  })
+
+  it('disables pygit2 after 3 consecutive launch failures', async () => {
+    // Each call simulates a timeout (killed=true ⇒ launch failure)
+    const timeoutErr = new Error('timeout') as Error & { killed: boolean }
+    timeoutErr.killed = true
+    mockExecFile((_cmd, _args, _opts, cb) => { cb(timeoutErr, '', '') })
+
+    expect(isPygit2Configured()).toBe(true)
+    expect(await countCommitsAhead('/repo', 'v0.1.0')).toBeUndefined()
+    expect(await countCommitsAhead('/repo', 'v0.1.0')).toBeUndefined()
+    // Still healthy after 2 failures
+    expect(isPygit2Configured()).toBe(true)
+
+    expect(await countCommitsAhead('/repo', 'v0.1.0')).toBeUndefined()
+    // 3rd consecutive launch failure ⇒ disabled
+    expect(isPygit2Configured()).toBe(false)
+    expect(getPygit2Status().status).toBe('disabled')
+  })
+
+  it('does not count normal non-zero exits as launch failures', async () => {
+    // exit code 1 with no killed/signal ⇒ helper ran fine, just returned non-zero
+    const exitErr = new Error('exit 1') as Error & { code: number }
+    exitErr.code = 1
+    mockExecFile((_cmd, _args, _opts, cb) => { cb(exitErr, '', 'no such ref\n') })
+
+    for (let i = 0; i < 5; i++) {
+      await countCommitsAhead('/repo', 'v0.1.0')
+    }
+    expect(isPygit2Configured()).toBe(true)
+    expect(getPygit2Status().status).toBe('healthy')
+  })
+
+  it('resets failure counter after a successful call', async () => {
+    const timeoutErr = new Error('timeout') as Error & { killed: boolean }
+    timeoutErr.killed = true
+    mockExecFile((_cmd, _args, _opts, cb) => { cb(timeoutErr, '', '') })
+    await countCommitsAhead('/repo', 'v0.1.0')
+    await countCommitsAhead('/repo', 'v0.1.0')
+
+    // Healthy run resets the counter
+    mockExecFile((_cmd, _args, _opts, cb) => { cb(null, '7\n', '') })
+    expect(await countCommitsAhead('/repo', 'v0.1.0')).toBe(7)
+
+    // Two more launch failures should not trip the breaker (counter was reset)
+    mockExecFile((_cmd, _args, _opts, cb) => { cb(timeoutErr, '', '') })
+    await countCommitsAhead('/repo', 'v0.1.0')
+    await countCommitsAhead('/repo', 'v0.1.0')
+    expect(isPygit2Configured()).toBe(true)
+  })
+
+  it('falls back to system git (not pygit2) once disabled', async () => {
+    const timeoutErr = new Error('timeout') as Error & { killed: boolean }
+    timeoutErr.killed = true
+    mockExecFile((_cmd, _args, _opts, cb) => { cb(timeoutErr, '', '') })
+    for (let i = 0; i < 3; i++) await countCommitsAhead('/repo', 'v0.1.0')
+    expect(isPygit2Configured()).toBe(false)
+
+    // After disable, calls take the system-git branch — the Python path
+    // should no longer appear in execFile invocations.
+    mockedExecFile.mockClear()
+    mockExecFile((_cmd, _args, _opts, cb) => { cb(null, '7\n', '') })
+    expect(await countCommitsAhead('/repo', 'v0.1.0')).toBe(7)
+    const call = mockedExecFile.mock.calls[0]!
+    expect(call[0]).toBe('git')
+    expect(call[0]).not.toBe('/usr/bin/python3')
   })
 })

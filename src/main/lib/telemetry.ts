@@ -1,28 +1,117 @@
 /**
- * Main-process telemetry for the launcher.
+ * Main-process telemetry — single capture point for the launcher.
  *
- * Co-exists with the renderer-side Datadog RUM + PostHog JS pipelines.
- * Responsibilities:
- *   - PostHog Node SDK lifecycle (init, identify, shutdown flush on quit)
- *   - Capture of events that occur outside the renderer's reach:
- *       * app lifecycle (start/quit) with uptime
- *       * pre-install / installation pipeline sub-steps
- *       * migration pipeline sub-steps
- *       * execution events parsed from ComfyUI's stdout
- *   - A `trackedStep()` helper mirroring legacy desktop's `@trackEvent` decorator
- *     pattern (`<step>.start` / `<step>.end` / `<step>.error`)
+ * =========================================================================
+ * REFERENCE FOR ANYONE ADDING NEW TELEMETRY
+ * =========================================================================
  *
- * The renderer continues to be the primary telemetry funnel for UI events;
- * this module exists for the things the renderer cannot see.
+ * ## Architecture (one paragraph)
  *
- * NOTE: There is intentionally no remote feature-flag system. We initially
- * shipped one with a few kill switches and a sample-rate dial, but the
- * launcher has no live use for them and the bootstrap/cache machinery
- * complicates startup. Reintroduce only if a concrete need appears.
+ * `posthog-node` runs here in main. Renderer events flow over IPC
+ * (`window.api.captureTelemetry` / `captureExceptionTelemetry` /
+ * `registerTelemetryProperties` / `telemetryBindUserId` /
+ * `telemetryUnbindUserId` / `telemetryGetExperimentFlag` /
+ * `telemetryRecordExposure`) to handlers in `ipc/registerTelemetryHandlers.ts`.
+ * Datadog RUM still runs in the renderer (browser-only) but is gated to a
+ * small failure-event allow-list in `src/shared/datadogMirroredEvents.ts`.
+ *
+ * ## Adding a product event — checklist
+ *
+ *   1. Pick a name. Convention: `desktop2.<area>.<verb>` snake_case
+ *      (e.g. `desktop2.instance.switched`). Add to whichever code path
+ *      naturally owns the event.
+ *   2. Use `capture(event, properties)` in main, or
+ *      `emitTelemetryAction(event, props)` in a Vue component. Never call
+ *      `posthog.capture` directly.
+ *   3. Bucket / enumerate user values at the call site. Free-form strings
+ *      get scrubbed by `scrubAll()` as a safety net, but the discipline is
+ *      to send `directory_bucket: 'checkpoints'` not raw `directory: '/Users/x/foo'`.
+ *      Use helpers in `src/renderer/src/lib/telemetry.ts` (`toSizeBucket`,
+ *      `toCountBucket`, `toErrorBucket`, `toModelDirectoryBucket`,
+ *      `deriveGpuTier`, etc.) — extend them instead of inlining new bucketing.
+ *   4. If the event is a *failure* (`*.error`, crash, install failure, etc.),
+ *      add the event name to `DATADOG_MIRRORED_EVENT_NAMES` so it also
+ *      reaches Datadog and a monitor can fire on it.
+ *   5. Add an insight to the relevant PostHog dashboard. Don't ship events
+ *      that don't end up on a dashboard or in a saved query — that's how
+ *      telemetry rots into noise.
+ *
+ * ## Identity model
+ *
+ *   - `installation_id` = `SHA-256(machine_id + salt)`, computed in
+ *     `deviceId.ts`. Deterministic per machine; can be matched against
+ *     the same hash computed by other Comfy products on the same machine.
+ *     Bound at boot via `identify(installation_id)`.
+ *   - `download_token` (TODO): web-session → desktop bridge for acquisition
+ *     attribution. Set as a person property on first launch from a
+ *     tokenised installer download.
+ *   - `user_id`: set on successful login via `bindUserId(user_id)`.
+ *     Aliases `installation_id` → `user_id` so historical anonymous events
+ *     merge under the user. Clear on logout via `unbindUserId()` —
+ *     DO NOT call `posthog.reset()`; it would clobber `installation_id`
+ *     and `download_token`.
+ *
+ * ## Consent (three-state)
+ *
+ *   - `'granted'`   — collect everything.
+ *   - `'denied'`    — collect nothing.
+ *   - `'undecided'` — fresh install or Desktop-1 migrator; collect ONLY
+ *                     `desktop2.first_use.consent_decision` until the
+ *                     user makes a choice.
+ *
+ *   Every capture path here is consent-gated. `setConsentState(state)` is
+ *   the single source of truth; `setConsent(bool)` is a legacy adapter.
+ *
+ * ## Provider split
+ *
+ *   PostHog gets everything. Datadog only mirrors the failure / reliability
+ *   allow-list in `src/shared/datadogMirroredEvents.ts`. Datadog is for
+ *   alerting, not analysis — adding a name to the allow-list is a
+ *   deliberate ops decision ("I want a monitor on this"). PostHog
+ *   dashboards + ad-hoc HogQL are the source of truth for everything else.
+ *
+ * ## A/B experiments
+ *
+ *   `experiments.ts` owns the flag cache. Read with `getFlag(key)` in main
+ *   or `window.api.telemetryGetExperimentFlag(key)` from the renderer
+ *   (cache-first; first-ever boot fails closed to control). Record
+ *   exposure with `recordExposure(key, variant, source)` or its IPC
+ *   equivalent — per-session dedup is enforced main-side. Outcome events
+ *   are normal product events; PostHog joins them to the exposure at query
+ *   time via the standard experiment view.
+ *
+ * ## What NOT to do
+ *
+ *   - Don't ship raw file paths, prompts, model filenames, user-typed
+ *     strings. Bucket or hash them first.
+ *   - Don't call `posthog.reset()` on logout.
+ *   - Don't add events that nobody is going to look at in PostHog. Add
+ *     them to a dashboard or skip them.
+ *   - Don't bypass `bucketError`; if you need a new error category, extend
+ *     `src/shared/errorBucket.ts` so main and renderer classify the same way.
+ *   - Don't fire events synchronously inside hot loops (e.g. every render
+ *     of a Vue list). Throttle / dedup at the call site.
+ *
+ * =========================================================================
+ *
+ * NOTE: There is intentionally no remote kill-switch / sample-rate system
+ * (that grab-bag was deliberately removed). `experiments.ts` brought back
+ * the flag-evaluation subset only, for A/B testing. Don't recreate the
+ * kill-switch without a concrete need.
  */
 import { app } from 'electron'
 import { PostHog } from 'posthog-node'
-import { DEFAULT_POSTHOG_API_KEY, DEFAULT_POSTHOG_HOST, isPostHogFlagDisabled as isFlagDisabled } from '../../shared/posthogConfig'
+
+// PostHog's `FeatureFlagValue` lives in `@posthog/core` and is not
+// re-exported by `posthog-node`. Inlining the shape we actually use.
+export type FeatureFlagValue = string | boolean
+import {
+  DEFAULT_POSTHOG_API_KEY,
+  DEFAULT_POSTHOG_HOST,
+  isPostHogFlagDisabled as isFlagDisabled
+} from '../../shared/posthogConfig'
+import { isDatadogMirroredEvent } from '../../shared/datadogMirroredEvents'
+import { bucketError as sharedBucketError } from '../../shared/errorBucket'
 
 export type TelemetryValue = boolean | number | string | null | undefined
 export type TelemetryContext = Record<string, TelemetryValue | TelemetryValue[]>
@@ -61,6 +150,24 @@ export function _resetTelemetryRelayTargets(): void {
   _telemetryRelayTargets.clear()
 }
 
+/**
+ * @internal — exposed for tests. Resets module-level identity / consent /
+ * pending state so consecutive test suites don't share state. Does not
+ * close an in-flight PostHog client — tests bring their own mocked one.
+ */
+export function _resetForTest(): void {
+  client = null
+  distinctId = null
+  installationDeviceId = null
+  consentState = 'undecided'
+  pendingSessionStart = null
+  pendingIdentifyProperties = null
+  pendingMigrationAlias = null
+  defaultEventProperties = {}
+  initialized = false
+  drainingForQuit = false
+}
+
 /** @internal — exposed for tests. */
 export function _telemetryRelayTargetCount(): number {
   return _telemetryRelayTargets.size
@@ -72,7 +179,6 @@ interface PostHogConfig {
   enabled: boolean
 }
 
-
 function readPostHogConfig(): PostHogConfig {
   const apiKey = (process.env['POSTHOG_API_KEY'] || DEFAULT_POSTHOG_API_KEY).trim()
   const host = (process.env['POSTHOG_HOST'] || DEFAULT_POSTHOG_HOST).trim()
@@ -82,16 +188,96 @@ function readPostHogConfig(): PostHogConfig {
 
 let client: PostHog | null = null
 let distinctId: string | null = null
-let consentEnabled = true
 let bootstrapTimeMs: number = Date.now()
 let initialized = false
 
-export function setConsent(enabled: boolean): void {
-  consentEnabled = enabled
-  if (!enabled) {
-    // Best-effort flush so already-queued events still go out
+/**
+ * Default properties merged into every `capture()` payload. Set once at
+ * `initTelemetry()` time from `InitOptions`. Holds `app_version`,
+ * `app_channel`, `app_env`, `platform`, `arch`, and `is_packaged` so
+ * per-event filters / breakdowns work without a join against the person
+ * profile (PostHog person properties are joined at query time and are
+ * point-in-time as of write — releasing a new app version while the user
+ * still has events from the old one would mis-attribute without this).
+ *
+ * Per-call properties take precedence on key collision.
+ */
+let defaultEventProperties: Record<string, TelemetryValue> = {}
+
+/**
+ * Coarse release-channel classification derived from a semver-ish
+ * `appVersion`. `-beta` / `-canary` / `-alpha` markers map to their
+ * channel; a missing suffix is `stable`; an unrecognised suffix is
+ * `unknown` (kept coarse so future `-rc` / `-dev` builds fall into
+ * `unknown` rather than silently being misclassified). Mirrors the
+ * renderer's `deriveAppChannel` so both surfaces agree.
+ */
+function deriveAppChannel(appVersion: string): string {
+  if (!appVersion) return 'unknown'
+  const v = appVersion.toLowerCase()
+  if (v.includes('-beta')) return 'beta'
+  if (v.includes('-canary')) return 'canary'
+  if (v.includes('-alpha')) return 'alpha'
+  if (/[a-z]/.test(v.split('+')[0]?.split('-').slice(1).join('-') || '')) return 'unknown'
+  return 'stable'
+}
+
+/**
+ * Three-state consent.
+ *
+ * - `'granted'` — user opted in. Everything ships.
+ * - `'denied'` — user opted out. Nothing ships.
+ * - `'undecided'` — user has not chosen yet (fresh install OR a Desktop-1
+ * migrator whose `telemetryEnabled` setting was never set).
+ * Only events in `PRE_CONSENT_ALLOWED_EVENTS` ship; everything
+ * else is suppressed until the user makes a choice. Mirrors
+ * the renderer's pre-consent gate in `rendererBootstrap.ts`.
+ *
+ * Default at module load is `'undecided'`: if `setConsentState` is never
+ * called (test paths, mis-wired boot), we fail closed.
+ */
+export type ConsentState = 'granted' | 'denied' | 'undecided'
+
+let consentState: ConsentState = 'undecided'
+
+const PRE_CONSENT_ALLOWED_EVENTS: ReadonlySet<string> = new Set([
+  'desktop2.first_use.consent_decision'
+])
+
+function isAllowedToFire(event: string): boolean {
+  if (consentState === 'granted') return true
+  if (consentState === 'denied') return false
+  return PRE_CONSENT_ALLOWED_EVENTS.has(event)
+}
+
+/**
+ * Set the current consent state. The deferred `desktop2.session.started`
+ * event (and the deferred `identify` person-property update) fire as soon
+ * as state transitions to `'granted'`.
+ */
+export function setConsentState(state: ConsentState): void {
+  const previous = consentState
+  consentState = state
+  if (state !== 'granted') {
+    // Best-effort flush so already-queued events still go out before we
+    // start suppressing.
     void client?.flush().catch(() => {})
+    return
   }
+  // Transitioned to granted. Ship anything we held back.
+  if (previous !== 'granted') {
+    tryFlushDeferred()
+  }
+}
+
+/**
+ * Legacy two-state adapter. Existing callers can keep using `setConsent(bool)`
+ * during the Phase-1 transition; new code calls `setConsentState` directly.
+ * Note: this maps `false → 'denied'` (NOT `'undecided'`). Pass `'undecided'`
+ * explicitly via `setConsentState` for the first-use case.
+ */
+export function setConsent(enabled: boolean): void {
+  setConsentState(enabled ? 'granted' : 'denied')
 }
 
 export function isInitialized(): boolean {
@@ -117,6 +303,18 @@ export function initTelemetry(opts: InitOptions): void {
   initialized = true
   bootstrapTimeMs = Date.now()
 
+  // Set the per-event defaults BEFORE the early-return so disabled
+  // telemetry still gets a coherent snapshot (useful when tests stub
+  // the client out but still inspect `defaultEventProperties`).
+  defaultEventProperties = {
+    app_version: opts.appVersion,
+    app_channel: deriveAppChannel(opts.appVersion),
+    app_env: opts.appEnv,
+    is_packaged: opts.isPackaged,
+    platform: process.platform,
+    arch: process.arch
+  }
+
   const cfg = readPostHogConfig()
   if (!cfg.enabled) return
 
@@ -125,35 +323,94 @@ export function initTelemetry(opts: InitOptions): void {
       host: cfg.host,
       flushAt: 20,
       flushInterval: 10_000,
+      // posthog-node defaults `disableGeoip: true` (it assumes a server
+      // whose IP isn't the user's). Here posthog-node runs in the
+      // desktop main process ON the user's machine, so the request IP is
+      // the real user IP — opt back into GeoIP so PostHog derives
+      // `$geoip_country_name` / region / city for geo cohorts. Only
+      // consented users emit at all (capture() is consent-gated), and we
+      // surface country/region for analytics, not the raw `$ip`.
+      disableGeoip: false
     })
   } catch {
     client = null
   }
 
   // Stash session-start parameters until identify() can attribute them.
+  // The session-start payload duplicates the defaults so an event-only
+  // reader (no defaults yet) still sees them on the first event.
   pendingSessionStart = {
     app_env: opts.appEnv,
     app_version: opts.appVersion,
-    is_packaged: opts.isPackaged,
+    is_packaged: opts.isPackaged
   }
 }
 
 let pendingSessionStart: Record<string, TelemetryValue> | null = null
+let pendingIdentifyProperties: Record<string, TelemetryValue> | null = null
 
 /**
- * Bind the persistent device id once it is known. Emits the deferred
- * session-start event with the now-known distinctId.
+ * Deferred legacy-id alias. Set by `deferMigrationAlias()` at boot if
+ * there's a pending migration; fired by `tryFlushDeferred()` once
+ * consent transitions to granted. The `onAliased` callback clears the
+ * persisted pending state in `deviceId.ts` so we never re-fire the
+ * alias on subsequent boots once it has shipped.
  */
-export function identify(
-  id: string,
-  properties: Record<string, TelemetryValue> = {},
-): void {
-  distinctId = id
-  if (!client) return
-  try {
-    client.identify({ distinctId: id, properties: { $set: properties } })
-  } catch {
-    // ignore
+let pendingMigrationAlias: {
+  legacyId: string
+  installationId: string
+  idClass: string
+  onAliased: () => void
+} | null = null
+
+/**
+ * The anonymous device identity bound at boot (typically `installation_id =
+ * SHA-256(machine_id + salt)`). Kept separately from `distinctId` so the
+ * logout path can switch the active distinct id back to this baseline
+ * without re-deriving anything.
+ *
+ * On logout we explicitly do NOT call `posthog.reset()` (which would
+ * generate a fresh anonymous id and clobber the deterministic
+ * `installation_id` plus the acquisition `download_token`). Instead, we
+ * switch `distinctId` back to this remembered baseline.
+ */
+let installationDeviceId: string | null = null
+
+function tryFlushDeferred(): void {
+  if (!client || !distinctId) return
+  if (consentState !== 'granted') return
+  if (pendingIdentifyProperties) {
+    try {
+      client.identify({ distinctId, properties: { $set: pendingIdentifyProperties } })
+    } catch {
+      // ignore
+    }
+    pendingIdentifyProperties = null
+  }
+  if (pendingMigrationAlias) {
+    // Snapshot + clear before await so a re-entrant flush doesn't double-fire.
+    const m = pendingMigrationAlias
+    pendingMigrationAlias = null
+    void (async () => {
+      await aliasImmediate(m.installationId, m.legacyId)
+      // Intentionally NOT publishing `from_id` (the legacy random UUID)
+      // as an event property. The `alias` call above already merges
+      // the legacy person record into the new one in PostHog, so the
+      // legacy id is already linked where it needs to be. Shipping it
+      // again on a regular event would scatter it across the event
+      // properties column where it shows up in every export and
+      // ad-hoc query — unnecessary proliferation of an identifier.
+      capture('desktop2.identity.migrated', {
+        installation_id: m.installationId,
+        id_class: m.idClass
+      })
+      try {
+        m.onAliased()
+      } catch {
+        // onAliased is the on-disk pending-alias / migration-guard cleanup
+        // — best-effort; a failure leaves the alias to re-fire next boot.
+      }
+    })()
   }
   if (pendingSessionStart) {
     capture('desktop2.session.started', pendingSessionStart)
@@ -161,11 +418,148 @@ export function identify(
   }
 }
 
+/**
+ * Queue a legacy-id alias to fire as soon as consent is granted. If
+ * consent is already granted, fires synchronously via `tryFlushDeferred`.
+ * If denied or undecided, the alias sits in module state and ships on
+ * the next `setConsentState('granted')` transition.
+ *
+ * `onAliased` runs after the alias call resolves — the caller passes a
+ * one-shot cleanup (clear the persisted pending-alias file + mark the
+ * migration guard) so the alias does not re-fire on subsequent boots.
+ * It is the caller's job to make `onAliased` idempotent — `tryFlushDeferred`
+ * may run multiple times across a session.
+ */
+export function deferMigrationAlias(opts: {
+  legacyId: string
+  installationId: string
+  idClass: string
+  onAliased: () => void
+}): void {
+  pendingMigrationAlias = opts
+  tryFlushDeferred()
+}
+
+/**
+ * Bind the persistent device id once it is known. If consent is granted,
+ * fires the deferred session-start event and ships person-property updates.
+ * If consent is `'denied'` or `'undecided'`, the binding happens in module
+ * state (so `capture` works once consent flips to granted) but no network
+ * calls are made until `setConsentState('granted')` is called.
+ */
+export function identify(id: string, properties: Record<string, TelemetryValue> = {}): void {
+  distinctId = id
+  installationDeviceId = id
+  pendingIdentifyProperties = properties
+  if (!client) return
+  tryFlushDeferred()
+}
+
+/**
+ * Bind a `user_id` after a successful login.
+ *
+ * identity lifecycle.
+ * Aliases the current anonymous `installation_id` into the new `user_id`
+ * (PostHog merges histories), switches the active `distinct_id` to the
+ * user id, sets `is_authenticated: true` as a person property, and emits
+ * the canonical `app:user_logged_in` event.
+ *
+ * Suppressed unless consent is `'granted'` — auth signals are
+ * identifying data and must not ship pre-consent.
+ *
+ * Caller responsibility (renderer): also call
+ * `datadogRum.setUser({ id: userId })` so RUM tags subsequent events
+ * with the user identity. (Datadog is browser-only; main cannot do
+ * this from here.)
+ */
+export function bindUserId(userId: string, properties: Record<string, TelemetryValue> = {}): void {
+  if (!client || !installationDeviceId) return
+  if (consentState !== 'granted') return
+  const anonymousId = installationDeviceId
+  distinctId = userId
+  try {
+    client.alias({ distinctId: userId, alias: anonymousId })
+  } catch {
+    // ignore
+  }
+  try {
+    client.identify({
+      distinctId: userId,
+      properties: { $set: { ...properties, is_authenticated: true } }
+    })
+  } catch {
+    // ignore
+  }
+  capture('app:user_logged_in', { user_id: userId })
+}
+
+/**
+ * Switch back to the anonymous `installation_id` after a logout.
+ *
+ * **Not** `posthog.reset()`: that would generate a brand-new anonymous
+ * device id and clobber the deterministic `installation_id` plus the
+ * acquisition `download_token`. Instead, we restore `distinct_id` to
+ * the remembered baseline so subsequent events ride under the device
+ * identity (not the prior user).
+ *
+ * Person-property `is_authenticated` is flipped back to `false` on the
+ * anonymous identity so cohort filters reading it stay consistent.
+ *
+ * Caller responsibility (renderer): also clear Datadog
+ * (`datadogRum.setUser({})` / `clearUser`) so RUM stops tagging events
+ * with the prior user.
+ */
+export function unbindUserId(): void {
+  if (!installationDeviceId) return
+  distinctId = installationDeviceId
+  if (client && consentState === 'granted') {
+    try {
+      client.identify({
+        distinctId: installationDeviceId,
+        properties: { $set: { is_authenticated: false } }
+      })
+    } catch {
+      // ignore
+    }
+  }
+}
+
 export function capture(event: string, properties: TelemetryContext = {}): void {
   if (!client || !distinctId) return
-  if (!consentEnabled) return
+  if (!isAllowedToFire(event)) return
   try {
-    client.capture({ distinctId, event, properties })
+    // Per-call properties override defaults on key collision — callers
+    // that explicitly pass `app_version` (e.g. session-start payload,
+    // legacy event re-emitters) win.
+    client.capture({
+      distinctId,
+      event,
+      properties: { ...defaultEventProperties, ...properties }
+    })
+  } catch {
+    // ignore – telemetry must never break the app
+  }
+}
+
+/**
+ * Update PostHog person properties for the current distinct id (`$set`).
+ *
+ * Used by the renderer's cohort-context register pass and any other
+ * caller that wants to attach durable user-level properties without
+ * firing an event. Honors three-state consent: queued in
+ * `pendingIdentifyProperties` until consent grants, at which point
+ * `tryFlushDeferred()` ships the merged set in one identify call.
+ *
+ * Repeated calls in the queued state merge (latest write wins per key).
+ */
+export function registerPersonProperties(properties: Record<string, TelemetryValue>): void {
+  if (!client) return
+  if (consentState !== 'granted' || !distinctId) {
+    pendingIdentifyProperties = { ...(pendingIdentifyProperties || {}), ...properties }
+    return
+  }
+  try {
+    client.identify({ distinctId, properties: { $set: properties } })
   } catch {
     // ignore – telemetry must never break the app
   }
@@ -173,11 +567,70 @@ export function capture(event: string, properties: TelemetryContext = {}): void 
 
 export function captureException(error: unknown, properties: TelemetryContext = {}): void {
   if (!client || !distinctId) return
-  if (!consentEnabled) return
+  // Exceptions are reliability data; suppress them outside `'granted'`.
+  if (consentState !== 'granted') return
   try {
     client.captureException(error, distinctId, properties)
   } catch {
     // ignore
+  }
+}
+
+/**
+ * Issue a one-shot alias to merge a legacy distinct id into the current one.
+ *
+ * Used by the boot-time identity migration (random-UUID `device-id.txt` ->
+ * SHA-256(machine_id + salt)) so PostHog reconciles historical events under
+ * the new identity. Uses `aliasImmediate` so the promise resolves once
+ * PostHog has accepted the call; failures are swallowed.
+ *
+ * Suppressed unless consent is `'granted'`. Aliases ship identifying data
+ * (the legacy id), so we never even attempt the network call when consent
+ * is `'denied'` or `'undecided'`.
+ */
+export async function aliasImmediate(distinctId: string, alias: string): Promise<void> {
+  if (!client) return
+  if (consentState !== 'granted') return
+  try {
+    await client.aliasImmediate({ distinctId, alias })
+  } catch {
+    // ignore – telemetry must never break the app
+  }
+}
+
+/**
+ * Fetch every feature flag for the current user with a hard timeout.
+ *
+ * Used by the experiments module's boot-time refresh. Returns `{}` on
+ * timeout / failure so the caller can fall back to its cached values
+ * without distinguishing failure modes. Suppressed unless consent is
+ * `'granted'` — flag evaluation requests carry the distinct id and
+ * person properties to PostHog, so they must not ship pre-consent.
+ *
+ * The returned record's keys are PostHog flag/experiment names; values
+ * are the assigned variant (string for multivariate, boolean for
+ * single-flag). See `src/main/lib/experiments.ts` for the cache wrapper.
+ */
+export async function loadFeatureFlagsImmediate(
+  distinctId: string,
+  personProperties: Record<string, string>,
+  timeoutMs: number
+): Promise<Record<string, FeatureFlagValue>> {
+  if (!client) return {}
+  if (consentState !== 'granted') return {}
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    const flagsPromise = client.getAllFlags(distinctId, { personProperties })
+    const timeoutPromise = new Promise<Record<string, FeatureFlagValue>>((resolve) => {
+      timer = setTimeout(() => resolve({}), timeoutMs)
+    })
+    return await Promise.race([flagsPromise, timeoutPromise])
+  } catch {
+    return {}
+  } finally {
+    // Clear the timer when the flags promise wins the race so we don't
+    // keep the event loop alive for the remainder of `timeoutMs`.
+    if (timer !== undefined) clearTimeout(timer)
   }
 }
 
@@ -189,7 +642,7 @@ export function captureException(error: unknown, properties: TelemetryContext = 
 export async function trackedStep<T>(
   step: string,
   context: TelemetryContext,
-  fn: () => Promise<T>,
+  fn: () => Promise<T>
 ): Promise<T> {
   capture(`${step}.start`, context)
   const t0 = Date.now()
@@ -203,29 +656,17 @@ export async function trackedStep<T>(
       ...context,
       duration_ms: Date.now() - t0,
       error_bucket: bucketError(message),
-      error_message: message.slice(0, 500),
+      error_message: message.slice(0, 500)
     })
     throw err
   }
 }
 
 /**
- * Coarse error categorisation that matches the renderer-side `toErrorBucket`.
- * Kept in sync manually – when adding categories, update both.
+ * Coarse error categorisation. Re-exported from `src/shared/errorBucket.ts`
+ * so main and renderer classify identically (dedup).
  */
-export function bucketError(input: unknown): string {
-  const message = (
-    input instanceof Error ? input.message : typeof input === 'string' ? input : ''
-  ).toLowerCase()
-  if (!message) return 'unknown'
-  if (message.includes('cancel')) return 'cancelled'
-  if (message.includes('timeout')) return 'timeout'
-  if (message.includes('network') || message.includes('fetch')) return 'network'
-  if (message.includes('disk') || message.includes('space')) return 'disk'
-  if (message.includes('permission') || message.includes('access')) return 'permissions'
-  if (message.includes('path')) return 'path'
-  return 'other'
-}
+export const bucketError = sharedBucketError
 
 /**
  * Forward an event to renderer-side Datadog RUM via the registered
@@ -242,7 +683,12 @@ export function bucketError(input: unknown): string {
  * host window opens.
  */
 export function forwardToRenderer(event: string, context: TelemetryContext = {}): void {
-  if (!consentEnabled) return
+  if (!isAllowedToFire(event)) return
+  // only mirror events on the Datadog allow-list.
+  // Product / funnel events are PostHog-only; main already captured them via
+  // `capture()` and forwarding them to the renderer for Datadog mirror is
+  // pure overhead.
+  if (!isDatadogMirroredEvent(event)) return
   const payload = { event, context, mainAlreadyCaptured: true }
   for (const wc of _telemetryRelayTargets) {
     if (!wc.isDestroyed()) {
@@ -273,7 +719,7 @@ export async function shutdown(reason: string): Promise<void> {
     capture('desktop2.session.ended', {
       reason,
       uptime_ms: uptimeMs,
-      uptime_seconds: Math.round(uptimeMs / 1000),
+      uptime_seconds: Math.round(uptimeMs / 1000)
     })
   } catch {
     // ignore
@@ -317,7 +763,7 @@ export function installAppHooks(): void {
     event.preventDefault()
     const drainPromise = shutdown('quit').catch(() => {})
     const timeoutPromise = new Promise<void>((resolve) =>
-      setTimeout(resolve, SHUTDOWN_DRAIN_TIMEOUT_MS),
+      setTimeout(resolve, SHUTDOWN_DRAIN_TIMEOUT_MS)
     )
     void Promise.race([drainPromise, timeoutPromise]).finally(() => {
       app.exit(0)

@@ -4,6 +4,32 @@ import { detectFirebaseEnv } from './config'
 import { buildIndexedDbInjectScript } from './inject'
 import { extractProviderId, type SupportedProvider } from './intercept'
 import { startBridgeServer } from './server'
+import * as mainTelemetry from '../../lib/telemetry'
+
+/**
+ * Tie the anonymous `installation_id` to the signed-in user so PostHog
+ * merges the two identities. Both auth paths (Google server-side,
+ * GitHub popup) converge on the resolved Firebase `user` record, so this
+ * is the single hook that covers every sign-in.
+ *
+ * Only the email DOMAIN is sent (never the raw address) — enough to
+ * power internal cohort filters (e.g. the comfy.org A/B targeting)
+ * without shipping PII. `bindUserId` is consent-gated downstream, so a
+ * user who declined telemetry binds nothing. Wrapped so a telemetry
+ * failure can never break the auth flow.
+ */
+function bindSignedInUser(user: Record<string, unknown>): void {
+  try {
+    const uid = typeof user.uid === 'string' && user.uid.length > 0 ? user.uid : null
+    if (!uid) return
+    const email = typeof user.email === 'string' ? user.email : null
+    const at = email ? email.lastIndexOf('@') : -1
+    const emailDomain = at >= 0 ? email!.slice(at + 1).toLowerCase() : null
+    mainTelemetry.bindUserId(uid, emailDomain ? { email_domain: emailDomain } : {})
+  } catch {
+    // telemetry must never break the auth flow
+  }
+}
 
 export { extractProviderId, isFirebaseAuthHandlerUrl } from './intercept'
 
@@ -63,13 +89,17 @@ const POST_SIGNIN_HOLD_MS = 3000
 export async function handleFirebasePopup(
   url: string,
   comfyContents: WebContents,
-  opts: HandleFirebasePopupOpts = {},
+  opts: HandleFirebasePopupOpts = {}
 ): Promise<void> {
   const providerId = extractProviderId(url)
   if (!providerId) {
     opts.onError?.(new Error(`Firebase popup URL missing providerId: ${url}`))
     return
   }
+  // Sign-in funnel: started -> (app:user_logged_in | auth.sign_in_failed).
+  // `provider` splits Google vs GitHub conversion + failure rates. The
+  // success leg is emitted by bindSignedInUser's app:user_logged_in.
+  mainTelemetry.capture('desktop2.auth.sign_in_started', { provider: providerId })
   const env = detectFirebaseEnv(url)
 
   // Kill any stale bridge from a prior sign-in attempt the user
@@ -98,6 +128,10 @@ export async function handleFirebasePopup(
     // bridge page when they intended to start a new Google flow.
     void shell.openExternal(`${handle.url}?n=${Date.now().toString(36)}`)
     const { user, apiKey } = await handle.signInPromise
+    // Bind PostHog identity as soon as we have the user — independent of
+    // the embedded-view reload below, so the merge happens even if the
+    // window is torn down before the reload completes.
+    bindSignedInUser(user)
     if (comfyContents.isDestroyed()) return
     // Hold for a beat so the user actually sees the "You're signed in"
     // page (with its synchronised countdown) before we yank focus back
@@ -118,7 +152,15 @@ export async function handleFirebasePopup(
       parentWindow.focus()
     }
   } catch (err) {
-    opts.onError?.(err instanceof Error ? err : new Error(String(err)))
+    const error = err instanceof Error ? err : new Error(String(err))
+    // Mirrored to Datadog (allow-list) so ops can alert if sign-in
+    // breaks for a provider. error_bucket keeps the dashboard low-
+    // cardinality; the raw message stays out (may carry tokens / URLs).
+    mainTelemetry.emit('desktop2.auth.sign_in_failed', {
+      provider: providerId,
+      error_bucket: mainTelemetry.bucketError(error.message)
+    })
+    opts.onError?.(error)
   } finally {
     handle?.close()
     if (activeBridge === handle) activeBridge = null

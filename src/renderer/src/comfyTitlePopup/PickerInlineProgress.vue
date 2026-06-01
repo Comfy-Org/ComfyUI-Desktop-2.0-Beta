@@ -2,6 +2,8 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { CheckCircle, XCircle, Ban } from 'lucide-vue-next'
+import { operationInflightLabel, operationSuccessLabel } from '../lib/progressStatusLabel'
+import { MSG_CANCELLED } from '../../../shared/operationStatus'
 import type { PopupInstancePickerSnapshot } from '../../../preload/comfyTitlePopupPreload'
 
 type OperationStatus = PopupInstancePickerSnapshot['installOperationStatus'][string]
@@ -24,8 +26,8 @@ const { t } = useI18n()
 
 const isInflight  = computed(() => !props.operation.done)
 const isSuccess   = computed(() => props.operation.done && props.operation.ok === true)
-const isError     = computed(() => props.operation.done && props.operation.ok === false && props.operation.error !== 'Cancelled.')
-const isCancelled = computed(() => props.operation.done && props.operation.error === 'Cancelled.')
+const isError     = computed(() => props.operation.done && props.operation.ok === false && props.operation.error !== MSG_CANCELLED)
+const isCancelled = computed(() => props.operation.done && props.operation.error === MSG_CANCELLED)
 
 const progressPercent   = computed(() => Math.min(100, Math.max(0, props.operation.percent)))
 const isIndeterminate   = computed(() => props.operation.percent < 0 && !props.operation.done)
@@ -33,8 +35,8 @@ const isIndeterminate   = computed(() => props.operation.percent < 0 && !props.o
 const statusLabel = computed(() => {
   if (isCancelled.value) return t('instancePicker.progressCancelled')
   if (isError.value)     return props.operation.error ?? t('instancePicker.progressError')
-  if (isSuccess.value)   return t('instancePicker.progressSuccessStopped')
-  return props.operation.status || props.operation.title
+  if (isSuccess.value)   return operationSuccessLabel(props.operation, t)
+  return props.operation.status || operationInflightLabel(props.operation, t)
 })
 </script>
 
@@ -73,7 +75,7 @@ const statusLabel = computed(() => {
         <div class="pip__icon pip__icon--success">
           <CheckCircle :size="40" />
         </div>
-        <p class="pip__heading">{{ t('instancePicker.progressSuccessStopped') }}</p>
+        <p class="pip__heading">{{ operationSuccessLabel(operation, t) }}</p>
         <p class="pip__subtext">{{ installationName }} {{ t('instancePicker.progressSuccessSubtext') }}</p>
         <button
           type="button"

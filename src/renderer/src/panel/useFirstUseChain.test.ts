@@ -7,6 +7,15 @@ import type { ActionResult, FieldOption, ShowProgressOpts, Source } from '../typ
 import { useProgressStore } from '../stores/progressStore'
 import { useFirstUseChain, type FirstUseChainApi } from './useFirstUseChain'
 
+// The express-install path emits telemetry via `emitTelemetryAction`,
+// which dispatches a CustomEvent on `window`. These tests replace
+// `window` with a plain stub (`vi.stubGlobal`) that drops prototype
+// methods like `dispatchEvent`, so stub the dispatch out — the chain
+// logic under test doesn't care about the telemetry side effect.
+vi.mock('../lib/telemetry', () => ({
+  emitTelemetryAction: vi.fn()
+}))
+
 /**
  * `useFirstUseChain` integration tests focused on the Express Install
  * path. Express skips the Configure (`InstallWizardModal`) screen and
@@ -21,21 +30,21 @@ const standaloneSource: Source = {
   label: 'Standalone',
   fields: [
     { id: 'release', label: 'Release', type: 'select' },
-    { id: 'variant', label: 'Variant', type: 'select' },
-  ],
+    { id: 'variant', label: 'Variant', type: 'select' }
+  ]
 }
 
 const recommendedRelease: FieldOption = {
   value: 'v1.0.0',
   label: 'v1.0.0',
-  recommended: true,
+  recommended: true
 }
 const fallbackRelease: FieldOption = { value: 'v0.9.0', label: 'v0.9.0' }
 const recommendedVariant: FieldOption = {
   value: 'nvidia',
   label: 'NVIDIA',
   recommended: true,
-  data: { variantId: 'nvidia-cuda' },
+  data: { variantId: 'nvidia-cuda' }
 }
 
 interface TestApi {
@@ -69,7 +78,9 @@ function buildApi(overrides: Partial<TestApi> = {}): TestApi {
       if (fieldId === 'variant') return Promise.resolve([recommendedVariant])
       return Promise.resolve([])
     }),
-    buildInstallation: vi.fn().mockResolvedValue({ sourceId: 'standalone', sourceCategory: 'local' }),
+    buildInstallation: vi
+      .fn()
+      .mockResolvedValue({ sourceId: 'standalone', sourceCategory: 'local' }),
     getUniqueName: vi.fn().mockResolvedValue('ComfyUI'),
     addInstallation: vi.fn().mockResolvedValue({ ok: true, entry: { id: 'inst-express-1' } }),
     installInstance: vi.fn().mockResolvedValue(undefined),
@@ -83,7 +94,7 @@ function buildApi(overrides: Partial<TestApi> = {}): TestApi {
     onErrorDetail: vi.fn().mockReturnValue(() => {}),
     onInstallProgress: vi.fn().mockReturnValue(() => {}),
     onComfyOutput: vi.fn().mockReturnValue(() => {}),
-    ...overrides,
+    ...overrides
   }
 }
 
@@ -112,10 +123,10 @@ function mountChain(): MountedChain {
         switchPanel,
         dismissTakeoverDirect,
         performChooserLaunch,
-        openFirstUseTakeover,
+        openFirstUseTakeover
       })
       return () => h('div')
-    },
+    }
   })
 
   mount(TestHost)
@@ -126,7 +137,7 @@ function mountChain(): MountedChain {
     switchPanel,
     dismissTakeoverDirect,
     performChooserLaunch,
-    openFirstUseTakeover,
+    openFirstUseTakeover
   }
 }
 
@@ -150,22 +161,22 @@ describe('useFirstUseChain — Express Install', () => {
       'standalone',
       expect.objectContaining({
         release: recommendedRelease,
-        variant: recommendedVariant,
-      }),
+        variant: recommendedVariant
+      })
     )
     expect(testApi.addInstallation).toHaveBeenCalledWith(
       expect.objectContaining({
         name: 'ComfyUI',
         installPath: '/Users/test/ComfyUI',
-        sourceId: 'standalone',
-      }),
+        sourceId: 'standalone'
+      })
     )
     expect(chain.handleShowProgress).toHaveBeenCalledWith(
       expect.objectContaining({
         installationId: 'inst-express-1',
         autoLaunchOnFinish: true,
-        opKind: 'install',
-      }),
+        opKind: 'install'
+      })
     )
     // Did NOT delegate to Configure when express succeeded.
     expect(chain.switchPanel).not.toHaveBeenCalled()
@@ -183,9 +194,7 @@ describe('useFirstUseChain — Express Install', () => {
   })
 
   it('falls back to Configure when hardware validation reports unsupported', async () => {
-    testApi.validateHardware = vi
-      .fn()
-      .mockResolvedValue({ supported: false, error: 'No GPU' })
+    testApi.validateHardware = vi.fn().mockResolvedValue({ supported: false, error: 'No GPU' })
     vi.stubGlobal('window', { ...window, api: testApi })
 
     const chain = mountChain()
@@ -197,9 +206,7 @@ describe('useFirstUseChain — Express Install', () => {
   })
 
   it('falls back to Configure when addInstallation rejects', async () => {
-    testApi.addInstallation = vi
-      .fn()
-      .mockResolvedValue({ ok: false, message: 'path conflict' })
+    testApi.addInstallation = vi.fn().mockResolvedValue({ ok: false, message: 'path conflict' })
     vi.stubGlobal('window', { ...window, api: testApi })
 
     const chain = mountChain()
@@ -237,7 +244,10 @@ describe('useFirstUseChain — chainSpan stamping', () => {
     vi.clearAllMocks()
   })
 
-  function progressOpts(installationId: string, extra: Partial<ShowProgressOpts> = {}): ShowProgressOpts {
+  function progressOpts(
+    installationId: string,
+    extra: Partial<ShowProgressOpts> = {}
+  ): ShowProgressOpts {
     return {
       installationId,
       title: `Installing — ${installationId}`,

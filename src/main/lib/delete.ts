@@ -2,6 +2,39 @@ import fs from 'fs'
 import path from 'path'
 import { formatTime } from './util'
 
+// Windows can briefly hold handles on `.git\refs`, `.venv\Lib\site-packages`,
+// and similar after `git` / `uv pip install` exit (antivirus scanners,
+// Search Indexer, the Restart Manager). The handles release within a few
+// hundred ms but the `rmdir` / `unlink` syscall fails with `ENOTEMPTY`,
+// `EBUSY`, `EPERM`, or `EACCES` if it arrives during that window. Retry
+// with short backoff before surfacing the error.
+const TRANSIENT_DELETE_ERRORS = new Set(['ENOTEMPTY', 'EBUSY', 'EPERM', 'EACCES'])
+const DELETE_RETRY_DELAYS_MS = [50, 100, 200, 400, 800]
+
+function isTransientDeleteError(err: NodeJS.ErrnoException | null): boolean {
+  return !!err && !!err.code && TRANSIENT_DELETE_ERRORS.has(err.code)
+}
+
+function retryFsOp(
+  op: (cb: (err: NodeJS.ErrnoException | null) => void) => void,
+  cb: (err: NodeJS.ErrnoException | null) => void,
+  signal?: AbortSignal,
+  attempt = 0,
+): void {
+  op((err) => {
+    if (!err || attempt >= DELETE_RETRY_DELAYS_MS.length || !isTransientDeleteError(err)) {
+      return cb(err)
+    }
+    // Honour cancel between retries — a single hot file could otherwise
+    // keep the retry loop alive for ~1.55s after the user cancels.
+    if (signal?.aborted) return cb(new Error('Delete cancelled'))
+    setTimeout(() => {
+      if (signal?.aborted) return cb(new Error('Delete cancelled'))
+      retryFsOp(op, cb, signal, attempt + 1)
+    }, DELETE_RETRY_DELAYS_MS[attempt])
+  })
+}
+
 export interface DeleteProgress {
   deleted: number
   total: number
@@ -121,7 +154,7 @@ export async function deleteDir(
           if (entry.isDirectory()) {
             walkAsync(fullPath, (err) => {
               if (err) return done(err)
-              fs.rmdir(fullPath, (e) => {
+              retryFsOp((cb) => fs.rmdir(fullPath, cb), (e) => {
                 if (e) return done(e)
                 deleted++
                 report()
@@ -132,10 +165,10 @@ export async function deleteDir(
                 } else {
                   next()
                 }
-              })
+              }, signal)
             })
           } else {
-            fs.unlink(fullPath, (e) => {
+            retryFsOp((cb) => fs.unlink(fullPath, cb), (e) => {
               if (e) return done(e)
               deleted++
               report()
@@ -146,7 +179,7 @@ export async function deleteDir(
               } else {
                 next()
               }
-            })
+            }, signal)
           }
         }
         next()
@@ -155,10 +188,10 @@ export async function deleteDir(
 
     walkAsync(dir, (err) => {
       if (err) return reject(err)
-      fs.rmdir(dir, (e) => {
+      retryFsOp((cb) => fs.rmdir(dir, cb), (e) => {
         if (e) return reject(e)
         resolve()
-      })
+      }, signal)
     })
   })
 }

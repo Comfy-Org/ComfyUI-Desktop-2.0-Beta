@@ -114,11 +114,11 @@ export function createUrlSource(config: UrlSourceConfig): SourcePlugin {
               editType: 'boolean', refreshSection: true, tooltip: t('tooltips.autoDownloadOutputs') },
             ...((installation.autoDownloadOutputs as boolean | undefined) !== false ? [
               { id: 'useSharedOutputDir', label: t('common.useSharedOutputDir'), value: (installation.useSharedOutputDir as boolean | undefined) ?? true, editable: true,
-                editType: 'boolean', refreshSection: true, tooltip: t('tooltips.useSharedOutputDir') },
+                editType: 'boolean', refreshSection: true, nested: true, tooltip: t('tooltips.useSharedOutputDir') },
               ...((installation.useSharedOutputDir as boolean | undefined) === false ? [
                 { id: 'outputDir', label: t('media.outputDir'),
                   value: (installation.outputDir as string | undefined) || settings.defaults.outputDir,
-                  editable: true, editType: 'path', browseOnly: true, tooltip: t('tooltips.outputDirPerInstall') },
+                  editable: true, editType: 'path', browseOnly: true, nested: true, tooltip: t('tooltips.outputDirPerInstall') },
               ] : []),
             ] : []),
           ],

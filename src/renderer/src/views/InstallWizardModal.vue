@@ -134,12 +134,52 @@ watch(instPath, (newPath) => {
 /** Generation counter — incremented on each open/source change to discard stale responses */
 let loadGeneration = 0
 
+/** Whitespace-only instance name is rejected: it produces a name made
+ *  of nothing but spaces. A truly-blank field is allowed — `handleSave`
+ *  falls back to the suggested default — so the error only fires once
+ *  the user has typed something that trims to empty. */
+const nameError = computed(() =>
+  instName.value.length > 0 && instName.value.trim().length === 0
+    ? t('newInstall.nameWhitespace')
+    : ''
+)
+
+/** Renderer-side sanity check for the Remote Connection / Cloud URL
+ *  field. Mirrors main's `parseUrl`: a scheme-less value is tried as
+ *  `http://<value>` and must yield a hostname. Keeps the bad-URL guard
+ *  in the form instead of failing silently at connect time. */
+function isValidConnectionUrl(raw: string): boolean {
+  const trimmed = raw.trim()
+  if (!trimmed) return false
+  try {
+    const parsed = new URL(trimmed.includes('://') ? trimmed : `http://${trimmed}`)
+    return parsed.hostname.length > 0
+  } catch {
+    return false
+  }
+}
+
+/** Inline error for the editable connection URL (`url` text field on
+ *  Remote Connection / Cloud sources). Empty/whitespace or an
+ *  unparseable value both surface the same hint. Scoped to `id === 'url'`
+ *  so other text fields (e.g. git's repo) keep their own error flow. */
+const urlFieldError = computed(() => {
+  const source = currentSource.value
+  if (!source) return ''
+  const urlField = source.fields.find((f) => f.id === 'url' && f.type === 'text')
+  if (!urlField) return ''
+  const value = textFieldValues.value.get('url') ?? ''
+  return isValidConnectionUrl(value) ? '' : t('newInstall.urlInvalid')
+})
+
 /** Single-screen guardrail gate. Continue must respect every check
  *  the user can interact with on the Configure surface. `skipInstall`
  *  sources (Remote Connection) have no install path, so the path-issue
- *  guard doesn't apply to them. */
+ *  guard doesn't apply to them. The instance-name and connection-URL
+ *  validity guards apply to every source. */
 const canContinue = computed(() => {
   if (!currentSource.value) return false
+  if (nameError.value || urlFieldError.value) return false
   if (currentSource.value.skipInstall) return !saveDisabled.value
   return !saveDisabled.value && pathIssues.value.length === 0
 })
@@ -622,14 +662,19 @@ defineExpose({ open })
         <div class="config-card__body">
           <div class="config-field">
             <label class="config-label" for="inst-name-standalone">{{ $t('common.name') }}</label>
-            <div class="brand-input">
+            <div class="brand-input" :class="{ 'brand-input--invalid': nameError }">
               <input
                 id="inst-name-standalone"
                 :value="instName"
                 type="text"
                 :placeholder="suggestedName || $t('common.namePlaceholder')"
+                :aria-invalid="!!nameError"
+                :aria-describedby="nameError ? 'inst-name-error' : undefined"
                 @input="instName = ($event.target as HTMLInputElement).value"
               />
+            </div>
+            <div v-if="nameError" id="inst-name-error" class="field-error" role="alert">
+              {{ nameError }}
             </div>
           </div>
 
@@ -647,7 +692,11 @@ defineExpose({ open })
               :class="{ 'config-field--disabled': currentSource?.skipInstall }"
             >
               <label class="config-label">{{ $t('newInstall.detectedGpuLabel') }}</label>
-              <div class="brand-input config-select" role="textbox" aria-readonly="true">
+              <div
+                class="brand-input config-select config-select--readonly"
+                role="textbox"
+                aria-readonly="true"
+              >
                 <span class="config-select__value">{{ detectedGpu }}</span>
               </div>
             </div>
@@ -742,12 +791,21 @@ defineExpose({ open })
 
                     <template v-if="field.type === 'text'">
                       <div class="path-input">
-                        <div class="brand-input config-source-text">
+                        <div
+                          class="brand-input config-source-text"
+                          :class="{
+                            'brand-input--invalid': field.id === 'url' && urlFieldError
+                          }"
+                        >
                           <input
                             :id="`sf-${field.id}`"
                             type="text"
                             :value="textFieldValues.get(field.id) ?? ''"
                             :placeholder="field.defaultValue || ''"
+                            :aria-invalid="field.id === 'url' && !!urlFieldError"
+                            :aria-describedby="
+                              field.id === 'url' && urlFieldError ? `sf-${field.id}-error` : undefined
+                            "
                             @input="
                               textFieldValues.set(
                                 field.id,
@@ -768,6 +826,14 @@ defineExpose({ open })
                       </div>
                       <div v-if="fieldErrors.get(field.id)" class="field-error">
                         {{ fieldErrors.get(field.id) }}
+                      </div>
+                      <div
+                        v-else-if="field.id === 'url' && urlFieldError"
+                        :id="`sf-${field.id}-error`"
+                        class="field-error"
+                        role="alert"
+                      >
+                        {{ urlFieldError }}
                       </div>
                     </template>
 
@@ -961,6 +1027,18 @@ defineExpose({ open })
 .config-select {
   padding: 8px 12px;
   cursor: default;
+}
+/* The detected GPU is fixed to the host hardware and cannot be changed, so
+ * present it as a static read-only value: strip the .brand-input hover
+ * affordance (border/background shift) that otherwise implies it's editable
+ * like the surrounding name/path inputs. Mirrors the muted read-only
+ * treatment used for the same value in QuickInstallModal (.detected-hardware). */
+.config-select--readonly:hover {
+  border-color: var(--brand-surface-border);
+  background: var(--brand-surface-bg);
+}
+.config-select--readonly .config-select__value {
+  color: var(--text-muted);
 }
 .config-select__value {
   flex: 1 1 auto;
