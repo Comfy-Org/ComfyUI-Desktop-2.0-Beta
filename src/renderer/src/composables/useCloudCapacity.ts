@@ -82,6 +82,11 @@ export function useCloudCapacity(): {
    *   - `disabled` → resolves `false` (defense-in-depth; surface also
    *                  greys/blocks at the click level). */
   confirmEntry: () => Promise<boolean>
+  /** Resolves once the boot-time capacity fetch has settled. Use for
+   *  pre-render decisions (e.g. the first-use Cloud-vs-Local default
+   *  selection) where reading a stale `'normal'` would race the user's
+   *  first click. Never rejects — failures fall back to `'normal'`. */
+  whenReady: () => Promise<void>
 } {
   const dialogs = useDialogs()
   const { t } = useI18n()
@@ -111,5 +116,6 @@ export function useCloudCapacity(): {
     isDisabled: () => status.value === 'disabled',
     isBlockingOrWarning: () => status.value !== 'normal',
     confirmEntry,
+    whenReady: ensureLoaded,
   }
 }

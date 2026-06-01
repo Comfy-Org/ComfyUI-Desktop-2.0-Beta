@@ -97,20 +97,26 @@ const locale = ref('en')
 const pickedChoice = ref<'cloud' | 'local'>('cloud')
 
 // Capacity-protection switch for Cloud (PostHog flag
-// `desktop-cloud-capacity`). When `disabled`, we auto-flip the default
-// pick to Local so users land on a usable option during an outage; the
-// Cloud card stays visible but is non-selectable and the proceed
-// handler refuses to advance with `cloud` picked.
+// `desktop-cloud-capacity`). `capacityReady` gates the visible picker
+// so we never render with the wrong card selected: on mount we await
+// `whenReady`, set the initial pick from the resolved status (Local if
+// disabled, Cloud otherwise), and only then flip `capacityReady` to
+// expose the cards. The watch still flips if the flag is changed live
+// later in the session (unlikely; boot-only refresh by design).
 const cloudCapacity = useCloudCapacity()
-watch(
-  cloudCapacity.status,
-  (status) => {
-    if (status === 'disabled' && pickedChoice.value === 'cloud') {
-      pickedChoice.value = 'local'
-    }
-  },
-  { immediate: true }
-)
+const capacityReady = ref(false)
+onMounted(async () => {
+  await cloudCapacity.whenReady()
+  if (cloudCapacity.isDisabled()) {
+    pickedChoice.value = 'local'
+  }
+  capacityReady.value = true
+})
+watch(cloudCapacity.status, (status) => {
+  if (status === 'disabled' && pickedChoice.value === 'cloud') {
+    pickedChoice.value = 'local'
+  }
+})
 const cloudDescriptionKey = computed(() => {
   if (cloudCapacity.isDisabled()) return 'cloud.capacityDisabledHint'
   if (cloudCapacity.isDegraded()) return 'cloud.capacityDegradedHint'
