@@ -184,6 +184,7 @@ export function buildElectronApi(): ElectronApi {
 
     // App
     getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+    getCloudCapacity: () => ipcRenderer.invoke('get-cloud-capacity'),
     quitApp: () => ipcRenderer.invoke('quit-app'),
     relaunchApp: () => ipcRenderer.invoke('app:relaunch'),
     resetZoom: () => ipcRenderer.invoke('reset-zoom'),

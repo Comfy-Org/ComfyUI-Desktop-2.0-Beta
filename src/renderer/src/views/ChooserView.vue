@@ -5,6 +5,7 @@ import { useInstallationStore } from '../stores/installationStore'
 import { useSessionStore } from '../stores/sessionStore'
 import { useInstallContextMenu } from '../composables/useInstallContextMenu'
 import { useInstallList } from '../composables/useInstallList'
+import { useCloudCapacity } from '../composables/useCloudCapacity'
 import { Cloud, MoreVertical, Plus, Search } from 'lucide-vue-next'
 import ContextMenu from '../components/ContextMenu.vue'
 import BrandBackground from '../components/BrandBackground.vue'
@@ -158,7 +159,17 @@ async function closeRunningInstance(inst: Installation): Promise<void> {
   await window.api.closeComfyWindow(inst.id)
 }
 
+// Capacity-protection switch (PostHog flag `desktop-cloud-capacity`).
+// When `disabled`, the tile is greyed out and the click is a no-op so
+// users can't enter cloud during an outage. When `degraded`, the tile
+// surfaces a "Heavy usage" meta pill but the click still proceeds.
+const cloudCapacity = useCloudCapacity()
+
 function handleCloudClick(): void {
+  // Capacity kill-switch — bail out before any navigation when cloud is
+  // currently disabled. The tile is also styled disabled so this is a
+  // defense-in-depth check (keyboard activation also routes through here).
+  if (cloudCapacity.isDisabled()) return
   // If a cloud install exists, route through the same body-click path
   // the install tiles use so behaviour can't drift between the two.
   // Otherwise promote new-install as a Try-Cloud CTA.
@@ -211,8 +222,11 @@ function handleNewInstallClick(): void {
         <div
           v-if="showCloudCard"
           role="button"
-          tabindex="0"
+          :tabindex="cloudCapacity.isDisabled() ? -1 : 0"
+          :aria-disabled="cloudCapacity.isDisabled() ? true : undefined"
           class="chooser-tile chooser-tile-cloud"
+          :class="{ 'chooser-tile--cloud-disabled': cloudCapacity.isDisabled() }"
+          :data-cloud-capacity="cloudCapacity.status.value"
           @click="handleCloudClick"
           @keydown.enter="handleCloudClick"
           @keydown.space.prevent="handleCloudClick"
@@ -240,6 +254,15 @@ function handleNewInstallClick(): void {
           </div>
           <div class="chooser-tile-meta">
             <span
+              v-if="cloudCapacity.isBlockingOrWarning()"
+              class="chooser-tile-pill chooser-tile-pill--capacity"
+              :class="{ 'chooser-tile-pill--capacity-disabled': cloudCapacity.isDisabled() }"
+              :title="cloudCapacity.isDisabled() ? t('cloud.capacityDisabledHint') : t('cloud.capacityDegradedHint')"
+            >
+              {{ cloudCapacity.isDisabled() ? t('cloud.capacityDisabled') : t('cloud.capacityDegraded') }}
+            </span>
+            <span
+              v-else
               class="chooser-tile-pill"
               :title="cloudInstall ? cloudInstall.sourceLabel : t('cloud.desc')"
             >

@@ -58,6 +58,7 @@ export type {
   ErrorDetailData,
   AppUpdateState,
   AppUpdateDownloadProgress,
+  CloudCapacityStatus,
   ElectronApi,
 } from '../../../types/ipc'
 export { REQUIRES_STOPPED } from '../../../types/ipc'

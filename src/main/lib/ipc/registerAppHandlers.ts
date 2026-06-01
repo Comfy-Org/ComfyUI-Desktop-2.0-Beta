@@ -12,10 +12,17 @@ import type { FieldOption } from './shared'
 import { getGpuPromise, setGpuPromise } from './shared'
 import * as mainTelemetry from '../telemetry'
 import { getDeviceId } from '../deviceId'
+import { getCloudCapacityStatus } from '../cloudCapacity'
 
 export function registerAppHandlers(): void {
   // App version
   ipcMain.handle('get-app-version', () => getAppVersion())
+
+  // Capacity-protection switch for Cloud entry points. Resolved from the
+  // `desktop-cloud-capacity` PostHog flag via the experiments cache; safe
+  // default is `'normal'` (no UI change). See `cloudCapacity.ts` for the
+  // boot-time / consent caveats.
+  ipcMain.handle('get-cloud-capacity', () => getCloudCapacityStatus())
 
   // Sources
   ipcMain.handle('get-sources', () =>

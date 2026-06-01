@@ -11,6 +11,11 @@ export type Unsubscribe = () => void
 export type Theme = 'system' | 'dark' | 'light'
 export type ResolvedTheme = Exclude<Theme, 'system'>
 
+/** Capacity-protection status for Cloud entry points (see
+ *  `getCloudCapacity` and `useCloudCapacity`). `normal` = no UI changes;
+ *  `degraded` = show heavy-usage warning; `disabled` = block entry. */
+export type CloudCapacityStatus = 'normal' | 'degraded' | 'disabled'
+
 // --- Installation types ---
 export interface Installation {
   id: string
@@ -1128,6 +1133,11 @@ export interface ElectronApi {
 
   // App
   getAppVersion(): Promise<string>
+  /** Capacity-protection switch for Cloud entry points. Resolved at boot
+   *  from the `desktop-cloud-capacity` PostHog flag (variants `normal` |
+   *  `degraded` | `disabled`); defaults to `'normal'` when the flag is
+   *  unavailable. Renderers consume this via `useCloudCapacity`. */
+  getCloudCapacity(): Promise<CloudCapacityStatus>
   quitApp(): Promise<void>
   relaunchApp(): Promise<void>
   resetZoom(): Promise<void>
