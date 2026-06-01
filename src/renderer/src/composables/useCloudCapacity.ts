@@ -22,11 +22,42 @@ import type { CloudCapacityStatus } from '../types/ipc'
 const status = ref<CloudCapacityStatus>('normal')
 let loadPromise: Promise<void> | null = null
 
+/**
+ * Resolve the capacity-fetch entry point. The composable runs in two
+ * different renderer contexts with different preloads:
+ *   - Panel / dashboard / first-use: `window.api.getCloudCapacity` from
+ *     the main `comfyPreload`.
+ *   - IPP popup (own WebContentsView): no `window.api`; uses the popup
+ *     bridge `window.__comfyTitlePopup.getCloudCapacity` from
+ *     `comfyTitlePopupPreload`. Both forward to the same `ipcMain`
+ *     handler, so the resolved value is identical.
+ * Returns `null` if neither surface is present (test envs, broken
+ * preload) so the caller fail-closes to `'normal'`.
+ */
+interface CapacitySource {
+  getCloudCapacity: () => Promise<unknown>
+}
+function resolveCapacitySource(): CapacitySource | null {
+  const w = window as unknown as {
+    api?: { getCloudCapacity?: () => Promise<unknown> }
+    __comfyTitlePopup?: { getCloudCapacity?: () => Promise<unknown> }
+  }
+  if (w.api && typeof w.api.getCloudCapacity === 'function') {
+    return w.api as CapacitySource
+  }
+  if (w.__comfyTitlePopup && typeof w.__comfyTitlePopup.getCloudCapacity === 'function') {
+    return w.__comfyTitlePopup as CapacitySource
+  }
+  return null
+}
+
 function ensureLoaded(): Promise<void> {
   if (loadPromise) return loadPromise
   loadPromise = (async () => {
     try {
-      const next = await window.api.getCloudCapacity()
+      const source = resolveCapacitySource()
+      if (!source) return
+      const next = await source.getCloudCapacity()
       if (next === 'normal' || next === 'degraded' || next === 'disabled') {
         status.value = next
       }
