@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { ref } from 'vue'
+import { ref, shallowRef, triggerRef } from 'vue'
 
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({
@@ -8,12 +8,23 @@ vi.mock('vue-i18n', () => ({
   }),
 }))
 
-const sessionState = vi.hoisted(() => ({
-  running: new Set<string>(),
-}))
+// Wrap the running-set in a shallowRef so `setRunning` can trigger the
+// composable's computed properties on real session-store mutations,
+// not on incidental dep churn from the test.
+const sessionState = vi.hoisted(() => ({ running: new Set<string>() }))
+function setRunning(running: Set<string>): void {
+  sessionState.running = running
+  triggerRef(sessionStoreVersion)
+}
+const sessionStoreVersion = shallowRef(0)
 vi.mock('../stores/sessionStore', () => ({
   useSessionStore: () => ({
-    isRunning: (id: string) => sessionState.running.has(id),
+    isRunning: (id: string) => {
+      // Touch the version ref so the computed re-runs when `setRunning`
+      // triggers it.
+      void sessionStoreVersion.value
+      return sessionState.running.has(id)
+    },
   }),
 }))
 
@@ -25,7 +36,7 @@ function installation(id: string): Installation {
 }
 
 beforeEach(() => {
-  sessionState.running.clear()
+  setRunning(new Set<string>())
 })
 
 describe('useInstallCta', () => {
@@ -90,16 +101,30 @@ describe('useInstallCta', () => {
     expect(cta.label.value).toBe('Start')
   })
 
-  it('reactively flips Restart → Start when the session stops', () => {
-    sessionState.running.add('inst-A')
+  it('reactively flips Restart → Start when the session-store reports the install stopped', () => {
+    setRunning(new Set<string>(['inst-A']))
     const inst = ref<Installation | null>(installation('inst-A'))
     const active = ref<string | null>('inst-A')
     const cta = useInstallCta(inst, { activeInstallationId: active })
     expect(cta.label.value).toBe('Restart')
-    sessionState.running.delete('inst-A')
-    // Touch a dependency to retrigger the computed (the Set delete is
-    // not reactive); swap the installation ref to force re-evaluation.
-    inst.value = installation('inst-A')
+    // Real driver: a session-store push from main flips
+    // `sessionStore.isRunning(id)` to false. `setRunning` triggers the
+    // mocked store's version ref so the composable's `runningAnywhere`
+    // computed re-runs — this is what proves the composable subscribes
+    // to the session store, not to an incidental ref the test held.
+    setRunning(new Set<string>())
     expect(cta.label.value).toBe('Start')
+  })
+
+  it('reactively flips Restart → Switch when the host window detaches the install', () => {
+    setRunning(new Set<string>(['inst-A']))
+    const inst = ref<Installation | null>(installation('inst-A'))
+    const active = ref<string | null>('inst-A')
+    const cta = useInstallCta(inst, { activeInstallationId: active })
+    expect(cta.label.value).toBe('Restart')
+    // Host window detached → activeInstallationId clears, the running
+    // install now reads as "running elsewhere".
+    active.value = null
+    expect(cta.label.value).toBe('Switch')
   })
 })
