@@ -67,6 +67,7 @@ import {
   markIdentityMigrationCompleted
 } from './lib/deviceId'
 import { initExperiments } from './lib/experiments'
+import { initCloudCapacity } from './lib/cloudCapacity'
 
 import {
   claimAttachHost,
@@ -1124,6 +1125,13 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
         id_class: getIdClass()
       }
     })
+
+    // Boot the cloud capacity-protection switch. Separate from
+    // `initExperiments` because this is an OPS kill-switch, not an A/B
+    // experiment — it deliberately bypasses the telemetry consent gate
+    // (a user who declined analytics still benefits from cloud being
+    // throttled when GPUs are saturated). See `cloudCapacity.ts`.
+    void initCloudCapacity({ distinctId: installationId })
 
     const locale = (settings.get('language') as string | undefined) || app.getLocale().split('-')[0]
     i18n.init(locale)

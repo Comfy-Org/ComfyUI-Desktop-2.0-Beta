@@ -780,6 +780,48 @@ export async function loadFeatureFlagsImmediate(
 }
 
 /**
+ * Fetch a single OPERATIONAL feature flag value with a hard timeout.
+ *
+ * Bypasses the telemetry consent gate by design: this entry point is
+ * reserved for kill-switches and capacity-protection flags (e.g.
+ * `desktop-cloud-capacity`), not A/B experiments or analytics. Those
+ * are server-config pushed *to* the client to protect service
+ * availability for everyone — distinct from analytics data collected
+ * *from* the user, which `loadFeatureFlagsImmediate` correctly gates on
+ * consent. The only data leaving the device is the anonymous distinct
+ * id and the flag key; no person properties are sent.
+ *
+ * Returns `undefined` when:
+ *   - the PostHog client is not yet initialised
+ *   - the network call times out or errors
+ *   - the flag is missing on the server
+ * Callers must default-fail-safe (e.g. `cloudCapacity.ts` defaults to
+ * `'normal'`) so a fetch miss never accidentally degrades the product.
+ */
+export async function getOpsFlag(
+  key: string,
+  distinctId: string,
+  timeoutMs: number
+): Promise<FeatureFlagValue | undefined> {
+  if (!client) return undefined
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    // No `personProperties` — ops flags are global, not user-keyed.
+    const flagPromise = client.getFeatureFlag(key, distinctId)
+    const timeoutPromise = new Promise<undefined>((resolve) => {
+      timer = setTimeout(() => resolve(undefined), timeoutMs)
+    })
+    const result = await Promise.race([flagPromise, timeoutPromise])
+    if (typeof result === 'string' || typeof result === 'boolean') return result
+    return undefined
+  } catch {
+    return undefined
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+  }
+}
+
+/**
  * Wrap an async step with start/end/error telemetry events that mirror legacy
  * desktop's `@trackEvent` decorator. Errors are re-thrown so callers can
  * continue normal control flow.
