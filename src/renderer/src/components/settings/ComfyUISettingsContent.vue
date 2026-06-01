@@ -4,6 +4,8 @@ import { useI18n } from 'vue-i18n'
 import { CheckCircle, XCircle, ChevronUp, HardDrive, SlidersHorizontal, Info, RefreshCw, History } from 'lucide-vue-next'
 import { useComfyUISettings } from '../../composables/useComfyUISettings'
 import { useInstallCta } from '../../composables/useInstallCta'
+import { useCloudCapacity } from '../../composables/useCloudCapacity'
+import { useSessionStore } from '../../stores/sessionStore'
 import { findActionById } from '../../lib/findAction'
 import MoreMenu from '../../views/comfyUISettings/MoreMenu.vue'
 import ArgsBuilderPage from '../../views/comfyUISettings/ArgsBuilderPage.vue'
@@ -529,7 +531,21 @@ const hasPendingRestart = computed(
   () => isRunningInThisWindow.value && pendingRestartFieldIds.value.size > 0
 )
 
+// Cloud capacity-protection switch (PostHog `desktop-cloud-capacity`).
+// When the selected install is cloud and capacity is `disabled`, swap
+// the CTA copy to "Unavailable" and disable the button so users get an
+// obvious signal that the click won't go anywhere — the parent already
+// no-ops the action via `confirmEntry()`; this is the UX surface for
+// that gate.
+const cloudCapacity = useCloudCapacity()
+const isCloudCapacityBlocked = computed(
+  () => installation.value?.sourceCategory === 'cloud' && cloudCapacity.isDisabled()
+)
+
 const primaryActionLabel = computed(() => {
+  if (isCloudCapacityBlocked.value) {
+    return t('cloud.capacityDisabled', 'Temporarily unavailable')
+  }
   if (hasPendingRestart.value) {
     return t('instancePicker.restartToApply', 'Restart to apply changes')
   }
@@ -882,8 +898,9 @@ defineExpose({
       <button
         type="button"
         class="primary settings-v2-relaunch"
-        :class="{ 'is-pending-restart': hasPendingRestart }"
-        :disabled="!installation || opBlocksFooter"
+        :class="{ 'is-pending-restart': hasPendingRestart, 'is-capacity-disabled': isCloudCapacityBlocked }"
+        :disabled="!installation || opBlocksFooter || isCloudCapacityBlocked"
+        :title="isCloudCapacityBlocked ? $t('cloud.capacityDisabledHint') : undefined"
         @click="handlePrimaryAction"
       >
         {{ primaryActionLabel }}
