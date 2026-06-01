@@ -26,6 +26,9 @@ import {
   resolvePickerSelectedInstallId,
   buildTitlePopupMenuItems,
   computePopupHeight,
+  decideFlowMenuItemTarget,
+  isFlowMenuItemId,
+  type FlowMenuItemId,
   type InstancePickerInstall,
 } from './titlePopup'
 import { nextWindowKey, type ComfyWindowEntry } from '../host/registry'
@@ -117,12 +120,17 @@ describe('buildTitlePopupMenuItems', () => {
     expect(ids).not.toContain('return-to-dashboard')
   })
 
-  it('omits install-creation entries on an install-backed host', () => {
+  // Unified menu: install-creation entries appear on every host
+  // (#644). The host-type branch lives in the action handler — picking
+  // one from an install-backed host spawns a fresh chooser window
+  // booted into the wizard; picking one from the dashboard takes over
+  // the current window in place.
+  it('includes install-creation entries on an install-backed host', () => {
     const items = buildTitlePopupMenuItems(makeEntry({ installationId: 'inst-1' }))
     const ids = items.map((i) => i.id ?? null)
-    expect(ids).not.toContain('new-install')
-    expect(ids).not.toContain('track')
-    expect(ids).not.toContain('load-snapshot')
+    expect(ids).toContain('new-install')
+    expect(ids).toContain('track')
+    expect(ids).toContain('load-snapshot')
   })
 
   it('chooser host includes New Window, Settings, Send Feedback, and Quit ComfyUI', () => {
@@ -132,43 +140,70 @@ describe('buildTitlePopupMenuItems', () => {
     expect(ids).toContain('settings')
     expect(ids).toContain('feedback')
     expect(ids).toContain('close-all-windows')
-    // The app-wide quit lives only on the dashboard host.
     const quit = items.find((i) => i.id === 'close-all-windows')
     expect(quit?.label).toBe('Quit ComfyUI')
   })
 
-  // Install-host menu was deliberately trimmed (spec item 1): no
-  // Desktop Settings, no Return to Dashboard (replaced by the Home
-  // icon in the picker, spec item 10), no Reset Zoom (Ctrl/Cmd+0
-  // shortcut still works). "Quit ComfyUI" stays available from every
-  // window; "Close Window" is the instance-only counterpart. The four
-  // entries are New Window, Send Beta Feedback, Close Window, Quit ComfyUI.
-  it('install-host menu is trimmed to four essentials in the canonical order', () => {
+  // Unified canonical order — same item set everywhere except
+  // Close Window, which stays install-host-only because the dashboard
+  // has nothing to close back to (its "close" affordance is Quit).
+  it('chooser host omits Close Window but otherwise matches the canonical order', () => {
+    const items = buildTitlePopupMenuItems(makeEntry({ installationId: null }))
+    const ids = items.map((i) => i.id ?? null).filter((id) => id !== null)
+    expect(ids).toEqual([
+      'new-window',
+      'new-install',
+      'track',
+      'load-snapshot',
+      'settings',
+      'feedback',
+      'close-all-windows',
+    ])
+  })
+
+  it('install host adds Close Window between Send Feedback and Quit ComfyUI', () => {
     const items = buildTitlePopupMenuItems(makeEntry({ installationId: 'inst-1' }))
     const ids = items.map((i) => i.id ?? null).filter((id) => id !== null)
-    expect(ids).toEqual(['new-window', 'feedback', 'exit-window', 'close-all-windows'])
+    expect(ids).toEqual([
+      'new-window',
+      'new-install',
+      'track',
+      'load-snapshot',
+      'settings',
+      'feedback',
+      'exit-window',
+      'close-all-windows',
+    ])
     const closeWindow = items.find((i) => i.id === 'exit-window')
     expect(closeWindow?.label).toBe('Close Window')
     const quit = items.find((i) => i.id === 'close-all-windows')
     expect(quit?.label).toBe('Quit ComfyUI')
   })
 
-  it('install-host menu has neither Reset Zoom nor Return to Dashboard', () => {
-    const items = buildTitlePopupMenuItems(
-      makeEntry({ installationId: 'inst-1', zoomLevel: 2 }),
-    )
+  it('install host omits Return to Dashboard — picker Home is the canonical dashboard escape', () => {
+    const items = buildTitlePopupMenuItems(makeEntry({ installationId: 'inst-1' }))
     const ids = items.map((i) => i.id ?? null)
-    expect(ids).not.toContain('reset-zoom')
     expect(ids).not.toContain('return-to-dashboard')
-    expect(ids).not.toContain('settings')
   })
 
-  it('exposes Reset Zoom on chooser host only when comfy zoom is non-zero, with the percent in the label', () => {
+  it('exposes Reset Zoom on chooser host when comfy zoom is non-zero, with the percent in the label', () => {
     const noZoom = buildTitlePopupMenuItems(makeEntry({ installationId: null, zoomLevel: 0 }))
     expect(noZoom.find((i) => i.id === 'reset-zoom')).toBeUndefined()
 
     // 1.2^2 ≈ 1.44 → 144 %
     const zoomed = buildTitlePopupMenuItems(makeEntry({ installationId: null, zoomLevel: 2 }))
+    const resetZoom = zoomed.find((i) => i.id === 'reset-zoom')
+    expect(resetZoom).toBeDefined()
+    expect(resetZoom?.label).toBe('Reset Zoom (144%)')
+  })
+
+  // Reset Zoom is now host-type-agnostic — it surfaces wherever the
+  // current comfyView is zoomed, including the instance host's live
+  // ComfyUI view (#644). Ctrl/Cmd+0 still works in parallel.
+  it('exposes Reset Zoom on install host when comfy zoom is non-zero', () => {
+    const zoomed = buildTitlePopupMenuItems(
+      makeEntry({ installationId: 'inst-1', zoomLevel: 2 }),
+    )
     const resetZoom = zoomed.find((i) => i.id === 'reset-zoom')
     expect(resetZoom).toBeDefined()
     expect(resetZoom?.label).toBe('Reset Zoom (144%)')
@@ -181,19 +216,62 @@ describe('buildTitlePopupMenuItems', () => {
     expect(items.find((i) => i.id === 'reset-zoom')).toBeUndefined()
   })
 
-  it('places New Window first and Close All Windows last on a chooser host', () => {
+  it('places New Window first and Quit ComfyUI last on a chooser host', () => {
     const items = buildTitlePopupMenuItems(makeEntry({ installationId: null }))
     const ids = items.map((i) => i.id ?? null)
     expect(ids[0]).toBe('new-window')
     expect(ids[ids.length - 1]).toBe('close-all-windows')
   })
 
-  it('separators bracket the optional install-creation block on chooser', () => {
-    const items = buildTitlePopupMenuItems(makeEntry({ installationId: null }))
-    const newWindowIdx = items.findIndex((i) => i.id === 'new-window')
-    expect(items[newWindowIdx + 1]?.kind).toBe('separator')
-    const newInstallIdx = items.findIndex((i) => i.id === 'new-install')
-    expect(newInstallIdx).toBeGreaterThan(newWindowIdx + 1)
+  it('separators bracket the install-creation block on both hosts', () => {
+    for (const installationId of [null, 'inst-1'] as const) {
+      const items = buildTitlePopupMenuItems(makeEntry({ installationId }))
+      const newWindowIdx = items.findIndex((i) => i.id === 'new-window')
+      expect(items[newWindowIdx + 1]?.kind).toBe('separator')
+      const newInstallIdx = items.findIndex((i) => i.id === 'new-install')
+      expect(newInstallIdx).toBeGreaterThan(newWindowIdx + 1)
+    }
+  })
+
+  // Loading-lockdown keeps the full menu live so the user can open a
+  // fresh window / picker / settings / feedback or quit cleanly while
+  // a long-running op runs in the background (#653).
+  it('returns the same item set during loading-lockdown as in normal mode', () => {
+    for (const installationId of [null, 'inst-1'] as const) {
+      const normal = buildTitlePopupMenuItems(makeEntry({ installationId }))
+      const locked = buildTitlePopupMenuItems(
+        makeEntry({ installationId, firstUseMode: 'loading-lockdown' }),
+      )
+      expect(locked.map((i) => i.id ?? null)).toEqual(normal.map((i) => i.id ?? null))
+    }
+  })
+})
+
+describe('decideFlowMenuItemTarget', () => {
+  // Pinned routing rule for #644 — dashboard takeover vs spawn-new-window.
+  const flowIds: FlowMenuItemId[] = ['new-install', 'track', 'load-snapshot', 'quick-install']
+
+  it.each(flowIds)('dashboard host routes %s to in-place takeover', (id) => {
+    const target = decideFlowMenuItemTarget(makeEntry({ installationId: null }), id)
+    expect(target).toEqual({ kind: 'set-active-panel', panel: id })
+  })
+
+  it.each(flowIds)('install host routes %s to a fresh chooser window', (id) => {
+    const target = decideFlowMenuItemTarget(makeEntry({ installationId: 'inst-1' }), id)
+    expect(target).toEqual({ kind: 'open-chooser-host', panel: id })
+  })
+})
+
+describe('isFlowMenuItemId', () => {
+  it('accepts the four flow ids and rejects everything else', () => {
+    expect(isFlowMenuItemId('new-install')).toBe(true)
+    expect(isFlowMenuItemId('track')).toBe(true)
+    expect(isFlowMenuItemId('load-snapshot')).toBe(true)
+    expect(isFlowMenuItemId('quick-install')).toBe(true)
+    expect(isFlowMenuItemId('new-window')).toBe(false)
+    expect(isFlowMenuItemId('settings')).toBe(false)
+    expect(isFlowMenuItemId('feedback')).toBe(false)
+    expect(isFlowMenuItemId('')).toBe(false)
   })
 })
 

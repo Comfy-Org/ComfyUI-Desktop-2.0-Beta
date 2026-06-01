@@ -630,94 +630,81 @@ export function buildTitlePopupMenuItems(entry: ComfyWindowEntry): TitlePopupMen
       },
     ]
   }
-  // Issue #497 — file-menu order:
+  // Unified menu order — same item set on dashboard (install-less)
+  // and instance (install-backed) hosts so the user has one mental
+  // model of what the waffle does regardless of where they opened it
+  // (issue #644):
+  //
   //   New Window
   //   ── separator ──
-  //   (install-less only) New Install / Track / Load Snapshot
+  //   New Install
+  //   Add Existing Install
+  //   Load Snapshot
   //   ── separator ──
-  //   Settings (unified — ComfyUI Settings on install-backed hosts,
-  //             Global Settings on install-less; PanelApp picks the
-  //             default tab at mount time)
-  //   Send Feedback
+  //   Desktop Settings
+  //   Send Beta Feedback
+  //   (Reset Zoom — when zoom level != 0)
   //   ── separator ──
-  //   (install-backed only) Return to Dashboard
-  //   Close All Windows
+  //   Close Window           (install host only)
+  //   Quit ComfyUI
   //
   // Notes:
-  //   - "Close Window" is intentionally absent — the OS-X / native
-  //     close button already covers single-window dismissal; the menu
-  //     only surfaces the cross-window kill switch.
-  //   - Install-creation / import flows (New Install / Track / Load
-  //     Snapshot) live ONLY on the dashboard (install-less host)
-  //     waffle menu. Inside a Comfy Instance window the only escape
-  //     hatch back to the dashboard is "Return to Dashboard" — the
-  //     in-Comfy chrome stays closed-off per the design doc's
-  //     "Comfy Instance is closed-off" rule.
-  //   - "Return to Dashboard" is install-backed-only; install-less
-  //     host windows are already on the chooser body so the entry
-  //     would be a no-op there.
+  //   - "Close Window" stays install-host-only. On the dashboard
+  //     there's nothing to close back to — the OS chrome already
+  //     covers single-window dismissal — and "Quit ComfyUI" is the
+  //     correct affordance for "close the last dashboard window".
+  //     On an instance host, "Close Window" stops that instance and
+  //     either closes the window or detaches it to the dashboard
+  //     when it's the last one open.
+  //   - New Install / Add Existing Install / Load Snapshot land in
+  //     a takeover *inside* this window when invoked from the
+  //     dashboard, and spawn a *new* chooser window booted straight
+  //     into the wizard when invoked from an instance host — so the
+  //     instance keeps running undisturbed. The host-type branch
+  //     lives in `activateTitlePopupMenuItem` below.
+  //   - "Return to Dashboard" is absent: the picker's Home icon is
+  //     the canonical dashboard escape (opens a fresh chooser window
+  //     instead of detaching, so the running ComfyUI stays alive).
   const items: TitlePopupMenuItem[] = [
     { id: 'new-window', label: 'New Window', labelKey: 'fileMenu.newWindow' },
     { kind: 'separator' },
-  ]
-  if (isChooserHost(entry)) {
-    items.push(
-      { id: 'new-install', label: 'New Install', labelKey: 'fileMenu.newInstall' },
-      {
-        id: 'track',
-        label: 'Add Existing Install',
-        labelKey: 'fileMenu.addExistingInstall',
-      },
-      { id: 'load-snapshot', label: 'Load Snapshot', labelKey: 'fileMenu.loadSnapshot' },
-      { kind: 'separator' },
-      {
-        id: 'settings',
-        label: 'Desktop Settings',
-        labelKey: 'fileMenu.globalSettings',
-      },
-      // Send Feedback (#493). The renderer-side handler resolves the
-      // support URL and emits the `desktop2.feedback.opened`
-      // telemetry action with `source: 'menu'`.
-      { id: 'feedback', label: 'Send Beta Feedback', labelKey: 'fileMenu.sendFeedback' },
-    )
-    // Reset Zoom — discoverable recovery path for users who zoom the
-    // comfyView too far to read. Only on the chooser host (the dummy
-    // comfyView there can still be zoomed via Ctrl/Cmd+scroll); the
-    // install host trims it out per the simplified menu spec.
-    if (!entry.comfyView.webContents.isDestroyed()) {
-      const level = entry.comfyView.webContents.getZoomLevel()
-      if (level !== 0) {
-        const percent = Math.round(Math.pow(1.2, level) * 100)
-        items.push({ id: 'reset-zoom', label: `Reset Zoom (${percent}%)` })
-      }
-    }
-    items.push(
-      { kind: 'separator' },
-      {
-        id: 'close-all-windows',
-        label: 'Quit ComfyUI',
-        labelKey: 'fileMenu.exitAllWindows',
-      },
-    )
-    return items
-  }
-  // Install-host menu: trimmed to the essentials. Desktop Settings,
-  // Return to Dashboard, and Reset Zoom are intentionally absent —
-  // Settings lives in the picker's Startup Args tab, the dashboard
-  // escape is the Home icon in the picker chips row, and Reset Zoom
-  // remains reachable via Ctrl/Cmd + 0. "Quit ComfyUI" stays available
-  // from every window; "Close Window" is instance-only — the dashboard
-  // omits it (there's nothing to close back to).
-  items.push(
-    { id: 'feedback', label: 'Send Beta Feedback', labelKey: 'fileMenu.sendFeedback' },
-    { kind: 'separator' },
-    { id: 'exit-window', label: 'Close Window', labelKey: 'fileMenu.exitWindow' },
+    { id: 'new-install', label: 'New Install', labelKey: 'fileMenu.newInstall' },
     {
-      id: 'close-all-windows',
-      label: 'Quit ComfyUI',
-      labelKey: 'fileMenu.exitAllWindows',
+      id: 'track',
+      label: 'Add Existing Install',
+      labelKey: 'fileMenu.addExistingInstall',
     },
-  )
+    { id: 'load-snapshot', label: 'Load Snapshot', labelKey: 'fileMenu.loadSnapshot' },
+    { kind: 'separator' },
+    {
+      id: 'settings',
+      label: 'Desktop Settings',
+      labelKey: 'fileMenu.globalSettings',
+    },
+    { id: 'feedback', label: 'Send Beta Feedback', labelKey: 'fileMenu.sendFeedback' },
+  ]
+  // Reset Zoom — discoverable recovery path for users who zoom the
+  // comfyView too far to read. Contextual: only surfaces when the
+  // current view actually carries a non-zero zoom. Available on
+  // every host (the dashboard's dummy comfyView can be zoomed via
+  // Ctrl/Cmd+scroll, and the instance host's live comfyView even
+  // more so).
+  if (!entry.comfyView.webContents.isDestroyed()) {
+    const level = entry.comfyView.webContents.getZoomLevel()
+    if (level !== 0) {
+      const percent = Math.round(Math.pow(1.2, level) * 100)
+      items.push({ id: 'reset-zoom', label: `Reset Zoom (${percent}%)` })
+    }
+  }
+  items.push({ kind: 'separator' })
+  if (!isChooserHost(entry)) {
+    items.push({ id: 'exit-window', label: 'Close Window', labelKey: 'fileMenu.exitWindow' })
+  }
+  items.push({
+    id: 'close-all-windows',
+    label: 'Quit ComfyUI',
+    labelKey: 'fileMenu.exitAllWindows',
+  })
   return items
 }
 
@@ -1621,6 +1608,47 @@ function openInstancePickerForHost(
   })()
 }
 
+/**
+ * Waffle-menu item ids whose action is an install-creation / import
+ * flow (#644). These are the only items that branch on host type at
+ * dispatch time — on the dashboard they take over the current window
+ * in place, on an instance host they spawn a fresh chooser window
+ * booted straight into the wizard so the running ComfyUI stays alive.
+ */
+export type FlowMenuItemId = 'new-install' | 'track' | 'load-snapshot' | 'quick-install'
+
+const FLOW_MENU_ITEM_IDS: ReadonlySet<string> = new Set<FlowMenuItemId>([
+  'new-install',
+  'track',
+  'load-snapshot',
+  'quick-install',
+])
+
+export function isFlowMenuItemId(id: string): id is FlowMenuItemId {
+  return FLOW_MENU_ITEM_IDS.has(id)
+}
+
+/**
+ * Where a flow-menu pick should land. Pure function — call sites
+ * inject the side effects (`setActivePanel` vs `openChooserHostWindow`)
+ * from the result kind so the dispatch policy stays one-decision-one-
+ * test (#644).
+ *
+ *   - dashboard (install-less host) → `set-active-panel` (takeover in
+ *     this window; the chooser body has no instance to disturb).
+ *   - instance host (install-backed) → `open-chooser-host` (spawn a
+ *     fresh window booted into the wizard so the running ComfyUI
+ *     keeps running).
+ */
+export function decideFlowMenuItemTarget(
+  entry: ComfyWindowEntry,
+  id: FlowMenuItemId,
+): { kind: 'set-active-panel' | 'open-chooser-host'; panel: ComfyPanelKey } {
+  return isChooserHost(entry)
+    ? { kind: 'set-active-panel', panel: id }
+    : { kind: 'open-chooser-host', panel: id }
+}
+
 function activateTitlePopupMenuItem(
   entry: TitlePopupEntry,
   id: string,
@@ -1729,14 +1757,15 @@ function activateTitlePopupMenuItem(
       })
     }
   }
-  else if (id === 'new-install' || id === 'track' || id === 'load-snapshot' || id === 'quick-install') {
-    // Install-creation / import flows are chooser-host-only.
-    // `buildTitlePopupMenuItems` already filters them out of the
-    // install-backed file menu; this guard is the belt-and-braces
-    // so a stale popup or an out-of-order IPC can't navigate an
-    // in-Comfy host into one of these panels.
-    if (parentEntry && isChooserHost(parentEntry)) {
-      bindings.setActivePanel(entry.parentEntryId, id)
+  else if (isFlowMenuItemId(id)) {
+    if (parentEntry) {
+      const target = decideFlowMenuItemTarget(parentEntry, id)
+      if (target.kind === 'set-active-panel') {
+        bindings.setActivePanel(entry.parentEntryId, target.panel)
+      } else {
+        bindings.openChooserHostWindow(target.panel)
+        releaseFocusToParent = false
+      }
     }
   }
   // Item click — popup still has focus, so push it back to the parent
