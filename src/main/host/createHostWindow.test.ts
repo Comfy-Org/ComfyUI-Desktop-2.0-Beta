@@ -121,7 +121,7 @@ describe('shouldBailAfterConsult', () => {
 })
 
 describe('shouldShowInstallCloseConfirm', () => {
-  it('shows the modal for an install-host with a live entry on a defer consult', () => {
+  it('shows the modal for a host that would kill a local session on a defer consult', () => {
     expect(shouldShowInstallCloseConfirm('defer', true, true, false)).toBe(true)
   })
 
@@ -130,7 +130,7 @@ describe('shouldShowInstallCloseConfirm', () => {
     expect(shouldShowInstallCloseConfirm('defer', true, true, true)).toBe(false)
   })
 
-  it('skips the modal for a chooser/dashboard host (no install backing)', () => {
+  it('skips the modal for a chooser host or a cloud/remote-backed host (no local session at risk)', () => {
     expect(shouldShowInstallCloseConfirm('defer', false, true, false)).toBe(false)
   })
 

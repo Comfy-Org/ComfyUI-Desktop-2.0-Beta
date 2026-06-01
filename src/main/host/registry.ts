@@ -378,6 +378,25 @@ export function isInstallHost(
 }
 
 /**
+ * Predicate: this entry, if torn down or stopped, would kill a local
+ * ComfyUI process the user might lose work in.
+ *
+ * Used by every "are you sure?" surface for actions that stop a local
+ * session — Switch, Restart, Close Window, Quit, native ✕. Cloud/remote
+ * windows close immediately because there is no local process at risk.
+ *
+ * Must be install-backed AND `sourceCategory === 'local'`: a
+ * chooser/preview host can carry `sourceCategory` without an attached
+ * install (see `attachHostPreview`), and a non-install host has no
+ * process to kill.
+ */
+export function shouldConfirmKillForEntry(
+  entry: ComfyWindowEntry | null | undefined,
+): entry is ComfyWindowEntry & { installationId: string } {
+  return !!entry && isInstallHost(entry) && entry.sourceCategory === 'local'
+}
+
+/**
  * Decide what should fill the body area of a comfy window right now.
  *
  * For install-backed windows, the Comfy pill resolves to either the live

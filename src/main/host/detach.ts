@@ -6,7 +6,7 @@ import { COMFY_BG } from '../lib/theme'
 import { destroyPanelView, ensurePanelView } from './panelView'
 import { openSystemModalAsync } from '../popups/systemModal'
 import type { SystemModalDetailGroup } from '../popups/systemModal'
-import { comfyWindows, isChooserHost, isInstallHost } from './registry'
+import { comfyWindows, isChooserHost, isInstallHost, shouldConfirmKillForEntry } from './registry'
 import type { ComfyWindowEntry } from './registry'
 import {
   applyChooserHostTheme,
@@ -246,10 +246,11 @@ export async function confirmAndCloseAllHostWindows(
   performQuit: () => void,
 ): Promise<void> {
   const entries = Array.from(comfyWindows.values()).filter((e) => !e.window.isDestroyed())
-  // "Instances" = install-backed host windows. The dashboard (chooser
-  // host) is never listed and never blocks the quit — quitting from the
-  // dashboard with nothing else running should just exit.
-  const instanceWindows = entries.filter((e) => isInstallHost(e))
+  // "Instances" = install-backed host windows that would lose a local
+  // ComfyUI process on quit. Chooser hosts and cloud/remote-backed
+  // windows close silently — they have no local work at risk (issue
+  // #654). Quitting with only those windows open just exits.
+  const instanceWindows = entries.filter((e) => shouldConfirmKillForEntry(e))
   if (instanceWindows.length === 0) {
     performQuit()
     return
@@ -358,15 +359,21 @@ export async function confirmAndCloseHostWindow(parentWindow: BrowserWindow): Pr
     (e) => !e.window.isDestroyed(),
   ).length
   const isLastWindow = liveWindowCount <= 1
-  const confirmed = await confirmCloseInstanceWindow(entry.window, isLastWindow, entry.lastTheme)
-  if (!confirmed) return
-  if (isLastWindow) {
+  // Confirm only when closing kills a local ComfyUI process (issue #654).
+  // Cloud/remote and chooser hosts close immediately — nothing local is lost.
+  if (shouldConfirmKillForEntry(entry)) {
+    const confirmed = await confirmCloseInstanceWindow(entry.window, isLastWindow, entry.lastTheme)
+    if (!confirmed) return
+  }
+  if (isLastWindow && isInstallHost(entry)) {
     // Stop the instance and flip this window to the dashboard rather than
-    // closing it (closing the last window would quit the app).
+    // closing it (closing the last window would quit the app). Chooser
+    // hosts have nothing to detach, so they fall through to the close path.
     entry.detachInstall()
   } else {
     // Skip the panel-renderer consult on the close handler — the user
-    // already confirmed via this prompt.
+    // already confirmed via this prompt (or no confirmation was needed
+    // because no local process is at risk).
     preClearedClose.add(entry.window)
     entry.window.close()
   }

@@ -38,6 +38,7 @@ import {
   nextWindowKey,
   registerHostEntry,
   setLastFocusedInstallationId,
+  shouldConfirmKillForEntry,
   unregisterHostEntry,
 } from './registry'
 import type { ComfyWindowEntry, ComfyPanelKey } from './registry'
@@ -66,15 +67,17 @@ export function shouldBailAfterConsult(consult: CloseConsultResult, forceClose: 
 }
 
 /** Should the install-host close-confirm modal run? Only fires when
- *  the renderer deferred (no overlay), the host is install-backed, an
- *  entry still exists, and the caller hasn't pre-cleared. */
+ *  the renderer deferred (no overlay), the host is install-backed and
+ *  would kill a local process, an entry still exists, and the caller
+ *  hasn't pre-cleared. Cloud/remote-backed windows skip the modal
+ *  (issue #654) — closing them never kills a local ComfyUI. */
 export function shouldShowInstallCloseConfirm(
   consult: CloseConsultResult,
-  isInstallHostWindow: boolean,
+  killsLocalSession: boolean,
   hasEntry: boolean,
   forceClose: boolean,
 ): boolean {
-  return consult === 'defer' && isInstallHostWindow && hasEntry && !forceClose
+  return consult === 'defer' && killsLocalSession && hasEntry && !forceClose
 }
 
 /** Should the close handler bail after the install-host close-confirm
@@ -665,7 +668,7 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
         if (
           shouldShowInstallCloseConfirm(
             consult,
-            isInstallHostWindow,
+            shouldConfirmKillForEntry(entryForClose),
             !!entryForClose,
             fx.preClearedClose.has(comfyWindow),
           )
