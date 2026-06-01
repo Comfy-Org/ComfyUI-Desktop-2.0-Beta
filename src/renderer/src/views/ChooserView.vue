@@ -6,7 +6,7 @@ import { useSessionStore } from '../stores/sessionStore'
 import { useInstallContextMenu } from '../composables/useInstallContextMenu'
 import { useInstallList } from '../composables/useInstallList'
 import { useCloudCapacity } from '../composables/useCloudCapacity'
-import { Cloud, MoreVertical, Plus, Search } from 'lucide-vue-next'
+import { Cloud, Info, MoreVertical, Plus, Search } from 'lucide-vue-next'
 import ContextMenu from '../components/ContextMenu.vue'
 import BrandBackground from '../components/BrandBackground.vue'
 import BaseInput from '../components/ui/BaseInput.vue'
@@ -196,6 +196,26 @@ function handleNewInstallClick(): void {
     <div class="chooser-view">
       <ComfyWordmark class="chooser-wordmark" aria-hidden="true" />
       <AccountBanner />
+      <!-- Cloud capacity banner. Always-visible explainer on the
+           dashboard when `desktop-cloud-capacity` is degraded or
+           disabled, so users see the state before they click the
+           cloud tile (chip on the tile alone reads as "broken"). -->
+      <div
+        v-if="cloudCapacity.isBlockingOrWarning()"
+        class="chooser-capacity-banner"
+        :class="{ 'is-disabled': cloudCapacity.isDisabled() }"
+        role="status"
+      >
+        <Info :size="16" class="chooser-capacity-banner-icon" aria-hidden="true" />
+        <div class="chooser-capacity-banner-body">
+          <p class="chooser-capacity-banner-title">
+            {{ cloudCapacity.isDisabled() ? t('cloud.capacityDisabled') : t('cloud.capacityDegraded') }}
+          </p>
+          <p class="chooser-capacity-banner-hint">
+            {{ cloudCapacity.isDisabled() ? t('cloud.capacityDisabledHint') : t('cloud.capacityDegradedHint') }}
+          </p>
+        </div>
+      </div>
       <div class="chooser-search">
         <BaseInput
           v-model="searchQuery"
@@ -430,5 +450,56 @@ function handleNewInstallClick(): void {
       transparent 100%
     );
   }
+}
+
+/* Cloud capacity banner on the dashboard (mirrors the per-install
+ * settings banner in ComfyUISettingsContent). Default is yellow
+ * (degraded — warning); flips to red on `.is-disabled`. */
+.chooser-capacity-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  margin: 0 auto 12px;
+  max-width: 720px;
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--accent-warn-soft, rgba(255, 193, 7, 0.10));
+  border: 1px solid var(--accent-warn, #d97706);
+  border-radius: 8px;
+  color: var(--text);
+}
+.chooser-capacity-banner.is-disabled {
+  background: var(--accent-danger-soft, rgba(217, 45, 32, 0.08));
+  border-color: var(--accent-danger, #d92d20);
+}
+.chooser-capacity-banner-icon {
+  color: var(--accent-warn, #d97706);
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+.chooser-capacity-banner.is-disabled .chooser-capacity-banner-icon {
+  color: var(--accent-danger, #d92d20);
+}
+.chooser-capacity-banner-body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.chooser-capacity-banner-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent-warn, #d97706);
+}
+.chooser-capacity-banner.is-disabled .chooser-capacity-banner-title {
+  color: var(--accent-danger, #d92d20);
+}
+.chooser-capacity-banner-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-muted);
 }
 </style>
