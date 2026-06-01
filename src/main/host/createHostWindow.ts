@@ -1131,8 +1131,10 @@ export function openChooserHostWindow(initialPanel: ComfyPanelKey = 'comfy'): Br
   // Final backstop: if both views somehow fail to load, force a
   // reveal so the window doesn't stay invisible forever. 2 s is
   // generous relative to observed cold-start times but well short
-  // of the user noticing the window is missing.
-  setTimeout(() => revealColdStartHostIfPending(revealKey), 2_000)
+  // of the user noticing the window is missing. Cleared on close
+  // so a fast-close window doesn't leave the closure pending.
+  const backstopTimer = setTimeout(() => revealColdStartHostIfPending(revealKey), 2_000)
+  comfyWindow.once('closed', () => clearTimeout(backstopTimer))
 
   return comfyWindow
 }
