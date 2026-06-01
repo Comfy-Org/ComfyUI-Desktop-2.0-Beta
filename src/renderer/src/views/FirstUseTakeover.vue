@@ -267,9 +267,18 @@ async function routePostStart(): Promise<void> {
   if (pickedChoice.value === 'cloud') {
     // Cloud capacity gate. `normal` resolves instantly; `degraded`
     // shows a confirm modal (user can back out); `disabled` resolves
-    // false (defense-in-depth — the card is also non-selectable in
-    // that state).
-    if (!(await cloudCapacity.confirmEntry())) return
+    // false. There's an inherent race: the user can hit Continue with
+    // `cloud` still picked before the boot-fetch reactive auto-flip
+    // runs (PostHog network ~ a few hundred ms). When that happens,
+    // un-stick `isContinuing` so the spinner clears, and flip the
+    // pick to Local so a second Continue click just proceeds (the
+    // Cloud card is already visually greyed). User sees: spinner
+    // disappears, Local is now selected, hit Continue → moves on.
+    if (!(await cloudCapacity.confirmEntry())) {
+      isContinuing.value = false
+      if (cloudCapacity.isDisabled()) pickedChoice.value = 'local'
+      return
+    }
     emitCompleted('cloud')
     emit('complete-cloud')
   } else if (hasLegacyDesktop.value && !expressInstall.value) {
