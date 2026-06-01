@@ -319,13 +319,18 @@ export async function confirmCloseInstanceWindow(
   isLastWindow: boolean,
   theme: { bg: string; text: string },
 ): Promise<boolean> {
+  // Body copy is intentionally omitted ('' so BaseAlert skips the
+  // message block): the confirm-button label already states the
+  // outcome ("Close & Return to Dashboard" / "Close Window"), so the
+  // long sentence under the title was pure restatement. Title + button
+  // label gives the user everything they need; the dialog itself
+  // signals "this is a confirm". Reported by QA (Robert) — the body
+  // felt unnecessary.
   return openSystemModalAsync({
     parent: window,
     spec: {
       title: 'Close Window',
-      message: isLastWindow
-        ? 'Close this window? This stops ComfyUI and returns you to the dashboard.'
-        : 'Close this window? This stops the running ComfyUI instance.',
+      message: '',
       confirmLabel: isLastWindow ? 'Close & Return to Dashboard' : 'Close Window',
       cancelLabel: 'Cancel',
       confirmStyle: 'danger',
