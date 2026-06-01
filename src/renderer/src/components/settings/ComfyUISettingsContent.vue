@@ -736,6 +736,21 @@ defineExpose({
           :data-testid="TID.pickerSettingsSections"
           :data-install-id="installation?.id"
         >
+          <!-- Cloud capacity banner. Always-visible explanation of the
+               disabled state so the user understands why the Start
+               button is greyed (the tooltip is hover-only and reads
+               as "broken" otherwise). -->
+          <div
+            v-if="isCloudCapacityBlocked"
+            class="cloud-capacity-banner"
+            role="status"
+          >
+            <Info :size="16" class="cloud-capacity-banner-icon" aria-hidden="true" />
+            <div class="cloud-capacity-banner-body">
+              <p class="cloud-capacity-banner-title">{{ $t('cloud.capacityDisabled') }}</p>
+              <p class="cloud-capacity-banner-hint">{{ $t('cloud.capacityDisabledHint') }}</p>
+            </div>
+          </div>
           <!-- Inner tab-swap transition. Wrapped in a single-root
                `<div>` because `<Transition>` requires one child. -->
           <Transition :name="tabTransition" mode="out-in">
@@ -1354,5 +1369,43 @@ defineExpose({
 .settings-v2-more.is-active {
   background: var(--brand-surface-border-hover);
   color: var(--text);
+}
+
+/* Cloud capacity banner — always-visible explainer for the disabled
+ * state. Sits at the top of the settings body so users see WHY the
+ * Start button is greyed (the title tooltip is hover-only). */
+.cloud-capacity-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  margin: 0 0 12px;
+  background: var(--accent-danger-soft, rgba(217, 45, 32, 0.08));
+  border: 1px solid var(--accent-danger, #d92d20);
+  border-radius: 8px;
+  color: var(--text);
+}
+.cloud-capacity-banner-icon {
+  color: var(--accent-danger, #d92d20);
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+.cloud-capacity-banner-body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.cloud-capacity-banner-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent-danger, #d92d20);
+}
+.cloud-capacity-banner-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-muted);
 }
 </style>
