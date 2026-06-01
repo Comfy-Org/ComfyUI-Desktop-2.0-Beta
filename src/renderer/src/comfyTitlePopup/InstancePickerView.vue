@@ -494,13 +494,13 @@ function handleSettingsNavigateList(): void {
 // (the row's a child component `InstanceRow.vue`).
 const cloudCapacity = useCloudCapacity()
 
-function handleExpandedPrimaryAction(restartInPlace: boolean): void {
+async function handleExpandedPrimaryAction(restartInPlace: boolean): Promise<void> {
   const inst = selectedInstall.value
   if (!inst) return
-  // Cloud capacity kill-switch — bail out before any navigation when
-  // cloud is currently disabled. Matches the ChooserView Cloud-tile
-  // gate so the two paths can't diverge.
-  if (inst.sourceCategory === 'cloud' && cloudCapacity.isDisabled()) return
+  // Cloud capacity gate. `normal` resolves instantly; `degraded`
+  // shows a confirm modal (user can back out); `disabled` resolves
+  // false. Matches the ChooserView path so the two can't diverge.
+  if (inst.sourceCategory === 'cloud' && !(await cloudCapacity.confirmEntry())) return
   if (restartInPlace) {
     bridge?.restartInstall(inst.id)
   } else {

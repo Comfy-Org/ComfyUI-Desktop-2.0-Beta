@@ -251,24 +251,25 @@ async function onContinue(): Promise<void> {
     return
   }
 
-  routePostStart()
+  void routePostStart()
 }
 
 /** Post-start routing — shared by `onContinue` (non-China path) and
  *  `chooseMirrors` (China path, after mirrors prompt). Honours
  *  `skipPick` for returning users by short-circuiting to `complete-skip`
  *  regardless of which card was selected. */
-function routePostStart(): void {
+async function routePostStart(): Promise<void> {
   if (skipPick.value) {
     emitCompleted('skipped')
     emit('complete-skip')
     return
   }
   if (pickedChoice.value === 'cloud') {
-    // Cloud capacity kill-switch — refuse to advance into cloud when
-    // the flag has it disabled. The card is also non-selectable in this
-    // state; this is the defense-in-depth check.
-    if (cloudCapacity.isDisabled()) return
+    // Cloud capacity gate. `normal` resolves instantly; `degraded`
+    // shows a confirm modal (user can back out); `disabled` resolves
+    // false (defense-in-depth — the card is also non-selectable in
+    // that state).
+    if (!(await cloudCapacity.confirmEntry())) return
     emitCompleted('cloud')
     emit('complete-cloud')
   } else if (hasLegacyDesktop.value && !expressInstall.value) {
@@ -293,7 +294,7 @@ async function chooseMirrors(useMirrors: boolean): Promise<void> {
     window.api.setSetting('chineseMirrorsPrompted', true)
   ])
   emitTelemetryAction('desktop2.first_use.mirrors_chosen', { use_mirrors: useMirrors })
-  routePostStart()
+  void routePostStart()
 }
 
 function openWhyCloud(): void {

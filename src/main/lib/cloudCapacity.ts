@@ -36,25 +36,26 @@ const VALID: ReadonlySet<CloudCapacityStatus> = new Set(['normal', 'degraded', '
 const DEFAULT_TIMEOUT_MS = 2000
 
 let cached: CloudCapacityStatus = 'normal'
-let initStarted = false
+let initPromise: Promise<void> | null = null
 
 /**
  * Boot-time fetch. Synchronously sets the cache to `'normal'`, then
- * issues a single non-blocking PostHog flag-fetch in the background to
- * replace it. The IPC handler (`get-cloud-capacity`) reads whatever is
- * currently in the cache — so a renderer query that lands before the
- * fetch settles receives the safe `'normal'` default.
+ * issues a single PostHog flag-fetch (bypassing consent) to replace it.
  *
- * Idempotent within a process; subsequent calls return without
- * re-issuing the fetch.
+ * The returned promise is cached on the module — the IPC handler awaits
+ * it so a renderer query that lands BEFORE the network call settles
+ * still sees the resolved value rather than the `'normal'` default. The
+ * 2s timeout in `getOpsFlag` bounds that wait.
+ *
+ * Idempotent within a process; subsequent calls return the same
+ * promise without re-issuing the fetch.
  */
 export function initCloudCapacity(opts: {
   distinctId: string
   timeoutMs?: number
 }): Promise<void> {
-  if (initStarted) return Promise.resolve()
-  initStarted = true
-  return mainTelemetry
+  if (initPromise) return initPromise
+  initPromise = mainTelemetry
     .getOpsFlag(CLOUD_CAPACITY_FLAG_KEY, opts.distinctId, opts.timeoutMs ?? DEFAULT_TIMEOUT_MS)
     .then((value) => {
       if (typeof value === 'string' && VALID.has(value as CloudCapacityStatus)) {
@@ -62,16 +63,38 @@ export function initCloudCapacity(opts: {
       }
       // Else keep `'normal'` — covers undefined (no client, timeout,
       // missing flag), boolean values, and unknown strings.
+      // eslint-disable-next-line no-console
+      console.log('[cloud-capacity] init: fetched=', value, '→ cached=', cached)
     })
-    .catch(() => {
+    .catch((err) => {
+      // eslint-disable-next-line no-console
+      console.log('[cloud-capacity] init error:', err)
       /* fail-safe: keep `'normal'` */
     })
+  return initPromise
 }
 
 /**
- * Synchronous accessor for the IPC handler. Returns the cached status,
- * which is always one of the three known variants (defaults to
- * `'normal'` until / unless the boot fetch replaces it).
+ * Async accessor — awaits the in-flight init fetch (if any) so renderer
+ * queries that land before the boot fetch settles still receive the
+ * resolved status rather than the `'normal'` default.
+ */
+export async function getCloudCapacityStatusAsync(): Promise<CloudCapacityStatus> {
+  if (initPromise) {
+    try {
+      await initPromise
+    } catch {
+      /* keep cached */
+    }
+  }
+  return cached
+}
+
+/**
+ * Synchronous accessor. Returns whatever is currently cached; useful
+ * for non-IPC call sites where a sync read is required. Prefer
+ * `getCloudCapacityStatusAsync` from the IPC handler so first-call
+ * timing doesn't race the boot fetch.
  */
 export function getCloudCapacityStatus(): CloudCapacityStatus {
   return cached
@@ -80,5 +103,5 @@ export function getCloudCapacityStatus(): CloudCapacityStatus {
 /** @internal — exposed for tests. */
 export function _resetForTest(): void {
   cached = 'normal'
-  initStarted = false
+  initPromise = null
 }

@@ -165,11 +165,12 @@ async function closeRunningInstance(inst: Installation): Promise<void> {
 // surfaces a "Heavy usage" meta pill but the click still proceeds.
 const cloudCapacity = useCloudCapacity()
 
-function handleCloudClick(): void {
-  // Capacity kill-switch — bail out before any navigation when cloud is
-  // currently disabled. The tile is also styled disabled so this is a
-  // defense-in-depth check (keyboard activation also routes through here).
-  if (cloudCapacity.isDisabled()) return
+async function handleCloudClick(): Promise<void> {
+  // Capacity gate: handles all three statuses. `normal` resolves
+  // instantly, `degraded` shows a confirm modal (user can back out),
+  // `disabled` resolves false (the tile is also styled disabled so
+  // this is defense-in-depth for keyboard activation).
+  if (!(await cloudCapacity.confirmEntry())) return
   // If a cloud install exists, route through the same body-click path
   // the install tiles use so behaviour can't drift between the two.
   // Otherwise promote new-install as a Try-Cloud CTA.
