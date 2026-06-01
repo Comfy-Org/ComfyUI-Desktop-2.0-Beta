@@ -11,7 +11,6 @@ import BrandBackground from '../components/BrandBackground.vue'
 import BaseInput from '../components/ui/BaseInput.vue'
 import ComfyWordmark from '../components/icons/ComfyWordmark.vue'
 import ChooserInstallTile from './chooser/ChooserInstallTile.vue'
-import AccountBanner from './chooser/AccountBanner.vue'
 import { resolvePickerTab } from '../lib/pickerTabs'
 import type { Installation, ShowProgressOpts } from '../types/ipc'
 
@@ -179,7 +178,6 @@ function handleNewInstallClick(): void {
   <BrandBackground v-show="props.visible" class="chooser-bg">
     <div class="chooser-view">
       <ComfyWordmark class="chooser-wordmark" aria-hidden="true" />
-      <AccountBanner />
       <div class="chooser-search">
         <BaseInput
           v-model="searchQuery"
