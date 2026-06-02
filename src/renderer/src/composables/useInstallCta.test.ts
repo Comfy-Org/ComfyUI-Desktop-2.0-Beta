@@ -8,22 +8,33 @@ vi.mock('vue-i18n', () => ({
   }),
 }))
 
-// Wrap the running-set in a shallowRef so `setRunning` can trigger the
-// composable's computed properties on real session-store mutations,
-// not on incidental dep churn from the test.
-const sessionState = vi.hoisted(() => ({ running: new Set<string>() }))
+// Wrap the session-state in a shallowRef so the `set*` helpers can
+// trigger the composable's computed properties on real session-store
+// mutations, not on incidental dep churn from the test.
+const sessionState = vi.hoisted(() => ({
+  running: new Set<string>(),
+  launching: new Set<string>(),
+}))
 function setRunning(running: Set<string>): void {
   sessionState.running = running
+  triggerRef(sessionStoreVersion)
+}
+function setLaunching(launching: Set<string>): void {
+  sessionState.launching = launching
   triggerRef(sessionStoreVersion)
 }
 const sessionStoreVersion = shallowRef(0)
 vi.mock('../stores/sessionStore', () => ({
   useSessionStore: () => ({
     isRunning: (id: string) => {
-      // Touch the version ref so the computed re-runs when `setRunning`
+      // Touch the version ref so the computed re-runs when `set*`
       // triggers it.
       void sessionStoreVersion.value
       return sessionState.running.has(id)
+    },
+    isLaunching: (id: string) => {
+      void sessionStoreVersion.value
+      return sessionState.launching.has(id)
     },
   }),
 }))
@@ -37,6 +48,7 @@ function installation(id: string): Installation {
 
 beforeEach(() => {
   setRunning(new Set<string>())
+  setLaunching(new Set<string>())
 })
 
 describe('useInstallCta', () => {
@@ -126,5 +138,48 @@ describe('useInstallCta', () => {
     // install now reads as "running elsewhere".
     active.value = null
     expect(cta.label.value).toBe('Switch')
+  })
+
+  // Launching state — the install has been attached to a window but
+  // `instance-started` has not yet fired (port not bound). The CTA
+  // must already read as "session attached" or the user sees a Start
+  // button in the very window the launch is happening in, and other
+  // windows see a Start button that the main-side single-attach guard
+  // would just reject.
+  it('returns Restart when the install is LAUNCHING in this host window', () => {
+    setLaunching(new Set<string>(['inst-A']))
+    const cta = useInstallCta(ref(installation('inst-A')), {
+      activeInstallationId: ref<string | null>('inst-A'),
+    })
+    expect(cta.runningAnywhere.value).toBe(true)
+    expect(cta.runningInThisWindow.value).toBe(true)
+    expect(cta.runningElsewhere.value).toBe(false)
+    expect(cta.restartInPlace.value).toBe(true)
+    expect(cta.label.value).toBe('Restart')
+  })
+
+  it('returns Switch when the install is LAUNCHING in another host window', () => {
+    setLaunching(new Set<string>(['inst-B']))
+    const cta = useInstallCta(ref(installation('inst-B')), {
+      activeInstallationId: ref<string | null>('inst-A'),
+    })
+    expect(cta.runningAnywhere.value).toBe(true)
+    expect(cta.runningInThisWindow.value).toBe(false)
+    expect(cta.runningElsewhere.value).toBe(true)
+    expect(cta.label.value).toBe('Switch')
+  })
+
+  it('keeps Restart across the launching → running handoff in the same window', () => {
+    // `instance-launching` arrives first → composable should already
+    // read Restart. Then `instance-started` arrives (launching clears,
+    // running sets) — same label, no flicker through Start.
+    setLaunching(new Set<string>(['inst-A']))
+    const cta = useInstallCta(ref(installation('inst-A')), {
+      activeInstallationId: ref<string | null>('inst-A'),
+    })
+    expect(cta.label.value).toBe('Restart')
+    setLaunching(new Set<string>())
+    setRunning(new Set<string>(['inst-A']))
+    expect(cta.label.value).toBe('Restart')
   })
 })
