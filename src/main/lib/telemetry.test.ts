@@ -6,7 +6,7 @@ import { EventEmitter } from 'events'
 vi.mock('electron', () => ({
   app: {
     getPath: () => path.join(os.tmpdir(), 'launcher-test'),
-    isPackaged: false,
+    isPackaged: true,
     on: () => {}
   },
   BrowserWindow: { getAllWindows: () => [] }
@@ -257,7 +257,7 @@ describe('telemetry.trackedStep', () => {
     captured.length = 0
     process.env['POSTHOG_API_KEY'] = 'test-key'
     process.env['POSTHOG_ENABLED'] = '1'
-    telemetry.initTelemetry({ appVersion: '0.0.0', appEnv: 'test', isPackaged: false })
+    telemetry.initTelemetry({ appVersion: '0.0.0', appEnv: 'test', isPackaged: true })
     await telemetry.identify('test-distinct-id')
     telemetry.setConsent(true)
   })
@@ -312,7 +312,7 @@ describe('telemetry consent state (3-state)', () => {
     process.env['POSTHOG_ENABLED'] = '1'
     // Reset module state so each test starts with fresh pendingSessionStart etc.
     telemetry._resetForTest()
-    telemetry.initTelemetry({ appVersion: '0.0.0', appEnv: 'test', isPackaged: false })
+    telemetry.initTelemetry({ appVersion: '0.0.0', appEnv: 'test', isPackaged: true })
     // identify *after* state changes per test so the deferral path is exercised.
   })
 
@@ -421,7 +421,7 @@ describe('telemetry.registerPersonProperties pre-consent merge', () => {
     process.env['POSTHOG_API_KEY'] = 'test-key'
     process.env['POSTHOG_ENABLED'] = '1'
     telemetry._resetForTest()
-    telemetry.initTelemetry({ appVersion: '0.0.0', appEnv: 'test', isPackaged: false })
+    telemetry.initTelemetry({ appVersion: '0.0.0', appEnv: 'test', isPackaged: true })
   })
 
   afterEach(() => {
@@ -464,7 +464,7 @@ describe('telemetry deferMigrationAlias', () => {
     process.env['POSTHOG_API_KEY'] = 'test-key'
     process.env['POSTHOG_ENABLED'] = '1'
     telemetry._resetForTest()
-    telemetry.initTelemetry({ appVersion: '0.0.0', appEnv: 'test', isPackaged: false })
+    telemetry.initTelemetry({ appVersion: '0.0.0', appEnv: 'test', isPackaged: true })
   })
 
   afterEach(() => {
@@ -588,7 +588,7 @@ describe('telemetry identity lifecycle (bindUserId / unbindUserId)', () => {
     process.env['POSTHOG_API_KEY'] = 'test-key'
     process.env['POSTHOG_ENABLED'] = '1'
     telemetry._resetForTest()
-    telemetry.initTelemetry({ appVersion: '0.0.0', appEnv: 'test', isPackaged: false })
+    telemetry.initTelemetry({ appVersion: '0.0.0', appEnv: 'test', isPackaged: true })
     telemetry.setConsentState('granted')
     telemetry.identify('installation-id-fake')
   })
@@ -653,7 +653,7 @@ describe('telemetry.forwardToRenderer + telemetry-relay registry', () => {
     captured.length = 0
     process.env['POSTHOG_API_KEY'] = 'test-key'
     process.env['POSTHOG_ENABLED'] = '1'
-    telemetry.initTelemetry({ appVersion: '0.0.0', appEnv: 'test', isPackaged: false })
+    telemetry.initTelemetry({ appVersion: '0.0.0', appEnv: 'test', isPackaged: true })
     await telemetry.identify('test-distinct-id')
     telemetry.setConsent(true)
   })
@@ -772,5 +772,92 @@ describe('telemetry.forwardToRenderer + telemetry-relay registry', () => {
 
     telemetry.forwardToRenderer('desktop2.execution.error', {})
     expect(a.sends).toHaveLength(0)
+  })
+})
+
+describe('telemetry SDK-level volume guards', () => {
+  beforeEach(async () => {
+    captured.length = 0
+    process.env['POSTHOG_API_KEY'] = 'test-key'
+    process.env['POSTHOG_ENABLED'] = '1'
+    telemetry.initTelemetry({ appVersion: '0.0.0', appEnv: 'test', isPackaged: true })
+    await telemetry.identify('test-distinct-id')
+    telemetry.setConsent(true)
+    telemetry._test_resetVolumeGuards()
+  })
+
+  afterEach(() => {
+    delete process.env['POSTHOG_API_KEY']
+    delete process.env['POSTHOG_ENABLED']
+  })
+
+  it('per-event sliding window caps at 60/window and emits exactly one rate_limited warning', () => {
+    for (let i = 0; i < 100; i++) {
+      telemetry.capture('desktop2.test.event', { i })
+    }
+    const product = captured.filter((c) => c.event === 'desktop2.test.event')
+    const warnings = captured.filter((c) => c.event === 'desktop2.telemetry.rate_limited')
+    expect(product).toHaveLength(60)
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]?.properties).toMatchObject({
+      event_name: 'desktop2.test.event',
+      limit: 60,
+      window_ms: 60_000
+    })
+  })
+
+  it('warning fires once per (event-name, process) — no warning spam', () => {
+    for (let i = 0; i < 200; i++) {
+      telemetry.capture('desktop2.test.event', { i })
+    }
+    const warnings = captured.filter((c) => c.event === 'desktop2.telemetry.rate_limited')
+    expect(warnings).toHaveLength(1)
+  })
+
+  it('different event names have independent windows', () => {
+    for (let i = 0; i < 100; i++) {
+      telemetry.capture('desktop2.test.a', { i })
+      telemetry.capture('desktop2.test.b', { i })
+    }
+    const a = captured.filter((c) => c.event === 'desktop2.test.a')
+    const b = captured.filter((c) => c.event === 'desktop2.test.b')
+    expect(a).toHaveLength(60)
+    expect(b).toHaveLength(60)
+  })
+
+  it('*.error events bypass the per-event rate limit', () => {
+    for (let i = 0; i < 200; i++) {
+      telemetry.capture('desktop2.execution.error', { i })
+    }
+    const errors = captured.filter((c) => c.event === 'desktop2.execution.error')
+    expect(errors).toHaveLength(200)
+    const warnings = captured.filter((c) => c.event === 'desktop2.telemetry.rate_limited')
+    expect(warnings).toHaveLength(0)
+  })
+
+  it('telemetry-self events bypass the rate limit (no recursion when warning fires)', () => {
+    for (let i = 0; i < 200; i++) {
+      telemetry.capture('desktop2.telemetry.rate_limited', { i })
+    }
+    const selfEvents = captured.filter((c) => c.event === 'desktop2.telemetry.rate_limited')
+    expect(selfEvents).toHaveLength(200)
+  })
+
+  it('per-process cap at 5000 stops everything (including *.error) and warns once', () => {
+    // Mix of rate-limited-bypassing errors and normal events to confirm
+    // the session cap is the FINAL backstop and applies to everything.
+    let i = 0
+    while (captured.filter((c) => c.event !== 'desktop2.telemetry.session_cap_hit').length < 5100) {
+      telemetry.capture('desktop2.execution.error', { i })
+      i++
+      if (i > 100_000) break // test runaway guard
+    }
+    const productEvents = captured.filter((c) => c.event !== 'desktop2.telemetry.session_cap_hit')
+    const sessionCapWarnings = captured.filter(
+      (c) => c.event === 'desktop2.telemetry.session_cap_hit'
+    )
+    expect(productEvents.length).toBeLessThanOrEqual(5000)
+    expect(sessionCapWarnings).toHaveLength(1)
+    expect(sessionCapWarnings[0]?.properties).toMatchObject({ cap: 5000 })
   })
 })

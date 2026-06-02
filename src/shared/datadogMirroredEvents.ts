@@ -53,7 +53,12 @@ export const DATADOG_MIRRORED_EVENT_NAMES: ReadonlySet<string> = new Set([
   'desktop2.identity.migrated',
   // Sign-in failures — alert if a provider's auth bridge breaks (OAuth
   // config drift, IdP outage, loopback-port contention).
-  'desktop2.auth.sign_in_failed'
+  'desktop2.auth.sign_in_failed',
+  // SDK-level volume guards — Datadog should alert if either fires
+  // because the call site is misbehaving (loop, missing dedup, etc.)
+  // and the SDK had to step in. One emit per process per event-name.
+  'desktop2.telemetry.rate_limited',
+  'desktop2.telemetry.session_cap_hit'
 ])
 
 export function isDatadogMirroredEvent(eventName: string): boolean {
