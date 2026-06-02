@@ -1027,22 +1027,27 @@ onUnmounted(() => {
    Container queries read `.title-bar`'s own inline size (set up via
    `container: title-bar / inline-size` above). Two tiers:
 
-     - Mid  (≤ 1199px on Mac, ≤ 1279px on Win): Feedback label drops
-       to icon-only. Saves ~80px on the trailing cluster.
-     - Narrow (≤ 899px on Mac, ≤ 979px on Win): both update pill
-       labels drop to icon-only. Saves another ~140–180px.
+     - Mid    (≤ 999px on Mac, ≤ 1099px on Win): Feedback label drops
+              to icon-only. Saves ~60px on the trailing cluster.
+     - Narrow (≤ 899px on Mac, ≤  979px on Win): both update pill
+              labels drop to icon-only. Saves another ~80–120px.
+
+   The Win thresholds sit ~80–100px above the Mac ones because Win/Linux
+   reserves 140px on the right for native window controls vs Mac's
+   78px left-side traffic-light reservation — Win needs to collapse
+   slightly earlier to keep the same effective usable width as Mac.
+
+   Both tiers sit well below the default host window width (1280, see
+   `DEFAULT_HOST_WIDTH` in createHostWindow.ts) so labels stay visible
+   at the canonical size; collapse only kicks in once the user resizes
+   the window meaningfully narrower.
 
    Tooltips already carry the full label on every pill (see
    `tooltipAttrs(...)` bindings on each <button>), so icon-only states
-   remain accessible without extra markup.
-
-   The Win thresholds are higher because the trailing cluster reserves
-   128px on the right for native window controls vs. Mac's 66px
-   left-side traffic-light reservation — Win needs to collapse earlier
-   to keep the same effective usable width as Mac. */
+   remain accessible without extra markup. */
 
 /* Mid tier — Feedback label collapses. */
-@container title-bar (max-width: 1199px) {
+@container title-bar (max-width: 999px) {
   .title-bar.is-mac .title-feedback-label {
     display: none;
   }
@@ -1051,7 +1056,7 @@ onUnmounted(() => {
     gap: 0;
   }
 }
-@container title-bar (max-width: 1279px) {
+@container title-bar (max-width: 1099px) {
   .title-bar:not(.is-mac) .title-feedback-label {
     display: none;
   }
@@ -1065,7 +1070,7 @@ onUnmounted(() => {
    collapsed pill becomes a 24×24 circle (matching the Settings + other
    icon buttons) instead of an oval, so it reads as an icon affordance
    not a "shrunk pill". */
-@container title-bar (max-width: 1099px) {
+@container title-bar (max-width: 899px) {
   .title-bar.is-mac .title-update-pill-label {
     display: none;
   }
@@ -1078,7 +1083,7 @@ onUnmounted(() => {
     border-radius: 999px;
   }
 }
-@container title-bar (max-width: 1179px) {
+@container title-bar (max-width: 979px) {
   .title-bar:not(.is-mac) .title-update-pill-label {
     display: none;
   }
