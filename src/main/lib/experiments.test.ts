@@ -16,7 +16,7 @@ vi.mock('./paths', () => ({
 vi.mock('electron', () => ({
   app: {
     getPath: () => testUserData,
-    isPackaged: false,
+    isPackaged: true,
     on: () => {}
   }
 }))
@@ -83,7 +83,7 @@ describe('experiments', () => {
     telemetry = await import('./telemetry')
     telemetry._resetForTest()
     experiments._resetForTest()
-    telemetry.initTelemetry({ appVersion: '0.0.0', appEnv: 'test', isPackaged: false })
+    telemetry.initTelemetry({ appVersion: '0.0.0', appEnv: 'test', isPackaged: true })
     telemetry.setConsentState('granted')
     telemetry.identify('test-distinct-id')
   })

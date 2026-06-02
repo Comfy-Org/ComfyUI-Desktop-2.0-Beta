@@ -315,6 +315,15 @@ export function initTelemetry(opts: InitOptions): void {
     arch: process.arch
   }
 
+  // Hard kill-switch for unpackaged (developer / `pnpm dev`) runs. Two
+  // reasons: (a) every hot-reload + every dev-tool action would otherwise
+  // pollute the same production project we read for product analytics,
+  // (b) dev-mode app-update behavior tends to produce pathological event
+  // shapes (e.g. the updater repeatedly "discovering" the staged build).
+  // Beta / canary / stable channels still ship — only the unpackaged
+  // local-source case is gated.
+  if (!opts.isPackaged) return
+
   const cfg = readPostHogConfig()
   if (!cfg.enabled) return
 

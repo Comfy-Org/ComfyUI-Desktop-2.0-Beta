@@ -6,7 +6,7 @@ import { EventEmitter } from 'events'
 vi.mock('electron', () => ({
   app: {
     getPath: () => path.join(os.tmpdir(), 'launcher-test'),
-    isPackaged: false,
+    isPackaged: true,
     on: () => {}
   },
   BrowserWindow: { getAllWindows: () => [] }
@@ -257,7 +257,7 @@ describe('telemetry.trackedStep', () => {
     captured.length = 0
     process.env['POSTHOG_API_KEY'] = 'test-key'
     process.env['POSTHOG_ENABLED'] = '1'
-    telemetry.initTelemetry({ appVersion: '0.0.0', appEnv: 'test', isPackaged: false })
+    telemetry.initTelemetry({ appVersion: '0.0.0', appEnv: 'test', isPackaged: true })
     await telemetry.identify('test-distinct-id')
     telemetry.setConsent(true)
   })
@@ -312,7 +312,7 @@ describe('telemetry consent state (3-state)', () => {
     process.env['POSTHOG_ENABLED'] = '1'
     // Reset module state so each test starts with fresh pendingSessionStart etc.
     telemetry._resetForTest()
-    telemetry.initTelemetry({ appVersion: '0.0.0', appEnv: 'test', isPackaged: false })
+    telemetry.initTelemetry({ appVersion: '0.0.0', appEnv: 'test', isPackaged: true })
     // identify *after* state changes per test so the deferral path is exercised.
   })
 
@@ -421,7 +421,7 @@ describe('telemetry.registerPersonProperties pre-consent merge', () => {
     process.env['POSTHOG_API_KEY'] = 'test-key'
     process.env['POSTHOG_ENABLED'] = '1'
     telemetry._resetForTest()
-    telemetry.initTelemetry({ appVersion: '0.0.0', appEnv: 'test', isPackaged: false })
+    telemetry.initTelemetry({ appVersion: '0.0.0', appEnv: 'test', isPackaged: true })
   })
 
   afterEach(() => {
@@ -464,7 +464,7 @@ describe('telemetry deferMigrationAlias', () => {
     process.env['POSTHOG_API_KEY'] = 'test-key'
     process.env['POSTHOG_ENABLED'] = '1'
     telemetry._resetForTest()
-    telemetry.initTelemetry({ appVersion: '0.0.0', appEnv: 'test', isPackaged: false })
+    telemetry.initTelemetry({ appVersion: '0.0.0', appEnv: 'test', isPackaged: true })
   })
 
   afterEach(() => {
@@ -588,7 +588,7 @@ describe('telemetry identity lifecycle (bindUserId / unbindUserId)', () => {
     process.env['POSTHOG_API_KEY'] = 'test-key'
     process.env['POSTHOG_ENABLED'] = '1'
     telemetry._resetForTest()
-    telemetry.initTelemetry({ appVersion: '0.0.0', appEnv: 'test', isPackaged: false })
+    telemetry.initTelemetry({ appVersion: '0.0.0', appEnv: 'test', isPackaged: true })
     telemetry.setConsentState('granted')
     telemetry.identify('installation-id-fake')
   })
@@ -653,7 +653,7 @@ describe('telemetry.forwardToRenderer + telemetry-relay registry', () => {
     captured.length = 0
     process.env['POSTHOG_API_KEY'] = 'test-key'
     process.env['POSTHOG_ENABLED'] = '1'
-    telemetry.initTelemetry({ appVersion: '0.0.0', appEnv: 'test', isPackaged: false })
+    telemetry.initTelemetry({ appVersion: '0.0.0', appEnv: 'test', isPackaged: true })
     await telemetry.identify('test-distinct-id')
     telemetry.setConsent(true)
   })
