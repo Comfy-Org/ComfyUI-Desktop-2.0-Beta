@@ -97,34 +97,39 @@ const locale = ref('en')
 const pickedChoice = ref<'cloud' | 'local'>('cloud')
 
 // Capacity-protection switch for Cloud (PostHog flag
-// `desktop-cloud-capacity`). At first-use, `disabled` softens into
-// the `degraded` heads-up modal — we don't know yet whether the user
-// is on a paid plan (sign-in happens after this picker), and hard-
-// blocking fresh-install paying users on launch-week overload is
-// worse than letting them through with a clear "heavy usage" notice.
-// The dashboard / IPP surfaces still hard-block; they have a signed-
-// in user to tier-check against.
+// `desktop-cloud-capacity`). At first-use, we follow the flag
+// verbatim — `disabled` greys the cloud card and pre-selects local,
+// `degraded` shows a heads-up modal on Continue. The only relaxation
+// anywhere in the gate is "known paid user", and that requires a
+// signed-in session — which we don't have here. So first-use cannot
+// soften, by design.
 const cloudCapacity = useCloudCapacity()
 const capacityReady = ref(false)
-/** Cloud is always the pre-selected card at first-use now (since
- *  `disabled` no longer forces a flip to local here). Retained as a
- *  constant ref so `fork_chosen.was_default` keeps the same shape and
- *  semantics: true when the user kept the default, false when they
- *  actively flipped to local. */
+/** What the picker rendered as default before the user could interact —
+ *  used to split `fork_chosen` conversion by signal-vs-defaulting: a
+ *  user keeping the default cloud pick is different from a user
+ *  actively flipping local→cloud. Reseeded on every `open()` from the
+ *  resolved capacity status. */
 const initialDefaultChoice = ref<'cloud' | 'local'>('cloud')
+function deriveDefaultChoice(): 'cloud' | 'local' {
+  return cloudCapacity.isDisabled() ? 'local' : 'cloud'
+}
 onMounted(async () => {
-  // Still await `whenReady` so the cloud card's tagline ("Heavy usage"
-  // vs the default "Try Cloud" copy) paints with the correct value on
-  // the first visible frame instead of flickering after the IPC
-  // settles.
   await cloudCapacity.whenReady()
+  if (cloudCapacity.isDisabled()) {
+    pickedChoice.value = 'local'
+  }
+  initialDefaultChoice.value = deriveDefaultChoice()
   capacityReady.value = true
 })
+watch(cloudCapacity.status, (status) => {
+  if (status === 'disabled' && pickedChoice.value === 'cloud') {
+    pickedChoice.value = 'local'
+  }
+})
 const cloudDescriptionKey = computed(() => {
-  // `degraded` and `disabled` share the same heads-up copy at first-
-  // use: under-the-hood the user will see the degraded modal on
-  // Continue, so the description should match.
-  if (cloudCapacity.isBlockingOrWarning()) return 'cloud.capacityDegradedHint'
+  if (cloudCapacity.isDisabled()) return 'cloud.capacityDisabledHint'
+  if (cloudCapacity.isDegraded()) return 'cloud.capacityDegradedHint'
   return 'firstUse.cloudDesc'
 })
 /** Express-install opt-out modifier on the start screen. Pre-ticked.
@@ -297,17 +302,20 @@ async function routePostStart(): Promise<void> {
     // pick to Local so a second Continue click just proceeds (the
     // Cloud card is already visually greyed). User sees: spinner
     // disappears, Local is now selected, hit Continue → moves on.
-    if (!(await cloudCapacity.confirmEntry({ surface: 'first-use' }))) {
-      // First-use only ever reaches the soft heads-up modal (disabled
-      // is mapped to degraded for this surface — see useCloudCapacity).
-      // The only reason a cloud pick is bounced here is the user
-      // declining that modal, so the reason field is fixed.
+    if (!(await cloudCapacity.confirmEntry())) {
+      // Separate event from `fork_chosen` because the user picked cloud
+      // but never actually entered it — counting them as a cloud
+      // converter would inflate the dashboard. `disabled` means the
+      // kill-switch was hard-off (composable returned false directly);
+      // `degraded_declined` means the user saw the heavy-load modal
+      // and backed out.
       emitTelemetryAction('desktop2.first_use.cloud_blocked', {
-        reason: 'degraded_declined',
+        reason: cloudCapacity.isDisabled() ? 'disabled' : 'degraded_declined',
         capacity_status: cloudCapacity.status.value,
         user_tier: cloudCapacity.tier.value
       })
       isContinuing.value = false
+      if (cloudCapacity.isDisabled()) pickedChoice.value = 'local'
       return
     }
     emitCompleted('cloud')
@@ -422,8 +430,12 @@ async function open(opts: OpenOpts = {}): Promise<void> {
   whyCloudOpen.value = false
   termsDoc.value = null
   acceptedTos.value = false
-  pickedChoice.value = 'cloud'
-  initialDefaultChoice.value = 'cloud'
+  // Re-derive default pick from current capacity. On first mount the
+  // `onMounted` `whenReady` await handles this; on takeover replay
+  // (capacity already resolved) we apply it inline so a `disabled`
+  // flag isn't clobbered by the reset.
+  pickedChoice.value = deriveDefaultChoice()
+  initialDefaultChoice.value = deriveDefaultChoice()
   expressInstall.value = true
   // Reset funnel-completion bookkeeping so a takeover replay measures
   // duration / steps from the replay, not from the original mount.
@@ -527,14 +539,16 @@ defineExpose({ open })
         >
           <ChoiceCard
             class="start-card-cloud"
+            :class="{ 'start-card-cloud--capacity-disabled': cloudCapacity.isDisabled() }"
             selectable
             :selected="pickedChoice === 'cloud'"
+            :aria-disabled="cloudCapacity.isDisabled() ? true : undefined"
             glow
             :label="$t('cloud.label')"
-            :tagline="cloudCapacity.isBlockingOrWarning() ? $t('cloud.capacityDegraded') : $t('firstUse.cloudTagline')"
+            :tagline="cloudCapacity.isDisabled() ? $t('cloud.capacityDisabled') : (cloudCapacity.isDegraded() ? $t('cloud.capacityDegraded') : $t('firstUse.cloudTagline'))"
             :description="$t(cloudDescriptionKey)"
             data-testid="first-use-pick-cloud"
-            @click="pickedChoice = 'cloud'"
+            @click="cloudCapacity.isDisabled() ? null : (pickedChoice = 'cloud')"
           >
             <template #label-trailing>
               <Tooltip :text="$t('firstUse.whyTryCloud')">
@@ -824,6 +838,15 @@ defineExpose({ open })
  * Cloud card the same way the original pick step did. */
 .start-card-cloud {
   anchor-name: --brand-beam-target;
+}
+/* Capacity-protection visual when cloud is currently disabled by the
+ * `desktop-cloud-capacity` flag: grey the card and block pointer
+ * interaction. The proceed handler also refuses to advance with cloud
+ * picked, so this is defense-in-depth + a clear signal to the user. */
+.start-card-cloud--capacity-disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  pointer-events: none;
 }
 .start-cloud-info {
   display: inline-flex;

@@ -16,9 +16,11 @@ import type { CloudCapacityStatus, CloudUserTier } from '../types/ipc'
  * process-local ref; there is intentionally no mid-session refresh.
  *
  * Also fetches the signed-in user's subscription tier (`free` / `paid` /
- * `unknown`) — paying users get relaxed gating on dashboard / IPP so a
- * launch-week kill-switch doesn't deny the product to people who pay
- * for it. See `main/lib/userTier.ts` for the source-of-truth fetch path.
+ * `unknown`). The ONLY relaxation on the flag is "known paid user" —
+ * a launch-week kill-switch should shed new free traffic, not deny the
+ * product to people who already pay for it. Every other case (free,
+ * unknown, pre-sign-in) follows the flag verbatim. See
+ * `main/lib/userTier.ts` for the source-of-truth fetch path.
  *
  * Always returns `'normal'` until the first IPC call resolves, and
  * fails-closed-to-normal on any error so a broken flag-fetch never
@@ -95,12 +97,13 @@ export function useCloudCapacity(): {
   isDisabled: () => boolean
   isBlockingOrWarning: () => boolean
   isPaid: () => boolean
-  /** What the gate would do for `surface` right now, after applying
-   *  the first-use + paid-tier relaxations. Use this for visual state
-   *  (chip copy, greying) so the UI matches what `confirmEntry` will
-   *  actually do — otherwise a paid user sees a "Temporarily
-   *  unavailable" tile that lets them through, or vice versa. */
-  effectiveStatus: (surface: 'first-use' | 'dashboard' | 'ipp') => CloudCapacityStatus
+  /** The status the gate will actually use, after the paid-user
+   *  relaxation. Use this for visual state (chip copy, greying) so the
+   *  UI matches what `confirmEntry` will do — otherwise a paid user
+   *  sees "Temporarily unavailable" on a tile they can click through.
+   *  For free / unknown users, this returns the raw flag value
+   *  verbatim. */
+  effectiveStatus: () => CloudCapacityStatus
   /** Gate every Cloud entry action through this. Awaits the boot-time
    *  fetch first, so an action fired before the IPC settles still sees
    *  the resolved value (not the stale `'normal'` default). Returns:
@@ -110,17 +113,12 @@ export function useCloudCapacity(): {
    *   - `disabled` → resolves `false` (defense-in-depth; surface also
    *                  greys/blocks at the click level).
    *
-   *  Two relaxations soften `disabled` into the `degraded` heads-up
-   *  modal instead of hard-blocking:
-   *   1. `surface: 'first-use'` — first-use runs pre-sign-in, so we
-   *      can't tell paid users from free here; blocking everyone on a
-   *      fresh install during launch-week overload is worse than
-   *      letting them proceed with a clear heads-up.
-   *   2. signed-in `paid` users on any surface — a launch-week kill-
-   *      switch should shed *new free* traffic, not deny the product
-   *      to people who already pay for it. `unknown` tier (no fetch
-   *      yet this lifetime) is treated as `free`, fails-closed. */
-  confirmEntry: (opts?: { surface?: 'first-use' | 'dashboard' | 'ipp' }) => Promise<boolean>
+   *  Single relaxation: signed-in `paid` users see `disabled` as the
+   *  `degraded` heads-up modal — a launch-week kill-switch should shed
+   *  new free traffic, not deny the product to people who already pay
+   *  for it. `unknown` tier (no fetch yet this lifetime) is treated as
+   *  `free`, fails-closed. Every other case follows the flag verbatim. */
+  confirmEntry: () => Promise<boolean>
   /** Resolves once the boot-time capacity + tier fetch has settled.
    *  Use for pre-render decisions (e.g. the first-use Cloud-vs-Local
    *  default selection) where reading a stale `'normal'` would race
@@ -137,15 +135,14 @@ export function useCloudCapacity(): {
 
   /** Shared between `confirmEntry` and the `effectiveStatus` helper —
    *  must stay aligned so visual state matches what the gate does. */
-  function computeEffective(surface: 'first-use' | 'dashboard' | 'ipp'): CloudCapacityStatus {
-    const softenDisabled = surface === 'first-use' || userTier.value === 'paid'
-    return status.value === 'disabled' && softenDisabled ? 'degraded' : status.value
+  function computeEffective(): CloudCapacityStatus {
+    return status.value === 'disabled' && userTier.value === 'paid' ? 'degraded' : status.value
   }
 
-  async function confirmEntry(opts: { surface?: 'first-use' | 'dashboard' | 'ipp' } = {}): Promise<boolean> {
+  async function confirmEntry(): Promise<boolean> {
     // Wait for the boot fetch so we never gate on a stale 'normal'.
     await ensureLoaded()
-    const effective = computeEffective(opts.surface ?? 'dashboard')
+    const effective = computeEffective()
     if (effective === 'disabled') return false
     if (effective !== 'degraded') return true
     const result = await dialogs.confirm({
@@ -165,7 +162,7 @@ export function useCloudCapacity(): {
     // `isDisabled` reports the RAW flag — used by surfaces that want
     // to know whether the kill-switch is engaged (e.g. for telemetry).
     // For "should I grey out the cloud tile?", prefer the tier-aware
-    // effective check below.
+    // `effectiveStatus` instead.
     isDisabled: () => status.value === 'disabled',
     isBlockingOrWarning: () => status.value !== 'normal',
     isPaid: () => userTier.value === 'paid',

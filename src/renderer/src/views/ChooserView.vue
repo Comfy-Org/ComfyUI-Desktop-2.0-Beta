@@ -147,7 +147,7 @@ async function pickInstall(inst: Installation): Promise<void> {
   // Cloud capacity gate — catches the case where a cloud install
   // already exists and the user clicks its per-install tile (the
   // generic "Try Cloud" tile gates separately in `handleCloudClick`).
-  if (inst.sourceCategory === 'cloud' && !(await cloudCapacity.confirmEntry({ surface: 'dashboard' }))) return
+  if (inst.sourceCategory === 'cloud' && !(await cloudCapacity.confirmEntry())) return
   emit('pick', inst)
 }
 
@@ -173,14 +173,14 @@ const cloudCapacity = useCloudCapacity()
  *  chip on `disabled` instead of a "Temporarily unavailable" lockout
  *  they can actually click through. Mirrors what `confirmEntry`
  *  would do on click. */
-const dashboardCapacityStatus = computed(() => cloudCapacity.effectiveStatus('dashboard'))
+const dashboardCapacityStatus = computed(() => cloudCapacity.effectiveStatus())
 
 async function handleCloudClick(): Promise<void> {
   // Capacity gate: handles all three statuses. `normal` resolves
   // instantly, `degraded` shows a confirm modal (user can back out),
   // `disabled` resolves false (the tile is also styled disabled so
   // this is defense-in-depth for keyboard activation).
-  if (!(await cloudCapacity.confirmEntry({ surface: 'dashboard' }))) return
+  if (!(await cloudCapacity.confirmEntry())) return
   // If a cloud install exists, route through the same body-click path
   // the install tiles use so behaviour can't drift between the two.
   // Otherwise promote new-install as a Try-Cloud CTA.

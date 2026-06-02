@@ -540,7 +540,7 @@ const cloudCapacity = useCloudCapacity()
 const isCloudCapacityBlocked = computed(
   () =>
     installation.value?.sourceCategory === 'cloud' &&
-    cloudCapacity.effectiveStatus('ipp') === 'disabled'
+    cloudCapacity.effectiveStatus() === 'disabled'
 )
 
 const primaryActionLabel = computed(() => {
