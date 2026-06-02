@@ -176,20 +176,21 @@ const cloudCapacity = useCloudCapacity()
 const dashboardCapacityStatus = computed(() => cloudCapacity.effectiveStatus())
 
 async function handleCloudClick(): Promise<void> {
-  // Capacity gate: handles all three statuses. `normal` resolves
-  // instantly, `degraded` shows a confirm modal (user can back out),
-  // `disabled` resolves false (the tile is also styled disabled so
-  // this is defense-in-depth for keyboard activation).
-  if (!(await cloudCapacity.confirmEntry())) return
-  // If a cloud install exists, route through the same body-click path
-  // the install tiles use so behaviour can't drift between the two.
-  // Otherwise promote new-install as a Try-Cloud CTA.
+  // Two paths from the dashboard cloud tile: an existing cloud install
+  // (delegate to `pickInstall`, which has its own capacity gate), or
+  // promote new-install as a Try-Cloud CTA (no install to pick, so the
+  // gate fires here). Calling `confirmEntry` in both branches would
+  // double-fire the degraded confirm modal on the existing-install
+  // path. The tile is also click-disabled when capacity is `disabled`
+  // (free / unknown), so this only really matters for the `degraded`
+  // and paid-on-disabled cases.
   if (cloudInstall.value) {
     if (sessionStore.isStopping(cloudInstall.value.id)) return
-    pickInstall(cloudInstall.value)
-  } else {
-    emit('show-new-install')
+    void pickInstall(cloudInstall.value)
+    return
   }
+  if (!(await cloudCapacity.confirmEntry())) return
+  emit('show-new-install')
 }
 
 function handleNewInstallClick(): void {
