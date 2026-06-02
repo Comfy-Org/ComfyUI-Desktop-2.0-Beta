@@ -194,6 +194,60 @@ no duplicate args.
 | `desktop2.adopt.failed` | `error_bucket`, `error_message` (first 500 chars) |
 | `desktop2.adopt.*` step events | `desktop2.adopt.backup`, `tcc`, `validate_venv`, `snapshot`, `source`, `comfy_update`, `requirements`, `requirements_reconcile`, `carry_settings`, `register` — all wrapped in `telemetry.trackedStep` |
 
+## Adopted-install parity with managed standalone
+
+Once adopted, the install should behave like any other standalone for
+the destructive/derived flows the dashboard exposes. The launcher
+resolves the right Python + uv per-install:
+
+- `getActivePythonPath(installation)` returns `adoptedPythonPath`
+  (legacy `.venv` python) for adopted installs.
+- `getActiveUvPath(installation)` returns the uv pip-installed into
+  the legacy `.venv` for adopted installs.
+- `getActiveVenvDir(installation)` points at `<adoptedBaseDir>/.venv`
+  for site-packages lookups during snapshot restore.
+
+These shims cover snapshot save/restore, custom-node dependency
+installs, and migrate-from flows without per-call special-casing.
+
+**Delete.** Adopted-aware: the wrapper at `installPath` is removed
+in full (it only contains the freshly cloned ComfyUI source — never
+user data), then `<adoptedBaseDir>/.venv` and the adopt-side marker
+are removed. `models/`, `user/`, `input/`, `output/`, `custom_nodes/`
+and any other entries under `adoptedBaseDir` are preserved. The
+install-side marker at `<installPath>/.comfyui-desktop-2` is what
+satisfies the delete safety check; older adoptions backfill it on
+the next idempotent re-run.
+
+**Copy / Copy & Update.** `performCopy` does a real deep copy for
+adopted installs. After the wrapper tree is copied to `destPath`,
+`standalone.fixupCopy(inst, destPath, …)` pulls the per-install
+state out of `<adoptedBaseDir>` into the new install:
+
+- `.venv` → `<destPath>/ComfyUI/.venv`  (preserves the user's
+  exact pytorch + python versions)
+- `user`, `custom_nodes`, `input`, `output` → `<destPath>/ComfyUI/…`
+- `models` is NOT copied — `useSharedModels: true` keeps them
+  global, matching adopted defaults.
+
+Then the venv path metadata (`pyvenv.cfg`, POSIX script shebangs) is
+rewritten from `<adoptedBaseDir>` → `<destPath>/ComfyUI` so the copy
+boots independently of the original legacy workspace. The new
+record stays `adopted: true` with `adoptedBaseDir` pointing at its
+own `ComfyUI/` dir and `adoptedPythonPath` at the new venv — that
+keeps the adopted-aware code paths (launch, snapshot, dep installs)
+working off the copy. The "where did this come from" fields
+(`adoptedFromLegacyVersion`, `adoptedFromGpu`, `adoptedSelectedDevice`,
+`adoptedComfyTagAtMigration`, `adoptedSourceMode`) are dropped —
+they describe the original migration event, not the derived copy.
+`adoptedAt` is reset to the copy time.
+
+**In-place ComfyUI update is gated off for adopted installs.** The
+update script needs `pygit2` (bundled with `standalone-env` but not
+the legacy venv) and a `standalone-env` python. `update-comfyui`
+short-circuits with a message recommending Copy & Update, which goes
+through the deep-copy path above.
+
 ## What this design intentionally does NOT do
 
 - No silent first-launch auto-adopt (see "Open scope" below — this is
@@ -208,6 +262,9 @@ no duplicate args.
 - No auto-update of ComfyUI after adoption. The one-shot checkout
   during adoption is **distinct** from the per-install opt-in update
   policy that applies from then on.
+- No in-place ComfyUI update for adopted installs — the user is
+  routed through Copy & Update, which yields a self-contained,
+  fully feature-equivalent install.
 
 ## Open scope (not yet on this branch)
 

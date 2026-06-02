@@ -127,5 +127,25 @@ export interface SourcePlugin {
     selections: Record<string, FieldOption | undefined>,
     context: Record<string, unknown>
   ): Promise<FieldOption[]>
-  fixupCopy?(srcPath: string, destPath: string): Promise<void>
+  /**
+   * Source-specific post-processing for a freshly copied installation.
+   * Invoked by `performCopy` after the wrapper tree is copied to
+   * `destPath`. Implementations can:
+   *
+   * - Rewrite venv path metadata (pyvenv.cfg, script shebangs) so the
+   *   new install boots cleanly from its new location.
+   * - Pull in additional files that don't live under `inst.installPath`
+   *   — e.g. an adopted install's legacy venv + workspace data, which
+   *   sit under `inst.adoptedBaseDir`.
+   *
+   * `sendProgress`/`signal` are forwarded from `performCopy` so heavy
+   * file copies can report progress under the same `copy` phase and
+   * respect cancellation.
+   */
+  fixupCopy?(
+    inst: InstallationRecord,
+    destPath: string,
+    sendProgress: (phase: string, detail: Record<string, unknown>) => void,
+    signal?: AbortSignal,
+  ): Promise<void>
 }
