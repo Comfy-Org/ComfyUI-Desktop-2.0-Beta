@@ -67,6 +67,8 @@ import {
   markIdentityMigrationCompleted
 } from './lib/deviceId'
 import { initExperiments } from './lib/experiments'
+import { initCloudCapacity } from './lib/cloudCapacity'
+import { initUserTier } from './lib/userTier'
 
 import {
   claimAttachHost,
@@ -1124,6 +1126,21 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
         id_class: getIdClass()
       }
     })
+
+    // Boot the cloud capacity-protection switch. Separate from
+    // `initExperiments` because this is an OPS kill-switch, not an A/B
+    // experiment — it deliberately bypasses the telemetry consent gate
+    // (a user who declined analytics still benefits from cloud being
+    // throttled when GPUs are saturated). See `cloudCapacity.ts`.
+    void initCloudCapacity({ distinctId: installationId })
+
+    // Hydrate the persisted cloud user-tier cache so the very first
+    // dashboard render knows whether the signed-in user is on a paid
+    // plan — without it, dashboard / IPP would treat returning paid
+    // users as `free` until they open a cloud install once this
+    // session. `userTier.ts` refreshes the cache on every cloud
+    // webContents `dom-ready` (see `attach.ts`).
+    void initUserTier()
 
     const locale = (settings.get('language') as string | undefined) || app.getLocale().split('-')[0]
     i18n.init(locale)

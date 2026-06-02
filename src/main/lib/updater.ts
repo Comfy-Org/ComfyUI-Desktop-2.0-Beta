@@ -41,6 +41,27 @@ let _appUpdateState: AppUpdateState = { kind: null, version: null, autoUpdate: t
  *  `update-error` so a subsequent check for a NEW version can trigger
  *  again. */
 let _autoDownloadTriggeredFor: string | null = null
+/** Telemetry dedup per `(event-name × version)` per process. The
+ *  todesktop / electron-updater state machine re-fires `update-available`
+ *  and `update-downloaded` on every periodic check that finds a staged
+ *  build, and our own `update-available` handler used to call
+ *  `runCheck('auto-download')` re-entrantly — together they produced
+ *  ~3M+ of each event in 24h across ~27 users (the volume incident
+ *  this dedup was introduced for). One emit per version covers every
+ *  analytical question (did this user see version X become available?
+ *  did the download finish?) without per-cycle re-emit. */
+const _appUpdateEmittedOnce: Map<string, Set<string>> = new Map()
+function _shouldEmitAppUpdateOnce(event: string, version: string | null): boolean {
+  if (!version) return true
+  let seen = _appUpdateEmittedOnce.get(event)
+  if (!seen) {
+    seen = new Set()
+    _appUpdateEmittedOnce.set(event, seen)
+  }
+  if (seen.has(version)) return false
+  seen.add(version)
+  return true
+}
 /** True when the most recent download was started by an explicit user
  *  action (the auto-off "Desktop Update Available" pill confirm-modal).
  *  Drives the post-download "restart now?" prompt: when the user opted
@@ -143,20 +164,29 @@ function bindUpdaterEvents(): void {
     const version = versionFromPayload(info)
     if (!version) return
     const autoInstall = isAutoInstallEnabled()
-    emitTelemetry('desktop2.app_update.available', {
-      version,
-      auto_update_setting: autoInstall ? 'on' : 'off',
-    })
+    if (_shouldEmitAppUpdateOnce('desktop2.app_update.available', version)) {
+      emitTelemetry('desktop2.app_update.available', {
+        version,
+        auto_update_setting: autoInstall ? 'on' : 'off'
+      })
+    }
     if (autoInstall) {
       // Auto-install ON suppresses the 'available' pill entirely.
-      // Main programmatically kicks off the download in the
-      // background; only the subsequent 'ready' state surfaces
-      // ("Desktop Update Ready"). The download is silent — no user
-      // action required, and the install is silent on next quit.
+      // electron-updater's default `autoDownload: true` already starts
+      // the download in the background; we only need to mark the
+      // intent for telemetry and let the natural `update-downloaded`
+      // event finish the cycle. A previous version called
+      // `runCheck('auto-download')` here to "kick" the download — that
+      // re-entrant check fired its own `update-available` /
+      // `update-downloaded` events and turned what should have been a
+      // single transition into a per-cycle telemetry storm. The dedup
+      // guard above defends against any residual re-emit even if the
+      // underlying updater fires the event multiple times per version.
       if (_autoDownloadTriggeredFor !== version) {
         _autoDownloadTriggeredFor = version
-        emitTelemetry('desktop2.app_update.download_started', { version, initiator: 'auto' })
-        void runCheck('auto-download').catch(() => {})
+        if (_shouldEmitAppUpdateOnce('desktop2.app_update.download_started', version)) {
+          emitTelemetry('desktop2.app_update.download_started', { version, initiator: 'auto' })
+        }
       }
       return
     }
@@ -167,7 +197,9 @@ function bindUpdaterEvents(): void {
     const version = versionFromPayload(event)
     if (!version) return
     _autoDownloadTriggeredFor = null
-    emitTelemetry('desktop2.app_update.download_complete', { version })
+    if (_shouldEmitAppUpdateOnce('desktop2.app_update.download_complete', version)) {
+      emitTelemetry('desktop2.app_update.download_complete', { version })
+    }
     _setUpdateState({ kind: 'ready', version, autoUpdate: isAutoInstallEnabled() })
     if (_userInitiatedDownload) {
       // The user opted in to download via the auto-off available pill
@@ -200,7 +232,7 @@ function bindUpdaterEvents(): void {
     emitTelemetry('desktop2.app_update.error', {
       stage,
       error_bucket: bucketError(updaterErrorMessage(args)),
-      user_initiated: wasUserInitiated,
+      user_initiated: wasUserInitiated
     })
     clearQuitReason()
     _autoDownloadTriggeredFor = null
@@ -211,7 +243,7 @@ function bindUpdaterEvents(): void {
       _setUpdateState({
         kind: 'available',
         version: _appUpdateState.version,
-        autoUpdate: _appUpdateState.autoUpdate,
+        autoUpdate: _appUpdateState.autoUpdate
       })
     }
     if (wasUserInitiated) {
@@ -245,33 +277,66 @@ function bindUpdaterEvents(): void {
     const transferred = typeof p.transferred === 'number' ? p.transferred : null
     const total = typeof p.total === 'number' ? p.total : null
     const bytesPerSecond = typeof p.bytesPerSecond === 'number' ? p.bytesPerSecond : null
-    if (_userInitiatedDownload && _appUpdateState.kind !== 'downloading' && _appUpdateState.kind !== 'ready') {
+    if (
+      _userInitiatedDownload &&
+      _appUpdateState.kind !== 'downloading' &&
+      _appUpdateState.kind !== 'ready'
+    ) {
       _setUpdateState({
         kind: 'downloading',
         version: _appUpdateState.version,
-        autoUpdate: _appUpdateState.autoUpdate,
+        autoUpdate: _appUpdateState.autoUpdate
       })
     }
-    _broadcastToRenderer('app-update:download-progress', { percent, transferred, total, bytesPerSecond })
+    _broadcastToRenderer('app-update:download-progress', {
+      percent,
+      transferred,
+      total,
+      bytesPerSecond
+    })
   })
 }
 
-async function checkForUpdate(source: string): Promise<{ available: boolean; version?: string; error?: string }> {
+/** Triggers that originate from explicit user intent (the title-bar
+ *  "Check for Updates" menu and the auto-off available-pill confirm
+ *  modal). Background triggers (`auto-check` every 10 min, plus any
+ *  app-open / dashboard-revisit / IPP-click code path that quietly
+ *  re-runs a check) are implementation details and would otherwise
+ *  fire on every periodic interval without carrying analytical
+ *  signal, so `desktop2.app_update.checked` only emits for the
+ *  user-initiated set. Per-version dedup also applies — a user
+ *  mashing the menu item while a download is staged still produces
+ *  one event per version. The `up_to_date` result is intentionally
+ *  not emitted at all: every analytical question that needs the
+ *  denominator can use `session.started` instead. */
+const USER_INITIATED_CHECK_TRIGGERS = new Set(['manual-check', 'download-button'])
+
+async function checkForUpdate(
+  source: string
+): Promise<{ available: boolean; version?: string; error?: string }> {
   const updater = getAutoUpdater()
   if (!updater) {
-    emitTelemetry('desktop2.app_update.checked', { trigger: source, result: 'updater_unavailable' })
+    if (USER_INITIATED_CHECK_TRIGGERS.has(source)) {
+      emitTelemetry('desktop2.app_update.checked', {
+        trigger: source,
+        result: 'updater_unavailable'
+      })
+    }
     return { available: false, error: UPDATER_UNAVAILABLE_MESSAGE }
   }
   bindUpdaterEvents()
   const result = await updater.checkForUpdates({
     source,
-    disableUpdateReadyAction: true,
+    disableUpdateReadyAction: true
   })
   const version = versionFromPayload(result)
-  emitTelemetry('desktop2.app_update.checked', {
-    trigger: source,
-    result: version ? 'available' : 'up_to_date',
-  })
+  if (
+    version &&
+    USER_INITIATED_CHECK_TRIGGERS.has(source) &&
+    _shouldEmitAppUpdateOnce('desktop2.app_update.checked', version)
+  ) {
+    emitTelemetry('desktop2.app_update.checked', { trigger: source, result: 'available' })
+  }
   return version ? { available: true, version } : { available: false }
 }
 
@@ -284,7 +349,7 @@ async function checkForUpdate(source: string): Promise<{ available: boolean; ver
  * so any subscribed renderer surface still updates.
  */
 export function runCheck(
-  source: string,
+  source: string
 ): Promise<{ available: boolean; version?: string; error?: string }> {
   return checkForUpdate(source)
 }
@@ -337,20 +402,20 @@ export async function downloadUpdate(): Promise<void> {
   _userInitiatedDownload = true
   emitTelemetry('desktop2.app_update.download_started', {
     version: _appUpdateState.version,
-    initiator: 'user',
+    initiator: 'user'
   })
   try {
     const result = await runCheck('download-button')
     if (!result.available && _appUpdateState.kind !== 'ready') {
       _userInitiatedDownload = false
       _broadcastToRenderer('app-update:user-action-failed', {
-        message: result.error || NO_UPDATE_AVAILABLE_MESSAGE,
+        message: result.error || NO_UPDATE_AVAILABLE_MESSAGE
       })
     }
   } catch (err) {
     _userInitiatedDownload = false
     _broadcastToRenderer('app-update:user-action-failed', {
-      message: err instanceof Error ? err.message : String(err),
+      message: err instanceof Error ? err.message : String(err)
     })
   }
 }
@@ -370,7 +435,7 @@ export function installUpdate(): void {
   }
   emitTelemetry('desktop2.app_update.install_triggered', {
     version: _appUpdateState.version,
-    auto_update_setting: isAutoInstallEnabled() ? 'on' : 'off',
+    auto_update_setting: isAutoInstallEnabled() ? 'on' : 'off'
   })
   try {
     setQuitReason('update-install')
@@ -378,7 +443,7 @@ export function installUpdate(): void {
   } catch (err) {
     clearQuitReason()
     _broadcastToRenderer('app-update:user-action-failed', {
-      message: err instanceof Error ? err.message : String(err),
+      message: err instanceof Error ? err.message : String(err)
     })
   }
 }

@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { LayoutDashboard, Plus, Search, X } from 'lucide-vue-next'
 import BaseInput from '../components/ui/BaseInput.vue'
 import { FILTER_CHIPS, useInstallList } from '../composables/useInstallList'
+import { useCloudCapacity } from '../composables/useCloudCapacity'
 import { useSessionStore } from '../stores/sessionStore'
 import ComfyUISettingsContent from '../components/settings/ComfyUISettingsContent.vue'
 import InfoTooltip from '../components/InfoTooltip.vue'
@@ -486,9 +487,24 @@ function handleSettingsNavigateList(): void {
  *  running in another window — issue #749) we route to `pickInstall`,
  *  whose main-side focus-existing short-circuit raises the already-open
  *  window rather than restarting it. */
-function handleExpandedPrimaryAction(restartInPlace: boolean): void {
+// Capacity-protection switch (PostHog flag `desktop-cloud-capacity`).
+// When `disabled`, the primary action no-ops for a cloud install so the
+// user can't enter cloud during an outage. A visual "Heavy usage" /
+// "Temporarily unavailable" chip on the cloud row itself is a follow-up
+// (the row's a child component `InstanceRow.vue`).
+const cloudCapacity = useCloudCapacity()
+/** Tier-aware capacity status passed down to per-row chips so a paid
+ *  user doesn't see "Temporarily unavailable" on a row they can still
+ *  click through. Mirrors what `confirmEntry()` will do. */
+const ippCapacityStatus = computed(() => cloudCapacity.effectiveStatus())
+
+async function handleExpandedPrimaryAction(restartInPlace: boolean): Promise<void> {
   const inst = selectedInstall.value
   if (!inst) return
+  // Cloud capacity gate. `normal` resolves instantly; `degraded`
+  // shows a confirm modal (user can back out); `disabled` resolves
+  // false. Matches the ChooserView path so the two can't diverge.
+  if (inst.sourceCategory === 'cloud' && !(await cloudCapacity.confirmEntry())) return
   if (restartInPlace) {
     bridge?.restartInstall(inst.id)
   } else {
@@ -573,6 +589,7 @@ function handleExpandedPrimaryAction(restartInPlace: boolean): void {
               :update-available="isRowUpdateAvailable(inst)"
               :operating="effectiveOperatingSet.has(inst.id)"
               :last-launched-short-label="lastLaunchedShortLabel(inst)"
+              :capacity-status="ippCapacityStatus"
               @select="handleSelect"
             />
 

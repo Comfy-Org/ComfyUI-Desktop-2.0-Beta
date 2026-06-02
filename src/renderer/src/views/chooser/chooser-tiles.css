@@ -305,3 +305,23 @@
   background: var(--accent-danger-hover, #b8241a);
   border-color: var(--accent-danger-hover, #b8241a);
 }
+
+/* Capacity-protection state for the cloud tile (PostHog flag
+ * `desktop-cloud-capacity`). `degraded` keeps the tile interactive but
+ * swaps the meta pill for a warning chip; `disabled` greys the tile and
+ * blocks interaction so users can't enter cloud during an outage. */
+.chooser-tile--cloud-disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+.chooser-tile-pill--capacity {
+  background: var(--accent-warn-soft, rgba(255, 193, 7, 0.15));
+  color: var(--accent-warn, #d97706);
+  border-color: var(--accent-warn, #d97706);
+}
+.chooser-tile-pill--capacity-disabled {
+  background: var(--accent-danger-soft, rgba(217, 45, 32, 0.12));
+  color: var(--accent-danger, #d92d20);
+  border-color: var(--accent-danger, #d92d20);
+}
