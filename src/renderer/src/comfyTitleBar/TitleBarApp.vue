@@ -195,7 +195,7 @@ const {
   isFullscreen,
   firstUseMode,
   isConsentLockdown,
-  isChromeLocked,
+  isFirstUseLockdown,
   installTypeMeta,
   installTypeLabel,
   showInstallTypeIcon,
@@ -204,8 +204,8 @@ const {
 } = useTitleBarIdentity({ bridge, isInstallLess })
 // Mark unused — sourceCategory feeds installTypeMeta inside the
 // composable, but the template doesn't reference it directly.
-// firstUseMode is consumed by isChromeLocked / isConsentLockdown inside
-// the composable; the template only reads the derived booleans.
+// firstUseMode is consumed by isFirstUseLockdown / isConsentLockdown
+// inside the composable; the template only reads the derived booleans.
 void sourceCategory
 void firstUseMode
 
@@ -492,7 +492,10 @@ watch(
     appUpdatePillLabel,
     showAppUpdatePill,
     showInstallUpdatePill,
-    isChromeLocked
+    // Trailing pills (update / feedback / downloads) hide on
+    // first-use lockdown only; loading-lockdown keeps them live, so
+    // the legacy `isChromeLocked` would over-invalidate.
+    isFirstUseLockdown
   ],
   () => invalidateRestoreCosts()
 )
@@ -549,10 +552,14 @@ onUnmounted(() => {
          host-app-level menu and stays out of ComfyUI's namespace. -->
     <!-- Left cluster: waffle menu. The app-update pill moved to the
          right trailing cluster so all user-action controls
-         (update / feedback / downloads / settings) live together. -->
+         (update / feedback / downloads / settings) live together.
+         Hidden only on `consent-lockdown` — `post-consent` still
+         surfaces the "Skip Onboarding" escape, and `loading-lockdown`
+         keeps the full menu so the user can open a fresh window,
+         settings, feedback, or quit cleanly while an op runs. -->
     <div class="title-cluster">
       <button
-        v-if="!isChromeLocked"
+        v-if="!isConsentLockdown"
         ref="fileBtn"
         type="button"
         class="title-menu-button title-menu-button--icon"
@@ -575,14 +582,16 @@ onUnmounted(() => {
            downloads tray). Install-less hosts (the chooser host) AND
            first-use-takeover steps render as a static label — the
            chooser body already IS the picker, and the takeover locks
-           down all chrome to avoid wandering out of bootstrap. -->
-      <!-- Interactive on both install-backed AND install-less (chooser)
-           hosts so the user has one consistent way to switch instances
-           from anywhere in the app. First-use takeover still renders the
-           static label — the bootstrap UX locks down all chrome to keep
-           the user inside the flow. -->
+           down all chrome to avoid wandering out of bootstrap.
+           `loading-lockdown` keeps the pill interactive so the user
+           can open the picker (switch / open another install) while
+           an op runs in the background. -->
+      <!-- Interactive on every mode except first-use lockdown. The
+           bootstrap UX is the only flow that needs to keep the user
+           inside one window; long-running ops mount the ProgressModal
+           in this window but leave the title bar free to navigate. -->
       <div
-        v-if="!isChromeLocked"
+        v-if="!isFirstUseLockdown"
         ref="installPill"
         class="title-install-pill is-interactive"
         :class="{
@@ -658,7 +667,7 @@ onUnmounted(() => {
            stay visually distinct: install update = in the center pill;
            Desktop app update = here. -->
       <button
-        v-if="!isChromeLocked && showAppUpdatePill"
+        v-if="!isFirstUseLockdown && showAppUpdatePill"
         type="button"
         class="title-update-pill is-app-update"
         :class="{
@@ -678,7 +687,7 @@ onUnmounted(() => {
         <span class="title-update-pill-label">{{ appUpdatePillLabel ?? 'Desktop Update' }}</span>
       </button>
       <button
-        v-if="!isChromeLocked"
+        v-if="!isFirstUseLockdown"
         type="button"
         class="title-menu-button title-feedback-button"
         v-bind="tooltipAttrs(t('titleBar.feedbackTooltip'), t('titleBar.feedback'))"
@@ -691,9 +700,11 @@ onUnmounted(() => {
            `'downloads'` mode anchored under the button. Distinct
            `ArrowDownToLine` icon vs. the update pills' `Download` so
            the user reads "downloads tray" vs "update available" at a
-           glance. Hidden during first-use takeover — no installs yet. -->
+           glance. Hidden during first-use takeover — no installs yet.
+           Visible during loading-lockdown so model downloads kicked
+           off in parallel with an install/update remain reachable. -->
       <button
-        v-if="!isChromeLocked"
+        v-if="!isFirstUseLockdown"
         ref="downloadsBtn"
         type="button"
         class="title-downloads-tray"

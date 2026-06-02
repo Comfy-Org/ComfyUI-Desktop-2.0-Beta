@@ -365,41 +365,67 @@ describe('TitleBarApp', () => {
     wrapper.unmount()
   })
 
-  it('hides the waffle menu and downloads tray for the full first-use takeover (consent + post-consent)', async () => {
-    // The title bar strips itself down to a minimal identity bar for
-    // the entire onboarding flow — waffle, downloads tray, and
-    // feedback button all disappear. No installs exist yet so the
-    // downloads tray is meaningless, and the takeover screens read
-    // cleaner without the surrounding chrome. The chrome returns once
-    // `firstUseMode === 'none'` (steady state).
+  it('locks chrome through the first-use takeover and restores it during loading-lockdown', async () => {
+    // First-use lockdown (consent + post-consent) strips chrome to a
+    // minimal identity bar — waffle / pill / trailing pills all hide.
+    // `consent-lockdown` also drops the waffle entirely (no escape
+    // hatch); `post-consent` keeps the waffle so the menu can surface
+    // the "Skip Onboarding" entry.
+    //
+    // `loading-lockdown` (any long-running op takeover — install /
+    // update / migrate / snapshot / launch) is NOT a chrome lockdown
+    // — the waffle, picker pill, feedback, and downloads tray all
+    // stay live so the user can open a fresh window, switch
+    // installs, or quit cleanly while the op runs in the background
+    // (#653).
     const { default: TitleBarApp } = await import('./TitleBarApp.vue')
     const wrapper = mount(TitleBarApp)
     await flushPromises()
-    // Steady state — waffle + downloads tray are rendered.
+    // Steady state — every button is rendered.
     expect(wrapper.find('.title-menu-button--icon').exists()).toBe(true)
     expect(wrapper.find('.title-downloads-tray').exists()).toBe(true)
+    expect(wrapper.find('.title-feedback-button').exists()).toBe(true)
+    expect(wrapper.find('.title-install-pill.is-interactive').exists()).toBe(true)
     expect(wrapper.find('header').classes()).not.toContain('is-consent-lockdown')
 
-    // Consent step on screen — waffle + downloads tray disappear.
+    // Consent step — full strip (waffle gone, trailing cluster gone,
+    // pill collapses to static label).
     bridgeState.firstUseModeChangedCallbacks.forEach((cb) => cb('consent-lockdown'))
     await flushPromises()
     expect(wrapper.find('header').classes()).toContain('is-consent-lockdown')
     expect(wrapper.find('.title-menu-button--icon').exists()).toBe(false)
     expect(wrapper.find('.title-downloads-tray').exists()).toBe(false)
+    expect(wrapper.find('.title-feedback-button').exists()).toBe(false)
+    expect(wrapper.find('.title-install-pill.is-interactive').exists()).toBe(false)
 
-    // Advance to post-consent — chrome stays stripped (no waffle, no tray).
+    // Post-consent — waffle returns (Skip Onboarding lives there);
+    // trailing pills + interactive picker stay hidden.
     bridgeState.firstUseModeChangedCallbacks.forEach((cb) => cb('post-consent'))
     await flushPromises()
     expect(wrapper.find('header').classes()).not.toContain('is-consent-lockdown')
-    expect(wrapper.find('.title-menu-button--icon').exists()).toBe(false)
+    expect(wrapper.find('.title-menu-button--icon').exists()).toBe(true)
     expect(wrapper.find('.title-downloads-tray').exists()).toBe(false)
+    expect(wrapper.find('.title-feedback-button').exists()).toBe(false)
+    expect(wrapper.find('.title-install-pill.is-interactive').exists()).toBe(false)
 
-    // Takeover dismissed — back to steady state with full chrome.
+    // Loading-lockdown — every chrome button stays live so the user
+    // keeps full title-bar access during long-running ops.
+    bridgeState.firstUseModeChangedCallbacks.forEach((cb) => cb('loading-lockdown'))
+    await flushPromises()
+    expect(wrapper.find('header').classes()).not.toContain('is-consent-lockdown')
+    expect(wrapper.find('.title-menu-button--icon').exists()).toBe(true)
+    expect(wrapper.find('.title-downloads-tray').exists()).toBe(true)
+    expect(wrapper.find('.title-feedback-button').exists()).toBe(true)
+    expect(wrapper.find('.title-install-pill.is-interactive').exists()).toBe(true)
+
+    // Takeover dismissed — back to steady state.
     bridgeState.firstUseModeChangedCallbacks.forEach((cb) => cb('none'))
     await flushPromises()
     expect(wrapper.find('header').classes()).not.toContain('is-consent-lockdown')
     expect(wrapper.find('.title-menu-button--icon').exists()).toBe(true)
     expect(wrapper.find('.title-downloads-tray').exists()).toBe(true)
+    expect(wrapper.find('.title-feedback-button').exists()).toBe(true)
+    expect(wrapper.find('.title-install-pill.is-interactive').exists()).toBe(true)
     wrapper.unmount()
   })
 

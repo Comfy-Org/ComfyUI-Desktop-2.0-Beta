@@ -39,7 +39,37 @@ export function normaliseFirstUseMode(raw: unknown): FirstUseMode {
     : 'none'
 }
 
-/** True when any mode that should lock the title-bar chrome is active. */
+/**
+ * First-use takeover modes (consent + post-consent) — full chrome
+ * lockdown. The user is mid-bootstrap and the only escape hatches
+ * are the consent buttons or (on `post-consent`) the menu's Skip
+ * Onboarding entry. The pill, trailing pills, and feedback button
+ * are all hidden.
+ */
+export function isFirstUseLockdownMode(mode: FirstUseMode): boolean {
+  return mode === 'consent-lockdown' || mode === 'post-consent'
+}
+
+/**
+ * ProgressModal takeover mode — a long-running op (install / update /
+ * migrate / snapshot / launch) is mounted. The user keeps full access
+ * to the title bar so they can open the picker, swap windows, send
+ * feedback, or quit cleanly while the op runs in the background. The
+ * waffle + pill + trailing pills all stay live.
+ */
+export function isLoadingLockdownMode(mode: FirstUseMode): boolean {
+  return mode === 'loading-lockdown'
+}
+
+/**
+ * Legacy union — true for every non-`'none'` mode. Retained for the
+ * `is-consent-lockdown` CSS class hook on the title-bar root and for
+ * back-compat with callers that haven't migrated to the granular
+ * predicates above. Prefer `isFirstUseLockdownMode` /
+ * `isLoadingLockdownMode` for new code so chrome gates can distinguish
+ * first-use lockdown (hide everything) from loading lockdown (keep
+ * everything live).
+ */
 export function isChromeLockedMode(mode: FirstUseMode): boolean {
   return mode !== 'none'
 }
