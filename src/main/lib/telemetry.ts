@@ -190,6 +190,19 @@ let client: PostHog | null = null
 let distinctId: string | null = null
 let bootstrapTimeMs: number = Date.now()
 let initialized = false
+/** When `true`, all PostHog WRITE paths (capture, identify, alias*,
+ *  captureException, person-property updates) short-circuit. Set in
+ *  `initTelemetry` based on `isPackaged`. Read paths (`getOpsFlag`,
+ *  `loadFeatureFlagsImmediate`, `shutdown`) deliberately ignore this
+ *  so devs can still resolve feature flags in `pnpm dev`. */
+let suppressEmit = false
+
+/** Short-circuit guard for all PostHog emission paths. Centralized so
+ *  the dev-mode suppression and a missing client are checked
+ *  identically across every callsite. */
+function canEmit(): boolean {
+  return !suppressEmit && client !== null
+}
 
 /**
  * Default properties merged into every `capture()` payload. Set once at
@@ -300,9 +313,9 @@ function _bypassRateLimit(event: string): boolean {
 }
 
 function _emitWarning(event: string, properties: TelemetryContext): void {
-  if (!client || !distinctId) return
+  if (!canEmit() || !distinctId) return
   try {
-    client.capture({
+    client!.capture({
       distinctId,
       event,
       properties: { ...defaultEventProperties, ...properties }
@@ -425,14 +438,25 @@ export function initTelemetry(opts: InitOptions): void {
     arch: process.arch
   }
 
-  // Hard kill-switch for unpackaged (developer / `pnpm dev`) runs. Two
-  // reasons: (a) every hot-reload + every dev-tool action would otherwise
-  // pollute the same production project we read for product analytics,
-  // (b) dev-mode app-update behavior tends to produce pathological event
-  // shapes (e.g. the updater repeatedly "discovering" the staged build).
-  // Beta / canary / stable channels still ship — only the unpackaged
-  // local-source case is gated.
-  if (!opts.isPackaged) return
+  // Suppress event capture on unpackaged (developer / `pnpm dev`) runs.
+  // Two reasons: (a) every hot-reload + every dev-tool action would
+  // otherwise pollute the same production project we read for product
+  // analytics, (b) dev-mode app-update behavior tends to produce
+  // pathological event shapes (e.g. the updater repeatedly
+  // "discovering" the staged build). Beta / canary / stable channels
+  // still emit normally — only the unpackaged local-source case is
+  // gated.
+  //
+  // FLAG READS are NOT suppressed: a dev working on a feature gated by
+  // a PostHog flag (e.g. `desktop-cloud-capacity`) needs to actually
+  // see the flag's resolved value at boot. Previously the entire
+  // PostHog client was skipped in dev, which made `getOpsFlag` /
+  // `loadFeatureFlagsImmediate` return defaults and stranded any
+  // capacity-protection or experiment testing. Now the client is
+  // always created so reads work; only the emission paths
+  // (`capture`, `identify`, `alias*`, `captureException`,
+  // `registerPersonProperties`) bail when `suppressEmit` is set.
+  suppressEmit = !opts.isPackaged
 
   const cfg = readPostHogConfig()
   if (!cfg.enabled) return
@@ -496,11 +520,11 @@ let pendingMigrationAlias: {
 let installationDeviceId: string | null = null
 
 function tryFlushDeferred(): void {
-  if (!client || !distinctId) return
+  if (!canEmit() || !distinctId) return
   if (consentState !== 'granted') return
   if (pendingIdentifyProperties) {
     try {
-      client.identify({ distinctId, properties: { $set: pendingIdentifyProperties } })
+      client!.identify({ distinctId, properties: { $set: pendingIdentifyProperties } })
     } catch {
       // ignore
     }
@@ -570,7 +594,7 @@ export function identify(id: string, properties: Record<string, TelemetryValue> 
   distinctId = id
   installationDeviceId = id
   pendingIdentifyProperties = properties
-  if (!client) return
+  if (!canEmit()) return
   tryFlushDeferred()
 }
 
@@ -592,17 +616,17 @@ export function identify(id: string, properties: Record<string, TelemetryValue> 
  * this from here.)
  */
 export function bindUserId(userId: string, properties: Record<string, TelemetryValue> = {}): void {
-  if (!client || !installationDeviceId) return
+  if (!canEmit() || !installationDeviceId) return
   if (consentState !== 'granted') return
   const anonymousId = installationDeviceId
   distinctId = userId
   try {
-    client.alias({ distinctId: userId, alias: anonymousId })
+    client!.alias({ distinctId: userId, alias: anonymousId })
   } catch {
     // ignore
   }
   try {
-    client.identify({
+    client!.identify({
       distinctId: userId,
       properties: { $set: { ...properties, is_authenticated: true } }
     })
@@ -631,9 +655,9 @@ export function bindUserId(userId: string, properties: Record<string, TelemetryV
 export function unbindUserId(): void {
   if (!installationDeviceId) return
   distinctId = installationDeviceId
-  if (client && consentState === 'granted') {
+  if (canEmit() && consentState === 'granted') {
     try {
-      client.identify({
+      client!.identify({
         distinctId: installationDeviceId,
         properties: { $set: { is_authenticated: false } }
       })
@@ -644,7 +668,7 @@ export function unbindUserId(): void {
 }
 
 export function capture(event: string, properties: TelemetryContext = {}): void {
-  if (!client || !distinctId) return
+  if (!canEmit() || !distinctId) return
   if (!isAllowedToFire(event)) return
   if (!_checkRateLimit(event)) return
   _eventsCapturedThisProcess++
@@ -652,7 +676,7 @@ export function capture(event: string, properties: TelemetryContext = {}): void 
     // Per-call properties override defaults on key collision — callers
     // that explicitly pass `app_version` (e.g. session-start payload,
     // legacy event re-emitters) win.
-    client.capture({
+    client!.capture({
       distinctId,
       event,
       properties: { ...defaultEventProperties, ...properties }
@@ -674,24 +698,24 @@ export function capture(event: string, properties: TelemetryContext = {}): void 
  * Repeated calls in the queued state merge (latest write wins per key).
  */
 export function registerPersonProperties(properties: Record<string, TelemetryValue>): void {
-  if (!client) return
+  if (!canEmit()) return
   if (consentState !== 'granted' || !distinctId) {
     pendingIdentifyProperties = { ...(pendingIdentifyProperties || {}), ...properties }
     return
   }
   try {
-    client.identify({ distinctId, properties: { $set: properties } })
+    client!.identify({ distinctId, properties: { $set: properties } })
   } catch {
     // ignore – telemetry must never break the app
   }
 }
 
 export function captureException(error: unknown, properties: TelemetryContext = {}): void {
-  if (!client || !distinctId) return
+  if (!canEmit() || !distinctId) return
   // Exceptions are reliability data; suppress them outside `'granted'`.
   if (consentState !== 'granted') return
   try {
-    client.captureException(error, distinctId, properties)
+    client!.captureException(error, distinctId, properties)
   } catch {
     // ignore
   }
@@ -710,10 +734,10 @@ export function captureException(error: unknown, properties: TelemetryContext = 
  * is `'denied'` or `'undecided'`.
  */
 export async function aliasImmediate(distinctId: string, alias: string): Promise<void> {
-  if (!client) return
+  if (!canEmit()) return
   if (consentState !== 'granted') return
   try {
-    await client.aliasImmediate({ distinctId, alias })
+    await client!.aliasImmediate({ distinctId, alias })
   } catch {
     // ignore – telemetry must never break the app
   }
