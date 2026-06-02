@@ -492,7 +492,14 @@
 
   "cloud": {
     "label": "云端",
-    "desc": "连接到 Comfy Cloud 进行远程 GPU 加速工作流。"
+    "desc": "连接到 Comfy Cloud 进行远程 GPU 加速工作流。",
+    "signInBanner": {
+      "message": "我们已打开浏览器以登录。没有打开？",
+      "copy": "复制链接",
+      "copied": "已复制",
+      "openAgain": "重新打开",
+      "dismiss": "关闭"
+    }
   },
 
   "standalone": {
