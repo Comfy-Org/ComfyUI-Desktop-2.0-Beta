@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, useTemplateRef, watch } from 'vue'
+import { ref, computed, nextTick, onMounted, onUnmounted, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   ArrowDownToLine,
@@ -17,7 +17,7 @@ import { useUpdatePills } from './useUpdatePills'
 import { useTitleBarHoverGate } from './useTitleBarHoverGate'
 import ComfyCLogo from '../components/icons/ComfyCLogo.vue'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 
 // Inlined to keep the title-bar renderer self-contained — the preload TS
 // file isn't visible to tsconfig.web (only its .d.ts would be). Kept in
@@ -241,6 +241,8 @@ function handleFeedback(): void {
 }
 
 // Icon is ComfyUI-tab only; also visible while the drawer is open so
+const titleBarRef = useTemplateRef<HTMLElement>('titleBar')
+const titleLeftRef = useTemplateRef<HTMLElement>('titleLeft')
 const fileBtnRef = useTemplateRef<HTMLButtonElement>('fileBtn')
 const downloadsBtnRef = useTemplateRef<HTMLButtonElement>('downloadsBtn')
 const installPillRef = useTemplateRef<HTMLElement>('installPill')
@@ -259,6 +261,121 @@ const titleTrailingRef = useTemplateRef<HTMLElement>('titleTrailing')
  *  pattern apps like Figma use for the same problem. */
 const trailingWidthPx = ref(0)
 let trailingObserver: ResizeObserver | undefined
+
+/** Responsive collapse mode for the trailing cluster.
+ *
+ *  Three tiers, decided from real measured geometry (not bar-width
+ *  breakpoints) so the decision actually accounts for the centre
+ *  install pill's current position and width:
+ *
+ *    - 'full'        — Feedback + Desktop Update labels visible.
+ *    - 'no-feedback' — Feedback collapsed to icon-only.
+ *    - 'icons-only'  — Both Feedback and Desktop Update collapsed.
+ *
+ *  Each resize frame measures the gap between the install pill rect
+ *  and the trailing cluster rect (and the symmetric gap on the left,
+ *  in case the mirror is off). When the gap drops below `MIN_GAP_PX`
+ *  the controller advances one tier; it only walks back when the gap
+ *  comfortably exceeds the *learned* cost of restoring the hidden
+ *  label plus `RESTORE_BUFFER_PX`. Hysteresis is essential — the
+ *  collapsed trailing cluster is narrower, which immediately frees
+ *  enough gap to consider re-expanding; the restore-cost guard
+ *  prevents that flap. */
+type CollapseMode = 'full' | 'no-feedback' | 'icons-only'
+const collapseMode = ref<CollapseMode>('full')
+const collapsedFeedback = computed(
+  () => collapseMode.value === 'no-feedback' || collapseMode.value === 'icons-only'
+)
+const collapsedUpdate = computed(() => collapseMode.value === 'icons-only')
+
+const MIN_GAP_PX = 16
+const RESTORE_BUFFER_PX = 24
+/** Learned at runtime via the before/after measurement around each
+ *  transition — we don't know analytically how wide each label is
+ *  (font, locale, version-string length all vary). Initialized to 0
+ *  so the first transition pair learns the real cost; until then a
+ *  conservative bound is enforced by `RESTORE_BUFFER_PX`. */
+let feedbackRestoreCostPx = 0
+let updateRestoreCostPx = 0
+let fitObserver: ResizeObserver | undefined
+let fitRaf: number | null = null
+
+/** Measure the visual gap between the install pill and each flanking
+ *  cluster. Returns `Infinity` when refs aren't mounted yet (so the
+ *  fit controller stays at `'full'` until layout exists) or when the
+ *  bar is hidden / detached (rect width 0). */
+function measureFitGap(): number {
+  const bar = titleBarRef.value
+  const left = titleLeftRef.value
+  const trailing = titleTrailingRef.value
+  const pill = installPillRef.value
+  if (!bar || !left || !trailing || !pill) return Infinity
+  const barRect = bar.getBoundingClientRect()
+  if (barRect.width === 0) return Infinity
+  const leftRect = left.getBoundingClientRect()
+  const trailingRect = trailing.getBoundingClientRect()
+  const pillRect = pill.getBoundingClientRect()
+  const leftGap = pillRect.left - leftRect.right
+  const rightGap = trailingRect.left - pillRect.right
+  return Math.min(leftGap, rightGap)
+}
+
+function scheduleFit(): void {
+  if (fitRaf !== null) return
+  fitRaf = requestAnimationFrame(() => {
+    fitRaf = null
+    evaluateFit()
+  })
+}
+
+function evaluateFit(): void {
+  const gap = measureFitGap()
+  if (!Number.isFinite(gap)) return
+  const mode = collapseMode.value
+  if (mode === 'full') {
+    if (gap < MIN_GAP_PX) transitionTo('no-feedback')
+  } else if (mode === 'no-feedback') {
+    if (gap < MIN_GAP_PX) transitionTo('icons-only')
+    else if (gap > feedbackRestoreCostPx + RESTORE_BUFFER_PX) transitionTo('full')
+  } else {
+    if (gap > updateRestoreCostPx + RESTORE_BUFFER_PX) transitionTo('no-feedback')
+  }
+}
+
+function transitionTo(next: CollapseMode): void {
+  const prev = collapseMode.value
+  if (prev === next) return
+  const before = measureFitGap()
+  collapseMode.value = next
+  // Wait for Vue to flush the DOM update + the browser to lay out,
+  // then learn how much gap restoring the hidden label would cost.
+  // A second rAF after `nextTick` is the standard "after-paint" hook.
+  void nextTick().then(() => {
+    requestAnimationFrame(() => {
+      const after = measureFitGap()
+      if (Number.isFinite(before) && Number.isFinite(after)) {
+        const delta = after - before
+        if (prev === 'full' && next === 'no-feedback') {
+          feedbackRestoreCostPx = Math.max(feedbackRestoreCostPx, delta)
+        } else if (prev === 'no-feedback' && next === 'icons-only') {
+          updateRestoreCostPx = Math.max(updateRestoreCostPx, delta)
+        }
+      }
+      // Re-evaluate in case one transition didn't free enough room.
+      scheduleFit()
+    })
+  })
+}
+
+/** Discard learned restore costs whenever something that changes the
+ *  trailing cluster's content width is mutated (locale switch, update
+ *  state, install-update flag, …). The next collapse transition then
+ *  re-learns the cost from the new label widths. */
+function invalidateRestoreCosts(): void {
+  feedbackRestoreCostPx = 0
+  updateRestoreCostPx = 0
+  scheduleFit()
+}
 
 const { tooltipAttrs, handleTooltipPointer, hideTip } = useTitleBarTooltip({
   bridge,
@@ -324,6 +441,21 @@ onMounted(() => {
     trailingObserver.observe(titleTrailingRef.value)
   }
 
+  // Observe the title bar itself for resize so the fit controller can
+  // re-evaluate whether the trailing labels still fit alongside the
+  // centre pill. Bar-only is sufficient — install-pill width and
+  // trailing width changes propagate through layout and either resize
+  // the bar (no, fixed `100vw`) or change the measured rects we read
+  // inside `evaluateFit`. The locale/state watches below handle
+  // changes that don't trigger a bar resize.
+  if (titleBarRef.value && typeof ResizeObserver !== 'undefined') {
+    fitObserver = new ResizeObserver(() => scheduleFit())
+    fitObserver.observe(titleBarRef.value)
+  }
+  // Initial pass after first paint so we start in the right tier
+  // rather than transitioning visibly on mount.
+  void nextTick().then(() => scheduleFit())
+
   if (!bridge) return
   unsubPanel = bridge.onPanelChanged((panel) => {
     activePanel.value = panel
@@ -334,12 +466,33 @@ onMounted(() => {
   bridge.ready()
 })
 
+// Invalidate the learned restore costs when anything that materially
+// changes the trailing cluster's content width flips. The fit
+// controller re-learns the cost on the next transition.
+watch(
+  [
+    locale,
+    installLabel,
+    appUpdatePillLabel,
+    showAppUpdatePill,
+    showInstallUpdatePill,
+    isChromeLocked
+  ],
+  () => invalidateRestoreCosts()
+)
+
 onUnmounted(() => {
   unsubPanel?.()
   unsubInstallationId?.()
   hideTip()
   trailingObserver?.disconnect()
   trailingObserver = undefined
+  fitObserver?.disconnect()
+  fitObserver = undefined
+  if (fitRaf !== null) {
+    cancelAnimationFrame(fitRaf)
+    fitRaf = null
+  }
   if (flashTimer) {
     clearTimeout(flashTimer)
     flashTimer = null
@@ -349,14 +502,18 @@ onUnmounted(() => {
 
 <template>
   <header
+    ref="titleBar"
     class="title-bar"
     :class="{
       'is-mac': isMac,
       'is-light': isLight,
       'is-fullscreen': isFullscreen,
       'is-hover-active': isHoverActive,
-      'is-consent-lockdown': isConsentLockdown
+      'is-consent-lockdown': isConsentLockdown,
+      'is-collapsed-feedback': collapsedFeedback,
+      'is-collapsed-update': collapsedUpdate
     }"
+    :data-collapse-mode="collapseMode"
     :style="{
       color: themeText ?? undefined,
       '--title-trailing-width': `${trailingWidthPx}px`
@@ -372,7 +529,7 @@ onUnmounted(() => {
     <!-- Left cluster: waffle menu. The app-update pill moved to the
          right trailing cluster so all user-action controls
          (update / feedback / downloads / settings) live together. -->
-    <div class="title-cluster">
+    <div ref="titleLeft" class="title-cluster">
       <button
         v-if="!isChromeLocked"
         ref="fileBtn"
@@ -576,10 +733,11 @@ onUnmounted(() => {
   user-select: none;
   -webkit-app-region: drag;
   column-gap: 12px;
-  /* Container query root for responsive pill collapse. The breakpoint
-     rules below (`@container title-bar`) read the title bar's own
-     inline size so the layout responds correctly regardless of which
-     OS reservation is in play. */
+  /* Container scope so the install pill's `max-inline-size:
+     clamp(..., 22cqi, ...)` resolves against the bar's inline size
+     rather than the viewport. Bar is `100vw` today so the two are
+     equivalent, but the explicit container keeps the intent and
+     stays correct if the bar ever lives inside a narrower frame. */
   container: title-bar / inline-size;
 }
 /* macOS: reserve 78px on the left for the traffic-light cluster. */
@@ -683,12 +841,16 @@ onUnmounted(() => {
   display: inline-flex;
   align-items: center;
   justify-content: space-between;
-  /* Fluid width: floor at 220px, preferred ~22% of the title-bar inline
-     size, ceiling at 360px. Acts as a min size so the pill never collapses
-     for a short instance name; `space-between` then pins the logo to the
-     left edge and the caret to the right, with the slack (and the inline
-     Update chip + name) sitting between them — same as the dashboard pill. */
-  width: clamp(220px, 22cqi, 360px);
+  /* Shrink-to-content with bounded floor + ceiling. `inline-size:
+     fit-content` lets the pill tighten around short install names
+     (e.g. "ComfyUI") so the layout budget isn't held hostage by a
+     220px reservation that the content doesn't need. The min keeps
+     the pill from looking puny on a wide bar; the max preserves the
+     fluid 22cqi growth up to a 360px ceiling, with ellipsis on the
+     name beyond that — matching the dashboard pill. */
+  inline-size: fit-content;
+  min-inline-size: 176px;
+  max-inline-size: clamp(176px, 22cqi, 360px);
   height: 28px;
   padding: 5px 8px;
   border-radius: 999px;
@@ -1024,82 +1186,42 @@ onUnmounted(() => {
 }
 
 /* --- Responsive pill collapse ---
-   Container queries read `.title-bar`'s own inline size (set up via
-   `container: title-bar / inline-size` above). Two tiers collapse
-   trailing-cluster labels to icon-only as the bar narrows.
+   Driven by the JS fit controller in <script>, not container queries.
+   The controller measures the actual gap between the centre install
+   pill rect and the trailing cluster rect each resize frame, then
+   advances through three modes (`full` → `no-feedback` → `icons-only`)
+   when the gap falls below `MIN_GAP_PX`, walking back with hysteresis
+   tied to the learned restore cost of each hidden label.
 
-   The thresholds are anchored to the actual point at which the
-   layout would overflow, not to arbitrary breakpoints. With the
-   three-track grid (`auto | minmax(0,1fr) | auto`), the left cluster
-   mirroring the trailing cluster, the install pill's `clamp(220px,
-   22cqi, 360px)` floor, and the platform-specific chrome padding
-   (Win/Linux reserves 140px right; Mac reserves 78px left), the
-   minimum bar width before content overflows works out to roughly:
+   Two boolean class hooks mirror that state for CSS:
 
-                          Full labels   Feedback collapsed
-     Win/Linux            ~1100 px      ~960 px
-     Mac                  ~ 910 px      ~770 px
+     - `.is-collapsed-feedback` — Feedback label is hidden.
+     - `.is-collapsed-update`   — Desktop Update label is hidden
+                                  (implies `.is-collapsed-feedback`).
 
-   Each tier fires ~40 px above its overflow point — enough buffer to
-   absorb font-rendering variance and modestly longer i18n labels
-   without false positives at the default `DEFAULT_HOST_WIDTH` (1280),
-   while still collapsing as soon as the user resizes narrow enough
-   that the cluster would otherwise crash into the centre pill.
+   Tooltips on every pill carry the full label, so icon-only states
+   stay accessible without extra markup. */
 
-     - Mid    (≤  949px Mac, ≤ 1139px Win): Feedback label → icon.
-     - Narrow (≤  809px Mac, ≤  999px Win): update-pill label → icon.
-
-   Tooltips on every pill already carry the full label, so icon-only
-   states remain accessible without extra markup. */
-
-/* Mid tier — Feedback label collapses. */
-@container title-bar (max-width: 949px) {
-  .title-bar.is-mac .title-feedback-label {
-    display: none;
-  }
-  .title-bar.is-mac .title-feedback-button {
-    padding: 4px 6px;
-    gap: 0;
-  }
+.title-bar.is-collapsed-feedback .title-feedback-label {
+  display: none;
 }
-@container title-bar (max-width: 1139px) {
-  .title-bar:not(.is-mac) .title-feedback-label {
-    display: none;
-  }
-  .title-bar:not(.is-mac) .title-feedback-button {
-    padding: 4px 6px;
-    gap: 0;
-  }
+.title-bar.is-collapsed-feedback .title-feedback-button {
+  padding: 4px 6px;
+  gap: 0;
 }
 
-/* Narrow tier — both update pill labels collapse to icon-only. The
-   collapsed pill becomes a 24×24 circle (matching the Settings + other
-   icon buttons) instead of an oval, so it reads as an icon affordance
-   not a "shrunk pill". */
-@container title-bar (max-width: 809px) {
-  .title-bar.is-mac .title-update-pill-label {
-    display: none;
-  }
-  .title-bar.is-mac .title-update-pill {
-    width: 24px;
-    height: 24px;
-    padding: 0;
-    gap: 0;
-    justify-content: center;
-    border-radius: 999px;
-  }
+/* When the update label collapses the pill drops to a 24×24 circle
+   (matching the Settings + other icon-only chrome) instead of staying
+   an oval, so it reads as an icon affordance not a "shrunk pill". */
+.title-bar.is-collapsed-update .title-update-pill-label {
+  display: none;
 }
-@container title-bar (max-width: 999px) {
-  .title-bar:not(.is-mac) .title-update-pill-label {
-    display: none;
-  }
-  .title-bar:not(.is-mac) .title-update-pill {
-    width: 24px;
-    height: 24px;
-    padding: 0;
-    gap: 0;
-    justify-content: center;
-    border-radius: 999px;
-  }
+.title-bar.is-collapsed-update .title-update-pill {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  gap: 0;
+  justify-content: center;
+  border-radius: 999px;
 }
 </style>
