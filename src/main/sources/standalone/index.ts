@@ -116,12 +116,11 @@ export const standalone: SourcePlugin = {
   },
 
   getLaunchCommand(installation: InstallationRecord): LaunchCommand | null {
+    // `getActivePythonPath` is adopted-aware: returns `adoptedPythonPath`
+    // for legacy-desktop adoptions and the managed `ComfyUI/.venv` python
+    // otherwise.
     const adopted = installation.adopted === true
-    // Adopted installs from Legacy Desktop reuse the legacy uv-managed `.venv`
-    // verbatim instead of the standalone-env tarball.
-    const pythonPath = adopted
-      ? ((installation.adoptedPythonPath as string | undefined) ?? null)
-      : getActivePythonPath(installation)
+    const pythonPath = getActivePythonPath(installation)
     if (!pythonPath || !fs.existsSync(pythonPath)) return null
     const mainPy = path.join(installation.installPath, 'ComfyUI', 'main.py')
     if (!fs.existsSync(mainPy)) return null

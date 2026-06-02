@@ -713,6 +713,20 @@ export async function adoptDesktopInstall(opts: AdoptOptions): Promise<Installat
   const existing = await findExistingAdoption(info.basePath)
   if (existing) {
     tools.sendOutput(`Already adopted as installation ${existing.id}; reconciling requirements…\n`)
+    // Backfill: older adoptions only wrote the marker under
+    // `<adoptedBaseDir>`. The install-side marker is required for
+    // `sessionActions/delete.ts`' safety check to recognise an
+    // adopted install — without it, Delete errors out with the
+    // generic "use Forget" message. Best-effort: ignore failures
+    // so reconcile still wins.
+    if (existing.installPath) {
+      try {
+        const installMarker = path.join(existing.installPath, MARKER_FILE)
+        if (!fs.existsSync(installMarker)) {
+          await fs.promises.writeFile(installMarker, existing.id)
+        }
+      } catch {}
+    }
     await reconcileAdoptedRequirements(existing, info, tools)
     return existing
   }
@@ -915,8 +929,20 @@ async function runAdoption(
     // If the marker write itself fails (disk full, permissions, …) we
     // must roll the DB entry back — otherwise the next re-run sees no
     // marker and creates a duplicate installation record.
+    //
+    // Two markers, two different jobs:
+    //   - `<adoptedBaseDir>/<MARKER_FILE>` lets the next adopt attempt
+    //     recognise an already-adopted legacy install and short-circuit
+    //     (see `findExistingByMarker`). Also disqualifies the legacy
+    //     workspace from the desktop auto-tracker.
+    //   - `<installPath>/<MARKER_FILE>` is the safety check used by the
+    //     standard delete flow (`sessionActions/delete.ts`) — without it
+    //     "Delete" on an adopted install errors out as "not created by
+    //     Desktop 2.0". Adopted delete also relies on the install-side
+    //     marker before touching anything under `adoptedBaseDir`.
     try {
       await fs.promises.writeFile(path.join(info.basePath, MARKER_FILE), entry.id)
+      await fs.promises.writeFile(path.join(installPath, MARKER_FILE), entry.id)
     } catch (err) {
       try { await installations.remove(entry.id) } catch {}
       throw err

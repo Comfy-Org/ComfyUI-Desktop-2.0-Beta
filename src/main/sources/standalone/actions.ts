@@ -13,7 +13,7 @@ import { t } from '../../lib/i18n'
 import * as installations from '../../installations'
 import * as settings from '../../settings'
 import * as snapshots from '../../lib/snapshots'
-import { getUvPath, getActivePythonPath, getMasterPythonPath } from './envPaths'
+import { getActivePythonPath, getActiveUvPath, getMasterPythonPath } from './envPaths'
 import { COMFYUI_REPO, getEffectiveChannel } from './updateSections'
 import { runComfyUIUpdate } from './updateOrchestrator'
 import type { InstallationRecord } from '../../installations'
@@ -309,6 +309,18 @@ async function handleUpdateComfyUI(
     return { ok: false, message: t('standalone.updateNoGit') }
   }
 
+  // Adopted installs reuse the legacy uv-managed `.venv` and don't ship
+  // with a `standalone-env` Python. The update script also needs `pygit2`
+  // (bundled with standalone-env but not in the legacy venv), so this
+  // flow can't run in-place. Recommend Copy & Update, which converts
+  // the install to a fully managed standalone.
+  if (installation.adopted === true) {
+    return {
+      ok: false,
+      message: 'In-place ComfyUI update is not available for installs adopted from Legacy Desktop. Use "Copy & Update" to convert this install to a managed standalone first.',
+    }
+  }
+
   const masterPython = getMasterPythonPath(installPath)
   if (!fs.existsSync(masterPython)) {
     return { ok: false, message: 'Master Python not found.' }
@@ -550,7 +562,7 @@ async function handleMigrateFrom(
     if (nodesWithReqs.length === 0) {
       sendProgress('deps', { percent: 100, status: t('migrate.noDeps') })
     } else {
-      const uvPath = getUvPath(installation.installPath)
+      const uvPath = getActiveUvPath(installation)
       const activePython = getActivePythonPath(installation)
 
       if (!fs.existsSync(uvPath) || !activePython) {
@@ -590,7 +602,7 @@ async function handleMigrateFrom(
     const dstComfyUIDir = path.join(installation.installPath, 'ComfyUI')
     const mgrReqPath = path.join(dstComfyUIDir, 'manager_requirements.txt')
     if (fs.existsSync(mgrReqPath)) {
-      const uvPath = getUvPath(installation.installPath)
+      const uvPath = getActiveUvPath(installation)
       const activePython = getActivePythonPath(installation)
 
       if (fs.existsSync(uvPath) && activePython) {

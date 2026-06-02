@@ -12,7 +12,7 @@ import { getBundledScriptPath } from '../../lib/bundledScript'
 import * as settings from '../../settings'
 import * as snapshots from '../../lib/snapshots'
 import { repairMacBinaries } from './macRepair'
-import { getUvPath, getActivePythonPath, getMasterPythonPath } from './envPaths'
+import { getActivePythonPath, getActiveUvPath, getMasterPythonPath } from './envPaths'
 import type { InstallationRecord } from '../../installations'
 
 interface ScriptResult {
@@ -226,7 +226,7 @@ export async function runComfyUIUpdate(opts: UpdateOrchestrationOptions): Promis
   try { postReqs = await fs.promises.readFile(reqPath, 'utf-8') } catch {}
 
   if (preReqs !== postReqs && postReqs.length > 0) {
-    const uvPath = getUvPath(installPath)
+    const uvPath = getActiveUvPath(installation)
     const activeEnvPython = getActivePythonPath(installation)
 
     if (fs.existsSync(uvPath) && activeEnvPython) {
@@ -289,7 +289,7 @@ export async function runComfyUIUpdate(opts: UpdateOrchestrationOptions): Promis
   try { postMgrReqs = await fs.promises.readFile(mgrReqPath, 'utf-8') } catch {}
 
   if (preMgrReqs !== postMgrReqs && postMgrReqs.length > 0) {
-    const uvPath = getUvPath(installPath)
+    const uvPath = getActiveUvPath(installation)
     const activeEnvPython = getActivePythonPath(installation)
 
     if (fs.existsSync(uvPath) && activeEnvPython) {
