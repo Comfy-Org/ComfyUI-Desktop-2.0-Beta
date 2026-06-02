@@ -758,6 +758,19 @@ function broadcastDownloadsToTitlePopups(): void {
   }
 }
 
+/**
+ *  Monotonic sequence stamped on every call to
+ *  `broadcastInstancePickerSnapshotToTitlePopups`. The function
+ *  awaits the install list and (per entry) the picker-detail payload;
+ *  back-to-back triggers (`hostInstallEvents.changed` +
+ *  `sessionLifecycleEvents.changed` firing in the same tick around a
+ *  fast launch/stop/restart) can otherwise resolve out of order and
+ *  let an older snapshot overwrite the newer one. Each in-flight
+ *  build re-checks this value after every await and aborts when
+ *  superseded.
+ */
+let pickerSnapshotBroadcastSeq = 0
+
 /** Push an updated instance-picker snapshot to every popup whose
  *  current kind is `'instance-picker'`. Triggered by the
  *  `installationEvents.on('changed')` subscription wired in
@@ -766,6 +779,7 @@ function broadcastDownloadsToTitlePopups(): void {
 async function broadcastInstancePickerSnapshotToTitlePopups(
   bindings: TitlePopupHostBindings,
 ): Promise<void> {
+  const mySeq = ++pickerSnapshotBroadcastSeq
   const hasActivePicker = Array.from(titlePopupsByParent.values()).some(
     (entry) => entry.kind === 'instance-picker'
       && (entry.view.isOpen || entry.view.pendingShowTimer !== null),
@@ -775,6 +789,7 @@ async function broadcastInstancePickerSnapshotToTitlePopups(
   // typically there is only one, but reading the disk-backed list per
   // entry would waste IO on the rare multi-window case.
   const installs = await bindings.getInstancePickerInstalls()
+  if (mySeq !== pickerSnapshotBroadcastSeq) return
   const runningInstallationIds = bindings.getRunningInstallationIds()
   const launchingInstallationIds = bindings.getLaunchingInstallationIds()
   for (const entry of titlePopupsByParent.values()) {
@@ -803,6 +818,7 @@ async function broadcastInstancePickerSnapshotToTitlePopups(
         snapshots: null,
       }))
       : { settings: null, snapshots: null }
+    if (mySeq !== pickerSnapshotBroadcastSeq) return
     const snapshot = buildInstancePickerSnapshot({
       installs,
       hostInstallationId: parentEntry?.installationId ?? null,

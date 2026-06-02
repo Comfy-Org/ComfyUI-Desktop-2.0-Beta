@@ -31,6 +31,14 @@ export async function applyAttachHostPreview(
   if (isInstallHost(entry)) return
   const installation = await getInstallation(installationId)
   if (!installation) return
+  // Re-check after the await: `claim-attach-host` calls us fire-and-
+  // forget (`void applyAttachHostPreview(...)`), so a fast launch can
+  // attach the install (or destroy the window) while the disk lookup
+  // is in flight. Without these guards we would overwrite the real
+  // `installationId` push from `attachInstall` with a stale preview
+  // and the title-bar chrome would diverge from reality.
+  if (entry.window.isDestroyed()) return
+  if (isInstallHost(entry)) return
   const previewChanged = entry.previewInstallationId !== installationId
   entry.previewInstallationId = installationId
   entry.titleBarText = installation.name

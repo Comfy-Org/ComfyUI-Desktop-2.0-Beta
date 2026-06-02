@@ -74,6 +74,7 @@ import {
   comfyWindows,
   computeBodyMode,
   consumeAttachClaim,
+  dropAttachClaimsForWindow,
   findEntryByTitleBarSender,
   getEntryByInstallationId,
   isChooserHost,
@@ -947,6 +948,12 @@ ipcMain.handle('release-attach-host-preview', (event) => {
     if (entry.window.isDestroyed()) continue
     if (isInstallHost(entry)) continue
     if (entry.panelView?.webContents !== event.sender) continue
+    // Drop any pending in-place attach claims for this window too —
+    // the renderer is signalling "this op is over, nothing will land
+    // on the claim". Without this a stale claim could be consumed by
+    // a later unrelated `onLaunch` and flip the chooser host into
+    // the wrong install.
+    dropAttachClaimsForWindow(entry.windowKey)
     clearAttachHostPreview(entry)
     return true
   }

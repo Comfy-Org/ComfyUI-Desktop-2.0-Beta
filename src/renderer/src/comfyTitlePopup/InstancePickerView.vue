@@ -402,8 +402,18 @@ const initialExpandedTab = computed<PickerTab>(() =>
   resolvePickerTab(props.snapshot.initialTab, 'update')
 )
 
+// Both lifecycle id arrays must be watched — the popup's preload
+// has no `instance-launching` / `instance-started` IPC listeners, so
+// the snapshot is the sole source of truth for `sessionStore`. Watching
+// only `runningInstallationIds` would miss the launching-only
+// transitions this drawer relies on to flip the CTA from Start to
+// Restart/Switch mid-launch. NUL-joined so an id containing a comma
+// can't collide a unique boundary.
 watch(
-  () => props.snapshot.runningInstallationIds.join(','),
+  [
+    () => props.snapshot.runningInstallationIds.join('\0'),
+    () => (props.snapshot.launchingInstallationIds ?? []).join('\0')
+  ],
   () => hydrateSessionStoreFromSnapshot(),
   { immediate: true }
 )

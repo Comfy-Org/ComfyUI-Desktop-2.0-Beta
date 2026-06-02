@@ -50,6 +50,9 @@ interface MockSnapshot {
   installs: MockInstall[]
   activeInstallationId: string | null
   runningInstallationIds: string[]
+  /** Optional — defaults to `[]` in `mountPicker`. Tests that exercise
+   *  the launching state explicitly set this. */
+  launchingInstallationIds?: string[]
   selectedInstallationId?: string | null
   selectedSettings?: unknown[] | null
   selectedSnapshots?: unknown | null
@@ -123,6 +126,7 @@ async function mountPicker(snapshot: MockSnapshot) {
     selectedInstallationId: snapshot.activeInstallationId,
     selectedSettings: null,
     selectedSnapshots: emptySnapshotListPayload,
+    launchingInstallationIds: [] as string[],
     ...snapshot,
   }
   return mount(InstancePickerView, {
@@ -470,6 +474,67 @@ describe('comfyTitlePopup/InstancePickerView', () => {
       await flushPromises()
       expect(bridge.picks).toEqual(['b'])
       expect(bridge.restarts).toEqual([])
+    })
+  })
+
+  // The popup's `sessionStore` is hydrated solely from the picker
+  // snapshot — its preload doesn't expose `onInstanceLaunching` /
+  // `onInstanceStarted`. The hydration watcher must fire on launching-
+  // only transitions or `useInstallCta` will keep the CTA on Start
+  // for the entire launching window when the running set hasn't yet
+  // changed (the exact bug #785 fixes).
+  describe('session-store hydration from snapshot', () => {
+    it('hydrates launching ids when only launchingInstallationIds changes', async () => {
+      const { useSessionStore } = await import('../stores/sessionStore')
+      const wrapper = await mountPicker({
+        installs: [makeInstall({ id: 'a', name: 'Alpha' })],
+        activeInstallationId: null,
+        runningInstallationIds: [],
+        launchingInstallationIds: [],
+      })
+      const sessionStore = useSessionStore()
+      expect(sessionStore.isLaunching('a')).toBe(false)
+
+      await wrapper.setProps({
+        snapshot: {
+          installs: [makeInstall({ id: 'a', name: 'Alpha' })],
+          activeInstallationId: 'a',
+          runningInstallationIds: [],
+          launchingInstallationIds: ['a'],
+          selectedInstallationId: null,
+          selectedSettings: null,
+          selectedSnapshots: emptySnapshotListPayload,
+        },
+      })
+      await flushPromises()
+      expect(sessionStore.isLaunching('a')).toBe(true)
+    })
+
+    it('clears a launching id when it drops out of the snapshot', async () => {
+      const { useSessionStore } = await import('../stores/sessionStore')
+      const wrapper = await mountPicker({
+        installs: [makeInstall({ id: 'a', name: 'Alpha' })],
+        activeInstallationId: 'a',
+        runningInstallationIds: [],
+        launchingInstallationIds: ['a'],
+      })
+      const sessionStore = useSessionStore()
+      expect(sessionStore.isLaunching('a')).toBe(true)
+
+      await wrapper.setProps({
+        snapshot: {
+          installs: [makeInstall({ id: 'a', name: 'Alpha' })],
+          activeInstallationId: 'a',
+          runningInstallationIds: ['a'],
+          launchingInstallationIds: [],
+          selectedInstallationId: null,
+          selectedSettings: null,
+          selectedSnapshots: emptySnapshotListPayload,
+        },
+      })
+      await flushPromises()
+      expect(sessionStore.isLaunching('a')).toBe(false)
+      expect(sessionStore.isRunning('a')).toBe(true)
     })
   })
 })
