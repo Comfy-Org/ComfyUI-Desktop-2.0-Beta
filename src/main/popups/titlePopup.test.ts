@@ -117,12 +117,13 @@ describe('buildTitlePopupMenuItems', () => {
     expect(ids).not.toContain('return-to-dashboard')
   })
 
-  it('omits install-creation entries on an install-backed host', () => {
+  it('includes install-creation entries and settings on an install-backed host', () => {
     const items = buildTitlePopupMenuItems(makeEntry({ installationId: 'inst-1' }))
     const ids = items.map((i) => i.id ?? null)
-    expect(ids).not.toContain('new-install')
-    expect(ids).not.toContain('track')
-    expect(ids).not.toContain('load-snapshot')
+    expect(ids).toContain('new-install')
+    expect(ids).toContain('track')
+    expect(ids).toContain('load-snapshot')
+    expect(ids).toContain('settings')
   })
 
   it('chooser host includes New Window, Settings, Send Feedback, and Quit ComfyUI', () => {
@@ -137,16 +138,22 @@ describe('buildTitlePopupMenuItems', () => {
     expect(quit?.label).toBe('Quit ComfyUI')
   })
 
-  // Install-host menu was deliberately trimmed (spec item 1): no
-  // Desktop Settings, no Return to Dashboard (replaced by the Home
-  // icon in the picker, spec item 10), no Reset Zoom (Ctrl/Cmd+0
-  // shortcut still works). "Quit ComfyUI" stays available from every
-  // window; "Close Window" is the instance-only counterpart. The four
-  // entries are New Window, Send Beta Feedback, Close Window, Quit ComfyUI.
-  it('install-host menu is trimmed to four essentials in the canonical order', () => {
+  // The install-host menu now mirrors the dashboard's install-creation +
+  // settings block, plus the instance-only "Close Window". Reset Zoom and
+  // Return to Dashboard stay off it (Ctrl/Cmd+0 and the picker Home icon).
+  it('install-host menu matches the unified order with Close Window', () => {
     const items = buildTitlePopupMenuItems(makeEntry({ installationId: 'inst-1' }))
     const ids = items.map((i) => i.id ?? null).filter((id) => id !== null)
-    expect(ids).toEqual(['new-window', 'feedback', 'exit-window', 'close-all-windows'])
+    expect(ids).toEqual([
+      'new-window',
+      'new-install',
+      'track',
+      'load-snapshot',
+      'settings',
+      'feedback',
+      'exit-window',
+      'close-all-windows',
+    ])
     const closeWindow = items.find((i) => i.id === 'exit-window')
     expect(closeWindow?.label).toBe('Close Window')
     const quit = items.find((i) => i.id === 'close-all-windows')
@@ -160,7 +167,6 @@ describe('buildTitlePopupMenuItems', () => {
     const ids = items.map((i) => i.id ?? null)
     expect(ids).not.toContain('reset-zoom')
     expect(ids).not.toContain('return-to-dashboard')
-    expect(ids).not.toContain('settings')
   })
 
   it('exposes Reset Zoom on chooser host only when comfy zoom is non-zero, with the percent in the label', () => {
