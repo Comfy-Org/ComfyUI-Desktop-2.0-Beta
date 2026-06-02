@@ -33,6 +33,7 @@ import {
   comfyWindows,
   findEntryByTitleBarSender,
   getEntryByInstallationId,
+  hostInstallEvents,
   isChooserHost,
 } from '../host/registry'
 import type { ComfyPanelKey, ComfyWindowEntry } from '../host/registry'
@@ -2788,6 +2789,16 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
     void refreshCachedInstallsForPicker()
     void broadcastInstancePickerSnapshotToTitlePopups(bindings)
     void broadcastGlobalSettingsSnapshotToTitlePopups(bindings)
+  })
+  // Host attach/detach flips `parentEntry.installationId`, which the
+  // picker snapshot folds into `activeInstallationId` (drives the
+  // "Current" pill on the row and the per-window CTA decision in
+  // `useInstallCta`). Without this listener the picker would only
+  // repaint at `instance-started` (via `markLaunched` → installation
+  // 'changed'), leaving the launching window without a Current pill
+  // for the entire launch.
+  hostInstallEvents.on('changed', () => {
+    void broadcastInstancePickerSnapshotToTitlePopups(bindings)
   })
   // Settings writes (applySettingSet) emit 'changed' — rebroadcast so
   // the popup sees Language / Theme / Cache / Models / etc. flip live.

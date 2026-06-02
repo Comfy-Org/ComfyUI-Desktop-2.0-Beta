@@ -23,8 +23,10 @@ import {
   computeBodyMode,
   consumeAttachClaim,
   dropAttachClaimsForWindow,
+  dropInstallationIndex,
   findPreferredHostByVisibility,
   getEntryByInstallationId,
+  hostInstallEvents,
   indexInstallationId,
   nextWindowKey,
   raiseAllHostWindows,
@@ -285,6 +287,72 @@ describe('register/unregister + getEntryByInstallationId', () => {
     // secondary-index pointer.
     unregisterHostEntry(first)
     expect(getEntryByInstallationId('inst-A')).toBe(second)
+  })
+})
+
+describe('hostInstallEvents', () => {
+  // Picker snapshots embed `parentEntry.installationId` as
+  // `activeInstallationId`. The "Current" pill on a row flips on when
+  // attach lands; without this event the picker would only repaint at
+  // `instance-started` time (via `markLaunched` → installationEvents
+  // 'changed') and the user would see a Current-less row for the
+  // entire launching window.
+  let events: string[]
+  let listener: () => void
+  beforeEach(() => {
+    events = []
+    listener = () => events.push('changed')
+    hostInstallEvents.on('changed', listener)
+  })
+  afterEach(() => {
+    hostInstallEvents.off('changed', listener)
+  })
+
+  it('fires on indexInstallationId (attach)', () => {
+    indexInstallationId('inst-A', 1)
+    expect(events).toEqual(['changed'])
+  })
+
+  it('fires on dropInstallationIndex when the index actually shrinks', () => {
+    indexInstallationId('inst-A', 1)
+    events.length = 0
+    dropInstallationIndex('inst-A')
+    expect(events).toEqual(['changed'])
+  })
+
+  it('does NOT fire on dropInstallationIndex when the id was already absent', () => {
+    // No-op drops shouldn't churn picker snapshots; mirrors how the
+    // installationEvents 'changed' bus avoids spurious emissions.
+    dropInstallationIndex('inst-never-indexed')
+    expect(events).toEqual([])
+  })
+
+  it('fires on registerHostEntry when the entry is install-backed', () => {
+    registerHostEntry(makeEntry({ installationId: 'inst-A' }))
+    expect(events).toEqual(['changed'])
+  })
+
+  it('does NOT fire on registerHostEntry for an install-less (chooser) host', () => {
+    // Construction of a fresh chooser host shouldn't repaint open
+    // pickers — there's no attached install for `activeInstallationId`
+    // to surface.
+    registerHostEntry(makeEntry({ installationId: null }))
+    expect(events).toEqual([])
+  })
+
+  it('fires on unregisterHostEntry (detach via close handler) for an install-backed host', () => {
+    const entry = makeEntry({ installationId: 'inst-A' })
+    registerHostEntry(entry)
+    events.length = 0
+    unregisterHostEntry(entry)
+    expect(events).toEqual(['changed'])
+  })
+
+  it('does NOT fire on unregisterHostEntry for an install-less host', () => {
+    const entry = makeEntry({ installationId: null })
+    registerHostEntry(entry)
+    unregisterHostEntry(entry)
+    expect(events).toEqual([])
   })
 })
 
