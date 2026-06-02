@@ -884,7 +884,22 @@ export function buildComfyView(
   webPreferences: Electron.WebPreferences,
   windowKey: number,
 ): WebContentsView {
-  const comfyView = new WebContentsView({ webPreferences })
+  /**
+   * Map the `monospace` generic to a real face. Electron leaves it unmapped,
+   * so ComfyUI's prompt textarea renders proportional on Desktop (monospace on web).
+   */
+  const defaultFontFamily: Electron.WebPreferences['defaultFontFamily'] = {
+    ...webPreferences.defaultFontFamily,
+    monospace:
+      process.platform === 'darwin'
+        ? 'Menlo'
+        : process.platform === 'win32'
+          ? 'Consolas'
+          : 'monospace',
+  }
+  const comfyView = new WebContentsView({
+    webPreferences: { ...webPreferences, defaultFontFamily },
+  })
   comfyView.setBackgroundColor(COMFY_BG)
 
   const comfyContents = comfyView.webContents
