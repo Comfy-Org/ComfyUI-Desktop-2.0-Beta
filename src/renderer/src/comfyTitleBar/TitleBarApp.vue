@@ -242,7 +242,6 @@ function handleFeedback(): void {
 
 // Icon is ComfyUI-tab only; also visible while the drawer is open so
 const titleBarRef = useTemplateRef<HTMLElement>('titleBar')
-const titleLeftRef = useTemplateRef<HTMLElement>('titleLeft')
 const fileBtnRef = useTemplateRef<HTMLButtonElement>('fileBtn')
 const downloadsBtnRef = useTemplateRef<HTMLButtonElement>('downloadsBtn')
 const installPillRef = useTemplateRef<HTMLElement>('installPill')
@@ -272,13 +271,14 @@ let trailingObserver: ResizeObserver | undefined
  *    - 'no-feedback' — Feedback collapsed to icon-only.
  *    - 'icons-only'  — Both Feedback and Desktop Update collapsed.
  *
- *  Each resize frame measures the gap between the install pill rect
- *  and the trailing cluster rect (and the symmetric gap on the left,
- *  in case the mirror is off). When the gap drops below `MIN_GAP_PX`
- *  the controller advances one tier; it only walks back when the gap
- *  comfortably exceeds the *learned* cost of restoring the hidden
- *  label plus `RESTORE_BUFFER_PX`. Hysteresis is essential — the
- *  collapsed trailing cluster is narrower, which immediately frees
+ *  Each resize frame measures the gap between the install pill's
+ *  right edge and the trailing cluster's left edge. With the trailing
+ *  mirror live the left-side gap is equal by construction, so the
+ *  right gap alone is sufficient. When the gap drops below
+ *  `MIN_GAP_PX` the controller advances one tier; it only walks back
+ *  when the gap comfortably exceeds the *learned* width cost of
+ *  restoring the hidden label plus `RESTORE_BUFFER_PX`. Hysteresis is
+ *  essential — collapsing the trailing cluster immediately frees
  *  enough gap to consider re-expanding; the restore-cost guard
  *  prevents that flap. */
 type CollapseMode = 'full' | 'no-feedback' | 'icons-only'
@@ -292,44 +292,53 @@ const MIN_GAP_PX = 16
 const RESTORE_BUFFER_PX = 24
 /** Learned at runtime via the before/after measurement around each
  *  transition — we don't know analytically how wide each label is
- *  (font, locale, version-string length all vary). Initialized to 0
- *  so the first transition pair learns the real cost; until then a
- *  conservative bound is enforced by `RESTORE_BUFFER_PX`. */
+ *  (font, locale, version-string length all vary). The cost is the
+ *  drop in `.title-trailing`'s own width, NOT the change in the pill
+ *  gap, because the user can be actively dragging a resize during
+ *  the rAF settle window and the bar width would otherwise poison
+ *  the delta. Trailing width is independent of bar width.
+ *
+ *  Initialized to 0 so the first transition pair learns the real
+ *  cost; until then `RESTORE_BUFFER_PX` is the only guard. */
 let feedbackRestoreCostPx = 0
 let updateRestoreCostPx = 0
 let fitObserver: ResizeObserver | undefined
 let fitRaf: number | null = null
+let transitionRaf: number | null = null
+let unmounted = false
 
-/** Measure the visual gap between the install pill and each flanking
- *  cluster. Returns `Infinity` when refs aren't mounted yet (so the
- *  fit controller stays at `'full'` until layout exists) or when the
- *  bar is hidden / detached (rect width 0). */
-function measureFitGap(): number {
+interface FitMeasurement {
+  gap: number
+  trailingWidth: number
+}
+
+/** Measure the gap between the install pill and the trailing cluster,
+ *  plus the trailing cluster's own width. Returns sentinels when refs
+ *  aren't mounted yet (so the fit controller stays at `'full'` until
+ *  layout exists) or when the bar is hidden / detached (rect width 0). */
+function measureFit(): FitMeasurement {
   const bar = titleBarRef.value
-  const left = titleLeftRef.value
   const trailing = titleTrailingRef.value
   const pill = installPillRef.value
-  if (!bar || !left || !trailing || !pill) return Infinity
+  if (!bar || !trailing || !pill) return { gap: Infinity, trailingWidth: NaN }
   const barRect = bar.getBoundingClientRect()
-  if (barRect.width === 0) return Infinity
-  const leftRect = left.getBoundingClientRect()
+  if (barRect.width === 0) return { gap: Infinity, trailingWidth: NaN }
   const trailingRect = trailing.getBoundingClientRect()
   const pillRect = pill.getBoundingClientRect()
-  const leftGap = pillRect.left - leftRect.right
-  const rightGap = trailingRect.left - pillRect.right
-  return Math.min(leftGap, rightGap)
+  return { gap: trailingRect.left - pillRect.right, trailingWidth: trailingRect.width }
 }
 
 function scheduleFit(): void {
-  if (fitRaf !== null) return
+  if (unmounted || fitRaf !== null) return
   fitRaf = requestAnimationFrame(() => {
     fitRaf = null
+    if (unmounted) return
     evaluateFit()
   })
 }
 
 function evaluateFit(): void {
-  const gap = measureFitGap()
+  const { gap } = measureFit()
   if (!Number.isFinite(gap)) return
   const mode = collapseMode.value
   if (mode === 'full') {
@@ -345,16 +354,22 @@ function evaluateFit(): void {
 function transitionTo(next: CollapseMode): void {
   const prev = collapseMode.value
   if (prev === next) return
-  const before = measureFitGap()
+  const before = measureFit()
   collapseMode.value = next
   // Wait for Vue to flush the DOM update + the browser to lay out,
-  // then learn how much gap restoring the hidden label would cost.
-  // A second rAF after `nextTick` is the standard "after-paint" hook.
+  // then learn how much trailing width restoring the hidden label
+  // would cost. Tracking the rAF lets `onUnmounted` cancel it so
+  // teardown doesn't race against a pending measurement callback.
   void nextTick().then(() => {
-    requestAnimationFrame(() => {
-      const after = measureFitGap()
-      if (Number.isFinite(before) && Number.isFinite(after)) {
-        const delta = after - before
+    if (unmounted) return
+    transitionRaf = requestAnimationFrame(() => {
+      transitionRaf = null
+      if (unmounted) return
+      const after = measureFit()
+      if (Number.isFinite(before.trailingWidth) && Number.isFinite(after.trailingWidth)) {
+        // Trailing shrinks when a label is hidden; the drop is the
+        // width the gap will gain back if we restore the label.
+        const delta = before.trailingWidth - after.trailingWidth
         if (prev === 'full' && next === 'no-feedback') {
           feedbackRestoreCostPx = Math.max(feedbackRestoreCostPx, delta)
         } else if (prev === 'no-feedback' && next === 'icons-only') {
@@ -452,9 +467,10 @@ onMounted(() => {
     fitObserver = new ResizeObserver(() => scheduleFit())
     fitObserver.observe(titleBarRef.value)
   }
-  // Initial pass after first paint so we start in the right tier
-  // rather than transitioning visibly on mount.
-  void nextTick().then(() => scheduleFit())
+  // Initial pass synchronously on mount so we start in the right tier
+  // before the first paint instead of flashing 'full' for one frame
+  // on a narrow boot width.
+  evaluateFit()
 
   if (!bridge) return
   unsubPanel = bridge.onPanelChanged((panel) => {
@@ -482,6 +498,7 @@ watch(
 )
 
 onUnmounted(() => {
+  unmounted = true
   unsubPanel?.()
   unsubInstallationId?.()
   hideTip()
@@ -492,6 +509,10 @@ onUnmounted(() => {
   if (fitRaf !== null) {
     cancelAnimationFrame(fitRaf)
     fitRaf = null
+  }
+  if (transitionRaf !== null) {
+    cancelAnimationFrame(transitionRaf)
+    transitionRaf = null
   }
   if (flashTimer) {
     clearTimeout(flashTimer)
@@ -529,7 +550,7 @@ onUnmounted(() => {
     <!-- Left cluster: waffle menu. The app-update pill moved to the
          right trailing cluster so all user-action controls
          (update / feedback / downloads / settings) live together. -->
-    <div ref="titleLeft" class="title-cluster">
+    <div class="title-cluster">
       <button
         v-if="!isChromeLocked"
         ref="fileBtn"
@@ -612,7 +633,7 @@ onUnmounted(() => {
           <ChevronDown :size="12" class="title-install-caret" aria-hidden="true" />
         </div>
       </div>
-      <div v-else class="title-install-pill">
+      <div v-else ref="installPill" class="title-install-pill">
         <div class="title-install-slot title-install-slot--leading">
           <ComfyCLogo v-if="showBrandMark" class="title-install-brand-mark" :size="16" />
           <component
