@@ -207,7 +207,14 @@ describe('standalone.getLaunchCommand for adopted Legacy Desktop installs', () =
       adopted: true,
       adoptedBaseDir,
       adoptedPythonPath,
-      useSharedPaths: false,
+      // Adopted records ship with shared models on (legacy `models/` is
+      // registered in the global modelsDirs list) and shared input/output
+      // off — the workspace is pinned to legacy basePath via the
+      // per-install inputDir/outputDir fields, which launch.ts handles.
+      useSharedModels: true,
+      useSharedInputOutput: false,
+      inputDir: path.join(adoptedBaseDir, 'input'),
+      outputDir: path.join(adoptedBaseDir, 'output'),
       launchArgs: '--listen 127.0.0.1 --port 8188',
       ...overrides,
     } as InstallationRecord
@@ -226,14 +233,17 @@ describe('standalone.getLaunchCommand for adopted Legacy Desktop installs', () =
     expect(cmd.args![1]).toBe(path.join('ComfyUI', 'main.py'))
   })
 
-  it('injects --base-directory / --user-directory / --input-directory / --output-directory rooted at adoptedBaseDir', () => {
+  it('injects only --base-directory / --user-directory rooted at adoptedBaseDir', () => {
+    // --input-directory / --output-directory are NOT injected here anymore;
+    // they're first-class per-install fields handled by launch.ts'
+    // shared-input-output branch.
     const cmd = standalone.getLaunchCommand!(makeAdoptedRecord())!
     const args = cmd.args!
     const idx = (flag: string) => args.indexOf(flag)
     expect(args[idx('--base-directory') + 1]).toBe(adoptedBaseDir)
     expect(args[idx('--user-directory') + 1]).toBe(path.join(adoptedBaseDir, 'user'))
-    expect(args[idx('--input-directory') + 1]).toBe(path.join(adoptedBaseDir, 'input'))
-    expect(args[idx('--output-directory') + 1]).toBe(path.join(adoptedBaseDir, 'output'))
+    expect(args.includes('--input-directory')).toBe(false)
+    expect(args.includes('--output-directory')).toBe(false)
   })
 
   it('places adopt CLI args before user launchArgs so user values win on conflict', () => {

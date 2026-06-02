@@ -388,20 +388,23 @@ async function handleMigrateFrom(
     return { ok: false, message: t('migrate.noComfyUIDir') }
   }
 
-  const useShared = (installation.useSharedPaths as boolean | undefined) !== false
+  const useSharedModels = (installation.useSharedModels as boolean | undefined) !== false
+  const useSharedInputOutput = (installation.useSharedInputOutput as boolean | undefined) !== false
+  const perInstallInput = installation.inputDir as string | undefined
+  const perInstallOutput = installation.outputDir as string | undefined
 
   const srcModels = path.join(srcComfyUI, 'models')
-  const dstModels = useShared
+  const dstModels = useSharedModels
     ? ((settings.get('modelsDirs') as string[] | undefined) || settings.defaults.modelsDirs)[0]!
     : path.join(dstComfyUI, 'models')
   const srcInput = path.join(srcComfyUI, 'input')
-  const dstInput = useShared
+  const dstInput = useSharedInputOutput
     ? ((settings.get('inputDir') as string | undefined) || settings.defaults.inputDir)
-    : path.join(dstComfyUI, 'input')
+    : perInstallInput || path.join(dstComfyUI, 'input')
   const srcOutput = path.join(srcComfyUI, 'output')
-  const dstOutput = useShared
+  const dstOutput = useSharedInputOutput
     ? ((settings.get('outputDir') as string | undefined) || settings.defaults.outputDir)
-    : path.join(dstComfyUI, 'output')
+    : perInstallOutput || path.join(dstComfyUI, 'output')
 
   const srcCustomNodes = path.join(srcComfyUI, 'custom_nodes')
   const dstCustomNodes = path.join(dstComfyUI, 'custom_nodes')

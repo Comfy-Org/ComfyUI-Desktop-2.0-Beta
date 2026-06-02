@@ -4,8 +4,9 @@ import { execFile } from 'child_process'
 
 import { detectDesktopInstall, captureDesktopSnapshot, type DesktopInstallInfo } from './desktopDetect'
 import { defaultInstallDir, allocateUniqueDir, sanitizeDirName } from './paths'
-import { gitClone } from './git'
+import { gitClone, gitCheckoutCommit } from './git'
 import { getComfyUIRemoteUrl } from './github-mirror'
+import { getLatestStableTag } from './comfyui-releases'
 import { installFilteredRequirements } from './pip'
 import * as installations from '../installations'
 import type { InstallationRecord } from '../installations'
@@ -61,8 +62,32 @@ export interface AdoptOptions {
 export type AdoptSourceMode = 'pre-swap-copy' | 'git-clone-fallback'
 
 /** Subset of legacy `comfy.settings.json` consumed by the orchestrator. */
-interface LegacyConsent {
+interface LegacyComfySettings {
+  /** `Comfy-Desktop.SendStatistics` — telemetry consent. */
   sendStatistics?: boolean
+  /** `Comfy-Desktop.AutoUpdate` — whether the legacy app installed
+   *  Desktop updates silently. Maps to v2 `autoInstallUpdates`. */
+  autoUpdate?: boolean
+  /** `Comfy.ColorPalette` — `'dark' | 'light'`. Maps to v2 `theme`. */
+  theme?: string
+  /** `Comfy-Desktop.UV.PypiInstallMirror`. Maps to v2 `pypiMirror`. */
+  pypiMirror?: string
+  /** `Comfy-Desktop.UV.TorchInstallMirror` — stashed on the adopted
+   *  record for a future "rebuild as managed standalone" flow that
+   *  needs to preselect the right wheel index. No active consumer in
+   *  v2 today. */
+  torchMirror?: string
+}
+
+/** Substrings that mark a mirror URL as a known Chinese mirror —
+ *  used to infer `useChineseMirrors` from a carried `pypiMirror` so the
+ *  locale-triggered prompt doesn't replay for migrated users. */
+const CHINESE_MIRROR_HINTS = ['aliyun', 'tencent', 'tsinghua', 'mirrors.cernet.edu.cn']
+
+function looksLikeChineseMirror(url: string | undefined): boolean {
+  if (!url) return false
+  const lower = url.toLowerCase()
+  return CHINESE_MIRROR_HINTS.some((hint) => lower.includes(hint))
 }
 
 /**
@@ -161,32 +186,100 @@ export function parseExtraModelsYaml(content: string): string[] {
 }
 
 /**
- * Build the user-facing `launchArgs` string for an adopted install from the
- * legacy `comfy.settings.json` blob (a flat dotted-key map).
+ * Keys legacy desktop wrote into `Comfy.Server.LaunchArgs` that v2 owns
+ * itself or stripped from the user-editable string for clarity:
+ *  - `extra-model-paths-config` is generated from global `modelsDirs`
+ *    when `useSharedModels: true`.
+ *  - `front-end-root`, `log-stdout` are v2 plumbing the user can't
+ *    meaningfully override.
+ *  - `database-url` is v2-specific (legacy SQLite path won't apply).
  */
-export function deriveLaunchArgs(comfySettings: Record<string, unknown>): string {
-  const listen = typeof comfySettings['server_config.listen'] === 'string'
-    ? (comfySettings['server_config.listen'] as string)
-    : '127.0.0.1'
-  const portRaw = comfySettings['server_config.port']
-  const port = typeof portRaw === 'number' ? portRaw
-    : typeof portRaw === 'string' && portRaw.trim() !== '' ? Number(portRaw)
-    : 8000
-  const parts: string[] = ['--listen', listen, '--port', String(port), '--enable-manager']
-  const extra = comfySettings['extra_server_args']
-  if (extra && typeof extra === 'object' && !Array.isArray(extra)) {
-    for (const [key, value] of Object.entries(extra as Record<string, unknown>)) {
-      if (!key) continue
-      if (value === undefined || value === null) continue
-      const strVal = String(value)
-      if (strVal === '') {
-        parts.push(`--${key}`)
-      } else {
-        parts.push(`--${key}`, strVal)
-      }
+const STRIPPED_LAUNCH_KEYS: ReadonlySet<string> = new Set([
+  'extra-model-paths-config',
+  'front-end-root',
+  'log-stdout',
+  'database-url',
+])
+
+/**
+ * Keys promoted out of the launchArgs string into first-class
+ * per-install record fields. Removed from the editable string so they
+ * show up in the v2 settings UI as dedicated folder pickers instead.
+ */
+const PROMOTED_LAUNCH_KEYS: ReadonlySet<string> = new Set([
+  'input-directory',
+  'output-directory',
+])
+
+export interface DerivedLaunchArgs {
+  /** Final user-facing `launchArgs` string written to the record. */
+  launchArgs: string
+  /** Input/output directory overrides extracted from the legacy
+   *  `Comfy.Server.LaunchArgs` map. Empty when the user never set them
+   *  — caller falls back to `<basePath>/{input,output}`. */
+  pathOverrides: {
+    inputDir?: string
+    outputDir?: string
+  }
+}
+
+/**
+ * Build the user-facing `launchArgs` string for an adopted install from
+ * the legacy `comfy.settings.json` blob (a flat dotted-key map). Reads
+ * **only** `Comfy.Server.LaunchArgs` — the actual source of legacy launch
+ * flags. Legacy `server_config.{listen,port}` keys are baked into
+ * defaults by the legacy app itself and never appear here.
+ *
+ * The synthesized output preserves legacy implicit defaults users notice:
+ *  - `--port 8000` when the user hasn't overridden it (legacy default;
+ *    matters because legacy users have it bookmarked).
+ *  - `--enable-manager` always included (legacy always did).
+ *  - `--listen` is NOT synthesized — legacy's implicit `127.0.0.1`
+ *    matches ComfyUI's native default, so emitting it would only add
+ *    noise to the editable string. Explicit user-set `listen` values
+ *    are preserved.
+ *
+ * `input-directory` / `output-directory` overrides are stripped from
+ * the string and returned in `pathOverrides` so the caller can promote
+ * them into the per-install `inputDir` / `outputDir` fields.
+ */
+export function deriveLaunchArgs(comfySettings: Record<string, unknown>): DerivedLaunchArgs {
+  const raw = comfySettings['Comfy.Server.LaunchArgs']
+  const launchArgsMap: Record<string, unknown> = (raw && typeof raw === 'object' && !Array.isArray(raw))
+    ? raw as Record<string, unknown>
+    : {}
+
+  const parts: string[] = []
+  const pathOverrides: DerivedLaunchArgs['pathOverrides'] = {}
+  let hasPort = false
+
+  for (const [key, value] of Object.entries(launchArgsMap)) {
+    if (!key) continue
+    if (STRIPPED_LAUNCH_KEYS.has(key)) continue
+    if (value === undefined || value === null) continue
+    const strVal = String(value)
+    if (PROMOTED_LAUNCH_KEYS.has(key)) {
+      if (strVal === '') continue
+      if (key === 'input-directory') pathOverrides.inputDir = strVal
+      else if (key === 'output-directory') pathOverrides.outputDir = strVal
+      continue
+    }
+    if (key === 'port') hasPort = true
+    if (strVal === '') {
+      parts.push(`--${key}`)
+    } else {
+      parts.push(`--${key}`, strVal)
     }
   }
-  return parts.join(' ')
+
+  // Synthesize legacy's baked-in defaults the user expects: port 8000
+  // (preserves bookmarked URLs) and --enable-manager. Skip --listen
+  // because its legacy implicit `127.0.0.1` matches ComfyUI's native
+  // default — writing it adds noise without effect.
+  if (!hasPort) parts.unshift('--port', '8000')
+  if (!parts.includes('--enable-manager')) parts.push('--enable-manager')
+
+  return { launchArgs: parts.join(' '), pathOverrides }
 }
 
 /**
@@ -204,9 +297,15 @@ function readLegacyComfySettings(configDir: string): Record<string, unknown> {
   return {}
 }
 
-function readLegacyConsent(raw: Record<string, unknown>): LegacyConsent {
+function readLegacyComfyPrefs(raw: Record<string, unknown>): LegacyComfySettings {
+  const asBool = (v: unknown): boolean | undefined => typeof v === 'boolean' ? v : undefined
+  const asNonEmptyString = (v: unknown): string | undefined => typeof v === 'string' && v.trim() !== '' ? v : undefined
   return {
-    sendStatistics: typeof raw['Comfy-Desktop.SendStatistics'] === 'boolean' ? raw['Comfy-Desktop.SendStatistics'] as boolean : undefined,
+    sendStatistics: asBool(raw['Comfy-Desktop.SendStatistics']),
+    autoUpdate: asBool(raw['Comfy-Desktop.AutoUpdate']),
+    theme: asNonEmptyString(raw['Comfy.ColorPalette']),
+    pypiMirror: asNonEmptyString(raw['Comfy-Desktop.UV.PypiInstallMirror']),
+    torchMirror: asNonEmptyString(raw['Comfy-Desktop.UV.TorchInstallMirror']),
   }
 }
 
@@ -448,16 +547,48 @@ async function sourceComfyUI(
   return { mode: 'git-clone-fallback' }
 }
 
+interface CarryReport {
+  addedModelsDirs: string[]
+  /** Global settings keys actually written during this carry pass. */
+  carriedKeys: string[]
+  /** Global settings keys we considered but skipped because v2 already
+   *  had a user-set value. Telemetered so we can spot adoption flows
+   *  that look like clean migrations but were really first-launches
+   *  followed by an adopt. */
+  carrySkippedKeys: string[]
+}
+
 /**
- * Persist `modelsDirs` and (when unset) the telemetry consent flag derived
- * from the legacy install. Existing `telemetryEnabled` user choice wins.
+ * Persist legacy preferences into v2's global settings under the
+ * "v2 user choice wins" rule — keys the user has already set in v2 are
+ * preserved verbatim; only absent keys are seeded from the legacy
+ * install. Uses `settings.has()` (which reads the raw `settings.json`)
+ * so built-in defaults don't masquerade as user choices.
+ *
+ * Carries:
+ *   - `modelsDirs`           ← `<basePath>/models` + every `base_path`
+ *                              from `extra_models_config.yaml`
+ *                              (always appended; never blocked).
+ *   - `telemetryEnabled`     ← `Comfy-Desktop.SendStatistics`
+ *   - `autoInstallUpdates`   ← `Comfy-Desktop.AutoUpdate`
+ *   - `theme`                ← `Comfy.ColorPalette`
+ *   - `pypiMirror`           ← `Comfy-Desktop.UV.PypiInstallMirror`
+ *   - `useChineseMirrors` +
+ *     `chineseMirrorsPrompted` ← inferred from `pypiMirror`
+ *   - `firstUseCompleted`    ← force `true` (the adopting user has been
+ *                              running ComfyUI for months — skip the
+ *                              first-launch takeover).
+ *   - `inputDir` / `outputDir` ← `<basePath>/input` / `<basePath>/output`
+ *                                so fresh managed installs created
+ *                                later automatically see the legacy
+ *                                workspace.
  */
 function carryLegacySettings(
   basePath: string,
   configDir: string,
-  legacy: LegacyConsent,
+  legacy: LegacyComfySettings,
   sendOutput: (t: string) => void,
-): { addedModelsDirs: string[] } {
+): CarryReport {
   let extraYamlContent: string | null = null
   try {
     extraYamlContent = fs.readFileSync(path.join(configDir, EXTRA_MODELS_YAML), 'utf-8')
@@ -470,13 +601,50 @@ function carryLegacySettings(
     sendOutput(`Registered ${additions.length} legacy model dir(s) for cross-install visibility.\n`)
   }
 
-  // Carry telemetry consent only when the user hasn't already decided.
-  const telemetryAlreadySet = Object.prototype.hasOwnProperty.call(settings.getAll(), 'telemetryEnabled')
-  if (!telemetryAlreadySet && typeof legacy.sendStatistics === 'boolean') {
-    settings.set('telemetryEnabled', legacy.sendStatistics)
+  const carriedKeys: string[] = []
+  const carrySkippedKeys: string[] = []
+
+  /** Apply the "v2 user choice wins" rule for a single key. */
+  function tryCarry<T>(key: string, value: T | undefined): void {
+    if (value === undefined) return
+    if (settings.has(key)) {
+      carrySkippedKeys.push(key)
+      return
+    }
+    settings.set(key, value)
+    carriedKeys.push(key)
   }
 
-  return { addedModelsDirs: additions }
+  tryCarry('telemetryEnabled', legacy.sendStatistics)
+  tryCarry('autoInstallUpdates', legacy.autoUpdate)
+  tryCarry('theme', legacy.theme)
+  tryCarry('pypiMirror', legacy.pypiMirror)
+
+  if (looksLikeChineseMirror(legacy.pypiMirror)) {
+    // Both flags carry together: the mirror toggle drives Git+PyPI
+    // routing, and the "already prompted" flag suppresses the locale-
+    // triggered prompt that would otherwise replay on next launch.
+    tryCarry('useChineseMirrors', true)
+    tryCarry('chineseMirrorsPrompted', true)
+  }
+
+  // Force-skip the first-launch takeover for adopted users — they've
+  // been running ComfyUI for months. Carries unconditionally because
+  // re-running adoption on a fresh v2 install (idempotent reconcile)
+  // shouldn't replay the takeover either.
+  if (!settings.has('firstUseCompleted')) {
+    settings.set('firstUseCompleted', true)
+    carriedKeys.push('firstUseCompleted')
+  }
+
+  // Seed global shared dirs to legacy workspace so fresh managed installs
+  // (created later by the same user) see the same input/output by default.
+  // Only when v2 hasn't already persisted a choice — adopted users who
+  // first ran v2 and configured shared dirs keep their choice.
+  tryCarry('inputDir', path.join(basePath, 'input'))
+  tryCarry('outputDir', path.join(basePath, 'output'))
+
+  return { addedModelsDirs: additions, carriedKeys, carrySkippedKeys }
 }
 
 /**
@@ -650,6 +818,18 @@ async function runAdoption(
     // 'retry' loops.
   }
 
+  // One-shot ComfyUI source update during adoption: the user is
+  // receiving the Desktop 2.0 update with the expectation that ComfyUI
+  // itself is also fresh. We resolve the latest stable tag and check
+  // it out *once* here. Subsequent launches do NOT re-update —
+  // `autoUpdateComfyUI` stays `false` on the record, matching Desktop
+  // 2.0's standard policy that ComfyUI updates are opt-in per install.
+  // Non-fatal: a stale source is still a working install.
+  sendProgress('comfy-update', { percent: 0 })
+  const updateInfo = await telemetry.trackedStep('desktop2.adopt.comfy_update', {}, async () => {
+    return updateComfyToStable(destSource, tools)
+  })
+
   sendProgress('requirements', { percent: 0 })
   const reqReport = await telemetry.trackedStep('desktop2.adopt.requirements', {}, async () => {
     try {
@@ -661,19 +841,30 @@ async function runAdoption(
   })
 
   const rawComfySettings = readLegacyComfySettings(info.configDir)
-  const consent = readLegacyConsent(rawComfySettings)
-  const launchArgs = deriveLaunchArgs(rawComfySettings)
+  const prefs = readLegacyComfyPrefs(rawComfySettings)
+  const derived = deriveLaunchArgs(rawComfySettings)
   const legacyDesktopConfig = readLegacyDesktopConfig(info.configDir)
   const legacyAppVersion = readLegacyAppVersion(info.executablePath)
+  const detectedGpu = typeof legacyDesktopConfig['detectedGpu'] === 'string'
+    ? legacyDesktopConfig['detectedGpu'] as string : null
+  const selectedDevice = typeof legacyDesktopConfig['selectedDevice'] === 'string'
+    ? legacyDesktopConfig['selectedDevice'] as string : null
 
   sendProgress('settings', { percent: 0 })
   const carry = await telemetry.trackedStep('desktop2.adopt.carry_settings', {}, async () => {
-    return carryLegacySettings(info.basePath, info.configDir, consent, sendOutput)
+    return carryLegacySettings(info.basePath, info.configDir, prefs, sendOutput)
   })
 
   sendProgress('register', { percent: 0 })
   const record = await telemetry.trackedStep('desktop2.adopt.register', {}, async () => {
+    // Re-read post-update so the recorded version matches the checkout.
     const comfyVersion = readComfyVersion(destSource) ?? undefined
+
+    // Per-install input/output: explicit legacy overrides win; otherwise
+    // pin to legacy workspace defaults so the adopted install opens the
+    // same input/output folders the user had on day one.
+    const inputDir = derived.pathOverrides.inputDir ?? path.join(info.basePath, 'input')
+    const outputDir = derived.pathOverrides.outputDir ?? path.join(info.basePath, 'output')
 
     const recordData: Record<string, unknown> = {
       name: ADOPT_INSTALL_NAME,
@@ -685,16 +876,32 @@ async function runAdoption(
       adoptedPythonPath: pythonPath,
       adoptedSourceMode: sourceMode!,
       ...(legacyAppVersion ? { adoptedFromLegacyVersion: legacyAppVersion } : {}),
+      // Hardware hints stashed for a future "rebuild as managed standalone"
+      // flow that needs to preselect the right variant — no v2 consumer
+      // today, but cheap to capture while we have the legacy config open.
+      ...(detectedGpu ? { adoptedFromGpu: detectedGpu } : {}),
+      ...(selectedDevice ? { adoptedSelectedDevice: selectedDevice } : {}),
+      ...(prefs.torchMirror ? { adoptedTorchMirror: prefs.torchMirror } : {}),
       releaseTag: 'legacy-adopted',
       variant: 'legacy-uv-py312',
       pythonVersion: '3.12',
       ...(comfyVersion ? { version: comfyVersion } : {}),
-      launchArgs,
+      ...(updateInfo.tag ? { adoptedComfyTagAtMigration: updateInfo.tag } : {}),
+      launchArgs: derived.launchArgs,
       launchMode: 'window',
       browserPartition: 'unique',
       portConflict: 'auto',
+      // Adopted records get one-time-update-during-adoption above but
+      // stay on opt-in updates from here on out — matching v2's standard
+      // policy. Do not conflate the two.
       autoUpdateComfyUI: false,
-      useSharedPaths: false,
+      // Shared models = on (legacy `models/` lives in the global modelsDirs).
+      // Shared input/output = off (workspace pinned to legacy basePath via
+      // the per-install inputDir/outputDir fields below).
+      useSharedModels: true,
+      useSharedInputOutput: false,
+      inputDir,
+      outputDir,
       copiedFrom: 'legacy-desktop',
       copyReason: 'in-place-adoption',
       status: 'installed',
@@ -722,13 +929,62 @@ async function runAdoption(
     has_venv: info.hasVenv,
     has_extra_models_yaml: fs.existsSync(path.join(info.configDir, EXTRA_MODELS_YAML)),
     models_dir_count: carry.addedModelsDirs.length,
+    carried_keys: carry.carriedKeys,
+    carry_skipped_keys: carry.carrySkippedKeys,
+    adopted_path_override_input: !!derived.pathOverrides.inputDir,
+    adopted_path_override_output: !!derived.pathOverrides.outputDir,
+    adopted_comfy_tag_at_migration: updateInfo.tag ?? null,
     requirements_uv_available: reqReport.uvAvailable,
     requirements_core_exit: reqReport.coreExitCode,
     requirements_manager_exit: reqReport.managerExitCode,
-    gpu: typeof legacyDesktopConfig['detectedGpu'] === 'string' ? legacyDesktopConfig['detectedGpu'] as string : null,
-    selected_device: typeof legacyDesktopConfig['selectedDevice'] === 'string' ? legacyDesktopConfig['selectedDevice'] as string : null,
+    gpu: detectedGpu,
+    selected_device: selectedDevice,
   })
 
   sendProgress('done', { percent: 100 })
   return record
+}
+
+/**
+ * One-shot "roll forward to current stable" for an adopted ComfyUI
+ * source tree. Resolves the latest stable tag and `git checkout`s it.
+ *
+ * Non-fatal on every failure path — offline lookups, mirror flakes,
+ * even checkout errors leave the adoption with whatever was cloned /
+ * copied. The user keeps a working install they can update from the
+ * settings UI later.
+ */
+async function updateComfyToStable(
+  destSource: string,
+  tools: AdoptTools,
+): Promise<{ tag: string | null }> {
+  if (!fs.existsSync(path.join(destSource, '.git'))) {
+    tools.sendOutput('Skipping post-adoption ComfyUI update: source is not a git checkout.\n')
+    return { tag: null }
+  }
+  let tag: string | null
+  try {
+    tag = await getLatestStableTag()
+  } catch {
+    tag = null
+  }
+  if (!tag) {
+    tools.sendOutput('Skipping post-adoption ComfyUI update: could not resolve latest stable tag.\n')
+    return { tag: null }
+  }
+  tools.sendOutput(`Checking out latest stable ComfyUI tag (${tag})…\n`)
+  try {
+    const result = await gitCheckoutCommit(destSource, tag, tools.sendOutput, tools.signal)
+    if (result.exitCode !== 0) {
+      tools.sendOutput(
+        `Warning: ComfyUI checkout of ${tag} failed (exit ${result.exitCode}). ` +
+        `Continuing with whatever was cloned; user can update from Settings later.\n`,
+      )
+      return { tag: null }
+    }
+  } catch (err) {
+    tools.sendOutput(`Warning: ComfyUI checkout threw: ${(err as Error).message}\n`)
+    return { tag: null }
+  }
+  return { tag }
 }

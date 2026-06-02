@@ -68,8 +68,8 @@ vi.mock('../../installations', () => ({
 }))
 
 // Source / destination dirs are isolated per test, so `settings.get`
-// for shared paths is never invoked when `useSharedPaths: false` is set
-// on the destination — but stub it anyway so any future drift surfaces
+// for shared paths is never invoked when both shared toggles are off on
+// the destination — but stub it anyway so any future drift surfaces
 // the missing field instead of crashing.
 vi.mock('../../settings', () => ({
   get: vi.fn(() => undefined),
@@ -88,7 +88,10 @@ function makeInstallation(overrides: Partial<InstallationRecord> & { id: string;
     sourceId: 'standalone',
     status: 'installed',
     createdAt: new Date(0).toISOString(),
-    useSharedPaths: false,
+    // Isolate models / input / output to per-install dirs for this test
+    // (no shared injection from global settings).
+    useSharedModels: false,
+    useSharedInputOutput: false,
     ...overrides,
   } as InstallationRecord
 }

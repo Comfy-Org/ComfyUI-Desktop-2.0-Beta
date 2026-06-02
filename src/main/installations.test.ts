@@ -239,6 +239,105 @@ describe('installations.getRecent', () => {
   })
 })
 
+describe('installations.load (useSharedPaths → useSharedModels/useSharedInputOutput migration)', () => {
+  function writeRawInstallations(records: Record<string, unknown>[]): string {
+    // On win32, `dataDir()` resolves to the Electron `userData` path
+    // directly — no `data/` subdir.
+    fs.mkdirSync(userDataPath, { recursive: true })
+    const file = path.join(userDataPath, 'installations.json')
+    fs.writeFileSync(file, JSON.stringify(records))
+    return file
+  }
+
+  it('translates legacy useSharedPaths: true → both new flags true', async () => {
+    writeRawInstallations([
+      {
+        id: 'legacy-on',
+        name: 'Legacy On',
+        installPath: path.join(tmpRoot, 'on'),
+        sourceId: 'standalone',
+        status: 'installed',
+        createdAt: new Date().toISOString(),
+        useSharedPaths: true,
+      },
+    ])
+    const installations = await loadInstallations()
+    const list = await installations.list()
+    const rec = list.find((r) => r.id === 'legacy-on')!
+    expect(rec.useSharedModels).toBe(true)
+    expect(rec.useSharedInputOutput).toBe(true)
+    expect(rec).not.toHaveProperty('useSharedPaths')
+  })
+
+  it('translates legacy useSharedPaths: false → useSharedModels: true, useSharedInputOutput: false', async () => {
+    // Users who set `useSharedPaths: false` almost certainly meant to
+    // isolate the workspace, not lose visibility of their model library.
+    // The migration always forces `useSharedModels: true` regardless of
+    // the legacy value.
+    writeRawInstallations([
+      {
+        id: 'legacy-off',
+        name: 'Legacy Off',
+        installPath: path.join(tmpRoot, 'off'),
+        sourceId: 'standalone',
+        status: 'installed',
+        createdAt: new Date().toISOString(),
+        useSharedPaths: false,
+      },
+    ])
+    const installations = await loadInstallations()
+    const list = await installations.list()
+    const rec = list.find((r) => r.id === 'legacy-off')!
+    expect(rec.useSharedModels).toBe(true)
+    expect(rec.useSharedInputOutput).toBe(false)
+    expect(rec).not.toHaveProperty('useSharedPaths')
+  })
+
+  it('leaves records without useSharedPaths untouched (no implicit migration)', async () => {
+    // Records already on the new schema must round-trip without the
+    // migration adding fields that weren't there before.
+    writeRawInstallations([
+      {
+        id: 'modern',
+        name: 'Modern',
+        installPath: path.join(tmpRoot, 'modern'),
+        sourceId: 'standalone',
+        status: 'installed',
+        createdAt: new Date().toISOString(),
+        useSharedModels: false,
+      },
+    ])
+    const installations = await loadInstallations()
+    const list = await installations.list()
+    const rec = list.find((r) => r.id === 'modern')!
+    expect(rec.useSharedModels).toBe(false)
+    expect(rec.useSharedInputOutput).toBeUndefined()
+    expect(rec).not.toHaveProperty('useSharedPaths')
+  })
+
+  it('strips legacy useSharedPaths from disk on next write', async () => {
+    const file = writeRawInstallations([
+      {
+        id: 'legacy-strip',
+        name: 'Legacy Strip',
+        installPath: path.join(tmpRoot, 'strip'),
+        sourceId: 'standalone',
+        status: 'installed',
+        createdAt: new Date().toISOString(),
+        useSharedPaths: true,
+      },
+    ])
+    const installations = await loadInstallations()
+    // Update triggers a save, which re-serializes the migrated record.
+    await installations.update('legacy-strip', { name: 'Renamed' })
+    const raw = JSON.parse(fs.readFileSync(file, 'utf-8')) as Record<string, unknown>[]
+    const persisted = raw.find((r) => r['id'] === 'legacy-strip')!
+    expect(persisted).not.toHaveProperty('useSharedPaths')
+    expect(persisted['useSharedModels']).toBe(true)
+    expect(persisted['useSharedInputOutput']).toBe(true)
+  })
+})
+
 describe('installations.getRecentByCategory', () => {
   it('returns null when there are no installs', async () => {
     const installations = await loadInstallations()

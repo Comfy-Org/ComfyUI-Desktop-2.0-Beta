@@ -129,16 +129,16 @@ export const standalone: SourcePlugin = {
     const parsed = userArgs.length > 0 ? parseArgs(userArgs) : []
     const port = extractPort(parsed)
     // Adopted installs keep their data (models, user, input, output,
-    // custom_nodes) at the legacy basePath; pin ComfyUI to it via CLI args
-    // here so the user-editable launchArgs stays free of these structural
-    // paths. Adopted records set `useSharedPaths: false`, so launch.ts also
-    // skips its own --input-directory / --output-directory injection.
+    // custom_nodes) at the legacy basePath. `--base-directory` and
+    // `--user-directory` are structural plumbing the user shouldn't need
+    // to touch, so pin them here. Input/output are first-class per-install
+    // fields (`installation.inputDir` / `outputDir`) handled by launch.ts'
+    // shared-input-output branch — adopted records ship with both set to
+    // `<legacyBasePath>/{input,output}` so the end result is the same.
     const adoptedBaseDir = adopted ? (installation.adoptedBaseDir as string | undefined) : undefined
     const adoptArgs = adoptedBaseDir ? [
       '--base-directory', adoptedBaseDir,
       '--user-directory', path.join(adoptedBaseDir, 'user'),
-      '--input-directory', path.join(adoptedBaseDir, 'input'),
-      '--output-directory', path.join(adoptedBaseDir, 'output'),
     ] : []
     // Desktop-managed feature flags (e.g. show_signin_button) are injected in
     // handleLaunch after we discover the running ComfyUI's feature-flag registry,

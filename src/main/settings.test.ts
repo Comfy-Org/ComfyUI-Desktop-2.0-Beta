@@ -26,6 +26,7 @@ fs.mkdirSync(xdgCacheHome, { recursive: true })
 let settings: {
   set: (key: string, value: unknown) => void
   get: (key: string) => unknown
+  has: (key: string) => boolean
   defaults: { onAppClose: 'tray' | 'quit' }
 }
 
@@ -190,6 +191,47 @@ describe('settings path sanitization', () => {
     expect(persisted['modelsDirs']).toEqual(expectedModelsDirs)
     expect(persisted['inputDir']).toBe(expectedInputDir)
     expect(persisted['outputDir']).toBe(expectedOutputDir)
+  })
+})
+
+describe('settings.has (persisted-only check)', () => {
+  it('returns false when settings.json does not exist yet', () => {
+    expect(settings.has('theme')).toBe(false)
+    // Built-in defaults must NOT register as user choices — that's the
+    // bug `has()` exists to avoid. `inputDir` has a default value from
+    // `settings.defaults` and would show up in `getAll()`, but the file
+    // doesn't carry it.
+    expect(settings.has('inputDir')).toBe(false)
+  })
+
+  it('returns false for keys with defaults even after first load creates settings.json', () => {
+    // Touch a key to force a write of settings.json so the file exists
+    // but doesn't carry the defaulted keys.
+    settings.set('theme', 'dark')
+    expect(fs.existsSync(settingsPath)).toBe(true)
+    expect(settings.has('theme')).toBe(true)
+    // Built-in defaults must still NOT be marked as persisted.
+    expect(settings.has('inputDir')).toBe(false)
+    expect(settings.has('cacheDir')).toBe(false)
+  })
+
+  it('returns true once the user explicitly sets the key', () => {
+    settings.set('theme', 'dark')
+    expect(settings.has('theme')).toBe(true)
+  })
+
+  it('returns false after the key is unset', () => {
+    settings.set('theme', 'dark')
+    expect(settings.has('theme')).toBe(true)
+    settings.set('theme', undefined)
+    expect(settings.has('theme')).toBe(false)
+  })
+
+  it('returns false for null persisted values', () => {
+    // legacy null normalization: any null on disk is treated as unset.
+    fs.mkdirSync(path.dirname(settingsPath), { recursive: true })
+    fs.writeFileSync(settingsPath, JSON.stringify({ theme: null }), 'utf-8')
+    expect(settings.has('theme')).toBe(false)
   })
 })
 

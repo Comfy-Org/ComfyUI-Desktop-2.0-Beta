@@ -18,16 +18,24 @@ import type { DetailField, DetailSection, Installation } from '../../types/ipc'
  *    `__comfyTitlePopup.globalSettings*` bridge methods. This mirrors
  *    the old Global Settings popup view exactly — only the render
  *    surface changed.
- *  - Per-install `useSharedPaths` toggle, sourced from `props.sections`
- *    (main emits `{ tab: 'storage', fields: [useSharedPaths] }` for
- *    desktop / portable installs; git installs omit it).
+ *  - Per-install storage section (`useSharedModels`,
+ *    `useSharedInputOutput`, and the per-install `inputDir` /
+ *    `outputDir` path pickers shown only when shared input/output is
+ *    off), sourced from `props.sections`. Git installs omit this
+ *    section entirely.
  *
  * Top-of-tab note swaps between an informational muted line and a
  * warning-colour restart prompt when the user has touched any field
  * in the tab during this session. The warning refers to restarting
  * the desktop application — distinct from the per-field "Restart to
- * apply" pill on `useSharedPaths`, which restarts the running Comfy
+ * apply" pill on the toggles, which restarts the running Comfy
  * instance.
+ *
+ * Turning `useSharedModels` off is rare and easy to mistake for "free
+ * up disk space" when the real effect is "this instance can no longer
+ * see any of your downloaded models". We render an inline warning
+ * banner directly below the toggle whenever it's off so the user can't
+ * miss the consequence.
  */
 
 interface ModelsDir {
@@ -58,8 +66,10 @@ interface Props {
    *  `onGlobalSettingsSnapshot`. Passed in as a prop so the picker view
    *  doesn't subscribe twice. */
   snapshot: StorageSnapshot
-  /** Per-install storage sections (today: a single section carrying
-   *  the `useSharedPaths` toggle for desktop / portable installs). */
+  /** Per-install storage sections — `useSharedModels` /
+   *  `useSharedInputOutput` toggles and the per-install `inputDir` /
+   *  `outputDir` path pickers for desktop / portable installs. Git
+   *  installs omit this section entirely. */
   sections: DetailSection[]
   pendingRestartFieldIds: Set<string>
   fieldErrorMessages: Map<string, string>
@@ -92,9 +102,14 @@ watch(
   }
 )
 
+/** Per-install storage toggles + path fields touch global state
+ *  (settings.json) at restart, so any pending edit also triggers the
+ *  warning-coloured restart prompt. */
+const PER_INSTALL_STORAGE_FIELD_IDS = ['useSharedModels', 'useSharedInputOutput', 'inputDir', 'outputDir']
+
 const showRestartWarning = computed(() => {
   if (globalTouched.value) return true
-  return props.pendingRestartFieldIds.has('useSharedPaths')
+  return PER_INSTALL_STORAGE_FIELD_IDS.some((id) => props.pendingRestartFieldIds.has(id))
 })
 
 /** Note-bar leading icon. Computed (not inlined as `:is`-via-import)
@@ -106,15 +121,46 @@ const sharedDirsSections = computed<DetailSection[]>(() => [
   { fields: props.snapshot.sharedDirectoriesFields as unknown as DetailField[] },
 ])
 
-/** Per-install `useSharedPaths` toggle value (defaults to on when the
- *  field is absent). When off, this install uses only its own local
- *  paths, so the shared Models / Directories config below is irrelevant
- *  and gets hidden. */
-const useSharedPathsEnabled = computed<boolean>(() => {
-  const field = props.sections
-    .flatMap((s) => s.fields ?? [])
-    .find((f) => f.id === 'useSharedPaths')
-  return field ? field.value !== false : true
+/** Flat view of every field across the per-install sections — used
+ *  by lookups below so the template stays declarative. */
+const perInstallFields = computed<DetailField[]>(() =>
+  props.sections.flatMap((s) => s.fields ?? [])
+)
+
+function findField(id: string): DetailField | undefined {
+  return perInstallFields.value.find((f) => f.id === id)
+}
+
+/** Per-install `useSharedModels` toggle value (defaults to on when
+ *  the field is absent). When off, the global Shared Models list
+ *  below is irrelevant for THIS install — we hide it and replace it
+ *  with an inline warning so the user sees the consequence. */
+const useSharedModelsEnabled = computed<boolean>(() => {
+  const f = findField('useSharedModels')
+  return f ? f.value !== false : true
+})
+
+/** Per-install `useSharedInputOutput` toggle value (defaults to on).
+ *  When off, the global Shared Directories list below is irrelevant
+ *  and per-install `inputDir` / `outputDir` pickers are shown
+ *  instead. */
+const useSharedInputOutputEnabled = computed<boolean>(() => {
+  const f = findField('useSharedInputOutput')
+  return f ? f.value !== false : true
+})
+
+/** Sections passed down to the per-install settings list. Filters out
+ *  the per-install `inputDir` / `outputDir` fields when shared
+ *  input/output is on — they're not meaningful in that mode and would
+ *  just clutter the common case. */
+const perInstallSections = computed<DetailSection[]>(() => {
+  if (useSharedInputOutputEnabled.value) {
+    return props.sections.map((s) => ({
+      ...s,
+      fields: (s.fields ?? []).filter((f) => f.id !== 'inputDir' && f.id !== 'outputDir'),
+    }))
+  }
+  return props.sections
 })
 
 async function handleAddModelsDir(): Promise<void> {
@@ -197,14 +243,15 @@ function handleUpdatePerInstallField(field: DetailField, value: unknown): void {
       </p>
     </div>
 
-    <!-- Per-install toggle (`useSharedPaths`) above the global model
+    <!-- Per-install toggles + per-install path pickers (when shared
+         input/output is off) sit above the global model / directory
          lists so the user sees "this instance opts in to shared
-         storage" before scrolling through the dirs themselves. Hidden
+         storage" before scrolling through the global dirs. Hidden
          for sources that opt out (git installs) where main emits no
          storage section. -->
     <SettingsSectionList
-      v-if="sections.length > 0"
-      :sections="sections"
+      v-if="perInstallSections.length > 0"
+      :sections="perInstallSections"
       :installation-id="installation?.id"
       :running-action-ids="runningActionIds"
       :pending-restart-field-ids="pendingRestartFieldIds"
@@ -212,34 +259,58 @@ function handleUpdatePerInstallField(field: DetailField, value: unknown): void {
       @update-field="handleUpdatePerInstallField"
     />
 
-    <!-- Shared Models + Shared Directories only apply when this install
-         opts into shared storage. Hide them when the toggle is off so
-         the user isn't configuring paths this install won't use. -->
-    <template v-if="useSharedPathsEnabled">
-      <GlobalSettingsMicroSection
-        :title="t('settings.models', 'Shared Models')"
-        :tooltip="t('tooltips.sharedModels')"
-      >
-        <ModelsDirList
-          :dirs="snapshot.modelsDirs"
-          @open="handleOpenModelsDir"
-          @remove="handleRemoveModelsDir"
-          @make-primary="handleMakePrimary"
-          @add="handleAddModelsDir"
-        />
-      </GlobalSettingsMicroSection>
+    <!-- Inline warning when shared models is OFF. Surfaces a state
+         most users would otherwise discover only when a workflow
+         fails to find a model. -->
+    <div
+      v-if="findField('useSharedModels') && !useSharedModelsEnabled"
+      class="storage-pane-warning"
+      role="alert"
+    >
+      <AlertTriangle :size="14" class="storage-pane-warning-icon" aria-hidden="true" />
+      <p class="storage-pane-warning-text">
+        {{
+          t(
+            'comfyUISettings.useSharedModelsOffWarning',
+            'Shared models is OFF for this install. It can only see models placed under its own folder — your shared library is hidden until you turn this back on.'
+          )
+        }}
+      </p>
+    </div>
 
-      <GlobalSettingsMicroSection :title="t('settings.sharedDirectories', 'Shared Directories')">
-        <SettingsSectionList
-          :sections="sharedDirsSections"
-          :installation-id="installation?.id"
-          :running-action-ids="runningActionIds"
-          :pending-restart-field-ids="pendingRestartFieldIds"
-          :field-error-messages="fieldErrorMessages"
-          @update-field="handleUpdateSharedDirField"
-        />
-      </GlobalSettingsMicroSection>
-    </template>
+    <!-- Shared Models only applies when this install opts into shared
+         models — hide it otherwise so the user isn't configuring a
+         list that has no effect here. -->
+    <GlobalSettingsMicroSection
+      v-if="useSharedModelsEnabled"
+      :title="t('settings.models', 'Shared Models')"
+      :tooltip="t('tooltips.sharedModels')"
+    >
+      <ModelsDirList
+        :dirs="snapshot.modelsDirs"
+        @open="handleOpenModelsDir"
+        @remove="handleRemoveModelsDir"
+        @make-primary="handleMakePrimary"
+        @add="handleAddModelsDir"
+      />
+    </GlobalSettingsMicroSection>
+
+    <!-- Shared Directories (input/output) only applies when this
+         install opts into shared input/output — when off, the
+         per-install path pickers above cover the same ground. -->
+    <GlobalSettingsMicroSection
+      v-if="useSharedInputOutputEnabled"
+      :title="t('settings.sharedDirectories', 'Shared Directories')"
+    >
+      <SettingsSectionList
+        :sections="sharedDirsSections"
+        :installation-id="installation?.id"
+        :running-action-ids="runningActionIds"
+        :pending-restart-field-ids="pendingRestartFieldIds"
+        :field-error-messages="fieldErrorMessages"
+        @update-field="handleUpdateSharedDirField"
+      />
+    </GlobalSettingsMicroSection>
   </div>
 </template>
 
@@ -291,5 +362,34 @@ function handleUpdatePerInstallField(field: DetailField, value: unknown): void {
 .storage-note.is-warning .storage-note-icon {
   color: var(--warning);
   opacity: 1;
+}
+
+/* Inline warning when `useSharedModels` is OFF. Sits between the
+ * per-install toggles and the (now-hidden) global Shared Models list
+ * so the consequence of toggling off is impossible to miss. Uses the
+ * same warning token as the top-of-tab restart banner. */
+.storage-pane-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--warning) 14%, transparent);
+  border: 1px solid var(--warning);
+  color: var(--warning);
+  font-weight: 500;
+}
+
+.storage-pane-warning-icon {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--warning);
+}
+
+.storage-pane-warning-text {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
 }
 </style>

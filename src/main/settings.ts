@@ -346,6 +346,52 @@ export function getAll(): Settings {
   return load()
 }
 
+/**
+ * Returns `true` iff `key` looks like a user-chosen value — i.e. it's
+ * explicitly persisted in `settings.json` as a non-null value AND, for
+ * defaulted keys, differs from the built-in default. Required so the
+ * legacy-adopt carry can apply the "v2 user choice wins" rule without
+ * being fooled by defaults that get persisted as a side effect of any
+ * `set()` call (the merged-result write in `load()` re-serializes the
+ * full `{ ...defaults, ...parsed }` object on first save).
+ *
+ * Edge case: a user who explicitly picks a value identical to the
+ * default will be mis-classified as "not set" and have legacy values
+ * carried over them. That's accepted — they wanted the default anyway,
+ * and the legacy value either also matches (no-op) or replaces it with
+ * something they'll see and can change.
+ *
+ * Returns `false` on parse errors or when the file is missing.
+ */
+export function has(key: string): boolean {
+  const raw = readFileSafe(dataPath)
+  if (!raw) return false
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return false
+    const value = (parsed as Record<string, unknown>)[key]
+    if (value === undefined || value === null) return false
+    if (key in defaults) {
+      const def = (defaults as Record<string, unknown>)[key]
+      if (typeof def === 'string' && typeof value === 'string') {
+        if (path.resolve(def) === path.resolve(value)) return false
+      } else if (Array.isArray(def) && Array.isArray(value)) {
+        if (def.length === value.length
+          && def.every((d, i) => typeof d === 'string' && typeof value[i] === 'string'
+            ? path.resolve(d as string) === path.resolve(value[i] as string)
+            : d === value[i])) {
+          return false
+        }
+      } else if (def === value) {
+        return false
+      }
+    }
+    return true
+  } catch {
+    return false
+  }
+}
+
 /** Build a PipMirrorConfig from current settings. */
 export function getMirrorConfig(): { pypiMirror?: string; useChineseMirrors?: boolean } {
   return { pypiMirror: get('pypiMirror'), useChineseMirrors: get('useChineseMirrors') === true }

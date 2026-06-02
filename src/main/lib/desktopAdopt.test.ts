@@ -5,6 +5,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 
 import type * as pathsModule from './paths'
 import type * as pipModule from './pip'
+import type * as gitModule from './git'
 
 vi.mock('electron', () => ({
   app: { getPath: (name: string) => name === 'home' ? os.tmpdir() : os.tmpdir() },
@@ -27,9 +28,32 @@ vi.mock('../settings', () => {
       if (value === undefined) delete store[key]
       else store[key] = value
     }),
+    // `has()` mirrors the real implementation's "explicitly persisted"
+    // semantics — built-in defaults must not look like user choices to
+    // the carry logic.
+    has: vi.fn((key: string) => store[key] !== undefined && store[key] !== null),
     getAll: vi.fn(() => ({ ...store })),
     getMirrorConfig: vi.fn(() => ({ pypiMirror: undefined, useChineseMirrors: false })),
     __store: store,
+  }
+})
+
+// Stub the latest-stable-tag lookup + git checkout so adoption tests
+// don't need network access or a real ComfyUI git tree.
+const { getLatestStableTagMock, gitCheckoutCommitMock } = vi.hoisted(() => ({
+  getLatestStableTagMock: vi.fn<() => Promise<string | null>>(),
+  gitCheckoutCommitMock: vi.fn<(...args: unknown[]) => Promise<{ exitCode: number; stdout: string; stderr: string }>>(),
+}))
+
+vi.mock('./comfyui-releases', () => ({
+  getLatestStableTag: getLatestStableTagMock,
+}))
+
+vi.mock('./git', async () => {
+  const actual = await vi.importActual<typeof gitModule>('./git')
+  return {
+    ...actual,
+    gitCheckoutCommit: gitCheckoutCommitMock,
   }
 })
 
@@ -208,6 +232,11 @@ beforeEach(() => {
   for (const key of Object.keys(settingsMock.__store)) delete settingsMock.__store[key]
   vi.clearAllMocks()
   installFilteredRequirementsMock.mockResolvedValue(0)
+  // Adoption's one-shot ComfyUI update path is exercised in dedicated
+  // tests; the default for unrelated tests is "no tag available", which
+  // makes the update step a no-op without polluting the source tree.
+  getLatestStableTagMock.mockResolvedValue(null)
+  gitCheckoutCommitMock.mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' })
 })
 
 afterEach(() => {
@@ -243,25 +272,94 @@ describe('parseExtraModelsYaml', () => {
 })
 
 describe('deriveLaunchArgs', () => {
-  it('uses defaults when settings are missing', () => {
-    expect(deriveLaunchArgs({})).toBe('--listen 127.0.0.1 --port 8000 --enable-manager')
+  it('synthesizes --port 8000 + --enable-manager when LaunchArgs is empty', () => {
+    const { launchArgs, pathOverrides } = deriveLaunchArgs({})
+    expect(launchArgs).toBe('--port 8000 --enable-manager')
+    expect(pathOverrides).toEqual({})
   })
 
-  it('uses server_config.listen/port from settings', () => {
-    const args = deriveLaunchArgs({ 'server_config.listen': '0.0.0.0', 'server_config.port': 8188 })
-    expect(args).toBe('--listen 0.0.0.0 --port 8188 --enable-manager')
+  it('reads Comfy.Server.LaunchArgs (not server_config.*)', () => {
+    const { launchArgs } = deriveLaunchArgs({
+      'Comfy.Server.LaunchArgs': { listen: '0.0.0.0', port: '7860', lowvram: '' },
+      // server_config.* live in legacy `config.json` and are NEVER read
+      // by adoption — including them here ensures the new parser ignores
+      // them rather than silently picking them up.
+      'server_config.listen': '1.2.3.4',
+      'server_config.port': 1234,
+    })
+    expect(launchArgs).toContain('--listen 0.0.0.0')
+    expect(launchArgs).toContain('--port 7860')
+    expect(launchArgs).toContain('--lowvram')
+    expect(launchArgs).not.toContain('1.2.3.4')
+    expect(launchArgs).not.toContain('1234')
   })
 
-  it('flattens extra_server_args with values', () => {
-    const args = deriveLaunchArgs({ extra_server_args: { 'use-pytorch-cross-attention': '', verbose: 'DEBUG' } })
-    expect(args).toContain('--use-pytorch-cross-attention')
-    expect(args).toMatch(/--verbose\s+DEBUG/)
+  it('does NOT synthesize --listen (legacy implicit matches ComfyUI native)', () => {
+    const { launchArgs } = deriveLaunchArgs({ 'Comfy.Server.LaunchArgs': {} })
+    expect(launchArgs).not.toContain('--listen')
   })
 
-  it('keeps --enable-manager even when overrides are present', () => {
-    const args = deriveLaunchArgs({ extra_server_args: { cpu: '' } })
-    expect(args).toContain('--enable-manager')
-    expect(args).toContain('--cpu')
+  it('preserves user-set --listen verbatim', () => {
+    const { launchArgs } = deriveLaunchArgs({
+      'Comfy.Server.LaunchArgs': { listen: '0.0.0.0' },
+    })
+    expect(launchArgs).toContain('--listen 0.0.0.0')
+  })
+
+  it('keeps --enable-manager always (idempotent if already present)', () => {
+    const { launchArgs } = deriveLaunchArgs({
+      'Comfy.Server.LaunchArgs': { 'enable-manager': '' },
+    })
+    expect((launchArgs.match(/--enable-manager/g) ?? []).length).toBe(1)
+  })
+
+  it('promotes input-directory / output-directory into pathOverrides', () => {
+    const { launchArgs, pathOverrides } = deriveLaunchArgs({
+      'Comfy.Server.LaunchArgs': {
+        'input-directory': 'D:\\my-input',
+        'output-directory': 'D:\\my-output',
+      },
+    })
+    expect(pathOverrides).toEqual({ inputDir: 'D:\\my-input', outputDir: 'D:\\my-output' })
+    expect(launchArgs).not.toContain('--input-directory')
+    expect(launchArgs).not.toContain('--output-directory')
+  })
+
+  it('keeps user-set --base-directory and --user-directory in the string', () => {
+    const { launchArgs } = deriveLaunchArgs({
+      'Comfy.Server.LaunchArgs': {
+        'base-directory': 'D:\\my-comfy',
+        'user-directory': 'D:\\my-comfy\\user',
+      },
+    })
+    expect(launchArgs).toContain('--base-directory D:\\my-comfy')
+    expect(launchArgs).toContain('--user-directory D:\\my-comfy\\user')
+  })
+
+  it('drops v2 plumbing keys (extra-model-paths-config, front-end-root, log-stdout, database-url)', () => {
+    const { launchArgs } = deriveLaunchArgs({
+      'Comfy.Server.LaunchArgs': {
+        'extra-model-paths-config': 'C:\\legacy.yaml',
+        'front-end-root': 'C:\\legacy-fe',
+        'log-stdout': '',
+        'database-url': 'sqlite:///legacy.db',
+        // preserved control: real CLI flag stays
+        cpu: '',
+      },
+    })
+    expect(launchArgs).not.toContain('--extra-model-paths-config')
+    expect(launchArgs).not.toContain('--front-end-root')
+    expect(launchArgs).not.toContain('--log-stdout')
+    expect(launchArgs).not.toContain('--database-url')
+    expect(launchArgs).toContain('--cpu')
+  })
+
+  it('user-set --port wins over the synthesized 8000', () => {
+    const { launchArgs } = deriveLaunchArgs({
+      'Comfy.Server.LaunchArgs': { port: '9999' },
+    })
+    expect(launchArgs).toContain('--port 9999')
+    expect(launchArgs).not.toContain('--port 8000')
   })
 })
 
@@ -292,7 +390,9 @@ describe('adoptDesktopInstall', () => {
   it('prefers pre-swap-copy when staged source is valid', async () => {
     const legacy = buildFakeLegacy({
       configFiles: {
-        'comfy.settings.json': JSON.stringify({ 'server_config.listen': '0.0.0.0', 'server_config.port': 8188 }),
+        'comfy.settings.json': JSON.stringify({
+          'Comfy.Server.LaunchArgs': { listen: '0.0.0.0', port: '8188' },
+        }),
       },
     })
     try {
@@ -310,7 +410,9 @@ describe('adoptDesktopInstall', () => {
       expect(copyFn).toHaveBeenCalledOnce()
       expect(cloneFn).not.toHaveBeenCalled()
       expect(record.adoptedSourceMode).toBe('pre-swap-copy')
-      expect(record.launchArgs).toBe('--listen 0.0.0.0 --port 8188 --enable-manager')
+      expect(record.launchArgs).toContain('--listen 0.0.0.0')
+      expect(record.launchArgs).toContain('--port 8188')
+      expect(record.launchArgs).toContain('--enable-manager')
       // Marker written
       const marker = fs.readFileSync(path.join(legacy.basePath, '.comfyui-desktop-2'), 'utf-8')
       expect(marker).toBe(record.id)
@@ -398,8 +500,10 @@ describe('adoptDesktopInstall', () => {
     const legacy = buildFakeLegacy({
       configFiles: {
         'comfy.settings.json': JSON.stringify({
-          'server_config.port': 8188,
-          'extra_server_args': { 'use-pytorch-cross-attention': '' },
+          'Comfy.Server.LaunchArgs': {
+            port: '8188',
+            'use-pytorch-cross-attention': '',
+          },
           'Comfy-Desktop.SendStatistics': false,
         }),
       },
@@ -422,11 +526,16 @@ describe('adoptDesktopInstall', () => {
         browserPartition: 'unique',
         portConflict: 'auto',
         autoUpdateComfyUI: false,
-        useSharedPaths: false,
+        // New shared-paths schema — `useSharedPaths` is gone.
+        useSharedModels: true,
+        useSharedInputOutput: false,
+        inputDir: path.join(legacy.basePath, 'input'),
+        outputDir: path.join(legacy.basePath, 'output'),
         copiedFrom: 'legacy-desktop',
         copyReason: 'in-place-adoption',
         status: 'installed',
       })
+      expect(record).not.toHaveProperty('useSharedPaths')
       expect(record.launchArgs as string).toContain('--port 8188')
       expect(record.launchArgs as string).toContain('--use-pytorch-cross-attention')
       // Marker stamped with the freshly minted install id
@@ -435,9 +544,152 @@ describe('adoptDesktopInstall', () => {
       // Telemetry succeeded
       expect(telemetry.capture).toHaveBeenCalledWith('desktop2.adopt.succeeded', expect.objectContaining({
         adopted_source_mode: 'git-clone-fallback',
+        carried_keys: expect.arrayContaining(['telemetryEnabled', 'firstUseCompleted']),
       }))
       // Telemetry consent carried from legacy SendStatistics
       expect(settingsMock.__store['telemetryEnabled']).toBe(false)
+      // First-use takeover skipped for adopted users.
+      expect(settingsMock.__store['firstUseCompleted']).toBe(true)
+      // Global shared dirs seeded to legacy workspace (v2 had nothing set).
+      expect(settingsMock.__store['inputDir']).toBe(path.join(legacy.basePath, 'input'))
+      expect(settingsMock.__store['outputDir']).toBe(path.join(legacy.basePath, 'output'))
+    } finally { legacy.cleanup() }
+  })
+
+  it('promotes legacy input-directory / output-directory into per-install fields', async () => {
+    const legacy = buildFakeLegacy({
+      configFiles: {
+        'comfy.settings.json': JSON.stringify({
+          'Comfy.Server.LaunchArgs': {
+            'input-directory': 'D:\\custom-input',
+            'output-directory': 'D:\\custom-output',
+          },
+        }),
+      },
+    })
+    try {
+      const tools = buildSilentTools()
+      const record = await adoptDesktopInstall({ tools, deps: buildDeps({}, legacy.info) })
+      expect(record.inputDir).toBe('D:\\custom-input')
+      expect(record.outputDir).toBe('D:\\custom-output')
+      // Promoted out of the editable string.
+      expect(record.launchArgs as string).not.toContain('--input-directory')
+      expect(record.launchArgs as string).not.toContain('--output-directory')
+      // Telemetry notes which dirs were overridden.
+      expect(telemetry.capture).toHaveBeenCalledWith('desktop2.adopt.succeeded', expect.objectContaining({
+        adopted_path_override_input: true,
+        adopted_path_override_output: true,
+      }))
+    } finally { legacy.cleanup() }
+  })
+
+  it('carries theme / autoInstallUpdates / pypiMirror and infers Chinese mirror flags', async () => {
+    const legacy = buildFakeLegacy({
+      configFiles: {
+        'comfy.settings.json': JSON.stringify({
+          'Comfy.ColorPalette': 'dark',
+          'Comfy-Desktop.AutoUpdate': false,
+          'Comfy-Desktop.UV.PypiInstallMirror': 'https://mirrors.aliyun.com/pypi/simple/',
+          'Comfy-Desktop.UV.TorchInstallMirror': 'https://download.pytorch.org/whl/cu121',
+        }),
+      },
+    })
+    try {
+      const tools = buildSilentTools()
+      const record = await adoptDesktopInstall({ tools, deps: buildDeps({}, legacy.info) })
+      expect(settingsMock.__store['theme']).toBe('dark')
+      expect(settingsMock.__store['autoInstallUpdates']).toBe(false)
+      expect(settingsMock.__store['pypiMirror']).toBe('https://mirrors.aliyun.com/pypi/simple/')
+      expect(settingsMock.__store['useChineseMirrors']).toBe(true)
+      expect(settingsMock.__store['chineseMirrorsPrompted']).toBe(true)
+      // Torch mirror is stashed on the record for a future managed-rebuild flow.
+      expect(record.adoptedTorchMirror).toBe('https://download.pytorch.org/whl/cu121')
+    } finally { legacy.cleanup() }
+  })
+
+  it('respects pre-existing v2 settings under the "v2 user choice wins" rule', async () => {
+    // User already configured v2 with a dark theme + a custom pypi mirror
+    // before running adoption. Adoption must NOT overwrite those choices.
+    settingsMock.__store['theme'] = 'light'
+    settingsMock.__store['pypiMirror'] = 'https://pypi.org/simple/'
+    settingsMock.__store['inputDir'] = '/v2/chosen/input'
+    const legacy = buildFakeLegacy({
+      configFiles: {
+        'comfy.settings.json': JSON.stringify({
+          'Comfy.ColorPalette': 'dark',
+          'Comfy-Desktop.UV.PypiInstallMirror': 'https://mirrors.aliyun.com/pypi/simple/',
+        }),
+      },
+    })
+    try {
+      const tools = buildSilentTools()
+      await adoptDesktopInstall({ tools, deps: buildDeps({}, legacy.info) })
+      expect(settingsMock.__store['theme']).toBe('light')
+      expect(settingsMock.__store['pypiMirror']).toBe('https://pypi.org/simple/')
+      expect(settingsMock.__store['inputDir']).toBe('/v2/chosen/input')
+      // outputDir was NOT pre-set → it should still get carried.
+      expect(settingsMock.__store['outputDir']).toBe(path.join(legacy.basePath, 'output'))
+      expect(telemetry.capture).toHaveBeenCalledWith('desktop2.adopt.succeeded', expect.objectContaining({
+        carry_skipped_keys: expect.arrayContaining(['theme', 'pypiMirror', 'inputDir']),
+      }))
+    } finally { legacy.cleanup() }
+  })
+
+  it('runs a one-shot ComfyUI checkout to the latest stable tag', async () => {
+    getLatestStableTagMock.mockResolvedValue('v0.99.99')
+    const legacy = buildFakeLegacy({ configFiles: { 'comfy.settings.json': '{}' } })
+    try {
+      const tools = buildSilentTools()
+      const cloneFn = vi.fn(async (_url: string, dest: string) => {
+        fs.mkdirSync(dest, { recursive: true })
+        // Make destSource look like a real git checkout so the update
+        // step's `.git` precondition fires.
+        fs.mkdirSync(path.join(dest, '.git'), { recursive: true })
+        fs.writeFileSync(path.join(dest, 'main.py'), '# clone')
+        return { ok: true as const }
+      })
+      const record = await adoptDesktopInstall({
+        tools,
+        deps: buildDeps({ cloneSourceFromGit: cloneFn }, legacy.info),
+      })
+      expect(getLatestStableTagMock).toHaveBeenCalledOnce()
+      expect(gitCheckoutCommitMock).toHaveBeenCalledWith(
+        expect.stringContaining('ComfyUI'),
+        'v0.99.99',
+        expect.any(Function),
+        expect.any(Object),
+      )
+      expect(record.adoptedComfyTagAtMigration).toBe('v0.99.99')
+      // autoUpdateComfyUI stays false — one-shot, not ongoing.
+      expect(record.autoUpdateComfyUI).toBe(false)
+      expect(telemetry.capture).toHaveBeenCalledWith('desktop2.adopt.succeeded', expect.objectContaining({
+        adopted_comfy_tag_at_migration: 'v0.99.99',
+      }))
+    } finally { legacy.cleanup() }
+  })
+
+  it('one-shot ComfyUI update is non-fatal when checkout fails', async () => {
+    getLatestStableTagMock.mockResolvedValue('v0.99.99')
+    gitCheckoutCommitMock.mockResolvedValue({ exitCode: 128, stdout: '', stderr: 'boom' })
+    const legacy = buildFakeLegacy({ configFiles: { 'comfy.settings.json': '{}' } })
+    try {
+      const cloneFn = vi.fn(async (_url: string, dest: string) => {
+        fs.mkdirSync(dest, { recursive: true })
+        fs.mkdirSync(path.join(dest, '.git'), { recursive: true })
+        fs.writeFileSync(path.join(dest, 'main.py'), '# clone')
+        return { ok: true as const }
+      })
+      const tools = buildSilentTools()
+      const record = await adoptDesktopInstall({
+        tools,
+        deps: buildDeps({ cloneSourceFromGit: cloneFn }, legacy.info),
+      })
+      // Adoption still succeeded; tag-at-migration is omitted because
+      // the checkout didn't actually land.
+      expect(record).not.toHaveProperty('adoptedComfyTagAtMigration')
+      expect(telemetry.capture).toHaveBeenCalledWith('desktop2.adopt.succeeded', expect.objectContaining({
+        adopted_comfy_tag_at_migration: null,
+      }))
     } finally { legacy.cleanup() }
   })
 
