@@ -269,6 +269,17 @@ export interface ComfyTitlePopupBridge {
    *  install so the user lands in a fresh Comfy window. Cancelling the
    *  confirm is a no-op. */
   restartInstall(installationId: string): void
+  /** Capacity-protection status for Cloud entry points (PostHog
+   *  `desktop-cloud-capacity`). The popup runs in a separate
+   *  WebContentsView with its own preload and does not have
+   *  `window.api`; this bridge method gives `useCloudCapacity` an
+   *  equivalent read path inside the popup. */
+  getCloudCapacity(): Promise<'normal' | 'degraded' | 'disabled'>
+  /** Signed-in user's Comfy Cloud subscription tier — 'paid' lets the
+   *  capacity gate relax `disabled` into `degraded` for the IPP cloud
+   *  row (heads-up only, never hard-blocked). Same shared main-side
+   *  handler the panel uses. */
+  getCloudUserTier(): Promise<'free' | 'paid' | 'unknown'>
   /** Tell main the picker's right-pane has switched to this install
    *  (or `null` when nothing is selected). Main re-resolves the
    *  install's Settings + Snapshots and pushes a fresh snapshot so
@@ -618,6 +629,27 @@ const bridge: ComfyTitlePopupBridge = {
   },
   restartInstall: (installationId) => {
     ipcRenderer.send('comfy-titlepopup:restart-install', { installationId })
+  },
+  getCloudCapacity: async () => {
+    // Reuses the main-side IPC handler registered for the panel
+    // renderer (`ipcMain.handle('get-cloud-capacity', ...)`). The
+    // handler awaits the boot fetch, so first-call timing on the
+    // popup doesn't race the PostHog network call either.
+    const result = await ipcRenderer.invoke('get-cloud-capacity')
+    if (result === 'normal' || result === 'degraded' || result === 'disabled') {
+      return result
+    }
+    return 'normal'
+  },
+  getCloudUserTier: async () => {
+    // Same shared main-side handler as `window.api.getCloudUserTier`.
+    // Validate the IPC response defensively — main returns a string
+    // but a regression could land us anything.
+    const result = await ipcRenderer.invoke('get-cloud-user-tier')
+    if (result === 'free' || result === 'paid' || result === 'unknown') {
+      return result
+    }
+    return 'unknown'
   },
   setPickerSelectedInstall: (installationId) => {
     ipcRenderer.send('comfy-titlepopup:set-picker-selected-install', { installationId })

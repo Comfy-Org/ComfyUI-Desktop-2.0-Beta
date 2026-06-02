@@ -653,7 +653,12 @@
       "copied": "Copied",
       "openAgain": "Open again",
       "dismiss": "Dismiss"
-    }
+    },
+    "capacityDegraded": "Heavy usage",
+    "capacityDegradedHint": "ComfyUI Cloud is under heavy load right now — you may see slower response times. Please try again later for the best experience.",
+    "capacityDisabled": "Temporarily unavailable",
+    "capacityDisabledHint": "ComfyUI Cloud is temporarily unavailable due to high demand. Please try again later.",
+    "capacityProceed": "Continue anyway"
   },
 
   "desktop": {

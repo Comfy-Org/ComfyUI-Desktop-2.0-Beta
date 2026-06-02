@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { onMounted, toRef } from 'vue'
+import { computed, onMounted, toRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useInstallationStore } from '../stores/installationStore'
 import { useSessionStore } from '../stores/sessionStore'
 import { useInstallContextMenu } from '../composables/useInstallContextMenu'
 import { useInstallList } from '../composables/useInstallList'
+import { useCloudCapacity } from '../composables/useCloudCapacity'
 import { Cloud, MoreVertical, Plus, Search } from 'lucide-vue-next'
 import ContextMenu from '../components/ContextMenu.vue'
 import BrandBackground from '../components/BrandBackground.vue'
@@ -142,7 +143,11 @@ function hasError(inst: Installation): boolean {
   return sessionStore.errorInstances.has(inst.id)
 }
 
-function pickInstall(inst: Installation): void {
+async function pickInstall(inst: Installation): Promise<void> {
+  // Cloud capacity gate — catches the case where a cloud install
+  // already exists and the user clicks its per-install tile (the
+  // generic "Try Cloud" tile gates separately in `handleCloudClick`).
+  if (inst.sourceCategory === 'cloud' && !(await cloudCapacity.confirmEntry())) return
   emit('pick', inst)
 }
 
@@ -158,16 +163,34 @@ async function closeRunningInstance(inst: Installation): Promise<void> {
   await window.api.closeComfyWindow(inst.id)
 }
 
-function handleCloudClick(): void {
-  // If a cloud install exists, route through the same body-click path
-  // the install tiles use so behaviour can't drift between the two.
-  // Otherwise promote new-install as a Try-Cloud CTA.
+// Capacity-protection switch (PostHog flag `desktop-cloud-capacity`).
+// When `disabled`, the tile is greyed out and the click is a no-op so
+// users can't enter cloud during an outage. When `degraded`, the tile
+// surfaces a "Heavy usage" meta pill but the click still proceeds.
+const cloudCapacity = useCloudCapacity()
+/** The capacity tier the tile should render as — collapses raw flag
+ *  status with the signed-in tier so a paying user sees a heads-up
+ *  chip on `disabled` instead of a "Temporarily unavailable" lockout
+ *  they can actually click through. Mirrors what `confirmEntry`
+ *  would do on click. */
+const dashboardCapacityStatus = computed(() => cloudCapacity.effectiveStatus())
+
+async function handleCloudClick(): Promise<void> {
+  // Two paths from the dashboard cloud tile: an existing cloud install
+  // (delegate to `pickInstall`, which has its own capacity gate), or
+  // promote new-install as a Try-Cloud CTA (no install to pick, so the
+  // gate fires here). Calling `confirmEntry` in both branches would
+  // double-fire the degraded confirm modal on the existing-install
+  // path. The tile is also click-disabled when capacity is `disabled`
+  // (free / unknown), so this only really matters for the `degraded`
+  // and paid-on-disabled cases.
   if (cloudInstall.value) {
     if (sessionStore.isStopping(cloudInstall.value.id)) return
-    pickInstall(cloudInstall.value)
-  } else {
-    emit('show-new-install')
+    void pickInstall(cloudInstall.value)
+    return
   }
+  if (!(await cloudCapacity.confirmEntry())) return
+  emit('show-new-install')
 }
 
 function handleNewInstallClick(): void {
@@ -211,8 +234,11 @@ function handleNewInstallClick(): void {
         <div
           v-if="showCloudCard"
           role="button"
-          tabindex="0"
+          :tabindex="dashboardCapacityStatus === 'disabled' ? -1 : 0"
+          :aria-disabled="dashboardCapacityStatus === 'disabled' ? true : undefined"
           class="chooser-tile chooser-tile-cloud"
+          :class="{ 'chooser-tile--cloud-disabled': dashboardCapacityStatus === 'disabled' }"
+          :data-cloud-capacity="dashboardCapacityStatus"
           @click="handleCloudClick"
           @keydown.enter="handleCloudClick"
           @keydown.space.prevent="handleCloudClick"
@@ -240,6 +266,15 @@ function handleNewInstallClick(): void {
           </div>
           <div class="chooser-tile-meta">
             <span
+              v-if="dashboardCapacityStatus !== 'normal'"
+              class="chooser-tile-pill chooser-tile-pill--capacity"
+              :class="{ 'chooser-tile-pill--capacity-disabled': dashboardCapacityStatus === 'disabled' }"
+              :title="dashboardCapacityStatus === 'disabled' ? t('cloud.capacityDisabledHint') : t('cloud.capacityDegradedHint')"
+            >
+              {{ dashboardCapacityStatus === 'disabled' ? t('cloud.capacityDisabled') : t('cloud.capacityDegraded') }}
+            </span>
+            <span
+              v-else
               class="chooser-tile-pill"
               :title="cloudInstall ? cloudInstall.sourceLabel : t('cloud.desc')"
             >
@@ -403,4 +438,5 @@ function handleNewInstallClick(): void {
     );
   }
 }
+
 </style>
