@@ -125,7 +125,7 @@
       #   Retry  -> loop back to vcRedistAttempt (re-show the UAC prompt)
       #   Ignore -> jump past, install without the redist
       #   Abort  -> fall through to Quit (also the silent-install default)
-      MessageBox MB_ABORTRETRYIGNORE|MB_ICONEXCLAMATION "ComfyUI Desktop needs the Microsoft Visual C++ Redistributable. Installing it requires Windows permission, and that prompt was declined.$\n$\nRetry — show the permission prompt again (recommended)$\nIgnore — install ComfyUI anyway (it may not start until the Redistributable is installed)$\nAbort — stop and exit Setup" /SD IDABORT IDRETRY vcRedistAttempt IDIGNORE vcRedistIgnore
+      MessageBox MB_ABORTRETRYIGNORE|MB_ICONEXCLAMATION "Comfy Desktop needs the Microsoft Visual C++ Redistributable. Installing it requires Windows permission, and that prompt was declined.$\n$\nRetry — show the permission prompt again (recommended)$\nIgnore — install ComfyUI anyway (it may not start until the Redistributable is installed)$\nAbort — stop and exit Setup" /SD IDABORT IDRETRY vcRedistAttempt IDIGNORE vcRedistIgnore
       SetErrorLevel 2
       Quit
     ${EndIf}

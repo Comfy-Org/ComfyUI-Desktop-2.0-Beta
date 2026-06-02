@@ -42,19 +42,19 @@ export type LegalDocId = 'eula' | 'tos' | 'privacy' | 'notices'
 
 export const EULA: LegalDoc = {
   effectiveDate: '2026-05-19',
-  appliesTo: 'ComfyUI Desktop',
+  appliesTo: 'Comfy Desktop',
   blocks: [
     {
       kind: 'p',
       text:
-        'This End-User License Agreement is a binding agreement between you and Comfy Org governing your installation and use of the ComfyUI Desktop application. By installing or using the Desktop App, you accept this EULA. If you do not agree, do not install or use the Desktop App.',
+        'This End-User License Agreement is a binding agreement between you and Comfy Org governing your installation and use of the Comfy Desktop application. By installing or using the Desktop App, you accept this EULA. If you do not agree, do not install or use the Desktop App.',
     },
 
     { kind: 'h2', text: '1. Definitions' },
     {
       kind: 'ul',
       items: [
-        '**"Desktop App"** — the ComfyUI Desktop application, including all binaries, installers, signed packages, scripts, configuration, and bundled assets we distribute under the name "ComfyUI Desktop," "Comfy Desktop 2," or any successor naming.',
+        '**"Desktop App"** — the Comfy Desktop application, including all binaries, installers, signed packages, scripts, configuration, and bundled assets we distribute under the name "Comfy Desktop," "ComfyUI Desktop," "Comfy Desktop 2," or any successor naming.',
         '**"Comfy Org," "we," "us," "our"** — the publisher of the Desktop App.',
         '**"You"** — the individual or entity installing or using the Desktop App.',
         '**"Source Code"** — the open-source source code published at github.com/Comfy-Org/ComfyUI-Desktop-2.0-Beta.',
@@ -96,7 +96,7 @@ export const EULA: LegalDoc = {
         'Use the Desktop App to generate or distribute content that is illegal in your jurisdiction, including but not limited to child sexual abuse material (CSAM), non-consensual intimate imagery, or material that infringes another person\'s intellectual property.',
         'Remove, alter, or obscure any copyright, trademark, or other proprietary notices in the Desktop App\'s user interface.',
         'Use the Comfy Org name, logo, or branding to imply endorsement or affiliation that does not exist (see Section 8, Trademarks).',
-        'Distribute modified compiled binaries under our trademarks (you may modify and redistribute the **Source Code** under the MIT License, but the resulting binaries must not be branded as "ComfyUI Desktop," "Comfy Desktop," or any confusingly similar name).',
+        'Distribute modified compiled binaries under our trademarks (you may modify and redistribute the **Source Code** under the MIT License, but the resulting binaries must not be branded as "Comfy Desktop," "ComfyUI Desktop," or any confusingly similar name).',
       ],
     },
 
@@ -266,19 +266,19 @@ export const EULA: LegalDoc = {
 
 export const TOS: LegalDoc = {
   effectiveDate: '2026-05-19',
-  appliesTo: 'ComfyUI Desktop',
+  appliesTo: 'Comfy Desktop',
   blocks: [
     {
       kind: 'p',
       text:
-        'These Terms of Service govern your use of the ComfyUI Desktop application. They apply alongside the End-User License Agreement (EULA), which grants your license to install and run the Desktop App binary. The EULA covers the technical license; these Terms cover usage.',
+        'These Terms of Service govern your use of the Comfy Desktop application. They apply alongside the End-User License Agreement (EULA), which grants your license to install and run the Desktop App binary. The EULA covers the technical license; these Terms cover usage.',
     },
 
     { kind: 'h2', text: '1. Acceptance' },
     {
       kind: 'p',
       text:
-        'By installing or using ComfyUI Desktop (the "Desktop App"), you agree to these Terms of Service and the EULA. If you don\'t agree, don\'t install or use the Desktop App.',
+        'By installing or using Comfy Desktop (the "Desktop App"), you agree to these Terms of Service and the EULA. If you don\'t agree, don\'t install or use the Desktop App.',
     },
 
     { kind: 'h2', text: '2. Acceptable use' },
@@ -385,12 +385,12 @@ export const TOS: LegalDoc = {
 
 export const PRIVACY_POLICY: LegalDoc = {
   effectiveDate: '2026-05-19',
-  appliesTo: 'ComfyUI Desktop',
+  appliesTo: 'Comfy Desktop',
   blocks: [
     {
       kind: 'p',
       text:
-        'This Privacy Policy describes what data Comfy Org collects from your use of the ComfyUI Desktop application, how it is used, who processes it, and the choices and rights you have.',
+        'This Privacy Policy describes what data Comfy Org collects from your use of the Comfy Desktop application, how it is used, who processes it, and the choices and rights you have.',
     },
 
     { kind: 'h2', text: 'What we collect' },
@@ -399,7 +399,7 @@ export const PRIVACY_POLICY: LegalDoc = {
     {
       kind: 'ul',
       items: [
-        'App version and platform (e.g. "ComfyUI Desktop 0.6.5, macOS 14.4 ARM")',
+        'App version and platform (e.g. "Comfy Desktop 0.6.5, macOS 14.4 ARM")',
         'A local device ID generated locally. Before you sign in to Comfy Cloud, this ID is not tied to your name, email, or any hardware identifier we can reverse. Once you sign in, the device ID is linked to your Comfy account.',
         'Feature events ("install completed," "workflow opened," "settings panel opened") with non-identifying metadata',
         'Approximate timing of those events',
@@ -537,7 +537,7 @@ export const PRIVACY_POLICY: LegalDoc = {
     {
       kind: 'p',
       text:
-        "ComfyUI Desktop is not intended for users under 13. If you believe a child has used the app, contact **privacy@comfy.org** and we'll remove related records.",
+        "Comfy Desktop is not intended for users under 13. If you believe a child has used the app, contact **privacy@comfy.org** and we'll remove related records.",
     },
 
     { kind: 'h2', text: 'Changes to this policy' },
@@ -561,13 +561,13 @@ export const PRIVACY_POLICY: LegalDoc = {
 
 export const THIRD_PARTY_NOTICES: LegalDoc = {
   effectiveDate: '2026-05-19',
-  appliesTo: 'ComfyUI Desktop',
+  appliesTo: 'Comfy Desktop',
   blocks: [
     { kind: 'h2', text: 'About this document' },
     {
       kind: 'p',
       text:
-        'ComfyUI Desktop is built on top of, and bundles, third-party open-source software. This document lists the major components, their licenses, and the required attribution notices. A complete auto-generated list (including transitive dependencies) is produced as part of the release build pipeline.',
+        'Comfy Desktop is built on top of, and bundles, third-party open-source software. This document lists the major components, their licenses, and the required attribution notices. A complete auto-generated list (including transitive dependencies) is produced as part of the release build pipeline.',
     },
     {
       kind: 'p',
@@ -653,7 +653,7 @@ export const THIRD_PARTY_NOTICES: LegalDoc = {
     {
       kind: 'p',
       text:
-        'ComfyUI Desktop is a **shell** that installs and manages ComfyUI environments. The following components are downloaded and set up on your machine at runtime (per your action). They are **not part of the ComfyUI Desktop binary** and are governed by their own licenses, which apply directly between you and the respective authors:',
+        'Comfy Desktop is a **shell** that installs and manages ComfyUI environments. The following components are downloaded and set up on your machine at runtime (per your action). They are **not part of the Comfy Desktop binary** and are governed by their own licenses, which apply directly between you and the respective authors:',
     },
     {
       kind: 'ul',

@@ -1,6 +1,6 @@
 # Telemetry
 
-ComfyUI Desktop 2 emits telemetry through **two providers** that share a
+Comfy Desktop emits telemetry through **two providers** that share a
 single event bus:
 
 - **Datadog RUM** (renderer-only) — reliability, errors, performance,

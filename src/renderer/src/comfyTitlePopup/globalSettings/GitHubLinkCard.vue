@@ -14,7 +14,7 @@ const props = withDefaults(
     label?: string
   }>(),
   {
-    label: 'ComfyUI Desktop',
+    label: 'Comfy Desktop',
   },
 )
 

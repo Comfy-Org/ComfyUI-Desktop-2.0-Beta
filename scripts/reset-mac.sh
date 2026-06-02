@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ComfyUI Desktop -- macOS reset script
+# Comfy Desktop -- macOS reset script
 #
 # Wipes app settings, caches, and the Chromium profile for the current build
 # AND for the older beta names (ComfyUI Launcher / com.kosinkadink.* /
@@ -34,16 +34,16 @@ if [ "$(uname -s)" != "Darwin" ]; then
 fi
 
 # Refuse to run while the app is open
-if pgrep -x "ComfyUI Desktop" >/dev/null 2>&1 \
+if pgrep -x "Comfy Desktop" >/dev/null 2>&1 \
    || pgrep -x "ComfyUI Desktop 2.0" >/dev/null 2>&1 \
    || pgrep -x "ComfyUI Launcher"  >/dev/null 2>&1; then
-  echo "ComfyUI Desktop / Launcher is running. Please quit it first (Cmd+Q),"
+  echo "Comfy Desktop / Launcher is running. Please quit it first (Cmd+Q),"
   echo "then re-run this script."
   exit 1
 fi
 
 PRODUCT_NAMES=(
-  "ComfyUI Desktop"
+  "Comfy Desktop"
   "ComfyUI Desktop 2.0"
   "ComfyUI Launcher"
 )
@@ -85,7 +85,7 @@ for t in "${TARGETS[@]}"; do
 done
 
 if [ ${#EXISTING[@]} -eq 0 ]; then
-  echo "Nothing to remove. No ComfyUI Desktop / Launcher data found."
+  echo "Nothing to remove. No Comfy Desktop / Launcher data found."
   exit 0
 fi
 
@@ -114,5 +114,5 @@ for t in "${EXISTING[@]}"; do
 done
 
 echo
-echo "Done. Reinstall ComfyUI Desktop from the latest .dmg if you haven't already,"
+echo "Done. Reinstall Comfy Desktop from the latest .dmg if you haven't already,"
 echo "then launch it. The app should come up with a clean profile."

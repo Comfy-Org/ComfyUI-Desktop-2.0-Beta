@@ -424,7 +424,7 @@ function onLaunch({ port, url, process: proc, installation, mode }: {
   const initialSourceCategory = sourceMap[installation.sourceId]?.category ?? null
 
   const { entry } = createHostWindow({
-    windowTitle: `${installation.name} — ComfyUI Desktop v${APP_VERSION}`,
+    windowTitle: `${installation.name} — Comfy Desktop v${APP_VERSION}`,
     boundsKey: installationId,
     initialTheme: { bg: COMFY_BG, text: '#dddddd' },
     titleBarOverlay: process.platform === 'darwin' ? undefined : titleBarOverlayForTheme(resolveTheme() === 'dark'),

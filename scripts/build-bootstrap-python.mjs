@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Build a minimal bootstrap Python environment with pygit2 for ComfyUI Desktop.
+ * Build a minimal bootstrap Python environment with pygit2 for Comfy Desktop.
  *
  * Downloads python-build-standalone (stripped), installs pygit2 using the
  * just-extracted interpreter, and aggressively strips unnecessary files to

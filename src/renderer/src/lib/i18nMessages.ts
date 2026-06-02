@@ -283,7 +283,7 @@ export const en = {
     readyBadge: 'Ready to restart',
     sectionTitle: 'Desktop updates',
     fallbackVersion: 'this update',
-    panelIdleTitle: 'ComfyUI Desktop is up to date',
+    panelIdleTitle: 'Comfy Desktop is up to date',
     panelAvailableTitle: 'Update {version} available',
     panelReadyTitle: 'Update {version} ready to install',
     panelDownloadingTitle: 'Downloading update {version}…',

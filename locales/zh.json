@@ -286,7 +286,7 @@
   "update": {
     "updateCheck": "检查更新",
     "updateError": "更新错误",
-    "upToDate": "您正在使用最新版本的 ComfyUI Desktop。",
+    "upToDate": "您正在使用最新版本的 Comfy Desktop。",
     "debUpToDate": "您正在使用最新版本。.deb 安装的更新通过系统包管理器（apt）提供。"
   },
 
@@ -301,7 +301,7 @@
     "later": "稍后",
     "errorTitle": "桌面端更新错误",
     "sectionTitle": "桌面端更新",
-    "panelIdleTitle": "ComfyUI Desktop 已是最新版本",
+    "panelIdleTitle": "Comfy Desktop 已是最新版本",
     "panelAvailableTitle": "更新 {version} 可用",
     "panelReadyTitle": "更新 {version} 可安装",
     "panelDownloadingTitle": "正在下载更新 {version}…",
@@ -326,7 +326,7 @@
     "cancelMessage": "操作将立即停止。尚未完成的内容将尽可能回滚。",
     "cancelConfirm": "取消操作",
     "quitSetupTitle": "退出设置？",
-    "quitSetupMessage": "如果您现在关闭，您的选择将不会被保存，下次启动 ComfyUI Desktop 时将重新进行设置。",
+    "quitSetupMessage": "如果您现在关闭，您的选择将不会被保存，下次启动 Comfy Desktop 时将重新进行设置。",
     "quitSetupConfirm": "退出设置",
     "discardSetupTitle": "放弃安装设置？",
     "discardSetupMessage": "如果您现在关闭，向导中的选择将不会被保存。尚未创建任何安装，因此无需回滚。",
@@ -334,8 +334,8 @@
   },
 
   "firstUse": {
-    "title": "欢迎使用 ComfyUI Desktop",
-    "grandTitle": "欢迎使用 ComfyUI Desktop",
+    "title": "欢迎使用 Comfy Desktop",
+    "grandTitle": "欢迎使用 Comfy Desktop",
     "grandSubtitle": "完成首次设置，即可启动 ComfyUI。",
     "consentLead": "在开始之前，请阅读下方隐私政策并选择是否分享匿名使用遥测数据。",
     "legalDocEffective": "生效日期",
@@ -356,7 +356,7 @@
     "expressInstallLine": "快捷安装——使用推荐设置",
     "expressGpuHintPrefix": "已检测到：",
     "expressGpuHintSuffix": "- 如果不是你的硬件，请取消勾选快捷安装",
-    "termsModalTitle": "ComfyUI Desktop 条款",
+    "termsModalTitle": "Comfy Desktop 条款",
     "eulaModalTitle": "最终用户许可协议",
     "tosModalTitle": "服务条款",
     "privacyModalTitle": "隐私政策",
@@ -621,7 +621,7 @@
     "cannotOpenDir": "无法打开目录：{error}",
     "launchCancelled": "启动已取消。",
     "cannotConnect": "无法连接到 {url}。请确保 ComfyUI 正在该地址运行。",
-    "portConflictLauncher": "端口 {port} 已被 \"{name}\" 占用，该实例由另一个 ComfyUI Desktop 启动。请先停止它或在启动参数中更改端口。",
+    "portConflictLauncher": "端口 {port} 已被 \"{name}\" 占用，该实例由另一个 Comfy Desktop 启动。请先停止它或在启动参数中更改端口。",
     "portConflictComfy": "端口 {port} 已被 {process} 占用，看起来是一个 ComfyUI 实例。请先停止它或在启动参数中更改端口。",
     "portConflictOther": "端口 {port} 已被 {process} 占用。请在启动参数中更改端口以避免冲突。",
     "portConflictUsePort": "改用端口 {port}",

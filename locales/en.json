@@ -4,10 +4,10 @@
   "dashboard": {
     "launchedAgo": "Launched {time}",
     "neverLaunched": "Not launched yet",
-    "telemetryNotice": "Anonymous telemetry is collected to improve ComfyUI Desktop.",
+    "telemetryNotice": "Anonymous telemetry is collected to improve Comfy Desktop.",
     "telemetrySettings": "Manage in Settings",
     "migrateBannerTitle": "Migrate to Standalone",
-    "migrateBannerDesc": "Your Legacy Desktop installation was detected. Migrate to a Standalone install for better performance, easier updates, and full ComfyUI Desktop management.",
+    "migrateBannerDesc": "Your Legacy Desktop installation was detected. Migrate to a Standalone install for better performance, easier updates, and full Comfy Desktop management.",
     "migrateBannerAction": "Migrate Now",
     "migrateBannerSkip": "New Install Without Migrating",
     "confirmStopLocal": {
@@ -17,7 +17,7 @@
     },
     "confirmQuit": {
       "title": "Quit Desktop?",
-      "message": "ComfyUI Desktop will close.",
+      "message": "Comfy Desktop will close.",
       "confirmLabel": "Quit"
     }
   },
@@ -371,7 +371,7 @@
     "onAppClose": "When app is closed",
     "closeTray": "Minimize to tray (keep instances running)",
     "closeQuit": "Stop all instances and quit",
-    "closeQuitTitle": "Quit ComfyUI Desktop",
+    "closeQuitTitle": "Quit Comfy Desktop",
     "closeQuitMessage": "The following are still active. Quitting will stop all of them.",
     "closeQuitConfirm": "Quit",
     "closeQuitSessions": "Running",
@@ -417,7 +417,7 @@
   "update": {
     "updateCheck": "Update Check",
     "updateError": "Update Error",
-    "upToDate": "You are running the latest version of ComfyUI Desktop.",
+    "upToDate": "You are running the latest version of Comfy Desktop.",
     "debUpToDate": "You are running the latest version. Updates for .deb installs are delivered through your system package manager (apt)."
   },
 
@@ -432,7 +432,7 @@
     "later": "Later",
     "errorTitle": "Desktop Update Error",
     "sectionTitle": "Desktop Updates",
-    "panelIdleTitle": "ComfyUI Desktop is up to date",
+    "panelIdleTitle": "Comfy Desktop is up to date",
     "panelAvailableTitle": "Update {version} available",
     "panelReadyTitle": "Update {version} ready to install",
     "panelDownloadingTitle": "Downloading update {version}…",
@@ -457,7 +457,7 @@
     "cancelMessage": "The operation will stop where it is. Anything not yet completed will be rolled back where possible.",
     "cancelConfirm": "Cancel operation",
     "quitSetupTitle": "Quit setup?",
-    "quitSetupMessage": "If you close now, your selection won't be saved and setup will start again the next time you launch ComfyUI Desktop.",
+    "quitSetupMessage": "If you close now, your selection won't be saved and setup will start again the next time you launch Comfy Desktop.",
     "quitSetupConfirm": "Quit setup",
     "discardSetupTitle": "Discard install setup?",
     "discardSetupMessage": "If you close now, your wizard selections won't be saved. No install has been created yet, so nothing will be rolled back.",
@@ -465,8 +465,8 @@
   },
 
   "firstUse": {
-    "title": "Welcome to ComfyUI Desktop",
-    "grandTitle": "Welcome to ComfyUI Desktop",
+    "title": "Welcome to Comfy Desktop",
+    "grandTitle": "Welcome to Comfy Desktop",
     "grandSubtitle": "A quick first-run setup so you're ready to launch ComfyUI.",
     "consentLead": "Before you get started, please review the privacy policy below and choose whether to share anonymous usage telemetry.",
     "legalDocEffective": "Effective",
@@ -487,7 +487,7 @@
     "expressInstallLine": "Express Install with recommended settings",
     "expressGpuHintPrefix": "Detected: ",
     "expressGpuHintSuffix": " - if that's not your hardware, uncheck Express",
-    "termsModalTitle": "ComfyUI Desktop Terms",
+    "termsModalTitle": "Comfy Desktop Terms",
     "eulaModalTitle": "End-User License Agreement",
     "tosModalTitle": "Terms of Service",
     "privacyModalTitle": "Privacy Policy",
@@ -527,7 +527,7 @@
   },
 
   "tray": {
-    "showApp": "Show ComfyUI Desktop",
+    "showApp": "Show Comfy Desktop",
     "quit": "Quit"
   },
 
@@ -958,7 +958,7 @@
     "cannotOpenDir": "Could not open directory: {error}",
     "launchCancelled": "Launch cancelled.",
     "cannotConnect": "Could not connect to {url}. Make sure ComfyUI is running at that address.",
-    "portConflictLauncher": "Port {port} is already in use by \"{name}\", launched from another ComfyUI Desktop instance. You can use the next available port, stop it first, or change the port in Startup Arguments.",
+    "portConflictLauncher": "Port {port} is already in use by \"{name}\", launched from another Comfy Desktop instance. You can use the next available port, stop it first, or change the port in Startup Arguments.",
     "portConflictComfy": "Port {port} is already in use by {process}, which appears to be a ComfyUI instance. You can use the next available port, stop the process, or change the port in Startup Arguments.",
     "portConflictOther": "Port {port} is already in use by {process}. You can use the next available port or change the port in Startup Arguments.",
     "portConflictTitle": "Port already in use",
@@ -976,7 +976,7 @@
     "cancelOperation": "Cancel Operation",
     "stopRequired": "This installation is currently running and must be stopped first.",
     "willStopRunning": "{name} is running and will be stopped first.",
-    "folderPermissionDenied": "macOS denied access to \"{path}\". Please open System Settings → Privacy & Security → Files and Folders, grant access to ComfyUI Desktop, then retry."
+    "folderPermissionDenied": "macOS denied access to \"{path}\". Please open System Settings → Privacy & Security → Files and Folders, grant access to Comfy Desktop, then retry."
   },
 
   "tooltips": {

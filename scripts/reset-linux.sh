@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ComfyUI Desktop -- Linux reset script
+# Comfy Desktop -- Linux reset script
 #
 # Wipes app settings, caches, and the Chromium profile for the current build
 # AND for the older beta names (ComfyUI Launcher / comfyui-launcher), in case
@@ -33,8 +33,8 @@ if [ "$(uname -s)" != "Linux" ]; then
 fi
 
 # Refuse to run while the app is open
-if pgrep -f "comfyui-desktop-2|ComfyUI Desktop|comfyui-launcher|ComfyUI Launcher" >/dev/null 2>&1; then
-  echo "ComfyUI Desktop / Launcher is running. Please quit it first,"
+if pgrep -f "comfyui-desktop-2|Comfy Desktop|comfyui-launcher|ComfyUI Launcher" >/dev/null 2>&1; then
+  echo "Comfy Desktop / Launcher is running. Please quit it first,"
   echo "then re-run this script."
   exit 1
 fi
@@ -50,7 +50,7 @@ XDG_STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}"
 APP_NAMES=(
   "comfyui-desktop-2"
   "comfyui-launcher"
-  "ComfyUI Desktop"
+  "Comfy Desktop"
   "ComfyUI Desktop 2.0"
   "ComfyUI Launcher"
 )
@@ -74,7 +74,7 @@ for t in "${TARGETS[@]}"; do
 done
 
 if [ ${#EXISTING[@]} -eq 0 ]; then
-  echo "Nothing to remove. No ComfyUI Desktop / Launcher data found."
+  echo "Nothing to remove. No Comfy Desktop / Launcher data found."
   exit 0
 fi
 
@@ -103,6 +103,6 @@ for t in "${EXISTING[@]}"; do
 done
 
 echo
-echo "Done. Reinstall ComfyUI Desktop from the latest .AppImage or .deb"
+echo "Done. Reinstall Comfy Desktop from the latest .AppImage or .deb"
 echo "if you haven't already, then launch it. The app should come up with a"
 echo "clean profile."

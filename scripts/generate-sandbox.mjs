@@ -38,7 +38,7 @@ const wsb = `<Configuration>
         </MappedFolder>
     </MappedFolders>
     <LogonCommand>
-        <Command>powershell.exe -ExecutionPolicy Bypass -NoExit -Command "Copy-Item C:\\installers\\*.exe $env:USERPROFILE\\Desktop\\ -Force; Set-Location $env:USERPROFILE\\Desktop; Write-Host '=== ComfyUI Desktop installer sandbox ===' -ForegroundColor Cyan; Write-Host 'Installer copied to Desktop:' -ForegroundColor Green; Get-ChildItem *.exe | Format-Table Name, @{N='SizeMB';E={[math]::Round($_.Length/1MB,1)}}; Write-Host ''; Write-Host 'Fresh install (assisted wizard with directory picker):' -ForegroundColor Yellow; Write-Host '  .\\&lt;installer&gt;.exe' -ForegroundColor White; Write-Host ''; Write-Host 'Silent update simulation (no UI expected):' -ForegroundColor Yellow; Write-Host '  Start-Process .\\&lt;installer&gt;.exe -ArgumentList ''/S'' -Wait' -ForegroundColor White; Write-Host ''"</Command>
+        <Command>powershell.exe -ExecutionPolicy Bypass -NoExit -Command "Copy-Item C:\\installers\\*.exe $env:USERPROFILE\\Desktop\\ -Force; Set-Location $env:USERPROFILE\\Desktop; Write-Host '=== Comfy Desktop installer sandbox ===' -ForegroundColor Cyan; Write-Host 'Installer copied to Desktop:' -ForegroundColor Green; Get-ChildItem *.exe | Format-Table Name, @{N='SizeMB';E={[math]::Round($_.Length/1MB,1)}}; Write-Host ''; Write-Host 'Fresh install (assisted wizard with directory picker):' -ForegroundColor Yellow; Write-Host '  .\\&lt;installer&gt;.exe' -ForegroundColor White; Write-Host ''; Write-Host 'Silent update simulation (no UI expected):' -ForegroundColor Yellow; Write-Host '  Start-Process .\\&lt;installer&gt;.exe -ArgumentList ''/S'' -Wait' -ForegroundColor White; Write-Host ''"</Command>
     </LogonCommand>
 </Configuration>
 `
