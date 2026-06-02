@@ -777,13 +777,18 @@ describe('telemetry.forwardToRenderer + telemetry-relay registry', () => {
 
 describe('telemetry SDK-level volume guards', () => {
   beforeEach(async () => {
-    captured.length = 0
     process.env['POSTHOG_API_KEY'] = 'test-key'
     process.env['POSTHOG_ENABLED'] = '1'
     telemetry.initTelemetry({ appVersion: '0.0.0', appEnv: 'test', isPackaged: true })
     await telemetry.identify('test-distinct-id')
     telemetry.setConsent(true)
     telemetry._test_resetVolumeGuards()
+    // Clear AFTER setConsent — granting consent flushes the deferred
+    // `desktop2.session.started` event into `captured`, which would
+    // otherwise count toward each test's product-event totals and
+    // throw the per-process cap assertions off by one (and make the
+    // 5000-cap test loop runaway-guard out, eating the 5s timeout).
+    captured.length = 0
   })
 
   afterEach(() => {
