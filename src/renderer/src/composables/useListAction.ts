@@ -18,6 +18,23 @@ export interface ListActionCallbacks {
   onNavigate?: (result: ActionResult, action: ListAction) => void | Promise<void>
 }
 
+/**
+ * Per-call hooks for an `executeAction` invocation.
+ *
+ * `onGuardsPassed` fires exactly once, after every cancel-path
+ * (disabled-message alert, busy guard, confirm modal, local-instance
+ * guard) has resolved positively but BEFORE the action is actually
+ * dispatched (either through `callbacks.showProgress` or the inline
+ * `runAction` path). The chooser-host pick flow uses this to stake the
+ * in-place attach claim only when the launch will really proceed —
+ * staking earlier (before the guard) would cross-window overwrite a
+ * sibling chooser's existing claim and leave the wrong window with the
+ * preview / claim if the user cancels.
+ */
+export interface ListActionInvocationHooks {
+  onGuardsPassed?: () => Promise<void> | void
+}
+
 export function useListAction(uiSurface: string, callbacks: ListActionCallbacks) {
   const { t } = useI18n()
   const modal = useModal()
@@ -25,7 +42,11 @@ export function useListAction(uiSurface: string, callbacks: ListActionCallbacks)
   const localInstanceGuard = useLocalInstanceGuard()
   const sessionStore = useSessionStore()
 
-  async function executeAction(inst: Installation, action: ListAction): Promise<void> {
+  async function executeAction(
+    inst: Installation,
+    action: ListAction,
+    hooks?: ListActionInvocationHooks,
+  ): Promise<void> {
     const telemetryContext = {
       source_category: inst.sourceCategory || 'unknown',
       ui_surface: uiSurface
@@ -82,6 +103,11 @@ export function useListAction(uiSurface: string, callbacks: ListActionCallbacks)
         return
       }
     }
+
+    // All cancel-paths have committed to running. Side effects that
+    // must NOT survive a cancel (chooser in-place attach claim +
+    // title-bar preview) belong in this hook.
+    if (hooks?.onGuardsPassed) await hooks.onGuardsPassed()
 
     sessionStore.clearErrorInstance(inst.id)
     emitTelemetryAction('desktop2.action.invoked', { action_id: action.id, ...telemetryContext })
