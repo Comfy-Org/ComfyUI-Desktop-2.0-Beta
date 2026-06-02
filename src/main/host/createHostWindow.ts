@@ -1,4 +1,4 @@
-import { BrowserWindow, WebContentsView, ipcMain, shell } from 'electron'
+import { BrowserWindow, WebContentsView, ipcMain, screen, shell } from 'electron'
 import path from 'path'
 import type { InstallationRecord } from '../installations'
 import { getAppVersion } from '../lib/ipc'
@@ -9,7 +9,12 @@ import {
   getDownloadsTrayState,
 } from '../lib/comfyDownloadManager'
 import { handleFirebasePopup, isFirebaseAuthHandlerUrl } from '../auth/firebaseBridge'
-import { isLikelyDownloadUrl, shouldOpenInPopup } from '../lib/allowedPopups'
+import {
+  isCheckoutReturnUrl,
+  isCheckoutUrl,
+  isLikelyDownloadUrl,
+  shouldOpenInPopup,
+} from '../lib/allowedPopups'
 import { COMFY_BG, TITLEBAR_BG } from '../lib/theme'
 import {
   TITLEBAR_HEIGHT,
@@ -26,6 +31,7 @@ import { forwardDatadogError } from '../lib/processErrorHandlers'
 import * as updater from '../lib/updater'
 import { getSavedBounds, getWindowOptions, saveWindowBounds } from '../lib/windowState'
 import { ensureSystemModal } from '../popups/systemModal'
+import { hideCheckoutBackdrop, showCheckoutBackdrop } from '../popups/checkoutBackdrop'
 import { hideTitlePopupForParent, prewarmTitlePopup } from '../popups/titlePopup'
 import { destroyPanelView, ensurePanelView } from './panelView'
 import {
@@ -206,6 +212,169 @@ function injectMacPasskeyWarning(childWindow: BrowserWindow): void {
 
   childWindow.webContents.on('dom-ready', inject)
   childWindow.webContents.on('did-navigate-in-page', inject)
+}
+
+/** Credits-checkout popup sizing. A landscape rectangle scaled to the
+ *  parent display's work area: most of the width, a shorter height, so
+ *  the checkout reads as a wide app-sized surface rather than a tall
+ *  dialog. Clamped to a min/max band and to a max aspect ratio so it
+ *  stays horizontal on a large monitor and never shrinks below what the
+ *  checkout content needs on a laptop. */
+const CHECKOUT_MIN_WIDTH = 720
+const CHECKOUT_MAX_WIDTH = 1280
+const CHECKOUT_MIN_HEIGHT = 560
+const CHECKOUT_MAX_HEIGHT = 860
+const CHECKOUT_WIDTH_FRACTION = 0.82
+const CHECKOUT_HEIGHT_FRACTION = 0.82
+/** Keep it a horizontal rectangle: width is at least this × height. */
+const CHECKOUT_MIN_ASPECT = 1.4
+
+/**
+ * Compute centered, work-area-fitted bounds for the checkout popup on
+ * whichever display the parent window currently sits on. Width is a
+ * large fraction of the work area, height a smaller one, both clamped to
+ * the min/max band; then width is widened (within the band) so the
+ * window stays a landscape rectangle. Centered over the parent.
+ * Cross-platform: `screen.workArea` already excludes the macOS menu bar
+ * / Dock and the Windows taskbar.
+ */
+function checkoutPopupBounds(parent: BrowserWindow): Electron.Rectangle {
+  const parentBounds = parent.getBounds()
+  const { workArea } = screen.getDisplayMatching(parentBounds)
+  const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v))
+
+  const height = clamp(
+    Math.round(workArea.height * CHECKOUT_HEIGHT_FRACTION),
+    CHECKOUT_MIN_HEIGHT,
+    Math.min(CHECKOUT_MAX_HEIGHT, workArea.height),
+  )
+  const maxWidth = Math.min(CHECKOUT_MAX_WIDTH, workArea.width)
+  const width = clamp(
+    Math.max(Math.round(workArea.width * CHECKOUT_WIDTH_FRACTION), Math.round(height * CHECKOUT_MIN_ASPECT)),
+    Math.min(CHECKOUT_MIN_WIDTH, maxWidth),
+    maxWidth,
+  )
+
+  // Center over the parent, then nudge fully inside the work area.
+  const cx = parentBounds.x + Math.round((parentBounds.width - width) / 2)
+  const cy = parentBounds.y + Math.round((parentBounds.height - height) / 2)
+  const x = clamp(cx, workArea.x, workArea.x + workArea.width - width)
+  const y = clamp(cy, workArea.y, workArea.y + workArea.height - height)
+  return { x, y, width, height }
+}
+
+/** Max wait for the host reload to paint before closing the popup
+ *  anyway, so a stalled reload can't trap the user on checkout. */
+const CHECKOUT_RELOAD_TIMEOUT_MS = 4000
+
+/**
+ * Wire the credits-checkout popup's lifecycle. The window is frameless
+ * on Windows/Linux and chrome-light on macOS, so we own the dim
+ * backdrop, the close affordances (scrim click, Esc, the ✕ overlay),
+ * and the auto-close/return handling below.
+ */
+function wireCheckoutPopup(
+  childWindow: BrowserWindow,
+  parent: BrowserWindow,
+  hostContents: Electron.WebContents,
+): void {
+  const close = (): void => {
+    if (!childWindow.isDestroyed()) childWindow.close()
+  }
+  // will-redirect and did-navigate both fire for the same return URL.
+  let returning = false
+
+  childWindow.once('ready-to-show', () => {
+    childWindow.show()
+    showCheckoutBackdrop(parent, close)
+    attachCheckoutCloseButton(childWindow, close)
+  })
+  childWindow.once('closed', () => hideCheckoutBackdrop(parent))
+
+  childWindow.webContents.on('before-input-event', (_e, input) => {
+    if (input.type === 'keyDown' && input.key === 'Escape') close()
+  })
+
+  const closeOnReturn = (_e: Electron.Event, targetUrl: string): void => {
+    if (returning || childWindow.isDestroyed() || !isCheckoutReturnUrl(targetUrl)) return
+    returning = true
+    if (hostContents.isDestroyed()) {
+      close()
+      return
+    }
+    // Reload the host (clears the cloud "Upgrade" modal that launched
+    // checkout — it lives in that page's DOM, out of our reach — and
+    // refreshes the balance) underneath the still-open popup + backdrop,
+    // then close only once its fresh frame paints, so the stale modal is
+    // never flashed.
+    let done = false
+    const finish = (): void => {
+      if (done) return
+      done = true
+      close()
+    }
+    hostContents.once('did-stop-loading', finish)
+    setTimeout(finish, CHECKOUT_RELOAD_TIMEOUT_MS)
+    hostContents.reload()
+  }
+
+  childWindow.webContents.on('will-redirect', closeOnReturn)
+  childWindow.webContents.on('did-navigate', closeOnReturn)
+}
+
+/** Inline ✕ button overlaid on the (frameless) checkout popup. The
+ *  checkout page renders its own back/✕ for in-flow navigation, but a
+ *  frameless window has no OS close control, so we float our own in the
+ *  top-right corner that closes the window on click. */
+const CHECKOUT_CLOSE_BUTTON_HTML = `<!doctype html>
+<html><head><meta charset="utf-8"><style>
+  /* Body ignores pointer events so only the button itself is clickable —
+     the rest of this overlay strip lets the checkout page underneath
+     receive clicks. */
+  html,body{margin:0;width:100%;height:100%;background:transparent;overflow:hidden;pointer-events:none}
+  /* The checkout's right pane is white, so the close chip is tuned for a
+     light background: dark glyph on a faint dark chip, deepening on hover. */
+  button{position:fixed;top:10px;right:10px;width:28px;height:28px;border:0;border-radius:8px;cursor:pointer;
+    pointer-events:auto;display:grid;place-items:center;color:rgba(0,0,0,0.55);background:rgba(0,0,0,0.06);font:16px/1 system-ui}
+  button:hover{background:rgba(0,0,0,0.12);color:rgba(0,0,0,0.85)}
+</style></head><body>
+<button id="x" aria-label="Close">✕</button>
+<script>
+  const { ipcRenderer } = require('electron');
+  document.getElementById('x').addEventListener('click', () => ipcRenderer.send('comfy-checkout:close'));
+</script>
+</body></html>`
+
+const CHECKOUT_CLOSE_BUTTON_SIZE = 48
+
+function attachCheckoutCloseButton(childWindow: BrowserWindow, onClose: () => void): void {
+  const overlay = new WebContentsView({
+    webPreferences: { contextIsolation: false, nodeIntegration: true, sandbox: false },
+  })
+  overlay.setBackgroundColor('#00000000')
+  childWindow.contentView.addChildView(overlay)
+  const place = (): void => {
+    if (childWindow.isDestroyed()) return
+    const { width } = childWindow.getContentBounds()
+    overlay.setBounds({
+      x: Math.max(0, width - CHECKOUT_CLOSE_BUTTON_SIZE),
+      y: 0,
+      width: CHECKOUT_CLOSE_BUTTON_SIZE,
+      height: CHECKOUT_CLOSE_BUTTON_SIZE,
+    })
+  }
+  place()
+  childWindow.on('resize', place)
+  void overlay.webContents
+    .loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(CHECKOUT_CLOSE_BUTTON_HTML)}`)
+    .catch(() => {})
+
+  const closeId = overlay.webContents.id
+  const handler = (event: Electron.IpcMainEvent): void => {
+    if (event.sender.id === closeId) onClose()
+  }
+  ipcMain.on('comfy-checkout:close', handler)
+  childWindow.once('closed', () => ipcMain.removeListener('comfy-checkout:close', handler))
 }
 
 /**
@@ -910,10 +1079,18 @@ export function buildComfyView(
   // the browser. `attachSessionDownloadHandler` is idempotent.
   attachSessionDownloadHandler(comfyContents.session)
 
+  // Set by the window-open handler immediately before the matching
+  // `did-create-window` fires (synchronous pairing), then reset there so
+  // it can never leak to a later non-checkout popup.
+  let nextPopupIsCheckout = false
+
   comfyContents.on('did-create-window', (childWindow) => {
+    const isCheckout = nextPopupIsCheckout
+    nextPopupIsCheckout = false
     childWindow.setIcon(APP_ICON)
     if (process.platform !== 'darwin') childWindow.removeMenu()
     injectMacPasskeyWarning(childWindow)
+    if (isCheckout) wireCheckoutPopup(childWindow, comfyWindow, comfyContents)
   })
   comfyContents.setWindowOpenHandler(({ url: childUrl }) => {
     // Intercept Firebase auth popups (`<authDomain>/__/auth/handler?...`)
@@ -935,6 +1112,31 @@ export function buildComfyView(
         },
       })
       return { action: 'deny' }
+    }
+    if (isCheckoutUrl(childUrl)) {
+      // `checkout.comfy.org` forbids iframing, so checkout has to be a
+      // real popup — styled to read as in-app (parented, centered, sized
+      // to the work area) and wired up in `wireCheckoutPopup`. Frameless
+      // on Windows/Linux only: there the checkout page's own ✕/back is
+      // enough, but a frameless `window.open` child on macOS can't be
+      // dragged/closed reliably, so it keeps its frame. preload:
+      // undefined strips our title-bar bridge.
+      nextPopupIsCheckout = true
+      const bounds = checkoutPopupBounds(comfyWindow)
+      return {
+        action: 'allow',
+        overrideBrowserWindowOptions: {
+          parent: comfyWindow,
+          ...bounds,
+          minWidth: CHECKOUT_MIN_WIDTH,
+          minHeight: CHECKOUT_MIN_HEIGHT,
+          frame: process.platform !== 'darwin' ? false : undefined,
+          backgroundColor: COMFY_BG,
+          title: 'Purchase Credits',
+          show: false,
+          webPreferences: { preload: undefined },
+        },
+      }
     }
     if (shouldOpenInPopup(childUrl)) {
       // preload: undefined strips our title-bar bridge so OAuth/cloud-login
