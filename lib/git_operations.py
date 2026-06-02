@@ -8,6 +8,7 @@ caller (src/main/lib/git.ts) can parse.
 Usage: python git_operations.py <subcommand> <repo_path> [args...]
 
 Subcommands:
+  healthcheck
   rev-parse          <repo_path> <ref>
   describe-tags      <repo_path> [commit]
   tag-list           <repo_path>
@@ -576,6 +577,7 @@ USAGE = """\
 Usage: python git_operations.py <subcommand> [args...]
 
 Subcommands:
+  healthcheck
   rev-parse          <repo_path> <ref>
   describe-tags      <repo_path> [commit]
   tag-list           <repo_path>
@@ -602,7 +604,14 @@ if __name__ == "__main__":
     subcmd = sys.argv[1]
 
     try:
-        if subcmd == "rev-parse":
+        if subcmd == "healthcheck":
+            # Minimal smoke test: prove Python starts, this script loads,
+            # and `import pygit2` (at module top) succeeded.  The TS
+            # caller probes this before configuring pygit2 as a fallback.
+            print("ok pygit2 %s" % getattr(pygit2, "__version__", "unknown"))
+            sys.exit(0)
+
+        elif subcmd == "rev-parse":
             if len(sys.argv) < 4:
                 print("Usage: git_operations.py rev-parse <repo_path> <ref>", file=sys.stderr)
                 sys.exit(1)

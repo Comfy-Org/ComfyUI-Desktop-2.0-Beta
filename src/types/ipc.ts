@@ -131,6 +131,13 @@ export interface DetailField {
    *  (e.g. switching update channel triggers `check-update`). */
   onChangeAction?: string
   browseOnly?: boolean
+  /** Renders the field indented behind a hairline rail to signal it
+   *  depends on the toggle directly above it (e.g. the per-install
+   *  output-path picker under "Use shared output directory"). Set
+   *  explicitly by the field builder — the renderer must not infer
+   *  nesting from the field id, since ids like `outputDir` are reused
+   *  for equal-weight rows in the Shared Directories section. */
+  nested?: boolean
   tooltip?: string
   /** Marks fields that only take effect on next process start.
    *  Renderer shows a per-field tag + promotes the footer Restart

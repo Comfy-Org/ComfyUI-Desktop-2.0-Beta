@@ -503,6 +503,31 @@ export function bringToFront(win: BrowserWindow): void {
 }
 
 /**
+ * Reveal a chooser host that's been held hidden waiting for its first
+ * paint. No-op once any caller has won the race (flag is cleared on
+ * first reveal) or the window has been destroyed.
+ *
+ * Three callers race to reveal the same host:
+ *  - titleBarView `dom-ready` (the fast path — titlebar bundle is
+ *    ~25 KB, paints in ~50-150 ms even on Windows cold start).
+ *  - panelView `did-finish-load` (older fallback — panel bundle is
+ *    ~585 KB and adds ~700-1000 ms on Windows).
+ *  - a short timeout (final backstop if neither view fires).
+ *
+ * The window's per-view `setBackgroundColor` paints the chooser surface
+ * the moment any of these reveal it, so winning the race early shows a
+ * solid-coloured window instead of black flash even if the panel JS
+ * is still booting.
+ */
+export function revealColdStartHostIfPending(windowKey: number): void {
+  const entry = comfyWindows.get(windowKey)
+  if (!entry?.coldStartPendingReveal || entry.window.isDestroyed()) return
+  entry.coldStartPendingReveal = false
+  entry.layoutViews()
+  bringToFront(entry.window)
+}
+
+/**
  * Late-bound host-window factories. `index.ts` calls
  * `setHostFactories({ createChooser })` during startup so the registry
  * can spawn a fresh chooser host when no live one exists, without
@@ -552,4 +577,33 @@ export function openOrFocusAnyHostWindow(): BrowserWindow {
     return chooser
   }
   return requireChooserFactory()()
+}
+
+/**
+ * macOS dock-icon `activate` behaviour: raise EVERY live host window to
+ * the front, matching the platform convention where clicking the dock
+ * icon brings all of an app's windows forward (not just one). The
+ * preferred host (same priority as `openOrFocusAnyHostWindow`) is shown
+ * last so it ends up frontmost / focused. When no live host exists, falls
+ * back to spawning a fresh chooser host.
+ *
+ * Returns the window left frontmost (or the freshly-spawned chooser).
+ *
+ * macOS-only by design — Windows / Linux re-launch keeps the single-window
+ * `openOrFocusAnyHostWindow` semantics, so the caller in `index.ts` guards
+ * this behind `process.platform === 'darwin'`.
+ */
+export function raiseAllHostWindows(): BrowserWindow {
+  const preferred =
+    findPreferredInstallHostWindow() ?? findPreferredChooserHostWindow()
+  if (!preferred) return requireChooserFactory()()
+
+  // Raise every other live host first so the whole app comes forward,
+  // then bring the preferred window up last so it lands frontmost.
+  for (const [, entry] of comfyWindows) {
+    if (entry.window.isDestroyed() || entry.window === preferred) continue
+    bringToFront(entry.window)
+  }
+  bringToFront(preferred)
+  return preferred
 }

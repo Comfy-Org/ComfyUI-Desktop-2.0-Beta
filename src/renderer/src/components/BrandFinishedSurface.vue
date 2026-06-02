@@ -270,16 +270,30 @@ function getLogText(): string {
 }
 
 /* Footer — only the logs accordion + its toggle live here when logs
- * are present. The action row is in the hero stack above. */
+ * are present. The action row is in the hero stack above.
+ * `top` is anchored so the block can never grow taller than the gap
+ * between the takeover's top padding and its bottom inset — on a short
+ * window the logs panel shrinks (see its flexible max-height below)
+ * instead of overflowing off the top edge and clipping the toggle.
+ * Mirrors ProgressModal's `.brand-progress__footer` — keep in sync. */
 .brand-progress__footer {
   position: absolute;
+  top: clamp(72px, 14vh, 160px);
   bottom: clamp(16px, 2.5vh, 32px);
   left: clamp(16px, 2.5vw, 32px);
   right: clamp(16px, 2.5vw, 32px);
   z-index: 3;
   display: flex;
   flex-direction: column;
+  justify-content: flex-end;
   gap: 8px;
+  min-height: 0;
+  pointer-events: none;
+}
+/* Re-enable interaction on the actual content — the container is only a
+ * geometric bound, so it stays click-through where it's empty. */
+.brand-progress__footer > * {
+  pointer-events: auto;
 }
 .brand-progress__footer-bar {
   display: flex;
@@ -333,10 +347,15 @@ function getLogText(): string {
 .brand-progress__logs-chevron.is-open {
   transform: rotate(0deg);
 }
-/* Log panel that opens above the footer bar */
+/* Log panel that opens above the footer bar. `min-height: 0` lets the
+ * accordion shrink within the bounded footer so short windows scroll the
+ * log body (capped via the panel's own `max-height`) instead of pushing
+ * the footer bar off-screen. Display stays `grid` (set by BaseAccordion)
+ * so the 0fr→1fr open/close animation is untouched. */
 .brand-progress__logs-wrap {
   border-radius: 10px;
   overflow: hidden;
+  min-height: 0;
 }
 .brand-progress__logs-wrap.is-expanded {
   border: 1px solid var(--brand-surface-border);
@@ -360,8 +379,14 @@ function getLogText(): string {
 }
 .brand-progress__logs {
   width: 100%;
-  height: clamp(140px, 25vh, 260px);
+  /* `max-height` (not a fixed `height`) so the panel shrinks on short
+   * windows instead of forcing the footer past the viewport. `25vh`
+   * tracks window height; the 88px floor keeps a couple of readable
+   * lines even on a very short window, and 260px caps it on tall ones. */
+  max-height: clamp(88px, 25vh, 260px);
+  min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 12px 14px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 11px;
