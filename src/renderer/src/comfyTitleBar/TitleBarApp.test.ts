@@ -1131,16 +1131,19 @@ describe('TitleBarApp', () => {
       const mod = await import('./TitleBarApp.vue')
       const wrapper = mount(mod.default, { attachTo: document.body })
       await flushPromises()
-      // Exactly one observer is created (the trailing-cluster mirror).
-      expect(handles).toHaveLength(1)
-      const handle = handles[0]!
-      // It observed the `.title-trailing` element.
+      // Two observers are created: one for the trailing-cluster
+      // mirror (this test's subject) and a second for the JS fit
+      // controller that watches the title-bar root.
+      expect(handles).toHaveLength(2)
       const trailingEl = wrapper.find('.title-trailing').element
-      expect(handle.observed[0]).toBe(trailingEl)
+      const handle = handles.find((h) => h.observed[0] === trailingEl)
+      expect(handle).toBeDefined()
       // Tear-down disconnects so the observer doesn't leak across
       // the WebContentsView's lifecycle.
       wrapper.unmount()
-      expect(handle.observed).toHaveLength(0)
+      for (const h of handles) {
+        expect(h.observed).toHaveLength(0)
+      }
     })
 
     it('mirrors trailing width onto the title bar as `--title-trailing-width`', async () => {
