@@ -206,6 +206,9 @@ export const en = {
   instancePicker: {
     instances: 'Instances',
     newInstance: 'New Instance',
+    openDashboard: 'Open Dashboard',
+    openDashboardHint:
+      'Opens the dashboard in a new window. Your running instance keeps running.',
     latestOnGithub: 'Latest on GitHub',
     open: 'Start',
     restart: 'Restart',

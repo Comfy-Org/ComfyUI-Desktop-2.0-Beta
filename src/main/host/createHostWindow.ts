@@ -29,7 +29,6 @@ import { ensureSystemModal } from '../popups/systemModal'
 import { hideTitlePopupForParent, prewarmTitlePopup } from '../popups/titlePopup'
 import { destroyPanelView, ensurePanelView } from './panelView'
 import {
-  bringToFront,
   comfyWindows,
   computeBodyMode,
   dropAttachClaimsForWindow,
@@ -37,6 +36,7 @@ import {
   isInstallHost,
   nextWindowKey,
   registerHostEntry,
+  revealColdStartHostIfPending,
   setLastFocusedInstallationId,
   shouldConfirmKillForEntry,
   unregisterHostEntry,
@@ -887,7 +887,22 @@ export function buildComfyView(
   webPreferences: Electron.WebPreferences,
   windowKey: number,
 ): WebContentsView {
-  const comfyView = new WebContentsView({ webPreferences })
+  /**
+   * Map the `monospace` generic to a real face. Electron leaves it unmapped,
+   * so ComfyUI's prompt textarea renders proportional on Desktop (monospace on web).
+   */
+  const defaultFontFamily: Electron.WebPreferences['defaultFontFamily'] = {
+    ...webPreferences.defaultFontFamily,
+    monospace:
+      process.platform === 'darwin'
+        ? 'Menlo'
+        : process.platform === 'win32'
+          ? 'Consolas'
+          : 'monospace',
+  }
+  const comfyView = new WebContentsView({
+    webPreferences: { ...webPreferences, defaultFontFamily },
+  })
   comfyView.setBackgroundColor(COMFY_BG)
 
   const comfyContents = comfyView.webContents
@@ -1066,7 +1081,7 @@ export function openChooserHostWindow(initialPanel: ComfyPanelKey = 'comfy'): Br
   // invisible.
   const initialChooserTheme = getChooserHostTheme()
 
-  const { comfyWindow, entry } = createHostWindow({
+  const { comfyWindow, entry, titleBarView } = createHostWindow({
     windowTitle: CHOOSER_HOST_WINDOW_TITLE,
     boundsKey: CHOOSER_HOST_BOUNDS_KEY,
     initialTheme: initialChooserTheme,
@@ -1118,13 +1133,26 @@ export function openChooserHostWindow(initialPanel: ComfyPanelKey = 'comfy'): Br
   entry.layoutViews()
 
   const revealKey = entry.windowKey
-  setTimeout(() => {
-    const live = comfyWindows.get(revealKey)
-    if (!live?.coldStartPendingReveal || live.window.isDestroyed()) return
-    live.coldStartPendingReveal = false
-    live.layoutViews()
-    bringToFront(live.window)
-  }, 10_000)
+
+  // Fast-path reveal: the title-bar bundle is ~25 KB and finishes its
+  // first paint in well under 200 ms even on a Windows cold start,
+  // versus ~700-1000 ms for the 585 KB panel bundle. Revealing on the
+  // titlebar's `dom-ready` lets the user see a fully chrome'd window
+  // (file menu, install pill, downloads icon) almost immediately
+  // after clicking File → New Window; the panel body underneath
+  // paints the chooser surface colour via its `setBackgroundColor`
+  // until panel.html finishes booting and Vue mounts. The
+  // panelView's `did-finish-load` handler in `ensurePanelView` is
+  // the fallback if titlebar load is delayed past the panel's.
+  titleBarView.webContents.once('dom-ready', () => revealColdStartHostIfPending(revealKey))
+
+  // Final backstop: if both views somehow fail to load, force a
+  // reveal so the window doesn't stay invisible forever. 2 s is
+  // generous relative to observed cold-start times but well short
+  // of the user noticing the window is missing. Cleared on close
+  // so a fast-close window doesn't leave the closure pending.
+  const backstopTimer = setTimeout(() => revealColdStartHostIfPending(revealKey), 2_000)
+  comfyWindow.once('closed', () => clearTimeout(backstopTimer))
 
   return comfyWindow
 }

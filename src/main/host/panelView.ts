@@ -10,11 +10,11 @@ import {
   _activeOperationStatus,
 } from '../lib/ipc/shared'
 import {
-  bringToFront,
   comfyWindows,
   computeBodyMode,
   findEntryByTitleBarSender,
   getEntryByInstallationId,
+  revealColdStartHostIfPending,
   VALID_PANELS,
 } from './registry'
 import type { BodyMode, ComfyPanelKey, ComfyWindowEntry } from './registry'
@@ -79,11 +79,11 @@ export function ensurePanelView(
   panelView.webContents.once('did-finish-load', () => {
     const latest = comfyWindows.get(windowKey)
     if (!latest || latest.window.isDestroyed() || panelView.webContents.isDestroyed()) return
-    if (latest.coldStartPendingReveal) {
-      latest.coldStartPendingReveal = false
-      latest.layoutViews()
-      bringToFront(latest.window)
-    }
+    // Backstop reveal — the titleBarView's `dom-ready` listener in
+    // `openChooserHostWindow` usually wins this race well before
+    // panel.html finishes loading. Stays here for the (rare) case
+    // where the titlebar load fails / is delayed past the panel's.
+    revealColdStartHostIfPending(windowKey)
     const mode = computeBodyMode(latest)
     if (mode !== 'comfy') {
       panelView.webContents.send('panel-switch', { panel: mode, installationId: latest.installationId ?? '' })

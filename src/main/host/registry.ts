@@ -522,6 +522,31 @@ export function bringToFront(win: BrowserWindow): void {
 }
 
 /**
+ * Reveal a chooser host that's been held hidden waiting for its first
+ * paint. No-op once any caller has won the race (flag is cleared on
+ * first reveal) or the window has been destroyed.
+ *
+ * Three callers race to reveal the same host:
+ *  - titleBarView `dom-ready` (the fast path — titlebar bundle is
+ *    ~25 KB, paints in ~50-150 ms even on Windows cold start).
+ *  - panelView `did-finish-load` (older fallback — panel bundle is
+ *    ~585 KB and adds ~700-1000 ms on Windows).
+ *  - a short timeout (final backstop if neither view fires).
+ *
+ * The window's per-view `setBackgroundColor` paints the chooser surface
+ * the moment any of these reveal it, so winning the race early shows a
+ * solid-coloured window instead of black flash even if the panel JS
+ * is still booting.
+ */
+export function revealColdStartHostIfPending(windowKey: number): void {
+  const entry = comfyWindows.get(windowKey)
+  if (!entry?.coldStartPendingReveal || entry.window.isDestroyed()) return
+  entry.coldStartPendingReveal = false
+  entry.layoutViews()
+  bringToFront(entry.window)
+}
+
+/**
  * Late-bound host-window factories. `index.ts` calls
  * `setHostFactories({ createChooser })` during startup so the registry
  * can spawn a fresh chooser host when no live one exists, without

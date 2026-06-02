@@ -221,7 +221,12 @@ export const standalone: SourcePlugin = {
           label: t('standalone.latestVersion'),
           ...(latestStableTag ? { description: latestStableTag } : {}),
           recommended: true,
-          data: { tag: tags[0]!.tag, vendorReleases } as unknown as Record<string, unknown>,
+          // `latestStableTag` is the upstream ComfyUI version the post-install
+          // "update to stable" step resolves to (and what the dropdown advertises).
+          // Thread it through so the variant cards show that same version rather
+          // than the older ComfyUI baked into the standalone bundle — otherwise
+          // the two surfaces disagree (issue #708).
+          data: { tag: tags[0]!.tag, vendorReleases, latestStableTag } as unknown as Record<string, unknown>,
         })
       }
 
@@ -237,7 +242,7 @@ export const standalone: SourcePlugin = {
     }
 
     if (fieldId === 'variant') {
-      const releaseData = selections.release?.data as { tag: string; vendorReleases: Record<string, R2Variant[]> } | undefined
+      const releaseData = selections.release?.data as { tag: string; vendorReleases: Record<string, R2Variant[]>; latestStableTag?: string | null } | undefined
       if (!releaseData) return []
       const prefix = PLATFORM_PREFIX[process.platform]
       if (!prefix) return []
@@ -259,10 +264,20 @@ export const standalone: SourcePlugin = {
             filename: release.file,
             size: release.size,
           }]
+          // For "Latest Stable", the card must advertise the version the user
+          // ends up with after post-install auto-update (the upstream stable
+          // tag the dropdown shows), not the older ComfyUI bundled in the R2
+          // standalone build. Strip a leading `v` to match the bare-version
+          // card format (`ComfyUI 0.22.3`). Falls back to the bundled version
+          // when the upstream tag couldn't be resolved (offline, etc.).
+          const displayVersion =
+            isLatest && releaseData.latestStableTag
+              ? releaseData.latestStableTag.replace(/^v/, '')
+              : release.comfyui_version
           return {
             value: vendorId,
             label: getVariantLabel(vendorId),
-            description: `ComfyUI ${release.comfyui_version}  ·  Python ${release.python_version}  ·  ${sizeMB} MB`,
+            description: `ComfyUI ${displayVersion}  ·  Python ${release.python_version}  ·  ${sizeMB} MB`,
             data: {
               variantId: vendorId,
               manifest: { id: vendorId, comfyui_ref: release.comfyui_version, python_version: release.python_version },

@@ -33,17 +33,35 @@ if [ "$(uname -s)" != "Darwin" ]; then
   exit 1
 fi
 
-# Refuse to run while the app is open
-if pgrep -x "ComfyUI Desktop 2.0" >/dev/null 2>&1 \
+# Refuse to run while the app is open (includes the upcoming post-rename
+# "ComfyUI Desktop" process name)
+if pgrep -x "ComfyUI Desktop"     >/dev/null 2>&1 \
+   || pgrep -x "ComfyUI Desktop 2.0" >/dev/null 2>&1 \
    || pgrep -x "ComfyUI Launcher"  >/dev/null 2>&1; then
-  echo "ComfyUI Desktop 2.0 / Launcher is running. Please quit it first (Cmd+Q),"
+  echo "ComfyUI Desktop / Launcher is running. Please quit it first (Cmd+Q),"
   echo "then re-run this script."
   exit 1
 fi
 
+# Product (display) names that map to ~/Library/Application Support and Logs
+# folders. Includes the upcoming post-rename name ("ComfyUI Desktop") so
+# scripts shipped today still work after the 2.0 suffix drops, and the
+# legacy v1.x desktop productName ("ComfyUI") whose userData/logs survive
+# an upgrade to the 2.0 beta and have caused clean-install issues (#679).
 PRODUCT_NAMES=(
+  "ComfyUI"
+  "ComfyUI Desktop"
   "ComfyUI Desktop 2.0"
   "ComfyUI Launcher"
+)
+
+# Package.json "name" values. Electron uses this for userData in dev/source
+# runs, and electron-updater uses it (+ "-updater") for the auto-update
+# cache that holds pending update.zip blobs — leaving this around lets a
+# fresh install get clobbered by a stale cached update on next launch.
+PACKAGE_NAMES=(
+  "comfyui-desktop-2"
+  "comfyui-launcher"
 )
 
 BUNDLE_IDS=(
@@ -61,10 +79,27 @@ for name in "${PRODUCT_NAMES[@]}"; do
   )
 done
 
+for name in "${PACKAGE_NAMES[@]}"; do
+  TARGETS+=(
+    # Dev / source-run userData (Electron falls back to package.json "name"
+    # when productName isn't honored).
+    "$HOME/Library/Application Support/$name"
+    # electron-updater pending-update cache (holds update.zip + pending/).
+    # If left in place, the updater can re-apply a stale update over the
+    # freshly-installed .app on next launch.
+    "$HOME/Library/Caches/${name}-updater"
+  )
+done
+
+shopt -s nullglob
+
 for id in "${BUNDLE_IDS[@]}"; do
   TARGETS+=(
     "$HOME/Library/Preferences/${id}.plist"
     "$HOME/Library/Caches/${id}"
+    # Squirrel.Mac ShipIt cache — handles in-place app replacement during
+    # auto-update; stale state here can re-trigger an old swap.
+    "$HOME/Library/Caches/${id}.ShipIt"
     "$HOME/Library/Saved Application State/${id}.savedState"
     "$HOME/Library/WebKit/${id}"
   )
@@ -73,6 +108,28 @@ for id in "${BUNDLE_IDS[@]}"; do
            "$HOME/Library/HTTPStorages/${id}.binarycookies"; do
     TARGETS+=("$p")
   done
+  # Native macOS cookies jar (separate from Chromium's Cookies file
+  # inside userData). NSURLSession-style native calls write here if the
+  # app ever makes them.
+  TARGETS+=("$HOME/Library/Cookies/${id}.binarycookies")
+  # Per-host Preferences (Squirrel.Mac writes ShipIt state under
+  # ~/Library/Preferences/ByHost/<id>.ShipIt.<HOST-UUID>.plist; the
+  # host-UUID suffix varies per machine so we glob).
+  for p in "$HOME/Library/Preferences/ByHost/${id}".*.plist; do
+    TARGETS+=("$p")
+  done
+done
+
+shopt -u nullglob
+
+# Warn (don't auto-delete) about extra .app copies — multiple installs in
+# different locations are a common cause of "I reinstalled but it's still
+# broken" because the user keeps launching an older copy.
+APP_LOCATIONS=()
+for app_name in "${PRODUCT_NAMES[@]}"; do
+  while IFS= read -r line; do
+    [ -n "$line" ] && APP_LOCATIONS+=("$line")
+  done < <(mdfind "kMDItemFSName == '${app_name}.app'" 2>/dev/null)
 done
 
 EXISTING=()
@@ -96,6 +153,19 @@ echo
 echo "Your ComfyUI installs at ~/ComfyUI-Installs will NOT be touched."
 echo "(You may need to re-add them via 'Add existing installation' on first launch.)"
 echo
+
+# Surface any .app copies the user has on disk. We don't delete them — the
+# user may legitimately keep multiple builds around — but flag them so they
+# can verify they're launching the right one. Multiple .apps in different
+# locations is the most common reason a "reset" appears not to work: the
+# user's Dock keeps launching an older cached copy.
+if [ ${#APP_LOCATIONS[@]} -gt 0 ]; then
+  echo "Found these app copies on disk (NOT deleted — verify you launch the right one):"
+  for app in "${APP_LOCATIONS[@]}"; do
+    echo "  $app"
+  done
+  echo
+fi
 
 if [ "$YES" -ne 1 ]; then
   printf "Proceed? [y/N] "

@@ -1,9 +1,16 @@
 import { shell, type BrowserWindow, type WebContents } from 'electron'
 
 import { detectFirebaseEnv } from './config'
+import {
+  buildCopyLinkBannerScript,
+  buildRemoveCopyLinkBannerScript,
+  COPY_LINK_BANNER_CSS,
+  OPEN_LINK_SENTINEL,
+} from './copyLinkBanner'
 import { buildIndexedDbInjectScript } from './inject'
 import { extractProviderId, type SupportedProvider } from './intercept'
 import { startBridgeServer } from './server'
+import * as i18n from '../../lib/i18n'
 import * as mainTelemetry from '../../lib/telemetry'
 
 /**
@@ -80,6 +87,59 @@ export interface HandleFirebasePopupOpts {
 let activeBridge: Awaited<ReturnType<typeof startBridgeServer>> | null = null
 
 /**
+ * Teardown for the in-flight "copy login link" card: removes the injected
+ * DOM node and detaches the `console-message` listener bound to it. Held
+ * at module scope (like `activeBridge`) so a fresh sign-in attempt can
+ * clear a prior attempt's card before showing its own.
+ */
+let activeBannerCleanup: (() => void) | null = null
+
+/** Run + clear the in-flight card teardown, if any. Safe to call twice. */
+function runBannerCleanup(): void {
+  const cleanup = activeBannerCleanup
+  activeBannerCleanup = null
+  cleanup?.()
+}
+
+/**
+ * Inject the "we opened your browser" card into the Cloud view. Same
+ * `loginUrl` we just opened, so the copied link matches the open tab.
+ * Copy stays in-page; only "Open again" reaches main, via a top-frame
+ * `OPEN_LINK_SENTINEL` console message that re-opens our own URL.
+ */
+function showCopyLinkBanner(comfyContents: WebContents, loginUrl: string): void {
+  if (comfyContents.isDestroyed()) return
+
+  const labels = {
+    message: i18n.t('cloud.signInBanner.message'),
+    copy: i18n.t('cloud.signInBanner.copy'),
+    copied: i18n.t('cloud.signInBanner.copied'),
+    openAgain: i18n.t('cloud.signInBanner.openAgain'),
+    dismiss: i18n.t('cloud.signInBanner.dismiss'),
+  }
+
+  void comfyContents
+    .insertCSS(COPY_LINK_BANNER_CSS)
+    .then(() => comfyContents.executeJavaScript(buildCopyLinkBannerScript(loginUrl, labels), true))
+    .catch(() => { })
+
+  const onConsoleMessage = (details: Electron.Event<Electron.WebContentsConsoleMessageEventParams>): void => {
+    // Top-frame only: ignore the sentinel if an iframe logs it.
+    if (details.frame?.parent != null) return
+    if (details.message !== OPEN_LINK_SENTINEL) return
+    void shell.openExternal(loginUrl).catch(() => { })
+  }
+  comfyContents.on('console-message', onConsoleMessage)
+
+  activeBannerCleanup = () => {
+    comfyContents.off('console-message', onConsoleMessage)
+    if (!comfyContents.isDestroyed()) {
+      void comfyContents.executeJavaScript(buildRemoveCopyLinkBannerScript(), true).catch(() => { })
+    }
+  }
+}
+
+/**
  * Time we hold on the "You're signed in" browser page before injecting
  * the user into the embedded view and pulling focus to Desktop. The
  * bridge HTML renders a synchronised countdown — keep these in lockstep.
@@ -115,6 +175,9 @@ export async function handleFirebasePopup(
     }
     activeBridge = null
   }
+  // Clear a prior attempt's "copy link" card + its console listener so a
+  // new attempt doesn't stack a second card or leak a stale listener.
+  runBannerCleanup()
 
   let handle: Awaited<ReturnType<typeof startBridgeServer>> | null = null
   try {
@@ -126,7 +189,13 @@ export async function handleFirebasePopup(
     // identical URL as "focus the open tab" rather than "open fresh"
     // — without the nonce the user would still see yesterday's GitHub
     // bridge page when they intended to start a new Google flow.
-    void shell.openExternal(`${handle.url}?n=${Date.now().toString(36)}`)
+    // Capture the full nonce'd URL once so the auto-opened tab, the
+    // "Copy link" button, and "Open again" all hand out the same link.
+    const loginUrl = `${handle.url}?n=${Date.now().toString(36)}`
+    void shell.openExternal(loginUrl)
+    // Surface a Notion/Claude-style "didn't open? copy the link" card in
+    // the Cloud view so users can finish sign-in in a non-default browser.
+    showCopyLinkBanner(comfyContents, loginUrl)
     const { user, apiKey } = await handle.signInPromise
     // Bind PostHog identity as soon as we have the user — independent of
     // the embedded-view reload below, so the merge happens even if the
@@ -164,6 +233,9 @@ export async function handleFirebasePopup(
   } finally {
     handle?.close()
     if (activeBridge === handle) activeBridge = null
+    // Tear down the "copy link" card on success (the post-sign-in reload
+    // also drops it — cleanup is idempotent) and on cancel/error.
+    runBannerCleanup()
   }
 }
 
