@@ -5,7 +5,6 @@ import { CheckCircle, XCircle, ChevronUp, HardDrive, SlidersHorizontal, Info, Re
 import { useComfyUISettings } from '../../composables/useComfyUISettings'
 import { useInstallCta } from '../../composables/useInstallCta'
 import { useCloudCapacity } from '../../composables/useCloudCapacity'
-import { useSessionStore } from '../../stores/sessionStore'
 import { findActionById } from '../../lib/findAction'
 import MoreMenu from '../../views/comfyUISettings/MoreMenu.vue'
 import ArgsBuilderPage from '../../views/comfyUISettings/ArgsBuilderPage.vue'

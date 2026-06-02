@@ -105,11 +105,21 @@ const pickedChoice = ref<'cloud' | 'local'>('cloud')
 // later in the session (unlikely; boot-only refresh by design).
 const cloudCapacity = useCloudCapacity()
 const capacityReady = ref(false)
+/** What the picker rendered as default before the user could interact —
+ *  used to split `fork_chosen` conversion by signal-vs-defaulting: a
+ *  user keeping the default cloud pick is different from a user
+ *  actively flipping local→cloud. Reseeded on every `open()` from the
+ *  resolved capacity status. */
+const initialDefaultChoice = ref<'cloud' | 'local'>('cloud')
+function deriveDefaultChoice(): 'cloud' | 'local' {
+  return cloudCapacity.isDisabled() ? 'local' : 'cloud'
+}
 onMounted(async () => {
   await cloudCapacity.whenReady()
   if (cloudCapacity.isDisabled()) {
     pickedChoice.value = 'local'
   }
+  initialDefaultChoice.value = deriveDefaultChoice()
   capacityReady.value = true
 })
 watch(cloudCapacity.status, (status) => {
@@ -248,7 +258,16 @@ async function onContinue(): Promise<void> {
   emitTelemetryAction('desktop2.first_use.fork_chosen', {
     choice: pickedChoice.value,
     has_legacy_desktop: hasLegacyDesktop.value,
-    express_install: expressInstall.value
+    express_install: expressInstall.value,
+    // Capacity-protection context. `capacity_status` is the resolved
+    // boot-time `desktop-cloud-capacity` flag value at the moment of
+    // commit; `was_default` is true when the user kept whatever card
+    // was pre-selected for them (cloud when normal, local when
+    // disabled), false when they actively flipped. Together they let
+    // the conversion dashboard split signal (active cloud pick) from
+    // defaulting, and slice each by capacity tier.
+    capacity_status: cloudCapacity.status.value,
+    was_default: pickedChoice.value === initialDefaultChoice.value
   })
 
   if (isChinese.value) {
@@ -281,6 +300,15 @@ async function routePostStart(): Promise<void> {
     // Cloud card is already visually greyed). User sees: spinner
     // disappears, Local is now selected, hit Continue → moves on.
     if (!(await cloudCapacity.confirmEntry())) {
+      // Separate event from `fork_chosen` because the user picked cloud
+      // but never actually entered it — counting them as a cloud
+      // converter would inflate the dashboard. `reason: 'disabled'`
+      // means the kill-switch was hard-off; `'degraded_declined'`
+      // means the user saw the heavy-load modal and backed out.
+      emitTelemetryAction('desktop2.first_use.cloud_blocked', {
+        reason: cloudCapacity.isDisabled() ? 'disabled' : 'degraded_declined',
+        capacity_status: cloudCapacity.status.value
+      })
       isContinuing.value = false
       if (cloudCapacity.isDisabled()) pickedChoice.value = 'local'
       return
@@ -397,7 +425,13 @@ async function open(opts: OpenOpts = {}): Promise<void> {
   whyCloudOpen.value = false
   termsDoc.value = null
   acceptedTos.value = false
-  pickedChoice.value = 'cloud'
+  // Re-derive the default pick from current capacity. On first mount
+  // capacity may not be resolved yet — `onMounted`'s `whenReady` will
+  // flip the pick after the await; on takeover replay (capacity
+  // already resolved) we apply it inline so a `disabled` flag isn't
+  // clobbered by the reset.
+  pickedChoice.value = deriveDefaultChoice()
+  initialDefaultChoice.value = deriveDefaultChoice()
   expressInstall.value = true
   // Reset funnel-completion bookkeeping so a takeover replay measures
   // duration / steps from the replay, not from the original mount.
