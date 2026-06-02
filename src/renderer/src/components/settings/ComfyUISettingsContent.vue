@@ -3,7 +3,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, toRef, useTemplateRef,
 import { useI18n } from 'vue-i18n'
 import { CheckCircle, XCircle, ChevronUp, HardDrive, SlidersHorizontal, Info, RefreshCw, History } from 'lucide-vue-next'
 import { useComfyUISettings } from '../../composables/useComfyUISettings'
-import { useSessionStore } from '../../stores/sessionStore'
+import { useInstallCta } from '../../composables/useInstallCta'
 import { findActionById } from '../../lib/findAction'
 import MoreMenu from '../../views/comfyUISettings/MoreMenu.vue'
 import ArgsBuilderPage from '../../views/comfyUISettings/ArgsBuilderPage.vue'
@@ -138,7 +138,9 @@ watch(
 )
 
 const installation = toRef(props, 'installation')
-const sessionStore = useSessionStore()
+const installCta = useInstallCta(installation, {
+  activeInstallationId: toRef(props, 'activeInstallationId'),
+})
 const {
   sections,
   loading,
@@ -519,30 +521,9 @@ function handleSnapshotsRefresh(): void {
  *  call: `restartInstall` when restarting in place, `pickInstall`
  *  otherwise. This keeps the same native-confirm flow across surfaces.
  *
- *  `isInstallRunning` — a session exists for this install *somewhere*
- *  (any window). Drives the row dot + the running-state copy. */
-const isInstallRunning = computed(() => {
-  const inst = installation.value
-  return inst ? sessionStore.isRunning(inst.id) : false
-})
-
-/** Running specifically in the host window that opened this picker.
- *  Only here does "Restart" make sense: stop + relaunch the session in
- *  place. When the install is running in a *different* window (issue
- *  #749 — switching between an already-open Cloud and local), the right
- *  action is to focus that window, not restart it. Install-less
- *  (dashboard) hosts have no `activeInstallationId`, so this is always
- *  false there and a running install reads as "switch to its window". */
-const isRunningInThisWindow = computed(() => {
-  const inst = installation.value
-  if (!inst || !isInstallRunning.value) return false
-  return props.activeInstallationId != null && inst.id === props.activeInstallationId
-})
-
-/** Running, but in another window — focus/switch instead of restart. */
-const isRunningElsewhere = computed(
-  () => isInstallRunning.value && !isRunningInThisWindow.value
-)
+ *  Running-state derives from `useInstallCta`, the single source of
+ *  truth for the Start / Restart / Switch decision (issue #755). */
+const isRunningInThisWindow = installCta.runningInThisWindow
 
 const hasPendingRestart = computed(
   () => isRunningInThisWindow.value && pendingRestartFieldIds.value.size > 0
@@ -552,23 +533,14 @@ const primaryActionLabel = computed(() => {
   if (hasPendingRestart.value) {
     return t('instancePicker.restartToApply', 'Restart to apply changes')
   }
-  if (isRunningInThisWindow.value) {
-    return t('instancePicker.restart', 'Restart')
-  }
-  // Running in another window → focus/switch to it (issue #749).
-  if (isRunningElsewhere.value) {
-    return t('instancePicker.switch', 'Switch')
-  }
-  // Idle → "Start" (issue #694); the live string also resolves to 'Start'
-  // via i18nMessages, this fallback is kept in sync.
-  return t('instancePicker.open', 'Start')
+  return installCta.label.value
 })
 
 function handlePrimaryAction(): void {
   if (!installation.value) return
   // Only restart in place when running in THIS window; running-elsewhere
   // and not-running both route to pickInstall (focus existing / launch).
-  emit('primary-action', isRunningInThisWindow.value)
+  emit('primary-action', installCta.restartInPlace.value)
 }
 
 // Inline-progress state derived from the `activeOperation` prop.

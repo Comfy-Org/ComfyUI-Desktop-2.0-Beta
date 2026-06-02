@@ -1,7 +1,12 @@
 import { computed, onMounted, onUnmounted, ref, type ComputedRef, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { installTypeMetaFor } from '../lib/installTypeIcon'
-import { isChromeLockedMode, type FirstUseMode } from '../../../shared/firstUseMode'
+import {
+  isChromeLockedMode,
+  isFirstUseLockdownMode,
+  isLoadingLockdownMode,
+  type FirstUseMode,
+} from '../../../shared/firstUseMode'
 
 interface InstallTypeMeta {
   icon: ReturnType<typeof installTypeMetaFor>['icon']
@@ -34,10 +39,29 @@ interface TitleBarIdentityApi {
   firstUseMode: Ref<FirstUseMode>
   isPreviewMode: Ref<boolean>
   isConsentLockdown: ComputedRef<boolean>
-  /** True for every mode that should collapse the title bar to just the
-   *  static centre pill — consent / post-consent (first-use) and
-   *  loading-lockdown (ProgressModal takeover). Single derived flag so
-   *  every gate in TitleBarApp.vue reads the same source. */
+  /**
+   * True during first-use takeover steps (consent + post-consent). The
+   * pill, trailing pills, and feedback button are hidden; the waffle
+   * is hidden on `consent-lockdown` and surfaces only "Skip Onboarding"
+   * on `post-consent`.
+   */
+  isFirstUseLockdown: ComputedRef<boolean>
+  /**
+   * True while a ProgressModal takeover (install / update / migrate /
+   * snapshot / launch) is mounted. The user keeps full title-bar access
+   * so they can open the picker, switch windows, send feedback, or
+   * quit cleanly while the op runs. Drives no current chrome-hide
+   * gate — exposed so callers can react to the lockdown without
+   * grafting onto `isChromeLocked`.
+   */
+  isLoadingLockdown: ComputedRef<boolean>
+  /**
+   * Legacy union flag — true for every non-`'none'` mode. Retained for
+   * the `is-consent-lockdown` CSS class hook on the title-bar root.
+   * New chrome gates should reach for `isFirstUseLockdown` /
+   * `isLoadingLockdown` so first-use lockdown (hide everything) stays
+   * distinct from loading lockdown (keep everything live).
+   */
   isChromeLocked: ComputedRef<boolean>
   installTypeMeta: ComputedRef<InstallTypeMeta>
   installTypeLabel: ComputedRef<string>
@@ -84,6 +108,8 @@ export function useTitleBarIdentity(opts: UseTitleBarIdentityOpts): TitleBarIden
   const isPreviewMode = ref(false)
 
   const isConsentLockdown = computed(() => firstUseMode.value === 'consent-lockdown')
+  const isFirstUseLockdown = computed(() => isFirstUseLockdownMode(firstUseMode.value))
+  const isLoadingLockdown = computed(() => isLoadingLockdownMode(firstUseMode.value))
   const isChromeLocked = computed(() => isChromeLockedMode(firstUseMode.value))
 
   const installTypeMeta = computed<InstallTypeMeta>(() => installTypeMetaFor(sourceCategory.value))
@@ -174,6 +200,8 @@ export function useTitleBarIdentity(opts: UseTitleBarIdentityOpts): TitleBarIden
     firstUseMode,
     isPreviewMode,
     isConsentLockdown,
+    isFirstUseLockdown,
+    isLoadingLockdown,
     isChromeLocked,
     installTypeMeta,
     installTypeLabel,

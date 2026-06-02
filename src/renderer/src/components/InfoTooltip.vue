@@ -37,7 +37,7 @@ const props = withDefaults(
 
 .info-tooltip-icon {
   color: var(--text-muted);
-  opacity: 0.6;
+  opacity: 0.85;
   transition:
     opacity 0.15s,
     color 0.15s;
