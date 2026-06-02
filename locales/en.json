@@ -646,7 +646,14 @@
 
   "cloud": {
     "label": "Cloud",
-    "desc": "Connect to Comfy Cloud for remote GPU-powered workflows."
+    "desc": "Connect to Comfy Cloud for remote GPU-powered workflows.",
+    "signInBanner": {
+      "message": "We opened your browser to sign in. Didn’t open?",
+      "copy": "Copy link",
+      "copied": "Copied",
+      "openAgain": "Open again",
+      "dismiss": "Dismiss"
+    }
   },
 
   "desktop": {
