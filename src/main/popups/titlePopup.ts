@@ -72,6 +72,13 @@ interface TitlePopupMenuItem {
 
 type TitlePopupKind = 'menu' | 'downloads' | 'instance-picker' | 'global-settings'
 
+/** Kinds that dim the host body with the shared backdrop view. Single source
+ *  of truth — geometry, blur-dismiss opt-out, and backdrop show/hide all key
+ *  off this so a new kind only has to opt in here. */
+function kindUsesBackdrop(kind: TitlePopupKind): boolean {
+  return kind === 'instance-picker' || kind === 'global-settings'
+}
+
 /** Single install row pushed to the instance-picker popup. Mirrors the
  *  renderer-side `Installation` shape returned by the `get-installations`
  *  IPC handler (extra fields like `version`, `statusTag`, `sourceLabel`
@@ -588,11 +595,18 @@ function showPopupBackdrop(parent: BrowserWindow): void {
   entry.visible = true
 }
 
+/** Hide AND detach the backdrop. Detaching (not just `setVisible(false)`)
+ *  stops a lagging hidden view from intercepting body clicks; `showPopupBackdrop`
+ *  re-adds it on every show. */
 function hidePopupBackdrop(parent: BrowserWindow): void {
   const entry = popupBackdropsByParent.get(parent.id)
   if (!entry || !entry.visible) return
-  if (!entry.view.webContents.isDestroyed()) entry.view.setVisible(false)
   entry.visible = false
+  if (entry.view.webContents.isDestroyed()) return
+  entry.view.setVisible(false)
+  if (!parent.isDestroyed()) {
+    try { parent.contentView.removeChildView(entry.view) } catch { /* noop */ }
+  }
 }
 
 const POPUP_WIDTH = 220
@@ -879,11 +893,6 @@ function ensureTitlePopup(parent: BrowserWindow): TitlePopupEntry {
       titlePopupsByWebContents.delete(view.popupWebContentsId)
     },
     onHide: () => {
-      // Always fires when the popup transitions out of open/pending —
-      // including the blur / will-move / move / popup-blur auto-dismiss
-      // paths. Without this notify, the title-bar renderer's
-      // `isMenuOpen` flag stays stuck true and every subsequent click
-      // on the trigger button is suppressed by the reopen guard.
       if (!entry.titleBarSender.isDestroyed()) {
         entry.titleBarSender.send('comfy-titlebar:menu-closed', { menu: entry.kind })
       }
@@ -892,15 +901,9 @@ function ensureTitlePopup(parent: BrowserWindow): TitlePopupEntry {
       if (entry.kind === 'downloads' && !view.parentWindow.isDestroyed()) {
         downloadsHiddenAtByParent.set(view.parentWindow.id, Date.now())
       }
-      // Hide the popup backdrop on every dismiss path so the dim
-      // never outlives the popup. Cheap no-op for kinds that don't
-      // use the backdrop (menu / downloads).
-      if (
-        (entry.kind === 'instance-picker' || entry.kind === 'global-settings')
-        && !view.parentWindow.isDestroyed()
-      ) {
-        hidePopupBackdrop(view.parentWindow)
-      }
+      /** Unconditional — never gated on `entry.kind`, which may have been
+       *  reassigned by a kind-switch. No-op when the backdrop isn't visible. */
+      if (!view.parentWindow.isDestroyed()) hidePopupBackdrop(view.parentWindow)
     },
   })
   const entry: TitlePopupEntry = {
@@ -997,10 +1000,7 @@ function showTitlePopupNow(entry: TitlePopupEntry): void {
   // Bring the picker backdrop up first so it sits BELOW the popup in
   // the parent's child-view stack — the popup's own re-stack inside
   // `showOnTop` lands on top.
-  if (
-    (entry.kind === 'instance-picker' || entry.kind === 'global-settings')
-    && !entry.view.parentWindow.isDestroyed()
-  ) {
+  if (kindUsesBackdrop(entry.kind) && !entry.view.parentWindow.isDestroyed()) {
     showPopupBackdrop(entry.view.parentWindow)
   }
   // Tell the renderer the popup is about to be shown. Unlike
@@ -1256,19 +1256,23 @@ function openTitlePopup(opts: OpenTitlePopupOpts): void {
   const entry = ensureTitlePopup(opts.parent)
   if (entry.view.popup.webContents.isDestroyed()) return
 
+  // Switching kind on the reused view: close the outgoing popup first so its
+  // `onHide` runs (hides the backdrop, emits `menu-closed` for the OUTGOING
+  // kind) before `entry.kind` is overwritten below.
+  const isOpenOrPending = entry.view.isOpen || entry.view.pendingShowTimer !== null
+  if (isOpenOrPending && opts.kind !== entry.kind) {
+    hideTitlePopup(entry, { releaseFocusToParent: false })
+  }
+
   // Refresh the per-open routing context. `kind` + `parentEntryId` +
   // `titleBarSender` only matter for the *current* open, so we
   // overwrite on every open instead of allocating a new context object.
   entry.parentEntryId = opts.parentEntryId
   entry.kind = opts.kind
   entry.titleBarSender = opts.titleBarSender
-  // Picker + global-settings own their outside-click dismiss via the
-  // backdrop view — skip the blur-driven hide path so the toggle-on-
-  // pill-click is deterministic. File menu + downloads tray have no
-  // backdrop and still rely on blur to close when the user clicks
-  // away.
-  entry.view.suppressBlurDismiss =
-    opts.kind === 'instance-picker' || opts.kind === 'global-settings'
+  // Backdrop kinds own outside-click dismiss via the backdrop view, so skip
+  // the blur-driven hide. Menu / downloads have no backdrop and rely on blur.
+  entry.view.suppressBlurDismiss = kindUsesBackdrop(opts.kind)
 
   // Anchor coords are title-bar-local; the title-bar view sits at
   // content (0,0) so they map directly to parent-window content
@@ -1948,22 +1952,23 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
     hideTitlePopup(entry, { releaseFocusToParent: true })
   })
 
-  // Click on the picker backdrop — dismiss the matching parent's
-  // picker popup. The backdrop is keyed by the parent windowId so we
-  // can route from any backdrop instance back to its popup.
-  //
-  // Guarded against a stray dismiss during the open transition: if the
-  // popup was opened less than `BACKDROP_DISMISS_GUARD_MS` ago, ignore.
-  // Without this, a click that lands on the trigger pill can fire the
-  // backdrop's mousedown after the popup is composited but before the
-  // OS settles focus, causing open → immediate-close → reopen flicker.
+  /** Click on the picker backdrop. Always hides the backdrop itself (safety
+   *  valve so a scrim left over from a kind-switch can never trap the user),
+   *  then dismisses the popup only when the current kind owns the backdrop.
+   *  `BACKDROP_DISMISS_GUARD_MS` ignores the trigger-pill click that can fire
+   *  the backdrop mousedown mid-open and cause open → close → reopen flicker. */
   ipcMain.on('comfy-popup-backdrop:dismiss', (event) => {
     const parentId = popupBackdropsByWebContents.get(event.sender.id)
     if (parentId === undefined) return
     const popup = titlePopupsByParent.get(parentId)
     if (!popup) return
-    if (popup.kind !== 'instance-picker' && popup.kind !== 'global-settings') return
-    if (!popup.view.isOpen) return
+    const parent = popup.view.parentWindow
+    // Safety valve: a backdrop click should never fail to clear the scrim,
+    // even if the current kind no longer owns it (left over from a switch).
+    if (!kindUsesBackdrop(popup.kind) || !popup.view.isOpen) {
+      if (!parent.isDestroyed()) hidePopupBackdrop(parent)
+      return
+    }
     if (Date.now() - popup.openedAt < BACKDROP_DISMISS_GUARD_MS) return
     hideTitlePopup(popup, { releaseFocusToParent: true })
   })
@@ -2612,17 +2617,24 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
   })
 
   // ---- Global-settings popup IPC ----
+  /** Resolve the popup entry for a settings IPC sender, or null if the sender
+   *  isn't a settings-capable popup. Settings fields are reachable from both
+   *  the global-settings popup and the instance-picker (which embeds them). */
+  const settingsEntryFor = (senderId: number): TitlePopupEntry | null => {
+    const entry = titlePopupsByWebContents.get(senderId)
+    if (!entry || (entry.kind !== 'global-settings' && entry.kind !== 'instance-picker')) {
+      return null
+    }
+    return entry
+  }
+
   // Field update (Language / Theme / Cache / Advanced / Shared Dirs).
   // Same side-effects as the legacy `set-setting` handler, plus a
   // `globalSettingsEvents.emit('changed')` for the snapshot loop.
   ipcMain.handle(
     'comfy-titlepopup:global-settings-update-field',
     (event, payload: { fieldId?: unknown; value?: unknown }) => {
-      const popupEntry = titlePopupsByWebContents.get(event.sender.id)
-      if (
-        !popupEntry
-        || (popupEntry.kind !== 'global-settings' && popupEntry.kind !== 'instance-picker')
-      ) {
+      if (!settingsEntryFor(event.sender.id)) {
         return { ok: false, message: 'Global Settings popup not active.' }
       }
       const fieldId = payload?.fieldId
@@ -2642,13 +2654,7 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
   ipcMain.handle(
     'comfy-titlepopup:global-settings-set-models-dirs',
     (event, payload: { dirs?: unknown }) => {
-      const popupEntry = titlePopupsByWebContents.get(event.sender.id)
-      if (
-        !popupEntry
-        || (popupEntry.kind !== 'global-settings' && popupEntry.kind !== 'instance-picker')
-      ) {
-        return { ok: false }
-      }
+      if (!settingsEntryFor(event.sender.id)) return { ok: false }
       const dirs = payload?.dirs
       if (!Array.isArray(dirs) || dirs.some((d) => typeof d !== 'string')) {
         return { ok: false }
@@ -2664,13 +2670,8 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
   ipcMain.handle(
     'comfy-titlepopup:global-settings-browse-folder',
     async (event, payload: { defaultPath?: unknown } | undefined) => {
-      const popupEntry = titlePopupsByWebContents.get(event.sender.id)
-      if (
-        !popupEntry
-        || (popupEntry.kind !== 'global-settings' && popupEntry.kind !== 'instance-picker')
-      ) {
-        return null
-      }
+      const popupEntry = settingsEntryFor(event.sender.id)
+      if (!popupEntry) return null
       const parentEntry = comfyWindows.get(popupEntry.parentEntryId)
       if (!parentEntry || parentEntry.window.isDestroyed()) return null
       const defaultPath = typeof payload?.defaultPath === 'string' && payload.defaultPath.length > 0
@@ -2689,13 +2690,7 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
   ipcMain.on(
     'comfy-titlepopup:global-settings-open-path',
     (event, payload: { path?: unknown }) => {
-      const popupEntry = titlePopupsByWebContents.get(event.sender.id)
-      if (
-        !popupEntry
-        || (popupEntry.kind !== 'global-settings' && popupEntry.kind !== 'instance-picker')
-      ) {
-        return
-      }
+      if (!settingsEntryFor(event.sender.id)) return
       const targetPath = payload?.path
       if (typeof targetPath !== 'string' || targetPath.length === 0) return
       void openPathHelper(targetPath)
