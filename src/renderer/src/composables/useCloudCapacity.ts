@@ -80,8 +80,16 @@ export function useCloudCapacity(): {
    *   - `degraded` → shows a confirm modal explaining heavy usage;
    *                  resolves `true` only on the user's confirm.
    *   - `disabled` → resolves `false` (defense-in-depth; surface also
-   *                  greys/blocks at the click level). */
-  confirmEntry: () => Promise<boolean>
+   *                  greys/blocks at the click level).
+   *
+   *  Pass `{ surface: 'first-use' }` to relax `disabled` into the
+   *  `degraded` heads-up modal. Rationale: first-use runs pre-sign-in,
+   *  so we can't tell paid users from free here; blocking them all from
+   *  a fresh install during launch-week overload is worse than letting
+   *  them proceed with a clear "heavy usage" heads-up. Dashboard / IPP
+   *  callers keep the hard `disabled` block because by then the user
+   *  is signed in and tier-aware relaxation can layer on top. */
+  confirmEntry: (opts?: { surface?: 'first-use' | 'dashboard' | 'ipp' }) => Promise<boolean>
   /** Resolves once the boot-time capacity fetch has settled. Use for
    *  pre-render decisions (e.g. the first-use Cloud-vs-Local default
    *  selection) where reading a stale `'normal'` would race the user's
@@ -95,11 +103,17 @@ export function useCloudCapacity(): {
     void ensureLoaded()
   })
 
-  async function confirmEntry(): Promise<boolean> {
+  async function confirmEntry(opts: { surface?: 'first-use' | 'dashboard' | 'ipp' } = {}): Promise<boolean> {
     // Wait for the boot fetch so we never gate on a stale 'normal'.
     await ensureLoaded()
-    if (status.value === 'disabled') return false
-    if (status.value !== 'degraded') return true
+    // First-use surface: `disabled` softens into the `degraded` modal —
+    // we can't yet tell paid users from free at first-use, so we choose
+    // not to hard-block fresh-install paying users on launch-week
+    // overload. Dashboard / IPP keep the hard block.
+    const effective =
+      status.value === 'disabled' && opts.surface === 'first-use' ? 'degraded' : status.value
+    if (effective === 'disabled') return false
+    if (effective !== 'degraded') return true
     const result = await dialogs.confirm({
       title: t('cloud.capacityDegraded'),
       message: t('cloud.capacityDegradedHint'),
