@@ -251,6 +251,116 @@ function isAllowedToFire(event: string): boolean {
 }
 
 /**
+ * SDK-level volume safety net — two layers, both belt-and-braces around
+ * the per-call-site dedup guards that individual emit paths add.
+ *
+ * Motivation: the 2026-06-02 volume incident shipped 3M+ events of the
+ * same four `desktop2.app_update.*` names in 24h before anyone noticed.
+ * The per-call fix in `updater.ts` prevents *that specific* loop, but
+ * any future emit-in-a-tight-loop bug (a Vue watcher that fires on
+ * every render, an IPC handler called every animation frame, a
+ * setInterval misconfigured to 100ms instead of 10min) would do the
+ * same damage. These two limits make the WORST case bounded even when
+ * the call site is buggy.
+ *
+ * Layer 1: per-event-name sliding window.
+ *   Drop further emits of the same event name once 60 fire in 60s.
+ *   60/min is well above any legitimate product event rate (the
+ *   loudest healthy event was `execution.completed` at ~36/user/day)
+ *   and well below any loop signature (the incident was ~2/sec).
+ *   One `desktop2.telemetry.rate_limited` warning fires per (event ×
+ *   process) so dashboards surface that it happened.
+ *
+ * Layer 2: per-process total cap.
+ *   After 5000 events captured this process, every further capture
+ *   no-ops. 5000 covers a heavy multi-hour workflow user (~500–1000
+ *   events) with 5–10x headroom, and turns "millions of events" into
+ *   "at most 5000" for any single runaway install. One
+ *   `desktop2.telemetry.session_cap_hit` warning fires once when the
+ *   cap is crossed.
+ *
+ * `*.error` events bypass Layer 1 — error volume is exactly the signal
+ * we need most during incidents, and `*.error` events are not the
+ * shape of any loop we've seen. Layer 2 still applies (a runaway
+ * error loop would still hit the cap).
+ */
+const RATE_LIMIT_COUNT = 60
+const RATE_LIMIT_WINDOW_MS = 60_000
+const SESSION_EVENT_CAP = 5_000
+const _rateLimitStamps: Map<string, number[]> = new Map()
+const _rateLimitWarned: Set<string> = new Set()
+let _eventsCapturedThisProcess = 0
+let _sessionCapWarned = false
+
+function _bypassRateLimit(event: string): boolean {
+  // Failure events are reliability signal we never want to silently
+  // throttle. Telemetry-self events bypass to avoid recursion when
+  // we emit the warning events below.
+  return event.endsWith('.error') || event.startsWith('desktop2.telemetry.')
+}
+
+function _emitWarning(event: string, properties: TelemetryContext): void {
+  if (!client || !distinctId) return
+  try {
+    client.capture({
+      distinctId,
+      event,
+      properties: { ...defaultEventProperties, ...properties }
+    })
+  } catch {
+    // ignore – the warning is best-effort
+  }
+}
+
+function _checkRateLimit(event: string): boolean {
+  if (_eventsCapturedThisProcess >= SESSION_EVENT_CAP) {
+    if (!_sessionCapWarned) {
+      _sessionCapWarned = true
+      _emitWarning('desktop2.telemetry.session_cap_hit', {
+        cap: SESSION_EVENT_CAP,
+        last_event: event
+      })
+    }
+    return false
+  }
+  if (_bypassRateLimit(event)) return true
+  const now = Date.now()
+  let stamps = _rateLimitStamps.get(event)
+  if (!stamps) {
+    stamps = []
+    _rateLimitStamps.set(event, stamps)
+  }
+  while (stamps.length > 0 && stamps[0]! < now - RATE_LIMIT_WINDOW_MS) {
+    stamps.shift()
+  }
+  if (stamps.length >= RATE_LIMIT_COUNT) {
+    if (!_rateLimitWarned.has(event)) {
+      _rateLimitWarned.add(event)
+      _emitWarning('desktop2.telemetry.rate_limited', {
+        event_name: event,
+        limit: RATE_LIMIT_COUNT,
+        window_ms: RATE_LIMIT_WINDOW_MS
+      })
+    }
+    return false
+  }
+  stamps.push(now)
+  return true
+}
+
+/**
+ * Test-only: reset the SDK rate-limit + session-cap state so each test
+ * starts from a clean slate. Not exported via index.ts; reached by
+ * tests via direct module import.
+ */
+export function _test_resetVolumeGuards(): void {
+  _rateLimitStamps.clear()
+  _rateLimitWarned.clear()
+  _eventsCapturedThisProcess = 0
+  _sessionCapWarned = false
+}
+
+/**
  * Set the current consent state. The deferred `desktop2.session.started`
  * event (and the deferred `identify` person-property update) fire as soon
  * as state transitions to `'granted'`.
@@ -536,6 +646,8 @@ export function unbindUserId(): void {
 export function capture(event: string, properties: TelemetryContext = {}): void {
   if (!client || !distinctId) return
   if (!isAllowedToFire(event)) return
+  if (!_checkRateLimit(event)) return
+  _eventsCapturedThisProcess++
   try {
     // Per-call properties override defaults on key collision — callers
     // that explicitly pass `app_version` (e.g. session-start payload,
