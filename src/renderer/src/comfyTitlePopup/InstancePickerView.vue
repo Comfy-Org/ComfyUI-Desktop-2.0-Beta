@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, toRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { LayoutGrid, Plus, Search, X } from 'lucide-vue-next'
+import { LayoutDashboard, Plus, Search, X } from 'lucide-vue-next'
 import BaseInput from '../components/ui/BaseInput.vue'
 import { FILTER_CHIPS, useInstallList } from '../composables/useInstallList'
 import { useSessionStore } from '../stores/sessionStore'
 import ComfyUISettingsContent from '../components/settings/ComfyUISettingsContent.vue'
 import InfoTooltip from '../components/InfoTooltip.vue'
+import Tooltip from '../components/ui/Tooltip.vue'
 import InstanceRow from './instancePicker/InstanceRow.vue'
 import { resolvePickerTab, type PickerTab } from '../lib/pickerTabs'
 import { resolveProgressRouting } from '../lib/pickerProgressRouting'
@@ -523,15 +524,17 @@ function handleExpandedPrimaryAction(restartInPlace: boolean): void {
 
     <div class="picker-chips-row">
       <template v-if="isInstallHost">
-        <button
-          type="button"
-          class="picker-home"
-          :aria-label="$t('fileMenu.returnToDashboard')"
-          :title="$t('fileMenu.returnToDashboard')"
-          @click="handleOpenDashboard"
-        >
-          <LayoutGrid :size="14" />
-        </button>
+        <Tooltip :text="$t('instancePicker.openDashboardHint')" side="bottom">
+          <button
+            type="button"
+            class="picker-home"
+            :aria-label="$t('instancePicker.openDashboard')"
+            @click="handleOpenDashboard"
+          >
+            <LayoutDashboard :size="14" />
+            <span class="picker-home-label">{{ $t('instancePicker.openDashboard') }}</span>
+          </button>
+        </Tooltip>
         <span class="picker-chips-divider" aria-hidden="true"></span>
       </template>
       <div
@@ -706,24 +709,30 @@ function handleExpandedPrimaryAction(restartInPlace: boolean): void {
   flex-wrap: wrap;
   min-width: 0;
 }
-/* Home — naked icon button. The vertical divider that follows it
- * does the visual separation work; a pill border around the icon
+/* Open Dashboard — naked icon + label button. The vertical divider
+ * that follows it does the visual separation work; a pill border
  * would compete with the chip pills and read as another filter.
- * Hover lifts the icon to full text colour without painting a
- * background. */
+ * Hover lifts both icon and label to full text colour without
+ * painting a background. */
 .picker-home {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
+  gap: 6px;
   height: 22px;
-  padding: 0;
+  padding: 0 6px 0 2px;
   border: none;
   background: transparent;
   color: var(--neutral-100);
   cursor: pointer;
   transition: color 100ms ease;
+}
+.picker-home-label {
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
+  white-space: nowrap;
 }
 .picker-home:hover,
 .picker-home:focus-visible {
@@ -801,6 +810,8 @@ function handleExpandedPrimaryAction(restartInPlace: boolean): void {
 }
 .picker-list-section-title {
   flex: 0 0 auto;
+  display: flex;
+  align-items: center;
   font-size: 14px;
   font-weight: 500;
   line-height: 20px;
