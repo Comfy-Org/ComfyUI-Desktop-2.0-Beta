@@ -6,15 +6,19 @@ existing **Migrate to Standalone** action, which now adopts the legacy
 install in place instead of copying it.
 
 There is no separate "adopt" UI, no cutover splash, no first-launch
-takeover. The OG migration surfaces stay where they are
-(`MigrationBanner`, `DetailModal`, `useInstallContextMenu`,
-`useComfyUISettings`); only the underlying handler changed.
+auto-trigger today (see "Open scope" below). The OG migration surfaces
+stay where they are (`MigrationBanner`, `DetailModal`,
+`useInstallContextMenu`, `useComfyUISettings`); only the underlying
+handler changed.
 
-## Two user-visible flows
+## User-visible flows
 
-1. **Manage → Migrate to Standalone** — same confirm modal as before;
-   on confirm the legacy install is adopted and the freshly-minted
-   Desktop 2.0 install opens in its own window
+1. **Manage → Migrate to Standalone** — same confirm modal as before,
+   but desktop-source installs route through `useAdoptAction` (which
+   renders a plain reuse list — no snapshot preview, no variant pick,
+   no pip-sync toggle) rather than `useMigrateAction`'s full standalone
+   migration flow. On confirm the legacy install is adopted and the
+   freshly-minted Desktop 2.0 install opens in its own window
    (`ProgressModal.handleDone` reads `newInstallationId`).
 
 2. **Launch on a not-yet-adopted desktop install** — the
@@ -24,15 +28,29 @@ takeover. The OG migration surfaces stay where they are
    `runAction('migrate-to-standalone')` → `runAction(adoptedId, 'launch')`
    in a single progress overlay.
 
+3. **First-use takeover → Local → Migrate** — `useFirstUseChain.
+   handleFirstUseChainMigrate()` fires the same `runAction(inst.id,
+   'migrate-to-standalone')` against the auto-tracked legacy desktop
+   install. Gated by `detectFirstUseState().hasLegacyDesktop` so the
+   sub-step only appears when there's something to migrate.
+
 ## Adoption contract
 
 `adoptDesktopInstall` (in `src/main/lib/desktopAdopt.ts`) is idempotent
 and marker-based:
 
-- Writes `.comfyui-desktop-2` at the legacy basePath after the new
+- Writes `.comfyui-desktop-2` at the legacy basePath **after** the new
   install record exists, so a crash mid-flow never poisons retries.
+  If the marker write fails (disk full, permissions, …), the just-added
+  installation record is rolled back so the next attempt isn't blocked
+  by a duplicate entry.
 - Re-runs detect the marker and return the existing record without
-  touching disk.
+  re-running the destructive steps. The re-run **does** run a
+  best-effort `installAdoptedRequirements` reconcile against the legacy
+  venv so older adoptions (pre-requirements-step) and installs whose
+  deps drifted after a manual ComfyUI source update can self-heal by
+  re-running Migrate-to-Standalone. `installFilteredRequirements` is
+  idempotent — repeating it on an up-to-date venv is a uv no-op.
 - Captures a forensic snapshot under `<basePath>/.snapshots/` and a
   legacy-config backup under `<configDir>/legacy-backup/<timestamp>/`
   before mutating anything.
@@ -42,14 +60,97 @@ and marker-based:
   2. Git clone of upstream (or the Chinese mirror) as fallback.
 - Allocates a fresh install path under `defaultInstallDir()` —
   the legacy basePath is never moved.
-- Carries `modelsDirs` from `extra_models_config.yaml` and
-  telemetry consent (`Comfy-Desktop.SendStatistics`) into Desktop 2.0
-  settings; existing user choice wins.
-- Derives `launchArgs` from `comfy.settings.json`
-  (`server_config.listen` / `server_config.port` / `extra_server_args`).
-- Registers the new install with `adopted: true`, `adoptedBaseDir`,
-  `adoptedPythonPath`, `adoptedSourceMode`, `useSharedPaths: false`,
-  `autoUpdateComfyUI: false`.
+- Installs `requirements.txt` (and `manager_requirements.txt` when
+  present) into the legacy `.venv` via the bundled `uv` binary, filtered
+  by `installFilteredRequirements` so PyTorch packages are preserved
+  verbatim (we never clobber the legacy CUDA build). Best-effort: a
+  non-zero exit logs a warning, never aborts adoption.
+- One-shot `git checkout <latest stable tag>` of the ComfyUI source
+  tree. Adopting users are coming in through what they perceive as a
+  ComfyUI update, so they expect a fresh server. The record's
+  `autoUpdateComfyUI` flag stays `false` afterward — ongoing ComfyUI
+  updates remain opt-in per install (Desktop 2.0's standard policy).
+- Captures hardware hints from legacy `config.json` (`adoptedFromGpu`,
+  `adoptedSelectedDevice`) and the legacy app's `package.json` version
+  (`adoptedFromLegacyVersion`) for a future "rebuild as managed
+  standalone" flow and for telemetry segmentation.
+
+### Settings carry (`carryLegacySettings`)
+
+Applies a "v2 user choice wins" rule via `settings.has()` (which reads
+the raw `settings.json` and ignores built-in defaults) so a key the
+user has already configured in v2 is never overwritten.
+
+| v2 key | Legacy source | Notes |
+|---|---|---|
+| `modelsDirs` | `<basePath>/models` + every `base_path` in `extra_models_config.yaml` | Always appended (never blocked by `has()`) — model dirs are additive. |
+| `telemetryEnabled` | `Comfy-Desktop.SendStatistics` | |
+| `autoInstallUpdates` | `Comfy-Desktop.AutoUpdate` | Desktop-app silent-update toggle, not ComfyUI updates. |
+| `pypiMirror` | `Comfy-Desktop.UV.PypiInstallMirror` | Feeds every `uv pip install` v2 runs (adoption requirements, custom-node installs, manager extras, snapshot restore). |
+| `useChineseMirrors` + `chineseMirrorsPrompted` | inferred from `pypiMirror` matching `aliyun`/`tencent`/`tsinghua`/`mirrors.cernet.edu.cn` | Suppresses the locale-triggered first-launch CN-mirror prompt. |
+| `firstUseCompleted` | force `true` | Skips the first-use takeover for adopted users. |
+| `inputDir` / `outputDir` (global) | `<basePath>/input` / `<basePath>/output` | Only when v2 hasn't already persisted a choice. Seeds fresh managed installs created later by the same user. |
+
+Intentionally NOT carried:
+
+- `Comfy.ColorPalette` — ComfyUI frontend canvas-palette setting; the
+  adopted install reads it from its own `<basePath>/user/...`. v2's
+  `theme` setting is the launcher chrome (`'system'|'dark'|'light'`),
+  not equivalent.
+- `Comfy-Desktop.UV.TorchInstallMirror` — no v2 consumer; standalone
+  variants ship torch pre-bundled. The legacy `comfy.settings.json` is
+  preserved in `legacy-backup/<timestamp>/` if a future managed-rebuild
+  flow needs it.
+
+### Launch-args derivation (`deriveLaunchArgs`)
+
+Reads `Comfy.Server.LaunchArgs` (a flat dotted-key map) from
+`comfy.settings.json` and rebuilds the user-facing `launchArgs` string:
+
+- **Stripped** (v2 owns or doesn't apply):
+  `extra-model-paths-config`, `front-end-root`, `log-stdout`,
+  `database-url`.
+- **Promoted** out of the string into per-install record fields:
+  `input-directory` → `inputDir`, `output-directory` → `outputDir`.
+  The new fields drive the v2 Storage tab's per-install folder pickers
+  and feed `launch.ts` when `useSharedInputOutput` is off.
+- **Preserved** verbatim: every other key, including explicit
+  `base-directory`, `user-directory`, and `listen`. Adopters who pinned
+  `--listen 0.0.0.0` for LAN access keep that.
+- **Synthesized when absent**: `--port 8000` (preserves legacy's
+  baked-in default; matters for bookmarked URLs) and `--enable-manager`
+  (legacy always included it). `--listen 127.0.0.1` is NOT synthesized
+  because it matches ComfyUI's native default — emitting it would only
+  add noise to the editable string.
+
+### Per-install record fields
+
+```
+adopted: true
+adoptedAt:   ISO timestamp
+adoptedBaseDir: <legacyBasePath>
+adoptedPythonPath: <legacyBasePath>/.venv/{Scripts,bin}/python(.exe)
+adoptedSourceMode: 'pre-swap-copy' | 'git-clone-fallback'
+adoptedFromLegacyVersion?: legacy app package.json version
+adoptedFromGpu?:           legacy config.json detectedGpu
+adoptedSelectedDevice?:    legacy config.json selectedDevice
+adoptedComfyTagAtMigration?: tag chosen by the one-shot checkout
+
+releaseTag: 'legacy-adopted'
+variant:    'legacy-uv-py312'
+pythonVersion: '3.12'
+
+launchArgs:    derived string (port + enable-manager + preserved keys)
+launchMode:    'window'
+browserPartition: 'unique'
+portConflict:  'auto'
+autoUpdateComfyUI: false
+
+useSharedModels:      true            # legacy models/ are in global modelsDirs
+useSharedInputOutput: false           # workspace pinned to legacy basePath
+inputDir:  <legacyBasePath>/input     # (or promoted --input-directory override)
+outputDir: <legacyBasePath>/output    # (or promoted --output-directory override)
+```
 
 ## Prompts
 
@@ -74,18 +175,29 @@ The `standalone` source's `getLaunchCommand` detects
 - Uses `adoptedPythonPath` (the legacy uv-managed `.venv`) instead of
   the standalone-env tarball's Python.
 - Runs `ComfyUI/main.py` from the new install path.
-- Pins ComfyUI to the legacy basePath via
-  `--base-directory` / `--user-directory` / `--input-directory` /
-  `--output-directory` CLI args so the user-editable `launchArgs` stays
-  free of these structural paths.
+- Pins ComfyUI to the legacy basePath via `--base-directory` /
+  `--user-directory` CLI args (structural plumbing the user shouldn't
+  need to touch). Input/output go through the per-install record
+  fields and `launch.ts`'s shared-input-output branch instead.
 
-Adopted records set `useSharedPaths: false`, so `launch.ts` also skips
-its own `--input-directory` / `--output-directory` injection (no
-duplicate args).
+`launch.ts` injects `--input-directory` / `--output-directory` from
+either the global shared paths (when `useSharedInputOutput` is on) or
+the per-install fields (when off — the adopted case). Same end result;
+no duplicate args.
+
+## Telemetry
+
+| Event | Properties |
+|---|---|
+| `desktop2.adopt.started` | (none) |
+| `desktop2.adopt.succeeded` | `installation_id`, `legacy_version`, `adopted_source_mode`, `has_venv`, `has_extra_models_yaml`, `models_dir_count`, `carried_keys[]`, `carry_skipped_keys[]`, `adopted_path_override_input`, `adopted_path_override_output`, `adopted_comfy_tag_at_migration`, `requirements_uv_available`, `requirements_core_exit`, `requirements_manager_exit`, `gpu`, `selected_device` |
+| `desktop2.adopt.failed` | `error_bucket`, `error_message` (first 500 chars) |
+| `desktop2.adopt.*` step events | `desktop2.adopt.backup`, `tcc`, `validate_venv`, `snapshot`, `source`, `comfy_update`, `requirements`, `requirements_reconcile`, `carry_settings`, `register` — all wrapped in `telemetry.trackedStep` |
 
 ## What this design intentionally does NOT do
 
-- No first-launch cutover splash or silent auto-adopt.
+- No silent first-launch auto-adopt (see "Open scope" below — this is
+  the next piece of work for the in-place-update flow).
 - No dedicated "Adopt in place" beta action or status pill.
 - No side-by-side "adopt your legacy install" banner.
 - No deferred Python-repair queue. A broken `.venv` either prompts the
@@ -93,3 +205,24 @@ duplicate args).
   separate user action afterward.
 - No per-trigger orchestrator modes. `adoptDesktopInstall` takes one
   shape; the dispatcher decides everything else.
+- No auto-update of ComfyUI after adoption. The one-shot checkout
+  during adoption is **distinct** from the per-install opt-in update
+  policy that applies from then on.
+
+## Open scope (not yet on this branch)
+
+The eventual cutover ships Desktop 2.0 as an in-place update of the
+legacy app installer (same signing identity, same install path). After
+the update, the user expects to launch "ComfyUI" and have it Just
+Work — they shouldn't see a chooser or a takeover. Today they do.
+
+Items pending to close the loop:
+
+- Auto-trigger adoption from the first-launch takeover (or skip the
+  takeover entirely when `hasLegacyDesktop`) so the user lands directly
+  in their adopted ComfyUI window.
+- Wire `desktop2.adopt.*` telemetry properties so the migration funnel
+  is visible end-to-end in PostHog.
+- Decide whether to remove the auto-tracked legacy desktop install
+  record after a successful adoption (today it stays in the list as a
+  `desktop`-source entry alongside the new `standalone` one).
