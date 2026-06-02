@@ -538,7 +538,9 @@ const hasPendingRestart = computed(
 // that gate.
 const cloudCapacity = useCloudCapacity()
 const isCloudCapacityBlocked = computed(
-  () => installation.value?.sourceCategory === 'cloud' && cloudCapacity.isDisabled()
+  () =>
+    installation.value?.sourceCategory === 'cloud' &&
+    cloudCapacity.effectiveStatus('ipp') === 'disabled'
 )
 
 const primaryActionLabel = computed(() => {

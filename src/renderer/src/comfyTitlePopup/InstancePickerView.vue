@@ -493,6 +493,11 @@ function handleSettingsNavigateList(): void {
 // "Temporarily unavailable" chip on the cloud row itself is a follow-up
 // (the row's a child component `InstanceRow.vue`).
 const cloudCapacity = useCloudCapacity()
+/** Tier-aware capacity status passed down to per-row chips so a paid
+ *  user doesn't see "Temporarily unavailable" on a row they can still
+ *  click through. Mirrors what `confirmEntry({surface: 'ipp'})`
+ *  will do. */
+const ippCapacityStatus = computed(() => cloudCapacity.effectiveStatus('ipp'))
 
 async function handleExpandedPrimaryAction(restartInPlace: boolean): Promise<void> {
   const inst = selectedInstall.value
@@ -500,7 +505,7 @@ async function handleExpandedPrimaryAction(restartInPlace: boolean): Promise<voi
   // Cloud capacity gate. `normal` resolves instantly; `degraded`
   // shows a confirm modal (user can back out); `disabled` resolves
   // false. Matches the ChooserView path so the two can't diverge.
-  if (inst.sourceCategory === 'cloud' && !(await cloudCapacity.confirmEntry())) return
+  if (inst.sourceCategory === 'cloud' && !(await cloudCapacity.confirmEntry({ surface: 'ipp' }))) return
   if (restartInPlace) {
     bridge?.restartInstall(inst.id)
   } else {
@@ -585,7 +590,7 @@ async function handleExpandedPrimaryAction(restartInPlace: boolean): Promise<voi
               :update-available="isRowUpdateAvailable(inst)"
               :operating="effectiveOperatingSet.has(inst.id)"
               :last-launched-short-label="lastLaunchedShortLabel(inst)"
-              :capacity-status="cloudCapacity.status.value"
+              :capacity-status="ippCapacityStatus"
               @select="handleSelect"
             />
 

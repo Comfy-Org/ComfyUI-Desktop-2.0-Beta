@@ -5,6 +5,7 @@ import { getModelDownloadContentScript } from '../lib/comfyContentScript'
 import { _operationAborts, sourceMap } from '../lib/ipc/shared'
 import { TITLEBAR_BG } from '../lib/theme'
 import * as mainTelemetry from '../lib/telemetry'
+import { refreshCloudUserTier } from '../lib/userTier'
 import { forwardDatadogError } from '../lib/processErrorHandlers'
 import { installationEvents, type InstallationRecord } from '../installations'
 import {
@@ -305,6 +306,11 @@ export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts):
     // frontend, never see the toast or the redirect flash.
     if (!isLocal) {
       comfyContents.executeJavaScript(COMFY_CLOUD_PATCHES_JS).catch(() => {})
+      // Refresh the cached subscription tier off the cloud view's
+      // Firebase auth record + /customers/me. Used by the capacity
+      // kill-switch to let paying users through `disabled`. Fire-and-
+      // forget — failures leave the tier cache as-is.
+      void refreshCloudUserTier(comfyContents)
     }
   }
   comfyContents.on('dom-ready', onDomReady)

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, toRef } from 'vue'
+import { computed, onMounted, toRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useInstallationStore } from '../stores/installationStore'
 import { useSessionStore } from '../stores/sessionStore'
@@ -147,7 +147,7 @@ async function pickInstall(inst: Installation): Promise<void> {
   // Cloud capacity gate — catches the case where a cloud install
   // already exists and the user clicks its per-install tile (the
   // generic "Try Cloud" tile gates separately in `handleCloudClick`).
-  if (inst.sourceCategory === 'cloud' && !(await cloudCapacity.confirmEntry())) return
+  if (inst.sourceCategory === 'cloud' && !(await cloudCapacity.confirmEntry({ surface: 'dashboard' }))) return
   emit('pick', inst)
 }
 
@@ -168,13 +168,19 @@ async function closeRunningInstance(inst: Installation): Promise<void> {
 // users can't enter cloud during an outage. When `degraded`, the tile
 // surfaces a "Heavy usage" meta pill but the click still proceeds.
 const cloudCapacity = useCloudCapacity()
+/** The capacity tier the tile should render as — collapses raw flag
+ *  status with the signed-in tier so a paying user sees a heads-up
+ *  chip on `disabled` instead of a "Temporarily unavailable" lockout
+ *  they can actually click through. Mirrors what `confirmEntry`
+ *  would do on click. */
+const dashboardCapacityStatus = computed(() => cloudCapacity.effectiveStatus('dashboard'))
 
 async function handleCloudClick(): Promise<void> {
   // Capacity gate: handles all three statuses. `normal` resolves
   // instantly, `degraded` shows a confirm modal (user can back out),
   // `disabled` resolves false (the tile is also styled disabled so
   // this is defense-in-depth for keyboard activation).
-  if (!(await cloudCapacity.confirmEntry())) return
+  if (!(await cloudCapacity.confirmEntry({ surface: 'dashboard' }))) return
   // If a cloud install exists, route through the same body-click path
   // the install tiles use so behaviour can't drift between the two.
   // Otherwise promote new-install as a Try-Cloud CTA.
@@ -227,11 +233,11 @@ function handleNewInstallClick(): void {
         <div
           v-if="showCloudCard"
           role="button"
-          :tabindex="cloudCapacity.isDisabled() ? -1 : 0"
-          :aria-disabled="cloudCapacity.isDisabled() ? true : undefined"
+          :tabindex="dashboardCapacityStatus === 'disabled' ? -1 : 0"
+          :aria-disabled="dashboardCapacityStatus === 'disabled' ? true : undefined"
           class="chooser-tile chooser-tile-cloud"
-          :class="{ 'chooser-tile--cloud-disabled': cloudCapacity.isDisabled() }"
-          :data-cloud-capacity="cloudCapacity.status.value"
+          :class="{ 'chooser-tile--cloud-disabled': dashboardCapacityStatus === 'disabled' }"
+          :data-cloud-capacity="dashboardCapacityStatus"
           @click="handleCloudClick"
           @keydown.enter="handleCloudClick"
           @keydown.space.prevent="handleCloudClick"
@@ -259,12 +265,12 @@ function handleNewInstallClick(): void {
           </div>
           <div class="chooser-tile-meta">
             <span
-              v-if="cloudCapacity.isBlockingOrWarning()"
+              v-if="dashboardCapacityStatus !== 'normal'"
               class="chooser-tile-pill chooser-tile-pill--capacity"
-              :class="{ 'chooser-tile-pill--capacity-disabled': cloudCapacity.isDisabled() }"
-              :title="cloudCapacity.isDisabled() ? t('cloud.capacityDisabledHint') : t('cloud.capacityDegradedHint')"
+              :class="{ 'chooser-tile-pill--capacity-disabled': dashboardCapacityStatus === 'disabled' }"
+              :title="dashboardCapacityStatus === 'disabled' ? t('cloud.capacityDisabledHint') : t('cloud.capacityDegradedHint')"
             >
-              {{ cloudCapacity.isDisabled() ? t('cloud.capacityDisabled') : t('cloud.capacityDegraded') }}
+              {{ dashboardCapacityStatus === 'disabled' ? t('cloud.capacityDisabled') : t('cloud.capacityDegraded') }}
             </span>
             <span
               v-else

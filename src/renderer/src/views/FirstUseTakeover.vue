@@ -257,12 +257,15 @@ async function onContinue(): Promise<void> {
     // Capacity-protection context. `capacity_status` is the resolved
     // boot-time `desktop-cloud-capacity` flag value at the moment of
     // commit; `was_default` is true when the user kept whatever card
-    // was pre-selected for them (cloud when normal, local when
-    // disabled), false when they actively flipped. Together they let
-    // the conversion dashboard split signal (active cloud pick) from
-    // defaulting, and slice each by capacity tier.
+    // was pre-selected for them, false when they actively flipped.
+    // `user_tier` is whatever was hydrated from the persisted cache
+    // at boot — `unknown` for users who've never opened cloud on this
+    // device, `free` / `paid` for returning users. Lets the funnel
+    // split conversion by (a) signal-vs-defaulting and (b) the gate
+    // tier the user would have hit on dashboard / IPP.
     capacity_status: cloudCapacity.status.value,
-    was_default: pickedChoice.value === initialDefaultChoice.value
+    was_default: pickedChoice.value === initialDefaultChoice.value,
+    user_tier: cloudCapacity.tier.value
   })
 
   if (isChinese.value) {
@@ -301,7 +304,8 @@ async function routePostStart(): Promise<void> {
       // declining that modal, so the reason field is fixed.
       emitTelemetryAction('desktop2.first_use.cloud_blocked', {
         reason: 'degraded_declined',
-        capacity_status: cloudCapacity.status.value
+        capacity_status: cloudCapacity.status.value,
+        user_tier: cloudCapacity.tier.value
       })
       isContinuing.value = false
       return

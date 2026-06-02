@@ -16,6 +16,12 @@ export type ResolvedTheme = Exclude<Theme, 'system'>
  *  `degraded` = show heavy-usage warning; `disabled` = block entry. */
 export type CloudCapacityStatus = 'normal' | 'degraded' | 'disabled'
 
+/** Signed-in user's Comfy Cloud subscription tier, normalized to the
+ *  two values the capacity gate cares about. `'unknown'` = signed out
+ *  or no fetch has succeeded yet this lifetime; treated as `'free'`
+ *  downstream (fail-closed). See `userTier.ts`. */
+export type CloudUserTier = 'free' | 'paid' | 'unknown'
+
 // --- Installation types ---
 export interface Installation {
   id: string
@@ -1138,6 +1144,7 @@ export interface ElectronApi {
    *  `degraded` | `disabled`); defaults to `'normal'` when the flag is
    *  unavailable. Renderers consume this via `useCloudCapacity`. */
   getCloudCapacity(): Promise<CloudCapacityStatus>
+  getCloudUserTier(): Promise<CloudUserTier>
   quitApp(): Promise<void>
   relaunchApp(): Promise<void>
   resetZoom(): Promise<void>
