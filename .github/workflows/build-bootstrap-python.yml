@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag for the bootstrap-python assets (e.g. bootstrap-v1)"
+        description: "Release tag for the bootstrap-python assets (e.g. bootstrap-v2)"
         required: true
-        default: "bootstrap-v1"
+        default: "bootstrap-v2"
 
 permissions:
   contents: write
@@ -31,13 +31,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
-          python-version: "3.12"
+          node-version: "20"
 
       - name: Build bootstrap Python
-        run: python scripts/build-bootstrap-python.py --platform ${{ matrix.platform }} --output bootstrap-python
+        # The script downloads python-build-standalone, installs pygit2, and
+        # places a pinned uv binary alongside python. No system Python or
+        # uv is required — all Python invocations use the just-extracted
+        # interpreter.
+        run: node scripts/build-bootstrap-python.mjs --platform ${{ matrix.platform }} --output bootstrap-python
 
       - name: Package archive
         shell: bash

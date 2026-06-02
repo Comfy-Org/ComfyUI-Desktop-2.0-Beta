@@ -26,22 +26,44 @@ import { pipeline } from 'node:stream/promises'
 const PYTHON_VERSION = '3.13.12'
 const PBS_RELEASE = '20260211'
 
+// uv is bundled so adopted-install flows (and any future bootstrap-driven
+// venv ops) have a managed package installer without depending on a system
+// uv or installing one into the user's environment. Pinned; bump together
+// with a new bootstrap-v* release tag.
+const UV_VERSION = '0.11.18'
+
 const PLATFORM_MAP = {
   'win-x64': {
     archive: `cpython-${PYTHON_VERSION}+${PBS_RELEASE}-x86_64-pc-windows-msvc-install_only_stripped.tar.gz`,
     pythonBin: 'python.exe',
+    // uv release asset + the binary name inside it, plus where it lands in
+    // the bootstrap env. Windows zip is flat; unix tarballs put binaries
+    // under a uv-<triple>/ subdir.
+    uvAsset: 'uv-x86_64-pc-windows-msvc.zip',
+    uvBinName: 'uv.exe',
+    uvArchiveSubdir: null,
+    uvDestRel: 'uv.exe', // next to python.exe at env root
   },
   'mac-arm64': {
     archive: `cpython-${PYTHON_VERSION}+${PBS_RELEASE}-aarch64-apple-darwin-install_only_stripped.tar.gz`,
     pythonBin: path.join('bin', 'python3'),
+    uvAsset: 'uv-aarch64-apple-darwin.tar.gz',
+    uvBinName: 'uv',
+    uvArchiveSubdir: 'uv-aarch64-apple-darwin',
+    uvDestRel: path.join('bin', 'uv'), // next to bin/python3
   },
   'linux-x64': {
     archive: `cpython-${PYTHON_VERSION}+${PBS_RELEASE}-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz`,
     pythonBin: path.join('bin', 'python3'),
+    uvAsset: 'uv-x86_64-unknown-linux-gnu.tar.gz',
+    uvBinName: 'uv',
+    uvArchiveSubdir: 'uv-x86_64-unknown-linux-gnu',
+    uvDestRel: path.join('bin', 'uv'),
   },
 }
 
 const PBS_URL_BASE = `https://github.com/astral-sh/python-build-standalone/releases/download/${PBS_RELEASE}`
+const UV_URL_BASE = `https://github.com/astral-sh/uv/releases/download/${UV_VERSION}`
 
 const STRIP_DIRS = new Set([
   'test', 'tests', '__pycache__',
@@ -104,6 +126,49 @@ function extractTarGz(archivePath, destDir) {
   const result = spawnSync('tar', ['-xzf', archivePath, '-C', destDir], { stdio: 'inherit' })
   if (result.error) throw result.error
   if (result.status !== 0) throw new Error(`tar extraction failed (status ${result.status})`)
+}
+
+function extractArchive(archivePath, destDir) {
+  // `tar -xf` (no -z) auto-detects format: gzip tarballs on every platform,
+  // and zip archives on Windows where bundled tar.exe is bsdtar/libarchive.
+  // Used for the uv release assets, which are .tar.gz on unix and .zip on
+  // Windows.
+  const result = spawnSync('tar', ['-xf', archivePath, '-C', destDir], { stdio: 'inherit' })
+  if (result.error) throw result.error
+  if (result.status !== 0) throw new Error(`archive extraction failed (status ${result.status})`)
+}
+
+async function installUv(plat, platInfo, envDir, tmpdir) {
+  console.log(`Installing uv ${UV_VERSION}...`)
+  const archivePath = path.join(tmpdir, platInfo.uvAsset)
+  await downloadFile(`${UV_URL_BASE}/${platInfo.uvAsset}`, archivePath)
+
+  const uvExtractDir = path.join(tmpdir, 'uv-extract')
+  await fs.mkdir(uvExtractDir, { recursive: true })
+  extractArchive(archivePath, uvExtractDir)
+
+  const srcBin = platInfo.uvArchiveSubdir
+    ? path.join(uvExtractDir, platInfo.uvArchiveSubdir, platInfo.uvBinName)
+    : path.join(uvExtractDir, platInfo.uvBinName)
+  if (!(await isFile(srcBin))) {
+    throw new Error(`uv binary not found at expected path after extract: ${srcBin}`)
+  }
+
+  const destBin = path.join(envDir, platInfo.uvDestRel)
+  await fs.mkdir(path.dirname(destBin), { recursive: true })
+  await fs.copyFile(srcBin, destBin)
+  if (plat !== 'win-x64') {
+    await fs.chmod(destBin, 0o755)
+  }
+
+  // Smoke-test the installed binary. Failing here surfaces a corrupt /
+  // wrong-arch uv before it ships, instead of a runtime error on user
+  // machines.
+  const versionRes = spawnSync(destBin, ['--version'], { stdio: 'pipe', encoding: 'utf8' })
+  if (versionRes.status !== 0) {
+    throw new Error(`uv --version failed: ${versionRes.stderr || versionRes.stdout}`)
+  }
+  console.log(`  ${versionRes.stdout.trim()} -> ${destBin}`)
 }
 
 async function findSitePackages(envDir) {
@@ -265,6 +330,9 @@ async function main() {
       console.error(`ERROR: pygit2 broken after stripping: ${verifyRes2.stderr}`)
       process.exit(1)
     }
+
+    // uv lands after stripping so the strip rules don't touch the binary.
+    await installUv(plat, platInfo, extracted, tmpdir)
 
     await fs.mkdir(path.dirname(outputDir), { recursive: true })
     await fs.rename(extracted, outputDir).catch(async (err) => {

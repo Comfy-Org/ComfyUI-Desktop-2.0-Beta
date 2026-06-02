@@ -43,7 +43,10 @@ const projectRoot = path.resolve(__dirname, '..')
 const outputBase = path.join(projectRoot, 'bootstrap-python')
 
 const PLATFORMS = ['win-x64', 'mac-arm64', 'linux-x64']
-const DEFAULT_TAG = 'bootstrap-v1'
+// bootstrap-v2 added a bundled `uv` binary alongside python+pygit2. Bump
+// this together with the tag published from build-bootstrap-python.mjs so
+// fresh fetches pull the archives that contain uv.
+const DEFAULT_TAG = 'bootstrap-v2'
 const REPO = 'Comfy-Org/ComfyUI-Desktop-2.0-Beta'
 
 // Each platform's expected Python binary inside its bootstrap-python dir.
@@ -52,6 +55,14 @@ const PYTHON_BINARY = {
   'win-x64': 'python.exe',
   'mac-arm64': path.join('bin', 'python3'),
   'linux-x64': path.join('bin', 'python3'),
+}
+
+// Each platform's expected uv binary inside its bootstrap-python dir.
+// Must match `uvDestRel` in build-bootstrap-python.mjs.
+const UV_BINARY = {
+  'win-x64': 'uv.exe',
+  'mac-arm64': path.join('bin', 'uv'),
+  'linux-x64': path.join('bin', 'uv'),
 }
 
 function parseArgs() {
@@ -105,17 +116,26 @@ async function downloadAndExtract(url, destDir) {
 
 function verifyPlatform(outBase, platform) {
   const destDir = path.join(outBase, platform)
-  const binaryRel = PYTHON_BINARY[platform]
-  if (!binaryRel) {
+  const pythonRel = PYTHON_BINARY[platform]
+  const uvRel = UV_BINARY[platform]
+  if (!pythonRel || !uvRel) {
     // Unknown platform — nothing to verify against. Treat as caller error.
-    throw new Error(`Unknown platform ${platform}: no Python binary path configured`)
+    throw new Error(`Unknown platform ${platform}: no binary paths configured`)
   }
-  const binaryPath = path.join(destDir, binaryRel)
-  if (!fs.existsSync(binaryPath)) {
+  const pythonPath = path.join(destDir, pythonRel)
+  if (!fs.existsSync(pythonPath)) {
     throw new Error(
-      `Expected ${binaryPath} after fetch, but it does not exist. The archive may have been partial, ` +
+      `Expected ${pythonPath} after fetch, but it does not exist. The archive may have been partial, ` +
       `extraction may have failed, or the directory was empty before the fetch ran. This installer ` +
       `would ship without bootstrap pygit2 — refusing to continue.`
+    )
+  }
+  const uvPath = path.join(destDir, uvRel)
+  if (!fs.existsSync(uvPath)) {
+    throw new Error(
+      `Expected ${uvPath} after fetch, but it does not exist. The bootstrap archive predates ` +
+      `bootstrap-v2 (uv was not bundled), or extraction was partial. Bump --tag or rebuild the ` +
+      `archive with the current build-bootstrap-python.mjs.`
     )
   }
 }
