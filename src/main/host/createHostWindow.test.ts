@@ -121,28 +121,24 @@ describe('shouldBailAfterConsult', () => {
 })
 
 describe('shouldShowInstallCloseConfirm', () => {
-  it('shows the modal for an install-host with a live entry on a defer consult', () => {
-    expect(shouldShowInstallCloseConfirm('defer', true, true, false)).toBe(true)
+  it('shows the modal for a host that would kill a local session on a defer consult', () => {
+    expect(shouldShowInstallCloseConfirm('defer', true, false)).toBe(true)
   })
 
   it('skips the modal when the caller pre-cleared the close', () => {
     // Force-close paths must not block on an extra user prompt.
-    expect(shouldShowInstallCloseConfirm('defer', true, true, true)).toBe(false)
+    expect(shouldShowInstallCloseConfirm('defer', true, true)).toBe(false)
   })
 
-  it('skips the modal for a chooser/dashboard host (no install backing)', () => {
-    expect(shouldShowInstallCloseConfirm('defer', false, true, false)).toBe(false)
-  })
-
-  it('skips the modal when the entry has already been dropped from the registry', () => {
-    expect(shouldShowInstallCloseConfirm('defer', true, false, false)).toBe(false)
+  it('skips the modal for a chooser host or a cloud/remote-backed host (no local session at risk)', () => {
+    expect(shouldShowInstallCloseConfirm('defer', false, false)).toBe(false)
   })
 
   it('skips the modal on a cleared or aborted consult', () => {
     // `cleared` → renderer already handled it; `aborted` → we already
     // bailed in the prior check (this case is unreachable in practice).
-    expect(shouldShowInstallCloseConfirm('cleared', true, true, false)).toBe(false)
-    expect(shouldShowInstallCloseConfirm('aborted', true, true, false)).toBe(false)
+    expect(shouldShowInstallCloseConfirm('cleared', true, false)).toBe(false)
+    expect(shouldShowInstallCloseConfirm('aborted', true, false)).toBe(false)
   })
 })
 

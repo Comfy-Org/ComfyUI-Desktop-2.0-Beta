@@ -31,6 +31,7 @@ import {
   registerHostEntry,
   setHostFactories,
   setLastFocusedInstallationId,
+  shouldConfirmKillForEntry,
   unregisterHostEntry,
   type ComfyWindowEntry,
 } from './registry'
@@ -75,6 +76,7 @@ function makeEntry(opts: {
   destroyed?: boolean
   minimized?: boolean
   titleBarWebContents?: unknown
+  sourceCategory?: ComfyWindowEntry['sourceCategory']
 }): ComfyWindowEntry {
   const window = makeWindow({ destroyed: opts.destroyed, minimized: opts.minimized })
   return {
@@ -93,7 +95,7 @@ function makeEntry(opts: {
     constructedPartition: null,
     firstUseMode: 'none',
     titleBarText: '',
-    sourceCategory: null,
+    sourceCategory: opts.sourceCategory ?? null,
     previewInstallationId: null,
     coldStartPendingReveal: false,
     _installCleanup: null,
@@ -177,6 +179,50 @@ describe('computeBodyMode', () => {
   it('returns `progress` for install-less hosts in progress mode (cold-spawn chooser case)', () => {
     const entry = makeEntry({ installationId: null, activePanel: 'progress' })
     expect(computeBodyMode(entry)).toBe('progress')
+  })
+})
+
+describe('shouldConfirmKillForEntry', () => {
+  // Single chokepoint used by Switch, Restart, Close Window, Quit, and
+  // the native ✕ to decide whether to surface a confirm modal. The rule
+  // is "would tearing this down kill a local ComfyUI process?" — yes
+  // for install-backed local hosts, no for everything else.
+  it('returns true for an install-backed local host', () => {
+    const entry = makeEntry({ installationId: 'inst-A', sourceCategory: 'local' })
+    expect(shouldConfirmKillForEntry(entry)).toBe(true)
+  })
+
+  it('returns false for a cloud/remote-backed host (no local process at risk)', () => {
+    expect(
+      shouldConfirmKillForEntry(
+        makeEntry({ installationId: 'inst-cloud', sourceCategory: 'cloud' }),
+      ),
+    ).toBe(false)
+    expect(
+      shouldConfirmKillForEntry(
+        makeEntry({ installationId: 'inst-remote', sourceCategory: 'remote' }),
+      ),
+    ).toBe(false)
+  })
+
+  it('returns false for a chooser/install-less host (nothing to kill)', () => {
+    expect(shouldConfirmKillForEntry(makeEntry({ installationId: null }))).toBe(false)
+  })
+
+  it('returns false for a preview-chooser host that carries a local sourceCategory without an install', () => {
+    // attachHostPreview can flash `sourceCategory` onto an install-less
+    // host while the picker hovers a target. The kill-confirm must not
+    // fire there — there is no attached install or running session.
+    expect(
+      shouldConfirmKillForEntry(
+        makeEntry({ installationId: null, sourceCategory: 'local' }),
+      ),
+    ).toBe(false)
+  })
+
+  it('returns false for null/undefined entries', () => {
+    expect(shouldConfirmKillForEntry(null)).toBe(false)
+    expect(shouldConfirmKillForEntry(undefined)).toBe(false)
   })
 })
 
