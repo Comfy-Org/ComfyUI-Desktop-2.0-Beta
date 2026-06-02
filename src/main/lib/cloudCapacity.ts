@@ -63,11 +63,11 @@ export function initCloudCapacity(opts: {
       }
       // Else keep `'normal'` — covers undefined (no client, timeout,
       // missing flag), boolean values, and unknown strings.
-      // eslint-disable-next-line no-console
+       
       console.log('[cloud-capacity] init: fetched=', value, '→ cached=', cached)
     })
     .catch((err) => {
-      // eslint-disable-next-line no-console
+       
       console.log('[cloud-capacity] init error:', err)
       /* fail-safe: keep `'normal'` */
     })

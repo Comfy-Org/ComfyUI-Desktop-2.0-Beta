@@ -88,7 +88,7 @@ export function initUserTier(): Promise<void> {
     } catch {
       // first launch, missing file, or corrupt — stay 'unknown'
     }
-    // eslint-disable-next-line no-console
+     
     console.log('[user-tier] init: persisted=', cached)
   })()
   return initPromise
@@ -131,7 +131,7 @@ async function setTier(rawTierName: string | null | undefined): Promise<void> {
       'utf-8',
     )
   } catch (err) {
-    // eslint-disable-next-line no-console
+     
     console.log('[user-tier] persist failed:', err)
   }
 }
@@ -201,15 +201,15 @@ export async function refreshCloudUserTier(webContents: WebContents): Promise<vo
       return
     }
     if (result.error) {
-      // eslint-disable-next-line no-console
+       
       console.log('[user-tier] refresh skipped:', result.error)
       return
     }
     await setTier(result.tier ?? null)
-    // eslint-disable-next-line no-console
+     
     console.log('[user-tier] refresh: raw=', result.tier, '→ cached=', cached)
   } catch (err) {
-    // eslint-disable-next-line no-console
+     
     console.log('[user-tier] executeJavaScript failed:', err)
   }
 }
