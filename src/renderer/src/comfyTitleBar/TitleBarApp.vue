@@ -1025,29 +1025,35 @@ onUnmounted(() => {
 
 /* --- Responsive pill collapse ---
    Container queries read `.title-bar`'s own inline size (set up via
-   `container: title-bar / inline-size` above). Two tiers:
+   `container: title-bar / inline-size` above). Two tiers collapse
+   trailing-cluster labels to icon-only as the bar narrows.
 
-     - Mid    (≤ 999px on Mac, ≤ 1099px on Win): Feedback label drops
-              to icon-only. Saves ~60px on the trailing cluster.
-     - Narrow (≤ 899px on Mac, ≤  979px on Win): both update pill
-              labels drop to icon-only. Saves another ~80–120px.
+   The thresholds are anchored to the actual point at which the
+   layout would overflow, not to arbitrary breakpoints. With the
+   three-track grid (`auto | minmax(0,1fr) | auto`), the left cluster
+   mirroring the trailing cluster, the install pill's `clamp(220px,
+   22cqi, 360px)` floor, and the platform-specific chrome padding
+   (Win/Linux reserves 140px right; Mac reserves 78px left), the
+   minimum bar width before content overflows works out to roughly:
 
-   The Win thresholds sit ~80–100px above the Mac ones because Win/Linux
-   reserves 140px on the right for native window controls vs Mac's
-   78px left-side traffic-light reservation — Win needs to collapse
-   slightly earlier to keep the same effective usable width as Mac.
+                          Full labels   Feedback collapsed
+     Win/Linux            ~1100 px      ~960 px
+     Mac                  ~ 910 px      ~770 px
 
-   Both tiers sit well below the default host window width (1280, see
-   `DEFAULT_HOST_WIDTH` in createHostWindow.ts) so labels stay visible
-   at the canonical size; collapse only kicks in once the user resizes
-   the window meaningfully narrower.
+   Each tier fires ~40 px above its overflow point — enough buffer to
+   absorb font-rendering variance and modestly longer i18n labels
+   without false positives at the default `DEFAULT_HOST_WIDTH` (1280),
+   while still collapsing as soon as the user resizes narrow enough
+   that the cluster would otherwise crash into the centre pill.
 
-   Tooltips already carry the full label on every pill (see
-   `tooltipAttrs(...)` bindings on each <button>), so icon-only states
-   remain accessible without extra markup. */
+     - Mid    (≤  949px Mac, ≤ 1139px Win): Feedback label → icon.
+     - Narrow (≤  809px Mac, ≤  999px Win): update-pill label → icon.
+
+   Tooltips on every pill already carry the full label, so icon-only
+   states remain accessible without extra markup. */
 
 /* Mid tier — Feedback label collapses. */
-@container title-bar (max-width: 999px) {
+@container title-bar (max-width: 949px) {
   .title-bar.is-mac .title-feedback-label {
     display: none;
   }
@@ -1056,7 +1062,7 @@ onUnmounted(() => {
     gap: 0;
   }
 }
-@container title-bar (max-width: 1099px) {
+@container title-bar (max-width: 1139px) {
   .title-bar:not(.is-mac) .title-feedback-label {
     display: none;
   }
@@ -1070,7 +1076,7 @@ onUnmounted(() => {
    collapsed pill becomes a 24×24 circle (matching the Settings + other
    icon buttons) instead of an oval, so it reads as an icon affordance
    not a "shrunk pill". */
-@container title-bar (max-width: 899px) {
+@container title-bar (max-width: 809px) {
   .title-bar.is-mac .title-update-pill-label {
     display: none;
   }
@@ -1083,7 +1089,7 @@ onUnmounted(() => {
     border-radius: 999px;
   }
 }
-@container title-bar (max-width: 979px) {
+@container title-bar (max-width: 999px) {
   .title-bar:not(.is-mac) .title-update-pill-label {
     display: none;
   }
