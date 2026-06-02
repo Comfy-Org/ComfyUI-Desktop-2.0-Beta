@@ -849,19 +849,21 @@ describe('telemetry SDK-level volume guards', () => {
   })
 
   it('per-process cap at 5000 stops everything (including *.error) and warns once', () => {
-    // Mix of rate-limited-bypassing errors and normal events to confirm
-    // the session cap is the FINAL backstop and applies to everything.
-    let i = 0
-    while (captured.filter((c) => c.event !== 'desktop2.telemetry.session_cap_hit').length < 5100) {
+    // Fire enough rate-limited-bypassing errors to overshoot the 5000
+    // session cap by a healthy margin — the cap is the FINAL backstop
+    // and must apply even to events that bypass the per-event window.
+    // Use a fixed iteration count instead of polling `captured.filter()`
+    // each loop turn: that filter is O(N) over a growing array, so a
+    // while-condition variant is O(N²) and blows the 5s test timeout
+    // on slower CI hosts.
+    for (let i = 0; i < 6000; i++) {
       telemetry.capture('desktop2.execution.error', { i })
-      i++
-      if (i > 100_000) break // test runaway guard
     }
     const productEvents = captured.filter((c) => c.event !== 'desktop2.telemetry.session_cap_hit')
     const sessionCapWarnings = captured.filter(
       (c) => c.event === 'desktop2.telemetry.session_cap_hit'
     )
-    expect(productEvents.length).toBeLessThanOrEqual(5000)
+    expect(productEvents).toHaveLength(5000)
     expect(sessionCapWarnings).toHaveLength(1)
     expect(sessionCapWarnings[0]?.properties).toMatchObject({ cap: 5000 })
   })
