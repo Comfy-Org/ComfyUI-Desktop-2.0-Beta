@@ -133,21 +133,23 @@ describe('buildTitlePopupMenuItems', () => {
     expect(ids).toContain('load-snapshot')
   })
 
-  it('chooser host includes New Window, Settings, Send Feedback, and Quit ComfyUI', () => {
+  it('chooser host includes New Window, Settings, Send Feedback, Close Window, and Quit Desktop', () => {
     const items = buildTitlePopupMenuItems(makeEntry({ installationId: null }))
     const ids = items.map((i) => i.id ?? null)
     expect(ids).toContain('new-window')
     expect(ids).toContain('settings')
     expect(ids).toContain('feedback')
+    expect(ids).toContain('exit-window')
     expect(ids).toContain('close-all-windows')
     const quit = items.find((i) => i.id === 'close-all-windows')
-    expect(quit?.label).toBe('Quit ComfyUI')
+    expect(quit?.label).toBe('Quit Desktop')
   })
 
-  // Unified canonical order — same item set everywhere except
-  // Close Window, which stays install-host-only because the dashboard
-  // has nothing to close back to (its "close" affordance is Quit).
-  it('chooser host omits Close Window but otherwise matches the canonical order', () => {
+  // Unified canonical order — same item set on every host. Close
+  // Window matches what the native ✕ already does on the dashboard
+  // (close that window, quit naturally if it's the last one), so the
+  // menu and the OS chrome stay consistent.
+  it('chooser host matches the canonical order including Close Window', () => {
     const items = buildTitlePopupMenuItems(makeEntry({ installationId: null }))
     const ids = items.map((i) => i.id ?? null).filter((id) => id !== null)
     expect(ids).toEqual([
@@ -157,11 +159,12 @@ describe('buildTitlePopupMenuItems', () => {
       'load-snapshot',
       'settings',
       'feedback',
+      'exit-window',
       'close-all-windows',
     ])
   })
 
-  it('install host adds Close Window between Send Feedback and Quit ComfyUI', () => {
+  it('install host matches the canonical order with Close Window between Send Feedback and Quit Desktop', () => {
     const items = buildTitlePopupMenuItems(makeEntry({ installationId: 'inst-1' }))
     const ids = items.map((i) => i.id ?? null).filter((id) => id !== null)
     expect(ids).toEqual([
@@ -177,7 +180,7 @@ describe('buildTitlePopupMenuItems', () => {
     const closeWindow = items.find((i) => i.id === 'exit-window')
     expect(closeWindow?.label).toBe('Close Window')
     const quit = items.find((i) => i.id === 'close-all-windows')
-    expect(quit?.label).toBe('Quit ComfyUI')
+    expect(quit?.label).toBe('Quit Desktop')
   })
 
   it('install host omits Return to Dashboard — picker Home is the canonical dashboard escape', () => {
@@ -216,7 +219,7 @@ describe('buildTitlePopupMenuItems', () => {
     expect(items.find((i) => i.id === 'reset-zoom')).toBeUndefined()
   })
 
-  it('places New Window first and Quit ComfyUI last on a chooser host', () => {
+  it('places New Window first and Quit Desktop last on a chooser host', () => {
     const items = buildTitlePopupMenuItems(makeEntry({ installationId: null }))
     const ids = items.map((i) => i.id ?? null)
     expect(ids[0]).toBe('new-window')

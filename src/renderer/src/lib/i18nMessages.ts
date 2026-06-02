@@ -114,7 +114,7 @@ export const en = {
     returnToDashboard: 'Return to Dashboard',
     closeAllWindows: 'Close All Windows',
     exitWindow: 'Close Window',
-    exitAllWindows: 'Quit ComfyUI',
+    exitAllWindows: 'Quit Desktop',
     skipOnboarding: 'Skip Onboarding'
     /* Reset Zoom carries a dynamic percentage in the label and is
      * built main-side without going through this catalog — kept as a

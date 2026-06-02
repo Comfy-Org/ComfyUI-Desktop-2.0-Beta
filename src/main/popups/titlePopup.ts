@@ -659,17 +659,16 @@ export function buildTitlePopupMenuItems(entry: ComfyWindowEntry): TitlePopupMen
   //   Send Beta Feedback
   //   (Reset Zoom — when zoom level != 0)
   //   ── separator ──
-  //   Close Window           (install host only)
-  //   Quit ComfyUI
+  //   Close Window
+  //   Quit Desktop
   //
   // Notes:
-  //   - "Close Window" stays install-host-only. On the dashboard
-  //     there's nothing to close back to — the OS chrome already
-  //     covers single-window dismissal — and "Quit ComfyUI" is the
-  //     correct affordance for "close the last dashboard window".
-  //     On an instance host, "Close Window" stops that instance and
-  //     either closes the window or detaches it to the dashboard
-  //     when it's the last one open.
+  //   - "Close Window" appears on every host. On an instance host it
+  //     stops the running ComfyUI and either closes the window or
+  //     detaches it to the dashboard when it's the last one open. On
+  //     the dashboard it just closes that window — matching what the
+  //     native ✕ already does — so the menu and the OS chrome stay
+  //     consistent.
   //   - New Install / Add Existing Install / Load Snapshot land in
   //     a takeover *inside* this window when invoked from the
   //     dashboard, and spawn a *new* chooser window booted straight
@@ -710,15 +709,15 @@ export function buildTitlePopupMenuItems(entry: ComfyWindowEntry): TitlePopupMen
       items.push({ id: 'reset-zoom', label: `Reset Zoom (${percent}%)` })
     }
   }
-  items.push({ kind: 'separator' })
-  if (!isChooserHost(entry)) {
-    items.push({ id: 'exit-window', label: 'Close Window', labelKey: 'fileMenu.exitWindow' })
-  }
-  items.push({
-    id: 'close-all-windows',
-    label: 'Quit ComfyUI',
-    labelKey: 'fileMenu.exitAllWindows',
-  })
+  items.push(
+    { kind: 'separator' },
+    { id: 'exit-window', label: 'Close Window', labelKey: 'fileMenu.exitWindow' },
+    {
+      id: 'close-all-windows',
+      label: 'Quit Desktop',
+      labelKey: 'fileMenu.exitAllWindows',
+    },
+  )
   return items
 }
 

@@ -293,10 +293,10 @@ export async function confirmAndCloseAllHostWindows(
   const confirmed = await openSystemModalAsync({
     parent: overlayParentEntry.window,
     spec: {
-      title: 'Quit ComfyUI',
+      title: 'Quit Desktop',
       message: count === 1
-        ? 'Quit ComfyUI? This will close the running instance.'
-        : `Quit ComfyUI? This will close ${count} running instances.`,
+        ? 'Quit Desktop? This will close the running ComfyUI instance.'
+        : `Quit Desktop? This will close ${count} running ComfyUI instances.`,
       details,
       confirmLabel: 'Quit',
       cancelLabel: 'Cancel',
@@ -341,7 +341,7 @@ export async function confirmCloseInstanceWindow(
  * it *stops* the running ComfyUI instance (not just hides the window).
  * Model downloads are owned by the desktop app, not the instance, so
  * they keep running after a close — hence no active-download list here
- * (that warning belongs to `Quit ComfyUI`).
+ * (that warning belongs to `Quit Desktop`).
  *
  * If this is the only live host window, closing it would quit the app,
  * so instead we stop the instance and flip the window in place to the
