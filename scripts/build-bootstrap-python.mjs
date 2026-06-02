@@ -121,18 +121,11 @@ async function downloadFile(url, dest) {
   console.log(`  -> ${(stat.size / 1048576).toFixed(1)} MB`)
 }
 
-function extractTarGz(archivePath, destDir) {
-  // tar.exe ships with Windows 10+; use it on all platforms for portability.
-  const result = spawnSync('tar', ['-xzf', archivePath, '-C', destDir], { stdio: 'inherit' })
-  if (result.error) throw result.error
-  if (result.status !== 0) throw new Error(`tar extraction failed (status ${result.status})`)
-}
-
 function extractArchive(archivePath, destDir) {
-  // `tar -xf` (no -z) auto-detects format: gzip tarballs on every platform,
-  // and zip archives on Windows where bundled tar.exe is bsdtar/libarchive.
-  // Used for the uv release assets, which are .tar.gz on unix and .zip on
-  // Windows.
+  // `tar -xf` (no -z) auto-detects format on every platform: gzip tarballs
+  // (PBS + uv unix assets) and zip archives (uv Windows asset, via the
+  // bsdtar/libarchive that ships as tar.exe on Windows 10+). tar.exe is
+  // available on every supported builder.
   const result = spawnSync('tar', ['-xf', archivePath, '-C', destDir], { stdio: 'inherit' })
   if (result.error) throw result.error
   if (result.status !== 0) throw new Error(`archive extraction failed (status ${result.status})`)
@@ -163,10 +156,12 @@ async function installUv(plat, platInfo, envDir, tmpdir) {
 
   // Smoke-test the installed binary. Failing here surfaces a corrupt /
   // wrong-arch uv before it ships, instead of a runtime error on user
-  // machines.
+  // machines. Include `.error.message` because a launch failure (ENOENT /
+  // EACCES / wrong arch) leaves status=null and stdout/stderr=undefined.
   const versionRes = spawnSync(destBin, ['--version'], { stdio: 'pipe', encoding: 'utf8' })
   if (versionRes.status !== 0) {
-    throw new Error(`uv --version failed: ${versionRes.stderr || versionRes.stdout}`)
+    const detail = versionRes.error?.message || versionRes.stderr || versionRes.stdout || `exit status ${versionRes.status}`
+    throw new Error(`uv --version failed: ${detail}`)
   }
   console.log(`  ${versionRes.stdout.trim()} -> ${destBin}`)
 }
@@ -295,7 +290,7 @@ async function main() {
     await downloadFile(`${PBS_URL_BASE}/${platInfo.archive}`, archivePath)
 
     console.log('Extracting...')
-    extractTarGz(archivePath, tmpdir)
+    extractArchive(archivePath, tmpdir)
 
     const extracted = path.join(tmpdir, 'python')
     if (!(await isDir(extracted))) {
