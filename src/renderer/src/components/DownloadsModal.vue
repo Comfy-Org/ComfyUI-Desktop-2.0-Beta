@@ -7,6 +7,7 @@ import {
   FolderOpen,
   PauseCircle,
   PlayCircle,
+  RotateCcw,
   X,
   XCircle,
 } from 'lucide-vue-next'
@@ -115,6 +116,9 @@ function resume(url: string): void {
 }
 function cancel(url: string): void {
   void safe(window.api.cancelModelDownload(url))
+}
+function retry(url: string): void {
+  void safe(window.api.retryModelDownload(url))
 }
 function showInFolder(savePath: string | undefined): void {
   if (!savePath) return
@@ -244,6 +248,14 @@ function isTerminal(status: ModelDownloadStatus): boolean {
           />
         </div>
         <div class="dlm-item-actions">
+          <button
+            v-if="d.status === 'error' || d.status === 'cancelled'"
+            type="button"
+            @click="retry(d.url)"
+          >
+            <RotateCcw :size="13" />
+            {{ t('downloadsTab.retry') }}
+          </button>
           <button
             v-if="d.status === 'downloading'"
             type="button"

@@ -96,6 +96,10 @@ export const en = {
      *  The unseen indicator clears as soon as the popup is opened. */
     downloadsCompleteUnseen:
       'no recent downloads | {n} download finished — click to review | {n} downloads finished — click to review',
+    /** Tooltip when one or more downloads have failed since the user
+     *  last opened the tray. Takes precedence over the "finished" copy. */
+    downloadsFailedUnseen:
+      'no downloads failed | {n} download failed — click to review | {n} downloads failed — click to review',
     desktopUpdateAvailable: 'Desktop Update',
     desktopUpdateDownloading: 'Downloading update…',
     desktopUpdateReady: 'Desktop Update Ready',
@@ -126,6 +130,7 @@ export const en = {
     pause: 'Pause',
     resume: 'Resume',
     cancel: 'Cancel',
+    retry: 'Retry',
     showInFolder: 'Show in Finder',
     remove: 'Remove from list',
     viewAllInSettings: 'View All Downloads',
@@ -142,7 +147,8 @@ export const en = {
     filterActive: 'Active',
     filterCompleted: 'Completed',
     filterErrored: 'Failed',
-    filterAriaLabel: 'Status filter'
+    filterAriaLabel: 'Status filter',
+    retry: 'Retry'
   },
   settingsModal: {
     title: 'Settings',

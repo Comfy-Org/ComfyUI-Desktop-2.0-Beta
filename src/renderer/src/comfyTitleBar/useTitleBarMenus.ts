@@ -58,6 +58,9 @@ interface TitleBarMenusApi {
   /** Number of `recent` (terminal) entries the user hasn't reviewed
    *  yet. Reset to zero whenever the downloads popup is opened. */
   unseenFinishedCount: ComputedRef<number>
+  /** Subset of `unseenFinishedCount` limited to failures (`error`) —
+   *  drives the red error badge. */
+  unseenErrorCount: ComputedRef<number>
   /** Tooltip / aria-label for the tray button — switches between an
    *  in-progress label, an unseen-finished label, and the idle
    *  "Downloads" label. */
@@ -137,9 +140,25 @@ export function useTitleBarMenus(opts: UseTitleBarMenusOpts): TitleBarMenusApi {
   const unseenFinishedCount = computed(() =>
     downloadsState.value.recent.filter((d) => !seenUrls.has(d.url)).length,
   )
+  /** Unseen *failures* only (`error`, not user-initiated `cancelled`) —
+   *  drives the red error badge that takes precedence over the green
+   *  "completed" badge so a failed download never reads as success. */
+  const unseenErrorCount = computed(() =>
+    downloadsState.value.recent.filter((d) => d.status === 'error' && !seenUrls.has(d.url)).length,
+  )
   const downloadsTrayLabel = computed<string>(() => {
     const active = downloadsActiveCount.value
-    if (active > 0) return t('titleBar.downloadsInProgress', { n: active }, active)
+    const errors = unseenErrorCount.value
+    if (active > 0) {
+      // Surface a mid-batch failure in the tooltip too — the red dot is
+      // the visual cue, this is its accessible/explanatory counterpart.
+      const inProgress = t('titleBar.downloadsInProgress', { n: active }, active)
+      if (errors > 0) {
+        return `${inProgress} · ${t('titleBar.downloadsFailedUnseen', { n: errors }, errors)}`
+      }
+      return inProgress
+    }
+    if (errors > 0) return t('titleBar.downloadsFailedUnseen', { n: errors }, errors)
     const unseen = unseenFinishedCount.value
     if (unseen > 0) return t('titleBar.downloadsCompleteUnseen', { n: unseen }, unseen)
     return t('titleBar.downloads')
@@ -284,6 +303,7 @@ export function useTitleBarMenus(opts: UseTitleBarMenusOpts): TitleBarMenusApi {
     downloadsState,
     downloadsActiveCount,
     unseenFinishedCount,
+    unseenErrorCount,
     downloadsTrayLabel,
     downloadsStartedAt,
     handleFileMenu,
