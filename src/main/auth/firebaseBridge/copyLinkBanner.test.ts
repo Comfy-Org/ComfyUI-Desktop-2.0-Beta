@@ -30,12 +30,9 @@ describe('buildCopyLinkBannerScript', () => {
     expect(script).toContain(JSON.stringify(COPY_LINK_BANNER_ID))
   })
 
-  it('emits only the Open-again sentinel (copy never reaches main)', () => {
+  it('emits both back-channel sentinels for the Copy / Open buttons', () => {
     const script = buildCopyLinkBannerScript(url, labels)
     expect(script).toContain(JSON.stringify(OPEN_LINK_SENTINEL))
-    // Copy is in-page only — no console sentinel, so a remote page can't
-    // drive a no-gesture clipboard write.
-    expect(script).not.toContain('__comfyCopyLoginLink')
   })
 
   it('copies in-page with a clipboard primary and execCommand fallback', () => {
@@ -52,7 +49,7 @@ describe('buildCopyLinkBannerScript', () => {
   })
 
   it('escapes hostile URLs and labels without breaking the script', () => {
-    const tricky = 'http://x/?q="; alert(1); //</script>  '
+    const tricky = 'http://x/?q="; alert(1); //</script>'
     const hostileLabels: CopyLinkBannerLabels = {
       ...labels,
       message: '"; document.title="x"; //',

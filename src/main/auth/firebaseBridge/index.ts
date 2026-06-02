@@ -121,20 +121,20 @@ function showCopyLinkBanner(comfyContents: WebContents, loginUrl: string): void 
   void comfyContents
     .insertCSS(COPY_LINK_BANNER_CSS)
     .then(() => comfyContents.executeJavaScript(buildCopyLinkBannerScript(loginUrl, labels), true))
-    .catch(() => {})
+    .catch(() => { })
 
   const onConsoleMessage = (details: Electron.Event<Electron.WebContentsConsoleMessageEventParams>): void => {
     // Top-frame only: ignore the sentinel if an iframe logs it.
     if (details.frame?.parent != null) return
     if (details.message !== OPEN_LINK_SENTINEL) return
-    void shell.openExternal(loginUrl).catch(() => {})
+    void shell.openExternal(loginUrl).catch(() => { })
   }
   comfyContents.on('console-message', onConsoleMessage)
 
   activeBannerCleanup = () => {
     comfyContents.off('console-message', onConsoleMessage)
     if (!comfyContents.isDestroyed()) {
-      void comfyContents.executeJavaScript(buildRemoveCopyLinkBannerScript(), true).catch(() => {})
+      void comfyContents.executeJavaScript(buildRemoveCopyLinkBannerScript(), true).catch(() => { })
     }
   }
 }
