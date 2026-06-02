@@ -19,6 +19,7 @@ import {
   getAppVersion,
   _activeOperationStatus,
   _operationAborts,
+  sessionLifecycleEvents,
   type PickerOperationStatus,
 } from '../lib/ipc/shared'
 import {
@@ -125,6 +126,13 @@ export interface InstancePickerSnapshot {
   installs: InstancePickerInstall[]
   activeInstallationId: string | null
   runningInstallationIds: string[]
+  /** Installs mid-launch — `instance-launching` fired, `instance-started`
+   *  has not. Mirrors `_launchingInstallationIds` in main so the picker
+   *  popup can hydrate `sessionStore.launchingInstances` from the
+   *  snapshot (its preload doesn't expose `onInstanceLaunching`).
+   *  Drives the CTA flip from **Start → Restart / Switch** during the
+   *  launching window via `useInstallCta`. */
+  launchingInstallationIds: string[]
   selectedInstallationId: string | null
   selectedSettings: Record<string, unknown>[] | null
   selectedSnapshots: Record<string, unknown> | null
@@ -202,7 +210,15 @@ export interface GlobalSettingsSnapshot {
 interface BuildInstancePickerSnapshotArgs {
   installs: InstancePickerInstall[]
   hostInstallationId: string | null
+  /** Optional fallback for `hostInstallationId` — set by the chooser
+   *  attach-claim path (`applyAttachHostPreview`) so a dashboard that
+   *  has staked a claim against an install reads as "currently owning"
+   *  it for picker purposes (Current pill + per-window CTA) from the
+   *  moment the claim is staked, instead of waiting for the real
+   *  `attachInstall` after `instance-started`. */
+  previewInstallationId?: string | null
   runningInstallationIds: string[]
+  launchingInstallationIds: string[]
   selectedInstallationId?: string | null
   selectedSettings?: Record<string, unknown>[] | null
   selectedSnapshots?: Record<string, unknown> | null
@@ -268,8 +284,14 @@ export function buildInstancePickerSnapshot(
 ): InstancePickerSnapshot {
   return {
     installs: args.installs,
-    activeInstallationId: args.hostInstallationId,
+    // Use the real attached install when available; fall back to the
+    // chooser's preview claim (set by `applyAttachHostPreview` when
+    // the chooser stakes an in-place attach claim ahead of a launch).
+    // Either case represents "this host is the one acting on the
+    // install" from the picker's perspective.
+    activeInstallationId: args.hostInstallationId ?? args.previewInstallationId ?? null,
     runningInstallationIds: args.runningInstallationIds,
+    launchingInstallationIds: args.launchingInstallationIds,
     selectedInstallationId: args.selectedInstallationId ?? null,
     selectedSettings: args.selectedSettings ?? null,
     selectedSnapshots: args.selectedSnapshots ?? null,
@@ -754,14 +776,22 @@ async function broadcastInstancePickerSnapshotToTitlePopups(
   // entry would waste IO on the rare multi-window case.
   const installs = await bindings.getInstancePickerInstalls()
   const runningInstallationIds = bindings.getRunningInstallationIds()
+  const launchingInstallationIds = bindings.getLaunchingInstallationIds()
   for (const entry of titlePopupsByParent.values()) {
     if (entry.kind !== 'instance-picker') continue
     if (!entry.view.isOpen && entry.view.pendingShowTimer === null) continue
     if (entry.view.popup.webContents.isDestroyed()) continue
     const parentEntry = comfyWindows.get(entry.parentEntryId)
+    // For picker selection / Current-pill purposes a chooser host
+    // that has staked an attach claim (previewInstallationId set,
+    // installationId still null) reads as "owning" the install — see
+    // `applyAttachHostPreview` + buildInstancePickerSnapshot's
+    // hostInstallationId/previewInstallationId fallback.
+    const effectiveHostInstallationId =
+      parentEntry?.installationId ?? parentEntry?.previewInstallationId ?? null
     const selectedId = resolvePickerSelectedInstallId(
       entry.pickerSelectedInstallationId,
-      parentEntry?.installationId,
+      effectiveHostInstallationId,
       installs,
     )
     if (!entry.pickerSelectedInstallationId && selectedId) {
@@ -776,7 +806,9 @@ async function broadcastInstancePickerSnapshotToTitlePopups(
     const snapshot = buildInstancePickerSnapshot({
       installs,
       hostInstallationId: parentEntry?.installationId ?? null,
+      previewInstallationId: parentEntry?.previewInstallationId ?? null,
       runningInstallationIds,
+      launchingInstallationIds,
       selectedInstallationId: selectedId,
       selectedSettings: details.settings,
       selectedSnapshots: details.snapshots,
@@ -1420,6 +1452,13 @@ export interface TitlePopupHostBindings {
   /** Currently-running installation ids. Drives the picker's "running"
    *  row indicator and the focus-vs-launch decision in `pickInstall`. */
   getRunningInstallationIds: () => string[]
+  /** Installs mid-launch (between `instance-launching` and
+   *  `instance-started` / `instance-launch-failed`). Surfaced in the
+   *  picker snapshot so the popup — whose preload doesn't expose the
+   *  `onInstanceLaunching` IPC channel — can hydrate
+   *  `sessionStore.launchingInstances` and let `useInstallCta` flip the
+   *  CTA from Start to Restart/Switch during the launching window. */
+  getLaunchingInstallationIds: () => string[]
   /** Picker chose an install. The "from a Comfy window pick" contract:
    *  if the install is already running, focus its window; otherwise
    *  open a new Comfy window for it. NEVER swap the active install out
@@ -1563,9 +1602,14 @@ function openInstancePickerForHost(
   if (parentEntry.window.isDestroyed()) return
   const installs: InstancePickerInstall[] = cachedInstallsForPicker.slice()
   const runningInstallationIds = bindings.getRunningInstallationIds()
+  const launchingInstallationIds = bindings.getLaunchingInstallationIds()
+  // A chooser host that already staked a claim (preview) reads as
+  // owning the install for default-selection purposes.
+  const effectiveHostInstallationId =
+    parentEntry.installationId ?? parentEntry.previewInstallationId ?? null
   const initialSelectedId = resolvePickerSelectedInstallId(
     selectedInstallationId,
-    parentEntry.installationId,
+    effectiveHostInstallationId,
     installs,
   )
   // Bump the nonce whenever this open carries an autoAction so a repeat
@@ -1581,7 +1625,9 @@ function openInstancePickerForHost(
   const snapshot = buildInstancePickerSnapshot({
     installs,
     hostInstallationId: parentEntry.installationId,
+    previewInstallationId: parentEntry.previewInstallationId,
     runningInstallationIds,
+    launchingInstallationIds,
     selectedInstallationId: initialSelectedId,
     selectedSettings: null,
     selectedSnapshots: null,
@@ -2790,14 +2836,23 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
     void broadcastInstancePickerSnapshotToTitlePopups(bindings)
     void broadcastGlobalSettingsSnapshotToTitlePopups(bindings)
   })
-  // Host attach/detach flips `parentEntry.installationId`, which the
-  // picker snapshot folds into `activeInstallationId` (drives the
-  // "Current" pill on the row and the per-window CTA decision in
-  // `useInstallCta`). Without this listener the picker would only
-  // repaint at `instance-started` (via `markLaunched` → installation
-  // 'changed'), leaving the launching window without a Current pill
-  // for the entire launch.
+  // Host attach/detach (and the chooser's preview-claim apply/clear)
+  // flips `parentEntry.installationId` / `previewInstallationId`,
+  // which the picker snapshot folds into `activeInstallationId`
+  // (drives the "Current" pill on the row and the per-window CTA
+  // decision in `useInstallCta`). Without this listener the picker
+  // would only repaint at `instance-started` (via `markLaunched` →
+  // installation 'changed'), leaving the launching window without a
+  // Current pill for the entire launch.
   hostInstallEvents.on('changed', () => {
+    void broadcastInstancePickerSnapshotToTitlePopups(bindings)
+  })
+  // Session lifecycle (launching set + running set) drives the
+  // picker's row-side "running" indicator and the Start/Restart/Switch
+  // CTA. The popup's preload doesn't expose `onInstanceLaunching` —
+  // the only path that brings launching state into the popup is the
+  // snapshot itself, so we must rebroadcast on every transition.
+  sessionLifecycleEvents.on('changed', () => {
     void broadcastInstancePickerSnapshotToTitlePopups(bindings)
   })
   // Settings writes (applySettingSet) emit 'changed' — rebroadcast so

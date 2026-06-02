@@ -49,6 +49,7 @@ import {
   _runningSessions,
   _operationAborts,
   _activeOperationStatus,
+  _getLaunchingInstallationIds,
   stopRunning,
   resolveTheme,
   MSG_CANCELLED,
@@ -1500,6 +1501,7 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
         return enriched as unknown as InstancePickerInstall[]
       },
       getRunningInstallationIds: () => Array.from(_runningSessions.keys()),
+      getLaunchingInstallationIds: () => _getLaunchingInstallationIds(),
       // Per-install Settings + Snapshots payload for the picker's
       // right-pane accordions. Both reads route through the same
       // source helpers the unified Settings drawer uses

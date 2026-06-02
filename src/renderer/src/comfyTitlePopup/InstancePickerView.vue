@@ -71,6 +71,12 @@ interface PickerSnapshot {
   installs: PickerInstall[]
   activeInstallationId: string | null
   runningInstallationIds: string[]
+  /** Installs whose `instance-launching` has fired but `instance-started`
+   *  has not. Hydrated into `sessionStore.launchingInstances` because
+   *  the popup preload doesn't expose `onInstanceLaunching`. Drives
+   *  the **Start → Restart / Switch** CTA flip during the launching
+   *  window via `useInstallCta`. */
+  launchingInstallationIds: string[]
   selectedInstallationId: string | null
   selectedSettings: DetailSection[] | null
   selectedSnapshots: SnapshotListData | null
@@ -102,6 +108,20 @@ function hydrateSessionStoreFromSnapshot(): void {
         mode: ''
       }
       sessionStore.runningInstances.set(id, placeholder)
+    }
+  }
+  // The popup preload doesn't expose `onInstanceLaunching`, so the
+  // only path that brings launching state in is this snapshot.
+  // Without this hydration, `sessionStore.isLaunching(id)` would stay
+  // false during the launching window and `useInstallCta` would leave
+  // the CTA on Start (instead of flipping to Restart/Switch).
+  const nextLaunching = new Set(props.snapshot.launchingInstallationIds ?? [])
+  for (const id of Array.from(sessionStore.launchingInstances.keys())) {
+    if (!nextLaunching.has(id)) sessionStore.launchingInstances.delete(id)
+  }
+  for (const id of nextLaunching) {
+    if (!sessionStore.launchingInstances.has(id)) {
+      sessionStore.launchingInstances.set(id, { installationName: '' })
     }
   }
 }
