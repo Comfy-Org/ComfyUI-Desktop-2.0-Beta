@@ -583,7 +583,7 @@ describe('adoptDesktopInstall', () => {
     } finally { legacy.cleanup() }
   })
 
-  it('carries theme / autoInstallUpdates / pypiMirror and infers Chinese mirror flags', async () => {
+  it('carries autoInstallUpdates / pypiMirror and infers Chinese mirror flags', async () => {
     const legacy = buildFakeLegacy({
       configFiles: {
         'comfy.settings.json': JSON.stringify({
@@ -597,26 +597,27 @@ describe('adoptDesktopInstall', () => {
     try {
       const tools = buildSilentTools()
       const record = await adoptDesktopInstall({ tools, deps: buildDeps({}, legacy.info) })
-      expect(settingsMock.__store['theme']).toBe('dark')
+      // ColorPalette is a frontend canvas-color setting, not equivalent to
+      // v2's launcher `theme` — never carried.
+      expect(settingsMock.__store).not.toHaveProperty('theme')
       expect(settingsMock.__store['autoInstallUpdates']).toBe(false)
       expect(settingsMock.__store['pypiMirror']).toBe('https://mirrors.aliyun.com/pypi/simple/')
       expect(settingsMock.__store['useChineseMirrors']).toBe(true)
       expect(settingsMock.__store['chineseMirrorsPrompted']).toBe(true)
-      // Torch mirror is stashed on the record for a future managed-rebuild flow.
-      expect(record.adoptedTorchMirror).toBe('https://download.pytorch.org/whl/cu121')
+      // TorchInstallMirror has no v2 consumer (standalone variants ship
+      // torch pre-bundled) → never stashed on the record.
+      expect(record).not.toHaveProperty('adoptedTorchMirror')
     } finally { legacy.cleanup() }
   })
 
   it('respects pre-existing v2 settings under the "v2 user choice wins" rule', async () => {
-    // User already configured v2 with a dark theme + a custom pypi mirror
-    // before running adoption. Adoption must NOT overwrite those choices.
-    settingsMock.__store['theme'] = 'light'
+    // User already configured v2 with a custom pypi mirror before running
+    // adoption. Adoption must NOT overwrite that choice.
     settingsMock.__store['pypiMirror'] = 'https://pypi.org/simple/'
     settingsMock.__store['inputDir'] = '/v2/chosen/input'
     const legacy = buildFakeLegacy({
       configFiles: {
         'comfy.settings.json': JSON.stringify({
-          'Comfy.ColorPalette': 'dark',
           'Comfy-Desktop.UV.PypiInstallMirror': 'https://mirrors.aliyun.com/pypi/simple/',
         }),
       },
@@ -624,13 +625,12 @@ describe('adoptDesktopInstall', () => {
     try {
       const tools = buildSilentTools()
       await adoptDesktopInstall({ tools, deps: buildDeps({}, legacy.info) })
-      expect(settingsMock.__store['theme']).toBe('light')
       expect(settingsMock.__store['pypiMirror']).toBe('https://pypi.org/simple/')
       expect(settingsMock.__store['inputDir']).toBe('/v2/chosen/input')
       // outputDir was NOT pre-set → it should still get carried.
       expect(settingsMock.__store['outputDir']).toBe(path.join(legacy.basePath, 'output'))
       expect(telemetry.capture).toHaveBeenCalledWith('desktop2.adopt.succeeded', expect.objectContaining({
-        carry_skipped_keys: expect.arrayContaining(['theme', 'pypiMirror', 'inputDir']),
+        carry_skipped_keys: expect.arrayContaining(['pypiMirror', 'inputDir']),
       }))
     } finally { legacy.cleanup() }
   })

@@ -61,22 +61,29 @@ export interface AdoptOptions {
 
 export type AdoptSourceMode = 'pre-swap-copy' | 'git-clone-fallback'
 
-/** Subset of legacy `comfy.settings.json` consumed by the orchestrator. */
+/** Subset of legacy `comfy.settings.json` consumed by the orchestrator.
+ *  Excludes things v2 already handles via other paths:
+ *   - `Comfy.ColorPalette` is a frontend canvas-color setting that
+ *     lives in `<basePath>/user/default/comfy.settings.json` — ComfyUI
+ *     reads it on its own. v2's `theme` setting is the Electron
+ *     launcher chrome (`'system' | 'dark' | 'light'`) and isn't
+ *     equivalent.
+ *   - `Comfy-Desktop.UV.TorchInstallMirror` has no v2 consumer:
+ *     standalone variants ship torch pre-bundled and v2 never runs
+ *     `uv pip install torch`. The legacy `comfy.settings.json` is
+ *     preserved in `<configDir>/legacy-backup/<timestamp>/` so a
+ *     future "rebuild as managed standalone" flow can read it then. */
 interface LegacyComfySettings {
   /** `Comfy-Desktop.SendStatistics` — telemetry consent. */
   sendStatistics?: boolean
   /** `Comfy-Desktop.AutoUpdate` — whether the legacy app installed
    *  Desktop updates silently. Maps to v2 `autoInstallUpdates`. */
   autoUpdate?: boolean
-  /** `Comfy.ColorPalette` — `'dark' | 'light'`. Maps to v2 `theme`. */
-  theme?: string
-  /** `Comfy-Desktop.UV.PypiInstallMirror`. Maps to v2 `pypiMirror`. */
+  /** `Comfy-Desktop.UV.PypiInstallMirror` — user-pinned PyPI index URL.
+   *  Carries verbatim into v2 `pypiMirror` (feeds every `uv pip install`
+   *  the launcher runs: requirements during adoption, custom-node
+   *  installs, manager extras, snapshot restore). */
   pypiMirror?: string
-  /** `Comfy-Desktop.UV.TorchInstallMirror` — stashed on the adopted
-   *  record for a future "rebuild as managed standalone" flow that
-   *  needs to preselect the right wheel index. No active consumer in
-   *  v2 today. */
-  torchMirror?: string
 }
 
 /** Substrings that mark a mirror URL as a known Chinese mirror —
@@ -303,9 +310,7 @@ function readLegacyComfyPrefs(raw: Record<string, unknown>): LegacyComfySettings
   return {
     sendStatistics: asBool(raw['Comfy-Desktop.SendStatistics']),
     autoUpdate: asBool(raw['Comfy-Desktop.AutoUpdate']),
-    theme: asNonEmptyString(raw['Comfy.ColorPalette']),
     pypiMirror: asNonEmptyString(raw['Comfy-Desktop.UV.PypiInstallMirror']),
-    torchMirror: asNonEmptyString(raw['Comfy-Desktop.UV.TorchInstallMirror']),
   }
 }
 
@@ -571,7 +576,6 @@ interface CarryReport {
  *                              (always appended; never blocked).
  *   - `telemetryEnabled`     ← `Comfy-Desktop.SendStatistics`
  *   - `autoInstallUpdates`   ← `Comfy-Desktop.AutoUpdate`
- *   - `theme`                ← `Comfy.ColorPalette`
  *   - `pypiMirror`           ← `Comfy-Desktop.UV.PypiInstallMirror`
  *   - `useChineseMirrors` +
  *     `chineseMirrorsPrompted` ← inferred from `pypiMirror`
@@ -617,7 +621,6 @@ function carryLegacySettings(
 
   tryCarry('telemetryEnabled', legacy.sendStatistics)
   tryCarry('autoInstallUpdates', legacy.autoUpdate)
-  tryCarry('theme', legacy.theme)
   tryCarry('pypiMirror', legacy.pypiMirror)
 
   if (looksLikeChineseMirror(legacy.pypiMirror)) {
@@ -881,7 +884,6 @@ async function runAdoption(
       // today, but cheap to capture while we have the legacy config open.
       ...(detectedGpu ? { adoptedFromGpu: detectedGpu } : {}),
       ...(selectedDevice ? { adoptedSelectedDevice: selectedDevice } : {}),
-      ...(prefs.torchMirror ? { adoptedTorchMirror: prefs.torchMirror } : {}),
       releaseTag: 'legacy-adopted',
       variant: 'legacy-uv-py312',
       pythonVersion: '3.12',
