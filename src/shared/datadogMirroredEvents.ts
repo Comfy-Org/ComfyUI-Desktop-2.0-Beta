@@ -30,41 +30,41 @@
 export const DATADOG_MIRRORED_EVENT_NAMES: ReadonlySet<string> = new Set([
   // ComfyUI execution failures — alert on execution error rate per release
   // and per gpu_tier.
-  'desktop2.execution.error',
+  'comfy.desktop.execution.error',
   // ComfyUI process exit — properties carry `crashed: boolean`; monitor
   // filters on crashed=true for the crash-rate signal.
-  'desktop2.comfyui.exited',
+  'comfy.desktop.comfyui.exited',
   // App-update failure — monitors catch update-channel regressions.
-  'desktop2.app_update.error',
+  'comfy.desktop.app_update.error',
   // Install pipeline failures — monitors the install funnel's bottom step.
-  'desktop2.install.standalone.error',
-  'desktop2.install.post_install.error',
+  'comfy.desktop.install.standalone.error',
+  'comfy.desktop.install.post_install.error',
   // Migration pipeline failures (Desktop-1 -> standalone).
-  'desktop2.migrate.flow.error',
-  'desktop2.migrate.user_files.error',
-  'desktop2.migrate.input.error',
-  'desktop2.migrate.output.error',
-  'desktop2.migrate.models.error',
+  'comfy.desktop.migrate.flow.error',
+  'comfy.desktop.migrate.user_files.error',
+  'comfy.desktop.migrate.input.error',
+  'comfy.desktop.migrate.output.error',
+  'comfy.desktop.migrate.models.error',
   // Snapshot restore failures — partial restores are a known pain point.
-  'desktop2.snapshot.restore_comfyui_version.error',
-  'desktop2.snapshot.restore_custom_nodes.error',
-  'desktop2.snapshot.restore_pip_packages.error',
+  'comfy.desktop.snapshot.restore_comfyui_version.error',
+  'comfy.desktop.snapshot.restore_custom_nodes.error',
+  'comfy.desktop.snapshot.restore_pip_packages.error',
   // Operational signal for the identity migration rollout.
-  'desktop2.identity.migrated',
+  'comfy.desktop.identity.migrated',
   // Sign-in failures — alert if a provider's auth bridge breaks (OAuth
   // config drift, IdP outage, loopback-port contention).
-  'desktop2.auth.sign_in_failed',
+  'comfy.desktop.auth.sign_in_failed',
   // SDK-level volume guards — Datadog should alert if either fires
   // because the call site is misbehaving (loop, missing dedup, etc.)
   // and the SDK had to step in. One emit per process per event-name.
-  'desktop2.telemetry.rate_limited',
-  'desktop2.telemetry.session_cap_hit',
+  'comfy.desktop.telemetry.rate_limited',
+  'comfy.desktop.telemetry.session_cap_hit',
   // pygit2 reliability — spike here means a release broke the bundled
   // Python env for a population of users (signing / quarantine /
   // bootstrap-python copy drift). probe_failed = single-user state;
   // circuit_broken = stop-the-bleeding guard tripped.
-  'desktop2.pygit2.probe_failed',
-  'desktop2.pygit2.circuit_broken'
+  'comfy.desktop.pygit2.probe_failed',
+  'comfy.desktop.pygit2.circuit_broken'
 ])
 
 export function isDatadogMirroredEvent(eventName: string): boolean {

@@ -112,9 +112,7 @@ const restoreOp = computed<ActiveOperation | null>(() => {
 const restoreOpFile = computed<string | null>(
   () => (restoreOp.value?.actionData as { file?: string } | undefined)?.file ?? null
 )
-const restoreInFlight = computed<boolean>(
-  () => !!restoreOp.value && !restoreOp.value.done
-)
+const restoreInFlight = computed<boolean>(() => !!restoreOp.value && !restoreOp.value.done)
 const restorePhase = computed<string>(() => {
   const op = restoreOp.value
   if (!op || op.done) return ''
@@ -125,8 +123,10 @@ const restorePercent = computed<number | null>(() => {
   return p < 0 ? null : Math.max(0, Math.min(100, p))
 })
 const restoreCancellable = computed<boolean>(
-  () => !!restoreOp.value && !restoreOp.value.done
-       && ((restoreOp.value as ActiveOperation & { cancellable?: boolean }).cancellable ?? false)
+  () =>
+    !!restoreOp.value &&
+    !restoreOp.value.done &&
+    ((restoreOp.value as ActiveOperation & { cancellable?: boolean }).cancellable ?? false)
 )
 
 /** "Updated · 1h ago"-style label for the snapshot being restored *to* —
@@ -307,9 +307,8 @@ function scheduleReload(): void {
   }, 250)
 }
 onMounted(() => {
-  const onChanged = (
-    window.api as { onInstallationsChanged?: (cb: () => void) => () => void }
-  ).onInstallationsChanged
+  const onChanged = (window.api as { onInstallationsChanged?: (cb: () => void) => () => void })
+    .onInstallationsChanged
   if (typeof onChanged === 'function') {
     unsubChanges = onChanged(() => scheduleReload())
   }
@@ -374,7 +373,7 @@ async function toggleDiff(filename: string, mode: DiffMode): Promise<void> {
   try {
     const d = await window.api.getSnapshotDiff(props.installationId, filename, mode)
     diffCache.value = new Map(diffCache.value).set(key, d)
-    emitTelemetryAction('desktop2.snapshot.flow', {
+    emitTelemetryAction('comfy.desktop.snapshot.flow', {
       action: 'view_diff',
       snapshot_count_bucket: toCountBucket(snapshots.value.length),
       has_diff: d ? diffHasChanges(d.diff) : undefined
@@ -432,7 +431,7 @@ async function handleSave(): Promise<void> {
     })
     return
   }
-  emitTelemetryAction('desktop2.snapshot.flow', {
+  emitTelemetryAction('comfy.desktop.snapshot.flow', {
     action: 'save',
     snapshot_count_bucket: toCountBucket(snapshots.value.length)
   })
@@ -452,7 +451,7 @@ async function handleRestore(filename: string): Promise<void> {
   }
   const hasChanges = diff ? diffHasChanges(diff.diff) : undefined
 
-  emitTelemetryAction('desktop2.snapshot.flow', {
+  emitTelemetryAction('comfy.desktop.snapshot.flow', {
     action: 'restore_complete',
     snapshot_count_bucket: toCountBucket(snapshots.value.length),
     has_diff: hasChanges
@@ -510,7 +509,7 @@ async function handleDelete(filename: string): Promise<void> {
     })
     return
   }
-  emitTelemetryAction('desktop2.snapshot.flow', {
+  emitTelemetryAction('comfy.desktop.snapshot.flow', {
     action: 'delete',
     snapshot_count_bucket: toCountBucket(snapshots.value.length)
   })
@@ -527,7 +526,7 @@ async function handleDelete(filename: string): Promise<void> {
 
 async function handleExport(filename: string): Promise<void> {
   await window.api.exportSnapshot(props.installationId, filename)
-  emitTelemetryAction('desktop2.snapshot.flow', {
+  emitTelemetryAction('comfy.desktop.snapshot.flow', {
     action: 'export_one',
     snapshot_count_bucket: toCountBucket(snapshots.value.length)
   })
@@ -535,7 +534,7 @@ async function handleExport(filename: string): Promise<void> {
 
 async function handleExportAll(): Promise<void> {
   await window.api.exportAllSnapshots(props.installationId)
-  emitTelemetryAction('desktop2.snapshot.flow', {
+  emitTelemetryAction('comfy.desktop.snapshot.flow', {
     action: 'export_all',
     snapshot_count_bucket: toCountBucket(snapshots.value.length)
   })
@@ -590,10 +589,13 @@ async function handleImport(): Promise<void> {
   // and immediately auto-restores from the newest one, so racing an
   // in-flight op (copy / release-update / migrate / running launch)
   // would clobber both surfaces.
-  if (!await actionGuard.checkBeforeAction(
-    props.installationId,
-    t('snapshots.importSnapshots', 'Import Snapshots'),
-  )) return
+  if (
+    !(await actionGuard.checkBeforeAction(
+      props.installationId,
+      t('snapshots.importSnapshots', 'Import Snapshots')
+    ))
+  )
+    return
   const importResult = await window.api.importSnapshotsConfirm(props.installationId)
   if (!importResult.ok) {
     if (importResult.message) {
@@ -605,7 +607,7 @@ async function handleImport(): Promise<void> {
     }
     return
   }
-  emitTelemetryAction('desktop2.snapshot.flow', {
+  emitTelemetryAction('comfy.desktop.snapshot.flow', {
     action: 'import',
     snapshot_count_bucket: toCountBucket(snapshots.value.length),
     imported_bucket: toCountBucket(importResult.imported ?? 0)
@@ -687,34 +689,40 @@ async function handleImport(): Promise<void> {
         ref="topCardRef"
         class="snapshots-rail-node is-save"
         :class="{
-          'is-op-inflight':  restoreInFlight,
-          'is-op-success':   restoreTerminal === 'ok',
-          'is-op-error':     restoreTerminal === 'error'
+          'is-op-inflight': restoreInFlight,
+          'is-op-success': restoreTerminal === 'ok',
+          'is-op-error': restoreTerminal === 'error'
         }"
       >
         <span
           class="snapshots-rail-dot"
           :class="{
-            'is-pending':  !showRestoreCard,
+            'is-pending': !showRestoreCard,
             'is-spinning': restoreInFlight,
             'is-restored': restoreTerminal === 'ok',
-            'is-error':    restoreTerminal === 'error'
+            'is-error': restoreTerminal === 'error'
           }"
           :aria-hidden="true"
         ></span>
         <div class="snapshots-rail-content">
           <span class="snapshots-rail-label">
-            <template v-if="restoreInFlight">{{ t('snapshots.restoringStatus', 'Restoring snapshot') }}</template>
-            <template v-else-if="restoreTerminal === 'ok'">{{ t('snapshots.restored', 'Snapshot restored') }}</template>
-            <template v-else-if="restoreTerminal === 'error'">{{ t('snapshots.restoreFailed', 'Restore failed') }}</template>
+            <template v-if="restoreInFlight">{{
+              t('snapshots.restoringStatus', 'Restoring snapshot')
+            }}</template>
+            <template v-else-if="restoreTerminal === 'ok'">{{
+              t('snapshots.restored', 'Snapshot restored')
+            }}</template>
+            <template v-else-if="restoreTerminal === 'error'">{{
+              t('snapshots.restoreFailed', 'Restore failed')
+            }}</template>
             <template v-else>{{ t('snapshots.createLabel', 'Create Snapshot') }}</template>
           </span>
           <div
             class="snapshots-rail-save-box"
             :class="{
-              'is-op-inflight':  restoreInFlight,
-              'is-op-success':   restoreTerminal === 'ok',
-              'is-op-error':     restoreTerminal === 'error'
+              'is-op-inflight': restoreInFlight,
+              'is-op-success': restoreTerminal === 'ok',
+              'is-op-error': restoreTerminal === 'error'
             }"
           >
             <!-- In-flight: prominent card with target label, phase text,
@@ -866,7 +874,9 @@ async function handleImport(): Promise<void> {
                     @click="toggleDiff(item.snapshot.filename, 'previous')"
                   >
                     <ChevronDown :size="13" class="snap-diff-chevron" />
-                    <span>{{ t('snapshots.changesInSnapshot', 'What changed in this snapshot') }}</span>
+                    <span>{{
+                      t('snapshots.changesInSnapshot', 'What changed in this snapshot')
+                    }}</span>
                   </button>
                   <BaseAccordion :open="isDiffOpen(item.snapshot.filename, 'previous')">
                     <div class="snapshots-view-diff">
@@ -876,12 +886,19 @@ async function handleImport(): Promise<void> {
                       >
                         {{ t('common.loading', 'Loading…') }}
                       </div>
-                      <template v-else-if="diffFor(item.snapshot.filename, 'previous') !== undefined">
+                      <template
+                        v-else-if="diffFor(item.snapshot.filename, 'previous') !== undefined"
+                      >
                         <div
-                          v-if="!diffFor(item.snapshot.filename, 'previous') || !diffHasChanges(diffFor(item.snapshot.filename, 'previous')!.diff)"
+                          v-if="
+                            !diffFor(item.snapshot.filename, 'previous') ||
+                            !diffHasChanges(diffFor(item.snapshot.filename, 'previous')!.diff)
+                          "
                           class="snapshots-view-diff-empty"
                         >
-                          {{ t('snapshots.diffNoChanges', 'No changes from the previous snapshot.') }}
+                          {{
+                            t('snapshots.diffNoChanges', 'No changes from the previous snapshot.')
+                          }}
                         </div>
                         <SnapshotDiffView
                           v-else
@@ -905,7 +922,9 @@ async function handleImport(): Promise<void> {
                     @click="toggleDiff(item.snapshot.filename, 'current')"
                   >
                     <ChevronDown :size="13" class="snap-diff-chevron" />
-                    <span>{{ t('snapshots.ifYouRestore', 'What restoring this would change') }}</span>
+                    <span>{{
+                      t('snapshots.ifYouRestore', 'What restoring this would change')
+                    }}</span>
                   </button>
                   <BaseAccordion :open="isDiffOpen(item.snapshot.filename, 'current')">
                     <div class="snapshots-view-diff">
@@ -915,12 +934,22 @@ async function handleImport(): Promise<void> {
                       >
                         {{ t('common.loading', 'Loading…') }}
                       </div>
-                      <template v-else-if="diffFor(item.snapshot.filename, 'current') !== undefined">
+                      <template
+                        v-else-if="diffFor(item.snapshot.filename, 'current') !== undefined"
+                      >
                         <div
-                          v-if="!diffFor(item.snapshot.filename, 'current') || !diffHasChanges(diffFor(item.snapshot.filename, 'current')!.diff)"
+                          v-if="
+                            !diffFor(item.snapshot.filename, 'current') ||
+                            !diffHasChanges(diffFor(item.snapshot.filename, 'current')!.diff)
+                          "
                           class="snapshots-view-diff-empty"
                         >
-                          {{ t('snapshots.restoreNoChanges', 'Restoring this would make no changes — it matches your current state.') }}
+                          {{
+                            t(
+                              'snapshots.restoreNoChanges',
+                              'Restoring this would make no changes — it matches your current state.'
+                            )
+                          }}
                         </div>
                         <SnapshotDiffView
                           v-else
@@ -1156,7 +1185,9 @@ async function handleImport(): Promise<void> {
   border: 2px solid var(--color-surface);
 }
 @keyframes snapshots-rail-dot-spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .snapshots-rail-dot.is-pending {
@@ -1432,8 +1463,12 @@ async function handleImport(): Promise<void> {
   animation: snapshots-op-bar-indet 1.2s ease-in-out infinite;
 }
 @keyframes snapshots-op-bar-indet {
-  0%   { transform: translateX(-100%); }
-  100% { transform: translateX(250%); }
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(250%);
+  }
 }
 
 .snapshots-op-card-error-msg {

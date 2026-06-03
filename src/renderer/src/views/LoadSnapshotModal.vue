@@ -76,7 +76,10 @@ function onReleaseChange(value: string): void {
   selectedRelease.value = releaseOptions.value.find((o) => o.value === value) ?? null
 }
 
-interface SummaryEntry { label: string; value: string }
+interface SummaryEntry {
+  label: string
+  value: string
+}
 const summaryEntries = computed<SummaryEntry[]>(() => {
   if (!preview.value) return []
   const p = preview.value
@@ -87,7 +90,7 @@ const summaryEntries = computed<SummaryEntry[]>(() => {
     { label: t('snapshots.comfyuiVersion'), value: n.comfyuiVersion || '—' },
     { label: t('snapshots.variant'), value: n.comfyui.variant || '—' },
     { label: t('snapshots.pythonVersion'), value: n.pythonVersion || '—' },
-    { label: t('snapshots.capturedAt'), value: formatDate(n.createdAt) },
+    { label: t('snapshots.capturedAt'), value: formatDate(n.createdAt) }
   ]
 })
 
@@ -150,7 +153,9 @@ async function loadVariantOptions(): Promise<void> {
   selectedVariant.value = null
   try {
     const rawRelease = JSON.parse(JSON.stringify(toRaw(selectedRelease.value))) as FieldOption
-    const options = await window.api.getFieldOptions('standalone', 'variant', { release: rawRelease })
+    const options = await window.api.getFieldOptions('standalone', 'variant', {
+      release: rawRelease
+    })
     if (gen !== optionsGeneration) return
     variantOptions.value = options
 
@@ -236,10 +241,10 @@ function handleClearPreview(): void {
 
 function selectVariant(option: FieldOption): void {
   selectedVariant.value = option
-  emitTelemetryAction('desktop2.install.variant.selected', {
+  emitTelemetryAction('comfy.desktop.install.variant.selected', {
     variant_bucket: toVariantBucket((option.data?.variantId as string | undefined) || option.value),
     recommended: !!option.recommended,
-    flow: 'snapshot',
+    flow: 'snapshot'
   })
 }
 
@@ -248,10 +253,16 @@ async function handleCreate(): Promise<void> {
   creating.value = true
   const filePath = preview.value.filePath
   const releaseTag = selectedRelease.value?.value
-  const variantId = (selectedVariant.value?.data?.variantId as string) || selectedVariant.value?.value || undefined
+  const variantId =
+    (selectedVariant.value?.data?.variantId as string) || selectedVariant.value?.value || undefined
 
   try {
-    const result = await window.api.createFromSnapshot(filePath, installName.value || undefined, releaseTag, variantId)
+    const result = await window.api.createFromSnapshot(
+      filePath,
+      installName.value || undefined,
+      releaseTag,
+      variantId
+    )
     if (!result.ok) {
       if (result.message) {
         await modal.alert({ title: t('list.loadSnapshot'), message: result.message })
@@ -268,7 +279,7 @@ async function handleCreate(): Promise<void> {
         apiCall: () => window.api.installInstance(result.entry!.id),
         cancellable: true,
         autoLaunchOnFinish: true,
-        opKind: 'install',
+        opKind: 'install'
       })
       return
     }
@@ -378,11 +389,12 @@ defineExpose({ open })
                 :aria-label="$t('list.snapshotRelease')"
                 @update:model-value="onReleaseChange"
               />
-              <div
-                v-if="preview.newestSnapshot.comfyui.releaseTag"
-                class="ls-hint"
-              >
-                {{ $t('list.snapshotOriginalRelease', { tag: preview.newestSnapshot.comfyui.releaseTag }) }}
+              <div v-if="preview.newestSnapshot.comfyui.releaseTag" class="ls-hint">
+                {{
+                  $t('list.snapshotOriginalRelease', {
+                    tag: preview.newestSnapshot.comfyui.releaseTag
+                  })
+                }}
               </div>
             </div>
 
@@ -400,18 +412,19 @@ defineExpose({ open })
               />
               <div v-else class="ls-loading">{{ $t('newInstall.noOptions') }}</div>
               <div v-if="hardwareMismatch" class="ls-hw-warning">
-                {{ $t('list.snapshotHardwareMismatch', { snapshotDevice: snapshotGpuLabel, detectedDevice: detectedGpuLabel }) }}
+                {{
+                  $t('list.snapshotHardwareMismatch', {
+                    snapshotDevice: snapshotGpuLabel,
+                    detectedDevice: detectedGpuLabel
+                  })
+                }}
               </div>
             </div>
 
             <div class="ls-divider" aria-hidden="true" />
 
             <div class="brand-summary">
-              <div
-                v-for="entry in summaryEntries"
-                :key="entry.label"
-                class="brand-summary__row"
-              >
+              <div v-for="entry in summaryEntries" :key="entry.label" class="brand-summary__row">
                 <span class="brand-summary__label">{{ entry.label }}</span>
                 <span class="brand-summary__value">{{ entry.value }}</span>
               </div>
@@ -425,14 +438,15 @@ defineExpose({ open })
                 @click="nodesExpanded = !nodesExpanded"
               >
                 <ChevronRight :size="14" class="ls-disclosure__chevron" aria-hidden="true" />
-                <span>{{ $t('snapshots.customNodes') }} ({{ preview.newestSnapshot.customNodes.length }})</span>
+                <span
+                  >{{ $t('snapshots.customNodes') }} ({{
+                    preview.newestSnapshot.customNodes.length
+                  }})</span
+                >
               </button>
               <div class="ls-disclosure__wrap">
                 <div class="ls-disclosure__body">
-                  <div
-                    v-if="preview.newestSnapshot.customNodes.length > 0"
-                    class="recessed-list"
-                  >
+                  <div v-if="preview.newestSnapshot.customNodes.length > 0" class="recessed-list">
                     <div
                       v-for="node in preview.newestSnapshot.customNodes"
                       :key="node.id"
@@ -462,14 +476,15 @@ defineExpose({ open })
                 @click="pipExpanded = !pipExpanded"
               >
                 <ChevronRight :size="14" class="ls-disclosure__chevron" aria-hidden="true" />
-                <span>{{ $t('snapshots.pipPackages') }} ({{ preview.newestSnapshot.pipPackageCount }})</span>
+                <span
+                  >{{ $t('snapshots.pipPackages') }} ({{
+                    preview.newestSnapshot.pipPackageCount
+                  }})</span
+                >
               </button>
               <div class="ls-disclosure__wrap">
                 <div class="ls-disclosure__body">
-                  <div
-                    v-if="preview.newestSnapshot.pipPackageCount > 0"
-                    class="recessed-list"
-                  >
+                  <div v-if="preview.newestSnapshot.pipPackageCount > 0" class="recessed-list">
                     <div
                       v-for="(version, name) in preview.newestSnapshot.pipPackages"
                       :key="name"
@@ -505,7 +520,9 @@ defineExpose({ open })
                       <span class="ls-trigger" :class="'ls-trigger-' + snap.trigger">
                         {{ triggerCopy(snap.trigger) }}
                       </span>
-                      <span v-if="i === 0" class="ls-current-tag">{{ $t('snapshots.current') }}</span>
+                      <span v-if="i === 0" class="ls-current-tag">{{
+                        $t('snapshots.current')
+                      }}</span>
                       <span class="ls-meta">
                         {{ snap.comfyuiVersion }} ·
                         {{ $t('snapshots.nodesCount', { count: snap.nodeCount }) }} ·
@@ -584,7 +601,9 @@ defineExpose({ open })
   border: 2px dashed var(--brand-surface-border);
   border-radius: 8px;
   padding: 32px;
-  transition: border-color 160ms ease, background 160ms ease;
+  transition:
+    border-color 160ms ease,
+    background 160ms ease;
   color: var(--neutral-200);
 }
 .ls-dropzone--active {
