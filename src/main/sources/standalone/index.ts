@@ -93,6 +93,12 @@ export const standalone: SourcePlugin = {
     const r2Release = vd?.r2Release
     const variantId = vd?.variantId || ''
     const isCpu = stripPlatform(variantId) === 'cpu' || stripPlatform(variantId).startsWith('cpu-')
+    // The release dropdown values now match the IPP channel ids:
+    // 'stable' triggers the post-install update-to-stable step;
+    // 'latest' (master HEAD) leaves the bundle's checked-in commit
+    // alone and only persists `updateChannel` so the IPP Update tab
+    // opens on the picked channel.
+    const isStable = selections.release?.value === 'stable'
     const isLatest = selections.release?.value === 'latest'
     const releaseTag = r2Release?.tag || (selections.release?.value || 'unknown')
     return {
@@ -112,7 +118,8 @@ export const standalone: SourcePlugin = {
       launchArgs: isCpu ? `${DEFAULT_LAUNCH_ARGS} --cpu` : DEFAULT_LAUNCH_ARGS,
       launchMode: 'window',
       browserPartition: 'unique',
-      ...(isLatest ? { autoUpdateComfyUI: true } : {}),
+      ...(isStable ? { autoUpdateComfyUI: true } : {}),
+      ...(isLatest ? { updateChannel: 'latest' } : {}),
     }
   },
 
@@ -285,32 +292,34 @@ export const standalone: SourcePlugin = {
 
       const options: FieldOption[] = []
 
-      // Synthetic "Latest Stable" entry.  Resolve the upstream ComfyUI tag
-      // (e.g. `v1.19.5`) via bootstrap pygit2 so users can see the concrete
-      // version they'll be installing.  Falls back to no description when
-      // the lookup fails (offline, pygit2 unavailable, etc.).
+      // Same two channel options the IPP Update tab uses (see
+      // `getChannelDefs()` in `./updateSections.ts`). 'stable' is
+      // recommended and triggers the post-install update-to-stable
+      // step. 'latest' (master HEAD) leaves the bundle's checked-in
+      // commit alone — the user can fast-forward from the IPP Update
+      // tab. Per-bundle-tag entries (v0.20.1-env1, etc.) were dropped
+      // at the same time; they exposed an implementation detail
+      // (the R2 bundle tag) instead of the channel users actually
+      // care about.
       if (tags.length > 0 && context?.includeLatestStable) {
         const latestStableTag = await getLatestStableTag()
+        const newestBundle = tags[0]!
         options.push({
-          value: 'latest',
-          label: t('standalone.latestVersion'),
-          ...(latestStableTag ? { description: latestStableTag } : {}),
+          value: 'stable',
+          label: t('standalone.channelStable'),
+          description: t('standalone.channelStableDesc'),
           recommended: true,
           // `latestStableTag` is the upstream ComfyUI version the post-install
-          // "update to stable" step resolves to (and what the dropdown advertises).
-          // Thread it through so the variant cards show that same version rather
-          // than the older ComfyUI baked into the standalone bundle — otherwise
-          // the two surfaces disagree (issue #708).
-          data: { tag: tags[0]!.tag, vendorReleases, latestStableTag } as unknown as Record<string, unknown>,
+          // "update to stable" step resolves to. Thread it through so the
+          // variant cards show that same version rather than the older
+          // ComfyUI baked into the standalone bundle (issue #708).
+          data: { tag: newestBundle.tag, vendorReleases, latestStableTag } as unknown as Record<string, unknown>,
         })
-      }
-
-      for (const entry of tags) {
-        const dateStr = entry.date.slice(0, 10)
         options.push({
-          value: entry.tag,
-          label: `${entry.tag}  —  ComfyUI ${entry.comfyui_version}  ·  ${dateStr}`,
-          data: { tag: entry.tag, vendorReleases } as unknown as Record<string, unknown>,
+          value: 'latest',
+          label: t('standalone.channelLatest'),
+          description: t('standalone.channelLatestDesc'),
+          data: { tag: newestBundle.tag, vendorReleases } as unknown as Record<string, unknown>,
         })
       }
       return options
@@ -322,15 +331,13 @@ export const standalone: SourcePlugin = {
       const prefix = PLATFORM_PREFIX[process.platform]
       if (!prefix) return []
 
-      const isLatest = selections.release?.value === 'latest'
+      const isStable = selections.release?.value === 'stable'
       const gpu = context?.gpu as string | undefined
 
       return Object.entries(releaseData.vendorReleases)
         .filter(([vendorId]) => vendorId.startsWith(prefix))
         .map(([vendorId, releases]): FieldOption | null => {
-          const release = isLatest
-            ? releases[0]
-            : releases.find((r) => r.tag === releaseData.tag)
+          const release = releases[0]
           if (!release) return null
 
           const sizeMB = (release.size / 1048576).toFixed(0)
@@ -339,14 +346,14 @@ export const standalone: SourcePlugin = {
             filename: release.file,
             size: release.size,
           }]
-          // For "Latest Stable", the card must advertise the version the user
+          // For Stable, the card must advertise the version the user
           // ends up with after post-install auto-update (the upstream stable
-          // tag the dropdown shows), not the older ComfyUI bundled in the R2
-          // standalone build. Strip a leading `v` to match the bare-version
-          // card format (`ComfyUI 0.22.3`). Falls back to the bundled version
-          // when the upstream tag couldn't be resolved (offline, etc.).
+          // tag), not the older ComfyUI bundled in the R2 standalone build.
+          // Strip a leading `v` to match the bare-version card format
+          // (`ComfyUI 0.22.3`). Falls back to the bundled version when the
+          // upstream tag couldn't be resolved (offline, etc.).
           const displayVersion =
-            isLatest && releaseData.latestStableTag
+            isStable && releaseData.latestStableTag
               ? releaseData.latestStableTag.replace(/^v/, '')
               : release.comfyui_version
           return {
