@@ -164,12 +164,9 @@ function sanitizeModelsDirs(value: unknown, currentDefault: string): string[] {
     result.push(candidate)
   }
 
-  // Ensure the system default is present, but preserve user ordering.
-  // Append (don't prepend) so the user's chosen primary path stays at [0].
-  const resolvedDefault = path.resolve(currentDefault)
-  if (!seen.has(resolvedDefault)) {
-    result.push(resolvedDefault)
-  }
+  // A non-empty list reflects the user's stated preference — return
+  // as-is. Empty / missing input falls back to [systemDefault] in the
+  // caller (`load()`).
 
   return result
 }
@@ -286,22 +283,39 @@ function load(): Settings {
   if (!Array.isArray(result.modelsDirs) || result.modelsDirs.length === 0) {
     result.modelsDirs = [systemDefault]
     changed = true
-  } else if (!result.modelsDirs.some((d) => path.resolve(d) === path.resolve(systemDefault))) {
-    result.modelsDirs.push(systemDefault)
-    changed = true
   }
-  // Create the system default directory and model subdirectories on disk
-  try {
-    fs.mkdirSync(systemDefault, { recursive: true })
-    for (const folder of MODEL_FOLDER_TYPES) {
-      fs.mkdirSync(path.join(systemDefault, folder), { recursive: true })
-    }
-  } catch {}
-  // Create shared input/output directories
+
+  // Only create the system-default tree on disk when the user is
+  // actually using it. Otherwise a user who has moved their models
+  // elsewhere ends up with an empty ~/ComfyUI-Shared that gets
+  // recreated on every settings load.
+  const usesSystemDefault = result.modelsDirs.some(
+    (d): d is string => typeof d === 'string' && path.resolve(d) === path.resolve(systemDefault)
+  )
+  if (usesSystemDefault) {
+    try {
+      fs.mkdirSync(systemDefault, { recursive: true })
+      for (const folder of MODEL_FOLDER_TYPES) {
+        fs.mkdirSync(path.join(systemDefault, folder), { recursive: true })
+      }
+    } catch {}
+  }
+  // Create shared input/output directories only when the user has them
+  // pointed at a path they actually want. Windows's
+  // sanitizeUserDefaultPath above replaces an undefined inputDir /
+  // outputDir with `defaults[key]`, so a non-empty value alone isn't a
+  // signal that the user explicitly chose the default — compare against
+  // `defaults[key]` and only mkdir the default location when the user
+  // is also using the default modelsDirs. A custom user path (any value
+  // not equal to the default) is always created.
   try {
     for (const key of ["inputDir", "outputDir"] as const) {
-      const dir = (result[key] as string | undefined) || defaults[key]
-      fs.mkdirSync(dir, { recursive: true })
+      const userSet = result[key] as string | undefined
+      if (!userSet || userSet.trim() === '') continue
+      const isDefaultPath = path.resolve(userSet) === path.resolve(defaults[key])
+      if (!isDefaultPath || usesSystemDefault) {
+        fs.mkdirSync(userSet, { recursive: true })
+      }
     }
   } catch {}
   if (changed) save(result)
