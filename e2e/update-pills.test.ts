@@ -126,20 +126,26 @@ test('install-update chip stays hidden on the install-less chooser host even wit
 // ---------------------------------------------------------------------------
 
 /** True iff the embedded comfySystemModal popup is visible — same
- *  contract as `isPopupVisible` in chooser.test.ts. */
+ *  contract as `isPopupVisible` in chooser.test.ts. Returns false if the
+ *  main-process context is torn down mid-evaluate (window navigation /
+ *  teardown race) — a destroyed context means nothing is visible anyway. */
 async function isSystemModalVisible(app: ElectronApplication): Promise<boolean> {
-  return app.evaluate(({ BrowserWindow, WebContentsView }) => {
-    for (const win of BrowserWindow.getAllWindows()) {
-      for (const child of win.contentView.children) {
-        if (!(child instanceof WebContentsView)) continue
-        if (!child.webContents.getURL().includes('comfySystemModal.html')) continue
-        if (!child.getVisible()) return false
-        const b = child.getBounds()
-        return b.width > 0 && b.height > 0
+  try {
+    return await app.evaluate(({ BrowserWindow, WebContentsView }) => {
+      for (const win of BrowserWindow.getAllWindows()) {
+        for (const child of win.contentView.children) {
+          if (!(child instanceof WebContentsView)) continue
+          if (!child.webContents.getURL().includes('comfySystemModal.html')) continue
+          if (!child.getVisible()) return false
+          const b = child.getBounds()
+          return b.width > 0 && b.height > 0
+        }
       }
-    }
+      return false
+    })
+  } catch {
     return false
-  })
+  }
 }
 
 /** Cancel any open system-modal popup so a previous test's leftover

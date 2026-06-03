@@ -17,6 +17,7 @@ import { migrateXdgPaths } from './lib/paths'
 import { saveWindowBounds } from './lib/windowState'
 import { registerProcessErrorHandlers } from './lib/processErrorHandlers'
 import { registerTitleTooltipIpc } from './popups/titleTooltip'
+import { registerTitleCoachmarkIpc } from './popups/titleCoachmark'
 import { openSystemModal, openSystemModalAsync, registerSystemModalIpc } from './popups/systemModal'
 import {
   registerTitlePopupIpc,
@@ -78,6 +79,7 @@ import {
   consumeAttachClaim,
   dropAttachClaimsForWindow,
   findEntryByTitleBarSender,
+  findEntryByHostWindow,
   getEntryByInstallationId,
   isChooserHost,
   isInstallHost,
@@ -1189,6 +1191,11 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
     i18n.init(locale)
     registerTitleTooltipIpc({
       findParentByTitleBarSender: (wc) => findEntryByTitleBarSender(wc)?.entry.window ?? null
+    })
+    registerTitleCoachmarkIpc({
+      findParentByTitleBarSender: (wc) => findEntryByTitleBarSender(wc)?.entry.window ?? null,
+      findTitleBarByParent: (parent) =>
+        findEntryByHostWindow(parent)?.titleBarView.webContents ?? null
     })
     registerSystemModalIpc()
     // Swap-in-place contract: when the user picks a different install

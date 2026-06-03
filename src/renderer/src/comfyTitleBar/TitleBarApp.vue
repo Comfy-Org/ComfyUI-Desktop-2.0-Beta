@@ -17,6 +17,7 @@ import { useTitleBarMenus } from './useTitleBarMenus'
 import { useTitleBarIdentity } from './useTitleBarIdentity'
 import { useUpdatePills } from './useUpdatePills'
 import { useTitleBarHoverGate } from './useTitleBarHoverGate'
+import { useCentralPillCoachmark } from './useCentralPillCoachmark'
 import ComfyCLogo from '../components/icons/ComfyCLogo.vue'
 
 const { t, locale } = useI18n()
@@ -78,6 +79,18 @@ interface Bridge {
   showTooltip: (payload: { text: string; leftX: number; rightX: number; bottomY: number }) => void
   /** Issue #514 — hide the title-bar hover tooltip popup. */
   hideTooltip: () => void
+  /** First-instance onboarding coachmark (issue #701) — show/hide the
+   *  sticky card pointing at the centre pill; subscribe to its dismiss. */
+  showCoachmark: (payload: {
+    title: string
+    body: string
+    dismissLabel: string
+    leftX: number
+    rightX: number
+    bottomY: number
+  }) => void
+  hideCoachmark: () => void
+  onCoachmarkDismissed: (cb: () => void) => () => void
   onPanelChanged: (cb: (panel: ComfyPanelKey) => void) => () => void
   onTitleChanged: (cb: (title: string) => void) => () => void
   /** Install source-category pushes from main. The raw category
@@ -204,6 +217,7 @@ const {
   firstUseMode,
   isConsentLockdown,
   isFirstUseLockdown,
+  isLoadingLockdown,
   installTypeMeta,
   installTypeLabel,
   showInstallTypeIcon,
@@ -448,6 +462,26 @@ const {
   installPillRef
 })
 
+// First-instance onboarding coachmark pointing at the centre pill. Shares
+// the menus composable's pill ref; opening the drawer acknowledges it.
+const coachmark = useCentralPillCoachmark({
+  bridge,
+  isInstallLess,
+  isFirstUseLockdown,
+  isLoadingLockdown,
+  installPillRef,
+  title: t('titleBar.pillHintTitle'),
+  body: t('titleBar.pillHintBody'),
+  dismissLabel: t('titleBar.pillHintDismiss')
+})
+
+/** Wrap the pill opener so opening the drawer retires the coachmark
+ *  (the hint did its job) before delegating to the real handler. */
+function handleInstallPillWithCoachmark(): void {
+  void coachmark.acknowledgeViaPillOpen()
+  handleInstallPill()
+}
+
 /** One-shot "downloads started" attention flash. Driven by
  *  `downloadsStartedAt` from the menus composable, which bumps each
  *  time a brand-new active download appears. The flash is purely
@@ -470,6 +504,7 @@ watch(downloadsStartedAt, (next) => {
 let unsubPanel: (() => void) | undefined
 let unsubInstallationId: (() => void) | undefined
 let unsubZoom: (() => void) | undefined
+let unsubCoachmarkDismissed: (() => void) | undefined
 
 onMounted(() => {
   // Observe the trailing cluster so the left cluster can mirror its
@@ -514,8 +549,32 @@ onMounted(() => {
   unsubInstallationId = bridge.onInstallationIdChanged((installationId) => {
     isInstallLess.value = installationId === null
   })
+  // The popup's own dismiss button (✕ / "Got it") routes through main
+  // back to here — flip the once-ever flag + hide.
+  unsubCoachmarkDismissed = bridge.onCoachmarkDismissed(() => {
+    void coachmark.dismiss()
+  })
   bridge.ready()
 })
+
+// Gate inputs settle async via main's pushes after mount, so watch them
+// and re-attempt on each transition (the composable is idempotent) rather
+// than firing once on mount.
+watch(
+  [isInstallLess, isFirstUseLockdown, isLoadingLockdown],
+  ([installLess, lockdown, loading]) => {
+    if (installLess || lockdown || loading) return
+    // Defer past the responsive fit settle so the pill's centre is final
+    // before anchoring: nextTick flushes the DOM, the rAF the layout.
+    void nextTick().then(() => {
+      requestAnimationFrame(() => {
+        if (unmounted) return
+        void coachmark.maybeShow()
+      })
+    })
+  },
+  { immediate: true }
+)
 
 // Invalidate the learned restore costs when anything that materially
 // changes the trailing cluster's content width flips. The fit
@@ -540,6 +599,8 @@ onUnmounted(() => {
   unsubPanel?.()
   unsubInstallationId?.()
   unsubZoom?.()
+  unsubCoachmarkDismissed?.()
+  bridge?.hideCoachmark()
   hideTip()
   trailingObserver?.disconnect()
   trailingObserver = undefined
@@ -644,15 +705,16 @@ onUnmounted(() => {
         class="title-install-pill is-interactive"
         :class="{
           'is-open': isInstancePickerOpen,
+          'is-coachmark': coachmark.isShowing.value,
           'is-install-less': isInstallLess
         }"
         role="button"
         tabindex="0"
         aria-haspopup="dialog"
         :aria-expanded="isInstancePickerOpen"
-        @click="handleInstallPill"
-        @keydown.enter.prevent="handleInstallPill"
-        @keydown.space.prevent="handleInstallPill"
+        @click="handleInstallPillWithCoachmark"
+        @keydown.enter.prevent="handleInstallPillWithCoachmark"
+        @keydown.space.prevent="handleInstallPillWithCoachmark"
       >
         <!-- Leading mark: the Comfy logo only on the bare dashboard; on an
              actual instance the pill leads with that install's source/type

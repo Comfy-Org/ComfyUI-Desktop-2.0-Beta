@@ -211,6 +211,25 @@ export interface ComfyTitleBarBridge {
   /** Issue #514 — hide the title-bar hover tooltip popup. Sent on
    *  pointer leave, focus loss, menu open, or panel switch. */
   hideTooltip(): void
+  /** First-instance onboarding coachmark (issue #701) — show the sticky
+   *  card pointing at the centre pill. Reuses the clip-escaping tooltip
+   *  popup pipeline (`variant: 'coachmark'`). `leftX`/`rightX` bracket
+   *  the pill's edges, `bottomY` is its bottom edge — title-bar-local
+   *  px (the title-bar view sits at window (0,0)). */
+  showCoachmark(payload: {
+    title: string
+    body: string
+    dismissLabel: string
+    leftX: number
+    rightX: number
+    bottomY: number
+  }): void
+  /** Hide the onboarding coachmark popup. */
+  hideCoachmark(): void
+  /** Subscribe to the coachmark's own dismiss button. Main forwards this
+   *  after the popup's ✕ / "Got it" is clicked so the renderer flips the
+   *  once-ever `hasSeenCentralPillHint` flag via `window.api`. */
+  onCoachmarkDismissed(cb: () => void): () => void
   /** Tell main this title bar is mounted; main responds with the initial state. */
   ready(): void
 }
@@ -394,6 +413,17 @@ const bridge: ComfyTitleBarBridge = {
   },
   hideTooltip: () => {
     ipcRenderer.send('comfy-window:hide-titlebar-tooltip')
+  },
+  showCoachmark: (payload) => {
+    ipcRenderer.send('comfy-window:show-titlebar-coachmark', payload)
+  },
+  hideCoachmark: () => {
+    ipcRenderer.send('comfy-window:hide-titlebar-coachmark')
+  },
+  onCoachmarkDismissed: (cb) => {
+    const handler = (): void => cb()
+    ipcRenderer.on('comfy-titlebar:coachmark-dismissed', handler)
+    return () => ipcRenderer.removeListener('comfy-titlebar:coachmark-dismissed', handler)
   },
   ready: () => {
     ipcRenderer.send('comfy-window:title-bar-ready')

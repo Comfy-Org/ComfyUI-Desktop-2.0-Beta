@@ -113,7 +113,13 @@ export const en = {
     installUpdateVersion: 'ComfyUI {version}',
     installUpdateShort: 'Update',
     refreshInstanceTooltip: 'Refresh',
-    resetZoomTooltip: 'Reset zoom to 100%'
+    resetZoomTooltip: 'Reset zoom to 100%',
+    /** First-instance onboarding coachmark pointing at the centre pill —
+     *  teaches that the pill is the instance picker (switch / manage /
+     *  back to the dashboard for a new local install). Shown once ever. */
+    pillHintTitle: 'Switch & manage instances',
+    pillHintBody: 'Click here to switch instances, start a new local install, or return to the dashboard.',
+    pillHintDismiss: 'Got it'
   },
   fileMenu: {
     newWindow: 'New Window',
