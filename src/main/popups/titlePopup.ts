@@ -1395,8 +1395,16 @@ function openTitlePopup(opts: OpenTitlePopupOpts): void {
     config = { kind: 'downloads', theme: opts.theme }
   } else if (opts.kind === 'instance-picker') {
     config = { kind: 'instance-picker', snapshot: opts.snapshot, theme: opts.theme }
+    // Seed the broadcast-dedupe cache with the snapshot we're about to
+    // ship as the initial config. Without this, a subsequent live
+    // broadcast that happens to equal a *previous* session's last
+    // broadcast (but differs from the snapshot the renderer is currently
+    // displaying) would be silently skipped by the dedupe check in
+    // `broadcastInstancePickerUpdate` / `broadcastGlobalSettingsUpdate`.
+    entry.lastPickerBroadcastJson = JSON.stringify(opts.snapshot)
   } else {
     config = { kind: 'global-settings', snapshot: opts.snapshot, theme: opts.theme }
+    entry.lastGlobalSettingsBroadcastJson = JSON.stringify(opts.snapshot)
   }
   const configJson = JSON.stringify(config)
 
@@ -1872,10 +1880,8 @@ const SETTINGS_TYPE_TO_DETAIL_EDIT_TYPE: Record<string, string | undefined> = {
 }
 
 /** Map a main-side `SettingsField` into the loose-typed `DetailField`
- *  shape the renderer's `SettingsSectionList` expects. Keeps the
- *  popup view pure-display by doing the field-shape translation here
- *  rather than in `useGlobalSettings.ts` (which only ran in the panel
- *  renderer). */
+ *  shape the renderer's `SettingsSectionList` expects. Done main-side
+ *  so the popup view stays pure-display. */
 function toDetailField(
   f: ReturnType<typeof buildSettingsSections>[number]['fields'][number],
 ): Record<string, unknown> {
