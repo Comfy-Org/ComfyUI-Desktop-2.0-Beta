@@ -6,8 +6,8 @@
 
 **Install, run, and manage [ComfyUI](https://github.com/comfyanonymous/ComfyUI) from one app — no dependency hell.**
 
-[![Latest Release](https://img.shields.io/github/v/release/Comfy-Org/ComfyUI-Desktop-2.0-Beta?style=for-the-badge&display_name=tag&color=4f46e5)](https://github.com/Comfy-Org/ComfyUI-Desktop-2.0-Beta/releases/latest)
-[![CI](https://img.shields.io/github/actions/workflow/status/Comfy-Org/ComfyUI-Desktop-2.0-Beta/ci.yml?branch=main&style=for-the-badge&label=CI)](https://github.com/Comfy-Org/ComfyUI-Desktop-2.0-Beta/actions/workflows/ci.yml)
+[![Latest Release](https://img.shields.io/github/v/release/Comfy-Org/Comfy-Desktop?style=for-the-badge&display_name=tag&color=4f46e5)](https://github.com/Comfy-Org/Comfy-Desktop/releases/latest)
+[![CI](https://img.shields.io/github/actions/workflow/status/Comfy-Org/Comfy-Desktop/ci.yml?branch=main&style=for-the-badge&label=CI)](https://github.com/Comfy-Org/Comfy-Desktop/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](LICENSE)
 [![Discord](https://img.shields.io/badge/Discord-Join-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://www.comfy.org/discord)
 
@@ -52,7 +52,7 @@ Comfy Desktop is the official desktop application for **ComfyUI**, the node-base
 | **Windows** (x64) | [![Windows x64](https://img.shields.io/badge/Download-Windows%20x64-0078D6?style=flat-square&logo=windows&logoColor=white)](https://dl.todesktop.com/241130tqe9q3y/windows/nsis/x64) |
 | **Windows** (ARM64) | [![Windows ARM64](https://img.shields.io/badge/Download-Windows%20ARM64-0078D6?style=flat-square&logo=windows&logoColor=white)](https://dl.todesktop.com/241130tqe9q3y/windows/nsis/arm64) |
 | **macOS** (Apple Silicon) | [![macOS Apple Silicon](https://img.shields.io/badge/Download-macOS%20Apple%20Silicon-000000?style=flat-square&logo=apple&logoColor=white)](https://dl.todesktop.com/241130tqe9q3y/mac/dmg/arm64) |
-| **Linux** | `.AppImage` &amp; `.deb` — see the [latest release](https://github.com/Comfy-Org/ComfyUI-Desktop-2.0-Beta/releases/latest) |
+| **Linux** | `.AppImage` &amp; `.deb` — see the [latest release](https://github.com/Comfy-Org/Comfy-Desktop/releases/latest) |
 
 > **New to ComfyUI?** Just download, install, and open the app — it walks you through creating your first setup. No terminal required.
 
@@ -113,8 +113,8 @@ corepack enable                # enables pnpm (bundled with Node)
 ### Setup
 
 ```bash
-git clone https://github.com/Comfy-Org/ComfyUI-Desktop-2.0-Beta.git
-cd ComfyUI-Desktop-2.0-Beta
+git clone https://github.com/Comfy-Org/Comfy-Desktop.git
+cd Comfy-Desktop
 pnpm run init
 ```
 
@@ -161,7 +161,7 @@ The app ships a minimal (~15–20 MB) standalone Python with `pygit2` baked in, 
 | Command | What it does |
 |---|---|
 | `pnpm run bootstrap` | Build locally via `scripts/build-bootstrap-python.py` (requires Python 3.13). Auto-detects the host platform; pass `--platform win-x64\|mac-arm64\|linux-x64` for another. |
-| `pnpm run bootstrap:fetch` | Download a prebuilt archive from the [`bootstrap-v1`](https://github.com/Comfy-Org/ComfyUI-Desktop-2.0-Beta/releases/tag/bootstrap-v1) release (faster; no local Python needed). Set `GITHUB_TOKEN` to authenticate. |
+| `pnpm run bootstrap:fetch` | Download a prebuilt archive from the [`bootstrap-v1`](https://github.com/Comfy-Org/Comfy-Desktop/releases/tag/bootstrap-v1) release (faster; no local Python needed). Set `GITHUB_TOKEN` to authenticate. |
 
 Both write to `bootstrap-python/{win-x64,mac-arm64,linux-x64}/` (gitignored). The directory must exist before `pnpm run dev` or `pnpm run build:*`.
 
@@ -219,13 +219,13 @@ Quit the app first, then:
 
 ```sh
 # macOS
-curl -fsSLO https://raw.githubusercontent.com/Comfy-Org/ComfyUI-Desktop-2.0-Beta/main/scripts/reset-mac.sh && bash reset-mac.sh
+curl -fsSLO https://raw.githubusercontent.com/Comfy-Org/Comfy-Desktop/main/scripts/reset-mac.sh && bash reset-mac.sh
 # Linux
-curl -fsSLO https://raw.githubusercontent.com/Comfy-Org/ComfyUI-Desktop-2.0-Beta/main/scripts/reset-linux.sh && bash reset-linux.sh
+curl -fsSLO https://raw.githubusercontent.com/Comfy-Org/Comfy-Desktop/main/scripts/reset-linux.sh && bash reset-linux.sh
 ```
 ```powershell
 # Windows (PowerShell)
-iwr -useb https://raw.githubusercontent.com/Comfy-Org/ComfyUI-Desktop-2.0-Beta/main/scripts/reset-windows.ps1 -OutFile reset-windows.ps1
+iwr -useb https://raw.githubusercontent.com/Comfy-Org/Comfy-Desktop/main/scripts/reset-windows.ps1 -OutFile reset-windows.ps1
 powershell -ExecutionPolicy Bypass -File .\reset-windows.ps1
 ```
 
@@ -241,7 +241,7 @@ Issues and pull requests are welcome. Before opening a PR, please run `pnpm run 
 
 - 💬 **Discord** — [comfy.org/discord](https://www.comfy.org/discord)
 - 🌐 **Website** — [comfy.org](https://www.comfy.org)
-- 🐛 **Issues** — [GitHub Issues](https://github.com/Comfy-Org/ComfyUI-Desktop-2.0-Beta/issues)
+- 🐛 **Issues** — [GitHub Issues](https://github.com/Comfy-Org/Comfy-Desktop/issues)
 - 🧠 **ComfyUI** — [github.com/comfyanonymous/ComfyUI](https://github.com/comfyanonymous/ComfyUI)
 
 ## License
