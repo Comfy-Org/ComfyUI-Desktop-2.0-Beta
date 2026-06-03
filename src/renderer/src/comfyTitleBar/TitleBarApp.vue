@@ -227,7 +227,9 @@ void firstUseMode
 
 const zoomLevel = ref(0)
 const zoomPercent = computed(() => Math.round(Math.pow(1.2, zoomLevel.value) * 100))
-const showZoomReset = computed(() => !isInstallLess.value && !isFirstUseLockdown.value)
+const showZoomReset = computed(
+  () => zoomLevel.value !== 0 && !isInstallLess.value && !isFirstUseLockdown.value
+)
 
 /**
  * Title-bar chrome lockdown. True whenever the bar should collapse to
@@ -732,19 +734,20 @@ onUnmounted(() => {
         <RefreshCw v-else-if="appUpdateState.kind === 'ready'" :size="14" />
         <span class="title-update-pill-label">{{ appUpdatePillLabel ?? 'Desktop Update' }}</span>
       </button>
-      <!-- Zoom-level pill. Always visible on an instance (reads "100%" at
-           the default); click resets the comfyView to 100%. -->
-      <button
-        v-if="showZoomReset"
-        type="button"
-        class="title-zoom-reset"
-        :class="{ 'is-zoomed': zoomLevel !== 0 }"
-        v-bind="tooltipAttrs(t('titleBar.resetZoomTooltip'))"
-        @click="handleResetZoom"
-      >
-        <ZoomIn :size="14" class="title-zoom-reset-icon" />
-        <span class="title-zoom-reset-percent">{{ zoomPercent }}%</span>
-      </button>
+      <!-- Zoom-level pill. Contextual — fades in only when the comfyView
+           is zoomed off 100%; click resets to 100% and it fades out. -->
+      <Transition name="title-zoom-fade">
+        <button
+          v-if="showZoomReset"
+          type="button"
+          class="title-zoom-reset"
+          v-bind="tooltipAttrs(t('titleBar.resetZoomTooltip'))"
+          @click="handleResetZoom"
+        >
+          <ZoomIn :size="14" class="title-zoom-reset-icon" />
+          <span class="title-zoom-reset-percent">{{ zoomPercent }}%</span>
+        </button>
+      </Transition>
       <button
         v-if="!isFirstUseLockdown"
         type="button"
@@ -1037,50 +1040,39 @@ onUnmounted(() => {
   gap: 4px;
   padding: 3px 8px;
   border-radius: 999px;
-  border: 1px solid transparent;
-  background: transparent;
-  color: var(--titlebar-icon);
+  border: 1px solid color-mix(in srgb, var(--comfy-yellow) 45%, transparent);
+  background: color-mix(in srgb, var(--comfy-yellow) 12%, transparent);
+  color: var(--comfy-yellow);
   font: inherit;
   font-size: 11px;
   line-height: 14px;
   font-variant-numeric: tabular-nums;
   cursor: pointer;
-  opacity: 0.7;
   transition:
     background-color 0.12s,
-    border-color 0.12s,
-    opacity 0.12s;
-}
-.title-zoom-reset-icon {
-  opacity: 0.85;
+    border-color 0.12s;
 }
 .title-zoom-reset-percent {
   letter-spacing: 0.01em;
 }
 .title-bar.is-hover-active .title-zoom-reset:hover {
-  opacity: 1;
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.18);
-}
-.title-bar.is-light.is-hover-active .title-zoom-reset:hover {
-  background: rgba(0, 0, 0, 0.06);
-  border-color: rgba(0, 0, 0, 0.18);
-}
-/* Off the default zoom: surface a quiet accent so the user notices the
-   view is zoomed and that the pill is the way back to 100%. */
-.title-zoom-reset.is-zoomed {
-  opacity: 1;
-  background: color-mix(in srgb, var(--comfy-yellow) 12%, transparent);
-  border-color: color-mix(in srgb, var(--comfy-yellow) 45%, transparent);
-  color: var(--comfy-yellow);
-}
-.title-bar.is-hover-active .title-zoom-reset.is-zoomed:hover {
   background: color-mix(in srgb, var(--comfy-yellow) 20%, transparent);
   border-color: var(--comfy-yellow);
 }
 .title-zoom-reset:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
+}
+.title-zoom-fade-enter-active,
+.title-zoom-fade-leave-active {
+  transition:
+    opacity 0.16s ease,
+    transform 0.16s ease;
+}
+.title-zoom-fade-enter-from,
+.title-zoom-fade-leave-to {
+  opacity: 0;
+  transform: scale(0.9);
 }
 
 .title-install-caret {
