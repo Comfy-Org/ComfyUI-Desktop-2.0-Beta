@@ -42,7 +42,7 @@ defineEmits<{
         id="inst-path"
         :value="path"
         type="text"
-        @input="$emit('update:path', ($event.target as HTMLInputElement).value)"
+        readonly
       />
       <button @click="$emit('browse')">{{ $t('common.browse') }}</button>
       <button

@@ -49,13 +49,15 @@ export function buildStorageFields(installation: InstallationRecord): Record<str
     {
       id: 'inputDir', label: t('common.perInstallInputDir'),
       value: (installation.inputDir as string | undefined) ?? '',
-      editable: true, editType: 'path', tooltip: t('tooltips.perInstallInputDir'),
+      editable: true, editType: 'path', browseOnly: true,
+      tooltip: t('tooltips.perInstallInputDir'),
       requiresRestart: true,
     },
     {
       id: 'outputDir', label: t('common.perInstallOutputDir'),
       value: (installation.outputDir as string | undefined) ?? '',
-      editable: true, editType: 'path', tooltip: t('tooltips.perInstallOutputDir'),
+      editable: true, editType: 'path', browseOnly: true,
+      tooltip: t('tooltips.perInstallOutputDir'),
       requiresRestart: true,
     },
   ]
